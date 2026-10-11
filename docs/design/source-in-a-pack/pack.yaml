@@ -1,0 +1,34 @@
+# SKETCH, not read by any yardr. The `sources` part of a pack once Linear is a
+# declared source the pack brings. Everything else in the pack is as in
+# packs/starter/pack.yaml.
+
+name: starter
+kind: git
+
+crew:
+  yardmaster:
+    role: roles/yardmaster.md
+    subscribe:
+      linear: involved
+    open_threads: [linear]
+
+sources:
+  linear:
+    # (today, for any name but github, linear, token) the file in the pack
+    # that declares the service. Today a source with this key has no other.
+    declaration: sources/linear.yaml
+
+    # (today, for the Go adapter only) what the source hears of the flows.
+    # New is only that it stands beside `declaration`: the words on the right
+    # are the ones the declaration's `thread.state` knows.
+    as: yardmaster
+    hears:
+      task: { new: started, review: review, merged: done }
+
+  # A second source costs a second file and no release of yardr.
+  # `says` is today's table for GitHub, unchanged: the keys in `where` are
+  # the fields the declaration's `hook.envelope` puts in the envelope.
+  forgejo:
+    declaration: sources/forgejo.yaml
+    says:
+      - { where: "event=pull_request action=closed merged=true", outcome: merged, note: "PR merged" }

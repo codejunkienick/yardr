@@ -1,0 +1,210 @@
+# SKETCH, not read by any yardr. What internal/hooks/linear.go and the Linear
+# halves of reply.go, open.go, state.go, forward.go and issue.go would be as
+# one declared source. README.md beside this file says what is new.
+#
+# Keys marked (today) exist in internal/source. Keys marked (new) do not.
+# Lines marked CANNOT are what the Go does today and this file has no way
+# to say.
+
+# ---- (today) the service, its credential, the requests ----------------------
+
+name: linear          # today refused: source.BuiltIn holds the name for the Go adapter
+about: Linear issues and comments. Hears its webhooks, answers in threads, sets an issue's status.
+base: https://api.linear.app
+credential:
+  env: LINEAR_API_KEY
+  header: "Authorization: {credential}"
+check: viewer
+
+calls:
+  viewer:
+    kind: read
+    request: { method: POST, path: /graphql, body: { query: "{ viewer { id name } }" } }
+    answer: { select: [data.viewer.id, data.viewer.name] }
+
+  comment:
+    kind: update
+    about: Comment on an issue, under a parent comment or at the top
+    params:
+      issue:  { type: string, log: true }
+      body:   { type: string, max: 60000 }
+      parent: { type: string, optional: true }
+      id:     { type: string, pattern: "^[0-9a-f-]{36}$" }   # the comment's own id: Linear takes ours
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: "mutation($i: CommentCreateInput!) { commentCreate(input: $i) { comment { id url } } }"
+        variables: { i: { id: "{id}", issueId: "{issue}", parentId: "{parent}", body: "{body}" } }
+    answer: { select: [data.commentCreate.comment.id, data.commentCreate.comment.url] }
+
+  comment_by_id:
+    kind: read
+    params: { id: { type: string, pattern: "^[0-9a-f-]{36}$" } }
+    request:
+      method: POST
+      path: /graphql
+      body: { query: "query($id: String!) { comment(id: $id) { id url } }", variables: { id: "{id}" } }
+    answer: { select: [data.comment.id, data.comment.url] }
+
+  comments:
+    kind: read
+    params: { issue: { type: string, log: true } }
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: "query($id: String!) { issue(id: $id) { comments(first: 250) { nodes { id body createdAt user { id name } parent { id } } } } }"
+        variables: { id: "{issue}" }
+    answer: { select: [data.issue.comments.nodes] }
+    # CANNOT: the next page. A thread of more than 250 comments is cut off.
+
+  team:
+    kind: read
+    params: { team: { type: string, log: true } }   # a key (YRD) or a name
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: "query($t: String!) { teams(filter: { or: [{ key: { eq: $t } }, { name: { eq: $t } }] }) { nodes { id key } } }"
+        variables: { t: "{team}" }
+    answer: { select: [data.teams.nodes] }
+
+  issue_create:
+    kind: update
+    params:
+      team_id: { type: string }
+      title:   { type: string, max: 250 }
+      body:    { type: string, max: 60000 }
+      id:      { type: string, pattern: "^[0-9a-f-]{36}$" }
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: "mutation($i: IssueCreateInput!) { issueCreate(input: $i) { issue { id title url } } }"
+        variables: { i: { id: "{id}", teamId: "{team_id}", title: "{title}", description: "{body}" } }
+    answer: { select: [data.issueCreate.issue.id, data.issueCreate.issue.title, data.issueCreate.issue.url] }
+
+  issue_states:
+    kind: read
+    about: The statuses of the issue's team, with the issue's own
+    params: { issue: { type: string, log: true } }
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: "query($id: String!) { issue(id: $id) { state { id type } team { states { nodes { id name type position } } } } }"
+        variables: { id: "{issue}" }
+    answer: { select: [data.issue.state, data.issue.team.states.nodes] }
+
+  issue_set_state:
+    kind: update
+    params: { issue: { type: string, log: true }, state_id: { type: string } }
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: "mutation($id: String!, $s: String!) { issueUpdate(id: $id, input: { stateId: $s }) { issue { id state { name } } } }"
+        variables: { id: "{issue}", s: "{state_id}" }
+    answer: { select: [data.issueUpdate.issue.state.name] }
+
+# ---- (new) what it sends us: hooks.Adapter -----------------------------------
+
+hook:
+  # Adapter.Verify. A scheme the core knows, with the names this source uses.
+  verify:
+    scheme: hmac-sha256
+    signed: body
+    signature: { header: Linear-Signature, encoding: hex }
+    delivery:  { header: Linear-Delivery }
+    timestamp: { body: webhookTimestamp, unit: ms, window: 1m }   # checked after the signature
+  # Adapter.Bodies: a body never repeats, so a body seen before is a replay.
+  bodies: unique
+
+  # Adapter.Normalize: the payload to the envelope. A value is a path into the
+  # body; a list is the first path that holds something; `[]` walks a list.
+  envelope:
+    type:   { path: type, lower: true }
+    action: action
+    url:    url
+    actor:
+      id:   [actor.id, data.user.id, data.userId]
+      name: [actor.name, data.user.name]
+    by_type:
+      comment:
+        thread:
+          id:    [data.issue.id, data.issueId, data.id]
+          title: data.issue.title
+          url:   [data.issue.url, url]
+          # CANNOT: the Go cuts "#comment-…" off `url` when the issue has none of its own.
+        text:    data.body
+        message: data.id
+        parent:  data.parentId
+        entity:  data.id
+        fields:
+          team:    [data.issue.team.key, data.issue.team.name]   # both, not the first: needs its own word
+          project: data.issue.project.name
+          label:   data.issue.labels[].name
+        mentions:
+          - { in: data.body, match: 'https://linear\.app/[^/\s]+/profiles/([A-Za-z0-9][A-Za-z0-9._-]*)', lower: true }
+          - { in: data.body, match: '(?:^|[^A-Za-z0-9_/])@([A-Za-z0-9][A-Za-z0-9._-]*)', lower: true, skip_code: true }
+          # CANNOT: the ids in data.bodyData, a ProseMirror document walked for
+          # nodes of type suggestion_userMentions. This is how Linear names a
+          # person by id and not by profile key.
+      issue:
+        thread:   { id: data.id, title: data.title, url: [data.url, url] }
+        assignee: [data.assigneeId, data.assignee.id]
+        delegate: [data.delegateId, data.delegate.id]
+        text:     data.description
+        # CANNOT: on action=update the Go says "changed <the keys of updatedFrom>" instead.
+        entity:   data.id
+        fields:
+          team:    [data.team.key, data.team.name]
+          project: data.project.name
+          label:   data.labels[].name
+        mentions:
+          - { in: data.description, match: 'https://linear\.app/[^/\s]+/profiles/([A-Za-z0-9][A-Za-z0-9._-]*)', lower: true }
+          - { in: data.description, match: '(?:^|[^A-Za-z0-9_/])@([A-Za-z0-9][A-Za-z0-9._-]*)', lower: true, skip_code: true }
+      "*":
+        thread: { id: data.id, title: data.title, url: url }
+
+# ---- (new) what the yard does in it: Replier, Opener, Stater, Forwarder ------
+#
+# Shaped as `notify:` is today: a capability names one of the calls above and
+# says which of the call's parameters take the values the yard has.
+
+thread:
+  reply:  { call: comment,       thread: issue, text: body, parent: parent, key: id }
+  posted: { call: comment_by_id, key: id }
+  read:   { call: comments,      thread: issue }
+
+  open:
+    place: team                    # what `--in` is called here
+    # CANNOT as one call: the team's key must first become its id.
+    steps:
+      - { call: team, with: { team: "{in}" }, take: { team_id: "nodes[0].id" } }
+      - { call: issue_create, title: title, text: body, key: id }
+
+  # started, review, done: the three words every source honours.
+  # CANNOT as one call: Linear has no status "started", each team has its own
+  # list. The Go reads the team's statuses, picks the first of the wanted
+  # type by position, and does nothing when the issue is already at or past it.
+  state:
+    steps:
+      - { call: issue_states, take: { current: "state.type", states: "nodes" } }
+      - pick:
+          from: states
+          started: { type: started, first_by: position }
+          review:  { type: started, name_like: "review", else: skip }
+          done:    { type: completed, first_by: position }
+          forward_only: [backlog, unstarted, started, completed]
+          into: state_id
+      - { call: issue_set_state }
+
+# ---- (new) its issues as a bead's link: Linker --------------------------------
+
+link:
+  host: linear.app
+  issue: '^/([^/]+)/issue/([A-Z][A-Z0-9]*-[0-9]+)'    # the rest of the path is the title, dropped
+  fixed: "https://linear.app/{1}/issue/{2}"
+  thread: "{2}"                                       # Forwarder.IssueThread: the identifier names the issue
