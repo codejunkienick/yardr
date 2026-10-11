@@ -1,6 +1,12 @@
 # SKETCH, not read by any yardr. The `sources` part of a pack once Linear is a
 # declared source the pack brings. Everything else in the pack is as in
 # packs/starter/pack.yaml.
+#
+#   pack.yaml
+#   roles/…  flows/…  scripts/merge-local      as today
+#   sources/linear.yaml                        the declaration
+#   sources/linear/normalize                   the commands it names,
+#   sources/linear/thread                      carried as scripts/* are
 
 name: starter
 kind: git
@@ -20,14 +26,14 @@ sources:
 
     # (today, for the Go adapter only) what the source hears of the flows.
     # New is only that it stands beside `declaration`: the words on the right
-    # are the ones the declaration's `thread.state` knows.
+    # are the ones the declaration lists under `thread.states`.
     as: yardmaster
     hears:
       task: { new: started, review: review, merged: done }
 
-  # A second source costs a second file and no release of yardr.
+  # A second source costs a directory in a pack and no release of yardr.
   # `says` is today's table for GitHub, unchanged: the keys in `where` are
-  # the fields the declaration's `hook.envelope` puts in the envelope.
+  # the fields its normalize command puts in the envelope.
   forgejo:
     declaration: sources/forgejo.yaml
     says:

@@ -1,67 +1,79 @@
 # Sketch: a source a pack brings (yardr-s48v)
 
-Not for merging. Two files to read and argue with, written by the yardmaster
-for mckean on 11 Oct 2026. No yardr reads them, and the GraphQL in them was
-not run.
+Not for merging. Files to read and argue with, written by the yardmaster for
+mckean on 11 Oct 2026. No yardr reads them.
 
-- [`pack.yaml`](pack.yaml): the `sources` part of a pack once Linear is a
-  declared source.
-- [`sources/linear.yaml`](sources/linear.yaml): the Linear adapter as one
-  declaration, 306 lines of `internal/hooks/linear.go` and the Linear halves
-  of `reply.go`, `open.go`, `state.go`, `forward.go` and `issue.go`.
+The direction is mckean's (11 Oct): **a source's logic is commands the
+declaration names.** For Linear a shell script or Linear's own CLI, for
+another source Lua, or anything else that reads JSON and prints JSON. The
+first commit of this branch tried the other way, all of it as data, and ran
+out at six places; this one has none.
 
-## What is new in the declaration
+- [`pack.yaml`](pack.yaml): the `sources` part of a pack.
+- [`sources/linear.yaml`](sources/linear.yaml): the declaration, 70 lines.
+- [`sources/linear/normalize`](sources/linear/normalize): a webhook to the
+  envelope, in jq. Tried on two made-up payloads, a comment and an issue
+  update; not on a real delivery.
+- [`sources/linear/thread`](sources/linear/thread): reply, posted, read,
+  open, state, in bash with curl and jq. `bash -n` passes; no request in it
+  was sent to Linear.
 
-A declaration today says the service's address, its credential, its calls,
-and two capabilities that are no call of an agent's: `notify` and `limits`.
-The sketch adds three keys of the same kind.
+## The shape
 
-| Key | Replaces | New mechanism it needs |
+| In the declaration | Replaces | Is |
 | -- | -- | -- |
-| `hook.verify` | `Adapter.Verify` | a short list of schemes in the core (HMAC over the body, a timestamp window) |
-| `hook.envelope` | `Adapter.Normalize` | paths into JSON, first-of lists, a walk over a list, regular expressions for mentions |
-| `thread` | `Replier`, `Opener`, `Stater`, `Forwarder` | a capability bound to a call, as `notify` is; and `steps`, which is new |
-| `link` | `Linker` | one pattern and two templates |
+| `hook.verify`, `hook.bodies` | `Adapter.Verify`, `Bodies` | data, checked by the core |
+| `hook.normalize` | `Adapter.Normalize` | a command |
+| `thread.reply`, `posted`, `read`, `open`, `state` | `Replier`, `Opener`, `Stater`, `Forwarder` | a command each |
+| `link` | `Linker` | data: a pattern and two templates |
+| `calls` | nothing, as today | declared requests an agent may be granted |
 
-## Where the file runs out
+The contract of a command is the one `limits.command` has today: a list run
+without a shell, one JSON object on stdin, one on stdout, exit 0, a time
+limit; on anything else the yard reports the command's stderr.
 
-Each is marked `CANNOT` in `linear.yaml`. Linear is the easy source, and it
-still has six:
+## What I chose, and why
 
-1. Mentions by id, from a ProseMirror document (`bodyData`).
-2. An update's text, "changed title, description", from the keys of
-   `updatedFrom`.
-3. Cutting the fragment off a URL.
-4. A thread of more than one page.
-5. Opening an issue: the team's key must become an id first (two calls).
-6. Setting a status: read the team's statuses, pick one by type and
-   position, never move backwards (two calls and a rule).
+1. **Verifying a webhook stays data in the core.** The signing secret is
+   handed to no command and an unverified body reaches none. The cost is a
+   list of schemes in Go (HMAC over the body, a timestamp window, GitHub's
+   `sha256=` prefix); a source with a scheme not on it needs a line of Go.
+2. **A command gets one credential and nothing else of the yard**: the
+   variable `credential.env` names, from the env file of whoever acts.
+   `normalize` gets none.
+3. **`calls` stay as they are and stay separate.** A declared request is
+   what an agent may be granted, one by one, and what the yard can show
+   before it is made. A command is the yard's own, and no agent calls one.
+4. **Idempotency is the command's.** The yard gives a key and asks `posted`
+   before it tries again, as it does today.
 
-1 to 4 are small and could be words of the format. 5 and 6 are the real
-question: the sketch invents `steps` and `pick` for them, and `pick` is a
-Linear rule written in YAML. GitHub adds the App's JWT and installation
-tokens, pull request and CI tracking (`internal/dispatch/github.go`, `ci.go`,
-1,100 lines), none of which a file of this kind says.
+## Open, and mckean's
 
-## A correction to what I proposed
+1. **Does a pack carry the scripts?** The docs say "a pack brings no command
+   the yard runs", and `pack check` refuses a `limits` key in a pack. But a
+   pack already brings one: `groups.assembly: { run: scripts/merge-local }`
+   is a file of the pack that the yard runs. The difference is what it is
+   handed. A landing script gets a worktree; a source's command gets a
+   credential. My proposal: a pack carries them, as it carries `scripts/*`;
+   the import shows each command and the file behind it, and only the
+   operator's apply adds them, which is already the rule for a declared
+   source. A command with an absolute path is one the operator installed,
+   and the import only checks that it is there.
+2. **A process per webhook delivery** for `normalize`. Cheap at a yard's
+   rate (the sketch's takes 20 ms); a source that sends hundreds a minute
+   would want it kept running, which is a protocol, and not proposed.
+3. **GitHub's dispatcher rules** (`internal/dispatch/github.go`, `ci.go`,
+   1,100 lines: the pull request a train tracks, its head, CI as state) are
+   not an adapter method and are not in this sketch. They need their own
+   answer: more commands, or events the pack's `says` table already routes.
+4. **`limits` in a pack.** If 1 is yes, the refusal there has lost its
+   reason and could go.
 
-I proposed a declared command as the escape for logic, "as `limits` already
-is". That holds only for a file the operator adds. A pack may not bring a
-command: `yardr pack check` refuses a declaration with a `limits` key,
-because the yard runs what it names (docs/integrations.md, "It is the
-operator's"). So the choices for 5 and 6 are:
+## Order of work, if this is the direction
 
-- **Grow the format** (`steps`, `pick`). Stays data, a pack can bring it,
-  and the format becomes a small language that each new source stretches.
-- **A command the operator installs**, which the pack's declaration names
-  and does not carry. The import asks for it as it asks for a group's agent.
-  Any logic, and a source is no longer added by a file alone.
-- **Keep such rules in the core as named behaviours** (`state: by_type`),
-  chosen by the file. Smallest, and the core still knows how Linear thinks,
-  under another name.
-
-## What is new in the pack
-
-One thing: `declaration` may stand beside `as`, `hears` and `says`. Today a
-source with `declaration` has no other key, and `hears` and `says` are for
-the Go adapters only.
+1. Close the places where the core branches on a source's name outside
+   `internal/hooks` (no behaviour change).
+2. The command contract and `thread.*`, proven by Linear running from the
+   declaration beside the Go adapter, same events and same replies.
+3. `hook.verify` and `hook.normalize`; then the Go Linear adapter goes.
+4. GitHub, with point 3 above answered first.

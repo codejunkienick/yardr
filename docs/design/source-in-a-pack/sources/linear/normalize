@@ -1,0 +1,39 @@
+#!/bin/sh
+# SKETCH. A verified Linear webhook to the yard's envelope.
+# stdin {"headers":{…},"body":{…}}, stdout the envelope. Needs jq.
+exec jq -c '
+def first_of(f): [f | select(. != null and . != "")] | .[0] // "";
+def mentions($md; $doc):
+  ( [ $doc | select(. != null) | (if type == "string" then fromjson else . end)
+      | .. | objects | select(.type == "suggestion_userMentions") | .attrs.id ]
+  + [ ($md // "") | scan("https://linear\\.app/[^/\\s]+/profiles/([A-Za-z0-9][A-Za-z0-9._-]*)")
+      | .[0] | ascii_downcase | rtrimstr(".") ]
+  + [ ($md // "") | gsub("```[^`]*```|`[^`]*`"; " ")
+      | scan("(?:^|[^A-Za-z0-9_/])@([A-Za-z0-9][A-Za-z0-9._-]*)")
+      | .[0] | ascii_downcase | sub("[.,:;!?]+$"; "") ]
+  ) | unique;
+def fields($i):
+  { team:    [$i.team.key, $i.team.name],
+    project: [$i.project.name],
+    label:   [$i.labels[]?.name] }
+  | map_values(map(select(. != null and . != ""))) | with_entries(select(.value | length > 0));
+
+.body as $p | $p.data as $d
+| { source: "linear", type: ($p.type | ascii_downcase), action: $p.action, url: $p.url,
+    actor: { id: first_of($p.actor.id, $d.user.id, $d.userId), name: first_of($p.actor.name, $d.user.name) } }
+| if .type == "comment" then . +
+    { thread: { id: first_of($d.issue.id, $d.issueId, $d.id), title: ($d.issue.title // ""),
+                url: first_of($d.issue.url, ($p.url // "" | sub("#.*$"; ""))) },
+      text: $d.body, message: $d.id, parent: ($d.parentId // ""), entity: $d.id,
+      mentions: mentions($d.body; $d.bodyData), fields: fields($d.issue // {}) }
+  elif .type == "issue" then . +
+    { thread: { id: $d.id, title: $d.title, url: first_of($d.url, $p.url) },
+      assignee: first_of($d.assigneeId, $d.assignee.id),
+      delegate: first_of($d.delegateId, $d.delegate.id),
+      text: ( if $p.action == "update"
+              then "changed " + ([$p.updatedFrom // {} | keys[] | select(. != "updatedAt")] | join(", "))
+              else $d.description end ),
+      entity: $d.id, mentions: mentions($d.description; null), fields: fields($d) }
+  else . + { thread: { id: $d.id, title: ($d.title // ""), url: $p.url }, mentions: [] }
+  end
+'
