@@ -1,0 +1,32 @@
+# SKETCH, not read by any yardr. The `sources` part of a flow pack once
+# integrations are packs of their own. The rest is packs/starter/pack.yaml.
+#
+# It carries no declaration and no command. It names a source and says what
+# this flow's stages mean in it, which only the pack with the flow can know.
+
+name: starter
+kind: git
+
+crew:
+  yardmaster:
+    role: roles/yardmaster.md
+    subscribe:
+      linear: involved
+    open_threads: [linear]
+
+sources:
+  # Every key here is today's. New is what the import does in a yard that
+  # has no source of the name: it skips the lines, says so with the command
+  # that would add the source, and sets them on the next apply once it is
+  # there. Today open_threads is already asked "only about a source this yard
+  # has a hook and a credential for"; this is the same rule for the rest.
+  linear:
+    as: yardmaster
+    hears:
+      task: { new: started, review: review, merged: done }   # words from the source's thread.states
+
+  # Any source whose events carry these keys. A yard on Forgejo imports the
+  # same flow pack and a forgejo pack; the flow pack does not change.
+  github:
+    says:
+      - { where: "event=pull_request action=closed merged=true", outcome: merged, note: "PR merged" }

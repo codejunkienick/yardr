@@ -9,12 +9,21 @@ another source Lua, or anything else that reads JSON and prints JSON. The
 first commit of this branch tried the other way, all of it as data, and ran
 out at six places; this one has none.
 
-- [`pack.yaml`](pack.yaml): the `sources` part of a pack.
-- [`sources/linear.yaml`](sources/linear.yaml): the declaration, 70 lines.
-- [`sources/linear/normalize`](sources/linear/normalize): a webhook to the
+Two packs, because a flow and an integration are two interests that rarely
+come as one (mckean, 11 Oct):
+
+- [`linear-pack/`](linear-pack/pack.yaml): the integration, imported into
+  the yard and into no depot. What Linear is.
+- [`flow-pack/pack.yaml`](flow-pack/pack.yaml): the `sources` part of a flow
+  pack. What this flow's stages mean in Linear. No declaration, no command.
+
+In the Linear pack:
+
+- [`linear.yaml`](linear-pack/linear.yaml): the declaration, 72 lines.
+- [`linear/normalize`](linear-pack/linear/normalize): a webhook to the
   envelope, in jq. Tried on two made-up payloads, a comment and an issue
   update; not on a real delivery.
-- [`sources/linear/thread`](sources/linear/thread): reply, posted, read,
+- [`linear/thread`](linear-pack/linear/thread): reply, posted, read,
   open, state, in bash with curl and jq. `bash -n` passes; no request in it
   was sent to Linear.
 
@@ -49,16 +58,15 @@ limit; on anything else the yard reports the command's stderr.
 
 ## Open, and mckean's
 
-1. **Does a pack carry the scripts?** The docs say "a pack brings no command
-   the yard runs", and `pack check` refuses a `limits` key in a pack. But a
-   pack already brings one: `groups.assembly: { run: scripts/merge-local }`
-   is a file of the pack that the yard runs. The difference is what it is
-   handed. A landing script gets a worktree; a source's command gets a
-   credential. My proposal: a pack carries them, as it carries `scripts/*`;
-   the import shows each command and the file behind it, and only the
-   operator's apply adds them, which is already the rule for a declared
-   source. A command with an absolute path is one the operator installed,
-   and the import only checks that it is there.
+1. **Does a pack carry the scripts?** With the split the question is
+   narrower: only an integration pack brings a command that is handed a
+   credential, and it is imported on purpose, for that. A flow pack brings
+   none, so "a pack brings no command the yard runs" stays true of every
+   pack a depot is set up from, as far as credentials go. My proposal: the
+   integration pack carries its scripts; the import shows each command and
+   the file behind it, and only the operator's apply adds them, which is
+   already the rule for a declared source. A command with an absolute path
+   is one the operator installed, and the import only checks it is there.
 2. **A process per webhook delivery** for `normalize`. Cheap at a yard's
    rate (the sketch's takes 20 ms); a source that sends hundreds a minute
    would want it kept running, which is a protocol, and not proposed.
@@ -68,6 +76,20 @@ limit; on anything else the yard reports the command's stderr.
    answer: more commands, or events the pack's `says` table already routes.
 4. **`limits` in a pack.** If 1 is yes, the refusal there has lost its
    reason and could go.
+
+## The seam between the two packs
+
+| | Integration pack | Flow pack |
+| -- | -- | -- |
+| Scope | the yard | a depot |
+| Carries | declaration, commands | flows, groups, roles, crew |
+| Says of a source | how to verify, read, reply, open, set a status; the words it has a status for; the keys its events carry | `hears`, `says`, `makes`: stage to status, event to outcome, event to bead |
+| Needs from the other | nothing | a source of that name in the yard; without one its lines are skipped and named |
+
+Not proposed: a flag to import part of a pack (`--only sources`). Two packs
+compose with what is there; a flag would be a second way to say the same.
+A pack may still carry both halves, for a team that wants one thing to
+import.
 
 ## Order of work, if this is the direction
 

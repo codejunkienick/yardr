@@ -1,0 +1,21 @@
+# SKETCH, not read by any yardr. A pack that is one integration and nothing
+# else: no flow, no group, no crew, so it is imported into the yard and into
+# no depot.
+#
+#   yardr pack apply https://yardr.dev/packs/linear/
+#
+# It says what Linear is: how its webhooks are verified and read, and how the
+# yard replies, opens a thread and sets a status in it. It says nothing of
+# what a stage means there: that is the flow pack's (../flow-pack/pack.yaml).
+#
+#   pack.yaml
+#   linear.yaml          the declaration
+#   linear/normalize     the commands it names
+#   linear/thread
+
+name: linear
+kind: source            # (new) beside git and dir: a pack for the yard, not for a depot
+
+sources:
+  linear:
+    declaration: linear.yaml      # (today) this key, and for a source no other
