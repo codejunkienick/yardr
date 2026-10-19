@@ -46,10 +46,12 @@ identity` says it for a crew member: `yardr user identity <name> --source
 <source> --id <id> --key <key>` sets it, `--rm` removes it, and with no
 `--source` it lists them. Only the user and the operator set or remove
 it, never a crew member or a bead's agent: a thread assigned to the user
-goes to whom it names. It has two uses: `yardr thread open <source>
+goes to whom it names. It has three uses: `yardr thread open <source>
 --assign <name>` opens a thread assigned to them
 ([integrations.md](integrations.md#reply-open-a-thread-set-a-threads-status)),
-by the id in Linear and by the key, the login, in GitHub; and a hook
+by the id in Linear and by the key, the login, in GitHub; in a source
+that hears by identity it is who they are heard as, one id naming one
+user ([integrations.md](integrations.md#what-the-service-sends-in)); and a hook
 delivery whose author uniquely matches bills that user's login when a
 herdr group and a route for the made bead use that login, else the
 operator's, since a bystander needs no subscription. An author linked to
