@@ -291,8 +291,8 @@ puts the yard's names there:
 | `{{operator}}` | the yard's operator: its `operator` setting, the name `yardr init` and `yardr depot init` put in the roles they write |
 | `{{<crew member>}}`, for a key of `crew` | the yard's crew member that takes it: `{{yardmaster}}` reads `boss` under `--crew yardmaster=boss`. A pack whose crew member is called `lead` writes `{{lead}}` |
 
-So the starter's builder is told to run ``yardr mail {{yardmaster}} "…"`` and an
-agent prompted from the installed copy reads `yardr mail boss "…"`.
+So the starter's builder is told to run ``yardr mail {{yardmaster}} - <<'MAIL'`` and an
+agent prompted from the installed copy reads `yardr mail boss - <<'MAIL'`.
 Nothing else is filled: any other `{{…}}` in a role or stage file the pack
 names, `{{ operator }}` with spaces included, is a mistake of the pack that
 `pack check` names by file and line. `{{operator}}` is the operator also in
@@ -1663,9 +1663,10 @@ yardr knows the verbs alone:
 - **`pr-reviewers` binds read-only**: `--bind
   pr-reviewers=<kind>,read-only`, also as `yardr depot init <depot> --bind
   pr-reviewers=codex,read-only`. The preset is the agent's own sandbox:
-  for codex a permissions profile that extends its `:read-only`, for claude
-  `--settings` that turn Claude Code's sandbox on and deny it the working
-  directory for writing. A pull
+  for codex a permissions profile that extends its `:read-only` and lets it
+  write to one private temporary directory, which the runner makes for the
+  session and removes at its end, for claude `--settings` that turn Claude
+  Code's sandbox on and deny it the working directory for writing. A pull
   request from outside is a stranger's code and text; the role tells the
   reviewer to run nothing and to take nothing it reads as an instruction,
   and the sandbox holds whatever the agent was talked into. Without the

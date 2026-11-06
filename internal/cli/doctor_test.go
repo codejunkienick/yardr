@@ -1577,6 +1577,11 @@ const (
 // to start one; a herdr that cannot be asked is a note, not a fault.
 func TestDoctorHerdrServer(t *testing.T) {
 	stub(t, &herdrServer, askHerdrServer)
+	// A herdr pane names its own session and socket, and herdr's words
+	// below are of the one the environment chose: clear both, so the test
+	// reads the same in a pane as in CI.
+	t.Setenv("HERDR_SOCKET_PATH", "")
+	t.Setenv("HERDR_SESSION", "")
 	st := storetest.New(t)
 	testYard(t, st, newHomeDir(t))
 	a := func() *app {
@@ -1593,9 +1598,13 @@ func TestDoctorHerdrServer(t *testing.T) {
 	if !errors.Is(err, errCheckFailed) {
 		t.Fatalf("err = %v\n%s", err, out)
 	}
-	wantText(t, out, "FAULT  herdr       "+herdr+": on PATH, but its server is not running (server_not_running: no herdr server is running): "+
-		"the daemon cannot start agents until it is. Start it: run herdr in a terminal (ctrl+b q detaches, the server stays); "+
-		"on a machine without a desktop, run `herdr server`, its headless server, as a service (docs/install.md, \"herdr's server\")")
+	// The yard names no session: herdr's words come with the one the
+	// environment chose, and how the yard names its own.
+	wantText(t, out, "FAULT  herdr       "+herdr+": on PATH, but its server is not running (herdr is not running in session default, socket ",
+		"; if the yard's agents run in another herdr session, name it (herdr session list; yardr settings set herdr_session <name>): "+
+			"server_not_running: no herdr server is running): "+
+			"the daemon cannot start agents until it is. Start it: run herdr in a terminal (ctrl+b q detaches, the server stays); "+
+			"on a machine without a desktop, run `herdr server`, its headless server, as a service (docs/install.md, \"herdr's server\")")
 	rep, _ := doctorJSON(t, st)
 	var got *serverCheck
 	for _, n := range rep.Machine {
@@ -1630,7 +1639,7 @@ func TestDoctorHerdrServer(t *testing.T) {
 	wantText(t, out, "FAULT  herdr       "+herdr+": herdr 0.7.3 is older than "+herdrOldest+", the oldest yardr starts agents with. Update it: "+herdrUpdate)
 	scripttest.Write(t, herdr, "#!/bin/sh\n[ \"$1\" = --version ] && { echo 'herdr 0.9.4'; exit 0; }\n"+strings.TrimPrefix(herdrNoServer, "#!/bin/sh\n"))
 	out, _ = run(t, a().rootCmd(), "doctor")
-	wantText(t, out, "FAULT  herdr       "+herdr+": on PATH, but its server is not running (server_not_running: ")
+	wantText(t, out, "FAULT  herdr       "+herdr+": on PATH, but its server is not running (herdr is not running in session default, socket ")
 }
 
 // tryTool is a stand-in harness: it answers its version flag with the line

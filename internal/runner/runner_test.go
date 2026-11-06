@@ -87,6 +87,18 @@ func TestBriefIncludesPromptAndCommands(t *testing.T) {
 			t.Errorf("brief missing %q:\n%s", want, b)
 		}
 	}
+	// A note, and the reason of a close, are shown as their usage, never as
+	// a double-quoted argument, where the shell would run the backticks an
+	// agent writes in it. How to write one safely is the role's to say: the
+	// brief reaches sessions whose sandbox cannot use every form.
+	for _, want := range []string{"`yardr bead note web-3 <text>`", "`yardr bead close web-3 --reason <text>`"} {
+		if !strings.Contains(b, want) {
+			t.Errorf("brief does not show the usage, %q:\n%s", want, b)
+		}
+	}
+	if strings.Contains(b, `bead note web-3 "`) || strings.Contains(b, `--note "`) || strings.Contains(b, `--reason "`) {
+		t.Errorf("brief shows a note or a reason as a double-quoted argument:\n%s", b)
+	}
 	job.Group.Config["prompt"] = "missing.md"
 	if _, err := Brief(job, "x", "", "", nil); err == nil {
 		t.Fatal("missing prompt file not reported")
@@ -1021,6 +1033,7 @@ func TestBriefListsOutcomes(t *testing.T) {
 		"Reporting an outcome, closing or holding ends your session",
 		"## Outcomes",
 		"Report how your work in `new` ended",
+		"Add `--note <text>` to attach a note with the move",
 		"- `done` (to `review`): an agent in `reviewers` picks it up",
 		"  `yardr bead done web-3`\n",
 		"- `question` (to `decide`): a human in `deciders` picks it up",
@@ -1034,7 +1047,7 @@ func TestBriefListsOutcomes(t *testing.T) {
 			t.Errorf("brief missing %q:\n%s", want, b)
 		}
 	}
-	for _, not := range []string{"## Next stages", "yardr bead advance", "backlog"} {
+	for _, not := range []string{"## Next stages", "yardr bead advance", "backlog", `--note "`} {
 		if strings.Contains(b, not) {
 			t.Errorf("brief with outcomes still offers %q:\n%s", not, b)
 		}
@@ -1557,7 +1570,7 @@ func TestAgentArgsModel(t *testing.T) {
 		{"nothing", job(map[string]any{}, nil), nil},
 	}
 	for _, c := range cases {
-		if got := AgentArgs(c.job, "", ""); strings.Join(got, " ") != strings.Join(c.want, " ") {
+		if got := AgentArgs(c.job, "", "", ""); strings.Join(got, " ") != strings.Join(c.want, " ") {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
 	}

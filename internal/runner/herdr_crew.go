@@ -154,7 +154,7 @@ func crewPrompt(yardr string, r store.CrewMember, user string) string {
 		prime = fmt.Sprintf("`%s prime --crew %s --for %s`", yardr, r.Name, user)
 	} else if greets := Greets(r); greets != "" {
 		run = fmt.Sprintf("%s set this yard up a moment ago and waits for your first message in `%s chat`, which shows "+
-			"them your mail and not your pane. Once you have read your prime, greet them with `%s mail %s \"<text>\"` and say "+
+			"them your mail and not your pane. Once you have read your prime, greet them with `%s mail %s -`, the words on stdin, and say "+
 			"what you need from them for the next setup step; go on with them by mail. First run", greets, yardr, yardr, greets)
 	}
 	return fmt.Sprintf(CrewPromptLead+" %s. %s %s "+CrewPromptEnd, who, run, prime)
@@ -214,6 +214,14 @@ func (h *Herdr) StartCrew(ctx context.Context, r store.CrewMember, user string) 
 			return nil, err
 		}
 	}
+	// The session's temporary directory, when its args name one, goes on the
+	// handle at once: a start that fails from here on returns it, for Stop.
+	handle := map[string]any{}
+	tmp, err := h.sessionTmp(r.Config, handle)
+	if err != nil {
+		return nil, err
+	}
+	env = append(env, sessionTmpEnv(tmp)...)
 	// The environment goes over the socket, never on a command line (see
 	// call). The workspace is not focused: a crew member starts in the
 	// background, under the daemon, not in front of whoever is at herdr.
@@ -226,14 +234,14 @@ func (h *Herdr) StartCrew(ctx context.Context, r store.CrewMember, user string) 
 		"env": envMap(paneEnv),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("workspace for %s: %w", r.Name, err)
+		return handle, fmt.Errorf("workspace for %s: %w", r.Name, err)
 	}
 	var ws herdrResult
 	if err := json.Unmarshal(raw, &ws); err != nil {
-		return nil, fmt.Errorf("workspace result: %w", err)
+		return handle, fmt.Errorf("workspace result: %w", err)
 	}
-	handle := map[string]any{"agent": name, "workspace": ws.Workspace.ID, "tab": ws.Tab.ID,
-		"pane": ws.RootPane.ID, "dir": dir}
+	maps.Copy(handle, map[string]any{"agent": name, "workspace": ws.Workspace.ID, "tab": ws.Tab.ID,
+		"pane": ws.RootPane.ID, "dir": dir})
 	if user != "" {
 		handle["for"] = user
 	}
@@ -250,7 +258,7 @@ func (h *Herdr) StartCrew(ctx context.Context, r store.CrewMember, user string) 
 
 	handle[harnessKind] = kind
 	start := []string{"agent", "start", name, "--kind", kind, "--pane", ws.RootPane.ID}
-	if extra := agentArgs(r.Config, "", h.YardHome, dir); len(extra) > 0 {
+	if extra := agentArgs(r.Config, "", h.YardHome, dir, tmp); len(extra) > 0 {
 		start = append(append(start, "--"), extra...)
 	}
 	prompt := crewPrompt(h.yard(), r, user)

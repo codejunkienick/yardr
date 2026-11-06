@@ -947,6 +947,40 @@ yardr bead hold webapp-3                     # stop routing; a human looks
 Every command takes `--json`. Set `YARDR_ACTOR` so the event log shows who
 acted.
 
+A note that quotes code or file names goes in on stdin, not as a quoted
+argument: inside double quotes the shell runs each backtick span and `$(`
+before yardr starts, and puts what it printed in the note. `-` reads the
+words from stdin, and a heredoc whose delimiter is quoted expands nothing:
+
+```sh
+yardr bead note webapp-3 - <<'NOTE'
+tests green: `go test ./...`
+NOTE
+```
+
+`--note -` on `done` and `advance` reads the move's note the same way. A
+note with no words, empty or only white space, is refused, and so is a
+`--note` given with none, whose usual cause is a shell that ran a backtick
+span and had nothing to put in its place; leaving `--note` out moves the
+bead with no note.
+
+A close reason and a bead's title read stdin the same way, trailing newlines
+trimmed: `yardr bead close <id> --reason -`, `yardr bead update <id> --title -`
+and `yardr bead create -` (the title). Stdin is read once, so with `-b -` as
+well the first line is the title and the lines after it the body, as a commit
+message divides; a title alone is one line.
+
+```sh
+yardr bead create - -b - --discovered-from webapp-3 <<'BEAD'
+`TestRetry` fails once in fifty runs
+
+Seen on a loaded machine: `go test -count=50 ./retry`.
+BEAD
+```
+
+A `-` with no words on stdin is refused, and nothing is closed, changed or
+created. An explicit `--reason ""` still closes the bead with no reason.
+
 ### Dependencies
 
 Work that spans several beads and must land as one unit is a
@@ -1707,16 +1741,18 @@ refused.
 
 ## The yard as the CI of a pull request
 
-GitHub Actions is off for the yard's repositories, and the yard is the CI of
-a pull request instead (decided on ask 9736): no minutes, no workflow files,
-the same for every depot. A `pr` bead of the contributors pack
+The yard is the CI of a pull request, whether or not the repository has GitHub
+Actions. A `pr` bead of the contributors pack
 ([packs.md](packs.md#the-contributors-pack)) that the reviewer found ready
 waits in `ciwait`, and [`contrib/assembly/pr-ci`](../contrib/assembly/pr-ci),
 the `cmd` of an `exec` group of its own (`pr-ci`, limit 1, so one run at a
 time) that the pack's flow gives the stage to, runs the depot's own test
-command on the pull request's head and says how it went. It reads the pull
-request from the bead's tracks link and asks GitHub as the yard's App, as
-merge-pr does (below), and:
+command on the exact head the reviewer read, on the yard's machine, and says
+how it went. It is the only CI of a repository with Actions off, and where
+Actions runs it is still the check merge-pr relies on (`ci_head`, below):
+GitHub's own check runs are not asked. It reads the pull request from the
+bead's tracks link and asks GitHub as the yard's App, as merge-pr does
+(below), and:
 
 - refuses a bead that is not in `ciwait`, before it fetches anything: the
   stage is the one after a reviewer has read the pull request, and the yard

@@ -24,22 +24,38 @@ forward: you fix what you find instead of only reporting it.
    builder's test line says: it names no commit you could hold the directory
    against, and nothing lands from a directory depot, so nothing runs it
    after you.
-5. Leave one note on the bead (`yardr bead note <id> "..."`), then report the
+5. Leave one note on the bead (as under "Writing a note"), then report the
    outcome. Your brief lists the outcomes the stage offers, with their
    commands, and its "Stage" section says what the note must hold and when
    each outcome applies. Approval closes the bead: nobody looks after you.
+
+## Writing a note
+
+Write every note as stdin from a heredoc with a quoted delimiter, never as a
+double-quoted argument: the shell runs backticks and `$(` inside double
+quotes, so a code span or a file name in backticks would run as a command and
+its output would take its place in the note.
+
+    yardr bead note <id> - <<'NOTE'
+    The words, with `code` and paths as they are.
+    NOTE
+
+An outcome's note takes the same form (`yardr bead done <id> --note -
+<<'NOTE'`), and a note with no words is refused. A bead's title and body take
+it too: each reads `-` as stdin, as shown below.
 
 ## Something outside your bead
 
 1. It does not block you (a wrong file elsewhere in the directory, a stale
    document): file it and carry on, never fix it under this bead.
-   `yardr bead create "<title>" --depot <depot> --stage backlog -b - --discovered-from <your bead>`,
-   with what you saw, where, and how to see it again. The new bead names the
-   bead it was found from.
+   `yardr bead create - -b - --depot <depot> --stage backlog --discovered-from <your bead> <<'BEAD'`,
+   then the title, a blank line, what you saw, where, and how to see it again,
+   and `BEAD` on a line of its own. The new bead names the bead it was found
+   from.
 2. It blocks you but is no question about the bead (the test command fails on
    files the bead did not touch, a tool is missing): file it as above, then
-   `yardr bead note <id> "blocked by <bead id>" && yardr bead hold <id>`; a
-   held bead waits for whoever runs the yard.
+   write the note `blocked by <bead id>` (as under "Writing a note") and
+   `yardr bead hold <id>`; a held bead waits for whoever runs the yard.
 3. It is a question about the bead itself (an unclear goal, a choice only
    {{operator}} can make): that is for the stage's outcomes, not for a new
    bead. Your brief says which outcome takes a question.

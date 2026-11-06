@@ -142,8 +142,8 @@ func TestTemplatesAreGeneric(t *testing.T) {
 	// And how to answer a user: with yardr reply when they wrote by mail
 	// (yardr mail is for writing first), in the pane when they wrote
 	// there.
-	if body := files[yardmaster]; !strings.Contains(body, "When a user wrote to you by mail, answer with\n  `yardr reply <seq> \"…\"`") ||
-		!strings.Contains(body, "`yardr mail <user> \"…\"` is for writing first") ||
+	if body := files[yardmaster]; !strings.Contains(body, "When a user wrote to you by mail, answer with\n  `yardr reply <seq> -`") ||
+		!strings.Contains(body, "`yardr mail <user> -` is for writing first") ||
 		!strings.Contains(body, "In a conversation in your\n  pane, answer in the pane") {
 		t.Error("yardmaster.md does not say to answer a user's mail with yardr reply and a pane conversation in the pane")
 	}
@@ -160,7 +160,7 @@ func TestTemplatesAreGeneric(t *testing.T) {
 	}
 	// And that the onboarding's conversation is by mail: the operator sits
 	// in yardr chat, which shows mail and nothing of the yardmaster's pane.
-	if body := files[yardmaster]; !strings.Contains(body, "greet them, do it by mail: `yardr mail {{operator}} \"…\"`") ||
+	if body := files[yardmaster]; !strings.Contains(body, "greet them, do it by mail: `yardr mail {{operator}} - <<'MAIL'`") ||
 		!strings.Contains(body, "It stays by mail for as long as they write by\nmail") {
 		t.Error("yardmaster.md does not say to greet the operator by mail, or that the setup conversation stays by mail")
 	}
@@ -967,6 +967,88 @@ func TestRolesSayWhatATestMayCost(t *testing.T) {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s lacks the test-cost rule: %q", name, want)
 			}
+		}
+	}
+}
+
+// A note shown as "..." is one an agent writes inside double quotes, where
+// the shell runs each backtick span and $( ) before yardr starts: a
+// reviewer's backticked file name ran the pull request's own test script,
+// and a note that was only such a span arrived empty (yardr-vmbn). So no
+// role or stage file shows a bead note, or the note of a move, as a
+// double-quoted argument, and each role that has its agent write a note
+// shows it as stdin from a heredoc with a quoted delimiter, which expands
+// nothing, and says why. The other texts an agent gives yardr (a mail, a
+// reply, a bead's title and body, a close reason) read - the same way, and
+// a role or stage file shows none of them in double quotes either
+// (yardr-tsrv). The words are compared with the lines folded, so rewrapping
+// breaks nothing.
+//
+// That holds for the contributors' pull request reviewer too: its read-only
+// sandbox lets a shell make the temporary file of a heredoc, in a private
+// directory and nowhere else (yardr-8f5k).
+func TestRolesShowNoQuotedText(t *testing.T) {
+	files := packFiles(t)
+	quoted := regexp.MustCompile(`bead note \S+ "|bead (done|advance)\b.*--note "`)
+	// What an agent gives yardr beside a note: only in the code span of the
+	// command, and only where an agent reads it, since a pack's SETUP.md
+	// and README are a person's at a terminal, where a quote is safe.
+	quotedText := regexp.MustCompile("yardr (mail|reply) [^`]*\"|yardr bead create [^`]*\"|--title \"|bead close\\b[^`]*--reason \"")
+	agentFile := regexp.MustCompile(`^[a-z]+/(roles|flows)/.*\.md$`)
+	writers := regexp.MustCompile(`^[a-z]+/roles/(builder|reviewer|review-security|pr-reviewer)\.md$`)
+	var roles int
+	for name, body := range files {
+		for n, line := range strings.Split(body, "\n") {
+			if quoted.MatchString(line) || agentFile.MatchString(name) && quotedText.MatchString(line) {
+				t.Errorf("%s:%d shows a text as a double-quoted argument, which the shell expands: show it as stdin from a quoted heredoc (yardr bead note <id> - <<'NOTE'): %s", name, n+1, strings.TrimSpace(line))
+			}
+		}
+		if !writers.MatchString(name) {
+			continue
+		}
+		roles++
+		folded := strings.Join(strings.Fields(body), " ")
+		for _, want := range []string{
+			"## Writing a note",
+			"the shell runs backticks and `$(` inside double quotes",
+			"yardr bead note <id> - <<'NOTE'",
+			"`yardr bead done <id> --note - <<'NOTE'`",
+		} {
+			if !strings.Contains(folded, want) {
+				t.Errorf("%s lacks %q, which its section on writing a note holds", name, want)
+			}
+		}
+	}
+	// Not for want of looking: the builders, reviewers and security
+	// reviewers of the packs, and the pull request reviewer.
+	if roles < 13 {
+		t.Errorf("%d roles that write notes read, want at least 13", roles)
+	}
+
+	// The depot's own role prompts and flow stage files are not embedded in
+	// the packs, so walk them from the repository as well. The test gate's
+	// read table selects this package when either directory changes.
+	yardFiles := os.DirFS("../.yardr")
+	for _, root := range []string{"roles", "flows"} {
+		if err := fs.WalkDir(yardFiles, root, func(name string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || !strings.HasSuffix(name, ".md") {
+				return nil
+			}
+			body, err := fs.ReadFile(yardFiles, name)
+			if err != nil {
+				return err
+			}
+			for n, line := range strings.Split(string(body), "\n") {
+				if quoted.MatchString(line) || quotedText.MatchString(line) {
+					t.Errorf(".yardr/%s:%d shows a text as a double-quoted argument, which the shell expands: %s", name, n+1, strings.TrimSpace(line))
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Errorf("walk .yardr/%s: %v", root, err)
 		}
 	}
 }
@@ -2522,7 +2604,7 @@ func TestContributorsTextsSayWhatIsNotRun(t *testing.T) {
 			"`git checkout --detach FETCH_HEAD`",
 			"its review stage file",
 			"fit:", "maintenance cost:", "licences:",
-			"Leave one note on the bead (`yardr bead note <id> \"...\"`): the review.",
+			"Leave one note on the bead (as under \"Writing a note\"): the review.",
 			"`yardr bead update <id> --add-label merge-ok`",
 			"opens `build(deps)`;",
 			"less a leading `PR #<number>: `",
@@ -2537,6 +2619,7 @@ func TestContributorsTextsSayWhatIsNotRun(t *testing.T) {
 			"until a fetch gives the commit you hold",
 			"Never record a head you have not read",
 			"A command the sandbox refuses is not tried another\nway",
+			"When the shell says it cannot create a temporary file\nfor the here-document, the sandbox is not the one this role expects: do not\nwrite the note another way",
 			"yardr mail {{yardmaster}} ",
 		},
 		"contributors/flows/pr/triage.md": {

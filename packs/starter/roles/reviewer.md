@@ -28,7 +28,8 @@ only reporting it. `<base>` below is the depot's base (`yardr depot list`).
      ("Withhold setup candidates from non-operator devices", not "Bead
      carries ... to every device"), since the landing makes it the subject
      of the bead's commit: retitle it when it does not
-     (`yardr bead update <id> --title "..."`)
+     (`yardr bead update <id> --title - <<'TITLE'`, the title, then `TITLE`
+     on a line of its own)
    - a change that removes or renames a command, flag, config key, store
      field or file format, or changes what one means, carries a line
      `BREAKING CHANGE: <what breaks>` in the body of a commit: add one in a
@@ -68,7 +69,7 @@ only reporting it. `<base>` below is the depot's base (`yardr depot list`).
      stand-in, and the isolated agent list has none of {{operator}}'s agents.
    - Afterwards stop what you started by pid, never by pattern, and remove
      the temp dir.
-5. Leave one note on the bead (`yardr bead note <id> "..."`), then report
+5. Leave one note on the bead (as under "Writing a note"), then report
    the outcome. Your brief lists the outcomes the stage offers, with their
    commands; where the flow has a stage file, its "Stage" section says what
    the note must hold and when each outcome applies.
@@ -95,20 +96,37 @@ While you work, a line may arrive naming a note added to your bead: read it
 with `yardr bead show <id>` and ack it with `yardr bead note <id> --ack <seq>`;
 a note by {{yardmaster}} or {{operator}} changes the bead.
 
+## Writing a note
+
+Write every note as stdin from a heredoc with a quoted delimiter, never as a
+double-quoted argument: the shell runs backticks and `$(` inside double
+quotes, so a code span or a file name in backticks would run as a command and
+its output would take its place in the note.
+
+    yardr bead note <id> - <<'NOTE'
+    The words, with `code` and paths as they are.
+    NOTE
+
+An outcome's note takes the same form (`yardr bead done <id> --note -
+<<'NOTE'`), and a note with no words is refused. A mail, a bead's title and
+body, and a close reason take it too: each reads `-` as stdin.
+
 ## Something outside your bead
 
 1. It does not block you (a bug elsewhere, a stale doc, or a flaky test
    that the depot's AGENTS.md says to file): file
-   it and carry on, never fix it on your branch. `yardr bead create "<title>"
-   --depot <depot> --stage backlog -b - --discovered-from <your bead>`, with what
-   you saw, where, and how to reproduce. The new bead names the bead it was
+   it and carry on, never fix it on your branch. `yardr bead create - -b -
+   --depot <depot> --stage backlog --discovered-from <your bead> <<'BEAD'`,
+   then the title, a blank line, what you saw, where, and how to reproduce,
+   and `BEAD` on a line of its own. The new bead names the bead it was
    found from. The yardmaster shapes it from backlog.
 2. It blocks you but is no question about the bead (the tests are red on the
    base, a tool is missing, the base moved under you): file it as above, then
-   mail the yardmaster: `yardr mail {{yardmaster}} "<bead id>: <one line>"`.
-   If you cannot finish without it,
-   `yardr bead note <id> "blocked by <bead id>" && yardr bead hold <id>`; the
-   yardmaster orders the two with `yardr dep add`.
+   mail the yardmaster: `yardr mail {{yardmaster}} - <<'MAIL'`, then
+   `<bead id>: <one line>` and `MAIL` on a line of its own.
+   If you cannot finish without it, write the note `blocked by <bead id>`
+   (as under "Writing a note"), then `yardr bead hold <id>`; the yardmaster
+   orders the two with `yardr dep add`.
 3. It is a question about the bead itself (an unclear goal, a design
    choice): that is for the stage's outcomes, not for a new bead. Your brief
    says which outcome takes a question.

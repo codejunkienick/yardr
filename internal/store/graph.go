@@ -582,7 +582,7 @@ func (s *Store) RemoveDep(ctx context.Context, fromRef, toRef, kind, at, until, 
 				if kind == DepParent {
 					what = "a child from its train, which takes the child's blocks edge with it"
 				}
-				return fmt.Errorf("%s -%s-> %s: the session %s of a bead's agent may add edges but not remove %s, whatever actor the command names; ask the yardmaster: yardr bead note %s \"which edge is wrong, and why\"",
+				return fmt.Errorf("%s -%s-> %s: the session %s of a bead's agent may add edges but not remove %s, whatever actor the command names; ask the yardmaster: yardr bead note %s - with the words on stdin (which edge is wrong, and why)",
 					fromRow.ID, kind, toRow.ID, sess.ID, what, toRow.ID)
 			}
 		}
@@ -875,19 +875,17 @@ func sessionActor(sess *Session) string {
 }
 
 // AddNote puts a plain note on the bead without telling its live session,
-// unlike AddNotedAs. files are the files the note carries, each as its
-// hash as PutBlob answered it with the name the sender gives it, as with
-// yardr bead note --file; a note with any needs words. Left out, the note
-// carries none. From a session's or a crew member's pane the note is
-// stored as that session's actor or that crew member, whatever actor says;
-// from anywhere else, as given (paneAuthor).
+// unlike AddNotedAs. Its files are PutBlob's refs with the sender's names,
+// as yardr bead note --file; none are needed. A note needs words with or
+// without files (noteWords). A pane's actor overrides the caller's; elsewhere
+// the given actor stands (paneAuthor).
 func (s *Store) AddNote(ctx context.Context, id, text, actor string, files ...BlobFile) error {
 	// A bead's handle never holds an "@" (validID).
 	if bead, peer, foreign := strings.Cut(id, "@"); foreign {
 		return s.refuseForeignNote(bead, peer)
 	}
-	if len(files) > 0 && strings.TrimSpace(text) == "" {
-		return fmt.Errorf("a note with files needs words: say what they show")
+	if err := noteWords(text, files); err != nil {
+		return err
 	}
 	refs, err := s.noteFiles(files)
 	if err != nil {
@@ -907,12 +905,14 @@ func (s *Store) AddNote(ctx context.Context, id, text, actor string, files ...Bl
 	})
 }
 
-// AddNoted is AddNote that answers the note it wrote, seq and all, for
-// whoever says what was written (yardr bead note).
+// AddNoted adds and returns a plain note, seq and all (yardr bead note).
 func (s *Store) AddNoted(ctx context.Context, id, text, actor string) (*Note, error) {
 	// A bead's handle never holds an "@" (validID).
 	if bead, peer, foreign := strings.Cut(id, "@"); foreign {
 		return nil, s.refuseForeignNote(bead, peer)
+	}
+	if err := noteWords(text, nil); err != nil {
+		return nil, err
 	}
 	var out *Note
 	err := s.writeVia(ctx, func(w *wtx) error {
@@ -938,17 +938,17 @@ func (s *Store) AddNoted(ctx context.Context, id, text, actor string) (*Note, er
 // nothing: a move's note ends the session in the same write, asks and
 // answers have their own flows, and the daemon notes past its sessions'
 // ends. files are the files the note carries, each as its hash as PutBlob
-// answered it with the name the sender gives it. From a session's or a
-// crew member's pane the note is stored as that session's actor or that
-// crew member, whatever actor says; from anywhere else, as given
-// (paneAuthor).
+// answered it with the name the sender gives it. A note needs words, with
+// files or without (noteWords). From a session's or a crew member's pane
+// the note is stored as that session's actor or that crew member,
+// whatever actor says; from anywhere else, as given (paneAuthor).
 func (s *Store) AddNotedAs(ctx context.Context, id, text, actor, session string, files ...BlobFile) (*Note, error) {
 	// A bead's handle never holds an "@" (validID).
 	if bead, peer, foreign := strings.Cut(id, "@"); foreign {
 		return nil, s.refuseForeignNote(bead, peer)
 	}
-	if len(files) > 0 && strings.TrimSpace(text) == "" {
-		return nil, fmt.Errorf("a note with files needs words: say what they show")
+	if err := noteWords(text, files); err != nil {
+		return nil, err
 	}
 	refs, err := s.noteFiles(files)
 	if err != nil {
@@ -1126,7 +1126,7 @@ func (s *Store) refuseForeignNote(bead, peer string) error {
 		who := rec.From + "@" + p.Name
 		if !seen[who] {
 			seen[who] = true
-			askers = append(askers, "yardr mail "+who+` "..."`)
+			askers = append(askers, "yardr mail "+who+" - with the words on stdin")
 		}
 	}
 	return fmt.Errorf("bead %s@%s is a question %s asked: words for the asker go as mail, %s",
