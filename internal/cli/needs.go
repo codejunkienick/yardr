@@ -477,7 +477,11 @@ const herdrOldest = "0.9.0"
 const herdrUpdate = "stop its server if one runs (herdr server stop) and run herdr update"
 
 // herdrVersion is the line `herdr --version` prints, such as "herdr 0.9.4".
-var herdrVersion = regexp.MustCompile(`^herdr v?(\d+)\.(\d+)\.(\d+)\b`)
+// A build of herdr's preview channel adds a prerelease, as in "herdr
+// 0.9.4-preview.2026-10-14-fbd2ae23927f" (herdr's src/build_info.rs: the
+// stable release it follows, then the build's date and commit). A "+build"
+// suffix is read past, since semver gives it no order.
+var herdrVersion = regexp.MustCompile(`^herdr v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?(?:\s|$)`)
 
 // herdrTooOld says that the herdr at path is older than herdrOldest, and is
 // "" when it is not or when its version could not be read: a herdr that does
@@ -495,15 +499,24 @@ func herdrTooOld(ctx context.Context, path string) string {
 }
 
 // dottedVersion is the major, minor and patch numbers of a herdr version
-// line, nil when it is none.
+// line, nil when it is none, then 0 for a prerelease and 1 for a release, so
+// that a prerelease orders below its release as semver has it: 0.9.0-rc.1 is
+// older than 0.9.0 and 0.9.1-rc.1 is newer. Prereleases of one release are
+// not ordered among themselves, which a floor that is a release never needs.
+// A herdr preview is built after the release it names, so this order refuses
+// a preview of the floor itself, which would do; that errs on the safe side,
+// and herdr update replaces it with a later preview, which passes.
 func dottedVersion(line string) []int {
 	m := herdrVersion.FindStringSubmatch(line)
 	if m == nil {
 		return nil
 	}
-	out := make([]int, 3)
-	for i := range out {
+	out := make([]int, 4)
+	for i := range 3 {
 		out[i], _ = strconv.Atoi(m[i+1])
+	}
+	if m[4] == "" {
+		out[3] = 1
 	}
 	return out
 }
