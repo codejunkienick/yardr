@@ -215,7 +215,7 @@ func (r AskRun) Command() string { return runCommandLine(r.Argv) }
 // completes it.
 const CarryPending = "approved, to be carried out"
 
-func runCommandLine(argv []string) string { return "yardr " + strings.Join(argv, " ") }
+func runCommandLine(argv []string) string { return "yardr " + strings.Join(typedWords(argv), " ") }
 
 // RunAsked is the command a run ask proposes, as a client shows it: the
 // command whole, the yard's sentences for what it changes, and the command

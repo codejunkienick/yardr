@@ -1418,6 +1418,16 @@ func TestRunAskHookPublicURL(t *testing.T) {
 	if got := y.asked(t, seq).Ask.Run.Does; !slices.Contains(got, "a hook whose source names a register call is registered at this address when its card is approved: the URL of hook <name> is https://yard.example/hooks/<name>.") {
 		t.Fatalf("the card says %q", got)
 	}
+	// A URL with brackets (an IPv6 host) is stored as a JSON string, which a
+	// shell takes as a quoted word already: the take-back shows it as it is,
+	// and does not quote it again.
+	if err := y.SetSetting(y.ctx, HookPublicURLSetting, "https://[2001:db8::1]:8790", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, listAsk("mckean", "settings set hook_public_url https://yard.example/hooks"), "yardmaster")
+	if got, want := y.asked(t, seq).Ask.Run.Back, `yardr settings set hook_public_url "https://[2001:db8::1]:8790"`; got != want {
+		t.Fatalf("the take-back is %q, want %q", got, want)
+	}
 	// The addresses the servers bind stay the operator's alone.
 	for _, c := range []string{
 		"settings set hook_addr 127.0.0.1:9999",
@@ -1662,6 +1672,17 @@ func TestTimerRmCardKeepsReasonAsData(t *testing.T) {
 	}
 	if strings.Contains(run.Does[0], "\n") || !strings.Contains(run.Does[0], strconv.Quote(reason)) {
 		t.Errorf("timer reason is not safely quoted on one line: %q", run.Does[0])
+	}
+
+	// A bracket in the reason does not quote it again: it is one quoted word
+	// before the words of the command are joined.
+	tm, err = y.AddTimer(y.ctx, NewTimer{Reason: "check [urgent] items", Due: time.Now().Add(time.Hour)}, "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, listAsk("mckean", "timer rm "+tm.ID), "yardmaster")
+	if got := y.asked(t, seq).Ask.Run.Back; !strings.HasSuffix(got, " 'check [urgent] items'") || strings.Contains(got, `'\''`) {
+		t.Errorf("take-back command is %q, want the reason in one layer of single quotes", got)
 	}
 
 	// A multiline reason is escaped in the card and does not become lines
@@ -1911,13 +1932,13 @@ func TestRunAskCrewIdentity(t *testing.T) {
 
 	// A GitHub App's bot logs in as <slug>[bot]: the brackets stand in a key
 	// as typed, in either form of the flag, and the card shows the command
-	// with them.
+	// as a terminal takes it, with the word in quotes.
 	seq = y.ask(t, listAsk("mckean", "crew identity yardmaster --source crm --key=yardr[bot]"), "yardmaster")
 	r = y.asked(t, seq)
 	if want := []string{"crew", "identity", "yardmaster", "--source", "crm", "--key", "yardr[bot]"}; !slices.Equal(r.Ask.Run.Argv, want) {
 		t.Fatalf("the bracketed ask holds %q, want %q", r.Ask.Run.Argv, want)
 	}
-	if want := "yardr crew identity yardmaster --source crm --key yardr[bot]"; r.Ask.proposed().Command != want {
+	if want := "yardr crew identity yardmaster --source crm --key 'yardr[bot]'"; r.Ask.proposed().Command != want {
 		t.Fatalf("the card shows %q, want %q", r.Ask.proposed().Command, want)
 	}
 	done, err = y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil)
@@ -1933,6 +1954,27 @@ func TestRunAskCrewIdentity(t *testing.T) {
 	}
 	if bot := member.Identities["crm"]; bot != (Identity{Key: "yardr[bot]"}) {
 		t.Fatalf("the crew member is %+v in crm, want the bot's login", bot)
+	}
+
+	// What stands is the bot's login, so the next change is taken back by
+	// putting it back, and that line quotes it as the command's does.
+	seq = y.ask(t, listAsk("mckean", "crew identity yardmaster --source crm --key deputy"), "yardmaster")
+	got = y.asked(t, seq).Ask.Run
+	if want := "yardr crew identity yardmaster --source crm --key 'yardr[bot]'"; got.Back != want {
+		t.Fatalf("the take-back of the bot's login is %q, want %q", got.Back, want)
+	}
+	if want := "only the operator can take it back: yardr crew identity yardmaster --source crm --key 'yardr[bot]'"; got.TakenBack() != want {
+		t.Fatalf("the card takes it back with %q, want %q", got.TakenBack(), want)
+	}
+	// Stored identity keys may also contain a quote. The take-back escapes
+	// that data inside the shell word, preserving both it and the brackets.
+	if err := y.SetIdentity(y.ctx, "yardmaster", "crm", Identity{Key: "yardr'[bot]"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, listAsk("mckean", "crew identity yardmaster --source crm --key deputy"), "yardmaster")
+	got = y.asked(t, seq).Ask.Run
+	if want := `yardr crew identity yardmaster --source crm --key 'yardr'\''[bot]'`; got.Back != want {
+		t.Fatalf("the take-back of the quoted bot key is %q, want %q", got.Back, want)
 	}
 }
 

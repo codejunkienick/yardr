@@ -210,19 +210,37 @@ func TestRunAskRefusals(t *testing.T) {
 // logs in as <slug>[bot], a model carries its window (opus[1m]) and an IPv6
 // host is in brackets. No shell reads a word, and nothing else comes in with
 // it: a quote, a dollar, a backtick and a parenthesis are still no character
-// of a word, and a space still ends it.
+// of a word, and a space still ends it. The line a card shows for it is the
+// one a terminal takes, so a word with a bracket is in single quotes (zsh
+// refuses it bare) and every other word is as it was.
 func TestRunAskTakesBrackets(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ typed, want string }{
-		{"crew identity yardmaster --source github --key yardr[bot]", "yardr crew identity yardmaster --source github --key yardr[bot]"},
-		{"user identity ada --source github --key=ada-app[bot]", "yardr user identity ada --source github --key ada-app[bot]"},
-		{"crew add porter kind=claude model=opus[1m] preset=auto", "yardr crew add porter kind=claude model=opus[1m] preset=auto"},
-		{"peer set airy --url http://[::1]:8790", "yardr peer set airy --url http://[::1]:8790"},
+		{"crew identity yardmaster --source github --key yardr[bot]", "yardr crew identity yardmaster --source github --key 'yardr[bot]'"},
+		{"user identity ada --source github --key=ada-app[bot]", "yardr user identity ada --source github --key 'ada-app[bot]'"},
+		{"crew add porter kind=claude model=opus[1m] preset=auto", "yardr crew add porter kind=claude 'model=opus[1m]' preset=auto"},
+		{"peer set airy --url http://[::1]:8790", "yardr peer set airy --url 'http://[::1]:8790'"},
+		{"peer allow airy --mail-limit 300", "yardr peer allow airy --mail-limit 300"},
 	} {
 		if _, argv, err := parseRun([]string{c.typed}); err != nil {
 			t.Errorf("--run %q = %v, want it read", c.typed, err)
 		} else if got := runCommandLine(argv); got != c.want {
 			t.Errorf("--run %q reads as %q, want %q", c.typed, got, c.want)
+		}
+	}
+	// A take-back line holds words from stored state as well as words that
+	// came in by --run. Raw values are quoted here; settings JSON and timer
+	// reasons are already shell words and their card builders append them
+	// after this formatter.
+	for _, c := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"peer", "set", "airy", "--url", "http://[::1]:8790"}, "yardr peer set airy --url 'http://[::1]:8790'"},
+		{[]string{"crew", "identity", "yardmaster", "--source", "github", "--key", "yardr'[bot]"}, `yardr crew identity yardmaster --source github --key 'yardr'\''[bot]'`},
+	} {
+		if got := runCommandLine(c.argv); got != c.want {
+			t.Errorf("runCommandLine(%q) = %q, want %q", c.argv, got, c.want)
 		}
 	}
 	for _, c := range []struct{ typed, want string }{
@@ -1329,7 +1347,9 @@ func TestRunAskPeerAdd(t *testing.T) {
 	}
 	card := r.Lines()
 	for _, line := range []string{
-		"      yardr peer add north " + invite,
+		// The invite is one word with brackets in it (the URL's host), so the
+		// line shows it in quotes as a terminal takes it.
+		"      yardr peer add north '" + invite + "'",
 		"  what the command does: Add another yard as a peer, from its invite",
 		"  the yard says: " + want.Does[0],
 		"  the yard says: " + want.Does[1],

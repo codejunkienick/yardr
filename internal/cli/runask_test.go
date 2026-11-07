@@ -385,7 +385,8 @@ func TestBeadAskRunAndApprove(t *testing.T) {
 	}
 
 	// A GitHub App's bot logs in as <slug>[bot]: the command takes the
-	// brackets as typed, and the card and the approval carry them.
+	// brackets as typed, the card shows the command as a terminal takes it
+	// (in bead ask and in prime), and the approval carries them.
 	asked, err = y.as(t, "yardmaster", "ask", b.ID, "Is the yardmaster the bot?",
 		"--context", "its own comments come back to its inbox.", "--run", "crew identity yardmaster --source crm --key yardr[bot]")
 	if err != nil {
@@ -395,8 +396,12 @@ func TestBeadAskRunAndApprove(t *testing.T) {
 	if _, err := fmt.Sscanf(asked, "ask %d on", &bot); err != nil {
 		t.Fatalf("bead ask printed %q: %v", asked, err)
 	}
-	if want := "to approve, yardr crew identity yardmaster --source crm --key yardr[bot]\n"; !strings.HasSuffix(asked, want) {
+	if want := "to approve, yardr crew identity yardmaster --source crm --key 'yardr[bot]'\n"; !strings.HasSuffix(asked, want) {
 		t.Fatalf("bead ask printed %q, want it to end %q", asked, want)
+	}
+	shown, err = run(t, y.a.primeCmd(), "--bead", b.ID)
+	if want := "      yardr crew identity yardmaster --source crm --key 'yardr[bot]'\n"; err != nil || !strings.Contains(shown, want) {
+		t.Fatalf("prime shows %q, %v, want it to hold %q", shown, err, want)
 	}
 	out, _, err = gated(t, y, false, strings.NewReader(""), b.ID, fmt.Sprint(bot), "--approve")
 	if err != nil || !strings.Contains(out, "crew member yardmaster is yardr[bot] in crm") {
@@ -615,7 +620,9 @@ func TestBeadAskRunPeerAdd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "ask 1 on " + b.ID + " for jo: to approve, yardr peer add north " + invite + "\n"; out != want {
+	// The invite is one word with brackets in it (the URL's host), so the card
+	// shows it in quotes as a terminal takes it.
+	if want := "ask 1 on " + b.ID + " for jo: to approve, yardr peer add north '" + invite + "'\n"; out != want {
 		t.Fatalf("bead ask --run peer add printed %q, want %q", out, want)
 	}
 	shown, err := run(t, y.a.primeCmd(), "--bead", b.ID)
@@ -623,7 +630,7 @@ func TestBeadAskRunPeerAdd(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"      yardr peer add north " + invite,
+		"      yardr peer add north '" + invite + "'",
 		"  what the command does: Add another yard as a peer, from its invite",
 		"  the yard says: links the yard south as the peer north with the key " + south + ", called at " + inviteURL + ".",
 		"  the yard says: The link carries nothing until yardr peer allow north says what.",

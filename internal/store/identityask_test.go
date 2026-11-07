@@ -106,9 +106,9 @@ func TestRunAskUserIdentity(t *testing.T) {
 	}
 
 	// A bot's login is <slug>[bot]: the brackets stand in the key, in either
-	// form of the flag.
+	// form of the flag, and the card quotes the word as a terminal takes it.
 	seq = y.ask(t, listAsk("ada", "user identity ada --source talk --key=ada-app[bot]"), "yardmaster")
-	if got := y.asked(t, seq).Ask.proposed().Command; got != "yardr user identity ada --source talk --key ada-app[bot]" {
+	if got := y.asked(t, seq).Ask.proposed().Command; got != "yardr user identity ada --source talk --key 'ada-app[bot]'" {
 		t.Fatalf("the card shows %q", got)
 	}
 	done, err = y.ApproveAsk(y.ctx, y.bead, seq, "ada", true, nil)

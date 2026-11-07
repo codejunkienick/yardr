@@ -386,7 +386,8 @@ func (w *wtx) settingSetCard(argv []string, asking bool) (AskRun, error) {
 	} else if set.Default != "" {
 		now = "unset (default " + set.Default + ")"
 	}
-	back := runCommandLine([]string{"settings", "set", key, string(stored)})
+	// The stored JSON is already a shell word.
+	back := runCommandLineWithShellWord([]string{"settings", "set", key}, string(stored))
 	if !has {
 		back = runCommandLine([]string{"settings", "set", key, `""`})
 	}
@@ -678,8 +679,7 @@ func (w *wtx) timerRmCard(argv []string, asking bool) (AskRun, error) {
 		back = append(back, "--unless", cond)
 	}
 	if reason, ok := timerReasonArg(t.Reason); ok && backBy != "nobody" {
-		back = append(back, reason)
-		backLine = runCommandLine(back)
+		backLine = runCommandLineWithShellWord(back, reason)
 	} else if backBy != "nobody" {
 		backLine = "the timer can be added again by hand"
 	}

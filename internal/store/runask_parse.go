@@ -1,7 +1,8 @@
 // Reading the command a run ask names: the list as a refusal and the help
 // of yardr bead ask name it (RunCommands), and the one reading of the
 // line, split at white space and nowhere else, into a row of the list in
-// its stored form. It reads no record of the yard.
+// its stored form; and the way back, the words of a stored row as a
+// terminal takes them (typedWords). It reads no record of the yard.
 package store
 
 import (
@@ -131,4 +132,27 @@ func parseRow(sent []string) (*runCommand, []string, error) {
 		return nil, nil, err
 	}
 	return row, append(slices.Clone(row.words), rest...), nil
+}
+
+// runCommandLineWithShellWord appends a word already quoted by a card's
+// builder, so its brackets are not quoted a second time.
+func runCommandLineWithShellWord(argv []string, word string) string {
+	return runCommandLine(argv) + " " + word
+}
+
+// typedWords are the words of a stored command as a terminal takes them
+// when the line is pasted, which is what a card's command and take-back
+// lines are for. A word that holds a bracket is single-quoted: zsh reads a
+// bare one as a pattern and refuses the whole line ("no matches found").
+// Single quotes inside the word are escaped so the shell passes the key
+// unchanged. Every other word stays bare, so a line without brackets reads
+// as it always has.
+func typedWords(argv []string) []string {
+	words := slices.Clone(argv)
+	for i, word := range words {
+		if strings.ContainsAny(word, "[]") {
+			words[i] = "'" + strings.ReplaceAll(word, "'", "'\\''") + "'"
+		}
+	}
+	return words
 }

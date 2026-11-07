@@ -203,7 +203,8 @@ which source, and that mentions and assignments of the id or key there
 will be addressed to it. A source the yard declares not, and a crew
 member the yard has not, are refused. A run ask is split at spaces and
 quotes nothing, so a GitHub App's login goes in as it is, `--key
-<slug>[bot]`, with no quotes around it.
+<slug>[bot]`, with no quotes around it; the card shows the command as a
+terminal takes it, with that word in quotes, `--key '<slug>[bot]'`.
 
 With that, for each crew member subscribed to the source:
 
