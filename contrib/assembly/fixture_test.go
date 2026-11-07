@@ -34,6 +34,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -202,6 +204,122 @@ func copyTree(t *testing.T, src, dst string) {
 	}
 }
 
+// relinkWorktrees makes the linked worktrees wts of a copied repository the
+// copy's own. A copy of a repository and of its worktree is bit-identical, so
+// the worktree's .git file still names the template's admin directory and the
+// admin directory still names the template's worktree: a commit made in the
+// copy would land in the shared template. Two files tie a linked worktree to
+// its repository, and this writes both as git worktree add does: the id is
+// read from the copied .git file, as git infers it, and the paths are
+// resolved, as git writes them (macOS's temp dir is behind a symlink).
+//
+// git worktree repair is no way to do it: before git 2.48 it trusts the .git
+// file, so it rewrites the template's links to name the copy and leaves the
+// copy naming the template, and the next borrower copies a template that
+// names the last borrower's gone temp dir (yardr-9r6w).
+func relinkWorktrees(t *testing.T, repo string, wts ...string) {
+	t.Helper()
+	repo, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(file, content string) {
+		t.Helper()
+		if err := os.WriteFile(file, []byte(content+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, wt := range wts {
+		wt, err := filepath.EvalSymlinks(wt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dotgit := filepath.Join(wt, ".git")
+		b, err := os.ReadFile(dotgit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		old, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir: ")
+		if !ok {
+			t.Fatalf("relink %s: %s is not a gitfile: %q", wt, dotgit, b)
+		}
+		admin := filepath.Join(repo, ".git", "worktrees", filepath.Base(old))
+		write(dotgit, "gitdir: "+admin)
+		write(filepath.Join(admin, "gitdir"), dotgit)
+	}
+}
+
+// A repository and its linked worktree, copied and relinked, belong to the
+// copy: its links name the copy, the template's are as they were, and a commit
+// made in the copy's worktree lands on the copy's branch, not the template's.
+// Every borrower relies on it. git before 2.48 (Debian 13 ships 2.47) left the
+// copy naming the template, and most of this package's tests failed there
+// (yardr-9r6w).
+func TestRelinkedWorktreesBelongToTheCopyNotTheTemplate(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	tplRepo, tplWT := filepath.Join(dir, "tpl", "repo"), filepath.Join(dir, "tpl", "wt")
+	cpRepo, cpWT := filepath.Join(dir, "copy", "repo"), filepath.Join(dir, "copy", "wt")
+	watcherGit(t, dir, "init", "-q", "-b", "main", tplRepo)
+	watcherGit(t, tplRepo, "commit", "-q", "--allow-empty", "-m", "base")
+	watcherGit(t, tplRepo, "branch", "yard/r-1")
+	watcherGit(t, tplRepo, "worktree", "add", "-q", tplWT, "yard/r-1")
+	links := func(repo, wt string) [2]string {
+		dotgit, err := os.ReadFile(filepath.Join(wt, ".git"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		admin, err := os.ReadFile(filepath.Join(repo, ".git", "worktrees", "wt", "gitdir"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return [2]string{string(dotgit), string(admin)}
+	}
+	tplLinks := links(tplRepo, tplWT)
+	copyTree(t, tplRepo, cpRepo)
+	copyTree(t, tplWT, cpWT)
+	relinkWorktrees(t, cpRepo, cpWT)
+
+	// Resolved, since git writes the links so and the temp dir may sit behind a
+	// symlink.
+	realCpRepo, err := filepath.EvalSymlinks(cpRepo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realCpWT, err := filepath.EvalSymlinks(cpWT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [2]string{
+		"gitdir: " + filepath.Join(realCpRepo, ".git", "worktrees", "wt") + "\n",
+		filepath.Join(realCpWT, ".git") + "\n",
+	}
+	if got := links(cpRepo, cpWT); got != want {
+		t.Errorf("the copy's links are %q, want %q", got, want)
+	}
+	if got := links(tplRepo, tplWT); got != tplLinks {
+		t.Errorf("the template's links are now %q, were %q", got, tplLinks)
+	}
+	// What git itself makes of them: the copy's repository registers the copy's
+	// worktree, and a commit made there stays in the copy.
+	var listed []string
+	for _, line := range strings.Split(watcherGit(t, cpRepo, "worktree", "list", "--porcelain"), "\n") {
+		if path, ok := strings.CutPrefix(line, "worktree "); ok {
+			listed = append(listed, path)
+		}
+	}
+	if wantListed := []string{realCpRepo, realCpWT}; !slices.Equal(listed, wantListed) {
+		t.Errorf("the copy's repository lists the worktrees %q, want %q", listed, wantListed)
+	}
+	watcherGit(t, cpWT, "commit", "-q", "--allow-empty", "-m", "in the copy")
+	if got := watcherGit(t, cpRepo, "log", "-1", "--format=%s", "yard/r-1"); got != "in the copy" {
+		t.Errorf("the copy's yard/r-1 is at %q after a commit in its worktree", got)
+	}
+	if got := watcherGit(t, tplRepo, "log", "-1", "--format=%s", "yard/r-1"); got != "base" {
+		t.Errorf("the template's yard/r-1 is at %q, a commit in the copy's worktree reached it", got)
+	}
+}
+
 var yardTpl = &yardTemplate{name: "yard", build: buildYardTpl}
 
 // buildYardTpl is newYard's setup, once, into root: a yard with depot r over
@@ -228,8 +346,8 @@ func buildYardTpl(t *testing.T, root string) {
 }
 
 // borrowYard is newYard from the template: the same yard, copied into the
-// test's own temp dir, with the worktree git registered repaired and the
-// depot pointing at the copy.
+// test's own temp dir, with the worktree relinked to the copy and the depot
+// pointing at the copy.
 func borrowYard(t *testing.T) *yard {
 	t.Helper()
 	t.Parallel()
@@ -246,10 +364,7 @@ func borrowYard(t *testing.T) *yard {
 	copyTree(t, filepath.Join(root, "repo"), repo)
 	y := &yard{t: t, home: home, repo: repo, wt: filepath.Join(home, "worktrees", "r", "r-1")}
 	y.env = append(os.Environ(), "YARDR_HOME="+home, "YARDR_ACTOR=test")
-	// Repair names the copy's worktree: a bare repair fixes the worktrees
-	// the copied admin registered, which are the template's, and every
-	// commit after would land in the shared template.
-	y.git(y.repo, "worktree", "repair", y.wt)
+	relinkWorktrees(t, y.repo, y.wt)
 	serveYard(t, home)
 	y.putDepot("r", y.repo, "main", "test ! -e RED")
 	return y
@@ -295,8 +410,8 @@ func buildTrainTpl(t *testing.T, root string) {
 }
 
 // borrowTrainTpl is a train-shaped template copied into the test's own temp
-// dir: the worktrees repaired, the origin set to the copied remote, and the
-// depot pointing at the copy with the test's own test command.
+// dir: the worktrees relinked to the copy, the origin set to the copied remote,
+// and the depot pointing at the copy with the test's own test command.
 func borrowTrainTpl(t *testing.T, tpl *yardTemplate, check string) *yard {
 	t.Helper()
 	t.Parallel()
@@ -316,10 +431,7 @@ func borrowTrainTpl(t *testing.T, tpl *yardTemplate, check string) *yard {
 	y := &yard{t: t, home: home, repo: repo}
 	y.env = append(os.Environ(), "YARDR_HOME="+home, "YARDR_ACTOR=test")
 	y.push = "origin"
-	// Repair names the copy's worktrees: a bare repair fixes the worktrees
-	// the copied admin registered, which are the template's, and every
-	// commit after would land in the shared template.
-	y.git(y.repo, "worktree", "repair",
+	relinkWorktrees(t, y.repo,
 		filepath.Join(home, "worktrees", "r", "r-1"),
 		filepath.Join(home, "worktrees", "r", "r-2"))
 	y.git(y.repo, "remote", "set-url", "origin", origin)
@@ -352,7 +464,7 @@ func buildLandedTpl(t *testing.T, root string) {
 	y := &yard{t: t, home: home, repo: repo}
 	y.env = append(os.Environ(), "YARDR_HOME="+home, "YARDR_ACTOR=test")
 	y.push = "origin"
-	y.git(y.repo, "worktree", "repair",
+	relinkWorktrees(t, y.repo,
 		filepath.Join(home, "worktrees", "r", "r-1"),
 		filepath.Join(home, "worktrees", "r", "r-2"))
 	y.git(y.repo, "remote", "set-url", "origin", origin)
@@ -401,7 +513,7 @@ func buildLandTpl(t *testing.T, root string) {
 	y.env = append(os.Environ(), "YARDR_HOME="+home, "YARDR_ACTOR=test")
 	y.push = "origin"
 	y.opts = "YARDR_PR=1"
-	y.git(y.repo, "worktree", "repair",
+	relinkWorktrees(t, y.repo,
 		filepath.Join(home, "worktrees", "r", "r-1"),
 		filepath.Join(home, "worktrees", "r", "r-2"))
 	y.git(y.repo, "remote", "set-url", "origin", origin)
@@ -446,7 +558,7 @@ func borrowLand(t *testing.T) (*yard, string) {
 	y.env = append(os.Environ(), "YARDR_HOME="+home, "YARDR_ACTOR=test")
 	y.push = "origin"
 	y.opts = "YARDR_PR=1"
-	y.git(y.repo, "worktree", "repair",
+	relinkWorktrees(t, y.repo,
 		filepath.Join(home, "worktrees", "r", "r-1"),
 		filepath.Join(home, "worktrees", "r", "r-2"))
 	y.git(y.repo, "remote", "set-url", "origin", origin)
