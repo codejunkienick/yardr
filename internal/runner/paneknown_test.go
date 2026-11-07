@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"testing"
@@ -87,9 +88,35 @@ func TestStartCrewRecordsItsPaneBeforeTheAgentStarts(t *testing.T) {
 	if strings.Contains(st.before, "agent start") || !strings.Contains(readCalls(t, st.calls), "agent start") {
 		t.Fatalf("the pane was recorded after the agent started; herdr's calls before the record:\n%s", st.before)
 	}
+	for _, pid := range []int{os.Getpid(), 4_000_001} {
+		if pid != os.Getpid() {
+			// Stored handles decode numbers as float64, including PIDs that format in exponent notation.
+			starting := maps.Clone(st.handle)
+			starting["shell_pid"] = pid
+			if err := st.API.CrewStarting(ctx, "yardmaster", starting); err != nil {
+				t.Fatal(err)
+			}
+		}
+		r, err := st.GetCrew(ctx, "yardmaster")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.State != "stopped" || len(r.Handle) != 0 || r.Starting["shell_pid"] != float64(pid) ||
+			r.Starting["shell_start"] != float64(st.handle["shell_start"].(uint64)) ||
+			r.Starting["pane"] != "p1" || r.Starting["tab"] != "t1" || r.Starting["workspace"] != "w1" {
+			t.Fatalf("the yardmaster = %+v: want its starting pane with shell %d on record", r, pid)
+		}
+	}
+	if err := st.CrewStarted(ctx, "yardmaster", st.handle); err != nil {
+		t.Fatal(err)
+	}
 	r, err := st.GetCrew(ctx, "yardmaster")
-	if err != nil || r.Live() || fmt.Sprint(r.Starting["shell_pid"]) != fmt.Sprint(os.Getpid()) {
-		t.Fatalf("the yardmaster = %+v, %v: want its starting pane on record", r, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Live() || len(r.Starting) != 0 || r.Handle["shell_pid"] != float64(os.Getpid()) ||
+		r.Handle["shell_start"] != float64(st.handle["shell_start"].(uint64)) || r.Handle["pane"] != "p1" {
+		t.Fatalf("after CrewStarted the yardmaster = %+v: want the running pane and no starting handle", r)
 	}
 
 	h, st = shellHerdr(t, "")
@@ -205,37 +232,46 @@ func TestHerdrStartRecordsItsPaneBeforeTheAgentStarts(t *testing.T) {
 func TestStartCrewKeepsThePaneAFailedStartLeft(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	h, st := shellHerdr(t, "")
-	if _, err := st.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr"}, "me"); err != nil {
-		t.Fatal(err)
-	}
-	left := map[string]any{"pane": "p0", "shell_pid": os.Getpid(), "shell_start": 7, store.HandleHerdrSession: "gc"}
-	if err := st.API.CrewStarting(ctx, "yardmaster", left); err != nil {
-		t.Fatal(err)
-	}
-	h.Bin = fakeHerdrBin(t, `printf '%s\n' "$*" >> `+st.calls+`
+	for _, pid := range []int{os.Getpid(), 4_000_001} {
+		h, st := shellHerdr(t, "")
+		if _, err := st.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr"}, "me"); err != nil {
+			t.Fatal(err)
+		}
+		left := map[string]any{"pane": "p0", "shell_pid": pid, "shell_start": 7, store.HandleHerdrSession: "gc"}
+		if err := st.API.CrewStarting(ctx, "yardmaster", left); err != nil {
+			t.Fatal(err)
+		}
+		h.Bin = fakeHerdrBin(t, `printf '%s\n' "$*" >> `+st.calls+`
 case "$1 $2" in
   "pane process-info") echo '{"result":{"process_info":{"pane_id":"p1"}}}' ;;
   *) echo '{"result":{"type":"ok"}}' ;;
 esac`)
-	r, err := st.GetCrew(ctx, "yardmaster")
-	if err != nil {
-		t.Fatal(err)
-	}
-	r.Dir = t.TempDir()
-	if _, err := h.StartCrew(ctx, *r, ""); err == nil {
-		t.Fatal("a start whose pane told no shell succeeded")
-	}
-	if err := st.CrewStartFailed(ctx, "yardmaster", "no shell", 0); err != nil {
-		t.Fatal(err)
-	}
-	r, err = st.GetCrew(ctx, "yardmaster")
-	if err != nil || fmt.Sprint(r.Starting["shell_pid"]) != fmt.Sprint(os.Getpid()) || r.Starting["shell_start"] == nil {
-		t.Fatalf("after a second failed start the yardmaster's starting pane = %v, %v: want the pane the first one left", r.Starting, err)
-	}
-	// The start that was underway may have gone to another herdr session:
-	// what is on record no longer says which.
-	if r.Starting[store.HandleHerdrSession] != "" {
-		t.Fatalf("the kept pane still names herdr session %v", r.Starting[store.HandleHerdrSession])
+		r, err := st.GetCrew(ctx, "yardmaster")
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Dir = t.TempDir()
+		if _, err := h.StartCrew(ctx, *r, ""); err == nil {
+			t.Fatal("a start whose pane told no shell succeeded")
+		}
+		if err := st.CrewStartFailed(ctx, "yardmaster", "no shell", 0); err != nil {
+			t.Fatal(err)
+		}
+		r, err = st.GetCrew(ctx, "yardmaster")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.State != "stopped" || r.Failures != 1 || r.RetryAfter == nil ||
+			r.Starting["shell_pid"] != float64(pid) || r.Starting["shell_start"] != float64(7) || r.Starting["pane"] != "p0" {
+			t.Fatalf("after a second failed start the yardmaster = %+v: want the pane the first one left", r)
+		}
+		if strings.Contains(readCalls(t, st.calls), "agent start") {
+			t.Fatal("a start whose pane told no shell started an agent")
+		}
+		// The start that was underway may have gone to another herdr session:
+		// what is on record no longer says which.
+		if r.Starting[store.HandleHerdrSession] != "" {
+			t.Fatalf("the kept pane still names herdr session %v", r.Starting[store.HandleHerdrSession])
+		}
 	}
 }

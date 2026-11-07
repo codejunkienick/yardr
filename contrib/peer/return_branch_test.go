@@ -142,7 +142,7 @@ func newYard(t *testing.T) *yard {
 	// os.Environ names this binary to the servers a command starts
 	// (TestMain), so a run killed by its timeout leaves none behind.
 	y.env = append(os.Environ(), "YARDR_HOME="+home, "YARDR_ACTOR=test")
-	y.yardr("init", "--harness", "claude", "--dir", home)
+	y.yardr("init", "--harness", "claude", "--dir", home, "--operator", "test")
 	y.git(dir, "init", "-q", "--bare", "-b", "main", y.remote)
 	y.git(dir, "clone", "-q", y.remote, y.repo)
 	y.git(y.repo, "checkout", "-q", "-b", "main")
@@ -219,7 +219,7 @@ func (y *yard) returns(opts string, job func(*dispatch.Job)) {
 	logPath := filepath.Join(y.home, "return.log")
 	ctx := context.Background()
 	st := rpc.NewClient((&config.Config{Home: y.home}).Socket())
-	if err := st.PutGroup(ctx, store.Group{Name: "return", Runner: "exec", Config: map[string]any{"cmd": "true"}}, "mckean"); err != nil {
+	if err := st.PutGroup(ctx, store.Group{Name: "return", Runner: "exec", Config: map[string]any{"cmd": "true"}}, "test"); err != nil {
 		y.t.Fatal(err)
 	}
 	b := y.bead()
