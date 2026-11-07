@@ -79,7 +79,8 @@ type Declaration struct {
 	Bases      map[string]string `json:"bases,omitempty"`
 	Credential *Credential       `json:"credential,omitempty"`
 	// Check names the call `yardr source check` makes: a read call that
-	// needs no parameter. Empty when the file names none.
+	// needs no parameter, sent as a request or answered by its run command
+	// (DoCheck). Empty when the file names none.
 	Check string `json:"check,omitempty"`
 	// Idempotency is the name of the header the service takes a key in, by
 	// which it tells an update it was sent before from a new one; "" for a
@@ -781,8 +782,6 @@ func (r *reader) declaration(d *Declaration, root *yaml.Node) {
 			r.errf(check.v, check.path, "%s is an update: the check is a read call, made to see that the source answers", name)
 		case len(c.Build) > 0:
 			r.errf(check.v, check.path, "%s names build: source check and yardr doctor send the request's template and run no build command", name)
-		case len(c.Run) > 0:
-			r.errf(check.v, check.path, "%s names run: source check and yardr doctor send the request a call declares, and a call that names run declares none", name)
 		case slices.ContainsFunc(c.Params, func(p Param) bool { return !p.Optional }):
 			r.errf(check.v, check.path, "%s needs a parameter: the check is a call without any", name)
 		default:

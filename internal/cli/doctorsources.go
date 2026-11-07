@@ -116,18 +116,20 @@ func sourcesPart(ctx context.Context, cfg *config.Config, st store.API, try bool
 			call, _ := d.Call(d.Check)
 			cred, _, err := d.ReadCredential(ctx, src.EnvFile, src.Mint, source.Read, store.ReadEnvFileEntries)
 			if err != nil {
-				part.Notes = append(part.Notes, fmt.Sprintf("tried: source %s: its check call %s (%s) was not made: %v", d.Name, d.Check, call.Request.Line(), err))
+				part.Notes = append(part.Notes, fmt.Sprintf("tried: source %s: its check call %s (%s) was not made: %v", d.Name, d.Check, call.Line(), err))
 				break
 			}
-			res, err := source.Do(ctx, d, d.Check, nil, cred, store.ReadSecretFile)
+			// A check call that names run is run from the copy of its program
+			// under the yard's home, the one place the file's commands stand.
+			res, err := source.DoCheck(ctx, d, cred, cfg.Home, store.ReadSecretFile)
 			switch {
 			case err != nil:
-				part.Notes = append(part.Notes, fmt.Sprintf("tried: source %s: its check call %s (%s) got no answer: %v", d.Name, d.Check, call.Request.Line(), err))
+				part.Notes = append(part.Notes, fmt.Sprintf("tried: source %s: its check call %s (%s) got no answer: %v", d.Name, d.Check, call.Line(), err))
 			case !res.OK():
-				part.Notes = append(part.Notes, fmt.Sprintf("tried: source %s: its check call %s (%s) was answered %d%s", d.Name, d.Check, call.Request.Line(), res.Status, source.StatusHint(res.Status, d)))
+				part.Notes = append(part.Notes, fmt.Sprintf("tried: source %s: its check call %s (%s) was answered %d%s", d.Name, d.Check, call.Line(), res.Status, source.StatusHint(res.Status, d)))
 			default:
 				tried = true
-				part.Notes = append(part.Notes, fmt.Sprintf("tried: source %s: its check call %s (%s) was answered %d in %dms", d.Name, d.Check, call.Request.Line(), res.Status, res.Took.Milliseconds()))
+				part.Notes = append(part.Notes, fmt.Sprintf("tried: source %s: its check call %s (%s) was answered %d in %dms", d.Name, d.Check, call.Line(), res.Status, res.Took.Milliseconds()))
 			}
 		}
 		// A check call answered just now says more than a call made before it.

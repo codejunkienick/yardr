@@ -80,8 +80,18 @@ func TestParseBuild(t *testing.T) {
 		if _, err := Parse("hook.yaml", []byte("name: hook\ncredential: { env: HOOK_URL, url: true }\ncalls:\n  look: { kind: read, run: [hook/look] }\n")); err != nil {
 			t.Fatalf("a run call beside a credential that is the address: %v", err)
 		}
+		// The call that names run may be the check, as a request's may, once
+		// it needs no parameter.
+		optional := strings.Replace(runCheckDeclaration, "folder: { type: string, max: 100 }", "folder: { type: string, max: 100, optional: true }", 1)
+		if d, err = Parse("mail.yaml", []byte(optional)); err != nil || d.Check != "search" {
+			t.Fatalf("a run call as the check: %+v, %v", d, err)
+		}
 	})
 }
+
+// runCheckDeclaration is runTestDeclaration with its search call named as the
+// check, whose folder is a required parameter.
+var runCheckDeclaration = strings.Replace(runTestDeclaration, "calls:\n", "check: search\ncalls:\n", 1)
 
 func TestParseRefusesBuild(t *testing.T) {
 	both := strings.Replace(buildTestDeclaration, "request: { method: POST, path: /notes }", "request: { method: POST, path: /notes, body: { text: value } }", 1)
@@ -108,8 +118,6 @@ calls:
 	runEmpty := strings.Replace(runTestDeclaration, "run: [mail/imap, search]", "run: []", 1)
 	runWords := strings.Replace(runTestDeclaration, "run: [mail/imap, search]", "run: mail/imap search", 1)
 	runUpdate := strings.Replace(runTestDeclaration, "    kind: read\n    about: Find", "    kind: update\n    about: Find", 1)
-	runCheck := strings.Replace(runTestDeclaration, "calls:\n", "check: search\ncalls:\n", 1)
-	runCheck = strings.Replace(runCheck, "      folder: { type: string, max: 100 }\n", "      folder: { type: string, max: 100, optional: true }\n", 1)
 	for name, tc := range map[string]struct {
 		text string
 		want string
@@ -128,7 +136,7 @@ calls:
 		"empty run command":       {runEmpty, "an empty list: want the program and its arguments"},
 		"run command in a word":   {runWords, "want a list of strings"},
 		"run update":              {runUpdate, "a call that names run is a read"},
-		"run check call":          {runCheck, "check: search names run: source check and yardr doctor send the request a call declares"},
+		"run check with a param":  {runCheckDeclaration, "check: search needs a parameter: the check is a call without any"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Parse("test.yaml", []byte(tc.text))

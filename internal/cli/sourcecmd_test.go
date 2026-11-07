@@ -512,6 +512,125 @@ func TestSourceCheck(t *testing.T) {
 	if !strings.Contains(string(raw), `"env_file":"`+env+`"`) {
 		t.Fatalf("source_set does not say which file: %s", raw)
 	}
+	t.Run("run check", sourceCheckRun)
+}
+
+// A source whose calls are answered by commands: its check is one of them.
+const checkedRunSource = `name: mail
+base: http://127.0.0.1:1143
+credential: { env: MAIL_PASSWORD }
+check: whoami
+calls:
+  whoami:
+    kind: read
+    run: [mail/probe]
+    answer: { select: [account, folders] }
+`
+
+// A check call that names run is answered by its command, run from the copy
+// of its program under the home with the credential in its environment: the
+// status line and the selected fields are a request's, a refusal is an error
+// in the program's own words, and the credential, the source's or a user's
+// with --as, is in none of what is printed.
+func sourceCheckRun(t *testing.T) {
+	t.Parallel()
+	const password, adaPassword = "pw-71d3-not-to-be-seen", "pw-ada-not-to-be-seen"
+	home := newHomeDir(t)
+	st := storetest.New(t)
+	ctx := context.Background()
+	if err := st.SetSetting(ctx, store.OperatorSetting, "jo", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddUser(ctx, "ada", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	a := testApp(t, st, home)
+	a.actor = "jo"
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "mail"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The program works in the home, where it leaves what it was handed.
+	probe := "#!/bin/sh\ncat > probe-stdin\nenv > probe-environment\n" +
+		"if [ -f probe-refuse ]; then echo \"login refused for $MAIL_PASSWORD\" >&2; exit 1; fi\n" +
+		"printf '{\"account\":\"ada@example.com\",\"folders\":3,\"private\":\"not selected\"}'\n"
+	if err := os.WriteFile(filepath.Join(dir, "mail", "probe"), []byte(probe), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "mail.yaml")
+	if err := os.WriteFile(file, []byte(checkedRunSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, a.sourceCmd(), "add", file); err != nil {
+		t.Fatal(err)
+	}
+	scripttest.Relink(t, filepath.Join(home, "sources", "mail"))
+	if _, err := run(t, a.sourceCmd(), "set", "mail", "env_file="+envFile(t, "MAIL_PASSWORD="+password+"\n", 0o600)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.KeyUserCredential(ctx, "ada", "mail", map[string]string{"MAIL_PASSWORD": adaPassword}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	handed := func(name string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(home, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+
+	out, err := run(t, a.sourceCmd(), "check", "mail")
+	for _, want := range []string{"mail: check call whoami (runs mail/probe): 200 in ", "mail: account: ada@example.com\n", "mail: folders: 3\n",
+		"mail: command call.whoami.run (mail/probe): can be run\n"} {
+		if err != nil || !strings.Contains(out, want) {
+			t.Fatalf("check: %q %v; want it to say %q", out, err, want)
+		}
+	}
+	if strings.Contains(out, "private") || strings.Contains(out, password) {
+		t.Fatalf("check printed what it should not:\n%s", out)
+	}
+	if in := handed("probe-stdin"); in != `{"params":{}}` {
+		t.Fatalf("the program was handed %s", in)
+	}
+	if env := handed("probe-environment"); !strings.Contains(env, "MAIL_PASSWORD="+password+"\n") || !strings.Contains(env, "YARDR_SOURCE_BASE=http://127.0.0.1:1143\n") {
+		t.Fatalf("the program's environment:\n%s", env)
+	}
+
+	// --json carries the selected answer and says the check was made.
+	a.json = true
+	out, err = run(t, a.sourceCmd(), "check", "mail")
+	a.json = false
+	var got map[string]any
+	if err != nil || json.Unmarshal([]byte(out), &got) != nil || got["sent"] != true || got["call"] != "whoami" || got["status"] != float64(200) ||
+		fmt.Sprint(got["answer"]) != "map[account:ada@example.com folders:3]" {
+		t.Fatalf("check --json: %q %v", out, err)
+	}
+
+	// As a user it is their credential the program is handed.
+	out, err = run(t, a.sourceCmd(), "check", "mail", "--as", "ada")
+	if err != nil || !strings.Contains(out, "mail: check call whoami (runs mail/probe) as ada: 200 in ") || strings.Contains(out, adaPassword) {
+		t.Fatalf("check --as ada: %q %v", out, err)
+	}
+	if env := handed("probe-environment"); !strings.Contains(env, "MAIL_PASSWORD="+adaPassword+"\n") || strings.Contains(env, password) {
+		t.Fatalf("the program's environment as ada:\n%s", env)
+	}
+
+	// A program that refuses is a failed check in its own words, the
+	// credential cut from them; one that is gone is a failed check too.
+	if err := os.WriteFile(filepath.Join(home, "probe-refuse"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err = run(t, a.sourceCmd(), "check", "mail")
+	if err == nil || !strings.Contains(err.Error(), "source mail, call whoami: login refused for [credential redacted]") || strings.Contains(err.Error()+out, password) {
+		t.Fatalf("a refusing program: %q %v", out, err)
+	}
+	if err := os.Remove(filepath.Join(home, "sources", "mail", "mail", "probe")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err = run(t, a.sourceCmd(), "check", "mail"); err == nil || !strings.Contains(err.Error(), "source mail, call whoami: ") || strings.Contains(err.Error()+out, password) {
+		t.Fatalf("a program that is gone: %q %v", out, err)
+	}
 }
 
 const checkedSelectedSource = `name: crm

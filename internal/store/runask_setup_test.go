@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"yardr.dev/yardr/internal/source"
 )
 
 // A setup pack the tests' reader serves: one minted source with a read
@@ -927,6 +929,7 @@ func TestSetupCheckPassStoresAsToday(t *testing.T) {
 	if !ok || values["CHECKED_TOKEN"] != "good-token" {
 		t.Errorf("the handed values = %v, %v", values, ok)
 	}
+	t.Run("run check", setupCheckRunCall)
 }
 
 // A card whose typed account is a mint's inputs is stored as today,
@@ -948,6 +951,88 @@ func TestSetupCheckMintedStoredAsToday(t *testing.T) {
 	}
 	if rec, err := y.CarryOf(y.ctx, y.bead, seq); err != nil || rec == nil || rec.State != CarryApproved {
 		t.Fatalf("the carrying record = %+v, %v", rec, err)
+	}
+}
+
+// A source whose check call names run: its program is the pack's, and stands
+// under the yard's home only once the pack is in.
+const setupCheckedRunDecl = `name: setupchecked
+base: http://127.0.0.1:1143
+credential: { env: CHECKED_TOKEN }
+check: look
+calls:
+  look: { kind: read, run: [check/look] }
+`
+
+// setupCheckedLook is that program: it leaves in the home what it was given,
+// and refuses while a marker file stands there.
+const setupCheckedLook = "#!/bin/sh\nenv > look-environment\n" +
+	"if [ -f look-refuse ]; then echo \"login refused for $CHECKED_TOKEN\" >&2; exit 1; fi\n" +
+	"printf '{\"account\":\"ops@example.com\"}'\n"
+
+func setupCheckedRunPack() *setupPack {
+	return &setupPack{label: "embedded in yardr test1", build: "test1",
+		sources: []setupSource{{name: "setupchecked", text: setupCheckedRunDecl, files: map[string]string{"check/look": setupCheckedLook}}},
+		presets: []AskPreset{
+			{Name: "read", Grants: []AskPresetGrant{{Source: "setupchecked", Calls: []string{"read"}}}},
+		}}
+}
+
+// A setup card whose source names a check that runs a program tries the
+// typed credential by running it from its copy under the home, as one that
+// names a request is tried by sending it: a refusal refuses the answer in the
+// program's words and stores nothing, a pass stores. On a first setup the
+// copy is not there yet, since the carry installs the pack after the
+// approval: a try there would keep the pack from ever being installed, so
+// nothing is tried and the card stores as today.
+func setupCheckRunCall(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	y.setSetupPack(setupCheckedRunPack())
+	seq := y.ask(t, setupAsk(), "yardmaster")
+	done := y.approveSetup(t, seq, 1, map[string]string{"CHECKED_TOKEN": "typed-token"}, "mckean")
+	if len(done.Given) != 1 || done.Result != CarryPending {
+		t.Errorf("the first setup recorded %+v", done)
+	}
+	if _, err := os.Stat(filepath.Join(y.home, "look-environment")); err == nil {
+		t.Error("the program ran on a first setup, before the pack is installed")
+	}
+
+	// The program stands under the home: a setup again. It is a file of its
+	// own, as a card shows a copy that is no link.
+	y, _ = runYard(t)
+	y.setSetupPack(setupCheckedRunPack())
+	if err := source.WriteCopies(y.home, "setupchecked", []source.FileCopy{{Program: "check/look", Data: []byte(setupCheckedLook)}}); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, setupAsk(), "yardmaster")
+	refuse := filepath.Join(y.home, "look-refuse")
+	if err := os.WriteFile(refuse, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, map[string]string{"CHECKED_TOKEN": "wrong-token"}, "", "mckean", true)
+	want := "ask " + strconv.FormatUint(seq, 10) + ": the check call look (runs check/look) failed: source setupchecked, call look: login refused for [credential redacted]. Nothing was stored"
+	if err == nil || err.Error() != want {
+		t.Fatalf("a refused run check was approved or refused otherwise: %v, want %q", err, want)
+	}
+	if rec, err := y.CarryOf(y.ctx, y.bead, seq); err != nil || rec != nil {
+		t.Errorf("a refused check left a carrying record: %+v, %v", rec, err)
+	}
+	if got := y.asked(t, seq); got.State != AskOpen {
+		t.Errorf("a refused check left the ask %s, want it open", got.State)
+	}
+	if _, ok := y.takeSetupSecret(carryKey(y.bead, seq)); ok {
+		t.Error("a refused check kept the typed value in memory")
+	}
+	if err := os.Remove(refuse); err != nil {
+		t.Fatal(err)
+	}
+	done = y.approveSetup(t, seq, 1, map[string]string{"CHECKED_TOKEN": "good-token"}, "mckean")
+	if len(done.Given) != 1 || done.Given[0] != "CHECKED_TOKEN" || done.Result != CarryPending {
+		t.Errorf("the second answer recorded %+v", done)
+	}
+	if env, _ := os.ReadFile(filepath.Join(y.home, "look-environment")); !strings.Contains(string(env), "CHECKED_TOKEN=good-token\n") {
+		t.Errorf("the program's environment:\n%s", env)
 	}
 }
 

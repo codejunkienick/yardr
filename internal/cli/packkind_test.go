@@ -96,6 +96,7 @@ func TestPackCheckSourcePackNeedsNoDepot(t *testing.T) {
 
 	// A call a command answers (run) brings its program as any command does:
 	// the plan names it with its hash, and the file is one of those that run.
+	// It may be the source's check, which loads as a request's does.
 	text, err := os.ReadFile(filepath.Join(dir, "acme.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +105,7 @@ func TestPackCheckSourcePackNeedsNoDepot(t *testing.T) {
 	if !strings.Contains(string(text), calls) {
 		t.Fatalf("the declaration has no calls to add one to:\n%s", text)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "acme.yaml"), []byte(strings.Replace(string(text), calls, calls+"  find: { kind: read, run: [acme/find, search] }\n", 1)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "acme.yaml"), []byte(strings.Replace(string(text), calls, "check: find\n"+calls+"  find: { kind: read, run: [acme/find, search] }\n", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "acme", "find"), []byte("#!/bin/sh\necho find\n"), 0o644); err != nil {

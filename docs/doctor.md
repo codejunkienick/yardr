@@ -112,7 +112,10 @@ the check call of each source whose file names one (`check:`, a read call
 without parameters), as `yardr source check <name>` makes it: by this
 command, with the credential read into this process for the one request,
 for up to 30 seconds, and with nothing of the request written anywhere, no
-event either. Without `--try` doctor sends a source nothing: it reads the
+event either. A check call that names `run` runs its command, from the copy
+under the yard's home, with the credential in its environment, and its note
+says `runs <program>` where a request's says the method and path. Without
+`--try` doctor sends a source nothing and runs no command: it reads the
 file the credential is in and how the source's last call ended.
 
 **It costs a model call per harness**, on your account with it, so doctor
@@ -356,9 +359,9 @@ never a fault. Not printed on a home with no yard.
 | `note sources: source <name>: its last call that was answered (<call>, <when>) was answered <401 or 403>: the service did not take what <NAME> is set to. yardr source check <name> asks it again` | the last `source_call` event of the source that has a status of the service's says the service refused the credential: one that is wrong, expired or rotated away. Read from the yard's last 500 `source_call` events; a call refused before it was sent (`not_granted`, `limit`) or left without an answer (`timeout`) says nothing of the credential and is passed over. The note goes when a later call is answered otherwise; `yardr source check` logs no event, so it goes with the next `yardr call`, or under `--try` |
 | `note sources: source <name>: nobody is granted a call of it, so only the operator makes one (yardr source grant <name> read --group <group>)` | the source has calls, no group and no crew member is granted any, and no user is told through it (`notify`): it is set up and used by nobody |
 | `note sources: source <name>: its file is not read by this yardr (yardr source show <name>)` | a file a later yardr added, with a key this build does not read |
-| `note sources: tried: source <name>: its check call <call> (<METHOD> <path>) was answered <status> in <n>ms` | `--try`: the call the source's file names as `check` was made, as `yardr source check <name>` makes it, and answered with a success |
-| `note sources: tried: source <name>: its check call <call> (<METHOD> <path>) was answered <status>: the service does not take what <NAME> is set to` | `--try`: answered with no success; the part after the status is there for a 401 or a 403 |
-| `note sources: tried: source <name>: its check call <call> (<METHOD> <path>) got no answer: <why>` | `--try`: nothing came back within 30 seconds, a redirect, a refused connection |
+| `note sources: tried: source <name>: its check call <call> (<METHOD> <path> or runs <program>) was answered <status> in <n>ms` | `--try`: the call the source's file names as `check` was made, as `yardr source check <name>` makes it, and answered with a success |
+| `note sources: tried: source <name>: its check call <call> (<METHOD> <path> or runs <program>) was answered <status>: the service does not take what <NAME> is set to` | `--try`: answered with no success; the part after the status is there for a 401 or a 403 |
+| `note sources: tried: source <name>: its check call <call> (<METHOD> <path> or runs <program>) got no answer: <why>` | `--try`: nothing came back within 30 seconds, a redirect, a refused connection; for a check call that names `run`, a command that exited non-zero (the last lines of its stderr are the `<why>`), printed no object or ran out of time |
 | `note sources: not tried: source <name> has no credential to make its check call with` | `--try`: see the `no call of it can be made` line above it |
 | `note sources: not tried: source <name> holds its credential back from the host its calls go to now` | `--try`: see the `no call of it can be made: its credential was given for` line above it |
 | `note sources: not tried: the file of source <name> names no check call (check: <a read call without parameters>)` | `--try`: nothing can be sent that changes nothing |

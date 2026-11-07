@@ -1461,14 +1461,14 @@ may revoke.`,
 		Use:   "check <name>",
 		Short: "See that a source's credential is set up, make its check call, and ask its limits command",
 		Long: `Reads the source's env_file as a call would, and makes the one call its
-declaration names as check: a read call without parameters. Prints the
-status the service answered with, and fails on anything but a success.
-Where the check call names answer.select, a successful check also prints
-each selected top-level field the answer carries, one per line under the
-status line (and carries the same object under answer with --json); a
-field the answer does not carry prints no line. A
-source whose file names no check call is sent nothing: its credential is
-looked at and that is all. Where the file names a mint (credential.mint),
+declaration names as check: a read call without parameters, sent as a request
+or, where it names run, answered by its command. Prints the status the service
+answered with, and fails on anything but a success. Where the check call names
+answer.select, a successful check also prints each selected top-level field
+the answer carries, one per line under the status line (and carries the same
+object under answer with --json); a field the answer does not carry prints no
+line. A source whose file names no check call is sent nothing: its credential
+is looked at and that is all. Where the file names a mint (credential.mint),
 the token is minted first, with the source's mint_command, and the line says
 what it was minted from and how long it is good.
 
@@ -1554,6 +1554,21 @@ process for it. Nothing of the request is written anywhere.`,
 			if checkAs != "" {
 				out["as"] = checkAs
 			}
+			// Of each command the file names, whether its program is there
+			// and can be run. This runs none: the check call below runs its
+			// own, if it names run, and the limits command is run per kind.
+			var cmds []commandCheck
+			cmdsOK := true
+			var home string
+			if len(d.Commands()) > 0 {
+				cfg, err := a.config()
+				if err != nil {
+					return err
+				}
+				home = cfg.Home
+				cmds, cmdsOK = checkCommands(d, home)
+				out["commands"] = cmds
+			}
 			// said is the part on the calls, for a person; the commands and
 			// limits follow it.
 			said := func(io.Writer) {}
@@ -1579,14 +1594,14 @@ process for it. Nothing of the request is written anywhere.`,
 					return fmt.Errorf("source %s: %w", d.Name, err)
 				}
 				state, out["credential"] = mstate, mstate
-				res, err := source.Do(c.Context(), d, d.Check, nil, cred, store.ReadSecretFile)
+				res, err := source.DoCheck(c.Context(), d, cred, home, store.ReadSecretFile)
 				if err != nil {
 					return err
 				}
 				call, _ := d.Call(d.Check)
 				out["sent"], out["call"], out["status"], out["ms"], out["bytes"] = true, d.Check, res.Status, res.Took.Milliseconds(), res.Bytes
 				if !res.OK() {
-					return fmt.Errorf("source %s: the check call %s (%s)%s was answered %d%s", d.Name, d.Check, call.Request.Line(), saidAs, res.Status, source.StatusHint(res.Status, d))
+					return fmt.Errorf("source %s: the check call %s (%s)%s was answered %d%s", d.Name, d.Check, call.Line(), saidAs, res.Status, source.StatusHint(res.Status, d))
 				}
 				// The check call's selection is what setup may read: a
 				// successful check shows the selected top-level fields the
@@ -1612,26 +1627,11 @@ process for it. Nothing of the request is written anywhere.`,
 				}
 				said = func(w io.Writer) {
 					fmt.Fprintf(w, "%s: credential: %s\n", d.Name, state)
-					fmt.Fprintf(w, "%s: check call %s (%s)%s: %d in %dms, %d bytes\n", d.Name, d.Check, call.Request.Line(), saidAs, res.Status, res.Took.Milliseconds(), res.Bytes)
+					fmt.Fprintf(w, "%s: check call %s (%s)%s: %d in %dms, %d bytes\n", d.Name, d.Check, call.Line(), saidAs, res.Status, res.Took.Milliseconds(), res.Bytes)
 					for _, line := range selected {
 						fmt.Fprintf(w, "%s: %s\n", d.Name, line)
 					}
 				}
-			}
-			// Of each command the file names, whether its program is there
-			// and can be run. None is run: the limits command is run below,
-			// per kind, as it is today.
-			var cmds []commandCheck
-			cmdsOK := true
-			var home string
-			if len(d.Commands()) > 0 {
-				cfg, err := a.config()
-				if err != nil {
-					return err
-				}
-				home = cfg.Home
-				cmds, cmdsOK = checkCommands(d, home)
-				out["commands"] = cmds
 			}
 			sayCmds := func(w io.Writer) {
 				for _, cmd := range cmds {

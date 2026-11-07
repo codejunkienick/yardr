@@ -8,7 +8,9 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
@@ -28,7 +30,8 @@ import (
 // Where the pack's source names a check call, the typed account is tried
 // with it before the write, with no store write open: a refused check
 // refuses the approval with the check's words, records nothing and leaves
-// the ask open.
+// the ask open. A check call that names run is tried only where its program
+// already stands under the yard's home (setupCheckOf).
 //
 // It refuses an ask that is not on the bead, sets up no pack, or was
 // declined, taken back or approved already: a setup runs once for one ask.
@@ -70,7 +73,7 @@ func (s *Store) ApproveSetup(ctx context.Context, id string, ask uint64, option 
 		if err != nil {
 			return err
 		}
-		job, err = setupCheckOf(ask, v, values)
+		job, err = setupCheckOf(ask, v, values, s.home)
 		return err
 	}); err != nil {
 		return nil, err
@@ -321,10 +324,12 @@ func (w *wtx) approveSetup(ctx context.Context, id string, seq uint64, option in
 
 // setupCheck is the pre-store check of a setup approval that typed its
 // account: the source's declaration with the card's base in place of its
-// own, and the typed read credential the check call is made with.
+// own, the typed read credential the check call is made with, and the
+// yard's home, where a check call that names run finds its program.
 type setupCheck struct {
 	d    *source.Declaration
 	cred string
+	home string
 }
 
 // setupCheckOf is the check a validated setup approval makes before
@@ -334,10 +339,12 @@ type setupCheck struct {
 // or where the typed values do not carry the read credential the check
 // call is sent with — the missing names of a drift card alone, or a
 // mint's inputs, whose token is minted only once the pack is in the
-// yard. The declaration is the first carried source that names a
-// credential, as the account the card asks for is (setupAccount), with
-// the card's base choice in place of its own, as a check after setup is.
-func setupCheckOf(seq uint64, v *setupApproval, values map[string]string) (*setupCheck, error) {
+// yard — or where the check call names run and its program is not under
+// home yet, as on a first setup. The declaration is the first carried
+// source that names a credential, as the account the card asks for is
+// (setupAccount), with the card's base choice in place of its own, as a
+// check after setup is.
+func setupCheckOf(seq uint64, v *setupApproval, values map[string]string, home string) (*setupCheck, error) {
 	if len(values) == 0 {
 		return nil, nil
 	}
@@ -362,7 +369,17 @@ func setupCheckOf(seq uint64, v *setupApproval, values map[string]string) (*setu
 	if cred == "" {
 		return nil, nil
 	}
-	return &setupCheck{d: d.WithBase(v.was.Base), cred: cred}, nil
+	// A run check's program is carried by the pack and stands under home
+	// only once the carry has installed it, after this approval. Where it
+	// is not there nothing is run, and a first setup is not refused for it:
+	// no approval could ever install the pack. yardr source check tries the
+	// call once the pack is in.
+	if call, _ := d.Call(d.Check); len(call.Run) > 0 {
+		if _, err := os.Stat(source.Command{Argv: call.Run}.Program(home, d.Name)); errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+	}
+	return &setupCheck{d: d.WithBase(v.was.Base), cred: cred, home: home}, nil
 }
 
 // runSetupCheck makes the check call of a setup approval with its typed
@@ -376,13 +393,13 @@ func runSetupCheck(ctx context.Context, seq uint64, job *setupCheck) error {
 	if job == nil {
 		return nil
 	}
-	res, err := source.Do(ctx, job.d, job.d.Check, nil, job.cred, ReadSecretFile)
+	res, err := source.DoCheck(ctx, job.d, job.cred, job.home, ReadSecretFile)
 	call, _ := job.d.Call(job.d.Check)
 	if err != nil {
-		return fmt.Errorf("ask %d: the check call %s (%s) failed: %v. Nothing was stored", seq, job.d.Check, call.Request.Line(), err)
+		return fmt.Errorf("ask %d: the check call %s (%s) failed: %v. Nothing was stored", seq, job.d.Check, call.Line(), err)
 	}
 	if !res.OK() {
-		return fmt.Errorf("ask %d: the check call %s (%s) was answered %d%s. Nothing was stored", seq, job.d.Check, call.Request.Line(), res.Status, source.StatusHint(res.Status, job.d))
+		return fmt.Errorf("ask %d: the check call %s (%s) was answered %d%s. Nothing was stored", seq, job.d.Check, call.Line(), res.Status, source.StatusHint(res.Status, job.d))
 	}
 	return nil
 }

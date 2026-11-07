@@ -80,3 +80,17 @@ func RunCall(ctx context.Context, d *Declaration, name string, params map[string
 	}
 	return &Result{Status: http.StatusOK, Answer: answer, Bytes: len(out), Took: time.Since(start)}, nil
 }
+
+// DoCheck makes the check call of d, the one call a declaration names for
+// yardr source check, yardr doctor --try and a setup card to try, without
+// parameters: as RunCall where it names run, its program's copy found under
+// home, and as Do otherwise. Do still refuses a call that names run, so the
+// routing is this function's alone, and only for the call the declaration
+// names as its check, a read made with the credential the caller read for it.
+// readSecret is Do's.
+func DoCheck(ctx context.Context, d *Declaration, credential, home string, readSecret func(path string) (secret []byte, resolved string, err error)) (*Result, error) {
+	if c, ok := d.Call(d.Check); ok && len(c.Run) > 0 {
+		return RunCall(ctx, d, d.Check, nil, credential, home, readSecret)
+	}
+	return Do(ctx, d, d.Check, nil, credential, readSecret)
+}

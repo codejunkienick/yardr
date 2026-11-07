@@ -2656,25 +2656,37 @@ sends that text again with every change. What the skeleton's stub
 prints is this shape with fixed values.
 
 **The check a source declares.** `check` names the call `yardr source
-check <name>` makes: a read call that takes no required parameter.
-What the command does, in order: it reads the source's own env file as
-a call would and reports the credential — the names set and missing,
-and with a mint whether a mint command is set; it mints where the file
-sets the mint's names and makes the check call with the credential, and
-fails unless the service answers 2xx; where the check call names
-`answer.select` it prints each selected top-level field the answer
-carries, one per line under the status line, and with `--json` carries
-the same object under `answer`; it says of every command the file
-names beside the check call — thread's, hook's, events', and each
-call's build and run — whether its
+check <name>` makes: a read call that takes no required parameter, one
+that names `request` or one that names `run`. What the command does, in
+order: it reads the source's own env file as a call would and reports
+the credential — the names set and missing, and with a mint whether a
+mint command is set; it mints where the file sets the mint's names and
+makes the check call with the credential, and fails unless the service
+answers 2xx; where the check call names `answer.select` it prints each
+selected top-level field the answer carries, one per line under the
+status line, and with `--json` carries the same object under `answer`;
+it says of every command the file names beside the check call —
+thread's, hook's, events', and each call's build and run — whether its
 program is there and can be run, and fails when one cannot, running
-none. A file that names no check call is sent
-nothing: its credential is looked at and that is all. With `--user` the
-command tells that user through the source instead: one real test
-message. So a new source declares a `check` with a ping-like read call
-behind it, and ships every command's program in the pack; `source
-check` then passes before the first delivery, and says which program or
-name does not hold when it does not.
+none. A check call that names `run` is run, as it is the check: its
+command is run from the copy under `~/.yardr/sources/<name>/`, with the
+credential in its environment as any `run` call is, and the line says
+`runs <program>` where a request's says `GET /path`. A command that
+exits non-zero, prints no object or prints none in time fails the check
+in its own words, with the credential cut from them. A file that names
+no check call is sent nothing: its credential is looked at and that is
+all. With `--user` the command tells that user through the source
+instead: one real test message. So a new source declares a `check` with
+a ping-like read call behind it, and ships every command's program in
+the pack; `source check` then passes before the first delivery, and
+says which program or name does not hold when it does not.
+
+`yardr doctor --try` makes the same call, whichever it names, and a
+setup card tries the typed account with it before anything is stored.
+The card runs a check that names `run` only where its program stands
+under the home already, as on a setup again: the pack's programs are
+installed after the approval, so a first setup stores the account
+untried, and `yardr source check` tries it once the pack is in.
 
 **A call may build its body with a command.** Where a fixed body cannot
 say the request — ranges worked out from a read first, a message
@@ -2716,8 +2728,10 @@ event and the answer under its line are the same.
 
 A `run` call names no `request` and no `build`, and is a read (`kind: read`):
 an update is sent with a key the service writes it once by, and a command is
-handed none. It is no check, notify or hook-register call, since those
-paths make a request. `base` stays required and is what every base is,
+handed none. It is no notify call and no hook register call (its
+`register.call` or its `existing` check), since those paths make a
+request; it may be the source's `check`, which is run as above. `base`
+stays required and is what every base is,
 `https://` or `http://` to this machine: it reaches the command as
 `YARDR_SOURCE_BASE` and says nothing of what the command speaks, so a bridge
 that listens for IMAP on `127.0.0.1:1143` is written `http://127.0.0.1:1143`

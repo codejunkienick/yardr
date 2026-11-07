@@ -272,6 +272,54 @@ func TestDoRefusesARunCall(t *testing.T) {
 	}
 }
 
+// The check call is made as the call it is: one that names run is answered
+// by its command, from the copy of its program under home, handed no
+// parameter but the defaults and the credential; one that names a request
+// is sent to the base and runs nothing. Do still refuses the run call
+// (TestDoRefusesARunCall), so this is the one way a check reaches a command.
+func TestDoCheckRunsARunCheckAndSendsARequestOtherwise(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		fmt.Fprint(w, `{"pong":true}`)
+	}))
+	t.Cleanup(srv.Close)
+	text := strings.Replace(runTestDeclaration, "http://127.0.0.1:1143", srv.URL, 1)
+	runCheck := strings.Replace(text, "calls:\n", "check: search\ncalls:\n", 1)
+	runCheck = strings.Replace(runCheck, "folder: { type: string, max: 100 }", "folder: { type: string, max: 100, optional: true }", 1)
+	d, home, write := runDeclaration(t, runCheck)
+	write(`cat > run-stdin; env > run-environment; printf '{"messages":[],"private":"not selected"}'`)
+	res, err := DoCheck(context.Background(), d, "mail-password", home, noSecrets)
+	if err != nil || res.Status != http.StatusOK || string(res.Answer) != `{"messages":[]}` {
+		t.Fatalf("DoCheck of a run check = %+v, %v", res, err)
+	}
+	if in, _ := os.ReadFile(filepath.Join(home, "run-stdin")); string(in) != `{"params":{"limit":10}}` {
+		t.Fatalf("the command was handed %s", in)
+	}
+	if env, _ := os.ReadFile(filepath.Join(home, "run-environment")); !strings.Contains(string(env), "MAIL_PASSWORD=mail-password\n") {
+		t.Fatalf("the command's environment:\n%s", env)
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("%d requests were made of a check that names run", n)
+	}
+
+	// A check that is a request is sent, and its program is not run.
+	if err := os.Remove(filepath.Join(home, "run-stdin")); err != nil {
+		t.Fatal(err)
+	}
+	d, err = Parse("mail.yaml", []byte(strings.Replace(text, "calls:\n", "check: ping\ncalls:\n", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = DoCheck(context.Background(), d, "mail-password", home, noSecrets)
+	if err != nil || res.Status != http.StatusOK || string(res.Answer) != `{"pong":true}` || hits.Load() != 1 {
+		t.Fatalf("DoCheck of a request check = %+v, %v (%d requests)", res, err, hits.Load())
+	}
+	if _, err := os.Stat(filepath.Join(home, "run-stdin")); err == nil {
+		t.Fatal("the command ran for a check that names a request")
+	}
+}
+
 // A command is handed no credential that is the address (credential.url):
 // the call goes nowhere a command could go for it, and nothing it says is
 // the address either.

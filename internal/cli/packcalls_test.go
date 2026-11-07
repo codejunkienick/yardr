@@ -15,6 +15,8 @@ import (
 	"github.com/charmbracelet/huh"
 
 	"yardr.dev/yardr/internal/config"
+	"yardr.dev/yardr/internal/scripttest"
+	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/standin"
 	"yardr.dev/yardr/internal/store"
 )
@@ -605,6 +607,37 @@ func TestDoctorSources(t *testing.T) {
 	if p = part(true); len(p.Notes) != 2 || !has(p, "an update call of it cannot be made") ||
 		!has(p, "tried: source crm: its check call ping (GET /me) was answered 200 in ") {
 		t.Fatalf("--try with the read credential alone: %+v", p)
+	}
+
+	// A check call that names run is run from the copy of its program under
+	// the home with the credential in its environment, and the note says what
+	// it runs. A program that refuses is a check that got no answer, in the
+	// program's own words, the credential cut from them (part holds every
+	// note to it).
+	runText := strings.Replace(crm.Text, "check: ping", "check: look", 1) + "  look: { kind: read, run: [crm/look] }\n"
+	if _, err := a.st.PutSource(ctx, "crm.yaml", runText, "me"); err != nil {
+		t.Fatal(err)
+	}
+	look := "#!/bin/sh\nenv > look-environment\nif [ -f look-refuse ]; then echo \"login refused for $CRM_TOKEN\" >&2; exit 1; fi\nprintf '{\"who\":\"ada\"}'\n"
+	if err := source.WriteCopies(cfg.Home, "crm", []source.FileCopy{{Program: "crm/look", Data: []byte(look)}}); err != nil {
+		t.Fatal(err)
+	}
+	scripttest.Relink(t, filepath.Join(cfg.Home, "sources", "crm"))
+	before := requests()
+	if p = part(true); !has(p, "tried: source crm: its check call look (runs crm/look) was answered 200 in ") {
+		t.Fatalf("--try with a check call that names run: %+v", p)
+	}
+	if env, _ := os.ReadFile(filepath.Join(cfg.Home, "look-environment")); !strings.Contains(string(env), "CRM_TOKEN="+deskRead+"\n") {
+		t.Fatalf("the program's environment:\n%s", env)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.Home, "look-refuse"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if p = part(true); !has(p, "tried: source crm: its check call look (runs crm/look) got no answer: source crm, call look: login refused for [credential redacted]") {
+		t.Fatalf("--try with a program that refuses: %+v", p)
+	}
+	if got := requests(); got != before {
+		t.Fatalf("doctor --try sent %d requests of a check call that names run", got-before)
 	}
 }
 
