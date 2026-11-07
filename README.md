@@ -1,4 +1,6 @@
-# yardr
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/yardr-lockup-stacked-light.svg"><img alt="yardr" src="docs/assets/yardr-lockup-stacked-dark.svg" width="128"></picture></p>
+<p align="center"><a href="https://github.com/yardr-dev/yardr/actions/workflows/ci.yml"><img alt="ci status" src="https://github.com/yardr-dev/yardr/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+<a href="https://signalbox.yardr.dev"><img alt="yard status" src="https://img.shields.io/endpoint?url=https://signalbox.yardr.dev/api/badge"></a></p>
 
 Your coding agents' changes, reviewed, tested and merged.
 Why it exists: [I made fire: the rise of the 0x human](https://yardr.dev/why).
