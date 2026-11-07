@@ -69,10 +69,21 @@ func TestChannelKeyIsSignedByTheIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The junk is made in the signature's bytes so that it always differs
+	// from it. Rewriting the last two characters of its spelling to "AA"
+	// does not: that spells a last byte of zero, which a signature already
+	// ends in one time in sixteen (the byte is the top of its scalar, which
+	// is under 2^252), and then the case is the signature itself.
+	raw, err := enc.DecodeString(sig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw[0] ^= 0xff
+	junk := enc.EncodeToString(raw)
 	for name, tc := range map[string][3]string{
 		"another channel key": {store.Public(identity), ChannelPublic(other), sig},
 		"another yard":        {store.Public(newKey(t)), ChannelPublic(channel), sig},
-		"a signature of junk": {store.Public(identity), ChannelPublic(channel), sig[:len(sig)-2] + "AA"},
+		"a signature of junk": {store.Public(identity), ChannelPublic(channel), junk},
 		"no channel key":      {store.Public(identity), "not a key", sig},
 	} {
 		if err := VerifyChannelKey(tc[0], tc[1], tc[2]); !errors.Is(err, store.ErrSignature) {
