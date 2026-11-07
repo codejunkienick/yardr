@@ -178,6 +178,12 @@ jobs:
             echo "$out"
             exit 1
           fi
+      # shellcheck is not on the macOS runner's image, as it is on the ubuntu
+      # one, and the gate fails where it is missing instead of skipping, so it
+      # is installed before the depot tests. Homebrew is on the image, and
+      # needs no sudo.
+      - name: shellcheck
+        run: command -v shellcheck >/dev/null || brew install shellcheck
       - name: depot tests (.yardr/test, as for a landing)
         run: YARDR_LANDING=1 sh .yardr/test
       - name: go test

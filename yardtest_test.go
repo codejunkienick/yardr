@@ -17,6 +17,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"go.yaml.in/yaml/v3"
+
 	"yardr.dev/yardr/internal/testload"
 )
 
@@ -5749,6 +5751,52 @@ func TestYardTestBudgets(t *testing.T) {
 		}
 		if !strings.Contains(string(gateScript(t)), ci[0]) {
 			t.Errorf("%s does not run CI's command in its shellchecked step: move them together\nCI's command: %s", yardTest, ci[0])
+		}
+	})
+
+	// The macOS runner's image ships no shellcheck, as the ubuntu one does,
+	// and the gate fails where the tool is missing instead of skipping (the
+	// shellchecked step above), so a macOS job that runs the gate installs
+	// the tool first. The landing's own run is on a machine that has it, so
+	// a job without the step shows red only in CI, after the landing. The
+	// workflow is read as YAML, not as lines, so that a comment naming the
+	// install cannot stand for the step.
+	t.Run("a macOS job of CI's workflow installs shellcheck before it runs the gate", func(t *testing.T) {
+		t.Parallel()
+		workflow, err := os.ReadFile(".github/workflows/ci.yml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ci struct {
+			Jobs map[string]struct {
+				RunsOn string `yaml:"runs-on"`
+				Steps  []struct {
+					Run string `yaml:"run"`
+				} `yaml:"steps"`
+			} `yaml:"jobs"`
+		}
+		if err := yaml.Unmarshal(workflow, &ci); err != nil {
+			t.Fatal(err)
+		}
+		gated := 0
+		for name, job := range ci.Jobs {
+			if !strings.HasPrefix(job.RunsOn, "macos-") {
+				continue
+			}
+			installed := false
+			for _, step := range job.Steps {
+				installed = installed || strings.Contains(step.Run, "brew install shellcheck")
+				if !strings.Contains(step.Run, "sh "+yardTest) {
+					continue
+				}
+				gated++
+				if !installed {
+					t.Errorf("ci.yml job %s runs the gate on a macOS runner with no step before it that runs `brew install shellcheck`: the image ships none, and the gate fails where it is missing", name)
+				}
+			}
+		}
+		if gated == 0 {
+			t.Error("ci.yml has no macOS job that runs the gate: the leg this test holds to installing shellcheck is gone, or this reads none of its jobs")
 		}
 	})
 
