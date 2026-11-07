@@ -151,6 +151,108 @@ func TestPackCheckPrintsThePlan(t *testing.T) {
 	}
 }
 
+// A frame-only pack applies with no --depot, as the yard's frame: the
+// plan says whose frame the yard would use, the import records a yard
+// record, and the depot's pages resolve to it. A frame beside a depot's
+// own still takes a depot.
+func TestPackApplyFrameOnlyPackToTheYard(t *testing.T) {
+	t.Parallel()
+	a := packApp(t)
+	requireNonInteractive(t)
+	ctx := context.Background()
+
+	frame := "<!DOCTYPE html>\n<html>\n<head>\n<title>untitled</title>\n</head>\n<body>\n<h1><!--yardr:title--></h1>\n<!--yardr:content-->\n</body>\n</html>\n"
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "frames"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{"pack.yaml": "name: brand\napi: 4\nframe: frames/page.html\n", "frames/page.html": frame} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := run(t, a.packCmd(), "apply", dir, "--yes")
+	if err != nil || !strings.Contains(out, "frame: the yard would use brand's frame (was pageframe's)") || !strings.Contains(out, "applied pack brand to the yard: 1 created") {
+		t.Fatalf("applying a frame-only pack with no depot: %v\n%s", err, out)
+	}
+	installed := filepath.Join(config.At(a.cfg.Home).Pack("brand"), "frames", "page.html")
+	if text, err := os.ReadFile(installed); err != nil || string(text) != frame {
+		t.Fatalf("the yard's installed frame = %q, %v", text, err)
+	}
+	recs, err := a.st.Packs(ctx)
+	if err != nil || len(recs) != 1 || recs[0].Pack != "brand" || recs[0].Depot != "" || recs[0].Frame != installed || !recs[0].FrameActive {
+		t.Fatalf("records = %+v, %v", recs, err)
+	}
+	if f, err := pack.FrameFor(ctx, a.st, a.cfg.Home, "web"); err != nil || f.Pack != "brand" || f.Path != installed {
+		t.Fatalf("web's frame = %+v, %v: want the yard's brand", f, err)
+	}
+	// Again unchanged: the choice already stands, and nothing is written.
+	head, _ := a.st.Head(ctx)
+	if out, err = run(t, a.packCmd(), "apply", dir, "--yes"); err != nil || !strings.Contains(out, "pack brand is already applied to the yard: nothing changed\n") {
+		t.Fatalf("applying the yard's frame again: %v\n%s", err, out)
+	}
+	if evs, _ := a.st.EventsSince(ctx, head, 0); len(evs) != 1 || evs[0].Kind != "pack_unchanged" {
+		t.Fatalf("the second apply logged %+v", evs)
+	}
+
+	// The embedded default itself may be named for the yard the same way.
+	if out, err := run(t, a.packCmd(), "apply", "pageframe", "--yes"); err != nil || !strings.Contains(out, "frame: the yard would use pageframe's frame (was brand's)") {
+		t.Fatalf("applying pageframe with no depot: %v\n%s", err, out)
+	}
+	if f, err := pack.FrameFor(ctx, a.st, a.cfg.Home, "web"); err != nil || f.Pack != "pageframe" || f.Path == "" {
+		t.Fatalf("web's frame = %+v, %v: want the installed pageframe the yard chose", f, err)
+	}
+
+	// A frame beside a depot's own refuses to go to the yard.
+	busy := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(busy, "frames"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "name: busy\napi: 4\nframe: frames/page.html\nflows:\n  default:\n    stages:\n      new: { group: people, outcomes: { done: done } }\n      done: { end: true }\ngroups:\n  people: { people: true }\n"
+	for name, text := range map[string]string{"pack.yaml": yaml, "frames/page.html": frame} {
+		if err := os.WriteFile(filepath.Join(busy, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := run(t, a.packCmd(), "apply", busy, "--yes"); err == nil || !strings.Contains(err.Error(), `"depot" not set`) {
+		t.Fatalf("applying a frame beside flows with no depot: %v, want the depot flag refused", err)
+	}
+
+	// A frame beside source mappings is not frame-only either, and a depot-
+	// kind frame pack cannot be applied to the yard where it would reach every
+	// depot regardless of that kind.
+	for _, c := range []struct {
+		name, yaml string
+	}{
+		{"source mappings", `name: mixed
+api: 4
+frame: frames/page.html
+sources:
+  github:
+    makes:
+      - { where: "event=workflow_run conclusion=failure head_branch=main", bead: { type: task, stage: new } }
+    says:
+      - { where: "event=workflow_run conclusion=success", outcome: done }
+`},
+		{"depot kind", "name: git-frame\napi: 4\nkind: git\nframe: frames/page.html\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			mixed := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(mixed, "frames"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for name, text := range map[string]string{"pack.yaml": c.yaml, "frames/page.html": frame} {
+				if err := os.WriteFile(filepath.Join(mixed, name), []byte(text), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := run(t, a.packCmd(), "apply", mixed, "--yes"); err == nil || !strings.Contains(err.Error(), `"depot" not set`) {
+				t.Fatalf("applying a frame beside %s with no depot: %v, want the depot flag refused", c.name, err)
+			}
+		})
+	}
+}
+
 // An invalid pack exits non-zero, each mistake with file, line and key,
 // and the store is not even asked.
 func TestPackCheckInvalidPackFails(t *testing.T) {

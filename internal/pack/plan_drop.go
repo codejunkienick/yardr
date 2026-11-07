@@ -204,7 +204,25 @@ func (b *planner) gone(po store.PackObject) (*Object, error) {
 			was := b.installedSums(po.Name)
 			edited = len(was) > 0 && !slices.Contains(was, sum(have))
 		}
-		return &Object{Kind: po.Kind, Name: filepath.ToSlash(rel), File: file, Edited: edited}, nil
+		o := &Object{Kind: po.Kind, Name: filepath.ToSlash(rel), File: file, Edited: edited}
+		// A dropped frame file is one installed copy shared by every
+		// scope: while another scope's active record still names this
+		// path, a prune keeps the file and the plan names the scopes that
+		// hold it, exactly as a group or a source another import names is
+		// held. The importing scope still falls back at once, since
+		// holding the bytes is not holding the choice; only the last
+		// active scope's drop lets the file go.
+		var holders []string
+		for _, r := range b.all {
+			if r.FrameActive && r.Frame == po.Name && !(r.Pack == b.p.Name && r.Depot == b.o.Depot) && !slices.Contains(holders, inDepot(r.Depot)) {
+				holders = append(holders, inDepot(r.Depot))
+			}
+		}
+		if len(holders) > 0 {
+			slices.Sort(holders)
+			o.Held = "still the active frame in " + strings.Join(holders, ", ")
+		}
+		return o, nil
 	case "group":
 		if _, err := b.st.GetGroup(b.ctx, po.Name); errors.Is(err, store.ErrNotFound) {
 			return nil, nil

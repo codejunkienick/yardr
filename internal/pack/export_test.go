@@ -146,9 +146,35 @@ func TestExportRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A pack that brings a page frame, imported beside the starter: an export
-	// cannot yet write the frame a depot uses, so it says it leaves it.
-	brand := framePack(t, "name: brand\napi: 4\nframe: frames/page.html\n", pageFrame)
+	// With no frame pack chosen, export leaves the embedded default named
+	// in Left. Choosing a frame in the yard makes that the depot's effective
+	// frame and gives the export a file to carry.
+	ex, defaultDir := export(t, st, "web", o.Home, "mine-default")
+	if p := load(t, defaultDir); p.Frame != nil {
+		t.Fatalf("the export of the default frame carries a file: %+v", p.Frame)
+	}
+	if !leftHas(ex, "frame: pageframe: not in the pack", "default page frame", "falls back to it") {
+		t.Errorf("left out lacks the default frame:\n%s", strings.Join(ex.Left, "\n"))
+	}
+	if _, err := os.Stat(filepath.Join(defaultDir, "frames")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the export of the default wrote a frame: %v", err)
+	}
+	apply(t, st, build(t, st, load(t, framedDir(t, "brand-yard")), pack.Options{Home: o.Home}), nil)
+	ex, yardDir := export(t, st, "web", o.Home, "mine-yard")
+	if p := load(t, yardDir); p.Frame == nil || p.Frame.File != "frames/page.html" || string(mustRead(t, filepath.Join(yardDir, "frames", "page.html"))) != frameVariant("brand-yard") {
+		t.Fatalf("the exported pack's frame = %+v, want the yard's brand-yard frame written", p.Frame)
+	}
+	if leftHas(ex, "frame: pageframe: not in the pack") {
+		t.Errorf("left out names the default the depot no longer uses:\n%s", strings.Join(ex.Left, "\n"))
+	}
+
+	// A pack that brings a page frame, imported beside the starter: it is
+	// the depot's active frame. Its source path collides with the starter's
+	// exported role, so export must keep the role and give the frame a path.
+	brand := writePack(t, map[string]string{
+		"pack.yaml":         "name: brand\napi: 4\nframe: roles/builders.md\n",
+		"roles/builders.md": pageFrame,
+	})
 	applyAs(t, st, build(t, st, load(t, brand), o), nil, "ann")
 
 	ex, d1 := export(t, st, "web", o.Home, "mine")
@@ -206,11 +232,17 @@ func TestExportRoundTrip(t *testing.T) {
 	if !leftHas(ex, "group web-builders", "kind, model") || !leftHas(ex, "group backlog", "members") {
 		t.Errorf("left out lacks what the groups keep in the yard:\n%s", strings.Join(ex.Left, "\n"))
 	}
-	if !leftHas(ex, "frame: brand: not in the pack", "frames/page.html") {
-		t.Errorf("left out lacks the page frame of pack brand:\n%s", strings.Join(ex.Left, "\n"))
+	if p.Frame == nil || *p.Frame != (pack.FrameFile{File: "frames/page.html", Bytes: len(pageFrame)}) || p.API != 4 {
+		t.Errorf("the exported pack's frame = %+v, api %d: want brand's frame under api 4", p.Frame, p.API)
 	}
-	if _, err := os.Stat(filepath.Join(d1, "frames")); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("the export wrote a frame: %v", err)
+	if leftHas(ex, "frame: brand: not in the pack") {
+		t.Errorf("left out names the frame the export wrote:\n%s", strings.Join(ex.Left, "\n"))
+	}
+	if text, err := os.ReadFile(filepath.Join(d1, "frames", "page.html")); err != nil || string(text) != pageFrame {
+		t.Errorf("the exported frame = %q, %v: want the installed frame byte for byte", text, err)
+	}
+	if !strings.Contains(packYAML, "api: 4") || !strings.Contains(packYAML, "frame: frames/page.html") {
+		t.Errorf("pack.yaml names no frame under api 4:\n%s", packYAML)
 	}
 	if !leftHas(ex, "roles/testers.md:3: names crew member yardmaster", "plain text", "brings no crew member of that name") {
 		t.Errorf("left out lacks the crew member a role names:\n%s", strings.Join(ex.Left, "\n"))

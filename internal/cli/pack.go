@@ -747,9 +747,9 @@ func (a *app) planImport(w, warn io.Writer, ctx context.Context, cmd, arg string
 		return nil, err
 	}
 	// An import goes into a depot and is recorded there, so apply takes
-	// --depot for every pack but kind source; check alone plans a
-	// yard-wide pack without one.
-	if fits == nil && f.opts.Depot == "" && p.Kind != pack.KindSource {
+	// --depot for every pack but kind source and a frame-only pack, which
+	// is the yard's frame; check alone plans a yard-wide pack without one.
+	if fits == nil && f.opts.Depot == "" && p.Kind != pack.KindSource && !p.FrameOnly() {
 		return nil, errors.New(`required flag(s) "depot" not set`)
 	}
 	if fits != nil {
@@ -1520,7 +1520,7 @@ func printResult(w io.Writer, plan *pack.Plan, res *pack.Result, pruning bool, a
 		}
 		fmt.Fprintln(w)
 	} else {
-		fmt.Fprintf(w, "pack %s is already applied to %s: nothing changed\n", res.Pack, inDepot(res.Depot))
+		fmt.Fprintln(w, appliedLine(plan, res))
 	}
 	for _, s := range res.Pruned {
 		fmt.Fprintln(w, "  pruned  "+s)

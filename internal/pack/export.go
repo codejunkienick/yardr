@@ -950,7 +950,7 @@ func add(m *yaml.Node, key string, v *yaml.Node) { m.Content = append(m.Content,
 // stage and a group on one line each, in the flow's order.
 func (e *exporter) yaml() ([]byte, error) {
 	root := mapping(false)
-	add(root, "name", str(e.p.Name))
+	e.head(root)
 	if e.p.Kind != "" {
 		add(root, "kind", str(e.p.Kind))
 	}

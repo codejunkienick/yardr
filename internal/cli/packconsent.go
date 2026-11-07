@@ -29,6 +29,17 @@ func printPlanConsent(w io.Writer, p *pack.Plan) {
 	if p.Frame != nil {
 		fmt.Fprintf(w, "\nframe %s (%s bytes): copied into each new page made under this pack; its script runs in a reader's browser only when the reader chooses run\n", p.Frame.File, grouped(p.Frame.Bytes))
 	}
+	// Whose frame the scope would use is the choice an apply makes, settled
+	// from its active record: said here, before anything is written, and an
+	// apply that only moves the choice shows this line as its change. The
+	// scopes that share the one installed copy are named with it, where the
+	// plan changes the frame's bytes for them too.
+	if p.FrameUse != "" {
+		fmt.Fprintf(w, "\n%s\n", p.FrameUse)
+	}
+	if len(p.FrameShared) > 0 {
+		fmt.Fprintf(w, "\nframe: %s use the same installed copy of %s's frame: their new pages take this change at once, and pages already made keep theirs until a rebuild\n", strings.Join(p.FrameShared, ", "), p.Pack)
+	}
 }
 
 // grouped is n in decimal with a comma before each three digits: 11842 is

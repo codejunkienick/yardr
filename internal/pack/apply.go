@@ -118,6 +118,11 @@ type Result struct {
 	// Recorded says the yard's record of the import was written; false when
 	// nothing changed.
 	Recorded bool `json:"recorded"`
+	// FrameMoved says the import moved its scope's frame choice to this
+	// pack (the plan's FrameUse), though it may have written no file: an
+	// unchanged re-apply of a displaced frame pack is pack_applied with
+	// Wrote false, and this is how the result says so.
+	FrameMoved bool `json:"frame_moved,omitempty"`
 }
 
 // Grant is a crew member and the sources an import let it open threads in.
@@ -280,6 +285,13 @@ func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (*Result,
 	pruned := prune(ctx, st, p, o, res)
 
 	rec := store.PackImport{Pack: p.Pack, Depot: p.Depot, Source: p.Dir, Auth: p.Auth, Flow: p.Flow, Setup: p.SetupFile != "", DepotRoles: p.DepotRoles, Groups: p.Groups, Crew: p.Crew, SourceBase: o.SourceBase, ApprovedBead: o.ApprovedBead, ApprovedAsk: o.ApprovedAsk}
+	// The frame the import brought, and its choice for the scope: a plan
+	// carrying a frame makes its record the scope's active one, which
+	// RecordPack writes by clearing the scope's others; a plan with none
+	// is built inactive and leaves the scope's choice untouched.
+	if p.Frame != nil {
+		rec.Frame, rec.FrameActive = p.installedFrame(), true
+	}
 	// A pack in no directory (one yardr embeds) has no commit of its own:
 	// its source names the build it came in.
 	if filepath.IsAbs(p.Dir) {
@@ -298,6 +310,7 @@ func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (*Result,
 	if res.Recorded, err = st.RecordPack(ctx, rec, res.Wrote(), o.Actor); err != nil {
 		return res, fmt.Errorf("recording the import: %w (the import itself is done; applying again records it)", err)
 	}
+	res.FrameMoved = p.FrameUse != "" && res.Recorded
 	if len(res.PruneErrors) > 0 {
 		return res, fmt.Errorf("the import is applied and recorded, but not everything dropped could be removed: %s", strings.Join(res.PruneErrors, "; "))
 	}

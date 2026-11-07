@@ -9,7 +9,10 @@ import (
 	"slices"
 	"strings"
 
+	"go.yaml.in/yaml/v3"
+
 	"yardr.dev/yardr/internal/config"
+	"yardr.dev/yardr/packs"
 )
 
 // MaxFrame bounds a pack's page frame. It is copied into every page made
@@ -138,14 +141,39 @@ func (p *Pack) pathUses(rel string) []string {
 	return uses
 }
 
-// frames lists, for each pack the depot imported that brought a page frame,
-// the frame as left in the yard: an export does not write one, because which
-// frame a depot uses is not yet recorded for it to write. It would be
-// dropped unsaid, which Left is there to prevent. The record of an import
-// does not say which of its files is the frame, so it is the installed file
-// that holds a marker: one that only quotes a marker costs a line too many,
-// and a frame left out would cost the line it needs.
+// frames writes the depot's effective frame into the pack, as frameFor
+// resolves it for the depot: where the frame came from a pack, its file is
+// copied as installed and the exported pack names it (head writes the key);
+// where it is the embedded default, no pack file carries it, so it is listed
+// in Left, which is there to keep a drop from going unsaid. A frame a depot
+// imported but does not use (another pack is its active frame, or none is)
+// is likewise listed, not carried: an export carries the one frame the depot
+// uses. The record now names its import's frame (PackImport.Frame), so no
+// marker scan is needed for a frame an export writes; one is still used to
+// name a frame it leaves, since a record from before the field says only
+// which files its import brought, and a file that only quotes a marker costs
+// a line too many where a frame left out would cost the line it needs.
 func (e *exporter) frames() error {
+	eff, err := frameFor(e.ctx, e.st, e.o.Home, e.depot.Name)
+	if err != nil {
+		return err
+	}
+	if eff.Path != "" {
+		if rel, err := filepath.Rel(config.At(e.o.Home).Pack(eff.Pack), eff.Path); err == nil && filepath.IsLocal(rel) {
+			rel = filepath.ToSlash(rel)
+			// Export writes its own roles, scripts and stage files under
+			// their conventional directories. A valid frame may use one of
+			// those paths in its source pack, so give the exported frame its
+			// own path instead of overwriting another exported file.
+			if _, exists := e.files[rel]; exists {
+				rel = "frames/page.html"
+			}
+			e.p.Frame = &FrameFile{File: rel, Bytes: len(eff.Bytes)}
+			e.files[rel] = exportFile{text: eff.Bytes, mode: 0o644, from: eff.Path}
+		}
+	} else {
+		e.left("frame: %s: not in the pack: depot %s uses the default page frame of pack %s, which is read from the binary and stands in no pack file: an import of this pack falls back to it", packs.PageFrame, e.depot.Name, packs.PageFrame)
+	}
 	all, err := e.st.Packs(e.ctx)
 	if err != nil {
 		return err
@@ -157,13 +185,25 @@ func (e *exporter) frames() error {
 		dir := config.At(e.o.Home).Pack(rec.Pack)
 		for _, po := range rec.Objects {
 			rel, err := filepath.Rel(dir, po.Name)
-			if po.Kind != "file" || err != nil || !filepath.IsLocal(rel) {
+			if po.Kind != "file" || err != nil || !filepath.IsLocal(rel) || po.Name == eff.Path {
 				continue
 			}
 			if text, err := os.ReadFile(po.Name); err == nil && (bytes.Contains(text, []byte(titleMarker)) || bytes.Contains(text, []byte(contentMarker))) {
-				e.left("frame: %s: not in the pack: pack %s brought the page frame %s, which an export does not carry: it cannot yet write the frame a depot uses as its own", rec.Pack, rec.Pack, filepath.ToSlash(rel))
+				e.left("frame: %s: not in the pack: pack %s brought the page frame %s, which an export does not carry: it is not the frame depot %s uses, and an export carries only that one", rec.Pack, rec.Pack, filepath.ToSlash(rel), e.depot.Name)
 			}
 		}
 	}
 	return nil
+}
+
+// head writes the pack's name into root, its pack.yaml node, and with it the
+// frame the depot uses where frames found one in a pack: the frame key and
+// the api number that first carries it, as a shipped pack with a frame says
+// them. A pack without a frame gets the name alone, byte for byte as before.
+func (e *exporter) head(root *yaml.Node) {
+	add(root, "name", str(e.p.Name))
+	if e.p.Frame != nil {
+		add(root, "api", scalar("!!int", "4"))
+		add(root, "frame", str(e.p.Frame.File))
+	}
 }

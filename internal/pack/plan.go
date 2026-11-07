@@ -96,6 +96,20 @@ type Plan struct {
 	// a reader's browser runs it, so check says it on a line of its own, after
 	// the digest that pins it. Absent for a pack without one.
 	Frame *FrameFile `json:"frame,omitempty"`
+	// FrameUse is the plan's frame line where applying the pack would
+	// move its scope's frame choice: whose frame the depot, or the yard
+	// for a yard-wide plan, would use, and whose it uses now (pageframe,
+	// the embedded default, where no import is the choice). It is settled
+	// from the scope's active record before anything is written, never
+	// from the newest import's time, and empty where the pack is already
+	// the scope's choice or carries no frame.
+	FrameUse string `json:"frame_use,omitempty"`
+	// FrameShared names the other scopes (each as inDepot says it) whose
+	// active record names this pack, where the plan changes the frame's
+	// bytes: one installed copy serves them all, so their new pages take
+	// the changed frame at once, and the plan names the reach before
+	// anything is written.
+	FrameShared []string `json:"frame_shared,omitempty"`
 	// Kind is the kind of depot the pack says it is for, "" when it says
 	// none.
 	Kind  string `json:"kind,omitempty"`
@@ -668,8 +682,9 @@ type planner struct {
 
 // YardWide reports whether the pack names nothing of a depot's own: no
 // flows, groups or crew, only sources lines and declared sources for the
-// yard's hooks. check plans such a pack without --depot, its lines waiting
-// for the depot; anything more is planned for a depot.
+// yard's hooks, or a page frame alone (FrameOnly). check plans such a
+// pack without --depot, its lines waiting for the depot; anything more
+// is planned for a depot.
 func (p *Pack) YardWide() bool {
 	return len(p.Flows) == 0 && len(p.Groups) == 0 && len(p.Crew) == 0
 }
@@ -736,6 +751,7 @@ func Build(ctx context.Context, st store.API, p *Pack, o Options) (*Plan, error)
 			return nil, err
 		}
 	}
+	b.frameUse()
 	if b.plan.Digest, err = p.digest(); err != nil {
 		return nil, err
 	}
@@ -804,6 +820,9 @@ func buildWithoutDepot(ctx context.Context, st store.API, p *Pack, o Options) (*
 	if b.all, err = st.Packs(ctx); err != nil {
 		return nil, err
 	}
+	if i := slices.IndexFunc(b.all, func(r store.PackImport) bool { return r.Pack == p.Name && r.Depot == "" }); i >= 0 {
+		b.rec = &b.all[i]
+	}
 	for name := range o.Crew {
 		return nil, fmt.Errorf("--crew %s=%s: the pack has no crew member %s", name, o.Crew[name], name)
 	}
@@ -811,6 +830,7 @@ func buildWithoutDepot(ctx context.Context, st store.API, p *Pack, o Options) (*
 		return nil, fmt.Errorf("--group %s=%s: the pack has no group %s", name, o.Groups[name], name)
 	}
 	for _, step := range []func() error{
+		b.frameObject,
 		b.maps,
 		b.optional,
 		b.declared,
@@ -821,6 +841,7 @@ func buildWithoutDepot(ctx context.Context, st store.API, p *Pack, o Options) (*
 			return nil, err
 		}
 	}
+	b.frameUse()
 	if b.plan.Digest, err = p.digest(); err != nil {
 		return nil, err
 	}

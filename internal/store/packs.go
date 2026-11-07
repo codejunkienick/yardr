@@ -41,6 +41,20 @@ type PackImport struct {
 	Auth string `json:"auth,omitempty"`
 	// Flow is the pack's flow the depot follows, by the pack's name for it.
 	Flow string `json:"flow,omitempty"`
+	// Frame is the absolute path of the installed page frame the import
+	// brought (<home>/packs/<pack>/<the pack's frame>), "" for an import
+	// whose pack names none. The file is the one copy every scope that
+	// chose this pack shares, and a hand edit of it stands as it is until
+	// the next import. A record written before the field reads back with
+	// it empty, which is the truth about that import.
+	Frame string `json:"frame,omitempty"`
+	// FrameActive says this import's frame is the chosen one for its
+	// scope (its depot, or the yard where Depot is empty). At most one
+	// record per scope is active: RecordPack clears the flag on the
+	// scope's other records in the write that sets it, and resolution
+	// (pack.FrameFor) reads the flag, never At. A record that carries no
+	// frame is never active.
+	FrameActive bool `json:"frame_active,omitempty"`
 	// Setup says the pack carried setup notes, its author's words about
 	// what a setup takes (pack.yaml's setup): a crew member's prime names
 	// them by the command that prints them (yardr pack show <pack>).
@@ -235,6 +249,34 @@ func (s *Store) RecordPack(ctx context.Context, rec PackImport, changed bool, ac
 		}
 		if had && !changed && old.same(rec) {
 			return w.event("", "pack_unchanged", actor, data)
+		}
+		// The frame choice is written, never inferred from At: an import
+		// whose frame is its scope's chosen one clears the flag on the
+		// scope's every other record in this same write, so at most one
+		// record per scope is active. A record with no frame clears
+		// nothing of another pack's: applying one never changes a scope's
+		// look, and this pack's own dropped frame falls back through its
+		// own record below, which is written inactive.
+		if rec.FrameActive {
+			var displaced []string
+			if err := each(w.Tx, bPacks, "", func(k []byte, p *PackImport) error {
+				if p.Depot == rec.Depot && p.FrameActive && string(k) != key {
+					displaced = append(displaced, string(k))
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			for _, k := range displaced {
+				var other PackImport
+				if _, err := get(w.Tx, bPacks, k, &other); err != nil {
+					return err
+				}
+				other.FrameActive = false
+				if err := put(w.Tx, bPacks, k, other); err != nil {
+					return err
+				}
+			}
 		}
 		rec.At, rec.By = now(), actor
 		if err := put(w.Tx, bPacks, key, rec); err != nil {

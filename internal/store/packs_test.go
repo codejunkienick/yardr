@@ -95,10 +95,80 @@ func TestRecordPack(t *testing.T) {
 		t.Fatalf("event = %+v", e)
 	}
 
+	// The frame choice is written, never read from the time: an active
+	// record clears the flag on its scope's other records in the same
+	// write, another scope's choice is untouched, and a record with no
+	// frame leaves the choice as it stands.
+	brandA := store.PackImport{Pack: "brand-a", Depot: "web", Source: "/packs/brand-a", Frame: "/home/packs/brand-a/frames/page.html", FrameActive: true}
+	brandB := store.PackImport{Pack: "brand-b", Depot: "web", Source: "/packs/brand-b", Frame: "/home/packs/brand-b/frames/page.html", FrameActive: true}
+	yardFrame := store.PackImport{Pack: "brand-yard", Source: "/packs/brand-yard", Frame: "/home/packs/brand-yard/frames/page.html", FrameActive: true}
+	frames := func() map[string]bool {
+		t.Helper()
+		got, err := st.Packs(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]bool{}
+		for _, r := range got {
+			out[r.Depot+"/"+r.Pack] = r.FrameActive
+		}
+		return out
+	}
+	if _, err := st.RecordPack(ctx, yardFrame, true, "ann"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.RecordPack(ctx, brandA, true, "ann"); err != nil {
+		t.Fatal(err)
+	}
+	if got := frames(); !got["/brand-yard"] || !got["web/brand-a"] {
+		t.Fatalf("active frames = %v, want the yard's and web's both", got)
+	}
+	if _, err := st.RecordPack(ctx, brandB, true, "ann"); err != nil {
+		t.Fatal(err)
+	}
+	if got := frames(); got["web/brand-a"] || !got["web/brand-b"] || !got["/brand-yard"] {
+		t.Fatalf("active frames after brand-b = %v, want brand-b in web and the yard's untouched", got)
+	}
+	// A pack with no frame, applied into web: the choice stands.
+	if _, err := st.RecordPack(ctx, store.PackImport{Pack: "plain", Depot: "web", Source: "/packs/plain"}, true, "ann"); err != nil {
+		t.Fatal(err)
+	}
+	if got := frames(); !got["web/brand-b"] {
+		t.Fatalf("active frames after a frame-less pack = %v, want brand-b still", got)
+	}
+	// Re-recording the displaced pack, changed by nothing but the flag
+	// the store cleared: it is written, as pack_applied, and the choice
+	// moves back. The same record again is pack_unchanged.
+	if wrote, err := st.RecordPack(ctx, brandA, false, "bob"); err != nil || !wrote {
+		t.Fatalf("the displaced pack again: %v, %v", wrote, err)
+	}
+	if e := last(); e.Kind != "pack_applied" {
+		t.Fatalf("event = %+v, want pack_applied", e)
+	}
+	if got := frames(); !got["web/brand-a"] || got["web/brand-b"] {
+		t.Fatalf("active frames after brand-a again = %v, want brand-a in web", got)
+	}
+	if wrote, err := st.RecordPack(ctx, brandA, false, "bob"); err != nil || wrote {
+		t.Fatalf("the active pack again: %v, %v", wrote, err)
+	}
+	if e := last(); e.Kind != "pack_unchanged" {
+		t.Fatalf("event = %+v, want pack_unchanged", e)
+	}
+	// brand-a dropped its frame: its own record falls back, and no other
+	// pack of the scope is promoted.
+	dropped := brandA
+	dropped.Frame, dropped.FrameActive = "", false
+	if _, err := st.RecordPack(ctx, dropped, true, "ann"); err != nil {
+		t.Fatal(err)
+	}
+	if got := frames(); got["web/brand-a"] || got["web/brand-b"] || !got["/brand-yard"] {
+		t.Fatalf("active frames after the drop = %v, want none in web and the yard's still", got)
+	}
+
 	if _, err := st.DeleteDepot(ctx, "web", "me"); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := st.Packs(ctx); len(got) != 0 {
+	if got, _ := st.Packs(ctx); len(got) != 1 || got[0].Pack != "brand-yard" {
 		t.Fatalf("records after the depot was removed = %+v", got)
 	}
 }
