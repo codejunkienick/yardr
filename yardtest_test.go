@@ -900,22 +900,23 @@ func TestYardTestSelects(t *testing.T) {
 		{"a testdata file under internal/ with no row of its own", []string{"internal/dispatch/testdata/probe.json"}, []string{
 			pre + "internal/dispatch/testdata/probe.json is read by no known package: testing everything"}},
 		// The root package's scans read every .go file and every import, and
-		// none of these six directories (test helpers and generators) is a
+		// none of these seven directories (test helpers and generators) is a
 		// dependency of the root package or its tests, so no import selects
 		// it. Each row prints a line of its own, so one dropped or pointed
-		// elsewhere fails here, though the other five still select the root
+		// elsewhere fails here, though the other six still select the root
 		// package.
 		{"a test helper or a generator under internal/", []string{
-			"internal/scripttest/p.go", "internal/standin/p.go", "internal/storetest/p.go",
+			"internal/previewtest/p.go", "internal/scripttest/p.go", "internal/standin/p.go", "internal/storetest/p.go",
 			"internal/rpc/gen/p.go", "internal/rpc/clientgen/p.go", "internal/flowdraw/gen/p.go"}, []string{
-			pre + "internal/flowdraw/gen/p.go and 5 more under internal/ changed: read by the tests of internal/rpc",
+			pre + "internal/flowdraw/gen/p.go and 6 more under internal/ changed: read by the tests of internal/rpc",
+			pre + "internal/previewtest/p.go changed: read by the tests of .",
 			pre + "internal/scripttest/p.go changed: read by the tests of .",
 			pre + "internal/standin/p.go changed: read by the tests of .",
 			pre + "internal/storetest/p.go changed: read by the tests of .",
 			pre + "internal/rpc/gen/p.go changed: read by the tests of .",
 			pre + "internal/rpc/clientgen/p.go changed: read by the tests of .",
 			pre + "internal/flowdraw/gen/p.go changed: read by the tests of .",
-			testedNoRace + " m.test/m m.test/m/internal/flowdraw/gen m.test/m/internal/rpc m.test/m/internal/rpc/clientgen m.test/m/internal/rpc/gen m.test/m/internal/scripttest m.test/m/internal/standin m.test/m/internal/storetest"}},
+			testedNoRace + " m.test/m m.test/m/internal/flowdraw/gen m.test/m/internal/previewtest m.test/m/internal/rpc m.test/m/internal/rpc/clientgen m.test/m/internal/rpc/gen m.test/m/internal/scripttest m.test/m/internal/standin m.test/m/internal/storetest"}},
 		{"a file no row knows", []string{"contrib/x.txt", "docs/web.md"}, []string{
 			pre + "contrib/x.txt is read by no known package: testing everything"}},
 		{"three files no row knows", []string{"contrib/x.txt", "alone/y.txt", "z"}, []string{

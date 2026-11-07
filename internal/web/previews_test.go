@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"yardr.dev/yardr/internal/preview"
+	"yardr.dev/yardr/internal/previewtest"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
 	"yardr.dev/yardr/internal/web"
@@ -37,8 +38,43 @@ func previewFixture(t *testing.T) *fixture {
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	return &fixture{t: t, st: st, own: own, ts: ts, home: home}
+	f := &fixture{t: t, st: st, own: own, ts: ts, home: home}
+	// A wait that times out says what it waited for; the cards say why it
+	// never came (a preview the supervisor gave up on, and what it logged).
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Log(f.cards())
+		}
+	})
+	return f
 }
+
+// cards is what the registry shows of each preview and what it logged last.
+func (f *fixture) cards() string {
+	all, err := f.own.Previews(context.Background())
+	if err != nil {
+		return "the registry is not read: " + err.Error()
+	}
+	if len(all) == 0 {
+		return "no preview in the registry"
+	}
+	var b strings.Builder
+	for _, p := range all {
+		fmt.Fprintf(&b, "preview %s: %s %q, %d restarts\n", p.App, p.State, p.StateDetail, p.RestartCount)
+		lines, _ := preview.LogTail(filepath.Join(f.home, "previews", p.App+".log"), 20)
+		for _, l := range lines {
+			fmt.Fprintf(&b, "    %s\n", l)
+		}
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// bindWait is how long the supervisor of these tests lets a preview take to
+// listen: its own default, named here so that the waits are written from it.
+// The app listens at once, so it is a fuse against a start that never comes,
+// and a wait for the app to answer is no longer than it: the supervisor has
+// given the preview up by then, and the card says so.
+const bindWait = 10 * time.Second
 
 // supervise runs the yard's supervisor against the fixture's store, with
 // shortened clocks as the supervisor's own tests run it.
@@ -46,7 +82,7 @@ func (f *fixture) supervise(t *testing.T) *preview.Supervisor {
 	t.Helper()
 	sup := preview.New(f.own, f.home, nil)
 	sup.Poll = 10 * time.Millisecond
-	sup.BindWait = 5 * time.Second
+	sup.BindWait = bindWait
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go sup.Run(ctx)
@@ -65,7 +101,12 @@ func previewPort(t *testing.T) int {
 
 func waitPreview(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	waitPreviewWithin(t, what, 15*time.Second, cond)
+}
+
+func waitPreviewWithin(t *testing.T, what string, within time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(within)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
@@ -93,16 +134,6 @@ func gitDepot(t *testing.T) (dir, head string) {
 	return dir, strings.TrimSpace(string(out))
 }
 
-func python3Available() bool {
-	for _, p := range []string{"/usr/local/bin/python3", "/usr/bin/python3", "/opt/homebrew/bin/python3"} {
-		if _, err := os.Stat(p); err == nil {
-			return true
-		}
-	}
-	_, err := exec.LookPath("python3")
-	return err == nil
-}
-
 // A pending proposal appears as one card, in JSON and HTML, showing the
 // start command in full, the directory, the port, the depot commit and
 // dirty mark, and the proposer. Approving it starts the preview through
@@ -110,20 +141,16 @@ func python3Available() bool {
 // started. A view that reads only draws no button and takes no write.
 func TestPreviewsPage(t *testing.T) {
 	t.Parallel()
-	if !python3Available() {
-		t.Skip("python3 not available for the stand-in app")
-	}
 	f := previewFixture(t)
 	ctx := context.Background()
 	dir, head := gitDepot(t)
 	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	const command = "python3 -m http.server PORT --bind 127.0.0.1"
 	port := previewPort(t)
+	command := previewtest.App("127.0.0.1", port)
 	if _, err := f.st.ProposePreview(ctx, store.NewPreview{
-		App: "demo", Command: strings.Replace(command, "PORT", fmt.Sprint(port), 1),
-		Dir: dir, Port: port,
+		App: "demo", Command: command, Dir: dir, Port: port,
 	}, "builder"); err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +166,7 @@ func TestPreviewsPage(t *testing.T) {
 		t.Fatalf("previews = %+v", got)
 	}
 	card := got.Previews[0]
-	if card.App != "demo" || card.Command != strings.Replace(command, "PORT", fmt.Sprint(port), 1) ||
+	if card.App != "demo" || card.Command != command ||
 		card.Dir != dir || card.Port != port || card.Commit != head || !card.Dirty ||
 		card.Proposer != "builder" || card.State != store.PreviewPending || card.Head != head || card.Stale {
 		t.Fatalf("pending card = %+v", card)
@@ -148,8 +175,10 @@ func TestPreviewsPage(t *testing.T) {
 		t.Fatalf("previews lifetime = %q/%q head %d", got.Idle, got.MaxAge, got.Head)
 	}
 	page := acting.get("/previews").body
+	// The page draws the command escaped: the same text, unless the path of
+	// the test binary in it holds a character the page escapes.
 	for _, want := range []string{
-		card.Command, dir, fmt.Sprint(port), head[:12], "(dirty)", "builder",
+		template.HTMLEscapeString(card.Command), dir, fmt.Sprint(port), head[:12], "(dirty)", "builder",
 		"idle 4h · age 7d", "/preview/demo/", `name="action" value="approve">Approve`,
 		`name="action" value="refuse">Refuse`,
 	} {
@@ -184,8 +213,8 @@ func TestPreviewsPage(t *testing.T) {
 		t.Error("the refused preview started")
 	}
 	// One request through the app, so its log has a line to show: the
-	// stand-in buffers its startup line, and logs each request.
-	waitPreview(t, "app answering", func() bool {
+	// stand-in logs each request, and nothing before the first.
+	waitPreviewWithin(t, "app answering", bindWait, func() bool {
 		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/", port))
 		if err != nil {
 			return false
@@ -238,7 +267,7 @@ func TestPreviewsPage(t *testing.T) {
 			t.Errorf("the read-only card shows the approval's command: %+v", c.Approval)
 		}
 	}
-	if body := f.get("/previews").body; strings.Contains(body, card.Command) {
+	if body := f.get("/previews").body; strings.Contains(body, template.HTMLEscapeString(card.Command)) {
 		t.Error("the read-only page shows the start command")
 	}
 }
@@ -432,15 +461,12 @@ func TestPreviewsCrewApprovalRefused(t *testing.T) {
 // stopped, and the preview runs at that commit once approved anew.
 func TestPreviewsStaleAndRestart(t *testing.T) {
 	t.Parallel()
-	if !python3Available() {
-		t.Skip("python3 not available for the stand-in app")
-	}
 	f := previewFixture(t)
 	ctx := context.Background()
 	dir, first := gitDepot(t)
 	port := previewPort(t)
 	if _, err := f.st.ProposePreview(ctx, store.NewPreview{
-		App: "demo", Command: fmt.Sprintf("python3 -m http.server %d --bind 127.0.0.1", port),
+		App: "demo", Command: previewtest.App("127.0.0.1", port),
 		Dir: dir, Port: port,
 	}, "builder"); err != nil {
 		t.Fatal(err)

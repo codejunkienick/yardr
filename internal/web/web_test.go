@@ -21,13 +21,17 @@ import (
 	"testing"
 	"time"
 
+	"yardr.dev/yardr/internal/previewtest"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
 	"yardr.dev/yardr/internal/telemetry"
 	"yardr.dev/yardr/internal/web"
 )
 
-func TestMain(m *testing.M) { storetest.Main(m) }
+func TestMain(m *testing.M) {
+	previewtest.MaybeServe() // a preview's app in these tests is this binary again
+	storetest.Main(m)
+}
 
 type fixture struct {
 	t   *testing.T

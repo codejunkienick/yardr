@@ -17,8 +17,15 @@ import (
 	"testing"
 	"time"
 
+	"yardr.dev/yardr/internal/previewtest"
 	"yardr.dev/yardr/internal/store"
 )
+
+// A preview's app in these tests is this binary again (previewtest).
+func TestMain(m *testing.M) {
+	previewtest.MaybeServe()
+	os.Exit(m.Run())
+}
 
 // freePort reserves a loopback port and frees it for the preview.
 func freePort(t *testing.T) int {
@@ -37,7 +44,12 @@ func freePortAt(t *testing.T, host string) int {
 
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	waitUntil(t, what, 15*time.Second, cond)
+}
+
+func waitUntil(t *testing.T, what string, within time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(within)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
@@ -66,9 +78,51 @@ func newYard(t *testing.T) *yard {
 	t.Cleanup(func() { st.Close(context.Background()) })
 	sup := New(st, home, nil)
 	sup.Poll = 10 * time.Millisecond
-	sup.BindWait = 5 * time.Second
+	// BindWait stays the supervisor's own: the app listens at once, and a
+	// figure shorter than the product's would only make a start depend on load.
 	sup.Backoffs = []time.Duration{0, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond}
-	return &yard{st: st, home: home, sup: sup}
+	y := &yard{st: st, home: home, sup: sup}
+	// A wait that times out says what it waited for; the cards say why it
+	// never came (a preview the supervisor gave up on, and what it logged).
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Log(y.cards())
+		}
+	})
+	return y
+}
+
+// cards is what the registry shows of each preview and what it logged last.
+func (y *yard) cards() string {
+	all, err := y.st.Previews(context.Background())
+	if err != nil {
+		return "the registry is not read: " + err.Error()
+	}
+	if len(all) == 0 {
+		return "no preview in the registry"
+	}
+	var b strings.Builder
+	for _, p := range all {
+		fmt.Fprintf(&b, "preview %s: %s %q, %d restarts\n", p.App, p.State, p.StateDetail, p.RestartCount)
+		lines, _ := LogTail(y.sup.logPath(p.App), 20)
+		for _, l := range lines {
+			fmt.Fprintf(&b, "    %s\n", l)
+		}
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// startWait is how long a preview may take to answer once it runs. The
+// supervisor gives a start BindWait to listen (watchBind), and the proxy waits
+// defaultStartWait for the port of a start it makes itself, BindWait more
+// where one is set (waitPort); this is past both, so a preview that has not
+// answered by then has been given up on, however loaded the machine is. A wait
+// for a start is that bound, not a figure of the test's.
+func (y *yard) startWait() time.Duration { return y.sup.bindWait() + defaultStartWait }
+
+func (y *yard) waitStart(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	waitUntil(t, what, y.startWait(), cond)
 }
 
 func (y *yard) run(t *testing.T) context.CancelFunc {
@@ -131,9 +185,6 @@ func (y *yard) state(app string) store.Preview {
 }
 
 func TestApprovedPreviewStartsAndAnswersThroughEndpoint(t *testing.T) {
-	if _, err := os.Stat(python3()); err != nil {
-		t.Skip("python3 not available for the stand-in app")
-	}
 	y := newYard(t)
 	y.run(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -176,13 +227,13 @@ func TestApprovedPreviewStartsAndAnswersThroughEndpoint(t *testing.T) {
 			t.Errorf("preview environment %s = %q, want one value %q", key, values, want)
 		}
 	}
-	y.propose(t, "demo", fmt.Sprintf("python3 -m http.server %d --bind 127.0.0.1", port), port, true)
+	y.propose(t, "demo", previewtest.App("127.0.0.1", port), port, true)
 
 	waitFor(t, "preview running", func() bool { return y.state("demo").State == store.PreviewRunning })
 	srv := httptest.NewServer(y.sup.Handler())
 	defer srv.Close()
 	var body string
-	waitFor(t, "answer through the supervisor endpoint", func() bool {
+	y.waitStart(t, "answer through the supervisor endpoint", func() bool {
 		resp, err := http.Get(srv.URL + "/preview/demo/")
 		if err != nil {
 			return false
@@ -237,29 +288,12 @@ func TestApprovedPreviewStartsAndAnswersThroughEndpoint(t *testing.T) {
 		port6 := probe.Addr().(*net.TCPAddr).Port
 		probe.Close()
 		dir := t.TempDir()
-		script := fmt.Sprintf(`import http.server, socket
-class Server(http.server.HTTPServer):
-    address_family = socket.AF_INET6
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"hello ipv6")
-Server(("::1", %d), Handler).serve_forever()
-`, port6)
-		if err := os.WriteFile(filepath.Join(dir, "serve.py"), []byte(script), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("hello ipv6"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := y.st.ProposePreview(context.Background(), store.NewPreview{
-			App: "v6", Command: "python3 serve.py", Dir: dir, Port: port6,
-		}, "builder"); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := y.st.ApprovePreview(context.Background(), "v6", "ada"); err != nil {
-			t.Fatal(err)
-		}
+		y.proposeIn(t, "v6", previewtest.App("::1", port6), dir, port6, true)
 		waitFor(t, "IPv6 preview running", func() bool { return y.state("v6").State == store.PreviewRunning })
-		waitFor(t, "IPv6 preview answer", func() bool {
+		y.waitStart(t, "IPv6 preview answer", func() bool {
 			resp, err := http.Get(srv.URL + "/preview/v6/")
 			if err != nil {
 				return false
@@ -345,14 +379,11 @@ func TestStartRunsOnlyOnTheApprovedTree(t *testing.T) {
 	// A preview that runs when the tree moves and its restart is asked for
 	// goes back to pending too, so what ran is stopped with the approval.
 	t.Run("a running preview whose approval is taken back is stopped", func(t *testing.T) {
-		if _, err := os.Stat(python3()); err != nil {
-			t.Skip("python3 not available for the stand-in app")
-		}
 		y := newYard(t)
 		y.run(t)
 		dir, git := gitTree(t)
 		port := freePort(t)
-		y.proposeIn(t, "demo", fmt.Sprintf("python3 -m http.server %d --bind 127.0.0.1", port), dir, port, true)
+		y.proposeIn(t, "demo", previewtest.App("127.0.0.1", port), dir, port, true)
 		waitFor(t, "preview running", func() bool { return y.state("demo").State == store.PreviewRunning })
 		git("commit", "-q", "--allow-empty", "-m", "two")
 		if _, err := y.st.RestartPreview(ctx, "demo", "ada"); err == nil || !strings.Contains(err.Error(), "approval is taken back") {
@@ -368,9 +399,6 @@ func TestStartRunsOnlyOnTheApprovedTree(t *testing.T) {
 }
 
 func TestNonLoopbackBindIsRefused(t *testing.T) {
-	if _, err := os.Stat(python3()); err != nil {
-		t.Skip("python3 not available for the stand-in app")
-	}
 	hosts := []string{"0.0.0.0"}
 	if addrs, err := net.InterfaceAddrs(); err == nil {
 		for _, addr := range addrs {
@@ -390,8 +418,8 @@ func TestNonLoopbackBindIsRefused(t *testing.T) {
 				app = "specific"
 			}
 			port := freePortAt(t, host)
-			y.propose(t, app, fmt.Sprintf("python3 -m http.server %d --bind %s", port, host), port, true)
-			waitFor(t, "preview refused for an outside bind", func() bool {
+			y.propose(t, app, previewtest.App(host, port), port, true)
+			y.waitStart(t, "preview refused for an outside bind", func() bool {
 				return y.state(app).State == store.PreviewRefused
 			})
 			if got := y.state(app); !strings.HasPrefix(got.StateDetail, "bound ") {
@@ -403,33 +431,8 @@ func TestNonLoopbackBindIsRefused(t *testing.T) {
 		y := newYard(t)
 		y.run(t)
 		port := freePort(t)
-		dir := t.TempDir()
-		script := fmt.Sprintf(`import socket, time
-port = %d
-local = socket.socket()
-local.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-local.bind(("127.0.0.1", port))
-local.listen()
-time.sleep(0.6)
-local.close()
-wide = socket.socket()
-wide.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-wide.bind(("0.0.0.0", port))
-wide.listen()
-time.sleep(60)
-`, port)
-		if err := os.WriteFile(filepath.Join(dir, "bind.py"), []byte(script), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := y.st.ProposePreview(context.Background(), store.NewPreview{
-			App: "late-wide", Command: "python3 bind.py", Dir: dir, Port: port,
-		}, "builder"); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := y.st.ApprovePreview(context.Background(), "late-wide", "ada"); err != nil {
-			t.Fatal(err)
-		}
-		waitFor(t, "later outside bind refused", func() bool {
+		y.propose(t, "late-wide", previewtest.LateWide(port), port, true)
+		y.waitStart(t, "later outside bind refused", func() bool {
 			return y.state("late-wide").State == store.PreviewRefused
 		})
 	})
@@ -501,12 +504,9 @@ func TestCleanExitIsNotRestarted(t *testing.T) {
 }
 
 func TestIdleStopAndRebootRule(t *testing.T) {
-	if _, err := os.Stat(python3()); err != nil {
-		t.Skip("python3 not available for the stand-in app")
-	}
 	y := newYard(t)
 	port := freePort(t)
-	y.propose(t, "demo", fmt.Sprintf("python3 -m http.server %d --bind 127.0.0.1", port), port, true)
+	y.propose(t, "demo", previewtest.App("127.0.0.1", port), port, true)
 	// Backdate the last request past the default idle bound once
 	// running: the next pass owes it the idle stop.
 	y.run(t)
@@ -548,14 +548,11 @@ func TestIdleStopAndRebootRule(t *testing.T) {
 // supervisor flips back to approved, and the next pass starts it. A stop
 // that wins while the process stops stands instead of the restart.
 func TestRestartAskStopsAndStartsAgain(t *testing.T) {
-	if _, err := os.Stat(python3()); err != nil {
-		t.Skip("python3 not available for the stand-in app")
-	}
 	ctx := context.Background()
 	y := newYard(t)
 	y.run(t)
 	port := freePort(t)
-	y.propose(t, "demo", fmt.Sprintf("python3 -m http.server %d --bind 127.0.0.1", port), port, true)
+	y.propose(t, "demo", previewtest.App("127.0.0.1", port), port, true)
 	waitFor(t, "preview running", func() bool { return y.state("demo").State == store.PreviewRunning })
 	first := y.state("demo").PID
 	if _, err := y.st.RestartPreview(ctx, "demo", "ada"); err != nil {
@@ -585,16 +582,13 @@ func TestRestartAskStopsAndStartsAgain(t *testing.T) {
 }
 
 func TestMemoryWatcherStopsOverCap(t *testing.T) {
-	if _, err := os.Stat(python3()); err != nil {
-		t.Skip("python3 not available for the stand-in app")
-	}
 	y := newYard(t)
 	y.sup.MemLimit = 1 // every process is over a one-byte cap
 	y.sup.MemoryTick = 10 * time.Millisecond
 	y.sup.MemoryHold = 20 * time.Millisecond
 	y.run(t)
 	port := freePort(t)
-	y.propose(t, "demo", fmt.Sprintf("python3 -m http.server %d --bind 127.0.0.1", port), port, true)
+	y.propose(t, "demo", previewtest.App("127.0.0.1", port), port, true)
 	waitFor(t, "preview stopped for memory", func() bool {
 		got := y.state("demo")
 		return got.State == store.PreviewStopped && got.StateDetail == "memory"
@@ -602,9 +596,6 @@ func TestMemoryWatcherStopsOverCap(t *testing.T) {
 }
 
 func TestOnDemandStartThroughEndpoint(t *testing.T) {
-	if _, err := os.Stat(python3()); err != nil {
-		t.Skip("python3 not available for the stand-in app")
-	}
 	y := newYard(t) // no Run: the request alone must start it
 	t.Cleanup(func() { y.sup.kill("demo") })
 	dir, git := gitTree(t)
@@ -614,7 +605,7 @@ func TestOnDemandStartThroughEndpoint(t *testing.T) {
 	git("add", "index.html")
 	git("commit", "-q", "-m", "index")
 	port := freePort(t)
-	y.proposeIn(t, "demo", fmt.Sprintf("python3 -m http.server %d --bind 127.0.0.1", port), dir, port, true)
+	y.proposeIn(t, "demo", previewtest.App("127.0.0.1", port), dir, port, true)
 	srv := httptest.NewServer(y.sup.Handler())
 	defer srv.Close()
 	resp, err := http.Get(srv.URL + "/preview/demo/")
@@ -678,13 +669,4 @@ func TestInFlightCap(t *testing.T) {
 	if !y.sup.enter("demo") {
 		t.Fatal("request after one left refused")
 	}
-}
-
-func python3() string {
-	for _, p := range []string{"/usr/local/bin/python3", "/usr/bin/python3", "/opt/homebrew/bin/python3"} {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return "python3"
 }

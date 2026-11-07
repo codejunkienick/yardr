@@ -94,6 +94,11 @@ it lists every exported name with its comment, faster than grepping.
   logs and carries their traffic on its yard-side endpoint; serves the
   files of a bead's worktree as a watch, which runs nothing; reports each
   preview to the edge, which answers the host it is opened at.
+- `previewtest`: the app a preview's tests run: the test binary started
+  again by the supervisor as a listener that serves its directory and logs
+  each request, in place of `python3 -m http.server`, which asks the
+  resolver for its own name before it listens; a package whose tests start
+  it calls `MaybeServe` first in its `TestMain`.
 - `rpc`: the store API over a local unix socket (`POST /call/<Method>`);
   the client is generated from `store.API`.
 - `runner`: starts work: herdr agents and exec commands in worktrees at
