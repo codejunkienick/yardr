@@ -36,7 +36,7 @@ const File = "pack.yaml"
 // key is read, since an older yardr that read on would call a newer key
 // unknown instead of saying that it is too old. It rises by one in the
 // release that adds anything to what the page lists as stable.
-const API = 4
+const API = 5
 
 // Pack is a pack as written. Everything that has an order in the file
 // keeps it: flows, a flow's stages (the first is where a bead starts), a
@@ -54,6 +54,11 @@ type Pack struct {
 	// API is the pack API the pack says it is written for (api), 1 for a
 	// pack that says none: every pack there was before the key is API 1.
 	API int `json:"api"`
+	// Author is who published the pack and ID the address it is published at
+	// (author, id), "" for a pack that says none: the pack's own words, kept
+	// as written and held to their form alone (publisher.go).
+	Author string `json:"author,omitempty"`
+	ID     string `json:"id,omitempty"`
 	// Kind is the kind of depot the pack is written for, one of Kinds, or
 	// KindSource for a pack that is imported into the yard itself, and
 	// into no depot; "" for a pack that says none and fits either depot.
@@ -575,7 +580,7 @@ func (r *reader) later(root *yaml.Node) (Error, bool) {
 func (r *reader) pack(p *Pack, root *yaml.Node) {
 	var flows, groups, crew, sources, presets, frame *entry
 	named := false
-	for _, e := range r.entries(root, "", "name", "api", "kind", "setup", "frame", "flows", "groups", "crew", "sources", "presets") {
+	for _, e := range r.entries(root, "", "name", "author", "id", "api", "kind", "setup", "frame", "flows", "groups", "crew", "sources", "presets") {
 		switch e.key {
 		case "api":
 			// Not above API: later has refused the pack before this.
@@ -596,6 +601,10 @@ func (r *reader) pack(p *Pack, root *yaml.Node) {
 				}
 				p.Name = s
 			}
+		case "author":
+			p.Author = r.author(e)
+		case "id":
+			p.ID = r.publishedAt(e)
 		case "kind":
 			if s, ok := r.str(e.v, e.path); ok {
 				if !slices.Contains(Kinds, s) && s != KindSource {
@@ -734,91 +743,6 @@ func (r *reader) calls(e entry) []CallsAsked {
 		}
 		for _, w := range words {
 			r.asked = append(r.asked, askedCall{n: s.v, key: s.path, source: s.key, call: w})
-		}
-		out = append(out, CallsAsked{Source: s.key, Calls: words})
-	}
-	return out
-}
-
-// preset reads one named grant suggestion: an optional one-line about and
-// the grants, a source the pack declares to store.GrantRead and the names
-// of calls. The declarations are already read, so each word is held to its
-// file here, where calls asked by a group or a crew member are held after.
-func (r *reader) preset(e entry, declared []Declared) (Preset, bool) {
-	pr := Preset{Name: e.key}
-	ok := true
-	var grants bool
-	for _, k := range r.entries(e.v, e.path, "about", "grants") {
-		switch k.key {
-		case "about":
-			s, good := r.str(k.v, k.path)
-			if !good {
-				ok = false
-				continue
-			}
-			if strings.Contains(s, "\n") {
-				r.errf(k.v, k.path, "about is one line, printed by pack show beside the preset's name")
-				ok = false
-				continue
-			}
-			pr.About = s
-		case "grants":
-			grants = true
-			pr.Grants = r.presetGrants(k, declared, &ok)
-		}
-	}
-	if e.v.Kind == yaml.MappingNode && !grants {
-		r.errf(e.k, join(e.path, "grants"), "missing: the calls the preset grants of the pack's sources (grants: { <source>: [read] })")
-		ok = false
-	}
-	return pr, ok
-}
-
-// presetGrants reads what one preset grants: a mapping of a declared
-// source to store.GrantRead and the names of calls, in the words yardr
-// source grant takes.
-func (r *reader) presetGrants(k entry, declared []Declared, ok *bool) []CallsAsked {
-	if k.v.Kind == yaml.MappingNode && len(k.v.Content) == 0 {
-		r.errf(k.v, k.path, "empty: name a source the pack declares and its calls ({ <source>: [read] }), or leave the preset out")
-		*ok = false
-	}
-	var out []CallsAsked
-	for _, s := range r.entries(k.v, k.path) {
-		i := slices.IndexFunc(declared, func(d Declared) bool { return d.Name == s.key })
-		if i < 0 {
-			declares := "nothing"
-			if len(declared) > 0 {
-				names := make([]string, len(declared))
-				for j, d := range declared {
-					names[j] = d.Name
-				}
-				declares = strings.Join(names, ", ")
-			}
-			r.errf(s.k, s.path, "the pack declares no source %s (it declares: %s): a preset grants a source the pack's sources declare", s.key, declares)
-			*ok = false
-			continue
-		}
-		words := r.strs(s.v, s.path)
-		if s.v.Kind == yaml.SequenceNode && len(s.v.Content) == 0 {
-			r.errf(s.v, s.path, "empty: name %s or a call ([%s]), or leave the source out", store.GrantRead, store.GrantRead)
-		}
-		if len(words) == 0 {
-			*ok = false
-			continue
-		}
-		d := declared[i].Declaration
-		for _, w := range words {
-			if w == store.GrantRead {
-				continue
-			}
-			if _, found := d.Call(w); !found {
-				names := make([]string, len(d.Calls))
-				for j, c := range d.Calls {
-					names[j] = c.Name
-				}
-				r.errf(s.v, s.path, "%s declares no call %s (it has: %s): grant %s, every read call, or a call by its name", declared[i].File, w, strings.Join(names, ", "), store.GrantRead)
-				*ok = false
-			}
 		}
 		out = append(out, CallsAsked{Source: s.key, Calls: words})
 	}

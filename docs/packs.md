@@ -208,6 +208,8 @@ sources:
 | key | meaning |
 |---|---|
 | `name` | the pack's name: letters, digits, `.`, `_`, `-`. It names the directory its files are copied to and goes in front of its flows' names |
+| `author` | optional, for a pack of any kind ([`api: 5`](pack-api.md#api-5)): who published the pack, a name as its publisher writes it (`author: Ada Lovelace`): one line of printable characters that is not blank, kept as written. `pack show <pack>` prints it beside the pack's name, marked as the pack's own words, which yardr does not check |
+| `id` | optional, for a pack of any kind ([`api: 5`](pack-api.md#api-5)): the address the pack is published at, an https URL with a host (`id: https://packs.example.com/acme-flow`), in ASCII with no space, and with no user, password, query or fragment, kept as written. `pack show <pack>` prints it beside the author. It is a name and nothing more: no registry stands behind it, two packs may say one, and nothing checks that the pack is served there |
 | `api` | optional: the pack API the pack is written for, a whole number, 1 or more, and **1 when the key is absent**, so every pack written before the key is a pack of API 1. A pack above the highest API this yardr reads is refused before any other key is read, with the cause (`upgrade yardr`) instead of an unknown key. The number rises on every addition to what is stable, and [pack-api.md](pack-api.md#the-api-number) lists what each number added |
 | `kind` | optional: the kind of depot the pack is for, `git` (a repository: beads are built on branches and landed on a base) or `dir` (a plain directory: nothing is committed and nothing merges), or `source`: the pack is an integration, imported into the yard itself and into no depot ([An integration pack](#an-integration-pack-kind-source)). `yardr depot init` refuses the pack for a depot of the other kind ([below](#yardr-depot-init)). A pack without the key fits either depot |
 | `setup` | optional, for a pack of any kind: the pack's setup notes, its author's words about what a setup takes — where in the service a webhook is made and which events it needs, what an identity wants, how to test. A file of the pack, markdown (`setup: SETUP.md`), at most 64 KB, with something in it. `pack check` prints it after the plan, `pack apply` after what it did (or names `pack show <pack>` when nothing changed), `pack show <pack>` prints it later, and a crew member's prime names it by that command, so the one who helps with a setup reads it first. The notes are marked as the pack's, not checked by yardr. Text only: the pack still carries no secret, sets no identity and grants nothing |
@@ -309,6 +311,32 @@ names, `{{ operator }}` with spaces included, is a mistake of the pack that
 a pack with a crew member called `operator`. A script is copied as it is, so
 braces in it are its own.
 
+**Who published it.** A pack may say who published it and the address it is
+published at, with `author` and `id` (`api: 5`):
+
+```yaml
+name: acme-flow
+api: 5
+author: Ada Lovelace
+id: https://packs.example.com/acme-flow
+```
+
+They are the pack's own words, and yardr holds them to their form and no
+more. An author is one line of printable characters that is not blank. An id
+is an https address with a host, in ASCII and without a space, a user, a
+password, a query or a fragment: a host with letters beyond ASCII is written
+in its `xn--` form, and the rest percent-encoded. Both are shown as they are
+written. No registry stands behind an id, two packs may say one, and nothing
+checks that a pack is its author's or is served at its id, so `yardr pack show
+./acme-flow` prints them first and says whose words they are:
+
+```
+pack acme-flow, by Ada Lovelace, published at https://packs.example.com/acme-flow (from the pack, not checked by yardr)
+```
+
+A plan prints neither and an import records neither: they change nothing an
+import does. The digest covers them with the rest of `pack.yaml`.
+
 ### What a pack is refused for
 
 `yardr pack check` reads the whole file and names every mistake with its
@@ -324,6 +352,12 @@ packs/mine/pack.yaml:7: flows.default.stages.decide.group: no group deciders is 
 - an `api` that is no whole number of 1 or more, or that names a pack API
   above the highest this yardr reads. The second is the pack's one mistake,
   named before any other key is read ([The API number](pack-api.md#the-api-number));
+- an `author` that is empty or only spaces, or that holds a character that is
+  not printable (a line break, an escape, a right-to-left override): it is
+  shown on one line beside the pack's name;
+- an `id` that is no https address with a host: plain `http://`, no scheme, no
+  host (`https:///acme`), a user or password in it (the error does not
+  repeat it), a query or a fragment, or a space or a letter beyond ASCII;
 - a key or a name YAML reads as a boolean: bare `on`, `off`, `yes`, `no`,
   `y`, `n`, `true`, `false`. One YAML reader takes `on:` for a key called
   "on" and the next for `true`, so a pack may not depend on it (it is why

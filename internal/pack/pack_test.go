@@ -551,11 +551,11 @@ func TestStrictness(t *testing.T) {
 		// this yardr reads is the pack's one mistake, wherever the key
 		// stands and whatever else is wrong with the pack: the rest would
 		// be this yardr's mistakes, not the pack's.
-		{name: "api above what this yardr reads", old: "name: small\n", new: "name: small\napi: 5\n", key: "api", msg: "this pack is written for pack API 5, and this yardr reads up to 4: upgrade yardr (yardr upgrade)", line: 2},
-		{name: "api far above", old: "name: small\n", new: "name: small\napi: 1000\n", key: "api", msg: "this pack is written for pack API 1000, and this yardr reads up to 4", line: 2},
-		{name: "api above, beside a key this yardr lacks", old: "name: small\n", new: "name: small\napi: 5\nmodel: opus\n", key: "api", msg: "upgrade yardr", line: 2},
-		{name: "api above, beside a file that is missing", old: "name: small\n", new: "name: small\napi: 5\n", files: map[string]string{"roles/builder.md": ""}, key: "api", msg: "upgrade yardr", line: 2},
-		{name: "api above, last in the file and beside a scope that is wrong", old: "      linear: involved\n", new: "      linear: everything\napi: 5\n", key: "api", msg: "this pack is written for pack API 5", line: 22},
+		{name: "api above what this yardr reads", old: "name: small\n", new: "name: small\napi: 6\n", key: "api", msg: "this pack is written for pack API 6, and this yardr reads up to 5: upgrade yardr (yardr upgrade)", line: 2},
+		{name: "api far above", old: "name: small\n", new: "name: small\napi: 1000\n", key: "api", msg: "this pack is written for pack API 1000, and this yardr reads up to 5", line: 2},
+		{name: "api above, beside a key this yardr lacks", old: "name: small\n", new: "name: small\napi: 6\nmodel: opus\n", key: "api", msg: "upgrade yardr", line: 2},
+		{name: "api above, beside a file that is missing", old: "name: small\n", new: "name: small\napi: 6\n", files: map[string]string{"roles/builder.md": ""}, key: "api", msg: "upgrade yardr", line: 2},
+		{name: "api above, last in the file and beside a scope that is wrong", old: "      linear: involved\n", new: "      linear: everything\napi: 6\n", key: "api", msg: "this pack is written for pack API 6", line: 22},
 		{name: "api of none", old: "name: small\n", new: "name: small\napi: 0\n", key: "api", msg: "want a whole number, 1 or more (the pack API this pack is written for, docs/pack-api.md), got int 0", line: 2},
 		{name: "api below zero", old: "name: small\n", new: "name: small\napi: -1\n", key: "api", msg: "got int -1", line: 2},
 		{name: "api is a string", old: "name: small\n", new: "name: small\napi: \"1\"\n", key: "api", msg: `got "1"`, line: 2},
@@ -577,6 +577,29 @@ func TestStrictness(t *testing.T) {
 		{name: "frame is a crew member's role", old: "name: small\n", new: framed("roles/yardmaster.md"), files: map[string]string{"roles/yardmaster.md": pageFrame}, key: "frame", msg: "frame roles/yardmaster.md is also the role of crew member yardmaster", line: 3},
 		{name: "frame is a stage file", old: "name: small\n", new: framed("frames/page.html"), also: []string{"review: { group: assembly,", "review: { group: assembly, file: frames/page.html,"}, files: map[string]string{"frames/page.html": pageFrame}, key: "frame", msg: "frame frames/page.html is also the stage file of stage review of flow default", line: 3},
 		{name: "frame is the setup notes", old: "name: small\n", new: "name: small\napi: 4\nsetup: frames/page.html\nframe: frames/page.html\n", files: map[string]string{"frames/page.html": pageFrame}, key: "frame", msg: "frame frames/page.html is also the setup notes", line: 4},
+		// author and id (API 5): the pack's own words, held to their form
+		// alone, each mistake named at its key.
+		{name: "author is empty", old: "name: small\n", new: "name: small\napi: 5\nauthor: \"\"\n", key: "author", msg: "empty: name who published the pack", line: 3},
+		{name: "author is only spaces", old: "name: small\n", new: "name: small\napi: 5\nauthor: \"   \"\n", key: "author", msg: "empty: name who published the pack", line: 3},
+		{name: "author is nothing", old: "name: small\n", new: "name: small\napi: 5\nauthor:\n", key: "author", msg: "want a string, got nothing", line: 3},
+		{name: "author is a list", old: "name: small\n", new: "name: small\napi: 5\nauthor: [ada, hal]\n", key: "author", msg: "want a string, got a list", line: 3},
+		{name: "author holds a line break", old: "name: small\n", new: "name: small\napi: 5\nauthor: \"Ada\\nLovelace\"\n", key: "author", msg: "the author holds U+000A, which is not printable", line: 3},
+		{name: "author holds an escape", old: "name: small\n", new: "name: small\napi: 5\nauthor: \"Ada\\e[2K\"\n", key: "author", msg: "the author holds U+001B, which is not printable", line: 3},
+		{name: "author holds a right-to-left override", old: "name: small\n", new: "name: small\napi: 5\nauthor: \"Ada\\u202ELovelace\"\n", key: "author", msg: "the author holds U+202E, which is not printable", line: 3},
+		{name: "id is plain http", old: "name: small\n", new: "name: small\napi: 5\nid: http://packs.example.com/acme\n", key: "id", msg: "http:// is not https://", line: 3},
+		{name: "id has no scheme", old: "name: small\n", new: "name: small\napi: 5\nid: packs.example.com/acme\n", key: "id", msg: "no scheme: want https://host/path", line: 3},
+		{name: "id has no host", old: "name: small\n", new: "name: small\napi: 5\nid: https:///acme\n", key: "id", msg: "no host: want https://host/path", line: 3},
+		{name: "id has a port and no host", old: "name: small\n", new: "name: small\napi: 5\nid: https://:8443/acme\n", key: "id", msg: "no host: want https://host/path", line: 3},
+		{name: "id is a scheme and a path", old: "name: small\n", new: "name: small\napi: 5\nid: https:acme\n", key: "id", msg: "no host: want https://host/path", line: 3},
+		{name: "id has a user", old: "name: small\n", new: "name: small\napi: 5\nid: https://ada@packs.example.com/acme\n", key: "id", msg: "an address with a user or password in it", line: 3},
+		{name: "id has a user and a password", old: "name: small\n", new: "name: small\napi: 5\nid: https://ada:hunter2@packs.example.com/acme\n", key: "id", msg: "an address with a user or password in it", line: 3},
+		{name: "id has a query", old: "name: small\n", new: "name: small\napi: 5\nid: https://packs.example.com/acme?v=1\n", key: "id", msg: "an address with a query or a fragment", line: 3},
+		{name: "id has an empty query", old: "name: small\n", new: "name: small\napi: 5\nid: https://packs.example.com/acme?\n", key: "id", msg: "an address with a query or a fragment", line: 3},
+		{name: "id has a fragment", old: "name: small\n", new: "name: small\napi: 5\nid: https://packs.example.com/acme#v1\n", key: "id", msg: "an address with a query or a fragment", line: 3},
+		{name: "id has a space", old: "name: small\n", new: "name: small\napi: 5\nid: \"https://packs.example.com/a b\"\n", key: "id", msg: "the id holds ' ' (U+0020)", line: 3},
+		{name: "id is not ASCII", old: "name: small\n", new: "name: small\napi: 5\nid: https://packs.exämple.com/acme\n", key: "id", msg: "the id holds 'ä' (U+00E4)", line: 3},
+		{name: "id is no address", old: "name: small\n", new: "name: small\napi: 5\nid: https://packs.example.com/%zz\n", key: "id", msg: "no address: want https://host/path", line: 3},
+		{name: "id is a number", old: "name: small\n", new: "name: small\napi: 5\nid: 12\n", key: "id", msg: "want a string, got int 12", line: 3},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -688,8 +711,8 @@ func TestKindIsTheDepotKindThePackIsFor(t *testing.T) {
 // A pack says which pack API it is written for, or says nothing and is
 // written for API 1, as every pack was before the key.
 func TestAPIIsTheNumberThePackSaysItIsWrittenFor(t *testing.T) {
-	if pack.API != 4 {
-		t.Fatalf("pack.API = %d: this test knows APIs 1 to 4, and so does the page's list of what each number added", pack.API)
+	if pack.API != 5 {
+		t.Fatalf("pack.API = %d: this test knows APIs 1 to 5, and so does the page's list of what each number added", pack.API)
 	}
 	for name, tc := range map[string]struct {
 		text string
@@ -700,12 +723,62 @@ func TestAPIIsTheNumberThePackSaysItIsWrittenFor(t *testing.T) {
 		"api 2":                {text: strings.Replace(small, "name: small\n", "name: small\napi: 2\n", 1), api: 2},
 		"api 3":                {text: strings.Replace(small, "name: small\n", "name: small\napi: 3\n", 1), api: 3},
 		"api 4":                {text: strings.Replace(small, "name: small\n", "name: small\napi: 4\n", 1), api: 4},
+		"api 5":                {text: strings.Replace(small, "name: small\n", "name: small\napi: 5\n", 1), api: 5},
 		"api last in the file": {text: small + "api: 1\n", api: 1},
 	} {
 		if p, err := pack.LoadDir(writePack(t, smallFiles(tc.text))); err != nil || p.API != tc.api {
 			t.Errorf("%s: api = %d, %v, want %d", name, p.API, err, tc.api)
 		}
 	}
+}
+
+// A pack says who published it and the address it is published at, or says
+// neither. Each is kept as the pack writes it, wherever the key stands, and a
+// pack that names an API below the one that added them is read the same: only
+// an older yardr refuses it, for a key it does not know.
+func TestAPackSaysWhoPublishedItAndWhere(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name       string
+		head       string // what replaces the first line of small
+		author, id string
+	}{
+		{name: "neither", head: "name: small\n"},
+		{name: "neither at api 5", head: "name: small\napi: 5\n"},
+		{name: "both", head: "name: small\napi: 5\nauthor: Ada Lovelace\nid: https://packs.example.com/acme\n", author: "Ada Lovelace", id: "https://packs.example.com/acme"},
+		{name: "an author alone", head: "name: small\napi: 5\nauthor: Ada Lovelace\n", author: "Ada Lovelace"},
+		{name: "an id alone", head: "name: small\napi: 5\nid: https://packs.example.com/acme\n", id: "https://packs.example.com/acme"},
+		{name: "a host alone", head: "name: small\napi: 5\nid: https://packs.example.com\n", id: "https://packs.example.com"},
+		{name: "in any order, beside other keys", head: "id: https://packs.example.com/acme\nkind: git\napi: 5\nauthor: Ada\nname: small\n", author: "Ada", id: "https://packs.example.com/acme"},
+		// Shown as written: spaces inside and around, letters beyond ASCII, the
+		// scheme's and the host's case, a port and a trailing slash all stay.
+		{name: "as written", head: "name: small\napi: 5\nauthor: \"  Zoë  Müller & Co.  \"\nid: HTTPS://Packs.Example.com:8443/Acme/\n", author: "  Zoë  Müller & Co.  ", id: "HTTPS://Packs.Example.com:8443/Acme/"},
+		// No pairing is held between the keys and the number: the pack is
+		// read, and says the lowest API whose list holds what it uses.
+		{name: "at an api below 5", head: "name: small\napi: 1\nauthor: Ada\nid: https://packs.example.com/acme\n", author: "Ada", id: "https://packs.example.com/acme"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p, err := pack.LoadDir(writePack(t, smallFiles(strings.Replace(small, "name: small\n", c.head, 1))))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.Author != c.author || p.ID != c.id {
+				t.Errorf("author %q, id %q, want %q and %q", p.Author, p.ID, c.author, c.id)
+			}
+		})
+	}
+	// A user in an id may be a credential, so no word of an error repeats it.
+	t.Run("an address with a user is not repeated", func(t *testing.T) {
+		head := "name: small\napi: 5\nid: https://tok3n:hunter2@packs.example.com/acme\n"
+		_, err := pack.LoadDir(writePack(t, smallFiles(strings.Replace(small, "name: small\n", head, 1))))
+		var errs pack.Errors
+		if !errors.As(err, &errs) || len(errs) != 1 {
+			t.Fatalf("errors = %v, want one", err)
+		}
+		if strings.Contains(errs[0].Msg, "tok3n") || strings.Contains(errs[0].Msg, "hunter2") {
+			t.Errorf("the error repeats the user or the password: %s", errs[0].Msg)
+		}
+	})
 }
 
 // The page lists what each API number added, under a heading of its own, and

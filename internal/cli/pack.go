@@ -672,67 +672,6 @@ after pack check. The import is recorded (yardr pack list). See docs/packs.md.
 	af.registerAnswers(apply)
 	apply.Flags().BoolVar(&af.prune, "prune", false, "remove what an earlier import of this pack brought and the pack has dropped since")
 
-	var sf packFlags
-	show := &cobra.Command{
-		Use: "show <pack>", Short: "Print a pack's setup notes, presets and script options",
-		Long: `Prints the pack's setup notes (pack.yaml's setup): its author's words
-about what a setup takes — where in the service a webhook is made and which
-events it needs, what an identity wants, how to test. They are the pack's,
-not checked by yardr, and are marked so, as an answer from a source is
-marked as data. A pack without any says so. Then the pack's presets
-(pack.yaml's presets), if it has any: its suggested grants, numbered in
-file order, each with the calls it grants of each source. Then the env of
-its script groups (groups.<group>.env), if it has any: the options an
-import sets in the cmd of a group it creates.
-` + naming,
-		Example: `  yardr pack show linear`,
-		Args:    cobra.ExactArgs(1),
-		RunE: func(c *cobra.Command, args []string) error {
-			// As check: a directory pack is read before the yard is
-			// asked anything, and a name is the yard's to resolve.
-			_, _, p, err := a.openPack(c.OutOrStdout(), c.ErrOrStderr(), c.Context(), args[0], &sf, func() error { return a.onboard(c) }, false)
-			if err != nil {
-				return err
-			}
-			env := map[string]map[string]string{}
-			for _, g := range p.Groups {
-				if len(g.Env) > 0 {
-					env[g.Name] = g.Env
-				}
-			}
-			if p.Setup == "" && len(p.Presets) == 0 && len(env) == 0 {
-				return a.out(c.OutOrStdout(), map[string]any{"pack": p.Name}, func(w io.Writer) {
-					fmt.Fprintf(w, "pack %s carries no setup notes\n", p.Name)
-				})
-			}
-			v := map[string]any{"pack": p.Name}
-			if p.Setup != "" {
-				v["file"], v["setup"] = p.Setup, p.SetupText
-			}
-			if len(p.Presets) > 0 {
-				v["presets"] = p.Presets
-			}
-			if len(env) > 0 {
-				v["env"] = env
-			}
-			return a.out(c.OutOrStdout(), v, func(w io.Writer) {
-				if p.Setup == "" {
-					fmt.Fprintf(w, "pack %s carries no setup notes\n", p.Name)
-				} else {
-					printSetup(w, p.Name, p.Setup, p.SetupText)
-				}
-				if len(p.Presets) > 0 {
-					fmt.Fprintln(w)
-					printPresets(w, p)
-				}
-				if len(env) > 0 {
-					fmt.Fprintln(w)
-					printEnv(w, p)
-				}
-			})
-		},
-	}
-
 	list := &cobra.Command{
 		Use: "list", Short: "List the packs imported into this yard", Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
@@ -758,7 +697,7 @@ import sets in the cmd of a group it creates.
 		},
 	}
 
-	cmd.AddCommand(check, apply, a.packExportCmd(), show, list)
+	cmd.AddCommand(check, apply, a.packExportCmd(), a.packShowCmd(naming), list)
 	return cmd
 }
 

@@ -173,6 +173,7 @@ Not for a pack, whatever it happens to do today:
 | the placeholders `{{operator}}` and `{{<crew member>}}` in a role or stage file | stable | any other `{{...}}` there is refused |
 | a role, script, stage file, setup file, frame or declaration is a path relative to the pack's directory, inside it, to a regular file. A command program is a file beside its declaration, inside the pack | stable | |
 | the frame (API 4): `frame: <file>` at the root of `pack.yaml`, one HTML file of at most 256 KiB with one `<title>` element in its head, one `<!--yardr:title-->` where the page's title block stands in its body and one `<!--yardr:content-->` where the page's content stands, each a comment of its own that a browser reads as a comment, and neither in the head, a `<script>`, a `<style>`, a `<template>`, a tag, nor where the title or the content could not stand | stable | what else is in the frame, its class names, its tokens and its script, is its author's: yardr holds the two markers and the `<title>`, nothing more. A pack of kind `source` carries no frame, and a frame's path is no other file's of the pack. The frame is copied as it stands, never filled in, and is no program |
+| the publisher (API 5): `author: <name>` and `id: <address>` at the root of `pack.yaml`, each optional. The author is one line of printable characters that is not blank. The id is an https URL with a host, in ASCII with no space, and with no user, password, query or fragment. Each is kept as written | stable | both are the pack's own words, and yardr holds them to their form alone: it shows them in `pack show`, marked as the pack's, and decides nothing by them. There is no registry, two packs may say one id, and nothing checks that a pack is its author's or is served at its id. A plan prints neither, and the digest covers them as it covers the rest of `pack.yaml` |
 | the digest: sha256 over each file the pack names, as its path, a NUL, its length, a NUL and its bytes, in path order | stable | |
 | a pack at a URL: one GET per file, over https, or plain http to this machine alone. A redirect stays within the host and never goes down to http. A file is at most 1 MiB and takes at most 10 s. `pack check` and `pack apply` take `--auth <name>`, which sends the header in `<home>/packs/<name>.auth` with every GET, to the pack's host alone; the record keeps the name, never the value | stable | |
 | the start of a mistake, `file:line: key:`, and its JSON form in `pack check --json` (`file`, `line`, `key`, `error`) | stable | |
@@ -395,6 +396,15 @@ page frame that pages made under the pack are made in (`frame:
 frames/page.html`). It is held to [what the files table above says of
 it](#the-files), pinned by the digest and named on its own line of the plan,
 and it is no program. A pack that carries a frame says `api: 4`.
+
+### API 5
+
+The `author` and `id` keys at the root of `pack.yaml`: who published the
+pack, and the address it is published at (`author: Ada Lovelace`, `id:
+https://packs.example.com/acme`). Both are optional and kept as written, and
+[the files table above says what each is held to](#the-files). `pack show`
+prints them first, as the pack's own words. A pack that carries either says
+`api: 5`.
 
 ## Left out
 
