@@ -416,9 +416,11 @@ func yardTestRows(t *testing.T) (script string, rows []readsRow) {
 
 // Every row names a path the repository has and packages that have tests:
 // a row left behind by a rename would otherwise select nothing, silently.
-// Every filesizes row names a non-test Go file the tree still holds: a row
-// left behind by a deletion fails here, as a grown file, an unlisted file
-// over 1000 lines or a ceiling above its file fails the gate.
+// Every filesizes row names a non-test Go file, not a directory: a row for a
+// test file fails here, as a grown file or an unlisted file over 1000 lines
+// fails the gate. A row whose file is gone does not: the budget warns of it and
+// the landing deletes it, so a change that deletes a listed file leaves the
+// table alone.
 func TestYardTestRowsAreThere(t *testing.T) {
 	// It only reads the script and stats the tree it names.
 	t.Parallel()
@@ -439,9 +441,9 @@ func TestYardTestRowsAreThere(t *testing.T) {
 	_, _, _, sizeRows := yardTestProbe(t)
 	for _, row := range sizeRows {
 		info, err := os.Stat(row.path)
-		if err != nil {
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("filesizes row %s: %v", row.path, err)
-		} else if info.IsDir() {
+		} else if err == nil && info.IsDir() {
 			t.Errorf("filesizes row %s: not a file", row.path)
 		}
 		if strings.HasSuffix(row.path, "_test.go") {
@@ -5499,19 +5501,21 @@ func TestYardTestBudgets(t *testing.T) {
 			return fmt.Sprintf("test: %s has %d lines, over its %d-line ceiling: %s", row.path, row.ceil+1, row.ceil, tail)
 		}
 	}
-	underCeiling := func(tail string) func(filesizeRow) string {
+	// A line a plain run warns with and a landing notes, by its lead: "test: warning: "
+	// or "test: ".
+	underCeiling := func(lead, tail string) func(filesizeRow) string {
 		return func(row filesizeRow) string {
-			return fmt.Sprintf("test: %s has %d lines, under its %d-line ceiling: %s", row.path, row.ceil-1, row.ceil, tail)
+			return fmt.Sprintf("%s%s has %d lines, under its %d-line ceiling: %s", lead, row.path, row.ceil-1, row.ceil, tail)
 		}
 	}
-	underDigits := func(tail string) func(filesizeRow) string {
+	underDigits := func(lead, tail string) func(filesizeRow) string {
 		return func(row filesizeRow) string {
-			return fmt.Sprintf("test: %s has 929 lines, under its %d-line ceiling: %s", row.path, row.ceil, tail)
+			return fmt.Sprintf("%s%s has 929 lines, under its %d-line ceiling: %s", lead, row.path, row.ceil, tail)
 		}
 	}
-	gone := func(tail string) func(filesizeRow) string {
+	gone := func(lead, tail string) func(filesizeRow) string {
 		return func(row filesizeRow) string {
-			return "test: filesizes row " + row.path + " names a file that is gone: " + tail
+			return lead + "filesizes row " + row.path + " names a file that is gone: " + tail
 		}
 	}
 	overOnly := func(tail string) func(filesizeRow) string {
@@ -5541,18 +5545,18 @@ func TestYardTestBudgets(t *testing.T) {
 			overCeiling("split it along a concept, one concept per file (a second same-stem file such as routing2.go is not a split); the ceiling only falls")},
 		{"an unlisted file over 1000 fails the file size budget", unlisted, false, 1,
 			overOnly("split it along a concept, one concept per file (a second same-stem file such as routing2.go is not a split)")},
-		{"a ceiling left above a shrunk file fails the file size budget", shrink, false, 1,
-			underCeiling("lower the row in the same change")},
-		{"a ceiling left above a file shrunk below 1000 lines fails the file size budget", shrinkDigits, false, 1,
-			underDigits("lower the row in the same change")},
-		{"a row whose file is gone fails the file size budget", remove, false, 1,
-			gone("delete the row with the file")},
+		{"a ceiling left above a shrunk file only warns in the file size budget", shrink, false, 0,
+			underCeiling("test: warning: ", "the landing lowers the row")},
+		{"a ceiling left above a file shrunk below 1000 lines only warns in the file size budget", shrinkDigits, false, 0,
+			underDigits("test: warning: ", "the landing lowers the row")},
+		{"a row whose file is gone only warns in the file size budget", remove, false, 0,
+			gone("test: warning: ", "the landing deletes the row")},
 		{"a shrunk file passes the file size budget at landing", shrink, true, 0,
-			underCeiling("landing keeps the higher base row (the branch lowers it)")},
+			underCeiling("test: ", "landing keeps the higher base row (the branch lowers it)")},
 		{"a file shrunk below 1000 lines passes the file size budget at landing", shrinkDigits, true, 0,
-			underDigits("landing keeps the higher base row (the branch lowers it)")},
+			underDigits("test: ", "landing keeps the higher base row (the branch lowers it)")},
 		{"a row whose file is gone passes the file size budget at landing", remove, true, 0,
-			gone("landing keeps the base row (the branch deletes it)")},
+			gone("test: ", "landing keeps the base row (the branch deletes it)")},
 		{"a grown listed file fails the file size budget at landing", grow, true, 1,
 			overCeiling("split it along a concept")},
 		{"an unlisted file over 1000 fails the file size budget at landing", unlisted, true, 1,
@@ -5607,14 +5611,21 @@ func TestYardTestBudgets(t *testing.T) {
 		}
 	})
 
-	t.Run("the tree's listed files are at their ceilings", func(t *testing.T) {
+	t.Run("the tree's listed files are within their ceilings", func(t *testing.T) {
 		t.Parallel()
-		// On the checkout itself: green, with every row's file at exactly
-		// its ceiling. A grown file, an unlisted file over 1000, a ceiling
-		// above its file, or a row whose file is gone fails here as it
-		// fails the gate.
+		// On the checkout itself: green. A grown file or an unlisted file
+		// over 1000 fails here as it fails the gate; a ceiling above its file,
+		// or a row whose file is gone, only warns, the landing settling it, so
+		// a change that shrinks or deletes a listed file leaves this green with
+		// the table alone. The count is of the rows whose file is there.
+		held := 0
+		for _, row := range sizeRows {
+			if _, err := os.Stat(row.path); err == nil {
+				held++
+			}
+		}
 		out, code := run(t, ".", "filesizebudget")
-		wantRun(t, out, code, 0, "test: "+strconv.Itoa(len(sizeRows))+" files over 1000 lines allow-listed")
+		wantRun(t, out, code, 0, "test: "+strconv.Itoa(held)+" files over 1000 lines allow-listed")
 	})
 
 	// The redaction marker scan, over a repository with files committed and
@@ -6467,7 +6478,7 @@ func TestYardTestSizes(t *testing.T) {
 	noFile := func(path string) string { return "test: sizes: " + path + " is no non-test Go file here" }
 	shortLine := listed(short.path, short.ceil-3, short.ceil)
 	overLine := listed(over.path, over.ceil+2, over.ceil)
-	goneLine := fmt.Sprintf("test: sizes: %s gone, its row says %d: delete the row with the file", gone.path, gone.ceil)
+	goneLine := fmt.Sprintf("test: sizes: %s gone, its row says %d: the landing deletes the row", gone.path, gone.ceil)
 	// The report: a line for each file that has one, in path order, and the
 	// rows whose file is gone after them.
 	byPath := map[string]string{
@@ -6539,6 +6550,125 @@ func TestYardTestSizes(t *testing.T) {
 			if code != 0 || out != c.want+"\n" {
 				t.Errorf("exit %d, output %q, want exit 0 and %q", code, out, c.want)
 			}
+		})
+	}
+
+	// `sizes --rewrite` is what the landing runs: it lowers the table in the
+	// script it runs from to the tree around it, so each case has a tree and a
+	// copy of the script of its own. A row becomes its file's lines; a row whose
+	// file is gone, or is at most 1000 lines, goes; none is added; a file over its
+	// row fails it and changes nothing, however much else it could lower. Like the
+	// report it asks git and go for nothing and leaves nothing in the run's TMPDIR.
+	script0 := string(gateScript(t))
+	for _, c := range []struct {
+		name   string
+		tree   func(t *testing.T, d string)
+		script func(text string) string // edits the copy of the script, none when nil
+		code   int
+		want   []string       // the lines the run prints
+		rows   map[string]int // the table's change: a path to its new ceiling, 0 for a deleted row; none leaves the file as it was
+	}{
+		{"lowers a row to its file, deletes a gone one and one at most 1000 lines, adds none",
+			func(t *testing.T, d string) {
+				writeFile(t, d, short.path, strings.Repeat("x\n", short.ceil-3))
+				writeFile(t, d, over.path, strings.Repeat("x\n", 929))
+				if err := os.Remove(filepath.Join(d, gone.path)); err != nil {
+					t.Fatal(err)
+				}
+				writeFile(t, d, "new.go", strings.Repeat("x\n", 1500))
+			}, nil, 0,
+			[]string{
+				fmt.Sprintf("test: sizes: lowered the row of %s from %d to %d", short.path, short.ceil, short.ceil-3),
+				fmt.Sprintf("test: sizes: deleted the row of %s: its 929 lines need none", over.path),
+				fmt.Sprintf("test: sizes: deleted the row of %s: the file is gone", gone.path),
+			},
+			map[string]int{short.path: short.ceil - 3, over.path: 0, gone.path: 0}},
+		{"leaves a table that is at its tree alone, its file untouched",
+			func(*testing.T, string) {}, nil, 0, nil, nil},
+		{"fails on a file over its row, naming it, and changes nothing",
+			func(t *testing.T, d string) {
+				writeFile(t, d, short.path, strings.Repeat("x\n", short.ceil+1))
+				writeFile(t, d, over.path, strings.Repeat("x\n", over.ceil-3))
+			}, nil, 1,
+			[]string{fmt.Sprintf("test: sizes: %s has %d lines, over its %d-line ceiling: split it along a concept, a row is never raised", short.path, short.ceil+1, short.ceil)},
+			nil},
+		{"fails on a file over its row even when it is at most 1000 lines",
+			func(t *testing.T, d string) {
+				writeFile(t, d, short.path, strings.Repeat("x\n", 950))
+			},
+			func(text string) string {
+				return strings.Replace(text, fmt.Sprintf("\n%s %d ", short.path, short.ceil), fmt.Sprintf("\n%s 900 ", short.path), 1)
+			}, 1,
+			[]string{fmt.Sprintf("test: sizes: %s has 950 lines, over its 900-line ceiling: split it along a concept, a row is never raised", short.path)},
+			nil},
+		{"fails on a script with no table",
+			func(*testing.T, string) {},
+			func(text string) string { return strings.Replace(text, "\nfilesizes='\n", "\nfilesizes_='\n", 1) }, 1,
+			[]string{"test: sizes: " + yardTest + " is no file with a filesizes table to rewrite"},
+			nil},
+	} {
+		t.Run("--rewrite "+c.name, func(t *testing.T) {
+			t.Parallel()
+			d := t.TempDir()
+			writeSizeTree(t, d, sizeRows)
+			c.tree(t, d)
+			text := script0
+			if c.script != nil {
+				text = c.script(text)
+			}
+			writeFile(t, d, yardTest, text)
+			path := filepath.Join(d, yardTest)
+			was, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The table's rows after the change the case expects: the text of the
+			// script with only those rows lowered or gone.
+			want := text
+			if c.rows != nil {
+				head, rest, _ := strings.Cut(text, "\nfilesizes='\n")
+				table, tail, _ := strings.Cut(rest, "\n'\n")
+				var kept []string
+				for _, line := range strings.Split(table, "\n") {
+					f := strings.SplitN(line, " ", 3)
+					if n, ok := c.rows[f[0]]; !ok {
+						kept = append(kept, line)
+					} else if n > 0 {
+						kept = append(kept, fmt.Sprintf("%s %d %s", f[0], n, f[2]))
+					}
+				}
+				want = head + "\nfilesizes='\n" + strings.Join(kept, "\n") + "\n'\n" + tail
+			}
+			record := "#!/bin/sh\necho \"$0 $*\" >>\"$FAKE/calls\"\n"
+			fake, tmp := fakeBins(t, map[string]string{"go": record, "git": record, "gofmt": record})
+			cmd := exec.Command("sh", yardTest, "sizes", "--rewrite")
+			cmd.Dir = d
+			cmd.Env = boxEnv(fake, tmp, "PWD="+d)
+			out, code := runCmd(t, cmd)
+			if got := splitLines(out); code != c.code || !slices.Equal(got, c.want) {
+				t.Errorf("exit %d, output:\n%s\nwant exit %d and:\n%s", code, out, c.code, strings.Join(c.want, "\n"))
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != want {
+				t.Errorf("the script after the run differs from the one expected: got %d bytes, want %d", len(got), len(want))
+			}
+			now, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if now.Mode() != was.Mode() {
+				t.Errorf("the script's mode is %v, was %v", now.Mode(), was.Mode())
+			}
+			if c.rows == nil && !now.ModTime().Equal(was.ModTime()) {
+				t.Errorf("the script was written though nothing changed in its table")
+			}
+			if calls := fakeLog(fake, "calls"); calls != "" {
+				t.Errorf("the rewrite ran:\n%s", calls)
+			}
+			wantEmpty(t, tmp)
 		})
 	}
 }

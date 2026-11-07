@@ -23,7 +23,10 @@
 #                       waited for the race lock (default 1800)
 #
 # It fetches the base when it is a remote's, rebases the train branch onto
-# the base, runs the depot's test command on the result, with
+# the base, lowers the file size table of a test command that carries one to
+# the branch's files (lowerrows, below: a commit of its own on the branch,
+# and a hold when a row stands below its file), runs the depot's test command
+# on the result, with
 # YARDR_LANDING=1 and YARDR_TEST_BEADS (the train's children, which the run
 # tests, where YARDR_BEAD names the train), and reports done (-> review). A
 # red run reports failed (-> open) with the commit, the failing tests and
@@ -197,42 +200,6 @@ Rebase $BR onto $BASE in $WT keeping both sides' intent, and do not push it: bac
   fi
 fi
 
-# The depot's test command runs on exactly what goes to review and then
-# lands, as merge-local runs it for a bead and with YARDR_LANDING=1: the
-# train is what moves the depot's base. Where the command is the path of a
-# file the base has, the base's copy of that file is what runs, with sh, in
-# the train's worktree; anything else is a command for sh -c. With no test
-# command the train goes to review untested.
-#
-# Exit 2 is the command saying it could not run at all (closefds says it too,
-# for a descriptor above 9 that this sh cannot close), which no child can
-# fix. An exit above 128 means the run was ended by a signal from outside,
-# which says nothing about the branch and which no child can fix either: as
-# in merge-local, it is run once more, after a note with the first run's
-# tail, and ended by a signal twice the train is held. The kill at the
-# deadline is not this: it is a red run.
-TEST=${YARDR_TEST:-}
-LIMIT=${YARDR_TEST_TIMEOUT:-1800}
-# The beads the tests are of, which the test command is told in
-# YARDR_TEST_BEADS: set before the run, below.
-BEADS=
-# trainbeads prints the train's children, sorted and joined by commas, for
-# YARDR_TEST_BEADS. The test command runs with YARDR_BEAD set to the train, and
-# a command that records which change a run tested (depot yardr's gate does,
-# so its flaky log line names the children rather than the train) would take
-# the train for a change of its own, apart from the children it is made of.
-# Nothing is printed when the children cannot be read (yardr not answering)
-# or there are none, and the variable is then set and empty: it tells that
-# test command that there is nothing to name, where an unset variable would
-# send it back to YARDR_BEAD, the train.
-trainbeads() {
-  if json=$("$Y" bead show "$TRAIN" --json 2>/dev/null) &&
-      kids=$(printf '%s' "$json" | sed -n '/^  "children": \[/,/^  \]/p' | sed -n -e 's/^    "\([^"]*\)",$/\1/p' -e 's/^    "\([^"]*\)"$/\1/p'); then
-    printf '%s\n' "$kids" | LC_ALL=C sort -u | paste -sd, -
-  else
-    echo "== could not read the children of $TRAIN (yardr must answer); the tests are told no beads" >&2
-  fi
-}
 # --- closefds: the same text in merge-local, integrate-train, pr-ci, deploy-dokku and deploy-void (a test holds them equal) ---
 # closefds closes every descriptor above 2 that the subshell it is called in
 # inherited, so that what the subshell starts holds none the landing did not
@@ -282,6 +249,117 @@ closefds() {
   exit 2
 }
 # --- end of closefds ---
+
+# --- lowerrows: the same text in merge-local and integrate-train (a test holds them equal) ---
+# lowerrows lowers the file size table of the depot's test command to the files
+# of the branch, so that a change that shrinks or deletes a listed file never
+# edits its row, and two that shrink neighbouring files cannot conflict on those
+# lines. It acts where the test command is one file of the branch that carries
+# such a table (a line `filesizes='`), and asks that file for it: `sh <it> sizes
+# --rewrite` in the worktree. The branch's copy, since it is the branch's own
+# table that is rewritten; what judges the branch stays the base's copy. A
+# change to the file is made a commit of the branch: `amend` takes it into the
+# branch's head, `commit` makes a commit of its own, for a head that is not the
+# assembly's to rewrite. The script is the branch's own, and runs after
+# closefds with no stdin; it may only leave its own table changed, since what
+# it left elsewhere would land in the file that judges the next bead, which
+# this run never executes. Neither branch nor base may move, the worktree stays
+# on the branch, and it may not stage changes, touch another path, or change a
+# line outside the table. Only the run's last bytes are kept, for the hold a
+# failing run ends in. A table already right prints nothing and
+# touches nothing. A rewrite that fails holds: it says a row stands below its
+# file, which no landing may paper over and only a person settles.
+lowerrows() {
+  lr_test=${YARDR_TEST:-}
+  [ -n "$lr_test" ] || return 0
+  [ "$(git -C "$WT" cat-file -t "HEAD:$lr_test" 2>/dev/null)" = blob ] || return 0
+  [ -f "$WT/$lr_test" ] && [ ! -L "$WT/$lr_test" ] || return 0
+  grep -q "^filesizes='\$" "$WT/$lr_test" || return 0
+  lr_head=$(git -C "$REPO" rev-parse "refs/heads/$BR") || hold "cannot record $BR before lowering its file size table"
+  lr_base=$(git -C "$REPO" rev-parse "refs/heads/$BASE") || hold "cannot record $BASE before lowering the file size table"
+  lr_log=$(mktemp "${TMPDIR:-/tmp}/lowerrows.XXXXXX") || hold "cannot make a file for the file size table rewrite's output"
+  (cd "$WT" && { closefds "the file size table rewrite"; sh "$lr_test" sizes --rewrite; }) >"$lr_log" 2>&1 </dev/null && lr_ok=1 || lr_ok=
+  lr_out=$(tail -c 4000 "$lr_log")
+  rm -f "$lr_log"
+  [ -n "$lr_ok" ] ||
+    hold "the file size table in $lr_test cannot be lowered to the files of $BR, so nothing lands:
+$lr_out
+Correct the table, or split the file it names, then unhold."
+  [ -f "$WT/$lr_test" ] && [ ! -L "$WT/$lr_test" ] ||
+    hold "the file size table rewrite removed or replaced $lr_test; nothing lands"
+  [ "$(git -C "$WT" symbolic-ref -q HEAD)" = "refs/heads/$BR" ] ||
+    hold "the file size table rewrite moved the worktree off $BR; nothing lands"
+  lr_now=$(git -C "$REPO" rev-parse "refs/heads/$BR") || hold "cannot read $BR after lowering its file size table"
+  [ "$lr_now" = "$lr_head" ] || hold "the file size table rewrite moved $BR from $lr_head to $lr_now; nothing lands"
+  lr_now_base=$(git -C "$REPO" rev-parse "refs/heads/$BASE") || hold "cannot read $BASE after lowering the file size table"
+  [ "$lr_now_base" = "$lr_base" ] || hold "the file size table rewrite moved $BASE from $lr_base to $lr_now_base; nothing lands"
+  git -C "$WT" diff --cached --quiet || hold "the file size table rewrite staged changes; nothing lands"
+  lr_changes=$(git -C "$WT" status --porcelain --untracked-files=all) || hold "cannot check the worktree after lowering the file size table"
+  lr_table_change=$(git -C "$WT" status --porcelain --untracked-files=all -- ":(literal)$lr_test") || hold "cannot check $lr_test after lowering the file size table"
+  [ "$lr_changes" = "$lr_table_change" ] || hold "the file size table rewrite changed paths outside $lr_test; nothing lands:
+$lr_changes
+Correct the rewrite command, then unhold."
+  lr_old=$(git -C "$WT" show "HEAD:$lr_test" | awk '$0=="filesizes=\047"&&!found{intable=1;found=1;next} intable&&$0=="\047"{intable=0;next} !intable' | git -C "$WT" hash-object --stdin) ||
+    hold "cannot read the committed $lr_test to check the file size table rewrite"
+  lr_new=$(awk '$0=="filesizes=\047"&&!found{intable=1;found=1;next} intable&&$0=="\047"{intable=0;next} !intable' "$WT/$lr_test" | git -C "$WT" hash-object --stdin) ||
+    hold "cannot read the rewritten $lr_test to check the file size table rewrite"
+  [ "$lr_old" = "$lr_new" ] || hold "the file size table rewrite changed lines outside the filesizes table in $lr_test; nothing lands"
+  git -C "$WT" diff --quiet -- ":(literal)$lr_test" && return 0
+  printf '%s\n' "$lr_out"
+  git -C "$WT" add -- "$lr_test" || hold "cannot add the lowered file size table in $lr_test to $BR"
+  if [ "$1" = amend ]; then
+    git -C "$WT" commit -q --amend --no-edit --no-verify
+  else
+    git -C "$WT" commit -q --no-verify -m "assembly: lower filesizes rows to actual"
+  fi || {
+    git -C "$WT" checkout -q HEAD -- "$lr_test"
+    hold "cannot commit the lowered file size table in $lr_test to $BR"
+  }
+  echo "== lowered the file size table in $lr_test ($1 on $BR)"
+}
+# --- end of lowerrows ---
+# The rows are lowered here for the whole train, after the rebase whether or not
+# it was needed: a wagon landing on the train's branch leaves them (merge-local),
+# and a commit of its own, not an amend, since the head is a child's landed
+# commit. The tests below run on the lowered branch, and what lands is it.
+lowerrows commit
+
+# The depot's test command runs on exactly what goes to review and then
+# lands, as merge-local runs it for a bead and with YARDR_LANDING=1: the
+# train is what moves the depot's base. Where the command is the path of a
+# file the base has, the base's copy of that file is what runs, with sh, in
+# the train's worktree; anything else is a command for sh -c. With no test
+# command the train goes to review untested.
+#
+# Exit 2 is the command saying it could not run at all (closefds says it too,
+# for a descriptor above 9 that this sh cannot close), which no child can
+# fix. An exit above 128 means the run was ended by a signal from outside,
+# which says nothing about the branch and which no child can fix either: as
+# in merge-local, it is run once more, after a note with the first run's
+# tail, and ended by a signal twice the train is held. The kill at the
+# deadline is not this: it is a red run.
+TEST=${YARDR_TEST:-}
+LIMIT=${YARDR_TEST_TIMEOUT:-1800}
+# The beads the tests are of, which the test command is told in
+# YARDR_TEST_BEADS: set before the run, below.
+BEADS=
+# trainbeads prints the train's children, sorted and joined by commas, for
+# YARDR_TEST_BEADS. The test command runs with YARDR_BEAD set to the train, and
+# a command that records which change a run tested (depot yardr's gate does,
+# so its flaky log line names the children rather than the train) would take
+# the train for a change of its own, apart from the children it is made of.
+# Nothing is printed when the children cannot be read (yardr not answering)
+# or there are none, and the variable is then set and empty: it tells that
+# test command that there is nothing to name, where an unset variable would
+# send it back to YARDR_BEAD, the train.
+trainbeads() {
+  if json=$("$Y" bead show "$TRAIN" --json 2>/dev/null) &&
+      kids=$(printf '%s' "$json" | sed -n '/^  "children": \[/,/^  \]/p' | sed -n -e 's/^    "\([^"]*\)",$/\1/p' -e 's/^    "\([^"]*\)"$/\1/p'); then
+    printf '%s\n' "$kids" | LC_ALL=C sort -u | paste -sd, -
+  else
+    echo "== could not read the children of $TRAIN (yardr must answer); the tests are told no beads" >&2
+  fi
+}
 # gradle_fails prints the failing tests a Gradle run left in the worktree:
 # each testcase carrying a failure or an error in a TEST-*.xml file under
 # $WT, named classname.name. Gradle's own output says only how many failed,

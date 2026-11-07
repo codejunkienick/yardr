@@ -101,6 +101,10 @@
 # file with no row fails at 1000 lines, so run it before planning a change to a
 # file near or over 1000 lines, not after the gate has failed it. With a path it
 # reports that file alone.
+#
+# `sh .yardr/test sizes --rewrite` is what the landing runs on what it lands: it
+# lowers the table in this file to the tree it is run in (filesizerewrite), so
+# that no change edits the row of a file it shrinks. It is no gate run either.
 set -e
 filesizewarnings_done=
 # The settings of the yard's server are not the tests': a server one of them
@@ -1763,12 +1767,12 @@ sleepbudget() {
 # and why it is over. The gate counts every non-test .go file with wc -l;
 # a file over its ceiling or an unlisted file over 1000 lines fails every
 # run, while a ceiling standing above its file, or a row whose file is
-# gone, fails a plain run and passes at landing with a note: the landing
-# judges with this file as it is on the base, whose rows still stand above
-# the branch's shrunk files. The ceiling only falls: a shrinking change
-# lowers its file's row in the same commit, and nothing else edits a row.
-# The root package's test counts the rows against the tree, so delete the
-# row with the file.
+# gone, only warns: the landing settles it (filesizerewrite, which
+# merge-local and integrate-train run on what they land), so that two
+# changes that shrink the same file, or two neighbouring files, never
+# conflict on a row. The ceiling only falls: the landing lowers rows to
+# actual, and nothing else edits a row. The root package's test holds the
+# rows to non-test Go files.
 filesizes='
 internal/chat/chat.go 1070 the chat TUI model, state and rendering
 internal/cli/bead_ask.go 1292 the ask and answer commands with secret-giving and setup approval
@@ -1786,7 +1790,6 @@ internal/cli/updown.go 1302 yard up and down with their handoffs
 internal/cli/users.go 1055 the user command, inboxes and conversations
 internal/dispatch/dispatch.go 1567 the daemon routing pass and its runners
 internal/dispatch/harnesslogin.go 1094 harness login leading and onboarding marks
-internal/dispatch/prompt.go 929 prompt, dialog and login watching
 internal/pack/export.go 1047 pack export and its object shapes
 internal/pack/pack.go 1777 pack reading, checking and its shapes
 internal/rpc/user.go 1469 the user server and callers (pairing is userpair.go, envelopes usere2e.go)
@@ -1806,23 +1809,22 @@ internal/store/policy.go 1179 the permission gates and their rules
 internal/store/routing.go 3043 groups, routes and their config merges
 internal/store/runask.go 1074 run asks and their approval
 internal/store/runask_list.go 1223 ask cards, labels and preset reading
-internal/store/runask_more.go 938 the user run-ask cards
 internal/store/runask_setup.go 1537 the setup ask, its card, and the carrying record
 internal/store/secretask.go 1092 secret asks and harness key files
 internal/store/settings.go 1117 yard settings and their checks
 internal/store/sourcecalls.go 1241 source grants and callables
 internal/store/subscriptions.go 1210 identities, subscriptions and where-clauses
 internal/store/users.go 1301 user records and operator words
-internal/web/beads.go 647 the bead cards, flows and panels
 '
 # filesizebudget fails the run when a non-test Go file stands over its
 # ceiling in the table above, or when one with no row stands over 1000
 # lines. A ceiling standing above its file, or a row naming a file that is
-# gone, fails a plain run, so the change lowers the row; at landing
-# (YARDR_LANDING set) it passes with a note instead, since the landing
+# gone, only warns, whatever the run: the change leaves the row, and the
+# landing lowers or deletes it (filesizerewrite). At landing
+# (YARDR_LANDING set) it is a plain note instead, since the landing
 # judges with the base's copy of this script, whose higher rows remain
-# while the branch lowers or deletes the corresponding rows. The measure
-# is wc -l, the count the table was seeded
+# while the branch's copy, lowered before the run, holds the right ones.
+# The measure is wc -l, the count the table was seeded
 # with. The allow-list goes by file, as the reads table does: awk takes no
 # newline in -v. It says how many listed files the tree holds, so the
 # re-measure can count the oversize debt. Before formatting, vet, build and
@@ -1854,11 +1856,10 @@ filesizebudget() {
         } else if (ceil[f] > n) {
           if (landing != "") {
             printf "test: %s has %d lines, under its %d-line ceiling: landing keeps the higher base row (the branch lowers it)\n", f, n, ceil[f]
-            nseen++
           } else {
-            printf "test: %s has %d lines, under its %d-line ceiling: lower the row in the same change\n", f, n, ceil[f]
-            bad++
+            printf "test: warning: %s has %d lines, under its %d-line ceiling: the landing lowers the row\n", f, n, ceil[f]
           }
+          nseen++
         } else nseen++
         next
       }
@@ -1873,8 +1874,7 @@ filesizebudget() {
           if (landing != "") {
             printf "test: filesizes row %s names a file that is gone: landing keeps the base row (the branch deletes it)\n", f
           } else {
-            printf "test: filesizes row %s names a file that is gone: delete the row with the file\n", f
-            bad++
+            printf "test: warning: filesizes row %s names a file that is gone: the landing deletes the row\n", f
           }
         }
       }
@@ -1946,12 +1946,72 @@ filesizeview() {
       for (i = 1; i <= rows; i++) {
         f = order[i]
         if ((f in seen) || (want != "" && f != want)) continue
-        printf "test: sizes: %s gone, its row says %d: delete the row with the file\n", f, ceil[f]
+        printf "test: sizes: %s gone, its row says %d: the landing deletes the row\n", f, ceil[f]
         shown++
       }
       if (want != "" && !shown) printf "test: sizes: %s is no non-test Go file here\n", want
     }' "$table" - || true
   rm -f "$table"
+}
+# filesizerewrite lowers the table above to the tree it is run in, in the file
+# of this script itself: `sh .yardr/test sizes --rewrite`, which the landing
+# runs on what it lands (contrib/assembly/merge-local, and integrate-train for a
+# train). A change that shrinks a listed file then never edits its row, and two
+# that shrink the same file, or neighbours, cannot collide on those lines. A row
+# becomes its file's lines when they are fewer; a row whose file is gone, or is
+# at most 1000 lines and so needs none, is deleted; a row is never raised and
+# none is added. A file over its row is growth, or a row cut by hand below its
+# file, which no rewrite settles: the run fails naming the file and changes
+# nothing, as the budget fails it. A line says each change; a table already at
+# the tree prints nothing, and its file is not touched. The measure is the
+# budget's own (sizelines).
+filesizerewrite() {
+  if [ ! -f "$0" ] || ! grep -q "^filesizes='\$" "$0"; then
+    echo "test: sizes: $0 is no file with a filesizes table to rewrite"
+    return 1
+  fi
+  measure=$(mktemp)
+  rewritten=$(mktemp)
+  sizelines >"$measure"
+  rwst=0
+  awk -v out="$rewritten" '
+    FILENAME == ARGV[1] {
+      if ($2 == "total" || NF < 2) next
+      f = $0; sub(/^ *[0-9]+ +/, "", f); sub(/^\.\//, "", f)
+      lines[f] = $1 + 0
+      next
+    }
+    $0 == "filesizes=\047" { intable = 1; found = 1; print > out; next }
+    intable && $0 == "\047" { intable = 0; print > out; next }
+    intable && /^[^ ]+ [0-9]+ / {
+      f = $0; sub(/ .*/, "", f)
+      m = $0; sub(/^[^ ]+ /, "", m); sub(/ .*/, "", m); m += 0
+      why = $0; sub(/^[^ ]+ [0-9]+ /, "", why)
+      if (!(f in lines)) {
+        change[++changes] = sprintf("test: sizes: deleted the row of %s: the file is gone", f)
+      } else if (lines[f] > m) {
+        printf "test: sizes: %s has %d lines, over its %d-line ceiling: split it along a concept, a row is never raised\n", f, lines[f], m
+        bad++
+        print > out
+      } else if (lines[f] <= 1000) {
+        change[++changes] = sprintf("test: sizes: deleted the row of %s: its %d lines need none", f, lines[f])
+      } else if (lines[f] < m) {
+        change[++changes] = sprintf("test: sizes: lowered the row of %s from %d to %d", f, m, lines[f])
+        print f " " lines[f] " " why > out
+      } else print > out
+      next
+    }
+    { print > out }
+    END {
+      if (!found) { print "test: sizes: no filesizes table in the script"; exit 1 }
+      if (bad > 0) exit 1
+      for (i = 1; i <= changes; i++) print change[i]
+    }' "$measure" "$0" || rwst=$?
+  if [ "$rwst" = 0 ] && ! cmp -s "$rewritten" "$0"; then
+    cat "$rewritten" >"$0" || { echo "test: sizes: cannot write $0"; rwst=1; }
+  fi
+  rm -f "$measure" "$rewritten"
+  return "$rwst"
 }
 # filesizewarnings reports near-ceiling files once per gate run. The gate calls
 # it before formatting, vet, build and tests, and filesizebudget calls it too so
@@ -2216,7 +2276,15 @@ fi
 # the seconds a find does. It prints no test line, which would pass for the
 # record of a run, and it exits 0 whatever it finds, since it judges nothing.
 # A path is cut to the tree's own spelling, as a person or a tool names a file.
+# --rewrite is the other mode (filesizerewrite), the landing's: it changes the
+# table, and exits 1 for a file over its row.
 if [ "$1" = sizes ]; then
+  if [ "$2" = --rewrite ]; then
+    rwrc=0
+    filesizerewrite || rwrc=$?
+    trap - EXIT
+    exit "$rwrc"
+  fi
   path=${2#./}
   case $path in "$PWD"/*) path=${path#"$PWD"/} ;; esac
   filesizeview report "$path" || true

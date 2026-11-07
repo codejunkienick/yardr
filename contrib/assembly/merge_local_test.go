@@ -928,6 +928,372 @@ func TestMergeLocalTestScriptNewOnTheBranchRunsAsACommand(t *testing.T) {
 	}
 }
 
+// rowsScript is a depot's test command that carries a file size table the way
+// .yardr/test does, and lowers it when asked as that does: `sh check.sh sizes
+// --rewrite` makes the one row its file's lines, in the file itself, and fails
+// for a file over its row. What it judges otherwise is the fixtures' own, red
+// when the tree has a file RED. ROW is the row it starts with. It is a
+// stand-in: what the real script makes of a table is yardtest_test.go's, and
+// what the assembly makes of its answer is these tests'.
+const rowsScript = `#!/bin/sh
+filesizes='
+big.go ROW the one listed file
+'
+if [ "$1 $2" = "sizes --rewrite" ]; then
+  row=$(sed -n 's/^big.go \([0-9]*\) .*/\1/p' "$0")
+  have=$(wc -l <big.go | tr -d ' ')
+  if [ "$have" -gt "$row" ]; then
+    echo "big.go has $have lines, over its $row-line row"
+    exit 1
+  fi
+  text=$(sed "s/^big.go $row /big.go $have /" "$0"; echo x)
+  printf '%s' "${text%x}" >"$0"
+  exit 0
+fi
+test ! -e RED
+`
+
+// rowsYard is a yard whose depot tests with check.sh, the rowsScript, on a base
+// that holds it and big.go at lines lines with its row at row: right where both
+// are 12, stale where the row stands above the file. The bead's branch has them.
+func rowsYard(t *testing.T, row, lines int) *yard {
+	t.Helper()
+	y := newYard(t)
+	y.commit(y.repo, "check.sh", strings.ReplaceAll(rowsScript, "ROW", strconv.Itoa(row)))
+	y.commit(y.repo, "big.go", strings.Repeat("x\n", lines))
+	y.tests("check.sh")
+	y.git(y.wt, "merge", "-q", "--ff-only", "main")
+	return y
+}
+
+// A landing that shrinks a listed file lands with its row at the file's lines,
+// and the commit that lands is the bead's own, amended: the branch's table was
+// left alone, so two beads that shrink neighbouring files never touch the same
+// rows (yardr-pqnz).
+func TestMergeLocalLowersTheFileSizeTable(t *testing.T) {
+	y := rowsYard(t, 12, 12)
+	before := y.git(y.repo, "rev-parse", "main")
+	y.commit(y.wt, "big.go", strings.Repeat("x\n", 9))
+
+	y.assembly()
+
+	if b := y.bead(); b.Stage != "merged" || b.Status != "closed" {
+		t.Fatalf("bead %s/%s, want merged and closed:\n%s", b.Stage, b.Status, y.notes())
+	}
+	main := y.git(y.repo, "rev-parse", "main")
+	if n := y.git(y.repo, "rev-list", "--count", before+".."+main); n != "1" {
+		t.Fatalf("%s commits landed, want the bead's one, amended", n)
+	}
+	if msg := y.git(y.repo, "log", "-1", "--format=%B", main); msg != "big.go" {
+		t.Fatalf("the landed commit says %q, want the bead's message", msg)
+	}
+	if got := y.git(y.repo, "show", main+":check.sh"); !strings.Contains(got, "\nbig.go 9 the one listed file\n") {
+		t.Fatalf("main's table:\n%s\nwant big.go at 9", got)
+	}
+	if y.git(y.wt, "status", "--porcelain") != "" {
+		t.Fatal("the branch's worktree is not clean after landing")
+	}
+	if !strings.Contains(y.log, "== lowered the file size table in check.sh (amend on yard/r-1)") {
+		t.Fatalf("the log does not say the table was lowered:\n%s", y.log)
+	}
+}
+
+// A table that is already right is left as it is: no amend, so the commit the
+// bead was reviewed at is the commit that lands, and the log says nothing of
+// rows.
+func TestMergeLocalLeavesARightFileSizeTableAlone(t *testing.T) {
+	y := rowsYard(t, 12, 12)
+	tip := y.commit(y.wt, "b.txt", "bead\n")
+
+	y.assembly()
+
+	if got := y.git(y.repo, "rev-parse", "main"); got != tip {
+		t.Fatalf("main %s, want the branch's own commit %s", got, tip)
+	}
+	if strings.Contains(y.log, "lowered the file size table") {
+		t.Fatalf("the log says the table was lowered:\n%s", y.log)
+	}
+}
+
+// A row that stands below its file is a hand edit, or growth the gate would
+// fail: the bead is held where it is, naming the file, and the tests (red on the
+// RED file, which would send it back) never run on it.
+func TestMergeLocalHoldsARowBelowItsFile(t *testing.T) {
+	y := rowsYard(t, 12, 12)
+	main := y.git(y.repo, "rev-parse", "main")
+	y.commit(y.wt, "big.go", strings.Repeat("x\n", 14))
+	tip := y.commit(y.wt, "RED", "red\n")
+
+	y.assembly()
+
+	if b := y.bead(); !b.Hold || b.Stage != "approved" {
+		t.Fatalf("bead %s hold=%v, want held in approved", b.Stage, b.Hold)
+	}
+	notes := y.notes()
+	for _, want := range []string{"cannot be lowered to the files of yard/r-1", "big.go has 14 lines, over its 12-line row"} {
+		if !strings.Contains(notes, want) {
+			t.Fatalf("the hold lacks %q:\n%s", want, notes)
+		}
+	}
+	if got := y.git(y.repo, "rev-parse", "main"); got != main {
+		t.Fatal("main moved under a table that could not be lowered")
+	}
+	if got := y.git(y.wt, "rev-parse", "HEAD"); got != tip {
+		t.Fatal("the branch moved under a table that could not be lowered")
+	}
+	if y.git(y.wt, "status", "--porcelain") != "" {
+		t.Fatal("the branch's worktree is not clean after the hold")
+	}
+
+	for _, c := range []struct {
+		name   string
+		change string
+		want   string
+		moves  bool
+	}{
+		{
+			name:   "an unrelated worktree change",
+			change: "  printf 'unexpected\\n' >UNRELATED\n",
+			want:   "changed paths outside check.sh",
+		},
+		{
+			name:   "a branch commit",
+			change: "  git commit --quiet --allow-empty -m preflight-side-effect\n",
+			want:   "file size table rewrite moved yard/r-1",
+			moves:  true,
+		},
+		{
+			name:   "a line outside the table",
+			change: "  echo '# a line outside the table' >>check.sh\n",
+			want:   "changed lines outside the filesizes table",
+		},
+		{
+			name:   "a worktree moved off the branch",
+			change: "  git checkout --quiet --detach HEAD\n",
+			want:   "moved the worktree off yard/r-1",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			y := rowsYard(t, 12, 12)
+			main := y.git(y.repo, "rev-parse", "main")
+			script := strings.Replace(rowsScript, "  row=$(sed", c.change+"  row=$(sed", 1)
+			if script == rowsScript {
+				t.Fatal("could not add the rewrite side effect to the stand-in")
+			}
+			tip := y.commit(y.wt, "check.sh", script)
+
+			y.assembly()
+
+			if b := y.bead(); !b.Hold || b.Stage != "approved" {
+				t.Fatalf("bead %s hold=%v, want held in approved", b.Stage, b.Hold)
+			}
+			if !strings.Contains(y.notes(), c.want) {
+				t.Fatalf("the hold lacks %q:\n%s", c.want, y.notes())
+			}
+			if got := y.git(y.repo, "rev-parse", "main"); got != main {
+				t.Fatal("main moved after the rewrite side effect")
+			}
+			if got := y.git(y.wt, "rev-parse", "HEAD"); (got != tip) != c.moves {
+				t.Fatalf("branch moved=%v, want %v (tip %s, got %s)", got != tip, c.moves, tip, got)
+			}
+			if strings.Contains(y.log, "== the tests on") || strings.Contains(y.log, "== the tests") {
+				t.Fatalf("the gate ran after a rewrite side effect:\n%s", y.log)
+			}
+		})
+	}
+}
+
+// A rewrite that fails loudly holds with only the run's last bytes in the
+// note: the branch's output is untrusted, and the whole of it would land in
+// the bead's notes unbounded (yardr-pqnz).
+func TestMergeLocalTrimsALoudRewriteInTheHold(t *testing.T) {
+	y := rowsYard(t, 12, 12)
+	main := y.git(y.repo, "rev-parse", "main")
+	loud := "  echo HEAD-MARKER-OF-A-LOUD-REWRITE\n" +
+		"  i=0; while [ \"$i\" -lt 200 ]; do echo \"filler line $i of a loud rewrite\"; i=$((i + 1)); done\n" +
+		"  exit 1\n"
+	script := strings.Replace(rowsScript, "  row=$(sed", loud+"  row=$(sed", 1)
+	if script == rowsScript {
+		t.Fatal("could not make the stand-in loud")
+	}
+	tip := y.commit(y.wt, "check.sh", script)
+
+	y.assembly()
+
+	if b := y.bead(); !b.Hold || b.Stage != "approved" {
+		t.Fatalf("bead %s hold=%v, want held in approved", b.Stage, b.Hold)
+	}
+	notes := y.notes()
+	if !strings.Contains(notes, "cannot be lowered to the files of yard/r-1") {
+		t.Fatalf("the hold lacks its reason:\n%s", notes)
+	}
+	if strings.Contains(notes, "HEAD-MARKER-OF-A-LOUD-REWRITE") {
+		t.Fatalf("the hold keeps the rewrite's whole output:\n%s", notes)
+	}
+	if !strings.Contains(notes, "filler line 199 of a loud rewrite") {
+		t.Fatalf("the hold keeps none of the rewrite's tail:\n%s", notes)
+	}
+	if got := y.git(y.repo, "rev-parse", "main"); got != main {
+		t.Fatal("main moved under a rewrite that could not be lowered")
+	}
+	if got := y.git(y.wt, "rev-parse", "HEAD"); got != tip {
+		t.Fatal("the branch moved under a rewrite that could not be lowered")
+	}
+	if strings.Contains(y.log, "== the tests on") || strings.Contains(y.log, "== the tests") {
+		t.Fatalf("the gate ran after a rewrite that could not be lowered:\n%s", y.log)
+	}
+}
+
+// The lowering comes before the design check, so a design bead lands as ever on
+// a right table, and one on a base whose table was left high is held by the
+// check, naming the test script: what a design lands is its document and no
+// other path, the assembly's own edit to the table included.
+func TestMergeLocalDesignAndTheFileSizeTable(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		lines     int // big.go on the base, whose row says 12
+		landed    bool
+		holdNames []string
+	}{
+		{"a right table lets a design land", 12, true, nil},
+		{"a high table holds a design at its check", 9, false, []string{"docs/design", "check.sh"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			y := rowsYard(t, 12, c.lines)
+			main := y.git(y.repo, "rev-parse", "main")
+			y.yardr("bead", "update", "r-1", "--type", "design")
+			if err := os.MkdirAll(filepath.Join(y.wt, "docs", "design"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			y.commit(y.wt, "docs/design/2026-11-07-r-1-direction.md", "# direction\n")
+
+			y.assembly()
+
+			b := y.bead()
+			if c.landed {
+				if b.Stage != "merged" || b.Status != "closed" {
+					t.Fatalf("bead %s/%s, want merged and closed:\n%s", b.Stage, b.Status, y.notes())
+				}
+				return
+			}
+			if !b.Hold || b.Stage != "approved" {
+				t.Fatalf("bead %s hold=%v, want held in approved", b.Stage, b.Hold)
+			}
+			for _, want := range c.holdNames {
+				if !strings.Contains(y.notes(), want) {
+					t.Fatalf("the hold names no %q:\n%s", want, y.notes())
+				}
+			}
+			if got := y.git(y.repo, "rev-parse", "main"); got != main {
+				t.Fatal("main moved under a design held at its check")
+			}
+		})
+	}
+}
+
+// A wagon landing on its train's branch leaves the rows for the train, which
+// integrate-train lowers once for all its children: the wagon's own landing
+// there lowers nothing, as it runs the tests without YARDR_LANDING. A child of
+// another type landing on the same branch is a landing, and lowers as any does.
+func TestMergeLocalLeavesTheFileSizeTableToTheTrainOfAWagon(t *testing.T) {
+	y := rowsYard(t, 12, 12)
+	y.yardr("bead", "create", "the train", "--id", "r-e", "-d", "r", "-t", "train", "-s", "approved")
+	y.yardr("dep", "add", "r-e", "r-1", "-k", "parent")
+	y.yardr("bead", "update", "r-1", "--type", "wagon")
+	// The herdr runner made the train branch from main when the wagon started.
+	y.git(y.repo, "branch", "yard/r-e")
+	trainWas := y.git(y.repo, "rev-parse", "yard/r-e")
+	y.commit(y.wt, "big.go", strings.Repeat("x\n", 9))
+
+	y.assembly()
+
+	if b := y.bead(); b.Stage != "merged" || b.Status != "closed" {
+		t.Fatalf("wagon %s/%s, want merged and closed:\n%s", b.Stage, b.Status, y.notes())
+	}
+	if y.git(y.repo, "rev-list", "--count", trainWas+"..yard/r-e") != "1" {
+		t.Fatal("the wagon did not land on the train's branch")
+	}
+	if got := y.git(y.repo, "show", "yard/r-e:check.sh"); !strings.Contains(got, "\nbig.go 12 the one listed file\n") {
+		t.Fatalf("the wagon lowered the table on the train's branch:\n%s", got)
+	}
+	if strings.Contains(y.log, "lowered the file size table") {
+		t.Fatalf("the log says the table was lowered:\n%s", y.log)
+	}
+}
+
+// A branch with no commit past the base has no head of its own to amend: the
+// lowering is skipped, however high the base's table stands, and neither the
+// branch nor the base's head is rewritten.
+func TestMergeLocalLeavesTheBaseHeadWhenTheBranchHasNoCommit(t *testing.T) {
+	y := rowsYard(t, 12, 9)
+	main := y.git(y.repo, "rev-parse", "main")
+
+	y.assembly()
+
+	if b := y.bead(); b.Stage != "merged" || b.Status != "closed" {
+		t.Fatalf("bead %s/%s, want merged and closed:\n%s", b.Stage, b.Status, y.notes())
+	}
+	if got := y.git(y.repo, "rev-parse", "main"); got != main {
+		t.Fatalf("main moved to %s, want %s", got, main)
+	}
+	if got := y.git(y.wt, "rev-parse", "HEAD"); got != main {
+		t.Fatalf("the branch was rewritten to %s, want %s", got, main)
+	}
+	if strings.Contains(y.log, "lowered the file size table") {
+		t.Fatalf("the log says the table was lowered:\n%s", y.log)
+	}
+}
+
+// The two scripts that lower the table carry one block, copied: they are
+// installed one file each, so there is none to source. A change to it is made in
+// both, as to the copies of merge-local (TestMergeLocalCopiesIdentical).
+func TestLowerRowsIsTheSameInMergeLocalAndIntegrateTrain(t *testing.T) {
+	const open, closing = "# --- lowerrows: ", "# --- end of lowerrows ---\n"
+	want, got := markedBlock(t, "merge-local", open, closing), markedBlock(t, "integrate-train", open, closing)
+	if got != want {
+		t.Errorf("integrate-train's lowerrows differs from merge-local's: change both\nmerge-local:\n%s\nintegrate-train:\n%s", want, got)
+	}
+}
+
+// integrate-train lowers the table for the whole train, in a commit of its own
+// after the children's, which are not the assembly's to rewrite, and tests the
+// lowered branch: a wagon landing on the train's branch leaves the rows for it.
+func TestIntegrateTrainLowersTheFileSizeTableInACommitOfItsOwn(t *testing.T) {
+	y := landedTrainYard(t, "check.sh")
+	// The push of a branch the rebase below rewrote is another test's.
+	y.push = ""
+	y.commit(y.repo, "check.sh", strings.ReplaceAll(rowsScript, "ROW", "12"))
+	y.commit(y.repo, "big.go", strings.Repeat("x\n", 12))
+	main := y.git(y.repo, "rev-parse", "main")
+	// The train has caught up with main, and a wagon landed on it that
+	// shrank the listed file.
+	wt := filepath.Join(y.home, "worktrees", "r", "r-e")
+	y.git(y.repo, "worktree", "add", "-q", wt, "yard/r-e")
+	y.git(wt, "rebase", "-q", "main")
+	wagon := y.commit(wt, "big.go", strings.Repeat("x\n", 9))
+
+	y.exec("integrate-train", "yard-integrators", "r-e")
+
+	if e := y.beadOf("r-e"); e.Stage != "review" || e.Status != "open" || e.Hold {
+		t.Fatalf("train %s/%s hold=%v, want review:\n%s", e.Stage, e.Status, e.Hold, y.notesOf("r-e"))
+	}
+	if got := y.git(y.repo, "log", "-1", "--format=%s", "yard/r-e"); got != "assembly: lower filesizes rows to actual" {
+		t.Fatalf("the train's tip says %q, want the lowering's commit", got)
+	}
+	if got := y.git(y.repo, "rev-parse", "yard/r-e~1"); got != wagon {
+		t.Fatalf("the commit under the lowering is %s, want the wagon's own %s", got, wagon)
+	}
+	if got := y.git(y.repo, "show", "yard/r-e:check.sh"); !strings.Contains(got, "\nbig.go 9 the one listed file\n") {
+		t.Fatalf("the train's table:\n%s\nwant big.go at 9", got)
+	}
+	if got := y.git(y.repo, "rev-parse", "main"); got != main {
+		t.Fatal("main moved when a train was integrated")
+	}
+	if y.git(wt, "status", "--porcelain") != "" {
+		t.Fatal("the train's worktree is not clean after integrating")
+	}
+}
+
 // With main checked out nowhere, landing moves only the ref. A flow without
 // a merged stage gets the bead closed instead.
 func TestMergeLocalBaseNotCheckedOut(t *testing.T) {

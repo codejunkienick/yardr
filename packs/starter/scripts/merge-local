@@ -26,7 +26,10 @@
 # For each bead it brings the base up to YARDR_PUSH, fast-forward only (a
 # base that diverged from the remote's branch fails the landing, never
 # merged or forced here), rebases the branch onto the base if the base
-# moved, keeps the machine's disk (yardr disk keep), runs the depot's test
+# moved, lowers the file size table of a test command that carries one to the
+# branch's files (lowerrows, below: an amend of the branch's head, and a hold
+# when a row stands below its file), keeps the machine's disk (yardr disk
+# keep), runs the depot's test
 # command on exactly what will land, fast-forwards the base to the commit
 # it tested, installs the landed build
 # where the yard's upgrade_from setting names the depot, and advances the
@@ -320,6 +323,135 @@ Rebase $BR onto $BASE, keep both changes' intent, run the tests again."
   fi
 fi
 
+# --- closefds: the same text in merge-local, integrate-train, pr-ci, deploy-dokku and deploy-void (a test holds them equal) ---
+# closefds closes every descriptor above 2 that the subshell it is called in
+# inherited, so that what the subshell starts holds none the landing did not
+# give it: the daemon's leaked resolver sockets once reached the tests and
+# starved them (yardr-b4ep), and an orphaned sleep once held the machine race
+# lock (yardr-tsms).
+#
+# 3 to 9 are closed by name, which every sh reads. Above them /dev/fd is
+# enumerated, so that no number is missed; the loop has no redirection, since
+# the shell saves fd 2 above 10 for one and would close the save from under
+# itself. When the listing itself fails, closefds refuses what it never
+# saw: a run that cannot prove its descriptors closed must not start.
+# But dash reads one digit as a redirection's number: there
+# `exec 10>&-` is the command `10` with its output closed, and a special
+# builtin that fails ends the shell. A subshell asks first. An sh that cannot
+# name them leaves them open, and closefds returns 1 with their numbers in
+# $leftover; given the name of what the caller is about to start, it says so
+# and exits 2 instead, the code for a run that could not be made rather than
+# a failed one (the assembly scripts hold on it: no builder can fix it).
+# Nothing hands this script such a descriptor since the daemon marks its own
+# close-on-exec before it starts one, so one that arrives comes from a source
+# that has regressed, which is why it is refused and not skipped.
+closefds() {
+  exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
+  leftover=
+  highok=1
+  (eval 'exec 10>&-') >/dev/null 2>&1 || highok=
+  for path in /dev/fd/*; do
+    if [ "$path" = "/dev/fd/*" ]; then
+      # An unmatched glob expands to itself: the listing failed, so no
+      # descriptor was seen, let alone closed. Refuse rather than
+      # report them closed.
+      leftover="$leftover ?"
+      break
+    fi
+    fd=${path##*/}
+    case "$fd" in ''|*[!0-9]*|?) continue ;; esac
+    if [ -n "$highok" ]; then
+      eval "exec $fd>&-"
+    elif [ -e "$path" ] || [ -L "$path" ]; then
+      leftover="$leftover $fd"
+    fi
+  done
+  [ -z "$leftover" ] && return 0
+  [ -n "${1:-}" ] || return 1
+  echo "${0##*/}: descriptors$leftover are open above 9 and this sh cannot close them; not starting $1 with them" >&2
+  exit 2
+}
+# --- end of closefds ---
+
+# --- lowerrows: the same text in merge-local and integrate-train (a test holds them equal) ---
+# lowerrows lowers the file size table of the depot's test command to the files
+# of the branch, so that a change that shrinks or deletes a listed file never
+# edits its row, and two that shrink neighbouring files cannot conflict on those
+# lines. It acts where the test command is one file of the branch that carries
+# such a table (a line `filesizes='`), and asks that file for it: `sh <it> sizes
+# --rewrite` in the worktree. The branch's copy, since it is the branch's own
+# table that is rewritten; what judges the branch stays the base's copy. A
+# change to the file is made a commit of the branch: `amend` takes it into the
+# branch's head, `commit` makes a commit of its own, for a head that is not the
+# assembly's to rewrite. The script is the branch's own, and runs after
+# closefds with no stdin; it may only leave its own table changed, since what
+# it left elsewhere would land in the file that judges the next bead, which
+# this run never executes. Neither branch nor base may move, the worktree stays
+# on the branch, and it may not stage changes, touch another path, or change a
+# line outside the table. Only the run's last bytes are kept, for the hold a
+# failing run ends in. A table already right prints nothing and
+# touches nothing. A rewrite that fails holds: it says a row stands below its
+# file, which no landing may paper over and only a person settles.
+lowerrows() {
+  lr_test=${YARDR_TEST:-}
+  [ -n "$lr_test" ] || return 0
+  [ "$(git -C "$WT" cat-file -t "HEAD:$lr_test" 2>/dev/null)" = blob ] || return 0
+  [ -f "$WT/$lr_test" ] && [ ! -L "$WT/$lr_test" ] || return 0
+  grep -q "^filesizes='\$" "$WT/$lr_test" || return 0
+  lr_head=$(git -C "$REPO" rev-parse "refs/heads/$BR") || hold "cannot record $BR before lowering its file size table"
+  lr_base=$(git -C "$REPO" rev-parse "refs/heads/$BASE") || hold "cannot record $BASE before lowering the file size table"
+  lr_log=$(mktemp "${TMPDIR:-/tmp}/lowerrows.XXXXXX") || hold "cannot make a file for the file size table rewrite's output"
+  (cd "$WT" && { closefds "the file size table rewrite"; sh "$lr_test" sizes --rewrite; }) >"$lr_log" 2>&1 </dev/null && lr_ok=1 || lr_ok=
+  lr_out=$(tail -c 4000 "$lr_log")
+  rm -f "$lr_log"
+  [ -n "$lr_ok" ] ||
+    hold "the file size table in $lr_test cannot be lowered to the files of $BR, so nothing lands:
+$lr_out
+Correct the table, or split the file it names, then unhold."
+  [ -f "$WT/$lr_test" ] && [ ! -L "$WT/$lr_test" ] ||
+    hold "the file size table rewrite removed or replaced $lr_test; nothing lands"
+  [ "$(git -C "$WT" symbolic-ref -q HEAD)" = "refs/heads/$BR" ] ||
+    hold "the file size table rewrite moved the worktree off $BR; nothing lands"
+  lr_now=$(git -C "$REPO" rev-parse "refs/heads/$BR") || hold "cannot read $BR after lowering its file size table"
+  [ "$lr_now" = "$lr_head" ] || hold "the file size table rewrite moved $BR from $lr_head to $lr_now; nothing lands"
+  lr_now_base=$(git -C "$REPO" rev-parse "refs/heads/$BASE") || hold "cannot read $BASE after lowering the file size table"
+  [ "$lr_now_base" = "$lr_base" ] || hold "the file size table rewrite moved $BASE from $lr_base to $lr_now_base; nothing lands"
+  git -C "$WT" diff --cached --quiet || hold "the file size table rewrite staged changes; nothing lands"
+  lr_changes=$(git -C "$WT" status --porcelain --untracked-files=all) || hold "cannot check the worktree after lowering the file size table"
+  lr_table_change=$(git -C "$WT" status --porcelain --untracked-files=all -- ":(literal)$lr_test") || hold "cannot check $lr_test after lowering the file size table"
+  [ "$lr_changes" = "$lr_table_change" ] || hold "the file size table rewrite changed paths outside $lr_test; nothing lands:
+$lr_changes
+Correct the rewrite command, then unhold."
+  lr_old=$(git -C "$WT" show "HEAD:$lr_test" | awk '$0=="filesizes=\047"&&!found{intable=1;found=1;next} intable&&$0=="\047"{intable=0;next} !intable' | git -C "$WT" hash-object --stdin) ||
+    hold "cannot read the committed $lr_test to check the file size table rewrite"
+  lr_new=$(awk '$0=="filesizes=\047"&&!found{intable=1;found=1;next} intable&&$0=="\047"{intable=0;next} !intable' "$WT/$lr_test" | git -C "$WT" hash-object --stdin) ||
+    hold "cannot read the rewritten $lr_test to check the file size table rewrite"
+  [ "$lr_old" = "$lr_new" ] || hold "the file size table rewrite changed lines outside the filesizes table in $lr_test; nothing lands"
+  git -C "$WT" diff --quiet -- ":(literal)$lr_test" && return 0
+  printf '%s\n' "$lr_out"
+  git -C "$WT" add -- "$lr_test" || hold "cannot add the lowered file size table in $lr_test to $BR"
+  if [ "$1" = amend ]; then
+    git -C "$WT" commit -q --amend --no-edit --no-verify
+  else
+    git -C "$WT" commit -q --no-verify -m "assembly: lower filesizes rows to actual"
+  fi || {
+    git -C "$WT" checkout -q HEAD -- "$lr_test"
+    hold "cannot commit the lowered file size table in $lr_test to $BR"
+  }
+  echo "== lowered the file size table in $lr_test ($1 on $BR)"
+}
+# --- end of lowerrows ---
+# A wagon lands on its train's branch when all three hold, as the exec runner
+# says them: the type, a train, and that train's branch as the base. The rows
+# are lowered once for the train, not by each wagon (integrate-train), and a
+# branch with no commit past the base has no head that is its own to amend.
+ONTRAIN=
+if [ "${YARDR_TYPE:-}" = wagon ] && [ -n "${YARDR_TRAIN:-}" ] && [ "$BASE" = "yard/$YARDR_TRAIN" ]; then
+  ONTRAIN=1
+elif [ "$(git -C "$REPO" rev-list --count "refs/heads/$BASE..refs/heads/$BR")" != 0 ]; then
+  lowerrows amend
+fi
+
 # A design bead lands a document, never code: a design branch that changes a
 # path outside docs/design/ is held here, naming every such path, before the
 # tests run on what cannot land. The branch is final (rebased above), and
@@ -591,68 +723,19 @@ fi
 #
 # YARDR_LANDING=1 is unset only for a wagon that lands on its train's branch,
 # where the train is still tested as a whole before the depot's base moves
-# (integrate-train). All three must hold, as the exec runner says them: the
-# type, a train, and that train's branch as the base. A wagon with no train
+# (integrate-train). All three must hold (ONTRAIN, set above after the rebase):
+# the type, a train, and that train's branch as the base. A wagon with no train
 # lands on the depot's base, so it is a landing, as is anything run by a
 # yardr that does not say the type and the train. YARDR_BASE is the train's
 # branch then, which the wagon was just rebased onto: a command that tests
 # what changed since the base tests what this wagon changed.
 LANDING=1 RUN="the tests" TRAIN=${YARDR_TRAIN:-}
-if [ "${YARDR_TYPE:-}" = wagon ] && [ -n "$TRAIN" ] && [ "$BASE" = "yard/$TRAIN" ]; then
+if [ -n "$ONTRAIN" ]; then
   LANDING='' RUN="the wagon's tests"
   echo "== $BEAD is a wagon of train $TRAIN: tested without YARDR_LANDING here, the landing run is the train's"
 fi
 TEST=${YARDR_TEST:-}
 LIMIT=${YARDR_TEST_TIMEOUT:-1800}
-# --- closefds: the same text in merge-local, integrate-train, pr-ci, deploy-dokku and deploy-void (a test holds them equal) ---
-# closefds closes every descriptor above 2 that the subshell it is called in
-# inherited, so that what the subshell starts holds none the landing did not
-# give it: the daemon's leaked resolver sockets once reached the tests and
-# starved them (yardr-b4ep), and an orphaned sleep once held the machine race
-# lock (yardr-tsms).
-#
-# 3 to 9 are closed by name, which every sh reads. Above them /dev/fd is
-# enumerated, so that no number is missed; the loop has no redirection, since
-# the shell saves fd 2 above 10 for one and would close the save from under
-# itself. When the listing itself fails, closefds refuses what it never
-# saw: a run that cannot prove its descriptors closed must not start.
-# But dash reads one digit as a redirection's number: there
-# `exec 10>&-` is the command `10` with its output closed, and a special
-# builtin that fails ends the shell. A subshell asks first. An sh that cannot
-# name them leaves them open, and closefds returns 1 with their numbers in
-# $leftover; given the name of what the caller is about to start, it says so
-# and exits 2 instead, the code for a run that could not be made rather than
-# a failed one (the assembly scripts hold on it: no builder can fix it).
-# Nothing hands this script such a descriptor since the daemon marks its own
-# close-on-exec before it starts one, so one that arrives comes from a source
-# that has regressed, which is why it is refused and not skipped.
-closefds() {
-  exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
-  leftover=
-  highok=1
-  (eval 'exec 10>&-') >/dev/null 2>&1 || highok=
-  for path in /dev/fd/*; do
-    if [ "$path" = "/dev/fd/*" ]; then
-      # An unmatched glob expands to itself: the listing failed, so no
-      # descriptor was seen, let alone closed. Refuse rather than
-      # report them closed.
-      leftover="$leftover ?"
-      break
-    fi
-    fd=${path##*/}
-    case "$fd" in ''|*[!0-9]*|?) continue ;; esac
-    if [ -n "$highok" ]; then
-      eval "exec $fd>&-"
-    elif [ -e "$path" ] || [ -L "$path" ]; then
-      leftover="$leftover $fd"
-    fi
-  done
-  [ -z "$leftover" ] && return 0
-  [ -n "${1:-}" ] || return 1
-  echo "${0##*/}: descriptors$leftover are open above 9 and this sh cannot close them; not starting $1 with them" >&2
-  exit 2
-}
-# --- end of closefds ---
 # The beads the tests are of, which the test command is told in
 # YARDR_TEST_BEADS when a train lands: set before the run, below.
 BEADS=
