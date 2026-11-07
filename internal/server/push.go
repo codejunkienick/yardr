@@ -93,7 +93,11 @@ func (s *pushSender) once(ctx context.Context) {
 			// pass sends them again with the same ids.
 			return
 		}
-		if _, err := s.st.FootSent(ctx, f.EventID); err != nil && ctx.Err() == nil {
+		// Recorded for the try the row was listed as, by its attempts: the
+		// relay's answer is read on its own goroutine and may already have
+		// asked for this try again, and a send recorded after that ask would
+		// undo the wait it set.
+		if _, err := s.st.FootSent(ctx, f.EventID, f.Attempts); err != nil && ctx.Err() == nil {
 			s.log.Warn("push: a footplate send is not recorded", "event", f.EventID, "err", err)
 		}
 	}

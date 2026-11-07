@@ -539,11 +539,13 @@ func TestFootSweepAndRetry(t *testing.T) {
 		t.Fatalf("due while the first waits out its retry = %+v", rows)
 	}
 	y.now = y.now.Add(6 * time.Second)
-	if rows := y.due(t); len(rows) != 2 {
+	rows = y.due(t)
+	if len(rows) != 2 || rows[0].EventID != first || rows[0].Attempts != 1 {
 		t.Fatalf("due after the retry waits out = %+v", rows)
 	}
 
-	if found, err := y.FootSent(y.ctx, first); err != nil || !found {
+	// The sender records a send with the attempts its row was listed with.
+	if found, err := y.FootSent(y.ctx, first, rows[0].Attempts); err != nil || !found {
 		t.Fatalf("sent = %v, %v", found, err)
 	}
 	if rows := y.due(t); len(rows) != 1 || rows[0].EventID != second {
@@ -572,7 +574,7 @@ func TestFootSweepAndRetry(t *testing.T) {
 	if kept, err := y.FootRetry(y.ctx, "no such event"); err != nil || kept {
 		t.Fatalf("retry unknown = %v, %v", kept, err)
 	}
-	if found, err := y.FootSent(y.ctx, "no such event"); err != nil || found {
+	if found, err := y.FootSent(y.ctx, "no such event", 0); err != nil || found {
 		t.Fatalf("sent unknown = %v, %v", found, err)
 	}
 
@@ -593,7 +595,7 @@ func TestFootSweepAndRetry(t *testing.T) {
 		t.Fatalf("due = %+v", rows)
 	}
 	for _, f := range rows {
-		if _, err := y.FootSent(y.ctx, f.EventID); err != nil {
+		if _, err := y.FootSent(y.ctx, f.EventID, f.Attempts); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -621,7 +623,7 @@ func TestFootSweepAndRetry(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("due = %+v", rows)
 	}
-	if _, err := y.FootSent(y.ctx, rows[0].EventID); err != nil {
+	if _, err := y.FootSent(y.ctx, rows[0].EventID, rows[0].Attempts); err != nil {
 		t.Fatal(err)
 	}
 	if kept, err := y.FootRetry(y.ctx, rows[0].EventID); err != nil || !kept {
@@ -630,5 +632,37 @@ func TestFootSweepAndRetry(t *testing.T) {
 	y.now = y.now.Add(6 * time.Second)
 	if rows := y.due(t); len(rows) != 2 {
 		t.Fatalf("due after the retry waits out = %+v", rows)
+	}
+
+	// The refusal can also be recorded before the send it answers: the
+	// sender records a send only after it wrote the frame, while the relay's
+	// answer is read on its own goroutine. That send is of the try the
+	// refusal ended, and is not recorded, so the retry still waits out
+	// RetryAt alone, not an ack that is over.
+	for _, f := range y.due(t) {
+		if _, err := y.FootLanded(y.ctx, f.EventID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := y.Mail(y.ctx, "ada", "and again", "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	rows = y.due(t)
+	if len(rows) != 2 {
+		t.Fatalf("due = %+v", rows)
+	}
+	asked, other := rows[0], rows[1]
+	if kept, err := y.FootRetry(y.ctx, asked.EventID); err != nil || !kept {
+		t.Fatalf("retry = %v, %v", kept, err)
+	}
+	if found, err := y.FootSent(y.ctx, asked.EventID, asked.Attempts); err != nil || !found {
+		t.Fatalf("sent after the retry = %v, %v", found, err)
+	}
+	if rows := y.due(t); len(rows) != 1 || rows[0].EventID != other.EventID {
+		t.Fatalf("due while the asked row waits out its retry = %+v", rows)
+	}
+	y.now = y.now.Add(6 * time.Second)
+	if rows := y.due(t); len(rows) != 2 {
+		t.Fatalf("due after the retry waits out, its send recorded late = %+v", rows)
 	}
 }

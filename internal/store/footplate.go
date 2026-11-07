@@ -624,9 +624,17 @@ func (s *Store) FootLinkReturned(ctx context.Context) error {
 }
 
 // FootSent records that the row with the event id was sent and waits for
-// the relay's ack. False when no row stands for it: acked and gone
-// already. It is the server's to ask, and no method of the API.
-func (s *Store) FootSent(ctx context.Context, id string) (bool, error) {
+// the relay's ack. attempts is the row's Attempts as FootDue listed it, so
+// that a send is recorded only for the try it was: the sender writes the
+// frame before it records the send, and the relay's answer is read on its
+// own goroutine, so a refusal that asks for the try again (FootRetry, which
+// adds an attempt) can land first. That refusal ended the wait for the ack;
+// recording the send after it would start the wait again and hold the retry
+// for FootResendAfter instead of the wait it asked for. Where the row's
+// Attempts has moved since, the row stands, found is true and nothing is
+// recorded. False when no row stands for it: acked and gone already. It is
+// the server's to ask, and no method of the API.
+func (s *Store) FootSent(ctx context.Context, id string, attempts int) (bool, error) {
 	found := false
 	err := s.write(func(w *wtx) error {
 		key, err := footByID(w.Tx, id)
@@ -637,9 +645,12 @@ func (s *Store) FootSent(ctx context.Context, id string) (bool, error) {
 		if _, err := get(w.Tx, bFoot, key, &f); err != nil {
 			return err
 		}
+		found = true
+		if f.Attempts != attempts {
+			return nil
+		}
 		at := now()
 		f.LastSent = &at
-		found = true
 		return put(w.Tx, bFoot, key, f)
 	})
 	return found, err
@@ -663,10 +674,12 @@ func (s *Store) FootLanded(ctx context.Context, id string) (bool, error) {
 
 // FootRetry records that the relay asked for another try, after a wait
 // that doubles from FootRetryBase up to FootRetryMax. The wait for its
-// ack ends with the refusal: the retry waits out RetryAt alone. Past
-// FootTries tries the row goes instead, and kept is false; so it is when
-// no row stands for it. The refusal text stays out of the store. This is
-// the server's to ask, and no method of the API.
+// ack ends with the refusal: the retry waits out RetryAt alone. The
+// attempt it adds is also how FootSent knows a send it is asked to record
+// is of a try this refusal ended. Past FootTries tries the row goes
+// instead, and kept is false; so it is when no row stands for it. The
+// refusal text stays out of the store. This is the server's to ask, and no
+// method of the API.
 func (s *Store) FootRetry(ctx context.Context, id string) (kept bool, err error) {
 	err = s.write(func(w *wtx) error {
 		key, err := footByID(w.Tx, id)
