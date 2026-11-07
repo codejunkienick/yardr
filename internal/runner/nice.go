@@ -33,23 +33,37 @@ func niceOf(pid int) (int, error) {
 	return n, nil
 }
 
-// underNice has cmd run under nice(1) when the niceness want is above this
-// process's, which cmd would start with, by the difference: nice adds to the
-// niceness it starts with. It is a wrapper and not a renice after the start
-// because a shell forks its first commands at once, and those would keep the
-// niceness they began with. nice execs the command, so the pid is the same.
-// It is given the program by the path os/exec found for it: it would look
-// the program up by the PATH of cmd.Env, which an env_file sets.
+// niceBy is how much nice(1) is told to add to the niceness own, which a
+// command would start with, for it to run at want: the difference, since nice
+// adds to the niceness it starts with. It is 0 for a want that is no more than
+// own, and for a want of 0: a group that asks for none starts as it would
+// without the key, which for a process started below 0 (with privilege, or by a
+// runner whose processes all start so) is below 0, and a comparison with own
+// alone would raise the command to 0.
+func niceBy(want, own int) int {
+	if want <= 0 || want <= own {
+		return 0
+	}
+	return want - own
+}
+
+// underNice has cmd run under nice(1) when niceBy finds a niceness to add to
+// this process's, which cmd would start with. It is a wrapper and not a renice
+// after the start because a shell forks its first commands at once, and those
+// would keep the niceness they began with. nice execs the command, so the pid
+// is the same. It is given the program by the path os/exec found for it: it
+// would look the program up by the PATH of cmd.Env, which an env_file sets.
 func underNice(cmd *exec.Cmd, want int) error {
 	own, _ := niceOf(os.Getpid()) // a process is always allowed to ask about itself
-	if want <= own {
+	by := niceBy(want, own)
+	if by == 0 {
 		return nil
 	}
 	nice, err := exec.LookPath("nice")
 	if err != nil {
 		return err
 	}
-	cmd.Args = append([]string{"nice", "-n", strconv.Itoa(want - own), cmd.Path}, cmd.Args[1:]...)
+	cmd.Args = append([]string{"nice", "-n", strconv.Itoa(by), cmd.Path}, cmd.Args[1:]...)
 	cmd.Path = nice
 	return nil
 }

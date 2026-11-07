@@ -33,6 +33,13 @@ func psNice(t *testing.T, pid int) int {
 	return n
 }
 
+// above is own plus by, for a test to ask a group for a niceness above that of
+// a process at own. A group's is 0 to store.MaxNice and 0 asks for none, so
+// where the process started below 0, as every process of some CI runners does,
+// it counts from 0: own+by would be one no group can ask for. It can pass
+// store.MaxNice, which a test that cannot ask for that skips or caps.
+func above(own, by int) int { return max(own, 0) + by }
+
 // paneShell is a stand-in for the shell of a herdr pane, run under nice by
 // extra as a herdr started at a niceness would have it: a process that has
 // started nothing yet, whose pid a test gives the fake herdr as the pane's
@@ -88,14 +95,14 @@ func TestNiceShell(t *testing.T) {
 		ask    func(shell int) int // what the group asks for, from the niceness the shell starts at
 		raised bool                // the shell ends at what is asked, and not where it was
 	}{
-		{"raised to what is asked", 0, func(shell int) int { return shell + 5 }, true},
+		{"raised to what is asked", 0, func(shell int) int { return above(shell, 5) }, true},
 		{"nicer than asked already", 15, func(shell int) int { return shell - 5 }, false},
 		{"asked for the niceness it has", 0, func(shell int) int { return shell }, false},
 		{"no niceness asked", 0, func(int) int { return 0 }, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			if c.raised && own+5 > store.MaxNice {
+			if c.raised && above(own, 5) > store.MaxNice {
 				t.Skipf("no niceness a group can ask for is nicer than %d", own)
 			}
 			pid, release := paneShell(t, c.extra)
@@ -133,7 +140,9 @@ func TestNiceShell(t *testing.T) {
 
 // A command is run under nice only when the niceness asked for is above the
 // one this process has, which the command would start with, and by the
-// difference: nice(1) adds to it. The shell goes to nice by its path.
+// difference: nice(1) adds to it. A group that asks for none (0) is left
+// alone, whatever this process's niceness is. The shell goes to nice by its
+// path.
 func TestUnderNiceWrapsByTheDifference(t *testing.T) {
 	t.Parallel()
 	nice, err := exec.LookPath("nice")
@@ -142,6 +151,7 @@ func TestUnderNiceWrapsByTheDifference(t *testing.T) {
 	}
 	own, err := niceOf(os.Getpid())
 	mustT(t, err)
+	up := above(own, 3)
 	for _, c := range []struct {
 		name   string
 		want   int
@@ -150,13 +160,13 @@ func TestUnderNiceWrapsByTheDifference(t *testing.T) {
 	}{
 		{"none asked", 0, 0, false},
 		{"as nice as this process", own, 0, false},
-		{"nicer than this process", own + 3, 3, own+3 > store.MaxNice},
-		{"less nice than this process", own - 1, 0, own == 0},
+		{"nicer than this process", up, up - own, up > store.MaxNice},
+		{"less nice than this process", own - 1, 0, own <= 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			if c.absent {
-				t.Skipf("no such niceness above %d", own)
+				t.Skipf("nothing to show at niceness %d", own)
 			}
 			cmd := exec.Command("sh", "-c", "true")
 			sh := cmd.Path
@@ -175,6 +185,34 @@ func TestUnderNiceWrapsByTheDifference(t *testing.T) {
 	}
 }
 
+// What nice(1) is told to add is the difference between the niceness asked for
+// and the one the process has, and nothing where the group asked for none or
+// for no more than the process has. The tests above read the process's own
+// niceness, which none of them can lower, so they meet a start below 0 only in
+// a run that began so (some CI runners start every process at -10); this table
+// gives it on any machine.
+func TestNiceBy(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name      string
+		want, own int
+		by        int
+	}{
+		{"none asked", 0, 0, 0},
+		{"none asked, process above 0", 0, 10, 0},
+		{"none asked, process below 0", 0, -10, 0},
+		{"as nice as the process", 5, 5, 0},
+		{"less nice than the process", 3, 5, 0},
+		{"nicer than the process", 8, 5, 3},
+		{"nicer than a process at 0", 3, 0, 3},
+		{"nicer than a process below 0", 5, -10, 15},
+	} {
+		if got := niceBy(c.want, c.own); got != c.by {
+			t.Errorf("%s: niceBy(%d, %d) = %d, want %d", c.name, c.want, c.own, got, c.by)
+		}
+	}
+}
+
 // A group's nice runs its command, and everything the command starts, at that
 // niceness from its first instruction (yardr-7a36): the shell and a child of
 // it both say so. A group without the key, or with 0, starts as it did. A
@@ -183,14 +221,14 @@ func TestUnderNiceWrapsByTheDifference(t *testing.T) {
 func TestExecRunsAtTheGroupsNiceness(t *testing.T) {
 	t.Parallel()
 	own := psNice(t, os.Getpid())
-	raised := min(own+5, store.MaxNice)
+	raised := min(above(own, 5), store.MaxNice)
 	for _, c := range []struct {
 		name string
 		cfg  map[string]any
 		want int
 		skip bool
 	}{
-		{"asked", map[string]any{"nice": raised}, raised, raised == own},
+		{"asked", map[string]any{"nice": raised}, raised, raised <= own},
 		{"not set", nil, own, false},
 		{"zero", map[string]any{"nice": 0}, own, false},
 	} {
@@ -230,14 +268,14 @@ func TestExecRunsAtTheGroupsNiceness(t *testing.T) {
 func TestHerdrStartNicesTheShellBeforeTheAgent(t *testing.T) {
 	t.Parallel()
 	own := psNice(t, os.Getpid())
-	raised := min(own+5, store.MaxNice)
+	raised := min(above(own, 5), store.MaxNice)
 	for _, c := range []struct {
 		name string
 		cfg  map[string]any
 		want int
 		skip bool
 	}{
-		{"asked", map[string]any{"nice": raised}, raised, raised == own},
+		{"asked", map[string]any{"nice": raised}, raised, raised <= own},
 		{"not set", nil, own, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -283,7 +321,8 @@ esac`)}
 func TestExecNiceNeedsNice(t *testing.T) {
 	// Serial: sets PATH.
 	own := psNice(t, os.Getpid()) // before PATH is changed: it runs ps
-	if own == store.MaxNice {
+	ask := above(own, 1)
+	if ask > store.MaxNice {
 		t.Skipf("nothing to show at niceness %d", own)
 	}
 	sh, err := exec.LookPath("sh")
@@ -308,7 +347,7 @@ func TestExecNiceNeedsNice(t *testing.T) {
 	if err := start(map[string]any{"nice": 0}); err != nil {
 		t.Errorf("a group that asks for no niceness looked for nice: %v", err)
 	}
-	if err := start(map[string]any{"nice": own + 1}); err == nil || !dispatch.IsRuntime(err) || !strings.Contains(err.Error(), `"nice"`) {
+	if err := start(map[string]any{"nice": ask}); err == nil || !dispatch.IsRuntime(err) || !strings.Contains(err.Error(), `"nice"`) {
 		t.Errorf("a group that asks for a niceness, with no nice to run its command under, started: %v; want the runtime's failure naming nice", err)
 	}
 }
