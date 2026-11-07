@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"yardr.dev/yardr/internal/rpc"
 	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/standin"
 	"yardr.dev/yardr/internal/store"
@@ -327,7 +329,14 @@ printf '{"messages":[{"id":1,"from":"ada"}],"private":"not selected"}'
 	slow := jo.callCmd()
 	slow.SetContext(callCtx)
 	_, timeoutErr := run(t, slow, "mail", "search", "folder=SLOW")
-	if timeoutErr == nil || !strings.Contains(timeoutErr.Error(), "no answer before the caller's deadline") {
+	// The caller's deadline reaches the command in process, which says whose it
+	// was. Over the socket the client's own ends the call before the server can
+	// answer, so what it gets is the transport's error.
+	if _, socket := st.(*rpc.Client); socket {
+		if !errors.Is(timeoutErr, context.DeadlineExceeded) {
+			t.Fatalf("a call that times out over the socket = %v", timeoutErr)
+		}
+	} else if timeoutErr == nil || !strings.Contains(timeoutErr.Error(), "no answer before the caller's deadline") {
 		t.Fatalf("a call that times out = %v", timeoutErr)
 	}
 	if _, err := os.Stat(filepath.Join(home, "run-slow-started")); err != nil {

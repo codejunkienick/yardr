@@ -380,7 +380,8 @@ func TestPostReviewHoldsWhatIsNotTheReviewers(t *testing.T) {
 			y.postBead(id, stage, postMeta(c.meta), !c.noLink)
 			stored := y.beadOf(id).Metadata["review"]
 			if c.noEnv {
-				y.envFile = ""
+				// Whatever the machine running the test exports is not the group's.
+				y.envFile, y.opts = "", y.opts+" GITHUB_APP_ID= GITHUB_APP_PRIVATE_KEY_FILE="
 			}
 			postStandIn(t, gh, id, c.files)
 			y.exec("post-review", "yardr-post", id)

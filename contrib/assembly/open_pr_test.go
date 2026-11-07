@@ -425,7 +425,8 @@ func TestOpenPRDoesNotPublish(t *testing.T) {
 				c.setup(y, wt, origin)
 			}
 			if c.noEnv {
-				y.envFile = ""
+				// Whatever the machine running the test exports is not the group's.
+				y.envFile, y.opts = "", y.opts+" GITHUB_APP_ID= GITHUB_APP_PRIVATE_KEY_FILE="
 			}
 			openStandIn(t, gh, c.files)
 			y.exec("open-pr", "yardr-pr", id)

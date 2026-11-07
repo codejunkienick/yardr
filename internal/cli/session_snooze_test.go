@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -26,6 +27,12 @@ func TestSessionSnooze(t *testing.T) {
 	}
 	sess, err := st.Claim(ctx, b.ID, "builders", "new", "yard")
 	if err != nil {
+		t.Fatal(err)
+	}
+	// The session's pane is this process: over the socket every call carries
+	// the test's pid, and a snooze from no pane is refused. No start time is
+	// recorded, so the store trusts the pid alone while the session lives.
+	if err := st.MarkRunning(ctx, sess.ID, map[string]any{"agent": "yard-x-new", "shell_pid": os.Getpid()}); err != nil {
 		t.Fatal(err)
 	}
 	a := testApp(t, st, t.TempDir(), "YARDR_SESSION="+sess.ID, "YARDR_ACTOR=yard-x-new")

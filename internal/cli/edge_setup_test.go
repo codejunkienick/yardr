@@ -225,6 +225,8 @@ func TestEdgeSetupGoogleHosted(t *testing.T) {
 			t.Errorf("a denied source setup made %d probes, want none", got-probes)
 		}
 	} else {
-		t.Fatal("the test store cannot set a policy")
+		// A socket client (YARDR_TEST_RPC=1) has none: a policy is set on the
+		// store itself, which only its owner holds. Everything above ran.
+		t.Skip("the store cannot set a policy")
 	}
 }

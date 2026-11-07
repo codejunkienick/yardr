@@ -20,7 +20,9 @@ import (
 // hermeticGo gives the script a go of its own: a GOENV file seeding
 // GOCACHE under the test's home, and a GOTMPDIR there too, passed in the
 // group's cmd, so the keeping the landing runs touches nothing of the
-// machine's go. It returns the seeded GOCACHE and GOTMPDIR.
+// machine's go. A GOCACHE exported to the test would win over that file and
+// the keeping refuses to rotate under it, so the cmd blanks it, which go
+// reads as unset. It returns the seeded GOCACHE and GOTMPDIR.
 func (y *yard) hermeticGo() (gocache, gotmp string) {
 	y.t.Helper()
 	gocache = filepath.Join(y.home, "gocache")
@@ -32,7 +34,7 @@ func (y *yard) hermeticGo() (gocache, gotmp string) {
 	if err := os.MkdirAll(gotmp, 0o755); err != nil {
 		y.t.Fatal(err)
 	}
-	y.opts = "GOENV=" + shellQuote(goenv) + " GOTMPDIR=" + shellQuote(gotmp) + " " + y.opts
+	y.opts = "GOENV=" + shellQuote(goenv) + " GOCACHE= GOTMPDIR=" + shellQuote(gotmp) + " " + y.opts
 	return gocache, gotmp
 }
 
