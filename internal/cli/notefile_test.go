@@ -462,6 +462,9 @@ func TestBeadNoteDressesAFragment(t *testing.T) {
 	a.json = true
 	out, err := run(t, a.beadCmd(), "note", inWeb.ID, "again", "--page", frag, "--title", "Again")
 	a.json = false
+	if err != nil {
+		t.Fatalf("bead note --page --json: %v\n%s", err, out)
+	}
 	var noted struct {
 		Files []store.BlobRef `json:"files"`
 	}

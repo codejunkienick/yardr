@@ -73,7 +73,7 @@ func TestDressRefuses(t *testing.T) {
 		{"no title", pageFrame, frag, "  ", "the title is empty"},
 		{"a title of two lines", pageFrame, frag, "one\ntwo", "one line of plain text"},
 		{"a title with a control character", pageFrame, frag, "one\x1b[31mtwo", "one line of plain text"},
-		{"a title with a bidi control", pageFrame, frag, "evil‮gnp", "one line of plain text"},
+		{"a title with a bidi control", pageFrame, frag, "evil\u202egnp", "one line of plain text"},
 		{"a long title", pageFrame, frag, strings.Repeat("x", 201), "at most 200 bytes, not 201"},
 		{"an empty fragment", pageFrame, " \n\t", "T", "the fragment is empty"},
 		{"a fragment that is a whole page", pageFrame, "<!DOCTYPE html><html><head><title>x</title></head><body><p>hi</p></body></html>", "T", "a whole document, with a doctype in it"},
