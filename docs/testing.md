@@ -207,6 +207,24 @@ and environment through its commands, and internal/store until yardr-2e9b
 pinned the package clock to the tests that move time. Packages under
 budget comply until they breach it, and the budget is their backstop then.
 
+The allow-list for the rest has two tests, both in `contrib/assembly`:
+`TestMergeLocalTestCommandStartsWithNoInheritedFile` and
+`TestIntegrateTrainTestCommandStartsWithNoInheritedFile` (yardr-q9s4). Neither
+calls `t.Parallel`, and their rows do. Each row forks a script that, under
+dash, refuses to start the tests when a descriptor above 9 reaches it, and the
+row marks every descriptor the test binary holds close-on-exec before it forks.
+On macOS, Go marks an accepted connection close-on-exec only after `accept`
+returns, outside `syscall.ForkLock`, so a connection that a yard server of the
+package accepts as a row forks can reach the script. The package runs up to ten
+tests per processor at once, each serving a yard to the `yardr` children it
+starts, and nothing a test can take closes that gap, because it is inside Go's
+accept. The runner finishes a test that does not call `t.Parallel`, rows and
+all, before it resumes any test that does, so these two run while no other test
+serves a yard. Linux has no gap (`accept4`), and the two run the same way there,
+to keep one shape. That adds a second or two to the package's run, and no bead
+brings it under. `TestFdTestsRunInTheSerialPhase` fails if either test calls
+`t.Parallel` again.
+
 R4. The depot test gate runs `go test -race` in its landing run
 (`YARDR_LANDING=1`, the assembly's, on exactly what lands; for a pull request
 from outside, pr-ci's run of its head, which no landing follows) and in the

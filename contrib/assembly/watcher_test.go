@@ -23,6 +23,9 @@ package assembly
 
 import (
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net"
 	"os"
 	"os/exec"
@@ -653,10 +656,19 @@ func TestMergeLocalKilledWithTermLeavesNoSleepBehind(t *testing.T) {
 // a descriptor above 9 of its own without close-on-exec, which no run may see:
 // a yard hands a script nothing it was not given (watcherRun.prepare), and the
 // scripts refuse a descriptor that arrives, where an sh cannot close it. Every
-// row plants one beside the rows of this test and the other, which run side by
-// side, so none may reach a run but its own planter's, marked (cmdWithStray).
+// row plants one beside the rows of this test, which run side by side, so none
+// may reach a run but its own planter's, marked (cmdWithStray).
+//
+// The test does not call t.Parallel, and its rows do. The runner finishes a
+// test that does not, rows and all, before it resumes any test paused in
+// t.Parallel, so no test is serving a yard in this process while a row forks.
+// That matters on darwin, where Go marks an accepted socket close-on-exec after
+// accept returns, outside syscall.ForkLock: a row of dash forked in that gap is
+// handed the socket, which dash cannot close, and the script refuses to start
+// the tests. Nothing a test can take closes the window, since it is inside
+// Go's accept, so these two tests are on the allow-list of docs/testing.md R3
+// (TestFdTestsRunInTheSerialPhase holds them to it).
 func TestMergeLocalTestCommandStartsWithNoInheritedFile(t *testing.T) {
-	t.Parallel()
 	for _, row := range fdRuns() {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
@@ -772,14 +784,13 @@ func refusedHas(got []string, fd string) bool {
 // it. The test closes it when it ends.
 //
 // mark is what marks it, which for a row is the run's prepare, and it is given
-// the descriptor. The rows run side by side, and with them every test that
-// starts a child, so a stray open without the flag is another run's too if its
-// fork comes first: a row of dash was refused its tests for the stray of a row
-// of the other test, planted a few microseconds after the dash row's own
-// marking and before its fork (yardr-436j). A fork takes syscall.ForkLock for
-// writing, and a descriptor made and then marked is made holding it for
-// reading, which is all this does: the stray is open without the flag only
-// while no fork can begin.
+// the descriptor. The rows of a test run side by side, so a stray open without
+// the flag is another row's too if its fork comes first: a row of dash was
+// refused its tests for the stray of a row beside it, planted a few
+// microseconds after the dash row's own marking and before its fork
+// (yardr-436j). A fork takes syscall.ForkLock for writing, and a descriptor
+// made and then marked is made holding it for reading, which is all this does:
+// the stray is open without the flag only while no fork can begin.
 func holdStray(t *testing.T, mark func(fd int)) {
 	t.Helper()
 	syscall.ForkLock.RLock()
@@ -960,6 +971,49 @@ func TestHoldStrayIsMarkedBeforeAnyForkCanBegin(t *testing.T) {
 		t.Fatal("holdStray did not let go of the fork lock: no fork in this binary can begin")
 	}
 	syscall.ForkLock.Unlock()
+}
+
+// The two tests of what a script's test command inherits do not call
+// t.Parallel, so the runner finishes them before it resumes any test that does.
+// A row of dash forked while another test's yard accepts a connection can be
+// handed the socket on darwin, as the comment of
+// TestMergeLocalTestCommandStartsWithNoInheritedFile explains. A test that
+// calls t.Parallel and one that does not pass alike, so only the source tells
+// them apart. A call inside a row's function is the row's, and stays; the body
+// of the test itself must not make one.
+func TestFdTestsRunInTheSerialPhase(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ file, test string }{
+		{"watcher_test.go", "TestMergeLocalTestCommandStartsWithNoInheritedFile"},
+		{"integrate_train_watcher_test.go", "TestIntegrateTrainTestCommandStartsWithNoInheritedFile"},
+	} {
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, c.file, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body *ast.BlockStmt
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == c.test {
+				body = fn.Body
+			}
+		}
+		if body == nil {
+			t.Errorf("%s has no %s: name the tests that run in the serial phase (docs/testing.md R3)", c.file, c.test)
+			continue
+		}
+		ast.Inspect(body, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncLit:
+				return false
+			case *ast.CallExpr:
+				if sel, ok := n.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Parallel" {
+					t.Errorf("%s calls t.Parallel, so the test would run beside the tests that serve a yard, and a row of dash can be handed an accepted socket (docs/testing.md R3)", fset.Position(n.Pos()))
+				}
+			}
+			return true
+		})
+	}
 }
 
 // A refusal's descriptors are described by what this process holds at their

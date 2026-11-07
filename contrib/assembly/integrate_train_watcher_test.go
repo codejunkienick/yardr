@@ -225,9 +225,10 @@ func TestIntegrateTrainWritesThroughNoPlantedSymlink(t *testing.T) {
 // sh the host has; where an sh cannot close what the run holds, the command is
 // not started at all. The test binary holds a descriptor above 9 of its own
 // without close-on-exec, which no run may see, as in that test, nor may it
-// reach a run beside it: the rows of both tests plant theirs side by side.
+// reach a run beside it: the rows of this test plant theirs side by side. Like
+// that test, this one does not call t.Parallel and its rows do, for the reason
+// given there.
 func TestIntegrateTrainTestCommandStartsWithNoInheritedFile(t *testing.T) {
-	t.Parallel()
 	for _, row := range fdRuns() {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
