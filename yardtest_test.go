@@ -197,14 +197,17 @@ func goModTemplate(t *testing.T) (template, base, short string) {
 // strict-budget judging and enable quiet-run-only tests, and the run's yard
 // (YARDR_HOME, YARDR_BEAD, YARDR_DEPOT, YARDR_ACTOR and YARDR_SESSION): a
 // case that runs the script files a flake through a stub yardr or through
-// none, never through the real CLI into the run's yard. It also reads a quiet
-// machine, a load of 1.5 on 10 cores, whatever the machine and the run: a
-// loaded one would give a landing's race leg a -p of its own (gatepar), and
-// the cases that run a landing assert the go commands it makes. A case sets
-// what it means the script to have, after these, so its own load wins: one that
-// runs the script sets YARDR_RACE_HELD, so its race step shares the hold instead
-// of taking the machine's lock, except the lock's own test, which takes a lock
-// of its own.
+// none, never through the real CLI into the run's yard. A CI runner's own
+// mark (GITHUB_ACTIONS) goes too: with it the race leg runs go's default on a
+// load past the cores (legflag), and the cases that give the script such a load
+// mean the throttle, so a case that means a runner sets the mark itself. It
+// also reads a quiet machine, a load of 1.5 on 10 cores, whatever the machine
+// and the run: a loaded one would give a landing's race leg a -p of its own
+// (gatepar), and the cases that run a landing assert the go commands it makes.
+// A case sets what it means the script to have, after these, so its own load
+// wins: one that runs the script sets YARDR_RACE_HELD, so its race step shares
+// the hold instead of taking the machine's lock, except the lock's own test,
+// which takes a lock of its own.
 func scriptEnv() []string {
 	return scriptEnvFrom(os.Environ())
 }
@@ -213,7 +216,7 @@ func scriptEnv() []string {
 func scriptEnvFrom(environ []string) []string {
 	env := slices.DeleteFunc(slices.Clone(environ), func(kv string) bool {
 		k, _, _ := strings.Cut(kv, "=")
-		return slices.Contains([]string{"YARDR_BASE", "YARDR_LANDING", "YARDR_TEST_PLAN", "YARDR_TEST_RPC", "GOOS", "GOFLAGS", "YARDR_RACE_HELD", "YARDR_R1_STRICT", "YARDR_QUIET_RUN", "YARDR_TEST_LOAD", "YARDR_TEST_BEADS", "YARDR_HOME", "YARDR_BEAD", "YARDR_DEPOT", "YARDR_ACTOR", "YARDR_SESSION"}, k)
+		return slices.Contains([]string{"YARDR_BASE", "YARDR_LANDING", "YARDR_TEST_PLAN", "YARDR_TEST_RPC", "GOOS", "GOFLAGS", "YARDR_RACE_HELD", "YARDR_R1_STRICT", "YARDR_QUIET_RUN", "YARDR_TEST_LOAD", "YARDR_TEST_BEADS", "YARDR_HOME", "YARDR_BEAD", "YARDR_DEPOT", "YARDR_ACTOR", "YARDR_SESSION", "GITHUB_ACTIONS"}, k)
 	})
 	return append(env, "YARDR_TEST_LOADAVG=1.5", "YARDR_TEST_CORES=10", "YARDR_HOME="+noYardHome)
 }
@@ -5925,6 +5928,12 @@ func TestYardTestBudgets(t *testing.T) {
 		{"a package over budget alone on a loaded machine passes", dispatchLeg, nil,
 			[]string{over, "YARDR_TEST_LOADAVG=72.4", "YARDR_TEST_CORES=10"}, 0,
 			[]string{loaded72 + "\n"}, []string{"over the 60 s budget"}, []string{dispatchCall}},
+		// A CI runner's mark takes only the leg's -p away (legflag): its load is
+		// read and judged as any machine's, so a package over budget alone on a
+		// loaded runner is excused, with the line a loaded machine gets.
+		{"a package over budget alone on a loaded CI runner passes as on any loaded machine", dispatchLeg, nil,
+			[]string{over, "YARDR_TEST_LOADAVG=72.4", "YARDR_TEST_CORES=10", "GITHUB_ACTIONS=true"}, 0,
+			[]string{loaded72 + "\n"}, []string{"over the 60 s budget"}, []string{dispatchCall}},
 		{"an unreadable load fails the run", dispatchLeg, nil,
 			[]string{over, "YARDR_TEST_LOADAVG=bogus", "YARDR_TEST_CORES=10"}, 1, []string{overAlone + "\n"}, nil, nil},
 		{"a load at the core count fails the run", dispatchLeg, nil,
@@ -6257,28 +6266,42 @@ loadedmachine() {
 		}
 	})
 
-	t.Run("the leg's -p follows the load, and a quiet or unknown one adds none", func(t *testing.T) {
+	t.Run("the leg's -p follows the load, a quiet or unknown one adds none, and a CI runner's is go's default", func(t *testing.T) {
 		t.Parallel()
 		// legflag sets the flag the race leg's command carries and says so in
 		// one line, only where the load made one. The probe here carries a
-		// function that shows the flag it set.
+		// function that shows the flag it set. A CI runner (GITHUB_ACTIONS set)
+		// runs nothing but its job, so a load past its cores adds no flag and
+		// a line that says why instead. The run these cases are part of may be
+		// a runner, so each is given the mark to inherit, which scriptEnv
+		// drops: a row means a runner only where it sets the mark itself.
 		showingPath := probeWith(t, "\nshowleg() { legflag; echo \"legpar=[$legpar]\"; }\n\"$@\"\n")
+		const ci = "GITHUB_ACTIONS=true"
+		runner := append(os.Environ(), ci)
 		for _, c := range []struct {
 			name string
-			avg  string // the machine's one-minute load on 10 cores: quiet where empty, as scriptEnv pins it
+			avg  string   // the machine's one-minute load on 10 cores: quiet where empty, as scriptEnv pins it
+			mark []string // GITHUB_ACTIONS as the row sets it: not at all where nil
 			want string
 		}{
-			{"quiet", "", "legpar=[]\n"},
-			{"loaded", "40", "test: go test -p=2 (load 40 on 10 cores)\nlegpar=[-p=2]\n"},
-			{"unknown", "bogus", "legpar=[]\n"},
+			{"quiet", "", nil, "legpar=[]\n"},
+			{"loaded", "40", nil, "test: go test -p=2 (load 40 on 10 cores)\nlegpar=[-p=2]\n"},
+			{"unknown", "bogus", nil, "legpar=[]\n"},
+			{"quiet on a CI runner", "", []string{ci}, "legpar=[]\n"},
+			{"loaded on a CI runner", "40", []string{ci},
+				"test: go test default -p on a CI runner (load 40 on 10 cores read, not throttled)\nlegpar=[]\n"},
+			{"unknown on a CI runner", "bogus", []string{ci}, "legpar=[]\n"},
+			// The mark counts where it holds something: an empty one names no runner.
+			{"loaded with the mark empty", "40", []string{"GITHUB_ACTIONS="},
+				"test: go test -p=2 (load 40 on 10 cores)\nlegpar=[-p=2]\n"},
 		} {
 			t.Run(c.name, func(t *testing.T) {
 				t.Parallel()
-				var env []string
+				env := slices.Clone(c.mark)
 				if c.avg != "" {
-					env = []string{"YARDR_TEST_LOADAVG=" + c.avg, "YARDR_TEST_CORES=10"}
+					env = append(env, "YARDR_TEST_LOADAVG="+c.avg, "YARDR_TEST_CORES=10")
 				}
-				out, code := runProbe(t, showingPath, t.TempDir(), os.Environ(), env, "showleg")
+				out, code := runProbe(t, showingPath, t.TempDir(), runner, env, "showleg")
 				if code != 0 || out != c.want {
 					t.Errorf("exit %d, output %q, want exit 0 and %q", code, out, c.want)
 				}
