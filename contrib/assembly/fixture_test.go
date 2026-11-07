@@ -28,6 +28,7 @@ package assembly
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
@@ -35,11 +36,14 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"yardr.dev/yardr/internal/config"
+	"yardr.dev/yardr/internal/peer"
 	"yardr.dev/yardr/internal/rpc"
 	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/store"
@@ -125,7 +129,15 @@ func (tpl *yardTemplate) borrow(t *testing.T) string {
 // copied: a copy of an open store is not a store. Nothing is registered on
 // the test: the builder owns the template, and the close is explicit, since
 // a cleanup would close it a second time when the builder ends.
-func serveTemplate(t *testing.T, home string) func() {
+//
+// The home's pidfile names this process while it serves, as a yardr server's
+// does. A yardr whose ping goes unanswered for its one second (a loaded
+// machine does that) starts a server of its own unless the pidfile names a
+// live one, which it waits for instead: with no pidfile, the one it started
+// took the store the moment the closer let go of it and listened on a new
+// socket after the close, in a template every borrower then failed to copy
+// (yardr-fjj6). wrap puts a handler of a test's own in front of the served one.
+func serveTemplate(t *testing.T, home string, wrap ...func(http.Handler) http.Handler) func() {
 	t.Helper()
 	cfg := &config.Config{Home: home}
 	st, err := store.Open(cfg.DBPath())
@@ -147,22 +159,118 @@ func serveTemplate(t *testing.T, home string) func() {
 	}
 	watch := &reportWatch{}
 	reportWatches.Store(home, watch)
-	srv := &http.Server{Handler: watch.handler(rpc.Handler(st, nil)), ConnContext: rpc.ConnContext}
+	handler := watch.handler(rpc.Handler(st, nil))
+	for _, w := range wrap {
+		handler = w(handler)
+	}
+	srv := &http.Server{Handler: handler, ConnContext: rpc.ConnContext}
 	go func() { _ = srv.Serve(ln) }()
+	recordServer(t, cfg)
 	return func() {
 		_ = srv.Close()
 		reportWatches.Delete(home)
 		_ = st.Close(context.Background())
-		// The closed socket is a stale node, not a file to copy.
-		_ = os.Remove(cfg.Socket())
+		// What the template's home holds of a server goes with it, and a node
+		// that cannot be taken away fails the build here, not its borrowers at
+		// their copy. The socket is gone already: closing its listener unlinks
+		// it, which is a removal done, not one that failed.
+		for _, file := range []string{cfg.PIDFile(), cfg.PIDStart(), cfg.Socket()} {
+			if err := os.Remove(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("take %s out of the template's home: %v", filepath.Base(file), err)
+			}
+		}
+		// A server of the CLIs' own is no state to copy: it takes the store and
+		// a socket of its own as soon as this one lets go of them. Its log is
+		// there before it runs (server.SpawnDetached), so a build that started
+		// one fails now, with what it printed, and not as a socket in a copy.
+		if _, err := os.Stat(cfg.LogFile()); err == nil {
+			log, _ := os.ReadFile(cfg.LogFile())
+			t.Fatalf("a yardr server was started on the template's home %s during the build; its log so far:\n%s", home, log)
+		}
+	}
+}
+
+// recordServer writes the pidfile and its start file as a yardr server does
+// (server.writePID): this process, and the start time the OS reports for it,
+// which tells it from a later process with its pid. They are written before
+// any call to the server is made, and the closer takes them away.
+func recordServer(t *testing.T, cfg *config.Config) {
+	t.Helper()
+	if peer.HaveStat() {
+		st, err := peer.Describe(os.Getpid())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(cfg.PIDStart(), []byte(strconv.FormatUint(st.Start, 10)+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(cfg.PIDFile(), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A yardr that finds the template's server slow to answer waits for it and
+// starts none of its own, and a template closed after such a call holds
+// nothing of a server. The first ping is held until its caller gives up, which
+// is what a loaded machine does to the one second the yardr allows it (the
+// request's context ends when the caller hangs up, so no clock stands in the
+// test's way). A server started in its place took the store from the closer and
+// put a socket back in the template's home (yardr-fjj6), which only a loaded
+// run showed: the borrowers' copyTree failed on it.
+func TestAStalledPingStartsNoServerOnATemplateHome(t *testing.T) {
+	t.Parallel()
+	// The home is short, not the test's temp dir: it holds the store's unix
+	// socket, whose path the kernel bounds.
+	home, err := os.MkdirTemp("", "yr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	var hold atomic.Bool // the next ping goes unanswered
+	held := make(chan struct{})
+	closeTemplate := serveTemplate(t, home, func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/ping" && hold.CompareAndSwap(true, false) {
+				close(held)
+				<-r.Context().Done()
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
+	y := &yard{t: t, home: home}
+	y.env = append(os.Environ(), "YARDR_HOME="+home, "YARDR_ACTOR=test")
+	y.initStore()
+
+	hold.Store(true)
+	if got := y.yardr("settings", "get", "yardmaster"); got != "yardmaster" {
+		t.Fatalf("settings get yardmaster is %q, want what the template's server holds", got)
+	}
+	select {
+	case <-held:
+	default:
+		t.Fatal("no ping was held, so the call met no stall")
+	}
+
+	// The closer fails the test itself where a server was started; the files
+	// are asked for again here, so that a closer that stopped looking cannot
+	// let this pass.
+	closeTemplate()
+	cfg := &config.Config{Home: home}
+	for _, file := range []string{cfg.LogFile(), cfg.PIDFile(), cfg.PIDStart(), cfg.Socket()} {
+		if _, err := os.Lstat(file); err == nil {
+			t.Errorf("%s is left in the template's home after its server closed", filepath.Base(file))
+		}
 	}
 }
 
 // copyTree copies src into dst, which must not exist: directories, regular
 // files with their modes and mtimes (so git finds its index valid), and
 // symlinks as links. Anything else is a bug, not a state: the templates
-// hold no sockets past their close, and no fifos or devices at all. A file
-// copies as a file, so a template's loose scripts copy beside its trees.
+// hold no sockets past their close (serveTemplate's closer fails the build
+// that leaves one), and no fifos or devices at all. A file copies as a
+// file, so a template's loose scripts copy beside its trees.
 func copyTree(t *testing.T, src, dst string) {
 	t.Helper()
 	if err := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
