@@ -43,11 +43,29 @@ func pushYard(t *testing.T) *pushTestYard {
 	pushTick = 20 * time.Millisecond
 	t.Cleanup(func() { pushTick = time.Second })
 	var buf bytes.Buffer
+	y := &pushTestYard{st: st, edge: edge, token: token, db: c.DBPath(), log: &buf}
+	// The sender's Warns go to buf and to no output, so a failed run said
+	// only that a frame did not come, not whether the retry was lost, late
+	// or sent down another link. This runs after stopEdge (cleanups run last
+	// in, first out), once the sender has stopped.
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		due, err := st.FootDue(context.Background())
+		frames := 0
+		if y.link != nil {
+			frames = len(y.link.Pushes())
+		}
+		t.Logf("push yard at the failure: %d upgrade(s) taken at the edge, %d frame(s) on the first link, %d row(s) due (%v); the sender's log:\n%s",
+			edge.Upgrades(), frames, len(due), err, buf.String())
+	})
 	stopEdge := KeepEdge(ctx, c, st, "", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}), slog.New(slog.NewTextHandler(&buf, nil)), nil)
 	t.Cleanup(stopEdge)
-	return &pushTestYard{st: st, edge: edge, link: nextLink(t, edge), token: token, db: c.DBPath(), log: &buf}
+	y.link = nextLink(t, edge)
+	return y
 }
 
 // nextPush is the next footplate frame on the link, waiting for it.
@@ -58,6 +76,28 @@ func nextPush(t *testing.T, l *standin.EdgeLink) standin.EdgePush {
 		return p
 	case <-time.After(10 * time.Second):
 		t.Fatal("no push frame on the link")
+		return standin.EdgePush{}
+	}
+}
+
+// nextRetry is nextPush for the frame that sends a row again after the relay
+// asked for it, and waits as long as the sender's schedule can owe it. The
+// row is due store.FootRetryBase after the ask; if the store recorded the
+// send only after the ask, it waits out store.FootResendAfter instead, the
+// wait for an ack that the ask had already ended. nextPush's ten seconds
+// cover the first and not the second, and a wait that gives up while the
+// schedule still owes the frame fails a slow machine, not a lost retry.
+// The waits are consts a test cannot drive, so the fuse is built from both.
+// It reads the link's channel, as nextPush does, so the retry's frame is
+// taken and the next leg's nextPush does not find it.
+func nextRetry(t *testing.T, l *standin.EdgeLink) standin.EdgePush {
+	t.Helper()
+	wait := store.FootRetryBase + store.FootResendAfter
+	select {
+	case p := <-l.PushEvents():
+		return p
+	case <-time.After(wait):
+		t.Fatalf("no retry frame on the link in %s", wait)
 		return standin.EdgePush{}
 	}
 }
@@ -234,7 +274,7 @@ func TestPushSenderTakesTheRelaysAnswer(t *testing.T) {
 	}
 	second := nextPush(t, y.link)
 	ackPush(t, y.link, second.EventID, "the relay did not take the intent; send it again")
-	third := nextPush(t, y.link)
+	third := nextRetry(t, y.link)
 	if third.EventID != second.EventID {
 		t.Fatalf("the retry has id %s, want %s", third.EventID, second.EventID)
 	}
