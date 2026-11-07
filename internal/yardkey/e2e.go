@@ -3,7 +3,9 @@ package yardkey
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"sync/atomic"
 
 	"github.com/flynn/noise"
@@ -349,37 +351,254 @@ func SplitRecords(run []byte) ([][]byte, error) {
 	return out, nil
 }
 
-// SealWhole seals a whole call or answer's joined plaintext as a record
-// run: the plaintext chopped into records of at most MaxRecordPlain,
-// in order, the first bound to first. An empty plaintext still travels
-// as one empty record, so the run of a call always holds its first.
-func (s *ChannelSession) SealWhole(call []byte, first *FirstBinding, plaintext []byte) ([]byte, error) {
+// A call's records close with a final record: its index is the count
+// of the call's data records in its direction, and its sealed
+// plaintext is sixteen bytes — that count again, and the total length
+// of the data records' plaintext. A receiver holds a call complete
+// only when the final record opens and both numbers match what
+// arrived before it; an outer ending without one is a truncation, and
+// a record whose index is not the next its call expects is a gap,
+// past which nothing is delivered as whole.
+var (
+	// ErrTruncated is a stream whose outer ending came with no final
+	// record: the part that arrived is no whole answer.
+	ErrTruncated = errors.New("a sealed stream ended without its final record")
+	// ErrRecordGap is a record that stands at an index other than the
+	// next its call expects: the records before it stand delivered,
+	// and nothing past it is.
+	ErrRecordGap = errors.New("a sealed record stands at an index its call does not expect")
+)
+
+// finalPlain is a final record's plaintext for dataCount data records
+// holding total bytes between them.
+func finalPlain(dataCount, total uint64) []byte {
+	plain := binary.BigEndian.AppendUint64(nil, dataCount)
+	return binary.BigEndian.AppendUint64(plain, total)
+}
+
+// isFinal says whether plain, opened at index with total data bytes
+// before it, is the final record it closes: sixteen bytes naming its
+// own index as the data count and the length that stands before it.
+func isFinal(plain []byte, index, total uint64) bool {
+	return len(plain) == 16 &&
+		binary.BigEndian.Uint64(plain) == index &&
+		binary.BigEndian.Uint64(plain[8:]) == total
+}
+
+// CallSealer seals one call's records in one direction, in the order
+// its plaintext is handed over: a whole call's run at once, or a
+// streamed answer as it flushes. Its index counts the call's records
+// from zero and its final record closes the call; the session's
+// sequences it takes as it seals, so calls seal at once in any order.
+type CallSealer struct {
+	session *ChannelSession
+	call    []byte
+	first   *FirstBinding
+	index   uint64 // the next record's index; the data records sealed
+	total   uint64 // the data records' plaintext bytes
+	done    bool   // the final record is sealed
+}
+
+// NewCallSealer starts sealing a call's records: first binds the
+// first record, as Seal's does.
+func (s *ChannelSession) NewCallSealer(call []byte, first *FirstBinding) *CallSealer {
+	return &CallSealer{session: s, call: append([]byte(nil), call...), first: first}
+}
+
+// Seal seals chunk as the call's next data records, chopped to
+// MaxRecordPlain, and answers them framed as a record run. An empty
+// chunk seals nothing yet: a stream's first flush carries its head
+// whether or not a byte of body stands behind it, and that flush
+// hands the head over as its chunk.
+func (c *CallSealer) Seal(chunk []byte) ([]byte, error) {
+	if c.done {
+		return nil, fmt.Errorf("a call sealed past its final record")
+	}
 	var run []byte
-	var index uint64
-	for {
-		n := min(len(plaintext), MaxRecordPlain)
-		bind := (*FirstBinding)(nil)
-		if index == 0 {
-			bind = first
+	for len(chunk) > 0 {
+		n := min(len(chunk), MaxRecordPlain)
+		// A data piece that would itself read as the final record for
+		// its place is split, so no honest data is ever taken for the
+		// close: the receiver's one test stays unambiguous.
+		if isFinal(chunk[:n], c.index, c.total) {
+			n = 8
 		}
-		msg, err := s.Seal(call, index, bind, plaintext[:n])
-		if err != nil {
+		if err := c.sealOne(&run, chunk[:n]); err != nil {
 			return nil, err
 		}
-		run = FrameRecord(run, msg)
-		plaintext = plaintext[n:]
-		index++
-		if len(plaintext) == 0 {
-			return run, nil
+		chunk = chunk[n:]
+	}
+	return run, nil
+}
+
+// sealOne seals one data record of plain at the next index.
+func (c *CallSealer) sealOne(run *[]byte, plain []byte) error {
+	bind := (*FirstBinding)(nil)
+	if c.index == 0 {
+		bind = c.first
+	}
+	msg, err := c.session.Seal(c.call, c.index, bind, plain)
+	if err != nil {
+		return err
+	}
+	*run = FrameRecord(*run, msg)
+	c.index++
+	c.total += uint64(len(plain))
+	return nil
+}
+
+// SealFinal seals the call's final record and answers it framed: its
+// index is the data count, its plaintext that count and the data
+// records' total length. A call that has sealed no data yet seals one
+// empty record first, so its run always holds a first record to bind.
+func (c *CallSealer) SealFinal() ([]byte, error) {
+	if c.done {
+		return nil, fmt.Errorf("a call sealed past its final record")
+	}
+	var run []byte
+	if c.index == 0 {
+		if err := c.sealOne(&run, nil); err != nil {
+			return nil, err
 		}
 	}
+	msg, err := c.session.Seal(c.call, c.index, nil, finalPlain(c.index, c.total))
+	if err != nil {
+		return nil, err
+	}
+	c.done = true
+	return FrameRecord(run, msg), nil
+}
+
+// CallOpener opens one call's records in one direction as they
+// arrive, each at the index the last left off: a whole run's records
+// in their order, or a streamed answer's as its pieces cross. Records
+// before a gap stand delivered; the record at a gap, and any after
+// it, open as nothing.
+type CallOpener struct {
+	session *ChannelSession
+	call    []byte
+	first   *FirstBinding
+	index   uint64 // the next record's index
+	total   uint64 // the data records' plaintext bytes
+	done    bool   // the final record opened
+}
+
+// NewCallOpener starts opening a call's records: first is what the
+// first record must be bound to, as Open's is.
+func (s *ChannelSession) NewCallOpener(call []byte, first *FirstBinding) *CallOpener {
+	return &CallOpener{session: s, call: append([]byte(nil), call...), first: first}
+}
+
+// Open opens one transport message of the call: its plaintext, and
+// whether it was the final record, which carries no plaintext of the
+// call's own. A record at any index but the next expected is refused
+// at the gap (ErrRecordGap) and marks nothing: the honest record that
+// belongs there still opens after it.
+func (o *CallOpener) Open(msg []byte) (plain []byte, final bool, err error) {
+	if o.done {
+		return nil, false, fmt.Errorf("a record stands after a call's final record")
+	}
+	bind := (*FirstBinding)(nil)
+	if o.index == 0 {
+		bind = o.first
+	}
+	index, plain, err := o.session.Open(msg, o.call, bind)
+	if err != nil {
+		return nil, false, err
+	}
+	if index != o.index {
+		return nil, false, fmt.Errorf("%w: record %d where %d was due", ErrRecordGap, index, o.index)
+	}
+	if isFinal(plain, index, o.total) {
+		o.done = true
+		return nil, true, nil
+	}
+	o.index++
+	o.total += uint64(len(plain))
+	return plain, false, nil
+}
+
+// Done says whether the call's final record has opened.
+func (o *CallOpener) Done() bool { return o.done }
+
+// Close ends the call at its outer ending: nil once the final record
+// opened, ErrTruncated while it has not — the part that arrived is
+// reported truncated, never read as a short complete answer.
+func (o *CallOpener) Close() error {
+	if !o.done {
+		return ErrTruncated
+	}
+	return nil
+}
+
+// RecordReader reads the transport messages of a record run as they
+// cross, a streamed answer's pieces among them: a four-byte length,
+// then that many bytes of one message, the record length and not the
+// carrier's framing saying where a message ends. A zero-length record
+// is the router's beat, framing and no message: it is read past
+// before any opening, as a device reads past it, so one forged,
+// dropped or replayed alters and reveals no inner byte.
+type RecordReader struct {
+	r io.Reader
+}
+
+// NewRecordReader starts reading records from r.
+func NewRecordReader(r io.Reader) *RecordReader { return &RecordReader{r: r} }
+
+// ReadMessage answers the run's next transport message. io.EOF
+// stands at a record boundary with nothing left; an ending inside a
+// length or a record is ErrTruncated, as an outer ending without the
+// final record is.
+func (r *RecordReader) ReadMessage() ([]byte, error) {
+	for {
+		var lenBuf [4]byte
+		if _, err := io.ReadFull(r.r, lenBuf[:]); err != nil {
+			if err == io.EOF {
+				return nil, io.EOF
+			}
+			return nil, fmt.Errorf("%w: a record run ends inside a length", ErrTruncated)
+		}
+		n := binary.BigEndian.Uint32(lenBuf[:])
+		if n == 0 {
+			continue // the beat: no message, nothing to open
+		}
+		if n > noise.MaxMsgLen {
+			return nil, fmt.Errorf("a record of %d bytes passes the Noise bound", n)
+		}
+		msg := make([]byte, n)
+		if _, err := io.ReadFull(r.r, msg); err != nil {
+			return nil, fmt.Errorf("%w: a record run ends inside a record", ErrTruncated)
+		}
+		return msg, nil
+	}
+}
+
+// SealWhole seals a whole call or answer's joined plaintext as a record
+// run: the plaintext chopped into records of at most MaxRecordPlain,
+// in order, the first bound to first, and the sealed final record
+// closing the run. An empty plaintext still travels as one empty
+// record, so the run of a call always holds its first.
+func (s *ChannelSession) SealWhole(call []byte, first *FirstBinding, plaintext []byte) ([]byte, error) {
+	sealer := s.NewCallSealer(call, first)
+	run, err := sealer.Seal(plaintext)
+	if err != nil {
+		return nil, err
+	}
+	final, err := sealer.SealFinal()
+	if err != nil {
+		return nil, err
+	}
+	return append(run, final...), nil
 }
 
 // OpenWhole opens a whole call or answer's record run and joins its
 // records in the order they stand: each record's index must be the
 // next its call expects here, as the records of one outer body stand
-// in the order they were sealed. The first is bound to first, and the
-// run must hold at least that one.
+// in the order they were sealed, and the run must close with its
+// final record — a run that ends without it is truncated and nothing
+// of it is answered, so a truncated request is refused unserved and a
+// part blob is never taken for a whole one. The first record is bound
+// to first, and the run must hold at least that one.
 func (s *ChannelSession) OpenWhole(run, call []byte, first *FirstBinding) ([]byte, error) {
 	msgs, err := SplitRecords(run)
 	if err != nil {
@@ -388,20 +607,20 @@ func (s *ChannelSession) OpenWhole(run, call []byte, first *FirstBinding) ([]byt
 	if len(msgs) == 0 {
 		return nil, fmt.Errorf("an enveloped call with no first record")
 	}
+	opener := s.NewCallOpener(call, first)
 	var plain []byte
 	for i, msg := range msgs {
-		bind := (*FirstBinding)(nil)
-		if i == 0 {
-			bind = first
-		}
-		index, piece, err := s.Open(msg, call, bind)
+		piece, final, err := opener.Open(msg)
 		if err != nil {
 			return nil, err
 		}
-		if index != uint64(i) {
-			return nil, fmt.Errorf("record %d of a call stands at index %d", i, index)
+		if final && i != len(msgs)-1 {
+			return nil, fmt.Errorf("a record stands after a call's final record")
 		}
 		plain = append(plain, piece...)
+	}
+	if err := opener.Close(); err != nil {
+		return nil, err
 	}
 	return plain, nil
 }

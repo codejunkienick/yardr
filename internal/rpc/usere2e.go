@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"yardr.dev/yardr/internal/yardkey"
 )
@@ -39,9 +40,9 @@ import (
 // listener /user/e2e is what it was before, answered as any path under
 // /user/ is, so the socket API and the LAN behaviour are unchanged.
 //
-// Whole calls are this bead's (yardr-j2nm) scope: streamed answers,
-// the events stream among them, are refused inside the envelope until
-// the stream bead (E2E 2b) seals them record by record as they flush.
+// Whole calls were E2E 2a's (yardr-j2nm) scope; E2E 2b seals streamed
+// answers — the events stream among them — record by record as they
+// flush, every answer closed by its sealed final record.
 const (
 	// E2EPath is the one fixed outer path of an enveloped call.
 	E2EPath = "/user/e2e"
@@ -196,7 +197,9 @@ func (u *UserServer) e2eDevice(r *http.Request, s *e2eSession) bool {
 	return false
 }
 
-// e2eCall opens one enveloped whole call and seals its whole answer.
+// e2eCall opens one enveloped call and seals its answer: whole when
+// its handler never flushes, record by record as it flushes when it
+// does, and closed by the sealed final record either way.
 // Its outer head is the envelope's alone: 200 with the envelope's
 // headers when an answer was sealed, the envelope's own refusal
 // otherwise, and in neither an inner status or header.
@@ -243,30 +246,35 @@ func (u *UserServer) e2eCall(w http.ResponseWriter, r *http.Request, run []byte)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-	answer := u.serveInner(r, session, reqHead, innerBody)
-	sealed, err := session.keys.SealWhole(call, binding, answer)
-	if err != nil {
-		u.log.Error("an enveloped answer could not be sealed", "err", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
+	writer := newE2EAnswerWriter(w, session, call, binding, isEventsCall(reqHead))
+	if binding.Present && !writer.events {
+		// A marked call is checked only now, after the envelope has
+		// opened: a mark buys a long-lived slot for the events stream
+		// alone, and any other inner call is refused sealed, unserved,
+		// and holding no stream slot.
+		writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = writer.Write([]byte("a call marked long-lived may open only the events stream\n"))
+	} else {
+		u.serveInner(writer, r, session, reqHead, innerBody)
 	}
-	if len(sealed) > maxE2EAnswer {
-		// The edge's bound is on the ciphertext it carries, including
-		// each record's framing and authentication tag, not only the
-		// inner plaintext. Refuse inside the envelope so the outer head
-		// still reveals only that a sealed answer arrived.
-		sealed, err = session.keys.SealWhole(call, binding, e2eTooLargeAnswer())
-		if err != nil {
-			u.log.Error("an oversized enveloped answer could not be refused", "err", err)
+	if err := writer.finish(); err != nil {
+		u.log.Error("an enveloped answer could not be sealed", "err", err)
+		if !writer.wrote {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
 		}
 	}
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set(e2eEnvelopeHeader, "sealed")
-	w.Header().Set(E2ECallHeader, r.Header.Get(E2ECallHeader))
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(sealed)
+}
+
+// isEventsCall says whether an opened inner call is the events
+// stream: the one inner call a marked outer call may carry, and the
+// one stream the per-credential cap and the long-lived rules name.
+func isEventsCall(head e2eRequestHead) bool {
+	path := head.Path
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		path = path[:i]
+	}
+	return head.Method == http.MethodGet && path == "/user/events"
 }
 
 // e2eBinding is the first record's binding as this yard checks it: the
@@ -316,31 +324,34 @@ func splitE2EHead(plain []byte) (head, body []byte, err error) {
 }
 
 // serveInner serves one opened inner call by the listener's own mux,
-// as the caller its channel resolved, and answers the sealed answer
-// plaintext: its head, then its body. The inner request is served from
-// the link's address, as the outer one came, so what a call may do
-// down the link is judged as the listener judges it. A streamed inner
-// call — the events stream — is refused sealed: streams are E2E 2b's,
-// and a whole-call recorder would hold one open past its answer.
-func (u *UserServer) serveInner(outer *http.Request, session *e2eSession, head e2eRequestHead, body []byte) []byte {
-	answer := func(status int, header http.Header, answerBody []byte) []byte {
-		raw, _ := json.Marshal(e2eAnswerHead{Status: status, Header: header})
-		return joinE2EHead(raw, answerBody)
+// as the caller its channel resolved, into w: the sealed answer's
+// writer, which seals whole or record by record as the handler
+// flushes. The inner request is served from the link's address, as
+// the outer one came, so what a call may do down the link is judged
+// as the listener judges it.
+func (u *UserServer) serveInner(w http.ResponseWriter, outer *http.Request, session *e2eSession, head e2eRequestHead, body []byte) {
+	answer := func(status int, header http.Header, answerBody []byte) {
+		for name, values := range header {
+			for _, v := range values {
+				w.Header().Add(name, v)
+			}
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write(answerBody)
 	}
 	if !strings.HasPrefix(head.Path, "/user/") && head.Path != "/user" {
-		return answer(http.StatusNotFound, http.Header{}, []byte("not found\n"))
-	}
-	if head.Method == http.MethodGet && (head.Path == "/user/events" || strings.HasPrefix(head.Path, "/user/events?")) {
-		return answer(http.StatusNotImplemented, http.Header{"Content-Type": {"text/plain; charset=utf-8"}},
-			[]byte("a sealed stream is not served yet: this yard seals whole calls\n"))
+		answer(http.StatusNotFound, http.Header{}, []byte("not found\n"))
+		return
 	}
 	target, err := url.ParseRequestURI(head.Path)
 	if err != nil {
-		return answer(http.StatusBadRequest, http.Header{}, []byte("bad request\n"))
+		answer(http.StatusBadRequest, http.Header{}, []byte("bad request\n"))
+		return
 	}
 	inner, err := http.NewRequestWithContext(outer.Context(), head.Method, target.String(), bytes.NewReader(body))
 	if err != nil {
-		return answer(http.StatusBadRequest, http.Header{}, []byte("bad request\n"))
+		answer(http.StatusBadRequest, http.Header{}, []byte("bad request\n"))
+		return
 	}
 	inner.URL, inner.RequestURI = target, head.Path
 	inner.Host, inner.RemoteAddr = outer.Host, outer.RemoteAddr
@@ -358,16 +369,30 @@ func (u *UserServer) serveInner(outer *http.Request, session *e2eSession, head e
 	}
 	caller := &Caller{User: session.user, SaidBy: session.device, device: true}
 	inner = inner.WithContext(context.WithValue(inner.Context(), callerKey{}, caller))
-	rec := &wholeRecorder{header: http.Header{}}
-	u.routes().ServeHTTP(rec, inner)
-	status := rec.status
-	if status == 0 {
-		status = http.StatusOK
+	if isEventsCall(head) {
+		// The stream was opened by its channel, not by a token: its
+		// liveness is asked of the device record the session names,
+		// re-read as the plain stream's credential is resolved again.
+		inner = inner.WithContext(context.WithValue(inner.Context(), e2eStillKey{},
+			func() bool { return u.e2eDevice(outer, session) }))
 	}
-	if rec.overflow {
-		return e2eTooLargeAnswer()
+	u.routes().ServeHTTP(w, inner)
+}
+
+// e2eStillKey carries an enveloped stream's liveness check in its
+// request context, where events asks for it (streamStill, below).
+type e2eStillKey struct{}
+
+// streamStill is an events stream's liveness check: an enveloped
+// stream's own check where its context carries one, else the plain
+// stream's — the credential it opened with, resolved again, must
+// still name the same caller.
+func (u *UserServer) streamStill(r *http.Request, c *Caller, credential string) bool {
+	if check, ok := r.Context().Value(e2eStillKey{}).(func() bool); ok && check != nil {
+		return check()
 	}
-	return answer(status, rec.header, rec.body.Bytes())
+	now, _ := u.resolveIn(r.Context(), credential, remote(r))
+	return now != nil && *now == *c
 }
 
 // e2eTooLargeAnswer is the inner refusal when a whole response cannot fit
@@ -380,35 +405,217 @@ func e2eTooLargeAnswer() []byte {
 	return joinE2EHead(head, []byte(http.StatusText(http.StatusRequestEntityTooLarge)+"\n"))
 }
 
-// wholeRecorder is a whole answer as serveInner keeps it: its head and
-// its body, flushed or not, held until the handler returns and sealed
-// as one. It stops retaining bytes at the ciphertext budget and answers
-// with a sealed refusal if the body crosses it.
-type wholeRecorder struct {
+// e2eAnswerWriter is an inner answer as the yard seals it: held
+// whole until its handler returns when the handler never flushes, and
+// sealed record by record as it flushes when it does — the events
+// stream's own way. Either way the answer closes with the sealed
+// final record (yardkey.CallSealer), the outer head is written once,
+// with the first sealed bytes or with the whole run, and shows only
+// the envelope's own status and headers. A whole answer stops
+// retaining bytes at the ciphertext budget and answers with a sealed
+// refusal; a streamed answer that is no events stream and crosses
+// that budget is left unclosed, so its receiver reports a truncation
+// and a part blob is never taken for a whole one.
+type e2eAnswerWriter struct {
+	outer   http.ResponseWriter
+	session *e2eSession
+	call    []byte
+	binding *yardkey.FirstBinding
+	sealer  *yardkey.CallSealer
+	events  bool // the events stream: no answer bound, no deadline
+
 	header   http.Header
 	status   int
-	body     bytes.Buffer
-	overflow bool
+	pending  []byte // inner body written, not yet sealed
+	started  bool   // the outer head and first records are sent
+	wrote    bool   // the outer head is sent, whole or streamed
+	overflow bool   // a whole answer past the retention bound
+	capped   bool   // a streamed answer past the bound: left unclosed
+	sealed   int    // framed bytes sent of a streamed answer
+	err      error  // a sealing or sending failure, kept whole
 }
 
-func (w *wholeRecorder) Header() http.Header { return w.header }
+func newE2EAnswerWriter(outer http.ResponseWriter, session *e2eSession, call []byte, binding *yardkey.FirstBinding, events bool) *e2eAnswerWriter {
+	return &e2eAnswerWriter{outer: outer, session: session, call: call, binding: binding,
+		sealer: session.keys.NewCallSealer(call, binding), events: events, header: http.Header{}}
+}
 
-func (w *wholeRecorder) WriteHeader(status int) {
+func (w *e2eAnswerWriter) Header() http.Header { return w.header }
+
+func (w *e2eAnswerWriter) WriteHeader(status int) {
 	if w.status == 0 {
 		w.status = status
 	}
 }
 
-func (w *wholeRecorder) Write(b []byte) (int, error) {
+func (w *e2eAnswerWriter) Write(b []byte) (int, error) {
 	w.WriteHeader(http.StatusOK)
-	if w.overflow || len(b) > maxE2EAnswer-w.body.Len() {
+	if w.err != nil || w.capped {
+		return len(b), nil
+	}
+	if !w.started && (w.overflow || len(b) > maxE2EAnswer-len(w.pending)) {
 		w.overflow = true
 		return len(b), nil
 	}
-	return w.body.Write(b)
+	w.pending = append(w.pending, b...)
+	if w.started && len(w.pending) >= yardkey.MaxRecordPlain {
+		w.sealPending()
+	}
+	return len(b), nil
 }
 
-// Flush holds a whole answer whole: a flush is a stream's word, and a
-// whole answer is sealed when its handler returns. The streams that
-// need it are refused before they are served (serveInner).
-func (w *wholeRecorder) Flush() {}
+// Flush seals what the handler has written as the answer's next
+// records, sending the outer head first when the stream begins: the
+// inner head travels in the first record, sealed, and the outer head
+// the link carries back shows the envelope's alone.
+func (w *e2eAnswerWriter) Flush() {
+	if w.err != nil || w.capped || w.overflow {
+		return
+	}
+	if !w.started {
+		w.start()
+	} else {
+		w.sealPending()
+	}
+	if w.err == nil && !w.capped {
+		_ = http.NewResponseController(w.outer).Flush()
+	}
+}
+
+// SetWriteDeadline passes a stream's per-write deadline to the outer
+// answer, as the events stream sets one on each event it writes.
+func (w *e2eAnswerWriter) SetWriteDeadline(t time.Time) error {
+	return http.NewResponseController(w.outer).SetWriteDeadline(t)
+}
+
+// Unwrap is the outer answer, for a response controller that looks
+// past this writer for what it does not itself offer.
+func (w *e2eAnswerWriter) Unwrap() http.ResponseWriter { return w.outer }
+
+// start sends the outer head and seals the inner head with what body
+// already stands behind it as the stream's first records.
+func (w *e2eAnswerWriter) start() {
+	raw, err := json.Marshal(e2eAnswerHead{Status: w.statusOrOK(), Header: w.header})
+	if err != nil {
+		w.err = err
+		return
+	}
+	chunk := joinE2EHead(raw, w.pending)
+	w.pending = nil
+	w.started, w.wrote = true, true
+	w.outer.Header().Set("Content-Type", "application/octet-stream")
+	w.outer.Header().Set(e2eEnvelopeHeader, "sealed")
+	w.outer.Header().Set(E2ECallHeader, base64.RawURLEncoding.EncodeToString(w.call))
+	w.outer.WriteHeader(http.StatusOK)
+	run, err := w.sealer.Seal(chunk)
+	if err != nil {
+		w.err = err
+		return
+	}
+	w.sendRun(run)
+}
+
+// sealPending seals the body written since the last flush.
+func (w *e2eAnswerWriter) sealPending() {
+	if len(w.pending) == 0 {
+		return
+	}
+	run, err := w.sealer.Seal(w.pending)
+	w.pending = nil
+	if err != nil {
+		w.err = err
+		return
+	}
+	w.sendRun(run)
+}
+
+// sendRun writes one framed run of a streamed answer, holding the
+// edge's ciphertext bound over a stream that is no events stream: a
+// run that would cross it is never sent and the answer is left
+// unclosed, which its receiver reports as truncated.
+func (w *e2eAnswerWriter) sendRun(run []byte) {
+	if len(run) == 0 {
+		return
+	}
+	if !w.events {
+		if w.sealed+len(run) > maxE2EAnswer {
+			w.capped = true
+			return
+		}
+		w.sealed += len(run)
+	}
+	if _, err := w.outer.Write(run); err != nil && w.err == nil {
+		w.err = err
+	}
+}
+
+func (w *e2eAnswerWriter) statusOrOK() int {
+	if w.status == 0 {
+		return http.StatusOK
+	}
+	return w.status
+}
+
+// finish closes the answer when its handler has returned: sealed
+// whole, under the bound checked on the ciphertext the edge carries
+// (e2eCall's refusal, sealed), when it never flushed; and, when it
+// streamed, sealed with whatever body is left and the final record.
+func (w *e2eAnswerWriter) finish() error {
+	if w.err != nil {
+		return w.err
+	}
+	if !w.started {
+		answer := e2eTooLargeAnswer()
+		if !w.overflow {
+			raw, err := json.Marshal(e2eAnswerHead{Status: w.statusOrOK(), Header: w.header})
+			if err != nil {
+				return err
+			}
+			answer = joinE2EHead(raw, w.pending)
+		}
+		sealed, err := w.session.keys.SealWhole(w.call, w.binding, answer)
+		if err != nil {
+			return err
+		}
+		if len(sealed) > maxE2EAnswer {
+			// The edge's bound is on the ciphertext it carries, as
+			// e2eCall has always refused it: inside the envelope.
+			if sealed, err = w.session.keys.SealWhole(w.call, w.binding, e2eTooLargeAnswer()); err != nil {
+				return err
+			}
+		}
+		w.wrote = true
+		w.outer.Header().Set("Content-Type", "application/octet-stream")
+		w.outer.Header().Set(e2eEnvelopeHeader, "sealed")
+		w.outer.Header().Set(E2ECallHeader, base64.RawURLEncoding.EncodeToString(w.call))
+		w.outer.WriteHeader(http.StatusOK)
+		_, err = w.outer.Write(sealed)
+		return err
+	}
+	if w.capped {
+		return nil // left unclosed on purpose, as sendRun says
+	}
+	w.sealPending()
+	if w.err != nil {
+		return w.err
+	}
+	if w.capped {
+		return nil // the tail was not sent, so its final cannot be sent either
+	}
+	final, err := w.sealer.SealFinal()
+	if err != nil {
+		return err
+	}
+	if !w.events {
+		if w.sealed+len(final) > maxE2EAnswer {
+			w.capped = true
+			return nil // the final is part of the ciphertext bound too
+		}
+		w.sealed += len(final)
+	}
+	if _, err := w.outer.Write(final); err != nil {
+		return err
+	}
+	_ = http.NewResponseController(w.outer).Flush()
+	return nil
+}

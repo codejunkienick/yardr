@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -78,17 +81,17 @@ func (d *e2eDevice) post(t *testing.T, body []byte, call string, header http.Hea
 	return w
 }
 
-// call makes one enveloped whole call and opens its sealed answer,
-// answering the inner status, headers and body beside the outer
-// status. sealMarker and wireMarker are told apart so a test can
-// rewrite the marker between the device and the yard.
-func (d *e2eDevice) call(t *testing.T, method, path string, header http.Header, body []byte, seal, wire *yardkey.FirstBinding) (outer int, outerHeader http.Header, status int, innerHeader http.Header, innerBody []byte) {
+// callRaw makes one enveloped call and answers its outer status and
+// the sealed answer as it crossed, with the call id it was made
+// under: a test opens the answer whole (call) or record by record,
+// and may drop or add records of it first, as a carrier could.
+func (d *e2eDevice) callRaw(t *testing.T, method, path string, header http.Header, body []byte, seal, wire *yardkey.FirstBinding) (outer int, outerHeader http.Header, sealed []byte, call []byte) {
 	t.Helper()
 	rawHead, err := json.Marshal(e2eRequestHead{Method: method, Path: path, Header: header})
 	if err != nil {
 		t.Fatal(err)
 	}
-	call, err := yardkey.NewCallID()
+	call, err = yardkey.NewCallID()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,11 +104,20 @@ func (d *e2eDevice) call(t *testing.T, method, path string, header http.Header, 
 		wireHeader.Set(E2EStreamHeader, wire.Marker)
 	}
 	w := d.post(t, run, base64.RawURLEncoding.EncodeToString(call), wireHeader)
-	outer, outerHeader = w.Code, w.Result().Header
+	return w.Code, w.Result().Header, w.Body.Bytes(), call
+}
+
+// call makes one enveloped whole call and opens its sealed answer,
+// answering the inner status, headers and body beside the outer
+// status. sealMarker and wireMarker are told apart so a test can
+// rewrite the marker between the device and the yard.
+func (d *e2eDevice) call(t *testing.T, method, path string, header http.Header, body []byte, seal, wire *yardkey.FirstBinding) (outer int, outerHeader http.Header, status int, innerHeader http.Header, innerBody []byte) {
+	t.Helper()
+	outer, outerHeader, sealed, call := d.callRaw(t, method, path, header, body, seal, wire)
 	if outer != http.StatusOK {
-		return outer, outerHeader, 0, nil, w.Body.Bytes()
+		return outer, outerHeader, 0, nil, sealed
 	}
-	plain, err := d.session.OpenWhole(w.Body.Bytes(), call, seal)
+	plain, err := d.session.OpenWhole(sealed, call, seal)
 	if err != nil {
 		t.Fatalf("the sealed answer does not open: %v", err)
 	}
@@ -229,6 +241,42 @@ func TestE2EMarkerRewrittenFailsTheCall(t *testing.T) {
 	}
 }
 
+// A request whose run ends without its sealed final record is
+// refused unserved — its opening fails whole — and the honest call
+// after it on the same session still opens.
+func TestE2ETruncatedRequestRefusedUnserved(t *testing.T) {
+	y := newPairYard(t)
+	d := newE2EDevice(t, y, "sam", "phone")
+	plain := bindFor("", false)
+
+	rawHead, err := json.Marshal(e2eRequestHead{Method: http.MethodGet, Path: "/user/me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := yardkey.NewCallID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := d.session.SealWhole(call, plain, joinE2EHead(rawHead, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := yardkey.SplitRecords(run)
+	if err != nil || len(records) < 2 {
+		t.Fatalf("records = %d, %v", len(records), err)
+	}
+	var truncated []byte
+	for _, m := range records[:len(records)-1] {
+		truncated = yardkey.FrameRecord(truncated, m)
+	}
+	if w := d.post(t, truncated, base64.RawURLEncoding.EncodeToString(call), nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("a truncated request = %d, want 400 unserved", w.Code)
+	}
+	if outer, _, status, _, _ := d.call(t, http.MethodGet, "/user/me", nil, nil, plain, plain); outer != http.StatusOK || status != http.StatusOK {
+		t.Fatalf("the honest call after it = outer %d, inner %d", outer, status)
+	}
+}
+
 // The channel key, not the token, authenticates an enveloped call:
 // a handshake from a key no device pins founds no session, and a call
 // on a session whose device record has been removed — re-read at the
@@ -263,14 +311,44 @@ func TestE2EChannelAuthenticatesNotTheToken(t *testing.T) {
 	}
 }
 
-// Enveloped calls in flight at once on one session all open: each
-// message carries its own number and opens with its own copied cipher
-// state in its serving goroutine, in no sealing order.
+// Enveloped calls and streams in flight at once on one session all
+// open: 64 of them — the link's own bound — held open together, each
+// message carrying its own number and opened with its own copied
+// cipher state in its serving goroutine, in no sealing order.
 func TestE2EConcurrentCallsOnOneSession(t *testing.T) {
 	y := newPairYard(t)
 	d := newE2EDevice(t, y, "sam", "phone")
 	plain := bindFor("", false)
-	const n = 16
+	ctx := context.Background()
+
+	// Sixteen marked events streams first, held open while the calls
+	// below are in flight: 48 calls and 16 streams make the 64.
+	head, err := y.st.Head(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked := bindFor(E2EStreamLongLived, true)
+	path := "/user/events?after=" + strconv.FormatUint(head, 10)
+	type held struct {
+		s        *e2eStream
+		cancel   context.CancelFunc
+		finished chan struct{}
+	}
+	var streams []held
+	for range StreamsPerCredential {
+		s, _, cancel, finished := d.openStream(t, http.MethodGet, path, marked, marked)
+		if status, _ := s.readHead(); status != http.StatusOK {
+			t.Fatalf("a stream's head = %d", status)
+		}
+		streams = append(streams, held{s, cancel, finished})
+	}
+	defer func() {
+		for _, h := range streams {
+			h.s.close(h.cancel, h.finished)
+		}
+	}()
+
+	const n = 48
 	// Sealed here, served all at once below, opened after: the yard's
 	// goroutines meet the messages in no sealing order.
 	runs := make([][]byte, n)
@@ -308,6 +386,401 @@ func TestE2EConcurrentCallsOnOneSession(t *testing.T) {
 		if !strings.Contains(string(opened), `"sam"`) {
 			t.Errorf("call %d answered %s", i, opened)
 		}
+	}
+
+	// And an event crosses one of the streams held open throughout.
+	if err := y.st.LogEvent(ctx, "", "noted", "jo", map[string]any{"bead": "yardr-33vh"}); err != nil {
+		t.Fatal(err)
+	}
+	streams[0].s.readUntil(`"kind":"noted"`)
+}
+
+// e2eStreamWriter is a streamed outer answer's other end: a pipe the
+// yard's handler writes its sealed records into as they are sealed,
+// as the link's data frames would carry them to the device.
+type e2eStreamWriter struct {
+	header http.Header
+	status int
+	pw     *io.PipeWriter
+}
+
+func (w *e2eStreamWriter) Header() http.Header { return w.header }
+
+func (w *e2eStreamWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+}
+
+func (w *e2eStreamWriter) Write(b []byte) (int, error) {
+	w.WriteHeader(http.StatusOK)
+	return w.pw.Write(b)
+}
+
+func (w *e2eStreamWriter) Flush() {}
+
+// e2eStream is the device's end of one streamed sealed answer: its
+// records read as they cross and opened in their call's order, its
+// inner head read first, its body what follows.
+type e2eStream struct {
+	t      *testing.T
+	reader *yardkey.RecordReader
+	opener *yardkey.CallOpener
+	plain  []byte // opened plaintext not yet taken
+	body   []byte // body taken so far
+	status int
+	header http.Header
+	done   bool // the final record opened
+}
+
+// openStream makes one enveloped call whose answer streams, served in
+// its own goroutine into a pipe, and answers the device's end of it
+// with the outer writer the yard is writing and the way to end it.
+func (d *e2eDevice) openStream(t *testing.T, method, path string, seal, wire *yardkey.FirstBinding) (*e2eStream, *e2eStreamWriter, context.CancelFunc, chan struct{}) {
+	t.Helper()
+	rawHead, err := json.Marshal(e2eRequestHead{Method: method, Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := yardkey.NewCallID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := d.session.SealWhole(call, seal, joinE2EHead(rawHead, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	r := httptest.NewRequest(http.MethodPost, E2EPath, bytes.NewReader(run))
+	r = r.WithContext(ctx)
+	r.RemoteAddr = linkRemoteAddr
+	r.Header.Set(E2ECallHeader, base64.RawURLEncoding.EncodeToString(call))
+	if wire != nil && wire.Present {
+		r.Header.Set(E2EStreamHeader, wire.Marker)
+	}
+	pr, pw := io.Pipe()
+	outer := &e2eStreamWriter{header: http.Header{}, pw: pw}
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		defer pw.Close()
+		d.handler.ServeHTTP(outer, r)
+	}()
+	s := &e2eStream{t: t, reader: yardkey.NewRecordReader(pr), opener: d.session.NewCallOpener(call, seal)}
+	return s, outer, cancel, finished
+}
+
+// record reads and opens the stream's next record, holding its
+// plaintext to be taken.
+func (s *e2eStream) record() {
+	s.t.Helper()
+	msg, err := s.reader.ReadMessage()
+	if err != nil {
+		s.t.Fatalf("the stream's next record: %v", err)
+	}
+	plain, final, err := s.opener.Open(msg)
+	if err != nil {
+		s.t.Fatalf("a stream record does not open: %v", err)
+	}
+	s.plain = append(s.plain, plain...)
+	s.done = s.done || final
+}
+
+// readHead opens records until the sealed inner head stands read, and
+// answers its status and headers.
+func (s *e2eStream) readHead() (int, http.Header) {
+	s.t.Helper()
+	for s.status == 0 {
+		if len(s.plain) >= 4 {
+			n := int(s.plain[0])<<24 | int(s.plain[1])<<16 | int(s.plain[2])<<8 | int(s.plain[3])
+			if len(s.plain) >= 4+n {
+				var head e2eAnswerHead
+				if err := json.Unmarshal(s.plain[4:4+n], &head); err != nil {
+					s.t.Fatal(err)
+				}
+				s.status, s.header = head.Status, head.Header
+				s.plain = s.plain[4+n:]
+				break
+			}
+		}
+		if s.done {
+			s.t.Fatal("the stream closed before its head")
+		}
+		s.record()
+	}
+	return s.status, s.header
+}
+
+// readUntil opens records until the body holds want, and answers the
+// body so far.
+func (s *e2eStream) readUntil(want string) []byte {
+	s.t.Helper()
+	if s.status == 0 {
+		s.readHead()
+	}
+	for !bytes.Contains(s.body, []byte(want)) {
+		if s.done {
+			s.t.Fatalf("the stream closed with body %q, want %q in it", s.body, want)
+		}
+		if len(s.plain) > 0 {
+			s.body = append(s.body, s.plain...)
+			s.plain = nil
+			continue
+		}
+		s.record()
+	}
+	return s.body
+}
+
+// close ends the caller's end and reads the stream out: the yard's
+// handler returns, its final record crosses, and the pipe ends.
+func (s *e2eStream) close(cancel context.CancelFunc, finished chan struct{}) {
+	s.t.Helper()
+	cancel()
+	for {
+		msg, err := s.reader.ReadMessage()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			s.t.Fatalf("the stream's end: %v", err)
+		}
+		if _, _, err := s.opener.Open(msg); err != nil {
+			s.t.Fatalf("the stream's last records do not open: %v", err)
+		}
+	}
+	<-finished
+	if err := s.opener.Close(); err != nil {
+		s.t.Fatalf("a stream the yard ended = %v, want its final record", err)
+	}
+}
+
+// A streamed blob and the events stream go sealed end to end: a blob
+// too large for one record crosses in several, closed by its final
+// record, and an events stream's head and events cross record by
+// record as they are written. A record dropped in the middle is
+// refused at the gap with nothing past it delivered, an outer ending
+// with no final record is a truncation a part blob is never saved
+// from, and a zero-length beat record in the run changes nothing.
+func TestE2EStreamsSealedEndToEnd(t *testing.T) {
+	y := newPairYard(t)
+	d := newE2EDevice(t, y, "jo", "phone")
+	plain := bindFor("", false)
+	ctx := context.Background()
+
+	// The blob, put sealed and fetched sealed: several records each way.
+	blob := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte("the shed, painted; "), 12000)...)
+	args, _ := json.Marshal(map[string]string{"data": base64.StdEncoding.EncodeToString(blob)})
+	if _, _, status, _, body := d.call(t, http.MethodPost, "/user/call/PutBlob", nil, args, plain, plain); status != http.StatusOK {
+		t.Fatalf("PutBlob inner = %d (%s)", status, body)
+	} else {
+		var reply struct {
+			Result struct{ Hash string }
+		}
+		if err := json.Unmarshal(body, &reply); err != nil || len(reply.Result.Hash) != 64 {
+			t.Fatalf("PutBlob answered %s (%v)", body, err)
+		}
+		outer, _, sealed, call := d.callRaw(t, http.MethodGet, "/user/blobs/"+reply.Result.Hash, nil, nil, plain, plain)
+		if outer != http.StatusOK {
+			t.Fatalf("the blob's outer = %d", outer)
+		}
+		records, err := yardkey.SplitRecords(sealed)
+		if err != nil || len(records) < 4 {
+			t.Fatalf("the blob crossed in %d records, %v: want several and a final", len(records), err)
+		}
+		// The device's saving of it: joined only once the final record
+		// closes the call, so a part is never saved as a whole.
+		save := func(run []byte) ([]byte, error) {
+			opener := d.session.NewCallOpener(call, plain)
+			reader := yardkey.NewRecordReader(bytes.NewReader(run))
+			var joined []byte
+			for {
+				msg, err := reader.ReadMessage()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					return nil, err
+				}
+				piece, _, err := opener.Open(msg)
+				if err != nil {
+					return nil, err
+				}
+				joined = append(joined, piece...)
+			}
+			if err := opener.Close(); err != nil {
+				return nil, err
+			}
+			return joined, nil
+		}
+		join := func(ms [][]byte) []byte {
+			var out []byte
+			for _, m := range ms {
+				out = yardkey.FrameRecord(out, m)
+			}
+			return out
+		}
+		whole, err := save(sealed)
+		if err != nil {
+			t.Fatalf("the streamed blob does not open: %v", err)
+		}
+		if head, got, err := splitE2EHead(whole); err != nil || !bytes.Equal(got, blob) {
+			t.Fatalf("the streamed blob = %d of %d bytes (%v, head %s)", len(got), len(blob), err, head)
+		}
+		// A beat forged into the run: read past, the blob unchanged.
+		withBeat := join([][]byte{records[0], nil, records[1]})
+		withBeat = append(withBeat, join(records[2:])...)
+		if whole, err := save(withBeat); err != nil || len(whole) == 0 {
+			t.Errorf("a run with a beat in it = %v", err)
+		} else if _, got, _ := splitE2EHead(whole); !bytes.Equal(got, blob) {
+			t.Errorf("a beat changed the blob: %d of %d bytes", len(got), len(blob))
+		}
+		// The final record dropped: a truncation, nothing saved.
+		if saved, err := save(join(records[:len(records)-1])); !errors.Is(err, yardkey.ErrTruncated) || saved != nil {
+			t.Errorf("a blob with no final record saved %d bytes, %v", len(saved), err)
+		}
+		// A middle record dropped: refused at the gap, nothing saved,
+		// and nothing past the gap in what was delivered.
+		if saved, err := save(join(append([][]byte{records[0]}, records[2:]...))); !errors.Is(err, yardkey.ErrRecordGap) || saved != nil {
+			t.Errorf("a blob past a gap saved %d bytes, %v", len(saved), err)
+		}
+	}
+
+	// A streamed answer that crosses the edge's ciphertext bound is
+	// left open. In particular, neither a data tail rejected at the
+	// bound nor a final record that would cross it can close the part.
+	t.Run("stream limit leaves the answer truncated", func(t *testing.T) {
+		for _, tc := range []struct {
+			name    string
+			sealed  int
+			pending []byte
+		}{
+			{name: "pending tail", sealed: maxE2EAnswer - 1, pending: []byte("tail")},
+			{name: "final record", sealed: maxE2EAnswer - 50},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				call, err := yardkey.NewCallID()
+				if err != nil {
+					t.Fatal(err)
+				}
+				outer := httptest.NewRecorder()
+				writer := newE2EAnswerWriter(outer, &e2eSession{keys: d.session}, call, plain, false)
+				writer.started, writer.wrote = true, true
+				writer.sealed, writer.pending = tc.sealed, tc.pending
+				if err := writer.finish(); err != nil {
+					t.Fatal(err)
+				}
+				if !writer.capped || outer.Body.Len() != 0 {
+					t.Fatalf("the capped stream ended with capped=%t and %d tail bytes", writer.capped, outer.Body.Len())
+				}
+			})
+		}
+	})
+	t.Run("pre-flush overflow stays a whole refusal", func(t *testing.T) {
+		call, err := yardkey.NewCallID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		outer := httptest.NewRecorder()
+		d.y.u.mu.Lock()
+		session := d.y.u.e2eSessions[string(d.session.Tag())]
+		d.y.u.mu.Unlock()
+		if session == nil {
+			t.Fatal("the yard's channel session is missing")
+		}
+		writer := newE2EAnswerWriter(outer, session, call, plain, false)
+		if _, err := writer.Write(make([]byte, maxE2EAnswer+1)); err != nil {
+			t.Fatal(err)
+		}
+		writer.Flush()
+		if writer.started || outer.Body.Len() != 0 {
+			t.Fatalf("the first flush sent an incomplete answer: started=%t, %d bytes", writer.started, outer.Body.Len())
+		}
+		if err := writer.finish(); err != nil {
+			t.Fatal(err)
+		}
+		opened, err := d.session.OpenWhole(outer.Body.Bytes(), call, plain)
+		if err != nil {
+			t.Fatalf("the oversized answer's refusal does not open: %v", err)
+		}
+		head, body, err := splitE2EHead(opened)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var answer e2eAnswerHead
+		if err := json.Unmarshal(head, &answer); err != nil {
+			t.Fatal(err)
+		}
+		if answer.Status != http.StatusRequestEntityTooLarge || string(body) != http.StatusText(http.StatusRequestEntityTooLarge)+"\n" {
+			t.Fatalf("an oversized answer after Flush = %d, %q; want a whole 413 refusal", answer.Status, body)
+		}
+	})
+
+	// The events stream, marked as the router marks it.
+	head, err := y.st.Head(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked := bindFor(E2EStreamLongLived, true)
+	s, outer, cancel, finished := d.openStream(t, http.MethodGet,
+		"/user/events?after="+strconv.FormatUint(head, 10), marked, marked)
+	status, header := s.readHead()
+	if status != http.StatusOK || header.Get("Content-Type") != "application/x-ndjson" {
+		t.Fatalf("the events head sealed inside = %d %v", status, header)
+	}
+	if outer.status != http.StatusOK || outer.header.Get(e2eEnvelopeHeader) != "sealed" ||
+		outer.header.Get("Content-Type") != "application/octet-stream" {
+		t.Errorf("the outer head = %d %v, want the envelope's alone", outer.status, outer.header)
+	}
+	if err := y.st.LogEvent(ctx, "", "noted", "jo", map[string]any{"bead": "yardr-33vh"}); err != nil {
+		t.Fatal(err)
+	}
+	if body := s.readUntil(`"kind":"noted"`); !bytes.Contains(body, []byte(`"kind":"noted"`)) {
+		t.Fatalf("the event crossed as %q", body)
+	}
+	s.close(cancel, finished)
+}
+
+// A marked call whose opened inner call is any other than the events
+// stream is refused sealed and unserved, and holds no stream slot: a
+// device still opens its sixteen marked streams after one, and the
+// seventeenth marked stream is refused as the seventeenth plain one
+// is (TestUserStreamsAreBounded holds the plain side).
+func TestE2EMarkedCallOpensOnlyTheEventsStream(t *testing.T) {
+	y := newPairYard(t)
+	d := newE2EDevice(t, y, "sam", "phone")
+	marked := bindFor(E2EStreamLongLived, true)
+	ctx := context.Background()
+
+	outer, _, status, _, body := d.call(t, http.MethodGet, "/user/me", nil, nil, marked, marked)
+	if outer != http.StatusOK || status != http.StatusForbidden || !strings.Contains(string(body), "marked long-lived") {
+		t.Fatalf("a marked call to /user/me = outer %d, inner %d (%s)", outer, status, body)
+	}
+
+	head, err := y.st.Head(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/user/events?after=" + strconv.FormatUint(head, 10)
+	type held struct {
+		s        *e2eStream
+		cancel   context.CancelFunc
+		finished chan struct{}
+	}
+	var streams []held
+	for range StreamsPerCredential {
+		s, _, cancel, finished := d.openStream(t, http.MethodGet, path, marked, marked)
+		if status, _ := s.readHead(); status != http.StatusOK {
+			t.Fatalf("a marked stream's head = %d", status)
+		}
+		streams = append(streams, held{s, cancel, finished})
+	}
+	outer, _, status, _, body = d.call(t, http.MethodGet, path, nil, nil, marked, marked)
+	if outer != http.StatusOK || status != http.StatusServiceUnavailable || !strings.Contains(string(body), "too many event streams") {
+		t.Fatalf("the seventeenth marked stream = outer %d, inner %d (%s)", outer, status, body)
+	}
+	for _, h := range streams {
+		h.s.close(h.cancel, h.finished)
 	}
 }
 

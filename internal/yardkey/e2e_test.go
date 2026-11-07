@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"io"
 	"sync"
 	"testing"
 
@@ -100,6 +101,28 @@ func TestChannelWholeCallNeedsSeveralRecords(t *testing.T) {
 	}
 	if got, err := device.OpenWhole(back, call, e2eFirst); err != nil || string(got) != "seen" {
 		t.Fatalf("the device opened %q, %v", got, err)
+	}
+
+	// A run with no final record is truncated, and one with a record
+	// dropped from its middle is refused at the gap: neither answers
+	// any of the plaintext as whole.
+	msgs, err = SplitRecords(run)
+	if err != nil || len(msgs) < 3 {
+		t.Fatalf("records = %d, %v", len(msgs), err)
+	}
+	join := func(ms [][]byte) []byte {
+		var out []byte
+		for _, m := range ms {
+			out = FrameRecord(out, m)
+		}
+		return out
+	}
+	if _, err := yard.OpenWhole(join(msgs[:len(msgs)-1]), call, e2eFirst); !errors.Is(err, ErrTruncated) {
+		t.Errorf("a run with no final record opened whole: %v", err)
+	}
+	mid := append([][]byte{msgs[0]}, msgs[2:]...)
+	if _, err := yard.OpenWhole(join(mid), call, e2eFirst); !errors.Is(err, ErrRecordGap) {
+		t.Errorf("a run with its middle record dropped opened whole: %v", err)
 	}
 
 	one, err := device.Seal(call, 0, e2eFirst, []byte("x"))
@@ -230,5 +253,147 @@ func TestChannelFirstRecordBindsPathAndMarker(t *testing.T) {
 	}
 	if _, err := SplitRecords(append(run, 1, 2)); err == nil {
 		t.Error("a run with bytes left over split")
+	}
+}
+
+// A streamed call opens record by record as its pieces cross: the
+// records before a dropped one stand delivered and the stream is
+// refused at the gap, an outer ending with no final record is a
+// truncation, and a zero-length beat record — forged, dropped or
+// replayed — is read past before any opening and alters no inner
+// byte. Two streams of one session seal and open interleaved, each
+// under its own call's indexes.
+func TestChannelStreamRecordsGapTruncationAndBeats(t *testing.T) {
+	device, yard, _ := channelPair(t)
+	call, other := callID(t), callID(t)
+
+	seal := func(c *CallSealer, chunk string) []byte {
+		t.Helper()
+		run, err := c.Seal([]byte(chunk))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
+	messages := func(run []byte) [][]byte {
+		t.Helper()
+		msgs, err := SplitRecords(run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return msgs
+	}
+
+	// Interleaved streams, beats between their records: a beat is
+	// four zero bytes a reader drops before any opening.
+	sealer, otherSealer := device.NewCallSealer(call, e2eFirst), device.NewCallSealer(other, e2eFirst)
+	beat := FrameRecord(nil, nil)
+	var wire []byte
+	wire = append(wire, seal(sealer, "one\n")...)
+	wire = append(wire, beat...)
+	wire = append(wire, seal(otherSealer, "first\n")...)
+	wire = append(wire, seal(sealer, "two\n")...)
+	wire = append(wire, beat...)
+	wire = append(wire, beat...)
+	wire = append(wire, seal(otherSealer, "second\n")...)
+	for _, s := range []*CallSealer{sealer, otherSealer} {
+		final, err := s.SealFinal()
+		if err != nil {
+			t.Fatal(err)
+		}
+		wire = append(wire, final...)
+	}
+	reader := NewRecordReader(bytes.NewReader(wire))
+	openers := map[string]*CallOpener{
+		string(call):  yard.NewCallOpener(call, e2eFirst),
+		string(other): yard.NewCallOpener(other, e2eFirst),
+	}
+	got := map[string][]byte{}
+	for {
+		msg, err := reader.ReadMessage()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The message's own call names its opener, as a device knows
+		// the call its answer belongs to.
+		plain, final, err := openers[string(msg[E2ETagSize:E2ETagSize+E2ECallSize])].Open(msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !final {
+			key := string(msg[E2ETagSize : E2ETagSize+E2ECallSize])
+			got[key] = append(got[key], plain...)
+		}
+	}
+	if string(got[string(call)]) != "one\ntwo\n" || string(got[string(other)]) != "first\nsecond\n" {
+		t.Errorf("the streams opened %q and %q", got[string(call)], got[string(other)])
+	}
+	for _, o := range openers {
+		if err := o.Close(); err != nil {
+			t.Errorf("a closed stream = %v", err)
+		}
+	}
+
+	// A record dropped from the middle: what stands before the gap is
+	// delivered, the record past it is refused there, and the honest
+	// record still opens when it comes.
+	sealer = device.NewCallSealer(call, e2eFirst)
+	var chunks [][]byte
+	for _, chunk := range []string{"a\n", "b\n", "c\n"} {
+		chunks = append(chunks, messages(seal(sealer, chunk))...)
+	}
+	opener := yard.NewCallOpener(call, e2eFirst)
+	if plain, _, err := opener.Open(chunks[0]); err != nil || string(plain) != "a\n" {
+		t.Fatalf("the first record opened %q, %v", plain, err)
+	}
+	if _, _, err := opener.Open(chunks[2]); !errors.Is(err, ErrRecordGap) {
+		t.Fatalf("the record past the gap = %v, want the gap refused", err)
+	}
+	if plain, _, err := opener.Open(chunks[1]); err != nil || string(plain) != "b\n" {
+		t.Fatalf("the honest record after a refused one opened %q, %v", plain, err)
+	}
+
+	// No final record before the outer ending: a truncation, and the
+	// part is no whole.
+	if err := opener.Close(); !errors.Is(err, ErrTruncated) {
+		t.Errorf("an outer ending with no final record = %v", err)
+	}
+	truncated := NewRecordReader(bytes.NewReader(append(seal(sealer, "x\n"), 0, 0)))
+	if _, err := truncated.ReadMessage(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := truncated.ReadMessage(); !errors.Is(err, ErrTruncated) {
+		t.Errorf("a run ending inside a length = %v", err)
+	}
+
+	// Data that would itself read as a final record is split by the
+	// sealer and delivered as data: sixteen zero bytes open whole,
+	// and the final record after them still closes the call.
+	sealer = device.NewCallSealer(call, e2eFirst)
+	run, err := sealer.Seal(finalPlain(0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, err := sealer.SealFinal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	opener = yard.NewCallOpener(call, e2eFirst)
+	var data []byte
+	for _, msg := range messages(append(run, final...)) {
+		plain, done, err := opener.Open(msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if done && len(data) != 16 {
+			t.Fatalf("the call closed after %d data bytes, want its 16 first", len(data))
+		}
+		data = append(data, plain...)
+	}
+	if !bytes.Equal(data, finalPlain(0, 0)) || opener.Close() != nil {
+		t.Errorf("final-shaped data opened as %v, close %v", data, opener.Close())
 	}
 }

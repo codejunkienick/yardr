@@ -1453,10 +1453,7 @@ func (u *UserServer) events(w http.ResponseWriter, r *http.Request) {
 		u.mu.Unlock()
 	}()
 	credential, _ := bearer(r.Header.Values("Authorization"))
-	still := func() bool {
-		now, _ := u.resolveIn(r.Context(), credential, remote(r))
-		return now != nil && *now == *c
-	}
+	still := func() bool { return u.streamStill(r, c, credential) }
 	u.api.events(w, r, still, u.recheck, func(e store.Event) (store.Event, bool) {
 		return u.deviceEvent(r.Context(), c, e)
 	})
