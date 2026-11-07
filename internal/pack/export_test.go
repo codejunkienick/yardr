@@ -146,6 +146,11 @@ func TestExportRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A pack that brings a page frame, imported beside the starter: an export
+	// cannot yet write the frame a depot uses, so it says it leaves it.
+	brand := framePack(t, "name: brand\napi: 4\nframe: frames/page.html\n", pageFrame)
+	applyAs(t, st, build(t, st, load(t, brand), o), nil, "ann")
+
 	ex, d1 := export(t, st, "web", o.Home, "mine")
 	p := load(t, d1)
 	if p.Name != "mine" || p.Kind != "git" || len(p.Flows) != 2 || p.Flows[0].Name != "default" || p.Flows[1].Name != "train" || p.Flows[1].Type != "train" {
@@ -200,6 +205,12 @@ func TestExportRoundTrip(t *testing.T) {
 	}
 	if !leftHas(ex, "group web-builders", "kind, model") || !leftHas(ex, "group backlog", "members") {
 		t.Errorf("left out lacks what the groups keep in the yard:\n%s", strings.Join(ex.Left, "\n"))
+	}
+	if !leftHas(ex, "frame: brand: not in the pack", "frames/page.html") {
+		t.Errorf("left out lacks the page frame of pack brand:\n%s", strings.Join(ex.Left, "\n"))
+	}
+	if _, err := os.Stat(filepath.Join(d1, "frames")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the export wrote a frame: %v", err)
 	}
 	if !leftHas(ex, "roles/testers.md:3: names crew member yardmaster", "plain text", "brings no crew member of that name") {
 		t.Errorf("left out lacks the crew member a role names:\n%s", strings.Join(ex.Left, "\n"))

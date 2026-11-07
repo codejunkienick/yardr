@@ -2113,16 +2113,7 @@ func printPlan(w io.Writer, p *pack.Plan, answers pack.Answers, open, calls map[
 			fmt.Fprintln(w, "  "+r)
 		}
 	}
-	// The code an import brings runs as whoever runs the yard, and applying
-	// the pack is the consent to that, so the plan ends by naming the files
-	// that run (docs/pack-api.md). A pack with none says nothing. The digest
-	// is just above that line, when there is one, and pins these files too.
-	if p.Digest != "" {
-		fmt.Fprintf(w, "\ndigest sha256:%s\n", p.Digest)
-	}
-	if len(p.Programs) > 0 {
-		fmt.Fprintf(w, "\nruns %s of the pack as you: %s\n", plural(len(p.Programs), "program"), strings.Join(p.Programs, ", "))
-	}
+	printPlanConsent(w, p)
 	if setup && p.SetupFile != "" {
 		fmt.Fprintln(w)
 		printSetup(w, p.Pack, p.SetupFile, p.Setup)

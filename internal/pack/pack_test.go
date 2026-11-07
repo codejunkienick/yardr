@@ -99,6 +99,10 @@ crew:
       linear: involved
 `
 
+// framed is the head of a pack for API 4 that names the file path as its
+// frame, on line 3.
+func framed(path string) string { return "name: small\napi: 4\nframe: " + path + "\n" }
+
 func smallFiles(yaml string) map[string]string {
 	return map[string]string{"pack.yaml": yaml, "roles/builder.md": "build\n", "roles/yardmaster.md": "yardmaster\n", "scripts/land": "#!/bin/sh\n"}
 }
@@ -471,7 +475,9 @@ func TestStrictness(t *testing.T) {
 	cases := []struct {
 		name     string
 		old, new string            // one replacement in small
+		also     []string          // more replacements, each an old text and its new
 		files    map[string]string // added or, with "", removed
+		file     string            // the file the error is in; pack.yaml unless named
 		key, msg string
 		line     int
 	}{
@@ -545,11 +551,11 @@ func TestStrictness(t *testing.T) {
 		// this yardr reads is the pack's one mistake, wherever the key
 		// stands and whatever else is wrong with the pack: the rest would
 		// be this yardr's mistakes, not the pack's.
-		{name: "api above what this yardr reads", old: "name: small\n", new: "name: small\napi: 4\n", key: "api", msg: "this pack is written for pack API 4, and this yardr reads up to 3: upgrade yardr (yardr upgrade)", line: 2},
-		{name: "api far above", old: "name: small\n", new: "name: small\napi: 1000\n", key: "api", msg: "this pack is written for pack API 1000, and this yardr reads up to 3", line: 2},
-		{name: "api above, beside a key this yardr lacks", old: "name: small\n", new: "name: small\napi: 4\nmodel: opus\n", key: "api", msg: "upgrade yardr", line: 2},
-		{name: "api above, beside a file that is missing", old: "name: small\n", new: "name: small\napi: 4\n", files: map[string]string{"roles/builder.md": ""}, key: "api", msg: "upgrade yardr", line: 2},
-		{name: "api above, last in the file and beside a scope that is wrong", old: "      linear: involved\n", new: "      linear: everything\napi: 4\n", key: "api", msg: "this pack is written for pack API 4", line: 22},
+		{name: "api above what this yardr reads", old: "name: small\n", new: "name: small\napi: 5\n", key: "api", msg: "this pack is written for pack API 5, and this yardr reads up to 4: upgrade yardr (yardr upgrade)", line: 2},
+		{name: "api far above", old: "name: small\n", new: "name: small\napi: 1000\n", key: "api", msg: "this pack is written for pack API 1000, and this yardr reads up to 4", line: 2},
+		{name: "api above, beside a key this yardr lacks", old: "name: small\n", new: "name: small\napi: 5\nmodel: opus\n", key: "api", msg: "upgrade yardr", line: 2},
+		{name: "api above, beside a file that is missing", old: "name: small\n", new: "name: small\napi: 5\n", files: map[string]string{"roles/builder.md": ""}, key: "api", msg: "upgrade yardr", line: 2},
+		{name: "api above, last in the file and beside a scope that is wrong", old: "      linear: involved\n", new: "      linear: everything\napi: 5\n", key: "api", msg: "this pack is written for pack API 5", line: 22},
 		{name: "api of none", old: "name: small\n", new: "name: small\napi: 0\n", key: "api", msg: "want a whole number, 1 or more (the pack API this pack is written for, docs/pack-api.md), got int 0", line: 2},
 		{name: "api below zero", old: "name: small\n", new: "name: small\napi: -1\n", key: "api", msg: "got int -1", line: 2},
 		{name: "api is a string", old: "name: small\n", new: "name: small\napi: \"1\"\n", key: "api", msg: `got "1"`, line: 2},
@@ -557,6 +563,20 @@ func TestStrictness(t *testing.T) {
 		{name: "api is a list", old: "name: small\n", new: "name: small\napi: [1]\n", key: "api", msg: "got a list", line: 2},
 		{name: "api is nothing", old: "name: small\n", new: "name: small\napi:\n", key: "api", msg: "got nothing", line: 2},
 		{name: "api given twice", old: "name: small\n", new: "name: small\napi: 1\napi: 1\n", key: "api", msg: "given twice", line: 3},
+		// frame (API 4): the file is read as a role is, and then held to what
+		// only a frame has to meet. Every way it can break the title contract
+		// is a row of TestFrameRefusalsNameFileLineAndKey.
+		{name: "frame is missing", old: "name: small\n", new: framed("frames/page.html"), key: "frame", msg: "frame frames/page.html is missing (looked for", line: 3},
+		{name: "frame is absolute", old: "name: small\n", new: framed("/etc/passwd"), key: "frame", msg: "frame /etc/passwd: a pack's paths are relative to its directory, not absolute", line: 3},
+		{name: "frame leaves the pack", old: "name: small\n", new: framed("../page.html"), key: "frame", msg: "frame ../page.html leaves the pack's directory", line: 3},
+		{name: "frame is no regular file", old: "name: small\n", new: framed("frames/page.html"), files: map[string]string{"frames/page.html/inner": "x"}, key: "frame", msg: "frame frames/page.html is not a regular file", line: 3},
+		{name: "frame is empty", old: "name: small\n", new: framed("frames/page.html"), files: map[string]string{"frames/page.html": " \n"}, key: "frame", msg: "frame frames/page.html is empty", line: 3},
+		{name: "frame is over 256 KiB", old: "name: small\n", new: framed("frames/page.html"), files: map[string]string{"frames/page.html": strings.Repeat("x", 256<<10+1)}, key: "frame", msg: "frame frames/page.html holds 262145 bytes: at most 262144", line: 3},
+		{name: "frame is a group's role", old: "name: small\n", new: framed("roles/builder.md"), files: map[string]string{"roles/builder.md": pageFrame}, key: "frame", msg: "frame roles/builder.md is also the role of group builders", line: 3},
+		{name: "frame is a group's script", old: "name: small\n", new: framed("scripts/land"), files: map[string]string{"scripts/land": pageFrame}, key: "frame", msg: "frame scripts/land is also the script of group assembly", line: 3},
+		{name: "frame is a crew member's role", old: "name: small\n", new: framed("roles/yardmaster.md"), files: map[string]string{"roles/yardmaster.md": pageFrame}, key: "frame", msg: "frame roles/yardmaster.md is also the role of crew member yardmaster", line: 3},
+		{name: "frame is a stage file", old: "name: small\n", new: framed("frames/page.html"), also: []string{"review: { group: assembly,", "review: { group: assembly, file: frames/page.html,"}, files: map[string]string{"frames/page.html": pageFrame}, key: "frame", msg: "frame frames/page.html is also the stage file of stage review of flow default", line: 3},
+		{name: "frame is the setup notes", old: "name: small\n", new: "name: small\napi: 4\nsetup: frames/page.html\nframe: frames/page.html\n", files: map[string]string{"frames/page.html": pageFrame}, key: "frame", msg: "frame frames/page.html is also the setup notes", line: 4},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -566,6 +586,12 @@ func TestStrictness(t *testing.T) {
 					t.Fatalf("the case replaces %q, which the pack does not have", c.old)
 				}
 				text = strings.Replace(text, c.old, c.new, 1)
+			}
+			for i := 0; i < len(c.also); i += 2 {
+				if !strings.Contains(text, c.also[i]) {
+					t.Fatalf("the case also replaces %q, which the pack does not have", c.also[i])
+				}
+				text = strings.Replace(text, c.also[i], c.also[i+1], 1)
 			}
 			files := smallFiles(text)
 			for name, content := range c.files {
@@ -585,11 +611,15 @@ func TestStrictness(t *testing.T) {
 				t.Fatalf("errors = %v, want one", errs)
 			}
 			e := errs[0]
-			if e.File != filepath.Join(dir, "pack.yaml") || e.Key != c.key || e.Line != c.line || !strings.Contains(e.Msg, c.msg) {
+			file := filepath.Join(dir, "pack.yaml")
+			if c.file != "" {
+				file = filepath.Join(dir, c.file)
+			}
+			if e.File != file || e.Key != c.key || e.Line != c.line || !strings.Contains(e.Msg, c.msg) {
 				t.Fatalf("error = %s\nwant key %s, line %d, message containing %q", e, c.key, c.line, c.msg)
 			}
 			// The printed error carries all three.
-			if want := filepath.Join(dir, "pack.yaml") + ":"; !strings.HasPrefix(err.Error(), want) || !strings.Contains(err.Error(), c.key+": ") {
+			if want := file + ":"; !strings.HasPrefix(err.Error(), want) || !strings.Contains(err.Error(), c.key+": ") {
 				t.Fatalf("printed %q", err.Error())
 			}
 		})
@@ -658,8 +688,8 @@ func TestKindIsTheDepotKindThePackIsFor(t *testing.T) {
 // A pack says which pack API it is written for, or says nothing and is
 // written for API 1, as every pack was before the key.
 func TestAPIIsTheNumberThePackSaysItIsWrittenFor(t *testing.T) {
-	if pack.API != 3 {
-		t.Fatalf("pack.API = %d: this test knows APIs 1, 2 and 3, and so does the page's list of what each number added", pack.API)
+	if pack.API != 4 {
+		t.Fatalf("pack.API = %d: this test knows APIs 1 to 4, and so does the page's list of what each number added", pack.API)
 	}
 	for name, tc := range map[string]struct {
 		text string
@@ -669,6 +699,7 @@ func TestAPIIsTheNumberThePackSaysItIsWrittenFor(t *testing.T) {
 		"api first":            {text: strings.Replace(small, "name: small\n", "name: small\napi: 1\n", 1), api: 1},
 		"api 2":                {text: strings.Replace(small, "name: small\n", "name: small\napi: 2\n", 1), api: 2},
 		"api 3":                {text: strings.Replace(small, "name: small\n", "name: small\napi: 3\n", 1), api: 3},
+		"api 4":                {text: strings.Replace(small, "name: small\n", "name: small\napi: 4\n", 1), api: 4},
 		"api last in the file": {text: small + "api: 1\n", api: 1},
 	} {
 		if p, err := pack.LoadDir(writePack(t, smallFiles(tc.text))); err != nil || p.API != tc.api {

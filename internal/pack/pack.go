@@ -36,7 +36,7 @@ const File = "pack.yaml"
 // key is read, since an older yardr that read on would call a newer key
 // unknown instead of saying that it is too old. It rises by one in the
 // release that adds anything to what the page lists as stable.
-const API = 3
+const API = 4
 
 // Pack is a pack as written. Everything that has an order in the file
 // keeps it: flows, a flow's stages (the first is where a bead starts), a
@@ -76,6 +76,9 @@ type Pack struct {
 	// pack without any. SetupText is what the file holds.
 	Setup     string `json:"setup,omitempty"`
 	SetupText string `json:"setup_text,omitempty"`
+	// Frame is the pack's page frame, the one HTML file pages are made in
+	// (frame), nil for a pack without one.
+	Frame *FrameFile `json:"frame,omitempty"`
 	// fsys is the pack's directory: every path in the pack is a slash path
 	// in it. Its files are read through reads, once each.
 	fsys  fs.FS
@@ -345,88 +348,6 @@ func Load(fsys fs.FS, dir string) (*Pack, error) {
 	return p, nil
 }
 
-// Operator is the placeholder for the yard's operator: a role or stage file
-// says {{operator}} where the import puts that person's name. The other
-// placeholders are the pack's crew, {{<name>}}, each filled with the
-// yard's crew member that takes it. A pack names no person and no crew member of
-// a yard, so these are how its prose refers to them.
-const Operator = "operator"
-
-// placeholder is anything between double braces on one line. A name the
-// import does not fill is an error of the pack, so what is installed never
-// carries one.
-var placeholder = regexp.MustCompile(`\{\{[^{}\n]*\}\}`)
-
-// Fill puts names where text has their placeholders: {{<key>}} becomes the
-// key's value. A placeholder without a key in names is left as it is.
-func Fill(text []byte, names map[string]string) []byte {
-	return placeholder.ReplaceAllFunc(text, func(m []byte) []byte {
-		if v, ok := names[string(m[2:len(m)-2])]; ok {
-			return []byte(v)
-		}
-		return m
-	})
-}
-
-// Filled reports whether the import fills the placeholders of the pack's
-// file rel: it does for a role and a stage file, and copies a script as it
-// is, where braces are the shell's or a template's own. A script is what a
-// run: group names, and that also makes its copy executable: the file's own
-// mode says nothing, since a pack yardr embeds has none.
-func (p *Pack) Filled(rel string) bool {
-	return !slices.ContainsFunc(p.Groups, func(g Group) bool { return g.Run == rel })
-}
-
-// Placeholders are the names a role or stage file of the pack may put in
-// double braces: the operator, then the pack's crew.
-func (p *Pack) Placeholders() []string {
-	out := []string{Operator}
-	for _, r := range p.Crew {
-		if r.Name != Operator {
-			out = append(out, r.Name)
-		}
-	}
-	return out
-}
-
-// placeholderErrors names every placeholder in the pack's role and stage
-// files that an import would not fill, by file and line.
-func (p *Pack) placeholderErrors() Errors {
-	files := p.Files()
-	for _, f := range p.Flows {
-		for _, s := range f.Stages {
-			if s.File != "" && !slices.Contains(files, s.File) {
-				files = append(files, s.File)
-			}
-		}
-	}
-	known := p.Placeholders()
-	may := make([]string, len(known))
-	for i, name := range known {
-		may[i] = "{{" + name + "}}"
-	}
-	var errs Errors
-	for _, rel := range files {
-		if !p.Filled(rel) {
-			continue
-		}
-		file := joinName(p.Dir, rel)
-		text, err := p.read(rel)
-		if err != nil {
-			errs = append(errs, Error{File: file, Msg: err.Error()})
-			continue
-		}
-		for i, line := range strings.Split(string(text), "\n") {
-			for _, m := range placeholder.FindAllString(line, -1) {
-				if name := m[2 : len(m)-2]; !slices.Contains(known, name) {
-					errs = append(errs, Error{File: file, Line: i + 1, Msg: fmt.Sprintf("placeholder %s: an import fills %s (the operator and the pack's crew) and nothing else", m, strings.Join(may, ", "))})
-				}
-			}
-		}
-	}
-	return errs
-}
-
 type reader struct {
 	file string
 	dir  string // as given: how an error names a file of the pack
@@ -652,9 +573,9 @@ func (r *reader) later(root *yaml.Node) (Error, bool) {
 }
 
 func (r *reader) pack(p *Pack, root *yaml.Node) {
-	var flows, groups, crew, sources, presets *entry
+	var flows, groups, crew, sources, presets, frame *entry
 	named := false
-	for _, e := range r.entries(root, "", "name", "api", "kind", "setup", "flows", "groups", "crew", "sources", "presets") {
+	for _, e := range r.entries(root, "", "name", "api", "kind", "setup", "frame", "flows", "groups", "crew", "sources", "presets") {
 		switch e.key {
 		case "api":
 			// Not above API: later has refused the pack before this.
@@ -665,6 +586,8 @@ func (r *reader) pack(p *Pack, root *yaml.Node) {
 			}
 		case "setup":
 			p.Setup, p.SetupText = r.setupFile(e.v, e.path)
+		case "frame":
+			frame = &e
 		case "name":
 			named = true
 			if s, ok := r.str(e.v, e.path); ok {
@@ -726,7 +649,7 @@ func (r *reader) pack(p *Pack, root *yaml.Node) {
 		for _, e := range []struct {
 			e    *entry
 			what string
-		}{{flows, "flows"}, {groups, "groups"}, {crew, "crew"}} {
+		}{{flows, "flows"}, {groups, "groups"}, {crew, "crew"}, {frame, "frame"}} {
 			if e.e != nil {
 				r.errf(e.e.k, e.e.path, "a pack of kind source carries sources alone, and no %s", e.what)
 			}
@@ -789,6 +712,8 @@ func (r *reader) pack(p *Pack, root *yaml.Node) {
 			r.errf(a.n, a.key, "%s declares no call %s (it has: %s): ask for %s, every read call, or a call by its name", p.Declared[i].File, a.call, strings.Join(names, ", "), store.GrantRead)
 		}
 	}
+	// Last: the frame's path may be none of the files read above.
+	p.Frame = r.frame(p, frame)
 }
 
 // calls reads what a group or a crew member asks to call: a mapping of a
@@ -1868,9 +1793,9 @@ func hasStage(flows []Flow, stage string) bool {
 }
 
 // Files are the role and script files the pack's groups and crew members
-// name, as slash paths relative to its directory, sorted, each once. Stage
-// files are not among them: they belong to a flow and go where the yard
-// reads that flow's (Stage.File).
+// name, and its frame, as slash paths relative to its directory, sorted, each
+// once. Stage files are not among them: they belong to a flow and go where the
+// yard reads that flow's (Stage.File).
 func (p *Pack) Files() []string {
 	var out []string
 	for _, g := range p.Groups {
@@ -1879,6 +1804,7 @@ func (p *Pack) Files() []string {
 	for _, r := range p.Crew {
 		out = append(out, r.Role)
 	}
+	out = append(out, p.frameFile())
 	slices.Sort(out)
 	out = slices.Compact(out)
 	return slices.DeleteFunc(out, func(s string) bool { return s == "" })

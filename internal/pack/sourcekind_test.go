@@ -215,6 +215,8 @@ groups:
 			key: "groups", line: 7, msg: "carries sources alone, and no groups"},
 		{name: "crew", yaml: "\ncrew:\n  boss: { role: roles/boss.md }\n", files: map[string]string{"roles/boss.md": "boss\n"},
 			key: "crew", line: 7, msg: "carries sources alone, and no crew"},
+		{name: "frame", yaml: "frame: frames/page.html\n", files: map[string]string{"frames/page.html": pageFrame},
+			key: "frame", line: 6, msg: "carries sources alone, and no frame"},
 		{name: "a stage map beside the declaration",
 			yaml: "    as: yardmaster\n",
 			key:  "sources.acme.as", line: 6, msg: "has declaration: <file> and nothing else"},

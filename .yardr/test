@@ -1777,7 +1777,7 @@ internal/cli/crew.go 2247 the crew, inbox, mail and memory commands
 internal/cli/doctor.go 1255 the doctor examinations and its report
 internal/cli/init.go 1600 yard init, onboarding and settings
 internal/cli/ops.go 1829 the server, daemon, depot, group, route and session commands
-internal/cli/pack.go 2172 pack loading, import planning and its question rounds
+internal/cli/pack.go 2163 pack loading, import planning and its question rounds
 internal/cli/peers.go 1567 the peer identity, intake and ping commands
 internal/cli/routereport.go 1513 the route report and its rendering
 internal/cli/sourcecmd.go 2147 the source command and its builtin checks
@@ -1788,8 +1788,7 @@ internal/dispatch/dispatch.go 1567 the daemon routing pass and its runners
 internal/dispatch/harnesslogin.go 1094 harness login leading and onboarding marks
 internal/dispatch/prompt.go 929 prompt, dialog and login watching
 internal/pack/export.go 1047 pack export and its object shapes
-internal/pack/pack.go 1927 pack reading, checking and its shapes
-internal/pack/plan.go 1106 import plans, diffs and their operations
+internal/pack/pack.go 1853 pack reading, checking and its shapes
 internal/rpc/user.go 1481 the user server and callers (pairing is userpair.go, envelopes usere2e.go)
 internal/source/declaration.go 1278 source declarations, credentials and calls
 internal/standin/standin.go 1540 the fake Linear, GitHub and edge APIs

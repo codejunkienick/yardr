@@ -73,6 +73,10 @@ func TestDigestIsOfEveryFileThePackNames(t *testing.T) {
 	delete(noScript, "scripts/land")
 	// acme's declaration up to the keys that name commands.
 	noCommands, _, _ := strings.Cut(cmdDecl, "hook:")
+	// A frame is pinned with the files that are code, and is none of them.
+	withFrame := digestFiles()
+	withFrame["pack.yaml"] = strings.Replace(digestYAML, "setup: SETUP.md\n", "setup: SETUP.md\napi: 4\nframe: frames/page.html\n", 1)
+	withFrame["frames/page.html"] = pageFrame
 	depotOther := pack.Options{Depot: "web", Home: t.TempDir(), Flow: "other", Crew: map[string]string{"yardmaster": "boss"}}
 	// A call a command answers (run) has its program carried like any
 	// command's: it is a file that runs, and so one the digest pins.
@@ -94,6 +98,7 @@ func TestDigestIsOfEveryFileThePackNames(t *testing.T) {
 		{"a pack of kind source", sourcePackFiles(), pack.Options{Home: o.Home}, pack.Options{Home: t.TempDir()}, []string{"acme/normalize", "acme/thread"}},
 		{"a pack of kind source whose call a command answers", answered, pack.Options{Home: o.Home}, pack.Options{Home: t.TempDir()}, []string{"mail/imap"}},
 		{"a pack that runs nothing", noScript, o, depotOther, []string{}},
+		{"a pack with a page frame, which is no program", withFrame, o, depotOther, []string{"scripts/land"}},
 		{"a pack of kind source that runs nothing", map[string]string{"pack.yaml": sourcePackYAML, "acme.yaml": noCommands}, pack.Options{Home: o.Home}, pack.Options{Home: t.TempDir()}, []string{}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -113,8 +118,12 @@ func TestDigestIsOfEveryFileThePackNames(t *testing.T) {
 			for _, name := range slices.Sorted(maps.Keys(c.files)) {
 				changed := maps.Clone(c.files)
 				changed[name] += "\n"
-				if got := plan(changed, c.o).Digest; got == want.Digest {
+				got := plan(changed, c.o)
+				if got.Digest == want.Digest {
 					t.Errorf("a byte more in %s leaves the digest as it was", name)
+				}
+				if err := got.CheckDigest(want.Digest); err == nil {
+					t.Errorf("a pin of the pack as it was accepts the pack with a byte more in %s", name)
 				}
 			}
 			plus := maps.Clone(c.files)

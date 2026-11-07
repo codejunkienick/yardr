@@ -41,6 +41,16 @@ prints no such line, and its digest remains the plan's last line.
 `pack check --json` carries the same list as
 `programs`, an empty array for none.
 
+A page frame (`frame:`, [API 4](#api-4)) is not a program. yardr never runs
+it: a reader's browser does, when the reader chooses to run a page, and
+applying the pack lets that script into every page made under it. The plan
+names it on a line of its own after the programs, and the digest pins it
+with the rest:
+
+```
+frame frames/page.html (11,842 bytes): copied into each new page made under this pack; its script runs in a reader's browser only when the reader chooses run
+```
+
 Applying is the consent. The digest makes sure that the code which runs is
 the code that was read. It covers every file the pack names, the programs
 among them, and `pack apply --sha256 <digest>` refuses a pack with any other
@@ -161,7 +171,8 @@ Not for a pack, whatever it happens to do today:
 | every key of `pack.yaml` that the [table](packs.md#packyaml) lists, `api` among them, and what a pack is [refused for](packs.md#what-a-pack-is-refused-for) | stable | |
 | every key of a declaration that [`packs/template/acme.yaml`](../packs/template/acme.yaml) shows, and the keys under them that [integrations.md](integrations.md#a-declared-source) gives. A pack for a depot brings `name`, `about`, `base`, `bases`, `credential`, `check`, `idempotency`, `calls` and `notify`, and a pack of kind `source` also `hear`, `hook`, `thread`, `link`, `identity` and `events` | stable | `limits` is not one: a pack may not bring it. `git` is not one either: a pack of kind `source` may carry it (the github pack does), and this page does not promise it |
 | the placeholders `{{operator}}` and `{{<crew member>}}` in a role or stage file | stable | any other `{{...}}` there is refused |
-| a role, script, stage file, setup file or declaration is a path relative to the pack's directory, inside it, to a regular file. A command program is a file beside its declaration, inside the pack | stable | |
+| a role, script, stage file, setup file, frame or declaration is a path relative to the pack's directory, inside it, to a regular file. A command program is a file beside its declaration, inside the pack | stable | |
+| the frame (API 4): `frame: <file>` at the root of `pack.yaml`, one HTML file of at most 256 KiB with one `<title>` element in its head, one `<!--yardr:title-->` where the page's title block stands in its body and one `<!--yardr:content-->` where the page's content stands, each a comment of its own that a browser reads as a comment, and neither in the head, a `<script>`, a `<style>`, a `<template>`, a tag, nor where the title or the content could not stand | stable | what else is in the frame, its class names, its tokens and its script, is its author's: yardr holds the two markers and the `<title>`, nothing more. A pack of kind `source` carries no frame, and a frame's path is no other file's of the pack. The frame is copied as it stands, never filled in, and is no program |
 | the digest: sha256 over each file the pack names, as its path, a NUL, its length, a NUL and its bytes, in path order | stable | |
 | a pack at a URL: one GET per file, over https, or plain http to this machine alone. A redirect stays within the host and never goes down to http. A file is at most 1 MiB and takes at most 10 s. `pack check` and `pack apply` take `--auth <name>`, which sends the header in `<home>/packs/<name>.auth` with every GET, to the pack's host alone; the record keeps the name, never the value | stable | |
 | the start of a mistake, `file:line: key:`, and its JSON form in `pack check --json` (`file`, `line`, `key`, `error`) | stable | |
@@ -376,6 +387,14 @@ or record.
 A call parameter with a default may stand anywhere a required parameter
 may, including a path, a part of a query value or the body's text. When the
 caller leaves it out, yardr sends the default.
+
+### API 4
+
+The `frame` key at the root of `pack.yaml`: one HTML file of the pack, the
+page frame that pages made under the pack are made in (`frame:
+frames/page.html`). It is held to [what the files table above says of
+it](#the-files), pinned by the digest and named on its own line of the plan,
+and it is no program. A pack that carries a frame says `api: 4`.
 
 ## Left out
 

@@ -121,7 +121,7 @@ func Export(ctx context.Context, st store.API, o ExportOptions) (*Exported, erro
 	if slices.Contains(Kinds, depot.Kind) {
 		e.p.Kind, e.out.Kind = depot.Kind, depot.Kind
 	}
-	for _, step := range []func() error{e.flows, e.routes, e.groups, e.names, e.rules} {
+	for _, step := range []func() error{e.flows, e.routes, e.groups, e.names, e.rules, e.frames} {
 		if err := step(); err != nil {
 			return nil, err
 		}

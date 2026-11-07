@@ -202,6 +202,7 @@ sources:
 | `api` | optional: the pack API the pack is written for, a whole number, 1 or more, and **1 when the key is absent**, so every pack written before the key is a pack of API 1. A pack above the highest API this yardr reads is refused before any other key is read, with the cause (`upgrade yardr`) instead of an unknown key. The number rises on every addition to what is stable, and [pack-api.md](pack-api.md#the-api-number) lists what each number added |
 | `kind` | optional: the kind of depot the pack is for, `git` (a repository: beads are built on branches and landed on a base) or `dir` (a plain directory: nothing is committed and nothing merges), or `source`: the pack is an integration, imported into the yard itself and into no depot ([An integration pack](#an-integration-pack-kind-source)). `yardr depot init` refuses the pack for a depot of the other kind ([below](#yardr-depot-init)). A pack without the key fits either depot |
 | `setup` | optional, for a pack of any kind: the pack's setup notes, its author's words about what a setup takes — where in the service a webhook is made and which events it needs, what an identity wants, how to test. A file of the pack, markdown (`setup: SETUP.md`), at most 64 KB, with something in it. `pack check` prints it after the plan, `pack apply` after what it did (or names `pack show <pack>` when nothing changed), `pack show <pack>` prints it later, and a crew member's prime names it by that command, so the one who helps with a setup reads it first. The notes are marked as the pack's, not checked by yardr. Text only: the pack still carries no secret, sets no identity and grants nothing |
+| `frame` | optional, for a pack of any kind but `source` ([`api: 4`](pack-api.md#api-4)): the pack's page frame, one HTML file of the pack that pages made under it are made in (`frame: frames/page.html`). A path as a role's is, to a regular file with something in it and at most 256 KiB, that is no other file of the pack. It is read as a browser reads HTML, and it has one `<title>` element in its head, one `<!--yardr:title-->` where the page's title block stands in its body (where text can stand, in an `<h1>` for one), and one `<!--yardr:content-->` where the page's content stands (where a heading, tiles and a table can: not in a paragraph, a button, a link, a heading, a list or the rows and cells of a table). Each marker is a comment of its own: the same bytes in a tag or an attribute, in a longer comment, or in the text of a `<script>`, `<style>`, `<textarea>`, `<title>`, `<iframe>`, `<xmp>`, `<noembed>`, `<noframes>`, `<noscript>` or `<plaintext>` are none, and the pack is refused for them. Nor may a marker stand in the head, after the body, or inside an `<svg>`, a `<math>` or a `<template>`, and a frame nests no more than 512 elements deep. The import copies the frame as it stands to `<home>/packs/<pack>/<its path>`, at mode 0644: nothing is filled in it, and it is no program, since only a reader's browser runs its script. The digest pins it, and `pack check` names it on a line of its own ([below](#yardr-pack-check)) |
 | `flows.<flow>.stages` | the flow's stages, **in file order**: the first is where a bead starts |
 | `flows.<flow>.type` | optional: the flow is for beads of this type, beside the depot's flow (a train flow beside the task flow). A type follows one flow |
 | `…stages.<stage>.group` | who works the stage: a key of `groups`. A stage without one is routed to nobody |
@@ -333,6 +334,23 @@ packs/mine/pack.yaml:7: flows.default.stages.decide.group: no group deciders is 
   after it in the file;
 - a role, script or stage file that is missing, absolute or outside the
   pack, or a stage file that is empty;
+- a `frame` that is missing, absolute or outside the pack, empty, over 256 KiB
+  (naming its size), or the path of a role, a script, a stage file, the setup
+  notes, a declaration or a program of one: the frame is copied as it stands,
+  and those are filled in or run;
+- a frame that breaks its contract, each named at its line of the frame file
+  with the key `frame`: a second `<title>` element, a `<title>` in the body or
+  in a `<template>`, a second `<!--yardr:title-->` or `<!--yardr:content-->`, a
+  marker that a browser does not read as a comment of its own (in a tag, an
+  attribute value, a longer comment, a CDATA section, the text of a raw text
+  element), a marker in the head, after the body, in an `<svg>`, `<math>` or
+  `<template>`, the title marker directly in a table or a `<select>`, and the
+  content marker inside a paragraph, a button or a link or directly in a
+  heading, a list or a table. What the frame lacks is named at the `frame` key of
+  `pack.yaml`: no `<title>` element, no title marker, no content marker. The
+  scan reads the file as the HTML standard has a browser read it, so a marker
+  after `<!-->` or `--!>` counts and one in an element a browser reads as text
+  does not;
 - a placeholder in a role or stage file that an import does not fill
   ([Placeholders](#packyaml)), named by that file and its line:
   `packs/mine/roles/builder.md:44: placeholder {{lead}}: an import fills
@@ -346,8 +364,8 @@ packs/mine/pack.yaml:7: flows.default.stages.decide.group: no group deciders is 
   `yardr`), whose calls are not declared; a call the pack's own declaration
   of the source lacks, with the ones it has; a source with an empty list; a
   people group, since a person calls as who they are and never as a group;
-- in a pack of kind `source`: `flows`, `groups` or `crew`, which it carries
-  none of; no `sources`, or an empty one; a source with any key beside
+- in a pack of kind `source`: `flows`, `groups`, `crew` or a `frame`, which it
+  carries none of; no `sources`, or an empty one; a source with any key beside
   `declaration`;
 - under `sources`: a source yardr has built in that it cannot set a status
   in (`token`); `hears` without `as`; `as` with neither `hears` nor a
@@ -395,10 +413,10 @@ is under way changes nothing that is installed.
 **Pinning a pack.** A pack applied with `--yes` is read by no one, and a
 server may have changed what it serves since someone did. `yardr pack check`
 prints the pack's digest, `digest sha256:<hex>`: one sha256 over
-`pack.yaml` and every file it names (the roles and scripts, the stage files
-of all its flows, the setup notes, the declarations and the programs of their
-commands), each as its path in the pack, a NUL, its length, a NUL and its
-bytes, in path order. One byte changed in any of them, or a file renamed, is
+`pack.yaml` and every file it names (the roles and scripts, the frame, the
+stage files of all its flows, the setup notes, the declarations and the
+programs of their commands), each as its path in the pack, a NUL, its length,
+a NUL and its bytes, in path order. One byte changed in any of them, or a file renamed, is
 another digest; a file the pack does not name is not part of it. It is the
 pack's and not the plan's, so it is the same for any depot and any answers,
 and for the pack read from a directory or from a URL. `yardr pack apply
@@ -466,7 +484,12 @@ and applying the pack authorizes yardr to run them as the user who runs the yard
 credential helper (`git.credential`), which the import installs with the rest
 and a depot's git runs. A pack with none prints
 no such line. The digest (`digest sha256:<hex>`) immediately above it is what
-`pack apply --sha256` takes ([Pinning a pack](#naming-a-pack)). After the plan
+`pack apply --sha256` takes ([Pinning a pack](#naming-a-pack)). A pack that
+carries a page frame says so after that, on a line of its own: `frame
+frames/page.html (11,842 bytes): copied into each new page made under this pack;
+its script runs in a reader's browser only when the reader chooses run`. The
+frame is no program, so it is not counted among them, and the digest above
+pins it. After the plan
 come the pack's setup notes (`setup`), when it has any: its author's words
 about what a setup takes, marked as the pack's, not checked by yardr. `--json` prints the
 same plan as data ([below](#the-plan-as-data)). It exits 1 on an invalid
@@ -1452,6 +1475,10 @@ with why:
   written.
 - A crew member's name in a role or stage file, by file and line. The name
   stays as plain text, and the pack brings no crew member of that name.
+- A page frame that a pack imported into the depot brought
+  (`frame: <pack>: not in the pack`, with the frame's path in that pack). An
+  export does not write a frame, since it cannot yet say which one the depot
+  uses.
 - The variables before and the arguments after a script in a script group's
   command, and the depot's rules file (`.yardr/depot.md`). The pack has an
   `env` for a script's options, but an export writes none: they are this
@@ -1948,7 +1975,10 @@ declares none. `digest` is the pack's digest in hex, without the `sha256:`
 that `pack check` prints before it. `programs` are the files of the pack that
 run as the user who runs the yard once it is imported: the script of each
 group with `run:` and the programs of a declaration's commands, as paths in
-the pack, sorted, each once, and an empty array for a pack with none. `install` is where roles and scripts are copied, `stage_files` the
+the pack, sorted, each once, and an empty array for a pack with none. `frame`
+is the pack's page frame, its path in the pack as `file` and what it holds as
+`bytes`, and is absent for a pack without one; it is no program. `install` is
+where roles, scripts and the frame are copied, `stage_files` the
 directory under which each flow's stage files are
 (`<stage_files>/<pack>.<flow>/<stage>.md`). `fill` is what the import puts
 for each placeholder, by its name. `setup` and `setup_file` are the pack's
@@ -1967,7 +1997,7 @@ prune removes), under its kind:
 
 | kind | carries |
 |---|---|
-| `file` | `from`, `to`, `mode`, `sha256` (of the content as installed), and `fill: true` on a role or stage file, whose placeholders are filled; a stage file also `flow`, the store flow it belongs to, and `stage` |
+| `file` | `from`, `to`, `mode` (0755 for a script, 0644 for anything else, the frame among them), `sha256` (of the content as installed), and `fill: true` on a role or stage file, whose placeholders are filled; a stage file also `flow`, the store flow it belongs to, and `stage` |
 | `group` | the whole group as it would be stored, what the yard keeps included |
 | `flow` | the whole flow, its stages in order |
 | `pointer` | `depot`, `type`, `flow` |

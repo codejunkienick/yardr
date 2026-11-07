@@ -120,6 +120,35 @@ func TestPackCheckPrintsThePlan(t *testing.T) {
 	if out, err = run(t, a.packCmd(), "check", quiet, "--depot", "web"); err != nil || strings.Contains(out, "runs ") || !strings.Contains(out, "\ndigest sha256:") {
 		t.Errorf("a pack that runs nothing: %v\n%s", err, out)
 	}
+
+	// A pack that carries a page frame says so on a line of its own, after
+	// the digest that pins it, and counts it among no program: its script
+	// runs in a reader's browser, never as the user who runs the yard. A pack
+	// without one has no frame in its plan at all.
+	frame := "<!DOCTYPE html>\n<title>t</title>\n<style>" + strings.Repeat("a", 1200) + "</style>\n<h1><!--yardr:title--></h1>\n<!--yardr:content-->\n"
+	withFrame := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(withFrame, "frames"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{"pack.yaml": "name: framed\napi: 4\nframe: frames/page.html\n", "frames/page.html": frame} {
+		if err := os.WriteFile(filepath.Join(withFrame, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	line := fmt.Sprintf("\nframe frames/page.html (%d,%03d bytes): copied into each new page made under this pack; its script runs in a reader's browser only when the reader chooses run\n", len(frame)/1000, len(frame)%1000)
+	out, err = run(t, a.packCmd(), "check", withFrame, "--depot", "web")
+	if err != nil || !strings.Contains(out, line) || strings.Contains(out, "of the pack as you") || strings.Index(out, "\ndigest sha256:") > strings.Index(out, line) {
+		t.Errorf("a pack with a frame: %v\nwant the digest, then %q, and no program line:\n%s", err, line, out)
+	}
+	a.json = true
+	out, err = run(t, a.packCmd(), "check", withFrame, "--depot", "web")
+	var framedPlan pack.Plan
+	if err != nil || json.Unmarshal([]byte(out), &framedPlan) != nil || framedPlan.Frame == nil || *framedPlan.Frame != (pack.FrameFile{File: "frames/page.html", Bytes: len(frame)}) || len(framedPlan.Programs) != 0 {
+		t.Errorf("the json plan of a pack with a frame: %v, frame %+v, programs %v\n%s", err, framedPlan.Frame, framedPlan.Programs, out)
+	}
+	if out, err = run(t, a.packCmd(), "check", quiet, "--depot", "web"); err != nil || strings.Contains(out, `"frame"`) {
+		t.Errorf("the json plan of a pack without a frame names one: %v\n%s", err, out)
+	}
 }
 
 // An invalid pack exits non-zero, each mistake with file, line and key,
