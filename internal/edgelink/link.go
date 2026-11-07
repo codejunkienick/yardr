@@ -170,6 +170,10 @@ type Link struct {
 	// only between serve's reading of its frame and its handler's return.
 	liveMu sync.Mutex
 	live   map[string]context.CancelFunc
+	// e2eLive is each live frame's registered enveloped call id, by
+	// frame id (e2e.go), held from serve's reading of the frame until
+	// its handler returns (untrack).
+	e2eLive map[string]string
 	// conn is the live link's socket while serve runs, for the frames the
 	// yard sends unasked: the sender's push frames.
 	sendMu sync.Mutex
@@ -527,6 +531,12 @@ func (l *Link) serve(ctx context.Context, c *websocket.Conn, session string) (re
 				l.Log.Warn("edge link: a request refused", "id", text(f.ID), "seq", f.Seq, "why", why)
 				continue
 			}
+			// The frame's enveloped call claim, registered before its
+			// goroutine starts (e2e.go): a claim already live is refused.
+			if !l.registerE2E(f) {
+				l.Log.Warn("edge link: an enveloped call id already live, refused", "id", text(f.ID))
+				continue
+			}
 			last = f.Seq
 			// The request's own context, held by its id before its handler
 			// starts, so the edge's end for it cancels it however soon it
@@ -599,6 +609,7 @@ func (l *Link) untrack(id string) {
 	l.liveMu.Lock()
 	defer l.liveMu.Unlock()
 	delete(l.live, id)
+	delete(l.e2eLive, id)
 }
 
 // answer serves one request with the listener's handler and sends its
@@ -675,6 +686,11 @@ func (l *Link) request(ctx context.Context, f frameIn) (*http.Request, error) {
 		for _, v := range values {
 			req.Header.Add(name, v)
 		}
+	}
+	// An enveloped call is handed the call id its frame registered
+	// (e2e.go), which is the frame header's claim as serve took it.
+	if call := l.registeredE2E(f.ID); call != "" {
+		req.Header.Set(e2eCallHeader, call)
 	}
 	return req, nil
 }

@@ -206,6 +206,9 @@ type UserServer struct {
 	// sealed pairing redemption is opened with (userpair.go,
 	// SetChannelKeyFile); "" where the yard told none.
 	channelPath string
+	// e2eSessions is the yard's live channel sessions by tag
+	// (usere2e.go), held in memory alone.
+	e2eSessions map[string]*e2eSession
 
 	mu      sync.Mutex
 	refused map[string]*refusals // by reason: a fixed few, whatever is sent
@@ -621,19 +624,14 @@ func (u *UserServer) device(ctx context.Context, credential, from string) (*Call
 }
 
 func (u *UserServer) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /user/call/{method}", u.call)
-	mux.HandleFunc("GET /user/events", u.events)
-	mux.HandleFunc("GET /user/blobs/{hash}", u.userBlob)
-	mux.HandleFunc("GET /user/me", func(w http.ResponseWriter, r *http.Request) {
-		c := callerOf(r)
-		writeJSON(w, struct {
-			Caller
-			Yard       string `json:"yard"`
-			Yardmaster string `json:"yardmaster"`
-		}{*c, u.yard(r.Context()), u.yardmaster(r.Context())})
-	})
+	mux := u.routes()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// An enveloped call down the link is opened by its channel, not
+		// by a token, and only from the link's address (usere2e.go).
+		if r.Method == http.MethodPost && r.URL.Path == E2EPath && r.RemoteAddr == linkRemoteAddr {
+			u.e2e(w, r)
+			return
+		}
 		// A device that has no token yet comes for one with a pairing's
 		// code. Asked first: the device a pairing is opened for may be the
 		// yard's first. With no pairing open the path is as any other here.

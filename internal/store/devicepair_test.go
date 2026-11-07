@@ -379,6 +379,18 @@ func TestDevicePairRedeemSealed(t *testing.T) {
 	if err != nil || len(list) != 1 || list[0].ChannelKey != key {
 		t.Fatalf("devices = %+v, %v, want the one device with its key pinned", list, err)
 	}
+	// The pinned key names the device to a channel handshake, and no
+	// other key names any.
+	if got, err := own.DeviceByChannelKey(ctx, key); err != nil || got == nil || got.User != "ada" || got.Name != "phone" {
+		t.Fatalf("DeviceByChannelKey(the pinned key) = %+v, %v", got, err)
+	}
+	other, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := own.DeviceByChannelKey(ctx, yardkey.ChannelPublic(other)); err != nil || got != nil {
+		t.Fatalf("DeviceByChannelKey(another key) = %+v, %v, want nil", got, err)
+	}
 	// The replay: the same code and key again buys nothing.
 	if d, err := own.DevicePairRedeemSealed(ctx, opened.Code, key); d != nil || !errors.As(err, &no) || no.Reason != store.NoPairing {
 		t.Fatalf("the sealed code again = %+v, %v, want no pairing", d, err)

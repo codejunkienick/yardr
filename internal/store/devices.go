@@ -319,6 +319,28 @@ func dropDevices(w *wtx, name string, data map[string]any) error {
 	return nil
 }
 
+// DeviceByChannelKey answers the device whose pinned channel public
+// key (Device.ChannelKey, set by a sealed pairing redemption) is key:
+// the device a channel handshake that proved that key speaks for. Nil
+// for a key no live device record pins. Like ResolveDevice it is the
+// server's to ask, for a handshake it was sent, and no method of the
+// API.
+func (s *Store) DeviceByChannelKey(ctx context.Context, key string) (*Device, error) {
+	if key == "" {
+		return nil, nil
+	}
+	var found *Device
+	err := s.read(func(tx *bolt.Tx) error {
+		return each(tx, bDevices, "", func(_ []byte, d *deviceRecord) error {
+			if d.ChannelKey == key {
+				found = &d.Device
+			}
+			return nil
+		})
+	})
+	return found, err
+}
+
 // ResolveDevice answers the device a token is of, and so the user a call
 // that carries it is made as; nil for a token of no device, whatever is
 // wrong with it. from is the address the call came from, as the caller
