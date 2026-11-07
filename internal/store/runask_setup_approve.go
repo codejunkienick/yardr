@@ -8,7 +8,6 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -30,8 +29,9 @@ import (
 // Where the pack's source names a check call, the typed account is tried
 // with it before the write, with no store write open: a refused check
 // refuses the approval with the check's words, records nothing and leaves
-// the ask open. A check call that names run is tried only where its program
-// already stands under the yard's home (setupCheckOf).
+// the ask open. A check call that names run is tried from a scratch home
+// holding the carried programs, first setup and setup again alike
+// (setupCheckOf, runSetupCheck).
 //
 // It refuses an ask that is not on the bead, sets up no pack, or was
 // declined, taken back or approved already: a setup runs once for one ask.
@@ -73,7 +73,7 @@ func (s *Store) ApproveSetup(ctx context.Context, id string, ask uint64, option 
 		if err != nil {
 			return err
 		}
-		job, err = setupCheckOf(ask, v, values, s.home)
+		job, err = setupCheckOf(ask, v, values)
 		return err
 	}); err != nil {
 		return nil, err
@@ -325,11 +325,12 @@ func (w *wtx) approveSetup(ctx context.Context, id string, seq uint64, option in
 // setupCheck is the pre-store check of a setup approval that typed its
 // account: the source's declaration with the card's base in place of its
 // own, the typed read credential the check call is made with, and the
-// yard's home, where a check call that names run finds its program.
+// carried source's command files, from which a check call that names run
+// is tried in a scratch home.
 type setupCheck struct {
-	d    *source.Declaration
-	cred string
-	home string
+	d     *source.Declaration
+	cred  string
+	files []AskFile
 }
 
 // setupCheckOf is the check a validated setup approval makes before
@@ -339,16 +340,15 @@ type setupCheck struct {
 // or where the typed values do not carry the read credential the check
 // call is sent with — the missing names of a drift card alone, or a
 // mint's inputs, whose token is minted only once the pack is in the
-// yard — or where the check call names run and its program is not under
-// home yet, as on a first setup. The declaration is the first carried
-// source that names a credential, as the account the card asks for is
-// (setupAccount), with the card's base choice in place of its own, as a
-// check after setup is.
-func setupCheckOf(seq uint64, v *setupApproval, values map[string]string, home string) (*setupCheck, error) {
+// yard. The declaration is the first carried source that names a
+// credential, as the account the card asks for is (setupAccount), with
+// the card's base choice in place of its own, as a check after setup is.
+func setupCheckOf(seq uint64, v *setupApproval, values map[string]string) (*setupCheck, error) {
 	if len(values) == 0 {
 		return nil, nil
 	}
 	var d *source.Declaration
+	var files []AskFile
 	for _, carried := range v.was.Carried {
 		parsed, err := source.Parse("pack source "+carried.Name, []byte(carried.Text))
 		if err != nil {
@@ -358,6 +358,7 @@ func setupCheckOf(seq uint64, v *setupApproval, values map[string]string, home s
 			continue
 		}
 		d = parsed
+		files = carried.Files
 		break
 	}
 	if d == nil || d.Check == "" {
@@ -369,23 +370,22 @@ func setupCheckOf(seq uint64, v *setupApproval, values map[string]string, home s
 	if cred == "" {
 		return nil, nil
 	}
-	// A run check's program is carried by the pack and stands under home
-	// only once the carry has installed it, after this approval. Where it
-	// is not there nothing is run, and a first setup is not refused for it:
-	// no approval could ever install the pack. yardr source check tries the
-	// call once the pack is in.
-	if call, _ := d.Call(d.Check); len(call.Run) > 0 {
-		if _, err := os.Stat(source.Command{Argv: call.Run}.Program(home, d.Name)); errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-	}
-	return &setupCheck{d: d.WithBase(v.was.Base), cred: cred, home: home}, nil
+	return &setupCheck{d: d.WithBase(v.was.Base), cred: cred, files: files}, nil
 }
+
+// setupCheckScratchPrefix names the scratch homes a setup approval's run
+// check is tried from, for the test that holds the try to removing its own.
+const setupCheckScratchPrefix = "yardr-setup-check-"
 
 // runSetupCheck makes the check call of a setup approval with its typed
 // credential, the one call the declaration names for it, as yardr source
 // check makes it after setup: with the credential as a call carries it
-// and the timeout a call uses, and nothing written anywhere. A check the
+// and the timeout a call uses, and nothing written anywhere. A check that
+// names run is tried from a scratch home holding the carried source's
+// command files, first setup and setup again alike: the carry installs
+// the pack after the approval, so on a first setup the program stands
+// nowhere else, and on a setup again the standing copy may be older than
+// the carried one. The scratch home is removed on every path. A check the
 // service refuses, or that is never answered, refuses the approval with
 // the check's words, and nothing is stored: the card stays open to be
 // answered again. Nil checks nothing.
@@ -393,8 +393,17 @@ func runSetupCheck(ctx context.Context, seq uint64, job *setupCheck) error {
 	if job == nil {
 		return nil
 	}
-	res, err := source.DoCheck(ctx, job.d, job.cred, job.home, ReadSecretFile)
+	home := ""
 	call, _ := job.d.Call(job.d.Check)
+	if len(call.Run) > 0 {
+		scratch, err := checkScratch(job.d.Name, job.files)
+		if err != nil {
+			return fmt.Errorf("ask %d: the check call %s (%s) was not tried: %v. Nothing was stored", seq, job.d.Check, call.Line(), err)
+		}
+		defer os.RemoveAll(scratch)
+		home = scratch
+	}
+	res, err := source.DoCheck(ctx, job.d, job.cred, home, ReadSecretFile)
 	if err != nil {
 		return fmt.Errorf("ask %d: the check call %s (%s) failed: %v. Nothing was stored", seq, job.d.Check, call.Line(), err)
 	}
@@ -402,6 +411,33 @@ func runSetupCheck(ctx context.Context, seq uint64, job *setupCheck) error {
 		return fmt.Errorf("ask %d: the check call %s (%s) was answered %d%s. Nothing was stored", seq, job.d.Check, call.Line(), res.Status, source.StatusHint(res.Status, job.d))
 	}
 	return nil
+}
+
+// checkScratch is the scratch home a run check is tried from: the carried
+// source's command files written under it as the carry writes them, each
+// held to its carried SHA-256, so the try runs what the approval would
+// install. The caller removes it. A failure removes it already and refuses
+// the approval, since storing untried is what the try is for.
+func checkScratch(name string, files []AskFile) (string, error) {
+	scratch, err := os.MkdirTemp("", setupCheckScratchPrefix)
+	if err != nil {
+		return "", err
+	}
+	copies := make([]source.FileCopy, len(files))
+	want := make(map[string]string, len(files))
+	for i, f := range files {
+		copies[i] = source.FileCopy{Program: f.Program, Data: []byte(f.Text)}
+		want[f.Program] = f.SHA256
+	}
+	if err := source.WriteCopies(scratch, name, copies); err != nil {
+		os.RemoveAll(scratch)
+		return "", err
+	}
+	if err := source.VerifyCopies(scratch, name, want); err != nil {
+		os.RemoveAll(scratch)
+		return "", err
+	}
+	return scratch, nil
 }
 
 // checkSetupValues checks typed account values against the ask: every name

@@ -964,10 +964,10 @@ calls:
   look: { kind: read, run: [check/look] }
 `
 
-// setupCheckedLook is that program: it leaves in the home what it was given,
-// and refuses while a marker file stands there.
+// setupCheckedLook is that program: it refuses every login but one, in
+// the service's words, and answers that one with its account.
 const setupCheckedLook = "#!/bin/sh\nenv > look-environment\n" +
-	"if [ -f look-refuse ]; then echo \"login refused for $CHECKED_TOKEN\" >&2; exit 1; fi\n" +
+	"if [ \"$CHECKED_TOKEN\" != good-token ]; then echo \"login refused for $CHECKED_TOKEN\" >&2; exit 1; fi\n" +
 	"printf '{\"account\":\"ops@example.com\"}'\n"
 
 func setupCheckedRunPack() *setupPack {
@@ -979,37 +979,21 @@ func setupCheckedRunPack() *setupPack {
 }
 
 // A setup card whose source names a check that runs a program tries the
-// typed credential by running it from its copy under the home, as one that
-// names a request is tried by sending it: a refusal refuses the answer in the
-// program's words and stores nothing, a pass stores. On a first setup the
-// copy is not there yet, since the carry installs the pack after the
-// approval: a try there would keep the pack from ever being installed, so
-// nothing is tried and the card stores as today.
+// typed credential by running the carried program from a scratch home,
+// first setup and setup again alike: the carry installs the pack after
+// the approval, so on a first setup the program stands nowhere else, and
+// on a setup again the standing copy may be older than the carried one.
+// A refusal refuses the answer in the program's words and stores nothing,
+// a pass stores, and the scratch home is removed on every path.
 func setupCheckRunCall(t *testing.T) {
 	t.Parallel()
+	scratches := setupCheckScratches(t)
+	// A first setup: nothing stands under the yard's home, and the
+	// carried program is still tried. A wrong login refuses the
+	// approval and stores nothing.
 	y, _ := runYard(t)
 	y.setSetupPack(setupCheckedRunPack())
 	seq := y.ask(t, setupAsk(), "yardmaster")
-	done := y.approveSetup(t, seq, 1, map[string]string{"CHECKED_TOKEN": "typed-token"}, "mckean")
-	if len(done.Given) != 1 || done.Result != CarryPending {
-		t.Errorf("the first setup recorded %+v", done)
-	}
-	if _, err := os.Stat(filepath.Join(y.home, "look-environment")); err == nil {
-		t.Error("the program ran on a first setup, before the pack is installed")
-	}
-
-	// The program stands under the home: a setup again. It is a file of its
-	// own, as a card shows a copy that is no link.
-	y, _ = runYard(t)
-	y.setSetupPack(setupCheckedRunPack())
-	if err := source.WriteCopies(y.home, "setupchecked", []source.FileCopy{{Program: "check/look", Data: []byte(setupCheckedLook)}}); err != nil {
-		t.Fatal(err)
-	}
-	seq = y.ask(t, setupAsk(), "yardmaster")
-	refuse := filepath.Join(y.home, "look-refuse")
-	if err := os.WriteFile(refuse, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	_, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, map[string]string{"CHECKED_TOKEN": "wrong-token"}, "", "mckean", true)
 	want := "ask " + strconv.FormatUint(seq, 10) + ": the check call look (runs check/look) failed: source setupchecked, call look: login refused for [credential redacted]. Nothing was stored"
 	if err == nil || err.Error() != want {
@@ -1024,15 +1008,84 @@ func setupCheckRunCall(t *testing.T) {
 	if _, ok := y.takeSetupSecret(carryKey(y.bead, seq)); ok {
 		t.Error("a refused check kept the typed value in memory")
 	}
-	if err := os.Remove(refuse); err != nil {
+	// The try ran from a scratch home: the yard's home holds nothing of
+	// the program, and the approval installed nothing there.
+	if _, err := os.Stat(filepath.Join(y.home, "look-environment")); err == nil {
+		t.Error("the tried program wrote to the yard's home, want a scratch home")
+	}
+	if _, err := os.Stat(filepath.Join(y.home, "sources", "setupchecked")); err == nil {
+		t.Error("the approval installed the pack's programs, want them installed at the carry")
+	}
+	setupCheckScratchesGone(t, scratches)
+	// The card stays open to be answered again: the same card with the
+	// right login stores.
+	done := y.approveSetup(t, seq, 1, map[string]string{"CHECKED_TOKEN": "good-token"}, "mckean")
+	if len(done.Given) != 1 || done.Given[0] != "CHECKED_TOKEN" || done.Result != CarryPending {
+		t.Errorf("the second answer recorded %+v", done)
+	}
+	if _, err := os.Stat(filepath.Join(y.home, "look-environment")); err == nil {
+		t.Error("the tried program wrote to the yard's home, want a scratch home")
+	}
+
+	// A setup again, over an older standing copy: the carried bytes are
+	// tried, not the standing ones. The standing program always passes
+	// and would leave a marker where it ran, so a refusal for a wrong
+	// login with no marker says the carried bytes ran.
+	y, _ = runYard(t)
+	y.setSetupPack(setupCheckedRunPack())
+	marker := filepath.Join(t.TempDir(), "standing-ran")
+	standing := "#!/bin/sh\necho ran >> \"" + marker + "\"\nprintf '{\"account\":\"old-standin\"}'\n"
+	if err := source.WriteCopies(y.home, "setupchecked", []source.FileCopy{{Program: "check/look", Data: []byte(standing)}}); err != nil {
 		t.Fatal(err)
+	}
+	seq = y.ask(t, setupAsk(), "yardmaster")
+	_, err = y.ApproveSetup(y.ctx, y.bead, seq, 1, map[string]string{"CHECKED_TOKEN": "wrong-token"}, "", "mckean", true)
+	want = "ask " + strconv.FormatUint(seq, 10) + ": the check call look (runs check/look) failed: source setupchecked, call look: login refused for [credential redacted]. Nothing was stored"
+	if err == nil || err.Error() != want {
+		t.Fatalf("a refused run check was approved or refused otherwise: %v, want %q", err, want)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the standing copy ran, want the carried bytes tried")
+	}
+	if data, err := os.ReadFile(filepath.Join(y.home, "sources", "setupchecked", "check", "look")); err != nil || string(data) != standing {
+		t.Errorf("the standing copy is %q, %v, want it untouched at the approval", data, err)
 	}
 	done = y.approveSetup(t, seq, 1, map[string]string{"CHECKED_TOKEN": "good-token"}, "mckean")
 	if len(done.Given) != 1 || done.Given[0] != "CHECKED_TOKEN" || done.Result != CarryPending {
 		t.Errorf("the second answer recorded %+v", done)
 	}
-	if env, _ := os.ReadFile(filepath.Join(y.home, "look-environment")); !strings.Contains(string(env), "CHECKED_TOKEN=good-token\n") {
-		t.Errorf("the program's environment:\n%s", env)
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the standing copy ran, want the carried bytes tried")
+	}
+	setupCheckScratchesGone(t, scratches)
+}
+
+// setupCheckScratches is the setup-check scratch homes standing in the
+// temp dir now, for the try to be held to removing its own.
+func setupCheckScratches(t *testing.T) map[string]bool {
+	t.Helper()
+	entries, err := os.ReadDir(os.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]bool{}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), setupCheckScratchPrefix) {
+			out[e.Name()] = true
+		}
+	}
+	return out
+}
+
+// setupCheckScratchesGone fails the test where a setup-check scratch home
+// stands that stood in no earlier listing: the try removes its own on
+// every path, refusal included.
+func setupCheckScratchesGone(t *testing.T, before map[string]bool) {
+	t.Helper()
+	for name := range setupCheckScratches(t) {
+		if !before[name] {
+			t.Errorf("the try left the scratch home %s behind", name)
+		}
 	}
 }
 

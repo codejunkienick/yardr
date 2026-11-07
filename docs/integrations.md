@@ -2683,10 +2683,11 @@ says which program or name does not hold when it does not.
 
 `yardr doctor --try` makes the same call, whichever it names, and a
 setup card tries the typed account with it before anything is stored.
-The card runs a check that names `run` only where its program stands
-under the home already, as on a setup again: the pack's programs are
-installed after the approval, so a first setup stores the account
-untried, and `yardr source check` tries it once the pack is in.
+The card runs a check that names `run` from the pack's carried
+programs: on a first setup those are installed only after the
+approval, so the try runs from a scratch copy of the carried bytes,
+and on a setup again the carried bytes are tried rather than the
+standing copy.
 
 **A call may build its body with a command.** Where a fixed body cannot
 say the request — ranges worked out from a read first, a message

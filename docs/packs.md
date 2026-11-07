@@ -1875,10 +1875,10 @@ call waiting on its preset. Picking a preset grants what it names past
 what is held, and revokes nothing. A typed account is tried with the
 source's check call before it is stored, where the file names one; a
 refused check refuses the answer and stores nothing. A check call that
-names `run` is tried only where its program stands under the yard's home
-already (a setup again): the pack's programs are installed after the
-approval, so a first setup stores the account untried, and `yardr source
-check` tries it once the pack is in.
+names `run` is tried from the pack's carried programs: on a first setup
+those are installed only after the approval, so the try runs from a
+scratch copy of the carried bytes, and on a setup again the carried
+bytes are tried rather than the standing copy.
 
 What a stage means in such a source is not the integration pack's to say:
 that is the flow pack's, the one the depot follows. The seam between the
