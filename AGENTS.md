@@ -23,8 +23,10 @@ worked); user docs live in `docs/` and are not repeated here.
   contract), `docs/testing.md` (the test rules), `docs/design/`, `docs/flows/`;
   `docs/docs.go` beside them embeds the top-level pages in the binary (`yardr docs`).
 - `packs/`: packs shipped inside the binary (`packs/packs.go` embeds them);
-  per-service and per-depot-kind directories. One is not embedded:
-  `template`, the skeleton a new source pack is copied from.
+  per-service and per-depot-kind directories. `pageframe` is neither: the
+  default page frame, one HTML file, with `testdata/` holding the fragment its
+  tests dress. One is not embedded: `template`, the skeleton a new source pack
+  is copied from.
 - `harnesses/`: one `<kind>.yaml` per agent harness kind, embedded and read
   by `internal/agents`.
 - `contrib/`: operator and developer tools, each with its own README

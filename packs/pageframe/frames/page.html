@@ -1,0 +1,139 @@
+<!-- yardr page frame (pageframe), the default.
+Give yardr a title and a fragment: body content, not a document. The title goes in the title element and in the h1, where the comment named yardr:title stands; the fragment goes where the comment named yardr:content stands. Write no h1.
+Nothing may need a script, a click or a hover to be read: without scripts the tabs stack as sections, so give a chart's figures in a table or list beside it, and say in its caption what a tooltip would.
+Tokens: --surface-app --surface-raised --surface-sunken --surface-hover --border-subtle --border-strong --text-primary --text-secondary --text-accent --accent --focus-ring --font-sans --font-mono --type-title --type-section --type-body --type-label --type-meta --type-code
+Classes:
+  .meta     a quiet line under the title: a byline or a date
+  .lede     an introduction, one paragraph
+  .id       a bead id, a path or a command, in mono and never broken across lines
+  .tiles    a grid of .tile; a tile holds .fig (the figure), .lbl (the label) and .cap (the caption)
+  .table    a div around a table, which scrolls inside it; its thead stays in view and .num right-aligns a cell
+  .charts   a grid of .chart; a .chart is a figure holding an svg with a viewBox, a figcaption, and it may open with an h3; marks: .grid .bar .line .area .alt. The svg's text scales with it: a viewBox about 400 wide stays readable on a phone
+  .tabs     a div of .tab sections, each opening with its own heading, which becomes its tab
+  data-hl="key" on a mark, a table row or an li: those with one key light together when the page runs
+The column is 1120px wide and fluid below it; colours follow the reader's light or dark setting.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>untitled</title>
+<style>
+:root{
+--surface-app:#161718;--surface-raised:#1C1D1F;--surface-sunken:#101112;--surface-hover:#232426;
+--border-subtle:#27282B;--border-strong:#333538;
+--text-primary:#E9E9EA;--text-secondary:#ABADB0;--text-accent:#E2794A;--accent:#D3602F;--focus-ring:#E2794A;
+--font-sans:"IBM Plex Sans","Noto Sans","Cantarell","Segoe UI",system-ui,sans-serif;
+--font-mono:"IBM Plex Mono","JetBrains Mono","DejaVu Sans Mono",ui-monospace,monospace;
+--type-title:600 20px/28px var(--font-sans);--type-section:600 16px/24px var(--font-sans);
+--type-body:400 16px/24px var(--font-sans);--type-label:500 14px/20px var(--font-sans);
+--type-meta:400 13px/18px var(--font-sans);--type-code:400 14px/20px var(--font-mono);
+color-scheme:dark}
+@media (prefers-color-scheme:light){:root{
+--surface-app:#F7F7F6;--surface-raised:#FFFFFF;--surface-sunken:#EDEDEB;--surface-hover:#EDEDEB;
+--border-subtle:#E2E2DF;--border-strong:#CFCFCB;
+--text-primary:#161718;--text-secondary:#5B5E64;--text-accent:#B54E22;--focus-ring:#B54E22;
+color-scheme:light}}
+*,::before,::after{box-sizing:border-box}
+body{margin:0;background:var(--surface-app);color:var(--text-primary);font:var(--type-body);overflow-wrap:break-word;-webkit-font-smoothing:antialiased}
+.page{max-width:1120px;margin:0 auto;padding:clamp(24px,5vw,48px) 16px 48px}
+:focus-visible{outline:2px solid var(--focus-ring);outline-offset:1px}
+h1{font:600 clamp(28px,5vw,40px)/1.15 var(--font-sans);margin:0;padding-bottom:16px;border-bottom:1px solid var(--border-subtle);text-wrap:balance}
+h1:has(+.meta){padding-bottom:0;border-bottom:0}
+.meta{font:var(--type-meta);color:var(--text-secondary);margin:0}
+h1+.meta{margin-top:4px;padding-bottom:16px;border-bottom:1px solid var(--border-subtle)}
+h1+:not(.meta),h1+.meta+*{margin-top:24px}
+.lede{font-size:18px;line-height:28px;color:var(--text-secondary);max-width:65ch;margin:24px 0 16px}
+.id{font:var(--type-code);white-space:nowrap}
+h2{font:var(--type-title);margin:32px 0 8px}
+h3{font:var(--type-section);margin:24px 0 4px}
+h4{font:var(--type-label);margin:16px 0 4px}
+p,ul,ol,pre,blockquote{margin:0 0 16px}
+ul,ol{padding-left:24px}
+li{margin:0 0 4px}
+a{color:var(--text-accent);text-underline-offset:2px}
+code,kbd{font:var(--type-code);background:var(--surface-sunken);border-radius:4px;padding:1px 4px}
+pre{font:var(--type-code);background:var(--surface-sunken);border-radius:6px;padding:12px 16px;overflow:auto}
+pre code{background:none;padding:0}
+blockquote{padding-left:16px;border-left:2px solid var(--border-strong);color:var(--text-secondary)}
+hr{border:0;border-top:1px solid var(--border-subtle);margin:24px 0}
+img{max-width:100%;height:auto}
+.tiles,.charts{display:grid;gap:12px;margin:24px 0}
+.tiles{grid-template-columns:repeat(auto-fit,minmax(min(168px,100%),1fr))}
+.charts{gap:16px;grid-template-columns:repeat(auto-fill,minmax(min(360px,100%),1fr))}
+.tile,.chart{min-width:0;margin:0;background:var(--surface-raised);border:1px solid var(--border-subtle);border-radius:8px}
+.tile{display:flex;flex-direction:column;padding:12px 16px}
+.lbl,.cap{font:var(--type-meta);color:var(--text-secondary)}
+.tile .lbl{order:-1}
+.tile .cap{order:1}
+.fig{font:600 32px/40px var(--font-sans);font-variant-numeric:tabular-nums}
+.chart{padding:16px}
+.chart h3{margin:0 0 8px}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.chart text{font:var(--type-meta);fill:var(--text-secondary)}
+.chart figcaption{font:var(--type-meta);color:var(--text-secondary);margin-top:8px}
+.grid{stroke:var(--border-subtle)}
+.bar{fill:var(--accent)}
+.line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round}
+.area{fill:var(--accent);opacity:.12}
+.alt.bar{fill:var(--text-secondary)}
+.alt.line{stroke:var(--text-secondary)}
+.table{overflow:auto;max-height:min(75vh,720px);margin:16px 0}
+.table table{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;font:var(--type-label);font-weight:400;font-variant-numeric:tabular-nums}
+.table th,.table td{max-width:28ch;padding:8px 12px 8px 0;text-align:left;vertical-align:top;border-bottom:1px solid var(--border-subtle)}
+.table th{font-weight:500;color:var(--text-secondary)}
+.table thead th{position:sticky;top:0;background:var(--surface-app);border-bottom-color:var(--border-strong)}
+.table tbody tr:last-child td{border-bottom:0}
+.table .num{text-align:right}
+.tabbar{display:flex;flex-wrap:wrap;gap:4px;margin:24px 0 16px;border-bottom:1px solid var(--border-subtle)}
+.tabbar button{font:var(--type-label);min-height:40px;padding:8px 12px;margin-bottom:-1px;background:none;border:0;border-bottom:2px solid transparent;color:var(--text-secondary);cursor:pointer}
+.tabbar button:hover{color:var(--text-primary)}
+.tabbar button[aria-selected=true]{color:var(--text-accent);border-bottom-color:var(--accent)}
+.table tr.hl td,li.hl{background:var(--surface-hover)}
+.hlo .chart [data-hl]:not(.hl){opacity:.45}
+[data-scripted] [hidden]{display:none!important}
+@media (max-width:600px){
+.tiles{grid-template-columns:1fr}
+.chart{padding:12px}
+.table{max-height:none}
+.tabbar button{min-height:48px}}
+</style>
+</head>
+<body>
+<main class="page">
+<h1><!--yardr:title--></h1>
+<!--yardr:content-->
+</main>
+<script>
+(()=>{
+const d=document;
+d.documentElement.setAttribute('data-scripted','');
+d.querySelectorAll('.tabs').forEach((box,n)=>{
+ const ps=[...box.querySelectorAll(':scope>.tab')],bar=d.createElement('div'),bs=[];
+ const pick=(i,focus)=>{ps.forEach((p,j)=>{p.hidden=j!=i;bs[j].setAttribute('aria-selected',j==i);bs[j].tabIndex=j==i?0:-1});if(focus)bs[i].focus()};
+ bar.className='tabbar';bar.setAttribute('role','tablist');
+ ps.forEach((p,i)=>{
+  const h=p.querySelector('h2,h3,h4'),b=d.createElement('button');
+  b.type='button';b.id='tab'+n+'-'+i;b.setAttribute('role','tab');b.textContent=h?h.textContent:'Tab '+(i+1);
+  p.setAttribute('role','tabpanel');p.setAttribute('aria-labelledby',b.id);
+  if(h)h.hidden=true;
+  b.onclick=()=>pick(i);
+  bar.append(b);bs.push(b)});
+ bar.onkeydown=e=>{
+  const i=bs.indexOf(d.activeElement),to={ArrowRight:i+1,ArrowLeft:i-1,Home:0,End:ps.length-1}[e.key];
+  if(to==null||i<0)return;
+  e.preventDefault();pick((to+ps.length)%ps.length,1)};
+ box.prepend(bar);pick(0)});
+const lit=(e,on)=>{
+ const t=e.target.closest('[data-hl],.table tbody tr');
+ if(!t)return;
+ const k=t.getAttribute('data-hl');
+ (k?d.querySelectorAll('[data-hl]'):[t]).forEach(x=>{if(!k||x.getAttribute('data-hl')==k)x.classList.toggle('hl',on)});
+ d.body.classList.toggle('hlo',on&&!!k)};
+d.addEventListener('pointerover',e=>lit(e,true));
+d.addEventListener('pointerout',e=>lit(e,false));
+})();
+</script>
+</body>
+</html>

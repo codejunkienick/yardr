@@ -124,6 +124,14 @@ deployed to the site's project on the user's own Void platform, and the bead
 closes when the site is live. It is imported instead of the starter, with
 setup notes for the person whose website it is.
 
+One pack is neither: [`packs/pageframe`](../packs/pageframe), named
+`pageframe`, is for no depot's work and no integration. It carries one page
+frame (`frame: frames/page.html`, [API 4](pack-api.md#api-4)), the HTML file a
+page is made inside, and nothing beside it. Its colours and type are the yardr
+design system's, its column is 1120 px and fluid below that, and the comment
+that opens the frame names the classes it styles: tiles, tables, charts and
+tabs among them.
+
 | pack | for | flows | a depot's default |
 |---|---|---|---|
 | `starter` | a git depot's own work | `default`, and `train` for trains | of a git depot |
@@ -144,6 +152,7 @@ setup notes for the person whose website it is.
 | `posthog` | PostHog itself, in the yard: HogQL queries, error tracking issues, session recordings and Replay Vision observations read, a new error issue heard | none: `kind: source` | of none: `yardr pack apply posthog` |
 | `webhook` | any service that POSTs to a URL or takes one (Zapier, Make, n8n), in the yard: its POSTs heard, a JSON object sent to its URL | none: `kind: source` | of none: `yardr pack apply webhook` |
 | `cloudflare` | Cloudflare itself, in the yard: accounts, zones, Workers scripts and Email Routing rules and addresses read; Workers uploaded, secrets put and rules made or edited, each on its own card | none: `kind: source` | of none: `yardr pack apply cloudflare` |
+| `pageframe` | the page frame yardr carries: one HTML file with the design system's colours and type, a title block, tiles, tables, charts and tabs | none: a frame and nothing else | of none: it brings no flow, group or source |
 
 ```
 packs/starter/
@@ -395,7 +404,7 @@ value (a directory there is absolute). It is one of:
 |---|---|
 | with a path separator: `packs/starter`, `./mine`, `~/packs/team` (also `.` and `..`) | the pack's directory |
 | a URL ending in /: `https://yardr.dev/packs/starter/` | the pack's directory on a web server: pack.yaml and the files it names, fetched when the command runs |
-| a bare word: `starter`, `team` | a name: of a pack this yard has imported (`yardr pack list`), read again from where that import recorded it; else of a pack in the binary (`starter`, `dir`, `contributors`, `design`, `ci-red`, `linear`, `github`, `google-mail`, `google-drive`, `google-docs`, `google-calendar`, `telegram`, `pushover`, `slack`, `posthog`, `webhook`, `website`) |
+| a bare word: `starter`, `team` | a name: of a pack this yard has imported (`yardr pack list`), read again from where that import recorded it; else of a pack in the binary (`starter`, `dir`, `contributors`, `design`, `ci-red`, `linear`, `github`, `google-mail`, `google-drive`, `google-docs`, `google-calendar`, `telegram`, `pushover`, `slack`, `posthog`, `webhook`, `website`, `pageframe`) |
 
 Each time yardr reads a file of a URL pack, it makes one GET; planning and
 applying can read the same file separately. Plain `http://` is refused unless

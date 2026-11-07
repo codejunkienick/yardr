@@ -2310,7 +2310,8 @@ packs/posthog/                 internal/hooks internal/store
 packs/webhook/                 internal/hooks
 packs/template/                internal/pack packs
 packs/website/                 internal/pack
-.yardr/flows/                  internal/cli internal/dispatch internal/store internal/flowdraw contrib/assembly packs
+packs/testdata/                packs
+.yardr/flows/                 internal/cli internal/dispatch internal/store internal/flowdraw contrib/assembly packs
 .yardr/security_paths          internal/store
 .yardr/test                    .
 internal/                       internal/rpc

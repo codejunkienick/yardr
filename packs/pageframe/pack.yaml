@@ -1,0 +1,12 @@
+# The default page frame: the one HTML file a page is made inside where no
+# depot's or yard's own pack names another. It holds the design tokens, a
+# title block, tiles, tables, charts and tabs, with no flows, groups, crew or
+# sources beside it, so a pack of a company's own that carries a frame is
+# written the same way and takes its place. The frame is read from the binary
+# as it stands and is not imported to be the fallback.
+name: pageframe
+
+# A pack carries a frame from pack API 4.
+api: 4
+
+frame: frames/page.html

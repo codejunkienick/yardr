@@ -29,8 +29,10 @@ import (
 // outside the yard, a declaration with the notify key that sends and no
 // commands, and webhook, one declaration for every service that POSTs to
 // a URL or takes one (Zapier, Make, n8n), whose credential is that URL.
+// pageframe is of no kind, for no depot's flow and no integration: the page
+// frame yardr brings, one HTML file and nothing beside it.
 //
-//go:embed starter dir contributors design ci-red linear github google-mail google-drive google-docs google-calendar cloudflare pushover telegram slack posthog webhook website
+//go:embed starter dir contributors design ci-red linear github google-mail google-drive google-docs google-calendar cloudflare pushover telegram slack posthog webhook website pageframe
 var FS embed.FS
 
 // Starter and Dir are the embedded packs by the kind of depot each is
@@ -63,6 +65,12 @@ const CiRed = "ci-red"
 // default either: it is imported instead of the starter, whose line it
 // carries with a deploy stage after landing.
 const Website = "website"
+
+// PageFrame is the embedded pack that carries the default page frame: the
+// frame a page is made in where no depot's or yard's pack names another. It
+// is a frame alone, with no flow, group or source, and its frame is read from
+// the binary as it stands, so a yard that imported nothing has one.
+const PageFrame = "pageframe"
 
 // Linear is the embedded pack for Linear itself, of kind source: it is
 // imported into the yard, and into no depot.
