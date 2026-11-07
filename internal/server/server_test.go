@@ -887,6 +887,11 @@ func TestCallDuringReplaceLandsOnTheNewBuild(t *testing.T) {
 		previewPID, err = strconv.Atoi(strings.TrimSpace(string(b)))
 		return err == nil && previewPID > 0
 	})
+	// The command writes its PID file the moment it starts; the server logs
+	// preview_started only after it has recorded the start. A head taken on
+	// the file alone can fall before that event, which the call's answer
+	// would then carry beside the new build's server_replaced.
+	waitEvent(t, client(c, "old"), "preview_started", nil)
 	head, err := client(c, "old").Head(context.Background())
 	if err != nil {
 		t.Fatal(err)
