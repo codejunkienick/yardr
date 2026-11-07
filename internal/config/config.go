@@ -213,6 +213,12 @@ func (c *Config) EdgeWebLock() string { return filepath.Join(c.Home, "edge-web.l
 // know it (see internal/yardkey). It is read as a secret file is: mode 0600.
 func (c *Config) PeerKey() string { return filepath.Join(c.Home, "peer.key") }
 
+// ChannelKey is the file holding the yard's channel key, the X25519
+// static a device pins from a pairing QR and opens a Noise handshake
+// to, beside the identity that signs it (PeerKey; see
+// internal/yardkey). It is read as a secret file is: mode 0600.
+func (c *Config) ChannelKey() string { return filepath.Join(c.Home, "channel.key") }
+
 // DaemonLock is the file the daemon holds a flock on while it runs. It
 // names the holder's pid and the start time it recorded (see DaemonStart).
 func (c *Config) DaemonLock() string { return filepath.Join(c.Home, "daemon.lock") }

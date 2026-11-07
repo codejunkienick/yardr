@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"yardr.dev/yardr/internal/standin"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
+	"yardr.dev/yardr/internal/yardkey"
 )
 
 // devicePairYard is userYard with a listener that serves the devices of its
@@ -29,13 +31,18 @@ func devicePairYard(t *testing.T) (st store.API, own *store.Store, addr string) 
 	t.Helper()
 	api, own := storetest.NewOwned(t)
 	st = userYardOn(t, api)
-	srv := httptest.NewServer(rpc.NewUserServer(own, func(context.Context) string { return "south" }, nil).Handler())
+	users := rpc.NewUserServer(own, func(context.Context) string { return "south" }, nil)
+	// As the yard's server does: a sealed redemption is opened with
+	// the channel key of the yard's home, made there by the pair
+	// command below.
+	users.SetChannelKeyFile(config.At(yardEnv(t, st)["YARDR_HOME"]).ChannelKey())
+	srv := httptest.NewServer(users.Handler())
 	t.Cleanup(srv.Close)
 	said(t, &config.Config{Home: yardEnv(t, st)["YARDR_HOME"]}, hooks.Listener{Addr: strings.TrimPrefix(srv.URL, "http://"), From: hooks.FromSetting})
 	return st, own, srv.URL
 }
 
-var devicePairShown = regexp.MustCompile(`(?m)^  address  (\S+)\n(?:  yard     (\S+)\n)?  code     ([0-9A-Z]{4}-[0-9A-Z]{4})$`)
+var devicePairShown = regexp.MustCompile(`(?m)^  address  (\S+)\n(?:  yard     (\S+)\n)?  code     ([0-9A-Z]{4}-[0-9A-Z]{4})\n(?:  channel  (\S+)\n)?`)
 
 // redeemCode calls the yard at addr with the code, as a device does.
 func redeemCode(t *testing.T, addr, code string) (int, rpc.Paired) {
@@ -64,15 +71,15 @@ func TestDevicePairCommand(t *testing.T) {
 
 	out := mustAs(t, st, "jo", "user", "device", "pair", "jo", "phone")
 	m := devicePairShown.FindStringSubmatch(out)
-	if m == nil || m[1] != addr || m[2] != "" {
-		t.Fatalf("device pair shows no code at %s, with no yard:\n%s", addr, out)
+	if m == nil || m[1] != addr || m[2] != "" || len(m[4]) != 43 {
+		t.Fatalf("device pair shows no code at %s, with no yard and the yard's channel key:\n%s", addr, out)
 	}
 	until := regexp.MustCompile(`^Pairing is open for 10 minutes, until (\d\d:\d\d:\d\d), for the device phone of jo\. Give the device this yard's address and the code:\n`).FindStringSubmatch(out)
 	if until == nil {
 		t.Fatalf("device pair does not say how long the code holds:\n%s", out)
 	}
 	wantText(t, out,
-		"The code is good once: the device is answered with its token, which is shown nowhere else. 5 wrong codes end the pairing, and so does: ",
+		"The code is good once: a device that scans the QR code is answered inside a sealed channel, and whoever carries the connection reads neither the code nor the device token. 5 wrong codes end the pairing, and so does: ",
 		" user device pair --end\n",
 		"It then calls as jo until: ", " user device rm jo phone\n")
 	if strings.Contains(out, "yardr-dev-") || strings.Contains(out, "█") || strings.Contains(out, "is not the operator") || strings.Contains(out, "plain http") {
@@ -105,9 +112,23 @@ func TestDevicePairCommand(t *testing.T) {
 	var opened devicePaired
 	out = mustAs(t, st, "jo", "user", "device", "pair", "ada", "laptop", "--url", "https://mac.example.net/", "--qr", "--json")
 	if err := json.Unmarshal([]byte(out), &opened); err != nil || opened.User != "ada" || opened.Device != "laptop" || opened.Pairing == "" ||
-		opened.Address != "https://mac.example.net" || opened.Yard != "" || opened.QR != "https://mac.example.net#"+opened.Code ||
+		opened.Address != "https://mac.example.net" || opened.Yard != "" || len(opened.ChannelKey) != 43 || opened.ChannelSignature == "" ||
+		opened.QR != pairQR("https://mac.example.net", opened.Code, "", opened.ChannelKey) ||
 		time.Until(opened.Expires) > store.TTL || time.Until(opened.Expires) < store.TTL-time.Minute || strings.Contains(out, "█") {
 		t.Fatalf("device pair --json: %+v, %v\n%s", opened, err, out)
+	}
+	// The channel key is this yard's, signed by its identity.
+	cfg := config.At(yardEnv(t, st)["YARDR_HOME"])
+	channel, err := yardkey.LoadChannel(cfg.ChannelKey())
+	if err != nil || yardkey.ChannelPublic(channel) != opened.ChannelKey {
+		t.Fatalf("the pair's channel key is not the yard's in %s: %v", cfg.ChannelKey(), err)
+	}
+	identity, err := store.Load(cfg.PeerKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yardkey.VerifyChannelKey(store.Public(identity), opened.ChannelKey, opened.ChannelSignature); err != nil {
+		t.Fatalf("the channel signature does not check against the yard's identity: %v", err)
 	}
 	if out := mustAs(t, st, "jo", "user", "device", "pair", "--end"); out != "the pairing for the device laptop of ada is ended: its code is good for nothing\n" {
 		t.Fatalf("device pair --end:\n%s", out)
@@ -119,7 +140,7 @@ func TestDevicePairCommand(t *testing.T) {
 	out = mustAs(t, st, "jo", "user", "device", "pair", "ada", "laptop", "--url", "http://10.0.0.5:8790")
 	wantText(t, out, "  address  http://10.0.0.5:8790\n",
 		"ada is not an operator, and the device reads every bead in the yard, with its notes, and the mail of ada alone.\n",
-		"http://10.0.0.5:8790 is plain http: whoever is between the device and this yard reads the code, and the token after it.")
+		"http://10.0.0.5:8790 is plain http: a code typed there crosses readable, and the token after it; a device that scans the QR code is answered sealed even so.")
 	mustAs(t, st, "jo", "user", "device", "pair", "--end")
 
 	refusedAs(t, st, "ada", "only the operator (jo) may add a device; this is ada", "user", "device", "pair", "ada", "watch")
@@ -136,8 +157,9 @@ func TestDevicePairCommand(t *testing.T) {
 }
 
 // --qr draws a QR code under the code, and what it holds is the address,
-// '#' and the code, and nothing else: read back module by module, the
-// picture is the QR code of exactly that.
+// '#' and the code, and the yard's channel public key as its fourth
+// field (the yard field empty where no yard is named): read back module
+// by module, the picture is the QR code of exactly that.
 func TestDevicePairQR(t *testing.T) {
 	t.Parallel()
 	st, _, _ := devicePairYard(t)
@@ -146,8 +168,15 @@ func TestDevicePairQR(t *testing.T) {
 	if m == nil || m[2] != "" {
 		t.Fatalf("device pair --qr shows no code, with no yard:\n%s", out)
 	}
-	holds := m[1] + "#" + m[3]
-	if holds != pairQR("https://mac.example.net", m[3], "") {
+	channel, err := yardkey.LoadChannel(config.At(yardEnv(t, st)["YARDR_HOME"]).ChannelKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m[4] != yardkey.ChannelPublic(channel) {
+		t.Fatalf("the pair shows channel %q, want the yard's %q", m[4], yardkey.ChannelPublic(channel))
+	}
+	holds := m[1] + "#" + m[3] + "##" + m[4]
+	if holds != pairQR("https://mac.example.net", m[3], "", m[4]) {
 		t.Fatalf("the QR code holds %q", holds)
 	}
 	want, err := qr.Encode(holds, qr.M)
@@ -194,6 +223,85 @@ func TestDevicePairQR(t *testing.T) {
 		if !strings.HasPrefix(line, "  \x1b[30;47m") || !strings.HasSuffix(line, "\x1b[0m") {
 			t.Fatalf("a line of the coloured picture is %q", line)
 		}
+	}
+}
+
+// A device that pairs by the new QR redeems the code the QR carries
+// inside a Noise handshake to the channel key of its fourth field: the
+// fields split at '#' name the address, the code, the empty yard field
+// and the key, the answer opens only with the device's own key, and
+// the device stands recorded with that key pinned. The same QR text
+// replayed buys nothing.
+func TestDevicePairSealedByTheQR(t *testing.T) {
+	t.Parallel()
+	st, own, addr := devicePairYard(t)
+	ctx := context.Background()
+	mustAs(t, st, "jo", "user", "add", "ada")
+	var opened devicePaired
+	out := mustAs(t, st, "jo", "user", "device", "pair", "ada", "phone", "--json")
+	if err := json.Unmarshal([]byte(out), &opened); err != nil {
+		t.Fatalf("device pair --json: %v\n%s", err, out)
+	}
+	fields := strings.Split(opened.QR, "#")
+	if len(fields) != 4 || fields[0] != opened.Address || fields[1] != opened.Code || fields[2] != "" || fields[3] != opened.ChannelKey {
+		t.Fatalf("the QR holds %q, want address#code##channel", opened.QR)
+	}
+	yardPublic, err := yardkey.ParseChannelPublic(fields[3])
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, opening, err := yardkey.StartPairingHandshake(device, yardPublic, fields[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]string{"sealed": base64.RawURLEncoding.EncodeToString(first)})
+	resp, err := http.Post(addr+rpc.PairPath, "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || strings.Contains(string(answer), opened.Code) || strings.Contains(string(answer), "yardr-dev-") {
+		t.Fatalf("the sealed redemption = %d %s, want 200 with neither the code nor a token readable", resp.StatusCode, answer)
+	}
+	var sealed struct {
+		Sealed string `json:"sealed"`
+	}
+	if err := json.Unmarshal(answer, &sealed); err != nil {
+		t.Fatal(err)
+	}
+	reply, err := base64.RawURLEncoding.DecodeString(sealed.Sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := opening.OpenAnswer(reply)
+	if err != nil {
+		t.Fatalf("the device could not open its answer: %v", err)
+	}
+	var got rpc.Paired
+	if err := json.Unmarshal(plain, &got); err != nil || !deviceToken.MatchString(got.Token) || got.User != "ada" || got.Device != "phone" {
+		t.Fatalf("the sealed redemption is answered %q (%v)", plain, err)
+	}
+	devices, err := own.Devices(ctx, "")
+	if err != nil || len(devices) != 1 || devices[0].ChannelKey != yardkey.ChannelPublic(device) {
+		t.Fatalf("devices = %+v, %v, want ada's phone with the device key pinned", devices, err)
+	}
+	// The transcript replayed: no second token, and no second device.
+	resp, err = http.Post(addr+rpc.PairPath, "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized || strings.Contains(string(answer), "yardr-dev-") {
+		t.Errorf("the sealed transcript again = %d %s, want 401 and no token", resp.StatusCode, answer)
+	}
+	if devices, err := own.Devices(ctx, ""); err != nil || len(devices) != 1 {
+		t.Fatalf("devices after the replay = %+v, %v, want still the one", devices, err)
 	}
 }
 
@@ -289,8 +397,11 @@ func TestDevicePairOverTheLinkWithNoListener(t *testing.T) {
 	var opened devicePaired
 	out = mustAs(t, st, "jo", "user", "device", "pair", "jo", "laptop", "--json")
 	if err := json.Unmarshal([]byte(out), &opened); err != nil || opened.Address != srv.URL || opened.Yard != "mckean/edgeyard" ||
-		opened.QR != srv.URL+"#"+opened.Code+"#mckean/edgeyard" {
+		opened.QR != srv.URL+"#"+opened.Code+"#mckean/edgeyard#"+opened.ChannelKey || len(opened.ChannelKey) != 43 {
 		t.Fatalf("device pair over the link --json: %+v, %v\n%s", opened, err, out)
+	}
+	if err := yardkey.VerifyChannelKey(store.Public(yard), opened.ChannelKey, opened.ChannelSignature); err != nil {
+		t.Fatalf("the channel signature over the link does not check against the yard's key: %v", err)
 	}
 }
 

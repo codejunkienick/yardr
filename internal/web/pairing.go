@@ -1,102 +1,47 @@
 package web
 
 import (
-	"errors"
-	"fmt"
 	"net/http"
-	"time"
-
-	"rsc.io/qr"
-
-	"yardr.dev/yardr/internal/store"
 )
 
-// The pairing page enrols one of the signed-in user's own devices by a
-// short code, as `yardr user device pair` does from a terminal: the user
-// opens a pairing here and the device that calls the yard with the code is
-// answered with its token. It is the web view's only pairing surface, and
-// it exists in JWT mode alone: the signed-in session names the user, the
-// handlers pass that name and no name from the request, and the store's
-// Self pairings take no other leave, so a pairing opened here is for the
-// visitor's own device or for no one's. A view that acts as a fixed user
-// (--as) and a view that only reads refuse the page outright.
+// The pairing page once enrolled one of the signed-in user's own
+// devices here, with a code and a QR the page showed. It does so no
+// longer for an app that calls through the edge: this page reaches its
+// visitor through the edge, so the edge can read or rewrite any code
+// or QR it showed, and a device paired from it would pin a key the
+// edge chose. What the page does now is say so, and say where a
+// pairing that does seal is opened: the yard's own screen, by its
+// operator (`yardr user device pair --qr` there), whose QR carries
+// the yard's channel key from a place the edge cannot rewrite
+// (docs/users.md, "Enrolled by a code"; the design's sections 3.1 and
+// 3.4 — that loss of a self-service page is accepted for now, and a
+// member ceremony whose secret never crosses the edge is a later
+// design). It exists in JWT mode alone: the signed-in session names
+// the user it speaks to. The store's Self pairings stand as they were
+// for any other caller; this page opens none.
 
-// Pairing is the pairing page: the visitor's own open pairing, or none,
-// with the form that opens one.
+// pairingNotice is what the page tells every signed-in visitor, in
+// the words the change is described in wherever it is described.
+const pairingNotice = "Pairing from this page no longer gives an app that can call through the edge. " +
+	"Ask the yard's operator to open a pairing QR on the yard's own screen and scan that."
+
+// Pairing is the pairing page: who it speaks to, and why a POST of
+// its former forms changed nothing, where one is sent.
 type Pairing struct {
 	// As is the yard user the visitor is signed in as.
 	As string `json:"as"`
-	// Open says a pairing of theirs is open now; Device, Code and Expires
-	// are its, and Left how long its code still has, in words.
-	Open    bool      `json:"open"`
-	Device  string    `json:"device,omitempty"`
-	Code    string    `json:"code,omitempty"`
-	Expires time.Time `json:"expires,omitempty"`
-	Left    string    `json:"left,omitempty"`
-	// Address is where a device reaches this yard through the edge, and
-	// Yard this yard there, handle/name from the edge setting where one
-	// stands and the bare yard name where none does: the QR code holds
-	// the two with the code. Address is "" while the yard is connected
-	// to no edge, and the page then shows the code with no QR to scan.
-	Address string `json:"address,omitempty"`
-	Yard    string `json:"yard,omitempty"`
-	// Error is why a POST opened or ended nothing; Draft is the device
-	// name it did not open a pairing for, back in the form.
+	// Notice is what the page says: pairing here no longer gives an
+	// app that calls through the edge, and where such a pairing is
+	// opened instead.
+	Notice string `json:"notice"`
+	// Error is why a POST opened or ended nothing, where one was
+	// sent to the page's former forms.
 	Error string `json:"error,omitempty"`
-	Draft string `json:"draft,omitempty"`
 }
 
-// pairingQR is what the QR code of a device's pairing holds, built as the
-// terminal's pairQR (internal/cli) builds it: the address the device
-// reaches the yard at, then '#', then the code, and '#' and the yard
-// beside them where one is named, so the device knows which of the
-// account's yards it pairs with. Nothing else is in it.
-func pairingQR(address, code, yard string) string {
-	if yard == "" {
-		return address + "#" + code
-	}
-	return address + "#" + code + "#" + yard
-}
-
-// pairingData is the pairing page as it stands for user: their own open
-// pairing with its code, or none. Another user's pairing is none here, as
-// the store answers it.
-func (s *Server) pairingData(r *http.Request, user string) (Pairing, error) {
-	ctx := r.Context()
-	out := Pairing{As: user}
-	open, err := s.st.DevicePairCodeSelf(ctx, user)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		return out, nil
-	case err != nil:
-		return out, err
-	}
-	out.Open, out.Device, out.Code, out.Expires = true, open.Device, open.Code, open.Expires
-	out.Left = pairingLeft(time.Until(open.Expires))
-	// The yard as the edge spells it where an edge setting stands, so a
-	// member's phone can say whose yard it pairs with; the bare name
-	// where none does, where there is no handle to spell.
-	out.Yard = s.yardName(ctx)
-	if all, err := s.st.Settings(ctx); err == nil {
-		if e, connected, err := store.EdgeOf(all); err == nil && connected {
-			out.Address = e.URL
-			out.Yard = e.HandleName()
-		}
-	}
-	return out, nil
-}
-
-// pairingLeft is how long a code still has, in words for the page: whole
-// minutes while it has them, and plainer words under one.
-func pairingLeft(d time.Duration) string {
-	if d < time.Minute {
-		return "under a minute"
-	}
-	if m := int(d.Round(time.Minute).Minutes()); m == 1 {
-		return "1 minute"
-	} else {
-		return fmt.Sprintf("%d minutes", m)
-	}
+// pairingPage is the pairing page as it stands for user.
+func pairingPage(user string) Pairing {
+	return Pairing{As: user, Notice: pairingNotice}
 }
 
 // refusePairing answers a pairing request on a view that is not in JWT
@@ -111,21 +56,14 @@ func (s *Server) handlePairing(w http.ResponseWriter, r *http.Request) {
 		s.refusePairing(w, r)
 		return
 	}
-	d, err := s.pairingData(r, s.acting(r.Context()))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	s.respond(w, r, Page{Template: "pairing", Title: "Pair a device", Menu: "pairing", Data: d})
+	s.respond(w, r, Page{Template: "pairing", Title: "Pair a device", Menu: "pairing", Data: pairingPage(s.acting(r.Context()))})
 }
 
-// handlePairingPost takes the pairing page's forms: open a pairing for a
-// device of the visitor's own, or end the one that is open. It is
-// registered only on a view that acts (ActAs, or UseJWT for JWT mode), and
-// refuses every view but JWT mode's before anything is read: the user it
-// opens and ends for is the request's signed-in one, never a name the
-// request carries. Opened or ended, the page is read again; refused, it is
-// redrawn with the reason, as 200 so a form puts it in place.
+// handlePairingPost took the pairing page's forms. The page has none
+// now, and a POST opens and ends nothing: it is answered with the
+// page and the reason, as 200 so a form puts it in place. It refuses
+// every view but JWT mode's before anything is read, as it did, and
+// takes a POST only from the view's own pages.
 func (s *Server) handlePairingPost(w http.ResponseWriter, r *http.Request) {
 	if s.jwt == nil {
 		s.refusePairing(w, r)
@@ -136,72 +74,20 @@ func (s *Server) handlePairingPost(w http.ResponseWriter, r *http.Request) {
 			http.StatusForbidden)
 		return
 	}
-	ctx, user := r.Context(), s.acting(r.Context())
-	switch r.PostFormValue("action") {
-	case "open":
-		if _, err := s.st.DevicePairOpenSelf(ctx, user, r.PostFormValue("device")); err != nil {
-			s.pairingAgain(w, r, r.PostFormValue("device"), err.Error())
-			return
-		}
-	case "end":
-		if _, err := s.st.DevicePairCloseSelf(ctx, user); errors.Is(err, store.ErrNotFound) {
-			s.pairingAgain(w, r, "", "there is no pairing open to end: it ended, or its time ran out")
-			return
-		} else if err != nil {
-			s.pairingAgain(w, r, "", err.Error())
-			return
-		}
-	default:
-		s.pairingAgain(w, r, "", "say whether to open a pairing or end the one that is open")
-		return
-	}
-	http.Redirect(w, r, "/pairing", http.StatusSeeOther)
-}
-
-// pairingAgain re-reads the pairing page after a POST that changed
-// nothing, with the reason and the device name back in the form.
-func (s *Server) pairingAgain(w http.ResponseWriter, r *http.Request, draft, why string) {
-	d, err := s.pairingData(r, s.acting(r.Context()))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	d.Error, d.Draft = why, draft
+	d := pairingPage(s.acting(r.Context()))
+	d.Error = "no pairing was opened or ended: " + pairingNotice
 	s.respond(w, r, Page{Template: "pairing", Title: "Pair a device", Menu: "pairing", Data: d})
 }
 
-// handlePairingPNG serves the QR code of the visitor's own open pairing as
-// a PNG: the edge's address, the code and the yard's name, as a phone
-// scans them (pairingQR). It answers the pairing's own user alone — the
-// code comes from their pairing or not at all — and no pairing is a plain
-// 404, as another user's is.
+// handlePairingPNG served the QR code of the visitor's own pairing.
+// There is no QR here now, for the page's reason: a QR this page
+// served would cross the edge that must not be able to rewrite it.
+// It answers 404, as a page with nothing at it does, with that reason
+// in its body.
 func (s *Server) handlePairingPNG(w http.ResponseWriter, r *http.Request) {
 	if s.jwt == nil {
 		http.Error(w, "device pairing is on the signed-in view only", http.StatusForbidden)
 		return
 	}
-	ctx := r.Context()
-	open, err := s.st.DevicePairCodeSelf(ctx, s.acting(ctx))
-	if errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "no pairing is open", http.StatusNotFound)
-		return
-	}
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	address, yard := "", s.yardName(ctx)
-	if all, err := s.st.Settings(ctx); err == nil {
-		if e, connected, err := store.EdgeOf(all); err == nil && connected {
-			address, yard = e.URL, e.HandleName()
-		}
-	}
-	code, err := qr.Encode(pairingQR(address, open.Code, yard), qr.M)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(code.PNG())
+	http.Error(w, "no pairing QR is served here: "+pairingNotice, http.StatusNotFound)
 }

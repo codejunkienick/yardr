@@ -54,6 +54,12 @@ type Device struct {
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 	CreatedBy string    `json:"created_by"`
+	// ChannelKey is the device's X25519 channel public key, pinned
+	// beside its token's hash when the device paired by the sealed
+	// redemption of a pairing (devicepair.go): the key its pairing
+	// handshake proved, which its later sealed calls are held to.
+	// "" for a device paired plainly or added by hand, which pins none.
+	ChannelKey string `json:"channel_key,omitempty"`
 	// LastUsed is when its token was last resolved, nil for never, and
 	// LastFrom the address that call came from, as whoever resolved it
 	// gave it.
@@ -150,7 +156,7 @@ func (s *Store) AddDevice(ctx context.Context, user, name, actor string) (*NewDe
 		if err := w.may(ctx, actor, ActAddDevice, Object{Kind: KindUser, Name: user}); err != nil {
 			return err
 		}
-		return putDevice(w, out, user, name, actor, nil)
+		return putDevice(w, out, user, name, actor, "", nil)
 	})
 	if err != nil {
 		return nil, err
@@ -181,13 +187,14 @@ func deviceFree(tx *bolt.Tx, user, name string) error {
 
 // putDevice keeps the device out, whose token is made, as name of user:
 // the record, the token's hash and the event, which says what extra says
-// beside whose device it is.
-func putDevice(w *wtx, out *NewDevice, user, name, actor string, extra map[string]any) error {
+// beside whose device it is. channelKey is the device's pinned channel
+// public key (Device.ChannelKey), "" where the device pinned none.
+func putDevice(w *wtx, out *NewDevice, user, name, actor, channelKey string, extra map[string]any) error {
 	if err := deviceFree(w.Tx, user, name); err != nil {
 		return err
 	}
 	hash := tokenHash(out.Token)
-	out.Device = Device{User: user, Name: name, CreatedAt: now(), CreatedBy: actor}
+	out.Device = Device{User: user, Name: name, CreatedAt: now(), CreatedBy: actor, ChannelKey: channelKey}
 	if err := put(w.Tx, bDevices, join(user, name), deviceRecord{Device: out.Device, TokenSHA256: hash}); err != nil {
 		return err
 	}

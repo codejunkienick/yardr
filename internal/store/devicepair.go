@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"crypto/ecdh"
 	"crypto/subtle"
+	"encoding/base64"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -17,8 +20,13 @@ import (
 // that pairing's code, its ten minutes, its five wrong tries and its one
 // use, and like it an open one is in the server's memory and nowhere else.
 //
-// What it has not is the exchange of keys and the check two operators
-// compare: a device has no key to be put in place of, and what it is given
+// What it has not is the check two operators compare. What it has,
+// where the device came by the QR's fourth field, is a key of its own:
+// the device makes a channel key pair for this yard, redeems the code
+// inside a Noise handshake to the yard's channel key, and is recorded
+// with its public half pinned beside its token's hash, sealed from
+// whoever carried the connection (DevicePairRedeemSealed). A pairing
+// redeemed with no key field is the plain one of before: what it is given
 // is a bearer token, which whoever reads the connection reads on every call
 // after this one. The connection is what a device rests on (docs/api.md,
 // "Over the network"), so the code crosses on it as the token does.
@@ -58,9 +66,11 @@ type DevicePairingState struct {
 	DevicePairingCode
 	// QR is what a QR code of the pairing holds: the address the device
 	// reaches the yard at, then '#', then the code, and '#' and the yard
-	// beside them where the address is the edge's. It is "" while the
-	// yard's edge setting names no edge, and the code is then given where
-	// it is asked for.
+	// beside them where the address is the edge's, and '#' and the
+	// yard's channel public key as its fourth field where the yard has
+	// a channel key (channelPublic). It is "" while the yard's edge
+	// setting names no edge, and the code is then given where it is
+	// asked for.
 	QR string `json:"qr"`
 }
 
@@ -234,6 +244,33 @@ func (s *Store) DevicePairClose(ctx context.Context, actor string) (*DevicePairi
 	return &out, nil
 }
 
+// channelPublic is the yard's channel public key as DevicePairState's
+// QR carries it: the public half of the channel key in the file beside
+// the yard key file the store was told (SetYard), which is the file
+// config's ChannelKey names in the yard's home. It is read, never
+// made, here: the key is made where it is first needed (the pairing
+// command, internal/yardkey.EnsureChannel), and a yard with none, or
+// whose store was told no key file, has "" — its pairings are the
+// plain ones of before, with no key field.
+func (s *Store) channelPublic() string {
+	if s.yardKeyFile == "" {
+		return ""
+	}
+	b, _, err := ReadSecretFile(filepath.Join(filepath.Dir(s.yardKeyFile), "channel.key"))
+	if err != nil {
+		return ""
+	}
+	private, err := base64.StdEncoding.DecodeString(string(b))
+	if err != nil || len(private) != 32 {
+		return ""
+	}
+	key, err := ecdh.X25519().NewPrivateKey(private)
+	if err != nil {
+		return ""
+	}
+	return enc.EncodeToString(key.PublicKey().Bytes())
+}
+
 // DevicePairState answers the yard's open device pairing with its code,
 // as it was shown when it was opened, and the QR string that holds the
 // address, the code and the yard, so a window reopened shows the same
@@ -259,6 +296,9 @@ func (s *Store) DevicePairState(ctx context.Context) (*DevicePairingState, error
 	}
 	if e, connected, err := EdgeOf(all); err == nil && connected {
 		out.QR = e.URL + "#" + out.Code + "#" + e.HandleName()
+		if channel := s.channelPublic(); channel != "" {
+			out.QR += "#" + channel
+		}
 	}
 	return &out, nil
 }
@@ -325,7 +365,7 @@ func (s *Store) DevicePairOpened(ctx context.Context) bool {
 // listener; a redemption that names who presents it is DevicePairRedeemBy,
 // or DevicePairRedeemUnmapped where the address maps to no user.
 func (s *Store) DevicePairRedeem(ctx context.Context, code string) (*NewDevice, error) {
-	return s.redeemDevicePairing(ctx, code, nil, nil)
+	return s.redeemDevicePairing(ctx, code, nil, nil, "")
 }
 
 // DevicePairRedeemBy is DevicePairRedeem for a redemption that names who
@@ -339,7 +379,35 @@ func (s *Store) DevicePairRedeem(ctx context.Context, code string) (*NewDevice, 
 // one a pairing was opened for, so it is always refused here; a single
 // address that maps to nobody is DevicePairRedeemUnmapped's, not this.
 func (s *Store) DevicePairRedeemBy(ctx context.Context, code, presenter string) (*NewDevice, error) {
-	return s.redeemDevicePairing(ctx, code, &presenter, nil)
+	return s.redeemDevicePairing(ctx, code, &presenter, nil, "")
+}
+
+// DevicePairRedeemSealed is DevicePairRedeem for a redemption that ran
+// inside a Noise handshake to the yard's channel key (internal/yardkey):
+// deviceKey is the device channel public key the handshake proved, and
+// the device added is recorded with it pinned beside its token's hash
+// (Device.ChannelKey). The code is the one the handshake's first
+// message carried, and it is held as any redemption's is: good once,
+// so a recorded handshake replayed is refused as a used code is, and
+// no second device is added. Like DevicePairRedeem it is the server's
+// to ask, for a request it was sent, and no method of the API.
+func (s *Store) DevicePairRedeemSealed(ctx context.Context, code, deviceKey string) (*NewDevice, error) {
+	return s.redeemDevicePairing(ctx, code, nil, nil, deviceKey)
+}
+
+// DevicePairRedeemSealedBy is DevicePairRedeemSealed for a redemption
+// that names who presents it, as DevicePairRedeemBy is of the plain
+// one: the presenter narrows it to the pairing's user alone.
+func (s *Store) DevicePairRedeemSealedBy(ctx context.Context, code, presenter, deviceKey string) (*NewDevice, error) {
+	return s.redeemDevicePairing(ctx, code, &presenter, nil, deviceKey)
+}
+
+// DevicePairRedeemSealedUnmapped is DevicePairRedeemSealed for a
+// redemption whose presenter is one address that maps to no user, as
+// DevicePairRedeemUnmapped is of the plain one.
+func (s *Store) DevicePairRedeemSealedUnmapped(ctx context.Context, code string, mapped map[string]bool, deviceKey string) (*NewDevice, error) {
+	nobody := ""
+	return s.redeemDevicePairing(ctx, code, &nobody, mapped, deviceKey)
 }
 
 // DevicePairRedeemUnmapped is DevicePairRedeemBy for a redemption whose
@@ -357,7 +425,7 @@ func (s *Store) DevicePairRedeemBy(ctx context.Context, code, presenter string) 
 // removal, that holder redeems the owner's pairing with its code.
 func (s *Store) DevicePairRedeemUnmapped(ctx context.Context, code string, mapped map[string]bool) (*NewDevice, error) {
 	nobody := ""
-	return s.redeemDevicePairing(ctx, code, &nobody, mapped)
+	return s.redeemDevicePairing(ctx, code, &nobody, mapped, "")
 }
 
 // redeemDevicePairing is every redemption: presenter is nil for one that
@@ -370,8 +438,16 @@ func (s *Store) DevicePairRedeemUnmapped(ctx context.Context, code string, mappe
 // is no try, whoever presents it. Past that the presenter is judged before
 // the code, so a presenter that may not redeem is refused the same whether
 // or not it holds the right code, and the code is not even compared for
-// it.
-func (s *Store) redeemDevicePairing(ctx context.Context, code string, presenter *string, mapped map[string]bool) (*NewDevice, error) {
+// it. deviceKey, for a sealed redemption, is the device channel public
+// key its handshake proved, recorded with the device as it is added; a
+// key that is none — no encoding of 32 bytes — is no redemption at all,
+// refused before the pairing is looked at, and no try.
+func (s *Store) redeemDevicePairing(ctx context.Context, code string, presenter *string, mapped map[string]bool, deviceKey string) (*NewDevice, error) {
+	if deviceKey != "" {
+		if raw, err := enc.Strict().DecodeString(deviceKey); err != nil || len(raw) != 32 {
+			return nil, fmt.Errorf("%q is no channel public key", clipErr(deviceKey))
+		}
+	}
 	s.devPair.mu.Lock()
 	defer s.devPair.mu.Unlock()
 	p := s.devicePairing(ctx)
@@ -403,7 +479,7 @@ func (s *Store) redeemDevicePairing(ctx context.Context, code string, presenter 
 	out, err := newDevice()
 	if err == nil {
 		err = s.write(func(w *wtx) error {
-			return putDevice(w, out, p.User, p.Device, p.actor, map[string]any{"pairing": p.ID})
+			return putDevice(w, out, p.User, p.Device, p.actor, deviceKey, map[string]any{"pairing": p.ID})
 		})
 	}
 	if err != nil {

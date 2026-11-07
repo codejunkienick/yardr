@@ -6,12 +6,14 @@ import (
 	"crypto/rand"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"yardr.dev/yardr/internal/peer"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/yardkey"
 )
 
 // A device pairing is opened by whoever adds a device and by nobody else:
@@ -115,7 +117,7 @@ func TestDevicePairOneAtATime(t *testing.T) {
 // handle/name there — and nothing while the yard is connected to no edge.
 func TestDevicePairState(t *testing.T) {
 	t.Parallel()
-	api, _ := deviceYard(t)
+	api, own := deviceYard(t)
 	ctx := context.Background()
 	if _, err := api.DevicePairState(ctx); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("DevicePairState with none open = %v, want no pairing", err)
@@ -145,6 +147,22 @@ func TestDevicePairState(t *testing.T) {
 	}
 	if want := "https://my.yardr.dev#" + opened.Code + "#mckean/edgeyard"; got.QR != want {
 		t.Fatalf("DevicePairState QR = %q, want %q", got.QR, want)
+	}
+	// With a channel key beside the yard key the store was told, the QR
+	// carries its public half as the fourth field; the code and the yard
+	// before it are as they were.
+	dir := t.TempDir()
+	channel, _, err := yardkey.EnsureChannel(filepath.Join(dir, "channel.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	own.SetYard(filepath.Join(dir, "peer.key"), "test")
+	got, err = api.DevicePairState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "https://my.yardr.dev#" + opened.Code + "#mckean/edgeyard#" + yardkey.ChannelPublic(channel); got.QR != want {
+		t.Fatalf("DevicePairState QR with a channel key = %q, want %q", got.QR, want)
 	}
 	if _, err := api.DevicePairClose(ctx, "jo"); err != nil {
 		t.Fatal(err)
@@ -314,6 +332,72 @@ func TestDevicePairRedeemBy(t *testing.T) {
 	}
 	if list, _ := api.Devices(ctx, ""); len(list) != 4 {
 		t.Fatalf("devices = %+v, want 4", list)
+	}
+}
+
+// A sealed redemption (DevicePairRedeemSealed and its presenter forms)
+// records the device with the channel public key its handshake proved
+// pinned beside its token's hash, and the token resolves as any paired
+// device's does. The code is good once for it as for a plain one: the
+// same sealed redemption again — a recorded handshake replayed — is
+// refused and adds no second device. A key that is none is no try, and
+// a plain redemption records no key.
+func TestDevicePairRedeemSealed(t *testing.T) {
+	t.Parallel()
+	api, own := deviceYard(t)
+	ctx := context.Background()
+	var no *store.Refused
+	device, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := yardkey.ChannelPublic(device)
+
+	opened, err := api.DevicePairOpen(ctx, "ada", "phone", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, err := own.DevicePairRedeemSealed(ctx, opened.Code, "not a key"); d != nil || err == nil || errors.As(err, &no) {
+		t.Fatalf("a sealed redemption with no key = %+v, %v, want an error that is no refusal", d, err)
+	}
+	if !own.DevicePairOpened(ctx) {
+		t.Fatal("a redemption with no key ended the pairing")
+	}
+	// A presenter that is not the pairing's user is refused as a wrong
+	// code, key and all, and the code is still good for ada.
+	if d, err := own.DevicePairRedeemSealedBy(ctx, opened.Code, "bob", key); d != nil || !errors.As(err, &no) || no.Reason != store.WrongCode {
+		t.Fatalf("ada's sealed code presented by bob = %+v, %v, want wrong_code", d, err)
+	}
+	d, err := own.DevicePairRedeemSealedBy(ctx, opened.Code, "ada", key)
+	if err != nil || d.User != "ada" || d.Name != "phone" || d.ChannelKey != key {
+		t.Fatalf("ada's sealed code presented by ada = %+v, %v", d, err)
+	}
+	if got, err := own.ResolveDevice(ctx, d.Token, "100.64.0.7"); err != nil || got == nil || got.ChannelKey != key {
+		t.Fatalf("the sealed device's token resolves to %+v, %v", got, err)
+	}
+	list, err := api.Devices(ctx, "")
+	if err != nil || len(list) != 1 || list[0].ChannelKey != key {
+		t.Fatalf("devices = %+v, %v, want the one device with its key pinned", list, err)
+	}
+	// The replay: the same code and key again buys nothing.
+	if d, err := own.DevicePairRedeemSealed(ctx, opened.Code, key); d != nil || !errors.As(err, &no) || no.Reason != store.NoPairing {
+		t.Fatalf("the sealed code again = %+v, %v, want no pairing", d, err)
+	}
+	if list, _ := api.Devices(ctx, ""); len(list) != 1 {
+		t.Fatalf("devices after the replay = %+v, want still 1", list)
+	}
+
+	// A plain redemption of another pairing pins nothing.
+	opened, err = api.DevicePairOpen(ctx, "bob", "phone", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := own.DevicePairRedeem(ctx, opened.Code); err != nil {
+		t.Fatal(err)
+	}
+	list, err = api.Devices(ctx, "")
+	if err != nil || len(list) != 2 || list[1].User != "bob" || list[1].ChannelKey != "" {
+		t.Fatalf("devices = %+v, %v, want bob's plain device with no key pinned", list, err)
 	}
 }
 

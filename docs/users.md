@@ -148,9 +148,9 @@ a later removal the edge no longer holds counting as landed, not as
 an error. A signed refusal that waiting cannot cure (the report naming
 another yard, a membership already standing, an unverified address)
 fails the card with the edge's own words. Once the mapping stands, the
-teammate signs in as themselves and opens a device pairing of their
-own on the web pairing page, for their yard user alone (see
-[Devices](#devices)); the operator never handles their code. The yard
+teammate signs in as themselves; a device of theirs is paired by a QR
+the yard's operator opens on the yard's own screen, as the web
+pairing page now tells them (see [Devices](#devices)). The yard
 side here reports through the edge's signed member door at `/member/add`
 and `/member/remove`; the connected edge must support those reports.
 
@@ -1059,10 +1059,11 @@ Pairing is open for 10 minutes, until 14:32:10, for the device phone of mckean. 
 
   address  https://mac.example.net
   code     K7QM-2XPD
+  channel  <the yard's channel public key>
 
   <the QR code>
 
-The code is good once: the device is answered with its token, which is shown nowhere else. 5 wrong codes end the pairing, and so does: yardr user device pair --end
+The code is good once: a device that scans the QR code is answered inside a sealed channel, and whoever carries the connection reads neither the code nor the device token. 5 wrong codes end the pairing, and so does: yardr user device pair --end
 It then calls as mckean until: yardr user device rm mckean phone
 ```
 
@@ -1090,13 +1091,21 @@ It then calls as mckean until: yardr user device rm mckean phone
 - **The device is added when the code is used**, as by the operator who
   opened the pairing, and is then a device as `device add` makes one: the
   store keeps the token's SHA-256, `device list` and `device rm` know it.
+  A device that redeemed sealed is recorded with its channel public key
+  pinned beside that hash (`channel_key` where a device is read as JSON);
+  a plain one pins none.
   What `device add` refuses is refused when the pairing is opened: a user
   the yard has not, a second device of the name. If either becomes true
   while the pairing is open, the code is used and nothing is added.
 - **`--json`** prints `{"pairing", "user", "device", "code", "address",
-  "yard", "expires", "qr"}`, where `qr` is what the QR code holds, `yard`
-  this yard's handle and name at the edge where the address is the edge's
-  (absent otherwise), and draws nothing.
+  "yard", "channel_key", "channel_signature", "expires", "qr"}`, where
+  `qr` is what the QR code holds, `yard` this yard's handle and name at
+  the edge where the address is the edge's (absent otherwise),
+  `channel_key` the yard's channel public key the QR's fourth field
+  holds and `channel_signature` the yard identity's signature of it,
+  and draws nothing. Where the yard's channel key could not be made or
+  read the two channel fields are absent and the pairing is the plain
+  one below, with no key in its QR code.
 
 **What the QR code holds.** With `--qr` the command also draws a QR code in
 the terminal, for a phone to read in place of the address and the code
@@ -1105,6 +1114,8 @@ being typed. It holds one line of text and nothing else:
 ```text
 <address>#<code>               https://mac.example.net#K7QM-2XPD
 <address>#<code>#<yard>        https://my.yardr.dev#K7QM-2XPD#mckean/airy
+<address>#<code>#<yard>#<channel>        https://my.yardr.dev#K7QM-2XPD#mckean/airy#<channel public key>
+<address>#<code>##<channel>   https://mac.example.net#K7QM-2XPD##<channel public key>
 ```
 
 The second is where the address is the edge's: the device reads which of
@@ -1113,8 +1124,26 @@ call. `<address>` is the yard's address as the command prints it: `http://`
 or `https://`, a host, perhaps a port and a path, no query, no `#` of its
 own and no slash at its end. `<code>` is the code as it is printed, with
 its dash. `<yard>` is the yard's handle and name at the edge, `handle/name`.
-A client splits the text at its `#`s: the address, the code, and the yard
-where a third stands. The QR code is of error correction level M.
+`<channel>` is the yard's channel public key: 43 characters of base64url,
+the public half of the one X25519 key the yard holds for this beside its
+identity, which signs it. A client splits the text at its `#`s: the
+address, the code, the yard where a third field stands and is not empty,
+and the channel key where a fourth stands — empty in the third place
+where no yard is named, as the fourth example shows. The first two, with
+no key field, are the pairings of before and are redeemed plainly, exactly
+as they always were. The QR code is of error correction level M.
+QR readers must accept this optional fourth field; a reader that requires
+exactly two or three fields will not read a new pairing QR.
+
+The yard's channel key stands in a file of its own beside the yard's
+identity (`channel.key` beside `peer.key` in the yard's home, mode
+0600), made once, the first time a pairing needs it, and never changed
+by a later pairing: the key a yard gave out in a QR stays its key. Its
+public half is signed by the yard's identity, as `channel_signature` in
+`--json` carries it, so a device that later learns the key from anywhere
+but the yard's own screen can check it against the identity it holds. A
+yard whose identity or channel key cannot be read or made opens a plain
+pairing instead, with no key field, and says so.
 
 **What a device does with them.** One request, without a credential:
 
@@ -1129,6 +1158,46 @@ curl -X POST https://mac.example.net/user/pair -d '{"code": "K7QM-2XPD"}'
 
 The code is read as it is typed: the dash and spaces may be left out, small
 letters are capitals, and `I` and `L` are read as `1`, `O` as `0`.
+
+**Sealed, by the QR's key.** A device that took the channel key from the
+QR's fourth field redeems sealed instead, and never sends that plain
+request. It makes itself an X25519 key pair for this yard, pins it, and
+opens a Noise handshake to the yard's channel key (pattern IK, X25519
+with ChaChaPoly and SHA-256, run on the yard by `github.com/flynn/noise`
+and on the device by its own Noise library): the pairing code is the
+first message's payload, and the device's own public key is sealed
+inside that message, where only the yard holding the channel private
+key can read either. The one request, without a credential:
+
+```text
+POST <address>/user/pair
+{"sealed": "<base64url of the handshake's first message>"}
+```
+
+The yard opens the message, redeems the code it carries — for the
+pairing's user alone, where the request names its presenter, exactly as
+a plain redemption — records the device with the public key the
+handshake proved pinned beside its token's hash, and answers the
+handshake's second message with the `{"token", "user", "device",
+"yard"}` of the table below as its payload, sealed to that device:
+
+```text
+200 {"sealed": "<base64url of the handshake's second message>"}
+```
+
+Neither the code nor the token crosses readable, to the edge or to any
+other carrier, and the sealed answer opens only with the device private
+key of the handshake. A sealed code is held as a plain one is: a wrong
+code inside a handshake is answered in the table's words (403
+`wrong_code`, or 409 `not_added`, in the clear of the status and the
+reason alone) and counted, the fifth ending the pairing; bytes that are
+no handshake to this yard's key are 400 and no try, as a body that is no
+code is. A transcript recorded and replayed buys nothing: the code is
+used by the first redemption, so the replay meets a pairing that is
+done, or counts as a wrong code against the next one, and no second
+device is added and no second token answered. A yard with no channel
+key file, or one its server was told nothing of, serves the plain form
+alone and answers a sealed body 400.
 
 | answer | what it says |
 |---|---|
@@ -1145,9 +1214,14 @@ remove it (`yardr user device rm`) and pair again.
 presents it, in the header `X-Edge-Presenter`: the address of the signed-in
 account the edge resolved. The yard looks the address up in `web_jwt_users`,
 the table the web view looks a token's email up in, and redeems the code for
-that user alone, the user the pairing was opened for. A pairing a member opens
-on the web pairing page is redeemed through the edge in that member's session
-and in no other, though another session holds the code. The yard answers any
+that user alone, the user the pairing was opened for. A member pairs by a
+QR the yard's operator opens on the yard's own screen (`yardr user device
+pair --qr` there) and scans that: the web view's pairing page opens no
+pairing now, because the page and any QR it showed reach the member
+through the edge, which could read or rewrite the code and the key. The
+page says so: pairing from it no longer gives an app that can call
+through the edge, and to ask the yard's operator to open a pairing QR on
+the yard's own screen and scan that. The yard answers any
 other presenter as it answers a wrong code, 403 `wrong_code` with no device
 added, and counts it with them: the fifth refusal ends the pairing. An address
 the table maps to nobody is refused the same way where the pairing's user is
@@ -1166,13 +1240,16 @@ this call and no other. It can only narrow who redeems, never widen it, since
 the code is still required, so a client that sends it straight to the
 listener gains nothing by it.
 
-**What it rests on.** On the listener the code is all a device needs: whoever
-has it within its ten minutes, and reaches it, gets the token. Show the code,
-and the QR code, to the device and to nobody else. There is no check for two
-people to compare, as a pairing of yards has. That check keeps someone
-between two yards from putting a key of their own in place of a yard's, and
-a device has no key: what it is given is a bearer token, which whoever
-reads the connection reads on every call after this one. So a device rests
+**What it rests on.** On the listener a plain code is all a device needs:
+whoever has it within its ten minutes, and reaches it, gets the token. Show
+the code, and the QR code, to the device and to nobody else. There is no
+check for two people to compare, as a pairing of yards has. That check
+keeps someone between two yards from putting a key of their own in place
+of a yard's; a device that pairs by the QR's key needs none, because the
+key reaches it on the yard's own screen, where the carrier cannot rewrite
+it, and its code and token then cross sealed. A device paired plainly has
+no key of its own in the yard's keeping: what it is given is a bearer token, which whoever
+reads the connection reads on every call after this one. So such a device rests
 on the connection, for the code as for the token: `https` off the yard's
 machine ([api.md](api.md#over-the-network)). The command says so when the
 address is plain `http` and not this machine's. Five tries at a code of 40

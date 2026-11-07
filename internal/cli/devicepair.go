@@ -17,6 +17,7 @@ import (
 	"yardr.dev/yardr/internal/edgelink"
 	"yardr.dev/yardr/internal/hooks"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/yardkey"
 )
 
 // A device is enrolled by a code, as two yards are paired (docs/users.md,
@@ -27,13 +28,21 @@ import (
 // pairQR is what the QR code of a device's pairing holds: the address the
 // device reaches the yard at, then '#', then the code, and where the address
 // is the edge's, '#' and the yard's handle/name at the edge beside them, so
-// the device knows which of the account's yards it pairs with. Nothing else
-// is in it, and an address has no '#' of its own (store.CleanURL).
-func pairQR(address, code, yard string) string {
-	if yard == "" {
-		return address + "#" + code
+// the device knows which of the account's yards it pairs with. Where the
+// yard has a channel key, '#' and its public half stand as the fourth
+// field — the yard field empty before it where no yard is named — and
+// the device pins that key and redeems the code inside a Noise
+// handshake to it, answered sealed. With no channel key it is the text
+// it always was: a pairing with no key field is a plain one. An address
+// has no '#' of its own (store.CleanURL).
+func pairQR(address, code, yard, channel string) string {
+	if channel == "" {
+		if yard == "" {
+			return address + "#" + code
+		}
+		return address + "#" + code + "#" + yard
 	}
-	return address + "#" + code + "#" + yard
+	return address + "#" + code + "#" + yard + "#" + channel
 }
 
 // drawQR draws text as a QR code in the terminal's characters, two modules
@@ -101,8 +110,17 @@ type devicePaired struct {
 	// Yard is this yard at the edge, handle/name, where the address is the
 	// edge's (linkAddr): the device sends it back to say which of the
 	// account's yards it means. A pairing on the listener names none.
-	Yard    string    `json:"yard,omitempty"`
-	Expires time.Time `json:"expires"`
+	Yard string `json:"yard,omitempty"`
+	// ChannelKey is the yard's channel public key, the QR's fourth
+	// field: the device pins it and redeems the code inside a Noise
+	// handshake to it. ChannelSignature is the yard identity's
+	// signature of it, for a device that later learns the key from
+	// anywhere but this yard's own screen. Both are absent where the
+	// yard's channel key could not be made or read, and the pairing
+	// is then the plain one it always was.
+	ChannelKey       string    `json:"channel_key,omitempty"`
+	ChannelSignature string    `json:"channel_signature,omitempty"`
+	Expires          time.Time `json:"expires"`
 	// QR is what a QR code of the pairing holds (pairQR).
 	QR string `json:"qr"`
 }
@@ -129,12 +147,18 @@ edge, so it knows which of the account's yards it pairs with. --qr also
 draws a QR code that holds the address and the code, as <address>#<code>,
 and the yard's name beside them where the address is the edge's, as
 <address>#<code>#<yard>, and nothing else: a phone reads it in place of
-each being typed.
+each being typed. The QR code also holds this yard's channel public key
+as its fourth field, <address>#<code>#<yard>#<channel> (the yard field
+empty where no yard is named): the device pins that key, redeems the
+code inside a Noise handshake to it, and is answered sealed, with its
+own key recorded beside its token. A device given the code alone, typed
+or read aloud, pairs plainly as it always has.
 
-The code is all a device needs, and whoever has it within those minutes gets
+The code is all a plain device needs, and whoever has it within those minutes gets
 the token: show it, and the QR code, to the device and to nobody else. What
-keeps the code and the token from whoever is between the device and the
-yard is the connection, so give an https address off this machine.
+keeps a plain code and its token from whoever is between the device and the
+yard is the connection, so give an https address off this machine; a device
+that scans the QR code is sealed from that carrier either way.
 
 Only the operator opens a pairing, and never from the pane of an agent, as
 for yardr user device add: whoever enrols a device decides who may speak as
@@ -207,7 +231,24 @@ a person.`,
 			if e, connected, err := store.EdgeOf(all); err == nil && connected && addr == e.URL {
 				out.Yard = e.HandleName()
 			}
-			out.QR = pairQR(addr, opened.Code, out.Yard)
+			// The yard's channel key, made once beside its identity
+			// where it has none: the QR carries its public half as the
+			// fourth field, and the device that scans it redeems the
+			// code inside a Noise handshake to it. An identity or a
+			// channel key that cannot be made costs the pairing its
+			// sealed form, never the pairing: it is opened and good as
+			// a plain one, and says so.
+			if identity, _, ierr := yardkey.Ensure(cfg.PeerKey()); ierr == nil {
+				if channel, _, cerr := yardkey.EnsureChannel(cfg.ChannelKey()); cerr == nil {
+					out.ChannelKey = yardkey.ChannelPublic(channel)
+					out.ChannelSignature = yardkey.SignChannelKey(identity, channel.Public)
+				} else {
+					fmt.Fprintf(c.ErrOrStderr(), "no channel key could be made (%v): this pairing is a plain one, with no key in its QR code\n", cerr)
+				}
+			} else {
+				fmt.Fprintf(c.ErrOrStderr(), "the yard's key could not be read or made (%v): this pairing is a plain one, with no key in its QR code\n", ierr)
+			}
+			out.QR = pairQR(addr, opened.Code, out.Yard, out.ChannelKey)
 			var picture string
 			if draw && !a.json {
 				if picture, err = drawQR(out.QR, term.IsTerminal(int(os.Stdout.Fd()))); err != nil {
@@ -227,24 +268,38 @@ a person.`,
 				if out.Yard != "" {
 					fmt.Fprintf(w, "  yard     %s\n", out.Yard)
 				}
-				fmt.Fprintf(w, "  code     %s\n\n", out.Code)
+				fmt.Fprintf(w, "  code     %s\n", out.Code)
+				if out.ChannelKey != "" {
+					fmt.Fprintf(w, "  channel  %s\n", out.ChannelKey)
+				}
+				fmt.Fprintf(w, "\n")
 				if picture != "" {
 					fmt.Fprintf(w, "%s\n", picture)
 				}
-				fmt.Fprintf(w, "The code is good once: the device is answered with its token, which is shown nowhere else. "+
-					"%d wrong codes end the pairing, and so does: %s user device pair --end\n", store.MaxTries, yardr)
+				if out.ChannelKey != "" {
+					fmt.Fprintf(w, "The code is good once: a device that scans the QR code is answered inside a sealed channel, "+
+						"and whoever carries the connection reads neither the code nor the device token. "+
+						"%d wrong codes end the pairing, and so does: %s user device pair --end\n", store.MaxTries, yardr)
+				} else {
+					fmt.Fprintf(w, "The code is good once: the device is answered with its token, which is shown nowhere else. "+
+						"%d wrong codes end the pairing, and so does: %s user device pair --end\n", store.MaxTries, yardr)
+				}
 				fmt.Fprintf(w, "It then calls as %s until: %s user device rm %s %s\n", out.User, yardr, out.User, out.Device)
 				if !isOperator(c.Context(), st, out.User) {
 					fmt.Fprintf(w, "%s is not an operator, and the device reads every bead in the yard, with its notes, and the mail of %s alone.\n", out.User, out.User)
 				}
 				if u, err := url.Parse(out.Address); err == nil && u.Scheme == "http" && u.Hostname() != "localhost" && !isLoopback(u.Hostname()) {
-					fmt.Fprintf(w, "%s is plain http: whoever is between the device and this yard reads the code, and the token after it. Use it on a network you trust.\n", out.Address)
+					if out.ChannelKey != "" {
+						fmt.Fprintf(w, "%s is plain http: a code typed there crosses readable, and the token after it; a device that scans the QR code is answered sealed even so. Use it on a network you trust.\n", out.Address)
+					} else {
+						fmt.Fprintf(w, "%s is plain http: whoever is between the device and this yard reads the code, and the token after it. Use it on a network you trust.\n", out.Address)
+					}
 				}
 			})
 		},
 	}
 	cmd.Flags().StringVar(&addr, "url", "", "where the device reaches this yard, such as https://mac.example.net (default: the listener's address, or the edge's when the link is up)")
-	cmd.Flags().BoolVar(&draw, "qr", false, "also draw a QR code that holds the address and the code")
+	cmd.Flags().BoolVar(&draw, "qr", false, "also draw a QR code that holds the address, the code and the yard's channel key")
 	cmd.Flags().BoolVar(&end, "end", false, "end the device pairing this yard has open")
 	return cmd
 }

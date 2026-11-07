@@ -1003,6 +1003,21 @@ is open. Before, and once the code was used, ran out or was ended, it is as
 every other path here: 401 without a credential, 404 in a yard with no
 device. On any of those the client asks the operator for another code.
 
+Where the QR code the device took its code from held the yard's channel
+public key as its fourth field, the device asks sealed instead: the body
+is `{"sealed": "<base64url of a Noise IK first message>"}` whose payload
+is the code and which seals the device's own X25519 public key inside
+it, opened by the yard's channel private key. The answer is 200
+`{"sealed": "<base64url of the second message>"}`, whose payload is the
+same `{"token", "user", "device", "yard"}` JSON, readable only with the
+device private key the handshake proved; the device is recorded with
+that proved public key pinned beside its token's hash. Refusals of the
+code it carries are answered and counted as a plain code's are, and
+bytes that are no handshake to this yard's key are 400 and no try. A
+recorded transcript replayed buys nothing: its code was used by the
+first redemption. A QR code with no key field is redeemed by the plain
+request above, exactly as before.
+
 The try limit is intended: five wrong codes end the open pairing, a code
 cannot be guessed in five tries, and `yardr user device add` is unaffected,
 so the operator either opens another pairing or adds the device directly.
@@ -6028,7 +6043,7 @@ When the call ends without a reply (the server went away), a client cannot know 
 
 ### `DevicePairState`
 
-Reads the yard's open device pairing back, so a window reopened shows the same pairing again: the device, the code as it was shown when it opened, when it runs out, and the QR string a phone scans in place of typing. The QR string is `<address>#<code>#<yard>`, the yard's `edge` address with its handle/name there; with no edge setting the yard names no address and `qr` is empty, and the code is given where it is asked for. With no pairing open the error is `not-found`. It is the operator's to read: on the socket its Operator class refuses agent and crew panes. A device token never opens a pairing: on the listener the call is answered as a method the yard does not have, to a device of the operator too, and down the yard link from the edge alike.
+Reads the yard's open device pairing back, so a window reopened shows the same pairing again: the device, the code as it was shown when it opened, when it runs out, and the QR string a phone scans in place of typing. The QR string is `<address>#<code>#<yard>`, the yard's `edge` address with its handle/name there, and the yard's channel public key as its fourth field where the yard has a channel key; with no edge setting the yard names no address and `qr` is empty, and the code is given where it is asked for. With no pairing open the error is `not-found`. It is the operator's to read: on the socket its Operator class refuses agent and crew panes. A device token never opens a pairing: on the listener the call is answered as a method the yard does not have, to a device of the operator too, and down the yard link from the edge alike.
 
 ```
 POST /call/DevicePairState
@@ -6053,7 +6068,7 @@ POST /call/DevicePairState
 | `state` | string | `open` |
 | `code` | string | the code the device calls with, as it was shown when it opened |
 | `expires` | time | when the code runs out |
-| `qr` | string | what a QR code of the pairing holds: `<address>#<code>#<yard>`; empty while the yard is connected to no edge |
+| `qr` | string | what a QR code of the pairing holds: `<address>#<code>#<yard>`, and the yard's channel public key as a fourth field where the yard has one; empty while the yard is connected to no edge |
 
 ### `DevicePairClose`
 

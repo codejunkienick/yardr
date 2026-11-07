@@ -915,7 +915,7 @@ var apiOperatorCalls = []apiCall{
 	},
 	{
 		method: "DevicePairState",
-		says:   "Reads the yard's open device pairing back, so a window reopened shows the same pairing again: the device, the code as it was shown when it opened, when it runs out, and the QR string a phone scans in place of typing. The QR string is `<address>#<code>#<yard>`, the yard's `edge` address with its handle/name there; with no edge setting the yard names no address and `qr` is empty, and the code is given where it is asked for. With no pairing open the error is `not-found`. It is the operator's to read: on the socket its Operator class refuses agent and crew panes. A device token never opens a pairing: on the listener the call is answered as a method the yard does not have, to a device of the operator too, and down the yard link from the edge alike.",
+		says:   "Reads the yard's open device pairing back, so a window reopened shows the same pairing again: the device, the code as it was shown when it opened, when it runs out, and the QR string a phone scans in place of typing. The QR string is `<address>#<code>#<yard>`, the yard's `edge` address with its handle/name there, and the yard's channel public key as its fourth field where the yard has a channel key; with no edge setting the yard names no address and `qr` is empty, and the code is given where it is asked for. With no pairing open the error is `not-found`. It is the operator's to read: on the socket its Operator class refuses agent and crew panes. A device token never opens a pairing: on the listener the call is answered as a method the yard does not have, to a device of the operator too, and down the yard link from the edge alike.",
 		// The QR string's address and yard are the edge the fixture
 		// sets for the depot-push cards.
 		requests: []string{`{}`},
@@ -925,7 +925,7 @@ var apiOperatorCalls = []apiCall{
 			{"state", "string", "`open`"},
 			{"code", "string", "the code the device calls with, as it was shown when it opened"},
 			{"expires", "time", "when the code runs out"},
-			{"qr", "string", "what a QR code of the pairing holds: `<address>#<code>#<yard>`; empty while the yard is connected to no edge"},
+			{"qr", "string", "what a QR code of the pairing holds: `<address>#<code>#<yard>`, and the yard's channel public key as a fourth field where the yard has one; empty while the yard is connected to no edge"},
 		},
 	},
 	{

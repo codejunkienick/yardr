@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,16 +13,19 @@ import (
 	"time"
 
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/yardkey"
 )
 
 // pairYard is a yard with the operator jo, the user sam and no device, on a
 // listener of its own at 127.0.0.1:0, and a clock for its device pairings
-// that the test moves.
+// that the test moves. It holds a channel key too, in a file of its own,
+// as a yard that pairs by QR does.
 type pairYard struct {
-	st   *store.Store
-	u    *UserServer
-	base string
-	late atomic.Int64 // how far the clock is ahead, in nanoseconds
+	st      *store.Store
+	u       *UserServer
+	base    string
+	channel yardkey.ChannelKey
+	late    atomic.Int64 // how far the clock is ahead, in nanoseconds
 }
 
 func newPairYard(t *testing.T) *pairYard {
@@ -41,6 +45,13 @@ func newPairYard(t *testing.T) *pairYard {
 		t.Fatal(err)
 	}
 	y := &pairYard{st: st, u: NewUserServer(st, func(context.Context) string { return "south" }, nil)}
+	channelPath := filepath.Join(t.TempDir(), "channel.key")
+	channel, _, err := yardkey.EnsureChannel(channelPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	y.channel = channel
+	y.u.SetChannelKeyFile(channelPath)
 	st.SetDevicePairClock(func() time.Time { return time.Now().Add(time.Duration(y.late.Load())) })
 	y.base = listen(t, y.u, 5*time.Second)
 	return y
@@ -415,5 +426,220 @@ func TestDevicePairPathIsTheOnlyOneOpened(t *testing.T) {
 	}
 	if w := ask(h, http.MethodPost, PairPath, "", unread{t}); w.Code != http.StatusUnauthorized {
 		t.Errorf("POST %s after the pairing was ended = %d, want 401", PairPath, w.Code)
+	}
+}
+
+// sealedCode begins a pairing handshake to the yard's channel key with
+// code as its payload, for the device key, and answers the first
+// message and the opening that reads the answer.
+func (y *pairYard) sealedCode(t *testing.T, device yardkey.ChannelKey, code string) (first []byte, opening *yardkey.PairingOpening) {
+	t.Helper()
+	first, opening, err := yardkey.StartPairingHandshake(device, y.channel.Public, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return first, opening
+}
+
+// postSealed sends one sealed first message to the pair path, with the
+// edge's presenter word where presenters are given.
+func (y *pairYard) postSealed(t *testing.T, first []byte, presenters ...string) (int, string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"sealed": base64.RawURLEncoding.EncodeToString(first)})
+	if len(presenters) == 0 {
+		return y.post(t, PairPath, "", string(body))
+	}
+	return y.do(t, http.MethodPost, PairPath, "", http.Header{PresenterHeader: presenters}, string(body))
+}
+
+// openSealed reads a sealed answer body and opens it with the opening
+// that began the handshake.
+func openSealed(t *testing.T, opening *yardkey.PairingOpening, body string) Paired {
+	t.Helper()
+	var sealed struct {
+		Sealed string `json:"sealed"`
+	}
+	if err := json.Unmarshal([]byte(body), &sealed); err != nil || sealed.Sealed == "" {
+		t.Fatalf("the sealed answer = %s (%v)", body, err)
+	}
+	reply, err := base64.RawURLEncoding.DecodeString(sealed.Sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := opening.OpenAnswer(reply)
+	if err != nil {
+		t.Fatalf("the device could not open its answer: %v", err)
+	}
+	var got Paired
+	if err := json.Unmarshal(plain, &got); err != nil {
+		t.Fatalf("the opened answer = %q (%v)", plain, err)
+	}
+	return got
+}
+
+// A device that pairs by the QR's channel key redeems its code inside
+// a Noise handshake to that key: neither the code nor the token
+// crosses readable, the answer opens only with the device key the
+// handshake proved, and the device is recorded with that key pinned
+// beside its token's hash. Its token then calls as its user.
+func TestDevicePairedBySealedCode(t *testing.T) {
+	y := newPairYard(t)
+	ctx := context.Background()
+	device, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := y.open(t, "sam", "phone")
+	first, opening := y.sealedCode(t, device, code)
+	status, body := y.postSealed(t, first)
+	if status != http.StatusOK || strings.Contains(body, code) || strings.Contains(body, "yardr-dev-") {
+		t.Fatalf("the sealed code = %d %s, want 200 with neither the code nor a token readable", status, body)
+	}
+	got := openSealed(t, opening, body)
+	if !strings.HasPrefix(got.Token, store.DeviceTokenPrefix) || got.User != "sam" || got.Device != "phone" || got.Yard != "south" {
+		t.Fatalf("the sealed code is answered %+v", got)
+	}
+	// The answer opens with that device's key alone.
+	stranger, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, strangerOpening := y.sealedCode(t, stranger, code)
+	var sealed struct {
+		Sealed string `json:"sealed"`
+	}
+	if err := json.Unmarshal([]byte(body), &sealed); err != nil {
+		t.Fatal(err)
+	}
+	reply, _ := base64.RawURLEncoding.DecodeString(sealed.Sealed)
+	if _, err := strangerOpening.OpenAnswer(reply); err == nil {
+		t.Error("another device's key opened the sealed answer")
+	}
+	if status, me := y.get(t, "/user/me", got.Token); status != http.StatusOK || me != `{"user":"sam","said_by":"phone","yard":"south","yardmaster":"yardmaster"}` {
+		t.Errorf("/user/me with the sealed token = %d %s", status, me)
+	}
+	devices, err := y.st.Devices(ctx, "")
+	if err != nil || len(devices) != 1 || devices[0].ChannelKey != yardkey.ChannelPublic(device) {
+		t.Fatalf("devices = %+v, %v, want sam's phone with the device key pinned", devices, err)
+	}
+}
+
+// A sealed transcript recorded and replayed buys nothing: the code it
+// carries was used by the first redemption, so the replay is answered
+// as a used code is and adds no device and answers no token; replayed
+// against the next pairing it counts as the wrong code it now is.
+func TestDevicePairSealedReplay(t *testing.T) {
+	y := newPairYard(t)
+	ctx := context.Background()
+	device, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := y.open(t, "sam", "phone")
+	first, _ := y.sealedCode(t, device, code)
+	if status, body := y.postSealed(t, first); status != http.StatusOK {
+		t.Fatalf("the sealed code = %d %s", status, body)
+	}
+	if status, body := y.postSealed(t, first); status != http.StatusUnauthorized || strings.Contains(body, "yardr-dev-") {
+		t.Errorf("the sealed transcript again = %d %s, want 401 and no token", status, body)
+	}
+	// Against a fresh pairing the same first message opens — it is a
+	// well-made handshake — and its spent code counts as a wrong one.
+	y.open(t, "jo", "phone")
+	if status, body := y.postSealed(t, first); status != http.StatusForbidden || body != `{"refused":"wrong_code"}` {
+		t.Errorf("the sealed transcript against a new pairing = %d %s, want 403 wrong_code", status, body)
+	}
+	if devices, err := y.st.Devices(ctx, ""); err != nil || len(devices) != 1 {
+		t.Fatalf("devices after the replays = %+v, %v, want still the one", devices, err)
+	}
+}
+
+// A sealed code is held as a plain one is: a wrong code inside a
+// handshake is counted and the fifth ends the pairing. What never
+// opens — bytes that are no handshake, a handshake to another yard's
+// key, base64 of neither — is 400 and no try, so it cannot end a
+// pairing it never read a code from.
+func TestDevicePairSealedWrongCodeAndGarbage(t *testing.T) {
+	y := newPairYard(t)
+	device, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := y.open(t, "jo", "phone")
+	otherYard, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, _, err := yardkey.StartPairingHandshake(device, otherYard.Public, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for what, first := range map[string][]byte{"no handshake": []byte("not a handshake"), "another yard's key": foreign} {
+		if status, body := y.postSealed(t, first); status != http.StatusBadRequest {
+			t.Errorf("a sealed body that is %s = %d %s, want 400", what, status, body)
+		}
+	}
+	if status, body := y.post(t, PairPath, "", `{"sealed":"!!!"}`); status != http.StatusBadRequest {
+		t.Errorf("a sealed body that is no base64 = %d %s, want 400", status, body)
+	}
+	for try := 1; try < store.MaxTries; try++ {
+		first, _ := y.sealedCode(t, device, wrong(code))
+		if status, body := y.postSealed(t, first); status != http.StatusForbidden || body != `{"refused":"wrong_code"}` {
+			t.Fatalf("sealed wrong code %d = %d %s, want 403 wrong_code", try, status, body)
+		}
+	}
+	// The garbage above was no try: the right code still redeems, as
+	// the fifth refusal would have ended the pairing.
+	first, opening := y.sealedCode(t, device, code)
+	status, body := y.postSealed(t, first)
+	if status != http.StatusOK {
+		t.Fatalf("the sealed right code after garbage and %d wrong ones = %d %s", store.MaxTries-1, status, body)
+	}
+	if got := openSealed(t, opening, body); got.User != "jo" || got.Device != "phone" {
+		t.Fatalf("the sealed right code is answered %+v", got)
+	}
+
+	// And the fifth wrong sealed code ends a pairing as a plain one.
+	code = y.open(t, "jo", "laptop")
+	for try := 1; try <= store.MaxTries; try++ {
+		first, _ := y.sealedCode(t, device, wrong(code))
+		y.postSealed(t, first)
+	}
+	first, _ = y.sealedCode(t, device, code)
+	if status, body := y.postSealed(t, first); status != http.StatusUnauthorized || strings.Contains(body, "yardr-dev-") {
+		t.Errorf("the sealed right code after %d wrong ones = %d %s, want 401", store.MaxTries, status, body)
+	}
+}
+
+// A sealed redemption that names who presents it is the pairing's
+// user's alone, as a plain one is: another presenter is refused as a
+// wrong code, and the code is still good for its user, whose device
+// is then recorded with its key pinned.
+func TestDevicePairSealedPresenter(t *testing.T) {
+	y := newPairYard(t)
+	ctx := context.Background()
+	if err := y.st.SetSetting(ctx, store.WebJWTUsersSetting, "jo@example.net=jo, sam@example.net=sam", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	device, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := y.open(t, "sam", "phone")
+	first, opening := y.sealedCode(t, device, code)
+	if status, body := y.postSealed(t, first, "jo@example.net"); status != http.StatusForbidden || body != `{"refused":"wrong_code"}` {
+		t.Fatalf("sam's sealed code presented by jo = %d %s, want 403 wrong_code", status, body)
+	}
+	first, opening = y.sealedCode(t, device, code)
+	status, body := y.postSealed(t, first, "sam@example.net")
+	if status != http.StatusOK {
+		t.Fatalf("sam's sealed code presented by sam = %d %s", status, body)
+	}
+	if got := openSealed(t, opening, body); got.User != "sam" || got.Device != "phone" {
+		t.Fatalf("sam's sealed code is answered %+v", got)
+	}
+	devices, err := y.st.Devices(ctx, "")
+	if err != nil || len(devices) != 1 || devices[0].ChannelKey != yardkey.ChannelPublic(device) {
+		t.Fatalf("devices = %+v, %v, want sam's phone with its key pinned", devices, err)
 	}
 }
