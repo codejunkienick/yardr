@@ -52,9 +52,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      # The BDP commit conformance/bdp/README.md records as last verified.
-      # Moving it is a deliberate change, made together with the README.
-      BDP_REF: 182f1fcf8a01d896976bff3c9e3fb87c596c6ca6
+      # The BDP commit conformance/bdp/README.md records as last verified:
+      # caf5ca7, the Read-profile era (BDP main has no Read profile since;
+      # whether yardr follows its current Core is yardr-fkgp). Moving it is
+      # a deliberate change, made together with the README.
+      BDP_REF: caf5ca75a4e9b9c7865e61e97f849ab736c21e64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -31,7 +31,7 @@ How it works:
    under test; only run-time values (link ids and revisions, demo-a's uuid
    and timestamps) are read from it, each checked for its shape. The type
    inventory is bd's plus the Types a fresh yard has for links to outside
-   issues (`relates`, `tracks`, `tracks-github`). They are pinned in the
+   issues (`relates`, `tracks`). They are pinned in the
    script too, not read from the server, so a Type that appears or goes
    fails `read.types.inventory`: a source the yard declares adds its
    `tracks-<source>`, and the script's list changes with it.
@@ -65,7 +65,7 @@ Of the catalog's 49 rows at caf5ca7, 31 run. The rest, by what keeps them out:
   endpoints are the issues of [links](../../docs/links.md), tested in
   internal/bdp).
 
-Last run (BDP main caf5ca7, 2026-10-13): 31 of 31 runnable scenarios pass.
+Last run (BDP caf5ca7, 2026-11-07, yardr 332543b0): 31 of 31 runnable scenarios pass.
 BDP's own `bdp bd ready --json` client, pointed at `yardr bdp serve`, returns
 J, D, A: the same ready set bd itself does.
 
