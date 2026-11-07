@@ -626,11 +626,11 @@ func TestDevicePairSealedPresenter(t *testing.T) {
 		t.Fatal(err)
 	}
 	code := y.open(t, "sam", "phone")
-	first, opening := y.sealedCode(t, device, code)
+	first, _ := y.sealedCode(t, device, code)
 	if status, body := y.postSealed(t, first, "jo@example.net"); status != http.StatusForbidden || body != `{"refused":"wrong_code"}` {
 		t.Fatalf("sam's sealed code presented by jo = %d %s, want 403 wrong_code", status, body)
 	}
-	first, opening = y.sealedCode(t, device, code)
+	first, opening := y.sealedCode(t, device, code)
 	status, body := y.postSealed(t, first, "sam@example.net")
 	if status != http.StatusOK {
 		t.Fatalf("sam's sealed code presented by sam = %d %s", status, body)
