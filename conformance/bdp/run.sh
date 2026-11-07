@@ -18,7 +18,11 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 work=$(mktemp -d)   # short path: the yardr server's unix socket lives here
 scope=https://scope.example/acme/
-port=${BDP_PORT:-18899}
+# A free loopback port for each run, so that a run beside this one, or any
+# other process on a fixed port, cannot make the server fail before the
+# scenarios start. BDP_PORT still names one. The port is free when it is
+# picked and could be taken before serve binds it: a local tool accepts that.
+port=${BDP_PORT:-$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')}
 
 export YARDR_HOME=$work/home
 # The seed's first command that needs the store starts the server, and a loaded

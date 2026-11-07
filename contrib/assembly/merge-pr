@@ -109,7 +109,14 @@ rebase | squash) ;;
 *) hold "YARDR_LAND is $LAND in this group's cmd, and a pull request is merged by rebase or by squash; not merging. Correct the cmd, then unhold." ;;
 esac
 
-bead=$("$Y" bead show "$BEAD" --json) || hold "reading $BEAD failed"
+# With --json yardr reports an error as {"error": ...} on stdout. Capture
+# stderr for the hold note, then replay it so warnings stay in the group's log.
+bead=$("$Y" bead show "$BEAD" --json 2>"$errf") || {
+  reason=$({ cat "$errf"; printf '%s' "$bead"; } | head -c 500)
+  cat "$errf" >&2
+  hold "reading $BEAD failed: $reason"
+}
+cat "$errf" >&2
 
 # merge-ok is the whole permission: a route sent the bead here, but a bead
 # without the label (moved here by hand, a route gone wrong) is not merged.

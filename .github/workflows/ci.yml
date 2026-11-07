@@ -12,7 +12,13 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A pull request's run is cancelled when a newer push supersedes it. A run
+  # on main is not: it is the backstop for what a landing leaves out
+  # (docs/design/2026-10-14-yardr-022s-landing-tests.md, "The backstop"), and
+  # a landing often follows the one before within the time a run takes, so
+  # cancelling it at each push would leave none to finish. The next push waits
+  # for it instead, and GitHub keeps only the newest of the runs that wait.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # The test run is three jobs, each with a limit of its own: the depot's

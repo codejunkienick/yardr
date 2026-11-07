@@ -228,9 +228,11 @@ gives. Each of the pack's `says` lines names the type of its bead (`issue` or
 closed unmerged is `dropped` for a `pr` bead, and asks a person about a train.
 
 Groups are matched by name, so imported into a depot the starter set up,
-the pack finds `builders`, `reviewers` and `assembly` there, points them at
-its copies of the roles and the script, which are the same text, and sets
-its own limits (3 builders, 2 reviewers).
+the pack finds `builders`, `reviewers` and `assembly` there, installs its
+copies of the roles and the script, which are the same text, and sets its
+own limits (3 builders, 2 reviewers). The groups keep their prompt (the
+assembly its cmd), which still names the starter's copy, and `pack check`
+says so under `kept`.
 
 ## The pr-reviewers group binds read-only
 

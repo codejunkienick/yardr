@@ -354,21 +354,24 @@ func TestMergePRMerges(t *testing.T) {
 		note   string
 		source bool   // the mint is the github source's own, not the group's cmd
 		land   string // YARDR_LAND in the group's cmd, none when empty
+		warn   bool   // bead show writes a warning to stderr before its answer
 	}{
 		{"a bot's bump of its own repository", mergeOpts{head: headB, yes: headA}, false, nil, "merged",
-			"--rebase --delete-branch --match-head-commit " + headB, "merged %s at " + headB + " (rebase)", false, ""},
+			"--rebase --delete-branch --match-head-commit " + headB, "merged %s at " + headB + " (rebase)", false, "", false},
 		{"a human's fork", mergeOpts{human: true, headOwner: "mallory", yes: headA}, true, nil, "merged",
-			"--merge --match-head-commit " + headA, "merged %s at " + headA + " (merge commit)", false, ""},
+			"--merge --match-head-commit " + headA, "merged %s at " + headA + " (merge commit)", false, "", false},
 		{"a person's branch of the repository", mergeOpts{human: true, yes: headA}, true, nil, "merged",
-			"--rebase --delete-branch --match-head-commit " + headA, "merged %s at " + headA + " (rebase)", false, ""},
+			"--rebase --delete-branch --match-head-commit " + headA, "merged %s at " + headA + " (rebase)", false, "", false},
 		{"a bot's fork", mergeOpts{headOwner: "mallory", yes: headA}, true, nil, "merged",
-			"--merge --match-head-commit " + headA, "merged %s at " + headA + " (merge commit)", false, ""},
-		{"a pull request merged already", mergeOpts{}, false, map[string]string{"state": "MERGED"}, "merged", "", "%s is merged already", false, ""},
-		{"a pull request closed unmerged", mergeOpts{}, false, map[string]string{"state": "CLOSED"}, "closed", "", "%s is closed, unmerged", false, ""},
+			"--merge --match-head-commit " + headA, "merged %s at " + headA + " (merge commit)", false, "", false},
+		{"a pull request merged already", mergeOpts{}, false, map[string]string{"state": "MERGED"}, "merged", "", "%s is merged already", false, "", false},
+		{"a pull request closed unmerged", mergeOpts{}, false, map[string]string{"state": "CLOSED"}, "closed", "", "%s is closed, unmerged", false, "", false},
 		{"a bot's bump, squashed", mergeOpts{head: headB}, false, map[string]string{"title": "chore(deps): bump x (r-m)", "body": "Bump x.  Yardr-Bead: r-m"}, "merged",
-			"--squash --delete-branch --match-head-commit " + headB + " --subject chore(deps): bump x (r-m) --body Bump x.  Yardr-Bead: r-m", "merged %s at " + headB + " (squash)", false, "squash"},
+			"--squash --delete-branch --match-head-commit " + headB + " --subject chore(deps): bump x (r-m) --body Bump x.  Yardr-Bead: r-m", "merged %s at " + headB + " (squash)", false, "squash", false},
 		{"a mint that is the github source's own", mergeOpts{}, false, nil, "merged",
-			"--rebase --delete-branch --match-head-commit " + headA, "merged %s at " + headA + " (rebase)", true, ""},
+			"--rebase --delete-branch --match-head-commit " + headA, "merged %s at " + headA + " (rebase)", true, "", false},
+		{"a bead read with a warning", mergeOpts{}, false, nil, "merged",
+			"--rebase --delete-branch --match-head-commit " + headA, "merged %s at " + headA + " (rebase)", false, "", true},
 	} {
 		t.Run(c.what, func(t *testing.T) {
 			y, gh := mergeYard(t)
@@ -390,8 +393,14 @@ func TestMergePRMerges(t *testing.T) {
 				y.yardr("source", "set", "github", "mint_command="+filepath.Join(gh, "bin", "github-mint")+" --from-source")
 				y.opts = ""
 			}
+			if c.warn {
+				y.bin = warningBead(t)
+			}
 
 			y.mergePR(gh, id, c.o, c.files)
+			if c.warn && !strings.Contains(y.log, "yardr: warning: a readable bead") {
+				t.Errorf("%s: successful bead read warning is missing from the group log:\n%s", c.what, y.log)
+			}
 
 			var merges []string
 			if c.flags != "" {
@@ -537,13 +546,42 @@ func TestMergePRHoldsUnlessTheYardsCIPassed(t *testing.T) {
 	})
 }
 
+// unreadableBead is a yardr that is the real one for everything but a bead
+// show, which it says a line of its own on stderr for and then answers as the
+// real one does for a bead the yard never made: exit 3, and on stdout, which is
+// where --json puts an error, {"error":"bead r-gone: not found"}. The script's
+// own bead cannot be the one that is not there: the harness reads it before it
+// starts the script, and the hold notes on it.
+func unreadableBead(t *testing.T) string {
+	t.Helper()
+	return writeScript(t, t.TempDir(), "yardr", `#!/bin/sh
+if [ "$1 $2" = "bead show" ]; then
+  echo "yardr: a line of the stand-in's own on stderr" >&2
+  shift 3
+  exec `+shellQuote(yardrBin)+` bead show r-gone "$@"
+fi
+exec `+shellQuote(yardrBin)+` "$@"
+`)
+}
+
+// warningBead is a yardr that writes a warning before a successful bead read.
+func warningBead(t *testing.T) string {
+	t.Helper()
+	return writeScript(t, t.TempDir(), "yardr", `#!/bin/sh
+if [ "$1 $2" = "bead show" ]; then
+  echo "yardr: warning: a readable bead" >&2
+fi
+exec `+shellQuote(yardrBin)+` "$@"
+`)
+}
+
 // What GitHub refuses holds the bead with its words, and a refusal of the App
 // itself names the permissions it lacks. A head that moves between the look
 // and the merge is refused by --match-head-commit and held as moved, not merged
 // and not sent anywhere. Without a token nothing is asked of GitHub: the App's
 // id and key file missing from the group's environment, a mint that fails or
 // none to mint with hold the bead with the reason, which is the mint's own
-// words and never a token.
+// words and never a token. A bead it cannot read is held with what yardr said.
 func TestMergePRHoldsWhatGitHubRefuses(t *testing.T) {
 	t.Parallel() // as its subtests are: see TestMain
 	for _, c := range []struct {
@@ -564,6 +602,9 @@ func TestMergePRHoldsWhatGitHubRefuses(t *testing.T) {
 			wants: []string{"gave a head for " + prURL + " that is no commit sha"}},
 		{what: "a pull request it cannot read", files: map[string]string{"view-fail": "HTTP 404: Not Found"},
 			wants: []string{"reading pull request " + prURL + " failed: HTTP 404: Not Found"}},
+		{what: "a bead it cannot read", tokens: true,
+			wants:  []string{"reading r-p failed: ", "a line of the stand-in's own on stderr", "bead r-gone: not found"},
+			change: func(y *yard) { y.bin = unreadableBead(y.t) }},
 		{what: "a mint that fails", files: map[string]string{"mint-fail": "PRIVATE_KEY_VALUE_SHOULD_NOT_ESCAPE"}, tokens: true,
 			wants: []string{"minting a token for o/r failed", "the mint's output is not copied to the bead"}},
 		{what: "no env_file", tokens: true,

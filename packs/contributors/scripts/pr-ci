@@ -230,7 +230,14 @@ cd "$work" || exit 1
 command -v gh >/dev/null 2>&1 || hold "gh is not on PATH; not running the tests."
 command -v jq >/dev/null 2>&1 || hold "jq is not on PATH; not running the tests."
 
-bead=$("$Y" bead show "$BEAD" --json) || hold "reading $BEAD failed"
+# With --json yardr reports an error as {"error": ...} on stdout. Capture
+# stderr for the hold note, then replay it so warnings stay in the group's log.
+bead=$("$Y" bead show "$BEAD" --json 2>"$errf") || {
+  reason=$({ cat "$errf"; printf '%s' "$bead"; } | head -c 500)
+  cat "$errf" >&2
+  hold "reading $BEAD failed: $reason"
+}
+cat "$errf" >&2
 
 # The code of a pull request is run only after a reviewer has read it, which
 # is what getting to ciwait means. A route that sends another stage's bead here

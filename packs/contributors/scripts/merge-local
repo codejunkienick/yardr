@@ -517,7 +517,8 @@ squash_message() {
   ERR=
   sq_nl='
 '
-  sq_json=$("$Y" bead show "$sq_bead" --json) || { ERR="reading $sq_bead failed"; return 1; }
+  # With --json yardr reports an error as {"error": ...} on its stdout.
+  sq_json=$("$Y" bead show "$sq_bead" --json) || { ERR="reading $sq_bead failed: $(printf '%s' "$sq_json" | head -c 500)"; return 1; }
   sq_fields=$(printf '%s\n' "$sq_json" | awk "$SQ_UNJSON"'
     match($0, /^  "[a-z_]+": "/) {
       key = substr($0, 4, RLENGTH - 7)

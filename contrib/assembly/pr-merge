@@ -119,7 +119,14 @@ remote=${BASE%%/*}
 [ -z "$(git -C "$REPO" status --porcelain)" ] ||
   hold "$REPO has uncommitted changes; not merging. Commit or clean them, then unhold."
 
-train=$("$Y" bead show "$TRAIN" --json) || hold "reading $TRAIN failed"
+# With --json yardr reports an error as {"error": ...} on stdout. Capture
+# stderr for the hold note, then replay it so warnings stay in the group's log.
+train=$("$Y" bead show "$TRAIN" --json 2>"$errf") || {
+  reason=$({ cat "$errf"; printf '%s' "$train"; } | head -c 500)
+  cat "$errf" >&2
+  hold "reading $TRAIN failed: $reason"
+}
+cat "$errf" >&2
 # The train's pull request is the one integrate-train bound it to, by number
 # and head repository, never one looked up by the branch's name: a fork's
 # pull request can carry the same name. What GitHub says of it must match
@@ -196,7 +203,8 @@ squash_message() {
   ERR=
   sq_nl='
 '
-  sq_json=$("$Y" bead show "$sq_bead" --json) || { ERR="reading $sq_bead failed"; return 1; }
+  # With --json yardr reports an error as {"error": ...} on its stdout.
+  sq_json=$("$Y" bead show "$sq_bead" --json) || { ERR="reading $sq_bead failed: $(printf '%s' "$sq_json" | head -c 500)"; return 1; }
   sq_fields=$(printf '%s\n' "$sq_json" | awk "$SQ_UNJSON"'
     match($0, /^  "[a-z_]+": "/) {
       key = substr($0, 4, RLENGTH - 7)

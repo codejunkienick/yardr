@@ -328,6 +328,23 @@ func TestMergeLocalLandMode(t *testing.T) {
 		t.Fatal("main or the branch moved under a squash that failed")
 	}
 
+	// So does a bead that yardr cannot show, with what yardr said of it.
+	y.setHold("r-1", false)
+	y.opts = "YARDR_LAND=squash"
+	y.bin = unreadableBead(t)
+	y.assembly()
+	y.bin = ""
+
+	if b := y.bead(); !b.Hold || b.Stage != "approved" {
+		t.Fatalf("bead %s hold=%v after a squash of a bead that could not be read, want held in approved", b.Stage, b.Hold)
+	}
+	if notes := y.notes(); !strings.Contains(notes, "reading r-1 failed: ") || !strings.Contains(notes, "bead r-gone: not found") {
+		t.Fatalf("no note with what yardr said of the bead it could not read:\n%s", notes)
+	}
+	if y.git(y.repo, "rev-parse", "main") != orig || y.git(y.wt, "rev-parse", "HEAD") != two {
+		t.Fatal("main or the branch moved under a squash that failed")
+	}
+
 	y.setHold("r-1", false)
 	y.opts = "YARDR_LAND=rebase"
 	y.assembly()

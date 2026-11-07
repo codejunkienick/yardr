@@ -91,7 +91,14 @@ prbase=$BASE
 remote=${BASE%%/*}
 [ "$remote" != "$BASE" ] && git -C "$REPO" remote | grep -qx "$remote" && prbase=${BASE#*/}
 
-train=$("$Y" prime --bead "$TRAIN" --json) || hold "reading $TRAIN failed"
+# With --json yardr reports an error as {"error": ...} on stdout. Capture
+# stderr for the hold note, then replay it so warnings stay in the group's log.
+train=$("$Y" prime --bead "$TRAIN" --json 2>"$errf") || {
+  reason=$({ cat "$errf"; printf '%s' "$train"; } | head -c 500)
+  cat "$errf" >&2
+  hold "reading $TRAIN failed: $reason"
+}
+cat "$errf" >&2
 # The train's pull request is the one integrate-train bound it to, by number
 # and head repository, never one looked up by the branch's name: a fork's
 # pull request can carry the same name. What GitHub says of it must match
