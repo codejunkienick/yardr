@@ -1,10 +1,14 @@
 # BDP conformance for yardr
 
-`run.sh` runs [BDP](https://github.com/gastownhall/bdp)'s own Read-profile
-conformance suite, black-box over HTTP, against `yardr bdp serve`:
+`run.sh` runs [BDP](https://github.com/gastownhall/bdp)'s historical Read-profile
+conformance suite, black-box over HTTP, against `yardr bdp serve`. BDP no
+longer has a standalone Read profile; reads are part of Core. This historical
+suite stops before testing it (the last paragraph says why), so check out
+caf5ca7, the last commit verified:
 
 ```sh
 git clone https://github.com/gastownhall/bdp ~/src/bdp
+git -C ~/src/bdp checkout caf5ca7
 (cd ~/src/bdp && pnpm install --frozen-lockfile && pnpm build)
 BDP_REPO=~/src/bdp conformance/bdp/run.sh
 ```
@@ -36,7 +40,7 @@ How it works:
 Journals and memories are not served, nor links touching them: they are not
 work, and a bd client would count an open one as ready.
 
-Of the catalog's 49 rows, 31 run. The rest, by what keeps them out:
+Of the catalog's 49 rows at caf5ca7, 31 run. The rest, by what keeps them out:
 
 - Not applicable, 8: the row's applicability names a capability the fixture
   does not declare. Aliases (`read.alias.resolution`), disclosure
@@ -64,3 +68,15 @@ Of the catalog's 49 rows, 31 run. The rest, by what keeps them out:
 Last run (BDP main caf5ca7, 2026-10-13): 31 of 31 runnable scenarios pass.
 BDP's own `bdp bd ready --json` client, pointed at `yardr bdp serve`, returns
 J, D, A: the same ready set bd itself does.
+
+BDP's main 029d176, 7 Nov 2026, has no standalone Read profile: reads are part
+of Core. BDP says its historical conformance seals "do not qualify the new
+composition". The historical suite stops during fixture seeding against it.
+Since BDP's commit 8f30b0e of 4 Nov 2026 the fixtures name beads without the
+`beads/` prefix, so `seed.py` stops at the first bead with an `IndexError` on
+`b["localId"].split("/", 1)[1]`, before the BDP scenarios run. Nothing here has
+been tested against BDP's current Core, whose inventories are `bdp/beads` and
+`bdp/links`. yardr serves neither. BDP's current 19-case Core/ordinary Write
+provider kit requires a trusted adapter and is a bounded interoperability
+slice, not a replacement full-conformance result.
+[docs/bdp.md](../../docs/bdp.md#conformance) says what yardr claims.

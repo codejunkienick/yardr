@@ -50,7 +50,9 @@ it lists every exported name with its comment, faster than grepping.
 
 - `agents`: what yardr knows of each harness kind (models, login recipes)
   and the fetch data `yardr doctor` reports; not herdr's agent state.
-- `bdp`: serves the yard over the Bead Protocol Read profile (HTTP).
+- `bdp`: serves the yard over HTTP as the Bead Protocol's October 2026 Read
+  profile. BDP has since replaced it; `docs/bdp.md`, Conformance, says what
+  yardr claims.
 - `chat`: the `yardr chat` terminal UI (bubbletea); not the socket API it
   reads through.
 - `cli`: cobra commands, one file per area, registered in `root.go`; no

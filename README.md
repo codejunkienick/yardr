@@ -116,9 +116,9 @@ Every command takes `--json`, and `yardr <command> --help` says the rest.
 
 - **Required.** yardr needs [herdr](https://herdr.dev): it starts every
   agent through it, and reads its agents' state and panes from it.
-- **Implemented.** [BDP](https://github.com/gastownhall/bdp), the Bead
-  Protocol: `yardr bdp serve` serves the yard over its Read profile
-  ([docs/bdp.md](docs/bdp.md)).
+- **Implemented, in an older draft.** [BDP](https://github.com/gastownhall/bdp),
+  the Bead Protocol: `yardr bdp serve` serves its October 2026 Read profile;
+  yardr claims no conformance to current profiles ([conformance](docs/bdp.md#conformance)).
 - **Inspiration.** [Beads](https://github.com/steveyegge/beads), where the
   bead comes from, and [Gas Town](https://github.com/steveyegge/gastown), by
   Steve Yegge, and [Gas City](https://github.com/gastownhall/gascity): the

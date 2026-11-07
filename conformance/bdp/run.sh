@@ -5,7 +5,10 @@
 #
 # BDP_REPO is a gastownhall/bdp clone after
 # `pnpm install --frozen-lockfile && pnpm build`. Last verified against bdp
-# caf5ca7: 31/31 Read scenarios pass (BDP_REPORT keeps the per-scenario states).
+# caf5ca7 (13 Oct 2026): 31/31 Read scenarios pass (BDP_REPORT keeps the
+# per-scenario states). Against BDP main 029d176 (7 Nov 2026), the historical
+# harness stops at seed.py: since 8f30b0e its fixtures name beads without the
+# `beads/` prefix that seed.py strips. docs/bdp.md says what yardr claims.
 # Needs go, python3 and pnpm. Everything runs in a temp dir on loopback;
 # your ~/.yardr is never touched.
 set -euo pipefail

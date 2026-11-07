@@ -49,7 +49,7 @@ Pages mark features that are not built yet as **planned**.
 internal/store      the bbolt store: records, indexes, revisions, event log and push hub
 internal/dispatch   routing, claims, liveness, teardown (the only control loop)
 internal/runner     manual, exec, herdr, peer
-internal/bdp        the BDP Read server (protocol rules, selector, paging)
+internal/bdp        the server of BDP's October 2026 Read profile (protocol rules, selector, paging)
 internal/web        the read-only web view (pages as HTML or JSON, embedded assets)
 internal/rpc        the store API over the server's unix socket; go generate ./internal/rpc writes the client's wrappers from store.API
 internal/server     the store-owning server process; started on first use
@@ -72,7 +72,7 @@ main.go             the yardr binary
 packs/starter       the starter pack: the default roles, flow and stage files, embedded in the binary
 packs/dir           the pack for a depot that is a plain directory
 docs/               the documentation (this page is its index)
-conformance/bdp     runs BDP's own Read conformance suite against yardr bdp serve
+conformance/bdp     runs BDP's Read conformance suite at caf5ca7 against yardr bdp serve
 contrib/assembly    merge-local, a reference assembly script for an exec group
 contrib/deploy      deploy-dokku, a reference deploy script: pushes a depot's base to a Dokku host after a landing, or a bead's branch to a preview app of its own before one
 contrib/peer        return-branch, the script that pushes the branch of a bead worked for a linked yard

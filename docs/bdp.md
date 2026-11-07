@@ -1,8 +1,11 @@
 # BDP (Bead Protocol)
 
-`yardr bdp serve` serves the yard over the [BDP](https://github.com/gastownhall/bdp)
-Read profile, so any BDP client reads yardr's beads, dependency links and
-links to outside issues over HTTP:
+`yardr bdp serve` serves the yard's beads, dependency links and links to
+outside issues over HTTP, as the Read profile of
+[BDP](https://github.com/gastownhall/bdp) stood in October 2026. BDP now
+specifies reads as part of Core, alongside separate Write, Types and Events
+profiles, with Transfer proposed. yardr claims no conformance to those current
+profiles or proposed Transfer ([Conformance](#conformance)):
 
 ```sh
 yardr bdp serve --scope https://beads.example/team/
@@ -100,10 +103,6 @@ refuses a `bdp_addr` off loopback the same way, and starts nothing for it.
   changed since that revision was read. Crew members carry their own `revision`
   (`yardr crew show --json`) for `crew add`, `start`, `stop`,
   `restart` and `rm`.
-- BDP's own conformance suite passes against it (31/31 runnable Read
-  scenarios on its main caf5ca7, 13 Oct 2026), and BDP's `bdp bd ready`
-  client computes the same ready set from yardr as `yardr ready`. See
-  [conformance/bdp](../conformance/bdp).
 
 ## Links to outside issues
 
@@ -131,3 +130,31 @@ a Link of its own, `<scope>links/<link-id>`:
   the store and **not** advertised: BDP v0 never counts or constrains an
   out-of-Scope endpoint.
 - A journal's or memory's links are not served, as the bead is not.
+
+## Conformance
+
+yardr's one result against BDP is for a profile BDP no longer has. On BDP's
+main caf5ca7, 13 Oct 2026, BDP's own conformance suite passed 31 of 31
+runnable Read scenarios against `yardr bdp serve`, and BDP's `bdp bd ready`
+client computed the same ready set from yardr as `yardr ready`.
+[conformance/bdp](../conformance/bdp) has the run.
+
+That result does not carry over. BDP's main 029d176, 7 Nov 2026, has no
+standalone Read profile: reads are part of Core. BDP's current profiles are
+Core, Write, Types and Events, with Transfer proposed, and BDP says its
+historical conformance seals "do not qualify the new composition". yardr claims
+no conformance to Core, Write, Types or Events, and none to proposed Transfer.
+It does not serve the inventories Core fixes, `bdp/beads` and `bdp/links`. It
+answers `GET` and `HEAD` only, so it does not support BDP Write, and it serves
+no BDP Events.
+
+The historical Read suite here stops during fixture seeding against that BDP.
+Since BDP's commit 8f30b0e of 4 Nov 2026, its fixtures name beads and links
+without the `beads/` and `links/` prefixes, and `conformance/bdp/seed.py` stops
+at the first bead. A run against 029d176 on 7 Nov confirmed this; no BDP
+scenarios ran and no `BDP_REPORT` was written.
+
+BDP's current Core/ordinary Write provider kit has 19 cases and requires a
+trusted provider adapter. BDP describes it as a bounded interoperability slice,
+not a full conformance suite, so it does not replace the historical Read
+result. yardr claims no conformance to BDP's current composition.
