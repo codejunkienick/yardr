@@ -173,6 +173,9 @@ func (s *frameScan) endTag() {
 	if !whole {
 		return
 	}
+	if name == "body" || name == "html" {
+		s.document = append(s.document, "a </"+name+"> tag")
+	}
 	if len(s.foreign) > 0 {
 		if s.htmlChild() {
 			s.closeElement(name)

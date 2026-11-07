@@ -13,9 +13,10 @@ import (
 
 func (a *app) newBeadNoteCmd() *cobra.Command {
 	var ackSeq uint64
-	var noteFiles []string
+	var noteFiles, pages []string
+	var title string
 	note := &cobra.Command{
-		Use:   "note <id> <text> [--file <path>]... | note <id> --ack <seq>",
+		Use:   "note <id> <text> [--file <path>]... [--page <fragment> --title <title>] | note <id> --ack <seq>",
 		Short: "Attach a note (evidence) to a bead",
 		Long: `Attaches a note (evidence) to a bead: what was done, seen or decided, in
 words. The bead's live session is told of it, unless the writer is that
@@ -44,20 +45,37 @@ from its bytes: an image is a PNG or a JPEG, a page is HTML, anything else
 a file, which carries the path's base name; one over the yard's limit
 (yardr settings get ` + store.BlobMaxSetting + `, 8 MiB unless set) is refused.
 
+--page <fragment> --title <title> attaches a page made in the frame that
+applies to this bead's depot: the depot's own, else the yard's, else yardr's
+default. <fragment> is a file of the page's body content, such as headings,
+prose, tiles, a table or an inline SVG chart, and not a whole HTML document;
+the title goes in the page's title block and in its <title>. The page opens
+and reads as --file's pages do. It is given once for a note, and the
+fragment, the title and the frame it was made in are kept apart from the
+page. yardr page show prints the frame, and what it offers a fragment, before
+you write one. --title is required with --page and refused without it.
+
 --ack <seq> writes nothing: it records that this session read note <seq>,
-and takes no text and no --file.`,
+and takes no text, no --file and no --page.`,
 		Args: func(c *cobra.Command, args []string) error {
 			if c.Flags().Changed("ack") {
-				if c.Flags().Changed("file") {
-					return fmt.Errorf("note --ack records that this session read the note: it takes no --file")
+				if c.Flags().Changed("file") || c.Flags().Changed("page") || c.Flags().Changed("title") {
+					return fmt.Errorf("note --ack records that this session read the note: it takes no --file, --page or --title")
 				}
 				if len(args) != 1 {
 					return fmt.Errorf("note --ack records that this session read the note: it takes the bead and no text")
 				}
 				return nil
 			}
-			if len(noteFiles) > store.MaxNoteFiles {
-				return fmt.Errorf("a note carries at most %d files, not %d", store.MaxNoteFiles, len(noteFiles))
+			switch {
+			case len(pages) > 1:
+				return fmt.Errorf("a note dresses one fragment, not %d: two pages are two notes", len(pages))
+			case len(pages) == 1 && !c.Flags().Changed("title"):
+				return fmt.Errorf("--page needs --title: it stands in the page's title block and in its <title>")
+			case len(pages) == 0 && c.Flags().Changed("title"):
+				return fmt.Errorf("--title is the title of the page --page dresses: give --page with it")
+			case len(noteFiles)+len(pages) > store.MaxNoteFiles:
+				return fmt.Errorf("a note carries at most %d files, not %d", store.MaxNoteFiles, len(noteFiles)+len(pages))
 			}
 			return cobra.ExactArgs(2)(c, args)
 		},
@@ -71,12 +89,16 @@ and takes no text and no --file.`,
 			// the asker.
 			id := args[0]
 			_, _, foreign := strings.Cut(id, "@")
+			depot := ""
 			if !foreign {
 				b, err := st.GetBead(c.Context(), id)
 				if err != nil {
 					return err
 				}
 				id = b.ID
+				if b.Depot != nil {
+					depot = *b.Depot
+				}
 			}
 			if c.Flags().Changed("ack") {
 				if ackSeq == 0 {
@@ -98,7 +120,7 @@ and takes no text and no --file.`,
 				}
 				text = strings.TrimRight(string(b), "\n")
 			}
-			if foreign && len(noteFiles) > 0 {
+			if foreign && (len(noteFiles) > 0 || len(pages) > 0) {
 				// A note on another yard's question is always refused;
 				// say so before any file is put.
 				_, err := st.AddNotedAs(c.Context(), id, text, a.who(), a.identity().session)
@@ -107,11 +129,33 @@ and takes no text and no --file.`,
 			if len(noteFiles) > 0 && strings.TrimSpace(text) == "" {
 				return fmt.Errorf("a note with --file needs words: say what they show")
 			}
+			if len(pages) > 0 && strings.TrimSpace(text) == "" {
+				return fmt.Errorf("a note with --page needs words: say what the page shows")
+			}
+			// What can refuse the page is settled before any blob is put, so
+			// a refusal leaves nothing in the yard. It is put before the
+			// files: the yard's size limit is likelier to refuse it, the
+			// frame counting in it, and nothing of the files is left behind.
+			var page *store.BlobRef
+			if len(pages) > 0 {
+				dressed, err := a.dressPage(c.Context(), st, depot, pages[0], title)
+				if err != nil {
+					return err
+				}
+				if page, err = dressed.put(c.Context(), st); err != nil {
+					return err
+				}
+			}
 			refs, err := putFiles(c.Context(), st, noteFiles)
 			if err != nil {
 				return err
 			}
-			n, err := st.AddNotedAs(c.Context(), id, text, a.who(), a.identity().session, blobFiles(refs)...)
+			files := blobFiles(refs)
+			if page != nil {
+				refs = append(refs, *page)
+				files = append(files, store.BlobFile{Hash: page.Hash, Framed: page.Framed})
+			}
+			n, err := st.AddNotedAs(c.Context(), id, text, a.who(), a.identity().session, files...)
 			if err != nil {
 				return err
 			}
@@ -133,5 +177,7 @@ and takes no text and no --file.`,
 	}
 	note.Flags().Uint64Var(&ackSeq, "ack", 0, "record that this session read note <seq>, instead of writing one")
 	note.Flags().StringArrayVar(&noteFiles, "file", nil, "a file the note carries (repeatable)")
+	note.Flags().StringArrayVar(&pages, "page", nil, "a fragment of body content to dress in the frame that applies, and attach as a page (once; needs --title; see yardr page show)")
+	note.Flags().StringVar(&title, "title", "", "the title of the page --page dresses, one line of plain text")
 	return note
 }

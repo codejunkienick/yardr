@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -293,6 +294,24 @@ func TestEventFiles(t *testing.T) {
 	}
 	if got := store.EventFiles(page.Events[0]); len(got) != 1 || got[0] != *png {
 		t.Errorf("the mail event's files = %+v", got)
+	}
+	// A framed record is a note's: mail dresses no page yet, and a record is
+	// never carried to another yard, so a mail made with one carries the page
+	// and nothing of the record.
+	html, err := api.PutBlob(ctx, htmlBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frag, err := api.PutBlob(ctx, []byte("<p>the shed</p>"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := store.FramedPage{Fragment: frag.Hash, Title: "The shed", Pack: "pageframe", Frame: "frames/page.html", FrameSHA256: hashOf([]byte("a frame"))}
+	if err := api.Mail(ctx, "ada", "dressed", "clerk", store.BlobFile{Hash: html.Hash, Framed: &rec}); err != nil {
+		t.Fatal(err)
+	}
+	if box, err := api.UserInbox(ctx, "ada", 0, "ada"); err != nil || len(box.Mail) != 3 || len(box.Mail[2].Files) != 1 || box.Mail[2].Files[0] != *html {
+		t.Errorf("a mail made with a framed record = %+v, %v", box, err)
 	}
 	refs := []store.BlobRef{*png}
 	if got := store.EventFiles(store.Event{Kind: store.QuietFailed, Data: map[string]any{"files": refs}}); len(got) != 1 || got[0] != *png {
@@ -639,6 +658,62 @@ func TestAddNoteFiles(t *testing.T) {
 	if notes, _ := api.Notes(ctx, b.ID); notes[len(notes)-1].Notify != "" {
 		t.Fatalf("AddNote with live session %s names %q", sess.ID, notes[len(notes)-1].Notify)
 	}
+
+	// A framed page keeps its fragment, title and frame beside it on the
+	// note's file, as written and read back, and a note refuses a record it
+	// cannot carry: on a file that is no page, naming a fragment the yard
+	// does not hold, or one that is not a record of a new page.
+	page, err := api.PutBlob(ctx, htmlBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frag, err := api.PutBlob(ctx, []byte("<p>the shed</p>"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := store.FramedPage{Fragment: frag.Hash, Title: "The shed", Pack: "pageframe", Frame: "frames/page.html", FrameSHA256: hashOf([]byte("a frame"))}
+	before, _ := api.Notes(ctx, b.ID)
+	if _, err := api.AddNotedAs(ctx, b.ID, "the shed, dressed", "jo", "", store.BlobFile{Hash: page.Hash, Framed: &rec}); err != nil {
+		t.Fatal(err)
+	}
+	notes, _ = api.Notes(ctx, b.ID)
+	if got := notes[len(notes)-1].Files; len(got) != 1 || got[0].Hash != page.Hash || got[0].Framed == nil || !reflect.DeepEqual(*got[0].Framed, rec) {
+		t.Fatalf("the framed note's files = %+v, want the record %+v", got, rec)
+	}
+	view, err = api.Bead(ctx, b.ID)
+	if err != nil || view.Notes[len(view.Notes)-1].Files[0].Framed == nil {
+		t.Errorf("the bead whole does not carry the record: %+v, %v", view, err)
+	}
+	with := func(edit func(*store.FramedPage)) store.BlobFile {
+		r := rec
+		edit(&r)
+		return store.BlobFile{Hash: page.Hash, Framed: &r}
+	}
+	for _, c := range []struct {
+		name string
+		file store.BlobFile
+		want string
+	}{
+		{"an image", store.BlobFile{Hash: png.Hash, Framed: &rec}, "a framed page is a page"},
+		{"a fragment the yard does not hold", with(func(r *store.FramedPage) { r.Fragment = unknown }), "the yard does not hold the fragment"},
+		{"a fragment that is no hash", with(func(r *store.FramedPage) { r.Fragment = "frag" }), "a blob hash"},
+		{"a frame sum that is no SHA-256", with(func(r *store.FramedPage) { r.FrameSHA256 = "abc" }), "frame sum is a SHA-256"},
+		{"no title", with(func(r *store.FramedPage) { r.Title = " " }), "the title is empty"},
+		{"a title of two lines", with(func(r *store.FramedPage) { r.Title = "a\nb" }), "one line of plain text"},
+		{"a title over the bound", with(func(r *store.FramedPage) { r.Title = strings.Repeat("t", store.MaxPageTitle+1) }), "at most 200 bytes"},
+		{"no pack", with(func(r *store.FramedPage) { r.Pack = "" }), "a framed page's pack"},
+		{"a frame path with a control character", with(func(r *store.FramedPage) { r.Frame = "frames/\x00page.html" }), "a framed page's frame path"},
+		{"a superseded version, which only a rebuild makes", with(func(r *store.FramedPage) {
+			r.Versions = []store.PageVersion{{Hash: png.Hash, Pack: "pageframe", Frame: "frames/page.html", FrameSHA256: rec.FrameSHA256}}
+		}), "a new framed page has no superseded version"},
+	} {
+		if err := api.AddNote(ctx, b.ID, "refused", "jo", c.file); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("a framed record with %s = %v, want %q", c.name, err, c.want)
+		}
+	}
+	if after, _ := api.Notes(ctx, b.ID); len(after) != len(before)+1 {
+		t.Errorf("what was refused was written: %d notes, want %d", len(after), len(before)+1)
+	}
 }
 
 // Prune keeps a blob a note names, past the grace, and sweeps one nothing
@@ -674,6 +749,72 @@ func TestPruneBlobsKeepsNoteFiles(t *testing.T) {
 	}
 	if got := blobFiles(t, s); len(got) != 1 || got[0] != named.Hash {
 		t.Errorf("after the prune the yard holds %v, want the note's %s", got, named.Hash)
+	}
+
+	// A framed page names its fragment as well, and a record that has
+	// superseded versions names each of those: what the note keeps the sweep
+	// keeps past the grace, a fragment no letter lists as a file among it,
+	// while a blob of the same age that nothing names goes. A mail event's
+	// files are read the same way (a quiet_failed carries them as mail does).
+	framed := func(tag string) (page, frag, older *store.BlobRef, rec store.FramedPage) {
+		t.Helper()
+		put := func(text string) *store.BlobRef {
+			ref, err := api.PutBlob(ctx, []byte(text))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return ref
+		}
+		page, frag, older = put("<!DOCTYPE html><p>"+tag+"</p>"), put("<p>"+tag+" fragment</p>"), put("<!DOCTYPE html><p>"+tag+" older</p>")
+		rec = store.FramedPage{Fragment: frag.Hash, Title: tag, Pack: "pageframe", Frame: "frames/page.html", FrameSHA256: hashOf([]byte("a frame"))}
+		return page, frag, older, rec
+	}
+	nPage, nFrag, nOlder, nRec := framed("note")
+	ePage, eFrag, eOlder, eRec := framed("event")
+	stray, err := api.PutBlob(ctx, []byte("<p>no letter names this</p>"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := api.AddNotedAs(ctx, b.ID, "dressed", "jo", "", store.BlobFile{Hash: nPage.Hash, Framed: &nRec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// What a rebuild will write: the page in a newer frame, the older look kept.
+	version := func(hash string) []store.PageVersion {
+		return []store.PageVersion{{Hash: hash, Pack: "pageframe", Frame: "frames/page.html", FrameSHA256: hashOf([]byte("an older frame"))}}
+	}
+	nRec.Versions = version(nOlder.Hash)
+	standing := *nPage
+	standing.Framed = &nRec
+	if err := s.SetNoteFiles(b.ID, n.Seq, []store.BlobRef{standing}); err != nil {
+		t.Fatal(err)
+	}
+	eRec.Versions = version(eOlder.Hash)
+	onEvent := *ePage
+	onEvent.Framed = &eRec
+	if err := api.LogDispatch(ctx, "", store.QuietFailed, "yard", map[string]any{"depot": "yard", "files": []store.BlobRef{onEvent}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []*store.BlobRef{nPage, nFrag, nOlder, ePage, eFrag, eOlder, stray} {
+		if err := os.Chtimes(s.BlobPath(ref.Hash), old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if res, err := api.Prune(ctx, store.Retention{}, "jo"); err != nil || res.Blobs != 1 {
+		t.Fatalf("prune with framed pages = %+v, %v", res, err)
+	}
+	for _, kept := range []*store.BlobRef{named, nPage, nFrag, nOlder, ePage, eFrag, eOlder} {
+		if _, err := os.Stat(s.BlobPath(kept.Hash)); err != nil {
+			t.Errorf("the sweep took %s that a framed record keeps: %v", kept.Hash, err)
+		}
+	}
+	if _, err := os.Stat(s.BlobPath(stray.Hash)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the blob nothing names stands: %v", err)
+	}
+	// The fragment is kept and never served: no note lists it as a file, so
+	// no surface offers it, though it is HTML.
+	if _, err := api.NoteBlob(ctx, nFrag.Hash); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("NoteBlob answers the fragment: %v", err)
 	}
 }
 

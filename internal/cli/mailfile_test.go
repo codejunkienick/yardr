@@ -118,6 +118,10 @@ func TestFileCountLimitsBeforePut(t *testing.T) {
 		noteArgs = append(noteArgs, "--file", report)
 	}
 	refusedAs(t, st, "jo", "a note carries at most 64 files, not 65", noteArgs...)
+	// The page --page dresses is one of the files: the 64th file and a page
+	// are 65, refused before the fragment is read.
+	refusedAs(t, st, "jo", "a note carries at most 64 files, not 65",
+		append(noteArgs[:len(noteArgs)-2], "--page", filepath.Join(t.TempDir(), "unread.html"), "--title", "T")...)
 
 	got, err := filepath.Glob(filepath.Join(filepath.Dir(s.BlobPath("x")), "*"))
 	if err != nil || len(got) != 0 {

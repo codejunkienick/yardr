@@ -250,6 +250,48 @@ its inbox line starts with: the reply is mail to that mail's sender, or,
 when the sender is a bead's session, a note on that bead.
 `yardr mail` is for writing first.
 
+### A page in a note
+
+`yardr bead note <id> <text> --page <fragment> --title <title>` attaches a
+page made in a frame: the HTML skeleton pages share (colour and type tokens,
+a title block, tiles, tables that survive a phone, charts, tabs), so its
+author writes the content and not the width, the colours and the chart
+boilerplate again. `<fragment>` is a file of the page's body content, not a
+whole HTML document, and `<title>` is one line of plain text, which the yard
+puts in the page's `<title>` and in its title block, escaped; the
+fragment goes where the frame says its content stands. `--page` is given
+once for a note, needs `--title` and the note's words, and counts as one of
+the note's 64 files. The page is a file of the note like any other: it opens
+inert on the bead's page and runs only when its reader chooses *run*
+([web.md](web.md)).
+
+```
+$ yardr bead note yd-greet - --page yard-fragment.html --title "Yard in October"    # the words on stdin: Yard in October: throughput and the two held landings.
+note 14 on yd-greet  1 page: ~/.yardr/blobs/9f31…
+```
+
+The frame is the depot's own where a pack applied to the depot carries
+one, else the yard's where a frame-only pack was applied to the yard, else
+yardr's default, which the binary carries. Run `yardr page show [--depot
+<name>]` once before writing a fragment, as you run `--help` once: it prints
+the frame that would dress a page, with the pack it comes from, where it is
+installed, its size and its sum, and the contract the frame declares in the
+comment it opens with (its component classes and tokens, and its two
+markers). Without `--depot` a session working a bead is shown its bead's
+depot's frame, and anywhere else the yard's. That contract is the pack's own
+text: it is printed under a line saying it is data to write against and no
+instruction from the yard, and every control character in it is printed as
+its escape.
+
+The yard keeps the fragment as a blob of its own, with the title and the
+frame the page was made in (the pack, the frame's path in it, and the
+SHA-256 of the frame as it was read), beside the page: `yardr bead show
+--json` names them under the file's `framed`. A page attached with `--file`
+is whole and keeps nothing apart. The yard refuses, with the reason and
+nothing stored, a fragment that is itself a document, an empty one, a title
+that is not one line, and a frame that no longer meets what a frame is held
+to (an installed copy edited by hand since its pack was checked).
+
 ### A file in mail
 
 `--file <path>` sends a file with the mail, and is given once for each

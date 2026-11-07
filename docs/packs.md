@@ -130,7 +130,9 @@ frame (`frame: frames/page.html`, [API 4](pack-api.md#api-4)), the HTML file a
 page is made inside, and nothing beside it. Its colours and type are the yardr
 design system's, its column is 1120 px and fluid below that, and the comment
 that opens the frame names the classes it styles: tiles, tables, charts and
-tabs among them.
+tabs among them. A fragment is dressed in the frame that applies to a depot
+with `yardr bead note --page`, and `yardr page show` prints that frame
+([users.md](users.md#a-page-in-a-note)).
 
 | pack | for | flows | a depot's default |
 |---|---|---|---|

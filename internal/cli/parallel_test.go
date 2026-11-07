@@ -209,6 +209,7 @@ var allowSerial = map[string]string{
 	"TestPackApplyRefusesAHandEditedCopy":                   "setInteractive",
 	"TestPackByNameOfAnImport":                              "t.Chdir",
 	"TestPackNameIsNeverADirectory":                         "t.Chdir",
+	"TestPageShowTakesTheDepotOfTheSessionsBead":            "t.Chdir",
 	"TestPagesSettingsAreCheckedAsTheFlags":                 "stubWeb",
 	"TestPairForm":                                          "formYards",
 	"TestPairFormAsksAgainAfterAWrongCode":                  "pairYards,setInteractive,stubAsk",

@@ -86,12 +86,18 @@ var blobImages = []string{"image/png", "image/jpeg"}
 // and hash, type, bytes and name are the sender's word. Where a
 // conversation shows mail this yard sent to another, it is set on a file
 // that yard did not take, with its reason (peerConversation).
+//
+// Framed is set on a page a note carries that was made through a frame
+// (FramedPage): the fragment, title and frame it was made from, kept for
+// a later rebuild. It never leaves the yard that keeps it: a file of mail
+// to another yard is built without it (peerFiles, filing.mailFiles).
 type BlobRef struct {
-	Hash     string `json:"hash"`
-	Type     string `json:"type"`
-	Bytes    int64  `json:"bytes"`
-	Name     string `json:"name,omitempty"`
-	NotTaken string `json:"not_taken,omitempty"`
+	Hash     string      `json:"hash"`
+	Type     string      `json:"type"`
+	Bytes    int64       `json:"bytes"`
+	Name     string      `json:"name,omitempty"`
+	NotTaken string      `json:"not_taken,omitempty"`
+	Framed   *FramedPage `json:"framed,omitempty"`
 }
 
 // IsPage is whether the blob is a page: HTML, as the bytes say.
@@ -113,10 +119,13 @@ func (f BlobRef) Kind() string {
 // BlobFile is a file a letter carries, as Mail, MailPeer, AddNote and
 // AddNotedAs take it: the hash PutBlob answered and the name the sender
 // gives it. The name is the file's base name; empty on a paste, and on
-// an image or a page sent without one.
+// an image or a page sent without one. Framed is the record of a page made
+// through a frame, which AddNote and AddNotedAs keep on the note's file
+// (noteFiles); mail and the rest do not take it.
 type BlobFile struct {
-	Hash string `json:"hash"`
-	Name string `json:"name,omitempty"`
+	Hash   string      `json:"hash"`
+	Name   string      `json:"name,omitempty"`
+	Framed *FramedPage `json:"framed,omitempty"`
 }
 
 // MaxBlobName is how many bytes a file's name may have.
@@ -668,7 +677,8 @@ func noteWords(text string, files []BlobFile) error {
 // with the type and size the yard holds, and the name the sender gave.
 // One the yard does not hold refuses the note: a note never names a file
 // nobody can read. A name no letter may carry refuses it too, never
-// sanitised.
+// sanitised. A page's framed record is kept on its ref, held to what a
+// note can carry (framedRecord).
 func (s *Store) noteFiles(files []BlobFile) ([]BlobRef, error) {
 	if len(files) > MaxNoteFiles {
 		return nil, fmt.Errorf("a note carries at most %d files, not %d", MaxNoteFiles, len(files))
@@ -685,6 +695,11 @@ func (s *Store) noteFiles(files []BlobFile) ([]BlobRef, error) {
 			return nil, err
 		}
 		ref.Name = f.Name
+		if f.Framed != nil {
+			if ref.Framed, err = s.framedRecord(ref, f.Framed); err != nil {
+				return nil, err
+			}
+		}
 		out = append(out, *ref)
 	}
 	return out, nil
@@ -719,7 +734,7 @@ func (s *Store) pruneBlobs() (int, error) {
 				for _, f := range EventFiles(e) {
 					// One not taken names no blob of the yard's.
 					if f.NotTaken == "" {
-						named[f.Hash] = true
+						nameKept(named, f)
 					}
 				}
 			}
@@ -741,10 +756,11 @@ func (s *Store) pruneBlobs() (int, error) {
 			return err
 		}
 		// And what the notes carry: without this line the sweeper takes
-		// every screenshot within the hour.
+		// every screenshot within the hour. A framed page also names the
+		// fragment it was dressed from, which no letter lists as a file.
 		if err := each(tx, bNotes, "", func(_ []byte, n *Note) error {
 			for _, f := range n.Files {
-				named[f.Hash] = true
+				nameKept(named, f)
 			}
 			return nil
 		}); err != nil {

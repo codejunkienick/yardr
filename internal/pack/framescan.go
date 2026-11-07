@@ -57,9 +57,14 @@ type frameFault struct {
 // refuse a frame a browser would have mended, and it is not meant to accept
 // one that a browser reads otherwise. noscript is read as a browser with
 // scripts on reads it, which is the reading a frame's own script runs under.
-func frameFaults(text []byte) []frameFault {
+func frameFaults(text []byte) []frameFault { return scanFrame(text).faults }
+
+// scanFrame runs the scan frameFaults describes and answers it finished: the
+// faults it found, and where in the file its markers and its <title> stand,
+// which Dress puts a page's words at.
+func scanFrame(text []byte) *frameScan {
 	// A browser takes a byte order mark off the front, and it is no text.
-	s := &frameScan{src: bytes.TrimPrefix(text, []byte("\xef\xbb\xbf")), real: map[int]bool{}}
+	s := &frameScan{src: bytes.TrimPrefix(text, byteOrderMark), real: map[int]bool{}}
 	for i, c := range s.src {
 		if c == '\n' {
 			s.nl = append(s.nl, i)
@@ -72,7 +77,8 @@ func frameFaults(text []byte) []frameFault {
 			s.text()
 		}
 	}
-	return s.finish()
+	s.finish()
+	return s
 }
 
 // A span is a stretch of the frame in which a marker's bytes are not a
@@ -117,6 +123,11 @@ type frameScan struct {
 	real         map[int]bool // where the markers that are comments are
 	titles       []int        // the line of each <title> element
 	faults       []frameFault
+	// document is what the scan read that only a whole document has: a
+	// doctype, the start tags of html, head and body and the end tags of body
+	// and html. Dress refuses a fragment that holds any, since the frame is
+	// the document.
+	document []string
 }
 
 // line is the line of the file the byte at off is on, from 1.
@@ -305,6 +316,9 @@ func commentLen(b []byte) int {
 // runs to ]]>.
 func (s *frameScan) declaration() {
 	start, rest := s.pos, s.src[s.pos:]
+	if len(rest) >= len("<!doctype") && strings.EqualFold(string(rest[:len("<!doctype")]), "<!doctype") {
+		s.document = append(s.document, "a doctype")
+	}
 	end, kind := len(s.src), spanTag
 	if len(s.foreign) > 0 && bytes.HasPrefix(rest, []byte("<![CDATA[")) {
 		kind = spanCDATA
@@ -327,6 +341,9 @@ func (s *frameScan) startTag() {
 	s.spans = append(s.spans, span{start: start, end: end, kind: spanTag})
 	s.pos = end
 	if whole {
+		if name == "html" || name == "head" || name == "body" {
+			s.document = append(s.document, "a <"+name+"> tag")
+		}
 		s.opened(name, selfClosing, start)
 	}
 }

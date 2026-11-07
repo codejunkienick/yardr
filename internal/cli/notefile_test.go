@@ -5,13 +5,18 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
+	"yardr.dev/yardr/internal/pack"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
+	"yardr.dev/yardr/packs"
 )
 
 // yardr bead note --file puts the image in the yard and writes a note that
@@ -346,4 +351,221 @@ func hashOfFile(t *testing.T, path string) string {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// yardr bead note --page dresses a fragment in the frame that applies to the
+// bead's depot, and keeps the fragment, title and frame apart from the page:
+// the page is a note's file as --file's pages are, with the title once in the
+// <title> and once in the title block, and its record names the fragment
+// blob and the frame by pack, path and the sum of the bytes read, which for a
+// frame an operator edited by hand is not the sum the import recorded. What
+// the record holds is enough to dress the page again to the same bytes.
+func TestBeadNoteDressesAFragment(t *testing.T) {
+	t.Parallel()
+	a, s := pageYard(t)
+	ctx := context.Background()
+	inWeb, err := a.st.CreateBead(ctx, store.NewBead{Title: "the shed", Depot: "web"}, "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loose, err := a.st.CreateBead(ctx, store.NewBead{Title: "no depot"}, "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	const fragment = `<p class="lede">Beads landed in <b>two</b> weeks.</p><div class="tiles"><div class="tile"><span class="fig">74</span></div></div>`
+	frag := write("fragment.html", fragment)
+	const title = "Two weeks <in> the yard"
+	const escaped = "Two weeks &lt;in&gt; the yard"
+	note := func(bead string, args ...string) store.BlobRef {
+		t.Helper()
+		before, _ := a.st.Notes(ctx, bead)
+		out, err := run(t, a.beadCmd(), append([]string{"note", bead, "the weeks, dressed"}, args...)...)
+		if err != nil {
+			t.Fatalf("bead note %v: %v\n%s", args, err, out)
+		}
+		notes, _ := a.st.Notes(ctx, bead)
+		if len(notes) != len(before)+1 || len(notes[len(notes)-1].Files) == 0 {
+			t.Fatalf("bead note %v wrote %+v", args, notes)
+		}
+		page := notes[len(notes)-1].Files[len(notes[len(notes)-1].Files)-1]
+		if want := store.BlobPath(a.cfg.Home, page.Hash); !strings.Contains(out, want) {
+			t.Errorf("bead note %v printed %q, want it to name the page at %s", args, out, want)
+		}
+		return page
+	}
+	blob := func(hash string) string {
+		t.Helper()
+		b, err := os.ReadFile(s.BlobPath(hash))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+
+	// With nothing applied the default frame dresses it: a page in the
+	// default's own words, and a fragment of its own beside it.
+	dflt, err := fs.ReadFile(packs.FS, packs.PageFrame+"/frames/page.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := note(inWeb.ID, "--page", frag, "--title", title)
+	if !page.IsPage() || page.Name != "" || page.Framed == nil {
+		t.Fatalf("the dressed page = %+v, want a page with no name and a record", page)
+	}
+	// Printed as a page --file attaches is, with no name after its path.
+	if notes, _ := a.st.Notes(ctx, inWeb.ID); len(notes) != 1 || !strings.HasPrefix(notes[0].Text, "the weeks, dressed") {
+		t.Fatalf("the note = %+v", notes)
+	}
+	rec := *page.Framed
+	if rec.Title != title || rec.Pack != "pageframe" || rec.Frame != "frames/page.html" || rec.FrameSHA256 != sum256(dflt) || rec.Fragment != sum256([]byte(fragment)) || len(rec.Versions) != 0 {
+		t.Errorf("the record = %+v, want the default frame %s and the fragment %s", rec, sum256(dflt), sum256([]byte(fragment)))
+	}
+	dressed := blob(page.Hash)
+	if got := blob(rec.Fragment); got != fragment {
+		t.Errorf("the fragment blob holds %q", got)
+	}
+	if strings.Count(dressed, "<title>"+escaped+"</title>") != 1 || strings.Count(dressed, "<h1>"+escaped+"</h1>") != 1 || strings.Count(dressed, fragment) != 1 || strings.Contains(dressed, "<!--yardr:") {
+		t.Errorf("the dressed page:\n%.1800s", dressed)
+	}
+	// The record is all a rebuild needs: the same frame and the kept
+	// fragment make the same bytes, so the same hash.
+	frame, err := pack.FrameFor(ctx, a.st, a.cfg.Home, "web")
+	if err != nil || frame.SHA256 != rec.FrameSHA256 {
+		t.Fatalf("the frame now = %+v, %v", frame, err)
+	}
+	again, err := pack.Dress(frame, []byte(blob(rec.Fragment)), rec.Title)
+	if err != nil || sum256(again) != page.Hash {
+		t.Errorf("dressing the kept fragment again made %s, %v; the page is %s", sum256(again), err, page.Hash)
+	}
+	// prime and bead show print what they print of any page, and none of
+	// the record.
+	for _, c := range []struct {
+		name string
+		cmd  func() *cobra.Command
+		args []string
+	}{{"prime", a.primeCmd, []string{"--bead", inWeb.ID}}, {"bead show", a.beadCmd, []string{"show", inWeb.ID}}} {
+		out, err := run(t, c.cmd(), c.args...)
+		if err != nil || !strings.Contains(out, store.NoteFilesMark+" 1 page: "+store.BlobPath(a.cfg.Home, page.Hash)) || strings.Contains(out, rec.Fragment) || strings.Contains(out, rec.FrameSHA256) {
+			t.Errorf("%s of a dressed page: %v\n%s", c.name, err, out)
+		}
+	}
+	// --json names the record.
+	a.json = true
+	out, err := run(t, a.beadCmd(), "note", inWeb.ID, "again", "--page", frag, "--title", "Again")
+	a.json = false
+	var noted struct {
+		Files []store.BlobRef `json:"files"`
+	}
+	if err := json.Unmarshal([]byte(out), &noted); err != nil || len(noted.Files) != 1 || noted.Files[0].Framed == nil || noted.Files[0].Framed.Title != "Again" || noted.Files[0].Framed.Fragment != rec.Fragment {
+		t.Errorf("bead note --page --json = %v, %v", out, err)
+	}
+	// A whole-file page, as before, carries no record and keeps nothing apart.
+	whole := note(inWeb.ID, "--file", write("whole.html", "<!DOCTYPE html><html><head><title>x</title></head><body><p>whole</p></body></html>"))
+	if whole.Framed != nil || whole.Name != "whole.html" {
+		t.Errorf("a whole-file page = %+v, want no record", whole)
+	}
+	// With --file beside it the page comes last, and counts as one file.
+	if both := note(inWeb.ID, "--file", write("shot.png", "\x89PNG\r\n\x1a\n a shot"), "--page", frag, "--title", "Both"); both.Framed == nil || both.Framed.Title != "Both" {
+		t.Errorf("the page beside a file = %+v", both)
+	}
+
+	// The yard's frame, then the depot's own, before the default; a bead with
+	// no depot takes the yard's. The frame an operator edited by hand, still
+	// meeting the contract, is used as it stands: the page records the sum of
+	// the bytes read, apart from the sum the import recorded.
+	installed := a.installFrame(t, "brand", brandFrame("Classes: .meta"), "")
+	imported := ""
+	recs, err := a.st.Packs(ctx)
+	for _, r := range recs {
+		for _, o := range r.Objects {
+			if r.Pack == "brand" && o.Kind == "file" {
+				imported = o.SHA256
+			}
+		}
+	}
+	if err != nil || imported != sum256([]byte(brandFrame("Classes: .meta"))) {
+		t.Fatalf("the import recorded %q, %v", imported, err)
+	}
+	edited := strings.Replace(brandFrame("Classes: .meta"), "</style>", "p{margin:0}</style>", 1)
+	if err := os.WriteFile(installed, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, bead := range []string{inWeb.ID, loose.ID} {
+		page := note(bead, "--page", frag, "--title", title)
+		if got := *page.Framed; got.Pack != "brand" || got.Frame != "frames/page.html" || got.FrameSHA256 != sum256([]byte(edited)) || got.FrameSHA256 == imported {
+			t.Errorf("a page in the yard's frame, edited by hand: %+v, want the sum of the edited bytes %s apart from the import's %s", got, sum256([]byte(edited)), imported)
+		}
+		if !strings.Contains(blob(page.Hash), "p{margin:0}") {
+			t.Errorf("the page was made from the import's bytes, not the installed copy's")
+		}
+	}
+	a.installFrame(t, "webbrand", brandFrame("Classes: .web"), "web")
+	if got := note(inWeb.ID, "--page", frag, "--title", title).Framed.Pack; got != "webbrand" {
+		t.Errorf("a bead of depot web dressed in %s, want webbrand", got)
+	}
+	if got := note(loose.ID, "--page", frag, "--title", title).Framed.Pack; got != "brand" {
+		t.Errorf("a bead with no depot dressed in %s, want the yard's brand", got)
+	}
+
+	// What is refused leaves nothing: no note, and no blob, the fragment's
+	// among them.
+	blobs, notes := blobNames(t, s), 0
+	for _, id := range []string{inWeb.ID, loose.ID} {
+		ns, _ := a.st.Notes(ctx, id)
+		notes += len(ns)
+	}
+	whole2 := write("document.html", "<!DOCTYPE html><html><head><title>x</title></head><body><p>hi</p></body></html>")
+	empty := write("empty.html", " \n")
+	refuse := func(want string, args ...string) {
+		t.Helper()
+		if out, err := run(t, a.beadCmd(), append([]string{"note", loose.ID}, args...)...); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("bead note %v = %v, want %q\n%s", args, err, want, out)
+		}
+	}
+	refuse("--page needs --title", "words", "--page", frag)
+	refuse("--title is the title of the page --page dresses: give --page with it", "words", "--title", "T")
+	refuse("a note dresses one fragment, not 2: two pages are two notes", "words", "--page", frag, "--page", frag, "--title", "T")
+	refuse("it takes no --file, --page or --title", "--ack", "1", "--page", frag, "--title", "T")
+	refuse("a note with --page needs words: say what the page shows", " \n", "--page", frag, "--title", "T")
+	refuse("the title is empty", "words", "--page", frag, "--title", " ")
+	refuse("one line of plain text", "words", "--page", frag, "--title", "one\ntwo")
+	refuse("no such file", "words", "--page", filepath.Join(dir, "none.html"), "--title", "T")
+	refuse("the fragment is empty", "words", "--page", empty, "--title", "T")
+	refuse("the fragment is a whole document, with a doctype in it", "words", "--page", whole2, "--title", "T")
+	// A frame whose installed copy was edited by hand since check, so it
+	// misses the title contract, is refused at wrapping, naming where it is.
+	if err := os.WriteFile(installed, []byte(strings.Replace(brandFrame("Classes: .meta"), "<!--yardr:content-->", "", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refuse("the frame that dresses pages here, frames/page.html of pack brand (installed at "+installed+")", "words", "--page", frag, "--title", "T")
+	refuse("has no <!--yardr:content-->", "words", "--page", frag, "--title", "T")
+	// The page over the yard's limit is refused naming what it is, before
+	// the fragment or any other file is put.
+	if err := a.st.SetSetting(ctx, store.BlobMaxSetting, "200", "me"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installed, []byte(brandFrame("Classes: .meta")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refuse("the dressed page: the file is ", "words", "--page", frag, "--title", "T", "--file", write("png.png", "\x89PNG\r\n\x1a\n"))
+	if err := a.st.SetSetting(ctx, store.BlobMaxSetting, "", "me"); err != nil {
+		t.Fatal(err)
+	}
+	after := 0
+	for _, id := range []string{inWeb.ID, loose.ID} {
+		ns, _ := a.st.Notes(ctx, id)
+		after += len(ns)
+	}
+	if got := blobNames(t, s); len(got) != len(blobs) || after != notes {
+		t.Errorf("what was refused left %d blobs (were %d) and %d notes (were %d)", len(got), len(blobs), after, notes)
+	}
 }

@@ -22,6 +22,10 @@ type ResolvedFrame struct {
 	// import is its scope's active one, or pageframe, the embedded
 	// default.
 	Pack string `json:"pack"`
+	// File is the frame's slash path in its pack, the key a pack names it
+	// by: what a page made in it records beside the pack's name, since the
+	// absolute path below is this yard's own.
+	File string `json:"file"`
 	// Path is the installed frame's absolute path under the yard's home.
 	// It is empty for the embedded default, whose bytes are read from the
 	// binary (packs.FS) and stand in no installed file.
@@ -35,6 +39,10 @@ type ResolvedFrame struct {
 	// Bytes are the frame's bytes as read, the ones SHA256 sums and the
 	// ones a page is dressed from.
 	Bytes []byte `json:"-"`
+	// Chosen is which step of the resolution chose the frame: "depot" for
+	// the depot's own active frame, "yard" for the yard's, "default" for the
+	// embedded one.
+	Chosen string `json:"chosen"`
 }
 
 // FrameFor is frameFor for a depot ("" for a bead with no depot, and for
@@ -56,13 +64,18 @@ func frameFor(ctx context.Context, st store.API, home, depot string) (ResolvedFr
 	if err != nil {
 		return ResolvedFrame{}, err
 	}
+	installed := func(rec store.PackImport, chosen string) (ResolvedFrame, error) {
+		f, err := readInstalled(home, rec)
+		f.Chosen = chosen
+		return f, err
+	}
 	if depot != "" {
 		if rec, ok := activeFrame(recs, depot); ok {
-			return readInstalled(home, rec)
+			return installed(rec, "depot")
 		}
 	}
 	if rec, ok := activeFrame(recs, ""); ok {
-		return readInstalled(home, rec)
+		return installed(rec, "yard")
 	}
 	// The embedded default: read from the binary as it stands, so every
 	// page can always be made, imported or not.
@@ -81,7 +94,7 @@ func frameFor(ctx context.Context, st store.API, home, depot string) (ResolvedFr
 	if err != nil {
 		return ResolvedFrame{}, err
 	}
-	return ResolvedFrame{Pack: p.Name, SHA256: sum(text), Bytes: text}, nil
+	return ResolvedFrame{Pack: p.Name, File: p.Frame.File, SHA256: sum(text), Bytes: text, Chosen: "default"}, nil
 }
 
 // activeFrame is the record of scope (a depot, or "" for the yard) whose
@@ -120,7 +133,7 @@ func readInstalled(home string, rec store.PackImport) (ResolvedFrame, error) {
 	if err != nil {
 		return ResolvedFrame{}, fmt.Errorf("the frame of pack %s, %s: %w", rec.Pack, rec.Frame, err)
 	}
-	return ResolvedFrame{Pack: rec.Pack, Path: rec.Frame, SHA256: sum(text), Bytes: text}, nil
+	return ResolvedFrame{Pack: rec.Pack, File: filepath.ToSlash(rel), Path: rec.Frame, SHA256: sum(text), Bytes: text}, nil
 }
 
 // FrameOnly reports whether the pack is a page frame and nothing beside

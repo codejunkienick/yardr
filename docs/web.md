@@ -1682,7 +1682,9 @@ writes nothing, makes no blob or copy of the pack, and ends with the ask. The
 page is not live and has no approval. The card approves on its bead's page, as
 above.
 
-A note's files are what `yardr bead note --file` attached to it. Each
+A note's files are what `yardr bead note --file` or `--page` attached to it
+(a page made with `--page` is dressed in a frame before it is a blob, so it
+is served as any page is). Each
 image shows below the note's words, with those words as its alt text; each
 page stands as a link, `page <hash8>`, opening the bytes top-level and
 inert; each file stands as a download link, `file <name>`, and downloads

@@ -493,6 +493,26 @@ func (s *Store) AgeStageAsk(id string, seq uint64) error {
 	})
 }
 
+// SetNoteFiles rewrites the files of note seq on bead id as given, with no
+// check, as a rebuild of a framed page will, which is no store call yet: a
+// test of what the sweep keeps of a record with superseded versions builds
+// the note so, since the yard writes none of that shape now.
+func (s *Store) SetNoteFiles(id string, seq uint64, files []BlobRef) error {
+	return s.write(func(w *wtx) error {
+		row, err := w.loadBead(id)
+		if err != nil {
+			return err
+		}
+		key := join(row.UUID, seqKey(seq))
+		var n Note
+		if ok, err := get(w.Tx, bNotes, key, &n); err != nil || !ok {
+			return fmt.Errorf("bead %s has no note %d (%v)", id, seq, err)
+		}
+		n.Files = files
+		return put(w.Tx, bNotes, key, n)
+	})
+}
+
 // FinishLine is finishLine: the first line of the finish note among notes.
 var FinishLine = finishLine
 
