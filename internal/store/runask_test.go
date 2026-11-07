@@ -156,6 +156,8 @@ func TestRunAskRefusals(t *testing.T) {
 		{"a line break", func(a *Ask) { a.Run.Argv = []string{"peer allow airy --mail-limit 300\nyardr user add eve"} }, "", `'\n' is none of their characters`},
 		{"a comma in a name", func(a *Ask) { a.Run.Argv = []string{"peer allow airy,north --mail-limit 300"} }, "", "peer airy,north: not found"},
 		{"a comma in no command of the list", func(a *Ask) { a.Run.Argv = []string{"user add eve,bo"} }, "", `',' is none of their characters`},
+		{"a backtick", func(a *Ask) { a.Run.Argv = []string{"peer allow airy --mail-limit `N`"} }, "", "'`' is none of their characters"},
+		{"a bracket in a name", func(a *Ask) { a.Run.Argv = []string{"user add eve[bo]"} }, "", `user "eve[bo]": use letters, digits, '.', '_', '-' or '/' (starting with a letter or digit)`},
 		{"a letter of another script", func(a *Ask) { a.Run.Argv = []string{"peer allow аiry --mail-limit 300"} }, "", "is none of their characters"},
 		{"a peer the yard has not", func(a *Ask) { a.Run.Argv = []string{"peer allow a1ry --mail-limit 300"} }, "", "peer a1ry: not found"},
 		{"zero", func(a *Ask) { a.Run.Argv = []string{"peer allow airy --mail-limit 0"} }, "", "peer airy: a link takes 1 to 10000 mails an hour, not 0"},
@@ -201,6 +203,39 @@ func TestRunAskRefusals(t *testing.T) {
 	y.noOperator(t, "mckean")
 	if _, err := y.AddAsk(y.ctx, y.bead, runAsk("peer allow airy --mail-limit 300"), "yardmaster"); err == nil || !strings.Contains(err.Error(), "this yard has none") {
 		t.Fatalf("a run ask in a yard with no operator = %v", err)
+	}
+}
+
+// A bracket is a character any word of the list may have: a GitHub App's bot
+// logs in as <slug>[bot], a model carries its window (opus[1m]) and an IPv6
+// host is in brackets. No shell reads a word, and nothing else comes in with
+// it: a quote, a dollar, a backtick and a parenthesis are still no character
+// of a word, and a space still ends it.
+func TestRunAskTakesBrackets(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ typed, want string }{
+		{"crew identity yardmaster --source github --key yardr[bot]", "yardr crew identity yardmaster --source github --key yardr[bot]"},
+		{"user identity ada --source github --key=ada-app[bot]", "yardr user identity ada --source github --key ada-app[bot]"},
+		{"crew add porter kind=claude model=opus[1m] preset=auto", "yardr crew add porter kind=claude model=opus[1m] preset=auto"},
+		{"peer set airy --url http://[::1]:8790", "yardr peer set airy --url http://[::1]:8790"},
+	} {
+		if _, argv, err := parseRun([]string{c.typed}); err != nil {
+			t.Errorf("--run %q = %v, want it read", c.typed, err)
+		} else if got := runCommandLine(argv); got != c.want {
+			t.Errorf("--run %q reads as %q, want %q", c.typed, got, c.want)
+		}
+	}
+	for _, c := range []struct{ typed, want string }{
+		{"crew identity yardmaster --source github --key 'yardr[bot]'", `'\'' is none of their characters`},
+		{`crew identity yardmaster --source github --key "yardr[bot]"`, `'"' is none of their characters`},
+		{"crew identity yardmaster --source github --key $yardr[bot]", `'$' is none of their characters`},
+		{"crew identity yardmaster --source github --key `yardr[bot]`", "'`' is none of their characters"},
+		{"crew identity yardmaster --source github --key yardr[bot](x)", `'(' is none of their characters`},
+		{"crew identity yardmaster --source github --key yardr [bot]", "one crew member, not 2 words"},
+	} {
+		if _, _, err := parseRun([]string{c.typed}); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("--run %q = %v, want %q", c.typed, err, c.want)
+		}
 	}
 }
 

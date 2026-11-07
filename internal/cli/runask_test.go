@@ -383,6 +383,28 @@ func TestBeadAskRunAndApprove(t *testing.T) {
 	if in.Len() != len("anything\n") || errOut != "" {
 		t.Fatalf("a routine approval read its input (%d bytes left) or printed %q", in.Len(), errOut)
 	}
+
+	// A GitHub App's bot logs in as <slug>[bot]: the command takes the
+	// brackets as typed, and the card and the approval carry them.
+	asked, err = y.as(t, "yardmaster", "ask", b.ID, "Is the yardmaster the bot?",
+		"--context", "its own comments come back to its inbox.", "--run", "crew identity yardmaster --source crm --key yardr[bot]")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bot uint64
+	if _, err := fmt.Sscanf(asked, "ask %d on", &bot); err != nil {
+		t.Fatalf("bead ask printed %q: %v", asked, err)
+	}
+	if want := "to approve, yardr crew identity yardmaster --source crm --key yardr[bot]\n"; !strings.HasSuffix(asked, want) {
+		t.Fatalf("bead ask printed %q, want it to end %q", asked, want)
+	}
+	out, _, err = gated(t, y, false, strings.NewReader(""), b.ID, fmt.Sprint(bot), "--approve")
+	if err != nil || !strings.Contains(out, "crew member yardmaster is yardr[bot] in crm") {
+		t.Fatalf("approving the bot's login = %q, %v", out, err)
+	}
+	if m, err := y.st.GetCrew(context.Background(), "yardmaster"); err != nil || m.Identities["crm"] != (store.Identity{Key: "yardr[bot]"}) {
+		t.Fatalf("the crew member = %+v, %v", m, err)
+	}
 }
 
 // A crew member proposes where a peer's beads go, and who a peer's crew member
@@ -1785,6 +1807,15 @@ func TestSourceAddCarriedReadBounds(t *testing.T) {
 	}
 	if carried, err := sourceAddCarried("source add " + commaPath); err != nil || carried != nil {
 		t.Fatalf("an invalid run command carried %v, %v", carried, err)
+	}
+	// A bracket is no reason to leave the file unread: the store takes it in
+	// a word, and a path is read as it was typed.
+	bracketPath := filepath.Join(dir, "added[1].yaml")
+	if err := os.WriteFile(bracketPath, []byte("name: bracketed\nbase: https://bracketed.example.com\ncalls:\n  ping: { kind: read, request: { method: GET, path: /me } }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if carried, err := sourceAddCarried("source add " + bracketPath); err != nil || len(carried) != 1 || carried[0].Name != "bracketed" {
+		t.Fatalf("a path with brackets carried %v, %v", carried, err)
 	}
 
 	decl := filepath.Join(dir, "large.yaml")

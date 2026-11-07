@@ -1908,6 +1908,32 @@ func TestRunAskCrewIdentity(t *testing.T) {
 	if want := "It is u1 / boss in crm now."; !slices.Contains(got.Does, want) {
 		t.Fatalf("the second card says %q, want it to hold %q", got.Does, want)
 	}
+
+	// A GitHub App's bot logs in as <slug>[bot]: the brackets stand in a key
+	// as typed, in either form of the flag, and the card shows the command
+	// with them.
+	seq = y.ask(t, listAsk("mckean", "crew identity yardmaster --source crm --key=yardr[bot]"), "yardmaster")
+	r = y.asked(t, seq)
+	if want := []string{"crew", "identity", "yardmaster", "--source", "crm", "--key", "yardr[bot]"}; !slices.Equal(r.Ask.Run.Argv, want) {
+		t.Fatalf("the bracketed ask holds %q, want %q", r.Ask.Run.Argv, want)
+	}
+	if want := "yardr crew identity yardmaster --source crm --key yardr[bot]"; r.Ask.proposed().Command != want {
+		t.Fatalf("the card shows %q, want %q", r.Ask.proposed().Command, want)
+	}
+	done, err = y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done.Result != "crew member yardmaster is yardr[bot] in crm" {
+		t.Fatalf("the approval ran %q", done.Result)
+	}
+	member, err = y.GetCrew(y.ctx, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bot := member.Identities["crm"]; bot != (Identity{Key: "yardr[bot]"}) {
+		t.Fatalf("the crew member is %+v in crm, want the bot's login", bot)
+	}
 }
 
 // A chmod of a command copy under the identity's source after the ask
@@ -1946,7 +1972,11 @@ func TestRunAskCrewIdentityRefusals(t *testing.T) {
 		{"crew identity yardmaster --source crm --id u1 --rm", "yardmaster", "crew identity with --rm is the operator's to type in a terminal"},
 		{"crew identity --source crm --id u1", "yardmaster", "one crew member, not 0 words"},
 		{"crew identity a b --source crm --id u1", "yardmaster", "one crew member, not 2 words"},
-		{"crew identity yardmaster --source crm --key a[bot]", "yardmaster", "'[' is none of their characters"},
+		// A bracket is a character any word may have, so a name that holds one
+		// is refused as the name it is, and a comma beside it is still none.
+		{"crew identity yardmaster[bot] --source crm --id u1", "yardmaster", "crew member yardmaster[bot]: not found"},
+		{"crew identity yardmaster --source crm[bot] --id u1", "yardmaster", "source crm[bot]: not found"},
+		{"crew identity yardmaster --source crm --key a[b,ot]", "yardmaster", `',' is none of their characters`},
 	} {
 		if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", c.command), c.actor); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("--run %q as %s = %v, want %q", c.command, c.actor, err, c.want)

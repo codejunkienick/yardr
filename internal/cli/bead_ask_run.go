@@ -41,7 +41,7 @@ func crewAddRole(command, runRole string, runRoleSet bool) (string, error) {
 		return "", nil
 	}
 	for _, r := range command {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune(" \t._/=-@:", r) {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune(" \t._/=-@:[]", r) {
 			continue
 		}
 		return "", nil
@@ -139,7 +139,7 @@ func sourceAddCarried(command string) ([]store.AskSource, error) {
 		return nil, nil
 	}
 	for _, r := range command {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune(" \t._/=-@:", r) {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune(" \t._/=-@:[]", r) {
 			continue
 		}
 		return nil, nil

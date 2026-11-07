@@ -74,14 +74,15 @@ func TestBeadAskRunCrewAdd(t *testing.T) {
 		t.Fatalf("role file = %q, want the bytes as asked, not the changed file", got)
 	}
 
-	// prompt= names the file the same way, without --run-role.
+	// prompt= names the file the same way, without --run-role, and a model
+	// carries its window in brackets as it does at a terminal.
 	const role2 = "You are the clerk.\n\nFile what arrives.\n"
 	role2File := filepath.Join(t.TempDir(), "clerk.md")
 	if err := os.WriteFile(role2File, []byte(role2), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out2, err := y.as(t, "yardmaster", "ask", b.ID, "Add the clerk?",
-		"--context", "the yard needs a clerk", "--run", "crew add clerk kind=claude model=sonnet preset=auto prompt="+role2File)
+		"--context", "the yard needs a clerk", "--run", "crew add clerk kind=claude model=opus[1m] preset=auto prompt="+role2File)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,6 +96,9 @@ func TestBeadAskRunCrewAdd(t *testing.T) {
 	m2, err := y.st.GetCrew(ctx, "clerk")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if m2.Config["model"] != "opus[1m]" {
+		t.Fatalf("the clerk's model is %v, want opus[1m]", m2.Config["model"])
 	}
 	got2, err := os.ReadFile(filepath.Join(m2.Dir, "roles", "clerk.md"))
 	if err != nil {

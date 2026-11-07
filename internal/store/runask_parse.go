@@ -104,10 +104,13 @@ func parseRow(sent []string) (*runCommand, []string, error) {
 		switch {
 		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
 		case strings.ContainsRune("._/=-", char):
-		case char == '@' || char == ':' || char == '+':
+		case char == '@' || char == ':' || char == '+' || char == '[' || char == ']':
 			// A trust is a name at a peer, an address is a host and a
-			// port or holds a '+' (an invite's address): the row that
-			// reads them says which.
+			// port or holds a '+' (an invite's address) or brackets (an
+			// IPv6 host), a bot's login in a source is <slug>[bot] and a
+			// model carries its window (opus[1m]): the row that reads
+			// them says which. No shell reads a word, so a bracket is
+			// data.
 		case char == ',':
 			// Held to the command that takes a list, below.
 		case row != nil && slices.Equal(row.words, []string{"peer", "add"}) && word-wordOffset == len(row.words)+1:

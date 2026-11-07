@@ -105,9 +105,29 @@ func TestRunAskUserIdentity(t *testing.T) {
 		t.Fatalf("ada = %+v, %v", u, err)
 	}
 
+	// A bot's login is <slug>[bot]: the brackets stand in the key, in either
+	// form of the flag.
+	seq = y.ask(t, listAsk("ada", "user identity ada --source talk --key=ada-app[bot]"), "yardmaster")
+	if got := y.asked(t, seq).Ask.proposed().Command; got != "yardr user identity ada --source talk --key ada-app[bot]" {
+		t.Fatalf("the card shows %q", got)
+	}
+	done, err = y.ApproveAsk(y.ctx, y.bead, seq, "ada", true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done.Result != "user ada is ada-app[bot] in talk" {
+		t.Fatalf("the approval printed %q", done.Result)
+	}
+	if u, err := y.GetUser(y.ctx, "ada"); err != nil || !u.IsIn("talk", "ADA-APP[BOT]") {
+		t.Fatalf("ada = %+v, %v", u, err)
+	}
+
 	// --rm is typed, not proposed; a repeated flag and no id or key
-	// are refused at asking, as on the crew row.
+	// are refused at asking, as on the crew row, and so are a user and a
+	// source whose names hold a bracket.
 	for _, command := range []string{
+		"user identity ada[bot] --source talk --id U1",
+		"user identity ada --source talk[bot] --id U1",
 		"user identity ada --source talk --rm",
 		"user identity ada --source talk --id U999 --rm",
 		"user identity ada --source talk --id U1 --id U2",
