@@ -7,11 +7,15 @@
 package release
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -43,9 +47,10 @@ esac
 // ($n.json for the nth call, the last one standing after that, a file
 // holding ABSENT for no release, and no directory for never one); lists
 // the runs FAKE_GH_RUNS cans; saves the notes file a release edit or
-// create was given; serves release downloads from a directory; verifies
-// attestations as FAKE_GH_ATTEST_RC says; and answers whether Actions is
-// enabled from FAKE_GH_ACTIONS_ENABLED.
+// create was given; keeps a copy of each file a release upload was given,
+// in $FAKE_DIR/uploaded, and fails as FAKE_GH_UPLOAD_RC says; serves release
+// downloads from a directory; verifies attestations as FAKE_GH_ATTEST_RC
+// says; and answers whether Actions is enabled from FAKE_GH_ACTIONS_ENABLED.
 const fakeGh = `#!/bin/sh
 printf 'gh %s\n' "$*" >>"$FAKE_DIR/calls.log"
 case "$1 $2" in
@@ -68,6 +73,8 @@ case "$1 $2" in
 "release download")
   rc="${FAKE_GH_DOWNLOAD_RC:-0}"
   if [ "$rc" -eq 0 ]; then
+    # With no directory served, the copy below would be of / itself.
+    [ -n "${FAKE_RELEASE_DIR:-}" ] || { echo "no release is served" >&2; exit 1; }
     prev=""
     for a in "$@"; do
       if [ "$prev" = "--dir" ]; then dir="$a"; fi
@@ -76,6 +83,13 @@ case "$1 $2" in
     cp -R "$FAKE_RELEASE_DIR"/. "$dir"/
   fi
   exit "$rc"
+  ;;
+"release upload")
+  mkdir -p "$FAKE_DIR/uploaded"
+  for a in "$@"; do
+    if [ -f "$a" ]; then cp "$a" "$FAKE_DIR/uploaded/"; fi
+  done
+  exit "${FAKE_GH_UPLOAD_RC:-0}"
   ;;
 "release edit")
   prev=""
@@ -113,23 +127,102 @@ printf '%s\n' "${FAKE_MINISIGN_OUT:-Signature and comment signature verified}"
 exit "${FAKE_MINISIGN_RC:-0}"
 `
 
+// fakeInstaller is the install.sh the fake build writes (fakeBuild has the
+// same text), and so the one the tests' CI draft sums when the two are to
+// agree.
+const fakeInstaller = "fake installer\n"
+
 // fakeBuild stands in for contrib/release/build in the checkout: it logs
-// its arguments and SOURCE_DATE_EPOCH, and writes four archives, a
-// checksums.txt and, unless FAKE_BUILD_NO_INSTALLER is set (another depot's
-// build, which has none), an install.sh to its out-dir.
+// its arguments, SOURCE_DATE_EPOCH, the targets it was asked for and the two
+// signing variables it was given, and writes an archive for each target, an
+// install.sh unless FAKE_BUILD_NO_INSTALLER is set (another depot's build,
+// which has none), and the checksums.txt over them, in the order and the
+// format the real script writes it.
 const fakeBuild = `#!/bin/sh
-printf 'build %s SOURCE_DATE_EPOCH=%s\n' "$*" "${SOURCE_DATE_EPOCH:-}" >>"$FAKE_DIR/calls.log"
+printf 'build %s SOURCE_DATE_EPOCH=%s targets=%s identity=%s profile=%s\n' "$*" "${SOURCE_DATE_EPOCH:-}" "${YARDR_RELEASE_TARGETS:-}" "${YARDR_RELEASE_SIGN_IDENTITY:-}" "${YARDR_RELEASE_NOTARY_PROFILE:-}" >>"$FAKE_DIR/calls.log"
 out=$2
 mkdir -p "$out"
 targets=${YARDR_RELEASE_TARGETS:-darwin/arm64 darwin/amd64 linux/amd64 linux/arm64}
+archives=""
 for t in $targets; do
   os=${t%/*}
   arch=${t#*/}
   printf 'fake %s\n' "$t" >"$out/yardr_${1#v}_${os}_${arch}.tar.gz"
+  archives="$archives yardr_${1#v}_${os}_${arch}.tar.gz"
 done
-printf 'fake checksums\n' >"$out/checksums.txt"
-[ -n "${FAKE_BUILD_NO_INSTALLER:-}" ] || printf 'fake installer\n' >"$out/install.sh"
+installer=""
+if [ -z "${FAKE_BUILD_NO_INSTALLER:-}" ]; then
+  printf 'fake installer\n' >"$out/install.sh"
+  installer=install.sh
+fi
+if command -v shasum >/dev/null 2>&1; then sum="shasum -a 256"; else sum=sha256sum; fi
+(cd "$out" && $sum $archives $installer >checksums.txt)
 exit "${FAKE_BUILD_RC:-0}"
+`
+
+// fakeCodesign answers as the Mac's codesign does for the yardr it is given,
+// the lines being those it prints for a Developer ID signature, an ad hoc
+// one and none (recorded from the real tool), chosen by what the file says.
+// The file is the last argument.
+const fakeCodesign = `#!/bin/sh
+printf 'codesign %s\n' "$*" >>"$FAKE_DIR/calls.log"
+for last; do :; done
+body=$(cat "$last")
+case "$1" in
+--verify)
+  case $body in
+  *unsigned*)
+    echo "$last: code object is not signed at all" >&2
+    exit 1
+    ;;
+  esac
+  echo "$last: valid on disk" >&2
+  echo "$last: satisfies its Designated Requirement" >&2
+  ;;
+-dv)
+  echo "Identifier=dev.yardr.yardr" >&2
+  case $body in
+  *adhoc*) echo "Signature=adhoc" >&2 ;;
+  *)
+    echo "Authority=Developer ID Application: Stand In (ABCDE12345)" >&2
+    echo "Authority=Developer ID Certification Authority" >&2
+    echo "Authority=Apple Root CA" >&2
+    ;;
+  esac
+  ;;
+esac
+`
+
+// fakeSpctl answers as spctl does to an install assessment of the yardr it
+// is given: accepted from the notarization service, or, as the file says,
+// rejected as not notarized, or accepted from some other source. An exec
+// assessment is refused whatever the file is, as the real spctl refuses a
+// notarized bare binary: exec is of apps.
+const fakeSpctl = `#!/bin/sh
+printf 'spctl %s\n' "$*" >>"$FAKE_DIR/calls.log"
+for last; do :; done
+case " $* " in
+*" -t exec "*)
+  echo "$last: rejected (the code is valid but does not seem to be an app)" >&2
+  echo "origin=Developer ID Application: Stand In (ABCDE12345)" >&2
+  exit 3
+  ;;
+esac
+case $(cat "$last") in
+*unnotarized*)
+  echo "$last: rejected" >&2
+  echo "source=Unnotarized Developer ID" >&2
+  exit 3
+  ;;
+*othersource*)
+  echo "$last: accepted" >&2
+  echo "source=Developer ID" >&2
+  exit 0
+  ;;
+esac
+echo "$last: accepted" >&2
+echo "source=Notarized Developer ID" >&2
+echo "origin=Developer ID Application: Stand In (ABCDE12345)" >&2
 `
 
 // stage is one run's world: the stand-ins, their canned answers, and the
@@ -140,6 +233,9 @@ type stage struct {
 	bin string // the stand-ins, first on PATH
 	env []string
 }
+
+// standInIdentity is the identity the stand-in codesign says signed a yardr.
+const standInIdentity = "Developer ID Application: Stand In (ABCDE12345)"
 
 var gitEnv = []string{"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1",
 	"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
@@ -195,6 +291,8 @@ func newStage(t *testing.T) *stage {
 	write("yardr", fakeYardr)
 	write("gh", fakeGh)
 	write("minisign", fakeMinisign)
+	write("codesign", fakeCodesign)
+	write("spctl", fakeSpctl)
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
 		if strings.HasPrefix(k, "YARDR_") || strings.HasPrefix(k, "GIT_") {
@@ -203,12 +301,16 @@ func newStage(t *testing.T) *stage {
 		s.env = append(s.env, kv)
 	}
 	s.env = append(s.env, gitEnv...)
+	// The group's env_file gives the script the identity and the notary
+	// profile, as it does the real one's.
 	s.env = append(s.env,
 		"PATH="+s.bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"FAKE_DIR="+s.dir,
 		"YARDR_BIN=yardr",
 		"YARDR_BEAD=yardr-rel1",
 		"YARDR_BASE=main",
+		"YARDR_RELEASE_SIGN_IDENTITY="+standInIdentity,
+		"YARDR_RELEASE_NOTARY_PROFILE=stand-in-profile",
 	)
 	s.prime("done", "failed", "question")
 	return s
@@ -329,6 +431,18 @@ func (s *stage) build(checkout string) {
 	}
 	s.git(checkout, "add", "contrib/release/build")
 	s.git(checkout, "commit", "-q", "-m", "fake build")
+	s.git(checkout, "push", "-q", "origin", "main")
+}
+
+// sourceInstaller adds the install.sh yardr's repo has, so CI's missing
+// checksum is refused before the local signing build starts.
+func (s *stage) sourceInstaller(checkout string) {
+	s.t.Helper()
+	if err := os.WriteFile(filepath.Join(checkout, "install.sh"), []byte(fakeInstaller), 0o755); err != nil {
+		s.t.Fatal(err)
+	}
+	s.git(checkout, "add", "install.sh")
+	s.git(checkout, "commit", "-q", "-m", "installer")
 	s.git(checkout, "push", "-q", "origin", "main")
 }
 
@@ -464,17 +578,82 @@ func TestStageBuildRefusesACheckoutBehindItsRemote(t *testing.T) {
 	s.mustLack(got, "gh run list")
 }
 
+// The assets of v1.2.3 that CI's release workflow makes, and the two darwin
+// archives it does not.
+const (
+	linuxAMD64  = "yardr_1.2.3_linux_amd64.tar.gz"
+	linuxARM64  = "yardr_1.2.3_linux_arm64.tar.gz"
+	darwinARM64 = "yardr_1.2.3_darwin_arm64.tar.gz"
+	darwinAMD64 = "yardr_1.2.3_darwin_amd64.tar.gz"
+)
+
+// ciAssets is CI's draft whole: what the stage waits for, and install.sh.
+var ciAssets = []string{linuxAMD64, linuxARM64, "checksums.txt", "install.sh"}
+
+// ci serves what CI's draft holds, for gh release download: the two linux
+// archives and an install.sh with this content, and the checksums.txt over
+// them, written as CI's build writes it.
+func (s *stage) ci(installer string) {
+	s.t.Helper()
+	s.release(map[string]string{linuxAMD64: "linux amd64\n", linuxARM64: "linux arm64\n", "install.sh": installer}, false, false)
+}
+
+// omitCISum removes one asset's line from CI's checksums.txt, leaving the
+// draft to serve an incomplete file as a failed or partial build could.
+func (s *stage) omitCISum(name string) {
+	s.t.Helper()
+	path := filepath.Join(s.releaseDir(), "checksums.txt")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	var kept []string
+	removed := false
+	for _, line := range strings.Split(strings.TrimSuffix(string(b), "\n"), "\n") {
+		if strings.HasSuffix(line, "  "+name) {
+			removed = true
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if !removed {
+		s.t.Fatalf("CI's checksums.txt has no line for %s to omit", name)
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(kept, "\n")+"\n"), 0o644); err != nil {
+		s.t.Fatal(err)
+	}
+}
+
+// uploaded is what the stage gave gh release upload, by name.
+func (s *stage) uploaded() map[string]string {
+	s.t.Helper()
+	files := map[string]string{}
+	entries, err := os.ReadDir(filepath.Join(s.dir, "uploaded"))
+	if os.IsNotExist(err) {
+		return files
+	}
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	for _, e := range entries {
+		b, err := os.ReadFile(filepath.Join(s.dir, "uploaded", e.Name()))
+		if err != nil {
+			s.t.Fatal(err)
+		}
+		files[e.Name()] = string(b)
+	}
+	return files
+}
+
 func TestStageBuildTagsPushesAndWaitsForTheDraft(t *testing.T) {
 	s := newStage(t)
 	checkout, origin := s.repo()
-	complete := []string{
-		"yardr_1.2.3_darwin_amd64.tar.gz", "yardr_1.2.3_darwin_arm64.tar.gz",
-		"yardr_1.2.3_linux_amd64.tar.gz", "yardr_1.2.3_linux_arm64.tar.gz",
-		"checksums.txt",
-	}
-	// No release, then a draft still filling, then the whole draft: the
-	// build waits through the first two rounds, not just one look.
-	s.view(viewAbsent, draftJSON(complete[:2], true), draftJSON(complete, true))
+	s.build(checkout)
+	s.ci(fakeInstaller)
+	// No release, then a draft still filling, then one whose linux archives
+	// and checksums are ready but whose installer is still uploading, then
+	// CI's whole draft: the build waits for every asset its checksums name.
+	s.view(viewAbsent, draftJSON(ciAssets[:1], true), draftJSON(ciAssets[:3], true), draftJSON(ciAssets, true))
 	body := "Release \"v1.2.3\"\n\n- fixes <bugs> & things"
 	s.show("yardr v1.2.3", body)
 	s.run("build", "YARDR_DEPOT_PATH="+checkout,
@@ -499,11 +678,49 @@ func TestStageBuildTagsPushesAndWaitsForTheDraft(t *testing.T) {
 	s.mustContain(got, "gh run list --repo yardr-dev/yardr --workflow release.yml --commit "+base+" --event push")
 	s.mustContain(got, "gh release view v1.2.3 --repo yardr-dev/yardr --json isDraft")
 	s.mustContain(got, "gh release view v1.2.3 --repo yardr-dev/yardr --json assets")
-	if n := strings.Count(got, "gh release view"); n != 3 {
-		t.Errorf("gh release view was asked %d times; want 3 (absent, filling, whole)", n)
+	if n := strings.Count(got, "gh release view"); n != 4 {
+		t.Errorf("gh release view was asked %d times; want 4 (absent, filling, installer uploading, whole)", n)
 	}
-	// The draft's notes are the body, set once it is whole.
+	// With CI's draft whole, this machine builds the two darwin archives, no
+	// others, signed and notarized (the group's two variables reach the build),
+	// with the tagged commit's time.
+	epoch := strings.TrimSpace(s.git(checkout, "log", "-1", "--format=%ct", base))
+	s.mustContain(got, "SOURCE_DATE_EPOCH="+epoch+" targets=darwin/arm64 darwin/amd64 identity="+standInIdentity+" profile=stand-in-profile")
+	if n := strings.Count(got, "\nbuild "); n != 1 {
+		t.Errorf("the build ran %d times; want once, for the darwin archives", n)
+	}
+	// What goes up to the draft is the two darwin archives and a checksums.txt
+	// that names all four archives and install.sh once each, in the order the
+	// build writes it: this machine's lines, then CI's, the installer's last.
+	// CI's own lines are kept as they were, and the draft's linux archives
+	// and install.sh are not uploaded again.
+	ciSums, err := os.ReadFile(filepath.Join(s.releaseDir(), "checksums.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSums := s.sums(map[string]string{darwinARM64: "fake darwin/arm64\n", darwinAMD64: "fake darwin/amd64\n"}, darwinARM64, darwinAMD64) + string(ciSums)
+	up := s.uploaded()
+	if len(up) != 3 || up[darwinARM64] != "fake darwin/arm64\n" || up[darwinAMD64] != "fake darwin/amd64\n" {
+		t.Errorf("uploaded %q; want the two darwin archives and checksums.txt", up)
+	}
+	if up["checksums.txt"] != wantSums {
+		t.Errorf("uploaded checksums.txt =\n%s\nwant\n%s", up["checksums.txt"], wantSums)
+	}
+	s.mustContain(got, "gh release download v1.2.3 --repo yardr-dev/yardr --pattern checksums.txt --dir")
+	upload := ""
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "gh release upload v1.2.3 --repo yardr-dev/yardr ") && strings.Contains(line, "darwin") {
+			upload = line
+		}
+	}
+	s.mustContain(upload, "/"+darwinARM64+" ")
+	s.mustContain(upload, "/"+darwinAMD64+" ")
+	s.mustContain(upload, "/checksums.txt --clobber")
+	// The draft's notes are the body, set once it is whole, after the upload.
 	s.mustContain(got, "gh release edit v1.2.3 --repo yardr-dev/yardr --notes-file")
+	if strings.Index(got, upload) > strings.Index(got, "gh release edit") {
+		t.Error("the notes were set before the darwin archives were uploaded")
+	}
 	notes, err := os.ReadFile(filepath.Join(s.dir, "notes.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -515,7 +732,9 @@ func TestStageBuildTagsPushesAndWaitsForTheDraft(t *testing.T) {
 	s.mustContain(got, "yardr bead done yardr-rel1 --note -")
 	s.mustLack(got, "--outcome")
 	s.mustContain(got, "is drafted")
-	s.mustContain(got, "built by CI")
+	s.mustContain(got, "the linux archives built by CI from")
+	s.mustContain(got, "the darwin archives built, signed and notarized on this machine")
+	s.mustLack(got, "no attestation")
 	s.mustContain(got, "https://example.com/run/1")
 	for _, cmd := range []string{
 		"mkdir -p ~/releases/v1.2.3",
@@ -555,7 +774,9 @@ func TestStageBuildBuildsOnThisMachineWhenActionsIsOff(t *testing.T) {
 	s.mustContain(got, "gh api repos/yardr-dev/yardr/actions/permissions --jq .enabled")
 	epoch := strings.TrimSpace(s.git(checkout, "log", "-1", "--format=%ct", base))
 	s.mustContain(got, "build v1.2.3")
-	s.mustContain(got, "SOURCE_DATE_EPOCH="+epoch)
+	// All four archives are built here, the darwin ones signed and notarized
+	// by the build, which is given the group's two variables for it.
+	s.mustContain(got, "SOURCE_DATE_EPOCH="+epoch+" targets= identity="+standInIdentity+" profile=stand-in-profile")
 	s.mustContain(got, "gh release create v1.2.3 --repo yardr-dev/yardr --draft --verify-tag --notes-file")
 	s.mustContain(got, ".tar.gz")
 	s.mustContain(got, "checksums.txt")
@@ -579,6 +800,7 @@ func TestStageBuildBuildsOnThisMachineWhenActionsIsOff(t *testing.T) {
 	s.mustLack(got, "--outcome")
 	s.mustContain(got, "is drafted")
 	s.mustContain(got, "built on this machine")
+	s.mustContain(got, "the darwin binaries signed and notarized")
 	s.mustContain(got, "no attestation")
 	s.mustLack(got, "built by CI")
 	for _, cmd := range []string{
@@ -648,19 +870,58 @@ func TestStageBuildRejectsAnIncompleteLocalTargetSet(t *testing.T) {
 	s.mustLack(got, "gh run list")
 }
 
+// A run that died after tagging resumes: the tag is already at the base and a
+// draft is standing, which is adopted, and gets its darwin archives all the
+// same. Where the draft already holds them, and lines for them in its
+// checksums.txt (the run died after the upload, or the bead was advanced back
+// to build), they are built and uploaded again: each name is in the checksums
+// once, with the sum of the archive uploaded now.
 func TestStageBuildResumesAfterTagging(t *testing.T) {
-	s := newStage(t)
-	checkout, _ := s.repo()
-	// A run that died after tagging: the tag is already at the base.
-	s.git(checkout, "tag", "v1.2.3", "refs/heads/main")
-	s.view(draftJSON([]string{"a.tar.gz", "b.tar.gz", "c.tar.gz", "d.tar.gz", "checksums.txt"}, true))
-	s.show("yardr v1.2.3", "notes")
-	out := s.run("build", "YARDR_DEPOT_PATH="+checkout, "YARDR_RELEASE_WAIT_SLEEP=0")
-	got := s.log()
-	s.mustContain(out, "finishing that run")
-	s.mustContain(out, "adopting it")
-	s.mustContain(got, "gh release edit v1.2.3 --repo yardr-dev/yardr --notes-file")
-	s.mustContain(got, "yardr bead done yardr-rel1 --note -")
+	for _, tc := range []struct {
+		name   string
+		darwin bool // the draft already holds the darwin archives, and their lines
+	}{
+		{"a draft CI made", false},
+		{"a draft that already holds the darwin archives", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStage(t)
+			checkout, _ := s.repo()
+			s.build(checkout)
+			ci := map[string]string{linuxAMD64: "linux amd64\n", linuxARM64: "linux arm64\n", "install.sh": fakeInstaller}
+			files, assets := ci, ciAssets
+			if tc.darwin {
+				files = map[string]string{darwinARM64: "an earlier build\n", darwinAMD64: "an earlier build\n"}
+				for name, content := range ci {
+					files[name] = content
+				}
+				assets = append([]string{darwinARM64, darwinAMD64}, ciAssets...)
+			}
+			s.release(files, false, false)
+			// A run that died after tagging: the tag is already at the base.
+			s.git(checkout, "tag", "v1.2.3", "refs/heads/main")
+			s.view(draftJSON(assets, true))
+			s.show("yardr v1.2.3", "notes")
+			out := s.run("build", "YARDR_DEPOT_PATH="+checkout, "YARDR_RELEASE_WAIT_SLEEP=0")
+			got := s.log()
+			s.mustContain(out, "finishing that run")
+			s.mustContain(out, "adopting it")
+			s.mustContain(got, "gh release edit v1.2.3 --repo yardr-dev/yardr --notes-file")
+			s.mustContain(got, "yardr bead done yardr-rel1 --note -")
+			s.mustLack(got, "--outcome")
+			// The darwin archives this machine built now, and checksums that name
+			// them once beside CI's lines.
+			darwin := s.sums(map[string]string{darwinARM64: "fake darwin/arm64\n", darwinAMD64: "fake darwin/amd64\n"}, darwinARM64, darwinAMD64)
+			want := darwin + s.sums(ci, linuxAMD64, linuxARM64, "install.sh")
+			up := s.uploaded()
+			if len(up) != 3 || up[darwinARM64] != "fake darwin/arm64\n" || up[darwinAMD64] != "fake darwin/amd64\n" {
+				t.Errorf("uploaded %q; want the two darwin archives and checksums.txt", up)
+			}
+			if up["checksums.txt"] != want {
+				t.Errorf("uploaded checksums.txt =\n%s\nwant\n%s", up["checksums.txt"], want)
+			}
+		})
+	}
 }
 
 func TestStageBuildRefusesAnEmptyBody(t *testing.T) {
@@ -723,7 +984,9 @@ func TestStageBuildTimeoutNamesTheRun(t *testing.T) {
 func TestStageBuildFailsWhenTheNotesAreNotSet(t *testing.T) {
 	s := newStage(t)
 	checkout, _ := s.repo()
-	s.view(draftJSON([]string{"a.tar.gz", "b.tar.gz", "c.tar.gz", "d.tar.gz", "checksums.txt"}, true))
+	s.build(checkout)
+	s.ci(fakeInstaller)
+	s.view(draftJSON(ciAssets, true))
 	s.show("yardr v1.2.3", "notes")
 	s.run("build", "YARDR_DEPOT_PATH="+checkout,
 		"FAKE_GH_EDIT_RC=1", "YARDR_RELEASE_WAIT_SLEEP=0")
@@ -731,6 +994,104 @@ func TestStageBuildFailsWhenTheNotesAreNotSet(t *testing.T) {
 	s.mustContain(got, "--outcome failed")
 	s.mustContain(got, "setting its notes from the bead failed")
 	s.mustContain(got, "advance the bead to sign")
+}
+
+// The darwin archives are signed and notarized here or not shipped: with
+// either variable of the signing setup missing, the build refuses before it
+// tags anything, whatever builds the rest, so no release is left half-made
+// and no darwin binary goes out unsigned.
+func TestStageBuildRefusesToShipDarwinUnsigned(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{"neither", []string{"YARDR_RELEASE_SIGN_IDENTITY=", "YARDR_RELEASE_NOTARY_PROFILE="}, "YARDR_RELEASE_SIGN_IDENTITY and YARDR_RELEASE_NOTARY_PROFILE"},
+		{"no identity", []string{"YARDR_RELEASE_SIGN_IDENTITY="}, "not set where this group runs: YARDR_RELEASE_SIGN_IDENTITY."},
+		{"no profile", []string{"YARDR_RELEASE_NOTARY_PROFILE="}, "not set where this group runs: YARDR_RELEASE_NOTARY_PROFILE."},
+	} {
+		for _, actionsOff := range []bool{false, true} {
+			name := tc.name + ", CI builds the linux archives"
+			if actionsOff {
+				name = tc.name + ", Actions is off"
+			}
+			t.Run(name, func(t *testing.T) {
+				s := newStage(t)
+				checkout, _ := s.repo()
+				s.build(checkout)
+				s.show("yardr v1.2.3", "notes")
+				extra := append([]string{"YARDR_DEPOT_PATH=" + checkout, "YARDR_RELEASE_WAIT_SLEEP=0"}, tc.env...)
+				if actionsOff {
+					extra = append(extra, "FAKE_GH_ACTIONS_ENABLED=false")
+				}
+				s.run("build", extra...)
+				got := s.log()
+				s.mustContain(got, "yardr bead done yardr-rel1 --outcome failed --note -")
+				s.mustContain(got, tc.want)
+				s.mustContain(got, "never shipped unsigned")
+				s.mustContain(got, "yardr group set <group> env_file=<file>")
+				s.mustContain(got, "Nothing was tagged.")
+				// Nothing was asked of GitHub or built, and no tag was made.
+				s.mustLack(got, "\ngh ")
+				s.mustLack(got, "\nbuild ")
+				probe := exec.Command("git", "-C", checkout, "rev-parse", "--verify", "-q", "refs/tags/v1.2.3")
+				probe.Env = s.env
+				if err := probe.Run(); err == nil {
+					t.Fatal("a tag was made for a refused build")
+				}
+			})
+		}
+	}
+}
+
+// Whatever goes wrong with the darwin archives after CI's draft is whole is a
+// failure that leaves the draft as CI made it: nothing is uploaded that is
+// not whole, the notes are not set, and the note names what to do.
+func TestStageBuildFailsWhenTheDarwinArchivesCannotBeAdded(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		installer  string // what CI's checksums sum as install.sh
+		missingSum string // an asset CI forgot to name in checksums.txt
+		sourceInst bool   // the tagged checkout has install.sh
+		env        []string
+		want       string
+		uploaded   bool // that the upload was tried
+	}{
+		{name: "the build fails", installer: fakeInstaller, env: []string{"FAKE_BUILD_RC=1"}, want: "building the darwin archives of v1.2.3 on this machine failed"},
+		{name: "CI's checksums cannot be fetched", installer: fakeInstaller, env: []string{"FAKE_GH_DOWNLOAD_RC=1"}, want: "downloading CI's checksums.txt of v1.2.3 failed"},
+		{name: "CI omitted a linux archive", installer: fakeInstaller, missingSum: linuxARM64, want: "CI's checksums.txt has no line for " + linuxARM64},
+		{name: "CI omitted the installer", installer: fakeInstaller, missingSum: "install.sh", sourceInst: true, want: "CI's checksums.txt has no line for install.sh"},
+		{name: "CI summed another install.sh", installer: "another installer\n", want: "CI summed an install.sh that is not the one this machine built v1.2.3 with"},
+		{name: "the upload fails", installer: fakeInstaller, env: []string{"FAKE_GH_UPLOAD_RC=1"}, want: "uploading the darwin archives and the whole checksums.txt to the draft for v1.2.3 failed", uploaded: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStage(t)
+			checkout, _ := s.repo()
+			s.build(checkout)
+			if tc.sourceInst {
+				s.sourceInstaller(checkout)
+			}
+			s.ci(tc.installer)
+			if tc.missingSum != "" {
+				s.omitCISum(tc.missingSum)
+			}
+			s.view(viewAbsent, draftJSON(ciAssets, true))
+			s.show("yardr v1.2.3", "notes")
+			s.run("build", append([]string{"YARDR_DEPOT_PATH=" + checkout, "YARDR_RELEASE_WAIT_SLEEP=0"}, tc.env...)...)
+			got := s.log()
+			s.mustContain(got, "yardr bead done yardr-rel1 --outcome failed --note -")
+			s.mustContain(got, tc.want)
+			s.mustContain(got, "advance the bead back to build")
+			s.mustLack(got, "gh release edit")
+			s.mustLack(got, "yardr bead done yardr-rel1 --note -")
+			if !tc.uploaded && strings.Contains(got, "gh release upload") {
+				t.Errorf("an upload was tried:\n%s", got)
+			}
+			if tc.missingSum != "" {
+				s.mustLack(got, "\nbuild ")
+			}
+		})
+	}
 }
 
 func TestStageHoldsWhenTheFlowOffersNoOutcome(t *testing.T) {
@@ -761,15 +1122,15 @@ func (s *stage) release(archives map[string]string, corrupt, minisig bool) {
 	for name := range archives {
 		names = append(names, name)
 	}
-	words := strings.Fields(sumCmd(s.t))
-	cmd := exec.Command(words[0], append(append([]string{}, words[1:]...), names...)...)
-	cmd.Dir = dir
-	cmd.Env = s.env
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		s.t.Fatalf("checksums: %v\n%s", err, out)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "checksums.txt"), out, 0o644); err != nil {
+	// The order contrib/release/build writes: the archives, sorted, then
+	// install.sh, so that a checksums.txt made here reads as CI's does.
+	sort.Slice(names, func(i, j int) bool {
+		if (names[i] == "install.sh") != (names[j] == "install.sh") {
+			return names[j] == "install.sh"
+		}
+		return names[i] < names[j]
+	})
+	if err := os.WriteFile(filepath.Join(dir, "checksums.txt"), []byte(s.sumIn(dir, names)), 0o644); err != nil {
 		s.t.Fatal(err)
 	}
 	if corrupt {
@@ -790,6 +1151,57 @@ func (s *stage) release(archives map[string]string, corrupt, minisig bool) {
 	s.env = append(s.env, "FAKE_RELEASE_DIR="+dir)
 }
 
+// sumIn is the checksums of the named files of dir, in that order, as the
+// build writes them.
+func (s *stage) sumIn(dir string, names []string) string {
+	s.t.Helper()
+	words := strings.Fields(sumCmd(s.t))
+	cmd := exec.Command(words[0], append(append([]string{}, words[1:]...), names...)...)
+	cmd.Dir = dir
+	cmd.Env = s.env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		s.t.Fatalf("checksums: %v\n%s", err, out)
+	}
+	return string(out)
+}
+
+// sums is the checksums of files made here with this content, in the order
+// of names: the lines the fake build writes for the archives it makes.
+func (s *stage) sums(files map[string]string, names ...string) string {
+	s.t.Helper()
+	dir := s.t.TempDir()
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			s.t.Fatal(err)
+		}
+	}
+	return s.sumIn(dir, names)
+}
+
+// archiveOf is a gzipped tar of one file, as a release archive is of its
+// yardr: what verify unpacks to hand the stand-in codesign and spctl, which
+// read what to answer from the file's content.
+func archiveOf(t *testing.T, name, content string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(content))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
 // releaseDir is where release put verify's download.
 func (s *stage) releaseDir() string {
 	s.t.Helper()
@@ -802,31 +1214,67 @@ func (s *stage) releaseDir() string {
 	return ""
 }
 
+// A release is four archives: CI's two linux ones, each attested, and the two
+// darwin ones this machine signed and notarized, which carry no attestation
+// and are held to their signature instead.
+func darwinRelease(t *testing.T, s *stage) {
+	t.Helper()
+	s.release(map[string]string{
+		linuxAMD64: "linux amd64\n", linuxARM64: "linux arm64\n",
+		darwinARM64: archiveOf(t, "yardr", "darwin arm64\n"), darwinAMD64: archiveOf(t, "yardr", "darwin amd64\n"),
+	}, false, true)
+}
+
+// mustCountCalls fails unless the stand-ins were asked exactly want times
+// with calls that begin with prefix.
+func (s *stage) mustCountCalls(got, prefix string, want int) {
+	s.t.Helper()
+	n := 0
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			n++
+		}
+	}
+	if n != want {
+		s.t.Errorf("%q was asked %d times; want %d:\n%s", prefix, n, want, got)
+	}
+}
+
 func TestStageVerifyChecksASignedRelease(t *testing.T) {
 	s := newStage(t)
-	s.release(map[string]string{"a.tar.gz": "a\n", "b.tar.gz": "b\n"}, false, true)
+	darwinRelease(t, s)
 	s.show("yardr v1.2.3", "notes")
 	s.run("verify")
 	got := s.log()
 	s.mustContain(got, "gh release download v1.2.3 --repo yardr-dev/yardr")
 	s.mustContain(got, "minisign -V -P "+releaseKey)
+	// CI's archives are attested, and only they are.
 	s.mustContain(got, "gh attestation verify")
-	s.mustContain(got, "a.tar.gz --repo yardr-dev/yardr")
-	s.mustContain(got, "b.tar.gz --repo yardr-dev/yardr")
+	s.mustContain(got, linuxAMD64+" --repo yardr-dev/yardr")
+	s.mustContain(got, linuxARM64+" --repo yardr-dev/yardr")
+	s.mustLack(got, darwinARM64+" --repo")
+	s.mustLack(got, darwinAMD64+" --repo")
 	s.mustContain(got, "--signer-workflow yardr-dev/yardr/.github/workflows/release.yml --source-ref refs/tags/v1.2.3")
-	if n := strings.Count(got, "attestation verify"); n != 2 {
-		t.Errorf("attestation verify ran %d times; want once per archive", n)
-	}
+	s.mustCountCalls(got, "gh attestation verify", 2)
+	// Each darwin archive's yardr is looked at three ways.
+	s.mustCountCalls(got, "codesign --verify --strict --verbose=2 ", 2)
+	s.mustCountCalls(got, "codesign -dv --verbose=4 ", 2)
+	s.mustCountCalls(got, "spctl -a -vv -t install ", 2)
 	s.mustContain(got, "yardr bead done yardr-rel1 --note -")
 	s.mustLack(got, "--outcome")
 	s.mustContain(got, "the signature on v1.2.3 is good")
-	s.mustContain(got, "2 archives match checksums.txt")
-	s.mustContain(got, "attestation verifies")
+	s.mustContain(got, "4 archives match checksums.txt")
+	s.mustContain(got, "the 2 archives CI built have attestations that verify")
+	s.mustContain(got, "Each darwin archive's yardr is signed with "+standInIdentity+" and notarized")
+	s.mustLack(got, "every archive")
 }
 
+// The darwin archives are this machine's whether Actions is on or not, so
+// switching it off skips their attestations, which they never had, and
+// nothing of their signature check.
 func TestStageVerifySkipsAttestationsWhenActionsIsOff(t *testing.T) {
 	s := newStage(t)
-	s.release(map[string]string{"a.tar.gz": "a\n", "b.tar.gz": "b\n"}, false, true)
+	darwinRelease(t, s)
 	s.show("yardr v1.2.3", "notes")
 	s.run("verify", "FAKE_GH_ACTIONS_ENABLED=false")
 	got := s.log()
@@ -834,11 +1282,57 @@ func TestStageVerifySkipsAttestationsWhenActionsIsOff(t *testing.T) {
 	s.mustContain(got, "gh release download v1.2.3 --repo yardr-dev/yardr")
 	s.mustContain(got, "minisign -V -P "+releaseKey)
 	s.mustLack(got, "attestation verify")
+	s.mustCountCalls(got, "codesign --verify --strict --verbose=2 ", 2)
+	s.mustCountCalls(got, "spctl -a -vv -t install ", 2)
 	s.mustContain(got, "yardr bead done yardr-rel1 --note -")
 	s.mustLack(got, "--outcome")
 	s.mustContain(got, "the signature on v1.2.3 is good")
-	s.mustContain(got, "2 archives match checksums.txt")
+	s.mustContain(got, "4 archives match checksums.txt")
 	s.mustContain(got, "no attestation: built on this machine")
+	s.mustContain(got, "Each darwin archive's yardr is signed with "+standInIdentity+" and notarized")
+}
+
+// A darwin archive is held to its signature in place of an attestation, and
+// anything short of a binary signed with the group's identity and notarized by
+// Apple is a question, asked before any attestation is: the release is remade
+// by hand. The stand-ins answer as the real tools do for each of these, which
+// were run on real binaries.
+func TestStageVerifyQuestionsADarwinArchiveThatIsNotSignedAndNotarized(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		yardr  string   // what the archive's yardr holds, which the stand-ins answer from
+		member string   // the member's name, "yardr" unless the archive has none
+		env    []string // the stage's environment, over the default's
+		want   string
+		fix    string // what the note says to do
+		spctl  bool   // that Gatekeeper was asked, the checks before it passing
+	}{
+		{"an ad hoc signature", "adhoc binary\n", "yardr", nil, "is not signed with " + standInIdentity, "it is remade by hand", false},
+		{"no signature", "unsigned binary\n", "yardr", nil, "codesign --verify refuses the yardr in", "it is remade by hand", false},
+		{"another identity", "binary\n", "yardr", []string{"YARDR_RELEASE_SIGN_IDENTITY=Developer ID Application: Someone Else (ZZZZZ99999)"},
+			"is not signed with Developer ID Application: Someone Else (ZZZZZ99999)", "it is remade by hand", false},
+		{"not notarized", "unnotarized binary\n", "yardr", nil, "Gatekeeper refuses the yardr in", "it is remade by hand", true},
+		{"accepted from no notarization", "othersource binary\n", "yardr", nil, "does not take the yardr in", "it is remade by hand", true},
+		{"no identity to hold it to", "binary\n", "yardr", []string{"YARDR_RELEASE_SIGN_IDENTITY="},
+			"YARDR_RELEASE_SIGN_IDENTITY is not set where this group runs", "then Done again", false},
+		{"no yardr in it", "binary\n", "README.md", nil, "unpacking the yardr of", "it is remade by hand", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStage(t)
+			s.release(map[string]string{linuxAMD64: "linux amd64\n", darwinARM64: archiveOf(t, tc.member, tc.yardr)}, false, true)
+			s.show("yardr v1.2.3", "notes")
+			s.run("verify", tc.env...)
+			got := s.log()
+			s.mustContain(got, "yardr bead done yardr-rel1 --outcome question --note -")
+			s.mustContain(got, tc.want)
+			s.mustContain(got, tc.fix)
+			s.mustLack(got, "yardr bead done yardr-rel1 --note -")
+			s.mustLack(got, "attestation verify")
+			if asked := strings.Contains(got, "\nspctl "); asked != tc.spctl {
+				t.Errorf("spctl asked = %v; want %v:\n%s", asked, tc.spctl, got)
+			}
+		})
+	}
 }
 
 func TestStageVerifyQuestionsABadAttestation(t *testing.T) {
@@ -997,6 +1491,9 @@ func TestStageVerifyHoldsTheInstallerToTheTag(t *testing.T) {
 				if n := strings.Count(got, "attestation verify"); n != 1 {
 					t.Errorf("attestation verify ran %d times; want once, for the archive", n)
 				}
+				// No darwin archive among them, and the note says that none was
+				// looked at, so that a check not made is never silent.
+				s.mustContain(got, "The release holds no darwin archive, so none was checked for a signature.")
 				switch {
 				case tc.release == "-":
 					s.mustLack(got, "install.sh")

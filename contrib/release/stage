@@ -13,35 +13,52 @@
 # v<major>.<minor>.<patch>; the bead's body is the release notes.
 #
 #   build: refuses a bad title (question: the bead is wrong), a published
-#     release, a tag at another commit, a dirty tree, and a checkout that
-#     is not the remote's base; tags the base commit, pushes the tag, and
-#     waits for the draft release CI's release workflow makes for the tag,
-#     bounded; sets the draft's notes from the bead's body and notes the
+#     release, a tag at another commit, a dirty tree, a checkout that is
+#     not the remote's base, and a machine that is not set up to sign
+#     (YARDR_RELEASE_SIGN_IDENTITY and YARDR_RELEASE_NOTARY_PROFILE, both,
+#     below), all before anything is tagged; tags the base commit, pushes
+#     the tag, and waits for the draft release CI's release workflow makes
+#     for the tag, bounded: the two linux archives and checksums.txt; if
+#     those sums name install.sh, it waits for that asset too. It then builds
+#     the two darwin archives on this machine, signed with the
+#     Developer ID and notarized by Apple (contrib/release/build, with
+#     SOURCE_DATE_EPOCH from the tagged commit, as the workflow sets it),
+#     makes checksums.txt name all four archives and install.sh, and
+#     uploads the darwin archives and that checksums.txt to the draft.
+#     Then it sets the draft's notes from the bead's body and notes the
 #     five signing commands for the version on the bead. Then done, to
 #     sign. A run that died after tagging resumes: a tag at the base
 #     commit with no release on it is pushed again and waited on, and a
-#     draft already standing is adopted, not refused. A CI run that
-#     concluded anything but success reports failed with the run's URL.
+#     draft already standing is adopted, not refused, and gets its darwin
+#     archives built and uploaded again. A CI run that concluded anything
+#     but success reports failed with the run's URL.
 #     When GitHub Actions is switched off on the release repo there is no
 #     CI to wait for: build runs contrib/release/build on this machine
-#     instead (SOURCE_DATE_EPOCH from the tagged commit, as the workflow
+#     instead, for all four archives (darwin signed and notarized as
+#     above, SOURCE_DATE_EPOCH from the tagged commit, as the workflow
 #     sets it) and makes the draft from it, with no attestation; a draft
 #     already standing is adopted in both modes. The draft is the build's
 #     archives and checksums.txt and, when the build wrote one, its
 #     install.sh.
 #   verify: downloads the release, checks checksums.txt.minisig against the
-#     release key, the archives against checksums.txt, and each archive's
-#     build-provenance attestation (gh attestation verify), skipped with
-#     no attestation when Actions is off on the release repo. Then done, to
-#     publish; a missing or bad signature reports failed with what minisign
-#     said, so sign is asked again, and archives that do not match, an
-#     attestation that does not verify, or a check that could not run,
-#     report question, to decide. An install.sh on the release is no archive:
-#     it is not counted with them and has no attestation. The checksums name
-#     it (a release made before they did has no line for it, and passes with
-#     a note saying so), and it is held to the tag besides: it must be the
-#     tagged commit's own file, byte for byte, and a release without one
-#     is questioned where the tag has one.
+#     release key, the archives against checksums.txt, and then each
+#     archive by who built it: a linux archive's build-provenance
+#     attestation (gh attestation verify), skipped with no attestation
+#     when Actions is off on the release repo, and a darwin archive's
+#     signature, in place of an attestation, which a build on this machine
+#     has none of: its yardr must pass codesign --verify, be signed by
+#     YARDR_RELEASE_SIGN_IDENTITY and be accepted by Gatekeeper as a
+#     notarized Developer ID binary (spctl), with or without Actions. Then
+#     done, to publish; a missing or bad signature reports failed with what
+#     minisign said, so sign is asked again, and archives that do not match,
+#     an attestation that does not verify, a darwin binary that is not signed
+#     and notarized, or a check that could not run, report question, to
+#     decide. An install.sh on the release is no archive: it is not counted
+#     with them and has no attestation. The checksums name it (a release
+#     made before they did has no line for it, and passes with a note saying
+#     so), and it is held to the tag besides: it must be the tagged commit's
+#     own file, byte for byte, and a release without one is questioned where
+#     the tag has one.
 #   publish: releases the draft, files the yardr.dev sync bead and advances
 #     it to new, notes its id on the release bead. Then done, to published.
 #
@@ -50,17 +67,34 @@
 # only moves the flow allows are tried, and a flow that names none holds
 # the bead instead.
 #
-# Needs on PATH: jq and git always; gh for build, verify and publish;
-# minisign and shasum (or sha256sum) for verify. gh acts as whoever it is
-# logged in as.
+# Needs on PATH: jq and git always; gh for build, verify and publish; go,
+# codesign, zip and xcrun (a Mac's, with the Xcode command line tools) for
+# build, which signs and notarizes the darwin binaries and needs this Mac
+# logged in, with the keychain that holds the identity unlocked; minisign,
+# shasum (or sha256sum), tar, codesign and spctl for verify. gh acts as
+# whoever it is logged in as.
 #
-# Another depot's release flow calls this same script with its own release:
+# Another depot's release flow can call this same script with its own release:
 # the repo and the key come from the environment, with yardr's as the
 # defaults. Its CI is expected to draft the release the same way
-# (.github/workflows/release.yml does): the four archives and checksums.txt
-# on the pushed tag, each archive attested. With Actions off on that repo
+# (.github/workflows/release.yml does): the two linux archives and
+# checksums.txt on the pushed tag, each archive attested; the darwin archives
+# are built here, so its contrib/release/build takes darwin targets and the
+# signing variables below as yardr's does. With Actions off on that repo
 # too the draft is built on this machine instead, with no attestation.
 #
+# The darwin binaries are signed under the one identity contrib/release/build
+# is given, and the exec group's env_file is where it and the notary profile
+# are named (docs/install.md, "Signed darwin binaries"): build refuses
+# without both, before it tags, and verify holds each darwin binary to the
+# identity.
+#
+#   YARDR_RELEASE_SIGN_IDENTITY  the "Developer ID Application" identity,
+#                           whole, as `security find-identity -v -p
+#                           codesigning` prints it between the quotes
+#                           (no default: build refuses without it)
+#   YARDR_RELEASE_NOTARY_PROFILE  the notarytool keychain profile the
+#                           binaries are notarized under (no default)
 #   YARDR_RELEASE_REPO      the GitHub repo, owner/name (default yardr-dev/yardr)
 #   YARDR_RELEASE_PUBKEY    the minisign public key verify checks against
 #                           (default yardr's release key)
@@ -189,6 +223,87 @@ actions_off() {
   [ "$enabled" = false ]
 }
 
+# name_of <line>: the file name a line of checksums.txt sums, read as verify
+# reads one (the sum, white space, an optional binary mark, the name).
+name_of() {
+  printf '%s\n' "$1" | sed -n 's/^[0-9a-fA-F][0-9a-fA-F]*  *[* ]\{0,1\}\(.*\)$/\1/p'
+}
+
+# line_of <checksums file> <name>: the first line of the file that sums <name>.
+line_of() {
+  while IFS= read -r sumline; do
+    if [ "$(name_of "$sumline")" = "$2" ]; then
+      printf '%s\n' "$sumline"
+      return 0
+    fi
+  done <"$1"
+  return 1
+}
+
+# has_asset <release view json> <name>: whether the release holds an asset of
+# that name. An answer that cannot be read holds none.
+has_asset() {
+  printf '%s' "$1" | jq -e --arg n "$2" '[.assets[]?.name] | index($n) != null' >/dev/null 2>&1
+}
+
+# darwin_archives: builds the two darwin archives of $v here, signed with the
+# Developer ID and notarized by Apple (contrib/release/build does both, from
+# the variables the exec group's env_file gives it), and adds them to the
+# standing draft: its checksums.txt is made to name them beside CI's linux
+# archives and its install.sh, and they go up with --clobber, so that a run
+# again replaces what an earlier one left. CI's checksums.txt is fetched and
+# added to, not made again: the sums of the linux archives stay CI's own, and
+# verify checks them against the files before anything is published. $epoch,
+# $tmp, $v, $REPO and $GHREPO are build's.
+darwin_archives() {
+  darwin="yardr_${v#v}_darwin_arm64.tar.gz yardr_${v#v}_darwin_amd64.tar.gz"
+  mkdir -p "$tmp/dist" "$tmp/ci" "$tmp/merged" ||
+    fail failed "cannot make a working directory; nothing was released"
+  echo "== $BEAD: building the darwin archives of $v on this machine, signed and notarized (Apple's answer takes minutes)"
+  if ! SOURCE_DATE_EPOCH="$epoch" YARDR_RELEASE_TARGETS="darwin/arm64 darwin/amd64" "$REPO/contrib/release/build" "$v" "$tmp/dist" >"$tmp/build.log" 2>&1; then
+    fail failed "building the darwin archives of $v on this machine failed, and the draft holds CI's linux archives and no darwin one: fix the failure, then advance the bead back to build, which adopts the draft and builds them again" "$(tail -n 20 "$tmp/build.log")"
+  fi
+  for archive in $darwin; do
+    [ -f "$tmp/dist/$archive" ] ||
+      fail failed "the build on this machine did not make $archive; fix the failure, then advance the bead back to build" "$(tail -n 20 "$tmp/build.log")"
+  done
+  # The order contrib/release/build writes: the archives, then install.sh,
+  # once. The two this machine made come from its own checksums, CI's lines
+  # are all the others (but any of the two an earlier run left), and the
+  # install.sh line is CI's, which this machine's must equal: the same tag
+  # makes the same file, so a difference says the two did not build the
+  # same commit.
+  sums=$tmp/merged/checksums.txt
+  : >"$sums"
+  for archive in $darwin; do
+    sumline=$(line_of "$tmp/dist/checksums.txt" "$archive") ||
+      fail failed "the checksums of the build on this machine have no line for $archive; fix the failure, then advance the bead back to build"
+    printf '%s\n' "$sumline" >>"$sums"
+  done
+  while IFS= read -r sumline; do
+    [ -n "$sumline" ] || continue
+    case " $darwin install.sh " in *" $(name_of "$sumline") "*) continue ;; esac
+    printf '%s\n' "$sumline" >>"$sums"
+  done <"$tmp/ci/checksums.txt"
+  my_install=$(line_of "$tmp/dist/checksums.txt" install.sh) || my_install=""
+  if [ -n "$my_install" ]; then
+    [ -n "$ci_install" ] ||
+      fail failed "CI's checksums.txt has no line for install.sh, so the draft's checksums would not cover the installer; advance the bead back to build"
+    [ "$ci_install" = "$my_install" ] ||
+      fail failed "CI summed an install.sh that is not the one this machine built $v with, so the two did not build the same files; delete the tag here and on $REMOTE and the draft, and advance the bead back to build" "CI: $ci_install
+here: $my_install"
+    printf '%s\n' "$ci_install" >>"$sums"
+  elif [ -n "$ci_install" ]; then
+    fail failed "CI's checksums.txt names install.sh, but the build on this machine did not make it; advance the bead back to build"
+  fi
+  set --
+  for archive in $darwin; do
+    set -- "$@" "$tmp/dist/$archive"
+  done
+  gh release upload "$v" --repo "$GHREPO" "$@" "$sums" --clobber >"$tmp/upload.log" 2>&1 ||
+    fail failed "uploading the darwin archives and the whole checksums.txt to the draft for $v failed, and the draft may hold some of them: advance the bead back to build, which adopts the draft and does it again" "$(cat "$tmp/upload.log")"
+}
+
 build() {
   : "${YARDR_DEPOT_PATH:?the bead has no depot}" "${YARDR_BASE:?the bead has no base}"
   command -v git >/dev/null 2>&1 || fail failed "git is not on PATH; the release group runs where jq, git and gh are"
@@ -199,6 +314,16 @@ build() {
   # says nothing.
   body=$(printf '%s' "$show" | jq -r '.body // empty')
   [ -n "$body" ] || fail question "the bead has no body, which is the release notes: write them on it and advance the bead back to build"
+  # The darwin archives are built, signed and notarized here, whatever builds
+  # the rest, and are never shipped unsigned. contrib/release/build only
+  # warns when it is told nothing of signing, so this stops it before the tag
+  # is made: after the tag CI has run, and a refusal then would leave a tag
+  # and a draft for someone to delete.
+  unset_vars=""
+  [ -n "${YARDR_RELEASE_SIGN_IDENTITY:-}" ] || unset_vars="YARDR_RELEASE_SIGN_IDENTITY"
+  [ -n "${YARDR_RELEASE_NOTARY_PROFILE:-}" ] || unset_vars="${unset_vars:+$unset_vars and }YARDR_RELEASE_NOTARY_PROFILE"
+  [ -z "$unset_vars" ] ||
+    fail failed "not set where this group runs: $unset_vars. The darwin archives are built here, signed and notarized, and never shipped unsigned: name both variables in a file only the operator can read (mode 0600, one NAME=value per line, the value unquoted) and give it to the group (yardr group set <group> env_file=<file>); docs/install.md, \"Signed darwin binaries\", has the lines. Then advance the bead back to build. Nothing was tagged."
   [ -z "$(git -C "$REPO" status --porcelain)" ] ||
     fail failed "$REPO has uncommitted or untracked files; commit or clean them, then advance the bead back to build"
   fetch_out=$(git -C "$REPO" fetch -q "$REMOTE" "$BASE" 2>&1) ||
@@ -232,14 +357,15 @@ build() {
   [ -n "$tagat" ] || git -C "$REPO" tag "$v" "$base" || fail failed "tagging $at as $v failed; nothing was pushed"
   git -C "$REPO" push "$REMOTE" "$v" >"$tmp/push.log" 2>&1 ||
     fail failed "tag $v is made but pushing it to $REMOTE failed; push it by hand, then advance the bead back to build" "$(tail -n 10 "$tmp/push.log")"
+  # Whatever is built on this machine is built reproducibly, from this
+  # checkout at the pushed tag: SOURCE_DATE_EPOCH is the tagged commit's time,
+  # as the workflow sets it.
+  epoch=$(git -C "$REPO" log -1 --format=%ct "$base" 2>/dev/null) || epoch=""
   # With Actions off on the release repo there is no CI to make the draft:
-  # it is built on this machine instead, from this checkout at the pushed
-  # tag, reproducibly (SOURCE_DATE_EPOCH from the tagged commit, as the
-  # workflow sets it). A draft already standing is adopted here too,
-  # filled again rather than refused.
+  # all four archives are built on this machine instead. A draft already
+  # standing is adopted here too, filled again rather than refused.
   if actions_off; then
     echo "== $BEAD: Actions is off on $GHREPO; building $v on this machine"
-    epoch=$(git -C "$REPO" log -1 --format=%ct "$base" 2>/dev/null) || epoch=""
     mkdir -p "$tmp/dist" ||
       fail failed "cannot make a working directory; nothing was released"
     if ! SOURCE_DATE_EPOCH="$epoch" "$REPO/contrib/release/build" "$v" "$tmp/dist" >"$tmp/build.log" 2>&1; then
@@ -278,22 +404,26 @@ build() {
         fail failed "the build for $v is made but creating its draft failed; build again by hand (contrib/release/build $v dist) and make the draft from it, then advance the bead to sign" "$(cat "$tmp/create.log")"
       fi
     fi
-    built_by="built on this machine from $at, with no attestation"
+    built_by="built on this machine from $at, the darwin binaries signed and notarized, with no attestation"
     run_line=""
   else
     # The pushed tag starts CI's release workflow, which tests, builds the
-    # archives and checksums.txt, attests them and makes the draft. Each
+    # linux archives and checksums.txt, attests them and makes the draft. Each
     # round asks the workflow for its run and the release for its assets;
-    # the draft is done when it holds the four archives and checksums.txt.
+    # the draft is done when it holds the two linux archives, by name, and
+    # checksums.txt, plus any installer that file names. The darwin archives
+    # are not CI's to make.
     # A gh answer that cannot be read is another round, not a failure: only
     # a run that concluded, or the last round, ends the wait.
     rounds=${YARDR_RELEASE_WAIT_ROUNDS:-60}
     sleep_for=${YARDR_RELEASE_WAIT_SLEEP:-30}
     case $rounds in '' | *[!0-9]*) rounds=60 ;; esac
     case $sleep_for in '' | *[!0-9]*) sleep_for=30 ;; esac
+    linux_archives="yardr_${v#v}_linux_amd64.tar.gz yardr_${v#v}_linux_arm64.tar.gz"
+    ci_assets="$linux_archives checksums.txt"
     run_url=""
-    n_arch=0
-    has_sums=0
+    ready=""
+    ci_install=""
     i=0
     while [ "$i" -lt "$rounds" ]; do
       i=$((i + 1))
@@ -308,29 +438,49 @@ build() {
         fi
       fi
       draft=$(gh release view "$v" --repo "$GHREPO" --json assets 2>/dev/null) || draft=""
-      if [ -n "$draft" ]; then
-        n_arch=$(printf '%s' "$draft" | jq '[.assets[]?.name | select(endswith(".tar.gz"))] | length' 2>/dev/null) || n_arch=0
-        has_sums=$(printf '%s' "$draft" | jq '[.assets[]?.name | select(. == "checksums.txt")] | length' 2>/dev/null) || has_sums=0
+      ready=1
+      for name in $ci_assets; do
+        has_asset "$draft" "$name" || ready=""
+      done
+      if [ -n "$ready" ]; then
+        mkdir -p "$tmp/ci" ||
+          fail failed "cannot make a working directory; nothing was released"
+        gh release download "$v" --repo "$GHREPO" --pattern checksums.txt --dir "$tmp/ci" --clobber >"$tmp/download.log" 2>&1 ||
+          fail failed "downloading CI's checksums.txt of $v failed, so the darwin archives were not added to the draft; advance the bead back to build" "$(cat "$tmp/download.log")"
+        [ -f "$tmp/ci/checksums.txt" ] ||
+          fail failed "draft $v holds no checksums.txt to add the darwin archives to; advance the bead back to build"
+        for archive in $linux_archives; do
+          line_of "$tmp/ci/checksums.txt" "$archive" >/dev/null ||
+            fail failed "CI's checksums.txt has no line for $archive, so the draft's checksums would not cover every archive; advance the bead back to build"
+        done
+        ci_install=$(line_of "$tmp/ci/checksums.txt" install.sh) || ci_install=""
+        if [ -f "$REPO/install.sh" ] && [ -z "$ci_install" ]; then
+          fail failed "CI's checksums.txt has no line for install.sh, so the draft's checksums would not cover the installer; advance the bead back to build"
+        fi
+        if [ -n "$ci_install" ]; then
+          has_asset "$draft" install.sh || ready=""
+        fi
       fi
-      if [ "$n_arch" -eq 4 ] && [ "$has_sums" -ge 1 ]; then
-        echo "== $BEAD: draft $v holds the four archives and checksums.txt"
+      if [ -n "$ready" ]; then
+        echo "== $BEAD: draft $v holds CI's linux archives, checksums.txt and every file it sums"
         break
       fi
       [ "$i" -ge "$rounds" ] || sleep "$sleep_for"
     done
-    if [ "$n_arch" -ne 4 ] || [ "$has_sums" -lt 1 ]; then
+    if [ -z "$ready" ]; then
       mins=$((rounds * sleep_for / 60))
       where="no release run has shown for the tag yet"
       [ -z "$run_url" ] || where="the run is at $run_url"
       fail failed "CI did not finish the draft for $v in $mins minutes ($where); check the run, and to run it again delete the tag here and on $REMOTE and advance the bead back to build"
     fi
+    darwin_archives
     printf '%s\n' "$body" >"$tmp/notes.md"
     if gh release edit "$v" --repo "$GHREPO" --notes-file "$tmp/notes.md" >"$tmp/notes.log" 2>&1; then
       echo "== $BEAD: the draft's notes are the bead's body"
     else
       fail failed "the draft for $v is complete but setting its notes from the bead failed; set them by hand from the bead's body, then advance the bead to sign" "$(cat "$tmp/notes.log")"
     fi
-    built_by="built by CI from $at"
+    built_by="the linux archives built by CI from $at, the darwin archives built, signed and notarized on this machine"
     run_line=""
     [ -z "$run_url" ] || run_line=" CI's run is at $run_url."
   fi
@@ -355,6 +505,57 @@ Then Done: the verify stage checks the signature next."
 # empty path would stay in the current directory, hence the test first.
 tagged_installer() {
   [ -n "$REPO" ] && git -C "$REPO" show "refs/tags/$v:install.sh" 2>/dev/null
+}
+
+# darwin_check: each darwin archive of the downloaded release ($archives, in
+# $tmp), looked at as a Mac that takes it would, in place of an attestation:
+# this machine built them, and nothing but their signature says so. The
+# archive's yardr is unpacked alone, into a directory of its own, and must
+# pass codesign --verify --strict, be signed by the identity the group signs
+# with (the Authority line of codesign -dv, which an ad hoc signature, as the
+# Go linker leaves one, does not have), and be taken by Gatekeeper as a
+# notarized Developer ID binary (spctl). The assessment asked of spctl is
+# install's, not exec's: exec is of apps, and refuses a notarized bare binary
+# as "the code is valid but does not seem to be an app", while install judges
+# the signature and the notarization alone. A bare binary carries no ticket,
+# so spctl asks Apple for it, and the check needs the network. A fault is a
+# question, as an archive that does not match is: the release is remade by
+# hand. Sets $mac to the sentence the done note carries: what was checked, or
+# that there was nothing to check, so that a skipped check is never silent.
+darwin_check() {
+  signed=""
+  for b in $archives; do
+    case $b in *_darwin_*.tar.gz) signed="$signed $b" ;; esac
+  done
+  if [ -z "$signed" ]; then
+    mac="The release holds no darwin archive, so none was checked for a signature."
+    return
+  fi
+  identity=${YARDR_RELEASE_SIGN_IDENTITY:-}
+  [ -n "$identity" ] ||
+    fail question "release $v holds darwin archives, and YARDR_RELEASE_SIGN_IDENTITY is not set where this group runs, so there is no identity to hold their signature to: name it in the group's env_file (docs/install.md, \"Signed darwin binaries\"), then Done again"
+  remade="it is remade by hand (the release and the tag deleted, the bead back to build)"
+  checked=""
+  for b in $signed; do
+    dest=$tmp/mac-${b%.tar.gz}
+    mkdir "$dest" || fail question "cannot make a working directory; the darwin archives were not checked"
+    tar -xzf "$tmp/$b" -C "$dest" yardr >"$tmp/mac.log" 2>&1 ||
+      fail question "unpacking the yardr of $b from release $v failed (the archive holds none, or tar could not read it), so the darwin archives were not checked; $remade" "$(cat "$tmp/mac.log")"
+    out=$(codesign --verify --strict --verbose=2 "$dest/yardr" 2>&1) ||
+      fail question "codesign --verify refuses the yardr in $b of release $v (it is not signed, or codesign could not run); $remade" "$out"
+    out=$(codesign -dv --verbose=4 "$dest/yardr" 2>&1) ||
+      fail question "codesign -dv could not read the signature of the yardr in $b of release $v; $remade" "$out"
+    printf '%s\n' "$out" | grep -q -x -F "Authority=$identity" ||
+      fail question "the yardr in $b of release $v is not signed with $identity (codesign -dv names no such Authority, as it names none for an ad hoc signature); $remade" "$out"
+    out=$(spctl -a -vv -t install "$dest/yardr" 2>&1) ||
+      fail question "Gatekeeper refuses the yardr in $b of release $v (spctl -a -vv -t install failed: it is not notarized, or the check could not reach Apple); $remade" "$out"
+    case $out in
+    *"source=Notarized Developer ID"*) ;;
+    *) fail question "Gatekeeper does not take the yardr in $b of release $v as notarized (spctl does not name source=Notarized Developer ID); $remade" "$out" ;;
+    esac
+    checked="${checked:+$checked, }$b"
+  done
+  mac="Each darwin archive's yardr is signed with $identity and notarized (codesign --verify passes, codesign -dv names the identity, and spctl names Notarized Developer ID as the source): $checked."
 }
 
 verify() {
@@ -419,24 +620,32 @@ verify() {
   elif tagged_installer >/dev/null; then
     fail question "tag $v has an install.sh and release $v holds none; it is remade by hand (the release and the tag deleted, the bead back to build)"
   fi
+  # The darwin archives are this machine's, whether or not Actions is on, so
+  # they are checked by their signature either way.
+  darwin_check
   # With Actions off the release was built on this machine, with no
-  # attestation to check; the signature and the checksums are the whole
-  # of it.
+  # attestation to check; the signature, the checksums and the darwin
+  # binaries' signatures are the whole of it.
   if actions_off; then
     echo "== $BEAD: Actions is off on $GHREPO; skipping attestations"
-    done_with publish "verify: the signature on $v is good ($minisign_out), its $n archives match checksums.txt (no attestation: built on this machine).$installer_note"
+    done_with publish "verify: the signature on $v is good ($minisign_out), its $n archives match checksums.txt (no attestation: built on this machine).$installer_note $mac"
   fi
-  # Each archive's attestation says CI's release workflow built it; without
-  # one the files are not the workflow's, however well they checksum. The
-  # workflow attests the archives alone, so the installer is not asked.
+  # Each of CI's archives has an attestation that says CI's release workflow
+  # built it; without one the files are not the workflow's, however well they
+  # checksum. The workflow attests the archives it builds, the linux ones, and
+  # neither the darwin archives, which darwin_check has looked at, nor the
+  # installer, so those are not asked.
+  attested=0
   # shellcheck disable=SC2086 # $archives is a newline-separated list
   for b in $archives; do
+    case $b in *_darwin_*.tar.gz) continue ;; esac
     attest_out=$(gh attestation verify "$tmp/$b" --repo "$GHREPO" \
       --signer-workflow "$GHREPO/.github/workflows/release.yml" \
       --source-ref "refs/tags/$v" 2>&1) ||
       fail question "the attestation for $b on release $v is missing or bad: the files are not CI's build, or the check could not reach GitHub. It is remade by hand (the release and the tag deleted, the bead back to build), or checked again where the failure was the network" "$attest_out"
+    attested=$((attested + 1))
   done
-  done_with publish "verify: the signature on $v is good ($minisign_out), its $n archives match checksums.txt, and every archive's attestation verifies.$installer_note"
+  done_with publish "verify: the signature on $v is good ($minisign_out), its $n archives match checksums.txt, and the $attested archives CI built have attestations that verify.$installer_note $mac"
 }
 
 publish() {

@@ -1,13 +1,16 @@
 name: release
 
 # A pushed tag v* tests, builds, attests and drafts the release: the same
-# test jobs as ci.yml, then the four archives and checksums.txt built
+# test jobs as ci.yml, then the two linux archives and checksums.txt built
 # reproducibly (install.sh is copied beside them, in no archive), an SBOM
 # of the source, build-provenance attestations for the archives, and a
-# draft release holding the files. The yard's release flow pushes the tag
-# and waits for the draft (docs/install.md, "Making a release"); mckean
-# signs the draft's checksums by hand, and the flow publishes the draft
-# once the signature verifies. Run by hand
+# draft release holding the files. The darwin archives are none of this
+# workflow's: they are signed with a Developer ID and notarized by Apple,
+# so the yard's release flow builds them on a Mac that holds the identity
+# and adds them to the draft, with checksums.txt made whole. The flow pushes
+# the tag and waits for the draft (docs/install.md, "Making a release");
+# mckean signs the draft's checksums by hand, and the flow publishes the
+# draft once the signature verifies. Run by hand
 # (workflow_dispatch) it is a dry run: the same tests and the same build,
 # the archives and the SBOM kept as workflow artifacts, and nothing
 # attested or published.
@@ -139,18 +142,25 @@ jobs:
       - name: fix the build time to the commit
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >>"$GITHUB_ENV"
       # The script a person runs for the same build. It cross-compiles the
-      # four targets without cgo, stamps the version, runs the linux/amd64
+      # targets without cgo, stamps the version, runs the linux/amd64
       # binary's `yardr version` against it, and writes the archives and
       # checksums.txt to dist/.
-      # The darwin binaries come out unsigned: signing and notarizing them
-      # takes a Mac with the Developer ID, which this runner is not, and the
-      # script's two variables for it are left unset (docs/install.md,
-      # "Signed darwin binaries"). checksums.txt comes out unsigned too: the
-      # minisign key is not on this runner, and the checksums of a release
-      # are signed by hand afterwards (docs/install.md, "Signed checksums").
+      # The targets are the two linux ones and no darwin one: signing and
+      # notarizing a darwin binary takes a Mac with the Developer ID, and
+      # this runner is not one and holds no Apple identity. The release flow
+      # builds the darwin archives on a Mac and adds them to the draft
+      # (docs/install.md, "Making a release"). checksums.txt comes out
+      # unsigned: the minisign key is not on this runner either, and the
+      # checksums of a release are signed by hand afterwards
+      # (docs/install.md, "Signed checksums").
       - name: build the archives
+        env:
+          YARDR_RELEASE_TARGETS: "linux/amd64 linux/arm64"
         run: contrib/release/build "$VERSION" dist
       # Only a tag attests; a dry run publishes nothing, not even attestations.
+      # The archives are the two built above; the darwin ones the flow adds
+      # carry no attestation, and its verify stage checks their signature and
+      # notarization instead.
       - name: attest the archives
         if: github.event_name == 'push'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2

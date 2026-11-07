@@ -133,9 +133,10 @@ may have no signature.
 ## macOS
 
 A release's darwin binaries are signed with an Apple Developer ID and
-notarized by Apple when the release was built on a Mac that has the identity
-([Making a release](#making-a-release)), and not otherwise: the workflow
-alone builds them unsigned. The binary says which it is:
+notarized by Apple: the release flow builds them on a Mac that has the
+identity ([Making a release](#making-a-release)) and ships them no other
+way. A binary built any other way, from a checkout or by the build script
+told nothing of signing, is unsigned. The binary says which it is:
 
 ```sh
 codesign -dv --verbose=2 ~/.local/bin/yardr
@@ -697,15 +698,31 @@ yard with any agent it stops nothing and prints `"confirm": true`, as
 
 ## Making a release
 
+Two machines build a release, and each vouches for what it built:
+
+| builds | where | vouched for by |
+|---|---|---|
+| the two linux archives | CI, on Linux (`.github/workflows/release.yml`) | a build-provenance attestation of each archive |
+| the two darwin archives | the Mac the release flow runs on, which holds the Developer ID | the Developer ID signature and Apple's notarization of the binary in each |
+
+CI has no Apple identity, so a darwin binary built there would be unsigned.
+An archive built on the Mac has no attestation either, since an attestation
+says that CI's workflow built the file. Each archive carries the proof of
+the machine that built it. The flow's `build` stage makes the release
+whole: it adds the Mac's archives to CI's draft and makes `checksums.txt`
+name all four archives and `install.sh`, so that the one signature on that
+file, which mckean makes by hand, covers every archive.
+
 ### With the yard
 
-A release bead cuts the release: `build` tags the base and waits for the
-draft CI makes for the tag, `sign` asks mckean to sign the draft's
-checksums, `verify` checks the signature and each archive's attestation,
-and `publish` releases the draft and files the yardr.dev sync bead (the
+A release bead cuts the release: `build` tags the base, waits for the
+draft CI makes for the tag and adds the darwin archives to it, `sign` asks
+mckean to sign the draft's checksums, `verify` checks the signature, each
+linux archive's attestation and each darwin archive's signature, and
+`publish` releases the draft and files the yardr.dev sync bead (the
 release flow, `.yardr/flows/type/release.flow`; the script its stages run
 is `contrib/release/stage`). With GitHub Actions switched off on the
-release repo there is no CI, so `build` builds the release on this
+release repo there is no CI, so `build` builds all four archives on this
 machine instead and `verify` skips the attestations
 ([below](#with-actions-off)).
 
@@ -719,30 +736,44 @@ will stand on the GitHub release. The yardmaster shapes the bead in
 `backlog`, then advances it to `build`, and from there:
 
 - `build` refuses a bad title, a published release, a tag at another
-  commit, a dirty tree, or a checkout that is not the remote's `main`;
-  tags the base commit, pushes the tag, and waits for the draft release
-  CI makes for the tag, bounded; sets the draft's notes from the bead's
-  body and notes the five signing commands on the bead. A CI run that
-  concluded anything but success fails the bead with the run's URL.
+  commit, a dirty tree, a checkout that is not the remote's `main`, or a
+  machine without the signing setup ([below](#signed-darwin-binaries)), all
+  before it tags anything; tags the base commit, pushes the tag, and waits
+  for the draft release CI makes for the tag, bounded: the two linux
+  archives, `checksums.txt` and the installer it names. It then builds the
+  two darwin archives on this machine, signed and notarized (Apple's answer
+  takes minutes), and makes `checksums.txt` name all four archives and
+  `install.sh`. It uploads the darwin archives and that file to the draft,
+  sets the draft's notes from the bead's body and notes the five signing
+  commands on the bead. A CI run
+  that concluded anything but success fails the bead with the run's URL.
 - `sign` asks mckean whether `checksums.txt.minisig` is uploaded. Run the
   five commands from the build's note, in a directory of their own, then
   Done. Each names the version, so a stale file or a wrong release shows
   itself.
 - `verify` downloads the draft, checks the signature against the release
-  key, the archives against the checksums, and each archive's
-  build-provenance attestation from the release workflow for this tag
-  (`gh attestation verify`). `install.sh` is no archive and has no
-  attestation: the checksums name it, and it is held to the tag besides, so
-  the draft holds the tagged commit's own file, byte for byte, or the bead
-  waits in `decide`. A bad signature asks `sign` again.
+  key, the archives against the checksums, and then each archive by who
+  built it. A linux archive has the build-provenance attestation from the
+  release workflow for this tag (`gh attestation verify`). A darwin
+  archive has none, and its `yardr` is looked at instead: it must pass
+  `codesign --verify --strict`, be signed by the group's identity
+  (`YARDR_RELEASE_SIGN_IDENTITY`, as `codesign -dv` names it as its
+  Authority) and be accepted by Gatekeeper as notarized (`spctl -a -vv -t
+  install`, which asks Apple, so it needs the network). A release with no
+  darwin archive says that none was checked. `install.sh` is no archive and
+  has no attestation: the checksums name it, and it is held to the tag
+  besides, so the draft holds the tagged commit's own file, byte for byte,
+  or the bead waits in `decide`. A bad signature asks `sign` again.
 - `publish` releases the draft, files the yardr.dev sync bead and advances
   it to `new`; the release bead is `published`.
 
 Anything failed or questioned waits in `decide` for a person. To build the
 release again, delete the tag and the draft release first, then advance the
-bead back to `build`: the pushed tag is what starts CI. The yard's releases
-leave the darwin binaries unsigned; a signed build is by hand, below. The
-group and the routes are the yard's, and the yardmaster adds them once
+bead back to `build`: the pushed tag is what starts CI. A `build` that
+failed after CI's draft was whole, in the darwin archives, is run again by
+advancing the bead back to `build` alone: the draft standing is adopted, and
+the darwin archives are built and added again. The group and the routes are
+the yard's, and the yardmaster adds them once, with the signing setup
 ([setup.md](setup.md#letting-the-yard-cut-releases)).
 
 `contrib/release/build <version> [out-dir]` builds the four archives and
@@ -754,24 +785,28 @@ it does not know) but with a line in `checksums.txt`, so that the signature
 covers the installer too (the site's sync takes an `install.sh` only against
 that line). It refuses a tree with uncommitted or untracked files.
 The darwin binaries it builds are not signed, and it says so, unless it is told
-to sign them ([below](#signed-darwin-binaries)). The same holds for
+to sign them, as the release flow always does
+([below](#signed-darwin-binaries)). The same holds for
 `checksums.txt` ([Signed checksums](#signed-checksums)). With
 `SOURCE_DATE_EPOCH` set to seconds since the epoch the build is reproducible:
 every archive entry carries that time, and the same inputs make the same
-bytes.
+bytes (a signed darwin binary excepted, below).
 
 `.github/workflows/release.yml` runs when a tag `v*` is pushed: the same
-test jobs as `ci.yml`, then that script with `SOURCE_DATE_EPOCH` fixed to
-the tagged commit (so a tag rebuilt makes the release's archives again), an
-SBOM of the source, build-provenance attestations for the four archives,
-and a draft release holding the archives, `checksums.txt` and `install.sh`.
-Every action it uses is pinned by full commit SHA. A tag with a pre-release part
+test jobs as `ci.yml`, then that script for the two linux targets with
+`SOURCE_DATE_EPOCH` fixed to the tagged commit (so a tag rebuilt makes the
+release's archives again), an SBOM of the source, build-provenance
+attestations for the two archives, and a draft release holding them,
+`checksums.txt` and `install.sh`. Every action it uses is pinned by full
+commit SHA. A tag with a pre-release part
 (`v1.2.3-rc.1`) makes a pre-release. Started by hand (Actions, "release",
 "Run workflow") it is a dry run: the same tests and build, the archives
 and the SBOM kept for a week as the run's artifacts, and nothing attested
-or published. The workflow runs on Linux and holds no Apple identity, so
-the darwin binaries of a draft it made are unsigned. It holds no minisign
-key either, so its `checksums.txt` is unsigned until it is signed by hand.
+or published. The workflow runs on Linux and holds no Apple identity, so it
+builds no darwin archive: the flow's `build` stage adds those to the draft
+([above](#making-a-release)), and the draft holds the two linux archives
+until it does. It holds no minisign key either, so its `checksums.txt` is
+unsigned until it is signed by hand.
 
 ### With Actions off
 
@@ -783,17 +818,26 @@ pushing the tag: when it answers `false`, it runs
 `contrib/release/build` from the tagged checkout with `SOURCE_DATE_EPOCH`
 from the tagged commit, as the workflow sets it, and makes the draft from
 the four archives, `checksums.txt` and `install.sh`, with the bead's body as
-its notes.
+its notes. The darwin archives are signed and notarized as they are with
+CI, and the signing setup is asked for before the tag, as ever
+([below](#signed-darwin-binaries)).
 There is no attestation: nothing but this machine vouches for the build,
 and the build's note says so. The five signing commands, `sign`, and
-`publish` are unchanged; `verify` checks the signature and the checksums
-as ever and skips the attestations. A draft already standing is adopted in
-both modes, and a release is rebuilt the same way: delete the tag and the
-draft, then advance the bead back to `build`. When Actions is on, or the
-check cannot run, the flow waits for CI's draft as ever. There is no
-setting to force a local build: the repo's Actions state is the switch.
+`publish` are unchanged; `verify` checks the signature, the checksums and
+the darwin archives' signatures as ever and skips the attestations. A draft
+already standing is adopted in both modes, and a release is rebuilt the same
+way: delete the tag and the draft, then advance the bead back to `build`.
+When Actions is on, or the check cannot run, the flow waits for CI's draft
+as ever. There is no setting to force a local build: the repo's Actions
+state is the switch.
 
 ### Signed darwin binaries
+
+The release flow does this for every release: its `build` stage builds the
+two darwin archives on the Mac that holds the identity, with the two
+variables below, and its `verify` stage holds each one to the identity
+([Making a release](#making-a-release) says who builds what). What follows
+is the script's, and what the Mac needs.
 
 On a Mac, with two variables set, the script signs each darwin binary
 (`codesign`, with the hardened runtime, a secure timestamp and the
@@ -801,7 +845,9 @@ identifier `dev.yardr.yardr`), sends it to Apple's notary service in a zip
 and waits for the answer (`xcrun notarytool submit --wait`, minutes as a
 rule), and only then packs the archive, so the archive and its line in
 `checksums.txt` are of the signed binary. The linux archives are built as
-ever.
+ever. A signature carries the time Apple's timestamp service gave it, so
+signing the same tag twice makes two different darwin archives, where the
+linux archives stay reproducible.
 
 ```sh
 YARDR_RELEASE_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID1234)" \
@@ -853,9 +899,32 @@ The setup is done once per Mac, and needs the Xcode command line tools
    xcrun notarytool history --keychain-profile yardr-notary
    ```
 
-The files of a signed build replace the ones the workflow attached to the
-draft, all of them together, as `checksums.txt` is of this build's
-archives and installer:
+4. For the release flow, the two variables in a file only the operator
+   reads, named as the `env_file` of the flow's exec group
+   ([groups.md](groups.md#outbound-credentials)): these two lines, the
+   values as they are, unquoted, since the file takes the rest of the line
+   literally. The identity is step 1's, whole, as the list prints it between
+   the quotes: `verify` looks for it by that name in each darwin binary's
+   signature.
+
+   ```sh
+   cat > ~/.yardr/release.env <<'END'
+   YARDR_RELEASE_SIGN_IDENTITY=Developer ID Application: Your Name (TEAMID1234)
+   YARDR_RELEASE_NOTARY_PROFILE=yardr-notary
+   END
+   chmod 600 ~/.yardr/release.env
+   yardr group set yardr-release env_file=~/.yardr/release.env
+   ```
+
+   Until both are set, `build` refuses before it tags anything and says
+   which is missing; the group never ships a darwin binary unsigned. The
+   group runs `build` as whoever the daemon runs as, on this Mac, which
+   must be logged in with the keychain that holds the identity unlocked,
+   and needs Go and the Xcode command line tools on the daemon's PATH.
+
+By hand, outside the flow, the files of a signed build replace the ones the
+workflow attached to the draft, all of them together, as `checksums.txt` is
+of this build's archives and installer:
 
 ```sh
 gh release upload v1.2.3 dist/*.tar.gz dist/checksums.txt dist/install.sh --clobber
@@ -863,9 +932,11 @@ gh release upload v1.2.3 dist/*.tar.gz dist/checksums.txt dist/install.sh --clob
 
 A signature the draft had is of the checksums this replaces: build with
 the minisign key too ([below](#signed-checksums)) and upload
-`dist/checksums.txt.minisig` with the rest. A draft whose archives were
-replaced by hand is no longer CI's build, so its attestations no longer
-verify; `verify` checks them next, and questions the bead.
+`dist/checksums.txt.minisig` with the rest. A draft whose linux archives
+were replaced by hand is no longer CI's build there, so their attestations
+no longer verify; `verify` checks them next, and questions the bead. The
+flow replaces nothing of CI's: it adds the two darwin archives, and their
+lines in `checksums.txt` beside CI's.
 
 ### Signed checksums
 

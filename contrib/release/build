@@ -29,7 +29,9 @@
 # on a Mac, sign each darwin binary with that "Developer ID Application"
 # identity of the keychain and have Apple notarize it under that notarytool
 # keychain profile, before it is packed (docs/install.md, "Making a
-# release"). With neither, the darwin binaries are not signed.
+# release"). With neither, the darwin binaries are not signed: that is for a
+# build of one's own, as the release flow's build stage (contrib/release/stage)
+# refuses to build the darwin archives without both.
 #
 # YARDR_RELEASE_MINISIGN_KEY, the path of a minisign secret key, signs
 # checksums.txt with it and writes checksums.txt.minisig beside it

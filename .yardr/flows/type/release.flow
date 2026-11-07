@@ -1,10 +1,12 @@
 # release: the flow of depot yardr's releases. A release bead is one version,
-# titled "yardr vX.Y.Z": build tags the base and waits for the draft CI
-# makes for the tag, mckean signs the draft's checksums by hand, verify
-# checks the signature and each archive's attestation, and publish releases
-# the draft and files the yardr.dev sync bead. The script the exec group
-# runs is contrib/release/stage; docs/install.md "Making a release" says
-# how a release is cut with the yard. A failed verify asks for the
+# titled "yardr vX.Y.Z": build tags the base, waits for the draft CI makes
+# for the tag (the linux archives) and adds the darwin archives it builds,
+# signed and notarized, on the Mac the group runs on; mckean signs the
+# draft's checksums by hand, verify checks the signature, each linux
+# archive's attestation and each darwin archive's signature, and publish
+# releases the draft and files the yardr.dev sync bead. The script the exec
+# group runs is contrib/release/stage; docs/install.md "Making a release"
+# says how a release is cut with the yard. A failed verify asks for the
 # signature again; anything else failed or questioned waits in decide for a
 # person, who advances it to the stage it should retry.
 backlog -> build

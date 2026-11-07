@@ -321,7 +321,8 @@ exec group and four routes; from then on a release bead cuts the release
 ```sh
 yardr group add yardr-release --runner exec --limit 1 \
   --set cmd='contrib/release/stage $YARDR_STAGE' \
-  --set log="$HOME/.yardr/logs/release.log"
+  --set log="$HOME/.yardr/logs/release.log" \
+  --set env_file=~/.yardr/release.env
 yardr route add --stage build --group yardr-release --depot yardr --originator any
 yardr route add --stage verify --group yardr-release --depot yardr --originator any
 yardr route add --stage publish --group yardr-release --depot yardr --originator any
@@ -332,10 +333,15 @@ The group runs the depot's own script, one release at a time; the stage in
 `cmd` says which of `build`, `verify` or `publish` it is. The script and the
 people bill no subscription, so every route takes `--originator any`: a
 release bead of any user is worked, not only the operator's. The build tags
-the base and waits for CI's draft release; it refuses a checkout that is
-not clean at the remote's `main`, so the script it runs is `main`'s.
+the base and waits for CI's draft release, then builds the darwin archives
+itself and adds them to it; it refuses a checkout that is not clean at the
+remote's `main`, so the script it runs is `main`'s.
 `sign` goes to the manual group mckean is in, whose Done says the signature
 is uploaded; `backlog` and `decide` ride the depot's existing routes. The
-group runs where `jq`, `git`, `gh` (logged in) and `minisign` are. The
-yard's releases leave the darwin binaries unsigned; a signed build is by
-hand ([install.md](install.md#signed-darwin-binaries)).
+group runs where `jq`, `git`, `gh` (logged in) and `minisign` are, and on a
+Mac that holds the Developer ID, with Go and the Xcode command line tools:
+the darwin binaries are signed and notarized there, and `build` refuses
+before it tags until the `env_file` above names the identity and the notary
+profile (`YARDR_RELEASE_SIGN_IDENTITY` and `YARDR_RELEASE_NOTARY_PROFILE`;
+[install.md](install.md#signed-darwin-binaries) has the file and what the
+Mac needs).

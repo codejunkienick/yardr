@@ -765,12 +765,13 @@ func TestReleaseWorkflowCreateReleaseStep(t *testing.T) {
 	}
 }
 
-// The SBOM scanner is third-party code that only reads the source: it
-// runs in its own job, so it shares neither the build job's workspace
-// (where it could change an archive before that archive is attested)
-// nor the build job's id-token and attestations grants, which it never
-// needs. The attestation stays with the build it vouches for.
-func TestReleaseWorkflowSBOMRunsApartFromTheBuild(t *testing.T) {
+// CI builds and attests only the linux archives. The SBOM scanner is
+// third-party code that only reads the source: it runs in its own job, so it
+// shares neither the build job's workspace (where it could change an archive
+// before that archive is attested) nor the build job's id-token and
+// attestations grants, which it never needs. The attestation stays with the
+// build it vouches for.
+func TestReleaseWorkflowAttestsOnlyItsLinuxBuildApartFromTheSBOM(t *testing.T) {
 	t.Parallel()
 	workflow, err := os.ReadFile("../../.github/workflows/release.yml")
 	if err != nil {
@@ -812,6 +813,12 @@ func TestReleaseWorkflowSBOMRunsApartFromTheBuild(t *testing.T) {
 	}
 	if !strings.Contains(build, "actions/attest-build-provenance@") {
 		t.Error("build job no longer attests the archives")
+	}
+	if !strings.Contains(build, `YARDR_RELEASE_TARGETS: "linux/amd64 linux/arm64"`) {
+		t.Error("build job does not limit its archives to the two linux targets")
+	}
+	if !strings.Contains(build, "subject-path: dist/*.tar.gz") {
+		t.Error("attestation no longer covers the archives the linux build wrote")
 	}
 	if release, ok := jobs["release"]; !ok {
 		t.Fatal("release workflow has no release job")
