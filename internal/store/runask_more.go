@@ -363,8 +363,8 @@ func checkSettingSet(ctx context.Context, w *wtx, argv []string, actor string) e
 }
 
 // settingSetCard is the card of settings set <key> <value>: the value it
-// sets, against what is stored now. The value is checked as setting
-// checks it.
+// sets, against what is stored now, as it was typed and not as it is
+// stored. The value is checked as setting checks it.
 func (w *wtx) settingSetCard(argv []string, asking bool) (AskRun, error) {
 	key, value := argv[2], argv[3]
 	set, ok := SettingOf(key)
@@ -376,18 +376,18 @@ func (w *wtx) settingSetCard(argv []string, asking bool) (AskRun, error) {
 			return AskRun{}, err
 		}
 	}
-	stored, has := w.Bucket(bSettings).Get([]byte(key)), w.Bucket(bSettings).Get([]byte(key)) != nil
-	if asking && has && string(stored) == value {
+	stored := w.Bucket(bSettings).Get([]byte(key))
+	has, held := stored != nil, settingValue(stored)
+	if asking && has && held == value {
 		return AskRun{}, fmt.Errorf("setting %s is %q already, so the command would change nothing", key, value)
 	}
 	now := "unset"
 	if has {
-		now = string(stored)
+		now = held
 	} else if set.Default != "" {
 		now = "unset (default " + set.Default + ")"
 	}
-	// The stored JSON is already a shell word.
-	back := runCommandLineWithShellWord([]string{"settings", "set", key}, string(stored))
+	back := runCommandLineWithShellWord([]string{"settings", "set", key}, shellQuote(held))
 	if !has {
 		back = runCommandLine([]string{"settings", "set", key, `""`})
 	}

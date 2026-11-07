@@ -47,10 +47,10 @@ func leftOf(rep uninstallReport, kind string) []leftThing {
 // TestMain: one commit with the depot's own files on main, and a worktree
 // per bead under wt/ on branch yard/<bead>, the first with a file in no
 // commit. Making it per test spent five git runs each; a test gets a copy,
-// and one git worktree repair repoints it (a copied worktree names the
-// template's paths). Made before the tests run, read only after, so no
-// test assigns it. uninstallTemplateDir is the same depot with the
-// uninstall test's beads.
+// and relinkWorktrees repoints it (a copied worktree names the template's
+// paths). Made before the tests run, read only after, so no test assigns
+// it. uninstallTemplateDir is the same depot with the uninstall test's
+// beads.
 var purgeTemplateDir, uninstallTemplateDir string
 
 // buildWorktreeTemplate makes a depot with one commit (its own .yardr
@@ -106,8 +106,8 @@ func buildWorktreeTemplate(first, second string) (string, error) {
 // copyWorktreeTemplate gives a test the depot and worktrees of a template
 // buildWorktreeTemplate made: the depot at depotPath, each bead's worktree
 // under wtDir. A copied worktree names the template's paths, in its .git
-// file and in the depot's record of it, so one git worktree repair
-// repoints both at the copies'.
+// file and in the depot's record of it, so relinkWorktrees repoints both at
+// the copies'.
 func copyWorktreeTemplate(t *testing.T, template, depotPath, wtDir string, beads ...string) {
 	t.Helper()
 	if err := os.CopyFS(depotPath, os.DirFS(filepath.Join(template, "depot"))); err != nil {
@@ -121,7 +121,107 @@ func copyWorktreeTemplate(t *testing.T, template, depotPath, wtDir string, beads
 		}
 		paths = append(paths, path)
 	}
-	gitIn(t, depotPath, append([]string{"worktree", "repair"}, paths...)...)
+	relinkWorktrees(t, depotPath, paths...)
+}
+
+// relinkWorktrees ties each worktree of wts, copied beside the depot, to the
+// copy of the depot, by writing what git worktree add writes: the worktree's
+// .git file, which names the depot's record of it, and the record's gitdir
+// file, which names the worktree. The record is named as git infers it, by the
+// last element of the path in the copied .git file, and both paths are
+// resolved as git writes them (macOS's temp dir is behind a symlink). git
+// worktree repair does this from 2.48 on, for a depot and its worktrees copied
+// as a unit; before that it trusts the copied .git file, rewrites the
+// template's records to name the copy and leaves the copy naming the template,
+// so that a commit made in the copy lands there.
+func relinkWorktrees(t *testing.T, depot string, wts ...string) {
+	t.Helper()
+	for _, wt := range wts {
+		dotgit := filepath.Join(resolve(wt), ".git")
+		file, err := os.ReadFile(dotgit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		was, ok := strings.CutPrefix(strings.TrimSpace(string(file)), "gitdir: ")
+		if !ok {
+			t.Fatalf("%s names no gitdir: %q", dotgit, file)
+		}
+		record := filepath.Join(resolve(depot), ".git", "worktrees", filepath.Base(was))
+		if err := os.WriteFile(dotgit, []byte("gitdir: "+record+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(record, "gitdir"), []byte(dotgit+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A copy of the template is a depot of its own: its worktrees name it and not
+// the template, whose files are as they were made, and a commit in a worktree
+// of the copy is the copy's. git before 2.48, asked to repair the copy's
+// worktrees, wrote the copy's name into the template's records and left the
+// copy naming the template, so that a commit made in the copy landed in the
+// template, and the next copy of it named the paths of a test that was gone.
+func TestCopiedWorktreesBelongToTheCopyNotTheTemplate(t *testing.T) {
+	t.Parallel()
+	template, err := buildWorktreeTemplate("web-1", "web-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(template) })
+	// links are what tie the worktree of a bead to its depot: its .git file
+	// and the depot's gitdir file for it.
+	links := func(depot, wtDir, bead string) [2]string {
+		t.Helper()
+		var out [2]string
+		for i, path := range []string{filepath.Join(wtDir, bead, ".git"), filepath.Join(depot, ".git", "worktrees", bead, "gitdir")} {
+			file, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out[i] = string(file)
+		}
+		return out
+	}
+	beads := []string{"web-1", "web-2"}
+	tplDepot, tplWts := filepath.Join(template, "depot"), filepath.Join(template, "wt")
+	made := map[string][2]string{}
+	for _, bead := range beads {
+		made[bead] = links(tplDepot, tplWts, bead)
+	}
+
+	home := t.TempDir()
+	depot, wtDir := filepath.Join(home, "depot"), filepath.Join(home, "wt")
+	copyWorktreeTemplate(t, template, depot, wtDir, beads...)
+
+	listed := gitIn(t, depot, "worktree", "list", "--porcelain")
+	for _, bead := range beads {
+		wt := filepath.Join(resolve(wtDir), bead)
+		want := [2]string{"gitdir: " + filepath.Join(resolve(depot), ".git", "worktrees", bead) + "\n", filepath.Join(wt, ".git") + "\n"}
+		if got := links(depot, wtDir, bead); got != want {
+			t.Errorf("the copy's links of %s are %q, want %q", bead, got, want)
+		}
+		if got := links(tplDepot, tplWts, bead); got != made[bead] {
+			t.Errorf("the template's links of %s are %q now, were %q", bead, got, made[bead])
+		}
+		if !strings.Contains(listed, "worktree "+wt+"\n") {
+			t.Errorf("git worktree list in the copy does not name %s:\n%s", wt, listed)
+		}
+	}
+	if strings.Contains(listed, resolve(template)) {
+		t.Errorf("git worktree list in the copy names the template:\n%s", listed)
+	}
+	// A commit made in the copy's worktree moves the copy's branch, and not
+	// the template's.
+	tip := func(depot string) string { return gitIn(t, depot, "rev-parse", store.Branch("web-1")) }
+	before := tip(depot)
+	gitIn(t, filepath.Join(wtDir, "web-1"), "commit", "-q", "--allow-empty", "-m", "two")
+	if tip(depot) == before {
+		t.Error("a commit in the copy's worktree did not move the copy's branch")
+	}
+	if got := tip(tplDepot); got != before {
+		t.Errorf("a commit in the copy's worktree moved the template's branch to %s, from %s", got, before)
+	}
 }
 
 // uninstall of a yard that runs and starts at login stops it as down does,

@@ -76,9 +76,11 @@ the yard's two people groups.
 
 - **In a depot the starter set up**, the import finds `<depot>-builders`,
   `<depot>-reviewers` and `<depot>-assembly` by name and routes the lane to
-  them. It points them at this pack's copies of the roles and the script,
-  which are the same text, and leaves their limits, agents and arguments as
-  they are.
+  them. It installs this pack's copies of the roles and the script, which
+  are the same text, and leaves the groups as they are: their limits,
+  agents and arguments, and their prompt (the assembly's cmd), which keeps
+  naming the starter's copy. A group another pack made keeps its prompt,
+  and `pack check` says so under `kept`.
 - **In a depot whose groups have other names or roles of their own**, say
   which group of the yard takes each, and nothing of those groups is
   changed:
@@ -90,8 +92,8 @@ the yard's two people groups.
   ```
 
   Without `--group`, a group the depot lacks is made, and a group it has
-  under the pack's name is pointed at the pack's role: `pack check` shows
-  either before anything is written.
+  under the pack's name keeps its prompt, whoever set it: `pack check`
+  shows either before anything is written.
 
 The pack names the crew member `yardmaster`, because the copied roles tell
 an agent to mail it. It carries no role for it, so the yardmaster keeps the

@@ -2,10 +2,12 @@
 // of yardr bead ask name it (RunCommands), and the one reading of the
 // line, split at white space and nowhere else, into a row of the list in
 // its stored form; and the way back, the words of a stored row as a
-// terminal takes them (typedWords). It reads no record of the yard.
+// terminal takes them (typedWords), and a value a card holds as one word
+// (settingValue, shellQuote). It reads no record of the yard.
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -155,4 +157,28 @@ func typedWords(argv []string) []string {
 		}
 	}
 	return words
+}
+
+// settingValue is the value a stored setting holds, as it was typed: the
+// bucket keeps a JSON string. What is stored as anything else is shown as it
+// is stored, since a card tells what is there and does not fail on odd data.
+func settingValue(stored []byte) string {
+	var value *string
+	if err := json.Unmarshal(stored, &value); err != nil || value == nil {
+		return string(stored)
+	}
+	return *value
+}
+
+// shellQuote is value as one word of a terminal command: as it is when only
+// letters, digits and / . _ - + : , @ % are in it, single-quoted otherwise,
+// a quote inside it closed and escaped. An equals sign is not among them,
+// since zsh reads a word that begins with one as a command's path. A card
+// quotes the value it takes back to this way and joins it with
+// runCommandLineWithShellWord, so that typedWords does not quote it again.
+func shellQuote(value string) string {
+	if value != "" && strings.Trim(value, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-+:,@%") == "" {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }

@@ -1785,8 +1785,10 @@ yardr bead create "How should retries work?" --depot web --type design
   adds the routes for type `design` to them; it gives no limit, so theirs
   stay. A group is named in a pack together with its role or script, so the
   pack carries the starter's builder and reviewer roles and its
-  `merge-local`, copied, and the import points the three groups at these
-  copies, which are the same text.
+  `merge-local`, and the import installs these copies, which are the same
+  text. It does not point the three groups at them: a group another pack
+  made keeps its prompt (the assembly its cmd), and `pack check` says so
+  under `kept` ([Role prompts](#how-a-pack-maps-to-the-yard)).
 - **A depot with groups or roles of its own names them**: `--group
   builders=<group> --group reviewers=<group> --group assembly=<group>`.
   Those groups take the pack's as they are, and nothing of them is changed

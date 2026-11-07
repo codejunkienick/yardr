@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -1375,11 +1376,10 @@ func TestSettingRunAskClassesAreExplicit(t *testing.T) {
 	}
 }
 
-// hook_public_url binds nothing and serves nothing — it only says where
-// the yard is reached from outside — so a crew member may propose it as
-// a run ask: the card shows the whole URL each hook is registered at,
-// approving sets it, and the bind addresses stay the operator's alone.
-func TestRunAskHookPublicURL(t *testing.T) {
+// hook_public_url only says where the yard is reached from outside, so a
+// crew member may propose it as a run ask. Setting cards show held values as
+// typed and give a take-back word, while bind addresses stay operator-only.
+func TestRunAskSettingSetCard(t *testing.T) {
 	t.Parallel()
 	y := listYard(t)
 	seq := y.ask(t, listAsk("mckean", "settings set hook_public_url https://yard.example/hooks"), "yardmaster")
@@ -1418,15 +1418,32 @@ func TestRunAskHookPublicURL(t *testing.T) {
 	if got := y.asked(t, seq).Ask.Run.Does; !slices.Contains(got, "a hook whose source names a register call is registered at this address when its card is approved: the URL of hook <name> is https://yard.example/hooks/<name>.") {
 		t.Fatalf("the card says %q", got)
 	}
-	// A URL with brackets (an IPv6 host) is stored as a JSON string, which a
-	// shell takes as a quoted word already: the take-back shows it as it is,
-	// and does not quote it again.
+	// What is held shows as it was typed, not as the bucket keeps it (a JSON
+	// string, quotes and all), and the take-back is that value as one word.
+	run = y.asked(t, seq).Ask.Run
+	if run.Does[0] != "setting hook_public_url becomes https://yard.example/hooks/ (now: https://yard.example/hooks)." ||
+		run.Back != "yardr settings set hook_public_url https://yard.example/hooks" {
+		t.Fatalf("the card says %q and takes back with %q", run.Does[0], run.Back)
+	}
+	// A URL with brackets (an IPv6 host) is held as it was typed too: the card
+	// shows it with no quotes, and the take-back is one single-quoted word,
+	// which zsh does not read as a pattern and which is quoted once.
 	if err := y.SetSetting(y.ctx, HookPublicURLSetting, "https://[2001:db8::1]:8790", "mckean"); err != nil {
 		t.Fatal(err)
 	}
 	seq = y.ask(t, listAsk("mckean", "settings set hook_public_url https://yard.example/hooks"), "yardmaster")
-	if got, want := y.asked(t, seq).Ask.Run.Back, `yardr settings set hook_public_url "https://[2001:db8::1]:8790"`; got != want {
+	run = y.asked(t, seq).Ask.Run
+	if want := "setting hook_public_url becomes https://yard.example/hooks (now: https://[2001:db8::1]:8790)."; run.Does[0] != want {
+		t.Fatalf("the card says %q, want %q", run.Does[0], want)
+	}
+	if got, want := run.Back, `yardr settings set hook_public_url 'https://[2001:db8::1]:8790'`; got != want {
 		t.Fatalf("the take-back is %q, want %q", got, want)
+	}
+	// Asking for the value that is held would change nothing, and is refused
+	// in the words of every card that finds it so.
+	if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", "settings set hook_public_url https://[2001:db8::1]:8790"), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), `setting hook_public_url is "https://[2001:db8::1]:8790" already, so the command would change nothing`) {
+		t.Fatalf("asking for the value held = %v, want it refused as changing nothing", err)
 	}
 	// The addresses the servers bind stay the operator's alone.
 	for _, c := range []string{
@@ -1440,6 +1457,59 @@ func TestRunAskHookPublicURL(t *testing.T) {
 	} {
 		if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", c), "yardmaster"); err == nil || !strings.Contains(err.Error(), "it is the operator's alone") {
 			t.Errorf("--run %q = %v, want the operator's alone", c, err)
+		}
+	}
+
+	// A setting is stored as a JSON string, and its card tells what is held as
+	// it was typed: the sentence shows it with no quotes, and the take-back is
+	// one word that a shell splits back to it. operator_note takes any one line
+	// and may be asked.
+	for _, c := range []struct{ name, held, word string }{
+		{"a plain word", "early-shift", "early-shift"},
+		{"a space", "early shift", `'early shift'`},
+		{"a quote", "it's mine", `'it'\''s mine'`},
+		{"brackets", "on call [week 45]", `'on call [week 45]'`},
+		{"a dollar, a backtick and double quotes", "$HOME `id` \"x\"", "'$HOME `id` \"x\"'"},
+		{"a leading equals sign", "=ls", "'=ls'"},
+	} {
+		if err := y.SetSetting(y.ctx, NoteSetting, c.held, "mckean"); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		run := y.asked(t, y.ask(t, listAsk("mckean", "settings set operator_note other"), "yardmaster")).Ask.Run
+		stored, _ := json.Marshal(c.held)
+		if want := "setting operator_note becomes other (now: " + c.held + ")."; run.Does[0] != want {
+			t.Errorf("%s: the card says %q, want %q", c.name, run.Does[0], want)
+		}
+		if want := "yardr settings set operator_note " + c.word; run.Back != want {
+			t.Errorf("%s: the take-back is %q, want %q", c.name, run.Back, want)
+		}
+		if got := run.Seen["setting operator_note"]; got != seen(true, string(stored)) {
+			t.Errorf("%s: the ask keeps %s, want a fingerprint of the stored bytes %s", c.name, got, stored)
+		}
+		// A shell reads the word back to the value, as a terminal does when
+		// the line is pasted.
+		if out, err := exec.Command("sh", "-c", "printf %s "+c.word).Output(); err != nil || string(out) != c.held {
+			t.Errorf("%s: sh reads the word %s as %q, %v, want %q", c.name, c.word, out, err, c.held)
+		}
+	}
+	// A card decodes JSON strings, including the empty string. It keeps every
+	// other value as stored bytes, including null, which encoding/json accepts
+	// into a plain string.
+	for _, c := range []struct{ name, stored, now, word string }{
+		{"a JSON number", `20`, `20`, "20"},
+		{"a JSON empty string", `""`, "", `''`},
+		{"JSON null", `null`, `null`, "null"},
+		{"no JSON at all", `{oops`, `{oops`, `'{oops'`},
+	} {
+		if err := y.write(func(w *wtx) error {
+			return w.Bucket(bSettings).Put([]byte(MaxSessionsSetting), []byte(c.stored))
+		}); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		run := y.asked(t, y.ask(t, listAsk("mckean", "settings set max_sessions 30"), "yardmaster")).Ask.Run
+		if want := "setting max_sessions becomes 30 (now: " + c.now + ")."; run.Does[0] != want ||
+			run.Back != "yardr settings set max_sessions "+c.word || run.Seen["setting max_sessions"] != seen(true, c.stored) {
+			t.Errorf("%s: the card says %q, takes back with %q and keeps %s", c.name, run.Does[0], run.Back, run.Seen["setting max_sessions"])
 		}
 	}
 }
