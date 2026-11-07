@@ -1180,10 +1180,16 @@ type telegramFiles struct {
 	files map[string][]byte
 	lie   string
 
-	mu   sync.Mutex
-	seen []string
-	sent int
+	mu      sync.Mutex
+	seen    []string
+	sent    int
+	liedone chan struct{}
 }
+
+// lyingStop bounds the lying download's body: the stub streams until a
+// write fails, and stops here, far past any socket buffer, so a reader
+// that stops at its cap never reaches it, and one that drains does.
+const lyingStop = 64 << 20
 
 func (s *telegramFiles) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
@@ -1224,12 +1230,15 @@ func (s *telegramFiles) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if fileID == s.lie {
 				// Flushing first omits Content-Length: the reader must stop
 				// a chunked stream at the cap instead of trusting its size.
+				// The body is unbounded, so the count cannot depend on how
+				// much the kernel's buffers hold: writes repeat until one
+				// fails, stopping only at lyingStop.
 				flusher := w.(http.Flusher)
 				flusher.Flush()
+				chunk := bytes.Repeat([]byte("l"), 1024)
 				sent := 0
-				for at := 0; at < len(data); at += 1024 {
-					end := min(at+1024, len(data))
-					n, err := w.Write(data[at:end])
+				for sent < lyingStop {
+					n, err := w.Write(chunk)
 					sent += n
 					flusher.Flush()
 					if err != nil {
@@ -1238,7 +1247,14 @@ func (s *telegramFiles) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				s.mu.Lock()
 				s.sent = sent
+				done := s.liedone
 				s.mu.Unlock()
+				if done != nil {
+					select {
+					case done <- struct{}{}:
+					default:
+					}
+				}
 				return
 			}
 			_, _ = w.Write(data)
@@ -1274,8 +1290,8 @@ func TestTelegramPackFile(t *testing.T) {
 	stub := &telegramFiles{token: cred, lie: "lying", files: map[string][]byte{
 		"small": []byte("\x89PNG\r\n\x1a\nsmall"),
 		"big":   bytes.Repeat([]byte("b"), 100),
-		"lying": bytes.Repeat([]byte("l"), 1<<20),
-	}}
+		"lying": []byte("lying"),
+	}, liedone: make(chan struct{}, 1)}
 	srv := httptest.NewServer(stub)
 	defer srv.Close()
 	ad.D.Base = srv.URL
@@ -1311,8 +1327,15 @@ func TestTelegramPackFile(t *testing.T) {
 	if _, left, err := get("lying", 50); err == nil || !strings.Contains(err.Error(), "over the limit of 50") || left != "" {
 		t.Fatalf("lying: left %q, err %v", left, err)
 	}
-	if sent := stub.bytesSent(); sent >= len(stub.files["lying"]) {
-		t.Fatalf("the chunked response sent all %d bytes despite the 50-byte limit", sent)
+	// The handler may still be writing when the download returns: wait
+	// for its count before reading it.
+	select {
+	case <-stub.liedone:
+	case <-time.After(30 * time.Second):
+		t.Fatalf("the lying download's handler never finished")
+	}
+	if sent := stub.bytesSent(); sent >= lyingStop {
+		t.Fatalf("the reader drained the chunked response: %d bytes against the 50-byte limit", sent)
 	}
 	if _, _, err := get("nobody", 50); err == nil || !strings.Contains(err.Error(), "getFile failed") {
 		t.Fatalf("an id the service refuses: %v", err)
