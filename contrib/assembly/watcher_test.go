@@ -17,10 +17,13 @@ package assembly
 // reads one digit as a redirection's number, so a run under it is given
 // the filler alone, and the scripts refuse the rest (see closefds). Nothing
 // else of the test binary's reaches a run: prepare marks what it holds
-// close-on-exec first, as the exec runner does.
+// close-on-exec first, as the exec runner does, and the strays the rows plant
+// to prove it are open without the flag only while no fork can begin
+// (holdStray), so no row's stray is another run's.
 
 import (
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -225,6 +228,16 @@ func (w *watcherRun) cmd() *exec.Cmd {
 		cmd = exec.Command(w.shell, w.script)
 	}
 	return w.prepare(cmd)
+}
+
+// cmdWithStray is cmd with a stray descriptor planted first, for the rows that
+// prove prepare marks what this binary holds open without close-on-exec. The
+// planting and the marking are one step to every fork (holdStray), so no run
+// beside this one starts with the stray either.
+func (w *watcherRun) cmdWithStray() *exec.Cmd {
+	var cmd *exec.Cmd
+	holdStray(w.t, func(int) { cmd = w.cmd() })
+	return cmd
 }
 
 // prepare gives cmd the run's directory, environment and inherited files, and
@@ -639,7 +652,9 @@ func TestMergeLocalKilledWithTermLeavesNoSleepBehind(t *testing.T) {
 // what the run holds, the command is not started at all. The test binary holds
 // a descriptor above 9 of its own without close-on-exec, which no run may see:
 // a yard hands a script nothing it was not given (watcherRun.prepare), and the
-// scripts refuse a descriptor that arrives, where an sh cannot close it.
+// scripts refuse a descriptor that arrives, where an sh cannot close it. Every
+// row plants one beside the rows of this test and the other, which run side by
+// side, so none may reach a run but its own planter's, marked (cmdWithStray).
 func TestMergeLocalTestCommandStartsWithNoInheritedFile(t *testing.T) {
 	t.Parallel()
 	for _, row := range fdRuns() {
@@ -655,14 +670,16 @@ func TestMergeLocalTestCommandStartsWithNoInheritedFile(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			holdStray(t)
-			cmd := w.cmd()
+			cmd := w.cmdWithStray()
 			cmd.Stdout, cmd.Stderr = log, log
 			err = cmd.Run()
 			log.Close()
 			out, _ := os.ReadFile(log.Name())
 			if err != nil {
 				t.Fatalf("merge-local (ls /dev/fd): %v\n%s", err, out)
+			}
+			if !row.refused {
+				assertNotRefused(t, "merge-local", string(out))
 			}
 			main, tip := watcherGit(t, w.repo, "rev-parse", "main"), watcherGit(t, w.wt, "rev-parse", "HEAD")
 			awaitNoWatcherSleepers(t, w.record, "1799")
@@ -753,8 +770,20 @@ func refusedHas(got []string, fd string) bool {
 // the null device, and the flag is not set on it. A run started with prepare
 // must never see it; where an sh cannot close above 9 the script would refuse
 // it. The test closes it when it ends.
-func holdStray(t *testing.T) {
+//
+// mark is what marks it, which for a row is the run's prepare, and it is given
+// the descriptor. The rows run side by side, and with them every test that
+// starts a child, so a stray open without the flag is another run's too if its
+// fork comes first: a row of dash was refused its tests for the stray of a row
+// of the other test, planted a few microseconds after the dash row's own
+// marking and before its fork (yardr-436j). A fork takes syscall.ForkLock for
+// writing, and a descriptor made and then marked is made holding it for
+// reading, which is all this does: the stray is open without the flag only
+// while no fork can begin.
+func holdStray(t *testing.T, mark func(fd int)) {
 	t.Helper()
+	syscall.ForkLock.RLock()
+	defer syscall.ForkLock.RUnlock()
 	null, err := os.Open(os.DevNull)
 	if err != nil {
 		t.Fatal(err)
@@ -765,6 +794,7 @@ func holdStray(t *testing.T) {
 		t.Fatalf("making a descriptor above 9: %v", errno)
 	}
 	t.Cleanup(func() { _ = syscall.Close(int(fd)) })
+	mark(int(fd))
 }
 
 // refusedRecord describes what the test command left in record: nothing when
@@ -801,6 +831,70 @@ func assertRefused(t *testing.T, script, out, record string) {
 	}
 }
 
+// assertNotRefused fails when a script held the run for descriptors it cannot
+// close, in a row that gave it none above 9: the run's own files are 3 to 9,
+// which every sh closes, so what the script names came from this binary past
+// prepare's marking. It says what each is here, since the script's is a copy of
+// this process's: the null device is a stray another row planted (holdStray
+// keeps those from a fork), a socket or a pipe is one that Go made and had not
+// yet marked close-on-exec (accept does so outside the fork lock on darwin, so a
+// run forked in those microseconds is handed the connection, which no lock here
+// prevents), a file one opened without the flag, and a number no longer open was
+// closed since the fork, as a connection is at once and a stray only as its row
+// ends. The failure of a row of dash otherwise reads as a landing's refusal, and
+// names a number and nothing else.
+func assertNotRefused(t *testing.T, script, out string) {
+	t.Helper()
+	got := refusedList(out, script)
+	if len(got) == 0 {
+		return
+	}
+	var what []string
+	for _, fd := range got {
+		what = append(what, "fd "+fd+" is "+describeFd(fd))
+	}
+	t.Fatalf("%s refused to start the tests with descriptors above 9 that this binary handed down without close-on-exec; in this process now, %s:\n%s", script, strings.Join(what, "; "), out)
+}
+
+// describeFd says what descriptor fd of this process is, as /dev/fd shows it:
+// the null device (what holdStray makes of a stray), else its kind, and the
+// file it links to where /dev/fd links to one (Linux). Where the descriptor is
+// not open it says so: the process closes its own as its rows end.
+func describeFd(fd string) string {
+	path := "/dev/fd/" + fd
+	info, err := os.Stat(path)
+	if err != nil {
+		return "not open in this process now"
+	}
+	if null, err := os.Stat(os.DevNull); err == nil && os.SameFile(info, null) {
+		return "the null device"
+	}
+	var kind string
+	switch mode := info.Mode(); {
+	case mode&os.ModeSocket != 0:
+		kind = "a socket"
+	case mode&os.ModeNamedPipe != 0:
+		kind = "a pipe"
+	case mode.IsDir():
+		kind = "a directory"
+	case mode.IsRegular():
+		kind = "a regular file"
+	default:
+		kind = "a device"
+	}
+	if to, err := os.Readlink(path); err == nil {
+		kind += " (" + to + ")"
+	}
+	return kind
+}
+
+// fdInheritable reports whether a fork now would hand fd to its child: the
+// descriptor is open and lacks close-on-exec.
+func fdInheritable(fd int) bool {
+	flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_GETFD, 0)
+	return errno == 0 && flags&syscall.FD_CLOEXEC == 0
+}
+
 // probeCommand is a test command that records its descriptors in record:
 // the listing itself, then one "leaked N" line for every fd of the run's
 // inherited set 3 to 10 and the high sentinel that still answers. The
@@ -835,6 +929,89 @@ func assertNoInheritedFds(t *testing.T, record string) {
 		}
 		if fd >= 10 {
 			t.Fatalf("the test command started with fd %d open: %v", fd, lines)
+		}
+	}
+}
+
+// A stray a row plants is open without close-on-exec, which is what it is for,
+// and no fork can begin while it is: holdStray holds syscall.ForkLock for
+// reading from the planting until the run's marking, and a fork takes it for
+// writing. Without that a run beside the row forks in the gap and its child is
+// handed the stray, which dash cannot close (yardr-436j). The test does not call
+// t.Parallel: it runs before the tests that do, when nothing else is forking, so
+// a lock it can take while the stray is unmarked is a fork that could begin.
+func TestHoldStrayIsMarkedBeforeAnyForkCanBegin(t *testing.T) {
+	stray := -1
+	holdStray(t, func(fd int) {
+		stray = fd
+		if !fdInheritable(fd) {
+			t.Errorf("fd %d is close-on-exec as planted: a row would prove nothing of prepare's marking", fd)
+		}
+		if syscall.ForkLock.TryLock() {
+			syscall.ForkLock.Unlock()
+			t.Errorf("a fork could begin while fd %d is open without close-on-exec: its child would be handed it", fd)
+		}
+		version.CloseOnExecAboveStdio()
+	})
+	if fdInheritable(stray) {
+		t.Errorf("fd %d is still open without close-on-exec after the marking", stray)
+	}
+	if !syscall.ForkLock.TryLock() {
+		t.Fatal("holdStray did not let go of the fork lock: no fork in this binary can begin")
+	}
+	syscall.ForkLock.Unlock()
+}
+
+// A refusal's descriptors are described by what this process holds at their
+// numbers: the null device a stray is, a kind for any other, and for a number
+// no longer open that it is not.
+func TestDescribeFd(t *testing.T) {
+	t.Parallel()
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer null.Close()
+	file, err := os.Create(filepath.Join(t.TempDir(), "f"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	dir, err := os.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dir.Close()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	sock, err := ln.(*net.TCPListener).File()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sock.Close()
+	for _, c := range []struct {
+		name string
+		fd   string
+		want string
+	}{
+		{"the null device", strconv.Itoa(int(null.Fd())), "the null device"},
+		{"a file", strconv.Itoa(int(file.Fd())), "a regular file"},
+		{"a directory", strconv.Itoa(int(dir.Fd())), "a directory"},
+		{"a pipe", strconv.Itoa(int(r.Fd())), "a pipe"},
+		{"a socket", strconv.Itoa(int(sock.Fd())), "a socket"},
+		{"a number that is not open", "999999", "not open in this process now"},
+	} {
+		if got := describeFd(c.fd); !strings.HasPrefix(got, c.want) {
+			t.Errorf("%s: fd %s is described as %q, want %q", c.name, c.fd, got, c.want)
 		}
 	}
 }

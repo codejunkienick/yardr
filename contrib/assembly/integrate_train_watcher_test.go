@@ -224,7 +224,8 @@ func TestIntegrateTrainWritesThroughNoPlantedSymlink(t *testing.T) {
 // descriptors and probes every inherited one, as that test's does, under every
 // sh the host has; where an sh cannot close what the run holds, the command is
 // not started at all. The test binary holds a descriptor above 9 of its own
-// without close-on-exec, which no run may see, as in that test.
+// without close-on-exec, which no run may see, as in that test, nor may it
+// reach a run beside it: the rows of both tests plant theirs side by side.
 func TestIntegrateTrainTestCommandStartsWithNoInheritedFile(t *testing.T) {
 	t.Parallel()
 	for _, row := range fdRuns() {
@@ -239,8 +240,7 @@ func TestIntegrateTrainTestCommandStartsWithNoInheritedFile(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			holdStray(t)
-			cmd := w.cmd()
+			cmd := w.cmdWithStray()
 			cmd.Stdout, cmd.Stderr = log, log
 			err = cmd.Run()
 			log.Close()
@@ -248,6 +248,9 @@ func TestIntegrateTrainTestCommandStartsWithNoInheritedFile(t *testing.T) {
 			out := string(b)
 			if err != nil {
 				t.Fatalf("integrate-train (ls /dev/fd): %v\n%s", err, out)
+			}
+			if !row.refused {
+				assertNotRefused(t, "integrate-train", out)
 			}
 			awaitNoWatcherSleepers(t, w.record, "1799")
 			if row.refused {
