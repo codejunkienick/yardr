@@ -1018,6 +1018,21 @@ recorded transcript replayed buys nothing: its code was used by the
 first redemption. A QR code with no key field is redeemed by the plain
 request above, exactly as before.
 
+Where the code was typed or read aloud and no QR carried a key, the
+device redeems through a PAKE instead: SPAKE2 (RFC 9382, suite
+SPAKE2-P256-SHA256-HKDF-HMAC, the code as its password) in three
+`{"pake": ...}` steps of this path — `start`, `confirm`, `finish` —
+exchanging the device's and the yard's channel public keys under
+the key the run derives, the answer (the same token JSON, with the
+yard's `channel_key` beside it) sealed under that key. A confirmation
+that does not hold is 403 `wrong_code` and counted as any wrong code
+is; a step that is no run is 400 and no try; the device is recorded
+with its key pinned, as a sealed device is. The full pin — suite,
+encodings, confirmation and sealing rules — is
+[users.md](users.md#enrolled-by-a-code). This covers only a code the
+edge never saw: a member pairing opened from the app, whose code the
+router reads and returns, is not covered by it.
+
 The try limit is intended: five wrong codes end the open pairing, a code
 cannot be guessed in five tries, and `yardr user device add` is unaffected,
 so the operator either opens another pairing or adds the device directly.

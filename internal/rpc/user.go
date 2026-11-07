@@ -118,16 +118,7 @@ import (
 //     nothing is kept for the address it came from or for the credential, so
 //     no number of them shuts out or slows a device at that address;
 //   - with no device in the yard the paths are not there: 404.
-//
-// PairPath is the one path that takes no credential, since it is where a
-// device comes for one: there only while the operator has a pairing open
-// for a device, and for whoever has that pairing's code, but for the one
-// the pairing was opened for when the redemption names its presenter
-// (PresenterHeader).
-const (
-	UserPath = "/user/"
-	PairPath = "/user/pair"
-)
+const UserPath = "/user/"
 
 const (
 	// UserRefused is the kind of the event refused requests are logged as:
@@ -156,8 +147,6 @@ const (
 	StreamsPerCredential = 16
 	// maxCredential is the longest credential that is looked at.
 	maxCredential = 4096
-	// maxPair bounds the body of a pairing's request: a code.
-	maxPair = 4 << 10
 	// maxUserCall is the most bytes a call's arguments may be, but for
 	// PutBlob, which is bounded by the yard's cap on a blob.
 	maxUserCall = 1 << 20
@@ -209,6 +198,9 @@ type UserServer struct {
 	// e2eSessions is the yard's live channel sessions by tag
 	// (usere2e.go), held in memory alone.
 	e2eSessions map[string]*e2eSession
+	// pake is the one live PAKE run of a typed pairing (userpair.go),
+	// under mu; nil where none is running.
+	pake *pakeSession
 
 	mu      sync.Mutex
 	refused map[string]*refusals // by reason: a fixed few, whatever is sent

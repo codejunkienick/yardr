@@ -123,7 +123,13 @@ func wrong(code string) string {
 // for, the store has its hash and never the token, and the device is as one
 // added by hand, with the event saying which pairing it came by. The yard
 // had no device before, so nothing else was under /user/.
-func TestDevicePairedByItsCode(t *testing.T) {
+func TestDevicePairRedemptionForms(t *testing.T) {
+	t.Run("plain", testDevicePairedByItsCode)
+	t.Run("sealed", testDevicePairedBySealedCode)
+	t.Run("pake", testDevicePairedByPAKECode)
+}
+
+func testDevicePairedByItsCode(t *testing.T) {
 	y := newPairYard(t)
 	ctx := context.Background()
 	if code, _ := y.post(t, PairPath, "", `{"code":"K7QM-2XPD"}`); code != http.StatusNotFound {
@@ -184,7 +190,13 @@ func (y *pairYard) get(t *testing.T, path, token string) (int, string) {
 // path. The yard has a device by then, so the path is answered as every
 // path under /user/ is without a credential, and as one that is not served
 // with one. No second device is added.
-func TestDevicePairCodeIsGoodOnce(t *testing.T) {
+func TestDevicePairReplayForms(t *testing.T) {
+	t.Run("plain", testDevicePairCodeIsGoodOnce)
+	t.Run("sealed", testDevicePairSealedReplay)
+	t.Run("pake", testDevicePairPAKEReplay)
+}
+
+func testDevicePairCodeIsGoodOnce(t *testing.T) {
 	y := newPairYard(t)
 	code := y.open(t, "jo", "phone")
 	status, body := y.redeem(t, code)
@@ -208,7 +220,13 @@ func TestDevicePairCodeIsGoodOnce(t *testing.T) {
 
 // A wrong code is refused and counted, and the fifth ends the pairing: the
 // right code is good for nothing then. What is no code at all is no try.
-func TestDevicePairWrongCodeFiveTimes(t *testing.T) {
+func TestDevicePairWrongCodesAndRewrites(t *testing.T) {
+	t.Run("plain", testDevicePairWrongCodeFiveTimes)
+	t.Run("sealed", testDevicePairSealedWrongCodeAndGarbage)
+	t.Run("pake", testDevicePairPAKERelayRewrites)
+}
+
+func testDevicePairWrongCodeFiveTimes(t *testing.T) {
 	y := newPairYard(t)
 	code := y.open(t, "jo", "phone")
 	for _, body := range []string{``, `[]`, `{"code":"K7QM"}`, `{"code":"K7QM-2XPD-9"}`, `{"code":17}`, `{}`} {
@@ -254,7 +272,13 @@ func TestDevicePairWrongCodeFiveTimes(t *testing.T) {
 // maps to nobody where the pairing's user maps to nobody too, which redeems
 // as with no presenter. The code is still required of the right presenter.
 // The header is read on this call alone.
-func TestDevicePairPresenter(t *testing.T) {
+func TestDevicePairPresenters(t *testing.T) {
+	t.Run("plain", testDevicePairPlainPresenter)
+	t.Run("sealed", testDevicePairSealedPresenter)
+	t.Run("pake", testDevicePairPAKEPresenter)
+}
+
+func testDevicePairPlainPresenter(t *testing.T) {
 	y := newPairYard(t)
 	ctx := context.Background()
 	if err := y.st.SetSetting(ctx, store.WebJWTUsersSetting, "jo@example.net=jo, Sam@Example.NET=sam", "jo"); err != nil {
@@ -482,7 +506,7 @@ func openSealed(t *testing.T, opening *yardkey.PairingOpening, body string) Pair
 // crosses readable, the answer opens only with the device key the
 // handshake proved, and the device is recorded with that key pinned
 // beside its token's hash. Its token then calls as its user.
-func TestDevicePairedBySealedCode(t *testing.T) {
+func testDevicePairedBySealedCode(t *testing.T) {
 	y := newPairYard(t)
 	ctx := context.Background()
 	device, err := yardkey.GenerateChannelKey()
@@ -528,7 +552,7 @@ func TestDevicePairedBySealedCode(t *testing.T) {
 // carries was used by the first redemption, so the replay is answered
 // as a used code is and adds no device and answers no token; replayed
 // against the next pairing it counts as the wrong code it now is.
-func TestDevicePairSealedReplay(t *testing.T) {
+func testDevicePairSealedReplay(t *testing.T) {
 	y := newPairYard(t)
 	ctx := context.Background()
 	device, err := yardkey.GenerateChannelKey()
@@ -559,7 +583,7 @@ func TestDevicePairSealedReplay(t *testing.T) {
 // opens — bytes that are no handshake, a handshake to another yard's
 // key, base64 of neither — is 400 and no try, so it cannot end a
 // pairing it never read a code from.
-func TestDevicePairSealedWrongCodeAndGarbage(t *testing.T) {
+func testDevicePairSealedWrongCodeAndGarbage(t *testing.T) {
 	y := newPairYard(t)
 	device, err := yardkey.GenerateChannelKey()
 	if err != nil {
@@ -615,7 +639,7 @@ func TestDevicePairSealedWrongCodeAndGarbage(t *testing.T) {
 // user's alone, as a plain one is: another presenter is refused as a
 // wrong code, and the code is still good for its user, whose device
 // is then recorded with its key pinned.
-func TestDevicePairSealedPresenter(t *testing.T) {
+func testDevicePairSealedPresenter(t *testing.T) {
 	y := newPairYard(t)
 	ctx := context.Background()
 	if err := y.st.SetSetting(ctx, store.WebJWTUsersSetting, "jo@example.net=jo, sam@example.net=sam", "jo"); err != nil {
@@ -637,6 +661,554 @@ func TestDevicePairSealedPresenter(t *testing.T) {
 	}
 	if got := openSealed(t, opening, body); got.User != "sam" || got.Device != "phone" {
 		t.Fatalf("sam's sealed code is answered %+v", got)
+	}
+	devices, err := y.st.Devices(ctx, "")
+	if err != nil || len(devices) != 1 || devices[0].ChannelKey != yardkey.ChannelPublic(device) {
+		t.Fatalf("devices = %+v, %v, want sam's phone with its key pinned", devices, err)
+	}
+}
+
+// postPAKE sends one PAKE step to the pair path, with the edge's
+// presenter word where presenters are given, and answers the status
+// and the step the yard replied with.
+func (y *pairYard) postPAKE(t *testing.T, ask pakeAsk, presenters ...string) (int, pakeReply, string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]pakeAsk{"pake": ask})
+	var raw string
+	var status int
+	if len(presenters) == 0 {
+		status, raw = y.post(t, PairPath, "", string(body))
+	} else {
+		status, raw = y.do(t, http.MethodPost, PairPath, "", http.Header{PresenterHeader: presenters}, string(body))
+	}
+	var got struct {
+		PAKE pakeReply `json:"pake"`
+	}
+	_ = json.Unmarshal([]byte(raw), &got)
+	return status, got.PAKE, raw
+}
+
+// pakeBegin starts a PAKE run for device on code, as a device that
+// typed it, and answers the session and the opening that continues
+// it.
+func (y *pairYard) pakeBegin(t *testing.T, device yardkey.ChannelKey, code string) (string, *yardkey.PairingPAKEOpening, pakeReply) {
+	t.Helper()
+	first, opening, err := yardkey.StartPairingPAKE(device, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, reply, raw := y.postPAKE(t, pakeAsk{Step: "start", Msg: base64.RawURLEncoding.EncodeToString(first)})
+	if status != http.StatusOK || reply.Step != "exchange" || reply.Session == "" {
+		t.Fatalf("the PAKE start = %d %s, want 200 exchange with a session", status, raw)
+	}
+	return reply.Session, opening, reply
+}
+
+// pakeRun runs a whole PAKE redemption for device on code and
+// answers what the device opened: the token, its user and device,
+// the yard, and the yard channel key it pins.
+func (y *pairYard) pakeRun(t *testing.T, device yardkey.ChannelKey, code string, presenters ...string) pakeAnswer {
+	t.Helper()
+	session, opening, reply := y.pakeBegin(t, device, code)
+	second, err := base64.RawURLEncoding.DecodeString(reply.Msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirm, err := opening.Finish(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, reply, raw := y.postPAKE(t, pakeAsk{Step: "confirm", Session: session, Confirm: base64.RawURLEncoding.EncodeToString(confirm)}, presenters...)
+	if status != http.StatusOK || reply.Step != "confirmed" {
+		t.Fatalf("the PAKE confirm = %d %s, want 200 confirmed", status, raw)
+	}
+	yardConfirm, err := base64.RawURLEncoding.DecodeString(reply.Confirm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := opening.Verify(yardConfirm); err != nil {
+		t.Fatal(err)
+	}
+	sealedKey, err := opening.SealKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, reply, raw = y.postPAKE(t, pakeAsk{Step: "finish", Session: session, Key: base64.RawURLEncoding.EncodeToString(sealedKey)}, presenters...)
+	if status != http.StatusOK || reply.Step != "done" {
+		t.Fatalf("the PAKE finish = %d %s, want 200 done", status, raw)
+	}
+	sealed, err := base64.RawURLEncoding.DecodeString(reply.Answer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := opening.OpenAnswer(sealed)
+	if err != nil {
+		t.Fatalf("the device could not open its PAKE answer: %v", err)
+	}
+	var got pakeAnswer
+	if err := json.Unmarshal(plain, &got); err != nil {
+		t.Fatalf("the opened PAKE answer = %q (%v)", plain, err)
+	}
+	return got
+}
+
+// A device that typed its code, with no key from any QR, redeems it
+// through the PAKE: the run is relayed step by step (here, recorded
+// at each pass, as the edge would carry it), neither the code, the
+// token nor either static key crosses readable, the device is
+// recorded with its key pinned beside its token's hash, the answer
+// gives it the yard's channel key to pin, and its token then calls
+// as its user.
+func testDevicePairedByPAKECode(t *testing.T) {
+	y := newPairYard(t)
+	ctx := context.Background()
+	device, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := y.open(t, "sam", "phone")
+	var carried []string
+	relay := func(ask pakeAsk) (int, pakeReply, string) {
+		status, reply, raw := y.postPAKE(t, ask)
+		body, _ := json.Marshal(map[string]pakeAsk{"pake": ask})
+		carried = append(carried, string(body), raw)
+		return status, reply, raw
+	}
+	first, opening, err := yardkey.StartPairingPAKE(device, strings.ToLower(strings.ReplaceAll(code, "-", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, reply, raw := relay(pakeAsk{Step: "start", Msg: base64.RawURLEncoding.EncodeToString(first)})
+	if status != http.StatusOK {
+		t.Fatalf("the PAKE start = %d %s", status, raw)
+	}
+	session := reply.Session
+	second, err := base64.RawURLEncoding.DecodeString(reply.Msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirm, err := opening.Finish(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, reply, raw = relay(pakeAsk{Step: "confirm", Session: session, Confirm: base64.RawURLEncoding.EncodeToString(confirm)})
+	if status != http.StatusOK {
+		t.Fatalf("the PAKE confirm = %d %s", status, raw)
+	}
+	yardConfirm, err := base64.RawURLEncoding.DecodeString(reply.Confirm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := opening.Verify(yardConfirm); err != nil {
+		t.Fatal(err)
+	}
+	sealedKey, err := opening.SealKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, reply, raw = relay(pakeAsk{Step: "finish", Session: session, Key: base64.RawURLEncoding.EncodeToString(sealedKey)})
+	if status != http.StatusOK {
+		t.Fatalf("the PAKE finish = %d %s", status, raw)
+	}
+	sealed, err := base64.RawURLEncoding.DecodeString(reply.Answer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := opening.OpenAnswer(sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got pakeAnswer
+	if err := json.Unmarshal(plain, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got.Token, store.DeviceTokenPrefix) || got.User != "sam" || got.Device != "phone" || got.Yard != "south" {
+		t.Fatalf("the PAKE code is answered %+v", got)
+	}
+	if got.ChannelKey != yardkey.ChannelPublic(y.channel) {
+		t.Fatalf("the PAKE answer pins yard channel key %q, want %q", got.ChannelKey, yardkey.ChannelPublic(y.channel))
+	}
+	// Nothing the relay carried reads: not the code in either of its
+	// forms, not the token, not either key in either of its forms.
+	all := strings.Join(carried, "\n")
+	for _, secret := range []string{code, strings.ReplaceAll(code, "-", ""), got.Token,
+		yardkey.ChannelPublic(device), base64.RawURLEncoding.EncodeToString(device.Public),
+		yardkey.ChannelPublic(y.channel), base64.RawURLEncoding.EncodeToString(y.channel.Public)} {
+		if strings.Contains(all, secret) {
+			t.Errorf("the relay carried %q readable", secret)
+		}
+	}
+	if status, me := y.get(t, "/user/me", got.Token); status != http.StatusOK || me != `{"user":"sam","said_by":"phone","yard":"south","yardmaster":"yardmaster"}` {
+		t.Errorf("/user/me with the PAKE token = %d %s", status, me)
+	}
+	devices, err := y.st.Devices(ctx, "")
+	if err != nil || len(devices) != 1 || devices[0].ChannelKey != yardkey.ChannelPublic(device) {
+		t.Fatalf("devices = %+v, %v, want sam's phone with the device key pinned", devices, err)
+	}
+}
+
+// A relay that rewrites what it carries holds nothing: a byte turned
+// in the first message is 400 and no try, in the second the device
+// cannot finish its run, in a confirmation one wrong code counted
+// against the pairing, and in the sealed device key 400 with the
+// pairing still open — and through it all no device is added until
+// an unturned run completes.
+func testDevicePairPAKERelayRewrites(t *testing.T) {
+	y := newPairYard(t)
+	ctx := context.Background()
+	device, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn := func(s string) string {
+		b, err := base64.RawURLEncoding.DecodeString(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b[len(b)/2] ^= 0xff
+		return base64.RawURLEncoding.EncodeToString(b)
+	}
+	devices := func(want int) {
+		t.Helper()
+		if got, err := y.st.Devices(ctx, ""); err != nil || len(got) != want {
+			t.Fatalf("devices = %+v, %v, want %d", got, err, want)
+		}
+	}
+
+	// A turned first message, and what is no message at all: 400,
+	// and the right code still redeems after them, so they were
+	// no try.
+	code := y.open(t, "jo", "phone")
+	first, _, err := yardkey.StartPairingPAKE(device, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := base64.RawURLEncoding.EncodeToString(first)
+	for what, msg := range map[string]string{"turned": turn(good), "no base64": "!!!", "no point": base64.RawURLEncoding.EncodeToString([]byte("not a point"))} {
+		if status, _, raw := y.postPAKE(t, pakeAsk{Step: "start", Msg: msg}); status != http.StatusBadRequest {
+			t.Errorf("a PAKE start that is %s = %d %s, want 400", what, status, raw)
+		}
+	}
+	if status, _, raw := y.postPAKE(t, pakeAsk{Step: "dance", Msg: good}); status != http.StatusBadRequest {
+		t.Errorf("a PAKE step that is none = %d %s, want 400", status, raw)
+	}
+	if got := y.pakeRun(t, device, code); got.User != "jo" || got.Device != "phone" {
+		t.Fatalf("the right code after the garbage is answered %+v", got)
+	}
+	devices(1)
+
+	// A turned second message (as the device receives it) fails
+	// the device's finish, so no confirmation is ever sent: the
+	// pairing is untouched and the code still redeems.
+	// Each device that is paired brings a key of its own: one another
+	// device pins already is not added.
+	if device, err = yardkey.GenerateChannelKey(); err != nil {
+		t.Fatal(err)
+	}
+	code = y.open(t, "jo", "laptop")
+	session, opening, reply := y.pakeBegin(t, device, code)
+	if _, err := opening.Finish(mustTurn(t, reply.Msg)); err == nil {
+		t.Error("the device finished a turned second message")
+	}
+	_ = session
+	if got := y.pakeRun(t, device, code); got.Device != "laptop" {
+		t.Fatalf("the right code after a turned second message is answered %+v", got)
+	}
+	devices(2)
+
+	// A turned confirmation is the one online guess, spent: 403
+	// wrong_code, the run is gone, and the code is still good for
+	// a clean run — four more turned ones end the pairing.
+	code = y.open(t, "jo", "tablet")
+	staleID, staleOpening, staleReply := y.pakeBegin(t, device, wrong(code))
+	stale, ok := y.u.pakeSessionFor(&pakeAsk{Session: staleID})
+	if !ok {
+		t.Fatal("the first PAKE run is not live")
+	}
+	session, opening, reply = y.pakeBegin(t, device, code)
+	staleSecond, err := base64.RawURLEncoding.DecodeString(staleReply.Msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleConfirm, err := staleOpening.Finish(staleSecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, live, err := y.u.confirmPAKESession(stale, staleConfirm); live || err != nil {
+		t.Fatalf("a replaced PAKE confirmation = live %t, %v, want no live step and no try", live, err)
+	}
+	second, err := base64.RawURLEncoding.DecodeString(reply.Msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirm, err := opening.Finish(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turned := base64.RawURLEncoding.EncodeToString(confirm)
+	if status, _, raw := y.postPAKE(t, pakeAsk{Step: "confirm", Session: session, Confirm: turn(turned)}); status != http.StatusForbidden || raw != `{"refused":"wrong_code"}` {
+		t.Fatalf("a turned confirmation = %d %s, want 403 wrong_code", status, raw)
+	}
+	if status, _, raw := y.postPAKE(t, pakeAsk{Step: "confirm", Session: session, Confirm: turned}); status != http.StatusBadRequest {
+		t.Errorf("the spent run's confirmation again = %d %s, want 400", status, raw)
+	}
+	// Four clean wrong-code runs follow the turned one: the fifth
+	// refusal in all, after which the right code finds no pairing.
+	for try := 2; try <= store.MaxTries; try++ {
+		first, opening, err := yardkey.StartPairingPAKE(device, wrong(code))
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, reply, raw := y.postPAKE(t, pakeAsk{Step: "start", Msg: base64.RawURLEncoding.EncodeToString(first)})
+		if status != http.StatusOK {
+			t.Fatalf("wrong-code run %d start = %d %s", try, status, raw)
+		}
+		second, err := base64.RawURLEncoding.DecodeString(reply.Msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		confirm, err := opening.Finish(second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status, _, raw := y.postPAKE(t, pakeAsk{Step: "confirm", Session: reply.Session, Confirm: base64.RawURLEncoding.EncodeToString(confirm)}); status != http.StatusForbidden || raw != `{"refused":"wrong_code"}` {
+			t.Fatalf("wrong-code run %d confirm = %d %s, want 403 wrong_code", try, status, raw)
+		}
+	}
+	devices(2)
+	first, _, err = yardkey.StartPairingPAKE(device, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _, raw := y.postPAKE(t, pakeAsk{Step: "start", Msg: base64.RawURLEncoding.EncodeToString(first)}); status != http.StatusUnauthorized {
+		t.Errorf("the right code after %d wrong PAKE runs = %d %s, want 401, no pairing", store.MaxTries, status, raw)
+	}
+
+	// A turned sealed device key, and a finish before its run is
+	// confirmed: 400, no device, and the pairing lives for a
+	// clean run.
+	// Each device that is paired brings a key of its own: one another
+	// device pins already is not added.
+	if device, err = yardkey.GenerateChannelKey(); err != nil {
+		t.Fatal(err)
+	}
+	code = y.open(t, "jo", "watch")
+	session, opening, reply = y.pakeBegin(t, device, code)
+	if status, _, raw := y.postPAKE(t, pakeAsk{Step: "finish", Session: session, Key: base64.RawURLEncoding.EncodeToString(make([]byte, 60))}); status != http.StatusBadRequest {
+		t.Errorf("a finish before confirmation = %d %s, want 400", status, raw)
+	}
+	second, err = base64.RawURLEncoding.DecodeString(reply.Msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirm, err = opening.Finish(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, reply, raw := y.postPAKE(t, pakeAsk{Step: "confirm", Session: session, Confirm: base64.RawURLEncoding.EncodeToString(confirm)})
+	if status != http.StatusOK {
+		t.Fatalf("the confirm = %d %s", status, raw)
+	}
+	firstConfirm := reply.Confirm
+	status, reply, raw = y.postPAKE(t, pakeAsk{Step: "confirm", Session: session, Confirm: base64.RawURLEncoding.EncodeToString(confirm)})
+	if status != http.StatusOK || reply.Confirm != firstConfirm {
+		t.Fatalf("the repeated valid confirm = %d %s, want the same confirmation", status, raw)
+	}
+	yardConfirm, err := base64.RawURLEncoding.DecodeString(reply.Confirm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := opening.Verify(yardConfirm); err != nil {
+		t.Fatal(err)
+	}
+	sealedKey, err := opening.SealKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _, raw := y.postPAKE(t, pakeAsk{Step: "finish", Session: session, Key: turn(base64.RawURLEncoding.EncodeToString(sealedKey))}); status != http.StatusBadRequest {
+		t.Errorf("a turned sealed device key = %d %s, want 400", status, raw)
+	}
+	devices(2)
+	// The finish spent that run; a fresh clean run redeems.
+	if got := y.pakeRun(t, device, code); got.Device != "watch" {
+		t.Fatalf("the right code after a turned key is answered %+v", got)
+	}
+	devices(3)
+}
+
+// mustTurn answers s with a byte turned, for a message a test
+// receives and passes on as a rewriting relay would.
+func mustTurn(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b[len(b)/2] ^= 0xff
+	return b
+}
+
+// A recorded PAKE transcript buys nothing replayed: its finish
+// again finds no pairing, its start against a new pairing is a new
+// run its recorded confirmation does not confirm, and no second
+// device is ever added. A yard told no channel key file serves no
+// PAKE start at all.
+func testDevicePairPAKEReplay(t *testing.T) {
+	y := newPairYard(t)
+	ctx := context.Background()
+	device, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := y.open(t, "sam", "phone")
+	first, opening, err := yardkey.StartPairingPAKE(device, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordedStart := pakeAsk{Step: "start", Msg: base64.RawURLEncoding.EncodeToString(first)}
+	status, reply, raw := y.postPAKE(t, recordedStart)
+	if status != http.StatusOK {
+		t.Fatalf("the PAKE start = %d %s", status, raw)
+	}
+	session := reply.Session
+	second, err := base64.RawURLEncoding.DecodeString(reply.Msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirm, err := opening.Finish(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordedConfirm := pakeAsk{Step: "confirm", Session: session, Confirm: base64.RawURLEncoding.EncodeToString(confirm)}
+	status, reply, raw = y.postPAKE(t, recordedConfirm)
+	if status != http.StatusOK {
+		t.Fatalf("the PAKE confirm = %d %s", status, raw)
+	}
+	yardConfirm, err := base64.RawURLEncoding.DecodeString(reply.Confirm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := opening.Verify(yardConfirm); err != nil {
+		t.Fatal(err)
+	}
+	sealedKey, err := opening.SealKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordedFinish := pakeAsk{Step: "finish", Session: session, Key: base64.RawURLEncoding.EncodeToString(sealedKey)}
+	if status, _, raw := y.postPAKE(t, recordedFinish); status != http.StatusOK {
+		t.Fatalf("the PAKE finish = %d %s", status, raw)
+	}
+	if status, _, raw := y.postPAKE(t, recordedFinish); status != http.StatusUnauthorized || strings.Contains(raw, "yardr-dev-") {
+		t.Errorf("the recorded finish again = %d %s, want 401 and no token", status, raw)
+	}
+	// Against a fresh pairing the recorded start opens a new run,
+	// whose session the recorded confirmation does not hold in:
+	// it is refused as the wrong code it now proves, and counted.
+	y.open(t, "jo", "phone")
+	status, reply, raw = y.postPAKE(t, recordedStart)
+	if status != http.StatusOK {
+		t.Fatalf("the recorded start against a new pairing = %d %s", status, raw)
+	}
+	replayed := recordedConfirm
+	replayed.Session = reply.Session
+	if status, _, raw := y.postPAKE(t, replayed); status != http.StatusForbidden || raw != `{"refused":"wrong_code"}` {
+		t.Errorf("the recorded confirmation in a new run = %d %s, want 403 wrong_code", status, raw)
+	}
+	if devices, err := y.st.Devices(ctx, ""); err != nil || len(devices) != 1 {
+		t.Fatalf("devices after the replays = %+v, %v, want still the one", devices, err)
+	}
+
+	// No channel key file told: no PAKE run is served, and the
+	// pairing it named is untouched by the refusal.
+	if _, err := y.st.DevicePairClose(ctx, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	// Each device that is paired brings a key of its own: one another
+	// device pins already is not added.
+	if device, err = yardkey.GenerateChannelKey(); err != nil {
+		t.Fatal(err)
+	}
+	y.u.channelPath = ""
+	code = y.open(t, "jo", "laptop")
+	first, _, err = yardkey.StartPairingPAKE(device, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _, raw := y.postPAKE(t, pakeAsk{Step: "start", Msg: base64.RawURLEncoding.EncodeToString(first)}); status != http.StatusBadRequest {
+		t.Errorf("a PAKE start at a yard with no channel key = %d %s, want 400", status, raw)
+	}
+	y.u.channelPath = filepath.Join(t.TempDir(), "channel.key")
+	channel, _, err := yardkey.EnsureChannel(y.u.channelPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	y.channel = channel
+	if got := y.pakeRun(t, device, code); got.Device != "laptop" || got.ChannelKey != yardkey.ChannelPublic(channel) {
+		t.Fatalf("the code at the yard whose channel key returned is answered %+v", got)
+	}
+}
+
+// A PAKE redemption that names who presents it is the pairing's
+// user's alone, as every form's is: another presenter is refused at
+// its finish as a wrong code, counted with them, and the code is
+// still good for its user, whose device is recorded with its key
+// pinned.
+func testDevicePairPAKEPresenter(t *testing.T) {
+	y := newPairYard(t)
+	ctx := context.Background()
+	if err := y.st.SetSetting(ctx, store.WebJWTUsersSetting, "jo@example.net=jo, sam@example.net=sam", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	device, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := y.open(t, "sam", "phone")
+	run := func(presenter string) (int, pakeReply, string) {
+		t.Helper()
+		first, opening, err := yardkey.StartPairingPAKE(device, code)
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, reply, raw := y.postPAKE(t, pakeAsk{Step: "start", Msg: base64.RawURLEncoding.EncodeToString(first)}, presenter)
+		if status != http.StatusOK {
+			t.Fatalf("the PAKE start presented by %s = %d %s", presenter, status, raw)
+		}
+		second, err := base64.RawURLEncoding.DecodeString(reply.Msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		confirm, err := opening.Finish(second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		session := reply.Session
+		status, reply, raw = y.postPAKE(t, pakeAsk{Step: "confirm", Session: session, Confirm: base64.RawURLEncoding.EncodeToString(confirm)}, presenter)
+		if status != http.StatusOK {
+			t.Fatalf("the PAKE confirm presented by %s = %d %s", presenter, status, raw)
+		}
+		yardConfirm, err := base64.RawURLEncoding.DecodeString(reply.Confirm)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := opening.Verify(yardConfirm); err != nil {
+			t.Fatal(err)
+		}
+		sealedKey, err := opening.SealKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return y.postPAKE(t, pakeAsk{Step: "finish", Session: session, Key: base64.RawURLEncoding.EncodeToString(sealedKey)}, presenter)
+	}
+	if status, _, raw := run("jo@example.net"); status != http.StatusForbidden || raw != `{"refused":"wrong_code"}` {
+		t.Fatalf("sam's PAKE code presented by jo = %d %s, want 403 wrong_code", status, raw)
+	}
+	if devices, err := y.st.Devices(ctx, ""); err != nil || len(devices) != 0 {
+		t.Fatalf("devices = %+v, %v, want none", devices, err)
+	}
+	if got := y.pakeRun(t, device, code, "sam@example.net"); got.User != "sam" || got.Device != "phone" {
+		t.Fatalf("sam's PAKE code presented by sam is answered %+v", got)
 	}
 	devices, err := y.st.Devices(ctx, "")
 	if err != nil || len(devices) != 1 || devices[0].ChannelKey != yardkey.ChannelPublic(device) {

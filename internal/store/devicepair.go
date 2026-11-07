@@ -25,8 +25,12 @@ import (
 // the device makes a channel key pair for this yard, redeems the code
 // inside a Noise handshake to the yard's channel key, and is recorded
 // with its public half pinned beside its token's hash, sealed from
-// whoever carried the connection (DevicePairRedeemSealed). A pairing
-// redeemed with no key field is the plain one of before: what it is given
+// whoever carried the connection (DevicePairRedeemSealed). Where no
+// key came by a QR, because the code was typed or read aloud, the
+// device and the yard run a PAKE on the code instead and exchange
+// their channel keys under the key it derives, recorded the same
+// way (the DevicePairPAKE steps below). A pairing redeemed with no
+// key field is the plain one of before: what it is given
 // is a bearer token, which whoever reads the connection reads on every call
 // after this one. The connection is what a device rests on (docs/api.md,
 // "Over the network"), so the code crosses on it as the token does.
@@ -458,22 +462,43 @@ func (s *Store) redeemDevicePairing(ctx context.Context, code string, presenter 
 	if err != nil {
 		return nil, err
 	}
-	if presenter != nil {
-		switch {
-		case *presenter != "" && *presenter != p.User:
-			return nil, s.wrongDevicePairCode(ctx, p)
-		case *presenter == "" && (mapped == nil || mapped[p.User]):
-			if mapped != nil {
-				if log := s.log.Load(); log != nil {
-					log.Warn("a pairing's presenter maps to no user", "setting", WebJWTUsersSetting)
-				}
-			}
-			return nil, s.wrongDevicePairCode(ctx, p)
-		}
+	if err := s.checkPairPresenter(ctx, p, presenter, mapped); err != nil {
+		return nil, err
 	}
 	if subtle.ConstantTimeCompare([]byte(clean), []byte(p.code)) != 1 {
 		return nil, s.wrongDevicePairCode(ctx, p)
 	}
+	return s.addPairedDevice(ctx, p, deviceKey)
+}
+
+// checkPairPresenter judges a redemption's presenter against p, with
+// s.devPair.mu held, as redeemDevicePairing's head states it: a
+// presenter that may not redeem is refused as a wrong code is and
+// counted as one, and nil is a redemption that names none.
+func (s *Store) checkPairPresenter(ctx context.Context, p *devicePairing, presenter *string, mapped map[string]bool) error {
+	if presenter == nil {
+		return nil
+	}
+	switch {
+	case *presenter != "" && *presenter != p.User:
+		return s.wrongDevicePairCode(ctx, p)
+	case *presenter == "" && (mapped == nil || mapped[p.User]):
+		if mapped != nil {
+			if log := s.log.Load(); log != nil {
+				log.Warn("a pairing's presenter maps to no user", "setting", WebJWTUsersSetting)
+			}
+		}
+		return s.wrongDevicePairCode(ctx, p)
+	}
+	return nil
+}
+
+// addPairedDevice uses p's code and adds its device, with
+// s.devPair.mu held and the code already proved — by comparison, by
+// a handshake, or by a PAKE confirmation: the code is spent before
+// the write, as every redemption's is, so a device that cannot be
+// added leaves it used.
+func (s *Store) addPairedDevice(ctx context.Context, p *devicePairing, deviceKey string) (*NewDevice, error) {
 	p.code = ""
 	// Made before the write, which may run twice (write).
 	out, err := newDevice()
@@ -488,4 +513,112 @@ func (s *Store) redeemDevicePairing(ctx context.Context, code string, presenter 
 	}
 	p.State = PairDone
 	return out, nil
+}
+
+// The PAKE redemption of a typed code (internal/yardkey, pake.go) is
+// driven from the server that runs the exchange, as the sealed one
+// is: three calls, one a step. DevicePairPAKEBegin hands that server
+// the open pairing's id and its code — the run's password, which the
+// server holds in its run and nowhere else, logging none of it — and
+// the run is bound to that pairing from then on. A confirmation that
+// does not hold is counted by DevicePairPAKEWrong, one wrong code as
+// any form's is. A confirmed run is redeemed by the
+// DevicePairRedeemPAKE forms, which compare no code: the
+// confirmation already proved the device holds it, against the code
+// this pairing's begin handed out, so what they hold is that the
+// pairing is still the same one, still open, and presented by whom
+// it may be. A run whose pairing ended, ran out or was replaced
+// between its steps is refused NoPairing at whichever step asks
+// next.
+
+// DevicePairPAKEBegin answers the id and code of the pairing the
+// yard has open, for the server to run a PAKE on. With none open it
+// is NoPairing, as a redemption's is. Like DevicePairRedeem it is
+// the server's to ask, for a request it was sent, and no method of
+// the API: the code goes to no caller, only into the run.
+func (s *Store) DevicePairPAKEBegin(ctx context.Context) (id, code string, err error) {
+	s.devPair.mu.Lock()
+	defer s.devPair.mu.Unlock()
+	p := s.devicePairing(ctx)
+	if p == nil || p.State != PairOpened {
+		return "", "", &Refused{Reason: NoPairing}
+	}
+	return p.ID, p.code, nil
+}
+
+// DevicePairPAKEWrong counts one wrong code against the pairing id
+// a PAKE run began under, for a confirmation that did not hold: one
+// online guess, as a wrong code of any form. A run bound to a
+// pairing that is no longer the open one counts nothing: it guessed
+// at a code that is gone.
+func (s *Store) DevicePairPAKEWrong(ctx context.Context, id string) error {
+	s.devPair.mu.Lock()
+	defer s.devPair.mu.Unlock()
+	p := s.devicePairing(ctx)
+	if p == nil || p.State != PairOpened || p.ID != id {
+		return &Refused{Reason: NoPairing}
+	}
+	return s.wrongDevicePairCode(ctx, p)
+}
+
+// DevicePairRedeemPAKE is the redemption of a confirmed PAKE run:
+// deviceKey is the device channel public key the run exchanged under
+// its derived key, recorded as a sealed redemption records its
+// handshake's. The code is used with this call, as any redemption's
+// is, and a recorded run replayed against a later pairing redeems
+// nothing there: its id is not that pairing's.
+func (s *Store) DevicePairRedeemPAKE(ctx context.Context, id, deviceKey string) (*NewDevice, error) {
+	return s.redeemDevicePairingPAKE(ctx, id, nil, nil, deviceKey)
+}
+
+// DevicePairRedeemPAKEBy is DevicePairRedeemPAKE for a redemption
+// that names who presents it, as DevicePairRedeemBy is of the plain
+// one: the presenter narrows it to the pairing's user alone, judged
+// here as at any redemption, before the code is spent.
+func (s *Store) DevicePairRedeemPAKEBy(ctx context.Context, id, presenter, deviceKey string) (*NewDevice, error) {
+	return s.redeemDevicePairingPAKE(ctx, id, &presenter, nil, deviceKey)
+}
+
+// DevicePairRedeemPAKEUnmapped is DevicePairRedeemPAKE for a
+// redemption whose presenter is one address that maps to no user,
+// as DevicePairRedeemUnmapped is of the plain one.
+func (s *Store) DevicePairRedeemPAKEUnmapped(ctx context.Context, id string, mapped map[string]bool, deviceKey string) (*NewDevice, error) {
+	nobody := ""
+	return s.redeemDevicePairingPAKE(ctx, id, &nobody, mapped, deviceKey)
+}
+
+// redeemDevicePairingPAKE is every PAKE redemption, in the terms of
+// redeemDevicePairing with the code's proof already made: a key
+// that is none is no redemption and no try, a pairing that is not
+// the run's is NoPairing, and the presenter is judged before the
+// code is spent, exactly as there.
+func (s *Store) redeemDevicePairingPAKE(ctx context.Context, id string, presenter *string, mapped map[string]bool, deviceKey string) (*NewDevice, error) {
+	if raw, err := enc.Strict().DecodeString(deviceKey); err != nil || len(raw) != 32 {
+		return nil, fmt.Errorf("%q is no channel public key", clipErr(deviceKey))
+	}
+	s.devPair.mu.Lock()
+	defer s.devPair.mu.Unlock()
+	p := s.devicePairing(ctx)
+	if p == nil || p.State != PairOpened || p.ID != id {
+		return nil, &Refused{Reason: NoPairing}
+	}
+	if err := s.checkPairPresenter(ctx, p, presenter, mapped); err != nil {
+		return nil, err
+	}
+	// A PAKE run proves the code, not the key: the device sealed 32
+	// bytes of its choosing and never showed it holds their private
+	// half, as a sealed handshake shows it. A key another device
+	// already pins would put that device's channel handshakes on this
+	// record (DeviceByChannelKey), so it is a device that could not be
+	// added, and the code is spent. Only pairings pin a key, and they
+	// run one at a time under s.devPair.mu, so no write slips between.
+	if pinned, err := s.DeviceByChannelKey(ctx, deviceKey); err != nil || pinned != nil {
+		detail := "the channel key is pinned by another device"
+		if err != nil {
+			detail = err.Error()
+		}
+		s.endDevicePairing(ctx, p, DeviceNotAdded, detail, "yard")
+		return nil, &Refused{Reason: DeviceNotAdded}
+	}
+	return s.addPairedDevice(ctx, p, deviceKey)
 }

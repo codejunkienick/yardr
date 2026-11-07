@@ -1199,6 +1199,97 @@ device is added and no second token answered. A yard with no channel
 key file, or one its server was told nothing of, serves the plain form
 alone and answers a sealed body 400.
 
+**By a typed code, through a PAKE.** A code that is typed or read
+aloud took no key from a QR, so the device and the yard agree on one
+from the code itself: they run SPAKE2 (RFC 9382) with the code as
+the password, in three steps of this same path, and exchange their
+static channel keys under the key the run derives. This holds only
+for a code the edge never saw — shown on the yard's own screen, in
+its terminal, or read aloud from there. It does not cover a member
+pairing opened from the app: the router reads that code and returns
+it, so the edge holds the password and could sit in the run as
+either end; a member is sealed by the QR an operator opens on the
+yard's own screen, as above, and no other way yet. The suite is
+pinned here for the clients that implement it:
+SPAKE2-P256-SHA256-HKDF-HMAC of RFC 9382 section 6 — P-256,
+SHA-256, HKDF-HMAC-SHA256
+and HMAC-SHA256, the suite's own M and N, the identities `A` (the
+device) and `B` (the yard), and no additional authenticated data —
+with the transcript and key schedule of the RFC's sections 3.3 and
+4. The password is the code as it is typed cleaned: its dash and
+spaces out, capitals, `I` and `L` as `1`, `O` as `0`, as eight ASCII
+bytes. On the yard the run is `github.com/backkem/spake2-go` at
+v0.0.1, which its tests hold against the RFC's appendix B vectors;
+no PAKE code is the yard's own, and the library states it has had
+no formal audit, so none is claimed for it. The device makes itself
+an X25519 key pair for this yard, as a sealed device does, and runs:
+
+```text
+POST <address>/user/pair
+{"pake": {"step": "start", "msg": "<base64url of the first message>"}}
+
+200 {"pake": {"step": "exchange", "session": "<base64url of 16 bytes>", "msg": "<base64url of the second message>"}}
+```
+
+The first and second messages are the run's two blinded points, 65
+bytes uncompressed each, base64url without padding. The yard answers
+from the code of the pairing it has open; a first message that is no
+point of the suite is 400 and no try. The session names the one run
+the yard holds — a new start replaces it, it lives two minutes at
+most, and it is bound to the pairing it began under, so a run whose
+pairing ended, ran out or was replaced redeems nothing and counts
+nothing from then on: its finish, or a confirmation counted against
+it, finds no such pairing.
+
+```text
+POST <address>/user/pair
+{"pake": {"step": "confirm", "session": "...", "confirm": "<base64url of the device's confirmation>"}}
+
+200 {"pake": {"step": "confirmed", "confirm": "<base64url of the yard's confirmation>"}}
+```
+
+The confirmations are the RFC's `cA` and `cB`, 32 bytes each. This
+is the step a wrong code spends its one online guess at: a
+confirmation that does not hold is 403 `wrong_code`, counted as any
+form's wrong code is, the fifth ending the pairing, and the run is
+spent either way. A step that names no live session is 400 and no
+try. The device checks the yard's confirmation before it sends
+anything more: only then has the other end proved it holds the code.
+
+```text
+POST <address>/user/pair
+{"pake": {"step": "finish", "session": "...", "key": "<base64url of the sealed device key>"}}
+
+200 {"pake": {"step": "done", "answer": "<base64url of the sealed answer>"}}
+```
+
+Under the run's derived key — the first half of the transcript's
+SHA-256, through HKDF-SHA256 with no salt to a ChaCha20-Poly1305
+key, a fresh 12-byte nonce before each sealed message — the device
+seals its channel public key (its 32 raw bytes; the HKDF's info is
+`yardr pake device key v1`), and the yard, which opens it only in a
+confirmed run, answers the `{"token", "user", "device", "yard"}` of
+the table below with the yard's own channel public key beside it as
+`channel_key`, sealed the same way (the info `yardr pake answer
+v1`), for the device to pin as a QR device pins the QR's key. The
+finish of a confirmed run spends it whatever it carries, and one
+sent before its run is confirmed is 400 with the run still live;
+a sealed key that does not open is 400 and no try; the presenter
+rule is every form's,
+judged at the finish before the code is spent; and a confirmed run
+redeems as a sealed one does, its device recorded with the key the
+run exchanged pinned beside its token's hash. The run proves the
+code, not that the device holds the key it sends, so the device
+makes a fresh key pair for the run: a key another device of the yard
+pins already is 409 `not_added`, and the code is spent. Neither the
+code nor the token crosses readable at any step. A recorded transcript buys
+no offline test of the code — that is the run's defining property,
+and the failure of a code-keyed HMAC's transcript — and replayed it
+buys nothing either: its session is spent, its confirmation does not
+hold in a new run, and no second device is added. A yard with no
+channel key serves no PAKE run and answers its start 400: it has no
+static key to exchange.
+
 | answer | what it says |
 |---|---|
 | 200 `{"token", "user", "device", "yard"}` | the device's token, the one time it is anywhere, and what [`/user/me`](api.md#over-the-network) then says of it: the user it calls as, its own name, the yard's name. The answer carries `Cache-Control: no-store`. Keep the token where the device keeps a secret |
@@ -1247,7 +1338,12 @@ check for two people to compare, as a pairing of yards has. That check
 keeps someone between two yards from putting a key of their own in place
 of a yard's; a device that pairs by the QR's key needs none, because the
 key reaches it on the yard's own screen, where the carrier cannot rewrite
-it, and its code and token then cross sealed. A device paired plainly has
+it, and its code and token then cross sealed. A device that pairs by a
+typed code needs none either, for the PAKE's reason: the code alone
+holds against someone in the middle, who gets one guess a run and no
+test of a recorded one, and the keys it pins crossed under the key the
+run derived — but only where the code itself never crossed the carrier,
+as a member pairing's code crosses the router that hands it out. A device paired plainly has
 no key of its own in the yard's keeping: what it is given is a bearer token, which whoever
 reads the connection reads on every call after this one. So such a device rests
 on the connection, for the code as for the token: `https` off the yard's

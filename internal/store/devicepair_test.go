@@ -411,6 +411,95 @@ func TestDevicePairRedeemSealed(t *testing.T) {
 	if err != nil || len(list) != 2 || list[1].User != "bob" || list[1].ChannelKey != "" {
 		t.Fatalf("devices = %+v, %v, want bob's plain device with no key pinned", list, err)
 	}
+
+	// The PAKE redemption of a typed code, in its three store steps:
+	// the begin hands the run its pairing's id and code, a failed
+	// confirmation counts one wrong code against that pairing alone,
+	// and the confirmed redemption spends the code and pins the key
+	// the run exchanged, as the sealed one pins its handshake's.
+	opened, err = api.DevicePairOpen(ctx, "ada", "tablet", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, code, err := own.DevicePairPAKEBegin(ctx)
+	if err != nil || id != opened.ID || code != strings.ReplaceAll(opened.Code, "-", "") {
+		t.Fatalf("DevicePairPAKEBegin = %q, %q, %v, want %q and its code", id, code, err, opened.ID)
+	}
+	if err := own.DevicePairPAKEWrong(ctx, "no such pairing"); err == nil || !errors.As(err, &no) || no.Reason != store.NoPairing {
+		t.Fatalf("a wrong confirmation under no pairing = %v, want no_pairing", err)
+	}
+	if err := own.DevicePairPAKEWrong(ctx, id); err == nil || !errors.As(err, &no) || no.Reason != store.WrongCode {
+		t.Fatalf("a wrong confirmation = %v, want wrong_code", err)
+	}
+	if !own.DevicePairOpened(ctx) {
+		t.Fatal("one wrong PAKE confirmation ended the pairing")
+	}
+	if d, err := own.DevicePairRedeemPAKE(ctx, "no such pairing", key); d != nil || !errors.As(err, &no) || no.Reason != store.NoPairing {
+		t.Fatalf("a PAKE redemption under no pairing = %+v, %v, want no_pairing", d, err)
+	}
+	if d, err := own.DevicePairRedeemPAKE(ctx, id, "not a key"); d != nil || err == nil || errors.As(err, &no) {
+		t.Fatalf("a PAKE redemption with no key = %+v, %v, want an error that is no refusal", d, err)
+	}
+	// The PAKE device brings a key of its own: ada's phone's key is
+	// pinned already, and the run proved no one holds it.
+	tablet, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	phoneKey, key := key, yardkey.ChannelPublic(tablet)
+	// A presenter that is not the pairing's user is refused as a
+	// wrong code, key and all, and the code is still good for ada:
+	// the run's confirmation proved the code, and the presenter is
+	// judged before it is spent.
+	if d, err := own.DevicePairRedeemPAKEBy(ctx, id, "bob", key); d != nil || !errors.As(err, &no) || no.Reason != store.WrongCode {
+		t.Fatalf("ada's PAKE code presented by bob = %+v, %v, want wrong_code", d, err)
+	}
+	d, err = own.DevicePairRedeemPAKEBy(ctx, id, "ada", key)
+	if err != nil || d.User != "ada" || d.Name != "tablet" || d.ChannelKey != key {
+		t.Fatalf("ada's PAKE code presented by ada = %+v, %v", d, err)
+	}
+	if got, err := own.ResolveDevice(ctx, d.Token, "100.64.0.7"); err != nil || got == nil || got.ChannelKey != key {
+		t.Fatalf("the PAKE device's token resolves to %+v, %v", got, err)
+	}
+	// The spent run replayed, and a beginner after it, find no
+	// pairing; a later pairing is not the spent run's, so its id
+	// redeems nothing there.
+	if _, _, err := own.DevicePairPAKEBegin(ctx); err == nil || !errors.As(err, &no) || no.Reason != store.NoPairing {
+		t.Fatalf("a PAKE begin after the code was used = %v, want no_pairing", err)
+	}
+	if d, err := own.DevicePairRedeemPAKE(ctx, id, key); d != nil || !errors.As(err, &no) || no.Reason != store.NoPairing {
+		t.Fatalf("the PAKE code again = %+v, %v, want no_pairing", d, err)
+	}
+	opened, err = api.DevicePairOpen(ctx, "bob", "tablet", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, err := own.DevicePairRedeemPAKE(ctx, id, key); d != nil || !errors.As(err, &no) || no.Reason != store.NoPairing {
+		t.Fatalf("the spent run against a new pairing = %+v, %v, want no_pairing", d, err)
+	}
+	if list, _ := api.Devices(ctx, ""); len(list) != 3 {
+		t.Fatalf("devices after the PAKE replays = %+v, want still 3", list)
+	}
+	// A confirmed run that brings a key another device pins — ada's
+	// phone's, which a holder of bob's code need never have held — adds
+	// no device: the phone's channel would be found on bob's tablet.
+	// The code is spent, as for any device that could not be added.
+	id, _, err = own.DevicePairPAKEBegin(ctx)
+	if err != nil || id != opened.ID {
+		t.Fatalf("DevicePairPAKEBegin = %q, %v, want %q", id, err, opened.ID)
+	}
+	if d, err := own.DevicePairRedeemPAKE(ctx, id, phoneKey); d != nil || !errors.As(err, &no) || no.Reason != store.DeviceNotAdded {
+		t.Fatalf("a PAKE redemption with ada's phone's key = %+v, %v, want not_added", d, err)
+	}
+	if own.DevicePairOpened(ctx) {
+		t.Fatal("a refused pinned key left the code good")
+	}
+	if got, err := own.DeviceByChannelKey(ctx, phoneKey); err != nil || got == nil || got.User != "ada" || got.Name != "phone" {
+		t.Fatalf("DeviceByChannelKey(ada's phone's key) = %+v, %v, want ada's phone", got, err)
+	}
+	if list, _ := api.Devices(ctx, ""); len(list) != 3 {
+		t.Fatalf("devices after a pinned key = %+v, want still 3", list)
+	}
 }
 
 // A user opens a pairing for one of their own devices with no leave taken:
