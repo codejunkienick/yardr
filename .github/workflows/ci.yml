@@ -112,22 +112,36 @@ jobs:
           command -v shellcheck >/dev/null || { sudo apt-get update && sudo apt-get install -y shellcheck; }
           grep -rlE '^#!(/bin/|/usr/bin/env )(sh|bash)' .yardr/test install.sh contrib | xargs shellcheck
 
-  # The darwin leg. The linux job above runs the whole suite, and running
-  # all of it on macOS too would buy little for its minutes, so this job
-  # runs what is platform-specific: go vet compiles every package for
-  # darwin, which catches a build break on mac anywhere, and the race
-  # tests cover internal/peer, the only package with darwin files
-  # (peer_darwin.go).
+  # The darwin leg: the steps of the test job above, run on macOS, so that a
+  # break only a Mac shows (a darwin-only syscall as in peer_darwin.go, a temp
+  # path too long for a unix socket) is on the pull request and not first on a
+  # Mac in the yard. It ran go vet and internal/peer alone while a runner's
+  # minutes were counted; the standard runners cost none on a public
+  # repository, so it runs the lot. Keep the steps in step with the test
+  # job's, whose comments say what each is for. The timeout is twice that
+  # job's because macOS runners are slower, and because setup-go saves its
+  # cache only after a success: a run that times out leaves the next one as
+  # cold as itself, so the first green run is what says how long this takes.
   test-macos:
     runs-on: macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
-      - name: go vet (every package, for darwin)
-        run: go vet ./...
-      - name: race tests (packages with darwin files)
-        run: go test -race ./internal/peer/...
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "gofmt needed on:"
+            echo "$out"
+            exit 1
+          fi
+      - name: depot tests (.yardr/test, as for a landing)
+        run: YARDR_LANDING=1 sh .yardr/test
+      - name: go test
+        run: go test ./...
+      - name: go test (rpc)
+        run: YARDR_TEST_RPC=1 go test ./...
