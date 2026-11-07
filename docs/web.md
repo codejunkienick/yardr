@@ -1728,16 +1728,46 @@ XHR, WebSocket and EventSource), no form posts (`form-action 'none'`),
 no popups, and blob bytes only — the origin answers no yard route. The
 sandbox flags stay as they are: with no `allow-popups` a script cannot
 open a new window, and with no `allow-top-navigation` a nested page
-cannot navigate its top frame. What a script can carry out is the
-page's own words and what a reader types into it: by navigating away
-with them in a URL — a page opened top-level, as run opens it, can
-always navigate itself by script, by meta refresh, by its reader's
-click, as any web page can — and by WebRTC, which no released browser
-blocks (the policy carries the `webrtc 'block'` directive, but as of
-October 2026 no released browser enforces it; probed in HeadlessChrome
-155 with the exact headers on 14 Oct 2026, where fetch, workers,
-frames, popups, cookies and storage were all blocked). A reader who
-types into a page from a note trusts its author.
+cannot navigate its top frame.
+
+The policy alone leaves three ways out for the page's own words and what
+a reader types into it. A page opened top-level, as run opens it, can
+navigate itself away with them in a URL, by script, by meta refresh or
+by its reader's click, whatever its sandbox flags say. It can open a
+WebRTC peer connection, because no released browser is known to enforce
+the policy's `webrtc 'block'` directive. And `<link rel="preconnect">`
+makes the browser open a connection, which Content Security Policy does
+not cover. HeadlessChrome 155 on 14 Oct 2026 and 157 on 7 Nov 2026 were
+probed with the exact headers. In both, fetch, workers, frames, popups,
+cookies and storage were all blocked. In 157, the three ways out were
+open.
+
+So the origin sends `Connection-Allowlist: (response-origin)` beside
+the policy, which limits the connections a document makes to the origin
+it came from. Chromium 152 and later honour it. There, probed in
+HeadlessChrome 157 against the origin as served:
+
+- A script, a meta refresh and a reader's click can no longer navigate
+  the page away. Chrome shows its own error page and nothing reaches
+  the address the page chose.
+- `<link rel="preconnect">` opens no connection.
+- WebRTC forms no candidate, but one STUN request still leaves. The
+  header narrows WebRTC and does not close it.
+
+The price is the page's links. Chrome does not tell a reader's click
+from a script's navigation, so on a page opened with run every link that
+leaves the origin is dead, the yard's own view included. The static link
+beside each run opens the same bytes under the page policy with no such
+header, and links work there. That page runs no script, yet its markup
+can still make the browser open a connection by `<link rel="preconnect">`.
+
+No other browser is known to honour the header, and none other was
+probed, so elsewhere the policy alone holds, with the limits above. The
+header is an unfinished draft whose text leaves open how it applies to
+a top-level navigation, so what Chrome does with it can change.
+[Probing the sandbox origin again](#probing-the-sandbox-origin-again)
+says how to check. A reader who types into a page from a note trusts its
+author.
 
 ```json
 {
@@ -1833,6 +1863,88 @@ in HTML and in JSON:
 change) and `old_sha256` belong to a file, and `new_sha256` to a file and a
 command file; `diff` to a changed one. `prev` and `next` are absent at the
 ends. A refusal is `{"error": "…"}`, as on every page.
+
+### Probing the sandbox origin again
+
+What the header does depends on the browser, and a browser changes, so
+the account of the sandbox origin is checked by hand, when a new Chrome
+comes out and when the policy or the header changes.
+`TestSandboxServesNoteBlobs` holds that the origin sends the header and
+the view does not. What the header stops shows only in a Chrome 152 or
+later, driven by a person who reads a sink's log, so the probe is a
+manual check and no test.
+
+The probe is a page server with a sink and a UDP socket, and four pages.
+Its sources are `pageframe-probes.tar`, a file on note 21247 of the bead
+yardr-9wxg in the yard that builds yardr, SHA-256
+`47bbf00508d3e26b21072038c6a7942bf37900f47d37f90d9f1dc5ec7f294715`.
+`yardr bead show yardr-9wxg` prints where that yard keeps it.
+
+`collect.go` is the server and the sink. It listens on three free
+loopback ports and prints them as `pages=`, `sink=` and `udp=`. The sink
+logs each request it takes and counts the TCP connections it accepts;
+`/log` lists both and `/reset` clears them. The UDP socket logs each
+datagram and says whether it is STUN. The page server answers
+`/pages/<file>?policy=page|scripted|none` under the policy named, and
+adds `Connection-Allowlist` only when the query has `cal=<value>`, so one
+page opens with and without the header in the same browser. Build it and
+give it the two policies, read from the source and never retyped:
+
+```sh
+go build -o collect collect.go
+./collect -dir pages \
+  -page-policy "$(sed -n 's/^const pagePolicy = "\(.*\)"$/\1/p' internal/web/beads.go)" \
+  -scripted-policy "$(sed -n 's/^const scriptedPolicy = "\(.*\)"$/\1/p' internal/web/beads.go)"
+```
+
+The pages are four fragments. Each has `__SINK__` and `__STUN__` to
+replace with the addresses `collect` printed, and is then dressed in the
+default frame:
+
+```sh
+go run dress.go packs/pageframe/frames/page.html <fragment> <title> > pages/<name>.html
+```
+
+- `script` tries every way out a script has: fetch, XHR, WebSocket,
+  EventSource, a worker, a beacon, an image, a CSS `url()`, an iframe, a
+  preconnect, storage, a cookie, WebRTC, `window.open` and a form submit.
+- `static` asks for the same in markup alone, as a page that runs no
+  script can.
+- `nav` navigates the page to the sink with its words in the address.
+- `rtc` opens one peer connection with a STUN server at the UDP socket
+  and records its ICE events.
+
+Open each page two ways. Through `collect`, at
+`http://<pages>/pages/<name>.html?policy=scripted` with and without
+`&cal=%28response-origin%29`, the header is the only difference, so this
+opening is the control. Through the product, make an isolated yard with
+`contrib/isolated-yard/isolated-yard bare`, attach the dressed pages to
+a bead's note there, start `yardr web serve --addr 127.0.0.1:0` in it
+and open each page's run link, so the response is the one a reader
+gets. Read the page's `#out` text, which says what the script saw, and
+then the sink's `/log`. The probes connect to loopback ports and open a
+WebRTC socket, so run them in isolation.
+
+Measured on 7 Nov 2026 in HeadlessChrome 157, with the sink on another
+loopback port than the page:
+
+| Page | Policy alone | With the header |
+|---|---|---|
+| `nav`, a script navigates away | the sink gets `GET /nav?leak=…` | Chrome's error page, nothing at the sink |
+| a link the reader clicks | the sink gets the request | Chrome's error page, nothing at the sink |
+| a page whose head holds `<meta http-equiv="refresh" content="1;url=http://<sink>/refresh">` | the sink gets the request | Chrome's error page, nothing at the sink |
+| `rtc`, one peer connection | 2 host candidates, 6 STUN requests | no candidate, 1 STUN request |
+| `script`, every way out | 2 TCP connections, 6 STUN requests | no connection, 2 STUN requests |
+
+In both columns `script` found every way out closed but preconnect and
+WebRTC, and no HTTP request reached the sink. `static` opened on the
+view, under the page policy and no header, made 2 TCP connections with
+its `preconnect` and asked for nothing else.
+
+Not probed: Firefox, Safari and other Chrome versions; TURN with
+credentials; whether a hostname in a STUN URL is looked up before the
+block takes hold; the header behind a proxy, with `--pages-host`; and a
+service worker, which the policy forbids anyway.
 
 ## Estimates: the ETA and the late mark
 

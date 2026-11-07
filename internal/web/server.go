@@ -378,6 +378,16 @@ func (s *Server) PagesHandler() http.Handler {
 		r = verified
 		h := w.Header()
 		h.Set("Content-Security-Policy", scriptedPolicy)
+		// The policy cannot keep a running script from navigating the
+		// page away with its words in the address, from opening a
+		// preconnect, or from WebRTC. Where a browser honours this header
+		// (Chromium 152 and later) the navigation and the preconnect are
+		// stopped and WebRTC is narrowed to one STUN request; the price
+		// is the page's links, since a click cannot be told from a
+		// script. A browser that does not know it ignores it. Only this
+		// origin carries it: a page opened on the view runs no script
+		// and keeps its links (docs/web.md).
+		h.Set("Connection-Allowlist", "(response-origin)")
 		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		h.Set("X-Content-Type-Options", "nosniff")
 		// no-referrer stays here: the sandbox origin is opaque, has no

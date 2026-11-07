@@ -168,7 +168,11 @@ func TestSandboxServesNoteBlobs(t *testing.T) {
 		t.Errorf("the page's ETag %q, want the hash", etag)
 	}
 	assertScriptedPolicy(t, r.header.Get("Content-Security-Policy"))
+	// Connection-Allowlist is held by its presence alone: what it stops (a
+	// script's navigation away, a preconnect, most of WebRTC) shows only in
+	// Chromium 152 or later, so docs/web.md keeps the probe that shows it.
 	for _, h := range [][2]string{
+		{"Connection-Allowlist", "(response-origin)"},
 		{"Cross-Origin-Resource-Policy", "same-origin"},
 		{"X-Content-Type-Options", "nosniff"},
 		{"Referrer-Policy", "no-referrer"},
@@ -179,6 +183,11 @@ func TestSandboxServesNoteBlobs(t *testing.T) {
 	}
 	if cookie := r.header.Get("Set-Cookie"); cookie != "" {
 		t.Errorf("the page sets a cookie %q, want none", cookie)
+	}
+	// The same page opened on the view runs no script and its links are
+	// meant to work, so it carries no allowlist.
+	if r := f.get("/blobs/" + page.Hash); r.status != 200 || r.header.Get("Connection-Allowlist") != "" {
+		t.Errorf("the page on the view: status %d, Connection-Allowlist %q, want 200 and none", r.status, r.header.Get("Connection-Allowlist"))
 	}
 	r = f.getPages("/blobs/" + shot.Hash)
 	if r.status != 200 || r.header.Get("Content-Type") != "image/png" || r.body != string(shotPNG) {
