@@ -924,34 +924,34 @@ entry is made only against a live device record: the handshake's
 static key must still be the key that record pins, and the entry
 names that record's user and device. The first record of every new
 enveloped call re-reads that record from the store and refuses the
-call — and drops the entry, cancelling the device's other live
-calls as below — when the record is gone or pins another key, so a
-call on an established session is judged against the device list as
-it stands when the call begins, not as it stood when the app
-opened. One store read a call is the price, and it is the read a
-plain call already pays to resolve its token. Records inside a
-call already begun are covered the other way, by cancellation
-rather than by reading: `RemoveDevice`
+call — and drops the entry it came on — when the record is gone or
+pins another key, so a call on an established session is judged
+against the device list as it stands when the call begins, not as
+it stood when the app opened. One store read a call is the price,
+and it is the read a plain call already pays to resolve its token.
+That re-read is the call's admission, and it fixes what a removal
+may and may not stop. An operation admitted before a removal
+commits — a call whose first record already re-read its device
+record and whose serving has begun — may finish: its handler
+completes and its whole answer is sealed. Nothing new is admitted
+after the commit. `RemoveDevice`
 (`internal/store/devices.go`) already writes a `device_removed`
 event as it commits a removal, and a user's removal writes its own
-(`user_removed`, in `internal/store/users.go`) naming the
-devices it drops with it; the server's standing event watch
-(`internal/server/edge.go`, which already subscribes to the store's
-events and reacts to one kind there) gains a branch for each: on
-either event it has the yard's current link purge every session entry
-naming that user and device and cancel each of its live
-calls and streams through the link's existing tracked cancels
-(`track` and `cancel` in `internal/edgelink/link.go`), so an events
-stream ends and a handler serving a half-made call loses its
-context in the removal's own moment. The purge follows the
-store's commit, and the first-record read above is the backstop
-that closes the race between the two: a call whose first record
-crosses the commit finds no device, whatever the purge has yet to
-reach. An answer half-sealed when the purge lands is never
-finished: the yard finds its session entry again before it seals
-each answer record, and an entry that is gone ends the answer with
-the link's refusal rather than with a new record, so the yard seals
-nothing new for the device from the removal on. Removal cannot
+(`user_removed`, in `internal/store/users.go`) naming the devices
+it drops with it; the user server's standing event watch
+(`UserServer.Run` and `watchE2ERemovals` in
+`internal/rpc/usere2e.go`, subscribed to the store's events for the
+server's life) purges every session entry naming that user and
+device on either event, without cancelling a handler already
+admitted. For a streamed answer each record is a new admission:
+the yard finds its session entry again, and its device record
+with it, before it seals each answer record, and an entry or
+device that is gone seals no next record and no final record, so
+a live stream ends there and an answer half-sealed when the purge
+lands is never finished. The purge follows the store's commit,
+and the first-record read above is the backstop that closes the
+race between the two: a call whose first record crosses the commit
+finds no device, whatever the purge has yet to reach. Removal cannot
 recall what it already sealed: a record sealed before the purge
 and already on the link, in the edge's hands or on the device's
 connection, still opens at the device, which holds the session's
@@ -969,7 +969,11 @@ is refused at the yard, which pins it no longer, so the discarded
 state cannot quietly regrow. Sessions of every other device — of
 the same user, and of every other — are untouched: the purge is
 keyed by the one user and device the removal named, as the token
-refusal always was.
+refusal always was. Sessions also end without a removal: one idle
+past a day expires and is dropped, and a fresh handshake from a
+device replaces that device's old session, at most one resident
+per device, so repeated app restarts cannot pile sessions up in
+server memory.
 
 **Ranking, question 2.** First, 2B in the Noise shape above: it is the
 smallest candidate under which the sentence "the edge carries calls it
@@ -1414,7 +1418,7 @@ is not the channel's failure, on any candidate.
 | Who | Can still do | Cannot do any more |
 |---|---|---|
 | The edge's operator, reading at leisure (logs, queue files, a lawful demand, a curious afternoon) | Read the edge session (`X-Edge-Token`) on every enveloped call, as today — it stays outside the envelope so the router can resolve the account (section 3.2); see that an account's yard had sealed calls, when, how long, how large, from where; read webhooks, the web view and previews, and peer bodies (peers have no slice in this programme; section 3.6 defers them to a later design); keep the push tokens the relay must hold; read the one plain probe until bead 6, and each pre-release device's one plain migration registration (its token and the key it registers, section 3.4); read the voucher's clear fields — user, device, yard, expiry — at push registration; read a plain attempt by a client too old to seal — its method, path, headers and body as sent — because the router reads the request before the yard refuses it (section 3.5); read the member pairing code the web view's pairing page shows, which reaches the member through the edge (sections 3.1 and 3.9) | Read a sealed call's method, path, headers, body or answer; find a device token, a pairing code or a harness login code in anything a sealed call carried; approve an ask later with what was logged. A refused plain attempt is not carried out and earns no answer beyond the refusal, and a device that has pinned a yard's key never sends one — but the attempt itself was readable as sent, and no claim may say it was not |
-| A compromised edge, active (rewriting, replaying, refusing, forging its own headers) | Refuse, drop, delay or reorder service (a record delayed past the replay window fails its call whole, section 3.2); mint correctly signed outer frames, since it holds the signing key, and submit invalid envelopes, which fail their AEAD opening as failed calls — failed opens and denial of service at the cost of the yard's openings (section 3.2); measure timing and size; spend its one online guess per PAKE run or five plain guesses per pairing, as a stranger could; assert a presenter at pairing, narrowed by the code as today; serve a web view or preview script of its own devising; hold a record sealed before a device's removal and deliver it after — the device will open it, within the limit section 3.2 states | Open a sealed call or answer, recorded now or later (a session's ephemeral keys see to later); put itself in a pairing held by 1B or 1A undetected; replay a sealed message inside its session, move one between calls or streams, or revive one after its call has closed (call-bound associated data, one opened-sequence window for the session, and closed-call marks, section 3.2), or forge a valid sealed record — the AEAD needs the session keys it never learns, so an envelope it signs correctly still fails its opening, while an outsider's forged frame and a frame replayed on a later link or out of order are refused earlier, by the signature and its session and sequence (section 3.2); talk a pinned device down to a plain call by breaking its handshakes (a pinned device refuses plain and fails the call instead, section 3.3); keep a removed device calling on a session it founded before the removal (the first record of each call re-reads the device record, and removal purges its sessions and cancels their streams, section 3.2); approve an ask, give a secret, or read a screen with anything it holds — no device token crosses in a sealed call (the edge session it reads is its own, section 3.2), and the channel key never leaves the phone |
+| A compromised edge, active (rewriting, replaying, refusing, forging its own headers) | Refuse, drop, delay or reorder service (a record delayed past the replay window fails its call whole, section 3.2); mint correctly signed outer frames, since it holds the signing key, and submit invalid envelopes, which fail their AEAD opening as failed calls — failed opens and denial of service at the cost of the yard's openings (section 3.2); measure timing and size; spend its one online guess per PAKE run or five plain guesses per pairing, as a stranger could; assert a presenter at pairing, narrowed by the code as today; serve a web view or preview script of its own devising; hold a record sealed before a device's removal and deliver it after — the device will open it, within the limit section 3.2 states | Open a sealed call or answer, recorded now or later (a session's ephemeral keys see to later); put itself in a pairing held by 1B or 1A undetected; replay a sealed message inside its session, move one between calls or streams, or revive one after its call has closed (call-bound associated data, one opened-sequence window for the session, and closed-call marks, section 3.2), or forge a valid sealed record — the AEAD needs the session keys it never learns, so an envelope it signs correctly still fails its opening, while an outsider's forged frame and a frame replayed on a later link or out of order are refused earlier, by the signature and its session and sequence (section 3.2); talk a pinned device down to a plain call by breaking its handshakes (a pinned device refuses plain and fails the call instead, section 3.3); keep a removed device calling on a session it founded before the removal (the first record of each call re-reads the device record, and removal purges its sessions and seals no further record of their streams, section 3.2); approve an ask, give a secret, or read a screen with anything it holds — no device token crosses in a sealed call (the edge session it reads is its own, section 3.2), and the channel key never leaves the phone |
 | Cloudflare, ending TLS in front of the router | Everything the first row can, over the traffic at its termination point, plain attempts and the edge session (`X-Edge-Token`) included; refuse, drop, delay, reorder or alter the outer traffic it carries, as the compromised edge can; forge, drop or replay a zero-length beat record, keeping a stream seemingly alive or letting it be cut | Read, forge or undetectably alter a sealed call or any inner byte: what it terminates TLS onto is an envelope, not a call, and any alteration of a sealed record or of an associated-data-bound field (the tag, direction, call id, sequence, index, and, on a call's first record, the outer path and the stream marker, section 3.2) fails that record's opening and becomes a failed call, never a call silently read or changed. The unauthenticated controls give no such promise and need none: beat records, frame kind, lengths and timing altered, forged or dropped touch availability only — a stream may end or linger, a call may fail whole — and no inner byte is read or altered by them, because every inner byte crosses only inside a record that must still open. The channel gives integrity for records and inner content, not availability: refusal, dropping and delay stay open to it, as they do to the edge |
 
 Two residues are stated so no summary may round them away. Metadata

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/yardkey"
@@ -580,17 +582,24 @@ func TestE2EStreamsSealedEndToEnd(t *testing.T) {
 		if err := json.Unmarshal(body, &reply); err != nil || len(reply.Result.Hash) != 64 {
 			t.Fatalf("PutBlob answered %s (%v)", body, err)
 		}
-		outer, _, sealed, call := d.callRaw(t, http.MethodGet, "/user/blobs/"+reply.Result.Hash, nil, nil, plain, plain)
-		if outer != http.StatusOK {
-			t.Fatalf("the blob's outer = %d", outer)
-		}
-		records, err := yardkey.SplitRecords(sealed)
-		if err != nil || len(records) < 4 {
-			t.Fatalf("the blob crossed in %d records, %v: want several and a final", len(records), err)
+		// Each variant fetches the blob anew: a fetch's records open
+		// once on the device's session, and replay nowhere, so no
+		// variant may re-open another's run.
+		fetch := func() ([][]byte, []byte, []byte) {
+			t.Helper()
+			outer, _, sealed, call := d.callRaw(t, http.MethodGet, "/user/blobs/"+reply.Result.Hash, nil, nil, plain, plain)
+			if outer != http.StatusOK {
+				t.Fatalf("the blob's outer = %d", outer)
+			}
+			records, err := yardkey.SplitRecords(sealed)
+			if err != nil || len(records) < 4 {
+				t.Fatalf("the blob crossed in %d records, %v: want several and a final", len(records), err)
+			}
+			return records, call, sealed
 		}
 		// The device's saving of it: joined only once the final record
 		// closes the call, so a part is never saved as a whole.
-		save := func(run []byte) ([]byte, error) {
+		save := func(call []byte, run []byte) ([]byte, error) {
 			opener := d.session.NewCallOpener(call, plain)
 			reader := yardkey.NewRecordReader(bytes.NewReader(run))
 			var joined []byte
@@ -620,7 +629,8 @@ func TestE2EStreamsSealedEndToEnd(t *testing.T) {
 			}
 			return out
 		}
-		whole, err := save(sealed)
+		_, call, sealed := fetch()
+		whole, err := save(call, sealed)
 		if err != nil {
 			t.Fatalf("the streamed blob does not open: %v", err)
 		}
@@ -628,20 +638,23 @@ func TestE2EStreamsSealedEndToEnd(t *testing.T) {
 			t.Fatalf("the streamed blob = %d of %d bytes (%v, head %s)", len(got), len(blob), err, head)
 		}
 		// A beat forged into the run: read past, the blob unchanged.
+		records, call, _ := fetch()
 		withBeat := join([][]byte{records[0], nil, records[1]})
 		withBeat = append(withBeat, join(records[2:])...)
-		if whole, err := save(withBeat); err != nil || len(whole) == 0 {
+		if whole, err := save(call, withBeat); err != nil || len(whole) == 0 {
 			t.Errorf("a run with a beat in it = %v", err)
 		} else if _, got, _ := splitE2EHead(whole); !bytes.Equal(got, blob) {
 			t.Errorf("a beat changed the blob: %d of %d bytes", len(got), len(blob))
 		}
 		// The final record dropped: a truncation, nothing saved.
-		if saved, err := save(join(records[:len(records)-1])); !errors.Is(err, yardkey.ErrTruncated) || saved != nil {
+		records, call, _ = fetch()
+		if saved, err := save(call, join(records[:len(records)-1])); !errors.Is(err, yardkey.ErrTruncated) || saved != nil {
 			t.Errorf("a blob with no final record saved %d bytes, %v", len(saved), err)
 		}
 		// A middle record dropped: refused at the gap, nothing saved,
 		// and nothing past the gap in what was delivered.
-		if saved, err := save(join(append([][]byte{records[0]}, records[2:]...))); !errors.Is(err, yardkey.ErrRecordGap) || saved != nil {
+		records, call, _ = fetch()
+		if saved, err := save(call, join(append([][]byte{records[0]}, records[2:]...))); !errors.Is(err, yardkey.ErrRecordGap) || saved != nil {
 			t.Errorf("a blob past a gap saved %d bytes, %v", len(saved), err)
 		}
 	}
@@ -781,6 +794,355 @@ func TestE2EMarkedCallOpensOnlyTheEventsStream(t *testing.T) {
 	}
 	for _, h := range streams {
 		h.s.close(h.cancel, h.finished)
+	}
+}
+
+// rehandshake founds a fresh channel session for the same device, as
+// an app that restarted does, and answers the device holding it.
+func (d *e2eDevice) rehandshake(t *testing.T) *e2eDevice {
+	t.Helper()
+	first, opening, err := yardkey.StartChannelHandshake(d.key, d.y.channel.Public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := d.post(t, first, "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("the fresh handshake = %d %s", w.Code, w.Body)
+	}
+	session, err := opening.OpenAnswer(w.Body.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &e2eDevice{y: d.y, handler: d.handler, key: d.key, session: session}
+}
+
+func sessionsFor(y *pairYard, user, device string) int {
+	y.u.mu.Lock()
+	defer y.u.mu.Unlock()
+	n := 0
+	for _, s := range y.u.e2eSessions {
+		if s.user == user && s.device == device {
+			n++
+		}
+	}
+	return n
+}
+
+func sessionEntry(t *testing.T, y *pairYard, d *e2eDevice) *e2eSession {
+	t.Helper()
+	y.u.mu.Lock()
+	defer y.u.mu.Unlock()
+	s := y.u.e2eSessions[string(d.session.Tag())]
+	if s == nil {
+		t.Fatal("the yard's channel session is missing")
+	}
+	return s
+}
+
+// A call replayed whole down the link, and one whose first record's
+// sequence was rewritten, are each refused and mark nothing: the
+// honest call, and the honest record, still open after them.
+func TestE2EReplayedCallRefusedAtTheYard(t *testing.T) {
+	y := newPairYard(t)
+	d := newE2EDevice(t, y, "sam", "phone")
+	plain := bindFor("", false)
+	build := func() ([]byte, []byte) {
+		t.Helper()
+		rawHead, err := json.Marshal(e2eRequestHead{Method: http.MethodGet, Path: "/user/me"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		call, err := yardkey.NewCallID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		run, err := d.session.SealWhole(call, plain, joinE2EHead(rawHead, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return run, call
+	}
+	run, call := build()
+	if w := d.post(t, run, base64.RawURLEncoding.EncodeToString(call), nil); w.Code != http.StatusOK {
+		t.Fatalf("the first call = %d", w.Code)
+	}
+	if w := d.post(t, run, base64.RawURLEncoding.EncodeToString(call), nil); w.Code != http.StatusBadRequest {
+		t.Errorf("a call replayed whole = %d, want 400", w.Code)
+	}
+	// Sequence rewritten in the first record's clear header.
+	run, call = build()
+	records, err := yardkey.SplitRecords(run)
+	if err != nil || len(records) == 0 {
+		t.Fatal(err)
+	}
+	rewritten := append([]byte(nil), records[0]...)
+	at := yardkey.E2ETagSize + yardkey.E2ECallSize
+	binary.BigEndian.PutUint64(rewritten[at:at+8], binary.BigEndian.Uint64(rewritten[at:at+8])+1000)
+	var forged []byte
+	forged = yardkey.FrameRecord(forged, rewritten)
+	for _, m := range records[1:] {
+		forged = yardkey.FrameRecord(forged, m)
+	}
+	if w := d.post(t, forged, base64.RawURLEncoding.EncodeToString(call), nil); w.Code != http.StatusBadRequest {
+		t.Errorf("a call with its sequence rewritten = %d, want 400", w.Code)
+	}
+	if w := d.post(t, run, base64.RawURLEncoding.EncodeToString(call), nil); w.Code != http.StatusOK {
+		t.Errorf("the honest call after a rewritten one = %d, want 200", w.Code)
+	}
+}
+
+// Sessions in server memory are capped per device, replaced by a
+// fresh handshake, and expire when idle: repeated restarts leave at
+// most the cap resident, the replaced session is refused, and a
+// session left past its idle bound is refused and dropped.
+func TestE2ESessionsReplacedCappedAndExpired(t *testing.T) {
+	y := newPairYard(t)
+	d := newE2EDevice(t, y, "sam", "phone")
+	plain := bindFor("", false)
+	old := sessionEntry(t, y, d)
+	// A replaced session ends its quiet events stream at the next
+	// liveness check and releases the stream slot it was holding.
+	y.u.recheck = 20 * time.Millisecond
+	head, err := y.st.Head(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked := bindFor(E2EStreamLongLived, true)
+	path := "/user/events?after=" + strconv.FormatUint(head, 10)
+	oldStream, _, stopOld, oldFinished := d.openStream(t, http.MethodGet, path, marked, marked)
+	defer stopOld()
+	if status, _ := oldStream.readHead(); status != http.StatusOK {
+		t.Fatalf("the old session's events head = %d", status)
+	}
+	fresh := d
+	for range 4 {
+		fresh = fresh.rehandshake(t)
+		if n := sessionsFor(y, "sam", "phone"); n != e2eSessionsPerDevice {
+			t.Fatalf("sessions resident after a restart = %d, want the cap %d", n, e2eSessionsPerDevice)
+		}
+	}
+	select {
+	case <-oldFinished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the replaced session's events stream did not end")
+	}
+	for {
+		msg, err := oldStream.reader.ReadMessage()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := oldStream.opener.Open(msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := oldStream.opener.Close(); !errors.Is(err, yardkey.ErrTruncated) {
+		t.Errorf("the replaced session's stream closed with %v, want no final record", err)
+	}
+	y.u.mu.Lock()
+	streams := y.u.streams["sam\x00phone"]
+	y.u.mu.Unlock()
+	if streams != 0 {
+		t.Errorf("stream slots held after session replacement = %d, want none", streams)
+	}
+	if y.u.touchE2ESessionIfLive(old) {
+		t.Error("a replaced session was still live for another record")
+	}
+	if outer, _, _, _, _ := d.call(t, http.MethodGet, "/user/me", nil, nil, plain, plain); outer != http.StatusUnauthorized {
+		t.Errorf("a call on the replaced session = %d, want 401", outer)
+	}
+	if outer, _, status, _, _ := fresh.call(t, http.MethodGet, "/user/me", nil, nil, plain, plain); outer != http.StatusOK || status != http.StatusOK {
+		t.Errorf("a call on the fresh session = outer %d, inner %d", outer, status)
+	}
+	y.u.now = func() time.Time { return time.Now().Add(e2eSessionMaxIdle + time.Hour) }
+	defer func() { y.u.now = time.Now }()
+	if outer, _, _, _, _ := fresh.call(t, http.MethodGet, "/user/me", nil, nil, plain, plain); outer != http.StatusUnauthorized {
+		t.Errorf("a call on an idle-expired session = %d, want 401", outer)
+	}
+	if n := sessionsFor(y, "sam", "phone"); n != 0 {
+		t.Errorf("sessions resident after expiry = %d, want none", n)
+	}
+}
+
+// Removal purges the device's sessions and refuses what comes next —
+// a call on the old session, a live stream's next record, a fresh
+// handshake — leaving a second device untouched. A whole call
+// admitted before the removal commits finishes; a streamed record
+// after it is no new admission's to seal.
+func TestE2ERemovalPurgesSessionsAndAdmittedFinishes(t *testing.T) {
+	t.Run("startup reconciliation catches an earlier removal", func(t *testing.T) {
+		y := newPairYard(t)
+		newE2EDevice(t, y, "sam", "phone")
+		if _, err := y.st.RemoveDevice(context.Background(), "sam", "phone", "jo"); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		defer func() {
+			cancel()
+			<-done
+		}()
+		go func() {
+			y.u.watchE2ERemovals(ctx)
+			close(done)
+		}()
+		for deadline := time.Now().Add(5 * time.Second); sessionsFor(y, "sam", "phone") != 0 && time.Now().Before(deadline); {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if n := sessionsFor(y, "sam", "phone"); n != 0 {
+			t.Fatalf("sessions resident after startup reconciliation = %d, want none", n)
+		}
+	})
+
+	y := newPairYard(t)
+	d := newE2EDevice(t, y, "sam", "phone")
+	other := newE2EDevice(t, y, "jo", "tablet")
+	plain := bindFor("", false)
+	ctx := context.Background()
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	defer stopWatch()
+	go y.u.watchE2ERemovals(watchCtx)
+
+	head, err := y.st.Head(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked := bindFor(E2EStreamLongLived, true)
+	s, _, cancel, finished := d.openStream(t, http.MethodGet,
+		"/user/events?after="+strconv.FormatUint(head, 10), marked, marked)
+	if status, _ := s.readHead(); status != http.StatusOK {
+		t.Fatalf("the stream's head = %d", status)
+	}
+
+	// Admitted before the removal: a whole answer not yet sealed, and
+	// a stream whose first record has crossed.
+	session := sessionEntry(t, y, d)
+	admittedCall, err := yardkey.NewCallID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	admittedOuter := httptest.NewRecorder()
+	admitted := newE2EAnswerWriter(admittedOuter, session, admittedCall, plain, false)
+	admitted.WriteHeader(http.StatusOK)
+	if _, err := admitted.Write([]byte("admitted result")); err != nil {
+		t.Fatal(err)
+	}
+	streamCall, err := yardkey.NewCallID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamOuter := httptest.NewRecorder()
+	streamed := newE2EAnswerWriter(streamOuter, session, streamCall, plain, false)
+	liveReq := httptest.NewRequest(http.MethodGet, "/user/me", nil)
+	streamed.live = func() bool { return y.u.touchE2ESessionIfLive(session) && y.u.e2eDevice(liveReq, session) }
+	streamed.WriteHeader(http.StatusOK)
+	if _, err := streamed.Write([]byte("first")); err != nil {
+		t.Fatal(err)
+	}
+	streamed.Flush()
+	sealedFirst := streamOuter.Body.Len()
+	if sealedFirst == 0 {
+		t.Fatal("the admitted stream sealed nothing before the removal")
+	}
+	if _, err := streamed.Write([]byte("second")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := y.st.RemoveDevice(ctx, "sam", "phone", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); sessionsFor(y, "sam", "phone") != 0 && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := sessionsFor(y, "sam", "phone"); n != 0 {
+		t.Errorf("sessions resident after the removal = %d, want purged", n)
+	}
+	if n := sessionsFor(y, "jo", "tablet"); n != 1 {
+		t.Errorf("the second device's sessions after the removal = %d, want its one untouched", n)
+	}
+
+	// The streamed next record and final are refused; the stream the
+	// device held ends with no event the removal preceded and no final.
+	streamed.Flush()
+	if err := streamed.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if streamOuter.Body.Len() != sealedFirst {
+		t.Errorf("a record was sealed after the removal: %d bytes over %d", streamOuter.Body.Len(), sealedFirst)
+	}
+	for {
+		msg, err := s.reader.ReadMessage()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := s.opener.Open(msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	<-finished
+	if err := s.opener.Close(); !errors.Is(err, yardkey.ErrTruncated) {
+		t.Errorf("the removed device's stream closed with %v, want no final record", err)
+	}
+	cancel()
+
+	// The whole call admitted before the commit finishes sealed.
+	if err := admitted.finish(); err != nil {
+		t.Fatal(err)
+	}
+	opened, err := d.session.OpenWhole(admittedOuter.Body.Bytes(), admittedCall, plain)
+	if err != nil || !bytes.Contains(opened, []byte("admitted result")) {
+		t.Errorf("the admitted call's answer opened %q, %v", opened, err)
+	}
+
+	if outer, _, _, _, _ := d.call(t, http.MethodGet, "/user/me", nil, nil, plain, plain); outer != http.StatusUnauthorized {
+		t.Errorf("a call on the pre-removal session = %d, want 401", outer)
+	}
+	first, _, err := yardkey.StartChannelHandshake(d.key, y.channel.Public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := d.post(t, first, "", nil); w.Code != http.StatusUnauthorized {
+		t.Errorf("a handshake after the removal = %d, want 401", w.Code)
+	}
+	if n := sessionsFor(y, "sam", "phone"); n != 0 {
+		t.Errorf("sessions resident after a refused handshake = %d, want none", n)
+	}
+	if outer, _, status, _, _ := other.call(t, http.MethodGet, "/user/me", nil, nil, plain, plain); outer != http.StatusOK || status != http.StatusOK {
+		t.Errorf("the second device's call = outer %d, inner %d", outer, status)
+	}
+}
+
+// A user removed with their devices loses their sessions the same
+// way (user_removed carries the removal the watcher purges by), and
+// another user's device is untouched.
+func TestE2EUserRemovalPurgesSessions(t *testing.T) {
+	y := newPairYard(t)
+	d := newE2EDevice(t, y, "sam", "phone")
+	other := newE2EDevice(t, y, "jo", "tablet")
+	plain := bindFor("", false)
+	ctx := context.Background()
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	defer stopWatch()
+	go y.u.watchE2ERemovals(watchCtx)
+	if err := y.st.DeleteUser(ctx, "sam", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); sessionsFor(y, "sam", "phone") != 0 && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := sessionsFor(y, "sam", "phone"); n != 0 {
+		t.Errorf("sessions resident after the user removal = %d, want purged", n)
+	}
+	if outer, _, _, _, _ := d.call(t, http.MethodGet, "/user/me", nil, nil, plain, plain); outer != http.StatusUnauthorized {
+		t.Errorf("a call after its user was removed = %d, want 401", outer)
+	}
+	if outer, _, status, _, _ := other.call(t, http.MethodGet, "/user/me", nil, nil, plain, plain); outer != http.StatusOK || status != http.StatusOK {
+		t.Errorf("the other user's call = outer %d, inner %d", outer, status)
 	}
 }
 

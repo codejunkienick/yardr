@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 
 	"github.com/flynn/noise"
@@ -52,6 +53,10 @@ const (
 	// carries: the Noise bound of 65,535 bytes, its clear header and
 	// its AEAD tag counted, as the design has it.
 	MaxRecordPlain = noise.MaxMsgLen - e2eHeaderSize - 16
+	// ReplayWindow is how many opened sequences a receiver remembers
+	// in one direction of a session: a record already opened there,
+	// or fallen below the window, is refused (section 3.2).
+	ReplayWindow = 65536
 )
 
 // The directions a message travels, as the associated data names them.
@@ -84,6 +89,16 @@ type ChannelSession struct {
 	sendDir byte
 	recvDir byte
 	next    atomic.Uint64
+
+	// The receiving side's replay state (section 3.2): one sliding
+	// window of opened sequences for the whole direction, and the
+	// closed calls whose records it still refuses. Judged only on
+	// sequences that opened, so a refused message marks nothing.
+	replayMu  sync.Mutex
+	highest   uint64
+	hasOpened bool
+	bits      []uint64 // ReplayWindow bits, by sequence modulo the window
+	closed    map[string]uint64
 }
 
 // Tag is the session's tag, as its messages carry it.
@@ -285,6 +300,101 @@ func (s *ChannelSession) nextSequence() (uint64, error) {
 	}
 }
 
+// ErrReplay is a transport message refused by the replay rule: its
+// sequence already opened in this direction, has fallen below the
+// replay window, or names a call that has already closed. A refusal
+// marks nothing, so the honest message that follows still opens.
+var ErrReplay = errors.New("a transport message already opened, below the replay window, or of a closed call")
+
+// messageHeader reads a transport message's clear header: its call,
+// sequence and record index, false for a message too short to hold one.
+func messageHeader(msg []byte) (call []byte, seq, index uint64, ok bool) {
+	if len(msg) < e2eHeaderSize {
+		return nil, 0, 0, false
+	}
+	return msg[E2ETagSize : e2eHeaderSize-16],
+		binary.BigEndian.Uint64(msg[e2eHeaderSize-16 : e2eHeaderSize-8]),
+		binary.BigEndian.Uint64(msg[e2eHeaderSize-8 : e2eHeaderSize]), true
+}
+
+func (s *ChannelSession) bit(seq uint64) bool {
+	i := seq % ReplayWindow
+	return s.bits[i/64]&(1<<(i%64)) != 0
+}
+
+func (s *ChannelSession) setBit(seq uint64, on bool) {
+	i := seq % ReplayWindow
+	if on {
+		s.bits[i/64] |= 1 << (i % 64)
+	} else {
+		s.bits[i/64] &^= 1 << (i % 64)
+	}
+}
+
+// replayErrLocked says why seq of call may not open now, "" when it
+// may: the caller holds replayMu. Nothing is marked here.
+func (s *ChannelSession) replayErrLocked(call []byte, seq uint64) error {
+	if _, gone := s.closed[string(call)]; gone {
+		return fmt.Errorf("%w: a record of a closed call", ErrReplay)
+	}
+	if !s.hasOpened || seq > s.highest {
+		return nil
+	}
+	if s.highest-seq >= ReplayWindow {
+		return fmt.Errorf("%w: sequence %d has fallen below the window at %d", ErrReplay, seq, s.highest)
+	}
+	if s.bit(seq) {
+		return fmt.Errorf("%w: sequence %d already opened", ErrReplay, seq)
+	}
+	return nil
+}
+
+// markOpened records seq as opened, under replayMu: it re-judges the
+// replay rule, so of two copies raced at once only the first is
+// delivered, and advances the window and the closed marks' keeping.
+func (s *ChannelSession) markOpened(call []byte, seq uint64) error {
+	s.replayMu.Lock()
+	defer s.replayMu.Unlock()
+	if err := s.replayErrLocked(call, seq); err != nil {
+		return err
+	}
+	if s.bits == nil {
+		s.bits = make([]uint64, ReplayWindow/64)
+	}
+	switch {
+	case !s.hasOpened:
+		s.hasOpened, s.highest = true, seq
+	case seq > s.highest:
+		if seq-s.highest >= ReplayWindow {
+			clear(s.bits)
+		} else {
+			for n := s.highest + 1; n <= seq; n++ {
+				s.setBit(n, false)
+			}
+		}
+		s.highest = seq
+	}
+	s.setBit(seq, true)
+	for id, last := range s.closed {
+		if s.highest > last && s.highest-last > ReplayWindow {
+			delete(s.closed, id)
+		}
+	}
+	return nil
+}
+
+// closeCall keeps call as closed at its final record's sequence seq,
+// until the window has passed it: a later record naming it is refused
+// however fresh its sequence looks.
+func (s *ChannelSession) closeCall(call []byte, seq uint64) {
+	s.replayMu.Lock()
+	defer s.replayMu.Unlock()
+	if s.closed == nil {
+		s.closed = map[string]uint64{}
+	}
+	s.closed[string(call)] = seq
+}
+
 // Open opens one transport message that names the call want (sixteen
 // bytes; nil takes the message's own word, for a caller that has no
 // expectation yet) and answers its record index and plaintext. The
@@ -312,10 +422,22 @@ func (s *ChannelSession) Open(msg, want []byte, first *FirstBinding) (index uint
 	if (index == 0) != (first != nil) {
 		return 0, nil, fmt.Errorf("record 0 alone carries the first binding")
 	}
+	// The replay rule is judged before a cipher state is spent, and
+	// again as the opened sequence is marked: a message refused here,
+	// or by the opening below, marks nothing for the honest one.
+	s.replayMu.Lock()
+	replayErr := s.replayErrLocked(call, seq)
+	s.replayMu.Unlock()
+	if replayErr != nil {
+		return 0, nil, replayErr
+	}
 	cs := noise.UnsafeNewCipherState(channelSuite, s.recvKey, seq)
 	plaintext, err = cs.Decrypt(nil, associated(tag, s.recvDir, call, seq, index, first), msg[e2eHeaderSize:])
 	if err != nil {
 		return 0, nil, fmt.Errorf("a transport message that does not open: %w", err)
+	}
+	if err := s.markOpened(call, seq); err != nil {
+		return 0, nil, err
 	}
 	return index, plaintext, nil
 }
@@ -498,6 +620,12 @@ func (o *CallOpener) Open(msg []byte) (plain []byte, final bool, err error) {
 	if o.done {
 		return nil, false, fmt.Errorf("a record stands after a call's final record")
 	}
+	// The index stands in the clear header: a record at any other
+	// index is the gap, refused before any opening is spent on it,
+	// so its sequence is unmarked and it still opens in its place.
+	if _, _, index, ok := messageHeader(msg); ok && index != o.index {
+		return nil, false, fmt.Errorf("%w: record %d where %d was due", ErrRecordGap, index, o.index)
+	}
 	bind := (*FirstBinding)(nil)
 	if o.index == 0 {
 		bind = o.first
@@ -511,6 +639,9 @@ func (o *CallOpener) Open(msg []byte) (plain []byte, final bool, err error) {
 	}
 	if isFinal(plain, index, o.total) {
 		o.done = true
+		if _, seq, _, ok := messageHeader(msg); ok {
+			o.session.closeCall(o.call, seq)
+		}
 		return nil, true, nil
 	}
 	o.index++

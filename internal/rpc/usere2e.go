@@ -84,6 +84,183 @@ type e2eSession struct {
 	user       string
 	device     string
 	channelKey string
+	lastUsed   time.Time // last handshake, call or streamed record, for e2eSessionMaxIdle
+}
+
+const (
+	// e2eSessionMaxIdle is how long a channel session may sit unused
+	// in server memory before it expires: a session no call or record
+	// has touched in a day is gone, and its next call handshakes again.
+	e2eSessionMaxIdle = 24 * time.Hour
+	// e2eSessionsPerDevice caps the channel sessions one device holds
+	// resident: one. A fresh handshake from a device replaces its old
+	// session, so repeated app restarts leave at most this many.
+	e2eSessionsPerDevice = 1
+)
+
+func (u *UserServer) e2eNow() time.Time {
+	if u.now != nil {
+		return u.now()
+	}
+	return time.Now()
+}
+
+// e2eSessionFor answers the live session tag names, touching it: an
+// entry past its idle bound is dropped and answers none.
+func (u *UserServer) e2eSessionFor(tag string) *e2eSession {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	s := u.e2eSessions[tag]
+	if s == nil {
+		return nil
+	}
+	if u.e2eNow().Sub(s.lastUsed) > e2eSessionMaxIdle {
+		delete(u.e2eSessions, tag)
+		return nil
+	}
+	s.lastUsed = u.e2eNow()
+	return s
+}
+
+// touchE2ESessionIfLive marks s used now while confirming that it is
+// still held: a stream's next record is admitted against the current
+// session entry, not one a handshake replaced between two checks.
+func (u *UserServer) touchE2ESessionIfLive(s *e2eSession) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	now := u.e2eNow()
+	for tag, live := range u.e2eSessions {
+		if live != s {
+			continue
+		}
+		if now.Sub(s.lastUsed) > e2eSessionMaxIdle {
+			delete(u.e2eSessions, tag)
+			return false
+		}
+		s.lastUsed = now
+		return true
+	}
+	return false
+}
+
+// storeE2ESession keeps s under tag, replacing every session its
+// device already held (e2eSessionsPerDevice is one): an app that
+// restarts and handshakes again leaves its old session refused.
+func (u *UserServer) storeE2ESession(tag string, s *e2eSession) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.e2eSessions == nil {
+		u.e2eSessions = map[string]*e2eSession{}
+	}
+	u.expireE2ELocked()
+	for old, live := range u.e2eSessions {
+		if live.user == s.user && live.device == s.device {
+			delete(u.e2eSessions, old)
+		}
+	}
+	u.e2eSessions[tag] = s
+}
+
+// expireE2ESessions drops every session past its idle bound.
+func (u *UserServer) expireE2ESessions() {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.expireE2ELocked()
+}
+
+func (u *UserServer) expireE2ELocked() {
+	now := u.e2eNow()
+	for tag, s := range u.e2eSessions {
+		if now.Sub(s.lastUsed) > e2eSessionMaxIdle {
+			delete(u.e2eSessions, tag)
+		}
+	}
+}
+
+// purgeE2EDevice drops every session entry the device user/device
+// founded, and no other device's: on its removal, the device's next
+// call, its live streams' next records and its next handshake (which
+// finds no device record to pin) are each refused.
+func (u *UserServer) purgeE2EDevice(user, device string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for tag, s := range u.e2eSessions {
+		if s.user == user && s.device == device {
+			delete(u.e2eSessions, tag)
+		}
+	}
+}
+
+// purgeE2EUser drops every session of a user who was removed, whose
+// devices went with them.
+func (u *UserServer) purgeE2EUser(user string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for tag, s := range u.e2eSessions {
+		if s.user == user {
+			delete(u.e2eSessions, tag)
+		}
+	}
+}
+
+// dropE2ESession drops the one entry tag names, as a call whose device
+// record is gone drops the entry it came on.
+func (u *UserServer) dropE2ESession(tag string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	delete(u.e2eSessions, tag)
+}
+
+// watchE2ERemovals purges channel sessions as device and user
+// removals commit, for as long as ctx runs (UserServer.Run): it is
+// the backstop behind the first-record re-read (e2eDevice), which
+// refuses a call whose first record crosses the commit whatever this
+// watch has yet to reach. An operation admitted before the commit —
+// its first record already re-read — is not recalled by a purge: a
+// whole call so admitted finishes, and no new call or streamed record
+// is admitted after it.
+func (u *UserServer) watchE2ERemovals(ctx context.Context) {
+	after, err := u.st.Head(ctx)
+	if err != nil {
+		return
+	}
+	// Sessions whose device already went, before this watch stood
+	// up, go now. The head came first so a removal during this check
+	// remains in the subscription's backlog instead of slipping into
+	// a gap between reconciliation and subscription.
+	u.mu.Lock()
+	held := make([]*e2eSession, 0, len(u.e2eSessions))
+	for _, s := range u.e2eSessions {
+		held = append(held, s)
+	}
+	u.mu.Unlock()
+	for _, s := range held {
+		if !u.e2eDeviceCtx(ctx, s) {
+			u.purgeE2EDevice(s.user, s.device)
+		}
+	}
+	for ctx.Err() == nil {
+		events, err := u.st.Subscribe(ctx, after)
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
+			continue
+		}
+		for e := range events {
+			after = e.Seq
+			user, _ := e.Data["user"].(string)
+			switch e.Kind {
+			case "device_removed":
+				device, _ := e.Data["device"].(string)
+				u.purgeE2EDevice(user, device)
+			case "user_removed":
+				u.purgeE2EUser(user)
+			}
+		}
+	}
 }
 
 // routes is the mux of the paths under /user/ a device calls, as
@@ -165,12 +342,25 @@ func (u *UserServer) e2eHandshake(w http.ResponseWriter, r *http.Request, first 
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	u.mu.Lock()
-	if u.e2eSessions == nil {
-		u.e2eSessions = map[string]*e2eSession{}
+	tagString := string(tag)
+	session := &e2eSession{keys: keys, user: device.User, device: device.Name, channelKey: opened.DeviceKey, lastUsed: u.e2eNow()}
+	u.storeE2ESession(tagString, session)
+	// The first lookup proved the key before the handshake was answered,
+	// but removal may commit while the handshake is being sealed. Check
+	// again after storing so a session cannot be installed behind the
+	// removal watch's event; a later removal is caught by that watch.
+	current, err := u.st.DeviceByChannelKey(r.Context(), opened.DeviceKey)
+	if err != nil {
+		u.dropE2ESession(tagString)
+		u.log.Error("a channel handshake's device could not be read", "err", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
 	}
-	u.e2eSessions[string(tag)] = &e2eSession{keys: keys, user: device.User, device: device.Name, channelKey: opened.DeviceKey}
-	u.mu.Unlock()
+	if current == nil || current.User != device.User || current.Name != device.Name {
+		u.dropE2ESession(tagString)
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
 	// The answer founds a session and holds its tag: nothing between
 	// keeps it readable but the device.
 	w.Header().Set("Cache-Control", "no-store")
@@ -184,7 +374,11 @@ func (u *UserServer) e2eHandshake(w http.ResponseWriter, r *http.Request, first 
 // key. One store read a call is the price, and it is the read a plain
 // call already pays to resolve its token.
 func (u *UserServer) e2eDevice(r *http.Request, s *e2eSession) bool {
-	devices, err := u.st.Devices(r.Context(), s.user)
+	return u.e2eDeviceCtx(r.Context(), s)
+}
+
+func (u *UserServer) e2eDeviceCtx(ctx context.Context, s *e2eSession) bool {
+	devices, err := u.st.Devices(ctx, s.user)
 	if err != nil {
 		u.log.Error("an enveloped call's device could not be read", "err", err)
 		return false
@@ -214,16 +408,26 @@ func (u *UserServer) e2eCall(w http.ResponseWriter, r *http.Request, run []byte)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-	u.mu.Lock()
-	session := u.e2eSessions[string(msgs[0][:yardkey.E2ETagSize])]
-	u.mu.Unlock()
+	tag := string(msgs[0][:yardkey.E2ETagSize])
+	session := u.e2eSessionFor(tag)
 	if session == nil {
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
 	// Each new call's first record re-reads the device record its
-	// session names, before anything of the call is served.
+	// session names, before anything of the call is served: this
+	// re-read is the call's admission. A call admitted here — before
+	// a removal of its device commits — may finish; a first record
+	// that crosses the removal finds no device, drops the session
+	// entry it came on, and is refused, as every later call is.
 	if !u.e2eDevice(r, session) {
+		u.dropE2ESession(tag)
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+	// A handshake may have replaced this entry after e2eSessionFor
+	// found it but before the device re-read admitted the call.
+	if !u.touchE2ESessionIfLive(session) {
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
@@ -247,6 +451,14 @@ func (u *UserServer) e2eCall(w http.ResponseWriter, r *http.Request, run []byte)
 		return
 	}
 	writer := newE2EAnswerWriter(w, session, call, binding, isEventsCall(reqHead))
+	// A streamed answer's every record is a new admission: before it
+	// seals, its session entry must still stand and its device still
+	// be there, so a removal since the call was admitted seals no
+	// next record and no final. A whole answer is the admitted call
+	// finishing, and is not rechecked (finish, below).
+	writer.live = func() bool {
+		return u.touchE2ESessionIfLive(session) && u.e2eDevice(r, session)
+	}
 	if binding.Present && !writer.events {
 		// A marked call is checked only now, after the envelope has
 		// opened: a mark buys a long-lived slot for the events stream
@@ -371,10 +583,11 @@ func (u *UserServer) serveInner(w http.ResponseWriter, outer *http.Request, sess
 	inner = inner.WithContext(context.WithValue(inner.Context(), callerKey{}, caller))
 	if isEventsCall(head) {
 		// The stream was opened by its channel, not by a token: its
-		// liveness is asked of the device record the session names,
-		// re-read as the plain stream's credential is resolved again.
+		// liveness check also confirms the channel session is still
+		// held. A fresh handshake replaces it, and the next check ends
+		// the old stream so it releases its per-device slot.
 		inner = inner.WithContext(context.WithValue(inner.Context(), e2eStillKey{},
-			func() bool { return u.e2eDevice(outer, session) }))
+			func() bool { return u.touchE2ESessionIfLive(session) && u.e2eDevice(outer, session) }))
 	}
 	u.routes().ServeHTTP(w, inner)
 }
@@ -433,6 +646,25 @@ type e2eAnswerWriter struct {
 	capped   bool   // a streamed answer past the bound: left unclosed
 	sealed   int    // framed bytes sent of a streamed answer
 	err      error  // a sealing or sending failure, kept whole
+	live     func() bool
+	gone     bool // the session went mid-stream: no next record, no final
+}
+
+// streamLive admits a streamed answer's next record: nil live (a
+// writer a test drives whole) always admits; a failed check is kept,
+// so no later record of the stream is admitted either.
+func (w *e2eAnswerWriter) streamLive() bool {
+	if w.live == nil {
+		return true
+	}
+	if w.gone {
+		return false
+	}
+	if !w.live() {
+		w.gone = true
+		return false
+	}
+	return true
 }
 
 func newE2EAnswerWriter(outer http.ResponseWriter, session *e2eSession, call []byte, binding *yardkey.FirstBinding, events bool) *e2eAnswerWriter {
@@ -450,7 +682,7 @@ func (w *e2eAnswerWriter) WriteHeader(status int) {
 
 func (w *e2eAnswerWriter) Write(b []byte) (int, error) {
 	w.WriteHeader(http.StatusOK)
-	if w.err != nil || w.capped {
+	if w.err != nil || w.capped || w.gone {
 		return len(b), nil
 	}
 	if !w.started && (w.overflow || len(b) > maxE2EAnswer-len(w.pending)) {
@@ -469,7 +701,7 @@ func (w *e2eAnswerWriter) Write(b []byte) (int, error) {
 // inner head travels in the first record, sealed, and the outer head
 // the link carries back shows the envelope's alone.
 func (w *e2eAnswerWriter) Flush() {
-	if w.err != nil || w.capped || w.overflow {
+	if w.err != nil || w.capped || w.overflow || w.gone {
 		return
 	}
 	if !w.started {
@@ -477,7 +709,7 @@ func (w *e2eAnswerWriter) Flush() {
 	} else {
 		w.sealPending()
 	}
-	if w.err == nil && !w.capped {
+	if w.err == nil && !w.capped && !w.gone {
 		_ = http.NewResponseController(w.outer).Flush()
 	}
 }
@@ -495,6 +727,9 @@ func (w *e2eAnswerWriter) Unwrap() http.ResponseWriter { return w.outer }
 // start sends the outer head and seals the inner head with what body
 // already stands behind it as the stream's first records.
 func (w *e2eAnswerWriter) start() {
+	if !w.streamLive() {
+		return
+	}
 	raw, err := json.Marshal(e2eAnswerHead{Status: w.statusOrOK(), Header: w.header})
 	if err != nil {
 		w.err = err
@@ -518,6 +753,10 @@ func (w *e2eAnswerWriter) start() {
 // sealPending seals the body written since the last flush.
 func (w *e2eAnswerWriter) sealPending() {
 	if len(w.pending) == 0 {
+		return
+	}
+	if !w.streamLive() {
+		w.pending = nil
 		return
 	}
 	run, err := w.sealer.Seal(w.pending)
@@ -564,6 +803,14 @@ func (w *e2eAnswerWriter) finish() error {
 	if w.err != nil {
 		return w.err
 	}
+	if w.gone {
+		// Sealed nothing of the stream, and nothing stands to finish
+		// it with: the outer head was never the yard's to send.
+		if !w.wrote {
+			return fmt.Errorf("a streamed answer's session is gone")
+		}
+		return nil // a stream cut by its removal: no final record
+	}
 	if !w.started {
 		answer := e2eTooLargeAnswer()
 		if !w.overflow {
@@ -599,8 +846,11 @@ func (w *e2eAnswerWriter) finish() error {
 	if w.err != nil {
 		return w.err
 	}
-	if w.capped {
+	if w.capped || w.gone {
 		return nil // the tail was not sent, so its final cannot be sent either
+	}
+	if !w.streamLive() {
+		return nil // the final is a new record too: none after a removal
 	}
 	final, err := w.sealer.SealFinal()
 	if err != nil {

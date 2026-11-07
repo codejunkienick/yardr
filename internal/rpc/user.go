@@ -195,8 +195,7 @@ type UserServer struct {
 	// sealed pairing redemption is opened with (userpair.go,
 	// SetChannelKeyFile); "" where the yard told none.
 	channelPath string
-	// e2eSessions is the yard's live channel sessions by tag
-	// (usere2e.go), held in memory alone.
+	// e2eSessions is the yard's live channel sessions by tag (usere2e.go), in memory alone.
 	e2eSessions map[string]*e2eSession
 	// pake is the one live PAKE run of a typed pairing (userpair.go),
 	// under mu; nil where none is running.
@@ -833,10 +832,9 @@ func (u *UserServer) Flush(all bool) {
 	u.logRefused(due)
 }
 
-// Run flushes as windows end until ctx ends, and then everything counted:
-// the server runs it beside the listener, and ends ctx while the store is
-// still open.
+// Run flushes as windows end until ctx ends, and then everything counted: the server runs it beside the listener, and ends ctx while the store is still open. It also purges channel sessions on removals and idleness (usere2e.go).
 func (u *UserServer) Run(ctx context.Context) {
+	go u.watchE2ERemovals(ctx)
 	tick := time.NewTicker(RefuseWindow / 10)
 	defer tick.Stop()
 	for {
@@ -846,6 +844,7 @@ func (u *UserServer) Run(ctx context.Context) {
 			return
 		case <-tick.C:
 			u.Flush(false)
+			u.expireE2ESessions()
 		}
 	}
 }

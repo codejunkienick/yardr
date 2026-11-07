@@ -105,11 +105,9 @@ func TestChannelWholeCallNeedsSeveralRecords(t *testing.T) {
 
 	// A run with no final record is truncated, and one with a record
 	// dropped from its middle is refused at the gap: neither answers
-	// any of the plaintext as whole.
-	msgs, err = SplitRecords(run)
-	if err != nil || len(msgs) < 3 {
-		t.Fatalf("records = %d, %v", len(msgs), err)
-	}
+	// any of the plaintext as whole. Each variant is sealed fresh,
+	// under its own call: the run above has opened, and its records
+	// replay nowhere.
 	join := func(ms [][]byte) []byte {
 		var out []byte
 		for _, m := range ms {
@@ -117,12 +115,30 @@ func TestChannelWholeCallNeedsSeveralRecords(t *testing.T) {
 		}
 		return out
 	}
-	if _, err := yard.OpenWhole(join(msgs[:len(msgs)-1]), call, e2eFirst); !errors.Is(err, ErrTruncated) {
-		t.Errorf("a run with no final record opened whole: %v", err)
+	fresh := func() ([][]byte, []byte) {
+		id := callID(t)
+		r, err := device.SealWhole(id, e2eFirst, plain)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ms, err := SplitRecords(r)
+		if err != nil || len(ms) < 3 {
+			t.Fatalf("records = %d, %v", len(ms), err)
+		}
+		return ms, id
 	}
-	mid := append([][]byte{msgs[0]}, msgs[2:]...)
-	if _, err := yard.OpenWhole(join(mid), call, e2eFirst); !errors.Is(err, ErrRecordGap) {
-		t.Errorf("a run with its middle record dropped opened whole: %v", err)
+	{
+		ms, id := fresh()
+		if _, err := yard.OpenWhole(join(ms[:len(ms)-1]), id, e2eFirst); !errors.Is(err, ErrTruncated) {
+			t.Errorf("a run with no final record opened whole: %v", err)
+		}
+	}
+	{
+		ms, id := fresh()
+		mid := append([][]byte{ms[0]}, ms[2:]...)
+		if _, err := yard.OpenWhole(join(mid), id, e2eFirst); !errors.Is(err, ErrRecordGap) {
+			t.Errorf("a run with its middle record dropped opened whole: %v", err)
+		}
 	}
 
 	one, err := device.Seal(call, 0, e2eFirst, []byte("x"))
@@ -220,11 +236,12 @@ func TestChannelFirstRecordBindsPathAndMarker(t *testing.T) {
 		if name == "marker added" {
 			sentBind = &FirstBinding{Path: "/user/e2e"}
 		}
-		run, err := device.SealWhole(call, sentBind, sentPlain)
+		id := callID(t)
+		run, err := device.SealWhole(id, sentBind, sentPlain)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := yard.OpenWhole(run, call, carried); err == nil {
+		if _, err := yard.OpenWhole(run, id, carried); err == nil {
 			t.Errorf("%s: the first record opened", name)
 		}
 	}
@@ -235,7 +252,8 @@ func TestChannelFirstRecordBindsPathAndMarker(t *testing.T) {
 	}
 	_ = msgs
 	plain := bytes.Repeat([]byte("y"), MaxRecordPlain+10)
-	run, err = device.SealWhole(call, e2eFirst, plain)
+	id := callID(t)
+	run, err = device.SealWhole(id, e2eFirst, plain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +266,7 @@ func TestChannelFirstRecordBindsPathAndMarker(t *testing.T) {
 	for _, m := range msgs {
 		tampered = FrameRecord(tampered, m)
 	}
-	if _, err := yard.OpenWhole(tampered, call, e2eFirst); err == nil {
+	if _, err := yard.OpenWhole(tampered, id, e2eFirst); err == nil {
 		t.Error("a record with a rewritten tag opened")
 	}
 	if _, err := SplitRecords(append(run, 1, 2)); err == nil {
@@ -339,13 +357,15 @@ func TestChannelStreamRecordsGapTruncationAndBeats(t *testing.T) {
 
 	// A record dropped from the middle: what stands before the gap is
 	// delivered, the record past it is refused there, and the honest
-	// record still opens when it comes.
-	sealer = device.NewCallSealer(call, e2eFirst)
+	// record still opens when it comes. A fresh call: the streams
+	// above have closed theirs, and a closed call is never reused.
+	gapCall := callID(t)
+	sealer = device.NewCallSealer(gapCall, e2eFirst)
 	var chunks [][]byte
 	for _, chunk := range []string{"a\n", "b\n", "c\n"} {
 		chunks = append(chunks, messages(seal(sealer, chunk))...)
 	}
-	opener := yard.NewCallOpener(call, e2eFirst)
+	opener := yard.NewCallOpener(gapCall, e2eFirst)
 	if plain, _, err := opener.Open(chunks[0]); err != nil || string(plain) != "a\n" {
 		t.Fatalf("the first record opened %q, %v", plain, err)
 	}
@@ -372,7 +392,8 @@ func TestChannelStreamRecordsGapTruncationAndBeats(t *testing.T) {
 	// Data that would itself read as a final record is split by the
 	// sealer and delivered as data: sixteen zero bytes open whole,
 	// and the final record after them still closes the call.
-	sealer = device.NewCallSealer(call, e2eFirst)
+	finalCall := callID(t)
+	sealer = device.NewCallSealer(finalCall, e2eFirst)
 	run, err := sealer.Seal(finalPlain(0, 0))
 	if err != nil {
 		t.Fatal(err)
@@ -381,7 +402,7 @@ func TestChannelStreamRecordsGapTruncationAndBeats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opener = yard.NewCallOpener(call, e2eFirst)
+	opener = yard.NewCallOpener(finalCall, e2eFirst)
 	var data []byte
 	for _, msg := range messages(append(run, final...)) {
 		plain, done, err := opener.Open(msg)
@@ -396,4 +417,168 @@ func TestChannelStreamRecordsGapTruncationAndBeats(t *testing.T) {
 	if !bytes.Equal(data, finalPlain(0, 0)) || opener.Close() != nil {
 		t.Errorf("final-shaped data opened as %v, close %v", data, opener.Close())
 	}
+}
+
+// The replay rule of section 3.2: a record replayed whole, a record
+// with its sequence rewritten, and a record fallen below the window
+// are each refused and mark nothing for the honest message after
+// them; a record carried to another concurrent call is refused there
+// and still opens on its own, and a closed call's records are refused
+// however fresh their sequence looks, neither refusal corrupting the
+// other call; a record withheld past the window fails its call whole,
+// and the call reissued under a new call id opens.
+func TestChannelReplayAndCrossStream(t *testing.T) {
+	device, yard, _ := channelPair(t)
+
+	// Replayed whole.
+	call := callID(t)
+	run, err := device.SealWhole(call, e2eFirst, []byte("paint the shed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := yard.OpenWhole(run, call, e2eFirst); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := yard.OpenWhole(run, call, e2eFirst); !errors.Is(err, ErrReplay) {
+		t.Errorf("a record replayed whole = %v, want the replay refused", err)
+	}
+	honest := callID(t)
+	run, err = device.SealWhole(honest, e2eFirst, []byte("paint the shed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := yard.OpenWhole(run, honest, e2eFirst); err != nil || string(got) != "paint the shed" {
+		t.Errorf("the honest call after a replay opened %q, %v", got, err)
+	}
+
+	// Sequence rewritten: refused at its opening, the honest record
+	// carrying that sequence still opens after it.
+	rwCall := callID(t)
+	sealer := device.NewCallSealer(rwCall, e2eFirst)
+	recRun, err := sealer.Seal([]byte("first"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recs, err := SplitRecords(recRun)
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("records = %d, %v", len(recs), err)
+	}
+	rewritten := append([]byte(nil), recs[0]...)
+	binary.BigEndian.PutUint64(rewritten[e2eHeaderSize-16:e2eHeaderSize-8],
+		binary.BigEndian.Uint64(rewritten[e2eHeaderSize-16:e2eHeaderSize-8])+1000)
+	opener := yard.NewCallOpener(rwCall, e2eFirst)
+	if _, _, err := opener.Open(rewritten); err == nil {
+		t.Error("a record with its sequence rewritten opened")
+	}
+	if plain, _, err := opener.Open(recs[0]); err != nil || string(plain) != "first" {
+		t.Errorf("the honest record after a rewritten one opened %q, %v", plain, err)
+	}
+
+	// Cross-stream: a record of stream A delivered to stream B before
+	// A has opened it is refused there and still opens on A; after A
+	// closes, its records are refused; B is uncorrupted throughout.
+	aCall, bCall := callID(t), callID(t)
+	aSeal, bSeal := device.NewCallSealer(aCall, e2eFirst), device.NewCallSealer(bCall, e2eFirst)
+	aRun, err := aSeal.Seal([]byte("a1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bRun, err := bSeal.Seal([]byte("b1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	aRec, bRec := messages0(t, aRun), messages0(t, bRun)
+	aOpen, bOpen := yard.NewCallOpener(aCall, e2eFirst), yard.NewCallOpener(bCall, e2eFirst)
+	if _, _, err := bOpen.Open(aRec); err == nil {
+		t.Error("a record of stream A opened on stream B")
+	}
+	if plain, _, err := aOpen.Open(aRec); err != nil || string(plain) != "a1" {
+		t.Errorf("the record on its own stream opened %q, %v", plain, err)
+	}
+	aFin, err := aSeal.SealFinal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finMsgs, err := SplitRecords(aFin); err != nil {
+		t.Fatal(err)
+	} else {
+		for _, m := range finMsgs {
+			if _, _, err := aOpen.Open(m); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := aOpen.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := yard.NewCallOpener(aCall, e2eFirst).Open(aRec); !errors.Is(err, ErrReplay) {
+		t.Errorf("a record replayed after its stream closed = %v, want the replay refused", err)
+	}
+	late, err := device.Seal(aCall, 0, e2eFirst, []byte("late"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := yard.NewCallOpener(aCall, e2eFirst).Open(late); !errors.Is(err, ErrReplay) {
+		t.Errorf("a fresh record of a closed call = %v, want it refused", err)
+	}
+	if plain, _, err := bOpen.Open(bRec); err != nil || string(plain) != "b1" {
+		t.Errorf("stream B after A's refusals opened %q, %v", plain, err)
+	}
+	bFin, err := bSeal.SealFinal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finMsgs, err := SplitRecords(bFin); err != nil {
+		t.Fatal(err)
+	} else {
+		for _, m := range finMsgs {
+			if _, _, err := bOpen.Open(m); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := bOpen.Close(); err != nil {
+		t.Errorf("stream B closed with %v", err)
+	}
+
+	// Withheld past the window, on a fresh session pair so the count
+	// is exact: the withheld call fails whole, and the same call under
+	// a new call id opens.
+	device2, yard2, _ := channelPair(t)
+	heldCall := callID(t)
+	held, err := device2.SealWhole(heldCall, e2eFirst, []byte("held back"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range ReplayWindow {
+		dummy := make([]byte, E2ECallSize)
+		binary.BigEndian.PutUint64(dummy[8:], uint64(i)+1)
+		msg, err := device2.Seal(dummy, 0, e2eFirst, []byte("x"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := yard2.Open(msg, dummy, e2eFirst); err != nil {
+			t.Fatalf("a window-filling record %d = %v", i, err)
+		}
+	}
+	if _, err := yard2.OpenWhole(held, heldCall, e2eFirst); !errors.Is(err, ErrReplay) {
+		t.Errorf("a record withheld past the window = %v, want the replay refused", err)
+	}
+	again := callID(t)
+	run, err = device2.SealWhole(again, e2eFirst, []byte("held back"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := yard2.OpenWhole(run, again, e2eFirst); err != nil || string(got) != "held back" {
+		t.Errorf("the call reissued under a new id opened %q, %v", got, err)
+	}
+}
+
+func messages0(t *testing.T, run []byte) []byte {
+	t.Helper()
+	msgs, err := SplitRecords(run)
+	if err != nil || len(msgs) == 0 {
+		t.Fatalf("records = %d, %v", len(msgs), err)
+	}
+	return msgs[0]
 }
