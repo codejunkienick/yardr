@@ -2,8 +2,10 @@ package rpc
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -19,13 +21,15 @@ import (
 // pairYard is a yard with the operator jo, the user sam and no device, on a
 // listener of its own at 127.0.0.1:0, and a clock for its device pairings
 // that the test moves. It holds a channel key too, in a file of its own,
-// as a yard that pairs by QR does.
+// as a yard that pairs by QR does, and an identity key, whose public half
+// is what the edge's map holds and a voucher is checked against.
 type pairYard struct {
-	st      *store.Store
-	u       *UserServer
-	base    string
-	channel yardkey.ChannelKey
-	late    atomic.Int64 // how far the clock is ahead, in nanoseconds
+	st       *store.Store
+	u        *UserServer
+	base     string
+	channel  yardkey.ChannelKey
+	identity ed25519.PrivateKey
+	late     atomic.Int64 // how far the clock is ahead, in nanoseconds
 }
 
 func newPairYard(t *testing.T) *pairYard {
@@ -52,6 +56,11 @@ func newPairYard(t *testing.T) *pairYard {
 	}
 	y.channel = channel
 	y.u.SetChannelKeyFile(channelPath)
+	identityPath := filepath.Join(t.TempDir(), "peer.key")
+	if y.identity, _, err = yardkey.Ensure(identityPath); err != nil {
+		t.Fatal(err)
+	}
+	y.u.SetIdentityKeyFile(identityPath)
 	st.SetDevicePairClock(func() time.Time { return time.Now().Add(time.Duration(y.late.Load())) })
 	y.base = listen(t, y.u, 5*time.Second)
 	return y
@@ -110,6 +119,25 @@ func (y *pairYard) redeemAs(t *testing.T, code string, presenters ...string) (in
 	return y.do(t, http.MethodPost, PairPath, "", http.Header{PresenterHeader: presenters}, string(body))
 }
 
+// checkVoucher checks that voucher verifies against the yard's public key,
+// as the edge's map holds it, at the time at; that it states the user and
+// device it was issued for, the yard's name and an expiry VoucherLife from
+// at; and that it verifies nowhere from that expiry on.
+func (y *pairYard) checkVoucher(t *testing.T, voucher, user, device string, at time.Time) {
+	t.Helper()
+	public := store.Public(y.identity)
+	v, err := yardkey.VerifyVoucher(public, voucher, at)
+	if err != nil {
+		t.Fatalf("the voucher %q does not verify against the yard's public key: %v", voucher, err)
+	}
+	if want := at.Add(VoucherLife).Truncate(time.Second); v.User != user || v.Device != device || v.Yard != "south" || !v.Expires.Equal(want) {
+		t.Errorf("the voucher states %+v, want %s's %s at south until %s", v, user, device, want.UTC())
+	}
+	if _, err := yardkey.VerifyVoucher(public, voucher, v.Expires); !errors.Is(err, yardkey.ErrVoucherExpired) {
+		t.Errorf("the voucher at its expiry = %v, want it expired", err)
+	}
+}
+
 // wrong is a code that is one, and not the code.
 func wrong(code string) string {
 	if strings.HasPrefix(code, "0") {
@@ -126,6 +154,7 @@ func wrong(code string) string {
 func TestDevicePairRedemptionForms(t *testing.T) {
 	t.Run("plain", testDevicePairedByItsCode)
 	t.Run("sealed", testDevicePairedBySealedCode)
+	t.Run("sealed, yard cannot sign a voucher", testDevicePairedWhereNoVoucherCanBeSigned)
 	t.Run("pake", testDevicePairedByPAKECode)
 }
 
@@ -144,6 +173,11 @@ func testDevicePairedByItsCode(t *testing.T) {
 	}
 	if !strings.HasPrefix(got.Token, store.DeviceTokenPrefix) || got.User != "sam" || got.Device != "phone" || got.Yard != "south" {
 		t.Fatalf("the code is answered %+v", got)
+	}
+	// A device that pinned no channel key is given no voucher: the plain
+	// answer is exactly what it was.
+	if got.Voucher != "" || strings.Contains(body, "voucher") {
+		t.Errorf("the plain answer holds a voucher: %s", body)
 	}
 	if status, me := y.get(t, "/user/me", got.Token); status != http.StatusOK || me != `{"user":"sam","said_by":"phone","yard":"south","yardmaster":"yardmaster"}` {
 		t.Errorf("/user/me with the token = %d %s", status, me)
@@ -509,6 +543,8 @@ func openSealed(t *testing.T, opening *yardkey.PairingOpening, body string) Pair
 func testDevicePairedBySealedCode(t *testing.T) {
 	y := newPairYard(t)
 	ctx := context.Background()
+	at := time.Now()
+	y.u.now = func() time.Time { return at }
 	device, err := yardkey.GenerateChannelKey()
 	if err != nil {
 		t.Fatal(err)
@@ -516,13 +552,17 @@ func testDevicePairedBySealedCode(t *testing.T) {
 	code := y.open(t, "sam", "phone")
 	first, opening := y.sealedCode(t, device, code)
 	status, body := y.postSealed(t, first)
-	if status != http.StatusOK || strings.Contains(body, code) || strings.Contains(body, "yardr-dev-") {
-		t.Fatalf("the sealed code = %d %s, want 200 with neither the code nor a token readable", status, body)
+	if status != http.StatusOK || strings.Contains(body, code) || strings.Contains(body, "yardr-dev-") || strings.Contains(body, yardkey.VoucherPrefix) {
+		t.Fatalf("the sealed code = %d %s, want 200 with neither the code, a token nor a voucher readable", status, body)
 	}
 	got := openSealed(t, opening, body)
 	if !strings.HasPrefix(got.Token, store.DeviceTokenPrefix) || got.User != "sam" || got.Device != "phone" || got.Yard != "south" {
 		t.Fatalf("the sealed code is answered %+v", got)
 	}
+	// The answer holds the yard's registration voucher for the device,
+	// which verifies against the yard's public key and says, in the open,
+	// whose device it is and when it lapses.
+	y.checkVoucher(t, got.Voucher, "sam", "phone", at)
 	// The answer opens with that device's key alone.
 	stranger, err := yardkey.GenerateChannelKey()
 	if err != nil {
@@ -545,6 +585,45 @@ func testDevicePairedBySealedCode(t *testing.T) {
 	devices, err := y.st.Devices(ctx, "")
 	if err != nil || len(devices) != 1 || devices[0].ChannelKey != yardkey.ChannelPublic(device) {
 		t.Fatalf("devices = %+v, %v, want sam's phone with the device key pinned", devices, err)
+	}
+}
+
+// A yard that cannot sign a voucher — told no identity key file, one it
+// cannot read, or a name no voucher can carry — still answers the pairing
+// with the token, which is never lost for want of an extra, and none of
+// the three leaves the device unpaired; the answer holds no voucher, which
+// the device asks for when it registers.
+func testDevicePairedWhereNoVoucherCanBeSigned(t *testing.T) {
+	for name, spoil := range map[string]func(*pairYard){
+		"no identity key file told": func(y *pairYard) { y.u.SetIdentityKeyFile("") },
+		"an identity key file that is gone": func(y *pairYard) {
+			y.u.SetIdentityKeyFile(filepath.Join(t.TempDir(), "gone.key"))
+		},
+		"a yard name with a line break": func(y *pairYard) {
+			y.u.yard = func(context.Context) string { return "so\nuth" }
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			y := newPairYard(t)
+			spoil(y)
+			device, err := yardkey.GenerateChannelKey()
+			if err != nil {
+				t.Fatal(err)
+			}
+			code := y.open(t, "sam", "phone")
+			first, opening := y.sealedCode(t, device, code)
+			status, body := y.postSealed(t, first)
+			if status != http.StatusOK {
+				t.Fatalf("the sealed code = %d %s, want 200", status, body)
+			}
+			got := openSealed(t, opening, body)
+			if !strings.HasPrefix(got.Token, store.DeviceTokenPrefix) || got.User != "sam" || got.Device != "phone" || got.Voucher != "" {
+				t.Errorf("the sealed code is answered %+v, want the token and no voucher", got)
+			}
+			if devices, err := y.st.Devices(context.Background(), ""); err != nil || len(devices) != 1 {
+				t.Errorf("devices = %+v, %v, want sam's phone paired", devices, err)
+			}
+		})
 	}
 }
 
@@ -762,6 +841,8 @@ func (y *pairYard) pakeRun(t *testing.T, device yardkey.ChannelKey, code string,
 func testDevicePairedByPAKECode(t *testing.T) {
 	y := newPairYard(t)
 	ctx := context.Background()
+	at := time.Now()
+	y.u.now = func() time.Time { return at }
 	device, err := yardkey.GenerateChannelKey()
 	if err != nil {
 		t.Fatal(err)
@@ -828,10 +909,12 @@ func testDevicePairedByPAKECode(t *testing.T) {
 	if got.ChannelKey != yardkey.ChannelPublic(y.channel) {
 		t.Fatalf("the PAKE answer pins yard channel key %q, want %q", got.ChannelKey, yardkey.ChannelPublic(y.channel))
 	}
+	y.checkVoucher(t, got.Voucher, "sam", "phone", at)
 	// Nothing the relay carried reads: not the code in either of its
-	// forms, not the token, not either key in either of its forms.
+	// forms, not the token, not the voucher, not either key in either of
+	// its forms.
 	all := strings.Join(carried, "\n")
-	for _, secret := range []string{code, strings.ReplaceAll(code, "-", ""), got.Token,
+	for _, secret := range []string{code, strings.ReplaceAll(code, "-", ""), got.Token, got.Voucher,
 		yardkey.ChannelPublic(device), base64.RawURLEncoding.EncodeToString(device.Public),
 		yardkey.ChannelPublic(y.channel), base64.RawURLEncoding.EncodeToString(y.channel.Public)} {
 		if strings.Contains(all, secret) {

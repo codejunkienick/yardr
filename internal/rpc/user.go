@@ -43,12 +43,12 @@ import (
 //	GET  /user/blobs/<hash>      a blob the caller may read, as the web
 //	                             view serves it (userBlob)
 //	GET  /user/me                {"user": ..., "said_by": ..., "yard": ..., "yardmaster": ...}
-//	POST /user/pair              a pairing's code for the device's token (pair),
-//	                             or the code inside a Noise handshake to the
-//	                             yard's channel key, answered sealed
-//	                             (pairSealed); a redemption the edge forwards
-//	                             names its presenter in PresenterHeader, and
-//	                             only the pairing's user may redeem it
+//	POST /user/pair              a pairing's code for the device's token (pair), or the code
+//	                             inside a Noise handshake to the yard's channel key, answered
+//	                             sealed (pairSealed); a redemption the edge forwards names its
+//	                             presenter in PresenterHeader, and only the pairing's user may
+//	                             redeem it
+//	POST /user/push/voucher      a push registration voucher, to a sealed call alone (pushVoucher)
 //
 // It is docs/api.md over TCP with one header more, `Authorization: Bearer
 // <credential>`, and the same implementation serves both (api). What makes
@@ -191,10 +191,10 @@ type UserServer struct {
 	resolve        Resolver
 	resolveTimeout time.Duration
 	recheck        time.Duration
-	// channelPath is the file of the yard's channel key, which a
-	// sealed pairing redemption is opened with (userpair.go,
-	// SetChannelKeyFile); "" where the yard told none.
-	channelPath string
+	// channelPath and identityPath are the files of the yard's channel key,
+	// which opens a sealed pairing, and of its identity key, which signs a
+	// voucher (SetChannelKeyFile, SetIdentityKeyFile); "" where told none.
+	channelPath, identityPath string
 	// e2eSessions is the yard's live channel sessions by tag (usere2e.go), in memory alone.
 	e2eSessions map[string]*e2eSession
 	// pake is the one live PAKE run of a typed pairing (userpair.go),

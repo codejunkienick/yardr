@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -310,6 +311,109 @@ func TestE2EChannelAuthenticatesNotTheToken(t *testing.T) {
 	}
 	if outer, _, status, _, _ := other.call(t, http.MethodGet, "/user/me", nil, nil, plain, plain); outer != http.StatusOK || status != http.StatusOK {
 		t.Errorf("the other device's call = outer %d, inner %d", outer, status)
+	}
+}
+
+// A device asks for a registration voucher inside its channel, as often as
+// it registers, and is given one for its own user and device that verifies
+// against the yard's public key and states, in the open, whose it is and
+// when it lapses. Each asking is fresh, and no body names another device
+// than the one the channel proved. A plain call is refused, down the link
+// and at the listener, since the edge read every token a device sent before
+// it held a channel; a voucher opens nothing at the yard; and a device that
+// was removed, or a yard that cannot sign, is given none.
+func TestE2EPushVoucherOnRequest(t *testing.T) {
+	y := newPairYard(t)
+	d := newE2EDevice(t, y, "sam", "phone")
+	other := newE2EDevice(t, y, "jo", "tablet")
+	plain := bindFor("", false)
+	base := time.Now()
+	var later atomic.Int64
+	y.u.now = func() time.Time { return base.Add(time.Duration(later.Load())) }
+	ask := func(dev *e2eDevice, body []byte) string {
+		t.Helper()
+		outer, _, status, header, answer := dev.call(t, http.MethodPost, "/user/push/voucher", nil, body, plain, plain)
+		if outer != http.StatusOK || status != http.StatusOK {
+			t.Fatalf("POST /user/push/voucher outer %d, inner %d (%s)", outer, status, answer)
+		}
+		var got struct {
+			Voucher string `json:"voucher"`
+		}
+		if err := json.Unmarshal(answer, &got); err != nil || got.Voucher == "" {
+			t.Fatalf("the voucher answer = %s (%v)", answer, err)
+		}
+		if header.Get("Cache-Control") != "no-store" {
+			t.Errorf("the voucher answer's Cache-Control = %q, want no-store", header.Get("Cache-Control"))
+		}
+		return got.Voucher
+	}
+
+	first := ask(d, nil)
+	y.checkVoucher(t, first, "sam", "phone", base)
+	// It crossed sealed: nothing of the outer call or its answer holds one.
+	if outer, _, sealed, _ := d.callRaw(t, http.MethodPost, "/user/push/voucher", nil, nil, plain, plain); outer != http.StatusOK || bytes.Contains(sealed, []byte(yardkey.VoucherPrefix)) {
+		t.Errorf("the outer answer = %d, %d bytes of it holding a voucher in the clear: %v", outer, len(sealed), bytes.Contains(sealed, []byte(yardkey.VoucherPrefix)))
+	}
+
+	// Each asking is fresh, the earlier one standing until its own expiry.
+	later.Store(int64(3 * time.Minute))
+	second := ask(d, nil)
+	if second == first {
+		t.Error("a second asking was given the first voucher again")
+	}
+	y.checkVoucher(t, second, "sam", "phone", base.Add(3*time.Minute))
+	public := store.Public(y.identity)
+	if _, err := yardkey.VerifyVoucher(public, first, base.Add(VoucherLife-time.Second)); err != nil {
+		t.Errorf("the first voucher just before its expiry: %v", err)
+	}
+	if _, err := yardkey.VerifyVoucher(public, first, base.Add(VoucherLife)); !errors.Is(err, yardkey.ErrVoucherExpired) {
+		t.Errorf("the first voucher at its expiry = %v, want it expired", err)
+	}
+	if _, err := yardkey.VerifyVoucher(public, second, base.Add(VoucherLife)); err != nil {
+		t.Errorf("the second voucher when the first has lapsed: %v", err)
+	}
+
+	// The channel proves the device: a body that names another is no
+	// say, and a second device is given its own.
+	named, _ := json.Marshal(map[string]string{"user": "sam", "device": "phone", "yard": "north"})
+	y.checkVoucher(t, ask(other, named), "jo", "tablet", base.Add(3*time.Minute))
+
+	// A plain call, with a token that is its device's, is refused: down
+	// the link as at the listener.
+	status, body := y.redeem(t, y.open(t, "sam", "slate"))
+	var paired Paired
+	if err := json.Unmarshal([]byte(body), &paired); status != http.StatusOK || err != nil {
+		t.Fatalf("the plain pairing = %d %s (%v)", status, body, err)
+	}
+	if status, answer := y.post(t, "/user/push/voucher", paired.Token, ""); status != http.StatusForbidden || strings.Contains(answer, yardkey.VoucherPrefix) {
+		t.Errorf("a plain call at the listener = %d %s, want 403 and no voucher", status, answer)
+	}
+	r := httptest.NewRequest(http.MethodPost, "/user/push/voucher", nil)
+	r.RemoteAddr = linkRemoteAddr
+	r.Header.Set("Authorization", "Bearer "+paired.Token)
+	w := httptest.NewRecorder()
+	y.u.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), yardkey.VoucherPrefix) || !strings.Contains(w.Body.String(), "sealed") {
+		t.Errorf("a plain call down the link = %d %s, want 403 naming the fix", w.Code, w.Body)
+	}
+
+	// A voucher is no credential at the yard.
+	if status, answer := y.get(t, "/user/me", first); status != http.StatusUnauthorized || strings.Contains(answer, "sam") {
+		t.Errorf("/user/me with a voucher as the bearer = %d %s, want 401", status, answer)
+	}
+
+	// A device removed since is given none, and a yard that cannot sign
+	// answers the sealed call 500 and no voucher.
+	if _, err := y.st.RemoveDevice(context.Background(), "sam", "phone", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if outer, _, _, _, answer := d.call(t, http.MethodPost, "/user/push/voucher", nil, nil, plain, plain); outer != http.StatusUnauthorized || bytes.Contains(answer, []byte(yardkey.VoucherPrefix)) {
+		t.Errorf("a removed device's request = outer %d, want 401 and no voucher", outer)
+	}
+	y.u.SetIdentityKeyFile("")
+	outer, _, status, _, answer := other.call(t, http.MethodPost, "/user/push/voucher", nil, nil, plain, plain)
+	if outer != http.StatusOK || status != http.StatusInternalServerError || bytes.Contains(answer, []byte(yardkey.VoucherPrefix)) {
+		t.Errorf("a yard that cannot sign = outer %d, inner %d %s, want inner 500 and no voucher", outer, status, answer)
 	}
 }
 

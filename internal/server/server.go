@@ -490,6 +490,9 @@ func serveHooks(ctx context.Context, c *config.Config, st *store.Store, log *slo
 	// A sealed pairing redemption is opened with the yard's channel
 	// key, read from its file for each one (rpc.SetChannelKeyFile).
 	users.SetChannelKeyFile(c.ChannelKey())
+	// A push registration voucher is signed with the yard's identity,
+	// read from its file for each one (rpc.SetIdentityKeyFile).
+	users.SetIdentityKeyFile(c.PeerKey())
 	running, stopRunning := context.WithCancel(context.Background())
 	flushed := make(chan struct{})
 	go func() {

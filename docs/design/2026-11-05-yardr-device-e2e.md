@@ -1026,6 +1026,27 @@ own yard header and the probe's answer already told it. What ends
 is the read of an answer the yard composed, and the handing over
 of a token to make the router ask for one.
 
+As built in `yardr` (bead 5): the voucher is one string,
+`yardr-voucher-<statement>.<signature>`, so a device can present it
+where it presented its token; how a router or an app presents it is
+bead 6's and the phone beads'. The statement — user, device, yard and
+expiry — is signed, not concealed: five plain lines, the label `yardr
+push voucher v1` and the four fields, the expiry in Unix seconds,
+under the yard identity's ed25519 over exactly those bytes, so the
+signature is no request's, link's, frame's or channel key's. User,
+device and yard are what the probe's answer said
+(`/user/me`'s `user`, `said_by` and `yard`); the yard's name is its
+own word for itself, so a router binds a voucher to the yard whose
+map key verified it and never to that name. A voucher lives ten
+minutes; the yard issues one in the sealed and the PAKE pairing
+answers, and a plain pairing's answer holds none, and on `POST
+/user/push/voucher`, which it answers only to a call sealed to it: a
+token never mints one, because a phone that migrates in place has had
+its token read by the edge before it held a channel. A voucher opens
+nothing at the yard. The bytes, the way to check them and a vector
+are in `docs/api.md`, "A registration voucher"; bead 6 checks them
+from its own copy.
+
 **Device tokens.** Still needed, demoted, and finally hidden. The
 channel authenticates a call by the device's static key, which the
 yard can check without anything crossing; the token's remaining work

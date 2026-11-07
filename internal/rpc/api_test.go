@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -2449,6 +2450,23 @@ func TestAPIDoc(t *testing.T) {
 	body, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The doc's registration voucher is the one the yard signs, for a
+	// router or an app that builds against the page: the key whose seed
+	// is the 32 bytes 1, 2, ... 32 and the statement the page names.
+	seed := make([]byte, ed25519.SeedSize)
+	for i := range seed {
+		seed[i] = byte(1 + i)
+	}
+	vectorKey := ed25519.NewKeyFromSeed(seed)
+	vector, err := yardkey.SignVoucher(vectorKey, yardkey.Voucher{User: "sam", Device: "phone", Yard: "south", Expires: time.Unix(1794082500, 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{store.Public(vectorKey), vector} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("%s does not hold %s, the registration voucher vector the yard signs", file, want)
+		}
 	}
 	lines := strings.Split(string(body), "\n")
 	var out []string

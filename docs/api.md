@@ -1009,14 +1009,15 @@ is `{"sealed": "<base64url of a Noise IK first message>"}` whose payload
 is the code and which seals the device's own X25519 public key inside
 it, opened by the yard's channel private key. The answer is 200
 `{"sealed": "<base64url of the second message>"}`, whose payload is the
-same `{"token", "user", "device", "yard"}` JSON, readable only with the
+same `{"token", "user", "device", "yard"}` JSON with a `voucher` beside
+it ([below](#a-registration-voucher)), readable only with the
 device private key the handshake proved; the device is recorded with
 that proved public key pinned beside its token's hash. Refusals of the
 code it carries are answered and counted as a plain code's are, and
 bytes that are no handshake to this yard's key are 400 and no try. A
 recorded transcript replayed buys nothing: its code was used by the
 first redemption. A QR code with no key field is redeemed by the plain
-request above, exactly as before.
+request above, exactly as before, and its answer holds no voucher.
 
 Where the code was typed or read aloud and no QR carried a key, the
 device redeems through a PAKE instead: SPAKE2 (RFC 9382, suite
@@ -1024,7 +1025,7 @@ SPAKE2-P256-SHA256-HKDF-HMAC, the code as its password) in three
 `{"pake": ...}` steps of this path — `start`, `confirm`, `finish` —
 exchanging the device's and the yard's channel public keys under
 the key the run derives, the answer (the same token JSON, with the
-yard's `channel_key` beside it) sealed under that key. A confirmation
+yard's `channel_key` and a `voucher` beside it) sealed under that key. A confirmation
 that does not hold is 403 `wrong_code` and counted as any wrong code
 is; a step that is no run is 400 and no try; the device is recorded
 with its key pinned, as a sealed device is. The full pin — suite,
@@ -1047,6 +1048,92 @@ neither is mapped, the code redeems as without the header; the code is still
 required. The edge sets the header and a device does not; the yard reads it
 on this call and no other, and without it the code alone redeems
 ([users.md](users.md#enrolled-by-a-code)).
+
+### A registration voucher
+
+A voucher is the yard's short statement that this user's device is
+registering for push at this yard until an expiry. It is for the edge's push
+relay to check against the yard's public key, which the edge holds from when
+the yard enrolled ([edge.md](edge.md#connecting-a-yard)), in place of asking
+the yard about the device's token: a device that calls through its channel
+does not hand the edge that token. The yard gives one to a device that pinned
+a channel key, in the answer that paired it ([above](#a-token-for-a-code))
+and afresh whenever the device asks inside its channel. A device that pinned
+none is never given one.
+
+**Signed, not concealed.** A voucher states its user, its device, its yard
+and its expiry in the open. The statement stands in the voucher as plain
+text, base64url encoded and not encrypted, and the signature beside it
+authenticates those four fields and conceals none of them: whoever carries a
+voucher reads whose device is registering at which yard, and until when. The
+relay must read exactly that, to check the signature against the yard's key
+and to name the device its push rows stand for. A voucher holds nothing of
+the device's token or channel key, and it opens nothing at the yard: sent as
+the bearer to the listener it is 401.
+
+**The bytes.** One string, `yardr-voucher-<statement>.<signature>`, the
+statement and the signature each base64url without padding:
+
+- the statement is five lines joined by a newline, with none at the end: the
+  label `yardr push voucher v1`, the user, the device, the yard and the
+  expiry as a decimal count of Unix seconds. The user is the `user` of
+  [`/user/me`](#over-the-network), the device its `said_by` and the yard its
+  `yard`. A field is not empty and holds no line break, and a statement is
+  at most 1024 bytes;
+- the signature is the ed25519 signature, by the yard's identity key, of the
+  statement's bytes as they stand in the voucher.
+
+To check one, take what follows the prefix, split it at the dot, decode both
+halves strictly and verify the signature over the statement with the yard's
+public key before reading anything in it; then read the five lines, refuse
+any other count and any other label, and refuse the voucher at its expiry
+and after it. The yard in the statement is the yard's word for itself and no
+identity: a receiver binds a voucher to the yard whose key verified it, never
+to that name. For the key whose seed is the 32 bytes 1, 2, … 32, whose public
+half is `ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ`, the user `sam`, the
+device `phone`, the yard `south` and the expiry 1794082500
+(2026-11-07T20:15:00Z), the statement is
+
+```text
+yardr push voucher v1
+sam
+phone
+south
+1794082500
+```
+
+and the voucher is
+
+```text
+yardr-voucher-eWFyZHIgcHVzaCB2b3VjaGVyIHYxCnNhbQpwaG9uZQpzb3V0aAoxNzk0MDgyNTAw.dZsBs3v2aotlAKP5ZqYdlR4FVW9QIBKK5sjjgXnEWL_-QVfzz2F0F45LZZkCb_ia6lgJ_iISKfFYNbPP06UrDg
+```
+
+**How long it stands.** A voucher stands for ten minutes from when the yard
+signed it. A device asks for one each time it registers, so one need only
+outlast the way to that call. Removing a device recalls no voucher: it
+lapses by itself, and a receiver reads the expiry in the voucher and assumes
+no lifetime.
+
+**Asking for one.**
+
+```
+POST <url>/user/push/voucher
+```
+
+is a call a device makes inside its channel, sealed to the yard as every call
+of a device that holds one is (the envelope of [the end-to-end
+design](design/2026-11-05-yardr-device-e2e.md), section 3.2), and no other.
+A plain request, on the yard's own listener or down the link from the edge,
+is 403 whatever token it carries: the edge read every token a device sent
+before it held a channel, and a token must not mint a voucher. The call takes
+no arguments; the voucher is for the user and device the channel proved,
+whatever a body says. The answer is 200 `{"voucher": "yardr-voucher-…"}`
+with `Cache-Control: no-store`. A device that was removed is refused as any
+call on its session is, and one whose call was admitted before the removal
+committed may be given a voucher that call's worth, which lapses as above. A
+yard that cannot sign one, because it has no identity key it can read or a
+name that holds a line break, answers 500, and answers a pairing with the
+token and no voucher: the device asks again once the yard can.
 
 ### The stream of a device
 
@@ -6266,6 +6353,8 @@ Stable, for a client to build on:
 - the paths under `/user/` on the listener, the header, `/user/me` and its
   four fields, the 401 and the 404, as [Over the
   network](#over-the-network) says them;
+- a registration voucher's bytes and the path that issues one, as [A
+  registration voucher](#a-registration-voucher) says them;
 - the methods of [The calls](#the-calls) and of [For the operator
   alone](#for-the-operator-alone), the names of their arguments, and every
   field in their tables, with its name and type;

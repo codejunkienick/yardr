@@ -1221,7 +1221,9 @@ pairing's user alone, where the request names its presenter, exactly as
 a plain redemption — records the device with the public key the
 handshake proved pinned beside its token's hash, and answers the
 handshake's second message with the `{"token", "user", "device",
-"yard"}` of the table below as its payload, sealed to that device:
+"yard"}` of the table below, and the yard's registration voucher for
+the device beside them as `voucher` ([api.md](api.md#a-registration-voucher)),
+as its payload, sealed to that device:
 
 ```text
 200 {"sealed": "<base64url of the handshake's second message>"}
@@ -1312,8 +1314,9 @@ seals its channel public key (its 32 raw bytes; the HKDF's info is
 `yardr pake device key v1`), and the yard, which opens it only in a
 confirmed run, answers the `{"token", "user", "device", "yard"}` of
 the table below with the yard's own channel public key beside it as
-`channel_key`, sealed the same way (the info `yardr pake answer
-v1`), for the device to pin as a QR device pins the QR's key. The
+`channel_key` and its registration voucher as `voucher`, sealed the same
+way (the info `yardr pake answer v1`), for the device to pin as a QR
+device pins the QR's key. The
 finish of a confirmed run spends it whatever it carries, and one
 sent before its run is confirmed is 400 with the run still live;
 a sealed key that does not open is 400 and no try; the presenter
@@ -1334,7 +1337,7 @@ static key to exchange.
 
 | answer | what it says |
 |---|---|
-| 200 `{"token", "user", "device", "yard"}` | the device's token, the one time it is anywhere, and what [`/user/me`](api.md#over-the-network) then says of it: the user it calls as, its own name, the yard's name. The answer carries `Cache-Control: no-store`. Keep the token where the device keeps a secret |
+| 200 `{"token", "user", "device", "yard"}` | the device's token, the one time it is anywhere, and what [`/user/me`](api.md#over-the-network) then says of it: the user it calls as, its own name, the yard's name. The answer carries `Cache-Control: no-store`. Keep the token where the device keeps a secret. A device that redeemed sealed or through a PAKE has one field more, `voucher`: the yard's push registration voucher for it, a statement of its user, device, yard and expiry that is signed, not concealed ([api.md](api.md#a-registration-voucher)). A plain redemption's answer has none |
 | 403 `{"refused": "wrong_code"}` | not the code. It is counted, and the fifth ends the pairing |
 | 409 `{"refused": "not_added"}` | the code was right and is used, and the device could not be added. The operator opens another pairing |
 | 400 | no code at all: a body that is not `{"code": ...}`, or a code that is not eight of a code's characters. It is no try |

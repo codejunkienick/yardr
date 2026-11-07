@@ -279,6 +279,7 @@ func (u *UserServer) routes() *http.ServeMux {
 			Yardmaster string `json:"yardmaster"`
 		}{*c, u.yard(r.Context()), u.yardmaster(r.Context())})
 	})
+	mux.HandleFunc("POST /user/push/voucher", u.pushVoucher)
 	return mux
 }
 
@@ -581,6 +582,9 @@ func (u *UserServer) serveInner(w http.ResponseWriter, outer *http.Request, sess
 	}
 	caller := &Caller{User: session.user, SaidBy: session.device, device: true}
 	inner = inner.WithContext(context.WithValue(inner.Context(), callerKey{}, caller))
+	// What came sealed says so: the calls only a sealed caller may make
+	// (pushVoucher) ask for the session, which no plain call has.
+	inner = inner.WithContext(context.WithValue(inner.Context(), e2eSessionKey{}, session))
 	if isEventsCall(head) {
 		// The stream was opened by its channel, not by a token: its
 		// liveness check also confirms the channel session is still
@@ -595,6 +599,11 @@ func (u *UserServer) serveInner(w http.ResponseWriter, outer *http.Request, sess
 // e2eStillKey carries an enveloped stream's liveness check in its
 // request context, where events asks for it (streamStill, below).
 type e2eStillKey struct{}
+
+// e2eSessionKey carries the channel session an inner call came on in its
+// request context. Only serveInner sets it, never anything a client sends,
+// so a call that has it came sealed.
+type e2eSessionKey struct{}
 
 // streamStill is an events stream's liveness check: an enveloped
 // stream's own check where its context carries one, else the plain

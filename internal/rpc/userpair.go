@@ -46,11 +46,16 @@ const maxPair = 4 << 10
 
 // Paired is the answer to the code of a device's pairing: the token, which
 // is in no later answer, and what /user/me says of whoever carries it.
+// Voucher is the yard's push registration voucher for the device
+// (uservoucher.go), a statement of its user, device, yard and expiry that is
+// signed, not concealed. Only the answer to a device that pinned a channel
+// key holds one, so the plain answer is exactly what it was.
 type Paired struct {
-	Token  string `json:"token"`
-	User   string `json:"user"`
-	Device string `json:"device"`
-	Yard   string `json:"yard"`
+	Token   string `json:"token"`
+	User    string `json:"user"`
+	Device  string `json:"device"`
+	Yard    string `json:"yard"`
+	Voucher string `json:"voucher,omitempty"`
 }
 
 // PresenterHeader is the edge's word, on a redemption of a pairing's code
@@ -217,7 +222,7 @@ func (u *UserServer) answerSealed(w http.ResponseWriter, r *http.Request, opened
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-	answer, err := json.Marshal(Paired{Token: d.Token, User: d.User, Device: d.Name, Yard: u.yard(r.Context())})
+	answer, err := json.Marshal(u.pairedSealed(r.Context(), d))
 	var reply []byte
 	if err == nil {
 		reply, err = opened.SealAnswer(answer)
@@ -497,7 +502,7 @@ func (u *UserServer) pakeFinish(w http.ResponseWriter, r *http.Request, ask *pak
 	var answer []byte
 	if err == nil {
 		answer, err = json.Marshal(pakeAnswer{
-			Paired:     Paired{Token: d.Token, User: d.User, Device: d.Name, Yard: u.yard(r.Context())},
+			Paired:     u.pairedSealed(r.Context(), d),
 			ChannelKey: yardkey.ChannelPublic(channel),
 		})
 	}

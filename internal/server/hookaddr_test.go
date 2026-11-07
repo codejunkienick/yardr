@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net"
@@ -343,5 +344,58 @@ func TestUserDevicePairedOnTheListener(t *testing.T) {
 	devices, err := cl.Devices(ctx, "jo")
 	if err != nil || len(devices) != 1 || devices[0].Name != "phone" || devices[0].LastUsed == nil {
 		t.Fatalf("devices = %+v, %v", devices, err)
+	}
+	// The plain answer holds no voucher.
+	if got.Voucher != "" || strings.Contains(body, "voucher") {
+		t.Errorf("the plain answer holds a voucher: %s", body)
+	}
+
+	// The key files the server was wired with (serveHooks): a device that
+	// pairs sealed, by the channel key a QR carries, is answered with a
+	// voucher signed by the yard's identity, whose public half is what the
+	// edge holds, and it names the device that paired.
+	identity, _, err := yardkey.Ensure(c.PeerKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel, _, err := yardkey.EnsureChannel(c.ChannelKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened, err = cl.DevicePairOpen(ctx, "jo", "tablet", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, opening, err := yardkey.StartPairingHandshake(device, channel.Public, opened.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealedBody, _ := json.Marshal(map[string]string{"sealed": base64.RawURLEncoding.EncodeToString(first)})
+	code, body = post(rpc.PairPath, "", string(sealedBody))
+	var sealed struct {
+		Sealed string `json:"sealed"`
+	}
+	if err := json.Unmarshal([]byte(body), &sealed); code != http.StatusOK || err != nil {
+		t.Fatalf("the sealed code = %d %s (%v)", code, body, err)
+	}
+	reply, err := base64.RawURLEncoding.DecodeString(sealed.Sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := opening.OpenAnswer(reply)
+	if err != nil {
+		t.Fatalf("the device could not open its answer: %v", err)
+	}
+	var paired rpc.Paired
+	if err := json.Unmarshal(plain, &paired); err != nil || paired.Device != "tablet" || paired.Voucher == "" {
+		t.Fatalf("the sealed answer = %s (%v), want the tablet's token and a voucher", plain, err)
+	}
+	v, err := yardkey.VerifyVoucher(store.Public(identity), paired.Voucher, time.Now())
+	if err != nil || v.User != "jo" || v.Device != "tablet" || v.Yard != paired.Yard || v.Yard == "" {
+		t.Errorf("the voucher verifies as %+v (%v) against the yard's identity, want jo's tablet at %q", v, err, paired.Yard)
 	}
 }
