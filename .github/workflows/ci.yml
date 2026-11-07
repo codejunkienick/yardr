@@ -15,9 +15,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The test run is three jobs, each with a limit of its own: the depot's
+  # test command, and the two plain runs it leaves out. They were three steps
+  # of one job. The first alone took most of that job's 15 minutes, so the
+  # job was cut off, red with no test failing, before the others began or
+  # while they ran. Apart, a leg that is slow or red hides none of the
+  # others, and a run is as long as the longest leg, not the sum of the
+  # three. release.yml has the same three; keep the two in step.
+  #
+  # The depot's test command as the assembly runs it on what lands: go
+  # vet, go test -race over every package, and the store/dispatch/bdp
+  # suites again through the unix-socket client. It is the whole suite
+  # here because the checkout has no base to compare with. Running the
+  # script itself keeps CI and the landing from drifting apart. It takes 11
+  # to 14 minutes on a runner's four cores when it finishes. Its 30 minutes
+  # are about twice the longest of those, because a run that outgrows its
+  # limit is cut off, and a cut-off says nothing about the tests.
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # go-version-file pins the toolchain go.mod names; cache keeps the
@@ -34,17 +50,35 @@ jobs:
             echo "$out"
             exit 1
           fi
-      # The depot's test command as the assembly runs it on what lands: go
-      # vet, go test -race over every package, and the store/dispatch/bdp
-      # suites again through the unix-socket client. It is the whole suite
-      # here because the checkout has no base to compare with. Running the
-      # script itself keeps CI and the landing from drifting apart.
       - name: depot tests (.yardr/test, as for a landing)
         run: YARDR_LANDING=1 sh .yardr/test
-      # What that run leaves out: the plain (non-race) build, and every
-      # package, not just three, through the unix-socket client.
+
+  # What that run leaves out: the plain (non-race) build, and every package,
+  # not just three, through the unix-socket client. Each is a job of its own,
+  # so the rpc run no longer leans on results the plain run cached, and tests
+  # every package. Each takes a fraction of the depot's run, and its limit is
+  # lower for that.
+  test-plain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: go test
         run: go test ./...
+
+  test-rpc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: go test (rpc)
         run: YARDR_TEST_RPC=1 go test ./...
 
@@ -82,8 +116,8 @@ jobs:
       - name: BDP read conformance
         run: BDP_REPO=$GITHUB_WORKSPACE/bdp conformance/bdp/run.sh
 
-  # The scans, apart from the test job so release.yml's copy of that job
-  # stays in step with it: known vulnerabilities in what the module builds
+  # The scans, apart from the test jobs so release.yml's copy of those jobs
+  # stays in step with them: known vulnerabilities in what the module builds
   # with, what staticcheck finds in its Go, and the depot's shell.
   scan:
     runs-on: ubuntu-latest
@@ -114,16 +148,19 @@ jobs:
           command -v shellcheck >/dev/null || { sudo apt-get update && sudo apt-get install -y shellcheck; }
           grep -rlE '^#!(/bin/|/usr/bin/env )(sh|bash)' .yardr/test install.sh contrib | xargs shellcheck
 
-  # The darwin leg: the steps of the test job above, run on macOS, so that a
+  # The darwin leg: the steps of the test jobs above, run on macOS, so that a
   # break only a Mac shows (a darwin-only syscall as in peer_darwin.go, a temp
   # path too long for a unix socket) is on the pull request and not first on a
   # Mac in the yard. It ran go vet and internal/peer alone while a runner's
   # minutes were counted; the standard runners cost none on a public
   # repository, so it runs the lot. Keep the steps in step with the test
-  # job's, whose comments say what each is for. The timeout is twice that
-  # job's because macOS runners are slower, and because setup-go saves its
-  # cache only after a success: a run that times out leaves the next one as
-  # cold as itself, so the first green run is what says how long this takes.
+  # jobs', whose comments say what each is for. The three steps share one job
+  # here, as they did in the linux job before it was split. The timeout is
+  # twice the 15 minutes that job had then, because macOS runners are slower,
+  # and because setup-go saves its cache only after a success: a run that
+  # times out leaves the next one as cold as itself, so the first green run is
+  # what says how long this takes. If it ends at the limit, split the three as
+  # the linux job is.
   test-macos:
     runs-on: macos-latest
     timeout-minutes: 30

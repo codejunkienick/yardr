@@ -30,10 +30,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The same steps as ci.yml's test job; keep the two in step.
+  # The same three test jobs as ci.yml's, with the same limits; keep the two
+  # in step. The build waits for all three, so a draft means each passed.
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # go-version-file pins the toolchain go.mod names; cache keeps the
@@ -57,10 +58,32 @@ jobs:
       # script itself keeps CI and the landing from drifting apart.
       - name: depot tests (.yardr/test, as for a landing)
         run: YARDR_LANDING=1 sh .yardr/test
-      # What that run leaves out: the plain (non-race) build, and every
-      # package, not just three, through the unix-socket client.
+
+  # What that run leaves out: the plain (non-race) build, and every package,
+  # not just three, through the unix-socket client. The same steps as ci.yml's
+  # test-plain job; keep the two in step.
+  test-plain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: go test
         run: go test ./...
+
+  # The same steps as ci.yml's test-rpc job; keep the two in step.
+  test-rpc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: go test (rpc)
         run: YARDR_TEST_RPC=1 go test ./...
 
@@ -122,7 +145,7 @@ jobs:
           upload-release-assets: "false"
 
   build:
-    needs: [test, conformance]
+    needs: [test, test-plain, test-rpc, conformance]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

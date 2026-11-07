@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -819,6 +820,20 @@ func TestReleaseWorkflowAttestsOnlyItsLinuxBuildApartFromTheSBOM(t *testing.T) {
 	}
 	if !strings.Contains(build, "subject-path: dist/*.tar.gz") {
 		t.Error("attestation no longer covers the archives the linux build wrote")
+	}
+	// The tests are several jobs (the depot's run and the two plain runs), and
+	// a draft means they passed. The build waits for every job that tests, so
+	// a test job added or split off later cannot be left out of its needs.
+	var needs []string
+	for _, line := range strings.Split(build, "\n") {
+		if rest, ok := strings.CutPrefix(line, "    needs: ["); ok {
+			needs = strings.Split(strings.TrimSuffix(rest, "]"), ", ")
+		}
+	}
+	for name := range jobs {
+		if (name == "conformance" || strings.HasPrefix(name, "test")) && !slices.Contains(needs, name) {
+			t.Errorf("build job does not wait for the %s job (needs %q), so a draft no longer means it passed", name, needs)
+		}
 	}
 	if release, ok := jobs["release"]; !ok {
 		t.Fatal("release workflow has no release job")
