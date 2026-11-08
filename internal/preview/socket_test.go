@@ -116,7 +116,7 @@ func previewSocketCounts(y *yard, app string) (sockets, inflight int) {
 // A socket frame over the link is dialled to the app, a message
 // crosses both ways under the subprotocol the app chose, the socket
 // counts in flight, and the app is dialled with no edge credential
-// and the true Origin the edge checked.
+// and the loopback Origin of the dial's target.
 func TestSocketThroughSupervisorRelaysUnderChosenSubprotocol(t *testing.T) {
 	y := newYard(t)
 	y.run(t)
@@ -153,7 +153,7 @@ func TestSocketThroughSupervisorRelaysUnderChosenSubprotocol(t *testing.T) {
 			return false
 		}
 		log := string(raw)
-		return strings.Contains(log, `origin="https://p-demo.preview.example.net"`) &&
+		return strings.Contains(log, `origin="http://127.0.0.1:`+strconv.Itoa(port)+`"`) &&
 			strings.Contains(log, `edge-token=""`) && strings.Contains(log, `edge-jwt=""`) &&
 			strings.Contains(log, `cookie="app=one; theme=dark"`) && strings.Contains(log, `preview-app="demo"`)
 	})
@@ -332,8 +332,8 @@ func TestSocketForWatchRefused501(t *testing.T) {
 }
 
 // Where the app refuses the dial, its own status and body answer the
-// head, and the dial carried the checked Origin with no edge
-// credential to the app that refused it.
+// head, and the dial carried the loopback Origin of its target with
+// no edge credential to the app that refused it.
 func TestSocketAnsweredWithAppsRefusal(t *testing.T) {
 	y := newYard(t)
 	seen := make(chan http.Header, 1)
@@ -362,8 +362,8 @@ func TestSocketAnsweredWithAppsRefusal(t *testing.T) {
 	}
 	select {
 	case h := <-seen:
-		if h.Get("Origin") != "https://p-demo.preview.example.net" || h.Get("X-Edge-Token") != "" {
-			t.Errorf("the app was dialled with origin %q and an edge token %q, want the true Origin and none", h.Get("Origin"), h.Get("X-Edge-Token"))
+		if h.Get("Origin") != app.URL || h.Get("X-Edge-Token") != "" {
+			t.Errorf("the app was dialled with origin %q and an edge token %q, want the loopback Origin %q and none", h.Get("Origin"), h.Get("X-Edge-Token"), app.URL)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the app was never dialled")
@@ -371,6 +371,38 @@ func TestSocketAnsweredWithAppsRefusal(t *testing.T) {
 	// The counts are given back as serveSocket returns, which is after the
 	// head went out: the head can be here before they are.
 	waitFor(t, "the refused dial's counts given back", func() bool {
+		sockets, inflight := previewSocketCounts(y, "demo")
+		return sockets == 0 && inflight == 0
+	})
+}
+
+// An app that checks Origin the way the library does by default takes
+// the dial: the supervisor dials with the loopback Origin of its own
+// target, which matches the loopback Host the app sees, not the
+// browser's true Origin forwarded on the socket frame.
+func TestSocketDialAcceptedByDefaultOriginCheck(t *testing.T) {
+	y := newYard(t)
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		// Hold the hop open until the supervisor ends it.
+		_, _, _ = c.Read(context.Background())
+	}))
+	defer app.Close()
+	manualSocketPreview(t, y, app.URL)
+	l := socketLink(t, y)
+	header := http.Header{"Origin": {"https://p-demo.preview.example.net"}}
+	head := openPreviewSocket(t, l, "/preview/demo/ws", header, nil)
+	if head.Status != http.StatusSwitchingProtocols {
+		t.Fatalf("the head is %+v, want 101 from the app with the default origin check", head)
+	}
+	if err := l.SendSocketClose(context.Background(), head.ID, 1000, "done"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the socket's count given back", func() bool {
 		sockets, inflight := previewSocketCounts(y, "demo")
 		return sockets == 0 && inflight == 0
 	})

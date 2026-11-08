@@ -136,9 +136,14 @@ func (s *Supervisor) serveSocket(req *edgelink.SocketRequest, sock *edgelink.Soc
 	for _, name := range []string{"Connection", "Upgrade", "Sec-Websocket-Key", "Sec-Websocket-Version", "Sec-Websocket-Extensions", "Sec-Websocket-Protocol"} {
 		header.Del(name)
 	}
-	header.Set("X-Preview-App", app)
-
 	target := url.URL{Scheme: "ws", Host: net.JoinHostPort(host, strconv.Itoa(p.Port)), Path: "/" + rest, RawQuery: u.RawQuery}
+	header.Set("X-Preview-App", app)
+	// The dial carries the loopback Origin of its own target, not the
+	// browser's true Origin from the frame: the app sees a loopback
+	// Host, and a library that checks Origin against Host by default
+	// refuses any other Origin with 403. Host stays loopback, as a
+	// request's does, so Vite dev servers answer.
+	header.Set("Origin", "http://"+target.Host)
 	appConn, resp, err := websocket.Dial(ctx, target.String(), &websocket.DialOptions{
 		HTTPHeader: header, Subprotocols: append([]string(nil), req.Protocols...),
 		CompressionMode: websocket.CompressionDisabled})
