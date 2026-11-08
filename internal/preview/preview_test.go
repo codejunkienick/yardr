@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -36,14 +37,34 @@ func freePort(t *testing.T) int {
 	return freePortAt(t, "127.0.0.1")
 }
 
+// freePortAt picks its port from quietPortsCount ports from quietPortsFrom up,
+// which lie below the range in which the kernel gives out ports by itself (from
+// 32768 on Linux, from 49152 on macOS). The port is named for the preview but
+// held by no one until its app binds it, and a server that another process binds
+// on port 0 in that time, as the other packages' tests do while this one runs, is
+// handed any port of that range that nothing holds. The preview's wait for its
+// app would take that server for the app, and it would answer the preview's
+// requests in the app's place.
+const quietPortsFrom, quietPortsCount = 20000, 10000
+
+// freePortAt picks a port that nothing holds on host, and frees it for the
+// preview.
 func freePortAt(t *testing.T, host string) int {
 	t.Helper()
-	ln, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
-	if err != nil {
-		t.Fatal(err)
+	for range 100 {
+		port := quietPortsFrom + rand.IntN(quietPortsCount)
+		ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+		if errors.Is(err, syscall.EADDRINUSE) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		ln.Close()
+		return port
 	}
-	defer ln.Close()
-	return ln.Addr().(*net.TCPAddr).Port
+	t.Fatalf("no port from %d up to %d is free on %s", quietPortsFrom, quietPortsFrom+quietPortsCount, host)
+	return 0
 }
 
 // interfaceHost is an IPv4 address of one of the machine's interfaces that is
@@ -114,7 +135,10 @@ func newYard(t *testing.T) *yard {
 	return y
 }
 
-// cards is what the registry shows of each preview and what it logged last.
+// cards is what the registry shows of each preview and what it logged last, and
+// whether something answers on its port that the supervisor holds no process
+// for: that is another process's server, or an app on its way out, and the
+// preview's wait for its app takes whatever answers there for the app.
 func (y *yard) cards() string {
 	all, err := y.st.Previews(context.Background())
 	if err != nil {
@@ -126,6 +150,9 @@ func (y *yard) cards() string {
 	var b strings.Builder
 	for _, p := range all {
 		fmt.Fprintf(&b, "preview %s: %s %q, %d restarts\n", p.App, p.State, p.StateDetail, p.RestartCount)
+		if host := loopbackHost(p.Port); host != "" && !y.sup.Running(p.App) {
+			fmt.Fprintf(&b, "    port %d answers on %s, and the supervisor holds no process for the preview\n", p.Port, host)
+		}
 		lines, _ := LogTail(y.sup.logPath(p.App), 20)
 		for _, l := range lines {
 			fmt.Fprintf(&b, "    %s\n", l)
@@ -244,6 +271,43 @@ func (g *flipGate) UpdatePreview(ctx context.Context, app string, upd store.Prev
 	return g.Store.UpdatePreview(ctx, app, upd)
 }
 
+// A port a test names for a preview is picked from below the range in which the
+// kernel gives out ports by itself, which starts at 32768 on Linux and higher on
+// macOS, so that no server another process binds on port 0 is handed it before
+// the preview's app binds it.
+func TestFreePortIsPickedBelowTheKernelsOwnRange(t *testing.T) {
+	const dynamicFrom = 32768
+	if quietPortsFrom+quietPortsCount > dynamicFrom {
+		t.Fatalf("the ports freePort picks from reach %d, into the range from %d that the kernel gives out by itself", quietPortsFrom+quietPortsCount-1, dynamicFrom)
+	}
+	for range 20 {
+		if port := freePort(t); port < quietPortsFrom || port >= quietPortsFrom+quietPortsCount {
+			t.Fatalf("freePort = %d, want one from %d up to %d", port, quietPortsFrom, quietPortsFrom+quietPortsCount)
+		}
+	}
+}
+
+// A failing test's card says when something answers on a preview's port that the
+// supervisor holds no process for, which is what a request taken for the app's
+// by that answer looks like from the test's side.
+func TestCardSaysWhenSomethingElseAnswersOnAPreviewsPort(t *testing.T) {
+	y := newYard(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	y.propose(t, "demo", "true", port, false)
+	if card, want := y.cards(), fmt.Sprintf("port %d answers on 127.0.0.1", port); !strings.Contains(card, want) {
+		t.Fatalf("with a server on the preview's port the card says %q, want it to say %q", card, want)
+	}
+	ln.Close()
+	if card := y.cards(); strings.Contains(card, "answers") {
+		t.Fatalf("with nothing on the preview's port the card says %q, want no answer on it", card)
+	}
+}
+
 func TestApprovedPreviewStartsAndAnswersThroughEndpoint(t *testing.T) {
 	y := newYard(t)
 	y.run(t)
@@ -345,8 +409,8 @@ func TestApprovedPreviewStartsAndAnswersThroughEndpoint(t *testing.T) {
 		if err != nil {
 			t.Skipf("IPv6 loopback is unavailable: %v", err)
 		}
-		port6 := probe.Addr().(*net.TCPAddr).Port
 		probe.Close()
+		port6 := freePortAt(t, "::1")
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("hello ipv6"), 0o600); err != nil {
 			t.Fatal(err)
@@ -980,19 +1044,36 @@ func TestOnDemandStartThroughEndpoint(t *testing.T) {
 	// old. The bound counts from the later of the start and the last request, so a
 	// pass that comes while the request waits for the app to bind leaves the app
 	// alone. Counted from the last request alone, that pass stopped the app the
-	// request had just started, and the person was told it was starting. The app
-	// binds half a second after it starts, so that the passes the test makes come
-	// while the request still waits, however fast the machine is.
+	// request had just started, and the person was told it was starting. The
+	// supervisor's look at the port finds nothing until the test lets it, so that
+	// the passes the test makes come while the request still waits, however fast
+	// the machine is. The app is the plain one and binds as soon as it starts: an
+	// app that bound later would leave its port named for it and held by no one
+	// all that time, and a server that another process started on the port then
+	// would be taken for the app and answer the request in its place.
 	t.Run("an app a request starts is not stopped as idle for a last request older than the bound", func(t *testing.T) {
 		ctx := context.Background()
 		y := newYard(t) // no Run: the request alone starts it, and the passes are the test's
 		t.Cleanup(func() { y.sup.kill("demo") })
+		open, probed := make(chan struct{}), make(chan struct{}, 1)
+		y.sup.portProbe = func(port int) string {
+			select {
+			case <-open:
+				return loopbackHost(port)
+			default:
+			}
+			select {
+			case probed <- struct{}{}:
+			default:
+			}
+			return ""
+		}
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("hello"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		port := freePort(t)
-		y.proposeIn(t, "demo", "sleep 0.5; exec "+previewtest.App("127.0.0.1", port), dir, port, true)
+		y.proposeIn(t, "demo", previewtest.App("127.0.0.1", port), dir, port, true)
 		// The row as the idle stop of the last visit leaves it.
 		old, idle := time.Now().Add(-5*time.Hour), "idle"
 		if _, err := y.st.UpdatePreview(ctx, "demo", store.PreviewUpdate{State: store.PreviewStopped, StateDetail: &idle, LastRequest: &old}); err != nil {
@@ -1000,6 +1081,10 @@ func TestOnDemandStartThroughEndpoint(t *testing.T) {
 		}
 		srv := httptest.NewServer(y.sup.Handler())
 		defer srv.Close()
+		// The request is let go before the server waits for it, whichever way the
+		// test ends.
+		let := sync.OnceFunc(func() { close(open) })
+		defer let()
 		type answer struct {
 			code int
 			body string
@@ -1015,12 +1100,15 @@ func TestOnDemandStartThroughEndpoint(t *testing.T) {
 			raw, _ := io.ReadAll(resp.Body)
 			answered <- answer{resp.StatusCode, string(raw)}
 		}()
-		y.waitStart(t, "the request's start to be recorded", func() bool {
-			return y.heldPID("demo") != 0 && y.state("demo").State == store.PreviewRunning
-		})
+		select {
+		case <-probed:
+		case <-time.After(y.startWait()):
+			t.Fatal("the request did not come to wait for the app's port")
+		}
 		for range 3 {
 			y.sup.reconcile(ctx, false)
 		}
+		let()
 		select {
 		case a := <-answered:
 			if a.code != http.StatusOK || a.body != "hello" {
