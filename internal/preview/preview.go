@@ -688,6 +688,7 @@ func nonLoopbackBind(port int) string {
 	if err != nil {
 		return ""
 	}
+	var targets []string
 	for _, iface := range ifaces {
 		if iface.Flags&net.FlagUp == 0 {
 			continue
@@ -711,11 +712,36 @@ func nonLoopbackBind(port int) string {
 			if ip.To4() == nil && ip.IsLinkLocalUnicast() {
 				host += "%" + iface.Name
 			}
-			target := net.JoinHostPort(host, strconv.Itoa(port))
-			if c, err := net.DialTimeout("tcp", target, 50*time.Millisecond); err == nil {
-				c.Close()
-				return target
-			}
+			targets = append(targets, net.JoinHostPort(host, strconv.Itoa(port)))
+		}
+	}
+	return firstAnswering(targets, func(target string) bool {
+		c, err := net.DialTimeout("tcp", target, 50*time.Millisecond)
+		if err != nil {
+			return false
+		}
+		c.Close()
+		return true
+	})
+}
+
+// firstAnswering dials every target at once and returns the first of them, in
+// the order given, that answers, or "" where none does. An address that does not
+// answer may not refuse either and then costs the whole dial timeout, and a
+// machine has many addresses: dialled in turn, those timeouts would add up to a
+// wait in every start. The first in order is returned, not the first to answer,
+// so that the same listeners give the same address on every call: the refusal
+// records it.
+func firstAnswering(targets []string, answers func(target string) bool) string {
+	answered := make([]bool, len(targets))
+	var dials sync.WaitGroup
+	for i, target := range targets {
+		dials.Go(func() { answered[i] = answers(target) })
+	}
+	dials.Wait()
+	for i, target := range targets {
+		if answered[i] {
+			return target
 		}
 	}
 	return ""

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -595,6 +596,51 @@ func TestNonLoopbackBindIsRefused(t *testing.T) {
 			return y.state("late-wide").State == store.PreviewRefused
 		})
 	})
+}
+
+// The scan of the interface addresses dials them all at once and answers with the
+// first of them, in the order given, that answers. Dialled in turn, the addresses
+// that do not answer cost their timeouts one after another; and the first to
+// answer of dials made at once would be another address from call to call, in the
+// detail of the refusal that records it. The dials here are held and let go by
+// channels, so no clock decides either: each waits until all of them are in
+// flight, then for the one after it to have answered, which makes the last answer
+// first and the first last. A scan that dials in turn never gets past its first
+// dial and meets the fuse; one that returns the first to answer returns the last.
+func TestFirstAnsweringDialsAtOnce(t *testing.T) {
+	targets := []string{"a", "b", "c", "d"}
+	// The fuse only turns a hang into a failure.
+	fuse, stop := context.WithTimeout(context.Background(), 15*time.Second)
+	defer stop()
+	// until is true where c is closed, false where the fuse runs out first.
+	until := func(c <-chan struct{}) bool {
+		select {
+		case <-c:
+			return true
+		case <-fuse.Done():
+			return false
+		}
+	}
+	var started atomic.Int32
+	allStarted := make(chan struct{})
+	answered := make([]chan struct{}, len(targets))
+	for i := range answered {
+		answered[i] = make(chan struct{})
+	}
+	got := firstAnswering(targets, func(target string) bool {
+		i := slices.Index(targets, target)
+		if started.Add(1) == int32(len(targets)) {
+			close(allStarted)
+		}
+		if !until(allStarted) || (i+1 < len(targets) && !until(answered[i+1])) {
+			return false
+		}
+		close(answered[i])
+		return true
+	})
+	if got != targets[0] {
+		t.Fatalf("firstAnswering = %q, want %q: it dials all at once (dialled in turn, the first waits out the fuse) and returns the first in order, not the first to answer, which is %q", got, targets[0], targets[len(targets)-1])
+	}
 }
 
 func TestCrashLoopEndsCrashed(t *testing.T) {
