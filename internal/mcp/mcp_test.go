@@ -272,6 +272,11 @@ func TestWhatIsHappening(t *testing.T) {
 	y.bead(t, store.NewBead{Title: "Parked decision", Depot: "yardr", Stage: "decide", Labels: []string{"parked"}, For: "ada"})
 	y.bead(t, store.NewBead{Title: "Pick the colours", Depot: "yardr", Stage: "decide", For: "ada"})
 	y.bead(t, store.NewBead{Title: "Tidy the footer", Depot: "yardr", Stage: "siding", For: "ada"})
+	// Two more stages belong to people: ready, where small work folded into
+	// one waits to be sent to build, and triage, where a report or a change
+	// from outside waits to be accepted.
+	y.bead(t, store.NewBead{Title: "Three small fixes, folded", Depot: "yardr", Stage: "ready", For: "ada"})
+	y.bead(t, store.NewBead{Title: "A stranger's report", Depot: "yardr", Stage: "triage", For: "ada"})
 	y.bead(t, store.NewBead{Title: "Plan the stall", Depot: "shop", Stage: "backlog", For: "ada"})
 	y.bead(t, store.NewBead{Title: "A thought with no project", Stage: "backlog", For: "ada"})
 	res, err := s.WhatIsHappening(y.ctx, "", "")
@@ -309,6 +314,8 @@ func TestWhatIsHappening(t *testing.T) {
 		{"Parked decision", "parked", "yardr", "last touched <when>"},
 		{"Pick the colours", "waiting", "yardr", "it is waiting for a person to decide"},
 		{"Tidy the footer", "waiting", "yardr", "it is waiting to be combined with other small work"},
+		{"Three small fixes, folded", "waiting", "yardr", "it is waiting for a person to send it to build"},
+		{"A stranger's report", "waiting", "yardr", "it is waiting for a person to accept it"},
 		{"Plan the stall", "not started", "shop", "last touched <when>"},
 		{"A thought with no project", "not started", "", "last touched <when>"},
 		{"Write the report", "under way", "yardr", "last touched <when>"},
@@ -369,6 +376,31 @@ func TestWhatIsHappening(t *testing.T) {
 	plain(t, res.Text)
 	if !strings.Contains(res.Text, "the figures arrived") || res.Structured["work"] != mine {
 		t.Fatalf("the one piece:\n%s\n%+v", res.Text, res.Structured)
+	}
+	// Asked for by name, each piece is told in the state the account tells
+	// it in, in the account's sentence ("It is <state> (<detail>)"), and its
+	// structured part carries the same work, title, state, project and
+	// detail as the account's item: a piece not started, parked, waiting or
+	// stuck is not "under way" for being asked about alone.
+	for _, c := range cases {
+		id, _ := byTitle[c.title]["work"].(string)
+		res, err := s.WhatIsHappening(y.ctx, id, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		plain(t, res.Text)
+		var project any // absent, not empty, for a piece with no project
+		if c.project != "" {
+			project = c.project
+		}
+		detail, _ := res.Structured["detail"].(string)
+		if res.Structured["work"] != id || res.Structured["title"] != c.title || res.Structured["state"] != c.state ||
+			res.Structured["project"] != project || whenWords.ReplaceAllString(detail, "<when>") != c.detail {
+			t.Errorf("%q asked for alone = %+v, want state %q, project %q, detail %q", c.title, res.Structured, c.state, c.project, c.detail)
+		}
+		if want := fmt.Sprintf("%s\nIt is %s (%s).", c.title, c.state, detail); !strings.HasPrefix(res.Text, want) {
+			t.Errorf("%q asked for alone is\n%s\nwant it to start\n%s", c.title, res.Text, want)
+		}
 	}
 	// A question waiting for the person on finished work is said
 	// beside its standing, in the account and in the one piece.

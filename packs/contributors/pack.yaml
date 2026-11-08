@@ -62,11 +62,12 @@ flows:
       # new stay, at the new head (the says table has the line). So is
       # unaccepted: new commits on a pull request a maintainer accepted are a
       # head nobody accepted, and the bead goes back to triage, from here and
-      # from ciwait and contributor, to be looked at again before the new head
-      # is read or run. outdated is the source's word too: a person pushed to a
-      # pull request no maintainer accepted while it was read, and the bead waits
-      # for its contributor, as it did before the reviewer's changes went through
-      # the posting (a bead that has stored no review has nothing to post).
+      # from review-post, ciwait and contributor, to be looked at again before
+      # the new head is read or run. outdated is the source's word too: a
+      # person pushed to a pull request no maintainer accepted while it was
+      # read, and the bead waits for its contributor, as it did before the
+      # reviewer's changes went through the posting (a bead that has stored no
+      # review has nothing to post).
       review:      { group: pr-reviewers, file: flows/pr/review.md,   outcomes: { done: review-post, changes: review-post, question: decide, pushed: review, unaccepted: triage, outdated: contributor, merged: merged, dropped: closed } }
       # The reviewer holds no key, so its review is data: it stores the review
       # on the bead with the head it read, and a script of the yard, post-review,
@@ -76,10 +77,15 @@ flows:
       # maintainer's and nothing posts again when the contributor acts. A question
       # is not posted. A review that cannot be posted as stored (a field wrong,
       # a head that moved since) goes back to the reviewer once, then to a person.
-      # The script runs as the bead arrives and is done in moments, so the lines
-      # for a push name no stage of it: the script's own check of the head fails
-      # a push that came meanwhile back to review.
-      review-post: { group: post,         file: flows/pr/review-post.md, outcomes: { done: ciwait, changes: contributor, failed: { to: review, max: 1, then: decide }, merged: merged, dropped: closed } }
+      # The script runs as the bead arrives and is done in moments, but a push
+      # that comes meanwhile is the source's word as it is under review: new
+      # commits on a pull request a maintainer accepted (unaccepted) take the
+      # bead back to triage, and a bot's rebase (pushed) back to review, so that
+      # a head nobody accepted is not read before a person has said yes to it. A
+      # person's push to a pull request no maintainer accepted has no line here:
+      # the script's own check of the head fails the review of the old head back
+      # to review, where the new head is read.
+      review-post: { group: post,         file: flows/pr/review-post.md, outcomes: { done: ciwait, changes: contributor, failed: { to: review, max: 1, then: decide }, pushed: review, unaccepted: triage, merged: merged, dropped: closed } }
       # The yard's own CI: the depot's test command, run on the head the
       # reviewer read, by pr-ci, which says done or changes. Not the end of
       # review because the reviewer runs nothing, and the code runs only once
@@ -207,16 +213,17 @@ sources:
       # label; the dispatcher also uses the bead's triage history when the
       # label was removed. This line comes before the trusted authors' and
       # bots' lines: the first line an event matches counts.
-      - { where: "event=pull_request action=synchronize label=accepted stage=review stage=ciwait stage=contributor type=pr", outcome: unaccepted, note: "new commits since a maintainer accepted the PR" }
+      - { where: "event=pull_request action=synchronize label=accepted stage=review stage=review-post stage=ciwait stage=contributor type=pr", outcome: unaccepted, note: "new commits since a maintainer accepted the PR" }
       - { where: "event=pull_request action=synchronize stage=contributor type=pr", outcome: pushed, note: "new commits on the PR" }
-      # A bot's push while the pull request is read or waits on CI starts the
-      # read again at its new head. A bot's rebase is the only push it makes,
+      # A bot's push while the pull request is read, its review is posted or it
+      # waits on CI starts the read again at its new head. A bot's rebase is the
+      # only push it makes,
       # so a bead sent to contributor would wait there for one that never
       # comes. sender is a kind, as in makes, so this is every bot; a
       # person's push is the general lines below, and the first line an event
       # matches counts, so this one comes before them. A pull request a
       # maintainer accepted never gets here: its push is the line above.
-      - { where: "event=pull_request action=synchronize sender=bot stage=review stage=ciwait type=pr", outcome: pushed, note: "a bot pushed to the PR" }
+      - { where: "event=pull_request action=synchronize sender=bot stage=review stage=review-post stage=ciwait type=pr", outcome: pushed, note: "a bot pushed to the PR" }
       - { where: "event=pull_request action=synchronize stage=review type=pr", outcome: outdated, note: "the PR changed under review" }
       # CI is the yard's own, run by pr-ci, which reports through the yard's
       # socket and not through a line of this table: no event of GitHub's CI

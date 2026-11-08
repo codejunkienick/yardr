@@ -361,6 +361,12 @@ func (d *Dispatcher) hookOriginator(ctx context.Context, ev ruleEvent, line *sto
 // madeBead is the bead line makes of ev in depot: the thread's title, the
 // event's text and where to read it, a tracks link to the thread, and the
 // event marked seen on it, so that it says nothing to the bead it made.
+//
+// It is filed at the priority any bead is made at where none is asked for
+// (yardr bead create's), set here because the zero value is P0, which a
+// depot's P0 reserve route takes ahead of any label and any load condition:
+// every delivery of a hook would jump the line. A line has no priority of
+// its own to say.
 func madeBead(ev ruleEvent, line *store.Make, depot string) store.NewBead {
 	str := func(v any) string { s, _ := v.(string); return s }
 	thread, _ := ev.data["thread"].(map[string]any)
@@ -371,6 +377,7 @@ func madeBead(ev ruleEvent, line *store.Make, depot string) store.NewBead {
 	return store.NewBead{
 		Title: cmp.Or(str(thread["title"]), ev.threadURL), Body: body,
 		Type: line.Type, Stage: line.Stage, Depot: depot,
+		Priority:  store.DefaultPriority,
 		Metadata:  map[string]any{metaHookSeq: ev.seq},
 		Links:     []store.NewLink{{Kind: store.LinkTracks, Source: ev.source, URL: ev.threadURL, Thread: str(thread["id"])}},
 		Untracked: true,
@@ -382,7 +389,8 @@ func madeBead(ev ruleEvent, line *store.Make, depot string) store.NewBead {
 // carried fields ride as hook.<key> metadata, which the bead's scripts
 // read, and are listed in the body beside the text and the delivery id;
 // the title is the text's first line. Fields ride as data only: nothing on
-// this path runs them.
+// this path runs them. It is filed at madeBead's priority, for the same
+// reason.
 func madeStandaloneBead(ev ruleEvent, line *store.Make, depot string) store.NewBead {
 	str := func(v any) string { s, _ := v.(string); return s }
 	first := func(v any) string {
@@ -427,6 +435,7 @@ func madeStandaloneBead(ev ruleEvent, line *store.Make, depot string) store.NewB
 	return store.NewBead{
 		Title: title, Body: body,
 		Type: line.Type, Stage: line.Stage, Depot: depot,
+		Priority: store.DefaultPriority,
 		Metadata: meta,
 	}
 }

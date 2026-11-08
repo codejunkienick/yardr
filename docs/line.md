@@ -518,11 +518,35 @@ exits.
    where the flow offers one (to `merge`, section 5), else the `merge`
    stage where the flow allows it, else `failed` back to `new`, as in
    depot yardr, whose flow has no `merge`. Only what the flow allows is
-   tried, so no refused move is raised. Where the group's `cmd` sets
-   `YARDR_LAND=squash`, the branch is then made one commit, written from the
-   bead ([below](#landing-by-squash)); `rebase` is the default, and lands the
-   branch's commits as they are;
-2. keeps the machine's disk (`yardr disk keep`), then runs the depot's
+   tried, so no refused move is raised;
+2. lowers the file size table of the depot's test command to the branch's
+   files, where that command is one file of the branch that carries such a
+   table (a line `filesizes='`; depot yardr's `.yardr/test` is one). It runs
+   `sh <that file> sizes --rewrite` in the worktree, from the branch's own
+   copy, since the branch's own table is what it rewrites; what judges the
+   branch (step 3) stays the base's copy. Each row becomes the smaller of
+   itself and its file's lines, a row whose file is gone or has at most 1000
+   lines is deleted, and the change is amended into the branch's head, so a
+   change that shrinks a listed file never edits its row and two that shrink
+   neighbouring files cannot conflict on those lines
+   ([testing.md](testing.md#file-size-budget)).
+   A table already right is left alone, and the step is skipped for a wagon
+   landing on its train's branch, since integrate-train lowers the rows once
+   for the train ([below](#the-trains-own-flow)), and for a branch with no
+   commit past the base, which has no head of its own to amend. The rewrite
+   is bounded by `YARDR_REWRITE_TIMEOUT` (120 seconds unless set; if set, it
+   must be a whole number of seconds, or the bead is held before the rewrite
+   runs), with no race lock to credit, since it waits on none: at the deadline
+   the run's whole process tree is killed. The bead is held when the rewrite
+   outlasts its deadline, or fails, which says a row stands below its file
+   (growth, or a row cut by hand, which no landing settles), with the last
+   4000 bytes of what it printed in the note, and when it leaves anything but
+   the table changed, stages a change, or moves the branch, the base or the
+   worktree.
+   Where the group's `cmd` sets `YARDR_LAND=squash`, the branch is then made
+   one commit, written from the bead ([below](#landing-by-squash)); `rebase`
+   is the default, and lands the branch's commits as they are;
+3. keeps the machine's disk (`yardr disk keep`), then runs the depot's
    test command on exactly what will land, every time,
    including after a merger's rebase, with `YARDR_LANDING=1`, and records
    the commit it ran on. Under `disk_keep_gb` free the keeping rotates
@@ -545,7 +569,9 @@ exits.
    more on the same commit, after a note with the first run's output, and
    what the second run says counts; ended by a signal again, the bead is
    held with both outputs. The script's own kill at its deadline
-   (`YARDR_TEST_TIMEOUT`, 1800 seconds) is not that: it is a red run. The
+   (`YARDR_TEST_TIMEOUT`, 1800 seconds besides what it waited for the race
+   lock) is not that: it is a red run. The rewrite of step 2 has a deadline of
+   its own, `YARDR_REWRITE_TIMEOUT`, and past it the bead is held. The
    tests start with no descriptor above 2 that the landing did not give them:
    merge-local closes what it inherited, and where its `sh` cannot name one
    above 9 (dash reads one digit as a redirection's number) it says which are
@@ -554,18 +580,18 @@ exits.
    leak to find. A branch that moved while the tests ran (a commit pushed to
    it meanwhile) reports `failed` the same way, with both commits in the
    note: nothing the tests did not see lands;
-3. lands that commit, by its sha, by fast-forward only. Where the base is
+4. lands that commit, by its sha, by fast-forward only. Where the base is
    checked out it fast-forwards that checkout, only when it is clean; a
    dirty one is someone's work in progress, so the bead is held with a note
    saying so and the tree is never touched. Where the base is checked out
    nowhere it moves the ref alone (`git fetch . <sha>:<base>`), which works
    whatever state the depot's checkout is in: keep the base checked out
    nowhere and a dirty checkout never blocks the queue;
-4. pushes the base if `YARDR_PUSH` names a remote (off by default, never
+5. pushes the base if `YARDR_PUSH` names a remote (off by default, never
    forced). A failed push leaves the bead merged; the next landing's push
    carries it, and `YARDR_NOTIFY` (default the yard's `yardmaster` setting, else
    `yardmaster`) is mailed;
-5. installs the landed build if the yard's `upgrade_from` setting names the
+6. installs the landed build if the yard's `upgrade_from` setting names the
    bead's depot: it runs the installed yardr's `upgrade` and folds its
    one-line summary into the landing note, with the scripts the install
    refreshed by name, and its seconds into the log line.
@@ -578,7 +604,7 @@ exits.
    builds the depot's checkout. The step activates only once the operator
    has installed the script and sets `upgrade_from`
    ([upgrade.md](upgrade.md#the-assembly-step));
-6. advances to the terminal stage `merged` with the note `merged <sha>`,
+7. advances to the terminal stage `merged` with the note `merged <sha>`,
    the net lines the landing added (`+<n> code, +<m> test`), what tested
    it, the seconds the tests took, and how the install went where it ran,
    which closes the bead; in a flow without `merged` it closes
@@ -600,11 +626,11 @@ moves. The starter pack makes its assembly group with the option set
 lands by squash; a group that exists is never changed by the pack, and opts in
 with `yardr group set <group> 'cmd=YARDR_LAND=squash <the rest of the cmd>'`.
 In squash mode merge-local replaces the branch's commits with one,
-between the rebase (step 1) and the tests (step 2), so that the commit the
-tests run on is the commit that is fast-forwarded onto the base (steps 2 and
-3 as above). The commit is made with `git commit-tree`, so the yard's
-commit-msg hook, which would put its own trailers on it, never runs; the
-script writes them. It is a
+between the lowering of the file size table (step 2) and the tests (step 3),
+so that the lowered table is in it and the commit the tests run on is the
+commit that is fast-forwarded onto the base (steps 3 and 4 as above). The
+commit is made with `git commit-tree`, so the yard's commit-msg hook, which
+would put its own trailers on it, never runs; the script writes them. It is a
 [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/) written
 from the bead, with the bead's id as a trailing reference, as GitHub's
 `(#123)`, and not as the scope:
@@ -693,7 +719,7 @@ merged terminal
 ```
 
 **A PR-based variant** is the same group and route with another script. In
-place of steps 3 to 6, it pushes the branch and opens (or updates) a PR, and
+place of steps 4 to 7, it pushes the branch and opens (or updates) a PR, and
 parks the bead until the PR is merged:
 
 ```sh
@@ -1222,10 +1248,11 @@ yardr dep add <train> <wagon> -k parent
   moved (`dep rm -k parent`), or that no flow governs, is not started by any
   agent or script: the dispatcher logs `wagon_without_train` once, and only a
   manual group still gets it. It can be taken back to `backlog`.
-- **The train pays.** integrate-train rebases the train's branch and runs the
-  test command on it with `YARDR_LANDING=1` as for any train, and a red run
-  adds a fix child. The train's reviewer is told that wagons were not
-  reviewed, nor tested as a landing is, one by
+- **The train pays.** integrate-train rebases the train's branch, lowers its
+  file size table (a wagon's landing on the train's branch leaves the rows to
+  it), and runs the test command on it with `YARDR_LANDING=1` as for any
+  train, and a red run adds a fix child. The train's reviewer is told that
+  wagons were not reviewed, nor tested as a landing is, one by
   one ([`.yardr/flows/yardr.train/review.md`](../.yardr/flows/yardr.train/review.md)),
   and reviews each; the security review reads each again. So keep a train to
   about five wagons, which one review can hold, and leave single fixes on the
@@ -1246,7 +1273,12 @@ path with that setup:
    `open` sends it to `yardr-integrators`, an exec group running
    [`contrib/assembly/integrate-train`](../contrib/assembly/integrate-train).
    The integrator fetches the base when it is a remote's, rebases
-   `yard/<train>` onto the depot's base in the train's worktree, runs the
+   `yard/<train>` onto the depot's base in the train's worktree, lowers the
+   file size table of a test command that carries one to the train's files
+   (merge-local's step 2, once for the train: a commit of its own on the
+   branch, `assembly: lower filesizes rows to actual`, since the head is a
+   child's landed commit; held on the same grounds, and past the same
+   `YARDR_REWRITE_TIMEOUT`, 120 seconds unless set), runs the
    depot's test command on it with `YARDR_LANDING=1` (a script named by its
    path is the copy main has) and `YARDR_TEST_BEADS` (the train's children:
    the command's `YARDR_BEAD` is the train),
@@ -1805,10 +1837,15 @@ argument, note or log. What a pull request from outside changes:
   that is not open, no App inputs, a mint that fails, any other answer from GitHub.
 
 A question for a person is never posted: it goes to `decide`. A push to the pull
-request while the script runs is no event of this stage: the script's check of
-the head sends a review of a head the pull request no longer has back to `review`.
-A merge or a close of the pull request ends the bead from `review-post`, as from
-every stage a bead waits in, and the run is stopped.
+request while the script runs is the source's word, by the pack's lines, as it
+is under review: new commits on a pull request a maintainer accepted take the
+bead back to `triage` (`unaccepted`), and a bot's send it back to `review`
+(`pushed`), so that a head nobody accepted is not read before a person has said
+yes to it, and the run is stopped with the move. A person's push to a pull
+request no maintainer accepted is no event of this stage: the script's check of
+the head sends a review of a head the pull request no longer has back to
+`review`. A merge or a close of the pull request ends the bead from
+`review-post`, as from every stage a bead waits in, and the run is stopped.
 
 ### Setup
 
@@ -1918,11 +1955,11 @@ bead before any report, by the pack's lines for the source: a person's push is
 read at the new head. On a pull request that waited in `triage`, every push
 is `unaccepted` instead, whoever pushed and whether or not the label
 `accepted` is still on it: the bead goes back to `triage` from `review`,
-`ciwait` and `contributor`, and nothing of the new head is read or run until
-a person has said yes to it. After looking at the new head, a maintainer adds
-the label `accepted` again; if it is still there, take it off and put it on
-again. A label put by a bot does not say yes. The run is stopped with its
-session, and a report of it that still comes is refused.
+`review-post`, `ciwait` and `contributor`, and nothing of the new head is read
+or run until a person has said yes to it. After looking at the new head, a
+maintainer adds the label `accepted` again; if it is still there, take it off
+and put it on again. A label put by a bot does not say yes. The run is stopped
+with its session, and a report of it that still comes is refused.
 The script's own reads of the head, against `accepted_head` and
 `reviewed_head` when it starts and against the commit it tested at the end of
 the run, are for a push whose event has not come yet or never will.

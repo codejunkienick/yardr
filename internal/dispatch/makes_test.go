@@ -123,6 +123,13 @@ func TestEventMakesTheBeadThatTracksItsThread(t *testing.T) {
 	if b.Type != "issue" || b.Stage != "triage" || b.Depot == nil || *b.Depot != "yard" || b.Status != "open" {
 		t.Fatalf("made %s: type %s, stage %s, depot %v, %s", b.ID, b.Type, b.Stage, b.Depot, b.Status)
 	}
+	// The priority is the one any bead is made at where none is asked for
+	// (yardr bead create's), not the zero value P0, which a depot's P0
+	// reserve route takes ahead of any label: a webhook's delivery must not
+	// jump the line.
+	if b.Priority != store.DefaultPriority {
+		t.Fatalf("made %s at P%d, want P%d", b.ID, b.Priority, store.DefaultPriority)
+	}
 	if b.Title != "Hook listener logs the secret path" || !strings.Contains(b.Body, "Seen on startup.") || !strings.HasSuffix(b.Body, issue23) {
 		t.Fatalf("made %s: title %q, body %q", b.ID, b.Title, b.Body)
 	}
@@ -776,6 +783,10 @@ func TestTokenDeliveryMakesStandaloneBead(t *testing.T) {
 	b := r.bead(t, all[0].ID)
 	if b.Type != "box" || b.Stage != "requested" || b.Depot == nil || *b.Depot != "yard" || b.Status != "open" {
 		t.Fatalf("made %s: type %s, stage %s, depot %v, %s", b.ID, b.Type, b.Stage, b.Depot, b.Status)
+	}
+	// At the default priority too, as the threaded path's bead is.
+	if b.Priority != store.DefaultPriority {
+		t.Fatalf("made %s at P%d, want P%d", b.ID, b.Priority, store.DefaultPriority)
 	}
 	if b.Title != "provision a box please" {
 		t.Fatalf("made %s: title %q", b.ID, b.Title)

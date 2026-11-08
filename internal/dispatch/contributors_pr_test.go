@@ -566,9 +566,11 @@ func TestContributorsBotPushStartsTheReadAgain(t *testing.T) {
 // and is never posted. A review the script cannot post goes back to the
 // reviewer once and the second time to a person, and the flow counts the
 // rounds back to review whichever outcome made them, so a bead that a push
-// already brought back to be read has used its retry. A push while the script
-// runs says nothing to the stage: the script's own check of the head is what
-// stops a review of another head.
+// already brought back to be read has used its retry. A bot's push while the
+// script runs sends the bead back to be read at the new head, as under review,
+// and the run is stopped; a person's push to a pull request no maintainer
+// accepted says nothing to the stage: the script's own check of the head is
+// what stops a review of another head.
 func TestContributorsReviewIsPostedBeforeTheWait(t *testing.T) {
 	t.Parallel()
 	r := newContributorsYard(t)
@@ -626,19 +628,42 @@ func TestContributorsReviewIsPostedBeforeTheWait(t *testing.T) {
 	inStage(asked.ID, "decide")
 	givenTo(asked.ID, "pr-reviewers")
 
-	// A push, a person's or a bot's, while the script runs moves nothing: no
-	// line of the table names the stage. The script's check of the head fails a
-	// review of the old head back to the reviewer.
+	// A person's push to a pull request no maintainer accepted, while the script
+	// runs, moves nothing: no line of the table names it. The script's check of
+	// the head fails a review of the old head back to the reviewer.
 	racing := open(84)
 	reviewerSays(racing.ID, "done")
 	givenTo(racing.ID, "pr-reviewers", "post")
-	for _, push := range []func(map[string]any){pushedBy("a-maintainer", "User"), pushedBy("an-app[bot]", "Bot")} {
-		r.deliverJSON(t, "pull_request", "pull_request_synchronize", prEvent(84, "dependabot[bot]", "Bot"), atHead(movedSHA), push)
-		r.pass(t)
-		inStage(racing.ID, "review-post")
-	}
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", prEvent(84, "dependabot[bot]", "Bot"), atHead(movedSHA), pushedBy("a-maintainer", "User"))
+	r.pass(t)
+	inStage(racing.ID, "review-post")
 	r.postSays(t, racing.ID, "failed")
 	inStage(racing.ID, "review")
+
+	// A bot's push is the source's word, pushed: the bead goes back to be read at
+	// the new head, as it does from the read, and the session of the posting is
+	// stopped, so that the report it still makes is refused.
+	bumped := open(87)
+	reviewerSays(bumped.ID, "done")
+	r.pass(t)
+	given := r.startedFor(bumped.ID)
+	if len(given) == 0 || given[len(given)-1] != "post" {
+		t.Fatalf("%s given to %v, want the posting last", bumped.ID, given)
+	}
+	posting := r.sessionsFor(bumped.ID)[len(given)-1]
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", prEvent(87, "dependabot[bot]", "Bot"), atHead(movedSHA), pushedBy("an-app[bot]", "Bot"))
+	r.pass(t)
+	inStage(bumped.ID, "review")
+	if note := r.lastNote(t, bumped.ID); !strings.Contains(note, "a bot pushed to the PR") {
+		t.Fatalf("note of the move: %q", note)
+	}
+	if _, err := r.api.Done(ctx, bumped.ID, "done", "post-review: posted", store.Expect{Stage: "review-post"}, "me"); err == nil {
+		t.Fatalf("a report from review-post on %s was taken after it went back to review", bumped.ID)
+	}
+	r.pass(t)
+	if !slices.Contains(r.stoppedSessions(), posting) {
+		t.Fatalf("session %s of the posting on the old head still runs: stopped %v", posting, r.stoppedSessions())
+	}
 
 	// A review that cannot be posted goes back to the reviewer once, with the
 	// reason in a note, and the second time to a person.
@@ -780,7 +805,7 @@ func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 // bead out of triage and records the head the event named as accepted_head,
 // where one put by a bot, or another label, moves nothing. New commits on a
 // pull request that bears the label, whoever pushed and wherever the bead
-// waits (read, run, or with the contributor), take the bead back to triage
+// waits (read, posted, run, or with the contributor), take the bead back to triage
 // with the accepted head as it was, where pr_head follows the last event; a
 // person's label says yes again, to the head it then has. A pull request no
 // maintainer accepted keeps the lines for its author's pushes.
@@ -828,19 +853,30 @@ func TestContributorsAcceptanceIsOfACommit(t *testing.T) {
 		t.Fatalf("%s in %s with accepted_head %v after a bot's label and another label, want triage with none", waiting.ID, stage, accepted)
 	}
 
+	// settle takes the bead of an accepted pull request, in review, to stage,
+	// by the reviewer's report and what the scripts would report after it. The
+	// posting is not reported in review-post: it is run, and the bead waits.
+	settle := func(b *store.Bead, stage string) {
+		t.Helper()
+		switch stage {
+		case "review-post":
+			_, err := r.api.Done(ctx, b.ID, "done", "Ready", store.Expect{Stage: "review"}, "me")
+			must(t, err)
+		case "ciwait":
+			r.reviewerSays(t, b.ID, false)
+		case "contributor":
+			r.reviewerAsksChanges(t, b.ID)
+		}
+	}
+
 	// New commits in each stage the bead can wait in after the yes, from a
 	// person and from a bot: back to triage, nothing recorded anew.
 	var last *store.Bead
 	var lastN int
-	for _, stage := range []string{"review", "ciwait", "contributor"} {
+	for _, stage := range []string{"review", "review-post", "ciwait", "contributor"} {
 		for _, who := range []struct{ login, kind string }{{"someone", "User"}, {"an-app[bot]", "Bot"}} {
 			b, n := accept()
-			switch stage {
-			case "ciwait":
-				r.reviewerSays(t, b.ID, false)
-			case "contributor":
-				r.reviewerAsksChanges(t, b.ID)
-			}
+			settle(b, stage)
 			if got := r.stageOf(t, b.ID); got != stage {
 				t.Fatalf("%s in %s, want %s", b.ID, got, stage)
 			}
@@ -852,11 +888,12 @@ func TestContributorsAcceptanceIsOfACommit(t *testing.T) {
 			if note := r.lastNote(t, b.ID); !strings.Contains(note, "new commits since a maintainer accepted the PR") {
 				t.Errorf("%s pushed to in %s: note of the move: %q", b.ID, stage, note)
 			}
-			if stage == "ciwait" {
-				// The yard's CI stopped with the move, and a report it still
-				// makes is refused: nothing approves the head nobody accepted.
-				if _, err := r.api.Done(ctx, b.ID, "done", "the tests passed", store.Expect{Stage: "ciwait"}, "me"); err == nil {
-					t.Errorf("a report from ciwait on %s was taken after it went back to triage", b.ID)
+			if stage == "ciwait" || stage == "review-post" {
+				// The yard's CI or the posting stopped with the move, and a report
+				// it still makes is refused: nothing approves the head nobody
+				// accepted, and the review of the old head is not posted.
+				if _, err := r.api.Done(ctx, b.ID, "done", "the script reported", store.Expect{Stage: stage}, "me"); err == nil {
+					t.Errorf("a report from %s on %s was taken after it went back to triage", stage, b.ID)
 				}
 			}
 			last, lastN = b, n
@@ -865,14 +902,9 @@ func TestContributorsAcceptanceIsOfACommit(t *testing.T) {
 
 	// The label may be removed before a later push. The bead's triage history
 	// still sends the changed head back for a person's acceptance.
-	for _, stage := range []string{"review", "ciwait", "contributor"} {
+	for _, stage := range []string{"review", "review-post", "ciwait", "contributor"} {
 		b, n := accept()
-		switch stage {
-		case "ciwait":
-			r.reviewerSays(t, b.ID, false)
-		case "contributor":
-			r.reviewerAsksChanges(t, b.ID)
-		}
+		settle(b, stage)
 		r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(n, bearing(), atHead(movedSHA))...)
 		if got, accepted, pr := where(b.ID); got != "triage" || accepted != fixtureSHA || pr != movedSHA {
 			t.Errorf("%s pushed to in %s after its accepted label was removed: %s with accepted_head %v and pr_head %v, want triage with %s and %s",

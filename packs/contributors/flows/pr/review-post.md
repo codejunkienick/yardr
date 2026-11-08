@@ -52,6 +52,18 @@ Outcomes, the review's own, and `failed`:
   failed post, or the first of a bead that a push or its contributor's new
   commits already brought back to be read. A person who has put it right sends
   the bead on from `decide` to `review-post`, which posts it again.
+- `pushed`: not the script's to report. A bot pushed new commits to a pull
+  request no maintainer accepted while the script ran, and the source says so.
+  A bot's rebase is the only push it makes, so the bead does not wait for
+  another: it goes back to `review`, to be read at the new head, and the run is
+  stopped with it. A report the script still makes is refused, as it is after a
+  push, since the bead has left the stage.
+- `unaccepted`: not the script's to report either. New commits arrived on a
+  pull request a maintainer accepted while the script ran, and the source says
+  so. The bead goes back to `triage` and the run is stopped with it: the yes
+  was of another commit, and nothing of the new head is read before a
+  maintainer has said yes to it. A report the script still makes is refused, as
+  it is after a push.
 - `merged`: not the script's to report. The pull request was merged on GitHub
   while the bead was here, and the source says so. The bead goes to `merged`, and
   the run is stopped with it: a report the script still makes is refused, as it is
@@ -59,9 +71,10 @@ Outcomes, the review's own, and `failed`:
 - `dropped`: likewise, for a pull request closed unmerged. The bead goes to
   `closed`.
 
-A push to the pull request while the script runs says nothing to this stage:
-the script's check of the head fails a review of a head the pull request no
-longer has back to `review`, and the yard's CI holds a head nobody read.
+A person's push to a pull request no maintainer accepted, while the script
+runs, says nothing to this stage: the script's check of the head fails a review
+of a head the pull request no longer has back to `review`, where the new head is
+read, and the yard's CI holds a head nobody read.
 
 A run that is no verdict on the review holds the bead here with a note and
 reports nothing: a bead the script was not given in this stage, a link that is

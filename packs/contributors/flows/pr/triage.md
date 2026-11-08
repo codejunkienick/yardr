@@ -33,11 +33,11 @@ The bead leaves on what comes of the pull request on GitHub:
 - `dropped`: the pull request is closed unmerged. The bead goes to `closed`.
 
 New commits on a pull request you accepted bring its bead back here, from
-`review`, `ciwait` and `contributor`, whoever pushed, even if the label
-`accepted` was removed: the yes was of one commit, and nothing of another is
-read or run until a person has said yes to it. After looking at the new head,
-a maintainer adds the label `accepted` again; if it is still there, take it
-off and put it on again.
+`review`, `review-post`, `ciwait` and `contributor`, whoever pushed, even if
+the label `accepted` was removed: the yes was of one commit, and nothing of
+another is read or run until a person has said yes to it. After looking at the
+new head, a maintainer adds the label `accepted` again; if it is still there,
+take it off and put it on again.
 
 Or by hand, with no label: `yardr bead advance <id> --to review`, or
 `--to closed`. The yard's CI tests a pull request that waited here at the

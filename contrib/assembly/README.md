@@ -22,7 +22,22 @@ rebases `yard/<bead>` onto the base if the base moved; a conflict goes to
 the mergers with the conflicting files: it reports `conflict` where the flow
 offers that outcome, else advances to `merge` where the flow allows it, else
 reports `failed` (back to `new`). It asks the flow first (`prime --bead
---json`), so a flow with no `merge` raises no refused move. With
+--json`), so a flow with no `merge` raises no refused move. Where the depot's
+test command is a file of the branch that carries a file size table (a line
+`filesizes='`, as depot yardr's `.yardr/test` does), it then lowers the table
+to the branch's files: it runs `sh <that file> sizes --rewrite` in the
+worktree, from the branch's own copy, and amends the change into the branch's
+head, so a change that shrinks a listed file never edits its row
+(docs/testing.md, "File size budget"). A wagon landing on its train's branch
+skips it, since integrate-train lowers the rows once for the train, and so
+does a branch with no commit past the base, which has no head to amend. The
+rewrite is bounded (`YARDR_REWRITE_TIMEOUT`, in seconds; 120 when unset), and
+it waits on no race lock, so none is credited to it: at the deadline it and
+everything it started is killed. The bead is held when the rewrite outlasts
+its deadline, or fails (a row stands below its file: growth, or a row cut by
+hand, which no landing settles), with the last 4000 bytes of what it printed in
+the note, and when it leaves anything but the table changed, stages a change,
+or moves the branch, the base or the worktree. With
 `YARDR_LAND=squash` (`rebase` is the default, and lands the branch's commits
 as they are) it then makes the branch one commit, so that the commit the tests
 run on is the commit that lands: a Conventional Commit written from the bead,
@@ -112,11 +127,16 @@ run, naming every such path, so code no reviewer read never lands.
 
 **integrate-train** runs once a train's last child has landed on its branch,
 routed for the train flow's `open` stage (type `train`). It fetches the base
-when it is a remote's, rebases `yard/<train>` onto the depot's base and runs
-the depot's test command on it, with `YARDR_LANDING=1` and from the base's
-copy where the command is a file the base has, as merge-local does, and for
-at most `YARDR_TEST_TIMEOUT` seconds besides what it waited for the race lock
-(a run killed at the deadline is red); a depot
+when it is a remote's, rebases `yard/<train>` onto the depot's base, lowers
+the file size table of a test command that carries one to the train's files as
+merge-local does (once for the train, whose wagons leave the rows alone, and as
+a commit of its own, `assembly: lower filesizes rows to actual`, since the head
+is a child's landed commit and not the assembly's to amend; held on the same
+grounds and past the same `YARDR_REWRITE_TIMEOUT`), and runs the depot's test
+command on the result, with `YARDR_LANDING=1` and from the base's copy where
+the command is a file the base has, as merge-local does, and for at most
+`YARDR_TEST_TIMEOUT` seconds besides what it waited for the race lock (a run
+killed at the deadline is red); a depot
 with no test command goes to review untested. The command's `YARDR_BEAD` is
 the train, which is no change of its own, so the run also sets
 `YARDR_TEST_BEADS` to the train's children, sorted and joined by commas (set
@@ -301,8 +321,12 @@ mailed when that push fails (default the yard's `yardmaster` setting, else
 `yardmaster`), `YARDR_LAND`, `rebase` (the default) or `squash`, how a bead
 lands, read by merge-local and pr-merge (a copy of merge-local's message
 writer is in pr-merge, held equal by a test) and by merge-pr for a branch of the
-repository's own, and `YARDR_PR=1`, the switch for
-the pull-request path, read by integrate-train, pr-train and pr-merge.
+repository's own, `YARDR_TEST_TIMEOUT`, the seconds the test command may run
+besides what it waited for the race lock (1800 when unset), read by
+merge-local, integrate-train and pr-ci, `YARDR_REWRITE_TIMEOUT`, the seconds
+the file size table rewrite may run (120 when unset, with no race lock to
+credit), read by merge-local and integrate-train, and `YARDR_PR=1`, the switch
+for the pull-request path, read by integrate-train, pr-train and pr-merge.
 
 **Setup** (from docs/line.md):
 

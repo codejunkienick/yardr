@@ -131,11 +131,15 @@ func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (
 // workState is the state one piece of work is told in, as the first of
 // workStates it fits, and the words that say why or when. The stage is
 // what separates the open pieces that are not moving: decide waits for
-// a person's answer, siding for the fold, and backlog is not on the line
-// yet. Every other open stage is work travelling the line. No rule
-// reads the type, so a lead or a design in the backlog is not started
-// like the rest. The state is "" for a closed piece outside the window,
-// which the account leaves out.
+// a person's answer, siding for the fold, ready for a person to send the
+// fold to build, triage for a person to accept what came from outside,
+// and backlog is not on the line yet. Every other open stage is work
+// travelling the line. Ready and triage are named like the others: they
+// are a person's wherever a flow has them, and the account reads no
+// group, which would take a call of the store for what two names say.
+// No rule reads the type, so a lead or a design in the backlog is not
+// started like the rest. The state is "" for a closed piece outside the
+// window, which the account leaves out.
 func (s *Service) workState(ctx context.Context, b store.Bead, since, now time.Time) (state, detail string, err error) {
 	if b.Status == "closed" {
 		if b.ClosedAt == nil || b.ClosedAt.Before(since) || b.ClosedAt.After(now) {
@@ -160,6 +164,10 @@ func (s *Service) workState(ctx context.Context, b store.Bead, since, now time.T
 		return "waiting", "it is waiting for a person to decide", nil
 	case b.Stage == "siding":
 		return "waiting", "it is waiting to be combined with other small work", nil
+	case b.Stage == "ready":
+		return "waiting", "it is waiting for a person to send it to build", nil
+	case b.Stage == "triage":
+		return "waiting", "it is waiting for a person to accept it", nil
 	case b.Stage == "backlog":
 		return "not started", touched, nil
 	}
@@ -167,8 +175,8 @@ func (s *Service) workState(ctx context.Context, b store.Bead, since, now time.T
 }
 
 // onePiece is what_is_happening for one named thing: its title, its
-// standing in plain words, and its notes, as the piece's own page
-// shows them.
+// state and the words that say why or when, as the account tells them,
+// and its notes, as the piece's own page shows them.
 func (s *Service) onePiece(ctx context.Context, work string, now time.Time) (*Result, error) {
 	view, err := s.Yard.Bead(ctx, work, s.User)
 	if err != nil {
@@ -179,19 +187,11 @@ func (s *Service) onePiece(ctx context.Context, work string, now time.Time) (*Re
 	if err != nil {
 		return nil, err
 	}
-	state := "under way"
-	if b.Status == "closed" {
-		state = "finished"
-	} else if b.Hold {
-		state = "stuck: it is on hold, waiting for a person"
-	} else {
-		blockers, err := s.Yard.OpenBlockers(ctx, b.ID)
-		if err != nil {
-			return nil, err
-		}
-		if len(blockers) > 0 {
-			state = "stuck: it is waiting for other work to finish first"
-		}
+	// A piece asked for by name is told however long ago it finished, so no
+	// window narrows it as it does the account.
+	state, detail, err := s.workState(ctx, *b, time.Time{}, now)
+	if err != nil {
+		return nil, err
 	}
 	var asks []uint64
 	for _, a := range view.Asks {
@@ -199,8 +199,9 @@ func (s *Service) onePiece(ctx context.Context, work string, now time.Time) (*Re
 			asks = append(asks, a.Ask)
 		}
 	}
+	waits := waitsLine(asks, state == "finished")
 	var out strings.Builder
-	fmt.Fprintf(&out, "%s\nIt is %s%s (last touched %s).", view.Title, state, waitsLine(asks, b.Status == "closed"), when(b.UpdatedAt, now))
+	fmt.Fprintf(&out, "%s\nIt is %s%s (%s).", view.Title, state, waits, detail)
 	if strings.TrimSpace(view.Body) != "" {
 		fmt.Fprintf(&out, "\n\n%s", strings.TrimSpace(view.Body))
 	}
@@ -225,7 +226,13 @@ func (s *Service) onePiece(ctx context.Context, work string, now time.Time) (*Re
 			}
 		}
 	}
-	structured := map[string]any{"work": view.ID, "title": view.Title, "state": state}
+	// The structured part says what the account's item of the piece does:
+	// its detail is the whole of what stands after the state, the question
+	// that waits for the person among it.
+	structured := map[string]any{"work": view.ID, "title": view.Title, "state": state, "detail": detail + waits}
+	if b.Depot != nil {
+		structured["project"] = *b.Depot
+	}
 	if len(asks) > 0 {
 		structured["waiting_questions"] = asks
 	}

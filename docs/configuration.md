@@ -468,7 +468,10 @@ to run it in the worktree before handing on. Its merge script, `merge-local`,
 runs it on the rebased commit before the base moves, with `YARDR_LANDING=1`
 in the environment (unset for a wagon landing on its train's branch) and
 for at most `YARDR_TEST_TIMEOUT` seconds (1800), besides what it waited for
-the race lock. Exit 0 lands the bead.
+the race lock. Where the field is a file of the branch that carries a file
+size table (depot yardr's `.yardr/test` does), it first has that file lower the
+table to the branch's files, for at most `YARDR_REWRITE_TIMEOUT` seconds (120),
+a run that waits on no race lock. Exit 0 lands the bead.
 Exit 2, the command saying it could not run, holds it. Any other exit sends
 it back to its builder with the end of the output in a note. A depot with no
 test command lands untested, and the note says so. Where the field is the
@@ -498,7 +501,10 @@ says so in its first line, queuing only when its step covers the whole
 suite. The deadline of
 a landing, and of a train's integration, does not count that wait:
 `merge-local` and `integrate-train` credit the waited seconds, so one late in
-the queue is killed only when its own run outlasts `YARDR_TEST_TIMEOUT`. Race suites
+the queue is killed only when its own run outlasts `YARDR_TEST_TIMEOUT`. The
+rewrite of the file size table, which they run first, has a deadline of its
+own, `YARDR_REWRITE_TIMEOUT` (120 seconds), and nothing is credited to it: it
+waits on no race lock. Race suites
 run side by side slow each other past Go's per-package timeout while one
 alone takes a third of the time, so the queue costs less wall time than the
 contention. Waiters take the lock in arrival order, landings first (a run

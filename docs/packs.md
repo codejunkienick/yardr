@@ -1651,7 +1651,7 @@ yardr knows the verbs alone:
 | verb | direction | in this pack |
 |---|---|---|
 | `makes` | source -> yard: an event makes a bead for a thread no open bead tracks | an issue opened makes an `issue` bead in `triage`; a pull request opened, marked ready or reopened a `pr` bead in `triage`, or in `review` when its author is an owner or a member of the repository (`association=`) or a bot (`sender=bot`: a kind, never a login, so every bot) |
-| `says` | source -> bead: an event reports an outcome to the bead that tracks its thread | the label `accepted`, put on by a person, says `accepted`; new commits on a pull request that waited in `triage` say `unaccepted` in `review`, `ciwait` and `contributor`, whoever pushed and even if the label was removed; new commits on any other pull request say `pushed` in `contributor`, and in `review` `pushed` when a bot pushed and `outdated` when a person did, in `ciwait` `pushed` when a bot pushed and `changes` when a person did; a merge says `merged`, a close `dropped`: for a pull request in `triage`, `review`, `review-post`, `ciwait`, `contributor`, `approved` and `decide`, for an issue in `triage`, `backlog`, `new`, `review`, `approved` and `decide`. No event of GitHub's CI says anything: the pull request's CI is the yard's own |
+| `says` | source -> bead: an event reports an outcome to the bead that tracks its thread | the label `accepted`, put on by a person, says `accepted`; new commits on a pull request that waited in `triage` say `unaccepted` in `review`, `review-post`, `ciwait` and `contributor`, whoever pushed and even if the label was removed; new commits on any other pull request say `pushed` in `contributor`, and in `review` `pushed` when a bot pushed and `outdated` when a person did, in `review-post` `pushed` when a bot pushed and nothing when a person did, in `ciwait` `pushed` when a bot pushed and `changes` when a person did; a merge says `merged`, a close `dropped`: for a pull request in `triage`, `review`, `review-post`, `ciwait`, `contributor`, `approved` and `decide`, for an issue in `triage`, `backlog`, `new`, `review`, `approved` and `decide`. No event of GitHub's CI says anything: the pull request's CI is the yard's own |
 | `hears` | bead -> source: a stage of the bead sets a status on the thread | an issue is closed when its bead reaches `merged` or `closed`, a pull request when its bead reaches `closed` |
 
 - **Triage is the pack's advice, and no rule of yardr.** Its stage file
@@ -1663,9 +1663,9 @@ yardr knows the verbs alone:
   person (one a bot puts moves nothing), moves a pull request's bead out of
   `triage` and records the head the event named as the bead's `accepted_head`.
   New commits on a pull request that waited in `triage` take its bead back to
-  `triage` from `review`, `ciwait` and `contributor`, whoever pushed and even
-  if the label was removed, so nothing of another commit is read or run until
-  a person has said yes to it again.
+  `triage` from `review`, `review-post`, `ciwait` and `contributor`, whoever
+  pushed and even if the label was removed, so nothing of another commit is
+  read or run until a person has said yes to it again.
   A pull request no maintainer accepted, a trusted author's or a bot's own,
   keeps the lines below for its pushes.
 - **A reopened pull request gets a new bead.** Its close ended the old
@@ -1715,12 +1715,15 @@ yardr knows the verbs alone:
 - **A bot's push starts the read again.** A bot's rebase is the only push
   it makes, so a bead sent to `contributor` by it would wait there for one
   that does not come. A push by a bot (`sender=bot`) while the pull request
-  is read or waits on CI says `pushed`, which leads from `review` and from
-  `ciwait` back to `review`: from `review` the bead stays, as a new stay,
-  and a new session reads the new head; from `ciwait` it goes back to be
-  read, and waits for CI on the new head after. A person's push says
-  `outdated` from `review` and `changes` from `ciwait`, as before, and waits
-  in `contributor` for the next commits.
+  is read, its review is posted or it waits on CI says `pushed`, which leads
+  from `review`, `review-post` and `ciwait` back to `review`: from `review`
+  the bead stays, as a new stay, and a new session reads the new head; from
+  `review-post` and `ciwait` it goes back to be read, and is posted and
+  waits for CI on the new head after. A person's push says `outdated` from
+  `review` and `changes` from `ciwait`, as before, and waits in
+  `contributor` for the next commits; the posting is done in moments, so a
+  person's push meanwhile says nothing to it, and the script's check of the
+  head sends the review of the old head back to `review`.
   Both are for a pull request no maintainer accepted: on one that waited in
   `triage`, every push says `unaccepted`, even after the label was removed.
 - **`contributor` is held by `outside`, a people group with no members.**

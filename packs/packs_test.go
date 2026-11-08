@@ -1131,11 +1131,11 @@ func TestContributorsPack(t *testing.T) {
 	// edges of the pr flow. The reviewer's done and changes both go through the
 	// posting, which sends the bead on the way the review says, and sends a
 	// review it cannot post back to the reviewer once, then to a person. A
-	// bot's push leads from the read and from the wait back to review. New
-	// commits on a pull request a maintainer accepted lead from the read, the
-	// wait and the contributor back to triage, to be accepted again. The
-	// pull request's merge or close ends the bead in every stage it waits
-	// in while it is open.
+	// bot's push leads from the read, the posting and the wait back to review.
+	// New commits on a pull request a maintainer accepted lead from the read,
+	// the posting, the wait and the contributor back to triage, to be accepted
+	// again. The pull request's merge or close ends the bead in every stage it
+	// waits in while it is open.
 	var prFlow store.Flow
 	for _, f := range p.Flows {
 		if f.Name != "pr" {
@@ -1152,6 +1152,7 @@ func TestContributorsPack(t *testing.T) {
 			// waits for its contributor, with no review stored to post.
 			{"review", "outdated", "contributor"},
 			{"review-post", "done", "ciwait"}, {"review-post", "changes", "contributor"}, {"review-post", "failed", "review"},
+			{"review-post", "pushed", "review"}, {"review-post", "unaccepted", "triage"},
 			{"review-post", "merged", "merged"}, {"review-post", "dropped", "closed"},
 			{"ciwait", "done", "approved"}, {"ciwait", "changes", "contributor"}, {"ciwait", "pushed", "review"},
 			{"ciwait", "unaccepted", "triage"}, {"ciwait", "merged", "merged"}, {"ciwait", "dropped", "closed"},
@@ -1172,10 +1173,10 @@ func TestContributorsPack(t *testing.T) {
 			t.Errorf("pr flow: ciwait has the outcomes %v, want %v alone", ciwait, want)
 		}
 		// What post-review reports from review-post is done and changes, the
-		// review's own, and failed; the source's merged and dropped end the
-		// bead. A done-safe, which the script sends back, is no outcome of it,
-		// nor are pushed and unaccepted: the script's own check of the head
-		// stands in for them.
+		// review's own, and failed. The source's merged and dropped end the
+		// bead, and its pushed and unaccepted send it back to be read or to be
+		// accepted again, as they do from the read. A done-safe, which the
+		// script sends back, is no outcome of it.
 		var posting []string
 		for _, o := range sf.OutcomesFrom("review-post") {
 			posting = append(posting, o.Name)
@@ -1186,7 +1187,7 @@ func TestContributorsPack(t *testing.T) {
 			}
 		}
 		slices.Sort(posting)
-		if want := []string{"changes", "done", "dropped", "failed", "merged"}; !slices.Equal(posting, want) {
+		if want := []string{"changes", "done", "dropped", "failed", "merged", "pushed", "unaccepted"}; !slices.Equal(posting, want) {
 			t.Errorf("pr flow: review-post has the outcomes %v, want %v alone", posting, want)
 		}
 		// A person puts a stored review right after a second failure, and has it
@@ -1318,9 +1319,9 @@ func TestContributorsPack(t *testing.T) {
 	for _, want := range []string{
 		"action=labeled event=issues label=accepted type=issue -> accepted",
 		"action=labeled event=pull_request label=accepted sender=user type=pr -> accepted",
-		"action=synchronize event=pull_request label=accepted stage=ciwait stage=contributor stage=review type=pr -> unaccepted: new commits since a maintainer accepted the PR",
+		"action=synchronize event=pull_request label=accepted stage=ciwait stage=contributor stage=review stage=review-post type=pr -> unaccepted: new commits since a maintainer accepted the PR",
 		"action=synchronize event=pull_request stage=contributor type=pr -> pushed: new commits on the PR",
-		"action=synchronize event=pull_request sender=bot stage=ciwait stage=review type=pr -> pushed: a bot pushed to the PR",
+		"action=synchronize event=pull_request sender=bot stage=ciwait stage=review stage=review-post type=pr -> pushed: a bot pushed to the PR",
 		"action=synchronize event=pull_request stage=review type=pr -> outdated: the PR changed under review",
 		"action=synchronize event=pull_request stage=ciwait type=pr -> changes: the PR changed while waiting on CI",
 		"action=closed event=pull_request merged=true type=pr -> merged",
@@ -1343,13 +1344,14 @@ func TestContributorsPack(t *testing.T) {
 	events := []event{
 		{"pull_request", "synchronize", "", "ciwait", "changes"},
 		{"pull_request", "synchronize", "", "review", "outdated"},
+		{"pull_request", "synchronize", "", "review-post", ""},
 		{"pull_request", "synchronize", "", "contributor", "pushed"},
 		{"pull_request", "synchronize", "", "approved", ""},
 		{"pull_request", "opened", "", "ciwait", ""},
 	}
 	for _, kind := range []string{"workflow_run", "check_suite"} {
 		for _, conclusion := range []string{"failure", "success", "timed_out", "cancelled", "neutral"} {
-			for _, stage := range []string{"triage", "review", "ciwait", "contributor", "approved"} {
+			for _, stage := range []string{"triage", "review", "review-post", "ciwait", "contributor", "approved"} {
 				events = append(events, event{kind, "completed", conclusion, stage, ""})
 			}
 		}
@@ -1377,10 +1379,12 @@ func TestContributorsPack(t *testing.T) {
 	// events before the general ones, which a person's push falls to. The
 	// exception is a pull request a maintainer accepted, which bears the label
 	// accepted among its labels: any push to it, a bot's too, is a head nobody
-	// accepted, and takes the bead back to triage from the read, the wait and
-	// the contributor, ahead of every line above; approved is a person's.
+	// accepted, and takes the bead back to triage from the read, the posting,
+	// the wait and the contributor, ahead of every line above; approved is a
+	// person's.
 	for _, c := range []struct{ sender, labels, stage, outcome, to string }{
 		{"bot", "", "review", "pushed", "review"},
+		{"bot", "", "review-post", "pushed", "review"},
 		{"bot", "", "ciwait", "pushed", "review"},
 		{"bot", "", "contributor", "pushed", "review"},
 		{"user", "", "review", "outdated", "contributor"},
@@ -1390,21 +1394,23 @@ func TestContributorsPack(t *testing.T) {
 		{"user", "", "approved", "", ""},
 		{"user", "bug", "contributor", "pushed", "review"},
 		{"user", "accepted", "review", "unaccepted", "triage"},
+		{"user", "accepted", "review-post", "unaccepted", "triage"},
 		{"user", "accepted", "ciwait", "unaccepted", "triage"},
 		{"user", "accepted", "contributor", "unaccepted", "triage"},
 		{"bot", "accepted", "review", "unaccepted", "triage"},
+		{"bot", "accepted", "review-post", "unaccepted", "triage"},
 		{"bot", "accepted", "ciwait", "unaccepted", "triage"},
 		{"bot", "accepted", "contributor", "unaccepted", "triage"},
 		{"user", "bug,accepted", "review", "unaccepted", "triage"},
 		{"bot", "accepted", "approved", "", ""},
 		{"user", "accepted", "approved", "", ""},
 		{"user", "accepted", "triage", "", ""},
-		// The posting runs in moments and checks the head itself, so no line of
-		// a push names its stage: a push meanwhile fails the posting back to
-		// review, and the tests run only on the head the reviewer read.
-		{"bot", "", "review-post", "", ""},
+		// The posting runs in moments and checks the head itself, so a person's
+		// push to a pull request nobody accepted has no line there: it fails the
+		// posting back to review, which reads the new head, and the tests run
+		// only on the head the reviewer read. A bot's push and any push to an
+		// accepted one are the source's word, as under review (above).
 		{"user", "", "review-post", "", ""},
-		{"user", "accepted", "review-post", "", ""},
 	} {
 		fields := map[string][]string{"event": {"pull_request"}, "action": {"synchronize"}, "sender": {c.sender}}
 		if c.labels != "" {

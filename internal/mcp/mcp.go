@@ -118,7 +118,7 @@ func Tools() []ToolDef {
 			Name: ToolWhatIsHappening,
 			Description: "Say what is happening with this person's own work: each piece with the project it belongs to and where it stands. " +
 				"A piece is finished lately, stuck (on hold, or waiting for other work to finish), parked (set aside for now), " +
-				"waiting (for a person to decide, or to be combined with other small work), not started, or under way. " +
+				"waiting (for a person to decide, to accept it or to send it to build, or for it to be combined with other small work), not started, or under way. " +
 				"Pass the work name from an earlier answer to show that one thing in full, with the notes on it. " +
 				"since is a time (for example 2026-11-01T09:00:00Z) widening how far back finished work is shown; without it, the last day.",
 			InputSchema: schema(`{
@@ -133,7 +133,9 @@ func Tools() []ToolDef {
 				"work_list": {"type": "array", "description": "the account's pieces of work: work, title, project (where it has one), state, detail (the words that say why or when), updated, waiting_questions", "items": {"type": "object"}},
 				"work": {"type": "string", "description": "the one piece's work name, when work was given"},
 				"title": {"type": "string"},
-				"state": {"type": "string", "description": "the piece's standing in plain words"},
+				"state": {"type": "string", "description": "the one piece's state: finished, stuck, parked, waiting, not started or under way"},
+				"project": {"type": "string", "description": "the project the one piece belongs to, when it has one"},
+				"detail": {"type": "string", "description": "the words that say why or when the one piece stands as it does"},
 				"waiting_questions": {"type": "array", "description": "the numbers of the questions on it that wait for this person", "items": {"type": "integer"}}`),
 		},
 		{
