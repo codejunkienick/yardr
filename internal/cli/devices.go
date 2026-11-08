@@ -106,7 +106,7 @@ printed with the token, to hand both over together.`,
 				}
 				rows := [][]string{}
 				for _, d := range devices {
-					rows = append(rows, []string{d.User, d.Name, d.CreatedAt.Local().Format(mailTime), lastUsed(d)})
+					rows = append(rows, []string{d.User, d.Name, d.CreatedAt.Local().Format(mailTime), lastUsed(d) + sealed(d)})
 				}
 				table(w, "USER\tDEVICE\tADDED\tLAST USED", rows)
 			})
@@ -143,6 +143,16 @@ func lastUsed(d store.Device) string {
 		out += " from " + d.LastFrom
 	}
 	return out
+}
+
+// sealed is the device's channel state after its last use, as the list
+// words it (store.Device.Sealed): ", sealed (paired)", ", sealed (in
+// place)", or nothing for a device that pins no key.
+func sealed(d store.Device) string {
+	if s := d.Sealed(); s != "" {
+		return ", " + s
+	}
+	return ""
 }
 
 // unusedDevice is yardr doctor's note on a device nothing has called with

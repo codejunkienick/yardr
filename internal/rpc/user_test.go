@@ -174,7 +174,8 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 		names = append(names, api.Method(i).Name)
 		seen[api.Method(i).Name] = true
 	}
-	// Arrivals and Flows are served but computed over the API, not in it.
+	// Arrivals and Flows are served but computed over the API, not in it,
+	// and RegisterChannelKey is the listener's own (listenerOnly).
 	for _, name := range slices.Sorted(maps.Keys(Calls)) {
 		if !seen[name] {
 			names = append(names, name)
@@ -201,8 +202,8 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 			t.Errorf("%s with an array of arguments is answered %s, want a refusal saying %q", name, byPlace, want)
 		}
 	}
-	if len(served) != len(Calls) || len(served) != 26 {
-		t.Errorf("%d calls are served and Calls has %d, want 26 of each: %v", len(served), len(Calls), served)
+	if len(served) != len(Calls) || len(served) != 27 {
+		t.Errorf("%d calls are served and Calls has %d, want 27 of each: %v", len(served), len(Calls), served)
 	}
 	if !slices.Equal(operators, []string{"ApproveAsk", "ApproveSetup", "GiveSecret", "SessionScreen", "SourceGrants", "Teammates", "TelemetrySet", "TelemetryShow", "UninviteTeammate"}) || len(OperatorCalls) != 12 {
 		t.Errorf("a device of the operator is served %v besides, and OperatorCalls is %v: want ApproveAsk, ApproveSetup, GiveSecret, SessionScreen, SourceGrants, Teammates, TelemetrySet, TelemetryShow, UninviteTeammate and no other of its twelve", operators, OperatorCalls)

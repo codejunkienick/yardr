@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -170,6 +169,9 @@ type Caller struct {
 	// that some service outside the yard vouches for is a user's word, and
 	// is not what a call of OperatorCalls is served to (operatorCall).
 	device bool
+	// token is the device token that resolved, which RegisterChannelKey
+	// pins by (userchannel.go); "" for a caller a channel resolved.
+	token string
 }
 
 // Resolver answers who the bearer of credential is, nil for nobody. from is
@@ -227,18 +229,7 @@ func NewUserServer(st *store.Store, yard func(context.Context) string, log *slog
 		resolveTimeout: ResolveTimeout, recheck: StreamRecheck,
 		refused: map[string]*refusals{}, streams: map[string]int{}}
 	u.resolve = u.device
-	u.api.methods["Settings"] = method{"Settings", reflect.ValueOf(u.settings)}
-	u.api.methods["Bead"] = method{"Bead", reflect.ValueOf(u.bead)}
-	u.api.methods["Arrivals"] = method{"Arrivals", reflect.ValueOf(u.arrivals)}
-	u.api.methods["UserAsks"] = method{"UserAsks", reflect.ValueOf(u.userAsks)}
-	u.api.methods["Users"] = method{"Users", reflect.ValueOf(u.users)}
-	u.api.methods["GetUser"] = method{"GetUser", reflect.ValueOf(u.getUser)}
-	u.api.methods["Crew"] = method{"Crew", reflect.ValueOf(u.crew)}
-	u.api.methods["GetCrew"] = method{"GetCrew", reflect.ValueOf(u.getCrew)}
-	u.api.methods["Flows"] = method{"Flows", reflect.ValueOf(u.flows)}
-	u.api.methods["Peers"] = method{"Peers", reflect.ValueOf(u.peers)}
-	u.api.methods["DeliveryFiles"] = method{"DeliveryFiles", reflect.ValueOf(u.deliveryFiles)}
-	u.api.methods["GiveSecret"] = method{"GiveSecret", reflect.ValueOf(u.giveSecret)}
+	u.serveMethods()
 	u.api.shapeErr = u.shapeUserErr
 	return u
 }
@@ -611,7 +602,7 @@ func (u *UserServer) device(ctx context.Context, credential, from string) (*Call
 	if err != nil || d == nil {
 		return nil, err
 	}
-	return &Caller{User: d.User, SaidBy: d.Name, device: true}, nil
+	return &Caller{User: d.User, SaidBy: d.Name, device: true, token: credential}, nil
 }
 
 func (u *UserServer) Handler() http.Handler {

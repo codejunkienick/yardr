@@ -610,8 +610,9 @@ func (s *Store) redeemDevicePairingPAKE(ctx context.Context, id string, presente
 	// half, as a sealed handshake shows it. A key another device
 	// already pins would put that device's channel handshakes on this
 	// record (DeviceByChannelKey), so it is a device that could not be
-	// added, and the code is spent. Only pairings pin a key, and they
-	// run one at a time under s.devPair.mu, so no write slips between.
+	// added, and the code is spent. Only pairings and the in-place
+	// registration (PinChannelKeyInPlace) pin a key, and each runs
+	// under s.devPair.mu, so no write slips between.
 	if pinned, err := s.DeviceByChannelKey(ctx, deviceKey); err != nil || pinned != nil {
 		detail := "the channel key is pinned by another device"
 		if err != nil {

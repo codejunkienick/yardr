@@ -1049,6 +1049,52 @@ required. The edge sets the header and a device does not; the yard reads it
 on this call and no other, and without it the code alone redeems
 ([users.md](users.md#enrolled-by-a-code)).
 
+### A channel key registered in place
+
+A device paired before the yard had a channel holds a token and pins no
+channel key. It registers its own key once, in place, with the token it
+holds ([the end-to-end design](design/2026-11-05-yardr-device-e2e.md),
+section 3.4), by the call [`RegisterChannelKey`](#registerchannelkey):
+
+```
+POST <url>/user/call/RegisterChannelKey
+Authorization: Bearer yardr-dev-…
+{"channel_key": "<base64url of the device's 32-byte X25519 public key>"}
+```
+
+The yard pins the key on the device's record, records it as pinned in
+place, and answers the device, the yard's `channel_key`, the yard
+identity's `channel_signature` of it and the identity's `yard_key`.
+`channel_signature` verifies against `yard_key` over the channel key, as
+the pairing's `channel_signature` does (`yardkey.VerifyChannelKey`). From
+then on the device handshakes with its key and calls sealed, as a device
+paired by the QR's key does. The answer holds no voucher: the device asks
+for one afterwards, sealed ([below](#a-registration-voucher)).
+
+It is the one plain device call the yard takes down the link from the edge
+beside the pairing redemption, and it is taken on the yard's own listener
+alike; the socket, which holds no device token, does not serve it. The edge
+reads it, the token and the key that cross: an edge active at that one call
+could put its own key in place of the device's, or of the yard's, and so
+hold the device's channel, reading every call the device makes from then
+on, undetected, until the device is re-paired by QR. An edge that only
+logged the call cannot. So the device list says `sealed (in place)` of such
+a device, against `sealed (paired)` for one that pinned its key at a pairing
+(`channel_pinned` in `yardr user device list --json` is `in_place` or
+`paired`). Re-pairing by QR lifts the label; it is never required.
+
+Refused, with the record unchanged, each as a call's error:
+
+| error | when |
+|---|---|
+| `conflict` | the device pins a key already, whether a pairing or an earlier registration pinned it, with the same key or another: a key is registered once, so the call is no way back to plain. A call that came sealed is from such a device |
+| `conflict` | another device pins the key |
+| `error` | the key is no base64url of 32 bytes |
+| `error` | the yard cannot read or make its channel key, or read its identity key to sign it with; the message says which, and the device keeps calling as before |
+
+A token of no device is 401 before any call, as for every path under
+`/user/`.
+
 ### A registration voucher
 
 A voucher is the yard's short statement that this user's device is
@@ -5448,6 +5494,39 @@ POST /call/DeliveryFiles
 | `[].not_taken` | string, may be absent | why the yard did not take the file, in its words; absent on a file the yard holds |
 
 The list is in the order the source named the files. A file is recorded once the fetch of all the delivery's files has ended, so the list is whole when it is there at all.
+
+### `RegisterChannelKey`
+
+Registers the calling device's channel public key in place: the one call a device paired before the yard had a channel makes, with the token it holds, to seal its calls from then on ([in place](#a-channel-key-registered-in-place)). The yard pins the key on the device's record, recorded as pinned in place, and answers its own channel public key signed by its identity. It registers only the device whose token makes it; no argument names a device. It is served on the listener alone, and down the link from the edge plain: the socket, which holds no device token, answers it as a method the yard does not have. It answers no voucher: the device asks for one afterwards, sealed ([`POST /user/push/voucher`](#a-registration-voucher)). Refused, with the record unchanged: a device that pins a key already, whether a pairing or an earlier registration pinned it, with the same key or another (`conflict`; a call that came sealed is from such a device); a key another device pins (`conflict`); a key that is no base64url of 32 bytes; and by a yard that cannot read or make its channel key, or read its identity key to sign it with, which says which.
+
+| argument | type | |
+|---|---|---|
+| `channel_key` | string | the device's X25519 channel public key: the base64url, unpadded, of its 32 bytes |
+
+```
+POST /call/RegisterChannelKey
+{"channel_key":"QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A"}
+
+{
+  "result": {
+    "user": "jo",
+    "device": "phone",
+    "channel_key": "WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns",
+    "channel_signature": "G73tntG0tPBprsEbe4d73zTWHXpfsyNiv4Iw_IhtRItUJEdbJZjUvjyl-6sbCZsI0EI5tYHKnDxO6CsWkzh8DA",
+    "yard_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ"
+  }
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `user` | string | the device's user |
+| `device` | string | the device's name |
+| `channel_key` | string | the yard's channel public key, base64url: the key the device handshakes to from then on |
+| `channel_signature` | string | the yard identity's ed25519 signature over `yardr channel key v1`, a line break, and `channel_key`, base64url |
+| `yard_key` | string | the yard identity's public key, base64url, which `channel_signature` verifies against |
+
+The device list says `sealed (in place)` of the device from then on, against `sealed (paired)` for one that pinned its key at a pairing: an edge active at this one call could put its own key in place of the device's, or of the yard's, and so hold the device's channel until it is re-paired by QR. Re-pairing lifts the label, and is never required.
 
 <!-- /calls -->
 

@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"regexp"
@@ -91,11 +93,38 @@ func TestDeviceCommands(t *testing.T) {
 	refusedAs(t, st, "yardmaster", "only the operator (jo) may add a device; this is yardmaster", "user", "device", "add", "jo", "watch")
 	refusedAs(t, st, "jo", "user carol: not found", "user", "device", "add", "carol", "phone")
 
+	// ada's tablet registers its channel key in place, and jo's watch
+	// pins one at a sealed pairing: the list words each after its last
+	// use, and says nothing new of a device that pins none.
+	key := func(b byte) string { return base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{b}, 32)) }
+	if _, err := own.PinChannelKeyInPlace(ctx, added.Token, key(1)); err != nil {
+		t.Fatal(err)
+	}
+	pairing, err := own.DevicePairOpen(ctx, "jo", "watch", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := own.DevicePairRedeemSealed(ctx, pairing.Code, key(2)); err != nil {
+		t.Fatal(err)
+	}
+
 	used := time.Now().Local().Format(mailTime)
 	list := mustAs(t, st, "jo", "user", "device", "list")
-	wantText(t, list, "USER  DEVICE  ADDED", "LAST USED\n", "  laptop  ", "  never\n", "jo    phone   ", " from 100.64.0.7\n")
-	if got := strings.Count(list, "\n"); got != 4 {
-		t.Fatalf("list has %d lines, want the heading and three devices:\n%s", got, list)
+	wantText(t, list, "USER  DEVICE  ADDED", "LAST USED\n", "  laptop  ", "  never\n", "jo    phone   ", " from 100.64.0.7\n",
+		"  tablet  ", "  never, sealed (in place)\n", "  watch   ", "  never, sealed (paired)\n")
+	if got := strings.Count(list, "\n"); got != 5 || strings.Count(list, "sealed") != 2 {
+		t.Fatalf("list has %d lines, want the heading and four devices, two of them sealed:\n%s", got, list)
+	}
+	var listed []store.Device
+	if err := json.Unmarshal([]byte(mustAs(t, st, "jo", "user", "device", "list", "--json")), &listed); err != nil {
+		t.Fatal(err)
+	}
+	pinned := map[string]string{}
+	for _, d := range listed {
+		pinned[d.Name] = d.ChannelPinned
+	}
+	if pinned["tablet"] != store.PinnedInPlace || pinned["watch"] != store.PinnedPaired || pinned["phone"] != "" || pinned["laptop"] != "" {
+		t.Fatalf("device list --json pins %v", pinned)
 	}
 	if out := mustAs(t, st, "ada", "user", "device", "list", "jo"); strings.Contains(out, "laptop") || !strings.Contains(out, "phone") {
 		t.Fatalf("list jo:\n%s", out)
@@ -104,7 +133,7 @@ func TestDeviceCommands(t *testing.T) {
 	if !regexp.MustCompile(`(?m)^  device: phone, added \d\d-\d\d \d\d:\d\d, last used \d\d-\d\d \d\d:\d\d from 100\.64\.0\.7$`).MatchString(show) {
 		t.Fatalf("user show (used about %s):\n%s", used, show)
 	}
-	wantText(t, mustAs(t, st, "jo", "user", "show", "ada"), "  device: laptop, added ", ", last used never\n", "  device: tablet, added ")
+	wantText(t, mustAs(t, st, "jo", "user", "show", "ada"), "  device: laptop, added ", ", last used never\n", "  device: tablet, added ", ", last used never, sealed (in place)\n")
 	for _, args := range [][]string{
 		{"user", "device", "list"}, {"user", "device", "list", "--json"}, {"user", "show", "jo"}, {"user", "show", "ada", "--json"},
 		{"user", "list", "--json"}, {"events", "--json"},
@@ -124,11 +153,19 @@ func TestDeviceCommands(t *testing.T) {
 	}
 	mustAs(t, st, "jo", "user", "device", "rm", "jo", "phone")
 	refusedAs(t, st, "jo", "device phone of jo: not found", "user", "device", "rm", "jo", "phone")
+	// Removing a device takes its pinned key with its token.
+	mustAs(t, st, "jo", "user", "device", "rm", "jo", "watch")
+	if d, err := own.DeviceByChannelKey(ctx, key(2)); err != nil || d != nil {
+		t.Fatalf("a removed device's channel key names %+v, %v", d, err)
+	}
 
 	// Removing the user removes what is left of theirs.
 	mustAs(t, st, "jo", "user", "rm", "ada")
 	if d, err := own.ResolveDevice(ctx, added.Token, "100.64.0.7"); err != nil || d != nil {
 		t.Fatalf("a removed user's token resolves: %+v, %v", d, err)
+	}
+	if d, err := own.DeviceByChannelKey(ctx, key(1)); err != nil || d != nil {
+		t.Fatalf("a removed user's key pinned in place names %+v, %v", d, err)
 	}
 	if out := mustAs(t, st, "jo", "user", "device", "list"); !strings.HasPrefix(out, "no devices") {
 		t.Fatalf("list, after the user was removed:\n%s", out)

@@ -57,14 +57,54 @@ type Device struct {
 	// ChannelKey is the device's X25519 channel public key, pinned
 	// beside its token's hash when the device paired by the sealed
 	// redemption of a pairing (devicepair.go): the key its pairing
-	// handshake proved, which its later sealed calls are held to.
-	// "" for a device paired plainly or added by hand, which pins none.
+	// handshake proved, which its later sealed calls are held to; or
+	// registered once with its token where it paired before the
+	// channel (PinChannelKeyInPlace). "" for a device paired plainly or
+	// added by hand that has registered none.
 	ChannelKey string `json:"channel_key,omitempty"`
+	// ChannelPinned says how ChannelKey was pinned: PinnedPaired at a
+	// pairing, PinnedInPlace by the one registration a device paired
+	// before the channel makes with its token (PinChannelKeyInPlace).
+	// The difference is lasting: an edge active at that one call could
+	// hold the device's channel until it is re-paired by QR (docs/design/
+	// 2026-11-05-yardr-device-e2e.md, section 3.4). "" where no key is
+	// pinned; a record with a key and none, kept before the field was,
+	// is read as PinnedPaired (withPinned).
+	ChannelPinned string `json:"channel_pinned,omitempty"`
 	// LastUsed is when its token was last resolved, nil for never, and
 	// LastFrom the address that call came from, as whoever resolved it
 	// gave it.
 	LastUsed *time.Time `json:"last_used,omitempty"`
 	LastFrom string     `json:"last_from,omitempty"`
+}
+
+// How a device's channel key was pinned (Device.ChannelPinned).
+const (
+	PinnedPaired  = "paired"
+	PinnedInPlace = "in_place"
+)
+
+// Sealed is the device's channel state as the device list words it:
+// "sealed (paired)", "sealed (in place)", or "" for a device that pins
+// no key.
+func (d Device) Sealed() string {
+	switch {
+	case d.ChannelKey == "":
+		return ""
+	case d.ChannelPinned == PinnedInPlace:
+		return "sealed (in place)"
+	}
+	return "sealed (paired)"
+}
+
+// withPinned is d as it is answered: a pinned key with no word of how
+// is one a pairing pinned, since pairings were the only pin before
+// the word was kept.
+func withPinned(d Device) Device {
+	if d.ChannelKey != "" && d.ChannelPinned == "" {
+		d.ChannelPinned = PinnedPaired
+	}
+	return d
 }
 
 // Unused reports whether the device has not been used for DeviceUnusedAfter
@@ -195,6 +235,9 @@ func putDevice(w *wtx, out *NewDevice, user, name, actor, channelKey string, ext
 	}
 	hash := tokenHash(out.Token)
 	out.Device = Device{User: user, Name: name, CreatedAt: now(), CreatedBy: actor, ChannelKey: channelKey}
+	if channelKey != "" {
+		out.Device.ChannelPinned = PinnedPaired
+	}
 	if err := put(w.Tx, bDevices, join(user, name), deviceRecord{Device: out.Device, TokenSHA256: hash}); err != nil {
 		return err
 	}
@@ -226,7 +269,7 @@ func (s *Store) Devices(ctx context.Context, user string) ([]Device, error) {
 			prefix = user + "\x00"
 		}
 		return each(tx, bDevices, prefix, func(_ []byte, d *deviceRecord) error {
-			out = append(out, d.Device)
+			out = append(out, withPinned(d.Device))
 			return nil
 		})
 	})
@@ -281,7 +324,8 @@ func (s *Store) RemoveDevice(ctx context.Context, user, name, actor string) (*De
 		if err := w.queueFootRemove(user, name); err != nil {
 			return err
 		}
-		out = &d.Device
+		removed := withPinned(d.Device)
+		out = &removed
 		return w.event("", "device_removed", actor, map[string]any{"user": user, "device": name})
 	})
 	return out, err
@@ -320,7 +364,8 @@ func dropDevices(w *wtx, name string, data map[string]any) error {
 }
 
 // DeviceByChannelKey answers the device whose pinned channel public
-// key (Device.ChannelKey, set by a sealed pairing redemption) is key:
+// key (Device.ChannelKey, set by a sealed pairing redemption or by
+// PinChannelKeyInPlace) is key:
 // the device a channel handshake that proved that key speaks for. Nil
 // for a key no live device record pins. Like ResolveDevice it is the
 // server's to ask, for a handshake it was sent, and no method of the
@@ -333,12 +378,86 @@ func (s *Store) DeviceByChannelKey(ctx context.Context, key string) (*Device, er
 	err := s.read(func(tx *bolt.Tx) error {
 		return each(tx, bDevices, "", func(_ []byte, d *deviceRecord) error {
 			if d.ChannelKey == key {
-				found = &d.Device
+				pinned := withPinned(d.Device)
+				found = &pinned
 			}
 			return nil
 		})
 	})
 	return found, err
+}
+
+// PinChannelKeyInPlace pins key, a device's X25519 channel public key,
+// on the device token is of, recorded PinnedInPlace: the in-place
+// migration of a device paired before the channel (docs/design/
+// 2026-11-05-yardr-device-e2e.md, section 3.4), which from then on
+// handshakes with that key as a device paired by QR does. The token
+// is the only proof of the device, so the edge that carries the call
+// could have put its own key here; the record says so for as long as
+// the device keeps it.
+//
+// It pins once. A device that pins a key already is refused, with the
+// same key or another, whether a pairing or an earlier call pinned
+// it: a second call is how the edge would swap a device's key, and
+// the answer to the first is not given again. A key that is no
+// encoding of 32 bytes is refused, and so is one another device pins,
+// which would put that device's handshakes on this record. The device
+// is found, judged and pinned in one write, and under s.devPair.mu,
+// which the pairings that pin hold too (redeemDevicePairingPAKE). Like
+// ResolveDevice it is the server's to ask, for a request it was sent,
+// and no method of the API.
+func (s *Store) PinChannelKeyInPlace(ctx context.Context, token, key string) (*Device, error) {
+	if raw, err := enc.Strict().DecodeString(key); err != nil || len(raw) != 32 {
+		return nil, fmt.Errorf("%q is no channel public key: send the base64url of the device's 32-byte X25519 public key", clipErr(key))
+	}
+	if !strings.HasPrefix(token, DeviceTokenPrefix) {
+		return nil, fmt.Errorf("the token is of no device: %w", ErrNotFound)
+	}
+	s.devPair.mu.Lock()
+	defer s.devPair.mu.Unlock()
+	var out *Device
+	err := s.write(func(w *wtx) error {
+		var ref deviceRef
+		if ok, err := get(w.Tx, bDeviceTokens, tokenHash(token), &ref); err != nil {
+			return err
+		} else if !ok {
+			return fmt.Errorf("the token is of no device: %w", ErrNotFound)
+		}
+		k := join(ref.User, ref.Name)
+		var d deviceRecord
+		if ok, err := get(w.Tx, bDevices, k, &d); err != nil {
+			return err
+		} else if !ok || subtle.ConstantTimeCompare([]byte(d.TokenSHA256), []byte(tokenHash(token))) != 1 {
+			return fmt.Errorf("the token is of no device: %w", ErrNotFound)
+		}
+		if d.ChannelKey != "" {
+			how := "at its pairing"
+			if d.ChannelPinned == PinnedInPlace {
+				how = "in place"
+			}
+			return fmt.Errorf("%w: the device %s of %s pins a channel key already, %s; a key is registered in place once, and only by a device that pins none. Pair it again by QR to change its key", ErrConflict, ref.Name, ref.User, how)
+		}
+		var other bool
+		if err := each(w.Tx, bDevices, "", func(_ []byte, o *deviceRecord) error {
+			other = other || o.ChannelKey == key
+			return nil
+		}); err != nil {
+			return err
+		}
+		if other {
+			return fmt.Errorf("%w: the channel key is pinned by another device; make a new key pair on the device", ErrConflict)
+		}
+		d.ChannelKey, d.ChannelPinned = key, PinnedInPlace
+		if err := put(w.Tx, bDevices, k, d); err != nil {
+			return err
+		}
+		out = &d.Device
+		return w.event("", "device_channel_pinned", "yard", map[string]any{"user": ref.User, "device": ref.Name, "pinned": PinnedInPlace})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ResolveDevice answers the device a token is of, and so the user a call

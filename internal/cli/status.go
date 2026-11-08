@@ -594,7 +594,7 @@ func (r *statusReport) parts() []statusPart {
 	if len(r.Devices) > 0 {
 		var rows [][]string
 		for _, d := range r.Devices {
-			rows = append(rows, []string{d.User, d.Name, "last used " + lastUsed(d)})
+			rows = append(rows, []string{d.User, d.Name, "last used " + lastUsed(d) + sealed(d)})
 		}
 		parts = append(parts, statusPart{"devices", columns(rows)})
 	}

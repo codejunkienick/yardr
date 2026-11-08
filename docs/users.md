@@ -1078,6 +1078,10 @@ most one for a reason in ten minutes.
 **Where they are listed.** `yardr user device list`; `yardr user show
 <name>`, one line a device (`device: phone, added 10-12 19:02, last used
 10-12 19:40 from 100.64.0.7`); and `yardr status`, in its part `devices`.
+A device that pins a channel key is said to be `sealed (paired)` after its
+last use where it pinned the key at a pairing, and `sealed (in place)` where
+it registered it with its token ([below](#sealed-in-place)); a device that
+pins none is said to be neither.
 The events are `device_added` and `device_removed`, about no bead, each
 with `user` and `device`; a pairing's are [below](#enrolled-by-a-code).
 
@@ -1402,6 +1406,45 @@ The events, about no bead, each with `pairing`, `user` and `device`:
 pairing that ended with no device, with `reason` (`wrong_code`, `timed_out`,
 `closed`, `not_added`) and `wrong_codes` when there were any. The
 `device_added` of a device enrolled so names its `pairing`.
+
+### Sealed in place
+
+A device paired before the yard had a channel, plainly or by a token added
+by hand, holds a token and no channel key. Updated, it makes its key pair
+and registers the public half once, in a call its token authenticates
+(`RegisterChannelKey`, [api.md](api.md#a-channel-key-registered-in-place)).
+The yard pins the key on the device's record and answers its own channel key
+signed by its identity; from then on the device's calls are sealed, as a
+device paired by the QR's key calls.
+
+What it does not have is a QR's guarantee. The edge carries that one call,
+and an edge active at it, putting its own key in place of the device's or of
+the yard's, could hold the device's channel: read every call the device
+makes from then on, undetected, until the device is re-paired by QR. An edge
+that only logged the call cannot. So the device list keeps the difference:
+
+```text
+$ yardr user device list
+USER  DEVICE  ADDED        LAST USED
+sam   phone   11-05 09:12  11-05 09:40 from the edge, sealed (paired)
+sam   tablet  10-28 18:03  11-04 22:15 from the edge, sealed (in place)
+```
+
+The label lasts for as long as the device keeps the key it registered.
+Re-pairing it by QR lifts it (`yardr user device rm`, then `yardr user
+device pair --qr`); re-pairing is never required.
+
+The registration is refused, leaving the record as it was, for a device that
+pins a key already, whether a pairing or an earlier registration pinned it,
+with the same key or another: it is registered once, and cannot be replayed
+to take a device back to plain. It is refused for a key that is no X25519
+public key and for one another device pins, and by a yard that cannot read
+or make its channel key, or read its identity key to sign it with, which
+says why. It is the one plain device
+call the yard still takes down the link from the edge beside the pairing
+redemption. `yardr user device rm` deletes the pinned key with the token,
+as for a device paired by QR. The event is `device_channel_pinned`, with
+`user`, `device` and `pinned` (`in_place`).
 
 ## A conversation
 

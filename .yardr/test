@@ -1806,7 +1806,7 @@ internal/dispatch/dispatch.go 1567 the daemon routing pass and its runners
 internal/dispatch/harnesslogin.go 1094 harness login leading and onboarding marks
 internal/pack/export.go 1047 pack export and its object shapes
 internal/pack/pack.go 1777 pack reading, checking and its shapes
-internal/rpc/user.go 1469 the user server and callers (pairing is userpair.go, envelopes usere2e.go)
+internal/rpc/user.go 1460 the user server and callers (pairing is userpair.go, envelopes usere2e.go)
 internal/source/declaration.go 1278 source declarations, credentials and calls
 internal/standin/standin.go 1540 the fake Linear, GitHub and edge APIs
 internal/store/asks.go 1777 ask and answer parsing and storage

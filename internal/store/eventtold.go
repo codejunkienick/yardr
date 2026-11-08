@@ -156,20 +156,21 @@ var eventDataTold = map[string][]string{
 	// operator's configuration, though the user is the one told through it, and
 	// so are the files the login of a removed user named, which stay on disk
 	// when the user goes: the names of what went with them are the yard's news.
-	"user_added":          {"user", "approved"},
-	"user_removed":        {"user", "approved", "as_grants", "devices", "unexposed", "unreached", "untrusted", "login.groups", "login.routes", "login.crew"},
-	"user_set":            {"user", "approved", "notify", "tell"},
-	"device_added":        {"device", "user", "pairing"},
-	"device_removed":      {"device", "user"},
-	"device_pair_opened":  {"device", "user", "pairing", "expires", "wrong_codes"},
-	"device_pair_refused": {"device", "user", "pairing", "reason", "wrong_codes"},
-	"identity_set":        {"user", "crew", "source", "id", "key", "approved"},
-	"identity_removed":    {"user", "crew", "source", "id"},
-	"subscribed":          {"crew", "group", "user", "subscription", "approved"},
-	"unsubscribed":        {"crew", "group", "user", "subscriptions"},
-	"sender_unignored":    {"approved", "sender", "source"},
-	"notifications_read":  {"reader", "through"},
-	"push_failed":         {"reason", "seqs", "source", "status", "tries", "user"},
+	"user_added":            {"user", "approved"},
+	"user_removed":          {"user", "approved", "as_grants", "devices", "unexposed", "unreached", "untrusted", "login.groups", "login.routes", "login.crew"},
+	"user_set":              {"user", "approved", "notify", "tell"},
+	"device_added":          {"device", "user", "pairing"},
+	"device_removed":        {"device", "user"},
+	"device_channel_pinned": {"device", "user", "pinned"},
+	"device_pair_opened":    {"device", "user", "pairing", "expires", "wrong_codes"},
+	"device_pair_refused":   {"device", "user", "pairing", "reason", "wrong_codes"},
+	"identity_set":          {"user", "crew", "source", "id", "key", "approved"},
+	"identity_removed":      {"user", "crew", "source", "id"},
+	"subscribed":            {"crew", "group", "user", "subscription", "approved"},
+	"unsubscribed":          {"crew", "group", "user", "subscriptions"},
+	"sender_unignored":      {"approved", "sender", "source"},
+	"notifications_read":    {"reader", "through"},
+	"push_failed":           {"reason", "seqs", "source", "status", "tries", "user"},
 
 	// Mail goes whole to its parties, as the listener decides who they are
 	// (rpc.UserServer.deviceEvent), and to no one else.

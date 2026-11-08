@@ -625,3 +625,98 @@ func TestDevicePairOpenSelfRefusals(t *testing.T) {
 		t.Fatal("a refused pairing is open")
 	}
 }
+
+// A device paired before the channel registers its key once, by its
+// token: the record pins it, recorded in place, and a channel
+// handshake that proves it names the device. Every second
+// registration is refused and leaves the record as it was — the same
+// key, another key, and a device a pairing pinned — and so is a key
+// that is none and one another device pins. Removing the device
+// takes the key with the token.
+func TestDevicePinChannelKeyInPlace(t *testing.T) {
+	t.Parallel()
+	api, own := deviceYard(t)
+	ctx := context.Background()
+	newKey := func() string {
+		t.Helper()
+		k, err := yardkey.GenerateChannelKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return yardkey.ChannelPublic(k)
+	}
+	tablet, err := api.AddDevice(ctx, "ada", "tablet", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := api.Devices(ctx, "ada"); err != nil || len(got) != 1 || got[0].ChannelPinned != "" || got[0].Sealed() != "" {
+		t.Fatalf("an unsealed device lists as %+v, %v, want no pin and no label", got, err)
+	}
+	for _, bad := range []string{"", "not a key", yardkey.ChannelPublic(yardkey.ChannelKey{Public: make([]byte, 31)})} {
+		if d, err := own.PinChannelKeyInPlace(ctx, tablet.Token, bad); d != nil || err == nil || !strings.Contains(err.Error(), "is no channel public key") {
+			t.Fatalf("pinning %q = %+v, %v, want no channel public key", bad, d, err)
+		}
+	}
+	if d, err := own.PinChannelKeyInPlace(ctx, "yardr-dev-nobody", newKey()); d != nil || !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("pinning by a token of no device = %+v, %v, want not found", d, err)
+	}
+
+	// A device a pairing pinned: refused, and its key is not another's to take.
+	opened, err := api.DevicePairOpen(ctx, "ada", "phone", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	phoneKey := newKey()
+	phone, err := own.DevicePairRedeemSealed(ctx, opened.Code, phoneKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if phone.ChannelPinned != store.PinnedPaired {
+		t.Fatalf("a sealed pairing pins %q, want paired", phone.ChannelPinned)
+	}
+	if d, err := own.PinChannelKeyInPlace(ctx, phone.Token, newKey()); d != nil || !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "already, at its pairing") {
+		t.Fatalf("pinning a paired device's key = %+v, %v, want refused", d, err)
+	}
+	if d, err := own.PinChannelKeyInPlace(ctx, tablet.Token, phoneKey); d != nil || !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "pinned by another device") {
+		t.Fatalf("pinning the phone's key on the tablet = %+v, %v, want refused", d, err)
+	}
+
+	key := newKey()
+	d, err := own.PinChannelKeyInPlace(ctx, tablet.Token, key)
+	if err != nil || d.User != "ada" || d.Name != "tablet" || d.ChannelKey != key || d.ChannelPinned != store.PinnedInPlace {
+		t.Fatalf("pinning the tablet's key = %+v, %v", d, err)
+	}
+	if got, err := own.DeviceByChannelKey(ctx, key); err != nil || got == nil || got.Name != "tablet" || got.Sealed() != "sealed (in place)" {
+		t.Fatalf("DeviceByChannelKey(the key pinned in place) = %+v, %v", got, err)
+	}
+	for _, again := range []string{key, newKey()} {
+		if d, err := own.PinChannelKeyInPlace(ctx, tablet.Token, again); d != nil || !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "already, in place") {
+			t.Fatalf("pinning the tablet again = %+v, %v, want refused", d, err)
+		}
+	}
+	list, err := api.Devices(ctx, "ada")
+	if err != nil || len(list) != 2 {
+		t.Fatal(list, err)
+	}
+	labels := map[string]string{}
+	for _, d := range list {
+		labels[d.Name] = d.Sealed()
+	}
+	if labels["phone"] != "sealed (paired)" || labels["tablet"] != "sealed (in place)" || list[1].ChannelKey != key {
+		t.Fatalf("the list = %+v, want the phone paired and the tablet in place on its first key", list)
+	}
+	pinned, err := api.EventsOfKind(ctx, "device_channel_pinned", 10)
+	if err != nil || len(pinned) != 1 || pinned[0].Data["device"] != "tablet" || pinned[0].Data["pinned"] != store.PinnedInPlace {
+		t.Fatalf("device_channel_pinned events = %+v, %v", pinned, err)
+	}
+
+	if _, err := api.RemoveDevice(ctx, "ada", "tablet", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := own.DeviceByChannelKey(ctx, key); err != nil || got != nil {
+		t.Fatalf("DeviceByChannelKey after the removal = %+v, %v, want none", got, err)
+	}
+	if got, err := own.ResolveDevice(ctx, tablet.Token, ""); err != nil || got != nil {
+		t.Fatalf("the removed tablet's token resolves to %+v, %v", got, err)
+	}
+}

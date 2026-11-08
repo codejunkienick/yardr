@@ -724,7 +724,33 @@ var apiCalls = []apiCall{
 		},
 		after: "The list is in the order the source named the files. A file is recorded once the fetch of all the delivery's files has ended, so the list is whole when it is there at all.",
 	},
+	{
+		method: "RegisterChannelKey",
+		says: "Registers the calling device's channel public key in place: the one call a device paired before the yard had a channel makes, with the token it holds, to seal its calls from then on ([in place](#a-channel-key-registered-in-place)). The yard pins the key on the device's record, recorded as pinned in place, and answers its own channel public key signed by its identity. It registers only the device whose token makes it; no argument names a device. " +
+			"It is served on the listener alone, and down the link from the edge plain: the socket, which holds no device token, answers it as a method the yard does not have. It answers no voucher: the device asks for one afterwards, sealed ([`POST /user/push/voucher`](#a-registration-voucher)). " +
+			"Refused, with the record unchanged: a device that pins a key already, whether a pairing or an earlier registration pinned it, with the same key or another (`conflict`; a call that came sealed is from such a device); a key another device pins (`conflict`); a key that is no base64url of 32 bytes; and by a yard that cannot read or make its channel key, or read its identity key to sign it with, which says which.",
+		args:     []field{{"channel_key", "string", "the device's X25519 channel public key: the base64url, unpadded, of its 32 bytes"}},
+		requests: []string{`{"channel_key":"` + apiDeviceChannelKey + `"}`},
+		fields: []field{
+			{"user", "string", "the device's user"},
+			{"device", "string", "the device's name"},
+			{"channel_key", "string", "the yard's channel public key, base64url: the key the device handshakes to from then on"},
+			{"channel_signature", "string", "the yard identity's ed25519 signature over `yardr channel key v1`, a line break, and `channel_key`, base64url"},
+			{"yard_key", "string", "the yard identity's public key, base64url, which `channel_signature` verifies against"},
+		},
+		after: "The device list says `sealed (in place)` of the device from then on, against `sealed (paired)` for one that pinned its key at a pairing: an edge active at this one call could put its own key in place of the device's, or of the yard's, and so hold the device's channel until it is re-paired by QR. Re-pairing lifts the label, and is never required.",
+	},
 }
+
+// apiDeviceChannelKey is the channel public key the doc's device
+// registers: the base64url of the 32 bytes 65 to 96.
+var apiDeviceChannelKey = func() string {
+	raw := make([]byte, 32)
+	for i := range raw {
+		raw[i] = byte(65 + i)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw)
+}()
 
 // apiOperatorCalls are the calls of the doc that OperatorCalls names:
 // documented and held to the server as apiCalls are, on the socket and on
@@ -1989,7 +2015,23 @@ func apiSetupSource(name string) string {
 func overNetwork(t *testing.T, st *store.Store, token string) *http.Client {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.Handle(UserPath, NewUserServer(st, func(context.Context) string { return "south" }, nil).Handler())
+	u := NewUserServer(st, func(context.Context) string { return "south" }, nil)
+	// The doc's keys, so what RegisterChannelKey answers reads the same
+	// on every run: the identity is the voucher vector's (seed 1 to 32),
+	// and the channel key's private half is the 32 bytes 33 to 64.
+	dir := t.TempDir()
+	identity, channel := make([]byte, 32), make([]byte, 32)
+	for i := range identity {
+		identity[i], channel[i] = byte(1+i), byte(33+i)
+	}
+	for name, raw := range map[string][]byte{"peer.key": identity, "channel.key": channel} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(base64.StdEncoding.EncodeToString(raw)+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	u.SetIdentityKeyFile(filepath.Join(dir, "peer.key"))
+	u.SetChannelKeyFile(filepath.Join(dir, "channel.key"))
+	mux.Handle(UserPath, u.Handler())
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return &http.Client{Transport: asDevice{srv.URL, token}}
@@ -2062,6 +2104,16 @@ func networkRefusal(method string) (want string, ok bool) {
 	return "", false
 }
 
+// socketRefusal is networkRefusal's other half: the refusal the socket
+// answers for a call a device's token alone makes (listenerOnly), which
+// is no method there.
+func socketRefusal(method string) (want string, ok bool) {
+	if listenerOnly[method] {
+		return "no such method " + method, true
+	}
+	return "", false
+}
+
 // runAPI makes every call of apiCalls against a fresh apiYard, in order,
 // then reads the stream from its beginning: through the socket, or with
 // network through the listener's handler as jo's device.
@@ -2100,19 +2152,21 @@ func runAPI(t *testing.T, network bool) *apiRun {
 				last, _ := at(run.replies[from][0], "last")
 				body = fmt.Sprintf(body, mustInt(t, last[0]))
 			}
+			refusal := socketRefusal
 			if network {
-				if want, ok := networkRefusal(c.method); ok {
-					raw := post(t, hc, c.method, body)
-					reply, ok := parse(t, raw).(object)
-					if !ok {
-						t.Fatalf("%s %s: the reply is no object: %s", c.method, body, raw)
-					}
-					got, _ := at(reply, "error.message")
-					if len(got) != 1 || got[0] != want {
-						t.Fatalf("%s %s: refused %s, want %q", c.method, body, raw, want)
-					}
-					continue
+				refusal = networkRefusal
+			}
+			if want, ok := refusal(c.method); ok {
+				raw := post(t, hc, c.method, body)
+				reply, ok := parse(t, raw).(object)
+				if !ok {
+					t.Fatalf("%s %s: the reply is no object: %s", c.method, body, raw)
 				}
+				got, _ := at(reply, "error.message")
+				if len(got) != 1 || got[0] != want {
+					t.Fatalf("%s %s: refused %s, want %q", c.method, body, raw, want)
+				}
+				continue
 			}
 			var reply object
 			raw := post(t, hc, c.method, body)
@@ -2211,10 +2265,16 @@ func TestCallsAreTheDocs(t *testing.T) {
 	// What the listener serves every device is Calls, as it was before
 	// there was a second list, and a device of the operator nine of the
 	// twelve calls of OperatorCalls besides; the socket's own three it
-	// answers as no method at all: a call is added to either on purpose,
-	// here too.
-	if len(Calls) != 26 || len(OperatorCalls) != 12 {
-		t.Errorf("Calls has %d calls and OperatorCalls %d, want 26 and 12", len(Calls), len(OperatorCalls))
+	// answers as no method at all, and the socket answers so the one call
+	// of Calls a device's token alone makes (listenerOnly): a call is
+	// added to either on purpose, here too.
+	if len(Calls) != 27 || len(OperatorCalls) != 12 || len(listenerOnly) != 1 {
+		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 27, 12 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
+	}
+	for name := range listenerOnly {
+		if _, ok := Calls[name]; !ok {
+			t.Errorf("%s is listener-only and not in Calls", name)
+		}
 	}
 	for name := range OperatorCalls {
 		if _, both := Calls[name]; both {
@@ -2226,6 +2286,7 @@ func TestCallsAreTheDocs(t *testing.T) {
 func callsAreTheDocs(t *testing.T, list string, Calls map[string][]string, apiCalls []apiCall) {
 	api := reflect.TypeOf((*store.API)(nil)).Elem()
 	served := newAPI(nil, StreamWriteTimeout).methods
+	listener := NewUserServer(nil, nil, nil).api.methods
 	documented := map[string]bool{}
 	for _, c := range apiCalls {
 		documented[c.method] = true
@@ -2247,6 +2308,8 @@ func callsAreTheDocs(t *testing.T, list string, Calls map[string][]string, apiCa
 		} else if s, ok := served[c.method]; ok {
 			// Arrivals and Flows are served on the socket but
 			// computed over the store API, not in it.
+			numIn = s.fn.Type().NumIn() - 1
+		} else if s, ok := listener[c.method]; ok && listenerOnly[c.method] {
 			numIn = s.fn.Type().NumIn() - 1
 		} else {
 			t.Errorf("%s is no method of store.API", c.method)
@@ -2354,11 +2417,11 @@ func TestAPIContract(t *testing.T) {
 
 func checkContract(t *testing.T, run *apiRun, network bool) {
 	for _, c := range append(slices.Clone(apiCalls), apiOperatorCalls...) {
-		if network && socketOnly[c.method] {
+		if network && socketOnly[c.method] || !network && listenerOnly[c.method] {
 			// Every request was refused as no method at all
-			// (networkRefusal), so no reply stands to check.
+			// (networkRefusal, socketRefusal), so no reply stands to check.
 			if len(run.replies[c.method]) != 0 {
-				t.Errorf("%s answers a device, want no such method", c.method)
+				t.Errorf("%s answers where it is no method", c.method)
 			}
 			continue
 		}
@@ -2446,6 +2509,11 @@ func TestCallByName(t *testing.T) {
 func TestAPIDoc(t *testing.T) {
 	const file = "../../docs/api.md"
 	run := runAPI(t, false)
+	// A call the socket does not serve is shown as a device makes it.
+	device := runAPI(t, true)
+	for name := range listenerOnly {
+		run.requests[name], run.replies[name], run.more[name] = device.requests[name], device.replies[name], device.more[name]
+	}
 	sections := map[string][]string{"calls": callsDoc(run, apiCalls), "local": callsDoc(run, apiOperatorCalls), "events": eventsDoc(run), "errors": errorsDoc(run)}
 	body, err := os.ReadFile(file)
 	if err != nil {

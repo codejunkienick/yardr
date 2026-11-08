@@ -21,7 +21,8 @@ const ClientHeader = "X-Yardr-Client"
 // shows a person's decisions needs (UserAsks, Bead and the writes); and
 // what a client that shows a kept hook delivery's files needs (DeliveryFiles,
 // with the hook_files event to read it again on; the bytes are the blob
-// route's).
+// route's); and what a device paired before the channel needs to seal its
+// calls (RegisterChannelKey, served on the listener alone: listenerOnly).
 // Every other method is yardr's own, changes with its builds,
 // and takes its arguments as yardr sends them, in an array.
 //
@@ -55,6 +56,16 @@ var Calls = map[string][]string{
 	"TakeBackAsk":          {"bead", "ask", "reason", "actor"},
 	"AddNote":              {"bead", "text", "actor", "files"},
 	"DeliveryFiles":        {"seq"},
+	"RegisterChannelKey":   {"channel_key"},
+}
+
+// listenerOnly are the calls of Calls the socket does not serve: a
+// device's own, made with the token the listener resolved, which no
+// caller on the socket has. RegisterChannelKey pins the calling
+// device's channel key in place (userchannel.go); on the socket it is
+// no method at all.
+var listenerOnly = map[string]bool{
+	"RegisterChannelKey": true,
 }
 
 // OperatorCalls are documented as Calls are, and are an operator's alone

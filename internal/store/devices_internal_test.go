@@ -143,3 +143,43 @@ func TestDeviceResolveWhileWriteHeld(t *testing.T) {
 		t.Fatalf("ResolveDevice after the write = %+v, %v", got, err)
 	}
 }
+
+// A device record kept with a pinned key before the store wrote how
+// it was pinned is read as pinned at a pairing: pairings were the
+// only pin then, and the device list keeps its label.
+func TestDevicePinnedReadsPairedByDefault(t *testing.T) {
+	t.Parallel()
+	s, err := Open(filepath.Join(t.TempDir(), "y.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close(context.Background()) })
+	ctx := context.Background()
+	if err := s.SetSetting(ctx, OperatorSetting, "jo", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.AddDevice(ctx, "jo", "phone", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := enc.EncodeToString(make([]byte, 32))
+	err = s.write(func(w *wtx) error {
+		return put(w.Tx, bDevices, join("jo", "phone"), deviceRecord{
+			Device:      Device{User: "jo", Name: "phone", CreatedAt: d.CreatedAt, CreatedBy: "jo", ChannelKey: key},
+			TokenSHA256: tokenHash(d.Token),
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.Devices(ctx, "jo")
+	if err != nil || len(list) != 1 || list[0].ChannelPinned != PinnedPaired || list[0].Sealed() != "sealed (paired)" {
+		t.Fatalf("an old pinned record lists as %+v, %v, want paired", list, err)
+	}
+	if got, err := s.DeviceByChannelKey(ctx, key); err != nil || got == nil || got.ChannelPinned != PinnedPaired {
+		t.Fatalf("DeviceByChannelKey = %+v, %v, want paired", got, err)
+	}
+	if got, err := s.PinChannelKeyInPlace(ctx, d.Token, enc.EncodeToString(make([]byte, 32))); got != nil || err == nil || !strings.Contains(err.Error(), "at its pairing") {
+		t.Fatalf("pinning in place over an old pinned record = %+v, %v, want refused", got, err)
+	}
+}

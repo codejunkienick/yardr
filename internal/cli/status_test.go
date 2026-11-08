@@ -387,6 +387,19 @@ func TestStatusRunningYard(t *testing.T) {
 		!maps.Equal(w.Waiting, map[string]int{"backlog": 2, "decisions": 1}) {
 		t.Fatalf("work: %+v, peers: %+v", w, rep.Peers)
 	}
+	// Status lists devices too. Its keyed rows carry the same lasting label
+	// as user device list and user show; keyless rows stay as they were.
+	rep.Devices = []store.Device{
+		{User: "Jo", Name: "phone", ChannelKey: "key", ChannelPinned: store.PinnedInPlace},
+		{User: "Jo", Name: "tablet", ChannelKey: "key", ChannelPinned: store.PinnedPaired},
+		{User: "Jo", Name: "laptop"},
+	}
+	var deviceStatus strings.Builder
+	rep.print(&deviceStatus)
+	wantText(t, deviceStatus.String(),
+		"devices    Jo  phone   last used never, sealed (in place)\n",
+		"           Jo  tablet  last used never, sealed (paired)\n",
+		"           Jo  laptop  last used never\n")
 }
 
 // While a daemon_lost event stands with no start after it, status lists

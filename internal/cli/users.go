@@ -208,7 +208,7 @@ everything either way.`,
 					fmt.Fprintf(w, "  last told: %s\n", last)
 				}
 				for _, d := range v.Devices {
-					fmt.Fprintf(w, "  device: %s, added %s, last used %s\n", d.Name, d.CreatedAt.Local().Format(mailTime), lastUsed(d))
+					fmt.Fprintf(w, "  device: %s, added %s, last used %s\n", d.Name, d.CreatedAt.Local().Format(mailTime), lastUsed(d)+sealed(d))
 				}
 				printTimers(w, v.Timers, v.Name, "  ")
 			})
