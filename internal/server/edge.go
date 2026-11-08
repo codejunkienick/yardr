@@ -69,6 +69,9 @@ func KeepEdge(ctx context.Context, c *config.Config, st store.API, role string, 
 			links.set(nil)
 			stopLink, current = func() {}, v
 			if role == "" {
+				// A link that was up took its state away as it told its stop
+				// (startLink); one that was down left the state of why, which
+				// this takes away.
 				os.Remove(c.EdgeState())
 			}
 			if v == "" {
@@ -244,7 +247,14 @@ func startLink(ctx context.Context, c *config.Config, st store.API, l *edgelink.
 		role := l.Role
 		if role == "" {
 			role = "yard"
-			if err := edgelink.WriteState(c, s); err != nil {
+			if s.Reason == edgelink.DownStopped {
+				// A stopped link keeps no state, so the state is taken away
+				// here, ahead of the event, as every other change's state is
+				// written ahead of its event. KeepEdge removes it too, but only
+				// once the link has returned, after the event, and a reader
+				// that had seen the stop would find "down, stopped" until then.
+				os.Remove(c.EdgeState())
+			} else if err := edgelink.WriteState(c, s); err != nil {
 				l.Log.Warn("edge: the link's state is not written", "err", err)
 			}
 		}

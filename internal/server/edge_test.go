@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -137,6 +138,35 @@ func (s *edgeAwayStore) Subscribe(ctx context.Context, after uint64) (<-chan sto
 		}
 	}()
 	return out, nil
+}
+
+// edgeStateStore notes, for each edge_link_up and edge_link_down the yard logs,
+// whether the link's state file is there as the event is logged: what a reader
+// that has seen the event can read.
+type edgeStateStore struct {
+	store.API
+	c    *config.Config
+	mu   sync.Mutex
+	seen []string
+}
+
+func (s *edgeStateStore) LogDispatch(ctx context.Context, bead, kind, actor string, data map[string]any) error {
+	if strings.HasPrefix(kind, "edge_link_") {
+		state := "no state"
+		if _, err := os.Stat(s.c.EdgeState()); err == nil {
+			state = "state"
+		}
+		s.mu.Lock()
+		s.seen = append(s.seen, kind+": "+state)
+		s.mu.Unlock()
+	}
+	return s.API.LogDispatch(ctx, bead, kind, actor, data)
+}
+
+func (s *edgeStateStore) noted() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.seen)
 }
 
 func overLink(t *testing.T, l *standin.EdgeLink, path string, header http.Header, body string) standin.EdgeAnswer {
@@ -407,6 +437,34 @@ func TestEdgeLinkFollowsTheSettingBesideTheListener(t *testing.T) {
 			}
 		})
 	}
+	// The yard link's state changes before the event that tells the change, so
+	// whoever has seen the event reads the state that goes with it: for a stop,
+	// none. role= above reads it after the event, and a machine that runs the
+	// server late reads it before a removal that came after the event, so this
+	// notes the state as the event is logged, where no wait or load is in it.
+	t.Run("yard link tells its stop with its state gone", func(t *testing.T) {
+		edge, srv := stubEdge(t)
+		c := home(t)
+		ctx := context.Background()
+		_, value := edgeYard(t, c, edge, srv, false)
+		real := storetest.NewIn(t, c.Home)
+		logged := &edgeStateStore{API: real, c: c}
+		stop := KeepEdge(ctx, c, logged, "", http.NotFoundHandler(), slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+		defer stop()
+		if err := real.SetSetting(ctx, store.EdgeSetting, value, "jo"); err != nil {
+			t.Fatal(err)
+		}
+		nextLink(t, edge)
+		waitEvent(t, real, "edge_link_up", nil)
+		if err := real.SetSetting(ctx, store.EdgeSetting, "", "jo"); err != nil {
+			t.Fatal(err)
+		}
+		waitEvent(t, real, "edge_link_down", func(e store.Event) bool { return e.Data["reason"] == edgelink.DownStopped })
+		want := []string{"edge_link_up: state", "edge_link_down: no state"}
+		if got := logged.noted(); !slices.Equal(got, want) {
+			t.Errorf("the link's state as each event was logged = %q, want %q", got, want)
+		}
+	})
 	t.Run("web across a server replace", func(t *testing.T) {
 		edge, srv := stubEdge(t)
 		c := home(t)
