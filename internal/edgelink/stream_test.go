@@ -15,9 +15,11 @@ import (
 )
 
 // A live answer its handler flushes goes as the head, then one data frame
-// per flushed piece, then end when the handler returns. The edge's end for
-// the id cancels the request, which ends the handler there as a closed
-// connection does on the listener.
+// per flushed piece, then end when the handler returns. The head is marked
+// as a stream's, even when the flush came before any body: the edge answers
+// an ordinary call at its unmarked head, and would drop the pieces after it.
+// The edge's end for the id cancels the request, which ends the handler there
+// as a closed connection does on the listener.
 func TestLinkStreamsAFlushedAnswerAndCancelsItOnEnd(t *testing.T) {
 	t.Parallel()
 	returned := make(chan struct{})
@@ -39,8 +41,8 @@ func TestLinkStreamsAFlushedAnswerAndCancelsItOnEnd(t *testing.T) {
 	l := y.next(t)
 	f := l.Frame(http.MethodGet, "/user/events?after=0", nil, nil, false)
 	head := deliver(t, l, f)
-	if head.Status != http.StatusOK || head.Header.Get("Content-Type") != "application/x-ndjson" || len(head.Body) != 0 {
-		t.Fatalf("the head is %+v, want 200 ndjson with no first piece", head)
+	if !head.Stream || head.Status != http.StatusOK || head.Header.Get("Content-Type") != "application/x-ndjson" || len(head.Body) != 0 {
+		t.Fatalf("the head is %+v, want a streamed 200 ndjson with no first piece", head)
 	}
 	select {
 	case d := <-l.DataEvents():
@@ -131,7 +133,9 @@ func TestLinkStreamsUserEventsOverTheLink(t *testing.T) {
 }
 
 // A flushed piece larger than one frame follows a response head as data
-// frames that fit, instead of being mistaken for an oversized head.
+// frames that fit, instead of being mistaken for an oversized head. A body
+// written and then flushed, as a reverse proxy that flushes after every write
+// does it, is a stream too: its head is marked, with the body in the data.
 func TestLinkStreamsALargeFlushedPieceAsDataFrames(t *testing.T) {
 	t.Parallel()
 	body := strings.Repeat("x", 900<<10)
@@ -150,8 +154,8 @@ func TestLinkStreamsALargeFlushedPieceAsDataFrames(t *testing.T) {
 	l := y.next(t)
 	f := l.Frame(http.MethodGet, "/user/events", nil, nil, false)
 	head := deliver(t, l, f)
-	if head.Status != http.StatusCreated || len(head.Body) != 0 {
-		t.Fatalf("the response head is %+v, want 201 with no body", head)
+	if !head.Stream || head.Status != http.StatusCreated || len(head.Body) != 0 {
+		t.Fatalf("the response head is %+v, want a streamed 201 with no body", head)
 	}
 	var got strings.Builder
 	frames := 0

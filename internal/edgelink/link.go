@@ -44,12 +44,12 @@ import (
 //	edge → yard           {"type":"request","id","seq","method","path",
 //	                      "header","body","received","queued","sig"}
 //	yard → edge           {"type":"response","id","status","header","body"}
-//	                      (a live request: the head, and the whole answer
-//	                      when its handler never flushed)
+//	                      (a live request: the whole answer, when its
+//	                      handler never flushed)
 //	yard → edge           {"type":"response","id","status","header",
-//	                      "stream":true}   (a live answer that will not fit
-//	                      one frame: the head with an empty body, the body
-//	                      in data pieces, then end)
+//	                      "stream":true}   (a live answer its handler flushed
+//	                      or that will not fit one frame: the head with an
+//	                      empty body, the body in data pieces, then end)
 //	yard → edge           {"type":"data","id","body"}   (each piece of a
 //	                      live answer its handler flushed, in order)
 //	yard → edge           {"type":"end","id"}   (a live answer is over: its
@@ -313,9 +313,9 @@ type responseFrame struct {
 	Status int         `json:"status"`
 	Header http.Header `json:"header"`
 	Body   []byte      `json:"body"`
-	// Stream marks the head of an answer that will not fit one frame: its
-	// body is empty, and the body follows in data frames with the same id
-	// until end.
+	// Stream marks the head of an answer in pieces, flushed by its handler
+	// or too large for one frame: its body is empty, and the body follows
+	// in data frames with the same id until end. An unmarked head is whole.
 	Stream bool `json:"stream,omitempty"`
 }
 
@@ -737,10 +737,10 @@ func (w *answerWriter) Write(b []byte) (int, error) {
 }
 
 // streamWriter is a live request's answer as the edge takes a stream: the
-// head goes as a response, each flushed piece as data, and end when the
-// handler returns (finish). A handler that never flushes is answered whole.
-// Writes go under the link's context, so they outlive the request's own
-// cancel.
+// head goes as a response marked stream, each flushed piece as data, and end
+// when the handler returns (finish). A handler that never flushes is answered
+// whole. Writes go under the link's context, so they outlive the request's
+// own cancel.
 type streamWriter struct {
 	l   *Link
 	c   *websocket.Conn
@@ -772,9 +772,9 @@ func (w *streamWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// Flush sends the head on the first call, then what the handler wrote since
-// the last flush as data. A flush with nothing new sends the head alone, so
-// the edge has it while the stream is still quiet.
+// Flush sends the head on the first call, marked as a stream's, then what
+// the handler wrote since the last flush as data. A flush with nothing new
+// sends the head alone, so the edge has it while the stream is still quiet.
 func (w *streamWriter) Flush() {
 	if w.status == 0 {
 		w.status = http.StatusOK
@@ -785,7 +785,7 @@ func (w *streamWriter) Flush() {
 	}
 	if !w.head {
 		w.head = true
-		w.refused = !w.sendResponse(w.status, w.header, nil)
+		w.refused = !w.sendResponse(w.status, w.header, nil, true)
 	}
 	if len(w.since) > 0 && !w.refused {
 		w.sendData(w.since)
@@ -817,7 +817,7 @@ func (w *streamWriter) finish() {
 		if w.failed {
 			body = nil
 		}
-		w.sendResponse(w.status, w.header, body)
+		w.sendResponse(w.status, w.header, body, false)
 	} else if len(w.since) > 0 && !w.failed && !w.refused {
 		w.sendData(w.since)
 	}
@@ -829,15 +829,16 @@ func (w *streamWriter) finish() {
 	}
 }
 
-// sendResponse sends the head and says whether its frame is the whole
-// answer. An answer that encodes past maxFrame is never sent in one frame:
-// it goes as a stream instead, the head marked with stream and an empty
-// body, then the body in data frames, so one large answer crosses the link
-// instead of closing it. Only a head that alone is too large, its headers,
-// is answered 413, with a short error. A stream and a 413 both report
-// false, so the caller sends no more of the answer after either.
-func (w *streamWriter) sendResponse(status int, header http.Header, body []byte) bool {
-	b, err := json.Marshal(responseFrame{Type: "response", ID: w.id, Status: status, Header: header, Body: body})
+// sendResponse sends the head and says whether its frame went as asked. A
+// flushed answer's head is asked with stream: the edge opens a stream for a
+// call only at a marked head, and answers at an unmarked one whole. A whole
+// answer that encodes past maxFrame is never sent in one frame: it goes as
+// a stream too, the head marked and empty, then data frames, so one large
+// answer crosses the link instead of closing it. Only a head that alone is
+// too large, its headers, is answered 413, with a short error. A stream it
+// made and a 413 both report false, so the caller sends no more after either.
+func (w *streamWriter) sendResponse(status int, header http.Header, body []byte, stream bool) bool {
+	b, err := json.Marshal(responseFrame{Type: "response", ID: w.id, Status: status, Header: header, Body: body, Stream: stream})
 	if err != nil {
 		w.quiet = true
 		w.l.Log.Warn("edge link: an answer that encodes to nothing, dropped", "id", text(w.id), "err", err)

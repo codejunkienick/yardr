@@ -40,8 +40,8 @@ type EdgeFrame struct {
 }
 
 // EdgeAnswer is a yard's response frame. Stream marks the head of an answer
-// that will not fit one frame: its body is empty, and the body follows in
-// data frames with the same id until end.
+// in pieces, flushed by its handler or too large for one frame: its body is
+// empty, and the body follows in data frames with the same id until end.
 type EdgeAnswer struct {
 	ID     string      `json:"id"`
 	Status int         `json:"status"`

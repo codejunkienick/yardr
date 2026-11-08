@@ -204,8 +204,9 @@ func hook(name string) (string, http.Header, []byte) {
 
 // Frames from the edge, in the order it numbers them, are each served by
 // the handler from RemoteAddr, with the sender's headers and body, and the
-// handler's answer goes back whole on the frame's id. The link says it is
-// up once welcomed.
+// handler's answer, which never flushes, goes back whole on the frame's id:
+// one response with its body, not marked as a stream's head. The link says
+// it is up once welcomed.
 func TestLinkServesTheEdgesFramesInOrder(t *testing.T) {
 	t.Parallel()
 	for _, role := range []string{"", "web"} {
@@ -224,7 +225,7 @@ func TestLinkServesTheEdgesFramesInOrder(t *testing.T) {
 				path, h, body := hook(name)
 				f := l.Frame(http.MethodPost, path+"?n=1", h, body, false)
 				a := deliver(t, l, f)
-				if a.ID != f.ID || a.Status != http.StatusAccepted || string(a.Body) != "seen "+path || a.Header.Get("X-Seen") != path {
+				if a.ID != f.ID || a.Status != http.StatusAccepted || string(a.Body) != "seen "+path || a.Header.Get("X-Seen") != path || a.Stream {
 					t.Errorf("frame %d answered %+v", f.Seq, a)
 				}
 				want = append(want, path+"?n=1")
