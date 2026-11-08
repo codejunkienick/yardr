@@ -254,7 +254,7 @@ Not printed on a home with no yard.
 | `note yardmaster <name> is stopped (disabled). Let it run again: yardr crew start <name>` | stopped on purpose: no fault |
 | `FAULT yardmaster <name> is not running: <N> failed starts so far, the last with: <reason>. Once that is fixed: yardr crew start <name>` | its starts fail; `the daemon gave up after <N> tries` once it has. A session gone within 60 seconds of its start is a failed start, with the reason `the session ended <time> after its start (…)` ([crew.md](crew.md)) |
 | `FAULT yardmaster <name> is not running: the daemon starts it` | no daemon |
-| `FAULT yardmaster <name> is not running, and no start has failed: the daemon may still be at it (yardr crew list)` | |
+| `FAULT yardmaster <name> is not running, and no start has failed: the daemon may still be at it (yardr crew list)` | the daemon takes its lock before it starts the yardmaster, so on a slow machine this is a moment's state, and the next report may not have it. The [server script](../contrib/server-yard/README.md) asks again while doctor says exactly this, so these words are what it waits on |
 | `FAULT crew <name> is not running: …` | another crew member whose starts fail, as for the yardmaster |
 | `FAULT crew <name> is not logged in: run <harness> in another terminal and log in there; then answer the login in its pane or start it fresh (yardr crew restart <name>)` | the crew member's session runs, and its pane shows its harness's login screen: one line per such crew member, the yardmaster included (whose own line still says it runs). `<harness>` is the kind's command (`claude`, `codex`, …) |
 | `ok crew <N>, none failing to start` | |

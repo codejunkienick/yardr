@@ -25,7 +25,7 @@ On a machine that has yardr, herdr, git and a harness on PATH it:
    without it, the yard keeps the harness's unattended flags as any yard
    made by hand does;
 4. installs the daemon and the web view as login services, and waits for
-   the daemon the service manager starts;
+   the daemon the service manager starts, and for the yardmaster it starts;
 5. ends with `yardr doctor`.
 
 Behind an egress proxy the unit carries the variables yardr hands on
@@ -55,7 +55,7 @@ script that goes on without the harness login cannot wait for. `yardr doctor
 
 Where a step cannot be taken it stops with exit status 1 and says what to
 do, the first two before it writes anything, the third before it creates the
-yard and the last after, before doctor:
+yard and the last two after, before doctor:
 
 - a program is not on PATH: the ones that are in `~/.local/bin`, which a
   shell without a profile (`ssh host server-yard`) lacks, are named apart,
@@ -70,7 +70,12 @@ yard and the last after, before doctor:
   status` says and where to look (`<home>/daemon.log`, `journalctl --user -u
   'yardr-daemon-*'`). A daemon that does not come up is a failure, not a
   missing piece like the login, so the run ends there and does not go on to
-  doctor.
+  doctor;
+- the yardmaster is not started a minute after the daemon is up (the same
+  `SERVER_YARD_DAEMON_WAIT`, counted on the clock): the run says so, with
+  where to look (`<home>/daemon.log`, `yardr crew list`), and ends there as
+  for a daemon. A yardmaster whose session runs and whose harness is not
+  logged in is started, and is doctor's to report.
 
 The harness login is the operator's step, in the yardmaster's pane once the
 yard exists (`herdr agent attach <yard>-yardmaster`), and the script does
@@ -81,8 +86,13 @@ word is doctor's, and so is the exit status: 0 when doctor names no fault,
 the run below). Doctor is asked once the daemon holds its lock: systemd
 returns from starting the daemon's unit before the process runs, and on a
 slow machine doctor, asked at once, found no daemon and the run ended 1 for
-one that came up a moment later. The script looks once a second and says when
-it waits.
+one that came up a moment later. It is asked once the yardmaster is started
+too: the daemon holds its lock before it has started the yardmaster, which
+`init --start` did not wait for on a slow machine, and doctor faults that
+moment (`not running, and no start has failed: the daemon may still be at it`),
+so the run ended 1 for a start that was on its way. The script asks doctor
+again while it says that, and nothing else of the yardmaster's is waited for.
+It looks once a second and says when it waits.
 
 A second run with the same flags changes nothing: each step looks first and
 says `already:` where there is nothing to do. `--wait <duration>` is how
@@ -242,9 +252,13 @@ loaded one), and the run after changes nothing (the unit files byte for byte,
 no manager told, the daemon and the server the same processes, no agent
 started) and `yardr init` was given a closed stdin; once with a harness that
 refuses every prompt, as one without its login does, where the script goes on
-to the services and doctor all the same; and once for each place it stops with
+to the services and doctor all the same, though herdr holds the yardmaster's
+start back until the script says it is waiting for it (so that a script that
+asked doctor as soon as the daemon held its lock fails on any machine, not only
+a loaded one); and once for each place it stops with
 the way on (the programs only in `~/.local/bin`, no systemd session, linger
-refused, a daemon that never starts, with the wait cut to two seconds). The
+refused, a daemon that never starts, a yardmaster that never starts, with the
+wait cut to two seconds). The
 first is run behind a proxy: the unit's Environment lines are the PATH and
 each of the nine variables, spelled out in the test, with none for two
 settings that are not among them; the unit is mode 0600; and a run in which
@@ -287,9 +301,12 @@ caller's environment:
   `agent list`, `agent start`, `agent prompt`, `agent get`, `pane read`),
   with one canned agent that is always working. With a file `logged-out`
   in its state dir a prompt is refused as herdr refuses one for an agent
-  at a login screen. Every call goes to `calls.log`, every start to
-  `agents.log`. Its server ends when the test binary named in
-  `YARDR_TEST_OWNER` does.
+  at a login screen. With a file `agent-hold` an agent's start waits, as
+  herdr answers late on a loaded machine: the test renames the file to
+  `agent-released` and the start goes on; a hold that only goes (the yard's
+  directory is removed) or lasts a minute fails the start. Every call goes
+  to `calls.log`, every start to `agents.log`. Its server ends when the test
+  binary named in `YARDR_TEST_OWNER` does.
 - `claude`: answers its version flag, and a one-shot call with `ok`,
   or with a login failure under `logged-out`.
 - `systemctl`, `loginctl`: units and linger as files, every call logged.

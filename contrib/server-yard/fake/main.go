@@ -4,9 +4,10 @@
 // HERDR_FAKE_STATE (calls.log, the pane, agents.log, server.pid); the API
 // socket is HERDR_SOCKET_PATH. With HERDR_FAKE_STATE/logged-out present, a
 // prompt is refused as herdr refuses one for an agent at a login screen,
-// and no session comes up. The server stops with the test binary that named
-// itself to the yard in YARDR_TEST_OWNER, as yardr's own server does (see
-// stopWithOwner).
+// and no session comes up. With agent-hold present an agent's start waits,
+// as herdr answers late on a loaded machine (see holdAgentStart). The server
+// stops with the test binary that named itself to the yard in
+// YARDR_TEST_OWNER, as yardr's own server does (see stopWithOwner).
 package main
 
 import (
@@ -60,6 +61,31 @@ func flag(args []string, name string) string {
 }
 
 func panePath() string { return filepath.Join(state, "pane") }
+
+// holdAgentStart keeps an agent's start waiting while the file agent-hold is
+// in the state dir, as herdr answers late on a loaded machine: the yardmaster
+// the daemon starts is not up yet, whatever the yard's other processes do. The
+// start goes on when the test renames the file to agent-released, as the
+// stand-in managers' start-hold is released, and reports false, to fail the
+// start, where the hold only goes (removing a yard's directory at the end of
+// a test unlinks it) or a minute has passed (a test that was killed): a
+// start whose caller is gone, a daemon the manager stopped, waits too, and
+// must end without starting anything when its test has ended.
+func holdAgentStart() bool {
+	hold, released := filepath.Join(state, "agent-hold"), filepath.Join(state, "agent-released")
+	if _, err := os.Stat(hold); err != nil {
+		return true
+	}
+	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if _, err := os.Stat(released); err == nil {
+			return true
+		}
+		if _, err := os.Stat(hold); err != nil {
+			return false
+		}
+	}
+	return false
+}
 
 // shellPath holds the pid the fake gives as every pane's shell: the
 // server's own, a process that lives as long as the panes it stands for and
@@ -175,6 +201,9 @@ func main() {
 		case "list":
 			result(`{"agents":[]}`)
 		case "start":
+			if !holdAgentStart() {
+				failure("cli:agent:start", "agent_held", "fake herdr: the start was held and not released")
+			}
 			name := ""
 			if len(args) > 2 {
 				name = args[2]

@@ -481,6 +481,28 @@ func (y *yard) releaseDaemon(t *testing.T) {
 	}
 }
 
+// holdYardmaster has the herdr stand-in keep an agent's start waiting, as
+// herdr answers late on a loaded machine: the yardmaster, the one agent these
+// yards start, is not up until releaseYardmaster is called, and never if it
+// is not, while the daemon that starts it runs all the time.
+func (y *yard) holdYardmaster(t *testing.T) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(y.state, "herdr", "agent-hold"), []byte("the test holds the yardmaster back\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// releaseYardmaster lets a start held by holdYardmaster go on. It renames
+// the hold to agent-released, which is what the stand-in waits for, as
+// releaseDaemon does for the daemon: a hold that only goes starts nothing.
+func (y *yard) releaseYardmaster(t *testing.T) {
+	t.Helper()
+	dir := filepath.Join(y.state, "herdr")
+	if err := os.Rename(filepath.Join(dir, "agent-hold"), filepath.Join(dir, "agent-released")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // serviceFile is the daemon's or the web view's service file, as yardr
 // wrote it on this system.
 func (y *yard) serviceFile(t *testing.T, kind string) string {
@@ -637,8 +659,12 @@ func TestServerYardSetsUpAYard(t *testing.T) {
 
 	// The daemon install stopped the daemon init started, and the
 	// stand-in manager started the service's own, late: the script waited
-	// for it, so doctor sees it.
+	// for it, so doctor sees it. Init saw the yardmaster come up, so the
+	// daemon's late start leaves it up, and the script has none to wait for.
 	mustContain(t, out, "waiting for the daemon to come up")
+	if strings.Contains(out, "waiting for the yardmaster") {
+		t.Errorf("the script waited for a yardmaster that init saw come up:\n%s", out)
+	}
 	stopped := regexp.MustCompile(`\(pid ([0-9]+)\) is stopped`).FindStringSubmatch(out)
 	if stopped == nil {
 		t.Fatalf("daemon install stopped no daemon:\n%s", out)
@@ -781,17 +807,23 @@ func mustRead(t *testing.T, path string) []byte {
 // TestServerYardWithoutTheHarnessLogin runs the script with a harness that
 // refuses every prompt, as one without its login does: init --start cannot
 // bring the yardmaster up, and the script goes on to the services and
-// doctor all the same.
+// doctor all the same. The yardmaster is not started until the script says
+// it waits for it, as on a machine too slow for init's wait and for the
+// daemon's first pass: a script that asked doctor as soon as the daemon held
+// its lock would find the yardmaster unstarted, however fast or slow the
+// machine is.
 func TestServerYardWithoutTheHarnessLogin(t *testing.T) {
 	y := build(t)
 	if err := os.WriteFile(filepath.Join(y.state, "herdr", "logged-out"), []byte("the test logs the harness out\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, err := y.run(t, "--harness", "claude", "--operator", "jo", "--wait", "2s")
+	y.holdYardmaster(t)
+	out, err := y.runSaying(t, y.env, "waiting for the yardmaster to start", func() { y.releaseYardmaster(t) },
+		"--harness", "claude", "--operator", "jo", "--wait", "2s")
 	if err != nil {
 		t.Fatalf("server-yard: %v\n%s", err, out)
 	}
-	mustContain(t, out, "going on")
+	mustContain(t, out, "going on", "waiting for the yardmaster to start")
 	mustContain(t, strings.Join(y.calls(t, "herdr"), "\n"), "prompt refused (logged-out)")
 	// None of the nine variables is in this environment, so the unit holds
 	// the PATH alone, as it did before it carried them, and is as closed as
@@ -874,13 +906,10 @@ func withEnv(env []string, set ...string) []string {
 // run: the programs are in ~/.local/bin and the shell has no profile (ssh
 // host cmd), the account has no systemd user session (sudo -u), and linger is
 // refused (a server without polkit lets only root turn it on); and where a
-// step is taken and does not hold, a daemon that its service manager loads
-// and never starts. Each stops the script with exit status 1 and the way on
-// and before doctor, the first two before it writes anything, the third
-// before it creates the yard and the last after.
+// step is taken and does not hold, a daemon or yardmaster that never starts.
+// Each stops the script with exit status 1 and the way on before doctor.
 func TestServerYardStopsWithTheWayOn(t *testing.T) {
 	y := build(t)
-	unit := filepath.Join(y.config, "systemd", "user", "herdr.service")
 	local := filepath.Join(y.home, ".local", "bin")
 	touch := func(t *testing.T, path string) {
 		t.Helper()
@@ -903,18 +932,21 @@ func TestServerYardStopsWithTheWayOn(t *testing.T) {
 			t.Errorf("bound %q: the script reached a service manager\n%s", bound, out)
 		}
 	}
-	noSession := filepath.Join(y.state, "systemctl", "no-session")
-	denied := filepath.Join(y.state, "loginctl", "denied")
+	// The script takes whole seconds, so round the scaled fuse up.
+	yardmasterWait := int((testload.Scale(2*time.Second) + time.Second - 1) / time.Second)
 	cases := []struct {
-		name  string
-		setup func(t *testing.T) []string // the environment the script runs in
-		say   []string
-		wrote bool // herdr's unit is written before the script stops
-		yard  bool // the yard is created, and a daemon started, before it stops
+		name       string
+		setup      func(t *testing.T, y *yard) []string // the environment the script runs in
+		args       []string
+		say        []string
+		wrote      bool // herdr's unit is written before the script stops
+		yard       bool // the yard is created, and a daemon lock is present
+		fresh      bool // this case holds a start and needs its own yard
+		daemonRuns bool // the daemon is running when the script stops
 	}{
 		{
 			name: "programs in ~/.local/bin, a shell without a profile",
-			setup: func(t *testing.T) []string {
+			setup: func(t *testing.T, y *yard) []string {
 				if err := os.MkdirAll(local, 0o755); err != nil {
 					t.Fatal(err)
 				}
@@ -931,19 +963,19 @@ func TestServerYardStopsWithTheWayOn(t *testing.T) {
 		},
 		{
 			name: "no systemd user session",
-			setup: func(t *testing.T) []string {
-				touch(t, noSession)
+			setup: func(t *testing.T, y *yard) []string {
+				touch(t, filepath.Join(y.state, "systemctl", "no-session"))
 				return y.env
 			},
 			say: []string{"reaches no systemd user session of sy-test", "sudo -iu sy-test", "loginctl enable-linger sy-test"},
 		},
 		{
 			name: "linger refused",
-			setup: func(t *testing.T) []string {
-				if err := os.Remove(noSession); err != nil {
+			setup: func(t *testing.T, y *yard) []string {
+				if err := os.Remove(filepath.Join(y.state, "systemctl", "no-session")); err != nil {
 					t.Fatal(err)
 				}
-				touch(t, denied)
+				touch(t, filepath.Join(y.state, "loginctl", "denied"))
 				return y.env
 			},
 			say:   []string{"could not turn linger on for sy-test: as root, loginctl enable-linger sy-test, then run this again"},
@@ -954,8 +986,8 @@ func TestServerYardStopsWithTheWayOn(t *testing.T) {
 			// process fails at once: the script says so after the bound, which
 			// two seconds shortens from a minute, and does not go on to doctor.
 			name: "a daemon the manager never starts",
-			setup: func(t *testing.T) []string {
-				if err := os.Remove(denied); err != nil {
+			setup: func(t *testing.T, y *yard) []string {
+				if err := os.Remove(filepath.Join(y.state, "loginctl", "denied")); err != nil {
 					t.Fatal(err)
 				}
 				y.holdDaemon(t)
@@ -965,10 +997,34 @@ func TestServerYardStopsWithTheWayOn(t *testing.T) {
 			wrote: true,
 			yard:  true,
 		},
+		{
+			// Give the held yardmaster its own daemon: its start stays blocked
+			// after this script stops, while the earlier rows share a yard.
+			name: "a yardmaster the daemon never starts",
+			setup: func(t *testing.T, y *yard) []string {
+				y.holdYardmaster(t)
+				return withEnv(y.env, "SERVER_YARD_DAEMON_WAIT="+strconv.Itoa(yardmasterWait))
+			},
+			args: []string{"--wait", "2s"},
+			say: []string{
+				fmt.Sprintf("waiting for the yardmaster to start (up to %d s)", yardmasterWait),
+				fmt.Sprintf("the yardmaster did not start in %d s", yardmasterWait),
+				"see <home>/daemon.log and yardr crew list",
+			},
+			wrote:      true,
+			yard:       true,
+			fresh:      true,
+			daemonRuns: true,
+		},
 	}
 	for _, c := range cases {
-		env := c.setup(t)
-		out, err := y.runWith(t, env, "--harness", "claude", "--operator", "jo")
+		caseYard := y
+		if c.fresh {
+			caseYard = build(t)
+		}
+		env := c.setup(t, caseYard)
+		args := append([]string{"--harness", "claude", "--operator", "jo"}, c.args...)
+		out, err := caseYard.runWith(t, env, args...)
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
 			t.Errorf("%s: the script ended %v; want exit status 1\n%s", c.name, err, out)
@@ -981,11 +1037,15 @@ func TestServerYardStopsWithTheWayOn(t *testing.T) {
 		if strings.Contains(out, "what is still missing") {
 			t.Errorf("%s: the script went on to doctor\n%s", c.name, out)
 		}
+		unit := filepath.Join(caseYard.config, "systemd", "user", "herdr.service")
 		if _, err := os.Stat(unit); (err == nil) != c.wrote {
 			t.Errorf("%s: herdr.service written is %v, want %v\n%s", c.name, err == nil, c.wrote, out)
 		}
-		if _, err := os.Stat(filepath.Join(y.yardhome, "daemon.lock")); (err == nil) != c.yard {
+		if _, err := os.Stat(filepath.Join(caseYard.yardhome, "daemon.lock")); (err == nil) != c.yard {
 			t.Errorf("%s: a daemon started is %v, want %v\n%s", c.name, err == nil, c.yard, out)
+		}
+		if c.daemonRuns {
+			caseYard.waitDaemon(t)
 		}
 	}
 }

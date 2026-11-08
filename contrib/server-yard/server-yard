@@ -38,6 +38,18 @@
 # unset). A daemon that is not up by then is a failure, not a missing piece
 # like the login: the run ends there with exit status 1, naming the daemon.
 #
+# A daemon holds its lock before it has started the yardmaster. Where
+# init --start gave up on the yardmaster (a slow machine), the daemon the
+# manager started may not have got to it yet, and doctor faults that moment:
+# the yardmaster is "not running, and no start has failed: the daemon may
+# still be at it", which the machine does not lack. So the script asks doctor
+# again, once a second, for as long as it says that, for up to
+# SERVER_YARD_DAEMON_WAIT seconds as well, counted on the clock because each
+# ask is a doctor run. A yardmaster the daemon has not started by then ends
+# the run with exit status 1, naming the daemon's log, as a daemon that is not
+# up does. Anything else doctor says of the yardmaster, a session that runs
+# without its harness's login included, ends the wait.
+#
 # A second run with the same flags changes nothing: each step looks at what
 # is there first and says "already" where there is nothing to do. A changed
 # PATH, or proxy or CA variable, is written into herdr's unit again; it
@@ -76,7 +88,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$harness" ] && [ -n "$operator" ] || usage
 [ "$have_permissions" != 1 ] || [ -n "$permissions" ] || usage
-# The wait below compares this value as a shell integer. Keep it in the
+# The waits below compare this value as a shell integer. Keep it in the
 # signed range every POSIX shell supports, or an oversized number could make
 # the comparison fail on every poll.
 daemon_wait=${SERVER_YARD_DAEMON_WAIT:-60}
@@ -250,6 +262,15 @@ daemon_up() {
   yardr daemon status 2>/dev/null | grep -q "^daemon  *running (pid "
 }
 
+# yardmaster_pending is whether doctor says the yardmaster is still to come:
+# the daemon runs, the yardmaster's session does not, and no start of it has
+# failed (docs/doctor.md). That is the one fault of the yardmaster's that
+# passes by itself; anything else doctor says of it, a fault of its own
+# included, is the last word.
+yardmaster_pending() {
+  yardr doctor 2>&1 | grep -q "no start has failed: the daemon may still be at it"
+}
+
 # The yard, started. Without the harness login the yardmaster does not come
 # up, and that is the operator's next step, not the script's failure: what
 # matters here is the yard and its daemon, which starts the yardmaster once
@@ -312,6 +333,25 @@ until daemon_up; do
   fi
   if [ "$i" -eq 0 ]; then
     echo "server-yard: waiting for the daemon to come up (up to $daemon_wait s)"
+  fi
+  i=$((i + 1))
+  sleep 1
+done
+
+# The daemon holds its lock before it has started the yardmaster, so doctor,
+# asked now, can fault a start that is on its way. Wait for the effect,
+# bounded, on the clock: each look is a doctor run, which on a loaded machine
+# takes more than the second slept after it.
+began=$(date +%s)
+i=0
+while yardmaster_pending; do
+  if [ "$i" -eq 0 ]; then
+    echo "server-yard: waiting for the yardmaster to start (up to $daemon_wait s)"
+  fi
+  if [ $(($(date +%s) - began)) -ge "$daemon_wait" ]; then
+    echo "server-yard: the yardmaster did not start in $daemon_wait s" >&2
+    echo "server-yard: see <home>/daemon.log and yardr crew list; SERVER_YARD_DAEMON_WAIT=<seconds> waits longer" >&2
+    exit 1
   fi
   i=$((i + 1))
   sleep 1
