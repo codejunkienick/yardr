@@ -203,6 +203,7 @@ func (d *Dispatcher) reap(ctx context.Context, groups map[string]store.Group) (m
 			d.Log.Warn("liveness unknown", "session", s.ID, "err", err)
 		}
 		live(s)
+		d.holdBack(ctx, s, groups[s.Group]) // An unreadable runner does not lift a saved hold.
 	}
 
 	outcomes := make([]*reapOutcome, len(sessions))

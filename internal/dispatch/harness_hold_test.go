@@ -3,12 +3,17 @@ package dispatch_test
 import (
 	"context"
 	"fmt"
+	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"yardr.dev/yardr/internal/dispatch"
+	"yardr.dev/yardr/internal/runner"
+	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
 )
@@ -26,6 +31,9 @@ func (p *paneRunner) Status(ctx context.Context, h map[string]any) (string, erro
 	own, ok := p.panes[h["session"].(string)]
 	p.mu.Unlock()
 	if ok {
+		if own[0] == "status-error" {
+			return "", fmt.Errorf("synthetic runner status unavailable")
+		}
 		return own[0], nil
 	}
 	return p.retryRunner.Status(ctx, h)
@@ -52,6 +60,34 @@ func (p *paneRunner) showBead(t *testing.T, s store.API, b store.Bead, status, t
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.panes[*got.Session] = [2]string{status, tail}
+}
+
+// freshPaneRunner replaces the stopped session's status and pane readers,
+// as a daemon restart replaces Herdr's in-memory stop observations.
+type freshPaneRunner struct {
+	*paneRunner
+	herdr   *runner.Herdr
+	session string
+}
+
+func (r *freshPaneRunner) Status(ctx context.Context, h map[string]any) (string, error) {
+	if h["session"] == r.session {
+		return r.herdr.Status(ctx, r.handle(h))
+	}
+	return r.paneRunner.Status(ctx, h)
+}
+
+func (r *freshPaneRunner) Tail(ctx context.Context, h map[string]any, n int) (string, error) {
+	if h["session"] == r.session {
+		return r.herdr.Tail(ctx, r.handle(h), n)
+	}
+	return r.paneRunner.Tail(ctx, h, n)
+}
+
+func (r *freshPaneRunner) handle(h map[string]any) map[string]any {
+	h = maps.Clone(h)
+	h["agent"], h["pane"], h["kind"] = "synthetic-muse", "synthetic-pane", "muse"
+	return h
 }
 
 // holdYard is a yard whose group g runs up to three kimi sessions with the
@@ -511,6 +547,21 @@ func elseYard(t *testing.T, first string, b store.Group, moonshot func(time.Time
 // so the quota gates nothing then either.
 func TestClaimPassesOverAGroupHeldByAUsageWait(t *testing.T) {
 	t.Parallel()
+	for _, unavailable := range []bool{false, true} {
+		for _, fallback := range []string{"available", "paused", "used up", "none"} {
+			for _, status := range []string{"idle", "unknown", "status-error"} {
+				recoveries := []string{"working"}
+				if status == "idle" {
+					recoveries = append(recoveries, "idle", "done", "ended", "history-working", "history-idle", "history-done")
+				}
+				for _, recovery := range recoveries {
+					t.Run(fmt.Sprintf("muse/unavailable=%t/fallback=%s/status=%s/recovery=%s", unavailable, fallback, status, recovery), func(t *testing.T) {
+						museQuotaFallback(t, unavailable, fallback, status, recovery)
+					})
+				}
+			}
+		}
+	}
 	for _, shape := range []struct {
 		name     string
 		first    string
@@ -600,6 +651,321 @@ func TestClaimPassesOverAGroupHeldByAUsageWait(t *testing.T) {
 				t.Fatalf("claimed by %q, want a again", group)
 			}
 		})
+	}
+}
+
+// museQuotaFallback drives the sanitized stop through a pane and the native
+// route choice, without a source window from which to infer a reset.
+func museQuotaFallback(t *testing.T, unavailable bool, fallback, status, recovery string) {
+	t.Helper()
+	ctx := context.Background()
+	s := storetest.New(t)
+	r := &paneRunner{retryRunner: &retryRunner{agentRunner: &agentRunner{statusRunner: &statusRunner{
+		fakeRunner: &fakeRunner{dead: map[string]bool{}}, status: "working"}, worked: true}}, panes: map[string][2]string{}}
+	d := &dispatch.Dispatcher{Store: s, Runners: map[string]dispatch.Runner{"herdr": r}, Backoff: time.Hour}
+	t.Cleanup(func() { dispatch.WaitLimitsIdle(d) })
+	now := noon()
+	dispatch.SetClock(d, func() time.Time { return now })
+	must(t, s.PutGroup(ctx, store.Group{Name: "a", Runner: "herdr", Limit: 6,
+		Config: map[string]any{"kind": "muse", "model": "muse-wonder-1.0", "stall": "off"}}, "me"))
+	must(t, s.PutGroup(ctx, store.Group{Name: "b", Runner: "herdr", Limit: 3,
+		Config: map[string]any{"kind": "claude", "model": "opus", "stall": "off"}}, "me"))
+	route := store.Route{Stage: "new", Group: "a"}
+	if fallback != "none" {
+		route.Else = []store.RouteGroup{{Name: "b"}}
+	}
+	_, err := s.AddRoute(ctx, route, "me")
+	must(t, err)
+	b1 := newBead(t, s, "first Muse session")
+	must(t, d.Reconcile(ctx))
+	must(t, d.Reconcile(ctx))
+	p := newStandIn(t, s, "muse: meta", "claude: anthropic")
+	p.sayFor("meta", `{"provider":"Muse","windows":[]}`)
+	if unavailable {
+		p.failFor("meta")
+	}
+	p.sayFor("anthropic", `{"provider":"Claude","windows":[{"label":"5h","used_percent":9}]}`)
+	if fallback == "used up" {
+		p.sayFor("anthropic", `{"provider":"Claude","windows":[{"label":"5h","used_percent":100,"resets_at":"`+now.Add(3*time.Hour).Format(time.RFC3339)+`"}]}`)
+	}
+	if fallback == "paused" {
+		zero := 0
+		_, err = s.SetGroup(ctx, "b", store.GroupEdit{Limit: &zero}, "me")
+		must(t, err)
+	}
+	primeGroupLimits(t, s, d, "a")
+	primeGroupLimits(t, s, d, "b")
+	// Uncertainty and ordinary quoted prose alone do not establish a stop.
+	r.showBead(t, s, b1, status, "The docs quote 'Usage limit reached' as an example.\n❯ ")
+	normal := newBead(t, s, "planner without an observed stop")
+	must(t, d.Reconcile(ctx))
+	if group, claim := claimedBy(t, s, normal.ID); group != "a" {
+		t.Fatalf("claimed by %q with %v, want Muse without an observed stop", group, claim)
+	}
+	if h := handleOfBead(t, s, b1); h[dispatch.HarnessErrorKey] != nil || h["harness_reset_model"] != nil {
+		t.Fatalf("handle = %v, want no hold without an observed stop", h)
+	}
+	if evs := eventKinds(t, s, b1.ID, "session_harness_error"); len(evs) != 0 {
+		t.Fatalf("session_harness_error = %v, want none without an observed stop", evs)
+	}
+	const stopped = "◆ Usage limit reached\n" +
+		"│ This turn stopped because your usage limit\n" +
+		"│ was reached.\n" +
+		"│ Send a message to continue when usage is\n" +
+		"│ available.\n\n❯ \n  muse-wonder-1.0"
+	r.showBead(t, s, b1, "idle", stopped)
+	must(t, d.Reconcile(ctx))
+	evs := eventKinds(t, s, b1.ID, "session_harness_error")
+	if len(evs) != 1 || evs[0].Data["reason"] != dispatch.ReasonRateLimited ||
+		evs[0].Data["kind"] != "muse" || evs[0].Data["line"] != "◆ Usage limit reached" || evs[0].Data["tail"] != stopped {
+		t.Fatalf("session_harness_error = %v, want Muse's quota stop on the first idle pass", evs)
+	}
+	data := evs[0].Data
+	for _, key := range []string{"window", "resets_at", "wakes_at"} {
+		if data[key] != nil {
+			t.Errorf("%s = %v, want no invented window or reset", key, data[key])
+		}
+	}
+	if unavailable {
+		if data["limits_unknown"] == nil || data["limits"] != nil {
+			t.Fatalf("data = %v, want unavailable limits", data)
+		}
+	} else {
+		report, _ := data["limits"].(map[string]any)
+		windows, _ := report["windows"].([]any)
+		if report["provider"] != "Muse" || len(windows) != 0 || data["limits_unknown"] != nil {
+			t.Fatalf("data = %v, want Muse's empty windows", data)
+		}
+	}
+	if h := handleOfBead(t, s, b1); h[dispatch.HarnessErrorKey] != dispatch.ReasonRateLimited {
+		t.Fatalf("handle = %v, want the persisted rate limit", h)
+	}
+	if idle := eventKinds(t, s, b1.ID, "session_idle"); len(idle) != 0 {
+		t.Fatalf("session_idle = %v, want the quota stop reported first", idle)
+	}
+	r.showBead(t, s, b1, status, stopped)
+	b2 := newBead(t, s, "next planner")
+	want := ""
+	if fallback == "available" {
+		want = "b"
+	}
+	starts := []string{b1.ID, normal.ID}
+	if want != "" {
+		starts = append(starts, b2.ID)
+	}
+	session := handleOfBead(t, s, b1)["session"].(string)
+	var queued []*store.Note
+	for _, text := range []string{"keep the current model", "read both notes after recovery"} {
+		n, err := s.AddNotedAs(ctx, b1.ID, text, "yardmaster", "")
+		must(t, err)
+		queued = append(queued, n)
+		must(t, d.Reconcile(ctx))
+	}
+	checkNotes := func(told int, live bool) {
+		t.Helper()
+		notes, err := s.Notes(ctx, b1.ID)
+		must(t, err)
+		if len(notes) != len(queued) {
+			t.Fatalf("notes = %+v, want the two queued notifications", notes)
+		}
+		for i, n := range notes {
+			if n.Seq != queued[i].Seq || n.Notify != session ||
+				n.Told != (i < told) || n.NotifyLive != live || n.Untold != "" || n.Acked {
+				t.Errorf("note = %+v, want told=%t, live=%t in queue order", n, i < told, live)
+			}
+		}
+		if evs := eventKinds(t, s, b1.ID, "note_told"); len(evs) != told {
+			t.Errorf("note_told = %v, want %d deliveries", evs, told)
+		}
+		if evs := eventKinds(t, s, b1.ID, "note_untold"); len(evs) != 0 {
+			t.Errorf("note_untold = %v, want notes to wait", evs)
+		}
+	}
+	check := func(d *dispatch.Dispatcher) {
+		t.Helper()
+		must(t, d.Reconcile(ctx))
+		if h := handleOfBead(t, s, b1); h[dispatch.HarnessErrorKey] != dispatch.ReasonRateLimited ||
+			h["harness_reset_model"] != "muse-wonder-1.0" {
+			t.Errorf("handle = %v, want the observed stop retained until recovery", h)
+		}
+		if evs := eventKinds(t, s, b1.ID, "session_harness_error"); len(evs) != 1 {
+			t.Errorf("session_harness_error = %v, want no duplicate report", evs)
+		}
+		if group, claim := claimedBy(t, s, b2.ID); group != want {
+			t.Fatalf("claimed by %q with %v, want %q while Muse is stopped", group, claim, want)
+		} else if want != "" {
+			passed, _ := claim["passed"].([]any)
+			if len(passed) != 1 {
+				t.Fatalf("passed = %v, want the held Muse group", claim["passed"])
+			}
+			one, _ := passed[0].(map[string]any)
+			if one["group"] != "a" || !strings.Contains(fmt.Sprint(one["reason"]), "muse-wonder-1.0") {
+				t.Fatalf("passed = %v, want Muse's model hold", passed)
+			}
+		}
+		if got := r.starts(); !slices.Equal(got, starts) || len(r.nudges) != 0 {
+			t.Fatalf("starts = %v, nudges = %q, want %v and no re-prompt", got, r.nudges, starts)
+		}
+		checkNotes(0, true)
+	}
+	check(d)
+	now = now.Add(10 * time.Minute)
+	check(d)
+	dispatch.WaitLimitsIdle(d)
+	waitKind := "group_wait"
+	if fallback == "used up" {
+		waitKind = "quota_wait"
+	}
+	if want == "" {
+		if waits := eventKinds(t, s, b2.ID, waitKind); len(waits) != 1 {
+			t.Fatalf("%s = %v, want one wait in this daemon", waitKind, waits)
+		}
+	}
+	// A fresh Herdr has forgotten that the unchanged error already stood still.
+	dir := t.TempDir()
+	screen := filepath.Join(dir, "screen")
+	show := func(tail string) {
+		t.Helper()
+		must(t, os.WriteFile(screen, []byte(tail), 0o600))
+	}
+	show(stopped)
+	statusFile := filepath.Join(dir, "status")
+	setStatus := func(status string) {
+		t.Helper()
+		must(t, os.WriteFile(statusFile, []byte(`{"result":{"agent":{"agent":"muse","agent_status":"`+status+`"}}}`), 0o600))
+	}
+	setStatus("working")
+	bin := filepath.Join(dir, "herdr")
+	scripttest.Write(t, bin, `#!/bin/sh
+case "$1 $2" in
+  'agent get') cat "$(dirname "$0")/status" ;;
+  'pane read') cat "$(dirname "$0")/screen" ;;
+  *) echo 'unexpected synthetic herdr call' >&2; exit 1 ;;
+esac
+`)
+	fresh := &freshPaneRunner{paneRunner: r, herdr: &runner.Herdr{Bin: bin, Store: s},
+		session: session}
+	d2 := &dispatch.Dispatcher{Store: s, Runners: map[string]dispatch.Runner{"herdr": fresh}, Backoff: time.Hour}
+	t.Cleanup(func() { dispatch.WaitLimitsIdle(d2) })
+	dispatch.SetClock(d2, func() time.Time { return now })
+	primeGroupLimits(t, s, d2, "a")
+	primeGroupLimits(t, s, d2, "b")
+	check(d2)
+	if want != "" {
+		b2 = newBead(t, s, "planner after daemon replacement")
+		starts = append(starts, b2.ID)
+		check(d2)
+	}
+	if want == "" {
+		if waits := eventKinds(t, s, b2.ID, waitKind); len(waits) != 2 {
+			t.Fatalf("%s = %v, want one honest wait per daemon", waitKind, waits)
+		}
+	}
+	// A failed pane read is not evidence that the stopped model recovered.
+	must(t, os.Remove(screen))
+	check(d2)
+	show(stopped)
+	check(d2)
+	if evs := eventKinds(t, s, b1.ID, "session_harness_error"); len(evs) != 1 {
+		t.Fatalf("session_harness_error = %v, want no duplicate report", evs)
+	}
+	if recovery == "ended" {
+		_, err := s.Release(ctx, b1.ID, "end the stopped session", store.Expect{}, "me")
+		must(t, err)
+		_, err = s.SetHold(ctx, b1.ID, true, store.Expect{}, "me")
+		must(t, err)
+		must(t, d2.Reconcile(ctx))
+		checkNotes(0, false)
+		if len(r.nudges) != 0 {
+			t.Fatalf("nudges = %q, want no notes sent after session end", r.nudges)
+		}
+		b3 := newBead(t, s, "after the stopped session ends")
+		must(t, d2.Reconcile(ctx))
+		if group, data := claimedBy(t, s, b3.ID); group != "a" {
+			t.Fatalf("claimed by %q with %v, want Muse after session end", group, data)
+		}
+		return
+	}
+	// A resumed turn may finish between reconciles, so idle and done recover too.
+	const resumed = stopped + "\n❯ continue\n◆ Work completed\n❯ "
+	recoveredStatus := strings.TrimPrefix(recovery, "history-")
+	setStatus(recoveredStatus)
+	if strings.HasPrefix(recovery, "history-") {
+		show(resumed)
+	} else {
+		show("◆ Work completed\n❯ ")
+	}
+	must(t, d2.Reconcile(ctx)) // the waiting bead can take the recovered group first
+	if h := handleOfBead(t, s, b1); h[dispatch.HarnessErrorKey] != nil || h["harness_reset_model"] != nil {
+		t.Errorf("handle = %v, want the hold cleared after readable recovery", h)
+	}
+	if recoveredStatus == "working" {
+		checkNotes(0, true)
+		setStatus("idle")
+		must(t, d2.Reconcile(ctx))
+	}
+	checkNotes(1, true)
+	must(t, d2.Reconcile(ctx))
+	checkNotes(2, true)
+	must(t, d2.Reconcile(ctx))
+	checkNotes(2, true)
+	if len(r.nudges) != 2 {
+		t.Errorf("nudges = %q, want the two notes once each after recovery", r.nudges)
+	}
+	for i, n := range queued {
+		if i >= len(r.nudges) || !strings.Contains(r.nudges[i], fmt.Sprintf("(note %d)", n.Seq)) {
+			t.Errorf("nudges = %q, want notification for note %d in queue order", r.nudges, n.Seq)
+		}
+	}
+	b3 := newBead(t, s, "after manual recovery")
+	must(t, d2.Reconcile(ctx))
+	if group, data := claimedBy(t, s, b3.ID); group != "a" {
+		t.Fatalf("claimed by %q with %v, want Muse after actual recovery", group, data)
+	}
+	if evs := eventKinds(t, s, b1.ID, "session_harness_error"); len(evs) != 1 {
+		t.Fatalf("session_harness_error = %v, want no new error after recovery", evs)
+	}
+	// Later idle passes over the retained history must not raise the old stop again.
+	setStatus("idle")
+	show(resumed)
+	for range 2 {
+		must(t, d2.Reconcile(ctx))
+		if h := handleOfBead(t, s, b1); h[dispatch.HarnessErrorKey] != nil || h["harness_reset_model"] != nil {
+			t.Errorf("handle = %v, want no hold from the historical stop", h)
+		}
+		if evs := eventKinds(t, s, b1.ID, "session_harness_error"); len(evs) != 1 {
+			t.Errorf("session_harness_error = %v, want no second event from the historical stop", evs)
+		}
+		checkNotes(2, true)
+	}
+	b4 := newBead(t, s, "after later idle passes")
+	must(t, d2.Reconcile(ctx))
+	if group, data := claimedBy(t, s, b4.ID); group != "a" {
+		t.Fatalf("claimed by %q with %v, want Muse while the old stop remains history", group, data)
+	}
+	// A new stop below the continuation starts a new hold and fallback decision.
+	show(resumed + "\n│ This turn stopped because your usage limit was reached.\n❯ ")
+	b5 := newBead(t, s, "after a second quota stop")
+	must(t, d2.Reconcile(ctx))
+	if h := handleOfBead(t, s, b1); h[dispatch.HarnessErrorKey] != dispatch.ReasonRateLimited || h["harness_reset_model"] != "muse-wonder-1.0" {
+		t.Errorf("handle = %v, want the second observed stop held", h)
+	}
+	if evs := eventKinds(t, s, b1.ID, "session_harness_error"); len(evs) != 2 ||
+		evs[1].Data["reason"] != dispatch.ReasonRateLimited || evs[1].Data["line"] != "│ This turn stopped because your usage limit was reached." {
+		t.Errorf("session_harness_error = %v, want a second event naming the new stop", evs)
+	}
+	if group, data := claimedBy(t, s, b5.ID); group != want {
+		t.Fatalf("claimed by %q with %v, want %q after the second quota stop", group, data, want)
+	}
+	if want == "" {
+		if waits := eventKinds(t, s, b5.ID, waitKind); len(waits) != 1 {
+			t.Errorf("%s = %v, want one honest wait after the second stop", waitKind, waits)
+		}
+	}
+	must(t, d2.Reconcile(ctx))
+	checkNotes(2, true)
+	if len(r.nudges) != 2 {
+		t.Errorf("nudges = %q, want no further prompts at the second stop", r.nudges)
 	}
 }
 

@@ -832,9 +832,10 @@ screen, so a still pane for that long is not working.
 
 **`session_harness_error`.** The pane says what herdr's status cannot. On
 each pass in the first 2 minutes of an idle spell (status `idle` or `done`)
-the daemon reads the end of the agent's
-pane, and a line among its last 20 that is a known error of the group's
-`kind` raises one event on the bead, at once and not at the `idle` limit:
+the daemon reads the end of the agent's pane. A message the agent took since
+ends the scan, so an error above it is history. A line among its last 20
+that is a known error of the group's `kind` raises one event on the bead,
+at once and not at the `idle` limit:
 
 | field | |
 |---|---|
@@ -925,6 +926,8 @@ before the general one:
 | `kimi` | `at_capacity` | `^Error: \[provider\.overloaded\]` |
 | `kimi` | `not_logged_in` | `^Error: \[(auth\.(login_required\|token_missing\|token_unauthorized)\|provider\.auth_error)\]` |
 | `pi` | `other` | `^Error: Retry failed after \d+ attempts` |
+| `muse` | `rate_limited` | `^Usage limit reached$` |
+| `muse` | `rate_limited` | `^This turn stopped because your usage limit was reached\.$` |
 | `muse` | `other` | `^model failed:` |
 | any other | | none known: nothing is reported, and `session_idle` with its `tail` is what there is |
 <!-- /harness errors -->
@@ -1047,7 +1050,16 @@ reset at 00:02 (3m ago)`. With no window used up the hint says so (`no
 window of kimi's subscription is used up, says aiquokka: …`): the limit the
 harness hit is then one the provider does not report, another account's, one
 model's or a short rate limit, and the yardmaster reads the pane as before.
-With `limits_unknown` the hint is what it was.
+With `limits_unknown` the hint explains the stop without a window or reset.
+
+When the source names no used-up window or gives no reset time, the
+observed usage stop still holds the session's model in its group. The
+route can pass it over for an `--else` group; with no available fallback,
+new beads wait. The hold survives a daemon restart and ends when the
+pane can be read without a current usage stop, or the session ends; status
+alone does not end it. No reset is guessed and no prompt is scheduled.
+An empty or unavailable report without an observed stop keeps the route's
+usual policy. A known reset continues to use the wait described below.
 
 A session's answer is for the login its group burns, read with the group's
 env (`yardr limits --group <group>` reads the same); a crew member's is for
@@ -1073,7 +1085,7 @@ command runs inside the dispatcher's pass, so one that hangs holds that
 pass for up to 30 seconds, once in a minute. The 60 seconds are fixed; no
 key sets them.
 
-The group goes on starting sessions whatever the event says.
+Other models and groups are held only by their own stops and route conditions.
 
 #### A window that resets within six hours is waited for
 
