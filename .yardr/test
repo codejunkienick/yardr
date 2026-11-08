@@ -2074,11 +2074,11 @@ formatted() {
   fi
 }
 # The shellchecked step fails the run when shellcheck finds anything in the
-# depot's shell: this script, the installer and every contrib script with a
-# shell shebang, found by that line, so a new script is covered without
-# touching the step. It is the file set and the command of CI's scan job
-# (.github/workflows/ci.yml), which fails on a finding after the landing, so
-# the landing must fail on it first. Every run judges the whole tree, like
+# depot's shell: this script, the installer and every contrib and conformance
+# script with a shell shebang, found by that line, so a new script is covered
+# without touching the step. It is the file set and the command of CI's scan
+# job (.github/workflows/ci.yml), which fails on a finding after the landing,
+# so the landing must fail on it first. Every run judges the whole tree, like
 # gofmt and vet, whatever was selected: a selection by changed file has the
 # base edge cases the header names. The shebang gives shellcheck the dialect,
 # so install.sh is held to POSIX sh. Where shellcheck is not installed the
@@ -2093,7 +2093,7 @@ shellchecked() {
     exit 1
   fi
   st=0
-  grep -rlE '^#!(/bin/|/usr/bin/env )(sh|bash)' .yardr/test install.sh contrib | xargs shellcheck || st=$?
+  grep -rlE '^#!(/bin/|/usr/bin/env )(sh|bash)' .yardr/test install.sh contrib conformance | xargs shellcheck || st=$?
   took "$t0" "shellcheck"
   if [ "$st" != 0 ]; then
     echo "test: shellcheck reported findings, which CI's scan job fails on as well"

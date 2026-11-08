@@ -5711,13 +5711,13 @@ func TestYardTestBudgets(t *testing.T) {
 	// The shellcheck step, over a directory of scripts, with the real
 	// shellcheck: what it is to catch is the tool's own findings, which a
 	// stand-in would only repeat from the case. A script is judged by its
-	// shebang wherever it sits under contrib, so one in a directory made
-	// after the step was written is covered; one with another shebang, or
-	// none, is not, and shellcheck would fail on either if it were given
-	// it (SC1071, SC2148). install.sh is judged as the POSIX sh its shebang
-	// says: the step names no dialect of its own. The tool is needed here
-	// and nowhere else in this file, so a machine without it skips the
-	// cases; its gate run fails with the install line instead.
+	// shebang wherever it sits under contrib or conformance, so one in a
+	// directory made after the step was written is covered; one with another
+	// shebang, or none, is not, and shellcheck would fail on either if it
+	// were given it (SC1071, SC2148). install.sh is judged as the POSIX sh
+	// its shebang says: the step names no dialect of its own. The tool is
+	// needed here and nowhere else in this file, so a machine without it
+	// skips the cases; its gate run fails with the install line instead.
 	const cleanSh = "#!/bin/sh\necho ok\n"
 	for _, c := range []struct {
 		name   string
@@ -5733,6 +5733,12 @@ func TestYardTestBudgets(t *testing.T) {
 			".yardr/test": cleanSh, "install.sh": cleanSh, "contrib/new/deep/tool": "#!/usr/bin/env bash\nunused=1\n",
 		}, 1, []string{
 			"contrib/new/deep/tool line 2", "SC2034",
+			"test: shellcheck took ", "test: shellcheck reported findings, which CI's scan job fails on as well",
+		}, nil},
+		{"a finding in a script under conformance fails the shellcheck step", map[string]string{
+			".yardr/test": cleanSh, "install.sh": cleanSh, "conformance/suite/probe.sh": "#!/usr/bin/env bash\nunused=1\n",
+		}, 1, []string{
+			"conformance/suite/probe.sh line 2", "SC2034",
 			"test: shellcheck took ", "test: shellcheck reported findings, which CI's scan job fails on as well",
 		}, nil},
 		{"a finding in the gate script or the installer fails the shellcheck step", map[string]string{
