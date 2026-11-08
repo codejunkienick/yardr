@@ -160,16 +160,21 @@ jobs:
   # Mac in the yard. It ran go vet and internal/peer alone while a runner's
   # minutes were counted; the standard runners cost none on a public
   # repository, so it runs the lot. Keep the steps in step with the test
-  # jobs', whose comments say what each is for. The three steps share one job
-  # here, as they did in the linux job before it was split. The timeout is
-  # twice the 15 minutes that job had then, because macOS runners are slower,
-  # and because setup-go saves its cache only after a success: a run that
-  # times out leaves the next one as cold as itself, so the first green run is
-  # what says how long this takes. If it ends at the limit, split the three as
-  # the linux job is.
+  # jobs', whose comments say what each is for.
+  #
+  # It is three jobs, as the linux run is, and for the same reason. The three
+  # steps were one job with 30 minutes. The depot's tests took 9 minutes on a
+  # macOS runner with five cores and 28 on one with three, and on a second one
+  # with three they were still going at the limit. The job was cancelled with
+  # no test failing, before the plain runs could finish. Apart, a slow leg
+  # hides none of the others.
+  #
+  # The depot's run has 45 minutes, because 30 left too little room over the
+  # 28 it took on three cores. A run that outgrows its limit is cut off, and a
+  # cut-off says nothing about the tests.
   test-macos:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -192,7 +197,35 @@ jobs:
         run: command -v shellcheck >/dev/null || brew install shellcheck
       - name: depot tests (.yardr/test, as for a landing)
         run: YARDR_LANDING=1 sh .yardr/test
+
+  # What the depot's run leaves out: the plain (non-race) build, and every
+  # package, not just three, through the unix-socket client. Each is a job of
+  # its own with the 30 minutes the one job had. That is a guess until a green
+  # run says how long each takes apart, and setup-go saves its cache only
+  # after a success, so a run that times out leaves the next one as cold as
+  # itself. Neither job installs shellcheck, because neither runs the gate.
+  # The root package's tests that call the real tool skip without it, and
+  # they run in test-macos.
+  test-macos-plain:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: go test
         run: go test ./...
+
+  test-macos-rpc:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: go test (rpc)
         run: YARDR_TEST_RPC=1 go test ./...
