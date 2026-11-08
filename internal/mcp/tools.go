@@ -24,11 +24,14 @@ var workStates = []struct{ state, heading string }{
 	{"under way", "Under way"},
 }
 
-// WhatIsHappening is what_is_happening: a short account of the
-// person's own work, each piece in the state it is in (workStates) and
-// with the project it belongs to, or, with work set, that one thing in
-// full with its notes. It keeps no record of when the person last
-// looked: each call is answered from the window it is given.
+// WhatIsHappening is what_is_happening: an account of the person's own
+// work that opens with how many pieces are in each state (workStates) and
+// in which projects, lists what changed inside the window, then each
+// state's pieces under their project, marking those being built this
+// moment; or, with work set, that one thing in full with its notes. It
+// keeps no record of when the person last looked: each call is answered
+// from the window it is given, and a person who wants what is new since
+// they last asked has their client pass that time.
 func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (*Result, error) {
 	if err := s.requireUser(); err != nil {
 		return nil, err
@@ -75,8 +78,13 @@ func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (
 		}
 		return originator == s.User
 	}
-	items := map[string][]map[string]any{}
-	lines := map[string][]string{}
+	building, err := s.buildingNow(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byState := map[string][]piece{}
+	changedOnly := map[string][]piece{}
+	var changed []piece
 	for _, b := range beads {
 		if !own(b) {
 			continue
@@ -85,47 +93,88 @@ func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (
 		if err != nil {
 			return nil, err
 		}
+		changedOnlyItem := false
 		if state == "" {
-			continue
+			// A closed piece normally leaves the account once it falls out
+			// of the finished window. If it changes again, its new update
+			// brings it back in the changed section as finished work.
+			if b.Status != "closed" || b.ClosedAt == nil || !inWindow(b.UpdatedAt, since, now) {
+				continue
+			}
+			state = "finished"
+			detail = "finished " + when(*b.ClosedAt, now)
+			changedOnlyItem = true
 		}
 		// The line and the item say the same: the detail is what stands
 		// in brackets, so a client that shows only the structured part
 		// loses no reason the words give, a question that waits for the
-		// person among them.
+		// person and a session at work among them.
 		asks := waiting[b.ID]
 		detail += waitsLine(asks, state == "finished")
+		p := piece{
+			title: b.Title, state: state, updated: b.UpdatedAt,
+			changed:  inWindow(b.UpdatedAt, since, now),
+			building: building[b.ID],
+		}
+		if p.building {
+			detail += "; building now"
+		}
+		p.detail = detail
 		item := map[string]any{"work": b.ID, "title": b.Title, "updated": b.UpdatedAt.UTC().Format(time.RFC3339), "state": state, "detail": detail}
 		if len(asks) > 0 {
 			item["waiting_questions"] = asks
 		}
-		line := "- " + b.Title
 		if b.Depot != nil {
 			item["project"] = *b.Depot
-			line += " in " + *b.Depot
+			p.project = *b.Depot
 		}
-		items[state] = append(items[state], item)
-		lines[state] = append(lines[state], fmt.Sprintf("%s (%s)", line, detail))
-	}
-	var b strings.Builder
-	b.WriteString("Here is what is happening with your work.\n")
-	list := []map[string]any{}
-	for _, st := range workStates {
-		if len(lines[st.state]) == 0 {
-			continue
+		if p.changed {
+			item["changed"] = item["updated"]
 		}
-		fmt.Fprintf(&b, "\n%s:\n%s\n", st.heading, strings.Join(lines[st.state], "\n"))
-		list = append(list, items[st.state]...)
+		if p.building {
+			item["building"] = true
+		}
+		p.item = item
+		if changedOnlyItem {
+			changedOnly[state] = append(changedOnly[state], p)
+		} else {
+			byState[state] = append(byState[state], p)
+		}
+		if p.changed {
+			changed = append(changed, p)
+		}
 	}
-	if len(list) == 0 {
+	if len(byState) == 0 && len(changedOnly) == 0 {
+		text := fmt.Sprintf("Nothing of yours is open, and nothing has finished since %s.", when(since, now))
 		return &Result{
-			Text:       fmt.Sprintf("Nothing of yours is open, and nothing has finished since %s.", when(since, now)),
-			Structured: map[string]any{"work_list": list},
+			Text:       text,
+			Structured: map[string]any{"work_list": []map[string]any{}, "summary": map[string]any{"text": text, "states": []map[string]any{}}},
 		}, nil
 	}
-	return &Result{
-		Text:       strings.TrimRight(b.String(), "\n"),
-		Structured: map[string]any{"work_list": list},
-	}, nil
+	return account(byState, changedOnly, changed, since, now), nil
+}
+
+// buildingNow is the pieces of work something is working on this moment,
+// by work name: those with a session that is starting or running. A manual
+// group's claim, which a person holds, and a peer group's, which another
+// yard works, are not the yard building, and the filter leaves them out.
+func (s *Service) buildingNow(ctx context.Context) (map[string]bool, error) {
+	sessions, err := s.Yard.ListSessions(ctx, store.SessionFilter{Running: true})
+	if err != nil {
+		return nil, err
+	}
+	building := make(map[string]bool, len(sessions))
+	for _, sess := range sessions {
+		building[sess.Bead] = true
+	}
+	return building, nil
+}
+
+// inWindow is whether t is inside the window the account is asked about,
+// from since until now: how finished work and changed work are told apart
+// from the rest.
+func inWindow(t, since, now time.Time) bool {
+	return !t.Before(since) && !t.After(now)
 }
 
 // workState is the state one piece of work is told in, as the first of
@@ -142,7 +191,7 @@ func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (
 // window, which the account leaves out.
 func (s *Service) workState(ctx context.Context, b store.Bead, since, now time.Time) (state, detail string, err error) {
 	if b.Status == "closed" {
-		if b.ClosedAt == nil || b.ClosedAt.Before(since) || b.ClosedAt.After(now) {
+		if b.ClosedAt == nil || !inWindow(*b.ClosedAt, since, now) {
 			return "", "", nil
 		}
 		return "finished", "finished " + when(*b.ClosedAt, now), nil

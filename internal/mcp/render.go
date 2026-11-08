@@ -1,7 +1,9 @@
 package mcp
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,6 +25,166 @@ func when(t time.Time, now time.Time) string {
 		return t.Format("Mon 2 Jan at 15:04")
 	}
 	return t.Format("Mon 2 Jan 2006 at 15:04")
+}
+
+// piece is one piece of the account (what_is_happening): the item that
+// carries it in the structured part, and what its lines in the words are
+// made of.
+type piece struct {
+	title, state string
+	project      string // "" for a piece that has none
+	detail       string // what stands in brackets in its state's section
+	updated      time.Time
+	changed      bool // updated inside the window asked about
+	building     bool // a session of the yard is working on it this moment
+	item         map[string]any
+}
+
+// line is the piece in its state's section: the state is the section's, so
+// the brackets hold what says why or when.
+func (p piece) line() string { return p.title + " (" + p.detail + ")" }
+
+// changedLine is the piece in the changed section, which has no state
+// heading over it, so the state stands in the brackets with when it
+// changed. The reason is in the state's section.
+func (p piece) changedLine(now time.Time) string {
+	extra := ""
+	if p.building {
+		extra = ", building now"
+	}
+	return fmt.Sprintf("%s (%s, changed %s%s)", p.title, p.state, when(p.updated, now), extra)
+}
+
+// projectGroup is the pieces of one project, in the order they came in.
+type projectGroup struct {
+	project string // "" for the pieces that have none
+	pieces  []piece
+}
+
+// byProject groups pieces by project: the project with most pieces first,
+// ties by name, and the pieces that have none last. The counts and the
+// sections both go in this order, so a person can read the one against the
+// other.
+func byProject(pieces []piece) []projectGroup {
+	var groups []projectGroup
+	at := map[string]int{}
+	for _, p := range pieces {
+		i, ok := at[p.project]
+		if !ok {
+			i = len(groups)
+			at[p.project] = i
+			groups = append(groups, projectGroup{project: p.project})
+		}
+		groups[i].pieces = append(groups[i].pieces, p)
+	}
+	slices.SortFunc(groups, func(a, b projectGroup) int {
+		if (a.project == "") != (b.project == "") {
+			if a.project == "" {
+				return 1
+			}
+			return -1
+		}
+		return cmp.Or(cmp.Compare(len(b.pieces), len(a.pieces)), strings.Compare(a.project, b.project))
+	})
+	return groups
+}
+
+// where is the group in words, as the counts say it: "in yardr", "with no
+// project".
+func (g projectGroup) where() string {
+	if g.project == "" {
+		return "with no project"
+	}
+	return "in " + g.project
+}
+
+// head is the group's head in a section: where, as a line of its own.
+func (g projectGroup) head() string {
+	w := g.where() // both begin with a lower-case ASCII letter
+	return strings.ToUpper(w[:1]) + w[1:]
+}
+
+// section is a heading over its groups, each under its project's head with
+// a line for each piece.
+func section(heading string, groups []projectGroup, line func(piece) string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n%s:\n", heading)
+	for _, g := range groups {
+		fmt.Fprintf(&b, "%s:\n", g.head())
+		for _, p := range g.pieces {
+			fmt.Fprintf(&b, "- %s\n", line(p))
+		}
+	}
+	return b.String()
+}
+
+// countsLine is the sentence the account opens with: for each state that
+// has pieces, how many, and how many of those in each project ("12 under
+// way (8 in yardr, 3 in footplate, 1 in footplate-ios)"), in the order of
+// the states. states is the same counts for the structured part.
+func countsLine(grouped map[string][]projectGroup) (sentence string, states []map[string]any) {
+	var parts []string
+	states = []map[string]any{}
+	for _, st := range workStates {
+		groups := grouped[st.state]
+		if len(groups) == 0 {
+			continue
+		}
+		total := 0
+		split := make([]string, len(groups))
+		projects := make([]map[string]any, len(groups))
+		for i, g := range groups {
+			total += len(g.pieces)
+			split[i] = fmt.Sprintf("%d %s", len(g.pieces), g.where())
+			projects[i] = map[string]any{"count": len(g.pieces)}
+			if g.project != "" {
+				projects[i]["project"] = g.project
+			}
+		}
+		parts = append(parts, fmt.Sprintf("%d %s (%s)", total, st.state, strings.Join(split, ", ")))
+		states = append(states, map[string]any{"state": st.state, "count": total, "projects": projects})
+	}
+	return "Your work: " + strings.Join(parts, ", ") + ".", states
+}
+
+// account is the account of the pieces, by state, in the words and in the
+// structured part: the counts first, then the pieces that changed inside
+// the window asked about, then each state's section. A previously finished
+// piece that changed again is counted and listed, but is not in Finished
+// lately. The structured list groups every piece by state and project.
+func account(byState, changedOnly map[string][]piece, changed []piece, since, now time.Time) *Result {
+	grouped := map[string][]projectGroup{}
+	sectionGroups := map[string][]projectGroup{}
+	for _, st := range workStates {
+		pieces := append([]piece(nil), byState[st.state]...)
+		sectionGroups[st.state] = byProject(pieces)
+		pieces = append(pieces, changedOnly[st.state]...)
+		grouped[st.state] = byProject(pieces)
+	}
+	sentence, states := countsLine(grouped)
+	var b strings.Builder
+	b.WriteString(sentence + "\n")
+	if len(changed) > 0 {
+		b.WriteString(section("Changed since "+when(since, now), byProject(changed), func(p piece) string { return p.changedLine(now) }))
+	}
+	list := []map[string]any{}
+	for _, st := range workStates {
+		if len(sectionGroups[st.state]) == 0 {
+			continue
+		}
+		b.WriteString(section(st.heading, sectionGroups[st.state], piece.line))
+	}
+	for _, st := range workStates {
+		for _, g := range grouped[st.state] {
+			for _, p := range g.pieces {
+				list = append(list, p.item)
+			}
+		}
+	}
+	return &Result{
+		Text:       strings.TrimRight(b.String(), "\n"),
+		Structured: map[string]any{"work_list": list, "summary": map[string]any{"text": sentence, "states": states}},
+	}
 }
 
 // authorMark is a writer's name as a result shows it: a name of this

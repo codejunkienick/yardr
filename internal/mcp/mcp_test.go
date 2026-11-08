@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +46,14 @@ type readErrorYard struct {
 	settingsErr error
 	crewErr     error
 	blockersErr error
+	sessionsErr error
+}
+
+func (y readErrorYard) ListSessions(ctx context.Context, f store.SessionFilter) ([]store.Session, error) {
+	if y.sessionsErr != nil {
+		return nil, y.sessionsErr
+	}
+	return y.Yard.ListSessions(ctx, f)
 }
 
 func (y readErrorYard) Settings(ctx context.Context) (map[string]string, error) {
@@ -138,6 +148,29 @@ func plain(t *testing.T, text string) {
 // whenWords is a time as the account says it ("Sun 8 Nov at 12:30"), so
 // a test can compare the words around it exactly, without the clock.
 var whenWords = regexp.MustCompile(`(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2}( \d{4})? at \d{2}:\d{2}`)
+
+// accountSection reads one section of the account (its heading, a pattern,
+// without the colon): the project heads in the order they come, and the
+// lines under each, without their dash. A section the account lacks reads
+// as no heads at all.
+func accountSection(text, heading string) (heads []string, lines map[string][]string) {
+	loc := regexp.MustCompile(`\n` + heading + `:\n`).FindStringIndex(text)
+	if loc == nil {
+		return nil, nil
+	}
+	body, _, _ := strings.Cut(text[loc[1]:], "\n\n")
+	lines = map[string][]string{}
+	head := ""
+	for _, l := range strings.Split(body, "\n") {
+		if line, ok := strings.CutPrefix(l, "- "); ok {
+			lines[head] = append(lines[head], line)
+			continue
+		}
+		head = strings.TrimSuffix(l, ":")
+		heads = append(heads, head)
+	}
+	return heads, lines
+}
 
 func TestNoUserRefusesEveryTool(t *testing.T) {
 	y := newYard(t)
@@ -292,8 +325,8 @@ func TestWhatIsHappening(t *testing.T) {
 	if strings.Contains(res.Text, "Bob's thing") {
 		t.Errorf("another person's work is in the account:\n%s", res.Text)
 	}
-	// Each piece is told in its own state, under that state's heading,
-	// with its project and the words that say why or when. The item and
+	// Each piece is told in its own state, under that state's heading and
+	// its project's head, with the words that say why or when. The item and
 	// the line carry the same words, so a client that shows only the
 	// structured part loses nothing. The cases are in the order of the
 	// states, which is the order of the headings and of the list.
@@ -321,7 +354,14 @@ func TestWhatIsHappening(t *testing.T) {
 		{"Write the report", "under way", "yardr", "last touched <when>"},
 	}
 	headings := map[string]string{}
+	// What changed comes after the counts and before the first state.
+	changed := "Changed since " + whenWords.String()
 	last := -1
+	if loc := regexp.MustCompile(`\n` + changed + `:\n`).FindStringIndex(res.Text); loc == nil {
+		t.Errorf("the account lacks what changed:\n%s", res.Text)
+	} else {
+		last = loc[0]
+	}
 	for _, st := range states {
 		headings[st.state] = st.heading
 		at := strings.Index(res.Text, "\n"+st.heading+":\n")
@@ -355,20 +395,138 @@ func TestWhatIsHappening(t *testing.T) {
 		if item["state"] != c.state || item["project"] != project || whenWords.ReplaceAllString(detail, "<when>") != c.detail {
 			t.Errorf("%q = %+v, want state %q, project %q, detail %q", c.title, item, c.state, c.project, c.detail)
 		}
-		line := "- " + c.title
+		head := "With no project"
 		if c.project != "" {
-			line += " in " + c.project
+			head = "In " + c.project
 		}
-		_, rest, _ := strings.Cut(res.Text, "\n"+headings[c.state]+":\n")
-		section, _, _ := strings.Cut(rest, "\n\n")
-		if !strings.Contains(section, line+" ("+detail+")") {
-			t.Errorf("under %q the account lacks the line %q:\n%s", headings[c.state], line+" ("+detail+")", res.Text)
+		_, lines := accountSection(res.Text, headings[c.state])
+		if !slices.Contains(lines[head], c.title+" ("+detail+")") {
+			t.Errorf("under %q, %q the account lacks the line %q:\n%s", headings[c.state], head, c.title+" ("+detail+")", res.Text)
 		}
 	}
-	// One piece in full, with its notes.
+	// The account opens with the counts, by state and by project in each:
+	// the project with most pieces first, ties by name, and the pieces with
+	// no project last. The sections go in the same order, and the structured
+	// part has the counts, and their words too.
+	counts := "Your work: 1 finished (1 in yardr), 3 stuck (2 in yardr, 1 in shop), 2 parked (1 in shop, 1 in yardr), " +
+		"4 waiting (4 in yardr), 2 not started (1 in shop, 1 with no project), 1 under way (1 in yardr)."
+	if first, _, _ := strings.Cut(res.Text, "\n"); first != counts {
+		t.Errorf("the account opens with\n%s\nwant\n%s", first, counts)
+	}
+	wantStates := []map[string]any{
+		{"state": "finished", "count": 1, "projects": []map[string]any{{"project": "yardr", "count": 1}}},
+		{"state": "stuck", "count": 3, "projects": []map[string]any{{"project": "yardr", "count": 2}, {"project": "shop", "count": 1}}},
+		{"state": "parked", "count": 2, "projects": []map[string]any{{"project": "shop", "count": 1}, {"project": "yardr", "count": 1}}},
+		{"state": "waiting", "count": 4, "projects": []map[string]any{{"project": "yardr", "count": 4}}},
+		{"state": "not started", "count": 2, "projects": []map[string]any{{"project": "shop", "count": 1}, {"count": 1}}},
+		{"state": "under way", "count": 1, "projects": []map[string]any{{"project": "yardr", "count": 1}}},
+	}
+	if summary, _ := res.Structured["summary"].(map[string]any); summary["text"] != counts || !reflect.DeepEqual(summary["states"], wantStates) {
+		t.Errorf("the summary is %+v, want the counts %q and the states %+v", summary, counts, wantStates)
+	}
+	for heading, want := range map[string][]string{
+		"Stuck":       {"In yardr", "In shop"},
+		"Parked":      {"In shop", "In yardr"},
+		"Not started": {"In shop", "With no project"},
+	} {
+		if heads, _ := accountSection(res.Text, heading); !slices.Equal(heads, want) {
+			t.Errorf("under %q the heads are %v, want %v", heading, heads, want)
+		}
+	}
+	// The window is the last day when none is asked for, and every piece
+	// here was just touched, so every piece changed inside it: the changed
+	// section lists them all, whatever their state, and each item says when.
+	// Its lines give the state in the brackets, since no state's heading
+	// stands over them.
+	heads, lines := accountSection(res.Text, changed)
+	if !slices.Equal(heads, []string{"In yardr", "In shop", "With no project"}) ||
+		len(lines["In yardr"]) != 9 || len(lines["In shop"]) != 3 || len(lines["With no project"]) != 1 {
+		t.Errorf("the changed section is %v %v, want all %d pieces under their projects:\n%s", heads, lines, len(cases), res.Text)
+	}
+	if got := whenWords.ReplaceAllString(strings.Join(lines["In shop"], "\n"), "<when>"); got !=
+		"Held and parked (stuck, changed <when>)\nSet the logo aside (parked, changed <when>)\nPlan the stall (not started, changed <when>)" {
+		t.Errorf("the changed lines under In shop are\n%s", got)
+	}
+	for _, item := range list {
+		if item["changed"] != item["updated"] {
+			t.Errorf("%v changed %v, want it at its update, %v", item["title"], item["changed"], item["updated"])
+		}
+	}
+	// A window that opens after most of the work was last touched lists
+	// only what changed in it. The note below is the one write after it:
+	// that piece is changed, the rest are not, and all are still told in
+	// their states.
+	opens := time.Now()
 	if err := y.st.AddNote(y.ctx, mine, "the figures arrived", "bob"); err != nil {
 		t.Fatal(err)
 	}
+	res, err = s.WhatIsHappening(y.ctx, "", opens.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain(t, res.Text)
+	heads, lines = accountSection(res.Text, changed)
+	if !slices.Equal(heads, []string{"In yardr"}) || len(lines["In yardr"]) != 1 ||
+		whenWords.ReplaceAllString(lines["In yardr"][0], "<when>") != "Write the report (under way, changed <when>)" {
+		t.Errorf("the changed section is %v %v, want the one piece the note touched:\n%s", heads, lines, res.Text)
+	}
+	for _, item := range res.Structured["work_list"].([]map[string]any) {
+		if _, isChanged := item["changed"]; isChanged != (item["work"] == mine) {
+			t.Errorf("%v: changed is %v, want it on %q alone", item["title"], item["changed"], "Write the report")
+		}
+	}
+	if _, lines := accountSection(res.Text, "Stuck"); len(lines["In yardr"]) != 2 {
+		t.Errorf("a window that opens late hides the pieces it did not change from their states:\n%s", res.Text)
+	}
+	// A closed piece outside the finished window still appears when it is
+	// updated inside it; it belongs in Changed since, with its finished
+	// state and update time, but not under Finished lately.
+	oldClosed := y.work(t, "An older finished piece", "yardr", "ada")
+	if _, err := y.st.CloseBead(y.ctx, oldClosed, "done", store.Expect{}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	oldSince := time.Now()
+	if err := y.st.AddNote(y.ctx, oldClosed, "a later note", "bob"); err != nil {
+		t.Fatal(err)
+	}
+	res, err = s.WhatIsHappening(y.ctx, "", oldSince.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain(t, res.Text)
+	if _, lines := accountSection(res.Text, changed); len(lines["In yardr"]) != 1 ||
+		whenWords.ReplaceAllString(lines["In yardr"][0], "<when>") != "An older finished piece (finished, changed <when>)" {
+		t.Errorf("an older finished piece changed inside the window is %v:\n%s", lines, res.Text)
+	}
+	if _, lines := accountSection(res.Text, "Finished lately"); len(lines["In yardr"]) != 0 {
+		t.Errorf("an older finished piece appeared under Finished lately:\n%s", res.Text)
+	}
+	summary, _ := res.Structured["summary"].(map[string]any)
+	summaryText, _ := summary["text"].(string)
+	if !strings.HasPrefix(summaryText, "Your work: 1 finished (1 in yardr),") {
+		t.Errorf("an older finished piece is missing from the summary: %+v", summary)
+	}
+	foundOldClosed := false
+	for _, item := range res.Structured["work_list"].([]map[string]any) {
+		if item["work"] == oldClosed {
+			foundOldClosed = item["state"] == "finished" && item["changed"] == item["updated"]
+		}
+	}
+	if !foundOldClosed {
+		t.Errorf("the structured account lacks the changed finished piece %q: %+v", oldClosed, res.Structured["work_list"])
+	}
+	// The window ends at the clock's now: with the clock an hour before the
+	// work was touched, none of it is changed, and the piece finished after
+	// that is not finished lately, while the open work is still told.
+	early := &mcp.Service{Yard: y.st, User: "ada", Now: func() time.Time { return opens.Add(-time.Hour) }}
+	res, err = early.WhatIsHappening(y.ctx, "", opens.Add(-2*time.Hour).UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if heads, _ := accountSection(res.Text, changed); heads != nil || strings.Contains(res.Text, "Old report") || !strings.Contains(res.Text, "Write the report") {
+		t.Errorf("a window that ends before the work was touched is\n%s", res.Text)
+	}
+	// One piece in full, with its notes.
 	res, err = s.WhatIsHappening(y.ctx, mine, "")
 	if err != nil {
 		t.Fatal(err)
@@ -417,7 +575,9 @@ func TestWhatIsHappening(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.Text, "Old report in yardr (finished ") || !strings.Contains(res.Text, fmt.Sprintf("; question %d still waits for you)", seq)) {
+	if _, lines := accountSection(res.Text, "Finished lately"); !slices.ContainsFunc(lines["In yardr"], func(line string) bool {
+		return strings.HasPrefix(line, "Old report (finished ") && strings.HasSuffix(line, fmt.Sprintf("; question %d still waits for you)", seq))
+	}) {
 		t.Errorf("the account hides the question waiting on finished work:\n%s", res.Text)
 	}
 	// A window that excludes the finished work drops it.
@@ -437,7 +597,13 @@ func TestWhatIsHappening(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if empty, ok := res.Structured["work_list"].([]map[string]any); !strings.HasPrefix(res.Text, "Nothing of yours is open, and nothing has finished since ") || !ok || empty == nil || len(empty) != 0 {
+	// Its structured part has the same shape, so a client reads the counts
+	// the same way: the words, and no state.
+	empty, ok := res.Structured["work_list"].([]map[string]any)
+	summary, _ = res.Structured["summary"].(map[string]any)
+	noStates, _ := summary["states"].([]map[string]any)
+	if !strings.HasPrefix(res.Text, "Nothing of yours is open, and nothing has finished since ") || !ok || empty == nil || len(empty) != 0 ||
+		summary["text"] != res.Text || noStates == nil || len(noStates) != 0 {
 		t.Errorf("an empty account is\n%s\n%+v", res.Text, res.Structured)
 	}
 	quiet.bead(t, store.NewBead{Title: "Plan the stall", Depot: "shop", Stage: "backlog", For: "ada"})
@@ -445,7 +611,8 @@ func TestWhatIsHappening(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(res.Text, "Nothing of yours") || !strings.Contains(res.Text, "Not started:\n- Plan the stall in shop") {
+	if _, lines := accountSection(res.Text, "Not started"); strings.Contains(res.Text, "Nothing of yours") || len(lines["In shop"]) != 1 ||
+		!strings.HasPrefix(lines["In shop"][0], "Plan the stall (last touched ") {
 		t.Errorf("an account of work that has not started is\n%s", res.Text)
 	}
 
@@ -461,6 +628,98 @@ func TestWhatIsHappening(t *testing.T) {
 	}
 	if _, err := s.WhatIsHappening(y.ctx, mine, ""); !errors.Is(err, blockersErr) {
 		t.Fatalf("a failed one-piece blocker lookup = %v, want its error", err)
+	}
+	sessionsErr := errors.New("sessions unavailable")
+	s.Yard = readErrorYard{Yard: y.st, sessionsErr: sessionsErr}
+	if _, err := s.WhatIsHappening(y.ctx, "", ""); !errors.Is(err, sessionsErr) {
+		t.Fatalf("a failed session lookup = %v, want its error", err)
+	}
+	checkWhatIsHappeningBuildingNow(t)
+}
+
+// A piece is building now while a session of the yard is starting or
+// running on it, and only then: a manual group's claim, which a person
+// holds, a session that ended and a piece nothing works on are not. No other
+// test starts a session through the account, so the claims are made here.
+func checkWhatIsHappeningBuildingNow(t *testing.T) {
+	t.Helper()
+	y := newYard(t)
+	y.depot(t, "yardr")
+	for _, g := range []store.Group{{Name: "builders", Runner: "herdr", Limit: 5}, {Name: "desk", Runner: "manual", Limit: 5}} {
+		if err := y.st.PutGroup(y.ctx, g, "ada"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claim := func(title, group string) (bead string, sess *store.Session) {
+		t.Helper()
+		bead = y.bead(t, store.NewBead{Title: title, Depot: "yardr", Stage: "new", For: "ada"})
+		sess, err := y.st.Claim(y.ctx, bead, group, "new", "yard")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return bead, sess
+	}
+	idle := y.bead(t, store.NewBead{Title: "Nobody on it", Depot: "yardr", Stage: "new", For: "ada"})
+	starting, _ := claim("Just claimed", "builders")
+	running, sess := claim("Being worked", "builders")
+	if err := y.st.MarkRunning(y.ctx, sess.ID, map[string]any{"agent": "worker"}); err != nil {
+		t.Fatal(err)
+	}
+	held, _ := claim("A person has it", "desk")
+	ended, sess := claim("Its session died", "builders")
+	if err := y.st.EndSession(y.ctx, sess.ID, "died", "the pane closed"); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := svc(y, "").WhatIsHappening(y.ctx, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain(t, res.Text)
+	building := map[string]bool{starting: true, running: true}
+	titles := map[string]string{idle: "Nobody on it", starting: "Just claimed", running: "Being worked", held: "A person has it", ended: "Its session died"}
+	items := map[string]map[string]any{}
+	for _, item := range res.Structured["work_list"].([]map[string]any) {
+		items[item["work"].(string)] = item
+	}
+	// The mark is in the item and in its lines, in its state's section and
+	// in the changed one; the item carries it only while it holds.
+	_, under := accountSection(res.Text, "Under way")
+	_, changed := accountSection(res.Text, "Changed since "+whenWords.String())
+	for work, title := range titles {
+		item := items[work]
+		if item == nil {
+			t.Errorf("the account lacks %q:\n%s", title, res.Text)
+			continue
+		}
+		line := func(lines []string) string {
+			for _, l := range lines {
+				if strings.HasPrefix(l, title+" (") {
+					return l
+				}
+			}
+			return ""
+		}
+		inState, inChanged := line(under["In yardr"]), line(changed["In yardr"])
+		if inState == "" || inChanged == "" {
+			t.Errorf("%q is not in both sections:\n%s", title, res.Text)
+		}
+		if got := strings.Contains(inState, "building now"); got != building[work] {
+			t.Errorf("%q: its line %q says building now = %v, want %v", title, inState, got, building[work])
+		}
+		if got := strings.HasSuffix(inChanged, ", building now)"); got != building[work] {
+			t.Errorf("%q: its changed line %q says building now = %v, want %v", title, inChanged, got, building[work])
+		}
+		detail, _ := item["detail"].(string)
+		if got := strings.HasSuffix(detail, "; building now"); got != building[work] {
+			t.Errorf("%q: its detail %q says building now = %v, want %v", title, detail, got, building[work])
+		}
+		if flag, present := item["building"]; present != building[work] || present && flag != true {
+			t.Errorf("%q: building is %v (present %v), want it true on the pieces being built alone", title, flag, present)
+		}
+	}
+	if ended := items[ended]; ended["state"] != "under way" {
+		t.Errorf("the piece whose session died is %v, want it under way again", ended["state"])
 	}
 }
 

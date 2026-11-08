@@ -44,6 +44,9 @@ func (f *fakeYard) CloseBead(_ context.Context, id, _ string, _ store.Expect, _ 
 func (f *fakeYard) ListBeads(context.Context, store.BeadFilter) ([]store.Bead, error) {
 	return nil, nil
 }
+func (f *fakeYard) ListSessions(context.Context, store.SessionFilter) ([]store.Session, error) {
+	return nil, nil
+}
 func (f *fakeYard) GetBead(_ context.Context, id string) (*store.Bead, error) {
 	return &store.Bead{ID: id, Title: "Add grace", Status: "open"}, nil
 }
@@ -169,6 +172,26 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 				t.Errorf("%s's description does not say when to pass wait false:\n%s", tool.Name, tool.Description)
 			}
 		}
+		// what_is_happening's output schema names the counts its answer
+		// opens with, and its description says what that answer opens with
+		// and what since is for.
+		if tool.Name == mcp.ToolWhatIsHappening {
+			var out struct {
+				Properties struct {
+					Summary struct {
+						Type       string         `json:"type"`
+						Properties map[string]any `json:"properties"`
+					} `json:"summary"`
+				} `json:"properties"`
+			}
+			if err := json.Unmarshal(schema, &out); err != nil || out.Properties.Summary.Type != "object" ||
+				out.Properties.Summary.Properties["text"] == nil || out.Properties.Summary.Properties["states"] == nil {
+				t.Errorf("%s's output schema = %s, want a summary object with text and states", tool.Name, schema)
+			}
+			if !strings.Contains(tool.Description, "opens with how many pieces") || !strings.Contains(tool.Description, "pass the time they last asked") {
+				t.Errorf("%s's description does not say what its answer opens with and what since is for:\n%s", tool.Name, tool.Description)
+			}
+		}
 		// read_my_mail's recent is an optional count, and its description
 		// says what passing it does.
 		if tool.Name == mcp.ToolReadMyMail {
@@ -241,6 +264,28 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 		t.Errorf("the refusal lacks its unread line:\n%s", text)
 	}
 	structuredText(t, res, text)
+
+	// The account over the wire: the counts it opens with ride in the
+	// structured part, in words and in numbers, as the summary. It is asked
+	// for here, while the one piece is the one this test made, because the
+	// loop below files, rewords and withdraws work of its own, and any tool
+	// added to the contract may change the counts again.
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: mcp.ToolWhatIsHappening, Arguments: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text = toolText(t, res)
+	plain(t, text)
+	structuredText(t, res, text)
+	accountJSON, _ := json.Marshal(res.StructuredContent)
+	var account map[string]json.RawMessage
+	if err := json.Unmarshal(accountJSON, &account); err != nil {
+		t.Fatalf("the structured account = %s: %v", accountJSON, err)
+	}
+	const counts = "Your work: 1 under way (1 in yardr)."
+	if want := `{"states":[{"count":1,"projects":[{"count":1,"project":"yardr"}],"state":"under way"}],"text":"` + counts + `"}`; string(account["summary"]) != want || !strings.HasPrefix(text, counts+"\n") {
+		t.Errorf("the account's summary = %s, want %s, and the words to open with %q:\n%s", account["summary"], want, counts, text)
+	}
 
 	// Every tool's structured part carries its words whole, footer and
 	// all, since a client may hand its model that part alone. A tool
