@@ -468,7 +468,7 @@ func (f *FootItem) askFresh(tx *bolt.Tx, at time.Time) (bool, error) {
 		if ok, err := get(tx, bBeads, f.AskBead, &b); err != nil || !ok {
 			return false, err
 		}
-		f.Ask = &OpenAsk{Bead: r.Note.Bead, BeadTitle: b.Title, Topic: topicOf(b.Bead), Ask: r.Note.Seq, Question: r.Ask.Question, Asker: r.Note.Author, Since: r.Note.At}
+		f.Ask = &OpenAsk{Bead: r.Note.Bead, BeadTitle: b.Title, Topic: topicOf(b.Bead), Ask: r.Note.Seq, Question: r.Ask.Question, Asker: r.Note.Author, Since: r.Note.At, Turn: r.Turn()}
 		return true, nil
 	}
 	return false, nil

@@ -30,6 +30,13 @@ const ClientHeader = "X-Yardr-Client"
 // A name here is on the wire for good. An argument a later build adds is
 // one a client of today leaves out, so it must mean what the call did
 // before when it is the zero value.
+//
+// AnswerAskExpected, DeferAskExpected and DeclineAskExpected are the three
+// writes of a decision guarded by the ask's turn, which a client read in
+// UserAsks or Bead. A new name, not a new argument of the old three: a yard
+// from before them answers a call of one as a method it does not have, and
+// the old three refuse a turn by name or a further argument in an array, so
+// no yard takes a guarded answer as an unguarded one.
 var Calls = map[string][]string{
 	"Head":                 {},
 	"Settings":             {},
@@ -56,6 +63,9 @@ var Calls = map[string][]string{
 	"AnswerAsk":            {"bead", "ask", "option", "words", "actor", "weighed"},
 	"DeferAsk":             {"bead", "ask", "actor"},
 	"DeclineAsk":           {"bead", "ask", "words", "actor"},
+	"AnswerAskExpected":    {"bead", "ask", "turn", "option", "words", "actor", "weighed"},
+	"DeferAskExpected":     {"bead", "ask", "turn", "actor"},
+	"DeclineAskExpected":   {"bead", "ask", "turn", "words", "actor"},
 	"TakeBackAsk":          {"bead", "ask", "reason", "actor"},
 	"AddNote":              {"bead", "text", "actor", "files"},
 	"DeliveryFiles":        {"seq"},

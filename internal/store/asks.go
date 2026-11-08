@@ -762,7 +762,7 @@ func (s *Store) AskNew(ctx context.Context, nb NewBead, ask Ask, actor string) (
 // approval, which AnswerAsk makes with its person's word (weighed): here
 // the answer comes with none, so such a pick is refused (weighedRefusal).
 func (s *Store) AddAnswer(ctx context.Context, id string, ans Answer, actor string) error {
-	return s.addAnswer(ctx, id, ans, actor, "", false)
+	return s.addAnswer(ctx, id, ans, actor, answerExpect{}, false)
 }
 
 // AddAnswerExpected is AddAnswer with the revision the caller read. The
@@ -773,13 +773,13 @@ func (s *Store) AddAnswerExpected(ctx context.Context, id string, ans Answer, ac
 	if revision == "" {
 		return fmt.Errorf("an answer needs the bead revision it was drawn from")
 	}
-	return s.addAnswer(ctx, id, ans, actor, revision, false)
+	return s.addAnswer(ctx, id, ans, actor, answerExpect{revision: revision}, false)
 }
 
-// addAnswer is AddAnswer's write. weighed is the caller's word that its
-// person saw the weight of a mapping card whose pick writes an identity
-// (weighedRefusal); no other answer reads it.
-func (s *Store) addAnswer(ctx context.Context, id string, ans Answer, actor, revision string, weighed bool) error {
+// addAnswer is AddAnswer's write, refused whole when expect no longer holds
+// (answerExpect). weighed is the caller's word that its person saw the weight
+// of a mapping card whose pick writes an identity (weighedRefusal).
+func (s *Store) addAnswer(ctx context.Context, id string, ans Answer, actor string, expect answerExpect, weighed bool) error {
 	unlock := s.askLocks.lock(askLockKey(id, ans.Ask))
 	defer unlock()
 	if err := answerShape(id, &ans); err != nil {
@@ -787,8 +787,8 @@ func (s *Store) addAnswer(ctx context.Context, id string, ans Answer, actor, rev
 	}
 	// A bead's handle never holds an "@" (validID).
 	if bead, peer, foreign := strings.Cut(id, "@"); foreign {
-		if revision != "" {
-			return fmt.Errorf("a revision cannot guard an ask on another yard's bead")
+		if expect.guards() {
+			return fmt.Errorf("a revision or a turn cannot guard an ask on another yard's bead")
 		}
 		return s.answerForeign(ctx, bead, peer, ans, actor)
 	}
@@ -815,11 +815,11 @@ func (s *Store) addAnswer(ctx context.Context, id string, ans Answer, actor, rev
 		if err != nil {
 			return err
 		}
-		if revision != "" && row.Revision != revision {
-			return fmt.Errorf("%w: bead %s is at revision %s, not %s; read it again", ErrConflict, row.ID, row.Revision, revision)
-		}
 		notes, err := beadNotes(w.Tx, row.UUID)
 		if err != nil {
+			return err
+		}
+		if err := expect.check(row, notes, ans.Ask); err != nil {
 			return err
 		}
 		mayAnswer := func(to string) error {

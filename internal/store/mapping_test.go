@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -210,6 +211,15 @@ func TestClaimIdentityPickWritesIdentity(t *testing.T) {
 	pick := pickFor(t, y, open.Bead, "ada")
 	if err := y.AnswerAsk(y.ctx, open.Bead, open.Ask, pick, "", "ada", false); err == nil {
 		t.Fatal("ada picked who a sender is")
+	}
+	wantCardOpen(t, y, open.Bead)
+	// The guarded pick at the card's own turn is held to the same rules:
+	// the operator's alone, and with the person's word on its weight.
+	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, pick, "", "ada", true); err == nil || errors.Is(err, ErrConflict) {
+		t.Fatalf("ada's guarded pick of who a sender is = %v", err)
+	}
+	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, pick, "", "mckean", false); err == nil || !strings.Contains(err.Error(), "weighed") {
+		t.Fatalf("the operator's guarded pick without its weight = %v", err)
 	}
 	wantCardOpen(t, y, open.Bead)
 	if err := y.AnswerAsk(y.ctx, open.Bead, open.Ask, pick, "", "mckean", true); err != nil {

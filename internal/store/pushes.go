@@ -186,7 +186,7 @@ func (p *Push) openAsk(tx *bolt.Tx, at time.Time) (*OpenAsk, error) {
 		if r.Note.Seq == p.AskSeq && r.AskErr == nil && r.Ask.To == p.User && r.State == AskOpen {
 			return &OpenAsk{
 				Bead: b.ID, BeadTitle: b.Title, Topic: topicOf(b.Bead),
-				Ask: r.Note.Seq, Question: r.Ask.Question,
+				Ask: r.Note.Seq, Question: r.Ask.Question, Turn: r.Turn(),
 				Asker: r.Note.Author, Since: r.Note.At,
 			}, nil
 		}
