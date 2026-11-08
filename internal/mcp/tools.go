@@ -17,6 +17,7 @@ import (
 // parked one takes precedence over its stage.
 var workStates = []struct{ state, heading string }{
 	{"finished", "Finished lately"},
+	{"closed early", "Closed before they were finished"},
 	{"stuck", "Stuck"},
 	{"parked", "Parked"},
 	{"waiting", "Waiting"},
@@ -96,13 +97,12 @@ func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (
 		changedOnlyItem := false
 		if state == "" {
 			// A closed piece normally leaves the account once it falls out
-			// of the finished window. If it changes again, its new update
-			// brings it back in the changed section as finished work.
+			// of the window. If it changes again, its new update brings it
+			// back in the changed section, in the state it was closed in.
 			if b.Status != "closed" || b.ClosedAt == nil || !inWindow(b.UpdatedAt, since, now) {
 				continue
 			}
-			state = "finished"
-			detail = "finished " + when(*b.ClosedAt, now)
+			state, detail = s.closedState(ctx, b, now)
 			changedOnlyItem = true
 		}
 		// The line and the item say the same: the detail is what stands
@@ -110,7 +110,7 @@ func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (
 		// loses no reason the words give, a question that waits for the
 		// person and a session at work among them.
 		asks := waiting[b.ID]
-		detail += waitsLine(asks, state == "finished")
+		detail += waitsLine(asks, over(state))
 		p := piece{
 			title: b.Title, state: state, updated: b.UpdatedAt,
 			changed:  inWindow(b.UpdatedAt, since, now),
@@ -187,14 +187,16 @@ func inWindow(t, since, now time.Time) bool {
 // are a person's wherever a flow has them, and the account reads no
 // group, which would take a call of the store for what two names say.
 // No rule reads the type, so a lead or a design in the backlog is not
-// started like the rest. The state is "" for a closed piece outside the
-// window, which the account leaves out.
+// started like the rest. A closed piece is finished or closed early, by
+// the stage it was closed in (closedEarly), and the state is "" for one
+// outside the window, which the account leaves out.
 func (s *Service) workState(ctx context.Context, b store.Bead, since, now time.Time) (state, detail string, err error) {
 	if b.Status == "closed" {
 		if b.ClosedAt == nil || !inWindow(*b.ClosedAt, since, now) {
 			return "", "", nil
 		}
-		return "finished", "finished " + when(*b.ClosedAt, now), nil
+		state, detail = s.closedState(ctx, b, now)
+		return state, detail, nil
 	}
 	if b.Hold {
 		return "stuck", "it is on hold, waiting for a person", nil
@@ -223,6 +225,50 @@ func (s *Service) workState(ctx context.Context, b store.Bead, since, now time.T
 	return "under way", touched, nil
 }
 
+// closedState is the state the closed piece b is told in, finished or closed
+// early (closedEarly), with the words that say when and, for a piece closed
+// early, why, the reason cut to one line. b's ClosedAt is set. It stands apart
+// from workState because a closed piece that fell out of the window and
+// changed again is told in the same state.
+func (s *Service) closedState(ctx context.Context, b store.Bead, now time.Time) (state, detail string) {
+	if !s.closedEarly(ctx, b) {
+		return "finished", "finished " + when(*b.ClosedAt, now)
+	}
+	detail = "closed " + when(*b.ClosedAt, now)
+	if why := closeReason(b); why != "" {
+		detail += ": " + oneLine(why)
+	}
+	return "closed early", detail
+}
+
+// closedEarly says the closed piece b stopped short: the flow the store
+// resolves for it has an ending, a terminal stage, and b was closed in
+// another. Who closed it does not matter, so a person's withdrawal and a
+// yardmaster's close of a duplicate read alike. Where no flow governs b, the
+// flow has no ending, or the flow cannot be read, nothing says b stopped
+// short, so it is told finished, as every closed piece was before the stage
+// was read, and a flow that will not read does not fail the account.
+func (s *Service) closedEarly(ctx context.Context, b store.Bead) bool {
+	next, err := s.Yard.NextStages(ctx, b.ID)
+	if err != nil || next.Flow == nil || len(next.Flow.Terminal) == 0 {
+		return false
+	}
+	return !next.Flow.IsTerminal(b.Stage)
+}
+
+// over says the state is one a piece is told in once it is closed: a
+// question that waits for the person on such a piece waits still.
+func over(state string) bool { return state == "finished" || state == "closed early" }
+
+// closeReason is the reason b was closed with, as written and trimmed; ""
+// for a piece closed without one.
+func closeReason(b store.Bead) string {
+	if b.CloseReason == nil {
+		return ""
+	}
+	return strings.TrimSpace(*b.CloseReason)
+}
+
 // onePiece is what_is_happening for one named thing: its title, its
 // state and the words that say why or when, as the account tells them,
 // and its notes, as the piece's own page shows them.
@@ -248,9 +294,16 @@ func (s *Service) onePiece(ctx context.Context, work string, now time.Time) (*Re
 			asks = append(asks, a.Ask)
 		}
 	}
-	waits := waitsLine(asks, state == "finished")
+	waits := waitsLine(asks, over(state))
 	var out strings.Builder
 	fmt.Fprintf(&out, "%s\nIt is %s%s (%s).", view.Title, state, waits, detail)
+	// The account's line keeps the first line of the reason; the piece's own
+	// view has it whole. A finished piece's reason is the line's own word for
+	// where it ended ("merged"), which tells the person nothing, so only a
+	// piece closed early says why.
+	if why := closeReason(*b); state == "closed early" && why != "" {
+		fmt.Fprintf(&out, "\nWhy it was closed: %s", why)
+	}
 	if strings.TrimSpace(view.Body) != "" {
 		fmt.Fprintf(&out, "\n\n%s", strings.TrimSpace(view.Body))
 	}
@@ -289,9 +342,9 @@ func (s *Service) onePiece(ctx context.Context, work string, now time.Time) (*Re
 }
 
 // waitsLine is what follows a piece's standing where questions on it
-// wait for the person ("; question 7 still waits for you" on finished
-// work), and "" where none does.
-func waitsLine(asks []uint64, finished bool) string {
+// wait for the person ("; question 7 still waits for you" on closed
+// work, finished or not), and "" where none does.
+func waitsLine(asks []uint64, closed bool) string {
 	if len(asks) == 0 {
 		return ""
 	}
@@ -300,7 +353,7 @@ func waitsLine(asks []uint64, finished bool) string {
 		nums[i] = strconv.FormatUint(a, 10)
 	}
 	still := ""
-	if finished {
+	if closed {
 		still = "still "
 	}
 	if len(nums) == 1 {
@@ -405,6 +458,19 @@ func cutTitle(title string) string {
 		return strings.TrimSpace(string(r[:maxTitle])) + "…"
 	}
 	return title
+}
+
+// oneLine is s cut to its first line and, as a title is, to maxTitle
+// characters, with an ellipsis where anything was left out: a close reason
+// in the account's list is a line a person reads, and the piece's own view
+// has the whole.
+func oneLine(s string) string {
+	first, _, more := strings.Cut(strings.TrimSpace(s), "\n")
+	line := cutTitle(strings.TrimSpace(first))
+	if more && !strings.HasSuffix(line, "…") {
+		line += "…"
+	}
+	return line
 }
 
 // WhatWaitsForMe is what_waits_for_me: the questions the yard is

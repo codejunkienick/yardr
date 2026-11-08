@@ -63,6 +63,9 @@ func (f *fakeYard) Bead(context.Context, string, ...string) (*store.BeadView, er
 	}, nil
 }
 func (f *fakeYard) OpenBlockers(context.Context, string) ([]string, error) { return nil, nil }
+func (f *fakeYard) NextStages(_ context.Context, id string) (*store.NextStages, error) {
+	return &store.NextStages{Bead: id}, nil
+}
 func (f *fakeYard) UserAsks(context.Context, string, string, ...string) (*store.AskQueue, error) {
 	return &store.AskQueue{Open: []store.OpenAsk{}}, nil
 }

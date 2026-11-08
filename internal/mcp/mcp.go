@@ -118,17 +118,18 @@ func Tools() []ToolDef {
 		{
 			Name: ToolWhatIsHappening,
 			Description: "Say what is happening with this person's own work: each piece with the project it belongs to and where it stands. " +
-				"A piece is finished lately, stuck (on hold, or waiting for other work to finish), parked (set aside for now), " +
+				"A piece is finished lately, closed early (closed before it was finished, whether the person withdrew it or someone else closed it, with the reason it was closed), " +
+				"stuck (on hold, or waiting for other work to finish), parked (set aside for now), " +
 				"waiting (for a person to decide, to accept it or to send it to build, or for it to be combined with other small work), not started, or under way. " +
 				"The answer opens with how many pieces are in each of those and in which projects, and marks the pieces being built right now. " +
-				"Pass the work name from an earlier answer to show that one thing in full, with the notes on it. " +
-				"since is a time (for example 2026-11-01T09:00:00Z) widening how far back finished work is shown and what changed is listed; " +
+				"Pass the work name from an earlier answer to show that one thing in full, with the notes on it and, for a piece closed early, why it was closed. " +
+				"since is a time (for example 2026-11-01T09:00:00Z) widening how far back finished and closed work is shown and what changed is listed; " +
 				"to tell this person what is new since they last asked, pass the time they last asked. Without it, the last day.",
 			InputSchema: schema(`{
 				"type": "object",
 				"properties": {
 					"work": {"type": "string", "description": "the work name from an earlier answer, to show that one thing in full"},
-					"since": {"type": "string", "description": "a time, how far back finished work is shown and changes are listed; the time this person last asked, for what is new (default: the last day)"}
+					"since": {"type": "string", "description": "a time, how far back finished and closed work is shown and changes are listed; the time this person last asked, for what is new (default: the last day)"}
 				},
 				"additionalProperties": false
 			}`),
@@ -150,7 +151,7 @@ func Tools() []ToolDef {
 				"work_list": {"type": "array", "description": "the account's pieces of work: work, title, project (where it has one), state, detail (the words that say why or when), updated, changed (when it changed, only where that was since the time asked about), building (true only while something is working on it), waiting_questions", "items": {"type": "object"}},
 				"work": {"type": "string", "description": "the one piece's work name, when work was given"},
 				"title": {"type": "string"},
-				"state": {"type": "string", "description": "the one piece's state: finished, stuck, parked, waiting, not started or under way"},
+				"state": {"type": "string", "description": "the one piece's state: finished, closed early, stuck, parked, waiting, not started or under way"},
 				"project": {"type": "string", "description": "the project the one piece belongs to, when it has one"},
 				"detail": {"type": "string", "description": "the words that say why or when the one piece stands as it does"},
 				"waiting_questions": {"type": "array", "description": "the numbers of the questions on it that wait for this person", "items": {"type": "integer"}}`),
@@ -354,6 +355,7 @@ type Yard interface {
 	Bead(ctx context.Context, id string, viewer ...string) (*store.BeadView, error)
 	OpenBlockers(ctx context.Context, id string) ([]string, error)
 	ListSessions(ctx context.Context, f store.SessionFilter) ([]store.Session, error)
+	NextStages(ctx context.Context, id string) (*store.NextStages, error)
 	UserAsks(ctx context.Context, name, actor string, viewer ...string) (*store.AskQueue, error)
 	AnswerAsk(ctx context.Context, id string, ask uint64, option int, words, actor string, weighed bool) error
 	DeferAsk(ctx context.Context, id string, ask uint64, actor string) error

@@ -149,9 +149,11 @@ func countsLine(grouped map[string][]projectGroup) (sentence string, states []ma
 
 // account is the account of the pieces, by state, in the words and in the
 // structured part: the counts first, then the pieces that changed inside
-// the window asked about, then each state's section. A previously finished
-// piece that changed again is counted and listed, but is not in Finished
-// lately. The structured list groups every piece by state and project.
+// the window asked about, then each state's section. A piece closed before
+// the window that changed again is counted and listed, in the state it was
+// closed in, but is not in that state's section (Finished lately, or Closed
+// before they were finished). The structured list groups every piece by
+// state and project.
 func account(byState, changedOnly map[string][]piece, changed []piece, since, now time.Time) *Result {
 	grouped := map[string][]projectGroup{}
 	sectionGroups := map[string][]projectGroup{}

@@ -51,6 +51,7 @@ type readErrorYard struct {
 	crewErr     error
 	blockersErr error
 	sessionsErr error
+	flowErr     error
 }
 
 func (y readErrorYard) ListSessions(ctx context.Context, f store.SessionFilter) ([]store.Session, error) {
@@ -79,6 +80,13 @@ func (y readErrorYard) OpenBlockers(ctx context.Context, id string) ([]string, e
 		return nil, y.blockersErr
 	}
 	return y.Yard.OpenBlockers(ctx, id)
+}
+
+func (y readErrorYard) NextStages(ctx context.Context, id string) (*store.NextStages, error) {
+	if y.flowErr != nil {
+		return nil, y.flowErr
+	}
+	return y.Yard.NextStages(ctx, id)
 }
 
 func newYard(t *testing.T) *yard {
@@ -373,6 +381,56 @@ func TestWhatIsHappening(t *testing.T) {
 	y.bead(t, store.NewBead{Title: "A stranger's report", Depot: "yardr", Stage: "triage", For: "ada"})
 	y.bead(t, store.NewBead{Title: "Plan the stall", Depot: "shop", Stage: "backlog", For: "ada"})
 	y.bead(t, store.NewBead{Title: "A thought with no project", Stage: "backlog", For: "ada"})
+	// Work that goes by a flow has an end. A piece closed in the stage that
+	// ends it is finished; one closed in any other stage was closed early,
+	// whoever closed it, and says why. The two projects above have no flow,
+	// so their closed piece has no end to stop short of and stays finished.
+	y.depot(t, "mill")
+	line, err := store.ParseFlow("backlog -> new\nnew -> merged on done | backlog\nmerged terminal\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line.Name = "line"
+	if _, err := y.st.PutFlow(y.ctx, *line, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.st.SetFlowPointer(y.ctx, "mill", "", "line", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	landed := y.bead(t, store.NewBead{Title: "Print the leaflets", Depot: "mill", Stage: "new", For: "ada"})
+	if _, err := y.st.Advance(y.ctx, landed, "merged", store.Expect{}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	// A request the person files and withdraws through the tools is closed
+	// in the stage the flow starts it in. Its reason has two lines, so the
+	// account's line keeps the first and the piece's own view the whole.
+	const bannerWhy = "the stall is cancelled\nso no banner is needed"
+	filed, err := s.AskForSomething(y.ctx, "Order the stall banner", "mill")
+	if err != nil {
+		t.Fatal(err)
+	}
+	banner := filed.Structured["work"].(string)
+	if _, err := s.Withdraw(y.ctx, banner, bannerWhy); err != nil {
+		t.Fatal(err)
+	}
+	if got := y.get(t, banner); got.Status != "closed" || got.Stage != "backlog" {
+		t.Fatalf("the withdrawn request = %s, want it closed in backlog", shown(got))
+	}
+	duplicate := y.bead(t, store.NewBead{Title: "Book the stall", Depot: "mill", Stage: "new", For: "ada"})
+	if _, err := y.st.CloseBead(y.ctx, duplicate, "Duplicate of the banner request", store.Expect{}, "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	// A close without a reason has none to say, and a long first line is cut
+	// as a title is, once, though more lines follow it.
+	bare := y.bead(t, store.NewBead{Title: "Hold the sale", Depot: "mill", Stage: "new", For: "ada"})
+	if _, err := y.st.CloseBead(y.ctx, bare, "", store.Expect{}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	longWhy := strings.Repeat("word ", 40) + "end\nand a second line"
+	long := y.bead(t, store.NewBead{Title: "Print the posters", Depot: "mill", Stage: "new", For: "ada"})
+	if _, err := y.st.CloseBead(y.ctx, long, longWhy, store.Expect{}, "ada"); err != nil {
+		t.Fatal(err)
+	}
 	res, err := s.WhatIsHappening(y.ctx, "", "")
 	if err != nil {
 		t.Fatal(err)
@@ -393,6 +451,7 @@ func TestWhatIsHappening(t *testing.T) {
 	// states, which is the order of the headings and of the list.
 	states := []struct{ state, heading string }{
 		{"finished", "Finished lately"},
+		{"closed early", "Closed before they were finished"},
 		{"stuck", "Stuck"},
 		{"parked", "Parked"},
 		{"waiting", "Waiting"},
@@ -401,6 +460,11 @@ func TestWhatIsHappening(t *testing.T) {
 	}
 	cases := []struct{ title, state, project, detail string }{
 		{"Old report", "finished", "yardr", "finished <when>"},
+		{"Print the leaflets", "finished", "mill", "finished <when>"},
+		{"Order the stall banner", "closed early", "mill", "closed <when>: the stall is cancelled…"},
+		{"Book the stall", "closed early", "mill", "closed <when>: Duplicate of the banner request"},
+		{"Hold the sale", "closed early", "mill", "closed <when>"},
+		{"Print the posters", "closed early", "mill", "closed <when>: " + strings.Repeat("word ", 31) + "word…"},
 		{"Stuck thing", "stuck", "yardr", "it is on hold, waiting for a person"},
 		{"Wait for the figures", "stuck", "yardr", "it is waiting for other work to finish first"},
 		{"Held and parked", "stuck", "shop", "it is on hold, waiting for a person"},
@@ -469,13 +533,14 @@ func TestWhatIsHappening(t *testing.T) {
 	// the project with most pieces first, ties by name, and the pieces with
 	// no project last. The sections go in the same order, and the structured
 	// part has the counts, and their words too.
-	counts := "Your work: 1 finished (1 in yardr), 3 stuck (2 in yardr, 1 in shop), 2 parked (1 in shop, 1 in yardr), " +
-		"4 waiting (4 in yardr), 2 not started (1 in shop, 1 with no project), 1 under way (1 in yardr)."
+	counts := "Your work: 2 finished (1 in mill, 1 in yardr), 4 closed early (4 in mill), 3 stuck (2 in yardr, 1 in shop), " +
+		"2 parked (1 in shop, 1 in yardr), 4 waiting (4 in yardr), 2 not started (1 in shop, 1 with no project), 1 under way (1 in yardr)."
 	if first, _, _ := strings.Cut(res.Text, "\n"); first != counts {
 		t.Errorf("the account opens with\n%s\nwant\n%s", first, counts)
 	}
 	wantStates := []map[string]any{
-		{"state": "finished", "count": 1, "projects": []map[string]any{{"project": "yardr", "count": 1}}},
+		{"state": "finished", "count": 2, "projects": []map[string]any{{"project": "mill", "count": 1}, {"project": "yardr", "count": 1}}},
+		{"state": "closed early", "count": 4, "projects": []map[string]any{{"project": "mill", "count": 4}}},
 		{"state": "stuck", "count": 3, "projects": []map[string]any{{"project": "yardr", "count": 2}, {"project": "shop", "count": 1}}},
 		{"state": "parked", "count": 2, "projects": []map[string]any{{"project": "shop", "count": 1}, {"project": "yardr", "count": 1}}},
 		{"state": "waiting", "count": 4, "projects": []map[string]any{{"project": "yardr", "count": 4}}},
@@ -500,13 +565,20 @@ func TestWhatIsHappening(t *testing.T) {
 	// Its lines give the state in the brackets, since no state's heading
 	// stands over them.
 	heads, lines := accountSection(res.Text, changed)
-	if !slices.Equal(heads, []string{"In yardr", "In shop", "With no project"}) ||
-		len(lines["In yardr"]) != 9 || len(lines["In shop"]) != 3 || len(lines["With no project"]) != 1 {
+	if !slices.Equal(heads, []string{"In yardr", "In mill", "In shop", "With no project"}) ||
+		len(lines["In yardr"]) != 9 || len(lines["In mill"]) != 5 || len(lines["In shop"]) != 3 || len(lines["With no project"]) != 1 {
 		t.Errorf("the changed section is %v %v, want all %d pieces under their projects:\n%s", heads, lines, len(cases), res.Text)
 	}
 	if got := whenWords.ReplaceAllString(strings.Join(lines["In shop"], "\n"), "<when>"); got !=
 		"Held and parked (stuck, changed <when>)\nSet the logo aside (parked, changed <when>)\nPlan the stall (not started, changed <when>)" {
 		t.Errorf("the changed lines under In shop are\n%s", got)
+	}
+	// A piece closed early is told so in the brackets, and one that ended where
+	// its flow ends is told finished.
+	for _, want := range []string{"Print the leaflets (finished, changed <when>)", "Order the stall banner (closed early, changed <when>)"} {
+		if !slices.ContainsFunc(lines["In mill"], func(line string) bool { return whenWords.ReplaceAllString(line, "<when>") == want }) {
+			t.Errorf("the changed lines under In mill lack %q: %v", want, lines["In mill"])
+		}
 	}
 	for _, item := range list {
 		if item["changed"] != item["updated"] {
@@ -539,42 +611,52 @@ func TestWhatIsHappening(t *testing.T) {
 	if _, lines := accountSection(res.Text, "Stuck"); len(lines["In yardr"]) != 2 {
 		t.Errorf("a window that opens late hides the pieces it did not change from their states:\n%s", res.Text)
 	}
-	// A closed piece outside the finished window still appears when it is
-	// updated inside it; it belongs in Changed since, with its finished
-	// state and update time, but not under Finished lately.
+	// A closed piece outside the window still appears when it is updated
+	// inside it; it belongs in Changed since, in the state it was closed in
+	// (finished, or closed early) and with its update time, but not under
+	// that state's heading.
 	oldClosed := y.work(t, "An older finished piece", "yardr", "ada")
 	if _, err := y.st.CloseBead(y.ctx, oldClosed, "done", store.Expect{}, "ada"); err != nil {
 		t.Fatal(err)
 	}
-	oldSince := time.Now()
-	if err := y.st.AddNote(y.ctx, oldClosed, "a later note", "bob"); err != nil {
+	oldEarly := y.bead(t, store.NewBead{Title: "An older withdrawn piece", Depot: "mill", Stage: "new", For: "ada"})
+	if _, err := y.st.CloseBead(y.ctx, oldEarly, "no longer needed", store.Expect{}, "ada"); err != nil {
 		t.Fatal(err)
+	}
+	oldSince := time.Now()
+	for _, id := range []string{oldClosed, oldEarly} {
+		if err := y.st.AddNote(y.ctx, id, "a later note", "bob"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	res, err = s.WhatIsHappening(y.ctx, "", oldSince.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
 	plain(t, res.Text)
-	if _, lines := accountSection(res.Text, changed); len(lines["In yardr"]) != 1 ||
-		whenWords.ReplaceAllString(lines["In yardr"][0], "<when>") != "An older finished piece (finished, changed <when>)" {
-		t.Errorf("an older finished piece changed inside the window is %v:\n%s", lines, res.Text)
+	_, lines = accountSection(res.Text, changed)
+	if len(lines["In yardr"]) != 1 || whenWords.ReplaceAllString(lines["In yardr"][0], "<when>") != "An older finished piece (finished, changed <when>)" ||
+		len(lines["In mill"]) != 1 || whenWords.ReplaceAllString(lines["In mill"][0], "<when>") != "An older withdrawn piece (closed early, changed <when>)" {
+		t.Errorf("the older pieces changed inside the window are %v:\n%s", lines, res.Text)
 	}
-	if _, lines := accountSection(res.Text, "Finished lately"); len(lines["In yardr"]) != 0 {
-		t.Errorf("an older finished piece appeared under Finished lately:\n%s", res.Text)
+	for _, heading := range []string{"Finished lately", "Closed before they were finished"} {
+		if heads, _ := accountSection(res.Text, heading); heads != nil {
+			t.Errorf("an older piece appeared under %s:\n%s", heading, res.Text)
+		}
 	}
 	summary, _ := res.Structured["summary"].(map[string]any)
 	summaryText, _ := summary["text"].(string)
-	if !strings.HasPrefix(summaryText, "Your work: 1 finished (1 in yardr),") {
-		t.Errorf("an older finished piece is missing from the summary: %+v", summary)
+	if !strings.HasPrefix(summaryText, "Your work: 1 finished (1 in yardr), 1 closed early (1 in mill),") {
+		t.Errorf("the older pieces are missing from the summary: %+v", summary)
 	}
-	foundOldClosed := false
+	older := map[string]string{}
 	for _, item := range res.Structured["work_list"].([]map[string]any) {
-		if item["work"] == oldClosed {
-			foundOldClosed = item["state"] == "finished" && item["changed"] == item["updated"]
+		if (item["work"] == oldClosed || item["work"] == oldEarly) && item["changed"] == item["updated"] {
+			older[item["work"].(string)] = item["state"].(string) + ": " + whenWords.ReplaceAllString(item["detail"].(string), "<when>")
 		}
 	}
-	if !foundOldClosed {
-		t.Errorf("the structured account lacks the changed finished piece %q: %+v", oldClosed, res.Structured["work_list"])
+	if want := map[string]string{oldClosed: "finished: finished <when>", oldEarly: "closed early: closed <when>: no longer needed"}; !reflect.DeepEqual(older, want) {
+		t.Errorf("the structured account tells the changed older pieces %v, want %v", older, want)
 	}
 	// The window ends at the clock's now: with the clock an hour before the
 	// work was touched, none of it is changed, and the piece finished after
@@ -621,6 +703,38 @@ func TestWhatIsHappening(t *testing.T) {
 			t.Errorf("%q asked for alone is\n%s\nwant it to start\n%s", c.title, res.Text, want)
 		}
 	}
+	// A piece closed early says why in the words it was closed with, whole and
+	// on a line of its own after its state, where the account's line kept the
+	// first line. A finished piece's reason is the word for where it ended
+	// ("merged" for the one the flow ended), which tells the person nothing:
+	// it is not said, and neither is one the flow's ending never gave.
+	for _, c := range []struct{ work, state, why string }{
+		{banner, "closed early", bannerWhy},
+		{duplicate, "closed early", "Duplicate of the banner request"},
+		{long, "closed early", longWhy},
+		{bare, "closed early", ""},
+		{landed, "finished", ""},
+		{done, "finished", ""},
+	} {
+		res, err := s.WhatIsHappening(y.ctx, c.work, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		plain(t, res.Text)
+		if res.Structured["state"] != c.state {
+			t.Errorf("%s is %v, want %s", c.work, res.Structured["state"], c.state)
+		}
+		afterState := strings.Join(strings.Split(res.Text, "\n")[2:], "\n") // past the title and the state line
+		switch {
+		case c.why == "" && strings.Contains(res.Text, "Why it was closed"):
+			t.Errorf("%s says why it was closed, and it was finished:\n%s", c.work, res.Text)
+		case c.why != "" && !strings.HasPrefix(afterState, "Why it was closed: "+c.why):
+			t.Errorf("%s does not say why it was closed, whole, after its state:\n%s\nwant it to say %q", c.work, res.Text, c.why)
+		}
+		if c.state == "finished" && strings.Contains(res.Text, "merged") {
+			t.Errorf("%s says the assembly's word for where it ended:\n%s", c.work, res.Text)
+		}
+	}
 	// A question waiting for the person on finished work is said
 	// beside its standing, in the account and in the one piece.
 	seq := y.ask(t, done, choicesAsk("ada"))
@@ -641,13 +755,35 @@ func TestWhatIsHappening(t *testing.T) {
 	}) {
 		t.Errorf("the account hides the question waiting on finished work:\n%s", res.Text)
 	}
-	// A window that excludes the finished work drops it.
+	// A piece closed early is over as well: its question waits still.
+	seq = y.ask(t, banner, choicesAsk("ada"))
+	res, err = s.WhatIsHappening(y.ctx, banner, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("It is closed early; question %d still waits for you (closed ", seq); !strings.Contains(res.Text, want) ||
+		fmt.Sprint(res.Structured["waiting_questions"]) != fmt.Sprintf("[%d]", seq) {
+		t.Errorf("the piece closed early hides its waiting question:\n%s\n%+v", res.Text, res.Structured)
+	}
+	res, err = s.WhatIsHappening(y.ctx, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, lines := accountSection(res.Text, "Closed before they were finished"); !slices.ContainsFunc(lines["In mill"], func(line string) bool {
+		return strings.HasPrefix(line, "Order the stall banner (closed ") && strings.HasSuffix(line, fmt.Sprintf("; question %d still waits for you)", seq))
+	}) {
+		t.Errorf("the account hides the question waiting on a piece closed early:\n%s", res.Text)
+	}
+	// A window that excludes the finished work drops it, and the work closed
+	// early with it.
 	res, err = s.WhatIsHappening(y.ctx, "", time.Now().Add(time.Hour).UTC().Format(time.RFC3339))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(res.Text, "Old report") {
-		t.Errorf("finished work outside the window is shown:\n%s", res.Text)
+	for _, title := range []string{"Old report", "Print the leaflets", "Order the stall banner", "Book the stall", "Hold the sale", "Print the posters"} {
+		if strings.Contains(res.Text, title) {
+			t.Errorf("work closed outside the window is shown (%s):\n%s", title, res.Text)
+		}
 	}
 
 	// With nothing open and nothing finished the account says so. Work
@@ -694,6 +830,22 @@ func TestWhatIsHappening(t *testing.T) {
 	s.Yard = readErrorYard{Yard: y.st, sessionsErr: sessionsErr}
 	if _, err := s.WhatIsHappening(y.ctx, "", ""); !errors.Is(err, sessionsErr) {
 		t.Fatalf("a failed session lookup = %v, want its error", err)
+	}
+	// A flow that cannot be read tells nothing of where a closed piece
+	// stopped, so the account still answers and tells each as finished, as it
+	// told every closed piece before the stage was read.
+	s.Yard = readErrorYard{Yard: y.st, flowErr: errors.New("flows unavailable")}
+	res, err = s.WhatIsHappening(y.ctx, "", "")
+	if err != nil {
+		t.Fatalf("a flow that cannot be read fails the account: %v", err)
+	}
+	if _, lines := accountSection(res.Text, "Finished lately"); !slices.ContainsFunc(lines["In mill"], func(line string) bool {
+		return strings.HasPrefix(line, "Order the stall banner (finished ")
+	}) || strings.Contains(res.Text, "Closed before they were finished") || strings.Contains(res.Text, "closed early") {
+		t.Errorf("a piece whose flow cannot be read is not told finished:\n%s", res.Text)
+	}
+	if res, err = s.WhatIsHappening(y.ctx, banner, ""); err != nil || res.Structured["state"] != "finished" {
+		t.Errorf("the one piece whose flow cannot be read = %+v, %v; want it finished", res, err)
 	}
 	checkWhatIsHappeningBuildingNow(t)
 }
