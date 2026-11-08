@@ -197,8 +197,8 @@ What happens, with the daemon running (`yardr daemon`):
    - **question**: it waits in `decide`.
 
    `yardr review list` shows the same queue without the form, and
-   `yardr bead done <id> --outcome changes --note "..."` does the same from a
-   script.
+   `yardr bead done <id> --outcome changes --note -` (the note on stdin) does
+   the same from a script.
 
 A dir depot that wants a bar before review can have a test command, e.g. a
 script that fails when a month folder with PDFs has no `summary.md`:

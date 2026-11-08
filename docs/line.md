@@ -963,9 +963,9 @@ The same commands for humans and agents alike:
 
 ```sh
 yardr prime --bead webapp-3                  # bead, edges, notes
-yardr bead note webapp-3 "tests green: ..."  # evidence
+yardr bead note webapp-3 -                   # evidence, the words on stdin ("tests green: ...")
 yardr bead advance webapp-3 --to review      # hand to the next stage
-yardr bead advance webapp-3 --to new --note "rename the flag"  # note and move in one write
+yardr bead advance webapp-3 --to new --note -  # note and move in one write
 yardr bead close webapp-3 --reason "merged"
 yardr bead hold webapp-3                     # stop routing; a human looks
 ```

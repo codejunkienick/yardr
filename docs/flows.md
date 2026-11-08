@@ -262,9 +262,9 @@ approved -> new on failed | merged
 ```
 
 ```sh
-yardr bead done <id>                          # outcome done
-yardr bead done <id> --outcome question       # the edge "on question"
-yardr bead done <id> --outcome changes --note "rename the flag"
+yardr bead done <id>                            # outcome done
+yardr bead done <id> --outcome question         # the edge "on question"
+yardr bead done <id> --outcome changes --note - # the note on stdin: rename the flag
 ```
 
 `yardr bead done` resolves the outcome for the bead's current stage under

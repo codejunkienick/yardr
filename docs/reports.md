@@ -102,15 +102,15 @@ yardr bead create "<the fault, in your words>" --depot yardr --discovered-from <
 
 Carry only what the rewritten bead needs to be worked (what happens,
 where, the harness and yardr versions the report names, the workaround),
-never the report's text whole. Then move the report on with a note naming
-the new bead:
+never the report's text whole. Then move the report on with a note, on
+stdin, naming the new bead ("rewritten as yardr-yyyy"):
 
-yardr bead done <report bead> --outcome accepted --note "rewritten as yardr-yyyy"
+yardr bead done <report bead> --outcome accepted --note -
 
-To drop: yardr bead done <report bead> --outcome dropped --note "<why>".
-Never a bare yardr bead close: that returns refused with the reason, a
-word the sender reads as a refusal of delivery rather than a decision on
-the report.
+To drop: yardr bead done <report bead> --outcome dropped --note - (the
+note, on stdin, says why). Never a bare yardr bead close: that returns
+refused with the reason, a word the sender reads as a refusal of
+delivery rather than a decision on the report.
 
 A report is never held: a hold reaches the yardmaster's inbox with its
 title, and no agent is told of this queue. It is dropped, by outcome,
@@ -128,11 +128,11 @@ summary: A rewritten report waits here until its bead of ours has landed or been
 
 A bead here waits, with its rewritten bead named in its notes, until that
 bead has landed or been dropped. Then close the report with the outcome
-fixed and a note in the words the reporter can act on ("fixed in
-v0.10.0", or "on main as yardr-yyyy in <sha>, in the next release after
-v0.9.1"):
+fixed and a note, on stdin, in the words the reporter can act on
+("fixed in v0.10.0", or "on main as yardr-yyyy in <sha>, in the next
+release after v0.9.1"):
 
-yardr bead done <report bead> --outcome fixed --note "fixed in v0.10.0"
+yardr bead done <report bead> --outcome fixed --note -
 
 Or dropped, saying so, if the rewritten bead came to nothing. Where the
 wait here would hold an intake slot a busier queue needs, close it early

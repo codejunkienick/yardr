@@ -306,8 +306,7 @@ func quotedTextShapes(t *testing.T) []quotedTextShape {
 	t.Helper()
 	shapes := []quotedTextShape{
 		{name: "a bead note", pattern: `bead note \S+ \\?"|bead (done|advance)\b.*--note \\?"`,
-			quoted: `yardr bead note web-1 "..."`, dash: `yardr bead note <id> -`,
-			docsLeft: "yardr-q8ea"},
+			quoted: `yardr bead note web-1 "..."`, dash: `yardr bead note <id> -`},
 		{name: "a mail", pattern: `(yardr|%s)` + globalFlags + ` mail (\S+ ){1,2}\\?"`,
 			quoted: `yardr mail <crew member>@<peer> "..."`, dash: `yardr mail <name> -`},
 		{name: "a reply", pattern: `(yardr|%s)` + globalFlags + ` reply (\S+ ){1,3}\\?"`,
@@ -402,16 +401,17 @@ func TestNoGoCodeShowsAQuotedText(t *testing.T) {
 }
 
 // A doc teaches a command by example as a refusal does, and an agent reads
-// it: one that shows a mail, a reply, a memory, a handoff, a journal entry or
-// a thread's title as a double-quoted argument teaches the same shape, whose
-// backtick spans and $( ) the shell runs before yardr starts. So the docs and
-// the packs' setup notes are held to the shapes the Go texts are, and show the
-// - form, which reads the words from stdin (yardr-ctwf rewrote 33 examples,
-// and nothing held the next one back). The files are the ones git lists under
-// docs/ and packs/*/SETUP.md, less docs/design/, which is history and shows
-// the forms of its day. Test fixtures (testdata/) and contrib/ are outside
-// these globs, and a wider glob leaves them out: no agent learns a command
-// from a fixture, and contrib/'s READMEs are for the people who run its tools.
+// it: one that shows a bead note, a mail, a reply, a memory, a handoff, a
+// journal entry or a thread's title as a double-quoted argument teaches the
+// same shape, whose backtick spans and $( ) the shell runs before yardr
+// starts. So the docs and the packs' setup notes are held to the shapes the
+// Go texts are, and show the - form, which reads the words from stdin
+// (yardr-ctwf rewrote 33 examples, and nothing held the next one back). The
+// files are the ones git lists under docs/ and packs/*/SETUP.md, less
+// docs/design/, which is history and shows the forms of its day. Test
+// fixtures (testdata/) and contrib/ are outside these globs, and a wider glob
+// leaves them out: no agent learns a command from a fixture, and contrib/'s
+// READMEs are for the people who run its tools.
 //
 // A shape the docs still show stays out until the bead that its docsLeft names
 // has rewritten them.
