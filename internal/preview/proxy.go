@@ -70,7 +70,14 @@ func (s *Supervisor) servePreview(w http.ResponseWriter, r *http.Request) {
 			_, _ = s.Store.UpdatePreview(ctx, app, store.PreviewUpdate{State: store.PreviewApproved, StateDetail: &d})
 		}
 		if err := s.Start(ctx, app); err != nil {
-			http.Error(w, "preview "+app+": "+err.Error(), http.StatusServiceUnavailable)
+			// The reason names what the machine holds, a path or an interface
+			// address: the operator reads it in the log and, for a start that
+			// failed, on the row (failStart), and a visitor is told that the
+			// preview cannot start and no more. That is true of every refusal,
+			// though not every one leaves the row failed, so the answer is not
+			// the row's (answerFromRow).
+			s.Log.Warn("preview: on-demand start not started", "app", app, "err", err)
+			http.Error(w, "preview "+app+" cannot start", http.StatusServiceUnavailable)
 			return
 		}
 		if !s.waitPort(ctx, app, p.Port) {

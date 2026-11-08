@@ -1,10 +1,12 @@
 package preview
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -40,6 +42,24 @@ func freePortAt(t *testing.T, host string) int {
 	}
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port
+}
+
+// interfaceHost is an IPv4 address of one of the machine's interfaces that is
+// neither loopback nor link-local, or "" where it has none. A listener bound to
+// it is not answered on loopback, so only the supervisor's scan of the
+// interfaces (nonLoopbackBind) finds it.
+func interfaceHost() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, addr := range addrs {
+		ip, _, err := net.ParseCIDR(addr.String())
+		if err == nil && ip.To4() != nil && ip.IsGlobalUnicast() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() {
+			return ip.String()
+		}
+	}
+	return ""
 }
 
 func waitFor(t *testing.T, what string, cond func() bool) {
@@ -400,14 +420,8 @@ func TestStartRunsOnlyOnTheApprovedTree(t *testing.T) {
 
 func TestNonLoopbackBindIsRefused(t *testing.T) {
 	hosts := []string{"0.0.0.0"}
-	if addrs, err := net.InterfaceAddrs(); err == nil {
-		for _, addr := range addrs {
-			ip, _, err := net.ParseCIDR(addr.String())
-			if err == nil && ip.To4() != nil && ip.IsGlobalUnicast() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() {
-				hosts = append(hosts, ip.String())
-				break
-			}
-		}
+	if host := interfaceHost(); host != "" {
+		hosts = append(hosts, host)
 	}
 	for i, host := range hosts {
 		t.Run(host, func(t *testing.T) {
@@ -631,8 +645,8 @@ func TestOnDemandStartThroughEndpoint(t *testing.T) {
 	}
 	raw, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(raw), "approval is taken back") {
-		t.Fatalf("on-demand start on another tree = %d %s, want refusal", resp.StatusCode, raw)
+	if resp.StatusCode != http.StatusServiceUnavailable || string(raw) != "preview demo cannot start\n" {
+		t.Fatalf("on-demand start on another tree = %d %q, want 503 and no more than that it cannot start", resp.StatusCode, raw)
 	}
 	got := y.state("demo")
 	if got.State != store.PreviewPending || got.StateDetail != store.PreviewTreeChangedDetail || got.Approval != nil || got.Commit != git("rev-parse", "HEAD") {
@@ -653,6 +667,67 @@ func TestOnDemandStartThroughEndpoint(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), "hello preview") {
 		t.Fatalf("on-demand answer after a new approval = %d %s", resp.StatusCode, raw)
 	}
+
+	// A visitor whose arrival starts a preview that then fails to start is told
+	// that it cannot start and no more. The reason names what the machine holds,
+	// an interface address or a path under the yard's home, and is for the
+	// operator: the row holds it, and so does the log. cannotStart asks for the
+	// approved preview app, stopped as its person's last visit left it, and
+	// checks all three; leak is what the reason names.
+	cannotStart := func(t *testing.T, y *yard, app, leak string) {
+		t.Helper()
+		var logged bytes.Buffer
+		y.sup.Log = slog.New(slog.NewTextHandler(&logged, nil))
+		if _, err := y.st.PreviewStop(context.Background(), app, "ada"); err != nil {
+			t.Fatal(err)
+		}
+		srv := httptest.NewServer(y.sup.Handler())
+		defer srv.Close()
+		resp, err := http.Get(srv.URL + "/preview/" + app + "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		if want := "preview " + app + " cannot start\n"; resp.StatusCode != http.StatusServiceUnavailable || string(raw) != want {
+			t.Fatalf("answer to the start that failed = %d %q, want 503 %q", resp.StatusCode, raw, want)
+		}
+		got := y.state(app)
+		if got.State != store.PreviewFailed || !strings.Contains(got.StateDetail, leak) {
+			t.Fatalf("after the start that failed = %+v, want failed with a detail that names %q", got, leak)
+		}
+		if !strings.Contains(logged.String(), got.StateDetail) {
+			t.Fatalf("the log = %q, want the reason the row holds: %q", logged.String(), got.StateDetail)
+		}
+	}
+	t.Run("a port held on an interface address", func(t *testing.T) {
+		host := interfaceHost()
+		if host == "" {
+			t.Skip("the machine has no interface address besides loopback")
+		}
+		ln, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
+		if err != nil {
+			t.Skipf("the machine's interface address %s takes no bind: %v", host, err)
+		}
+		t.Cleanup(func() { ln.Close() })
+		port := ln.Addr().(*net.TCPAddr).Port
+		addr := net.JoinHostPort(host, strconv.Itoa(port))
+		if got := listeningAddress(port); got != addr {
+			t.Skipf("the machine finds no listener on its interface address: %q, want %q", got, addr)
+		}
+		y := newYard(t)
+		y.propose(t, "held", "true", port, true)
+		cannotStart(t, y, "held", addr)
+	})
+	t.Run("a log directory that cannot be made", func(t *testing.T) {
+		y := newYard(t)
+		// A file stands where the directory is to be.
+		if err := os.WriteFile(filepath.Join(y.home, "previews"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		y.propose(t, "nolog", "true", freePort(t), true)
+		cannotStart(t, y, "nolog", y.home)
+	})
 }
 
 func TestInFlightCap(t *testing.T) {
