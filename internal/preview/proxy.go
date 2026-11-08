@@ -19,7 +19,8 @@ import (
 // preview through it, never directly. It serves /preview/<app>/... —
 // the path past the app is forwarded whole, so an ordinary web app
 // written for / runs unmodified — checks the app is running (starting
-// an approved, stopped one on demand), counts the preview's requests
+// an approved, stopped one on demand) and answering (waiting for one
+// that has not bound its port yet), counts the preview's requests
 // in flight, records the request's moment, and streams the answer
 // back, WebSockets included. No edge credential is forwarded: the
 // router strips its own names, and this drops the same names itself,
@@ -60,7 +61,7 @@ func (s *Supervisor) servePreview(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.Running(app) {
 		// On-demand start of an approved, stopped preview: its person has
-		// arrived, so start it and wait for its port.
+		// arrived, so start it.
 		if p.Approval == nil {
 			http.NotFound(w, r)
 			return
@@ -96,18 +97,26 @@ func (s *Supervisor) servePreview(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if !s.waitPort(ctx, app, p.Port) {
-			// The supervisor may have given the app up while the request
-			// waited (a wide bind refused, a start that never listened, too
-			// many crashes): its row says so, and answers as it does a request
-			// that comes after.
-			if cur, err := s.Store.GetPreview(ctx, app); err != nil {
-				http.NotFound(w, r)
-			} else if !answerFromRow(w, r, cur) {
-				http.Error(w, "preview "+app+" is starting", http.StatusServiceUnavailable)
-			}
-			return
+	}
+	// A process that is held is not an app that answers: one the supervisor has
+	// just started (a restart's, or its own pass's after a server restart or the
+	// card's Restart) has not bound its port yet. Whoever made the start, the
+	// request waits for the bind and is answered by the app; proxied at once it
+	// would meet a port that refuses it. A port that answers is found at the
+	// first look, so a preview that is up costs the request that one dial. The
+	// wait is not the request's time in flight, so it comes before the cap.
+	host := s.waitPort(ctx, app, p.Port)
+	if host == "" {
+		// The supervisor may have given the app up while the request
+		// waited (a wide bind refused, a start that never listened, too
+		// many crashes): its row says so, and answers as it does a request
+		// that comes after.
+		if cur, err := s.Store.GetPreview(ctx, app); err != nil {
+			http.NotFound(w, r)
+		} else if !answerFromRow(w, r, cur) {
+			http.Error(w, "preview "+app+" is starting", http.StatusServiceUnavailable)
 		}
+		return
 	}
 	leave, ok := s.admit(w, r, app)
 	if !ok {
@@ -117,11 +126,6 @@ func (s *Supervisor) servePreview(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	_, _ = s.Store.UpdatePreview(ctx, app, store.PreviewUpdate{LastRequest: &now})
 
-	host := loopbackHost(p.Port)
-	if host == "" {
-		http.Error(w, "preview "+app+" is not answering", http.StatusBadGateway)
-		return
-	}
 	target, _ := url.Parse("http://" + net.JoinHostPort(host, strconv.Itoa(p.Port)))
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -162,25 +166,30 @@ func answerFromRow(w http.ResponseWriter, r *http.Request, p *store.Preview) boo
 // or approved until the restart has been made, and the request waits for it.
 // The start wait is the supervisor's own wait for a bind and defaultStartWait
 // beyond it, so the verdict on a start that never listens, which is due at the
-// bind wait, is on the row before the request stops waiting.
-func (s *Supervisor) waitPort(ctx context.Context, app string, port int) bool {
+// bind wait, is on the row before the request stops waiting. It returns the
+// host the port answers on, or "" where the wait ended without an answer.
+func (s *Supervisor) waitPort(ctx context.Context, app string, port int) string {
 	deadline := time.Now().Add(s.bindWait() + defaultStartWait)
+	probe := s.portProbe
+	if probe == nil {
+		probe = loopbackHost
+	}
 	for time.Now().Before(deadline) {
-		if loopbackHost(port) != "" {
-			return true
+		if host := probe(port); host != "" {
+			return host
 		}
 		if !s.Running(app) {
 			if cur, err := s.Store.GetPreview(ctx, app); err != nil || (cur.State != store.PreviewRunning && cur.State != store.PreviewApproved) {
-				return false
+				return ""
 			}
 		}
 		select {
 		case <-ctx.Done():
-			return false
+			return ""
 		case <-time.After(25 * time.Millisecond):
 		}
 	}
-	return false
+	return ""
 }
 
 // admit counts the request in flight for app, as enter does, and says

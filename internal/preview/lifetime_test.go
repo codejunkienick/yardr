@@ -29,15 +29,33 @@ type watched struct {
 	port      int
 	srv       *httptest.Server
 	byRequest bool
+	portWait  chan struct{}
+	bindGate  bool
 }
 
 // newWatched is the yard of one case: command is the app's, given the port the
-// yard chose for it. A bindWait or backoff of zero is the yard's own.
-func newWatched(t *testing.T, byRequest bool, command func(port int) string, bindWait, backoff time.Duration) *watched {
+// yard chose for it. A backoff of zero is the yard's own.
+func newWatched(t *testing.T, byRequest bool, command func(port int) string, backoff time.Duration, watchPortWait, bindGate bool) *watched {
 	t.Helper()
 	w := &watched{yard: newYard(t), app: "demo", dir: t.TempDir(), port: freePort(t), byRequest: byRequest}
-	if bindWait > 0 {
-		w.sup.BindWait = bindWait
+	if bindGate {
+		if err := syscall.Mkfifo(filepath.Join(w.dir, "bind.gate"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		w.bindGate = true
+	}
+	if watchPortWait {
+		w.portWait = make(chan struct{}, 1)
+		w.sup.portProbe = func(port int) string {
+			host := loopbackHost(port)
+			if port == w.port && host == "" {
+				select {
+				case w.portWait <- struct{}{}:
+				default:
+				}
+			}
+			return host
+		}
 	}
 	if backoff > 0 {
 		w.sup.Backoffs = []time.Duration{backoff}
@@ -127,6 +145,70 @@ func (w *watched) get(t *testing.T) (int, string) {
 	return resp.StatusCode, string(raw)
 }
 
+type previewAnswer struct {
+	code int
+	body string
+	err  error
+}
+
+// getAsync asks the supervisor without making the test goroutine wait for its
+// answer, so the test can release or stop an app while the request waits.
+func (w *watched) getAsync() <-chan previewAnswer {
+	answer := make(chan previewAnswer, 1)
+	go func() {
+		resp, err := http.Get(w.srv.URL + "/preview/" + w.app + "/")
+		if err != nil {
+			answer <- previewAnswer{err: err}
+			return
+		}
+		defer resp.Body.Close()
+		raw, err := io.ReadAll(resp.Body)
+		answer <- previewAnswer{code: resp.StatusCode, body: string(raw), err: err}
+	}()
+	return answer
+}
+
+// waitForPortWait proves the request made a failed port probe before the test
+// releases or stops the app. An early answer means it did not wait.
+func (w *watched) waitForPortWait(t *testing.T, answer <-chan previewAnswer) {
+	t.Helper()
+	select {
+	case <-w.portWait:
+	case got := <-answer:
+		t.Fatalf("request answered before waiting for the port: %d %q (%v)", got.code, got.body, got.err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("request did not check the unbound port")
+	}
+}
+
+func (w *watched) releaseBindGate(t *testing.T) {
+	t.Helper()
+	if !w.bindGate {
+		t.Fatal("no bind gate")
+	}
+	f, err := os.OpenFile(filepath.Join(w.dir, "bind.gate"), os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func takePreviewAnswer(t *testing.T, answer <-chan previewAnswer) previewAnswer {
+	t.Helper()
+	select {
+	case got := <-answer:
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		return got
+	case <-time.After(15 * time.Second):
+		t.Fatal("request did not finish")
+		return previewAnswer{}
+	}
+}
+
 // answered asks once and wants the app's own answer, then waits for the
 // request to be over: the count in flight is the last thing the handler gives
 // back before net/http ends the request's context.
@@ -149,12 +231,13 @@ func (w *watched) answered(t *testing.T) {
 // starter starts and asks the same of both.
 func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 	cases := []struct {
-		name     string
-		command  func(port int) string
-		listens  bool // the app listens, so Run's start waits for it to
-		bindWait time.Duration
-		backoff  time.Duration // what a crash waits before its restart, in place of the yard's
-		check    func(t *testing.T, w *watched)
+		name          string
+		command       func(port int) string
+		listens       bool          // the app listens, so Run's start waits for it to
+		backoff       time.Duration // what a crash waits before its restart, in place of the yard's
+		watchPortWait bool
+		bindGate      bool
+		check         func(t *testing.T, w *watched)
 	}{
 		{
 			// The app binds outside after the request is over, and later than the
@@ -173,7 +256,8 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 		{
 			// The restart waits out a backoff that a request comes in however
 			// loaded the machine is: one that came after the restart would meet an
-			// app that runs and has not bound yet.
+			// app that runs and has not bound yet, and wait for its bind, not for
+			// the restart this case is about.
 			name: "a killed app restarts under the crash rule", command: loopbackApp, listens: true,
 			backoff: time.Second,
 			check: func(t *testing.T, w *watched) {
@@ -217,20 +301,51 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 			},
 		},
 		{
-			name: "an app that never listens fails with no listen", bindWait: 500 * time.Millisecond,
-			command: func(int) string { return "sleep 60" },
+			// The request arrives while the process runs but its app is held at a
+			// FIFO until the test knows the request has found the unbound port.
+			name:          "an app that binds after the request comes is waited for",
+			command:       func(port int) string { return "cat bind.gate >/dev/null; exec " + loopbackApp(port) },
+			watchPortWait: true, bindGate: true,
 			check: func(t *testing.T, w *watched) {
-				if !w.byRequest {
-					// Run's start has no request to wait on the verdict; it is
-					// there before the first one comes.
-					waitFor(t, "the verdict on the app", func() bool { return w.state(w.app).State == store.PreviewFailed })
+				answer := w.getAsync()
+				w.waitForPortWait(t, answer)
+				w.releaseBindGate(t)
+				got := takePreviewAnswer(t, answer)
+				if got.code != http.StatusOK || got.body != "hello" {
+					t.Fatalf("the app's answer = %d %q, want 200 hello", got.code, got.body)
 				}
-				code, body := w.get(t)
-				if code != http.StatusServiceUnavailable || !strings.Contains(body, "preview demo is failed") {
-					t.Fatalf("the answer = %d %q, want the row's: 503 preview demo is failed", code, body)
+				waitFor(t, "the request to end", func() bool {
+					w.sup.mu.Lock()
+					defer w.sup.mu.Unlock()
+					return w.sup.inflight[w.app] == 0
+				})
+			},
+		},
+		{
+			name:          "an app given up while the request waits for its bind",
+			command:       func(int) string { return "sleep 60" },
+			watchPortWait: true,
+			check: func(t *testing.T, w *watched) {
+				answer := w.getAsync()
+				w.waitForPortWait(t, answer)
+				// Stop the held process and record the supervisor's no-listen
+				// verdict while the request is inside the wait.
+				w.sup.kill(w.app)
+				detail := "no listen"
+				if _, err := w.st.UpdatePreview(context.Background(), w.app, store.PreviewUpdate{
+					ExpectedState: store.PreviewRunning,
+					State:         store.PreviewFailed,
+					StateDetail:   &detail,
+					PID:           -1,
+				}); err != nil {
+					t.Fatal(err)
 				}
-				if got := w.state(w.app); got.State != store.PreviewFailed || got.StateDetail != "no listen" || w.sup.Running(w.app) {
-					t.Fatalf("after the answer = %+v running %v, want failed with no listen and the app stopped", got, w.sup.Running(w.app))
+				got := takePreviewAnswer(t, answer)
+				if got.code != http.StatusServiceUnavailable || !strings.Contains(got.body, "preview demo is failed") {
+					t.Fatalf("the answer = %d %q, want the row's: 503 preview demo is failed", got.code, got.body)
+				}
+				if row := w.state(w.app); row.State != store.PreviewFailed || row.StateDetail != "no listen" || w.sup.Running(w.app) {
+					t.Fatalf("after the answer = %+v running %v, want failed with no listen and the app stopped", row, w.sup.Running(w.app))
 				}
 			},
 		},
@@ -246,7 +361,7 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
-					w := newWatched(t, byRequest, tc.command, tc.bindWait, tc.backoff)
+					w := newWatched(t, byRequest, tc.command, tc.backoff, tc.watchPortWait, tc.bindGate)
 					w.up(t, tc.listens)
 					tc.check(t, w)
 				})

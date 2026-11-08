@@ -136,10 +136,10 @@ func (y *yard) cards() string {
 
 // startWait is how long a preview may take to answer once it runs. The
 // supervisor gives a start BindWait to listen (watchBind), and the proxy waits
-// that and defaultStartWait more for the port of a start it makes itself
-// (waitPort); this is as long as the proxy waits, so a preview that has not
-// answered by then has been given up on, however loaded the machine is. A wait
-// for a start is that bound, not a figure of the test's.
+// that and defaultStartWait more for the port of a preview that runs and has
+// not bound it (waitPort); this is as long as the proxy waits, so a preview
+// that has not answered by then has been given up on, however loaded the
+// machine is. A wait for a start is that bound, not a figure of the test's.
 func (y *yard) startWait() time.Duration { return y.sup.bindWait() + defaultStartWait }
 
 func (y *yard) waitStart(t *testing.T, what string, cond func() bool) {
