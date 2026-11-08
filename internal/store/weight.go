@@ -736,6 +736,14 @@ func crewAddWeight(w *wtx, run AskRun) ([]AskWeight, error) {
 	return []AskWeight{weighs(WeightCode, fmt.Sprintf("a new crew member %s on %s with the role the card shows, which the yard will run", name, kind))}, nil
 }
 
+// groupAddWeight weighs a group add: a new group of sessions the yard will
+// run, on the command or the agent the card shows. A group that defines
+// nothing the yard runs is no card (checkGroupAdd), so every one is code.
+func groupAddWeight(w *wtx, run AskRun) ([]AskWeight, error) {
+	name, runner, _, _ := groupAddOf(run.Argv)
+	return []AskWeight{weighs(WeightCode, fmt.Sprintf("a new group %s on the %s runner, whose sessions the yard will start as the card shows", name, runner))}, nil
+}
+
 // userIdentityWeight weighs a user identity: what the id or key says in
 // the source then counts as the user's.
 func userIdentityWeight(w *wtx, run AskRun) ([]AskWeight, error) {

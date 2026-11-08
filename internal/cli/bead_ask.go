@@ -281,6 +281,17 @@ one of the list the yard runs from a card:
       writes those exact bytes to roles/<name>.md and starts the member
       with its prompt there; env, free args and any grant stay out, and
       a name in use is refused, since this adds and never replaces
+  group add <name> --runner <runner> [--limit <n>] [--set k=v ...]
+      a new group on the runner manual, herdr or exec, with its limit and
+      as --set cmd and args (one word each: the line is split at spaces),
+      dir and worktrees (a directory under the yard's home or a depot),
+      kind (one the yard knows) and prompt (an absolute path of a file
+      under the yard's home) whose text the ask carries, read from that
+      file; the card shows the command and the prompt text whole (weighty,
+      code), and approving is refused when the file holds other text by
+      then. env_file, log and a peer group stay out (yardr group set
+      <name> env_file=<file> in a terminal), and a name in use is
+      refused, since this adds and never replaces
   crew set <name> open_threads=<sources> | set_state=<sources> | peers=<peers>
       a crew member may open threads or set the status of threads in the
       sources, or mail crew members of the peers
@@ -321,8 +332,9 @@ one of the list the yard runs from a card:
 Whether each is the operator's is the command's own check: when the asker
 may run the command themselves the ask is refused with that. What is the
 operator's alone is refused as a run ask: what defines what the yard runs
-(a command of a group or a source, a device, another yard paired or
-called elsewhere), what takes a file path, and what reaches another yard.
+(a source's command, a change to what a group runs, a device, another
+yard paired or called elsewhere), what takes a file path, and what
+reaches another yard.
 Such a command is typed in a terminal. A link card (peer add, peer allow,
 peer intake, peer identity, peer rm, peer set) can be approved from this
 yard in a terminal or from a paired device. Peer add and peer set are
@@ -694,33 +706,8 @@ what the person asked does, and this is the asker's own.`,
 				q.DepotPush = &store.AskDepotPush{Depot: askDepotPushOff, Off: true}
 			}
 			if c.Flags().Changed("run") {
-				// As typed, in one string: the yard splits and parses it.
-				q.Run = &store.AskRun{Argv: []string{askRun}}
-				// Source add carries its file: read once here, beside
-				// the ask, so the store holds the bytes the card shows.
-				carried, err := sourceAddCarried(askRun)
-				if err != nil {
+				if q.Run, err = askRunCarried(askRun, askRunTest, c.Flags().Changed("run-test"), askRunRole, c.Flags().Changed("run-role")); err != nil {
 					return err
-				}
-				q.Run.Carried = carried
-				// Depot test carries its command from --run-test, beside
-				// the ask: --run quotes nothing, so it never goes there.
-				if depotTestCommand(askRun) {
-					if !c.Flags().Changed("run-test") {
-						return fmt.Errorf("--run \"depot test <depot>\" carries its command beside the ask, in --run-test \"<command>\"")
-					}
-					q.Run.Test = askRunTest
-				}
-				// Crew add carries its role text from --run-role, or
-				// from the file prompt= names: read once here, beside
-				// the ask, so the store holds the bytes the card shows
-				// and a file changed after the ask changes nothing.
-				if crewAddCommand(askRun) {
-					role, err := crewAddRole(askRun, askRunRole, c.Flags().Changed("run-role"))
-					if err != nil {
-						return err
-					}
-					q.Run.Role = role
 				}
 			}
 			var seq uint64

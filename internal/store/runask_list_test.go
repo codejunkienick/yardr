@@ -736,16 +736,6 @@ func TestRunAskListRefusals(t *testing.T) {
 		{"group set builders worktrees=/tmp/wt", "group set with worktrees=/tmp/wt defines what the yard runs: " + alone},
 		{"group set builders --unset worktrees", "group set with --unset worktrees defines what the yard runs: " + alone},
 		{"group set builders runner=exec", "group set with runner=exec defines what the yard runs: " + alone},
-		{"group add builders --runner exec --set cmd=make", "group add with runner exec defines what the yard runs: " + alone},
-		{"group add builders --runner=exec --set=cmd=make", "group add with runner exec defines what the yard runs: " + alone},
-		{"group add builders --runner exec --set cmd=make,check", "group add with runner exec defines what the yard runs: " + alone},
-		{"group add builders --runner herdr --set cmd=make", "group add with cmd defines what the yard runs: " + alone},
-		{"group add builders --runner herdr --set dir=/tmp", "group add with dir defines what the yard runs: " + alone},
-		{"group add builders --runner=herdr --set=env_file=/tmp/builders.env", "group add with env_file defines what the yard runs: " + alone},
-		{"group add builders --runner herdr --set kind=codex", "group add with kind defines what the yard runs: " + alone},
-		{"group add builders --runner herdr --set args=--careful", "group add with args defines what the yard runs: " + alone},
-		{"group add builders --runner herdr --set prompt=roles/other.md", "group add with prompt defines what the yard runs: " + alone},
-		{"group add builders --runner herdr --set worktrees=/tmp/wt", "group add with worktrees defines what the yard runs: " + alone},
 		{"crew set yardmaster env_file=/tmp/yardmaster.env", "env_file is the operator's alone, typed in a terminal and never proposed as a run ask"},
 		{"crew set yardmaster env_command=op inject", "env_command is the operator's alone, typed in a terminal and never proposed as a run ask"},
 		{"crew set yardmaster --unset env_file", "env_file is the operator's alone, typed in a terminal and never proposed as a run ask"},
@@ -757,10 +747,12 @@ func TestRunAskListRefusals(t *testing.T) {
 		{"crew set yardmaster --unset args", "args is the operator's alone, typed in a terminal and never proposed as a run ask"},
 		{"crew set yardmaster --unset prompt", "prompt is the operator's alone, typed in a terminal and never proposed as a run ask"},
 		{"group set builders runner=herdr", "anything else is run directly, or typed by the operator in a terminal"},
-		// A group that sends beads to a linked yard, and a route to it, are
-		// anyone's to add (PutGroup and AddRoute check no one): the asker's
-		// own to run, so no card.
-		{"group add exchange --runner peer --set peer=airy", "anything else is run directly, or typed by the operator in a terminal"},
+		// Group add is a row of the list (runask_groupadd_test.go): a name in
+		// use is refused before anything else, and a group that sends beads
+		// to a linked yard, like a route to it, is anyone's to add (PutGroup
+		// and AddRoute check no one): the asker's own to run, so no card.
+		{"group add builders --runner exec --set cmd=make", "this adds, it never replaces"},
+		{"group add exchange --runner peer --set peer=airy", "a peer group hands its beads to another yard"},
 		{"route add --stage arrived --group exchange", "anything else is run directly, or typed by the operator in a terminal"},
 		{"user key mckean crm", "source crm: its declaration has no notify key"},
 	} {

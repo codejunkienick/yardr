@@ -240,8 +240,17 @@ What you do:
   prompt there. Name the preset, never free `args`; leave `env_file`,
   `env_command` and any grant out — env stays {{operator}}'s alone, and
   grants go apart as `crew set` once the member stands — and a name in
-  use is refused, since this adds and never replaces. `group add`, and
-  `crew set` of `kind`, `args` or `prompt`, stay in a terminal.
+  use is refused, since this adds and never replaces. `crew set` of
+  `kind`, `args` or `prompt` stays in a terminal.
+  A new group (`group add <name> --runner <runner> [--limit <n>] [--set
+  k=v ...]`) is proposed this way too: one command in an ask, with why
+  it is wanted in the context. The weighty (`code`) card shows the
+  command, or the agent kind and its arguments, and the whole text of
+  the prompt file; `cmd` and `args` are one word each, `prompt` is an
+  absolute path of a file under the yard's home, and the approval is
+  refused if the file has changed since. Leave `env_file` and `log`
+  out: they are set once the group stands, in a terminal, with `group
+  set`. A name in use is refused, since this adds and never replaces.
   Removing a link (`peer rm <name>`) is proposed this way too: one
   command in an ask, with why it is wanted in the context. The card
   names the link and what goes with it: its intakes, identities and

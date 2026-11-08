@@ -244,24 +244,37 @@ func (w *wtx) crewAddProposal(run AskRun) (crewAddSpec, error) {
 		spec.dir = w.home
 		return spec, nil
 	}
+	clean, err := w.knownDir("crew member "+name, "dir", dir, "dir=<dir>")
+	if err != nil {
+		return crewAddSpec{}, err
+	}
+	spec.dir = clean
+	return spec, nil
+}
+
+// knownDir is dir, absolute and with its symlinks resolved, when it is a
+// directory that stands in the yard's known places (crewDirKnown). What is
+// refused is refused in the words of subject ("crew member porter"), with
+// key the setting that names the directory and hint how to write one.
+func (w *wtx) knownDir(subject, key, dir, hint string) (string, error) {
+	const places = "the yard's known places (the yard's home, a depot, or under one of them)"
 	if !filepath.IsAbs(dir) {
-		return crewAddSpec{}, fmt.Errorf("crew member %s: dir %q is no absolute directory under the yard's known places (the yard's home, a depot, or under one of them): name one as dir=<dir>", name, dir)
+		return "", fmt.Errorf("%s: %s %q is no absolute directory under %s: name one as %s", subject, key, dir, places, hint)
 	}
 	clean := filepath.Clean(dir)
 	info, err := os.Stat(clean)
 	if err != nil || !info.IsDir() {
-		return crewAddSpec{}, fmt.Errorf("crew member %s: dir %s is no directory under the yard's known places (the yard's home, a depot, or under one of them): name one as dir=<dir>", name, clean)
+		return "", fmt.Errorf("%s: %s %s is no directory under %s: name one as %s", subject, key, clean, places, hint)
 	}
 	clean, err = filepath.EvalSymlinks(clean)
 	if err != nil {
-		return crewAddSpec{}, fmt.Errorf("crew member %s: resolve dir %s: %w", name, dir, err)
+		return "", fmt.Errorf("%s: resolve %s %s: %w", subject, key, dir, err)
 	}
 	clean = filepath.Clean(clean)
 	if !w.crewDirKnown(clean) {
-		return crewAddSpec{}, fmt.Errorf("crew member %s: dir %s is outside the yard's known places (the yard's home, a depot, or under one of them): name one as dir=<dir>", name, clean)
+		return "", fmt.Errorf("%s: %s %s is outside %s: name one as %s", subject, key, clean, places, hint)
 	}
-	spec.dir = clean
-	return spec, nil
+	return clean, nil
 }
 
 // mapsKeys is the keys of m, for a refusal that lists them.

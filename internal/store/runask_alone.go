@@ -51,11 +51,13 @@ type aloneCommand struct {
 // the rows of the list. Each check is the store function's own, so the
 // refusal is the yard's and cannot drift from it; the two that consult
 // none (pack apply, group set with a command) say what the command does
-// instead. Group add's and group set's words name the same settings the
-// store holds to the operator in checkGroupDefine.
+// instead. Group set's words name the same settings the store holds to the
+// operator in checkGroupDefine. Group add is no entry of this list: it is
+// a row of runList (runask_groupadd.go), which proposes what defines a new
+// group and refuses the rest in its own words.
 //
-// aloneGroupKeys are those settings: group add and group set refuse one
-// in words, before any stored group is read.
+// aloneGroupKeys are those settings: group set refuses one in words,
+// before any stored group is read.
 var aloneGroupKeys = []string{"cmd", "dir", "env_file", "kind", "args", "prompt", "worktrees"}
 
 var aloneList = []aloneCommand{{
@@ -153,33 +155,6 @@ var aloneList = []aloneCommand{{
 			return fmt.Errorf("crew add defines the member whole: to change one's grants propose %s apart", runCommandLine([]string{"crew", "set", name, grantSetOf(sets)}))
 		}
 		return w.may(ctx, actor, ActGrantCrew, Object{Kind: KindCrew, Name: name, Does: added[0]})
-	},
-}, {
-	words: []string{"group", "add"},
-	parse: aloneArgs("yardr group add <name> --runner <runner> [--set cmd=<command>]", 1, -1),
-	check: func(_ context.Context, _ *wtx, argv []string, _ string) error {
-		for i := 3; i < len(argv); i++ {
-			word := argv[i]
-			switch {
-			case word == "--runner" && i+1 < len(argv):
-				i++
-				if argv[i] == "exec" {
-					return fmt.Errorf("group add with runner exec defines what the yard runs: it is the operator's alone, typed in a terminal and never proposed as a run ask")
-				}
-			case word == "--runner=exec":
-				return fmt.Errorf("group add with runner exec defines what the yard runs: it is the operator's alone, typed in a terminal and never proposed as a run ask")
-			case word == "--set" && i+1 < len(argv):
-				i++
-				if key, _, ok := strings.Cut(argv[i], "="); ok && slices.Contains(aloneGroupKeys, key) {
-					return fmt.Errorf("group add with %s defines what the yard runs: it is the operator's alone, typed in a terminal and never proposed as a run ask", key)
-				}
-			case strings.HasPrefix(word, "--set="):
-				if key, _, ok := strings.Cut(strings.TrimPrefix(word, "--set="), "="); ok && slices.Contains(aloneGroupKeys, key) {
-					return fmt.Errorf("group add with %s defines what the yard runs: it is the operator's alone, typed in a terminal and never proposed as a run ask", key)
-				}
-			}
-		}
-		return errNotRow
 	},
 }, {
 	words: []string{"group", "set"},

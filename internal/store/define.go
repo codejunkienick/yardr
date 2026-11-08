@@ -3,8 +3,10 @@
 // comes from, and which user's login they burn. A setting the stored
 // definition already holds, with the same value, is kept unasked, as a
 // depot re-put is; everything else stays anyone's. Each check here is
-// Alone: a run ask never proposes these (runask_alone.go), so the store
-// and the run-ask refusal name the same settings in the same way.
+// Alone: no run ask proposes these except the group-add card, which
+// proposes a new group's (runask_groupadd.go changes the mark to Askable
+// there and nowhere else), so the store and the run-ask refusal name the
+// same settings in the same way.
 package store
 
 import (

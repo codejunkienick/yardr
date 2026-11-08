@@ -813,9 +813,9 @@ with the names it wrote and not the file they are in, and refuses a value the
 file cannot hold without naming the file. `Bead` and `UserAsks` tell a run
 ask as its asker typed it, without the yard's sentences about what it
 changes, the files it carries, the plan of a pack, or the result of its
-approval, except one that sets a setting or adds a source, whose typed words
-carry a value or a path: those words, and the sentence of its approval, are
-the operator's alone. A notification's text is made from what its person is
+approval, except one that sets a setting, adds a source or adds a group,
+whose typed words carry a value or a path: those words, and the sentence of
+its approval, are the operator's alone. A notification's text is made from what its person is
 told of the event. A device of an operator gets all of it whole.
 
 What a device can still read is text written about one thing that happened,

@@ -1,6 +1,7 @@
 // How a bead ask carries a --run command's bytes beside argv: whether the
-// command is a depot test ask, whose command --run-test carries, and the
-// declaration file a source add ask carries.
+// command is a depot test ask, whose command --run-test carries, the role
+// file a crew add ask carries, the prompt file a group add ask carries and
+// the declaration file a source add ask carries.
 package cli
 
 import (
@@ -18,6 +19,94 @@ import (
 	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/store"
 )
+
+// askRunCarried is the run ask --run names, as it is sent: the command as
+// typed, in one string, for the yard to split and parse, and what that
+// command carries beside it, each read once here so the store holds the
+// bytes the card shows. test and role are the values of --run-test and
+// --run-role, and testSet and roleSet say whether they were given.
+func askRunCarried(command, test string, testSet bool, role string, roleSet bool) (*store.AskRun, error) {
+	run := &store.AskRun{Argv: []string{command}}
+	// Source add carries its file: read once here, beside the ask, so the
+	// store holds the bytes the card shows.
+	carried, err := sourceAddCarried(command)
+	if err != nil {
+		return nil, err
+	}
+	run.Carried = carried
+	// Depot test carries its command from --run-test, beside the ask: --run
+	// quotes nothing, so it never goes there.
+	if depotTestCommand(command) {
+		if !testSet {
+			return nil, fmt.Errorf("--run \"depot test <depot>\" carries its command beside the ask, in --run-test \"<command>\"")
+		}
+		run.Test = test
+	}
+	// Crew add carries its role text from --run-role, or from the file
+	// prompt= names: read once here, beside the ask, so the store holds the
+	// bytes the card shows and a file changed after the ask changes nothing.
+	if crewAddCommand(command) {
+		if run.Role, err = crewAddRole(command, role, roleSet); err != nil {
+			return nil, err
+		}
+	}
+	// Group add carries the text of the prompt file its --set prompt=
+	// names, the same way: the store holds the approval to a file that
+	// still holds those bytes, and the yard reads no file for the card.
+	if groupAddCommand(command) {
+		if run.Role, err = groupAddPrompt(command); err != nil {
+			return nil, err
+		}
+	}
+	return run, nil
+}
+
+// plainRunLine reports whether command has only the characters a run ask's
+// line takes (the store's parseRow). A command the store will refuse is
+// refused there, carried or not, so no file is read for it.
+func plainRunLine(command string) bool {
+	if strings.ContainsRune(command, ',') {
+		return false
+	}
+	for _, r := range command {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune(" \t._/=-@:[]", r) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// groupAddCommand reports whether command is a --run "group add <name> ..."
+// ask: those words, with or without the leading yardr. The store parses
+// it; this only says the ask may carry a prompt file's text beside it.
+func groupAddCommand(command string) bool {
+	words := strings.Fields(command)
+	if len(words) > 0 && words[0] == "yardr" {
+		words = words[1:]
+	}
+	return len(words) >= 3 && words[0] == "group" && words[1] == "add"
+}
+
+// groupAddPrompt reads what a --run "group add ..." ask carries: the text
+// of the file its --set prompt=<file> names, once, so the store holds the
+// bytes the card shows. It answers "" for any other command, and for a
+// group add that names no prompt. A file that cannot be read is refused
+// here, and nothing is stored.
+func groupAddPrompt(command string) (string, error) {
+	if !plainRunLine(command) || !groupAddCommand(command) {
+		return "", nil
+	}
+	file := crewPromptFile(command)
+	if file == "" {
+		return "", nil
+	}
+	data, err := readCrewRoleFile(file)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
 
 // crewAddCommand reports whether command is a --run "crew add <name> ..."
 // ask: those words, with or without the leading yardr. The store parses
@@ -37,16 +126,7 @@ func crewAddCommand(command string) bool {
 // store then refuses for carrying no role text. A file that cannot be
 // read is refused here, and nothing is stored.
 func crewAddRole(command, runRole string, runRoleSet bool) (string, error) {
-	if strings.ContainsRune(command, ',') {
-		return "", nil
-	}
-	for _, r := range command {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune(" \t._/=-@:[]", r) {
-			continue
-		}
-		return "", nil
-	}
-	if !crewAddCommand(command) {
+	if !plainRunLine(command) || !crewAddCommand(command) {
 		return "", nil
 	}
 	file := runRole

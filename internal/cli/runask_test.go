@@ -778,6 +778,9 @@ func TestBeadAskRunPeerSet(t *testing.T) {
 	}
 }
 
+// groupAddUse is the group add row of the store's list, by its use.
+const groupAddUse = "yardr group add <name> --runner <runner> [--limit <n>] [--set k=v ...]"
+
 // runCLI are the commands of internal/cli that the rows of the store's
 // list stand for, by the word a stored command begins with.
 func runCLI(a *app) map[string]*cobra.Command {
@@ -846,6 +849,10 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr user uninvite <name>":                                                        {"user uninvite eve"},
 		"yardr crew add <name> kind=<kind> model=<model> preset=<preset> dir=<dir>": {
 			"crew add porter kind=claude model=opus preset=auto",
+		},
+		groupAddUse: {
+			"group add post --runner exec --limit 2 --set cmd=/srv/bin/post",
+			"group add review --runner herdr --set args=--auto",
 		},
 		"yardr crew set <name> open_threads=<sources> | set_state=<sources> | peers=<peers>": {
 			"crew set yardmaster peers=airy",
@@ -1134,6 +1141,63 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				}
 				if string(got) != role {
 					t.Fatalf("%s: role file = %q, want the carried bytes", use, got)
+				}
+				continue
+			}
+			if use == groupAddUse {
+				ctx := context.Background()
+				// A group add's card adds and never replaces, where the
+				// terminal's group add replaces, so the row is held to its
+				// card and its approval, and to the group the terminal's
+				// group add makes of the words the approval ran: the same
+				// group, with the yard's default kind where it names none,
+				// and the same words to say so.
+				for _, y := range []*cliYard{approved, typed} {
+					if err := y.st.SetSetting(ctx, store.DefaultKindSetting, "codex", "jo"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				seq, err := approved.st.AddAsk(ctx, ab.ID, store.Ask{Question: "Run it?", To: "jo", Context: []string{"why"},
+					Run: &store.AskRun{Argv: []string{command}}}, "yardmaster")
+				if err != nil {
+					t.Fatalf("%s: %v", use, err)
+				}
+				notes, err := approved.st.Notes(ctx, ab.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var description string
+				for _, asked := range store.ResolveAsks(notes, time.Now()) {
+					if asked.Note.Seq == seq && asked.Ask.Run != nil {
+						description = asked.Ask.Run.Description
+					}
+				}
+				if want := "Add a new group without replacing one"; description != want {
+					t.Errorf("%s card description %q, want %q", use, description, want)
+				}
+				done, err := approved.st.ApproveAsk(ctx, ab.ID, seq, "jo", true, nil)
+				if err != nil {
+					t.Fatalf("%s: %v", use, err)
+				}
+				out, err := run(t, typed.a.groupCmd(), done.Argv[1:]...)
+				if err != nil {
+					t.Fatalf("yardr %s: %v", strings.Join(done.Argv, " "), err)
+				}
+				if strings.TrimSpace(out) != done.Result {
+					t.Errorf("yardr %s printed %q, and the approval recorded %q", strings.Join(done.Argv, " "), out, done.Result)
+				}
+				var made [2][]byte
+				for i, y := range []*cliYard{approved, typed} {
+					g, err := y.st.GetGroup(ctx, done.Argv[2])
+					if err != nil {
+						t.Fatalf("%s: %v", use, err)
+					}
+					if made[i], err = json.Marshal(g); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if string(made[0]) != string(made[1]) {
+					t.Errorf("%s: the approval made %s and the terminal %s", use, made[0], made[1])
 				}
 				continue
 			}

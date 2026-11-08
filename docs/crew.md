@@ -44,8 +44,9 @@ it, and a file changed after the ask changes nothing. `env_file`,
 stays the operator's alone, and grants are proposed apart as `crew set`
 once the member stands — and a name in use, or one whose
 `roles/<name>.md` stands already, is refused, since the card adds and
-never replaces. `group add`, and `crew set` of `kind`, `args`
-or `prompt`, stay in a terminal with env and credentials. A crew member
+never replaces. `crew set` of `kind`, `args` or `prompt` stays in a
+terminal with env and credentials, and a new group has a card of its own
+([groups.md](groups.md)). A crew member
 that needs one of those asks the operator for it, with the command whole
 in the ask; every other setting is changed as above.
 

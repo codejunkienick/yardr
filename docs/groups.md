@@ -66,9 +66,24 @@ and [`yardr doctor`](doctor.md#the-yard) notes it with how it is removed
 The `cmd`, `dir`, `env_file`, `kind`, `args`, `prompt` and `worktrees`
 settings, and a change of runner to or from `exec` by `group add` whole,
 are the operator's alone: the store refuses each from anyone else, a crew
-member's pane included, and a run ask never proposes one. A crew member
-that needs one asks the operator for it, with the command whole in the
-ask; every other setting is changed as above.
+member's pane included, and no `group set` run ask proposes one. A new
+group is the one exception: from a crew pane, `yardr bead ask <id>
+"<question>" --run "group add <name> --runner <runner> [--limit <n>]
+[--set k=v ...]"` proposes one on a weighty (`code`) card that shows the
+runner and limit, the command of an `exec` group or the agent kind and
+arguments of a `herdr` one, and the whole text of its prompt; approving adds
+the group as `group add` does. The `--set` words carry `cmd`, `args`, `dir`,
+`kind`, `prompt` and `worktrees`: `cmd` and `args` are one word each, since a
+`--run` line is split at spaces and quotes nothing; `dir` and `worktrees` are
+a directory under the yard's home or a depot; `kind` is one the yard knows;
+and `prompt` is the absolute path of a file under the yard's home, whose text
+`yardr bead ask` reads from the file and carries beside the command, and the
+approval is refused if that file holds other text by then. `env_file` and
+`log` stay out of that card and are set once the group stands, in a
+terminal, with `group set`; a peer group needs no card; and a name in use
+is refused, since the card adds and never replaces. A crew member that
+needs any other of those asks the operator for it, with the command whole
+in the ask; every other setting is changed as above.
 
 The runner is not changed this way, since another runner reads another
 config: that is `group add`. `yardr group show <name>` prints one group: its

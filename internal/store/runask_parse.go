@@ -29,15 +29,17 @@ func RunCommands() []string {
 // it, a value or a path: settings set, whose value is a setting's (the
 // operator's own words to the agents, the address hooks are registered at, or
 // what Settings withholds from a device), source add, whose file is a
-// path on the yard's machine, and pack apply with any word past the pack's
-// name, whose mappings are the operator's configuration as the card's are
-// (Mappings). Bead and UserAsks tell those words to a device
+// path on the yard's machine, group add, whose command, directories and
+// prompt file are the operator's machine too, and pack apply with any word
+// past the pack's name, whose mappings are the operator's configuration as
+// the card's are (Mappings). Bead and UserAsks tell those words to a device
 // of the operator alone, and the sentence of an approval of one is marked for
 // WithoutHeld. Every other row's words are names and numbers the stream and
 // the calls tell every device already.
 func RunArgvHeld(argv []string) bool {
 	return len(argv) >= 2 && (slices.Equal(argv[:2], []string{"settings", "set"}) ||
-		slices.Equal(argv[:2], []string{"source", "add"})) ||
+		slices.Equal(argv[:2], []string{"source", "add"}) ||
+		slices.Equal(argv[:2], []string{"group", "add"})) ||
 		len(argv) > 3 && slices.Equal(argv[:2], []string{"pack", "apply"})
 }
 
