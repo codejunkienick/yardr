@@ -170,13 +170,47 @@ func TestAskForSomethingDepotResolution(t *testing.T) {
 	}
 	y.depot(t, "yardr")
 	// The one project needs no name, and takes the bead.
-	res, err := s.AskForSomething(y.ctx, "Write the report\nWhat done looks like: a page the team reads.", "")
+	res, err := s.AskForSomething(y.ctx, "Write the report\n\nWhat done looks like: a page the team reads.\n\nNot a slide deck.", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	plain(t, res.Text)
 	if res.Structured["project"] != "yardr" || res.Structured["title"] != "Write the report" {
 		t.Fatalf("filed as %+v", res.Structured)
+	}
+	// The first line is the title and the words after it, trimmed, are the
+	// body, which does not say the title again. The work is filed at the
+	// priority a bead made without one has (yardr bead create's), not P0,
+	// which a route takes before it reads a label.
+	filed, err := y.st.GetBead(y.ctx, res.Structured["work"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "What done looks like: a page the team reads.\n\nNot a slide deck."; filed.Body != want {
+		t.Fatalf("the filed work's body = %q, want %q", filed.Body, want)
+	}
+	if filed.Priority != store.DefaultPriority {
+		t.Fatalf("the filed work is P%d, want P%d", filed.Priority, store.DefaultPriority)
+	}
+	// Cutting the stored title does not move the original first line into
+	// the body.
+	long := strings.Repeat("word ", 40) + "end"
+	for _, tc := range []struct{ request, body string }{
+		{request: long},
+		{request: long + "\nand what done looks like", body: "and what done looks like"},
+	} {
+		res, err := s.AskForSomething(y.ctx, tc.request, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		filed, err := y.st.GetBead(y.ctx, res.Structured["work"].(string))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cut, wasCut := strings.CutSuffix(filed.Title, "…")
+		if !wasCut || !strings.HasPrefix(tc.request, cut) || filed.Body != tc.body {
+			t.Fatalf("filed %q as %q with the body %q, want its first line cut short for the title and body %q", tc.request, filed.Title, filed.Body, tc.body)
+		}
 	}
 	// A name that is not the one project refuses the same way.
 	if _, err := s.AskForSomething(y.ctx, "Other", "shop"); err == nil ||

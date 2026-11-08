@@ -305,19 +305,27 @@ func (s *Service) AskForSomething(ctx context.Context, request, project string) 
 		}
 		depot = matches[0]
 	}
+	// The first line is the title and the words after it are the body, so
+	// the title is not said twice.
 	title, body := request, ""
 	if i := strings.Index(request, "\n"); i >= 0 {
-		title, body = strings.TrimSpace(request[:i]), request
+		title, body = strings.TrimSpace(request[:i]), strings.TrimSpace(request[i+1:])
 	}
 	if r := []rune(title); len(r) > 160 {
 		title = strings.TrimSpace(string(r[:160])) + "…"
 	}
+	// The priority is the one any bead is made at where none is asked for
+	// (yardr bead create's): the zero value is P0, which a depot's P0
+	// reserve route takes ahead of any label and any load condition, so
+	// every request would jump the line. The tool takes no priority; a
+	// person who wants it sooner says so to the yardmaster.
 	bead, err := s.Yard.CreateBead(ctx, store.NewBead{
-		Title: title,
-		Body:  body,
-		Type:  "task",
-		Depot: depot,
-		For:   s.User,
+		Title:    title,
+		Body:     body,
+		Type:     "task",
+		Priority: store.DefaultPriority,
+		Depot:    depot,
+		For:      s.User,
 	}, s.User)
 	if err != nil {
 		return nil, err
