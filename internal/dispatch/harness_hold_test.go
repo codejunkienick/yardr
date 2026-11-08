@@ -548,6 +548,15 @@ func elseYard(t *testing.T, first string, b store.Group, moonshot func(time.Time
 func TestClaimPassesOverAGroupHeldByAUsageWait(t *testing.T) {
 	t.Parallel()
 	for _, unavailable := range []bool{false, true} {
+		for _, status := range []string{"idle", "unknown", "status-error"} {
+			for _, guard := range []string{"available", "healthy", "primary paused", "other model", "backup paused", "backup used up", "backup unavailable", "no fallback", "global cap", "global pause"} {
+				t.Run(fmt.Sprintf("one-slot/unavailable=%t/status=%s/%s", unavailable, status, guard), func(t *testing.T) {
+					oneSlotQuotaFallback(t, unavailable, status, guard)
+				})
+			}
+		}
+	}
+	for _, unavailable := range []bool{false, true} {
 		for _, fallback := range []string{"available", "paused", "used up", "none"} {
 			for _, status := range []string{"idle", "unknown", "status-error"} {
 				recoveries := []string{"working"}
@@ -651,6 +660,153 @@ func TestClaimPassesOverAGroupHeldByAUsageWait(t *testing.T) {
 				t.Fatalf("claimed by %q, want a again", group)
 			}
 		})
+	}
+}
+
+// oneSlotQuotaFallback keeps both groups at limit 1 so a live, quota-held
+// primary occupies its only slot while the route considers the backup.
+func oneSlotQuotaFallback(t *testing.T, unavailable bool, status, guard string) {
+	t.Helper()
+	ctx := context.Background()
+	s := storetest.New(t)
+	r := &paneRunner{retryRunner: &retryRunner{agentRunner: &agentRunner{statusRunner: &statusRunner{
+		fakeRunner: &fakeRunner{dead: map[string]bool{}}, status: "working"}, worked: true}}, panes: map[string][2]string{}}
+	d := &dispatch.Dispatcher{Store: s, Runners: map[string]dispatch.Runner{"herdr": r}, Backoff: time.Hour}
+	t.Cleanup(func() { dispatch.WaitLimitsIdle(d) })
+	now := noon()
+	dispatch.SetClock(d, func() time.Time { return now })
+	must(t, s.PutGroup(ctx, store.Group{Name: "a", Runner: "herdr", Limit: 1,
+		Config: map[string]any{"kind": "muse", "model": "muse-wonder-1.0", "stall": "off"}}, "me"))
+	must(t, s.PutGroup(ctx, store.Group{Name: "b", Runner: "herdr", Limit: 1,
+		Config: map[string]any{"kind": "claude", "model": "opus", "stall": "off"}}, "me"))
+	route := store.Route{Stage: "new", Group: "a"}
+	if guard != "no fallback" {
+		route.Else = []store.RouteGroup{{Name: "b"}}
+	}
+	_, err := s.AddRoute(ctx, route, "me")
+	must(t, err)
+	first := newBead(t, s, "first Muse session at its cap")
+	must(t, d.Reconcile(ctx))
+	must(t, d.Reconcile(ctx))
+	p := newStandIn(t, s, "muse: meta", "claude: anthropic")
+	p.sayFor("meta", `{"provider":"Muse","windows":[]}`)
+	if unavailable {
+		p.failFor("meta")
+	}
+	p.sayFor("anthropic", `{"provider":"Claude","windows":[{"label":"5h","used_percent":9}]}`)
+	if guard == "backup used up" {
+		p.sayFor("anthropic", `{"provider":"Claude","windows":[{"label":"5h","used_percent":100}]}`)
+	}
+	primeGroupLimits(t, s, d, "a")
+	primeGroupLimits(t, s, d, "b")
+	tail := "◆ Usage limit reached\n│ This turn stopped because your usage limit\n│ was reached.\n❯ "
+	if guard == "healthy" {
+		tail = "The docs quote 'Usage limit reached' as an example.\n❯ "
+	}
+	r.showBead(t, s, first, "idle", tail)
+	must(t, d.Reconcile(ctx))
+	checkHold := func() {
+		t.Helper()
+		h := handleOfBead(t, s, first)
+		if guard == "healthy" {
+			if h[dispatch.HarnessErrorKey] != nil || h["harness_reset_model"] != nil {
+				t.Fatalf("handle = %v, want no hold without an observed stop", h)
+			}
+		} else if h[dispatch.HarnessErrorKey] != dispatch.ReasonRateLimited || h["harness_reset_model"] != "muse-wonder-1.0" {
+			t.Fatalf("handle = %v, want the saved observed quota hold", h)
+		}
+	}
+	checkHold()
+	r.showBead(t, s, first, status, tail)
+	waitKind, waitText := "group_wait", ""
+	model := ""
+	switch guard {
+	case "healthy", "other model":
+		waitText = "group a runs as many sessions as its limit (1) allows"
+		if guard == "other model" {
+			model = "another-model"
+		}
+	case "primary paused", "backup paused":
+		group := "a"
+		if guard == "backup paused" {
+			group = "b"
+		}
+		zero := 0
+		_, err = s.SetGroup(ctx, group, store.GroupEdit{Limit: &zero}, "me")
+		must(t, err)
+		waitText = "group " + group + " is paused (limit 0)"
+	case "backup used up":
+		waitKind, waitText = "quota_wait", "Claude's 5h window is 100% used"
+	case "backup unavailable":
+		r.mu.Lock()
+		r.failNext = dispatch.Runtime(fmt.Errorf("synthetic backup runtime unavailable"))
+		r.mu.Unlock()
+		newBead(t, s, "probe the unavailable backup")
+		must(t, d.Reconcile(ctx))
+		must(t, d.Reconcile(ctx))
+		if got := groupEvents(t, s, "runtime_down"); got["b"] != 1 {
+			t.Fatalf("runtime_down = %v, want the backup's observed outage", got)
+		}
+		waitText = "group b's runtime is down"
+	case "no fallback":
+		waitText = "model muse-wonder-1.0"
+	case "global cap", "global pause":
+		value := "1"
+		waitText = "max_sessions (1)"
+		if guard == "global pause" {
+			value, waitText = "0", "max_sessions is 0 (paused)"
+		}
+		must(t, s.SetSetting(ctx, store.MaxSessionsSetting, value, "me"))
+		waitKind = "capped"
+	}
+	next, err := s.CreateBead(ctx, store.NewBead{Title: "planner after a one-slot quota stop", Metadata: map[string]any{"model": model}}, "me")
+	must(t, err)
+	starts := []string{first.ID}
+	if guard == "available" {
+		starts = append(starts, next.ID)
+	}
+	for range 2 {
+		must(t, d.Reconcile(ctx))
+	}
+	checkHold()
+	group, claim := claimedBy(t, s, next.ID)
+	if guard == "available" {
+		if group != "b" {
+			t.Fatalf("claimed by %q with %v, waits = %v; want independent fallback b at primary limit 1", group, claim, eventKinds(t, s, next.ID, "group_wait"))
+		}
+		passed, _ := claim["passed"].([]any)
+		if len(passed) != 1 {
+			t.Fatalf("passed = %v, want the primary's model hold", claim["passed"])
+		}
+		one, _ := passed[0].(map[string]any)
+		if one["group"] != "a" || !strings.Contains(fmt.Sprint(one["reason"]), "model muse-wonder-1.0") {
+			t.Fatalf("passed = %v, want the exact model hold", passed)
+		}
+		if evs := eventKinds(t, s, next.ID, "group_wait"); len(evs) != 0 {
+			t.Fatalf("group_wait = %v for a bead that should start", evs)
+		}
+		// The held primary still counts, and the backup's only slot is now
+		// occupied too: another bead must wait at the backup's own cap.
+		third := newBead(t, s, "planner after the backup fills")
+		must(t, d.Reconcile(ctx))
+		if group, claim := claimedBy(t, s, third.ID); group != "" {
+			t.Fatalf("claimed by %q with %v, want the backup's capacity wait", group, claim)
+		}
+		waits := eventKinds(t, s, third.ID, "group_wait")
+		if len(waits) != 1 || !strings.Contains(fmt.Sprint(waits[0].Data["reason"]), "group b runs as many sessions as its limit (1) allows") {
+			t.Fatalf("group_wait = %v, want the backup's capacity wait", waits)
+		}
+	} else {
+		if group != "" {
+			t.Fatalf("claimed by %q with %v, want the bead to wait on %s", group, claim, guard)
+		}
+		waits := eventKinds(t, s, next.ID, waitKind)
+		if len(waits) != 1 || !strings.Contains(fmt.Sprint(waits[0].Data["reason"]), waitText) {
+			t.Fatalf("%s = %v, want one wait naming %q", waitKind, waits, waitText)
+		}
+	}
+	if got := r.starts(); !slices.Equal(got, starts) || len(r.nudges) != 0 {
+		t.Fatalf("starts = %v, nudges = %q, want %v and no re-prompt", got, r.nudges, starts)
 	}
 }
 

@@ -463,11 +463,15 @@ prints them as `builders@Weekly<80,5h<90 else spare-builders`.
   conditions, however many beads are ready; the built-in machine source
   is re-read every pass, about every 30 seconds, since load moves faster
   than any provider's windows.
-- **A group at its limit is waited for, not passed over.** So is one whose
-  runtime is down or that is held back for a model. Only a quota condition
-  sends a bead to a further group, and what the yard runs at once stays
-  bounded by the groups' limits. The bead gets one `group_wait` event,
-  logged once per stage and route until it starts, as `quota_wait` is:
+- **A group at its limit is waited for, not passed over, unless the bead's
+  exact model is held.** A model hold passes the group over for the route's
+  next group even when the held session occupies its last slot. A pause
+  (limit 0), a runtime outage or a start in flight still waits. The next
+  group must satisfy its own quota and limit, and held sessions still count
+  against `max_sessions`. With no available group the bead waits, with a
+  `quota_wait` if the remaining groups fail their quota conditions. A wait
+  for a group's limit, runtime or model gets one `group_wait` event, logged
+  once per stage and route until it starts, as `quota_wait` is:
   `route`, `groups` (each group with its `reason` in words: at its limit,
   its runtime down, or held back for the bead's model), `reason` (the same
   on one line) and `hint`. A group at limit 0 says paused instead of

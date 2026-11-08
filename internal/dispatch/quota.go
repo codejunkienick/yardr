@@ -37,8 +37,8 @@ const routeLimitsMemory = 5 * time.Minute
 // passed over for the route's next group, not chosen and then waited for:
 // the choice is made among the rest, in route order, with their quota
 // conditions judged as ever, and a group passed over is not judged, so its
-// windows are not read. A group at its limit, with its runtime down, or
-// with a start in flight is waited for instead, as before. ok is false when
+// windows are not read. Other groups at their limits, with their runtimes
+// down, or with starts in flight are waited for instead. ok is false when
 // the bead does not start in this pass.
 //
 // The limits command is run only for a gated route (store.Route.Gated): one
@@ -163,13 +163,15 @@ func withoutGroups(r *store.Route, aside []waitedGroup) store.Route {
 }
 
 // waitReason is why g cannot start b now: its limit, its runtime, or its
-// model's hold, in the order the dispatcher checks them. It reports false
-// when the group could start the bead.
+// model's hold. An exact model hold allows fallback at positive capacity,
+// but a pause, runtime outage or start in flight still keeps it waiting.
 func (d *Dispatcher) waitReason(g store.Group, b store.Bead, active map[string]int) (waitedGroup, bool) {
-	if active[g.Name] >= g.Limit {
-		if g.Limit == 0 {
-			return waitedGroup{Group: g.Name, Reason: fmt.Sprintf("group %s is paused (limit 0); the bead starts when the limit is raised (yardr group set %s --limit <n>)", g.Name, g.Name)}, true
-		}
+	if g.Limit == 0 {
+		return waitedGroup{Group: g.Name, Reason: fmt.Sprintf("group %s is paused (limit 0); the bead starts when the limit is raised (yardr group set %s --limit <n>)", g.Name, g.Name)}, true
+	}
+	model := modelFor(g, b)
+	sid, held := d.paused[g.Name][model]
+	if active[g.Name] >= g.Limit && !held {
 		return waitedGroup{Group: g.Name, Reason: fmt.Sprintf("group %s runs as many sessions as its limit (%d) allows; the bead starts when one ends, or the limit is raised (yardr group set %s --limit <n>)", g.Name, g.Limit, g.Name)}, true
 	}
 	if o := d.down[g.Name]; o != nil && time.Now().Before(o.until) {
@@ -185,8 +187,7 @@ func (d *Dispatcher) waitReason(g store.Group, b store.Bead, active map[string]i
 	// A session of the group sits stalled with this model, or waits
 	// with it for a usage limit's window to reset: another would end
 	// the same way (see holdBack).
-	model := modelFor(g, b)
-	if sid, held := d.paused[g.Name][model]; held {
+	if held {
 		with := "the agent's default model"
 		if model != "" {
 			with = "model " + model
