@@ -55,12 +55,7 @@ func (s *Supervisor) servePreview(w http.ResponseWriter, r *http.Request) {
 		s.servePreviewWatch(w, r, p, rest)
 		return
 	}
-	switch p.State {
-	case store.PreviewPending, store.PreviewRefused:
-		http.NotFound(w, r)
-		return
-	case store.PreviewCrashed, store.PreviewFailed:
-		http.Error(w, fmt.Sprintf("preview %s is %s", app, p.State), http.StatusServiceUnavailable)
+	if answerFromRow(w, r, p) {
 		return
 	}
 	if !s.Running(app) {
@@ -78,8 +73,16 @@ func (s *Supervisor) servePreview(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "preview "+app+": "+err.Error(), http.StatusServiceUnavailable)
 			return
 		}
-		if !s.waitPort(ctx, p.Port) {
-			http.Error(w, "preview "+app+" is starting", http.StatusServiceUnavailable)
+		if !s.waitPort(ctx, app, p.Port) {
+			// The supervisor may have given the app up while the request
+			// waited (a wide bind refused, a start that never listened, too
+			// many crashes): its row says so, and answers as it does a request
+			// that comes after.
+			if cur, err := s.Store.GetPreview(ctx, app); err != nil {
+				http.NotFound(w, r)
+			} else if !answerFromRow(w, r, cur) {
+				http.Error(w, "preview "+app+" is starting", http.StatusServiceUnavailable)
+			}
 			return
 		}
 	}
@@ -112,16 +115,41 @@ func (s *Supervisor) servePreview(w http.ResponseWriter, r *http.Request) {
 	proxy.ServeHTTP(w, r)
 }
 
-// waitPort waits until the preview's port answers or the start wait
-// runs out.
-func (s *Supervisor) waitPort(ctx context.Context, port int) bool {
-	deadline := time.Now().Add(defaultStartWait)
-	if s.BindWait > 0 {
-		deadline = time.Now().Add(s.BindWait + defaultStartWait)
+// answerFromRow answers a request for a preview whose row says it cannot be
+// reached, and reports whether it did: a proposal or a refused one is not
+// there to anyone, and a crashed or failed one says it is down, with no more
+// than its state, since its detail can name a path or an interface address of
+// the machine and this answers visitors.
+func answerFromRow(w http.ResponseWriter, r *http.Request, p *store.Preview) bool {
+	switch p.State {
+	case store.PreviewPending, store.PreviewRefused:
+		http.NotFound(w, r)
+		return true
+	case store.PreviewCrashed, store.PreviewFailed:
+		http.Error(w, fmt.Sprintf("preview %s is %s", p.App, p.State), http.StatusServiceUnavailable)
+		return true
 	}
+	return false
+}
+
+// waitPort waits until the preview's port answers, the start wait runs out,
+// or the supervisor gives the app up: no process runs for it, and its row no
+// longer says it is to (it was refused, never listened, crashed too often or
+// exited). A crash that restarts is not given up: its row still says running
+// or approved until the restart has been made, and the request waits for it.
+// The start wait is the supervisor's own wait for a bind and defaultStartWait
+// beyond it, so the verdict on a start that never listens, which is due at the
+// bind wait, is on the row before the request stops waiting.
+func (s *Supervisor) waitPort(ctx context.Context, app string, port int) bool {
+	deadline := time.Now().Add(s.bindWait() + defaultStartWait)
 	for time.Now().Before(deadline) {
 		if loopbackHost(port) != "" {
 			return true
+		}
+		if !s.Running(app) {
+			if cur, err := s.Store.GetPreview(ctx, app); err != nil || (cur.State != store.PreviewRunning && cur.State != store.PreviewApproved) {
+				return false
+			}
 		}
 		select {
 		case <-ctx.Done():

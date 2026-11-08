@@ -282,6 +282,7 @@ func (r *runner) serve(ctx context.Context) (string, bool, error) {
 		defer close(supervisorDone)
 		supervisor.Run(watchCtx)
 	}()
+	<-supervisor.RunReady()
 	defer func() {
 		stopWatchCtx()
 		<-supervisorDone

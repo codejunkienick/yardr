@@ -92,9 +92,14 @@ type Supervisor struct {
 	running  map[string]*proc
 	inflight map[string]int
 	over     map[string]time.Time // app -> first moment over the memory cap
-	startMu  sync.Mutex           // one start at a time
-	rebooted bool
-	report   reporting
+	// life is the context Run was given, kept for the watchers of every
+	// start (see lifetime); nil until Run begins.
+	life         context.Context
+	runReady     chan struct{}
+	runReadyOnce sync.Once
+	startMu      sync.Mutex // one start at a time
+	rebooted     bool
+	report       reporting
 }
 
 type proc struct {
@@ -113,7 +118,8 @@ func New(st Store, home string, log *slog.Logger) *Supervisor {
 		log = slog.Default()
 	}
 	return &Supervisor{Store: st, Home: home, Log: log, report: newReporting(),
-		running: map[string]*proc{}, inflight: map[string]int{}, over: map[string]time.Time{}}
+		running: map[string]*proc{}, inflight: map[string]int{}, over: map[string]time.Time{},
+		runReady: make(chan struct{})}
 }
 
 func (s *Supervisor) poll() time.Duration {
@@ -147,12 +153,17 @@ func (s *Supervisor) logPath(app string) string {
 // that replaces itself starts its successor's previews from the
 // registry as stopped. It also reports the previews to the edge the yard is
 // connected to (report.go), and does not return before that is done with
-// the store.
+// the store. ctx is also the life of what every start leaves behind, one a
+// request made included (lifetime), and once it has ended no start is made.
 func (s *Supervisor) Run(ctx context.Context) {
 	tick := time.NewTicker(s.poll())
 	defer tick.Stop()
 	memTick := time.NewTicker(s.memoryTick())
 	defer memTick.Stop()
+	s.mu.Lock()
+	s.life = ctx
+	s.mu.Unlock()
+	s.runReadyOnce.Do(func() { close(s.runReady) })
 	if ctx.Err() != nil {
 		return
 	}
@@ -173,11 +184,34 @@ func (s *Supervisor) Run(ctx context.Context) {
 	}
 }
 
+// RunReady returns a channel closed when Run has retained its context. A
+// caller should wait for it before serving requests whose starts need the
+// supervisor's lifetime rather than the request's.
+func (s *Supervisor) RunReady() <-chan struct{} {
+	return s.runReady
+}
+
 func (s *Supervisor) memoryTick() time.Duration {
 	if s.MemoryTick > 0 {
 		return s.MemoryTick
 	}
 	return defaultMemoryTick
+}
+
+// lifetime is the context a start's watchers live by: the guard that the
+// preview binds loopback alone, and the handling of its exit. It is Run's, so
+// that a preview a request starts is watched as one the supervisor starts: a
+// request's own context ends when its handler returns, and watchers that lived
+// by it would end with the first answer. Where no Run has begun (a start made
+// directly, as a test does) nothing is there to end them but the process they
+// watch, so they take the caller's values and none of its cancellation.
+func (s *Supervisor) lifetime(caller context.Context) context.Context {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.life != nil {
+		return s.life
+	}
+	return context.WithoutCancel(caller)
 }
 
 // reconcile brings the processes in line with the registry: approved
@@ -309,10 +343,19 @@ func (s *Supervisor) Start(ctx context.Context, app string) error {
 	return s.spawn(ctx, p)
 }
 
-// spawn runs p's approved command and records it running.
+// spawn runs p's approved command and records it running. ctx is the
+// caller's: it gates the start and the write that records it, so a caller that
+// has left is refused. What watches the process once it runs lives by the
+// supervisor's context, not the caller's (lifetime).
 func (s *Supervisor) spawn(ctx context.Context, p *store.Preview) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	life := s.lifetime(ctx)
+	if err := life.Err(); err != nil {
+		// Run has returned and stopped everything it ran: a process started
+		// now would have watchers that end at once and nothing to stop it.
+		return fmt.Errorf("preview %s: the supervisor has stopped, so a process started now would have no one to watch it: %w", p.App, err)
 	}
 	if addr := listeningAddress(p.Port); addr != "" {
 		return s.failStart(ctx, p, "port already in use at "+addr)
@@ -363,7 +406,7 @@ func (s *Supervisor) spawn(ctx context.Context, p *store.Preview) error {
 	go func() {
 		err := cmd.Wait()
 		if <-recorded {
-			s.onExit(ctx, p.App, pr, err)
+			s.onExit(life, p.App, pr, err)
 			return
 		}
 		terminateGroup(pr.pgid)
@@ -387,8 +430,8 @@ func (s *Supervisor) spawn(ctx context.Context, p *store.Preview) error {
 		return fmt.Errorf("preview %s: start not recorded: %w", p.App, err)
 	}
 	recorded <- true
-	_ = s.Store.LogPreviewEvent(ctx, p.App, "preview_started", strconv.Itoa(cmd.Process.Pid))
-	go s.watchBind(ctx, p.App, p.Approval.Port, pr)
+	_ = s.Store.LogPreviewEvent(life, p.App, "preview_started", strconv.Itoa(cmd.Process.Pid))
+	go s.watchBind(life, p.App, p.Approval.Port, pr)
 	return nil
 }
 
