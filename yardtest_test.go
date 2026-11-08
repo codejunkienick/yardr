@@ -5286,32 +5286,54 @@ func runProbe(t *testing.T, probePath, dir string, inheritedEnv, env []string, a
 
 // r1go is a go for the package budget's re-run: it reports the alone
 // seconds FAKE_OVER names over budget, every other package fast, and
-// fails every re-run when FAKE_FAIL is set. FAKE_SLEEP sleeps that long
-// in every re-run, opening a window the re-runs overlap in; FAKE_TRACK
-// records the maximum concurrent re-runs, which is what proves the
-// overlap, since a wall clock fails on a loaded machine; FAKE_CACHED
-// prints no seconds, as a cached re-run would. It writes down every call
-// with YARDR_RACE_HELD.
+// fails every re-run when FAKE_FAIL is set. FAKE_TRACK records the
+// maximum concurrent re-runs, which is what proves the overlap, since a
+// wall clock fails on a loaded machine. FAKE_SLEEP sleeps that long in
+// every re-run, and FAKE_WIDTH, beside FAKE_TRACK, holds each re-run
+// before its sleep until the maximum has reached that many: the overlap is
+// waited for, not hoped for, so a loaded machine that starts the re-runs
+// seconds apart still gets them active together. A scheduler that allows
+// fewer than the width never reaches it and the wait ends at its fuse, of
+// about ten seconds, with the lower maximum; one that allows more shows a
+// higher one. FAKE_CACHED prints no seconds, as a cached re-run would. It
+// writes down every call with YARDR_RACE_HELD.
 func r1go(t *testing.T) (fake string, env []string) {
 	t.Helper()
 	fake = t.TempDir()
 	goFake := `#!/bin/sh
 echo "$* held=${YARDR_RACE_HELD-unset}" >>"$FAKE/calls"
-# The mkdir lock makes the fake's concurrent-run count atomic for its test.
+# The mkdir lock makes the fake's concurrent-run count atomic for its test. Its
+# spin sleeps: a bare one keeps a cpu from the re-run that holds the lock, which
+# on a loaded machine is the one the others wait on.
 if [ -n "$FAKE_TRACK" ]; then
   lock=$FAKE/active.lock
-  while ! mkdir "$lock" 2>/dev/null; do :; done
+  while ! mkdir "$lock" 2>/dev/null; do sleep 0.01; done
   active=$(cat "$FAKE/active" 2>/dev/null || echo 0)
   active=$((active + 1))
   echo "$active" >"$FAKE/active"
   max=$(cat "$FAKE/max" 2>/dev/null || echo 0)
   [ "$active" -le "$max" ] || echo "$active" >"$FAKE/max"
   rmdir "$lock"
+  # Stay active until FAKE_WIDTH re-runs have been active at once, so the maximum
+  # is the width the scheduler allows and not the width the spawns happened to
+  # start within the sleep. The wait reads max outside the lock, which the re-run
+  # it waits for must be able to take. A read the writer has truncated is empty
+  # and counts 0, so the loop goes round again. The fuse is the clock's, ten
+  # seconds, not a count of laps: a lap costs its forks and a short sleep's
+  # rounding, which macOS makes tens of milliseconds, so laps measure no seconds.
+  if [ -n "$FAKE_WIDTH" ]; then
+    deadline=$(($(date +%s) + 10))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+      seen=$(cat "$FAKE/max" 2>/dev/null)
+      [ "${seen:-0}" -lt "$FAKE_WIDTH" ] || break
+      sleep 0.01
+    done
+  fi
 fi
 [ -n "$FAKE_SLEEP" ] && sleep "$FAKE_SLEEP"
 if [ -n "$FAKE_TRACK" ]; then
   lock=$FAKE/active.lock
-  while ! mkdir "$lock" 2>/dev/null; do :; done
+  while ! mkdir "$lock" 2>/dev/null; do sleep 0.01; done
   active=$(cat "$FAKE/active" 2>/dev/null || echo 0)
   echo "$((active - 1))" >"$FAKE/active"
   rmdir "$lock"
@@ -6323,10 +6345,11 @@ loadedmachine() {
 		// judges the same verdicts without paying for the overlap again,
 		// since the re-measure case above pays for this shape. The
 		// strict row's sleeps are short and add up, four of them one
-		// after another. Half a second is the overlap window the quiet
-		// row needs: the fake counts a re-run before it sleeps, so the
-		// maximum proves the overlap however the spawns stagger, and a
-		// longer sleep only lengthens this suite (yardr-5372).
+		// after another. The fake holds each re-run active until the
+		// row's width of them have been (FAKE_WIDTH), so the maximum
+		// proves the scheduler's width however the spawns stagger, and
+		// the half second is only how long the re-runs then stay
+		// together: a longer sleep only lengthens this suite (yardr-5372).
 		leg := "ok  \tyardr.dev/yardr/internal/store\t1m1.4s\n" +
 			"ok  \tyardr.dev/yardr/internal/bdp\t1m1.1s\n" +
 			"ok  \tyardr.dev/yardr/internal/pack\t1m1.3s\n" +
@@ -6340,7 +6363,8 @@ loadedmachine() {
 			code int
 			want string // dispatch's verdict: over alone, judged by the load
 			// A row that sleeps in each re-run (in seconds, as the fake's
-			// sleep takes them) wants the most re-runs the fake saw at once.
+			// sleep takes them) wants the most re-runs the fake saw at once,
+			// and the fake waits for that many to be active together.
 			sleep string
 			width int
 		}{
@@ -6367,7 +6391,7 @@ loadedmachine() {
 				env = append(env, c.env...)
 				timed := c.sleep != ""
 				if timed {
-					env = append(env, "FAKE_SLEEP="+c.sleep, "FAKE_TRACK=1")
+					env = append(env, "FAKE_SLEEP="+c.sleep, "FAKE_TRACK=1", "FAKE_WIDTH="+strconv.Itoa(c.width))
 				}
 				start := time.Now()
 				out, code := runEnv(t, dir, env,
@@ -6398,7 +6422,9 @@ loadedmachine() {
 				// width allows, one after another, which nothing shortens.
 				// The maximum below is what proves how many re-runs
 				// overlapped; the batch's wall proves nothing more, so
-				// there is no ceiling for a loaded machine to miss.
+				// there is no ceiling for a loaded machine to miss. The
+				// fake's wait for the overlap only adds to the wall, so
+				// the floor stands as it was.
 				if timed {
 					sleep, err := time.ParseDuration(c.sleep + "s")
 					if err != nil {
