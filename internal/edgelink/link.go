@@ -56,6 +56,10 @@ import (
 //	                      handler returned)
 //	edge → yard           {"type":"end","id"}   (a stream's caller went
 //	                      away: the request with that id is cancelled)
+//	edge → yard           {"type":"socket","id","seq","path","header","protocols","sig"}
+//	yard → edge           {"type":"socket-head","id","status","header","protocol","body"}
+//	both ways             {"type":"socket-data","id","kind","body","more"}
+//	both ways             {"type":"socket-close","id","code","reason"}
 //	yard → edge           {"type":"ack","id"}   (a queued request, once
 //	                      served: the edge deletes it on the ack)
 //	yard → edge           {"type":"push-intent","event_id","user","device",
@@ -160,8 +164,8 @@ type Link struct {
 	OnPushAck func(PushAck)
 
 	// The link's timing; tests shorten it. Zero keeps the constants above.
-	PingEvery, DeadAfter, HelloWithin time.Duration
-	Backoff, BackoffMax, Steady       time.Duration
+	PingEvery, DeadAfter, HelloWithin        time.Duration
+	Backoff, BackoffMax, Steady, SocketGrace time.Duration
 
 	mu    sync.Mutex
 	state State
@@ -170,6 +174,7 @@ type Link struct {
 	// only between serve's reading of its frame and its handler's return.
 	liveMu sync.Mutex
 	live   map[string]context.CancelFunc
+	socks  *socketSet
 	// e2eLive is each live frame's registered enveloped call id, by
 	// frame id (e2e.go), held from serve's reading of the frame until
 	// its handler returns (untrack).
@@ -502,11 +507,12 @@ func (l *Link) serve(ctx context.Context, c *websocket.Conn, session string) (re
 	defer func() {
 		heard.Stop()
 		cancel()
+		l.endSockets()
 		served.Wait()
 	}()
 	var last uint64 // the seq of the last request accepted on this socket
 	for {
-		var f frameIn
+		var f socketFrame
 		err := l.read(lctx, c, &f)
 		if err != nil {
 			var syntax *json.SyntaxError
@@ -527,13 +533,13 @@ func (l *Link) serve(ctx context.Context, c *websocket.Conn, session string) (re
 		heard.Reset(dead)
 		switch f.Type {
 		case "request":
-			if why := l.check(session, last, f); why != "" {
+			if why := l.check(session, last, f.frameIn); why != "" {
 				l.Log.Warn("edge link: a request refused", "id", text(f.ID), "seq", f.Seq, "why", why)
 				continue
 			}
 			// The frame's enveloped call claim, registered before its
 			// goroutine starts (e2e.go): a claim already live is refused.
-			if !l.registerE2E(f) {
+			if !l.registerE2E(f.frameIn) {
 				l.Log.Warn("edge link: an enveloped call id already live, refused", "id", text(f.ID))
 				continue
 			}
@@ -543,11 +549,25 @@ func (l *Link) serve(ctx context.Context, c *websocket.Conn, session string) (re
 			// comes.
 			reqCtx, cancel := context.WithCancel(lctx)
 			l.track(f.ID, cancel)
-			request := f
+			request := f.frameIn
 			served.Go(func() {
 				defer cancel()
 				l.answer(lctx, c, request, reqCtx)
 			})
+		case "socket": // numbered and signed as a request is: GET, empty body, same check
+			signed := f.frameIn
+			signed.Method, signed.Body = http.MethodGet, nil
+			if why := l.check(session, last, signed); why != "" {
+				l.Log.Warn("edge link: a socket refused", "id", text(f.ID), "seq", f.Seq, "why", why)
+				continue
+			}
+			last = f.Seq
+			opening := f
+			served.Go(func() { l.openSocket(lctx, c, opening) })
+		case "socket-data":
+			l.socketData(f)
+		case "socket-close":
+			l.socketClosed(f)
 		case "end":
 			l.cancel(f.ID)
 		case "push-ack":

@@ -340,6 +340,22 @@ lost, so the server reports a preview within a moment of its changing, and
 every preview again each time its link to the edge comes up. A report the edge
 does not answer is made again a minute later, or when the link comes up.
 
+A preview app's WebSocket crosses the same preview link as a stream kind
+beside its requests. The edge opens one with a `socket` frame — the yard-side
+path, the sanitised headers and the subprotocols the browser offered —
+numbered and signed as a `request` frame is, and the yard answers one
+`socket-head`: 101 and the subprotocol the app chose, or the refusal's own
+status and a short body. The two ends then exchange `socket-data` in chunks
+of at most 64 KiB, each side reassembling a whole message before handing it
+over; a message is at most 1 MiB, past which its socket is closed 1009, and
+a socket queues at most 256 KiB a direction for the side not taking it,
+past a 30-second grace closed 1013. `socket-close` carries the close code
+and reason and is final. When the preview link drops, every socket it
+carried ends at both ends, 1012, and nothing is queued for its return. The
+same frames serve a yard app's socket when one is carried; they are defined
+for the served-app endpoint, not for previews as a kind. Ping, pong and
+WebSocket extensions are not carried: each hop answers its own.
+
 A yard connected to no edge reports nothing, so its previews have no host and
 a card on the Previews page has no Open for them. An edge that does not take
 previews from a yard (it serves them for some kinds of yard alone) refuses the

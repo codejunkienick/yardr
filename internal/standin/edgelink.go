@@ -57,6 +57,45 @@ type EdgeData struct {
 	Body []byte
 }
 
+// EdgeSocket is a socket frame as it travels down the link: an upgrade
+// the edge opens on the yard, numbered and signed as a request frame is.
+type EdgeSocket struct {
+	Type      string      `json:"type"`
+	ID        string      `json:"id"`
+	Seq       uint64      `json:"seq"`
+	Path      string      `json:"path"`
+	Header    http.Header `json:"header"`
+	Protocols []string    `json:"protocols"`
+	Sig       string      `json:"sig"`
+}
+
+// EdgeSocketHead is the yard's answer to a socket frame: 101 and the
+// subprotocol it chose, or a refusal's status and body.
+type EdgeSocketHead struct {
+	ID       string
+	Status   int
+	Header   http.Header
+	Protocol string
+	Body     []byte
+}
+
+// EdgeSocketData is one chunk of a socket message the yard sent: its
+// kind, its body, and whether the message continues in the next chunk.
+type EdgeSocketData struct {
+	ID   string
+	Kind string
+	Body []byte
+	More bool
+}
+
+// EdgeSocketClose is a socket's end as the yard sent it: its code and
+// reason.
+type EdgeSocketClose struct {
+	ID     string
+	Code   int
+	Reason string
+}
+
 // EdgePush is one footplate frame the yard sent up the link: an intent or
 // a removal. Raw is the frame as it arrived, for the tests that hold the
 // yard to the relay's shape.
@@ -92,9 +131,18 @@ type EdgeLink struct {
 	endCh   chan string
 	pushes  []EdgePush
 	pushCh  chan EdgePush
-	silent  bool
-	pongs   int
-	pongCh  chan struct{}
+	// The sockets the yard answered on this link: their heads by the id
+	// a test waits on, and every head, chunk and close in order.
+	sockWaiting map[string]chan EdgeSocketHead
+	sockHeads   []EdgeSocketHead
+	sockHeadCh  chan EdgeSocketHead
+	sockData    []EdgeSocketData
+	sockDataCh  chan EdgeSocketData
+	sockCloses  []EdgeSocketClose
+	sockCloseCh chan EdgeSocketClose
+	silent      bool
+	pongs       int
+	pongCh      chan struct{}
 }
 
 // Links gives each link the stand-in welcomed, as it is welcomed.
@@ -173,7 +221,8 @@ func (e *Edge) link(w http.ResponseWriter, r *http.Request) {
 	}
 	l := &EdgeLink{Header: r.Header.Clone(), e: e, c: c, session: yardkey.Session(yardNonce, edgeNonce), done: make(chan struct{}), waiting: map[string]chan EdgeAnswer{},
 		ackCh: make(chan string, 64), dataCh: make(chan EdgeData, 64), endCh: make(chan string, 64), pongCh: make(chan struct{}, 64),
-		pushCh: make(chan EdgePush, 64)}
+		pushCh: make(chan EdgePush, 64), sockWaiting: map[string]chan EdgeSocketHead{},
+		sockHeadCh: make(chan EdgeSocketHead, 64), sockDataCh: make(chan EdgeSocketData, 256), sockCloseCh: make(chan EdgeSocketClose, 64)}
 	if err := writeFrame(ctx, c, map[string]string{"type": "welcome"}); err != nil {
 		return
 	}
@@ -190,6 +239,11 @@ func (e *Edge) link(w http.ResponseWriter, r *http.Request) {
 		var f struct {
 			Type string `json:"type"`
 			EdgeAnswer
+			Kind     string `json:"kind"`
+			More     bool   `json:"more"`
+			Code     int    `json:"code"`
+			Reason   string `json:"reason"`
+			Protocol string `json:"protocol"`
 		}
 		if json.Unmarshal(raw, &f) != nil {
 			continue
@@ -237,6 +291,38 @@ func (e *Edge) link(w http.ResponseWriter, r *http.Request) {
 			l.mu.Unlock()
 			select {
 			case l.endCh <- f.ID:
+			default:
+			}
+		case "socket-head":
+			h := EdgeSocketHead{ID: f.ID, Status: f.Status, Header: f.Header, Protocol: f.Protocol, Body: f.Body}
+			l.mu.Lock()
+			l.sockHeads = append(l.sockHeads, h)
+			ch := l.sockWaiting[f.ID]
+			delete(l.sockWaiting, f.ID)
+			l.mu.Unlock()
+			if ch != nil {
+				ch <- h
+			}
+			select {
+			case l.sockHeadCh <- h:
+			default:
+			}
+		case "socket-data":
+			d := EdgeSocketData{ID: f.ID, Kind: f.Kind, Body: f.Body, More: f.More}
+			l.mu.Lock()
+			l.sockData = append(l.sockData, d)
+			l.mu.Unlock()
+			select {
+			case l.sockDataCh <- d:
+			default:
+			}
+		case "socket-close":
+			cl := EdgeSocketClose{ID: f.ID, Code: f.Code, Reason: f.Reason}
+			l.mu.Lock()
+			l.sockCloses = append(l.sockCloses, cl)
+			l.mu.Unlock()
+			select {
+			case l.sockCloseCh <- cl:
 			default:
 			}
 		case "push-intent", "push-remove":
@@ -298,6 +384,103 @@ func (l *EdgeLink) Sign(key ed25519.PrivateKey, f EdgeFrame) string {
 func (l *EdgeLink) Send(ctx context.Context, f EdgeFrame) error {
 	return writeFrame(ctx, l.c, f)
 }
+
+// Socket is the next socket frame of this link, numbered and signed as
+// the router signs one — over method GET and an empty body, as a request
+// frame is — and not yet sent: a test may change it after signing, or
+// sign it with another key.
+func (l *EdgeLink) Socket(path string, header http.Header, protocols []string) EdgeSocket {
+	l.mu.Lock()
+	l.seq++
+	l.ids++
+	f := EdgeSocket{Type: "socket", ID: "s-" + strconv.Itoa(l.ids), Seq: l.seq, Path: path,
+		Header: header, Protocols: protocols}
+	l.mu.Unlock()
+	if f.Header == nil {
+		f.Header = http.Header{}
+	}
+	f.Sig = l.SignSocket(l.e.key, f)
+	return f
+}
+
+// SignSocket is f's signature by key over this link's session; a nil key
+// is the edge's own.
+func (l *EdgeLink) SignSocket(key ed25519.PrivateKey, f EdgeSocket) string {
+	if key == nil {
+		key = l.e.key
+	}
+	return yardkey.SignFrame(key, yardkey.Frame{Session: l.session, Seq: f.Seq, ID: f.ID, Method: http.MethodGet, Path: f.Path,
+		Header: f.Header, Body: []byte{}})
+}
+
+// SendSocket writes f down the link as it is.
+func (l *EdgeLink) SendSocket(ctx context.Context, f EdgeSocket) error {
+	return writeFrame(ctx, l.c, f)
+}
+
+// OpenSocket sends f and waits for the yard's head for its id.
+func (l *EdgeLink) OpenSocket(ctx context.Context, f EdgeSocket) (EdgeSocketHead, error) {
+	ch := make(chan EdgeSocketHead, 1)
+	l.mu.Lock()
+	l.sockWaiting[f.ID] = ch
+	l.mu.Unlock()
+	if err := l.SendSocket(ctx, f); err != nil {
+		return EdgeSocketHead{}, err
+	}
+	select {
+	case h := <-ch:
+		return h, nil
+	case <-l.done:
+		return EdgeSocketHead{}, errors.New("the link closed before the yard answered the socket")
+	case <-ctx.Done():
+		return EdgeSocketHead{}, ctx.Err()
+	}
+}
+
+// SendSocketData sends one chunk of one message of a socket down the
+// link, as the router relays a browser's chunk.
+func (l *EdgeLink) SendSocketData(ctx context.Context, id, kind string, body []byte, more bool) error {
+	return writeFrame(ctx, l.c, map[string]any{"type": "socket-data", "id": id, "kind": kind, "body": body, "more": more})
+}
+
+// SendSocketClose ends a socket from the edge's side, with the code and
+// reason the browser closed it with.
+func (l *EdgeLink) SendSocketClose(ctx context.Context, id string, code int, reason string) error {
+	return writeFrame(ctx, l.c, map[string]any{"type": "socket-close", "id": id, "code": code, "reason": reason})
+}
+
+// SocketHeads are the yard's socket heads on this link so far, in the
+// order they came.
+func (l *EdgeLink) SocketHeads() []EdgeSocketHead {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]EdgeSocketHead(nil), l.sockHeads...)
+}
+
+// SocketHeadEvents signals each head the yard sends for a socket.
+func (l *EdgeLink) SocketHeadEvents() <-chan EdgeSocketHead { return l.sockHeadCh }
+
+// SocketData are the yard's socket chunks on this link so far, in the
+// order they came.
+func (l *EdgeLink) SocketData() []EdgeSocketData {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]EdgeSocketData(nil), l.sockData...)
+}
+
+// SocketDataEvents signals each chunk of a socket message the yard sends.
+func (l *EdgeLink) SocketDataEvents() <-chan EdgeSocketData { return l.sockDataCh }
+
+// SocketCloses are the sockets the yard closed on this link so far, in
+// the order they came.
+func (l *EdgeLink) SocketCloses() []EdgeSocketClose {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]EdgeSocketClose(nil), l.sockCloses...)
+}
+
+// SocketCloseEvents signals each socket the yard closes.
+func (l *EdgeLink) SocketCloseEvents() <-chan EdgeSocketClose { return l.sockCloseCh }
 
 // Deliver sends f and waits for the yard's answer to its id.
 func (l *EdgeLink) Deliver(ctx context.Context, f EdgeFrame) (EdgeAnswer, error) {
