@@ -23,7 +23,6 @@
              watched in. */}}
       <div><dt>watch of</dt><dd>{{.Bead}} in {{.Stage}}</dd></div>
       <div><dt>directory</dt><dd>{{.Dir}}</dd></div>
-      <div><dt>opens at</dt><dd>/preview/{{.App}}/</dd></div>
       {{- with .Host}}
       <div><dt>address</dt><dd><a href="https://{{.}}/">{{.}}</a></dd></div>
       {{- end}}
@@ -40,7 +39,6 @@
       {{- /* The depot's HEAD now, beside the commit the preview runs, so a
              stale preview reads apart from a fresh one. */}}
       <div><dt>head</dt><dd>{{.ShortHead}}</dd></div>
-      <div><dt>opens at</dt><dd>/preview/{{.App}}/</dd></div>
       {{- with .Host}}
       <div><dt>address</dt><dd><a href="https://{{.}}/">{{.}}</a></dd></div>
       {{- end}}
@@ -58,12 +56,17 @@
     {{- end}}
     {{- /* A pending proposal is approved or refused; a refused card keeps
            no button; every other state opens, stops and restarts. The
-           buttons are drawn only for a request that acts. */}}
+           buttons are drawn only for a request that acts. Open goes to the
+           host the edge gave the preview, where a person reaches it behind
+           their login: /preview/<app>/ is the path the edge forwards to over
+           the preview link, and this view serves nothing there. A card with
+           no host draws no Open and says why in its place; the detail is
+           where the edge's refusal is kept. */}}
     {{- if $.Data.As}}
     {{- if eq .State "pending"}}
     <form class="preview-actions" method="post" action="/previews" hx-post="/previews" hx-target="#live" hx-select="#live > *" hx-swap="innerHTML ignoreTitle:true">{{template "csrf"}}<input type="hidden" name="app" value="{{.App}}"><button type="submit" name="action" value="approve">Approve</button><button type="submit" name="action" value="refuse">Refuse</button></form>
     {{- else if ne .State "refused"}}
-    <form class="preview-actions" method="post" action="/previews" hx-post="/previews" hx-target="#live" hx-select="#live > *" hx-swap="innerHTML ignoreTitle:true">{{template "csrf"}}<input type="hidden" name="app" value="{{.App}}"><a href="/preview/{{.App}}/">Open</a><button type="submit" name="action" value="stop">Stop</button>{{if ne .Kind "watch"}}<button type="submit" name="action" value="restart">Restart</button>{{end}}</form>
+    <form class="preview-actions" method="post" action="/previews" hx-post="/previews" hx-target="#live" hx-select="#live > *" hx-swap="innerHTML ignoreTitle:true">{{template "csrf"}}<input type="hidden" name="app" value="{{.App}}">{{with .Host}}<a href="https://{{.}}/">Open</a>{{else}}<span class="faint">no address from the edge yet{{with .StateDetail}} ({{.}}){{end}}</span>{{end}}<button type="submit" name="action" value="stop">Stop</button>{{if ne .Kind "watch"}}<button type="submit" name="action" value="restart">Restart</button>{{end}}</form>
     {{- end}}
     {{- end}}
   </article>

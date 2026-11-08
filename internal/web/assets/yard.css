@@ -558,6 +558,9 @@ ul, ol { list-style: none; }
 .preview-actions, .file-pager { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .preview-actions button, .preview-actions a, .file-pager a, .file-pager span { padding: 12px 16px; min-height: 44px; background: var(--panel); color: var(--dim); border: 1px solid var(--hairline-strong); overflow-wrap: anywhere; }
 .preview-actions button:hover, .preview-actions a:hover, .file-pager a:hover { color: var(--accent-hover); border-color: var(--accent-hover); }
+/* A card with no host has no Open: the line that says why stands in its
+   place, on the row's first line. */
+.preview-actions .faint { flex: 1 0 100%; overflow-wrap: anywhere; }
 .file-pager { max-width: 90ch; }
 .file-pager a, .file-pager span { flex: 1 1 0; min-width: max-content; text-align: center; }
 .file-pager span { color: var(--faint); border-color: var(--hairline); }

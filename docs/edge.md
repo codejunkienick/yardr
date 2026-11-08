@@ -323,10 +323,12 @@ host of its own at the edge, behind their login, such as
 preview to the edge, on a signed call like the other reports a yard makes, and
 **the host comes from the edge's answer to the report**: the edge issues the
 preview an id, once, and answers with the host it is opened at. The yard keeps
-the host on the preview's row and shows it beside the path
-`/preview/<app>/`: on the Previews page, in `yardr preview list` (the `HOST`
-column, and `host` with `--json`), and as the address `yardr preview watch`
-prints for the bead's note.
+the host on the preview's row and shows it: on the Previews page, as the
+card's address, which its Open goes to; in `yardr preview list` (the `HOST`
+column, and `host` with `--json`); and as the address `yardr preview watch`
+prints for the bead's note. The path `/preview/<app>/` is no address: it is
+the endpoint on the yard that the edge forwards to over the preview link, and
+the web view serves nothing at it.
 
 What is reported is the app, the port it binds (a watch binds none), its kind
 and its state, for a preview that is approved, running or stopped. A proposal
@@ -338,13 +340,16 @@ lost, so the server reports a preview within a moment of its changing, and
 every preview again each time its link to the edge comes up. A report the edge
 does not answer is made again a minute later, or when the link comes up.
 
-A yard connected to no edge reports nothing, and its previews are what they
-were: the path on the yard. An edge that does not take previews from a yard
-(it serves them for some kinds of yard alone) refuses the report. The edge's
-words are kept in the preview's state detail, where the Previews page and
-`yardr preview list` show them beside the state of a preview that is approved
-or running (a stopped one shows the reason it stopped), and nothing else about
-the preview changes. A host the edge gave goes when the yard leaves the edge.
+A yard connected to no edge reports nothing, so its previews have no host and
+a card on the Previews page has no Open for them. An edge that does not take
+previews from a yard (it serves them for some kinds of yard alone) refuses the
+report. The edge's words are kept in the preview's state detail, where the
+Previews page and `yardr preview list` show them beside the state of a preview
+that is approved or running (a stopped one shows the reason it stopped), and
+nothing else about the preview changes. A host the edge gave goes when the yard
+leaves the edge. A card without a host draws no Open: where it would be, the
+card says there is no address from the edge yet, with the state detail after
+it.
 
 ## While the yard is away: the queue
 

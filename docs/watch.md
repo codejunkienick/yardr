@@ -100,9 +100,11 @@ The same `yardr preview watch <bead>` starts it again, at the same address. A
 server restart, an upgrade among them, does not end a watch.
 
 On the Previews page of the web view a running watch has a card with the bead,
-the directory, its address and lifetime, and Open and Stop. An ended one
-leaves the page, where a card waiting for a person's approval must stand out,
-and stays in `yardr preview list`.
+the directory, its address and lifetime, and Open and Stop. Open goes to the
+host the edge gave the watch; until it has given one, the card has no address
+and says so in Open's place. An ended one leaves the page, where a card
+waiting for a person's approval must stand out, and stays in
+`yardr preview list`.
 
 ## Through the edge
 

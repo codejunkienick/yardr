@@ -20,8 +20,10 @@ import (
 // while it runs, with the bead, directory and lifetime, and Open and Stop:
 // it has no command or commit to approve, and a watch that ended leaves
 // the page, where a card that waits for a person must stand out. A card
-// shows the host the edge gave the preview beside its path, once it has
-// one.
+// shows the host the edge gave the preview as its address once it has
+// one, and Open goes there: the view serves nothing at the yard-side
+// /preview/<app>/ the edge forwards to, so a card with no host has no
+// Open and says why.
 type Previews struct {
 	// As is the user the request acts as, "" when it acts as none: the
 	// card's buttons are drawn only for a request that acts.

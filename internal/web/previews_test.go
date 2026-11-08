@@ -124,6 +124,20 @@ func gitDepot(t *testing.T) (dir, head string) {
 	return dir, strings.TrimSpace(string(out))
 }
 
+// cardOf is the article of the page that draws app's card, so that a link
+// or a line is held to the card it belongs to and not to the page.
+func cardOf(t *testing.T, page, app string) string {
+	t.Helper()
+	for _, a := range strings.Split(page, "<article")[1:] {
+		if strings.Contains(a, `<span class="bead">`+app+`</span>`) {
+			card, _, _ := strings.Cut(a, "</article>")
+			return card
+		}
+	}
+	t.Fatalf("the page has no card of %s:\n%s", app, page)
+	return ""
+}
+
 // A pending proposal appears as one card, in JSON and HTML, showing the
 // start command in full, the directory, the port, the depot commit and
 // dirty mark, and the proposer. Approving it starts the preview through
@@ -169,11 +183,18 @@ func TestPreviewsPage(t *testing.T) {
 	// the test binary in it holds a character the page escapes.
 	for _, want := range []string{
 		template.HTMLEscapeString(card.Command), dir, fmt.Sprint(port), head[:12], "(dirty)", "builder",
-		"idle 4h · age 7d", "/preview/demo/", `name="action" value="approve">Approve`,
+		"idle 4h · age 7d", `name="action" value="approve">Approve`,
 		`name="action" value="refuse">Refuse`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the page does not show %q", want)
+		}
+	}
+	// The yard-side path the edge forwards to is no address of this view's:
+	// it serves nothing there, so the card names it nowhere.
+	for _, not := range []string{"/preview/", "<dt>opens at</dt>"} {
+		if strings.Contains(page, not) {
+			t.Errorf("the pending card shows %q", not)
 		}
 	}
 	// A view that reads only draws no button and takes no write.
@@ -212,8 +233,9 @@ func TestPreviewsPage(t *testing.T) {
 		resp.Body.Close()
 		return true
 	})
-	// The running card shows its log tail and its Open, Stop and Restart;
-	// the refused card stays listed with no button.
+	// The running card shows its log tail and its Stop and Restart, and in
+	// Open's place the line that says why it has none: no edge gave it a
+	// host; the refused card stays listed with no button.
 	var running web.Previews
 	waitPreview(t, "log tail on the card", func() bool {
 		// Decoded fresh: a reused value would keep a field the
@@ -230,9 +252,14 @@ func TestPreviewsPage(t *testing.T) {
 	if tail := template.HTMLEscapeString(running.Previews[0].Log[0]); !strings.Contains(page, tail) {
 		t.Errorf("the page does not show the log tail %q", tail)
 	}
-	for _, want := range []string{`href="/preview/demo/"`, `value="stop">Stop`, `value="restart">Restart`} {
+	for _, want := range []string{`<span class="faint">no address from the edge yet</span>`, `value="stop">Stop`, `value="restart">Restart`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the running card does not show %q", want)
+		}
+	}
+	for _, not := range []string{">Open<", "/preview/"} {
+		if strings.Contains(page, not) {
+			t.Errorf("the running card with no host shows %q", not)
 		}
 	}
 	if refused := running.Previews[1]; refused.App != "other" || refused.State != store.PreviewRefused || len(refused.Log) != 0 {
@@ -321,22 +348,25 @@ func TestPreviewsPageDrawsARunningWatch(t *testing.T) {
 		card.Command != "" || card.Port != 0 || card.Head != "" || card.Stale || card.Approval != nil {
 		t.Fatalf("watch card = %+v", card)
 	}
+	// No edge has given the watch a host, so its card has no Open and says so
+	// in Open's place; it names the yard-side path nowhere, for this view
+	// serves nothing there.
 	page := acting.get("/previews").body
 	for _, want := range []string{
-		"watch of", b.ID + " in new", filepath.Join(tree, "mockups"), "/preview/" + p.App + "/",
-		`href="/preview/` + p.App + `/"`, `value="stop">Stop`, "idle 4h · age 7d", "started by",
+		"watch of", b.ID + " in new", filepath.Join(tree, "mockups"),
+		`<span class="faint">no address from the edge yet</span>`, `value="stop">Stop`, "idle 4h · age 7d", "started by",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the page does not show %q", want)
 		}
 	}
-	for _, not := range []string{"<dt>command</dt>", "<dt>commit</dt>", "<dt>head</dt>", "<dt>proposed by</dt>", "Restart", "Approve"} {
+	for _, not := range []string{"<dt>command</dt>", "<dt>commit</dt>", "<dt>head</dt>", "<dt>proposed by</dt>", "Restart", "Approve", ">Open<", "/preview/", "<dt>opens at</dt>"} {
 		if strings.Contains(page, not) {
 			t.Errorf("the watch's card shows %q", not)
 		}
 	}
-	// The edge's host for the watch stands beside its path as a link, once it
-	// has one; a watch it gave none shows no address.
+	// A host the edge gave the watch is its address, as a link, and Open goes
+	// there; a watch it gave none shows no address.
 	if strings.Contains(page, "<dt>address</dt>") {
 		t.Error("a watch the edge gave no host shows an address")
 	}
@@ -350,13 +380,19 @@ func TestPreviewsPageDrawsARunningWatch(t *testing.T) {
 		t.Fatalf("watch card host = %q, want %q", got.Previews[0].Host, host)
 	}
 	page = acting.get("/previews").body
-	for _, want := range []string{"<dt>address</dt>", `href="https://` + host + `/"`} {
+	for _, want := range []string{"<dt>address</dt>", `href="https://` + host + `/"`, `<a href="https://` + host + `/">Open</a>`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the watch's card does not show %q", want)
 		}
 	}
+	for _, not := range []string{"no address from the edge yet", "/preview/"} {
+		if strings.Contains(page, not) {
+			t.Errorf("the watch's card with a host shows %q", not)
+		}
+	}
 	// A refusal of the edge's is the running card's status, in the detail
-	// the card shows for a preview that has one, and the host goes.
+	// the card shows for a preview that has one, and the host goes: Open with
+	// it, and the line in its place carries the refusal.
 	none, refusal := "", "the edge refused the report: no previews here (403)"
 	if _, err := f.own.UpdatePreview(ctx, p.App, store.PreviewUpdate{Host: &none, StateDetail: &refusal}); err != nil {
 		t.Fatal(err)
@@ -364,6 +400,9 @@ func TestPreviewsPageDrawsARunningWatch(t *testing.T) {
 	page = acting.get("/previews").body
 	if !strings.Contains(page, "running ("+refusal+")") || strings.Contains(page, "<dt>address</dt>") {
 		t.Errorf("a running watch the edge refused: want its refusal for the status and no address:\n%s", page)
+	}
+	if want := `<span class="faint">no address from the edge yet (` + refusal + `)</span>`; !strings.Contains(page, want) || strings.Contains(page, ">Open<") {
+		t.Errorf("a running watch the edge refused: want %q in Open's place and no Open:\n%s", want, page)
 	}
 	if r := acting.postForm("/previews", url.Values{"app": {p.App}, "action": {"restart"}}, "Origin", acting.ts.URL); r.status != http.StatusOK ||
 		!strings.Contains(r.body, "has no approved form to restart") {
@@ -384,20 +423,26 @@ func TestPreviewsPageDrawsARunningWatch(t *testing.T) {
 	}
 }
 
-// An app's card shows the host the edge gave it beside its path, as a link;
-// a card the edge gave none shows no address.
+// An app's card shows the host the edge gave it as its address, a link, and
+// Open goes there. A card the edge gave none has no address and no Open, and
+// says why in Open's place, with the edge's refusal after it where the detail
+// holds one; a proposal that waits for approval has neither, for it has
+// Approve and Refuse. A view that reads only draws no Open: the address is
+// its link.
 func TestPreviewsPageShowsTheHostTheEdgeGave(t *testing.T) {
 	t.Parallel()
 	f := previewFixture(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	for _, app := range []string{"hosted", "plain"} {
+	for _, app := range []string{"hosted", "plain", "unaddressed"} {
 		if _, err := f.st.ProposePreview(ctx, store.NewPreview{App: app, Command: "serve .", Dir: dir, Port: previewtest.FreePort(t, "127.0.0.1")}, "builder"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := f.st.ApprovePreview(ctx, "hosted", "ada"); err != nil {
-		t.Fatal(err)
+	for _, app := range []string{"hosted", "unaddressed"} {
+		if _, err := f.st.ApprovePreview(ctx, app, "ada"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	host := "p-3.preview.example.net"
 	if _, err := f.own.UpdatePreview(ctx, "hosted", store.PreviewUpdate{Host: &host}); err != nil {
@@ -406,12 +451,37 @@ func TestPreviewsPageShowsTheHostTheEdgeGave(t *testing.T) {
 	acting := f.as(t, "ada")
 	var got web.Previews
 	acting.getJSON("/previews", &got)
-	if len(got.Previews) != 2 || got.Previews[0].App != "hosted" || got.Previews[0].Host != host || got.Previews[1].Host != "" {
-		t.Fatalf("previews = %+v, want the first to carry the host the edge gave and the second none", got.Previews)
+	if len(got.Previews) != 3 || got.Previews[0].App != "hosted" || got.Previews[0].Host != host || got.Previews[1].Host != "" || got.Previews[2].Host != "" {
+		t.Fatalf("previews = %+v, want the first to carry the host the edge gave and the others none", got.Previews)
 	}
 	page := acting.get("/previews").body
 	if n := strings.Count(page, "<dt>address</dt>"); n != 1 || !strings.Contains(page, `href="https://`+host+`/"`) {
 		t.Errorf("the page shows %d addresses, want the one link to %s:\n%s", n, host, page)
+	}
+	const why = "no address from the edge yet"
+	if c := cardOf(t, page, "hosted"); !strings.Contains(c, `<a href="https://`+host+`/">Open</a>`) || strings.Contains(c, why) {
+		t.Errorf("the card with a host: want Open to https://%s/ and no reason line:\n%s", host, c)
+	}
+	if c := cardOf(t, page, "plain"); strings.Contains(c, ">Open<") || strings.Contains(c, why) || !strings.Contains(c, `value="approve">Approve`) {
+		t.Errorf("the pending card: want Approve, with no Open and no reason line:\n%s", c)
+	}
+	if c := cardOf(t, page, "unaddressed"); !strings.Contains(c, `<span class="faint">`+why+`</span>`) || strings.Contains(c, ">Open<") || strings.Contains(c, "<dt>address</dt>") {
+		t.Errorf("the card with no host: want the reason line, with no Open and no address:\n%s", c)
+	}
+	// What the edge refused with is kept in the card's state detail, and the
+	// line carries it after its own words.
+	refusal := "the edge refused the report: previews need a yard on its own server: this yard is docker (403)"
+	if _, err := f.own.UpdatePreview(ctx, "unaddressed", store.PreviewUpdate{StateDetail: &refusal}); err != nil {
+		t.Fatal(err)
+	}
+	if c := cardOf(t, acting.get("/previews").body, "unaddressed"); !strings.Contains(c, `<span class="faint">`+why+` (`+refusal+`)</span>`) || strings.Contains(c, ">Open<") {
+		t.Errorf("the card the edge refused: want the reason line with the refusal after it, and no Open:\n%s", c)
+	}
+	// A view that reads only has no buttons, Open among them: the card's
+	// address is what it opens from.
+	read := f.get("/previews").body
+	if c := cardOf(t, read, "hosted"); !strings.Contains(c, `<dd><a href="https://`+host+`/">`+host+`</a></dd>`) || strings.Contains(c, ">Open<") {
+		t.Errorf("the card on a view that reads only: want the address link and no Open:\n%s", c)
 	}
 }
 
