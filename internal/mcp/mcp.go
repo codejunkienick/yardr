@@ -63,10 +63,15 @@ const FloorMessage = "This yard speaks MCP 2025-06-18 or later. Update your clie
 const NoUserMessage = "I can't tell who you are to this yard. Run `yardr user list` to see its people, then set `YARDR_ACTOR` or `--actor` to your name in this client's `yardr mcp` configuration and reconnect."
 
 // DefaultWait is how long ask_the_yardmaster holds its call open for a
-// client whose limits are measured (Claude Code): about two minutes,
+// client whose limits are measured (Claude Code): a hundred seconds,
 // which the yardmaster's ordinary answer, given when it is next
-// nudged, usually meets (design yardr-ts4d 3.5).
-const DefaultWait = 2 * time.Minute
+// nudged, usually meets (design yardr-ts4d 3.5). It is short of Claude
+// Code's 120 s tool limit, at which the client moves a call still open
+// to the background: two minutes met that limit, so every call went
+// there. The twenty seconds left are the margin for the call to reach
+// the yard and its answer to get back, so the wait ends, with the
+// reply or the words that it will come, inside the turn that asked.
+const DefaultWait = 100 * time.Second
 
 // ShortWait is the interim wait for every other client, whose tool-call
 // limit is still unmeasured: under sixty seconds, so such a client gets
@@ -286,7 +291,10 @@ type Service struct {
 // Result is one tool's answer: the words written for the person, and,
 // beside them, the structured part a program needs (which thing, which
 // question) for the next call. The identifiers ride there, not in the
-// words the person is shown (design yardr-ts4d 3.5).
+// words the person is shown (design yardr-ts4d 3.5). The exception is
+// ask_the_yardmaster: its structured part carries its words too, as
+// message, because a client that shows only that part showed nothing
+// else of a wait.
 type Result struct {
 	Text       string
 	Structured map[string]any

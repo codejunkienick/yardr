@@ -275,7 +275,7 @@ func clientName(req *sdkmcp.CallToolRequest) string {
 }
 
 // waitFor is the interim bounded wait by client (design yardr-ts4d
-// 3.5): the measured client's two minutes, and under a minute for
+// 3.5): the measured client's DefaultWait, and under a minute for
 // every other, until a hand-run trial sets the other number.
 func waitFor(client string) time.Duration {
 	name := strings.ToLower(client)

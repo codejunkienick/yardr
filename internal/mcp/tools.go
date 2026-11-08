@@ -502,7 +502,8 @@ func (s *Service) Answer(ctx context.Context, in AnswerInput, weighed bool) (*Re
 // chat sends it, then a bounded wait inside the open call for the
 // reply. Progress says the wait is standing, often enough to hold the
 // client's idle window. Cancelling the wait never takes the message
-// back: the question stands, and the reply will come as mail.
+// back: the question stands, and the reply will come as mail. Finding
+// the reply marks nothing read: reading mail is read_my_mail's.
 func (s *Service) AskTheYardmaster(ctx context.Context, message string, progress func(string)) (*Result, error) {
 	if err := s.requireUser(); err != nil {
 		return nil, err
@@ -537,6 +538,13 @@ func (s *Service) AskTheYardmaster(ctx context.Context, message string, progress
 	if progress != nil {
 		progress("asked; waiting for the answer")
 	}
+	// Every result carries its words in the structured part too: a client
+	// that shows only that part (Claude Code showed {"waiting": true} and
+	// nothing else) then shows words, and the two cannot differ.
+	said := func(text string, structured map[string]any) *Result {
+		structured["message"] = text
+		return &Result{Text: text, Structured: structured}
+	}
 	deadline := time.NewTimer(wait)
 	defer deadline.Stop()
 	pollTick := time.NewTicker(poll)
@@ -546,15 +554,11 @@ func (s *Service) AskTheYardmaster(ctx context.Context, message string, progress
 	for {
 		select {
 		case <-ctx.Done():
-			return &Result{
-				Text:       "You stopped the wait; your message is still with the yardmaster, and the answer will come. Ask me to read your mail later, and I will tell you what it says.",
-				Structured: map[string]any{"waiting": true},
-			}, nil
+			return said("You stopped the wait; your message is still with the yardmaster, and the answer will come. Ask me to read your mail later, and I will tell you what it says.",
+				map[string]any{"waiting": true}), nil
 		case <-deadline.C:
-			return &Result{
-				Text:       "Your question is with the yardmaster. The answer will come; ask me to read your mail later, and I will tell you what it says.",
-				Structured: map[string]any{"waiting": true},
-			}, nil
+			return said("Your question is with the yardmaster. The answer will come; ask me to read your mail later, and I will tell you what it says.",
+				map[string]any{"waiting": true}), nil
 		case <-progressTick.C:
 			if progress != nil {
 				progress("asked; waiting for the answer")
@@ -564,14 +568,22 @@ func (s *Service) AskTheYardmaster(ctx context.Context, message string, progress
 			if err != nil {
 				continue
 			}
-			for _, l := range box.Mail {
-				if l.Read || l.From != to || l.Seq <= head {
-					continue
+			// The reply is the first letter from the yardmaster after the
+			// question, read or not: another reader of this person's mail
+			// (footplate on their phone or laptop) may have marked it read
+			// before this poll, and a reply passed over for that is lost to
+			// the connection both ways, since read_my_mail shows unread
+			// mail only. The inbox lists unread letters first, so the
+			// first match is not the oldest: the lowest seq is.
+			var reply *store.Letter
+			for i, l := range box.Mail {
+				if l.From == to && l.Seq > head && (reply == nil || l.Seq < reply.Seq) {
+					reply = &box.Mail[i]
 				}
-				return &Result{
-					Text:       fmt.Sprintf("The yardmaster replied (%s):\n%s", when(l.At, s.now()), l.Text),
-					Structured: map[string]any{"waiting": false, "reply": l.Text},
-				}, nil
+			}
+			if reply != nil {
+				return said(fmt.Sprintf("The yardmaster replied (%s):\n%s", when(reply.At, s.now()), reply.Text),
+					map[string]any{"waiting": false, "reply": reply.Text}), nil
 			}
 		}
 	}

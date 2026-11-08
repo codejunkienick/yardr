@@ -406,6 +406,12 @@ func TestAskTheYardmasterProgressOverTheWire(t *testing.T) {
 	if text := toolText(t, res); !strings.Contains(text, "done: it is filed") {
 		t.Fatalf("the reply over the wire:\n%s", text)
 	}
+	// The words ride in the structured part too, for a client that shows
+	// only that part.
+	structured, _ := res.StructuredContent.(map[string]any)
+	if msg, _ := structured["message"].(string); !strings.Contains(msg, "done: it is filed") || structured["waiting"] != false {
+		t.Errorf("the structured part over the wire = %v, want the reply's words in message", structured)
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	found := false

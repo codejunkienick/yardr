@@ -554,6 +554,14 @@ func TestAskTheYardmasterWait(t *testing.T) {
 	if _, err := s.AskTheYardmaster(y.ctx, "what is the answer?", nil); !errors.Is(err, crewErr) {
 		t.Fatalf("a failed yardmaster roster lookup = %v, want its error", err)
 	}
+	// Every result says its words in the structured part too, for a client
+	// that shows only that part (Claude Code showed {"waiting": true}).
+	wordsInBoth := func(res *mcp.Result, waiting bool) {
+		t.Helper()
+		if res.Structured["message"] != res.Text || res.Structured["waiting"] != waiting {
+			t.Errorf("the structured part = %v, want waiting %v and the result's words:\n%s", res.Structured, waiting, res.Text)
+		}
+	}
 	s.Yard = replyYard
 	var progress []string
 	res, err := s.AskTheYardmaster(y.ctx, "what is the answer?", func(msg string) { progress = append(progress, msg) })
@@ -563,6 +571,63 @@ func TestAskTheYardmasterWait(t *testing.T) {
 	plain(t, res.Text)
 	if !strings.Contains(res.Text, "the answer is 42") || len(progress) == 0 || progress[0] != "asked; waiting for the answer" {
 		t.Fatalf("the waited reply:\n%s\nprogress %v", res.Text, progress)
+	}
+	wordsInBoth(res, false)
+	if res.Structured["reply"] != "the answer is 42" {
+		t.Errorf("the structured reply = %v", res.Structured["reply"])
+	}
+	// Finding the reply marks nothing read: that is read_my_mail's.
+	if box, err := y.st.UserInbox(y.ctx, "ada", 0, "ada"); err != nil || box.Unread != 1 {
+		t.Fatalf("the inbox after the wait found the reply = %+v, %v; want the reply still unread", box, err)
+	}
+	// A reply the person's other window (footplate on a laptop) read
+	// before the wait's first look is still the reply: it is lost to the
+	// connection both ways otherwise, for read_my_mail shows unread mail only.
+	readElsewhere := func(ctx context.Context, user string) error {
+		head, err := y.st.Head(ctx)
+		if err != nil {
+			return err
+		}
+		return y.st.AckUserInbox(store.WithVia(ctx, user, "laptop"), user, head, user)
+	}
+	s.Yard = mailHookYard{Yard: y.st, afterMail: func(ctx context.Context, to, _ string, actor string) error {
+		if to != "yardmaster" {
+			return nil
+		}
+		if err := y.st.Mail(ctx, actor, "it is filed", to); err != nil {
+			return err
+		}
+		return readElsewhere(ctx, actor)
+	}}
+	res, err = s.AskTheYardmaster(y.ctx, "is it filed?", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Structured["reply"] != "it is filed" {
+		t.Fatalf("the reply read elsewhere before the wait looked:\n%s", res.Text)
+	}
+	wordsInBoth(res, false)
+	// With two replies, the first is the reply even when it is the one
+	// read elsewhere and the later one is still unread, which the inbox
+	// lists first.
+	s.Yard = mailHookYard{Yard: y.st, afterMail: func(ctx context.Context, to, _ string, actor string) error {
+		if to != "yardmaster" {
+			return nil
+		}
+		if err := y.st.Mail(ctx, actor, "first answer", to); err != nil {
+			return err
+		}
+		if err := readElsewhere(ctx, actor); err != nil {
+			return err
+		}
+		return y.st.Mail(ctx, actor, "second answer", to)
+	}}
+	res, err = s.AskTheYardmaster(y.ctx, "and the rest?", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Structured["reply"] != "first answer" {
+		t.Fatalf("the first of two replies, read elsewhere:\n%s", res.Text)
 	}
 	// The wait ending says the answer will come, and keeps the message.
 	s.Yard = y.st
@@ -574,6 +639,7 @@ func TestAskTheYardmasterWait(t *testing.T) {
 	if !strings.Contains(res.Text, "The answer will come") {
 		t.Fatalf("the ended wait:\n%s", res.Text)
 	}
+	wordsInBoth(res, true)
 	// The message itself stands in the conversation, read or not.
 	letters, _, err := y.st.Conversation(y.ctx, "ada", "yardmaster", 0, 0, 0)
 	if err != nil || len(letters) == 0 {
@@ -603,6 +669,7 @@ func TestAskTheYardmasterWait(t *testing.T) {
 		if !strings.Contains(res.Text, "still with the yardmaster") {
 			t.Fatalf("the cancelled wait:\n%s", res.Text)
 		}
+		wordsInBoth(res, true)
 	case <-time.After(5 * time.Second):
 		t.Fatal("the cancelled wait did not end")
 	}

@@ -34,6 +34,11 @@ func TestWaitForUsesTheMeasuredClientLimit(t *testing.T) {
 			}
 		})
 	}
+	// Claude Code moves a call still open at 120 s to the background, so
+	// the wait for it ends well inside that, with room for the trip back.
+	if limit := 120 * time.Second; DefaultWait > limit-10*time.Second {
+		t.Errorf("DefaultWait = %s, want at least 10 s under Claude Code's %s tool limit", DefaultWait, limit)
+	}
 }
 
 func TestAnswerInputRequiresWholePositiveNumbers(t *testing.T) {
