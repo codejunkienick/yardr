@@ -17,6 +17,7 @@
 package previewtest
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -29,6 +30,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 // mark is the first argument of a test binary started as the app. A test
@@ -164,13 +167,57 @@ func MaybeServe() {
 
 // serve answers on addr with the files of the directory it runs in, and logs
 // one line to stderr for each request, before the answer. It logs nothing
-// before the first request.
+// before the first request. A WebSocket upgrade is echoed instead: the
+// stand-in app a preview's socket tests dial, which chooses the first
+// subprotocol offered and logs the handshake it was dialled with.
 func serve(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
-	return http.Serve(ln, files(nil))
+	filesHandler := files(nil)
+	return http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			serveSocketEcho(w, r)
+			return
+		}
+		filesHandler.ServeHTTP(w, r)
+	}))
+}
+
+// serveSocketEcho accepts one WebSocket and echoes its messages. The
+// handshake line it logs names the Origin it was given and whether an
+// edge credential reached it, which a socket test reads from the
+// preview's captured log. Any origin is taken: the edge has already
+// checked it, and the app's loopback host is not that origin.
+func serveSocketEcho(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(os.Stderr, "%s %s %s origin=%q edge-token=%q edge-jwt=%q cookie=%q preview-app=%q\n",
+		r.RemoteAddr, r.Method, r.URL.Path, r.Header.Get("Origin"),
+		r.Header.Get("X-Edge-Token"), r.Header.Get("X-Edge-JWT"), r.Header.Get("Cookie"),
+		r.Header.Get("X-Preview-App"))
+	var offered []string
+	for _, part := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			offered = append(offered, part)
+		}
+	}
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		Subprotocols: offered, InsecureSkipVerify: true, CompressionMode: websocket.CompressionDisabled})
+	if err != nil {
+		return
+	}
+	defer c.CloseNow()
+	c.SetReadLimit(1 << 20)
+	ctx := context.Background()
+	for {
+		typ, body, err := c.Read(ctx)
+		if err != nil {
+			return
+		}
+		if err := c.Write(ctx, typ, body); err != nil {
+			return
+		}
+	}
 }
 
 // files is what serve answers with: the files of the directory the app runs

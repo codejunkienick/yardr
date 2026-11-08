@@ -87,10 +87,15 @@ type Supervisor struct {
 	// not answer waits before it is made again; zero takes the default.
 	EdgeHTTP    *http.Client
 	ReportRetry time.Duration
+	// SocketRefresh is how often a socket's frames may refresh a
+	// preview's last-request moment; zero takes a minute (socket.go).
+	SocketRefresh time.Duration
 
 	mu       sync.Mutex
 	running  map[string]*proc
 	inflight map[string]int
+	sockets  map[string]int       // app -> sockets open
+	touched  map[string]time.Time // app -> last socket refresh written
 	over     map[string]time.Time // app -> first moment over the memory cap
 	// portProbe is the readiness check waitPort uses; tests set it to observe
 	// a request before they release a held app.
@@ -121,7 +126,8 @@ func New(st Store, home string, log *slog.Logger) *Supervisor {
 		log = slog.Default()
 	}
 	return &Supervisor{Store: st, Home: home, Log: log, report: newReporting(),
-		running: map[string]*proc{}, inflight: map[string]int{}, over: map[string]time.Time{},
+		running: map[string]*proc{}, inflight: map[string]int{}, sockets: map[string]int{},
+		touched: map[string]time.Time{}, over: map[string]time.Time{},
 		runReady: make(chan struct{})}
 }
 

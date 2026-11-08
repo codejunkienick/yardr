@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"yardr.dev/yardr/internal/edgelink"
 	"yardr.dev/yardr/internal/store"
 )
 
@@ -26,9 +27,24 @@ import (
 // router strips its own names, and this drops the same names itself,
 // so the yard-side rule does not depend on the router having stripped
 // first. A watch runs nothing to forward to: the supervisor serves its
-// files itself (watch.go), under the same counting.
+// files itself (watch.go), under the same counting. The handler also
+// takes a socket's frames on the link (socket.go): the link offers
+// each socket to a Handler that implements edgelink.SocketHandler,
+// which this one does, for the served-app endpoint the frames name.
 func (s *Supervisor) Handler() http.Handler {
-	return http.HandlerFunc(s.servePreview)
+	return previewHandler{sup: s}
+}
+
+// previewHandler is Handler's value: an http.Handler for requests and
+// an edgelink.SocketHandler for sockets, both served by the supervisor.
+type previewHandler struct{ sup *Supervisor }
+
+func (h previewHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.sup.servePreview(w, r)
+}
+
+func (h previewHandler) ServeSocket(req *edgelink.SocketRequest, sock *edgelink.Socket) {
+	h.sup.serveSocket(req, sock)
 }
 
 // edgeHeaders are the names a request through the edge carries that must

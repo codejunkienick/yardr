@@ -1,6 +1,7 @@
 package previewtest
 
 import (
+	"context"
 	"io"
 	"net"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 func TestMain(m *testing.M) {
@@ -79,6 +82,49 @@ func TestAppAnswersFromItsDirectoryWithNothingButTheTestBinary(t *testing.T) {
 				t.Errorf("the app's log = %q, want a line for the request", out)
 			}
 		})
+	}
+}
+
+// The app echoes a WebSocket's messages under the first subprotocol
+// offered, which is the stand-in a preview's socket is dialled to.
+func TestAppEchoesWebSocketUnderFirstOfferedSubprotocol(t *testing.T) {
+	port := FreePort(t, "127.0.0.1")
+	cmd := exec.Command("sh", "-c", App("127.0.0.1", port))
+	cmd.Dir = t.TempDir()
+	cmd.Env = []string{}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var conn *websocket.Conn
+	waitFor(t, "the app accepting a socket", func() bool {
+		c, _, err := websocket.Dial(ctx, "ws://"+net.JoinHostPort("127.0.0.1", strconv.Itoa(port))+"/ws",
+			&websocket.DialOptions{Subprotocols: []string{"chat", "other"}, CompressionMode: websocket.CompressionDisabled})
+		if err != nil {
+			return false
+		}
+		conn = c
+		return true
+	})
+	defer conn.CloseNow()
+	if got := conn.Subprotocol(); got != "chat" {
+		t.Fatalf("the chosen subprotocol is %q, want chat", got)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, []byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	typ, body, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ != websocket.MessageText || string(body) != "hello" {
+		t.Errorf("the echo is %v %q, want text hello", typ, body)
 	}
 }
 
