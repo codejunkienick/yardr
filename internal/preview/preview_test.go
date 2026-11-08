@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -33,39 +32,11 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// freePort reserves a loopback port and frees it for the preview.
+// freePort picks a loopback port for a preview's app; previewtest.FreePort says
+// from where, and why.
 func freePort(t *testing.T) int {
-	return freePortAt(t, "127.0.0.1")
-}
-
-// freePortAt picks its port from quietPortsCount ports from quietPortsFrom up,
-// which lie below the range in which the kernel gives out ports by itself (from
-// 32768 on Linux, from 49152 on macOS). The port is named for the preview but
-// held by no one until its app binds it, and a server that another process binds
-// on port 0 in that time, as the other packages' tests do while this one runs, is
-// handed any port of that range that nothing holds. The preview's wait for its
-// app would take that server for the app, and it would answer the preview's
-// requests in the app's place.
-const quietPortsFrom, quietPortsCount = 20000, 10000
-
-// freePortAt picks a port that nothing holds on host, and frees it for the
-// preview.
-func freePortAt(t *testing.T, host string) int {
 	t.Helper()
-	for range 100 {
-		port := quietPortsFrom + rand.IntN(quietPortsCount)
-		ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
-		if errors.Is(err, syscall.EADDRINUSE) {
-			continue
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		ln.Close()
-		return port
-	}
-	t.Fatalf("no port from %d up to %d is free on %s", quietPortsFrom, quietPortsFrom+quietPortsCount, host)
-	return 0
+	return previewtest.FreePort(t, "127.0.0.1")
 }
 
 // interfaceHost is an IPv4 address of one of the machine's interfaces that is
@@ -272,22 +243,6 @@ func (g *flipGate) UpdatePreview(ctx context.Context, app string, upd store.Prev
 	return g.Store.UpdatePreview(ctx, app, upd)
 }
 
-// A port a test names for a preview is picked from below the range in which the
-// kernel gives out ports by itself, which starts at 32768 on Linux and higher on
-// macOS, so that no server another process binds on port 0 is handed it before
-// the preview's app binds it.
-func TestFreePortIsPickedBelowTheKernelsOwnRange(t *testing.T) {
-	const dynamicFrom = 32768
-	if quietPortsFrom+quietPortsCount > dynamicFrom {
-		t.Fatalf("the ports freePort picks from reach %d, into the range from %d that the kernel gives out by itself", quietPortsFrom+quietPortsCount-1, dynamicFrom)
-	}
-	for range 20 {
-		if port := freePort(t); port < quietPortsFrom || port >= quietPortsFrom+quietPortsCount {
-			t.Fatalf("freePort = %d, want one from %d up to %d", port, quietPortsFrom, quietPortsFrom+quietPortsCount)
-		}
-	}
-}
-
 // A failing test's card says when something answers on a preview's port that the
 // supervisor holds no process for, which is what a request taken for the app's
 // by that answer looks like from the test's side.
@@ -411,7 +366,7 @@ func TestApprovedPreviewStartsAndAnswersThroughEndpoint(t *testing.T) {
 			t.Skipf("IPv6 loopback is unavailable: %v", err)
 		}
 		probe.Close()
-		port6 := freePortAt(t, "::1")
+		port6 := previewtest.FreePort(t, "::1")
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("hello ipv6"), 0o600); err != nil {
 			t.Fatal(err)
@@ -577,7 +532,7 @@ func TestNonLoopbackBindIsRefused(t *testing.T) {
 			if i > 0 {
 				app = "specific"
 			}
-			port := freePortAt(t, host)
+			port := previewtest.FreePort(t, host)
 			y.propose(t, app, previewtest.App(host, port), port, true)
 			y.waitStart(t, "preview refused for an outside bind", func() bool {
 				return y.state(app).State == store.PreviewRefused

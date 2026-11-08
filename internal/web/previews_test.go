@@ -89,16 +89,6 @@ func (f *fixture) supervise(t *testing.T) *preview.Supervisor {
 	return sup
 }
 
-func previewPort(t *testing.T) int {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	return ln.Addr().(*net.TCPAddr).Port
-}
-
 func waitPreview(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	waitPreviewWithin(t, what, 15*time.Second, cond)
@@ -147,7 +137,7 @@ func TestPreviewsPage(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	port := previewPort(t)
+	port := previewtest.FreePort(t, "127.0.0.1")
 	command := previewtest.App("127.0.0.1", port)
 	if _, err := f.st.ProposePreview(ctx, store.NewPreview{
 		App: "demo", Command: command, Dir: dir, Port: port,
@@ -155,7 +145,7 @@ func TestPreviewsPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := f.st.ProposePreview(ctx, store.NewPreview{
-		App: "other", Command: "serve .", Dir: dir, Port: previewPort(t),
+		App: "other", Command: "serve .", Dir: dir, Port: previewtest.FreePort(t, "127.0.0.1"),
 	}, "builder"); err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +392,7 @@ func TestPreviewsPageShowsTheHostTheEdgeGave(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	for _, app := range []string{"hosted", "plain"} {
-		if _, err := f.st.ProposePreview(ctx, store.NewPreview{App: app, Command: "serve .", Dir: dir, Port: previewPort(t)}, "builder"); err != nil {
+		if _, err := f.st.ProposePreview(ctx, store.NewPreview{App: app, Command: "serve .", Dir: dir, Port: previewtest.FreePort(t, "127.0.0.1")}, "builder"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -435,7 +425,7 @@ func TestPreviewsCrewApprovalRefused(t *testing.T) {
 	if _, err := f.st.AddUser(ctx, "builder", "ada"); err != nil {
 		t.Fatal(err)
 	}
-	port := previewPort(t)
+	port := previewtest.FreePort(t, "127.0.0.1")
 	if _, err := f.st.ProposePreview(ctx, store.NewPreview{
 		App: "demo", Command: "serve .", Dir: t.TempDir(), Port: port,
 	}, "builder"); err != nil {
@@ -464,7 +454,7 @@ func TestPreviewsStaleAndRestart(t *testing.T) {
 	f := previewFixture(t)
 	ctx := context.Background()
 	dir, first := gitDepot(t)
-	port := previewPort(t)
+	port := previewtest.FreePort(t, "127.0.0.1")
 	if _, err := f.st.ProposePreview(ctx, store.NewPreview{
 		App: "demo", Command: previewtest.App("127.0.0.1", port),
 		Dir: dir, Port: port,

@@ -12,17 +12,22 @@
 // macOS assesses the first run of one, for seconds on a busy machine
 // (docs/testing.md), and the test binary has run already.
 //
-// A package whose tests start it calls MaybeServe first in its TestMain.
+// A package whose tests start it calls MaybeServe first in its TestMain, and
+// takes the port it names for the app from FreePort.
 package previewtest
 
 import (
+	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
+	"testing"
 	"time"
 )
 
@@ -44,11 +49,43 @@ const lifetime = 10 * time.Minute
 // sees it.
 const afterRequest = 1500 * time.Millisecond
 
+// quietPortsFrom and quietPortsCount are the ports FreePort picks from: the
+// quietPortsCount ports from quietPortsFrom up, which lie below the range in
+// which the kernel gives out ports by itself (from 32768 on Linux, from 49152 on
+// macOS). A port is named for a preview but held by no one until its app binds
+// it, and a server that another process binds on port 0 in that time, as other
+// packages' tests do while these run, is handed any port of that range that
+// nothing holds. The preview's wait for its app would take that server for the
+// app, and it would answer the preview's requests in the app's place.
+const quietPortsFrom, quietPortsCount = 20000, 10000
+
 // App is the command, for the supervisor's `sh -c`, of the app listening on
 // host and port. The host is an address, not a name: "127.0.0.1", "::1",
 // "0.0.0.0" or an interface's own.
 func App(host string, port int) string {
 	return command("serve", net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
+// FreePort picks a port that nothing holds on host, frees it, and returns it for
+// a test to name for a preview whose app is App(host, port). It fails the test
+// when host cannot be bound at all, so a test that would rather skip where host
+// is unavailable (IPv6, say) tries the host itself first.
+func FreePort(t testing.TB, host string) int {
+	t.Helper()
+	for range 100 {
+		port := quietPortsFrom + rand.IntN(quietPortsCount)
+		ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+		if errors.Is(err, syscall.EADDRINUSE) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		ln.Close()
+		return port
+	}
+	t.Fatalf("no port from %d up to %d is free on %s", quietPortsFrom, quietPortsFrom+quietPortsCount, host)
+	return 0
 }
 
 // LateWide is the command of an app that listens on loopback until its first

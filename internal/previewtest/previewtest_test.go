@@ -96,6 +96,22 @@ func TestShellWordSurvivesSh(t *testing.T) {
 	}
 }
 
+// A port a test names for a preview's app is picked from below the range in which
+// the kernel gives out ports by itself, which starts at 32768 on Linux and higher
+// on macOS, so that no server another process binds on port 0 is handed it before
+// the app binds it.
+func TestFreePortIsPickedBelowTheKernelsOwnRange(t *testing.T) {
+	const dynamicFrom = 32768
+	if quietPortsFrom+quietPortsCount > dynamicFrom {
+		t.Fatalf("the ports FreePort picks from reach %d, into the range from %d that the kernel gives out by itself", quietPortsFrom+quietPortsCount-1, dynamicFrom)
+	}
+	for range 20 {
+		if port := FreePort(t, "127.0.0.1"); port < quietPortsFrom || port >= quietPortsFrom+quietPortsCount {
+			t.Fatalf("FreePort = %d, want one from %d up to %d", port, quietPortsFrom, quietPortsFrom+quietPortsCount)
+		}
+	}
+}
+
 // waitFor polls cond until it holds. The deadline is a fuse against a hang,
 // not a measurement.
 func waitFor(t *testing.T, what string, cond func() bool) {
