@@ -112,7 +112,7 @@ func TestRefusedMoveOfASessionsAgentIsLogged(t *testing.T) {
 		"stale":       func() (*store.Bead, error) { return s.CloseBead(ctx, b.ID, "x", store.Expect{Stage: "new"}, "mckean") },
 		"not allowed": func() (*store.Bead, error) { return s.AdvanceNote(ctx, b.ID, "merged", "", store.Expect{}, "mckean") },
 		"outcome":     func() (*store.Bead, error) { return s.Done(ctx, b.ID, "shipped", "", store.Expect{}, "mckean") },
-		"no bead":     func() (*store.Bead, error) { return s.Done(ctx, "yard-zzzz", "", "", store.Expect{}, "mckean") },
+		"no bead":     func() (*store.Bead, error) { return s.Done(ctx, "yard-nope", "", "", store.Expect{}, "mckean") },
 	} {
 		if _, err := move(); err == nil {
 			t.Fatalf("%s: a person's move was taken", name)
@@ -173,11 +173,11 @@ func TestRefusedMoveOfAnotherBead(t *testing.T) {
 		t.Fatalf("the refused hold ended the owner's session: %+v", sess)
 	}
 
-	if _, err := s.Done(ctx, "yard-zzzz", "", "", pane, "a-new"); err == nil {
+	if _, err := s.Done(ctx, "yard-nope", "", "", pane, "a-new"); err == nil {
 		t.Fatal("a done of no bead was taken")
 	}
 	got = refusals(t, s, a.ID)
-	if len(got) != 1 || got[0].Data["reason"] != store.RefusedNotFound || got[0].Data["command"] != "yardr bead done yard-zzzz" {
+	if len(got) != 1 || got[0].Data["reason"] != store.RefusedNotFound || got[0].Data["command"] != "yardr bead done yard-nope" {
 		t.Fatalf("move_refused for a bead that is not there = %+v", got)
 	}
 

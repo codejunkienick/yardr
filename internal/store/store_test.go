@@ -319,7 +319,7 @@ func TestReadyRespectsBlocksHoldAndClose(t *testing.T) {
 	if err := s.AddDep(ctx, a.ID, b.ID, "blocks", "", "", "me"); err == nil {
 		t.Fatal("duplicate edge accepted")
 	}
-	if err := s.AddDep(ctx, a.ID, "yd-99", "blocks", "", "", "me"); err == nil {
+	if err := s.AddDep(ctx, a.ID, "yd-nope", "blocks", "", "", "me"); err == nil {
 		t.Fatal("edge to missing bead accepted")
 	}
 	ready, _ := s.Ready(ctx)
@@ -540,7 +540,11 @@ func TestRoutesAndUpdate(t *testing.T) {
 	if b.Title != "y" || !slices.Equal(b.Labels, []string{"b"}) || b.Metadata["pr"] == nil {
 		t.Fatalf("after update: %+v", b)
 	}
-	if _, err := s.UpdateBead(ctx, "yd-404", store.BeadPatch{Title: &title}, store.Expect{}, "me"); !errors.Is(err, store.ErrNotFound) {
+	// A bead that must not exist is spelled with an o, which no handle has
+	// (handleAlphabet): a ref of handle characters can begin the handle of the
+	// bead above, and resolve then asks for more characters, where this wants
+	// not found.
+	if _, err := s.UpdateBead(ctx, "yd-nope", store.BeadPatch{Title: &title}, store.Expect{}, "me"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("update missing err = %v", err)
 	}
 }
