@@ -858,8 +858,12 @@ write a run ask, but it writes mail as the operator, and the yardmaster does
 what the operator asks by mail, so the holder can ask the yardmaster to
 propose a command and then approve it. The table below lists each command a
 run ask may hold and what a stolen device can have run with one agent's
-help. Some changes it makes stand after `yardr user device rm`. Setup asks
-are covered below under Strong cards. Row by row:
+help. Some changes it makes stand after `yardr user device rm`. With no
+terminal at hand, a hosted yard's operator signs the device out at the edge
+from `/ready` on another device. That cuts it off from the yards behind the
+edge within about a minute. A yard it reaches without the edge still needs
+`yardr user device rm` (see A device that is lost, below). Setup asks are
+covered below under Strong cards. Row by row:
 
 | the command | what a holder of the token gains |
 |---|---|
@@ -1060,6 +1064,18 @@ yard's terminal or by asking the operator. The token is refused at the next
 request, and the event streams the device held are closed at once. The yard
 also resolves the token of an open stream again every minute, and closes
 the stream when it no longer resolves.
+
+**A device that is lost, with no terminal at hand.** `yardr user device rm`
+needs a terminal on the yard's machine, and the operator of a hosted yard has
+none there. The person whose device it is can still cut it off at [the
+edge](edge.md#footplate-through-the-link), whose gate in front of a yard is
+their account's session. On another device they sign in at the edge, open
+`/ready` and sign the lost one out in the list of the other places the
+account is signed in. The edge then refuses the device's next call to the
+yards behind it within about a minute, and ends an event stream it holds open
+within about two minutes. The device's token stays valid, so a yard the
+device reaches without the edge, at the yard's own listener, still answers it
+until `yardr user device rm` removes it.
 
 **What is refused** is answered 401 before the request's body is read, and
 is counted by its reason alone: `no_credential` (no `Authorization: Bearer`

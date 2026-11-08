@@ -166,6 +166,17 @@ the invite list does not name may connect its own yard, up to the account
 cap below, and gets no hosted yard, which still needs the invite list. A
 token is revoked per device on the yard: `yardr user device rm <user> <device>`.
 
+**A lost phone, with no terminal at hand.** `yardr user device rm` needs a
+terminal on the yard's machine, and the operator of a hosted yard has none
+there. You can still cut the phone off at the edge, whose gate is your
+account's session. On another device, sign in at the edge, open `/ready` and
+sign the phone out in the list of the other places the account is signed in.
+The edge then refuses the phone's next call to every yard behind it, hosted
+or connected, within about a minute, and ends an event stream the phone holds
+open within about two minutes. The phone's token stays valid, so a yard the
+phone reaches without the edge, at the yard's own listener, still answers it
+until `yardr user device rm` removes it.
+
 Approvals cross the link: `ApproveAsk` and `ApproveSetup` are taken from a
 paired device of the operator down the link, as from the yard's own
 machine — pairing is the grant, and `yardr user device rm` is the revoke.
