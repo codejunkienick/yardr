@@ -266,6 +266,11 @@ func (m *Model) lines(w int) []string {
 			// row for a name trusted as the viewer.
 			head += look.faint.Render(" to " + store.Letters(l.To))
 		}
+		if l.Answered != 0 {
+			// A reply says which mail it answers, as the inbox line and
+			// the talk page do.
+			head += look.faint.Render(store.ReMark("", l.Answered))
+		}
 		out = append(out, fit(head, w))
 		if text != "" {
 			out = append(out, markdown(text, w, "  ")...)

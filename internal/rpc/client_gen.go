@@ -492,6 +492,9 @@ func (c *Client) Journal(ctx context.Context, name, kind, text, actor string) (b
 func (c *Client) Mail(ctx context.Context, to, text, actor string, files ...store.BlobFile) error {
 	return c.call(ctx, "Mail", nil, to, text, actor, files)
 }
+func (c *Client) MailReply(ctx context.Context, to, text, actor string, answered uint64) error {
+	return c.call(ctx, "MailReply", nil, to, text, actor, answered)
+}
 func (c *Client) React(ctx context.Context, seq uint64, emoji, actor string) error {
 	return c.call(ctx, "React", nil, seq, emoji, actor)
 }

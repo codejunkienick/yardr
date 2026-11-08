@@ -89,6 +89,30 @@ func TestToolArgumentNumbersRequireWholePositiveNumbers(t *testing.T) {
 			}
 		})
 	}
+
+	if _, err := mailArg(map[string]any{}); err == nil {
+		t.Fatal("a missing mail was served")
+	}
+	if n, err := mailArg(map[string]any{"mail": json.Number("3")}); err != nil || n != 3 {
+		t.Fatalf("mail 3 = %d, %v", n, err)
+	}
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{"null", nil},
+		{"zero", json.Number("0")},
+		{"negative", json.Number("-2")},
+		{"fractional", json.Number("2.5")},
+		{"text", "two"},
+		{"boolean", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := mailArg(map[string]any{"mail": tc.value}); err == nil {
+				t.Fatalf("mail %v was served", tc.value)
+			}
+		})
+	}
 }
 
 func TestWeighedWordDoesNotCoerceNumericContent(t *testing.T) {

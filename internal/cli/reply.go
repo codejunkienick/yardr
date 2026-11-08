@@ -126,7 +126,8 @@ yard (a user or a crew member) as yardr mail <sender> would send it; mail
 from <name>@<peer> as yardr mail <name>@<peer> would (it is queued for the
 peer, which the crew member must be allowed, and a refusal reads as that
 command's). A reply to local mail sends one mail, or several numbered ones
-for a long text, as yardr mail does; a reply to peer mail keeps its separate
+for a long text, as yardr mail does, carrying the answered mail's number so
+the thread shows where mail is read; a reply to peer mail keeps its separate
 16 KB per-mail limit. Mail from the session of a bead has no inbox to answer
 into: the reply is a note on that bead, as yardr bead note writes it, so its
 live session is told of it, and with none running it waits on the bead for
@@ -492,7 +493,7 @@ func (a *app) replyMail(c *cobra.Command, st store.API, seq uint64, e store.Even
 	if err := a.mayMailUser(from); err != nil {
 		return err
 	}
-	if err := store.MailText(st, ctx, from, body, name); err != nil {
+	if err := store.MailReplyText(st, ctx, from, body, name, seq); err != nil {
 		return err
 	}
 	if err := a.ackAnsweredMail(ctx, st, name, seq); err != nil {

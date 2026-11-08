@@ -73,4 +73,7 @@ func TestViaMarksTheUsersOwnWrites(t *testing.T) {
 	if got := store.ViaMark("jo", "phone") + ", " + store.ViaMark("jo", ""); got != "jo (via phone), jo" {
 		t.Errorf("the marks read %q", got)
 	}
+	if got := store.ReMark("jo", 12) + ", " + store.ReMark("jo", 0); got != "jo re 12, jo" {
+		t.Errorf("the reply marks read %q", got)
+	}
 }

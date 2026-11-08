@@ -103,16 +103,40 @@ func mailAround(s string, i int, set string) (cut, next int) {
 // through but yardr chat, which numbers the parts itself to keep what was
 // not sent in the line.
 func MailText(api API, ctx context.Context, to, text, actor string, files ...BlobFile) error {
+	return mailParts(to, text, func(i int, part string) error {
+		var first []BlobFile
+		if i == 0 {
+			first = files
+		}
+		return api.Mail(ctx, to, part, actor, first...)
+	})
+}
+
+// MailReplyText sends text as a reply to the mail answered, as MailText
+// sends a new message: as one mail when one holds it, else as its parts,
+// in order, each numbered. The answered seq goes with the first part
+// only, as files do; a part that is not taken ends the send, so that no
+// later part arrives without it.
+func MailReplyText(api API, ctx context.Context, to, text, actor string, answered uint64) error {
+	return mailParts(to, text, func(i int, part string) error {
+		if i == 0 {
+			return api.MailReply(ctx, to, part, actor, answered)
+		}
+		return api.Mail(ctx, to, part, actor)
+	})
+}
+
+// mailParts sends text's parts in order, each through send: as one mail
+// when one holds it, else numbered (SplitMail). A text past MaxMailParts
+// parts is refused whole (ErrMailTooLong); a part that is not taken ends
+// the send, so that no later part arrives without it.
+func mailParts(to, text string, send func(i int, part string) error) error {
 	parts := SplitMail(text)
 	if len(parts) > MaxMailParts {
 		return ErrMailTooLong
 	}
 	for i, p := range parts {
-		var first []BlobFile
-		if i == 0 {
-			first = files
-		}
-		if err := api.Mail(ctx, to, p.Mail(i, len(parts)), actor, first...); err != nil {
+		if err := send(i, p.Mail(i, len(parts))); err != nil {
 			if len(parts) == 1 {
 				return err
 			}

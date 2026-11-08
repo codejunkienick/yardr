@@ -205,6 +205,12 @@ func (s *Server) dispatch(ctx context.Context, req *sdkmcp.CallToolRequest, svc 
 			return nil, err
 		}
 		return svc.ReadMyMail(ctx, recent)
+	case ToolReplyToMail:
+		mail, err := mailArg(args)
+		if err != nil {
+			return nil, err
+		}
+		return svc.ReplyToMail(ctx, mail, stringArg(args, "message"))
 	case ToolReword:
 		return svc.Reword(ctx, stringArg(args, "work"), stringArg(args, "title"), stringArg(args, "body"))
 	case ToolWithdraw:
@@ -425,4 +431,19 @@ func recentArg(args map[string]any) (int, error) {
 		return refuse()
 	}
 	return int(n), nil
+}
+
+// mailArg reads reply_to_mail's message number: the number read_my_mail
+// showed. Anything but a whole positive number is refused in plain
+// words.
+func mailArg(args map[string]any) (uint64, error) {
+	number, ok := args["mail"].(json.Number)
+	if !ok {
+		return 0, fmt.Errorf("mail: say the message's number, from read_my_mail")
+	}
+	n, err := strconv.ParseUint(string(number), 10, 64)
+	if err != nil || n == 0 {
+		return 0, fmt.Errorf("mail: say the message's number, from read_my_mail")
+	}
+	return n, nil
 }

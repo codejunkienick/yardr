@@ -785,7 +785,7 @@ func (a *app) userInbox(w io.Writer, ctx context.Context, st store.API, name str
 				// The sender and the text are writers' words, shown without
 				// the mark, and the files stand under them on a marked line
 				// of their own, so no mail's words forge its files line.
-				fmt.Fprintf(w, "%6d %s  mail from %s%s: %s\n", l.Seq, l.At.Local().Format(mailTime), store.Letters(from), state, store.Letters(l.Text))
+				fmt.Fprintf(w, "%6d %s  mail from %s%s: %s\n", l.Seq, l.At.Local().Format(mailTime), store.Letters(store.ReMark(from, l.Answered)), state, store.Letters(l.Text))
 				if line := store.NoteFilesLine(a.mailHome(), l.Files); line != "" {
 					fmt.Fprintf(w, "    %s\n", line)
 				}
@@ -913,7 +913,7 @@ func (a *app) conversation(w io.Writer, ctx context.Context, st store.API, with 
 			if l.As != "" {
 				from += " (as " + l.As + ")"
 			}
-			from = store.ViaMark(from, l.Via)
+			from = store.ReMark(store.ViaMark(from, l.Via), l.Answered)
 			if l.To != with && l.To != me {
 				from += " to " + l.To
 			}

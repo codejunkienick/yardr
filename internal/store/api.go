@@ -181,6 +181,7 @@ type API interface {
 	RecordCrewUsage(ctx context.Context, name, user, agentSession string, usage map[string]any) error
 	Journal(ctx context.Context, name, kind, text, actor string) (bool, error)
 	Mail(ctx context.Context, to, text, actor string, files ...BlobFile) error
+	MailReply(ctx context.Context, to, text, actor string, answered uint64) error
 	React(ctx context.Context, seq uint64, emoji, actor string) error
 	PutBlob(ctx context.Context, data []byte) (*BlobRef, error)
 	Inbox(ctx context.Context, name string, limit int) (*InboxPage, error)

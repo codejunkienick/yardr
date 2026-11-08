@@ -350,10 +350,14 @@ func TestMailWith(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustAs(t, st, "jo", "inbox", "--ack", fmt.Sprint(mailBox.Last))
+	answered := crewBox.Events[0].Seq
+	if err := st.MailReply(context.Background(), "jo", "that is set", "yardmaster", answered); err != nil {
+		t.Fatal(err)
+	}
 
 	out := mustAs(t, st, "jo", "mail", "--with", "yardmaster")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 3 {
+	if len(lines) != 4 {
 		t.Fatalf("mail --with yardmaster:\n%s", out)
 	}
 	for i, want := range []string{"read    jo: deploys are frozen", "read    yardmaster: until when?", "unread  jo: friday"} {
@@ -361,19 +365,25 @@ func TestMailWith(t *testing.T) {
 			t.Errorf("line %d = %q, want it to end in %q", i, lines[i], want)
 		}
 	}
+	if want := fmt.Sprintf("unread  yardmaster re %d: that is set", answered); !strings.HasSuffix(lines[3], want) {
+		t.Errorf("the reply line = %q, want it to end in %q", lines[3], want)
+	}
 	// The yardmaster's session asks with the user's name and reads the same.
 	if theirs := mustAs(t, st, "yardmaster", "mail", "--with", "jo"); theirs != out {
 		t.Fatalf("from the yardmaster's side:\n%s\nfrom jo's:\n%s", theirs, out)
 	}
 
 	var raw []map[string]any
-	if err := json.Unmarshal([]byte(mustAs(t, st, "jo", "mail", "--with", "yardmaster", "--json")), &raw); err != nil || len(raw) != 3 {
+	if err := json.Unmarshal([]byte(mustAs(t, st, "jo", "mail", "--with", "yardmaster", "--json")), &raw); err != nil || len(raw) != 4 {
 		t.Fatalf("--json: %v, %v", raw, err)
 	}
 	for _, k := range []string{"seq", "at", "from", "to", "text", "read"} {
 		if _, ok := raw[1][k]; !ok {
 			t.Errorf("--json lacks %q: %v", k, raw[1])
 		}
+	}
+	if raw[3]["answered"] != float64(answered) {
+		t.Errorf("--json reply answered = %v, want %d", raw[3]["answered"], answered)
 	}
 	if len(raw[1]) != 6 || raw[1]["from"] != "yardmaster" || raw[1]["to"] != "jo" || raw[1]["read"] != true || raw[2]["read"] != false {
 		t.Fatalf("--json = %v", raw)

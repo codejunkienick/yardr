@@ -27,7 +27,7 @@ func TestMCPHelpNamesTheSDKAndItsRevisions(t *testing.T) {
 	for _, want := range []string{
 		"official Go SDK for MCP", "modelcontextprotocol", "go-sdk, v1.7.0",
 		"2026-07-28", "2025-06-18", "2025-11-25",
-		mcp.FloorMessage, "--connection",
+		mcp.FloorMessage, "--connection", "answering one message by", "number with mail to its sender",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("yardr mcp --help lacks %q:\n%s", want, out)

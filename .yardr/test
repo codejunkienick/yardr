@@ -1811,7 +1811,7 @@ internal/source/declaration.go 1278 source declarations, credentials and calls
 internal/standin/standin.go 1540 the fake Linear, GitHub and edge APIs
 internal/store/asks.go 1777 ask and answer parsing and storage
 internal/store/beads.go 2563 bead CRUD, queries and dispatch reads
-internal/store/crew.go 1489 crew records and their events
+internal/store/crew.go 1461 crew records and their events
 internal/store/flows.go 1454 flow parsing and storage
 internal/store/graph.go 1316 the dependency graph and its queries
 internal/store/hooks.go 1118 webhook parsing and the say shapes

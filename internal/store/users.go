@@ -129,6 +129,9 @@ type Letter struct {
 	// without any: each is read with GET /blobs/<hash>, and is the file of
 	// that name in the home's blobs directory.
 	Files []BlobRef `json:"files,omitempty"`
+	// Answered is the seq of the mail this answers, 0 for mail that
+	// answers none: the thread's one link back.
+	Answered uint64 `json:"answered,omitempty"`
 }
 
 // Mailbox is a user's mail: what they have not acknowledged, and the
@@ -766,10 +769,7 @@ func (w *wtx) deleteUser(ctx context.Context, name, actor string, by *approvedOn
 }
 
 // toUser reports whether a mail event is for a user, not a crew member.
-func toUser(e Event) bool {
-	u, _ := e.Data["to_user"].(bool)
-	return e.Kind == "mail" && u
-}
+func toUser(e Event) bool { u, _ := e.Data["to_user"].(bool); return e.Kind == "mail" && u }
 
 // MailReceiver is whose inbox a mail event of this yard is in, crew member or
 // user: "" for mail that left for a peer's crew member, and for what is no
@@ -922,7 +922,7 @@ func (rd *readers) letter(e Event) (Letter, error) {
 	if err != nil {
 		return Letter{}, err
 	}
-	return Letter{Seq: e.Seq, At: e.At, From: e.Actor, To: to, Text: text, Read: e.Seq <= cursor, Reactions: reactions, Timer: timerOf(e), As: SpeaksAs(e), Via: Via(e), Files: EventFiles(e)}, nil
+	return Letter{Seq: e.Seq, At: e.At, From: e.Actor, To: to, Text: text, Read: e.Seq <= cursor, Reactions: reactions, Timer: timerOf(e), As: SpeaksAs(e), Via: Via(e), Files: EventFiles(e), Answered: answeredSeq(e)}, nil
 }
 
 // mayReadInbox asks whether actor may read or acknowledge (does) the inbox

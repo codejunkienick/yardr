@@ -376,7 +376,7 @@ func sender(l store.Letter, me, with string) string {
 	if l.To != with && l.To != me {
 		from += " to " + l.To
 	}
-	return from
+	return store.ReMark(from, l.Answered)
 }
 
 // handleTalkPost takes the talk page's form: mail to the member or user in

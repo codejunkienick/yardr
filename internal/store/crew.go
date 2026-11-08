@@ -943,35 +943,7 @@ func (s *Store) Mail(ctx context.Context, to, text, actor string, files ...BlobF
 		if err != nil {
 			return err
 		}
-		actor = resolved
-		data := map[string]any{"to": to, "text": text}
-		if len(refs) > 0 {
-			data["files"] = refs
-		}
-		if sess != nil {
-			// In the data and not on the event's bead: the event would
-			// then reach the bead's subscribers and its history, which
-			// are not the mail's readers.
-			data["from_bead"] = handlesIn(w.Tx).of(sess.Bead)
-		}
-		switch {
-		case w.Bucket(bCrew).Get([]byte(to)) != nil:
-			var r CrewMember
-			if ok, err := get(w.Tx, bCrew, to, &r); err != nil {
-				return err
-			} else if ok && w.Bucket(bUsers).Get([]byte(actor)) != nil && !r.Serves(actor) {
-				// Mail from a user it does not serve is refused at write,
-				// naming whom it serves; anything else (the yard, another
-				// crew member, a bead's agent) still lands, for the line
-				// slice, or waits in the log where no line session runs.
-				return fmt.Errorf("mail to %s from %s: %s serves %s", to, actor, to, strings.Join(r.Served(), ", "))
-			}
-		case w.Bucket(bUsers).Get([]byte(to)) != nil:
-			data["to_user"] = true
-		default:
-			return fmt.Errorf("crew member %s: %w (nor is there a user of that name)", to, ErrNotFound)
-		}
-		return w.event("", "mail", actor, data)
+		return s.sendMail(w, to, text, resolved, sess, refs, 0)
 	})
 }
 

@@ -81,6 +81,13 @@ func TestReplyToLocalMail(t *testing.T) {
 	if err != nil || ada.Unread != 0 {
 		t.Fatalf("ada's inbox = %+v, %v", ada, err)
 	}
+	// The reply carries the answered mail's number, shown where mail is
+	// read. Without the crew the run answers as, inbox is the user's.
+	yardEnv(t, st)["YARDR_CREW"] = ""
+	if out := mustAs(t, st, "jo", "inbox"); !strings.Contains(out, "mail from yardmaster re "+seq+": Friday; I'll post here when it lands.") {
+		t.Fatalf("jo's inbox lacks the thread:\n%s", out)
+	}
+	yardEnv(t, st)["YARDR_CREW"] = "yardmaster"
 
 	// From stdin, as JSON.
 	c := a.replyCmd()
@@ -131,6 +138,15 @@ func TestReplyLongMail(t *testing.T) {
 	if bodies != text {
 		t.Fatal("the mails do not make the text again")
 	}
+	// The first part carries the answered number, the rest are its
+	// numbered continuations. Without the crew the run answers as,
+	// inbox is the user's.
+	yardEnv(t, st)["YARDR_CREW"] = ""
+	if out := mustAs(t, st, "jo", "inbox"); !strings.Contains(out, "mail from yardmaster re "+seq+": (1/3)") ||
+		strings.Count(out, "re "+seq) != 1 {
+		t.Fatalf("jo's inbox lacks the thread on its first part:\n%s", out)
+	}
+	yardEnv(t, st)["YARDR_CREW"] = "yardmaster"
 	if _, err := run(t, a.replyCmd(), seq, strings.Repeat("x", store.MaxMailParts*store.MaxMailBytes+1)); err == nil ||
 		!strings.Contains(err.Error(), "--file") {
 		t.Fatalf("a text past %d mails = %v", store.MaxMailParts, err)

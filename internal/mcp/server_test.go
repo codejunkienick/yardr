@@ -82,6 +82,9 @@ func (f *fakeYard) ApproveAsk(_ context.Context, _ string, _ uint64, _ string, w
 func (f *fakeYard) Mail(context.Context, string, string, string, ...store.BlobFile) error {
 	return nil
 }
+func (f *fakeYard) MailReply(context.Context, string, string, string, uint64) error {
+	return nil
+}
 func (f *fakeYard) Head(context.Context) (uint64, error) { return 0, nil }
 func (f *fakeYard) UserInbox(context.Context, string, int, string) (*store.Mailbox, error) {
 	return &store.Mailbox{Mail: []store.Letter{}, From: []string{}}, nil
@@ -209,6 +212,25 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 				t.Errorf("%s's description does not say what passing recent does:\n%s", tool.Name, tool.Description)
 			}
 		}
+		// reply_to_mail's mail is a required number and its message
+		// required words, and its description says the answer stands as
+		// a reply.
+		if tool.Name == mcp.ToolReplyToMail {
+			input, _ := json.Marshal(tool.InputSchema)
+			var in struct {
+				Properties map[string]struct {
+					Type string `json:"type"`
+				} `json:"properties"`
+				Required []string `json:"required"`
+			}
+			if err := json.Unmarshal(input, &in); err != nil || in.Properties["mail"].Type != "integer" ||
+				in.Properties["message"].Type != "string" || !slices.Contains(in.Required, "mail") || !slices.Contains(in.Required, "message") {
+				t.Errorf("%s's input schema = %s, want mail a required integer and message required words", tool.Name, input)
+			}
+			if !strings.Contains(tool.Description, "stands as a reply to it") || !strings.Contains(tool.Description, "comes as mail") {
+				t.Errorf("%s's description does not say the answer stands as a reply:\n%s", tool.Name, tool.Description)
+			}
+		}
 	}
 	if len(served) != len(mcp.Tools()) {
 		t.Fatalf("the served tools = %v, want the contract %v", served, mcp.Tools())
@@ -299,6 +321,7 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 		mcp.ToolAnswer:           {"work": bead, "question": 1, "put_aside": true},
 		mcp.ToolAskTheYardmaster: {"message": "Are the links moved?"},
 		mcp.ToolReadMyMail:       {},
+		mcp.ToolReplyToMail:      {"mail": uint64(0), "message": "Thanks for the hello."},
 		mcp.ToolReword:           {"title": "Tidy all the links"},
 		mcp.ToolWithdraw:         {"reason": "the links tidied themselves"},
 	}
@@ -311,6 +334,9 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 		}
 		if def.Name == mcp.ToolAnswer {
 			a["question"] = waitingQuestion(t, y, bead)
+		}
+		if def.Name == mcp.ToolReplyToMail {
+			a["mail"] = helloSeq(t, y)
 		}
 		if def.Name == mcp.ToolReword || def.Name == mcp.ToolWithdraw {
 			a["work"] = filed
@@ -384,6 +410,22 @@ func structuredText(t *testing.T, res *sdkmcp.CallToolResult, text string) {
 	}
 }
 
+// helloSeq is the number of ada's "unread hello" mail.
+func helloSeq(t *testing.T, y *yard) uint64 {
+	t.Helper()
+	box, err := y.st.UserInbox(y.ctx, "ada", 0, "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range box.Mail {
+		if l.Text == "unread hello" {
+			return l.Seq
+		}
+	}
+	t.Fatalf("ada has no unread hello: %+v", box)
+	return 0
+}
+
 // waitingQuestion is the number of the one question waiting on bead.
 func waitingQuestion(t *testing.T, y *yard, bead string) uint64 {
 	t.Helper()
@@ -425,6 +467,7 @@ func TestNoUserOverTheWire(t *testing.T) {
 		{mcp.ToolAnswer, map[string]any{"work": "yd-1", "question": 1, "pick": 1}},
 		{mcp.ToolAskTheYardmaster, map[string]any{"message": "a question"}},
 		{mcp.ToolReadMyMail, map[string]any{}},
+		{mcp.ToolReplyToMail, map[string]any{"mail": 1, "message": "thanks"}},
 		{mcp.ToolReword, map[string]any{"work": "yd-1", "title": "a new title"}},
 		{mcp.ToolWithdraw, map[string]any{"work": "yd-1", "reason": "no longer wanted"}},
 	}

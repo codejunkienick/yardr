@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strconv"
 	"time"
 )
 
@@ -215,4 +216,14 @@ func ViaMark(who, device string) string {
 		return who
 	}
 	return who + " (via " + device + ")"
+}
+
+// ReMark is who with the mail it answers behind it, "ada re 12", and who
+// alone for mail that answers none. It is the thread's mark where mail is
+// read: the inbox line, the chat head and the talk page carry it.
+func ReMark(who string, answered uint64) string {
+	if answered == 0 {
+		return who
+	}
+	return who + " re " + strconv.FormatUint(answered, 10)
 }

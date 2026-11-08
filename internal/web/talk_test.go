@@ -310,6 +310,24 @@ func TestTalkJSON(t *testing.T) {
 	if got.Crew[0].Name != "scribe" || got.Crew[0].Unread || got.Crew[1].Name != "yardmaster" || !got.Crew[1].Unread {
 		t.Errorf("the crew: %+v", got.Crew)
 	}
+	// A reply carries the answered number: the page names it beside the
+	// sender, and the letter carries it.
+	ctx := context.Background()
+	letters, _, err := f.st.Conversation(ctx, "jo", "yardmaster", 0, 0, 0)
+	if err != nil || len(letters) != 2 {
+		t.Fatalf("the conversation = %+v, %v", letters, err)
+	}
+	painted := letters[1].Seq
+	must(t, f.st.MailReply(ctx, "yardmaster", "thanks", "jo", painted))
+	var answered web.Talk
+	f.getJSON("/talk?with=yardmaster", &answered)
+	if len(answered.Letters) != 3 || answered.Letters[2].Text != "thanks" ||
+		answered.Letters[2].Sender != "jo re "+fmt.Sprint(painted) || answered.Letters[2].Answered != painted {
+		t.Errorf("the reply reads %+v, want jo's thanks re %d", answered.Letters, painted)
+	}
+	if r := f.get("/talk?with=yardmaster"); !strings.Contains(r.body, `<p class="who">jo re `+fmt.Sprint(painted)+`</p>`) {
+		t.Errorf("the page lacks the reply's head:\n%s", r.body)
+	}
 }
 
 // Past the page's limit the oldest letters are an "Older mail" link away,

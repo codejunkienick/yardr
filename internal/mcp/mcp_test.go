@@ -2,8 +2,10 @@ package mcp_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -14,6 +16,7 @@ import (
 	"yardr.dev/yardr/internal/mcp"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
+	"yardr.dev/yardr/internal/yardkey"
 )
 
 // The tests drive the tools through a real store (a throwaway one, as
@@ -22,8 +25,9 @@ import (
 // protocol eras, the typed-back number over the wire) are server_test.go's.
 
 type yard struct {
-	st  store.API
-	ctx context.Context
+	st    store.API
+	owned *store.Store
+	ctx   context.Context
 }
 
 type mailHookYard struct {
@@ -79,7 +83,8 @@ func (y readErrorYard) OpenBlockers(ctx context.Context, id string) ([]string, e
 
 func newYard(t *testing.T) *yard {
 	t.Helper()
-	y := &yard{st: storetest.New(t), ctx: context.Background()}
+	api, owned := storetest.NewOwned(t)
+	y := &yard{st: api, owned: owned, ctx: context.Background()}
 	if _, err := y.st.AddUser(y.ctx, "ada", "ada"); err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +131,61 @@ func (y *yard) ask(t *testing.T, bead string, ask store.Ask) uint64 {
 		t.Fatal(err)
 	}
 	return seq
+}
+
+// linkNorth links the peer north, receiving mail and exposing ada, and
+// answers the key the intake is signed with.
+func (y *yard) linkNorth(t *testing.T) string {
+	t.Helper()
+	k, _, err := yardkey.Ensure(filepath.Join(t.TempDir(), "north.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := store.Public(k)
+	if _, err := y.st.AddPeer(y.ctx, store.Peer{Name: "north", Key: key, URL: "http://north.test"}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.st.AllowPeer(y.ctx, "north", store.PeerAllow{Receive: []string{"mail"}, Expose: []string{"ada"}}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
+// takePeerMail takes one mail from the peer, as the receiver takes it.
+func (y *yard) takePeerMail(t *testing.T, key, id, to, from, text string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"to": to, "from": from, "text": text})
+	got, err := y.owned.PeerReceive(y.ctx, "north", key, []store.PeerMessage{{ID: id, Kind: store.PeerMail, Body: body}})
+	if err != nil || got[0].Refused != "" {
+		t.Fatalf("PeerReceive = %+v, %v", got, err)
+	}
+}
+
+// sessionPane is the pid of the pane the session-mail tests make up: no
+// process has it, so none of the test's own calls is taken for the
+// session's.
+const sessionPane = 1 << 30
+
+// sessionMail is mail to to from the agent working yd-1, written from its
+// pane, so the mail names its bead.
+func (y *yard) sessionMail(t *testing.T, to, text string) {
+	t.Helper()
+	if err := y.st.PutGroup(y.ctx, store.Group{Name: "g", Runner: "fake"}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.st.CreateBead(y.ctx, store.NewBead{ID: "yd-1", Title: "the shed", Stage: "new"}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := y.st.Claim(y.ctx, "yd-1", "g", "new", "yard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := y.st.MarkRunning(y.ctx, sess.ID, map[string]any{"agent": "yd-1-new", "shell_pid": sessionPane}); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.owned.Mail(store.WithCaller(y.ctx, sessionPane), to, text, "yd-1-new"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func svc(y *yard, connection string) *mcp.Service {
@@ -185,6 +245,7 @@ func TestNoUserRefusesEveryTool(t *testing.T) {
 		},
 		func() error { _, err := s.AskTheYardmaster(y.ctx, "hi", true, nil); return err },
 		func() error { _, err := s.ReadMyMail(y.ctx, 0); return err },
+		func() error { _, err := s.ReplyToMail(y.ctx, 1, "thanks"); return err },
 		func() error { _, err := s.Reword(y.ctx, "x", "a new title", ""); return err },
 		func() error { _, err := s.Withdraw(y.ctx, "x", "no longer wanted"); return err },
 	}
@@ -952,6 +1013,11 @@ func TestReadMyMailAcksThroughWhatItShowed(t *testing.T) {
 	if err := y.st.Mail(y.ctx, "ada", "second note", "bob"); err != nil {
 		t.Fatal(err)
 	}
+	box, err := y.st.UserInbox(y.ctx, "ada", 0, "ada")
+	if err != nil || len(box.Mail) != 2 {
+		t.Fatalf("ada's inbox = %+v, %v", box, err)
+	}
+	first, second := box.Mail[0].Seq, box.Mail[1].Seq
 	res, err := s.ReadMyMail(y.ctx, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -959,6 +1025,20 @@ func TestReadMyMailAcksThroughWhatItShowed(t *testing.T) {
 	plain(t, res.Text)
 	if !strings.Contains(res.Text, "first note") || !strings.Contains(res.Text, "second note") {
 		t.Fatalf("the unread mail:\n%s", res.Text)
+	}
+	// Each message carries its number both ways: "Mail <seq>" on the
+	// From line and seq in the structured message.
+	for _, want := range []string{
+		fmt.Sprintf("Mail %d from yardmaster", first),
+		fmt.Sprintf("Mail %d from bob", second),
+	} {
+		if !strings.Contains(res.Text, want) {
+			t.Errorf("the unread mail lacks %q:\n%s", want, res.Text)
+		}
+	}
+	messages, _ := res.Structured["messages"].([]map[string]any)
+	if len(messages) != 2 || messages[0]["seq"] != first || messages[1]["seq"] != second {
+		t.Fatalf("the structured numbers = %+v, want %d and %d", res.Structured, first, second)
 	}
 	// Both senders read, and marked read: nothing waits now.
 	if n, err := s.UnreadCount(y.ctx); err != nil || n != 0 {
@@ -997,6 +1077,19 @@ func TestReadMyMailRecentLooksBackWithoutAcking(t *testing.T) {
 	if err := y.st.Mail(y.ctx, "ada", "third note", "yardmaster"); err != nil {
 		t.Fatal(err)
 	}
+	box, err := y.st.UserInbox(y.ctx, "ada", 0, "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var thirdSeq, secondSeq uint64
+	for _, l := range box.Mail {
+		switch l.Text {
+		case "third note":
+			thirdSeq = l.Seq
+		case "second note":
+			secondSeq = l.Seq
+		}
+	}
 	res, err := s.ReadMyMail(y.ctx, 2)
 	if err != nil {
 		t.Fatal(err)
@@ -1029,6 +1122,14 @@ func TestReadMyMailRecentLooksBackWithoutAcking(t *testing.T) {
 			t.Fatalf("a structured message lacks its words: %+v", m)
 		}
 	}
+	if messages[0]["seq"] != thirdSeq || messages[1]["seq"] != secondSeq {
+		t.Fatalf("the structured numbers = %+v, want %d and %d", res.Structured, thirdSeq, secondSeq)
+	}
+	for _, want := range []string{fmt.Sprintf("Mail %d from", thirdSeq), fmt.Sprintf("Mail %d from", secondSeq)} {
+		if !strings.Contains(res.Text, want) {
+			t.Errorf("the look-back lacks %q:\n%s", want, res.Text)
+		}
+	}
 	// The look-back moved no cursor: the plain call still shows the unread.
 	if n, err := s.UnreadCount(y.ctx); err != nil || n != 1 {
 		t.Fatalf("unread after the look-back = %d, %v", n, err)
@@ -1043,6 +1144,139 @@ func TestReadMyMailRecentLooksBackWithoutAcking(t *testing.T) {
 	} else {
 		plain(t, err.Error())
 	}
+}
+
+// Answering a mail by its number sends mail to its sender, carrying the
+// answered number: the sender reads it back as the reply's link. What is
+// no message of the inbox, and nothing to say, is refused in plain words,
+// and nothing is sent.
+func TestReplyToMailAnswersByNumber(t *testing.T) {
+	y := newYard(t)
+	s := svc(y, "")
+	if err := y.st.Mail(y.ctx, "ada", "when is the freeze over?", "bob"); err != nil {
+		t.Fatal(err)
+	}
+	box, err := y.st.UserInbox(y.ctx, "ada", 0, "ada")
+	if err != nil || len(box.Mail) != 1 {
+		t.Fatalf("ada's inbox = %+v, %v", box, err)
+	}
+	seq := box.Mail[0].Seq
+	res, err := s.ReplyToMail(y.ctx, seq, "Friday.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain(t, res.Text)
+	if want := fmt.Sprintf("Sent to bob as a reply to message %d.", seq); res.Text != want {
+		t.Fatalf("the answer = %q, want %q", res.Text, want)
+	}
+	if res.Structured["to"] != "bob" || res.Structured["reply_to"] != seq {
+		t.Fatalf("the structured answer = %+v, want to bob replying to %d", res.Structured, seq)
+	}
+	bob, err := y.st.UserInbox(y.ctx, "bob", 0, "bob")
+	if err != nil || len(bob.Mail) != 1 || bob.Mail[0].From != "ada" ||
+		bob.Mail[0].Text != "Friday." || bob.Mail[0].Answered != seq {
+		t.Fatalf("bob's inbox = %+v, %v", bob, err)
+	}
+	bobService := &mcp.Service{Yard: y.st, User: "bob", Now: time.Now}
+	read, err := bobService.ReadMyMail(y.ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("Mail %d from ada re %d", bob.Mail[0].Seq, seq); !strings.Contains(read.Text, want) {
+		t.Errorf("read_my_mail does not show the reply's thread link %q:\n%s", want, read.Text)
+	}
+	messages, _ := read.Structured["messages"].([]map[string]any)
+	if len(messages) != 1 || messages[0]["seq"] != bob.Mail[0].Seq || messages[0]["answered"] != seq {
+		t.Errorf("read_my_mail does not carry the reply's thread link: %+v", read.Structured)
+	}
+	for _, tc := range []struct {
+		name    string
+		mail    uint64
+		message string
+		want    string
+	}{
+		{"no message of that number", 999999, "Friday.", "can't find message 999999"},
+		{"no number", 0, "Friday.", "say which message"},
+		{"nothing to say", seq, "  ", "say what you would like to answer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := s.ReplyToMail(y.ctx, tc.mail, tc.message)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ReplyToMail = %v, want %q", err, tc.want)
+			}
+			plain(t, err.Error())
+		})
+	}
+	bob, _ = y.st.UserInbox(y.ctx, "bob", 0, "bob")
+	if len(bob.Mail) != 1 {
+		t.Fatalf("bob's inbox after the refusals = %+v", bob)
+	}
+}
+
+// Mail from another yard is not answered here: the refusal names the
+// terminal and the commands that answer there, and nothing is sent.
+func TestReplyToMailRefusesPeerMail(t *testing.T) {
+	y := newYard(t)
+	s := svc(y, "")
+	key := y.linkNorth(t)
+	y.takePeerMail(t, key, "m1", "ada", "clerk", "is the ledger closed?")
+	box, err := y.st.UserInbox(y.ctx, "ada", 0, "ada")
+	if err != nil || len(box.Mail) != 1 {
+		t.Fatalf("ada's inbox = %+v, %v", box, err)
+	}
+	_, err = s.ReplyToMail(y.ctx, box.Mail[0].Seq, "Friday.")
+	for _, want := range []string{"another yard", "clerk@north", "terminal", "yardr mail clerk@north", "yardr reply"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("ReplyToMail = %v, want %q", err, want)
+		}
+	}
+	plain(t, err.Error())
+	mails, merr := y.st.EventsOfKind(y.ctx, "mail", 10)
+	if merr != nil || len(mails) != 1 {
+		t.Fatalf("mail events after the refusal = %+v, %v", mails, merr)
+	}
+}
+
+// Mail from a session doing the person's work is not answered by mail:
+// its answer is a note, and the refusal names the ways.
+func TestReplyToMailRefusesSessionMail(t *testing.T) {
+	y := newYard(t)
+	s := svc(y, "")
+	y.sessionMail(t, "ada", "may I narrow it to the shed?")
+	box, err := y.st.UserInbox(y.ctx, "ada", 0, "ada")
+	if err != nil || len(box.Mail) != 1 {
+		t.Fatalf("ada's inbox = %+v, %v", box, err)
+	}
+	_, err = s.ReplyToMail(y.ctx, box.Mail[0].Seq, "Yes: only the shed.")
+	for _, want := range []string{"a note on that work", "footplate", "yardmaster"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("ReplyToMail = %v, want %q", err, want)
+		}
+	}
+	plain(t, err.Error())
+}
+
+// Mail from a yard no longer linked is refused as the command refuses
+// it: no address would reach its sender.
+func TestReplyToMailRefusesUnlinkedMail(t *testing.T) {
+	y := newYard(t)
+	s := svc(y, "")
+	key := y.linkNorth(t)
+	y.takePeerMail(t, key, "m1", "ada", "clerk", "is the ledger closed?")
+	if err := y.st.DeletePeer(y.ctx, "north", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	box, err := y.st.UserInbox(y.ctx, "ada", 0, "ada")
+	if err != nil || len(box.Mail) != 1 {
+		t.Fatalf("ada's inbox = %+v, %v", box, err)
+	}
+	_, err = s.ReplyToMail(y.ctx, box.Mail[0].Seq, "Friday.")
+	for _, want := range []string{"no longer linked", "was north", "no address would reach its sender"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("ReplyToMail = %v, want %q", err, want)
+		}
+	}
+	plain(t, err.Error())
 }
 
 func TestAskTheYardmasterWait(t *testing.T) {

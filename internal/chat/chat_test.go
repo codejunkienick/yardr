@@ -305,6 +305,11 @@ func TestMailArrives(t *testing.T) {
 	if v.m.Unread("recorder") != 0 || v.m.Unread("chief") != 0 {
 		t.Fatalf("replayed mail counts as unread again: recorder %d, chief %d", v.m.Unread("recorder"), v.m.Unread("chief"))
 	}
+
+	// A reply says which mail it answers on its head.
+	must(t, st.MailReply(ctx, "chief", "on it", me, newest))
+	again := open(t, st, "chief", 120, 24)
+	again.shows("on it", me+" re "+fmt.Sprint(newest))
 }
 
 // A conversation session's positional cursor may pass mail in another
