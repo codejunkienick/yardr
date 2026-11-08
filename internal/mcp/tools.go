@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -10,11 +11,24 @@ import (
 	"yardr.dev/yardr/internal/store"
 )
 
+// workStates are the states the account tells a piece of work in, in the
+// order it lists them. workState tries them in the same order, so the
+// first a piece fits is its own: a held or blocked piece is stuck, and a
+// parked one takes precedence over its stage.
+var workStates = []struct{ state, heading string }{
+	{"finished", "Finished lately"},
+	{"stuck", "Stuck"},
+	{"parked", "Parked"},
+	{"waiting", "Waiting"},
+	{"not started", "Not started"},
+	{"under way", "Under way"},
+}
+
 // WhatIsHappening is what_is_happening: a short account of the
-// person's own work — what is under way, what finished inside the
-// window, what is stuck — or, with work set, that one thing in full
-// with its notes. It keeps no record of when the person last looked:
-// each call is answered from the window it is given.
+// person's own work, each piece in the state it is in (workStates) and
+// with the project it belongs to, or, with work set, that one thing in
+// full with its notes. It keeps no record of when the person last
+// looked: each call is answered from the window it is given.
 func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (*Result, error) {
 	if err := s.requireUser(); err != nil {
 		return nil, err
@@ -61,67 +75,95 @@ func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (
 		}
 		return originator == s.User
 	}
-	var underWay, stuck, finished []map[string]any
-	var underWayText, stuckText, finishedText []string
+	items := map[string][]map[string]any{}
+	lines := map[string][]string{}
 	for _, b := range beads {
 		if !own(b) {
 			continue
 		}
-		item := map[string]any{"work": b.ID, "title": b.Title, "updated": b.UpdatedAt.UTC().Format(time.RFC3339)}
+		state, detail, err := s.workState(ctx, b, since, now)
+		if err != nil {
+			return nil, err
+		}
+		if state == "" {
+			continue
+		}
+		// The line and the item say the same: the detail is what stands
+		// in brackets, so a client that shows only the structured part
+		// loses no reason the words give, a question that waits for the
+		// person among them.
 		asks := waiting[b.ID]
+		detail += waitsLine(asks, state == "finished")
+		item := map[string]any{"work": b.ID, "title": b.Title, "updated": b.UpdatedAt.UTC().Format(time.RFC3339), "state": state, "detail": detail}
 		if len(asks) > 0 {
 			item["waiting_questions"] = asks
 		}
-		switch {
-		case b.Status == "closed":
-			if b.ClosedAt == nil || b.ClosedAt.Before(since) || b.ClosedAt.After(now) {
-				continue
-			}
-			item["state"] = "finished"
-			finished = append(finished, item)
-			finishedText = append(finishedText, fmt.Sprintf("- %s (finished %s%s)", b.Title, when(*b.ClosedAt, now), waitsLine(asks, true)))
-		case b.Hold:
-			item["state"] = "stuck"
-			stuck = append(stuck, item)
-			stuckText = append(stuckText, fmt.Sprintf("- %s: it is on hold, waiting for a person%s", b.Title, waitsLine(asks, false)))
-		default:
-			blockers, err := s.Yard.OpenBlockers(ctx, b.ID)
-			if err != nil {
-				return nil, err
-			}
-			if len(blockers) > 0 {
-				item["state"] = "stuck"
-				stuck = append(stuck, item)
-				stuckText = append(stuckText, fmt.Sprintf("- %s: it is waiting for other work to finish first%s", b.Title, waitsLine(asks, false)))
-				continue
-			}
-			item["state"] = "under way"
-			underWay = append(underWay, item)
-			underWayText = append(underWayText, fmt.Sprintf("- %s (last touched %s%s)", b.Title, when(b.UpdatedAt, now), waitsLine(asks, false)))
+		line := "- " + b.Title
+		if b.Depot != nil {
+			item["project"] = *b.Depot
+			line += " in " + *b.Depot
 		}
-	}
-	if len(underWay)+len(stuck)+len(finished) == 0 {
-		return &Result{
-			Text:       fmt.Sprintf("Nothing of yours is under way, stuck, or finished since %s.", when(since, now)),
-			Structured: map[string]any{"work_list": []map[string]any{}},
-		}, nil
+		items[state] = append(items[state], item)
+		lines[state] = append(lines[state], fmt.Sprintf("%s (%s)", line, detail))
 	}
 	var b strings.Builder
 	b.WriteString("Here is what is happening with your work.\n")
-	section := func(name string, lines []string) {
-		if len(lines) == 0 {
-			return
+	list := []map[string]any{}
+	for _, st := range workStates {
+		if len(lines[st.state]) == 0 {
+			continue
 		}
-		fmt.Fprintf(&b, "\n%s:\n%s\n", name, strings.Join(lines, "\n"))
+		fmt.Fprintf(&b, "\n%s:\n%s\n", st.heading, strings.Join(lines[st.state], "\n"))
+		list = append(list, items[st.state]...)
 	}
-	section("Under way", underWayText)
-	section("Stuck", stuckText)
-	section("Finished lately", finishedText)
-	all := append(append(append([]map[string]any{}, underWay...), stuck...), finished...)
+	if len(list) == 0 {
+		return &Result{
+			Text:       fmt.Sprintf("Nothing of yours is open, and nothing has finished since %s.", when(since, now)),
+			Structured: map[string]any{"work_list": list},
+		}, nil
+	}
 	return &Result{
 		Text:       strings.TrimRight(b.String(), "\n"),
-		Structured: map[string]any{"work_list": all},
+		Structured: map[string]any{"work_list": list},
 	}, nil
+}
+
+// workState is the state one piece of work is told in, as the first of
+// workStates it fits, and the words that say why or when. The stage is
+// what separates the open pieces that are not moving: decide waits for
+// a person's answer, siding for the fold, and backlog is not on the line
+// yet. Every other open stage is work travelling the line. No rule
+// reads the type, so a lead or a design in the backlog is not started
+// like the rest. The state is "" for a closed piece outside the window,
+// which the account leaves out.
+func (s *Service) workState(ctx context.Context, b store.Bead, since, now time.Time) (state, detail string, err error) {
+	if b.Status == "closed" {
+		if b.ClosedAt == nil || b.ClosedAt.Before(since) || b.ClosedAt.After(now) {
+			return "", "", nil
+		}
+		return "finished", "finished " + when(*b.ClosedAt, now), nil
+	}
+	if b.Hold {
+		return "stuck", "it is on hold, waiting for a person", nil
+	}
+	blockers, err := s.Yard.OpenBlockers(ctx, b.ID)
+	if err != nil {
+		return "", "", err
+	}
+	touched := "last touched " + when(b.UpdatedAt, now)
+	switch {
+	case len(blockers) > 0:
+		return "stuck", "it is waiting for other work to finish first", nil
+	case slices.Contains(b.Labels, "parked"):
+		return "parked", touched, nil
+	case b.Stage == "decide":
+		return "waiting", "it is waiting for a person to decide", nil
+	case b.Stage == "siding":
+		return "waiting", "it is waiting to be combined with other small work", nil
+	case b.Stage == "backlog":
+		return "not started", touched, nil
+	}
+	return "under way", touched, nil
 }
 
 // onePiece is what_is_happening for one named thing: its title, its

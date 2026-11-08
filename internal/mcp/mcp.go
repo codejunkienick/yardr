@@ -102,7 +102,9 @@ func Tools() []ToolDef {
 	return []ToolDef{
 		{
 			Name: ToolWhatIsHappening,
-			Description: "Say what is happening with this person's own work: what is under way, what finished lately, and what is stuck. " +
+			Description: "Say what is happening with this person's own work: each piece with the project it belongs to and where it stands. " +
+				"A piece is finished lately, stuck (on hold, or waiting for other work to finish), parked (set aside for now), " +
+				"waiting (for a person to decide, or to be combined with other small work), not started, or under way. " +
 				"Pass the work name from an earlier answer to show that one thing in full, with the notes on it. " +
 				"since is a time (for example 2026-11-01T09:00:00Z) widening how far back finished work is shown; without it, the last day.",
 			InputSchema: schema(`{
@@ -114,7 +116,7 @@ func Tools() []ToolDef {
 				"additionalProperties": false
 			}`),
 			OutputSchema: output(`
-				"work_list": {"type": "array", "description": "the account's pieces of work: work, title, state, updated, waiting_questions", "items": {"type": "object"}},
+				"work_list": {"type": "array", "description": "the account's pieces of work: work, title, project (where it has one), state, detail (the words that say why or when), updated, waiting_questions", "items": {"type": "object"}},
 				"work": {"type": "string", "description": "the one piece's work name, when work was given"},
 				"title": {"type": "string"},
 				"state": {"type": "string", "description": "the piece's standing in plain words"},

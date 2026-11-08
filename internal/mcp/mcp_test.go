@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -93,7 +94,15 @@ func (y *yard) depot(t *testing.T, name string) {
 
 func (y *yard) work(t *testing.T, title, depot, owner string) string {
 	t.Helper()
-	b, err := y.st.CreateBead(y.ctx, store.NewBead{Title: title, Type: "task", Depot: depot, For: owner}, "yardmaster")
+	return y.bead(t, store.NewBead{Title: title, Depot: depot, For: owner})
+}
+
+// bead files a task as the yardmaster does, for the tests that need what
+// work leaves out: a stage, a label, a blocker, no project.
+func (y *yard) bead(t *testing.T, nb store.NewBead) string {
+	t.Helper()
+	nb.Type = "task"
+	b, err := y.st.CreateBead(y.ctx, nb, "yardmaster")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,12 +128,16 @@ func svc(y *yard, connection string) *mcp.Service {
 func plain(t *testing.T, text string) {
 	t.Helper()
 	lower := strings.ToLower(strings.ReplaceAll(text, "yardr bead answer", ""))
-	for _, word := range []string{"bead", "depot", "flow", "stage", "seq"} {
+	for _, word := range []string{"bead", "depot", "flow", "stage", "seq", "label"} {
 		if strings.Contains(lower, word) {
 			t.Errorf("the result uses the yard word %q:\n%s", word, text)
 		}
 	}
 }
+
+// whenWords is a time as the account says it ("Sun 8 Nov at 12:30"), so
+// a test can compare the words around it exactly, without the clock.
+var whenWords = regexp.MustCompile(`(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2}( \d{4})? at \d{2}:\d{2}`)
 
 func TestNoUserRefusesEveryTool(t *testing.T) {
 	y := newYard(t)
@@ -197,6 +210,7 @@ func TestAskForSomethingDepotResolution(t *testing.T) {
 func TestWhatIsHappening(t *testing.T) {
 	y := newYard(t)
 	y.depot(t, "yardr")
+	y.depot(t, "shop")
 	s := svc(y, "")
 	mine := y.work(t, "Write the report", "yardr", "ada")
 	y.work(t, "Bob's thing", "yardr", "bob")
@@ -208,6 +222,22 @@ func TestWhatIsHappening(t *testing.T) {
 	if _, err := y.st.SetHold(y.ctx, held, true, store.Expect{}, "ada"); err != nil {
 		t.Fatal(err)
 	}
+	// The other states are reached by what the account reads: an open
+	// blocker, the parked label, a stage. The first that fits wins, so a
+	// held piece that is also parked is stuck, a blocked piece in the
+	// backlog is stuck, and a parked piece in the decide stage is parked.
+	// The last piece has no project.
+	y.bead(t, store.NewBead{Title: "Wait for the figures", Depot: "yardr", Stage: "backlog", BlockedBy: []string{mine}, For: "ada"})
+	heldParked := y.bead(t, store.NewBead{Title: "Held and parked", Depot: "shop", Stage: "backlog", Labels: []string{"parked"}, For: "ada"})
+	if _, err := y.st.SetHold(y.ctx, heldParked, true, store.Expect{}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	y.bead(t, store.NewBead{Title: "Set the logo aside", Depot: "shop", Stage: "backlog", Labels: []string{"parked"}, For: "ada"})
+	y.bead(t, store.NewBead{Title: "Parked decision", Depot: "yardr", Stage: "decide", Labels: []string{"parked"}, For: "ada"})
+	y.bead(t, store.NewBead{Title: "Pick the colours", Depot: "yardr", Stage: "decide", For: "ada"})
+	y.bead(t, store.NewBead{Title: "Tidy the footer", Depot: "yardr", Stage: "siding", For: "ada"})
+	y.bead(t, store.NewBead{Title: "Plan the stall", Depot: "shop", Stage: "backlog", For: "ada"})
+	y.bead(t, store.NewBead{Title: "A thought with no project", Stage: "backlog", For: "ada"})
 	res, err := s.WhatIsHappening(y.ctx, "", "")
 	if err != nil {
 		t.Fatal(err)
@@ -220,6 +250,77 @@ func TestWhatIsHappening(t *testing.T) {
 	}
 	if strings.Contains(res.Text, "Bob's thing") {
 		t.Errorf("another person's work is in the account:\n%s", res.Text)
+	}
+	// Each piece is told in its own state, under that state's heading,
+	// with its project and the words that say why or when. The item and
+	// the line carry the same words, so a client that shows only the
+	// structured part loses nothing. The cases are in the order of the
+	// states, which is the order of the headings and of the list.
+	states := []struct{ state, heading string }{
+		{"finished", "Finished lately"},
+		{"stuck", "Stuck"},
+		{"parked", "Parked"},
+		{"waiting", "Waiting"},
+		{"not started", "Not started"},
+		{"under way", "Under way"},
+	}
+	cases := []struct{ title, state, project, detail string }{
+		{"Old report", "finished", "yardr", "finished <when>"},
+		{"Stuck thing", "stuck", "yardr", "it is on hold, waiting for a person"},
+		{"Wait for the figures", "stuck", "yardr", "it is waiting for other work to finish first"},
+		{"Held and parked", "stuck", "shop", "it is on hold, waiting for a person"},
+		{"Set the logo aside", "parked", "shop", "last touched <when>"},
+		{"Parked decision", "parked", "yardr", "last touched <when>"},
+		{"Pick the colours", "waiting", "yardr", "it is waiting for a person to decide"},
+		{"Tidy the footer", "waiting", "yardr", "it is waiting to be combined with other small work"},
+		{"Plan the stall", "not started", "shop", "last touched <when>"},
+		{"A thought with no project", "not started", "", "last touched <when>"},
+		{"Write the report", "under way", "yardr", "last touched <when>"},
+	}
+	headings := map[string]string{}
+	last := -1
+	for _, st := range states {
+		headings[st.state] = st.heading
+		at := strings.Index(res.Text, "\n"+st.heading+":\n")
+		if at <= last {
+			t.Errorf("the heading %q is missing or out of order:\n%s", st.heading, res.Text)
+		}
+		last = at
+	}
+	list, _ := res.Structured["work_list"].([]map[string]any)
+	if len(list) != len(cases) {
+		t.Fatalf("work_list has %d pieces, want %d: %+v", len(list), len(cases), list)
+	}
+	byTitle := map[string]map[string]any{}
+	for i, item := range list {
+		byTitle[item["title"].(string)] = item
+		if item["state"] != cases[i].state {
+			t.Errorf("work_list[%d] is %v, want a piece that is %s", i, item["state"], cases[i].state)
+		}
+	}
+	for _, c := range cases {
+		item := byTitle[c.title]
+		if item == nil {
+			t.Errorf("the account lacks %q:\n%s", c.title, res.Text)
+			continue
+		}
+		var project any // absent, not empty, for a piece with no project
+		if c.project != "" {
+			project = c.project
+		}
+		detail, _ := item["detail"].(string)
+		if item["state"] != c.state || item["project"] != project || whenWords.ReplaceAllString(detail, "<when>") != c.detail {
+			t.Errorf("%q = %+v, want state %q, project %q, detail %q", c.title, item, c.state, c.project, c.detail)
+		}
+		line := "- " + c.title
+		if c.project != "" {
+			line += " in " + c.project
+		}
+		_, rest, _ := strings.Cut(res.Text, "\n"+headings[c.state]+":\n")
+		section, _, _ := strings.Cut(rest, "\n\n")
+		if !strings.Contains(section, line+" ("+detail+")") {
+			t.Errorf("under %q the account lacks the line %q:\n%s", headings[c.state], line+" ("+detail+")", res.Text)
+		}
 	}
 	// One piece in full, with its notes.
 	if err := y.st.AddNote(y.ctx, mine, "the figures arrived", "bob"); err != nil {
@@ -248,7 +349,7 @@ func TestWhatIsHappening(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.Text, "Old report (finished ") || !strings.Contains(res.Text, fmt.Sprintf("; question %d still waits for you)", seq)) {
+	if !strings.Contains(res.Text, "Old report in yardr (finished ") || !strings.Contains(res.Text, fmt.Sprintf("; question %d still waits for you)", seq)) {
 		t.Errorf("the account hides the question waiting on finished work:\n%s", res.Text)
 	}
 	// A window that excludes the finished work drops it.
@@ -258,6 +359,26 @@ func TestWhatIsHappening(t *testing.T) {
 	}
 	if strings.Contains(res.Text, "Old report") {
 		t.Errorf("finished work outside the window is shown:\n%s", res.Text)
+	}
+
+	// With nothing open and nothing finished the account says so. Work
+	// that has not started is open work, so it is not that account.
+	quiet := newYard(t)
+	quiet.depot(t, "shop")
+	res, err = svc(quiet, "").WhatIsHappening(quiet.ctx, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty, ok := res.Structured["work_list"].([]map[string]any); !strings.HasPrefix(res.Text, "Nothing of yours is open, and nothing has finished since ") || !ok || empty == nil || len(empty) != 0 {
+		t.Errorf("an empty account is\n%s\n%+v", res.Text, res.Structured)
+	}
+	quiet.bead(t, store.NewBead{Title: "Plan the stall", Depot: "shop", Stage: "backlog", For: "ada"})
+	res, err = svc(quiet, "").WhatIsHappening(quiet.ctx, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Text, "Nothing of yours") || !strings.Contains(res.Text, "Not started:\n- Plan the stall in shop") {
+		t.Errorf("an account of work that has not started is\n%s", res.Text)
 	}
 
 	settingsErr := errors.New("settings unavailable")
