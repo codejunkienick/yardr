@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -221,22 +222,14 @@ func TestSocketStartsStoppedApprovedAndRefusesRefused(t *testing.T) {
 // bound runs again from its last socket's close.
 func TestSocketHoldsPreviewPastIdleBoundUntilLastSocketCloses(t *testing.T) {
 	ctx := context.Background()
-	// No Run: the passes are this test's own, so none comes between two of
-	// its steps. One that came after the last socket gave back its counts
-	// and before the row held the moment it closed would find the row a
-	// bound old and stop the preview as idle at once. That window is not
-	// what this test pins; the bound running from the close is.
 	y := newYard(t)
-	const idle = 300 * time.Millisecond
-	if err := y.st.SetSetting(ctx, store.PreviewIdleSetting, idle.String(), "ada"); err != nil {
-		t.Fatal(err)
-	}
+	// The loop makes the passes, as it does in the server: the one that
+	// comes as the last socket closes must not stop the preview before the
+	// row holds the moment it closed.
+	y.run(t)
 	port := freePort(t)
 	y.propose(t, "demo", previewtest.App("127.0.0.1", port), port, true)
-	t.Cleanup(func() { y.sup.kill("demo") })
-	if err := y.sup.Start(ctx, "demo"); err != nil {
-		t.Fatal(err)
-	}
+	waitFor(t, "preview running", func() bool { return y.state("demo").State == store.PreviewRunning })
 	l := socketLink(t, y)
 	head := openPreviewSocket(t, l, "/preview/demo/ws", nil, nil)
 	if head.Status != http.StatusSwitchingProtocols {
@@ -246,9 +239,15 @@ func TestSocketHoldsPreviewPastIdleBoundUntilLastSocketCloses(t *testing.T) {
 	if opened == nil {
 		t.Fatal("the socket opening did not set the preview's last-request moment")
 	}
+	// The bound is shortened only now: the loop counts a preview nobody has
+	// asked for from its start, so a slow link could have it stopped before
+	// the socket was there.
+	const idle = 300 * time.Millisecond
+	if err := y.st.SetSetting(ctx, store.PreviewIdleSetting, idle.String(), "ada"); err != nil {
+		t.Fatal(err)
+	}
 	// Past the idle bound with the socket as the only activity.
 	waitFor(t, "the idle bound past the socket's opening", func() bool { return time.Since(*opened) > idle })
-	y.sup.reconcile(ctx, false)
 	if got := y.state("demo"); got.State != store.PreviewRunning {
 		t.Fatalf("a preview held by a socket alone was stopped as idle: %+v", got)
 	}
@@ -274,7 +273,6 @@ func TestSocketHoldsPreviewPastIdleBoundUntilLastSocketCloses(t *testing.T) {
 	// bound, never sooner.
 	var stoppedAt time.Time
 	waitFor(t, "the preview stopped idle", func() bool {
-		y.sup.reconcile(ctx, false)
 		if got := y.state("demo"); got.State != store.PreviewStopped || got.StateDetail != "idle" {
 			return false
 		}
@@ -292,6 +290,82 @@ func TestSocketHoldsPreviewPastIdleBoundUntilLastSocketCloses(t *testing.T) {
 	})
 	if gap := stoppedAt.Sub(closedAt); gap < idle {
 		t.Fatalf("the preview stopped %v after its last socket closed, want no sooner than the idle bound %v", gap, idle)
+	}
+}
+
+// touchGate is a store whose writes of a preview's last-request moment wait to
+// be let go once it is armed, one each time let is sent to, so a test says what
+// a pass finds while a moment is on its way to the row. Closing let lets go
+// every write that waits and every later one. Writes before it is armed pass,
+// so a test arms it after the socket it is about is open, and sets it as the
+// supervisor's store before anything runs, as flipGate's users do.
+type touchGate struct {
+	Store
+	armed   atomic.Bool
+	arrived atomic.Int32 // writes that have come to the gate armed
+	let     chan struct{}
+}
+
+func (g *touchGate) UpdatePreview(ctx context.Context, app string, upd store.PreviewUpdate) (*store.Preview, error) {
+	if upd.LastRequest != nil && g.armed.Load() {
+		g.arrived.Add(1)
+		<-g.let
+	}
+	return g.Store.UpdatePreview(ctx, app, upd)
+}
+
+// The idle clock of a preview restarts at its last socket's close, and the
+// socket keeps the preview from idling until it does: a pass that comes after
+// the socket is gone and before the close's moment is in the row finds a row a
+// bound old, so it must still find the socket in flight and leave the preview
+// alone. The gate holds the close's write while that pass is made.
+func TestSocketLastCloseHoldsItsPreviewUntilItsMomentIsWritten(t *testing.T) {
+	ctx := context.Background()
+	// No Run: the pass is this test's own, made while the write is held.
+	y := newYard(t)
+	gate := &touchGate{Store: y.sup.Store, let: make(chan struct{})}
+	y.sup.Store = gate
+	port := freePort(t)
+	y.propose(t, "demo", previewtest.App("127.0.0.1", port), port, true)
+	t.Cleanup(func() { y.sup.kill("demo") })
+	if err := y.sup.Start(ctx, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	l := socketLink(t, y)
+	head := openPreviewSocket(t, l, "/preview/demo/ws", nil, nil)
+	if head.Status != http.StatusSwitchingProtocols {
+		t.Fatalf("the head is %+v, want 101", head)
+	}
+	// The socket has sat quiet longer than the idle bound (the default, which
+	// nothing here changes): the process started and the row was last written
+	// before it. Frames refresh the row at most once a minute, and pings do
+	// not cross.
+	old := time.Now().Add(-2 * store.DefaultPreviewIdle)
+	y.backdateStart("demo", old)
+	if _, err := y.st.UpdatePreview(ctx, "demo", store.PreviewUpdate{LastRequest: &old}); err != nil {
+		t.Fatal(err)
+	}
+	gate.armed.Store(true)
+	// Whichever way the test ends, the write is let go, so the socket's close
+	// returns before the link is shut.
+	defer close(gate.let)
+	if err := l.SendSocketClose(ctx, head.ID, 1000, "done"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the close's moment to come to its write", func() bool { return gate.arrived.Load() == 1 })
+	y.sup.reconcile(ctx, false)
+	if got := y.state("demo"); got.State != store.PreviewRunning {
+		t.Fatalf("a preview whose last socket is closing, its moment not yet in the row, was stopped: %+v", got)
+	}
+	gate.let <- struct{}{}
+	waitFor(t, "the socket's count given back", func() bool {
+		sockets, inflight := previewSocketCounts(y, "demo")
+		return sockets == 0 && inflight == 0
+	})
+	// Counts at zero, the moment is in the row: the clock runs from the close.
+	y.sup.reconcile(ctx, false)
+	if got := y.state("demo"); got.State != store.PreviewRunning {
+		t.Fatalf("a preview whose last socket has just closed was stopped as idle: %+v", got)
 	}
 }
 

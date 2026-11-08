@@ -114,6 +114,12 @@ func (s *Supervisor) serveSocket(req *edgelink.SocketRequest, sock *edgelink.Soc
 		return
 	}
 	defer func() {
+		// The in-flight count is given back last, once the close's moment
+		// is in the row, and even if that write panics (the link recovers
+		// a handler's panic): a count that left with the socket would let
+		// a pass find nothing in flight while the row is still as old as
+		// the last frame, and stop the preview as idle at once.
+		defer s.leave(app)
 		if s.leaveSocket(app) {
 			// The last socket is gone: the idle clock runs from
 			// now, a full bound after it, not from a frame that
@@ -185,7 +191,8 @@ func socketRefusal(p *store.Preview) (status int, body string, refused bool) {
 // enterSocket counts one socket for app in flight for its life, as a
 // request is counted (proxy.go), and among its sockets: past ten
 // sockets, or past the in-flight cap the two share, it refuses with
-// words that name the preview. leaveSocket gives the count back.
+// words that name the preview. leaveSocket gives the socket back, and
+// serveSocket gives the in-flight count back with leave.
 func (s *Supervisor) enterSocket(app string) (refusal string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -203,16 +210,15 @@ func (s *Supervisor) enterSocket(app string) (refusal string) {
 	return ""
 }
 
-// leaveSocket gives back what enterSocket counted, and says whether
-// that was the preview's last socket.
+// leaveSocket gives back the socket enterSocket counted, and says
+// whether that was the preview's last. The in-flight count enterSocket
+// also took is left for the caller to give back, after the last
+// socket's close is written to the row.
 func (s *Supervisor) leaveSocket(app string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.sockets[app] > 0 {
 		s.sockets[app]--
-	}
-	if s.inflight[app] > 0 {
-		s.inflight[app]--
 	}
 	return s.sockets[app] == 0
 }
