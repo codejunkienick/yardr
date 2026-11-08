@@ -989,35 +989,6 @@ func (u *UserServer) Run(ctx context.Context) {
 	}
 }
 
-// selfArg is, for each call that names whose inbox or queue it reads,
-// who reads, or who writes, the arguments that do: over the network each
-// is the caller. Conversation names two parties and is checked by itself
-// (asUser).
-var selfArg = map[string][]string{
-	"GetUser":              {"name"},
-	"UserInbox":            {"name", "actor"},
-	"AckUserInbox":         {"name", "actor"},
-	"UserNotifications":    {"name", "actor"},
-	"AckUserNotifications": {"name", "actor"},
-	"UserAsks":             {"name", "actor", "viewer"},
-	"Bead":                 {"viewer"},
-	"Arrivals":             {"viewer"},
-	"Flows":                {"viewer"},
-	"Mail":                 {"actor"},
-	"MailPeer":             {"actor"},
-	"React":                {"actor"},
-	"AnswerAsk":            {"actor"},
-	"DeferAsk":             {"actor"},
-	"DeclineAsk":           {"actor"},
-	"TakeBackAsk":          {"actor"},
-	"AddNote":              {"actor"},
-	"GiveSecret":           {"actor"},
-	"ApproveAsk":           {"actor"},
-	"ApproveSetup":         {"actor"},
-	"UninviteTeammate":     {"actor"},
-	"TelemetrySet":         {"actor"},
-}
-
 // asUser is the arguments body of the call method as user makes it: each
 // argument that says whose inbox is read or who writes is filled in with
 // user when it is left out, and refused when it names anyone else; one side

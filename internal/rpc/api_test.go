@@ -109,6 +109,13 @@ var apiPNGHash = func() string {
 	return hex.EncodeToString(sum[:])
 }()
 
+// turnSays is what an ask's turn says, on a row of the queue and an ask of
+// a bead.
+const turnSays = "how many answers the ask has taken: every pick, words answer, put-aside, decline and take-back written on it, `0` for none. It only grows, and is the same while nothing is written on the ask, so it is what a guarded write names: [`AnswerAskExpected`](#answeraskexpected), [`DeferAskExpected`](#deferaskexpected) and [`DeclineAskExpected`](#declineaskexpected). A put-aside ask that came back stays at the turn of its put-aside. `0` on a question another yard asked, which takes no guarded write"
+
+// guardIntro is what the three guarded writes share.
+const guardIntro = "A guarded write names the turn the client read (`turn` of the ask in [`UserAsks`](#userasks) or [`Bead`](#bead)), and the yard checks it in the same write as the answer: when anyone has written on the ask since (a pick, words, a put-aside, a decline or a take-back, from any client), the call is refused with the code `conflict`, writes nothing, moves nothing and tells nobody, and the client reads the ask again before it asks its person again. A retry of a write that landed is refused so too, so a reply lost on the way is never an answer written twice. The ask's question, options, addressee and, on a card the yard put for a stage, its stage and stay are never rewritten under its seq, so `ask` with `turn` names what the person saw. Every other rule is the unguarded call's, and is refused with its own words and code `error`: who may answer, what the ask takes, the weight's word, a stage card's own stage. A `bead@peer` is refused: a question another yard asked is answered with the unguarded call. A yard from before the guarded writes answers each as a method it does not have (`no such method`), and the unguarded calls refuse `turn` as an argument they do not have, so a client never falls back to an unguarded write: it says the yard is too old and answers nothing."
+
 // A queue row is the same open and decided.
 func queueRow(prefix string) []field {
 	return append([]field{
@@ -119,6 +126,7 @@ func queueRow(prefix string) []field {
 		{prefix + "question", "string", "the question in one line, as a person would ask it"},
 		{prefix + "asker", "string", "who asked: a name, or `name@peer` for a question another yard asked"},
 		{prefix + "since", "time", "when the ask was written: how long it waits (as sent, for a question another yard asked)"},
+		{prefix + "turn", "number", turnSays},
 	}, weighed(prefix)...)
 }
 
@@ -537,6 +545,7 @@ var apiCalls = []apiCall{
 			{"asks[].words", "string?", "what went with the pick, the words answer, or why the question is declined or taken back; on a question another yard asked, how it ended or stands put aside there; absent when there are none"},
 			{"asks[].by", "string?", "who took the ask back, its asker or the operator; absent on every other state"},
 			{"asks[].return_at", "time?", "when a put-aside ask comes back, here or in the yard that asked it; absent otherwise"},
+			{"asks[].turn", "number", turnSays},
 			{"asks[].picks_before", "number?", "how many picks there were before the current one, so a client can say \"changed\"; absent when there were none"},
 			weighed("asks[].")[0], weighed("asks[].")[1], weighed("asks[].")[2],
 			{"asks[].secret", "object?", "what a secret ask asks for; absent on any other ask. Such an ask has no options and takes no words: show it with a field that does not echo, and answer it with [`GiveSecret`](#for-the-operator-alone). `AnswerAsk` refuses a pick and words on it, and `DeclineAsk` words"},
@@ -682,6 +691,44 @@ var apiCalls = []apiCall{
 			{"actor", "string", "who declines: the user's name"},
 		},
 		requests: []string{`{"bead":"yd-greet","ask":5,"words":"the greeting can wait","actor":"jo"}`},
+	},
+	{
+		method: "AnswerAskExpected",
+		says:   "`AnswerAsk` guarded by the ask's turn: it picks or answers with words as `AnswerAsk` does, only while the ask is at the turn the client read. " + guardIntro + " A pick drawn from an answered ask at its turn replaces the pick, as the person chose having seen it; the examples are a first pick at turn 0 and a changed pick at turn 1. It answers nothing; the answer is then a `noted` event in the stream.",
+		args: []field{
+			{"bead", "string", "the bead"},
+			{"ask", "number", "the ask note's seq"},
+			{"turn", "number", "the ask's `turn` as the client read it; left out, `0`: an ask nobody has written on"},
+			{"option", "number", "as `AnswerAsk`'s"},
+			{"words", "string", "as `AnswerAsk`'s"},
+			{"actor", "string", "who answers: the user's name"},
+			{"weighed", "bool", "as `AnswerAsk`'s"},
+		},
+		requests: []string{`{"bead":"yd-greet","ask":%d,"turn":0,"option":1,"words":"Monday it is","actor":"jo"}`,
+			`{"bead":"yd-greet","ask":%d,"turn":1,"option":2,"actor":"jo"}`},
+	},
+	{
+		method: "DeferAskExpected",
+		says:   "`DeferAsk` guarded by the ask's turn: it puts the ask aside as `DeferAsk` does, only while the ask is at the turn the client read. " + guardIntro + " It answers nothing; putting it aside is then a `noted` event in the stream.",
+		args: []field{
+			{"bead", "string", "the bead"},
+			{"ask", "number", "the ask note's seq"},
+			{"turn", "number", "the ask's `turn` as the client read it; left out, `0`: an ask nobody has written on"},
+			{"actor", "string", "who puts it aside: the user's name"},
+		},
+		requests: []string{`{"bead":"yd-greet","ask":%d,"turn":0,"actor":"jo"}`},
+	},
+	{
+		method: "DeclineAskExpected",
+		says:   "`DeclineAsk` guarded by the ask's turn: it declines the ask as `DeclineAsk` does, only while the ask is at the turn the client read. " + guardIntro + " It answers nothing; declining is then a `noted` event in the stream.",
+		args: []field{
+			{"bead", "string", "the bead"},
+			{"ask", "number", "the ask note's seq"},
+			{"turn", "number", "the ask's `turn` as the client read it; left out, `0`: an ask nobody has written on"},
+			{"words", "string", "why they will not decide it"},
+			{"actor", "string", "who declines: the user's name"},
+		},
+		requests: []string{`{"bead":"yd-greet","ask":%d,"turn":0,"words":"the desk is taken","actor":"jo"}`},
 	},
 	{
 		method: "TakeBackAsk",
@@ -1211,6 +1258,8 @@ var apiErrors = []struct{ method, request, says string }{
 	{"Mail", `{"to":"yardmaster","body":"hello","actor":"jo"}`, "An argument the call does not have (one misspelt would otherwise be a call that means another):"},
 	{"GetUser", `{"name":7}`, "An argument of another type:"},
 	{"Sing", `{}`, "A method it does not have:"},
+	{"AnswerAskExpected", `{"bead":"yd-links","ask":3,"turn":0,"option":2,"actor":"jo"}`, "A guarded write drawn from a read that is stale (here the ask `AnswerAsk` answered above):"},
+	{"AnswerAsk", `{"bead":"yd-links","ask":3,"turn":1,"option":2,"actor":"jo"}`, "A turn sent to the unguarded call, which has none:"},
 }
 
 // apiYard is a yard with all a chat client meets: the user jo, the crew
@@ -1909,6 +1958,16 @@ calls:
 	// no daily snapshot, which the telemetry preview shows. Last again, for
 	// the seqs above.
 	must(st.SetSetting(ctx, store.HostedSetting, "false", "jo"))
+
+	// The cards the guarded writes answer in the doc, each at turn 0. Last
+	// again, for the seqs above.
+	guarded := func(question string) uint64 {
+		return ask(greet.ID, store.Ask{Question: question, To: "jo", Context: []string{"the newcomer arrives Monday."},
+			Options: []store.AskOption{{Label: "Monday", Consequence: "the welcome is Monday"}, {Label: "Friday", Consequence: "the welcome waits for the week's end"}}})
+	}
+	apiGuarded["AnswerAskExpected"] = guarded("Welcome the newcomer on Monday?")
+	apiGuarded["DeferAskExpected"] = guarded("A lunch for the newcomer?")
+	apiGuarded["DeclineAskExpected"] = guarded("A desk by the window?")
 	return st, d.Token
 }
 
@@ -1925,6 +1984,10 @@ func apiHookSource() string {
 // apiTakeBack is the ask TakeBackAsk takes back in the doc, by seq, as the
 // fixture last made it.
 var apiTakeBack uint64
+
+// apiGuarded is the ask each guarded write answers in the doc, by seq, as
+// the fixture last made it.
+var apiGuarded = map[string]uint64{}
 
 // apiDelivery is the hook delivery DeliveryFiles reads in the doc, by seq,
 // as the fixture last made it.
@@ -2087,6 +2150,8 @@ func runAPI(t *testing.T, network bool) *apiRun {
 				body = fmt.Sprintf(body, apiSetupAsks[i])
 			} else if c.method == "TakeBackAsk" {
 				body = fmt.Sprintf(body, apiTakeBack)
+			} else if seq, ok := apiGuarded[c.method]; ok {
+				body = fmt.Sprintf(body, seq)
 			} else if c.method == "DeliveryFiles" {
 				body = fmt.Sprintf(body, apiDelivery)
 			} else if c.method == "React" {
@@ -2212,8 +2277,8 @@ func TestCallsAreTheDocs(t *testing.T) {
 	// twelve calls of OperatorCalls besides; the socket's own three it
 	// answers as no method at all: a call is added to either on purpose,
 	// here too.
-	if len(Calls) != 26 || len(OperatorCalls) != 12 {
-		t.Errorf("Calls has %d calls and OperatorCalls %d, want 26 and 12", len(Calls), len(OperatorCalls))
+	if len(Calls) != 29 || len(OperatorCalls) != 12 {
+		t.Errorf("Calls has %d calls and OperatorCalls %d, want 29 and 12", len(Calls), len(OperatorCalls))
 	}
 	for name := range OperatorCalls {
 		if _, both := Calls[name]; both {

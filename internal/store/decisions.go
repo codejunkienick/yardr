@@ -43,6 +43,9 @@ type OpenAsk struct {
 	Question string    `json:"question"`
 	Asker    string    `json:"asker"`
 	Since    time.Time `json:"since"`
+	// Turn is how many answers the ask has taken (ResolvedAsk.Turn): what
+	// a guarded answer names.
+	Turn int `json:"turn"`
 	// Secret is what a secret ask asks for, in the yard's words; absent on
 	// any other ask.
 	Secret *SecretAsked `json:"secret,omitempty"`
@@ -77,6 +80,8 @@ type DecidedAsk struct {
 	Question  string    `json:"question"`
 	Asker     string    `json:"asker"`
 	Since     time.Time `json:"since"`
+	// Turn is how many answers the ask has taken (ResolvedAsk.Turn).
+	Turn int `json:"turn"`
 	// State is answered, put aside, declined or taken back.
 	State string `json:"state"`
 	// Option is the picked option's number, with its label; absent on a
@@ -235,14 +240,14 @@ func (s *Store) UserAsks(ctx context.Context, name, actor string, viewer ...stri
 			if r.State == AskOpen {
 				q.Open = append(q.Open, OpenAsk{
 					Bead: b.ID, BeadTitle: b.Title, Topic: topic,
-					Ask: r.Note.Seq, Question: r.Ask.Question,
+					Ask: r.Note.Seq, Question: r.Ask.Question, Turn: r.Turn(),
 					Asker: r.Note.Author, Since: r.Note.At, Secret: r.Ask.asked(), Concealed: r.Ask.concealed(), Run: r.Ask.proposed(), Setup: r.Ask.setup(), Identity: r.Ask.identityAsked(), DepotPush: r.Ask.depotPushAsked(), Weight: r.Ask.Weight,
 				})
 				continue
 			}
 			d := DecidedAsk{
 				Bead: b.ID, BeadTitle: b.Title, Topic: topic,
-				Ask: r.Note.Seq, Question: r.Ask.Question,
+				Ask: r.Note.Seq, Question: r.Ask.Question, Turn: r.Turn(),
 				Asker: r.Note.Author, Since: r.Note.At,
 				State: r.State.String(), Secret: r.Ask.asked(), Concealed: r.Ask.concealed(), Run: r.Ask.proposed(), Setup: r.Ask.setup(), Identity: r.Ask.identityAsked(), DepotPush: r.Ask.depotPushAsked(), Weight: r.Ask.Weight,
 			}
@@ -464,6 +469,9 @@ type BeadAsk struct {
 	// PicksBefore is how many picks there were before the current one, so
 	// a client can say "changed"; absent when there were none.
 	PicksBefore int `json:"picks_before,omitempty"`
+	// Turn is how many answers the ask has taken (ResolvedAsk.Turn): what
+	// a guarded answer names. 0 on a bead@peer, which takes none.
+	Turn int `json:"turn"`
 	// Secret is what a secret ask asks for, in the yard's words: such an
 	// ask has no options and takes no words, and is answered by GiveSecret.
 	// Given are the names it was given values for, which reads "gave
@@ -620,7 +628,7 @@ func (s *Store) Bead(ctx context.Context, id string, viewer ...string) (*BeadVie
 			continue
 		}
 		a := BeadAsk{
-			Ask: r.Note.Seq, To: r.Ask.To, Asker: r.Note.Author, Since: r.Note.At,
+			Ask: r.Note.Seq, To: r.Ask.To, Asker: r.Note.Author, Since: r.Note.At, Turn: r.Turn(),
 			Question: r.Ask.Question, Context: r.Ask.Context, Options: r.Ask.Options,
 			Recommend: r.Ask.Recommend, Why: r.Ask.Why, State: r.State.String(), Secret: r.Ask.asked(), Concealed: r.Ask.concealed(), Run: r.Ask.proposed(), Setup: r.Ask.setup(), Identity: r.Ask.identityAsked(), DepotPush: r.Ask.depotPushAsked(), Weight: r.Ask.Weight,
 		}
@@ -875,7 +883,7 @@ func (s *Store) foreignBead(ctx context.Context, bead, peer, viewer string) (*Be
 // first, and the pick is refused without it (weighedRefusal). The yard
 // checks what the client says and no more. Every other answer ignores it.
 func (s *Store) AnswerAsk(ctx context.Context, id string, ask uint64, option int, words, actor string, weighed bool) error {
-	return s.addAnswer(ctx, id, Answer{Ask: ask, Option: option, Words: words}, actor, "", weighed)
+	return s.addAnswer(ctx, id, Answer{Ask: ask, Option: option, Words: words}, actor, answerExpect{}, weighed)
 }
 
 // DeferAsk puts the ask aside: it leaves the person's queue for 24 hours

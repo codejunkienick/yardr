@@ -130,7 +130,8 @@ the build of yardr that serves, and `X-Yardr-Pid`, its process.
 | code | what it says |
 |---|---|
 | `not-found` | the yard has no such user, crew member, peer |
-| `taken`, `at-limit`, `conflict`, `ambiguous` | none of the calls below answers these today |
+| `conflict` | a guarded write was drawn from a read that is stale: [`AnswerAskExpected`](#answeraskexpected), [`DeferAskExpected`](#deferaskexpected) and [`DeclineAskExpected`](#declineaskexpected) wrote nothing; read again |
+| `taken`, `at-limit`, `ambiguous` | none of the calls below answers these today |
 | `replacing` | the server is about to start a newer build of itself, and did not run the call: see [Builds](#builds) |
 | `error` | anything else: an argument that cannot be read, a call the yard refuses |
 
@@ -173,6 +174,24 @@ POST /call/Sing
 {}
 
 {"error":{"code":"error","message":"no such method Sing"}}
+```
+
+A guarded write drawn from a read that is stale (here the ask `AnswerAsk` answered above):
+
+```
+POST /call/AnswerAskExpected
+{"bead":"yd-links","ask":3,"turn":0,"option":2,"actor":"jo"}
+
+{"error":{"code":"conflict","message":"stale: ask 3 on bead yd-links is at turn 1, not 0: it was answered, put aside, declined or taken back since; read it again"}}
+```
+
+A turn sent to the unguarded call, which has none:
+
+```
+POST /call/AnswerAsk
+{"bead":"yd-links","ask":3,"turn":1,"option":2,"actor":"jo"}
+
+{"error":{"code":"error","message":"argument \"turn\": AnswerAsk has none of that name (it takes bead, ask, option, words, actor, weighed)"}}
 ```
 
 <!-- /errors -->
@@ -280,7 +299,7 @@ Mail was queued for one of a linked yard: the conversation with `<data.to>@<data
 
 ```json
 {
-  "seq": 185,
+  "seq": 188,
   "kind": "mail",
   "actor": "jo",
   "data": {
@@ -308,7 +327,7 @@ A user or a crew member acknowledged its mail. Every letter to `data.reader` wit
 
 ```json
 {
-  "seq": 187,
+  "seq": 190,
   "kind": "mail_read",
   "data": {
     "reader": "jo",
@@ -452,7 +471,7 @@ A user acknowledged their notifications, in this client or another.
 
 ```json
 {
-  "seq": 188,
+  "seq": 191,
   "kind": "notifications_read",
   "data": {
     "reader": "jo",
@@ -738,7 +757,7 @@ nothing else. What is not the same:
 - **Arguments by name only.** The array yardr's own builds send is refused.
 - **Every call is made as the device's user.** The `name` of `GetUser`, the
   inbox calls and `UserAsks`, and the `actor` of `Mail`, `MailPeer`,
-  `AnswerAsk`, `DeferAsk`, `DeclineAsk`, `TakeBackAsk`, `AddNote`,
+  `AnswerAsk`, `DeferAsk`, `DeclineAsk`, their three guarded writes, `TakeBackAsk`, `AddNote`,
   `GiveSecret`, `ApproveAsk`, `ApproveSetup` and `TelemetrySet`, may be left out: the yard fills in the user. One that names anyone else is refused with the
   code `error` (`this device calls as jo: "actor" is jo or left out, not
   yardmaster`). One side of `Conversation` is the user: `a` left out is the
@@ -1158,7 +1177,7 @@ POST /call/Head
 {}
 
 {
-  "result": 182
+  "result": 185
 }
 ```
 
@@ -1671,7 +1690,7 @@ POST /call/Conversation
       "as": "jo"
     },
     {
-      "seq": 183,
+      "seq": 186,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -1679,7 +1698,7 @@ POST /call/Conversation
       "read": false
     },
     {
-      "seq": 184,
+      "seq": 187,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -1705,7 +1724,7 @@ POST /call/Conversation
 {
   "result": [
     {
-      "seq": 183,
+      "seq": 186,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -1713,7 +1732,7 @@ POST /call/Conversation
       "read": false
     },
     {
-      "seq": 184,
+      "seq": 187,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -1740,7 +1759,7 @@ POST /call/Conversation
 {
   "result": [
     {
-      "seq": 185,
+      "seq": 188,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "clerk@north",
@@ -1906,7 +1925,8 @@ POST /call/UserAsks
         "ask": 3,
         "question": "Move this yard's links to the declared source now?",
         "asker": "yardmaster",
-        "since": "2026-10-08T09:30:00Z"
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
       },
       {
         "bead": "yd-links",
@@ -1915,7 +1935,8 @@ POST /call/UserAsks
         "ask": 4,
         "question": "This design before that one?",
         "asker": "yardmaster",
-        "since": "2026-10-08T09:30:00Z"
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
       },
       {
         "bead": "yd-greet",
@@ -1924,7 +1945,8 @@ POST /call/UserAsks
         "ask": 5,
         "question": "What should the tone of the greeting be?",
         "asker": "yardmaster",
-        "since": "2026-10-08T09:30:00Z"
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
       },
       {
         "bead": "yd-links",
@@ -1933,7 +1955,8 @@ POST /call/UserAsks
         "ask": 12,
         "question": "The web view cleanup: build?",
         "asker": "yardmaster",
-        "since": "2026-10-08T09:30:00Z"
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 1
       },
       {
         "bead": "yd-ledger@north",
@@ -1942,7 +1965,8 @@ POST /call/UserAsks
         "ask": 9,
         "question": "Close the ledger tonight?",
         "asker": "clerk@north",
-        "since": "2026-10-08T09:30:00Z"
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
       },
       {
         "bead": "yd-crm",
@@ -1952,6 +1976,7 @@ POST /call/UserAsks
         "question": "The CRM's token for updates",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "secret": {
           "source": "crm",
           "env": ["CRM_UPDATE_TOKEN"],
@@ -1972,6 +1997,7 @@ POST /call/UserAsks
         "question": "The API key for the CRM",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "secret": {
           "source": "crm",
           "env": ["CRM_TOKEN"],
@@ -1991,7 +2017,8 @@ POST /call/UserAsks
         "ask": 22,
         "question": "Flowers for the newcomer?",
         "asker": "yardmaster",
-        "since": "2026-10-08T09:30:00Z"
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
       },
       {
         "bead": "yd-crm",
@@ -2001,6 +2028,7 @@ POST /call/UserAsks
         "question": "Your id at the phone service",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "secret": {
           "source": "phone",
           "env": ["PHONE_USER"],
@@ -2022,6 +2050,7 @@ POST /call/UserAsks
         "question": "Take more mail from north?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "run": {
           "argv": ["peer", "allow", "north", "--mail-limit", "300"],
           "command": "yardr peer allow north --mail-limit 300",
@@ -2043,6 +2072,7 @@ POST /call/UserAsks
         "question": "May the CRM be called more often?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "run": {
           "argv": ["source", "set", "crm", "calls_per_hour=240"],
           "command": "yardr source set crm calls_per_hour=240",
@@ -2059,6 +2089,7 @@ POST /call/UserAsks
         "question": "The code the second sign-in showed",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "secret": {
           "source": "",
           "env": ["INPUT"],
@@ -2080,6 +2111,7 @@ POST /call/UserAsks
         "question": "The token it updates with",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "secret": {
           "source": "crm",
           "env": ["CRM_UPDATE_TOKEN"],
@@ -2101,6 +2133,7 @@ POST /call/UserAsks
         "question": "Your CRM token",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "secret": {
           "source": "crm",
           "env": ["CRM_TOKEN"],
@@ -2126,6 +2159,7 @@ POST /call/UserAsks
         "question": "The yard's account for gog",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "secret": {
           "source": "gog",
           "env": ["GOG_ACCOUNT"],
@@ -2147,6 +2181,7 @@ POST /call/UserAsks
         "question": "Set up the courier source?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "setup": {
           "pack": "courier",
           "label": "embedded in yardr doctest",
@@ -2217,6 +2252,7 @@ POST /call/UserAsks
         "question": "Set up the courier source for the night crew?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "setup": {
           "pack": "courier",
           "label": "embedded in yardr doctest",
@@ -2284,6 +2320,7 @@ POST /call/UserAsks
         "question": "Update the ledger source?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "setup": {
           "pack": "ledger",
           "label": "embedded in yardr doctest",
@@ -2341,6 +2378,7 @@ POST /call/UserAsks
         "question": "Update the parcel source?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "setup": {
           "pack": "parcel",
           "label": "embedded in yardr doctest",
@@ -2398,6 +2436,7 @@ POST /call/UserAsks
         "question": "The API key Claude Code will use",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "secret": {
           "source": "",
           "env": ["ANTHROPIC_API_KEY"],
@@ -2420,6 +2459,7 @@ POST /call/UserAsks
         "question": "Hook the bot's messages up?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "run": {
           "argv": ["hook", "add", "bot", "--source", "bot"],
           "command": "yardr hook add bot --source bot",
@@ -2442,6 +2482,7 @@ POST /call/UserAsks
         "question": "Turn push off for the yard depot?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
         "depot_push": {
           "depot": "yard",
           "off": true,
@@ -2455,6 +2496,36 @@ POST /call/UserAsks
             "line": "lets the yard change something outside it: landings of depot yard push to its origin no more"
           }
         ]
+      },
+      {
+        "bead": "yd-greet",
+        "bead_title": "The greeting",
+        "topic": "",
+        "ask": 67,
+        "question": "Welcome the newcomer on Monday?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
+      },
+      {
+        "bead": "yd-greet",
+        "bead_title": "The greeting",
+        "topic": "",
+        "ask": 68,
+        "question": "A lunch for the newcomer?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
+      },
+      {
+        "bead": "yd-greet",
+        "bead_title": "The greeting",
+        "topic": "",
+        "ask": 69,
+        "question": "A desk by the window?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
       }
     ],
     "decided": [
@@ -2466,6 +2537,7 @@ POST /call/UserAsks
         "question": "Invite Rhea to the yard?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "answered",
         "run": {
           "argv": ["user", "invite", "rhea", "--email", "rhea@example.net"],
@@ -2494,6 +2566,7 @@ POST /call/UserAsks
         "question": "Can the note wait?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "put aside",
         "return_at": "2026-10-08T09:30:00Z"
       },
@@ -2505,6 +2578,7 @@ POST /call/UserAsks
         "question": "Turn push off for the yard depot?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "answered",
         "ran": {
           "argv": ["depot-push-off", "yard"],
@@ -2532,6 +2606,7 @@ POST /call/UserAsks
         "question": "May the builders write notes in the CRM?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "answered",
         "run": {
           "argv": ["source", "grant", "crm", "put", "--group", "builders"],
@@ -2558,6 +2633,7 @@ POST /call/UserAsks
         "question": "The API key Claude Code needs at first login",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "answered",
         "secret": {
           "source": "",
@@ -2582,6 +2658,7 @@ POST /call/UserAsks
         "question": "Update the parcel source for the elders too?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "declined",
         "words": "the builders' card covers it",
         "setup": {
@@ -2641,6 +2718,7 @@ POST /call/UserAsks
         "question": "Update the ledger source for the elders too?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "declined",
         "words": "the builders' card covers it",
         "setup": {
@@ -2700,6 +2778,7 @@ POST /call/UserAsks
         "question": "Set up the courier source for the elders too?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "declined",
         "words": "the builders' card covers it",
         "setup": {
@@ -2772,6 +2851,7 @@ POST /call/UserAsks
         "question": "The yard's other account for gog",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "answered",
         "secret": {
           "source": "gog",
@@ -2795,6 +2875,7 @@ POST /call/UserAsks
         "question": "Your CRM token for updates",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "answered",
         "secret": {
           "source": "crm",
@@ -2822,6 +2903,7 @@ POST /call/UserAsks
         "question": "The token it reads with",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "answered",
         "secret": {
           "source": "crm",
@@ -2845,6 +2927,7 @@ POST /call/UserAsks
         "question": "The code the sign-in page showed",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "answered",
         "secret": {
           "source": "",
@@ -2868,6 +2951,7 @@ POST /call/UserAsks
         "question": "May the CRM be called more often?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "answered",
         "run": {
           "argv": ["source", "set", "crm", "calls_per_hour=120"],
@@ -2889,6 +2973,7 @@ POST /call/UserAsks
         "question": "Take more mail from north?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "answered",
         "run": {
           "argv": ["peer", "allow", "north", "--mail-limit", "100"],
@@ -2915,6 +3000,7 @@ POST /call/UserAsks
         "question": "Your id at the pager",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "answered",
         "secret": {
           "source": "pager",
@@ -2938,6 +3024,7 @@ POST /call/UserAsks
         "question": "Read the CRM's archive too?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "taken back",
         "words": "the archive is not in the CRM's API",
         "by": "yardmaster"
@@ -2950,6 +3037,7 @@ POST /call/UserAsks
         "question": "The API key for the books",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "answered",
         "secret": {
           "source": "books",
@@ -2972,6 +3060,7 @@ POST /call/UserAsks
         "question": "Send yardr-3msx and yardr-vgjp to build?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 2,
         "state": "answered",
         "option": 1,
         "option_label": "Send them",
@@ -2985,6 +3074,7 @@ POST /call/UserAsks
         "question": "Who greets the newcomer?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "answered",
         "words": "warmly"
       },
@@ -2996,6 +3086,7 @@ POST /call/UserAsks
         "question": "Close sketch PR #3?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "turn": 1,
         "state": "declined",
         "words": "not mine to take"
       }
@@ -3013,6 +3104,7 @@ POST /call/UserAsks
 | `open[].question` | string | the question in one line, as a person would ask it |
 | `open[].asker` | string | who asked: a name, or `name@peer` for a question another yard asked |
 | `open[].since` | time | when the ask was written: how long it waits (as sent, for a question another yard asked) |
+| `open[].turn` | number | how many answers the ask has taken: every pick, words answer, put-aside, decline and take-back written on it, `0` for none. It only grows, and is the same while nothing is written on the ask, so it is what a guarded write names: [`AnswerAskExpected`](#answeraskexpected), [`DeferAskExpected`](#deferaskexpected) and [`DeclineAskExpected`](#declineaskexpected). A put-aside ask that came back stays at the turn of its put-aside. `0` on a question another yard asked, which takes no guarded write |
 | `open[].weight` | array, may be absent | the card's weight as the yard weighed it when it wrote the card: one entry a class, each a way approving it widens what the yard does ([weighty cards](#weighty-cards)). Absent on a routine card |
 | `open[].weight[].class` | string | `credential`, `as-user`, `outside`, `code`, `trust` or `reads`. A later build may add a class: draw one a client does not know as weighty, with its line |
 | `open[].weight[].line` | string | the yard's line for the class with what this card does, as a terminal card prints it after `WEIGHTY · <class>: ` |
@@ -3068,6 +3160,7 @@ POST /call/UserAsks
 | `decided[].question` | string | the question in one line, as a person would ask it |
 | `decided[].asker` | string | who asked: a name, or `name@peer` for a question another yard asked |
 | `decided[].since` | time | when the ask was written: how long it waits (as sent, for a question another yard asked) |
+| `decided[].turn` | number | how many answers the ask has taken: every pick, words answer, put-aside, decline and take-back written on it, `0` for none. It only grows, and is the same while nothing is written on the ask, so it is what a guarded write names: [`AnswerAskExpected`](#answeraskexpected), [`DeferAskExpected`](#deferaskexpected) and [`DeclineAskExpected`](#declineaskexpected). A put-aside ask that came back stays at the turn of its put-aside. `0` on a question another yard asked, which takes no guarded write |
 | `decided[].weight` | array, may be absent | the card's weight as the yard weighed it when it wrote the card: one entry a class, each a way approving it widens what the yard does ([weighty cards](#weighty-cards)). Absent on a routine card |
 | `decided[].weight[].class` | string | `credential`, `as-user`, `outside`, `code`, `trust` or `reads`. A later build may add a class: draw one a client does not know as weighty, with its line |
 | `decided[].weight[].line` | string | the yard's line for the class with what this card does, as a terminal card prints it after `WEIGHTY · <class>: ` |
@@ -3207,7 +3300,8 @@ POST /call/Bead
             "stage": "new"
           }
         ],
-        "state": "open"
+        "state": "open",
+        "turn": 0
       },
       {
         "ask": 4,
@@ -3226,7 +3320,8 @@ POST /call/Bead
             "consequence": "leave it to yardmaster"
           }
         ],
-        "state": "open"
+        "state": "open",
+        "turn": 0
       },
       {
         "ask": 6,
@@ -3248,7 +3343,8 @@ POST /call/Bead
         "state": "answered",
         "option": 1,
         "words": "send them tonight",
-        "picks_before": 1
+        "picks_before": 1,
+        "turn": 2
       },
       {
         "ask": 8,
@@ -3268,7 +3364,8 @@ POST /call/Bead
           }
         ],
         "state": "declined",
-        "words": "not mine to take"
+        "words": "not mine to take",
+        "turn": 1
       },
       {
         "ask": 12,
@@ -3287,7 +3384,8 @@ POST /call/Bead
             "consequence": "leave it to yardmaster"
           }
         ],
-        "state": "open"
+        "state": "open",
+        "turn": 1
       },
       {
         "ask": 60,
@@ -3298,6 +3396,7 @@ POST /call/Bead
         "context": ["The linked depot is ready."],
         "options": [],
         "state": "open",
+        "turn": 0,
         "depot_push": {
           "depot": "yard",
           "off": true,
@@ -3321,7 +3420,8 @@ POST /call/Bead
         "context": ["It can be read tomorrow."],
         "options": [],
         "state": "put aside",
-        "return_at": "2026-10-08T09:30:00Z"
+        "return_at": "2026-10-08T09:30:00Z",
+        "turn": 1
       }
     ],
     "rounds": {
@@ -3413,7 +3513,8 @@ POST /call/Bead
         ],
         "recommend": 1,
         "why": "signed off",
-        "state": "open"
+        "state": "open",
+        "turn": 0
       }
     ]
   }
@@ -3443,6 +3544,7 @@ POST /call/Bead
         "context": ["Create one at https://books.example.com/account/api (read only)."],
         "options": [],
         "state": "answered",
+        "turn": 1,
         "secret": {
           "source": "books",
           "env": ["BOOKS_TOKEN"],
@@ -3465,6 +3567,7 @@ POST /call/Bead
         "context": ["Create one at https://crm.example.com/account/api (read only)."],
         "options": [],
         "state": "open",
+        "turn": 0,
         "secret": {
           "source": "crm",
           "env": ["CRM_UPDATE_TOKEN"],
@@ -3486,6 +3589,7 @@ POST /call/Bead
         "context": ["Create one at https://crm.example.com/account/api (read only)."],
         "options": [],
         "state": "open",
+        "turn": 0,
         "secret": {
           "source": "crm",
           "env": ["CRM_TOKEN"],
@@ -3517,7 +3621,8 @@ POST /call/Bead
         ],
         "state": "taken back",
         "words": "the archive is not in the CRM's API",
-        "by": "yardmaster"
+        "by": "yardmaster",
+        "turn": 1
       },
       {
         "ask": 23,
@@ -3528,6 +3633,7 @@ POST /call/Bead
         "context": ["It is on the first page of pager.example.com after login."],
         "options": [],
         "state": "answered",
+        "turn": 1,
         "secret": {
           "source": "pager",
           "env": ["PAGER_USER"],
@@ -3551,6 +3657,7 @@ POST /call/Bead
         "context": ["It is on the first page of phone.example.com after login."],
         "options": [],
         "state": "open",
+        "turn": 0,
         "secret": {
           "source": "phone",
           "env": ["PHONE_USER"],
@@ -3573,6 +3680,7 @@ POST /call/Bead
         "context": ["north's yard was refused 4 mails in the last hour."],
         "options": [],
         "state": "answered",
+        "turn": 1,
         "run": {
           "argv": ["peer", "allow", "north", "--mail-limit", "100"],
           "command": "yardr peer allow north --mail-limit 100",
@@ -3599,6 +3707,7 @@ POST /call/Bead
         "context": ["north's yard was refused 4 mails in the last hour."],
         "options": [],
         "state": "open",
+        "turn": 0,
         "run": {
           "argv": ["peer", "allow", "north", "--mail-limit", "300"],
           "command": "yardr peer allow north --mail-limit 300",
@@ -3621,6 +3730,7 @@ POST /call/Bead
         "context": ["The import was refused its 61st call of the hour."],
         "options": [],
         "state": "answered",
+        "turn": 1,
         "run": {
           "argv": ["source", "set", "crm", "calls_per_hour=120"],
           "command": "yardr source set crm calls_per_hour=120",
@@ -3642,6 +3752,7 @@ POST /call/Bead
         "context": ["The import was refused its 61st call of the hour."],
         "options": [],
         "state": "open",
+        "turn": 0,
         "run": {
           "argv": ["source", "set", "crm", "calls_per_hour=240"],
           "command": "yardr source set crm calls_per_hour=240",
@@ -3659,6 +3770,7 @@ POST /call/Bead
         "context": ["The login waits for what the sign-in page showed."],
         "options": [],
         "state": "answered",
+        "turn": 1,
         "secret": {
           "source": "",
           "env": ["INPUT"],
@@ -3682,6 +3794,7 @@ POST /call/Bead
         "context": ["The login waits for what the sign-in page showed."],
         "options": [],
         "state": "open",
+        "turn": 0,
         "secret": {
           "source": "",
           "env": ["INPUT"],
@@ -3704,6 +3817,7 @@ POST /call/Bead
         "context": ["Create one at https://crm.example.com/account/api (read only)."],
         "options": [],
         "state": "answered",
+        "turn": 1,
         "secret": {
           "source": "crm",
           "env": ["CRM_TOKEN"],
@@ -3727,6 +3841,7 @@ POST /call/Bead
         "context": ["Create one at https://crm.example.com/account/api (read only)."],
         "options": [],
         "state": "open",
+        "turn": 0,
         "secret": {
           "source": "crm",
           "env": ["CRM_UPDATE_TOKEN"],
@@ -3749,6 +3864,7 @@ POST /call/Bead
         "context": ["Create one at https://crm.example.com/account/api (read only)."],
         "options": [],
         "state": "answered",
+        "turn": 1,
         "secret": {
           "source": "crm",
           "env": ["CRM_UPDATE_TOKEN"],
@@ -3776,6 +3892,7 @@ POST /call/Bead
         "context": ["Create one at https://crm.example.com/account/api (read only)."],
         "options": [],
         "state": "open",
+        "turn": 0,
         "secret": {
           "source": "crm",
           "env": ["CRM_TOKEN"],
@@ -3802,6 +3919,7 @@ POST /call/Bead
         "context": ["Create one at https://gog.example.com/account/api (read only)."],
         "options": [],
         "state": "open",
+        "turn": 0,
         "secret": {
           "source": "gog",
           "env": ["GOG_ACCOUNT"],
@@ -3824,6 +3942,7 @@ POST /call/Bead
         "context": ["Create one at https://gog.example.com/account/api (read only)."],
         "options": [],
         "state": "answered",
+        "turn": 1,
         "secret": {
           "source": "gog",
           "env": ["GOG_ACCOUNT"],
@@ -3862,6 +3981,7 @@ POST /call/Bead
         "recommend": 1,
         "why": "reading is the job",
         "state": "open",
+        "turn": 0,
         "setup": {
           "pack": "courier",
           "label": "embedded in yardr doctest",
@@ -3959,6 +4079,7 @@ POST /call/Bead
           }
         ],
         "state": "open",
+        "turn": 0,
         "setup": {
           "pack": "courier",
           "label": "embedded in yardr doctest",
@@ -4053,6 +4174,7 @@ POST /call/Bead
           }
         ],
         "state": "open",
+        "turn": 0,
         "setup": {
           "pack": "ledger",
           "label": "embedded in yardr doctest",
@@ -4130,6 +4252,7 @@ POST /call/Bead
           }
         ],
         "state": "open",
+        "turn": 0,
         "setup": {
           "pack": "parcel",
           "label": "embedded in yardr doctest",
@@ -4208,6 +4331,7 @@ POST /call/Bead
         ],
         "state": "declined",
         "words": "the builders' card covers it",
+        "turn": 1,
         "setup": {
           "pack": "courier",
           "label": "embedded in yardr doctest",
@@ -4306,6 +4430,7 @@ POST /call/Bead
         ],
         "state": "declined",
         "words": "the builders' card covers it",
+        "turn": 1,
         "setup": {
           "pack": "ledger",
           "label": "embedded in yardr doctest",
@@ -4384,6 +4509,7 @@ POST /call/Bead
         ],
         "state": "declined",
         "words": "the builders' card covers it",
+        "turn": 1,
         "setup": {
           "pack": "parcel",
           "label": "embedded in yardr doctest",
@@ -4448,6 +4574,7 @@ POST /call/Bead
         "context": ["Create an API key for Claude Code usage."],
         "options": [],
         "state": "open",
+        "turn": 0,
         "secret": {
           "source": "",
           "env": ["ANTHROPIC_API_KEY"],
@@ -4471,6 +4598,7 @@ POST /call/Bead
         "context": ["Create an API key for Claude Code usage."],
         "options": [],
         "state": "answered",
+        "turn": 1,
         "secret": {
           "source": "",
           "env": ["ANTHROPIC_API_KEY"],
@@ -4495,6 +4623,7 @@ POST /call/Bead
         "context": ["The import leaves a note on each account it touches."],
         "options": [],
         "state": "answered",
+        "turn": 1,
         "run": {
           "argv": ["source", "grant", "crm", "put", "--group", "builders"],
           "command": "yardr source grant crm put --group builders",
@@ -4521,6 +4650,7 @@ POST /call/Bead
         "context": ["The bot's stream needs a hook to land in."],
         "options": [],
         "state": "open",
+        "turn": 0,
         "run": {
           "argv": ["hook", "add", "bot", "--source", "bot"],
           "command": "yardr hook add bot --source bot",
@@ -4545,6 +4675,7 @@ POST /call/Bead
         "context": ["Rhea works with the builders."],
         "options": [],
         "state": "answered",
+        "turn": 1,
         "run": {
           "argv": ["user", "invite", "rhea", "--email", "rhea@example.net"],
           "command": "yardr user invite rhea --email rhea@example.net",
@@ -4636,6 +4767,7 @@ POST /call/Bead
 | `asks[].words` | string, may be absent | what went with the pick, the words answer, or why the question is declined or taken back; on a question another yard asked, how it ended or stands put aside there; absent when there are none |
 | `asks[].by` | string, may be absent | who took the ask back, its asker or the operator; absent on every other state |
 | `asks[].return_at` | time, may be absent | when a put-aside ask comes back, here or in the yard that asked it; absent otherwise |
+| `asks[].turn` | number | how many answers the ask has taken: every pick, words answer, put-aside, decline and take-back written on it, `0` for none. It only grows, and is the same while nothing is written on the ask, so it is what a guarded write names: [`AnswerAskExpected`](#answeraskexpected), [`DeferAskExpected`](#deferaskexpected) and [`DeclineAskExpected`](#declineaskexpected). A put-aside ask that came back stays at the turn of its put-aside. `0` on a question another yard asked, which takes no guarded write |
 | `asks[].picks_before` | number, may be absent | how many picks there were before the current one, so a client can say "changed"; absent when there were none |
 | `asks[].weight` | array, may be absent | the card's weight as the yard weighed it when it wrote the card: one entry a class, each a way approving it widens what the yard does ([weighty cards](#weighty-cards)). Absent on a routine card |
 | `asks[].weight[].class` | string | `credential`, `as-user`, `outside`, `code`, `trust` or `reads`. A later build may add a class: draw one a client does not know as weighty, with its line |
@@ -5245,6 +5377,71 @@ Ends the ask with no option picked: the person will not decide it. It is what `y
 ```
 POST /call/DeclineAsk
 {"bead":"yd-greet","ask":5,"words":"the greeting can wait","actor":"jo"}
+
+{}
+```
+
+### `AnswerAskExpected`
+
+`AnswerAsk` guarded by the ask's turn: it picks or answers with words as `AnswerAsk` does, only while the ask is at the turn the client read. A guarded write names the turn the client read (`turn` of the ask in [`UserAsks`](#userasks) or [`Bead`](#bead)), and the yard checks it in the same write as the answer: when anyone has written on the ask since (a pick, words, a put-aside, a decline or a take-back, from any client), the call is refused with the code `conflict`, writes nothing, moves nothing and tells nobody, and the client reads the ask again before it asks its person again. A retry of a write that landed is refused so too, so a reply lost on the way is never an answer written twice. The ask's question, options, addressee and, on a card the yard put for a stage, its stage and stay are never rewritten under its seq, so `ask` with `turn` names what the person saw. Every other rule is the unguarded call's, and is refused with its own words and code `error`: who may answer, what the ask takes, the weight's word, a stage card's own stage. A `bead@peer` is refused: a question another yard asked is answered with the unguarded call. A yard from before the guarded writes answers each as a method it does not have (`no such method`), and the unguarded calls refuse `turn` as an argument they do not have, so a client never falls back to an unguarded write: it says the yard is too old and answers nothing. A pick drawn from an answered ask at its turn replaces the pick, as the person chose having seen it; the examples are a first pick at turn 0 and a changed pick at turn 1. It answers nothing; the answer is then a `noted` event in the stream.
+
+| argument | type | |
+|---|---|---|
+| `bead` | string | the bead |
+| `ask` | number | the ask note's seq |
+| `turn` | number | the ask's `turn` as the client read it; left out, `0`: an ask nobody has written on |
+| `option` | number | as `AnswerAsk`'s |
+| `words` | string | as `AnswerAsk`'s |
+| `actor` | string | who answers: the user's name |
+| `weighed` | bool | as `AnswerAsk`'s |
+
+```
+POST /call/AnswerAskExpected
+{"bead":"yd-greet","ask":67,"turn":0,"option":1,"words":"Monday it is","actor":"jo"}
+
+{}
+```
+
+```
+POST /call/AnswerAskExpected
+{"bead":"yd-greet","ask":67,"turn":1,"option":2,"actor":"jo"}
+
+{}
+```
+
+### `DeferAskExpected`
+
+`DeferAsk` guarded by the ask's turn: it puts the ask aside as `DeferAsk` does, only while the ask is at the turn the client read. A guarded write names the turn the client read (`turn` of the ask in [`UserAsks`](#userasks) or [`Bead`](#bead)), and the yard checks it in the same write as the answer: when anyone has written on the ask since (a pick, words, a put-aside, a decline or a take-back, from any client), the call is refused with the code `conflict`, writes nothing, moves nothing and tells nobody, and the client reads the ask again before it asks its person again. A retry of a write that landed is refused so too, so a reply lost on the way is never an answer written twice. The ask's question, options, addressee and, on a card the yard put for a stage, its stage and stay are never rewritten under its seq, so `ask` with `turn` names what the person saw. Every other rule is the unguarded call's, and is refused with its own words and code `error`: who may answer, what the ask takes, the weight's word, a stage card's own stage. A `bead@peer` is refused: a question another yard asked is answered with the unguarded call. A yard from before the guarded writes answers each as a method it does not have (`no such method`), and the unguarded calls refuse `turn` as an argument they do not have, so a client never falls back to an unguarded write: it says the yard is too old and answers nothing. It answers nothing; putting it aside is then a `noted` event in the stream.
+
+| argument | type | |
+|---|---|---|
+| `bead` | string | the bead |
+| `ask` | number | the ask note's seq |
+| `turn` | number | the ask's `turn` as the client read it; left out, `0`: an ask nobody has written on |
+| `actor` | string | who puts it aside: the user's name |
+
+```
+POST /call/DeferAskExpected
+{"bead":"yd-greet","ask":68,"turn":0,"actor":"jo"}
+
+{}
+```
+
+### `DeclineAskExpected`
+
+`DeclineAsk` guarded by the ask's turn: it declines the ask as `DeclineAsk` does, only while the ask is at the turn the client read. A guarded write names the turn the client read (`turn` of the ask in [`UserAsks`](#userasks) or [`Bead`](#bead)), and the yard checks it in the same write as the answer: when anyone has written on the ask since (a pick, words, a put-aside, a decline or a take-back, from any client), the call is refused with the code `conflict`, writes nothing, moves nothing and tells nobody, and the client reads the ask again before it asks its person again. A retry of a write that landed is refused so too, so a reply lost on the way is never an answer written twice. The ask's question, options, addressee and, on a card the yard put for a stage, its stage and stay are never rewritten under its seq, so `ask` with `turn` names what the person saw. Every other rule is the unguarded call's, and is refused with its own words and code `error`: who may answer, what the ask takes, the weight's word, a stage card's own stage. A `bead@peer` is refused: a question another yard asked is answered with the unguarded call. A yard from before the guarded writes answers each as a method it does not have (`no such method`), and the unguarded calls refuse `turn` as an argument they do not have, so a client never falls back to an unguarded write: it says the yard is too old and answers nothing. It answers nothing; declining is then a `noted` event in the stream.
+
+| argument | type | |
+|---|---|---|
+| `bead` | string | the bead |
+| `ask` | number | the ask note's seq |
+| `turn` | number | the ask's `turn` as the client read it; left out, `0`: an ask nobody has written on |
+| `words` | string | why they will not decide it |
+| `actor` | string | who declines: the user's name |
+
+```
+POST /call/DeclineAskExpected
+{"bead":"yd-greet","ask":69,"turn":0,"words":"the desk is taken","actor":"jo"}
 
 {}
 ```
@@ -5979,7 +6176,7 @@ POST /call/UninviteTeammate
 {
   "result": {
     "bead": "yd-uninvite",
-    "ask": 85
+    "ask": 92
   }
 }
 ```
