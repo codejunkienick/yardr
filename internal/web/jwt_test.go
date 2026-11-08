@@ -116,6 +116,10 @@ type jwksStub struct {
 	doc    string
 	status int
 	delay  time.Duration
+	// held is the gate a fetch waits at until it is closed, and arrived hears
+	// of the first fetch to wait there (hold).
+	held    chan struct{}
+	arrived chan struct{}
 }
 
 func newJWKStub(t *testing.T, doc string) *jwksStub {
@@ -124,8 +128,15 @@ func newJWKStub(t *testing.T, doc string) *jwksStub {
 	s.ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		s.fetches.Add(1)
 		s.mu.Lock()
-		delay, status, doc := s.delay, s.status, s.doc
+		delay, status, doc, held, arrived := s.delay, s.status, s.doc, s.held, s.arrived
 		s.mu.Unlock()
+		if held != nil {
+			select {
+			case arrived <- struct{}{}:
+			default:
+			}
+			<-held
+		}
 		if delay > 0 {
 			time.Sleep(delay)
 		}
@@ -150,6 +161,22 @@ func (s *jwksStub) breakWith(status int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.status = status
+}
+
+// hold makes the fetches that come after it wait at the stub until release
+// is called, and tells arrived of the first to get there. A test that has to
+// act while a fetch is in flight waits for that arrival. A delay long enough
+// for the act stops being long enough on a slow machine. Cleanup releases
+// too, so a test that fails with a fetch held does not leave the stub's close
+// waiting on it.
+func (s *jwksStub) hold() (arrived <-chan struct{}, release func()) {
+	held, got := make(chan struct{}), make(chan struct{}, 1)
+	s.mu.Lock()
+	s.held, s.arrived = held, got
+	s.mu.Unlock()
+	release = sync.OnceFunc(func() { close(held) })
+	s.t.Cleanup(release)
+	return got, release
 }
 
 // jwtServer builds a server for st in JWT mode against the stub's keys,
@@ -711,36 +738,88 @@ func TestJWTHeaderDefaultMatchesSetting(t *testing.T) {
 // it: a caller who hangs up mid-fetch does not abort it, so no one with a
 // token-shaped header can keep a rotation from landing by cancelling one
 // unknown-key request a minute.
+//
+// The stub holds the fetch until the test lets it go, and the test lets it go
+// only after the server has seen the caller hang up, so the test sets the
+// order of the two. A hang-up by client timeout against a stub that answers
+// after a delay holds only while the machine fires the timeout well before the
+// delay ends.
 func TestJWTRefreshOutlivesItsRequest(t *testing.T) {
 	t.Parallel()
 	keys := mustJWTTestKeys(t)
 	jwks := newJWKStub(t, jwksDoc(t, rsaJWK("a", &keys.a.PublicKey)))
-	ts, _ := serveJWT(t, jwks, "", map[string]string{jwtTestEmail: "mckean"})
+	st := storetest.New(t)
+	srv, _ := jwtServer(t, st, jwks, "", map[string]string{jwtTestEmail: "mckean"})
+	if _, err := st.AddUser(context.Background(), "mckean", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	// The request's context as the server has it: it ends when the server sees
+	// the caller go.
+	served := make(chan context.Context, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case served <- r.Context():
+		default:
+		}
+		srv.ServeHTTP(w, r)
+	}))
+	t.Cleanup(func() { shut(ts) })
+
 	jwks.setDoc(jwksDoc(t, rsaJWK("a", &keys.a.PublicKey), rsaJWK("b", &keys.b.PublicKey)))
-	jwks.mu.Lock()
-	jwks.delay = 300 * time.Millisecond
-	jwks.mu.Unlock()
+	arrived, release := jwks.hold()
 	token := signRSA(t, keys.b, "b", jwtClaims(jwtTestEmail))
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
+	ctx, hangUp := context.WithCancel(context.Background())
+	defer hangUp()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set(web.DefaultJWTHeader, signRSA(t, keys.c, "b", jwtClaims(jwtTestEmail)))
-	hangUp := &http.Client{Timeout: 50 * time.Millisecond}
-	if r, err := hangUp.Do(req); err == nil {
-		r.Body.Close()
-		t.Fatal("the hung-up request was answered before the slow fetch")
+	ended := make(chan error, 1)
+	go func() {
+		r, err := http.DefaultClient.Do(req)
+		if err == nil {
+			err = errors.New("answered with status " + strconv.Itoa(r.StatusCode))
+			r.Body.Close()
+		}
+		ended <- err
+	}()
+
+	// Every wait here ends on the event it names; the fuse is only against a
+	// hang.
+	fuse := time.After(10 * time.Second)
+	select {
+	case <-arrived:
+	case err := <-ended:
+		t.Fatalf("the unknown key id ended while its fetch was held: %v", err)
+	case <-fuse:
+		t.Fatal("the unknown key id did not fetch")
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for jwks.fetches.Load() < 2 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	reqCtx := <-served
+	hangUp()
+	select {
+	case err := <-ended:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("the hung-up request ended with %v, want it cancelled", err)
+		}
+	case <-fuse:
+		t.Fatal("the hung-up request did not end")
 	}
-	time.Sleep(500 * time.Millisecond)
-	jwks.mu.Lock()
-	jwks.delay = 0
-	jwks.mu.Unlock()
+	select {
+	case <-reqCtx.Done():
+	case <-fuse:
+		t.Fatal("the server did not see the request hang up")
+	}
+
+	// The fetch the hung-up request started answers now, to no one. If the
+	// hang-up had aborted it, the cool-down would keep the next request from
+	// fetching again, and the rotated key would stay unknown.
+	release()
 	if got := jwtGet(t, ts, "/", web.DefaultJWTHeader, token); got.status != 200 {
 		t.Fatalf("after the hang-up, the rotated key: status %d, want 200: %s", got.status, got.body)
+	}
+	if n := jwks.fetches.Load(); n != 2 {
+		t.Fatalf("fetched %d times, want 2 (start and the hung-up request's refresh)", n)
 	}
 }
 
