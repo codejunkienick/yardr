@@ -80,6 +80,16 @@
 # so it splits no cache, and a leg that meets a load it did not start in, the
 # re-run alone and a plain run all size their waits to the load they meet.
 #
+# conformance/bdp's test runs conformance/bdp/probe-core-test.sh, which builds
+# yardr and seeds a yard eight times over and needs node, so it runs only where
+# the run sets YARDR_CONFORMANCE, which it does when a path under conformance/
+# changed (the reads table's row for conformance/ selects the package). Every
+# other run of the package skips, plain go test ./... among them (CI's plain
+# jobs have no node), and so does a whole suite chosen for another reason
+# (go.mod, a file no row knows, no base, the quiet run), since none of those
+# changed anything there. Where a change does set it and a tool is missing, the
+# test fails and says how to get the tool, as the shellchecked step does.
+#
 # After each step a line says how many seconds it took (test: go vet ./...
 # took 14 s), so a landing's log shows where a run's time went. The run ends
 # with its test line, the line a note carries whole: `test: sh .yardr/test @
@@ -2306,6 +2316,14 @@ if [ "$1" = sizes ]; then
   trap - EXIT
   exit 0
 fi
+# The mark that lets conformance/bdp's test run its script (the header says
+# when) is the run's to give and never the caller's: one the run was started
+# with would run the script in every whole suite. So it starts empty, ahead of
+# the base, and a run that cannot compare has none. It is exported so that the
+# race leg's worker, which re-enters this script above this point, has the
+# run's value.
+YARDR_CONFORMANCE=
+export YARDR_CONFORMANCE
 # What the branch changed: against the base, from where the branch left it.
 # For a wagon of a train that is the tip of its train's branch, so a wagon is
 # tested for what it changed, not for the train's earlier wagons again.
@@ -2382,6 +2400,10 @@ since="since $base ($said), from $(git rev-parse --short "$from")"
 # the - form of a mail, a reply and the other texts an agent gives yardr
 # (TestDocsShowNoQuotedText): docs/ names it, the embedded packs reach it as
 # importers of packs, and packs/template/, which the embed skips, names it.
+# conformance/ is read by conformance/bdp's test, which runs the scripts there
+# when the run sets YARDR_CONFORMANCE (below). Nothing imports that package, so
+# its row alone selects it, for any path under conformance/, the README too,
+# because a row cannot tell a path the scripts read from one they do not.
 reads='
 packs/starter/                 internal/pack internal/cli
 packs/design/                  contrib/assembly internal/pack
@@ -2458,7 +2480,7 @@ CLAUDE.md                      -
 .github/workflows/release.yml  contrib/release
 .github/workflows/ci.yml       .
 .gitignore                     -
-conformance/                   -
+conformance/                   conformance/bdp
 '
 built() {
   [ -z "$YARDR_TEST_PLAN" ] || return 0
@@ -2481,6 +2503,13 @@ built() {
 # compiled changed" and did not race it (yardr-mwh8). A move costs what a
 # deletion does: a landing is the whole suite.
 changed=$(git diff --no-renames --name-only "$from")
+# A change under conformance/ has its test run whatever else the run tests. A
+# whole suite that go.mod or a stray file chose holds the package too, and
+# without the mark it would skip the package and pass the change unjudged. A
+# deleted path counts, as it does in the table's rows.
+if printf '%s\n' "$changed" | grep -q '^conformance/'; then
+  YARDR_CONFORMANCE=1
+fi
 # What is tested: the packages that changed, and
 # every package that imports one of them, however far up, since a change
 # breaks its importers as easily as itself. go list knows both, with the

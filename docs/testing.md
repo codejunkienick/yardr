@@ -297,6 +297,23 @@ plain go-test step queues as class 1; a smaller selection takes no ticket
 go.sum, a deletion, a file no row knows) and one with nothing to compare
 with still run the whole suite. The whole suite otherwise runs only when
 the yard is quiet (R6 below).
+One test runs for a change to its own files and for no other run.
+`conformance/bdp`'s `TestProbeCoreFailurePaths` runs
+`conformance/bdp/probe-core-test.sh`, the failure paths of BDP's conformance
+probe. The script builds yardr, seeds a yard eight times over, and needs bash,
+go, python3, curl, jq and node. The table's row for `conformance/` selects the
+package, which nothing imports, for any path under it. When one is among what
+changed, a deleted or moved path included, the gate sets `YARDR_CONFORMANCE=1`
+for the run. Without the mark the test skips and says so, so `go test ./...`
+(CI's plain jobs have no node), a whole suite chosen for another reason and
+the quiet run (R6) do not run the script. A whole suite that a conformance
+change shares with `go.mod` or a file no row knows is marked too. With the
+mark, a missing tool fails the test, which names the tool and how to install
+it, as the shellcheck step fails where shellcheck is missing. A skip would let
+a broken seed through to CI's conformance job after the landing. The script
+takes about half a minute, so the package has no R1 allow-list row. CI's
+conformance job runs it too, and runs `probe-core.sh`, which needs BDP's
+checkout and the network and stays CI's.
 A landing's race leg takes the machine-wide race lock ahead of any other
 run's (yardr-0cw8). A ticket is class 0 for a landing's race leg and class
 1 for a whole-suite plain step, including an unraced landing's plain

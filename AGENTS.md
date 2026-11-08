@@ -39,6 +39,9 @@ worked); user docs live in `docs/` and are not repeated here.
   run the server-yard script against.
 - `conformance/bdp`: BDP's provider kit run at `yardr bdp serve`
   (`probe-core.sh`), as CI's conformance job runs it at the commit its README pins.
+  `probe-core-test.sh` drives that script through the paths a healthy server never
+  shows. CI runs it, and so does the gate for a change under `conformance/`, through
+  the Go test beside it (`YARDR_CONFORMANCE`, which `.yardr/test` sets).
 - `.yardr/`: the yard's own rules for this depot: `depot.md`, the `test`
   gate, `flows/`, `roles/`, `security_paths` (the paths a reviewer may not
   call `done-safe` for).

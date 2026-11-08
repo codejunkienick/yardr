@@ -194,7 +194,9 @@ func goModTemplate(t *testing.T) (template, base, short string) {
 // of (YARDR_TEST_BEADS, which a case that checks the beads a flaky log line
 // carries would find there already), the quiet run's marks
 // (YARDR_R1_STRICT and YARDR_QUIET_RUN), which would otherwise change
-// strict-budget judging and enable quiet-run-only tests, and the run's yard
+// strict-budget judging and enable quiet-run-only tests, the mark a change
+// under conformance/ gives the run (YARDR_CONFORMANCE, which a case that
+// checks the go the script runs would find there already), and the run's yard
 // (YARDR_HOME, YARDR_BEAD, YARDR_DEPOT, YARDR_ACTOR and YARDR_SESSION): a
 // case that runs the script files a flake through a stub yardr or through
 // none, never through the real CLI into the run's yard. A CI runner's own
@@ -216,7 +218,7 @@ func scriptEnv() []string {
 func scriptEnvFrom(environ []string) []string {
 	env := slices.DeleteFunc(slices.Clone(environ), func(kv string) bool {
 		k, _, _ := strings.Cut(kv, "=")
-		return slices.Contains([]string{"YARDR_BASE", "YARDR_LANDING", "YARDR_TEST_PLAN", "YARDR_TEST_RPC", "GOOS", "GOFLAGS", "YARDR_RACE_HELD", "YARDR_R1_STRICT", "YARDR_QUIET_RUN", "YARDR_TEST_LOAD", "YARDR_TEST_BEADS", "YARDR_HOME", "YARDR_BEAD", "YARDR_DEPOT", "YARDR_ACTOR", "YARDR_SESSION", "GITHUB_ACTIONS"}, k)
+		return slices.Contains([]string{"YARDR_BASE", "YARDR_LANDING", "YARDR_TEST_PLAN", "YARDR_TEST_RPC", "GOOS", "GOFLAGS", "YARDR_RACE_HELD", "YARDR_R1_STRICT", "YARDR_QUIET_RUN", "YARDR_CONFORMANCE", "YARDR_TEST_LOAD", "YARDR_TEST_BEADS", "YARDR_HOME", "YARDR_BEAD", "YARDR_DEPOT", "YARDR_ACTOR", "YARDR_SESSION", "GITHUB_ACTIONS"}, k)
 	})
 	return append(env, "YARDR_TEST_LOADAVG=1.5", "YARDR_TEST_CORES=10", "YARDR_HOME="+noYardHome)
 }
@@ -953,6 +955,13 @@ func TestYardTestSelects(t *testing.T) {
 			testedNoRace + " m.test/m"}},
 		{"a file its name begins", []string{".yardr/tests.md"}, []string{
 			pre + ".yardr/tests.md is read by no known package: testing everything"}},
+		// conformance/bdp's test runs the scripts under conformance/ and nothing
+		// imports it, so the row alone selects it, for any path there. A script
+		// no test read would pass the gate and fail CI's conformance job after the
+		// landing.
+		{"a script under conformance", []string{"conformance/bdp/probe-core.sh", "conformance/bdp/README.md"}, []string{
+			pre + "conformance/bdp/README.md and 1 more under conformance/ changed: read by the tests of conformance/bdp",
+			testedNoRace + " m.test/m/conformance/bdp"}},
 		{"an embedded file", []string{"emb/a.txt"}, []string{
 			testedNoRace + " m.test/m/emb m.test/m/top"}},
 		{"a go file", []string{"alone/p.go", "docs/web.md"}, []string{
@@ -1013,6 +1022,12 @@ func TestYardTestSelects(t *testing.T) {
 				pre + "packs/starter/roles/builder.md changed: read by the tests of internal/pack internal/cli",
 				pre + ".github/a.yml changed: no test reads it",
 				tested + " m.test/m/contrib/assembly m.test/m/contrib/deploy m.test/m/contrib/isolated-yard m.test/m/contrib/peer m.test/m/contrib/release m.test/m/contrib/server-yard m.test/m/internal/cli m.test/m/internal/pack m.test/m/packs m.test/m/packtop"}},
+		// A script is not compiled code, so the package that runs it is tested
+		// without -race.
+		{"a landing of a conformance script", []string{"conformance/bdp/probe-core.sh"},
+			landing + "nothing compiled changed" + sincePH + unraced, []string{
+				pre + "conformance/bdp/probe-core.sh changed: read by the tests of conformance/bdp",
+				testedNoRace + " m.test/m/conformance/bdp"}},
 		// Nothing to test, so no claim about how: the first line says only what
 		// compiled.
 		{"a landing of what no test reads", []string{".github/a.yml"},
@@ -1110,22 +1125,27 @@ func TestYardTestSelects(t *testing.T) {
 	// every other call.
 	for _, c := range []struct {
 		name    string
-		env     []string // beyond the plain run's: a landing's mark
+		env     []string // beyond the plain run's: a landing's mark, or what the caller started the run with
 		changed []string
 		first   string
 		calls   []string
 		steps   []string
 	}{
-		{"a plain run of the docs runs without -race", nil, []string{"docs/api.md", "docs/design/2026-10-12-a.md"},
+		// A script under conformance/ marks the run for conformance/bdp's test. The
+		// fake go writes the mark down as a prefix of every call it gets, so the
+		// rows below that have none show their run was not marked.
+		{"a plain run of the docs and a conformance script runs without -race, marked for conformance/bdp's test", nil, []string{"docs/api.md", "docs/design/2026-10-12-a.md", "conformance/bdp/probe-core.sh"},
 			pre + "what changed" + sincePH + plainWhy,
-			[]string{"vet ./...", "build ./...", "test m.test/m m.test/m/internal/rpc"},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test m.test/m m.test/m/internal/rpc"}},
+			[]string{"conformance vet ./...", "conformance build ./...", "conformance test m.test/m m.test/m/conformance/bdp m.test/m/internal/rpc"},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test m.test/m m.test/m/conformance/bdp m.test/m/internal/rpc"}},
 		{"a landing of one design document runs without -race", []string{"YARDR_LANDING=1"}, []string{"docs/design/2026-10-12-a.md"},
 			landing + "nothing compiled changed" + sincePH + unraced,
 			[]string{"vet ./...", "build ./...", "test m.test/m"},
 			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test m.test/m"}},
-		// A landing races compiled code; a plain run does not.
-		{"a plain run of a go file runs without -race", nil, []string{"alone/p.go"},
+		// A landing races compiled code; a plain run does not. The mark is the run's
+		// to give: one the caller had is dropped, or the script would run in every
+		// whole suite.
+		{"a plain run of a go file runs without -race, and drops a conformance mark the caller had", []string{"YARDR_CONFORMANCE=1"}, []string{"alone/p.go"},
 			pre + "what changed" + sincePH + plainWhy,
 			[]string{"vet ./...", "build ./...", "test m.test/m/alone"},
 			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test m.test/m/alone"}},
@@ -1133,9 +1153,11 @@ func TestYardTestSelects(t *testing.T) {
 			pre + "what changed" + sincePH + plainWhy,
 			[]string{"vet ./...", "build ./...", "test ./..."},
 			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test ./..."}},
-		{"a plain run of go.mod tests every package without -race", []string{"YARDR_RACE_HELD=1"}, []string{"go.mod"},
+		// A whole suite is marked when a path under conformance/ is among what
+		// changed, and was not for the file no row knows above.
+		{"a plain run of go.mod and a conformance script tests every package without -race, marked for conformance/bdp's test", []string{"YARDR_RACE_HELD=1"}, []string{"go.mod", "conformance/bdp/probe-core.sh"},
 			pre + "what changed" + sincePH + plainWhy,
-			[]string{"vet ./...", "build ./...", "test ./..."},
+			[]string{"conformance vet ./...", "conformance build ./...", "conformance test ./..."},
 			[]string{"gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test ./..."}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -1143,7 +1165,7 @@ func TestYardTestSelects(t *testing.T) {
 			fx := rowFixture(t)
 			realGo := needTool(t, "go")
 			fake, _ := fakeBins(t, map[string]string{
-				"go": "#!/bin/sh\nif [ \"$1\" = list ]; then HOME=$REAL_HOME exec \"$REAL_GO\" \"$@\"; fi\necho \"${GOOS:+$GOOS }$*\" >>\"$FAKE/calls\"\n",
+				"go": "#!/bin/sh\nif [ \"$1\" = list ]; then HOME=$REAL_HOME exec \"$REAL_GO\" \"$@\"; fi\necho \"${YARDR_CONFORMANCE:+conformance }${GOOS:+$GOOS }$*\" >>\"$FAKE/calls\"\n",
 			})
 			home := t.TempDir()
 			env := append([]string{"YARDR_TEST_PLAN=", "HOME=" + home, "REAL_HOME=" + os.Getenv("HOME"), "FAKE=" + fake, "REAL_GO=" + realGo, pathWith(fake)}, c.env...)
@@ -3378,15 +3400,16 @@ func plainLockFixture(t *testing.T, script []byte) (dir, base string, pkgs []str
 func overPlainLine(pkgs []string) int { return len(pkgs)*7/10 + 1 }
 
 // plainLockFake writes the go a plain-lock run drives: the real one for the
-// list of packages, and every other call written down. A go test also marks
-// its start and end in ORDER (RUN names the run), waiting for RELEASE first,
-// and prints the ok lines OKS names, so two runs' legs order themselves in
-// one file.
+// list of packages, and every other call written down, after "conformance"
+// when the run has the mark that a change under conformance/ gives it. A go
+// test also marks its start and end in ORDER (RUN names the run), waiting for
+// RELEASE first, and prints the ok lines OKS names, so two runs' legs order
+// themselves in one file.
 func plainLockFake(t *testing.T, realGo string) (fake string) {
 	t.Helper()
 	text := "#!/bin/sh\n" +
 		"if [ \"$1\" = list ]; then HOME=$REAL_HOME exec \"$REAL_GO\" \"$@\"; fi\n" +
-		"echo \"${GOOS:+$GOOS }$*\" >>\"$FAKE/calls\"\n" +
+		"echo \"${YARDR_CONFORMANCE:+conformance }${GOOS:+$GOOS }$*\" >>\"$FAKE/calls\"\n" +
 		"if [ \"$1\" = test ]; then\n" +
 		"  echo \"start-$RUN\" >>\"$ORDER\"\n" +
 		"  n=0\n" +
@@ -3594,33 +3617,42 @@ func TestYardTestWholePlainRunsSerialize(t *testing.T) {
 // and queues for it on the race lock as class 1: held here by the test until
 // the run says it waits, the run waits with its ticket out, then runs when
 // the lock is free, with the same wait line and waited seconds a landing's
-// wait prints.
+// wait prints. A change under conformance/ among them marks the run for
+// conformance/bdp's test, and the leg that queues, which a worker the lock's
+// holder starts runs, has the mark as the steps before it do.
 func TestYardTestWholePlainPathsQueue(t *testing.T) {
 	t.Parallel()
 	needTool(t, "perl")
 	realGo := needTool(t, "go")
 	script := gateScript(t)
 	// One template fixture: each case copies it and changes its own copy,
-	// so the two do not stage the same repository twice.
+	// so the three do not stage the same repository twice.
 	template, base, _ := plainLockFixture(t, script)
+	changeGoMod := func(t *testing.T, dir string) {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), append(b, []byte("\n// changed\n")...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, c := range []struct {
 		name   string
 		change func(t *testing.T, dir string)
+		marked bool // the go calls of the run have the conformance mark
 	}{
-		{"go.mod", func(t *testing.T, dir string) {
-			t.Helper()
-			b, err := os.ReadFile(filepath.Join(dir, "go.mod"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(dir, "go.mod"), append(b, []byte("\n// changed\n")...), 0o644); err != nil {
-				t.Fatal(err)
-			}
-		}},
+		{"go.mod", changeGoMod, false},
 		{"a file no row knows", func(t *testing.T, dir string) {
 			t.Helper()
 			writeFile(t, dir, "contrib/x.txt", "changed\n")
-		}},
+		}, false},
+		{"go.mod and a script under conformance/", func(t *testing.T, dir string) {
+			t.Helper()
+			changeGoMod(t, dir)
+			writeFile(t, dir, "conformance/bdp/probe-core.sh", "changed\n")
+		}, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -3656,8 +3688,12 @@ func TestYardTestWholePlainPathsQueue(t *testing.T) {
 				t.Fatalf("err %v, output:\n%s", err, got)
 			}
 			wantQueued(t, "the run", got)
-			if calls, _ := os.ReadFile(filepath.Join(fake, "calls")); strings.TrimSpace(string(calls)) != "vet ./...\nbuild ./...\ntest ./..." {
-				t.Errorf("go was run as:\n%s\nwant:\n%s", calls, "vet ./...\nbuild ./...\ntest ./...")
+			want := "vet ./...\nbuild ./...\ntest ./..."
+			if c.marked {
+				want = "conformance vet ./...\nconformance build ./...\nconformance test ./..."
+			}
+			if calls, _ := os.ReadFile(filepath.Join(fake, "calls")); strings.TrimSpace(string(calls)) != want {
+				t.Errorf("go was run as:\n%s\nwant:\n%s", calls, want)
 			}
 			if entries, _ := os.ReadDir(qdir); len(entries) != 0 {
 				t.Errorf("tickets left behind: %v", entries)
@@ -5996,14 +6032,14 @@ func TestYardTestBudgets(t *testing.T) {
 		})
 	}
 
-	t.Run("quiet run marks and the race leg's wait factor do not reach the budget probe", func(t *testing.T) {
+	t.Run("quiet run marks, the conformance mark and the race leg's wait factor do not reach the budget probe", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeFile(t, dir, "leak.txt", dispatchLeg)
-		inheritedEnv := append(os.Environ(), "YARDR_R1_STRICT=1", "YARDR_QUIET_RUN=1", "YARDR_TEST_LOAD=3.0")
+		inheritedEnv := append(os.Environ(), "YARDR_R1_STRICT=1", "YARDR_QUIET_RUN=1", "YARDR_CONFORMANCE=1", "YARDR_TEST_LOAD=3.0")
 		for _, kv := range scriptEnvFrom(inheritedEnv) {
 			k, _, _ := strings.Cut(kv, "=")
-			if k == "YARDR_R1_STRICT" || k == "YARDR_QUIET_RUN" || k == "YARDR_TEST_LOAD" {
+			if k == "YARDR_R1_STRICT" || k == "YARDR_QUIET_RUN" || k == "YARDR_CONFORMANCE" || k == "YARDR_TEST_LOAD" {
 				t.Fatalf("scriptEnv carries %q from the run", kv)
 			}
 		}

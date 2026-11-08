@@ -42,6 +42,17 @@ before you trust a run.
 `BDP_REPORT` keeps the kit's JSON report in a file, and `BDP_PORT` names a port to
 serve on.
 
+## The failure-path test
+
+`probe-core-test.sh` runs the script through the paths a healthy server never shows:
+a kit that fails, that crashes, that has nothing to read, a pnpm that refuses. The
+kit and pnpm are stand-ins, so it needs no BDP checkout and no network, only
+bash, go, python3, curl, jq and node, and it takes about half a minute. CI runs
+it before `probe-core.sh`. The test gate (`sh .yardr/test`) runs it too, through
+`probe_core_test.go`, when a path under `conformance/` changed, so a broken seed
+or verdict fails the gate and not the CI run after the landing. A machine without
+one of the tools fails that test, and the failure says how to get the tool.
+
 ## What it covers
 
 At the pinned commit the kit has 28 required rows and 33 optional ones. Against a

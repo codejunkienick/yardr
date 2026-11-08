@@ -10,7 +10,7 @@
 # stand-in reads the served link inventory first and fails unless the seed's two
 # links to an outside issue are in it: the real kit validates every link it is
 # served but cannot tell that these were never seeded. Each scenario says what the
-# exit status must be. Needs go, python3, curl, jq and node.
+# exit status must be. Needs bash, go, python3, curl, jq and node.
 set -u
 ROOT=${ROOT:-$PWD}
 script=$ROOT/conformance/bdp/probe-core.sh
