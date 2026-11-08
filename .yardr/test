@@ -2378,7 +2378,10 @@ since="since $base ($said), from $(git rev-parse --short "$from")"
 # root package or its tests either, so each has its row too, and a new one
 # needs its row when it is added.
 # It also follows every link of the README to its page and heading, so the
-# README and docs/ name it.
+# README and docs/ name it, and it holds every doc and every pack's SETUP.md to
+# the - form of a mail, a reply and the other texts an agent gives yardr
+# (TestDocsShowNoQuotedText): docs/ names it, the embedded packs reach it as
+# importers of packs, and packs/template/, which the embed skips, names it.
 reads='
 packs/starter/                 internal/pack internal/cli
 packs/design/                  contrib/assembly internal/pack
@@ -2391,7 +2394,7 @@ packs/telegram/                internal/hooks internal/store internal/source
 packs/pushover/                internal/notify internal/dispatch
 packs/posthog/                 internal/hooks internal/store
 packs/webhook/                 internal/hooks
-packs/template/                internal/pack packs
+packs/template/                internal/pack packs .
 packs/website/                 internal/pack
 packs/testdata/                packs
 .yardr/flows/                 internal/cli internal/dispatch internal/store internal/flowdraw contrib/assembly packs

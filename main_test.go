@@ -266,6 +266,91 @@ func TestNoGoCodeNamesANotifyService(t *testing.T) {
 	}
 }
 
+// quotedTextShape is one free text an agent gives yardr, found written as a
+// double-quoted argument by its pattern. Each has two samples: the quoted
+// form, which the pattern must hold both in a Go string (\") and in a raw one
+// ("), and the - form, which it must not, so that a pattern that stopped
+// matching would not leave its shape unheld without a failure.
+type quotedTextShape struct {
+	name, pattern, quoted, dash string
+	// docsLeft is the bead that rewrites the examples the docs still show of
+	// this shape. Until it lands TestDocsShowNoQuotedText leaves the shape
+	// out, and it fails once no doc shows the shape, so that the field goes
+	// with the last example and the docs are held to the shape from then on.
+	docsLeft string
+	re       *regexp.Regexp
+}
+
+// globalFlags are the flags every command takes (the root command's
+// persistent ones, internal/cli/root.go), which may stand between yardr and a
+// command's name: a pattern that starts at yardr would otherwise pass over
+// `yardr --home $T/a mail ...`. The set is closed, and a value is read in
+// either of its forms, because a pattern that took any flag and its value
+// could take the addressee for one. A new global flag is named here.
+const globalFlags = `( --home(=\S+| \S+)| --actor(=\S+| \S+)| --json)*`
+
+// quotedTextShapes are the free texts that nothing an agent reads shows in
+// double quotes (TestNoGoCodeShowsAQuotedText, TestDocsShowNoQuotedText), each
+// held to its samples with every global flag in front and to the prose that
+// is no command. A walker gets its own copy, since it compiles the patterns
+// into it and the walkers run in parallel.
+//
+// A pattern runs from the command's name over the few words before the text
+// to the quote that opens it; no more are allowed, or the closing quote of a
+// Go string later on the line would be taken for it. Mail, reply and remember
+// are English words as well, so their pattern starts at `yardr`, or at the %s
+// that stands for it in a text that is given the program's path, and allows
+// the global flags after it. The other patterns start at the command's own
+// words, so a flag before them changes nothing.
+func quotedTextShapes(t *testing.T) []quotedTextShape {
+	t.Helper()
+	shapes := []quotedTextShape{
+		{name: "a bead note", pattern: `bead note \S+ \\?"|bead (done|advance)\b.*--note \\?"`,
+			quoted: `yardr bead note web-1 "..."`, dash: `yardr bead note <id> -`,
+			docsLeft: "yardr-q8ea"},
+		{name: "a mail", pattern: `(yardr|%s)` + globalFlags + ` mail (\S+ ){1,2}\\?"`,
+			quoted: `yardr mail <crew member>@<peer> "..."`, dash: `yardr mail <name> -`},
+		{name: "a reply", pattern: `(yardr|%s)` + globalFlags + ` reply (\S+ ){1,3}\\?"`,
+			quoted: `yardr reply 4211 "..."`, dash: `yardr reply <seq> -`},
+		{name: "a handoff", pattern: `crew handoff \S+ \\?"`,
+			quoted: `yardr crew handoff %s "..."`, dash: `yardr crew handoff <name> -`},
+		{name: "a journal entry", pattern: `crew journal \S+ \\?"`,
+			quoted: `yardr crew journal %[1]s "..."`, dash: `yardr crew journal <name> -`},
+		{name: "a memory", pattern: `(yardr|%s)` + globalFlags + ` remember (\S+ ){0,3}\\?"`,
+			quoted: `yardr remember "<title>" -b "<body>"`, dash: `yardr remember - -b -`},
+		{name: "a thread's title", pattern: `thread open (\S+ ){1,9}\\?"`,
+			quoted: `yardr thread open github --crew yardmaster --in acme/webapp --assign jo -b body "Retries"`,
+			dash:   `yardr thread open <source> --crew <member> --in <place> --assign <user> -b body -`},
+	}
+	// The line yardr doctor prints once a yard's first bead has merged, which
+	// docs/doctor.md quotes: English that names a command's word and quotes
+	// something after it is no command, which is why the patterns of mail,
+	// reply and remember start at yardr.
+	const prose = `Tell us it landed: mail yardmaster@yardr.dev with "landed".`
+	for i := range shapes {
+		sh := &shapes[i]
+		sh.re = regexp.MustCompile(sh.pattern)
+		// The samples behind each name of the program and each spelling of
+		// the global flags, as a doc's trial block sets the home first.
+		for _, program := range []string{"yardr", "%s"} {
+			for _, flags := range []string{"", " --home $T/a", " --actor ada", " --actor=ada", " --json", " --json --home=$T/a --actor ada"} {
+				quoted := strings.Replace(sh.quoted, "yardr", program+flags, 1)
+				dash := strings.Replace(sh.dash, "yardr", program+flags, 1)
+				if !sh.re.MatchString(quoted) || !sh.re.MatchString(strings.ReplaceAll(quoted, `"`, `\"`)) {
+					t.Errorf("the pattern for %s misses %q", sh.name, quoted)
+				}
+				if sh.re.MatchString(dash) {
+					t.Errorf("the pattern for %s holds the - form %q", sh.name, dash)
+				}
+			}
+		}
+		if sh.re.MatchString(prose) {
+			t.Errorf("the pattern for %s holds prose, which is no command: %q", sh.name, prose)
+		}
+	}
+	return shapes
+}
+
 // A refusal, a brief or a help text that shows a bead note, a mail, a reply,
 // a handoff, a journal entry, a memory or a thread's title as a double-quoted
 // argument teaches the shape whose backtick spans and $( ) the shell runs
@@ -277,50 +362,12 @@ func TestNoGoCodeNamesANotifyService(t *testing.T) {
 // role, since one sandbox that reads these refusals cannot make a heredoc's
 // temporary file (yardr-g8ky). Tests are not held to this: they say what the
 // refusals must not.
-//
-// Each shape has its pattern and two samples: the quoted form, which the
-// pattern must hold both in a Go string (\") and in a raw one ("), and the -
-// form, which it must not, so that a pattern that stopped matching would not
-// leave its shape unheld without a failure.
 func TestNoGoCodeShowsAQuotedText(t *testing.T) {
 	t.Parallel()
-	// A pattern runs from the command's name over the few words before the
-	// text to the quote that opens it; no more are allowed, or the closing
-	// quote of a Go string later on the line would be taken for it. Mail,
-	// reply and remember are English words as well, so their pattern starts
-	// at `yardr`, or at the %s that stands for it in a text that is given the
-	// program's path.
-	shapes := []struct {
-		name, pattern, quoted, dash string
-		re                          *regexp.Regexp
-	}{
-		{name: "a bead note", pattern: `bead note \S+ \\?"|bead (done|advance)\b.*--note \\?"`,
-			quoted: `yardr bead note web-1 "..."`, dash: `yardr bead note <id> -`},
-		{name: "a mail", pattern: `(yardr|%s) mail (\S+ ){1,2}\\?"`,
-			quoted: `yardr mail <crew member>@<peer> "..."`, dash: `yardr mail <name> -`},
-		{name: "a reply", pattern: `(yardr|%s) reply (\S+ ){1,3}\\?"`,
-			quoted: `yardr reply 4211 "..."`, dash: `yardr reply <seq> -`},
-		{name: "a handoff", pattern: `crew handoff \S+ \\?"`,
-			quoted: `yardr crew handoff %s "..."`, dash: `yardr crew handoff <name> -`},
-		{name: "a journal entry", pattern: `crew journal \S+ \\?"`,
-			quoted: `yardr crew journal %[1]s "..."`, dash: `yardr crew journal <name> -`},
-		{name: "a memory", pattern: `(yardr|%s) remember (\S+ ){0,3}\\?"`,
-			quoted: `yardr remember "<title>" -b "<body>"`, dash: `yardr remember - -b -`},
-		{name: "a thread's title", pattern: `thread open (\S+ ){1,9}\\?"`,
-			quoted: `yardr thread open github --crew yardmaster --in acme/webapp --assign jo -b body "Retries"`,
-			dash:   `yardr thread open <source> --crew <member> --in <place> --assign <user> -b body -`},
-	}
+	shapes := quotedTextShapes(t)
 	var patterns []string
-	for i := range shapes {
-		sh := &shapes[i]
-		sh.re = regexp.MustCompile(sh.pattern)
+	for _, sh := range shapes {
 		patterns = append(patterns, sh.pattern)
-		if !sh.re.MatchString(sh.quoted) || !sh.re.MatchString(strings.ReplaceAll(sh.quoted, `"`, `\"`)) {
-			t.Errorf("the pattern for %s misses %q", sh.name, sh.quoted)
-		}
-		if sh.re.MatchString(sh.dash) {
-			t.Errorf("the pattern for %s holds the - form %q", sh.name, sh.dash)
-		}
 	}
 	anyShape := regexp.MustCompile(strings.Join(patterns, "|"))
 	files, err := loadRepoGoFiles()
@@ -351,6 +398,72 @@ func TestNoGoCodeShowsAQuotedText(t *testing.T) {
 	// Not for want of looking: the walk started at the repository's root.
 	if len(files) < 100 {
 		t.Fatalf("%d Go files read", len(files))
+	}
+}
+
+// A doc teaches a command by example as a refusal does, and an agent reads
+// it: one that shows a mail, a reply, a memory, a handoff, a journal entry or
+// a thread's title as a double-quoted argument teaches the same shape, whose
+// backtick spans and $( ) the shell runs before yardr starts. So the docs and
+// the packs' setup notes are held to the shapes the Go texts are, and show the
+// - form, which reads the words from stdin (yardr-ctwf rewrote 33 examples,
+// and nothing held the next one back). The files are the ones git lists under
+// docs/ and packs/*/SETUP.md, less docs/design/, which is history and shows
+// the forms of its day. Test fixtures (testdata/) and contrib/ are outside
+// these globs, and a wider glob leaves them out: no agent learns a command
+// from a fixture, and contrib/'s READMEs are for the people who run its tools.
+//
+// A shape the docs still show stays out until the bead that its docsLeft names
+// has rewritten them.
+func TestDocsShowNoQuotedText(t *testing.T) {
+	t.Parallel()
+	shapes := quotedTextShapes(t)
+	listed, err := exec.Command("git", "ls-files", "-z", "--", "docs/*.md", "packs/*/SETUP.md").Output()
+	if err != nil {
+		t.Fatalf("git ls-files: %v", err)
+	}
+	var files int
+	left := map[string]int{}
+	for path := range strings.SplitSeq(strings.TrimSuffix(string(listed), "\x00"), "\x00") {
+		if strings.HasPrefix(path, "docs/design/") {
+			continue
+		}
+		// A file the index lists and the work tree has lost is not at the
+		// tip, and a link or a submodule has no text of its own.
+		if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files++
+		for n, line := range strings.Split(string(body), "\n") {
+			// Every shape needs the quote, and most lines have none.
+			if !strings.Contains(line, `"`) {
+				continue
+			}
+			for _, sh := range shapes {
+				if !sh.re.MatchString(line) {
+					continue
+				}
+				if sh.docsLeft != "" {
+					left[sh.name]++
+					continue
+				}
+				t.Errorf("%s:%d shows %s as a double-quoted argument, which the shell expands: show the - form, which reads the words from stdin (%s): %s", path, n+1, sh.name, sh.dash, strings.TrimSpace(line))
+				break
+			}
+		}
+	}
+	for _, sh := range shapes {
+		if sh.docsLeft != "" && left[sh.name] == 0 {
+			t.Errorf("no doc shows %s as a double-quoted argument any more: delete its docsLeft (%s), so that the docs are held to the shape", sh.name, sh.docsLeft)
+		}
+	}
+	// Not for want of looking: git lists the docs and the setup notes.
+	if files < 40 {
+		t.Fatalf("%d docs read", files)
 	}
 }
 
