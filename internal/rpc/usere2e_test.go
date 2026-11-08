@@ -905,7 +905,14 @@ func TestE2EMarkedCallOpensOnlyTheEventsStream(t *testing.T) {
 // an app that restarted does, and answers the device holding it.
 func (d *e2eDevice) rehandshake(t *testing.T) *e2eDevice {
 	t.Helper()
-	first, opening, err := yardkey.StartChannelHandshake(d.key, d.y.channel.Public)
+	return d.rehandshakeTo(t, d.y.channel.Public)
+}
+
+// rehandshakeTo is rehandshake to the yard key yardPublic, which a device
+// that holds no copy of the yard's own has from an answer it was given.
+func (d *e2eDevice) rehandshakeTo(t *testing.T, yardPublic []byte) *e2eDevice {
+	t.Helper()
+	first, opening, err := yardkey.StartChannelHandshake(d.key, yardPublic)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -88,10 +88,14 @@ func newChannelKey(t *testing.T) yardkey.ChannelKey {
 // plain RegisterChannelKey down the link, its token the proof: the
 // record pins the key in place, the answer is the yard's channel key
 // signed by its identity, and from then on the device handshakes with
-// that key and calls sealed as a QR-paired device does. A second
-// registration is refused whatever key it sends, plain or sealed, and
-// so are a key that is none and one another device pins; no refusal
-// changes the record.
+// that key and calls sealed as a QR-paired device does. The same key
+// sent again, down the link or on the listener, is answered what the
+// first time was, as to a device whose answer was lost, and a device
+// that never had that answer founds its channel with the yard key the
+// repeat carries. Every other second registration is refused: another
+// key, and a call that came sealed, with its own key too; so are a key
+// that is none and one another device pins. No refusal changes the
+// record, and no repeat adds an event.
 func TestRegisterChannelKeyInPlace(t *testing.T) {
 	y := newPairYard(t)
 	ctx := context.Background()
@@ -138,10 +142,11 @@ func TestRegisterChannelKeyInPlace(t *testing.T) {
 	// sealed calls are served as a QR-paired device's: as its user, and
 	// with a voucher on request.
 	link := y.u.Handler()
-	migrated := (&e2eDevice{y: y, key: key, handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	down := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.RemoteAddr = linkRemoteAddr
 		link.ServeHTTP(w, r)
-	})}).rehandshake(t)
+	})
+	migrated := (&e2eDevice{y: y, key: key, handler: down}).rehandshake(t)
 	plain := bindFor("", false)
 	if outer, _, status, _, body := migrated.call(t, http.MethodGet, "/user/me", nil, nil, plain, plain); outer != http.StatusOK || status != http.StatusOK ||
 		!strings.Contains(string(body), `"user":"sam","said_by":"tablet"`) {
@@ -151,28 +156,48 @@ func TestRegisterChannelKeyInPlace(t *testing.T) {
 		t.Fatalf("the migrated tablet's sealed voucher = outer %d, inner %d %s", outer, status, body)
 	}
 
-	// Once pinned, every registration is refused: the same key, another,
-	// down the link, on the listener, and sealed.
-	sealed := func(d *e2eDevice) (string, string, ChannelRegistered) {
-		args, _ := json.Marshal(map[string]string{"channel_key": yardkey.ChannelPublic(newChannelKey(t))})
-		_, _, status, _, body := d.call(t, http.MethodPost, registerPath, nil, args, plain, plain)
-		return registered(t, status, string(body))
-	}
-	for _, again := range []struct {
+	// Once pinned, the same key sent again is answered what the first time
+	// was, down the link and on the listener.
+	type attempt struct {
 		name string
 		send func() (string, string, ChannelRegistered)
-	}{
+	}
+	for _, again := range []attempt{
 		{"the same key down the link", func() (string, string, ChannelRegistered) {
 			return y.linkRegister(t, tablet.Token, yardkey.ChannelPublic(key))
 		}},
+		{"the same key on the listener", func() (string, string, ChannelRegistered) {
+			return y.listenerRegister(t, tablet.Token, yardkey.ChannelPublic(key))
+		}},
+	} {
+		if code, msg, repeated := again.send(); code != "" || repeated != got {
+			t.Errorf("%s = %s %s %+v, want the first answer, %+v", again.name, code, msg, repeated, got)
+		}
+	}
+
+	// Every other registration is refused: another key, down the link and on
+	// the listener, and a call that came sealed, with its own key too.
+	sealed := func(d *e2eDevice, key string) (string, string, ChannelRegistered) {
+		args, _ := json.Marshal(map[string]string{"channel_key": key})
+		_, _, status, _, body := d.call(t, http.MethodPost, registerPath, nil, args, plain, plain)
+		return registered(t, status, string(body))
+	}
+	for _, again := range []attempt{
 		{"another key down the link", func() (string, string, ChannelRegistered) {
 			return y.linkRegister(t, tablet.Token, yardkey.ChannelPublic(newChannelKey(t)))
 		}},
 		{"another key on the listener", func() (string, string, ChannelRegistered) {
 			return y.listenerRegister(t, tablet.Token, yardkey.ChannelPublic(newChannelKey(t)))
 		}},
-		{"the tablet sealed", func() (string, string, ChannelRegistered) { return sealed(migrated) }},
-		{"the QR-paired phone sealed", func() (string, string, ChannelRegistered) { return sealed(phone) }},
+		{"the tablet sealed, its own key", func() (string, string, ChannelRegistered) {
+			return sealed(migrated, yardkey.ChannelPublic(key))
+		}},
+		{"the tablet sealed, another key", func() (string, string, ChannelRegistered) {
+			return sealed(migrated, yardkey.ChannelPublic(newChannelKey(t)))
+		}},
+		{"the QR-paired phone sealed, its own key", func() (string, string, ChannelRegistered) {
+			return sealed(phone, yardkey.ChannelPublic(phone.key))
+		}},
 	} {
 		if code, msg, _ := again.send(); code != "conflict" || !strings.Contains(msg, "pins a channel key already") {
 			t.Errorf("%s = %s %s, want conflict", again.name, code, msg)
@@ -184,14 +209,43 @@ func TestRegisterChannelKeyInPlace(t *testing.T) {
 	if k, pinned := y.pinnedAs(t, "jo", "phone"); k != yardkey.ChannelPublic(phone.key) || pinned != store.PinnedPaired {
 		t.Fatalf("the phone pins %q (%s), want its paired key", k, pinned)
 	}
+	if pinned, err := y.st.EventsOfKind(ctx, "device_channel_pinned", 10); err != nil || len(pinned) != 1 || pinned[0].Data["device"] != "tablet" {
+		t.Fatalf("device_channel_pinned events after the repeats = %+v, %v, want the tablet's one", pinned, err)
+	}
 
-	// On the yard's own listener a device registers as down the link.
+	// On the yard's own listener a device registers as down the link. When
+	// its answer is lost the device asks again with the same key: the
+	// laptop's first answer is dropped here, as if it never arrived, and the
+	// repeat, down the link, is answered the same. The laptop checks its
+	// signature as an app does, founds its channel with the yard key the
+	// repeat carries, and its sealed calls are served; it was pinned once.
 	laptop, err := y.st.AddDevice(ctx, "jo", "laptop", "jo")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code, msg, got := y.listenerRegister(t, laptop.Token, yardkey.ChannelPublic(newChannelKey(t))); code != "" || got.Device != "laptop" {
-		t.Fatalf("the registration on the listener = %s %s %+v", code, msg, got)
+	laptopKey := newChannelKey(t)
+	code, msg, lost := y.listenerRegister(t, laptop.Token, yardkey.ChannelPublic(laptopKey))
+	if code != "" || lost.Device != "laptop" {
+		t.Fatalf("the registration on the listener = %s %s %+v", code, msg, lost)
+	}
+	code, msg, repeated := y.linkRegister(t, laptop.Token, yardkey.ChannelPublic(laptopKey))
+	if code != "" || repeated != lost {
+		t.Fatalf("the repeated registration = %s %s %+v, want the answer that was lost, %+v", code, msg, repeated, lost)
+	}
+	if err := yardkey.VerifyChannelKey(repeated.YardKey, repeated.ChannelKey, repeated.ChannelSignature); err != nil {
+		t.Fatalf("the repeated answer's signature does not verify against the yard key it carries: %v", err)
+	}
+	yardPublic, err := yardkey.ParseChannelPublic(repeated.ChannelKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered := (&e2eDevice{y: y, key: laptopKey, handler: down}).rehandshakeTo(t, yardPublic)
+	if outer, _, status, _, body := recovered.call(t, http.MethodGet, "/user/me", nil, nil, plain, plain); outer != http.StatusOK || status != http.StatusOK ||
+		!strings.Contains(string(body), `"user":"jo","said_by":"laptop"`) {
+		t.Fatalf("the laptop's sealed /user/me on the replayed yard key = outer %d, inner %d %s", outer, status, body)
+	}
+	if pinned, err := y.st.EventsOfKind(ctx, "device_channel_pinned", 10); err != nil || len(pinned) != 2 {
+		t.Fatalf("device_channel_pinned events = %+v, %v, want one for the tablet and one for the laptop", pinned, err)
 	}
 }
 

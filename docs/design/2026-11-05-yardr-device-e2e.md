@@ -1225,7 +1225,19 @@ the refusal of section 3.5 still carries after the channel release:
 one call per pre-release device, authenticated by the token it
 already holds, readable by the edge that once, and refused for any
 device that already pins a key, so it cannot be replayed as a
-downgrade path. (c) Migrate at next pairing only, plainly, and
+downgrade path. One call is the exception, the identical retry of
+the registration that pinned the device in place, with the same key.
+The first answer may have been lost on its way back, and without an
+answer the device cannot finish its migration, so the yard answers
+the retry with its keys as they stand. A replay grants nothing new:
+the answer is public key material the yard gives every migrated
+device, the record is unchanged, and the plain exemption covers this
+call alone, so no plain access follows. The edge reads in the retry
+nothing the first call did not carry. A different key, a device
+paired by QR and a call that came sealed stay refused. Guessing
+another device's 32-byte key to probe its pin is infeasible, so the
+difference between the answer and the refusal leaks nothing usable.
+(c) Migrate at next pairing only, plainly, and
 let old pairings age out by the inactivity habits the apps already
 have. Picked: (b), with its record kept and its handling picked
 with it — a yard can say which devices were pinned at a ceremony
@@ -1310,15 +1322,20 @@ Cloudflare and to the edge before the yard refuses it: the yard
 does not carry it out and returns no answer beyond the refusal, but
 the edge could read the attempt as it arrived. What limits that
 exposure is the client rule of section 3.3: once a device has
-pinned a yard's channel key it never sends a plain call to that
-yard again, and a failed handshake is a refusal in the app, never a
-fallback to plain; the only senders left are clients that were
-never updated, and the refusal itself tells them to update. Two
-narrow exceptions are
-not plain device calls and are named wherever the claim is printed:
-the pairing redeem, which new pairings run inside the handshake
-itself, and the one-time in-place migration registration of a
-pre-release device (section 3.4), refused once a key is pinned.
+pinned a yard's channel key its ordinary calls are sealed, and a
+failed handshake is a refusal in the app, never a fallback to plain.
+A pre-release device may repeat its in-place migration registration
+with the same key if it never received the first answer (section
+3.4); that retry returns the yard's current public keys and the
+caller's user and device names, and no other plain call passes for a
+device that has pinned a key. The other
+senders of refused plain attempts are clients that were never
+updated, and the refusal itself tells them to update. The two narrow
+exceptions to the sealed-call rule are named wherever the claim is
+printed: the pairing redeem, which new pairings run inside the
+handshake itself, and the one-time in-place migration registration
+of a pre-release device, whose identical retry pins nothing and
+grants nothing new (section 3.4).
 The order is what makes the rule survivable: the yard learns to
 open envelopes first, the desktop and phone clients that speak
 them ship next, and the refusal lands last (bead 9) — and only
@@ -1438,7 +1455,7 @@ is not the channel's failure, on any candidate.
 
 | Who | Can still do | Cannot do any more |
 |---|---|---|
-| The edge's operator, reading at leisure (logs, queue files, a lawful demand, a curious afternoon) | Read the edge session (`X-Edge-Token`) on every enveloped call, as today — it stays outside the envelope so the router can resolve the account (section 3.2); see that an account's yard had sealed calls, when, how long, how large, from where; read webhooks, the web view and previews, and peer bodies (peers have no slice in this programme; section 3.6 defers them to a later design); keep the push tokens the relay must hold; read the one plain probe until bead 6, and each pre-release device's one plain migration registration (its token and the key it registers, section 3.4); read the voucher's clear fields — user, device, yard, expiry — at push registration; read a plain attempt by a client too old to seal — its method, path, headers and body as sent — because the router reads the request before the yard refuses it (section 3.5); read the member pairing code the web view's pairing page shows, which reaches the member through the edge (sections 3.1 and 3.9) | Read a sealed call's method, path, headers, body or answer; find a device token, a pairing code or a harness login code in anything a sealed call carried; approve an ask later with what was logged. A refused plain attempt is not carried out and earns no answer beyond the refusal, and a device that has pinned a yard's key never sends one — but the attempt itself was readable as sent, and no claim may say it was not |
+| The edge's operator, reading at leisure (logs, queue files, a lawful demand, a curious afternoon) | Read the edge session (`X-Edge-Token`) on every enveloped call, as today — it stays outside the envelope so the router can resolve the account (section 3.2); see that an account's yard had sealed calls, when, how long, how large, from where; read webhooks, the web view and previews, and peer bodies (peers have no slice in this programme; section 3.6 defers them to a later design); keep the push tokens the relay must hold; read the one plain probe until bead 6, and each pre-release device's one plain migration registration and any identical retry where the answer was lost (its token and registered key in the request, and the yard's current public keys and the caller's user and device names in the answer, section 3.4); read the voucher's clear fields — user, device, yard, expiry — at push registration; read a plain attempt by a client too old to seal — its method, path, headers and body as sent — because the router reads the request before the yard refuses it (section 3.5); read the member pairing code the web view's pairing page shows, which reaches the member through the edge (sections 3.1 and 3.9) | Read a sealed call's method, path, headers, body or answer; find a device token, a pairing code or a harness login code in anything a sealed call carried; approve an ask later with what was logged. A refused plain attempt is not carried out and earns no answer beyond the refusal. A device that has pinned a yard's key sends no plain call except the identical retry of its in-place registration when it never received the first answer; that request repeats the token and registered key, and its answer contains only the yard's current public keys and the caller's user and device names. No claim may say the retry is sealed or unreadable |
 | A compromised edge, active (rewriting, replaying, refusing, forging its own headers) | Refuse, drop, delay or reorder service (a record delayed past the replay window fails its call whole, section 3.2); mint correctly signed outer frames, since it holds the signing key, and submit invalid envelopes, which fail their AEAD opening as failed calls — failed opens and denial of service at the cost of the yard's openings (section 3.2); measure timing and size; spend its one online guess per PAKE run or five plain guesses per pairing, as a stranger could; assert a presenter at pairing, narrowed by the code as today; serve a web view or preview script of its own devising; hold a record sealed before a device's removal and deliver it after — the device will open it, within the limit section 3.2 states | Open a sealed call or answer, recorded now or later (a session's ephemeral keys see to later); put itself in a pairing held by 1B or 1A undetected; replay a sealed message inside its session, move one between calls or streams, or revive one after its call has closed (call-bound associated data, one opened-sequence window for the session, and closed-call marks, section 3.2), or forge a valid sealed record — the AEAD needs the session keys it never learns, so an envelope it signs correctly still fails its opening, while an outsider's forged frame and a frame replayed on a later link or out of order are refused earlier, by the signature and its session and sequence (section 3.2); talk a pinned device down to a plain call by breaking its handshakes (a pinned device refuses plain and fails the call instead, section 3.3); keep a removed device calling on a session it founded before the removal (the first record of each call re-reads the device record, and removal purges its sessions and seals no further record of their streams, section 3.2); approve an ask, give a secret, or read a screen with anything it holds — no device token crosses in a sealed call (the edge session it reads is its own, section 3.2), and the channel key never leaves the phone |
 | Cloudflare, ending TLS in front of the router | Everything the first row can, over the traffic at its termination point, plain attempts and the edge session (`X-Edge-Token`) included; refuse, drop, delay, reorder or alter the outer traffic it carries, as the compromised edge can; forge, drop or replay a zero-length beat record, keeping a stream seemingly alive or letting it be cut | Read, forge or undetectably alter a sealed call or any inner byte: what it terminates TLS onto is an envelope, not a call, and any alteration of a sealed record or of an associated-data-bound field (the tag, direction, call id, sequence, index, and, on a call's first record, the outer path and the stream marker, section 3.2) fails that record's opening and becomes a failed call, never a call silently read or changed. The unauthenticated controls give no such promise and need none: beat records, frame kind, lengths and timing altered, forged or dropped touch availability only — a stream may end or linger, a call may fail whole — and no inner byte is read or altered by them, because every inner byte crosses only inside a record that must still open. The channel gives integrity for records and inner content, not availability: refusal, dropping and delay stay open to it, as they do to the edge |
 
@@ -2006,7 +2023,8 @@ agent does it in its depot's isolated harness, never the operator's.
    unsealed is refused, judged on link calls alone, its refusal
    naming the fix; no setting softens it, and the one plain call
    still carried is a pre-release device's one-time migration
-   registration, refused to any device that already pins a key. In
+   registration, refused to any device that already pins a key except
+   for the identical retry of its own registration (section 3.4). In
    the same release, `GiveSecret` from the operator's own device on
    a sealed call takes every secret as a hosted yard does, with the
    pairing-time warning of section 3.9; every other device is

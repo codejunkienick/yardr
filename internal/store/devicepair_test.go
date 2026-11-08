@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -628,10 +629,12 @@ func TestDevicePairOpenSelfRefusals(t *testing.T) {
 
 // A device paired before the channel registers its key once, by its
 // token: the record pins it, recorded in place, and a channel
-// handshake that proves it names the device. Every second
-// registration is refused and leaves the record as it was — the same
-// key, another key, and a device a pairing pinned — and so is a key
-// that is none and one another device pins. Removing the device
+// handshake that proves it names the device. The same key sent again,
+// as a device does whose answer was lost, is answered the device as it
+// is, with the record unchanged and no second event. Every other second
+// registration is refused and leaves the record as it was — another
+// key, and a device a pairing pinned, with its own key too — and so is
+// a key that is none and one another device pins. Removing the device
 // takes the key with the token.
 func TestDevicePinChannelKeyInPlace(t *testing.T) {
 	t.Parallel()
@@ -677,6 +680,9 @@ func TestDevicePinChannelKeyInPlace(t *testing.T) {
 	if d, err := own.PinChannelKeyInPlace(ctx, phone.Token, newKey()); d != nil || !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "already, at its pairing") {
 		t.Fatalf("pinning a paired device's key = %+v, %v, want refused", d, err)
 	}
+	if d, err := own.PinChannelKeyInPlace(ctx, phone.Token, phoneKey); d != nil || !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "already, at its pairing") {
+		t.Fatalf("pinning a paired device's own key = %+v, %v, want refused: only a key pinned in place is answered again", d, err)
+	}
 	if d, err := own.PinChannelKeyInPlace(ctx, tablet.Token, phoneKey); d != nil || !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "pinned by another device") {
 		t.Fatalf("pinning the phone's key on the tablet = %+v, %v, want refused", d, err)
 	}
@@ -689,10 +695,13 @@ func TestDevicePinChannelKeyInPlace(t *testing.T) {
 	if got, err := own.DeviceByChannelKey(ctx, key); err != nil || got == nil || got.Name != "tablet" || got.Sealed() != "sealed (in place)" {
 		t.Fatalf("DeviceByChannelKey(the key pinned in place) = %+v, %v", got, err)
 	}
-	for _, again := range []string{key, newKey()} {
-		if d, err := own.PinChannelKeyInPlace(ctx, tablet.Token, again); d != nil || !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "already, in place") {
-			t.Fatalf("pinning the tablet again = %+v, %v, want refused", d, err)
-		}
+	// Its key sent again is answered the device as the first pin did, and
+	// another key is refused; neither changes the record.
+	if again, err := own.PinChannelKeyInPlace(ctx, tablet.Token, key); err != nil || !reflect.DeepEqual(again, d) {
+		t.Fatalf("pinning the tablet's key again = %+v, %v, want the device as the first pin answered it, %+v", again, err, d)
+	}
+	if again, err := own.PinChannelKeyInPlace(ctx, tablet.Token, newKey()); again != nil || !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "already, in place") {
+		t.Fatalf("pinning the tablet with another key = %+v, %v, want refused", again, err)
 	}
 	list, err := api.Devices(ctx, "ada")
 	if err != nil || len(list) != 2 {
@@ -718,5 +727,8 @@ func TestDevicePinChannelKeyInPlace(t *testing.T) {
 	}
 	if got, err := own.ResolveDevice(ctx, tablet.Token, ""); err != nil || got != nil {
 		t.Fatalf("the removed tablet's token resolves to %+v, %v", got, err)
+	}
+	if got, err := own.PinChannelKeyInPlace(ctx, tablet.Token, key); got != nil || !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("pinning the removed tablet's key again = %+v, %v, want not found", got, err)
 	}
 }

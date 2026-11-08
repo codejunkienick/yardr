@@ -25,8 +25,9 @@ import (
 // there: RegisterChannelKey, section 3.5's second exception beside the
 // pairing redemption, which runs inside its handshake and is answered
 // before any call is judged (PairPath), so is not one. It is one call
-// per pre-release device, refused for any device that pins a key, so
-// it is no way back to plain.
+// per pre-release device, and its identical repeat where the answer was
+// lost, which pins nothing; it is refused for any other call of a device
+// that pins a key, so it is no way back to plain.
 var PlainDeviceCallsDown = []string{"RegisterChannelKey"}
 
 // ChannelRegistered is the answer to RegisterChannelKey: the device it
@@ -53,10 +54,14 @@ type ChannelRegistered struct {
 // never pinned to a channel it was not told: a yard that cannot read
 // or make its channel key (yardkey.EnsureChannel makes one where there
 // is none), or cannot read its identity key to sign with, refuses and
-// says which. A device that pins a key already is refused whatever key
-// it sends, the same one too: a call that came sealed is from such a
-// device, and is refused before its key's encoding is checked. A key
-// that is none, and one another device pins, are refused too.
+// says which. A device that pins a key already is refused, with one
+// exception that the store makes: the key it registered in place, sent
+// again because the answer was lost, is answered the yard's keys as they
+// stand, and nothing is pinned twice (store.PinChannelKeyInPlace). A call
+// that came sealed is from such a device and is refused whatever key it
+// sends, before the key's encoding is checked: it proved it holds the
+// channel, so it lost nothing. A key that is none, and one another
+// device pins, are refused too.
 func (u *UserServer) registerChannelKey(ctx context.Context, channelKey string) (*ChannelRegistered, error) {
 	if _, sealed := ctx.Value(e2eSessionKey{}).(*e2eSession); sealed {
 		return nil, fmt.Errorf("%w: this device pins a channel key already: a key is registered in place once, and only by a device that pins none. Pair it again by QR to change its key", store.ErrConflict)

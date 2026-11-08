@@ -179,6 +179,8 @@ func TestDevicePinnedReadsPairedByDefault(t *testing.T) {
 	if got, err := s.DeviceByChannelKey(ctx, key); err != nil || got == nil || got.ChannelPinned != PinnedPaired {
 		t.Fatalf("DeviceByChannelKey = %+v, %v, want paired", got, err)
 	}
+	// The key it sends is the record's own: only a record that says in place
+	// is answered its key again (PinChannelKeyInPlace), and this one does not.
 	if got, err := s.PinChannelKeyInPlace(ctx, d.Token, enc.EncodeToString(make([]byte, 32))); got != nil || err == nil || !strings.Contains(err.Error(), "at its pairing") {
 		t.Fatalf("pinning in place over an old pinned record = %+v, %v, want refused", got, err)
 	}

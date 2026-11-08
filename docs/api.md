@@ -1071,6 +1071,15 @@ then on the device handshakes with its key and calls sealed, as a device
 paired by the QR's key does. The answer holds no voucher: the device asks
 for one afterwards, sealed ([below](#a-registration-voucher)).
 
+A device that registered but never got the answer, because it was lost on
+its way back, sends the same call with the same key again. The yard answers
+it with its keys as they stand. The record does not change and nothing is
+pinned twice. The repeat grants nothing new: the answer is the yard's public
+keys, which it gives every device that registers, and only this call is
+carried plain, so no plain access follows from it. Another key, a device a
+pairing pinned and a call that came sealed stay refused, as the table below
+says.
+
 It is the one plain device call the yard takes down the link from the edge
 beside the pairing redemption, and it is taken on the yard's own listener
 alike; the socket, which holds no device token, does not serve it. The edge
@@ -1087,7 +1096,7 @@ Refused, with the record unchanged, each as a call's error:
 
 | error | when |
 |---|---|
-| `conflict` | the device pins a key already, whether a pairing or an earlier registration pinned it, with the same key or another: a key is registered once, so the call is no way back to plain. A call that came sealed is from such a device |
+| `conflict` | the device pins a key already, whether a pairing or an earlier registration pinned it, and the call is not that registration repeated: another key, the same key of a device a pairing pinned, or a call that came sealed, which is from such a device. A key is registered once, so the call is no way back to plain |
 | `conflict` | another device pins the key |
 | `error` | the key is no base64url of 32 bytes |
 | `error` | the yard cannot read or make its channel key, or read its identity key to sign it with; the message says which, and the device keeps calling as before |
@@ -5497,7 +5506,7 @@ The list is in the order the source named the files. A file is recorded once the
 
 ### `RegisterChannelKey`
 
-Registers the calling device's channel public key in place: the one call a device paired before the yard had a channel makes, with the token it holds, to seal its calls from then on ([in place](#a-channel-key-registered-in-place)). The yard pins the key on the device's record, recorded as pinned in place, and answers its own channel public key signed by its identity. It registers only the device whose token makes it; no argument names a device. It is served on the listener alone, and down the link from the edge plain: the socket, which holds no device token, answers it as a method the yard does not have. It answers no voucher: the device asks for one afterwards, sealed ([`POST /user/push/voucher`](#a-registration-voucher)). Refused, with the record unchanged: a device that pins a key already, whether a pairing or an earlier registration pinned it, with the same key or another (`conflict`; a call that came sealed is from such a device); a key another device pins (`conflict`); a key that is no base64url of 32 bytes; and by a yard that cannot read or make its channel key, or read its identity key to sign it with, which says which.
+Registers the calling device's channel public key in place: the one call a device paired before the yard had a channel makes, with the token it holds, to seal its calls from then on ([in place](#a-channel-key-registered-in-place)). The yard pins the key on the device's record, recorded as pinned in place, and answers its own channel public key signed by its identity. It registers only the device whose token makes it; no argument names a device. It is served on the listener alone, and down the link from the edge plain: the socket, which holds no device token, answers it as a method the yard does not have. It answers no voucher: the device asks for one afterwards, sealed ([`POST /user/push/voucher`](#a-registration-voucher)). A device that registered its key in place but never had the answer sends the same key again, and the yard answers it with its keys as they stand. The record does not change and nothing is pinned twice, so the repeat grants nothing new. Refused, with the record unchanged: a device that pins a key already, whether a pairing or an earlier registration pinned it, unless the call repeats that registration (`conflict`). These are no repeat: another key, the same key of a device a pairing pinned, and a call that came sealed, which is from such a device and is refused whatever key it sends. Also refused: a key another device pins (`conflict`); a key that is no base64url of 32 bytes; and by a yard that cannot read or make its channel key, or read its identity key to sign it with, which says which.
 
 | argument | type | |
 |---|---|---|

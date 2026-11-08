@@ -1435,16 +1435,20 @@ Re-pairing it by QR lifts it (`yardr user device rm`, then `yardr user
 device pair --qr`); re-pairing is never required.
 
 The registration is refused, leaving the record as it was, for a device that
-pins a key already, whether a pairing or an earlier registration pinned it,
-with the same key or another: it is registered once, and cannot be replayed
-to take a device back to plain. It is refused for a key that is no X25519
-public key and for one another device pins, and by a yard that cannot read
-or make its channel key, or read its identity key to sign it with, which
-says why. It is the one plain device
-call the yard still takes down the link from the edge beside the pairing
-redemption. `yardr user device rm` deletes the pinned key with the token,
-as for a device paired by QR. The event is `device_channel_pinned`, with
-`user`, `device` and `pinned` (`in_place`).
+pins a key already, whether a pairing or an earlier registration pinned it:
+it is registered once, and cannot be replayed to take a device back to plain.
+A repeat of that registration is not a second one. A device whose answer was
+lost on the way back sends the same key again, and the yard answers it with
+its keys, as it did the first time. The record does not change and no second
+event follows. The answer is the yard's public keys, so the repeat grants
+nothing. Another key, a device a pairing pinned, and a call that came sealed
+are refused. It is refused for a key that is no X25519 public key and for one
+another device pins, and by a yard that cannot read or make its channel key,
+or read its identity key to sign it with, which says why. It is the one
+plain device call the yard still takes down the link from the edge beside
+the pairing redemption. `yardr user device rm` deletes the pinned key with
+the token, as for a device paired by QR. The event is `device_channel_pinned`,
+with `user`, `device` and `pinned` (`in_place`).
 
 ## A conversation
 

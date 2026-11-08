@@ -396,14 +396,21 @@ func (s *Store) DeviceByChannelKey(ctx context.Context, key string) (*Device, er
 // could have put its own key here; the record says so for as long as
 // the device keeps it.
 //
-// It pins once. A device that pins a key already is refused, with the
-// same key or another, whether a pairing or an earlier call pinned
-// it: a second call is how the edge would swap a device's key, and
-// the answer to the first is not given again. A key that is no
-// encoding of 32 bytes is refused, and so is one another device pins,
-// which would put that device's handshakes on this record. The device
-// is found, judged and pinned in one write, and under s.devPair.mu,
-// which the pairings that pin hold too (redeemDevicePairingPAKE). Like
+// It pins once. A device that pins a key already is refused, whether a
+// pairing or an earlier call pinned it, except for the call that repeats
+// the registration that pinned the device in place, with the same key:
+// that is answered the device as it stands, with the record unchanged
+// and no second device_channel_pinned event. The answer to the first
+// call may have been lost on its way back, and a device that never had
+// it cannot finish its migration; a repeat grants nothing, since the
+// caller is given only what the first call was. Another key is still
+// refused, since a second call with one is how the edge would swap a
+// device's key, and so is the same key on a device a pairing pinned,
+// which had the yard's key at its pairing. A key that is no encoding of
+// 32 bytes is refused, and so is one another device pins, which would
+// put that device's handshakes on this record. The device is found,
+// judged and pinned in one write, and under s.devPair.mu, which the
+// pairings that pin hold too (redeemDevicePairingPAKE). Like
 // ResolveDevice it is the server's to ask, for a request it was sent,
 // and no method of the API.
 func (s *Store) PinChannelKeyInPlace(ctx context.Context, token, key string) (*Device, error) {
@@ -431,6 +438,12 @@ func (s *Store) PinChannelKeyInPlace(ctx context.Context, token, key string) (*D
 			return fmt.Errorf("the token is of no device: %w", ErrNotFound)
 		}
 		if d.ChannelKey != "" {
+			if d.ChannelPinned == PinnedInPlace && d.ChannelKey == key {
+				// The registration this device made already, sent again: it is
+				// answered as it stands, and nothing is written.
+				out = &d.Device
+				return nil
+			}
 			how := "at its pairing"
 			if d.ChannelPinned == PinnedInPlace {
 				how = "in place"
