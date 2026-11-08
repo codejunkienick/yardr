@@ -220,46 +220,79 @@ func TestSocketStartsStoppedApprovedAndRefusesRefused(t *testing.T) {
 // A socket alone holds its preview past a shortened idle bound; the
 // bound runs again from its last socket's close.
 func TestSocketHoldsPreviewPastIdleBoundUntilLastSocketCloses(t *testing.T) {
+	ctx := context.Background()
+	// No Run: the passes are this test's own, so none comes between two of
+	// its steps. One that came after the last socket gave back its counts
+	// and before the row held the moment it closed would find the row a
+	// bound old and stop the preview as idle at once. That window is not
+	// what this test pins; the bound running from the close is.
 	y := newYard(t)
-	y.run(t)
-	if err := y.st.SetSetting(context.Background(), store.PreviewIdleSetting, "300ms", "ada"); err != nil {
+	const idle = 300 * time.Millisecond
+	if err := y.st.SetSetting(ctx, store.PreviewIdleSetting, idle.String(), "ada"); err != nil {
 		t.Fatal(err)
 	}
 	port := freePort(t)
 	y.propose(t, "demo", previewtest.App("127.0.0.1", port), port, true)
-	waitFor(t, "preview running", func() bool { return y.state("demo").State == store.PreviewRunning })
+	t.Cleanup(func() { y.sup.kill("demo") })
+	if err := y.sup.Start(ctx, "demo"); err != nil {
+		t.Fatal(err)
+	}
 	l := socketLink(t, y)
 	head := openPreviewSocket(t, l, "/preview/demo/ws", nil, nil)
 	if head.Status != http.StatusSwitchingProtocols {
 		t.Fatalf("the head is %+v, want 101", head)
 	}
+	opened := y.state("demo").LastRequestAt
+	if opened == nil {
+		t.Fatal("the socket opening did not set the preview's last-request moment")
+	}
 	// Past the idle bound with the socket as the only activity.
-	time.Sleep(400 * time.Millisecond)
+	waitFor(t, "the idle bound past the socket's opening", func() bool { return time.Since(*opened) > idle })
+	y.sup.reconcile(ctx, false)
 	if got := y.state("demo"); got.State != store.PreviewRunning {
 		t.Fatalf("a preview held by a socket alone was stopped as idle: %+v", got)
 	}
-	lastActivity := y.state("demo").LastRequestAt
-	if lastActivity == nil {
-		t.Fatal("the socket opening did not set the preview's last-request moment")
-	}
-	if err := l.SendSocketClose(context.Background(), head.ID, 1000, "done"); err != nil {
+	if err := l.SendSocketClose(ctx, head.ID, 1000, "done"); err != nil {
 		t.Fatal(err)
 	}
+	var closedAt time.Time
 	waitFor(t, "the idle clock refreshed at the socket's close", func() bool {
 		last := y.state("demo").LastRequestAt
-		return last != nil && last.After(*lastActivity)
+		if last == nil || !last.After(*opened) {
+			return false
+		}
+		closedAt = *last
+		return true
 	})
 	waitFor(t, "the socket's count given back", func() bool {
 		sockets, inflight := previewSocketCounts(y, "demo")
 		return sockets == 0 && inflight == 0
 	})
-	if got := y.state("demo"); got.State != store.PreviewRunning {
-		t.Fatalf("the preview stopped with its last socket, not a bound after it: %+v", got)
-	}
-	waitFor(t, "the preview stopped idle a bound after its socket closed", func() bool {
-		got := y.state("demo")
-		return got.State == store.PreviewStopped && got.StateDetail == "idle"
+	// A slow machine gets this test to the preview late, so it does not
+	// ask whether the preview still runs. It reads when the stop happened
+	// from the stop's own event: load can only put that later than the
+	// bound, never sooner.
+	var stoppedAt time.Time
+	waitFor(t, "the preview stopped idle", func() bool {
+		y.sup.reconcile(ctx, false)
+		if got := y.state("demo"); got.State != store.PreviewStopped || got.StateDetail != "idle" {
+			return false
+		}
+		evs, err := y.st.EventsOfKind(ctx, "preview_stopped", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range evs {
+			if e.Data["app"] == "demo" && e.Data["detail"] == "idle" {
+				stoppedAt = e.At
+				return true
+			}
+		}
+		return false
 	})
+	if gap := stoppedAt.Sub(closedAt); gap < idle {
+		t.Fatalf("the preview stopped %v after its last socket closed, want no sooner than the idle bound %v", gap, idle)
+	}
 }
 
 // The eleventh socket of a preview is refused, naming the preview.
@@ -335,9 +368,12 @@ func TestSocketAnsweredWithAppsRefusal(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the app was never dialled")
 	}
-	if sockets, inflight := previewSocketCounts(y, "demo"); sockets != 0 || inflight != 0 {
-		t.Errorf("counts after a refused dial = %d sockets, %d in flight, want none held", sockets, inflight)
-	}
+	// The counts are given back as serveSocket returns, which is after the
+	// head went out: the head can be here before they are.
+	waitFor(t, "the refused dial's counts given back", func() bool {
+		sockets, inflight := previewSocketCounts(y, "demo")
+		return sockets == 0 && inflight == 0
+	})
 }
 
 // manualSocketPreview marks the preview of the httptest app at port
