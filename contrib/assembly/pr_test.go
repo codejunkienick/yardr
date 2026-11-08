@@ -593,6 +593,41 @@ func TestPRMergeDirtyCheckoutHolds(t *testing.T) {
 	if n := countCalls(t, gh, "pr merge"); n != 0 {
 		t.Fatal("merged under a mode that is none")
 	}
+
+	// A message that cannot be written holds it as well, with nothing merged
+	// and what the read that failed said, on the stream its command says it on:
+	// yardr's error on stdout, git's on stderr.
+	main := y.git(y.repo, "rev-parse", "main")
+	for _, c := range []struct {
+		what   string
+		yardr  func(*testing.T) string
+		fails  string // the argument of the one call of git to fail
+		prefix string
+		why    string
+	}{
+		{"a link list", unreadableLinks, "", "listing the links of r-e failed: ", "bead r-gone: not found"},
+		{"a git log", nil, "--no-show-signature", "reading the commits of ", "will not run a call with --no-show-signature"},
+		{"a git diff", nil, "core.quotePath=false", "listing what ", "will not run a call with core.quotePath=false"},
+	} {
+		y.setHold("r-e", false)
+		y.opts = "YARDR_PR=1 YARDR_LAND=squash"
+		if c.fails != "" {
+			y.path = failingGit(t, c.fails)
+		}
+		if c.yardr != nil {
+			y.bin = c.yardr(t)
+		}
+		y.exec("pr-merge", "yard-pr-merge", "r-e")
+		y.bin, y.path = "", ""
+
+		unmerged(t, y, main, "cannot write the message of the squash commit of r-e: "+c.prefix)
+		if notes := y.notesOf("r-e"); !strings.Contains(notes, c.why) {
+			t.Fatalf("no note with what the command said, %q, for %s:\n%s", c.why, c.what, notes)
+		}
+		if n := countCalls(t, gh, "pr merge"); n != 0 {
+			t.Fatalf("merged under a message that failed on %s", c.what)
+		}
+	}
 	reviewed := y.git(y.repo, "rev-parse", "yard/r-e")
 	y.setHold("r-e", false)
 	y.opts = "YARDR_PR=1 YARDR_LAND=squash"

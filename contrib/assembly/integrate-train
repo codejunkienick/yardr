@@ -21,12 +21,15 @@
 #                       gh and jq on PATH, gh logged in as the operator
 #   YARDR_TEST_TIMEOUT  seconds the test command may run, besides what it
 #                       waited for the race lock (default 1800)
+#   YARDR_REWRITE_TIMEOUT
+#                       seconds the file size table rewrite may run (default
+#                       120); it waits on no race lock
 #
 # It fetches the base when it is a remote's, rebases the train branch onto
 # the base, lowers the file size table of a test command that carries one to
 # the branch's files (lowerrows, below: a commit of its own on the branch,
-# and a hold when a row stands below its file), runs the depot's test command
-# on the result, with
+# and a hold when a row stands below its file or the rewrite outlasts its
+# deadline), runs the depot's test command on the result, with
 # YARDR_LANDING=1 and YARDR_TEST_BEADS (the train's children, which the run
 # tests, where YARDR_BEAD names the train), and reports done (-> review). A
 # red run reports failed (-> open) with the commit, the failing tests and
@@ -138,8 +141,8 @@ bye() {
   cleanup
   return 0
 }
-# pid is only the test command this script starts, never a handle inherited
-# from the exec group's environment.
+# pid is only the command this script starts (the file size table rewrite, then
+# the test command), never a handle inherited from the exec group's environment.
 unset pid
 pid=
 trap 'bye' EXIT
@@ -269,18 +272,65 @@ closefds() {
 # failing run ends in. A table already right prints nothing and
 # touches nothing. A rewrite that fails holds: it says a row stands below its
 # file, which no landing may paper over and only a person settles.
+#
+# The run is bounded as the tests' is (runtest): in the background beside a
+# watcher that sleeps YARDR_REWRITE_TIMEOUT seconds (120 unless set), and then
+# stops and kills the run's whole tree (stoprun) and holds with what it had
+# printed. The rewrite waits on nothing, so there is no race lock to credit. It
+# runs ahead of the tests, whose deadline does not reach it, and one that never
+# ended would stall the queue of landings. The run, its watcher and their files
+# are the script's own pid, watch, napfile, log and latefile, so that bye takes
+# them away on any way out, as it does for the tests.
 lowerrows() {
   lr_test=${YARDR_TEST:-}
   [ -n "$lr_test" ] || return 0
   [ "$(git -C "$WT" cat-file -t "HEAD:$lr_test" 2>/dev/null)" = blob ] || return 0
   [ -f "$WT/$lr_test" ] && [ ! -L "$WT/$lr_test" ] || return 0
   grep -q "^filesizes='\$" "$WT/$lr_test" || return 0
+  lr_limit=${YARDR_REWRITE_TIMEOUT:-120}
+  case $lr_limit in
+  *[!0-9]*) hold "YARDR_REWRITE_TIMEOUT is $lr_limit in this group's cmd, and it is a whole number of seconds; nothing lands. Correct the cmd, then unhold." ;;
+  esac
   lr_head=$(git -C "$REPO" rev-parse "refs/heads/$BR") || hold "cannot record $BR before lowering its file size table"
   lr_base=$(git -C "$REPO" rev-parse "refs/heads/$BASE") || hold "cannot record $BASE before lowering the file size table"
-  lr_log=$(mktemp "${TMPDIR:-/tmp}/lowerrows.XXXXXX") || hold "cannot make a file for the file size table rewrite's output"
-  (cd "$WT" && { closefds "the file size table rewrite"; sh "$lr_test" sizes --rewrite; }) >"$lr_log" 2>&1 </dev/null && lr_ok=1 || lr_ok=
-  lr_out=$(tail -c 4000 "$lr_log")
-  rm -f "$lr_log"
+  log=$(mktemp "${TMPDIR:-/tmp}/lowerrows.XXXXXX") || hold "cannot make a file for the file size table rewrite's output"
+  latefile=$(mktemp "${TMPDIR:-/tmp}/lowerrows.XXXXXX") || hold "cannot make a file for the file size table rewrite's timeout watcher"
+  napfile=$(mktemp "${TMPDIR:-/tmp}/lowerrows.XXXXXX") || hold "cannot make a file for the file size table rewrite's timeout watcher"
+  (cd "$WT" && { closefds "the file size table rewrite"; sh "$lr_test" sizes --rewrite; }) >"$log" 2>&1 </dev/null &
+  pid=$!
+  (
+    nap=
+    trap 'kill "$nap" 2>/dev/null; exit 0' TERM
+    closefds
+    sleep "$lr_limit" &
+    nap=$!
+    echo "$nap" >"$napfile"
+    wait "$nap"
+    echo late >"$latefile"
+    stoprun
+  ) &
+  watch=$!
+  # The watcher records its sleep before it waits on it; hold until it has (a
+  # bounded wait), so that unwatched never kills a watcher whose sleep is not
+  # yet known.
+  lr_i=0
+  while [ ! -s "$napfile" ] && [ "$lr_i" -lt 100 ]; do sleep 0.05; lr_i=$((lr_i + 1)); done
+  wait "$pid" && lr_ok=1 || lr_ok=
+  pid=
+  unwatched
+  lr_out=$(tail -c 4000 "$log")
+  # A run that passed as its deadline came has passed: the marker is empty
+  # until the watcher writes to it.
+  lr_late=
+  [ ! -s "$latefile" ] || [ -n "$lr_ok" ] || lr_late=1
+  rm -f "$log" "$latefile" "$napfile"
+  log=
+  latefile=
+  napfile=
+  [ -z "$lr_late" ] ||
+    hold "the file size table rewrite in $lr_test ran past its deadline of ${lr_limit}s and was killed, so nothing lands:
+$lr_out
+Correct the rewrite, or raise YARDR_REWRITE_TIMEOUT in this group's cmd, then unhold."
   [ -n "$lr_ok" ] ||
     hold "the file size table in $lr_test cannot be lowered to the files of $BR, so nothing lands:
 $lr_out

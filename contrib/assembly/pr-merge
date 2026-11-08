@@ -231,7 +231,8 @@ squash_message() {
 
   # Links the bead made to outside issues. A bead of another yard that it is
   # at or came from is listed too (kind at, was at, from), and is no issue.
-  sq_linkjson=$("$Y" link list "$sq_bead" --json) || { ERR="listing the links of $sq_bead failed"; return 1; }
+  # Its error is on stdout as well.
+  sq_linkjson=$("$Y" link list "$sq_bead" --json) || { ERR="listing the links of $sq_bead failed: $(printf '%s' "$sq_linkjson" | head -c 500)"; return 1; }
   sq_refs=$(printf '%s\n' "$sq_linkjson" | awk "$SQ_UNJSON"'
     /^  [{]/ { kind = ""; url = "" }
     match($0, /^    "[a-z_]+": "/) {
@@ -260,9 +261,11 @@ squash_message() {
   # last paragraph. It runs to the next blank line or footer, and leaves the
   # body for the footer. A commit that is itself such a squash (an earlier
   # landing of this bead that came back red) gives up its subject line, which
-  # the new one replaces.
+  # the new one replaces. Where git says why a read failed is stderr, which the
+  # capture of its output leaves out: this read and the one for the scope below
+  # change nothing, so a failed one is run again for its stderr.
   sq_msgs=$(git -C "$REPO" log --reverse --no-show-signature --format='%B%x1e' "$sq_base..$sq_head") ||
-    { ERR="reading the commits of $sq_head since $sq_base failed"; return 1; }
+    { ERR="reading the commits of $sq_head since $sq_base failed: $(git -C "$REPO" log --reverse --no-show-signature --format='%B%x1e' "$sq_base..$sq_head" 2>&1 >/dev/null | head -c 500)"; return 1; }
   sq_parts=$(printf '%s\n' "$sq_msgs" | awk -v bead="$sq_bead" '
     function bc(l) { return l ~ /^BREAKING[ -]CHANGE:([ \t]|$)/ }
     function footer(l) { return bc(l) || l ~ /^[A-Za-z0-9-]+:([ \t]|$)/ }
@@ -324,7 +327,7 @@ squash_message() {
 
   # The scope, from the paths the squash changes.
   sq_paths=$(git -c core.quotePath=false -C "$REPO" diff --name-only --no-renames "$sq_base...$sq_head") ||
-    { ERR="listing what $sq_head changes since $sq_base failed"; return 1; }
+    { ERR="listing what $sq_head changes since $sq_base failed: $(git -c core.quotePath=false -C "$REPO" diff --name-only --no-renames "$sq_base...$sq_head" 2>&1 >/dev/null | head -c 500)"; return 1; }
   sq_dir=
   if [ -n "$sq_paths" ]; then
     sq_dir=$(printf '%s\n' "$sq_paths" | awk '

@@ -644,17 +644,19 @@ const (
 )
 
 // closefdsScripts are the scripts that close what they inherited before they
-// start a command of the depot's or the operator's, merge-local first, and
-// whether their timeout watcher closes it for its sleep too.
+// start a command of the depot's or the operator's, merge-local first, and how
+// many timeout watchers each runs, which close it for their sleeps too:
+// merge-local's and integrate-train's have one for the tests and one for the
+// file size table rewrite before them (yardr-19sp).
 var closefdsScripts = []struct {
-	path    string
-	watcher bool
+	path     string
+	watchers int
 }{
-	{"merge-local", true},
-	{"integrate-train", true},
-	{"pr-ci", true},
-	{"../deploy/deploy-dokku", false},
-	{"../deploy/deploy-void", false},
+	{"merge-local", 2},
+	{"integrate-train", 2},
+	{"pr-ci", 1},
+	{"../deploy/deploy-dokku", 0},
+	{"../deploy/deploy-void", 0},
 }
 
 // Every command these scripts start from a subshell is started after
@@ -689,8 +691,8 @@ func TestCloseFdsComesBeforeEveryStart(t *testing.T) {
 		if starts == 0 {
 			t.Errorf("%s starts no command by exec sh: has the start moved?", s.path)
 		}
-		if want := map[bool]int{true: 1, false: 0}[s.watcher]; watchers != want {
-			t.Errorf("%s calls closefds bare %d times, want %d (its watcher's)", s.path, watchers, want)
+		if watchers != s.watchers {
+			t.Errorf("%s calls closefds bare %d times, want %d (its watchers')", s.path, watchers, s.watchers)
 		}
 	}
 }

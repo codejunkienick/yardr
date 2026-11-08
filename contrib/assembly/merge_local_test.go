@@ -20,6 +20,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -189,6 +190,7 @@ type yard struct {
 	opts           string // more assignments for the script's cmd, e.g. YARDR_PR=1
 	envFile        string // the group's env_file, when a test's script reads its credentials from one
 	bin            string // the script's YARDR_BIN, when not yardrBin itself
+	path           string // a directory of stand-ins, on the script's PATH behind the recorder (a PATH= in opts would replace it)
 	log            string // what the last run wrote to its group's log
 
 	runs []string // the log of each run, for a failed test (showRuns)
@@ -473,6 +475,9 @@ func (y *yard) exec(script, group, id string) {
 	// gh after it, if it has one: the script finds the fake gh by its command
 	// line, as the environment is every test's.
 	path := bin
+	if y.path != "" {
+		path += ":" + y.path
+	}
 	if state, ok := fakeGhs.Load(y.t); ok {
 		stateDir := state.(string)
 		path += ":" + filepath.Join(stateDir, "bin")
@@ -966,14 +971,85 @@ func rowsYard(t *testing.T, row, lines int) *yard {
 	return y
 }
 
+// hangingRewrite is the rowsScript, its row at 12, with a rewrite that never
+// ends: it adds a line to the file ran, prints a line of its own, and starts a
+// sleep a shell below it, whose pid it writes to the file pids, and waits for it.
+func hangingRewrite(t *testing.T, ran, pids string) string {
+	t.Helper()
+	hang := "  echo run >>" + ran + "\n" +
+		"  echo OUTPUT-OF-A-REWRITE-THAT-HUNG\n" +
+		"  sh -c 'sleep 300 & echo $! >" + pids + "; wait'\n"
+	script := strings.Replace(rowsScript, "  row=$(sed", hang+"  row=$(sed", 1)
+	if script == rowsScript {
+		t.Fatal("could not make the stand-in hang")
+	}
+	return strings.ReplaceAll(script, "ROW", "12")
+}
+
+// waitGone fails the test unless the process whose pid the stand-in wrote to
+// file is gone: killed with the rewrite that started it, not left running past
+// its deadline.
+func waitGone(t *testing.T, file string) {
+	t.Helper()
+	b, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Killed, it is gone once its parent, killed too, is reaped by init.
+	for deadline := time.Now().Add(testload.Scale(5 * time.Second)); syscall.Kill(pid, 0) == nil; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("the sleep the rewrite started (pid %d) outlived the deadline's kill", pid)
+		}
+	}
+}
+
+// noSleep fails the test if a `sleep secs` is still running after the run: a
+// watcher that was not taken away leaves its sleep behind for the rest of its
+// deadline (yardr-tsms). secs is a deadline no other run of the package gives,
+// so that a sleep found is this run's.
+func noSleep(t *testing.T, secs string) {
+	t.Helper()
+	for deadline := time.Now().Add(testload.Scale(5 * time.Second)); ; time.Sleep(20 * time.Millisecond) {
+		out, err := exec.Command("ps", "-A", "-o", "pid=", "-o", "command=").Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var left []int
+		for _, line := range strings.Split(string(out), "\n") {
+			f := strings.Fields(line)
+			if len(f) == 3 && filepath.Base(f[1]) == "sleep" && f[2] == secs {
+				pid, _ := strconv.Atoi(f[0])
+				left = append(left, pid)
+			}
+		}
+		if len(left) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			for _, pid := range left {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+			t.Fatalf("a sleep of %s s is still running after the run: pids %v", secs, left)
+		}
+	}
+}
+
 // A landing that shrinks a listed file lands with its row at the file's lines,
 // and the commit that lands is the bead's own, amended: the branch's table was
 // left alone, so two beads that shrink neighbouring files never touch the same
-// rows (yardr-pqnz).
+// rows (yardr-pqnz). The rewrite's watcher goes with its run: the sleep it
+// started, for a deadline of its own here, is not left behind (yardr-19sp).
 func TestMergeLocalLowersTheFileSizeTable(t *testing.T) {
 	y := rowsYard(t, 12, 12)
 	before := y.git(y.repo, "rev-parse", "main")
 	y.commit(y.wt, "big.go", strings.Repeat("x\n", 9))
+	secs := strconv.Itoa(3000 + os.Getpid()%6000)
+	y.opts = "YARDR_REWRITE_TIMEOUT=" + secs
 
 	y.assembly()
 
@@ -996,6 +1072,7 @@ func TestMergeLocalLowersTheFileSizeTable(t *testing.T) {
 	if !strings.Contains(y.log, "== lowered the file size table in check.sh (amend on yard/r-1)") {
 		t.Fatalf("the log does not say the table was lowered:\n%s", y.log)
 	}
+	noSleep(t, secs)
 }
 
 // A table that is already right is left as it is: no amend, so the commit the
@@ -1141,6 +1218,61 @@ func TestMergeLocalTrimsALoudRewriteInTheHold(t *testing.T) {
 	}
 	if strings.Contains(y.log, "== the tests on") || strings.Contains(y.log, "== the tests") {
 		t.Fatalf("the gate ran after a rewrite that could not be lowered:\n%s", y.log)
+	}
+}
+
+// A rewrite that never ends is stopped and killed at its deadline, the sleep a
+// shell below it with it, and the bead is held with what the rewrite had
+// printed, not left to stall the queue of landings until the assembly is killed
+// (yardr-19sp). A deadline that is no number holds the bead before the rewrite
+// is run at all, and is not mistaken for a hang.
+func TestMergeLocalHoldsARewriteThatRunsPastItsDeadline(t *testing.T) {
+	y := rowsYard(t, 12, 12)
+	main := y.git(y.repo, "rev-parse", "main")
+	ran, pids := filepath.Join(y.home, "ran"), filepath.Join(y.home, "pids")
+	tip := y.commit(y.wt, "check.sh", hangingRewrite(t, ran, pids))
+	held := func(step string, want ...string) {
+		t.Helper()
+		if b := y.bead(); !b.Hold || b.Stage != "approved" {
+			t.Fatalf("%s: bead %s hold=%v, want held in approved:\n%s", step, b.Stage, b.Hold, y.notes())
+		}
+		for _, w := range want {
+			if !strings.Contains(y.notes(), w) {
+				t.Fatalf("%s: the hold lacks %q:\n%s", step, w, y.notes())
+			}
+		}
+		if strings.Contains(y.notes(), "cannot be lowered") {
+			t.Fatalf("%s: the hold says the rewrite failed:\n%s", step, y.notes())
+		}
+		if got := y.git(y.repo, "rev-parse", "main"); got != main {
+			t.Fatalf("%s: main moved", step)
+		}
+		if got := y.git(y.wt, "rev-parse", "HEAD"); got != tip {
+			t.Fatalf("%s: the branch moved", step)
+		}
+		if strings.Contains(y.log, "== the tests") {
+			t.Fatalf("%s: the gate ran:\n%s", step, y.log)
+		}
+	}
+
+	y.opts = "YARDR_REWRITE_TIMEOUT=2"
+	y.assembly()
+
+	held("a rewrite that never ends",
+		"the file size table rewrite in check.sh ran past its deadline of 2s and was killed",
+		"OUTPUT-OF-A-REWRITE-THAT-HUNG", "raise YARDR_REWRITE_TIMEOUT")
+	waitGone(t, pids)
+	if n := runs(t, ran); n != 1 {
+		t.Fatalf("the rewrite ran %d times, want 1", n)
+	}
+
+	y.setHold("r-1", false)
+	y.opts = "YARDR_REWRITE_TIMEOUT=2m"
+	y.assembly()
+
+	held("a deadline that is no number", "YARDR_REWRITE_TIMEOUT is 2m in this group's cmd")
+	if n := runs(t, ran); n != 1 {
+		t.Fatalf("the rewrite ran %d times in all, want 1: a deadline that is no number runs none", n)
 	}
 }
 
@@ -1291,6 +1423,43 @@ func TestIntegrateTrainLowersTheFileSizeTableInACommitOfItsOwn(t *testing.T) {
 	}
 	if y.git(wt, "status", "--porcelain") != "" {
 		t.Fatal("the train's worktree is not clean after integrating")
+	}
+}
+
+// The deadline of the rewrite is integrate-train's as well, the block being the
+// same: a rewrite that never ends is killed, and the train is held, its branch
+// as the children left it (yardr-19sp).
+func TestIntegrateTrainHoldsARewriteThatRunsPastItsDeadline(t *testing.T) {
+	y := landedTrainYard(t, "check.sh")
+	y.push = ""
+	ran, pids := filepath.Join(y.home, "ran"), filepath.Join(y.home, "pids")
+	y.commit(y.repo, "check.sh", hangingRewrite(t, ran, pids))
+	y.commit(y.repo, "big.go", strings.Repeat("x\n", 12))
+	wt := filepath.Join(y.home, "worktrees", "r", "r-e")
+	y.git(y.repo, "worktree", "add", "-q", wt, "yard/r-e")
+	y.git(wt, "rebase", "-q", "main")
+	wagon := y.commit(wt, "big.go", strings.Repeat("x\n", 9))
+	y.opts = "YARDR_REWRITE_TIMEOUT=2"
+
+	y.exec("integrate-train", "yard-integrators", "r-e")
+
+	if e := y.beadOf("r-e"); !e.Hold || e.Stage != "open" {
+		t.Fatalf("train %s hold=%v, want held in open:\n%s", e.Stage, e.Hold, y.notesOf("r-e"))
+	}
+	for _, want := range []string{
+		"the file size table rewrite in check.sh ran past its deadline of 2s and was killed",
+		"OUTPUT-OF-A-REWRITE-THAT-HUNG", "raise YARDR_REWRITE_TIMEOUT",
+	} {
+		if !strings.Contains(y.notesOf("r-e"), want) {
+			t.Fatalf("the hold lacks %q:\n%s", want, y.notesOf("r-e"))
+		}
+	}
+	if got := y.git(y.repo, "rev-parse", "yard/r-e"); got != wagon {
+		t.Fatalf("the train's branch is at %s, want the wagon's %s", got, wagon)
+	}
+	waitGone(t, pids)
+	if n := runs(t, ran); n != 1 {
+		t.Fatalf("the rewrite ran %d times, want 1", n)
 	}
 }
 

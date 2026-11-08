@@ -383,13 +383,42 @@ needs a row in the `filesizes` table in `.yardr/test`, naming its ceiling
 in lines (`wc -l`, the count the table was seeded with) and why it is
 over. A file over its ceiling, or an unlisted file over 1000 lines, fails
 every run: split it along a concept, one concept per file. A ceiling
-standing above its file, or a row whose file is gone, fails a plain run,
-so a shrinking change lowers its file's row in the same commit and a
-deletion deletes the row with the file: the ceiling only falls. At landing
-(`YARDR_LANDING=1`) those two pass with a printed note instead: the
-assembly runs the base's copy of `.yardr/test`, so it still has the old row
-while the branch lowers or deletes its row. Over-ceiling and
-unlisted-over-1000 fail at landing as ever.
+standing above its file, or a row whose file is gone, only warns on a plain
+run, and the step passes:
+
+```text
+test: warning: <file> has <n> lines, under its <m>-line ceiling: the landing lowers the row
+test: warning: filesizes row <file> names a file that is gone: the landing deletes the row
+```
+
+A change that shrinks or deletes a listed file therefore leaves the table
+alone, and two that shrink the same file, or neighbouring files, never
+conflict on a row: the ceiling only falls, the landing lowers rows to
+actual, and nothing else edits a row.
+
+The assembly lowers them. Where the depot's test command is a file of the
+branch that carries the table, as `.yardr/test` is,
+`contrib/assembly/merge-local` and, for a train, `integrate-train` run
+`sh .yardr/test sizes --rewrite` on what they land, from the branch's own
+copy of the script, after the rebase and before the tests. Each row becomes
+the smaller of itself and its file's `wc -l`; a row whose file is gone, or
+has at most 1000 lines and so needs none, is deleted; none is added or
+raised. A file over its row fails the rewrite, which changes nothing, and
+the bead is held: that is growth, or a row cut below its file by hand, and
+no landing settles it. merge-local amends the change into the branch's
+head; integrate-train commits it as `assembly: lower filesizes rows to actual`,
+once for the train, so a wagon landing on its train's branch leaves the
+rows alone. The landing's tests then run the base's copy of `.yardr/test`,
+whose rows still stand above the branch's shrunk files, so at landing
+(`YARDR_LANDING=1`) those two cases pass with a printed note instead of the
+warning:
+
+```text
+test: <file> has <n> lines, under its <m>-line ceiling: landing keeps the higher base row (the branch lowers it)
+test: filesizes row <file> names a file that is gone: landing keeps the base row (the branch deletes it)
+```
+
+Over-ceiling and unlisted-over-1000 fail at landing as ever.
 
 Two things say where a file stands before a change takes it over, so that a
 split is planned and not found at the gate. `sh .yardr/test sizes [path]`
@@ -397,12 +426,16 @@ reports how much room the Go files have, in the seconds a find and a `wc`
 take: none of a run's steps, no git and no go, and no test line (which would
 pass for the record of a run). It prints a line for each listed file, as
 `test: sizes: <file> <lines>/<ceiling> (<room>)` with the room signed (negative
-for a file over its ceiling); for each row whose file is gone; and for each file
-with no row once fewer than 50 lines are left before the 1000 it fails at,
-marked `no row, fails over 1000`. With a path it prints that file's line alone,
-whatever its size. It judges nothing and always exits 0. Run it before planning
-a change to a file over 1000 lines: a listed file has no room, since a plain
-run holds its ceiling to its size, so a change that grows one splits it first.
+for a file over its ceiling); for each row whose file is gone, as
+`test: sizes: <file> gone, its row says <n>: the landing deletes the row`; and
+for each file with no row once fewer than 50 lines are left before the 1000 it
+fails at, marked `no row, fails over 1000`. With a path it prints that file's
+line alone, whatever its size. The report judges nothing and always exits 0.
+Run it before planning a change to a file over 1000 lines: a listed file has no
+room, since the landing keeps its row at its size, so a change that grows one
+splits it first. `sh .yardr/test sizes --rewrite` is a second mode of the same
+entry, the landing's (above): it runs none of a run's steps either, and it is
+the only mode that changes a file or can exit 1, for a file over its row.
 
 The gate warns before formatting, vet, build and tests, whether it then passes
 or fails, of every file with fewer than 50 lines of room under its ceiling, as

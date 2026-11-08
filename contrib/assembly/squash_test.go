@@ -10,6 +10,7 @@ package assembly
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -112,10 +113,11 @@ func TestPRMergeSquashMessageIsMergeLocals(t *testing.T) {
 	}
 }
 
-// squashMessage runs merge-local's squash_message for bead id over what head
-// adds to base in repo, with the yardr at bin, and returns the subject and
-// the body it leaves.
-func (y *yard) squashMessage(bin, repo, id, base, head string) (subject, body string) {
+// squashRun runs merge-local's squash_message for bead id over what head adds
+// to base in repo, with the yardr at bin, and returns what it printed together
+// with the error of a run that could not make the message, which says why as
+// ERR on stderr, behind "squash_message: ".
+func (y *yard) squashRun(bin, repo, id, base, head string) (string, error) {
 	y.t.Helper()
 	script := readFile(y.t, "merge-local")
 	containers := regexp.MustCompile(`(?m)^CONTAINERS="([^"]*)"$`).FindStringSubmatch(script)
@@ -126,12 +128,41 @@ func (y *yard) squashMessage(bin, repo, id, base, head string) (subject, body st
 	if err := os.WriteFile(file, []byte(squashBlock(y.t, "merge-local")), 0o644); err != nil {
 		y.t.Fatal(err)
 	}
-	out := y.run(y.home, "sh", "", "-c",
+	cmd := exec.Command("sh", "-c",
 		`Y=$1 REPO=$2 CONTAINERS=$3; . "$4"; squash_message "$5" "$6" "$7" || { echo "squash_message: $ERR" >&2; exit 1; }
 printf '%s\n\n%s\n' "$SQ_SUBJECT" "$SQ_BODY"`,
 		"sh", bin, repo, containers[1], file, id, base, head)
+	cmd.Dir, cmd.Env = y.home, y.env
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+// squashMessage runs merge-local's squash_message for bead id over what head
+// adds to base in repo, with the yardr at bin, and returns the subject and
+// the body it leaves.
+func (y *yard) squashMessage(bin, repo, id, base, head string) (subject, body string) {
+	y.t.Helper()
+	out, err := y.squashRun(bin, repo, id, base, head)
+	if err != nil {
+		y.t.Fatalf("squash_message of %s: %v\n%s", id, err, out)
+	}
 	subject, body, _ = strings.Cut(out, "\n\n")
 	return subject, body
+}
+
+// squashError is squashMessage for a read that fails: it returns the ERR that
+// squash_message leaves, and fails the test when it makes a message instead.
+func (y *yard) squashError(bin, repo, id, base, head string) string {
+	y.t.Helper()
+	out, err := y.squashRun(bin, repo, id, base, head)
+	if err == nil {
+		y.t.Fatalf("squash_message of %s made a message though a read failed:\n%s", id, out)
+	}
+	_, why, ok := strings.Cut(out, "squash_message: ")
+	if !ok {
+		y.t.Fatalf("squash_message of %s failed with no ERR: %v\n%s", id, err, out)
+	}
+	return why
 }
 
 // A yardr that lists the links of a bead as the test says, and is the real
@@ -142,6 +173,46 @@ func fakeLinkLister(t *testing.T, list string) string {
 	return writeScript(t, t.TempDir(), "yardr", "#!/bin/sh\n"+
 		`if [ "$1 $2" = "link list" ]; then cat <<'EOF'`+"\n"+list+"\nEOF\nexit 0; fi\n"+
 		"exec "+shellQuote(yardrBin)+` "$@"`+"\n")
+}
+
+// unreadableLinks is a yardr that is the real one for everything but a link
+// list, which it answers as the real one does for a bead the yard never made:
+// exit 3, and on stdout, which is where --json puts an error,
+// {"error":"bead r-gone: not found"}, with nothing on stderr. A bead's own links
+// cannot be the ones that are not there: the block reads the bead first.
+func unreadableLinks(t *testing.T) string {
+	t.Helper()
+	return writeScript(t, t.TempDir(), "yardr", `#!/bin/sh
+if [ "$1 $2" = "link list" ]; then
+  shift 3
+  exec `+shellQuote(yardrBin)+` link list r-gone "$@"
+fi
+exec `+shellQuote(yardrBin)+` "$@"
+`)
+}
+
+// failingGit is a directory with a git that fails the one call that has the
+// argument arg, as git does for a read it cannot make: "fatal: the stand-in git
+// will not run a call with <arg>" on stderr and nothing on stdout, exit 128. For
+// every other call it is the git it found, the real one of this test
+// (testload.PreferRealGit), put first on a PATH.
+func failingGit(t *testing.T, arg string) string {
+	t.Helper()
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	writeScript(t, dir, "git", `#!/bin/sh
+for a in "$@"; do
+  if [ "$a" = `+shellQuote(arg)+` ]; then
+    echo "fatal: the stand-in git will not run a call with "`+shellQuote(arg)+` >&2
+    exit 128
+  fi
+done
+exec `+shellQuote(git)+` "$@"
+`)
+	return dir
 }
 
 const peerAndIssueLinks = `[
@@ -178,7 +249,9 @@ const (
 // The format of the squash commit's message, case by case: the type from the
 // kind: label, else from the bead's type; the scope from the paths the
 // squash changes; the commits' messages without their trailers; and the
-// footer. Each case is a bead and a branch of commits.
+// footer. Each case is a bead and a branch of commits. A case with an err is a
+// read that fails, and gives the ERR the block leaves in place of a message:
+// it says why, as the command said it, on the stream the command said it on.
 func TestSquashMessage(t *testing.T) {
 	t.Parallel() // as its subtests are: see TestMain
 	type commit struct {
@@ -193,6 +266,9 @@ func TestSquashMessage(t *testing.T) {
 		links          string // the links the bead lists, when not its own
 		commits        []commit
 		subject, body  string
+		yardr          func(*testing.T) string // a yardr that fails a read, in place of the real one
+		fails          string                  // the argument of the one call of git to fail
+		err            []string                // what ERR holds, where a read fails
 	}{
 		{
 			// No kind: label, a bug: fix. One package: its name.
@@ -252,6 +328,21 @@ func TestSquashMessage(t *testing.T) {
 			commits: []commit{{msg: "x\n", files: map[string]string{"x.txt": "x\n"}}},
 			subject: "chore: Links (r-9)",
 			body:    "x\n\nRefs: https://github.com/acme/widgets/issues/7?a=1&b=2\nRefs: https://linear.app/acme/issue/ACM-9\nYardr-Bead: r-9",
+		}, {
+			// The two reads of yardr: its error is on stdout, exit 3 (--json).
+			id: "r-10", title: "Read the bead", typ: "task", yardr: unreadableBead,
+			err: []string{"reading r-10 failed: ", "bead r-gone: not found"},
+		}, {
+			id: "r-11", title: "Read the links", typ: "task", yardr: unreadableLinks,
+			err: []string{"listing the links of r-11 failed: ", "bead r-gone: not found"},
+		}, {
+			// The two reads of git: its words are on stderr, which the read
+			// that failed has no part of, so it is asked again.
+			id: "r-12", title: "Read the commits", typ: "task", fails: "--no-show-signature",
+			err: []string{"reading the commits of yard/r-12 since main failed: ", "fatal: the stand-in git will not run a call with --no-show-signature"},
+		}, {
+			id: "r-13", title: "List the changes", typ: "task", fails: "core.quotePath=false",
+			err: []string{"listing what yard/r-13 changes since main failed: ", "fatal: the stand-in git will not run a call with core.quotePath=false"},
 		},
 	} {
 		t.Run(c.id, func(t *testing.T) {
@@ -278,7 +369,22 @@ func TestSquashMessage(t *testing.T) {
 			if c.links != "" {
 				bin = fakeLinkLister(t, c.links)
 			}
+			if c.yardr != nil {
+				bin = c.yardr(t)
+			}
+			if c.fails != "" {
+				y.env = append(y.env, "PATH="+failingGit(t, c.fails)+string(os.PathListSeparator)+os.Getenv("PATH"))
+			}
 
+			if c.err != nil {
+				got := y.squashError(bin, y.repo, c.id, "main", "yard/"+c.id)
+				for _, want := range c.err {
+					if !strings.Contains(got, want) {
+						t.Errorf("%s: ERR is\n%s\nwant it to hold %q", c.id, got, want)
+					}
+				}
+				return
+			}
 			subject, body := y.squashMessage(bin, y.repo, c.id, "main", "yard/"+c.id)
 
 			if subject != c.subject || body != c.body {
@@ -343,6 +449,41 @@ func TestMergeLocalLandMode(t *testing.T) {
 	}
 	if y.git(y.repo, "rev-parse", "main") != orig || y.git(y.wt, "rev-parse", "HEAD") != two {
 		t.Fatal("main or the branch moved under a squash that failed")
+	}
+
+	// The other reads hold it the same way, each with what its command said on
+	// the stream it says it on: yardr's error on stdout, git's on stderr.
+	for _, c := range []struct {
+		what   string
+		yardr  func(*testing.T) string
+		fails  string // the argument of the one call of git to fail
+		prefix string
+		why    string
+	}{
+		{"a link list", unreadableLinks, "", "listing the links of r-1 failed: ", "bead r-gone: not found"},
+		{"a git log", nil, "--no-show-signature", "reading the commits of ", "will not run a call with --no-show-signature"},
+		{"a git diff", nil, "core.quotePath=false", "listing what ", "will not run a call with core.quotePath=false"},
+	} {
+		y.setHold("r-1", false)
+		y.opts = "YARDR_LAND=squash"
+		if c.fails != "" {
+			y.path = failingGit(t, c.fails)
+		}
+		if c.yardr != nil {
+			y.bin = c.yardr(t)
+		}
+		y.assembly()
+		y.bin, y.path = "", ""
+
+		if b := y.bead(); !b.Hold || b.Stage != "approved" {
+			t.Fatalf("bead %s hold=%v after a squash of %s that failed, want held in approved", b.Stage, b.Hold, c.what)
+		}
+		if notes := y.notes(); !strings.Contains(notes, c.prefix) || !strings.Contains(notes, c.why) {
+			t.Fatalf("no note with %q and what the command said, %q, for %s:\n%s", c.prefix, c.why, c.what, notes)
+		}
+		if y.git(y.repo, "rev-parse", "main") != orig || y.git(y.wt, "rev-parse", "HEAD") != two {
+			t.Fatalf("main or the branch moved under a squash that failed on %s", c.what)
+		}
 	}
 
 	y.setHold("r-1", false)
