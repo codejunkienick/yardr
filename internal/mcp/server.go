@@ -192,7 +192,11 @@ func (s *Server) dispatch(ctx context.Context, req *sdkmcp.CallToolRequest, svc 
 		}
 		return svc.Answer(ctx, in, weighed)
 	case ToolAskTheYardmaster:
-		return svc.AskTheYardmaster(ctx, stringArg(args, "message"), s.progress(ctx, req))
+		waitForReply, err := waitArg(args)
+		if err != nil {
+			return nil, err
+		}
+		return svc.AskTheYardmaster(ctx, stringArg(args, "message"), waitForReply, s.progress(ctx, req))
 	case ToolReadMyMail:
 		return svc.ReadMyMail(ctx)
 	}
@@ -340,6 +344,23 @@ func toolError(err error, footer string) *sdkmcp.CallToolResult {
 func stringArg(args map[string]any, name string) string {
 	v, _ := args[name].(string)
 	return v
+}
+
+// waitArg reads ask_the_yardmaster's wait: true where it is absent or
+// null, so a caller that says nothing waits as it always did. Anything
+// but a boolean is refused in plain words before the message is sent:
+// a client that sends "false" as a string would otherwise wait out the
+// whole limit for a send it meant to be quick.
+func waitArg(args map[string]any) (bool, error) {
+	v, ok := args["wait"]
+	if !ok || v == nil {
+		return true, nil
+	}
+	wait, ok := v.(bool)
+	if !ok {
+		return false, fmt.Errorf("wait: say true to wait for the reply, or false to send the message without waiting")
+	}
+	return wait, nil
 }
 
 // answerInput reads the answer tool's arguments into an AnswerInput,

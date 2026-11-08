@@ -150,7 +150,7 @@ func TestNoUserRefusesEveryTool(t *testing.T) {
 			_, err := s.Answer(y.ctx, mcp.AnswerInput{Work: "x", Question: 1, Pick: 1}, false)
 			return err
 		},
-		func() error { _, err := s.AskTheYardmaster(y.ctx, "hi", nil); return err },
+		func() error { _, err := s.AskTheYardmaster(y.ctx, "hi", true, nil); return err },
 		func() error { _, err := s.ReadMyMail(y.ctx); return err },
 	}
 	for i, call := range calls {
@@ -701,12 +701,12 @@ func TestAskTheYardmasterWait(t *testing.T) {
 		PollInterval: 10 * time.Millisecond, ProgressInterval: time.Hour}
 	settingsErr := errors.New("settings unavailable")
 	s.Yard = readErrorYard{Yard: y.st, settingsErr: settingsErr}
-	if _, err := s.AskTheYardmaster(y.ctx, "what is the answer?", nil); !errors.Is(err, settingsErr) {
+	if _, err := s.AskTheYardmaster(y.ctx, "what is the answer?", true, nil); !errors.Is(err, settingsErr) {
 		t.Fatalf("a failed yardmaster setting lookup = %v, want its error", err)
 	}
 	crewErr := errors.New("crew unavailable")
 	s.Yard = readErrorYard{Yard: y.st, crewErr: crewErr}
-	if _, err := s.AskTheYardmaster(y.ctx, "what is the answer?", nil); !errors.Is(err, crewErr) {
+	if _, err := s.AskTheYardmaster(y.ctx, "what is the answer?", true, nil); !errors.Is(err, crewErr) {
 		t.Fatalf("a failed yardmaster roster lookup = %v, want its error", err)
 	}
 	// Every result says its words in the structured part too, for a client
@@ -719,7 +719,7 @@ func TestAskTheYardmasterWait(t *testing.T) {
 	}
 	s.Yard = replyYard
 	var progress []string
-	res, err := s.AskTheYardmaster(y.ctx, "what is the answer?", func(msg string) { progress = append(progress, msg) })
+	res, err := s.AskTheYardmaster(y.ctx, "what is the answer?", true, func(msg string) { progress = append(progress, msg) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -734,6 +734,38 @@ func TestAskTheYardmasterWait(t *testing.T) {
 	// Finding the reply marks nothing read: that is read_my_mail's.
 	if box, err := y.st.UserInbox(y.ctx, "ada", 0, "ada"); err != nil || box.Unread != 1 {
 		t.Fatalf("the inbox after the wait found the reply = %+v, %v; want the reply still unread", box, err)
+	}
+	// Without a wait the call ends once the message is sent. The reply
+	// that lands at once, which a wait finds on its first look, is not
+	// looked for (it is read_my_mail's), no progress line says a wait is
+	// standing, and the message stands in the conversation.
+	progress = nil
+	res, err = s.AskTheYardmaster(y.ctx, "an FYI for you", false, func(msg string) { progress = append(progress, msg) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain(t, res.Text)
+	if res.Text != "Sent to the yardmaster; the reply comes by mail. Ask me to read your mail later." || len(progress) != 0 {
+		t.Fatalf("the send without a wait:\n%s\nprogress %v", res.Text, progress)
+	}
+	wordsInBoth(res, true)
+	if _, found := res.Structured["reply"]; found {
+		t.Errorf("the send without a wait found a reply: %v", res.Structured)
+	}
+	standing, _, err := y.st.Conversation(y.ctx, "ada", "yardmaster", 0, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fyi bool
+	for _, l := range standing {
+		fyi = fyi || (l.From == "ada" && l.Text == "an FYI for you")
+	}
+	if !fyi {
+		t.Errorf("the conversation after the send without a wait lacks the message: %+v", standing)
+	}
+	// The reply that message drew is there, unread, with the first.
+	if box, err := y.st.UserInbox(y.ctx, "ada", 0, "ada"); err != nil || box.Unread != 2 {
+		t.Fatalf("the inbox after the send without a wait = %+v, %v; want both replies unread", box, err)
 	}
 	// A reply the person's other window (footplate on a laptop) read
 	// before the wait's first look is still the reply: it is lost to the
@@ -754,7 +786,7 @@ func TestAskTheYardmasterWait(t *testing.T) {
 		}
 		return readElsewhere(ctx, actor)
 	}}
-	res, err = s.AskTheYardmaster(y.ctx, "is it filed?", nil)
+	res, err = s.AskTheYardmaster(y.ctx, "is it filed?", true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -777,7 +809,7 @@ func TestAskTheYardmasterWait(t *testing.T) {
 		}
 		return y.st.Mail(ctx, actor, "second answer", to)
 	}}
-	res, err = s.AskTheYardmaster(y.ctx, "and the rest?", nil)
+	res, err = s.AskTheYardmaster(y.ctx, "and the rest?", true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -787,7 +819,7 @@ func TestAskTheYardmasterWait(t *testing.T) {
 	// The wait ending says the answer will come, and keeps the message.
 	s.Yard = y.st
 	s.Wait = 150 * time.Millisecond
-	res, err = s.AskTheYardmaster(y.ctx, "and this one?", nil)
+	res, err = s.AskTheYardmaster(y.ctx, "and this one?", true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,7 +842,7 @@ func TestAskTheYardmasterWait(t *testing.T) {
 	}}
 	done := make(chan *mcp.Result, 1)
 	go func() {
-		res, _ := s.AskTheYardmaster(ctx, "a third question", nil)
+		res, _ := s.AskTheYardmaster(ctx, "a third question", true, nil)
 		done <- res
 	}()
 	select {

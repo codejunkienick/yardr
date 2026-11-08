@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -142,6 +143,23 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 		}
 		if err := json.Unmarshal(schema, &out); err != nil || out.Properties["text"] == nil || len(out.Required) != 1 || out.Required[0] != "text" {
 			t.Errorf("%s's output schema = %s, want text required", tool.Name, schema)
+		}
+		// ask_the_yardmaster's wait is an optional boolean, and its
+		// description says when to pass it.
+		if tool.Name == mcp.ToolAskTheYardmaster {
+			input, _ := json.Marshal(tool.InputSchema)
+			var in struct {
+				Properties map[string]struct {
+					Type string `json:"type"`
+				} `json:"properties"`
+				Required []string `json:"required"`
+			}
+			if err := json.Unmarshal(input, &in); err != nil || in.Properties["wait"].Type != "boolean" || slices.Contains(in.Required, "wait") {
+				t.Errorf("%s's input schema = %s, want wait an optional boolean", tool.Name, input)
+			}
+			if !strings.Contains(tool.Description, "Pass wait as false for a note or an FYI") {
+				t.Errorf("%s's description does not say when to pass wait false:\n%s", tool.Name, tool.Description)
+			}
 		}
 	}
 	if len(served) != len(mcp.Tools()) {
@@ -411,6 +429,46 @@ func TestAskTheYardmasterProgressOverTheWire(t *testing.T) {
 	structured, _ := res.StructuredContent.(map[string]any)
 	if msg, _ := structured["message"].(string); !strings.Contains(msg, "done: it is filed") || structured["waiting"] != false {
 		t.Errorf("the structured part over the wire = %v, want the reply's words in message", structured)
+	}
+	// The wait argument over the wire. False sends and ends at once: the
+	// reply this yard lands at every send is not looked for. Null is as
+	// good as leaving it out, which waits. A value that is no boolean is
+	// refused in words before anything is sent.
+	ask := func(message string, wait any) (*sdkmcp.CallToolResult, string) {
+		t.Helper()
+		res, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{
+			Name:      mcp.ToolAskTheYardmaster,
+			Arguments: map[string]any{"message": message, "wait": wait},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res, toolText(t, res)
+	}
+	letters := func() int {
+		t.Helper()
+		standing, _, err := y.st.Conversation(context.Background(), "ada", "yardmaster", 0, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(standing)
+	}
+	res, text := ask("a note for the yardmaster", false)
+	if res.IsError || !strings.HasPrefix(text, "Sent to the yardmaster; the reply comes by mail.") || strings.Contains(text, "done: it is filed") {
+		t.Errorf("the send without a wait over the wire (error %v):\n%s", res.IsError, text)
+	}
+	structuredText(t, res, text)
+	if structured, _ := res.StructuredContent.(map[string]any); structured["waiting"] != true {
+		t.Errorf("the structured part of the send without a wait = %v, want waiting", structured)
+	}
+	res, text = ask("and a question", nil)
+	if res.IsError || !strings.Contains(text, "done: it is filed") {
+		t.Errorf("a null wait over the wire (error %v), want the wait's reply:\n%s", res.IsError, text)
+	}
+	before := letters()
+	res, text = ask("this must not be sent", "false")
+	if !res.IsError || !strings.Contains(text, "wait: say true") || letters() != before {
+		t.Errorf("a wait that is no boolean (error %v, letters %d, were %d):\n%s", res.IsError, letters(), before, text)
 	}
 	mu.Lock()
 	defer mu.Unlock()

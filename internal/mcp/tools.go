@@ -554,7 +554,11 @@ func (s *Service) Answer(ctx context.Context, in AnswerInput, weighed bool) (*Re
 // client's idle window. Cancelling the wait never takes the message
 // back: the question stands, and the reply will come as mail. Finding
 // the reply marks nothing read: reading mail is read_my_mail's.
-func (s *Service) AskTheYardmaster(ctx context.Context, message string, progress func(string)) (*Result, error) {
+//
+// waitForReply false is for a note or an FYI that needs no answer now:
+// the call ends once the message is sent, so it holds nobody's
+// conversation, and any reply is read_my_mail's.
+func (s *Service) AskTheYardmaster(ctx context.Context, message string, waitForReply bool, progress func(string)) (*Result, error) {
 	if err := s.requireUser(); err != nil {
 		return nil, err
 	}
@@ -573,6 +577,20 @@ func (s *Service) AskTheYardmaster(ctx context.Context, message string, progress
 	if err := s.Yard.Mail(ctx, to, message, s.User); err != nil {
 		return nil, err
 	}
+	// Every result carries its words in the structured part too: a client
+	// that shows only that part (Claude Code showed {"waiting": true} and
+	// nothing else) then shows words, and the two cannot differ.
+	said := func(text string, structured map[string]any) *Result {
+		structured["message"] = text
+		return &Result{Text: text, Structured: structured}
+	}
+	// No wait, no progress line and no look at the inbox: the message
+	// stands, and waiting stays true because a reply, if the yardmaster
+	// gives one, comes as mail.
+	if !waitForReply {
+		return said("Sent to the yardmaster; the reply comes by mail. Ask me to read your mail later.",
+			map[string]any{"waiting": true}), nil
+	}
 	wait := s.Wait
 	if wait <= 0 {
 		wait = DefaultWait
@@ -587,13 +605,6 @@ func (s *Service) AskTheYardmaster(ctx context.Context, message string, progress
 	}
 	if progress != nil {
 		progress("asked; waiting for the answer")
-	}
-	// Every result carries its words in the structured part too: a client
-	// that shows only that part (Claude Code showed {"waiting": true} and
-	// nothing else) then shows words, and the two cannot differ.
-	said := func(text string, structured map[string]any) *Result {
-		structured["message"] = text
-		return &Result{Text: text, Structured: structured}
 	}
 	deadline := time.NewTimer(wait)
 	defer deadline.Stop()

@@ -194,11 +194,13 @@ func Tools() []ToolDef {
 		{
 			Name: ToolAskTheYardmaster,
 			Description: "Write to the person who runs this yard for you (the yardmaster) and wait a little for the reply, as writing in the yard's chat does. " +
-				"If the reply takes longer than the wait, it comes as mail: read_my_mail reads it then. Stopping the wait never takes the message back.",
+				"If the reply takes longer than the wait, it comes as mail: read_my_mail reads it then. Stopping the wait never takes the message back. " +
+				"Pass wait as false for a note or an FYI that needs no answer now: the message is sent, the call returns at once, and any reply comes as mail.",
 			InputSchema: schema(`{
 				"type": "object",
 				"properties": {
-					"message": {"type": "string", "description": "what to say to the yardmaster, in the person's words"}
+					"message": {"type": "string", "description": "what to say to the yardmaster, in the person's words"},
+					"wait": {"type": "boolean", "description": "false sends the message and returns at once, for a note or an FYI that needs no answer now (default: true, wait a little for the reply)"}
 				},
 				"required": ["message"],
 				"additionalProperties": false
