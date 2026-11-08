@@ -74,8 +74,15 @@ func (s *Supervisor) servePreview(w http.ResponseWriter, r *http.Request) {
 		// one that made the start does.
 		if p.State != store.PreviewRunning {
 			if p.State == store.PreviewStopped || p.State == store.PreviewApproved {
+				// The flip acts on the row this request read, not on the row as it is
+				// by now: another request's start may have made it running since, and
+				// approved written over that would leave the process under a row that
+				// does not say it runs. A flip that finds the row changed lost to a
+				// writer that went on from it; what follows reads the row as it stands.
 				d := ""
-				_, _ = s.Store.UpdatePreview(ctx, app, store.PreviewUpdate{State: store.PreviewApproved, StateDetail: &d})
+				if _, err := s.Store.UpdatePreview(ctx, app, store.PreviewUpdate{ExpectedState: p.State, State: store.PreviewApproved, StateDetail: &d}); err != nil {
+					s.Log.Debug("preview: on-demand flip not made", "app", app, "err", err)
+				}
 			}
 			if err := s.Start(ctx, app); err != nil {
 				// The reason names what the machine holds, a path or an interface

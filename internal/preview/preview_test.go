@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -203,6 +204,34 @@ func (y *yard) state(app string) store.Preview {
 		return store.Preview{State: "gone"}
 	}
 	return *p
+}
+
+// heldPID is the pid of the process the supervisor holds for app, 0 where it
+// holds none.
+func (y *yard) heldPID(app string) int {
+	y.sup.mu.Lock()
+	defer y.sup.mu.Unlock()
+	if pr := y.sup.running[app]; pr != nil {
+		return pr.cmd.Process.Pid
+	}
+	return 0
+}
+
+// flipGate is a store whose flips of a row to approved wait to be let go, one
+// each time let is sent to, so a test says what is written before a flip lands.
+// Closing let lets go every flip that waits and every later one.
+type flipGate struct {
+	Store
+	arrived atomic.Int32 // flips that have come to the gate
+	let     chan struct{}
+}
+
+func (g *flipGate) UpdatePreview(ctx context.Context, app string, upd store.PreviewUpdate) (*store.Preview, error) {
+	if upd.State == store.PreviewApproved {
+		g.arrived.Add(1)
+		<-g.let
+	}
+	return g.Store.UpdatePreview(ctx, app, upd)
 }
 
 func TestApprovedPreviewStartsAndAnswersThroughEndpoint(t *testing.T) {
@@ -527,6 +556,82 @@ func TestCrashLoopEndsCrashed(t *testing.T) {
 			t.Fatalf("stop lost to a delayed restart: %+v", got)
 		}
 	})
+
+	// The person's restart, asked for in a crash's backoff, starts the app again
+	// before the backoff is over. The timer that then fires finds a process held
+	// and the row running, as the crash left it and the new process has made it
+	// again: the restart it was to make is made. Flipping that row to approved
+	// would leave the process under a row that does not say it runs, never stopped
+	// as idle and its exit never recorded.
+	t.Run("a restart asked for in a backoff outlasts the timer", func(t *testing.T) {
+		ctx := context.Background()
+		y := newYard(t)
+		y.sup.Backoffs = []time.Duration{time.Hour}
+		y.runJoined(t)
+		port := freePort(t)
+		// The first start crashes; the second, which the person's restart makes, serves.
+		y.propose(t, "demo", "if [ -e ran ]; then exec "+loopbackApp(port)+"; fi; touch ran; exit 1", port, true)
+		waitFor(t, "first crash enters its backoff", func() bool {
+			p := y.state("demo")
+			return p.RestartCount == 1 && p.State == store.PreviewRunning
+		})
+		if _, err := y.st.RestartPreview(ctx, "demo", "ada"); err != nil {
+			t.Fatal(err)
+		}
+		y.waitStart(t, "the restart the person asked for to run the app", func() bool {
+			pid := y.heldPID("demo")
+			return pid != 0 && y.state("demo").PID == pid
+		})
+		first := y.heldPID("demo")
+		y.sup.restart(ctx, "demo") // the timer of the crash's backoff runs out
+		if got := y.state("demo"); got.State != store.PreviewRunning || got.PID != first || y.heldPID("demo") != first {
+			t.Fatalf("after the timer the row says %s with pid %d and the supervisor holds pid %d, want running as the process the person's restart started, %d", got.State, got.PID, y.heldPID("demo"), first)
+		}
+	})
+
+	// A restart that finds no process held and the row running flips the row and
+	// starts the app. A start recorded between its check and its flip would be
+	// flipped over, as the one the person's restart makes above would be; what
+	// keeps one from being recorded there is the lock the starts take their turns
+	// by, which the restart holds from its check to its start. The gate holds the
+	// restart at its flip, where the lock must be held.
+	t.Run("a restart holds the starts' lock from its check to its start", func(t *testing.T) {
+		ctx := context.Background()
+		y := newYard(t)
+		t.Cleanup(func() { y.sup.kill("demo") })
+		gate := &flipGate{Store: y.sup.Store, let: make(chan struct{})}
+		y.sup.Store = gate
+		port := freePort(t)
+		y.propose(t, "demo", loopbackApp(port), port, true)
+		// The row a crash leaves in its backoff: running, with no process.
+		if _, err := y.st.UpdatePreview(ctx, "demo", store.PreviewUpdate{State: store.PreviewRunning}); err != nil {
+			t.Fatal(err)
+		}
+		restarted := make(chan struct{})
+		go func() {
+			defer close(restarted)
+			y.sup.restart(ctx, "demo")
+		}()
+		// Whichever way the test ends, the restart is let go and has returned before
+		// the app it may have started is killed.
+		defer func() {
+			close(gate.let)
+			<-restarted
+		}()
+		waitFor(t, "the restart to come to its flip", func() bool { return gate.arrived.Load() == 1 })
+		if y.sup.startMu.TryLock() {
+			y.sup.startMu.Unlock()
+			t.Fatal("the restart is between its check and its flip without the starts' lock, so a start could be recorded there")
+		}
+		gate.let <- struct{}{}
+		y.waitStart(t, "the restart to run the app", func() bool {
+			pid := y.heldPID("demo")
+			return pid != 0 && y.state("demo").PID == pid
+		})
+		if got := y.state("demo"); got.State != store.PreviewRunning {
+			t.Fatalf("after the restart the row says %s, want running", got.State)
+		}
+	})
 }
 
 func TestCleanExitIsNotRestarted(t *testing.T) {
@@ -769,6 +874,69 @@ func TestOnDemandStartThroughEndpoint(t *testing.T) {
 		}
 		y.propose(t, "nolog", "true", freePort(t), true)
 		cannotStart(t, y, "nolog", y.home)
+	})
+
+	// Two visitors arrive together at a stopped preview and each reads its row
+	// stopped. One flips it to approved and starts the app; the other's flip
+	// comes after that start. The flip holds only while the row still says what
+	// its request read, so it finds the row running and changes nothing: written
+	// over, the row would say approved under a process that runs on, never stopped
+	// as idle and its exit never recorded. Left to themselves the two flips land
+	// long before either start is recorded, so the gate holds both until both
+	// requests have read the row, lets one go, and lets the other go once the
+	// first request's start is recorded.
+	t.Run("a flip that comes after another request's start leaves the row running", func(t *testing.T) {
+		y := newYard(t) // no Run: the requests alone start it
+		t.Cleanup(func() { y.sup.kill("demo") })
+		gate := &flipGate{Store: y.sup.Store, let: make(chan struct{})}
+		y.sup.Store = gate
+		port := freePort(t)
+		y.propose(t, "demo", previewtest.App("127.0.0.1", port), port, true)
+		if _, err := y.st.PreviewStop(context.Background(), "demo", "ada"); err != nil {
+			t.Fatal(err)
+		}
+		srv := httptest.NewServer(y.sup.Handler())
+		defer srv.Close()
+		// What is left waiting at the gate is let go before the server waits for
+		// its requests, whichever way the test ends.
+		defer close(gate.let)
+		type answer struct {
+			code int
+			body string
+		}
+		answers := make(chan answer, 2)
+		for range 2 {
+			go func() {
+				resp, err := http.Get(srv.URL + "/preview/demo/")
+				if err != nil {
+					answers <- answer{body: err.Error()}
+					return
+				}
+				defer resp.Body.Close()
+				raw, _ := io.ReadAll(resp.Body)
+				answers <- answer{resp.StatusCode, string(raw)}
+			}()
+		}
+		waitFor(t, "both requests to come to their flip", func() bool { return gate.arrived.Load() == 2 })
+		gate.let <- struct{}{}
+		y.waitStart(t, "the first request's start to be recorded", func() bool {
+			return y.heldPID("demo") != 0 && y.state("demo").State == store.PreviewRunning
+		})
+		gate.let <- struct{}{}
+		for range 2 {
+			select {
+			case a := <-answers:
+				if a.code != http.StatusOK || !strings.Contains(a.body, "hello preview") {
+					t.Errorf("a request's answer = %d %q, want the app's: 200 hello preview", a.code, a.body)
+				}
+			case <-time.After(y.startWait()):
+				t.Fatal("a request was not answered")
+			}
+		}
+		pid := y.heldPID("demo")
+		if got := y.state("demo"); pid == 0 || got.State != store.PreviewRunning || got.PID != pid {
+			t.Fatalf("after both flips the row says %s with pid %d and the supervisor holds pid %d, want running as that process", got.State, got.PID, pid)
+		}
 	})
 }
 

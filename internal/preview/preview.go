@@ -310,6 +310,12 @@ func (s *Supervisor) Start(ctx context.Context, app string) error {
 	// the first would go on running with no one holding it.
 	s.startMu.Lock()
 	defer s.startMu.Unlock()
+	return s.startLocked(ctx, app)
+}
+
+// startLocked is Start for a caller that holds startMu: restart, which decides
+// whether to start under the turn it starts in.
+func (s *Supervisor) startLocked(ctx context.Context, app string) error {
 	s.mu.Lock()
 	if s.running[app] != nil {
 		s.mu.Unlock()
@@ -548,9 +554,20 @@ func waitGroupGone(pgid int, wait time.Duration) bool {
 	}
 }
 
-// restart changes a crash's running row back to approved only if no stop
-// or forget won while its backoff was elapsing.
+// restart changes a crash's running row back to approved, and starts it, only
+// if no stop or forget won while its backoff was elapsing and no start has been
+// made since the crash: a person's restart on the card, or a request, may have
+// started the app again, and the row then says running as that process made it.
+// Flipped to approved it would leave the process under a row that does not say
+// it runs, never stopped as idle and its exit never recorded. The starts' lock
+// is held across the check, the flip and the start, as Start holds it across its
+// own decision, so that no start is recorded between them.
 func (s *Supervisor) restart(ctx context.Context, app string) {
+	s.startMu.Lock()
+	defer s.startMu.Unlock()
+	if s.Running(app) {
+		return
+	}
 	cur, err := s.Store.GetPreview(ctx, app)
 	if err != nil || cur.State != store.PreviewRunning || cur.Approval == nil {
 		return
@@ -563,7 +580,7 @@ func (s *Supervisor) restart(ctx context.Context, app string) {
 	}); err != nil {
 		return
 	}
-	if err := s.Start(ctx, app); err != nil {
+	if err := s.startLocked(ctx, app); err != nil {
 		s.Log.Debug("preview: crash restart not started", "app", app, "err", err)
 	}
 }
