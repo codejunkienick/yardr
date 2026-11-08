@@ -62,6 +62,16 @@ const FloorMessage = "This yard speaks MCP 2025-06-18 or later. Update your clie
 // yardr-ts4d 3.1).
 const NoUserMessage = "I can't tell who you are to this yard. Run `yardr user list` to see its people, then set `YARDR_ACTOR` or `--actor` to your name in this client's `yardr mcp` configuration and reconnect."
 
+// questionRule is the one rule for a waiting question, said in the
+// server's introduction and in both tools a question passes through,
+// since a client may show its model the introduction, the tool list or
+// both. The person decides: each question is put to them as a pick (a
+// client with a picker shows one, any other lists the choices as text),
+// and the answer tool is given what they picked or said, never what the
+// client chose for them.
+const questionRule = "Ask the person about each waiting question one at a time, offering its choices by their labels with \"put it aside\" and \"decline\" beside them; " +
+	"answer only with what they picked or said, never choose for them, and never answer a question they have not been shown."
+
 // DefaultWait is how long ask_the_yardmaster holds its call open for a
 // client whose limits are measured (Claude Code): a hundred seconds,
 // which the yardmaster's ordinary answer, given when it is next
@@ -145,7 +155,8 @@ func Tools() []ToolDef {
 		{
 			Name: ToolWhatWaitsForMe,
 			Description: "List the questions this yard is waiting for this person to answer, oldest first, each in plain words with its choices. " +
-				"Each question carries a work name and a question number; the answer tool takes both.",
+				"Each question carries a work name and a question number; the answer tool takes both. " +
+				questionRule,
 			InputSchema: schema(`{"type": "object", "properties": {}, "additionalProperties": false}`),
 			OutputSchema: output(`
 				"questions": {"type": "array", "description": "the waiting questions, oldest first", "items": {
@@ -170,6 +181,7 @@ func Tools() []ToolDef {
 			Description: "Give this person's answer to one question from what_waits_for_me, by its work name and question number: " +
 				"pick a choice by number (words may go with it), give words alone, approve the command a question proposes (approve), " +
 				"put it aside for a day (put_aside), or say it is not theirs to decide (decline, with their reason in words). " +
+				questionRule + " " +
 				"A question that carries weight shows its weight first and asks the person to type its number back before anything is approved. " +
 				"A question asking for a secret is never answered here: it is given in the yard's own window, as its answer says.",
 			InputSchema: schema(`{

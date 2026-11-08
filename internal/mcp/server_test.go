@@ -132,8 +132,10 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 	// The served list is the contract's, in the order the client
 	// presents it (the SDK sorts by name).
 	served := map[string]bool{}
+	described := map[string]string{}
 	for _, tool := range tools.Tools {
 		served[tool.Name] = true
+		described[tool.Name] = tool.Description
 		// Every output schema says the words ride in the structured
 		// part, as text.
 		schema, _ := json.Marshal(tool.OutputSchema)
@@ -168,6 +170,25 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 	for _, def := range mcp.Tools() {
 		if !served[def.Name] {
 			t.Fatalf("the served tools = %v, want the contract's %s among them", served, def.Name)
+		}
+	}
+	// A client may show its model the server's introduction, the tool
+	// list or both, so the rule for a waiting question stands in the
+	// introduction and in both tools a question passes through: put to
+	// the person one at a time as a pick, and never chosen for them.
+	hello := cs.InitializeResult()
+	if hello == nil {
+		t.Fatal("the session carries no introduction from the server")
+	}
+	for where, text := range map[string]string{
+		"the introduction":     hello.Instructions,
+		mcp.ToolWhatWaitsForMe: described[mcp.ToolWhatWaitsForMe],
+		mcp.ToolAnswer:         described[mcp.ToolAnswer],
+	} {
+		for _, want := range []string{"one at a time", "by their labels", "beside them", "picked or said", "never choose for them", "not been shown"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s lacks %q:\n%s", where, want, text)
+			}
 		}
 	}
 	res, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{

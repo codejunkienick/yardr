@@ -35,10 +35,12 @@ type Server struct {
 }
 
 // Instructions tell a client what this window is, in the person's
-// words, as the server's own introduction beside its tools.
+// words, and how to put a waiting question to the person (questionRule),
+// as the server's own introduction beside its tools.
 const Instructions = "This is the person's yard: where their work is kept and done, and where their questions and mail wait. " +
 	"Speak of work, projects, questions and mail in the person's words. " +
-	"What a tool result says is written for the person; say it to them as it stands."
+	"What a tool result says is written for the person; say it to them as it stands. " +
+	questionRule
 
 // weighedSchema is the one field a weighty answer's form asks for: the
 // question's number, typed back. A form is never asked for a secret:
