@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -416,6 +417,47 @@ func TestStartRunsOnlyOnTheApprovedTree(t *testing.T) {
 			t.Fatalf("after the process stopped = %+v, want pending with no approval", got)
 		}
 	})
+}
+
+// Starts asked together for one preview run one process, and the supervisor
+// holds it. Each start decides whether to go on where the starts take turns,
+// so those that waited their turn find the preview running and leave it as it
+// is. Decided before the turn, each of them had spawned one more process, put
+// it in the first one's place in running and, as the registry refused to record
+// it, killed it there: the first was left running with no one holding it, and
+// every request after that was told it had no process.
+func TestStartsAskedTogetherRunOneProcess(t *testing.T) {
+	y := newYard(t)
+	t.Cleanup(func() { y.sup.kill("demo") })
+	// The app never listens: a start is judged by the process it holds, and the
+	// test is over long before the supervisor's wait for a bind is.
+	y.proposeIn(t, "demo", "exec sleep 60", t.TempDir(), freePort(t), true)
+	const callers = 8
+	var asked sync.WaitGroup
+	together := make(chan struct{})
+	errs := make([]error, callers)
+	for i := range errs {
+		asked.Go(func() {
+			<-together
+			errs[i] = y.sup.Start(context.Background(), "demo")
+		})
+	}
+	close(together)
+	asked.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("start %d of %d err = %v, want the running preview left as it is", i+1, callers, err)
+		}
+	}
+	y.sup.mu.Lock()
+	held := y.sup.running["demo"]
+	y.sup.mu.Unlock()
+	if held == nil {
+		t.Fatalf("after %d starts the supervisor holds no process; the row is %+v", callers, y.state("demo"))
+	}
+	if got := y.state("demo"); got.State != store.PreviewRunning || got.PID != held.cmd.Process.Pid {
+		t.Fatalf("after %d starts = %+v, want running as the process the supervisor holds, %d", callers, got, held.cmd.Process.Pid)
+	}
 }
 
 func TestNonLoopbackBindIsRefused(t *testing.T) {

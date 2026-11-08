@@ -296,12 +296,20 @@ func (s *Supervisor) reconcile(ctx context.Context, first bool) {
 // is refused, whatever asks, and so is one whose depot tree no longer
 // reads as it did when the approval was given: its approval is taken
 // back and it waits for a new one (store.CheckPreviewTree). A running
-// preview is left as it is. At most PreviewRunningLimit run at once, and
-// one start at a time: a start past either limit waits for a later pass.
+// preview is left as it is, so starts asked together for one app run one
+// process. At most PreviewRunningLimit run at once, and one start at a time:
+// a start past either limit waits for a later pass.
 func (s *Supervisor) Start(ctx context.Context, app string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// The starts take their turns before any of them decides, not after. One that
+	// found nothing running and then waited its turn would spawn a second process
+	// for the app, write it over the first's entry in running and, when the
+	// registry refused to record it, remove that entry as it killed the process:
+	// the first would go on running with no one holding it.
+	s.startMu.Lock()
+	defer s.startMu.Unlock()
 	s.mu.Lock()
 	if s.running[app] != nil {
 		s.mu.Unlock()
@@ -327,8 +335,6 @@ func (s *Supervisor) Start(ctx context.Context, app string) error {
 	if p.State != store.PreviewApproved {
 		return fmt.Errorf("preview %s is %s; it is not approved to start", app, p.State)
 	}
-	s.startMu.Lock()
-	defer s.startMu.Unlock()
 	s.mu.Lock()
 	running := len(s.running)
 	s.mu.Unlock()

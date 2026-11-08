@@ -65,20 +65,29 @@ func (s *Supervisor) servePreview(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		if p.State == store.PreviewStopped || p.State == store.PreviewApproved {
-			d := ""
-			_, _ = s.Store.UpdatePreview(ctx, app, store.PreviewUpdate{State: store.PreviewApproved, StateDetail: &d})
-		}
-		if err := s.Start(ctx, app); err != nil {
-			// The reason names what the machine holds, a path or an interface
-			// address: the operator reads it in the log and, for a start that
-			// failed, on the row (failStart), and a visitor is told that the
-			// preview cannot start and no more. That is true of every refusal,
-			// though not every one leaves the row failed, so the answer is not
-			// the row's (answerFromRow).
-			s.Log.Warn("preview: on-demand start not started", "app", app, "err", err)
-			http.Error(w, "preview "+app+" cannot start", http.StatusServiceUnavailable)
-			return
+		// A row that says running while no process is held is not one to start,
+		// for the supervisor is not done with it: the process has left and what
+		// follows is not recorded yet, and a crash leaves its row running until
+		// the restart has been made (reconcile leaves it alone for the same
+		// reason). Start refuses it, which would turn the visitor away from a
+		// restart that is a moment off, so the request waits for the port, as the
+		// one that made the start does.
+		if p.State != store.PreviewRunning {
+			if p.State == store.PreviewStopped || p.State == store.PreviewApproved {
+				d := ""
+				_, _ = s.Store.UpdatePreview(ctx, app, store.PreviewUpdate{State: store.PreviewApproved, StateDetail: &d})
+			}
+			if err := s.Start(ctx, app); err != nil {
+				// The reason names what the machine holds, a path or an interface
+				// address: the operator reads it in the log and, for a start that
+				// failed, on the row (failStart), and a visitor is told that the
+				// preview cannot start and no more. That is true of every refusal,
+				// though not every one leaves the row failed, so the answer is not
+				// the row's (answerFromRow).
+				s.Log.Warn("preview: on-demand start not started", "app", app, "err", err)
+				http.Error(w, "preview "+app+" cannot start", http.StatusServiceUnavailable)
+				return
+			}
 		}
 		if !s.waitPort(ctx, app, p.Port) {
 			// The supervisor may have given the app up while the request

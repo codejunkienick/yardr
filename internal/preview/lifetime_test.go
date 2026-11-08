@@ -32,12 +32,15 @@ type watched struct {
 }
 
 // newWatched is the yard of one case: command is the app's, given the port the
-// yard chose for it.
-func newWatched(t *testing.T, byRequest bool, command func(port int) string, bindWait time.Duration) *watched {
+// yard chose for it. A bindWait or backoff of zero is the yard's own.
+func newWatched(t *testing.T, byRequest bool, command func(port int) string, bindWait, backoff time.Duration) *watched {
 	t.Helper()
 	w := &watched{yard: newYard(t), app: "demo", dir: t.TempDir(), port: freePort(t), byRequest: byRequest}
 	if bindWait > 0 {
 		w.sup.BindWait = bindWait
+	}
+	if backoff > 0 {
+		w.sup.Backoffs = []time.Duration{backoff}
 	}
 	if err := os.WriteFile(filepath.Join(w.dir, "index.html"), []byte("hello"), 0o600); err != nil {
 		t.Fatal(err)
@@ -150,6 +153,7 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 		command  func(port int) string
 		listens  bool // the app listens, so Run's start waits for it to
 		bindWait time.Duration
+		backoff  time.Duration // what a crash waits before its restart, in place of the yard's
 		check    func(t *testing.T, w *watched)
 	}{
 		{
@@ -167,7 +171,11 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 			},
 		},
 		{
+			// The restart waits out a backoff that a request comes in however
+			// loaded the machine is: one that came after the restart would meet an
+			// app that runs and has not bound yet.
 			name: "a killed app restarts under the crash rule", command: loopbackApp, listens: true,
+			backoff: time.Second,
 			check: func(t *testing.T, w *watched) {
 				w.answered(t)
 				first := w.state(w.app).PID
@@ -179,6 +187,12 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 				if err := syscall.Kill(-first, syscall.SIGKILL); err != nil {
 					t.Fatal(err)
 				}
+				// Once the crash is recorded no process runs until the restart has
+				// been made, and the row says running all the while. A request that
+				// comes in that time waits for the restart, and is not told the app
+				// cannot start.
+				waitFor(t, "the crash to be recorded", func() bool { return w.state(w.app).RestartCount >= 1 })
+				w.answered(t)
 				waitFor(t, "the killed app to run again", func() bool {
 					got := w.state(w.app)
 					return got.RestartCount >= 1 && got.State == store.PreviewRunning && got.PID != 0 && got.PID != first
@@ -232,7 +246,7 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
-					w := newWatched(t, byRequest, tc.command, tc.bindWait)
+					w := newWatched(t, byRequest, tc.command, tc.bindWait, tc.backoff)
 					w.up(t, tc.listens)
 					tc.check(t, w)
 				})
