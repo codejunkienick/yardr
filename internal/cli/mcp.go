@@ -32,11 +32,11 @@ func (a *app) mcpCmd() *cobra.Command {
 		Long: `Runs an MCP server on the standard input and output your MCP client
 started this process with, so that client (Claude Code, Claude Desktop,
 or any other MCP client) works the yard as you: what is happening with
-your work, filing a request, the questions waiting for you and your
-answers to them, writing to the yardmaster, and your unread mail. It
-is one more window like the browser view and yardr chat: every call is
-made as the one user named below, and the yard's own rules decide each
-one.
+your work, filing a request, rewording or withdrawing a request you
+filed, the questions waiting for you and your answers to them, writing
+to the yardmaster, and your unread mail. It is one more window like
+the browser view and yardr chat: every call is made as the one user
+named below, and the yard's own rules decide each one.
 
 Who it acts as is who this run acts as, resolved as every yardr
 command resolves it: --actor where that flag is given, else

@@ -1381,7 +1381,7 @@ func (s *Store) UpdateBead(ctx context.Context, id string, p BeadPatch, exp Expe
 	}
 	var titleChanged, bodyChanged bool
 	var result *Bead
-	err := s.write(func(w *wtx) error {
+	err := s.writeVia(ctx, func(w *wtx) error {
 		var err error
 		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
 		if err != nil {
@@ -2166,7 +2166,7 @@ func (s *Store) CloseBead(ctx context.Context, id, reason string, exp Expect, ac
 	// flows through, read before the write: git must not run inside one.
 	look := &untilLooks{repos: s.gateRepos(ctx, s.blocksTargets(ctx, id)...), memo: flowMemo{}}
 	var b *Bead
-	err := s.write(func(w *wtx) (err error) {
+	err := s.writeVia(ctx, func(w *wtx) (err error) {
 		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
 		if err != nil {
 			return err

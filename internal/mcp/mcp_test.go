@@ -152,6 +152,8 @@ func TestNoUserRefusesEveryTool(t *testing.T) {
 		},
 		func() error { _, err := s.AskTheYardmaster(y.ctx, "hi", true, nil); return err },
 		func() error { _, err := s.ReadMyMail(y.ctx, 0); return err },
+		func() error { _, err := s.Reword(y.ctx, "x", "a new title", ""); return err },
+		func() error { _, err := s.Withdraw(y.ctx, "x", "no longer wanted"); return err },
 	}
 	for i, call := range calls {
 		if err := call(); err == nil || err.Error() != mcp.NoUserMessage {
@@ -965,6 +967,29 @@ func TestConnectionMarkOnWrites(t *testing.T) {
 			if n.Kind == store.NoteAnswer && n.Via != conn {
 				t.Errorf("connection %q: the answer note's via = %q", conn, n.Via)
 			}
+		}
+		// So are rewording the filed work and withdrawing it.
+		if _, err := s.Reword(y.ctx, beadID, "Reworded "+conn, ""); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Withdraw(y.ctx, beadID, "not needed"); err != nil {
+			t.Fatal(err)
+		}
+		evs, err = y.st.Events(y.ctx, beadID, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		marked := map[string]bool{}
+		for _, e := range evs {
+			if e.Kind == "updated" || e.Kind == "closed" {
+				marked[e.Kind] = true
+				if got := store.Via(e); got != conn {
+					t.Errorf("connection %q: the %s event's via = %q", conn, e.Kind, got)
+				}
+			}
+		}
+		if !marked["updated"] || !marked["closed"] {
+			t.Errorf("connection %q: the history lacks the reword or the withdrawal: %+v", conn, evs)
 		}
 		if _, err := s.WhatWaitsForMe(y.ctx); err != nil {
 			t.Fatal(err)

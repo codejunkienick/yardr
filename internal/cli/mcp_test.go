@@ -51,7 +51,7 @@ func TestMCPIsRegistered(t *testing.T) {
 // yardr mcp serves a client that started it, over the streams that
 // client speaks on (the process's own stdin and stdout in use; pipes
 // of the test's here, through the mcpServe seam): a legacy handshake,
-// the six tools, and a filing whose history reads "ada via testconn".
+// the tools, and a filing whose history reads "ada via testconn".
 // The socket half of that mark (the header) is internal/rpc's test;
 // here the store is the command's own, as a test's is.
 func TestMCPServeOverStdio(t *testing.T) {

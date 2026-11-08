@@ -35,6 +35,12 @@ func (f *fakeYard) Depots(context.Context) ([]store.Depot, error) {
 func (f *fakeYard) CreateBead(_ context.Context, nb store.NewBead, _ string) (*store.Bead, error) {
 	return &store.Bead{ID: "yd-1", Title: nb.Title}, nil
 }
+func (f *fakeYard) UpdateBead(_ context.Context, id string, _ store.BeadPatch, _ store.Expect, _ string) (*store.Bead, error) {
+	return &store.Bead{ID: id, Title: "Add grace", Status: "open"}, nil
+}
+func (f *fakeYard) CloseBead(_ context.Context, id, _ string, _ store.Expect, _ string) (*store.Bead, error) {
+	return &store.Bead{ID: id, Title: "Add grace", Status: "closed"}, nil
+}
 func (f *fakeYard) ListBeads(context.Context, store.BeadFilter) ([]store.Bead, error) {
 	return nil, nil
 }
@@ -238,7 +244,9 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 
 	// Every tool's structured part carries its words whole, footer and
 	// all, since a client may hand its model that part alone. A tool
-	// added to the contract without a call here fails the test.
+	// added to the contract without a call here fails the test. The two
+	// that change a request act on the one this person files in the loop,
+	// which the contract's order reaches first: reword before withdraw.
 	args := map[string]map[string]any{
 		mcp.ToolWhatIsHappening:  {"work": bead},
 		mcp.ToolAskForSomething:  {"request": "Tidy the links"},
@@ -246,7 +254,10 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 		mcp.ToolAnswer:           {"work": bead, "question": 1, "put_aside": true},
 		mcp.ToolAskTheYardmaster: {"message": "Are the links moved?"},
 		mcp.ToolReadMyMail:       {},
+		mcp.ToolReword:           {"title": "Tidy all the links"},
+		mcp.ToolWithdraw:         {"reason": "the links tidied themselves"},
 	}
+	var filed string
 	for _, def := range mcp.Tools() {
 		a, ok := args[def.Name]
 		if !ok {
@@ -256,6 +267,9 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 		if def.Name == mcp.ToolAnswer {
 			a["question"] = waitingQuestion(t, y, bead)
 		}
+		if def.Name == mcp.ToolReword || def.Name == mcp.ToolWithdraw {
+			a["work"] = filed
+		}
 		res, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: def.Name, Arguments: a})
 		if err != nil {
 			t.Fatal(err)
@@ -264,6 +278,10 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 			t.Errorf("%s refused: %s", def.Name, toolText(t, res))
 		}
 		structuredText(t, res, toolText(t, res))
+		if def.Name == mcp.ToolAskForSomething {
+			structured, _ := res.StructuredContent.(map[string]any)
+			filed, _ = structured["work"].(string)
+		}
 	}
 
 	// The plain read_my_mail above marked the letter read; its look-back
@@ -362,6 +380,8 @@ func TestNoUserOverTheWire(t *testing.T) {
 		{mcp.ToolAnswer, map[string]any{"work": "yd-1", "question": 1, "pick": 1}},
 		{mcp.ToolAskTheYardmaster, map[string]any{"message": "a question"}},
 		{mcp.ToolReadMyMail, map[string]any{}},
+		{mcp.ToolReword, map[string]any{"work": "yd-1", "title": "a new title"}},
+		{mcp.ToolWithdraw, map[string]any{"work": "yd-1", "reason": "no longer wanted"}},
 	}
 	for _, call := range calls {
 		res, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{

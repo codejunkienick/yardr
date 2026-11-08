@@ -18,7 +18,7 @@ import (
 
 // Server is the local adapter over the contract: an MCP server on the
 // official Go SDK (the modelcontextprotocol go-sdk, v1.7.0), serving
-// the six tools of Tools over one connection. It speaks the
+// the tools of Tools over one connection. It speaks the
 // modern revision (2026-07-28, no handshake, the version on each
 // request) and the legacy revisions 2025-06-18 and 2025-11-25 (an
 // initialize handshake, then the session it opens) from one handler,
@@ -205,6 +205,10 @@ func (s *Server) dispatch(ctx context.Context, req *sdkmcp.CallToolRequest, svc 
 			return nil, err
 		}
 		return svc.ReadMyMail(ctx, recent)
+	case ToolReword:
+		return svc.Reword(ctx, stringArg(args, "work"), stringArg(args, "title"), stringArg(args, "body"))
+	case ToolWithdraw:
+		return svc.Withdraw(ctx, stringArg(args, "work"), stringArg(args, "reason"))
 	}
 	return nil, fmt.Errorf("no tool of that name here")
 }

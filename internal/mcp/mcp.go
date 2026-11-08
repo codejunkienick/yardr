@@ -12,9 +12,11 @@
 // one, as it decides footplate's and chat's: this package is a window,
 // not a new permission.
 //
-// Six of the design's seven tools live here. The seventh, add_a_note,
-// is not served yet: it lands with the bead that carries the network
-// filing promotions, and nothing here names it.
+// Six of the design's seven tools live here, and two the design does
+// not name: reword and withdraw, the person's own say over a request
+// they filed. The seventh, add_a_note, is not served yet: it lands with
+// the bead that carries the network filing promotions, and nothing here
+// names it.
 //
 // No secret passes through MCP, on any path: a question that asks for
 // one is refused by Service.Answer before any secret call could be
@@ -40,6 +42,8 @@ const (
 	ToolAnswer           = "answer"
 	ToolAskTheYardmaster = "ask_the_yardmaster"
 	ToolReadMyMail       = "read_my_mail"
+	ToolReword           = "reword"
+	ToolWithdraw         = "withdraw"
 )
 
 // FloorVersion is the oldest MCP revision this server speaks: every
@@ -104,7 +108,7 @@ type ToolDef struct {
 	OutputSchema json.RawMessage
 }
 
-// Tools is the contract: the six tools, in the order a client lists
+// Tools is the contract: the eight tools, in the order a client lists
 // them. Adding a tool is a contract change (a new ToolDef here, a
 // Service method, and the parity both adapters check), never an
 // adapter-local one.
@@ -236,6 +240,46 @@ func Tools() []ToolDef {
 			OutputSchema: output(`
 				"messages": {"type": "array", "description": "the messages shown: from, at, text, and for a look-back read, whether it had already been read", "items": {"type": "object"}}`),
 		},
+		{
+			Name: ToolReword,
+			Description: "Change the words of a request this person filed: its title, its details, or both. " +
+				"Only a request they filed themselves can be reworded, and only while nobody is working on it: once someone is, write to the yardmaster instead. " +
+				"What you send replaces the old words as it stands, so send the whole new text, and leave out what stays as it is. At least one of title and body is needed. " +
+				"work is the work name from an earlier answer.",
+			InputSchema: schema(`{
+				"type": "object",
+				"properties": {
+					"work": {"type": "string", "description": "the work name from an earlier answer, of a request this person filed"},
+					"title": {"type": "string", "description": "the new title: one line naming the thing wanted"},
+					"body": {"type": "string", "description": "the new details: what done looks like, and anything it is not"}
+				},
+				"required": ["work"],
+				"additionalProperties": false
+			}`),
+			OutputSchema: output(`
+				"work": {"type": "string", "description": "the reworded work's name"},
+				"title": {"type": "string", "description": "the title it has now"}`),
+		},
+		{
+			Name: ToolWithdraw,
+			Description: "Withdraw a request this person filed: it is closed, and their reason is kept on it. " +
+				"Only a request they filed themselves can be withdrawn; for any other, write to the yardmaster. " +
+				"If someone is working on it, they are stopped, and it cannot be undone from here, so be sure the person means it. " +
+				"A request whose change is being landed (put in for good) cannot be withdrawn here: write to the yardmaster instead. " +
+				"work is the work name from an earlier answer, and reason is why, in the person's words: ask them for it when they have not said.",
+			InputSchema: schema(`{
+				"type": "object",
+				"properties": {
+					"work": {"type": "string", "description": "the work name from an earlier answer, of a request this person filed"},
+					"reason": {"type": "string", "description": "why it is withdrawn, in the person's words"}
+				},
+				"required": ["work", "reason"],
+				"additionalProperties": false
+			}`),
+			OutputSchema: output(`
+				"work": {"type": "string", "description": "the withdrawn work's name"},
+				"title": {"type": "string"}`),
+		},
 	}
 }
 
@@ -265,6 +309,8 @@ type Yard interface {
 	Crew(ctx context.Context) ([]store.CrewMember, error)
 	Depots(ctx context.Context) ([]store.Depot, error)
 	CreateBead(ctx context.Context, nb store.NewBead, actor string) (*store.Bead, error)
+	UpdateBead(ctx context.Context, id string, p store.BeadPatch, exp store.Expect, actor string) (*store.Bead, error)
+	CloseBead(ctx context.Context, id, reason string, exp store.Expect, actor string) (*store.Bead, error)
 	ListBeads(ctx context.Context, f store.BeadFilter) ([]store.Bead, error)
 	GetBead(ctx context.Context, id string) (*store.Bead, error)
 	Bead(ctx context.Context, id string, viewer ...string) (*store.BeadView, error)

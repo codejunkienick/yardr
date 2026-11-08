@@ -311,9 +311,7 @@ func (s *Service) AskForSomething(ctx context.Context, request, project string) 
 	if i := strings.Index(request, "\n"); i >= 0 {
 		title, body = strings.TrimSpace(request[:i]), strings.TrimSpace(request[i+1:])
 	}
-	if r := []rune(title); len(r) > 160 {
-		title = strings.TrimSpace(string(r[:160])) + "…"
-	}
+	title = cutTitle(title)
 	// The priority is the one any bead is made at where none is asked for
 	// (yardr bead create's): the zero value is P0, which a depot's P0
 	// reserve route takes ahead of any label and any load condition, so
@@ -338,6 +336,19 @@ func (s *Service) AskForSomething(ctx context.Context, request, project string) 
 			"project": depot,
 		},
 	}, nil
+}
+
+// maxTitle is how many characters a title the tools write keeps.
+const maxTitle = 160
+
+// cutTitle is title cut short to maxTitle characters, with an ellipsis
+// where it was cut: a title is a line a person reads in a list, in
+// filing and in rewording alike.
+func cutTitle(title string) string {
+	if r := []rune(title); len(r) > maxTitle {
+		return strings.TrimSpace(string(r[:maxTitle])) + "…"
+	}
+	return title
 }
 
 // WhatWaitsForMe is what_waits_for_me: the questions the yard is

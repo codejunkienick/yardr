@@ -26,11 +26,24 @@ func TestViaMarksTheUsersOwnWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	gone, err := st.CreateBead(ctx, store.NewBead{Title: "Mow the lawn"}, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
 	head, _ := st.Head(ctx)
 	away := store.WithVia(ctx, "jo", "phone")
+	retitled := "Paint the shed blue"
 	for _, write := range []func() error{
 		func() error { return st.Mail(away, "yardmaster", "through the phone", "jo") },
 		func() error { return st.AddNote(away, b.ID, "through the phone", "jo") },
+		func() error {
+			_, err := st.UpdateBead(away, b.ID, store.BeadPatch{Title: &retitled}, store.Expect{}, "jo")
+			return err
+		},
+		func() error {
+			_, err := st.CloseBead(away, gone.ID, "through the phone", store.Expect{}, "jo")
+			return err
+		},
 		// Not the device's user: whatever let the call in, it is not theirs.
 		func() error { return st.Mail(away, "jo", "as the yardmaster", "yardmaster") },
 		func() error { return st.AddNote(away, b.ID, "as the yardmaster", "yardmaster") },
@@ -44,7 +57,7 @@ func TestViaMarksTheUsersOwnWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"phone", "phone", "", "", ""}
+	want := []string{"phone", "phone", "phone", "phone", "", "", ""}
 	if len(evs) != len(want) {
 		t.Fatalf("%d events, want %d", len(evs), len(want))
 	}
