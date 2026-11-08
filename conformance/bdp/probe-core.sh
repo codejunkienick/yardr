@@ -71,14 +71,19 @@ fi
 
 (cd "$root" && go build -o "$work/yardr" .)
 # A fresh home has no yard yet, and nothing here has a terminal to onboard in.
-"$work/yardr" init --harness claude --dir "$work" >/dev/null
+# Adding a source is the operator's, so the operator is named here and the seed
+# adds its source as that name. The defaults would not do everywhere: with no
+# user in the environment (a container) init makes the operator "operator" and
+# a command acts as "unknown".
+"$work/yardr" init --harness claude --operator bdp-operator --dir "$work" >/dev/null
 
 # What the kit reads. It takes its subject from the inventories and never reads
 # BDP's fixtures, whose ids have changed before, so the script seeds a graph of
 # its own: beads that are open, closed and held, joined by blocks edges and one
-# related edge. Both inventories then run past one page (the discovery
-# document's limits.page.defaultItems is 50): 45 more beads, each blocked by
-# demo-a, make 54 beads and 54 links, and the kit follows a continuation.
+# related edge, and two links to an outside issue. Both inventories then run
+# past one page (the discovery document's limits.page.defaultItems is 50): 45
+# more beads, each blocked by demo-a, make 54 beads and 56 links, and the kit
+# follows a continuation.
 y() { "$work/yardr" "$@" --actor bdp-conformance >/dev/null; }
 y bead create A --id demo-a
 y bead create B --id demo-b
@@ -95,6 +100,15 @@ y bead close demo-k --reason seeded
 # dep add takes the blocker first, then the bead that waits for it.
 for pair in a:b c:a c:d e:f a:i c:i c:j k:j; do y dep add "demo-${pair%:*}" "demo-${pair#*:}"; done
 y dep add demo-f demo-e --kind related
+# A link to an outside issue is the other Link yardr serves: its target is out of
+# the Scope and its Type is tracks-<source> or relates. A fresh yard refuses it
+# for a host no source has issues on, so the one source the seed needs is added
+# first, from a file that names no credential and is never called. The links
+# are made by URL, so neither has the thread property that only a hook delivery
+# gives. A bead tracks one issue per source, so the two are different issues.
+"$work/yardr" source add "$root/conformance/bdp/issue-source.yaml" --actor bdp-operator >/dev/null
+y link add demo-a https://tracker.example.com/issue/DEMO-1
+y link add demo-b https://tracker.example.com/issue/DEMO-2 --relates
 for i in $(seq 45); do y bead create "P$i" --id "demo-p$i" --blocked-by demo-a; done
 
 "$work/yardr" bdp serve --addr "127.0.0.1:$port" --scope "$scope" >"$work/serve.log" 2>&1 &

@@ -1,0 +1,15 @@
+# The one issue source the conformance yard knows. A fresh yard refuses `yardr
+# link add` for an issue whose host no source has issues on, so probe-core.sh
+# adds this file before it links a bead to an outside issue. It names no
+# credential, so adding it asks for none, and nothing ever calls it: a
+# declaration with a base needs a call, and this is the one it has.
+name: tracker
+about: A stand-in issue tracker, so that the conformance seed can link beads to its issues.
+base: https://tracker.example.com
+calls:
+  ping: { kind: read, request: { method: GET, path: /ping } }
+link:
+  host: tracker.example.com
+  issue: '^/issue/([A-Z]+-[0-9]+)'
+  fixed: "https://tracker.example.com/issue/{1}"
+  thread: "{1}"

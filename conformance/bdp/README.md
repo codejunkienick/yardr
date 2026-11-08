@@ -20,12 +20,16 @@ before you trust a run.
 
 1. It builds yardr from this checkout into a temp dir and starts a fresh yard
    there. Your `~/.yardr` is not touched.
-2. It seeds 54 beads and 54 links. Nine beads, some open, some closed and one
+2. It seeds 54 beads and 56 links. Nine beads, some open, some closed and one
    held, are joined by `blocks` edges and one `related` edge. Each of the other 45
    is blocked by the first of the nine, so each inventory runs past its first page
-   of 50 and the kit follows a continuation. The kit learns what the Scope holds
-   from its inventories, so the script seeds a graph of its own and reads none of
-   BDP's fixtures.
+   of 50 and the kit follows a continuation. Two of the links go to an outside
+   issue: `demo-a` tracks `https://tracker.example.com/issue/DEMO-1` and `demo-b`
+   relates to `.../DEMO-2`. A fresh yard knows no issue host and refuses such a
+   link, so the script first adds the source that `issue-source.yaml` declares:
+   a name, an address nothing calls, the form of its issue URLs and no
+   credential. The kit learns what the Scope holds from its inventories, so the
+   script seeds a graph of its own and reads none of BDP's fixtures.
 3. It serves the yard with `yardr bdp serve` on a free loopback port. The Scope
    is `http://127.0.0.1:<port>/acme/`, because the kit dials the Scope's own
    origin and cannot be pointed elsewhere.
@@ -54,6 +58,17 @@ Scope that advertises Core, with no adapter and no mutation:
   cases and 4 Write families. yardr serves no Write.
 - The 33 optional rows (Callables, Issue package) are not applicable too.
 
+The two links to an outside issue are a record of their own: the target is a URL
+out of the Scope, the Type is `types/tracks-tracker` (which conforms to
+`types/tracks`) or `types/relates`, and the properties name the source.
+`core.inventory-fixed-routes` follows the link inventory through every page and
+validates each item against BDP's schema, so it reads both: a target that is no
+URI in either one fails that row. `core.point-read` reads one link, the first of
+the inventory, and that is a `blocks` link, so no issue link is point-read; the
+kit's missing `core.link-and-alias-reads` is where that would be. The two links
+are made by URL and carry no `thread` property, which yardr gives only to a link
+made from a hook delivery.
+
 BDP calls the kit a vertical slice. Its report is `incomplete` and says
 `claimEligible: false`. A pass shows that discovery, the two inventories and a
 point read are what the kit asserts of Core, and shows nothing of the rows it has
@@ -73,7 +88,7 @@ the two cannot drift apart unseen.
 `internal/bdp` should name. It is older than the pin when BDP's later commits left
 Core's text alone.
 
-Last run: BDP a4fd83a2, yardr 13b5d5d7, 8 Nov 2026. 3 pass, 5 not run, 53 not
+Last run: BDP a4fd83a2, yardr 6d67c83b, 8 Nov 2026. 3 pass, 5 not run, 53 not
 applicable (20 required, 33 optional), 0 fail.
 
 ## History

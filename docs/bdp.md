@@ -189,8 +189,9 @@ Events, or to proposed Transfer. It answers `GET` and `HEAD` only, so it does
 not support BDP Write, and it serves no BDP Events.
 
 What has been checked: on 8 Nov 2026, against BDP's main a4fd83a2 (7 Nov), BDP's
-current provider kit, pointed at a seeded yard with `--scope` (so with no
-adapter, and without `--allow-mutation`, so nothing that writes is sent),
+current provider kit, pointed at a seeded yard (beads, the links between them
+and two links to an outside issue) with `--scope` (so with no adapter, and
+without `--allow-mutation`, so nothing that writes is sent),
 passes the three Core cases it can run against such a Scope,
 `core.scope-discovery`, `core.inventory-fixed-routes` and `core.point-read`. The
 other four of its seven Core cases did not run, because the kit does not run

@@ -6,8 +6,11 @@
 # The kit is a stand-in that prints a canned report in the real kit's shape and
 # exits with a status of the scenario's choosing; pnpm is a stand-in too. The
 # script itself is the committed one, run under env -i, so it really builds yardr,
-# seeds the 54-bead yard and serves it before the stand-in kit is asked. Each
-# scenario says what the exit status must be. Needs go, python3, curl, jq and node.
+# seeds the 54-bead yard and serves it before the stand-in kit is asked. The
+# stand-in reads the served link inventory first and fails unless the seed's two
+# links to an outside issue are in it: the real kit validates every link it is
+# served but cannot tell that these were never seeded. Each scenario says what the
+# exit status must be. Needs go, python3, curl, jq and node.
 set -u
 ROOT=${ROOT:-$PWD}
 script=$ROOT/conformance/bdp/probe-core.sh
@@ -25,10 +28,20 @@ EOF
 chmod +x "$tmp/bin/pnpm"
 
 cat >"$tmp/bdp/scripts/current-provider-kit.mjs" <<'EOF'
-// Stand-in kit: prints the scenario file KIT_SCENARIO and exits with KIT_EXIT, or crashes with no report when KIT_EMPTY is set.
+// Stand-in kit: prints the scenario file KIT_SCENARIO and exits with KIT_EXIT, or crashes with no report when KIT_EMPTY is set. Before it prints, it follows the link inventory and exits 70 unless the seed's links to an outside issue are served.
 import { readFileSync } from "node:fs";
 if (process.argv[2] !== "--scope" || process.argv.length !== 4) { console.error("stand-in: unexpected arguments " + process.argv.slice(2).join(" ")); process.exit(64); }
 if (process.env.KIT_EMPTY) { console.error("stand-in kit crashed"); process.exit(1); }
+const scope = process.argv[3];
+const links = [];
+for (let next = new URL("bdp/links", scope).href; next; ) {
+  const page = await (await fetch(next)).json();
+  links.push(...page.items);
+  next = page.next && new URL(page.next, scope).href;
+}
+const outside = links.filter((l) => !l.target.startsWith(scope)).map((l) => `${l.type.slice(scope.length)} ${l.source.slice(scope.length)} ${l.target}`).sort();
+const seeded = ["types/relates beads/demo-b https://tracker.example.com/issue/DEMO-2", "types/tracks-tracker beads/demo-a https://tracker.example.com/issue/DEMO-1"];
+if (JSON.stringify(outside) !== JSON.stringify(seeded)) { console.error("stand-in: the links to an outside issue are " + JSON.stringify(outside) + ", want " + JSON.stringify(seeded)); process.exit(70); }
 process.stdout.write(readFileSync(process.env.KIT_SCENARIO, "utf8"));
 process.exitCode = Number(process.env.KIT_EXIT);
 EOF
@@ -64,7 +77,7 @@ run() {
   got=$?
   verdict=ok; [ "$got" = "$want" ] || { verdict=WRONG; bad=1; }
   printf '%-5s%-20s %-12s kit exit %s, script exit %s (want %s)\n' "$verdict" "$name" "$*" "$kitexit" "$got" "$want"
-  grep -hE '^probe: (passed|failed|the kit|BDP did not)|^harnessFailure' "$tmp/out" "$tmp/err" | sed 's/^/       /'
+  grep -hE '^probe: (passed|failed|the kit|BDP did not)|^harnessFailure|^stand-in' "$tmp/out" "$tmp/err" | sed 's/^/       /'
 }
 run pass              2 0
 run fail-point-read   1 1
