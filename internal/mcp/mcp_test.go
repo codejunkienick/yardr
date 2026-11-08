@@ -151,7 +151,7 @@ func TestNoUserRefusesEveryTool(t *testing.T) {
 			return err
 		},
 		func() error { _, err := s.AskTheYardmaster(y.ctx, "hi", true, nil); return err },
-		func() error { _, err := s.ReadMyMail(y.ctx); return err },
+		func() error { _, err := s.ReadMyMail(y.ctx, 0); return err },
 	}
 	for i, call := range calls {
 		if err := call(); err == nil || err.Error() != mcp.NoUserMessage {
@@ -659,7 +659,7 @@ func TestReadMyMailAcksThroughWhatItShowed(t *testing.T) {
 	if err := y.st.Mail(y.ctx, "ada", "second note", "bob"); err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.ReadMyMail(y.ctx)
+	res, err := s.ReadMyMail(y.ctx, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -671,7 +671,7 @@ func TestReadMyMailAcksThroughWhatItShowed(t *testing.T) {
 	if n, err := s.UnreadCount(y.ctx); err != nil || n != 0 {
 		t.Fatalf("unread after reading = %d, %v", n, err)
 	}
-	res, err = s.ReadMyMail(y.ctx)
+	res, err = s.ReadMyMail(y.ctx, 0)
 	if err != nil || !strings.Contains(res.Text, "no unread mail") {
 		t.Fatalf("the second read: %v\n%s", err, res.Text)
 	}
@@ -682,9 +682,73 @@ func TestReadMyMailAcksThroughWhatItShowed(t *testing.T) {
 	if n, _ := s.UnreadCount(y.ctx); n != 1 {
 		t.Fatalf("unread = %d, want the new one", n)
 	}
-	res, err = s.ReadMyMail(y.ctx)
+	res, err = s.ReadMyMail(y.ctx, 0)
 	if err != nil || !strings.Contains(res.Text, "third note") || strings.Contains(res.Text, "first note") {
 		t.Fatalf("the third read: %v\n%s", err, res.Text)
+	}
+}
+
+func TestReadMyMailRecentLooksBackWithoutAcking(t *testing.T) {
+	y := newYard(t)
+	s := svc(y, "")
+	if err := y.st.Mail(y.ctx, "ada", "first note", "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.st.Mail(y.ctx, "ada", "second note", "bob"); err != nil {
+		t.Fatal(err)
+	}
+	// A plain call reads the first two, so the look-back spans both states.
+	if _, err := s.ReadMyMail(y.ctx, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.st.Mail(y.ctx, "ada", "third note", "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.ReadMyMail(y.ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain(t, res.Text)
+	// Bounded to two, unread first: the new note, then the latest read.
+	if !strings.Contains(res.Text, "Your 2 recent messages:") {
+		t.Fatalf("the look-back header:\n%s", res.Text)
+	}
+	third := strings.Index(res.Text, "third note")
+	second := strings.Index(res.Text, "second note")
+	if third < 0 || second < 0 || third > second || strings.Contains(res.Text, "first note") {
+		t.Fatalf("the looked-back mail:\n%s", res.Text)
+	}
+	if !strings.Contains(res.Text, "(unread)") || !strings.Contains(res.Text, "(read)") {
+		t.Fatalf("the look-back marks nothing read or unread:\n%s", res.Text)
+	}
+	messages, _ := res.Structured["messages"].([]map[string]any)
+	if len(messages) != 2 {
+		t.Fatalf("the structured look-back = %+v", res.Structured)
+	}
+	if messages[0]["text"] != "third note" || messages[0]["read"] != false {
+		t.Fatalf("the structured unread = %+v", messages[0])
+	}
+	if messages[1]["text"] != "second note" || messages[1]["read"] != true {
+		t.Fatalf("the structured read = %+v", messages[1])
+	}
+	for _, m := range messages {
+		if m["from"] == "" || m["at"] == "" || m["text"] == "" {
+			t.Fatalf("a structured message lacks its words: %+v", m)
+		}
+	}
+	// The look-back moved no cursor: the plain call still shows the unread.
+	if n, err := s.UnreadCount(y.ctx); err != nil || n != 1 {
+		t.Fatalf("unread after the look-back = %d, %v", n, err)
+	}
+	res, err = s.ReadMyMail(y.ctx, 0)
+	if err != nil || !strings.Contains(res.Text, "third note") || strings.Contains(res.Text, "second note") {
+		t.Fatalf("the plain call after the look-back: %v\n%s", err, res.Text)
+	}
+	// A non-positive count is refused in plain words.
+	if _, err := s.ReadMyMail(y.ctx, -1); err == nil {
+		t.Fatal("a negative recent was served")
+	} else {
+		plain(t, err.Error())
 	}
 }
 
@@ -926,7 +990,7 @@ func TestConnectionMarkOnWrites(t *testing.T) {
 	if err := y.st.Mail(y.ctx, "ada", "one letter", "yardmaster"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReadMyMail(y.ctx); err != nil {
+	if _, err := s.ReadMyMail(y.ctx, 0); err != nil {
 		t.Fatal(err)
 	}
 	evs, err := y.st.EventsSince(y.ctx, before, 20)

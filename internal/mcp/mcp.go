@@ -224,10 +224,17 @@ func Tools() []ToolDef {
 		{
 			Name: ToolReadMyMail,
 			Description: "Read everything in this person's inbox they have not read yet, from everyone who wrote to them, and mark just what was shown as read. " +
-				"What a later call returns is what arrived since.",
-			InputSchema: schema(`{"type": "object", "properties": {}, "additionalProperties": false}`),
+				"What a later call returns is what arrived since. " +
+				"Pass recent, a number, to look back at that many recent messages instead, read or not; a look-back marks nothing read.",
+			InputSchema: schema(`{
+				"type": "object",
+				"properties": {
+					"recent": {"type": "integer", "minimum": 1, "description": "how many recent messages to show, read or not, marking nothing read"}
+				},
+				"additionalProperties": false
+			}`),
 			OutputSchema: output(`
-				"messages": {"type": "array", "description": "the messages shown: from, at, text", "items": {"type": "object"}}`),
+				"messages": {"type": "array", "description": "the messages shown: from, at, text, and for a look-back read, whether it had already been read", "items": {"type": "object"}}`),
 		},
 	}
 }

@@ -200,7 +200,11 @@ func (s *Server) dispatch(ctx context.Context, req *sdkmcp.CallToolRequest, svc 
 		}
 		return svc.AskTheYardmaster(ctx, stringArg(args, "message"), waitForReply, s.progress(ctx, req))
 	case ToolReadMyMail:
-		return svc.ReadMyMail(ctx)
+		recent, err := recentArg(args)
+		if err != nil {
+			return nil, err
+		}
+		return svc.ReadMyMail(ctx, recent)
 	}
 	return nil, fmt.Errorf("no tool of that name here")
 }
@@ -393,4 +397,28 @@ func answerInput(args map[string]any) (AnswerInput, error) {
 	in.PutAside, _ = args["put_aside"].(bool)
 	in.Decline, _ = args["decline"].(bool)
 	return in, nil
+}
+
+// recentArg reads the read_my_mail look-back count: absent or null is
+// the whole unread inbox, as waitArg takes them, so a client that
+// sends null for what it leaves unset still reads its mail; a whole
+// positive number is that many recent messages. Anything else is
+// refused in plain words.
+func recentArg(args map[string]any) (int, error) {
+	value, ok := args["recent"]
+	if !ok || value == nil {
+		return 0, nil
+	}
+	refuse := func() (int, error) {
+		return 0, fmt.Errorf("recent: say how many recent messages to show, a number of 1 or more")
+	}
+	number, ok := value.(json.Number)
+	if !ok {
+		return refuse()
+	}
+	n, err := strconv.ParseUint(string(number), 10, 64)
+	if err != nil || n == 0 || n > uint64(^uint(0)>>1) {
+		return refuse()
+	}
+	return int(n), nil
 }

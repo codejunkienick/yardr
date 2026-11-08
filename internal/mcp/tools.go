@@ -675,11 +675,20 @@ func (s *Service) yardmaster(ctx context.Context) (string, error) {
 // every sender, shown in order, and the one inbox cursor advanced
 // through what it showed and no further, as chat advances it. The tool
 // keeps no cursor of its own: a later call returns what arrived since.
-func (s *Service) ReadMyMail(ctx context.Context) (*Result, error) {
+// With recent set, it looks back instead: that many recent messages,
+// read or not, each saying whether it was already read, and the cursor
+// left alone, so a later plain call still shows the unread.
+func (s *Service) ReadMyMail(ctx context.Context, recent int) (*Result, error) {
 	if err := s.requireUser(); err != nil {
 		return nil, err
 	}
+	if recent < 0 {
+		return nil, fmt.Errorf("recent: say how many recent messages to show, a number of 1 or more")
+	}
 	ctx = s.ctx(ctx)
+	if recent > 0 {
+		return s.recentMail(ctx, recent)
+	}
 	box, err := s.Yard.UserInbox(ctx, s.User, 0, s.User)
 	if err != nil {
 		return nil, err
@@ -703,33 +712,7 @@ func (s *Service) ReadMyMail(ctx context.Context) (*Result, error) {
 	var through uint64
 	for _, l := range unread {
 		through = max(through, l.Seq)
-		from, outside := authorMark(l.From)
-		if l.As != "" {
-			from = fmt.Sprintf("%s (writing as %s)", l.From, l.As)
-			outside = false
-		}
-		if l.Via != "" {
-			from = store.ViaMark(from, l.Via)
-		}
-		fmt.Fprintf(&b, "\n\nFrom %s, %s:", from, when(l.At, now))
-		if outside {
-			fmt.Fprintf(&b, " %s", outsideLine(l.From))
-		}
-		fmt.Fprintf(&b, "\n%s", l.Text)
-		if len(l.Files) > 0 {
-			names := make([]string, len(l.Files))
-			for i, f := range l.Files {
-				names[i] = f.Name
-			}
-			fmt.Fprintf(&b, "\n(with: %s)", strings.Join(names, ", "))
-		}
-		messageText := l.Text
-		if outside {
-			messageText = outsideLine(l.From) + "\n" + messageText
-		}
-		messages = append(messages, map[string]any{
-			"from": from, "at": l.At.UTC().Format(time.RFC3339), "text": messageText,
-		})
+		messages = append(messages, renderLetter(&b, l, now, false))
 	}
 	// Through what was shown, and no further: mail that arrived while
 	// this was being read waits for the next call. The acknowledgement
@@ -743,6 +726,80 @@ func (s *Service) ReadMyMail(ctx context.Context) (*Result, error) {
 		Text:       b.String(),
 		Structured: map[string]any{"messages": messages},
 	}, nil
+}
+
+// recentMail is read_my_mail's look-back: that many recent messages,
+// read or not, as the inbox fills them — the unread oldest-first, then
+// the latest read — each saying whether it was already read. It acks
+// nothing: a look-back marks nothing read.
+func (s *Service) recentMail(ctx context.Context, recent int) (*Result, error) {
+	box, err := s.Yard.UserInbox(ctx, s.User, recent, s.User)
+	if err != nil {
+		return nil, err
+	}
+	if len(box.Mail) == 0 {
+		return &Result{
+			Text:       "You have no mail.",
+			Structured: map[string]any{"messages": []map[string]any{}},
+		}, nil
+	}
+	now := s.now()
+	var b strings.Builder
+	fmt.Fprintf(&b, "Your %s:", countWords(len(box.Mail), "recent message"))
+	messages := make([]map[string]any, 0, len(box.Mail))
+	for _, l := range box.Mail {
+		messages = append(messages, renderLetter(&b, l, now, true))
+	}
+	return &Result{
+		Text:       b.String(),
+		Structured: map[string]any{"messages": messages},
+	}, nil
+}
+
+// renderLetter writes one letter under an inbox header: its From line,
+// its words, and what came with them. With marked, the From line and
+// the structured message each say whether it was already read;
+// without, neither does, as the unread inbox reads.
+func renderLetter(b *strings.Builder, l store.Letter, now time.Time, marked bool) map[string]any {
+	from, outside := authorMark(l.From)
+	if l.As != "" {
+		from = fmt.Sprintf("%s (writing as %s)", l.From, l.As)
+		outside = false
+	}
+	if l.Via != "" {
+		from = store.ViaMark(from, l.Via)
+	}
+	fmt.Fprintf(b, "\n\nFrom %s, %s", from, when(l.At, now))
+	if marked {
+		if l.Read {
+			fmt.Fprintf(b, " (read)")
+		} else {
+			fmt.Fprintf(b, " (unread)")
+		}
+	}
+	fmt.Fprintf(b, ":")
+	if outside {
+		fmt.Fprintf(b, " %s", outsideLine(l.From))
+	}
+	fmt.Fprintf(b, "\n%s", l.Text)
+	if len(l.Files) > 0 {
+		names := make([]string, len(l.Files))
+		for i, f := range l.Files {
+			names[i] = f.Name
+		}
+		fmt.Fprintf(b, "\n(with: %s)", strings.Join(names, ", "))
+	}
+	messageText := l.Text
+	if outside {
+		messageText = outsideLine(l.From) + "\n" + messageText
+	}
+	message := map[string]any{
+		"from": from, "at": l.At.UTC().Format(time.RFC3339), "text": messageText,
+	}
+	if marked {
+		message["read"] = l.Read
+	}
+	return message
 }
 
 // countWords is "1 question", "3 questions": the counts a result

@@ -41,7 +41,7 @@ func TestWaitForUsesTheMeasuredClientLimit(t *testing.T) {
 	}
 }
 
-func TestAnswerInputRequiresWholePositiveNumbers(t *testing.T) {
+func TestToolArgumentNumbersRequireWholePositiveNumbers(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args map[string]any
@@ -62,6 +62,32 @@ func TestAnswerInputRequiresWholePositiveNumbers(t *testing.T) {
 		"work": "yd-1", "question": json.Number("7"), "pick": json.Number("2"),
 	}); err != nil {
 		t.Fatalf("a whole positive question and choice: %v", err)
+	}
+
+	if n, err := recentArg(map[string]any{}); err != nil || n != 0 {
+		t.Fatalf("a missing recent = %d, %v; want the plain call", n, err)
+	}
+	if n, err := recentArg(map[string]any{"recent": nil}); err != nil || n != 0 {
+		t.Fatalf("a null recent = %d, %v; want the plain call, as a null wait is the default", n, err)
+	}
+	if n, err := recentArg(map[string]any{"recent": json.Number("3")}); err != nil || n != 3 {
+		t.Fatalf("recent 3 = %d, %v", n, err)
+	}
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{"zero", json.Number("0")},
+		{"negative", json.Number("-2")},
+		{"fractional", json.Number("2.5")},
+		{"text", "two"},
+		{"boolean", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := recentArg(map[string]any{"recent": tc.value}); err == nil {
+				t.Fatalf("recent %v was served", tc.value)
+			}
+		})
 	}
 }
 

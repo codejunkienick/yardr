@@ -163,6 +163,23 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 				t.Errorf("%s's description does not say when to pass wait false:\n%s", tool.Name, tool.Description)
 			}
 		}
+		// read_my_mail's recent is an optional count, and its description
+		// says what passing it does.
+		if tool.Name == mcp.ToolReadMyMail {
+			input, _ := json.Marshal(tool.InputSchema)
+			var in struct {
+				Properties map[string]struct {
+					Type string `json:"type"`
+				} `json:"properties"`
+				Required []string `json:"required"`
+			}
+			if err := json.Unmarshal(input, &in); err != nil || in.Properties["recent"].Type != "integer" || slices.Contains(in.Required, "recent") {
+				t.Errorf("%s's input schema = %s, want recent an optional integer", tool.Name, input)
+			}
+			if !strings.Contains(tool.Description, "Pass recent, a number, to look back") || !strings.Contains(tool.Description, "marks nothing read") {
+				t.Errorf("%s's description does not say what passing recent does:\n%s", tool.Name, tool.Description)
+			}
+		}
 	}
 	if len(served) != len(mcp.Tools()) {
 		t.Fatalf("the served tools = %v, want the contract %v", served, mcp.Tools())
@@ -248,6 +265,46 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 		}
 		structuredText(t, res, toolText(t, res))
 	}
+
+	// The plain read_my_mail above marked the letter read; its look-back
+	// shows it again, marked as read in the words and in the structured
+	// part, and a count of nothing is refused in plain words, not in the
+	// schema's.
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{
+		Name: mcp.ToolReadMyMail, Arguments: map[string]any{"recent": 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text = toolText(t, res)
+	plain(t, text)
+	if res.IsError || !strings.Contains(text, "Your 1 recent message:") || !strings.Contains(text, "(read)") || !strings.Contains(text, "unread hello") {
+		t.Errorf("the look-back over the wire:\n%s", text)
+	}
+	structuredText(t, res, text)
+	raw, _ := json.Marshal(res.StructuredContent)
+	var lookBack struct {
+		Messages []struct {
+			Text string `json:"text"`
+			Read *bool  `json:"read"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &lookBack); err != nil || len(lookBack.Messages) != 1 ||
+		lookBack.Messages[0].Text != "unread hello" || lookBack.Messages[0].Read == nil || !*lookBack.Messages[0].Read {
+		t.Errorf("the structured look-back = %s", raw)
+	}
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{
+		Name: mcp.ToolReadMyMail, Arguments: map[string]any{"recent": 0},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text = toolText(t, res)
+	plain(t, text)
+	if !res.IsError || !strings.Contains(text, "recent: say how many recent messages to show, a number of 1 or more") {
+		t.Errorf("a recent of 0 over the wire = %+v:\n%s", res.IsError, text)
+	}
+	structuredText(t, res, text)
 }
 
 // structuredText holds a result's structured part to its words: text,
@@ -721,7 +778,7 @@ func TestOutsideTextKeepsItsMark(t *testing.T) {
 	if err := y.st.Mail(y.ctx, "ada", "the figures are ready", "yardmaster"); err != nil {
 		t.Fatal(err)
 	}
-	res, err := svc(y, "").ReadMyMail(y.ctx)
+	res, err := svc(y, "").ReadMyMail(y.ctx, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -807,7 +864,7 @@ func (p *peerMailYard) UserInbox(context.Context, string, int, string) (*store.M
 
 func TestPeerMailKeepsItsMark(t *testing.T) {
 	svc := &mcp.Service{Yard: &peerMailYard{fakeYard: &fakeYard{}}, User: "ada"}
-	res, err := svc.ReadMyMail(context.Background())
+	res, err := svc.ReadMyMail(context.Background(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
