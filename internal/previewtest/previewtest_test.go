@@ -27,12 +27,16 @@ func TestMain(m *testing.M) {
 func TestAppAnswersFromItsDirectoryWithNothingButTheTestBinary(t *testing.T) {
 	for _, host := range []string{"127.0.0.1", "::1"} {
 		t.Run(host, func(t *testing.T) {
+			// The probe only decides the skip, as FreePort fails a test whose host cannot
+			// be bound. The app does not take the probe's port: the kernel dealt it from
+			// its own range, where another process's server can be handed it before the
+			// app binds it.
 			probe, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
 			if err != nil {
 				t.Skipf("%s is unavailable: %v", host, err)
 			}
-			port := probe.Addr().(*net.TCPAddr).Port
 			probe.Close()
+			port := FreePort(t, host)
 			dir := t.TempDir()
 			if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("hello app"), 0o600); err != nil {
 				t.Fatal(err)
