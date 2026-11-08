@@ -75,14 +75,18 @@ const DefaultWait = 2 * time.Minute
 const ShortWait = 50 * time.Second
 
 // ToolDef is one tool of the contract: its name in the person's words,
-// what it tells the client it does, and its input schema as JSON. The
-// schemas are data, beside the names, so another adapter (the edge)
-// serves the same contract and a parity check compares bytes, not
+// what it tells the client it does, and its input and output schemas as
+// JSON. The schemas are data, beside the names, so another adapter (the
+// edge) serves the same contract and a parity check compares bytes, not
 // behaviour re-derived per adapter.
 type ToolDef struct {
 	Name        string
 	Description string
 	InputSchema json.RawMessage
+	// OutputSchema is the structured part's shape. Every one requires
+	// text, the result's words whole (Result.Wire), and leaves the rest
+	// open, so a field a later change adds is no break.
+	OutputSchema json.RawMessage
 }
 
 // Tools is the contract: the six tools, in the order a client lists
@@ -104,6 +108,12 @@ func Tools() []ToolDef {
 				},
 				"additionalProperties": false
 			}`),
+			OutputSchema: output(`
+				"work_list": {"type": "array", "description": "the account's pieces of work: work, title, state, updated, waiting_questions", "items": {"type": "object"}},
+				"work": {"type": "string", "description": "the one piece's work name, when work was given"},
+				"title": {"type": "string"},
+				"state": {"type": "string", "description": "the piece's standing in plain words"},
+				"waiting_questions": {"type": "array", "description": "the numbers of the questions on it that wait for this person", "items": {"type": "integer"}}`),
 		},
 		{
 			Name: ToolAskForSomething,
@@ -120,12 +130,33 @@ func Tools() []ToolDef {
 				"required": ["request"],
 				"additionalProperties": false
 			}`),
+			OutputSchema: output(`
+				"work": {"type": "string", "description": "the filed work's name, for what_is_happening"},
+				"title": {"type": "string"},
+				"project": {"type": "string"}`),
 		},
 		{
 			Name: ToolWhatWaitsForMe,
 			Description: "List the questions this yard is waiting for this person to answer, oldest first, each in plain words with its choices. " +
 				"Each question carries a work name and a question number; the answer tool takes both.",
 			InputSchema: schema(`{"type": "object", "properties": {}, "additionalProperties": false}`),
+			OutputSchema: output(`
+				"questions": {"type": "array", "description": "the waiting questions, oldest first", "items": {
+					"type": "object",
+					"properties": {
+						"work": {"type": "string", "description": "the work name, for the answer tool"},
+						"question": {"type": "integer", "description": "the question number, for the answer tool"},
+						"title": {"type": "string", "description": "the piece of work it stands on"},
+						"text": {"type": "string", "description": "the question whole in plain words, as the person is shown it"},
+						"asked_by": {"type": "string"},
+						"asked_at": {"type": "string", "description": "when it was asked, as 2026-11-01T09:00:00Z"},
+						"choices": {"type": "array", "description": "its choices; none where it wants words or an approval", "items": {
+							"type": "object",
+							"properties": {"number": {"type": "integer"}, "label": {"type": "string"}, "consequence": {"type": "string"}}
+						}},
+						"recommended": {"type": "integer", "description": "the recommended choice's number, where one is"}
+					}
+				}}`),
 		},
 		{
 			Name: ToolAnswer,
@@ -148,6 +179,10 @@ func Tools() []ToolDef {
 				"required": ["work", "question"],
 				"additionalProperties": false
 			}`),
+			OutputSchema: output(`
+				"work": {"type": "string"},
+				"question": {"type": "integer"},
+				"state": {"type": "string", "description": "answered, put aside or declined"}`),
 		},
 		{
 			Name: ToolAskTheYardmaster,
@@ -161,12 +196,17 @@ func Tools() []ToolDef {
 				"required": ["message"],
 				"additionalProperties": false
 			}`),
+			OutputSchema: output(`
+				"waiting": {"type": "boolean", "description": "true while the reply has not come; it will come as mail"},
+				"reply": {"type": "string", "description": "the yardmaster's reply, where it came"}`),
 		},
 		{
 			Name: ToolReadMyMail,
 			Description: "Read everything in this person's inbox they have not read yet, from everyone who wrote to them, and mark just what was shown as read. " +
 				"What a later call returns is what arrived since.",
 			InputSchema: schema(`{"type": "object", "properties": {}, "additionalProperties": false}`),
+			OutputSchema: output(`
+				"messages": {"type": "array", "description": "the messages shown: from, at, text", "items": {"type": "object"}}`),
 		},
 	}
 }
@@ -175,6 +215,18 @@ func Tools() []ToolDef {
 // description; the bytes are the contract, so they are written once,
 // as JSON, and served as they stand.
 func schema(s string) json.RawMessage { return json.RawMessage(s) }
+
+// output is a tool's output schema: text, which every result carries
+// (Result.Wire), and the tool's own properties beside it.
+func output(properties string) json.RawMessage {
+	return schema(`{
+				"type": "object",
+				"properties": {
+					"text": {"type": "string", "description": "the result's words whole, as the person is to be told them"},` + properties + `
+				},
+				"required": ["text"]
+			}`)
+}
 
 // Yard is what the tools ask of the yard: the store calls of the
 // design (docs/api.md's list, read as the acting user), and no more.
@@ -245,6 +297,25 @@ type Result struct {
 	// revision carries one) and calls again with the typed number
 	// weighed, as Answer's weighed argument says.
 	Weighed *WeighedPrompt
+}
+
+// Wire is the result as an adapter sends it: its words, with footer
+// (the unread-mail line, "" for none) after them, and its structured
+// part with those same words as "text". A client may hand its model
+// the structured part alone, and the words are what the person is to
+// be told, so every adapter sends through this one place and no tool
+// can leave them out.
+func (r *Result) Wire(footer string) (text string, structured map[string]any) {
+	text = r.Text
+	if footer != "" {
+		text += "\n\n" + footer
+	}
+	structured = make(map[string]any, len(r.Structured)+1)
+	for k, v := range r.Structured {
+		structured[k] = v
+	}
+	structured["text"] = text
+	return text, structured
 }
 
 // WeighedPrompt is the form a weighty answer asks its person to pass:

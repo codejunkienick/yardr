@@ -63,9 +63,10 @@ func (s *Server) MCPServer() *sdkmcp.Server {
 	for _, def := range Tools() {
 		def := def
 		srv.AddTool(&sdkmcp.Tool{
-			Name:        def.Name,
-			Description: def.Description,
-			InputSchema: def.InputSchema,
+			Name:         def.Name,
+			Description:  def.Description,
+			InputSchema:  def.InputSchema,
+			OutputSchema: def.OutputSchema,
 		}, func(ctx context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
 			return s.call(ctx, req, def.Name)
 		})
@@ -126,18 +127,14 @@ func floorMiddleware(next sdkmcp.MethodHandler) sdkmcp.MethodHandler {
 // unread-mail line every result ends with.
 func (s *Server) call(ctx context.Context, req *sdkmcp.CallToolRequest, name string) (*sdkmcp.CallToolResult, error) {
 	if err := s.Service.requireUser(); err != nil {
-		return toolError(err), nil
+		return toolError(err, ""), nil
 	}
 	svc := *s.Service
 	if svc.Wait <= 0 {
 		svc.Wait = waitFor(clientName(req))
 	}
 	refusal := func(err error) (*sdkmcp.CallToolResult, error) {
-		out := toolError(err)
-		if line := s.unreadLine(ctx, &svc); line != "" {
-			out.Content[0].(*sdkmcp.TextContent).Text += "\n\n" + line
-		}
-		return out, nil
+		return toolError(err, s.unreadLine(ctx, &svc)), nil
 	}
 	args := map[string]any{}
 	if raw := req.Params.Arguments; len(raw) > 0 {
@@ -320,26 +317,23 @@ func (s *Server) unreadLine(ctx context.Context, svc *Service) string {
 // waits (which a read of the yard works out, and an unread count of
 // none leaves unsaid).
 func (s *Server) finish(ctx context.Context, svc *Service, res *Result) *sdkmcp.CallToolResult {
-	text := res.Text
-	if line := s.unreadLine(ctx, svc); line != "" {
-		text += "\n\n" + line
+	text, structured := res.Wire(s.unreadLine(ctx, svc))
+	return &sdkmcp.CallToolResult{
+		Content:           []sdkmcp.Content{&sdkmcp.TextContent{Text: text}},
+		StructuredContent: structured,
 	}
-	out := &sdkmcp.CallToolResult{
-		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: text}},
-	}
-	if res.Structured != nil {
-		out.StructuredContent = res.Structured
-	}
-	return out
 }
 
 // toolError is a refusal as a tool result: words the person reads,
-// marked as an error so the client does not mistake them for an
-// answer, never a protocol failure.
-func toolError(err error) *sdkmcp.CallToolResult {
+// with footer after them, marked as an error so the client does not
+// mistake them for an answer, never a protocol failure. The words ride
+// in the structured part too, as a finished result's do.
+func toolError(err error, footer string) *sdkmcp.CallToolResult {
+	text, structured := (&Result{Text: err.Error()}).Wire(footer)
 	return &sdkmcp.CallToolResult{
-		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: err.Error()}},
-		IsError: true,
+		Content:           []sdkmcp.Content{&sdkmcp.TextContent{Text: text}},
+		StructuredContent: structured,
+		IsError:           true,
 	}
 }
 

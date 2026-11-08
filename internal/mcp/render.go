@@ -134,6 +134,20 @@ func questionText(a store.BeadAsk, beadTitle string, now time.Time) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// choices is a card's choices as the structured part carries them,
+// numbered as the answer tool takes them: none where the card is
+// answered by an approval, a secret or words, as questionText says.
+func choices(a store.BeadAsk) []map[string]any {
+	out := []map[string]any{}
+	if a.Secret != nil || a.Run != nil || a.DepotPush != nil || a.Setup != nil {
+		return out
+	}
+	for i, o := range a.Options {
+		out = append(out, map[string]any{"number": i + 1, "label": o.Label, "consequence": o.Consequence})
+	}
+	return out
+}
+
 // weighedMessage is the form a weighty answer puts in front of its
 // person: the card's whole weight in its own words, and what typing
 // the number back does. The form asks for that number and nothing

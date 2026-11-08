@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,16 @@ func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (
 	if err != nil {
 		return nil, err
 	}
+	// A question may wait for the person on work of any standing,
+	// finished work too, and the standing alone would hide it.
+	queue, err := s.Yard.UserAsks(ctx, s.User, s.User, s.User)
+	if err != nil {
+		return nil, err
+	}
+	waiting := map[string][]uint64{}
+	for _, open := range queue.Open {
+		waiting[open.Bead] = append(waiting[open.Bead], open.Ask)
+	}
 	own := func(b store.Bead) bool {
 		originator := b.Originator
 		if originator == "" {
@@ -57,6 +68,10 @@ func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (
 			continue
 		}
 		item := map[string]any{"work": b.ID, "title": b.Title, "updated": b.UpdatedAt.UTC().Format(time.RFC3339)}
+		asks := waiting[b.ID]
+		if len(asks) > 0 {
+			item["waiting_questions"] = asks
+		}
 		switch {
 		case b.Status == "closed":
 			if b.ClosedAt == nil || b.ClosedAt.Before(since) || b.ClosedAt.After(now) {
@@ -64,11 +79,11 @@ func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (
 			}
 			item["state"] = "finished"
 			finished = append(finished, item)
-			finishedText = append(finishedText, fmt.Sprintf("- %s (finished %s)", b.Title, when(*b.ClosedAt, now)))
+			finishedText = append(finishedText, fmt.Sprintf("- %s (finished %s%s)", b.Title, when(*b.ClosedAt, now), waitsLine(asks, true)))
 		case b.Hold:
 			item["state"] = "stuck"
 			stuck = append(stuck, item)
-			stuckText = append(stuckText, fmt.Sprintf("- %s: it is on hold, waiting for a person", b.Title))
+			stuckText = append(stuckText, fmt.Sprintf("- %s: it is on hold, waiting for a person%s", b.Title, waitsLine(asks, false)))
 		default:
 			blockers, err := s.Yard.OpenBlockers(ctx, b.ID)
 			if err != nil {
@@ -77,12 +92,12 @@ func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (
 			if len(blockers) > 0 {
 				item["state"] = "stuck"
 				stuck = append(stuck, item)
-				stuckText = append(stuckText, fmt.Sprintf("- %s: it is waiting for other work to finish first", b.Title))
+				stuckText = append(stuckText, fmt.Sprintf("- %s: it is waiting for other work to finish first%s", b.Title, waitsLine(asks, false)))
 				continue
 			}
 			item["state"] = "under way"
 			underWay = append(underWay, item)
-			underWayText = append(underWayText, fmt.Sprintf("- %s (last touched %s)", b.Title, when(b.UpdatedAt, now)))
+			underWayText = append(underWayText, fmt.Sprintf("- %s (last touched %s%s)", b.Title, when(b.UpdatedAt, now), waitsLine(asks, false)))
 		}
 	}
 	if len(underWay)+len(stuck)+len(finished) == 0 {
@@ -136,8 +151,14 @@ func (s *Service) onePiece(ctx context.Context, work string, now time.Time) (*Re
 			state = "stuck: it is waiting for other work to finish first"
 		}
 	}
+	var asks []uint64
+	for _, a := range view.Asks {
+		if a.To == s.User && a.State == "open" {
+			asks = append(asks, a.Ask)
+		}
+	}
 	var out strings.Builder
-	fmt.Fprintf(&out, "%s\nIt is %s (last touched %s).", view.Title, state, when(b.UpdatedAt, now))
+	fmt.Fprintf(&out, "%s\nIt is %s%s (last touched %s).", view.Title, state, waitsLine(asks, b.Status == "closed"), when(b.UpdatedAt, now))
 	if strings.TrimSpace(view.Body) != "" {
 		fmt.Fprintf(&out, "\n\n%s", strings.TrimSpace(view.Body))
 	}
@@ -162,10 +183,33 @@ func (s *Service) onePiece(ctx context.Context, work string, now time.Time) (*Re
 			}
 		}
 	}
-	return &Result{
-		Text:       out.String(),
-		Structured: map[string]any{"work": view.ID, "title": view.Title, "state": state},
-	}, nil
+	structured := map[string]any{"work": view.ID, "title": view.Title, "state": state}
+	if len(asks) > 0 {
+		structured["waiting_questions"] = asks
+	}
+	return &Result{Text: out.String(), Structured: structured}, nil
+}
+
+// waitsLine is what follows a piece's standing where questions on it
+// wait for the person ("; question 7 still waits for you" on finished
+// work), and "" where none does.
+func waitsLine(asks []uint64, finished bool) string {
+	if len(asks) == 0 {
+		return ""
+	}
+	nums := make([]string, len(asks))
+	for i, a := range asks {
+		nums[i] = strconv.FormatUint(a, 10)
+	}
+	still := ""
+	if finished {
+		still = "still "
+	}
+	if len(nums) == 1 {
+		return fmt.Sprintf("; question %s %swaits for you", nums[0], still)
+	}
+	last := len(nums) - 1
+	return fmt.Sprintf("; questions %s and %s %swait for you", strings.Join(nums[:last], ", "), nums[last], still)
 }
 
 // AskForSomething is ask_for_something: the person's request filed as
@@ -271,26 +315,46 @@ func (s *Service) WhatWaitsForMe(ctx context.Context) (*Result, error) {
 	questions := make([]map[string]any, 0, len(queue.Open))
 	for _, open := range queue.Open {
 		b.WriteString("\n\n")
-		questions = append(questions, map[string]any{
-			"work": open.Bead, "question": open.Ask,
-		})
-		view, err := s.Yard.Bead(ctx, open.Bead, s.User)
-		if err != nil {
+		// Each question's object carries what the card gives a person
+		// (its words whole, under any outside mark, its choices, who
+		// asked and when), since a client may show its model only this.
+		q := map[string]any{"work": open.Bead, "question": open.Ask, "title": open.BeadTitle}
+		var card *store.BeadAsk
+		if view, err := s.Yard.Bead(ctx, open.Bead, s.User); err == nil {
+			for i := range view.Asks {
+				if view.Asks[i].Ask == open.Ask {
+					card = &view.Asks[i]
+					q["title"] = view.Title
+				}
+			}
+		}
+		var text string
+		if card != nil {
+			text = questionText(*card, q["title"].(string), now)
+			q["asked_by"], _ = authorMark(card.Asker)
+			q["asked_at"] = card.Since.UTC().Format(time.RFC3339)
+			q["choices"] = choices(*card)
+			if card.Recommend >= 1 && card.Recommend <= len(card.Options) {
+				q["recommended"] = card.Recommend
+			}
+		} else {
 			// The row alone, where the card cannot be read: the
 			// question and who asked it, in the row's words.
+			var row strings.Builder
 			asker, outside := authorMark(open.Asker)
-			fmt.Fprintf(&b, "Question %d, on %q (asked by %s, %s)\n", open.Ask, open.BeadTitle, asker, when(open.Since, now))
+			fmt.Fprintf(&row, "Question %d, on %q (asked by %s, %s)\n", open.Ask, open.BeadTitle, asker, when(open.Since, now))
 			if outside {
-				b.WriteString(outsideLine(open.Asker) + "\n")
+				row.WriteString(outsideLine(open.Asker) + "\n")
 			}
-			b.WriteString(open.Question)
-			continue
+			row.WriteString(open.Question)
+			text = row.String()
+			q["asked_by"] = asker
+			q["asked_at"] = open.Since.UTC().Format(time.RFC3339)
+			q["choices"] = []map[string]any{}
 		}
-		for _, a := range view.Asks {
-			if a.Ask == open.Ask {
-				b.WriteString(questionText(a, view.Title, now))
-			}
-		}
+		q["text"] = text
+		b.WriteString(text)
+		questions = append(questions, q)
 	}
 	return &Result{
 		Text:       b.String(),

@@ -3,6 +3,7 @@ package mcp_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -232,6 +233,24 @@ func TestWhatIsHappening(t *testing.T) {
 	if !strings.Contains(res.Text, "the figures arrived") || res.Structured["work"] != mine {
 		t.Fatalf("the one piece:\n%s\n%+v", res.Text, res.Structured)
 	}
+	// A question waiting for the person on finished work is said
+	// beside its standing, in the account and in the one piece.
+	seq := y.ask(t, done, choicesAsk("ada"))
+	waits := fmt.Sprintf("finished; question %d still waits for you", seq)
+	res, err = s.WhatIsHappening(y.ctx, done, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "It is "+waits) || fmt.Sprint(res.Structured["waiting_questions"]) != fmt.Sprintf("[%d]", seq) {
+		t.Errorf("the finished piece hides its waiting question:\n%s\n%+v", res.Text, res.Structured)
+	}
+	res, err = s.WhatIsHappening(y.ctx, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "Old report (finished ") || !strings.Contains(res.Text, fmt.Sprintf("; question %d still waits for you)", seq)) {
+		t.Errorf("the account hides the question waiting on finished work:\n%s", res.Text)
+	}
 	// A window that excludes the finished work drops it.
 	res, err = s.WhatIsHappening(y.ctx, "", time.Now().Add(time.Hour).UTC().Format(time.RFC3339))
 	if err != nil {
@@ -456,6 +475,20 @@ func TestWhatWaitsForMe(t *testing.T) {
 	qs, _ := res.Structured["questions"].([]map[string]any)
 	if len(qs) != 1 || qs[0]["work"] != bead || qs[0]["question"] != seq {
 		t.Fatalf("the structured questions = %+v", res.Structured)
+	}
+	// The question's object is the card a person reads: its words,
+	// its numbered choices, who asked and when.
+	q := qs[0]
+	if text, _ := q["text"].(string); !strings.Contains(text, "Move the links now?") || !strings.Contains(text, "Move them now") {
+		t.Errorf("the structured question's words = %q", q["text"])
+	}
+	choices, _ := q["choices"].([]map[string]any)
+	// The store adds its own last choice (leave it to the asker).
+	if len(choices) != 3 || choices[0]["number"] != 1 || choices[0]["label"] != "Move them now" || choices[1]["label"] != "After Friday" || choices[2]["number"] != 3 {
+		t.Errorf("the structured choices = %+v", q["choices"])
+	}
+	if q["asked_by"] != "yardmaster" || q["asked_at"] == "" || q["recommended"] != 1 || q["title"] != "Move the links" {
+		t.Errorf("the structured question = %+v", q)
 	}
 	if _, ok := qs[0]["question_text"]; ok {
 		t.Fatalf("the structured result duplicates question text without its outside mark: %+v", qs[0])

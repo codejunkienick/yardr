@@ -118,7 +118,9 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 	if err := y.st.Mail(y.ctx, "ada", "unread hello", "yardmaster"); err != nil {
 		t.Fatal(err)
 	}
-	svc := &mcp.Service{Yard: y.st, User: "ada", Connection: "openclaw"}
+	// The wait is the tool's own deadline, not the test's: no reply
+	// comes, and ask_the_yardmaster ends at once with its waiting words.
+	svc := &mcp.Service{Yard: y.st, User: "ada", Connection: "openclaw", Wait: time.Millisecond}
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "stand-in", Version: "1"}, nil)
 	cs := connect(t, svc, client)
 
@@ -131,6 +133,16 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 	served := map[string]bool{}
 	for _, tool := range tools.Tools {
 		served[tool.Name] = true
+		// Every output schema says the words ride in the structured
+		// part, as text.
+		schema, _ := json.Marshal(tool.OutputSchema)
+		var out struct {
+			Properties map[string]any `json:"properties"`
+			Required   []string       `json:"required"`
+		}
+		if err := json.Unmarshal(schema, &out); err != nil || out.Properties["text"] == nil || len(out.Required) != 1 || out.Required[0] != "text" {
+			t.Errorf("%s's output schema = %s, want text required", tool.Name, schema)
+		}
 	}
 	if len(served) != len(mcp.Tools()) {
 		t.Fatalf("the served tools = %v, want the contract %v", served, mcp.Tools())
@@ -166,6 +178,67 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 	if !res.IsError || !strings.HasSuffix(text, "Call read_my_mail to read it and tell them what it says.") {
 		t.Errorf("the refusal lacks its unread line:\n%s", text)
 	}
+	structuredText(t, res, text)
+
+	// Every tool's structured part carries its words whole, footer and
+	// all, since a client may hand its model that part alone. A tool
+	// added to the contract without a call here fails the test.
+	args := map[string]map[string]any{
+		mcp.ToolWhatIsHappening:  {"work": bead},
+		mcp.ToolAskForSomething:  {"request": "Tidy the links"},
+		mcp.ToolWhatWaitsForMe:   {},
+		mcp.ToolAnswer:           {"work": bead, "question": 1, "put_aside": true},
+		mcp.ToolAskTheYardmaster: {"message": "Are the links moved?"},
+		mcp.ToolReadMyMail:       {},
+	}
+	for _, def := range mcp.Tools() {
+		a, ok := args[def.Name]
+		if !ok {
+			t.Errorf("%s has no call in this test", def.Name)
+			continue
+		}
+		if def.Name == mcp.ToolAnswer {
+			a["question"] = waitingQuestion(t, y, bead)
+		}
+		res, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: def.Name, Arguments: a})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.IsError {
+			t.Errorf("%s refused: %s", def.Name, toolText(t, res))
+		}
+		structuredText(t, res, toolText(t, res))
+	}
+}
+
+// structuredText holds a result's structured part to its words: text,
+// the same as the content's.
+func structuredText(t *testing.T, res *sdkmcp.CallToolResult, text string) {
+	t.Helper()
+	raw, _ := json.Marshal(res.StructuredContent)
+	var structured map[string]any
+	if err := json.Unmarshal(raw, &structured); err != nil {
+		t.Fatalf("the structured part = %s: %v", raw, err)
+	}
+	if structured["text"] != text {
+		t.Errorf("the structured text = %q, want the words %q", structured["text"], text)
+	}
+}
+
+// waitingQuestion is the number of the one question waiting on bead.
+func waitingQuestion(t *testing.T, y *yard, bead string) uint64 {
+	t.Helper()
+	q, err := y.st.UserAsks(y.ctx, "ada", "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, open := range q.Open {
+		if open.Bead == bead {
+			return open.Ask
+		}
+	}
+	t.Fatalf("no question waits on %s: %+v", bead, q)
+	return 0
 }
 
 // Where the connection's actor resolves to no user of the yard, the
@@ -628,6 +701,9 @@ func TestForeignQuestionKeepsItsMark(t *testing.T) {
 	}
 	if _, ok := questions[0]["question_text"]; ok {
 		t.Fatalf("the structured result carries an unmarked copy of the outside question: %+v", questions[0])
+	}
+	if text, _ := questions[0]["text"].(string); !strings.Contains(text, store.OutsideMail) || !strings.Contains(text, "Send the figures?") {
+		t.Fatalf("the structured question lost its mark: %+v", questions[0])
 	}
 }
 
