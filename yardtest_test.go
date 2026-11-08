@@ -70,10 +70,10 @@ type filesizeRow struct {
 
 // What the tests of the gate share, in the order a case uses it: the
 // repository a run is made in (gateRepo, copyFixture, goModTemplate), the
-// fakes it runs against (fakeBins, boxEnv), the run (runCmd, modGate.box),
-// the wait on it (pollUntil), and what a case asserts of it (wantRun,
-// wantGoCalls, wantSteps, wantEmpty, wantQueued). A case that needs more
-// than these writes it beside the case.
+// fakes it runs against (fakeBins, boxEnv), the run (gateCmd, runCmd,
+// modGate.box), the wait on it (pollUntil), and what a case asserts of it
+// (wantRun, wantGoCalls, wantSteps, wantEmpty, wantQueued). A case that needs
+// more than these writes it beside the case.
 
 // writeSizeTree writes every filesizes-listed file at exactly its ceiling,
 // as valid Go, so a fixture that runs the whole gate passes the file size
@@ -233,6 +233,24 @@ func gateScript(t *testing.T) []byte {
 	return b
 }
 
+// gateCmd is the command that runs script, the gate's text and any shell text a
+// case puts ahead of it, from a file of the test's own temp dir: sh <file>,
+// never the script as the one argument of sh -c. Linux caps one argument at
+// MAX_ARG_STRLEN (128 KiB on a 4 KiB-page system) and the gate is past that,
+// so a case that ran it as an argument failed there with "argument list too
+// long", where macOS, which has no such cap, passed. The file is outside the
+// fixture a case runs in, so
+// the fixture's git sees nothing new, and it is named and made executable as
+// the checkout's is, so $0 is a path the race lock's holder can re-enter the
+// script by, not the word sh that sh -c gave it. The caller sets the command's
+// directory and environment.
+func gateCmd(t *testing.T, script string) *exec.Cmd {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, dir, yardTest, script)
+	return exec.Command("sh", filepath.Join(dir, yardTest))
+}
+
 // needTool skips a case that drives a program the machine lacks, and returns
 // where the program is.
 func needTool(t *testing.T, name string) string {
@@ -389,7 +407,7 @@ func (m modGate) box(t *testing.T, bins map[string]string) gateBox {
 // commit.
 func (b gateBox) run(t *testing.T, env ...string) (string, int) {
 	t.Helper()
-	cmd := exec.Command("sh", "-c", string(b.script))
+	cmd := gateCmd(t, string(b.script))
 	cmd.Dir = b.dir
 	cmd.Env = boxEnv(b.fake, b.tmp, append([]string{"YARDR_BASE=" + b.base, "YARDR_RACE_HELD=1"}, env...)...)
 	return runCmd(t, cmd)
@@ -497,7 +515,7 @@ func TestYardTestSaysItsBase(t *testing.T) {
 	gitT(t, template, "branch", "other")
 	run := func(t *testing.T, dir string, env ...string) (string, int) {
 		t.Helper()
-		cmd := exec.Command("sh", "-c", script)
+		cmd := gateCmd(t, script)
 		cmd.Dir = dir
 		cmd.Env = append(append(scriptEnv(), "YARDR_TEST_PLAN=1"), env...)
 		return runCmd(t, cmd)
@@ -811,7 +829,7 @@ func TestYardTestSelects(t *testing.T) {
 			}
 		}
 		gitT(t, fx.dir, "add", "-A")
-		cmd := exec.Command("sh", "-c", script)
+		cmd := gateCmd(t, script)
 		cmd.Dir = fx.dir
 		cmd.Env = append(append(scriptEnv(), "YARDR_TEST_PLAN=1", "YARDR_BASE="+fx.base), env...)
 		b, err := cmd.CombinedOutput()
@@ -3133,7 +3151,7 @@ func TestYardTestKilledGatePrintsNoPass(t *testing.T) {
 			// that package, and asks go for the list of them.
 			dir, base := gateRepo(t, map[string]string{"go.mod": "module m.test/m\n", "a/a.go": "package a\n"})
 			writeFile(t, dir, "a/a.go", "package a\n\n// touched\n")
-			cmd := exec.Command("sh", "-c", "echo $$ > \"$FAKE/gate.pid\"\n"+string(script))
+			cmd := gateCmd(t, "echo $$ > \"$FAKE/gate.pid\"\n"+string(script))
 			cmd.Dir = dir
 			// Its own process group, so the TERM below reaches the script and
 			// the go test it holds, and nothing else.
@@ -4671,7 +4689,7 @@ func TestYardTestRaceLockTermToQueuedGateStopsItAtOnce(t *testing.T) {
 	fake, tmp := fakeBins(t, map[string]string{"go": "#!/bin/sh\nexit 0\n"})
 	dir, base := gateRepo(t, map[string]string{"go.mod": "module m.test/m\n"})
 	writeFile(t, dir, "go.mod", "module m.test/m\n\n// touched\n")
-	gate := exec.Command("sh", "-c", "echo $$ > \"$FAKE/gate.pid\"\n"+string(script))
+	gate := gateCmd(t, "echo $$ > \"$FAKE/gate.pid\"\n"+string(script))
 	gate.Dir = dir
 	gate.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	gate.Env = boxEnv(fake, tmp, "YARDR_BASE="+base, "YARDR_BEAD=gate-bead", "HOME="+home)
