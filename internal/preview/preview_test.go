@@ -217,6 +217,16 @@ func (y *yard) heldPID(app string) int {
 	return 0
 }
 
+// backdateStart makes the process the supervisor holds for app as old as one
+// that started at: the moment its idle and age rules count from, which is the
+// supervisor's own record of the start and no row's. A pass reads it without the
+// lock, so this is for a yard that no Run passes over.
+func (y *yard) backdateStart(app string, at time.Time) {
+	y.sup.mu.Lock()
+	defer y.sup.mu.Unlock()
+	y.sup.running[app].started = at
+}
+
 // flipGate is a store whose flips of a row to approved wait to be let go, one
 // each time let is sent to, so a test says what is written before a flip lands.
 // Closing let lets go every flip that waits and every later one.
@@ -665,29 +675,55 @@ func TestCleanExitIsNotRestarted(t *testing.T) {
 }
 
 func TestIdleStopAndRebootRule(t *testing.T) {
+	ctx := context.Background()
+	// No Run: the passes are this test's own, so that each finds the preview as
+	// the test has just left it and none comes between two of its steps.
 	y := newYard(t)
 	port := freePort(t)
 	y.propose(t, "demo", previewtest.App("127.0.0.1", port), port, true)
-	// Backdate the last request past the default idle bound once
-	// running: the next pass owes it the idle stop.
-	y.run(t)
-	waitFor(t, "preview running", func() bool { return y.state("demo").State == store.PreviewRunning })
+	t.Cleanup(func() { y.sup.kill("demo") })
+	// The row is an old one, approved again: its last request is older than the
+	// default idle bound. A start writes no request, and the bound counts from the
+	// later of the start and the last request, so the passes after the one that
+	// starts it do not stop what it started.
 	old := time.Now().Add(-5 * time.Hour)
-	if _, err := y.st.UpdatePreview(context.Background(), "demo", store.PreviewUpdate{LastRequest: &old}); err != nil {
+	if _, err := y.st.UpdatePreview(ctx, "demo", store.PreviewUpdate{LastRequest: &old}); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		y.sup.reconcile(ctx, false)
+	}
+	if got := y.state("demo"); got.State != store.PreviewRunning || got.StateDetail != "" || y.heldPID("demo") == 0 {
+		t.Fatalf("after passes over a preview started for a last request 5 h old = %+v, want it running and held, with no reason to stop", got)
+	}
+	// A request after the start is the later moment: it keeps a process that
+	// started hours ago.
+	recent := time.Now().Add(-time.Minute)
+	y.backdateStart("demo", old)
+	if _, err := y.st.UpdatePreview(ctx, "demo", store.PreviewUpdate{LastRequest: &recent}); err != nil {
+		t.Fatal(err)
+	}
+	y.sup.reconcile(ctx, false)
+	if got := y.state("demo"); got.State != store.PreviewRunning {
+		t.Fatalf("a process that started 5 h ago, asked a minute ago, was stopped: %+v", got)
+	}
+	// One that started that long ago and was last asked as long ago is idle, and
+	// stops once no request is in flight.
+	if _, err := y.st.UpdatePreview(ctx, "demo", store.PreviewUpdate{LastRequest: &old}); err != nil {
 		t.Fatal(err)
 	}
 	y.sup.mu.Lock()
 	y.sup.inflight["demo"] = 1
 	y.sup.mu.Unlock()
-	y.sup.reconcile(context.Background(), false)
+	y.sup.reconcile(ctx, false)
 	if got := y.state("demo"); got.State != store.PreviewRunning {
 		t.Fatalf("active response was stopped as idle: %+v", got)
 	}
 	y.sup.leave("demo")
-	waitFor(t, "idle preview stopped", func() bool {
-		got := y.state("demo")
-		return got.State == store.PreviewStopped && got.StateDetail == "idle"
-	})
+	y.sup.reconcile(ctx, false)
+	if got := y.state("demo"); got.State != store.PreviewStopped || got.StateDetail != "idle" {
+		t.Fatalf("idle preview = %+v, want it stopped as idle", got)
+	}
 	// A row left running when the supervisor starts is the reboot
 	// rule: stopped, not restarted.
 	y2 := newYard(t)
@@ -936,6 +972,66 @@ func TestOnDemandStartThroughEndpoint(t *testing.T) {
 		pid := y.heldPID("demo")
 		if got := y.state("demo"); pid == 0 || got.State != store.PreviewRunning || got.PID != pid {
 			t.Fatalf("after both flips the row says %s with pid %d and the supervisor holds pid %d, want running as that process", got.State, got.PID, pid)
+		}
+	})
+
+	// A person arrives at a preview that was stopped as idle: its last request is
+	// older than the idle bound, and the process their request starts is moments
+	// old. The bound counts from the later of the start and the last request, so a
+	// pass that comes while the request waits for the app to bind leaves the app
+	// alone. Counted from the last request alone, that pass stopped the app the
+	// request had just started, and the person was told it was starting. The app
+	// binds half a second after it starts, so that the passes the test makes come
+	// while the request still waits, however fast the machine is.
+	t.Run("an app a request starts is not stopped as idle for a last request older than the bound", func(t *testing.T) {
+		ctx := context.Background()
+		y := newYard(t) // no Run: the request alone starts it, and the passes are the test's
+		t.Cleanup(func() { y.sup.kill("demo") })
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("hello"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		port := freePort(t)
+		y.proposeIn(t, "demo", "sleep 0.5; exec "+previewtest.App("127.0.0.1", port), dir, port, true)
+		// The row as the idle stop of the last visit leaves it.
+		old, idle := time.Now().Add(-5*time.Hour), "idle"
+		if _, err := y.st.UpdatePreview(ctx, "demo", store.PreviewUpdate{State: store.PreviewStopped, StateDetail: &idle, LastRequest: &old}); err != nil {
+			t.Fatal(err)
+		}
+		srv := httptest.NewServer(y.sup.Handler())
+		defer srv.Close()
+		type answer struct {
+			code int
+			body string
+		}
+		answered := make(chan answer, 1)
+		go func() {
+			resp, err := http.Get(srv.URL + "/preview/demo/")
+			if err != nil {
+				answered <- answer{body: err.Error()}
+				return
+			}
+			defer resp.Body.Close()
+			raw, _ := io.ReadAll(resp.Body)
+			answered <- answer{resp.StatusCode, string(raw)}
+		}()
+		y.waitStart(t, "the request's start to be recorded", func() bool {
+			return y.heldPID("demo") != 0 && y.state("demo").State == store.PreviewRunning
+		})
+		for range 3 {
+			y.sup.reconcile(ctx, false)
+		}
+		select {
+		case a := <-answered:
+			if a.code != http.StatusOK || a.body != "hello" {
+				t.Fatalf("the request's answer = %d %q, want the app's: 200 hello", a.code, a.body)
+			}
+		case <-time.After(y.startWait()):
+			t.Fatal("the request was not answered")
+		}
+		pid := y.heldPID("demo")
+		if got := y.state("demo"); pid == 0 || got.State != store.PreviewRunning || got.StateDetail != "" || got.PID != pid {
+			t.Fatalf("after the answer the row says %s %q with pid %d and the supervisor holds pid %d, want running as that process", got.State, got.StateDetail, got.PID, pid)
 		}
 	})
 }

@@ -258,8 +258,14 @@ func (s *Supervisor) reconcile(ctx context.Context, first bool) {
 			if pr == nil {
 				continue // the start path or a restart owns it
 			}
+			// Idle time counts from the later of the process's start and the last
+			// request. A start writes no request, so the row of a preview that was
+			// stopped as idle, or approved again, still holds a last request older than
+			// the bound. Counted from that alone, the next pass would stop a process
+			// just started, for a person's request or by an earlier pass, before
+			// anything could ask it for a page.
 			last := pr.started
-			if p.LastRequestAt != nil {
+			if p.LastRequestAt != nil && p.LastRequestAt.After(last) {
 				last = *p.LastRequestAt
 			}
 			switch {
