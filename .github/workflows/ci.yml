@@ -93,10 +93,9 @@ jobs:
     timeout-minutes: 15
     env:
       # The BDP commit conformance/bdp/README.md records as last verified:
-      # caf5ca7, the Read-profile era (BDP main has no Read profile since;
-      # whether yardr follows its current Core is yardr-fkgp). Moving it is
-      # a deliberate change, made together with the README.
-      BDP_REF: caf5ca75a4e9b9c7865e61e97f849ab736c21e64
+      # a4fd83a, the Core era. Moving it is a deliberate change, made
+      # together with the README, once probe-core.sh passes at the new commit.
+      BDP_REF: a4fd83a2ce3bc77c28f98c5f023ade997e4a1642
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -104,6 +103,12 @@ jobs:
           repository: gastownhall/bdp
           ref: ${{ env.BDP_REF }}
           path: bdp
+      - name: README records the pin
+        run: |
+          grep -qF "$BDP_REF" conformance/bdp/README.md || {
+            echo "conformance/bdp/README.md does not record BDP_REF ($BDP_REF); move them together"
+            exit 1
+          }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -119,8 +124,10 @@ jobs:
       - name: build bdp
         working-directory: bdp
         run: pnpm install --frozen-lockfile && pnpm build
-      - name: BDP read conformance
-        run: BDP_REPO=$GITHUB_WORKSPACE/bdp conformance/bdp/run.sh
+      - name: BDP probe failure paths
+        run: conformance/bdp/probe-core-test.sh
+      - name: BDP Core conformance
+        run: BDP_REPO=$GITHUB_WORKSPACE/bdp conformance/bdp/probe-core.sh
 
   # The scans, apart from the test jobs so release.yml's copy of those jobs
   # stays in step with them: known vulnerabilities in what the module builds

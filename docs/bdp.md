@@ -202,14 +202,15 @@ qualification and not a provider badge: its report is `incomplete` and says
 `claimEligible: false`. So the pass shows that discovery, the two inventories
 and a point read are what the kit asserts of Core, and shows nothing of the
 cases the kit lacks. [conformance/bdp/probe-core.sh](../conformance/bdp/probe-core.sh)
-makes the run, and [conformance/bdp](../conformance/bdp) has the rest of the
-harness.
+makes the run, CI makes it at that commit on every push to main and every pull
+request, and [conformance/bdp](../conformance/bdp) says what it covers.
 
 The Read-profile result of October 2026 is of a server that no longer exists.
 On BDP's main caf5ca7, 13 Oct 2026, BDP's own conformance suite passed 31 of 31
 runnable Read scenarios against `yardr bdp serve`, and BDP's `bdp bd ready`
 client computed the same ready set from yardr as `yardr ready`. BDP has no
 standalone Read profile since, and says its historical conformance seals "do not
-qualify the new composition". `conformance/bdp/run.sh` still holds that suite,
-and it fails against this server by design: it checks the Read profile's
-discovery document and its `beads/` and `links/` listings, which are not served.
+qualify the new composition". That suite is retired and not ported: its rows are
+the Read profile's, and this server fails them by construction. BDP's discovery
+row asks for `application/json` and a `bdpVersion` of 0, and this server answers
+in Core's media type with 0.1.

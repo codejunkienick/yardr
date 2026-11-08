@@ -1,82 +1,91 @@
 # BDP conformance for yardr
 
-`run.sh` runs [BDP](https://github.com/gastownhall/bdp)'s historical Read-profile
-conformance suite, black-box over HTTP, against `yardr bdp serve`. BDP no
-longer has a standalone Read profile; reads are part of Core. This historical
-suite stops before testing it (the last paragraph says why), so check out
-caf5ca7, the last commit verified:
+`probe-core.sh` runs [BDP](https://github.com/gastownhall/bdp)'s current provider
+kit at `yardr bdp serve` and passes or fails on what the kit finds. CI runs it at
+the BDP commit pinned below. To run it yourself:
 
 ```sh
 git clone https://github.com/gastownhall/bdp ~/src/bdp
-git -C ~/src/bdp checkout caf5ca7
-(cd ~/src/bdp && pnpm install --frozen-lockfile && pnpm build)
-BDP_REPO=~/src/bdp conformance/bdp/run.sh
+git -C ~/src/bdp checkout a4fd83a2ce3bc77c28f98c5f023ade997e4a1642
+BDP_REPO=~/src/bdp conformance/bdp/probe-core.sh
 ```
 
-BDP pins its toolchain (`package.json`: Node 24.16.0, pnpm 11.20.0) and its
-`.npmrc` sets `engine-strict`, so the install refuses any other Node.
+The script installs and builds BDP in place (`pnpm install --frozen-lockfile &&
+pnpm build`) and needs go, python3, curl, node and pnpm. BDP pins its Node in
+`.nvmrc` and its pnpm in `package.json`. pnpm only warns on another Node, so the
+report prints the Node the kit ran under beside BDP's pin. Check that they match
+before you trust a run.
 
-How it works:
+## What a run does
 
-1. `seed.py` builds a throwaway yard holding the graph BDP's bd-backed lane
-   seeds (`seedBdWorkspace`): beads A–F, I, J, K, their `blocks` links and the
-   E→F `related` link, with C and K closed and E deferred (held).
-2. `yardr bdp serve` serves it under the Scope `https://scope.example/acme/`.
-3. `make-fixture.py` derives the fixture from BDP's bd fixture
-   (`read-bdpbd-v1.json`). Only implementation-specific literals change: bd's
-   link ids become yard's, bd's content hashes become yard's revisions, and
-   demo-a's property body and revision provenance become yard's. Every membership,
-   direction, readiness and ordering expectation stays bd's. Yard's demo-a
-   row and revision provenance are pinned in the script, not copied from the server
-   under test; only run-time values (link ids and revisions, demo-a's uuid
-   and timestamps) are read from it, each checked for its shape. The type
-   inventory is bd's plus the Types a fresh yard has for links to outside
-   issues (`relates`, `tracks`). They are pinned in the
-   script too, not read from the server, so a Type that appears or goes
-   fails `read.types.inventory`: a source the yard declares adds its
-   `tracks-<source>`, and the script's list changes with it.
-4. `external-read.test.mts` runs the suite against the live server.
+1. It builds yardr from this checkout into a temp dir and starts a fresh yard
+   there. Your `~/.yardr` is not touched.
+2. It seeds 54 beads and 54 links. Nine beads, some open, some closed and one
+   held, are joined by `blocks` edges and one `related` edge. Each of the other 45
+   is blocked by the first of the nine, so each inventory runs past its first page
+   of 50 and the kit follows a continuation. The kit learns what the Scope holds
+   from its inventories, so the script seeds a graph of its own and reads none of
+   BDP's fixtures.
+3. It serves the yard with `yardr bdp serve` on a free loopback port. The Scope
+   is `http://127.0.0.1:<port>/acme/`, because the kit dials the Scope's own
+   origin and cannot be pointed elsewhere.
+4. It runs `node scripts/current-provider-kit.mjs --scope <Scope>`. The `--scope`
+   mode needs no adapter, and without `--allow-mutation` the kit sends nothing
+   that changes the yard.
+5. It prints one line per row, then exits 0 when no row failed and the three Core
+   read rows below passed, and 1 otherwise.
 
-Journals and memories are not served, nor links touching them: they are not
-work, and a bd client would count an open one as ready.
+`BDP_REPORT` keeps the kit's JSON report in a file, and `BDP_PORT` names a port to
+serve on.
 
-Of the catalog's 49 rows at caf5ca7, 31 run. The rest, by what keeps them out:
+## What it covers
 
-- Not applicable, 8: the row's applicability names a capability the fixture
-  does not declare. Aliases (`read.alias.resolution`), disclosure
-  (`read.disclosure.gate`, `.gone`), owned links (`read.owned.closure`,
-  `read.owned-wildcard.closure`, `.present-entries`) and content-derived
-  revisions (`read.numeric-model.declared-token-model`) yard does not
-  claim. `read.attribution.link` it could: yard's links carry revision
-  provenance, but the capability list is bd's, which has no
-  `attribution-links-v1`.
-- In-process only, 11 (three of them also among the 8): rows with a
-  `lifecycle` action, which BDP drives through test hooks no live server
-  has. These are `read.discovery.optional-limits`,
-  `read.collections.selector`, `read.collections.pagination-snapshot`,
-  `read.collections.cursor-errors`, `read.bead-links.pagination`,
-  `read.resource.not-found-nondisclosure`, `read.http.problem-table`,
-  `read.scope.restore-identity`, `read.disclosure.gate`,
-  `read.owned.closure`, and `read.owned-wildcard.closure`. BDP calls them
-  self-certified and runs them inside its own two servers.
-- No setup on a live server, 2: `read.http.internal-fault` needs the server
-  started with a fault injected, and `read.resource.external-endpoint`
-  needs a seeded link to a URI that is no issue (yard's only out-of-Scope
-  endpoints are the issues of [links](../../docs/links.md), tested in
-  internal/bdp).
+At the pinned commit the kit has 28 required rows and 33 optional ones. Against a
+Scope that advertises Core, with no adapter and no mutation:
 
-Last run (BDP caf5ca7, 2026-11-07, yardr 332543b0): 31 of 31 runnable scenarios pass.
-BDP's own `bdp bd ready --json` client, pointed at `yardr bdp serve`, returns
-J, D, A: the same ready set bd itself does.
+- 3 required rows pass: `core.scope-discovery`, `core.inventory-fixed-routes` and
+  `core.point-read`. The script requires all three.
+- 5 required rows do not run. The kit has no case yet for
+  `core.collections-and-native-pagination`, `core.link-and-alias-reads` or
+  `core.http-and-selection`. `core.deleted-absence` needs a Write delete or an
+  adapter's witness of a deleted resource, and `--scope` has neither.
+  `coverage.complete-obligation-audit` never runs.
+- 20 required rows are not applicable, because discovery says `core`: 16 `write.*`
+  cases and 4 Write families. yardr serves no Write.
+- The 33 optional rows (Callables, Issue package) are not applicable too.
 
-BDP's main 029d176, 7 Nov 2026, has no standalone Read profile: reads are part
-of Core. BDP says its historical conformance seals "do not qualify the new
-composition". The historical suite stops during fixture seeding against it.
-Since BDP's commit 8f30b0e of 4 Nov 2026 the fixtures name beads without the
-`beads/` prefix, so `seed.py` stops at the first bead with an `IndexError` on
-`b["localId"].split("/", 1)[1]`, before the BDP scenarios run. Nothing here has
-been tested against BDP's current Core, whose inventories are `bdp/beads` and
-`bdp/links`. yardr serves neither. BDP's current 19-case Core/ordinary Write
-provider kit requires a trusted adapter and is a bounded interoperability
-slice, not a replacement full-conformance result.
-[docs/bdp.md](../../docs/bdp.md#conformance) says what yardr claims.
+BDP calls the kit a vertical slice. Its report is `incomplete` and says
+`claimEligible: false`. A pass shows that discovery, the two inventories and a
+point read are what the kit asserts of Core, and shows nothing of the rows it has
+no case for. [docs/bdp.md](../../docs/bdp.md#conformance) says what yardr claims.
+
+## The pin
+
+`BDP_REF` in the `conformance` job of `.github/workflows/ci.yml` and `release.yml`
+is the BDP commit CI checks out, and it is the one recorded here:
+`a4fd83a2ce3bc77c28f98c5f023ade997e4a1642`, of 7 Nov 2026. BDP moves and the kit
+gains rows, so a newer commit can fail where this one passes. To move the pin, run
+the script at the new commit first, then change both workflows and this file in
+one commit. A step of the job fails when this file does not contain `BDP_REF`, so
+the two cannot drift apart unseen.
+
+`pnpm spec:revision` in the BDP checkout prints the commit that `SpecRevision` in
+`internal/bdp` should name. It is older than the pin when BDP's later commits left
+Core's text alone.
+
+Last run: BDP a4fd83a2, yardr 13b5d5d7, 8 Nov 2026. 3 pass, 5 not run, 53 not
+applicable (20 required, 33 optional), 0 fail.
+
+## History
+
+Until the move to Core this directory held BDP's Read-profile conformance suite
+run over HTTP against `yardr bdp serve`. It was retired and not ported. Its rows
+are the Read profile's: BDP's `read.discovery.document` asks with
+`Accept: application/json` and asserts `bdpVersion` 0 and the Read discovery
+schema, which a Core server (0.1, with a media type of its own) fails by
+construction. BDP keeps those rows as historical evidence and says they do not
+qualify Core. A port would be new rows of our own, and the Core cases BDP has not
+implemented in its kit are the ones that would cover the same ground: pagination,
+Link reads and HTTP. `git log --diff-filter=D --stat -- conformance/bdp/run.sh`
+finds the commit that removed the suite, and
+[docs/bdp.md](../../docs/bdp.md#conformance) has its last result.

@@ -72,7 +72,7 @@ main.go             the yardr binary
 packs/starter       the starter pack: the default roles, flow and stage files, embedded in the binary
 packs/dir           the pack for a depot that is a plain directory
 docs/               the documentation (this page is its index)
-conformance/bdp     runs BDP's Read conformance suite at caf5ca7 against yardr bdp serve
+conformance/bdp     runs BDP's provider kit, at the commit its README pins, against yardr bdp serve
 contrib/assembly    merge-local, a reference assembly script for an exec group
 contrib/deploy      deploy-dokku, a reference deploy script: pushes a depot's base to a Dokku host after a landing, or a bead's branch to a preview app of its own before one
 contrib/peer        return-branch, the script that pushes the branch of a bead worked for a linked yard

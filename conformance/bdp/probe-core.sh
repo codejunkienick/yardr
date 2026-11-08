@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Probe BDP's current Core reads against `yardr bdp serve`: seed a yard from the
-# fixture of a BDP checkout, serve it, and run BDP's provider kit at it.
+# Run BDP's current provider kit at `yardr bdp serve`: seed a yard, serve it, and
+# let the kit read it as a Core Scope. This is yardr's BDP conformance check, the
+# one CI runs (.github/workflows/ci.yml) at the BDP commit it pins.
 #
 #   BDP_REPO=~/src/bdp conformance/bdp/probe-core.sh
 #
-# BDP_REPO is a gastownhall/bdp clone at the commit to probe. It is installed and
+# BDP_REPO is a gastownhall/bdp clone at the commit to check. It is installed and
 # built in place, as the kit's doc says (`pnpm install --frozen-lockfile && pnpm
 # build`). BDP pins the Node (its .nvmrc) and the pnpm (its packageManager) to
 # use, but pnpm only warns on another Node, so the report names the Node the kit
@@ -15,25 +16,30 @@
 # The kit runs in its `--scope` mode: no adapter, and no --allow-mutation, which
 # would make it create records in the yard. So nothing is sent that changes the
 # yard, the durability and graph cases stay not-run and the Write cases are
-# not-applicable or not-run; only the Core cases can pass or fail. A failed
-# core.scope-discovery leaves every case after it not-run, which says nothing of
-# those cases: the kit reads nothing else of a Scope whose discovery it refuses.
+# not-applicable by discovery; only the Core cases can pass or fail, and of the
+# seven the kit can run three here. A failed core.scope-discovery leaves every
+# case after it not-run, which says nothing of those cases: the kit reads nothing
+# else of a Scope whose discovery it refuses.
 #
-# One line per case is printed. A case that fails is the finding, not an error
-# of the probe: the exit status is 0 once the kit has given a verdict and 1 when
-# it has not. BDP_REPORT names a file to keep the kit's JSON report in, and
-# BDP_PORT a port to serve on instead of a free one.
+# One line per case is printed. The exit status is 0 when no case failed and the
+# three Core read cases passed, and 1 when a case failed, when one of the three
+# did not pass, or when the kit gave no verdict. A case that is not-run or
+# not-applicable fails nothing, because the kit has no exit 0 yet: its coverage
+# is incomplete by design. The three must pass all the same, or a Scope that held
+# nothing to read would pass the run. BDP_REPORT names a file to keep the kit's
+# JSON report in, and BDP_PORT a port to serve on instead of a free one.
 set -euo pipefail
 : "${BDP_REPO:?set BDP_REPO to a gastownhall/bdp clone}"
 BDP_REPO=$(cd "$BDP_REPO" && pwd)
-here=$(cd "$(dirname "$0")" && pwd)
-root=$(cd "$here/../.." && pwd)
+root=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d)   # short path: the yardr server's unix socket lives here
-# A free loopback port for each run, as run.sh picks one: free when picked, and
-# could be taken before serve binds it, which a local tool accepts.
+# A free loopback port for each run, so that a run beside this one, or any
+# other process on a fixed port, cannot make the server fail before the kit
+# starts. The port is free when it is picked and could be taken before serve
+# binds it, which a local tool accepts.
 port=${BDP_PORT:-$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')}
 # The kit dials the Scope URL's own origin and cannot be told to dial elsewhere,
-# so unlike run.sh's, the Scope here is the address served.
+# so the Scope here is the address served.
 scope=http://127.0.0.1:$port/acme/
 report=${BDP_REPORT:-$work/report.json}
 
@@ -66,7 +72,31 @@ fi
 (cd "$root" && go build -o "$work/yardr" .)
 # A fresh home has no yard yet, and nothing here has a terminal to onboard in.
 "$work/yardr" init --harness claude --dir "$work" >/dev/null
-python3 "$here/seed.py" "$BDP_REPO/packages/conformance/fixtures/read-reference-v1.json" "$work/yardr" >/dev/null
+
+# What the kit reads. It takes its subject from the inventories and never reads
+# BDP's fixtures, whose ids have changed before, so the script seeds a graph of
+# its own: beads that are open, closed and held, joined by blocks edges and one
+# related edge. Both inventories then run past one page (the discovery
+# document's limits.page.defaultItems is 50): 45 more beads, each blocked by
+# demo-a, make 54 beads and 54 links, and the kit follows a continuation.
+y() { "$work/yardr" "$@" --actor bdp-conformance >/dev/null; }
+y bead create A --id demo-a
+y bead create B --id demo-b
+y bead create C --id demo-c --type feature
+y bead close demo-c --reason seeded
+y bead create D --id demo-d
+y bead create E --id demo-e --type bug
+y bead hold demo-e
+y bead create F --id demo-f --type decision
+y bead create I --id demo-i
+y bead create J --id demo-j
+y bead create K --id demo-k
+y bead close demo-k --reason seeded
+# dep add takes the blocker first, then the bead that waits for it.
+for pair in a:b c:a c:d e:f a:i c:i c:j k:j; do y dep add "demo-${pair%:*}" "demo-${pair#*:}"; done
+y dep add demo-f demo-e --kind related
+for i in $(seq 45); do y bead create "P$i" --id "demo-p$i" --blocked-by demo-a; done
+
 "$work/yardr" bdp serve --addr "127.0.0.1:$port" --scope "$scope" >"$work/serve.log" 2>&1 &
 serve_pid=$!
 for _ in $(seq 100); do
@@ -83,8 +113,9 @@ fi
 kit_rc=0
 (cd "$BDP_REPO" && node scripts/current-provider-kit.mjs --scope "$scope") >"$report" 2>"$work/kit.err" || kit_rc=$?
 # The kit exits 1 when a case failed, 2 when none did (it has no exit 0 yet: its
-# coverage is incomplete by design) and 3 when it could not observe. A higher
-# status is misuse (64), and a crash leaves no report: neither is a verdict.
+# coverage is incomplete by design) and 3 when it could not observe, and the
+# report says which. A higher status is misuse (64), and a crash leaves no
+# report: neither is a verdict.
 if [[ $kit_rc -gt 3 || ! -s $report ]]; then
   cat "$work/kit.err" >&2
   echo "probe: the kit gave no report (exit $kit_rc)" >&2
@@ -97,9 +128,9 @@ echo "probe: BDP $bdp_commit, yardr $yardr_commit, Scope $scope"
 python3 -I - "$report" "$BDP_REPO" <<'EOF'
 import json, sys
 r = json.load(open(sys.argv[1]))
-rows = r["obligations"]
-width = max(len(x["id"]) for x in rows)
-print(f'kit {r["kit"]}: {r["state"]}, slice {"complete" if r["sliceComplete"] else "incomplete"}')
+rows = r.get("obligations") or []
+width = max((len(x["id"]) for x in rows), default=0)
+print(f'kit {r.get("kit")}: {r.get("state")}, slice {"complete" if r.get("sliceComplete") else "incomplete"}')
 try:
     pin = open(sys.argv[2] + "/.nvmrc").read().strip()
 except OSError:
@@ -123,8 +154,20 @@ if optional:
     for x in optional:
         if x["state"] not in ("not-run", "not-applicable"):
             print(f'  {x["state"]:<14} {x["id"]:<{width}}  {x.get("reason") or x.get("note") or ""}')
+
+# The verdict. These are the Core read cases the kit can run at a Scope with no
+# adapter. A case the kit gains is added here when the pin moves to a commit
+# that has it.
+need = ("core.scope-discovery", "core.inventory-fixed-routes", "core.point-read")
+state = {x["id"]: x["state"] for x in rows}
+bad = {x["id"]: x["state"] for x in rows + optional if x["state"] in ("fail", "harness-error")}
+for i in need:
+    if state.get(i) != "pass":
+        bad.setdefault(i, state.get(i, "missing"))
+if r.get("state") in ("fail", "harness-error") and not bad:
+    bad["the kit"] = r["state"]
+if bad:
+    print("probe: failed: " + ", ".join(f"{i} {s}" for i, s in bad.items()))
+    sys.exit(1)
+print("probe: passed: " + ", ".join(need))
 EOF
-if [[ $kit_rc -eq 3 ]]; then
-  echo "probe: the kit could not observe (harness-error)" >&2
-  exit 1
-fi
