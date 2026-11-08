@@ -7,10 +7,16 @@ import (
 	"strings"
 )
 
-// acceptsJSON applies Accept negotiation for parameter-free
-// application/json: the most specific matching range decides, q=0 refuses,
-// and a range carrying media parameters cannot match. No header means yes.
-func acceptsJSON(values []string) bool {
+// mediaType is the one representation of a Resource, an inventory page or the
+// discovery document: Core's. Core says its "+json" permits decoding and does
+// not equate the subtype with application/json, so a client that accepts only
+// application/json is refused, not served a type it did not ask for.
+const mediaType = "application/vnd.bdp.v0.1+json"
+
+// acceptsBDP applies Accept negotiation for the parameter-free mediaType: the
+// most specific matching range decides, q=0 refuses, and a range carrying media
+// parameters cannot match. No header means yes.
+func acceptsBDP(values []string) bool {
 	if len(values) == 0 {
 		return true
 	}
@@ -20,7 +26,7 @@ func acceptsJSON(values []string) bool {
 	}
 	specificity, quality := -1, 0.0
 	for _, rng := range ranges {
-		spec, q, ok := jsonRange(rng)
+		spec, q, ok := mediaRange(rng)
 		if !ok {
 			continue
 		}
@@ -40,13 +46,13 @@ var (
 	quality = regexp.MustCompile(`^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$`)
 )
 
-func jsonRange(v string) (specificity int, q float64, ok bool) {
+func mediaRange(v string) (specificity int, q float64, ok bool) {
 	parts, ok := splitQuoted(v, ';')
 	if !ok {
 		return 0, 0, false
 	}
 	switch strings.ToLower(strings.TrimSpace(parts[0])) {
-	case "application/json":
+	case mediaType:
 		specificity = 2
 	case "application/*":
 		specificity = 1
@@ -67,7 +73,7 @@ func jsonRange(v string) (specificity int, q float64, ok bool) {
 			return 0, 0, false
 		}
 		if !strings.EqualFold(name, "q") {
-			return 0, 0, false // media parameters never match parameter-free JSON
+			return 0, 0, false // media parameters never match the parameter-free mediaType
 		}
 		if weighted || !quality.MatchString(raw) {
 			return 0, 0, false

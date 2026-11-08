@@ -27,12 +27,15 @@ func (a *app) bdpCmd() *cobra.Command {
 	var hosts []string
 	serve := &cobra.Command{
 		Use:   "serve",
-		Short: "Serve the BDP Read profile over HTTP",
-		Long: `Serve the yard's beads and dependency links over the BDP Read profile.
+		Short: "Serve BDP Core's reads over HTTP",
+		Long: `Serve the yard's beads and dependency links over BDP's Core reads.
 
 The Scope URL is the canonical public address of this yard: every Bead and Link
 id is minted under it, and it is what BDP clients use. It may differ from the
-listen address (behind a proxy, or a fixed name for tests).
+listen address (behind a proxy, or a fixed name for tests). Discovery is
+<scope>bdp.json, the Beads are listed at <scope>bdp/beads and the Links at
+<scope>bdp/links. Records, pages and the discovery document are
+application/vnd.bdp.v0.1+json.
 
 It listens on --addr, else on YARDR_BDP_ADDR when set in the command's
 environment, else on the yard's bdp_addr setting (yardr settings set
@@ -125,7 +128,7 @@ read the yard through a visitor's browser.`,
 				srv.AllowHosts(hosts...)
 			}
 			defer kindOf(svcBDP).announced(a.cfg, log, map[string]any{"addr": ln.Addr().String(), "scope": scope})()
-			log.Info("serving BDP Read", "addr", addr, "scope", scope)
+			log.Info("serving BDP Core", "addr", addr, "scope", scope)
 			if err := hs.Serve(bdp.BodylessTransportErrors(ln)); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				return err
 			}

@@ -30,7 +30,22 @@ var DefaultLimits = Limits{
 	Selector: SelectorLimits{Bytes: 1024, Depth: 16, Nodes: 128},
 }
 
-// Server answers the BDP Read profile for one Scope.
+// SpecRevision is the BDP commit whose Core this server follows, which
+// discovery names: the full SHA that `pnpm spec:revision` prints in a BDP
+// checkout, the last commit to change Core, Write, Types or Events. It names
+// the protocol text and not a yardr build, so nothing derives it. It moves when
+// someone has read what Core changed since and run conformance/bdp/probe-core.sh
+// against the BDP commit it is taken from; the value here is BDP main a4fd83a2's.
+const SpecRevision = "f168d60f1ce5155d03ecb5324e328310c21b8ed0"
+
+// The fields Core's reads of Beads and Links carry: the kind of the Resource a
+// read returns, and of the Resources a page of them lists.
+const (
+	resourceKind   = "BDP-Resource-Kind"
+	collectionKind = "BDP-Collection-Kind"
+)
+
+// Server answers BDP's Core reads for one Scope.
 type Server struct {
 	scope     string // canonical, ends in "/"
 	sources   []string
@@ -73,7 +88,7 @@ func NewServer(scope string, sources []string, load func(ctx context.Context) (*
 		pages: newPageCache(10*time.Minute, 2000)}, nil
 }
 
-// problem codes of the Read profile: code -> family, status, retry.
+// problem codes of Core's reads: code -> family, status, retry.
 var problems = map[string]struct {
 	family string
 	status int
@@ -105,7 +120,7 @@ type response struct {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// A Host that is not one the server answers to is refused before
 	// anything else, 421 with no body as the other rejections that are no
-	// part of the Read profile are (host.go says why). An absolute-form
+	// part of Core's reads are (host.go says why). An absolute-form
 	// target names an authority of its own, which net/http reports as
 	// r.Host in place of the header and route ignores, and a browser sends
 	// that form to a proxy only: it is not what rebinding sends.
@@ -182,7 +197,7 @@ func (s *Server) writeSuccess(w http.ResponseWriter, r *http.Request, resp respo
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		h.Set("Content-Type", "application/json")
+		h.Set("Content-Type", mediaType)
 		h.Set("Vary", "Accept")
 	}
 	h.Set("Cache-Control", "private, no-store")
@@ -191,7 +206,7 @@ func (s *Server) writeSuccess(w http.ResponseWriter, r *http.Request, resp respo
 	}
 	status := resp.status
 	switch {
-	case body != nil && !acceptsJSON(r.Header.Values("Accept")):
+	case body != nil && !acceptsBDP(r.Header.Values("Accept")):
 		status = http.StatusNotAcceptable
 		h.Del("ETag")
 	default:
@@ -202,6 +217,10 @@ func (s *Server) writeSuccess(w http.ResponseWriter, r *http.Request, resp respo
 		if status == http.StatusNotModified {
 			h.Del("Content-Length")
 		} else {
+			// A 406 or a 412 refuses the read, and a refusal says nothing of
+			// the kind of what was read; a 304 is still the read.
+			h.Del(resourceKind)
+			h.Del(collectionKind)
 			h.Set("Content-Length", "0")
 		}
 		w.WriteHeader(status)
@@ -263,17 +282,19 @@ func (s *Server) route(r *http.Request) (response, error) {
 		if err := q.only(); err != nil {
 			return response{}, err
 		}
-		return response{status: http.StatusNoContent, headers: map[string]string{
-			"Link": `<bdp.json>; rel="service-desc"; type="application/json"`}}, nil
+		return response{status: http.StatusNoContent, headers: map[string]string{"Link": s.serviceDesc()}}, nil
 	case "bdp.json":
 		if err := q.only(); err != nil {
 			return response{}, err
 		}
 		return response{status: 200, body: s.discovery()}, nil
-	case "beads/", "links/", "types/":
-		return s.collection(r.Context(), strings.TrimSuffix(rel, "/"), q)
+	case "bdp/beads", "bdp/links", "types/":
+		return s.collection(r.Context(), rel, q)
 	}
 
+	// Anything else under bdp/ is Core's namespace and holds nothing more, and
+	// beads/ and links/ name no inventory: a Resource id is one or more
+	// segments under them.
 	root, rest, ok := strings.Cut(rel, "/")
 	if !ok || (root != "beads" && root != "links" && root != "types") {
 		return response{}, fail("resource-not-found")
@@ -319,13 +340,37 @@ func (s *Server) route(r *http.Request) (response, error) {
 	if !ok || rec.link != (root == "links") {
 		return response{}, fail("resource-not-found")
 	}
+	fields := s.kinds(rec.kind(), "")
 	switch view {
 	case "properties":
-		return response{status: 200, body: rec.Properties, etag: etag(rec.Revision)}, nil
+		return response{status: 200, body: rec.Properties, etag: etag(rec.Revision), headers: fields}, nil
 	case "links":
 		return s.beadLinks(g, rec, q)
 	}
-	return response{status: 200, body: rec, etag: etag(rec.Revision)}, nil
+	return response{status: 200, body: rec, etag: etag(rec.Revision), headers: fields}, nil
+}
+
+// serviceDesc is the Link to the Scope's discovery document, which Core has the
+// Scope's own response and every read of a Bead or a Link carry. It is the
+// canonical address, as ids and `next` are, so that a read at any depth names
+// the same document.
+func (s *Server) serviceDesc() string {
+	return `<` + s.scope + `bdp.json>; rel="service-desc"; type="` + mediaType + `"`
+}
+
+// kinds are the fields besides the body of a read of Beads or Links: the way
+// to the Scope's discovery, the kind of the Resource read (resource, "bead" or
+// "link") and the kind of the Resources a page of them lists (collection). A
+// page of a Bead's Links has both: the Bead is what was read.
+func (s *Server) kinds(resource, collection string) map[string]string {
+	h := map[string]string{"Link": s.serviceDesc()}
+	if resource != "" {
+		h[resourceKind] = resource
+	}
+	if collection != "" {
+		h[collectionKind] = collection
+	}
+	return h
 }
 
 var absoluteForm = regexp.MustCompile(`^(?i:https?)://[^/?#]*`)
@@ -339,10 +384,13 @@ func (s *Server) graph(ctx context.Context) (*Graph, error) {
 	return g, nil
 }
 
-// discovery advertises one aggregate rule: a bead tracks at most one issue
-// per source. That an issue has at most one tracking bead is yardr's own
-// rule, kept by the store and not advertised: BDP v0 never counts an
-// out-of-Scope endpoint, and the issue is one.
+// discovery is Core's closed discovery object. It says nothing of the
+// inventories, whose routes Core fixes, and has no Types member, whose
+// presence would advertise a Types inventory (the types/ pages are yardr's own
+// summaries and descriptors, which Core's Types do not define). It advertises
+// one aggregate rule: a bead tracks at most one issue per source. That an issue
+// has at most one tracking bead is yardr's own rule, kept by the store and not
+// advertised: BDP never counts an out-of-Scope endpoint, and the issue is one.
 func (s *Server) discovery() map[string]any {
 	maximums := []any{}
 	for _, src := range s.sources {
@@ -351,12 +399,10 @@ func (s *Server) discovery() map[string]any {
 	}
 	return map[string]any{
 		"maximumEndpointMultiplicity": maximums,
-		"bdpVersion":                  "0",
-		"profile":                     "read",
+		"bdpVersion":                  "0.1",
+		"profile":                     "core",
+		"specRevision":                SpecRevision,
 		"scope":                       s.scope,
-		"beads":                       s.scope + "beads/",
-		"links":                       s.scope + "links/",
-		"types":                       s.scope + "types/",
 		"order":                       "canonical-uri",
 		"limits": map[string]any{
 			"page":    map[string]int{"defaultItems": s.limits.PageDefault, "maximumItems": s.limits.PageMax},
@@ -373,14 +419,20 @@ type page struct {
 	items      []any
 	offset     int
 	limit      int
+	// headers are the fields every page of the set carries, which a cursor
+	// keeps as it keeps the selection: a continuation says what a first page
+	// does.
+	headers map[string]string
 }
 
-func (s *Server) collection(ctx context.Context, name string, q query) (response, error) {
+// collection answers an inventory, by its route under the Scope: the Beads' and
+// the Links' are Core's fixed ones, and the Types' is yardr's own.
+func (s *Server) collection(ctx context.Context, route string, q query) (response, error) {
 	allowed := map[string][]string{
-		"beads": {"type", "conformsTo", "selector", "limit", "cursor"},
-		"links": {"type", "conformsTo", "source", "target", "endpoint", "selector", "limit", "cursor"},
-		"types": {"limit", "cursor"},
-	}[name]
+		"bdp/beads": {"type", "conformsTo", "selector", "limit", "cursor"},
+		"bdp/links": {"type", "conformsTo", "source", "target", "endpoint", "selector", "limit", "cursor"},
+		"types/":    {"limit", "cursor"},
+	}[route]
 	if err := q.only(allowed...); err != nil {
 		return response{}, err
 	}
@@ -424,7 +476,7 @@ func (s *Server) collection(ctx context.Context, name string, q query) (response
 	}
 
 	// The continuation URL is canonical: parameters in a fixed order.
-	proj := s.scope + name + "/"
+	proj := s.scope + route
 	var params []string
 	add := func(k, v string) { params = append(params, url.QueryEscape(k)+"="+url.QueryEscape(v)) }
 	if typ != "" {
@@ -456,15 +508,20 @@ func (s *Server) collection(ctx context.Context, name string, q query) (response
 		return response{}, err
 	}
 	var items []any
-	switch name {
-	case "types":
+	// A page of Beads or of Links says which it lists; a page of Types is
+	// neither, and says nothing.
+	var fields map[string]string
+	switch route {
+	case "types/":
 		for _, t := range g.Types {
 			items = append(items, t)
 		}
-	case "beads", "links":
+	case "bdp/beads", "bdp/links":
 		src := g.Beads
-		if name == "links" {
+		fields = s.kinds("", "bead")
+		if route == "bdp/links" {
 			src = g.Links
+			fields = s.kinds("", "link")
 		}
 		for _, rec := range src {
 			if typ != "" && rec.Type != typ {
@@ -488,7 +545,7 @@ func (s *Server) collection(ctx context.Context, name string, q query) (response
 			items = append(items, rec)
 		}
 	}
-	return s.firstPage(proj, items, limit), nil
+	return s.firstPage(proj, items, limit, fields), nil
 }
 
 func (s *Server) beadLinks(g *Graph, bead *Record, q query) (response, error) {
@@ -520,7 +577,7 @@ func (s *Server) beadLinks(g *Graph, bead *Record, q query) (response, error) {
 			items = append(items, l)
 		}
 	}
-	return s.firstPage(proj, items, limit), nil
+	return s.firstPage(proj, items, limit, s.kinds("bead", "link")), nil
 }
 
 func (s *Server) limit(q query) (int, error) {
@@ -540,11 +597,11 @@ func (s *Server) limit(q query) (int, error) {
 
 var positiveInt = regexp.MustCompile(`^[1-9][0-9]*$`)
 
-func (s *Server) firstPage(proj string, items []any, limit int) response {
+func (s *Server) firstPage(proj string, items []any, limit int, headers map[string]string) response {
 	if items == nil {
 		items = []any{}
 	}
-	return s.servePage(&page{projection: proj, items: items, limit: limit})
+	return s.servePage(&page{projection: proj, items: items, limit: limit, headers: headers})
 }
 
 func (s *Server) continuePage(proj, token string) (response, error) {
@@ -562,14 +619,14 @@ func (s *Server) servePage(p *page) response {
 	end := min(p.offset+p.limit, len(p.items))
 	var next any // JSON null on the last page
 	if end < len(p.items) {
-		token := s.pages.put(&page{projection: p.projection, items: p.items, offset: end, limit: p.limit})
+		token := s.pages.put(&page{projection: p.projection, items: p.items, offset: end, limit: p.limit, headers: p.headers})
 		sep := "?"
 		if strings.Contains(p.projection, "?") {
 			sep = "&"
 		}
 		next = p.projection + sep + "cursor=" + token
 	}
-	return response{status: 200, body: map[string]any{"items": p.items[p.offset:end], "next": next}}
+	return response{status: 200, body: map[string]any{"items": p.items[p.offset:end], "next": next}, headers: p.headers}
 }
 
 // typeParam accepts an absolute Type URL; one inside the Scope must be

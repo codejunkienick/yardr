@@ -49,7 +49,7 @@ Pages mark features that are not built yet as **planned**.
 internal/store      the bbolt store: records, indexes, revisions, event log and push hub
 internal/dispatch   routing, claims, liveness, teardown (the only control loop)
 internal/runner     manual, exec, herdr, peer
-internal/bdp        the server of BDP's October 2026 Read profile (protocol rules, selector, paging)
+internal/bdp        the server of BDP's Core reads (protocol rules, selector, paging)
 internal/web        the read-only web view (pages as HTML or JSON, embedded assets)
 internal/rpc        the store API over the server's unix socket; go generate ./internal/rpc writes the client's wrappers from store.API
 internal/server     the store-owning server process; started on first use

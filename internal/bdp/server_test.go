@@ -23,6 +23,13 @@ func TestMain(m *testing.M) { storetest.Main(m) }
 
 const scope = "https://beads.test/acme/"
 
+// bdpMedia is Core's media type, and serviceDesc the Link to the Scope's
+// discovery that Core has the Scope and every read of a Bead or Link carry.
+const (
+	bdpMedia    = "application/vnd.bdp.v0.1+json"
+	serviceDesc = `<` + scope + `bdp.json>; rel="service-desc"; type="` + bdpMedia + `"`
+)
+
 // sources are the sources a bead can link to, as yardr bdp serve hands them
 // (hooks.LinkSources).
 var sources = []string{"github", "linear"}
@@ -143,13 +150,31 @@ func (f *fixture) bead(title, typ string) *store.Bead {
 func TestDiscovery(t *testing.T) {
 	f := newFixture(t)
 	r := f.get("")
-	if r.status != 204 || r.header.Get("Link") != `<bdp.json>; rel="service-desc"; type="application/json"` {
+	if r.status != 204 || r.header.Get("Link") != serviceDesc {
 		t.Fatalf("root: %d %v", r.status, r.header)
 	}
-	d := f.get("bdp.json").json(t)
-	if d["bdpVersion"] != "0" || d["profile"] != "read" || d["scope"] != scope ||
-		d["beads"] != scope+"beads/" || d["order"] != "canonical-uri" {
+	r = f.get("bdp.json")
+	if r.status != 200 || r.header.Get("Content-Type") != bdpMedia {
+		t.Fatalf("discovery: %d %v", r.status, r.header)
+	}
+	d := r.json(t)
+	if d["bdpVersion"] != "0.1" || d["profile"] != "core" || d["scope"] != scope || d["order"] != "canonical-uri" {
 		t.Fatalf("discovery = %v", d)
+	}
+	// Core's discovery object is closed. It has no beads or links member, for
+	// the inventories are fixed routes, and no types member, which would
+	// advertise a Types inventory that yardr's types/ pages are not.
+	var members []string
+	for m := range d {
+		members = append(members, m)
+	}
+	slices.Sort(members)
+	if want := []string{"bdpVersion", "limits", "maximumEndpointMultiplicity", "order", "profile", "scope", "specRevision"}; !slices.Equal(members, want) {
+		t.Fatalf("discovery members = %v, want %v", members, want)
+	}
+	// The schema's pattern for specRevision: a full lowercase commit SHA.
+	if rev, _ := d["specRevision"].(string); rev != bdp.SpecRevision || len(rev) != 40 || strings.Trim(rev, "0123456789abcdef") != "" {
+		t.Fatalf("specRevision = %q, want %q, 40 lowercase hex", d["specRevision"], bdp.SpecRevision)
 	}
 	f.get("bdp.json?x=1").problem(t, 400, "invalid-parameter")
 }
@@ -159,9 +184,14 @@ func TestBeadRecordAndHTTPRules(t *testing.T) {
 	b := f.bead("Write the spec", "task")
 
 	r := f.get("beads/" + b.ID)
-	if r.status != 200 || r.header.Get("Content-Type") != "application/json" ||
+	if r.status != 200 || r.header.Get("Content-Type") != bdpMedia ||
 		r.header.Get("Cache-Control") != "private, no-store" || r.header.Get("Vary") != "Accept" {
 		t.Fatalf("headers: %d %v", r.status, r.header)
+	}
+	// Core's fields of a read of a Bead: what it is, and the way to the Scope's
+	// discovery.
+	if r.header.Get("BDP-Resource-Kind") != "bead" || r.header.Get("BDP-Collection-Kind") != "" || r.header.Get("Link") != serviceDesc {
+		t.Fatalf("kind fields: %v", r.header)
 	}
 	rec := r.json(t)
 	if rec["id"] != scope+"beads/"+b.ID || rec["type"] != "https://work.example/types/task" ||
@@ -208,19 +238,22 @@ func TestBeadRecordAndHTTPRules(t *testing.T) {
 
 	// view=properties is the properties object, same validator.
 	pr := f.get("beads/" + b.ID + "?view=properties")
-	if pr.json(t)["title"] != "Write the spec" || pr.header.Get("ETag") != etag {
+	if pr.json(t)["title"] != "Write the spec" || pr.header.Get("ETag") != etag ||
+		pr.header.Get("Content-Type") != bdpMedia || pr.header.Get("BDP-Resource-Kind") != "bead" || pr.header.Get("BDP-Collection-Kind") != "" {
 		t.Fatalf("properties view: %s %v", pr.body, pr.header)
 	}
 
-	// Conditional requests.
-	if r := f.get("beads/"+b.ID, "If-None-Match", etag); r.status != 304 || len(r.body) != 0 {
-		t.Fatalf("If-None-Match match: %d", r.status)
+	// Conditional requests. A 304 is still the read, and says what it read; a
+	// 412 refuses it, and does not.
+	if r := f.get("beads/"+b.ID, "If-None-Match", etag); r.status != 304 || len(r.body) != 0 ||
+		r.header.Get("BDP-Resource-Kind") != "bead" || r.header.Get("Link") != serviceDesc {
+		t.Fatalf("If-None-Match match: %d %v", r.status, r.header)
 	}
 	if r := f.get("beads/"+b.ID, "If-None-Match", `W/`+etag); r.status != 304 {
 		t.Fatalf("weak If-None-Match: %d", r.status)
 	}
-	if r := f.get("beads/"+b.ID, "If-Match", `"other"`); r.status != 412 || len(r.body) != 0 {
-		t.Fatalf("If-Match mismatch: %d", r.status)
+	if r := f.get("beads/"+b.ID, "If-Match", `"other"`); r.status != 412 || len(r.body) != 0 || r.header.Get("BDP-Resource-Kind") != "" {
+		t.Fatalf("If-Match mismatch: %d %v", r.status, r.header)
 	}
 	if r := f.get("beads/"+b.ID, "If-Match", etag); r.status != 200 {
 		t.Fatalf("If-Match match: %d", r.status)
@@ -229,17 +262,27 @@ func TestBeadRecordAndHTTPRules(t *testing.T) {
 		t.Fatalf("root If-None-Match *: %d", r.status)
 	}
 
-	// Negotiation: most specific range wins; 406 is bodyless.
+	// Negotiation: most specific range wins; 406 is bodyless and, being a
+	// refusal, says nothing of the kind of what was asked for. Core's "+json"
+	// permits decoding and does not equate its type with application/json, so a
+	// client that accepts only that is refused, with or without a parameter that
+	// claims to select the contract.
 	for accept, want := range map[string]int{
-		"application/json":           200,
-		"*/*":                        200,
-		"text/html":                  406,
-		"application/json;q=0, */*":  406,
-		"application/json;charset=x": 406,
-		"text/html, application/*":   200,
+		bdpMedia:                                 200,
+		"*/*":                                    200,
+		"text/html":                              406,
+		bdpMedia + ";q=0, */*":                   406,
+		bdpMedia + ";charset=x":                  406,
+		"text/html, application/*":               200,
+		"application/json":                       406,
+		"application/json; bdp=0.1":              406,
+		"application/json, */*;q=0.1":            200,
+		"application/json, " + bdpMedia:          200,
+		"application/json, " + bdpMedia + ";q=0": 406,
 	} {
-		if r := f.get("beads/"+b.ID, "Accept", accept); r.status != want || (want == 406 && len(r.body) != 0) {
-			t.Errorf("Accept %q: %d, want %d", accept, r.status, want)
+		r := f.get("beads/"+b.ID, "Accept", accept)
+		if r.status != want || (want == 406 && (len(r.body) != 0 || r.header.Get("BDP-Resource-Kind") != "")) {
+			t.Errorf("Accept %q: %d %v, want %d", accept, r.status, r.header, want)
 		}
 	}
 	// Errors are not negotiated.
@@ -247,8 +290,9 @@ func TestBeadRecordAndHTTPRules(t *testing.T) {
 
 	// HEAD: same headers, no body.
 	h := f.do("HEAD", "beads/"+b.ID)
-	if h.status != 200 || len(h.body) != 0 || h.header.Get("Content-Length") != itoa(len(r.body)) {
-		t.Fatalf("HEAD: %d len=%s body=%d", h.status, h.header.Get("Content-Length"), len(h.body))
+	if h.status != 200 || len(h.body) != 0 || h.header.Get("Content-Length") != itoa(len(r.body)) ||
+		h.header.Get("BDP-Resource-Kind") != "bead" || h.header.Get("Link") != serviceDesc {
+		t.Fatalf("HEAD: %d len=%s body=%d %v", h.status, h.header.Get("Content-Length"), len(h.body), h.header)
 	}
 	// Other methods: 405, Allow, no body.
 	if r := f.do("POST", "beads/"+b.ID); r.status != 405 || r.header.Get("Allow") != "GET, HEAD" || len(r.body) != 0 {
@@ -262,11 +306,15 @@ func TestRequestTargetsAndParameters(t *testing.T) {
 	for _, target := range []string{
 		"beads/" + strings.Replace(b.ID, "y", "%79", 1), // non-canonical escape
 		"beads/" + b.ID + "/",                           // empty segment
-		"beads",                                         // collection without slash
+		"beads",                                         // no id
 		"beads/./" + b.ID,
 		"beads/%2F",
 		"nothing/here",
 		"links/" + b.ID, // a bead id under links/
+		// The inventories are Core's fixed routes and nothing else under bdp/
+		// is a route. The Read-era beads/ and links/ are not served: they
+		// name no id, and a client of the old shape finds out.
+		"beads/", "links/", "bdp", "bdp/", "bdp/beads/", "bdp/links/", "bdp/openapi", "bdp/beads/" + b.ID,
 	} {
 		f.get(target).problem(t, 404, "resource-not-found")
 	}
@@ -283,14 +331,14 @@ func TestRequestTargetsAndParameters(t *testing.T) {
 			t.Fatalf("raw octets %q: %d %q", suffix, r.status, r.body)
 		}
 	}
-	f.get("beads/?bogus=1").problem(t, 400, "invalid-parameter")
-	f.get("beads/?limit=1&limit=2").problem(t, 400, "invalid-parameter")
-	f.get("beads/?limit=0").problem(t, 400, "invalid-parameter")
-	f.get("beads/?limit=6").problem(t, 413, "limit-exceeded")
+	f.get("bdp/beads?bogus=1").problem(t, 400, "invalid-parameter")
+	f.get("bdp/beads?limit=1&limit=2").problem(t, 400, "invalid-parameter")
+	f.get("bdp/beads?limit=0").problem(t, 400, "invalid-parameter")
+	f.get("bdp/beads?limit=6").problem(t, 413, "limit-exceeded")
 	f.get("beads/"+b.ID+"?view=nope").problem(t, 400, "invalid-parameter")
 	f.get("beads/missing?view=nope").problem(t, 400, "invalid-parameter") // parameters before lookup
-	f.get("beads/?type=not-a-url").problem(t, 400, "invalid-parameter")
-	f.get("beads/?x="+strings.Repeat("a", 600)).problem(t, 413, "request-too-large")
+	f.get("bdp/beads?type=not-a-url").problem(t, 400, "invalid-parameter")
+	f.get("bdp/beads?x="+strings.Repeat("a", 600)).problem(t, 413, "request-too-large")
 }
 
 func TestLinksFollowBDPDirection(t *testing.T) {
@@ -304,33 +352,44 @@ func TestLinksFollowBDPDirection(t *testing.T) {
 	if err := f.st.AddDep(ctx, blocker.ID, waiting.ID, "related", "", "", "tester"); err != nil {
 		t.Fatal(err)
 	}
-	links := f.get("links/?type=" + url.QueryEscape("https://work.example/types/blocks")).json(t)["items"].([]any)
+	inv := f.get("bdp/links?type=" + url.QueryEscape("https://work.example/types/blocks"))
+	links := inv.json(t)["items"].([]any)
 	if len(links) != 1 {
 		t.Fatalf("blocks links = %v", links)
+	}
+	// An inventory of Links says it lists Links, and is no Resource of any kind.
+	if inv.header.Get("BDP-Collection-Kind") != "link" || inv.header.Get("BDP-Resource-Kind") != "" || inv.header.Get("Link") != serviceDesc {
+		t.Fatalf("links inventory fields: %v", inv.header)
 	}
 	l := links[0].(map[string]any)
 	// "UI depends on API": source is the waiting bead, target its blocker.
 	if l["source"] != scope+"beads/"+waiting.ID || l["target"] != scope+"beads/"+blocker.ID || l["revision"] == "" {
 		t.Fatalf("link = %v", l)
 	}
-	if r := f.get(strings.TrimPrefix(l["id"].(string), scope)); r.json(t)["id"] != l["id"] {
-		t.Fatalf("link GET: %s", r.body)
+	if r := f.get(strings.TrimPrefix(l["id"].(string), scope)); r.json(t)["id"] != l["id"] ||
+		r.header.Get("BDP-Resource-Kind") != "link" || r.header.Get("BDP-Collection-Kind") != "" || r.header.Get("Link") != serviceDesc {
+		t.Fatalf("link GET: %s %v", r.body, r.header)
 	}
 
-	out := f.get("beads/" + waiting.ID + "?view=links&direction=outbound").json(t)["items"].([]any)
+	outPage := f.get("beads/" + waiting.ID + "?view=links&direction=outbound")
+	out := outPage.json(t)["items"].([]any)
 	in := f.get("beads/" + waiting.ID + "?view=links&direction=inbound").json(t)["items"].([]any)
 	if len(out) != 2 || len(in) != 0 {
 		t.Fatalf("outbound %d inbound %d", len(out), len(in))
+	}
+	// The Bead is what was read, and the page lists Links.
+	if outPage.header.Get("BDP-Resource-Kind") != "bead" || outPage.header.Get("BDP-Collection-Kind") != "link" || outPage.header.Get("Link") != serviceDesc {
+		t.Fatalf("links view fields: %v", outPage.header)
 	}
 	f.get("beads/"+waiting.ID+"?view=links&direction=sideways").problem(t, 400, "invalid-parameter")
 
 	// Endpoint filters accept local ids and absolute URLs alike.
 	for _, src := range []string{"beads/" + waiting.ID, scope + "beads/" + waiting.ID} {
-		if n := len(f.get("links/?source=" + url.QueryEscape(src)).json(t)["items"].([]any)); n != 2 {
+		if n := len(f.get("bdp/links?source=" + url.QueryEscape(src)).json(t)["items"].([]any)); n != 2 {
 			t.Fatalf("source=%s matched %d", src, n)
 		}
 	}
-	f.get("links/?source="+url.QueryEscape(scope+"beads/%79d-1")).problem(t, 400, "invalid-parameter")
+	f.get("bdp/links?source="+url.QueryEscape(scope+"beads/%79d-1")).problem(t, 400, "invalid-parameter")
 
 	// The local kind gets a Scope-local Type with a descriptor.
 	desc := f.get("types/related").json(t)
@@ -340,7 +399,7 @@ func TestLinksFollowBDPDirection(t *testing.T) {
 	// conformsTo follows the reference chain blocks -> dependency ->
 	// relationship; a minted local kind claims no conformance (as in bd).
 	rel := url.QueryEscape("https://work.example/types/relationship")
-	if n := len(f.get("links/?conformsTo=" + rel).json(t)["items"].([]any)); n != 1 {
+	if n := len(f.get("bdp/links?conformsTo=" + rel).json(t)["items"].([]any)); n != 1 {
 		t.Fatalf("conformsTo relationship matched %d, want only the blocks link", n)
 	}
 }
@@ -356,7 +415,7 @@ func TestDiscoveredFromLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	typ := scope + "types/discovered-from"
-	links := f.get("links/?type=" + url.QueryEscape(typ)).json(t)["items"].([]any)
+	links := f.get("bdp/links?type=" + url.QueryEscape(typ)).json(t)["items"].([]any)
 	if len(links) != 1 {
 		t.Fatalf("discovered-from links = %v", links)
 	}
@@ -370,7 +429,7 @@ func TestDiscoveredFromLink(t *testing.T) {
 	}
 	for _, c := range []string{"dependency", "relationship", "blocks"} {
 		q := url.QueryEscape("https://work.example/types/" + c)
-		if n := len(f.get("links/?conformsTo=" + q).json(t)["items"].([]any)); n != 0 {
+		if n := len(f.get("bdp/links?conformsTo=" + q).json(t)["items"].([]any)); n != 0 {
 			t.Fatalf("conformsTo %s matched %d links, want none", c, n)
 		}
 	}
@@ -398,7 +457,7 @@ func TestJournalsAndMemoriesAreNotServed(t *testing.T) {
 		t.Fatal(err)
 	}
 	var ids []string
-	for next := "beads/?limit=5"; next != ""; {
+	for next := "bdp/beads?limit=5"; next != ""; {
 		page := f.get(next).json(t)
 		for _, it := range page["items"].([]any) {
 			ids = append(ids, it.(map[string]any)["id"].(string))
@@ -411,7 +470,7 @@ func TestJournalsAndMemoriesAreNotServed(t *testing.T) {
 	for _, id := range []string{journal.ID, memory.ID} {
 		f.get("beads/"+id).problem(t, 404, "resource-not-found")
 	}
-	if links := f.get("links/").json(t)["items"].([]any); len(links) != 0 {
+	if links := f.get("bdp/links").json(t)["items"].([]any); len(links) != 0 {
 		t.Fatalf("links to a memory served: %v", links)
 	}
 	props := f.get("beads/" + work.ID + "?view=properties").json(t)
@@ -426,11 +485,25 @@ func TestPaginationIsOneSnapshot(t *testing.T) {
 	for _, title := range []string{"a", "b", "c", "d", "e"} {
 		beads = append(beads, f.bead(title, "task"))
 	}
-	first := f.get("beads/").json(t) // default page size 2
+	firstResp := f.get("bdp/beads") // default page size 2
+	first := firstResp.json(t)
 	items := first["items"].([]any)
 	next, _ := first["next"].(string)
 	if len(items) != 2 || next == "" {
 		t.Fatalf("first page = %v", first)
+	}
+	// The inventory is Core's fixed route, `next` continues it, and every page
+	// of it says it lists Beads, the first and the ones a cursor leads to alike.
+	if !strings.HasPrefix(next, scope+"bdp/beads?cursor=") || firstResp.header.Get("BDP-Collection-Kind") != "bead" ||
+		firstResp.header.Get("BDP-Resource-Kind") != "" || firstResp.header.Get("Link") != serviceDesc {
+		t.Fatalf("first page: next %q, fields %v", next, firstResp.header)
+	}
+	// HEAD and a 304 of a page say what its GET does, a continuation's too.
+	if h := f.do("HEAD", next); h.status != 200 || len(h.body) != 0 || h.header.Get("BDP-Collection-Kind") != "bead" || h.header.Get("Link") != serviceDesc {
+		t.Fatalf("HEAD of a continuation: %d %v", h.status, h.header)
+	}
+	if n := f.get(next, "If-None-Match", "*"); n.status != 304 || n.header.Get("BDP-Collection-Kind") != "bead" || n.header.Get("Link") != serviceDesc {
+		t.Fatalf("304 of a continuation: %d %v", n.status, n.header)
 	}
 	var all []string
 	for _, it := range items {
@@ -451,7 +524,11 @@ func TestPaginationIsOneSnapshot(t *testing.T) {
 	f.bead("f", "task")
 
 	for next != "" {
-		page := f.get(next).json(t)
+		resp := f.get(next)
+		if resp.header.Get("BDP-Collection-Kind") != "bead" || resp.header.Get("Link") != serviceDesc {
+			t.Fatalf("continuation fields: %v", resp.header)
+		}
+		page := resp.json(t)
 		for _, it := range page["items"].([]any) {
 			m := it.(map[string]any)
 			all = append(all, m["id"].(string))
@@ -470,10 +547,12 @@ func TestPaginationIsOneSnapshot(t *testing.T) {
 		}
 	}
 
-	f.get("beads/?cursor=nonexistent").problem(t, 410, "cursor-expired")
+	f.get("bdp/beads?cursor=nonexistent").problem(t, 410, "cursor-expired")
 	// Reusing a cursor with different parameters is invalid.
-	cur := f.get("beads/").json(t)["next"].(string)
+	cur := f.get("bdp/beads").json(t)["next"].(string)
 	f.get(cur+"&limit=3").problem(t, 400, "invalid-parameter")
+	// ...and so is using it on the other inventory.
+	f.get(strings.Replace(cur, "bdp/beads", "bdp/links", 1)).problem(t, 400, "invalid-parameter")
 }
 
 func TestSelector(t *testing.T) {
@@ -483,7 +562,7 @@ func TestSelector(t *testing.T) {
 	if _, err := f.st.CloseBead(context.Background(), b.ID, "done", store.Expect{}, "x"); err != nil {
 		t.Fatal(err)
 	}
-	sel := func(s string) string { return "beads/?limit=5&selector=" + url.QueryEscape(s) }
+	sel := func(s string) string { return "bdp/beads?limit=5&selector=" + url.QueryEscape(s) }
 	got := f.get(sel(`$[?@.properties.status == 'closed']`)).json(t)["items"].([]any)
 	if len(got) != 1 || got[0].(map[string]any)["id"] != scope+"beads/"+b.ID {
 		t.Fatalf("status == closed: %v", got)
@@ -613,7 +692,7 @@ func TestIssueLinks(t *testing.T) {
 	q := url.QueryEscape
 
 	// Every tracked issue, whatever its source, through the parent Type.
-	tracked := items("links/?conformsTo=" + q(scope+"types/tracks"))
+	tracked := items("bdp/links?conformsTo=" + q(scope+"types/tracks"))
 	if len(tracked) != 2 {
 		t.Fatalf("conformsTo tracks = %v", tracked)
 	}
@@ -649,17 +728,17 @@ func TestIssueLinks(t *testing.T) {
 
 	// The issue's URL is an endpoint to filter on, compared as given; the
 	// journal's link is not served, as the journal is not.
-	if got := items("links/?target=" + q(lin)); len(got) != 2 {
+	if got := items("bdp/links?target=" + q(lin)); len(got) != 2 {
 		t.Fatalf("target=%s matched %v", lin, got)
 	}
-	rel := items("links/?type=" + q(scope+"types/relates"))
+	rel := items("bdp/links?type=" + q(scope+"types/relates"))
 	if len(rel) != 1 || rel[0]["source"] != scope+"beads/"+two.ID || rel[0]["target"] != lin {
 		t.Fatalf("relates links = %v", rel)
 	}
-	if got := items("links/?target=" + q(other)); len(got) != 0 {
+	if got := items("bdp/links?target=" + q(other)); len(got) != 0 {
 		t.Fatalf("a journal's link is served: %v", got)
 	}
-	if got := items("links/?type=" + q(scope+"types/tracks")); len(got) != 0 {
+	if got := items("bdp/links?type=" + q(scope+"types/tracks")); len(got) != 0 {
 		t.Fatalf("a link is typed plain tracks: %v", got)
 	}
 	// A bead's links view has its issue links, outbound.
@@ -681,6 +760,14 @@ func TestIssueLinks(t *testing.T) {
 	empty := newFixture(t)
 	if d := empty.get("types/tracks-linear").json(t); d["id"] != scope+"types/tracks-linear" {
 		t.Fatalf("descriptor on a yard with no link = %v", d)
+	}
+	// The Types are yardr's own pages and no Beads or Links of Core's: in Core's
+	// media type, and with no kind of either.
+	for _, target := range []string{"types/", "types/tracks"} {
+		if r := f.get(target); r.status != 200 || r.header.Get("Content-Type") != bdpMedia ||
+			r.header.Get("BDP-Resource-Kind") != "" || r.header.Get("BDP-Collection-Kind") != "" {
+			t.Fatalf("%s: %d %v", target, r.status, r.header)
+		}
 	}
 	inventory := map[string]bool{}
 	for _, ty := range items("types/") {
@@ -707,7 +794,7 @@ func TestIssueLinks(t *testing.T) {
 	}
 	// What is advertised holds of what is served.
 	perBead := map[string]int{}
-	for _, l := range items("links/?conformsTo=" + q(scope+"types/tracks-linear")) {
+	for _, l := range items("bdp/links?conformsTo=" + q(scope+"types/tracks-linear")) {
 		perBead[l["source"].(string)]++
 	}
 	for bead, n := range perBead {

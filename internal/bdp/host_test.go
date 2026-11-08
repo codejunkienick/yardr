@@ -49,7 +49,7 @@ func TestHostIsChecked(t *testing.T) {
 	}
 	// The refusal comes before the method and the route, so it says
 	// nothing of what is there.
-	for _, c := range []struct{ method, target string }{{"POST", "bdp.json"}, {"GET", ""}, {"GET", "nothing/here"}, {"GET", "beads/?bogus=1"}} {
+	for _, c := range []struct{ method, target string }{{"POST", "bdp.json"}, {"GET", ""}, {"GET", "nothing/here"}, {"GET", "bdp/beads?bogus=1"}} {
 		if r := f.do(c.method, c.target, "Host", "evil.example"); r.status != http.StatusMisdirectedRequest || len(r.body) != 0 {
 			t.Errorf("%s %s under another site's name: status %d, body %q, want 421 and no body", c.method, c.target, r.status, r.body)
 		}

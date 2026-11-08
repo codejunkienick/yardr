@@ -1,6 +1,8 @@
-// Package bdp serves yard over the Bead Protocol (BDP) Read profile.
+// Package bdp serves yard over the Bead Protocol (BDP): Core's reads.
 //
-// The mapping from yard to BDP:
+// The mapping from yard to BDP. Core lets a Resource id be any safe segments
+// and fixes the inventories at <scope>bdp/beads and <scope>bdp/links, so ids
+// stay under beads/ and links/:
 //
 //	bead           Bead  <scope>beads/<id>; properties carry yard's fields
 //	dep (a -k-> b) Link  <scope>links/<dep-id>, source b, target a: for kind
@@ -77,6 +79,14 @@ type Record struct {
 	Metadata map[string]any `json:"metadata"`
 
 	link bool
+}
+
+// kind is the Resource kind Core's HTTP fields name.
+func (r *Record) kind() string {
+	if r.link {
+		return "link"
+	}
+	return "bead"
 }
 
 // RevisionProvenance is who a record's current version is attributed to.

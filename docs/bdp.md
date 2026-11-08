@@ -1,11 +1,11 @@
 # BDP (Bead Protocol)
 
 `yardr bdp serve` serves the yard's beads, dependency links and links to
-outside issues over HTTP, as the Read profile of
-[BDP](https://github.com/gastownhall/bdp) stood in October 2026. BDP now
-specifies reads as part of Core, alongside separate Write, Types and Events
-profiles, with Transfer proposed. yardr claims no conformance to those current
-profiles or proposed Transfer ([Conformance](#conformance)):
+outside issues over HTTP, as the reads of Core, version 0.1, of
+[BDP](https://github.com/gastownhall/bdp) fix them ([routes, media type and
+headers](#routes-media-type-and-headers)). It serves no Write, Types or Events
+profile and no proposed Transfer, and claims no conformance to any profile
+([Conformance](#conformance)):
 
 ```sh
 yardr bdp serve --scope https://beads.example/team/
@@ -104,6 +104,57 @@ refuses a `bdp_addr` off loopback the same way, and starts nothing for it.
   (`yardr crew show --json`) for `crew add`, `start`, `stop`,
   `restart` and `rm`.
 
+## Routes, media type and headers
+
+Under the Scope URL (`<scope>` ends in `/`), `GET` and `HEAD` answer:
+
+- `<scope>`: 204 with a `service-desc` Link to the discovery document.
+- `<scope>bdp.json`: the discovery document, Core's closed object: `bdpVersion`
+  `0.1`, `profile` `core`, `scope`, `specRevision`, `order`, `limits` and
+  `maximumEndpointMultiplicity`. It has no `beads` or `links` member, for Core
+  fixes the inventories' routes, and no `types` member ([Types](#types)).
+- `<scope>bdp/beads` and `<scope>bdp/links`: the inventories, a page of every
+  Bead and of every Link in canonical id order, over one snapshot that `next`
+  continues. They take Core's `limit`, `cursor`, `type`, `conformsTo` and
+  `selector`, and for Links `source`, `target` and `endpoint`. The Read
+  profile's `beads/` and `links/` listings are not served and answer 404, as
+  does anything else under `bdp/`, which Core reserves.
+- `<scope>beads/<handle>` and `<scope>links/<id>`: one record, `?view=properties`
+  for its properties and, on a Bead, `?view=links&direction=inbound|outbound|both`
+  for the Links it is an endpoint of.
+
+Records, pages and the discovery document are `application/vnd.bdp.v0.1+json`,
+and a request whose `Accept` excludes it is refused with 406 and no body. Core
+does not take that type for `application/json`: a client that accepts only
+`application/json` is refused, and `*/*` or no `Accept` is served. Problems are
+`application/problem+json`.
+
+A page of Beads or of Links carries `BDP-Collection-Kind: bead` or `link`, every
+page of it a cursor leads to as well. A read of a Bead or a Link carries
+`BDP-Resource-Kind: bead` or `link`, `HEAD` and `304` too; a Bead's
+`?view=links` page carries both, the Bead being what was read and Links what it
+lists. Those pages and reads, and the Scope's own answer, carry a `service-desc`
+Link to the discovery document. A 406 or a 412 carries no kind: it refuses the
+read.
+
+`specRevision` names the BDP commit whose Core this server follows: the full
+SHA that `pnpm spec:revision` prints in a BDP checkout, the last commit to
+change Core, Write, Types or Events. It names the protocol text and not a yardr
+build, so nothing derives it: it is the constant `SpecRevision` in
+`internal/bdp`, and moves when someone has read what Core changed since and run
+[conformance/bdp/probe-core.sh](../conformance/bdp/probe-core.sh) against the
+BDP commit it is taken from.
+
+### Types
+
+Core carries a record's Type as a URI and does not require it to resolve.
+yardr's Scope-local Types (`<scope>types/<name>`) resolve anyway, and
+`<scope>types/` lists them: pages of its own, summaries and descriptors, which
+BDP's Types profile does not define (there a definition is an ordinary Bead).
+Discovery therefore has no `types` member, whose presence advertises a Types
+inventory, and yardr claims no Types. The pages are in the same media type and
+carry no kind field, being no Beads or Links.
+
 ## Links to outside issues
 
 A bead's link to a Linear or GitHub issue ([links.md](links.md)) is served as
@@ -116,8 +167,8 @@ a Link of its own, `<scope>links/<link-id>`:
   it, `thread`: the issue's thread id in that source.
 - The Type is `<scope>types/relates`, or `<scope>types/tracks-<source>`
   (`tracks-linear`, `tracks-github`), which conforms to `<scope>types/tracks`.
-  `links/?conformsTo=<scope>types/tracks` lists every tracked issue;
-  `links/?target=<issue URL>` lists an issue's beads. The Types are
+  `bdp/links?conformsTo=<scope>types/tracks` lists every tracked issue;
+  `bdp/links?target=<issue URL>` lists an issue's beads. The Types are
   Scope-local and resolve whether or not the yard has such a link yet.
   `relates` is not BDP's reference `relates`: its target is no work item.
 - A link has its own revision. Its kind is fixed, as BDP requires of a
@@ -127,34 +178,38 @@ a Link of its own, `<scope>links/<link-id>`:
   `tracks-<source>` Type, endpoint `source`, max 1. A bead tracks at most one
   issue per source.
 - That an issue has at most one tracking bead is yardr's own rule, kept by
-  the store and **not** advertised: BDP v0 never counts or constrains an
+  the store and **not** advertised: BDP never counts or constrains an
   out-of-Scope endpoint.
 - A journal's or memory's links are not served, as the bead is not.
 
 ## Conformance
 
-yardr's one result against BDP is for a profile BDP no longer has. On BDP's
-main caf5ca7, 13 Oct 2026, BDP's own conformance suite passed 31 of 31
+yardr follows Core's reads and claims no conformance to Core, Write, Types or
+Events, or to proposed Transfer. It answers `GET` and `HEAD` only, so it does
+not support BDP Write, and it serves no BDP Events.
+
+What has been checked: on 8 Nov 2026, against BDP's main a4fd83a2 (7 Nov), BDP's
+current provider kit, pointed at a seeded yard with `--scope` (so with no
+adapter, and without `--allow-mutation`, so nothing that writes is sent),
+passes the three Core cases it can run against such a Scope,
+`core.scope-discovery`, `core.inventory-fixed-routes` and `core.point-read`. The
+other four of its seven Core cases did not run, because the kit does not run
+them: it has no case yet for pagination (`core.collections-and-native-pagination`),
+for Link and alias reads (`core.link-and-alias-reads`) or for HTTP and selection
+(`core.http-and-selection`), and `core.deleted-absence` needs a Write delete or
+an adapter. BDP calls the kit a vertical slice, not complete Core/Write
+qualification and not a provider badge: its report is `incomplete` and says
+`claimEligible: false`. So the pass shows that discovery, the two inventories
+and a point read are what the kit asserts of Core, and shows nothing of the
+cases the kit lacks. [conformance/bdp/probe-core.sh](../conformance/bdp/probe-core.sh)
+makes the run, and [conformance/bdp](../conformance/bdp) has the rest of the
+harness.
+
+The Read-profile result of October 2026 is of a server that no longer exists.
+On BDP's main caf5ca7, 13 Oct 2026, BDP's own conformance suite passed 31 of 31
 runnable Read scenarios against `yardr bdp serve`, and BDP's `bdp bd ready`
-client computed the same ready set from yardr as `yardr ready`.
-[conformance/bdp](../conformance/bdp) has the run.
-
-That result does not carry over. BDP's main 029d176, 7 Nov 2026, has no
-standalone Read profile: reads are part of Core. BDP's current profiles are
-Core, Write, Types and Events, with Transfer proposed, and BDP says its
-historical conformance seals "do not qualify the new composition". yardr claims
-no conformance to Core, Write, Types or Events, and none to proposed Transfer.
-It does not serve the inventories Core fixes, `bdp/beads` and `bdp/links`. It
-answers `GET` and `HEAD` only, so it does not support BDP Write, and it serves
-no BDP Events.
-
-The historical Read suite here stops during fixture seeding against that BDP.
-Since BDP's commit 8f30b0e of 4 Nov 2026, its fixtures name beads and links
-without the `beads/` and `links/` prefixes, and `conformance/bdp/seed.py` stops
-at the first bead. A run against 029d176 on 7 Nov confirmed this; no BDP
-scenarios ran and no `BDP_REPORT` was written.
-
-BDP's current Core/ordinary Write provider kit has 19 cases and requires a
-trusted provider adapter. BDP describes it as a bounded interoperability slice,
-not a full conformance suite, so it does not replace the historical Read
-result. yardr claims no conformance to BDP's current composition.
+client computed the same ready set from yardr as `yardr ready`. BDP has no
+standalone Read profile since, and says its historical conformance seals "do not
+qualify the new composition". `conformance/bdp/run.sh` still holds that suite,
+and it fails against this server by design: it checks the Read profile's
+discovery document and its `beads/` and `links/` listings, which are not served.
