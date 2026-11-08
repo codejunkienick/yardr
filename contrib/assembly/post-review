@@ -2,9 +2,10 @@
 # post-review: posts the review a reviewer stored on its bead as a GitHub review
 # on the bead's pull request, as the yard's GitHub App, and sends the bead on
 # the way the review says. It is the one place the public line's reviews are
-# posted from (the flow yardr.public; docs/line.md, "The public line"), and the
-# reviewers never hold what it holds: the App's id and key file are in the
-# environment of the exec group that runs it, and in no reviewer's.
+# posted from (the flow yardr.public; docs/line.md, "The public line"), and a
+# pull request from outside's too (below), and the reviewers never hold what it
+# holds: the App's id and key file are in the environment of the exec group that
+# runs it, and in no reviewer's.
 #
 # Run it as the cmd of an exec group (yardr-post, limit 1), routed for the two
 # posting stages of the flow: review-post, after review, and
@@ -18,29 +19,45 @@
 # and reports the same outcome, which takes the bead here. The outcome is what
 # the review decides: done (approved, and the security review follows), done-safe
 # (approved, and only the yard's tests follow) or changes (the builder is to
-# change it); review-security-post takes done and changes. The GitHub review is
-# made from it: APPROVE for the two approvals and REQUEST_CHANGES for changes,
-# with the verdict ("Approved", "Changes needed") written as the first line of
-# the body by this script, so that the two cannot disagree. Each comment is on a
-# line of the pull request's diff (the right side), by path in the repository and
-# line number in the head the reviewer read. A question for a person is not
-# posted: it never comes here.
+# change it); review-security-post takes done and changes. On the public line,
+# the GitHub review is made from it: APPROVE for the two approvals and
+# REQUEST_CHANGES for changes, with the verdict ("Approved", "Changes needed")
+# written as the first line of the body by this script, so that the two cannot
+# disagree. Each comment is on a line of the pull request's diff (the right
+# side), by path in the repository and line number in the head the reviewer
+# read. A question for a person is not posted: it never comes here.
 #
-# What it reads of the bead is its stage, its tracks link, own_pr, reviewed_head
-# and review, and nothing else: no body, no note. The pull request is the one the
-# bead tracks (its URL must be https://github.com/<owner>/<repo>/pull/<n> and
-# nothing else), which must also be the bead's own_pr and be from the bead's
-# branch of that repository: a bead whose metadata was written to point at
-# another pull request is held, not posted on. The review is anchored to
-# reviewed_head, and refused when GitHub says the pull request has another head
-# now, so that a review is never posted on lines of a commit it was not written
-# against.
+# What it reads of the bead is its stage, its type, its tracks link, own_pr,
+# reviewed_head and review, and nothing else: no body, no note. On the public
+# line, the pull request is the one the bead tracks (its URL must be
+# https://github.com/<owner>/<repo>/pull/<n> and nothing else), which must also
+# be the bead's own_pr and be from the bead's branch of that repository: a bead
+# whose metadata was written to point at another pull request is held, not
+# posted on. The review is anchored to reviewed_head, and refused when GitHub
+# says the pull request has another head now, so that a review is never posted
+# on lines of a commit it was not written against.
 #
-# GitHub does not let an account approve or ask changes of a pull request it
-# opened, and the App opened this one (open-pr). The review is then posted as a
-# comment review instead, which is why its first line is the verdict; a yard that
-# reviews under another identity gets the approval or the request as asked, with
-# no change here.
+# A bead of type pr is a pull request from outside, on the contributors pack's
+# flow, whose review-post stage runs this script too (docs/line.md, "Posting a
+# pull request's review"). The rules above are all kept but two, which that bead
+# cannot meet: it has no own_pr, and its head is the contributor's branch, in a
+# fork perhaps, not yard/<bead>. The pull request is the one its tracks link
+# names, and the link must have been made by the hook that made the bead
+# (created_by is hook:<name>), which a link made by a person or an agent of the
+# yard is not: that one is held, not posted on. The review is always a comment
+# review, never an approval or a request for changes: merging is a maintainer's,
+# and a request for changes would stand on the pull request after its author
+# had acted, since nothing here posts again. Its stored outcomes are done and
+# changes (the pack's flow has no done-safe), the verdict is still the first
+# line, and the script gives the bead no merge-ok and touches no label. What it
+# sends back to the reviewer never tells it to push: the pull request is its
+# author's, and the reviewer pushes nothing of it.
+#
+# On the public line, GitHub does not let the App approve or ask changes of the
+# pull request it opened (open-pr). The review is then posted as a comment
+# review instead, which is why its first line is the verdict; a yard that reviews
+# under another identity gets the approval or the request as asked, with no
+# change here.
 #
 # The token is the App's, minted for the repository by contrib/github-mint
 # (the github source's mint_command, or YARDR_GITHUB_MINT in the group's cmd)
@@ -53,12 +70,14 @@
 # line. What it may say is the reviewers' stage files' rule: it describes the
 # change and the code, and quotes nothing of the bead.
 #
-# When the review is posted, the bead gets the label merge-ok if the review is
-# the one that approves the head for the yard's tests and its merge (done-safe at
-# review-post, done at review-security-post), the stored review is emptied so
-# that it is posted once and a later round never finds this one, and the bead is
-# reported with the outcome the review stored. That is the whole of the yes: the
-# reviewers do not say merge-ok.
+# On the public line, when the review is posted, the bead gets the label
+# merge-ok if the review approves the head for the yard's tests and its merge
+# (done-safe at review-post, done at review-security-post). The stored review is
+# emptied so that it is posted once and a later round never finds this one, and
+# the bead is reported with the outcome the review stored. That is the whole of
+# the public line's yes: its reviewers do not say merge-ok. In fork mode the
+# script does not change labels, so a reviewer's merge-ok for a bot's Go module
+# bump stays on the bead.
 #
 # The outcomes at the posting stages are done, done-safe and changes, the
 # review's own, and failed. failed (back to the reviewer, with the reason in the
@@ -142,6 +161,12 @@ bead=$("$Y" bead show "$BEAD" --json 2>"$errf") || {
 }
 cat "$errf" >&2
 stage=$(printf '%s' "$bead" | jq -r '.stage // empty')
+# A bead of type pr is a pull request from outside, which has the fork rules
+# below; every other bead is the public line's own.
+fork=
+[ "$(printf '%s' "$bead" | jq -r '.type // empty')" != pr ] || fork=1
+posting="review-post or review-security-post"
+[ -z "$fork" ] || posting="review-post"
 NOT="not posting" STAGE=$stage
 # The outcomes of the stored review each posting stage takes, as a failed
 # report names them; the table that holds them for the check is below.
@@ -149,20 +174,41 @@ yes=
 case $stage in
 review-post) outcomes="done, done-safe or changes" ;;
 review-security-post) outcomes="done or changes" ;;
-*) hold "$BEAD is in ${stage:-no stage}, and a review is posted from review-post or review-security-post; $NOT." ;;
+*) hold "$BEAD is in ${stage:-no stage}, and a review is posted from $posting; $NOT." ;;
 esac
+# The contributors pack's flow has the one posting stage, and no done-safe.
+if [ -n "$fork" ]; then
+  [ "$stage" = review-post ] ||
+    hold "$BEAD is in $stage, and a review is posted from $posting; $NOT."
+  outcomes="done or changes"
+fi
 
 # The pull request is the one the bead tracks, by the URL of the link and
 # nothing else: owner, repository and number are read from it, and a URL of
 # another shape (another host, an issue, a path past the number) is refused. It
-# must be the one open-pr opened for the bead, which records it as own_pr.
+# must be the one open-pr opened for the bead, which records it as own_pr; for a
+# pull request from outside, which has no own_pr, the one the hook linked.
 url=$(printf '%s' "$bead" | jq -r '[.links[]? | select(.kind == "tracks" and .source == "github") | .url] | first // empty')
 [ -n "$url" ] ||
   hold "$BEAD tracks no GitHub pull request (no tracks link of source github); $NOT. Link it with yardr link, or take the bead out of $STAGE."
 printf '%s' "$url" | grep -Eq '^https://github\.com/[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+/pull/[1-9][0-9]*$' ||
   hold "$BEAD tracks $url, which is not a pull request address (https://github.com/<owner>/<repo>/pull/<n>); $NOT."
-[ "$(printf '%s' "$bead" | jq -r '.metadata.own_pr // empty')" = "$url" ] ||
-  hold "$BEAD's tracked pull request was not opened for its own branch by open-pr (its own_pr is not $url); $NOT."
+if [ -n "$fork" ]; then
+  # The link is the one thing that says which pull request the bead is of, and
+  # nothing of the bead's metadata can: the branch is the contributor's. The
+  # hook makes it with the bead (created_by hook:<name>). A link an agent makes
+  # from its pane is recorded as the agent's, whatever actor the command names,
+  # and an agent may not change the tracks link of a pr bead past triage at all;
+  # this check does not rest on either.
+  by=$(printf '%s' "$bead" | jq -r --arg url "$url" '[.links[]? | select(.kind == "tracks" and .source == "github" and .url == $url) | .created_by // ""] | first // empty')
+  case $by in
+  hook:?*) ;;
+  *) hold "$BEAD's tracks link to $url was not made by a hook (made by ${by:-no one on record}), and a review is posted only on the pull request the hook linked when it made the bead; $NOT." ;;
+  esac
+else
+  [ "$(printf '%s' "$bead" | jq -r '.metadata.own_pr // empty')" = "$url" ] ||
+    hold "$BEAD's tracked pull request was not opened for its own branch by open-pr (its own_pr is not $url); $NOT."
+fi
 path=${url#https://github.com/}
 owner=${path%%/*}
 rest=${path#*/}
@@ -194,6 +240,11 @@ review=$(jq -c '
   end' "$work/stored" 2>"$errf") ||
   report failed "the review stored on $BEAD is not postable: $(sed -n 's/^jq: error (at [^)]*): //p' "$errf" | head -n 1). $fix"
 outcome=$(printf '%s' "$review" | jq -r .outcome)
+# done-safe sends the bead to the yard's tests alone, with merge-ok, and a pull
+# request from outside has no such way: its flow would refuse the report after
+# the review was posted.
+[ -z "$fork" ] || [ "$outcome" != done-safe ] ||
+  report failed "the review stored on $BEAD says $outcome, which $STAGE does not take for a pull request from outside (it takes $outcomes). $fix"
 case $stage:$outcome in
 review-post:done | review-post:done-safe | review-post:changes | review-security-post:done | review-security-post:changes) ;;
 *) report failed "the review stored on $BEAD says $outcome, which $STAGE does not take (it takes $outcomes). $fix" ;;
@@ -202,6 +253,10 @@ case $outcome in
 changes) event=REQUEST_CHANGES verdict="Changes needed" ;;
 *) event=APPROVE verdict=Approved ;;
 esac
+# A pull request from outside gets a comment review whatever the outcome: it is
+# not the yard's to approve, and a request for changes would stay on it after its
+# author acts, since nothing posts again. The verdict is still the first line.
+[ -z "$fork" ] || event=COMMENT
 case $stage:$outcome in review-post:done-safe | review-security-post:done) yes=1 ;; esac
 
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
@@ -211,6 +266,11 @@ short() { printf '%s' "$1" | cut -c1-7; }
 read_head=$(printf '%s' "$bead" | jq -r '.metadata.reviewed_head // empty')
 case $read_head in *[!0-9a-fA-F]*) read_head= ;; esac
 case ${#read_head} in 40 | 64) ;; *) read_head= ;; esac
+# The reviewer of a pull request from outside has pushed nothing, and is not told
+# to: its worktree stands on the head it read.
+if [ -z "$read_head" ] && [ -n "$fork" ]; then
+  report failed "$BEAD has no reviewed_head, the head the review is of (a full commit sha). Record the head you read and store the review in one update: yardr bead update $BEAD --meta reviewed_head=\"\$(git rev-parse HEAD)\" --meta review=<JSON>."
+fi
 [ -n "$read_head" ] ||
   report failed "$BEAD has no reviewed_head, the head the review is of (a full commit sha). Push your commits (git push origin $BR), then record it and store the review in one update: yardr bead update $BEAD --meta reviewed_head=\"\$(git rev-parse HEAD)\" --meta review=<JSON>."
 
@@ -254,11 +314,17 @@ pr=$(gh_ pr view "$url" --json state,headRefOid,headRefName,headRepository,headR
 # The pull request must be the bead's own branch of this repository. own_pr is
 # metadata, which an agent can write, so it is the pull request that says whose
 # it is: a bead pointed at some other pull request of the App's installation is
-# not posted on.
-headrepo=$(printf '%s' "$pr" | jq -r 'if .headRepositoryOwner.login and .headRepository.name then .headRepositoryOwner.login + "/" + .headRepository.name else empty end')
-{ [ "$(printf '%s' "$pr" | jq -r '.headRefName // empty')" = "$BR" ] && [ "$(lower "$headrepo")" = "$(lower "$slug")" ]; } ||
-  hold "pull request $url is not from $BR of $slug, the branch that open-pr publishes for $BEAD, so it is not $BEAD's to review; $NOT."
+# not posted on. A pull request from outside is the contributor's branch, and
+# was bound to its bead by the link above.
+if [ -z "$fork" ]; then
+  headrepo=$(printf '%s' "$pr" | jq -r 'if .headRepositoryOwner.login and .headRepository.name then .headRepositoryOwner.login + "/" + .headRepository.name else empty end')
+  { [ "$(printf '%s' "$pr" | jq -r '.headRefName // empty')" = "$BR" ] && [ "$(lower "$headrepo")" = "$(lower "$slug")" ]; } ||
+    hold "pull request $url is not from $BR of $slug, the branch that open-pr publishes for $BEAD, so it is not $BEAD's to review; $NOT."
+fi
 live=$(printf '%s' "$pr" | jq -r '.headRefOid // empty')
+if [ -n "$fork" ] && [ "$(lower "$live")" != "$(lower "$read_head")" ]; then
+  report failed "$url has moved since the review was written (you read $(short "$read_head"), its head is $(short "$live")), and a review is posted only on the head it was written against. Read the pull request at the head it has now (your worktree stands on it: git rev-parse HEAD), then record that head and store the review of it in one update: yardr bead update $BEAD --meta reviewed_head=\"\$(git rev-parse HEAD)\" --meta review=<JSON>."
+fi
 [ "$(lower "$live")" = "$(lower "$read_head")" ] ||
   report failed "$url has moved since the review was written (you read $(short "$read_head"), its head is $(short "$live")), and a review is posted only on the head it was written against. If you made commits that are not pushed, push them (git push origin $BR). Read the pull request as it is now, then record that head and store the review of it in one update: yardr bead update $BEAD --meta reviewed_head=\"\$(git rev-parse HEAD)\" --meta review=<JSON>."
 
@@ -301,6 +367,14 @@ review-post:changes | review-security-post:changes) move="yardr bead advance $BE
 review-security-post:done) move="yardr bead advance $BEAD --to ciwait" ;;
 *) move="yardr bead advance $BEAD --to <the stage $outcome leads to>" ;;
 esac
+# The contributors pack's flow leads done to the yard's tests, and changes to the
+# pull request's author.
+if [ -n "$fork" ]; then
+  case $outcome in
+  done) move="yardr bead advance $BEAD --to ciwait" ;;
+  *) move="yardr bead advance $BEAD --to contributor" ;;
+  esac
+fi
 "$Y" bead update "$BEAD" "$@" >"$errf" 2>&1 ||
   hold "posted the $event review${where:+ ($where)} on $url, but recording that on $BEAD failed: $(head -c 500 "$errf"). Do not unhold it, which would post the review again: record it by hand (yardr bead update $BEAD $*) and move the bead on ($move)."
 [ -z "$yes" ] || merge_ok_added=1

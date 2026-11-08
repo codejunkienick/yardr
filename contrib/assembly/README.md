@@ -247,6 +247,16 @@ the bead's stage, tracks link, `own_pr`, `reviewed_head` and `review`, and never
 its body or notes. Needs `gh` and `jq`. docs/line.md, "The public line", has the
 setup.
 
+post-review is also routed for `review-post` of the contributors pack's `pr` flow,
+which carries a copy of it that a test holds equal, and takes a bead of type `pr`
+as a pull request from outside, in a mode of its own: the pull request is the one
+the tracks link names when the hook that made the bead made the link (`created_by`
+is `hook:<name>`), in place of the bead's `own_pr` and branch, which a
+contributor's pull request has not; the review is always a comment review; it
+gives and takes away no label; and what it sends back to the reviewer never says
+to push. It reports `done` or `changes` (a `done-safe` is sent back as `failed`).
+docs/line.md, "Posting a pull request's review", has the rules and the setup.
+
 **pr-ci** is routed for `ciwait` (type `pr`), the stage after a reviewer has
 read a pull request of the contributors pack, which carries a copy of it that
 a test holds equal, and is the yard's CI of it, whether or not the repository

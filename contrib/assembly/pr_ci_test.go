@@ -133,10 +133,11 @@ func (c *ciYard) reviewed(id, head string) {
 }
 
 // accepted brings pr bead id to ciwait the way the pr flow does for a pull
-// request a maintainer let in: made in triage, accepted into review and
-// reported done by its reviewer (which records its own head, as reviewed does).
-// The commit the maintainer accepted is recorded as the yard records it for the
-// label; "-" records none, as for a bead a maintainer moved by hand.
+// request a maintainer let in: made in triage, accepted into review, reported
+// done by its reviewer (which records its own head, as reviewed does) and by
+// post-review once it posted the review. The commit the maintainer accepted is
+// recorded as the yard records it for the label; "-" records none, as for a
+// bead a maintainer moved by hand.
 func (c *ciYard) accepted(id, url, head string) {
 	c.t.Helper()
 	c.prBeadIn(id, url, "triage", false)
@@ -146,7 +147,7 @@ func (c *ciYard) accepted(id, url, head string) {
 			c.t.Fatal(err)
 		}
 	}
-	for _, outcome := range []struct{ stage, outcome string }{{"triage", "accepted"}, {"review", "done"}} {
+	for _, outcome := range []struct{ stage, outcome string }{{"triage", "accepted"}, {"review", "done"}, {"review-post", "done"}} {
 		if _, err := st.Done(ctx, id, outcome.outcome, "", store.Expect{Stage: outcome.stage}, "test"); err != nil {
 			c.t.Fatal(err)
 		}
@@ -407,7 +408,8 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 
 	// A bot's bump of Go modules, end to end through the real pr flow: the
 	// reviewer reads the head, records it as reviewed_head, marks the bump
-	// merge-ok and reports done, which has it wait in ciwait. The bot rebases
+	// merge-ok and reports done, which has its review posted (post-review reports
+	// done) and then wait in ciwait. The bot rebases
 	// before pr-ci runs and the event of that push is lost (nothing here
 	// delivers one, which is what a missed webhook is), so the bead is still in
 	// ciwait: pr-ci holds it at a head no reviewer read, and fetches nothing.
@@ -428,7 +430,11 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 			if _, err := st.Done(ctx, id, "done", "Ready", store.Expect{Stage: "review"}, "test"); err != nil {
 				t.Fatal(err)
 			}
-			c.has(id, "reported done by the reviewer", "ciwait", false)
+			c.has(id, "reported done by the reviewer", "review-post", false)
+			if _, err := st.Done(ctx, id, "done", "post-review: posted", store.Expect{Stage: "review-post"}, "test"); err != nil {
+				t.Fatal(err)
+			}
+			c.has(id, "posted by post-review", "ciwait", false)
 		}
 		reviewerDone(read)
 		pushed := c.pull(num, map[string]string{"go.sum": "bump, rebased\n"})

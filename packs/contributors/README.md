@@ -3,7 +3,8 @@
 The pack yardr ships for what comes to a public repository from outside: an
 issue or a pull request someone opens there is a bead in the yard, a
 maintainer looks at it first, and a pull request is reviewed by an agent
-that reads it and runs nothing. A maintainer merges on GitHub, or the yard
+that reads it and runs nothing, whose review the yard posts on the pull
+request as a comment. A maintainer merges on GitHub, or the yard
 does for a pull request marked `merge-ok` (a bot's bump of Go modules, or
 what a maintainer said yes to); nothing of the yard pushes to a pull request.
 
@@ -23,16 +24,20 @@ maps to a yard are in [docs/packs.md](../../docs/packs.md).
   `scripts/merge-local` are the starter's, copied: an accepted issue is
   built, reviewed and landed as the depot's own beads are. A test fails
   when a copy drifts.
+- `scripts/pr-ci` and `scripts/post-review` are copies of
+  `contrib/assembly/pr-ci` and `contrib/assembly/post-review`, for the
+  groups that run the yard's CI and post the reviewer's review. A test fails
+  when a copy drifts.
 - `flows/issue/triage.md`, `flows/pr/triage.md`, `flows/pr/review.md`,
-  `flows/pr/ciwait.md`, `flows/pr/approved.md`: the stage files of the
-  stages that are this pack's own.
+  `flows/pr/review-post.md`, `flows/pr/ciwait.md`, `flows/pr/approved.md`:
+  the stage files of the stages that are this pack's own.
 
 ## The two flows
 
 | | stages |
 |---|---|
 | `issue` | `triage` (maintainers) -> `backlog` -> `new` -> `review` -> `approved` -> `merged`, or `closed` |
-| `pr` | `triage` (maintainers) -> `review` (pr-reviewers) -> `ciwait` (pr-ci) -> `contributor` (outside) -> `approved` (maintainers) -> `merged`, or `closed` |
+| `pr` | `triage` (maintainers) -> `review` (pr-reviewers) -> `review-post` (post) -> `ciwait` (pr-ci) -> `contributor` (outside) -> `approved` (maintainers) -> `merged`, or `closed` |
 
 Everything a maintainer chooses is in `pack.yaml`: the stages, the label,
 who is trusted. yardr knows three verbs and none of the choices:
@@ -40,7 +45,7 @@ who is trusted. yardr knows three verbs and none of the choices:
 | verb | direction | here |
 |---|---|---|
 | `makes` | an event makes a bead for a thread no open bead tracks | an issue opened: an `issue` bead in `triage`. A pull request opened, marked ready or reopened: a `pr` bead in `triage`, or in `review` when its author is an owner or a member of the repository, or a bot |
-| `says` | an event reports an outcome to the bead that tracks its thread | the label `accepted`, put on by a person: `accepted`. New commits on a pull request that waited in `triage`: `unaccepted`, from `review`, `ciwait` and `contributor`, whoever pushed and even if the label was removed. New commits on any other pull request: `pushed` from `contributor`; from `review` and from `ciwait`, `pushed` when a bot pushed and `changes` when a person did. Merged: `merged`. Closed: `dropped`: for a pull request in `triage`, `review`, `ciwait`, `contributor`, `approved` and `decide`, for an issue in `triage`, `backlog`, `new`, `review`, `approved` and `decide`. No event of GitHub's CI says anything: the pull request's CI is the yard's own, reported by a script |
+| `says` | an event reports an outcome to the bead that tracks its thread | the label `accepted`, put on by a person: `accepted`. New commits on a pull request that waited in `triage`: `unaccepted`, from `review`, `ciwait` and `contributor`, whoever pushed and even if the label was removed. New commits on any other pull request: `pushed` from `contributor`; from `review`, `pushed` when a bot pushed and `outdated` when a person did; from `ciwait`, `pushed` when a bot pushed and `changes` when a person did. Merged: `merged`. Closed: `dropped`: for a pull request in `triage`, `review`, `review-post`, `ciwait`, `contributor`, `approved` and `decide`, for an issue in `triage`, `backlog`, `new`, `review`, `approved` and `decide`. No event of GitHub's CI says anything: the pull request's CI is the yard's own, reported by a script |
 | `hears` | a stage of the bead sets a status on the thread | an issue is closed when its bead is `merged` or `closed`, a pull request when its bead is `closed` |
 
 **Triage is the pack's advice, not a rule of yardr.** The stage a bead
@@ -86,6 +91,31 @@ merge-ok`, which goes over the yard's socket). The label says the yard may
 merge the pull request from `approved`. For any other pull request it is a
 maintainer's to add.
 
+**The stage `review-post` posts the review, worked by `post-review`.** The
+reviewer holds no key, so its review is data: it stores the review on the bead
+with the head it read, and when it reports `done` or `changes` a script of the
+yard posts it on the pull request as the yard's GitHub App and sends the bead
+on, `done` to `ciwait` and `changes` to `contributor`. It is always a comment,
+never an approval or a request for changes: merging is a maintainer's, and a
+request for changes would stand on the pull request after its author had
+acted, since nothing posts again. The comment's first line is the verdict
+(`Approved`, `Changes needed`), written by the script, which posts only what
+it checks: the pull request is the one the bead tracks, linked by the hook that
+made the bead (a link made by a person or an agent of the yard is held, not
+posted on), it is open, and it has the head the reviewer read, else the review
+goes back to the reviewer once and then to `decide`. The script gives the bead
+no label, and a question is never posted.
+
+**`post-review` works as the yard's GitHub App, so the yard sets its group up
+first.** The script is `scripts/post-review`, the copy of
+`contrib/assembly/post-review` (a test fails when they differ). The App's id
+and key file are the group's `env_file`, which an import cannot ask for, so a
+yard makes the group once, for all its depots, and maps the pack's to it:
+`--group post=yardr-post` (docs/line.md, "Posting a pull request's review",
+has the commands). The same group posts for the public line's review stages.
+Imported without that, the pack makes the depot's own `<depot>-post` and the
+route, and the group needs its `env_file` and the mint before it runs.
+
 **The stage `ciwait` is the yard's own CI, worked by `pr-ci`.** A reviewed
 pull request waits there while the script runs the depot's test command on
 its head: the one every landing runs, from the base's copy where the command
@@ -102,10 +132,11 @@ getting to `ciwait` means. A run that is no verdict on the pull request (no
 test command, no token, a failed fetch) holds the bead for the yard's
 operator, and the pull request is not called green untested.
 
-**The head that is tested is the head the reviewer read.** The reviewer
-records the commit it read as the bead's `reviewed_head` right before it
-reports `done` (`yardr bead update <id> --meta reviewed_head=<sha>`, over the
-yard's socket, on its own bead only). That is the head its worktree stands on,
+**The head that is posted and tested is the head the reviewer read.** The
+reviewer records the commit it read as the bead's `reviewed_head` right before
+it reports `done` or `changes`, in the one update that stores its review
+(`yardr bead update <id> --meta reviewed_head=<sha> --meta review=<JSON>`,
+over the yard's socket, on its own bead only). That is the head its worktree stands on,
 which the yard fetched when its session began; where its sandbox lets it
 fetch, it looks at the pull request's head once more first, and at the diff
 again if it moved, but the read-only sandbox reaches no network. `pr-ci` runs
@@ -158,7 +189,9 @@ does not come. A push by a bot (`sender=bot`, a kind as in the line of
 `review` the bead stays, as a new stay: the session reading the old head
 ends and a new one reads the new head. From `ciwait` it goes back to be
 read, and waits for CI on the new head after. A person's push is as it was:
-`changes`, to `contributor`, until the next commits. The line comes before
+`outdated` from `review` and `changes` from `ciwait`, to `contributor`, until
+the next commits (`outdated` is the source's word and not the reviewer's
+`changes`, which the posting takes). The line comes before
 the person's in the table, since the first line an event matches counts.
 Both are for a pull request no maintainer accepted: on one that waited in
 `triage`, every push says `unaccepted`, even after the label was removed.
@@ -172,7 +205,8 @@ request waits.
 **A merge or a close moves the bead itself.** When the pull request is
 merged on GitHub, the `merged` outcome moves its bead to `merged`, and when it
 is closed unmerged `dropped` moves it to `closed`: from `approved`, and as
-well from `triage`, `review`, `ciwait`, `contributor` and `decide`, since a
+well from `triage`, `review`, `review-post`, `ciwait`, `contributor` and
+`decide`, since a
 maintainer can merge a pull request nobody of the yard has read and its author
 can close one under review, and the bead would otherwise wait in a stage for a
 pull request that is over. A reviewer's `question` sends the bead to `decide`
@@ -301,5 +335,5 @@ and the outcome need nobody.
 ## Not in this pack
 
 `CONTRIBUTING.md` and a pull request template are the repository's own.
-Posting the review to the pull request is not here either: the review is a
-note on the bead, and a maintainer posts of it what they choose.
+What a maintainer says to a contributor beyond the review is not here either:
+they post it themselves (`yardr reply`), in their own words.

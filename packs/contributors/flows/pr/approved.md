@@ -1,9 +1,10 @@
 summary: A reviewed pull request is merged from here: by the yard if it is merge-ok, else by a maintainer.
 
 A pull request the reviewer found ready, and whose tests the yard ran green
-on its head, waits here. The review is a note on the bead; it was made by
-reading. The tests were the yard's CI run in `ciwait`, of the depot's own
-test command alone, and the bead has the commit they passed on as `ci_head`.
+on its head, waits here. The review is a note on the bead, and posted on the
+pull request; it was made by reading. The tests were the yard's CI run in
+`ciwait`, of the depot's own test command alone, and the bead has the commit
+they passed on as `ci_head`.
 
 Running it beyond that is here, and a person's: a maintainer who wants to see
 it work pulls the code and runs it where they choose, by their own judgement
@@ -47,17 +48,20 @@ too, and a head that was not has the note say how to record it
 (`accepted_head`). The yard reports a bead merged or dropped and nothing
 else.
 
-What of the review reaches the contributor is the maintainer's to post, in
-their own words or the note's, approved text only: `yardr reply --crew
-yardmaster <seq> - < review.md`, where `<seq>` is the number the pull
-request's delivery starts with in the inbox and review.md holds the
+The yard posted the reviewer's review on the pull request in `review-post`
+(the bead's notes say when), as a comment of its GitHub App, so the
+contributor has read it. What else reaches the contributor is the
+maintainer's to post, in their own words, approved text only: `yardr reply
+--crew yardmaster <seq> - < comment.md`, where `<seq>` is the number the pull
+request's delivery starts with in the inbox and comment.md holds the
 approved text. Run the command in an environment that sets the credential
 variables in the yardmaster's `env_file`; for a GitHub App, the source's
 `mint_command` turns its two inputs into the token for the comment. It goes
 out under the yard's bot, the App's `<slug>[bot]`. A command without a
 credential set in its environment is refused; yardr does not use the shell's
-`gh` login. Nothing posts by itself:
-no reviewer, no stage and no hook puts the review on the pull request.
+`gh` login. Nothing else posts by itself: no reviewer, no other stage and no
+hook puts anything on the pull request, and the yard's own comment is never
+an approval or a request for changes.
 
 A write through the yard's GitHub App is not proven everywhere:
 check the comment appeared on the pull request.

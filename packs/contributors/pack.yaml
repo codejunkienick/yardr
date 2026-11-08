@@ -36,21 +36,23 @@ flows:
       closed:   { end: true }
 
   # A pull request from outside: a maintainer looks, a reviewer that only
-  # reads reviews it, the yard runs the depot's tests on its head, the
-  # contributor answers on GitHub, a maintainer merges on GitHub, or the yard
-  # does for one marked merge-ok (the exec group of the importing yard's own,
-  # which the pack does not carry: docs/line.md, "Merging pull requests").
-  # Nothing of the yard pushes to the pull request, and nothing of it runs on
-  # the yard's machine until a reviewer has read it, and then only the depot's
-  # tests, in ciwait. A maintainer's yes is of one commit: new commits on a
-  # pull request they accepted take its bead back to triage, and the tests run
-  # only at the commit that was accepted.
+  # reads reviews it, the yard posts that review on the pull request, the yard
+  # runs the depot's tests on its head, the contributor answers on GitHub, a
+  # maintainer merges on GitHub, or the yard does for one marked merge-ok (the
+  # exec group of the importing yard's own, which the pack does not carry:
+  # docs/line.md, "Merging pull requests"). Nothing of the yard pushes to the
+  # pull request, and nothing of it runs on the yard's machine until a
+  # reviewer has read it, and then only the depot's tests, in ciwait. A
+  # maintainer's yes is of one commit: new commits on a pull request they
+  # accepted take its bead back to triage, and the tests run only at the
+  # commit that was accepted.
   #
   # What became of the pull request is the source's word, and it can come
-  # while its bead waits in triage, review, ciwait, contributor or decide: a
-  # maintainer merges on GitHub without waiting for the yard, or the author
-  # closes it. Each of those stages has an edge for merged and for dropped, as
-  # approved does, or the bead would stay open on a pull request that is over.
+  # while its bead waits in triage, review, review-post, ciwait, contributor
+  # or decide: a maintainer merges on GitHub without waiting for the yard, or
+  # the author closes it. Each of those stages has an edge for merged and for
+  # dropped, as approved does, or the bead would stay open on a pull request
+  # that is over.
   pr:
     type: pr
     stages:
@@ -61,8 +63,23 @@ flows:
       # unaccepted: new commits on a pull request a maintainer accepted are a
       # head nobody accepted, and the bead goes back to triage, from here and
       # from ciwait and contributor, to be looked at again before the new head
-      # is read or run.
-      review:      { group: pr-reviewers, file: flows/pr/review.md,   outcomes: { done: ciwait, changes: contributor, question: decide, pushed: review, unaccepted: triage, merged: merged, dropped: closed } }
+      # is read or run. outdated is the source's word too: a person pushed to a
+      # pull request no maintainer accepted while it was read, and the bead waits
+      # for its contributor, as it did before the reviewer's changes went through
+      # the posting (a bead that has stored no review has nothing to post).
+      review:      { group: pr-reviewers, file: flows/pr/review.md,   outcomes: { done: review-post, changes: review-post, question: decide, pushed: review, unaccepted: triage, outdated: contributor, merged: merged, dropped: closed } }
+      # The reviewer holds no key, so its review is data: it stores the review
+      # on the bead with the head it read, and a script of the yard, post-review,
+      # posts it on the pull request as the yard's GitHub App and sends the bead
+      # on the way the review says: the tests, or the contributor. Always a
+      # comment, never an approval or a request for changes, since merging is a
+      # maintainer's and nothing posts again when the contributor acts. A question
+      # is not posted. A review that cannot be posted as stored (a field wrong,
+      # a head that moved since) goes back to the reviewer once, then to a person.
+      # The script runs as the bead arrives and is done in moments, so the lines
+      # for a push name no stage of it: the script's own check of the head fails
+      # a push that came meanwhile back to review.
+      review-post: { group: post,         file: flows/pr/review-post.md, outcomes: { done: ciwait, changes: contributor, failed: { to: review, max: 1, then: decide }, merged: merged, dropped: closed } }
       # The yard's own CI: the depot's test command, run on the head the
       # reviewer read, by pr-ci, which says done or changes. Not the end of
       # review because the reviewer runs nothing, and the code runs only once
@@ -80,7 +97,9 @@ flows:
       # A reviewer's question waits here for a person, and the pull request can
       # be merged or closed on GitHub meanwhile: the bead ends with it, or it
       # would wait for an answer about a pull request that is over.
-      decide:      { group: decisions,    outcomes: { merged: merged, dropped: closed }, manual: [review, closed] }
+      # review-post is for a person to run the posting again, once the stored
+      # review is put right after a second failure.
+      decide:      { group: decisions,    outcomes: { merged: merged, dropped: closed }, manual: [review, review-post, closed] }
       merged:      { end: true }
       closed:      { end: true }
 
@@ -100,6 +119,13 @@ groups:
   # group up first and maps it (--group pr-ci=pr-ci), once for all its depots.
   # One at a time: the machine's tests queue anyway.
   pr-ci:        { run: scripts/pr-ci,          limit: 1 }
+  # The yard's posting of a reviewer's stored review on a pull request
+  # (docs/line.md, "Posting a pull request's review"). It works as the yard's
+  # GitHub App too, whose id and key file the group's env_file gives and the
+  # import cannot ask for, so a yard sets the group up first and maps it
+  # (--group post=yardr-post), once for all its depots; the public line's own
+  # posting stages are routed to the same group. One at a time.
+  post:         { run: scripts/post-review,    limit: 1 }
   # The import asks who.
   maintainers:  { people: true }
   backlog:      { people: true }
@@ -191,7 +217,7 @@ sources:
       # matches counts, so this one comes before them. A pull request a
       # maintainer accepted never gets here: its push is the line above.
       - { where: "event=pull_request action=synchronize sender=bot stage=review stage=ciwait type=pr", outcome: pushed, note: "a bot pushed to the PR" }
-      - { where: "event=pull_request action=synchronize stage=review type=pr", outcome: changes, note: "the PR changed under review" }
+      - { where: "event=pull_request action=synchronize stage=review type=pr", outcome: outdated, note: "the PR changed under review" }
       # CI is the yard's own, run by pr-ci, which reports through the yard's
       # socket and not through a line of this table: no event of GitHub's CI
       # moves a bead. A push while the run is queued or running sends the pull
@@ -199,8 +225,8 @@ sources:
       # review (the line above), a person's to its contributor.
       - { where: "event=pull_request action=synchronize stage=ciwait type=pr", outcome: changes, note: "the PR changed while waiting on CI" }
       # The end of the pull request, wherever its bead waits: these name no
-      # stage, and the flow above leads them out of triage, review, ciwait,
-      # contributor, approved and decide.
+      # stage, and the flow above leads them out of triage, review,
+      # review-post, ciwait, contributor, approved and decide.
       - { where: "event=pull_request action=closed merged=true type=pr", outcome: merged }
       - { where: "event=pull_request action=closed merged=false type=pr", outcome: dropped }
 

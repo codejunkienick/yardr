@@ -208,8 +208,8 @@ codesign --force --sign "<the certificate's name>" --identifier dev.yardr.yardr 
 
 The groups of a yard run scripts from `<home>/scripts`: `merge-local` for
 the assembly, `integrate-train`, `pr-train` and `pr-merge` for trains,
-`merge-pr` and `pr-ci` for the pull requests of outside, `open-pr` and
-`post-review` for the public line, `deploy-dokku` and
+`merge-pr` and `pr-ci` for the pull requests of outside, `open-pr` for the
+public line, `post-review` for both, `deploy-dokku` and
 `deploy-void` for deploy stages, `return-branch` for a peer. The
 operator installs each once by hand (`install contrib/assembly/merge-local
 ~/.yardr/scripts/`, [line.md](line.md#setup)), and a copy is only as new

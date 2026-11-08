@@ -9,9 +9,15 @@ package assembly
 // account that opened a pull request approve it or ask changes of it. What the
 // reviewer did is the metadata the bead carries into the stage: the head it read
 // and the review it stored.
+//
+// A pull request from outside is the same script in its fork mode: a bead of
+// type pr on the contributors pack's real flow, with the tracks link the hook
+// made, whose pull request is a contributor's branch of a fork. Its cases are
+// rows of the same tables, marked fork.
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -64,10 +70,11 @@ case "$1 $2" in
 esac
 `
 
-// postYard is a yard whose depot r is on the public line, with the stand-ins
-// for gh and github-mint and the group's env_file with the App's id and the
-// path of its key file. It holds no bead of the line: a test adds them. gh is
-// the stand-in's state directory.
+// postYard is a yard whose depot r is on the public line, and follows the
+// contributors pack's flow for its pull requests, with the stand-ins for gh and
+// github-mint and the group's env_file with the App's id and the path of its key
+// file. It holds no bead of the line: a test adds them. gh is the stand-in's
+// state directory.
 func postYard(t *testing.T) (y *yard, gh string) {
 	t.Helper()
 	y = newYard(t)
@@ -87,6 +94,7 @@ func postYard(t *testing.T) (y *yard, gh string) {
 	y.opts = "YARDR_GITHUB_MINT=" + shellQuote(mint+" --from-group")
 	y.putFlowFile("yardr.public", storetest.RepoFlow(t, "yardr.public"))
 	y.pointFlow("r", "", "yardr.public")
+	y.contributorsPRFlow()
 	return y, gh
 }
 
@@ -108,6 +116,35 @@ func (y *yard) postBead(id, stage string, meta map[string]any, tracked bool) {
 	if err := st.AddNote(ctx, id, yardOnlyNote, "test"); err != nil {
 		y.t.Fatal(err)
 	}
+}
+
+// forkBead adds the bead of a pull request from outside in stage: type pr, with
+// no own_pr, tracking the pull request the stand-in has as a link that by made,
+// and with a body and a note of the yard's own that must never reach GitHub. The
+// hook that makes such a bead records its link as hook:gh.
+func (y *yard) forkBead(id, stage string, meta map[string]any, by string) {
+	y.t.Helper()
+	nb := store.NewBead{Title: "Fix a typo in the README", Body: yardOnlyBody, ID: id, Depot: "r", Type: "pr",
+		Stage: stage, Priority: store.DefaultPriority, Metadata: meta,
+		Links: []store.NewLink{{Kind: store.LinkTracks, Source: "github", URL: prAddr}}}
+	ctx, st := context.Background(), rpc.NewClient((&config.Config{Home: y.home}).Socket())
+	if _, err := st.CreateBead(ctx, nb, by); err != nil {
+		y.t.Fatal(err)
+	}
+	if err := st.AddNote(ctx, id, yardOnlyNote, "test"); err != nil {
+		y.t.Fatal(err)
+	}
+}
+
+// forkHead is the stand-in's state for a pull request a contributor opened from
+// a branch of their fork, not the yard/<bead> of the repository itself.
+var forkHead = map[string]string{"head-ref": "fix-typo", "head-owner": "ada", "head-name": "r"}
+
+// withFork is files with the fork's head added, for a pull request from outside.
+func withFork(files map[string]string) map[string]string {
+	out := maps.Clone(forkHead)
+	maps.Copy(out, files)
+	return out
 }
 
 // postStandIn forgets everything of the stand-ins' last run, sets the pull
@@ -160,6 +197,13 @@ func postMeta(over map[string]any) map[string]any {
 	return m
 }
 
+// forkMeta is postMeta for a pull request from outside, which has no own_pr.
+func forkMeta(over map[string]any) map[string]any {
+	m := postMeta(over)
+	delete(m, "own_pr")
+	return m
+}
+
 // aReview is a review as a reviewer stores it, with two comments. Its body is
 // text a shell would run if the script let it, to touch pwned when there is one.
 func aReview(outcome, pwned string) map[string]any {
@@ -180,6 +224,12 @@ func aReview(outcome, pwned string) map[string]any {
 // the yard's tests gives the bead merge-ok, and the review is taken off the
 // bead. The account that opened the pull request cannot approve it, so a review
 // GitHub refuses on that ground is posted again as a comment review.
+//
+// A pull request from outside is posted on the same way but for what its owner
+// is: a contributor's branch of a fork, so no branch of the yard's is looked
+// for, and the pull request the hook linked. Its review is a comment review at
+// once, whatever it says, and the bead goes on the way the contributors pack's
+// flow says, with no merge-ok and no label touched.
 func TestPostReviewPosts(t *testing.T) {
 	t.Parallel() // as its subtests are: see TestMain
 	pwned := filepath.Join(t.TempDir(), "pwned")
@@ -192,25 +242,36 @@ func TestPostReviewPosts(t *testing.T) {
 		events  []string // the reviews GitHub is asked for, in order
 		verdict string   // the first line of the body
 		yes     bool     // merge-ok is on the bead after
+		fork    bool     // a pull request from outside, from a fork
 	}{
 		{"an approval that needs the security review", "review-post", "done", nil,
-			"review-security", []string{"APPROVE"}, "Approved", false},
+			"review-security", []string{"APPROVE"}, "Approved", false, false},
 		{"an approval that needs nothing but the tests", "review-post", "done-safe", nil,
-			"ciwait", []string{"APPROVE"}, "Approved", true},
+			"ciwait", []string{"APPROVE"}, "Approved", true, false},
 		{"changes asked at review", "review-post", "changes", nil,
-			"new", []string{"REQUEST_CHANGES"}, "Changes needed", false},
+			"new", []string{"REQUEST_CHANGES"}, "Changes needed", false, false},
 		{"the security review's approval", "review-security-post", "done", nil,
-			"ciwait", []string{"APPROVE"}, "Approved", true},
+			"ciwait", []string{"APPROVE"}, "Approved", true, false},
 		{"changes asked at the security review", "review-security-post", "changes", nil,
-			"new", []string{"REQUEST_CHANGES"}, "Changes needed", false},
+			"new", []string{"REQUEST_CHANGES"}, "Changes needed", false, false},
 		{"an approval of the pull request the App opened", "review-post", "done-safe", map[string]string{"self": ""},
-			"ciwait", []string{"APPROVE", "COMMENT"}, "Approved", true},
+			"ciwait", []string{"APPROVE", "COMMENT"}, "Approved", true, false},
+		{"a fork's pull request that is ready", "review-post", "done", nil,
+			"ciwait", []string{"COMMENT"}, "Approved", false, true},
+		{"a fork's pull request that needs changes", "review-post", "changes", nil,
+			"contributor", []string{"COMMENT"}, "Changes needed", false, true},
 	} {
 		t.Run(c.what, func(t *testing.T) {
 			y, gh := postYard(t)
 			const id = "r-post"
-			y.postBead(id, c.stage, postMeta(map[string]any{"review": aReview(c.outcome, pwned)}), true)
-			postStandIn(t, gh, id, c.files)
+			review, files := map[string]any{"review": aReview(c.outcome, pwned)}, c.files
+			if c.fork {
+				y.forkBead(id, c.stage, forkMeta(review), "hook:gh")
+				files = withFork(files)
+			} else {
+				y.postBead(id, c.stage, postMeta(review), true)
+			}
+			postStandIn(t, gh, id, files)
 			y.exec("post-review", "yardr-post", id)
 
 			b := y.beadOf(id)
@@ -219,6 +280,9 @@ func TestPostReviewPosts(t *testing.T) {
 			}
 			if got := strings.Contains(strings.Join(b.Labels, ","), "merge-ok"); got != c.yes {
 				t.Errorf("labels = %v, want merge-ok = %v", b.Labels, c.yes)
+			}
+			if c.fork && len(b.Labels) != 0 {
+				t.Errorf("the review of a pull request from outside left labels on the bead: %v", b.Labels)
 			}
 			if b.Metadata["review"] != "" {
 				t.Errorf("the review is still stored after it was posted: %v", b.Metadata["review"])
@@ -274,7 +338,10 @@ func TestPostReviewPosts(t *testing.T) {
 // review stored, one that is no object or has a field wrong, an outcome the
 // stage does not take, no head recorded, a pull request that has moved since
 // the head was read, and a review that GitHub refuses as written. The stored
-// review stays on the bead for the reviewer to correct.
+// review stays on the bead for the reviewer to correct. The reviewer of a pull
+// request from outside is sent back the same way, and is never told to push: the
+// pull request is its author's, and it reads the head the pull request has now.
+// A done-safe is not an outcome of that flow, so it is sent back too.
 func TestPostReviewSendsBackWhatTheReviewerCanPutRight(t *testing.T) {
 	t.Parallel() // as its subtests are: see TestMain
 	for _, c := range []struct {
@@ -283,7 +350,8 @@ func TestPostReviewSendsBackWhatTheReviewerCanPutRight(t *testing.T) {
 		meta  map[string]any
 		files map[string]string
 		note  string
-		posts int // the reviews GitHub was asked for
+		posts int  // the reviews GitHub was asked for
+		fork  bool // a pull request from outside, from a fork
 	}{
 		{what: "no review stored", meta: map[string]any{"review": nil}, note: "has no stored review"},
 		{what: "a review that did not parse as JSON", meta: map[string]any{"review": "{\"outcome\": \"done\", "}, note: "is no JSON object"},
@@ -299,6 +367,11 @@ func TestPostReviewSendsBackWhatTheReviewerCanPutRight(t *testing.T) {
 			note: "has moved since the review was written (you read " + headA[:7] + ", its head is " + headB[:7] + ")"},
 		{what: "a line that is not in the diff", files: map[string]string{"refuse": "gh: Unprocessable Entity: Line could not be resolved (HTTP 422)"},
 			note: "GitHub refused the review as stored", posts: 1},
+		{what: "a fork's pull request that moved", fork: true, files: map[string]string{"head": headB},
+			note: "has moved since the review was written (you read " + headA[:7] + ", its head is " + headB[:7] + ")"},
+		{what: "no head recorded for a fork's pull request", fork: true, meta: map[string]any{"reviewed_head": nil}, note: "has no reviewed_head"},
+		{what: "a done-safe for a fork's pull request", fork: true, meta: map[string]any{"review": map[string]any{"outcome": "done-safe", "body": "x"}},
+			note: "says done-safe, which review-post does not take for a pull request from outside (it takes done or changes)"},
 	} {
 		t.Run(c.what, func(t *testing.T) {
 			y, gh := postYard(t)
@@ -307,9 +380,15 @@ func TestPostReviewSendsBackWhatTheReviewerCanPutRight(t *testing.T) {
 			if stage == "review-security-post" {
 				back = "review-security"
 			}
-			y.postBead(id, stage, postMeta(c.meta), true)
+			files := c.files
+			if c.fork {
+				y.forkBead(id, stage, forkMeta(c.meta), "hook:gh")
+				files = withFork(files)
+			} else {
+				y.postBead(id, stage, postMeta(c.meta), true)
+			}
 			stored := y.beadOf(id).Metadata["review"]
-			postStandIn(t, gh, id, c.files)
+			postStandIn(t, gh, id, files)
 			y.exec("post-review", "yardr-post", id)
 
 			if b := y.beadOf(id); b.Stage != back || b.Hold || b.Status == "closed" {
@@ -317,6 +396,9 @@ func TestPostReviewSendsBackWhatTheReviewerCanPutRight(t *testing.T) {
 			}
 			if note := y.lastNoteOf(id); !strings.Contains(note, c.note) || !strings.Contains(note, "post-review: ") {
 				t.Errorf("no note from post-review with %q:\n%s", c.note, note)
+			}
+			if note := y.lastNoteOf(id); c.fork && strings.Contains(note, "push") {
+				t.Errorf("the note to the reviewer of a pull request from outside speaks of pushing:\n%s", note)
 			}
 			if got := len(posts(t, gh)); got != c.posts {
 				t.Errorf("%d reviews posted, want %d", got, c.posts)
@@ -342,7 +424,9 @@ func TestPostReviewSendsBackWhatTheReviewerCanPutRight(t *testing.T) {
 // that names another pull request, a pull request of another branch or another
 // repository) or is not open, a group with no App, a mint that fails and any
 // other refusal from GitHub. None of them posts a review on a pull request that
-// is not the bead's own, and none touches the stored review.
+// is not the bead's own, and none touches the stored review. A pull request from
+// outside is the bead's own when the hook linked it: a link made by anyone else
+// is held, and so is a pull request that is closed.
 func TestPostReviewHoldsWhatIsNotTheReviewers(t *testing.T) {
 	t.Parallel() // as its subtests are: see TestMain
 	for _, c := range []struct {
@@ -354,8 +438,10 @@ func TestPostReviewHoldsWhatIsNotTheReviewers(t *testing.T) {
 		noEnv  bool              // the group has no env_file
 		note   string
 		posts  int
-		viewed bool // gh was asked to look at the pull request
-		minted bool // a token was asked for
+		viewed bool   // gh was asked to look at the pull request
+		minted bool   // a token was asked for
+		fork   bool   // a pull request from outside, from a fork
+		linkBy string // who made a fork's link, the hook unless written
 	}{
 		{what: "a bead that was not sent here", stage: "new", note: "r-hold is in new, and a review is posted from review-post or review-security-post"},
 		{what: "a bead that tracks no pull request", noLink: true, note: "tracks no GitHub pull request"},
@@ -372,18 +458,29 @@ func TestPostReviewHoldsWhatIsNotTheReviewers(t *testing.T) {
 		{what: "a mint that fails", files: map[string]string{"mint-fail": "no key"}, minted: true, note: "minting a token for o/r failed"},
 		{what: "GitHub refusing the App", files: map[string]string{"refuse": "gh: Resource not accessible by integration (HTTP 403)"},
 			minted: true, viewed: true, posts: 1, note: "GitHub refused the review: "},
+		{what: "a fork's pull request in a stage that does not post", fork: true, stage: "triage",
+			note: "r-hold is in triage, and a review is posted from review-post; not posting"},
+		{what: "a fork's pull request whose link an agent made", fork: true, linkBy: "pr-reviewer",
+			note: "tracks link to " + prAddr + " was not made by a hook (made by pr-reviewer)"},
+		{what: "a fork's pull request that is closed", fork: true, files: map[string]string{"state": "CLOSED"}, minted: true, viewed: true, note: "is not open"},
 	} {
 		t.Run(c.what, func(t *testing.T) {
 			y, gh := postYard(t)
 			const id = "r-hold"
 			stage := or(c.stage, "review-post")
-			y.postBead(id, stage, postMeta(c.meta), !c.noLink)
+			files := c.files
+			if c.fork {
+				y.forkBead(id, stage, forkMeta(c.meta), or(c.linkBy, "hook:gh"))
+				files = withFork(files)
+			} else {
+				y.postBead(id, stage, postMeta(c.meta), !c.noLink)
+			}
 			stored := y.beadOf(id).Metadata["review"]
 			if c.noEnv {
 				// Whatever the machine running the test exports is not the group's.
 				y.envFile, y.opts = "", y.opts+" GITHUB_APP_ID= GITHUB_APP_PRIVATE_KEY_FILE="
 			}
-			postStandIn(t, gh, id, c.files)
+			postStandIn(t, gh, id, files)
 			y.exec("post-review", "yardr-post", id)
 
 			if b := y.beadOf(id); b.Stage != stage || !b.Hold || b.Status == "closed" {

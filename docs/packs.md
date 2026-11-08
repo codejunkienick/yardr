@@ -1642,7 +1642,7 @@ yardr pack apply contributors --depot web \
 | flow | stages |
 |---|---|
 | `issue` | `triage` (maintainers) -> `backlog` -> `new` -> `review` -> `approved` -> `merged`, or `closed`: from `backlog` on, the starter's stages and groups |
-| `pr` | `triage` (maintainers) -> `review` (pr-reviewers) -> `ciwait` -> `contributor` (outside) -> `approved` (maintainers) -> `merged`, or `closed` |
+| `pr` | `triage` (maintainers) -> `review` (pr-reviewers) -> `review-post` (post) -> `ciwait` -> `contributor` (outside) -> `approved` (maintainers) -> `merged`, or `closed` |
 
 What moves a bead through them is the pack's `sources.github`, in three
 verbs. The stages, the label and who is trusted are the pack's lines;
@@ -1651,7 +1651,7 @@ yardr knows the verbs alone:
 | verb | direction | in this pack |
 |---|---|---|
 | `makes` | source -> yard: an event makes a bead for a thread no open bead tracks | an issue opened makes an `issue` bead in `triage`; a pull request opened, marked ready or reopened a `pr` bead in `triage`, or in `review` when its author is an owner or a member of the repository (`association=`) or a bot (`sender=bot`: a kind, never a login, so every bot) |
-| `says` | source -> bead: an event reports an outcome to the bead that tracks its thread | the label `accepted`, put on by a person, says `accepted`; new commits on a pull request that waited in `triage` say `unaccepted` in `review`, `ciwait` and `contributor`, whoever pushed and even if the label was removed; new commits on any other pull request say `pushed` in `contributor`, and in `review` and `ciwait` `pushed` when a bot pushed and `changes` when a person did; a merge says `merged`, a close `dropped`: for a pull request in `triage`, `review`, `ciwait`, `contributor`, `approved` and `decide`, for an issue in `triage`, `backlog`, `new`, `review`, `approved` and `decide`. No event of GitHub's CI says anything: the pull request's CI is the yard's own |
+| `says` | source -> bead: an event reports an outcome to the bead that tracks its thread | the label `accepted`, put on by a person, says `accepted`; new commits on a pull request that waited in `triage` say `unaccepted` in `review`, `ciwait` and `contributor`, whoever pushed and even if the label was removed; new commits on any other pull request say `pushed` in `contributor`, and in `review` `pushed` when a bot pushed and `outdated` when a person did, in `ciwait` `pushed` when a bot pushed and `changes` when a person did; a merge says `merged`, a close `dropped`: for a pull request in `triage`, `review`, `review-post`, `ciwait`, `contributor`, `approved` and `decide`, for an issue in `triage`, `backlog`, `new`, `review`, `approved` and `decide`. No event of GitHub's CI says anything: the pull request's CI is the yard's own |
 | `hears` | bead -> source: a stage of the bead sets a status on the thread | an issue is closed when its bead reaches `merged` or `closed`, a pull request when its bead reaches `closed` |
 
 - **Triage is the pack's advice, and no rule of yardr.** Its stage file
@@ -1680,6 +1680,19 @@ yardr knows the verbs alone:
   `go.mod` or `go.sum` and nothing else) gets the label from the reviewer
   when it reports `done`; it says the yard may merge the pull request from
   `approved`. For any other pull request it is a maintainer's to add.
+- **`review-post` posts the reviewer's review, worked by the script group
+  `post`.** The reviewer holds no key, so its review is data: it stores the
+  review on the bead with the head it read, and when it reports `done` or
+  `changes` the script `post-review` posts it on the pull request as the
+  yard's GitHub App and sends the bead on, `done` to `ciwait` and `changes`
+  to `contributor`. It is always a comment, never an approval or a request
+  for changes, and the script gives the bead no label. The pull request is
+  the one the hook linked when it made the bead, so a link made by anyone
+  else is held, and the head must be the one the reviewer read, else the
+  review goes back to the reviewer once and then to `decide`. The group
+  works as the yard's GitHub App, so a yard makes it first and maps it
+  (`--group post=yardr-post`,
+  [line.md](line.md#posting-a-pull-requests-review)).
 - **`ciwait` is the yard's own CI, worked by the script group `pr-ci`.** A
   reviewed pull request waits there while `pr-ci` runs the depot's test
   command on its head, the one every landing runs; green is `done` to
@@ -1706,7 +1719,8 @@ yardr knows the verbs alone:
   `ciwait` back to `review`: from `review` the bead stays, as a new stay,
   and a new session reads the new head; from `ciwait` it goes back to be
   read, and waits for CI on the new head after. A person's push says
-  `changes`, as before, and waits in `contributor` for the next commits.
+  `outdated` from `review` and `changes` from `ciwait`, as before, and waits
+  in `contributor` for the next commits.
   Both are for a pull request no maintainer accepted: on one that waited in
   `triage`, every push says `unaccepted`, even after the label was removed.
 - **`contributor` is held by `outside`, a people group with no members.**
@@ -1714,7 +1728,7 @@ yardr knows the verbs alone:
   works it, and `yardr review` shows where it waits.
 - **A merge or a close ends the bead.** `merged` and `dropped` are the
   source's word, said by two lines that name no stage, and `triage`,
-  `review`, `ciwait`, `contributor`, `approved` and `decide` each lead them
+  `review`, `review-post`, `ciwait`, `contributor`, `approved` and `decide` each lead them
   to `merged` and `closed`: a maintainer can merge a pull request nobody of
   the yard has read, and its author can close one under review. A reviewer's
   `question` sends the bead to `decide` to wait for a member of `decisions`,
@@ -1752,8 +1766,8 @@ yardr knows the verbs alone:
   [README](../packs/contributors/README.md#the-pr-reviewers-group-binds-read-only)
   says what a maintainer then answers in the reviewer's pane.
 - **Nothing of the yard pushes, and it merges only what is `merge-ok`.**
-  The review is a note on the bead; a maintainer posts of it what they
-  choose. A pull request marked `merge-ok` (by the reviewer, a bot's bump
+  The review is a note on the bead, and the yard posts it on the pull
+  request as a comment (`review-post`, above). A pull request marked `merge-ok` (by the reviewer, a bot's bump
   of Go modules, or by a maintainer's yes, `yardr bead update <id>
   --add-label merge-ok --meta merge_head=<sha>`) is merged from `approved`
   by `contrib/assembly/merge-pr`, an `exec` group of the yard's own routed

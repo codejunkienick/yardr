@@ -159,25 +159,31 @@ func mergeYard(t *testing.T) (y *yard, gh string) {
 	y.envFile = filepath.Join(t.TempDir(), "pr-merges.env")
 	write(y.envFile, "GITHUB_APP_ID=123456\nGITHUB_APP_PRIVATE_KEY_FILE="+filepath.Join(gh, "app.pem")+"\n", 0o600)
 	y.opts = "YARDR_GITHUB_MINT=" + shellQuote(mint+" --from-group")
+	y.contributorsPRFlow()
+	return y, gh
+}
 
+// contributorsPRFlow puts the contributors pack's pr flow in the yard exactly
+// as the pack carries it, and points depot r's pull requests at it.
+func (y *yard) contributorsPRFlow() {
+	y.t.Helper()
 	sub, err := fs.Sub(packs.FS, packs.Contributors)
 	if err != nil {
-		t.Fatal(err)
+		y.t.Fatal(err)
 	}
 	p, err := pack.Load(sub, packs.Embedded)
 	if err != nil {
-		t.Fatal(err)
+		y.t.Fatal(err)
 	}
 	st := rpc.NewClient((&config.Config{Home: y.home}).Socket())
 	for _, f := range p.Flows {
 		if f.Name == "pr" {
 			if _, err := st.PutFlow(context.Background(), f.StoreFlow("contributors.pr"), "test"); err != nil {
-				t.Fatal(err)
+				y.t.Fatal(err)
 			}
 		}
 	}
 	y.pointFlow("r", "pr", "contributors.pr")
-	return y, gh
 }
 
 // prBead adds pr bead id in approved, tracking the pull request at url (none

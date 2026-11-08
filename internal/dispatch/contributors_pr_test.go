@@ -2,10 +2,11 @@ package dispatch_test
 
 // The pr flow of the contributors pack, whole, as the dispatcher runs it: the
 // pack's flow, its makes and says tables and the routes its yard adds for the
-// yard's CI and merge, with GitHub's deliveries normalized through the github
-// pack as a yard does. A bead is made by a pull request's event, is given to
-// the yard's CI in ciwait, and is routed from approved by its label, all by
-// the events and reports a person or a script would make; what pr-ci and
+// yard's posting of the review, CI and merge, with GitHub's deliveries
+// normalized through the github pack as a yard does. A bead is made by a pull
+// request's event, is given to the posting in review-post and to the yard's CI
+// in ciwait, and is routed from approved by its label, all by the events and
+// reports a person or a script would make; what post-review, pr-ci and
 // merge-pr do with a bead they are given is contrib/assembly's test.
 
 import (
@@ -29,12 +30,13 @@ import (
 
 // newContributorsYard is a yard whose depot yard, of acme/yardr, follows the
 // contributors pack for beads of the type pr: its flow, and the hook gh with
-// the pack's tables. The yard has the groups and routes docs/line.md, "The
-// yard as the CI of a pull request" and "Merging pull requests", set up: pr-ci
-// takes a pr bead in ciwait, and pr-merges one in approved that carries
-// merge-ok, as a yard default that outranks the depot's own route of a pr bead
-// in approved to the decisions, at 11. The review stage has no route: the
-// reviewer's report is made by the test, as is what a session of pr-ci reports.
+// the pack's tables. The yard has the groups and routes docs/line.md, "Posting
+// a pull request's review", "The yard as the CI of a pull request" and
+// "Merging pull requests", set up: post takes a pr bead in review-post, pr-ci
+// one in ciwait, and pr-merges one in approved that carries merge-ok, as a
+// yard default that outranks the depot's own route of a pr bead in approved to
+// the decisions, at 11. The review stage has no route: the reviewer's report
+// is made by the test, as is what a session of post or of pr-ci reports.
 func newContributorsYard(t *testing.T) *ghDepot {
 	t.Helper()
 	r := newGHDepot(t)
@@ -56,10 +58,13 @@ func newContributorsYard(t *testing.T) *ghDepot {
 	_, err = r.api.PutHook(ctx, *h, "me")
 	must(t, err)
 
+	must(t, r.api.PutGroup(ctx, store.Group{Name: "post", Runner: "fake", Limit: 1}, "me"))
 	must(t, r.api.PutGroup(ctx, store.Group{Name: "pr-ci", Runner: "fake", Limit: 1}, "me"))
 	must(t, r.api.PutGroup(ctx, store.Group{Name: "pr-merges", Runner: "fake", Limit: 1}, "me"))
 	pr, merge, everyone := "pr", "merge-ok", store.OriginatorAny
 	depot := "yard"
+	_, err = r.api.AddRoute(ctx, store.Route{Stage: "review-post", Type: &pr, Originator: &everyone, Group: "post"}, "me")
+	must(t, err)
 	_, err = r.api.AddRoute(ctx, store.Route{Stage: "ciwait", Type: &pr, Originator: &everyone, Group: "pr-ci"}, "me")
 	must(t, err)
 	_, err = r.api.AddRoute(ctx, store.Route{Stage: "approved", Type: &pr, Label: &merge, Originator: &everyone, Group: "pr-merges"}, "me")
@@ -179,7 +184,10 @@ func ciRun(key string, number int, conclusion string) func(map[string]any) {
 }
 
 // reviewerSays reports bead id done as the reviewer's session would, with
-// merge-ok when label is set, which the reviewer adds before it reports.
+// merge-ok when label is set, which the reviewer adds before it reports, and
+// then what the session of post would report once it posted the stored review,
+// before any pass has given it the bead: the bead is in ciwait. The posting
+// itself is TestContributorsReviewIsPostedBeforeTheWait's.
 func (r *ghDepot) reviewerSays(t *testing.T, id string, label bool) {
 	t.Helper()
 	ctx := context.Background()
@@ -188,6 +196,25 @@ func (r *ghDepot) reviewerSays(t *testing.T, id string, label bool) {
 		must(t, err)
 	}
 	_, err := r.api.Done(ctx, id, "done", "Ready", store.Expect{Stage: "review"}, "me")
+	must(t, err)
+	r.postSays(t, id, "done")
+}
+
+// reviewerAsksChanges reports bead id changes as the reviewer's session would,
+// and then what the session of post would report once it posted the stored
+// review: the bead is with its contributor.
+func (r *ghDepot) reviewerAsksChanges(t *testing.T, id string) {
+	t.Helper()
+	_, err := r.api.Done(context.Background(), id, "changes", "needs work", store.Expect{Stage: "review"}, "me")
+	must(t, err)
+	r.postSays(t, id, "changes")
+}
+
+// postSays reports bead id from review-post as the session of post would after
+// it posted the stored review on the pull request.
+func (r *ghDepot) postSays(t *testing.T, id, outcome string) {
+	t.Helper()
+	_, err := r.api.Done(context.Background(), id, outcome, "post-review: posted", store.Expect{Stage: "review-post"}, "me")
 	must(t, err)
 }
 
@@ -531,15 +558,124 @@ func TestContributorsBotPushStartsTheReadAgain(t *testing.T) {
 	}
 }
 
+// The reviewer's verdict is not the end of the review of a pull request from
+// outside: done and changes both take the bead to review-post, where the post
+// group is given it, and the script's report sends it on the way the stored
+// review says, done to the wait for the yard's CI and changes to its
+// contributor, neither before the script has posted. A question is a person's
+// and is never posted. A review the script cannot post goes back to the
+// reviewer once and the second time to a person, and the flow counts the
+// rounds back to review whichever outcome made them, so a bead that a push
+// already brought back to be read has used its retry. A push while the script
+// runs says nothing to the stage: the script's own check of the head is what
+// stops a review of another head.
+func TestContributorsReviewIsPostedBeforeTheWait(t *testing.T) {
+	t.Parallel()
+	r := newContributorsYard(t)
+	r.reviewedBy(t, "pr-reviewers")
+	now := time.Now()
+	dispatch.SetClock(r.d, func() time.Time { return now })
+	ctx := context.Background()
+	open := func(n int) *store.Bead {
+		r.deliverJSON(t, "pull_request", "pull_request_opened", prEvent(n, "dependabot[bot]", "Bot"))
+		return r.madeIn(t, n, "review")
+	}
+	reviewerSays := func(id, outcome string) {
+		t.Helper()
+		_, err := r.api.Done(ctx, id, outcome, "the review", store.Expect{Stage: "review"}, "me")
+		must(t, err)
+	}
+	// givenTo says, after a pass, which groups the daemon has given bead id, in
+	// order.
+	givenTo := func(id string, want ...string) {
+		t.Helper()
+		r.pass(t)
+		if got := r.startedFor(id); !slices.Equal(got, want) {
+			t.Fatalf("%s given to %v, want %v", id, got, want)
+		}
+	}
+	inStage := func(id, want string) {
+		t.Helper()
+		if st := r.stageOf(t, id); st != want {
+			t.Fatalf("%s in %s, want %s", id, st, want)
+		}
+	}
+
+	// Ready: posted, then the yard's CI runs on the head that was read.
+	ready := open(81)
+	reviewerSays(ready.ID, "done")
+	inStage(ready.ID, "review-post")
+	givenTo(ready.ID, "pr-reviewers", "post")
+	r.postSays(t, ready.ID, "done")
+	inStage(ready.ID, "ciwait")
+	givenTo(ready.ID, "pr-reviewers", "post", "pr-ci")
+
+	// Changes asked: posted, then it waits for its contributor, whose new
+	// commits are what bring it back; the yard's CI never runs.
+	changes := open(82)
+	reviewerSays(changes.ID, "changes")
+	inStage(changes.ID, "review-post")
+	givenTo(changes.ID, "pr-reviewers", "post")
+	r.postSays(t, changes.ID, "changes")
+	inStage(changes.ID, "contributor")
+	givenTo(changes.ID, "pr-reviewers", "post")
+
+	// A question is for a person and nothing is posted.
+	asked := open(83)
+	reviewerSays(asked.ID, "question")
+	inStage(asked.ID, "decide")
+	givenTo(asked.ID, "pr-reviewers")
+
+	// A push, a person's or a bot's, while the script runs moves nothing: no
+	// line of the table names the stage. The script's check of the head fails a
+	// review of the old head back to the reviewer.
+	racing := open(84)
+	reviewerSays(racing.ID, "done")
+	givenTo(racing.ID, "pr-reviewers", "post")
+	for _, push := range []func(map[string]any){pushedBy("a-maintainer", "User"), pushedBy("an-app[bot]", "Bot")} {
+		r.deliverJSON(t, "pull_request", "pull_request_synchronize", prEvent(84, "dependabot[bot]", "Bot"), atHead(movedSHA), push)
+		r.pass(t)
+		inStage(racing.ID, "review-post")
+	}
+	r.postSays(t, racing.ID, "failed")
+	inStage(racing.ID, "review")
+
+	// A review that cannot be posted goes back to the reviewer once, with the
+	// reason in a note, and the second time to a person.
+	stuck := open(85)
+	for _, want := range []string{"review", "decide"} {
+		reviewerSays(stuck.ID, "done")
+		inStage(stuck.ID, "review-post")
+		r.pass(t)
+		_, err := r.api.Done(ctx, stuck.ID, "failed", "post-review: the review stored on "+stuck.ID+" is not postable", store.Expect{Stage: "review-post"}, "me")
+		must(t, err)
+		inStage(stuck.ID, want)
+		if note := r.lastNote(t, stuck.ID); !strings.Contains(note, "is not postable") {
+			t.Fatalf("note of the move to %s: %q", want, note)
+		}
+		now = now.Add(time.Hour)
+	}
+
+	// A bead that a bot's push already brought back to be read has used the
+	// retry: its first failed post goes to a person.
+	again := open(86)
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", prEvent(86, "dependabot[bot]", "Bot"), atHead(movedSHA))
+	r.pass(t)
+	inStage(again.ID, "review")
+	reviewerSays(again.ID, "done")
+	r.postSays(t, again.ID, "failed")
+	inStage(again.ID, "decide")
+}
+
 // A pull request merged or closed on GitHub ends its bead wherever the bead
-// waits but approved, which had the edges first: in triage, under review, in
-// the wait for the yard's CI, with the contributor and in decide, where a
-// reviewer's question leaves it for a person. The pack's two lines name no
-// stage, so a stage without an edge for them left the event nowhere to go, and
-// the bead open on a pull request that was over. Where the bead is worked its
-// session ends with it: the reviewer's is stopped, and so is the yard's CI,
-// whose report is then refused as one from a stage the bead has left, as it is
-// after a push.
+// waits but approved, which had the edges first: in triage, under review,
+// while its review is posted, in the wait for the yard's CI, with the
+// contributor and in decide, where a reviewer's question leaves it for a
+// person. The pack's two lines name no stage, so a stage without an edge for
+// them left the event nowhere to go, and the bead open on a pull request that
+// was over. Where the bead is worked its session ends with it: the reviewer's
+// is stopped, and so are the posting's and the yard's CI, whose report is then
+// refused as one from a stage the bead has left, as it is after a push.
 func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 	t.Parallel()
 	r := newContributorsYard(t)
@@ -549,8 +685,9 @@ func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 
 	// arrive makes the bead of a new pull request and takes it to stage as its
 	// events and reports would: a stranger's waits in triage, a bot's goes
-	// to the reader, whose verdict sends it on to the wait for CI, back to
-	// its contributor, or to a person with a question.
+	// to the reader, whose verdict sends it on to the posting of its review,
+	// then to the wait for CI or back to its contributor, or to a person with a
+	// question.
 	number := 50
 	arrive := func(stage string) *store.Bead {
 		number++
@@ -561,11 +698,13 @@ func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 		r.deliverJSON(t, "pull_request", "pull_request_opened", prEvent(number, "dependabot[bot]", "Bot"))
 		b := r.madeIn(t, number, "review")
 		switch stage {
+		case "review-post":
+			_, err := r.api.Done(ctx, b.ID, "done", "Ready", store.Expect{Stage: "review"}, "me")
+			must(t, err)
 		case "ciwait":
 			r.reviewerSays(t, b.ID, false)
 		case "contributor":
-			_, err := r.api.Done(ctx, b.ID, "changes", "needs work", store.Expect{Stage: "review"}, "me")
-			must(t, err)
+			r.reviewerAsksChanges(t, b.ID)
 		case "decide":
 			_, err := r.api.Done(ctx, b.ID, "question", "is this change wanted?", store.Expect{Stage: "review"}, "me")
 			must(t, err)
@@ -578,7 +717,8 @@ func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 	}
 
 	// workedIn are the sessions of the yard that worked bead id in stage: the
-	// reader's, the yard's CI. Nobody of the yard works the stages of people.
+	// reader's, the posting's, the yard's CI. Nobody of the yard works the
+	// stages of people.
 	workedIn := func(id, stage string) []string {
 		r.f.mu.Lock()
 		defer r.f.mu.Unlock()
@@ -591,7 +731,7 @@ func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 		return sessions
 	}
 
-	for _, stage := range []string{"triage", "review", "ciwait", "contributor", "decide"} {
+	for _, stage := range []string{"triage", "review", "review-post", "ciwait", "contributor", "decide"} {
 		for _, c := range []struct{ fixture, outcome, to string }{
 			{"pull_request_closed_merged", "merged", "merged"},
 			{"pull_request_closed_unmerged", "dropped", "closed"},
@@ -610,12 +750,17 @@ func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 			}
 			wantRules(t, r.rules(t, b.ID), "pull_request made", c.outcome+" "+stage+" -> "+c.to)
 
-			// Whatever worked the stage is stopped, and the yard's CI cannot
-			// report a pass for a pull request that is over.
+			// Whatever worked the stage is stopped, and neither the posting nor
+			// the yard's CI can report for a pull request that is over.
 			r.pass(t)
 			for _, s := range worked {
 				if !slices.Contains(r.stoppedSessions(), s) {
 					t.Errorf("%s: session %s of the old stay still runs: stopped %v", stage, s, r.stoppedSessions())
+				}
+			}
+			if stage == "review-post" {
+				if _, err := r.api.Done(ctx, b.ID, "done", "post-review: posted", store.Expect{Stage: "review-post"}, "me"); err == nil {
+					t.Errorf("a report from review-post on %s was taken after its pull request was %s", b.ID, c.outcome)
 				}
 			}
 			if stage == "ciwait" {
@@ -694,8 +839,7 @@ func TestContributorsAcceptanceIsOfACommit(t *testing.T) {
 			case "ciwait":
 				r.reviewerSays(t, b.ID, false)
 			case "contributor":
-				_, err := r.api.Done(ctx, b.ID, "changes", "needs work", store.Expect{Stage: "review"}, "me")
-				must(t, err)
+				r.reviewerAsksChanges(t, b.ID)
 			}
 			if got := r.stageOf(t, b.ID); got != stage {
 				t.Fatalf("%s in %s, want %s", b.ID, got, stage)
@@ -727,8 +871,7 @@ func TestContributorsAcceptanceIsOfACommit(t *testing.T) {
 		case "ciwait":
 			r.reviewerSays(t, b.ID, false)
 		case "contributor":
-			_, err := r.api.Done(ctx, b.ID, "changes", "needs work", store.Expect{Stage: "review"}, "me")
-			must(t, err)
+			r.reviewerAsksChanges(t, b.ID)
 		}
 		r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(n, bearing(), atHead(movedSHA))...)
 		if got, accepted, pr := where(b.ID); got != "triage" || accepted != fixtureSHA || pr != movedSHA {

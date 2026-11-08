@@ -1380,7 +1380,7 @@ func TestSharedTableRoutesByTheBeadsType(t *testing.T) {
 		{"changes requested by a writer the review does not name, a train", changes(""), "review", "train", "", ""},
 		{"changes requested by a member, a pull request", changes("member"), "review", "pr", "", ""},
 		{"changes requested by someone unknown to the repository, a pull request", changes("none"), "review", "pr", "", ""},
-		{"pushed under review, a pull request", ev("event", "pull_request", "action", "synchronize"), "review", "pr", "changes", "the PR changed under review"},
+		{"pushed under review, a pull request", ev("event", "pull_request", "action", "synchronize"), "review", "pr", "outdated", "the PR changed under review"},
 		{"pushed under review, a train", ev("event", "pull_request", "action", "synchronize"), "review", "train", "", ""},
 		{"a bot pushed under review, a pull request", bot, "review", "pr", "pushed", "a bot pushed to the PR"},
 		{"a bot pushed in the wait for CI, a pull request", bot, "ciwait", "pr", "pushed", "a bot pushed to the PR"},

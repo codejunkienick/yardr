@@ -1739,6 +1739,109 @@ the part's bead id, so the reviewer reverts that commit on the carrier's
 branch and goes on reviewing. A bead that is not a member of the carrier is
 refused.
 
+## Posting a pull request's review
+
+The reviewer of a pull request from outside reads a stranger's text, and it
+holds no key on purpose: whatever talks it into something would have what the
+yard's GitHub App has. So its review is data, and a script posts it, as the
+public line's reviews are posted ([below](#the-public-line)). A `pr` bead of
+the contributors pack ([packs.md](packs.md#the-contributors-pack)) that the
+reviewer found ready, or that needs changes, goes to `review-post`, and
+[`contrib/assembly/post-review`](../contrib/assembly/post-review), the `cmd` of
+an `exec` group of the yard's own, posts the review the reviewer stored, as the
+App, and sends the bead on: `done` to `ciwait`, `changes` to `contributor`. The
+reviewer stores it in the update that records the head it read, and reports the
+same outcome:
+
+```sh
+yardr bead update <id> --meta reviewed_head="$(git rev-parse HEAD)" --meta review='{
+  "outcome": "done",
+  "body": "What the change does, and the findings, each with its file and line…",
+  "comments": []}'
+```
+
+It is one script with two modes: a bead of type `pr` takes the rules below, and
+every other bead keeps the public line's. What the two share is kept as it is:
+the pull request's URL must be `https://github.com/<owner>/<repo>/pull/<n>`, the
+pull request must be open, the review is anchored to the head the reviewer read
+(`reviewed_head`) and refused when GitHub says the pull request has another head
+now, the review's fields are checked one by one and the request is made from
+them by `jq`, and the App's token goes to `gh` in its environment and to no
+argument, note or log. What a pull request from outside changes:
+
+- **The pull request is the one the hook linked.** The public line binds the
+  review to the bead's own branch, which a contributor's pull request is not:
+  it comes from a fork, or from a branch of theirs. The bead has no `own_pr`
+  either. What says which pull request the bead is of is its tracks link, and
+  the script posts only if the hook that made the bead made that link
+  (`created_by` is `hook:<name>`). A link a person or an agent of the yard made,
+  which an agent cannot do to a `pr` bead past triage anyway
+  ([links.md](links.md#the-rules)), is held, not posted on.
+- **Always a comment, never an approval or a request for changes.** Merging is
+  a maintainer's, and a request for changes would stand on the pull request
+  after its author had acted, since nothing posts again: the bead's routing
+  carries the consequence, and the review is a comment whatever it says. The
+  first line is still the verdict, written by the script (`Approved`, `Changes
+  needed`), and the stored review is emptied once it is posted, so that it is
+  posted once.
+- **No label.** The script gives the bead no `merge-ok` and takes none off. The
+  reviewer's grant for a bot's bump of Go modules and a maintainer's yes are as
+  they were ("Merging pull requests", below).
+- **Findings are in the body.** The reviewer stores `comments` as `[]` and puts
+  each finding in `body` with its file and line; the script still checks inline
+  comments as it does for the public line, and posts one if it is given.
+- **A review it cannot post goes back to the reviewer, never with an order to
+  push.** The pull request is its author's, and the reviewer pushes nothing. A
+  review none stored, one with a field wrong, a `done-safe` (which the contributors
+  flow has no way for), no recorded head, a pull request that has moved since
+  the head was read, or a comment GitHub refuses, is failed back to `review` with
+  the reason in a note, which tells the reviewer to read the pull request as it
+  is now, record that head and store the review again. The flow allows one such
+  return, then sends the bead to `decide`; the flow counts the rounds back to
+  `review`, whichever outcome made them, so a bead that a push already brought
+  back to be read goes to `decide` the first time. What is not the reviewer's to
+  put right holds the bead in `review-post` with a note, for the operator to put
+  right and `yardr bead unhold <id>`: a link the hook did not make, a pull request
+  that is not open, no App inputs, a mint that fails, any other answer from GitHub.
+
+A question for a person is never posted: it goes to `decide`. A push to the pull
+request while the script runs is no event of this stage: the script's check of
+the head sends a review of a head the pull request no longer has back to `review`.
+A merge or a close of the pull request ends the bead from `review-post`, as from
+every stage a bead waits in, and the run is stopped.
+
+### Setup
+
+The group is the yard's, made once, for the public line's posting stages and
+this one: one group, `yardr-post`, serves both. Its `env_file` is the App's id
+and the path of its key file, the same file the groups of the sections below
+have, and the github source's `mint_command` is the mint, as there. The App needs
+Pull requests read and write on the repository, to read the head and post a
+review.
+
+```sh
+install contrib/assembly/post-review ~/.yardr/scripts/                 # from main
+yardr group add yardr-post --runner exec --limit 1 \
+  --set cmd="$HOME/.yardr/scripts/post-review" \
+  --set env_file="$HOME/.yardr/env/pr-merges.env" \
+  --set log="$HOME/.yardr/logs/yardr-post.log"
+yardr pack apply contributors --depot <depot> --group post=yardr-post …   # the pack's flow, and its route for review-post
+```
+
+`--group post=yardr-post` maps the pack's group to the yard's for every depot
+(the flag is repeatable, so the same apply maps `--group pr-ci=pr-ci` too, as
+the next section has it), and the apply writes the route for each:
+`review-post`, type `pr`, to `yardr-post`. A yard whose `pr` flow is its own
+routes the stage by hand instead (`yardr route add --stage review-post --type pr
+--originator any --group yardr-post`). The script is refreshed by `yardr
+upgrade` from the checkout it builds, once installed
+([upgrade.md](upgrade.md#the-scripts)); the pack carries a copy that a test
+holds equal. The reviewer's role is what stores the review,
+and the pack's flow is what sends the bead to `review-post`, so a yard that
+upgrades the script applies the pack again too: a yard that has not keeps its
+old flow and role, and its reviewer's `done` goes straight to `ciwait` with
+nothing stored or posted.
+
 ## The yard as the CI of a pull request
 
 The yard is the CI of a pull request, whether or not the repository has GitHub

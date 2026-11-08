@@ -139,6 +139,24 @@ func TestPRCICopyInThePackIsIdentical(t *testing.T) {
 	}
 }
 
+// The contributors pack carries post-review for the group that posts the
+// reviewer's stored review on a pull request from outside, byte for byte the
+// one in contrib/assembly that a yard installs and `yardr upgrade` refreshes: a
+// change to one is made in both.
+func TestPostReviewCopyInThePackIsIdentical(t *testing.T) {
+	want, err := os.ReadFile("post-review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile("../../packs/contributors/scripts/post-review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Error("packs/contributors/scripts/post-review differs from contrib/assembly/post-review: change both")
+	}
+}
+
 // A landing on the depot upgrade_from names installs the landed build and
 // notes the outcome: the summary joins the landing note, the seconds the
 // log line, and the install's own lines the log. The install also refreshes
