@@ -247,6 +247,15 @@ func (s *Supervisor) leave(app string) {
 	}
 }
 
+// hasInFlight reports whether app has a request in flight now. A reconcile
+// pass uses its earlier copy to catch a release before its row read, and this
+// live read catches a request admitted after that copy.
+func (s *Supervisor) hasInFlight(app string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.inflight[app] > 0
+}
+
 // stripEdgeCredentials removes edge headers and cookies from a request
 // before forwarding it, keeping the app's own cookies.
 func stripEdgeCredentials(h http.Header) {

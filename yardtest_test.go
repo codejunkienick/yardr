@@ -3908,6 +3908,74 @@ func TestYardTestRaceLockIsTheYards(t *testing.T) {
 	}
 }
 
+// running reports whether pid is a live process. A zombie is not running:
+// kill -0 still answers for one, so where it says alive the state is read
+// with ps and a zombie counts as dead. ps listing nothing means the process
+// died between the checks. A killed process stays a zombie until its parent,
+// or the init that adopted it, waits for it, and a container whose first
+// process does not (go itself, in a `docker run` without --init) never does.
+func running(pid int) bool {
+	if pid <= 0 || syscall.Kill(pid, 0) != nil {
+		return false
+	}
+	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return false
+	}
+	return !zombie(strings.TrimSpace(string(out)))
+}
+
+// zombie reports whether a ps STAT word names a process that is not
+// running: a zombie, or nothing at all where ps lists no such process.
+func zombie(stat string) bool { return stat == "" || strings.Contains(stat, "Z") }
+
+// A killed process nobody has waited for is a zombie, and running counts it as
+// dead whatever reaps on the machine the suite runs on. A STAT word with a Z in
+// it names one, and so does none listed at all; and a real zombie is a child of
+// the test that is killed and not waited for until the test ends, which kill -0
+// still answers for.
+func TestRunningCountsAZombieAsDead(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		stat string
+		want bool
+	}{
+		{"Z", true},
+		{"Z+", true},
+		{"Ss", false},
+		{"R", false},
+		{"", true}, // ps lists nothing: dead between the checks
+	} {
+		if got := zombie(c.stat); got != c.want {
+			t.Errorf("zombie(%q) = %v, want %v", c.stat, got, c.want)
+		}
+	}
+	needTool(t, "ps")
+	sleeper := exec.Command("sleep", "300")
+	if err := sleeper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := sleeper.Process.Pid
+	t.Cleanup(func() {
+		_ = sleeper.Process.Kill()
+		_ = sleeper.Wait()
+	})
+	if !running(pid) {
+		t.Fatalf("a sleeping child (pid %d) is not running", pid)
+	}
+	if err := sleeper.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, 10*time.Millisecond, func(_ time.Time) bool {
+		return !running(pid)
+	}, func(scaled time.Duration) {
+		t.Fatalf("a killed child (pid %d) that nobody waited for is still running after %s", pid, scaled)
+	})
+	if syscall.Kill(pid, 0) != nil {
+		t.Errorf("kill -0 no longer answers for the child (pid %d): it was reaped, so the case proves nothing", pid)
+	}
+}
+
 // The race lock dies with the run, whatever the run leaves behind: a run
 // under racelocked that backgrounds a long sleep and exits releases the
 // lock at once, so a second run gets it at its first attempt (an orphaned
@@ -4020,9 +4088,12 @@ func TestYardTestRaceLockDiesWithTheRun(t *testing.T) {
 	if pid := pidOf(victim); syscall.Kill(pid, 0) == nil {
 		t.Errorf("the run (pid %d) survived the TERM to its holder: it was not forwarded", pid)
 	}
+	// The child's parent is gone, so the init of the machine adopts it, and
+	// where that one does not wait for what it adopts (a container without an
+	// init) the killed child stays a zombie that kill -0 still answers for.
 	childPID := pidOf(victimChild)
 	pollUntil(t, 5*time.Second, 10*time.Millisecond, func(_ time.Time) bool {
-		return syscall.Kill(childPID, 0) != nil
+		return !running(childPID)
 	}, func(time.Duration) {
 		t.Errorf("the run's child (pid %d) survived the TERM to its holder", childPID)
 	})

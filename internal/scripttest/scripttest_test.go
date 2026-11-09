@@ -56,6 +56,42 @@ func TestStandInRunsAsAScriptAtItsPath(t *testing.T) {
 	}
 }
 
+// A stand-in starts while the files beside its link are open for writing. An
+// executable file of a test's own does not on Linux, for as long as any process
+// holds it open for writing (text file busy), and a fork made beside a test
+// that writes one holds its descriptor until the fork execs: a git written for
+// a case then did not start, and the check that ran it answered false. The
+// launcher is written once and run before any stand-in is, and a body is only
+// read by the shell. Holding the body open here is that fork's hold, kept for
+// the whole run instead of a moment. Where a system starts a file of its own
+// that is open for writing too, the case tells nothing apart, and says so.
+func TestStandInStartsWhileItsBodyIsOpenForWriting(t *testing.T) {
+	dir := t.TempDir()
+	hold := func(path string) {
+		t.Helper()
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { f.Close() })
+	}
+	plain := filepath.Join(dir, "plain")
+	if err := os.WriteFile(plain, []byte("#!/bin/sh\necho plain\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hold(plain)
+	refused := exec.Command(plain).Run() != nil
+	git := filepath.Join(dir, "git")
+	Write(t, git, "#!/bin/sh\necho stood-in\n")
+	hold(git + ".sh")
+	if out, err := exec.Command(git).Output(); err != nil || string(out) != "stood-in\n" {
+		t.Errorf("a stand-in whose body is open for writing: %q, %v", out, err)
+	}
+	if !refused {
+		t.Log("this system starts a file that is open for writing, so a stand-in is no different from one here")
+	}
+}
+
 // Relink makes stand-ins of the executable scripts under a directory, each
 // under its own shell, over a file that was there, and leaves alone what is
 // no script of those shells and what cannot be run.

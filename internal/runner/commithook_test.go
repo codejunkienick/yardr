@@ -12,6 +12,7 @@ import (
 
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/dispatch"
+	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/store"
 )
 
@@ -1684,19 +1685,18 @@ func TestSessionCommitHonoursRepoInclude(t *testing.T) {
 // The check runs past every override, so it reads the install's own file.
 func TestSystemGitconfigClean(t *testing.T) {
 	t.Parallel()
+	// A stand-in, not an executable file written here: Linux does not start
+	// a file while any process holds it open for writing (text file busy), and
+	// the subtests run side by side, so a fork of one that is made while another
+	// is writing its git carries that descriptor until it execs. The check then
+	// found a git that would not run, which it answers false for, and failed a
+	// case that wants true. A stand-in's executable is a launcher that no test
+	// writes again, and it is run once, outside the check's deadline, so the
+	// first start of a new file does not wait behind the machine's others either.
 	fakeGit := func(t *testing.T, body string) string {
 		t.Helper()
 		path := filepath.Join(t.TempDir(), "git")
-		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		// Warm the script once, to completion and unbounded: the first
-		// start of a never-run executable pays the machine's first-launch
-		// assessment, seconds under builder load, and the check below
-		// answers false past its deadline. A stopped start pays the
-		// whole assessment again next time, so this run must not go
-		// through the check's timeout; the result is ignored.
-		_ = exec.Command(path, "config", "--system", "--list").Run()
+		scripttest.Write(t, path, body)
 		return path
 	}
 	for _, tc := range []struct {

@@ -243,6 +243,28 @@ func (g *flipGate) UpdatePreview(ctx context.Context, app string, upd store.Prev
 	return g.Store.UpdatePreview(ctx, app, upd)
 }
 
+// rowGate is a store whose reads of the registry's rows, once it is armed, read
+// first and then wait to be let go, one each time let is sent to, so a test says
+// what happens between a pass's read of the rows and the rest of the pass.
+// Closing let lets go every read that waits and every later one. Reads before it
+// is armed pass, and a test sets it as the supervisor's store before anything
+// runs, as it does flipGate.
+type rowGate struct {
+	Store
+	armed   atomic.Bool
+	arrived atomic.Int32 // reads that have come to the gate armed
+	let     chan struct{}
+}
+
+func (g *rowGate) Previews(ctx context.Context) ([]store.Preview, error) {
+	rows, err := g.Store.Previews(ctx)
+	if g.armed.Load() {
+		g.arrived.Add(1)
+		<-g.let
+	}
+	return rows, err
+}
+
 // A failing test's card says when something answers on a preview's port that the
 // supervisor holds no process for, which is what a request taken for the app's
 // by that answer looks like from the test's side.
@@ -802,6 +824,144 @@ func TestIdleStopAndRebootRule(t *testing.T) {
 	waitFor(t, "reboot-stopped preview", func() bool {
 		got := y2.state("demo")
 		return got.State == store.PreviewStopped && got.StateDetail == "reboot"
+	})
+}
+
+// A pass reads what is in flight before it reads the rows. What ends a request,
+// a socket or a stream writes its last moment to the row before it gives its
+// count back, so a count of zero that the pass saw means the row it read after
+// holds that moment. Read the other way round, a pass that has read the rows
+// and then waits finds the count at zero once what was in flight has ended, with
+// a row from before the moment, a last request older than the idle bound and
+// nothing in flight, and stops a preview that was asked for as it was read. The
+// gate holds the pass after its rows are read, while what is in flight ends.
+func TestPassReadsWhatIsInFlightBeforeItsRows(t *testing.T) {
+	ctx := context.Background()
+	// Older than the idle bound, which nothing here changes from its default.
+	old := time.Now().Add(-2 * store.DefaultPreviewIdle)
+	for _, tc := range []struct {
+		name string
+		// start puts something in flight on a preview that is idle by its row, and
+		// returns the app and what ends it, once its count is given back.
+		start func(t *testing.T, y *yard) (app string, end func())
+	}{
+		{"a socket's close", func(t *testing.T, y *yard) (string, func()) {
+			port := freePort(t)
+			y.propose(t, "demo", previewtest.App("127.0.0.1", port), port, true)
+			t.Cleanup(func() { y.sup.kill("demo") })
+			must(t, y.sup.Start(ctx, "demo"))
+			l := socketLink(t, y)
+			head := openPreviewSocket(t, l, "/preview/demo/ws", nil, nil)
+			if head.Status != http.StatusSwitchingProtocols {
+				t.Fatalf("the head is %+v, want 101", head)
+			}
+			// The socket has sat quiet longer than the idle bound: the process
+			// started and the row was last written before it.
+			y.backdateStart("demo", old)
+			_, err := y.st.UpdatePreview(ctx, "demo", store.PreviewUpdate{LastRequest: &old})
+			must(t, err)
+			return "demo", func() {
+				must(t, l.SendSocketClose(ctx, head.ID, 1000, "done"))
+				waitFor(t, "the socket's counts given back", func() bool {
+					sockets, inflight := previewSocketCounts(y, "demo")
+					return sockets == 0 && inflight == 0
+				})
+			}
+		}},
+		{"a watch stream's end", func(t *testing.T, y *yard) (string, func()) {
+			y.sup.WatchPoll, y.sup.WatchSettle = 20*time.Millisecond, 50*time.Millisecond
+			p, _, _ := y.watching(t, map[string]string{"index.html": "<body>one</body>"})
+			srv := httptest.NewServer(y.sup.Handler())
+			t.Cleanup(srv.Close)
+			lines, closeIt := stream(t, srv.URL+"/preview/"+p.App+"/"+watchEvents)
+			<-lines // the stream is open
+			_, err := y.st.UpdatePreview(ctx, p.App, store.PreviewUpdate{LastRequest: &old})
+			must(t, err)
+			return p.App, func() {
+				closeIt()
+				waitFor(t, "the stream's count given back", func() bool {
+					y.sup.mu.Lock()
+					defer y.sup.mu.Unlock()
+					return y.sup.inflight[p.App] == 0
+				})
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// No Run: the pass is this test's own, held after its rows are read.
+			y := newYard(t)
+			gate := &rowGate{Store: y.sup.Store, let: make(chan struct{})}
+			y.sup.Store = gate
+			app, end := tc.start(t, y)
+			gate.armed.Store(true)
+			// Whichever way the test ends, the read is let go, so the pass ends.
+			defer close(gate.let)
+			passed := make(chan struct{})
+			go func() {
+				defer close(passed)
+				y.sup.reconcile(ctx, false)
+			}()
+			waitFor(t, "the pass to have read the rows", func() bool { return gate.arrived.Load() == 1 })
+			end()
+			// The pass holds the row from before the end; the row now holds its moment.
+			if at := y.state(app).LastRequestAt; at == nil || time.Since(*at) > time.Minute {
+				t.Fatalf("the row of %s holds %v after the end, want the moment it ended", app, at)
+			}
+			gate.let <- struct{}{}
+			waitFor(t, "the pass to end", func() bool {
+				select {
+				case <-passed:
+					return true
+				default:
+					return false
+				}
+			})
+			if got := y.state(app); got.State != store.PreviewRunning {
+				t.Fatalf("a pass that read its rows before %s stopped the preview, though the row holds the moment it ended: %+v", tc.name, got)
+			}
+		})
+	}
+	t.Run("a request admitted after the count snapshot", func(t *testing.T) {
+		ctx := context.Background()
+		y := newYard(t)
+		port := freePort(t)
+		y.propose(t, "demo", previewtest.App("127.0.0.1", port), port, true)
+		t.Cleanup(func() { y.sup.kill("demo") })
+		y.sup.reconcile(ctx, false)
+		if got := y.state("demo"); got.State != store.PreviewRunning {
+			t.Fatalf("preview did not start: %+v", got)
+		}
+		old := time.Now().Add(-2 * store.DefaultPreviewIdle)
+		y.backdateStart("demo", old)
+		if _, err := y.st.UpdatePreview(ctx, "demo", store.PreviewUpdate{LastRequest: &old}); err != nil {
+			t.Fatal(err)
+		}
+		gate := &rowGate{Store: y.sup.Store, let: make(chan struct{})}
+		y.sup.Store = gate
+		gate.armed.Store(true)
+		defer close(gate.let)
+		passed := make(chan struct{})
+		go func() {
+			defer close(passed)
+			y.sup.reconcile(ctx, false)
+		}()
+		waitFor(t, "the pass to have read the rows", func() bool { return gate.arrived.Load() == 1 })
+		if !y.sup.enter("demo") {
+			t.Fatal("request was not admitted")
+		}
+		defer y.sup.leave("demo")
+		gate.let <- struct{}{}
+		waitFor(t, "the pass to end", func() bool {
+			select {
+			case <-passed:
+				return true
+			default:
+				return false
+			}
+		})
+		if got := y.state("demo"); got.State != store.PreviewRunning {
+			t.Fatalf("a request admitted after the count snapshot was stopped as idle: %+v", got)
+		}
 	})
 }
 

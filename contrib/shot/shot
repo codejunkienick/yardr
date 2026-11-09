@@ -213,9 +213,11 @@ fi
 # script. Each trap names its signal and exit code, and the handler stops
 # the watcher, gives Chrome TERM with the watchdog's grace and then KILL
 # whatever it did, removes the profile, and exits 128+n; it ends with
-# exit, never falling through to the normal path.
+# exit, never falling through to the normal path. The watcher is stopped
+# with USR1, which this shell does not trap, and not with TERM, which it does
+# (see where the watcher is forked).
 stop_shot() {
-  kill "${watcher:-}" 2>/dev/null
+  kill -USR1 "${watcher:-}" 2>/dev/null
   wait "${watcher:-}" 2>/dev/null
   kill -TERM "${pid:-}" 2>/dev/null
   sleep 5
@@ -242,29 +244,33 @@ trap 'stop_sig=HUP; stop_code=129; stop_shot' HUP
 "$chrome" --headless --disable-gpu --user-data-dir="$prof" \
   --screenshot="$out" --window-size="$SHOT_WIDTH,800" "$shoot" </dev/null &
 pid=$!
+# The watcher and its timer are stopped with a signal that the shell which
+# forked them does not trap. A fork is a copy of its shell until it resets the
+# traps it copied, which a loaded machine can leave waiting a good while, and a
+# signal that is trapped there reaches the copy as the trap of the shell it
+# copies and is dropped when the copy resets them. A TERM to the watcher, which
+# this shell traps, was dropped that way after a Chrome that had ended at once:
+# the wait below then waited out the whole watchdog, SHOT_TIMEOUT and its grace,
+# and reported that Chrome had not finished. The watcher is stopped with USR1,
+# which this shell traps nowhere, so a copy that has not run yet dies of it by
+# default and one that has takes it as its own trap; its timer, forked holding
+# the watcher's traps, with KILL. Chrome is stopped with TERM and then, after
+# the grace, KILL, which a TERM dropped in the same way does not outlast.
 ( timer=
-  # Invoked by the subshell's TERM/INT/HUP trap below, not by name.
+  # Invoked by the subshell's TERM/INT/HUP/USR1 trap below, not by name.
   # shellcheck disable=SC2329
   stop_timer() {
-    trap - TERM INT HUP
+    trap - TERM INT HUP USR1
     if [ -n "$timer" ]; then
-      # The timer may have forked but not exec'd sleep yet: still a shell
-      # copy with the TERM trap, so one TERM is consumed and the sleep
-      # runs whole while the shot waits it out. Re-send TERM until the
-      # timer is gone; once exec'd, sleep carries no trap and dies. The
-      # loop is tight and bounded, with no sleep: the pre-exec window is
-      # microseconds.
-      kill "$timer" 2>/dev/null
-      i=0
-      while kill -0 "$timer" 2>/dev/null && [ "$i" -lt 100 ]; do
-        kill "$timer" 2>/dev/null
-        i=$((i+1))
-      done
+      # KILL ends the timer whether it has exec'd sleep yet or is still a
+      # copy of this subshell with its traps, and a sleep has nothing to
+      # clean up.
+      kill -KILL "$timer" 2>/dev/null
       wait "$timer" 2>/dev/null
     fi
     exit 0
   }
-  trap 'stop_timer' TERM INT HUP
+  trap 'stop_timer' TERM INT HUP USR1
   sleep "$SHOT_TIMEOUT" &
   timer=$!
   wait "$timer"
@@ -279,7 +285,7 @@ pid=$!
 watcher=$!
 wait "$pid"
 rc=$?
-kill "$watcher" 2>/dev/null
+kill -USR1 "$watcher" 2>/dev/null
 wait "$watcher" 2>/dev/null
 if [ "$rc" -ne 0 ] && [ -f "$prof/timedout" ]; then
   echo "shot: chrome did not finish within ${SHOT_TIMEOUT}s" >&2

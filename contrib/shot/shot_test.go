@@ -129,8 +129,21 @@ func runShot(ctx context.Context, t *testing.T, args []string, env ...string) (i
 // after the stand-in is ready runs the script ahead of that, from another
 // goroutine, where the test must not fail.
 func runShotCmd(ctx context.Context, args []string, env ...string) (int, string, error) {
+	return runStarted(ctx, exec.CommandContext(ctx, "./shot", args...), env)
+}
+
+// runShotTermIgnored is runShotCmd for a script started by something that
+// ignores TERM, as a supervisor can: the ignore is inherited through the exec,
+// so the script's shell and everything it forks start with it, and a TERM to
+// any of them does nothing.
+func runShotTermIgnored(ctx context.Context, args []string, env ...string) (int, string, error) {
+	cmd := exec.CommandContext(ctx, "sh", append([]string{"-c", `trap '' TERM; exec ./shot "$@"`, "sh"}, args...)...)
+	return runStarted(ctx, cmd, env)
+}
+
+// runStarted runs cmd, which starts the script, as runShotCmd describes.
+func runStarted(ctx context.Context, cmd *exec.Cmd, env []string) (int, string, error) {
 	start := time.Now()
-	cmd := exec.CommandContext(ctx, "./shot", args...)
 	cmd.Env = scriptEnv(env...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
@@ -954,20 +967,43 @@ func TestShotRefusesAnUnwritableFile(t *testing.T) {
 	}
 }
 
-// A nonzero Chrome exit is a failed shot even if it left a non-empty file.
+// A nonzero Chrome exit is a failed shot even if it left a non-empty file, and
+// the script says so once Chrome has ended: it stops its watchdog and does not
+// wait it out. The watchdog is a copy of the script's shell, and a TERM to it
+// that comes before it has reset the traps it copied is dropped. Only a Chrome
+// that ends before the copy has run meets that, an instant stand-in, and the
+// busier the machine the likelier it is: the script then waited SHOT_TIMEOUT
+// and its grace (65 s) after a Chrome that had exited 7, and called it one that
+// did not finish (yardr-h9pb). The second row is that loss without the timing:
+// whatever starts the script ignores TERM, so TERM stops neither the watchdog
+// nor its timer, and the script has to stop both with other signals.
 func TestShotReportsChromeFailure(t *testing.T) {
 	if _, err := exec.LookPath("curl"); err != nil {
 		t.Skip("no curl: it checks the page before the shot")
 	}
 	s := page(t)
-	env, _ := standin(t, "partial shot", 7)
-	out := filepath.Join(t.TempDir(), "shot.png")
-	if err := os.WriteFile(out, []byte("stale shot"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	rc, text := runShot(shotCtx(t), t, []string{s.URL + "/page", out}, env...)
-	if rc != 7 || !strings.Contains(text, "Chrome failed with exit 7") {
-		t.Errorf("failed Chrome shot: exit %d, %q, want exit 7 and its reason", rc, text)
+	for _, tc := range []struct {
+		name string
+		run  func(ctx context.Context, args []string, env ...string) (int, string, error)
+	}{
+		{"started as it is", runShotCmd},
+		{"started with TERM ignored", runShotTermIgnored},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, _ := standin(t, "partial shot", 7)
+			out := filepath.Join(t.TempDir(), "shot.png")
+			if err := os.WriteFile(out, []byte("stale shot"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{s.URL + "/page", out}
+			rc, text, err := tc.run(shotCtx(t), args, env...)
+			if err != nil {
+				t.Fatalf("shot %v: %v", args, err)
+			}
+			if rc != 7 || !strings.Contains(text, "Chrome failed with exit 7") {
+				t.Errorf("failed Chrome shot: exit %d, %q, want exit 7 and its reason", rc, text)
+			}
+		})
 	}
 }
 

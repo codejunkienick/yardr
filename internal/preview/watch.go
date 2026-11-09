@@ -363,8 +363,10 @@ func (s *Supervisor) serveWatchEvents(w http.ResponseWriter, r *http.Request, p 
 // (reconcile): it is PreviewAgeLimit old, its bead has left the stage it
 // was watched in or is closed or gone, or it has stood idle PreviewIdle
 // with no request in flight (a stream open is one). The row is then
-// stopped with the reason, and the same command starts it again.
-func (s *Supervisor) reapWatch(ctx context.Context, p store.Preview, now time.Time, idle time.Duration) {
+// stopped with the reason, and the same command starts it again. inflight
+// is the pass's copy of what is in flight, read before the rows it judges by;
+// a request admitted after that copy is checked live before the stop.
+func (s *Supervisor) reapWatch(ctx context.Context, p store.Preview, now time.Time, idle time.Duration, inflight map[string]int) {
 	started := now
 	if p.StartedAt != nil {
 		started = *p.StartedAt
@@ -386,10 +388,7 @@ func (s *Supervisor) reapWatch(ctx context.Context, p store.Preview, now time.Ti
 	case b.Stage != p.Stage:
 		reason = "stage left"
 	case now.Sub(last) > idle:
-		s.mu.Lock()
-		busy := s.inflight[p.App] > 0
-		s.mu.Unlock()
-		if !busy {
+		if inflight[p.App] == 0 && !s.hasInFlight(p.App) {
 			reason = "idle"
 		}
 	}

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -226,6 +227,18 @@ func (s *Supervisor) lifetime(caller context.Context) context.Context {
 // reconcile brings the processes in line with the registry: approved
 // previews start, stopped ones are killed, idle and aged ones stop.
 func (s *Supervisor) reconcile(ctx context.Context, first bool) {
+	// What is in flight is read before the rows, and the idle checks below
+	// judge by this copy, not by the live counts. A request, a socket or a
+	// stream writes its last moment to the row before it gives its count back,
+	// so a count of zero read here means every moment that left with it is in
+	// the rows read next. Read the other way round, a pass could take a row from
+	// before that moment and a count from after the release, find a last request
+	// older than the idle bound with nothing in flight, and stop a preview that
+	// was asked for as the pass began. A request may enter after this copy, so
+	// the idle checks also read the live count immediately before stopping.
+	s.mu.Lock()
+	inflight := maps.Clone(s.inflight)
+	s.mu.Unlock()
 	all, err := s.Store.Previews(ctx)
 	if err != nil {
 		s.Log.Warn("preview: the registry is not read", "err", err)
@@ -258,7 +271,7 @@ func (s *Supervisor) reconcile(ctx context.Context, first bool) {
 			}
 		case store.PreviewRunning:
 			if p.Kind == store.PreviewKindWatch {
-				s.reapWatch(ctx, p, now, idle)
+				s.reapWatch(ctx, p, now, idle, inflight)
 				continue
 			}
 			s.mu.Lock()
@@ -281,10 +294,7 @@ func (s *Supervisor) reconcile(ctx context.Context, first bool) {
 			case now.Sub(pr.started) > store.PreviewAgeLimit:
 				s.stop(ctx, p.App, "aged")
 			case now.Sub(last) > idle:
-				s.mu.Lock()
-				active := s.inflight[p.App] > 0
-				s.mu.Unlock()
-				if !active {
+				if inflight[p.App] == 0 && !s.hasInFlight(p.App) {
 					s.stop(ctx, p.App, "idle")
 				}
 			}
