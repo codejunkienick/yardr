@@ -51,7 +51,8 @@ type rig struct {
 // is asked to run in $name, or "package" where it is asked to run none. It
 // waits until every yes-loop of the run has recorded itself, since burn starts
 // them and does not wait for them, then does what the rig's files for the name
-// say: block, fail on the runs listed, skip, run no test, or pass.
+// say: block, fail on the runs listed (with a NUL among what it prints on those
+// that nul-NAME lists), skip, run no test, or pass.
 const testBin = `
 case "$1" in
 -test.run=*) name=${1#-test.run=^}; name=${name%\$} ;;
@@ -69,6 +70,9 @@ fi
 if grep -qx "$n" "$RIG/fail-$name" 2>/dev/null; then
   echo "=== RUN   $name"
   echo "    x_test.go:12: run $n went wrong"
+  if grep -qx "$n" "$RIG/nul-$name" 2>/dev/null; then
+    printf '    x_test.go:13: a NUL byte follows\0\n'
+  fi
   echo "--- FAIL: $name (0.00s)"
   echo FAIL
   exit 1
@@ -310,12 +314,15 @@ func (r *rig) leftover() []string {
 // level is the one told, unless this process is nicer than it already, as a
 // yard session is and the gate may be: burn starts at this process's level,
 // which nothing can lower, and the loops and the tests stay at it. The real
-// ps and nice are used here, since it is what an operator sees.
+// ps and nice are used here, since it is what an operator sees. A test may
+// print any byte: run 4's output holds a NUL, and its lines are shown all the
+// same.
 func TestBurnCountsTheRunsThatPass(t *testing.T) {
 	t.Parallel()
 	level := max(7, psNice(t, os.Getpid()))
 	r := newRig(t)
 	r.set("fail-TestA", "2\n4\n")
+	r.set("nul-TestA", "4\n")
 	cmd, stdout, stderr := r.burn(6, "-n", "5", "-x", "3", "-c", "2", "-N", "7", "./pkg", "TestA", "TestB")
 	if code := finish(t, cmd); code != 1 {
 		t.Fatalf("exit status = %d, want 1: a run failed\n%s", code, stderr)
@@ -335,6 +342,28 @@ func TestBurnCountsTheRunsThatPass(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "run 1 failed") || strings.Contains(stderr.String(), "TestB, run") {
 		t.Errorf("stderr names a run that passed:\n%s", stderr)
+	}
+	// The lines of run 4 follow its header, the last of the failures shown. A
+	// grep that takes its NUL for binary prints that the file matches instead.
+	_, run4, _ := strings.Cut(stderr.String(), "burn: TestA, run 4 failed (exit 1):")
+	for _, want := range []string{"x_test.go:12: run 4 went wrong", "--- FAIL: TestA"} {
+		if !strings.Contains(run4, want) {
+			t.Errorf("stderr lacks %q after run 4's header, whose output holds a NUL:\n%q", want, stderr)
+		}
+	}
+	// Reviewers and contributors run burn at -x 1, so pin the NUL case at
+	// that factor too while the run-count checks above keep the -x 3 coverage.
+	nul := newRig(t)
+	nul.set("fail-TestA", "1\n")
+	nul.set("nul-TestA", "1\n")
+	one, _, oneStderr := nul.burn(1, "-n", "1", "-x", "1", "-c", "1", "-N", "7", "./pkg", "TestA")
+	if code := finish(t, one); code != 1 {
+		t.Fatalf("exit status at -x 1 = %d, want 1: a run failed\n%s", code, oneStderr)
+	}
+	for _, want := range []string{"x_test.go:13: a NUL byte follows", "--- FAIL: TestA"} {
+		if !strings.Contains(oneStderr.String(), want) {
+			t.Errorf("stderr at -x 1 lacks %q for output that holds a NUL:\n%s", want, oneStderr)
+		}
 	}
 	if got, want := r.read("cwd"), filepath.Join(r.dir, "pkg"); got != want {
 		t.Errorf("the tests ran in %q, want the package's directory %q", got, want)

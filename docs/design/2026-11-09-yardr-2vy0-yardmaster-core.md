@@ -223,7 +223,8 @@ in the cut bead's note rather than held back:
 | `## First run` | 500 | that `yardr doctor` lists the steps and names the next; go on from the first not done; the four steps as one line each, no detail |
 | `## The work`: Triage | 700 | read the inbox when nudged; the fault kinds are yours to resolve or bring to the operator |
 | `## The work`: Shape work | 1,400 | when a bead may leave `backlog`; refine or split first; prefer an existing mechanism; chain before train, in two lines |
-| `## The work`: Decisions in brief | 1,100 | a person's decision is an ask; a command is a card where one carries it, never mailed text; pointer lines to the catalogue |
+| `## The work`: Decisions in brief | 750 | a person's decision is an ask; a command is a card where one carries it, never mailed text; pointer lines to the catalogue |
+| `## The work`: Run an operator's command for them, in brief | 350 | the heading `**Run an operator's command for them.**` as it stands; where `yardmaster_delegation` is on, an operator's local mail opens a run of some of their own commands, cited `--for <sender> --mail <seq>`, and the yard tells them after; nothing else opens a run; one pointer line to the whole |
 | `## The work`: Design a process, in brief | 450 | propose the yard's pieces before scripts; what names what runs is the operator's, by card; a stage a person moves carries an `## Ask`, so its wait is a card in Decide |
 | `## The work`: Keep the line moving | 350 | the three watches; a builder that fails repeatedly is held, and find out why first |
 | `## Estimating a bead`, in brief | 750 | estimate when a bead leaves `backlog`: `difficulty:`, `size:`, `kind:`; a change that shows takes `eyes` (about 150 bytes of this budget, with its pointer); change a wrong label, never keep routing in memory |
@@ -242,6 +243,12 @@ section that cannot be cut to its budget by deleting reference is
 reported in the cut bead's note, with where the room went, rather than
 squeezed or held back as a design question.
 
+The delegation row was added after these budgets were drawn, for the bullet
+yardr-6qry put into the role (section 3.2). Delegation is the third door
+beside the cards, so its 350 bytes come out of what was Decisions in
+brief's 1,100, which is now 750 and 350. The total stays at the ceiling and
+no other row moves.
+
 ### 3.2 Where every cut section goes
 
 Each row names the cut text as it stands in starter today, its size, its
@@ -258,6 +265,7 @@ that never landed does not pass.
 |---|---|---|---|
 | First run, steps 1–4 detail | about 3,400 of 3,900 | `docs/setup.md`; `yardr doctor` names the next step | `## First run` brief (3.1) and: `The steps in full: yardr docs setup.` |
 | Decisions: the card catalogue (per-command `--run`, `--setup`, terminal-block rules, incl. the yardr-ayx0 set-card text once yardr-pdat has landed) | about 6,800 of 7,949 | `yardr bead ask --help` (authority), `docs/chat.md` "Questions for you" and its card sections | Decisions in brief and: `Which card carries a command: yardr bead ask --help; the cards a person sees: yardr docs chat questions.` |
+| Run an operator's command for them, the bullet yardr-6qry added after the sizes above were measured (where `yardmaster_delegation` is on, an operator's cited local mail opens a run of some of their own commands; the bullet lists them, what stays a card, and what is told after and taken back) | 3,953, of which about 3,600 are cut | Nothing to write. The whole already stands in `docs/users.md` "The yardmaster for the operator" and its subsections "What opens a run", "What it runs", "What stays with the operator", "Told after, and taken back" and "Packs run for the operator". For a pack it also stands in `docs/packs.md` "Running a pack for the operator", a lead-in paragraph with no heading of its own, so `yardr docs packs` cannot print it by section. The core points at the users.md section, which links to it. Bead 4 (section 6, yardr-97p6) cuts the bullet. No earlier bead has anything of it to move | the brief (3.1) and the pointer `The list, the limits and the packs: yardr docs users the yardmaster for the operator.` The prime of a hosted yard cites the bullet, and `testPrimeCrewHostedYardHasNoTerminal` (called from `internal/cli/operator_test.go`) reads the role it prints, so four things stay word for word. The first is the heading `**Run an operator's command for them.**`, which the prime's delegation paragraph and the role's Design a process and Speaking text name. The other three are role lines that the prime's No terminal section supersedes: "for them to type in a terminal" (in Decisions), "What a person is to run, paste or type goes in a fenced code block" and "hand the command to the operator" (both in Users). None is in this bullet, so the rows that cut Decisions and Users keep them. Two places say the list and its limits are in the role: the prime's delegation paragraph, and the Decisions sentences that send the reader to "the delegated list below". After the cut they are in the doc, so bead 4 words those places to match and keeps the two strings the test pins: `the yardmaster's role (Run an operator's command for them)` and the `yardr docs users` command |
 | Design a process, detail (exec groups, timers, sources, what is the operator's to set) | about 1,110 of 1,560 | `docs/flows.md`, `docs/groups.md` | the brief (3.1) and: `Designing a process: yardr docs flows; yardr docs groups.` |
 | Design a process: the manual-stage rule (a stage a person moves carries an `## Ask`; what waits on a person is a card, never a "waiting on you" list) — the yardr-837b text once yardr-pdat has landed | about 50 of the Design a process brief | `docs/flows.md` "The ask template: `## Ask`" | one line in the brief (3.1) and: `A stage a person moves: yardr docs flows ask template.` |
 | Shape work: train and wagon rules | about 1,900 of 3,383 | `docs/line.md` "Trains" and "Wagons" | chain-before-train in two lines and: `Trains and wagons: yardr docs line trains.` |
@@ -269,7 +277,12 @@ that never landed does not pass.
 | How you work, long tail (grounding, journal, handoff mechanics) | about 1,400 of 2,028 | `docs/crew.md` "Conversation sessions" (its Journal, Prime and Memories bullets) | the kept rules (3.4); journal and handoff as one line each; and: `Working detail: yardr docs crew conversation sessions.` |
 
 Nothing is cut without a row: the table plus the kept sections account for
-all 31,435 bytes. The yardr-ayx0 and yardr-837b contents ride inside the
+all 39,500 bytes of the starter role at c6ff1967. The 31,435 of section 2.1
+were measured before two changes. yardr-pdat added 3,038 to Design a
+process, Decisions and the last section (Estimating, to the end of the
+file). yardr-6qry added 5,027, of which 3,953 are the bullet with a row of
+its own and 1,074 are mentions of it in those three sections, which go with
+their rows. The yardr-ayx0 and yardr-837b contents ride inside the
 Decisions and Design a process rows once yardr-pdat has landed; the cut
 beads wait for that landing (section 6), so neither text is placed twice.
 
@@ -490,9 +503,11 @@ finished without asking.
 4. **Cut the starter yardmaster role to its 8 KB core** — Goal:
    `packs/starter/roles/yardmaster.md` is the core of section 3.1 at
    most 8,192 bytes, with the rules of section 3.4 present in their
-   kept wording. Where to look: section 3 as a whole. Done when: the
-   file measures at most 8,192 bytes; `yardr prime --crew yardmaster`
-   on a yard whose setup is complete and whose pack is starter shows
+   kept wording and the Run an operator's command for them bullet cut
+   to its brief, which no earlier bead moves (section 3.2). Where to
+   look: section 3 as a whole. Done when: the file measures at most
+   8,192 bytes; `yardr prime --crew yardmaster` on a yard whose setup
+   is complete and whose pack is starter shows
    the core whole with every pointer resolving and reading as in
    section 3.5; that prime's total size and any section over its
    section 3.1 budget are in the bead's note; and `sh .yardr/test`

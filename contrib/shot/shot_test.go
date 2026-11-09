@@ -48,11 +48,26 @@ import (
 // other first runs on macOS, and that wait would come out of the script's
 // SHOT_TIMEOUT and the test's context. The launchers are in a directory of
 // their own, which this removes after the run.
+//
+// The script's TMPDIR (suiteTmp) is another: the script makes its throwaway
+// profile there and removes it when it exits, but a test that kills it outright
+// (a Chrome that does not finish) gives its trap no chance to.
 func TestMain(m *testing.M) {
+	var err error
+	if suiteTmp, err = os.MkdirTemp("", "yardr-shot-"); err != nil {
+		panic(err)
+	}
 	code := m.Run()
 	scripttest.Remove()
+	os.RemoveAll(suiteTmp)
 	os.Exit(code)
 }
+
+// suiteTmp is the TMPDIR every run of the script gets (scriptEnv): one
+// directory for the whole run of the suite, made for it by TestMain and
+// removed with it, so that the profile of a script that was killed outright
+// goes too, and none is left in the machine's TMPDIR.
+var suiteTmp string
 
 // page is one local page at /page; every other path is missing.
 func page(t *testing.T) *httptest.Server {
@@ -190,17 +205,19 @@ func timeoutSecs(ctx context.Context, start time.Time) string {
 // scriptEnv is the script's environment: its own, without the proxy
 // variables, plus env. curl honours the proxy for every host, so the box's
 // proxy would bend every test that checks a page (a proxy that answers
-// nothing fails them all); each test that needs a proxy sets its own.
+// nothing fails them all); each test that needs a proxy sets its own. Its
+// TMPDIR is the suite's (suiteTmp), the last of an environment's repeats of a
+// name being the one that counts.
 func scriptEnv(env ...string) []string {
 	base := os.Environ()
-	out := make([]string, 0, len(base)+len(env))
+	out := make([]string, 0, len(base)+len(env)+1)
 	for _, kv := range base {
 		if name, _, _ := strings.Cut(kv, "="); isProxyVar(name) {
 			continue
 		}
 		out = append(out, kv)
 	}
-	return append(out, env...)
+	return append(append(out, "TMPDIR="+suiteTmp), env...)
 }
 
 // isProxyVar reports whether name is a proxy variable curl honours.
@@ -370,6 +387,11 @@ func TestShotPassesFlagsToChrome(t *testing.T) {
 			}
 			if prof == "" {
 				t.Fatalf("Chrome was passed %q, with no --user-data-dir", args)
+			}
+			// A script killed outright leaves its profile where it made it, so
+			// the suite's TMPDIR is where the profile has to be.
+			if filepath.Dir(prof) != suiteTmp {
+				t.Errorf("the throwaway profile %s is not in the suite's TMPDIR %s", prof, suiteTmp)
 			}
 			if c.wrap {
 				if strings.Contains(args, s.URL+"/page") {

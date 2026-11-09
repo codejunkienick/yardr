@@ -197,7 +197,10 @@ for name in "$@"; do
         else
           echo "burn: $label, run $run failed (exit $rc):" >&2
         fi
-        grep -E '^[[:space:]]*(--- (FAIL|SKIP)|panic:|fatal error:|testing: warning|WARNING: DATA RACE)|_test\.go:[0-9]+:' "$work/out" | head -n 40 >&2 || true
+        # -a reads the output as text: a test may print any byte, and a NUL
+        # makes grep take the run for a binary file and say only that it
+        # matches, in place of the lines that say what failed.
+        grep -aE '^[[:space:]]*(--- (FAIL|SKIP)|panic:|fatal error:|testing: warning|WARNING: DATA RACE)|_test\.go:[0-9]+:' "$work/out" | head -n 40 >&2 || true
       fi
     fi
     if [ $((run % 25)) -eq 0 ] && [ "$run" -lt "$count" ]; then

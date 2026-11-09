@@ -8,11 +8,13 @@ package deploy
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -31,9 +33,23 @@ import (
 var yardrBin string
 
 // gitEnv keeps git off the developer's configuration and gives it a name
-// to commit as.
-var gitEnv = []string{"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_AUTHOR_NAME=t",
+// to commit as. The configuration it reads instead is the file TestMain writes
+// from gitConfig, which GIT_CONFIG_GLOBAL names.
+var gitEnv = []string{"GIT_CONFIG_NOSYSTEM=1", "GIT_AUTHOR_NAME=t",
 	"GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t"}
+
+// gitConfig is what git reads in place of the developer's configuration, and
+// it has git start no maintenance of its own. A commit, a push, a fetch and a
+// fast-forward merge each end by running `git maintenance run --auto`, which
+// by default detaches: it forks a daemon and returns, and the daemon takes the
+// repository's objects/maintenance.lock a moment later and drops it a moment
+// after that, a moment the scheduler stretches on a loaded box. A template is
+// copied the instant its build returns (copyTree), so a copy that lists the
+// lock can find it gone when it stats it (yardr-03av, in contrib/assembly's
+// copies). Nothing here wants a repository repacked, so no repository is given
+// the chance. gc.auto is the same switch for a git older than maintenance,
+// whose commands run gc --auto themselves.
+const gitConfig = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n"
 
 // loadFactorEnv marks the TestMainKeepsTheGatesLoadFactor child, which skips
 // the driven binary's build: the child only reads the load factor, it never
@@ -70,6 +86,14 @@ func TestMain(m *testing.M) {
 		k, v, _ := strings.Cut(kv, "=")
 		os.Setenv(k, v)
 	}
+	// The configuration is a file, so that it reaches the scripts: the exec
+	// runner drops GIT_CONFIG_COUNT and its kin from their environment, and
+	// keeps GIT_CONFIG_GLOBAL. It lives in the directory that goes with the run.
+	gitconfig := filepath.Join(nowhere, "gitconfig")
+	if err := os.WriteFile(gitconfig, []byte(gitConfig), 0o644); err != nil {
+		panic(err)
+	}
+	os.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
 	// Each test has a yard, a repository and a server of its own, and most
 	// of its time is waiting for the processes it starts. Eight at once is
 	// the knee: four takes twice as long, ten no less (yardr-mzjv).
@@ -117,6 +141,60 @@ func TestMainKeepsTheGatesLoadFactor(t *testing.T) {
 	cmd.Env = append(os.Environ(), loadFactorEnv+"=1", "YARDR_"+testload.Env+"=3.0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("the gate's factor did not reach the child's fuses: %v\n%s", err, out)
+	}
+}
+
+// A template is copied the instant its build returns, and a build ends with a
+// commit. Git ends a commit, and a push, by running `git maintenance run
+// --auto`, which detaches and may hold the repository's objects/maintenance.lock
+// for a moment after the command has returned, so a copy could list the lock and
+// find it gone (yardr-03av). gitConfig has git start none. The race itself is
+// the scheduler's, so this pins its cause, which git's trace2 events show
+// whatever the timing: the commit and the push start no maintenance process.
+func TestMainKeepsGitFromStartingMaintenance(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	repo, origin := filepath.Join(dir, "repo"), filepath.Join(dir, "origin.git")
+	y := &yard{t: t, env: os.Environ()}
+	y.git(".", "init", "-q", "-b", "main", repo)
+	y.git(".", "init", "-q", "--bare", "-b", "main", origin)
+	y.git(repo, "remote", "add", "origin", origin)
+	for _, step := range []struct {
+		cmd  string
+		args []string
+	}{
+		{"commit", []string{"commit", "-q", "--allow-empty", "-m", "base"}},
+		{"push", []string{"push", "-q", "origin", "main"}},
+	} {
+		trace := filepath.Join(dir, step.cmd+".trace")
+		y.env = append(os.Environ(), "GIT_TRACE2_EVENT="+trace)
+		y.git(repo, step.args...)
+		b, err := os.ReadFile(trace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The git commands the run started, as the start events of its trace
+		// name them: the second word of each argv.
+		var ran []string
+		for _, line := range strings.Split(string(b), "\n") {
+			var ev struct {
+				Event string   `json:"event"`
+				Argv  []string `json:"argv"`
+			}
+			if json.Unmarshal([]byte(line), &ev) != nil || len(ev.Argv) < 2 ||
+				(ev.Event != "start" && ev.Event != "child_start") {
+				continue
+			}
+			ran = append(ran, ev.Argv[1])
+		}
+		// A trace that does not show the command itself shows nothing of what
+		// it started either, and the check below would pass for the wrong reason.
+		if !slices.Contains(ran, step.cmd) {
+			t.Fatalf("git %s: its trace2 events hold no start of it, only %q", step.cmd, ran)
+		}
+		if slices.Contains(ran, "maintenance") {
+			t.Errorf("git %s started git maintenance: its daemon can hold objects/maintenance.lock after the command returns", step.cmd)
+		}
 	}
 }
 
