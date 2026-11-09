@@ -107,6 +107,7 @@ type Party struct {
 	Nonce string `json:"nonce"`
 	Name  string `json:"name"`
 	Key   string `json:"key"`
+	Enc   string `json:"enc,omitempty"`
 	URL   string `json:"url,omitempty"`
 }
 
@@ -122,6 +123,11 @@ func (p Party) Valid() error {
 	}
 	if _, err := ParsePublic(p.Key); err != nil {
 		return errors.New("pairing: that is no yard's public key")
+	}
+	if p.Enc != "" {
+		if _, err := ParseEncPublic(p.Enc); err != nil {
+			return errors.New("pairing: that is no yard's encryption key")
+		}
 	}
 	if p.URL != "" {
 		if u, err := CleanURL(p.URL); err != nil || u != p.URL {
@@ -153,7 +159,7 @@ func mac(key []byte, fields ...string) string {
 // binds it to its nonce, name and key and, the nonce being random, tells
 // nothing of them.
 func Commit(joiner Party) string {
-	return enc.EncodeToString(sum("yardr-pair-commit-1", joiner.Nonce, joiner.Name, joiner.Key))
+	return enc.EncodeToString(sum("yardr-pair-commit-1", joiner.Nonce, joiner.Name, joiner.Key, joiner.Enc))
 }
 
 // PairingKey stretches the code into the key of a pairing's HMACs, salted
@@ -204,7 +210,7 @@ type PairingOffer struct {
 }
 
 func offerMAC(key []byte, commit string, host Party) string {
-	return mac(key, "yardr-pair-offer-1", commit, host.Nonce, host.Name, host.Key, host.URL)
+	return mac(key, "yardr-pair-offer-1", commit, host.Nonce, host.Name, host.Key, host.Enc, host.URL)
 }
 
 // NewPairingOffer is the host's answer to the hello that committed to
@@ -235,8 +241,8 @@ type Transcript struct {
 
 func (t Transcript) fields(tag string) []string {
 	return []string{tag, t.Commit,
-		t.Joiner.Nonce, t.Joiner.Name, t.Joiner.Key,
-		t.Host.Nonce, t.Host.Name, t.Host.Key, t.Host.URL}
+		t.Joiner.Nonce, t.Joiner.Name, t.Joiner.Key, t.Joiner.Enc,
+		t.Host.Nonce, t.Host.Name, t.Host.Key, t.Host.Enc, t.Host.URL}
 }
 
 // Reveal is the joiner's second message: what it committed to.

@@ -22,6 +22,7 @@ import (
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/hooks"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/yardkey"
 	"yardr.dev/yardr/internal/yards"
 )
 
@@ -311,7 +312,7 @@ func (a *app) pairHost(w, warn io.Writer, ctx context.Context, cfg *config.Confi
 		return err
 	}
 	who := a.who()
-	opened, err := st.PairOpen(ctx, store.PairOffer{Name: inv.Name, Key: inv.Key, URL: inv.URL, As: opt.name}, who)
+	opened, err := st.PairOpen(ctx, store.PairOffer{Name: inv.Name, Key: inv.Key, Enc: inv.Enc, URL: inv.URL, As: opt.name}, who)
 	if err != nil {
 		return err
 	}
@@ -479,14 +480,18 @@ func (a *app) pairJoin(w, warn io.Writer, ctx context.Context, cfg *config.Confi
 			return err
 		}
 	}
-	caller := &yards.Caller{Key: key, HTTP: pairHTTP}
+	encPriv, _, _, err := yardkey.EnsureEnc(cfg.PeerEncKey())
+	if err != nil {
+		return err
+	}
+	caller := &yards.Caller{Key: key, Enc: encPriv, HTTP: pairHTTP}
 	// Whether the yard that answers can be a peer here is asked before this
 	// yard has revealed itself: the other operator is then asked nothing,
 	// and the code is still good for a call with --name.
 	var peer store.Peer
 	errNotAdded := errors.New("not added")
 	called, err := caller.PairCall(ctx, addr, clean, inv.Name, func(host store.Party) error {
-		peer = store.Peer{Name: or(opt.name, host.Name), Key: host.Key, URL: addr, Calls: host.Name}
+		peer = store.Peer{Name: or(opt.name, host.Name), Key: host.Key, Enc: host.Enc, URL: addr, Calls: host.Name}
 		if host.Key == inv.Key {
 			_ = st.PairRefused(ctx, store.Own, host.Name, who)
 			return fmt.Errorf("%w: the yard that answered has this yard's own key, and a yard is not paired with itself", errNotAdded)

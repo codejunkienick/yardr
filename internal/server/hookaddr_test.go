@@ -166,22 +166,30 @@ func TestHookListenerTakesPeers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	northEnc, northEncPub, _, err := yardkey.EnsureEnc(filepath.Join(t.TempDir(), "north-enc.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ownEncPub, _, err := yardkey.EnsureEnc(c.PeerEncKey())
+	if err != nil {
+		t.Fatal(err)
+	}
 	stranger, _, err := yardkey.Ensure(filepath.Join(t.TempDir(), "stranger.key"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cl.AddPeer(ctx, store.Peer{Name: "north", Key: store.Public(north)}, "me"); err != nil {
+	if _, err := cl.AddPeer(ctx, store.Peer{Name: "north", Key: store.Public(north), Enc: northEncPub}, "me"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := cl.AllowPeer(ctx, "north", store.PeerAllow{Receive: []string{"ping"}}, "me"); err != nil {
 		t.Fatal(err)
 	}
-	me := store.Peer{Name: "yard", Key: store.Public(own), URL: "http://" + addr}
+	me := store.Peer{Name: "yard", Key: store.Public(own), Enc: ownEncPub, URL: "http://" + addr}
 	m := store.PeerMessage{ID: "m1", Kind: "ping", Body: []byte(`{}`)}
-	if err := (&yards.Caller{Key: north}).Push(ctx, me, m); err != nil {
+	if err := (&yards.Caller{Key: north, Enc: northEnc}).Push(ctx, me, m); err != nil {
 		t.Fatalf("north's message: %v", err)
 	}
-	if err := (&yards.Caller{Key: stranger}).Push(ctx, me, m); err == nil || !strings.Contains(err.Error(), "answered 401") {
+	if err := (&yards.Caller{Key: stranger, Enc: northEnc}).Push(ctx, me, m); err == nil || !strings.Contains(err.Error(), "answered 401") {
 		t.Fatalf("a stranger's message: %v", err)
 	}
 	evs, err := cl.Events(ctx, "", 50)

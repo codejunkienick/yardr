@@ -29,11 +29,24 @@ import (
 
 // The headers of a request between yards: the sender's public key, by
 // which the receiver finds the link, when it was signed (Unix seconds), and
-// the signature. An answer carries HeaderSig alone.
+// the signature. An answer carries HeaderSig alone. These are the edge
+// link's and a pairing's headers still; a peer message's are the RFC 9421
+// pair below (docs/peers.md "The requests").
 const (
 	HeaderKey  = "Yardr-Peer-Key"
 	HeaderTime = "Yardr-Peer-Time"
 	HeaderSig  = "Yardr-Peer-Signature"
+)
+
+// The headers of a request between peers on the sealed wire: the RFC 9421
+// pair, the body's digest, and the two yardr headers the profile covers —
+// the intended receiver and the fresh nonce an answer echoes.
+const (
+	HeaderSigInput      = "Signature-Input"
+	HeaderSignature     = "Signature"
+	HeaderContentDigest = "Content-Digest"
+	HeaderPeerTo        = "Yardr-Peer-To"
+	HeaderPeerNonce     = "Yardr-Peer-Nonce"
 )
 
 // MaxSkew is how far a request's timestamp may be from the receiver's
@@ -106,6 +119,102 @@ func request(to, method, path, ts string, body []byte) []byte {
 func SignRequest(key ed25519.PrivateKey, to, method, path string, at time.Time, body []byte) (ts, sig string) {
 	ts = strconv.FormatInt(at.Unix(), 10)
 	return ts, enc.EncodeToString(ed25519.Sign(key, request(to, method, path, ts, body)))
+}
+
+// SignPeerRequest signs a peer request in the RFC 9421 profile (store
+// signs it; this is its name outside the store): r describes the request
+// as sent — method, authority, the path and query of the URL actually
+// sent to, the intended receiver and a fresh nonce (store.NewPeerNonce) —
+// and body is the sealed envelope that crosses, or nil for a bodyless
+// request. It returns the Signature-Input and Signature header values.
+func SignPeerRequest(key ed25519.PrivateKey, r *store.PeerRequestSig, body []byte, at time.Time) (input, sig string) {
+	return store.SignPeerRequest(key, r, body, at)
+}
+
+// VerifyPeerRequest checks a peer request's RFC 9421 signature: from
+// signed the request r describes, within its stated validity at now.
+func VerifyPeerRequest(from string, r store.PeerRequestSig, input, sig string, now time.Time) error {
+	return store.VerifyPeerRequest(from, r, input, sig, now)
+}
+
+// SignPeerResponse signs a peer answer in the RFC 9421 profile: its
+// status, the digest of body (the sealed envelope) and the nonce of the
+// request it answers, beside every component of that request with ;req.
+// It returns the Signature-Input, Signature and Content-Digest values;
+// the answer's Yardr-Peer-Nonce header is r.Nonce, echoed.
+func SignPeerResponse(key ed25519.PrivateKey, status int, r store.PeerRequestSig, body []byte) (input, sig, digest string) {
+	return store.SignPeerResponse(key, status, r, body)
+}
+
+// VerifyPeerResponse checks a peer answer's RFC 9421 signature, as
+// SignPeerResponse made it, over body as it crossed.
+func VerifyPeerResponse(from string, status int, r store.PeerRequestSig, nonce, digest, input, sig string, body []byte) error {
+	return store.VerifyPeerResponse(from, status, r, nonce, digest, input, sig, body)
+}
+
+// SealBody seals a peer body to the yard whose encryption key is toEnc:
+// HPKE base mode with the two signing keys as additional data, through
+// hpke.NewSender and Sender.Seal (the top-level hpke.Seal takes no such
+// data and so cannot carry that binding). OpenBody is its mirror, with
+// this yard's encryption private key (EnsureEnc).
+func SealBody(fromSign, toSign, toEnc string, plaintext []byte) ([]byte, error) {
+	return store.SealBody(fromSign, toSign, toEnc, plaintext)
+}
+
+func OpenBody(priv []byte, fromSign, toSign string, envelope []byte) ([]byte, error) {
+	return store.OpenBody(priv, fromSign, toSign, envelope)
+}
+
+// EnsureEnc returns the yard's encryption private key from the file at
+// path (peer-enc.key beside peer.key), making the X25519 pair first when
+// there is no file: once, so the key peers pin stays its key. The file
+// holds the private bytes, base64, under the same rule as Ensure's.
+func EnsureEnc(path string) (priv []byte, pub string, made bool, err error) {
+	priv, err = LoadEncBytes(path)
+	if err == nil {
+		pub, err = store.EncPublicOf(priv)
+		return priv, pub, false, err
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return nil, "", false, err
+	}
+	priv, pub, err = store.GenerateEnc()
+	if err != nil {
+		return nil, "", false, err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if errors.Is(err, fs.ErrExist) {
+		priv, err = LoadEncBytes(path)
+		if err != nil {
+			return nil, "", false, err
+		}
+		pub, err = store.EncPublicOf(priv)
+		return priv, pub, false, err
+	} else if err != nil {
+		return nil, "", false, err
+	}
+	_, werr := f.WriteString(base64.StdEncoding.EncodeToString(priv) + "\n")
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		os.Remove(path)
+		return nil, "", false, werr
+	}
+	return priv, pub, true, nil
+}
+
+// LoadEncBytes reads an encryption private key EnsureEnc wrote.
+func LoadEncBytes(path string) ([]byte, error) {
+	b, p, err := store.ReadSecretFile(path)
+	if err != nil {
+		return nil, err
+	}
+	priv, err := base64.StdEncoding.DecodeString(string(b))
+	if err != nil || len(priv) != 32 {
+		return nil, fmt.Errorf("key file %s does not hold a yard's encryption key", p)
+	}
+	return priv, nil
 }
 
 // VerifyRequest checks that the yard whose public key is from signed this

@@ -7,10 +7,12 @@ import (
 	"io/fs"
 	"maps"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"time"
 
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/yardkey"
 	"yardr.dev/yardr/internal/yards"
 )
 
@@ -101,9 +103,17 @@ func (d *Dispatcher) peers(ctx context.Context) error {
 		}
 		return nil
 	}
+	enc, err := d.peerEnc()
+	if err != nil {
+		if msg := "encryption key: " + err.Error(); msg != d.peerKeyErr {
+			d.peerKeyErr = msg
+			d.Log.Warn("this yard's encryption key cannot be read, so it sends and asks for nothing", "err", err)
+		}
+		return nil
+	}
 	d.peerKeyErr = ""
 	c := &yards.Caller{
-		Key: key, HTTP: d.PeerHTTP, Now: d.now,
+		Key: key, Enc: enc, HTTP: d.PeerHTTP, Now: d.now,
 		Heard: func(ctx context.Context, p store.Peer, answer store.PeerAnswer) {
 			if err := d.Store.PeerPostAnswered(ctx, p.Name, answer); err != nil && !errors.Is(err, store.ErrNotFound) {
 				d.Log.Warn("peer: keeping what it says it understands", "peer", p.Name, "err", err)
@@ -114,6 +124,12 @@ func (d *Dispatcher) peers(ctx context.Context) error {
 		c.HTTP = http.DefaultClient
 	}
 	for _, p := range ps {
+		// A peer stored before sealed bodies has no encryption key: it is
+		// not dialled and no try is counted for it, until its operator
+		// re-links it (store.ReLinkLine, which peer show and doctor say).
+		if !p.Sealed() {
+			continue
+		}
 		// A peer that just failed is not called again in the same breath.
 		if until, ok := d.peerWait[p.Key]; p.URL == "" || ok && d.now().Before(until) {
 			continue
@@ -175,7 +191,7 @@ func (d *Dispatcher) pullers(ps []store.Peer) {
 	}
 	urls := make(map[string]string, len(ps))
 	for _, p := range ps {
-		if p.URL != "" {
+		if p.URL != "" && p.Sealed() {
 			urls[p.Key] = p.URL
 		}
 	}
@@ -248,12 +264,20 @@ func (d *Dispatcher) pullOnce(ctx context.Context, key, url string) (name string
 		return "", d.PeerPoll, nil
 	}
 	name = ps[i].Name
+	if !ps[i].Sealed() {
+		// Stored before sealed bodies: not asked, and no try counted.
+		return name, d.PeerPoll, nil
+	}
 	// The pass says what is wrong with the key, once (peers).
 	own, err := store.Load(d.PeerKey)
 	if err != nil {
 		return name, d.PeerPoll, nil
 	}
-	c := &yards.Caller{Key: own, HTTP: d.PeerHTTP, Now: d.now}
+	enc, err := d.peerEnc()
+	if err != nil {
+		return name, 0, err
+	}
+	c := &yards.Caller{Key: own, Enc: enc, HTTP: d.PeerHTTP, Now: d.now}
 	// By the clock on the wall, whatever a test's says: it is the peer's
 	// hold that is timed.
 	asked := time.Now()
@@ -389,4 +413,16 @@ func (d *Dispatcher) peerFailed(p store.Peer, doing string, err error) {
 		d.Log.Warn("peer: "+doing+" failed; trying again", "peer", p.Name, "err", err)
 	}
 	d.peerWait[p.Key] = d.now().Add(d.Backoff)
+}
+
+// peerEnc is this yard's encryption private key, made beside its signing
+// key on first use: the pair a yard of the sealed wire has, with which
+// Caller opens what peers seal to it. A failure stops the call before it
+// can post a message the yard cannot verify the answer to.
+func (d *Dispatcher) peerEnc() ([]byte, error) {
+	if d.PeerKey == "" {
+		return nil, errors.New("this yard has no signing key file beside which to keep its encryption key")
+	}
+	priv, _, _, err := yardkey.EnsureEnc(filepath.Join(filepath.Dir(d.PeerKey), "peer-enc.key"))
+	return priv, err
 }

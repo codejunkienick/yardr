@@ -2,10 +2,13 @@ package store
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -304,11 +307,11 @@ func mailLinked(t *testing.T) (a, b *linked, key map[string][]byte) {
 		if _, err := s.AddUser(ctx, "mckean", "jo"); err != nil {
 			t.Fatal(err)
 		}
-		return &linked{Store: s, name: name, key: Public(k)}
+		return &linked{Store: s, name: name, key: Public(k), encPub: sealSetup(t, s, k)}
 	}
 	a, b = open("a"), open("b")
 	for _, l := range [][2]*linked{{a, b}, {b, a}} {
-		if _, err := l[0].AddPeer(ctx, Peer{Name: l[1].name, Key: l[1].key}, "jo"); err != nil {
+		if _, err := l[0].AddPeer(ctx, Peer{Name: l[1].name, Key: l[1].key, Enc: l[1].encPub}, "jo"); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := l[0].AllowPeer(ctx, l[1].name, PeerAllow{Send: []string{PeerMail}, Receive: []string{PeerMail}, Expose: []string{"mckean"}}, "jo"); err != nil {
@@ -316,6 +319,40 @@ func mailLinked(t *testing.T) (a, b *linked, key map[string][]byte) {
 		}
 	}
 	return a, b, key
+}
+
+// sealSetup gives s a signing key file and an encryption key beside it,
+// as a server's yard has, and returns the encryption public key: the
+// store then opens what a peer seals to this yard (PeerPulled).
+func sealSetup(t *testing.T, s *Store, k ed25519.PrivateKey) string {
+	t.Helper()
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "peer.key")
+	if err := os.WriteFile(keyPath, []byte(base64.StdEncoding.EncodeToString(k.Seed())+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	priv, pub, err := GenerateEnc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "peer-enc.key"), []byte(base64.StdEncoding.EncodeToString(priv)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.SetYard(keyPath, "test")
+	return pub
+}
+
+// sealedTo is a pull answer of body signed by signer, sealed to the yard
+// receiver, as the profile signs an answer.
+func sealedTo(t *testing.T, signer ed25519.PrivateKey, fromSign string, receiver *linked, body []byte, told []uint64) PeerBatch {
+	t.Helper()
+	env, err := SealBody(fromSign, receiver.key, receiver.encPub, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := PeerRequestSig{Method: "GET", Authority: "peer.test", Path: "/peers/messages", Query: "after=0", To: receiver.key, Nonce: "req-1"}
+	input, sig, digest := SignPeerResponse(signer, 200, req, env)
+	return PeerBatch{Request: req, SigInput: input, Signature: sig, Digest: digest, Nonce: req.Nonce, Body: env, Told: told}
 }
 
 // yardMail is the yard's mail to who in the yard's events: what it told of
@@ -432,7 +469,7 @@ func TestPeerMailLimitReachesSenderByPull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := b.PeerPulled(ctx, "a", PeerBatch{RequestSig: "req-1", Signature: SignResponse(key["a"], 200, "req-1", body), Body: body})
+	res, err := b.PeerPulled(ctx, "a", sealedTo(t, key["a"], a.key, b, body, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -512,7 +549,15 @@ func TestPeerRefusedReadsABareReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.PeerPulled(ctx, "north", PeerBatch{RequestSig: "req-1", Signature: SignResponse(k, 200, "req-1", body), Body: body, Told: []uint64{4}}); err != nil {
+	own := newKey(t)
+	sEnc := sealSetup(t, s, own)
+	env, err := SealBody(Public(k), Public(own), sEnc, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := PeerRequestSig{Method: "GET", Authority: "peer.test", Path: "/peers/messages", Query: "after=0", To: Public(own), Nonce: "req-1"}
+	input, sig, digest := SignPeerResponse(k, 200, req, env)
+	if _, err := s.PeerPulled(ctx, "north", PeerBatch{Request: req, SigInput: input, Signature: sig, Digest: digest, Nonce: req.Nonce, Body: env, Told: []uint64{4}}); err != nil {
 		t.Fatal(err)
 	}
 	if p, err := s.GetPeer(ctx, "north"); err != nil || len(p.Refused) != 0 {

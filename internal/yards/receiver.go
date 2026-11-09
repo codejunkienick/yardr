@@ -3,17 +3,18 @@
 // answers what it asks for, on the server's hook listener under /peers/;
 // the Caller is the other end, which the daemon posts and asks with.
 //
-// Every request is signed with the sender's key and every answer with the
-// receiver's (internal/yardkey). That proves who sent it and that it is
-// whole. It does not hide it.
+// Every request is signed with the sender's key (RFC 9421) and sealed to
+// the receiver's, and every answer the same the other way (internal/
+// yardkey). That proves who sent it and that it is whole, and hides it
+// from whoever carries it.
 package yards
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -85,27 +86,17 @@ const (
 	answerTime = 30 * time.Second
 )
 
-// maxRequest bounds a posted message: its body, and room for the rest.
-// maxFileRequest bounds one from a yard that names a peer's key, which may
-// be a file: as large as any yard sends one (store.MaxPeerFile), so that a
-// file this yard does not take is read and refused with its reason, signed,
-// and the sender gives it up. A file cut off unread would be posted again
-// for most of a day.
-//
-// The grant is on the key the request claims, before its signature is
-// checked (the signature covers the body's sha256, so checking it needs the
-// whole body): a stranger who knows a peer's key can make the receiver read
-// megabytes it will then refuse. That read is accepted, and bounded below:
-// every non-empty request takes one of maxLargeReads before its first byte,
-// and holds it until its signature is checked; the head is grown as bytes
-// arrive, so a part-written body holds what it sent. Four concurrent reads
-// of at most ~43MB hold ~172MB at most inside the listener's timeouts, and a
-// refused request is reposted by its sender.
-const (
-	maxRequest     = store.MaxPeerBody + 4<<10
-	maxFileRequest = store.MaxPeerFileBody + 4<<10
-	maxLargeReads  = 4
-)
+// maxRequest bounds what is read of a request before its headers are
+// checked: nobody earns more with an unsigned or badly signed one. Once
+// the header signature holds, the receiver grants maxSealedRequest, the
+// sealed encoding of the largest file body, and checks the body against
+// the signed digest before opening it. Headers-first is what lets the
+// large limit be granted without yardr-zd25's interim slot bound, which
+// this wire removes: a stranger cannot earn the large read, so there is
+// nothing left to bound.
+const maxRequest = store.MaxPeerBody + 4<<10
+
+var maxSealedRequest = store.SealedFileBound() + 4<<10
 
 // Store is what the receiver needs of the yard: the store itself, in the
 // process that owns it. None of the four is on the socket. Those that take
@@ -136,10 +127,6 @@ type Receiver struct {
 	// and maxHeld how many there may be.
 	held    map[string]chan struct{}
 	maxHeld int
-	// largeReads is how many non-empty request bodies are being read or
-	// verified, and maxLargeReads how many may be at once.
-	largeReads    int
-	maxLargeReads int
 }
 
 // NewReceiver serves the peers of the yard whose key is in the file
@@ -148,7 +135,7 @@ func NewReceiver(st Store, keyFile string, log *slog.Logger) *Receiver {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	rc := &Receiver{st: st, key: keyFile, log: log, now: time.Now, held: map[string]chan struct{}{}, maxHeld: maxHeld, maxLargeReads: maxLargeReads}
+	rc := &Receiver{st: st, key: keyFile, log: log, now: time.Now, held: map[string]chan struct{}{}, maxHeld: maxHeld}
 	// The store is both; a test's stand-in for its messages may be only one.
 	rc.pair, _ = st.(PairStore)
 	return rc
@@ -158,16 +145,34 @@ func NewReceiver(st Store, keyFile string, log *slog.Logger) *Receiver {
 // test's clock, and the receiver checks against it.
 func (rc *Receiver) SetClock(now func() time.Time) { rc.now = now }
 
+// Handler routes on the ending of the path it is given: a peer route
+// keeps the path the sender signed, unstripped, through an edge whose
+// base stands in front of it (the address-URL path), and the receiver
+// derives @path from that whole target (internal/yardkey). Anything else
+// under the mount is 404, as the exact routes were.
 func (rc *Receiver) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST "+Path, rc.post)
-	mux.HandleFunc("GET "+Path, rc.get)
-	if rc.pair != nil {
-		mux.HandleFunc("POST "+pairing.PathHello, rc.pairHello)
-		mux.HandleFunc("POST "+pairing.PathReveal, rc.pairReveal)
-		mux.HandleFunc("POST "+pairing.PathConfirm, rc.pairConfirm)
-	}
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, Path):
+			switch r.Method {
+			case http.MethodPost:
+				rc.post(w, r)
+			case http.MethodGet:
+				rc.get(w, r)
+			default:
+				w.Header().Set("Allow", "GET, POST")
+				http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			}
+		case rc.pair != nil && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, pairing.PathHello):
+			rc.pairHello(w, r)
+		case rc.pair != nil && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, pairing.PathReveal):
+			rc.pairReveal(w, r)
+		case rc.pair != nil && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, pairing.PathConfirm):
+			rc.pairConfirm(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
 }
 
 // from is a request whose signature held: the peer it is from, and what
@@ -175,50 +180,24 @@ func (rc *Receiver) Handler() http.Handler {
 type from struct {
 	peer *store.Peer
 	key  ed25519.PrivateKey
-	sig  string
-	body []byte
+	sig  string // a pairing confirm's signature, on the old profile
+	req  store.PeerRequestSig
+	body []byte // opened; the sealed body is checked and opened in verify
 }
 
-// verify reads the request and tells whose it is. A request that is no
+// verify tells whose a request is, from its headers alone first: the
+// keyid it claims finds the link, Yardr-Peer-To must name this yard, and
+// the RFC 9421 signature over the headers (the covered components and the
+// Content-Digest value among them) must hold, all before a body past
+// maxRequest is read. Only then is the body read, up to the sealed bound,
+// checked against its signed digest, and opened; every §2.5 check runs on
+// the opened body, in post and get, as before. A request that is no
 // peer's is answered here, 401 whatever was wrong with it: a key no link
-// has, a signature that does not hold, a timestamp too far off. The log and
-// the counts say which; the sender is not told.
+// has, a signature that does not hold, a validity past, a request signed
+// for another yard, or one signed the old way, which carries no keyid
+// this profile can look up. The log and the counts say which; the sender
+// is not told.
 func (rc *Receiver) verify(w http.ResponseWriter, r *http.Request) (*from, bool) {
-	// Whose the request says it is decides only how much of it is read:
-	// megabytes for a key a link has, and not for anyone who can reach the
-	// listener. Whether it is that yard's is the signature's to say, below.
-	p, known := rc.st.PeerByKey(r.Context(), r.Header.Get(yardkey.HeaderKey))
-	var body []byte
-	var held bool
-	if known == nil {
-		if r.ContentLength != 0 {
-			if !rc.takeLarge() {
-				rc.reject(w, "", "too_many_large", http.StatusServiceUnavailable, errors.New("too many large requests in flight"))
-				return nil, false
-			}
-			held = true
-			defer func() {
-				if held {
-					rc.releaseLarge()
-				}
-			}()
-		}
-		var ok bool
-		if body, ok = rc.readLarge(w, r); !ok {
-			return nil, false
-		}
-	} else {
-		var err error
-		body, err = io.ReadAll(http.MaxBytesReader(w, r.Body, int64(maxRequest)))
-		var tooBig *http.MaxBytesError
-		if errors.As(err, &tooBig) {
-			rc.reject(w, "", "too_large", http.StatusRequestEntityTooLarge, err)
-			return nil, false
-		} else if err != nil {
-			rc.reject(w, "", "read", http.StatusBadRequest, err)
-			return nil, false
-		}
-	}
 	unauthorized := func(peer, reason string, err error) (*from, bool) {
 		rc.reject(w, peer, reason, http.StatusUnauthorized, err)
 		return nil, false
@@ -229,20 +208,63 @@ func (rc *Receiver) verify(w http.ResponseWriter, r *http.Request) (*from, bool)
 	if err != nil {
 		return unauthorized("", "no_key", err)
 	}
-	if err = known; errors.Is(err, store.ErrNotFound) {
+	own := store.Public(key)
+	keyID, err := store.PeerSigKeyID(r.Header.Get(yardkey.HeaderSigInput))
+	if err != nil {
+		return unauthorized("", "unknown_peer", err)
+	}
+	p, err := rc.st.PeerByKey(r.Context(), keyID)
+	if errors.Is(err, store.ErrNotFound) {
 		return unauthorized("", "unknown_peer", err)
 	} else if err != nil {
 		rc.reject(w, "", "store", http.StatusInternalServerError, err)
 		return nil, false
 	}
-	sig := r.Header.Get(yardkey.HeaderSig)
-	err = yardkey.VerifyRequest(p.Key, store.Public(key), r.Method, r.URL.RequestURI(), r.Header.Get(yardkey.HeaderTime), sig, body, rc.now())
-	if held {
-		rc.releaseLarge()
-		held = false
-	}
+	authority, err := store.PeerAuthority(peerRequestScheme(r), r.Host)
 	if err != nil {
+		return unauthorized(p.Name, "authority", err)
+	}
+	desc := store.PeerRequestSig{Method: r.Method, Authority: authority, Path: r.URL.EscapedPath(), Query: r.URL.RawQuery,
+		To: r.Header.Get(yardkey.HeaderPeerTo), Nonce: r.Header.Get(yardkey.HeaderPeerNonce), Digest: r.Header.Get(yardkey.HeaderContentDigest)}
+	if desc.To != own {
+		return unauthorized(p.Name, "wrong_peer", fmt.Errorf("signed for %s, not for this yard", clipKey(desc.To)))
+	}
+	if err := yardkey.VerifyPeerRequest(p.Key, desc, r.Header.Get(yardkey.HeaderSigInput), r.Header.Get(yardkey.HeaderSignature), rc.now()); err != nil {
 		return unauthorized(p.Name, "unauthorized", err)
+	}
+	if !p.Sealed() {
+		// Its answer could not be sealed to it: the record predates
+		// sealed bodies, and is refused as the caller refuses it.
+		return unauthorized(p.Name, "keyless_peer", errors.New(store.ReLinkLine(p.Name)))
+	}
+	// The header signature holds, so the file-sized limit is earned: read
+	// the body up to the sealed bound and check it against its signed
+	// digest before opening anything.
+	var body []byte
+	if desc.Digest != "" {
+		body, err = io.ReadAll(http.MaxBytesReader(w, r.Body, int64(maxSealedRequest)))
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			rc.reject(w, p.Name, "too_large", http.StatusRequestEntityTooLarge, err)
+			return nil, false
+		} else if err != nil {
+			rc.reject(w, p.Name, "read", http.StatusBadRequest, err)
+			return nil, false
+		}
+		if store.ContentDigest(body) != desc.Digest {
+			return unauthorized(p.Name, "digest", fmt.Errorf("%w: the body is not its signed digest", store.ErrSignature))
+		}
+		priv, _, _, err := yardkey.EnsureEnc(encFileOf(rc.key))
+		if err != nil {
+			rc.reject(w, p.Name, "no_enc_key", http.StatusInternalServerError, err)
+			return nil, false
+		}
+		body, err = yardkey.OpenBody(priv, p.Key, own, body)
+		if err != nil {
+			// Sealed to another key or changed: a bad message, answered
+			// signed as one is, in post and get, from the empty body.
+			body = nil
+		}
 	}
 	// What the peer says of its build is kept whatever becomes of the
 	// request: it is the peer's word either way. Not kept, it costs the
@@ -252,89 +274,39 @@ func (rc *Receiver) verify(w http.ResponseWriter, r *http.Request) (*from, bool)
 			rc.log.Warn("peer: keeping what it says it understands", "peer", p.Name, "err", err)
 		}
 	}
-	return &from{peer: p, key: key, sig: sig, body: body}, true
+	return &from{peer: p, key: key, req: desc, body: body}, true
 }
 
-// readLarge reads a request that names a peer's key, which may be a file:
-// up to maxFileRequest, in two steps. The caller holds a large-read slot
-// before any non-empty body is read and until its signature is checked. The
-// head is grown as bytes arrive, so a part-written body holds what it sent;
-// only a body past maxRequest reads its tail. False means the request was
-// answered here.
-func (rc *Receiver) readLarge(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
-	head, err := readHead(r.Body)
-	if err != nil {
-		rc.reject(w, "", "read", http.StatusBadRequest, err)
-		return nil, false
+// peerRequestScheme recovers the target scheme that an edge terminates
+// before forwarding the request. The hosted edge overwrites
+// X-Forwarded-Proto; direct listeners use TLS on the request itself.
+func peerRequestScheme(r *http.Request) string {
+	if r.URL.Scheme == "http" || r.URL.Scheme == "https" {
+		return r.URL.Scheme
 	}
-	if len(head) <= maxRequest {
-		return head, true
+	if r.TLS != nil {
+		return "https"
 	}
-	buf := bytes.NewBuffer(head)
-	if r.ContentLength > int64(buf.Len()) && r.ContentLength <= int64(maxFileRequest) {
-		buf.Grow(int(r.ContentLength) - buf.Len())
+	if scheme := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))); scheme == "http" || scheme == "https" {
+		return scheme
 	}
-	_, err = io.Copy(buf, http.MaxBytesReader(w, r.Body, int64(maxFileRequest-buf.Len())))
-	var tooBig *http.MaxBytesError
-	if errors.As(err, &tooBig) {
-		rc.reject(w, "", "too_large", http.StatusRequestEntityTooLarge, err)
-		return nil, false
-	} else if err != nil {
-		rc.reject(w, "", "read", http.StatusBadRequest, err)
-		return nil, false
-	}
-	return buf.Bytes(), true
+	return "http"
 }
 
-// readHead reads up to maxRequest+1 bytes, growing its buffer as bytes
-// arrive: a body that stalls part-written holds what it sent, not the whole
-// head. A head longer than maxRequest says the body is past it, and its tail
-// is read behind a large-read slot.
-func readHead(r io.Reader) ([]byte, error) {
-	var head []byte
-	var tmp [32 << 10]byte
-	emptyReads := 0
-	for len(head) <= maxRequest {
-		want := len(tmp)
-		if room := maxRequest + 1 - len(head); room < want {
-			want = room
-		}
-		n, err := r.Read(tmp[:want])
-		head = append(head, tmp[:n]...)
-		if n == 0 && err == nil {
-			emptyReads++
-			if emptyReads >= 100 {
-				return nil, io.ErrNoProgress
-			}
-		} else {
-			emptyReads = 0
-		}
-		if err != nil {
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				return head, nil
-			}
-			return nil, err
-		}
+// encFileOf is the encryption key file beside a signing key file:
+// peer-enc.key beside peer.key, where EnsureEnc makes it.
+func encFileOf(keyFile string) string {
+	if i := strings.LastIndex(keyFile, "/"); i >= 0 {
+		return keyFile[:i+1] + "peer-enc.key"
 	}
-	return head, nil
+	return "peer-enc.key"
 }
 
-// takeLarge takes a pre-verification read slot, false when none is free.
-// releaseLarge gives one back after its body's signature is checked.
-func (rc *Receiver) takeLarge() bool {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-	if rc.largeReads >= rc.maxLargeReads {
-		return false
+func clipKey(s string) string {
+	if len(s) > 12 {
+		return s[:12] + "..."
 	}
-	rc.largeReads++
-	return true
-}
-
-func (rc *Receiver) releaseLarge() {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-	rc.largeReads--
+	return s
 }
 
 // stated reads what a request says of its sender's build: nil for one that
@@ -603,14 +575,38 @@ func parseRefusal(rest string) store.Refusal {
 	return no
 }
 
-// answer writes a signed answer to a peer's request. Only an answer to a
-// peer is signed: who is not one gets reject's. An answer that is fields
-// of its own says what this yard states to the peer too (SaysTo), as a
-// page does.
+// answer writes a signed, sealed answer to a peer's request: the body is
+// sealed to the peer and signed as an RFC 9421 response over the request
+// it answers. Only an answer to a peer is signed: who is not one gets
+// reject's. An answer that is fields of its own says what this yard
+// states to the peer too (SaysTo), as a page does.
 func (rc *Receiver) answer(w http.ResponseWriter, f *from, code int, v any) {
 	if fields, ok := v.(map[string]any); ok {
 		fields["says"] = SaysTo(*f.peer)
 	}
+	plain, err := json.Marshal(v)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	sealed, err := yardkey.SealBody(store.Public(f.key), f.peer.Key, f.peer.Enc, plain)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	input, sig, digest := yardkey.SignPeerResponse(f.key, code, f.req, sealed)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(yardkey.HeaderSigInput, input)
+	w.Header().Set(yardkey.HeaderSignature, sig)
+	w.Header().Set(yardkey.HeaderContentDigest, digest)
+	w.Header().Set(yardkey.HeaderPeerNonce, f.req.Nonce)
+	w.WriteHeader(code)
+	_, _ = w.Write(sealed)
+}
+
+// answerOld writes an answer signed the way before the sealed wire: a
+// pairing confirm's, the one answer of that profile left (pair.go).
+func (rc *Receiver) answerOld(w http.ResponseWriter, f *from, code int, v any) {
 	body, err := json.Marshal(v)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)

@@ -200,7 +200,7 @@ func TestPeerMailPulledRefusal(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return store.PeerBatch{RequestSig: "req-1", Signature: store.SignResponse(y.north, 200, "req-1", body), Body: body, Told: told}
+		return y.sealedBatch(t, y.north, y.key, body, told)
 	}
 	good, bad := mail("p1", "yardmaster", "yardmaster", "hi"), mail("p2", "nobody", "yardmaster", "hi")
 	good.Seq, bad.Seq = 3, 4

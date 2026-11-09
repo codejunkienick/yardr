@@ -37,9 +37,13 @@ func newHeldYard(t *testing.T) *heldYard {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, bEnc, err := store.GenerateEnc()
+	if err != nil {
+		t.Fatal(err)
+	}
 	// b has no URL at a, which then holds b's pulls rather than answering
 	// them at once as it does a peer it posts to.
-	if _, err = api.AddPeer(context.Background(), store.Peer{Name: "b", Key: store.Public(b)}, "jo"); err != nil {
+	if _, err = api.AddPeer(context.Background(), store.Peer{Name: "b", Key: store.Public(b), Enc: bEnc}, "jo"); err != nil {
 		t.Fatal(err)
 	}
 	return &heldYard{rc: NewReceiver(own, keyFile, nil), to: store.Public(a), peer: b}
@@ -59,12 +63,18 @@ type heldPull struct {
 func (y *heldYard) pull(t *testing.T) *heldPull {
 	t.Helper()
 	uri := Path + "?after=0&wait=60"
-	ts, sig := yardkey.SignRequest(y.peer, y.to, http.MethodGet, uri, time.Now(), nil)
+	nonce, err := store.NewPeerNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	desc := store.PeerRequestSig{Method: http.MethodGet, Authority: "example.com", Path: Path, Query: "after=0&wait=60", To: y.to, Nonce: nonce}
+	input, sig := yardkey.SignPeerRequest(y.peer, &desc, nil, time.Now())
 	asker, kill := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, uri, nil).WithContext(asker)
-	req.Header.Set(yardkey.HeaderKey, store.Public(y.peer))
-	req.Header.Set(yardkey.HeaderTime, ts)
-	req.Header.Set(yardkey.HeaderSig, sig)
+	req.Header.Set(yardkey.HeaderSigInput, input)
+	req.Header.Set(yardkey.HeaderSignature, sig)
+	req.Header.Set(yardkey.HeaderPeerTo, y.to)
+	req.Header.Set(yardkey.HeaderPeerNonce, nonce)
 	p := &heldPull{rec: httptest.NewRecorder(), kill: kill, over: make(chan struct{})}
 	go func() { defer close(p.over); y.rc.Handler().ServeHTTP(p.rec, req) }()
 	t.Cleanup(func() { kill(); <-p.over })

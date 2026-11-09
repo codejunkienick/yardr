@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,13 +18,17 @@ import (
 )
 
 // peerYard is a yard with one peer, north, whose private key the test
-// holds, so it can sign as north does.
+// holds, so it can sign as north does. The yard itself has a signing key
+// and an encryption key on disk, as a server's yard does, so the store
+// can open what north seals to it.
 type peerYard struct {
 	api   store.API
 	own   *store.Store
 	ctx   context.Context
 	north []byte // north's private key
 	key   string // north's public key
+	// ownSign and ownEnc are this yard's two public keys.
+	ownSign, ownEnc string
 }
 
 func newPeerYard(t *testing.T, url string) *peerYard {
@@ -36,15 +41,56 @@ func newPeerYard(t *testing.T, url string) *peerYard {
 // that closes it and opens the file again.
 func newPeerYardOn(t *testing.T, url string, api store.API, own *store.Store) *peerYard {
 	t.Helper()
-	k, _, err := yardkey.Ensure(filepath.Join(t.TempDir(), "north.key"))
+	dir := t.TempDir()
+	k, _, err := yardkey.Ensure(filepath.Join(dir, "north.key"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	y := &peerYard{api: api, own: own, ctx: context.Background(), north: k, key: store.Public(k)}
-	if _, err := api.AddPeer(y.ctx, store.Peer{Name: "north", Key: y.key, URL: url, Calls: "the-north"}, "jo"); err != nil {
+	ownDir := t.TempDir()
+	ownKey, _, err := yardkey.Ensure(filepath.Join(ownDir, "peer.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ownEncPub, _, err := yardkey.EnsureEnc(filepath.Join(ownDir, "peer-enc.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	own.SetYard(filepath.Join(ownDir, "peer.key"), "test")
+	y := &peerYard{api: api, own: own, ctx: context.Background(), north: k, key: store.Public(k), ownSign: store.Public(ownKey), ownEnc: ownEncPub}
+	_, northEncPub, err := store.GenerateEnc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.AddPeer(y.ctx, store.Peer{Name: "north", Key: y.key, Enc: northEncPub, URL: url, Calls: "the-north"}, "jo"); err != nil {
 		t.Fatal(err)
 	}
 	return y
+}
+
+// sealedBatch is a pull answer of body from the yard whose signing key is
+// signer (its public half fromSign), sealed to this yard and signed as the
+// profile signs an answer, for the store to check and open.
+func (y *peerYard) sealedBatch(t *testing.T, signer ed25519.PrivateKey, fromSign string, body []byte, told []uint64) store.PeerBatch {
+	t.Helper()
+	env, err := store.SealBody(fromSign, y.ownSign, y.ownEnc, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := store.PeerRequestSig{Method: "GET", Authority: "north.test", Path: "/peers/messages", Query: "after=0", To: y.ownSign, Nonce: "req-1"}
+	input, sig, digest := store.SignPeerResponse(signer, 200, req, env)
+	return store.PeerBatch{Request: req, SigInput: input, Signature: sig, Digest: digest, Nonce: req.Nonce, Body: env, Told: told}
+}
+
+// sealedAnswer is a post answer of body, as sealedBatch is a pull's.
+func (y *peerYard) sealedAnswer(t *testing.T, signer ed25519.PrivateKey, fromSign string, status int, body []byte) store.PeerAnswer {
+	t.Helper()
+	env, err := store.SealBody(fromSign, y.ownSign, y.ownEnc, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := store.PeerRequestSig{Method: "POST", Authority: "north.test", Path: "/peers/messages", To: y.ownSign, Nonce: "post-1"}
+	input, sig, digest := store.SignPeerResponse(signer, status, req, env)
+	return store.PeerAnswer{Status: status, Request: req, SigInput: input, Signature: sig, Digest: digest, Nonce: req.Nonce, Body: env}
 }
 
 func (y *peerYard) allow(t *testing.T, ch store.PeerAllow) *store.Peer {
@@ -603,12 +649,12 @@ func TestPeerPulled(t *testing.T) {
 	t.Parallel()
 	y := newPeerYard(t, "http://north.test")
 	y.allow(t, store.PeerAllow{Receive: []string{"ping"}, Send: []string{"ping"}})
-	batch := func(key []byte, page store.PeerPage) store.PeerBatch {
+	batch := func(key ed25519.PrivateKey, page store.PeerPage) store.PeerBatch {
 		body, err := json.Marshal(page)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return store.PeerBatch{RequestSig: "req-1", Signature: store.SignResponse(key, 200, "req-1", body), Body: body}
+		return y.sealedBatch(t, key, store.Public(key), body, nil)
 	}
 	m1, m2 := ping("m1"), ping("m2")
 	m1.Seq, m2.Seq = 4, 7
@@ -619,9 +665,10 @@ func TestPeerPulled(t *testing.T) {
 		t.Fatal(err)
 	}
 	changed := good
-	changed.Body = []byte(strings.Replace(string(good.Body), "m1", "mX", 1))
+	changed.Body = append([]byte{}, good.Body...)
+	changed.Body[len(changed.Body)-3] ^= 1
 	moved := good
-	moved.RequestSig = "req-2"
+	moved.Request.Nonce, moved.Nonce = "req-2", "req-2"
 	unsigned := good
 	unsigned.Signature = ""
 	for name, b := range map[string]store.PeerBatch{

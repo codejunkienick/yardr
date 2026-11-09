@@ -502,6 +502,7 @@ func TestSettleOverAnswerOnItsWay(t *testing.T) {
 type linked struct {
 	*Store
 	name, key string
+	encPub    string
 }
 
 // pair is two stores, a and b, linked both ways with ask allowed each way.

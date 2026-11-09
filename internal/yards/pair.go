@@ -137,7 +137,7 @@ func (rc *Receiver) pairConfirm(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get(yardkey.HeaderKey) != caller {
 		err = fmt.Errorf("%w: not the key the pairing was called with", store.ErrSignature)
 	} else {
-		err = yardkey.VerifyRequest(caller, store.Public(key), r.Method, r.URL.RequestURI(), r.Header.Get(yardkey.HeaderTime), sig, body, rc.now())
+		err = yardkey.VerifyRequest(caller, store.Public(key), r.Method, pairing.PathConfirm, r.Header.Get(yardkey.HeaderTime), sig, body, rc.now())
 	}
 	if err != nil {
 		rc.reject(w, "", "pair_unauthorized", http.StatusUnauthorized, err)
@@ -148,7 +148,7 @@ func (rc *Receiver) pairConfirm(w http.ResponseWriter, r *http.Request) {
 		rc.pairFailed(w, err)
 		return
 	}
-	rc.answer(w, &from{key: key, sig: sig}, http.StatusOK, out)
+	rc.answerOld(w, &from{key: key, sig: sig}, http.StatusOK, out)
 }
 
 // Called is a pairing as the calling yard has it once the other has
@@ -229,6 +229,11 @@ var ErrNotTheCode = errors.New("the answer was not made with the code: something
 // operator has been asked nothing.
 func (c *Caller) PairCall(ctx context.Context, url, code, name string, accept func(host store.Party) error) (*Called, error) {
 	me := store.Party{Nonce: store.NewNonce(), Name: name, Key: store.Public(c.Key)}
+	if c.Enc != nil {
+		if pub, err := store.EncPublicOf(c.Enc); err == nil {
+			me.Enc = pub
+		}
+	}
 	if err := me.Valid(); err != nil {
 		return nil, err
 	}
@@ -269,7 +274,7 @@ func (c *Caller) PairAnswer(ctx context.Context, p *Called, yes bool) (*store.Pa
 		return nil, err
 	}
 	host := store.Peer{Name: p.Host.Name, Key: p.Host.Key, URL: p.URL}
-	status, answer, _, _, err := c.do(ctx, host, http.MethodPost, pairing.PathConfirm, body)
+	status, answer, _, err := c.doOld(ctx, host, http.MethodPost, pairing.PathConfirm, body)
 	if errors.Is(err, ErrUnsigned) {
 		// do's words are a peer's; these two are not peers yet.
 		return nil, fmt.Errorf("%s's answer was %w, the one it gave in the pairing: the pairing is gone there, the clocks are more than %s apart, or something between the two answered",

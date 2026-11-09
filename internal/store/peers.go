@@ -82,15 +82,16 @@ const (
 	pullBatchBytes = 1 << 20
 )
 
-// Peer is another yard this one is linked with, under a name of this yard's
-// choosing. Nothing a peer says of itself is trusted: Calls is kept to show
-// the operator, and the key alone tells whose a request is.
+// Peer is another yard this one is linked with, under a name of this yard's choosing. Nothing a peer
+// says of itself is trusted: Calls is kept to show the operator, and the key alone tells whose it is.
 type Peer struct {
 	Name string `json:"name"`
-	// Key is its public key (Public).
+	// Key is its signing public key (Public); Enc its encryption public
+	// key, pinned beside it, empty on a link made before sealed bodies.
 	Key string `json:"key"`
-	// URL is where it can be called; empty for a yard that cannot be, which
-	// calls this one and asks for what waits.
+	Enc string `json:"enc,omitempty"`
+	// URL is where it can be called; empty for a yard that cannot be,
+	// which calls this one and asks for what waits.
 	URL string `json:"url,omitempty"`
 	// Calls is what the yard called itself in its invite.
 	Calls string `json:"calls,omitempty"`
@@ -98,10 +99,10 @@ type Peer struct {
 	// direction on its own. A new link carries none.
 	Send    []string `json:"send"`
 	Receive []string `json:"receive"`
-	// Expose names the crew members and users of this yard the peer may
-	// see and write to, sorted; nobody on a new link. Roster is what this
-	// yard says of them to the peer (peerroster.go), on a peer the store
-	// hands out. Read only.
+	// Expose names the crew members and users of this yard the peer may see
+	// and write to, sorted; nobody on a new link. Roster is what this yard
+	// says of them to the peer (peerroster.go), on a peer the store hands
+	// out. Read only.
 	Expose []string          `json:"expose,omitempty"`
 	Roster []PeerRosterEntry `json:"roster,omitempty"`
 	// Trust names those of the peer's yard whose mail counts as a user of
@@ -263,28 +264,32 @@ type PeerAllow struct {
 	MailLimit int               `json:"mail_limit,omitempty"`
 }
 
-// PeerBatch is a peer's answer to a pull, as the daemon got it: the store
-// checks the peer's signature on it itself (PeerPulled), so nothing on the
-// socket can hand in a message no peer sent.
+// PeerBatch is a peer's answer to a pull, as the daemon got it: the sealed
+// envelope (Body) and the signature material over it, which the store
+// checks and opens itself (PeerPulled), so nothing on the socket can hand
+// in a message no peer sent.
 type PeerBatch struct {
-	// RequestSig is the signature of the request this answers.
-	RequestSig string `json:"request_sig"`
-	Signature  string `json:"signature"`
-	Body       []byte `json:"body"`
+	Request   PeerRequestSig `json:"request"`
+	SigInput  string         `json:"sig_input"`
+	Signature string         `json:"signature"`
+	Digest    string         `json:"digest"`
+	Nonce     string         `json:"nonce"`
+	Body      []byte         `json:"body"`
 	// Told are the refusals (Peer.Refused, by sequence number) the request
-	// carried, which the peer has now heard of. It is the daemon's own
-	// word, not the peer's: all it can do is stop a refusal being told
-	// again.
+	// carried, which the peer has now heard of. It is the daemon's own word,
+	// not the peer's: all it can do is stop a refusal being told again.
 	Told []uint64 `json:"told,omitempty"`
 }
 
-// PeerAnswer is a signed answer to a posted message. The store checks its
-// signature before keeping what it says, as it does for a pull page.
+// PeerAnswer is a signed answer to a posted message, as PeerBatch is for a pull: the store checks and opens it.
 type PeerAnswer struct {
-	Status     int    `json:"status"`
-	RequestSig string `json:"request_sig"`
-	Signature  string `json:"signature"`
-	Body       []byte `json:"body"`
+	Status    int            `json:"status"`
+	Request   PeerRequestSig `json:"request"`
+	SigInput  string         `json:"sig_input"`
+	Signature string         `json:"signature"`
+	Digest    string         `json:"digest"`
+	Nonce     string         `json:"nonce"`
+	Body      []byte         `json:"body"`
 }
 
 // PeerPage is the body of an answer to a pull. Push says that the yard
@@ -1240,8 +1245,8 @@ func (w *wtx) receivePeer(p *Peer, msgs []PeerMessage, way string, tk *taking, f
 }
 
 // PeerReceive takes messages the peer name posted (see receivePeer), signed
-// with key: the name is taken only while it is that key's (loadPeerOf). It is
-// not on the API: only the receiver, in the process that owns the store,
+// with key: the name is taken only while it is that key's (loadPeerOf). It
+// is not on the API: only the receiver, in the process that owns the store,
 // has checked whose they are, so no client can hand in one of its own.
 func (s *Store) PeerReceive(ctx context.Context, name, key string, msgs []PeerMessage) ([]PeerTaken, error) {
 	unlock := s.lockPeerBatch(name, msgs)
@@ -1264,11 +1269,11 @@ func (s *Store) PeerReceive(ctx context.Context, name, key string, msgs []PeerMe
 	return out, err
 }
 
-// PeerHeard keeps what the peer name said of its build with a request
-// signed with key (Peer.heard); says is nil for one that said nothing. A
-// peer asks every few seconds and says the same each time, so it writes
-// only what changed. Like PeerReceive it is not on the API: the receiver
-// has checked whose the request is.
+// PeerHeard keeps what the peer name said of its build with a request signed
+// with key (Peer.heard); says is nil for one that said nothing. A peer asks
+// every few seconds and says the same each time, so it writes only what
+// changed. Like PeerReceive it is not on the API: the receiver has checked
+// whose the request is.
 func (s *Store) PeerHeard(ctx context.Context, name, key string, says *PeerSays) error {
 	changed := false
 	hear := func(tx *bolt.Tx) (*Peer, error) {
@@ -1298,7 +1303,8 @@ func (s *Store) PeerHeard(ctx context.Context, name, key string, says *PeerSays)
 	})
 }
 
-// PeerPostAnswered keeps what a peer says in its signed answer to a post.
+// PeerPostAnswered keeps what a peer says in its signed, sealed answer to
+// a post, checked and opened as a pull's is (openPeerAnswer).
 func (s *Store) PeerPostAnswered(ctx context.Context, name string, answer PeerAnswer) error {
 	var says *PeerSays
 	changed := false
@@ -1307,13 +1313,14 @@ func (s *Store) PeerPostAnswered(ctx context.Context, name string, answer PeerAn
 		if err != nil {
 			return nil, err
 		}
-		if err := VerifyResponse(p.Key, answer.Status, answer.RequestSig, answer.Signature, answer.Body); err != nil {
+		opened, err := s.openPeerAnswer(p.Key, answer.Status, answer.Request, answer.Nonce, answer.Digest, answer.SigInput, answer.Signature, answer.Body)
+		if err != nil {
 			return nil, fmt.Errorf("peer %s: %w", name, err)
 		}
 		var reply struct {
 			Says *PeerSays `json:"says"`
 		}
-		if err := json.Unmarshal(answer.Body, &reply); err != nil {
+		if err := json.Unmarshal(opened, &reply); err != nil {
 			return nil, fmt.Errorf("peer %s: its answer is not JSON", name)
 		}
 		says = reply.Says
@@ -1339,23 +1346,15 @@ func (s *Store) PeerPostAnswered(ctx context.Context, name string, answer PeerAn
 	})
 }
 
-// PeerPulled takes what the peer name handed over when the daemon asked.
-// The peer's signature on the answer is checked here, against the key the
-// link was made with, so the daemon is trusted with nothing: what it passes
-// on is the peer's or is refused. The next question starts after the
-// highest sequence number taken. It returns what became of each message,
-// and whether the peer posts instead.
-//
-// What was not taken is kept with why (Peer.Refused) for the next
-// question to tell the peer, and what b says the peer has been told of is
-// forgotten.
-//
-// The answer also says what the peer's build understands, which is kept
-// (Peer.heard): it is under the same signature.
-//
-// An answer that hands over nothing, told of nothing and says nothing new
-// writes nothing: the daemon asks again as soon as it is answered, and a
-// write would wake it for nothing.
+// PeerPulled takes what the peer name handed over when the daemon asked. The peer's signature on the answer is
+// checked here, against the key the link was made with, and its sealed body opened, so the daemon is trusted
+// with nothing: what it passes on is the peer's or is refused. The next question starts after the highest
+// sequence number taken. It returns what became of each message, and whether the peer posts instead. What was
+// not taken is kept with why (Peer.Refused) for the next question to tell the peer, and what b says the peer
+// has been told of is forgotten. The answer also says what the peer's build understands, which is kept
+// (Peer.heard): it is under the same signature. An answer that hands over nothing, told of nothing and says
+// nothing new writes nothing: the daemon asks again as soon as it is answered, and a write would wake it for
+// nothing.
 func (s *Store) PeerPulled(ctx context.Context, name string, b PeerBatch) (*PeerPulled, error) {
 	var page PeerPage
 	told, said := false, false
@@ -1364,11 +1363,12 @@ func (s *Store) PeerPulled(ctx context.Context, name string, b PeerBatch) (*Peer
 		if err != nil {
 			return nil, err
 		}
-		if err := VerifyResponse(p.Key, 200, b.RequestSig, b.Signature, b.Body); err != nil {
+		opened, err := s.openPeerAnswer(p.Key, 200, b.Request, b.Nonce, b.Digest, b.SigInput, b.Signature, b.Body)
+		if err != nil {
 			return nil, fmt.Errorf("peer %s: %w", name, err)
 		}
 		page = PeerPage{}
-		if err := json.Unmarshal(b.Body, &page); err != nil {
+		if err := json.Unmarshal(opened, &page); err != nil {
 			return nil, fmt.Errorf("peer %s: its answer is not a page of messages", name)
 		}
 		told = false

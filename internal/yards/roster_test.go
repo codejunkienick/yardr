@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/yardkey"
 	"yardr.dev/yardr/internal/yards"
 )
 
@@ -80,17 +81,21 @@ func TestYardsSayWhomTheyExpose(t *testing.T) {
 	// What crosses is the entry's four fields: nothing of what the crew
 	// member runs as, nor where its files are.
 	resp, body := signed(a, b, "GET", yards.Path+"?after=0", nil).send(t, b)
+	opened, err := yardkey.OpenBody(a.encPriv, b.pub(), a.pub(), body)
+	if err != nil {
+		t.Fatalf("b's answer does not open: %v", err)
+	}
 	var page struct {
 		Says struct {
 			Roster []map[string]any `json:"roster"`
 		} `json:"says"`
 	}
-	if err := json.Unmarshal(body, &page); err != nil || resp.StatusCode != http.StatusOK || len(page.Says.Roster) != 2 {
-		t.Fatalf("b's answer = %d %s, %v", resp.StatusCode, body, err)
+	if err := json.Unmarshal(opened, &page); err != nil || resp.StatusCode != http.StatusOK || len(page.Says.Roster) != 2 {
+		t.Fatalf("b's answer = %d %s, %v", resp.StatusCode, opened, err)
 	}
 	if want := map[string]any{"name": "yardmaster", "kind": "crew", "role": "Yardmaster: shapes the beads", "mail": true}; !reflect.DeepEqual(page.Says.Roster[1], want) ||
-		strings.Contains(string(body), "opus") || strings.Contains(string(body), "claude") || strings.Contains(string(body), dir) {
-		t.Fatalf("b's answer says %s", body)
+		strings.Contains(string(opened), "opus") || strings.Contains(string(opened), "claude") || strings.Contains(string(opened), dir) {
+		t.Fatalf("b's answer says %s", opened)
 	}
 	// That question was an older yardr's, which says nothing: nothing is
 	// kept of a yard that has not said.
@@ -132,8 +137,9 @@ func TestYardsSayWhomTheyExpose(t *testing.T) {
 		}
 	}
 	resp, body = signed(a, b, "POST", yards.Path, []byte(`{"id":"r3","kind":"mail","body":{"to":"clerk","from":"scout","text":"hi"}}`)).send(t, b)
-	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(body), `"refused":"not_exposed"`) {
-		t.Fatalf("mail to the clerk = %d %s", resp.StatusCode, body)
+	opened, err = yardkey.OpenBody(a.encPriv, b.pub(), a.pub(), body)
+	if err != nil || resp.StatusCode != http.StatusForbidden || !strings.Contains(string(opened), `"refused":"not_exposed"`) {
+		t.Fatalf("mail to the clerk = %d %s (%v)", resp.StatusCode, body, err)
 	}
 	refused := b.events(t, "peer_message_refused")
 	if len(refused) != 3 || refused[2].Data["reason"] != "not_exposed" || refused[2].Data["to"] != "clerk" || refused[2].Data["direction"] != "in" {

@@ -96,29 +96,45 @@ func cliEnv(t *testing.T, yards ...*cliYard) {
 	}
 }
 
-// yardr peer key makes the key once and prints the same public key every
-// time; a key file open to others is refused. The invite carries the
-// yard's name, that key and the URL when one is given.
+// yardr peer key makes each key once and prints the same public keys
+// every time: the signing key on its own line, as it always was, and the
+// encryption key below it, named. A key file open to others is refused.
+// The invite (yardr-peer-2) carries the yard's name, both keys and the
+// URL when one is given; a yardr-peer-1 line still reads, with no
+// encryption key.
 func TestPeerKeyAndInvite(t *testing.T) {
 	t.Parallel()
 	y := newCLIYard(t, "north")
 	cliEnv(t, y)
-	first := strings.TrimSpace(y.must(t, "key"))
+	out := strings.TrimSpace(y.must(t, "key"))
+	first, encLine, _ := strings.Cut(out, "\n")
 	if _, err := store.ParsePublic(first); err != nil {
 		t.Fatalf("peer key printed %q: %v", first, err)
 	}
-	st, err := os.Stat(filepath.Join(y.home, "peer.key"))
-	if err != nil || st.Mode().Perm() != 0o600 {
-		t.Fatalf("peer.key: %v, %v", st, err)
+	encPub, ok := strings.CutPrefix(encLine, "encryption: ")
+	if !ok {
+		t.Fatalf("peer key printed %q: no encryption line", out)
 	}
-	if again := strings.TrimSpace(y.must(t, "key")); again != first {
-		t.Fatalf("peer key printed %q, then %q", first, again)
+	if _, err := store.ParseEncPublic(encPub); err != nil {
+		t.Fatalf("encryption key printed %q: %v", encPub, err)
+	}
+	for _, f := range []string{"peer.key", "peer-enc.key"} {
+		st, err := os.Stat(filepath.Join(y.home, f))
+		if err != nil || st.Mode().Perm() != 0o600 {
+			t.Fatalf("%s: %v, %v", f, st, err)
+		}
+	}
+	if again := strings.TrimSpace(y.must(t, "key")); again != out {
+		t.Fatalf("peer key printed %q, then %q", out, again)
 	}
 
 	line := strings.TrimSpace(y.must(t, "invite", "--url", y.srv.URL+"/"))
 	inv, err := store.ParseInvite(line)
-	if err != nil || inv.Name != "north" || inv.Key != first || inv.URL != y.srv.URL {
+	if err != nil || inv.Name != "north" || inv.Key != first || inv.Enc != encPub || inv.URL != y.srv.URL || !strings.HasPrefix(line, "yardr-peer-2,") {
 		t.Fatalf("invite %q = %+v, %v", line, inv, err)
+	}
+	if old, err := store.ParseInvite("yardr-peer-1,north," + first); err != nil || old.Enc != "" {
+		t.Fatalf("a yardr-peer-1 invite = %+v, %v", old, err)
 	}
 	if err := y.st.SetSetting(context.Background(), "name", "the-north", "jo"); err != nil {
 		t.Fatal(err)

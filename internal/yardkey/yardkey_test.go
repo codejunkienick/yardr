@@ -1,6 +1,7 @@
 package yardkey
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"errors"
 	"io/fs"
@@ -110,4 +111,53 @@ func TestRequestSignature(t *testing.T) {
 			t.Errorf("%s: %v, want ErrSignature", name, err)
 		}
 	}
+}
+
+// A body sealed to a yard opens only for that yard, in that direction:
+// HPKE base mode with the two signing keys as additional data. EnsureEnc
+// makes the pair once, in a 0600 file beside the signing key.
+func TestEncKeySealAndOpen(t *testing.T) {
+	dir := t.TempDir()
+	aPriv, aEnc, made, err := EnsureEnc(filepath.Join(dir, "peer-enc.key"))
+	if err != nil || !made {
+		t.Fatalf("EnsureEnc = %v, made %v", err, made)
+	}
+	if again, pub, made, err := EnsureEnc(filepath.Join(dir, "peer-enc.key")); err != nil || made || pub != aEnc || !bytes.Equal(again, aPriv) {
+		t.Fatalf("EnsureEnc again = %v, made %v: the pair changed", err, made)
+	}
+	if st, err := os.Stat(filepath.Join(dir, "peer-enc.key")); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("peer-enc.key stat = %v, %v", st, err)
+	}
+	bPriv, bEnc, _, err := EnsureEnc(filepath.Join(dir, "b-enc.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	from, to := "yard-a-signing", "yard-b-signing"
+	env, err := SealBody(from, to, bEnc, []byte(`{"kind":"ping","note":"the quiet cow"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(env), "quiet cow") || strings.Contains(string(env), "ping") {
+		t.Fatalf("the envelope carries plaintext: %s", env)
+	}
+	opened, err := OpenBody(bPriv, from, to, env)
+	if err != nil || !strings.Contains(string(opened), "quiet cow") {
+		t.Fatalf("OpenBody = %s, %v", opened, err)
+	}
+	if _, err := OpenBody(aPriv, from, to, env); err == nil {
+		t.Error("opened for the wrong yard")
+	}
+	if _, err := OpenBody(bPriv, to, from, env); err == nil {
+		t.Error("opened in the other direction")
+	}
+	tampered := bytes.Replace(env, []byte(`"ct":"`), []byte(`"ct":"A`), 1)
+	if _, err := OpenBody(bPriv, from, to, tampered); err == nil {
+		t.Error("opened tampered")
+	}
+	if _, err := OpenBody(bPriv, from, to, []byte(`{"old":true}`)); !errors.Is(err, store.ErrSealed) {
+		t.Errorf("an old-way body = %v, want ErrSealed", err)
+	}
+	_ = aEnc
+	_ = bEnc
+	_ = bPriv
 }

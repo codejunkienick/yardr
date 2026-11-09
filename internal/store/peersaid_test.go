@@ -25,7 +25,7 @@ func TestPeerUnknownKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := y.api.PeerPulled(y.ctx, "north", store.PeerBatch{RequestSig: "req-1", Signature: store.SignResponse(y.north, 200, "req-1", body), Body: body})
+	res, err := y.api.PeerPulled(y.ctx, "north", y.sealedBatch(t, y.north, y.key, body, nil))
 	if err != nil || len(res.Taken) != 3 {
 		t.Fatalf("PeerPulled = %+v, %v", res, err)
 	}
@@ -193,7 +193,7 @@ func TestPeerPostAnswered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	answer := store.PeerAnswer{Status: 200, RequestSig: "post-1", Signature: store.SignResponse(y.north, 200, "post-1", page), Body: page}
+	answer := y.sealedAnswer(t, y.north, y.key, 200, page)
 	if err := y.api.PeerPostAnswered(y.ctx, "north", answer); err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestPeerPulledSays(t *testing.T) {
 	y.allow(t, store.PeerAllow{Receive: []string{"ping"}})
 	pulled := func(page string) *store.PeerPulled {
 		t.Helper()
-		res, err := y.api.PeerPulled(y.ctx, "north", store.PeerBatch{RequestSig: "req-1", Signature: store.SignResponse(y.north, 200, "req-1", []byte(page)), Body: []byte(page)})
+		res, err := y.api.PeerPulled(y.ctx, "north", y.sealedBatch(t, y.north, y.key, []byte(page), nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -238,7 +238,9 @@ func TestPeerPulledSays(t *testing.T) {
 	quiet(t, y.own, "an empty page that says the same", func() { pulled(says) })
 	// Changed, the answer is no longer north's.
 	forged := strings.Replace(says, "v1.2.3", "v6.6.6", 1)
-	if _, err := y.api.PeerPulled(y.ctx, "north", store.PeerBatch{RequestSig: "req-1", Signature: store.SignResponse(y.north, 200, "req-1", []byte(says)), Body: []byte(forged)}); err == nil {
+	forgedBatch := y.sealedBatch(t, y.north, y.key, []byte(says), nil)
+	forgedBatch.Body = []byte(forged)
+	if _, err := y.api.PeerPulled(y.ctx, "north", forgedBatch); err == nil {
 		t.Fatal("a changed answer was taken")
 	}
 	if p, _ := y.api.GetPeer(y.ctx, "north"); p.Said.Yardr != "v1.2.3" {

@@ -32,7 +32,7 @@ func (s *Store) AddPeer(ctx context.Context, p Peer, actor string) (*Peer, error
 // ask it was approved on, which the event carries.
 func (w *wtx) addPeer(ctx context.Context, p Peer, actor string, by *approvedOn) (*Peer, error) {
 	// A new link carries nothing, whatever the caller holds.
-	p = Peer{Name: p.Name, Key: p.Key, URL: p.URL, Calls: p.Calls, Send: []string{}, Receive: []string{}, AddedAt: now()}
+	p = Peer{Name: p.Name, Key: p.Key, Enc: p.Enc, URL: p.URL, Calls: p.Calls, Send: []string{}, Receive: []string{}, AddedAt: now()}
 	if err := w.checkPeerInvite(p.Key); err != nil {
 		return nil, err
 	}

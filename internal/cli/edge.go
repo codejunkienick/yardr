@@ -242,7 +242,11 @@ func (a *app) edgeConnect(c *cobra.Command, address, as string) error {
 	}
 	a.progress(w, warn, "This yard's key: %s", keyLabel(store.Public(yard)))
 
-	en, err := client.Enrol(ctx, edgeKey, yard, name)
+	_, encPub, _, err := yardkey.EnsureEnc(cfg.PeerEncKey())
+	if err != nil {
+		return err
+	}
+	en, err := client.Enrol(ctx, edgeKey, yard, encPub, name)
 	if err != nil {
 		return fmt.Errorf("%w: nothing was written", err)
 	}

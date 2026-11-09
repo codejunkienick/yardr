@@ -19,7 +19,11 @@
 //
 //	GET  /edge/key        the edge's public key as store.Public writes it,
 //	                      as plain text. Not signed.
-//	POST /edge/enrol      {"key": <the yard's key>, "name": <its name>}.
+//	POST /edge/enrol      {"key": <the yard's key>, "enc": <its encryption
+//	                      key>, "name": <its name>}. The encryption key is
+//	                      presented beside the signing key since the sealed
+//	                      peer wire, so the edge can publish both (design
+//	                      yardr-4687 §3.5); an edge from before it ignores it.
 //	                      Answered {"code", "expires"} (RFC 3339, shown to
 //	                      the person and read as unknown if it is anything
 //	                      else) while no one has
@@ -352,11 +356,12 @@ type Enrolment struct {
 	body    []byte
 }
 
-// Enrol begins the enrolment of the yard whose key is yard, which calls
-// itself name, with the edge whose key is edgeKey: the first call, which the
-// edge answers with a code. The caller shows the code and Waits.
-func (c *Client) Enrol(ctx context.Context, edgeKey string, yard ed25519.PrivateKey, name string) (*Enrolment, error) {
-	body, err := json.Marshal(map[string]string{"key": store.Public(yard), "name": name})
+// Enrol begins the enrolment of the yard whose key is yard and whose
+// encryption public key is enc, which calls itself name, with the edge
+// whose key is edgeKey: the first call, which the edge answers with a
+// code. The caller shows the code and Waits.
+func (c *Client) Enrol(ctx context.Context, edgeKey string, yard ed25519.PrivateKey, enc, name string) (*Enrolment, error) {
+	body, err := json.Marshal(map[string]string{"key": store.Public(yard), "enc": enc, "name": name})
 	if err != nil {
 		return nil, err
 	}

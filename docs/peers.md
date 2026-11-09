@@ -33,21 +33,33 @@ yardr peer set north --url https://north.example.com   # where this yard calls i
 yardr peer rm north
 ```
 
-## What a signature does, and what it does not
+## What a signature does, and what a seal hides
 
-Every request between two yards is signed with the sender's key, and every
-answer with the receiver's. The signature proves who sent a message and that
-it is whole. **It does not hide it.** Over plain http the body is readable by
-whoever carries it. For anything that is not on one machine or a private
-network, put TLS in front of the listener (a reverse proxy or a tunnel of your own)
-and give the `https://` address as the URL. yardr does not do TLS itself.
+Every request between two yards is signed with the sender's key (HTTP
+Message Signatures, [RFC 9421](https://www.rfc-editor.org/rfc/rfc9421.html),
+in the profile [The requests](#the-requests) fixes), and every answer with
+the receiver's. The signature proves who sent a message and that it is
+whole — and, by covering the intended receiver and a fresh nonce, that it
+was made for this yard and for this asking.
 
-The signature covers the body's sha256, so the receiver reads the whole
-body before it can check who sent it: a request that names a peer's key is
-read up to file size (~43MB) and only then refused if its signature does
-not hold. Bodies past message size (256KB plus room) are read at most four
-at a time, ~172MB held at most; a further large one is refused with 503
-and its sender posts it again.
+Every body is also sealed to the receiver's encryption key (HPKE,
+[RFC 9180](https://www.rfc-editor.org/rfc/rfc9180.html) — an IRTF
+Informational RFC, and a published, widely implemented specification; the
+Go standard library carries it, and yardr seals through `hpke.NewSender`
+and `Sender.Seal`, which take the additional data this binding needs).
+**What crosses is the envelope alone**: whoever carries a request or an
+answer — an edge, a proxy, a network — reads neither the body's text nor
+the kind of message inside it. TLS in front of the listener is still
+worth having for anything that is not on one machine or a private network
+(it hides that two yards speak at all, which the seal does not), and
+yardr does not do TLS itself.
+
+The request's signature is checked from its headers alone, before its
+body is read: a signature covers the body's digest, so the receiver
+verifies first and only then grants the large read — up to the sealed
+encoding of the largest file — checks the body against the signed digest,
+and opens it. A stranger cannot earn that read, however large a body
+they offer.
 
 ## Linking two yards
 
@@ -268,18 +280,18 @@ the same time, and for scripts. Four commands each, and one line from each
 yard carried to the other.
 
 1. **An invite from each.** `yardr peer invite` prints one line: the yard's
-   name (its `name` setting, else its home's directory name), its public key
-   and, with `--url`, where it can be reached. The first `invite` or `key`
-   makes the key pair.
+   name (its `name` setting, else its home's directory name), its two
+   public keys and, with `--url`, where it can be reached. The first
+   `invite` or `key` makes the key pairs.
 
    ```sh
    # on north
    yardr peer invite --url http://10.0.0.5:8790
-   yardr-peer-1,north,a8tUnLBerkUE5hhF7C4ejE-GeV12GYuXpfNf1Jw1grY,http://10.0.0.5:8790
+   yardr-peer-2,north,a8tUnLBerkUE5hhF7C4ejE-GeV12GYuXpfNf1Jw1grY,7Kq3wP9sDfGhJkLzXcVbNmAsDfGhJkLzXcVbNmQwEr,http://10.0.0.5:8790
 
    # on laptop: no --url, it cannot be reached
    yardr peer invite
-   yardr-peer-1,laptop,YeV1ykmaiuXGs72Ruw0uce6T4hthRT_I9rmgrcNr5ls
+   yardr-peer-2,laptop,YeV1ykmaiuXGs72Ruw0uce6T4hthRT_I9rmgrcNr5ls,2WsX5EdC8RfV3TgB6YhN9UjM4IkO1LpQ7AzS0DxFvGbH
    ```
 
    The line holds nothing secret. Give it over a way the other operator can
@@ -289,15 +301,18 @@ yard carried to the other.
 
    ```sh
    # on north
-   yardr peer add laptop yardr-peer-1,laptop,YeV1ykma…
+   yardr peer add laptop yardr-peer-2,laptop,YeV1ykma…
    # on laptop
-   yardr peer add north yardr-peer-1,north,a8tUnLBe…,http://10.0.0.5:8790
+   yardr peer add north yardr-peer-2,north,a8tUnLBe…,http://10.0.0.5:8790
    ```
 
    The link works once both have. A name or a key that is a peer already is
    refused: `yardr peer rm` first, to replace one. A peer whose address
    moved is not replaced: `yardr peer set <name> --url <url>` [changes where
-   it is called](#changing-where-a-peer-is-called) and keeps the link.
+   it is called](#changing-where-a-peer-is-called) and keeps the link. A
+   `yardr-peer-1` line from before the sealed wire still adds, with no
+   encryption key pinned: [The requests](#the-requests) says what that
+   link gets until it is re-added from a new invite.
 
 3. **Each allows what the link carries.** Nothing is allowed by default:
 
@@ -3118,56 +3133,105 @@ how many of each it removed per peer (`peers` on `store_pruned`, and in what
 
 ## The requests
 
-Both go to `<url>/peers/messages`, under the peer URL's own base for an
-edge URL, and carry three headers:
+Two requests. The paths below are the yard's own; through an edge whose
+base stands in front of the yard's (the address form `peer add` derives
+from a linked answer, or an enrolment), the sender signs the whole path
+of the URL it sent to and the receiver derives `@path` from the target
+it receives, unstripped, so a request is verifiable in either position
+and no party rewrites a signed value — stripping one is what would break
+it, and is the point no yard can see from inside.
 
-| header | |
-|---|---|
-| `Yardr-Peer-Key` | the sender's public key. The receiver finds the link by it |
-| `Yardr-Peer-Time` | when it was signed, Unix seconds |
-| `Yardr-Peer-Signature` | ed25519 over the receiver's public key, the method, the path with its query, the timestamp and the body's sha256 |
+Every peer-message request and answer uses an HTTP Message Signature
+(RFC 9421) from the sender's ed25519 key. Every body crosses sealed
+(RFC 9180 HPKE, as [above](#what-a-signature-does-and-what-a-seal-hides)).
+In detail it transmits:
 
-| request | answer |
-|---|---|
-| `POST /peers/messages`, body `{"id", "kind", "re", "body", "says"}` | 200 `{"taken": true}` or `{"duplicate": true}`; 403 `{"refused": "<reason>"}`: `kind_unknown`, `kind_not_allowed`, one of [mail's](#mail-between-crew-members), one of [a question's](#questions-for-a-person-of-another-yard), or for a file `too_large` and `not_file`; 400 for what is no message; 500 `{"error": "not kept"}` when the yard could not keep it (a full disk, a store write that failed), which the sender tries again as it does a post that was not answered. A request may be as large as a file's body (about 45 MB) when its key is a peer's, and 260 KB otherwise: past that it is 413, unsigned. Each with `says` |
-| `GET /peers/messages?after=<seq>&understands=<kind>,…&yardr=<build>[&roster=<JSON>][&wait=<seconds>][&refused=<seq>:<reason>,…]` | 200 `{"messages": [{"seq", "id", "kind", "re", "body"}], "push": <whether the yard asked posts instead>, "says"}`. `refused` names what the asker got and did not take: the yard asked gives those up instead of logging them as sent. With `wait` the answer is [held](#the-held-question) for up to that long (60 at most) while `messages` would be empty; the answer itself is the same |
+* the signed components: for a request, in this order, `"@method"`,
+  `"@path"`, `"@query"`, `"yardr-peer-to"`, `"yardr-peer-nonce"` and, for
+  a request with a body, `"content-digest"`; for an answer, `"@status"`,
+  `"content-digest"` and `"yardr-peer-nonce"` (its own, echoing the
+  request's), then every component the request covered again with the
+  `;req` parameter — `"@authority";req` and `"@query";req` always, and
+  `"content-digest";req` when the request carried a body. When its URL has
+  no query, RFC 9421 gives `@query` the value `?`. `@signature-params` is
+  the signature base's last line and is never a covered component. The
+  request's `@authority` uses RFC 9421's normalized value: lowercase host,
+  with the scheme's default port omitted;
+* the signature parameters: for a request, `keyid` (the sender's signing
+  key, which finds the stored link), `alg="ed25519"`, `created` and
+  `expires` (the signing moment, and 300 seconds on) and
+  `tag="yardr-peer-req"`; for an answer, `keyid` (the answering yard's
+  key) and `tag="yardr-peer-res"`;
+* `Yardr-Peer-To: ` the receiver's signing key. A request signed for
+  another yard is refused however well it is signed;
+* `Yardr-Peer-Nonce: ` a fresh nonce per request, which the answer echoes
+  as its own covered `yardr-peer-nonce` component. An answer made for any
+  other asking — another nonce, method, authority, path, query, body
+  digest or intended peer — does not verify for this one, and replaying a
+  taken push is refused by its message id, as before;
+* `Content-Digest: sha-256=:<…>:` (RFC 9530) of the sealed envelope as it
+  crosses, for every message that carries a body. It is the body's proof
+  the signature covers, so a receiver verifies from the headers first;
+* `Signature-Input: ` and `Signature: ` (RFC 9421), under the one label
+  `sig1`;
+* the body, when there is one, as the seal's envelope and nothing else:
+  `{"v":2,"enc":"…","ct":"…"}` of HPKE base mode (DHKEM(X25519,
+  HKDF-SHA256) with ChaCha20Poly1305; `info` the protocol alone,
+  `yardr-peer-hpke-1`, and the two signing keys, sender first, as the
+  additional authenticated data). The kind of a message, and the sender's
+  name in its says, are inside the seal; a message for a yard that cannot
+  be called says who it is for inside the envelope, never in a header.
 
-`says` and `understands` are what the yard's build understands
-([above](#two-yards-on-different-builds)); a yardr from before them sends
-neither and passes both by. `roster` is [whom the yard exposes to the
-other](#the-roster-whom-a-peer-may-see-and-write-to):
-`[{"name", "kind": "crew"|"user", "role", "mail": true|false}]`.
+A yard linked before this wire — by an old invite, or by an enrolment
+whose record holds only its signing key — has no encryption key pinned,
+and is refused before anything is dialled, with one line, by `yardr peer
+ping`, `yardr peer show` and `yardr doctor` alike:
 
-A mail's body is `{"to": "<crew member or user>", "from": "<name>", "text": "…"}`,
-with `"files": [{"hash", "type", "bytes", "name"}]` when it carries files,
-at most 64.
-A file's body is `{"hash": "<sha256 of the bytes, hex>", "type", "bytes",
-"data": "<the bytes, base64>"}`: only the hash is held to, the type is read
-from the bytes.
+```text
+<peer> was linked before sealed bodies: re-link it — yardr peer rm <peer>, then link it again by its address or its new invite
+```
 
-A request is refused with 401 when its key is no peer's, its signature does
-not hold, or its timestamp is more than five minutes from the receiver's
-clock. The answer is the same for all three and does not say which; the
-server's log does. A recorded request played again within the five minutes
-is the same id again, and dropped.
+The dispatcher makes no dial and counts no try for such a peer. A request
+signed the old way (the `Yardr-Peer-*` triplet over a body's sha256) is
+the same plain unsigned 401 at the receiver: no compat reader is kept.
+Upgrading the two yards in either order, an operator sees this: while
+only one side is upgraded, its traffic is refused (401 on the old side's
+asking, an unopenable answer on the other's), which counts as a failed
+try, so what waited is delivered once both run the new build — unless its
+tries run out first, in a gap of days rather than minutes, after which
+it is given up as any failed message is. What the peer held for this yard
+crosses after a gap of any length, since asking burns no tries.
+Enrolment is unchanged apart from presenting the yard's encryption key
+beside its signing key; a yard linked by its address is re-linked by
+deriving the address again (`yardr peer rm`, then the same add), which
+mints no code and changes no operator's confirmation.
 
-Every answer to a peer carries `Yardr-Peer-Signature` over its status, the
-request's signature and the body's sha256. The caller trusts no answer
-without it: anything between the two yards can write a 200 or a 403. An
-unsigned answer is a failed try, and tried again.
+Until a header signature holds, a request is read up to a small
+message's bound (256 KiB plus room); then up to the sealed encoding of
+the largest file a link carries (about 58 MB), which is checked against
+the signed digest before it is opened, and refused 413 past it. A pull's
+answer is read up to the same bound plus a MiB of heading. The plaintext
+bounds do not move: a body past the plaintext cap inside a lawful
+envelope is a signed `too_large` refusal (403), as before. The earlier
+wire's interim limit of four large reads at once is gone: headers-first
+is what made the large read safe to grant, so there is nothing left for
+it to bound.
 
 ### A pairing's requests
 
-Three more, from a yard that is no peer yet, to the yard that opened a
+Pairing confirm remains outside the sealed peer-message wire. It uses the
+`Yardr-Peer-Key`, `Yardr-Peer-Time` and `Yardr-Peer-Signature` headers; its
+transcript binds both yards' signing and encryption keys. Three requests
+come from a yard that is no peer yet, to the yard that opened a
 [pairing](#pairing). The first two carry no signature: an HMAC under the key
 made from the code is what they are taken for. Every value is base64url
 without padding, as keys are.
 
 | request | answer |
 |---|---|
-| `POST /peers/pair/hello`, body `{"commit", "mac"}`: the hash of the calling yard's nonce, name and key | 200 `{"nonce", "name", "key", "url", "mac"}`: the called yard |
-| `POST /peers/pair/reveal`, body `{"commit", "nonce", "name", "key", "mac"}`: what was committed to | 200 `{"session"}`, a hash of all that crossed, by which the next request names the pairing |
-| `POST /peers/pair/confirm`, body `{"session", "confirm": true or false}`, with the three headers above, signed with the key that was revealed | 200 `{"state": "waiting", "confirmed" or "ended", "reason"}`, signed as an answer to a peer. The calling yard asks again while it is `waiting`, and saves the other only on `confirmed` |
+| `POST /peers/pair/hello`, body `{"commit", "mac"}`: the hash of the calling yard's nonce, name, signing key and encryption key | 200 `{"nonce", "name", "key", "enc", "url", "mac"}`: the called yard |
+| `POST /peers/pair/reveal`, body `{"commit", "nonce", "name", "key", "enc", "mac"}`: what was committed to | 200 `{"session"}`, a hash of all that crossed, by which the next request names the pairing |
+| `POST /peers/pair/confirm`, body `{"session", "confirm": true or false}`, with the old headers named above, signed with the key that was revealed | 200 `{"state": "waiting", "confirmed" or "ended", "reason"}`, signed with the old response signature. The calling yard asks again while it is `waiting`, and saves the other only on `confirmed` |
 
 The first two are refused with `{"refused": "<reason>"}`: 403 `wrong_code`
 (counted), 404 `no_pairing`, 410 `timed_out`, 409 `used` (another yard
@@ -3265,14 +3329,19 @@ card. It appears in no agent-facing surface: no prime, no review, no chat,
 no brief, since it stands on no local bead. Names are held to mail's
 charset, sizes to the caps above.
 
-## The key
+## The keys
 
-The private key is in the home, `peer.key`, mode 0600. It is made once and
-there is no rotation yet. A key file that is open to others is refused, as a
-hook's secret file is: the yard then signs nothing and takes nothing from
-its peers until it is `chmod 600` again. Back it up with the store: a yard
-restored without it is a stranger to its peers.
-
+Each yard has two key pairs of its own, each made once (nothing is asked)
+and kept in its home, mode 0600: a signing pair in `peer.key`, by whose
+public half other yards know who sent a request, and an encryption pair
+(X25519) in `peer-enc.key`, to whose public half their bodies are sealed.
+The private halves never leave the home. `yardr peer key` prints both
+public halves, the signing key first and on its own line. At rest, only
+the file's mode holds them, as §"On a small enough deployment" of that
+post puts it: on your own machine, that is what any secret can have. A
+yard opens no account, holds no password and remembers no session. A link
+between two yards is nothing but the two public keys each way, each kept
+by the other under a name.
 ## When it does not work
 
 `yardr peer ping` says what it knows when no pong comes: no daemon on this

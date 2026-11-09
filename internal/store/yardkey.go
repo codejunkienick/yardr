@@ -54,8 +54,13 @@ func ParsePublic(s string) (ed25519.PublicKey, error) {
 }
 
 // inviteTag starts an invite, so a line that is something else is told
-// apart, and a later form from this one.
-const inviteTag = "yardr-peer-1"
+// apart, and a later form from this one. inviteTag2 carries both keys: a
+// yard added from a yardr-peer-1 line has no encryption key pinned, and
+// the new wire refuses it with the re-link line (peersealed.go).
+const (
+	inviteTag  = "yardr-peer-1"
+	inviteTag2 = "yardr-peer-2"
+)
 
 var inviteName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$`)
 
@@ -64,43 +69,65 @@ var inviteName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$`)
 func ValidName(s string) bool { return inviteName.MatchString(s) }
 
 // Invite is what one yard's operator gives another's to be added as a peer:
-// what the yard calls itself, its public key, and where it can be reached.
-// A yard without a URL cannot be called: it calls.
+// what the yard calls itself, its two public keys, and where it can be
+// reached. A yard without a URL cannot be called: it calls.
 type Invite struct {
 	Name string `json:"name"`
 	Key  string `json:"key"`
+	Enc  string `json:"enc,omitempty"`
 	URL  string `json:"url,omitempty"`
 }
 
 // String is the invite as one line to paste: no spaces, nothing a shell
-// reads.
+// reads. With an encryption key it is the yardr-peer-2 line; without one
+// (a yard that has made none yet) the yardr-peer-1 line, which adds a
+// peer the sealed wire then refuses until it is re-linked.
 func (i Invite) String() string {
-	parts := []string{inviteTag, i.Name, i.Key}
+	if i.Enc == "" {
+		parts := []string{inviteTag, i.Name, i.Key}
+		if i.URL != "" {
+			parts = append(parts, i.URL)
+		}
+		return strings.Join(parts, ",")
+	}
+	parts := []string{inviteTag2, i.Name, i.Key, i.Enc}
 	if i.URL != "" {
 		parts = append(parts, i.URL)
 	}
 	return strings.Join(parts, ",")
 }
 
-// ParseInvite reads an invite as String writes it.
+// ParseInvite reads an invite as String writes it, either version.
 func ParseInvite(s string) (Invite, error) {
-	parts := strings.SplitN(strings.TrimSpace(s), ",", 4)
-	if len(parts) < 3 || parts[0] != inviteTag {
-		return Invite{}, fmt.Errorf("%q is no invite: want the line yardr peer invite prints (%s,<name>,<key>[,<url>])", clipErr(s), inviteTag)
+	parts := strings.Split(strings.TrimSpace(s), ",")
+	if len(parts) < 3 || (parts[0] != inviteTag && parts[0] != inviteTag2) {
+		return Invite{}, fmt.Errorf("%q is no invite: want the line yardr peer invite prints (%s,<name>,<key>,<encryption key>[,<url>])", clipErr(s), inviteTag2)
 	}
 	inv := Invite{Name: parts[1], Key: parts[2]}
+	rest := parts[3:]
+	if parts[0] == inviteTag2 {
+		if len(rest) < 1 {
+			return Invite{}, fmt.Errorf("invite: the %s line carries no encryption key", inviteTag2)
+		}
+		inv.Enc, rest = rest[0], rest[1:]
+		if _, err := ParseEncPublic(inv.Enc); err != nil {
+			return Invite{}, fmt.Errorf("invite: %w", err)
+		}
+	}
 	if !inviteName.MatchString(inv.Name) {
 		return Invite{}, fmt.Errorf("invite: %q is no yard's name", clipErr(inv.Name))
 	}
 	if _, err := ParsePublic(inv.Key); err != nil {
 		return Invite{}, fmt.Errorf("invite: %w", err)
 	}
-	if len(parts) == 4 {
-		u, err := CleanURL(parts[3])
+	if len(rest) == 1 {
+		u, err := CleanURL(rest[0])
 		if err != nil {
 			return Invite{}, fmt.Errorf("invite: %w", err)
 		}
 		inv.URL = u
+	} else if len(rest) > 1 {
+		return Invite{}, fmt.Errorf("%q is no invite: too many fields", clipErr(s))
 	}
 	return inv, nil
 }

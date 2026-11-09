@@ -35,6 +35,7 @@ const (
 type PairOffer struct {
 	Name string `json:"name"`
 	Key  string `json:"key"`
+	Enc  string `json:"enc,omitempty"`
 	URL  string `json:"url"`
 	As   string `json:"as,omitempty"`
 }
@@ -52,6 +53,7 @@ type Pairing struct {
 	Peer  string `json:"peer,omitempty"`
 	Calls string `json:"calls,omitempty"`
 	Key   string `json:"key,omitempty"`
+	Enc   string `json:"enc,omitempty"`
 	Check string `json:"check,omitempty"`
 	// Confirmed is this yard's operator's word on the check, PeerConfirmed
 	// the other's.
@@ -159,6 +161,11 @@ func peerFree(tx *bolt.Tx, p *Peer) error {
 	if _, err := ParsePublic(p.Key); err != nil {
 		return fmt.Errorf("peer %s: %w", p.Name, err)
 	}
+	if p.Enc != "" {
+		if _, err := ParseEncPublic(p.Enc); err != nil {
+			return fmt.Errorf("peer %s: %w", p.Name, err)
+		}
+	}
 	if err := p.cleanURL(); err != nil {
 		return err
 	}
@@ -204,7 +211,7 @@ func (s *Store) PairPeer(ctx context.Context, p Peer, actor string) (*Peer, erro
 }
 
 func (s *Store) pairPeer(p Peer, actor string, data map[string]any) (*Peer, error) {
-	p = Peer{Name: p.Name, Key: p.Key, URL: p.URL, Calls: p.Calls, Send: []string{PeerPing}, Receive: []string{PeerPing}, AddedAt: now()}
+	p = Peer{Name: p.Name, Key: p.Key, Enc: p.Enc, URL: p.URL, Calls: p.Calls, Send: []string{PeerPing}, Receive: []string{PeerPing}, AddedAt: now()}
 	err := s.write(func(w *wtx) error {
 		if err := peerFree(w.Tx, &p); err != nil {
 			return err
@@ -263,7 +270,7 @@ func (s *Store) PairOpen(ctx context.Context, o PairOffer, actor string) (*Pairi
 	if err := s.mayRead(ctx, actor, ActPair, Object{Kind: KindPeer}); err != nil {
 		return nil, err
 	}
-	if err := (Party{Nonce: NewNonce(), Name: o.Name, Key: o.Key, URL: o.URL}).Valid(); err != nil {
+	if err := (Party{Nonce: NewNonce(), Name: o.Name, Key: o.Key, Enc: o.Enc, URL: o.URL}).Valid(); err != nil {
 		return nil, err
 	} else if o.URL == "" {
 		return nil, errors.New("pairing: the yard that shows the code is the one that is called, and has given no URL")
@@ -396,7 +403,7 @@ func (s *Store) PairClose(ctx context.Context, id, actor string) error {
 // finishPairing saves the other yard as a peer, both operators having
 // confirmed. A name or key taken since the call ends the pairing instead.
 func (s *Store) finishPairing(ctx context.Context, p *hostPairing) {
-	peer := Peer{Name: p.Peer, Key: p.Key, Calls: p.Calls}
+	peer := Peer{Name: p.Peer, Key: p.Key, Enc: p.Enc, Calls: p.Calls}
 	if _, err := s.pairPeer(peer, p.actor, map[string]any{"role": "host", "pairing": p.ID}); err != nil {
 		s.endPairing(ctx, p, AlreadyPeer, err.Error(), p.actor)
 		return
@@ -458,7 +465,7 @@ func (s *Store) PairHello(ctx context.Context, h Hello) (*PairingOffer, error) {
 }
 
 func (s *Store) hostParty(p *hostPairing) Party {
-	return Party{Nonce: p.nonce, Name: p.offer.Name, Key: p.offer.Key, URL: p.offer.URL}
+	return Party{Nonce: p.nonce, Name: p.offer.Name, Key: p.offer.Key, Enc: p.offer.Enc, URL: p.offer.URL}
 }
 
 // PairReveal takes the second message: who the calling yard is. The code
@@ -488,7 +495,7 @@ func (s *Store) PairReveal(ctx context.Context, r Reveal) (session string, err e
 		return "", err
 	}
 	p.forget()
-	p.Calls, p.Key, p.Check, p.session = t.Joiner.Name, t.Joiner.Key, t.Check(), t.Session()
+	p.Calls, p.Key, p.Enc, p.Check, p.session = t.Joiner.Name, t.Joiner.Key, t.Joiner.Enc, t.Check(), t.Session()
 	p.Peer = p.offer.As
 	if p.Peer == "" {
 		p.Peer = p.Calls

@@ -48,13 +48,15 @@ func (l *logBuffer) String() string {
 // pairYard is a yard that pairs: its store in a file the test can read, its
 // key, and its receiver on a listener of its own, logging to logs.
 type pairYard struct {
-	name string
-	own  *store.Store
-	file string
-	key  ed25519.PrivateKey
-	rc   *yards.Receiver
-	srv  *httptest.Server
-	logs *logBuffer
+	name    string
+	own     *store.Store
+	file    string
+	key     ed25519.PrivateKey
+	enc     string
+	encPriv []byte
+	rc      *yards.Receiver
+	srv     *httptest.Server
+	logs    *logBuffer
 }
 
 func newPairYard(t *testing.T, name string) *pairYard {
@@ -66,6 +68,10 @@ func newPairYard(t *testing.T, name string) *pairYard {
 	if y.key, _, err = yardkey.Ensure(filepath.Join(dir, "peer.key")); err != nil {
 		t.Fatal(err)
 	}
+	if y.encPriv, y.enc, _, err = yardkey.EnsureEnc(filepath.Join(dir, "peer-enc.key")); err != nil {
+		t.Fatal(err)
+	}
+	y.own.SetYard(filepath.Join(dir, "peer.key"), "test")
 	y.rc = yards.NewReceiver(y.own, filepath.Join(dir, "peer.key"), slog.New(slog.NewTextHandler(y.logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	y.srv = httptest.NewServer(y.rc.Handler())
 	t.Cleanup(y.srv.Close)
@@ -73,13 +79,13 @@ func newPairYard(t *testing.T, name string) *pairYard {
 }
 
 func (y *pairYard) pub() string           { return store.Public(y.key) }
-func (y *pairYard) caller() *yards.Caller { return &yards.Caller{Key: y.key} }
+func (y *pairYard) caller() *yards.Caller { return &yards.Caller{Key: y.key, Enc: y.encPriv} }
 
 // open opens a pairing on y, to save the other yard as as ("" for the name
 // it gives), and returns it with its code as both sides compute from it.
 func (y *pairYard) open(t *testing.T, as string) (*store.PairingCode, string) {
 	t.Helper()
-	p, err := y.own.PairOpen(context.Background(), store.PairOffer{Name: y.name, Key: y.pub(), URL: y.srv.URL, As: as}, "jo")
+	p, err := y.own.PairOpen(context.Background(), store.PairOffer{Name: y.name, Key: y.pub(), Enc: y.enc, URL: y.srv.URL, As: as}, "jo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +220,7 @@ func TestPairing(t *testing.T) {
 			t.Fatalf("laptop asked how it stands: %+v, %v", out, err)
 		}
 	}
-	toNorth, err := laptop.own.PairPeer(ctx, store.Peer{Name: "north", Key: called.Host.Key, URL: called.URL, Calls: called.Host.Name}, "jo")
+	toNorth, err := laptop.own.PairPeer(ctx, store.Peer{Name: "north", Key: called.Host.Key, Enc: called.Host.Enc, URL: called.URL, Calls: called.Host.Name}, "jo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +386,7 @@ func TestPairingCodeIsUsedOnce(t *testing.T) {
 		t.Fatalf("north's pairing after the second call = %+v", p)
 	}
 	// Nor while one is open: a yard has one pairing at a time.
-	if _, err := north.own.PairOpen(ctx, store.PairOffer{Name: "north", Key: north.pub(), URL: north.srv.URL}, "jo"); err == nil || !strings.Contains(err.Error(), "a pairing is open already") {
+	if _, err := north.own.PairOpen(ctx, store.PairOffer{Name: "north", Key: north.pub(), Enc: north.enc, URL: north.srv.URL}, "jo"); err == nil || !strings.Contains(err.Error(), "a pairing is open already") {
 		t.Fatalf("a second pairing = %v", err)
 	}
 	// It ends with the pairing, and once done the code is still used up.
@@ -552,7 +558,7 @@ func TestPairingAPeerAlready(t *testing.T) {
 		t.Fatalf("north's jos-laptop = %+v, %v", p, err)
 	}
 	// And one that is a peer already is refused when the pairing is opened.
-	if _, err := north.own.PairOpen(ctx, store.PairOffer{Name: "north", Key: north.pub(), URL: north.srv.URL, As: "laptop"}, "jo"); err == nil || !strings.Contains(err.Error(), "peer laptop is added already") {
+	if _, err := north.own.PairOpen(ctx, store.PairOffer{Name: "north", Key: north.pub(), Enc: north.enc, URL: north.srv.URL, As: "laptop"}, "jo"); err == nil || !strings.Contains(err.Error(), "peer laptop is added already") {
 		t.Fatalf("a pairing opened for a name that is a peer = %v", err)
 	}
 	// A yard is not paired with itself.

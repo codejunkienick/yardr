@@ -265,7 +265,8 @@ func airyKey(t *testing.T) string {
 	t.Helper()
 	other := newCLIYard(t, "airy")
 	other.a.env = testEnv(t, other.home)
-	return strings.TrimSpace(other.must(t, "key"))
+	key, _, _ := strings.Cut(strings.TrimSpace(other.must(t, "key")), "\n")
+	return key
 }
 
 // yardr bead ask --run stores the command in the yard's form and prints
@@ -475,7 +476,7 @@ func TestBeadAskRunPeerIntakeAndIdentity(t *testing.T) {
 	for _, c := range []struct{ command, want string }{
 		{"peer intake airy --depot web --none", "needs no approval: run it yourself"},
 		{"peer identity airy mayor --source talk --rm", "peer identity with --rm is the operator's to type in a terminal"},
-		{"peer add north abc", `"abc" is no invite: want the line yardr peer invite prints (yardr-peer-1,<name>,<key>[,<url>])`},
+		{"peer add north abc", `"abc" is no invite: want the line yardr peer invite prints (yardr-peer-2,<name>,<key>,<encryption key>[,<url>])`},
 	} {
 		if _, err := y.as(t, "yardmaster", "ask", b.ID, "May I?", "--context", "why", "--run", c.command); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("--run %q = %v, want %q", c.command, err, c.want)

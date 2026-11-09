@@ -87,7 +87,7 @@ func TestEnrolIsSignedToTheFetchedKeyAtEachCallsOwnMoment(t *testing.T) {
 	if err != nil || key != edge.PublicKey() {
 		t.Fatalf("Key = %q, %v; want the edge's %q", key, err, edge.PublicKey())
 	}
-	en, err := c.Enrol(context.Background(), key, yard, "laptop")
+	en, err := c.Enrol(context.Background(), key, yard, "enc-laptop", "laptop")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestEnrolTakesACodeWhateverItsExpiryIs(t *testing.T) {
 	for name, expires := range map[string]any{"seconds": 600, "words": "soon", "null": nil, "a time": "2026-10-20T09:24:03Z"} {
 		srv := answersSigned(t, edgeKey, http.StatusOK, map[string]any{"code": "WQ4F-7K2M", "expires": expires})
 		c := &Client{URL: srv.URL, HTTP: srv.Client()}
-		en, err := c.Enrol(context.Background(), store.Public(edgeKey), newKey(t), "laptop")
+		en, err := c.Enrol(context.Background(), store.Public(edgeKey), newKey(t), "enc-laptop", "laptop")
 		if err != nil || en.Code != "WQ4F-7K2M" {
 			t.Errorf("%s: Enrol = %+v, %v; want the code taken", name, en, err)
 			continue
@@ -147,7 +147,7 @@ func TestEnrolTakesACodeWhateverItsExpiryIs(t *testing.T) {
 	}
 	srv := answersSigned(t, edgeKey, http.StatusOK, map[string]any{"code": "WQ4F-7K2M"})
 	c := &Client{URL: srv.URL, HTTP: srv.Client()}
-	if en, err := c.Enrol(context.Background(), store.Public(edgeKey), newKey(t), "laptop"); err != nil || en.Code == "" || !en.Expires.IsZero() {
+	if en, err := c.Enrol(context.Background(), store.Public(edgeKey), newKey(t), "enc-laptop", "laptop"); err != nil || en.Code == "" || !en.Expires.IsZero() {
 		t.Errorf("Enrol, with no expiry at all = %+v, %v", en, err)
 	}
 }
@@ -159,7 +159,7 @@ func TestEnrolAnsweredWithAHandleNeedsNoWait(t *testing.T) {
 	edge, srv := edgeAt(t)
 	edge.Behave(func(b *standin.EdgeBehaviour) { b.ApproveAfter, b.Name = 0, "airy" })
 	c := &Client{URL: srv.URL, HTTP: srv.Client(), Poll: time.Millisecond}
-	en, err := c.Enrol(context.Background(), edge.PublicKey(), newKey(t), "laptop")
+	en, err := c.Enrol(context.Background(), edge.PublicKey(), newKey(t), "enc-laptop", "laptop")
 	if err != nil || en.Handle != "mckean" || en.Name != "airy" || en.Code != "" {
 		t.Fatalf("Enrol = %+v, %v; want the handle and name and no code", en, err)
 	}
@@ -229,14 +229,14 @@ func TestEnrolRefusesAnAnswerSignedByAnotherKey(t *testing.T) {
 
 	other := newKey(t)
 	edge.Behave(func(b *standin.EdgeBehaviour) { b.Signer = other })
-	if _, err := c.Enrol(context.Background(), key, newKey(t), "laptop"); !errors.Is(err, ErrUnsigned) {
+	if _, err := c.Enrol(context.Background(), key, newKey(t), "enc-laptop", "laptop"); !errors.Is(err, ErrUnsigned) {
 		t.Fatalf("Enrol, answered by another key = %v, want ErrUnsigned", err)
 	}
 
 	// Signed rightly at first and wrongly later: the edge that was fetched is
 	// not the one that answers the poll.
 	edge.Behave(func(b *standin.EdgeBehaviour) { b.Signer, b.ApproveAfter = b.Served, 5 })
-	en, err := c.Enrol(context.Background(), key, newKey(t), "laptop")
+	en, err := c.Enrol(context.Background(), key, newKey(t), "enc-laptop", "laptop")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestEnrolRefusesAnAnswerSignedToAnotherCall(t *testing.T) {
 	// WaitFor keeps a regression from waiting out the default: a replayed
 	// code is never approved.
 	c := &Client{URL: front.URL, HTTP: front.Client(), Poll: time.Millisecond, Now: clk.Now, WaitFor: 5 * time.Second}
-	en, err := c.Enrol(context.Background(), edge.PublicKey(), newKey(t), "laptop")
+	en, err := c.Enrol(context.Background(), edge.PublicKey(), newKey(t), "enc-laptop", "laptop")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +371,7 @@ func TestEnrolRefusalsAndAnswersItDoesNotRead(t *testing.T) {
 		"a word that shows as none": {naming("\u202e\u009b"), "answered 401, not signed with the key this yard pinned: " + clocksAndKey},
 	} {
 		c := &Client{URL: tc.srv.URL, HTTP: tc.srv.Client()}
-		_, err := c.Enrol(context.Background(), store.Public(edgeKey), newKey(t), "laptop")
+		_, err := c.Enrol(context.Background(), store.Public(edgeKey), newKey(t), "enc-laptop", "laptop")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: Enrol = %v, want %q", name, err, tc.want)
 		}
@@ -382,7 +382,7 @@ func TestEnrolRefusalsAndAnswersItDoesNotRead(t *testing.T) {
 	gone := signed(http.StatusGone, map[string]string{"refused": "expired"})
 	c := &Client{URL: gone.URL, HTTP: gone.Client()}
 	var refused *Refused
-	if _, err := c.Enrol(context.Background(), store.Public(edgeKey), newKey(t), "laptop"); !errors.As(err, &refused) || refused.Status != http.StatusGone || refused.Reason != "expired" {
+	if _, err := c.Enrol(context.Background(), store.Public(edgeKey), newKey(t), "enc-laptop", "laptop"); !errors.As(err, &refused) || refused.Status != http.StatusGone || refused.Reason != "expired" {
 		t.Errorf("Enrol, refused with 410 = %v, want a *Refused with the status and the reason", err)
 	}
 }
@@ -404,9 +404,12 @@ func TestWaitEndsWithTheCallerOrTheEdgesRefusal(t *testing.T) {
 		return base.RoundTrip(r)
 	})
 	c := &Client{URL: srv.URL, HTTP: hc, Poll: time.Millisecond}
-	en, err := c.Enrol(ctx, edge.PublicKey(), newKey(t), "laptop")
+	en, err := c.Enrol(ctx, edge.PublicKey(), newKey(t), "enc-laptop", "laptop")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got := edge.State().Enrols; len(got) == 0 || got[len(got)-1].Enc != "enc-laptop" {
+		t.Errorf("the enrolment as the edge took it = %+v, want it to present the encryption key beside the signing key", got)
 	}
 	if err := en.Wait(ctx); !errors.Is(err, context.Canceled) {
 		t.Errorf("Wait, cancelled = %v, want context.Canceled", err)
@@ -417,7 +420,7 @@ func TestWaitEndsWithTheCallerOrTheEdgesRefusal(t *testing.T) {
 
 	// The edge says the code is gone: a refusal, and the wait is over.
 	c = &Client{URL: srv.URL, HTTP: srv.Client(), Poll: time.Millisecond}
-	en, err = c.Enrol(context.Background(), edge.PublicKey(), newKey(t), "laptop")
+	en, err = c.Enrol(context.Background(), edge.PublicKey(), newKey(t), "enc-laptop", "laptop")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,7 +434,7 @@ func TestWaitEndsWithTheCallerOrTheEdgesRefusal(t *testing.T) {
 	// the wait's own end and not the caller's.
 	edge.Behave(func(b *standin.EdgeBehaviour) { b.Refuse = 0 })
 	c = &Client{URL: srv.URL, HTTP: srv.Client(), Poll: time.Millisecond, WaitFor: 20 * time.Millisecond}
-	en, err = c.Enrol(context.Background(), edge.PublicKey(), newKey(t), "laptop")
+	en, err = c.Enrol(context.Background(), edge.PublicKey(), newKey(t), "enc-laptop", "laptop")
 	if err != nil {
 		t.Fatal(err)
 	}

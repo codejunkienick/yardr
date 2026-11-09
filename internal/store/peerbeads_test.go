@@ -979,7 +979,7 @@ func TestPeerBeadPulled(t *testing.T) {
 	y := newBeadYard(t)
 	page := func(ms ...store.PeerMessage) store.PeerBatch {
 		body, _ := json.Marshal(store.PeerPage{Messages: ms})
-		return store.PeerBatch{RequestSig: "req-1", Signature: store.SignResponse(y.north, 200, "req-1", body), Body: body}
+		return y.sealedBatch(t, y.north, y.key, body, nil)
 	}
 	a, b := beadMsg("p1", "web-1", nil), beadMsg("p2", "web-1", nil)
 	a.Seq, b.Seq = 4, 5
@@ -1106,7 +1106,7 @@ func TestPeerBeadBasesLookedAtWithinTheHour(t *testing.T) {
 		page = append(page, m)
 	}
 	body, _ := json.Marshal(store.PeerPage{Messages: page})
-	res, err := y.api.PeerPulled(y.ctx, "north", store.PeerBatch{RequestSig: "req-1", Signature: store.SignResponse(y.north, 200, "req-1", body), Body: body})
+	res, err := y.api.PeerPulled(y.ctx, "north", y.sealedBatch(t, y.north, y.key, body, nil))
 	if err != nil {
 		t.Fatal(err)
 	}

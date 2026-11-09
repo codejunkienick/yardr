@@ -111,9 +111,9 @@ type EdgeBehaviour struct {
 
 // EdgeEnrol is one enrolling call as the edge took it.
 type EdgeEnrol struct {
-	// Key and Name are the yard's, from the body; Time and Sig the
+	// Key, Enc and Name are the yard's, from the body; Time and Sig the
 	// signature's own.
-	Key, Name, Time, Sig string
+	Key, Enc, Name, Time, Sig string
 }
 
 // EdgeMint is one mint call as the edge took it.
@@ -261,13 +261,13 @@ func (e *Edge) enrol(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var in struct{ Key, Name string }
+	var in struct{ Key, Enc, Name string }
 	if json.Unmarshal(body, &in) != nil || in.Key != r.Header.Get(yardkey.HeaderKey) || in.Name == "" {
 		e.answer(w, r, http.StatusBadRequest, map[string]string{"refused": "an enrolment names the yard's key, the one that signed it, and its name"})
 		return
 	}
 	e.mu.Lock()
-	e.state.Enrols = append(e.state.Enrols, EdgeEnrol{in.Key, in.Name, r.Header.Get(yardkey.HeaderTime), r.Header.Get(yardkey.HeaderSig)})
+	e.state.Enrols = append(e.state.Enrols, EdgeEnrol{in.Key, in.Enc, in.Name, r.Header.Get(yardkey.HeaderTime), r.Header.Get(yardkey.HeaderSig)})
 	e.asked[in.Key]++
 	calls, b := e.asked[in.Key], e.b
 	e.mu.Unlock()

@@ -716,26 +716,37 @@ func TestPulledFileRefused(t *testing.T) {
 func TestFilesPastTheHourAreRefused(t *testing.T) {
 	south, north, toNorth := fileYards(t, true, mailAndFile, mailAndFile)
 	ctx := context.Background()
+	// The hour shrunk to its smallest (one mail's worth of files): the
+	// quota logic is the same at 64 as at the default 1920, and filling
+	// the default with sealed pushes costs the race budget its minutes.
+	if _, err := north.api.AllowPeer(ctx, "south", store.PeerAllow{MailLimit: 1}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	southAtNorth, err := north.api.GetPeer(ctx, "south")
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := southAtNorth.FilesAnHour()
 	file := func(id string, n int) error {
 		data := append(bytes.Clone(shedPNG), byte(n>>8), byte(n))
 		body, _ := json.Marshal(peerFileForTest(store.BlobRef{Hash: hashOf(data), Type: "image/png", Bytes: int64(len(data))}, data))
 		return south.caller().Push(ctx, toNorth, store.PeerMessage{ID: id, Kind: "file", Body: body})
 	}
-	for i := 0; i < store.PeerFileLimit-1; i++ {
+	for i := 0; i < limit-1; i++ {
 		if err := file("f"+strconv.Itoa(i), i); err != nil {
 			t.Fatalf("file %d of the hour: %v", i+1, err)
 		}
 		if i > 0 {
 			continue
 		}
-		if err := file("f0", store.PeerFileLimit+7); err != nil || len(blobs(t, north)) != 1 {
+		if err := file("f0", limit+7); err != nil || len(blobs(t, north)) != 1 {
 			t.Fatalf("a file sent again under its id: %v, and north holds %v", err, blobs(t, north))
 		}
 	}
 	// Simultaneous batches at the boundary must not both write a blob based
-	// on the same pre-write quota snapshot. A full read gate answers with an
-	// unsigned 503, so retry those posts after the first batch has finished;
-	// this assertion is about the file quota, not the read gate.
+	// on the same pre-write quota snapshot, so retry a post the quota race
+	// turned away after the first batch has finished; this assertion is
+	// about the file quota.
 	const concurrent = 8
 	errs := make([]error, concurrent)
 	pending := make([]int, concurrent)
@@ -752,7 +763,7 @@ func TestFilesPastTheHourAreRefused(t *testing.T) {
 			go func(i int) {
 				defer wg.Done()
 				<-start
-				errs[i] = file("edge"+strconv.Itoa(i), store.PeerFileLimit+i)
+				errs[i] = file("edge"+strconv.Itoa(i), limit+i)
 			}(i)
 		}
 		close(start)
@@ -779,20 +790,20 @@ func TestFilesPastTheHourAreRefused(t *testing.T) {
 	if taken != 1 || refusedCount != concurrent-1 {
 		t.Fatalf("concurrent files: %d taken, %d refused", taken, refusedCount)
 	}
-	if got := blobs(t, north); len(got) != store.PeerFileLimit {
-		t.Fatalf("north holds %d blobs, want %d", len(got), store.PeerFileLimit)
+	if got := blobs(t, north); len(got) != limit {
+		t.Fatalf("north holds %d blobs, want %d", len(got), limit)
 	}
 	for i := range 2 {
-		err := file("over"+strconv.Itoa(i), store.PeerFileLimit+i)
+		err := file("over"+strconv.Itoa(i), limit+i)
 		if !errors.Is(err, yards.ErrRefused) || !strings.HasSuffix(err.Error(), "it has taken as many files from this yard as it takes in an hour") {
 			t.Fatalf("a file past the limit = %v", err)
 		}
 	}
-	if got := blobs(t, north); len(got) != store.PeerFileLimit {
+	if got := blobs(t, north); len(got) != limit {
 		t.Fatalf("north kept a file past the limit: %d blobs", len(got))
 	}
 	refused := north.events(t, "peer_message_refused")
-	if len(refused) != 1 || refused[0].Data["reason"] != store.RefusedRate || refused[0].Data["kind"] != "file" || refused[0].Data["limit"] != float64(store.PeerFileLimit) || refused[0].Data["until"] == nil {
+	if len(refused) != 1 || refused[0].Data["reason"] != store.RefusedRate || refused[0].Data["kind"] != "file" || refused[0].Data["limit"] != float64(limit) || refused[0].Data["until"] == nil {
 		t.Fatalf("north's peer_message_refused = %+v", refused)
 	}
 	// The files are counted apart from the mail: mail is taken still.
@@ -945,7 +956,7 @@ func TestFileNotKeptStaysQueued(t *testing.T) {
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("a file north cannot keep is answered %d (%s), want 500", resp.StatusCode, answer)
 	}
-	if err := store.VerifyResponse(north.pub(), resp.StatusCode, r.sig, resp.Header.Get(yardkey.HeaderSig), answer); err != nil {
+	if err := yardkey.VerifyPeerResponse(north.pub(), resp.StatusCode, r.req, resp.Header.Get(yardkey.HeaderPeerNonce), resp.Header.Get(yardkey.HeaderContentDigest), resp.Header.Get(yardkey.HeaderSigInput), resp.Header.Get(yardkey.HeaderSignature), answer); err != nil {
 		t.Fatalf("the 500 is not north's: %v", err)
 	}
 	if strings.Contains(string(answer), dir) {
@@ -1061,4 +1072,114 @@ func TestMailWithABadNameArrivesNameless(t *testing.T) {
 	if got := store.EventFiles(mails[1]); len(got) != 1 || got[0].Name != "" {
 		t.Fatalf("the second mail's files = %+v", got)
 	}
+}
+
+// A file of the largest size the setting can allow (32 MiB) crosses
+// sealed, byte-identical, both posted and pulled; a file one byte past
+// the plaintext cap is refused too_large inside a lawful envelope, and a
+// wire body past the sealed bound is refused 413 before it is opened.
+// The four legs run beside one another, each on its own yards: in
+// sequence their unseals alone hold the package's race budget.
+func TestMaxFileCrossesSealed(t *testing.T) {
+	ctx := context.Background()
+	// A repeated block, copied as bytes are: a Go loop over 32 MiB costs
+	// seconds under -race for no more byte-identical proof.
+	block := make([]byte, 4096)
+	for i := range block {
+		block[i] = byte(i*31 + 7)
+	}
+	data := bytes.Repeat(block, store.MaxPeerFile/len(block)+1)[:store.MaxPeerFile]
+	hash := hashOf(data)
+	setCaps := func(t *testing.T, y *yard) {
+		t.Helper()
+		if err := y.api.SetSetting(ctx, store.BlobMaxSetting, "33554432", "jo"); err != nil {
+			t.Fatal(err)
+		}
+		if err := y.api.SetSetting(ctx, store.PeerFileMaxSetting, "33554432", "jo"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("posted", func(t *testing.T) {
+		t.Parallel()
+		south, north, toNorth := fileYards(t, true, mailAndFile, mailAndFile)
+		setCaps(t, south)
+		setCaps(t, north)
+		ref, err := south.api.PutBlob(ctx, data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := south.api.MailPeer(ctx, "yardmaster", "north", "the big shed", "jo", store.BlobFile{Hash: ref.Hash, Name: "big.bin"}); err != nil {
+			t.Fatal(err)
+		}
+		south.post(t, toNorth)
+		got, err := os.ReadFile(north.own.BlobPath(hash))
+		if err != nil || !bytes.Equal(got, data) {
+			t.Fatalf("posted: north's blob = %d bytes, %v; want the 32 MiB file byte-identical", len(got), err)
+		}
+	})
+
+	// Pulled: north cannot be called, so it asks south, and the file
+	// crosses in the sealed page.
+	t.Run("pulled", func(t *testing.T) {
+		t.Parallel()
+		south, north, _ := fileYards(t, false, mailAndFile, mailAndFile)
+		setCaps(t, south)
+		setCaps(t, north)
+		ref, err := south.api.PutBlob(ctx, data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := south.api.MailPeer(ctx, "yardmaster", "north", "pulled", "jo", store.BlobFile{Hash: ref.Hash, Name: "big.bin"}); err != nil {
+			t.Fatal(err)
+		}
+		toSouth, err := north.api.GetPeer(ctx, "south")
+		if err != nil {
+			t.Fatal(err)
+		}
+		batch, err := north.caller().Pull(ctx, *toSouth, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := north.api.PeerPulled(ctx, "south", batch); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(north.own.BlobPath(hash))
+		if err != nil || !bytes.Equal(got, data) {
+			t.Fatalf("pulled: north's blob = %d bytes, %v; want the 32 MiB file byte-identical", len(got), err)
+		}
+	})
+
+	t.Run("past the plaintext cap", func(t *testing.T) {
+		t.Parallel()
+		south, north, toNorth := fileYards(t, true, mailAndFile, mailAndFile)
+		setCaps(t, south)
+		setCaps(t, north)
+		// Written as JSON text with a repeated base64 field, not by
+		// encoding 33 MiB: the body is the same length, and takeFile
+		// refuses it for its decoded size before it checks the hash.
+		overHash := hashOf(make([]byte, store.MaxPeerFile+1))
+		encoded := (store.MaxPeerFile + 1 + 2) / 3 * 4
+		fileBody := []byte(`{"hash":"` + overHash + `","type":"application/octet-stream","bytes":` + strconv.Itoa(store.MaxPeerFile+1) + `,"data":"` + strings.Repeat("A", encoded) + `"}`)
+		err := south.caller().Push(ctx, toNorth, store.PeerMessage{ID: "big1", Kind: "file", Body: fileBody})
+		if !errors.Is(err, yards.ErrRefused) || !strings.Contains(err.Error(), "larger than it takes") {
+			t.Fatalf("a file past the plaintext cap = %v, want a too-large refusal", err)
+		}
+	})
+
+	t.Run("past the sealed bound", func(t *testing.T) {
+		t.Parallel()
+		south, north, _ := fileYards(t, true, mailAndFile, mailAndFile)
+		setCaps(t, south)
+		setCaps(t, north)
+		// Sent as raw signed bytes past that bound, not as a sealed
+		// envelope larger still: the size is refused after the header
+		// signature, before any opening.
+		wireReq := signed(south, north, "POST", yards.Path, []byte(`{}`))
+		wireReq.body = bytes.Repeat([]byte("A"), store.SealedFileBound()+8192)
+		wireReq.input, wireReq.sig = yardkey.SignPeerRequest(south.key, &wireReq.req, wireReq.body, north.now)
+		if resp, _ := wireReq.send(t, north); resp.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Fatalf("a wire body past the sealed bound = %d, want 413", resp.StatusCode)
+		}
+	})
 }

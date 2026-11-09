@@ -672,7 +672,7 @@ func TestRunAskListRefusals(t *testing.T) {
 		{"peer allow airy --trust mckean@airy=mckean", `it exposes nobody called "mckean" to this yard`},
 		{"peer allow airy --reach mckean=mckean", "--reach mckean=mckean: name the sender as mail does, <name>@airy"},
 		{"peer allow airy --reach mckean@airy=mckean", "the link does not trust mckean@airy as mckean"},
-		{"peer add north abc", `"abc" is no invite: want the line yardr peer invite prints (yardr-peer-1,<name>,<key>[,<url>])`},
+		{"peer add north abc", `"abc" is no invite: want the line yardr peer invite prints (yardr-peer-2,<name>,<key>,<encryption key>[,<url>])`},
 		{"peer add north abc\n", `'\n' is none of their characters`},
 		{"peer add north", "--run takes yardr peer add <name> <invite>: one peer and one invite, not 1 words"},
 		{"peer identity airy mayor --source linear --rm", "peer identity with --rm is the operator's to type in a terminal"},

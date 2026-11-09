@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync/atomic"
@@ -30,6 +31,7 @@ type peerYard struct {
 	api    store.API
 	own    *store.Store
 	pub    string
+	enc    string
 	srv    *httptest.Server
 	rc     *yards.Receiver
 	d      *dispatch.Dispatcher
@@ -84,6 +86,8 @@ func newPeerYard(t *testing.T, name string, clock *peerClock) *peerYard {
 	key, _, err := yardkey.Ensure(keyFile)
 	must(t, err)
 	y := &peerYard{name: name, api: api, own: own, pub: store.Public(key)}
+	_, y.enc, _, err = yardkey.EnsureEnc(filepath.Join(filepath.Dir(keyFile), "peer-enc.key"))
+	must(t, err)
 	// As the server says it on opening the store: a bead that crosses a
 	// link names the yards it passes by their keys.
 	own.SetYard(keyFile, "test")
@@ -119,7 +123,7 @@ func link(t *testing.T, a, b *peerYard, aCallsB, bCallsA bool) {
 		in, other *peerYard
 		url       bool
 	}{{a, b, aCallsB}, {b, a, bCallsA}} {
-		p := store.Peer{Name: l.other.name, Key: l.other.pub}
+		p := store.Peer{Name: l.other.name, Key: l.other.pub, Enc: l.other.enc}
 		if l.url {
 			p.URL = l.other.srv.URL
 		}
@@ -442,7 +446,7 @@ func TestPeersRefused(t *testing.T) {
 	}
 
 	// c has b's invite and added it; b never added c.
-	_, err = c.api.AddPeer(ctx, store.Peer{Name: "b", Key: b.pub, URL: b.srv.URL}, "jo")
+	_, err = c.api.AddPeer(ctx, store.Peer{Name: "b", Key: b.pub, Enc: b.enc, URL: b.srv.URL}, "jo")
 	must(t, err)
 	_, err = c.api.AllowPeer(ctx, "b", store.PeerAllow{Send: []string{"ping"}, Receive: []string{"ping"}}, "jo")
 	must(t, err)
@@ -467,11 +471,25 @@ func TestPeersWithoutAKey(t *testing.T) {
 	clock := newClock()
 	a, b := newPeerYard(t, "a", clock), newPeerYard(t, "b", clock)
 	link(t, a, b, true, true)
+	keyFile := a.d.PeerKey
 	a.d.PeerKey = filepath.Join(t.TempDir(), "none.key")
 	a.send(t, "b")
 	a.pass(t)
 	if b.asked.Load() != 0 || len(a.waiting(t, "b")) != 1 {
 		t.Fatalf("a yard without a key made %d requests", b.asked.Load())
+	}
+	// A yard whose encryption key cannot be read must stop before posting:
+	// the peer might take a message, but the sender could not verify its
+	// signed answer and would count a successful delivery as a failed try.
+	a.d.PeerKey = keyFile
+	encFile := filepath.Join(filepath.Dir(keyFile), "peer-enc.key")
+	if err := os.WriteFile(encFile, []byte("not a private key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.pass(t)
+	waiting := a.waiting(t, "b")
+	if b.asked.Load() != 0 || len(waiting) != 1 || waiting[0].Attempts != 0 {
+		t.Fatalf("a yard without a readable encryption key made %d requests or counted a try: %+v", b.asked.Load(), waiting)
 	}
 }
 
@@ -495,11 +513,11 @@ func TestPeersRenamed(t *testing.T) {
 	_, err := a.api.RenamePeer(ctx, "b", "bee", "jo")
 	must(t, err)
 	// c takes the name b had, on both sides.
-	_, err = a.api.AddPeer(ctx, store.Peer{Name: "b", Key: c.pub, URL: c.srv.URL}, "jo")
+	_, err = a.api.AddPeer(ctx, store.Peer{Name: "b", Key: c.pub, Enc: c.enc, URL: c.srv.URL}, "jo")
 	must(t, err)
 	_, err = a.api.AllowPeer(ctx, "b", store.PeerAllow{Send: []string{"ping"}, Receive: []string{"ping"}}, "jo")
 	must(t, err)
-	_, err = c.api.AddPeer(ctx, store.Peer{Name: "a", Key: a.pub, URL: a.srv.URL}, "jo")
+	_, err = c.api.AddPeer(ctx, store.Peer{Name: "a", Key: a.pub, Enc: a.enc, URL: a.srv.URL}, "jo")
 	must(t, err)
 	_, err = c.api.AllowPeer(ctx, "a", store.PeerAllow{Send: []string{"ping"}, Receive: []string{"ping"}}, "jo")
 	must(t, err)
@@ -553,4 +571,73 @@ func TestPeersSayWhatTheyUnderstand(t *testing.T) {
 			t.Fatalf("after b's pass: a says of b %+v, b of a %+v", said(a, "b"), said(b, "a"))
 		}
 	}
+}
+
+// The flag day's upgrade gap, at the pass: a peer already linked with
+// both keys is down while its yard is replaced (an old build there would
+// answer 401 the same way a down one goes unanswered: a failed try).
+// Back within its tries, the message is delivered and never marked
+// failed; gone past them, it is given up and stays failed when the peer
+// returns — not delivered afterwards. What the peer holds for this yard
+// crosses after a gap of either length, since nothing burns on asking.
+func TestSealedPeerAcrossAnUpgradeGap(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	clock := newClock()
+	a, b := newPeerYard(t, "a", clock), newPeerYard(t, "b", clock)
+	link(t, a, b, true, true)
+	a.d.PeerTries = 2
+
+	// Short gap: one failed try, then the peer is back.
+	short := a.send(t, "b")
+	b.down.Store(true)
+	a.pass(t)
+	if w := a.waiting(t, "b"); len(w) != 1 || w[0].Attempts != 1 {
+		t.Fatalf("after one try in a short gap, waiting = %+v", w)
+	}
+	clock.now = clock.now.Add(30 * time.Second)
+	b.down.Store(false)
+	a.pass(t)
+	b.pass(t)
+	a.pass(t)
+	if a.pong(t, short) == nil {
+		t.Fatalf("after the short gap, %s was not delivered and answered", short)
+	}
+	if w := a.waiting(t, "b"); len(w) != 0 {
+		t.Fatalf("after the short gap, waiting = %+v, want none", w)
+	}
+
+	// Long gap: the tries run out while it is down, and what was given
+	// up is not delivered when it returns.
+	long := a.send(t, "b")
+	b.down.Store(true)
+	a.pass(t)
+	clock.now = clock.now.Add(30 * time.Second)
+	a.pass(t)
+	if w := a.waiting(t, "b"); len(w) != 0 {
+		t.Fatalf("after its tries ran out, waiting = %+v, want none (given up)", w)
+	}
+	p, err := a.api.GetPeer(ctx, "b")
+	must(t, err)
+	if p.Failed != 1 {
+		t.Fatalf("after the long gap, the peer counts %+v, want one given up", p)
+	}
+	clock.now = clock.now.Add(time.Minute)
+	b.down.Store(false)
+	a.pass(t)
+	b.pass(t)
+	a.pass(t)
+	if a.pong(t, long) != nil {
+		t.Fatalf("what was given up in the long gap was delivered after it")
+	}
+
+	// What b holds for a crosses after the long gap all the same.
+	held := b.send(t, "a")
+	b.pass(t)
+	a.pass(t)
+	b.pass(t)
+	if b.pong(t, held) == nil {
+		t.Fatalf("after the gap, what b held for a did not cross by asking (%s)", held)
+	}
+	_ = ctx
 }

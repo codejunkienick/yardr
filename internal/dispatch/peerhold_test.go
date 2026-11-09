@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -33,14 +34,22 @@ func (y *peerYard) ask(t *testing.T, ctx context.Context, peer string, clock *pe
 	must(t, err)
 	p, err := y.api.GetPeer(ctx, peer)
 	must(t, err)
-	c := &yards.Caller{Key: key, Now: func() time.Time { return clock.now }}
+	encPriv, _, _, err := yardkey.EnsureEnc(filepath.Join(filepath.Dir(y.d.PeerKey), "peer-enc.key"))
+	must(t, err)
+	c := &yards.Caller{Key: key, Enc: encPriv, Now: func() time.Time { return clock.now }}
 	out := make(chan asked, 1)
 	go func() {
 		start := time.Now()
 		batch, err := c.Pull(ctx, *p, p.Pulled, wait)
 		a := asked{wait: wait, took: time.Since(start), err: err}
 		if err == nil {
-			a.err = json.Unmarshal(batch.Body, &a.page)
+			// As the store opens it: sealed to this yard by the peer.
+			opened, err := yardkey.OpenBody(encPriv, p.Key, store.Public(key), batch.Body)
+			if err != nil {
+				a.err = err
+			} else {
+				a.err = json.Unmarshal(opened, &a.page)
+			}
 		}
 		out <- a
 	}()
@@ -112,20 +121,41 @@ func untilQuiet(t *testing.T, y *peerYard) {
 	}
 }
 
-// oldPeer serves questions as a yardr from before questions were held:
-// every one answered at once with an empty page, signed with a's key
-// so the asker takes it. It counts the questions it hears.
-func oldPeer(t *testing.T, a *peerYard) (*httptest.Server, *atomic.Int64) {
+// oldPeer serves questions as a yardr from before questions were held,
+// on the sealed wire: every one answered at once with an empty page,
+// sealed to the asker b and signed as a's answer over the question as
+// sent, so the asker takes it. It counts the questions it hears.
+func oldPeer(t *testing.T, a, b *peerYard) (*httptest.Server, *atomic.Int64) {
 	t.Helper()
 	key, err := store.Load(a.d.PeerKey)
 	must(t, err)
 	asked := &atomic.Int64{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		asked.Add(1)
-		answer := []byte(`{"messages":[]}`)
-		w.Header().Set(yardkey.HeaderSig, store.SignResponse(key, http.StatusOK, r.Header.Get(yardkey.HeaderSig), answer))
+		plain, err := json.Marshal(store.PeerPage{Messages: []store.PeerMessage{}, Says: yards.Says()})
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		wire, err := yardkey.SealBody(a.pub, b.pub, b.enc, plain)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		authority, err := store.PeerAuthority("http", r.Host)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		desc := store.PeerRequestSig{Method: r.Method, Authority: authority, Path: r.URL.EscapedPath(), Query: r.URL.RawQuery, To: r.Header.Get(yardkey.HeaderPeerTo), Nonce: r.Header.Get(yardkey.HeaderPeerNonce), Digest: r.Header.Get(yardkey.HeaderContentDigest)}
+		input, sig, digest := yardkey.SignPeerResponse(key, http.StatusOK, desc, wire)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(yardkey.HeaderSigInput, input)
+		w.Header().Set(yardkey.HeaderSignature, sig)
+		w.Header().Set(yardkey.HeaderContentDigest, digest)
+		w.Header().Set(yardkey.HeaderPeerNonce, desc.Nonce)
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(answer)
+		_, _ = w.Write(wire)
 	}))
 	t.Cleanup(srv.Close)
 	return srv, asked
@@ -290,7 +320,7 @@ func TestPeersDaemonHoldsOrPolls(t *testing.T) {
 	ctx := context.Background()
 	// Against a yardr that knows no wait, b polls at the rhythm of
 	// before there were holds.
-	old, oldAsked := oldPeer(t, a)
+	old, oldAsked := oldPeer(t, a, b)
 	if _, err := b.api.SetPeerURL(ctx, "a", old.URL, "jo"); err != nil {
 		t.Fatal(err)
 	}

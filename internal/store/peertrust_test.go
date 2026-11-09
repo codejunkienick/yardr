@@ -187,7 +187,7 @@ func TestTrustGoesWithItsEnds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch := store.PeerBatch{RequestSig: "req-1", Signature: store.SignResponse(y.north, 200, "req-1", body), Body: body}
+	batch := y.sealedBatch(t, y.north, y.key, body, nil)
 	if res, err := y.api.PeerPulled(y.ctx, "north", batch); err != nil || len(res.Taken) != 1 || res.Taken[0].Refused != "" {
 		t.Fatalf("PeerPulled = %+v, %v", res, err)
 	}

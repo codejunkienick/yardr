@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -29,6 +30,8 @@ type yard struct {
 	own     *store.Store
 	key     ed25519.PrivateKey
 	keyFile string
+	enc     string // this yard's encryption public key
+	encPriv []byte
 	rc      *yards.Receiver
 	srv     *httptest.Server
 	now     time.Time
@@ -42,6 +45,10 @@ func newYard(t *testing.T) *yard {
 	if y.key, _, err = yardkey.Ensure(y.keyFile); err != nil {
 		t.Fatal(err)
 	}
+	if y.encPriv, y.enc, _, err = yardkey.EnsureEnc(filepath.Join(filepath.Dir(y.keyFile), "peer-enc.key")); err != nil {
+		t.Fatal(err)
+	}
+	own.SetYard(y.keyFile, "test")
 	y.rc = yards.NewReceiver(own, y.keyFile, nil)
 	y.rc.SetClock(func() time.Time { return y.now })
 	y.srv = httptest.NewServer(y.rc.Handler())
@@ -52,14 +59,14 @@ func newYard(t *testing.T) *yard {
 func (y *yard) pub() string { return store.Public(y.key) }
 
 func (y *yard) caller() *yards.Caller {
-	return &yards.Caller{Key: y.key, Now: func() time.Time { return y.now }}
+	return &yards.Caller{Key: y.key, Enc: y.encPriv, Now: func() time.Time { return y.now }}
 }
 
 // add records other as a peer of y under name, with or without its URL, and
 // allows the kinds each way.
 func (y *yard) add(t *testing.T, name string, other *yard, url bool, send, receive []string) store.Peer {
 	t.Helper()
-	p := store.Peer{Name: name, Key: other.pub()}
+	p := store.Peer{Name: name, Key: other.pub(), Enc: other.enc}
 	if url {
 		p.URL = other.srv.URL
 	}
@@ -102,27 +109,60 @@ func (y *yard) events(t *testing.T, kind string) []store.Event {
 
 var ping = []string{"ping"}
 
-// request is a request to y as from signs it, which a test may then change.
+// request is a request to y as from signs it on the sealed wire, which a
+// test may then change: its descriptor, its headers' material and its
+// wire body (the sealed envelope, or whatever a test puts there).
 type request struct {
 	method, path string
-	key, ts, sig string
+	req          store.PeerRequestSig
+	input, sig   string
 	body         []byte
+	from         *yard
+}
+
+func signedAt(from, to *yard, method, path string, body []byte, at time.Time) *request {
+	nonce, err := store.NewPeerNonce()
+	if err != nil {
+		panic(err)
+	}
+	pth, query, _ := strings.Cut(path, "?")
+	desc := store.PeerRequestSig{Method: method, Authority: strings.TrimPrefix(to.srv.URL, "http://"), Path: pth, Query: query, To: to.pub(), Nonce: nonce}
+	var wire []byte
+	if body != nil {
+		var err error
+		if wire, err = yardkey.SealBody(from.pub(), to.pub(), to.enc, body); err != nil {
+			panic(err)
+		}
+	}
+	input, sig := yardkey.SignPeerRequest(from.key, &desc, wire, at)
+	// The authority the receiver sees is its own listener's host, which
+	// only send knows; the signature is made there over it. desc keeps
+	// the placeholder until then, and send re-signs over the real one.
+	return &request{method: method, path: path, req: desc, input: input, sig: sig, body: wire, from: from}
 }
 
 func signed(from, to *yard, method, path string, body []byte) *request {
-	ts, sig := yardkey.SignRequest(from.key, to.pub(), method, path, to.now, body)
-	return &request{method: method, path: path, key: from.pub(), ts: ts, sig: sig, body: body}
+	return signedAt(from, to, method, path, body, to.now)
 }
 
 func (r *request) send(t *testing.T, to *yard) (*http.Response, []byte) {
 	t.Helper()
-	req, err := http.NewRequest(r.method, to.srv.URL+r.path, bytes.NewReader(r.body))
+	u := to.srv.URL + r.path
+	// @path is derived from the URL sent to: under an edge base the path
+	// is the full one, which the caller signs and the receiver checks.
+	req, err := http.NewRequest(r.method, u, bytes.NewReader(r.body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set(yardkey.HeaderKey, r.key)
-	req.Header.Set(yardkey.HeaderTime, r.ts)
-	req.Header.Set(yardkey.HeaderSig, r.sig)
+	if r.input != "" {
+		req.Header.Set(yardkey.HeaderSigInput, r.input)
+		req.Header.Set(yardkey.HeaderSignature, r.sig)
+		req.Header.Set(yardkey.HeaderPeerTo, r.req.To)
+		req.Header.Set(yardkey.HeaderPeerNonce, r.req.Nonce)
+		if r.req.Digest != "" {
+			req.Header.Set(yardkey.HeaderContentDigest, r.req.Digest)
+		}
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -147,15 +187,15 @@ func TestReceiverRefusesWhatIsNoPeers(t *testing.T) {
 
 	stranger := signed(c, b, "POST", yards.Path, message("m1")) // a third yard with its own key, not added
 	wrongKey := signed(c, b, "POST", yards.Path, message("m1"))
-	wrongKey.key = a.pub() // says it is a, signed by c
+	// Says it is a (the keyid the receiver looks up), signed by c: the
+	// signature is made again over a's keyid with c's key.
+	wrongKey.input = strings.Replace(wrongKey.input, "keyid=\""+c.pub()+"\"", "keyid=\""+a.pub()+"\"", 1) // says it is a, signed by c
 	changed := signed(a, b, "POST", yards.Path, message("m1"))
 	changed.body = message("m2")
-	old := signed(a, b, "POST", yards.Path, message("m1"))
-	old.ts, old.sig = yardkey.SignRequest(a.key, b.pub(), "POST", yards.Path, b.now.Add(-yardkey.MaxSkew-time.Second), old.body)
-	ahead := signed(a, b, "POST", yards.Path, message("m1"))
-	ahead.ts, ahead.sig = yardkey.SignRequest(a.key, b.pub(), "POST", yards.Path, b.now.Add(yardkey.MaxSkew+time.Second), ahead.body)
+	old := signedAt(a, b, "POST", yards.Path, message("m1"), b.now.Add(-yardkey.MaxSkew-time.Second))
+	ahead := signedAt(a, b, "POST", yards.Path, message("m1"), b.now.Add(yardkey.MaxSkew+time.Second))
 	redated := signed(a, b, "POST", yards.Path, message("m1"))
-	redated.ts = "1"
+	redated.input = strings.Replace(redated.input, "created="+strconv.FormatInt(redated.req.Created, 10), "created=1", 1)
 	forOther := signed(a, c, "POST", yards.Path, message("m1")) // a's request to c, played to b
 	otherPath := signed(a, b, "GET", yards.Path+"?after=0", nil)
 	otherPath.path = yards.Path + "?after=5"
@@ -171,7 +211,7 @@ func TestReceiverRefusesWhatIsNoPeers(t *testing.T) {
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Errorf("%s: status %d, want 401", name, resp.StatusCode)
 		}
-		if resp.Header.Get(yardkey.HeaderSig) != "" {
+		if resp.Header.Get(yardkey.HeaderSignature) != "" {
 			t.Errorf("%s: the refusal is signed", name)
 		}
 		if first == "" {
@@ -215,11 +255,15 @@ func TestReceiverPost(t *testing.T) {
 		if resp.StatusCode != want {
 			t.Fatalf("status %d (%s), want %d", resp.StatusCode, body, want)
 		}
-		if err := store.VerifyResponse(b.pub(), resp.StatusCode, r.sig, resp.Header.Get(yardkey.HeaderSig), body); err != nil {
+		if err := yardkey.VerifyPeerResponse(b.pub(), resp.StatusCode, r.req, resp.Header.Get(yardkey.HeaderPeerNonce), resp.Header.Get(yardkey.HeaderContentDigest), resp.Header.Get(yardkey.HeaderSigInput), resp.Header.Get(yardkey.HeaderSignature), body); err != nil {
 			t.Fatalf("the %d answer is not b's: %v", resp.StatusCode, err)
 		}
+		opened, err := yardkey.OpenBody(a.encPriv, b.pub(), a.pub(), body)
+		if err != nil {
+			t.Fatalf("the %d answer does not open: %v", resp.StatusCode, err)
+		}
 		var v map[string]any
-		if err := json.Unmarshal(body, &v); err != nil {
+		if err := json.Unmarshal(opened, &v); err != nil {
 			t.Fatal(err)
 		}
 		return v
@@ -278,9 +322,11 @@ func TestReceiverPost(t *testing.T) {
 	}
 	over, _ := json.Marshal(store.PeerMessage{ID: "bigger", Kind: "ping", Body: json.RawMessage(`"` + strings.Repeat("x", store.MaxPeerBody+8<<10) + `"`)})
 	answer(signed(a, b, "POST", yards.Path, over), http.StatusBadRequest)
-	stranger := signed(a, b, "POST", yards.Path, over)
-	stranger.key = newYard(t).pub()
-	if resp, _ := stranger.send(t, b); resp.StatusCode != http.StatusRequestEntityTooLarge {
+	// Past maxRequest under a key no link has: refused 401 from its
+	// headers alone, reading nothing of the body (the count is pinned in
+	// the headers-first subtest below).
+	stranger := signed(newYard(t), b, "POST", yards.Path, over)
+	if resp, _ := stranger.send(t, b); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("a request past the limit under a key no link has: %d", resp.StatusCode)
 	}
 	huge, _ := json.Marshal(store.PeerMessage{ID: "huge", Kind: "file", Body: json.RawMessage(`"` + strings.Repeat("x", store.MaxPeerFileBody+8<<10) + `"`)})
@@ -301,160 +347,74 @@ func TestReceiverPost(t *testing.T) {
 			t.Errorf("%s %s: %d", r.method, r.path, resp.StatusCode)
 		}
 	}
-	t.Run("large reads", checkReceiverBoundsLargeReads)
+	t.Run("headers first", checkReceiverHeadersFirst)
 }
 
-// checkReceiverBoundsLargeReads pins how a peer request is read before its
-// signature is checked and how the receiver refuses one when no large-read
-// slot is free.
-func checkReceiverBoundsLargeReads(t *testing.T) {
+// checkReceiverHeadersFirst pins the headers-first order: a request
+// whose header signature does not hold — a known key with a bad
+// signature, an unknown keyid, or a Yardr-Peer-To for another yard — is
+// refused 401 with no more than maxRequest of its body read, however
+// large the body is. The same body signed well is read and answered.
+func checkReceiverHeadersFirst(t *testing.T) {
 	t.Helper()
 	a, b := newYard(t), newYard(t)
 	b.add(t, "a", a, true, ping, ping)
-	head := store.MaxPeerBody + 4<<10 // maxRequest
-	large, _ := json.Marshal(store.PeerMessage{ID: "big", Kind: "ping", Body: json.RawMessage(`"` + strings.Repeat("x", head) + `"`)})
-	bad := bytes.Clone(large)
-	bad[len(bad)-10] ^= 0xff // signed below, then changed: no peer's
+	large, _ := json.Marshal(store.PeerMessage{ID: "big", Kind: "ping", Body: json.RawMessage(`"` + strings.Repeat("x", store.MaxPeerBody+8<<10) + `"`)})
+	maxRead := store.MaxPeerBody + 4<<10 // maxRequest
 
-	// The head is grown as bytes arrive: a small body holds near what it
-	// sent, not the whole head, and a longer one stops past maxRequest.
-	smallHead, err := yards.ReadHead(bytes.NewReader(message("m1")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(smallHead) != len(message("m1")) || cap(smallHead) >= head+1 {
-		t.Fatalf("a small head holds %d bytes in %d of cap", len(smallHead), cap(smallHead))
-	}
-	fullHead, err := yards.ReadHead(bytes.NewReader(large))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(fullHead) != head+1 {
-		t.Fatalf("a large head holds %d bytes, want %d", len(fullHead), head+1)
-	}
-	emptyHead, err := yards.ReadHead(bytes.NewReader(nil))
-	if err != nil || len(emptyHead) != 0 {
-		t.Fatalf("an empty head = %d bytes, %v", len(emptyHead), err)
-	}
-	if _, err = yards.ReadHead(noProgressReader{}); err != io.ErrNoProgress {
-		t.Fatalf("a body that makes no read progress: %v, want %v", err, io.ErrNoProgress)
-	}
-
-	// Read, then refused: the 401 for a bad signature needs the whole body.
-	// Repeating it with one slot proves the first read released that slot.
-	b.rc.SetMaxLargeReads(1)
-	r := signed(a, b, "POST", yards.Path, large)
-	r.body = bad
-	if resp, _ := r.send(t, b); resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("a large request with a bad signature: %d, want 401", resp.StatusCode)
-	}
-	r = signed(a, b, "POST", yards.Path, large)
-	r.body = bad
-	if resp, _ := r.send(t, b); resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("a second large request after its slot was released: %d, want 401", resp.StatusCode)
-	}
-	// With no slot free a non-empty request is 503'd, unsigned: its sender
-	// keeps it and posts it again. Pulls and empty posts take no slot.
-	b.rc.SetMaxLargeReads(0)
-	r = signed(a, b, "POST", yards.Path, large)
-	r.body = bad
-	resp, _ := r.send(t, b)
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("a large request with no slot free: %d, want 503", resp.StatusCode)
-	}
-	if resp.Header.Get(yardkey.HeaderSig) != "" {
-		t.Fatal("the 503 is signed")
-	}
-	if resp, _ := signed(a, b, "POST", yards.Path, message("m1")).send(t, b); resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("a small post with no slot free: %d, want 503", resp.StatusCode)
-	}
-	small := signed(a, b, "POST", yards.Path, message("m2"))
-	small.body = message("m3")
-	if resp, _ := small.send(t, b); resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("a small bad signature with no slot free: %d, want 503", resp.StatusCode)
-	}
-	if resp, _ := signed(a, b, "GET", yards.Path+"?after=0", nil).send(t, b); resp.StatusCode != http.StatusOK {
-		t.Fatalf("a pull with no slot free: %d", resp.StatusCode)
-	}
-	ereq := httptest.NewRequest(http.MethodPost, yards.Path, nil)
-	ereq.Header.Set(yardkey.HeaderKey, a.pub())
-	erec := httptest.NewRecorder()
-	b.rc.Handler().ServeHTTP(erec, ereq)
-	if erec.Code != http.StatusUnauthorized {
-		t.Fatalf("an empty post with no slot free: %d, want 401", erec.Code)
-	}
-
-	// Refused before reading: a part-written body is not read when no slot
-	// is free. Served straight at the handler, so what it read is counted.
-	stall := &stallBody{left: bytes.Clone(large[:head+1]), release: make(chan struct{})}
-	req := httptest.NewRequest(http.MethodPost, yards.Path, stall)
-	req.Header.Set(yardkey.HeaderKey, a.pub())
-	rec := httptest.NewRecorder()
-	done := make(chan int, 1)
-	go func() { b.rc.Handler().ServeHTTP(rec, req); done <- rec.Code }()
-	select {
-	case code := <-done:
-		if code != http.StatusServiceUnavailable {
-			t.Fatalf("a stalled request with no slot free: %d, want 503", code)
+	serve := func(r *request) (int, int) {
+		body := &countingBody{r: bytes.NewReader(r.body)}
+		req := httptest.NewRequest(r.method, r.path, body)
+		req.Header.Set(yardkey.HeaderSigInput, r.input)
+		req.Header.Set(yardkey.HeaderSignature, r.sig)
+		req.Header.Set(yardkey.HeaderPeerTo, r.req.To)
+		req.Header.Set(yardkey.HeaderPeerNonce, r.req.Nonce)
+		if r.req.Digest != "" {
+			req.Header.Set(yardkey.HeaderContentDigest, r.req.Digest)
 		}
-	case <-time.After(10 * time.Second):
-		close(stall.release)
-		<-done
-		t.Fatal("a large request with no slot free waited on its body")
+		rec := httptest.NewRecorder()
+		b.rc.Handler().ServeHTTP(rec, req)
+		return rec.Code, body.n
 	}
-	close(stall.release)
-	if stall.read != 0 {
-		t.Fatalf("the handler read %d bytes before refusing", stall.read)
-	}
-
-	// A part-written body holds its slot while it stalls: a further
-	// non-empty read is refused, a pull goes as before, and the held body
-	// is answered once it ends. Signed over the whole body, then part-sent:
-	// no peer's.
-	b.rc.SetMaxLargeReads(1)
-	part := &stallBody{left: bytes.Clone(large[:1024]), release: make(chan struct{}), waiting: make(chan struct{})}
-	preq := httptest.NewRequest(http.MethodPost, yards.Path, part)
-	ts, sig := yardkey.SignRequest(a.key, b.pub(), "POST", yards.Path, b.now, large)
-	preq.Header.Set(yardkey.HeaderKey, a.pub())
-	preq.Header.Set(yardkey.HeaderTime, ts)
-	preq.Header.Set(yardkey.HeaderSig, sig)
-	prec := httptest.NewRecorder()
-	pdone := make(chan int, 1)
-	go func() { b.rc.Handler().ServeHTTP(prec, preq); pdone <- prec.Code }()
-	select {
-	case <-part.waiting:
-	case <-time.After(10 * time.Second):
-		close(part.release)
-		<-pdone
-		t.Fatal("a part-written body was not read")
-	}
-	if resp, _ := signed(a, b, "POST", yards.Path, message("m4")).send(t, b); resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("a further non-empty read while the slot is held: %d, want 503", resp.StatusCode)
-	}
-	if resp, _ := signed(a, b, "GET", yards.Path+"?after=0", nil).send(t, b); resp.StatusCode != http.StatusOK {
-		t.Fatalf("a pull while the slot is held: %d", resp.StatusCode)
-	}
-	close(part.release)
-	select {
-	case code := <-pdone:
-		if code != http.StatusUnauthorized {
-			t.Fatalf("the held body once ended: %d, want 401", code)
+	badSig := signed(a, b, "POST", yards.Path, large)
+	badSig.sig = "sig1=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==:"
+	unknown := signed(newYard(t), b, "POST", yards.Path, large)
+	wrongTo := signed(a, newYard(t), "POST", yards.Path, large)
+	// wrongTo is signed for another yard but sent to b: its authority is
+	// the other yard's listener, so re-sign it for b's with To unchanged.
+	wrongTo.req.Authority = strings.TrimPrefix(b.srv.URL, "http://")
+	wrongTo.input, wrongTo.sig = yardkey.SignPeerRequest(a.key, &wrongTo.req, wrongTo.body, b.now)
+	// SignPeerRequest signs for the signer's own keyid, which is a's, as
+	// the good one is; only To names the other yard.
+	for name, r := range map[string]*request{"a bad signature": badSig, "an unknown keyid": unknown, "a request for another yard": wrongTo} {
+		if code, read := serve(r); code != http.StatusUnauthorized || read > maxRead {
+			t.Errorf("%s: status %d with %d bytes read, want 401 with at most %d read", name, code, read, maxRead)
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the held body was not answered once it ended")
 	}
-	if part.read != 1024 || part.asked > 32<<10 {
-		t.Fatalf("part-written body read %d bytes into a %d-byte buffer", part.read, part.asked)
+	// Old way: no RFC 9421 headers at all is the same plain 401.
+	oldReq := httptest.NewRequest(http.MethodPost, yards.Path, bytes.NewReader(large))
+	oldRec := httptest.NewRecorder()
+	b.rc.Handler().ServeHTTP(oldRec, oldReq)
+	if oldRec.Code != http.StatusUnauthorized {
+		t.Errorf("a request signed the old way: %d, want 401", oldRec.Code)
 	}
-	if resp, _ := signed(a, b, "POST", yards.Path, message("m5")).send(t, b); resp.StatusCode != http.StatusOK {
-		t.Fatalf("a small post after the slot was released: %d, want 200", resp.StatusCode)
-	}
-	r = signed(a, b, "POST", yards.Path, large)
-	r.body = bad
-	if resp, _ := r.send(t, b); resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("a large read after the slot was released: %d, want 401", resp.StatusCode)
+	if code, _ := serve(signed(a, b, "POST", yards.Path, large)); code != http.StatusBadRequest {
+		t.Errorf("the same body signed well: %d, want 400 (it is no ping's body)", code)
 	}
 }
+
+// countingBody counts what a handler reads of a request body.
+type countingBody struct {
+	r io.Reader
+	n int
+}
+
+func (c *countingBody) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += n
+	return n, err
+}
+func (c *countingBody) Close() error { return nil }
 
 // stallBody gives its bytes, then waits for release: a body that stalls
 // where the test wants it to, counting what it gave and the read buffer
@@ -551,7 +511,7 @@ func TestCallerPush(t *testing.T) {
 			w.WriteHeader(status)
 			_, _ = w.Write([]byte(`{"taken":true}`))
 		}))
-		err := a.caller().Push(ctx, store.Peer{Name: "b", Key: b.pub(), URL: fake.URL}, m)
+		err := a.caller().Push(ctx, store.Peer{Name: "b", Key: b.pub(), Enc: b.enc, URL: fake.URL}, m)
 		fake.Close()
 		if err == nil || errors.Is(err, yards.ErrRefused) || !strings.Contains(err.Error(), "not signed with its key") {
 			t.Fatalf("Push answered %d by someone else = %v", status, err)
@@ -629,7 +589,7 @@ func TestCallerPull(t *testing.T) {
 		_, _ = w.Write([]byte(`{"messages":[{"id":"forged","kind":"ping","body":{},"seq":99}]}`))
 	}))
 	defer fake.Close()
-	if _, err := b.caller().Pull(ctx, store.Peer{Name: "a", Key: a.pub(), URL: fake.URL}, 0, 0); err == nil || !strings.Contains(err.Error(), "not signed with its key") {
+	if _, err := b.caller().Pull(ctx, store.Peer{Name: "a", Key: a.pub(), Enc: a.enc, URL: fake.URL}, 0, 0); err == nil || !strings.Contains(err.Error(), "not signed with its key") {
 		t.Fatalf("Pull answered by someone else = %v", err)
 	}
 	// A yard that is called is told so, and handed nothing by asking.
@@ -655,7 +615,7 @@ func TestCallerPull(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer capped.Close()
-	cappedPeer := store.Peer{Name: "a", Key: a.pub(), URL: capped.URL}
+	cappedPeer := store.Peer{Name: "a", Key: a.pub(), Enc: a.enc, URL: capped.URL}
 	if _, err := b.caller().Pull(ctx, cappedPeer, 0, 0); !errors.Is(err, yards.ErrHoldCapped) {
 		t.Fatalf("a capped pull = %v, want ErrHoldCapped", err)
 	}
@@ -807,8 +767,9 @@ func TestReceiverPeerRenamedAndNameGivenAway(t *testing.T) {
 		}
 		// The id is not one c has sent: its own m1 is taken, not dropped.
 		resp, body := signed(c, b, "POST", yards.Path, message("m1")).send(t, b)
-		if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"taken":true`) {
-			t.Fatalf("m1 from the yard that has the name = %d %s", resp.StatusCode, body)
+		opened, err := yardkey.OpenBody(c.encPriv, b.pub(), c.pub(), body)
+		if err != nil || resp.StatusCode != http.StatusOK || !strings.Contains(string(opened), `"taken":true`) {
+			t.Fatalf("m1 from the yard that has the name = %d %s (%v)", resp.StatusCode, body, err)
 		}
 		evs := b.events(t, "peer_message_received")
 		if len(evs) != 2 || evs[0].Data["peer"] != "b2" || evs[1].Data["peer"] != "a" {
@@ -844,9 +805,13 @@ func TestReceiverPeerRenamedAndNameGivenAway(t *testing.T) {
 		if err != nil {
 			t.Fatalf("the next question = %v", err)
 		}
+		opened, err := yardkey.OpenBody(a.encPriv, b.pub(), a.pub(), batch.Body)
+		if err != nil {
+			t.Fatalf("the next question's page does not open: %v", err)
+		}
 		var page store.PeerPage
-		if err := json.Unmarshal(batch.Body, &page); err != nil || len(page.Messages) != 1 || page.Messages[0].ID != forA.ID {
-			t.Fatalf("the next question's page = %s, %v", batch.Body, err)
+		if err := json.Unmarshal(opened, &page); err != nil || len(page.Messages) != 1 || page.Messages[0].ID != forA.ID {
+			t.Fatalf("the next question's page = %s, %v", opened, err)
 		}
 	})
 }
@@ -881,11 +846,15 @@ func TestReceiverTakesABead(t *testing.T) {
 		if resp.StatusCode != want {
 			t.Fatalf("status %d (%s), want %d", resp.StatusCode, body, want)
 		}
-		if err := store.VerifyResponse(b.pub(), resp.StatusCode, r.sig, resp.Header.Get(yardkey.HeaderSig), body); err != nil {
+		if err := yardkey.VerifyPeerResponse(b.pub(), resp.StatusCode, r.req, resp.Header.Get(yardkey.HeaderPeerNonce), resp.Header.Get(yardkey.HeaderContentDigest), resp.Header.Get(yardkey.HeaderSigInput), resp.Header.Get(yardkey.HeaderSignature), body); err != nil {
 			t.Fatalf("the %d answer is not b's: %v", resp.StatusCode, err)
 		}
+		opened, err := yardkey.OpenBody(a.encPriv, b.pub(), a.pub(), body)
+		if err != nil {
+			t.Fatalf("the %d answer does not open: %v", resp.StatusCode, err)
+		}
 		var v map[string]any
-		if err := json.Unmarshal(body, &v); err != nil {
+		if err := json.Unmarshal(opened, &v); err != nil {
 			t.Fatal(err)
 		}
 		return v
@@ -954,5 +923,70 @@ func TestHeldPullOutlastsTheListenersTimeouts(t *testing.T) {
 	}
 	if res, err := b.api.PeerPulled(context.Background(), "a", batch); err != nil || len(res.Taken) != 0 {
 		t.Fatalf("the answer = %+v, %v", res, err)
+	}
+}
+
+// What crosses between two yards on the sealed wire is the HPKE envelope
+// alone: a mail's text, and the kind of any message, are in neither the
+// header lines the profile exposes nor the body. A recording carrier in
+// front of b's receiver takes the bytes as they crossed.
+func TestWireCarriesOnlyCiphertext(t *testing.T) {
+	a, b := newYard(t), newYard(t)
+	ctx := context.Background()
+	var raw [][]byte
+	rec := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		raw = append(raw, body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		b.rc.Handler().ServeHTTP(w, r)
+	}))
+	defer rec.Close()
+	toB := a.add(t, "b", b, true, []string{"ping"}, []string{"ping"})
+	b.add(t, "a", a, false, nil, []string{"ping"})
+	if _, err := a.api.SetPeerURL(ctx, "b", rec.URL, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	toB.URL = rec.URL
+	m := store.PeerMessage{ID: "wire1", Kind: "ping", Body: json.RawMessage(`{"note":"the quiet cow jumps at midnight"}`)}
+	if err := a.caller().Push(ctx, toB, m); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 1 {
+		t.Fatalf("requests on the wire = %d", len(raw))
+	}
+	if strings.Contains(string(raw[0]), "the quiet cow") || strings.Contains(string(raw[0]), `"kind"`) || strings.Contains(string(raw[0]), `"ping"`) {
+		t.Fatalf("the wire carries plaintext: %s", raw[0])
+	}
+	var env map[string]any
+	if err := json.Unmarshal(raw[0], &env); err != nil || env["v"] != 2.0 || env["enc"] == nil || env["ct"] == nil || len(env) != 3 {
+		t.Fatalf("the wire body = %s, %v: not the sealed envelope alone", raw[0], err)
+	}
+}
+
+// An envelope sealed to another yard, and one whose ciphertext is
+// changed after signing, are refused without anything being taken: the
+// first as a bad message under a signed 400, the second with the plain
+// 401 of a body that is not its signed digest.
+func TestSealedToAnotherAndTampered(t *testing.T) {
+	a, b, c := newYard(t), newYard(t), newYard(t)
+	b.add(t, "a", a, true, ping, ping)
+	wrong := signed(a, b, "POST", yards.Path, message("m1"))
+	// Re-seal the same message to c and sign that envelope for b.
+	env, err := yardkey.SealBody(a.pub(), c.pub(), c.enc, message("m1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong.body = env
+	wrong.input, wrong.sig = yardkey.SignPeerRequest(a.key, &wrong.req, env, b.now)
+	if resp, _ := wrong.send(t, b); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("sealed to another yard: %d, want 400", resp.StatusCode)
+	}
+	tampered := signed(a, b, "POST", yards.Path, message("m1"))
+	tampered.body = tampered.body[:len(tampered.body)-4]
+	if resp, _ := tampered.send(t, b); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("tampered envelope: %d, want 401", resp.StatusCode)
+	}
+	if evs := b.events(t, "peer_message_received"); len(evs) != 0 {
+		t.Fatalf("b took something under a bad seal: %+v", evs)
 	}
 }

@@ -15,8 +15,11 @@ import (
 
 // A peer whose URL is an edge URL is called under its base: the requests go
 // to <base>/peers/messages and <base>/peers/pair/..., and the signatures
-// still hold, since the edge strips the base before the yard sees them. Every
-// request asks that its connection not be kept.
+// still hold, since the edge forwards the path unstripped and the yard
+// derives @path from the target it receives, as the sender did from the
+// URL it sent to (bead 3 of the design makes the real edge do this; this
+// stand-in is updated for this bead's own tests). Every request asks that
+// its connection not be kept.
 func TestCallerUnderBasePath(t *testing.T) {
 	cheapKeys(t)
 	a, b := newYard(t), newYard(t)
@@ -32,18 +35,11 @@ func TestCallerUnderBasePath(t *testing.T) {
 			kept = append(kept, r.Method+" "+r.URL.RequestURI())
 		}
 		mu.Unlock()
-		rest, ok := strings.CutPrefix(r.URL.Path, prefix)
-		if !ok {
+		if !strings.HasPrefix(r.URL.Path, prefix) {
 			http.NotFound(w, r)
 			return
 		}
-		r2 := r.Clone(r.Context())
-		r2.URL.Path = rest
-		r2.RequestURI = rest
-		if r.URL.RawQuery != "" {
-			r2.RequestURI += "?" + r.URL.RawQuery
-		}
-		b.rc.Handler().ServeHTTP(w, r2)
+		b.rc.Handler().ServeHTTP(w, r)
 	}))
 	t.Cleanup(edge.Close)
 	base := edge.URL + prefix
@@ -72,7 +68,7 @@ func TestCallerUnderBasePath(t *testing.T) {
 		t.Fatalf("PeerPulled = %+v, %v", res, err)
 	}
 
-	opened, err := b.own.PairOpen(ctx, store.PairOffer{Name: "b", Key: b.pub(), URL: base}, "jo")
+	opened, err := b.own.PairOpen(ctx, store.PairOffer{Name: "b", Key: b.pub(), Enc: b.enc, URL: base}, "jo")
 	if err != nil {
 		t.Fatal(err)
 	}

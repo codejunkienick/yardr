@@ -1426,7 +1426,7 @@ func TestRunAskPeerAdd(t *testing.T) {
 	// Asking refuses what the command would refuse, with nothing stored.
 	airyInvite := Invite{Name: "yardr", Key: airyKey}.String()
 	for _, c := range []struct{ command, want string }{
-		{"peer add north abc", `"abc" is no invite: want the line yardr peer invite prints (yardr-peer-1,<name>,<key>[,<url>])`},
+		{"peer add north abc", `"abc" is no invite: want the line yardr peer invite prints (yardr-peer-2,<name>,<key>,<encryption key>[,<url>])`},
 		{"peer add north " + invite, "peer north is added already; to replace it, remove it first (its waiting messages go with it)"},
 		{"peer add east " + airyInvite, "peer east: that key is peer airy's already"},
 		{"peer add North " + invite, `peer "North": use lowercase letters, digits, '.', '_' or '-' (starting with a letter or digit)`},

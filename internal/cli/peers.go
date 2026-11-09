@@ -24,7 +24,6 @@ import (
 	"yardr.dev/yardr/internal/runner"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/yardkey"
-	"yardr.dev/yardr/internal/yards"
 )
 
 func (a *app) peerCmd() *cobra.Command {
@@ -65,29 +64,23 @@ laptop behind a router) gives no --url in its invite: it is never called, it
 calls the other and asks for what waits there. One of two linked yards must be
 reachable. The daemon carries the messages (yardr daemon).
 
-Every request and every answer is signed with the sender's key. That proves
-who sent it and that it is whole. It does not hide it: over plain http the body
-is readable by whoever carries it, so put TLS in front of the listener for
-anything that is not on one machine or a private network. See docs/peers.md.`}
+Every request and every answer is signed with the sender's key (RFC 9421)
+and its body sealed to the receiver's encryption key (HPKE), so whoever
+carries it reads neither the body nor its kind. See docs/peers.md.`}
 
 	key := &cobra.Command{
 		Use: "key", Short: "Print this yard's public key, making the key pair on first use", Args: cobra.NoArgs,
-		Long: `Prints the public key other yards know this one by. The key pair is made once:
-the private key stays in the home (peer.key, mode 0600; a file open to others
-is refused, as a hook's secret file is) and the same public key is printed
-every time.`,
+		Long: `Prints the public keys other yards know this one by: its signing key, and
+below it its encryption key, to which their bodies are sealed. Each pair is
+made once: the private keys stay in the home (peer.key and peer-enc.key,
+mode 0600; a file open to others is refused, as a hook's secret file is) and
+the same public keys are printed every time.`,
 		RunE: func(c *cobra.Command, _ []string) error {
 			cfg, err := a.config()
 			if err != nil {
 				return err
 			}
-			k, made, err := yardkey.Ensure(cfg.PeerKey())
-			if err != nil {
-				return err
-			}
-			return a.out(c.OutOrStdout(), map[string]any{"key": store.Public(k), "file": cfg.PeerKey(), "made": made}, func(w io.Writer) {
-				fmt.Fprintln(w, store.Public(k))
-			})
+			return a.peerKeys(c, cfg)
 		},
 	}
 
@@ -151,13 +144,16 @@ remove the peer first to replace it.`,
 			if err != nil {
 				return err
 			}
-			p, err := st.AddPeer(ctx, store.Peer{Name: args[0], Key: inv.Key, URL: inv.URL, Calls: inv.Name}, a.who())
+			p, err := st.AddPeer(ctx, store.Peer{Name: args[0], Key: inv.Key, Enc: inv.Enc, URL: inv.URL, Calls: inv.Name}, a.who())
 			if err != nil {
 				return err
 			}
 			return a.out(c.OutOrStdout(), p, func(w io.Writer) {
 				yardr := yardrAt(cfg.Home)
 				fmt.Fprintf(w, "peer %s added (it calls itself %s)\n", p.Name, p.Calls)
+				if !p.Sealed() {
+					fmt.Fprintln(w, "its invite carries no encryption key, so this yard sends it nothing sealed: "+store.ReLinkLine(p.Name))
+				}
 				if p.URL == "" {
 					fmt.Fprintln(w, "it gave no URL, so this yard never calls it: it calls this one and asks for what waits here")
 				}
@@ -241,6 +237,10 @@ remove the peer first to replace it.`,
 					fmt.Fprintf(w, "  was      %s until %s\n", was.Name, was.At.Local().Format("2006-01-02 15:04"))
 				}
 				fmt.Fprintf(w, "  key      %s\n", p.Key)
+				fmt.Fprintf(w, "  enc      %s\n", or(p.Enc, "- (none pinned)"))
+				if !p.Sealed() {
+					fmt.Fprintf(w, "  sealed   %s\n", store.ReLinkLine(p.Name))
+				}
 				if p.URL != "" {
 					fmt.Fprintf(w, "  url      %s: this yard posts to it and asks it for what waits there\n", p.URL)
 				} else {
@@ -1311,7 +1311,11 @@ func invite(ctx context.Context, cfg *config.Config, st store.API, url string) (
 	if err != nil {
 		return store.Invite{}, err
 	}
-	inv := store.Invite{Name: runner.YardName(cfg.Home, all), Key: store.Public(k)}
+	encPub, err := peerEncPub(cfg)
+	if err != nil {
+		return store.Invite{}, err
+	}
+	inv := store.Invite{Name: runner.YardName(cfg.Home, all), Key: store.Public(k), Enc: encPub}
 	if url != "" {
 		if inv.URL, err = store.CleanURL(url); err != nil {
 			return store.Invite{}, fmt.Errorf("--url: %w", err)
@@ -1323,19 +1327,6 @@ func invite(ctx context.Context, cfg *config.Config, st store.API, url string) (
 		return store.Invite{}, fmt.Errorf("%w; give the yard a name an invite can carry: %s settings set name <name>", err, yardrAt(cfg.Home))
 	}
 	return inv, nil
-}
-
-// peerIncoming says how the peer's messages reach this yard, and that they
-// do not when they cannot: a peer that is never called must call, and with
-// no listener there is nothing for it to call.
-func peerIncoming(p store.Peer, listening bool, text string) string {
-	switch {
-	case listening:
-		return fmt.Sprintf("it posts to this yard under %s: %s", yards.Path, text)
-	case p.URL != "":
-		return "nothing can be posted to this yard, so it gets this peer's messages by asking it: " + text
-	}
-	return "none. No listener, no incoming: this peer is never called and cannot call: " + text
 }
 
 // pinged is what a ping found.
@@ -1354,6 +1345,9 @@ func (a *app) ping(ctx context.Context, cfg *config.Config, st store.API, name s
 	p, err := st.GetPeer(ctx, name)
 	if err != nil {
 		return nil, err
+	}
+	if !p.Sealed() {
+		return nil, errors.New(store.ReLinkLine(p.Name))
 	}
 	if _, err := store.Load(cfg.PeerKey()); errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("this yard has no key, so it can sign nothing: %s peer key", yardrAt(cfg.Home))
@@ -1532,6 +1526,9 @@ func peerPart(ctx context.Context, cfg *config.Config, st store.API) (optionalPa
 		names = append(names, name)
 		if p.Failed > 0 {
 			part.Notes = append(part.Notes, fmt.Sprintf("%d messages for peer %s were given up (%s peer show %s)", p.Failed, p.Name, yardr, p.Name))
+		}
+		if !p.Sealed() {
+			part.Notes = append(part.Notes, store.ReLinkLine(p.Name))
 		}
 		// Mail with an image to it is refused here while that holds.
 		if slices.Contains(p.Send, store.PeerFile) {

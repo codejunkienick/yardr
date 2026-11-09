@@ -219,6 +219,10 @@ func (c *Config) PeerKey() string { return filepath.Join(c.Home, "peer.key") }
 // internal/yardkey). It is read as a secret file is: mode 0600.
 func (c *Config) ChannelKey() string { return filepath.Join(c.Home, "channel.key") }
 
+// PeerEncKey is the file holding the yard's encryption private key, with
+// which peer bodies are opened (peer-enc.key beside peer.key).
+func (c *Config) PeerEncKey() string { return filepath.Join(c.Home, "peer-enc.key") }
+
 // DaemonLock is the file the daemon holds a flock on while it runs. It
 // names the holder's pid and the start time it recorded (see DaemonStart).
 func (c *Config) DaemonLock() string { return filepath.Join(c.Home, "daemon.lock") }
