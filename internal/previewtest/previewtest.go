@@ -69,26 +69,64 @@ func App(host string, port int) string {
 	return command("serve", net.JoinHostPort(host, strconv.Itoa(port)))
 }
 
-// FreePort picks a port that nothing holds on host, frees it, and returns it for
-// a test to name for a preview whose app is App(host, port). It fails the test
-// when host cannot be bound at all, so a test that would rather skip where host
-// is unavailable (IPv6, say) tries the host itself first.
+// FreePort picks a port that nothing holds on host and nothing answers on
+// loopback, frees it, and returns it for a test to name for a preview whose app is
+// App(host, port). It fails the test when host cannot be bound at all, so a test
+// that would rather skip where host is unavailable (IPv6, say) tries the host
+// itself first.
 func FreePort(t testing.TB, host string) int {
 	t.Helper()
+	port, err := pickPort(host, quietPortsFrom, quietPortsCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return port
+}
+
+// errNoFreePort is pickPort's error when every port it drew was held. A test that
+// narrows the range to one held port matches it, to tell that from a host that
+// cannot be bound.
+var errNoFreePort = errors.New("no free port")
+
+// pickPort is FreePort's draw over the count ports from `from` up. It returns an
+// error where FreePort fails the test, so that a test can narrow the range to the
+// one port it holds.
+func pickPort(host string, from, count int) (int, error) {
 	for range 100 {
-		port := quietPortsFrom + rand.IntN(quietPortsCount)
+		port := from + rand.IntN(count)
 		ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 		if errors.Is(err, syscall.EADDRINUSE) {
 			continue
 		}
 		if err != nil {
-			t.Fatal(err)
+			return 0, err
 		}
 		ln.Close()
-		return port
+		if loopbackAnswers(port) {
+			continue
+		}
+		return port, nil
 	}
-	t.Fatalf("no port from %d up to %d is free on %s", quietPortsFrom, quietPortsFrom+quietPortsCount, host)
-	return 0
+	return 0, fmt.Errorf("%w from %d up to %d on %s", errNoFreePort, from, from+count, host)
+}
+
+// loopbackAnswers reports whether a dial of port connects on 127.0.0.1 or on ::1,
+// the set and the timeout of the supervisor's own look at a port
+// (preview.loopbackHost). A bind cannot see what that dial does: a bind of
+// loopback succeeds beside a listener on every address where Go sets
+// SO_REUSEADDR (macOS), and beside a listener of the other family, and the
+// supervisor then refuses the start as "port already in use". The set is
+// repeated here, not shared with the supervisor: its probe is product code, and
+// this is a check made as a test draws.
+func loopbackAnswers(port int) bool {
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		c, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 200*time.Millisecond)
+		if err == nil {
+			c.Close()
+			return true
+		}
+	}
+	return false
 }
 
 // LateWide is the command of an app that listens on loopback until its first

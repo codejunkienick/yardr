@@ -2,6 +2,7 @@ package previewtest
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -159,6 +160,45 @@ func TestFreePortIsPickedBelowTheKernelsOwnRange(t *testing.T) {
 		if port := FreePort(t, "127.0.0.1"); port < quietPortsFrom || port >= quietPortsFrom+quietPortsCount {
 			t.Fatalf("FreePort = %d, want one from %d up to %d", port, quietPortsFrom, quietPortsFrom+quietPortsCount)
 		}
+	}
+}
+
+// A port that a listener on every address holds is no free port, though a bind of
+// loopback beside it succeeds where Go sets SO_REUSEADDR (macOS). The supervisor
+// refuses a start on it, as a dial of loopback is answered, so a test that names
+// the port for a preview fails with "port already in use". A listener of one
+// family answers on that family's loopback address alone, and a host of the
+// other family binds beside it too, so the draw dials both. The range is the
+// held port and nothing else, which makes the held port the only draw there is;
+// once the listener is gone the same range gives the port, so it is the held
+// port that is refused and not every port.
+func TestFreePortSkipsAPortAWildcardListenerHolds(t *testing.T) {
+	for _, tc := range []struct{ name, network, addr, host string }{
+		{"dual-stack", "tcp", ":0", "127.0.0.1"},
+		{"IPv4 only", "tcp4", "0.0.0.0:0", "::1"},
+		{"IPv6 only", "tcp6", "[::]:0", "127.0.0.1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wide, err := net.Listen(tc.network, tc.addr)
+			if err != nil {
+				t.Skipf("%s is unavailable: %v", tc.addr, err)
+			}
+			defer wide.Close()
+			held := wide.Addr().(*net.TCPAddr).Port
+			got, err := pickPort(tc.host, held, 1)
+			if err == nil {
+				t.Fatalf("pickPort(%s, %d, 1) = %d, want no free port: a listener on %s holds it", tc.host, held, got, wide.Addr())
+			}
+			if !errors.Is(err, errNoFreePort) {
+				// The host cannot be bound at all, which FreePort fails a test for and
+				// this one skips for, as the app's does.
+				t.Skipf("%s is unavailable: %v", tc.host, err)
+			}
+			wide.Close()
+			if got, err := pickPort(tc.host, held, 1); err != nil || got != held {
+				t.Errorf("pickPort(%s, %d, 1) = %d, %v once the listener is gone, want the port", tc.host, held, got, err)
+			}
+		})
 	}
 }
 
