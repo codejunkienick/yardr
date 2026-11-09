@@ -74,6 +74,7 @@ type API interface {
 	AddAnswerExpected(ctx context.Context, id string, ans Answer, actor, revision string) error
 	UserAsks(ctx context.Context, name, actor string, viewer ...string) (*AskQueue, error)
 	Waiting(ctx context.Context, name, actor string, viewer ...string) ([]WaitingBead, error)
+	MoveBead(ctx context.Context, bead, outcome, to, note, revision, actor string) (*MovedBead, error)
 	IdentityHeldPayloads(ctx context.Context, bead string, ask uint64, actor string) ([]string, error)
 	WriterAsks(ctx context.Context, writer string, viewer ...string) ([]WriterAsk, error)
 	Bead(ctx context.Context, id string, viewer ...string) (*BeadView, error)

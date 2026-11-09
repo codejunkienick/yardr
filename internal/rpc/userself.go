@@ -18,6 +18,7 @@ var selfArg = map[string][]string{
 	"AckUserNotifications": {"name", "actor"},
 	"UserAsks":             {"name", "actor", "viewer"},
 	"Waiting":              {"name", "actor", "viewer"},
+	"MoveBead":             {"actor"},
 	"Bead":                 {"viewer"},
 	"Arrivals":             {"viewer"},
 	"Flows":                {"viewer"},

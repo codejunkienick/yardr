@@ -503,6 +503,26 @@ var apiCalls = []apiCall{
 			"Read it again on every event that carries a bead, `noted` among them, and on the events without one that move its inputs: `group_set` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated` and `depot_removed`, and `setting_changed` whose `key` is `operator`. A put-aside ask also comes back on its own after 24 hours, with no event, and takes its bead from this list with it: read again then, as for [`UserAsks`](#userasks).",
 	},
 	{
+		method: "MoveBead",
+		says:   "Makes one move [`Waiting`](#waiting) offers the person, with its note, from the revision its row was read at, and nothing else. Exactly one of `outcome` (a `done` action) and `to` (an `advance` action) names the move, as the row's action names it. The yard refuses, with nothing written, a stale revision, a move not among the ones the row offers the person, a note missing where the move needs one, and both or neither of `outcome` and `to`. The note goes with the move in the same write, so a refused move leaves none behind. The answer names the bead, the stage it entered, and whether it closed.",
+		args: []field{
+			{"bead", "string", "the bead"},
+			{"outcome", "string", "the outcome a `done` move reports, as `actions[].outcome` of its `Waiting` row; left out on an advance move"},
+			{"to", "string", "the stage an `advance` move enters, as `actions[].to` of its `Waiting` row; left out on a done move"},
+			{"note", "string", "what goes with the move, in the same write; left out where the note line is empty. A move whose action says `note_required` is refused without words"},
+			{"revision", "string", "the bead's revision when its `Waiting` row was read, as `revision` of the row"},
+			{"actor", "string", "who moves it: the user's name"},
+		},
+		requests: []string{`{"bead":"yd-notes","outcome":"done","note":"read on the train: the notes are good to publish","revision":"%s","actor":"jo"}`},
+		fields: []field{
+			{"bead", "string", "the bead"},
+			{"stage", "string", "the stage the move entered"},
+			{"closed", "bool?", "`true` where entering the stage closed the bead; absent otherwise"},
+		},
+		after: "[`Waiting`](#waiting) is the whole of what is offered, read for the person who moves the bead: a bead with no row in their queue offers no move here. So a held bead, and one in a stage its flow lacks, cannot be moved with this call, though the store refuses no move for a held bead by its own calls: release the hold, or mend the flow (`yardr review` offers a stranded bead its move to the first stage there), read `Waiting` again, and then move. A bead at its flow's first stage, one carrying an open ask to the person, and one the person has answered with another member left are not offered either: the first is shaped, the second is answered at its ask, and the third is the other member's to move. A row whose `flow_error` stands offers no move, and the refusal says why the flow does not resolve.\n\n" +
+			"Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else, another member of the bead's stage group included, is refused with no call made and nothing written; on the socket it is the caller's word, as for [`AnswerAsk`](#answerask). Either way the offered moves are rebuilt for that actor, and inside the write the stage group's members are judged again, so a non-member's move is refused as not offered to them. The move is then an `advanced` event in the stream: read `Waiting` again on it. When the call ends without a reply (the yard went away), the move may have run: say \"the yard did not answer; read the bead again\", never that the bead moved, and read `Waiting` and [`Bead`](#bead) again; making the same move twice by hand is refused by the revision, not by remembering.",
+	},
+	{
 		method:   "Bead",
 		says:     "One bead whole: body, stage, labels, notes, its asks with their options, recommendation and state, its stage moves, who works it now, and for each about-bead its id, title and stage. On a `bead@peer` ref, a question another yard asked, the view is synthesized from what that yard carried: its title, stage, topic and labels, its body under one first line saying the bead lives in the other yard and at which stage, no notes, the asks whole with their state as this yard knows it, and the about-beads as carried.",
 		args:     []field{{"bead", "string", "the bead: a handle, or `bead@peer` for a question another yard asked"}, {"viewer", "string", "who reads it: what they may not see reads as missing; left out, the yard itself, which sees every bead"}},
@@ -2181,6 +2201,10 @@ func runAPI(t *testing.T, network bool) *apiRun {
 				body = fmt.Sprintf(body, apiSetupAsks[i])
 			} else if c.method == "TakeBackAsk" {
 				body = fmt.Sprintf(body, apiTakeBack)
+			} else if c.method == "MoveBead" {
+				// The revision of the parked bead's Waiting row, read above.
+				revisions, _ := at(run.replies["Waiting"][0], "[].revision")
+				body = fmt.Sprintf(body, revisions[0])
 			} else if c.method == "DeliveryFiles" {
 				body = fmt.Sprintf(body, apiDelivery)
 			} else if c.method == "React" {
@@ -2309,8 +2333,8 @@ func TestCallsAreTheDocs(t *testing.T) {
 	// answers as no method at all, and the socket answers so the one call
 	// of Calls a device's token alone makes (listenerOnly): a call is
 	// added to either on purpose, here too.
-	if len(Calls) != 28 || len(OperatorCalls) != 12 || len(listenerOnly) != 1 {
-		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 28, 12 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
+	if len(Calls) != 29 || len(OperatorCalls) != 12 || len(listenerOnly) != 1 {
+		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 29, 12 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
 	}
 	for name := range listenerOnly {
 		if _, ok := Calls[name]; !ok {
@@ -2722,6 +2746,9 @@ const exampleRevision = "01KJ8W3C5T0E9XRQ2NAM4PBD7F"
 
 var beadRevision = regexp.MustCompile(`"revision": "[0-9A-Z]{26}"`)
 
+// beadRevisionCompact is a revision in a request as sent, without a space.
+var beadRevisionCompact = regexp.MustCompile(`"revision":"[0-9A-Z]{26}"`)
+
 // exampleUUIDs stand for the batch's event uuids in the doc, in order:
 // each is derived from the sending day, so the doc is the same on every
 // run. The example's batch holds three events, a daily and two crew days.
@@ -2756,6 +2783,8 @@ func callsDoc(run *apiRun, calls []apiCall) []string {
 			out = append(out, fieldTable("argument", c.args)...)
 		}
 		for i, body := range run.requests[c.method] {
+			body = beadRevision.ReplaceAllString(body, `"revision": "`+exampleRevision+`"`)
+			body = beadRevisionCompact.ReplaceAllString(body, `"revision":"`+exampleRevision+`"`)
 			reply := object{}
 			if r := run.replies[c.method][i]; r != nil {
 				reply = object{{"result", prune(r, "", c.fields)}}

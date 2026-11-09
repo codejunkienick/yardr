@@ -202,8 +202,8 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 			t.Errorf("%s with an array of arguments is answered %s, want a refusal saying %q", name, byPlace, want)
 		}
 	}
-	if len(served) != len(Calls) || len(served) != 28 {
-		t.Errorf("%d calls are served and Calls has %d, want 28 of each: %v", len(served), len(Calls), served)
+	if len(served) != len(Calls) || len(served) != 29 {
+		t.Errorf("%d calls are served and Calls has %d, want 29 of each: %v", len(served), len(Calls), served)
 	}
 	if !slices.Equal(operators, []string{"ApproveAsk", "ApproveSetup", "GiveSecret", "SessionScreen", "SourceGrants", "Teammates", "TelemetrySet", "TelemetryShow", "UninviteTeammate"}) || len(OperatorCalls) != 12 {
 		t.Errorf("a device of the operator is served %v besides, and OperatorCalls is %v: want ApproveAsk, ApproveSetup, GiveSecret, SessionScreen, SourceGrants, Teammates, TelemetrySet, TelemetryShow, UninviteTeammate and no other of its twelve", operators, OperatorCalls)
@@ -589,16 +589,26 @@ func TestUserCallsAreMadeAsTheUser(t *testing.T) {
 	}
 	// Two beads parked for jo, which the group elders works: one jo may see
 	// and one hidden from every viewer.
-	if err := st.PutGroup(ctx, store.Group{Name: "elders", Runner: "manual", Members: []string{"jo"}}, "jo"); err != nil {
+	if err := st.PutGroup(ctx, store.Group{Name: "elders", Runner: "manual", Members: []string{"jo", "sam"}}, "jo"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.AddRoute(ctx, store.Route{Stage: "ready", Group: "elders"}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddRoute(ctx, store.Route{Stage: "draft", Group: "elders"}, "jo"); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"yd-parked", "yd-hidden-parked"} {
 		if _, err := st.CreateBead(ctx, store.NewBead{Title: "Parked bead " + id, ID: id, Stage: "ready"}, "jo"); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if _, err := st.AddUser(ctx, "hal", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	hal, err := st.AddDevice(ctx, "hal", "tablet", "jo")
+	if err != nil {
+		t.Fatal(err)
 	}
 	st.SetPolicy(seePolicy(func(actor string, act store.Action, obj store.Object) error {
 		if act == store.ActSee && obj.Kind == store.KindBead && (obj.Name == hidden.ID || obj.Name == "yd-hidden-parked") {
@@ -649,6 +659,7 @@ func TestUserCallsAreMadeAsTheUser(t *testing.T) {
 		{"Waiting", `{"name":"sam"}`, `this device calls as jo: \"name\" is jo or left out, not sam`},
 		{"Waiting", `{"name":"jo","actor":"sam"}`, `this device calls as jo: \"actor\" is jo or left out, not sam`},
 		{"Waiting", `{"name":"jo","viewer":"sam"}`, `this device calls as jo: \"viewer\" is jo or left out, not sam`},
+		{"MoveBead", `{"bead":"yd-parked","to":"draft","actor":"sam"}`, `this device calls as jo: \"actor\" is jo or left out, not sam`},
 		{"Flows", `{"viewer":"sam"}`, `this device calls as jo: \"viewer\" is jo or left out, not sam`},
 		{"UserNotifications", `{"name":"sam"}`, `this device calls as jo`},
 		{"AckUserInbox", fmt.Sprintf(`{"name":"sam","through":%d}`, head), `this device calls as jo`},
@@ -675,6 +686,40 @@ func TestUserCallsAreMadeAsTheUser(t *testing.T) {
 		if got := call(t, h, token, c.method, c.body); !strings.Contains(got, c.want) {
 			t.Errorf("%s %s = %s, want %s", c.method, c.body, got, c.want)
 		}
+	}
+	// The table's MoveBead refusal names sam, who is another member of
+	// elders: device identity wins before the store is called. A member of
+	// no group, whose actor is filled in by the listener, cannot move the
+	// same offered action either.
+	rows, err := st.Waiting(ctx, "jo", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parked *store.WaitingBead
+	for i := range rows {
+		if rows[i].Bead == "yd-parked" {
+			parked = &rows[i]
+			break
+		}
+	}
+	if parked == nil || len(parked.Actions) == 0 {
+		t.Fatalf("yd-parked has no offered move: %+v", rows)
+	}
+	moveArgs := map[string]any{"bead": parked.Bead, "revision": parked.Revision}
+	switch m := parked.Actions[0]; m.Kind {
+	case store.MoveDone:
+		moveArgs["outcome"] = m.Outcome
+	case store.MoveAdvance:
+		moveArgs["to"] = m.To
+	default:
+		t.Fatalf("yd-parked offers an unknown move: %+v", m)
+	}
+	body, err := json.Marshal(moveArgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := call(t, h, hal.Token, "MoveBead", string(body)); !strings.Contains(got, "bead yd-parked does not wait for hal") {
+		t.Errorf("MoveBead from hal's device = %s, want it refused as not offered to him", got)
 	}
 	if got := call(t, h, token, "UserAsks", `{}`); strings.Contains(got, hidden.ID) {
 		t.Errorf("UserAsks shows a bead the device may not see: %s", got)

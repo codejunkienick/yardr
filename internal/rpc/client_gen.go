@@ -182,6 +182,9 @@ func (c *Client) UserAsks(ctx context.Context, name, actor string, viewer ...str
 func (c *Client) Waiting(ctx context.Context, name, actor string, viewer ...string) ([]store.WaitingBead, error) {
 	return callV[[]store.WaitingBead](c, ctx, "Waiting", name, actor, viewer)
 }
+func (c *Client) MoveBead(ctx context.Context, bead, outcome, to, note, revision, actor string) (*store.MovedBead, error) {
+	return callV[*store.MovedBead](c, ctx, "MoveBead", bead, outcome, to, note, revision, actor)
+}
 func (c *Client) IdentityHeldPayloads(ctx context.Context, bead string, ask uint64, actor string) ([]string, error) {
 	return callV[[]string](c, ctx, "IdentityHeldPayloads", bead, ask, actor)
 }
