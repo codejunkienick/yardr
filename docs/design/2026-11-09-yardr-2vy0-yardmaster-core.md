@@ -155,24 +155,51 @@ as long as the heading keeps its words:
 
 ### 2.4 What holds role text today
 
-No test asserts the role's size, and none asserts its sentences.
+No test asserts the role's size. Its sentences are asserted, per pack:
+`packs/packs_test.go` reads each shipped `roles/yardmaster.md` through
+`packs.FS` and fails on a sentence it lacks. `TestYardmasterHowYouWork`,
+`TestYardmasterProposesOperatorsCommands`, `TestEyesLabel` and
+`TestYardmasterTelegramChatIsOperatorsWord` read the yardmaster role of
+the starter, contributors and website packs;
+`TestStarterYardmasterSpeaksInThePersonsWords` holds that the starter's
+role has "In the person's words" while the contributors' role does not.
+`TestTemplatesAreGeneric` pins more of the starter's alone. Beside them,
+`TestShippedRolePointersResolve` (`internal/cli/docs_test.go`) holds
+every `yardr docs <page> <words>` pointer in a shipped role to a page the
+binary carries and a heading that matches.
+
+No test holds the three roles equal. Two tests compare shared pack files
+with the starter's byte for byte:
+`TestContributorsCarriesTheStartersRoles` (the builder and reviewer roles
+and `merge-local`) and `TestWebsitePack` (those, the merger and
+review-security roles, and the stage files but `merged.md`). A shared
+group is prompted from whichever pack was imported last, and each flow
+reads the stage files from its pack; a change to a shared prompt or stage
+must be made in both packs. Until
+yardr-zmp6 both also held `roles/yardmaster.md` equal (the contributors'
+test but for the "In the person's words" passage its role lacks), which
+is why yardr-mar0 made its Decisions cut in all three roles; neither does
+now (section 3.3).
+
 `internal/pack/pack_test.go` loads the starter pack (`pack.LoadDir`) and
 holds its files and flows, and at lines 179–194 holds the crew metadata
 the pack declares for the yardmaster — its name, its `role:
 roles/yardmaster.md`, its `done` flag, its stages and subscriptions, its
 `OpenThreads` and that `stranded` reaches it — not the role's text: no
-line of `roles/yardmaster.md` is read there. The gate `.yardr/test`
-sends a `packs/starter/*` change to the `internal/pack` and
-`internal/cli` tests (its table row for `packs/starter/` names both), so
-a role edit is exercised by those packages' tests. `internal/cli/
-primecrew_test.go` holds `withoutFirstRun` against a role containing a
-`## First run` heading; `internal/cli/expect_test.go` holds the
-quoted-heredoc guidance in command help. The run-ask behaviour the
+line of `roles/yardmaster.md` is read there. The gate `.yardr/test` runs
+the `packs` tests, where the pins are, for a change to any embedded pack
+file, and sends a `packs/starter/*` change to the `internal/pack` and
+`internal/cli` tests besides (its table row for `packs/starter/` names
+both), so a role edit is exercised by those packages' tests.
+`internal/cli/primecrew_test.go` holds `withoutFirstRun` against a role
+containing a `## First run` heading; `internal/cli/expect_test.go` holds
+the quoted-heredoc guidance in command help. The run-ask behaviour the
 catalogue describes is held by `internal/cli/runask_test.go` and the
 store's card tests, not by the role text: the role can move without
-moving any behaviour, and a yard that has already imported a pack keeps
-the role file it has until it re-imports, so nothing breaks on yards
-that never take the new packs.
+moving any behaviour. A sentence a pin holds moves with its pin (section
+3.3). A yard that has already imported a pack keeps the role file it has
+until it re-imports, so nothing breaks on yards that never take the new
+packs.
 
 ### 2.5 The neighbouring beads
 
@@ -292,18 +319,34 @@ The three packs today carry one text by hand, and it has already drifted
 once (section 2.1). Mckean's answer to ask 22239 was independent: "i
 think generally a pack might not want to dictate the yardmaster... or
 you pick which one you want." So there is no shared source, no generation
-at pack load and no test that the three files agree. Each pack's
-`roles/yardmaster.md` is its own text, cut to the same 8,192-byte ceiling
-and free to differ on purpose — a pack whose yard works differently
-keeps its own words for the coordinating job, as it keeps its own flows
-and groups. The starter pack is cut first, as the worked example the
-other two beads read; website and contributors then follow as their own
-beads (section 6), each cutting its file to the ceiling in the voice of
-the pack around it. The one known drift is left to that choice: whether
+at pack load and no test that holds the three files equal: the two tests
+that compared a pack's role with the starter's no longer list the
+yardmaster's, and the sentence pins read each pack's role on its own
+(section 2.4). Each pack's `roles/yardmaster.md` is its own text, cut to
+the same 8,192-byte ceiling and free to differ on purpose — a pack whose
+yard works differently keeps its own words for the coordinating job, as
+it keeps its own flows and groups. The starter pack is cut first, as the
+worked example the other two beads read; website and contributors then
+follow as their own beads (section 6), each cutting its file to the
+ceiling in the voice of the pack around it.
+
+What website and contributors share with the starter besides that role
+(the other roles, the stage files, `merge-local`) stays held equal, byte
+for byte. A shared group is prompted from whichever pack was imported
+last, and each flow reads the stage files from its pack, so those copies
+must not say different things of one stage. The tests keep `merge-local`
+equal as well. For the yardmaster that cost is accepted: the yard's
+yardmaster speaks in the words of the pack imported last. A cut bead that
+moves a pinned sentence moves the pin with it: the test then reads the
+docs page that now holds the sentence, or the sentence stays in the role
+and the pin stays. The one known drift is left to that choice: whether
 contributors carries "In the person's words" is its bead's to decide
-within its ceiling, not restored by this design. A pack may already ship
-no yardmaster role at all: a default pack without a crew member called
-`yardmaster` gets a yard none (`internal/cli/defaultpack_test.go`,
+within its ceiling, not restored by this design, and the test that holds
+its absence moves with the decision.
+
+A pack may already ship no yardmaster role at all: a default pack without
+a crew member called `yardmaster` gets a yard none
+(`internal/cli/defaultpack_test.go`,
 `TestInitWithADefaultPackWithoutAYardmaster`), so a pack that wants none
 needs no design. What a pack may want further — for the operator to pick
 which pack's yardmaster serves at setup — mckean named as a direction;
@@ -376,9 +419,10 @@ quota` — and reads the rubric where the routes that use it are described.
   and read back.
 - No behaviour moves: `internal/cli/runask_test.go`,
   `internal/cli/primecrew_test.go` (including `withoutFirstRun`, which the
-  kept `## First run` heading preserves), `internal/cli/expect_test.go` and
-  the pack tests pass unchanged; the depot gate `sh .yardr/test` is the
-  record, run by each cut bead as for any change.
+  kept `## First run` heading preserves) and `internal/cli/expect_test.go`
+  pass unchanged, and so do the pack tests but for the pin of a sentence a
+  cut moves, which moves with it (section 3.3); the depot gate
+  `sh .yardr/test` is the record, run by each cut bead as for any change.
 - By hand, before each cut bead hands on: `yardr prime --crew yardmaster`
   on a yard whose setup is complete and whose pack is the one just cut
   shows that pack's core whole, and each pointer in it resolves and
@@ -418,13 +462,15 @@ cut beads to choose.
    mckean, via the edge: "i think generally a pack might not want to
    dictate the yardmaster... or you pick which one you want.") There is
    no shared source, no generation from starter at pack load and no test
-   that the three files agree. Each pack's role is its own text, cut to
-   the same ceiling and free to differ on purpose (section 3.3). The
-   starter pack is cut first; website and contributors follow as their
-   own beads. The further direction in the same answer — the operator
-   might pick one at setup — is recorded there and left out of this
-   design (section 4). A pack shipping no yardmaster role at all needs
-   no direction: it already works (section 3.3).
+   that holds the three files equal; the tests that pin sentences read
+   each pack's role on its own (section 2.4). Each pack's role is its own
+   text, cut to the same ceiling and free to differ on purpose, at the
+   cost that a yard's yardmaster speaks in the words of the pack imported
+   last (section 3.3). The starter pack is cut first; website and
+   contributors follow as their own beads. The further direction in the
+   same answer — the operator might pick one at setup — is recorded there
+   and left out of this design (section 4). A pack shipping no yardmaster
+   role at all needs no direction: it already works (section 3.3).
 2. **8,192 bytes is a hard ceiling.** (Ask 22240; mckean: "is that still
    enough?") A test reads each shipped `roles/yardmaster.md` and fails
    over 8,192 bytes (section 3.5). Adding reference back to a role then
@@ -449,6 +495,13 @@ different target page but reads the same role, so they land in this
 order to keep each diff readable. The last three beads then cut one
 pack's role each to the ceiling. Every bead below is shaped to be
 finished without asking.
+
+Bead 1 landed as yardr-mar0, which made its cut in all three packs'
+roles, since the tests of the time held the website's and the
+contributors' yardmaster role equal to the starter's. They no longer do
+(section 2.4), so beads 2–4 change the starter role alone, and beads 5
+and 6 (yardr-q4sy for website, yardr-45en for contributors) start from
+roles that already carry yardr-mar0's Decisions cut.
 
 1. **Move the card catalogue out of the starter yardmaster role** —
    Goal: the starter role's Decisions bullet keeps only the brief and
@@ -539,5 +592,3 @@ finished without asking.
    resolving and reading as in section 3.5; any section over its
    budget is in the bead's note; and `sh .yardr/test` passes. Depends
    on: beads 4 and 5.
-
-

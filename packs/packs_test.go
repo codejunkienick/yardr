@@ -429,30 +429,23 @@ func TestPacksShareNoParagraphAboutDirectories(t *testing.T) {
 }
 
 // The contributors pack works an accepted issue as the starter works a
-// bead, with the starter's own roles and script: its copies are the
-// starter's, byte for byte, so the two never say different things of one
-// stage. A change to one of them is made in both. The one difference is
-// the starter yardmaster's "In the person's words": a contributors yard is
-// worked by people who know the yard's words.
+// bead, with the starter's own builder and reviewer roles and script: its
+// copies are the starter's, byte for byte, so the two never say different
+// things of one stage. A change to one of them is made in both. Its
+// yardmaster role is not one of them: each pack's is its own text (design
+// yardr-2vy0 3.3), held by the tests that pin its sentences, not by a
+// comparison with the starter's.
 func TestContributorsCarriesTheStartersRoles(t *testing.T) {
-	for _, name := range []string{"roles/builder.md", "roles/reviewer.md", "roles/yardmaster.md", "scripts/merge-local"} {
-		body, err := fs.ReadFile(packs.FS, packs.Starter+"/"+name)
+	for _, name := range []string{"roles/builder.md", "roles/reviewer.md", "scripts/merge-local"} {
+		want, err := fs.ReadFile(packs.FS, packs.Starter+"/"+name)
 		if err != nil {
 			t.Fatal(err)
-		}
-		want := string(body)
-		if name == "roles/yardmaster.md" {
-			from, to := strings.Index(want, "In the person's words:\n"), strings.Index(want, "How you work:\n")
-			if from < 0 || to < from {
-				t.Fatalf("packs/starter/%s: no \"In the person's words\" before \"How you work\"", name)
-			}
-			want = want[:from] + want[to:]
 		}
 		got, err := fs.ReadFile(packs.FS, packs.Contributors+"/"+name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(got) != want {
+		if string(got) != string(want) {
 			t.Errorf("packs/contributors/%s differs from packs/starter/%s: change both", name, name)
 		}
 	}
@@ -591,11 +584,14 @@ func TestCiRedPack(t *testing.T) {
 // for a website on the user's own Void platform: one depot flow, no train
 // flow, merged worked by the deploy group, live the end, and decide able to
 // send a bead back to merged. Its four ways back to new are limited as the
-// starter's are, to 3 rounds and then decide. Its roles, stage files but
-// merged.md's, and merge-local are the starter's, byte for byte, so the two
-// never say different things of one stage; its deploy-void is the reference
-// script's, held equal in internal/pack beside the executable bits an embed
-// has no mode for. A change to one of them is made in both.
+// starter's are, to 3 rounds and then decide. Its roles but the yardmaster's,
+// stage files but merged.md's, and merge-local are the starter's, byte for
+// byte, so the two never say different things of one stage; its deploy-void
+// is the reference script's, held equal in internal/pack beside the
+// executable bits an embed has no mode for. A change to one of them is made
+// in both. Its yardmaster role is its own text (design yardr-2vy0 3.3), held
+// by the tests that pin its sentences, not by a comparison with the
+// starter's.
 func TestWebsitePack(t *testing.T) {
 	sub, err := fs.Sub(packs.FS, packs.Website)
 	if err != nil {
@@ -745,7 +741,7 @@ func TestWebsitePack(t *testing.T) {
 	// group both packs name is prompted from whichever was imported last,
 	// and a stage either flow works is read from the same text.
 	for _, name := range []string{
-		"roles/builder.md", "roles/merger.md", "roles/review-security.md", "roles/reviewer.md", "roles/yardmaster.md",
+		"roles/builder.md", "roles/merger.md", "roles/review-security.md", "roles/reviewer.md",
 		"flows/default/backlog.md", "flows/default/new.md", "flows/default/review.md",
 		"flows/default/review-security.md", "flows/default/clear.md", "flows/default/approved.md", "flows/default/decide.md",
 		"scripts/merge-local",
@@ -767,7 +763,7 @@ func TestWebsitePack(t *testing.T) {
 // A person who does not know the yard's words can say what they need to
 // the starter's yardmaster and be understood: its role tells it to answer
 // in their words and to do the yard's part itself. The contributors pack
-// has no such lines.
+// has no such lines: its yard is worked by people who know the yard's words.
 func TestStarterYardmasterSpeaksInThePersonsWords(t *testing.T) {
 	body, err := fs.ReadFile(packs.FS, "starter/roles/yardmaster.md")
 	if err != nil {
@@ -795,9 +791,9 @@ func TestStarterYardmasterSpeaksInThePersonsWords(t *testing.T) {
 
 // The yardmaster answers people fast and only from what it has looked
 // at: its "How you work" opens with the three rules (acknowledge at
-// once, ground what it says, be critical), in both packs.
+// once, ground what it says, be critical), in each pack.
 func TestYardmasterHowYouWork(t *testing.T) {
-	for _, name := range []string{"starter/roles/yardmaster.md", "contributors/roles/yardmaster.md"} {
+	for _, name := range []string{"starter/roles/yardmaster.md", "contributors/roles/yardmaster.md", "website/roles/yardmaster.md"} {
 		body, err := fs.ReadFile(packs.FS, name)
 		if err != nil {
 			t.Fatal(err)
@@ -826,8 +822,8 @@ func TestYardmasterHowYouWork(t *testing.T) {
 }
 
 // The role directs commands the yard runs from a card to run asks and
-// commands marked as operator-alone to the operator's terminal. Both packs
-// need the same rule, adjusted for their different audience. A person is
+// commands marked as operator-alone to the operator's terminal. Each pack
+// needs the same rule, adjusted for its audience. A person is
 // brought in by the invite card, which does the user, the mapping and the
 // report to the edge: a role that names only user add leaves the yardmaster
 // making a plain user that admits no one, and believing the yard cannot
@@ -842,7 +838,7 @@ func TestYardmasterHowYouWork(t *testing.T) {
 // proves the mail's sender and recipient while the reading of its words is
 // the yardmaster's.
 func TestYardmasterProposesOperatorsCommands(t *testing.T) {
-	for _, name := range []string{"starter/roles/yardmaster.md", "contributors/roles/yardmaster.md"} {
+	for _, name := range []string{"starter/roles/yardmaster.md", "contributors/roles/yardmaster.md", "website/roles/yardmaster.md"} {
 		body, err := fs.ReadFile(packs.FS, name)
 		if err != nil {
 			t.Fatal(err)
@@ -930,7 +926,7 @@ func TestYardmasterProposesOperatorsCommands(t *testing.T) {
 // reason and reviews as today, without blocking the bead.
 func TestEyesLabel(t *testing.T) {
 	files := packFiles(t)
-	for _, name := range []string{"starter/roles/yardmaster.md", "contributors/roles/yardmaster.md"} {
+	for _, name := range []string{"starter/roles/yardmaster.md", "contributors/roles/yardmaster.md", "website/roles/yardmaster.md"} {
 		for _, want := range []string{
 			"takes one more label, `eyes`: a page, a\nwindow, the web view",
 			"A refactor, a doc, a flag take\nnone: nothing to see",
@@ -1085,9 +1081,9 @@ func TestRolesShowNoQuotedText(t *testing.T) {
 
 // A line from an operator-role user's Telegram chat is their word, as
 // mail from them is, with the store's limits and the thread's own: the
-// yardmaster's role says all three, in both packs.
+// yardmaster's role says all three, in each pack.
 func TestYardmasterTelegramChatIsOperatorsWord(t *testing.T) {
-	for _, name := range []string{"starter/roles/yardmaster.md", "contributors/roles/yardmaster.md"} {
+	for _, name := range []string{"starter/roles/yardmaster.md", "contributors/roles/yardmaster.md", "website/roles/yardmaster.md"} {
 		body, err := fs.ReadFile(packs.FS, name)
 		if err != nil {
 			t.Fatal(err)
