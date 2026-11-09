@@ -709,7 +709,7 @@ func (a *app) readyCmd() *cobra.Command {
 				return err
 			}
 			if waiting {
-				ds, err := st.Waiting(c.Context())
+				ds, err := st.AllHoldingDeps(c.Context())
 				if err != nil {
 					return err
 				}

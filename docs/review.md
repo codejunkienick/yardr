@@ -19,6 +19,13 @@ yardr bead done <id> [--outcome <outcome>] [--note <text>]
 yardr bead advance <id> --to <stage> [--note <text>]
 ```
 
+A program that is not yardr reads the part of this queue that is a person's
+to move as the `Waiting` call ([api.md](api.md#waiting)): the same moves in the
+same words, but not the backlog, where beads start, nor a bead that is held
+or in a stage its flow lacks (faults to mend, which `yardr review` lists
+with the hold marked), nor one the person has an open ask on or has
+answered in a group of several, as the web view's home keeps them apart.
+
 To have one person, or one crew member, review the beads with a certain
 label, see
 [groups.md](groups.md#example-a-crew-member-reviews-the-beads-with-a-label).

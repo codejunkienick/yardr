@@ -2059,13 +2059,13 @@ internal/dispatch/dispatch.go 1564 the daemon routing pass and its runners
 internal/dispatch/harnesslogin.go 1094 harness login leading and onboarding marks
 internal/pack/export.go 1047 pack export and its object shapes
 internal/pack/pack.go 1777 pack reading, checking and its shapes
-internal/rpc/user.go 1460 the user server and callers (pairing is userpair.go, envelopes usere2e.go)
+internal/rpc/user.go 1377 the user server and callers (pairing is userpair.go, envelopes usere2e.go)
 internal/source/declaration.go 1278 source declarations, credentials and calls
 internal/standin/standin.go 1540 the fake Linear, GitHub and edge APIs
 internal/store/asks.go 1777 ask and answer parsing and storage
 internal/store/beads.go 2563 bead CRUD, queries and dispatch reads
 internal/store/crew.go 1461 crew records and their events
-internal/store/flows.go 1454 flow parsing and storage
+internal/store/flows.go 1358 flow parsing and storage
 internal/store/graph.go 1316 the dependency graph and its queries
 internal/store/hooks.go 1092 webhook parsing and the say shapes
 internal/store/peerasks.go 1076 peer asks, their answers and ask copies

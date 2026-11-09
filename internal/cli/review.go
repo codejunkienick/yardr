@@ -38,8 +38,8 @@ type reviewItem struct {
 // Action kinds. advance moves the bead to Stage; done reports Outcome,
 // which the flow sends to Stage; diff and skip leave it.
 const (
-	actAdvance = "advance"
-	actDone    = "done"
+	actAdvance = store.MoveAdvance
+	actDone    = store.MoveDone
 	actDiff    = "diff"
 	actSkip    = "skip"
 )
@@ -86,16 +86,8 @@ func reviewQueue(ctx context.Context, st store.API, actor string, only []string)
 	}
 	items := []reviewItem{}
 	for _, b := range beads {
-		name := deref(b.Group)
-		if b.Group == nil {
-			r := store.MatchRoute(routes, b, operator, byName)
-			if r == nil {
-				continue
-			}
-			name = r.Worker()
-		}
-		g, ok := byName[name]
-		if !ok || g.Runner != "manual" || (len(only) > 0 && !slices.Contains(only, g.Name)) {
+		g, ok := store.ManualGroup(routes, b, operator, byName)
+		if !ok || (len(only) > 0 && !slices.Contains(only, g.Name)) {
 			continue
 		}
 		if len(g.Members) > 0 && !slices.Contains(g.Members, actor) {
@@ -119,73 +111,14 @@ func reviewQueue(ctx context.Context, st store.API, actor string, only []string)
 	return items, nil
 }
 
-// reviewActions is what a reviewer may do with b. Under a flow that names
-// outcomes for b's stage: those outcomes, as they stand for the bead: a
-// round limit can send the report somewhere the flow's edge does not name.
-// Under a flow without: the stages it allows for this bead. Returning to a
-// question's asker needs no new note because the answer is already on the
-// bead. Other earlier stages need a note. Without a flow: any stage a route
-// uses. Then always open diff and skip.
+// reviewActions is what a reviewer may do with b: the moves the yard offers
+// for it (store.MovesFor, which the web and the Waiting call offer too), then
+// always open diff and skip.
 func reviewActions(b store.Bead, next *store.NextStages, routes []store.Route) []reviewAction {
 	var out []reviewAction
-	var f *store.Flow
-	var outcomes []store.OutcomeNow
-	if next != nil {
-		f, outcomes = next.Flow, next.Outcomes
-	}
-	if f != nil {
-		here := slices.Index(f.Stages, b.Stage)
-		// move describes going to s; its label starts lower-case to follow an outcome.
-		move := func(s string) reviewAction {
-			a := reviewAction{Kind: actAdvance, Stage: s, Terminal: f.IsTerminal(s)}
-			switch {
-			case next != nil && s == next.Back:
-				a.Label = "return to " + s
-			case a.Terminal:
-				a.Label = "finish as " + s + " (closes the bead)"
-			case here >= 0 && slices.Index(f.Stages, s) < here:
-				a.Label, a.NoteRequired = "send back to "+s+" (note required)", true
-			default:
-				a.Label = "move to " + s
-			}
-			return a
-		}
-		if len(outcomes) > 0 {
-			for _, o := range outcomes {
-				a := move(o.Goes)
-				a.Kind, a.Outcome, a.Label = actDone, o.Name, o.Name+": "+a.Label
-				if note := o.RoundNote(""); note != "" {
-					a.Label += " (" + note + ")"
-				}
-				out = append(out, a)
-			}
-		} else {
-			for _, s := range next.Stages {
-				a := move(s)
-				a.Label = strings.ToUpper(a.Label[:1]) + a.Label[1:]
-				out = append(out, a)
-			}
-		}
-		// A question can make a stage an additional move for this bead,
-		// even when the stage's flow lists outcomes instead of bare moves.
-		if next != nil && next.Back != "" && !slices.ContainsFunc(out, func(a reviewAction) bool {
-			return a.Stage == next.Back
-		}) {
-			a := move(next.Back)
-			a.Label = "Return to " + next.Back
-			out = append(out, a)
-		}
-	} else {
-		var stages []string
-		for _, r := range routes {
-			if r.Stage != b.Stage && !slices.Contains(stages, r.Stage) {
-				stages = append(stages, r.Stage)
-			}
-		}
-		slices.Sort(stages)
-		for _, s := range stages {
-			out = append(out, reviewAction{Kind: actAdvance, Stage: s, Label: "Move to " + s})
-		}
+	for _, m := range store.MovesFor(&b, next, routes) {
+		out = append(out, reviewAction{Kind: m.Kind, Label: m.Label, Stage: m.To, Outcome: m.Outcome,
+			NoteRequired: m.NoteRequired, Terminal: m.Terminal})
 	}
 	return append(out, lookActions()...)
 }

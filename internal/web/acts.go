@@ -15,28 +15,14 @@ import (
 // MoveAction is one way the view's user may send the bead on, as `yardr
 // review` offers it: an outcome the flow names (done), or a stage it
 // allows next (advance).
-type MoveAction struct {
-	Kind  string `json:"kind"`
-	Label string `json:"label"`
-	// Outcome is the outcome a done action reports; To the stage either
-	// enters.
-	Outcome string `json:"outcome,omitempty"`
-	To      string `json:"to"`
-	// NoteRequired: sending a bead back needs a note saying what to
-	// change, or whoever picks it up next has nothing to go on.
-	NoteRequired bool `json:"note_required,omitempty"`
-	// Terminal is a stage that closes the bead entering it.
-	Terminal bool `json:"terminal,omitempty"`
-}
+type MoveAction = store.Move
 
 // moveActions is what the view's user may do with b, as `yardr review`
-// offers it: the outcomes its flow names for the stage, as they stand for
-// the bead (a round limit can send the report somewhere the flow's edge
-// does not name), else the stages it allows for this bead. Returning to a
-// question's asker needs no new note because the answer is already on the
-// bead. A bead that waits for no manual group the user belongs to, or a
-// closed one, offers none. next is the bead's NextStages, read by the caller;
-// a flow error leaves no move, as review's queue does.
+// offers it (store.MovesFor): the outcomes its flow names for the stage, as
+// they stand for the bead, else the stages it allows for this bead. A bead
+// that waits for no manual group the user belongs to, or a closed one,
+// offers none. next is the bead's NextStages, read by the caller; a flow
+// error leaves no move, as review's queue does.
 func (s *Server) moveActions(ctx context.Context, b *store.Bead, next *store.NextStages) ([]MoveAction, error) {
 	if b.Status != "open" {
 		return nil, nil
@@ -59,74 +45,14 @@ func (s *Server) moveActions(ctx context.Context, b *store.Bead, next *store.Nex
 	for _, g := range groups {
 		byName[g.Name] = g
 	}
-	name := ""
-	if b.Group != nil {
-		name = *b.Group
-	} else if r := store.MatchRoute(routes, *b, operator, byName); r != nil {
-		name = r.Worker()
-	}
-	i := slices.IndexFunc(groups, func(g store.Group) bool { return g.Name == name })
-	if i < 0 || groups[i].Runner != "manual" {
+	g, ok := store.ManualGroup(routes, *b, operator, byName)
+	if !ok {
 		return nil, nil
 	}
-	if members := groups[i].Members; len(members) > 0 && !slices.Contains(members, s.acting(ctx)) {
+	if len(g.Members) > 0 && !slices.Contains(g.Members, s.acting(ctx)) {
 		return nil, nil
 	}
-	var out []MoveAction
-	if f := next.Flow; f != nil {
-		here := slices.Index(f.Stages, b.Stage)
-		move := func(to string) MoveAction {
-			a := MoveAction{Kind: "advance", To: to, Terminal: f.IsTerminal(to)}
-			switch {
-			case next != nil && to == next.Back:
-				a.Label = "return to " + to
-			case a.Terminal:
-				a.Label = "finish as " + to + " (closes the bead)"
-			case here >= 0 && slices.Index(f.Stages, to) < here:
-				a.Label, a.NoteRequired = "send back to "+to+" (note required)", true
-			default:
-				a.Label = "move to " + to
-			}
-			return a
-		}
-		if outcomes := next.Outcomes; len(outcomes) > 0 {
-			for _, o := range outcomes {
-				a := move(o.Goes)
-				a.Kind, a.Outcome, a.Label = "done", o.Name, o.Name+": "+a.Label
-				if note := o.RoundNote(""); note != "" {
-					a.Label += " (" + note + ")"
-				}
-				out = append(out, a)
-			}
-		} else {
-			for _, to := range next.Stages {
-				a := move(to)
-				a.Label = strings.ToUpper(a.Label[:1]) + a.Label[1:]
-				out = append(out, a)
-			}
-		}
-		// A question can make a stage an additional move for this bead,
-		// even when the stage's flow lists outcomes instead of bare moves.
-		if next != nil && next.Back != "" && !slices.ContainsFunc(out, func(a MoveAction) bool {
-			return a.To == next.Back
-		}) {
-			a := move(next.Back)
-			a.Label = "Return to " + next.Back
-			out = append(out, a)
-		}
-	} else {
-		var stages []string
-		for _, r := range routes {
-			if r.Stage != b.Stage && !slices.Contains(stages, r.Stage) {
-				stages = append(stages, r.Stage)
-			}
-		}
-		slices.Sort(stages)
-		for _, to := range stages {
-			out = append(out, MoveAction{Kind: "advance", To: to, Label: "Move to " + to})
-		}
-	}
-	return out, nil
+	return store.MovesFor(b, next, routes), nil
 }
 
 // openBeadAsks are the bead's open asks to the user the request acts as,

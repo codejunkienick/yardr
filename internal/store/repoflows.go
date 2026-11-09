@@ -269,6 +269,7 @@ func (s *Store) RepoFlows(ctx context.Context, depot string) (*RepoFlows, error)
 	if err != nil {
 		return nil, err
 	}
+	s.repoReads.Add(1)
 	return s.repos.load(ctx, *r)
 }
 

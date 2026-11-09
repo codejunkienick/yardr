@@ -139,6 +139,10 @@ type Store struct {
 	// can tell one of open beads never looked at a closed one, and the
 	// dispatcher's pass decoded the open ones once.
 	beadReads atomic.Int64
+	// repoReads counts the depots' repositories read for their flows
+	// (RepoFlows), so a test can tell a read of many beads, Waiting, read
+	// each depot's once and not once for each bead.
+	repoReads atomic.Int64
 	// open is the open beads as the last read of them decoded them
 	// (openBeads).
 	open openSnap

@@ -202,8 +202,8 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 			t.Errorf("%s with an array of arguments is answered %s, want a refusal saying %q", name, byPlace, want)
 		}
 	}
-	if len(served) != len(Calls) || len(served) != 27 {
-		t.Errorf("%d calls are served and Calls has %d, want 27 of each: %v", len(served), len(Calls), served)
+	if len(served) != len(Calls) || len(served) != 28 {
+		t.Errorf("%d calls are served and Calls has %d, want 28 of each: %v", len(served), len(Calls), served)
 	}
 	if !slices.Equal(operators, []string{"ApproveAsk", "ApproveSetup", "GiveSecret", "SessionScreen", "SourceGrants", "Teammates", "TelemetrySet", "TelemetryShow", "UninviteTeammate"}) || len(OperatorCalls) != 12 {
 		t.Errorf("a device of the operator is served %v besides, and OperatorCalls is %v: want ApproveAsk, ApproveSetup, GiveSecret, SessionScreen, SourceGrants, Teammates, TelemetrySet, TelemetryShow, UninviteTeammate and no other of its twelve", operators, OperatorCalls)
@@ -587,8 +587,21 @@ func TestUserCallsAreMadeAsTheUser(t *testing.T) {
 	if _, err := st.AddAsk(ctx, "yardmaster-journal", store.Ask{Question: "How should the yard log the harness in?", To: "jo", Context: []string{"the yardmaster is at its login screen"}}, "yard"); err != nil {
 		t.Fatal(err)
 	}
+	// Two beads parked for jo, which the group elders works: one jo may see
+	// and one hidden from every viewer.
+	if err := st.PutGroup(ctx, store.Group{Name: "elders", Runner: "manual", Members: []string{"jo"}}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddRoute(ctx, store.Route{Stage: "ready", Group: "elders"}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"yd-parked", "yd-hidden-parked"} {
+		if _, err := st.CreateBead(ctx, store.NewBead{Title: "Parked bead " + id, ID: id, Stage: "ready"}, "jo"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	st.SetPolicy(seePolicy(func(actor string, act store.Action, obj store.Object) error {
-		if act == store.ActSee && obj.Kind == store.KindBead && obj.Name == hidden.ID {
+		if act == store.ActSee && obj.Kind == store.KindBead && (obj.Name == hidden.ID || obj.Name == "yd-hidden-parked") {
 			return fmt.Errorf("hidden from %s", actor)
 		}
 		return nil
@@ -617,6 +630,11 @@ func TestUserCallsAreMadeAsTheUser(t *testing.T) {
 		{"UserAsks", `{"name":"jo","actor":""}`, `"open":`},
 		{"GetUser", `{}`, `"name":"jo"`},
 		{"UserAsks", `{}`, `"open":`},
+		// The queue parked for jo is jo's whatever the name says, and made
+		// as jo: a left-out name, actor and viewer are filled in.
+		{"Waiting", `{}`, `"bead":"yd-parked"`},
+		{"Waiting", `{"name":null,"actor":"","viewer":null}`, `"bead":"yd-parked"`},
+		{"Waiting", `{"name":"jo","actor":"jo","viewer":"jo"}`, `"bead":"yd-parked"`},
 		{"Bead", `{"bead":"yd-hidden"}`, `not found`},
 		{"UserNotifications", `{}`, `"notifications":`},
 		{"Conversation", `{"b":"yardmaster"}`, `"text":"for jo"`},
@@ -626,6 +644,11 @@ func TestUserCallsAreMadeAsTheUser(t *testing.T) {
 		{"GetUser", `{"name":"sam"}`, `this device calls as jo`},
 		{"UserAsks", `{"name":"sam"}`, `this device calls as jo`},
 		{"UserAsks", `{"name":"jo","viewer":"sam"}`, `this device calls as jo: \"viewer\" is jo or left out, not sam`},
+		// Nor is anyone else's queue read, or read as anyone else, though
+		// the operator reads any on the socket.
+		{"Waiting", `{"name":"sam"}`, `this device calls as jo: \"name\" is jo or left out, not sam`},
+		{"Waiting", `{"name":"jo","actor":"sam"}`, `this device calls as jo: \"actor\" is jo or left out, not sam`},
+		{"Waiting", `{"name":"jo","viewer":"sam"}`, `this device calls as jo: \"viewer\" is jo or left out, not sam`},
 		{"Flows", `{"viewer":"sam"}`, `this device calls as jo: \"viewer\" is jo or left out, not sam`},
 		{"UserNotifications", `{"name":"sam"}`, `this device calls as jo`},
 		{"AckUserInbox", fmt.Sprintf(`{"name":"sam","through":%d}`, head), `this device calls as jo`},
@@ -657,6 +680,9 @@ func TestUserCallsAreMadeAsTheUser(t *testing.T) {
 		t.Errorf("UserAsks shows a bead the device may not see: %s", got)
 	} else if !strings.Contains(got, `"bead":"yardmaster-journal"`) {
 		t.Errorf("UserAsks leaves out the ask on the crew journal: %s", got)
+	}
+	if got := call(t, h, token, "Waiting", `{}`); strings.Contains(got, "yd-hidden-parked") {
+		t.Errorf("Waiting shows a bead the device may not see: %s", got)
 	}
 	if got := call(t, h, token, "Arrivals", `{}`); strings.Contains(got, hidden.ID) {
 		t.Errorf("Arrivals shows a bead the device may not see: %s", got)

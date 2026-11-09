@@ -877,12 +877,12 @@ func (s *Store) Ready(ctx context.Context) ([]Bead, error) {
 	return out, err
 }
 
-// Waiting lists every blocks edge that holds its target now: the complement
-// of Ready on the dependency gate, one entry per holding edge, each bead's
-// oldest first. Its targets are open, unheld beads of a working type,
-// assigned or not like Ready's, in the same order (by priority, then
+// AllHoldingDeps lists every blocks edge that holds its target now: the
+// complement of Ready on the dependency gate, one entry per holding edge,
+// each bead's oldest first. Its targets are open, unheld beads of a working
+// type, assigned or not like Ready's, in the same order (by priority, then
 // creation time). It is what ready --waiting prints, with why.
-func (s *Store) Waiting(ctx context.Context) ([]Dep, error) {
+func (s *Store) AllHoldingDeps(ctx context.Context) ([]Dep, error) {
 	type wait struct {
 		priority int
 		edges    []Dep

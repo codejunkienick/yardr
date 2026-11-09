@@ -478,6 +478,31 @@ var apiCalls = []apiCall{
 		after: "Read it again on every `noted` event: a question asked, answered, put aside, declined or taken back, and the asker's next note, all arrive as `noted`. A put-aside ask also comes back on its own after 24 hours, with no event: its decided entry carries `return_at`, so read again then. An answer to a question another yard asked that did not land arrives as `noted` by `yard`: the question is open again, or decided with how it ended there, and the person has mail from `yard` that says which.",
 	},
 	{
+		method:   "Waiting",
+		says:     "The beads parked for the person, longest waiting first, each with the moves they may make of it: open beads in a stage a manual group works, the person one of its members where the group lists any, past the first stage of the flow that governs the bead, so that a backlog, where beads start, is never here. It is the part of `yardr review`'s queue that is the person's to move, with the same moves in the same words. Only the user reads their queue, and an operator any user's. A device's viewer is always its user.",
+		args:     []field{{"name", "string", "the user"}, {"actor", "string", "who reads: the user's name, or an operator's; left out, the user"}, {"viewer", "string", "who reads the queue: it holds no bead they may not see; a device's viewer is its user; left out, the yard itself"}},
+		requests: []string{`{"name":"jo","actor":"jo","viewer":"jo"}`},
+		fields: []field{
+			{"[].bead", "string", "the bead's handle"},
+			{"[].title", "string", "the bead's title"},
+			{"[].depot", "string?", "the depot it is worked in; absent where it has none"},
+			{"[].stage", "string", "where it stands"},
+			{"[].group", "string", "the manual group whose stage it is"},
+			{"[].since", "time", "when the bead last changed: about when it began to wait"},
+			{"[].revision", "string", "the bead's revision when the row was read: a move is checked against it, and one made from a row the bead has changed since is refused"},
+			{"[].actions", "array", "the moves offered to the person, in `yardr review`'s order; empty where `flow_error` stands"},
+			{"[].actions[].kind", "string", "`done`, which reports an outcome the flow names, or `advance`, which sends the bead to a stage by hand"},
+			{"[].actions[].label", "string", "the move in the yard's words, as `yardr review` prints it (`done: move to review`, `changes: send back to draft (note required)`): show it as it is"},
+			{"[].actions[].outcome", "string?", "the outcome a `done` move reports; absent on `advance`"},
+			{"[].actions[].to", "string", "the stage the move enters"},
+			{"[].actions[].note_required", "bool?", "`true` where the move needs a note saying what should change: a move back to an earlier stage, but for the return to a question's asker, whose answer is on the bead already; absent otherwise"},
+			{"[].actions[].terminal", "bool?", "`true` where entering the stage closes the bead; absent otherwise"},
+		},
+		after: "A bead stands in one list only, and these are the cases that leave it out. While an open ask to the person stands on it, it is among their decisions ([`UserAsks`](#userasks)) and not here. In a group of several members, once the person has decided every ask to them on it (answered, put aside, declined, or taken back by its asker), it is another member's move now. A held bead, and one in a stage its flow lacks, are faults to mend and not moves to make, and are never here, whatever stage they stand in: a bead that is both parked and held stands here when the hold is lifted and not before, though `yardr review` lists it with its hold marked.\n\n" +
+			"A row may carry two fields more, which the example does not show. `flow_error` says why the bead's flow does not resolve: `actions` is then empty, as no move exists until the flow is fixed, and the bead is shown all the same, so that it is not lost. `template_error` says why entering the stage put no ask for its people, where that ask would stand; the bead still moves by hand, and `actions` are its moves.\n\n" +
+			"Read it again on every event that carries a bead, `noted` among them, and on the events without one that move its inputs: `group_set` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated` and `depot_removed`, and `setting_changed` whose `key` is `operator`. A put-aside ask also comes back on its own after 24 hours, with no event, and takes its bead from this list with it: read again then, as for [`UserAsks`](#userasks).",
+	},
+	{
 		method:   "Bead",
 		says:     "One bead whole: body, stage, labels, notes, its asks with their options, recommendation and state, its stage moves, who works it now, and for each about-bead its id, title and stage. On a `bead@peer` ref, a question another yard asked, the view is synthesized from what that yard carried: its title, stage, topic and labels, its body under one first line saying the bead lives in the other yard and at which stage, no notes, the asks whole with their state as this yard knows it, and the about-beads as carried.",
 		args:     []field{{"bead", "string", "the bead: a handle, or `bead@peer` for a question another yard asked"}, {"viewer", "string", "who reads it: what they may not see reads as missing; left out, the yard itself, which sees every bead"}},
@@ -1937,6 +1962,21 @@ calls:
 	// no daily snapshot, which the telemetry preview shows. Last again, for
 	// the seqs above.
 	must(st.SetSetting(ctx, store.HostedSetting, "false", "jo"))
+
+	// A bead parked for jo: it stands in proof, past the first stage of the
+	// flow it pins, which elders (jo alone) work, with nothing asked of jo
+	// on it. Waiting serves it with the moves its flow gives, a finish and a
+	// send back. Last again, for the seqs above.
+	proofing, err := store.ParseFlow("draft -> proof on done\nproof -> published on done | draft on changes\npublished terminal\n")
+	must(err)
+	proofing.Name = "proofing"
+	_, err = st.PutFlow(ctx, *proofing, "jo")
+	must(err)
+	_, err = st.AddRoute(ctx, store.Route{Stage: "proof", Group: "elders"}, "jo")
+	must(err)
+	_, err = st.CreateBead(ctx, store.NewBead{Title: "Publish the release notes", ID: "yd-notes", Depot: "yard", Stage: "proof",
+		Metadata: map[string]any{"flow": "proofing"}}, "yardmaster")
+	must(err)
 	return st, d.Token
 }
 
@@ -2269,8 +2309,8 @@ func TestCallsAreTheDocs(t *testing.T) {
 	// answers as no method at all, and the socket answers so the one call
 	// of Calls a device's token alone makes (listenerOnly): a call is
 	// added to either on purpose, here too.
-	if len(Calls) != 27 || len(OperatorCalls) != 12 || len(listenerOnly) != 1 {
-		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 27, 12 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
+	if len(Calls) != 28 || len(OperatorCalls) != 12 || len(listenerOnly) != 1 {
+		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 28, 12 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
 	}
 	for name := range listenerOnly {
 		if _, ok := Calls[name]; !ok {
@@ -2676,6 +2716,12 @@ var (
 	pairQRCode = regexp.MustCompile(`#[A-Z0-9]{4}-[A-Z0-9]{4}#`)
 )
 
+// exampleRevision stands for a bead's revision in the doc: a revision is
+// minted from the clock, and the doc is the same on every run.
+const exampleRevision = "01KJ8W3C5T0E9XRQ2NAM4PBD7F"
+
+var beadRevision = regexp.MustCompile(`"revision": "[0-9A-Z]{26}"`)
+
 // exampleUUIDs stand for the batch's event uuids in the doc, in order:
 // each is derived from the sending day, so the doc is the same on every
 // run. The example's batch holds three events, a daily and two crew days.
@@ -2730,6 +2776,7 @@ func callsDoc(run *apiRun, calls []apiCall) []string {
 			shown = telemetryOS.ReplaceAllString(shown, `"os": "darwin"`)
 			shown = pairCode.ReplaceAllString(shown, `"code": "`+examplePairCode+`"`)
 			shown = pairQRCode.ReplaceAllString(shown, `#`+examplePairCode+`#`)
+			shown = beadRevision.ReplaceAllString(shown, `"revision": "`+exampleRevision+`"`)
 			shown = scrubUUIDs(shown)
 			out = append(out, fenced("", "POST /call/"+c.method, body, "", shown)...)
 		}

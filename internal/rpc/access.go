@@ -107,14 +107,14 @@ func allowed(ctx context.Context, st *store.Store, name string) error {
 // is given one here, and the test of this file fails until then.
 var Access = map[string]Class{
 	// Beads.
-	"CreateBead":   Agent, // but a pin of its flow or a stage past its first (store.CreateBead)
-	"GetBead":      Read,
-	"ListBeads":    Read,
-	"Ready":        Read,
-	"Waiting":      Read,
-	"Dispatchable": Read,
-	"SidingBeads":  Read,
-	"UpdateBead":   Agent, // but a pin of its flow, its type or depot (store.UpdateBead)
+	"CreateBead":     Agent, // but a pin of its flow or a stage past its first (store.CreateBead)
+	"GetBead":        Read,
+	"ListBeads":      Read,
+	"Ready":          Read,
+	"AllHoldingDeps": Read,
+	"Dispatchable":   Read,
+	"SidingBeads":    Read,
+	"UpdateBead":     Agent, // but a pin of its flow, its type or depot (store.UpdateBead)
 	// A move is held by the store to the edges its flow allows, and to the
 	// members of the stage's group: it is no wider than an outcome.
 	"Advance":     Agent,
@@ -168,6 +168,7 @@ var Access = map[string]Class{
 	"AddAnswer":            Admin,
 	"AddAnswerExpected":    Admin,
 	"UserAsks":             Read,
+	"Waiting":              Read,
 	"IdentityHeldPayloads": Operator, // the raw body is only for the person the card asks
 	"WriterAsks":           Read,
 	"Bead":                 Read,

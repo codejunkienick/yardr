@@ -72,11 +72,11 @@ func TestHoldingDepsListsHoldingEdges(t *testing.T) {
 	}
 }
 
-// Waiting lists every holding edge of the yard: one entry per holding edge,
+// AllHoldingDeps lists every holding edge of the yard: one entry per holding edge,
 // each bead's oldest first, beads by priority, then creation time. A held
 // bead, a journal and a memory never wait; an assigned bead waits like an
 // unassigned one.
-func TestWaitingListsHoldingEdges(t *testing.T) {
+func TestAllHoldingDepsListsHoldingEdges(t *testing.T) {
 	t.Parallel()
 	s, ctx := untilYard(t)
 	add := func(from, to, kind, at, until string) {
@@ -120,7 +120,7 @@ func TestWaitingListsHoldingEdges(t *testing.T) {
 	if _, err := s.UpdateBead(ctx, "y-target", store.BeadPatch{Priority: &one}, store.Expect{}, "me"); err != nil {
 		t.Fatal(err)
 	}
-	ds, err := s.Waiting(ctx)
+	ds, err := s.AllHoldingDeps(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,13 +134,13 @@ func TestWaitingListsHoldingEdges(t *testing.T) {
 		{"y-target", "y-block", "", "review"},
 	}
 	if !slices.Equal(got, want) {
-		t.Fatalf("Waiting = %+v, want %+v", got, want)
+		t.Fatalf("AllHoldingDeps = %+v, want %+v", got, want)
 	}
 }
 
-// Waiting is the complement of Ready on the gate: an open, unheld bead of
+// AllHoldingDeps is the complement of Ready on the gate: an open, unheld bead of
 // a working type waits exactly when it is not ready.
-func TestWaitingComplementsReady(t *testing.T) {
+func TestAllHoldingDepsComplementsReady(t *testing.T) {
 	t.Parallel()
 	s, ctx := untilYard(t)
 	if err := s.AddDep(ctx, "y-block", "y-target", store.DepBlocks, "", "review", "me"); err != nil {
@@ -153,7 +153,7 @@ func TestWaitingComplementsReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ds, err := s.Waiting(ctx)
+	ds, err := s.AllHoldingDeps(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestWaitingComplementsReady(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ds, err = s.Waiting(ctx)
+			ds, err = s.AllHoldingDeps(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}

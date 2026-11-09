@@ -13,7 +13,7 @@ type API interface {
 	GetBead(ctx context.Context, id string) (*Bead, error)
 	ListBeads(ctx context.Context, f BeadFilter) ([]Bead, error)
 	Ready(ctx context.Context) ([]Bead, error)
-	Waiting(ctx context.Context) ([]Dep, error)
+	AllHoldingDeps(ctx context.Context) ([]Dep, error)
 	Dispatchable(ctx context.Context) ([]ReadyBead, error)
 	UpdateBead(ctx context.Context, id string, p BeadPatch, exp Expect, actor string) (*Bead, error)
 	Advance(ctx context.Context, id, stage string, exp Expect, actor string) (*Bead, error)
@@ -73,6 +73,7 @@ type API interface {
 	// cannot both answer from the same page.
 	AddAnswerExpected(ctx context.Context, id string, ans Answer, actor, revision string) error
 	UserAsks(ctx context.Context, name, actor string, viewer ...string) (*AskQueue, error)
+	Waiting(ctx context.Context, name, actor string, viewer ...string) ([]WaitingBead, error)
 	IdentityHeldPayloads(ctx context.Context, bead string, ask uint64, actor string) ([]string, error)
 	WriterAsks(ctx context.Context, writer string, viewer ...string) ([]WriterAsk, error)
 	Bead(ctx context.Context, id string, viewer ...string) (*BeadView, error)

@@ -20,6 +20,9 @@ import (
 // to check they do not walk every bead for every question.
 func (s *Store) BeadReads() int64 { return s.beadReads.Load() }
 
+// RepoReads is how many times a depot's repository was read for its flows.
+func (s *Store) RepoReads() int64 { return s.repoReads.Load() }
+
 // MentionCompiles is how many @mention patterns the store has compiled.
 func (s *Store) MentionCompiles() int64 { return s.mentions.compiled.Load() }
 

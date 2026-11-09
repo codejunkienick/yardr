@@ -457,6 +457,30 @@ func TestWaitsManualAnswered(t *testing.T) {
 		t.Errorf("cid's parked row is %q, want %q", got, want)
 	}
 
+	// The Waiting call serves the parked half of that home to the people it
+	// parks for, so a client that is not the web counts the same beads: less
+	// the bead with an open ask to them, which is among their decisions, and
+	// the stage of a group that does not list them (ben's home counts lone,
+	// which only anna may move).
+	for _, c := range []struct {
+		who  string
+		want map[string]bool
+	}{
+		{"anna", map[string]bool{quiet.ID: true, lone.ID: true, free.ID: true, other.ID: true}},
+		{"ben", map[string]bool{answered.ID: true, declined.ID: true, open.ID: true, quiet.ID: true, free.ID: true, other.ID: true}},
+		{"cid", map[string]bool{free.ID: true}},
+	} {
+		rows, err := f.st.Waiting(ctx, c.who, c.who, c.who)
+		must(t, err)
+		got := map[string]bool{}
+		for _, r := range rows {
+			got[r.Bead] = true
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s's Waiting %v, want %v", c.who, got, c.want)
+		}
+	}
+
 	// A round limit's reason is part of the manual wait. The person who
 	// answered the bead's ask still sees their answer and it remains out of
 	// their home; a one-round limit says "round" in the singular.

@@ -22,8 +22,8 @@ func (c *Client) ListBeads(ctx context.Context, f store.BeadFilter) ([]store.Bea
 func (c *Client) Ready(ctx context.Context) ([]store.Bead, error) {
 	return callV[[]store.Bead](c, ctx, "Ready")
 }
-func (c *Client) Waiting(ctx context.Context) ([]store.Dep, error) {
-	return callV[[]store.Dep](c, ctx, "Waiting")
+func (c *Client) AllHoldingDeps(ctx context.Context) ([]store.Dep, error) {
+	return callV[[]store.Dep](c, ctx, "AllHoldingDeps")
 }
 func (c *Client) Dispatchable(ctx context.Context) ([]store.ReadyBead, error) {
 	return callV[[]store.ReadyBead](c, ctx, "Dispatchable")
@@ -178,6 +178,9 @@ func (c *Client) AddAnswerExpected(ctx context.Context, id string, ans store.Ans
 }
 func (c *Client) UserAsks(ctx context.Context, name, actor string, viewer ...string) (*store.AskQueue, error) {
 	return callV[*store.AskQueue](c, ctx, "UserAsks", name, actor, viewer)
+}
+func (c *Client) Waiting(ctx context.Context, name, actor string, viewer ...string) ([]store.WaitingBead, error) {
+	return callV[[]store.WaitingBead](c, ctx, "Waiting", name, actor, viewer)
 }
 func (c *Client) IdentityHeldPayloads(ctx context.Context, bead string, ask uint64, actor string) ([]string, error) {
 	return callV[[]string](c, ctx, "IdentityHeldPayloads", bead, ask, actor)
