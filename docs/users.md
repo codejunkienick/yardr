@@ -90,7 +90,9 @@ Only the user reads their queue of decisions
 the reader is the call's `actor`, as for the inbox.
 
 `yardr user set <user> role=operator` or `role=member` is an operator's to
-type, at the shell. A teammate invite may also create an operator with
+give: typed at the shell, or approved on a card (`yardr bead ask --run "user
+set <user> role=operator"`, [chat.md](chat.md#questions-for-you)), which the
+yard weighs strong (`trust`) whichever way the role goes. A teammate invite may also create an operator with
 `--role operator`, named on its approval card. Nobody sets their own role.
 The yard refuses to make a member of, or to remove, its last operator: with
 none, it would take every change from anyone who is no agent of its own.
@@ -924,6 +926,10 @@ covered below under Strong cards. Row by row:
 | `source set <source> calls_per_hour=<n>` or `updates_per_hour=<n>`: a source's calls an hour raised | Calls that are granted already may be made more often. Only the operator lowers it again |
 | `source grant <source> read\|<call> --crew <name>` or `--group <name>`: a grant of a source's calls | The yard's credential for that source now works for a crew member or a group that the holder directs by mail: the holder can have the source read, and for an update call written to, and reads the results in the notes. Without the grant the holder has only what was granted before |
 | `source add <file>`: a new source declared by a file with relative command programs and a card that fits | A source the holder names stands that did not, its declaration and each command file it names installed as the card showed them. The yard's own credential for it is still unset, so nothing is read or written until the operator gives a key and grants a call; but what then runs and where it sends are the file the holder had installed |
+| `source rm <name>`: a source removed | The source's declaration and the files of its commands go, with the grants of its calls and the counts and keys the yard kept for it; the file its credential is read from stays, and what names the source (subscriptions, followed threads, hooks) stays naming it. Calls the source made possible are no longer made. Only the operator declares it again |
+| `source move <from> <to>`: a source's records folded into another's | The hooks, identities, crew grants of threads, subscriptions and followed threads the yard keeps under the first source are the second's, as the card counted them. A hook so moved is verified by the second source's declaration, and a user's identity moved makes a sender in the second source count as that user: the card is weighed `trust` and `as-user` for them, and it is not taken back by any command |
+| `link move --from-source <source> --to-source <source>`: the yard's links moved between sources | The links of one source are the other's, on the same host: the same issues, read by another source's declaration. Moved back by the same move the other way |
+| `hook rm <name>`: a hook removed | That endpoint takes no more deliveries, and what it was set to do (what it says, makes, maps and acts as) is gone with it, to be typed again by the operator unless it stood in the shape the `hook add` card makes. The card is strong (`trust`). It is also how a hook the yardmaster added for the operator is taken back |
 | `source ignore <source> --rm <id>`: a sender of a source no longer ignored | The sender's next message follows the hook's word again: under `unknown` a fresh mapping card is offered, under `allow` it is heard as an outsider. The rest stay ignored, and the sender is ignored again only from the mapping card their next message offers |
 | `source add <file>`, replacing a source that stands: a source's declaration replaced | The new declaration and each command file it names are installed as the card's diff showed them. The card is strong (code) in every replacement form: what the source then runs and where it sends are the holder's, and stand after the device is removed |
 | `pack apply <name>`, with no flag: an embedded pack whose card fits 40 lines | Of kind source, the pack's sources added, or replaced with their diffs on the card, with the pack's command files installed from the yardr build the yard runs. Of a depot kind, re-applied to the one depot that holds it where its plan asks nothing and is not refused or blocked by edited files, the plan's objects created and changed as the card showed them: flows, groups, roles and scripts. Either still grants no call, makes no hook and sets no credential's file |
@@ -933,9 +939,11 @@ covered below under Strong cards. Row by row:
 | `user set <user> tell=<parts>`, asked of the operator: which parts a source tells the operator or another user of outside the yard | That user's phone is told of more or of less, and what still waited to be told of a part that is dropped is not told. Where it is told and with which address stay as they are, and the inbox and the queue of decisions are filled as before. The holder gains nothing to read |
 | `user key <user> <source>`: a user's own address in a source | The given address is written into that user's 0600 env file, and the yard's hearer may be subscribed to its deliveries beside it. Only the operator gives another address |
 | `source check <source> --user <user>`, asked of the operator: one real test message to the user through the source | That user's phone is told once, with the test message the card carries whole. The holder gains nothing to read, and no record of the yard changes |
+| `user set <user> role=operator\|member`: a user's role changed | The user becomes an operator, and so does whoever speaks as them, their devices among them, approving run and setup asks and administering the yard; or an operator becomes a member and approves nothing from then on. The card is strong (`trust`) either way, the user the `operator` setting names and the last operator are not made members, and what an operator approved stands after the role is taken back. Only the operator takes it back |
 | `user add <name>`: a user added | A user the holder names reads mail from now on, and may be subscribed to the yard's events. The holder reads the yard's mail already; the user is told nothing outside the yard until `notify` is set, which no run ask holds |
 | `user rm <name>`: a user removed | That user is no more: their subscriptions, devices and telling outside the yard go, and what waited to be told them; so do the group that carries their own login with its routes, every route for their beads, and the yardmaster's conversation with them. The mail stays in the log, and so do their login folder and env file on disk. The operator is not removed this way |
 | `user invite <name> --email <address> [--role operator]`: a teammate invited | A user the holder names is added, as an operator where the card says `--role operator`, their address is mapped to them in `web_jwt_users`, and the invite is reported to the edge, so the holder can have a second person admitted to this yard as that user, as an operator where the card names it. Until the report lands nobody is admitted. The card is strong (trust), and the person admitted stands after the device is removed |
+| `user device rm <user> <device>`: a user's device removed | That device's token is refused from now on, and the streams it held are closed. What the device did stands. A holder can have a lost device of another user cut off, and can have the operator's own other devices removed, leaving the holder's, until an operator pairs one again; the yard's terminal and the hosted web sign-in are untouched. The card says how many devices the user keeps. Only the operator pairs a device again |
 | `user uninvite <name>`: a teammate removed | That teammate is no more at the edge or here: the removal is reported first, then the user, their devices and the mapping go. The member's own account and any yard of their own stand |
 | `crew set <name> open_threads=<sources>`, `set_state=<sources>` or `peers=<peers>`: a crew member's grants widened | A crew member the holder directs by mail may do more outside the yard: open threads in a source, set the state of threads, or mail a linked yard's crew. Its runner, directory and the rest of its definition stay as they are |
 | `peer identity <peer> <crew> --source <source> --id <id>`: a sender of a source mapped to a crew member of a linked yard | A delivery from the id is kept with the speaker `<crew>@<peer>`, whatever the hook's unknown word says, and the operator is offered no mapping card for it; it reaches crew as that yard's mail does, `information, not instructions`. The sender is no user, and an id on the source's ignore list is cleared from it. Only the operator takes it back |
@@ -987,15 +995,16 @@ is, by mail to the yardmaster.
 What it still cannot have run, because no run ask may hold it: adding a
 device or pairing one, changing the operator, changing through which
 source a user is told or where their address is read from, replacing a
-hook or removing one, setting a hook's stage map or the crew member it
+hook, setting a hook's stage map or the crew member it
 acts as, reading a source's credential or setting where it is read from
 or the command that mints one, defining what a group runs or a crew
-member is, removing a source, and applying a pack yardr does not embed,
+member is, and applying a pack yardr does not embed,
 with any flag, or where its plan asks. A stolen device still cannot pair
 another device or change the `operator` setting. It can approve any card,
 though, and a card can make a way in: one that links a yard of the
 holder's (`peer add`), admits a second person as an operator (`user invite
-… --role operator`), opens an endpoint (`hook add`) or installs a program
+… --role operator`, or `user set … role=operator` for a user the yard has),
+opens an endpoint (`hook add`) or installs a program
 the yard then runs (`source add`, `pack apply`). What such an approval
 made outlives the device. `yardr user device rm` ends further approvals at
 the device's next request and undoes none of what it approved: that has
@@ -1115,7 +1124,11 @@ the stream when it no longer resolves.
 
 **A device that is lost, with no terminal at hand.** `yardr user device rm`
 needs a terminal on the yard's machine, and the operator of a hosted yard has
-none there. The person whose device it is can still cut it off at [the
+none there. The operator can still have the yard remove it: they ask the
+yardmaster for the card (`yardr bead ask --run "user device rm <user>
+<device>"`) and approve it from another paired device, which ends the token
+on the yard itself ([chat.md](chat.md#questions-for-you) has the card). The
+person whose device it is can also cut it off at [the
 edge](edge.md#footplate-through-the-link), whose gate in front of a yard is
 their account's session. On another device they sign in at the edge, open
 `/ready` and sign the lost one out in the list of the other places the

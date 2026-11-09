@@ -40,50 +40,13 @@ func (m *SourceMove) Moved() bool {
 // nothing is written. Moving a source's records is the operator's to do
 // (operatorOnly).
 func (s *Store) MoveSourceRecords(ctx context.Context, from, to, actor string) (*SourceMove, error) {
-	if from == "" || to == "" {
-		return nil, fmt.Errorf("move records from a source to a source, not from %q to %q", from, to)
-	}
-	if from == to {
-		return nil, fmt.Errorf("move records from %s to itself: give two sources", from)
-	}
-	if err := checkName("source", to); err != nil {
+	if err := checkRecordsMove(from, to); err != nil {
 		return nil, err
 	}
-	out := &SourceMove{}
-	err := s.write(func(w *wtx) error {
-		paneActor, paneErr := paneAuthor(w.Tx, callerOf(ctx), actor)
-		if paneErr != nil {
-			return paneErr
-		}
-		actor = paneActor
-		if err := w.may(ctx, actor, ActMoveSource, Object{Kind: KindSource, Name: from, To: to}); err != nil {
-			return err
-		}
-		*out = SourceMove{}
-		var err error
-		if out.Hooks, err = moveHookSource(w.Tx, from, to); err != nil {
-			return err
-		}
-		if out.Identities, out.Grants, err = moveCrewIdentitiesAndGrants(w.Tx, from, to); err != nil {
-			return err
-		}
-		users, err := moveUserIdentities(w.Tx, from, to)
-		if err != nil {
-			return err
-		}
-		out.Identities += users
-		peers, err := movePeerIdentities(w.Tx, from, to)
-		if err != nil {
-			return err
-		}
-		out.Identities += peers
-		if out.Subscriptions, err = moveSubscriptions(w.Tx, from, to); err != nil {
-			return err
-		}
-		if out.Threads, err = moveParticipation(w.Tx, from, to); err != nil {
-			return err
-		}
-		return nil
+	var out *SourceMove
+	err := s.write(func(w *wtx) (err error) {
+		out, err = w.moveSourceRecords(ctx, from, to, actor)
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -91,8 +54,78 @@ func (s *Store) MoveSourceRecords(ctx context.Context, from, to, actor string) (
 	return out, nil
 }
 
+// checkRecordsMove refuses the sources a fold of records is not made
+// between: an empty name, the same source twice, and a name no source has.
+func checkRecordsMove(from, to string) error {
+	if from == "" || to == "" {
+		return fmt.Errorf("move records from a source to a source, not from %q to %q", from, to)
+	}
+	if from == to {
+		return fmt.Errorf("move records from %s to itself: give two sources", from)
+	}
+	return checkName("source", to)
+}
+
+// moveSourceRecords is MoveSourceRecords inside the transaction, on sources
+// checkRecordsMove has passed, so that an approved run ask folds the records
+// in the write that records its approval. From a session's or a crew
+// member's pane the actor is the pane's (paneAuthor).
+func (w *wtx) moveSourceRecords(ctx context.Context, from, to, actor string) (*SourceMove, error) {
+	paneActor, paneErr := paneAuthor(w.Tx, callerOf(ctx), actor)
+	if paneErr != nil {
+		return nil, paneErr
+	}
+	actor = paneActor
+	if err := w.may(ctx, actor, ActMoveSource, Object{Kind: KindSource, Name: from, To: to}); err != nil {
+		return nil, err
+	}
+	m, err := foldRecords(w.Tx, from, to, false)
+	if err != nil {
+		return nil, err
+	}
+	return &m.SourceMove, nil
+}
+
+// recordsFold is what a fold of the records of one source into another did,
+// or, run dry, would do: the counts MoveSourceRecords reports, with the
+// identities told apart by whose they are.
+type recordsFold struct {
+	SourceMove
+	crewIdentities, userIdentities, peerIdentities int
+}
+
+// foldRecords is the fold MoveSourceRecords makes, in the order it makes it.
+// Run dry it changes nothing and counts, and refuses what a fold would
+// refuse, so that a card can show the fold by running it: the later steps
+// read what the earlier ones wrote only to refuse a clash among identities
+// that could not stand before the fold either.
+func foldRecords(tx *bolt.Tx, from, to string, dry bool) (*recordsFold, error) {
+	out := &recordsFold{}
+	var err error
+	if out.Hooks, err = moveHookSource(tx, from, to, dry); err != nil {
+		return nil, err
+	}
+	if out.crewIdentities, out.Grants, err = moveCrewIdentitiesAndGrants(tx, from, to, dry); err != nil {
+		return nil, err
+	}
+	if out.userIdentities, err = moveUserIdentities(tx, from, to, dry); err != nil {
+		return nil, err
+	}
+	if out.peerIdentities, err = movePeerIdentities(tx, from, to, dry); err != nil {
+		return nil, err
+	}
+	out.Identities = out.crewIdentities + out.userIdentities + out.peerIdentities
+	if out.Subscriptions, err = moveSubscriptions(tx, from, to, dry); err != nil {
+		return nil, err
+	}
+	if out.Threads, err = moveParticipation(tx, from, to, dry); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // moveHookSource points the hooks of from at to.
-func moveHookSource(tx *bolt.Tx, from, to string) (int, error) {
+func moveHookSource(tx *bolt.Tx, from, to string, dry bool) (int, error) {
 	var all []Hook
 	if err := each(tx, bHooks, "", func(_ []byte, h *Hook) error {
 		all = append(all, *h)
@@ -107,8 +140,10 @@ func moveHookSource(tx *bolt.Tx, from, to string) (int, error) {
 			continue
 		}
 		h.Source = to
-		if err := put(tx, bHooks, h.Name, h); err != nil {
-			return 0, err
+		if !dry {
+			if err := put(tx, bHooks, h.Name, h); err != nil {
+				return 0, err
+			}
 		}
 		n++
 	}
@@ -119,7 +154,7 @@ func moveHookSource(tx *bolt.Tx, from, to string) (int, error) {
 // merges the grants. It returns the identities moved and the crew
 // members whose grants changed. An identity under both names must
 // agree, else the whole move is refused naming the crew member.
-func moveCrewIdentitiesAndGrants(tx *bolt.Tx, from, to string) (identities, grants int, err error) {
+func moveCrewIdentitiesAndGrants(tx *bolt.Tx, from, to string, dry bool) (identities, grants int, err error) {
 	var all []CrewMember
 	if err := each(tx, bCrew, "", func(_ []byte, r *CrewMember) error {
 		all = append(all, *r)
@@ -171,8 +206,10 @@ func moveCrewIdentitiesAndGrants(tx *bolt.Tx, from, to string) (identities, gran
 			continue
 		}
 		r.Revision = newRevision()
-		if err := put(tx, bCrew, r.Name, r); err != nil {
-			return 0, 0, err
+		if !dry {
+			if err := put(tx, bCrew, r.Name, r); err != nil {
+				return 0, 0, err
+			}
 		}
 	}
 	return identities, grants, nil
@@ -180,7 +217,7 @@ func moveCrewIdentitiesAndGrants(tx *bolt.Tx, from, to string) (identities, gran
 
 // moveUserIdentities moves the users' identities of from to to, as
 // moveCrewIdentitiesAndGrants moves the crew's, and returns how many.
-func moveUserIdentities(tx *bolt.Tx, from, to string) (int, error) {
+func moveUserIdentities(tx *bolt.Tx, from, to string, dry bool) (int, error) {
 	var all []User
 	if err := each(tx, bUsers, "", func(_ []byte, u *User) error {
 		all = append(all, *u)
@@ -200,8 +237,10 @@ func moveUserIdentities(tx *bolt.Tx, from, to string) (int, error) {
 		}
 		u.Identities[to] = id
 		delete(u.Identities, from)
-		if err := put(tx, bUsers, u.Name, u); err != nil {
-			return 0, err
+		if !dry {
+			if err := put(tx, bUsers, u.Name, u); err != nil {
+				return 0, err
+			}
 		}
 		n++
 	}
@@ -213,7 +252,7 @@ func moveUserIdentities(tx *bolt.Tx, from, to string) (int, error) {
 // of a peer's yard that has one id under from and another under to is
 // refused, naming it; the same id under both is kept once. Left behind they
 // would map a sender in a source that no delivery names any more.
-func movePeerIdentities(tx *bolt.Tx, from, to string) (int, error) {
+func movePeerIdentities(tx *bolt.Tx, from, to string, dry bool) (int, error) {
 	var all []Peer
 	if err := each(tx, bPeers, "", func(_ []byte, p *Peer) error {
 		if slices.ContainsFunc(p.Identities, func(i PeerIdentity) bool { return i.Source == from }) {
@@ -246,14 +285,18 @@ func movePeerIdentities(tx *bolt.Tx, from, to string) (int, error) {
 			}
 			p.Identities[j].Source = to
 			n++
-			if err := put(tx, bPeers, p.Name, p); err != nil {
-				return 0, err
+			if !dry {
+				if err := put(tx, bPeers, p.Name, p); err != nil {
+					return 0, err
+				}
 			}
 		}
 		slices.SortFunc(p.Identities, comparePeerIdentity)
 		p.Identities = slices.Compact(p.Identities)
-		if err := put(tx, bPeers, p.Name, p); err != nil {
-			return 0, err
+		if !dry {
+			if err := put(tx, bPeers, p.Name, p); err != nil {
+				return 0, err
+			}
 		}
 	}
 	return n, nil
@@ -262,7 +305,7 @@ func movePeerIdentities(tx *bolt.Tx, from, to string) (int, error) {
 // moveSubscriptions points the subscriptions of from at to, keeping one
 // copy of what is then identical. It returns the subscriptions that
 // pointed at from, whether kept or collapsed.
-func moveSubscriptions(tx *bolt.Tx, from, to string) (int, error) {
+func moveSubscriptions(tx *bolt.Tx, from, to string, dry bool) (int, error) {
 	n := 0
 	// moveOne returns the subscriptions with from pointed at to and
 	// duplicates dropped, and whether anything changed.
@@ -301,8 +344,10 @@ func moveSubscriptions(tx *bolt.Tx, from, to string) (int, error) {
 		}
 		r.Subscriptions = subs
 		r.Revision = newRevision()
-		if err := put(tx, bCrew, r.Name, r); err != nil {
-			return 0, err
+		if !dry {
+			if err := put(tx, bCrew, r.Name, r); err != nil {
+				return 0, err
+			}
 		}
 	}
 	var users []User
@@ -319,8 +364,10 @@ func moveSubscriptions(tx *bolt.Tx, from, to string) (int, error) {
 			continue
 		}
 		u.Subscriptions = subs
-		if err := put(tx, bUsers, u.Name, u); err != nil {
-			return 0, err
+		if !dry {
+			if err := put(tx, bUsers, u.Name, u); err != nil {
+				return 0, err
+			}
 		}
 	}
 	var groups []Group
@@ -337,8 +384,10 @@ func moveSubscriptions(tx *bolt.Tx, from, to string) (int, error) {
 			continue
 		}
 		g.Subscriptions = subs
-		if err := put(tx, bGroups, g.Name, g); err != nil {
-			return 0, err
+		if !dry {
+			if err := put(tx, bGroups, g.Name, g); err != nil {
+				return 0, err
+			}
 		}
 	}
 	return n, nil
@@ -346,7 +395,7 @@ func moveSubscriptions(tx *bolt.Tx, from, to string) (int, error) {
 
 // moveParticipation re-keys the participations of from under to. A
 // thread followed under both keeps the one under to.
-func moveParticipation(tx *bolt.Tx, from, to string) (int, error) {
+func moveParticipation(tx *bolt.Tx, from, to string, dry bool) (int, error) {
 	type entry struct {
 		key string
 		p   Participation
@@ -366,6 +415,9 @@ func moveParticipation(tx *bolt.Tx, from, to string) (int, error) {
 			continue
 		}
 		n++
+		if dry {
+			continue
+		}
 		target := threadKey(member, to, thread)
 		if b.Get([]byte(target)) != nil {
 			if err := b.Delete([]byte(e.key)); err != nil {

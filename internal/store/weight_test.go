@@ -254,10 +254,15 @@ calls:
 	}
 
 	// Every other row is routine whatever it is asked.
-	weighty := []string{"peer add", "peer set", "peer allow", "source set", "source grant", "source add", "pack apply", "hook add", "user key", "user add", "user invite", "crew add", "group add", "group set", "crew set", "user identity", "depot test", "call", "settings set"}
+	weighty := []string{"peer add", "peer set", "peer allow", "source set", "source grant", "source add", "pack apply", "hook add", "user key", "user add", "user invite", "crew add", "group add", "group set", "crew set", "user identity", "depot test", "call", "settings set", "hook rm", "user set role", "source move"}
 	for _, c := range runList {
-		if has := c.weigh != nil; has != slices.Contains(weighty, strings.Join(c.words, " ")) {
-			t.Errorf("the row %s weighs: %v", strings.Join(c.words, " "), has)
+		// The two forms of user set are two rows of one command's words.
+		name := strings.Join(c.words, " ")
+		if c.use == userRoleUse {
+			name += " role"
+		}
+		if has := c.weigh != nil; has != slices.Contains(weighty, name) {
+			t.Errorf("the row %s weighs: %v", name, has)
 		}
 	}
 }

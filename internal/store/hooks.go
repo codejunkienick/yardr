@@ -864,33 +864,7 @@ func renamePeerHooks(tx *bolt.Tx, name, to string) ([]string, error) {
 func (s *Store) DeleteHook(ctx context.Context, name, actor string) error {
 	unlock := s.askLocks.lock(hookLockKey(name))
 	defer unlock()
-	return s.write(func(w *wtx) error {
-		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
-		if err != nil {
-			return err
-		}
-		actor = resolved
-		if err := w.may(ctx, actor, ActRemoveHook, Object{Kind: KindHook, Name: name}); err != nil {
-			return err
-		}
-		if w.Bucket(bHooks).Get([]byte(name)) == nil {
-			return fmt.Errorf("hook %s: %w", name, ErrNotFound)
-		}
-		if err := w.Bucket(bHooks).Delete([]byte(name)); err != nil {
-			return err
-		}
-		data := map[string]any{"hook": name}
-		// What the hook had still to do is not done behind the back of
-		// whoever removed it.
-		dropped, err := dropIssueMoves(w.Tx, name)
-		if err != nil {
-			return err
-		}
-		if dropped > 0 {
-			data["issue_moves_dropped"] = dropped
-		}
-		return w.event("", "hook_removed", actor, data)
-	})
+	return s.write(func(w *wtx) error { return w.deleteHook(ctx, name, actor, nil) })
 }
 
 // BlockHook records that the receiver refuses the hook's deliveries, and

@@ -223,7 +223,7 @@ yard's bead.`,
 	var to, fromSource, toSource string
 	move := &cobra.Command{
 		Use:   "move <issue> --to <bead> | --from-source <source> --to-source <source>",
-		Short: "Make another bead the issue's tracker; the earlier one keeps a relates link",
+		Short: "Make another bead the issue's tracker, or move the yard's links from one source to another",
 		Long: `Moves the tracks link of an issue to <bead> in one write, so the issue is
 never without a tracking bead nor with two: for work that grew into a train,
 which then tracks the issue in place of the bead that started it. The bead

@@ -1014,11 +1014,15 @@ commands the source names use that selected URL.
   as one card instead (`yardr bead ask <id> "<question>" --setup <pack>
   --crew <crew member> --recommend <n> --why "<why>" --context
   "<what it is for>"`, [chat.md](chat.md#setting-up-a-packs-sources)):
-  the apply, the account and the preset grants together. Every
+  the apply, the account and the preset grants together. A source is
+  removed on a card too (`source rm <name>`), and its records and its
+  links move to another source on one (`source move`, `link move`). Every
   other command of a source stays the operator's to type in a terminal:
   `source set env_file=`, `mint_command=`
-  and `base=`, `source key` (a key is asked for with a secret ask)
-  and `source rm`. Their words are a file, a path, a program or the name
+  and `base=`, and `source key` (a key is asked for with a secret ask). A
+  source's region `base` alone is changed by a setup ask instead
+  (`yardr bead ask ... --setup <pack> --source-base <name>`). Their words
+  are a file, a path, a program or the name
   of where the credential is sent, and a command that is approved from a
   card has only names the yard holds, numbers and flags: `source add` is
   the one exception, and its file's bytes are on the card.

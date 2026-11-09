@@ -201,6 +201,36 @@ func seedIntake(t *testing.T, y *cliYard) {
 	}
 }
 
+// seedHook puts the hook linear in the yard, as a hook add card makes it:
+// for the declared source linear, with a secret file of its own, for the
+// hook rm row.
+func seedHook(t *testing.T, y *cliYard) {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "linear.secret")
+	if err := os.WriteFile(file, []byte("signing-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.st.PutHook(context.Background(), store.Hook{Name: "linear", Source: "linear", SecretFile: file}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// seedLinks makes linear a source that links Linear's issues, adds lin-new
+// on the same host, and links the bead to an issue under linear, for the
+// link move row.
+func seedLinks(t *testing.T, y *cliYard, bead string) {
+	t.Helper()
+	ctx := context.Background()
+	for name, text := range map[string]string{"linear.yaml": linLink, "lin-new.yaml": strings.Replace(linLink, "name: linear", "name: lin-new", 1)} {
+		if _, err := y.st.PutSource(ctx, name, text, "jo"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := y.st.AddLink(ctx, bead, store.NewLink{Kind: store.LinkTracks, Source: "linear", URL: "https://linear.app/acme/issue/YRD-1"}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // runPush is a source that tells a user, for the user key row: the
 // address a delivery claims is given typed, as the approval writes it.
 const runPush = `name: pushover
@@ -790,7 +820,7 @@ const (
 // list stand for, by the word a stored command begins with.
 func runCLI(a *app) map[string]*cobra.Command {
 	return map[string]*cobra.Command{"peer": a.peerCmd(), "source": a.sourceCmd(), "subscribe": a.subscribeCmd(),
-		"user": a.userCmd(), "bead": a.beadCmd(), "crew": a.crewCmd(), "settings": a.settingsCmd(), "timer": a.timerCmd(), "hook": a.hookCmd(), "call": a.callCmd()}
+		"user": a.userCmd(), "bead": a.beadCmd(), "crew": a.crewCmd(), "settings": a.settingsCmd(), "timer": a.timerCmd(), "hook": a.hookCmd(), "call": a.callCmd(), "link": a.linkCmd()}
 }
 
 // The store's list of commands a run ask may name is held to the CLI: each
@@ -870,15 +900,21 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr user identity <user> --source <source> [--id <id>] [--key <key>]": {
 			"user identity ada --source crm --id u1",
 		},
-		"yardr settings set <key> <value>":                           {"settings set max_sessions 20"},
-		"yardr peer rename <old> <new>":                              {"peer rename airy north"},
-		"yardr bead update <bead> --originator <user>":               {"bead update yardmaster-journal --originator ada"},
-		"yardr timer rm <id>":                                        {"timer rm t1"},
-		"yardr up":                                                   {"up"},
-		"yardr crew restart <name> [--for <user>]":                   {"crew restart yardmaster"},
-		"yardr depot test <depot>":                                   {"depot test web"},
-		"yardr depot base <depot> <base>":                            {"depot base web origin/other"},
-		"yardr call <source> <call> [param=value ...] [--as <user>]": {"call crm note text=a test note"},
+		"yardr settings set <key> <value>":                            {"settings set max_sessions 20"},
+		"yardr peer rename <old> <new>":                               {"peer rename airy north"},
+		"yardr bead update <bead> --originator <user>":                {"bead update yardmaster-journal --originator ada"},
+		"yardr timer rm <id>":                                         {"timer rm t1"},
+		"yardr up":                                                    {"up"},
+		"yardr crew restart <name> [--for <user>]":                    {"crew restart yardmaster"},
+		"yardr depot test <depot>":                                    {"depot test web"},
+		"yardr depot base <depot> <base>":                             {"depot base web origin/other"},
+		"yardr call <source> <call> [param=value ...] [--as <user>]":  {"call crm note text=a test note"},
+		"yardr hook rm <name>":                                        {"hook rm linear"},
+		"yardr link move --from-source <source> --to-source <source>": {"link move --from-source linear --to-source lin-new"},
+		"yardr source move <from> <to>":                               {"source move crm linear"},
+		"yardr source rm <name>":                                      {"source rm crm"},
+		"yardr user device rm <user> <device>":                        {"user device rm ada phone"},
+		"yardr user set <user> role=operator|member":                  {"user set ada role=operator"},
 	}
 	if len(asks) != len(store.RunCommands()) {
 		t.Errorf("this test has asks for %d commands, and the list has %d", len(asks), len(store.RunCommands()))
@@ -914,7 +950,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		}
 		for _, command := range commands {
 			approved, ab := runYardCLI(t, "approved", key)
-			typed, _ := runYardCLI(t, "typed", key)
+			typed, tb := runYardCLI(t, "typed", key)
 			if use == "yardr source ignore <source> --rm <id>" {
 				// The entry the card removes stands on both yards
 				// before the marks below, put there by a mapping
@@ -931,6 +967,24 @@ func TestRunListIsTheCLIs(t *testing.T) {
 			if use == "yardr peer intake <peer> --depot <depot> --flow <flow> [--limit <n>] [--default]" {
 				for _, y := range []*cliYard{approved, typed} {
 					seedIntake(t, y)
+				}
+			}
+			if use == "yardr hook rm <name>" {
+				for _, y := range []*cliYard{approved, typed} {
+					seedHook(t, y)
+				}
+			}
+			if use == "yardr link move --from-source <source> --to-source <source>" {
+				seedLinks(t, approved, ab.ID)
+				seedLinks(t, typed, tb.ID)
+			}
+			if use == "yardr user device rm <user> <device>" {
+				for _, y := range []*cliYard{approved, typed} {
+					for _, device := range []string{"phone", "laptop"} {
+						if _, err := y.st.AddDevice(context.Background(), "ada", device, "jo"); err != nil {
+							t.Fatal(err)
+						}
+					}
 				}
 			}
 			if use == "yardr peer identity <peer> <crew> --source <source> --id <id>" {
@@ -1049,6 +1103,46 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				done, err := approved.st.ApproveAsk(ctx, ab.ID, seq, "jo", true, nil)
 				if err != nil || done.Result != "approved, to be carried out" {
 					t.Fatalf("%s approval = %+v, %v", use, done, err)
+				}
+				continue
+			}
+			if use == "yardr source move <from> <to>" {
+				ctx := context.Background()
+				// There is no command to type: a pack apply folds the records
+				// of the sources it brings, and the card is the way in for the
+				// fold alone. So the row is held to its card, its recorded
+				// approval, and the records the approval left.
+				if err := approved.st.SetIdentity(ctx, "yardmaster", "crm", store.Identity{ID: "U1"}, "jo"); err != nil {
+					t.Fatal(err)
+				}
+				seq, err := approved.st.AddAsk(ctx, ab.ID, store.Ask{Question: "Run it?", To: "jo", Context: []string{"why"},
+					Run: &store.AskRun{Argv: []string{command}}}, "yardmaster")
+				if err != nil {
+					t.Fatalf("%s: %v", use, err)
+				}
+				notes, err := approved.st.Notes(ctx, ab.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var description string
+				for _, asked := range store.ResolveAsks(notes, time.Now()) {
+					if asked.Note.Seq == seq && asked.Ask.Run != nil {
+						description = asked.Ask.Run.Description
+					}
+				}
+				if want := "Move the records a yard keeps under one source to another source"; description != want {
+					t.Errorf("%s card description %q, want %q", use, description, want)
+				}
+				done, err := approved.st.ApproveAsk(ctx, ab.ID, seq, "jo", true, nil)
+				if want := "moved the records of crm to linear: 0 hooks, 1 identity, 0 grants, 0 subscriptions, 0 threads"; err != nil || done.Result != want {
+					t.Fatalf("%s approval = %+v, %v; want %q", use, done, err, want)
+				}
+				m, err := approved.st.GetCrew(ctx, "yardmaster")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, left := m.Identities["crm"]; left || m.Identities["linear"].ID != "U1" {
+					t.Fatalf("%s: the member holds %+v", use, m.Identities)
 				}
 				continue
 			}
@@ -1380,6 +1474,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				return evs[0].Seq
 			}
 			markApproved, markTyped := lastSeq(approved), lastSeq(typed)
+			beads := map[*cliYard]string{approved: ab.ID, typed: tb.ID}
 			// A hook takes its signing secret first: on the approved
 			// yard it is given on its card, and at a terminal it stands
 			// in the file the command names.
@@ -1509,7 +1604,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 						users[name] = "gone"
 						continue
 					}
-					users[name] = map[string]any{"name": u.Name, "subscriptions": u.Subscriptions, "tell": u.Tell, "notify": u.Notify}
+					users[name] = map[string]any{"name": u.Name, "subscriptions": u.Subscriptions, "tell": u.Tell, "notify": u.Notify, "role": u.RoleOf()}
 				}
 				crew, err := y.st.GetCrew(ctx, "yardmaster")
 				if err != nil {
@@ -1535,13 +1630,33 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				devices := map[string][]string{}
+				for _, user := range []string{"ada", "jo"} {
+					ds, err := y.st.Devices(ctx, user)
+					if err != nil {
+						// A user the row removed has none to list.
+						devices[user] = []string{"gone"}
+						continue
+					}
+					for _, d := range ds {
+						devices[user] = append(devices[user], d.Name)
+					}
+				}
+				var linkRows []map[string]any
+				ls, err := y.st.Links(ctx, beads[y])
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, l := range ls {
+					linkRows = append(linkRows, map[string]any{"source": l.Source, "kind": l.Kind, "url": l.URL})
+				}
 				var hookRows []map[string]any
 				for _, h := range hooks {
 					hookRows = append(hookRows, map[string]any{"name": h.Name, "source": h.Source, "file": filepath.Base(h.SecretFile)})
 				}
 				var changes []map[string]any
 				for _, kind := range []string{"peer_added", "peer_allowed", "source_set", "source_granted", "subscribed", "user_set",
-					"peer_renamed", "peer_removed", "user_added", "user_removed", "crew_defined", "crew_restart_requested", "setting_changed", "timer_removed", "originator_changed", "source_added", "hook_added", "identity_set", "identity_removed", "sender_unignored", "peer_intake", "peer_identity_set", "peer_url_set"} {
+					"peer_renamed", "peer_removed", "user_added", "user_removed", "crew_defined", "crew_restart_requested", "setting_changed", "timer_removed", "originator_changed", "source_added", "hook_added", "identity_set", "identity_removed", "sender_unignored", "peer_intake", "peer_identity_set", "peer_url_set", "hook_removed", "device_removed"} {
 					evs, err := y.st.EventsOfKind(ctx, kind, 10)
 					if err != nil {
 						t.Fatal(err)
@@ -1559,10 +1674,16 @@ func TestRunListIsTheCLIs(t *testing.T) {
 						changes = append(changes, map[string]any{"kind": e.Kind, "actor": e.Actor, "data": e.Data})
 					}
 				}
-				if len(changes) != strings.Count(done.Result, "\n")+1 {
+				// Removing a source logs no event, and a link move logs on the beads
+				// (unlinked, linked): the answer on the bead is the record.
+				wantChanges := strings.Count(done.Result, "\n") + 1
+				if use == "yardr source rm <name>" || use == "yardr link move --from-source <source> --to-source <source>" {
+					wantChanges = 0
+				}
+				if len(changes) != wantChanges {
 					t.Errorf("%s: %d changes were logged for %q", use, len(changes), done.Result)
 				}
-				text, err := json.Marshal(map[string]any{"peers": peers, "sources": sources, "grants": grants, "hooks": hookRows,
+				text, err := json.Marshal(map[string]any{"peers": peers, "sources": sources, "grants": grants, "hooks": hookRows, "devices": devices, "links": linkRows,
 					"subscriptions": jo.Subscriptions, "tell": jo.Tell, "changes": changes, "users": users,
 					"crew":     map[string]any{"name": crew.Name, "runner": crew.Runner, "journal": crew.Journal, "config": crew.Config, "identities": crew.Identities},
 					"settings": settings, "timers": timerIDs, "journal": journal.Originator})

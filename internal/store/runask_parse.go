@@ -49,9 +49,10 @@ func RunArgvHeld(argv []string) bool {
 // errNotRow is when the words name no row of the list: askedRun then
 // tries what is the operator's alone, and approveAsk refuses what the
 // yard did not write. A row's parse answers it too for words that are
-// another row's of the same command (crew set: grants, or the strong few),
-// and the next row that begins with them reads them; none that takes them
-// leaves the words as no row's.
+// another row's of the same command (crew set: grants, or the strong few;
+// user set: where a user is told, or their role), and the next row that
+// begins with them reads them; none that takes them leaves the words as no
+// row's.
 var errNotRow = errors.New("is no command the yard runs from a card")
 
 // runNoneChar refuses a character no run command takes.
@@ -83,6 +84,12 @@ func parseRun(sent []string) (*runCommand, []string, error) {
 // else: a command the asker may run themselves, one that is the
 // operator's alone, or none the yard runs from a card. askedRun tells
 // those apart; approveAsk only ever sees what askedRun stored.
+//
+// Rows may share the words of a command, one for each form of it. They are
+// tried newest first, so that a row added for another form of a command
+// reads its words before the older row refuses them as none of its own: it
+// answers errNotRow for the forms that are not its, and the older row need
+// not know it.
 func parseRow(sent []string) (*runCommand, []string, error) {
 	line := strings.Join(sent, " ")
 	words := strings.Fields(line)
@@ -92,7 +99,8 @@ func parseRow(sent []string) (*runCommand, []string, error) {
 		wordOffset = 1
 	}
 	// The rows that begin with these words, in the order of the list: one
-	// for most commands, and more where a command is read by key (crew set).
+	// for most commands, and more where a command is read by key (crew set)
+	// or by its form (user set).
 	var rows []*runCommand
 	for i := range runList {
 		c := &runList[i]
@@ -140,7 +148,8 @@ func parseRow(sent []string) (*runCommand, []string, error) {
 		return nil, nil, errNotRow
 	}
 	var refused error
-	for _, c := range rows {
+	for i := len(rows) - 1; i >= 0; i-- {
+		c := rows[i]
 		if strings.ContainsRune(line, ',') && !c.commas {
 			refused = runNoneChar(',')
 			continue

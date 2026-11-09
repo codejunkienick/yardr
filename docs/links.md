@@ -78,7 +78,10 @@ yard's links from one source to the other in one write instead, for a yard
 whose source moved: a builtin one to a declared one on the same host. The
 URLs stay as they are, so the two must share the host. A bead that would
 then track two issues of the new source refuses the whole move, and nothing
-changes. Moving back undoes it.
+changes. Moving back undoes it. An operator with no terminal approves the move
+as a card (`yardr bead ask --run "link move --from-source <source>
+--to-source <source>"`, [chat.md](chat.md#questions-for-you)), which counts
+the links and names their beads first.
 
 `bead create --tracks` and `--relates` make the links in the write that
 creates the bead: a refused link creates no bead.

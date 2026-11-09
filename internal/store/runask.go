@@ -432,7 +432,7 @@ var runList = []runCommand{{
 }, {
 	words:       []string{"user", "set"},
 	use:         "yardr user set <user> tell=<parts>",
-	description: "Set where, how and what a source tells a user",
+	description: userSetDescription,
 	parse:       parseUserTell,
 	card:        (*wtx).userTellCard,
 	stale:       (*wtx).userTellStale,
@@ -807,19 +807,19 @@ func (s *Store) ApproveAsk(ctx context.Context, id string, ask uint64, actor str
 		return nil, fmt.Errorf("ask %d on %s is a command of another yard's operator: it is approved in the yard that asked, never over a link", ask, id)
 	}
 	if name, ok := s.hookRegisterTarget(id, ask); ok {
-		unlockAsk := s.askLocks.lock(askLockKey(id, ask))
-		defer unlockAsk()
-		unlockHook := s.askLocks.lock(hookLockKey(name))
-		defer unlockHook()
+		defer s.askLocks.lock(askLockKey(id, ask))()
+		defer s.askLocks.lock(hookLockKey(name))()
 		return s.approveHookRegister(ctx, id, ask, actor, weighed, values)
 	}
 	if s.sourceCheckTarget(id, ask) || s.sourceCallTarget(id, ask) {
-		unlockAsk := s.askLocks.lock(askLockKey(id, ask))
-		defer unlockAsk()
+		defer s.askLocks.lock(askLockKey(id, ask))()
 		if s.sourceCallTarget(id, ask) {
 			return s.approveSourceCall(ctx, id, ask, actor, weighed)
 		}
 		return s.approveSourceCheck(ctx, id, ask, actor, weighed)
+	}
+	if name, ok := s.hookRmTarget(id, ask); ok {
+		defer s.askLocks.lock(hookLockKey(name))()
 	}
 	// What the ask's card needs of git is read before the write.
 	repos, err := s.approvalRepos(ctx, id, ask)

@@ -668,7 +668,6 @@ func TestRunAskListRefusals(t *testing.T) {
 		{"source add crm.yaml", "with the declaration of one source carried on the ask"},
 		{"source add /tmp/crm,backup.yaml", "',' is none of their characters"},
 		{"source key crm", alone},
-		{"source rm crm", alone},
 		{"peer allow airy --trust mckean=mckean", "--trust mckean=mckean: name the sender as mail does, <name>@airy"},
 		{"peer allow airy --trust mckean@airy=mckean", `it exposes nobody called "mckean" to this yard`},
 		{"peer allow airy --reach mckean=mckean", "--reach mckean=mckean: name the sender as mail does, <name>@airy"},
@@ -1008,7 +1007,7 @@ func TestRunAskUserTell(t *testing.T) {
 	run := *y.asked(t, seq).Ask.Run
 	want := AskRun{
 		Argv:        []string{"user", "set", "mckean", "tell=notifications,asks"},
-		Description: "Set where, how and what a source tells a user",
+		Description: userSetDescription,
 		Does: []string{
 			"mckean has no notify source, so nothing tells them outside the yard, and the change tells them nothing until one is set (yardr user set mckean notify=<source>). A source would then tell them of notifications and asks; it would tell them of notifications, mail and asks as things stand.",
 			"What still waited to be told of mail is dropped, and is not told later. Their inbox and their queue of decisions in the yard are filled as before.",

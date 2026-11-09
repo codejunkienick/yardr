@@ -480,137 +480,181 @@ func (w *wtx) moveLink(issue string, to *beadRow, kind, actor string) (*LinkChan
 // Moving links from one source to another is the operator's to do
 // (operatorOnly).
 func (s *Store) MoveLinkSource(ctx context.Context, from, to, actor string) (int, error) {
-	if from == "" || to == "" {
-		return 0, fmt.Errorf("move links from a source to a source, not from %q to %q", from, to)
-	}
-	if from == to {
-		return 0, fmt.Errorf("move links from %s to itself: give two sources", from)
-	}
-	if err := checkName("link source", to); err != nil {
+	if err := checkLinkSourceMove(from, to); err != nil {
 		return 0, err
 	}
-	// No link is stored under the source peer, and none is to be: its rows
-	// are read from the records of the pairs.
-	if from == SourcePeer || to == SourcePeer {
-		return 0, fmt.Errorf("move links from %s to %s: the rows of the source %s are read from this yard's records of its beads at other yards and are no links anyone made, so nothing moves them", from, to, SourcePeer)
-	}
 	var moved int
-	err := s.write(func(w *wtx) error {
-		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
-		if err != nil {
-			return err
-		}
-		actor = resolved
-		if err := w.may(ctx, actor, ActMoveLinks, Object{Kind: KindSource, Name: from, To: to}); err != nil {
-			return err
-		}
-		var all []linkRow
-		if err := each(w.Tx, bLinks, "", func(_ []byte, l *linkRow) error {
-			all = append(all, *l)
-			return nil
-		}); err != nil {
-			return err
-		}
-		var targets []linkRow
-		for _, l := range all {
-			if l.Source == from {
-				targets = append(targets, l)
-			}
-		}
-		if len(targets) == 0 {
-			moved = 0
-			return nil
-		}
-		fixed := map[string]string{}
-		for _, l := range targets {
-			f, err := issueForm(to, l.URL)
-			if err != nil {
-				return err
-			}
-			if err := checkIssueURL(f); err != nil {
-				return err
-			}
-			fixed[l.ID] = f
-		}
-		byBead := map[string][]linkRow{}
-		for _, l := range all {
-			byBead[l.Bead] = append(byBead[l.Bead], l)
-		}
-		h := handlesIn(w.Tx)
-		for _, t := range targets {
-			own := byBead[t.Bead]
-			seen := map[string]string{}
-			for _, l := range own {
-				url, source := l.URL, l.Source
-				if l.ID == t.ID {
-					url, source = fixed[l.ID], to
-				} else if l.Source == from {
-					url = fixed[l.ID]
-					source = to
-				}
-				if was, dup := seen[url]; dup {
-					return fmt.Errorf("%s links %s twice after the move (as %s and %s): remove one first", h.of(t.Bead), url, was, l.Kind)
-				}
-				seen[url] = l.Kind
-				_ = source
-			}
-			tracks := map[string][]string{}
-			for _, l := range own {
-				url, source := l.URL, l.Source
-				if l.Source == from {
-					url = fixed[l.ID]
-					source = to
-				}
-				if l.Kind == LinkTracks {
-					tracks[source] = append(tracks[source], url)
-				}
-			}
-			if len(tracks[to]) > 1 {
-				return fmt.Errorf("%s would track two %s issues after the move (%s and %s): remove one link first", h.of(t.Bead), to, tracks[to][0], tracks[to][1])
-			}
-		}
-		minted := map[string]*beadRow{}
-		for i := range targets {
-			l := &targets[i]
-			old := *l
-			l.Source, l.URL = to, fixed[l.ID]
-			l.Revision, l.LastActor = newRevision(), actor
-			if err := put(w.Tx, bLinks, l.ID, l); err != nil {
-				return err
-			}
-			if old.URL != l.URL {
-				if err := w.Bucket(bLinkIssue).Delete([]byte(join(old.URL, l.ID))); err != nil {
-					return err
-				}
-				if err := w.Bucket(bLinkIssue).Put([]byte(join(l.URL, l.ID)), []byte{}); err != nil {
-					return err
-				}
-			}
-			row := minted[l.Bead]
-			if row == nil {
-				var err error
-				if row, err = w.loadBead(l.Bead); err != nil {
-					return err
-				}
-				minted[l.Bead] = row
-			}
-			if err := w.mintBead(row, actor); err != nil {
-				return err
-			}
-			if err := w.event(row.UUID, "unlinked", actor, linkData(&old, map[string]any{"moved_source_to": to})); err != nil {
-				return err
-			}
-			if err := w.event(row.UUID, "linked", actor, linkData(l, map[string]any{"moved_source_from": from})); err != nil {
-				return err
-			}
-		}
-		moved = len(targets)
-		return nil
+	err := s.write(func(w *wtx) (err error) {
+		moved, err = w.moveLinkSource(ctx, from, to, actor)
+		return err
 	})
 	if err != nil {
 		return 0, err
 	}
 	return moved, nil
+}
+
+// checkLinkSourceMove refuses the sources a move of links is not made
+// between: an empty name, the same source twice, a name no source has, and
+// the source peer, whose rows are no links.
+func checkLinkSourceMove(from, to string) error {
+	if from == "" || to == "" {
+		return fmt.Errorf("move links from a source to a source, not from %q to %q", from, to)
+	}
+	if from == to {
+		return fmt.Errorf("move links from %s to itself: give two sources", from)
+	}
+	if err := checkName("link source", to); err != nil {
+		return err
+	}
+	// No link is stored under the source peer, and none is to be: its rows
+	// are read from the records of the pairs.
+	if from == SourcePeer || to == SourcePeer {
+		return fmt.Errorf("move links from %s to %s: the rows of the source %s are read from this yard's records of its beads at other yards and are no links anyone made, so nothing moves them", from, to, SourcePeer)
+	}
+	return nil
+}
+
+// linkSourceMove is what moving the links of one source to another would do,
+// read from the yard and checked, and written nowhere: the links, each with
+// its URL in the new source's fixed form, and how many beads hold them.
+type linkSourceMove struct {
+	targets []linkRow
+	fixed   map[string]string
+	beads   int
+}
+
+// planLinkSourceMove reads and checks the move of the links of from to to,
+// refusing it where MoveLinkSource does: a URL the new source takes no issue
+// at, a bead that would link one issue twice, and a bead that would then
+// track two issues of the new source. It writes nothing, so a card can show
+// what a move would do by running it as the move does.
+func (w *wtx) planLinkSourceMove(from, to string) (*linkSourceMove, error) {
+	var all []linkRow
+	if err := each(w.Tx, bLinks, "", func(_ []byte, l *linkRow) error {
+		all = append(all, *l)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	plan := &linkSourceMove{fixed: map[string]string{}}
+	for _, l := range all {
+		if l.Source == from {
+			plan.targets = append(plan.targets, l)
+		}
+	}
+	if len(plan.targets) == 0 {
+		return plan, nil
+	}
+	for _, l := range plan.targets {
+		f, err := issueForm(to, l.URL)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkIssueURL(f); err != nil {
+			return nil, err
+		}
+		plan.fixed[l.ID] = f
+	}
+	byBead := byBeadOf(all)
+	h := handlesIn(w.Tx)
+	for _, t := range plan.targets {
+		own := byBead[t.Bead]
+		seen := map[string]string{}
+		for _, l := range own {
+			url := l.URL
+			if l.ID == t.ID {
+				url = plan.fixed[l.ID]
+			} else if l.Source == from {
+				url = plan.fixed[l.ID]
+			}
+			if was, dup := seen[url]; dup {
+				return nil, fmt.Errorf("%s links %s twice after the move (as %s and %s): remove one first", h.of(t.Bead), url, was, l.Kind)
+			}
+			seen[url] = l.Kind
+		}
+		tracks := map[string][]string{}
+		for _, l := range own {
+			url, source := l.URL, l.Source
+			if l.Source == from {
+				url = plan.fixed[l.ID]
+				source = to
+			}
+			if l.Kind == LinkTracks {
+				tracks[source] = append(tracks[source], url)
+			}
+		}
+		if len(tracks[to]) > 1 {
+			return nil, fmt.Errorf("%s would track two %s issues after the move (%s and %s): remove one link first", h.of(t.Bead), to, tracks[to][0], tracks[to][1])
+		}
+	}
+	plan.beads = len(byBeadOf(plan.targets))
+	return plan, nil
+}
+
+// byBeadOf groups links by the bead that holds them.
+func byBeadOf(ls []linkRow) map[string][]linkRow {
+	out := map[string][]linkRow{}
+	for _, l := range ls {
+		out[l.Bead] = append(out[l.Bead], l)
+	}
+	return out
+}
+
+// moveLinkSource is MoveLinkSource inside the transaction, on sources
+// checkLinkSourceMove has passed, so that an approved run ask moves the
+// links in the write that records its approval. From a session's or a crew
+// member's pane the actor is the pane's (paneAuthor). It answers how many
+// links it moved.
+func (w *wtx) moveLinkSource(ctx context.Context, from, to, actor string) (int, error) {
+	resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
+	if err != nil {
+		return 0, err
+	}
+	actor = resolved
+	if err := w.may(ctx, actor, ActMoveLinks, Object{Kind: KindSource, Name: from, To: to}); err != nil {
+		return 0, err
+	}
+	plan, err := w.planLinkSourceMove(from, to)
+	if err != nil {
+		return 0, err
+	}
+	minted := map[string]*beadRow{}
+	for i := range plan.targets {
+		l := &plan.targets[i]
+		old := *l
+		l.Source, l.URL = to, plan.fixed[l.ID]
+		l.Revision, l.LastActor = newRevision(), actor
+		if err := put(w.Tx, bLinks, l.ID, l); err != nil {
+			return 0, err
+		}
+		if old.URL != l.URL {
+			if err := w.Bucket(bLinkIssue).Delete([]byte(join(old.URL, l.ID))); err != nil {
+				return 0, err
+			}
+			if err := w.Bucket(bLinkIssue).Put([]byte(join(l.URL, l.ID)), []byte{}); err != nil {
+				return 0, err
+			}
+		}
+		row := minted[l.Bead]
+		if row == nil {
+			var err error
+			if row, err = w.loadBead(l.Bead); err != nil {
+				return 0, err
+			}
+			minted[l.Bead] = row
+		}
+		if err := w.mintBead(row, actor); err != nil {
+			return 0, err
+		}
+		if err := w.event(row.UUID, "unlinked", actor, linkData(&old, map[string]any{"moved_source_to": to})); err != nil {
+			return 0, err
+		}
+		if err := w.event(row.UUID, "linked", actor, linkData(l, map[string]any{"moved_source_from": from})); err != nil {
+			return 0, err
+		}
+	}
+	return len(plan.targets), nil
 }
 
 // handOn clears the way for the new bead to to track the issue at url: a

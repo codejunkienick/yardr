@@ -73,12 +73,6 @@ var aloneList = []aloneCommand{{
 		return w.may(ctx, actor, ActSetSourceKey, Object{Kind: KindSource, Name: argv[2]})
 	},
 }, {
-	words: []string{"source", "rm"},
-	parse: aloneArgs("yardr source rm <name>", 1, 1),
-	check: func(ctx context.Context, w *wtx, argv []string, actor string) error {
-		return w.may(ctx, actor, ActRemoveSource, Object{Kind: KindSource, Name: argv[2]})
-	},
-}, {
 	words: []string{"user", "device", "add"},
 	parse: aloneArgs("yardr user device add <user> <device>", 2, 2),
 	check: func(ctx context.Context, w *wtx, argv []string, actor string) error {

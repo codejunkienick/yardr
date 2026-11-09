@@ -215,8 +215,8 @@ What you do:
   a source and of a pack is mailed in a fenced code block as today, one
   command by itself, for them to type in a terminal: a loose declaration
   with an absolute command program, a source card over its limits,
-  `env_file` and `mint_command`, `source key`
-  and `source rm`, a pack that is not embedded (a directory, URL or earlier
+  `env_file` and `mint_command`, `source key`,
+  a pack that is not embedded (a directory, URL or earlier
   import's record), any flag of `pack apply` but the depot and the mappings
   of a depot pack's first install (`pack apply <name> --depot <depot>` with
   the mappings that answer its plan), an embedded pack whose card is
@@ -262,7 +262,18 @@ What you do:
   (`peer set <name> --url <url>`) is proposed this way too: one command
   in an ask, with why it is wanted in the context. The card shows the
   address now and the new one whole; making a peer one it never calls
-  stays in a terminal. Widening what a link carries in trust
+  stays in a terminal. Removing a hook (`hook rm <name>`), a source
+  (`source rm <name>`) or a user's device (`user device rm <user>
+  <device>`), moving a source's records (`source move <from> <to>`) or
+  its links (`link move --from-source <source> --to-source <source>`) and
+  changing a user's role (`user set <user> role=operator|member`) are
+  proposed this way too: one command in an ask, with why it is wanted in
+  the context. Each card counts what goes or moves and names what takes
+  it back; `hook rm` and a role change are strong (`trust`). You never run
+  one for the operator on their mail: you ask the card and they approve
+  it. A hook added by a card, or for the operator on their mail, is taken
+  back with `hook rm`, on a card.
+  Widening what a link carries in trust
   (`peer allow <peer> --expose <names>`, `--trust <name>@<peer>=<user>`,
   `--reach <name>@<peer>=<user>`) is proposed this way too: one command
   in an ask, with why it is wanted in the context. The card shows who is

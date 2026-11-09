@@ -457,6 +457,23 @@ func TestDelegatedRefusals(t *testing.T) {
 			_, err := y.api.SetUser(ctx, "ada", map[string]string{store.UserRole: store.RoleOperator}, "yardmaster")
 			return err
 		}, "only"},
+		// The exclusions that have a card (design yardr-m90n 3.3, bead 4)
+		// are the operator's to approve, never the yardmaster's to run on
+		// a cited mail, whatever the switch says.
+		"a device removal": {func() error {
+			_, err := y.api.RemoveDevice(ctx, "ada", "phone", "yardmaster")
+			return err
+		}, "may remove a device of ada"},
+		"a source removal": {func() error { return y.api.DeleteSource(ctx, "linear", "yardmaster") }, "removing a source"},
+		"a records move": {func() error {
+			_, err := y.api.MoveSourceRecords(ctx, "linear", "pushover", "yardmaster")
+			return err
+		}, "move a source's records"},
+		"a links move": {func() error {
+			_, err := y.api.MoveLinkSource(ctx, "linear", "pushover", "yardmaster")
+			return err
+		}, "move links from one source to another"},
+		"a hook removal": {func() error { return y.api.DeleteHook(ctx, "linear", "yardmaster") }, "remove a hook"},
 		"notify with env_file": {func() error {
 			_, err := y.api.SetUser(ctx, "jo", map[string]string{store.UserNotify: "pushover", store.UserEnvFile: "/x.env"}, "yardmaster")
 			return err

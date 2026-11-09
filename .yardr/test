@@ -1825,7 +1825,7 @@ internal/store/beads.go 2563 bead CRUD, queries and dispatch reads
 internal/store/crew.go 1461 crew records and their events
 internal/store/flows.go 1454 flow parsing and storage
 internal/store/graph.go 1316 the dependency graph and its queries
-internal/store/hooks.go 1118 webhook parsing and the say shapes
+internal/store/hooks.go 1092 webhook parsing and the say shapes
 internal/store/peerasks.go 1076 peer asks, their answers and ask copies
 internal/store/peerbeads.go 1736 peer bead intake and fetching
 internal/store/peers.go 1529 peer records and their allowances

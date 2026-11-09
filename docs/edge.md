@@ -168,7 +168,10 @@ token is revoked per device on the yard: `yardr user device rm <user> <device>`.
 
 **A lost phone, with no terminal at hand.** `yardr user device rm` needs a
 terminal on the yard's machine, and the operator of a hosted yard has none
-there. You can still cut the phone off at the edge, whose gate is your
+there. Ask the yardmaster for the card that removes the device (`user device
+rm <user> <device>`, [chat.md](chat.md#questions-for-you)) and approve it from
+another paired device: the yard then refuses the phone's token itself. You can
+also cut the phone off at the edge, whose gate is your
 account's session. On another device, sign in at the edge, open `/ready` and
 sign the phone out in the list of the other places the account is signed in.
 The edge then refuses the phone's next call to every yard behind it, hosted

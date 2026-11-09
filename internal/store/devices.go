@@ -297,38 +297,49 @@ func (s *Store) AnyDevice(ctx context.Context) (bool, error) {
 // alone.
 func (s *Store) RemoveDevice(ctx context.Context, user, name, actor string) (*Device, error) {
 	var out *Device
-	err := s.write(func(w *wtx) error {
-		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
-		if err != nil {
-			return err
-		}
-		actor = resolved
-		if err := w.may(ctx, actor, ActRemoveDevice, Object{Kind: KindUser, Name: user}); err != nil {
-			return err
-		}
-		key := join(user, name)
-		var d deviceRecord
-		if ok, err := get(w.Tx, bDevices, key, &d); err != nil {
-			return err
-		} else if !ok {
-			return fmt.Errorf("device %s of %s: %w", name, user, ErrNotFound)
-		}
-		if err := dropDevice(w.Tx, key, &d); err != nil {
-			return err
-		}
-		// Its queued intents tell of nothing now, and the relay forgets
-		// the device with a removal.
-		if err := dropFootForget(w.Tx, user, name); err != nil {
-			return err
-		}
-		if err := w.queueFootRemove(user, name); err != nil {
-			return err
-		}
-		removed := withPinned(d.Device)
-		out = &removed
-		return w.event("", "device_removed", actor, map[string]any{"user": user, "device": name})
+	err := s.write(func(w *wtx) (err error) {
+		out, err = w.removeDevice(ctx, user, name, actor, nil)
+		return err
 	})
 	return out, err
+}
+
+// removeDevice is RemoveDevice inside the transaction, so that an approved
+// run ask removes the device in the write that records its approval. by is
+// that ask, nil for a device removed by hand.
+func (w *wtx) removeDevice(ctx context.Context, user, name, actor string, by *approvedOn) (*Device, error) {
+	resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
+	if err != nil {
+		return nil, err
+	}
+	actor = resolved
+	if err := w.may(ctx, actor, ActRemoveDevice, Object{Kind: KindUser, Name: user}); err != nil {
+		return nil, err
+	}
+	key := join(user, name)
+	var d deviceRecord
+	if ok, err := get(w.Tx, bDevices, key, &d); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, fmt.Errorf("device %s of %s: %w", name, user, ErrNotFound)
+	}
+	if err := dropDevice(w.Tx, key, &d); err != nil {
+		return nil, err
+	}
+	// Its queued intents tell of nothing now, and the relay forgets
+	// the device with a removal.
+	if err := dropFootForget(w.Tx, user, name); err != nil {
+		return nil, err
+	}
+	if err := w.queueFootRemove(user, name); err != nil {
+		return nil, err
+	}
+	removed := withPinned(d.Device)
+	data := map[string]any{"user": user, "device": name}
+	if by != nil {
+		data["approved"] = by
+	}
+	return &removed, w.event("", "device_removed", actor, data)
 }
 
 func dropDevice(tx *bolt.Tx, key string, d *deviceRecord) error {

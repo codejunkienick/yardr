@@ -176,8 +176,8 @@ Whether each is the operator's is the command's own check: when the asker
 may run the command themselves the ask is refused with that. What is the
 operator's alone is refused as a run ask: what defines what the yard runs
 (a source's command, a change to what a group runs beyond its prompt,
-command and a permission preset that never asks, a device, another
-yard paired or called elsewhere), what takes a file path, and what
+command and a permission preset that never asks, a device added or paired,
+another yard paired or called elsewhere), what takes a file path, and what
 reaches another yard.
 Such a command is typed in a terminal. A link card (peer add, peer allow,
 peer intake, peer identity, peer rm, peer set) can be approved from this

@@ -1,6 +1,7 @@
 // The carrying out of an approved apply (design yardr-bht9 3.5): an
-// approval of a pack apply, of a source add that names commands, of an
-// up, or of a setup ask is recorded first (ApproveAsk and ApproveSetup,
+// approval of a pack apply, of a source add that names commands, of a
+// source rm whose command files are to go, of an up, or of a setup ask is
+// recorded first (ApproveAsk and ApproveSetup,
 // with the answer holding CarryPending) and carried out straight after
 // by the yard's server, because applying a pack writes files and makes
 // many store calls and cannot be one write of the store, and neither can
@@ -126,8 +127,9 @@ func carryKey(bead string, ask uint64) string { return join(bead, seqKey(ask)) }
 // carried out: a pack apply always, an up, which starts the yard's own
 // processes after the write, a source add whose declaration names
 // command files the approval's write cannot write or that replaces a
-// source whose command copies stand (they are made anew), and a teammate
-// invite or removal, whose edge report cannot be one store write.
+// source whose command copies stand (they are made anew), a source rm
+// whose command copies are to go, and a teammate invite or removal, whose
+// edge report cannot be one store write.
 func needsCarry(was AskRun) bool {
 	if len(was.Argv) >= 2 && was.Argv[0] == "pack" && was.Argv[1] == "apply" {
 		return true
@@ -137,6 +139,9 @@ func needsCarry(was AskRun) bool {
 	}
 	if len(was.Argv) >= 2 && was.Argv[0] == "user" && (was.Argv[1] == "invite" || was.Argv[1] == "uninvite") {
 		return true
+	}
+	if len(was.Argv) == 3 && was.Argv[0] == "source" && was.Argv[1] == "rm" {
+		return was.Seen["source "+was.Argv[2]+" files"] != ""
 	}
 	return len(was.Argv) >= 2 && was.Argv[0] == "source" && was.Argv[1] == "add" &&
 		len(was.Carried) == 1 && (len(was.Carried[0].Files) > 0 || len(was.Carried[0].Inventory) > 0)
@@ -222,7 +227,7 @@ func carryHandledHere(rec *Carry) bool {
 		return false
 	}
 	return rec.Argv[0] == "pack" && rec.Argv[1] == "apply" ||
-		rec.Argv[0] == "source" && rec.Argv[1] == "add"
+		rec.Argv[0] == "source" && (rec.Argv[1] == "add" || rec.Argv[1] == "rm")
 }
 
 // KeySourceForSetup writes a setup's account through the secret path and

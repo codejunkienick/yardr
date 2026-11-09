@@ -51,6 +51,20 @@ const askRunList = `  peer add <name> <invite>
       card shows it whole and a replacement's changes (strong, code); a
       commands-free add runs at approval, one naming commands is carried
       out by the server after it; an absolute program stays in a terminal
+  source rm <name>
+      the source is removed with the grants of its calls and the counts
+      and keys kept for it; the files of its commands go too, removed by
+      the server after the approval, and the file its credential is read
+      from stays; subscriptions, followed threads and hooks that name it
+      stay and the card counts them
+  source move <from> <to>
+      what the yard keeps under the source <from> is folded into the source
+      <to>, which the yard declares: its hooks, identities, crew grants of
+      threads, subscriptions and followed threads, each counted on the card
+      (trust for hooks, as-user for users' identities, where there are
+      any); what both hold is kept once; there is no such command at a
+      terminal (a pack apply folds the records of its own sources): the
+      card is the way in, and the links of <from> move with link move
   source ignore <source> --rm <id>
       a sender ignored in the source is heard again: their next message
       follows the hook's word, a fresh mapping card under unknown, heard
@@ -76,6 +90,18 @@ const askRunList = `  peer add <name> <invite>
       for a source that hears by identity, --unknown names what an
       unmapped sender is (unknown without it); --map, --as and a
       replacement stay in a terminal
+  hook rm <name>
+      the hook is removed: POST /hooks/<name> takes no more deliveries,
+      what it accepted stays, the issue moves it still had to make are
+      dropped and counted, and its secret file stays where it is; the card
+      names what was set on it (strong, trust), and it is how a hook the
+      yardmaster added for the operator is taken back
+  link move --from-source <source> --to-source <source>
+      the links of one source are moved to another on the same host: the
+      card counts the links and names the beads, the URLs stay as they are,
+      and the whole move is refused where the command refuses it (a bead
+      that would track two issues, a URL the source takes no issue at);
+      moving one issue to another bead needs no approval
   subscribe <user> yardr [--done] [--where <key>=<value>]
       a user is told of the yard's own events in their inbox; with --done,
       --where or both
@@ -83,6 +109,13 @@ const askRunList = `  peer add <name> <invite>
       which parts a source tells a user of outside the yard, on their
       phone: a list of notifications, mail and asks with commas between,
       or nothing after tell= for all three again
+  user set <user> role=operator|member
+      the user's role changes: an operator approves run asks, setup asks
+      and secrets and administers the yard, and a member is a party of the
+      yard and no more; the card says what the role lets whoever speaks as
+      the user do and how many of their devices speak with it (strong,
+      trust, whichever way it goes); the operator setting's user and the
+      last operator are not made members, and the operator alone approves
   user key <user> <source>
       the person's own address in the source, as yardr user key gives
       it: a card of this row is offered by the yard itself, when a
@@ -106,6 +139,11 @@ const askRunList = `  peer add <name> <invite>
       a teammate goes: the removal is reported to the edge first, then
       the user, their devices and the mapping go; a plain user, whom no
       mapping names, is removed with user rm instead
+  user device rm <user> <device>
+      the device is removed: its token is refused from now on, the streams
+      it held are closed and what was queued to tell it is dropped; what it
+      did stands, and the card says how many devices the user keeps; asked
+      of the user whose it is or of the operator, and either approves it
   crew add <name> kind=<kind> model=<model> preset=<preset> dir=<dir>
       a new crew member on the kind the yard knows, with its model, the
       kind's named permission preset (never free args) and a directory

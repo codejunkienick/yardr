@@ -254,7 +254,7 @@ command erases them yet, and the command says where they are.`,
 	}
 	set := &cobra.Command{
 		Use:   "set <name> [notify=<source>] [env_file=<file>] [tell=<parts>] [role=operator|member]",
-		Short: "Set where, how and what a source tells a user",
+		Short: "Set where, how and what a source tells a user, or their role",
 		Long: `notify is the source that tells the user outside the yard: a declared source
 whose file has a notify key (yardr source list shows which), or a source
 yardr has built in that can. One that cannot is refused, with the ones that
@@ -282,7 +282,7 @@ person's inbox goes where these point.
 role is operator or member. An operator approves run asks, setup asks and
 secrets through a door (footplate, the web view, a device) and administers
 the yard at the shell; a member is a party of the yard and no more. Only an
-operator sets a role, never through a run ask, and the yard refuses to make
+operator sets a role, at a shell or on a run ask's card (strong, trust), and the yard refuses to make
 a member of the user the operator setting names (whom an ask with no --to
 goes to) or of its last operator. Naming a user in the operator setting
 makes them an operator.
