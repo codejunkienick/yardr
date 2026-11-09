@@ -83,6 +83,7 @@ func TestDelegatedPackRecord(t *testing.T) {
 	if body.Pack != "starter" || body.Digest != "abc123" || len(body.Objects) != 2 || body.Objects[0].Before != before {
 		t.Errorf("blob body = pack %q digest %q objects %+v, want the complete before-state", body.Pack, body.Digest, body.Objects)
 	}
+	y.viewed(t, id, []string{"group builders", "file roles/builder.md"}, objects)
 	for _, reader := range []string{"ada", "yardmaster"} {
 		if _, err := y.api.Delegation(y.ctx, id, reader); !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("%s reads the record: %v", reader, err)
@@ -173,6 +174,7 @@ func TestDelegatedPackRecord(t *testing.T) {
 		if got := y.body(t, smallID).Objects; !reflect.DeepEqual(got, small) {
 			t.Errorf("%s: objects = %+v, want %+v", stage, got, small)
 		}
+		y.viewed(t, smallID, []string{"group builders", "file roles/builder.md"}, small)
 		if text := y.telling(t); !strings.Contains(text, "yardr pack apply starter --depot shed") || strings.Contains(text, "too long for mail") {
 			t.Errorf("%s: telling = %q, want the command", stage, text)
 		}
@@ -1060,6 +1062,47 @@ func TestDelegatedPackWritesAreHeldToTheirValues(t *testing.T) {
 	}
 	if err := y.api.FinishDelegatedPack(ctx, id, true, nil, "", "yardmaster"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// viewed holds the JSON an operator reads of the delegated pack record id,
+// its body merged in as the readers merge it, to what the record holds: the
+// view prints everything the merged record prints, as it prints it (the
+// objects by name among it), and beside it the objects whole under plan.
+func (y *delegationYard) viewed(t *testing.T, id uint64, names []string, plan []store.DelegatedPackObject) {
+	t.Helper()
+	rec, err := y.api.Delegation(y.ctx, id, "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.DelegatedBody = y.body(t, id)
+	printed := func(v any) (map[string]json.RawMessage, []byte) {
+		t.Helper()
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		return fields, raw
+	}
+	merged, _ := printed(rec)
+	view, raw := printed(store.ViewDelegation(rec))
+	delete(view, "plan")
+	if !reflect.DeepEqual(view, merged) {
+		t.Errorf("record %d: the view prints %v beside plan, the merged record %v", id, view, merged)
+	}
+	var got struct {
+		Objects []string                    `json:"objects"`
+		Plan    []store.DelegatedPackObject `json:"plan"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Objects, names) || !reflect.DeepEqual(got.Plan, plan) {
+		t.Errorf("record %d: the view prints objects %v and plan %+.60v, want %v and %+.60v", id, got.Objects, got.Plan, names, plan)
 	}
 }
 

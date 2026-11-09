@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -302,6 +304,7 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 			t.Errorf("a started record's show lacks %q:\n%s", want, show)
 		}
 	}
+	objectsShown(t, st, id)
 
 	// A plan that asks refuses whole and leaves no record.
 	if err := st.PutDepot(ctx, store.Depot{Name: "web", Path: t.TempDir(), Base: "main"}, "jo"); err != nil {
@@ -393,6 +396,63 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 		if show := mustAs(t, st, "jo", "delegation", "show", strconv.FormatUint(id+1, 10)); !strings.Contains(show, want) {
 			t.Errorf("delegation show lacks %q:\n%s", want, show)
 		}
+	}
+
+	// A record whose before-state passes what a record could keep inline
+	// says the same of its objects in both forms as a small one does.
+	large, err := st.StartDelegatedPack(dctx, store.DelegatedPackStart{Pack: "starter", Depot: "web", Digest: "abc", Objects: []store.DelegatedPackObject{
+		{Kind: "group", Name: "web-builders", Action: "change", Diff: "model: sonnet -> opus", Before: strings.Repeat("what stood ", 500), Had: true},
+		{Kind: "file", Name: "roles/builder.md", Action: "create", Diff: "+the role the pack installs\n+on two lines"},
+	}}, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	objectsShown(t, st, large)
+}
+
+// objectsShown reads the delegated pack record id in both forms of yardr
+// delegation show and holds what each says of its objects to the other and
+// to the body the record keeps in its blob: the text prints each object with
+// its diff and before-state, and the JSON carries the same objects whole
+// under plan, beside their names under objects.
+func objectsShown(t *testing.T, st store.API, id uint64) {
+	t.Helper()
+	n := strconv.FormatUint(id, 10)
+	text := mustAs(t, st, "jo", "delegation", "show", n)
+	var rec struct {
+		Objects []string                    `json:"objects"`
+		Plan    []store.DelegatedPackObject `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(mustAs(t, st, "jo", "delegation", "show", n, "--json")), &rec); err != nil {
+		t.Fatal(err)
+	}
+	body, err := st.DelegationBlob(context.Background(), id, "jo")
+	if err != nil || len(body.Objects) == 0 {
+		t.Fatalf("record %d's body = %+v, %v; want its objects", id, body, err)
+	}
+	if !reflect.DeepEqual(rec.Plan, body.Objects) {
+		// Each field is cut short: a before-state runs to the blob cap.
+		t.Errorf("record %d: show --json plan = %+.60v, want the body's objects %+.60v", id, rec.Plan, body.Objects)
+	}
+	var names []string
+	for _, o := range body.Objects {
+		names = append(names, o.Kind+" "+o.Name)
+	}
+	if !reflect.DeepEqual(rec.Objects, names) {
+		t.Errorf("record %d: show --json objects = %v, want the body's names %v", id, rec.Objects, names)
+	}
+	var printed strings.Builder
+	for _, o := range rec.Plan {
+		fmt.Fprintf(&printed, "  %s %s: %s\n", o.Kind, o.Name, o.Action)
+		if o.Diff != "" {
+			fmt.Fprintf(&printed, "    diff: %s\n", o.Diff)
+		}
+		if o.Had {
+			fmt.Fprintf(&printed, "    before: %s\n", o.Before)
+		}
+	}
+	if !strings.Contains(text, printed.String()) {
+		t.Errorf("record %d: show prints the objects as\n%s\nwant the JSON's plan\n%s", id, text, printed.String())
 	}
 }
 

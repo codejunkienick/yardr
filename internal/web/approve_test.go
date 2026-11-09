@@ -107,13 +107,17 @@ func (y *approveYard) post(target, token string, form url.Values, headers ...str
 }
 
 // getNoFollow gets target as the token's user, following no redirect.
-func (y *approveYard) getNoFollow(target, token string) resp {
+// headers are more request headers, each a name and a value.
+func (y *approveYard) getNoFollow(target, token string, headers ...string) resp {
 	y.t.Helper()
 	req, err := http.NewRequest(http.MethodGet, y.ts.URL+target, nil)
 	if err != nil {
 		y.t.Fatal(err)
 	}
 	req.Header.Set(web.DefaultJWTHeader, token)
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
+	}
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	r, err := client.Do(req)
 	if err != nil {

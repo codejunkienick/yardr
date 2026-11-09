@@ -2,10 +2,12 @@ package web_test
 
 import (
 	"context"
+	"encoding/json"
 	"html"
 	"maps"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -264,10 +266,60 @@ func TestWebDelegationRecord(t *testing.T) {
 					t.Errorf("jo's page for record %d holds %q:\n%s", c.id, not, r.body)
 				}
 			}
-			// A member is told it is not there, and nothing of it.
-			if r := y.getNoFollow(target, y.token("sam@example.net")); r.status != http.StatusNotFound || strings.Contains(r.body, "abc123") || strings.Contains(r.body, "starter") || strings.Contains(r.body, "what stood") {
-				t.Errorf("GET %s as sam: %d:\n%s", target, r.status, r.body)
+			pageObjects(t, y, c.id, body)
+			// A member is told it is not there, and nothing of it, in either
+			// form.
+			for _, accept := range []string{"text/html", "application/json"} {
+				if r := y.getNoFollow(target, y.token("sam@example.net"), "Accept", accept); r.status != http.StatusNotFound || strings.Contains(r.body, "abc123") || strings.Contains(r.body, "starter") || strings.Contains(r.body, "what stood") {
+					t.Errorf("GET %s as sam, accepting %s: %d:\n%s", target, accept, r.status, r.body)
+				}
 			}
 		})
+	}
+}
+
+// pageObjects reads the delegated pack record id's page in its JSON form and
+// holds what it says of the objects to the body the record keeps in its blob
+// and to the page as the HTML form shows it (shown): the names stand under
+// objects, and the objects whole under plan, each with its action, diff and
+// before-state, which the HTML form shows too.
+func pageObjects(t *testing.T, y *approveYard, id uint64, shown string) {
+	t.Helper()
+	target := "/delegations/" + itoa(id)
+	r := y.getNoFollow(target, y.token("jo@example.net"), "Accept", "application/json")
+	var page struct {
+		Record struct {
+			Objects []string                    `json:"objects"`
+			Plan    []store.DelegatedPackObject `json:"plan"`
+		} `json:"record"`
+	}
+	if err := json.Unmarshal([]byte(r.body), &page); err != nil || r.status != http.StatusOK {
+		t.Fatalf("GET %s as jo, accepting JSON: %d, %v:\n%s", target, r.status, err, r.body)
+	}
+	body, err := y.st.DelegationBlob(context.Background(), id, "jo")
+	if err != nil || len(body.Objects) == 0 {
+		t.Fatalf("record %d's body = %+v, %v; want its objects", id, body, err)
+	}
+	if !reflect.DeepEqual(page.Record.Plan, body.Objects) {
+		// Each field is cut short: a before-state runs to the blob cap.
+		t.Errorf("record %d: the page's JSON plan = %+.60v, want the body's objects %+.60v", id, page.Record.Plan, body.Objects)
+	}
+	var names []string
+	for _, o := range body.Objects {
+		names = append(names, o.Kind+" "+o.Name)
+	}
+	if !reflect.DeepEqual(page.Record.Objects, names) {
+		t.Errorf("record %d: the page's JSON objects = %v, want the body's names %v", id, page.Record.Objects, names)
+	}
+	for _, o := range page.Record.Plan {
+		if want := "<code>" + o.Kind + " " + o.Name + "</code>: " + o.Action; !strings.Contains(shown, want) {
+			t.Errorf("record %d: the page lacks %q, which its JSON plan carries", id, want)
+		}
+		if o.Diff != "" && !strings.Contains(shown, o.Diff) {
+			t.Errorf("record %d: the page lacks the diff of %s %s, which its JSON plan carries: %q", id, o.Kind, o.Name, o.Diff)
+		}
+		if o.Had && !strings.Contains(shown, o.Before) {
+			t.Errorf("record %d: the page lacks the before-state of %s %s, which its JSON plan carries: %.60q", id, o.Kind, o.Name, o.Before)
+		}
 	}
 }

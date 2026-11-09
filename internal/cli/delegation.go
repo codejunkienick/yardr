@@ -261,7 +261,9 @@ not there. The mail the yard sent the operator for the run names its id.`,
 				}
 				rec.DelegatedBody = *body
 			}
-			return a.out(c.OutOrStdout(), rec, func(w io.Writer) { writeDelegation(w, rec) })
+			// The JSON is the view: the merged record's own would name the
+			// body's objects and lose their diffs and before-states.
+			return a.out(c.OutOrStdout(), store.ViewDelegation(rec), func(w io.Writer) { writeDelegation(w, rec) })
 		},
 	}
 	cmd.AddCommand(show)

@@ -381,7 +381,9 @@ A delegated pack apply's record is written `started` before its first
 object and rewritten `done` or `failed` at the end: it holds the pack's
 digest, its objects by name, each updated object's diff and the complete
 before-state (kept in one blob, whatever the record's size, which the
-record's page and `yardr delegation show <id>` read). A record that would
+record's page and `yardr delegation show <id>` read). In the JSON of both
+the record's `objects` are the names, and `plan` carries each object whole,
+with its `action`, `diff`, `before` and `had`. A record that would
 pass the yard's blob cap refuses before anything writes. The operator is
 mailed when the run starts and how it ended; a failure names the objects
 written, the partial import stays, and applying again finishes it. A

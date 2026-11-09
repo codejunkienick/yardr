@@ -349,7 +349,9 @@ func (w *wtx) delegatedDefine(subject string, before, after map[string]any, keys
 // MaxDelegationInline, and in one blob past it (Blob), which only
 // Store.DelegationBlob serves. A delegated pack apply's body stands in
 // its blob whatever its size (delegation_pack.go), so a reader of a
-// record that names a pack takes the body from Store.DelegationBlob.
+// record that names a pack takes the body from Store.DelegationBlob. A
+// reader that prints the merged record as JSON prints a DelegationView:
+// the record's own JSON names the body's objects by name only.
 type Delegation struct {
 	ID         uint64    `json:"id"`
 	Yardmaster string    `json:"yardmaster"`

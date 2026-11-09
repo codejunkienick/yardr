@@ -160,9 +160,11 @@ func (s *Server) configAgain(w http.ResponseWriter, r *http.Request, why string)
 	s.config(w, r, why)
 }
 
-// DelegationPage is a delegated record's page (/delegations/{id}).
+// DelegationPage is a delegated record's page (/delegations/{id}). Its
+// record is the view, whose JSON carries a pack apply's objects whole under
+// plan; the template reads the merged record's fields through it.
 type DelegationPage struct {
-	Record *store.Delegation `json:"record"`
+	Record *store.DelegationView `json:"record"`
 }
 
 // handleDelegation serves the delegated record id to an operator, the
@@ -195,5 +197,5 @@ func (s *Server) handleDelegation(w http.ResponseWriter, r *http.Request) {
 		}
 		rec.DelegatedBody = *body
 	}
-	s.respond(w, r, Page{Template: "delegation", Title: fmt.Sprintf("Delegated record %d", id), Menu: "config", Data: DelegationPage{Record: rec}})
+	s.respond(w, r, Page{Template: "delegation", Title: fmt.Sprintf("Delegated record %d", id), Menu: "config", Data: DelegationPage{Record: store.ViewDelegation(rec)}})
 }
