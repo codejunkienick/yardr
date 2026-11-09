@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -466,7 +467,7 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 			return nil, errors.New("pack " + name + ": yardr embeds no pack of that name")
 		}
 		imp := held
-		return &store.PackReading{Name: "starter", Kind: "git", Depot: depot, Digest: "abc123", Label: "embedded in yardr test", Import: &imp,
+		return &store.PackReading{Name: "starter", Kind: "git", Depot: depot, Digest: "abc123", Label: "embedded in yardr test", Build: "test", Import: &imp,
 			Plan:    &store.AskPlan{Objects: objects},
 			Targets: map[string]string{"flow\x00starter.default": string(flowJSON), "route\x00depot shed stage new -> builders": routeJSON}}, nil
 	})
@@ -483,6 +484,39 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 		{Kind: "subscription", Name: "builder linear assigned", Action: "create"},
 		{Kind: "crew", Name: "builder", Action: "change"},
 	}}
+
+	// The command says the source it read the pack from, and the start holds
+	// it to the reading's label before anything writes. One that differs in
+	// the build alone is a command and a server of two builds, refused naming
+	// both (the install that the server has not restarted into yet); any
+	// other source is refused as what it is. The reading's own label starts.
+	for name, tc := range map[string]struct {
+		source string
+		builds bool
+	}{
+		"another build's label": {"embedded in yardr other", true},
+		"a directory":           {"/srv/packs/starter", false},
+		"a URL":                 {"https://evil.example/starter/", false},
+	} {
+		skewed := start
+		skewed.Source = tc.source
+		_, err := y.api.StartDelegatedPack(ctx, skewed, "yardmaster")
+		if err == nil || strings.Contains(err.Error(), "two builds") != tc.builds || !strings.Contains(err.Error(), strconv.Quote(tc.source)) ||
+			!strings.Contains(err.Error(), `"embedded in yardr test"`) || !strings.HasSuffix(err.Error(), "nothing was written") {
+			t.Errorf("a start whose command read the pack from %s: %v", name, err)
+		}
+	}
+	if _, err := y.api.Delegation(y.ctx, 1, "jo"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("a start refused for its source left a record: %v", err)
+	}
+	named := start
+	named.Source = "embedded in yardr test"
+	if _, err := y.api.StartDelegatedPack(ctx, named, "yardmaster"); err != nil {
+		t.Errorf("a start whose command read the pack from the reading's own label: %v", err)
+	}
+
+	// A start that names no source, an older client's, is held as before:
+	// it starts, and its record's write is held to the reading below.
 	id, err := y.api.StartDelegatedPack(ctx, start, "yardmaster")
 	if err != nil {
 		t.Fatal(err)

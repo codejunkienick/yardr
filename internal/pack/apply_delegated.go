@@ -60,7 +60,12 @@ func (p *Plan) beginDelegated(ctx context.Context, st store.API, o ApplyOptions,
 	if IsURL(p.Dir) {
 		from = p.Dir
 	}
-	id, err := st.StartDelegatedPack(ctx, store.DelegatedPackStart{Pack: p.Pack, Depot: p.Depot, Digest: p.Digest, From: from,
+	// The source this command read the pack from is also what its record of
+	// the import will name (ImportRecord). A pack yardr embeds is read under
+	// a label that names this build, and the store holds the record to its
+	// own reading's: told here, the start refuses a command that is not the
+	// server's build before anything writes, not at the record's write.
+	id, err := st.StartDelegatedPack(ctx, store.DelegatedPackStart{Pack: p.Pack, Depot: p.Depot, Digest: p.Digest, From: from, Source: p.Dir,
 		Mappings: mappings, Grants: delegatedGrants(o), Objects: objects}, o.Actor)
 	if err != nil {
 		return nil, err

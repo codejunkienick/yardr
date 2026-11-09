@@ -57,8 +57,10 @@ func TestDelegatedPackFromTheRepository(t *testing.T) {
 		{Kind: "group", Name: "builders", Action: "change"},
 		{Kind: "file", Name: "roles/builder.md", Action: "create"},
 	}
+	// The command names the URL it read the pack at as the source, as it does
+	// in pack.Apply: it is the URL the store fetches.
 	start := func(digest string) store.DelegatedPackStart {
-		return store.DelegatedPackStart{Pack: "starter", Depot: "shed", Digest: digest, From: repoURL, Objects: objects,
+		return store.DelegatedPackStart{Pack: "starter", Depot: "shed", Digest: digest, From: repoURL, Source: repoURL, Objects: objects,
 			Mappings: store.Mappings{Crew: map[string]string{"builder": "clerk"}}}
 	}
 	f := &repoFetcher{}
@@ -91,6 +93,19 @@ func TestDelegatedPackFromTheRepository(t *testing.T) {
 		t.Errorf("a refused fetch left a record: %v", err)
 	}
 	f.refuse = nil
+
+	// The source the command read the pack from is held to the URL the store
+	// fetches: another is refused as what it is, not as two builds, and
+	// leaves no record.
+	other := start("abc123")
+	other.Source = "https://evil.example/starter/"
+	if _, err := y.api.StartDelegatedPack(ctx, other, "yardmaster"); err == nil || strings.Contains(err.Error(), "two builds") ||
+		!strings.Contains(err.Error(), `"`+other.Source+`"`) || !strings.Contains(err.Error(), `"`+repoURL+`"`) || !strings.HasSuffix(err.Error(), "nothing was written") {
+		t.Errorf("a start whose command read the pack from another URL: %v", err)
+	}
+	if _, err := y.api.Delegation(y.ctx, 1, "jo"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("a start refused for its source left a record: %v", err)
+	}
 
 	// The fetch runs before the store's write: a write made while it
 	// runs completes at once. Were the fetch inside the start's write, that
@@ -204,7 +219,7 @@ func TestDelegatedPackFromTheRepository(t *testing.T) {
 	// it has no prior.
 	y.own.SetPackReader(fakePackReader)
 	embedded := start("abc123")
-	embedded.From = ""
+	embedded.From, embedded.Source = "", ""
 	embeddedID, err := y.api.StartDelegatedPack(ctx, embedded, "yardmaster")
 	if err != nil {
 		t.Fatal(err)

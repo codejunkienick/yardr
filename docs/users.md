@@ -394,8 +394,11 @@ refuses there too, the record names the reading's objects exactly, each
 write under it (a group, crew member, flow, pointer, route, source, hook
 or the import's own record among them) is held to the object and the
 values that reading names for it, and a grant passes only where the
-run's mappings answered it. A record left `started` carries no write
-after an hour.
+run's mappings answered it. A command applying an embedded pack from a
+different build than the server's, as in the seconds between an install
+and the server's restart, is refused at the start with nothing written,
+both builds named: apply again once they are one. A record left `started`
+carries no write after an hour.
 
 A pack of the packs repository is applied the same way, named by its URL and
 pinned: `yardr pack apply https://raw.githubusercontent.com/yardr-dev/yardr-packs/main/<name>/

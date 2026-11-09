@@ -1969,7 +1969,10 @@ up to what the run's record can hold. Before the first object the yard
 writes that record, with the digest, the plan's objects by name, each updated
 object's diff and the complete before-state, and mails the operator at the
 start and again at the end; a pack whose record would pass the yard's blob
-cap (`blob_max_bytes`) is refused before anything is written. A run that
+cap (`blob_max_bytes`) is refused before anything is written. An embedded
+pack also refuses a command from a different build than the server's at the
+start, naming both builds; after an install, apply again once the server has
+restarted. A run that
 fails part way leaves a `failed` record naming the objects it wrote, keeps
 the partial import, and is finished by applying again. No one command takes
 an apply back: a pack of the packs repository goes back by applying it again

@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"yardr.dev/yardr/internal/pack"
@@ -159,7 +160,12 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 	// embeds the server registers: telegram's declaration whole, and
 	// starter with the digest the started-record case below names.
 	rpcAPI, own := storetest.NewRPCOwned(t)
+	// The build the server's reading names: the command's own, until a step
+	// stands the server on another.
+	var serverBuild atomic.Value
+	serverBuild.Store(version.Describe())
 	reader := func(ctx context.Context, name string, depot string, _ store.Mappings, yard store.API) (*store.PackReading, error) {
+		build := serverBuild.Load().(string)
 		switch name {
 		case "telegram", "pushover":
 			sub, err := fs.Sub(packs.FS, name)
@@ -187,7 +193,7 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 			// loads a pack yardr embeds under.
 			imp := plan.ImportRecord(pack.ApplyOptions{})
 			return &store.PackReading{Name: name, Kind: "source", Digest: plan.Digest, Plan: askPlan, Import: &imp,
-				Label:   packs.Embedded + " in yardr " + version.Describe(),
+				Label: packs.Embedded + " in yardr " + build, Build: build,
 				Sources: []store.AskSource{{Name: name, Text: string(text)}}}, nil
 		case "starter":
 			return &store.PackReading{Name: "starter", Kind: "git", Depot: depot, Digest: "abc", Plan: &store.AskPlan{}}, nil
@@ -234,6 +240,19 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 		if out, err := as(t, st, "yardmaster", args...); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %q, %v; want %q", words, out, err, want)
 		}
+	}
+	// The command applies a pack of the build it is, which the server's
+	// reading names: where the server runs another, as in the seconds between
+	// an install and its restart, the start refuses naming both builds, with
+	// nothing written, and the apply goes through once they are one.
+	serverBuild.Store("other")
+	if out, err := as(t, st, "yardmaster", "pack", "apply", "telegram", "--for", "jo", "--mail", mail); err == nil || !strings.Contains(err.Error(), "two builds") ||
+		!strings.Contains(err.Error(), "embedded in yardr "+version.Describe()) || !strings.Contains(err.Error(), "embedded in yardr other") {
+		t.Errorf("pack apply against a server of another build: %q, %v", out, err)
+	}
+	serverBuild.Store(version.Describe())
+	if _, err := st.GetSource(ctx, "telegram"); err == nil {
+		t.Fatal("telegram was applied against a server of another build")
 	}
 	if _, err := st.Delegation(ctx, 1, "jo"); err == nil {
 		t.Fatal("a refused delegated pack apply left a record")

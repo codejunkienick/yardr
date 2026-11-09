@@ -8,7 +8,10 @@
 // record must not choose any of them. The start therefore keeps the record
 // the store's own reading of the pack says the run leaves
 // (Delegation.Import), and the write is held to it field by field, each
-// object of it too, none of them left out.
+// object of it too, none of them left out. The one field the command sets
+// that the start can check at once, the source it read the pack from, is
+// held there too (startSourceHeld), so that a command and a server that are
+// two builds refuse before anything writes and not at this write.
 package store
 
 import (
@@ -33,7 +36,7 @@ func heldImport(start *DelegatedPackStart, reading *PackReading) *PackImport {
 		held = *reading.Import
 	}
 	held.Pack, held.Depot = start.Pack, start.Depot
-	held.Source, held.Auth = or(start.From, reading.Label), ""
+	held.Source, held.Auth = heldSource(start, reading), ""
 	// What the write sets itself, in nobody's reading: the time and actor
 	// are the write's own, and the run ask an import is approved on is a
 	// carrying out's, which no delegated run is. The objects stay the
@@ -41,6 +44,39 @@ func heldImport(start *DelegatedPackStart, reading *PackReading) *PackImport {
 	held.At, held.By = time.Time{}, ""
 	held.ApprovedBead, held.ApprovedAsk = "", 0
 	return &held
+}
+
+// heldSource is the origin a delegated pack start holds the run's record of
+// its import to: the URL a pack of the packs repository was fetched at,
+// else the reading's label, which names the build that embeds the pack. The
+// record (heldImport) and the start's own check (startSourceHeld) both take
+// it from here, so what the start checks is what the write will hold.
+func heldSource(start *DelegatedPackStart, reading *PackReading) string {
+	return or(start.From, reading.Label)
+}
+
+// startSourceHeld refuses a delegated pack start whose command read the pack
+// from a source other than heldSource, before anything writes. The command
+// records that source as the import's (pack.Plan.ImportRecord), and the
+// write of the record refuses any other (packImportHeld), but only after
+// every object was written: the run would read failed over a partial
+// import, and applying again would fail the same way until the server ran
+// the command's build. A pack yardr embeds is read under a label that names
+// the build, so a source that differs from the reading's in the build alone
+// is a command and a server of two builds, as in the seconds between an
+// install and the server's restart; the refusal names both labels whole,
+// each with its build. Any other source is refused as what it is. A start
+// that names no source, from a client older than the field, is held as
+// before, by the write alone.
+func startSourceHeld(start *DelegatedPackStart, reading *PackReading) error {
+	held := heldSource(start, reading)
+	if start.Source == "" || start.Source == held {
+		return nil
+	}
+	if head := LabelWithoutBuild(reading.Label, reading.Build); start.From == "" && strings.HasPrefix(start.Source, head+" ") {
+		return fmt.Errorf("pack %s: the command and the server are two builds: the command read it from %q and the server reads it from %q, and a run across two builds writes the import and then cannot record it: apply again once both are one build: nothing was written", start.Pack, start.Source, held)
+	}
+	return fmt.Errorf("pack %s: the command read it from %q, and the run is held to %q: nothing was written", start.Pack, start.Source, held)
 }
 
 // packImportHeld refuses an import's record imp that is not the one the

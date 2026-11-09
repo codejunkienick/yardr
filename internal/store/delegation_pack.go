@@ -57,7 +57,8 @@ type DelegatedPackStart struct {
 	Pack     string                `json:"pack"`
 	Depot    string                `json:"depot,omitempty"`
 	Digest   string                `json:"digest"`
-	From     string                `json:"from,omitempty"` // the packs repository's URL for the pack; none for a pack yardr embeds
+	From     string                `json:"from,omitempty"`   // the packs repository's URL for the pack; none for a pack yardr embeds
+	Source   string                `json:"source,omitempty"` // where the command read the pack from (pack.Plan.Dir); none from a client that names none
 	Mappings Mappings              `json:"mappings,omitzero"`
 	Grants   []string              `json:"grants,omitempty"`
 	Objects  []DelegatedPackObject `json:"objects,omitempty"`
@@ -248,6 +249,10 @@ func (w *wtx) delegationPointer(ym string, d *DelegatedCall, id uint64) error {
 // A plan that still asks or refuses — a question unanswered, a grant
 // nobody mapped, a hand-edited or non-text file — refuses the start
 // whole, as a card refuses it: the CLI's refusal is not the only one.
+// So does a source the command read the pack from that is not the origin
+// its import record is held to, as a command and a server of two builds
+// make (startSourceHeld); it is checked first, for it is what a digest,
+// object or grant that then differs would come from.
 // The caller's objects must be the reading's complete object list,
 // kind, name and action each, exactly once and with nothing beside
 // them, and its digest the reading's where the reading carries one;
@@ -271,6 +276,9 @@ func (w *wtx) delegatedPackPlan(ctx context.Context, start *DelegatedPackStart, 
 	}
 	if reading == nil || reading.Name != start.Pack {
 		return nil, nil, fmt.Errorf("pack %s: the server's reading named another pack: nothing was written", start.Pack)
+	}
+	if err := startSourceHeld(start, reading); err != nil {
+		return nil, nil, err
 	}
 	if reading.Digest == "" || start.Digest != reading.Digest {
 		return nil, nil, fmt.Errorf("pack %s: its digest is sha256:%s, and the run named sha256:%s: nothing was written", start.Pack, reading.Digest, start.Digest)

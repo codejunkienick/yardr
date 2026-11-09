@@ -43,7 +43,7 @@ func delegatedPackYardAt(t *testing.T, origin string) (store.API, pack.Options, 
 		}
 		r := &store.PackReading{Name: name, Kind: current.Kind, Depot: depot, Digest: current.Digest, Plan: &store.AskPlan{}, Targets: map[string]string{}}
 		if origin == "" {
-			r.Label = "embedded in yardr test"
+			r.Label, r.Build = "embedded in yardr test", "test"
 		}
 		// The record the plan leaves of its import, as the server's reading
 		// derives it from the same plan: the apply's own is held to it.
@@ -452,6 +452,30 @@ func TestDelegatedApplyAskingPlanAndOverCapRefuse(t *testing.T) {
 			}
 			if groups, err := st.Groups(ctx); err != nil || len(groups) != 0 {
 				t.Errorf("groups = %v, %v; want nothing written", groups, err)
+			}
+
+			// A command and a server of two builds, as in the seconds between
+			// an install and the server's restart: the pack the command loaded
+			// names its own build and the server's reading another. The start
+			// refuses naming both, where the import used to run whole and fail
+			// at its own record. A pack of the repository has no build to
+			// differ in: its source is the URL both read it at.
+			if mode == "embedded" {
+				command := pk(o)
+				command.Dir = "embedded in yardr other"
+				skewed := build(t, st, command, o)
+				setPlan(skewed)
+				if _, err := pack.Apply(dctx, st, skewed, pack.ApplyOptions{Answers: answered(t, skewed, answers), Actor: "yardmaster"}); err == nil ||
+					!strings.Contains(err.Error(), "two builds") || !strings.Contains(err.Error(), `"embedded in yardr other"`) || !strings.Contains(err.Error(), `"embedded in yardr test"`) {
+					t.Fatalf("an apply of a command of another build than the server's: err = %v", err)
+				}
+				if _, err := st.Delegation(ctx, 1, "jo"); !errors.Is(err, store.ErrNotFound) {
+					t.Errorf("an apply of another build left a record: %v", err)
+				}
+				if groups, err := st.Groups(ctx); err != nil || len(groups) != 0 {
+					t.Errorf("groups = %v, %v; want nothing written", groups, err)
+				}
+				setPlan(plan)
 			}
 
 			if err := st.SetSetting(ctx, store.BlobMaxSetting, "128", "jo"); err != nil {
