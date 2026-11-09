@@ -2,7 +2,9 @@ package peer
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strconv"
 	"strings"
@@ -29,10 +31,22 @@ var procOnce = sync.OnceValue(func() bool {
 // HaveStat is false where there is no /proc.
 func HaveStat() bool { return procOnce() }
 
+// readFile reads a file under /proc. It is a variable so that a test can
+// hand stat the error a process that exits mid-read gives, which no real
+// process can be made to give on demand.
+var readFile = os.ReadFile
+
 // stat reads /proc/<pid>/stat. The start time is in clock ticks after
-// boot. A pid with no process is fs.ErrNotExist.
+// boot. A pid with no process is fs.ErrNotExist, and so is one that exits
+// while its stat is read.
 func stat(pid int) (Stat, error) {
-	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	b, err := readFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if errors.Is(err, unix.ESRCH) {
+		// A process that goes after the open found it answers the read with
+		// ESRCH, where one gone before the open is ENOENT. Callers take only
+		// fs.ErrNotExist for no process, so both must read as that.
+		return Stat{}, fmt.Errorf("pid %d: %w", pid, fs.ErrNotExist)
+	}
 	if err != nil {
 		return Stat{}, err
 	}
