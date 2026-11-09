@@ -1211,6 +1211,12 @@ Before a depot's first train, read `yardr flow show <depot>`: a train may
 follow a flow of its own ([the train's own flow](#the-trains-own-flow)), and a
 train in a stage no route serves waits for a person.
 
+When the work for an issue outside the yard is a train, the train tracks it:
+`--tracks <issue>` on `bead create`, or `yardr link move <issue> --to <train>`
+from the bead that started it. In a chain the last bead tracks it, so its
+mapped stages follow the chain's progress; the others take `--relates
+<issue>`. [links.md](links.md) has what a link does and the rules for one.
+
 ### Wagons
 
 A wagon is a child of a train that takes a shorter road to the train's

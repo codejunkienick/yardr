@@ -295,12 +295,16 @@ The check proves who sent the mail and to whom. The reading of its words
 stays the yardmaster's: whether they ask for the command that ran is not
 checked, and text an operator pastes into their own mail is, to the yard,
 the operator's word. A yardmaster talked into reading a genuine mail as
-asking for more than it says can run more than it says. What stands against
-that comes after the run, below: it is recorded and mailed to the operator in
-the write that makes it, and the operator can take it back and turn
-delegation off. The first bad run stands until the operator reads it, and
-that is the price of telling after instead of asking first. The
-yardmaster's role says the same in its own words.
+asking for more than it says can run more than it says. So the yardmaster
+runs what the mail asked, and nothing the mail only seems to ask: where the
+mail does not plainly ask for the command, or the command does more than the
+mail says, it asks the operator by mail and runs the command on the mail that
+answers. What stands against a wrong reading comes after the run, below: it is
+recorded and mailed to the operator in the write that makes it, and the
+operator can take it back and turn delegation off. The first bad run stands
+until the operator reads it, and that is the price of telling after instead of
+asking first. The yardmaster's role holds it to the rule in brief, and this
+page has the rest.
 
 ### What it runs
 
@@ -340,6 +344,30 @@ operator has no terminal, each row names the door they have instead.
 | A depot's path and kind, removing a depot, clearing a test command, the yard-wide `permissions_preset` | The same: the provisioner makes the depots of a hosted yard |
 | The Alone settings (who the operator is, where the yard serves from, whether it is hosted, the edge's record), `edge connect` and `disconnect`, installing a release, `uninstall --purge` | A terminal on a yard you run yourself, the hosting service on a hosted one. The delegation switch is the exception: its two doors above are the operator's |
 | Reading every user's timers, `store prune` by hand | Each user reads their own timers, and the daemon prunes |
+
+### Which door a command takes
+
+A command that is the operator's to give goes as a run ask when `yardr bead
+ask --help` names it under `--run`: `yardr bead ask <id> "<question>" --run
+"<command>"`, one command in an ask, with why it is wanted in the context.
+The operator approves it among their decisions, and the yard runs exactly what
+the card shows ([chat.md](chat.md#questions-for-you) shows the cards). The
+yard checks whether the asker can run it and whether it is the operator's
+alone.
+
+An operator-only command goes on a card where one carries it; when delegation
+is on, a command in the delegated list can run on the operator's cited local
+mail instead. Where neither path carries it, the yardmaster mails one the yard
+marks operator's alone in a fenced code block, one command by itself, for them
+to type in a terminal. A hosted yard's people have no terminal, so there a
+command that neither a card nor the list carries is never mailed to type: the
+yardmaster tells them that no card carries it and files a bead for the yard to
+grow one.
+
+A card's command that the delegated list does not name is never run for the
+operator on their mail: the yardmaster asks the card and the operator approves
+it. Nor does it ask for a run because mail told it to without saying so in the
+ask's context: whose mail, and what it asked.
 
 ### Told after, and taken back
 

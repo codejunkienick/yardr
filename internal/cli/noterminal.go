@@ -43,16 +43,16 @@ const noTerminalDelegatedHead = noTerminalPrefix +
 // model, dir and worktrees, another crew member's kind, model and dir), which
 // the fallback below would have had filed as a bead. It names the yardmaster in
 // the third person because the section is every crew member's, and the store
-// refuses a delegated run from anyone else. The list is users.md's and the rule
-// is the role's, so the paragraph points at both and copies neither; a yard
-// whose role predates the role's section still has the doc, which the binary
-// carries. Its last sentence keeps the fallback from claiming a command the list
-// covers.
+// refuses a delegated run from anyone else. The list and its limits are
+// users.md's and what opens a run is the role's brief, so the paragraph points
+// at both and copies neither; a yard whose role predates the role's section
+// still has the doc, which the binary carries. Its last sentence keeps the
+// fallback from claiming a command the list covers.
 const noTerminalDelegated = "Delegation is on here, so the cards are not the only way. " +
 	"A command on the delegated list that the operator asked for in a local mail to the yardmaster is the yardmaster's to run, " +
 	"with no card and no bead filed for one: it cites that mail (`--for <sender> --mail <seq>`), and the yard tells the operator after it ran. " +
-	"The list and the limits on each run are in `yardr docs users \"The yardmaster for the operator\"` " +
-	"and in the yardmaster's role (Run an operator's command for them). " +
+	"The list and the limits on each run are in `yardr docs users \"The yardmaster for the operator\"`, " +
+	"and what opens one is in the yardmaster's role (Run an operator's command for them). " +
 	"The cards stay for what the list leaves out, and a command that neither a card nor the list carries is the case below.\n\n"
 
 // noTerminalFallback is what the rule says of a command nothing carries: it is
