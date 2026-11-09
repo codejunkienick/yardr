@@ -10,6 +10,11 @@
 // GOCACHE is the machine's, one go env file for every yard on it, while the
 // record of rotations is one yard's store. So a keeping also records the
 // rotated caches no record names, whichever yard left them.
+//
+// A keeping acts only under disk_keep_gb, and only where a landing starts
+// it, so a rotated directory could stand long past its grace and fill the
+// disk that builders then meet. The daemon therefore runs the removal alone
+// (Sweep) at the end of each grace, whatever the disk holds.
 package diskkeep
 
 import (
@@ -39,9 +44,9 @@ const GB = 1 << 30
 // has to look at the disk.
 const GaveUpGB = 10
 
-// OldGrace is how long a rotated GOCACHE directory stands aside before a
-// landing removes it: builds that started before the rotation still write
-// to it, and files are never taken from under a running build. It is also
+// OldGrace is how long a rotated GOCACHE directory stands aside before it is
+// removed: builds that started before the rotation still write to it, and
+// files are never taken from under a running build. It is also
 // how long after a rotation the next one waits: a rotation inside it frees
 // nothing, since the directory it leaves cannot go yet, and the cache it
 // starts must be filled from empty.
@@ -115,7 +120,7 @@ type Report struct {
 	// GaveUp is whether free space is still under 10 GB after the keeping.
 	GaveUp bool `json:"gave_up"`
 	// Errors is what went wrong past the rotation, each a sentence: a
-	// directory that could not be removed stays for the next landing.
+	// directory that could not be removed stays for the next keeping or sweep.
 	Errors []string `json:"errors,omitempty"`
 }
 
@@ -170,12 +175,9 @@ func Keep(ctx context.Context, st store.API, settings map[string]string) (*Repor
 	if thresholdGB == 0 || !hasGo() {
 		return &Report{}, nil
 	}
-	gocache, err := goEnv("GOCACHE")
+	gocache, err := LiveGOCACHE()
 	if err != nil {
-		return nil, fmt.Errorf("go env GOCACHE: %w", err)
-	}
-	if gocache == "" {
-		return nil, fmt.Errorf("go env GOCACHE: empty")
+		return nil, err
 	}
 	free, err := freeDisk(existingDir(gocache))
 	if err != nil {
@@ -201,12 +203,9 @@ func Keep(ctx context.Context, st store.API, settings map[string]string) (*Repor
 		if err != nil {
 			return nil, fmt.Errorf("lock GOCACHE keeping: %w", err)
 		}
-		current, err := goEnv("GOCACHE")
+		current, err := LiveGOCACHE()
 		if err != nil {
-			return nil, fmt.Errorf("go env GOCACHE: %w", err)
-		}
-		if current == "" {
-			return nil, fmt.Errorf("go env GOCACHE: empty")
+			return nil, err
 		}
 		if filepath.Dir(current) != filepath.Dir(gocache) {
 			if err := lock.Close(); err != nil {
@@ -254,6 +253,68 @@ func Keep(ctx context.Context, st store.API, settings map[string]string) (*Repor
 	}
 	rep.Removed = append(rep.Removed, removeOld(ctx, st, rep, live, at)...)
 	rep.Removed = append(rep.Removed, pruneTmp(rep, at)...)
+	conclude(ctx, st, rep, live)
+	return rep, nil
+}
+
+// Sweep is the removal half of Keep and nothing else, for the daemon to run
+// where a rotated directory has stood aside for OldGrace, so none waits for a
+// landing's keeping. It records the rotated caches no record names, as Keep
+// does, and removes the recorded directories whose grace has ended at at,
+// never the live one. It rotates nothing, clears no go-tmp and does not ask
+// disk_keep_gb: a directory past its grace has no use whatever the disk holds,
+// and what rotates stays the landing's keeping. at is the caller's clock, so
+// a sweep can be run at any time a test names.
+//
+// It takes no lock on GOCACHE's parent: it moves no pointer and decides no
+// rotation, and what it adopts is stamped at first sight, so a sweep and a
+// keeping that adopt the same directory differ by seconds of its grace.
+//
+// It logs the disk_kept event as Keep does, with not_rotated saying so, and
+// only when it adopted, removed or failed at something: a sweep that found
+// nothing to do leaves no record and reports itself not Acted. What fails
+// joins the report's errors, and the directory stays recorded.
+func Sweep(ctx context.Context, st store.API, live string, at time.Time) (*Report, error) {
+	free, err := freeDisk(existingDir(live))
+	if err != nil {
+		return nil, fmt.Errorf("free space on %s: %w", live, err)
+	}
+	olds, err := st.GOCACHEOldDirs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list rotated GOCACHE directories: %w", err)
+	}
+	rep := &Report{FreeBefore: free, FreeAfter: free, Removed: []string{},
+		NotRotated: "a removal alone, which rotates nothing"}
+	rep.Adopted = adopt(ctx, st, rep, strayCaches(rep, olds, live), at)
+	rep.Removed = append(rep.Removed, removeOld(ctx, st, rep, live, at)...)
+	if len(rep.Adopted)+len(rep.Removed)+len(rep.Errors) == 0 {
+		return &Report{FreeBefore: free, FreeAfter: free}, nil
+	}
+	rep.Acted = true
+	conclude(ctx, st, rep, live)
+	return rep, nil
+}
+
+// Due is the earliest time a recorded directory has stood aside for OldGrace,
+// the time a sweep has something to remove from, and false with none
+// recorded. A record of the live cache or of a path that is no rotated
+// sibling counts as any other: only the sweep, which knows the live cache,
+// can tell what it will leave.
+func Due(olds []store.GOCACHEDir) (time.Time, bool) {
+	var due time.Time
+	for _, old := range olds {
+		if end := old.At.Add(OldGrace); due.IsZero() || end.Before(due) {
+			due = end
+		}
+	}
+	return due, !due.IsZero()
+}
+
+// conclude ends a keeping, whichever way it began: it reads the free space
+// after, says whether it gave up, and logs the disk_kept event with what the
+// report holds. A keeping that rotated and one that only removed write the
+// one shape, which a reader of the log tells apart by not_rotated.
+func conclude(ctx context.Context, st store.API, rep *Report, live string) {
 	if free, err := freeDisk(existingDir(live)); err != nil {
 		rep.Errors = append(rep.Errors, fmt.Sprintf("could not read free space after: %v", err))
 	} else {
@@ -280,7 +341,26 @@ func Keep(ctx context.Context, st store.API, settings map[string]string) (*Repor
 	if err := st.LogDispatch(ctx, "", store.DiskKept, Actor, data); err != nil {
 		rep.Errors = append(rep.Errors, fmt.Sprintf("could not log the %s event: %v", store.DiskKept, err))
 	}
-	return rep, nil
+}
+
+// LiveGOCACHE is the GOCACHE go answers with now: the cache builders use, and
+// the one a removal never takes. It is one clean absolute path or an error,
+// because the answer decides which recorded directories are rotated siblings
+// of it, and a garbled one (a warning in front of the path, a relative path)
+// would make every record look foreign, which removeOld answers by dropping it
+// from the record unremoved.
+func LiveGOCACHE() (string, error) {
+	gocache, err := goEnv("GOCACHE")
+	if err != nil {
+		return "", fmt.Errorf("go env GOCACHE: %w", err)
+	}
+	if gocache == "" {
+		return "", fmt.Errorf("go env GOCACHE: empty")
+	}
+	if !filepath.IsAbs(gocache) || filepath.Clean(gocache) != gocache {
+		return "", fmt.Errorf("go env GOCACHE: %q is not one clean absolute path", gocache)
+	}
+	return gocache, nil
 }
 
 // lockGOCACHE serializes keepings that use the same cache parent, even when
@@ -451,7 +531,7 @@ func adopt(ctx context.Context, st store.API, rep *Report, strays []string, at t
 // removeOld removes the recorded GOCACHE directories whose grace has
 // passed, except the live one, and drops each from the record once it is
 // gone. A directory that cannot be removed stays recorded for the next
-// landing.
+// keeping or sweep.
 func removeOld(ctx context.Context, st store.API, rep *Report, live string, at time.Time) []string {
 	olds, err := st.GOCACHEOldDirs(ctx)
 	if err != nil {

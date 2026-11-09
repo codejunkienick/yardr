@@ -219,6 +219,37 @@ func CrewStartsInFlight(d *Dispatcher) []string {
 // last pass; nil with none.
 func SidingDue(d *Dispatcher) *time.Time { return d.sidingDue }
 
+// GOCACHEDue is when the pass next has a sweep of rotated GOCACHE
+// directories to start, as of the last pass; nil with none. Read from the
+// pass's own goroutine or after it, as SidingDue is.
+func GOCACHEDue(d *Dispatcher) *time.Time { return d.gocache.due }
+
+// NextDue is the time Run wakes at between passes, as of the last pass: the
+// earliest of the dues the pass noted; nil with none.
+func NextDue(d *Dispatcher) *time.Time { return d.nextDue() }
+
+// SetLiveGOCACHE makes d ask liveOf which GOCACHE is live, where it asks go,
+// so that no go runs in a test. It is set before a pass, as the sweep's
+// goroutine reads it.
+func SetLiveGOCACHE(d *Dispatcher, liveOf func() (string, error)) { d.gocache.liveOf = liveOf }
+
+// WaitGOCACHE waits for the sweep of rotated GOCACHE directories in flight,
+// if there is one, to end: a pass run alone starts it and does not wait. It
+// gives up after WaitFuse, leaving the test's own assertions to say what did
+// not land.
+func WaitGOCACHE(d *Dispatcher) {
+	d.gocache.mu.Lock()
+	done := d.gocache.done
+	d.gocache.mu.Unlock()
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(WaitFuse):
+	}
+}
+
 // NotTakenHint begins the hint for a prompt at a reset that an agent of a
 // kind did not take.
 var NotTakenHint = notTakenHint

@@ -422,8 +422,11 @@ Exit 2 is "could not run" ([line.md](line.md#4-approved-the-assembly-lands-it-on
 no test line, nothing ran, and the assembly holds a landing instead of sending
 it back, since nothing a builder changes can fix it. A builder who meets it has
 met the machine and not their change: they free nothing that is not their own,
-and tell the yardmaster. A rotation of GOCACHE that nothing has built in yet does
-not exist, so each volume is read at the nearest directory that does. A `df` or
+and tell the yardmaster. The daemon removes a rotated GOCACHE directory itself
+when its 30 minutes are over ([setup.md](setup.md#the-machines-disk)), so one
+that stands beside the live cache past that is worth telling too. A rotation of
+GOCACHE that nothing has built in yet does not exist, so each volume is read at
+the nearest directory that does. A `df` or
 `go env` that cannot be read lets the run go on, since a gate that cannot see
 the disk must not refuse a healthy one. A plan (`YARDR_TEST_PLAN`), `sizes` and
 `--race-queue` run no step and are never refused, nor is a CI runner

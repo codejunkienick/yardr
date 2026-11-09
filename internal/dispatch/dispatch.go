@@ -295,6 +295,8 @@ type Dispatcher struct {
 	// sidingDue is when the earliest siding that can fold is due, as of
 	// the last pass (see sidings); nil with none.
 	sidingDue *time.Time
+	// gocache is the removal of rotated GOCACHE directories (gocache.go).
+	gocache gocacheKeeping
 
 	// lookDue is when the dispatcher next has work due, as of the last pass;
 	// nil when nothing needs a pass before the regular interval.
@@ -722,16 +724,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 		// not spun on.
 		var due <-chan time.Time
 		var timer *time.Timer
-		next := d.timerDue
-		if d.lookDue != nil && (next == nil || d.lookDue.Before(*next)) {
-			next = d.lookDue
-		}
-		if d.pushDue != nil && (next == nil || d.pushDue.Before(*next)) {
-			next = d.pushDue
-		}
-		if d.sidingDue != nil && (next == nil || d.sidingDue.Before(*next)) {
-			next = d.sidingDue
-		}
+		next := d.nextDue()
 		if next != nil {
 			timer = time.NewTimer(max(next.Sub(d.now()), time.Second))
 			due = timer.C
@@ -871,7 +864,8 @@ func (d *Dispatcher) noteStart(ctx context.Context) {
 // tokens the stopped ones used, tear down finished ones, apply the hook rules
 // to new hook events, read the CI of trains in in-pr, move the issues beads
 // track, tell users outside the yard of what landed in their inboxes, route
-// and start unowned ready beads, make the copy of the store that is due.
+// and start unowned ready beads, make the copy of the store that is due, and
+// start the removal of the rotated GOCACHE directories whose grace has ended.
 //
 // Each step is marked by name as it begins, so a pass that ran past one
 // Interval says where its time went (passtime.go).
@@ -994,6 +988,9 @@ func (d *Dispatcher) Reconcile(ctx context.Context) error {
 	// After the work is started: a copy of a large store takes a while.
 	pass.step("backups")
 	d.backups(ctx)
+	// Removing a cache of 20 GiB takes longer, so a goroutine does it.
+	pass.step("gocache")
+	d.gocacheOld(ctx)
 	// Once a day at most, and bounded: a push (pushes.go) waits as long.
 	pass.step("telemetry")
 	d.telemetry(ctx)

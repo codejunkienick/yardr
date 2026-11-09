@@ -64,10 +64,12 @@ it lists every exported name with its comment, faster than grepping.
   running operator-configured commands for what they print.
 - `depotfile`: reads a depot's standing working-rules file.
 - `dispatch`: the daemon's pass: wakes on a committed write, re-reads
-  state, routes beads, runs the crew, keeps backups, sends the daily
-  telemetry batch when the operator turned it on; never polls.
+  state, routes beads, runs the crew, keeps backups, removes rotated
+  GOCACHE directories when their grace ends, sends the daily telemetry
+  batch when the operator turned it on; never polls.
 - `diskkeep`: keeping the machine's disk free for landings' builds
-  (GOCACHE rotation, stale go-tmp), run by `yardr disk keep`.
+  (GOCACHE rotation, stale go-tmp), run by `yardr disk keep`; its removal
+  of rotated caches past their grace is also the daemon's (`Sweep`).
 - `edgelink`: the yard's side of the edge (`yardr edge connect`): fetching
   the edge's key and enrolling the yard by a code, each call signed with the
   yard's key (the member and preview reports among them), and the link

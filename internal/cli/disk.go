@@ -32,7 +32,9 @@ nothing.
 The assembly runs it before every landing's tests run
 (contrib/assembly/merge-local), where a failure is in the log and the
 landing goes on to the tests. Run by hand it reports the same lines, and
-exits 1 when anything past the rotation failed.`,
+exits 1 when anything past the rotation failed. The daemon removes a
+recorded directory itself when its 30 minutes are over, whatever
+disk_keep_gb is, so the removal does not wait for this command.`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			st, err := a.store(c.Context())

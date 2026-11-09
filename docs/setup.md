@@ -187,6 +187,18 @@ What it did is a `disk_kept` event (`yardr events`, `yardr watch`), with
 the free space before and after and what was removed, and a gave-up line
 in the assembly's log when free space is still under 10 GB afterwards.
 
+A rotated directory does not wait for the next landing to go: the daemon
+removes it when its 30 minutes are over, with no landing running and
+whatever `disk_keep_gb` is set to, since a directory past its grace has no
+use. It wakes for the end of the earliest grace, removes in a goroutine of its
+own (a cache of tens of gigabytes takes a while, and no pass or stop waits
+for it), never takes the live cache or a path that is no rotated sibling of
+it, and logs the same `disk_kept` event, whose `not_rotated` says that
+nothing was rotated. A removal that fails, or a daemon that cannot ask `go`
+which cache is live (`go` is not on the PATH it runs with), is told once in
+the daemon's log and tried again after a wait that doubles up to an hour. The
+rotation itself stays the landing's keeping, under `disk_keep_gb`.
+
 GOCACHE belongs to the machine and the record of rotations to the yard, so
 two yards on one machine each see only their own rotations. A landing
 therefore also records every rotated cache it finds beside the live one that

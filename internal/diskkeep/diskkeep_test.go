@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -779,5 +780,157 @@ func TestLastRotation(t *testing.T) {
 				t.Errorf("lastRotation = %v, want %v", got, want)
 			}
 		})
+	}
+}
+
+// Sweep is the removal half of Keep and nothing else: whatever disk_keep_gb
+// says, the directories whose grace has ended go, a rotation is not made and
+// go-tmp is not touched, and what a keeping would not take stays: a cache
+// younger than its grace by a second, the live cache and a path that is no
+// rotated sibling (dropped from the record, never removed). A cache no record
+// names is adopted as in Keep, and one disk_kept event says the sweep, with
+// not_rotated; a sweep with nothing to do says nothing.
+func TestSweepRemovesWhatIsPastItsGrace(t *testing.T) {
+	k, _ := newKeeping(t, nil)
+	base := t.TempDir()
+	live := filepath.Join(base, "go-build-9")
+	mkcache(t, live)
+	exact := filepath.Join(base, "go-build-7")  // stood aside for exactly the grace
+	almost := filepath.Join(base, "go-build-8") // a second short of it
+	stray := filepath.Join(base, "go-build-5")  // a cache no record names
+	for _, dir := range []string{exact, almost, stray} {
+		mkcache(t, dir)
+	}
+	foreign := filepath.Join(t.TempDir(), "precious")
+	mkdir(t, foreign)
+	k.fake.gotmp = filepath.Join(base, "go-tmp")
+	stale := filepath.Join(k.fake.gotmp, "go-build111")
+	mkdir(t, stale)
+	past := k.now.Add(-4 * time.Hour)
+	if err := os.Chtimes(stale, past, past); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	must(t, k.st.RecordGOCACHEOld(ctx, exact, k.now.Add(-OldGrace)))
+	must(t, k.st.RecordGOCACHEOld(ctx, almost, k.now.Add(-OldGrace+time.Second)))
+	// The live cache's own record, a day past its grace: a pointer moved back.
+	must(t, k.st.RecordGOCACHEOld(ctx, live, k.now.Add(-24*time.Hour)))
+	must(t, k.st.RecordGOCACHEOld(ctx, foreign, k.now.Add(-24*time.Hour)))
+	// Over every threshold: a keeping would do nothing at all.
+	k.free = []uint64{50 * GB, 60 * GB}
+
+	rep, err := Sweep(ctx, k.st, live, k.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !rep.Acted || len(rep.Removed) != 1 || rep.Removed[0] != exact {
+		t.Errorf("Acted = %v, Removed = %v, want [%s]", rep.Acted, rep.Removed, exact)
+	}
+	if len(rep.Adopted) != 1 || rep.Adopted[0] != stray {
+		t.Errorf("Adopted = %v, want [%s]", rep.Adopted, stray)
+	}
+	if _, err := os.Stat(exact); !os.IsNotExist(err) {
+		t.Errorf("%s stands at the end of its grace: %v", exact, err)
+	}
+	for _, dir := range []string{almost, live, foreign, stray, stale} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("%s was taken: %v", dir, err)
+		}
+	}
+	if len(k.fake.sets) != 0 {
+		t.Errorf("go env -w ran %v: a sweep rotates nothing", k.fake.sets)
+	}
+	var recorded []string
+	for _, o := range k.olds() {
+		recorded = append(recorded, o.Dir)
+	}
+	want := []string{almost, live, stray}
+	slices.Sort(want)
+	if !slices.Equal(recorded, want) {
+		t.Errorf("recorded = %v, want %v: the removed and the foreign dropped, the adopted added", recorded, want)
+	}
+	if len(rep.Errors) != 1 || !strings.Contains(rep.Errors[0], "not a rotated sibling") {
+		t.Errorf("Errors = %v, want the foreign path told", rep.Errors)
+	}
+	evs := k.events()
+	if len(evs) != 1 {
+		t.Fatalf("%d disk_kept events, want 1", len(evs))
+	}
+	data := evs[0].Data
+	if data["free_before"] != float64(50*GB) || data["free_after"] != float64(60*GB) || data["gave_up"] != false {
+		t.Errorf("event free %v -> %v, gave_up %v", data["free_before"], data["free_after"], data["gave_up"])
+	}
+	if data["rotated_from"] != "" || data["rotated_to"] != "" || data["not_rotated"] != rep.NotRotated || rep.NotRotated == "" {
+		t.Errorf("event rotation %v -> %v, not_rotated %v: a sweep says it rotated nothing", data["rotated_from"], data["rotated_to"], data["not_rotated"])
+	}
+	if removed, _ := data["removed"].([]any); len(removed) != 1 || removed[0] != exact {
+		t.Errorf("event removed = %v, want [%s]", data["removed"], exact)
+	}
+	if adopted, _ := data["adopted"].([]any); len(adopted) != 1 || adopted[0] != stray {
+		t.Errorf("event adopted = %v, want [%s]", data["adopted"], stray)
+	}
+	if evs[0].Actor != Actor || evs[0].Bead != nil {
+		t.Errorf("event actor = %q, bead = %v, want %q and none", evs[0].Actor, evs[0].Bead, Actor)
+	}
+
+	// With the second gone the same sweep finds nothing past its grace: it
+	// reads the free space once, logs nothing and says it did not act.
+	k.free = append(k.free, 50*GB)
+	rep, err = Sweep(ctx, k.st, live, k.now.Add(time.Second-1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Acted || len(rep.Removed) != 0 || len(rep.Adopted) != 0 {
+		t.Errorf("an idle sweep reports %+v", rep)
+	}
+	if evs := k.events(); len(evs) != 1 {
+		t.Errorf("%d disk_kept events after an idle sweep, want still 1", len(evs))
+	}
+}
+
+// The time the next sweep has something to remove from: the earliest record
+// and the grace, whatever the record names.
+func TestDue(t *testing.T) {
+	at := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	rec := func(dir string, ago time.Duration) store.GOCACHEDir {
+		return store.GOCACHEDir{Dir: dir, At: at.Add(-ago)}
+	}
+	if _, ok := Due(nil); ok {
+		t.Errorf("Due of nothing recorded is a time")
+	}
+	got, ok := Due([]store.GOCACHEDir{rec("/cache/go-build-6", 5*time.Minute), rec("/cache/go-build-5", 20*time.Minute), rec("/cache/go-build-7", time.Minute)})
+	if want := at.Add(-20*time.Minute + OldGrace); !ok || !got.Equal(want) {
+		t.Errorf("Due = %v, %v, want %v: the earliest record's grace", got, ok, want)
+	}
+}
+
+// The live cache is the one go answers with, as a clean absolute path: any
+// other answer would make every record look foreign to a sweep, which drops
+// what is foreign from the record unremoved. Keep asks the same, and refuses
+// before it does anything.
+func TestLiveGOCACHE(t *testing.T) {
+	k, settings := newKeeping(t, nil)
+	k.fake.gocache = "/cache/go-build-8"
+	if got, err := LiveGOCACHE(); err != nil || got != "/cache/go-build-8" {
+		t.Fatalf("LiveGOCACHE = %q, %v", got, err)
+	}
+	for _, answer := range []string{
+		"",
+		"go-build-8",
+		"/cache/go-build-8/",
+		"/cache/../cache/go-build-8",
+		"go: downloading go1.99 (darwin/arm64)\n/cache/go-build-8",
+	} {
+		k.fake.gocache = answer
+		if got, err := LiveGOCACHE(); err == nil {
+			t.Errorf("LiveGOCACHE of %q = %q, want an error", answer, got)
+		}
+	}
+	if _, err := Keep(context.Background(), k.st, settings); err == nil || !strings.Contains(err.Error(), "go env GOCACHE") {
+		t.Errorf("Keep with a garbled GOCACHE: %v, want the refusal", err)
+	}
+	if len(k.fake.sets) != 0 || len(k.events()) != 0 {
+		t.Errorf("Keep did something about a GOCACHE it could not read: %v", k.fake.sets)
 	}
 }
