@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"yardr.dev/yardr/internal/limits"
+	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
 	"yardr.dev/yardr/internal/web"
@@ -30,14 +31,21 @@ func limitsSource(t *testing.T, f *fixture, body string) string {
 
 // limitsSourceAs is limitsSource for a source named name with the kinds
 // table given, for a yard with more than one source.
+//
+// The command is a stand-in, not an executable file written here: Linux does
+// not start a file while any process holds it open for writing (text file
+// busy), and these tests run side by side, each starting processes. A fork of
+// one made while another was writing its script carries that descriptor until
+// it execs, and the other's first run then did not start: an answer of none
+// and no line in the asked file, which a test of how often the source is
+// asked read as an ask too few (yardr-kmtc). A stand-in's executable is a
+// launcher that no test writes again.
 func limitsSourceAs(t *testing.T, f *fixture, name, kinds, body string) string {
 	t.Helper()
 	dir := t.TempDir()
 	asked := filepath.Join(dir, "asked")
 	script := filepath.Join(dir, "provider")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho \"$1\" >>"+asked+"\n"+body+"\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	scripttest.Write(t, script, "#!/bin/sh\necho \"$1\" >>"+asked+"\n"+body+"\n")
 	text := "name: " + name + "\nabout: A stand-in for a provider of limits.\nlimits:\n  command: [" + script + ", \"{provider}\", --json]\n  kinds: " + kinds + "\n"
 	if _, err := f.st.PutSource(context.Background(), name+".yaml", text, "me"); err != nil {
 		t.Fatal(err)
@@ -182,15 +190,13 @@ func TestLimits(t *testing.T) {
 
 // selfSource stores machine, a source that answers for itself: the
 // stand-in appends a line to the asked file each time it runs, then does
-// body. It returns the asked file.
+// body. It returns the asked file. A stand-in, as limitsSourceAs has it.
 func selfSource(t *testing.T, f *fixture, body string) string {
 	t.Helper()
 	dir := t.TempDir()
 	asked := filepath.Join(dir, "asked")
 	script := filepath.Join(dir, "machine")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho ran >>"+asked+"\n"+body+"\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	scripttest.Write(t, script, "#!/bin/sh\necho ran >>"+asked+"\n"+body+"\n")
 	text := "name: machine\nlimits:\n  command: [" + script + "]\n"
 	if _, err := f.st.PutSource(context.Background(), "machine.yaml", text, "me"); err != nil {
 		t.Fatal(err)
@@ -453,20 +459,23 @@ func TestLimitsCached(t *testing.T) {
 }
 
 // Once the last answer is older than the minute, the next read asks again.
+// The test sets the window to a nanosecond and waits for no time to pass: an
+// ask is stamped when its run starts and a read waits for its run, so the
+// answer is older than the window by the time the first read returns, however
+// busy the machine is.
 func TestLimitsAskedAgain(t *testing.T) {
 	t.Parallel()
 	st := storetest.New(t)
 	home := t.TempDir()
 	srv, err := web.NewServer(st, home, nil)
 	must(t, err)
-	srv.SetLimitsEvery(50 * time.Millisecond)
+	srv.SetLimitsEvery(time.Nanosecond)
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
 	f := &fixture{t: t, st: st, ts: ts, home: home}
 	asked := limitsSource(t, f, limitsAnswer())
 	useKinds(t, f, "", "kimi")
 	f.get("/limits", "Accept", "application/json")
-	time.Sleep(200 * time.Millisecond)
 	f.get("/limits", "Accept", "application/json")
 	if got := askedFor(t, asked); got != "moonshot moonshot" {
 		t.Errorf("asked = %q, want kimi's provider again after the minute", got)

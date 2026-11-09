@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"yardr.dev/yardr/internal/previewtest"
+	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
 	"yardr.dev/yardr/internal/telemetry"
@@ -30,7 +31,9 @@ import (
 
 func TestMain(m *testing.M) {
 	previewtest.MaybeServe() // a preview's app in these tests is this binary again
-	storetest.Main(m)
+	code := m.Run()
+	scripttest.Remove()
+	os.Exit(code)
 }
 
 type fixture struct {
