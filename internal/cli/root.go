@@ -52,6 +52,10 @@ type app struct {
 	// terminal to give. Nil means the real check.
 	inTerm func(in io.Reader) bool
 	actor  string
+	// packsOrigin is where the packs repository serves from, for the pack
+	// a delegated apply names by URL; tests hand their stand-in's. Empty
+	// means the repository itself (pack.Repository).
+	packsOrigin string
 	// actingAs is the actor resolved once by PersistentPreRunE, so a later
 	// lookup cannot time out and silently change this run's attribution.
 	actingAs    string

@@ -3,6 +3,9 @@ package cli
 import (
 	"context"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -100,10 +103,10 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 	// embeds the server registers: telegram's declaration whole, and
 	// starter with the digest the started-record case below names.
 	rpcAPI, own := storetest.NewRPCOwned(t)
-	own.SetPackReader(func(ctx context.Context, name string, depot string, _ store.Mappings, yard store.API) (*store.PackReading, error) {
+	reader := func(ctx context.Context, name string, depot string, _ store.Mappings, yard store.API) (*store.PackReading, error) {
 		switch name {
-		case "telegram":
-			sub, err := fs.Sub(packs.FS, "telegram")
+		case "telegram", "pushover":
+			sub, err := fs.Sub(packs.FS, name)
 			if err != nil {
 				return nil, err
 			}
@@ -115,7 +118,7 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
-			text, err := fs.ReadFile(packs.FS, "telegram/telegram.yaml")
+			text, err := fs.ReadFile(packs.FS, name+"/"+name+".yaml")
 			if err != nil {
 				return nil, err
 			}
@@ -123,12 +126,24 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 			for _, o := range plan.Objects {
 				askPlan.Objects = append(askPlan.Objects, store.AskPlanObject{Kind: o.Kind, Name: o.Name, Action: o.Action})
 			}
-			return &store.PackReading{Name: "telegram", Kind: "source", Digest: plan.Digest, Plan: askPlan,
-				Sources: []store.AskSource{{Name: "telegram", Text: string(text)}}}, nil
+			return &store.PackReading{Name: name, Kind: "source", Digest: plan.Digest, Plan: askPlan,
+				Sources: []store.AskSource{{Name: name, Text: string(text)}}}, nil
 		case "starter":
 			return &store.PackReading{Name: "starter", Kind: "git", Depot: depot, Digest: "abc", Plan: &store.AskPlan{}}, nil
 		}
 		return nil, store.ErrNotFound
+	}
+	own.SetPackReader(reader)
+	// The packs repository is a stand-in serving pushover and starter: the
+	// store's fetching holds a pack to its URL and its pin as the server's
+	// does (pack.LoadRepository), and reads it as the double above reads
+	// them.
+	origin := serveRepositoryPacks(t, "pushover", "starter")
+	own.SetPackFetcher(func(_ context.Context, from, digest string) (store.PackReader, error) {
+		if _, err := pack.LoadRepository(origin, from, digest); err != nil {
+			return nil, err
+		}
+		return reader, nil
 	})
 	st := userYardOn(t, rpcAPI)
 	ctx := context.Background()
@@ -201,4 +216,103 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 	if _, err := st.Delegation(ctx, id+1, "jo"); err == nil {
 		t.Error("an asking plan left a record")
 	}
+
+	// A pack of the packs repository is named by its URL and pinned. An
+	// apply with no pin, with a URL of another origin, with another digest
+	// or with another flag refuses, and leaves no record; the pinned apply
+	// of the repository's own pack runs and the record names where it came
+	// from.
+	sub, err := fs.Sub(packs.FS, "pushover")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pushover, err := pack.Load(sub, packs.Embedded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := pack.Build(ctx, st, pushover, pack.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := origin + "pushover/"
+	pin := "sha256:" + plan.Digest
+	starterSub, err := fs.Sub(packs.FS, "starter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	starterPack, err := pack.Load(starterSub, packs.Embedded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	starterPlan, err := pack.Build(ctx, st, starterPack, pack.Options{Depot: "web", Home: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustAs(t, st, "jo", "mail", "yardmaster", "and pushover, from the packs repository")
+	if head, err = st.Head(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mail = strconv.FormatUint(head, 10)
+	asRepository := func(args ...string) (string, error) {
+		a := appOn(st)
+		a.packsOrigin = origin
+		return run(t, a.rootCmd(), append(args, "--for", "jo", "--mail", mail, "--actor", "yardmaster")...)
+	}
+	for words, want := range map[string]string{
+		"pack apply " + from: "applied pinned",
+		"pack apply " + strings.Replace(from, "yardr-packs", "other", 1) + " --sha256 " + pin: "is not in the packs repository",
+		"pack apply " + from + " --sha256 " + strings.Repeat("a", 64):                         "is not the one pinned",
+		"pack apply " + from + " --sha256 " + pin + " --yes":                                  "no other flag, not --yes",
+		"pack apply " + from + " --sha256 " + pin + " --auth packs":                           "no other flag, not --auth",
+		"pack apply " + origin + "pushover/roles/ --sha256 " + pin:                            "want one pack's name",
+		// A plan that still asks refuses whole, as an embedded one does.
+		"pack apply " + origin + "starter/ --sha256 sha256:" + starterPlan.Digest + " --depot web": "its plan asks",
+	} {
+		if out, err := asRepository(strings.Fields(words)...); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %q, %v; want %q", words, out, err, want)
+		}
+	}
+	if _, err := st.GetSource(ctx, "pushover"); err == nil {
+		t.Fatal("a refused repository apply added the source")
+	}
+	if _, err := st.Delegation(ctx, id+1, "jo"); err == nil {
+		t.Fatal("a refused repository apply left a record")
+	}
+	if out, err := asRepository("pack", "apply", strings.TrimSuffix(from, "/"), "--sha256", plan.Digest); err != nil || !strings.Contains(out, "pushover") {
+		t.Fatalf("pushover from the repository: %q, %v", out, err)
+	}
+	if _, err := st.GetSource(ctx, "pushover"); err != nil {
+		t.Fatalf("pushover was not applied: %v", err)
+	}
+	rec, err = st.Delegation(ctx, id+1, "jo")
+	if err != nil || rec.State != "done" || rec.DelegatedBody.From != from || rec.DelegatedBody.Digest != plan.Digest || rec.DelegatedBody.Prior != "" {
+		t.Fatalf("record %d = %+v, %v; want pushover done from %s", id+1, rec, err, from)
+	}
+	for _, want := range []string{"from: " + from, "prior digest: none known", "pack pushover, digest " + pin, "state: done"} {
+		if show := mustAs(t, st, "jo", "delegation", "show", strconv.FormatUint(id+1, 10)); !strings.Contains(show, want) {
+			t.Errorf("delegation show lacks %q:\n%s", want, show)
+		}
+	}
+}
+
+// serveRepositoryPacks serves the packs yardr embeds under names as packs of
+// a stand-in packs repository, at <origin><name>/, and answers the origin.
+func serveRepositoryPacks(t *testing.T, names ...string) string {
+	t.Helper()
+	mux := http.NewServeMux()
+	for _, name := range names {
+		dir := t.TempDir()
+		sub, err := fs.Sub(packs.FS, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.CopyFS(dir, sub); err != nil {
+			t.Fatal(err)
+		}
+		prefix := "/yardr-packs/main/" + name + "/"
+		mux.Handle(prefix, http.StripPrefix(prefix, http.FileServer(http.Dir(dir))))
+	}
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv.URL + "/yardr-packs/main/"
 }

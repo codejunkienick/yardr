@@ -64,6 +64,15 @@ func readEmbeddedPack(ctx context.Context, name string, depot string, mappings s
 	if err != nil {
 		return nil, err
 	}
+	return readPack(ctx, p, func(rel string) ([]byte, error) { return fs.ReadFile(sub, rel) }, label, name, depot, mappings, yard, home)
+}
+
+// readPack is the reading of a loaded pack: the embedded pack of a name
+// (readEmbeddedPack), or a pack of the packs repository the server fetched
+// and held to its digest (packFetcherFor). read is how a file of the pack is
+// read, so that a pack served over HTTP is read from the bytes its digest
+// was checked on and never from a second answer of the server.
+func readPack(ctx context.Context, p *pack.Pack, read func(rel string) ([]byte, error), label, name, depot string, mappings store.Mappings, yard store.API, home string) (*store.PackReading, error) {
 	reading := &store.PackReading{Name: p.Name, Kind: p.Kind, Mappings: mappings, Label: label, Build: version.Describe()}
 	for _, d := range p.Declared {
 		src := store.AskSource{Name: d.Name, Text: d.Text}
@@ -73,7 +82,7 @@ func readEmbeddedPack(ctx context.Context, name string, depot string, mappings s
 				continue
 			}
 			seenProg[c.Argv[0]] = true
-			data, err := fs.ReadFile(sub, path.Join(declDirOf(d.File), c.Argv[0]))
+			data, err := read(path.Join(declDirOf(d.File), c.Argv[0]))
 			if err != nil {
 				return nil, fmt.Errorf("declaration %s names the command file %s: %v", d.File, c.Argv[0], err)
 			}
@@ -97,7 +106,7 @@ func readEmbeddedPack(ctx context.Context, name string, depot string, mappings s
 		if err != nil {
 			return nil, err
 		}
-		reading.Plan = askPlanOf(sub, plan, pack.Answers{}, nil, nil)
+		reading.Plan = askPlanFrom(read, plan, pack.Answers{}, nil, nil)
 		reading.Digest, reading.Programs = plan.Digest, plan.Programs
 		return reading, nil
 	}
@@ -134,7 +143,7 @@ func readEmbeddedPack(ctx context.Context, name string, depot string, mappings s
 		}
 	}
 	reading.Depot = target
-	reading.Plan = askPlanOf(sub, plan, answers, open, calls)
+	reading.Plan = askPlanFrom(read, plan, answers, open, calls)
 	reading.Digest, reading.Programs = plan.Digest, plan.Programs
 	reading.Grants = packGrantsOf(open, calls)
 	targets, err := packTargetsOf(ctx, yard, plan, answers)
@@ -339,12 +348,18 @@ func declDirOf(file string) string {
 	return ""
 }
 
-// askPlanOf is a pack plan as a card or delegated record holds it, with each created or
+// askPlanOf is askPlanFrom for the files of an embedded pack, sub.
+func askPlanOf(sub fs.FS, plan *pack.Plan, answers pack.Answers, open, calls map[string]map[string]bool) *store.AskPlan {
+	return askPlanFrom(func(rel string) ([]byte, error) { return fs.ReadFile(sub, rel) }, plan, answers, open, calls)
+}
+
+// askPlanFrom is a pack plan as a card or delegated record holds it, with each created or
 // changed file's text as the import would install it (filled) and its
 // unified diff against the installed text, computed here from the two
 // texts the file's hashes already name. What the mappings already
 // answer, in answers, open and calls, is no part of what it still asks.
-func askPlanOf(sub fs.FS, plan *pack.Plan, answers pack.Answers, open, calls map[string]map[string]bool) *store.AskPlan {
+// read reads a file of the pack by its path in it.
+func askPlanFrom(read func(rel string) ([]byte, error), plan *pack.Plan, answers pack.Answers, open, calls map[string]map[string]bool) *store.AskPlan {
 	out := &store.AskPlan{}
 	for _, q := range plan.Missing(answers) {
 		out.Missing = append(out.Missing, q.ID+": "+q.Ask)
@@ -383,7 +398,7 @@ func askPlanOf(sub fs.FS, plan *pack.Plan, answers pack.Answers, open, calls map
 				sum := sha256.Sum256(data)
 				ao.FileOldSHA = hex.EncodeToString(sum[:])
 			}
-			if raw, err := fs.ReadFile(sub, o.Name); err == nil {
+			if raw, err := read(o.Name); err == nil {
 				if o.File.Fill {
 					raw = pack.Fill(raw, plan.Fill)
 				}

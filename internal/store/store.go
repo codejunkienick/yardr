@@ -165,6 +165,10 @@ type Store struct {
 	// the binary of the process that owns the store (SetPackReader,
 	// runask_pack.go); nil where no server owns the store.
 	packReader PackReader
+	// packFetcher fetches a pack of the packs repository for a delegated
+	// pack apply (SetPackFetcher, delegation_repo.go); nil where no
+	// server owns the store.
+	packFetcher PackFetcher
 	// hostedMint mints a hosted-Google token in-process for a source
 	// call, from the process that owns the store (SetHostedMint,
 	// sourcecalls.go); nil where no server owns the store, and a hosted

@@ -395,8 +395,14 @@ type DelegatedBody struct {
 	// A delegated pack apply's record (delegation_pack.go): the pack and
 	// its digest, each plan object with its diff and complete
 	// before-state, what was written before a failure, and the failure.
-	Pack    string                `json:"pack,omitempty"`
-	Digest  string                `json:"digest,omitempty"`
+	Pack   string `json:"pack,omitempty"`
+	Digest string `json:"digest,omitempty"`
+	// From is the packs repository's URL a pack was applied from, and
+	// Prior the digest of the pack that stood before it where the yard's
+	// records name one: the digest a re-apply takes the run back to
+	// (delegation_repo.go). Empty for a pack yardr embeds.
+	From    string                `json:"from,omitempty"`
+	Prior   string                `json:"prior,omitempty"`
 	Objects []DelegatedPackObject `json:"objects,omitempty"`
 	Written []string              `json:"written,omitempty"`
 	Error   string                `json:"error,omitempty"`
@@ -439,6 +445,8 @@ type DelegatedPackObject struct {
 	// answers would write it, as JSON, filled in with Fields where the
 	// reading carries one: a write under the record is held to it
 	// value by value, so naming the object opens none of its values.
+	// A declared source's is the hash of its text (TextSum) where the
+	// pack came from the packs repository, which no write re-reads.
 	Target string `json:"target,omitempty"`
 }
 

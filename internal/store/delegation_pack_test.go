@@ -421,7 +421,7 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 		if name != "starter" {
 			return nil, errors.New("pack " + name + ": yardr embeds no pack of that name")
 		}
-		return &store.PackReading{Name: "starter", Kind: "git", Depot: depot, Digest: "abc123",
+		return &store.PackReading{Name: "starter", Kind: "git", Depot: depot, Digest: "abc123", Label: "embedded in yardr test",
 			Plan:    &store.AskPlan{Objects: objects},
 			Targets: map[string]string{"flow\x00starter.default": string(flowJSON), "route\x00depot shed stage new -> builders": routeJSON}}, nil
 	})
@@ -505,7 +505,7 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 
 	// The import's record of this pack in this depot passes; another
 	// pack's, and one naming an object beside the record, refuse.
-	if _, err := y.api.RecordPack(packCtx, store.PackImport{Pack: "starter", Depot: "shed", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}}, true, "yardmaster"); err != nil {
+	if _, err := y.api.RecordPack(packCtx, store.PackImport{Pack: "starter", Depot: "shed", Source: "embedded in yardr test", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}}, true, "yardmaster"); err != nil {
 		t.Errorf("the import's own record: %v", err)
 	}
 	if _, err := y.api.RecordPack(packCtx, store.PackImport{Pack: "other", Depot: "shed"}, true, "yardmaster"); err == nil {
@@ -513,6 +513,19 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 	}
 	if _, err := y.api.RecordPack(packCtx, store.PackImport{Pack: "starter", Depot: "shed", Objects: []store.PackObject{{Kind: "group", Name: "others"}}}, true, "yardmaster"); err == nil {
 		t.Error("an import record naming an object beside the record was let through")
+	}
+	// A pack yardr embeds is read from no URL and with no credential: the
+	// source an import records is where a later apply by name reads it.
+	for name, imp := range map[string]store.PackImport{
+		"a URL as its source":          {Pack: "starter", Depot: "shed", Source: "https://evil.example/starter/", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}},
+		"a directory as its source":    {Pack: "starter", Depot: "shed", Source: "/srv/packs/starter", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}},
+		"another scheme as its source": {Pack: "starter", Depot: "shed", Source: "ftp://evil.example/starter/", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}},
+		"no source":                    {Pack: "starter", Depot: "shed", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}},
+		"a credential's name":          {Pack: "starter", Depot: "shed", Source: "embedded in yardr test", Auth: "packs", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}},
+	} {
+		if _, err := y.api.RecordPack(packCtx, imp, true, "yardmaster"); err == nil || !strings.Contains(err.Error(), "no other source and no credential") {
+			t.Errorf("an import record with %s: %v", name, err)
+		}
 	}
 	if err := y.api.FinishDelegatedPack(ctx, id, true, nil, "", "yardmaster"); err != nil {
 		t.Fatal(err)

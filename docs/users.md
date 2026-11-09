@@ -268,9 +268,10 @@ directory and preset args for a member other than the yardmaster; `depot test`
 and `depot base`; `user set
 <user> notify=<source>` alone; `hook add` in its card's safe shape (a name,
 `--source`, optional `--unknown`, and the secret file the yard owns for the hook);
-and `pack apply` of a pack yardr embeds, with `--depot` and its mappings alone
-and past the pack card's bounds, where its plan asks nothing after them (a plan
-that asks is refused whole, and no answer path is built for it). Free
+and `pack apply` of a pack yardr embeds, by name, or of a pack of the packs
+repository, by its URL and `--sha256` (below), with `--depot` and its mappings
+alone and past the pack card's bounds, where its plan asks nothing after them (a
+plan that asks is refused whole, and no answer path is built for it). Free
 args, `env_file`, `env_command`, a prompt, a group's `cmd`, the exec runner,
 the yardmaster's own entry, the switch, and a hook add with `--says`,
 `--makes`, `--map`, `--as` or a secret file of its own each refuse it. A
@@ -305,6 +306,27 @@ or the import's own record among them) is held to the object and the
 values that reading names for it, and a grant passes only where the
 run's mappings answered it. A record left `started` carries no write
 after an hour.
+
+A pack of the packs repository is applied the same way, named by its URL and
+pinned: `yardr pack apply https://raw.githubusercontent.com/yardr-dev/yardr-packs/main/<name>/
+--sha256 <digest> --depot <depot> --for ada --mail 1042`. The URL is that
+repository's and nowhere else's (not another host, ref or path, and no
+directory), and `--sha256` is the digest `yardr pack check` prints, which the
+operator's mail names or the yardmaster reads from the repository; no other
+flag comes with them. The yard fetches the pack itself, before the store's
+write and never in it, and holds it to the digest before it reads anything
+of it, so what the store takes the run's objects and values from, and what
+is installed, is those bytes and not a second answer of the server. Its
+record also names the URL and the digest that stood before it, the latest
+delegated run of that pack into the depot that finished from the repository,
+and mails both. The import it leaves names that URL as the source a later apply
+by name reads the pack from again, and the store refuses any other source and
+any credential there. Re-applying the pack pinned to that digest takes the run
+back, as far as the repository still serves those bytes: its `main` moves,
+so after its next commit that digest is refused with nothing changed, and the
+record's before-state is the way back by hand. A commit's URL is refused on
+purpose: GitHub serves a fork's commit under its parent's path, so only the
+branch the owner writes stands for the owner.
 
 On a delegated run the approval is the operator's own cited mail, so the run
 skips the card the same command carries today: the code card of `group add`,

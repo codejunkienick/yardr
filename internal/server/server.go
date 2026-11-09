@@ -20,6 +20,7 @@ import (
 
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/hooks"
+	"yardr.dev/yardr/internal/pack"
 	"yardr.dev/yardr/internal/peer"
 	"yardr.dev/yardr/internal/preview"
 	"yardr.dev/yardr/internal/rpc"
@@ -141,6 +142,9 @@ func (r *runner) serve(ctx context.Context) (string, bool, error) {
 	// How a pack apply ask reads the packs this build embeds, and a
 	// preset grant ask their presets by source.
 	st.SetPackReader(packReaderFor(c.Home))
+	// And how a delegated pack apply reads a pack of the packs
+	// repository: fetched by the server, held to its pinned digest.
+	st.SetPackFetcher(packFetcherFor(c.Home, pack.Repository))
 	st.SetPresetReader(presetReaderFor())
 	// How a hosted-Google source call mints: in-process through the edge,
 	// never by running the mint command its setting names.

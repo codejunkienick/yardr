@@ -1,12 +1,13 @@
 package cli
 
-// A delegated pack apply (design yardr-m90n 3.2): the yardmaster applies
-// a pack yardr embeds for an operator on their cited mail, past the card
-// bounds of internal/store/runask_pack.go, which bind cards and not this
-// leg. The command takes the depot and its mappings alone; a plan that
-// still asks after them refuses whole, and no answer path is built for
-// it here. pack.Apply keeps the run's delegated record around the import
-// (internal/pack/apply_delegated.go).
+// A delegated pack apply (design yardr-m90n 3.2 and 3.9): the yardmaster
+// applies a pack yardr embeds, or a pack of the packs repository pinned by
+// its digest, for an operator on their cited mail, past the card bounds of
+// internal/store/runask_pack.go, which bind cards and not this leg. The
+// command takes the depot and its mappings alone (and, for a pack of the
+// repository, the pin); a plan that still asks after them refuses whole,
+// and no answer path is built for it here. pack.Apply keeps the run's
+// delegated record around the import (internal/pack/apply_delegated.go).
 
 import (
 	"fmt"
@@ -41,31 +42,74 @@ func (a *app) packApplyRun(c *cobra.Command, name string, f *importFlags) error 
 // delegatedPackFlags are the flags a delegated pack apply refuses, each
 // shaping or answering the import past its mappings: the run takes
 // --depot and the mappings (--flow, --crew, --group, --bind, --members,
-// --open-threads, --calls) alone.
+// --open-threads, --calls) alone, and for a pack of the packs repository
+// the pin (--sha256) beside them.
 var delegatedPackFlags = []string{"auth", "depot-roles", "pack-roles", "source-env", "source-base", "notify", "yes", "sha256", "prune"}
 
-// delegatedPackApply applies the embedded pack name for the operator the
-// run's delegation names, with no terminal to ask in: what the mappings
-// do not answer, the plan still asks, and that refuses the run whole
-// before anything writes.
-func (a *app) delegatedPackApply(c *cobra.Command, name string, f *importFlags) error {
-	ctx := c.Context()
-	if packDir(name) || pack.IsURL(name) {
-		return fmt.Errorf("pack %s: a delegated run applies a pack yardr embeds, by name alone: a directory or a URL is the operator's to type in a terminal", name)
+// refuseFlags refuses a delegated pack apply that carries a flag of
+// delegatedPackFlags other than allow, naming the command the run takes.
+func refuseFlags(c *cobra.Command, name, use, allow string) error {
+	for _, flag := range delegatedPackFlags {
+		if flag != allow && c.Flags().Changed(flag) {
+			return fmt.Errorf("pack %s: a delegated run takes yardr pack apply %s --depot <depot> with its mappings (--flow, --crew, --group, --bind, --members, --open-threads, --calls) and no other flag, not --%s", name, use, flag)
+		}
+	}
+	return nil
+}
+
+// delegatedPack is the pack a delegated apply takes: one yardr embeds,
+// by name alone, or one of the packs repository, by its URL and its pin.
+// Anything else — a directory, another URL, an imported pack — is the
+// operator's to type in a terminal, and is refused before a file of it is
+// read.
+func (a *app) delegatedPack(c *cobra.Command, name string, f *importFlags) (*pack.Pack, error) {
+	if pack.IsURL(name) {
+		return a.delegatedRepositoryPack(c, name, f)
+	}
+	if packDir(name) {
+		return nil, fmt.Errorf("pack %s: a delegated run applies a pack yardr embeds, by name, or one of the packs repository, by its URL and --sha256: a directory is the operator's to type in a terminal", name)
 	}
 	if _, err := fs.Stat(packs.FS, name+"/pack.yaml"); err != nil {
-		return fmt.Errorf("pack %s: yardr embeds no pack of that name (it embeds %s): a pack read from anywhere else is the operator's to type in a terminal", name, strings.Join(embeddedPacks(), ", "))
+		return nil, fmt.Errorf("pack %s: yardr embeds no pack of that name (it embeds %s): a pack of the packs repository is named by its URL (%s<name>/) and pinned with --sha256, and a pack read from anywhere else is the operator's to type in a terminal", name, strings.Join(embeddedPacks(), ", "), pack.Repository)
 	}
-	for _, flag := range delegatedPackFlags {
-		if c.Flags().Changed(flag) {
-			return fmt.Errorf("pack %s: a delegated run takes yardr pack apply <name> --depot <depot> with its mappings (--flow, --crew, --group, --bind, --members, --open-threads, --calls) and no other flag, not --%s", name, flag)
-		}
+	if err := refuseFlags(c, name, "<name>", ""); err != nil {
+		return nil, err
 	}
 	sub, err := fs.Sub(packs.FS, name)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	p, err := pack.Load(sub, packs.Embedded+" in yardr "+version.Describe())
+	return pack.Load(sub, packs.Embedded+" in yardr "+version.Describe())
+}
+
+// delegatedRepositoryPack reads the pack of the packs repository the URL
+// from names, held to the digest --sha256 pins before anything of it is
+// planned, asked or written. A URL that is not the repository's, and an
+// apply with no pin, refuse before a request goes out. The store fetches the
+// pack again itself and holds the run to what it read (store.PackFetcher):
+// this is the command's own copy, which it installs from.
+func (a *app) delegatedRepositoryPack(c *cobra.Command, from string, f *importFlags) (*pack.Pack, error) {
+	origin := or(a.packsOrigin, pack.Repository)
+	name, url, err := pack.RepositoryPack(origin, from)
+	if err != nil {
+		return nil, err
+	}
+	if !c.Flags().Changed("sha256") {
+		return nil, fmt.Errorf("pack %s: a pack of the packs repository is applied pinned: add --sha256 <digest>, as yardr pack check %s prints it", name, url)
+	}
+	if err := refuseFlags(c, name, "<url> --sha256 <digest>", "sha256"); err != nil {
+		return nil, err
+	}
+	return pack.LoadRepository(origin, url, string(f.sha256))
+}
+
+// delegatedPackApply applies the pack name, an embedded one or one of the
+// packs repository, for the operator the run's delegation names, with no
+// terminal to ask in: what the mappings do not answer, the plan still
+// asks, and that refuses the run whole before anything writes.
+func (a *app) delegatedPackApply(c *cobra.Command, name string, f *importFlags) error {
+	ctx := c.Context()
+	p, err := a.delegatedPack(c, name, f)
 	if err != nil {
 		return err
 	}

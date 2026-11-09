@@ -9,7 +9,9 @@ package pack
 // is rewritten "done" or "failed" at the end, a failure naming the
 // objects written before it. A record that would pass the blob cap
 // refuses before anything writes (store.StartDelegatedPack). The
-// partial import stays either way, and applying again finishes it.
+// partial import stays either way, and applying again finishes it. A
+// pack of the packs repository (Plan.Dir a URL) is the same run, with the
+// URL beside its digest and, in the record, the digest that stood before.
 
 import (
 	"context"
@@ -51,7 +53,14 @@ func (p *Plan) beginDelegated(ctx context.Context, st store.API, o ApplyOptions,
 	if mappings.IsZero() {
 		mappings = store.Mappings{Flow: p.Flow, Crew: p.Crew, Groups: p.Groups}
 	}
-	id, err := st.StartDelegatedPack(ctx, store.DelegatedPackStart{Pack: p.Pack, Depot: p.Depot, Digest: p.Digest,
+	// A pack read from a URL is the packs repository's, and the store
+	// fetches it again itself to hold the run to what the origin serves:
+	// the URL is told, not trusted (store.PackFetcher).
+	from := ""
+	if IsURL(p.Dir) {
+		from = p.Dir
+	}
+	id, err := st.StartDelegatedPack(ctx, store.DelegatedPackStart{Pack: p.Pack, Depot: p.Depot, Digest: p.Digest, From: from,
 		Mappings: mappings, Grants: delegatedGrants(o), Objects: objects}, o.Actor)
 	if err != nil {
 		return nil, err

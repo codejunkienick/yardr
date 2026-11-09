@@ -280,6 +280,13 @@ func writeDelegation(w io.Writer, rec *store.Delegation) {
 	}
 	if rec.Pack != "" {
 		fmt.Fprintf(w, "pack %s, digest sha256:%s\n", rec.Pack, rec.Digest)
+		if rec.From != "" {
+			prior := "none known"
+			if rec.Prior != "" {
+				prior = "sha256:" + rec.Prior
+			}
+			fmt.Fprintf(w, "from: %s\nprior digest: %s\n", rec.From, prior)
+		}
 		for _, o := range rec.DelegatedBody.Objects {
 			fmt.Fprintf(w, "  %s %s: %s\n", o.Kind, o.Name, o.Action)
 			if o.Diff != "" {

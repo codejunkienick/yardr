@@ -472,10 +472,12 @@ func TestDocsShowNoQuotedText(t *testing.T) {
 // names it, except what the move audited (bead yardr-2c8b): the pack's own
 // name; the stand-in and the trial sources, which serve its API shape so
 // the pack proves without the real service; the problem and schema URL
-// namespaces and the fetched programs' release addresses, which live under
-// github.com; and help texts, examples and comments that use GitHub as the
-// example source. Tests are not held to this: they prove the pack against
-// the stand-in. A line importing a Go module (github.com/...) cannot go.
+// namespaces, the fetched programs' release addresses and the address the
+// packs repository serves its packs from (internal/pack/repository.go),
+// which live under github.com; and help texts, examples and comments that
+// use GitHub as the example source. Tests are not held to this: they prove
+// the pack against the stand-in. A line importing a Go module
+// (github.com/...) cannot go.
 func TestNoGoCodeNamesGitHub(t *testing.T) {
 	t.Parallel()
 	kept := []string{
@@ -493,6 +495,7 @@ func TestNoGoCodeNamesGitHub(t *testing.T) {
 		"internal/cli/threadopen.go",
 		"internal/cli/threadstate.go",
 		"internal/hooks/open.go",
+		"internal/pack/repository.go",
 		"internal/standin/standin.go",
 		"packs/packs.go",
 	}

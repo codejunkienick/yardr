@@ -21,28 +21,7 @@ func TestDelegatedPackApplyThroughTheServerReading(t *testing.T) {
 	home := t.TempDir()
 	st := packReaderYard(t)
 	st.SetPackReader(packReaderFor(home))
-	if err := st.SetSetting(ctx, store.OperatorSetting, "jo", "jo"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddUser(ctx, "ada", "jo"); err != nil {
-		t.Fatal(err)
-	}
-	for _, r := range []string{"yardmaster", "clerk"} {
-		if _, err := st.PutCrew(ctx, store.CrewMember{Name: r, Runner: "herdr"}, "jo"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := st.SetSetting(ctx, store.DelegationSetting, "true", "jo"); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Mail(ctx, "yardmaster", "apply telegram for me", "jo"); err != nil {
-		t.Fatal(err)
-	}
-	mail, err := st.Head(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dctx := store.WithDelegation(ctx, store.DelegatedCall{For: "jo", Mail: mail, Command: "yardr pack apply telegram"})
+	dctx := delegatedServerYard(t, st, "yardr pack apply telegram")
 
 	reading, err := readEmbeddedPack(ctx, "telegram", "", store.Mappings{}, st, home)
 	if err != nil {
