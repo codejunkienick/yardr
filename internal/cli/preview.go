@@ -113,10 +113,11 @@ The bead's builder, the user it is for or an operator may start a watch.
 It ends when the bead leaves the stage it is in now or is closed, after
 the idle time without a request (preview_idle, four hours while unset), or
 seven days after it began, and the same command starts it again at the
-same address. Put the address it prints in the bead's note. On a yard
-connected to an edge that is the host the edge gave the watch, which the
-command waits a few seconds for; where the edge gives none it is the path on
-this yard, and the words the edge refused with are printed beneath it.
+same address. Put the address it prints in the bead's note, when there is
+one. On a yard connected to an edge that is the host the edge gave the
+watch, which the command waits a few seconds for; where the edge gives
+none the command says there is no address yet, and the words the edge
+refused with are printed beneath it.
 
 A watch serves plain files. A site that needs a build step runs the
 builder's code, and is an app: yardr preview propose.`,
@@ -138,7 +139,14 @@ builder's code, and is an app: yardr preview propose.`,
 			p = a.awaitHost(c.Context(), st, p, settings)
 			return a.out(c.OutOrStdout(), p, func(w io.Writer) {
 				fmt.Fprintf(w, "watching %s: %s is served read-only, and its pages reload when a file changes\n", p.Bead, p.Dir)
-				fmt.Fprintf(w, "opens at %s\n", opensAt(p))
+				if p.Host != "" {
+					fmt.Fprintf(w, "opens at %s\n", opensAt(p))
+				} else {
+					// No host is no address: the yard-side path only the edge
+					// reaches opens nothing from here, so the command says why
+					// there is nothing to open instead of printing it.
+					fmt.Fprintf(w, "no address from the edge yet\n")
+				}
 				if p.StateDetail != "" {
 					fmt.Fprintf(w, "%s\n", p.StateDetail)
 				}
@@ -182,13 +190,11 @@ func (a *app) awaitHost(ctx context.Context, st store.API, p *store.Preview, set
 	return p
 }
 
-// opensAt is where a person opens the preview p: the host the edge gave it,
-// else its path on this yard.
+// opensAt is where a person opens the preview p: the host the edge gave it.
+// The caller prints the no-host reason instead of calling this with none:
+// the yard-side path only the edge reaches is not an address.
 func opensAt(p *store.Preview) string {
-	if p.Host != "" {
-		return "https://" + p.Host + "/"
-	}
-	return "/preview/" + p.App + "/"
+	return "https://" + p.Host + "/"
 }
 
 func shortCommit(commit string) string {

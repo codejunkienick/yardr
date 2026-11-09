@@ -12,21 +12,22 @@ yardr preview watch yardr-1a2b mockups    # one directory of it
 
 ```text
 watching yardr-1a2b: ~/.yardr/worktrees/site/yardr-1a2b/mockups is served read-only, and its pages reload when a file changes
-opens at /preview/yardr-1a2b/
+no address from the edge yet
 ends when yardr-1a2b leaves new, after 4h without a request, or in 7d
 ```
 
-The builder puts the address in the note it writes on the bead; notes show
-as they always do. `yardr bead show` has nothing new. On a yard connected to an
-edge the address is the host the edge gave the watch, which the command waits
-a few seconds for, and the note's reader opens it in a browser:
+The builder puts the address in the note it writes on the bead, when there
+is one; notes show as they always do. `yardr bead show` has nothing new. On
+a yard connected to an edge the address is the host the edge gave the watch,
+which the command waits a few seconds for, and the note's reader opens it in
+a browser:
 
 ```text
 opens at https://p-12.preview.example.net/
 ```
 
-Where the edge gives none, the address is the path on the yard as above, and the
-words the edge refused with are printed under it
+Where the edge gives none, there is no address yet: the command says so as
+above, and the words the edge refused with are printed under it
 ([Previews through the edge](edge.md#previews-through-the-edge)).
 
 ## A watch is a preview of another kind
@@ -117,4 +118,4 @@ drops it. A watch binds no port, and the report says so. The host the edge
 answers with is kept on the watch's row, and it stands when the same command
 starts the watch again, so the address is the same. The edge serves previews
 for yards on their own server (`vps`) alone today; for a yard it does not serve
-it refuses the report, and the watch keeps its path on the yard.
+it refuses the report, and the watch has no address.

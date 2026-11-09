@@ -76,7 +76,7 @@ run() {
     /bin/bash "$script" >"$tmp/out" 2>"$tmp/err"
   got=$?
   verdict=ok; [ "$got" = "$want" ] || { verdict=WRONG; bad=1; }
-  printf '%-5s%-20s %-12s kit exit %s, script exit %s (want %s)\n' "$verdict" "$name" "$*" "$kitexit" "$got" "$want"
+  printf '%-5s %-20s %-12s kit exit %s, script exit %s (want %s)\n' "$verdict" "$name" "$*" "$kitexit" "$got" "$want"
   grep -hE '^probe: (passed|failed|the kit|BDP did not)|^harnessFailure|^stand-in' "$tmp/out" "$tmp/err" | sed 's/^/       /'
 }
 run pass              2 0

@@ -105,10 +105,11 @@ func TestPreviewProposeListStopForget(t *testing.T) {
 
 // A watch is started from a bead by its builder, the user it is for or an
 // operator, names the address it opens at and when it ends, and is listed
-// as a watch, without a commit or a port. The address is its path on the
-// yard, or, on a yard connected to an edge, the host the edge gave it: the
-// command waits for the supervisor to keep that on the row, and falls back to
-// the path, with the words of the edge's refusal beneath it.
+// as a watch, without a commit or a port. On a yard connected to an edge the
+// address is the host the edge gave it: the command waits for the supervisor
+// to keep that on the row. Where the edge gives none there is no address,
+// and the command says so instead of naming the yard-side path, with the
+// words of the edge's refusal beneath it.
 func TestPreviewWatchStartsAndListsAWatch(t *testing.T) {
 	t.Parallel()
 	st, own, ctx := reviewYardOwned(t, "/tmp/yard")
@@ -142,12 +143,15 @@ func TestPreviewWatchStartsAndListsAWatch(t *testing.T) {
 	name := store.WatchApp(b.ID)
 	for _, want := range []string{
 		"watching " + b.ID + ": " + filepath.Join(tree, "mockups") + " is served read-only",
-		"opens at /preview/" + name + "/",
+		"no address from the edge yet",
 		"ends when " + b.ID + " leaves new, after 4h without a request, or in 7d",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("watch printed %q, lacking %q", out, want)
 		}
+	}
+	if strings.Contains(out, "/preview/") {
+		t.Errorf("watch printed %q, want no yard-side path", out)
 	}
 	out, err = run(t, a.previewCmd(), "list")
 	if err != nil {
@@ -218,7 +222,8 @@ func TestPreviewWatchStartsAndListsAWatch(t *testing.T) {
 	}
 
 	// An edge that refused the report leaves its words in the row's detail:
-	// the command stops waiting, prints the path and says why that is all.
+	// the command stops waiting, says there is no address, and prints the
+	// refusal beneath that.
 	refusal := "the edge refused the report: previews need a yard on its own server: this yard is docker (403)"
 	none := ""
 	again()
@@ -227,20 +232,20 @@ func TestPreviewWatchStartsAndListsAWatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "opens at /preview/"+name+"/\n"+refusal+"\n") {
-		t.Fatalf("watch the edge refused printed %q, want the path and the refusal beneath it", out)
+	if !strings.Contains(out, "no address from the edge yet\n"+refusal+"\n") || strings.Contains(out, "/preview/") {
+		t.Fatalf("watch the edge refused printed %q, want the reason and the refusal beneath it, and no path", out)
 	}
 	out, err = run(t, a.previewCmd(), "list")
 	if err != nil || !strings.Contains(out, "running ("+refusal+")") {
 		t.Fatalf("list printed %q, %v, want the refusal after the state", out, err)
 	}
 
-	// An edge that has not answered when the wait is up: the path, as before.
+	// An edge that has not answered when the wait is up: the reason, as before.
 	again()
 	a.hostWait = 20 * time.Millisecond
 	out, err = run(t, a.previewCmd(), "watch", b.ID, "mockups")
-	if err != nil || !strings.Contains(out, "opens at /preview/"+name+"/\nends when") {
-		t.Fatalf("watch with no answer printed %q, %v, want the path", out, err)
+	if err != nil || !strings.Contains(out, "no address from the edge yet\nends when") || strings.Contains(out, "/preview/") {
+		t.Fatalf("watch with no answer printed %q, %v, want the reason and no path", out, err)
 	}
 	a.hostWait = 0
 

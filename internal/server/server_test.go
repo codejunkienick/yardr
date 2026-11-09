@@ -23,6 +23,7 @@ import (
 
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/peer"
+	"yardr.dev/yardr/internal/previewtest"
 	"yardr.dev/yardr/internal/rpc"
 	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/store"
@@ -726,12 +727,7 @@ func TestStoreOutlivesCallsPastTheShutdownGrace(t *testing.T) {
 		if err := st.SetSetting(ctx, store.OperatorSetting, "ada", "ada"); err != nil {
 			t.Fatal(err)
 		}
-		port, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		previewPort := port.Addr().(*net.TCPAddr).Port
-		port.Close()
+		previewPort := previewtest.FreePort(t, "127.0.0.1")
 		dir := t.TempDir()
 		pidPath := filepath.Join(dir, "pid")
 		command := fmt.Sprintf("trap '' TERM; echo $$ > %q; exec sleep 60", pidPath)
@@ -842,12 +838,7 @@ func TestCallDuringReplaceLandsOnTheNewBuild(t *testing.T) {
 	if err := st.SetSetting(ctx, store.OperatorSetting, "ada", "ada"); err != nil {
 		t.Fatal(err)
 	}
-	port, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	previewPort := port.Addr().(*net.TCPAddr).Port
-	port.Close()
+	previewPort := previewtest.FreePort(t, "127.0.0.1")
 	dir := t.TempDir()
 	previewPIDPath := filepath.Join(dir, "preview.pid")
 	previewCommand := fmt.Sprintf("trap '' TERM; echo $$ > %q; exec sleep 60", previewPIDPath)
