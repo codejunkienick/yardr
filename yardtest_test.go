@@ -5047,8 +5047,9 @@ func raceStart(t *testing.T, ctx context.Context, dir, path string, env []string
 // that queued earlier, and two of a class in the order they came, each
 // printing its place and the holder. A waiter killed with KILL while
 // queued leaves a ticket the next waiter skips and removes, and one killed
-// with TERM removes its own ticket and exits 143. A ticket carries the
-// waiter's bead and worktree. Its own home stands in for the yard's, so no
+// with TERM removes its own ticket and exits 143. A waiter whose ps dies
+// without an answer keeps the holder's ticket (yardr-5766). A ticket carries
+// the waiter's bead and worktree. Its own home stands in for the yard's, so no
 // real gate waits on it.
 func TestYardTestRaceLockServesWaitersInOrder(t *testing.T) {
 	// Its home, driver, queue and waiters are its own.
@@ -5171,6 +5172,50 @@ func TestYardTestRaceLockServesWaitersInOrder(t *testing.T) {
 		_, err := os.ReadFile(holderFile)
 		t.Fatalf("the holder never acquired the lock and recorded itself: %v", err)
 	})
+	// A ps that dies without an answer says nothing of a pid. The TERM that
+	// stops a waiter reaches the ps it has in flight beside it, and a waiter
+	// that took that silence for the holder's death removed the holder's
+	// ticket as it died (yardr-5766). Which of the two the waiter reads first
+	// is the scheduler's, and shows only now and then on a loaded macOS
+	// runner, so a stand-in stands for the TERM. It answers as the real ps
+	// does, except that its first question about the holder ends in TERM, and
+	// it logs each question about the holder: the second is asked once the
+	// verdict on the first is in. A helper that reads /proc, as Linux has,
+	// runs no ps.
+	realPS, psErr := exec.LookPath("ps")
+	if _, err := os.Stat("/proc/self/stat"); err != nil && psErr == nil {
+		holderTicket := known[0]
+		fake := t.TempDir()
+		writeBins(t, fake, map[string]string{"ps": `#!/bin/sh
+case " $* " in
+*" $HOLDER_PID "*)
+  echo "$$" >>"$FAKE/asked"
+  mkdir "$FAKE/killed" 2>/dev/null && kill -TERM $$ ;;
+esac
+exec "$REAL_PS" "$@"
+`})
+		unanswered := startWith("ps-bead", []string{
+			pathWith(fake), "FAKE=" + fake, "REAL_PS=" + realPS,
+			"HOLDER_PID=" + holderTicket[strings.LastIndex(holderTicket, "-")+1:],
+		}, "sh", "-c", "echo ps >>"+quote(order))
+		known = waitTicket(known)
+		psTicket := newest(known)
+		pollUntil(t, 30*time.Second, 10*time.Millisecond, func(_ time.Time) bool {
+			b, _ := os.ReadFile(filepath.Join(fake, "asked"))
+			return strings.Count(string(b), "\n") >= 2
+		}, func(time.Duration) {
+			b, _ := os.ReadFile(unanswered.out.Name())
+			t.Fatalf("the waiter asked ps about the holder fewer than twice in 30 s:\n%s", b)
+		})
+		if !slices.Contains(tickets(), holderTicket) {
+			b, _ := os.ReadFile(unanswered.out.Name())
+			t.Fatalf("a ps that died unanswered made the waiter remove the live holder's ticket; queued: %v\n%s", tickets(), b)
+		}
+		killTicket(psTicket, syscall.SIGTERM)
+		if code, out := finish(unanswered); code != 143 {
+			t.Errorf("the waiter whose ps died exits %d, want 143:\n%s", code, out)
+		}
+	}
 	// A waiter killed with KILL leaves its ticket behind; the queue
 	// must skip it.
 	dead := start("dead-bead", "sh", "-c", "echo dead >>"+quote(order))
@@ -5369,7 +5414,11 @@ func TestYardTestRaceLockTermDuringTicketCreationLeavesNoQueueFiles(t *testing.T
 // ticket is gone from the queue while the holder's stays. The signal goes
 // to the shell's pid alone, as the one in the evidence did: to the whole
 // group the lock helper would get one too and clean up whatever the shell
-// does. Its own home stands in for the yard's, so no real gate waits on it.
+// does. Where the helper has no /proc, that group's TERM also kills the ps the
+// helper has in flight, and the holder's ticket must survive its silence
+// (yardr-5766): TestYardTestRaceLockServesWaitersInOrder pins that, with a ps
+// that dies on cue. Its own home stands in for the yard's, so no real gate
+// waits on it.
 func TestYardTestRaceLockTermToQueuedGateStopsItAtOnce(t *testing.T) {
 	t.Parallel()
 	needTool(t, "perl")

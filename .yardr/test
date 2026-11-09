@@ -299,7 +299,9 @@ runlogged() {
 # as there are approved beads, so landings cannot starve the other runs.
 # Nothing pre-empts the
 # holder: a landing waits for the run that holds the lock. A dead waiter's
-# ticket is skipped and removed. Waiting gates print their place and the
+# ticket is skipped and removed; a ticket is dead only when the OS says its
+# pid is gone, and a ps that was killed or could not run says nothing, so kill
+# is asked too (yardr-5766). Waiting gates print their place and the
 # holder at once and then each minute. The holder records itself beside the
 # lock for that line.
 # sh .yardr/test --race-queue shows the holder and waiters, each with its
@@ -368,10 +370,16 @@ sub proc_stat {
   }
   if ($have_ps) {
     my $out = qx(ps -p $pid -o state= -o lstart= 2>/dev/null);
-    if ($? == -1) {
+    # Only a ps that ended well and printed a line has said anything of the
+    # pid. One that printed nothing may be saying the pid is gone (it exits 1
+    # then), but a ps that was killed or could not run prints nothing too, and
+    # the TERM that stops a waiter reaches the ps it has in flight beside it:
+    # a waiter that took that silence for a death removed the live holder
+    # ticket as it died (yardr-5766). Whatever ps leaves unanswered, kill is
+    # asked, and only both saying gone makes the pid gone.
+    if ($? != 0 || !defined($out) || $out !~ /\S/) {
       return (undef, undef, kill(0, $pid) ? 1 : 0);
     }
-    return (undef, undef, 0) unless defined($out) && $out =~ /\S/;
     if ($out =~ /^\s*(\S+)\s+(.+?)\s*$/) {
       return (substr($1, 0, 1), $2, 1);
     }
