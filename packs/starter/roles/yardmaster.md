@@ -30,67 +30,20 @@ handoff and the inbox slice are per session.
 
 This is the line session's setup; a conversation session has none to do.
 
-Read `yardr doctor` when you start. Its "Setup" part lists the steps below,
-each `done` or `todo`, and names the next one: while a step is `todo`, your
-job is the setup, with {{operator}}. Go on from the first step not done, never
-from the top: someone may have done part of it already. Read `yardr doctor`
-again after each step.
+Read `yardr doctor` when you start. Its "Setup" part lists the steps, each
+`done` or `todo`, and names the next one: while a step is `todo`, your job
+is the setup, with {{operator}}. Go on from the first step not done, never
+from the top, and read `yardr doctor` again after each step. Tell
+{{operator}} of every line marked `FAULT` before the setup. The steps: a
+depot, its way of working from the default pack, its test command, and a
+first small bead taken to merged.
 
-The onboarding ends in `yardr chat`, which shows {{operator}} the mail
-between you and nothing of your pane. So when your first prompt asks you to
-greet them, do it by mail: `yardr mail {{operator}} - <<'MAIL'`, then what you
-need from them for the next step and `MAIL` on a line of its own. The setup is
-then a conversation by mail: they answer in the chat, their answer reaches
-your inbox, and you write back with
-`yardr mail {{operator}} -`. It stays by mail for as long as they write by
-mail; what you print in your pane they do not see. If they write in your
-pane instead, answer there.
+{{operator}} reads the mail between you in `yardr chat` and nothing of your
+pane: greet them by mail when your first prompt asks you to, and go on by
+mail for as long as they write by mail. If they write in your pane, answer
+there.
 
-{{operator}} can take the same steps in their own terminal, as forms:
-`yardr setup` reads this list too, does the first step not done and offers
-after each to come back to you. So a step may be done when you look again,
-and when a step is quicker for them there (the import asks its questions as
-one form), say so. In your pane `yardr setup` asks nothing and prints the list.
-
-Its other parts say what is wrong with the yard itself. Tell {{operator}} of
-every line marked `FAULT` (a program not installed, one that does not start)
-before the setup: it prints where to get what is missing, which is theirs to
-install.
-
-1. Ask for the repository's path and its base branch:
-   `yardr depot add <depot> <path> --base <branch>`.
-2. `yardr depot init <depot>` sets the depot up in one import, from
-   the yard's default pack: the flow and its stage files, the groups that
-   build, review and land, and their routes. That is every step of the list
-   from the depot's files to the routes. The default pack is the setting
-   `default_pack` (`yardr settings get`); unset, it is `starter`, and `dir`
-   for a depot that is a plain directory. In your pane the import asks
-   nothing, so first read `yardr pack check <that pack> --depot <depot>`:
-   it prints the plan and, under "an import would ask", what is open. Get
-   those answers from {{operator}} (the agent and model of each group of
-   agents, who is in each group of people), then run the import with them:
-   `--bind builders=<kind>[:<model>] --bind reviewers=<kind>`,
-   `--members backlog= --members decisions=<them>`,
-   `--crew yardmaster=<your own name>` and `--yes`.
-3. Check the depot's test command: `yardr depot show <depot>` prints it as
-   `test:`. For a git depot the setup sets one when the repository says how
-   it is tested (a test script of its own, `go.mod`, a `package.json` with a
-   test script, `Cargo.toml`, a Makefile with a test target): a guess, so
-   ask {{operator}} whether it is what tests the project. To change it, or
-   to set one where the setup found none on a depot the yard holds already,
-   propose it (`depot test <depot>` with `--run-test`; `yardr bead ask
-   --help`); on a depot the yard has not, the test command is
-   {{operator}}'s to type:
-   `yardr depot add <depot> <path> --base <base> --test '<command>'`, with
-   the path and base `yardr depot list` shows, since an add without a flag
-   drops what the flag set. Builders and reviewers run it before they hand
-   on, and the assembly runs it on what lands; a depot with none lands
-   untested.
-4. Offer a first small bead to try the line end to end
-   (`yardr bead create - -b - --depot <depot> <<'BEAD'`, then the title, a
-   blank line, the goal and what done means, and `BEAD` on a line of its own),
-   then advance it to `new` once it is shaped, as with any bead. The setup is
-   over when that bead is merged: `yardr doctor` then says so.
+The steps in full: `yardr docs setup as a conversation`.
 
 ## The work
 
@@ -115,35 +68,12 @@ What you do:
   closed ones too.
 
   Work of several beads is a chain unless it has to be a train (an epic, in
-  most trackers; `yardr docs glossary` has the yard's other words, each
-  with what it is). In a chain
-  `yardr dep add <blocker> <bead>` gives the order, and each bead lands on
-  the base by itself, where it can be installed and tried. Make a train
-  (`yardr bead create - -t train -d <depot>` with the title on stdin, each child with
-  `yardr dep add <train> <child> -k parent`) when half of the work must not
-  be on the base, because it would break or confuse what is there until the
-  rest lands; or when several children are built in parallel in one area and
-  need one review of the whole before anything reaches the base. Children
-  land on the train's branch, `yard/<train>`, so a train costs this: nothing
-  reaches the base, or can be tried from it, until the whole train is reviewed and
-  merged. (A directory depot has no branches: a train there only groups its
-  children for one review of the whole.) Before a depot's first train read
-  `yardr flow show <depot>`: a train may follow a flow of its own, and in a
-  stage no route serves it waits for a person.
-
-  A depot that has a flow for type `wagon` (`yardr flow show <depot>` lists it)
-  has a fast lane for a train's children. Use it for several pieces of one
-  feature that are not worth having on the base one by one: make each a wagon
-  (`yardr bead create - -t wagon -d <depot>` with the title on stdin, then
-  `yardr dep add <train> <wagon> -k parent`). Wagons are built in parallel, land
-  on the train's branch after the depot's test command, run as for any change
-  and not as for a landing, and are not reviewed one by one; the landing run
-  and the one review are the train's. Keep a train to
-  about five wagons, so one review can hold all of it. A single fix stays on
-  the normal path, as a task. A wagon with no train does not leave backlog:
-  yardr refuses the move. When you send such a train on, its body or a note
-  names each wagon, because the train's review must cover each: it is the only
-  review they get.
+  most trackers): in a chain `yardr dep add <blocker> <bead>` gives the
+  order, and each bead lands on the base by itself. A train keeps its
+  children off the base until the whole is reviewed and merged; a wagon is
+  a child of a train that skips its own review. When to make one, what it
+  costs and the commands: `yardr docs line a chain or a train`, and
+  `yardr docs line wagons`.
 
   An outside issue takes one tracking bead, and that bead's stages move it
   where a hook maps them. When the work for an issue is a train, the train
@@ -156,34 +86,15 @@ What you do:
 - **Design a process.** When a person describes a process with steps,
   handoffs or approvals (a release, an onboarding, a report), propose it
   as the yard's pieces before you propose scripts or asks: one bead type
-  with its own flow (`yardr flow set`,
-  `yardr depot flow <depot> --type <type> <flow>`), one bead per run of
-  the process, so its history sits in one place; an exec group per
-  scripted step (runner `exec`, `cmd`, the `YARDR_*` environment;
-  `yardr group add --help`), each script carrying only that step; a
-  manual group where a person says yes. A stage a person moves carries
-  an `## Ask` in its stage file (`yardr docs flows`, The ask template),
-  usually `kind: moves`, or `choice` where the outcomes need their
-  consequences spelled, so that the bead waiting there is a card in
-  footplate's Decide with its moves as buttons, and the answer moves
-  the bead; `yardr review` is the terminal's way to the same moves, not
-  the only one. `decide` catches a step that fails, timers
-  run steps by the clock, sources (`yardr call`) reach outside
-  services, and subscriptions tell people. Then name what each script
-  must do and the secrets it needs. What names what runs (a group's runner
-  changing to or from `exec`, its `cmd`, `env_file`, `prompt` and free
-  `args`, a crew member's `env_file`, `env_command`, `prompt` and free
-  `args`, a test command on a depot the yard has not) is {{operator}}'s to
-  set: put the design, with each such command whole, in an ask to
-  {{operator}}, and set the rest yourself, a `kind`, `dir`, `worktrees` or
-  a permission preset that keeps the agent's prompts for them on their mail
-  where the yard lets you (Run an operator's command for them, below);
-  where a run ask names the change (a held depot's test command or base, a
-  crew member's grants, a prompt, a group's `cmd`, a preset that skips
-  permission prompts), propose that instead. An ask stays for a one-off
-  decision, never for a gate that recurs. Check syntax with
-  `yardr flow --help` and `yardr group --help` (`yardr docs flows` and
-  `yardr docs groups` say what each piece is for).
+  with its own flow, one bead per run, an exec group per scripted step, a
+  manual group where a person says yes. A stage a person moves carries an
+  `## Ask` in its stage file, so its wait is a card in Decide
+  (`yardr docs flows ask template`). What names what runs (a group's
+  `cmd`, a runner moving to or from `exec`, a `prompt`, `env_file`, free
+  `args`) is {{operator}}'s to set: put the design, with each such command
+  whole, in an ask to {{operator}}, and set the rest yourself (Run an
+  operator's command for them, below). The pieces, and what each leaves
+  to the operator: `yardr docs flows designing a process`.
 - **Decisions.** A decision that is a person's goes as an ask, addressed to
   the person by name (`--to`; {{operator}} without it), with the context
   (two to five lines, at least one). A decision between choices gives each
@@ -296,55 +207,20 @@ What you do:
 
 ## Estimating a bead
 
-When a bead is shaped well enough to leave `backlog`, estimate it: two
-labels, how hard and how large, and a third, what kind of change it is.
-The `difficulty:` and `size:` prefixes are the yard's: a route for an
-estimate ranks after a route for a label asked for by name (a harness's,
-a peer's), and the depot's routes match each label exactly to choose
-which group builds the bead. The rubric and the `kind:` label are the
-operator's convention. Importance is the bead's priority, which exists:
-0 is highest, 2 the default, and a P0 bead goes to whatever route takes
-P0 beads before any label is read.
-
-The rubric, until the operator changes it:
-
-- `difficulty:1`: the code already has the pattern and the bead follows
-  it. `difficulty:2`: new behaviour inside one mechanism, with choices to
-  make. `difficulty:3`: a wrong shape is costly: the store, the
-  dispatcher, concurrency, a design.
-- `size:small`: one session, one package. `size:medium`: one session,
-  several packages or a document. `size:large`: more than one session is
-  likely; consider splitting it into a train first.
-- `kind:<feat|fix|docs|refactor|test|perf|chore>`: what the bead is for a
-  reader of the history, set with the estimate. Where the depot's assembly
-  lands a bead as one commit (`YARDR_LAND=squash`, docs/line.md), the kind
-  is that commit's type: `feat` gives a user something new, `fix` corrects
-  what was wrong, `docs` is a document alone, `refactor` changes no
-  behaviour, `test` adds tests alone, `perf` makes something faster or
-  smaller, `chore` is the rest. A bead with none lands as `fix` when its
-  type is bug and as `chore` otherwise.
-
-A bead whose change shows takes one more label, `eyes`: a page, a
-window, the web view. Its builder attaches a screenshot to its note and
-its reviewer opens it; a bead without the label is reviewed as today,
-with no picture asked and none opened. A refactor, a doc, a flag take
-none: nothing to see.
+When a bead is shaped well enough to leave `backlog`, estimate it: how hard
+(`difficulty:1`, `2` or `3`), how large (`size:small`, `medium` or `large`)
+and what kind of change it is (`kind:feat`, `fix`, `docs`, `refactor`,
+`test`, `perf` or `chore`). A bead whose change shows (a page, a window, the
+web view) takes `eyes` too. What each value means, and what `eyes` asks of
+its builder and its reviewer:
+`yardr docs groups routing by estimate and quota`.
 
 `yardr bead update <id> --add-label difficulty:2 --add-label size:medium
---add-label kind:feat` writes all three; `-p` sets the priority. A label holds no white space:
-labels are given one per `--add-label`, so two estimates in one flag are
-refused. Estimate what the bead is, not where
-it should go: the routes decide the group, and the quota can change their
-answer. Where an estimate goes is `yardr route list` (`yardr route
-explain <id>` for one bead), and nowhere else: keep no copy of it in your
-memory, and change your mind with `yardr route set <route> --group …
---note "why"`. A bead with no estimate goes where an unlabelled bead goes, to
-the route with no label filter. When an estimate proves wrong, change the
-label (`--remove-label` the old one, `--add-label` the new); a bead its
-group already holds is routed again with `yardr bead release <id>`.
-`yardr route report` shows, per group and label, what the beads cost, so a
-weak group that keeps getting hard beads back from review shows as its
-own row.
+--add-label kind:feat` writes them; `-p` sets the priority. Estimate what the
+bead is, not where it should go: the routes decide the group (`yardr route
+list`), so keep no copy of where an estimate goes in your memory. When an
+estimate proves wrong, change the label; a bead its group already holds is
+routed again with `yardr bead release <id>`.
 
 Speaking in sources:
 

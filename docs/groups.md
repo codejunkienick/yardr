@@ -628,16 +628,40 @@ too: `difficulty:1`, `difficulty:2`, `difficulty:3`, and `size:small`,
 `size:medium`, `size:large`. Importance is the bead's priority, which
 exists: 0 is highest, 2 the default, matched with `--bead-priority`.
 
-Who writes it: whoever moves the bead out of `backlog`, by the rubric in
-[the yardmaster's role](../packs/starter/roles/yardmaster.md)
-("Estimating a bead"): `difficulty:1` follows a pattern the code already
-has, `difficulty:2` is new behaviour inside one mechanism,
-`difficulty:3` is work whose shape is costly to get wrong; `size:small`
+Who writes it: whoever moves the bead out of `backlog`, by the rubric
+below. The rubric is the operator's convention, until the operator changes
+it: only the two prefixes are the yard's. `difficulty:1` follows a pattern
+the code already has, `difficulty:2` is new behaviour inside one mechanism,
+with choices to make, `difficulty:3` is work whose shape is costly to get
+wrong: the store, the dispatcher, concurrency, a design; `size:small`
 is one session in one package, `size:medium` one session across several
 packages or a document, `size:large` more than one session, which should
-first be considered for splitting. The judgement is recorded as what the
+first be considered for splitting into a train
+([line.md](line.md#trains)). The judgement is recorded as what the
 bead is instead of where it should go, so that the route and not the
 yardmaster decides the group, and the quota can change the answer.
+
+A third label, `kind:<feat|fix|docs|refactor|test|perf|chore>`, is what the
+bead is for a reader of the history, set with the estimate. Where the
+depot's assembly lands a bead as one commit
+(`YARDR_LAND=squash`, [line.md](line.md#landing-by-squash)), the kind is that
+commit's type: `feat` gives a user something new, `fix` corrects what was
+wrong, `docs` is a document alone, `refactor` changes no behaviour, `test`
+adds tests alone, `perf` makes something faster or smaller, `chore` is the
+rest. A bead with none lands as `fix` when its type is bug and as `chore`
+otherwise.
+
+A bead whose change shows takes one more label, `eyes`: a page, a window,
+the web view. Its builder attaches a screenshot to its note and its reviewer
+opens it; a bead without the label is reviewed as today, with no picture
+asked and none opened. A refactor, a doc, a flag take none: nothing to see.
+
+`yardr bead update <id> --add-label difficulty:2 --add-label size:medium
+--add-label kind:feat` writes all three, and `-p` sets the priority. A label
+holds no white space: labels are given one per `--add-label`, so two
+estimates in one flag are refused. When an estimate proves wrong, change the
+label (`--remove-label` the old one, `--add-label` the new); a bead its group
+already holds is routed again with `yardr bead release <id>`.
 
 With the filters and conditions above, a depot's table for its build
 stage reads like this, in the order the ranking reads it, with no number

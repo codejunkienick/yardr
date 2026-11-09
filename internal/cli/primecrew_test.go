@@ -18,7 +18,7 @@ func TestPrimeCrewKeepsFirstRunWhileSetupTodo(t *testing.T) {
 	t.Parallel()
 	st := userYard(t)
 	out := mustAs(t, st, "yardmaster", "prime", "--crew", "yardmaster")
-	for _, want := range []string{"## First run", "Ask for the repository's path", "yardr depot init"} {
+	for _, want := range []string{"## First run", "Go on from the first step not done", "`yardr docs setup as a conversation`"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("a fresh yard's prime lacks %q:\n%s", want, out)
 		}
@@ -69,14 +69,25 @@ func TestPrimeCrewReplacesFirstRunWhenSetupComplete(t *testing.T) {
 	if !strings.Contains(out, setupDoneLine) {
 		t.Errorf("a set-up yard's prime lacks the setup-done line:\n%s", out)
 	}
-	for _, not := range []string{"## First run", "Ask for the repository's path", "yardr depot init"} {
+	for _, not := range []string{"## First run", "Go on from the first step not done", "`yardr docs setup as a conversation`"} {
 		if strings.Contains(out, not) {
 			t.Errorf("a set-up yard's prime still holds %q:\n%s", not, out)
 		}
 	}
-	// Shorter by about the section (some 4 KB), not by a line.
-	if d := len(fresh) - len(out); d < 3000 {
-		t.Errorf("a set-up yard's prime is shorter by %d bytes, want over 3000", d)
+	// Shorter by the section less the line, not by the heading alone. The
+	// section is measured in the fresh prime, so the test holds a role that
+	// carries the steps in full and one cut to a brief the same.
+	start := strings.Index(fresh, "## First run")
+	if start < 0 {
+		t.Fatalf("a fresh yard's prime has no First run section:\n%s", fresh)
+	}
+	end := start + strings.Index(fresh[start:], "\n## ")
+	if end < start {
+		t.Fatalf("the First run section runs to the end of the prime:\n%s", fresh)
+	}
+	section := strings.TrimRight(fresh[start:end], "\n")
+	if d, want := len(fresh)-len(out), len(section)-len(setupDoneLine); d != want {
+		t.Errorf("a set-up yard's prime is shorter by %d bytes, want %d (the %d-byte section, less the %d-byte line)", d, want, len(section), len(setupDoneLine))
 	}
 	// The rest of the role is still there, around the line.
 	if i, j, k := strings.Index(out, "You coordinate the work"), strings.Index(out, setupDoneLine), strings.Index(out, "## The work"); i < 0 || j < 0 || k < 0 || !(i < j && j < k) {

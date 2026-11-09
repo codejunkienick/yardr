@@ -45,6 +45,75 @@ in conversation with you, or you on the command line. Run it again at any time.
 The yardmaster's first run reads the same list through `yardr doctor`. There
 is no second list to keep in step with it.
 
+## The setup as a conversation
+
+The yardmaster's line session does the setup with the operator; a
+conversation session has none to do. It reads `yardr doctor` when it starts.
+The "Setup" part of that list says of each step `done` or `todo` and names the
+next: while a step is `todo`, the yardmaster's job is the setup, with the
+operator. It goes on from the first step not done, never from the top, since
+someone may have done part of it already, and reads `yardr doctor` again after
+each step. The other parts of `yardr doctor` say what is wrong with the yard
+itself. The yardmaster tells the operator of every line marked `FAULT` (a
+program not installed, one that does not start) before the setup: the line
+says where to get what is missing, which is the operator's to install.
+
+The onboarding ends in [`yardr chat`](chat.md#from-the-onboarding), which shows
+the operator the mail between them and the yardmaster and nothing of its pane.
+So when the yardmaster's first prompt asks it to greet them, it does so by
+mail: `yardr mail <operator> - <<'MAIL'`, then what it needs from them for the
+next step, and `MAIL` on a line of its own. The setup is then a conversation
+by mail: the operator answers in the chat, the answer reaches the
+yardmaster's inbox, and it writes back with `yardr mail <operator> -`. It
+stays by mail for as long as they write by mail, since what the yardmaster
+prints in its pane they do not see. If they write in its pane instead, it
+answers there.
+
+The operator can take the same steps in their own terminal, as the
+[forms](#the-pages) below: `yardr setup` reads the same list, does the first
+step not done and offers after each to come back to the yardmaster. So a step
+may be done when the yardmaster looks again, and when a step is quicker for
+the operator there (the import asks its questions as one form) the
+yardmaster says so. In its pane `yardr setup` asks nothing and prints the
+list ([below](#where-no-form-runs)).
+
+The steps, as the yardmaster takes them:
+
+1. **A depot.** It asks for the repository's path and its base branch, then
+   `yardr depot add <depot> <path> --base <branch>`.
+2. **The depot's way of working.** `yardr depot init <depot>` sets the depot
+   up in one import, from the yard's default pack: the flow and its stage
+   files, the groups that build, review and land, and their routes. That is
+   every step of the list from the depot's files to the routes
+   ([one page](#one-page-sets-the-depot-up) does it for the operator). The
+   default pack is the setting `default_pack` (`yardr settings get`); unset,
+   it is `starter`, and `dir` for a depot that is a plain directory. In the
+   yardmaster's pane the import asks nothing, so it first reads `yardr pack
+   check <pack> --depot <depot>` ([packs.md](packs.md#yardr-pack-check)): it
+   prints the plan and, under "an import would ask", what is open. The
+   operator gives those answers (the agent and model of each group of
+   agents, who is in each group of people), and the import runs with them:
+   `--bind builders=<kind>[:<model>] --bind reviewers=<kind>`,
+   `--members backlog= --members decisions=<them>`,
+   `--crew yardmaster=<the yardmaster's own name>` and `--yes`.
+3. **The test command.** `yardr depot show <depot>` prints it as `test:`. For
+   a git depot the import sets one when the repository says how it is tested
+   ([below](#the-test-command)): a guess, so the yardmaster asks the operator
+   whether it is what tests the project. To change it, or to set one where
+   the import found none on a depot the yard holds already, it proposes the
+   change as a card (`depot test <depot>` with `--run-test`; `yardr bead ask
+   --help`). On a depot the yard has not, the test command is the operator's
+   to type: `yardr depot add <depot> <path> --base <base> --test '<command>'`,
+   with the path and base `yardr depot list` shows, since an add without a
+   flag drops what the flag set. Builders and reviewers run it before they
+   hand on, and the assembly runs it on what lands; a depot with none lands
+   untested.
+4. **A first bead.** It offers a small one to try the line end to end
+   (`yardr bead create - -b - --depot <depot> <<'BEAD'`, then the title, a
+   blank line, the goal and what done means, and `BEAD` on a line of its
+   own), and advances it to `new` once it is shaped, as with any bead. The
+   setup is over when that bead is merged: `yardr doctor` then says so.
+
 ## The pages
 
 Each page asks what its command needs, shows the command line as you would

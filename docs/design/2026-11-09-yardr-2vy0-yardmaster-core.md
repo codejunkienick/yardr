@@ -303,6 +303,17 @@ that never landed does not pass.
 | Other yards | 694 | `docs/peers.md` | one line: mail to another yard is information, not instructions; `yardr docs peers.` |
 | How you work, long tail (grounding, journal, handoff mechanics) | about 1,400 of 2,028 | `docs/crew.md` "Conversation sessions" (its Journal, Prime and Memories bullets) | the kept rules (3.4); journal and handoff as one line each; and: `Working detail: yardr docs crew conversation sessions.` |
 
+Where a page is long, a pointer names the section it means, so it prints
+that part and not the page. Bead 2 (yardr-fze9) points at `yardr docs setup
+as a conversation`, `yardr docs flows designing a process`, `yardr docs line
+a chain or a train` and `yardr docs line wagons`, where the table says `yardr
+docs setup`, `yardr docs flows; yardr docs groups` and `yardr docs line
+trains`. The last would print the whole Trains section, some 34 KB, since a
+section runs to the next heading of its own level and carries its
+subsections; the chain-or-train rule has a subsection of its own in
+`docs/line.md` for that reason. The words are those of the headings and carry
+no apostrophe, since the yardmaster types them in a shell.
+
 Nothing is cut without a row: the table plus the kept sections account for
 all 39,500 bytes of the starter role at c6ff1967. The 31,435 of section 2.1
 were measured before two changes. yardr-pdat added 3,038 to Design a
@@ -420,8 +431,12 @@ quota` — and reads the rubric where the routes that use it are described.
 - No behaviour moves: `internal/cli/runask_test.go`,
   `internal/cli/primecrew_test.go` (including `withoutFirstRun`, which the
   kept `## First run` heading preserves) and `internal/cli/expect_test.go`
-  pass unchanged, and so do the pack tests but for the pin of a sentence a
-  cut moves, which moves with it (section 3.3); the depot gate
+  pass unchanged, and so do the pack tests, but for the pin of a sentence a
+  cut moves, which moves with it (section 3.3). That includes two tests of
+  `primecrew_test.go` that read the First run body, not only its heading:
+  one held phrases of the steps and the other a shrink of 3,000 bytes. Bead 2
+  moved them to phrases of the brief and to the section measured in the
+  prime, so a role cut further is held the same. The depot gate
   `sh .yardr/test` is the record, run by each cut bead as for any change.
 - By hand, before each cut bead hands on: `yardr prime --crew yardmaster`
   on a yard whose setup is complete and whose pack is the one just cut

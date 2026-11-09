@@ -570,6 +570,16 @@ a stage a manual group serves, past the flow's first stage and not terminal,
 whose file has no section is a warning in `yardr flow show` of its depot and
 of the flow and after `yardr flow set`, never a refusal, since its beads reach
 no one's Decide and only `yardr review` moves them.
+
+So a stage a person moves carries an `## Ask`. The bead waiting there is then
+a card in footplate's Decide, with the stage's moves as buttons, and the
+answer moves the bead; `yardr review` is the terminal's way to the same
+moves, not the only one. The kind is usually `moves`, or `choice` where the
+outcomes need their consequences spelled. What waits on a person is a card
+in the same way, this one or the ask `yardr bead ask` puts on a bead, and
+never a "waiting on you" list in chat, in a pane or by mail: asks are
+answered at the yard, and an answer given in a list answers nothing.
+
 Four kinds answer four wants: `choice` offers outcomes the file names, `moves`
 offers the stage's moves as the flow has them, `input` asks for words, `check`
 asks whether something has been done.
@@ -963,6 +973,41 @@ stage's beads. With `--json` each such stage has a `siding` object: `fold`,
 `fold_after`, `fold_max`, `to`, `waiting`, `points`, `stuck`, `folds_at` and
 `warning`, of which `to`, `folds_at` and `warning` are absent when there is
 nothing to say.
+
+## Designing a process
+
+A person who describes a process with steps, handoffs or approvals (a
+release, an onboarding, a report) is answered with the yard's own pieces
+before any script or ask is proposed:
+
+- **One bead type with its own flow** (`yardr flow set`, then `yardr depot
+  flow <depot> --type <type> <flow>`, [above](#named-flows-and-pointers)), and
+  **one bead per run** of the process, so that its history sits in one place.
+- **An exec group per scripted step** (runner `exec`, a `cmd`, the `YARDR_*`
+  environment; `yardr group add --help`), each script carrying only that
+  step ([groups.md](groups.md#runners)).
+- **A manual group where a person says yes.** Its stage carries an `## Ask`
+  ([the ask template](#the-ask-template--ask), above), so the bead waiting
+  there is a card for the person and the answer moves it.
+- `decide` catches a step that fails, [timers](timers.md) bring a crew member
+  back by the clock, sources (`yardr call`) reach outside services
+  ([integrations.md](integrations.md)), and
+  [subscriptions](subscriptions.md) tell people.
+
+Then each script is named for what it must do and the secrets it needs. What
+names what runs is the operator's to set: a group's runner changing to or from
+`exec`, its `cmd`, `env_file`, `prompt` and free `args`; a crew member's
+`env_file`, `env_command`, `prompt` and free `args`; a test command on a depot
+the yard has not. The yardmaster puts the design, with each such command
+whole, in an ask to the operator, and sets the rest itself: a `kind`, `dir`,
+`worktrees`, or a permission preset that keeps the agent's prompts, which it
+sets for them on their mail where the yard lets it
+([users.md](users.md#the-yardmaster-for-the-operator)). Where a run ask names
+the change (a held depot's test command or base, a crew member's grants, a
+prompt, a group's `cmd`, a preset that skips permission prompts), it proposes
+that instead ([chat.md](chat.md#questions-for-you)). An ask stays for a
+one-off decision, never for a gate that recurs, which is a manual group's
+stage. `yardr flow --help` and `yardr group --help` check the syntax.
 
 ## Worked example: depot yardr
 

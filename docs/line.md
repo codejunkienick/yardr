@@ -1189,6 +1189,28 @@ stage's tab mirrors it with the stage in front, `<stage> [<train>] <bead>`
 one command makes the child and keeps the train from being ready until the
 child closes; `dep rm <train> <child> -k parent` removes both edges.
 
+### A chain or a train
+
+Work of several beads is a chain unless it has to be a train (an epic, in
+most trackers). In a chain `yardr dep add <blocker> <bead>` gives the order
+([Dependencies](#dependencies)), and each bead lands on the base by itself,
+where it can be installed and tried. Make a train (`yardr bead create - -t
+train -d <depot>` with the title on stdin, then `yardr dep add <train>
+<child> -k parent` for each child) when half of the work must not be on the
+base, because it would break or confuse what is there until the rest lands;
+or when several children are built in parallel in one area and need one
+review of the whole before anything reaches the base.
+
+A train costs this: its children land on the train's branch, `yard/<train>`,
+so nothing reaches the base, or can be tried from it, until the whole train
+is reviewed and merged. A directory depot has no branches: a train there only
+groups its children for one review of the whole
+([dir-depots.md](dir-depots.md)).
+
+Before a depot's first train, read `yardr flow show <depot>`: a train may
+follow a flow of its own ([the train's own flow](#the-trains-own-flow)), and a
+train in a stage no route serves waits for a person.
+
 ### Wagons
 
 A wagon is a child of a train that takes a shorter road to the train's
@@ -1205,6 +1227,11 @@ yardr bead create "Trains" -t train -d yardr
 yardr bead create "The parser" -t wagon -d yardr
 yardr dep add <train> <wagon> -k parent
 ```
+
+A depot has this lane when it has a flow for type `wagon`
+(`yardr flow show <depot>` lists it). A train sent on to review names each
+wagon in its body or in a note, because the train's review must cover each:
+it is the only review they get.
 
 - **The type.** A wagon is a bead of type `wagon`. In depot yardr the type has
   a flow of its own, [`.yardr/flows/type/wagon.flow`](../.yardr/flows/type/wagon.flow):

@@ -148,22 +148,26 @@ func TestTemplatesAreGeneric(t *testing.T) {
 		!strings.Contains(body, "In a conversation in your\n  pane, answer in the pane") {
 		t.Error("yardmaster.md does not say to answer a user's mail with yardr reply and a pane conversation in the pane")
 	}
-	// And when work of several beads is a train rather than a chain, with
-	// the commands that make one and what it costs: a role that names only
-	// the chain leaves the yardmaster never reaching for a train.
-	if body := files[yardmaster]; !strings.Contains(body, "is a chain unless it has to be a train") ||
-		!strings.Contains(body, "`yardr dep add <blocker> <bead>` gives the order") ||
-		!strings.Contains(body, "-t train -d <depot>") ||
-		!strings.Contains(body, "`yardr dep add <train> <child> -k parent`") ||
-		!strings.Contains(body, "until the whole train is reviewed and\n  merged") ||
-		!strings.Contains(body, "the train\n  tracks it") || !strings.Contains(body, "the last bead tracks it") {
-		t.Error("yardmaster.md does not say when to make a train and when a chain, how, what a train costs, or which bead tracks an outside issue")
+	// And when work of several beads is a train rather than a chain, and
+	// what a train costs: a role that names only the chain leaves the
+	// yardmaster never reaching for a train. The commands that make one and
+	// when to are in docs/line.md ("A chain or a train"), which the role
+	// points at. Which bead tracks an outside issue stays in the role. Read
+	// as one line, so that rewrapping a paragraph breaks nothing.
+	if flat := strings.Join(strings.Fields(files[yardmaster]), " "); !strings.Contains(flat, "is a chain unless it has to be a train") ||
+		!strings.Contains(flat, "`yardr dep add <blocker> <bead>` gives the order") ||
+		!strings.Contains(flat, "A train keeps its children off the base until the whole is reviewed and merged") ||
+		!strings.Contains(flat, "`yardr docs line a chain or a train`") ||
+		!strings.Contains(flat, "the train tracks it") || !strings.Contains(flat, "the last bead tracks it") {
+		t.Error("yardmaster.md does not say when to make a train and when a chain, what a train costs, where the rest is, or which bead tracks an outside issue")
 	}
 	// And that the onboarding's conversation is by mail: the operator sits
 	// in yardr chat, which shows mail and nothing of the yardmaster's pane.
-	if body := files[yardmaster]; !strings.Contains(body, "greet them, do it by mail: `yardr mail {{operator}} - <<'MAIL'`") ||
-		!strings.Contains(body, "It stays by mail for as long as they write by\nmail") {
-		t.Error("yardmaster.md does not say to greet the operator by mail, or that the setup conversation stays by mail")
+	// The whole setup is in docs/setup.md ("The setup as a conversation").
+	if flat := strings.Join(strings.Fields(files[yardmaster]), " "); !strings.Contains(flat, "greet them by mail when your first prompt asks you to") ||
+		!strings.Contains(flat, "go on by mail for as long as they write by mail") ||
+		!strings.Contains(flat, "`yardr docs setup as a conversation`") {
+		t.Error("yardmaster.md does not say to greet the operator by mail, or that the setup conversation stays by mail, or where the setup is")
 	}
 	for _, name := range []string{yardmaster, "starter/roles/builder.md", "starter/roles/reviewer.md", "dir/roles/builder.md", "dir/roles/reviewer.md"} {
 		if !strings.Contains(files[name], "{{operator}}") {
@@ -926,7 +930,21 @@ func TestYardmasterProposesOperatorsCommands(t *testing.T) {
 // reason and reviews as today, without blocking the bead.
 func TestEyesLabel(t *testing.T) {
 	files := packFiles(t)
-	for _, name := range []string{"starter/roles/yardmaster.md", "contributors/roles/yardmaster.md", "website/roles/yardmaster.md"} {
+	// The starter's yardmaster role is cut to a brief that names the label
+	// and points at the rubric, which docs/groups.md holds whole (design
+	// yardr-2vy0 3.2; internal/cli's TestShippedRolePointersResolve reads
+	// that section for the rule). The website's and the contributors' roles
+	// are cut by their own beads and carry the rule until then.
+	flat := strings.Join(strings.Fields(files["starter/roles/yardmaster.md"]), " ")
+	for _, want := range []string{
+		"A bead whose change shows (a page, a window, the web view) takes `eyes` too.",
+		"what `eyes` asks of its builder and its reviewer: `yardr docs groups routing by estimate and quota`",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("starter/roles/yardmaster.md lacks %q", want)
+		}
+	}
+	for _, name := range []string{"contributors/roles/yardmaster.md", "website/roles/yardmaster.md"} {
 		for _, want := range []string{
 			"takes one more label, `eyes`: a page, a\nwindow, the web view",
 			"A refactor, a doc, a flag take\nnone: nothing to see",
