@@ -417,11 +417,22 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	routeJSON := `{"stage":"new","depot":"shed","group":"builders","delete":["` + standingNew.ID + `"]}`
+	// The record the reading says the import leaves, objects aside: every
+	// field a later apply, or a page, starts from set, so that each forged
+	// row below differs from it in exactly one.
+	held := store.PackImport{Pack: "starter", Depot: "shed", Source: "embedded in yardr test", Flow: "default", Setup: true, DepotRoles: true,
+		Frame: "/yard/packs/starter/frame.html", FrameActive: true,
+		Groups:      map[string]string{"builders": "shed-builders"},
+		Crew:        map[string]string{"builder": "builder"},
+		OpenThreads: map[string]map[string]bool{"builder": {"linear": true, "slack": false}},
+		Calls:       map[string]map[string]bool{"group shed-builders": {"linear:read": true}},
+		Expose:      map[string]map[string]bool{"builder": {"peerkey": true}}}
 	y.own.SetPackReader(func(_ context.Context, name string, depot string, _ store.Mappings, _ store.API) (*store.PackReading, error) {
 		if name != "starter" {
 			return nil, errors.New("pack " + name + ": yardr embeds no pack of that name")
 		}
-		return &store.PackReading{Name: "starter", Kind: "git", Depot: depot, Digest: "abc123", Label: "embedded in yardr test",
+		imp := held
+		return &store.PackReading{Name: "starter", Kind: "git", Depot: depot, Digest: "abc123", Label: "embedded in yardr test", Import: &imp,
 			Plan:    &store.AskPlan{Objects: objects},
 			Targets: map[string]string{"flow\x00starter.default": string(flowJSON), "route\x00depot shed stage new -> builders": routeJSON}}, nil
 	})
@@ -503,31 +514,113 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 		t.Error("a group removal under a pack record was let through")
 	}
 
-	// The import's record of this pack in this depot passes; another
-	// pack's, and one naming an object beside the record, refuse.
-	if _, err := y.api.RecordPack(packCtx, store.PackImport{Pack: "starter", Depot: "shed", Source: "embedded in yardr test", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}}, true, "yardmaster"); err != nil {
+	// record is the import's record as the reading says it, the objects
+	// beside it the record names, each edit forging the fields it touches.
+	record := func(edit func(*store.PackImport)) store.PackImport {
+		raw, err := json.Marshal(held)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var imp store.PackImport
+		if err := json.Unmarshal(raw, &imp); err != nil {
+			t.Fatal(err)
+		}
+		imp.Objects = []store.PackObject{{Kind: "group", Name: "builders"}}
+		if edit != nil {
+			edit(&imp)
+		}
+		return imp
+	}
+	// The import's record of this pack in this depot, as the reading says
+	// it, passes; another pack's, and one naming an object beside the
+	// record, refuse.
+	if _, err := y.api.RecordPack(packCtx, record(nil), true, "yardmaster"); err != nil {
 		t.Errorf("the import's own record: %v", err)
 	}
 	if _, err := y.api.RecordPack(packCtx, store.PackImport{Pack: "other", Depot: "shed"}, true, "yardmaster"); err == nil {
 		t.Error("another pack's record under a pack record was let through")
 	}
-	if _, err := y.api.RecordPack(packCtx, store.PackImport{Pack: "starter", Depot: "shed", Objects: []store.PackObject{{Kind: "group", Name: "others"}}}, true, "yardmaster"); err == nil {
-		t.Error("an import record naming an object beside the record was let through")
+	if _, err := y.api.RecordPack(packCtx, record(func(imp *store.PackImport) {
+		imp.Objects = []store.PackObject{{Kind: "group", Name: "others"}}
+	}), true, "yardmaster"); err == nil || !strings.Contains(err.Error(), "stands on no delegated pack record") {
+		t.Errorf("an import record naming an object beside the record: %v", err)
 	}
 	// A pack yardr embeds is read from no URL and with no credential: the
-	// source an import records is where a later apply by name reads it.
-	for name, imp := range map[string]store.PackImport{
-		"a URL as its source":          {Pack: "starter", Depot: "shed", Source: "https://evil.example/starter/", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}},
-		"a directory as its source":    {Pack: "starter", Depot: "shed", Source: "/srv/packs/starter", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}},
-		"another scheme as its source": {Pack: "starter", Depot: "shed", Source: "ftp://evil.example/starter/", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}},
-		"no source":                    {Pack: "starter", Depot: "shed", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}},
-		"a credential's name":          {Pack: "starter", Depot: "shed", Source: "embedded in yardr test", Auth: "packs", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}},
+	// source an import records is where a later apply by name reads it, and
+	// the only one it may name is the reading's own label, not a directory
+	// after the word embedded.
+	for name, edit := range map[string]func(*store.PackImport){
+		"a URL as its source":                 func(imp *store.PackImport) { imp.Source = "https://evil.example/starter/" },
+		"a directory as its source":           func(imp *store.PackImport) { imp.Source = "/srv/packs/starter" },
+		"another scheme as its source":        func(imp *store.PackImport) { imp.Source = "ftp://evil.example/starter/" },
+		"a directory after the embedded word": func(imp *store.PackImport) { imp.Source = "embedded /srv/packs/starter" },
+		"the embedded word alone":             func(imp *store.PackImport) { imp.Source = "embedded" },
+		"another build's label as its source": func(imp *store.PackImport) { imp.Source = "embedded in yardr other" },
+		"no source":                           func(imp *store.PackImport) { imp.Source = "" },
+		"a credential's name":                 func(imp *store.PackImport) { imp.Auth = "packs" },
 	} {
-		if _, err := y.api.RecordPack(packCtx, imp, true, "yardmaster"); err == nil || !strings.Contains(err.Error(), "no other source and no credential") {
+		if _, err := y.api.RecordPack(packCtx, record(edit), true, "yardmaster"); err == nil || !strings.Contains(err.Error(), "no other source and no credential") {
+			t.Errorf("an import record with %s: %v", name, err)
+		}
+	}
+	// The rest of the record is the reading's too. A later apply by name
+	// starts from its mappings, flow and answers and a page from its frame,
+	// so a caller that reaches RecordPack over the socket chooses none of
+	// them: each forged field refuses, naming the field.
+	for name, tc := range map[string]struct {
+		edit  func(*store.PackImport)
+		field string
+	}{
+		"a yard group taking the pack's":           {func(imp *store.PackImport) { imp.Groups["builders"] = "operators" }, "groups"},
+		"a group beside the pack's":                {func(imp *store.PackImport) { imp.Groups["extra"] = "operators" }, "groups"},
+		"no groups":                                {func(imp *store.PackImport) { imp.Groups = nil }, "groups"},
+		"the yardmaster taking the pack's crew":    {func(imp *store.PackImport) { imp.Crew["builder"] = "yardmaster" }, "crew"},
+		"a crew member beside the pack's":          {func(imp *store.PackImport) { imp.Crew["extra"] = "yardmaster" }, "crew"},
+		"a region base":                            {func(imp *store.PackImport) { imp.SourceBase = map[string]string{"linear": "eu"} }, "source_base"},
+		"a thread opening no grant names":          {func(imp *store.PackImport) { imp.OpenThreads["builder"]["github"] = true }, "open_threads"},
+		"a refused thread opening answered yes":    {func(imp *store.PackImport) { imp.OpenThreads["builder"]["slack"] = true }, "open_threads"},
+		"a thread opening for another crew member": {func(imp *store.PackImport) { imp.OpenThreads["yardmaster"] = map[string]bool{"linear": true} }, "open_threads"},
+		"a call no grant names":                    {func(imp *store.PackImport) { imp.Calls["group shed-builders"]["linear:write"] = true }, "calls"},
+		"a call for another grantee":               {func(imp *store.PackImport) { imp.Calls["crew yardmaster"] = map[string]bool{"linear:read": true} }, "calls"},
+		"an exposure to another peer":              {func(imp *store.PackImport) { imp.Expose["builder"]["otherkey"] = true }, "expose_to_peers"},
+		"an exposure of another crew member":       {func(imp *store.PackImport) { imp.Expose["yardmaster"] = map[string]bool{"peerkey": true} }, "expose_to_peers"},
+		"another file of the pack as its frame":    {func(imp *store.PackImport) { imp.Frame = "/yard/packs/starter/roles/builder.md" }, "frame"},
+		"a file outside the pack as its frame":     {func(imp *store.PackImport) { imp.Frame = "/etc/hosts" }, "frame"},
+		"no frame":                                 {func(imp *store.PackImport) { imp.Frame = "" }, "frame"},
+		"a frame that is not its scope's choice":   {func(imp *store.PackImport) { imp.FrameActive = false }, "frame_active"},
+		"a commit":                                 {func(imp *store.PackImport) { imp.Commit = "0123abc" }, "commit"},
+		"a dirty tree":                             {func(imp *store.PackImport) { imp.Dirty = true }, "dirty"},
+		"another flow":                             {func(imp *store.PackImport) { imp.Flow = "other" }, "flow"},
+		"no flow":                                  {func(imp *store.PackImport) { imp.Flow = "" }, "flow"},
+		"no setup notes":                           {func(imp *store.PackImport) { imp.Setup = false }, "setup"},
+		"the pack's roles where the depot's stand": {func(imp *store.PackImport) { imp.DepotRoles = false }, "depot_roles"},
+	} {
+		if _, err := y.api.RecordPack(packCtx, record(tc.edit), true, "yardmaster"); err == nil || !strings.Contains(err.Error(), "records the import's "+tc.field+" as") {
 			t.Errorf("an import record with %s: %v", name, err)
 		}
 	}
 	if err := y.api.FinishDelegatedPack(ctx, id, true, nil, "", "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A reading that carries no record of the import holds every field to
+	// empty: the origin is all a record of it may name.
+	y.own.SetPackReader(func(_ context.Context, name string, depot string, _ store.Mappings, _ store.API) (*store.PackReading, error) {
+		return &store.PackReading{Name: "starter", Kind: "git", Depot: depot, Digest: "abc123", Label: "embedded in yardr test", Plan: &store.AskPlan{Objects: objects},
+			Targets: map[string]string{"flow\x00starter.default": string(flowJSON), "route\x00depot shed stage new -> builders": routeJSON}}, nil
+	})
+	bare, err := y.api.StartDelegatedPack(ctx, start, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bareCtx := store.WithDelegatedPack(ctx, bare)
+	if _, err := y.api.RecordPack(bareCtx, record(nil), true, "yardmaster"); err == nil || !strings.Contains(err.Error(), "records the import's flow as none") {
+		t.Errorf("a record of the import against a reading that carries none: %v", err)
+	}
+	if _, err := y.api.RecordPack(bareCtx, store.PackImport{Pack: "starter", Depot: "shed", Source: "embedded in yardr test", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}}, true, "yardmaster"); err != nil {
+		t.Errorf("the bare record against a reading that carries none: %v", err)
+	}
+	if err := y.api.FinishDelegatedPack(ctx, bare, true, nil, "", "yardmaster"); err != nil {
 		t.Fatal(err)
 	}
 }

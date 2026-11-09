@@ -304,22 +304,7 @@ func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (res *Res
 	}
 	pruned := prune(ctx, st, p, o, res)
 
-	rec := store.PackImport{Pack: p.Pack, Depot: p.Depot, Source: p.Dir, Auth: p.Auth, Flow: p.Flow, Setup: p.SetupFile != "", DepotRoles: p.DepotRoles, Groups: p.Groups, Crew: p.Crew, SourceBase: o.SourceBase, ApprovedBead: o.ApprovedBead, ApprovedAsk: o.ApprovedAsk}
-	// The frame the import brought, and its choice for the scope: a plan
-	// carrying a frame makes its record the scope's active one, which
-	// RecordPack writes by clearing the scope's others; a plan with none
-	// is built inactive and leaves the scope's choice untouched.
-	if p.Frame != nil {
-		rec.Frame, rec.FrameActive = p.installedFrame(), true
-	}
-	// A pack in no directory (one yardr embeds) has no commit of its own:
-	// its source names the build it came in.
-	if filepath.IsAbs(p.Dir) {
-		rec.Commit, rec.Dirty = Commit(p.Dir)
-	}
-	rec.OpenThreads = p.openAnswers(o.OpenThreads)
-	rec.Calls = p.callAnswers(o.Calls)
-	rec.Expose = p.exposeAnswers(o.Expose)
+	rec := p.ImportRecord(o)
 	for _, obj := range p.Objects {
 		po, ok := Ident(obj)
 		if !ok || pruned[po.Key()] || (po.Kind == "route" && po.Group == "") || obj.refused(o) {
@@ -355,6 +340,33 @@ func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (res *Res
 		}
 	}
 	return res, nil
+}
+
+// ImportRecord is the yard's record of the import as Apply writes it, but
+// for the objects: where the pack came from, the flow, frame, setup,
+// roles and name mappings the plan settled, and the answers the record
+// keeps. The server's reading of a pack makes the same record from the
+// same plan, so that a delegated run's own record of its import is held to
+// the reading's field by field (store.PackReading.Import) and the two
+// cannot drift.
+func (p *Plan) ImportRecord(o ApplyOptions) store.PackImport {
+	rec := store.PackImport{Pack: p.Pack, Depot: p.Depot, Source: p.Dir, Auth: p.Auth, Flow: p.Flow, Setup: p.SetupFile != "", DepotRoles: p.DepotRoles, Groups: p.Groups, Crew: p.Crew, SourceBase: o.SourceBase, ApprovedBead: o.ApprovedBead, ApprovedAsk: o.ApprovedAsk}
+	// The frame the import brought, and its choice for the scope: a plan
+	// carrying a frame makes its record the scope's active one, which
+	// RecordPack writes by clearing the scope's others; a plan with none
+	// is built inactive and leaves the scope's choice untouched.
+	if p.Frame != nil {
+		rec.Frame, rec.FrameActive = p.installedFrame(), true
+	}
+	// A pack in no directory (one yardr embeds) has no commit of its own:
+	// its source names the build it came in.
+	if filepath.IsAbs(p.Dir) {
+		rec.Commit, rec.Dirty = Commit(p.Dir)
+	}
+	rec.OpenThreads = p.openAnswers(o.OpenThreads)
+	rec.Calls = p.callAnswers(o.Calls)
+	rec.Expose = p.exposeAnswers(o.Expose)
+	return rec
 }
 
 // refused reports whether o is a stage map the import was told not to set

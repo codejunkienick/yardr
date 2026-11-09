@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,5 +71,43 @@ func TestDelegatedPackRecordExpires(t *testing.T) {
 	}
 	if rec, err := s.Delegation(ctx, id, "jo"); err != nil || rec.State != "failed" {
 		t.Errorf("record = %+v, %v; want failed", rec, err)
+	}
+}
+
+// An import record under a started delegated pack record is held in every
+// field but its objects, its time and its actor, the ones no socket caller
+// can set among them (ApprovedBead and ApprovedAsk are json:"-"): a field
+// added to PackImport later is held until the reading says it, and this
+// test says which sample to forge it with.
+func TestPackImportHeldHoldsEveryField(t *testing.T) {
+	rec := &Delegation{ID: 7, Import: &PackImport{Pack: "starter", Depot: "shed", Source: "embedded in yardr test"}}
+	imp := PackImport{Pack: "starter", Depot: "shed", Source: "embedded in yardr test", Objects: []PackObject{{Kind: "group", Name: "builders"}}, At: time.Now(), By: "yardmaster"}
+	if err := packImportHeld(rec, imp); err != nil {
+		t.Fatalf("the held record itself: %v", err)
+	}
+	samples := map[reflect.Type]string{
+		reflect.TypeOf(""):                           `"x"`,
+		reflect.TypeOf(false):                        `true`,
+		reflect.TypeOf(uint64(0)):                    `1`,
+		reflect.TypeOf(map[string]string{}):          `{"a":"b"}`,
+		reflect.TypeOf(map[string]map[string]bool{}): `{"a":{"b":true}}`,
+	}
+	typ := reflect.TypeOf(imp)
+	for i := range typ.NumField() {
+		field := typ.Field(i)
+		if field.Name == "Objects" || field.Name == "At" || field.Name == "By" {
+			continue
+		}
+		sample, ok := samples[field.Type]
+		if !ok {
+			t.Fatalf("PackImport.%s is a %s: add a sample of it to this test", field.Name, field.Type)
+		}
+		forged := imp
+		if err := json.Unmarshal([]byte(sample), reflect.ValueOf(&forged).Elem().Field(i).Addr().Interface()); err != nil {
+			t.Fatal(err)
+		}
+		if err := packImportHeld(rec, forged); err == nil || !strings.Contains(err.Error(), "record 7") {
+			t.Errorf("a record with %s forged: %v", field.Name, err)
+		}
 	}
 }

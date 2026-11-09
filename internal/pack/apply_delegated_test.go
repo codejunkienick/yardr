@@ -45,6 +45,10 @@ func delegatedPackYardAt(t *testing.T, origin string) (store.API, pack.Options, 
 		if origin == "" {
 			r.Label = "embedded in yardr test"
 		}
+		// The record the plan leaves of its import, as the server's reading
+		// derives it from the same plan: the apply's own is held to it.
+		imp := current.ImportRecord(pack.ApplyOptions{})
+		r.Import = &imp
 		for _, o := range current.Objects {
 			ao := store.AskPlanObject{Kind: o.Kind, Name: o.Name, Action: o.Action}
 			for _, c := range o.Changes {

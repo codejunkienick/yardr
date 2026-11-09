@@ -108,6 +108,8 @@ func readPack(ctx context.Context, p *pack.Pack, read func(rel string) ([]byte, 
 		}
 		reading.Plan = askPlanFrom(read, plan, pack.Answers{}, nil, nil)
 		reading.Digest, reading.Programs = plan.Digest, plan.Programs
+		imp := plan.ImportRecord(pack.ApplyOptions{})
+		reading.Import = &imp
 		return reading, nil
 	}
 	target := depot
@@ -146,6 +148,10 @@ func readPack(ctx context.Context, p *pack.Pack, read func(rel string) ([]byte, 
 	reading.Plan = askPlanFrom(read, plan, answers, open, calls)
 	reading.Digest, reading.Programs = plan.Digest, plan.Programs
 	reading.Grants = packGrantsOf(open, calls)
+	// The record the apply of this plan, answered by these mappings, leaves
+	// of its import: a delegated run holds its own record to it.
+	imp := plan.ImportRecord(pack.ApplyOptions{OpenThreads: open, Calls: calls})
+	reading.Import = &imp
 	targets, err := packTargetsOf(ctx, yard, plan, answers)
 	if err != nil {
 		return nil, err

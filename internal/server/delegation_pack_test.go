@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"io/fs"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -42,7 +44,9 @@ func TestDelegatedPackApplyThroughTheServerReading(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := pack.Load(sub, packs.Embedded)
+	// The pack is loaded under the label the reading carries, as the
+	// command loads one yardr embeds: the import records it as its source.
+	p, err := pack.Load(sub, reading.Label)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,5 +68,116 @@ func TestDelegatedPackApplyThroughTheServerReading(t *testing.T) {
 	}
 	if rec == nil || rec.State != "done" || rec.DelegatedBody.Pack != "telegram" || rec.DelegatedBody.Digest != plan.Digest {
 		t.Fatalf("record = %+v, want telegram done with digest %s", rec, plan.Digest)
+	}
+	t.Run("depot pack", delegatedDepotPackApplyRecordsWhatItDid)
+	t.Run("frame pack", delegatedFramePackApplyRecordsItsFrame)
+}
+
+// A delegated apply of a pack that names a depot, through the server's own
+// reading, records the import as the same apply records it outside a
+// delegation: the flow, the groups and crew the plan mapped, the setup
+// notes and the answers it keeps. The record is held to the reading's, so
+// this is where the plan the command builds and the one the server reads
+// from the run's mappings must agree: for a first install answered by
+// binds and members, and for a bare re-apply, whose mappings the command
+// fills from its own plan.
+func delegatedDepotPackApplyRecordsWhatItDid(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	st := packReaderYard(t)
+	st.SetPackReader(packReaderFor(home))
+	dctx := delegatedServerYard(t, st, "yardr pack apply starter --depot web")
+	if err := st.PutDepot(ctx, store.Depot{Name: "web", Path: t.TempDir()}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	reading, err := readEmbeddedPack(ctx, "starter", "web", store.Mappings{}, st, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := fs.Sub(packs.FS, "starter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := pack.Load(sub, reading.Label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply := func(mappings store.Mappings) *store.PackImport {
+		t.Helper()
+		plan, err := pack.Build(ctx, st, p, packOptions("web", home, mappings))
+		if err != nil {
+			t.Fatal(err)
+		}
+		answers, open, calls, err := mappingAnswers(ctx, st, plan, mappings, home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pack.Apply(dctx, st, plan, pack.ApplyOptions{Answers: answers, OpenThreads: open, Calls: calls, Expose: map[string]map[string]bool{},
+			Actor: "yardmaster", DelegatedMappings: mappings}); err != nil {
+			t.Fatal(err)
+		}
+		recs, err := st.Packs(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range recs {
+			if recs[i].Pack == "starter" && recs[i].Depot == "web" {
+				return &recs[i]
+			}
+		}
+		t.Fatalf("the import records = %+v, want starter in depot web", recs)
+		return nil
+	}
+
+	first := apply(store.Mappings{Binds: []string{"builders=claude:opus", "reviewers=claude:opus"}, Members: []string{"backlog=jo", "decisions=jo"}})
+	if first.Flow != "default" || first.Source != reading.Label || first.Groups["builders"] != "web-builders" || len(first.Objects) == 0 {
+		t.Fatalf("the first install's record = %+v, want flow default from %q with the groups mapped", first, reading.Label)
+	}
+	again := apply(store.Mappings{})
+	if again.Flow != first.Flow || again.Source != first.Source || !reflect.DeepEqual(again.Groups, first.Groups) || !reflect.DeepEqual(again.Crew, first.Crew) {
+		t.Errorf("the bare re-apply's record = %+v, want the first install's %+v", again, first)
+	}
+}
+
+// The frame a delegated apply brings is recorded at the path the plan
+// installs it at, as its scope's chosen one: the record is held to the
+// reading's, so this is where the path the command's plan makes and the one
+// the server's reading makes must agree (the store's own test refuses any
+// other path, which is where the page frame is read from).
+func delegatedFramePackApplyRecordsItsFrame(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	st := packReaderYard(t)
+	st.SetPackReader(packReaderFor(home))
+	dctx := delegatedServerYard(t, st, "yardr pack apply pageframe --depot web")
+	if err := st.PutDepot(ctx, store.Depot{Name: "web", Path: t.TempDir()}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	reading, err := readEmbeddedPack(ctx, "pageframe", "web", store.Mappings{}, st, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := fs.Sub(packs.FS, "pageframe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := pack.Load(sub, reading.Label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := pack.Build(ctx, st, p, packOptions("web", home, store.Mappings{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pack.Apply(dctx, st, plan, pack.ApplyOptions{Actor: "yardmaster"}); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := st.Packs(ctx)
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("the import records = %+v, %v", recs, err)
+	}
+	want := filepath.Join(home, "packs", "pageframe", p.Frame.File)
+	if recs[0].Frame != want || !recs[0].FrameActive {
+		t.Errorf("the frame recorded = %q (active %v), want %q chosen", recs[0].Frame, recs[0].FrameActive, want)
 	}
 }

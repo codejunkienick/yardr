@@ -167,6 +167,12 @@ func TestRepositoryReadingMatchesTheEmbeddedReading(t *testing.T) {
 		t.Fatal(err)
 	}
 	got.Label, want.Label = "", ""
+	// The record of the import each reading says is the same apart from the
+	// origin it names, which is where each pack came from.
+	if got.Import == nil || want.Import == nil {
+		t.Fatalf("a reading carries no record of the import: got %v, want %v", got.Import, want.Import)
+	}
+	got.Import.Source, want.Import.Source = "", ""
 	for _, s := range got.Sources {
 		delete(got.Targets, "source\x00"+s.Name)
 	}

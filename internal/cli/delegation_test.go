@@ -14,6 +14,7 @@ import (
 	"yardr.dev/yardr/internal/pack"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
+	"yardr.dev/yardr/internal/version"
 	"yardr.dev/yardr/packs"
 )
 
@@ -126,7 +127,12 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 			for _, o := range plan.Objects {
 				askPlan.Objects = append(askPlan.Objects, store.AskPlanObject{Kind: o.Kind, Name: o.Name, Action: o.Action})
 			}
-			return &store.PackReading{Name: name, Kind: "source", Digest: plan.Digest, Plan: askPlan,
+			// The record the plan leaves of its import is the plan's own, as the
+			// server's reading derives it, and the label the one the command
+			// loads a pack yardr embeds under.
+			imp := plan.ImportRecord(pack.ApplyOptions{})
+			return &store.PackReading{Name: name, Kind: "source", Digest: plan.Digest, Plan: askPlan, Import: &imp,
+				Label:   packs.Embedded + " in yardr " + version.Describe(),
 				Sources: []store.AskSource{{Name: name, Text: string(text)}}}, nil
 		case "starter":
 			return &store.PackReading{Name: "starter", Kind: "git", Depot: depot, Digest: "abc", Plan: &store.AskPlan{}}, nil

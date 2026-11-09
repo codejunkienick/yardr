@@ -61,6 +61,10 @@ type DelegatedPackStart struct {
 	Mappings Mappings              `json:"mappings,omitzero"`
 	Grants   []string              `json:"grants,omitempty"`
 	Objects  []DelegatedPackObject `json:"objects,omitempty"`
+	// held is the record the reading says the run's import leaves
+	// (heldImport), which delegatedPackPlan sets and the record keeps. It
+	// is unexported: no caller names it.
+	held *PackImport
 }
 
 // delegatedPackTTL is how long a started delegated pack record carries
@@ -127,7 +131,7 @@ func (s *Store) StartDelegatedPack(ctx context.Context, start DelegatedPackStart
 		if int64(len(raw)) > limit {
 			return fmt.Errorf("pack %s: its record of before-state and diffs is %d bytes, over the yard's blob cap of %d (%s): this pack is the operator's to type in a terminal", start.Pack, len(raw), limit, BlobMaxSetting)
 		}
-		rec := Delegation{Yardmaster: ym, For: d.For, At: now(), Mail: d.Mail, Of: of, State: "started", Grants: start.Grants, Mappings: start.Mappings, DelegatedBody: body}
+		rec := Delegation{Yardmaster: ym, For: d.For, At: now(), Mail: d.Mail, Of: of, State: "started", Grants: start.Grants, Mappings: start.Mappings, Import: start.held, DelegatedBody: body}
 		for _, o := range start.Objects {
 			rec.Objects = append(rec.Objects, o.Kind+" "+o.Name)
 			rec.PackObjects = append(rec.PackObjects, DelegatedPackObject{Kind: o.Kind, Name: o.Name, Action: o.Action, Fields: o.Fields, Changes: o.Changes, Target: o.Target})
@@ -386,6 +390,7 @@ func (w *wtx) delegatedPackPlan(ctx context.Context, start *DelegatedPackStart, 
 			return nil, nil, fmt.Errorf("pack %s: grant %q names %s, which its plan does not: nothing was written", start.Pack, g, want)
 		}
 	}
+	start.held = heldImport(start, reading)
 	return objects, grants, nil
 }
 
@@ -788,11 +793,14 @@ func (w *wtx) packRemoveRoute(ctx context.Context, id, actor string) error {
 }
 
 // packRecordWrite holds an import's record written under a delegated
-// pack record to that record's pack and depot, and to its objects, and
-// to its origin: a later apply by name reads the pack again from the
-// source the import records, so that is the URL the run fetched it from
-// (a pack of the packs repository), or, for a pack yardr embeds, no URL
-// at all; and a delegated run takes no credential.
+// pack record to that record's pack and depot, to its objects, and, field
+// by field, to the record the store's reading of the pack said the run
+// leaves (packImportHeld). That is its origin, which a later apply by name
+// reads the pack again from: the URL the run fetched it from (a pack of
+// the packs repository) or, for a pack yardr embeds, the build the reading
+// names, and no credential, for a delegated run takes none. It is also the
+// flow, frame, mappings and answers a later apply and every page start
+// from, which a caller reaching RecordPack over the socket must not choose.
 func (w *wtx) packRecordWrite(ctx context.Context, imp PackImport, actor string) error {
 	if _, pack := DelegatedPackOf(ctx); !pack {
 		return nil
@@ -804,14 +812,8 @@ func (w *wtx) packRecordWrite(ctx context.Context, imp PackImport, actor string)
 	if imp.Pack != body.Pack || imp.Depot != recDepot(rec) {
 		return fmt.Errorf("pack %s: the delegated pack record %d is of pack %s, not this import", imp.Pack, rec.ID, body.Pack)
 	}
-	sourceMatches := imp.Source == body.From
-	if body.From == "" {
-		// An embedded import records its build marker, not a directory or
-		// another origin that a later apply by name could read.
-		sourceMatches = imp.Source == "embedded" || strings.HasPrefix(imp.Source, "embedded ")
-	}
-	if imp.Auth != "" || !sourceMatches {
-		return fmt.Errorf("pack %s: the delegated pack record %d reads the pack from %s, and its import records no other source and no credential", imp.Pack, rec.ID, or(body.From, "the binary that runs the yard"))
+	if err := packImportHeld(rec, imp); err != nil {
+		return err
 	}
 	for _, po := range imp.Objects {
 		if !recordedObject(rec, po) {
