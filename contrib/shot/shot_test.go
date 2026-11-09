@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"image/png"
 	"net"
@@ -154,9 +155,18 @@ func runStarted(ctx context.Context, cmd *exec.Cmd, env []string) (int, string, 
 	}
 	rc := 0
 	if err != nil {
-		if exit, ok := err.(*exec.ExitError); ok {
+		var exit *exec.ExitError
+		switch {
+		case errors.As(err, &exit):
 			rc = exit.ExitCode()
-		} else {
+		case errors.Is(err, exec.ErrWaitDelay):
+			// The script exited 0, the only exit Go reports this for, and a
+			// process it started still held its output a second later. With
+			// real Chrome that can be one of its helpers outliving the browser's
+			// own process, which the script does not wait for and the shot does
+			// not depend on, so the run is the script's exit and what it
+			// printed (yardr-8ybv).
+		default:
 			return 0, "", err
 		}
 	}
@@ -1166,6 +1176,47 @@ func closeTo(r, g, b, wantR, wantG, wantB uint8) bool {
 // the skip must not cost the full minute. A skip ends the test, so the second
 // shot is taken only where the first was made, and a skip costs one deadline.
 func TestShotWritesAWindowSizedPNG(t *testing.T) {
+	// Chrome can exit after writing the shot while one of its helpers still
+	// holds stdout or stderr. This stand-in makes that process relationship
+	// certain and checks that the harness still reports the script's success.
+	t.Run("helper_holds_output", func(t *testing.T) {
+		if _, err := exec.LookPath("curl"); err != nil {
+			t.Skip("no curl: it checks the page before the shot")
+		}
+		s := page(t)
+		dir := t.TempDir()
+		pids := filepath.Join(dir, "pids")
+		bin := filepath.Join(dir, "chrome")
+		scripttest.Write(t, bin, "#!/bin/sh\n"+
+			"echo 'chrome has written the shot'\n"+
+			"for a in \"$@\"; do case \"$a\" in --screenshot=*) out=${a#--screenshot=};; esac; done\n"+
+			"printf shot >\"$out\"\n"+
+			"sleep 30 &\n"+
+			"echo $! >"+pids+"\n")
+		// The script does not stop the helper, so the test does, and whatever
+		// the run does: the cleanup is registered before it.
+		t.Cleanup(func() { reap(pids) })
+		out := filepath.Join(t.TempDir(), "shot.png")
+		rc, text := runShot(shotCtx(t), t, []string{s.URL + "/page", out}, "SHOT_CHROME="+bin)
+		if rc != 0 || !strings.Contains(text, "chrome has written the shot") {
+			t.Errorf("a shot with a helper holding its output: exit %d, %q, want exit 0 with what Chrome printed", rc, text)
+		}
+		if got, err := os.ReadFile(out); err != nil || string(got) != "shot" {
+			t.Errorf("shot wrote %q, %v, want the stand-in's bytes", got, err)
+		}
+		raw, err := os.ReadFile(pids)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+		if err != nil || pid <= 0 {
+			t.Fatalf("the stand-in recorded %q, not a PID", raw)
+		}
+		if err := syscall.Kill(pid, 0); err != nil {
+			t.Errorf("the helper (pid %d) was gone when the run returned: %v, so it held no pipe open", pid, err)
+		}
+	})
+
 	if _, err := exec.LookPath("curl"); err != nil {
 		t.Skip("no curl: it checks the page before the shot")
 	}
@@ -1344,6 +1395,21 @@ func deadWithin(t *testing.T, pids string, within time.Duration) {
 				t.Fatalf("process %d is still alive after %s", pid, within)
 			}
 			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+// reap kills every PID in pids, for a test whose stand-in leaves a process
+// running on purpose: the script under test does not stop it, so the test must.
+// A PID already gone, or a file never written, is nothing to reap.
+func reap(pids string) {
+	raw, err := os.ReadFile(pids)
+	if err != nil {
+		return
+	}
+	for _, field := range strings.Fields(string(raw)) {
+		if pid, err := strconv.Atoi(field); err == nil && pid > 0 {
+			syscall.Kill(pid, syscall.SIGKILL)
 		}
 	}
 }
