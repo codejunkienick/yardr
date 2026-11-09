@@ -34,8 +34,9 @@ find_repo_hooks() {
 	# core.hooksPath override: --git-path honours a configured hooksPath
 	# (a relative one it returns relative to here, where git runs hooks),
 	# and otherwise names the git dir's hooks, in a linked worktree the
-	# common dir's.
-	repo_hooks=$(env -u GIT_CONFIG_COUNT -u GIT_CONFIG_KEY_0 -u GIT_CONFIG_VALUE_0 -u GIT_CONFIG_PARAMETERS git rev-parse --git-path hooks 2>/dev/null || true)
+	# common dir's. The override goes in the substitution's own shell, so
+	# the call starts git alone, not env and then git.
+	repo_hooks=$(unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_CONFIG_PARAMETERS; git rev-parse --git-path hooks 2>/dev/null || true)
 }
 
 # fast_repo_hooks is find_repo_hooks without asking git. It sets
@@ -234,9 +235,8 @@ fi
 const commitHook = commitHookHead + repoHooksFind + commitHookTail
 
 // passthroughHookHead opens the yard's shim for a repo hook other than
-// commit-msg.
-const passthroughHookHead = `#!/bin/sh
-# The yard's pass-through for a repo hook other than commit-msg: pointing
+// commit-msg, past its interpreter line (see passthroughShell).
+const passthroughHookHead = `# The yard's pass-through for a repo hook other than commit-msg: pointing
 # the session's git at the yard's hooks for commit-msg must not skip the
 # repo's other hooks, so this runs the repo's hook of the same name as git
 # would have run it, and git sees its exit status.
@@ -281,7 +281,29 @@ var passthroughHooks = []string{
 // message; only commit-msg does that. The lookup reads the filesystem
 // (see repoHooksFind), so a repo with no hook of that name costs the shim
 // no git call.
-const passthroughHook = passthroughHookHead + repoHooksFind + passthroughHookTail
+var passthroughHook = "#!" + passthroughShell + "\n" + passthroughHookHead + repoHooksFind + passthroughHookTail
+
+// passthroughShell is the interpreter the pass-through shims name. Git fires
+// a hook for nearly every ref update, index write and checkout, and a shim
+// that finds no hook of its name does so little that a firing costs what its
+// shell costs to start. sh is bash on macOS, which starts in more than twice
+// the time of the dash installed beside it, so the shims take dash where the
+// machine has it. commit-msg keeps sh: it fires once per commit and does real
+// work, and its behaviour is not the shims' to change.
+var passthroughShell = firstExecutable("/bin/dash", "/bin/sh")
+
+// firstExecutable is the first of paths that names an executable file, else
+// the last, which the caller can count on to be there. A hook whose
+// interpreter is missing cannot start, and git fails the operation it guards,
+// so a shell is never named on a guess.
+func firstExecutable(paths ...string) string {
+	for _, p := range paths {
+		if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() && st.Mode().Perm()&0o111 != 0 {
+			return p
+		}
+	}
+	return paths[len(paths)-1]
+}
 
 type hookFile struct{ name, body string }
 

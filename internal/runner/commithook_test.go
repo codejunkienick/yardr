@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/dispatch"
@@ -134,17 +135,25 @@ func shellQuote(s string) string {
 // reveals every nested git call it makes.
 func logGitBin(t *testing.T) (bin, log string) {
 	t.Helper()
-	realGit, err := exec.LookPath("git")
+	bin = t.TempDir()
+	return bin, logCmd(t, bin, "git")
+}
+
+// logCmd adds to bin a stand-in for the system's command name that logs
+// every call to a file of its own and runs the real one, and returns the
+// log: a hook run with bin first on PATH shows every process of that name it
+// starts. The stand-in is a scripttest one, so that tests running side by
+// side do not each write an executable another's fork may hold open.
+func logCmd(t *testing.T, bin, name string) string {
+	t.Helper()
+	realBin, err := exec.LookPath(name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bin, log = t.TempDir(), filepath.Join(t.TempDir(), "calls")
-	script := fmt.Sprintf("#!/bin/sh\necho \"$*\" >> %s\nexec %s \"$@\"\n",
-		shellQuote(log), shellQuote(realGit))
-	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return bin, log
+	log := filepath.Join(t.TempDir(), name+"-calls")
+	scripttest.Write(t, filepath.Join(bin, name), fmt.Sprintf("#!/bin/sh\necho \"$*\" >> %s\nexec %s \"$@\"\n",
+		shellQuote(log), shellQuote(realBin)))
+	return log
 }
 
 // execPathOverlay is logGitBin as a GIT_EXEC_PATH dir: git prepends its
@@ -311,9 +320,25 @@ func TestEnsureCommitHook(t *testing.T) {
 // The yard's hooks directory holds a pass-through for every other hook
 // git looks up by name (see passthroughHooks): each is the shim, executable
 // and syntactically sound, and an outdated or unexecutable one is repaired
-// as the commit-msg hook is.
+// as the commit-msg hook is. The shims start under dash where the machine
+// has it, for its start-up cost (see passthroughShell), and under an
+// interpreter that is there: git cannot start a hook without one, and fails
+// the operation the hook guards. commit-msg, which does real work, stays on
+// sh.
 func TestEnsureCommitHookInstallsPassthroughs(t *testing.T) {
 	t.Parallel()
+	if first, _, _ := strings.Cut(passthroughHook, "\n"); first != "#!"+passthroughShell {
+		t.Errorf("shim interpreter line = %q, want #!%s", first, passthroughShell)
+	}
+	if _, err := exec.LookPath(passthroughShell); err != nil {
+		t.Errorf("the shims' interpreter: %v", err)
+	}
+	if _, err := exec.LookPath("/bin/dash"); err == nil && passthroughShell != "/bin/dash" {
+		t.Errorf("the shims name %s on a machine with /bin/dash", passthroughShell)
+	}
+	if first, _, _ := strings.Cut(commitHook, "\n"); first != "#!/bin/sh" {
+		t.Errorf("commit-msg interpreter line = %q, want #!/bin/sh", first)
+	}
 	home := t.TempDir()
 	dir, err := EnsureCommitHook(home)
 	if err != nil {
@@ -363,6 +388,77 @@ func TestEnsureCommitHookInstallsPassthroughs(t *testing.T) {
 	if st, _ := os.Stat(other); st.Mode().Perm()&0o111 == 0 {
 		t.Error("an unexecutable pass-through was not repaired")
 	}
+}
+
+// firstExecutable names the first of its candidates that is an executable
+// file, else the last: a path that is not there, a file without the execute
+// bit and a directory are passed over, a link to an executable counts.
+func TestFirstExecutable(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	exe, plain := filepath.Join(dir, "exe"), filepath.Join(dir, "plain")
+	sub, link, missing := filepath.Join(dir, "sub"), filepath.Join(dir, "link"), filepath.Join(dir, "missing")
+	for path, mode := range map[string]os.FileMode{exe: 0o755, plain: 0o644} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(exe, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name  string
+		paths []string
+		want  string
+	}{
+		{"first wins", []string{exe, link}, exe},
+		{"missing passed over", []string{missing, exe}, exe},
+		{"no execute bit passed over", []string{plain, exe}, exe},
+		{"directory passed over", []string{sub, exe}, exe},
+		{"link counts", []string{link, plain}, link},
+		{"none is the last", []string{missing, plain}, plain},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := firstExecutable(tc.paths...); got != tc.want {
+				t.Errorf("firstExecutable(%q) = %q, want %q", tc.paths, got, tc.want)
+			}
+		})
+	}
+}
+
+// BenchmarkPassthroughFiring is the probe behind the cost of a session's git
+// hook firings: one pass-through shim run in a repo with no hook of its
+// name, as git runs one for nearly every ref update and index write. It
+// reports the CPU of the shim and of what it starts (cpu-ms/op, from the
+// rusage wait4 gives for the child), which holds still on a loaded machine
+// where the wall time does not. To compare two shims, run both in turn on a
+// quiet machine and take the lower of several runs:
+//
+//	go test ./internal/runner -run '^$' -bench PassthroughFiring -benchtime 100x -count 9
+func BenchmarkPassthroughFiring(b *testing.B) {
+	dir, err := EnsureCommitHook(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	repo := b.TempDir()
+	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+		b.Fatalf("git init: %v\n%s", err, out)
+	}
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + b.TempDir(), "YARDR_GIT_SYSTEM_CLEAN=1"}
+	var cpu time.Duration
+	b.ResetTimer()
+	for range b.N {
+		cmd := exec.Command(filepath.Join(dir, "pre-commit"))
+		cmd.Dir, cmd.Env = repo, env
+		if err := cmd.Run(); err != nil {
+			b.Fatal(err)
+		}
+		cpu += cmd.ProcessState.UserTime() + cmd.ProcessState.SystemTime()
+	}
+	b.ReportMetric(float64(cpu)/float64(time.Millisecond)/float64(b.N), "cpu-ms/op")
 }
 
 // writeRepoHook writes one executable hook into dir.
@@ -918,8 +1014,9 @@ func shimMarkerHook(marker string, refuse bool) string {
 // file), and runs what it finds there; anything it cannot prove — a
 // hooksPath or include in any config it reads, no word from the yard
 // about the system config, an odd git dir — falls back to asking git,
-// which still runs the repo's hook. Each case runs the shim directly, so
-// the routing is what's pinned, at shell speed.
+// which still runs the repo's hook, with the hook's own exit status. Each
+// case runs the shim directly, so the routing is what's pinned, at shell
+// speed, and so is what a firing starts: at most one cat, and never env.
 func TestShimFindsRepoHooksWithoutGit(t *testing.T) {
 	t.Parallel()
 	hooks := yardHooks(t) // installed once: the cases only run them
@@ -995,6 +1092,24 @@ func TestShimFindsRepoHooksWithoutGit(t *testing.T) {
 			},
 			wantRan: true,
 			want:    1,
+		},
+		{
+			// The shim execs the hook, so git sees the hook's own status,
+			// not a flattened failure.
+			name: "hook exit status passes through",
+			hook: "pre-push",
+			setup: func(t *testing.T) (string, []string, string) {
+				repo := sessionRepo(t)
+				hooks := filepath.Join(repo, ".git", "hooks")
+				if err := os.MkdirAll(hooks, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				marker := markerIn(t, repo)
+				writeRepoHook(t, hooks, "pre-push", shimMarkerHook(marker, false)+"exit 7\n")
+				return repo, clean, marker
+			},
+			wantRan: true,
+			want:    7,
 		},
 		{
 			name: "linked worktree",
@@ -1272,6 +1387,7 @@ func TestShimFindsRepoHooksWithoutGit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			bin, log := logGitBin(t)
+			cats, envs := logCmd(t, bin, "cat"), logCmd(t, bin, "env")
 			cwd, extra, marker := tc.setup(t)
 			_, code := runHook(t, filepath.Join(hooks, tc.hook), cwd, directHookEnv(t, bin, extra...))
 			if code != tc.want {
@@ -1288,6 +1404,16 @@ func TestShimFindsRepoHooksWithoutGit(t *testing.T) {
 			calls := nestedCalls(t, log)
 			if got := len(calls) > 0; got != tc.wantGit {
 				t.Errorf("nested git calls = %v, want git %v", calls, tc.wantGit)
+			}
+			// Git fires a hook for nearly every ref update, so a process the
+			// shim starts is paid by every operation: its config read is one
+			// cat for all the files, and its fallback is git alone, never env
+			// and then git.
+			if n := len(nestedCalls(t, cats)); n > 1 {
+				t.Errorf("config reads = %d cat calls, want at most 1", n)
+			}
+			if calls := nestedCalls(t, envs); len(calls) > 0 {
+				t.Errorf("shim started env: %q", calls)
 			}
 		})
 	}
