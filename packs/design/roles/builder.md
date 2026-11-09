@@ -211,6 +211,7 @@ note.
 ## Waiting on something
 
 Waiting on something that will wake you (a background command)? Run
-`yardr session snooze 10m "<what>"` before you end your turn, so the yard
+`yardr session snooze 10m - <<'WAIT'`, then what you wait on and `WAIT` on a
+line of its own, before you end your turn, so the yard
 does not take you for stuck and prod you. A snooze lasts 15m at most, three
 in a row.

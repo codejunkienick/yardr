@@ -236,3 +236,19 @@ func stdinTitleBody(c *cobra.Command, title, body string) (string, string, error
 	}
 	return title, body, nil
 }
+
+// stdinWords is a text that stands alone, where "-" reads the command's
+// stdin: trailing newlines trimmed, as note and close read theirs, and any
+// other text comes back as given. A "-" that stdin gave no words for comes
+// back blank, for the command to refuse in its own words before it writes
+// anything, as stdinTitleBody leaves a title.
+func stdinWords(c *cobra.Command, text string) (string, error) {
+	if text != "-" {
+		return text, nil
+	}
+	b, err := io.ReadAll(c.InOrStdin())
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(string(b), "\n"), nil
+}

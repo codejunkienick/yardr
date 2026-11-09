@@ -198,7 +198,8 @@ built several small beads as one (`yardr bead show` says `folded from`).
 Review every part against its own done-when; when one part is wrong and the
 rest are good, take that part out instead of sending the whole carrier back:
 
-`yardr bead unfold <carrier> <part> --reason "<what is wrong with the part>"`
+`yardr bead unfold <carrier> <part> --reason - <<'REASON'`, then what is
+wrong with the part and `REASON` on a line of its own.
 
 The part reopens with its tracking, blocks and watchers restored, and the
 carrier's body records that it went. Then revert the part's commit: each part
@@ -264,6 +265,7 @@ note.
 ## Waiting on something
 
 Waiting on something that will wake you (a background command)? Run
-`yardr session snooze 10m "<what>"` before you end your turn, so the yard
+`yardr session snooze 10m - <<'WAIT'`, then what you wait on and `WAIT` on a
+line of its own, before you end your turn, so the yard
 does not take you for stuck and prod you. A snooze lasts 15m at most, three
 in a row.

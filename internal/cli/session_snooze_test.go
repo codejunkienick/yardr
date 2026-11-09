@@ -65,6 +65,43 @@ func TestSessionSnooze(t *testing.T) {
 		t.Errorf("no session_snoozed event saying what the session waits on")
 	}
 
+	// The why reads - from stdin, as typed: a code span and $( ) stay text,
+	// and one with no words is refused before anything is snoozed.
+	const why = "the `go vet` run, $(not run)"
+	feed := func(stdin string) (string, error) {
+		c := a.sessionCmd()
+		c.SetIn(strings.NewReader(stdin))
+		return run(t, c, "snooze", "5m", "-")
+	}
+	got, err = st.GetSession(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := got.Handle[store.SnoozeCount]
+	for _, stdin := range []string{"", " \n\n"} {
+		if _, err := feed(stdin); err == nil || !strings.Contains(err.Error(), "stdin gave no words for what the session waits on") {
+			t.Fatalf("session snooze 5m - with %q on stdin err = %v, want refused", stdin, err)
+		}
+	}
+	if got, err = st.GetSession(ctx, sess.ID); err != nil || got.Handle[store.SnoozeCount] != before {
+		t.Fatalf("snooze count after the refusals = %v, want the %v it was: %v", got.Handle[store.SnoozeCount], before, err)
+	}
+	if out, err = feed(why + "\n\n"); err != nil || !strings.Contains(out, "snoozed 5m") || !strings.Contains(out, why) {
+		t.Fatalf("session snooze 5m - printed %q, %v, want the wait and the why as typed", out, err)
+	}
+	if evs, err = st.Events(ctx, b.ID, 100); err != nil {
+		t.Fatal(err)
+	}
+	snoozed = false
+	for _, e := range evs {
+		if e.Kind == "session_snoozed" && e.Data["why"] == why {
+			snoozed = true
+		}
+	}
+	if !snoozed {
+		t.Errorf("no session_snoozed event with the why from stdin, as typed")
+	}
+
 	out, err = run(t, a.rootCmd(), "session", "snooze", "5m", "gate", "--json")
 	if err != nil {
 		t.Fatalf("session snooze --json: %v", err)

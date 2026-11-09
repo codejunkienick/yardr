@@ -67,6 +67,43 @@ func TestBeadUnfold(t *testing.T) {
 		}
 	})
 
+	t.Run("--reason - reads the reason from stdin, as typed", func(t *testing.T) {
+		carrier, ids := foldOf(t, "backlog", "backlog")
+		// A code span and $( ) stay text: no shell expanded them.
+		const reason = "part 2 breaks `go vet`, $(not run)"
+		c := yard.beadCmd()
+		c.SetIn(strings.NewReader(reason + "\n\n"))
+		if _, err := run(t, c, "unfold", carrier, ids[0], "--reason", "-", "--to", "new"); err != nil {
+			t.Fatal(err)
+		}
+		notes, err := st.Notes(ctx, ids[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var noted bool
+		for _, n := range notes {
+			noted = noted || n.Text == reason
+		}
+		if !noted {
+			t.Errorf("the part's notes carry no %q: %+v", reason, notes)
+		}
+	})
+
+	t.Run("a --reason - with no words on stdin is refused and the part stays folded", func(t *testing.T) {
+		carrier, ids := foldOf(t, "backlog", "backlog")
+		for _, stdin := range []string{"", " \n\n"} {
+			c := yard.beadCmd()
+			c.SetIn(strings.NewReader(stdin))
+			if out, err := run(t, c, "unfold", carrier, ids[0], "--reason", "-"); err == nil ||
+				!strings.Contains(err.Error(), "say why the part comes out with --reason <reason>") {
+				t.Fatalf("unfold --reason - with %q on stdin = %q, %v", stdin, out, err)
+			}
+			if b, _ := st.GetBead(ctx, ids[0]); b == nil || b.Status != "closed" {
+				t.Errorf("%s after the refusal: %+v", ids[0], b)
+			}
+		}
+	})
+
 	t.Run("--json is the member and the carrier it came out of", func(t *testing.T) {
 		carrier, ids := foldOf(t, "backlog", "backlog")
 		j := &app{st: st, actor: "me", json: true}

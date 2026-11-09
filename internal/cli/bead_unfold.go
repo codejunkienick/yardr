@@ -13,7 +13,7 @@ import (
 func (a *app) newBeadUnfoldCmd() *cobra.Command {
 	var to, reason string
 	unfold := &cobra.Command{
-		Use:   "unfold <carrier> <member> --reason <reason> [--to <stage>]",
+		Use:   "unfold <carrier> <member> --reason <reason|-> [--to <stage>]",
 		Short: "Take a bead out of the carrier it was folded into",
 		Long: `Takes the member out of the carrier, restored whole: it reopens in --to
 (the flow's first stage without it) with the reason as a note, and what the
@@ -23,6 +23,12 @@ parts moved stays on the carrier until the last of them is out, so each
 part restores exactly what it moved. The folded edge is gone, the carrier's
 body gains the taken-out line, and an unfolded event is logged on it.
 
+--reason - reads the reason from stdin: write one that quotes code or file
+names as a heredoc with a quoted delimiter, since inside a double-quoted
+argument the shell runs every backtick span and $( ) and puts what it prints
+in the reason. A --reason - with no words on stdin is refused, and the part
+stays folded.
+
 Each part of a carrier is its own commit, starting with the part's bead id,
 so taking the part out of the bead leaves taking it out of the branch: revert
 its commit on the carrier's branch and go on reviewing. A bead that is not a
@@ -31,7 +37,12 @@ a --to outside the member's flow. --json prints the member, with the carrier
 it came out of.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(c *cobra.Command, args []string) error {
-			if strings.TrimSpace(reason) == "" {
+			// Read first, so that a reason with no words takes nothing out.
+			why, err := stdinWords(c, reason)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(why) == "" {
 				return fmt.Errorf("say why the part comes out with --reason <reason>")
 			}
 			st, err := a.store(c.Context())
@@ -48,7 +59,7 @@ it came out of.`,
 			if err != nil {
 				return err
 			}
-			out, err := st.Unfold(c.Context(), carrier.ID, member.ID, to, reason, a.who())
+			out, err := st.Unfold(c.Context(), carrier.ID, member.ID, to, why, a.who())
 			if err != nil {
 				return err
 			}
@@ -62,6 +73,6 @@ it came out of.`,
 		},
 	}
 	unfold.Flags().StringVar(&to, "to", "", "the stage the part reopens in (default: the flow's first stage)")
-	unfold.Flags().StringVar(&reason, "reason", "", "why the part comes out")
+	unfold.Flags().StringVar(&reason, "reason", "", "why the part comes out (- reads stdin; use a quoted heredoc so the shell does not expand backticks or $( ) in double-quoted words)")
 	return unfold
 }

@@ -215,7 +215,7 @@ func TestTemplatesAreGeneric(t *testing.T) {
 			"on the yard's machine reads that\ncache",
 			"`GOCACHE=$(mktemp -d) <command>`",
 			"## Waiting on something",
-			"`yardr session snooze 10m \"<what>\"`",
+			"`yardr session snooze 10m - <<'WAIT'`",
 			"A snooze lasts 15m at most, three\nin a row.",
 		},
 		"starter/flows/default/new.md": {
@@ -1097,10 +1097,10 @@ func TestRolesSayWhatATestMayCost(t *testing.T) {
 // double-quoted argument, and each role that has its agent write a note
 // shows it as stdin from a heredoc with a quoted delimiter, which expands
 // nothing, and says why. The other texts an agent gives yardr (a mail, a
-// reply, a bead's title and body, a close reason) read - the same way, and
-// a role or stage file shows none of them in double quotes either
-// (yardr-tsrv). The words are compared with the lines folded, so rewrapping
-// breaks nothing.
+// reply, a bead's title and body, a close reason, an unfold's reason, the
+// words of a snooze) read - the same way, and a role or stage file shows
+// none of them in double quotes either (yardr-tsrv, yardr-s351). The words
+// are compared with the lines folded, so rewrapping breaks nothing.
 //
 // That holds for the contributors' pull request reviewer too: its read-only
 // sandbox lets a shell make the temporary file of a heredoc, in a private
@@ -1111,9 +1111,25 @@ func TestRolesShowNoQuotedText(t *testing.T) {
 	// What an agent gives yardr beside a note: only in the code span of the
 	// command, and only where an agent reads it, since a pack's SETUP.md
 	// and README are a person's at a terminal, where a quote is safe.
-	quotedText := regexp.MustCompile("yardr (mail|reply) [^`]*\"|yardr bead create [^`]*\"|--title \"|bead close\\b[^`]*--reason \"")
+	quotedText := regexp.MustCompile("yardr (mail|reply) [^`]*\"|yardr bead create [^`]*\"|--title \"|bead close\\b[^`]*--reason \"|bead unfold\\b[^`]*--reason \"|session snooze [^`]*\"")
 	agentFile := regexp.MustCompile(`^[a-z]+/(roles|flows)/.*\.md$`)
 	writers := regexp.MustCompile(`^[a-z]+/roles/(builder|reviewer|review-security|pr-reviewer)\.md$`)
+	// A shape is held only while its pattern matches the quoted form it is
+	// for and misses the stdin one, so a pattern that stops matching fails
+	// here instead of holding nothing.
+	for _, tc := range []struct {
+		line   string
+		quoted bool
+	}{
+		{"`yardr bead unfold <carrier> <part> --reason \"<what is wrong>\"`", true},
+		{"`yardr bead unfold <carrier> <part> --reason - <<'REASON'`, then what is", false},
+		{"`yardr session snooze 10m \"<what>\"` before you end your turn", true},
+		{"`yardr session snooze 10m - <<'WAIT'`, then what you wait on, \"as is\"", false},
+	} {
+		if got := quotedText.MatchString(tc.line); got != tc.quoted {
+			t.Errorf("the quoted-text pattern on %s is %v, want %v", tc.line, got, tc.quoted)
+		}
+	}
 	var roles int
 	for name, body := range files {
 		for n, line := range strings.Split(body, "\n") {
@@ -1143,6 +1159,33 @@ func TestRolesShowNoQuotedText(t *testing.T) {
 		t.Errorf("%d roles that write notes read, want at least 13", roles)
 	}
 
+	// A code span wraps, and a shape whose command and quote fall on different
+	// lines is out of reach of the patterns above, which read a line: a
+	// thread's title was written so in the yardmaster's role. That shape is
+	// matched in the body with its lines folded (yardr-rz43), the way the
+	// section checks above read it.
+	threadQuoted := regexp.MustCompile("thread open [^`]*\"")
+	quotedThread := func(body string) string {
+		return threadQuoted.FindString(strings.Join(strings.Fields(body), " "))
+	}
+	for _, tc := range []struct {
+		text   string
+		quoted bool
+	}{
+		{"`yardr thread open <source> --in\n  <team|repo> \"<title>\" -b -`", true},
+		{"`yardr thread open <source> --in\n  <team|repo> - -b - <<'THREAD'`, the title", false},
+		{"There is no `thread open`, and the \"title\" is a word.", false},
+	} {
+		if got := quotedThread(tc.text) != ""; got != tc.quoted {
+			t.Errorf("the thread-open pattern on %q is %v, want %v", tc.text, got, tc.quoted)
+		}
+	}
+	for name, body := range files {
+		if m := quotedThread(body); m != "" && agentFile.MatchString(name) {
+			t.Errorf("%s shows a thread's title as a double-quoted argument, which the shell expands: show it as stdin from a quoted heredoc (yardr thread open <source> --in <place> - -b - <<'THREAD'): %s", name, m)
+		}
+	}
+
 	// The depot's own role prompts and flow stage files are not embedded in
 	// the packs, so walk them from the repository as well. The test gate's
 	// read table selects this package when either directory changes.
@@ -1163,6 +1206,9 @@ func TestRolesShowNoQuotedText(t *testing.T) {
 				if quoted.MatchString(line) || quotedText.MatchString(line) {
 					t.Errorf(".yardr/%s:%d shows a text as a double-quoted argument, which the shell expands: %s", name, n+1, strings.TrimSpace(line))
 				}
+			}
+			if m := quotedThread(string(body)); m != "" {
+				t.Errorf(".yardr/%s shows a thread's title as a double-quoted argument, which the shell expands: %s", name, m)
 			}
 			return nil
 		}); err != nil {

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -408,6 +409,16 @@ func TestBeadAskTakeBack(t *testing.T) {
 			t.Errorf("%q was taken", args)
 		}
 	}
+	// A reason of - is read from stdin, and one with no words is refused
+	// in words that name stdin, so the ask stays open with the others.
+	for _, stdin := range []string{"", " \n\n"} {
+		c := asker.beadCmd()
+		c.SetIn(strings.NewReader(stdin))
+		if _, err := run(t, c, "ask", "--take-back", id, "1", "-"); err == nil ||
+			!strings.Contains(err.Error(), "nothing to write: stdin gave no reason, so ask 1 on "+id+" is still open") {
+			t.Errorf("take-back - with %q on stdin = %v, want refused in words", stdin, err)
+		}
+	}
 	if q, err := st.UserAsks(ctx, "mckean", "mckean"); err != nil || len(q.Open) != 1 {
 		t.Fatalf("the queue after the refusals: %+v, %v", q, err)
 	}
@@ -457,6 +468,27 @@ func TestBeadAskTakeBack(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(out), &got); err != nil || got.Bead != id || got.Ask != 3 || got.State != "taken back" {
 		t.Fatalf("--json = %s, %v", out, err)
+	}
+
+	// The reason reads - from stdin, as typed: a code span and $( ) stay text.
+	ja := &app{st: st, actor: "yardmaster", json: true}
+	out, err = run(t, ja.beadCmd(), "ask", id, "And the tests?", "--context", "the tests.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asked struct{ Ask uint64 }
+	if err := json.Unmarshal([]byte(out), &asked); err != nil || asked.Ask == 0 {
+		t.Fatalf("ask --json = %s, %v", out, err)
+	}
+	const reason = "settled in `the design`, $(not run)"
+	c := asker.beadCmd()
+	c.SetIn(strings.NewReader(reason + "\n\n"))
+	out, err = run(t, c, "ask", "--take-back", id, strconv.FormatUint(asked.Ask, 10), "-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "  taken back by yardmaster: " + reason; !strings.Contains(out, want) {
+		t.Errorf("take-back - printed no %q:\n%s", want, out)
 	}
 
 	help, err := run(t, asker.beadCmd(), "ask", "--help")

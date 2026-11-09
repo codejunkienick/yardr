@@ -469,25 +469,7 @@ what the person asked does, and this is the asker's own.`,
 				return err
 			}
 			if askTakeBack {
-				// A bead@peer ref is the store's to refuse, with whose the
-				// question is to take back.
-				id := args[0]
-				if !strings.Contains(id, "@") {
-					b, err := st.GetBead(c.Context(), id)
-					if err != nil {
-						return err
-					}
-					id = b.ID
-				}
-				seq, err := strconv.ParseUint(args[1], 10, 64)
-				if err != nil || seq == 0 {
-					return fmt.Errorf("ask %q: want the ask's seq, as prime, review and chat print it", args[1])
-				}
-				if err := st.TakeBackAsk(c.Context(), id, seq, args[2], a.who()); err != nil {
-					return err
-				}
-				return a.out(c.OutOrStdout(), map[string]any{"bead": id, "ask": seq, "state": askState(c.Context(), st, id, seq)},
-					func(w io.Writer) { printAsk(w, c.ErrOrStderr(), c.Context(), st, id, seq) })
+				return a.takeBackAsk(c, st, args)
 			}
 			question := args[len(args)-1]
 			var b *store.Bead
