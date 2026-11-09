@@ -12,7 +12,8 @@
 //
 // A prompt rides as a crew add's does, beside argv (AskRun.Role), but as a
 // group set's names it: a file under the yard's home, held to the text at
-// the card and at the approval, which the member then reads at each start.
+// the card and at the approval, which writes the text to a file of the
+// yard's own (runask_promptfile.go) for the member to read at each start.
 package store
 
 import (
@@ -98,12 +99,12 @@ func (w *wtx) crewSetProposal(run AskRun) (crewSetSpec, error) {
 	}
 	subject := "crew member " + name
 	if path, ok := sets["prompt"]; ok {
-		resolved, err := w.heldPrompt(subject, path, run.Role, promptWords{
+		saved, err := w.heldPrompt(name, subject, path, run.Role, promptWords{
 			otherwise: "the prompt is set in a terminal, with yardr crew set " + name + " prompt=<file>", spelled: "prompt=<path>"})
 		if err != nil {
 			return crewSetSpec{}, err
 		}
-		spec.set["prompt"], spec.prompt = resolved, run.Role
+		spec.set["prompt"], spec.prompt = saved, run.Role
 	} else if run.Role != "" {
 		return crewSetSpec{}, fmt.Errorf("%s: the ask carries prompt text but names no prompt: name the file it was read from as prompt=<path>", subject)
 	}
@@ -226,6 +227,11 @@ func runCrewSet(ctx context.Context, w *wtx, run AskRun, actor string, by *appro
 	r, err := w.putCrew(ctx, spec.want, actor, by)
 	if err != nil {
 		return "", err
+	}
+	if path, ok := spec.set["prompt"].(string); ok {
+		if err := w.writePrompt("crew member "+spec.name, path, spec.prompt); err != nil {
+			return "", err
+		}
 	}
 	lines := []string{fmt.Sprintf("crew member %s saved", spec.name)}
 	var atStart []string

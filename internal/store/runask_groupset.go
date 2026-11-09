@@ -9,8 +9,9 @@
 // card names by its label (runask_strong.go). A prompt is a file under the
 // yard's home as group add's is: its path rides argv and its text rides
 // beside it (AskRun.Role), held to the file at the card and again at the
-// approval. Every other setting of a group is not this card's, and refuses
-// beside it in words that say where it goes instead.
+// approval, which writes the text to a file of the yard's own and sets that
+// (runask_promptfile.go). Every other setting of a group is not this card's,
+// and refuses beside it in words that say where it goes instead.
 //
 // The row is registered here, beside its functions, as the peer set row is
 // (runask_peerset.go), and not in runList's literal: runask.go stands at the
@@ -92,12 +93,12 @@ func (w *wtx) groupSetProposal(run AskRun) (groupSetSpec, error) {
 	}
 	subject := "group " + name
 	if path, ok := sets["prompt"]; ok {
-		resolved, err := w.heldPrompt(subject, path, run.Role, promptWords{
+		saved, err := w.heldPrompt(name, subject, path, run.Role, promptWords{
 			otherwise: "the prompt is set in a terminal, with yardr group set " + name + " prompt=<file>", spelled: "prompt=<path>"})
 		if err != nil {
 			return groupSetSpec{}, err
 		}
-		spec.set["prompt"], spec.prompt = resolved, run.Role
+		spec.set["prompt"], spec.prompt = saved, run.Role
 	} else if run.Role != "" {
 		return groupSetSpec{}, fmt.Errorf("%s: the ask carries prompt text but names no prompt: name the file it was read from as prompt=<path>", subject)
 	}
@@ -235,6 +236,11 @@ func runGroupSet(ctx context.Context, w *wtx, run AskRun, actor string, _ *appro
 	ch, err := w.setGroup(ctx, spec.name, GroupEdit{Set: spec.set}, actor, nil)
 	if err != nil {
 		return "", err
+	}
+	if path, ok := spec.set["prompt"].(string); ok {
+		if err := w.writePrompt("group "+spec.name, path, spec.prompt); err != nil {
+			return "", err
+		}
 	}
 	lines := []string{fmt.Sprintf("group %s saved", spec.name)}
 	for _, key := range []string{"args", "cmd", "prompt"} {

@@ -15,8 +15,8 @@ import (
 // file their prompt= names beside the ask, as group add does: prime shows the
 // weighty card whole with what stands now beside what will, the approval is
 // refused while the file holds other text, and the weighed approval sets the
-// path of that file and the flags of the preset. The yardmaster's own entry
-// is proposed the same way.
+// file the yard writes from that text and the flags of the preset. The
+// yardmaster's own entry is proposed the same way.
 func TestBeadAskRunSetsThePromptAndPreset(t *testing.T) {
 	t.Parallel()
 	key := airyKey(t)
@@ -41,8 +41,9 @@ func TestBeadAskRunSetsThePromptAndPreset(t *testing.T) {
 	}
 	const oldPrompt, newPrompt, ownPrompt = "You cook.\n", "You cook with care.\nTaste before you serve.\n", "You run the yard.\nAsk before you spend.\n"
 	_, oldSaved := write("cooks-old", oldPrompt)
-	file, saved := write("cooks", newPrompt)
-	ownFile, ownSaved := write("yardmaster", ownPrompt)
+	file, _ := write("cooks", newPrompt)
+	ownFile, _ := write("yardmaster", ownPrompt)
+	yardFile, ownYard := yardPromptFile(t, home, "cooks", newPrompt), yardPromptFile(t, home, "yardmaster", ownPrompt)
 	if err := y.st.PutGroup(ctx, store.Group{Name: "cooks", Runner: "herdr", Config: map[string]any{"kind": "claude", "prompt": oldSaved}}, "jo"); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +69,7 @@ func TestBeadAskRunSetsThePromptAndPreset(t *testing.T) {
 		"changes the group cooks on the herdr runner",
 		"Its prompt is the file " + oldSaved + ", which each session reads when it starts, and which holds now:",
 		"You cook.",
-		"It will read the file " + saved + " when each session starts, and that holds:",
+		"On approval the yard writes the text below to the file " + yardFile + ", read-only.",
 		"Taste before you serve.",
 		`It will start them with "--dangerously-skip-permissions": the bypass preset`,
 		"changes the crew member yardmaster",
@@ -99,7 +100,7 @@ func TestBeadAskRunSetsThePromptAndPreset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g.Config["prompt"] != saved || fmt.Sprint(g.Config["args"]) != "[--dangerously-skip-permissions]" || g.Config["kind"] != "claude" {
+	if g.Config["prompt"] != yardFile || fmt.Sprint(g.Config["args"]) != "[--dangerously-skip-permissions]" || g.Config["kind"] != "claude" {
 		t.Fatalf("the group holds %+v", g)
 	}
 	if out, err = y.as(t, "jo", "answer", b.ID, "2", "--approve"); err != nil || !strings.Contains(out, "crew member yardmaster saved") {
@@ -109,7 +110,7 @@ func TestBeadAskRunSetsThePromptAndPreset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Config["prompt"] != ownSaved || fmt.Sprint(m.Config["args"]) != "[--dangerously-skip-permissions]" {
+	if m.Config["prompt"] != ownYard || fmt.Sprint(m.Config["args"]) != "[--dangerously-skip-permissions]" {
 		t.Fatalf("the yardmaster holds %+v", m)
 	}
 

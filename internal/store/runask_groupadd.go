@@ -10,9 +10,12 @@
 // yard reads no file for an asker's eyes, since the asker reads its own ask
 // back. It reads the prompt file only to hold it to that text, when the
 // card is written and again at the approval, so a file that holds other
-// text by then is refused. What defines whose environment a group runs in,
-// and every group that hands beads to another yard, stay out, in words
-// that say where they go instead, so no check downstream can miss them.
+// text by then is refused. That file is no more than where the text was
+// read from: the approval writes the carried text to a file of the yard's
+// own (runask_promptfile.go) and the group saves that path. What defines
+// whose environment a group runs in, and every group that hands beads to
+// another yard, stay out, in words that say where they go instead, so no
+// check downstream can miss them.
 package store
 
 import (
@@ -42,13 +45,13 @@ var groupAddKeys = []string{"cmd", "dir", "kind", "args", "prompt", "worktrees"}
 
 // groupAddSpec is a group add proposal as the yard holds it: the group to
 // add, with its limit and config resolved as group add resolves them, and
-// the prompt text its file was held to.
+// the prompt text the approval writes to its file.
 type groupAddSpec struct {
 	name   string
 	runner string
 	limit  int
 	config map[string]any // dir, worktrees and prompt as absolute paths
-	prompt string         // the text of the file config["prompt"] names; "" for none
+	prompt string         // the text the approval writes to the file config["prompt"] names; "" for none
 }
 
 // group is the group the proposal adds, as the terminal's group add saves it.
@@ -214,7 +217,8 @@ func (w *wtx) groupAddName(name string) error {
 // the yard knows and a prompt is a file under the yard's home that holds
 // the text the ask carries. It answers the proposal resolved: the default
 // limit and the yard's default_kind as group add gives them, paths
-// absolute, and the prompt text.
+// absolute (the prompt's is the file the approval writes), and the prompt
+// text.
 func (w *wtx) groupAddProposal(run AskRun) (groupAddSpec, error) {
 	name, runner, limit, sets := groupAddOf(run.Argv)
 	if err := w.groupAddName(name); err != nil {
@@ -267,10 +271,9 @@ func (w *wtx) groupAddProposal(run AskRun) (groupAddSpec, error) {
 }
 
 // groupPrompt holds the prompt file of the group name that path names to the
-// text the ask carries (heldPrompt), and answers the resolved path, which is
-// the path the group saves.
+// text the ask carries (heldPrompt), and answers the path the group saves.
 func (w *wtx) groupPrompt(name, path, text string) (string, error) {
-	return w.heldPrompt("group "+name, path, text, promptWords{
+	return w.heldPrompt(name, "group "+name, path, text, promptWords{
 		otherwise: "the group is added in a terminal", spelled: "--set prompt=<path>"})
 }
 
@@ -279,15 +282,19 @@ func (w *wtx) groupPrompt(name, path, text string) (string, error) {
 // cannot carry, and how the command spells the path.
 type promptWords struct{ otherwise, spelled string }
 
-// heldPrompt holds the prompt file of subject ("group builders") that path
-// names to the text the ask carries: a regular file that stands under the
-// yard's home once its symlinks are resolved, holding exactly that text,
-// which a card shows whole. It answers the resolved path, which is the path
-// the definition saves. Its sessions read the file at each start, so the
-// path must be one every session reads the same way: an absolute one. The
-// file is read only as far as the carried text goes and is never shown, so
-// nothing of it reaches an asker who cannot already write it out.
-func (w *wtx) heldPrompt(subject, path, text string, say promptWords) (string, error) {
+// heldPrompt holds the prompt file of subject ("group builders", name
+// "builders") that path names to the text the ask carries: a regular file
+// that stands under the yard's home once its symlinks are resolved, holding
+// exactly that text, which a card shows whole. That file is where the text
+// was read from and is not the prompt: it answers the file the approval
+// writes the text to (yardPromptPath), which is the path the definition
+// saves, so that a write to the named file after the approval reaches no
+// session. A file the yard wrote for a prompt is not one to name, so a
+// rewritten one cannot stand as both what the card says is there and what
+// it will be. The named file is read only as far as the carried text goes and
+// is never shown, so nothing of it reaches an asker who cannot already write
+// it out.
+func (w *wtx) heldPrompt(name, subject, path, text string, say promptWords) (string, error) {
 	switch {
 	case strings.TrimSpace(text) == "":
 		return "", fmt.Errorf("%s: the ask carries no prompt text: the text goes beside --run, read from the file prompt= names, which yardr bead ask does", subject)
@@ -298,16 +305,41 @@ func (w *wtx) heldPrompt(subject, path, text string, say promptWords) (string, e
 	case strings.IndexFunc(text, crewRoleHidden) >= 0 || strings.Contains(text, NoteFilesMark) || strings.Contains(text, WeightMark):
 		return "", fmt.Errorf("%s: the prompt text holds control characters or a mark the yard draws on a card itself, which a card would not show as written: %s", subject, say.otherwise)
 	case !filepath.IsAbs(path):
-		return "", fmt.Errorf("%s: prompt %q is no absolute path: a relative one is read against each depot, which a card cannot show: name a file under the yard's home as %s", subject, path, say.spelled)
+		return "", fmt.Errorf("%s: prompt %q is no absolute path: a relative one is read against the yard's own directory, which a card cannot show: name the file the text was read from, under the yard's home, as %s", subject, path, say.spelled)
 	}
 	real, held, err := w.homeFile(subject, path, len(text))
 	if err != nil {
 		return "", err
 	}
+	if yardPromptName.MatchString(real) {
+		return "", fmt.Errorf("%s: prompt file %s is one the yard wrote when it approved a prompt, and it stays as it was written: a new prompt is a new file, so name one under the yard's home as %s", subject, real, say.spelled)
+	}
 	if string(held) != text {
 		return "", fmt.Errorf("%s: the prompt file %s holds other text than the ask carries: it was changed since the ask was written, or the ask was written from another file", subject, real)
 	}
-	return real, nil
+	saved, err := w.yardPromptPath(subject, name, text)
+	if err != nil {
+		return "", err
+	}
+	// A file that stands at the yard's name with other text is refused here,
+	// at the card, and not found at the approval: a card whose file is not
+	// the text it shows cannot be approved.
+	if _, err := promptStands(subject, saved, text); err != nil {
+		return "", err
+	}
+	return saved, nil
+}
+
+// homeDirs is the yard's home as named and as its symlinks resolve it, in the
+// words of a refusal that names subject.
+func (w *wtx) homeDirs(subject string) (home, real string, err error) {
+	if home, err = filepath.Abs(w.home); err != nil {
+		return "", "", fmt.Errorf("%s: resolve the yard's home: %w", subject, err)
+	}
+	if real, err = filepath.EvalSymlinks(home); err != nil {
+		return "", "", fmt.Errorf("%s: resolve the yard's home: %w", subject, err)
+	}
+	return home, real, nil
 }
 
 // homeFile is the regular file at path that stands under the yard's home
@@ -316,14 +348,9 @@ func (w *wtx) heldPrompt(subject, path, text string, say promptWords) (string, e
 // subject. A path outside the home is refused before the disk is asked
 // about it, so the refusal tells nothing of what stands elsewhere.
 func (w *wtx) homeFile(subject, path string, limit int) (real string, data []byte, err error) {
-	// The home as named and as its symlinks resolve it.
-	home, err := filepath.Abs(w.home)
+	home, homeReal, err := w.homeDirs(subject)
 	if err != nil {
-		return "", nil, fmt.Errorf("%s: resolve the yard's home: %w", subject, err)
-	}
-	homeReal, err := filepath.EvalSymlinks(home)
-	if err != nil {
-		return "", nil, fmt.Errorf("%s: resolve the yard's home: %w", subject, err)
+		return "", nil, err
 	}
 	under := func(p string) bool {
 		return strings.HasPrefix(p, filepath.Clean(home)+string(filepath.Separator)) || strings.HasPrefix(p, filepath.Clean(homeReal)+string(filepath.Separator))
@@ -427,8 +454,8 @@ func (w *wtx) groupAddCard(run AskRun, _ bool) (AskRun, error) {
 	if spec.prompt != "" {
 		sum := sha256.Sum256([]byte(spec.prompt))
 		seenMap["prompt "+str("prompt")] = hex.EncodeToString(sum[:])
-		does = append(does, fmt.Sprintf("Its prompt is the file %s, which each session reads when it starts, and which holds now:", str("prompt")))
-		does = append(does, strings.Split(strings.TrimSuffix(spec.prompt, "\n"), "\n")...)
+		does = append(does, promptWritten(str("prompt")))
+		does = append(does, textLines(spec.prompt)...)
 	}
 	return AskRun{
 		Argv:   run.Argv,
@@ -459,6 +486,11 @@ func runGroupAdd(ctx context.Context, w *wtx, run AskRun, actor string, _ *appro
 	g := spec.group()
 	if err := putGroup(ctx, w, &g, actor, false); err != nil {
 		return "", err
+	}
+	if path, ok := spec.config["prompt"].(string); ok {
+		if err := w.writePrompt("group "+g.Name, path, spec.prompt); err != nil {
+			return "", err
+		}
 	}
 	parts := []string{g.Runner}
 	if kind, _ := g.Config["kind"].(string); kind != "" {

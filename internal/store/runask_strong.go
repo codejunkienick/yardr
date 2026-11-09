@@ -151,9 +151,18 @@ func (w *wtx) promptBefore(path string) (text, why string) {
 // textLines are the lines of a prompt's text as a card shows it.
 func textLines(text string) []string { return strings.Split(strings.TrimSuffix(text, "\n"), "\n") }
 
+// promptWritten is the card's line for the file the approval of a prompt
+// writes (yardPromptPath): the text below it is what the file will hold. It
+// says that the file the ask names is no part of what runs, since the
+// approval is of the bytes the card shows and a later write to that file
+// is nobody's to approve.
+func promptWritten(path string) string {
+	return fmt.Sprintf("On approval the yard writes the text below to the file %s, read-only. Each session reads that file when it starts, so changing the file the ask names later changes no session:", path)
+}
+
 // promptLines are the card's lines for a prompt that changes from the file
-// was (empty for none) to the file path, which holds text: what stands now
-// and what will, each whole.
+// was (empty for none) to the file path, which the approval writes from
+// text: what stands now and what will, each whole.
 func (w *wtx) promptLines(was, path, text string) []string {
 	var lines []string
 	if was == "" {
@@ -164,7 +173,7 @@ func (w *wtx) promptLines(was, path, text string) []string {
 	} else {
 		lines = append(lines, fmt.Sprintf("Its prompt is the file %s, which each session reads when it starts. This card cannot show it: %s.", was, why))
 	}
-	lines = append(lines, fmt.Sprintf("It will read the file %s when each session starts, and that holds:", path))
+	lines = append(lines, promptWritten(path))
 	return append(lines, textLines(text)...)
 }
 

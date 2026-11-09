@@ -123,9 +123,12 @@ const askRunList = `  peer add <name> <invite>
       under the yard's home) whose text the ask carries, read from that
       file; the card shows the command and the prompt text whole (weighty,
       code), and approving is refused when the file holds other text by
-      then. env_file, log and a peer group stay out (yardr group set
-      <name> env_file=<file> in a terminal), and a name in use is
-      refused, since this adds and never replaces
+      then, and writes that text to a read-only file of the yard's own,
+      roles/<name>.<digest>.md, which is the group's prompt: a later change
+      to the file named reaches no session, and a file the yard wrote is
+      not one to name. env_file, log and a peer group stay out (yardr
+      group set <name> env_file=<file> in a terminal), and a name in use
+      is refused, since this adds and never replaces
   crew set <name> open_threads=<sources> | set_state=<sources> | peers=<peers>
       a crew member may open threads or set the status of threads in the
       sources, or mail crew members of the peers
@@ -137,14 +140,20 @@ const askRunList = `  peer add <name> <invite>
       the preset's (weighty, code), and approving sets exactly that; the
       prompt is a file under the yard's home, named by prompt=<file>,
       whose text the ask carries, read from it, and an approval is
-      refused when the file holds other text by then; no other setting
-      rides in with it
+      refused when the file holds other text by then; it writes that
+      text to a read-only file of the yard's own, roles/<name>.<digest>.md,
+      and sets it as the prompt, so a later change to the file named
+      reaches no session, and a file the yard wrote is not one to name;
+      no other setting rides in with it
   group set <name> prompt=<file> | cmd=<command> | preset=<preset>
       the same for a group, and for an exec group's command (one word:
-      the line is split at spaces); a kind, a directory and the rest of
-      a group are not this card's: the yardmaster sets those the
-      operator has delegated on their mail, and the rest are typed in a
-      terminal
+      the line is split at spaces); approving a prompt writes its carried
+      text to a read-only file of the yard's own, roles/<name>.<digest>.md,
+      and sets it as the prompt, so a later change to the file named
+      reaches no session, and a file the yard wrote is not one to name; a
+      kind, a directory and the rest of a group are not this card's: the
+      yardmaster sets those the operator has delegated on their mail, and
+      the rest are typed in a terminal
   crew identity <name> --source <source> [--id <id>] [--key <key>]
       who the crew member is in the source: mentions and assignments of
       the id or key there are then addressed to it

@@ -1,6 +1,8 @@
 package store
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -42,6 +44,37 @@ func groupAddFile(t *testing.T, y *askYard, name, text string) (given, saved str
 		t.Fatal(err)
 	}
 	return given, saved
+}
+
+// yardPromptFile is the file the approval of a prompt writes the text of
+// name's prompt to: the yard's roles directory, by the name and the SHA-256
+// of the text. It is built here from the home as its symlinks resolve it, so
+// a test does not take the path from the code it holds.
+func yardPromptFile(t *testing.T, y *askYard, name, text string) string {
+	t.Helper()
+	home, err := filepath.EvalSymlinks(y.Store.home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(text))
+	return filepath.Join(home, "roles", name+"."+hex.EncodeToString(sum[:])+".md")
+}
+
+// yardPromptHolds holds a file the approval wrote to what it promises: a
+// regular file, read-only, with exactly the text.
+func yardPromptHolds(t *testing.T, path, text string) {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Errorf("the yard's prompt file: %v", err)
+		return
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o400 {
+		t.Errorf("%s is %v, want a regular file of mode 0400", path, info.Mode())
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != text {
+		t.Errorf("%s holds %q, %v; want %q", path, got, err, text)
+	}
 }
 
 // A group add ask from a crew pane shows a weighty code card with the
@@ -122,10 +155,12 @@ func TestRunAskGroupAddExecApproves(t *testing.T) {
 
 // A herdr group's card shows the prompt text the ask carries whole, its
 // kind (the yard's default where it names none) and the arguments it starts
-// the agent with, and approving it saves the path of the file. The file's
-// bytes are what the approval is held to: a file that holds other text than
-// the ask carried by then is refused, and the ask goes through once it
-// holds the text again.
+// the agent with, and approving it writes that text to a file of the yard's
+// own and saves its path. The file the ask names is held to the text until
+// then: a file that holds other text than the ask carried by then is
+// refused, and the ask goes through once it holds the text again. After the
+// approval it is no more than where the text was read from: a write to it
+// reaches no session.
 func TestRunAskGroupAddHerdrHoldsThePrompt(t *testing.T) {
 	t.Parallel()
 	y, _ := runYard(t)
@@ -133,18 +168,27 @@ func TestRunAskGroupAddHerdrHoldsThePrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := groupAddPromptText()
-	given, saved := groupAddFile(t, y, "builder", text)
+	// The asker's file stands outside roles/, which this yard does not have
+	// yet (its roles came from a pack): the approval makes the directory.
+	given := filepath.Join(y.Store.home, "notes", "builder.md")
+	if err := os.MkdirAll(filepath.Dir(given), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(given, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	yardFile := yardPromptFile(t, y, "post-builders", text)
 	seq := y.ask(t, groupAddAsk(text, "group", "add", "post-builders", "--runner", "herdr", "--set", "args=--dangerously-skip-permissions", "--set", "prompt="+given), "yardmaster")
 	r := y.asked(t, seq)
 	joined := strings.Join(r.Ask.Run.Does, "\n")
 	for _, want := range []string{"adds the group post-builders on the herdr runner, with limit 1, the runner's default.",
 		"It starts codex (Codex) agents, the yard's default_kind.", `It starts them with "--dangerously-skip-permissions".`,
-		"It skips permissions: it runs without asking for permission.", "Its prompt is the file " + saved, strings.TrimSuffix(text, "\n")} {
+		"It skips permissions: it runs without asking for permission.", "On approval the yard writes the text below to the file " + yardFile + ", read-only.", strings.TrimSuffix(text, "\n")} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("card does not say %q:\n%s", want, joined)
 		}
 	}
-	if got := r.Ask.Run.Seen["prompt "+saved]; len(got) != 64 {
+	if got := r.Ask.Run.Seen["prompt "+yardFile]; len(got) != 64 {
 		t.Errorf("card's prompt fingerprint = %q, want the SHA-256 of the text", got)
 	}
 	if r.Ask.Run.Role != text {
@@ -170,6 +214,10 @@ func TestRunAskGroupAddHerdrHoldsThePrompt(t *testing.T) {
 	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil || !strings.Contains(err.Error(), "holds other text than the ask carries") {
 		t.Errorf("approval over another prompt = %v, want it refused", err)
 	}
+	// Nothing of the yard's is written until the approval.
+	if _, err := os.Lstat(filepath.Dir(yardFile)); !os.IsNotExist(err) {
+		t.Fatalf("the yard's roles directory after refused approvals: %v", err)
+	}
 	if err := os.WriteFile(given, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -180,9 +228,22 @@ func TestRunAskGroupAddHerdrHoldsThePrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g.Runner != "herdr" || g.Limit != 1 || !reflect.DeepEqual(g.Config, map[string]any{"kind": "codex", "args": "--dangerously-skip-permissions", "prompt": saved}) {
+	if g.Runner != "herdr" || g.Limit != 1 || !reflect.DeepEqual(g.Config, map[string]any{"kind": "codex", "args": "--dangerously-skip-permissions", "prompt": yardFile}) {
 		t.Errorf("group = %+v", g)
 	}
+	yardPromptHolds(t, yardFile, text)
+	if info, err := os.Stat(filepath.Dir(yardFile)); err != nil || info.Mode().Perm() != 0o700 {
+		t.Errorf("the roles directory the approval made = %v, %v, want mode 0700", info, err)
+	}
+	// The file the ask named is where the text was read from: a write to it
+	// after the approval changes no session, which read the yard's own.
+	if err := os.WriteFile(given, []byte("You are another builder.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if g, err := y.GetGroup(y.ctx, "post-builders"); err != nil || g.Config["prompt"] != yardFile {
+		t.Errorf("group after a write to the named file = %+v, %v", g, err)
+	}
+	yardPromptHolds(t, yardFile, text)
 	// A prompt that went away since is refused in the proposal's words, and
 	// nothing is made.
 	_, other := groupAddFile(t, y, "other", text)
@@ -311,6 +372,23 @@ func TestRunAskGroupAddRefusals(t *testing.T) {
 	herdr := []string{"group", "add", "post2", "--runner", "herdr", "--set", "kind=claude"}
 	exec := []string{"group", "add", "post2", "--runner", "exec", "--set", "cmd=/srv/bin/post"}
 	with := func(argv []string, more ...string) []string { return append(append([]string{}, argv...), more...) }
+	// What stands at the yard's names: a prompt file the yard wrote, which no
+	// ask names, and files put at the name a prompt would be written to,
+	// which no approval uses.
+	written := yardPromptFile(t, y, "any", x)
+	if err := os.WriteFile(written, []byte(x), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	writtenLink := filepath.Join(home, "roles", "to-written.md")
+	if err := os.Symlink(written, writtenLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(yardPromptFile(t, y, "post2", x), []byte("other text\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(any, yardPromptFile(t, y, "post5", x)); err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range []struct {
 		name string
 		role string
@@ -347,6 +425,12 @@ func TestRunAskGroupAddRefusals(t *testing.T) {
 		{"prompt that is a directory", x, with(herdr, "--set", "prompt="+filepath.Join(home, "roles")), "not a regular file"},
 		{"prompt file that holds other text", "y\n", with(herdr, "--set", "prompt="+any), "holds other text than the ask carries"},
 		{"prompt file that holds more text", "x", with(herdr, "--set", "prompt="+any), "holds other text than the ask carries"},
+		{"prompt that is a file the yard wrote", x, with(herdr, "--set", "prompt="+written), "is one the yard wrote when it approved a prompt"},
+		{"prompt through a symlink to a file the yard wrote", x, with(herdr, "--set", "prompt="+writtenLink), "is one the yard wrote when it approved a prompt"},
+		{"a file at the yard's name that holds other text", x, with(herdr, "--set", "prompt="+any), "holds other text than its name says"},
+		// A symlink there would make the file it points to the live prompt,
+		// though it holds the very text.
+		{"a symlink at the yard's name", x, []string{"group", "add", "post5", "--runner", "herdr", "--set", "kind=claude", "--set", "prompt=" + any}, "is not one it can use"},
 		{"prompt text that is no text", string([]byte{0xff, 0xfe}), with(herdr, "--set", "prompt="+any), "not valid UTF-8"},
 		{"escape in prompt", "shown\x1b[8mhidden\n", with(herdr, "--set", "prompt="+any), "control characters"},
 		{"weight mark in prompt", "WEIGHTY · routine\n", with(herdr, "--set", "prompt="+any), "a mark the yard draws"},

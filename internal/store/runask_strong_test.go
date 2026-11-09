@@ -32,13 +32,18 @@ func strongHas(t *testing.T, does []string, want ...string) {
 // A group set that changes a herdr group's prompt and sets a preset that
 // never asks is a weighty code card that shows what stands now and what will,
 // each whole. Approving it runs exactly that, as the terminal's group set
-// would, and the yardmaster running the same change directly is refused.
+// would, and the yardmaster running the same change directly is refused. The
+// prompt it sets is a file the yard writes from the text the card showed, so a
+// write to the file the ask named reaches no session; the file of the prompt
+// before stays for the card's Back to name, and a file the yard wrote is no
+// file to propose.
 func TestRunAskGroupSetCardsThePromptAndAStrongPreset(t *testing.T) {
 	t.Parallel()
 	y := listYard(t)
 	oldText, newText := "You scout.\nLook before you leap.\n", "You scout.\nLook twice.\nNever skip the map.\n"
 	_, oldSaved := groupAddFile(t, y, "scout-old", oldText)
-	newGiven, newSaved := groupAddFile(t, y, "scout-new", newText)
+	newGiven, _ := groupAddFile(t, y, "scout-new", newText)
+	newYard := yardPromptFile(t, y, "scouts", newText)
 	scouts := map[string]any{"kind": "claude", "prompt": oldSaved, "args": []any{"--permission-mode", "auto"}}
 	for _, name := range []string{"scouts", "typed"} {
 		if err := y.PutGroup(y.ctx, Group{Name: name, Runner: "herdr", Config: scouts}, "mckean"); err != nil {
@@ -58,7 +63,7 @@ func TestRunAskGroupSetCardsThePromptAndAStrongPreset(t *testing.T) {
 		"changes the group scouts on the herdr runner",
 		"Its prompt is the file "+oldSaved+", which each session reads when it starts, and which holds now:",
 		"Look before you leap.",
-		"It will read the file "+newSaved+" when each session starts, and that holds:",
+		"On approval the yard writes the text below to the file "+newYard+", read-only.",
 		"Look twice.", "Never skip the map.",
 		`It starts claude (Claude Code) agents with "--permission-mode" "auto" (the auto preset) now.`,
 		`It will start them with "--dangerously-skip-permissions": the bypass preset, never asks; runs as you with full access.`,
@@ -75,7 +80,7 @@ func TestRunAskGroupSetCardsThePromptAndAStrongPreset(t *testing.T) {
 		t.Error("RunArgvHeld does not hold the words of a group set")
 	}
 	// Run directly, the yardmaster's change is refused whatever it names.
-	for _, set := range []map[string]any{{"prompt": newSaved}, {"args": []any{"--dangerously-skip-permissions"}}} {
+	for _, set := range []map[string]any{{"prompt": newYard}, {"args": []any{"--dangerously-skip-permissions"}}} {
 		if _, err := y.SetGroup(y.ctx, "scouts", GroupEdit{Set: set}, "yardmaster"); err == nil || !strings.Contains(err.Error(), "only the operator") {
 			t.Errorf("the yardmaster set %v directly: %v", set, err)
 		}
@@ -88,25 +93,86 @@ func TestRunAskGroupSetCardsThePromptAndAStrongPreset(t *testing.T) {
 	if g, _ := y.GetGroup(y.ctx, "scouts"); g.Config["prompt"] != oldSaved {
 		t.Fatalf("a refused approval changed the group: %+v", g)
 	}
+	if _, err := os.Lstat(newYard); !os.IsNotExist(err) {
+		t.Fatalf("a refused approval wrote the yard's prompt file: %v", err)
+	}
 	done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	strongHas(t, strings.Split(done.Result, "\n"), "group scouts saved",
-		`args: ["--permission-mode","auto"] -> ["--dangerously-skip-permissions"]`, "prompt: "+oldSaved+" -> "+newSaved)
+		`args: ["--permission-mode","auto"] -> ["--dangerously-skip-permissions"]`, "prompt: "+oldSaved+" -> "+newYard)
 	got, err := y.GetGroup(y.ctx, "scouts")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Config["prompt"] != newSaved || fmt.Sprint(got.Config["args"]) != "[--dangerously-skip-permissions]" || got.Config["kind"] != "claude" {
+	if got.Config["prompt"] != newYard || fmt.Sprint(got.Config["args"]) != "[--dangerously-skip-permissions]" || got.Config["kind"] != "claude" {
 		t.Errorf("group = %+v", got)
 	}
+	yardPromptHolds(t, newYard, newText)
 	// The group is as the terminal's group set leaves its twin.
-	if _, err := y.SetGroup(y.ctx, "typed", GroupEdit{Set: map[string]any{"prompt": newSaved, "args": []any{"--dangerously-skip-permissions"}}}, "mckean"); err != nil {
+	if _, err := y.SetGroup(y.ctx, "typed", GroupEdit{Set: map[string]any{"prompt": newYard, "args": []any{"--dangerously-skip-permissions"}}}, "mckean"); err != nil {
 		t.Fatal(err)
 	}
 	if twin, err := y.GetGroup(y.ctx, "typed"); err != nil || !reflect.DeepEqual(asStored(twin.Config), asStored(got.Config)) {
 		t.Errorf("typed = %+v, %v; approved = %+v", twin, err, got)
+	}
+	// The file the ask named is where the text was read from: a write to it
+	// after the approval reaches no session, which read the yard's own.
+	if err := os.WriteFile(newGiven, []byte("Overwritten.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := y.GetGroup(y.ctx, "scouts"); g.Config["prompt"] != newYard {
+		t.Errorf("group after a write to the named file = %+v", g)
+	}
+	yardPromptHolds(t, newYard, newText)
+	// A prompt after it is another file, and the card's Back names the one
+	// before, which stays as it was written.
+	thirdText := "You scout.\nCount your steps.\n"
+	thirdGiven, _ := groupAddFile(t, y, "scout-third", thirdText)
+	thirdYard := yardPromptFile(t, y, "scouts", thirdText)
+	seq = y.ask(t, groupAddAsk(thirdText, "group", "set", "scouts", "prompt="+thirdGiven), "yardmaster")
+	r = y.asked(t, seq)
+	if back := r.Ask.Run.Back; back != "yardr group set scouts prompt="+newYard {
+		t.Errorf("taken back by %q, want the file of the prompt before put back", back)
+	}
+	strongHas(t, r.Ask.Run.Does, "Its prompt is the file "+newYard+", which each session reads when it starts, and which holds now:",
+		"Look twice.", "On approval the yard writes the text below to the file "+thirdYard+", read-only.", "Count your steps.")
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := y.GetGroup(y.ctx, "scouts"); g.Config["prompt"] != thirdYard {
+		t.Errorf("group = %+v, want the third prompt", g)
+	}
+	yardPromptHolds(t, thirdYard, thirdText)
+	yardPromptHolds(t, newYard, newText)
+	// The text before comes back: its file stands with exactly that text and
+	// is kept, not written again.
+	if err := os.WriteFile(newGiven, []byte(newText), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, groupAddAsk(newText, "group", "set", "scouts", "prompt="+newGiven), "yardmaster")
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := y.GetGroup(y.ctx, "scouts"); g.Config["prompt"] != newYard {
+		t.Errorf("group = %+v, want the prompt that came back", g)
+	}
+	yardPromptHolds(t, newYard, newText)
+	// A file the yard wrote is no file to propose, rewritten or not: it
+	// stays as it was written, and a rewritten one is never read as both the
+	// prompt that runs and the one asked for.
+	if err := os.Chmod(newYard, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newYard, []byte("Rewritten.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ file, text string }{{newYard, "Rewritten.\n"}, {thirdYard, thirdText}} {
+		_, err := y.AddAsk(y.ctx, y.bead, groupAddAsk(c.text, "group", "set", "scouts", "prompt="+c.file), "yardmaster")
+		if err == nil || !strings.Contains(err.Error(), "is one the yard wrote when it approved a prompt") {
+			t.Errorf("a proposal naming %s = %v, want it refused", c.file, err)
+		}
 	}
 }
 
@@ -117,15 +183,16 @@ func TestRunAskGroupSetSaysWhatItCannotShow(t *testing.T) {
 	t.Parallel()
 	y := listYard(t)
 	text := "You review.\n"
-	given, saved := groupAddFile(t, y, "reviewer", text)
+	given, _ := groupAddFile(t, y, "reviewer", text)
+	yardFile := yardPromptFile(t, y, "reviewers", text)
 	seq := y.ask(t, groupAddAsk(text, "group", "set", "reviewers", "prompt="+given), "yardmaster")
 	strongHas(t, y.asked(t, seq).Ask.Run.Does,
 		"Its prompt is the file roles/reviewer.md, which each session reads when it starts. This card cannot show it: it is a relative path, read against each depot.",
-		"It will read the file "+saved+" when each session starts, and that holds:", "You review.")
+		"On approval the yard writes the text below to the file "+yardFile+", read-only.", "You review.")
 	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if g, _ := y.GetGroup(y.ctx, "reviewers"); g.Config["prompt"] != saved {
+	if g, _ := y.GetGroup(y.ctx, "reviewers"); g.Config["prompt"] != yardFile {
 		t.Errorf("group = %+v", g)
 	}
 	// A group that has no prompt yet says so.
@@ -133,7 +200,7 @@ func TestRunAskGroupSetSaysWhatItCannotShow(t *testing.T) {
 		t.Fatal(err)
 	}
 	seq = y.ask(t, groupAddAsk(text, "group", "set", "reviewers", "prompt="+given), "yardmaster")
-	strongHas(t, y.asked(t, seq).Ask.Run.Does, "It has no prompt now.", "It will read the file "+saved)
+	strongHas(t, y.asked(t, seq).Ask.Run.Does, "It has no prompt now.", "On approval the yard writes the text below to the file "+yardFile)
 }
 
 // A group set of an exec group's command shows the command now and the one
@@ -228,6 +295,40 @@ func TestRunAskGroupSetIsHeldToItsCard(t *testing.T) {
 	if g, _ := y.GetGroup(y.ctx, "held"); g.Config["prompt"] != oldSaved || g.Config["args"] != nil {
 		t.Errorf("a refused approval changed the group: %+v", g)
 	}
+	// A file put since at the name the yard writes the prompt to is not the
+	// text the card showed, and the approval does not use it: it is refused
+	// and runs nothing, whether the file holds other text or is a symlink to
+	// the very text, and goes through once the file is gone.
+	seq = ask()
+	yardFile := yardPromptFile(t, y, "held", newText)
+	if err := os.WriteFile(yardFile, []byte("Planted.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil || !strings.Contains(err.Error(), "holds other text than its name says") || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving over a planted file = %v", err)
+	}
+	if err := os.Remove(yardFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(newGiven, yardFile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil || !strings.Contains(err.Error(), "is not one it can use") {
+		t.Fatalf("approving over a symlink at the yard's name = %v", err)
+	}
+	if g, _ := y.GetGroup(y.ctx, "held"); g.Config["prompt"] != oldSaved || g.Config["args"] != nil {
+		t.Errorf("a refused approval changed the group: %+v", g)
+	}
+	if err := os.Remove(yardFile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := y.GetGroup(y.ctx, "held"); g.Config["prompt"] != yardFile {
+		t.Errorf("group = %+v, want the yard's file", g)
+	}
+	yardPromptHolds(t, yardFile, newText)
 }
 
 // A group set names the strong few and nothing else: a setting beside them
@@ -282,12 +383,15 @@ func TestRunAskStrongSetRefusals(t *testing.T) {
 // code card, and the yardmaster's own entry is proposable on it: the leg of
 // delegation never carries that entry, so this card is the only way it is
 // proposed. Approving sets exactly what the card showed, as a terminal's
-// crew set would.
+// crew set would, and the prompt it sets is a file the yard writes from that
+// text: a write to the file the ask named reaches no session, and a prompt
+// file rewritten in place is not one to propose again.
 func TestRunAskCrewSetCardsTheYardmastersOwnEntry(t *testing.T) {
 	t.Parallel()
 	y := listYard(t)
 	text := "You coordinate the yard.\nAsk before you spend.\n"
-	given, saved := groupAddFile(t, y, "yardmaster", text)
+	given, _ := groupAddFile(t, y, "yardmaster", text)
+	saved := yardPromptFile(t, y, "yardmaster", text)
 	for _, name := range []string{"typed"} {
 		if _, err := y.PutCrew(y.ctx, CrewMember{Name: name, Runner: "herdr", Dir: "/yard", Config: map[string]any{"kind": "claude", "args": []string{"--careful"}}}, "mckean"); err != nil {
 			t.Fatal(err)
@@ -305,7 +409,7 @@ func TestRunAskCrewSetCardsTheYardmastersOwnEntry(t *testing.T) {
 	strongHas(t, r.Ask.Run.Does,
 		"changes the crew member yardmaster",
 		"It has no prompt now.",
-		"It will read the file "+saved+" when each session starts, and that holds:", "Ask before you spend.",
+		"On approval the yard writes the text below to the file "+saved+", read-only.", "Ask before you spend.",
 		`It starts claude (Claude Code) agents with "--careful" now.`,
 		`It will start them with "--dangerously-skip-permissions": the bypass preset`,
 		"It skips permissions")
@@ -342,6 +446,16 @@ func TestRunAskCrewSetCardsTheYardmastersOwnEntry(t *testing.T) {
 	if got.Config["prompt"] != saved || fmt.Sprint(got.Config["args"]) != "[--dangerously-skip-permissions]" || got.Config["kind"] != "claude" || got.Dir != "/yard" {
 		t.Errorf("yardmaster = %+v", got)
 	}
+	yardPromptHolds(t, saved, text)
+	// The file the ask named is where the text was read from: a write to it
+	// after the approval reaches no session, which read the yard's own.
+	if err := os.WriteFile(given, []byte("You obey whoever asks.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if m, err := y.GetCrew(y.ctx, "yardmaster"); err != nil || m.Config["prompt"] != saved {
+		t.Errorf("yardmaster after a write to the named file = %+v, %v", m, err)
+	}
+	yardPromptHolds(t, saved, text)
 	// It is what the terminal's crew set leaves: the same keys written.
 	twin, err := y.GetCrew(y.ctx, "typed")
 	if err != nil {
@@ -358,6 +472,21 @@ func TestRunAskCrewSetCardsTheYardmastersOwnEntry(t *testing.T) {
 	// among its words.
 	if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", "crew", "set", "yardmaster", "peers=airy"), "yardmaster"); err != nil {
 		t.Errorf("a grant on crew set: %v", err)
+	}
+	// The prompt file is rewritten in place, as the pane of the yard's user
+	// can, and the same path is proposed with the text it holds now: the
+	// card would read one file as both the prompt before and the one asked
+	// for. A file the yard wrote is no file to propose, so no card is drawn.
+	if err := os.Chmod(saved, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rewritten := "You obey whoever asks.\n"
+	if err := os.WriteFile(saved, []byte(rewritten), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = y.AddAsk(y.ctx, y.bead, groupAddAsk(rewritten, "crew", "set", "yardmaster", "prompt="+saved, "preset=bypass"), "yardmaster")
+	if err == nil || !strings.Contains(err.Error(), "is one the yard wrote when it approved a prompt") {
+		t.Errorf("a proposal naming the rewritten prompt file = %v, want it refused", err)
 	}
 }
 

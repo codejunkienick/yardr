@@ -2,16 +2,32 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
+// yardPromptFile is the file the approval of a prompt writes the text of
+// name's prompt to: the yard's roles directory, by the name and the SHA-256
+// of the text. It is built here from the home as its symlinks resolve it, so
+// a test does not take the path from the code it holds.
+func yardPromptFile(t *testing.T, home, name, text string) string {
+	t.Helper()
+	home, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(text))
+	return filepath.Join(home, "roles", name+"."+hex.EncodeToString(sum[:])+".md")
+}
+
 // bead ask --run "group add ..." carries the text of the file its --set
 // prompt= names beside the ask: prime shows the weighty card whole, the
 // approval is refused while the file holds other text, and the weighed
-// approval adds the group with the path of that file.
+// approval adds the group with the file the yard writes from that text.
 func TestBeadAskRunGroupAdd(t *testing.T) {
 	t.Parallel()
 	key := airyKey(t)
@@ -27,10 +43,7 @@ func TestBeadAskRunGroupAdd(t *testing.T) {
 	if err := os.WriteFile(file, []byte(prompt), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	saved, err := filepath.EvalSymlinks(file)
-	if err != nil {
-		t.Fatal(err)
-	}
+	yardFile := yardPromptFile(t, home, "reviewers", prompt)
 	command := "group add reviewers --runner herdr --limit 2 --set kind=claude --set args=--auto --set prompt=" + file
 	out, err := y.as(t, "yardmaster", "ask", b.ID, "Add the reviewers?", "--context", "the yard needs reviewers", "--run", command)
 	if err != nil {
@@ -47,7 +60,7 @@ func TestBeadAskRunGroupAdd(t *testing.T) {
 		"WEIGHTY · code:",
 		"adds the group reviewers on the herdr runner, with limit 2.",
 		`It starts them with "--auto".`,
-		"Its prompt is the file " + saved,
+		"On approval the yard writes the text below to the file " + yardFile + ", read-only.",
 		"Read the diff and say what is wrong with it.",
 	} {
 		if !strings.Contains(shown, want) {
@@ -79,8 +92,19 @@ func TestBeadAskRunGroupAdd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g.Runner != "herdr" || g.Limit != 2 || g.Config["kind"] != "claude" || g.Config["args"] != "--auto" || g.Config["prompt"] != saved {
+	if g.Runner != "herdr" || g.Limit != 2 || g.Config["kind"] != "claude" || g.Config["args"] != "--auto" || g.Config["prompt"] != yardFile {
 		t.Fatalf("the group holds %+v", g)
+	}
+	// The yard wrote the prompt itself: a write to the file the ask named
+	// reaches no session.
+	if err := os.WriteFile(file, []byte("changed after the approval\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(yardFile); err != nil || string(got) != prompt {
+		t.Fatalf("the yard's prompt file holds %q, %v", got, err)
+	}
+	if info, err := os.Stat(yardFile); err != nil || info.Mode().Perm() != 0o400 {
+		t.Fatalf("the yard's prompt file is %v, %v, want mode 0400", info, err)
 	}
 
 	// A file that cannot be read, or is no text, is refused before anything

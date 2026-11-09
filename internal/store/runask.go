@@ -122,14 +122,14 @@ type AskRun struct {
 	// keeps it: askedRun throws a writer's Test away with its Does
 	// and Seen.
 	Test string `json:"test,omitempty"`
-	// Role is the prompt text a crew add row or a group add row carries,
-	// shown on the card in Does as the command's own words never show it
-	// (it goes beside argv, in the ask's --run-role, or read from the file
-	// prompt= names when the ask is written). A crew add's approval writes
-	// it to the yard's roles directory as the new member's prompt; a group
-	// add's is held to the prompt file still holding exactly it. No other
-	// row keeps it: askedRun throws a writer's Role away with its Does and
-	// Seen.
+	// Role is the prompt text a crew add, group add, group set or crew set
+	// row carries, shown on the card in Does as the command's own words
+	// never show it (it goes beside argv, in the ask's --run-role, or read
+	// from the file prompt= names when the ask is written). A crew add's
+	// approval writes it to roles/<name>.md as the new member's prompt; the
+	// others hold the file prompt= names to it and write it, at the approval,
+	// to a file the yard names (runask_promptfile.go). No other row keeps
+	// it: askedRun throws a writer's Role away with its Does and Seen.
 	Role string `json:"role,omitempty"`
 }
 

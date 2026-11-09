@@ -443,12 +443,14 @@ func crewRolePath(home, name string) (disk, prompt string, err error) {
 	return clean, prompt, nil
 }
 
-// writeCrewRole puts the carried text at a path that holds nothing,
-// whole or not at all: the link refuses whatever arrived there since the
-// proposal was read, a symlink included, so nothing is replaced or
-// followed. A member can read only the role the operator approved, and
-// the role stays private.
-func writeCrewRole(home, disk, role string) error {
+// writeRoleFile puts the carried text at a path in the yard's roles
+// directory that holds nothing, with the mode given, whole or not at all:
+// the link refuses whatever arrived there since the proposal was read, a
+// symlink included, so nothing is replaced or followed. A member can read
+// only the role the operator approved, and the role stays private. A crew
+// add writes its member's role with it, and the approval of a prompt card
+// writes the prompt (writePrompt).
+func writeRoleFile(home, disk, role string, mode os.FileMode) error {
 	dir := filepath.Dir(disk)
 	roles, err := filepath.Abs(filepath.Join(home, "roles"))
 	if err != nil {
@@ -498,7 +500,7 @@ func writeCrewRole(home, disk, role string) error {
 	if _, err := f.Write([]byte(role)); err != nil {
 		return err
 	}
-	if err := f.Chmod(0o600); err != nil {
+	if err := f.Chmod(mode); err != nil {
 		return err
 	}
 	if err := f.Close(); err != nil {
@@ -540,7 +542,7 @@ func runCrewAdd(ctx context.Context, w *wtx, run AskRun, actor string, by *appro
 	if err != nil {
 		return "", err
 	}
-	if err := writeCrewRole(w.home, disk, spec.role); err != nil {
+	if err := writeRoleFile(w.home, disk, spec.role, 0o600); err != nil {
 		return "", fmt.Errorf("crew member %s: write its role to %s: %w", spec.name, disk, err)
 	}
 	return fmt.Sprintf("crew member %s added; the daemon starts it (journal %s)", r.Name, r.Journal), nil

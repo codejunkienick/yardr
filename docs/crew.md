@@ -58,9 +58,13 @@ either or both on a weighty (`code`) card that shows the prompt now and the
 new one whole, and the flags the member starts with now and the preset's.
 The `prompt` is the absolute path of a file under the yard's home, whose text
 `yardr bead ask` reads from the file and carries beside the command, and the
-approval is refused if that file holds other text by then. Nothing else rides
-in with them, and a running member keeps its session: the next one starts
-with the new prompt or flags.
+approval is refused if that file holds other text by then. Approving writes
+that text to a read-only file of the yard's own, `roles/<name>.<digest>.md`
+under the home (the digest is the text's SHA-256), and sets it as the prompt,
+so a later change to the file the ask named reaches no session; a file the
+yard wrote is not one to name, since a new prompt is a new file. Nothing else
+rides in with them, and a running member keeps its session: the next one
+starts with the new prompt or flags.
 
 The value of a key named like a secret (`token`, `secret`, `password`,
 `…_key`) is not printed. A running crew member keeps its session: what it may

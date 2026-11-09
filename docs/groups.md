@@ -79,12 +79,16 @@ the group as `group add` does. The `--set` words carry `cmd`, `args`, `dir`,
 a directory under the yard's home or a depot; `kind` is one the yard knows;
 and `prompt` is the absolute path of a file under the yard's home, whose text
 `yardr bead ask` reads from the file and carries beside the command, and the
-approval is refused if that file holds other text by then. `env_file` and
-`log` stay out of that card and are set once the group stands, in a
-terminal, with `group set`; a peer group needs no card; and a name in use
-is refused, since the card adds and never replaces. A crew member that
-needs any other of those asks the operator for it, with the command whole
-in the ask; every other setting is changed as above.
+approval is refused if that file holds other text by then. Approving writes
+that text to a read-only file of the yard's own, `roles/<name>.<digest>.md`
+under the home (the digest is the text's SHA-256), which is the group's
+prompt: a later change to the file the ask named reaches no session, and a
+file the yard wrote is not one to name, since a new prompt is a new file.
+`env_file` and `log` stay out of that card and are set once the group
+stands, in a terminal, with `group set`; a peer group needs no card; and a
+name in use is refused, since the card adds and never replaces. A crew
+member that needs any other of those asks the operator for it, with the
+command whole in the ask; every other setting is changed as above.
 
 A group's `cmd`, its `prompt` and the permission preset of its kind that
 never asks (`yardr harness show <kind>` lists the presets; free `args` are
@@ -95,8 +99,9 @@ weighty (`code`) card that shows each as it stands and as it would be, whole,
 and approving sets exactly that. `cmd` is one word, as above; `prompt` is
 the absolute path of a file under the yard's home, whose text `yardr bead ask`
 carries beside the command, and the approval is refused if that file holds
-other text by then; `preset` names one of the group's kind. Nothing else rides
-in with them.
+other text by then and, as for a new group, writes that text to a read-only
+file of the yard's own which becomes the prompt; `preset` names one of the
+group's kind. Nothing else rides in with them.
 
 The runner is not changed this way, since another runner reads another
 config: that is `group add`. `yardr group show <name>` prints one group: its
