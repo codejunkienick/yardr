@@ -359,7 +359,7 @@ func parseSettingSet(rest []string) ([]string, error) {
 
 // checkSettingSet is setting a setting's own check as the asker.
 func checkSettingSet(ctx context.Context, w *wtx, argv []string, actor string) error {
-	return w.may(ctx, actor, ActChangeSetting, Object{Kind: KindSetting, Name: argv[2], Ask: settingAsk(argv[2])})
+	return w.may(ctx, actor, ActChangeSetting, Object{Kind: KindSetting, Name: argv[2], Ask: settingSetAsk(argv[2], argv[3])})
 }
 
 // settingSetCard is the card of settings set <key> <value>: the value it

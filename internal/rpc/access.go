@@ -154,6 +154,8 @@ var Access = map[string]Class{
 	"Notes":             Read,
 	"NoteBlob":          Read,
 	"MailBlob":          Read,
+	"Delegation":        Read,
+	"DelegationBlob":    Read,
 	"DeliveryBlob":      Read,
 
 	// Asks. An agent asks and takes its ask back; answering is a person's.

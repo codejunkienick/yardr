@@ -113,6 +113,9 @@ of its inbox.`,
       --map train:open=started --map train:done=done`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			if delegatedRun(c) && c.Flags().Changed("secret-file") {
+				return fmt.Errorf("hook add with --secret-file is the operator's to type in a terminal")
+			}
 			st, err := a.store(c.Context())
 			if err != nil {
 				return err
@@ -120,9 +123,17 @@ of its inbox.`,
 			if err := checkSource(c.Context(), st, h.Source); err != nil {
 				return err
 			}
-			path, err := secretPath(h.SecretFile)
-			if err != nil {
-				return err
+			// A delegated add names the file the yard owns for the hook,
+			// whose secret its own card gives later (design yardr-m90n
+			// 3.2); a terminal's names one that holds it already.
+			path := store.HookSecretFile(a.home(), args[0])
+			switch {
+			case !delegatedRun(c) && h.SecretFile == "":
+				return fmt.Errorf(`required flag(s) "secret-file" not set`)
+			case !delegatedRun(c) || c.Flags().Changed("secret-file"):
+				if path, err = secretPath(h.SecretFile); err != nil {
+					return err
+				}
 			}
 			if h.Map, err = hookMap(c.Context(), st, a.home(), h.Source, maps); err != nil {
 				return err
@@ -175,14 +186,13 @@ of its inbox.`,
 		},
 	}
 	add.Flags().StringVar(&h.Source, "source", "", "source adapter: "+strings.Join(hooks.Sources(), ", "))
-	add.Flags().StringVar(&h.SecretFile, "secret-file", "", "file holding the secret (never the secret itself)")
+	add.Flags().StringVar(&h.SecretFile, "secret-file", "", "file holding the secret (never the secret itself); required but on a delegated add (--for), which takes the file the yard owns for the hook")
 	add.Flags().StringVar(&h.Unknown, "unknown", "", "for a source that hears by identity, what an unmapped sender is: unknown holds their messages on a mapping card until it is answered, allow hears them as outside, ignore drops them ("+strings.Join(store.HookUnknowns, ", ")+"; default unknown)")
 	add.Flags().StringVar(&h.As, "as", "", "crew member the hook moves tracked issues as (with --map) and reports says outcomes as")
 	add.Flags().StringArrayVar(&maps, "map", nil, "<bead type>:<stage>=<state> (repeatable): a bead entering the stage moves the issue it tracks to "+strings.Join(hooks.States(), ", ")+", or on GitHub adds label:<name> to it")
 	add.Flags().StringArrayVar(&says, "says", nil, `"<key>=<value> ... -> <outcome>[: <note>]" (repeatable, in order): an event of the source that matches reports the outcome for the bead it is about: the one that tracks its thread, else the train of its branch`)
 	add.Flags().StringArrayVar(&makes, "makes", nil, `"<key>=<value> ... -> <type>:<stage>[@<depot>]" (repeatable, in order): an event of the source that matches, about a thread no open bead tracks, makes a bead of the type in the stage that tracks it, in the depot or the one whose origin is the event's repository`)
 	_ = add.MarkFlagRequired("source")
-	_ = add.MarkFlagRequired("secret-file")
 
 	list := &cobra.Command{
 		Use: "list", Short: "List hooks", Args: cobra.NoArgs,

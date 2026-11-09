@@ -1,9 +1,32 @@
 {{define "content"}}
-{{- /* The hub of the yard's configuration pages: static links with no live
-       part of their own. */}}
+{{- /* The hub of the yard's configuration pages: static links, and for an
+       operator the yardmaster's delegation switch with the button for its
+       other state. The switch turns only on an explicit click. */}}
+{{- with .Data.Error}}
+<p class="item error">{{.}}</p>
+{{- end}}
 <section class="item">
   {{- range .Data.Links}}
   <p><a href="{{.Path}}">{{.Title}}</a> <span class="faint">— {{.Blurb}}</span></p>
   {{- end}}
 </section>
+{{- with .Data.Delegation}}
+<article class="item">
+  <header class="item-head">
+    <h2>Yardmaster for the operator</h2>
+    {{- if eq . "on"}}
+    <span class="state">on</span>
+    {{- else}}
+    <span class="state faint">off</span>
+    {{- end}}
+  </header>
+  <p>On, the yardmaster may run an operator's defining commands for them on that operator's own mail to it: a group's kind, model, directories and permission preset, a crew member's beside the yardmaster's own, a depot's test command and base, where a user is told, and a new hook in its safe shape. Each run is recorded and mailed to the operator as it runs. Prompts, commands, secrets and free args stay on cards or at a terminal.</p>
+  {{- if eq . "on"}}
+  <form method="post" action="/config/delegation">{{template "csrf"}}<button type="submit" name="action" value="off">Turn off</button></form>
+  {{- else}}
+  <p class="faint">Turning it on takes a fresh sign-in.</p>
+  <form method="post" action="/config/delegation">{{template "csrf"}}<button type="submit" name="action" value="on">Turn on</button></form>
+  {{- end}}
+</article>
+{{- end}}
 {{end}}

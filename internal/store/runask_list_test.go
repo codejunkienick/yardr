@@ -1348,6 +1348,8 @@ func TestSettingRunAskClassesAreExplicit(t *testing.T) {
 		TelemetrySetting:         Alone,
 
 		WebJWTPrivilegedSessionMaxAgeSetting: Alone,
+		// Its run ask's two values are settingSetAsk's exception.
+		DelegationSetting: Alone,
 	}
 	for _, setting := range KnownSettings {
 		class, ok := want[setting.Key]

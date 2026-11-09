@@ -207,6 +207,10 @@ type Store struct {
 	// prune must not remove a blob between its grace-period refresh and the
 	// mail that names it.
 	blobMu sync.Mutex
+	// blobFileMu serializes the prune's look at one blob file and its
+	// removal with a delegated record's blob, which is kept inside the
+	// write that names it (keepDelegationBlob) and so cannot take blobMu.
+	blobFileMu sync.Mutex
 	// peerFileMu serializes file intake from its quota check through the write
 	// that counts it. Filing writes blobs before that transaction, so without
 	// this lock concurrent batches could both keep files the write later refuses.

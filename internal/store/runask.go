@@ -137,8 +137,7 @@ type AskRun struct {
 // with who may run it.
 func (r AskRun) TakenBack() string { return or(r.BackBy, "anyone") + " can take it back: " + r.Back }
 
-// Command is the command whole, as it is typed in a terminal. No view
-// shortens it.
+// Command is the command whole, as typed in a terminal; no view shortens it.
 func (r AskRun) Command() string { return runCommandLine(r.Argv) }
 
 // CarryPending is what an approval of a pack apply, of an up, of a
@@ -557,6 +556,7 @@ var runList = []runCommand{{
 	check:       checkSettingSet,
 	card:        (*wtx).settingSetCard,
 	stale:       (*wtx).settingSetStale,
+	weigh:       settingSetWeight,
 	run:         runSettingSet,
 }, {
 	words:       []string{"peer", "rename"},

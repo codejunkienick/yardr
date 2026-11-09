@@ -6,7 +6,8 @@
 // Alone: no run ask proposes these except the group-add card, which
 // proposes a new group's (runask_groupadd.go changes the mark to Askable
 // there and nowhere else), so the store and the run-ask refusal name the
-// same settings in the same way.
+// same settings in the same way. The delegated leg (delegation.go)
+// carries the settings its maps name, and its site marks them so.
 package store
 
 import (
@@ -27,7 +28,7 @@ func checkGroupDefine(ctx context.Context, w *wtx, old, want Group, actor string
 		if had == has && reflect.DeepEqual(was, is) {
 			continue
 		}
-		if err := w.may(ctx, actor, ActChangeGroup, Object{Kind: KindGroup, Name: want.Name, Does: fmt.Sprintf("change %s on group %s", key, want.Name), Ask: Alone}); err != nil {
+		if err := w.may(ctx, actor, ActChangeGroup, Object{Kind: KindGroup, Name: want.Name, Does: fmt.Sprintf("change %s on group %s", key, want.Name), Ask: Alone, Delegate: groupDelegates[key]}); err != nil {
 			return err
 		}
 	}
@@ -46,18 +47,30 @@ func checkGroupDefine(ctx context.Context, w *wtx, old, want Group, actor string
 // no env_command yet that the operator did not set.
 func (w *wtx) checkCrewDefine(ctx context.Context, before, want CrewMember, existed bool, actor string) error {
 	if existed && want.Dir != before.Dir {
-		if err := w.may(ctx, actor, ActChangeCrew, Object{Kind: KindCrew, Name: want.Name, Does: fmt.Sprintf("change dir on crew member %s", want.Name), Ask: Alone}); err != nil {
+		if err := w.may(ctx, actor, ActChangeCrew, Object{Kind: KindCrew, Name: want.Name, Does: fmt.Sprintf("change dir on crew member %s", want.Name), Ask: Alone, Delegate: w.crewDelegate(want.Name, "dir")}); err != nil {
 			return err
 		}
 	}
 	b, a := asStored(before.Config), asStored(want.Config)
-	for _, key := range []string{"env_file", "env_command", "kind", "args", "prompt"} {
+	for _, key := range []string{"env_file", "env_command", "kind", "model", "args", "prompt"} {
 		was, had := b[key]
 		is, has := a[key]
 		if had == has && reflect.DeepEqual(was, is) {
 			continue
 		}
-		if err := w.may(ctx, actor, ActChangeCrew, Object{Kind: KindCrew, Name: want.Name, Does: fmt.Sprintf("change %s on crew member %s", key, want.Name), Ask: Alone}); err != nil {
+		if key == "model" {
+			// A member may still change its own model through the ordinary
+			// path. A delegated change uses the policy leg, where the
+			// yardmaster's own entry is deliberately not carried.
+			d, err := w.delegated(ctx, actor)
+			if err != nil {
+				return err
+			}
+			if d == nil {
+				continue
+			}
+		}
+		if err := w.may(ctx, actor, ActChangeCrew, Object{Kind: KindCrew, Name: want.Name, Does: fmt.Sprintf("change %s on crew member %s", key, want.Name), Ask: Alone, Delegate: w.crewDelegate(want.Name, key)}); err != nil {
 			return err
 		}
 	}

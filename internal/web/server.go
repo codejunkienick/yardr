@@ -204,6 +204,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /pairing", s.handlePairing)
 	s.mux.HandleFunc("GET /pairing.png", s.handlePairingPNG)
 	s.mux.HandleFunc("GET /config", s.handleConfig)
+	// The delegation toggle's return from its sign-in, and a delegated
+	// record's page (delegation.go).
+	s.mux.HandleFunc("GET /config/delegation/fresh/{state}", s.handleDelegationFresh)
+	s.mux.HandleFunc("GET /delegations/{id}", s.handleDelegation)
 	s.mux.HandleFunc("GET /depots", s.handleDepots)
 	s.mux.HandleFunc("GET /groups", s.handleGroups)
 	s.mux.HandleFunc("GET /routes", s.handleRoutes)
@@ -735,6 +739,7 @@ func (s *Server) postRoutes() {
 	s.mux.HandleFunc("POST /pairing", s.handlePairingPost)
 	s.mux.HandleFunc("POST /previews", s.handlePreviewsPost)
 	s.mux.HandleFunc("POST /telemetry", s.handleTelemetryPost)
+	s.mux.HandleFunc("POST /config/delegation", s.handleDelegationPost)
 }
 
 // As is the user the view acts as, "" when it acts as none.

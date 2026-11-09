@@ -83,7 +83,19 @@ func (s *Store) PutDepot(ctx context.Context, r Depot, actor string) error {
 		if err != nil {
 			return err
 		}
-		return w.putDepot(ctx, r, resolved, nil)
+		d, err := w.delegated(ctx, resolved)
+		if err != nil {
+			return err
+		}
+		var was Depot
+		had, err := get(w.Tx, bDepots, r.Name, &was)
+		if err != nil {
+			return err
+		}
+		if err := w.putDepot(ctx, r, resolved, nil); err != nil || d == nil {
+			return err
+		}
+		return w.delegatedDepot(d, was, had, r)
 	})
 }
 
@@ -107,12 +119,12 @@ func (w *wtx) putDepot(ctx context.Context, r Depot, actor string, by *approvedO
 			}
 		}
 		if r.Test != was.Test {
-			if err := w.may(ctx, actor, ActChangeDepotTest, Object{Kind: KindDepot, Name: r.Name, Ask: Askable}); err != nil {
+			if err := w.may(ctx, actor, ActChangeDepotTest, Object{Kind: KindDepot, Name: r.Name, Ask: Askable, Delegate: r.Test != ""}); err != nil {
 				return err
 			}
 		}
 		if r.Base != was.Base {
-			if err := w.may(ctx, actor, ActChangeDepotBase, Object{Kind: KindDepot, Name: r.Name, Ask: Askable}); err != nil {
+			if err := w.may(ctx, actor, ActChangeDepotBase, Object{Kind: KindDepot, Name: r.Name, Ask: Askable, Delegate: true}); err != nil {
 				return err
 			}
 		}

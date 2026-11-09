@@ -766,7 +766,14 @@ func (s *Store) pruneBlobs() (int, error) {
 		}); err != nil {
 			return err
 		}
-		return nil
+		// And a delegated record's body past its inline bound, which no
+		// letter or note names: it stands while its record does.
+		return each(tx, bDelegations, "", func(_ []byte, d *Delegation) error {
+			if d.Blob != nil {
+				named[d.Blob.Hash] = true
+			}
+			return nil
+		})
 	})
 	if err != nil {
 		return 0, err
@@ -776,12 +783,13 @@ func (s *Store) pruneBlobs() (int, error) {
 	for _, f := range files {
 		// Asked now, after the letters were read: a blob put again since
 		// is young again.
-		st, err := f.Info()
-		if err != nil || f.IsDir() || named[f.Name()] || !st.ModTime().Before(young) {
+		if f.IsDir() || named[f.Name()] {
 			continue
 		}
-		if err := os.Remove(filepath.Join(dir, f.Name())); err != nil {
+		if gone, err := s.sweepBlobFile(filepath.Join(dir, f.Name()), young); err != nil {
 			return n, err
+		} else if !gone {
+			continue
 		}
 		if blobHash.MatchString(f.Name()) {
 			n++
@@ -805,4 +813,20 @@ func (s *Store) pruneBlobs() (int, error) {
 		}
 	}
 	return n, nil
+}
+
+// sweepBlobFile removes the blob file at path if it was last put before
+// young, and says whether it did. The look and the removal are one step
+// under blobFileMu: a delegated record keeps its blob inside its write
+// (keepDelegationBlob), which refreshes or writes the file under the same
+// lock, so the file is either young when looked at or written again after
+// it went.
+func (s *Store) sweepBlobFile(path string, young time.Time) (bool, error) {
+	s.blobFileMu.Lock()
+	defer s.blobFileMu.Unlock()
+	st, err := os.Lstat(path)
+	if err != nil || !st.ModTime().Before(young) {
+		return false, nil
+	}
+	return true, os.Remove(path)
 }

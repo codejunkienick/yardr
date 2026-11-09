@@ -182,7 +182,14 @@ func (a *app) rootCmd() *cobra.Command {
 		a.depCmd(), a.linkCmd(), a.groupCmd(), a.routeCmd(), a.flowCmd(), a.sessionCmd(), a.eventsCmd(), a.watchCmd(), a.primeCmd(),
 		a.bdpCmd(), a.webCmd(), a.crewCmd(), a.userCmd(), a.inboxCmd(), a.mailCmd(), a.timerCmd(), a.chatCmd(), a.rememberCmd(), a.recallCmd(), a.hookCmd(), a.sourceCmd(), a.callCmd(), a.limitsCmd(), a.harnessCmd(),
 		a.peerCmd(), a.edgeCmd(), a.subscribeCmd(), a.unsubscribeCmd(), a.threadCmd(), a.replyCmd(), a.reactCmd(), a.reviewCmd(), a.storeCmd(), a.packCmd(), a.pageCmd(), a.docsCmd(), a.previewCmd(), a.mcpCmd(),
-		a.initCmd(), a.settingsCmd(), a.doctorCmd(), a.statusCmd(), a.upgradeCmd(), a.upCmd(), a.downCmd(), a.uninstallCmd(), a.setupCmd(), a.otelCmd(), a.diskCmd(), a.versionCmd())
+		a.initCmd(), a.settingsCmd(), a.doctorCmd(), a.statusCmd(), a.upgradeCmd(), a.upCmd(), a.downCmd(), a.uninstallCmd(), a.setupCmd(), a.otelCmd(), a.diskCmd(), a.versionCmd(),
+		a.delegationCmd())
+	if depot, _, err := root.Find([]string{"depot"}); err == nil {
+		depot.AddCommand(a.depotFieldCmds()...)
+	}
+	// After every command is added: the yardmaster's delegated run rides
+	// the commands of its list (delegation.go).
+	a.delegate(root)
 	// Cobra adds its completion command, a group like the rest, only as it
 	// executes; added now, it is in the tree refuseStray walks.
 	root.InitDefaultCompletionCmd()

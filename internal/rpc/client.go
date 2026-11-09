@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -64,6 +65,13 @@ const FreshWitnessHeader = "X-Yardr-Fresh-Witness"
 // under it. It is taken on trust, as a caller's named actor is: whoever
 // can open the socket already acts as the user their calls name.
 const ConnectionHeader = "X-Yardr-Connection"
+
+// DelegationHeader carries a delegated run's word where the call is one
+// (store.WithDelegation): the operator it is for, the seq of the mail it
+// cites and the command as typed, as JSON. The store holds it to its own
+// records in the write (design yardr-m90n 3.6); a device's call carries
+// none (dropDoorHeaders).
+const DelegationHeader = "X-Yardr-Delegation"
 
 var _ store.API = (*Client)(nil)
 
@@ -174,6 +182,13 @@ func (c *Client) callOnce(ctx context.Context, method string, out any, body []by
 	}
 	if name := store.ConnectionOf(ctx); name != "" {
 		req.Header.Set(ConnectionHeader, name)
+	}
+	if d, ok := store.DelegationOf(ctx); ok {
+		raw, err := json.Marshal(d)
+		if err != nil {
+			return err
+		}
+		req.Header.Set(DelegationHeader, base64.StdEncoding.EncodeToString(raw))
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

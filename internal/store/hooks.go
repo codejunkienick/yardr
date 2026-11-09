@@ -659,7 +659,7 @@ func (s *Store) PutHook(ctx context.Context, h Hook, actor string) (*Hook, error
 	var out *Hook
 	err := s.write(func(w *wtx) error {
 		var err error
-		out, err = w.putHook(ctx, h, actor, nil, Alone)
+		out, err = w.delegatedHook(ctx, h, actor)
 		return err
 	})
 	if err != nil {
@@ -703,7 +703,7 @@ func (w *wtx) putHook(ctx context.Context, h Hook, actor string, by *approvedOn,
 		}
 		switch {
 		case !had:
-			if err := w.may(ctx, actor, ActAddHook, Object{Kind: KindHook, Name: h.Name, Ask: add}); err != nil {
+			if err := w.may(ctx, actor, ActAddHook, Object{Kind: KindHook, Name: h.Name, Ask: add, Delegate: true}); err != nil {
 				return nil, err
 			}
 		case was.Source != h.Source || was.SecretFile != h.SecretFile:

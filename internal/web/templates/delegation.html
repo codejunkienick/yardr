@@ -1,0 +1,32 @@
+{{define "content"}}
+{{- /* A delegated run's record: what the yardmaster ran for an operator, on
+       which of their mails, what each setting held before, and how it is
+       taken back. An operator's alone, as the store's read is. */}}
+<nav class="item filters" aria-label="Config">
+  <p><a href="/config">‹ Config</a></p>
+</nav>
+{{- with .Data.Record}}
+<article class="item">
+  <header class="item-head">
+    <h2>Record {{.ID}}: {{.Yardmaster}} for {{.For}}</h2>
+    <span class="state faint">{{clock .At}}</span>
+  </header>
+  <dl class="facts">
+    <div><dt>on mail</dt><dd>{{.Mail}} from {{.For}}</dd></div>
+    <div><dt>changed</dt><dd>{{.Of}}</dd></div>
+    <div><dt>ran</dt><dd><code>{{or .Command "(no command words were sent)"}}</code></dd></div>
+    {{- with .Back}}
+    <div><dt>taken back by</dt><dd><code>{{.}}</code></dd></div>
+    {{- end}}
+  </dl>
+  {{- with .Changes}}
+  <h3 class="label">before and after</h3>
+  <dl class="facts">
+    {{- range .}}
+    <div><dt>{{.Key}}</dt><dd>{{if .Had}}{{.Was}}{{else}}(unset){{end}} → {{if .Has}}{{.Is}}{{else}}(unset){{end}}</dd></div>
+    {{- end}}
+  </dl>
+  {{- end}}
+</article>
+{{- end}}
+{{end}}

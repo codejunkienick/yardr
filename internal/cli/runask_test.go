@@ -1047,11 +1047,11 @@ func TestRunListIsTheCLIs(t *testing.T) {
 			}
 			if use == "yardr depot test <depot>" || use == "yardr depot base <depot> <base>" {
 				ctx := context.Background()
-				// A depot change runs in its own write, and there is no CLI
-				// verb to type (the row is the only way in), so there is no
-				// typed state to compare: the row is held to its card, which
-				// has no command help to match, its recorded approval, and
-				// the depot as the approval left it.
+				// A depot change runs in its own write, and its CLI verb
+				// takes the command as a word where the row carries it
+				// beside, so there is no typed state to compare: the row is
+				// held to its card, its recorded approval, and the depot as
+				// the approval left it.
 				if err := approved.st.PutDepot(ctx, store.Depot{Name: "web", Path: "/srv/web", Base: "origin/main", Test: "make test"}, "jo"); err != nil {
 					t.Fatal(err)
 				}

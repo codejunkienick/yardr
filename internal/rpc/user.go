@@ -1341,7 +1341,7 @@ func (u *UserServer) call(w http.ResponseWriter, r *http.Request) {
 	if r.RemoteAddr == linkRemoteAddr {
 		via += " via edge"
 	}
-	r.Header.Del(FreshWitnessHeader) // its call carries no fresh sign-in (store.FreshWitness)
+	dropDoorHeaders(r) // its call carries no fresh sign-in and is no delegated run
 	u.api.call(w, r.WithContext(store.WithVia(r.Context(), c.User, via)), name, args)
 }
 

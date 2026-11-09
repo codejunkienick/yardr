@@ -17,6 +17,7 @@ package rpc
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -211,6 +212,17 @@ func callerCtx(r *http.Request) (context.Context, error) {
 	}
 	if name := r.Header.Get(ConnectionHeader); name != "" {
 		ctx = store.WithConnection(ctx, name)
+	}
+	if raw := r.Header.Get(DelegationHeader); raw != "" {
+		var d store.DelegatedCall
+		js, err := base64.StdEncoding.DecodeString(raw)
+		if err == nil {
+			err = json.Unmarshal(js, &d)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("the call's delegation is no delegated run's word: %w", err)
+		}
+		ctx = store.WithDelegation(ctx, d)
 	}
 	if raw := r.Header.Get(FreshWitnessHeader); raw != "" {
 		fw, err := parseFreshWitness(raw)
@@ -453,4 +465,13 @@ func toWire(err error) *wireError {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// dropDoorHeaders takes from a device's request what only a door of the
+// yard's own machine says: a fresh sign-in, which only the web states,
+// and a delegated run, which only the yardmaster's command states. The
+// device's call is judged as the device's own.
+func dropDoorHeaders(r *http.Request) {
+	r.Header.Del(FreshWitnessHeader)
+	r.Header.Del(DelegationHeader)
 }

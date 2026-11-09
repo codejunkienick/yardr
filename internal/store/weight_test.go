@@ -140,6 +140,9 @@ calls:
 		{name: "peer allow exposing", run: AskRun{Argv: []string{"peer allow airy --expose ada"}}, want: []string{WeightTrust}},
 		{name: "peer allow trusting", run: AskRun{Argv: []string{"peer allow airy --trust mckean@airy=ada"}}, want: []string{WeightTrust}},
 		{name: "peer allow reaching", run: AskRun{Argv: []string{"peer allow airy --reach mckean@airy=ada"}}, want: []string{WeightTrust}},
+		{name: "settings set turning delegation on", run: AskRun{Argv: []string{"settings set yardmaster_delegation true"}}, want: []string{WeightTrust}},
+		{name: "settings set turning it off", run: AskRun{Argv: []string{"settings set yardmaster_delegation false"}}},
+		{name: "settings set of another setting", run: AskRun{Argv: []string{"settings set operator_note hello"}}},
 		{name: "source set raising updates_per_hour", run: AskRun{Argv: []string{"source set crm updates_per_hour=20"}}, want: []string{WeightOutside}},
 		{name: "source set lowering it", run: AskRun{Argv: []string{"source set crm updates_per_hour=5"}}},
 		{name: "source grant of an update call", run: AskRun{Argv: []string{"source grant crm note --crew yardmaster"}}, want: []string{WeightOutside}},
@@ -247,7 +250,7 @@ calls:
 	}
 
 	// Every other row is routine whatever it is asked.
-	weighty := []string{"peer add", "peer set", "peer allow", "source set", "source grant", "source add", "pack apply", "hook add", "user key", "user add", "user invite", "crew add", "group add", "crew set", "user identity", "depot test", "call"}
+	weighty := []string{"peer add", "peer set", "peer allow", "source set", "source grant", "source add", "pack apply", "hook add", "user key", "user add", "user invite", "crew add", "group add", "crew set", "user identity", "depot test", "call", "settings set"}
 	for _, c := range runList {
 		if has := c.weigh != nil; has != slices.Contains(weighty, strings.Join(c.words, " ")) {
 			t.Errorf("the row %s weighs: %v", strings.Join(c.words, " "), has)

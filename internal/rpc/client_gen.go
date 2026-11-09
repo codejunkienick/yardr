@@ -146,6 +146,13 @@ func (c *Client) NoteBlob(ctx context.Context, hash string) (*store.BlobRef, err
 func (c *Client) MailBlob(ctx context.Context, viewer, hash string) (*store.BlobRef, error) {
 	return callV[*store.BlobRef](c, ctx, "MailBlob", viewer, hash)
 }
+
+func (c *Client) Delegation(ctx context.Context, id uint64, actor string) (*store.Delegation, error) {
+	return callV[*store.Delegation](c, ctx, "Delegation", id, actor)
+}
+func (c *Client) DelegationBlob(ctx context.Context, id uint64, actor string) (*store.DelegatedBody, error) {
+	return callV[*store.DelegatedBody](c, ctx, "DelegationBlob", id, actor)
+}
 func (c *Client) DeliveryBlob(ctx context.Context, hash string) (*store.BlobRef, error) {
 	return callV[*store.BlobRef](c, ctx, "DeliveryBlob", hash)
 }

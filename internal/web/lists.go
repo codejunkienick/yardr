@@ -180,7 +180,13 @@ func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
 // links with no live part of its own.
 type Config struct {
 	Links []ConfigLink `json:"links"`
-	Head  uint64       `json:"head"`
+	// Delegation is the yardmaster's delegation switch as it reads, "on"
+	// or "off", drawn with its button for an operator alone
+	// (delegation.go).
+	Delegation string `json:"delegation,omitempty"`
+	// Error is why a POST did not write, back on the redrawn page.
+	Error string `json:"error,omitempty"`
+	Head  uint64 `json:"head"`
 }
 
 // ConfigLink is one page of the hub: where it is and what it lists.
@@ -190,7 +196,10 @@ type ConfigLink struct {
 	Blurb string `json:"blurb"`
 }
 
-func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) { s.config(w, r, "") }
+
+// config draws the hub, with why where a POST to it wrote nothing.
+func (s *Server) config(w http.ResponseWriter, r *http.Request, why string) {
 	head, err := s.st.Head(r.Context())
 	if err != nil {
 		s.fail(w, r, err)
@@ -213,7 +222,14 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	)
 	if operator {
 		out.Links = append(out.Links, telemetryLink)
+		settings, err := s.st.Settings(r.Context())
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		out.Delegation = delegationSwitch(settings)
 	}
+	out.Error = why
 	s.respond(w, r, Page{Template: "config", Title: "Config", Menu: "config", Data: out, head: head})
 }
 

@@ -116,7 +116,7 @@ func (s *Store) PutGroup(ctx context.Context, g Group, actor string) error {
 			return err
 		}
 		actor = resolved
-		return putGroup(ctx, w, &g, actor, false)
+		return w.delegatedPutGroup(ctx, &g, actor)
 	})
 }
 

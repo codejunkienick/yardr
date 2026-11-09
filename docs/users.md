@@ -235,6 +235,54 @@ starts at that name and takes no other, since the operator under a name
 nobody acts as would leave the person who made the yard no user of it. To
 be the operator under another name, set `YARDR_ACTOR` to it before `yardr`.
 
+## The yardmaster for the operator
+
+A yard whose operator has no terminal on its machine, a hosted one first,
+can let its yardmaster run some of the operator's defining commands for
+them. The switch is the `yardmaster_delegation` setting: unset, it reads as
+`hosted` does, on for a hosted yard and off for one you run yourself. The
+operator turns it off with a run ask (`yardr bead ask --run "settings set
+yardmaster_delegation false"`), approved as any card that narrows, or with
+the button on the hosted web's Config page; turning it back on takes the
+same two doors under the fresh sign-in a strong card takes. The yardmaster
+never changes it.
+
+With it on, the yardmaster runs the command in its own pane for a named
+operator, citing the operator's mail it acts on:
+
+```
+yardr group set reviewers model=opus preset=accept-edits --for ada --mail 1042
+```
+
+The yard checks, in the write that runs it, that the call comes from the
+yardmaster, that `ada` holds the operator role, and that mail 1042 is a mail
+from `ada` to the yardmaster with no mark of another yard, a session or a
+timer on it. What `ada` types in `yardr chat` is that same mail; a word in a
+pane cites nothing and starts nothing. The commands it covers are `group add`
+and `group set` of kind, model, directories and worktrees, with args only as
+a kind's named permission preset (`preset=<label>`) that keeps the agent's
+permission prompts (never `bypass` or its like); `crew set` of kind, model,
+directory and preset args for a member other than the yardmaster; `depot test`
+and `depot base`; `user set
+<user> notify=<source>` alone; and `hook add` in its card's safe shape (a name,
+`--source`, optional `--unknown`, and the secret file the yard owns for the hook). Free
+args, `env_file`, `env_command`, a prompt, a group's `cmd`, the exec runner,
+the yardmaster's own entry, the switch, and a hook add with `--says`,
+`--makes`, `--map`, `--as` or a secret file of its own each refuse it.
+
+Each run is told after it runs instead of approved before: the same write
+keeps a record of it (the command whole, the cited mail, what each setting
+held before, and how it is taken back), puts a line on the yardmaster's
+journal naming only the record's id, and mails the operator what ran.
+`yardr delegation show <id>`, and the record's page in the hosted web, read
+it for an operator alone; anyone else is told it is not there.
+
+On a delegated run the approval is the operator's own cited mail, so the run
+skips the card the same command carries today: the code card of `group add`,
+the trust card of a safe-shape `hook add`, the code card of `depot test` and
+the card of `depot base`. Those cards stay, weighed as before, for the same
+command proposed by anyone else.
+
 ## Mail
 
 `yardr mail <user> <text|->` puts a message in the user's inbox: one mail,

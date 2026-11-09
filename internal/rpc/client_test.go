@@ -326,19 +326,33 @@ func TestClientMailLong(t *testing.T) {
 
 // A call made with a fresh sign-in on its context carries the witness
 // header: the user the gateway authenticated and their authentication
-// time. One made without carries none.
+// time. One made without carries none. A delegated run's word crosses
+// whole, its command's quotes and line breaks too.
 func TestCallSendsFreshWitness(t *testing.T) {
 	sock := socket(t)
 	type headers struct {
 		witness    string
 		connection string
+		delegation store.DelegatedCall
 	}
 	var got []headers
 	serve(t, sock, func(w http.ResponseWriter, r *http.Request) {
-		got = append(got, headers{
+		h := headers{
 			witness:    r.Header.Get(FreshWitnessHeader),
 			connection: r.Header.Get(ConnectionHeader),
-		})
+		}
+		// The server reads the delegation back as the client sent it, and
+		// a device's request carries none to read (dropDoorHeaders).
+		if ctx, err := callerCtx(r); err != nil {
+			t.Error(err)
+		} else if d, ok := store.DelegationOf(ctx); ok {
+			h.delegation = d
+			dropDoorHeaders(r)
+			if r.Header.Get(DelegationHeader) != "" {
+				t.Error("a device's request keeps the delegation header")
+			}
+		}
+		got = append(got, h)
 		writeJSON(w, reply{Result: uint64(1)})
 	})
 	c := NewClient(sock)
@@ -353,10 +367,15 @@ func TestCallSendsFreshWitness(t *testing.T) {
 	if _, err := c.Head(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	delegated := store.DelegatedCall{For: "jo", Mail: 1042, Command: "yardr group set reviewers 'model=opus'\nnext"}
+	if _, err := c.Head(store.WithDelegation(context.Background(), delegated)); err != nil {
+		t.Fatal(err)
+	}
 	want := []headers{
 		{witness: "jo " + fmt.Sprint(at.Unix()), connection: "openclaw"},
 		{connection: "terminal"},
 		{},
+		{delegation: delegated},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("context headers = %+v, want %+v", got, want)

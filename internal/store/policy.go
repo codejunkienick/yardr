@@ -204,6 +204,9 @@ type Object struct {
 	Group *Group
 	// Fallback marks a stage ask put to its operator as fallback.
 	Fallback bool
+	// Delegate marks a deed the yardmaster may do for an operator on
+	// their cited mail, where the rule is delegable (delegation.go).
+	Delegate bool
 
 	// The move the core's ActMoveOut reads the calling session from.
 	exp Expect
@@ -273,9 +276,9 @@ var coreRules = map[Action]rule{}
 
 func init() {
 	for _, act := range []Action{
-		ActChangeOriginator, ActGrantCrew, ActChangeCrew, ActChangeGroup, ActEndDevicePairing,
-		ActChangeDepotPath, ActChangeDepotTest, ActChangeDepotBase, ActChangeDepotKind, ActRemoveDepot,
-		ActMoveLinks, ActAddHook, ActReplaceHook, ActChangeHookSource, ActChangeHookUnknown, ActRemoveHook,
+		ActChangeOriginator, ActGrantCrew, ActEndDevicePairing,
+		ActChangeDepotPath, ActChangeDepotKind, ActRemoveDepot,
+		ActMoveLinks, ActReplaceHook, ActChangeHookSource, ActChangeHookUnknown, ActRemoveHook,
 		ActPair, ActMapPeerIdentity, ActUnmapPeerIdentity, ActAddPeer, ActRemovePeer, ActExposeToPeer,
 		ActTrustPeerName, ActSendAsksToPeer, ActAllowPeerMessages, ActRaisePeerMail, ActChangePeerAddress,
 		ActRenamePeer, ActRoutePeerBeads, ActMoveSource, ActApplyPack, ActSetUpPackSources,
@@ -288,6 +291,11 @@ func init() {
 	}
 	for _, act := range []Action{ActEnableCrew, ActRestartCrew, ActRemoveFlow, ActRemoveGroup, ActRemoveRoute} {
 		coreRules[act] = ruleOperatorOrYardmaster
+	}
+	// The operator's, with the delegated leg beside it for the deeds a
+	// site marks Delegate (delegation.go).
+	for _, act := range []Action{ActChangeCrew, ActChangeGroup, ActChangeDepotTest, ActChangeDepotBase, ActAddHook} {
+		coreRules[act] = delegable(ruleOperator)
 	}
 	for _, act := range []Action{ActAddSource, ActSetSourceKey, ActRemoveSource, ActIgnoreSender, ActUnignoreSender, ActGrantSource, ActAnswerSourceLogin} {
 		coreRules[act] = maySource
@@ -308,7 +316,7 @@ func init() {
 		ActApproveRun:        mayApprove,
 		ActApproveOwn:        mayApproveOwn,
 		ActApproveSole:       mayApproveSole,
-		ActTell:              mayTell,
+		ActTell:              delegable(mayTell),
 		ActAnswerLogin:       mayAnswerLogin,
 		ActIdentify:          mayIdentify,
 		ActApprovePreview:    ruleOperatorRequired,
@@ -347,12 +355,9 @@ func ruleRemoveCrew(ctx context.Context, tx *bolt.Tx, actor string, act Action, 
 	if err != nil {
 		return err
 	}
-	var yardmaster string
-	if _, err := get(tx, bSettings, YardmasterSetting, &yardmaster); err != nil {
+	yardmaster, err := yardmasterIn(tx)
+	if err != nil {
 		return err
-	}
-	if yardmaster == "" {
-		yardmaster = "yardmaster"
 	}
 	if resolved == yardmaster && obj.Name == yardmaster {
 		return fmt.Errorf("the yardmaster cannot remove itself; the operator can")
@@ -453,12 +458,9 @@ func operatorOrYardmaster(ctx context.Context, tx *bolt.Tx, actor, does string, 
 	if err != nil {
 		return err
 	}
-	var ym string
-	if _, err := get(tx, bSettings, YardmasterSetting, &ym); err != nil {
+	ym, err := yardmasterIn(tx)
+	if err != nil {
 		return err
-	}
-	if ym == "" {
-		ym = "yardmaster"
 	}
 	// The setting names a crew member; a matching user name or stale
 	// setting is not a delegation.
@@ -1165,12 +1167,9 @@ func mayWaitLogin(ctx context.Context, tx *bolt.Tx, _ string, _ Action, _ Object
 	if err != nil || r == nil {
 		return err
 	}
-	var yardmaster string
-	if _, err := get(tx, bSettings, YardmasterSetting, &yardmaster); err != nil {
+	yardmaster, err := yardmasterIn(tx)
+	if err != nil {
 		return err
-	}
-	if yardmaster == "" {
-		yardmaster = "yardmaster"
 	}
 	if r.Name != yardmaster {
 		return fmt.Errorf("%s; this is the crew member %s", why, r.Name)

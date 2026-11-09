@@ -549,3 +549,7 @@ func Witness(e Event) string {
 	v, _ := e.Data["witness"].(string)
 	return v
 }
+
+// HomeDir is the yard's home, for a test that names a file the yard owns
+// (HookSecretFile).
+func (s *Store) HomeDir() string { return s.home }

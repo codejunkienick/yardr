@@ -142,7 +142,7 @@ func (s *Store) SetUser(ctx context.Context, name string, set map[string]string,
 	sort.Strings(keys)
 	var u *User
 	err := s.write(func(w *wtx) (err error) {
-		u, err = w.setUser(ctx, name, keys, set, actor, nil)
+		u, err = w.delegatedUser(ctx, name, keys, set, actor)
 		return err
 	})
 	if err != nil {
@@ -169,7 +169,8 @@ func (w *wtx) setUser(ctx context.Context, name string, keys []string, set map[s
 		}
 	}
 	if len(keys) > 1 || keys[0] != UserRole {
-		if err := w.may(ctx, actor, ActTell, Object{Kind: KindUser, Name: name}); err != nil {
+		// The delegated leg carries notify= alone (delegation.go).
+		if err := w.may(ctx, actor, ActTell, Object{Kind: KindUser, Name: name, Delegate: len(keys) == 1 && keys[0] == UserNotify}); err != nil {
 			return nil, err
 		}
 	}

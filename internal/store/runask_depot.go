@@ -1,10 +1,11 @@
 // The depot test and depot base rows of the run-ask list: a depot's test
 // command and its base, changed on a card for an operator with no
 // terminal to approve. Both are the operator's to change (PutDepot), and
-// both rows run through it, so the check stays one. There is no such
-// command at a terminal: the card is the way in, as for a teammate
-// invite. A depot's path and kind stay the operator's alone in a
-// terminal: they name this machine, not the hosted yard.
+// both rows run through it, so the check stays one. At a terminal the
+// same words take the command itself (yardr depot test <depot>
+// <command>), for the operator and for the yardmaster's delegated run. A
+// depot's path and kind stay the operator's alone in a terminal: they
+// name this machine, not the hosted yard.
 package store
 
 import (

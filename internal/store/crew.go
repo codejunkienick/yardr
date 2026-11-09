@@ -432,7 +432,7 @@ func (s *Store) PutCrew(ctx context.Context, def CrewMember, actor string) (*Cre
 	var out *CrewMember
 	err := s.write(func(w *wtx) error {
 		var err error
-		out, err = w.putCrew(ctx, def, actor, nil)
+		out, err = w.delegatedCrew(ctx, def, actor)
 		return err
 	})
 	return out, err

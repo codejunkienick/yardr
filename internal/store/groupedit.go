@@ -51,6 +51,10 @@ func (s *Store) SetGroup(ctx context.Context, name string, e GroupEdit, actor st
 			return err
 		}
 		actor = resolved
+		d, err := w.delegated(ctx, actor)
+		if err != nil {
+			return err
+		}
 		ch = new(GroupChange)
 		if ok, err := get(w.Tx, bGroups, name, &ch.Was); err != nil {
 			return err
@@ -84,7 +88,10 @@ func (s *Store) SetGroup(ctx context.Context, name string, e GroupEdit, actor st
 			ch.Is = ch.Was
 			return nil
 		}
-		return putGroup(ctx, w, g, actor, e.Limit != nil)
+		if err := putGroup(ctx, w, g, actor, e.Limit != nil); err != nil || d == nil {
+			return err
+		}
+		return w.delegatedGroup(d, ch.Was, *g, true)
 	})
 	if err != nil {
 		return nil, err

@@ -55,6 +55,11 @@ type API interface {
 	Notes(ctx context.Context, id string) ([]Note, error)
 	NoteBlob(ctx context.Context, hash string) (*BlobRef, error)
 	MailBlob(ctx context.Context, viewer, hash string) (*BlobRef, error)
+	// Delegation and DelegationBlob read a delegated run's record and the
+	// body it holds in a blob: an operator's alone, anyone else told it is
+	// not there (delegation.go).
+	Delegation(ctx context.Context, id uint64, actor string) (*Delegation, error)
+	DelegationBlob(ctx context.Context, id uint64, actor string) (*DelegatedBody, error)
 	DeliveryBlob(ctx context.Context, hash string) (*BlobRef, error)
 	AddAsk(ctx context.Context, id string, ask Ask, actor string) (uint64, error)
 	AskNew(ctx context.Context, nb NewBead, ask Ask, actor string) (*AskedBead, error)
