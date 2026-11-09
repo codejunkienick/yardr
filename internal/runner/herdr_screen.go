@@ -54,7 +54,13 @@ var inputMarks = []string{"❯", "›"}
 // placeholder is the input's hint when it holds nothing, for a harness
 // that draws one in no faint style; placeholderSGR is the colour such a
 // hint is drawn in, for a harness whose hint's words are not fixed.
-type paneMarks struct{ input, message, edge, placeholder, placeholderSGR string }
+// queue heads the list of inputs the harness took and holds back, queued
+// begins each entry of it, and errorMarks are what may stand before the
+// heading (see promptQueued).
+type paneMarks struct {
+	input, message, edge, placeholder, placeholderSGR string
+	queue, queued, errorMarks                         string
+}
 
 // marksOf is the marks of a harness kind, and whether yardr knows them:
 // its file (harnesses/<kind>.yaml, `marks`) names the mark of its input.
@@ -64,7 +70,8 @@ type paneMarks struct{ input, message, edge, placeholder, placeholderSGR string 
 func marksOf(kind string) (paneMarks, bool) {
 	h, _ := agents.Lookup(kind)
 	m := h.Marks
-	return paneMarks{input: m.Input, message: m.Message, edge: m.Edge, placeholder: m.Placeholder, placeholderSGR: m.PlaceholderSGR}, m.Input != ""
+	return paneMarks{input: m.Input, message: m.Message, edge: m.Edge, placeholder: m.Placeholder, placeholderSGR: m.PlaceholderSGR,
+		queue: m.Queue, queued: m.Queued, errorMarks: m.Error}, m.Input != ""
 }
 
 // begins reports whether line is the first of the input.
@@ -265,6 +272,60 @@ func promptPlace(text, prompt, kind string) (taken, typed, bare bool) {
 		in = append(in, m.unboxed(l))
 	}
 	return false, showsPrompt(strings.Join(in, "\n"), prompt), false
+}
+
+// promptQueued reports whether the pane text of a harness of kind lists
+// prompt among the inputs the harness took and holds back (its marks' queue
+// and queued): the last such list above its input, each entry its first
+// line after the entry's mark and the lines under it.
+//
+// Found live (yardr-w6w3, codex-cli 0.166.0): a review session's first
+// prompt was submitted and Codex listed it under "Queued follow-up inputs",
+// its thread never having started. Read for an echo or the input it was
+// neither, so it was taken as lost and typed three times more, each copy
+// queued under the first. Taken into the queue is taken: what is left is
+// whether the harness ever starts on it.
+func promptQueued(text, prompt, kind string) bool {
+	m, known := marksOf(kind)
+	if !known || m.queue == "" {
+		return false
+	}
+	lines, _ := rowsOf(kind, strings.Split(text, "\n"), nil)
+	head, input := -1, -1
+	for i, l := range lines {
+		switch {
+		case strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(l), m.errorMarks)) == m.queue:
+			head = i
+		case m.begins(l):
+			// The input, or a message the harness took after the queue,
+			// which then no longer stands right above the input.
+			if head >= 0 && input > head {
+				head = -1
+			}
+			input = i
+		}
+	}
+	if head < 0 || input < head {
+		return false
+	}
+	var entry []string
+	ends := func() bool {
+		found := len(entry) > 0 && beginsWithPrompt(strings.Join(entry, "\n"), prompt)
+		entry = entry[:0]
+		return found
+	}
+	for _, l := range lines[head+1 : input] {
+		l = strings.TrimSpace(l)
+		if rest, ok := strings.CutPrefix(l, m.queued); ok {
+			if ends() {
+				return true
+			}
+			entry = append(entry, rest)
+		} else if len(entry) > 0 {
+			entry = append(entry, l)
+		}
+	}
+	return ends()
 }
 
 // InputText is what is typed in the input of the session's agent and not

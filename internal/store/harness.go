@@ -111,7 +111,10 @@ type Harness struct {
 // harness whose hint's words are not fixed: text drawn in it reads as no
 // text, as faint text does. Error is every mark the harness's TUI may draw
 // before a message of its own, taken off a line before it is read for an
-// error.
+// error. Queue heads the list of inputs the harness took and holds back
+// until it can start a turn on them, drawn above its input, and Queued
+// begins each entry of that list: a prompt there was submitted and taken,
+// and is not to be typed again.
 type Marks struct {
 	Input          string `yaml:"input" json:"input,omitempty"`
 	Message        string `yaml:"message" json:"message,omitempty"`
@@ -119,6 +122,8 @@ type Marks struct {
 	Placeholder    string `yaml:"placeholder" json:"placeholder,omitempty"`
 	PlaceholderSGR string `yaml:"placeholder_sgr" json:"placeholder_sgr,omitempty"`
 	Error          string `yaml:"error" json:"error,omitempty"`
+	Queue          string `yaml:"queue" json:"queue,omitempty"`
+	Queued         string `yaml:"queued" json:"queued,omitempty"`
 }
 
 // parseSGRColor is colour, a foreground colour as a harness file names it,
@@ -772,6 +777,10 @@ func (h *Harness) Check() error {
 		return fmt.Errorf("no label")
 	case h.Marks.Input == "" && (h.Marks.Message != "" || h.Marks.Edge != "" || h.Marks.Placeholder != "" || h.Marks.PlaceholderSGR != ""):
 		return fmt.Errorf("marks: message, edge, placeholder or placeholder_sgr without input, which is what a pane is read from")
+	case h.Marks.Input == "" && (h.Marks.Queue != "" || h.Marks.Queued != ""):
+		return fmt.Errorf("marks: queue or queued without input, which is where a queue ends")
+	case (h.Marks.Queue == "") != (h.Marks.Queued == ""):
+		return fmt.Errorf("marks: queue and queued name one list, its heading and its entries: both or neither")
 	}
 	if sgr := h.Marks.PlaceholderSGR; sgr != "" {
 		colour, err := parseSGRColor(sgr)

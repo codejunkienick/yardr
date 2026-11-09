@@ -49,10 +49,24 @@ trust:
 # Codex begins a message it took with the mark of its input. Before a
 # message of its own it draws ■ or •; the other marks are a box's edge and
 # what any TUI may draw before an error.
+#
+# Codex holds back what is submitted while it cannot start a turn on it and
+# lists it above its input, each entry wrapped under its first line, until
+# the turn starts. Read on 9 Nov 2026 from the pane of a review session
+# (codex-cli 0.166.0) whose thread never started, with its first prompt
+# submitted four times:
+#
+#    • Queued follow-up inputs
+#      ↳ Read <repo>/.git/worktrees/<bead>/yardr/brief-<session>.md and
+#        follow it. Run yardr as <bin>/yardr.
+#        shift+← edit last queued message
+#    › Ask Codex to do anything
 marks:
   input: "›"
   message: "›"
   error: "⏺⎿●■•▌│┃✗✘⚠!"
+  queue: "Queued follow-up inputs"
+  queued: "↳"
 
 flags:
   model: --model

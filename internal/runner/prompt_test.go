@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -989,6 +990,281 @@ func TestPromptPlace(t *testing.T) {
 		if taken, typed, bare := promptPlace(c.text, prompt, c.kind); taken != c.taken || typed != c.typed || bare != c.bare {
 			t.Errorf("%s: taken %v, typed %v, bare %v; want %v, %v, %v", c.name, taken, typed, bare, c.taken, c.typed, c.bare)
 		}
+	}
+}
+
+// codexQueued is the pane of the Codex review session of 9 Nov 2026
+// (codex-cli 0.166.0) whose thread never started: its first prompt was
+// submitted, then typed three times more, and each copy is listed under
+// "Queued follow-up inputs", wrapped at the pane's width. Paths are
+// shortened; nothing else is changed.
+const codexQueued = `[me@host b1]$ codex --disable memories --no-daemon --dangerously-bypass-approvals-and-sandbox --model gpt-6-luna
+  >_ OpenAI Codex (v0.166.0)
+     ~/.yardr/worktrees/r/b1
+  permissions: YOLO mode
+• Queued follow-up inputs
+  ↳ Read /Users/x/repo/.git/worktrees/b1/yardr/brief-1x7.md and follow it. Run yardr as
+    /Users/x/.local/bin/yardr.
+  ↳ Read /Users/x/repo/.git/worktrees/b1/yardr/brief-1x7.md and follow it. Run yardr as
+    /Users/x/.local/bin/yardr.
+    shift+← edit last queued message
+› Ask Codex to do anything
+  ~/.yardr/worktrees/r/b1 · Context 0% used                     ⚠ 1 warning · f2 to view`
+
+// Found live (yardr-w6w3): Codex took a first prompt into its queue and
+// started no turn on it. The pane shows it neither echoed nor in the input,
+// so that read alone took it as lost; it is in the queue, which is taken.
+// Only an entry of the last queue above the input counts, from its first
+// line, as an echo does.
+func TestPromptQueued(t *testing.T) {
+	t.Parallel()
+	prompt := "Read /Users/x/repo/.git/worktrees/b1/yardr/brief-1x7.md and follow it. Run yardr as /Users/x/.local/bin/yardr."
+	if taken, typed, bare := promptPlace(codexQueued, prompt, "codex"); taken || typed || bare {
+		t.Fatalf("the queued prompt reads as taken %v, typed %v, bare %v", taken, typed, bare)
+	}
+	head := "• Queued follow-up inputs\n"
+	input := "\n› Ask Codex to do anything\n  ~ · Context 0% used"
+	for _, c := range []struct {
+		name, kind, text string
+		queued           bool
+	}{
+		{"Codex, queued four times", "codex", codexQueued, true},
+		{"Codex, queued once", "codex", head + "  ↳ " + prompt + input, true},
+		{"Codex, queued behind another input", "codex", head + "  ↳ hello\n  ↳ " + prompt + input, true},
+		{"Codex, another input queued", "codex", head + "  ↳ hello" + input, false},
+		{"Codex, an entry that only holds the prompt", "codex", head + "  ↳ what does " + prompt + input, false},
+		{"Codex, a queue the turn has emptied", "codex", head + "  ↳ " + prompt + "\n› " + prompt + "\n\n• Reading the brief." + input, false},
+		{"Codex, the queue below the input", "codex", "› Ask Codex to do anything\n" + head + "  ↳ " + prompt, false},
+		{"Codex, no queue", "codex", "  ↳ " + prompt + input, false},
+		{"Claude Code, which names no queue", "claude", head + "  ↳ " + prompt + "\n❯ \n", false},
+	} {
+		if got := promptQueued(c.text, prompt, c.kind); got != c.queued {
+			t.Errorf("%s: queued %v, want %v", c.name, got, c.queued)
+		}
+	}
+}
+
+// codexRateLimitOffer is a Codex pane at its offer to switch models at its
+// rate limit (harnesses/codex.yaml, rate_limit_switch), drawn where its
+// input and queue were: its selected option carries the input mark.
+const codexRateLimitOffer = "  >_ OpenAI Codex (v0.166.0)\n\n" +
+	"  Approaching rate limits\n  Switch to gpt-6-luna for lower credit usage?\n\n" +
+	"› 1. Switch to gpt-6-luna\n  2. Keep current model\n  3. Keep current model (never show again)\n\n  enter select · esc back\n"
+
+// queuingCodexHerdr is a fake herdr for a bead's session whose Codex drew
+// its screen and never started its thread, as on 9 Nov 2026: every prompt
+// it is sent is submitted and listed under "Queued follow-up inputs", herdr
+// sees nothing start on it (agent_prompt_stalled), and the agent is idle.
+func queuingCodexHerdr(t *testing.T, dir, queue string) string {
+	t.Helper()
+	return deafHerdrBin(t, `cd `+dir+`
+printf '%s\n' "$*" >> calls
+case "$1 $2" in
+  "pane process-info") echo '{"result":{"process_info":{"pane_id":"p1","shell_pid":`+fmt.Sprint(os.Getpid())+`}}}' ;;
+  "worktree create")
+    shift 2
+    while [ $# -gt 1 ]; do
+      case "$1" in --cwd) cwd=$2 ;; --branch) br=$2 ;; --base) base=$2 ;; --path) p=$2 ;; esac
+      shift 2
+    done
+    git -C "$cwd" worktree add -q -b "$br" "$p" "$base" >&2 || exit 1
+    echo '{"result":{"workspace":{"workspace_id":"w1"},"tab":{"tab_id":"t1"},"root_pane":{"pane_id":"p1"},"worktree":{"path":"'"$p"'"}}}' ;;
+  "agent prompt") `+queue+`; answer stalled ;;
+  "pane read")
+    if [ -f unreadable ]; then echo 'pane read failed' >&2; exit 1; fi
+    if [ -f dialog ]; then cat dialog; exit 0; fi
+    if [ -f starting ]; then echo starting; exit 0; fi
+    echo "  >_ OpenAI Codex (v0.166.0)"
+    if [ -s queue ]; then echo "• Queued follow-up inputs"; cat queue; echo "    shift+← edit last queued message"; fi
+    printf '› \n\n  ~/b1 · Context 0%% used\n' ;;
+  "agent get") status=idle; [ ! -f status ] || status=$(cat status); echo '{"result":{"agent":{"agent_status":"'"$status"'"}}}' ;;
+  *) echo '{"result":{"type":"ok"}}' ;;
+esac`)
+}
+
+// Found live (yardr-w6w3): Codex reviewers and builders started for five
+// beads drew their screens and never started a thread. Each took its first
+// prompt into its queue; yardr read it as lost, typed it three times more,
+// gave up, and left the session owning its bead, idle and silent, as one
+// had sat for six hours the night before. A prompt in the harness's queue
+// is typed once in all, and a session whose first prompt is given up is
+// ended, failed: the bead is released with a note saying why, to be routed
+// again after the backoff.
+func TestQueuedFirstPromptEndsTheSession(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name, queue, look, why string
+		typed                  int
+		// turn is what the harness does with a queued prompt after the
+		// first pass found it there: "" nothing, "working" a turn seen
+		// working, "done" a turn that started and ended between passes.
+		// Either turn is the prompt's arrival, its echo gone from the pane.
+		turn string
+		// late: the harness draws its screen only after the start, so the
+		// dispatcher sends the prompt. hide is what hides the queue for one
+		// pass after it was seen: "unreadable", a pane that cannot be read,
+		// or "dialog", Codex's rate limit offer drawn over it.
+		late bool
+		hide string
+	}{
+		{"queued", `echo "  ↳ $4" >> queue`, "queued, herdr stalled", "queue", 1, "", false, ""},
+		// One the harness dropped is delivered again, PromptTries times,
+		// and then ends its session the same way.
+		{"dropped", `:`, "absent, herdr stalled", "never showed", 1 + dispatch.PromptTries, "", false, ""},
+		{"queued then worked on", `echo "  ↳ $4" >> queue`, "queued, herdr stalled", "", 1, "working", false, ""},
+		{"queued then done between passes", `echo "  ↳ $4" >> queue`, "queued, herdr stalled", "", 1, "done", false, ""},
+		// The harness drew its screen late, so the dispatcher sent the
+		// prompt, and found it queued; a pane that once cannot be read
+		// tells nothing of it, and it is given up at its deadline.
+		{"sent late, queued, a pane read failed", `echo "  ↳ $4" >> queue`, "no screen, not typed", "queue", 1, "", true, "unreadable"},
+		// Queued at the start while herdr saw the agent working or at a
+		// dialog: the queue is what counts, and a pane that once cannot be
+		// read is no arrival.
+		{"queued while herdr saw it working, a pane read failed", `echo "  ↳ $4" >> queue; answer working`, "queued, herdr working", "queue", 1, "", false, "unreadable"},
+		{"queued while herdr saw it blocked, a pane read failed", `echo "  ↳ $4" >> queue; answer blocked`, "queued, herdr blocked", "queue", 1, "", false, "unreadable"},
+		// A dialog drawn over the queue hides it: no arrival either.
+		{"queued, a dialog over it", `echo "  ↳ $4" >> queue`, "queued, herdr stalled", "queue", 1, "", false, "dialog"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			repo := seedRepo(t)
+			s := storetest.New(t)
+			mustT(t, s.PutDepot(ctx, store.Depot{Name: "r", Path: repo, Base: "main"}, "me"))
+			mustT(t, s.PutGroup(ctx, store.Group{Name: "reviewers", Runner: "herdr", Limit: 1, Config: map[string]any{"kind": "codex"}}, "me"))
+			_, err := s.AddRoute(ctx, store.Route{Stage: "new", Group: "reviewers"}, "me")
+			mustT(t, err)
+			b, err := s.CreateBead(ctx, store.NewBead{Title: "b0", Stage: "new", Depot: "r"}, "me")
+			mustT(t, err)
+			dir := t.TempDir()
+			h := &Herdr{Socket: fakeHerdrAPI(t, filepath.Join(dir, "calls")), Bin: queuingCodexHerdr(t, dir, c.queue),
+				WorktreeRoot: t.TempDir(), Store: s}
+			if c.late {
+				mustT(t, os.WriteFile(filepath.Join(dir, "starting"), nil, 0o600))
+			}
+			wait := time.Duration(-1)
+			if c.turn != "" || c.hide != "" {
+				wait = time.Minute // the queued prompt is not given up meanwhile
+			}
+			d := &dispatch.Dispatcher{Store: s, Runners: map[string]dispatch.Runner{"herdr": h},
+				PromptSettle: -1, PromptWait: wait, Backoff: time.Hour}
+			calls := func() string { return readCalls(t, filepath.Join(dir, "calls")) }
+			mustT(t, d.Reconcile(ctx))
+			live, err := s.Sessions(ctx, false)
+			if err != nil || len(live) != 1 || live[0].Bead != b.ID {
+				t.Fatalf("sessions = %+v %v", live, err)
+			}
+			id := live[0].ID
+			if look := live[0].Handle[dispatch.PromptLook]; look != c.look {
+				t.Errorf("prompt_look = %v, want %q", look, c.look)
+			}
+			if c.hide != "" {
+				pending := func(when string) {
+					t.Helper()
+					sess, err := s.GetSession(ctx, id)
+					mustT(t, err)
+					if sess.State != "running" || sess.Handle[store.PendingPrompt] == nil || sess.Handle[dispatch.PromptQueuedAt] == nil {
+						t.Fatalf("%s: session = %+v, want it running with its prompt pending and queued", when, sess)
+					}
+				}
+				if c.late {
+					mustT(t, os.Remove(filepath.Join(dir, "starting")))
+					mustT(t, d.Reconcile(ctx)) // sent, now the screen is up
+					mustT(t, d.Reconcile(ctx)) // found in the queue
+				}
+				pending("queued")
+				hide, body := filepath.Join(dir, c.hide), []byte(nil)
+				if c.hide == "dialog" {
+					body = []byte(codexRateLimitOffer)
+				}
+				mustT(t, os.WriteFile(hide, body, 0o600))
+				mustT(t, d.Reconcile(ctx))
+				pending(c.hide)
+				mustT(t, os.Remove(hide))
+				mustT(t, d.Reconcile(ctx))
+				pending("still queued before its deadline")
+				d.PromptWait = -1 // its deadline has come
+			} else if c.turn != "" {
+				if c.turn == "done" {
+					mustT(t, d.Reconcile(ctx)) // still queued
+				}
+				mustT(t, os.WriteFile(filepath.Join(dir, "queue"), nil, 0o600))
+				if c.turn == "working" {
+					// Started before any pass looked: the start's look is
+					// all that says it was queued.
+					mustT(t, os.WriteFile(filepath.Join(dir, "status"), []byte("working"), 0o600))
+					mustT(t, d.Reconcile(ctx))
+					if sess, err := s.GetSession(ctx, id); err != nil || sess.Handle[store.PendingPrompt] != nil {
+						t.Fatalf("session working on its queued prompt = %+v %v, want the prompt arrived", sess, err)
+					}
+					mustT(t, os.WriteFile(filepath.Join(dir, "status"), []byte("idle"), 0o600))
+				}
+				for range 2 * dispatch.PromptTries {
+					mustT(t, d.Reconcile(ctx))
+				}
+				// An idle agent that worked is nudged to hand on: that is no
+				// first prompt.
+				if n := strings.Count(calls(), "and follow it."); n != c.typed {
+					t.Fatalf("the prompt was typed %d times, want %d:\n%s", n, c.typed, calls())
+				}
+				sess, err := s.GetSession(ctx, id)
+				mustT(t, err)
+				if sess.State != "running" || sess.Handle[store.PendingPrompt] != nil || sess.Handle[dispatch.PromptQueuedAt] != nil {
+					t.Fatalf("session whose queued prompt started = %+v, want it running with nothing pending", sess)
+				}
+				evs, err := s.Events(ctx, b.ID, 100)
+				mustT(t, err)
+				kinds := map[string]int{}
+				for _, e := range evs {
+					kinds[e.Kind]++
+				}
+				if kinds["session_prompted"] != 1 || kinds["session_prompt_gave_up"] != 0 || kinds["session_prompt_lost"] != 0 {
+					t.Fatalf("events = %v, want the prompt arrived once, never lost", kinds)
+				}
+				return
+			}
+			for range 2 * dispatch.PromptTries {
+				mustT(t, d.Reconcile(ctx))
+			}
+			if n := strings.Count(calls(), "agent prompt"); n != c.typed {
+				t.Fatalf("the prompt was typed %d times, want %d:\n%s", n, c.typed, calls())
+			}
+			all, err := s.Sessions(ctx, true)
+			mustT(t, err)
+			var ended *store.Session
+			for i := range all {
+				if all[i].ID == id {
+					ended = &all[i]
+				}
+			}
+			if ended == nil || ended.State != "failed" || ended.Error == nil || !strings.Contains(*ended.Error, c.why) {
+				t.Fatalf("the session whose first prompt was given up = %+v, want it ended failed (%s)", ended, c.why)
+			}
+			got, err := s.GetBead(ctx, b.ID)
+			mustT(t, err)
+			if got.Group != nil || got.Hold {
+				t.Fatalf("bead after its session gave up = %+v, want it released and not held", got)
+			}
+			if fails, _ := s.FailureCount(ctx, b.ID, "new"); fails != 1 {
+				t.Errorf("failures = %d, want the given-up session counted once", fails)
+			}
+			evs, err := s.Events(ctx, b.ID, 100)
+			mustT(t, err)
+			kinds, noted := map[string]int{}, false
+			for _, e := range evs {
+				kinds[e.Kind]++
+				if e.Kind == "session_prompt_gave_up" && c.name == "queued" {
+					if tail, _ := e.Data["tail"].(string); e.Data["queued"] != true || !strings.Contains(tail, "Queued follow-up inputs") {
+						t.Errorf("session_prompt_gave_up does not say the prompt sat in the queue: %+v", e.Data)
+					}
+				}
+				noted = noted || e.Kind == "noted"
+			}
+			if kinds["session_prompt_gave_up"] != 1 || kinds["session_prompted"] != 0 || !noted ||
+				kinds["session_prompt_lost"] != c.typed-1 {
+				t.Fatalf("events = %v, want one gave_up, %d lost, none prompted, and a note", kinds, c.typed-1)
+			}
+		})
 	}
 }
 

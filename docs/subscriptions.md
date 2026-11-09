@@ -462,7 +462,9 @@ per bead, session and reason; a person's refused command logs none.
 `session_prompt_gave_up`: a session whose agent never took its first prompt
 ([groups.md](groups.md#herdr-setup)). Its `hint` is the command that
 gives the agent the prompt by hand, or, with `typed: true`, the Enter that
-submits the prompt sitting in its input. A crew member whose `--on` is a
+submits the prompt sitting in its input; `queued: true` is a Codex that took
+the prompt into its queue and never started on it. A bead's session is ended
+with it and the bead routed again. A crew member whose `--on` is a
 list copied before this kind joined the default does not hear it until its
 `--on` names it, or the class.
 

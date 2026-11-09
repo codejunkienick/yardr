@@ -1904,7 +1904,7 @@ check the footer's model instead.
   and anything else waits for you as `session_blocked`, like an agent that
   was not ready. What the pane showed and what herdr said is
   `prompt_look` on the handle (`shown, herdr working`; `typed, herdr
-  stalled`: the pane's part is `shown`, `typed`, `no input`, `absent`,
+  stalled`: the pane's part is `shown`, `typed`, `queued`, `no input`, `absent`,
   `unknown`, `unreadable` or `no pane`, herdr's is `working`, `blocked` or `stalled`;
   `no screen, not typed` is a prompt that was not given to herdr at all,
   see below),
@@ -1924,8 +1924,11 @@ check the footer's model instead.
   seconds was lost (`session_prompt_lost`) and is made again, three times in
   all; after the third, `session_prompt_gave_up` tells the yardmaster, its `hint`
   being the command that gives the prompt by hand (`herdr agent prompt
-  <agent> '<text>'`), and the session is left as it is. A prompt given by
-  hand ends the wait like any other that shows. A prompt whose text is in
+  <agent> '<text>'`). A bead's session is then ended, failed, with a note on
+  the bead that says why: the bead is routed again after the backoff, and
+  held once its stage has failed as often as the daemon tries (three times).
+  A crew member is left as it is, and a prompt given by hand ends its wait
+  like any other that shows. A prompt whose text is in
   the agent's input and was not submitted has not arrived either: "shows"
   means above the input, where a harness echoes a message it took. The
   pane is read by two marks of its kind (`kind` on the session's handle):
@@ -1955,7 +1958,32 @@ check the footer's model instead.
   With the agent idle the daemon sends Enter alone, never the text a second
   time (`session_prompt_typed`, its `submit` the count), three times in
   all, ten seconds apart; after the third, `session_prompt_gave_up` has
-  `typed: true` and the hint `herdr pane send-keys <pane> enter`.
+  `typed: true` and the hint `herdr pane send-keys <pane> enter`, and a
+  bead's session is ended as above.
+  A Codex that cannot start a turn yet lists what is submitted to it under
+  `Queued follow-up inputs`, above its input, and runs it once its turn can
+  start (`queue` and `queued` in its file's `marks`). A prompt found there
+  was taken: `prompt_look` says `queued`, it is never typed again, and a
+  Codex that starts no turn on it for three times ten seconds is given up:
+  `session_prompt_gave_up` has `queued: true` and the pane's last lines in
+  `tail`, and a bead's session is ended as above. One that left the queue,
+  or whose Codex is seen working, arrived: the handle's `prompt_queued_at`
+  keeps that it was queued after its echo has left the pane. A prompt seen
+  in the queue is stored as queued on that pass, before its Codex's status
+  counts, and is decided as queued from the next; so is one the start
+  finds there, whatever herdr said of the agent (`queued, herdr working`).
+  What the handle stored decides before any look does: a prompt given up
+  (`prompt_lost`) stays given up, and a bead's session is ended on every
+  pass until the end lands, whatever its pane shows, and before herdr is
+  asked anything of it, so a herdr that cannot answer holds no such end
+  back; a queued one
+  (`prompt_queued_at`) is never typed again, and arrives only when its
+  Codex works, the pane echoes it, or a pane whose screen is up shows it in
+  neither the queue, the input nor an echo. A look that could not be taken
+  (a pane that cannot be read, a screen not up, a dialog drawn over the
+  queue, such as Codex's rate limit offer, no queue to read) decides
+  nothing: the prompt waits ten seconds and is looked at again, and its
+  three times ten seconds still count from when it was first seen queued.
   `session_prompted` is the arrival, not the sending: `shown: true` when the
   prompt was found in the pane, `deliveries` how often the daemon had sent
   it, `submits` how often it had sent Enter for it, and `unseen` (a

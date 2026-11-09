@@ -102,6 +102,12 @@ func (h *Herdr) startAgent(ctx context.Context, args []string, name, prompt stri
 	}
 	saw := h.arrived(ctx, handle, prompt)
 	handle[dispatch.PromptLook] = saw + ", herdr " + took
+	if saw == sawQueued {
+		// Taken into the harness's queue, whatever herdr saw: stored before
+		// any status counts, so the dispatcher types it nowhere again and
+		// counts its wait for a turn from now.
+		handle[dispatch.PromptQueuedAt] = time.Now().UTC().Format(time.RFC3339Nano)
+	}
 	switch {
 	case saw == sawShown:
 	case took == tookBlocked:
@@ -123,6 +129,8 @@ func (h *Herdr) startAgent(ctx context.Context, args []string, name, prompt stri
 		if took == tookWorking {
 			handle[dispatch.PromptStarted] = true
 		}
+	case saw == sawQueued:
+		handle[store.PendingPrompt] = prompt
 	default:
 		// Sent, and nothing in the pane to show that it was taken: the
 		// dispatcher sends it again once the agent is idle, or submits the
@@ -211,6 +219,7 @@ const (
 	sawTyped      = "typed"      // in the agent's input, not submitted
 	sawNoInput    = "no input"   // in a pane whose harness has drawn no input
 	sawAbsent     = "absent"     // nowhere in the pane
+	sawQueued     = "queued"     // taken into the harness's queue, which it has not started on
 	sawNoScreen   = "no screen"  // not typed: the harness had not drawn its screen (see HarnessScreen)
 )
 
@@ -259,17 +268,19 @@ func (h *Herdr) arrived(ctx context.Context, handle map[string]any, prompt strin
 	if pane == "" {
 		return sawNoPane
 	}
-	switch taken, typed, bare, err := h.lookFor(ctx, pane, handle, prompt); {
+	switch look, err := h.lookFor(ctx, pane, handle, prompt); {
 	case err != nil:
 		if errors.Is(err, errBeyond) {
 			return sawUnknown
 		}
 		return sawUnreadable
-	case taken:
+	case look.taken:
 		return sawShown
-	case typed:
+	case look.typed:
 		return sawTyped
-	case bare:
+	case look.queued:
+		return sawQueued
+	case look.bare:
 		return sawNoInput
 	}
 	return sawAbsent
@@ -283,15 +294,24 @@ func (h *Herdr) arrived(ctx context.Context, handle map[string]any, prompt strin
 // says the pane could not be read, which tells nothing either way (see
 // arrived).
 func (h *Herdr) PromptShown(ctx context.Context, handle map[string]any, prompt string) (bool, error) {
-	taken, _, err := h.promptPlace(ctx, handle, prompt)
-	return taken, err
+	look, err := h.promptPlace(ctx, handle, prompt)
+	return look.taken, err
 }
 
 // PromptTyped reports whether prompt is in the input of the session's agent
 // and nowhere above it: typed, and not submitted.
 func (h *Herdr) PromptTyped(ctx context.Context, handle map[string]any, prompt string) (bool, error) {
-	_, typed, err := h.promptPlace(ctx, handle, prompt)
-	return typed, err
+	look, err := h.promptPlace(ctx, handle, prompt)
+	return look.typed, err
+}
+
+// PromptQueued reports whether prompt is in the list of inputs the
+// session's harness took and holds back until it can start a turn
+// (dispatch.PromptQueuer; see promptQueued): submitted and taken, and not
+// started on.
+func (h *Herdr) PromptQueued(ctx context.Context, handle map[string]any, prompt string) (bool, error) {
+	look, err := h.promptPlace(ctx, handle, prompt)
+	return look.queued, err
 }
 
 // SubmitPrompt presses Enter in the session's pane: what a prompt that is
@@ -305,14 +325,18 @@ func (h *Herdr) SubmitPrompt(ctx context.Context, handle map[string]any) error {
 	return h.sendKey(ctx, pane, "enter")
 }
 
-func (h *Herdr) promptPlace(ctx context.Context, handle map[string]any, prompt string) (taken, typed bool, err error) {
+func (h *Herdr) promptPlace(ctx context.Context, handle map[string]any, prompt string) (promptLook, error) {
 	pane, _ := handle["pane"].(string)
 	if pane == "" {
-		return false, false, fmt.Errorf("handle has no pane")
+		return promptLook{}, fmt.Errorf("handle has no pane")
 	}
-	taken, typed, _, err = h.lookFor(ctx, pane, handle, prompt)
-	return taken, typed, err
+	return h.lookFor(ctx, pane, handle, prompt)
 }
+
+// promptLook is where lookFor found a prompt in a pane: echoed as taken,
+// typed in the input, in the harness's queue, or in a pane with no input
+// (bare). At most one is true.
+type promptLook struct{ taken, typed, queued, bare bool }
 
 // errBeyond says a prompt is not in the lines read of a pane, and that herdr
 // holds more above them: it may be there, and nothing is known.
@@ -326,22 +350,26 @@ var errBeyond = errors.New("the prompt is not in the pane's last lines, and the 
 // prompt the agent took and printed a screenful after is not in it. That
 // one the read cannot tell from a prompt that was lost: the dispatcher
 // goes by whether herdr saw the agent start on it (dispatch.PromptStarted).
-func (h *Herdr) lookFor(ctx context.Context, pane string, handle map[string]any, prompt string) (taken, typed, bare bool, err error) {
+func (h *Herdr) lookFor(ctx context.Context, pane string, handle map[string]any, prompt string) (promptLook, error) {
 	text, err := h.readPane(ctx, pane, promptScan)
 	if err != nil {
-		return false, false, false, err
+		return promptLook{}, err
 	}
 	kind, _ := handle[harnessKind].(string)
-	taken, typed, bare = promptPlace(text, prompt, kind)
-	if lines := strings.Split(text, "\n"); !taken && !typed && len(lines) >= promptScan {
+	var look promptLook
+	look.taken, look.typed, look.bare = promptPlace(text, prompt, kind)
+	if !look.taken && !look.typed && promptQueued(text, prompt, kind) {
+		return promptLook{queued: true}, nil
+	}
+	if lines := strings.Split(text, "\n"); !look.taken && !look.typed && len(lines) >= promptScan {
 		// Only of a pane that shows the harness's input: one without it is
 		// of a harness still coming up, which is told as that.
 		rows, _ := rowsOf(kind, lines, nil)
 		if input, _ := inputLine(rows, kind); input >= 0 {
-			return false, false, false, errBeyond
+			return promptLook{}, errBeyond
 		}
 	}
-	return taken, typed, bare, nil
+	return look, nil
 }
 
 // harnessKind is a handle key: the kind of harness the session's agent was
