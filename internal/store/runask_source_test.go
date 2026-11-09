@@ -822,7 +822,7 @@ func TestSourceAddReplacementCard(t *testing.T) {
 	if strings.Contains(joined, "nothing to read here") {
 		t.Errorf("the asker's sentences stood:\n%s", joined)
 	}
-	if got.Ask.Run.TakenBack() != `only the operator can take it back: yardr bead ask <bead> "<question>" --run "source add <a file holding the declaration that stands now>"` {
+	if got.Ask.Run.TakenBack() != `only the operator can take it back: yardr bead ask <bead> - with Q: <question> and R: source add <a file holding the declaration that stands now> on stdin` {
 		t.Errorf("the card takes it back with %q", got.Ask.Run.TakenBack())
 	}
 	if want := []string{WeightCode, WeightReads}; !slices.Equal(weightClasses(got.Ask.Weight), want) {

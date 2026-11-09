@@ -123,7 +123,7 @@ func TestBeadAskRunGroupAdd(t *testing.T) {
 		}
 	}
 	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Add the cooks?", "--context", "the yard needs cooks",
-		"--run", "group add cooks --runner herdr --set kind=claude --set prompt="+file, "--run-role", file); err == nil || !strings.Contains(err.Error(), "--run-role is the role file a --run \"crew add") {
+		"--run", "group add cooks --runner herdr --set kind=claude --set prompt="+file, "--run-role", file); err == nil || !strings.Contains(err.Error(), "--run-role is the role file the run ask crew add") {
 		t.Errorf("group add with --run-role = %v, want it refused", err)
 	}
 	// An exec group carries no file: the command rides argv whole.

@@ -177,7 +177,7 @@ func TestAnswerWithWords(t *testing.T) {
 	id, seq := wordsAsk(t, st)
 	r := &replies{API: st}
 	v := withAsks(t, r, "chief", 200, 40)
-	v.shows("ctrl+r answers it here · or in a terminal: yardr bead answer " + id + fmt.Sprintf(" %d --words \"<text>\"", seq))
+	v.shows("ctrl+r answers it here · or in a terminal: yardr bead answer " + id + fmt.Sprintf(" %d --words - with the words on stdin", seq))
 
 	v.press(ctrlR())
 	v.shows(fmt.Sprintf("ask %d: words", seq))

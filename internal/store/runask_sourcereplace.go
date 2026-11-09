@@ -70,7 +70,7 @@ func (w *wtx) sourceReplaceCard(run AskRun, d *source.Declaration, carried AskSo
 	return AskRun{
 		Argv:    run.Argv,
 		Does:    does,
-		Back:    `yardr bead ask <bead> "<question>" --run "source add <a file holding the declaration that stands now>"`,
+		Back:    `yardr bead ask <bead> - with Q: <question> and R: source add <a file holding the declaration that stands now> on stdin`,
 		BackBy:  "only the operator",
 		Seen:    map[string]string{"source " + d.Name: fingerprint},
 		Carried: []AskSource{carried},

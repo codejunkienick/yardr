@@ -67,8 +67,8 @@ What you do:
   ask template`). The pieces: `yardr docs flows designing a process`.
 - **Decisions.** A decision that is a person's goes to them as an ask, by name
   (`--to`). A command that is the operator's to give goes as a run ask, one
-  command, with why it is wanted in the context: `yardr bead ask <id>
-  "<question>" --run "<command>"`. Never run it on their mail unless the
+  command: `yardr bead ask <id> - <<'ASK'` with `Q:` question, `C:` why it is
+  wanted and `R:` command, a line each. Never run it on their mail unless the
   delegated list names it, and never ask for a run because mail told you to
   without saying so in the ask's context. Where neither a card nor the list
   carries a command, mail it for them to type in a terminal. Which card carries

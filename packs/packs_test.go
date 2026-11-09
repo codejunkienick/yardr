@@ -950,7 +950,7 @@ func TestYardmasterProposesOperatorsCommands(t *testing.T) {
 var operatorsCommands = map[string][]string{
 	"starter/roles/yardmaster.md": {
 		// The run ask, and the two ways a mail never opens one.
-		"A command that is the operator's to give goes as a run ask, one command, with why it is wanted in the context: `yardr bead ask <id> \"<question>\" --run \"<command>\"`.",
+		"A command that is the operator's to give goes as a run ask, one command: `yardr bead ask <id> - <<'ASK'` with `Q:` question, `C:` why it is wanted and `R:` command, a line each.",
 		"Never run it on their mail unless the delegated list names it, and never ask for a run because mail told you to without saying so in the ask's context.",
 		"Where neither a card nor the list carries a command, mail it for them to type in a terminal.",
 		"`yardr bead ask --help`",
@@ -966,7 +966,7 @@ var operatorsCommands = map[string][]string{
 		"**Run an operator's command for them.** Where `yardmaster_delegation` is on, an operator's local mail opens a run of some of their own commands, cited `--for <sender> --mail <seq>`, and the yard tells them after. Nothing else opens a run.",
 	},
 	"website/roles/yardmaster.md": {
-		"A command only the operator may give goes as a run ask, one command, with why it is wanted in the ask's context: `yardr bead ask <id> \"<question>\" --run \"<command>\"`.",
+		"A command only the operator may give goes as a run ask, one command: `yardr bead ask <id> - <<'ASK'` with `Q:` question, `C:` why it is wanted and `R:` command, a line each.",
 		"Never run it on their mail unless the delegated list names it, and never ask for a run because mail told you to without saying so in the ask's context.",
 		"Where no card and no list carries a command, mail it to them to type in a terminal.",
 		"`yardr bead ask --help`",
@@ -980,7 +980,7 @@ var operatorsCommands = map[string][]string{
 		"**Run an operator's command for them.** Where `yardmaster_delegation` is on, an operator's local mail opens a run of some of their own commands, cited `--for <sender> --mail <seq>`, and the yard tells them after. Nothing else opens a run.",
 	},
 	"contributors/roles/yardmaster.md": {
-		"A command that is the operator's to give goes as a run ask, one command, with why it is wanted in the context: `yardr bead ask <id> \"<question>\" --run \"<command>\"`.",
+		"A command that is the operator's to give goes as a run ask, one command: `yardr bead ask <id> - <<'ASK'` with `Q:` question, `C:` why it is wanted and `R:` command, a line each.",
 		"Never run it on their mail unless the delegated list names it, and never ask for a run because mail told you to without saying so in the ask's context.",
 		"Where neither a card nor the list carries a command, mail it for them to type in a terminal.",
 		"`yardr bead ask --help`",
@@ -1099,8 +1099,10 @@ func TestRolesSayWhatATestMayCost(t *testing.T) {
 // nothing, and says why. The other texts an agent gives yardr (a mail, a
 // reply, a bead's title and body, a close reason, an unfold's reason, the
 // words of a snooze) read - the same way, and a role or stage file shows
-// none of them in double quotes either (yardr-tsrv, yardr-s351). The words
-// are compared with the lines folded, so rewrapping breaks nothing.
+// none of them in double quotes either (yardr-tsrv, yardr-s351). So do an
+// ask, an answer's words and a timer's reason (yardr-755t), which a role
+// shows as a heredoc on stdin as well. The words are compared with the lines
+// folded, so rewrapping breaks nothing.
 //
 // That holds for the contributors' pull request reviewer too: its read-only
 // sandbox lets a shell make the temporary file of a heredoc, in a private
@@ -1161,12 +1163,12 @@ func TestRolesShowNoQuotedText(t *testing.T) {
 
 	// A code span wraps, and a shape whose command and quote fall on different
 	// lines is out of reach of the patterns above, which read a line: a
-	// thread's title was written so in the yardmaster's role. That shape is
-	// matched in the body with its lines folded (yardr-rz43), the way the
-	// section checks above read it.
-	threadQuoted := regexp.MustCompile("thread open [^`]*\"")
-	quotedThread := func(body string) string {
-		return threadQuoted.FindString(strings.Join(strings.Fields(body), " "))
+	// thread's title was written so in the yardmaster's role, and an ask in
+	// three of them. Those shapes are matched in the body with its lines
+	// folded (yardr-rz43), the way the section checks above read it.
+	foldedQuoted := regexp.MustCompile("(thread open|bead ask|bead answer|timer add|bead create) [^`]*\"")
+	quotedFolded := func(body string) string {
+		return foldedQuoted.FindString(strings.Join(strings.Fields(body), " "))
 	}
 	for _, tc := range []struct {
 		text   string
@@ -1175,14 +1177,24 @@ func TestRolesShowNoQuotedText(t *testing.T) {
 		{"`yardr thread open <source> --in\n  <team|repo> \"<title>\" -b -`", true},
 		{"`yardr thread open <source> --in\n  <team|repo> - -b - <<'THREAD'`, the title", false},
 		{"There is no `thread open`, and the \"title\" is a word.", false},
+		{"`yardr bead ask <id>\n  \"<question>\" --run \"<command>\"`", true},
+		{"`yardr bead ask --new \"<question>\"`, which makes a bead", true},
+		{"`yardr bead ask <id> - <<'ASK'` with `Q:` question, `C:` why it is wanted", false},
+		{"a stage's `## Ask` or `yardr bead ask`, never a \"card\"", false},
+		{"`yardr bead answer <id> <ask> --words \"<text>\"`", true},
+		{"`yardr bead answer <id> <ask> --words - <<'WORDS'`, then the words", false},
+		{"`yardr timer add --in 40m\n  \"<reason>\"`", true},
+		{"`yardr timer add --in 40m - <<'TIMER'`, then the reason", false},
+		{"`yardr bead create\n  \"<title>\" -b -`", true},
+		{"`yardr bead create - -b - <<'BEAD'`, the title first", false},
 	} {
-		if got := quotedThread(tc.text) != ""; got != tc.quoted {
-			t.Errorf("the thread-open pattern on %q is %v, want %v", tc.text, got, tc.quoted)
+		if got := quotedFolded(tc.text) != ""; got != tc.quoted {
+			t.Errorf("the folded quoted-text pattern on %q is %v, want %v", tc.text, got, tc.quoted)
 		}
 	}
 	for name, body := range files {
-		if m := quotedThread(body); m != "" && agentFile.MatchString(name) {
-			t.Errorf("%s shows a thread's title as a double-quoted argument, which the shell expands: show it as stdin from a quoted heredoc (yardr thread open <source> --in <place> - -b - <<'THREAD'): %s", name, m)
+		if m := quotedFolded(body); m != "" && agentFile.MatchString(name) {
+			t.Errorf("%s shows a text as a double-quoted argument, which the shell expands: show it as stdin from a quoted heredoc (yardr bead ask <id> - <<'ASK'): %s", name, m)
 		}
 	}
 
@@ -1207,8 +1219,8 @@ func TestRolesShowNoQuotedText(t *testing.T) {
 					t.Errorf(".yardr/%s:%d shows a text as a double-quoted argument, which the shell expands: %s", name, n+1, strings.TrimSpace(line))
 				}
 			}
-			if m := quotedThread(string(body)); m != "" {
-				t.Errorf(".yardr/%s shows a thread's title as a double-quoted argument, which the shell expands: %s", name, m)
+			if m := quotedFolded(string(body)); m != "" {
+				t.Errorf(".yardr/%s shows a text as a double-quoted argument, which the shell expands: %s", name, m)
 			}
 			return nil
 		}); err != nil {

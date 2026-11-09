@@ -344,7 +344,7 @@ func TestRunAskPresetGrantAs(t *testing.T) {
 	if err := y.write(func(w *wtx) error { checkErr = c.check(y.ctx, w, argv, "mckean"); return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if checkErr == nil || !strings.Contains(checkErr.Error(), `--run "source grant crm --preset standard --crew yardmaster --as ada"`) {
+	if checkErr == nil || !strings.Contains(checkErr.Error(), `R: source grant crm --preset standard --crew yardmaster --as ada on stdin`) {
 		t.Fatalf("the as check suggests %v", checkErr)
 	}
 }

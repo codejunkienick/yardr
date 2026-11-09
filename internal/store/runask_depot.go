@@ -57,7 +57,7 @@ func depotTestCarried(run AskRun) (string, error) {
 	proposed := run.Test
 	switch {
 	case strings.TrimSpace(proposed) == "":
-		return "", fmt.Errorf("depot test %s carries no command: the command goes beside --run, in --run-test \"<command>\"; --run takes the depot alone", name)
+		return "", fmt.Errorf("depot test %s carries no command: the command goes beside --run, in --run-test <command> (T: on stdin); --run takes the depot alone", name)
 	case len(proposed) > MaxRunDepotTest:
 		return "", fmt.Errorf("depot test %s: the command it carries is %d bytes: a card shows it whole and holds at most %d, so this is the operator's to type in a terminal", name, len(proposed), MaxRunDepotTest)
 	case claimPlain(proposed) != proposed:
@@ -92,7 +92,7 @@ func (w *wtx) depotTestCard(run AskRun, asking bool) (AskRun, error) {
 	}
 	back := "clear the depot's test command in a terminal"
 	if d.Test != "" {
-		back = fmt.Sprintf("yardr bead ask <bead> \"<question>\" --run \"depot test %s\" --run-test \"<the old command above>\"", name)
+		back = fmt.Sprintf("yardr bead ask <bead> - with Q: <question>, R: depot test %s and T: <the old command above> on stdin", name)
 	}
 	return AskRun{
 		Argv:   run.Argv,

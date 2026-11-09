@@ -1,4 +1,4 @@
-// The setup ask (design yardr-7d4e, B2): `yardr bead ask <id> "<q>" --setup
+// The setup ask (design yardr-7d4e, B2): `yardr bead ask <id> - --setup
 // <pack> --crew|--group <grantee>` carries the whole setup of a pack's
 // sources as one decision: the apply, the account and the grants. Its
 // options are the pack's presets, picked once with --recommend as on any

@@ -130,7 +130,7 @@ func TestBeadAskRunSetsThePromptAndPreset(t *testing.T) {
 		}
 	}
 	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Change it?", "--context", "it needs changing",
-		"--run", "group set cooks prompt="+file, "--run-role", file); err == nil || !strings.Contains(err.Error(), "--run-role is the role file a --run \"crew add") {
+		"--run", "group set cooks prompt="+file, "--run-role", file); err == nil || !strings.Contains(err.Error(), "--run-role is the role file the run ask crew add") {
 		t.Errorf("group set with --run-role = %v, want it refused", err)
 	}
 	// A command with a preset alone carries no file.

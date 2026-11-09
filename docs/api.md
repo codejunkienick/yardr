@@ -2622,7 +2622,7 @@ POST /call/UserAsks
           "depot": "yard",
           "off": true,
           "does": ["turns push to github.com off for depot yard (origin https://github.com/ada/yard.git).", "takes YARDR_PUSH=origin out of yard-assembly's cmd; the rest of the cmd stands untouched, YARDR_LAND as it was.", "takes the pack's helper line for https://github.com out of depot yard's own git config with git -C yard config --unset credential.https://github.com.helper; no other depot's config changes.", "landings of the depot then land here and push nowhere."],
-          "back": "yardr bead ask yd-links \"\u003cquestion\u003e\" --depot-push yard",
+          "back": "yardr bead ask yd-links - --depot-push yard, with the question and context on stdin",
           "back_by": "only the operator"
         },
         "weight": [
@@ -2690,7 +2690,7 @@ POST /call/UserAsks
           "depot": "yard",
           "off": true,
           "does": ["turns push to github.com off for depot yard (origin https://github.com/ada/yard.git).", "takes YARDR_PUSH=origin out of yard-assembly's cmd; the rest of the cmd stands untouched, YARDR_LAND as it was.", "takes the pack's helper line for https://github.com out of depot yard's own git config with git -C yard config --unset credential.https://github.com.helper; no other depot's config changes.", "landings of the depot then land here and push nowhere."],
-          "back": "yardr bead ask yd-greet \"\u003cquestion\u003e\" --depot-push yard",
+          "back": "yardr bead ask yd-greet - --depot-push yard, with the question and context on stdin",
           "back_by": "only the operator"
         },
         "weight": [
@@ -3582,7 +3582,7 @@ POST /call/Bead
           "depot": "yard",
           "off": true,
           "does": ["turns push to github.com off for depot yard (origin https://github.com/ada/yard.git).", "takes YARDR_PUSH=origin out of yard-assembly's cmd; the rest of the cmd stands untouched, YARDR_LAND as it was.", "takes the pack's helper line for https://github.com out of depot yard's own git config with git -C yard config --unset credential.https://github.com.helper; no other depot's config changes.", "landings of the depot then land here and push nowhere."],
-          "back": "yardr bead ask yd-links \"\u003cquestion\u003e\" --depot-push yard",
+          "back": "yardr bead ask yd-links - --depot-push yard, with the question and context on stdin",
           "back_by": "only the operator"
         },
         "weight": [

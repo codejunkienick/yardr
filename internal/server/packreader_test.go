@@ -136,7 +136,7 @@ func TestReadEmbeddedDepotPack(t *testing.T) {
 	}
 	for _, want := range []string{
 		"no standing import",
-		`--run "pack apply starter --depot <depot>"`,
+		`the run ask pack apply starter --depot <depot>`,
 		"a plan that still asks is the operator's to type in a terminal",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -273,7 +273,7 @@ func TestReadEmbeddedDepotPack(t *testing.T) {
 	}
 	if _, err = readEmbeddedPack(ctx, "starter", "", store.Mappings{}, st, home); err == nil ||
 		!strings.Contains(err.Error(), "depots web, yardr") ||
-		!strings.Contains(err.Error(), `--run "pack apply starter --depot <depot>"`) ||
+		!strings.Contains(err.Error(), `the run ask pack apply starter --depot <depot>`) ||
 		strings.Contains(err.Error(), "to name in a terminal") {
 		t.Fatalf("a pack held by two depots, named with none = %v", err)
 	}

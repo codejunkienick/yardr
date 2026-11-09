@@ -885,7 +885,7 @@ func TestSourceCallLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := s.CallSource(ctx, ping); err == nil || !strings.Contains(err.Error(), "CRM_TOKEN is not set up: yardr source key crm gives CRM_TOKEN") ||
-		!strings.Contains(err.Error(), "an agent asks from its pane: yardr bead ask <bead> \"<question>\" --secret crm --context \"<where to get it>\"") {
+		!strings.Contains(err.Error(), "an agent asks from its pane: yardr bead ask <bead> - --secret crm, with the question and where to get it on stdin") {
 		t.Fatalf("without a credential = %v", err)
 	}
 	if _, data := lastCall(t, s); !strings.Contains(data, `"status":"no_credential"`) {

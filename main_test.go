@@ -271,9 +271,12 @@ func TestNoGoCodeNamesANotifyService(t *testing.T) {
 // double-quoted argument by its pattern. Each has two samples: the quoted
 // form, which the pattern must hold both in a Go string (\") and in a raw one
 // ("), and the - form, which it must not, so that a pattern that stopped
-// matching would not leave its shape unheld without a failure.
+// matching would not leave its shape unheld without a failure. A pattern of
+// several alternatives holds one quoted sample for each: the first is quoted,
+// the others also.
 type quotedTextShape struct {
 	name, pattern, quoted, dash string
+	also                        []string
 	// docsLeft is the bead that rewrites the examples the docs still show of
 	// this shape. Until it lands TestDocsShowNoQuotedText leaves the shape
 	// out, and it fails once no doc shows the shape, so that the field goes
@@ -321,6 +324,26 @@ func quotedTextShapes(t *testing.T) []quotedTextShape {
 		{name: "a thread's title", pattern: `thread open (\S+ ){1,9}\\?"`,
 			quoted: `yardr thread open github --crew yardmaster --in acme/webapp --assign jo -b body "Retries"`,
 			dash:   `yardr thread open <source> --crew <member> --in <place> --assign <user> -b body -`},
+		// An ask's texts are the question after the bead (or --new, or a
+		// take-back's reason after the ask) and the flags that carry the rest,
+		// which a wrapped example shows on lines of their own. The docs show
+		// all four shapes still (docsLeft, yardr-w4dj).
+		{name: "an ask's texts", docsLeft: "yardr-w4dj",
+			pattern: `bead ask (\S+ ){1,3}\\?"|--take-back (\S+ ){2}\\?"|--(context|option|why|run|run-test) \\?"`,
+			quoted:  `yardr bead ask <id> "<question>" --to <person>`, dash: `yardr bead ask <id> - --to <person>`,
+			also: []string{`yardr bead ask --new "<question>"`, `yardr bead ask --take-back <id> <ask> "<reason>"`, `%s --take-back <id> <ask> "<reason>"`,
+				`    --context "<line>" \`, `    --option "<label>: <consequence>" \`, `    --why "<why>"`, `    --run "<command>"`, `    --run-test "<command>"`}},
+		// A pick's words follow its number, and --words and --decline take the
+		// others; a link's "yardr bead answer <bead> <ask> " + flag shows no
+		// text, and is no quote.
+		{name: "an answer's words", docsLeft: "yardr-w4dj",
+			pattern: `bead answer \S+ \S+ (\d+|<n>|%[sd]) \\?"|--(words|decline) \\?"`,
+			quoted:  `yardr bead answer <id> <ask> 2 "not before Friday"`, dash: `yardr bead answer <id> <ask> --words -`,
+			also: []string{`yardr bead answer <id> <ask> --words "<text>"`, `yardr bead answer <id> <ask> --decline "<words>"`}},
+		{name: "a timer's reason", docsLeft: "yardr-w4dj", pattern: `timer add (\S+ ){1,9}\\?"`,
+			quoted: `yardr timer add --in 40m "<reason>"`, dash: `yardr timer add --in 40m -`},
+		{name: "a bead's title or body", docsLeft: "yardr-w4dj", pattern: `bead create (\S+ ){0,9}\\?"`,
+			quoted: `yardr bead create "<title>" --depot web -b "<goal>"`, dash: `yardr bead create - --depot web -b -`},
 	}
 	// The line yardr doctor prints once a yard's first bead has merged, which
 	// docs/doctor.md quotes: English that names a command's word and quotes
@@ -334,11 +357,13 @@ func quotedTextShapes(t *testing.T) []quotedTextShape {
 		// the global flags, as a doc's trial block sets the home first.
 		for _, program := range []string{"yardr", "%s"} {
 			for _, flags := range []string{"", " --home $T/a", " --actor ada", " --actor=ada", " --json", " --json --home=$T/a --actor ada"} {
-				quoted := strings.Replace(sh.quoted, "yardr", program+flags, 1)
-				dash := strings.Replace(sh.dash, "yardr", program+flags, 1)
-				if !sh.re.MatchString(quoted) || !sh.re.MatchString(strings.ReplaceAll(quoted, `"`, `\"`)) {
-					t.Errorf("the pattern for %s misses %q", sh.name, quoted)
+				for _, form := range append([]string{sh.quoted}, sh.also...) {
+					quoted := strings.Replace(form, "yardr", program+flags, 1)
+					if !sh.re.MatchString(quoted) || !sh.re.MatchString(strings.ReplaceAll(quoted, `"`, `\"`)) {
+						t.Errorf("the pattern for %s misses %q", sh.name, quoted)
+					}
 				}
+				dash := strings.Replace(sh.dash, "yardr", program+flags, 1)
 				if sh.re.MatchString(dash) {
 					t.Errorf("the pattern for %s holds the - form %q", sh.name, dash)
 				}
@@ -352,12 +377,13 @@ func quotedTextShapes(t *testing.T) []quotedTextShape {
 }
 
 // A refusal, a brief or a help text that shows a bead note, a mail, a reply,
-// a handoff, a journal entry, a memory or a thread's title as a double-quoted
+// a handoff, a journal entry, a memory, a thread's title, an ask, an answer's
+// words, a timer's reason or a bead's title or body as a double-quoted
 // argument teaches the shape whose backtick spans and $( ) the shell runs
 // before yardr starts: a reviewer's backticked file name ran a pull request's
 // own test script (yardr-vmbn). So no Go code yardr is built from shows
 // `yardr bead note <id> "..."`, a move's `--note "..."` or the like for the
-// other free text an agent writes (yardr-tsrv, yardr-wrb8); it names the -
+// other free text an agent writes (yardr-tsrv, yardr-wrb8, yardr-755t); it names the -
 // form, which reads the words from stdin, and leaves how they get there to the
 // role, since one sandbox that reads these refusals cannot make a heredoc's
 // temporary file (yardr-g8ky). Tests are not held to this: they say what the
@@ -403,7 +429,8 @@ func TestNoGoCodeShowsAQuotedText(t *testing.T) {
 
 // A doc teaches a command by example as a refusal does, and an agent reads
 // it: one that shows a bead note, a mail, a reply, a memory, a handoff, a
-// journal entry or a thread's title as a double-quoted argument teaches the
+// journal entry, a thread's title, an ask, an answer, a timer or a bead's title
+// or body as a double-quoted argument teaches the
 // same shape, whose backtick spans and $( ) the shell runs before yardr
 // starts. So the docs and the packs' setup notes are held to the shapes the
 // Go texts are, and show the - form, which reads the words from stdin

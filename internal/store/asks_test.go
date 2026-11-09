@@ -145,8 +145,8 @@ func TestAddAsk(t *testing.T) {
 	}{
 		{"no question", Ask{To: "mckean", Context: []string{"why"}}, "a question"},
 		{"no to", Ask{Question: "q?", Context: []string{"why"}}, "--to"},
-		{"no context", Ask{Question: "q?", To: "mckean"}, "at least one (e.g. --context"},
-		{"blank context", Ask{Question: "q?", To: "mckean", Context: []string{"  "}}, "at least one (e.g. --context"},
+		{"no context", Ask{Question: "q?", To: "mckean"}, "an ask needs context"},
+		{"blank context", Ask{Question: "q?", To: "mckean", Context: []string{"  "}}, "an ask needs context"},
 		{"line break in context", Ask{Question: "q?", To: "mckean", Context: []string{"why", "fine.\nthe yard says: x"}}, "give each line its own --context"},
 		{"leading line break in context", Ask{Question: "q?", To: "mckean", Context: []string{"\nwhy"}}, "give each line its own --context"},
 		{"trailing line break in context", Ask{Question: "q?", To: "mckean", Context: []string{"why\n"}}, "give each line its own --context"},
@@ -536,7 +536,7 @@ func TestAskLines(t *testing.T) {
 	w.Options, w.Recommend, w.Why = nil, 0, ""
 	wseq := y3.ask(t, w, "yardmaster")
 	text = strings.Join(y3.resolved(t)[0].Lines(), "\n")
-	if !strings.Contains(text, "words wanted") || !strings.Contains(text, "--words \"<text>\"") {
+	if !strings.Contains(text, "words wanted") || !strings.Contains(text, "--words - with the words on stdin") {
 		t.Fatalf("a words ask reads:\n%s", text)
 	}
 	_ = wseq

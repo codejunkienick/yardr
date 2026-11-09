@@ -1041,7 +1041,7 @@ func TestPackApplyDepotRefusals(t *testing.T) {
 	}
 	for _, want := range []string{
 		"no single depot",
-		`--run "pack apply starter --depot <depot>"`,
+		`the run ask pack apply starter --depot <depot>`,
 		"a plan that still asks is the operator's to type in a terminal",
 	} {
 		if !strings.Contains(err.Error(), want) {

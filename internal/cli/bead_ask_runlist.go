@@ -148,7 +148,7 @@ const askRunList = `  peer add <name> <invite>
       a new crew member on the kind the yard knows, with its model, the
       kind's named permission preset (never free args) and a directory
       under the yard's home or a depot; its role text goes beside --run,
-      in --run-role "<file>" or as prompt=<file> whose text the ask
+      in --run-role <file> or as prompt=<file> whose text the ask
       carries, the card shows it whole (weighty, code), and approving
       writes those exact bytes to a read-only file of the yard's own,
       roles/<name>.<digest>.md, and starts the member with its prompt

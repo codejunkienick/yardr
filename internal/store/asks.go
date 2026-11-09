@@ -355,7 +355,7 @@ func (s *Store) newAsk(ctx context.Context, ask Ask, actor string) (func(w *wtx,
 		}
 	}
 	if len(context) == 0 {
-		return nil, fmt.Errorf("an ask needs --context: two to five lines of what it is about, at least one (e.g. --context \"<first line>\" --context \"<second line>\")")
+		return nil, fmt.Errorf("an ask needs context: two to five lines of what it is about, at least one (a --context <line> for each, or the lines after the question on stdin)")
 	}
 	ask.Context = context
 	for i, o := range ask.Options {
@@ -363,10 +363,10 @@ func (s *Store) newAsk(ctx context.Context, ask Ask, actor string) (func(w *wtx,
 		ask.Options[i].Consequence = strings.TrimSpace(o.Consequence)
 		o = ask.Options[i]
 		if o.Label == "" {
-			return nil, fmt.Errorf("option %d needs a label: --option \"<label>: <consequence>\"", i+1)
+			return nil, fmt.Errorf("option %d needs a label: <label>: <consequence>", i+1)
 		}
 		if o.Consequence == "" {
-			return nil, fmt.Errorf("option %d (%s) needs a consequence: --option %q", i+1, o.Label, o.Label+": <what picking it does>")
+			return nil, fmt.Errorf("option %d (%s) needs a consequence after its label: %s", i+1, o.Label, o.Label+": <what picking it does>")
 		}
 		if strings.EqualFold(o.Label, YouDecide) {
 			return nil, fmt.Errorf("option %d: yardr adds %q itself, to every ask with options: leave it out", i+1, YouDecide)
@@ -966,7 +966,7 @@ func (s *Store) seatLeftRefusal(ctx context.Context, id string, ans Answer) (str
 func answerShape(id string, ans *Answer) error {
 	ans.Words = strings.TrimSpace(ans.Words)
 	if ans.TakeBack {
-		return fmt.Errorf("answer %d: an ask is taken back by whoever asked it, with yardr bead ask --take-back %s %d \"<why>\"", ans.Ask, id, ans.Ask)
+		return fmt.Errorf("answer %d: an ask is taken back by whoever asked it, with yardr bead ask --take-back %s %d - with why on stdin", ans.Ask, id, ans.Ask)
 	}
 	if len(ans.Given) > 0 {
 		return fmt.Errorf("answer %d: a secret is given with yardr bead answer %s %d --secret, and recorded by the yard alone", ans.Ask, id, ans.Ask)
@@ -1037,7 +1037,7 @@ func answerable(id string, notes []Note, ans Answer, at time.Time, actor string,
 	// First, and without what was sent: the words may be the secret, typed
 	// into a client that does not know the field.
 	case ask.Secret != nil && ans.Decline && ans.Words != "":
-		return "", fmt.Errorf("ask %d asks for a secret, and declining it takes no words: yardr bead answer %s %d --decline \"\"", ans.Ask, id, ans.Ask)
+		return "", fmt.Errorf("ask %d asks for a secret, and declining it takes no words: yardr bead answer %s %d --decline ''", ans.Ask, id, ans.Ask)
 	case ask.Secret != nil && (ans.Option != 0 || ans.Words != ""):
 		return "", fmt.Errorf("ask %d takes a secret, not words: yardr bead answer %s %d --secret", ans.Ask, id, ans.Ask)
 	// A client that does not know the field shows a run ask as one that
@@ -1059,7 +1059,7 @@ func answerable(id string, notes []Note, ans Answer, at time.Time, actor string,
 		}
 		return "", fmt.Errorf("ask %d takes a preset pick with the account, not words alone: yardr bead answer %s %d <n> --secret (or --account <source> where the card lists one)", ans.Ask, id, ans.Ask)
 	case ask.Secret == nil && ans.Decline && ans.Words == "":
-		return RefusedNotAsk, fmt.Errorf("declining ask %d needs words: --decline \"<why you will not decide it>\"", ans.Ask)
+		return RefusedNotAsk, fmt.Errorf("declining ask %d needs words: --decline - with why you will not decide it on stdin", ans.Ask)
 	}
 	resolved := ResolveAsks(notes, at)
 	var current *ResolvedAsk
@@ -1095,14 +1095,14 @@ func answerable(id string, notes []Note, ans Answer, at time.Time, actor string,
 	}
 	switch {
 	case ans.Option != 0 && len(ask.Options) == 0:
-		return "", fmt.Errorf("ask %d wants words: answer with yardr bead answer %s %d --words \"<text>\"", ans.Ask, id, ans.Ask)
+		return "", fmt.Errorf("ask %d wants words: answer with yardr bead answer %s %d --words - with the words on stdin", ans.Ask, id, ans.Ask)
 	case ans.Option != 0 && (ans.Option < 1 || ans.Option > len(ask.Options)):
 		return "", fmt.Errorf("ask %d has options 1..%d", ans.Ask, len(ask.Options))
 	case ans.Option == 0 && !ans.Later && !ans.Decline && len(ask.Options) > 0:
 		return "", fmt.Errorf("ask %d has options: words alone go as yardr bead note %s - with the words on stdin and leave the ask open; pick one with yardr bead answer %s %d <n>",
 			ans.Ask, id, id, ans.Ask)
 	case ans.Option == 0 && !ans.Later && !ans.Decline && ans.Words == "":
-		return "", fmt.Errorf("ask %d wants words: yardr bead answer %s %d --words \"<text>\"", ans.Ask, id, ans.Ask)
+		return "", fmt.Errorf("ask %d wants words: yardr bead answer %s %d --words - with the words on stdin", ans.Ask, id, ans.Ask)
 	}
 	return "", nil
 }
@@ -1154,9 +1154,9 @@ func (s *Store) TakeBackAsk(ctx context.Context, id string, seq uint64, reason, 
 	reason = strings.TrimSpace(reason)
 	switch {
 	case seq == 0:
-		return fmt.Errorf("taking an ask back needs the ask: yardr bead ask --take-back %s <ask> \"<why>\"", id)
+		return fmt.Errorf("taking an ask back needs the ask: yardr bead ask --take-back %s <ask> - with why on stdin", id)
 	case reason == "":
-		return fmt.Errorf("taking ask %d back needs a reason, which the person reads in its place: yardr bead ask --take-back %s %d \"<why>\"", seq, id, seq)
+		return fmt.Errorf("taking ask %d back needs a reason, which the person reads in its place: yardr bead ask --take-back %s %d - with why on stdin", seq, id, seq)
 	case strings.Contains(id, "@"):
 		// A bead's handle never holds an "@" (validID).
 		return fmt.Errorf("ask %d on %s was asked in another yard, and is taken back there by whoever asked it", seq, id)
@@ -1689,7 +1689,7 @@ func (r ResolvedAsk) lines(mark func(string) string) []string {
 	case r.Ask.Secret != nil:
 		out = append(out, fmt.Sprintf("  answer with: yardr bead answer %s %d --secret", r.Note.Bead, r.Note.Seq))
 	case len(r.Ask.Options) == 0:
-		out = append(out, fmt.Sprintf("  answer with: yardr bead answer %s %d --words \"<text>\"", r.Note.Bead, r.Note.Seq))
+		out = append(out, fmt.Sprintf("  answer with: yardr bead answer %s %d --words - with the words on stdin", r.Note.Bead, r.Note.Seq))
 	default:
 		out = append(out, fmt.Sprintf("  answer with: yardr bead answer %s %d <n> [words]", r.Note.Bead, r.Note.Seq))
 	}

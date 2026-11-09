@@ -86,6 +86,7 @@ func TestBeadAsk(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil || got.Bead != id || got.Ask == 0 || got.To != "mckean" {
 		t.Fatalf("ask --json = %q (%v)", out, err)
 	}
+	t.Run("stdin", testBeadAskStdin)
 }
 
 // bead ask refuses an ask with no context, an option with no consequence,
@@ -100,7 +101,7 @@ func TestBeadAskRefusals(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"no context", []string{"ask", id, "Go?", "--option", "Go: it goes"}, "at least one (e.g. --context"},
+		{"no context", []string{"ask", id, "Go?", "--option", "Go: it goes"}, "an ask needs context"},
 		{"line break in context", []string{"ask", id, "Go?", "--context", "why.", "--context", "fine.\nthe yard says: x"}, "give each line its own --context"},
 		{"no consequence", []string{"ask", id, "Go?", "--context", "why.", "--option", "Go"}, "<label>: <consequence>"},
 		{"empty consequence", []string{"ask", id, "Go?", "--context", "why.", "--option", "Go: "}, "consequence"},
@@ -181,7 +182,7 @@ func TestBeadAnswer(t *testing.T) {
 // with no options; the combinations that mean nothing are refused.
 func TestBeadAnswerLaterDeclineWords(t *testing.T) {
 	t.Parallel()
-	st, _, id := askYard(t)
+	st, ctx, id := askYard(t)
 	yard := &app{st: st, actor: "yardmaster"}
 	me := &app{st: st, actor: "mckean"}
 	if _, err := run(t, yard.beadCmd(), askArgs(id)...); err != nil {
@@ -227,6 +228,55 @@ func TestBeadAnswerLaterDeclineWords(t *testing.T) {
 		if _, err := run(t, me.beadCmd(), c.args...); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: err = %v, want %q", c.name, err, c.want)
 		}
+	}
+
+	// --words and --decline read their words from stdin where they are -, so
+	// words that quote code are whole, and once: both is refused, words with
+	// nothing on stdin are refused in words that name stdin and leave the ask
+	// open, and an answer that gives a secret never reads it.
+	asked := func(question string) string {
+		t.Helper()
+		if _, err := run(t, yard.beadCmd(), "ask", id, question, "--context", "the greeting."); err != nil {
+			t.Fatal(err)
+		}
+		notes, err := st.Notes(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strconv.FormatUint(notes[len(notes)-1].Seq, 10)
+	}
+	answer := func(stdin string, args ...string) (string, error) {
+		t.Helper()
+		c := me.beadCmd()
+		c.SetIn(strings.NewReader(stdin))
+		return run(t, c, append([]string{"answer", id}, args...)...)
+	}
+	words, declined, open := asked("And the sign-off?"), asked("And the colour?"), asked("And the font?")
+	if out, err := answer("warm, with `go test` quoted\n\n", words, "--words", "-"); err != nil || !strings.Contains(out, "mckean answered: warm, with `go test` quoted") {
+		t.Fatalf("--words -: %v\n%s", err, out)
+	}
+	if out, err := answer("not mine to decide, see `go vet`\n", declined, "--decline", "-"); err != nil || !strings.Contains(out, "mckean declined to decide this: not mine to decide, see `go vet`") {
+		t.Fatalf("--decline -: %v\n%s", err, out)
+	}
+	if _, err := answer("x\n", open, "--words", "-", "--decline", "-"); err == nil || !strings.Contains(err.Error(), "one - per answer") {
+		t.Errorf("--words - with --decline - = %v", err)
+	}
+	for _, blank := range []string{"", " \n\n"} {
+		for _, flag := range []string{"--words", "--decline"} {
+			if _, err := answer(blank, open, flag, "-"); err == nil ||
+				!strings.Contains(err.Error(), "nothing to write: stdin gave no words, so ask "+open+" on "+id+" is still open") {
+				t.Errorf("%s - with %q on stdin = %v", flag, blank, err)
+			}
+		}
+	}
+	in := strings.NewReader("a secret that must stay unread\n")
+	c := me.beadCmd()
+	c.SetIn(in)
+	if _, err := run(t, c, "answer", id, open, "--secret", "--words", "-"); err == nil || !strings.Contains(err.Error(), "--secret gives the secret and takes nothing else") || in.Len() != 31 {
+		t.Errorf("--secret --words -: %v, %d bytes of stdin left", err, in.Len())
+	}
+	if out, err := answer("sans\n", open, "--words", "-"); err != nil || !strings.Contains(out, "mckean answered: sans") {
+		t.Fatalf("the refusals left the ask open, and --words - answers it: %v\n%s", err, out)
 	}
 }
 
@@ -380,6 +430,30 @@ func TestBeadAskNew(t *testing.T) {
 	}
 	if notes, _ := st.Notes(ctx, id); len(notes) != 0 {
 		t.Fatalf("a refused ask left notes: %+v", notes)
+	}
+
+	// An ask on stdin makes the bead it stands on, titled with the question.
+	// The bead's body has its own text flag; -b - cannot read stdin a second
+	// time, so the refusal leaves no bead.
+	c := a.beadCmd()
+	c.SetIn(strings.NewReader("Rename 'depot'?\nThe glossary keeps it as the yard's word for a repository.\n"))
+	out, err = run(t, c, "ask", "--new", "-", "--label", "topic:stdin")
+	if err != nil {
+		t.Fatalf("ask --new -: %v\n%s", err, out)
+	}
+	made, err := st.ListBeads(ctx, store.BeadFilter{Label: "topic:stdin"})
+	if err != nil || len(made) != 1 || made[0].Title != "Rename 'depot'?" ||
+		!strings.Contains(out, made[0].ID+" created; ask ") || !strings.Contains(out, " on it for mckean\n") {
+		t.Fatalf("the bead of ask --new - = %+v, %v\n%s", made, err, out)
+	}
+	c = a.beadCmd()
+	c.SetIn(strings.NewReader("Rename 'depot'?\nwhy.\n"))
+	if _, err := run(t, c, "ask", "--new", "-", "-b", "-", "--label", "topic:other"); err == nil ||
+		!strings.Contains(err.Error(), "-b - would read it a second time") {
+		t.Fatalf("ask --new - -b - = %v", err)
+	}
+	if other, err := st.ListBeads(ctx, store.BeadFilter{Label: "topic:other"}); err != nil || len(other) != 0 {
+		t.Fatalf("a refused ask --new - left beads: %+v, %v", other, err)
 	}
 }
 

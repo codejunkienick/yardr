@@ -697,5 +697,5 @@ func setupKeyCommand(src string, names []string) string {
 
 // setupSecretAsk is the secret ask that gives the account again, in words.
 func setupSecretAsk(bead, src string) string {
-	return fmt.Sprintf("yardr bead ask %s \"<question>\" --secret %s --context \"<where to get it>\"", bead, src)
+	return fmt.Sprintf("yardr bead ask %s - --secret %s, with the question and where to get it on stdin", bead, src)
 }

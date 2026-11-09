@@ -266,7 +266,7 @@ func (w *wtx) checkGrantSource(ctx context.Context, src, what string, to Grantee
 	if to.Crew != "" {
 		flag = "--crew " + to.Crew
 	}
-	why := fmt.Sprintf("granting a call of a source as %s is %s's to give, and nobody else's: ask %s on a card (yardr bead ask <bead> \"<question>\" --run \"source grant %s %s %s --as %s\" --to %s --context \"<why it is needed>\")", as, as, as, src, what, flag, as, as)
+	why := fmt.Sprintf("granting a call of a source as %s is %s's to give, and nobody else's: ask %s on a card (yardr bead ask <bead> - --to %s, with Q: <question>, C: <why it is needed> and R: source grant %s %s %s --as %s on stdin)", as, as, as, as, src, what, flag, as)
 	return w.may(ctx, actor, ActGrantSourceAs, Object{Kind: KindSource, Name: src, Whose: as, Does: why, Ask: Askable})
 }
 

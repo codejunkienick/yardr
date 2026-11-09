@@ -186,7 +186,7 @@ func TestSourceCallAsWithoutTheNames(t *testing.T) {
 
 	_, err := s.CallSource(ctx, store.SourceCall{Source: "crm", Call: "ping", As: "bia", Actor: "jo"})
 	if err == nil || !strings.Contains(err.Error(), "source crm, call ping: env_file "+other+" does not set CRM_TOKEN") ||
-		!strings.Contains(err.Error(), `yardr bead ask <bead> "<question>" --secret crm --as bia --context "<where to get it>" asks bia for it`) {
+		!strings.Contains(err.Error(), `yardr bead ask <bead> - --secret crm --as bia, with the question and where to get it on stdin, asks bia for it`) {
 		t.Fatalf("a file without the names = %v", err)
 	}
 	if _, data := lastCall(t, s); !strings.Contains(data, `"status":"no_credential"`) || !strings.Contains(data, `"as":"bia"`) {

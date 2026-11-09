@@ -103,7 +103,7 @@ func (d *Declaration) CredentialState(envFile string, mint []string, readEnv fun
 // userCredentialCard is the card that gives the user's credential in the
 // source: asked of them, or of the operator for them.
 func userCredentialCard(src, user string) string {
-	return fmt.Sprintf("yardr bead ask <bead> \"<question>\" --secret %s --as %s --context \"<where to get it>\" asks %s for it", src, user, user)
+	return fmt.Sprintf("yardr bead ask <bead> - --secret %s --as %s, with the question and where to get it on stdin, asks %s for it", src, user, user)
 }
 
 func (d *Declaration) UserCredentialState(user, file string, readEnv func(path string) (env []string, resolved string, err error)) (string, error) {
@@ -172,7 +172,7 @@ func (d *Declaration) SelectCredential(envFile, kind string, readEnv func(path s
 		// hand; the file the operator keeps themselves is named instead.
 		// An agent reads this from yardr call, where source key is refused
 		// from a pane, so its way on is named too: this names no caller.
-		return nil, fmt.Errorf("%s is not set up: yardr source key %s gives %s, or yardr source set %s env_file=<file> names a file the operator keeps themselves; an agent asks from its pane: yardr bead ask <bead> \"<question>\" --secret %s --context \"<where to get it>\"", need, d.Name, sets, d.Name, d.Name)
+		return nil, fmt.Errorf("%s is not set up: yardr source key %s gives %s, or yardr source set %s env_file=<file> names a file the operator keeps themselves; an agent asks from its pane: yardr bead ask <bead> - --secret %s, with the question and where to get it on stdin", need, d.Name, sets, d.Name, d.Name)
 	}
 	env, file, err := readEnv(envFile)
 	if err != nil {

@@ -328,7 +328,7 @@ func (s setupState) beadStep(depot string) setupStep {
 		}
 	}
 	step.Detail = "no bead was created in a depot yet"
-	step.Next = fmt.Sprintf(`yardr bead create "<title>" --depot %s -b "<goal, done when>", then yardr bead advance <id> --to new`, depot)
+	step.Next = fmt.Sprintf(`yardr bead create - --depot %s -b - with the title and the goal on stdin (the title its first line, then the goal and done when), then yardr bead advance <id> --to new`, depot)
 	return step
 }
 

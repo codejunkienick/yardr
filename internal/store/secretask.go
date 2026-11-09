@@ -340,7 +340,7 @@ func (w *wtx) askedHookSecret(d *source.Declaration, hook string, sec AskSecret,
 	case d.Hook == nil:
 		return nil, fmt.Errorf("source %s: its declaration has no hook key, so the yard hears nothing from it and there is no signing secret to ask for", d.Name)
 	case d.Hook.RegistersSecret():
-		return nil, fmt.Errorf("source %s registers its webhook itself (call %s): the yard makes the signing secret for hook %s, and no secret is typed: ask the hook alone (--run \"hook add %s --source %s\")", d.Name, d.Hook.Register.Call, hook, hook, d.Name)
+		return nil, fmt.Errorf("source %s registers its webhook itself (call %s): the yard makes the signing secret for hook %s, and no secret is typed: ask the hook alone (the run ask hook add %s --source %s)", d.Name, d.Hook.Register.Call, hook, hook, d.Name)
 	}
 	if w.Bucket(bHooks).Get([]byte(hook)) != nil {
 		return nil, fmt.Errorf("hook %s is in the yard already: replacing it, secret included, is the operator's to type in a terminal (yardr hook add %s --source %s --secret-file <file>)", hook, hook, d.Name)

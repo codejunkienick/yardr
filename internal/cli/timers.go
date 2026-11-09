@@ -42,10 +42,14 @@ says it was the last.`}
 
 	var in, at, every, runs, to, unless string
 	add := &cobra.Command{
-		Use:   `add (--in <duration> | --at <time> | --every <duration>) [--to <user>] [--unless bead=<id>[,stage=<stage>]] "<reason>"`,
+		Use:   `add (--in <duration> | --at <time> | --every <duration>) [--to <user>] [--unless bead=<id>[,stage=<stage>]] <reason|->`,
 		Short: "Set a timer; the reason is what the receiver reads",
 		Long: `Sets a timer. The reason is required: it is what the receiver reads when
-the timer fires, with who set it and when.
+the timer fires, with who set it and when. It may be - to read it from
+stdin, which is how to write a reason that quotes code or file names: inside
+a double-quoted argument the shell runs every backtick span and $( ) and puts
+what it prints in the reason, where a heredoc with a quoted delimiter expands
+nothing. A reason with no words on stdin is refused, and no timer is set.
 
 --in 40m fires once, that long from now. --at fires once at a time: RFC 3339
 (2026-10-06T09:00:00+02:00), or 15:04 for the next time the local clock
@@ -59,13 +63,21 @@ it is dropped when the bead has entered that stage: it is there, was there,
 is in a stage its flow orders after it, or is closed. A recurring timer with
 --unless ends when that holds. A firing says what was awaited and where the
 bead stands.`,
-		Example: `  yardr timer add --in 40m "look at the deploy again"
-  yardr timer add --in 30m --to mckean --unless bead=yardr-1a2b,stage=review "yardr-1a2b is stuck in new"
-  yardr timer add --at 09:00 "read the night's CI"
-  yardr timer add --every 1d --for 14d --unless bead=yardr-1a2b "yardr-1a2b is still open"`,
+		Example: `  yardr timer add --in 40m - <<'TIMER'
+  look at the deploy again
+  TIMER
+  yardr timer add --in 30m --to mckean --unless bead=yardr-1a2b,stage=review - <<'TIMER'
+  yardr-1a2b is stuck in new
+  TIMER
+  yardr timer add --at 09:00 - <<'TIMER'
+  read the night's CI
+  TIMER
+  yardr timer add --every 1d --for 14d --unless bead=yardr-1a2b - <<'TIMER'
+  yardr-1a2b is still open
+  TIMER`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			nt := store.NewTimer{To: to, Reason: args[0]}
+			nt := store.NewTimer{To: to}
 			set := 0
 			for _, v := range []string{in, at, every} {
 				if v != "" {
@@ -77,6 +89,14 @@ bead stands.`,
 			}
 			now := time.Now()
 			var err error
+			// Read before anything is written, so that a reason with no words
+			// sets no timer, in words that name stdin, not the store's.
+			if nt.Reason, err = stdinWords(c, args[0]); err != nil {
+				return err
+			}
+			if args[0] == "-" && strings.TrimSpace(nt.Reason) == "" {
+				return errors.New("nothing to write: stdin gave no reason, so no timer was set")
+			}
 			switch {
 			case in != "":
 				d, err := store.ParseSpan(in)

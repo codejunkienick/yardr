@@ -100,8 +100,8 @@ type Uninvited struct {
 
 // UninviteTeammate files the removal of the teammate user: the run ask
 // `user uninvite <user>` on a new bead, addressed to the yard's operator,
-// as AskNew files it. The card it makes is the same card a
-// `yardr bead ask --run "user uninvite <user>"` makes, and approval,
+// as AskNew files it. The card it makes is the same card a run ask of
+// `user uninvite <user>` makes, and approval,
 // the edge-first removal and the retry are that card's built path.
 //
 // It files the ask and no more. The card refuses a user the yard has

@@ -243,7 +243,7 @@ func TestDelegatedRuns(t *testing.T) {
 			// A hook is taken back by its hook rm card, which only the
 			// operator approves, not by a terminal's command: the way back a
 			// hosted operator has.
-			const hookBack = `the hook rm card, approved by the operator: yardr bead ask --run "hook rm tracker"`
+			const hookBack = `the hook rm card, approved by the operator: yardr bead ask <bead> - with R: hook rm tracker on stdin`
 			isHook := c.name == "hook add in the safe shape"
 			if isHook && rec.Back != hookBack {
 				t.Errorf("hook add's taking-back = %q, want %q", rec.Back, hookBack)

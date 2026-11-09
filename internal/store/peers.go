@@ -764,7 +764,7 @@ func (s *Store) PeerSend(ctx context.Context, name, kind string, body json.RawMe
 	case PeerAsk:
 		// An ask crosses from the yard's own asks, asked with the command:
 		// a socket client names no question of its own.
-		return nil, fmt.Errorf("an ask goes to a person of a peer's yard with yardr bead ask <id> \"<question>\" --to <person>@%s", name)
+		return nil, fmt.Errorf("an ask goes to a person of a peer's yard with yardr bead ask <id> - --to <person>@%s, the ask on stdin", name)
 	}
 	if len(body) == 0 {
 		body = json.RawMessage("{}")

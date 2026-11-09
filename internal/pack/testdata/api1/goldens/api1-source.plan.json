@@ -144,7 +144,7 @@
         {
           "what": "env_file",
           "status": "missing",
-          "detail": "no env_file is set for it, and a pack neither carries nor names one: yardr source key acme gives ACME_APP_ID and ACME_APP_KEY_FILE, or ACME_TOKEN and ACME_UPDATE_TOKEN, or yardr source set acme env_file=\u003cfile\u003e names a file the operator keeps themselves; an agent asks from its pane: yardr bead ask \u003cbead\u003e \"\u003cquestion\u003e\" --secret acme --context \"\u003cwhere to get it\u003e\""
+          "detail": "no env_file is set for it, and a pack neither carries nor names one: yardr source key acme gives ACME_APP_ID and ACME_APP_KEY_FILE, or ACME_TOKEN and ACME_UPDATE_TOKEN, or yardr source set acme env_file=\u003cfile\u003e names a file the operator keeps themselves; an agent asks from its pane: yardr bead ask \u003cbead\u003e - --secret acme, with the question and where to get it on stdin"
         },
         {
           "what": "notify",

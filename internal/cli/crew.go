@@ -1816,7 +1816,7 @@ func (a *app) primeCrew(w io.Writer, ctx context.Context, st store.API, name, us
 		fmt.Fprintf(w, `## What the yard does for you
 
 - wait for a bead to move or land -> yardr bead watch <id> [--stage|--kind|--done]
-- a deadline on that wait -> yardr timer add --in N --unless bead=<id>[,stage=<stage>] "..."
+- a deadline on that wait -> yardr timer add --in N --unless bead=<id>[,stage=<stage>] - with the words on stdin
 - start builders only when the machine can carry them -> route conditions on machine.load/mem/swap (e.g. builders@machine.load<80)
 - an agent that went idle -> session_stalled (2m, never got going) and session_idle (30m, a still pane counts from 10m) reach your inbox
 - be told when a group has nothing to send -> a quota_wait subscription
@@ -1855,8 +1855,8 @@ Before you write a loop, a script or a file of your own, find the row; if there 
   pane conversation) is short: the answer or the decision first, then only
   what they need to act on it; what you checked and how you got there only
   when they ask.
-- yardr timer add --in 40m|--at 15:04|--every 1d [--to <user>] [--unless bead=<id>[,stage=<stage>]] "...":
-  the yard tells you, or a user, later. Prefer an event (a subscription, a bead's done: yardr bead
+- yardr timer add --in 40m|--at 15:04|--every 1d [--to <user>] [--unless bead=<id>[,stage=<stage>]] - with the words
+  on stdin: the yard tells you, or a user, later. Prefer an event (a subscription, a bead's done: yardr bead
   watch <id> --done); a timer is the fallback for when it does not come, or a check by the clock.
 %[2]s- The yard itself: yardr ready, yardr bead list|show|create|update|advance|close|hold|unhold|release,
   yardr dep add, yardr prime --bead <id>, yardr events, yardr group list, yardr route list, yardr session list.

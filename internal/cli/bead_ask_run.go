@@ -38,7 +38,7 @@ func askRunCarried(command, test string, testSet bool, role string, roleSet bool
 	// quotes nothing, so it never goes there.
 	if depotTestCommand(command) {
 		if !testSet {
-			return nil, fmt.Errorf("--run \"depot test <depot>\" carries its command beside the ask, in --run-test \"<command>\"")
+			return nil, fmt.Errorf("the run ask depot test <depot> carries its command beside the ask, in --run-test <command> (T: on stdin)")
 		}
 		run.Test = test
 	}
@@ -84,8 +84,8 @@ func plainRunLine(command string) bool {
 	return true
 }
 
-// groupAddCommand reports whether command is a --run "group add <name> ..."
-// ask: those words, with or without the leading yardr. The store parses
+// groupAddCommand reports whether command is the run ask group add <name>
+// ...: those words, with or without the leading yardr. The store parses
 // it; this only says the ask may carry a prompt file's text beside it.
 func groupAddCommand(command string) bool {
 	words := strings.Fields(command)
@@ -95,7 +95,7 @@ func groupAddCommand(command string) bool {
 	return len(words) >= 3 && words[0] == "group" && words[1] == "add"
 }
 
-// groupAddPrompt reads what a --run "group add ..." ask carries: the text
+// groupAddPrompt reads what a run ask of group add ... carries: the text
 // of the file its --set prompt=<file> names, once, so the store holds the
 // bytes the card shows. It answers "" for any other command, and for a
 // group add that names no prompt. A file that cannot be read is refused
@@ -107,8 +107,8 @@ func groupAddPrompt(command string) (string, error) {
 	return promptFileText(command)
 }
 
-// setPromptCommand reports whether command is a --run "group set <name> ..."
-// or "crew set <name> ..." ask: those words, with or without the leading
+// setPromptCommand reports whether command is the run ask group set <name>
+// ... or crew set <name> ...: those words, with or without the leading
 // yardr. The store parses it; this only says the ask may carry a prompt
 // file's text beside it, when it names one.
 func setPromptCommand(command string) bool {
@@ -139,8 +139,8 @@ func promptFileText(command string) (string, error) {
 	return string(data), nil
 }
 
-// crewAddCommand reports whether command is a --run "crew add <name> ..."
-// ask: those words, with or without the leading yardr. The store parses
+// crewAddCommand reports whether command is the run ask crew add <name>
+// ...: those words, with or without the leading yardr. The store parses
 // it; this only says the ask carries a role file beside it.
 func crewAddCommand(command string) bool {
 	words := strings.Fields(command)
@@ -150,7 +150,7 @@ func crewAddCommand(command string) bool {
 	return len(words) >= 3 && words[0] == "crew" && words[1] == "add"
 }
 
-// crewAddRole reads what a --run "crew add ..." ask carries: the role
+// crewAddRole reads what a run ask of crew add ... carries: the role
 // file --run-role names, or the file prompt= names in the command,
 // once, so the store holds the bytes the card shows. It answers "" for
 // any other command, and for a crew add that names neither, which the
@@ -223,8 +223,8 @@ func readCrewRoleFile(file string) ([]byte, error) {
 	return data, nil
 }
 
-// depotTestCommand reports whether command is a --run "depot test <depot>"
-// ask: exactly those three words, with or without the leading yardr. The
+// depotTestCommand reports whether command is the run ask depot test
+// <depot>: exactly those three words, with or without the leading yardr. The
 // store parses it; this only says the ask carries --run-test beside it,
 // so no character gate goes here: a command the store refuses is refused
 // there, carried or not.
@@ -236,7 +236,7 @@ func depotTestCommand(command string) bool {
 	return len(words) == 3 && words[0] == "depot" && words[1] == "test"
 }
 
-// sourceAddCarried reads what a --run "source add <file>" ask carries:
+// sourceAddCarried reads what a run ask of source add <file> carries:
 // the declaration file once, resolved as yardr source add resolves it
 // (a name yardr carries a source under, where no file stands), and each
 // relative program's bytes from beside it as CopyCommandFiles reads

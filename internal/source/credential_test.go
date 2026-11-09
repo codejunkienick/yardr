@@ -95,7 +95,7 @@ func TestReadCredentialMint(t *testing.T) {
 	// agent's way on from a pane.
 	if _, _, err := d.ReadCredential(ctx, "", []string{script}, Read, testReadEnv); err == nil ||
 		!strings.Contains(err.Error(), "CRM_APP_ID and CRM_APP_KEY, or CRM_TOKEN is not set up: yardr source key crm gives CRM_APP_ID and CRM_APP_KEY, or CRM_TOKEN") ||
-		!strings.Contains(err.Error(), "an agent asks from its pane: yardr bead ask <bead> \"<question>\" --secret crm --context \"<where to get it>\"") {
+		!strings.Contains(err.Error(), "an agent asks from its pane: yardr bead ask <bead> - --secret crm, with the question and where to get it on stdin") {
 		t.Fatalf("no env_file: %v", err)
 	}
 	// A file that names no credential reads nothing.
@@ -146,7 +146,7 @@ func TestReadUserCredential(t *testing.T) {
 	empty := credFile(t, "OTHER=x\n")
 	if _, _, err := d.ReadUserCredential(ctx, "ada", empty, []string{script}, Read, testReadEnv); err == nil ||
 		!strings.Contains(err.Error(), "env_file "+empty+" does not set CRM_APP_ID and CRM_APP_KEY, or CRM_TOKEN") ||
-		!strings.Contains(err.Error(), `yardr bead ask <bead> "<question>" --secret crm --as ada --context "<where to get it>" asks ada for it`) {
+		!strings.Contains(err.Error(), `yardr bead ask <bead> - --secret crm --as ada, with the question and where to get it on stdin, asks ada for it`) {
 		t.Fatalf("nothing set: %v", err)
 	}
 	if _, _, err := d.ReadUserCredential(ctx, "ada", "", []string{script}, Read, testReadEnv); err == nil ||
@@ -225,7 +225,7 @@ func TestUserCredentialState(t *testing.T) {
 	}
 	if _, err := two.UserCredentialState("ada", one, testReadEnv); err == nil ||
 		!strings.Contains(err.Error(), "does not set CRM_WRITE_TOKEN") ||
-		!strings.Contains(err.Error(), `yardr bead ask <bead> "<question>" --secret crm --as ada --context "<where to get it>" asks ada for it`) {
+		!strings.Contains(err.Error(), `yardr bead ask <bead> - --secret crm --as ada, with the question and where to get it on stdin, asks ada for it`) {
 		t.Fatalf("without the update's: %v", err)
 	}
 	// A file without the names, and no file at all: the card that gives
@@ -238,7 +238,7 @@ func TestUserCredentialState(t *testing.T) {
 	}
 	if _, err := d.UserCredentialState("ada", "", testReadEnv); err == nil ||
 		!strings.Contains(err.Error(), "CRM_APP_ID and CRM_APP_KEY is not set for ada: ") ||
-		!strings.Contains(err.Error(), `yardr bead ask <bead> "<question>" --secret crm --as ada --context "<where to get it>" asks ada for it`) {
+		!strings.Contains(err.Error(), `yardr bead ask <bead> - --secret crm --as ada, with the question and where to get it on stdin, asks ada for it`) {
 		t.Fatalf("no file: %v", err)
 	}
 	// A file that names no credential reads nothing.

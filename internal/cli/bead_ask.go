@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -27,7 +26,7 @@ func (a *app) newBeadAskCmd() *cobra.Command {
 	var askEnv []string
 	var askTakeBack bool
 	ask := &cobra.Command{
-		Use:   "ask <id> <question> | ask --new <question> | ask --take-back <id> <ask> <reason>",
+		Use:   "ask <id> <question|-> | ask --new <question|-> | ask --take-back <id> <ask> <reason|->",
 		Short: "Ask someone a question as data: options to pick, answered, put aside or declined, or taken back",
 		Long: `Asks a person a question as data, on any bead in any stage: the question in
 one line, who must answer, two to five lines of context, the options each
@@ -35,6 +34,40 @@ with its consequence in a line, the one recommended and why, and the other
 beads it is about. The person answers by picking an option, puts the
 question aside, or declines it (yardr bead answer); the answer is the
 option, so it cannot be misread.
+
+The question is the last argument, or - to read the ask from stdin, which is
+how to write one that quotes code or file names: inside a double-quoted
+argument the shell runs every backtick span and $( ) and puts what it prints
+in the ask, where a heredoc with a quoted delimiter expands nothing. Stdin is
+read once and holds every text of the ask. Its first line is the question and
+each line after it a line of context:
+
+  yardr bead ask <id> - <<'ASK'
+  the question, in one line
+  a line of context
+  another line of context
+  ASK
+
+An ask with options, a recommendation or a command to run labels every line
+instead, a letter and a space, in any order and one line a field, since no
+field continues on the next:
+
+  Q: the question, once
+  C: a line of context (two to five, at least one)
+  O: <label>: <consequence>, one line for each option
+  W: why the recommended one, once (--recommend names it)
+  R: the command a run ask proposes, once (--run)
+  T: its test command, once, with R: a depot test (--run-test)
+
+A line with no label among labeled ones, a label among unlabeled ones, an
+unknown label and a label with no words are refused, and nothing is asked.
+With - no text is a flag: --context, --option, --why, --run and --run-test
+are refused beside it, and so is --new's -b -, which would read the same
+stdin. The flags that name no prose (--to, --recommend, --about, --setup,
+--crew and the rest) go beside it. The secret flags name a source, a user, a
+crew member or a login, and never read stdin: the value is typed unseen
+where it is given (yardr bead answer <id> <ask> --secret), so that no
+history keeps it.
 
 The ask is a note of kind ask; its text is JSON, one schema: question, to,
 context, options (a label and a consequence each), recommend and why,
@@ -161,12 +194,12 @@ The yard's server writes it to the file it owns for the hook,
 value is in no note, event, mail, brief or pane, as for --secret. It is asked of the operator, takes no --env, no --for-user, no --for-crew and
 no --as, and is refused for a source the yard does not declare, one whose
 declaration has no hook key, and a hook the yard has already. The hook itself
-is a second ask on the same bead (--run "hook add <hook> --source <source>"),
-asked after this one: the operator gives the secret first, then approves the
+is a second ask on the same bead (--run hook add <hook> --source <source>, or
+R: on stdin), asked after this one: the operator gives the secret first, then approves the
 hook, whose approval runs only with the secret standing in its file.
 
---run "<command>" proposes one yardr command that is the operator's to give,
-for the operator to approve: a crew member that needs it asks this way instead
+--run <command>, or R: <command> on stdin, proposes one yardr command that is
+the operator's to give, for the operator to approve: a crew member that needs it asks this way instead
 of mailing the person a line to paste into a terminal. The
 command is written as it is typed, with or without the leading yardr, and is
 one of the list the yard runs from a card:
@@ -195,7 +228,7 @@ else: it never interprets quotes or shell punctuation. A peer-add invite
 stays one word and the yardkey invite reader validates all of it, including
 its URL; line breaks are refused. A comma is accepted only in a list the
 command takes or in the peer-add invite (the parts of tell=, the kinds peer
-allow carries, the grants crew set gives). A depot's test command goes beside --run, in --run-test "<command>", since it needs those
+allow carries, the grants crew set gives). A depot's test command goes beside --run, in --run-test <command> or T: <command>, since it needs those
 characters. It checks the
 command against the yard as it stands, and refuses one the yard would
 refuse and one that would change nothing (a peer, source, group, crew
@@ -290,8 +323,8 @@ it is routed from that stage like any bead (a depot's decide stage, where
 the group of people that stage is routed to holds it), and a stage the
 depot's flow does not have is refused.
 
---take-back takes an open ask back: yardr bead ask --take-back <id> <ask>
-"<reason>", for a question that is asked no more (it was settled another
+--take-back takes an open ask back: yardr bead ask --take-back <id> <ask> -,
+with the reason on stdin, for a question that is asked no more (it was settled another
 way, or asked again in other words). It is the asker's to do, and the
 operator's; anyone else is refused, since nobody ends a question in the
 person's place. The ask leaves the person's open decisions wherever it
@@ -304,42 +337,67 @@ also sent to a linked yard (--to <person>@<peer>, or by reach) that yard is
 told in the same write, and it leaves the decisions there with "it was
 taken back in <yard>'s yard". It is a flag of ask, not of answer: answer is
 what the person asked does, and this is the asker's own.`,
-		Example: `  yardr bead ask yardr-n8ta "Move this yard's links to the declared source now?" \
-    --to mckean \
-    --context "The links file declares the new source; 64 links still point at the old one." \
-    --context "The move was tested on a copy just now and passed; the old source goes away Friday." \
-    --option "Move them now: all 64 links point at the new source tonight" \
-    --option "After Friday: keep the old source until the release is out" \
-    --recommend 1 --why "the test passed; waiting only risks Friday's rush"
-  yardr bead ask yardr-n8ta "Move them now?" --to mckean@airy \
-    --context "The links file declares the new source." \
-    --option "Move them now: all 64 links point at the new source tonight"
-  yardr bead ask yardr-k3vd "The API key for the CRM" --secret crm \
-    --context "Create one at https://crm.example.com/account/api (read only)."
-  yardr bead ask yardr-k3vd "Your id at the phone service" --secret phone --for-user mckean \
-    --context "It is on the first page of the service after login."
-  yardr bead ask yardr-k3vd "The token it answers with" --secret phone --for-crew yardmaster \
-    --context "Create one at https://phone.example.com/account/api."
-  yardr bead ask yardr-k3vd "Your Google account for your mail?" --secret google-mail --as ada \
-    --context "The yard reads your mail as you when it is granted it as you."
-  yardr bead ask yardr-k3vd "The code the sign-in page showed" --secret-login claude-a1b2c3d4 \
-    --context "The login waits for what the sign-in page showed."
-  yardr bead ask yardr-k3vd "The signing secret for it" --secret-hook <hook> --source <source> \
-    --context "It is shown once where the webhook is made in the service."
-  yardr bead ask yardr-k3vd "Set up the webhook?" \
-    --context "The signing secret is asked for on the ask above; give it first." \
-    --run "hook add <hook> --source <source>"
-  yardr bead ask yardr-k3vd "Set up Gmail for the yardmaster?" --setup google-mail --crew yardmaster \
-    --context "The yardmaster reads mail to work beads; drafts only, the person sends." \
-    --recommend 1 --why "reading is the job; drafts can follow"
-  yardr bead ask yardr-k3vd "Take more mail from airy?" \
-    --context "airy's yard was refused 4 mails in the last hour: the link takes 30." \
-    --run "peer allow airy --mail-limit 300"
-  yardr bead ask --new "Rename 'depot'?" --label topic:words \
-    --context "The glossary keeps it as the yard's word for a repository." \
-    --option "Keep depot: nothing changes" \
-    --option "Rename it: every command, page and document changes once"
-  yardr bead ask --take-back yardr-n8ta 2913 "the design went back to draft; a new question follows"`,
+		Example: `  yardr bead ask yardr-n8ta - --to mckean --recommend 1 <<'ASK'
+  Q: Move this yard's links to the declared source now?
+  C: The links file declares the new source; 64 links still point at the old one.
+  C: The move was tested on a copy just now and passed; the old source goes away Friday.
+  O: Move them now: all 64 links point at the new source tonight
+  O: After Friday: keep the old source until the release is out
+  W: the test passed; waiting only risks Friday's rush
+  ASK
+  yardr bead ask yardr-n8ta - --to mckean@airy <<'ASK'
+  Q: Move them now?
+  C: The links file declares the new source.
+  O: Move them now: all 64 links point at the new source tonight
+  ASK
+  yardr bead ask yardr-k3vd - --secret crm <<'ASK'
+  The API key for the CRM
+  Create one at https://crm.example.com/account/api (read only).
+  ASK
+  yardr bead ask yardr-k3vd - --secret phone --for-user mckean <<'ASK'
+  Your id at the phone service
+  It is on the first page of the service after login.
+  ASK
+  yardr bead ask yardr-k3vd - --secret phone --for-crew yardmaster <<'ASK'
+  The token it answers with
+  Create one at https://phone.example.com/account/api.
+  ASK
+  yardr bead ask yardr-k3vd - --secret google-mail --as ada <<'ASK'
+  Your Google account for your mail?
+  The yard reads your mail as you when it is granted it as you.
+  ASK
+  yardr bead ask yardr-k3vd - --secret-login claude-a1b2c3d4 <<'ASK'
+  The code the sign-in page showed
+  The login waits for what the sign-in page showed.
+  ASK
+  yardr bead ask yardr-k3vd - --secret-hook <hook> --source <source> <<'ASK'
+  The signing secret for it
+  It is shown once where the webhook is made in the service.
+  ASK
+  yardr bead ask yardr-k3vd - <<'ASK'
+  Q: Set up the webhook?
+  C: The signing secret is asked for on the ask above; give it first.
+  R: hook add <hook> --source <source>
+  ASK
+  yardr bead ask yardr-k3vd - --setup google-mail --crew yardmaster --recommend 1 <<'ASK'
+  Q: Set up Gmail for the yardmaster?
+  C: The yardmaster reads mail to work beads; drafts only, the person sends.
+  W: reading is the job; drafts can follow
+  ASK
+  yardr bead ask yardr-k3vd - <<'ASK'
+  Q: Take more mail from airy?
+  C: airy's yard was refused 4 mails in the last hour: the link takes 30.
+  R: peer allow airy --mail-limit 300
+  ASK
+  yardr bead ask --new - --label topic:words <<'ASK'
+  Q: Rename 'depot'?
+  C: The glossary keeps it as the yard's word for a repository.
+  O: Keep depot: nothing changes
+  O: Rename it: every command, page and document changes once
+  ASK
+  yardr bead ask --take-back yardr-n8ta 2913 - <<'REASON'
+  the design went back to draft; a new question follows
+  REASON`,
 		Args: func(c *cobra.Command, args []string) error {
 			if askTakeBack {
 				// It asks nothing: no flag of a question goes with it.
@@ -353,7 +411,7 @@ what the person asked does, and this is the asker's own.`,
 					return fmt.Errorf("--take-back takes the bead, the ask and why, and nothing of a question: not %s", strings.Join(other, ", "))
 				}
 				if len(args) != 3 {
-					return fmt.Errorf("--take-back takes the bead, the ask and why: %s --take-back <id> <ask> \"<reason>\" (got %d arguments)", c.CommandPath(), len(args))
+					return fmt.Errorf("--take-back takes the bead, the ask and why: %s --take-back <id> <ask> - with the reason on stdin (got %d arguments)", c.CommandPath(), len(args))
 				}
 				return nil
 			}
@@ -371,6 +429,11 @@ what the person asked does, and this is the asker's own.`,
 			return cobra.ExactArgs(2)(c, args)
 		},
 		PreRunE: func(c *cobra.Command, args []string) error {
+			// An ask on stdin first: the texts it holds are what the checks
+			// below judge, as if they were typed.
+			if err := askFromStdin(c, args); err != nil {
+				return err
+			}
 			if len(askEnv) > 0 && askSecret == "" && !c.Flags().Changed("secret-login") && !c.Flags().Changed("secret-hook") {
 				return fmt.Errorf("--env narrows a secret ask: it goes with --secret <source>")
 			}
@@ -457,9 +520,9 @@ what the person asked does, and this is the asker's own.`,
 			case c.Flags().Changed("run") && c.Flags().Changed("secret-hook"):
 				return fmt.Errorf("--run proposes a command and --secret-hook asks for a value: one of the two; ask for the hook's secret and the hook as two asks, the secret first")
 			case c.Flags().Changed("run-test") && (!c.Flags().Changed("run") || !depotTestCommand(askRun)):
-				return fmt.Errorf("--run-test is the command a --run \"depot test <depot>\" ask proposes: it goes with that command")
+				return fmt.Errorf("--run-test is the command the run ask depot test <depot> proposes: it goes with that command")
 			case c.Flags().Changed("run-role") && (!c.Flags().Changed("run") || !crewAddCommand(askRun)):
-				return fmt.Errorf("--run-role is the role file a --run \"crew add <name> ...\" ask carries: it goes with that command")
+				return fmt.Errorf("--run-role is the role file the run ask crew add <name> ... carries: it goes with that command")
 			}
 			return nil
 		},
@@ -496,7 +559,7 @@ what the person asked does, and this is the asker's own.`,
 			for _, o := range askOptions {
 				label, consequence, ok := strings.Cut(o, ":")
 				if !ok {
-					return fmt.Errorf("--option %q: want \"<label>: <consequence>\"", o)
+					return fmt.Errorf("option %q: want <label>: <consequence>, with the colon", o)
 				}
 				options = append(options, store.AskOption{Label: label, Consequence: consequence})
 			}
@@ -695,10 +758,10 @@ what the person asked does, and this is the asker's own.`,
 		},
 	}
 	ask.Flags().StringVar(&askTo, "to", "", "who must answer (default the yard's operator)")
-	ask.Flags().StringArrayVar(&askContext, "context", nil, "what the question is about, a line (repeatable; write two to five, at least one)")
-	ask.Flags().StringArrayVar(&askOptions, "option", nil, "an option as \"<label>: <consequence>\" (repeatable; none wants words)")
+	ask.Flags().StringArrayVar(&askContext, "context", nil, "what the question is about, a line (repeatable; write two to five, at least one; C: on stdin)")
+	ask.Flags().StringArrayVar(&askOptions, "option", nil, "an option as \"<label>: <consequence>\" (repeatable; none wants words; O: on stdin)")
 	ask.Flags().IntVar(&askRecommend, "recommend", 0, "the recommended option's number, with --why")
-	ask.Flags().StringVar(&askWhy, "why", "", "why the recommended option, in a line")
+	ask.Flags().StringVar(&askWhy, "why", "", "why the recommended option, in a line (W: on stdin)")
 	ask.Flags().StringSliceVar(&askAbout, "about", nil, "the other beads the question is about")
 	ask.Flags().StringVar(&askSecret, "secret", "", "ask for the credential of this declared source: answered with a value typed unseen, never with words")
 	ask.Flags().StringVar(&askSecretHook, "secret-hook", "", "with --source: ask for the signing secret of this hook of a declared source: answered with a value typed unseen, kept in the hook's secret file")
@@ -707,9 +770,9 @@ what the person asked does, and this is the asker's own.`,
 	ask.Flags().StringVar(&askForUser, "for-user", "", "with --secret: ask for this user's own address in the source (the variable its notify key names), kept in the user's env_file")
 	ask.Flags().StringVar(&askForCrew, "for-crew", "", "with --secret: ask for this crew member's own credential in the source (the variables its credential names), kept in the crew member's env_file")
 	ask.Flags().StringVar(&askAs, "as", "", "with --secret: ask for this user's own credential in the source (the names a call made as them reads), kept in the user's env_file; with --secret-login: the login is this user's own, and theirs to give")
-	ask.Flags().StringVar(&askRun, "run", "", "propose this yardr command for the operator to approve, as it is typed: one the yard runs from a card (yardr bead ask --help)")
-	ask.Flags().StringVar(&askRunTest, "run-test", "", "with --run \"depot test <depot>\": the test command the ask proposes, carried beside the command since --run quotes nothing")
-	ask.Flags().StringVar(&askRunRole, "run-role", "", "with --run \"crew add <name> ...\": the file whose role text the ask carries beside the command, shown whole on the card")
+	ask.Flags().StringVar(&askRun, "run", "", "propose this yardr command for the operator to approve, as it is typed: one the yard runs from a card (yardr bead ask --help; R: on stdin)")
+	ask.Flags().StringVar(&askRunTest, "run-test", "", "with --run depot test <depot> (R:): the test command the ask proposes (T:), carried beside the command since --run quotes nothing")
+	ask.Flags().StringVar(&askRunRole, "run-role", "", "with --run crew add <name> ... (R:): the file whose role text the ask carries beside the command, shown whole on the card")
 	ask.Flags().StringVar(&askSetup, "setup", "", "set up this embedded pack of kind source as one decision: the apply, the account and the grants, with --crew/--group naming who the grants are for")
 	ask.Flags().StringVar(&askDepotPush, "depot-push", "", "turn this depot's push to its origin on as one decision for the operator to approve: YARDR_PUSH=origin in <depot>-assembly's cmd and the pack's helper in the depot's git config, carried out by the server")
 	ask.Flags().StringVar(&askDepotPushOff, "depot-push-off", "", "turn this depot's push off as one decision for the operator to approve: the exact reverse of --depot-push for the depot")
@@ -717,7 +780,7 @@ what the person asked does, and this is the asker's own.`,
 	ask.Flags().StringArrayVar(&askGroup, "group", nil, "with --setup: the grants are for this group's sessions (repeatable; at least one of --crew and --group)")
 	ask.Flags().StringVar(&askSourceBase, "source-base", "", "with --setup: the setup's calls go to the pack's region base <name>, for a pack whose source declares bases")
 	ask.Flags().StringSliceVar(&askEnv, "env", nil, "with --secret: only these variables of the source's credential (default the mint's inputs where the declaration names a mint, else every one it names)")
-	ask.Flags().BoolVar(&askTakeBack, "take-back", false, "take an open ask back instead of asking: <id> <ask> \"<reason>\" (the asker's, or the operator's)")
+	ask.Flags().BoolVar(&askTakeBack, "take-back", false, "take an open ask back instead of asking: <id> <ask> <reason|-> (the asker's, or the operator's)")
 	ask.Flags().BoolVar(&askNew, "new", false, "the question is about no bead: make one titled with it, and the ask on it, in one write")
 	// The bead of --new, by bead create's flags and defaults.
 	ask.Flags().StringVarP(&askBead.Body, "body", "b", "", "with --new: the bead's description (- reads stdin)")
@@ -725,282 +788,6 @@ what the person asked does, and this is the asker's own.`,
 	ask.Flags().StringVarP(&askBead.Stage, "stage", "s", "", "with --new: place the bead in this stage as a task, routed as bead create's is (decide, for a depot's); default a question nothing routes")
 	ask.Flags().StringSliceVarP(&askBead.Labels, "label", "l", nil, "with --new: the bead's labels")
 	return ask
-}
-
-func (a *app) newBeadAnswerCmd() *cobra.Command {
-	var ansWords, ansDecline, ansAccount string
-
-	var ansLater, ansSecret, ansApprove bool
-	var ansValue []string
-	answer := &cobra.Command{
-		Use:   "answer <id> <ask> [<n> [words]]",
-		Short: "Answer an ask: pick an option, answer with words, give a secret, approve a command, put it aside, or decline it",
-		Long: `Answers an ask on a bead: picks option <n> with any words, answers with
-words alone, puts the ask aside, or declines it. The answer is a note of
-kind answer naming who picked which option; a newer pick supersedes the
-older one for display, and every pick stays as a note. Nothing is deleted.
-
-  yardr bead answer <id> <ask> <n> [words]      pick option n with words alongside
-  yardr bead answer <id> <ask> --words "<text>"   answer an ask with no options
-  yardr bead answer <id> <ask> --later             put it aside for 24 hours
-  yardr bead answer <id> <ask> --decline "<words>"   refuse to decide it
-  yardr bead answer <id> <ask> --secret            give the secret a secret ask asks for
-  yardr bead answer <id> <ask> <n> --secret        pick a setup ask's preset with the account typed
-  yardr bead answer <id> <ask> <n> --account <source>   pick a setup ask's preset, taking a listed account
-  yardr bead answer <id> <ask> <n>                 pick a drift card's preset, keeping the standing account
-  yardr bead answer <id> <ask> --approve           approve the command a run ask proposes
-  yardr bead answer <id> <ask> --approve --value <name>=<value>   approve it giving the values the card asks for
-
-<ask> is the ask note's seq, as prime, review and chat print it. <n> counts
-the ask's options as shown, "You decide" last where it has one.
-
-Words alone on an ask with options are refused. They go as a plain note
-(yardr bead note) and leave the ask open. Talk about the question stays
-where talk lives, in the conversation with the asker.
-
---later leaves the person's queue for 24 hours or until the asker's next
-note on the bead, whichever is first; answering early is a pick like any
-other. --decline ends the ask with no option picked. Wherever the ask is
-shown it reads "<user> declined to decide this: <words>". A declined ask
-and an ask answered with words take no further answer; a picked ask takes
-only a newer pick.
-
---secret answers a secret ask (yardr bead ask --secret), as yardr source
-key gives a credential: each name the ask asks for is asked for in turn at
-a terminal and nothing is shown as it is typed, once the gate below is
-passed. The value is never an argument and never a variable of the
-command's environment. The
-yard's server writes it into the file the source's credential is read
-from, and the answer on the bead says who gave which names: the value is
-in that file and nowhere else. It is the operator's to give, and is
-refused from the pane of an agent. An ask for a user's own address in a
-source (yardr bead ask --secret <source> --for-user <user>) is that user's
-to give, or the operator's, into the user's env_file, and names the
-command that tells the user through the source when that is still to be
-run. An ask for a crew member's own credential in a source (yardr bead ask
---secret <source> --for-crew <name>) is the operator's to give, into the
-crew member's env_file, and takes effect when the crew member next starts.
-An ask for a user's own credential in a source (yardr bead ask --secret
-<source> --as <user>) is that user's to give, or the operator's, into the
-user's env_file, and names the check that tries it as them.
-An ask for a waiting login's input (yardr bead ask --secret-login
-<login>) is handed to the login and kept nowhere; with --as <user> it is
-that user's to give, or the operator's. Giving again replaces what was
-given.
-When the yard wrote the file and could not record it, it says so with the
-names and the file: give it again. A secret ask takes no pick and no
-words, which are refused and kept nowhere; --later puts it aside as any
-ask, and it is declined with --decline "", without words.
-
-<n> --secret answers a setup ask (yardr bead ask --setup): the preset
-pick with the account typed unseen beside it, as --secret types it.
-<n> --account <source> answers it taking the named candidate's account
-instead, one the card lists with its address; where the card lists any,
-exactly one of the two settles the account, and where it lists none the
-typed value does. A drift card, on a pack already applied, is kept with a
-bare <n> where its file holds every name, typed missing names where the
-update newly needs them, or a candidate's file taken as ever. The yard
-then applies the pack, takes the account, and grants the preset picked,
-as the operator, and records what ran. It is the operator's to give, and
-is refused from the pane of an agent. A pick with --secret or --account
-is allowed on a setup ask only, as a bare pick that keeps is; everywhere
-else a secret answer still takes no pick.
-
---approve answers a run ask (yardr bead ask --run): the yard runs the
-command the ask holds, exactly as its card shows it, as the operator, and
-records on the bead what ran and what it printed. It is the operator's to
-give and nobody else's, and is refused from the pane of an agent whatever
---actor says. A user's own subscription, and which parts they are told
-of, is approved by the one it was asked of, that user or the operator, and runs as them. A command runs once for one ask: an ask that was approved,
-declined or taken back takes no approval. It is refused too, and nothing
-runs, when the yard is no longer what the card was written from: what the
-command changes was changed in between, or what it names was replaced
-under its name. The ask is then declined and asked again. What the command
-itself would refuse at a terminal is refused in the same words. A run ask
-takes no pick and no words, which are refused; --later puts it aside and
---decline "<words>" ends it, as for any ask. The card names the command
-that takes the change back and who may run it: anyone, but for a source's
-limits (the operator) and a user's subscription (the user or the
-operator).
-
-A card that asks for values in the clear (a hook add the yard registers
-itself, whose register call wants the project's id) is approved with
---value <name>=<value>, repeatable, one for each name the card shows:
-the yard sends them to the register call with the URL and the secret,
-and keeps none. A name the card asks for nothing of, and a missing one,
-refuse the approval and nothing runs.
-
-A weighty card is one whose approval widens what reaches outside the yard,
-whose word or credential counts as a person's, or what runs inside it; its
-WEIGHTY lines say how, and every secret ask and every setup ask is one. The
-approvals above stand behind a gate for it: --approve, --secret, <n> --secret,
-<n> --account <source>, a bare <n> on a drift card, and a pick on a mapping
-ask that writes a user's identity. At a terminal the command prints the
-card's weight and asks for the ask's number typed back, before it reads a
-value, and goes on only when it is: friction against approving on reflex,
-and no authentication, since the terminal is the yard's own machine and its
-shell is the operator's. Without a terminal (standard input is not one) it
-declines, and says to approve the card in footplate, or in a
-terminal on the yard's machine. No flag gets round that: a gate that a
-script walks through is not a gate. A routine card has no gate.
-
-An ask another yard asked is answered as <bead>@<peer>, the ref the
-decisions queue shows: the answer is queued home for that yard instead
-of written as a note, and the question stands decided here from then
-on. Only the person the question is for answers it, the link must carry
-asks out (yardr peer allow <peer> --send ask), and --later there is 24
-hours by this yard's clock and nothing else. Words alone on an ask with
-options go as mail to the asker instead (yardr mail <asker>@<peer>).`,
-		Args: cobra.RangeArgs(2, 4),
-		RunE: func(c *cobra.Command, args []string) error {
-			st, err := a.store(c.Context())
-			if err != nil {
-				return err
-			}
-			// A bead@peer ref names a question another yard asked: it
-			// stands on no bead of this yard, so there is no bead to
-			// read, and the answer is queued home instead of noted.
-			id := args[0]
-			if _, _, foreign := strings.Cut(id, "@"); !foreign {
-				b, err := st.GetBead(c.Context(), id)
-				if err != nil {
-					return err
-				}
-				id = b.ID
-			}
-			askSeq, err := strconv.ParseUint(args[1], 10, 64)
-			if err != nil || askSeq == 0 {
-				return fmt.Errorf("ask %q: want the ask's seq, as prime, review and chat print it", args[1])
-			}
-			declined := c.Flags().Changed("decline")
-			if ansSecret && ansAccount != "" {
-				return fmt.Errorf("--secret types the account and --account takes a listed one: one of the two")
-			}
-			if ansAccount != "" {
-				if len(args) != 3 || ansWords != "" || ansLater || declined || len(ansValue) > 0 {
-					return fmt.Errorf("--account takes a candidate of a setup ask with its preset pick: yardr bead answer %s %d <n> --account <source>", id, askSeq)
-				}
-				n, pickErr := strconv.Atoi(args[2])
-				if pickErr != nil || n < 1 {
-					return fmt.Errorf("--account takes a candidate of a setup ask with its preset pick: yardr bead answer %s %d <n> --account <source>", id, askSeq)
-				}
-				return a.approveSetupAccount(c, st, id, askSeq, n, ansAccount)
-			}
-			if ansSecret {
-				if len(args) > 2 || ansWords != "" || ansLater || declined || len(ansValue) > 0 {
-					// A pick with --secret settles a setup ask alone.
-					if len(args) == 3 && ansWords == "" && !ansLater && !declined && len(ansValue) == 0 {
-						if n, pickErr := strconv.Atoi(args[2]); pickErr == nil && n >= 1 {
-							return a.approveSetup(c, st, id, askSeq, n)
-						}
-					}
-					return fmt.Errorf("--secret gives the secret and takes nothing else: the value is typed at a terminal")
-				}
-				if setup, err := askedSetup(c.Context(), st, id, askSeq); err == nil && setup != nil {
-					return fmt.Errorf("ask %d sets up a pack: pick its preset with the account: yardr bead answer %s %d <n> --secret (or --account <source> where the card lists one)", askSeq, id, askSeq)
-				}
-				return a.giveSecret(c, st, id, askSeq)
-			}
-			if ansApprove {
-				if len(args) > 2 || ansWords != "" || ansLater || declined {
-					return fmt.Errorf("--approve runs the command the ask holds, with --value alone beside it")
-				}
-				values := map[string]string{}
-				for _, kv := range ansValue {
-					name, value, ok := strings.Cut(kv, "=")
-					if !ok || name == "" || value == "" {
-						return fmt.Errorf("--value %q: want <name>=<value>, one the card asks for", kv)
-					}
-					values[name] = value
-				}
-				weighed, err := a.gate(c, st, id, askSeq, "approve", "--approve")
-				if err != nil {
-					return err
-				}
-				done, err := st.ApproveAsk(c.Context(), id, askSeq, a.who(), weighed, values)
-				if err != nil {
-					return err
-				}
-				return a.out(c.OutOrStdout(), done, func(w io.Writer) {
-					ran := store.AskRan{Argv: done.Argv}
-					fmt.Fprintf(w, "ask %d, asked by %s: %s\n", done.Ask, done.Asker, ran.Command())
-					for _, does := range done.Does {
-						fmt.Fprintln(w, does)
-					}
-					fmt.Fprintf(w, "%s approved it, and the yard ran it:\n%s\n", a.who(), done.Result)
-				})
-			}
-			if len(ansValue) > 0 {
-				return fmt.Errorf("--value gives the values an approval carries, with --approve")
-			}
-			ans := store.Answer{Ask: askSeq}
-			if len(args) >= 3 {
-				n, err := strconv.Atoi(args[2])
-				if err != nil || n < 1 {
-					return fmt.Errorf("%q is not an option number: yardr bead answer %s %d <n> [words], or --words, --later, --decline",
-						args[2], id, askSeq)
-				}
-				ans.Option = n
-				ans.Words = ansWords
-				if len(args) == 4 {
-					if ansWords != "" {
-						return fmt.Errorf("words after the option and --words: one of the two")
-					}
-					ans.Words = args[3]
-				}
-				if ansLater || declined {
-					return fmt.Errorf("an option with --later or --decline: pick, put aside, or decline, one of the three")
-				}
-				if len(args) == 3 && ans.Words == "" {
-					if setup, err := askedSetup(c.Context(), st, id, askSeq); err == nil && setup != nil && setup.Given && len(setup.Missing) == 0 {
-						return a.approveSetupKeep(c, st, id, askSeq, n)
-					}
-				}
-			} else {
-				switch {
-				case ansLater && (ansWords != "" || declined):
-					return fmt.Errorf("--later puts the ask aside with nothing else")
-				case declined && ansWords != "":
-					return fmt.Errorf("--decline ends the ask with its own words, not --words")
-				case !ansLater && !declined && ansWords == "":
-					return fmt.Errorf("nothing to record: pick <n> [words], answer with --words, put it aside with --later, or decline it")
-				}
-				ans.Words, ans.Later, ans.Decline = ansWords, ansLater, declined
-				if ans.Decline {
-					ans.Words = ansDecline
-				}
-			}
-			if ans.Option != 0 {
-				// A pick that writes a user's identity on a mapping card is
-				// a weighty approval: it takes its person's word that the
-				// weight was seen, which here is the gate. Any other pick
-				// asks for none.
-				weighed := false
-				if card, ok := askedCard(c.Context(), st, id, askSeq); ok && card.PickWrites(ans.Option) {
-					var err error
-					if weighed, err = a.weighed(c, id, askSeq, card.Weight, "pick", fmt.Sprintf("%d [words]", ans.Option)); err != nil {
-						return err
-					}
-				}
-				if err := st.AnswerAsk(c.Context(), id, askSeq, ans.Option, ans.Words, a.who(), weighed); err != nil {
-					return err
-				}
-			} else if err := st.AddAnswer(c.Context(), id, ans, a.who()); err != nil {
-				return err
-			}
-			return a.out(c.OutOrStdout(), map[string]any{"bead": id, "ask": askSeq, "state": askState(c.Context(), st, id, askSeq)}, func(w io.Writer) {
-				printAsk(w, c.ErrOrStderr(), c.Context(), st, id, askSeq)
-			})
-		},
-	}
-	answer.Flags().StringVar(&ansWords, "words", "", "words alone, answering an ask with no options (or with a pick, in place of words after it)")
-	answer.Flags().BoolVar(&ansLater, "later", false, "put the ask aside for 24 hours, or until the asker's next note on the bead")
-	answer.Flags().StringVar(&ansDecline, "decline", "", "end the ask with no option picked: why you will not decide it (\"\" on a secret ask, which takes no words)")
-	answer.Flags().BoolVar(&ansApprove, "approve", false, "approve the command a run ask proposes: the yard runs it as you, exactly as the card shows it")
-	answer.Flags().StringArrayVar(&ansValue, "value", nil, "with --approve: <name>=<value> the approval gives in the clear, one the card asks for (repeatable)")
-	answer.Flags().BoolVar(&ansSecret, "secret", false, "give the secret a secret ask asks for: typed unseen at a terminal, after its card's gate")
-	answer.Flags().StringVar(&ansAccount, "account", "", "with a preset pick on a setup ask: take this listed candidate's account instead of typing one")
-	return answer
 }
 
 // giveSecret is yardr bead answer --secret: past the gate of a weighty card

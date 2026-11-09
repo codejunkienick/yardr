@@ -1,4 +1,4 @@
-// The depot-push card (yardr-zbcp): `yardr bead ask <bead> "<q>"
+// The depot-push card (yardr-zbcp): `yardr bead ask <bead> -
 // --depot-push <depot>` and the same with --depot-push-off turn a
 // depot's push to its origin on or off as one decision, carried out by
 // the yard's server on approval. It is not a --run row (the git half is
@@ -685,7 +685,7 @@ func (w *wtx) depotPushCard(bead string, gp AskDepotPush, asking bool) (AskDepot
 		}
 		does = append(does, "landings of the depot then land here and push nowhere.")
 		return AskDepotPush{Depot: gp.Depot, Off: true, Does: does,
-			Back:   fmt.Sprintf("yardr bead ask %s \"<question>\" --depot-push %s", bead, gp.Depot),
+			Back:   fmt.Sprintf("yardr bead ask %s - --depot-push %s, with the question and context on stdin", bead, gp.Depot),
 			BackBy: "only the operator", Seen: seenMap}, st, nil
 	}
 	does = append(does,
@@ -703,7 +703,7 @@ func (w *wtx) depotPushCard(bead string, gp AskDepotPush, asking bool) (AskDepot
 	}
 	does = append(does, "nothing here runs git push: the assembly pushes at landing, as it does on any yard.")
 	return AskDepotPush{Depot: gp.Depot, Does: does,
-		Back:   fmt.Sprintf("yardr bead ask %s \"<question>\" --depot-push-off %s", bead, gp.Depot),
+		Back:   fmt.Sprintf("yardr bead ask %s - --depot-push-off %s, with the question and context on stdin", bead, gp.Depot),
 		BackBy: "only the operator", Seen: seenMap}, st, nil
 }
 

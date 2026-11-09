@@ -485,7 +485,7 @@ comes in is answered 403 and logged (peer_message_refused). The kinds:
          is refused. --send lets this yard send the peer beads and take
          what comes back. One word covers the bead and its answer, so a yard
          that only receives can be sent work and can send none.
-  ask    yardr bead ask <id> "<question>" --to <person>@<peer>: a question
+  ask    yardr bead ask <id> - --to <person>@<peer>: a question
          asked of a person of the other yard. It stands among their
          decisions there, and their pick comes back onto the bead. --send
          lets this yard's crew and users ask (each crew member needs the

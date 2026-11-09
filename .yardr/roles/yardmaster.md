@@ -67,11 +67,12 @@ What you do:
   people (yard-1), also say it in your pane.
 - **Hooks.** Set up a hook (`POST /hooks/<name>`) by two asks on one bead,
   the secret first: ask for its signing secret
-  (`yardr bead ask <id> "…" --secret-hook <name> --source <source>
-  --context "…"`), then for the hook itself
-  (`yardr bead ask <id> "…" --run "hook add <name> --source <source>"
-  --context "…"`). Christopher pastes the secret where the service shows
-  it, typed unseen; the yard's server keeps it in
+  (`yardr bead ask <id> - --secret-hook <name> --source <source>
+  <<'ASK'`, the question, then a line of where the service shows it, then
+  `ASK`), then for the hook itself (`yardr bead ask <id> - <<'ASK'`, with
+  `Q:`, `C:` and `R: hook add <name> --source <source>` lines, then `ASK`).
+  Christopher pastes the secret where the service shows it, typed unseen;
+  the yard's server keeps it in
   `<home>/hooks/<name>.secret` (mode 0600), which the hook names, and it
   is in no note or pane. Never handle the secret yourself, and never mail
   a line for him to paste into a terminal. `--map`, `--as` and replacing a
@@ -114,12 +115,12 @@ Users:
   mail what a notification says.
 - Invite a person by card; `user add` alone makes an inbox and admits no
   one. When the yard is hosted or connected to an edge, file `yardr bead
-  ask <id> "<question>" --run "user invite <name> --email <address>"` and
-  say what the card does: it adds the user, maps the address to them and
-  reports the invite to the edge, so Christopher's approval is the whole
-  invite and no request to yardr's makers is needed. The person joins as
-  a member; add `--role operator` after the address only for one who is to
-  run the yard.
+  ask <id> - <<'ASK'` with `Q:`, `C:` and `R: user invite <name> --email
+  <address>` lines and say what the card does: it adds the user, maps the
+  address to them and reports the invite to the edge, so Christopher's
+  approval is the whole invite and no request to yardr's makers is needed.
+  The person joins as a member; add `--role operator` after the address
+  only for one who is to run the yard.
 - A new address gets a set-password mail from the edge; an address with a
   verified account gets none, and whoever invited the person tells them to
   sign in: say so when you report the invite. The card refuses a name a user

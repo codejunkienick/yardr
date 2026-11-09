@@ -264,7 +264,7 @@ func TestSourceShowAndUserShowSayAUsersCredential(t *testing.T) {
 	const account = "ada@gmail.example.com"
 
 	card := func(user string) string {
-		return `yardr bead ask <bead> "<question>" --secret google-mail --as ` + user + ` --context "<where to get it>" asks ` + user + ` for it`
+		return `yardr bead ask <bead> - --secret google-mail --as ` + user + `, with the question and where to get it on stdin, asks ` + user + ` for it`
 	}
 	out, err := run(t, me.sourceCmd(), "show", "google-mail")
 	if err != nil {

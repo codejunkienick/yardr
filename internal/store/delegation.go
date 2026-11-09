@@ -41,7 +41,7 @@ var yardmasterDelegation = Setting{Key: DelegationSetting, Help: "whether the ya
 	"each recorded (yardr delegation show) and mailed to the operator in the write that runs it (true), or not (false): group add and group set of kind, model, dir, worktrees and preset args, " +
 	"crew set of the same for a member other than the yardmaster, depot test and depot base, user set notify=, and hook add in its safe shape. " +
 	"Unset, it reads as hosted does: on for a hosted yard, off for one you run yourself. An operator turns it off or on with a run ask " +
-	"(yardr bead ask --run \"settings set yardmaster_delegation false\"), or on the hosted web's Config page; the yardmaster never changes it",
+	"(yardr bead ask <bead> - with R: settings set yardmaster_delegation false on stdin), or on the hosted web's Config page; the yardmaster never changes it",
 	Check: func(v string) error {
 		if v != "true" && v != "false" {
 			return fmt.Errorf("%s %q: true or false", DelegationSetting, v)
@@ -767,7 +767,7 @@ func (w *wtx) delegatedCrew(ctx context.Context, def CrewMember, actor string) (
 	if ok, err := get(w.Tx, bCrew, def.Name, &before); err != nil {
 		return nil, err
 	} else if !ok {
-		return nil, fmt.Errorf("crew member %s is new, and a new member arrives with its role on the crew add card, never by a delegated run: yardr bead ask --run \"crew add %s ...\"", def.Name, def.Name)
+		return nil, fmt.Errorf("crew member %s is new, and a new member arrives with its role on the crew add card, never by a delegated run: yardr bead ask <bead> - with R: crew add %s ... on stdin", def.Name, def.Name)
 	}
 	out, err := w.putCrew(ctx, def, actor, nil)
 	if err != nil {
@@ -900,6 +900,6 @@ func (w *wtx) delegatedHook(ctx context.Context, h Hook, actor string) (*Hook, e
 	// Removing a hook is a run ask (runask_hookrm.go), a strong card the
 	// operator approves on a device or in the hosted web under a fresh
 	// sign-in: the way back an operator with no terminal has.
-	back := `the hook rm card, approved by the operator: yardr bead ask --run "hook rm ` + shellQuote(h.Name) + `"`
+	back := `the hook rm card, approved by the operator: yardr bead ask <bead> - with R: hook rm ` + h.Name + ` on stdin`
 	return out, w.recordDelegated(d, "hook "+h.Name, DelegatedBody{Changes: changes, Back: back})
 }

@@ -408,7 +408,7 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 		Pack: &AskPack{Name: name, Kind: reading.Kind, Depot: reading.Depot, Mappings: reading.Mappings, Label: reading.Label, Digest: digest}}
 	if reading.Kind == "source" {
 		if named {
-			return AskRun{}, fmt.Errorf("pack %s: it is of kind source, so it goes into the yard and no depot, and a setup card installs it: yardr bead ask <bead> \"<question>\" --setup %s", name, name)
+			return AskRun{}, fmt.Errorf("pack %s: it is of kind source, so it goes into the yard and no depot, and a setup card installs it: yardr bead ask <bead> - --setup %s, with the question and context on stdin", name, name)
 		}
 		does, err := w.packSourceDoes(name, reading, carried, decls)
 		if err != nil {
@@ -424,7 +424,7 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 		card.BackBy = "the operator"
 	} else {
 		if reading.Depot == "" || reading.Plan == nil {
-			return AskRun{}, fmt.Errorf("pack %s: it has no single depot to re-apply to: a first install, and one of several depots, is asked with its depot named and the mappings that answer its plan (--run \"pack apply %s --depot <depot>\"); a plan that still asks is the operator's to type in a terminal (yardr pack check %s --depot <depot> shows its plan there)", name, name, name)
+			return AskRun{}, fmt.Errorf("pack %s: it has no single depot to re-apply to: a first install, and one of several depots, is asked with its depot named and the mappings that answer its plan (the run ask pack apply %s --depot <depot>); a plan that still asks is the operator's to type in a terminal (yardr pack check %s --depot <depot> shows its plan there)", name, name, name)
 		}
 		for _, group := range [][]string{reading.Plan.Missing, reading.Plan.Asks, reading.Plan.Refused, reading.Plan.Edited, reading.Plan.NonText} {
 			if len(group) > 0 {

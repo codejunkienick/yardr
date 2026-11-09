@@ -53,7 +53,7 @@ env file, and held to a grant as them (yardr source grant <source>
 read|<call> --group <group>|--crew <crew member> --as <user>): a plain
 grant covers no call as a user, and a grant as a user no plain call, so
 the word must be typed. The credential is given on a card (yardr bead ask
-<bead> "<question>" --secret <source> --as <user>). The operator may make
+<bead> - --secret <source> --as <user>, the question on stdin). The operator may make
 any call as any user whose file sets the names, to try it. The record of
 the call names the user beside who called.
 

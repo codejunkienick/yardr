@@ -98,6 +98,25 @@ func TestTimerCommands(t *testing.T) {
 	if ts, _ := st.Timers(ctx, ""); len(ts) != 0 {
 		t.Fatalf("left: %+v", ts)
 	}
+
+	// A reason of - is read from stdin, where a heredoc expands nothing, so
+	// one that quotes code is whole; one with no words sets no timer.
+	stdin := func(text string, args ...string) (string, error) {
+		c := appOn(st).rootCmd()
+		c.SetIn(strings.NewReader(text))
+		return run(t, c, append(args, "--actor", "yardmaster")...)
+	}
+	if out, err := stdin("look at `go test ./...` again\n\n", "timer", "add", "--in", "40m", "-"); err != nil || !strings.Contains(out, "(in 40m): look at `go test ./...` again") {
+		t.Fatalf("add -: %q, %v", out, err)
+	}
+	for _, blank := range []string{"", " \n\n"} {
+		if _, err := stdin(blank, "timer", "add", "--in", "40m", "-"); err == nil || !strings.Contains(err.Error(), "nothing to write: stdin gave no reason, so no timer was set") {
+			t.Errorf("add - with %q on stdin = %v", blank, err)
+		}
+	}
+	if ts, _ := st.Timers(ctx, ""); len(ts) != 1 || ts[0].Reason != "look at `go test ./...` again" {
+		t.Fatalf("after add -: %+v", ts)
+	}
 }
 
 // The two settings bound what timer add takes, and refuse what is no
