@@ -27,10 +27,12 @@ import (
 // address, and the prompt it reads one line on, which does not end. The
 // code good#s1 logs it in; any other line ends it as the real one ended on
 // a line that is no code. With a file `browser` beside it the login is made
-// on the page it opened itself, and it reads nothing. What the real one
-// prints when a login is made was not run, so this one prints nothing then.
-// Its one-shot call answers once it is logged in. It writes down beside
-// itself how it was started (logins, calls) and its pid.
+// on the page it opened itself, and it reads nothing. With a file `reprompt`
+// it prints four more prompts at once and fails, reading nothing. With a file
+// `echo-input` it repeats what it read in a prompt and an error. What the
+// real one prints when a login is made was not run, so this one prints
+// nothing then. Its one-shot call answers once it is logged in. It writes
+// down beside itself how it was started (logins, calls) and its pid.
 const loginStandIn = `dir=${0%/*}
 case "$1" in
 --version) echo "2.1.288 (Claude Code)"; exit 0 ;;
@@ -45,6 +47,12 @@ echo 'Opening browser to sign in…'
 echo "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&state=s1"
 printf 'Paste code here if prompted > '
 [ -e "$dir/browser" ] && { : > "$dir/logged-in"; exit 0; }
+[ -e "$dir/reprompt" ] && {
+  echo
+  for n in 1 2 3 4; do echo "Paste code here if prompted > again $n"; done
+  echo "Login failed: no code was read" >&2
+  exit 1
+}
 IFS= read -r code
 [ -e "$dir/echo-input" ] && {
   printf '\nPaste code here if prompted > %s\n' "$code"
@@ -75,6 +83,7 @@ type loginWaitReadyGate struct {
 	store.API
 	entered     chan struct{}
 	released    chan struct{}
+	enterOnce   sync.Once // the first LoginWaitReady closes entered, and a later one passes the released gate
 	releaseOnce sync.Once // release closes released once, however many ask
 }
 
@@ -88,7 +97,7 @@ func (s *loginWaitReadyGate) release() {
 }
 
 func (s *loginWaitReadyGate) LoginWaitReady(ctx context.Context, id string) error {
-	close(s.entered)
+	s.enterOnce.Do(func() { close(s.entered) })
 	select {
 	case <-s.released:
 	case <-ctx.Done():
@@ -143,8 +152,8 @@ func leadStandInAs(t *testing.T, a *app, script string, args ...string) *ledLogi
 }
 
 // leadStandInGated starts the run of harness login claude --json on st, with
-// the leader held at the returned gate when it registers an input wait, until
-// the test releases the gate or ends. The release is registered after
+// the leader held at the returned gate when it first registers an input wait,
+// until the test releases the gate or ends. The release is registered after
 // leadStandInAs's cleanup, so it runs before it: that cleanup drains the run,
 // which ends only when the leader does, and the leader waits on the gate, so
 // a test that failed with the gate held would otherwise hang the package
@@ -390,6 +399,58 @@ func TestHarnessLoginEndsInTheBrowser(t *testing.T) {
 	}
 	if calls := l.wrote("calls"); calls != "" {
 		t.Errorf("a real call after a no: %q", calls)
+	}
+}
+
+// A harness can print prompts and end while the leader is still busy with the
+// first one. The leader is held here at the registration of that prompt's
+// wait. When it is free again the end and the other prompts are ready
+// together, and a select over the two takes the end at random. Every prompt
+// must still be said, in the order printed and ahead of the end. Whether one
+// waits in the yard or is said after the harness is gone follows that select,
+// so the test holds none of them to a `login`. There are four prompts because
+// a leader that lets that select drop them keeps all four in one run of
+// sixteen.
+func TestHarnessLoginSaysPromptsPrintedBeforeItsEnd(t *testing.T) {
+	l, gate := leadStandInGated(t, storetest.New(t))
+	if err := os.WriteFile(filepath.Join(l.dir, "reprompt"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l.need("choose")
+	l.answer(`{"choose":"Claude subscription"}`)
+	l.need("open_url")
+	select {
+	case <-gate.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the leader did not wait for the login registration")
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(l.wrote("pid")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Once the harness's pid is free the leader has waited for it. Its end is
+	// ready by now or about to be, and the prompts it printed are queued.
+	for deadline := time.Now().Add(10 * time.Second); syscall.Kill(pid, 0) != syscall.ESRCH; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the login command (pid %d) did not end", pid)
+		}
+	}
+	gate.release()
+	first := l.need("input")
+	if login, _ := first["login"].(string); login == "" || first["text"] != "Paste code here if prompted >" {
+		t.Fatalf("the first input: %v", first)
+	}
+	for n := 1; n <= 4; n++ {
+		again := l.need("input")
+		if again["text"] != "Paste code here if prompted > again "+strconv.Itoa(n) || again["secret"] != true {
+			t.Fatalf("the prompt printed as number %d before the end: %v", n, again)
+		}
+	}
+	if msg, _ := l.next()["error"].(string); !strings.Contains(msg, "exit status 1: Login failed: no code was read") {
+		t.Fatalf("the error: %q", msg)
+	}
+	if code := l.ends(); code != 1 {
+		t.Errorf("exit %d, want 1", code)
 	}
 }
 

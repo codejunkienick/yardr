@@ -247,9 +247,10 @@ func newLoginID(kind string) string {
 // command ends. Then, on a yes, it makes the one real call that proves the
 // login (tryHarnessCall) and prints the end. An answer to a need that was
 // not asked, or is over, is passed by: the login may end in the browser
-// while the person still types. env, when given, joins the environment of
-// both the login command and the proving call, over the process's own: a
-// login led for a group lands in the folder its env names.
+// while the person still types. It still says a prompt the command printed
+// just before it ended, ahead of the end. env, when given, joins the
+// environment of both the login command and the proving call, over the
+// process's own: a login led for a group lands in the folder its env names.
 //
 // With st, each input also waits in the yard under the reference its need
 // names: a secret ask naming it answers the input as a stdin answer does,
@@ -454,6 +455,20 @@ func leadLogin(ctx context.Context, h store.Harness, path string, in io.Reader, 
 		}
 	}
 	leave()
+	// The command's output was all read before Wait returned, so a prompt it
+	// printed just before it ended is queued on prompts by now. The loop may
+	// have taken the end first, since select picks at random between two
+	// ready cases. Say the queued prompts here, in the order printed and
+	// ahead of the end. They get no wait in the yard, because the command
+	// that asked is gone and nothing can take an input.
+	for queued := true; queued; {
+		select {
+		case text := <-prompts:
+			say(loginNeed{Need: needInput, Text: text, Secret: true})
+		default:
+			queued = false
+		}
+	}
 	switch {
 	case err == nil:
 	case errors.Is(loginCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil:

@@ -117,6 +117,7 @@ var allowSerial = map[string]string{
 	"TestHarnessLoginRecipeShown":                           "fakeTools,stub:loginShell",
 	"TestHarnessLoginRedactsEchoedInput":                    "leadStandIn",
 	"TestHarnessLoginRefusesAnswers":                        "leadStandIn",
+	"TestHarnessLoginSaysPromptsPrintedBeforeItsEnd":        "leadStandInGated",
 	"TestHarnessLoginStdinAnswerLeavesTheWait":              "leadStandInAs",
 	"TestHarnessLoginStdinClosed":                           "leadStandIn",
 	"TestHarnessLoginStopsWithItsLeader":                    "leadStandIn",
