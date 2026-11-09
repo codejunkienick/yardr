@@ -31,8 +31,9 @@ yardr crew set yardmaster --unset set_state
 The `env_file`, `env_command`, `kind`, `args` and `prompt` settings, and
 the `--dir` of a crew member the yard has, are the operator's
 alone besides: the store refuses each from anyone else, a crew member's
-pane included, and no `crew set` run ask proposes one. A new member is
-the one exception: from a crew pane, `yardr bead ask <id> "<question>"
+pane included, and no `crew set` run ask proposes one but a prompt and a
+permission preset that never asks, below. A new member is the other
+exception: from a crew pane, `yardr bead ask <id> "<question>"
 --run "crew add <name> kind=<kind> model=<model> preset=<preset>
 dir=<dir>" --run-role "<file>"` proposes one on a weighty (`code`) card
 that shows the kind, model, named permission preset (never free `args`),
@@ -44,11 +45,22 @@ it, and a file changed after the ask changes nothing. `env_file`,
 stays the operator's alone, and grants are proposed apart as `crew set`
 once the member stands — and a name in use, or one whose
 `roles/<name>.md` stands already, is refused, since the card adds and
-never replaces. `crew set` of `kind`, `args` or `prompt` stays in a
-terminal with env and credentials, and a new group has a card of its own
-([groups.md](groups.md)). A crew member
-that needs one of those asks the operator for it, with the command whole
-in the ask; every other setting is changed as above.
+never replaces. A new group has a card of its own ([groups.md](groups.md)).
+A crew member that needs one of those asks the operator for it, with the
+command whole in the ask; every other setting is changed as above.
+
+A member's `prompt`, and the permission preset of its kind that never asks
+(`yardr harness show <kind>` lists the presets; free `args` are never
+proposed), are what every later session of the member runs, so they have a
+card of their own, the yardmaster's own entry included: `yardr bead ask <id>
+"<question>" --run "crew set <name> prompt=<file> preset=<preset>"` proposes
+either or both on a weighty (`code`) card that shows the prompt now and the
+new one whole, and the flags the member starts with now and the preset's.
+The `prompt` is the absolute path of a file under the yard's home, whose text
+`yardr bead ask` reads from the file and carries beside the command, and the
+approval is refused if that file holds other text by then. Nothing else rides
+in with them, and a running member keeps its session: the next one starts
+with the new prompt or flags.
 
 The value of a key named like a secret (`token`, `secret`, `password`,
 `…_key`) is not printed. A running crew member keeps its session: what it may

@@ -228,7 +228,9 @@ func (w *wtx) crewDelegate(name, key string) bool {
 // presetOnly refuses args that are not exactly one named permission
 // preset of kind: a delegated run names a preset (preset=<label>), and
 // what runs is a flag set the yard names, never words the yardmaster
-// typed (3.2). Args removed are none, which is no preset.
+// typed (3.2). A preset marked Strong (harness.go) is refused: it skips
+// the agent's permission prompts, which only a card sets (3.5). Args
+// removed are none, which is no preset.
 func presetOnly(subject, kind string, args any, has bool) error {
 	if !has {
 		return nil
@@ -248,8 +250,8 @@ func presetOnly(subject, kind string, args any, has bool) error {
 			if !slices.Equal(p.Args, given) {
 				continue
 			}
-			if skipsAsking(p.Args) {
-				return fmt.Errorf("%s: the %s preset %s skips the agent's permission prompts, and a delegated run never sets one: it is the operator's to type in a terminal", subject, kind, p.Label)
+			if p.Strong {
+				return fmt.Errorf("%s: the %s preset %s skips the agent's permission prompts, and a delegated run never sets one: it is a card the operator approves before it runs, or theirs to type in a terminal", subject, kind, p.Label)
 			}
 			return nil
 		}
@@ -258,21 +260,21 @@ func presetOnly(subject, kind string, args any, has bool) error {
 		subject, or(kind, "kind's"), or(strings.Join(HarnessPresetLabels(kind), ", "), "it has none"))
 }
 
-// skipsAsking says whether a preset's args let the agent act without its
-// permission prompts: the flags design yardr-m90n 3.5 names for the bypass
-// presets and their like, which the delegated leg refuses (3.2). Bead 3
-// moves this to a Strong mark on HarnessPresets; until then the flags
-// themselves are read, so no such preset runs told-after meanwhile.
-func skipsAsking(args []string) bool {
-	for _, a := range args {
-		switch {
-		case strings.HasPrefix(a, "--dangerously-"), strings.HasPrefix(a, "--trust-tools"):
-			return true
-		case a == "--always-approve", a == "--yolo", a == "--auto", a == "--trust-all-tools", a == "--disable-approval":
-			return true
-		}
+// kindOf is the harness kind a definition's config starts agents of: the
+// kind it names, else the yard's default_kind, else that setting's default.
+func (w *wtx) kindOf(config map[string]any) (string, error) {
+	kind, _ := config["kind"].(string)
+	if kind != "" {
+		return kind, nil
 	}
-	return false
+	if _, err := get(w.Tx, bSettings, DefaultKindSetting, &kind); err != nil {
+		return "", err
+	}
+	if kind == "" {
+		setting, _ := SettingOf(DefaultKindSetting)
+		kind = setting.Default
+	}
+	return kind, nil
 }
 
 // delegatedDefine holds the delegated keys of a definition to what the leg
@@ -281,15 +283,9 @@ func skipsAsking(args []string) bool {
 // let through by their gates (delegable); this reads their values.
 func (w *wtx) delegatedDefine(subject string, before, after map[string]any, keys []string) error {
 	b, a := asStored(before), asStored(after)
-	kind, _ := a["kind"].(string)
-	if kind == "" {
-		if _, err := get(w.Tx, bSettings, DefaultKindSetting, &kind); err != nil {
-			return err
-		}
-		if kind == "" {
-			setting, _ := SettingOf(DefaultKindSetting)
-			kind = setting.Default
-		}
+	kind, err := w.kindOf(a)
+	if err != nil {
+		return err
 	}
 	oldKind, hadKind := b["kind"]
 	newKind, hasKind := a["kind"]

@@ -778,8 +778,13 @@ func TestBeadAskRunPeerSet(t *testing.T) {
 	}
 }
 
-// groupAddUse is the group add row of the store's list, by its use.
-const groupAddUse = "yardr group add <name> --runner <runner> [--limit <n>] [--set k=v ...]"
+// groupAddUse is the group add row of the store's list, by its use, and
+// groupSetUse and crewSetUse the rows of the strong few.
+const (
+	groupAddUse = "yardr group add <name> --runner <runner> [--limit <n>] [--set k=v ...]"
+	groupSetUse = "yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset>"
+	crewSetUse  = "yardr crew set <name> prompt=<file> | preset=<preset>"
+)
 
 // runCLI are the commands of internal/cli that the rows of the store's
 // list stand for, by the word a stored command begins with.
@@ -857,6 +862,8 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr crew set <name> open_threads=<sources> | set_state=<sources> | peers=<peers>": {
 			"crew set yardmaster peers=airy",
 		},
+		groupSetUse: {"group set builders cmd=./deploy.sh"},
+		crewSetUse:  {"crew set yardmaster preset=bypass"},
 		"yardr crew identity <name> --source <source> [--id <id>] [--key <key>]": {
 			"crew identity yardmaster --source crm --id u1 --key boss",
 		},
@@ -1193,6 +1200,77 @@ func TestRunListIsTheCLIs(t *testing.T) {
 						t.Fatalf("%s: %v", use, err)
 					}
 					if made[i], err = json.Marshal(g); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if string(made[0]) != string(made[1]) {
+					t.Errorf("%s: the approval made %s and the terminal %s", use, made[0], made[1])
+				}
+				continue
+			}
+			if use == groupSetUse || use == crewSetUse {
+				ctx := context.Background()
+				// A prompt rides as a file under a yard's home, whose path is
+				// another on the other yard, and a preset as a label that the
+				// terminal reads into the kind's flags (presetWords): so the
+				// row is held to its card, its approval, the state the
+				// terminal's command leaves of the same words and what it
+				// prints.
+				seq, err := approved.st.AddAsk(ctx, ab.ID, store.Ask{Question: "Run it?", To: "jo", Context: []string{"why"},
+					Run: &store.AskRun{Argv: []string{command}}}, "yardmaster")
+				if err != nil {
+					t.Fatalf("%s: %v", use, err)
+				}
+				notes, err := approved.st.Notes(ctx, ab.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var description string
+				for _, asked := range store.ResolveAsks(notes, time.Now()) {
+					if asked.Note.Seq == seq && asked.Ask.Run != nil {
+						description = asked.Ask.Run.Description
+					}
+				}
+				// The commands as the root gives them, with their preset=
+				// read, but not the root itself: building it names no actor.
+				root := &cobra.Command{Use: "yardr"}
+				root.AddCommand(typed.a.groupCmd(), typed.a.crewCmd())
+				typed.a.delegate(root)
+				helpCmd, _, err := root.Find(strings.Fields(command)[:2])
+				if err != nil {
+					t.Fatalf("%s: find help for %q: %v", use, command, err)
+				}
+				if description != helpCmd.Short {
+					t.Errorf("%s card description %q, want the command help's %q", use, description, helpCmd.Short)
+				}
+				done, err := approved.st.ApproveAsk(ctx, ab.ID, seq, "jo", true, nil)
+				if err != nil {
+					t.Fatalf("%s: %v", use, err)
+				}
+				out, err := run(t, root, strings.Fields(command)...)
+				if err != nil {
+					t.Fatalf("yardr %s: %v", command, err)
+				}
+				if strings.TrimSpace(out) != done.Result {
+					t.Errorf("yardr %s printed %q, and the approval recorded %q", command, out, done.Result)
+				}
+				var made [2][]byte
+				for i, y := range []*cliYard{approved, typed} {
+					var config map[string]any
+					if use == groupSetUse {
+						g, err := y.st.GetGroup(ctx, "builders")
+						if err != nil {
+							t.Fatalf("%s: %v", use, err)
+						}
+						config = g.Config
+					} else {
+						m, err := y.st.GetCrew(ctx, "yardmaster")
+						if err != nil {
+							t.Fatalf("%s: %v", use, err)
+						}
+						config = m.Config
+					}
+					if made[i], err = json.Marshal(config); err != nil {
 						t.Fatal(err)
 					}
 				}

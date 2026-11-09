@@ -1,7 +1,7 @@
 // How a bead ask carries a --run command's bytes beside argv: whether the
 // command is a depot test ask, whose command --run-test carries, the role
-// file a crew add ask carries, the prompt file a group add ask carries and
-// the declaration file a source add ask carries.
+// file a crew add ask carries, the prompt file a group add, group set or
+// crew set ask carries and the declaration file a source add ask carries.
 package cli
 
 import (
@@ -58,6 +58,13 @@ func askRunCarried(command, test string, testSet bool, role string, roleSet bool
 			return nil, err
 		}
 	}
+	// Group set and crew set carry the text of the prompt file their prompt=
+	// names the same way, when they name one.
+	if setPromptCommand(command) {
+		if run.Role, err = promptFileText(command); err != nil {
+			return nil, err
+		}
+	}
 	return run, nil
 }
 
@@ -94,7 +101,31 @@ func groupAddCommand(command string) bool {
 // group add that names no prompt. A file that cannot be read is refused
 // here, and nothing is stored.
 func groupAddPrompt(command string) (string, error) {
-	if !plainRunLine(command) || !groupAddCommand(command) {
+	if !groupAddCommand(command) {
+		return "", nil
+	}
+	return promptFileText(command)
+}
+
+// setPromptCommand reports whether command is a --run "group set <name> ..."
+// or "crew set <name> ..." ask: those words, with or without the leading
+// yardr. The store parses it; this only says the ask may carry a prompt
+// file's text beside it, when it names one.
+func setPromptCommand(command string) bool {
+	words := strings.Fields(command)
+	if len(words) > 0 && words[0] == "yardr" {
+		words = words[1:]
+	}
+	return len(words) >= 3 && (words[0] == "group" || words[0] == "crew") && words[1] == "set"
+}
+
+// promptFileText is the text of the file the prompt= of a --run command
+// names, once, so the store holds the bytes the card shows. It answers ""
+// for a command that names no prompt, and for one the store will refuse
+// before it reads any file. A file that cannot be read is refused here, and
+// nothing is stored.
+func promptFileText(command string) (string, error) {
+	if !plainRunLine(command) {
 		return "", nil
 	}
 	file := crewPromptFile(command)

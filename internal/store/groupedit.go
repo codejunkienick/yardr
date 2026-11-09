@@ -50,51 +50,63 @@ func (s *Store) SetGroup(ctx context.Context, name string, e GroupEdit, actor st
 		if err != nil {
 			return err
 		}
-		actor = resolved
-		d, err := w.delegated(ctx, actor)
+		d, err := w.delegated(ctx, resolved)
 		if err != nil {
 			return err
 		}
-		ch = new(GroupChange)
-		if ok, err := get(w.Tx, bGroups, name, &ch.Was); err != nil {
-			return err
-		} else if !ok {
-			return fmt.Errorf("group %s: %w", name, ErrNotFound)
-		}
-		// Read again, not copied: the two share no map or slice.
-		if _, err := get(w.Tx, bGroups, name, &ch.Is); err != nil {
-			return err
-		}
-		g := &ch.Is
-		var cfgErr error
-		if g.Config, cfgErr = MergeConfig(name, g.Config, e.Set, e.Unset); cfgErr != nil {
-			return cfgErr
-		}
-		if e.Limit != nil {
-			g.Limit = *e.Limit
-		}
-		if e.Members != nil {
-			g.Members = dedupeOrdered(*e.Members)
-		}
-		// Compared as stored: a list is the same list whatever type it was
-		// given as.
-		was, err := json.Marshal(ch.Was)
-		if err != nil {
-			return err
-		}
-		if is, err := json.Marshal(g); err != nil {
-			return err
-		} else if bytes.Equal(was, is) {
-			ch.Is = ch.Was
-			return nil
-		}
-		if err := putGroup(ctx, w, g, actor, e.Limit != nil); err != nil || d == nil {
-			return err
-		}
-		return w.delegatedGroup(d, ch.Was, *g, true)
+		ch, err = w.setGroup(ctx, name, e, resolved, d)
+		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+	return ch, nil
+}
+
+// setGroup is SetGroup inside the write, for an actor already resolved: d
+// is the delegated run it is, nil for any other, which the group set card's
+// approval is (runask_groupset.go).
+func (w *wtx) setGroup(ctx context.Context, name string, e GroupEdit, actor string, d *DelegatedCall) (*GroupChange, error) {
+	ch := new(GroupChange)
+	if ok, err := get(w.Tx, bGroups, name, &ch.Was); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, fmt.Errorf("group %s: %w", name, ErrNotFound)
+	}
+	// Read again, not copied: the two share no map or slice.
+	if _, err := get(w.Tx, bGroups, name, &ch.Is); err != nil {
+		return nil, err
+	}
+	g := &ch.Is
+	var cfgErr error
+	if g.Config, cfgErr = MergeConfig(name, g.Config, e.Set, e.Unset); cfgErr != nil {
+		return nil, cfgErr
+	}
+	if e.Limit != nil {
+		g.Limit = *e.Limit
+	}
+	if e.Members != nil {
+		g.Members = dedupeOrdered(*e.Members)
+	}
+	// Compared as stored: a list is the same list whatever type it was
+	// given as.
+	was, err := json.Marshal(ch.Was)
+	if err != nil {
+		return nil, err
+	}
+	if is, err := json.Marshal(g); err != nil {
+		return nil, err
+	} else if bytes.Equal(was, is) {
+		ch.Is = ch.Was
+		return ch, nil
+	}
+	if err := putGroup(ctx, w, g, actor, e.Limit != nil); err != nil {
+		return nil, err
+	}
+	if d != nil {
+		if err := w.delegatedGroup(d, ch.Was, *g, true); err != nil {
+			return nil, err
+		}
 	}
 	return ch, nil
 }

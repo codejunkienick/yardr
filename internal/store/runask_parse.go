@@ -29,23 +29,29 @@ func RunCommands() []string {
 // it, a value or a path: settings set, whose value is a setting's (the
 // operator's own words to the agents, the address hooks are registered at, or
 // what Settings withholds from a device), source add, whose file is a
-// path on the yard's machine, group add, whose command, directories and
-// prompt file are the operator's machine too, and pack apply with any word
-// past the pack's name, whose mappings are the operator's configuration as
-// the card's are (Mappings). Bead and UserAsks tell those words to a device
-// of the operator alone, and the sentence of an approval of one is marked for
+// path on the yard's machine, group add and group set, whose command,
+// directories and prompt file are the operator's machine too, crew set
+// where it names a prompt file, and pack apply with any word past the
+// pack's name, whose mappings are the operator's configuration as the
+// card's are (Mappings). Bead and UserAsks tell those words to a device of
+// the operator alone, and the sentence of an approval of one is marked for
 // WithoutHeld. Every other row's words are names and numbers the stream and
 // the calls tell every device already.
 func RunArgvHeld(argv []string) bool {
 	return len(argv) >= 2 && (slices.Equal(argv[:2], []string{"settings", "set"}) ||
 		slices.Equal(argv[:2], []string{"source", "add"}) ||
-		slices.Equal(argv[:2], []string{"group", "add"})) ||
+		slices.Equal(argv[:2], []string{"group", "add"}) ||
+		slices.Equal(argv[:2], []string{"group", "set"}) ||
+		slices.Equal(argv[:2], []string{"crew", "set"}) && slices.ContainsFunc(argv[2:], func(word string) bool { return strings.HasPrefix(word, "prompt=") })) ||
 		len(argv) > 3 && slices.Equal(argv[:2], []string{"pack", "apply"})
 }
 
 // errNotRow is when the words name no row of the list: askedRun then
 // tries what is the operator's alone, and approveAsk refuses what the
-// yard did not write.
+// yard did not write. A row's parse answers it too for words that are
+// another row's of the same command (crew set: grants, or the strong few),
+// and the next row that begins with them reads them; none that takes them
+// leaves the words as no row's.
 var errNotRow = errors.New("is no command the yard runs from a card")
 
 // runNoneChar refuses a character no run command takes.
@@ -85,13 +91,18 @@ func parseRow(sent []string) (*runCommand, []string, error) {
 		words = words[1:]
 		wordOffset = 1
 	}
-	var row *runCommand
+	// The rows that begin with these words, in the order of the list: one
+	// for most commands, and more where a command is read by key (crew set).
+	var rows []*runCommand
 	for i := range runList {
 		c := &runList[i]
 		if len(words) >= len(c.words) && slices.Equal(words[:len(c.words)], c.words) {
-			row = c
-			break
+			rows = append(rows, c)
 		}
+	}
+	var row *runCommand
+	if len(rows) > 0 {
+		row = rows[0]
 	}
 	word, inWord := -1, false
 	for _, char := range line {
@@ -128,14 +139,25 @@ func parseRow(sent []string) (*runCommand, []string, error) {
 	if row == nil {
 		return nil, nil, errNotRow
 	}
-	if strings.ContainsRune(line, ',') && !row.commas {
-		return nil, nil, runNoneChar(',')
+	var refused error
+	for _, c := range rows {
+		if strings.ContainsRune(line, ',') && !c.commas {
+			refused = runNoneChar(',')
+			continue
+		}
+		rest, err := c.parse(words[len(c.words):])
+		if err == errNotRow {
+			continue
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		return c, append(slices.Clone(c.words), rest...), nil
 	}
-	rest, err := row.parse(words[len(row.words):])
-	if err != nil {
-		return nil, nil, err
+	if refused != nil {
+		return nil, nil, refused
 	}
-	return row, append(slices.Clone(row.words), rest...), nil
+	return nil, nil, errNotRow
 }
 
 // runCommandLineWithShellWord appends a word already quoted by a card's

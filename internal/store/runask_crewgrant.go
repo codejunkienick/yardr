@@ -64,6 +64,11 @@ var crewAloneKeys = []string{"env_file", "env_command", "kind", "args", "prompt"
 // env_command, kind, args and prompt as the operator's alone
 // (checkCrewDefine).
 func parseCrewGrant(rest []string) ([]string, error) {
+	// A prompt or a preset is the next row's (runask_crewset.go), which
+	// refuses a grant beside it in its own words.
+	if crewSetNamesStrong(rest) {
+		return nil, errNotRow
+	}
 	args, values, err := runWords(crewGrantUse, "crew set", "the asker's", rest, map[string]bool{"--unset": true})
 	if err != nil {
 		return nil, err

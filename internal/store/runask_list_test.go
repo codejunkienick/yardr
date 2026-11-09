@@ -721,7 +721,10 @@ func TestRunAskListRefusals(t *testing.T) {
 		{"user set yardmaster tell=mail", "and yardmaster is none"},
 		{"user set mckean tell=", "mckean is told of notifications, mail and asks outside the yard already, so the command would change nothing"},
 		{"user set mckean tell=asks,mail,notifications", "mckean is told of notifications, mail and asks outside the yard already, so the command would change nothing"},
-		{"group set builders cmd=true", "group set with cmd=true defines what the yard runs: " + alone},
+		// The strong few are a card (runask_groupset.go): a value that reads as
+		// JSON is stored by the terminal as another type, and a prompt needs
+		// its text carried beside it.
+		{"group set builders cmd=true", "cmd=true reads as JSON, which the terminal stores as a value of its own type"},
 		{"group set builders --unset cmd", "group set with --unset cmd defines what the yard runs: " + alone},
 		{"group set builders dir=/tmp", "group set with dir=/tmp defines what the yard runs: " + alone},
 		{"group set builders --unset dir", "group set with --unset dir defines what the yard runs: " + alone},
@@ -731,7 +734,7 @@ func TestRunAskListRefusals(t *testing.T) {
 		{"group set builders --unset kind", "group set with --unset kind defines what the yard runs: " + alone},
 		{"group set builders args=--careful", "group set with args=--careful defines what the yard runs: " + alone},
 		{"group set builders --unset args", "group set with --unset args defines what the yard runs: " + alone},
-		{"group set builders prompt=roles/other.md", "group set with prompt=roles/other.md defines what the yard runs: " + alone},
+		{"group set builders prompt=roles/other.md", "the ask carries no prompt text"},
 		{"group set builders --unset prompt", "group set with --unset prompt defines what the yard runs: " + alone},
 		{"group set builders worktrees=/tmp/wt", "group set with worktrees=/tmp/wt defines what the yard runs: " + alone},
 		{"group set builders --unset worktrees", "group set with --unset worktrees defines what the yard runs: " + alone},
@@ -742,7 +745,7 @@ func TestRunAskListRefusals(t *testing.T) {
 		{"crew set yardmaster --unset env_command", "env_command is the operator's alone, typed in a terminal and never proposed as a run ask"},
 		{"crew set yardmaster kind=codex", "kind is the operator's alone, typed in a terminal and never proposed as a run ask"},
 		{"crew set yardmaster args=--careful", "args is the operator's alone, typed in a terminal and never proposed as a run ask"},
-		{"crew set yardmaster prompt=roles/other.md", "prompt is the operator's alone, typed in a terminal and never proposed as a run ask"},
+		{"crew set yardmaster prompt=roles/other.md", "the ask carries no prompt text"},
 		{"crew set yardmaster --unset kind", "kind is the operator's alone, typed in a terminal and never proposed as a run ask"},
 		{"crew set yardmaster --unset args", "args is the operator's alone, typed in a terminal and never proposed as a run ask"},
 		{"crew set yardmaster --unset prompt", "prompt is the operator's alone, typed in a terminal and never proposed as a run ask"},

@@ -188,6 +188,14 @@ type Permission struct {
 	Label string   `yaml:"label" json:"label"`
 	Args  []string `yaml:"args" json:"args"`
 	Note  string   `yaml:"description" json:"description"`
+	// Strong marks a preset whose flags skip the agent's permission
+	// prompts: a session started with it never stops to ask (design
+	// yardr-m90n 3.5). It reaches a group or a crew member only on a card
+	// its operator approves before it runs, and the delegated leg refuses
+	// it, so this one field is what both sides read. It is set in
+	// HarnessPresets alone, where a test holds it to the flags
+	// (harness_kinds_test.go); the harness files carry none.
+	Strong bool `yaml:"-" json:"-"`
 }
 
 // Offer is one model a harness file suggests: the id the kind's --model

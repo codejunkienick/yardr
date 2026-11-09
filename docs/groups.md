@@ -66,8 +66,9 @@ and [`yardr doctor`](doctor.md#the-yard) notes it with how it is removed
 The `cmd`, `dir`, `env_file`, `kind`, `args`, `prompt` and `worktrees`
 settings, and a change of runner to or from `exec` by `group add` whole,
 are the operator's alone: the store refuses each from anyone else, a crew
-member's pane included, and no `group set` run ask proposes one. A new
-group is the one exception: from a crew pane, `yardr bead ask <id>
+member's pane included, and no `group set` run ask proposes one but `cmd`,
+`prompt` and a permission preset that never asks, below. A new group is the
+other exception: from a crew pane, `yardr bead ask <id>
 "<question>" --run "group add <name> --runner <runner> [--limit <n>]
 [--set k=v ...]"` proposes one on a weighty (`code`) card that shows the
 runner and limit, the command of an `exec` group or the agent kind and
@@ -84,6 +85,18 @@ terminal, with `group set`; a peer group needs no card; and a name in use
 is refused, since the card adds and never replaces. A crew member that
 needs any other of those asks the operator for it, with the command whole
 in the ask; every other setting is changed as above.
+
+A group's `cmd`, its `prompt` and the permission preset of its kind that
+never asks (`yardr harness show <kind>` lists the presets; free `args` are
+never proposed) are what every later session of the group runs, so they have
+a card of their own: `yardr bead ask <id> "<question>" --run "group set <name>
+prompt=<file> cmd=<command> preset=<preset>"` proposes any of the three on a
+weighty (`code`) card that shows each as it stands and as it would be, whole,
+and approving sets exactly that. `cmd` is one word, as above; `prompt` is
+the absolute path of a file under the yard's home, whose text `yardr bead ask`
+carries beside the command, and the approval is refused if that file holds
+other text by then; `preset` names one of the group's kind. Nothing else rides
+in with them.
 
 The runner is not changed this way, since another runner reads another
 config: that is `group add`. `yardr group show <name>` prints one group: its

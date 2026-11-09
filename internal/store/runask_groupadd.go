@@ -267,69 +267,92 @@ func (w *wtx) groupAddProposal(run AskRun) (groupAddSpec, error) {
 }
 
 // groupPrompt holds the prompt file of the group name that path names to the
-// text the ask carries: a regular file that stands under the yard's home
-// once its symlinks are resolved, holding exactly that text, which a card
-// shows whole. It answers the resolved path, which is the path the group
-// saves. The group's sessions read the file at each start, so the path must
-// be one every session reads the same way: an absolute one. The file is
-// read only as far as the carried text goes and is never shown, so nothing
-// of it reaches an asker who cannot already write it out.
+// text the ask carries (heldPrompt), and answers the resolved path, which is
+// the path the group saves.
 func (w *wtx) groupPrompt(name, path, text string) (string, error) {
-	subject := "group " + name
+	return w.heldPrompt("group "+name, path, text, promptWords{
+		otherwise: "the group is added in a terminal", spelled: "--set prompt=<path>"})
+}
+
+// promptWords are the words of a refusal about a prompt that depend on the
+// command it is for: where the change is made instead, for a text a card
+// cannot carry, and how the command spells the path.
+type promptWords struct{ otherwise, spelled string }
+
+// heldPrompt holds the prompt file of subject ("group builders") that path
+// names to the text the ask carries: a regular file that stands under the
+// yard's home once its symlinks are resolved, holding exactly that text,
+// which a card shows whole. It answers the resolved path, which is the path
+// the definition saves. Its sessions read the file at each start, so the
+// path must be one every session reads the same way: an absolute one. The
+// file is read only as far as the carried text goes and is never shown, so
+// nothing of it reaches an asker who cannot already write it out.
+func (w *wtx) heldPrompt(subject, path, text string, say promptWords) (string, error) {
 	switch {
 	case strings.TrimSpace(text) == "":
 		return "", fmt.Errorf("%s: the ask carries no prompt text: the text goes beside --run, read from the file prompt= names, which yardr bead ask does", subject)
 	case len(text) > MaxRunCrewRole:
-		return "", fmt.Errorf("%s: the prompt text it carries is %d bytes, past the %d a card holds and shows whole: the group is added in a terminal", subject, len(text), MaxRunCrewRole)
+		return "", fmt.Errorf("%s: the prompt text it carries is %d bytes, past the %d a card holds and shows whole: %s", subject, len(text), MaxRunCrewRole, say.otherwise)
 	case !utf8.ValidString(text):
 		return "", fmt.Errorf("%s: the prompt text is not valid UTF-8, so a card cannot carry it whole", subject)
 	case strings.IndexFunc(text, crewRoleHidden) >= 0 || strings.Contains(text, NoteFilesMark) || strings.Contains(text, WeightMark):
-		return "", fmt.Errorf("%s: the prompt text holds control characters or a mark the yard draws on a card itself, which a card would not show as written: the group is added in a terminal", subject)
+		return "", fmt.Errorf("%s: the prompt text holds control characters or a mark the yard draws on a card itself, which a card would not show as written: %s", subject, say.otherwise)
 	case !filepath.IsAbs(path):
-		return "", fmt.Errorf("%s: prompt %q is no absolute path: a relative one is read against each depot, which a card cannot show: name a file under the yard's home as --set prompt=<path>", subject, path)
+		return "", fmt.Errorf("%s: prompt %q is no absolute path: a relative one is read against each depot, which a card cannot show: name a file under the yard's home as %s", subject, path, say.spelled)
 	}
-	// The home as named and as its symlinks resolve it. A path outside both
-	// is refused before the disk is asked about it, so the refusal tells
-	// nothing of what stands elsewhere.
-	home, err := filepath.Abs(w.home)
+	real, held, err := w.homeFile(subject, path, len(text))
 	if err != nil {
-		return "", fmt.Errorf("%s: resolve the yard's home: %w", subject, err)
-	}
-	homeReal, err := filepath.EvalSymlinks(home)
-	if err != nil {
-		return "", fmt.Errorf("%s: resolve the yard's home: %w", subject, err)
-	}
-	under := func(p string) bool {
-		return strings.HasPrefix(p, filepath.Clean(home)+string(filepath.Separator)) || strings.HasPrefix(p, filepath.Clean(homeReal)+string(filepath.Separator))
-	}
-	if !under(filepath.Clean(path)) {
-		return "", fmt.Errorf("%s: prompt file %s is outside the yard's home: a card carries a prompt that stands under it", subject, filepath.Clean(path))
-	}
-	real, err := filepath.EvalSymlinks(filepath.Clean(path))
-	if err != nil {
-		return "", fmt.Errorf("%s: prompt file %s: %s", subject, path, OneLine(err.Error()))
-	}
-	if !strings.HasPrefix(real, filepath.Clean(homeReal)+string(filepath.Separator)) {
-		return "", fmt.Errorf("%s: prompt file %s resolves to %s, outside the yard's home: a card carries a prompt that stands under it", subject, path, real)
-	}
-	// Opened without blocking and judged by the open file, so a file that
-	// became a pipe since it was named cannot hold the write.
-	f, err := os.OpenFile(real, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return "", fmt.Errorf("%s: prompt file %s: %s", subject, real, OneLine(err.Error()))
-	}
-	defer f.Close()
-	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
-		return "", fmt.Errorf("%s: prompt file %s is not a regular file", subject, real)
-	}
-	held, err := io.ReadAll(io.LimitReader(f, int64(len(text))+1))
-	if err != nil {
-		return "", fmt.Errorf("%s: prompt file %s: %s", subject, real, OneLine(err.Error()))
+		return "", err
 	}
 	if string(held) != text {
 		return "", fmt.Errorf("%s: the prompt file %s holds other text than the ask carries: it was changed since the ask was written, or the ask was written from another file", subject, real)
 	}
 	return real, nil
+}
+
+// homeFile is the regular file at path that stands under the yard's home
+// once its symlinks are resolved, as that path, and as much of it as limit
+// bytes and one more: a prompt file, in the words of a refusal that names
+// subject. A path outside the home is refused before the disk is asked
+// about it, so the refusal tells nothing of what stands elsewhere.
+func (w *wtx) homeFile(subject, path string, limit int) (real string, data []byte, err error) {
+	// The home as named and as its symlinks resolve it.
+	home, err := filepath.Abs(w.home)
+	if err != nil {
+		return "", nil, fmt.Errorf("%s: resolve the yard's home: %w", subject, err)
+	}
+	homeReal, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		return "", nil, fmt.Errorf("%s: resolve the yard's home: %w", subject, err)
+	}
+	under := func(p string) bool {
+		return strings.HasPrefix(p, filepath.Clean(home)+string(filepath.Separator)) || strings.HasPrefix(p, filepath.Clean(homeReal)+string(filepath.Separator))
+	}
+	if !under(filepath.Clean(path)) {
+		return "", nil, fmt.Errorf("%s: prompt file %s is outside the yard's home: a card carries a prompt that stands under it", subject, filepath.Clean(path))
+	}
+	real, err = filepath.EvalSymlinks(filepath.Clean(path))
+	if err != nil {
+		return "", nil, fmt.Errorf("%s: prompt file %s: %s", subject, path, OneLine(err.Error()))
+	}
+	if !strings.HasPrefix(real, filepath.Clean(homeReal)+string(filepath.Separator)) {
+		return "", nil, fmt.Errorf("%s: prompt file %s resolves to %s, outside the yard's home: a card carries a prompt that stands under it", subject, path, real)
+	}
+	// Opened without blocking and judged by the open file, so a file that
+	// became a pipe since it was named cannot hold the write.
+	f, err := os.OpenFile(real, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return "", nil, fmt.Errorf("%s: prompt file %s: %s", subject, real, OneLine(err.Error()))
+	}
+	defer f.Close()
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+		return "", nil, fmt.Errorf("%s: prompt file %s is not a regular file", subject, real)
+	}
+	data, err = io.ReadAll(io.LimitReader(f, int64(limit)+1))
+	if err != nil {
+		return "", nil, fmt.Errorf("%s: prompt file %s: %s", subject, real, OneLine(err.Error()))
+	}
+	return real, data, nil
 }
 
 // checkGroupAdd is adding a group as the asker: what defines what the

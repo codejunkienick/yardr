@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -431,6 +432,7 @@ func TestDelegatedRefusals(t *testing.T) {
 		"group cmd":           {func() error { return setGroup(map[string]any{"cmd": "make"}) }, "change cmd on group builders"},
 		"worktrees outside":   {func() error { return setGroup(map[string]any{"worktrees": t.TempDir()}) }, "outside the yard's known places"},
 		"crew env_command":    {func() error { return setCrew("clerk", map[string]any{"env_command": "pass x"}) }, "change env_command on crew member clerk"},
+		"crew prompt":         {func() error { return setCrew("clerk", map[string]any{"prompt": "/roles/c.md"}) }, "change prompt on crew member clerk"},
 		"crew free args":      {func() error { return setCrew("clerk", map[string]any{"kind": "claude", "args": []any{"--x"}}) }, "never carries free args"},
 		"group bypass preset": {func() error { return setGroup(map[string]any{"args": []any{"--dangerously-skip-permissions"}}) }, "preset bypass skips the agent's permission prompts"},
 		"crew bypass preset": {func() error {
@@ -474,6 +476,29 @@ func TestDelegatedRefusals(t *testing.T) {
 		"hook --map":         {func() error { return hookAdd(store.Hook{Name: "h3", Map: map[string]string{"task:review": "started"}}) }, "with --map is the operator's"},
 		"hook --as":          {func() error { return hookAdd(store.Hook{Name: "h4", As: "clerk"}) }, "with --as is the operator's"},
 		"hook --secret-file": {func() error { return hookAdd(store.Hook{Name: "h5", SecretFile: secret}) }, "with --secret-file is the operator's"},
+	}
+	// Every preset the table marks Strong is refused, on a group and on a
+	// crew member: the leg reads the mark, so a preset added later is held
+	// without a case of its own.
+	for kind, presets := range store.HarnessPresets {
+		for _, p := range presets {
+			if !p.Strong {
+				continue
+			}
+			args := make([]any, len(p.Args))
+			for i, a := range p.Args {
+				args[i] = a
+			}
+			want := fmt.Sprintf("preset %s skips the agent's permission prompts", p.Label)
+			cases["group "+kind+" "+p.Label] = struct {
+				run  func() error
+				want string
+			}{func() error { return setGroup(map[string]any{"kind": kind, "args": args}) }, want}
+			cases["crew "+kind+" "+p.Label] = struct {
+				run  func() error
+				want string
+			}{func() error { return setCrew("clerk", map[string]any{"kind": kind, "args": args}) }, want}
+		}
 	}
 	for name, c := range cases {
 		if err := c.run(); err == nil || !strings.Contains(err.Error(), c.want) {

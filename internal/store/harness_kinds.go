@@ -60,36 +60,39 @@ var PresetNames = []string{
 // writes them (label, args, description). The store holds a crew add card
 // to them, so that it imports no internal package; a test in agents pins
 // this table to the catalogue, so a file that renames a label or changes
-// its flags fails until this follows. Read-only.
+// its flags fails until this follows. Strong is the table's alone: true
+// exactly for a preset whose flags skip the agent's permission prompts
+// (design yardr-m90n 3.5), which a test here holds to the flags, so a
+// preset added without the mark fails until it has it. Read-only.
 var HarnessPresets = map[string][]Permission{
 	"claude": {
 		{Label: "auto", Args: []string{"--permission-mode", "auto"}, Note: "Claude judges each action; asks only about risky ones"},
 		{Label: "accept edits", Args: []string{"--permission-mode", "acceptEdits"}, Note: "file edits allowed; shell commands still ask"},
-		{Label: "bypass", Args: []string{"--dangerously-skip-permissions"}, Note: "never asks; runs as you with full access"},
+		{Label: "bypass", Args: []string{"--dangerously-skip-permissions"}, Note: "never asks; runs as you with full access", Strong: true},
 		{Label: "read only", Args: []string{"--settings", `{"sandbox":{"enabled":true,"filesystem":{"denyWrite":["{workdir}"]},"network":{"allowUnixSockets":["{socket}"]}}}`}, Note: "reads in a read-only sandbox, no network but the yard's socket; asks for anything else"},
 	},
 	"codex": {
 		{Label: "approve for me", Args: []string{"--approve-for-me"}, Note: "automatic review inside a workspace-write sandbox"},
-		{Label: "bypass", Args: []string{"--dangerously-bypass-approvals-and-sandbox"}, Note: "never asks, no sandbox"},
+		{Label: "bypass", Args: []string{"--dangerously-bypass-approvals-and-sandbox"}, Note: "never asks, no sandbox", Strong: true},
 		{Label: "read only", Args: []string{"--enable", "network_proxy", "-c", `default_permissions="yardr_read_only"`, "-c", `permissions.yardr_read_only.extends=":read-only"`, "-c", "permissions.yardr_read_only.network.enabled=true", "-c", `permissions.yardr_read_only.network.unix_sockets={"{socket}"="allow"}`, "-c", `permissions.yardr_read_only.filesystem={"{tmpdir}"="write"}`}, Note: "reads in a read-only sandbox, writes only to a private temporary directory, no network but the yard's socket; asks for anything else; needs Codex's network_proxy feature"},
 	},
 	"grok": {
-		{Label: "always approve", Args: []string{"--always-approve"}, Note: "auto-approves all tool executions"},
+		{Label: "always approve", Args: []string{"--always-approve"}, Note: "auto-approves all tool executions", Strong: true},
 	},
 	"kimi": {
-		{Label: "yolo", Args: []string{"--yolo"}, Note: "auto-approves tool calls; may still ask questions"},
-		{Label: "auto", Args: []string{"--auto"}, Note: "fully autonomous; asks nothing"},
+		{Label: "yolo", Args: []string{"--yolo"}, Note: "auto-approves tool calls; may still ask questions", Strong: true},
+		{Label: "auto", Args: []string{"--auto"}, Note: "fully autonomous; asks nothing", Strong: true},
 	},
 	"kiro": {
-		{Label: "allow all tools", Args: []string{"--trust-tools=*"}, Note: "every built-in tool without asking; a Hook confirmation is denied"},
-		{Label: "trust all tools", Args: []string{"--trust-all-tools"}, Note: "everything without asking, after one warning acknowledged at every start"},
+		{Label: "allow all tools", Args: []string{"--trust-tools=*"}, Note: "every built-in tool without asking; a Hook confirmation is denied", Strong: true},
+		{Label: "trust all tools", Args: []string{"--trust-all-tools"}, Note: "everything without asking, after one warning acknowledged at every start", Strong: true},
 	},
 	"muse": {
-		{Label: "yolo", Args: []string{"--yolo"}, Note: "never asks, no sandbox, trusts the workspace for the run"},
-		{Label: "no approval", Args: []string{"--disable-approval"}, Note: "no approval prompts; the sandbox still applies"},
+		{Label: "yolo", Args: []string{"--yolo"}, Note: "never asks, no sandbox, trusts the workspace for the run", Strong: true},
+		{Label: "no approval", Args: []string{"--disable-approval"}, Note: "no approval prompts; the sandbox still applies", Strong: true},
 	},
 	"opencode": {
-		{Label: "auto", Args: []string{"--auto"}, Note: "auto-approves anything not explicitly denied"},
+		{Label: "auto", Args: []string{"--auto"}, Note: "auto-approves anything not explicitly denied", Strong: true},
 	},
 	"pi": {},
 }

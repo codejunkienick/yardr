@@ -189,6 +189,10 @@ calls:
 		{name: "user uninvite", run: AskRun{Argv: []string{"user uninvite ada"}}},
 		{name: "crew add", run: AskRun{Argv: []string{"crew add porter kind=claude model=opus preset=auto"}, Role: "You are the porter.\n"}, want: []string{WeightCode}},
 		{name: "group add", run: AskRun{Argv: []string{"group add post --runner exec --set cmd=/srv/bin/post"}}, want: []string{WeightCode}},
+		{name: "group set of a command", run: AskRun{Argv: []string{"group set builders cmd=/srv/bin/post"}}, want: []string{WeightCode}},
+		{name: "group set of a prompt and a preset", run: AskRun{Argv: []string{"group set reviewers prompt=/yard/roles/reviewer.md preset=bypass"}}, want: []string{WeightCode}},
+		{name: "crew set of a prompt", run: AskRun{Argv: []string{"crew set yardmaster prompt=/yard/roles/yardmaster.md"}}, want: []string{WeightCode}},
+		{name: "crew set of a preset that never asks", run: AskRun{Argv: []string{"crew set yardmaster preset=bypass"}}, want: []string{WeightCode}},
 		{name: "crew set adding a peer", run: AskRun{Argv: []string{"crew set yardmaster peers=airy"}}, want: []string{WeightTrust}},
 		{name: "crew set of threads", run: AskRun{Argv: []string{"crew set yardmaster open_threads=crm"}}},
 		{name: "crew set taking the peer away", prep: func() {
@@ -250,7 +254,7 @@ calls:
 	}
 
 	// Every other row is routine whatever it is asked.
-	weighty := []string{"peer add", "peer set", "peer allow", "source set", "source grant", "source add", "pack apply", "hook add", "user key", "user add", "user invite", "crew add", "group add", "crew set", "user identity", "depot test", "call", "settings set"}
+	weighty := []string{"peer add", "peer set", "peer allow", "source set", "source grant", "source add", "pack apply", "hook add", "user key", "user add", "user invite", "crew add", "group add", "group set", "crew set", "user identity", "depot test", "call", "settings set"}
 	for _, c := range runList {
 		if has := c.weigh != nil; has != slices.Contains(weighty, strings.Join(c.words, " ")) {
 			t.Errorf("the row %s weighs: %v", strings.Join(c.words, " "), has)
