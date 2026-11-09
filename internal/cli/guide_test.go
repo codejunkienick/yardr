@@ -137,10 +137,12 @@ func buildSetupTemplate() (string, error) {
 			return
 		}
 		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		// The global configuration is the process's (gitConfig): one set here
+		// would win over it, and the template would start maintenance.
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
 			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
-			"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull)
+			"GIT_CONFIG_SYSTEM="+os.DevNull)
 		if out, cerr := cmd.CombinedOutput(); cerr != nil {
 			err = fmt.Errorf("git %v: %v %s", args, cerr, out)
 		}
@@ -208,11 +210,13 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	// The commit a test makes needs an author, and no signing: named on
 	// the command's own environment, since a run's map does not reach
-	// what the test itself starts.
+	// what the test itself starts. The global configuration is the
+	// process's (gitConfig), which asks for no signing and starts no
+	// maintenance: one set here would win over it.
 	cmd.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
 		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
-		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull)
+		"GIT_CONFIG_SYSTEM="+os.DevNull)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v %s", args, err, out)

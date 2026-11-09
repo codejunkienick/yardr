@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -48,6 +49,12 @@ var noYardHome = filepath.Join(os.TempDir(), "yardr-test-no-yard")
 // shim report a directory unrelated to the git it runs, so what the pane or
 // hook that runs the tests sets for git goes first; a case that wants one
 // passes it to its run (runEnv).
+//
+// What git reads instead of the developer's configuration is a file, in a
+// directory that goes with the run. It is the process's setting alone, which
+// every run's environment inherits (gitT, scriptEnv, a case's runEnv): a case
+// that set GIT_CONFIG_GLOBAL for its git would win over it and start
+// maintenance again, so none does.
 func TestMain(m *testing.M) {
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
@@ -55,8 +62,103 @@ func TestMain(m *testing.M) {
 			os.Unsetenv(name)
 		}
 	}
+	gitDir, err := os.MkdirTemp("", "ygit")
+	if err != nil {
+		panic(err)
+	}
+	gitconfig := filepath.Join(gitDir, "gitconfig")
+	if err := os.WriteFile(gitconfig, []byte(gitConfig), 0o644); err != nil {
+		panic(err)
+	}
+	os.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
 	testload.PreferRealGit()
-	os.Exit(m.Run())
+	code := m.Run()
+	os.RemoveAll(gitDir)
+	os.Exit(code)
+}
+
+// gitConfig is what git reads in place of the developer's configuration, and
+// it has git start no maintenance of its own. A commit, a push, a fetch and a
+// fast-forward merge each end by running `git maintenance run --auto`, which
+// by default detaches: it forks a daemon and returns, and the daemon takes the
+// repository's objects/maintenance.lock a moment later and drops it a moment
+// after that, a moment the scheduler stretches on a loaded box. A fixture is
+// copied (copyFixture's cp -R) as soon as its build returns, so a copy that
+// lists the lock can find it gone when it opens it (yardr-03av, in
+// contrib/assembly's copies). Nothing here wants a repository repacked, so no
+// repository is given the chance. gc.auto is the same switch for a git older
+// than maintenance, whose commands run gc --auto themselves.
+const gitConfig = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n"
+
+// A fixture is copied as soon as its build returns, and a build ends with a
+// commit. Git ends a commit, and a push, by running `git maintenance run
+// --auto`, which detaches and may hold the repository's objects/maintenance.lock
+// for a moment after the command has returned, so a copy could list the lock and
+// find it gone when it opens it (yardr-03av). gitConfig has git start none. The
+// race itself is the scheduler's, so this pins its cause, which git's trace2
+// events show whatever the timing: a commit and a push, run in the environment
+// gitT gives git, start no maintenance process.
+func TestMainKeepsGitFromStartingMaintenance(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	repo, origin := filepath.Join(dir, "repo"), filepath.Join(dir, "origin.git")
+	// A system setting turns maintenance on, so the trace fails if TestMain
+	// stops supplying the global file that turns it off.
+	systemConfig := filepath.Join(dir, "system.gitconfig")
+	if err := os.WriteFile(systemConfig, []byte("[maintenance]\n\tauto = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, dir, "init", "-q", "-b", "main", repo)
+	gitT(t, dir, "init", "-q", "--bare", "-b", "main", origin)
+	gitT(t, repo, "remote", "add", "origin", origin)
+	for _, step := range []struct {
+		cmd  string
+		args []string
+	}{
+		{"commit", []string{"commit", "-q", "--allow-empty", "-m", "base"}},
+		{"push", []string{"push", "-q", "origin", "main"}},
+	} {
+		trace := filepath.Join(dir, step.cmd+".trace")
+		// gitT's environment, and the directory the command's own and not git's
+		// -C, so that the subcommand is the second word of the argv a trace2
+		// start event holds.
+		cmd := exec.Command("git", step.args...)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+			"HOME="+dir, "XDG_CONFIG_HOME="+dir,
+			"GIT_CONFIG_SYSTEM="+systemConfig, "GIT_TRACE2_EVENT="+trace)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", step.cmd, err, out)
+		}
+		b, err := os.ReadFile(trace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The git commands the run started, as the start events of its trace
+		// name them: the second word of each argv.
+		var ran []string
+		for _, line := range strings.Split(string(b), "\n") {
+			var ev struct {
+				Event string   `json:"event"`
+				Argv  []string `json:"argv"`
+			}
+			if json.Unmarshal([]byte(line), &ev) != nil || len(ev.Argv) < 2 ||
+				(ev.Event != "start" && ev.Event != "child_start") {
+				continue
+			}
+			ran = append(ran, ev.Argv[1])
+		}
+		// A trace that does not show the command itself shows nothing of what
+		// it started either, and the check below would pass for the wrong reason.
+		if !slices.Contains(ran, step.cmd) {
+			t.Fatalf("git %s: its trace2 events hold no start of it, only %q", step.cmd, ran)
+		}
+		if slices.Contains(ran, "maintenance") {
+			t.Errorf("git %s started git maintenance: its daemon can hold objects/maintenance.lock after the command returns", step.cmd)
+		}
+	}
 }
 
 type readsRow struct {

@@ -31,7 +31,9 @@ calls:
 
 func depotPushCLIYard(t *testing.T) (store.API, string) {
 	t.Helper()
-	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "none"))
+	// The global file is TestMain's, which keeps the developer's out and has git
+	// start no maintenance; the system's is none.
+	t.Setenv("GIT_CONFIG_GLOBAL", gitConfigFile)
 	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "none"))
 	// Nor one git builds in beside the system file (Apple's git brings
 	// a credential.helper of its own).

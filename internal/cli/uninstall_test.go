@@ -76,10 +76,12 @@ func buildWorktreeTemplate(first, second string) (string, error) {
 			return
 		}
 		cmd := exec.Command("git", append([]string{"-C", depot}, args...)...)
+		// The global configuration is the process's (gitConfig): one set here
+		// would win over it, and the template would start maintenance.
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
 			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
-			"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull)
+			"GIT_CONFIG_SYSTEM="+os.DevNull)
 		if out, cerr := cmd.CombinedOutput(); cerr != nil {
 			err = fmt.Errorf("git %v: %v %s", args, cerr, out)
 		}

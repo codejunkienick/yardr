@@ -46,6 +46,24 @@ var realAnswers func(string) bool
 // which downloads from a stand-in server.
 var realOfferInstall func(context.Context, io.Writer, need) (bool, error)
 
+// gitConfig is what git reads in place of the developer's configuration, and
+// it has git start no maintenance of its own. A commit, a push, a fetch and a
+// fast-forward merge each end by running `git maintenance run --auto`, which
+// by default detaches: it forks a daemon and returns, and the daemon takes the
+// repository's objects/maintenance.lock a moment later and drops it a moment
+// after that, a moment the scheduler stretches on a loaded box. A template is
+// copied (os.CopyFS) as soon as TestMain has built it, so a copy that lists the
+// lock can find it gone when it opens it (yardr-03av, in contrib/assembly's
+// copies). Nothing here wants a repository repacked, so no repository is given
+// the chance. gc.auto is the same switch for a git older than maintenance,
+// whose commands run gc --auto themselves.
+const gitConfig = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n"
+
+// gitConfigFile is the file TestMain writes gitConfig to, in a directory that
+// goes with the run, and names in GIT_CONFIG_GLOBAL for the whole process. Made
+// before the tests run, read only after, so no test assigns it.
+var gitConfigFile string
+
 func TestMain(m *testing.M) {
 	// Code that starts a part of yardr runs its own binary again (as
 	// `server run`, `daemon`, `web serve`), and in a test that binary is
@@ -66,6 +84,20 @@ func TestMain(m *testing.M) {
 			os.Unsetenv(name)
 		}
 	}
+	// What git reads instead of the developer's configuration is a file, in a
+	// directory of its own: nowhere, below, is the user's home, which stays
+	// empty. It is the process's setting alone. A git run with one of its own
+	// would win over it and start maintenance again, so a test's git names this
+	// file (gitConfigFile) or none.
+	gitDir, err := os.MkdirTemp("", "ygit")
+	if err != nil {
+		panic(err)
+	}
+	gitConfigFile = filepath.Join(gitDir, "gitconfig")
+	if err := os.WriteFile(gitConfigFile, []byte(gitConfig), 0o644); err != nil {
+		panic(err)
+	}
+	os.Setenv("GIT_CONFIG_GLOBAL", gitConfigFile)
 	// Many tests run git, and on macOS each run is two execs, the system's shim
 	// and the git it runs: the real git first on PATH, for these tests and the
 	// programs they start (testload.PreferRealGit).
@@ -214,6 +246,7 @@ func TestMain(m *testing.M) {
 	scripttest.Remove()
 	os.RemoveAll(services)
 	os.RemoveAll(nowhere)
+	os.RemoveAll(gitDir)
 	os.RemoveAll(setupTemplateDir)
 	os.RemoveAll(stageTemplateDir)
 	os.RemoveAll(purgeTemplateDir)
