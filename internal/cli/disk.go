@@ -20,7 +20,11 @@ GOCACHE's volume (30 GB while unset, 0 turns the keeping off) it rotates
 GOCACHE at a fresh sibling directory, so builders that start afterwards
 use it, and records the old directory with the time; removes a recorded
 directory once it has stood aside for 30 minutes, never the live one; and
-clears go-build directories in GOTMPDIR older than 3 hours. It logs what
+clears go-build directories in GOTMPDIR older than 3 hours. A rotation
+less than 30 minutes after the last one frees nothing, so it is not made:
+the rest is done, and the report says why. It also records the rotated
+caches beside the live one that no record names (another yard on the
+machine rotates the same GOCACHE), as stood aside from now. It logs what
 it did as a disk_kept event, and says it gave up when free space is still
 under 10 GB afterwards. Over the threshold it does nothing and says
 nothing.

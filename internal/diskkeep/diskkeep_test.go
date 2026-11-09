@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -117,6 +118,18 @@ func mkdir(t *testing.T, dir string) {
 	}
 }
 
+// mkcache writes dir as a Go build cache: with the README Go leaves in each
+// one it makes, which is all that tells a rotated cache from any other
+// directory of the same name.
+func mkcache(t *testing.T, dir string) {
+	t.Helper()
+	mkdir(t, dir)
+	readme := goCacheMarker + "\nRun \"go clean -cache\" if the directory is getting too large.\n"
+	if err := os.WriteFile(filepath.Join(dir, "README"), []byte(readme), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestKeepIdleOverThreshold(t *testing.T) {
 	k, settings := newKeeping(t, nil)
 	base := t.TempDir()
@@ -182,7 +195,7 @@ func TestKeepRotates(t *testing.T) {
 	base := t.TempDir()
 	k.fake.gocache = filepath.Join(base, "go-build-8")
 	mkdir(t, k.fake.gocache)
-	k.free = []uint64{20 * GB, 40 * GB}
+	k.free = []uint64{20 * GB, 40 * GB, 20 * GB, 5 * GB, 20 * GB, 40 * GB}
 
 	rep := k.run(settings)
 
@@ -224,6 +237,136 @@ func TestKeepRotates(t *testing.T) {
 	lines := rep.Lines()
 	if len(lines) != 2 || !strings.HasPrefix(lines[0], "disk kept: free 20.0 GB -> 40.0 GB") {
 		t.Errorf("Lines = %v", lines)
+	}
+
+	// Five minutes later, another low disk keeping holds the rotation, but
+	// still clears stale go-tmp and reports the space it found.
+	k.now = k.now.Add(5 * time.Minute)
+	k.fake.gotmp = filepath.Join(base, "go-tmp")
+	stale := filepath.Join(k.fake.gotmp, "go-build111")
+	mkdir(t, stale)
+	past := k.now.Add(-4 * time.Hour)
+	if err := os.Chtimes(stale, past, past); err != nil {
+		t.Fatal(err)
+	}
+	rep = k.run(settings)
+	if len(k.fake.sets) != 1 || k.fake.gocache != wantTo {
+		t.Errorf("go env -w ran %v, GOCACHE is %s: rotated again inside the grace", k.fake.sets, k.fake.gocache)
+	}
+	if rep.RotatedFrom != "" || rep.RotatedTo != "" || rep.NotRotated != "the last rotation was 5m0s ago, inside the 30 minutes a rotated cache stands aside" {
+		t.Errorf("rotation = %q -> %q, not rotated %q", rep.RotatedFrom, rep.RotatedTo, rep.NotRotated)
+	}
+	if len(rep.Removed) != 1 || rep.Removed[0] != stale || !rep.GaveUp || rep.FreeAfter != 5*GB {
+		t.Errorf("Removed = %v, gave up = %v, free after = %d; want stale go-tmp and 5 GB", rep.Removed, rep.GaveUp, rep.FreeAfter)
+	}
+	if olds := k.olds(); len(olds) != 1 || olds[0].Dir != wantFrom {
+		t.Errorf("recorded = %+v, want only the first rotation's directory", olds)
+	}
+	evs = k.events()
+	if len(evs) != 2 {
+		t.Fatalf("%d disk_kept events, want one for each keeping", len(evs))
+	}
+	if evs[1].Data["not_rotated"] != rep.NotRotated || evs[1].Data["rotated_to"] != "" || evs[1].Data["gave_up"] != true {
+		t.Errorf("second event = %v, want the held rotation and gave_up", evs[1].Data)
+	}
+	if _, ok := evs[0].Data["not_rotated"]; ok {
+		t.Errorf("the rotating keeping's event says it did not rotate: %v", evs[0].Data)
+	}
+
+	// Thirty-one minutes after the rotation, it can go ahead and take the
+	// first cache.
+	k.now = k.now.Add(26 * time.Minute)
+	rep = k.run(settings)
+	wantThird := filepath.Join(base, "go-build-10")
+	if len(k.fake.sets) != 2 || k.fake.gocache != wantThird || rep.RotatedTo != wantThird {
+		t.Errorf("go env -w ran %v, GOCACHE is %s, rotated to %s; want %s", k.fake.sets, k.fake.gocache, rep.RotatedTo, wantThird)
+	}
+	if rep.NotRotated != "" || len(rep.Removed) != 1 || rep.Removed[0] != wantFrom {
+		t.Errorf("NotRotated = %q, Removed = %v, want rotation that takes %s", rep.NotRotated, rep.Removed, wantFrom)
+	}
+}
+
+func TestLockGOCACHESerializesKeepings(t *testing.T) {
+	gocache := filepath.Join(t.TempDir(), "go-build-8")
+	first, err := lockGOCACHE(gocache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	path := filepath.Join(filepath.Dir(gocache), ".yardr-diskkeep.lock")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("lock mode = %04o, want 0600", got)
+	}
+
+	second, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if err := syscall.Flock(int(second.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+		_ = syscall.Flock(int(second.Fd()), syscall.LOCK_UN)
+		t.Fatal("second keeping acquired the held lock")
+	} else if err != syscall.EWOULDBLOCK && err != syscall.EAGAIN {
+		t.Fatalf("second lock attempt: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(second.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("second keeping could not acquire the released lock: %v", err)
+	}
+	if err := syscall.Flock(int(second.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+
+	// A keeping that waited on the shared lock uses the cache another yard
+	// selected while it waited, then adopts the cache that yard left.
+	k, settings := newKeeping(t, nil)
+	base := t.TempDir()
+	gocache = filepath.Join(base, "go-build-8")
+	k.fake.gocache = gocache
+	mkcache(t, gocache)
+	held, err := lockGOCACHE(gocache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	started, resume := make(chan struct{}), make(chan struct{})
+	reads := 0
+	freeDisk = func(string) (uint64, error) {
+		reads++
+		if reads == 1 {
+			close(started)
+			<-resume
+		}
+		return 20 * GB, nil
+	}
+	type keepResult struct {
+		report *Report
+		err    error
+	}
+	done := make(chan keepResult, 1)
+	go func() {
+		rep, err := Keep(context.Background(), k.st, settings)
+		done <- keepResult{report: rep, err: err}
+	}()
+	<-started
+	current := filepath.Join(base, "go-build-9")
+	k.fake.gocache = current
+	close(resume)
+	if err := held.Close(); err != nil {
+		t.Fatal(err)
+	}
+	result := <-done
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	if len(k.fake.sets) != 0 || result.report.NotRotated == "" || len(result.report.Adopted) != 1 || result.report.Adopted[0] != gocache {
+		t.Errorf("sets = %v, not rotated %q, adopted %v; want no rotation and [%s]", k.fake.sets, result.report.NotRotated, result.report.Adopted, gocache)
 	}
 }
 
@@ -267,21 +410,36 @@ func TestKeepRemovesOldPastGrace(t *testing.T) {
 	if _, err := os.Stat(young); err != nil {
 		t.Errorf("%s went before its grace: %v", young, err)
 	}
-	if _, err := os.Stat(filepath.Join(base, "go-build-9")); !os.IsNotExist(err) {
-		t.Errorf("the fresh sibling was touched: %v", err)
+	// The young one was rotated away from 29 minutes ago, which holds the
+	// rotation: what is past its grace goes all the same.
+	if len(k.fake.sets) != 0 || rep.RotatedTo != "" {
+		t.Errorf("go env -w ran %v, rotated to %q, inside the grace of a rotation", k.fake.sets, rep.RotatedTo)
 	}
-	olds := k.olds()
-	var dirs []string
-	for _, o := range olds {
-		dirs = append(dirs, o.Dir)
-	}
-	// The old directory past its grace is gone from the record; the young
-	// one and the just-rotated one stay.
-	if len(olds) != 2 || dirs[0] != filepath.Join(base, "go-build-6") || dirs[1] != filepath.Join(base, "go-build-8") {
-		t.Errorf("recorded = %v", dirs)
+	if olds := k.olds(); len(olds) != 1 || olds[0].Dir != young {
+		t.Errorf("recorded = %+v, want only the young one", olds)
 	}
 	if len(rep.Removed) != 1 || rep.Removed[0] != past {
 		t.Errorf("Removed = %v, want [%s]", rep.Removed, past)
+	}
+
+	// Two minutes on it is 31 minutes old: the rotation goes ahead, and the
+	// young one is the next to go.
+	k.now = k.now.Add(2 * time.Minute)
+	k.free = append(k.free, 20*GB, 40*GB)
+
+	rep = k.run(settings)
+
+	if _, err := os.Stat(young); !os.IsNotExist(err) {
+		t.Errorf("%s stands past its grace: %v", young, err)
+	}
+	if len(rep.Removed) != 1 || rep.Removed[0] != young {
+		t.Errorf("Removed = %v, want [%s]", rep.Removed, young)
+	}
+	if want := filepath.Join(base, "go-build-9"); rep.RotatedTo != want {
+		t.Errorf("rotated to %q, want %s", rep.RotatedTo, want)
+	}
+	if olds := k.olds(); len(olds) != 1 || olds[0].Dir != filepath.Join(base, "go-build-8") {
+		t.Errorf("recorded = %+v, want only the just-rotated one", olds)
 	}
 }
 
@@ -487,5 +645,139 @@ func TestKeepNeverRemovesARecordedForeignPath(t *testing.T) {
 	}
 	if len(rep.Removed) != 0 {
 		t.Errorf("Removed = %v", rep.Removed)
+	}
+}
+
+// GOCACHE is the machine's and the record one yard's store, so a rotation by
+// another yard on the machine is in no record here. The caches it left are
+// recorded at first sight, hold the rotation (it may have been just now), and
+// go when their grace, counted from that sight, has passed. Nothing else
+// beside the cache is touched: not a directory that is no Go cache, a name
+// that is no rotation's, a number past the live one's (the live cache of
+// whoever rotated last), a file, or a link.
+func TestKeepAdoptsACacheNoRecordNames(t *testing.T) {
+	k, settings := newKeeping(t, nil)
+	base := t.TempDir()
+	k.fake.gocache = filepath.Join(base, "go-build-8")
+	mkcache(t, k.fake.gocache)
+	stray := filepath.Join(base, "go-build-7")
+	mkcache(t, stray)
+	left := []string{
+		filepath.Join(base, "go-build-6"),  // no README: no Go cache
+		filepath.Join(base, "go-build-12"), // a number past the live one's
+		filepath.Join(base, "go-build-ym"), // no number
+		filepath.Join(base, "go-build"),    // the bare name: whoever's default cache it may be
+		filepath.Join(base, "other-3"),     // another stem
+		filepath.Join(base, "go-build-5"),  // a file
+		filepath.Join(base, "go-build-4"),  // a link
+		filepath.Join(base, "go-build-3"),  // a link in place of Go's README
+	}
+	mkdir(t, left[0])
+	mkcache(t, left[1])
+	mkcache(t, left[2])
+	mkcache(t, left[3])
+	mkcache(t, left[4])
+	if err := os.WriteFile(left[5], []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(t.TempDir(), "linked")
+	mkcache(t, linked)
+	if err := os.Symlink(linked, left[6]); err != nil {
+		t.Fatal(err)
+	}
+	mkdir(t, left[7])
+	if err := os.Symlink(filepath.Join(linked, "README"), filepath.Join(left[7], "README")); err != nil {
+		t.Fatal(err)
+	}
+	k.free = []uint64{20 * GB, 20 * GB}
+
+	rep := k.run(settings)
+
+	if len(k.fake.sets) != 0 || rep.RotatedTo != "" {
+		t.Errorf("go env -w ran %v, rotated to %q, with a cache just left beside the live one", k.fake.sets, rep.RotatedTo)
+	}
+	if !strings.Contains(rep.NotRotated, "no record names") {
+		t.Errorf("NotRotated = %q", rep.NotRotated)
+	}
+	if len(rep.Adopted) != 1 || rep.Adopted[0] != stray {
+		t.Errorf("Adopted = %v, want [%s]", rep.Adopted, stray)
+	}
+	if len(rep.Removed) != 0 {
+		t.Errorf("Removed = %v, want nothing before the grace", rep.Removed)
+	}
+	if olds := k.olds(); len(olds) != 1 || olds[0].Dir != stray || !olds[0].At.Equal(k.now) {
+		t.Errorf("recorded = %+v, want the stray at now", olds)
+	}
+	evs := k.events()
+	if len(evs) != 1 {
+		t.Fatalf("%d disk_kept events, want 1", len(evs))
+	}
+	if adopted, _ := evs[0].Data["adopted"].([]any); len(adopted) != 1 || adopted[0] != stray {
+		t.Errorf("event adopted = %v, want [%s]", evs[0].Data["adopted"], stray)
+	}
+	if lines := rep.Lines(); len(lines) < 3 || !strings.HasPrefix(lines[2], "adopted "+stray+": ") {
+		t.Errorf("Lines = %v", lines)
+	}
+
+	// Past the grace it counts from the sight: the stray goes, the rotation
+	// with it, and nothing of the rest.
+	k.now = k.now.Add(OldGrace + time.Minute)
+	k.free = append(k.free, 20*GB, 40*GB)
+
+	rep = k.run(settings)
+
+	if len(rep.Adopted) != 0 || rep.NotRotated != "" {
+		t.Errorf("Adopted = %v, NotRotated = %q on the second keeping", rep.Adopted, rep.NotRotated)
+	}
+	if len(rep.Removed) != 1 || rep.Removed[0] != stray {
+		t.Errorf("Removed = %v, want [%s]", rep.Removed, stray)
+	}
+	if len(k.fake.sets) != 1 {
+		t.Errorf("go env -w ran %v, want the rotation the held keeping left", k.fake.sets)
+	}
+	if _, err := os.Stat(stray); !os.IsNotExist(err) {
+		t.Errorf("%s stands past its grace: %v", stray, err)
+	}
+	for _, dir := range left {
+		if _, err := os.Lstat(dir); err != nil {
+			t.Errorf("%s was taken: %v", dir, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(linked, "README")); err != nil {
+		t.Errorf("the link's target was taken: %v", err)
+	}
+}
+
+// What a record says of the last rotation: a rotated sibling of the live
+// cache, at or before now.
+func TestLastRotation(t *testing.T) {
+	live := filepath.Join("/cache", "go-build-8")
+	at := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	rec := func(dir string, ago time.Duration) store.GOCACHEDir {
+		return store.GOCACHEDir{Dir: dir, At: at.Add(-ago)}
+	}
+	for _, c := range []struct {
+		name string
+		olds []store.GOCACHEDir
+		want time.Duration // ago; 0 for none
+	}{
+		{"none", nil, 0},
+		{"one", []store.GOCACHEDir{rec("/cache/go-build-7", 5*time.Minute)}, 5 * time.Minute},
+		{"the newest of several", []store.GOCACHEDir{rec("/cache/go-build-5", time.Hour), rec("/cache/go-build-7", time.Minute), rec("/cache/go-build-6", 20*time.Minute)}, time.Minute},
+		{"the bare name", []store.GOCACHEDir{rec("/cache/go-build", 3*time.Minute)}, 3 * time.Minute},
+		{"the live cache itself", []store.GOCACHEDir{rec(live, time.Minute)}, 0},
+		{"no sibling", []store.GOCACHEDir{rec("/elsewhere/go-build-7", time.Minute), rec("/cache/work", time.Minute), rec("/cache/go-build-7/..", time.Minute)}, 0},
+		{"ahead of the clock", []store.GOCACHEDir{rec("/cache/go-build-7", -time.Hour)}, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := lastRotation(c.olds, live, at)
+			var want time.Time
+			if c.want != 0 {
+				want = at.Add(-c.want)
+			}
+			if !got.Equal(want) {
+				t.Errorf("lastRotation = %v, want %v", got, want)
+			}
+		})
 	}
 }

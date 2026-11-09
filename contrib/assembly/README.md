@@ -79,9 +79,10 @@ with a note of the first run's output, and held with both outputs if a
 signal ends it again.
 Before the tests run, the yard keeps its disk (`yardr disk keep`): under
 `disk_keep_gb` free on GOCACHE's volume it rotates GOCACHE at a fresh
-sibling directory, removes a rotated directory once it has stood aside
-for 30 minutes, and clears go-build directories in GOTMPDIR older than 3
-hours, logging a `disk_kept` event with what it did
+sibling directory (not within 30 minutes of the last rotation), removes a
+rotated directory once it has stood aside for 30 minutes, and clears
+go-build directories in GOTMPDIR older than 3 hours, logging a
+`disk_kept` event with what it did
 (docs/setup.md, "The machine's disk"). Best effort: a keep that fails is
 in the log and the landing goes on to the tests. Where the installed
 yardr predates the command the step is skipped, and activates once the

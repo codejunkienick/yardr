@@ -179,9 +179,23 @@ directory with `go env -w`, so builders that start afterwards use it, and
 records the old directory with the time; a landing that starts 30 minutes
 or more after a rotation removes the recorded directories, never the live
 one; and it clears go-build directories in GOTMPDIR older than 3 hours.
+A rotation less than 30 minutes after the last frees nothing (the
+directory it leaves cannot go yet) and starts one more cache from empty, so
+the landing skips it. It still removes and clears what it can, and its
+event carries `not_rotated` with the reason.
 What it did is a `disk_kept` event (`yardr events`, `yardr watch`), with
 the free space before and after and what was removed, and a gave-up line
 in the assembly's log when free space is still under 10 GB afterwards.
+
+GOCACHE belongs to the machine and the record of rotations to the yard, so
+two yards on one machine each see only their own rotations. A landing
+therefore also records every rotated cache it finds beside the live one that
+no record names, whichever yard left it: a real directory named as the live
+cache is, with a lower number, holding the README Go writes into every cache
+it makes. The moment it finds one counts as the moment it was left, so it
+holds that landing's own rotation and is removed 30 minutes later. The event
+lists these as `adopted`. Name a Go cache of your own differently:
+`go-build-3` beside a live `go-build-9` is taken for a rotated cache.
 
 Two things are the operator's. First, GOCACHE must come from the go env
 file, not the environment: a GOCACHE set in the environment wins over
