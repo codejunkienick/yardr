@@ -30,7 +30,8 @@ yardr crew set yardmaster --unset set_state
 
 The `env_file`, `env_command`, `kind`, `args` and `prompt` settings, and
 the `--dir` of a crew member the yard has, are the operator's
-alone besides: the store refuses each from anyone else, a crew member's
+alone besides, but for what the yardmaster runs for them on their mail
+(below): the store refuses each from anyone else, a crew member's
 pane included, and no `crew set` run ask proposes one but a prompt and a
 permission preset that never asks, below. A new member is the other
 exception: from a crew pane, `yardr bead ask <id> "<question>"
@@ -48,7 +49,22 @@ in use, or one whose `roles/<name>.<digest>.md` stands already with other
 text than its name says, is refused, since the card adds and never
 replaces. A new group has a card of its own ([groups.md](groups.md)).
 A crew member that needs one of those asks the operator for it, with the
-command whole in the ask; every other setting is changed as above.
+command whole in the ask, except what the yardmaster may run for the
+operator on their mail instead. Where `yardmaster_delegation` is on
+([users.md](users.md#the-yardmaster-for-the-operator)), the yardmaster sets
+the `kind`, `model` and `--dir` of another member, and its args as
+`preset=<label>`, one of the kind's named permission presets that keeps the
+agent's prompts, citing that mail's sender with `--for <sender> --mail
+<seq>`:
+
+```sh
+yardr crew set assembly model=sonnet preset=accept-edits --for ada --mail 1042
+```
+
+The yard records the run for the operator and mails it to them. Free `args`,
+`env_file`, `env_command`, a prompt, a conversation login and the
+yardmaster's own entry are never part of it. Every other setting is changed
+as above.
 
 A member's `prompt`, and the permission preset of its kind that never asks
 (`yardr harness show <kind>` lists the presets; free `args` are never
@@ -331,7 +347,10 @@ names its person and its slice.
   few first lines.
 - **Prime:** a new session reads `yardr prime --crew <name>`: its role, on a
   hosted yard a "No terminal" section after it (its people have no terminal,
-  so every command for the operator goes as a card; the `hosted` setting in
+  so the yardmaster runs commands on the delegated list on the operator's
+  cited local mail when delegation is on; commands that need approval go by
+  card, and an operator-only command with no card or delegated path is filed
+  as a bead instead of mailed as text to type; the `hosted` setting in
   [configuration.md](configuration.md#settings)), how the operator wants
   agents to work with them when the yard says
   ([configuration.md](configuration.md#how-agents-work-with-you)), the

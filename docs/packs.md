@@ -1919,7 +1919,8 @@ with the mappings that answer its plan (`--run "pack apply <name>
 sent to the setup ask instead (`yardr bead ask <id> "<question>"
 --setup <pack>`, [chat.md](chat.md#setting-up-a-packs-sources)).
 A card is read whole, so a pack whose card would run past 40 lines is
-refused, and the operator applies it in a terminal. Google is split into
+refused, and the operator applies it in a terminal, or the yardmaster applies
+it for them on their mail (below). Google is split into
 packs (`google-mail`, `google-drive`, `google-docs` and `google-calendar`)
 so that each applies by one card, and so does the re-apply of
 `google-docs` over an earlier import.
@@ -1947,7 +1948,34 @@ and is carried out by the server after it, which holds the plan to the
 digest before anything is written. A pack that is a directory, a URL or
 an earlier import's record, any flag of `pack apply` but the depot and the
 mappings of a depot pack's first install, and a plan that asks, is refused
-to a terminal, where `yardr pack check <name>` shows the plan.
+to a terminal, where `yardr pack check <name>` shows the plan. The
+yardmaster has a road of its own beside the card, for a pack that yardr
+embeds and for one that the packs repository serves.
+
+**Running a pack for the operator.** Where the yardmaster's delegation is on
+([users.md](users.md#the-yardmaster-for-the-operator)), the yardmaster
+applies a pack for an operator who asked by mail, with no card to approve.
+For a pack yardr embeds it runs `yardr pack apply <name> --depot <depot>
+--for <sender> --mail <seq>`, and for a pack of the packs repository
+`yardr pack apply <url> --sha256 <digest> --depot <depot> --for <sender>
+--mail <seq>`: the URL is that repository's and nowhere else's, and the
+digest is the one `yardr pack check` prints. Both take the depot and the
+mappings and no other flag, and both refuse a plan that still asks after the
+mappings, whole and with nothing written. No card or other road answers a
+plan's questions for a delegated apply; a pack whose plan asks stays the
+operator's, in a terminal, until its questions are settled in the pack. The
+card's bounds do not bind this road: a pack past 40 lines or 1 MiB applies,
+up to what the run's record can hold. Before the first object the yard
+writes that record, with the digest, the plan's objects by name, each updated
+object's diff and the complete before-state, and mails the operator at the
+start and again at the end; a pack whose record would pass the yard's blob
+cap (`blob_max_bytes`) is refused before anything is written. A run that
+fails part way leaves a `failed` record naming the objects it wrote, keeps
+the partial import, and is finished by applying again. No one command takes
+an apply back: a pack of the packs repository goes back by applying it again
+pinned to the digest that stood before it, which the record names, and any
+other from the record's diffs. The card stays for the operator who would
+rather approve first.
 
 **A pack updated is one card again.** A setup ask on a pack already
 applied (`yardr bead ask <id> "<question>" --setup <pack>`,

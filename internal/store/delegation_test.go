@@ -359,6 +359,14 @@ func TestDelegatedCitation(t *testing.T) {
 	if _, err := y.api.Delegation(y.ctx, 1, "jo"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("a refused run left a record: %v", err)
 	}
+	// A mail a device wrote is its user's word, marked "via" the device and
+	// with none of the marks above, so a stolen device's mail opens a run as
+	// the operator's own does. docs/users.md says so in its stolen-device
+	// table, and a check that refused "via" would make that wrong.
+	byDevice := y.logEvent(t, "mail", map[string]any{"to": "yardmaster", "text": "do it", "via": "phone"})
+	if _, err := y.api.SetGroup(y.as(byDevice, ""), "builders", store.GroupEdit{Set: map[string]any{"model": "opus"}}, "yardmaster"); err != nil {
+		t.Errorf("a delegated run citing a mail written via a device: %v", err)
+	}
 }
 
 // With the switch off, or unset on a yard that is not hosted, a delegated

@@ -256,36 +256,126 @@ operator, citing the operator's mail it acts on:
 yardr group set reviewers model=opus preset=accept-edits --for ada --mail 1042
 ```
 
-The yard checks, in the write that runs it, that the call comes from the
-yardmaster, that `ada` holds the operator role, and that mail 1042 is a mail
-from `ada` to the yardmaster with no mark of another yard, a session or a
-timer on it. What `ada` types in `yardr chat` is that same mail; a word in a
-pane cites nothing and starts nothing. The commands it covers are `group add`
-and `group set` of kind, model, directories and worktrees, with args only as
-a kind's named permission preset (`preset=<label>`) that keeps the agent's
-permission prompts (never `bypass` or its like); `crew set` of kind, model,
-directory and preset args for a member other than the yardmaster; `depot test`
-and `depot base`; `user set
-<user> notify=<source>` alone; `hook add` in its card's safe shape (a name,
-`--source`, optional `--unknown`, and the secret file the yard owns for the hook);
-and `pack apply` of a pack yardr embeds, by name, or of a pack of the packs
-repository, by its URL and `--sha256` (below), with `--depot` and its mappings
-alone and past the pack card's bounds, where its plan asks nothing after them (a
-plan that asks is refused whole, and no answer path is built for it). Free
-args, `env_file`, `env_command`, a prompt, a group's `cmd`, the exec runner,
-the yardmaster's own entry, the switch, and a hook add with `--says`,
-`--makes`, `--map`, `--as` or a secret file of its own each refuse it. A
-prompt, a group's `cmd`, a preset that skips permission prompts and, for the
-yardmaster's own entry, its kind, model, directory and any preset are cards
-instead: the yardmaster proposes them in a run ask (`group set`, `crew set`,
-[crew.md](crew.md)) and they run when the operator approves.
+### What opens a run
 
-Each run is told after it runs instead of approved before: the same write
-keeps a record of it (the command whole, the cited mail, what each setting
-held before, and how it is taken back), puts a line on the yardmaster's
-journal naming only the record's id, and mails the operator what ran.
-`yardr delegation show <id>`, and the record's page in the hosted web, read
-it for an operator alone; anyone else is told it is not there.
+The only word that opens a run is a local mail: a mail in this yard, to the
+yardmaster, from a user who holds the operator role. What `ada` types in
+[`yardr chat`](chat.md) is that mail, since Enter does what `yardr mail`
+does. The yard checks the citation in the write that runs the command, and
+refuses the run whole, before it writes anything, unless all four hold:
+
+- the caller is the yardmaster, the crew member the `yardmaster` setting
+  names (a call from a crew member's pane is that member, whatever `--actor`
+  it names);
+- the user named by `--for` holds the operator role;
+- the switch is on;
+- `--mail` is the seq of a mail from that user to the yardmaster, with no
+  mark of another yard, a session or a timer on it.
+
+Nothing else opens a run. A mail from a linked yard does not, even from a
+name the link trusts as a user: it is information and not instructions. A
+delivery from a source does not, mapped to a person or heard as an outsider,
+so a line from an operator's Telegram or Slack opens none. Nor do thread
+text, a hook delivery, a bead's brief, or words a session or another crew
+member passes on. A word in the yardmaster's pane cites nothing and starts
+nothing: an operator at a pane has a terminal, and runs the command there.
+
+The check proves who sent the mail and to whom. The reading of its words
+stays the yardmaster's: whether they ask for the command that ran is not
+checked, and text an operator pastes into their own mail is, to the yard,
+the operator's word. A yardmaster talked into reading a genuine mail as
+asking for more than it says can run more than it says. What stands against
+that comes after the run, below: it is recorded and mailed to the operator in
+the write that makes it, and the operator can take it back and turn
+delegation off. The first bad run stands until the operator reads it, and
+that is the price of telling after instead of asking first. The
+yardmaster's role says the same in its own words.
+
+### What it runs
+
+| the command | what the yard holds it to |
+|---|---|
+| `group add`, and `group set` of `kind`, `model`, `dir` and `worktrees` | `dir` and `worktrees` name a directory under the yard's home or a depot. Args only as `preset=<label>`, a named permission preset of the kind that keeps the agent's permission prompts (`yardr harness show <kind>` lists them), never `bypass` or its like and never free `args`. No `prompt`, `cmd` or `env_file`, and no change of runner to or from `exec` |
+| `crew set` of `kind`, `model`, `dir` and `preset=<label>` | A member other than the yardmaster, whose own entry is a card. The same rule for the preset. No `env_file`, `env_command`, prompt or conversation login. A new member is `crew add`'s card, which shows its role text whole |
+| `depot test <depot> <command>` and `depot base <depot> <base>` | A test command of one line, at most 4096 bytes, as the depot test card shows one whole. Clearing a test command, and a depot's path and kind, are not here |
+| `user set <user> notify=<source>` | That key alone: `env_file` or `role` in the same command refuses the whole run |
+| `hook add <name> --source <source> [--unknown <word>]` | A new hook in the card's safe shape: the secret file the yard owns for it, with its signing secret still given on the hook's own secret card. `--says`, `--makes`, `--map`, `--as` or a secret file of its own refuse the run, and so does the name of a hook that stands |
+| `pack apply` | A pack yardr embeds, by name, or a pack of the packs repository, by its URL and `--sha256` ([below](#packs-run-for-the-operator)), with `--depot` and its mappings and no other flag, past the pack card's bounds. A plan that still asks after the mappings is refused whole, and no answer path is built for it |
+
+A prompt, a group's `cmd`, a preset that skips permission prompts and every
+setting of the yardmaster's own entry are not runs. They rewrite what every
+later session does, so the yardmaster proposes them in a run ask (`group
+set`, `crew set`; [groups.md](groups.md), [crew.md](crew.md)) and they run
+when the operator approves.
+
+On a delegated run the approval is the operator's own cited mail, so the run
+skips the card the same command carries today: the code card of `group add`,
+the trust card of a safe-shape `hook add`, the code card of `depot test` and
+the card of `depot base`. Those cards stay, weighed as before, for the same
+command proposed by anyone else, and for an operator who would rather
+approve first.
+
+### What stays with the operator
+
+Everything not in the table above is still what it was. Where a hosted
+operator has no terminal, each row names the door they have instead.
+
+| stays the operator's | the door instead |
+|---|---|
+| A secret value, `env_file` and `env_command`, a source's key and mint command, where a credential is read from | The secret asks: the person types the value on their device or in the hosted web, and the yard writes it to its file where no agent reads it |
+| A user's role, adding or removing a user, inviting a teammate, a device, a link's trust | The cards as they stand (`user set … role=`, `user add`, `user rm`, `user invite`, `user device rm`, `peer add` and the other link cards), the strong ones under a fresh sign-in in the hosted web. The operator pairs their own first device through the hosted web |
+| Removing a source or a hook, moving a source's records or its links, a source's `base` | The `source rm`, `source move`, `link move` and `hook rm` cards; a base alone by `yardr bead ask --setup … --source-base` |
+| A hook add with `--says`, `--makes`, `--map`, `--as` or a secret file of its own, replacing a hook, changing its source or its secret file | A terminal on a yard you run yourself, the host on a hosted one |
+| A depot's path and kind, removing a depot, clearing a test command, the yard-wide `permissions_preset` | The same: the provisioner makes the depots of a hosted yard |
+| The Alone settings (who the operator is, where the yard serves from, whether it is hosted, the edge's record), `edge connect` and `disconnect`, installing a release, `uninstall --purge` | A terminal on a yard you run yourself, the hosting service on a hosted one. The delegation switch is the exception: its two doors above are the operator's |
+| Reading every user's timers, `store prune` by hand | Each user reads their own timers, and the daemon prunes |
+
+### Told after, and taken back
+
+Each run is told after it runs instead of approved before. In the same write
+the yard keeps a record of it (the command whole, the cited mail, what each
+setting held before, and how the run is taken back), puts a line on the
+yardmaster's journal that names only the record's id and the operator, and
+mails the operator:
+
+```
+yardmaster for ada ran, on your mail 1042 (record 12, which yardr delegation show 12 reads):
+  yardr depot test web 'sh .yardr/test'
+changed: depot web (test)
+taken back by: yardr depot test web 'make test'
+```
+
+The mail carries no before-values; the record does. `yardr delegation show
+<id>` and the record's page in the hosted web (`/delegations/<id>`) read it
+for an operator alone, any operator and not only the one acted for. A
+member, a crew member (the yardmaster that ran it too) and a call that names
+nobody are told it is not there. The change's own event is what every such
+change leaves, with nothing added, so someone who only follows the events
+cannot tell a delegated run from the operator's own. That a run happened,
+and where its record is held, is on the yardmaster's journal, which is not
+scoped to operators; what ran, on what word and from what before-state are
+the operators'.
+
+What taking a run back costs depends on what it was:
+
+- A defining change (a group's or a member's kind, model, directory,
+  worktrees or preset, a depot's test command or base, where a user is
+  told) goes back with one more mail to the yardmaster, itself a delegated
+  run and itself told, that runs the command the telling mail names.
+- A new group goes back with `group rm`, which the yardmaster already runs
+  beside the operator.
+- A new hook goes back only on its removal card (`hook rm`), one tap and not
+  one word. An operator who wants hook adds undone by word alone should not
+  delegate them.
+- A pack has no one command back. A pack of the packs repository goes back by
+  applying it again pinned to the digest that stood before it, which the
+  record and the mail name, as far as the repository still serves those
+  bytes; any other, by hand from the record's diffs, each updated object set
+  back to the text its diff shows and each created one removed by name. The
+  operator, who alone can read the record, names the objects and the digest
+  in the mail that asks for it.
+
+### Packs run for the operator
 
 A delegated pack apply's record is written `started` before its first
 object and rewritten `done` or `failed` at the end: it holds the pack's
@@ -328,11 +418,10 @@ record's before-state is the way back by hand. A commit's URL is refused on
 purpose: GitHub serves a fork's commit under its parent's path, so only the
 branch the owner writes stands for the owner.
 
-On a delegated run the approval is the operator's own cited mail, so the run
-skips the card the same command carries today: the code card of `group add`,
-the trust card of a safe-shape `hook add`, the code card of `depot test` and
-the card of `depot base`. Those cards stay, weighed as before, for the same
-command proposed by anyone else.
+A pack of the packs repository has no card to read it on. An operator who
+wants to read every line of one before it runs reads the repository first, or
+does not delegate packs. [packs.md](packs.md) says where this road stands
+beside the card.
 
 ## Mail
 
@@ -613,14 +702,18 @@ and is answered where the field shows dots: in footplate, in `yardr chat`
 with `ctrl+o`, or with `yardr bead answer <id> <ask> --secret`
 ([chat.md](chat.md#questions-for-you)). Giving the address does not set
 `notify`: the card and the answer name `yardr user set <user>
-notify=<source>`, which stays the person's to run. The value is in that
-file and nowhere else: no note, event, mail or log has it. A file you keep
+notify=<source>`, which stays the person's to run, or the yardmaster's for an
+operator on their mail ([below](#the-yardmaster-for-the-operator)). The value
+is in that file and nowhere else: no note, event, mail or log has it. A file you keep
 yourself is named with `env_file=<file>` as before.
 
 **Who may.** The user themselves and an operator, for the two settings
 and for giving the address, by command or on a card. It is refused from the
 pane of an agent, whoever the command says it is, and from a crew member:
-whoever sets these decides where a person's inbox is sent. Like
+whoever sets these decides where a person's inbox is sent. The one crew
+member who sets `notify` is the yardmaster, in a delegated run for an
+operator on that operator's cited mail, and never `env_file`
+([below](#the-yardmaster-for-the-operator)). Like
 every such check in yardr it is a line, not a wall: every agent runs as the
 one OS user ([Who is acting](#who-is-acting)).
 
@@ -854,8 +947,9 @@ writer, or another user's inbox, is refused. The yardmaster does what the
 operator asks by mail, so a device of the operator can have work shaped,
 built and landed. Of what is [refused from an agent's
 pane](#who-is-acting) it can have run what a run ask may hold, by
-approving one, and what a setup approval carries, and nothing else: no
-other such command is among the calls.
+approving one, what a setup approval carries, and what the yardmaster runs
+for the operator on that mail ([below](#the-yardmaster-for-the-operator)),
+and nothing else: no other such command is among the calls.
 
 It reads every bead with its notes, the crew, the users, and through the
 stream the mail of its user alone: its own mail, the reactions on it and
@@ -955,9 +1049,14 @@ holds its token can approve every open run ask that is asked of the operator,
 a strong one included (below). They need not wait for one: a device cannot
 write a run ask, but it writes mail as the operator, and the yardmaster does
 what the operator asks by mail, so the holder can ask the yardmaster to
-propose a command and then approve it. The table below lists each command a
-run ask may hold and what a stolen device can have run with one agent's
-help. Some changes it makes stand after `yardr user device rm`. With no
+propose a command and then approve it. Where the yardmaster's delegation is
+on, the holder can ask it to run the commands of [its list](#what-it-runs)
+itself, with no card to approve: the yard checks that the cited mail is the
+operator's, and a stolen token is the operator's sender, so the holder's
+mail passes as the operator's own. The table below lists each command a
+run ask may hold, and the runs that need none, with what a stolen device can
+have run with one agent's help. Some changes it makes stand after
+`yardr user device rm`. With no
 terminal at hand, a hosted yard's operator signs the device out at the edge
 from `/ready` on another device. That cuts it off from the yards behind the
 edge within about a minute. A yard it reaches without the edge still needs
@@ -995,6 +1094,8 @@ covered below under Strong cards. Row by row:
 | `user device rm <user> <device>`: a user's device removed | That device's token is refused from now on, and the streams it held are closed. What the device did stands. A holder can have a lost device of another user cut off, and can have the operator's own other devices removed, leaving the holder's, until an operator pairs one again; the yard's terminal and the hosted web sign-in are untouched. The card says how many devices the user keeps. Only the operator pairs a device again |
 | `user uninvite <name>`: a teammate removed | That teammate is no more at the edge or here: the removal is reported first, then the user, their devices and the mapping go. The member's own account and any yard of their own stand |
 | `crew set <name> open_threads=<sources>`, `set_state=<sources>` or `peers=<peers>`: a crew member's grants widened | A crew member the holder directs by mail may do more outside the yard: open threads in a source, set the state of threads, or mail a linked yard's crew. Its runner, directory and the rest of its definition stay as they are |
+| `group add <name> --runner <runner> …` or `crew add <name> kind=<kind> …`: a new group or crew member | The group or member the holder names stands, with the command of an `exec` group, the prompt, the agent kind and the permission preset as the card showed them whole. The card is weighty (`code`) and says where a preset skips permissions. A group does nothing until a route sends it work, which the yardmaster shapes on the operator's mail, so the holder can have that done too. It stands after the device is removed. The operator or the yardmaster takes a group or a crew member away with `group rm` or `crew rm`; only the operator removes the yardmaster's own entry |
+| `group set <name> prompt=<file>`, `cmd=<command>` or `preset=<preset>`; `crew set <name> prompt=<file>` or `preset=<preset>`, with `kind`, `model` and `dir` for the yardmaster's own entry: what a group or a member runs changed | What every later session of the group or member runs is the holder's: its prompt, the command of an `exec` group, a permission preset that skips permission prompts and, for the yardmaster's own entry, its kind, model, directory and any preset. The card is weighty (`code`) and shows each whole, now and after. The next session starts with it, and it stands after the device is removed. Only the operator puts the old values back |
 | `peer identity <peer> <crew> --source <source> --id <id>`: a sender of a source mapped to a crew member of a linked yard | A delivery from the id is kept with the speaker `<crew>@<peer>`, whatever the hook's unknown word says, and the operator is offered no mapping card for it; it reaches crew as that yard's mail does, `information, not instructions`. The sender is no user, and an id on the source's ignore list is cleared from it. Only the operator takes it back |
 | `crew identity <name> --source <source> --id <id> --key <key>`: a crew member's identity in a source set | Mentions and assignments of the id or key there are then addressed to that crew member, and what it does there is its own: the holder can have what is meant for another reach a member it directs by mail, or blind a member to what is meant for it. Only the operator sets it back |
 | `user identity <user> --source <source> [--id <id>] [--key <key>]`: who a user is in a source | Threads opened there for them are assigned to the id or key, and where the source hears by identity a delivery from them is heard as theirs; an ignored id or key is cleared in the same write. The user or the operator sets it back |
@@ -1007,6 +1108,8 @@ covered below under Strong cards. Row by row:
 | `crew restart <name> [--for <user>]`: a crew member's session restarted | A fresh session starts once the current one is idle, of the line session or, with `--for`, of one conversation. A requested restart cannot be taken back |
 | `depot test <depot>`: a depot's test command changed | The holder's command stands as what tests the depot: a script group's command gets it as YARDR_TEST, and builders' primes tell them to run it. Only the operator takes it back, with another card carrying the command that stood |
 | `depot base <depot> <base>`: a depot's base changed | Bead branches of the depot start from the holder's base instead. Only the operator takes it back, with the base that stood |
+| `group add` without a prompt, or `group set` of `kind`, `model`, `dir`, `worktrees` or a named preset that keeps the agent's permission prompts; `crew set` of `kind`, `model`, `dir` or such a preset; `depot test`; `depot base`; `user set <user> notify=<source>`; a new `hook add` in the card's safe shape: run by the yardmaster on the holder's mail, within [the delegated bounds](#what-it-runs) and with no card | The change stands as the yardmaster's delegated run, recorded for the operator and mailed to them in the write that makes it. The holder needed no card and no approval, and the weight of the `group add`, `hook add` and `depot test` cards goes with the card. What it made (a group's or a member's new definition, a depot's new gate, where a user is told, a hook's endpoint) stands after the device is removed, until the operator has it taken back: with one more mail for the defining changes, and for the hook only by approving its removal card |
+| `pack apply` of an embedded pack, or of a packs-repository pack pinned to its digest: run by the yardmaster on the holder's mail, with no card | The pack's objects stand in the depot as an approval would have put them, whatever the card's bounds: a first install's groups, roles and scripts are among them, unread on any card. The digest, the plan and each updated object's diff are in the record. They stand after the device is removed, and no one command takes them back: a pinned re-apply to the digest that stood before it, or the record's diffs by hand |
 
 **Strong cards.** A card the yard weighs `trust` or `code` — it widens
 who the yard listens to, or it brings a program the yard will run — is
@@ -1032,7 +1135,9 @@ the operator's existing subscriptions and `notify` and `tell` settings,
 and successful delivery, so no alert to every paired device or outside
 address is promised. A card weighed neither trust nor code — a credential
 or an update taken alone, a routine card, and every narrowing, `peer rm`
-among them — is approved as it always was.
+among them — is approved as it always was. A delegated run is no card, so
+it takes none of these gates: the operator's cited mail is its approval
+([above](#what-it-runs)).
 
 A setup approval is no run ask, and gives a holder nothing past what one
 decision carries: an embedded pack of sources applied (the `pack apply`
@@ -1041,15 +1146,18 @@ has one for, whose file the pack's sources then read, and the picked
 preset's calls granted (the `source grant` row). It is asked as a run ask
 is, by mail to the yardmaster.
 
-What it still cannot have run, because no run ask may hold it: adding a
-device or pairing one, changing the operator, changing through which
-source a user is told or where their address is read from, replacing a
-hook, setting a hook's stage map or the crew member it
-acts as, reading a source's credential or setting where it is read from
-or the command that mints one, defining what a group runs or a crew
-member is, and applying a pack yardr does not embed,
-with any flag, or where its plan asks. A stolen device still cannot pair
-another device or change the `operator` setting. It can approve any card,
+What it still cannot have run, by a card or by the yardmaster on its mail:
+adding a device or pairing one, changing the operator, where a user's
+address is read from, replacing a hook, a hook add that says, makes, maps
+or acts as anything or keeps a secret file of its own, reading a source's
+credential or setting where it is read from or the command that mints one,
+free `args` of a group or a crew member that stands and any env setting of
+one, and applying a pack from a directory, or from a URL but the packs
+repository's, with a flag beyond the depot, the mappings and the pin, or
+where its plan asks. The delegation switch it can move either way, as it
+approves any card, through the operator's own doors
+([above](#the-yardmaster-for-the-operator)). A stolen device still cannot
+pair another device or change the `operator` setting. It can approve any card,
 though, and a card can make a way in: one that links a yard of the
 holder's (`peer add`), admits a second person as an operator (`user invite
 … --role operator`, or `user set … role=operator` for a user the yard has),

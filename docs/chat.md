@@ -460,17 +460,23 @@ file its reverse.
 Anything else that is the operator's is still typed by you: a hook's
 replacement and its `--map` and `--as`, a source's `env_file` and
 `mint_command`, taking a
-peer's identity back (`peer identity --rm`), a user's `notify` and `env_file`,
-`group add` that changes a runner to or from `exec`, or sets `cmd=`, `dir=`,
-`env_file=`, `kind=`, `args=`, `prompt=` or `worktrees=`, `group set` with one
-of those (or `--unset` of one) but a `cmd=`, `prompt=` or `preset=` that has
-its card above, a crew member's `env_file` and
-`env_command`, `crew set` of `kind` or `args`, or `--unset` of `prompt`, and a crew
+peer's identity back (`peer identity --rm`), a user's `env_file`,
+`group add` that replaces a group or names `env_file=` or `log=`, `group set`
+of `env_file` or of free `args`, or `--unset` of `cmd`, `env_file` or
+`prompt`, a crew member's `env_file` and
+`env_command`, `crew set` of free `args`, or `--unset` of `prompt`, and a crew
 `add` that names `env_file`, `env_command`, free `args` or any grant
 (grants are proposed apart as `crew set` once the member stands), a test command on a depot
 the yard has not, the
 `operator` setting and the settings of where the yard reads and serves from,
-and every other command. A crew member's own `source add` for a name the
+and every other command. Where the yard's `yardmaster_delegation` is on, the
+yardmaster runs some of the rest for you on your mail and tells you after: a
+group's `kind`, `model`, `dir` or `worktrees`, or another member's `kind`,
+`model` or `dir`, and a named permission preset that keeps the prompts for
+either, a depot's test command and base, a user's `notify`, a hook in the
+card's safe shape, and a pack that yardr embeds or the packs repository
+serves at a digest
+([users.md](users.md#the-yardmaster-for-the-operator)). A crew member's own `source add` for a name the
 yard has is refused: a replacement is proposed as a card, or typed by you.
 A source's region `base` has a door of its own where the base is the only
 change: a setup ask names it (`yardr bead ask <id> "<question>" --setup

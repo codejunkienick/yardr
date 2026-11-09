@@ -65,7 +65,8 @@ and [`yardr doctor`](doctor.md#the-yard) notes it with how it is removed
 
 The `cmd`, `dir`, `env_file`, `kind`, `args`, `prompt` and `worktrees`
 settings, and a change of runner to or from `exec` by `group add` whole,
-are the operator's alone: the store refuses each from anyone else, a crew
+are the operator's alone, but for what the yardmaster runs for them on
+their mail (below): the store refuses each from anyone else, a crew
 member's pane included, and no `group set` run ask proposes one but `cmd`,
 `prompt` and a permission preset that never asks, below. A new group is the
 other exception: from a crew pane, `yardr bead ask <id>
@@ -88,7 +89,21 @@ file the yard wrote is not one to name, since a new prompt is a new file.
 stands, in a terminal, with `group set`; a peer group needs no card; and a
 name in use is refused, since the card adds and never replaces. A crew
 member that needs any other of those asks the operator for it, with the
-command whole in the ask; every other setting is changed as above.
+command whole in the ask, except what the yardmaster may run for the
+operator on their mail instead. Where `yardmaster_delegation` is on
+([users.md](users.md#the-yardmaster-for-the-operator)), the yardmaster sets
+a group's `kind`, `model`, `dir` and `worktrees` and its args as
+`preset=<label>`, one of the kind's named permission presets that keeps the
+agent's prompts, and adds a group with them, citing that mail's sender with
+`--for <sender> --mail <seq>`:
+
+```sh
+yardr group set reviewers model=opus preset=accept-edits --for ada --mail 1042
+```
+
+The yard records the run for the operator and mails it to them. Free `args`,
+`env_file`, a `prompt`, a `cmd` and a change of runner to or from `exec` are
+never part of it. Every other setting is changed as above.
 
 A group's `cmd`, its `prompt` and the permission preset of its kind that
 never asks (`yardr harness show <kind>` lists the presets; free `args` are
