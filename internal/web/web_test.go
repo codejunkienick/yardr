@@ -1360,13 +1360,14 @@ func TestTokens(t *testing.T) {
 	}
 	// Square corners everywhere; circles only for status dots and the
 	// rail's chip, tiles and pills, which keep footplate's rounded
-	// corners, and pills only for the Beads filters' chips.
+	// corners, as the talk page's composer keeps its card radius, and
+	// pills only for the Beads filters' chips.
 	radii := regexp.MustCompile(`(?m)^(.*)border-radius:\s*([^;]+);`).FindAllStringSubmatch(string(css), -1)
 	for _, r := range radii {
 		before := strings.TrimSpace(r[1])
 		round := strings.HasPrefix(before, ".dot ") || strings.HasPrefix(before, ".chip ") ||
 			strings.HasPrefix(before, ".tile ") || strings.HasPrefix(before, ".pill ") ||
-			strings.HasPrefix(before, ".chips a ")
+			strings.HasPrefix(before, ".chips a ") || strings.HasPrefix(before, "#send ")
 		if r[2] != "0" && !round {
 			t.Errorf("a corner that is not square: %s", r[0])
 		}

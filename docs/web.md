@@ -2080,6 +2080,20 @@ scrolls into view, a page at a time; without scripts it is a plain link to
 the older page under `?before=`, a snapshot read undisturbed, with the way
 back above the letters.
 
+The form is a composer: a framed box under the mail, on the raised ground
+with a hairline and the card radius, as wide as the mail and on its edges. It
+holds the label `Mail to <member> as <user>`, the line to write in, and the
+Send button. Enter sends the mail and Shift+Enter breaks the line, as in
+footplate, so that a person who moves between the two never sends half a
+thought with the key that breaks a line in the other; Ctrl+Enter and
+Cmd+Enter, which sent before the keys moved, still send. A pasted line break
+still breaks the line, and an Enter that confirms what an input method is
+composing sends nothing. The hint beside Send names Enter and Shift+Enter:
+`yard.js` puts it in from the words on the page, so without scripts the page
+names no key. There Enter breaks the line, as a text field's does, and the
+button sends. Mail refused says why above the composer, on its edge, and the
+words stay in its line.
+
 As JSON:
 
 ```json

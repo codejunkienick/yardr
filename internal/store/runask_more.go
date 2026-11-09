@@ -181,8 +181,6 @@ var crewGrantKeys = []string{OpenThreads, SetState, MailPeers}
 // crewGrantUse is how a refusal names the crew set a run ask takes.
 const crewGrantUse = "yardr crew set <name> open_threads=<sources> | set_state=<sources> | peers=<peers>"
 
-// crewGrantChange is a parsed crew set of grants: the member, the grants
-// set whole, and the grants removed.
 // parseCrewIdentity reads the words of crew identity <name> with its
 // --source and --id and --key, one of the two at least. What is stored is
 // the name, the source and each of the two given, each once, in that

@@ -48,12 +48,13 @@ func All(home string, st store.API, log *slog.Logger, onError func(error)) map[s
 	}
 }
 
-// Env is the environment every started process gets, under the yardr names
-// and the old yard ones (see config.Env), and the trace context of its
-// session: TRACEPARENT and OTEL_RESOURCE_ATTRIBUTES, so that whatever in it
-// exports OpenTelemetry sends it under the bead (see otel.Env). They are set
-// whether or not anything collects; the resource attributes this process
-// was itself started with are kept in front of the bead's.
+// Env is the environment every started process gets: the five YARDR_
+// entries BEAD, SESSION, STAGE, GROUP and ACTOR (see config.Env), and the
+// trace context of its session, TRACEPARENT and OTEL_RESOURCE_ATTRIBUTES,
+// so that whatever in it exports OpenTelemetry sends it under the bead (see
+// otel.Env). They are set whether or not anything collects; the resource
+// attributes this process was itself started with are kept in front of the
+// bead's.
 func Env(job dispatch.Job, actor string) []string {
 	depot := ""
 	if job.Depot != nil {

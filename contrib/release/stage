@@ -95,6 +95,9 @@
 #                           (no default: build refuses without it)
 #   YARDR_RELEASE_NOTARY_PROFILE  the notarytool keychain profile the
 #                           binaries are notarized under (no default)
+#   YARDR_RELEASE_NOTARY_TIMEOUT  how long build waits for Apple's answer
+#                           for each darwin binary: a whole number above
+#                           zero with an optional s, m or h (default 30m)
 #   YARDR_RELEASE_REPO      the GitHub repo, owner/name (default yardr-dev/yardr)
 #   YARDR_RELEASE_PUBKEY    the minisign public key verify checks against
 #                           (default yardr's release key)

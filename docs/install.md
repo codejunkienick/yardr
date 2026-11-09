@@ -860,6 +860,18 @@ an error before anything is built. A binary Apple does not accept fails the
 build, which prints the notary service's log for the submission. No ticket
 is stapled, as a bare binary cannot carry one ([macOS](#macos)).
 
+The wait for Apple's answer is bounded, for each binary, so that a notary
+service that stalls cannot hold the build, and with it the release group's
+one slot, for good. The bound is 30 minutes, or what
+`YARDR_RELEASE_NOTARY_TIMEOUT` says: a whole number above zero with an
+optional `s`, `m` or `h`, in seconds where it has none, as `notarytool`'s
+`--timeout` reads it. A value that is none of those is an error before
+anything is built. A submission Apple has not answered by then fails the
+build, which names the target, the bound and the submission, with the line
+that looks it up (`xcrun notarytool info <id> --keychain-profile <profile>`).
+Apple goes on processing it after `notarytool` gives up, so a run again may
+find it accepted; the build does not submit it a second time by itself.
+
 The setup is done once per Mac, and needs the Xcode command line tools
 (`xcode-select --install`) and membership of the Apple Developer Program.
 
@@ -917,7 +929,9 @@ The setup is done once per Mac, and needs the Xcode command line tools
    ```
 
    Until both are set, `build` refuses before it tags anything and says
-   which is missing; the group never ships a darwin binary unsigned. The
+   which is missing; the group never ships a darwin binary unsigned. A third
+   line, `YARDR_RELEASE_NOTARY_TIMEOUT=45m`, sets the bound on the wait above
+   for the group's builds, where 30 minutes is not the one wanted. The
    group runs `build` as whoever the daemon runs as, on this Mac, which
    must be logged in with the keychain that holds the identity unlocked,
    and needs Go and the Xcode command line tools on the daemon's PATH.

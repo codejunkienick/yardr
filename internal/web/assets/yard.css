@@ -497,16 +497,29 @@ ul, ol { list-style: none; }
 .letter .text { font-family: var(--sans); }
 .letter img { display: block; max-width: 100%; height: auto; margin-top: 8px; }
 .letter .label { margin-top: 4px; }
-/* The form stands outside the live part, so what is typed survives what
-   arrives. Its text is 16px: smaller, a phone enlarges the field on focus
-   and the page with it. */
-#send { display: flex; flex-direction: column; gap: 8px; padding: var(--gap); }
-#send textarea { width: 100%; padding: 8px; background: var(--panel); color: var(--ink); border: 1px solid var(--hairline-strong); font: 16px/1.5 var(--mono); resize: vertical; }
+/* The composer: the form stands in the reading column under the mail, a
+   framed box on the raised ground, with a hairline and the card radius (8px,
+   as the rail's chip and tiles keep theirs where the reset squares the
+   rest). It is as wide as the mail less the gutter the letters keep, so its
+   edges stand on the hairlines of the day breaks above it, and centred past
+   the reading width. The label stands small and quiet at its top, the line
+   has no border of its own, and the Send row is its foot. The form stands
+   outside the live part, so what is typed survives what arrives. The line's
+   text is 16px: smaller, a phone enlarges the field on focus and the page
+   with it. Why a mail was not sent stands above the frame, on its edge. */
+#send, #talk > .error { width: calc(100% - 2 * var(--gap)); max-width: calc(var(--reading-width) - 2 * var(--gap)); margin-inline: auto; }
+#send { display: flex; flex-direction: column; gap: 4px; margin-block: var(--gap); padding: 8px 12px; background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px; }
+#talk > .error { padding: var(--gap) 0 0; border-bottom: 0; }
+/* The line has no border to show the focus, so the frame shows it. */
+#send:focus-within { border-color: var(--accent); }
+#send textarea { width: 100%; padding: 0; background: none; color: var(--ink); border: 0; font: 16px/1.5 var(--mono); resize: vertical; }
+#send textarea:focus-visible { outline: none; }
+#send textarea::placeholder { color: var(--faint); }
 /* The Send button stands at the row's right edge, the key that sends it
    beside: faint as the view's faint text, small, and never uppercased,
    as key names are case-sensitive. */
 #send .send-row { display: flex; justify-content: flex-end; align-items: baseline; gap: 8px; }
-#send .hint { color: var(--faint); font-size: var(--small); }
+#send .hint { color: var(--faint); font-size: var(--small); text-wrap: balance; }
 #send button { padding: 8px 16px; background: var(--panel); color: var(--dim); border: 1px solid var(--hairline-strong); font-size: var(--small); letter-spacing: var(--label-spacing); text-transform: uppercase; }
 #send button:hover { color: var(--accent-hover); border-color: var(--accent-hover); }
 /* Why a mail was not sent, above the form that keeps its words. */

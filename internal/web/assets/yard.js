@@ -1,39 +1,48 @@
 // yard.js is the view's own script: every page loads it from this server,
 // and nothing in it names another host. What it does now:
 //
-// The talk page's textarea sends on ctrl+Enter, cmd+Enter on a Mac, as its
-// Send button does; a plain Enter still breaks the line. The form stands
-// outside the page's live part, so one listener on the document holds
-// across htmx swaps. requestSubmit fires the submit event, which htmx
-// takes as it takes the button's.
+// The talk page's textarea sends on Enter, as its Send button does, and
+// breaks the line on Shift+Enter, as footplate's line does, so that a person
+// moving between the two never sends half a thought with the key that breaks
+// a line in the other. Ctrl+Enter and Cmd+Enter, which sent before the keys
+// moved, still send; with Shift or Alt held the browser's own meaning of the
+// key stands, which is the line break for Shift. The form stands outside the
+// page's live part, so one listener on the document holds across htmx swaps.
+// requestSubmit fires the submit event, which htmx takes as it takes the
+// button's. Only the Enter key's meaning moves: a pasted line break still
+// breaks the line.
 //
-// The talk page names that key beside its Send button: ctrl+Enter,
-// ⌘+Enter on a Mac. The template carries the element empty and hidden,
-// so where this script does not run the page names no key, which is
-// true. Each send puts a fresh form in place of the talk, so the hint
-// is shown again after every swap.
+// The talk page names the keys beside its Send button, from the words in the
+// hint's data-hint. The template carries the element empty and hidden, so
+// where this script does not run the page names no key, which is true: there
+// Enter breaks the line and only the button sends. Each send puts a fresh
+// form in place of the talk, so the hint is shown again after every swap.
 //
 // The talk page's letters are grouped by the reader's day and clock, which
 // the browser sets over the whole pane (groupLetters, below).
 document.addEventListener("keydown", function (event) {
-  if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey)) return;
+  if (event.key !== "Enter" || event.shiftKey || event.altKey) return;
+  // An Enter that confirms what an input method is composing is the
+  // composition's, not the form's. isComposing says so, except in Safari,
+  // which ends the composition before that keydown and reports it with
+  // keyCode 229.
+  if (event.isComposing || event.keyCode === 229) return;
   var target = event.target;
   if (!(target instanceof HTMLTextAreaElement) || target.id !== "text") return;
   if (!target.form) return;
   event.preventDefault();
+  // A held key repeats the keydown: the first sends, and the rest do nothing.
+  // They are swallowed above, so none puts a line break into the emptied form
+  // the send brings, and none asks that form to send, which would show its
+  // validation message at every repeat.
+  if (event.repeat) return;
   target.form.requestSubmit();
 });
 
 function showSendKey() {
-  var hint = document.getElementById("send-key");
-  if (!hint || !hint.hidden) return;
-  var platform = "";
-  if (navigator.userAgentData && typeof navigator.userAgentData.platform === "string") {
-    platform = navigator.userAgentData.platform;
-  } else if (typeof navigator.platform === "string") {
-    platform = navigator.platform;
-  }
-  hint.textContent = platform === "macOS" || platform.indexOf("Mac") === 0 ? "⌘+Enter" : "ctrl+Enter";
+  var hint = document.getElementById("send-keys");
+  if (!hint || !hint.hidden || !hint.dataset.hint) return;
+  hint.textContent = hint.dataset.hint;
   hint.hidden = false;
 }
 showSendKey();

@@ -322,8 +322,10 @@ func goBuilds(t *testing.T, env []string) []string {
 // noting only when an archive is packed. go is fakeGo, which notes its builds
 // in the file GO_CALLS names (goBuilds reads it) and not in the one returned.
 //
-//	STANDIN_UNAME    what uname -s prints (Darwin)
-//	STANDIN_STATUS   what the notary service answers (Accepted)
+//	STANDIN_UNAME        what uname -s prints (Darwin)
+//	STANDIN_STATUS       what the notary service answers (Accepted)
+//	STANDIN_ID           the submission's id in that answer; set and empty, none
+//	STANDIN_SUBMIT_EXIT  the exit status of notarytool submit (0)
 func standIns(t *testing.T) (env []string, calls string) {
 	t.Helper()
 	bin := t.TempDir()
@@ -346,7 +348,7 @@ cp "$4" "$3"`,
 case "$2" in
   submit)
     grep -q 'signed by the stand-in' "$3" || { echo "the submission is not of the signed binary" >&2; exit 1; }
-    echo '{"path":"'"$3"'","message":"Processing complete","status":"'"${STANDIN_STATUS:-Accepted}"'","id":"2efe2717-52ef-43a5-96dc-0797e4ca1041"}'
+    echo '{"path":"'"$3"'","message":"Processing complete","status":"'"${STANDIN_STATUS:-Accepted}"'","id":"'"${STANDIN_ID-2efe2717-52ef-43a5-96dc-0797e4ca1041}"'"}'
     exit "${STANDIN_SUBMIT_EXIT:-0}"
     ;;
   log)
@@ -444,7 +446,8 @@ func TestBuildSignsAndNotarizesTheDarwinBinaryBeforeItPacksIt(t *testing.T) {
 	for _, arg := range []string{
 		"--sign Developer ID Application: Stand In (ABCDE12345) ",
 		"--options runtime", "--timestamp", "--identifier dev.yardr.yardr", "--force",
-		"--keychain-profile stand-in-profile", "--wait",
+		// The wait for Apple is bounded, by 30 minutes where nothing says otherwise.
+		"--keychain-profile stand-in-profile", "--wait", " --timeout 30m ",
 	} {
 		if !strings.Contains(string(b), arg) {
 			t.Errorf("no %q in the calls:\n%s", arg, b)
@@ -483,10 +486,94 @@ func TestBuildFailsWithTheNotaryLogWhenAppleRefuses(t *testing.T) {
 	}
 }
 
-// Half a signing setup, or a whole one where there is no codesign, is an
-// error before anything is built: nothing is called and no out-dir made.
+// The wait for Apple's answer is bounded by what YARDR_RELEASE_NOTARY_TIMEOUT
+// says, in notarytool's own duration, and by 30 minutes where it says nothing
+// (an empty value says nothing): the submit carries the bound, and the build
+// says it, so that a notary service that stalls cannot hold the build.
+func TestBuildBoundsTheNotaryWait(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct{ value, want string }{
+		"empty":   {"", "30m"},
+		"seconds": {"90s", "90s"},
+		"minutes": {"45m", "45m"},
+		"hours":   {"2h", "2h"},
+		"bare":    {"300", "300"}, // seconds, as notarytool reads it
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			env, calls := standIns(t)
+			out, err := buildWith(t, append(env, "YARDR_RELEASE_TARGETS=darwin/arm64", "YARDR_RELEASE_NOTARY_TIMEOUT="+tc.value), "v9.8.7", t.TempDir())
+			if err != nil {
+				t.Fatalf("build: %v\n%s", err, out)
+			}
+			if b, _ := os.ReadFile(calls); !strings.Contains(string(b), " --timeout "+tc.want+" ") {
+				t.Errorf("the submit does not carry --timeout %s:\n%s", tc.want, b)
+			}
+			if want := tc.want + " at most"; !strings.Contains(out, want) {
+				t.Errorf("the build does not say it waits %s:\n%s", want, out)
+			}
+		})
+	}
+}
+
+// A notary service that has not answered when the wait ends fails the build
+// with the target, the bound it reached and, where the answer carries the
+// submission's id, the line that looks it up. It is no refusal: there is no
+// log to ask for, and nothing asks Apple again.
+func TestBuildFailsWithTheSubmissionWhenTheNotaryServiceDoesNotAnswerInTime(t *testing.T) {
+	t.Parallel()
+	const id = "2efe2717-52ef-43a5-96dc-0797e4ca1041"
+	for name, tc := range map[string]struct {
+		env     []string
+		timeout string
+		hasID   bool
+	}{
+		"notarytool exits non-zero": {[]string{"STANDIN_SUBMIT_EXIT=1"}, "30m", true},
+		// The status says the wait ran out, whatever notarytool exits with.
+		"notarytool exits zero": {nil, "30m", true},
+		"a bound that is set":   {[]string{"STANDIN_SUBMIT_EXIT=1", "YARDR_RELEASE_NOTARY_TIMEOUT=90s"}, "90s", true},
+		"an answer with no id":  {[]string{"STANDIN_SUBMIT_EXIT=1", "STANDIN_ID="}, "30m", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			env, calls := standIns(t)
+			dist := t.TempDir()
+			env = append(env, "YARDR_RELEASE_TARGETS=darwin/arm64", "STANDIN_STATUS=In Progress")
+			out, err := buildWith(t, append(env, tc.env...), "v9.8.7", dist)
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+				t.Fatalf("build: %v, want exit status 1:\n%s", err, out)
+			}
+			wants := []string{"darwin/arm64", "within " + tc.timeout + " (YARDR_RELEASE_NOTARY_TIMEOUT)", "a run again may find it accepted"}
+			if tc.hasID {
+				wants = append(wants, "submission "+id+" is still in progress", "xcrun notarytool info "+id+" --keychain-profile stand-in-profile")
+			}
+			for _, want := range wants {
+				if !strings.Contains(out, want) {
+					t.Errorf("no %q in the output:\n%s", want, out)
+				}
+			}
+			if !tc.hasID && (strings.Contains(out, "submission") || strings.Contains(out, "notarytool info")) {
+				t.Errorf("the output names a submission it has no id for:\n%s", out)
+			}
+			// The line is printed for a person to run, not run: nothing asks
+			// Apple for the log of a submission that has none yet.
+			if b, _ := os.ReadFile(calls); strings.Contains(string(b), "notarytool log") || strings.Contains(string(b), "notarytool info") {
+				t.Errorf("the build asked Apple again:\n%s", b)
+			}
+			if left, _ := os.ReadDir(dist); len(left) != 0 {
+				t.Errorf("a build that failed to notarize left %d files in %s", len(left), dist)
+			}
+		})
+	}
+}
+
+// Half a signing setup, or a whole one where there is no codesign, or a notary
+// wait that is no duration, is an error before anything is built: nothing is
+// called and no out-dir made.
 func TestBuildRefusesSigningItCannotDo(t *testing.T) {
 	t.Parallel()
+	timeout := func(value string) []string { return []string{"YARDR_RELEASE_NOTARY_TIMEOUT=" + value} }
 	for name, tc := range map[string]struct {
 		env  []string
 		want string
@@ -494,6 +581,15 @@ func TestBuildRefusesSigningItCannotDo(t *testing.T) {
 		"identity alone": {[]string{"YARDR_RELEASE_NOTARY_PROFILE="}, "YARDR_RELEASE_NOTARY_PROFILE is not"},
 		"profile alone":  {[]string{"YARDR_RELEASE_SIGN_IDENTITY="}, "YARDR_RELEASE_SIGN_IDENTITY is not"},
 		"not macOS":      {[]string{"STANDIN_UNAME=Linux"}, "this is Linux"},
+		// notarytool's durations are a whole number above zero with an s, m
+		// or h; it refuses a zero too, but only once the binary is signed.
+		"timeout in words":        {timeout("soon"), `YARDR_RELEASE_NOTARY_TIMEOUT is "soon"`},
+		"timeout in days":         {timeout("30d"), `YARDR_RELEASE_NOTARY_TIMEOUT is "30d"`},
+		"timeout of zero":         {timeout("0"), `YARDR_RELEASE_NOTARY_TIMEOUT is "0"`},
+		"timeout of zero seconds": {timeout("00s"), `YARDR_RELEASE_NOTARY_TIMEOUT is "00s"`},
+		"timeout with a fraction": {timeout("1.5h"), `YARDR_RELEASE_NOTARY_TIMEOUT is "1.5h"`},
+		"timeout of a unit alone": {timeout("m"), `YARDR_RELEASE_NOTARY_TIMEOUT is "m"`},
+		"timeout below zero":      {timeout("-5m"), `YARDR_RELEASE_NOTARY_TIMEOUT is "-5m"`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			env, calls := standIns(t)

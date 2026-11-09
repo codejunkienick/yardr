@@ -33,6 +33,14 @@
 # build of one's own, as the release flow's build stage (contrib/release/stage)
 # refuses to build the darwin archives without both.
 #
+# YARDR_RELEASE_NOTARY_TIMEOUT bounds that wait for Apple's answer, for each
+# darwin binary: a whole number above zero with an optional s, m or h, in
+# seconds where it has none, as notarytool reads it (default 30m). A
+# submission Apple has not answered by then fails the build, which names it
+# and the command that looks it up: Apple keeps processing it, so a run again
+# may find it accepted. A value that is none of those is refused before
+# anything is built.
+#
 # YARDR_RELEASE_MINISIGN_KEY, the path of a minisign secret key, signs
 # checksums.txt with it and writes checksums.txt.minisig beside it
 # (docs/install.md, "Signed checksums"). Unset, the checksums are not signed.
@@ -64,6 +72,24 @@ if [ -z "$identity" ] && [ -n "$profile" ]; then
 fi
 if [ -n "$identity" ] && [ "$(uname -s)" != Darwin ]; then
   echo "contrib/release/build: YARDR_RELEASE_SIGN_IDENTITY and YARDR_RELEASE_NOTARY_PROFILE are set, and this is $(uname -s): codesign and notarytool are macOS's; unset both for unsigned darwin binaries" >&2
+  exit 2
+fi
+
+# The wait for Apple's answer is bounded, so that a notary service that
+# stalls fails the build with a reason instead of holding it, and the release
+# group's one slot, until someone kills it. The value is notarytool's own
+# duration. It checks it too, but only when the submit starts, after the
+# binary is signed, and it refuses a zero: so one that is not a whole number
+# above zero with an optional s, m or h is refused here, before the first
+# build.
+notary_timeout=${YARDR_RELEASE_NOTARY_TIMEOUT:-30m}
+timeout_ok=""
+case ${notary_timeout%[smh]} in
+  *[!0-9]*) ;;
+  *[1-9]*) timeout_ok=yes ;;
+esac
+if [ -z "$timeout_ok" ]; then
+  printf 'contrib/release/build: YARDR_RELEASE_NOTARY_TIMEOUT is "%s"; set it to how long to wait for Apple, a whole number above zero with an optional s, m or h (seconds without one), like 30m, or unset it for 30m\n' "$notary_timeout" >&2
   exit 2
 fi
 case " $targets" in
@@ -162,12 +188,12 @@ notarize() {
   # only. zip and not ditto, which packs the extended attributes beside the
   # binary as a second member.
   zip -q -j "$2.zip" "$2"
-  echo "$1: signed; waiting for Apple's notary service (minutes, as a rule)"
+  echo "$1: signed; waiting for Apple's notary service (minutes, as a rule; $notary_timeout at most)"
   # json, as the normal format is for reading: the id and the status are
   # taken from it. A refusal is a status, which notarytool need not exit
-  # non-zero for.
+  # non-zero for. --timeout is how long notarytool polls before it gives up.
   submit_exit=0
-  if answer=$(xcrun notarytool submit "$2.zip" --keychain-profile "$profile" --wait --output-format json); then
+  if answer=$(xcrun notarytool submit "$2.zip" --keychain-profile "$profile" --wait --timeout "$notary_timeout" --output-format json); then
     :
   else
     # Some notarytool versions can return a failed exit status along with a
@@ -181,6 +207,18 @@ notarize() {
   }
   status=$(field status)
   id=$(field id)
+  # A wait that ran out is no refusal: the submission is still In Progress,
+  # which is Apple's status for one it has not decided, so there is no log to
+  # print, and it goes on processing after notarytool gives up. Whether
+  # notarytool exits non-zero for it is not relied on: the status says it.
+  if [ "$status" = "In Progress" ]; then
+    echo "contrib/release/build: $1: Apple's notary service gave no answer within $notary_timeout (YARDR_RELEASE_NOTARY_TIMEOUT)${id:+; submission $id is still in progress}" >&2
+    if [ -n "$id" ]; then
+      echo "  look it up: xcrun notarytool info $id --keychain-profile $profile" >&2
+    fi
+    echo "  Apple keeps processing it after notarytool gives up, so a run again may find it accepted" >&2
+    exit 1
+  fi
   if [ "$submit_exit" -ne 0 ] || [ "$status" != Accepted ]; then
     echo "contrib/release/build: $1: Apple did not notarize the binary (status \"$status\", submission $id); its log:" >&2
     if [ -n "$id" ]; then

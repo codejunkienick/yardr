@@ -528,6 +528,27 @@ func TestTalkLayout(t *testing.T) {
 	if !strings.Contains(head, "color: var(--faint);") {
 		t.Errorf(".talk-head .state lacks color: var(--faint);: %s", head)
 	}
+	// The form is the composer: a framed box on the raised ground, with a
+	// hairline and the card radius, in the reading column as the mail is, less
+	// the gutter its letters keep, so that its edges stand on the hairlines of
+	// the day breaks above it; the reason a mail was not sent stands above it,
+	// on the same edge. Its line has no border of its own and keeps its 16
+	// pixels, which a phone does not enlarge on focus, and the frame shows
+	// the focus.
+	for selector, wants := range map[string][]string{
+		"#send": {"background: var(--panel);", "border: 1px solid var(--hairline);", "border-radius: 8px;"},
+		"#send, #talk > .error": {"width: calc(100% - 2 * var(--gap));",
+			"max-width: calc(var(--reading-width) - 2 * var(--gap));", "margin-inline: auto;"},
+		"#send textarea":     {"border: 0;", "font: 16px/1.5 var(--mono);"},
+		"#send:focus-within": {"border-color: var(--accent);"},
+	} {
+		rule := cssRule(t, selector)
+		for _, want := range wants {
+			if !strings.Contains(rule, want) {
+				t.Errorf("%s lacks %s: %s", selector, want, rule)
+			}
+		}
+	}
 	css, err := os.ReadFile("assets/yard.css")
 	must(t, err)
 	// Where the window has no room for the right column, every page's

@@ -133,8 +133,9 @@ func TestTalk(t *testing.T) {
 		"paint the shed", "it is painted", // the letters, both directions
 		"jo", "yardmaster", // who wrote each
 		`<form id="send" method="post" action="/talk?with=yardmaster"`,
-		`<textarea id="text" name="text"`,                 // yard.js sends on ctrl+Enter in this box
-		`<span class="hint" id="send-key" hidden></span>`, // yard.js names the send key here
+		`<textarea id="text" name="text"`, // yard.js sends on Enter in this box
+		// yard.js puts these words, the keys that stand, in the hint and shows it
+		`<span class="hint" id="send-keys" data-hint="Enter to send · Shift+Enter for a new line" hidden></span>`,
 		`hx-post="/talk?with=yardmaster"`,
 		`hx-get="/talk?with=yardmaster"`, // the newest page is live
 		`maxlength="65536"`,
@@ -161,6 +162,30 @@ func TestTalk(t *testing.T) {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("the letters lack %q:\n%s", want, r.body)
 		}
+	}
+	// The form is the composer: its label, its line and its Send row stand in
+	// that order in the one form, which posts by its button where no script
+	// runs. The hint is empty and hidden and the keys stand once, in
+	// data-hint, so a page without scripts names no key: there Enter breaks
+	// the line and only the button sends.
+	form := body[strings.Index(body, `<form id="send"`):]
+	form = form[:strings.Index(form, `</form>`)]
+	at := -1
+	for _, part := range []string{
+		`<label class="label" for="text">Mail to yardmaster as jo</label>`,
+		`<textarea id="text" name="text" rows="3" required maxlength="65536" placeholder="Write to yardmaster…"></textarea>`,
+		`<div class="send-row">`,
+		`<span class="hint" id="send-keys"`,
+		`<button type="submit">Send</button>`,
+	} {
+		next := strings.Index(form, part)
+		if next <= at {
+			t.Errorf("the form has %q at %d after %d, want its label, line and Send row in that order:\n%s", part, next, at, form)
+		}
+		at = next
+	}
+	if n := strings.Count(r.body, "Enter to send"); n != 1 {
+		t.Errorf("the page names the send key %d times, want once, in data-hint:\n%s", n, r.body)
 	}
 	if csp := r.header.Get("Content-Security-Policy"); !strings.Contains(csp, "form-action 'self'") {
 		t.Errorf("Content-Security-Policy %q, want form-action 'self': the form posts to the view", csp)
@@ -895,6 +920,17 @@ func TestTalkPostInvalid(t *testing.T) {
 	r = f.postForm("/talk?with=yardmaster", url.Values{"text": {big}}, "Origin", f.ts.URL)
 	if r.status != 200 || !strings.Contains(r.body, "--file") || !strings.Contains(r.body, big[:100]) {
 		t.Errorf("long mail: status %d, want the page with the reason and the words kept", r.status)
+	}
+	// The words are back in the line of the form, which is the composer
+	// still, and the reason stands above it.
+	if why, form := strings.Index(r.body, `<p class="item error">`), strings.Index(r.body, `<form id="send"`); why < 0 || form < why {
+		t.Errorf("long mail: the reason stands at %d and the form at %d, want the reason first", why, form)
+	}
+	if want := `placeholder="Write to yardmaster…">` + big[:100]; !strings.Contains(r.body, want) {
+		t.Error("long mail: the words are not back in the form's line")
+	}
+	if want := `<span class="hint" id="send-keys" data-hint="Enter to send`; !strings.Contains(r.body, want) {
+		t.Errorf("long mail: the form lacks %q", want)
 	}
 	r = f.postForm("/talk?with=yardmaster", url.Values{"text": {""}}, "Origin", f.ts.URL, "Accept", "application/json")
 	var got web.Talk

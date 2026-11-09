@@ -112,19 +112,24 @@
   {{- if .Data.Error}}
   <p class="item error">{{.Data.Error}}</p>
   {{- end}}
-  {{- /* The form posts and puts the page's answer in place of the talk,
-         letters and an emptied form alike; without scripts it posts and
-         loads the conversation it lands on. It stands outside the live
-         part, so what is typed survives what arrives. */}}
+  {{- /* The composer: a framed box in the reading column under the mail,
+         holding the label, the line and the Send row. The form posts and
+         puts the page's answer in place of the talk, letters and an emptied
+         form alike; without scripts it posts and loads the conversation it
+         lands on. It stands outside the live part, so what is typed
+         survives what arrives. */}}
   <form id="send" method="post" action="/talk?with={{.Data.With}}" hx-post="/talk?with={{.Data.With}}" hx-target="#talk" hx-select="#talk > *" hx-swap="innerHTML ignoreTitle:true">
     {{template "csrf"}}
     <label class="label" for="text">Mail to {{.Data.With}} as {{.Data.As}}</label>
     <textarea id="text" name="text" rows="3" required maxlength="{{.Data.MaxMail}}" placeholder="Write to {{.Data.With}}…">{{.Data.Draft}}</textarea>
-    {{- /* The key that sends beside the Send button: yard.js fills the
-           empty, hidden hint from the platform and shows it, so without
-           scripts the page names no key, which is true. */}}
+    {{- /* The keys beside the Send button: Enter sends and Shift+Enter breaks
+           the line, as in footplate. The words ride in data-hint, and yard.js
+           puts them in the hint and shows it. The element stays empty, for a
+           browser that shows hidden text would show them: without scripts the
+           page names no key, which is true, since there Enter breaks the line
+           and only the button sends. */}}
     <div class="send-row">
-      <span class="hint" id="send-key" hidden></span>
+      <span class="hint" id="send-keys" data-hint="Enter to send · Shift+Enter for a new line" hidden></span>
       <button type="submit">Send</button>
     </div>
   </form>
