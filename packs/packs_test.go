@@ -827,12 +827,26 @@ func TestStarterYardmasterSpeaksInThePersonsWords(t *testing.T) {
 	}
 }
 
+// hasFirstRunHeading says whether a yardmaster role holds the line that
+// withoutFirstRun (internal/cli) finds its setup section by: one whose trimmed
+// form is exactly "## First run". It is that function's match, so a heading
+// renamed, recapitalised or set at another level is not found, nor are the
+// words inside a line of prose.
+func hasFirstRunHeading(role string) bool {
+	return slices.ContainsFunc(strings.Split(role, "\n"), func(l string) bool {
+		return strings.TrimSpace(l) == "## First run"
+	})
+}
+
 // The yardmaster answers people fast and only from what it has looked
 // at: its "How you work" opens with the three rules (acknowledge at
 // once, ground what it says, be critical), in each pack. Each carries the
 // rules in their short form and points at docs/crew.md ("Conversation
 // sessions") for what to look at and what the journal and a handoff hold. Read
-// as one line, so that rewrapping a paragraph breaks nothing.
+// as one line, so that rewrapping a paragraph breaks nothing. Each also holds
+// the line "## First run", which withoutFirstRun finds the setup section by
+// (design yardr-2vy0 3.1): without it the role is printed whole, its setup
+// steps in every prime once the setup is done.
 func TestYardmasterHowYouWork(t *testing.T) {
 	for _, name := range []string{"starter/roles/yardmaster.md", "contributors/roles/yardmaster.md", "website/roles/yardmaster.md"} {
 		body, err := fs.ReadFile(packs.FS, name)
@@ -868,6 +882,27 @@ func TestYardmasterHowYouWork(t *testing.T) {
 		// First under "How you work", before the journaling.
 		if h, first, journal := strings.Index(text, "How you work:"), strings.Index(text, "When a person asks or picks"), strings.Index(text, "- Journal decisions"); h < 0 || first < 0 || journal < 0 || !(h < first && first < journal) {
 			t.Errorf("packs/%s: the three rules are not first under How you work", name)
+		}
+		if !hasFirstRunHeading(text) {
+			t.Errorf("packs/%s has no line \"## First run\": withoutFirstRun cannot find its setup steps, so every prime prints them", name)
+		}
+	}
+	// The roles are held to that helper, so these show what it refuses (a role
+	// without the line, and the near misses a later edit leaves) and what it
+	// takes (a line that is the heading once trimmed, as withoutFirstRun trims).
+	for _, c := range []struct {
+		name, role string
+		want       bool
+	}{
+		{"trimmed", "# Yardmaster\r\n\r\n  ## First run \r\n", true},
+		{"no section", "# Yardmaster\n\n## The work\n\nTriage.\n", false},
+		{"renamed", "# Yardmaster\n\n## First steps\n\nSetup.\n", false},
+		{"recapitalised", "# Yardmaster\n\n## First Run\n\nSetup.\n", false},
+		{"another level", "# Yardmaster\n\n### First run\n\nSetup.\n", false},
+		{"named in prose", "# Yardmaster\n\n## Setup\n\nThe ## First run section moved.\n", false},
+	} {
+		if got := hasFirstRunHeading(c.role); got != c.want {
+			t.Errorf("%s: hasFirstRunHeading = %t, want %t for:\n%s", c.name, got, c.want, c.role)
 		}
 	}
 }
