@@ -5470,6 +5470,10 @@ POST /call/Flows
 | `unassigned[].model` | string, may be absent | the model the claiming session started with, as it recorded it at claim, served unchanged; absent wherever no worker can be named, on a manual group's claim, and where the session recorded none |
 | `unassigned[].entered_stage_at` | time, may be absent | when the bead entered its stage, as an RFC 3339 time; absent where no session claimed it, and where the stay has no clock |
 
+What group a client sees for a bead depends on its claim. A bead no session has claimed shows no group of its own. The only group Flows gives for it is the `group` of its stage, the one a route sends a bead of the flow's type to. A bead an agent's or a command's session claimed shows `group` as that session recorded it at claim, next to its `worker`. A bead a manual group claimed shows no group. That claim is a person's turn and no work, so `working` is false and `worker`, `group`, `kind` and `model` are absent. The bead's row names no manual group, though its stage's `group` may be one.
+
+`yardr review` serves a bead by its own manual group, which is the group working it, else the one its routes send it to. Flows does not expose that group where a manual group claimed the bead. A stage's `group` is the route's for a bead of the flow's type, which need not be the bead's own. So a hint drawn for a stage cannot name the group review will serve from Flows alone. [`Waiting`](#waiting) names it for each bead that is a person's to move.
+
 Every depot stands here, travelling or not, and a removed depot's line leaves with it: `DeleteDepot` refuses while open beads remain. The unassigned rows are the open beads outside the backlog with no depot, the newest change first.
 
 Read it again on every event that carries a bead, and on the events without one that move its inputs: `group_set` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated` and `depot_removed`, and `setting_changed` whose `key` is `max_sessions` or `operator`. One minute is the ETA's grain: no timed refresh.

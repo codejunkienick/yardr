@@ -13,7 +13,7 @@ import (
 )
 
 // The peer of a unix connection is the connecting process, and its
-// ancestors begin with it and its parent.
+// ancestors begin with it and its parent, unless that is pid 1.
 func TestPIDAndAncestors(t *testing.T) {
 	dir, err := os.MkdirTemp("", "yp") // t.TempDir is too long for a socket path
 	if err != nil {
@@ -52,9 +52,17 @@ func TestPIDAndAncestors(t *testing.T) {
 	if pid != os.Getpid() {
 		t.Fatalf("peer pid %d, want this process %d", pid, os.Getpid())
 	}
+	// Ancestors leaves out pid 1 and anything below it (Parent answers 0 for
+	// them), so a test binary that is a direct child of pid 1, as when a
+	// container's entrypoint runs it, has itself alone; any other has its
+	// parent next. (yardr-t6ah: slicing two off the pid alone panicked.)
 	anc := Ancestors(os.Getpid())
-	if !slices.Equal(anc[:2], []int{os.Getpid(), os.Getppid()}) {
-		t.Fatalf("ancestors %v, want to begin with %d, %d", anc, os.Getpid(), os.Getppid())
+	if ppid := os.Getppid(); ppid <= 1 {
+		if !slices.Equal(anc, []int{os.Getpid()}) {
+			t.Fatalf("ancestors %v, want %d alone: its parent is pid %d, which Ancestors leaves out", anc, os.Getpid(), ppid)
+		}
+	} else if len(anc) < 2 || !slices.Equal(anc[:2], []int{os.Getpid(), ppid}) {
+		t.Fatalf("ancestors %v, want to begin with %d, %d", anc, os.Getpid(), ppid)
 	}
 	// A pid no process has is nobody's child.
 	if p, err := Parent(1<<22 - 7); err != nil || p != 0 {

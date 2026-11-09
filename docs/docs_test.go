@@ -65,7 +65,8 @@ func TestLookup(t *testing.T) {
 
 // Section prints one heading's part of a page: the match ignores case,
 // the section runs to the next heading of the same or higher level,
-// and deeper headings stay in.
+// and deeper headings stay in. A line in a code fence is no heading, so
+// a sample's `# comment` or a template's `## Ask` ends no section.
 func TestSection(t *testing.T) {
 	text, ok := Section("groups", "runners")
 	if !ok {
@@ -88,6 +89,47 @@ func TestSection(t *testing.T) {
 	}
 	if _, ok := Section("groups", "  "); ok {
 		t.Errorf("Section(groups, blank) finds a section")
+	}
+
+	// The ask template's `## Ask` and an integration pack's
+	// `# packs/linear/pack.yaml` stand in fences of their sections, which run
+	// on past them: to the fence's close, and the text after it. (yardr-z53c:
+	// each section ended at that line, with its fence open.)
+	for _, c := range []struct{ page, words, fenced string }{
+		{"flows", "ask template", "\n## Ask\nkind: choice\n"},
+		{"packs", "integration pack", "\n# packs/linear/pack.yaml\nname: linear\n"},
+	} {
+		section, ok := Section(c.page, c.words)
+		if !ok {
+			t.Errorf("Section(%s, %s) finds nothing", c.page, c.words)
+			continue
+		}
+		_, inFence, ok := strings.Cut(section, c.fenced)
+		if !ok {
+			t.Errorf("Section(%s, %s) stops before %q, a line in a fence:\n%s", c.page, c.words, strings.TrimSpace(c.fenced), lastLines(section, 3))
+			continue
+		}
+		if _, after, closed := strings.Cut(inFence, "\n```\n"); !closed || strings.TrimSpace(after) == "" {
+			t.Errorf("Section(%s, %s) ends in the fence that holds %q, or at its close:\n%s", c.page, c.words, strings.TrimSpace(c.fenced), lastLines(section, 3))
+		}
+	}
+
+	// The rules, on texts no page carries: a fence's lines end no section
+	// and start none, and a fence left open runs to the end of the page.
+	for _, c := range []struct{ name, page, words, want string }{
+		{"a fenced heading ends no section",
+			"# T\n\n### Sample\n\n```\n## Ask\n# comment\n```\n\nafter\n\n### Next\n\nrest\n", "sample",
+			"### Sample\n\n```\n## Ask\n# comment\n```\n\nafter\n"},
+		{"a fenced heading starts no section",
+			"# T\n\n## Intro\n\n```\n## Sample in a fence\n```\n\n## Sample\n\ntext\n", "sample",
+			"## Sample\n\ntext\n"},
+		{"an open fence runs to the end of the page",
+			"# T\n\n## Sample\n\n```\n## Next\ntext\n", "sample",
+			"## Sample\n\n```\n## Next\ntext\n"},
+	} {
+		if got, ok := sectionOf(c.page, c.words); !ok || got != c.want {
+			t.Errorf("%s: sectionOf(%q, %q) = %q, %v, want %q", c.name, c.page, c.words, got, ok, c.want)
+		}
 	}
 }
 

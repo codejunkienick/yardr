@@ -88,7 +88,7 @@ type Plan struct {
 	// yard, once it is imported: a group's script and the programs of a
 	// declaration's commands (Pack.programs), as paths in the pack, sorted.
 	// An operator who has read the pack and pinned its digest has read these
-	// too; check prints them in a line above the digest. Empty for a pack
+	// too; check prints them in a line after the digest. Empty for a pack
 	// that has none, and then the text says nothing.
 	Programs []string `json:"programs"`
 	// Frame is the pack's page frame, which an import copies beside its

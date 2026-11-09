@@ -94,13 +94,22 @@ func Title(name string) (title string, ok bool) {
 // words, ignoring case, from that heading to the next heading of the
 // same or higher level or the end of the page. The page's own title
 // never matches: it would print the whole page, which is `yardr docs
-// <name>` without words. ok is false when the page is unknown or no
+// <name>` without words. A line in a code fence is code and no heading,
+// whatever it starts with: a shell sample's "# comment" or a template's
+// "## Ask" neither ends a section nor starts one, and a fence left open
+// runs to the end of the page. ok is false when the page is unknown or no
 // section heading matches.
 func Section(name, words string) (text string, ok bool) {
-	text, ok = Read(name)
+	page, ok := Read(name)
 	if !ok {
 		return "", false
 	}
+	return sectionOf(page, words)
+}
+
+// sectionOf is Section over the text of a page, so that its rules can be
+// held to a text that no page carries.
+func sectionOf(page, words string) (text string, ok bool) {
 	words = strings.TrimSpace(words)
 	if words == "" {
 		return "", false
@@ -108,9 +117,13 @@ func Section(name, words string) (text string, ok bool) {
 	var out []string
 	level := 0
 	titled := false
-	for line := range strings.Lines(strings.TrimSuffix(text, "\n")) {
+	fenced := false
+	for line := range strings.Lines(strings.TrimSuffix(page, "\n")) {
 		trimmed := strings.TrimRight(line, "\n")
-		if n, head, is := cutHeading(trimmed); is {
+		if isFence(trimmed) {
+			fenced = !fenced
+		}
+		if n, head, is := cutHeading(trimmed); is && !fenced {
 			if out == nil {
 				// The first heading is the title, not a section.
 				if !titled {
@@ -134,6 +147,12 @@ func Section(name, words string) (text string, ok bool) {
 		return "", false
 	}
 	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n", true
+}
+
+// isFence reports whether line opens or closes a code fence: three
+// backticks, after the indentation a fence inside a list item has.
+func isFence(line string) bool {
+	return strings.HasPrefix(strings.TrimSpace(line), "```")
 }
 
 // cutHeading splits a markdown heading line into its level and its
