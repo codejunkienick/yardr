@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -25,6 +26,7 @@ import (
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
 	"yardr.dev/yardr/internal/yardkey"
+	"yardr.dev/yardr/internal/yards"
 )
 
 const hookToken = "s3cret-token"
@@ -180,6 +182,60 @@ func overLink(t *testing.T, l *standin.EdgeLink, path string, header http.Header
 	return a
 }
 
+// linkTransport carries a request down the stand-in edge's link as the edge
+// would. The frame holds the path, the query and the headers the caller signed
+// over, and the scheme the edge ended TLS for, which the receiver needs to
+// derive the authority that was signed.
+type linkTransport struct{ l *standin.EdgeLink }
+
+func (lt linkTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	header := req.Header.Clone()
+	header.Set("X-Forwarded-Proto", req.URL.Scheme)
+	a, err := lt.l.Deliver(req.Context(), lt.l.Frame(req.Method, req.URL.RequestURI(), header, body, false))
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{StatusCode: a.Status, Header: a.Header, Body: io.NopCloser(bytes.NewReader(a.Body)), Request: req}, nil
+}
+
+// peerOverLink adds the peer bo to the yard in c, with ping allowed both ways.
+// It returns bo's caller, whose requests go down l, and the yard as bo calls
+// it, at an edge URL under a base, as a peer calls a yard behind the edge.
+func peerOverLink(t *testing.T, c *config.Config, cl store.API, l *standin.EdgeLink, edgeURL string) (*yards.Caller, store.Peer) {
+	t.Helper()
+	dir := t.TempDir()
+	key, _, err := yardkey.Ensure(filepath.Join(dir, "peer.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, encPub, _, err := yardkey.EnsureEnc(filepath.Join(dir, "peer-enc.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := cl.AddPeer(ctx, store.Peer{Name: "bo", Key: store.Public(key), Enc: encPub}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	ping := []string{"ping"}
+	if _, err := cl.AllowPeer(ctx, "bo", store.PeerAllow{Send: ping, Receive: ping}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	yardKey, err := store.Load(c.PeerKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, yardEnc, _, err := yardkey.EnsureEnc(c.PeerEncKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &yards.Caller{Key: key, Enc: enc, HTTP: &http.Client{Transport: linkTransport{l}}},
+		store.Peer{Name: "yard", Key: store.Public(yardKey), Enc: yardEnc, URL: edgeURL + "/peers/jo/yard"}
+}
+
 // waitEvent is the first event of kind the yard logged, waiting for it.
 func waitEvent(t *testing.T, cl store.API, kind string, ok func(store.Event) bool) store.Event {
 	t.Helper()
@@ -203,7 +259,9 @@ func waitEvent(t *testing.T, cl store.API, kind string, ok func(store.Event) boo
 // verified by the hook's secret, which the edge never holds (the right token
 // recorded, a wrong one 401); a device's call is served as the device, and
 // GiveSecret without an eligible login-input ask is refused, since no other
-// secret crosses the edge; /peers/ is not served through the edge. The link
+// secret crosses the edge; a peer's request meets the peers' receiver's own
+// check (unsigned it is a 401, a peer the yard has is answered, signed), and a
+// pairing's three requests, which are not sealed, are not carried. The link
 // is told as an event and in its state, and nothing listens on a port.
 func TestEdgeLinkServesTheListenersHandlersWithNoAddress(t *testing.T) {
 	edge, srv := stubEdge(t)
@@ -241,8 +299,34 @@ func TestEdgeLinkServesTheListenersHandlersWithNoAddress(t *testing.T) {
 	if a := overLink(t, l, "/user/call/GiveSecret", bearer(token), `{}`); !strings.Contains(string(a.Body), "a secret never crosses the edge") {
 		t.Errorf("GiveSecret without an ask over the link answered %d %s, want it refused", a.Status, a.Body)
 	}
-	if a := overLink(t, l, "/peers/messages", nil, `{}`); a.Status != http.StatusNotFound {
-		t.Errorf("/peers/ over the link answered %d, want 404", a.Status)
+	// A peer's request meets the peers' receiver's own check, as on the
+	// listener. Unsigned, it is refused there with a 401, where the link
+	// answered 404 before. From a peer the yard has, it is taken and answered.
+	// The caller checks each answer's signature against the yard's key, so
+	// only the receiver's own answer passes.
+	if a := overLink(t, l, "/peers/messages", nil, `{}`); a.Status != http.StatusUnauthorized {
+		t.Errorf("an unsigned /peers/messages over the link answered %d, want 401", a.Status)
+	}
+	bo, yard := peerOverLink(t, c, cl, l, srv.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := bo.Push(ctx, yard, store.PeerMessage{ID: "m1", Kind: "ping", Body: json.RawMessage(`{}`)}); err != nil {
+		t.Errorf("a signed, sealed push over the link: %v", err)
+	}
+	if _, err := bo.Pull(ctx, yard, 0, 0); err != nil {
+		t.Errorf("a signed pull over the link: %v", err)
+	}
+	// A pairing's requests cross unsealed, so the link carries none of them,
+	// under an edge's base or not, and however the path is spelled: the
+	// receiver reads a path decoded, and so does the filter. The answer is the
+	// plain 404 of a path with no route, and not the receiver's refusal of a
+	// pairing it has not open.
+	for _, base := range []string{"", "/peers/jo/yard"} {
+		for _, path := range []string{"/peers/pair/hello", "/peers/pair/reveal", "/peers/pair/confirm", "/peers/pair%2Fhello"} {
+			if a := overLink(t, l, base+path, nil, `{}`); a.Status != http.StatusNotFound || string(a.Body) != "404 page not found\n" {
+				t.Errorf("%s over the link answered %d %q, want the plain 404", base+path, a.Status, a.Body)
+			}
+		}
 	}
 	if up := waitEvent(t, cl, "edge_link_up", func(e store.Event) bool { return e.Data["role"] == "yard" }); up.Data["handle"] != "jo" || up.Data["url"] != srv.URL || up.Data["role"] != "yard" {
 		t.Errorf("edge_link_up = %+v", up.Data)

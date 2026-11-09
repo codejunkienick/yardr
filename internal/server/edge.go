@@ -14,6 +14,7 @@ import (
 
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/edgelink"
+	"yardr.dev/yardr/internal/pairing"
 	"yardr.dev/yardr/internal/store"
 )
 
@@ -283,13 +284,32 @@ func startLink(ctx context.Context, c *config.Config, st store.API, l *edgelink.
 	}
 }
 
-// withoutPeers is h less /peers/: a linked yard's requests are not carried
-// through the edge, whose operator would then read the peers' mail.
-func withoutPeers(h http.Handler) http.Handler {
+// withoutPairing is h less a pairing's three requests (internal/pairing).
+//
+// Everything else under /peers/ crosses signed, with its bodies sealed, and
+// down the link it meets the receiver's own check as it does on the listener.
+// The edge reads of it what any carrier reads: that two yards spoke, when,
+// and how much. It also reads a pull's query, which the signature covers and
+// the seal does not (docs/design/2026-10-26-yardr-4687-peering-on-standards.md,
+// section 3.7). It never reads a message's text.
+//
+// A pairing is the one exchange that is not sealed, because the two yards
+// hold no key of each other's yet to seal to. Its names, keys and URL cross
+// in the clear, with an HMAC under the code's key that anyone who reads it
+// can try codes against (docs/peers.md, "What pairing rests on"). So a
+// pairing reaches a yard on its listener alone, and a yard called only through
+// the edge is linked by hand.
+//
+// A request is matched by the ending of its decoded path, as the receiver
+// routes it, so that one under an edge's base
+// (/peers/<account>/<yard>/peers/pair/hello) is no way round.
+func withoutPairing(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/peers" || strings.HasPrefix(r.URL.Path, "/peers/") {
-			http.NotFound(w, r)
-			return
+		for _, p := range []string{pairing.PathHello, pairing.PathReveal, pairing.PathConfirm} {
+			if strings.HasSuffix(r.URL.Path, p) {
+				http.NotFound(w, r)
+				return
+			}
 		}
 		h.ServeHTTP(w, r)
 	})

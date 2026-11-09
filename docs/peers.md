@@ -83,9 +83,13 @@ Or the yard is [connected to the edge](edge.md), and the other yard calls
 it through the edge at `https://my.yardr.dev/peers/<account>/<yard>`:
 the edge's address with the account and the yard's name at the edge. The
 edge passes the requests down the yard's link and the answers back,
-keeping nothing, and the signatures still hold end to end. So two yards
-behind routers link as soon as one is edge-connected: the other calls
-the edge URL, and asks through it for what waits there.
+keeping nothing, and the signatures still hold end to end. A pairing is
+the exception. Its requests are not sealed, so the link does not carry
+them. Link a yard that is called only through the edge [by
+hand](#by-hand-invite-lines), with its edge URL as the `--url` of its
+invite. So two yards behind routers link as soon as one is
+edge-connected: the other calls the edge URL, and asks through it for
+what waits there.
 
 No listener and no edge link, no incoming. `yardr doctor` and `yardr peer
 show` say when that is so. A yard that only calls needs neither. One of
@@ -220,8 +224,10 @@ the same and the command says that the ping is owed.
   calls finds out before it has said who it is, so its code is still good
   for the same command with `--name`.
 - **`--url`** is where the other yard reaches the one that opens the
-  pairing: its listener's address, or, for a yard called through the edge,
-  its edge URL (`https://my.yardr.dev/peers/<account>/<yard>`). Without
+  pairing: its listener's address, or an address of your own that passes
+  the calls on to it, such as a tunnel or proxy. The edge's address will
+  not do, since a yard's link to the edge carries no pairing
+  ([above](#linking-two-yards)). Without
   it, it is the listener's own address, which is right on one machine or
   one network; a listener on every address (`:8790`) needs it. The yard
   that calls keeps the address it called, until `yardr peer set`

@@ -457,9 +457,12 @@ func (r *runner) handler(st *store.Store, offer func(string) bool, streams conte
 // BDP and the rest of the socket are not on it.
 //
 // The same handlers, the one mux, serve what comes down the yard's link to
-// its edge (KeepEdge), with or without an address, less /peers/: so a
-// delivery through the edge meets the receiver's own check, a device call
-// its own token check, and nothing new decides who is let in.
+// its edge (KeepEdge), with or without an address, less a pairing's three
+// requests (withoutPairing): so a delivery through the edge meets the
+// receiver's own check, a peer's request the peers' receiver's own, a device
+// call its own token check, and nothing new decides who is let in. Of a
+// peer's request the edge learns which yards spoke, when and how much, and a
+// pull's query. A message's text stays sealed.
 //
 // The function returned stops the listener and the link and has the
 // receivers log the refusals they had still counted (hooks.Receiver.Run,
@@ -514,7 +517,7 @@ func serveHooks(ctx context.Context, c *config.Config, st *store.Store, log *slo
 	// Without the slash too, or the mux would answer a redirect there to
 	// whoever asks.
 	mux.Handle(strings.TrimSuffix(rpc.UserPath, "/"), device)
-	stopEdge := KeepEdge(ctx, c, st, "", withoutPeers(mux), log, nil)
+	stopEdge := KeepEdge(ctx, c, st, "", withoutPairing(mux), log, nil)
 	stopListener := func() {}
 	if l.Addr != "" {
 		stopListener = listenHooks(ctx, st, &l, mux, log)
