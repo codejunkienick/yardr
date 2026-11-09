@@ -1189,10 +1189,16 @@ carries a pass-through for each of them, so a repo's `pre-commit`,
 `pre-push` and the rest run as they would without the yard's hook, with
 the same power to refuse. The hooks find the repo's own hooks from the
 filesystem, so a repo with no hook of that name costs no git call;
-anything they cannot prove — a hooks path or include in a config they
-read, or no word from the yard about the install's system config
-(`YARDR_GIT_SYSTEM_CLEAN`, checked once per session) — falls back to
-asking git. A pass-through runs under dash where the machine has it, and
+anything they cannot prove — a hooks path in a config they read, an
+include they cannot follow, or no word from the yard about the install's
+system config (`YARDR_GIT_SYSTEM_CLEAN`, checked once per session) —
+falls back to asking git. They follow an include one level deep, through
+the files it names by an absolute path or under `~/`, whatever its
+`includeIf` condition: a global config that picks an identity by
+directory costs a second read of those files, not a git call. A file that
+sets a hooks path or includes another, one they cannot read, and a path
+they cannot take at its word (a relative one, `~user`, a quote or a
+comment) ask git. A pass-through runs under dash where the machine has it, and
 under sh where it does not: git fires a hook for nearly every ref update,
 and a pass-through that finds nothing to run costs little beyond starting
 its shell. The files in `githooks/` link one per-user cached copy, so a

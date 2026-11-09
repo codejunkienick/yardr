@@ -191,7 +191,8 @@ func execPathOverlay(t *testing.T) (dir, log string) {
 }
 
 // nestedCalls reads a log written by logGitBin or execPathOverlay: one
-// logged git call per line, empty when nothing was logged.
+// logged git call per line, empty when nothing was logged. Only the last
+// line's own newline goes, so a call that logged no arguments still counts.
 func nestedCalls(t *testing.T, log string) []string {
 	t.Helper()
 	raw, err := os.ReadFile(log)
@@ -201,7 +202,7 @@ func nestedCalls(t *testing.T, log string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	return strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
 }
 
 // directHookEnv is the environment for running a hook body directly: the
@@ -226,9 +227,15 @@ func directHookEnv(t *testing.T, bindir string, extra ...string) []string {
 // runHook runs the hook body at path in cwd with env and args, and returns
 // its combined output and exit code.
 func runHook(t *testing.T, path, cwd string, env []string, args ...string) (string, int) {
+	return runHookWithInput(t, path, cwd, env, "", args...)
+}
+
+// runHookWithInput is runHook with input for a hook that reads stdin.
+func runHookWithInput(t *testing.T, path, cwd string, env []string, input string, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(path, args...)
 	cmd.Dir, cmd.Env = cwd, env
+	cmd.Stdin = strings.NewReader(input)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return string(out), 0
@@ -434,8 +441,11 @@ func TestFirstExecutable(t *testing.T) {
 // name, as git runs one for nearly every ref update and index write. It
 // reports the CPU of the shim and of what it starts (cpu-ms/op, from the
 // rusage wait4 gives for the child), which holds still on a loaded machine
-// where the wall time does not. To compare two shims, run both in turn on a
-// quiet machine and take the lower of several runs:
+// where the wall time does not. Its cases are the home gitconfigs a firing
+// meets: plain, with no include, and include, the global identity picked by
+// directory, whose include of a clear file the shim once left to git. To
+// compare two shims, run both in turn on a quiet machine and take the lower of
+// several runs:
 //
 //	go test ./internal/runner -run '^$' -bench PassthroughFiring -benchtime 100x -count 9
 func BenchmarkPassthroughFiring(b *testing.B) {
@@ -447,18 +457,33 @@ func BenchmarkPassthroughFiring(b *testing.B) {
 	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
 		b.Fatalf("git init: %v\n%s", err, out)
 	}
-	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + b.TempDir(), "YARDR_GIT_SYSTEM_CLEAN=1"}
-	var cpu time.Duration
-	b.ResetTimer()
-	for range b.N {
-		cmd := exec.Command(filepath.Join(dir, "pre-commit"))
-		cmd.Dir, cmd.Env = repo, env
-		if err := cmd.Run(); err != nil {
-			b.Fatal(err)
-		}
-		cpu += cmd.ProcessState.UserTime() + cmd.ProcessState.SystemTime()
+	for _, bc := range []struct{ name, gitconfig string }{
+		{"plain", ""},
+		{"include", "[user]\n\tname = ada\n[includeIf \"gitdir:~/work/\"]\n\tpath = ~/.gitconfig-work\n"},
+	} {
+		b.Run(bc.name, func(b *testing.B) {
+			home := b.TempDir()
+			if bc.gitconfig != "" {
+				for name, body := range map[string]string{".gitconfig": bc.gitconfig, ".gitconfig-work": "[user]\n\temail = ada@example.com\n"} {
+					if err := os.WriteFile(filepath.Join(home, name), []byte(body), 0o644); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+			env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "YARDR_GIT_SYSTEM_CLEAN=1"}
+			var cpu time.Duration
+			b.ResetTimer()
+			for range b.N {
+				cmd := exec.Command(filepath.Join(dir, "pre-commit"))
+				cmd.Dir, cmd.Env = repo, env
+				if err := cmd.Run(); err != nil {
+					b.Fatal(err)
+				}
+				cpu += cmd.ProcessState.UserTime() + cmd.ProcessState.SystemTime()
+			}
+			b.ReportMetric(float64(cpu)/float64(time.Millisecond)/float64(b.N), "cpu-ms/op")
+		})
 	}
-	b.ReportMetric(float64(cpu)/float64(time.Millisecond)/float64(b.N), "cpu-ms/op")
 }
 
 // writeRepoHook writes one executable hook into dir.
@@ -1012,11 +1037,15 @@ func shimMarkerHook(marker string, refuse bool) string {
 // The shim finds the repo's hooks from the filesystem, with no git call,
 // in every plain layout (checkout, linked worktree, bare, GIT_DIR, git
 // file), and runs what it finds there; anything it cannot prove — a
-// hooksPath or include in any config it reads, no word from the yard
-// about the system config, an odd git dir — falls back to asking git,
-// which still runs the repo's hook, with the hook's own exit status. Each
-// case runs the shim directly, so the routing is what's pinned, at shell
-// speed, and so is what a firing starts: at most one cat, and never env.
+// hooksPath in any config it reads, an include it cannot account for, no
+// word from the yard about the system config, an odd git dir — falls back
+// to asking git, which still runs the repo's hook, with the hook's own exit
+// status. An include of files it can name is read one level deep, whatever
+// its condition: clear files cost it a second cat, not a git, and a file
+// that sets a hooksPath or includes another sends it to git. Each case runs
+// the shim directly, under its own interpreter and under sh, so the routing is
+// what's pinned, at shell speed, and so is what a firing starts: at most one
+// cat, two where it follows an include, and never env.
 func TestShimFindsRepoHooksWithoutGit(t *testing.T) {
 	t.Parallel()
 	hooks := yardHooks(t) // installed once: the cases only run them
@@ -1031,13 +1060,62 @@ func TestShimFindsRepoHooksWithoutGit(t *testing.T) {
 		writeRepoHook(t, custom, "pre-commit", shimMarkerHook(marker, refuse))
 		return custom
 	}
+	writeConfig := func(t *testing.T, path, body string) string {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	// The shims run under dash where the machine has it, and commit-msg, which
+	// runs the same lookup, under sh, which is bash on macOS: each case runs
+	// under sh as well where that is not the shims' own interpreter.
+	shells := []string{""}
+	if sh, err := exec.LookPath("sh"); err == nil && !sameFile(t, sh, passthroughShell) {
+		shells = append(shells, sh)
+	}
+	// homeConfig is the setup of a case that differs only in how its home
+	// gitconfig writes an include: body, with %c the path of a clear file
+	// beside it, %k of one that sets core.hooksPath to a directory whose
+	// pre-commit touches the marker, %o of one that includes that one, and %h
+	// the home directory itself. Beside them are clear files named as the
+	// literal text of a path that git reads differently, hooking#x (git
+	// reads a # as a comment) and hoo"king" (git reads the quotes as
+	// quoting): a shim that took the text as a name would read them and
+	// miss the hooks path of the file git does read.
+	homeConfig := func(body string) shimSetup {
+		return func(t *testing.T) (string, []string, string) {
+			repo, home := sessionRepo(t), t.TempDir()
+			marker := markerIn(t, repo)
+			clearFile := writeConfig(t, filepath.Join(home, "clear"), "[user]\n\tname = ada\n")
+			hooking := writeConfig(t, filepath.Join(home, "hooking"), "[core]\n\thooksPath = "+customHooks(t, marker, false)+"\n")
+			outer := writeConfig(t, filepath.Join(home, "outer"), "[include]\n\tpath = "+hooking+"\n")
+			writeConfig(t, hooking+"#x", "[user]\n\tname = ada\n")
+			writeConfig(t, filepath.Join(home, `hoo"king"`), "[user]\n\tname = ada\n")
+			body := strings.NewReplacer("%c", clearFile, "%k", hooking, "%o", outer, "%h", home).Replace(body)
+			// A throwaway directory is named for the case that made it, and a
+			// path with hooksPath in it would send the shim to git on its
+			// first read, before the include the case is about.
+			if strings.Contains(strings.ToLower(body), "hookspath") {
+				t.Fatalf("the paths of case %q say hooksPath: rename the case\n%s", t.Name(), body)
+			}
+			writeConfig(t, filepath.Join(home, ".gitconfig"), body)
+			return repo, append(slices.Clone(clean), "HOME="+home), marker
+		}
+	}
 	for _, tc := range []struct {
-		name    string
-		hook    string
-		setup   shimSetup
-		wantRan bool
-		wantGit bool
-		want    int
+		name        string
+		hook        string
+		setup       shimSetup
+		stdin       string
+		wantStdin   string
+		wantRan     bool
+		wantGit     bool
+		wantInclude bool // the shim reads the files an include names, in a second cat
+		want        int
 	}{
 		{
 			name: "no hooks",
@@ -1308,13 +1386,251 @@ func TestShimFindsRepoHooksWithoutGit(t *testing.T) {
 			wantGit: true,
 		},
 		{
-			name: "include in a URL asks git",
+			// Only a section header names an include, so the word in a URL is
+			// not one.
+			name: "include in a URL stays fast",
 			hook: "pre-commit",
 			setup: func(t *testing.T) (string, []string, string) {
 				repo := sessionRepo(t)
 				gitT(t, repo, "config", "remote.origin.url", "https://example.com/xincludey.git")
 				return repo, clean, ""
 			},
+		},
+		{
+			name: "repo include of a clear file skips git",
+			hook: "pre-commit",
+			setup: func(t *testing.T) (string, []string, string) {
+				repo := sessionRepo(t)
+				included := writeConfig(t, filepath.Join(t.TempDir(), "work"), "[user]\n\tname = ada\n")
+				gitT(t, repo, "config", "include.path", included)
+				return repo, clean, ""
+			},
+			wantInclude: true,
+		},
+		{
+			name:        "home include of a clear file skips git",
+			hook:        "pre-commit",
+			setup:       homeConfig("[include]\n\tpath = %c\n"),
+			wantInclude: true,
+		},
+		{
+			// A global identity picked by directory, the layout this is for.
+			name:        "home includeIf under the tilde skips git",
+			hook:        "pre-commit",
+			setup:       homeConfig("[user]\n\tname = ada\n[includeIf \"gitdir:~/work/\"]\n\tpath = ~/clear\n[core]\n\teditor = vi\n"),
+			wantInclude: true,
+		},
+		{
+			name:        "uppercase include of a clear file skips git",
+			hook:        "pre-commit",
+			setup:       homeConfig("[INCLUDEIF \"gitdir:/\"]\n\tPATH = %c\n"),
+			wantInclude: true,
+		},
+		{
+			// A path key in another section is no include: its file is not read.
+			name:        "include section ends at the next header",
+			hook:        "pre-commit",
+			setup:       homeConfig("[alias]\n\tpath = /nowhere/at/all\n[include]\n\tpath = %c\n[alias]\n\tpath = /nowhere/at/all\n"),
+			wantInclude: true,
+		},
+		{
+			// No file to read means no second cat: a cat with no file would
+			// read the hook's stdin.
+			name:  "include with no path reads no file",
+			hook:  "pre-commit",
+			setup: homeConfig("[include]\n[user]\n\tname = ada\n"),
+		},
+		{
+			// The include names this process's stdin, but the cat that reads it
+			// must leave the refs for the repo's pre-push hook.
+			name: "include of stdin leaves all hook input",
+			hook: "pre-push",
+			setup: func(t *testing.T) (string, []string, string) {
+				repo, extra, _ := homeConfig("[include]\n\tpath = /dev/stdin\n")(t)
+				hooks := filepath.Join(repo, ".git", "hooks")
+				if err := os.MkdirAll(hooks, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				marker := markerIn(t, repo)
+				writeRepoHook(t, hooks, "pre-push", "#!/bin/sh\nwhile IFS= read -r line || [ -n \"$line\" ]; do\n  printf '%s\\n' \"$line\"\ndone > "+shellQuote(marker)+"\n")
+				return repo, extra, marker
+			},
+			stdin:       "refs/heads/main 1111 refs/heads/main 2222\nrefs/tags/v1 3333 refs/tags/v1 4444\n",
+			wantStdin:   "refs/heads/main 1111 refs/heads/main 2222\nrefs/tags/v1 3333 refs/tags/v1 4444\n",
+			wantRan:     true,
+			wantInclude: true,
+		},
+		{
+			name: "clear include still runs a refusing repo hook",
+			hook: "pre-commit",
+			setup: func(t *testing.T) (string, []string, string) {
+				repo, extra, _ := homeConfig("[include]\n\tpath = %c\n")(t)
+				hooks := filepath.Join(repo, ".git", "hooks")
+				if err := os.MkdirAll(hooks, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				marker := markerIn(t, repo)
+				writeRepoHook(t, hooks, "pre-commit", shimMarkerHook(marker, true))
+				return repo, extra, marker
+			},
+			wantRan:     true,
+			wantInclude: true,
+			want:        1,
+		},
+		{
+			name:        "include that sets a hooks path asks git and runs",
+			hook:        "pre-commit",
+			setup:       homeConfig("[include]\n\tpath = %k\n"),
+			wantRan:     true,
+			wantGit:     true,
+			wantInclude: true,
+		},
+		{
+			name:        "includeIf that sets a hooks path asks git and runs",
+			hook:        "pre-commit",
+			setup:       homeConfig("[includeIf \"gitdir:/\"]\n\tpath = ~/hooking\n"),
+			wantRan:     true,
+			wantGit:     true,
+			wantInclude: true,
+		},
+		{
+			name:        "uppercase include that sets a hooks path asks git and runs",
+			hook:        "pre-commit",
+			setup:       homeConfig("[INCLUDE]\n\tPATH = %k\n"),
+			wantRan:     true,
+			wantGit:     true,
+			wantInclude: true,
+		},
+		{
+			// Every file of the section is read in one cat, and one that sets
+			// a hooksPath is enough.
+			name:        "second path that sets a hooks path asks git and runs",
+			hook:        "pre-commit",
+			setup:       homeConfig("[include]\n\tpath = %c\n\tpath = %k\n"),
+			wantRan:     true,
+			wantGit:     true,
+			wantInclude: true,
+		},
+		{
+			name:        "nested include asks git and runs",
+			hook:        "pre-commit",
+			setup:       homeConfig("[include]\n\tpath = %o\n"),
+			wantRan:     true,
+			wantGit:     true,
+			wantInclude: true,
+		},
+		{
+			// Git honours a path on the header's own line; the shim reads no
+			// path there and asks it.
+			name:    "include on its header line asks git and runs",
+			hook:    "pre-commit",
+			setup:   homeConfig("[include] path = %k\n"),
+			wantRan: true,
+			wantGit: true,
+		},
+		{
+			// The one cat runs a file that ends in a comment with no newline
+			// into the first line of the next, so the comment carries the
+			// header that is the next file's, and git still reads it.
+			name: "include after a comment with no newline asks git and runs",
+			hook: "pre-commit",
+			setup: func(t *testing.T) (string, []string, string) {
+				repo, extra, marker := homeConfig("[include]\n\tpath = %k\n")(t)
+				f, err := os.OpenFile(filepath.Join(repo, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0o644)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer f.Close()
+				if _, err := f.WriteString("; work"); err != nil {
+					t.Fatal(err)
+				}
+				return repo, extra, marker
+			},
+			wantRan: true,
+			wantGit: true,
+		},
+		{
+			name:        "missing include target asks git",
+			hook:        "pre-commit",
+			setup:       homeConfig("[include]\n\tpath = %h/nothere\n"),
+			wantGit:     true,
+			wantInclude: true,
+		},
+		{
+			// A directory is a file the shim cannot read, and no test of
+			// permissions: a root user reads a file with none.
+			name:        "unreadable include target asks git",
+			hook:        "pre-commit",
+			setup:       homeConfig("[include]\n\tpath = %h\n"),
+			wantGit:     true,
+			wantInclude: true,
+		},
+		{
+			// The files are read as one text, so the file an include sits in
+			// is not known to resolve it against.
+			name:    "relative include path asks git",
+			hook:    "pre-commit",
+			setup:   homeConfig("[include]\n\tpath = clear\n"),
+			wantGit: true,
+		},
+		{
+			name:    "other user's home include asks git",
+			hook:    "pre-commit",
+			setup:   homeConfig("[include]\n\tpath = ~root/clear\n"),
+			wantGit: true,
+		},
+		{
+			name:    "quoted include path asks git",
+			hook:    "pre-commit",
+			setup:   homeConfig("[include]\n\tpath = \"%c\"\n"),
+			wantGit: true,
+		},
+		{
+			name:    "include path with a comment asks git",
+			hook:    "pre-commit",
+			setup:   homeConfig("[include]\n\tpath = %c # work\n"),
+			wantGit: true,
+		},
+		{
+			// Git reads a # as the start of a comment wherever it is, and
+			// takes the file before it.
+			name:    "include path with a hash inside asks git and runs",
+			hook:    "pre-commit",
+			setup:   homeConfig("[include]\n\tpath = %k#x\n"),
+			wantRan: true,
+			wantGit: true,
+		},
+		{
+			name:    "include path with quotes inside asks git and runs",
+			hook:    "pre-commit",
+			setup:   homeConfig("[include]\n\tpath = %h/hoo\"king\"\n"),
+			wantRan: true,
+			wantGit: true,
+		},
+		{
+			name:    "includeIf condition with an escape asks git",
+			hook:    "pre-commit",
+			setup:   homeConfig("[includeIf \"gitdir:/a\\\"b\"]\n\tpath = %c\n"),
+			wantGit: true,
+		},
+		{
+			name:    "includeIf condition with a space asks git",
+			hook:    "pre-commit",
+			setup:   homeConfig("[includeIf \"gitdir:/a b/\"]\n\tpath = %c\n"),
+			wantGit: true,
+		},
+		{
+			name:    "key other than path in an include asks git",
+			hook:    "pre-commit",
+			setup:   homeConfig("[include]\n\tfoo = %c\n"),
+			wantGit: true,
+		},
+		{
+			// A comment can be the end of one file and the start of the next
+			// header, so one that names a header is not skipped.
+			name:    "comment naming a header asks git",
+			hook:    "pre-commit",
+			setup:   homeConfig("# the [include] below\n[include]\n\tpath = %c\n"),
 			wantGit: true,
 		},
 		{
@@ -1384,38 +1700,60 @@ func TestShimFindsRepoHooksWithoutGit(t *testing.T) {
 			wantGit: true,
 		},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			bin, log := logGitBin(t)
-			cats, envs := logCmd(t, bin, "cat"), logCmd(t, bin, "env")
-			cwd, extra, marker := tc.setup(t)
-			_, code := runHook(t, filepath.Join(hooks, tc.hook), cwd, directHookEnv(t, bin, extra...))
-			if code != tc.want {
-				t.Errorf("exit = %d, want %d", code, tc.want)
+		for _, shell := range shells {
+			name := tc.name
+			if shell != "" {
+				name += " under sh"
 			}
-			ran := false
-			if marker != "" {
-				_, err := os.Stat(marker)
-				ran = err == nil
-			}
-			if ran != tc.wantRan {
-				t.Errorf("repo hook ran = %v, want %v", ran, tc.wantRan)
-			}
-			calls := nestedCalls(t, log)
-			if got := len(calls) > 0; got != tc.wantGit {
-				t.Errorf("nested git calls = %v, want git %v", calls, tc.wantGit)
-			}
-			// Git fires a hook for nearly every ref update, so a process the
-			// shim starts is paid by every operation: its config read is one
-			// cat for all the files, and its fallback is git alone, never env
-			// and then git.
-			if n := len(nestedCalls(t, cats)); n > 1 {
-				t.Errorf("config reads = %d cat calls, want at most 1", n)
-			}
-			if calls := nestedCalls(t, envs); len(calls) > 0 {
-				t.Errorf("shim started env: %q", calls)
-			}
-		})
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				bin, log := logGitBin(t)
+				cats, envs := logCmd(t, bin, "cat"), logCmd(t, bin, "env")
+				cwd, extra, marker := tc.setup(t)
+				env := directHookEnv(t, bin, extra...)
+				var code int
+				if shell == "" {
+					_, code = runHookWithInput(t, filepath.Join(hooks, tc.hook), cwd, env, tc.stdin)
+				} else {
+					_, code = runHookWithInput(t, shell, cwd, env, tc.stdin, filepath.Join(hooks, tc.hook))
+				}
+				if code != tc.want {
+					t.Errorf("exit = %d, want %d", code, tc.want)
+				}
+				ran := false
+				if marker != "" {
+					_, err := os.Stat(marker)
+					ran = err == nil
+				}
+				if ran != tc.wantRan {
+					t.Errorf("repo hook ran = %v, want %v", ran, tc.wantRan)
+				}
+				if tc.wantStdin != "" {
+					got, err := os.ReadFile(marker)
+					if err != nil || string(got) != tc.wantStdin {
+						t.Errorf("repo hook read %q, %v, want %q", got, err, tc.wantStdin)
+					}
+				}
+				calls := nestedCalls(t, log)
+				if got := len(calls) > 0; got != tc.wantGit {
+					t.Errorf("nested git calls = %v, want git %v", calls, tc.wantGit)
+				}
+				// Git fires a hook for nearly every ref update, so a process the
+				// shim starts is paid by every operation: its config read is one
+				// cat for all the files, one more where it follows an include,
+				// and its fallback is git alone, never env and then git.
+				maxCats := 1
+				if tc.wantInclude {
+					maxCats = 2
+				}
+				if n := len(nestedCalls(t, cats)); n > maxCats || tc.wantInclude && n < maxCats {
+					t.Errorf("config reads = %d cat calls, want %d", n, maxCats)
+				}
+				if calls := nestedCalls(t, envs); len(calls) > 0 {
+					t.Errorf("shim started env: %q", calls)
+				}
+			})
+		}
 	}
 }
 
@@ -1443,6 +1781,7 @@ func TestCommitMsgHookNestedGitCalls(t *testing.T) {
 		name        string
 		msg         string
 		repoHook    string // "" for none, else the repo commit-msg body ("refuse" refuses)
+		include     bool   // the home gitconfig includes a clear file
 		noBead      bool
 		contains    []string
 		absent      []string
@@ -1502,6 +1841,18 @@ func TestCommitMsgHookNestedGitCalls(t *testing.T) {
 			name:        "repo hook appends",
 			msg:         "web-3: chained\n",
 			repoHook:    "#!/bin/sh\necho ran > \"$REPO_MARKER\"\nprintf 'Reviewed-by: Repo <r@example.com>\\n' >> \"$1\"\n",
+			contains:    []string{"Reviewed-by: Repo <r@example.com>", "Yardr-Bead: web-3"},
+			wantRepoRan: true,
+			wantTrailer: 1,
+		},
+		{
+			// The lookup reads the include and gives the shell back its
+			// arguments: the repo's hook still gets the message file, with no
+			// git call to find it.
+			name:        "repo hook behind an include",
+			msg:         "web-3: included\n",
+			repoHook:    "#!/bin/sh\necho ran > \"$REPO_MARKER\"\nprintf 'Reviewed-by: Repo <r@example.com>\\n' >> \"$1\"\n",
+			include:     true,
 			contains:    []string{"Reviewed-by: Repo <r@example.com>", "Yardr-Bead: web-3"},
 			wantRepoRan: true,
 			wantTrailer: 1,
@@ -1567,6 +1918,17 @@ func TestCommitMsgHookNestedGitCalls(t *testing.T) {
 			extra := slices.Clone(session)
 			if tc.noBead {
 				extra = []string{"YARDR_GIT_SYSTEM_CLEAN=1"}
+			}
+			if tc.include {
+				home := t.TempDir()
+				included := filepath.Join(home, "included")
+				if err := os.WriteFile(included, []byte("[user]\n\tname = ada\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[include]\n\tpath = "+included+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				extra = append(extra, "HOME="+home)
 			}
 			_, code := runHook(t, hook, repo, directHookEnv(t, bin, extra...), msgfile)
 			if tc.wantFail {
@@ -1726,40 +2088,55 @@ func TestSessionOpsResolveHooksWithoutGit(t *testing.T) {
 
 // A global hooksPath still guards a session's commits: a refusing
 // pre-commit blocks, whether the path is set directly or arrives through
-// an include.
+// an include. The include names its file relative to the config (which the
+// shim leaves to git), by an absolute path, or under the home directory,
+// which it reads itself before it asks git.
 func TestSessionCommitHonoursGlobalHooks(t *testing.T) {
 	t.Parallel()
-	global := func(t *testing.T, body string) string {
+	write := func(t *testing.T, path, body string) string {
 		t.Helper()
-		path := filepath.Join(t.TempDir(), "gitconfig")
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		return path
 	}
+	// included writes the file that sets the hooks path and a global config
+	// whose include is the line, with %o the path of that file, and returns
+	// the session's entries for it: the global config and the home it sits in.
+	included := func(t *testing.T, custom, include string) []string {
+		t.Helper()
+		dir := t.TempDir()
+		other := write(t, filepath.Join(dir, "other"), "[core]\n\thooksPath = "+custom+"\n")
+		gitconfig := write(t, filepath.Join(dir, "gitconfig"), strings.ReplaceAll(include, "%o", other))
+		return []string{"GIT_CONFIG_GLOBAL=" + gitconfig, "HOME=" + dir}
+	}
 	for _, tc := range []struct {
 		name   string
-		config func(t *testing.T, custom string) string
+		config func(t *testing.T, custom string) []string
 	}{
 		{
 			name: "hooksPath",
-			config: func(t *testing.T, custom string) string {
-				return global(t, "[core]\n\thooksPath = "+custom+"\n")
+			config: func(t *testing.T, custom string) []string {
+				path := write(t, filepath.Join(t.TempDir(), "gitconfig"), "[core]\n\thooksPath = "+custom+"\n")
+				return []string{"GIT_CONFIG_GLOBAL=" + path}
 			},
 		},
 		{
 			name: "include",
-			config: func(t *testing.T, custom string) string {
-				dir := t.TempDir()
-				other := filepath.Join(dir, "other")
-				if err := os.WriteFile(other, []byte("[core]\n\thooksPath = "+custom+"\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				path := filepath.Join(dir, "gitconfig")
-				if err := os.WriteFile(path, []byte("[include]\n\tpath = other\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				return path
+			config: func(t *testing.T, custom string) []string {
+				return included(t, custom, "[include]\n\tpath = other\n")
+			},
+		},
+		{
+			name: "include by absolute path",
+			config: func(t *testing.T, custom string) []string {
+				return included(t, custom, "[include]\n\tpath = %o\n")
+			},
+		},
+		{
+			name: "includeIf under the home",
+			config: func(t *testing.T, custom string) []string {
+				return included(t, custom, "[includeIf \"gitdir:/\"]\n\tpath = ~/other\n")
 			},
 		},
 	} {
@@ -1770,8 +2147,7 @@ func TestSessionCommitHonoursGlobalHooks(t *testing.T) {
 			custom := t.TempDir()
 			writeRepoHook(t, custom, "pre-commit", "#!/bin/sh\necho ran > "+ran+"\nexit 1\n")
 			job := sessionJob("web-3", "builders", "codex", "luna")
-			env := append(sessionTestEnv(t, t.TempDir(), job, "web-3-new", "pre-commit"),
-				"GIT_CONFIG_GLOBAL="+tc.config(t, custom))
+			env := append(sessionTestEnv(t, t.TempDir(), job, "web-3-new", "pre-commit"), tc.config(t, custom)...)
 			if out, err := sessionGit(t, repo, env, "commit", "--allow-empty", "-m", "web-3: refused"); err == nil {
 				t.Fatalf("a refusing global pre-commit committed:\n%s", out)
 			}
@@ -1783,24 +2159,38 @@ func TestSessionCommitHonoursGlobalHooks(t *testing.T) {
 }
 
 // A repo include that points core.hooksPath elsewhere still guards a
-// session's commits: a refusing pre-commit blocks.
+// session's commits: a refusing pre-commit blocks, whether the include names
+// its file relative to the config (which the shim leaves to git) or by an
+// absolute path, which it reads itself before it asks git.
 func TestSessionCommitHonoursRepoInclude(t *testing.T) {
 	t.Parallel()
-	repo := sessionRepo(t)
-	ran := filepath.Join(repo, ".git", "included-pre-commit.ran")
-	custom := t.TempDir()
-	writeRepoHook(t, custom, "pre-commit", "#!/bin/sh\necho ran > "+ran+"\nexit 1\n")
-	if err := os.WriteFile(filepath.Join(repo, ".git", "extra"), []byte("[core]\n\thooksPath = "+custom+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	gitT(t, repo, "config", "include.path", "extra")
-	job := sessionJob("web-3", "builders", "codex", "luna")
-	env := sessionTestEnv(t, t.TempDir(), job, "web-3-new", "pre-commit")
-	if out, err := sessionGit(t, repo, env, "commit", "--allow-empty", "-m", "web-3: refused"); err == nil {
-		t.Fatalf("a refusing included pre-commit committed:\n%s", out)
-	}
-	if _, err := os.Stat(ran); err != nil {
-		t.Fatal("the included pre-commit hook did not run")
+	for _, tc := range []struct {
+		name string
+		path func(extra string) string
+	}{
+		{"relative", func(string) string { return "extra" }},
+		{"absolute", func(extra string) string { return extra }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo := sessionRepo(t)
+			ran := filepath.Join(repo, ".git", "included-pre-commit.ran")
+			custom := t.TempDir()
+			writeRepoHook(t, custom, "pre-commit", "#!/bin/sh\necho ran > "+ran+"\nexit 1\n")
+			extra := filepath.Join(repo, ".git", "extra")
+			if err := os.WriteFile(extra, []byte("[core]\n\thooksPath = "+custom+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			gitT(t, repo, "config", "include.path", tc.path(extra))
+			job := sessionJob("web-3", "builders", "codex", "luna")
+			env := sessionTestEnv(t, t.TempDir(), job, "web-3-new", "pre-commit")
+			if out, err := sessionGit(t, repo, env, "commit", "--allow-empty", "-m", "web-3: refused"); err == nil {
+				t.Fatalf("a refusing included pre-commit committed:\n%s", out)
+			}
+			if _, err := os.Stat(ran); err != nil {
+				t.Fatal("the included pre-commit hook did not run")
+			}
+		})
 	}
 }
 

@@ -87,19 +87,130 @@ fast_repo_hooks() {
 			*) commondir=$gitdir/$line ;;
 		esac
 	fi
-	# A core.hooksPath in what git reads, or any include that could
-	# carry one from a file not read here, and the hooks are wherever
-	# that says: ask git. The match is a substring, so a commented or
+	# A core.hooksPath in what git reads, and the hooks are wherever that
+	# says: ask git. The match is a substring, so a commented or
 	# oddly-cased key still falls back; over-matching only costs a call.
+	# An include could carry one from a file not read here. A file is
+	# included only by a section header, and git takes no space between
+	# the bracket and the section name, so a config without the text
+	# [include (in any case) includes nothing, whatever else it says of
+	# includes: a URL or a comment does not send the shim to git. One with
+	# it is read through (fast_includes_clear), and only an include it
+	# cannot account for asks git.
 	home=${HOME:-}
 	xdg=${XDG_CONFIG_HOME:-$home/.config}
 	cfg=$(cat "$commondir/config" "$gitdir/config" "$gitdir/config.worktree" \
 		"${GIT_CONFIG_GLOBAL:-}" "$home/.gitconfig" "$xdg/git/config" \
 		"${GIT_CONFIG_SYSTEM:-}" 2>/dev/null) || true
 	case "$cfg" in
-		*[Hh][Oo][Oo][Kk][Ss][Pp][Aa][Tt][Hh]*|*[Ii][Nn][Cc][Ll][Uu][Dd][Ee]*) return 1 ;;
+		*[Hh][Oo][Oo][Kk][Ss][Pp][Aa][Tt][Hh]*) return 1 ;;
+		*'['[Ii][Nn][Cc][Ll][Uu][Dd][Ee]*) fast_includes_clear || return 1 ;;
 	esac
 	repo_hooks=$commondir/hooks
+}
+
+# fast_includes_clear is fast_repo_hooks's second look, at a config that
+# opens an include section. It returns 0 when every file those includes
+# could pull in is named plainly, is readable, and names no core.hooksPath
+# and no include of its own, and 1 at any doubt, which sends the caller to
+# git. Conditions are never evaluated: an includeIf file is read whether or
+# not its condition would hold, so no hooksPath slips by whichever condition
+# matches. It needs cfg and home as fast_repo_hooks left them.
+fast_includes_clear() {
+	inc_ifs=$IFS
+	set -f
+	scan_includes
+	inc_status=$?
+	IFS=$inc_ifs
+	set +f
+	return $inc_status
+}
+
+# scan_includes finds the files the includes in cfg name, and reads them. The
+# lines come from one splitting expansion and the words of the few lines that
+# matter from another: dash's read costs a syscall a byte, and from about 2 KB
+# of config on that costs more than the cat it would save. The splitting needs
+# the noglob and the IFS that fast_includes_clear restores.
+#
+# A value ends at its line, so only what sits alone on one is a path: a
+# section's body may hold blank lines, comments and path = value, and a line
+# that does not is doubt, a trailing comment or a continuation among them.
+# A line that mentions an include header without being one is doubt too, a
+# comment among them: the first read joins the files, and one that ends with
+# no newline runs into the first line of the next, so a comment can carry a
+# header that is the next file's. A path with a quote, a space or a backslash
+# in it is doubt, and so is a relative one (the joined text does not say
+# which file an include sits in) or any form git would expand, as ~user is.
+scan_includes() {
+	inc_files=
+	inc_open=
+	IFS='
+'
+	set -- $cfg
+	IFS=$inc_ifs
+	for inc_line; do
+		case $inc_line in
+			*'['[Ii][Nn][Cc][Ll][Uu][Dd][Ee]*)
+				set -- $inc_line
+				include_header "$@" || return 1
+				inc_open=1
+				continue ;;
+			*) [ -n "$inc_open" ] || continue ;;
+		esac
+		set -- $inc_line
+		case ${1-} in
+			''|'#'*|';'*) continue ;;
+			'['*) inc_open=; continue ;;
+		esac
+		[ $# -eq 3 ] || return 1
+		case $1:$2 in
+			[Pp][Aa][Tt][Hh]:=) ;;
+			*) return 1 ;;
+		esac
+		case $3 in
+			*[!A-Za-z0-9/._+@%,~-]*) return 1 ;;
+			/*) inc_path=$3 ;;
+			'~/'*)
+				[ -n "$home" ] || return 1
+				inc_path=$home/${3#'~/'} ;;
+			*) return 1 ;;
+		esac
+		inc_files="$inc_files$inc_path
+"
+	done
+	[ -n "$inc_files" ] || return 0
+	IFS='
+'
+	set -- $inc_files
+	IFS=$inc_ifs
+	# One cat for every file. Its stdin is nothing, so that a config naming
+	# /dev/stdin cannot take what the repo's hook is about to read.
+	inc_text=$(cat "$@" 2>/dev/null </dev/null) || return 1
+	case "$inc_text" in
+		*[Hh][Oo][Oo][Kk][Ss][Pp][Aa][Tt][Hh]*|*'['[Ii][Nn][Cc][Ll][Uu][Dd][Ee]*) return 1 ;;
+	esac
+	return 0
+}
+
+# include_header succeeds when its arguments, the words of a line, are one
+# include header and nothing else: [include], or [includeIf "condition"]
+# where the condition has no quote or backslash to move the header's end.
+include_header() {
+	case "$#:$1" in
+		1:'['[Ii][Nn][Cc][Ll][Uu][Dd][Ee]']') return 0 ;;
+		2:'['[Ii][Nn][Cc][Ll][Uu][Dd][Ee][Ii][Ff]) ;;
+		*) return 1 ;;
+	esac
+	case $2 in
+		'"'*'"]') ;;
+		*) return 1 ;;
+	esac
+	inc_cond=${2#'"'}
+	inc_cond=${inc_cond%'"]'}
+	case $inc_cond in
+		*'"'*|*'\'*) return 1 ;;
+	esac
+	return 0
 }
 `
 
