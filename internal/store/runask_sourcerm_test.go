@@ -83,6 +83,12 @@ func TestRunAskSourceRm(t *testing.T) {
 	if _, err := y.GetHook(y.ctx, "crm"); err != nil {
 		t.Fatalf("the hook that served it was removed: %v", err)
 	}
+	// The removal is on the event stream, with the ask it was approved on.
+	evs, err := y.EventsOfKind(y.ctx, "source_removed", 2)
+	if err != nil || len(evs) != 1 || evs[0].Data["source"] != "crm" {
+		t.Fatalf("source_removed events = %+v, %v", evs, err)
+	}
+	y.approved(t, evs[0], seq)
 	if rec, err := y.CarryOf(y.ctx, y.bead, seq); err != nil || rec != nil {
 		t.Fatalf("a source with no command files left a carrying record: %+v, %v", rec, err)
 	}

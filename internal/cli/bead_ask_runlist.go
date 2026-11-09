@@ -150,9 +150,11 @@ const askRunList = `  peer add <name> <invite>
       under the yard's home or a depot; its role text goes beside --run,
       in --run-role "<file>" or as prompt=<file> whose text the ask
       carries, the card shows it whole (weighty, code), and approving
-      writes those exact bytes to roles/<name>.md and starts the member
-      with its prompt there; env, free args and any grant stay out, and
-      a name in use is refused, since this adds and never replaces
+      writes those exact bytes to a read-only file of the yard's own,
+      roles/<name>.<digest>.md, and starts the member with its prompt
+      there; env, free args and any grant stay out, and a name in use,
+      or one whose file stands already with other text than its name
+      says, is refused, since this adds and never replaces
   group add <name> --runner <runner> [--limit <n>] [--set k=v ...]
       a new group on the runner manual, herdr or exec, with its limit and
       as --set cmd and args (one word each: the line is split at spaces),
@@ -178,16 +180,17 @@ const askRunList = `  peer add <name> <invite>
       never carry, its kind, its model, its directory (under the yard's
       home or a depot) and any preset of the kind it will then have: the
       card shows each now and as it will be, whole (weighty, code), the
-      prompt and the flags among them, and approving sets exactly that;
-      the prompt is a file under the yard's home, named by prompt=<file>,
-      whose text the ask carries, read from it, and an approval is
-      refused when the file holds other text by then; it writes that
-      text to a read-only file of the yard's own, roles/<name>.<digest>.md,
-      and sets it as the prompt, so a later change to the file named
-      reaches no session, and a file the yard wrote is not one to name;
-      no other setting rides in with it, and another member's kind, model
-      and directory are the yardmaster's to run for the operator on their
-      mail
+      prompt and the flags among them (and says so when the prompt now is
+      a file the yard wrote that holds other text than its name says),
+      and approving sets exactly that; the prompt is a file under the
+      yard's home, named by prompt=<file>, whose text the ask carries,
+      read from it, and an approval is refused when the file holds other
+      text by then; it writes that text to a read-only file of the yard's
+      own, roles/<name>.<digest>.md, and sets it as the prompt, so a later
+      change to the file named reaches no session, and a file the yard
+      wrote is not one to name; no other setting rides in with it, and
+      another member's kind, model and directory are the yardmaster's to
+      run for the operator on their mail
   group set <name> prompt=<file> | cmd=<command> | preset=<preset>
       the same for a group, and for an exec group's command (one word:
       the line is split at spaces); approving a prompt writes its carried

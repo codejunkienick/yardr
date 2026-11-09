@@ -34,6 +34,7 @@ type crewAddSpec struct {
 	presetNote string
 	dir        string // absolute; "" in argv means the yard's home
 	role       string
+	rolePath   string // the file approval writes role to, which the member's prompt is
 }
 
 // parseCrewAdd reads the words of crew add <name> with its settings. It
@@ -41,8 +42,9 @@ type crewAddSpec struct {
 // as the terminal's --set key=value and --dir <dir>; prompt=<file> names
 // where the role text was read from when the ask was written and is not
 // kept: the text itself rides beside argv, and approval always writes it
-// to roles/<name>.md. What this row never carries refuses here, in words
-// that say where it goes instead, so no check downstream can miss it.
+// to a file of the yard's own named by its digest (yardPromptPath). What
+// this row never carries refuses here, in words that say where it goes
+// instead, so no check downstream can miss it.
 func parseCrewAdd(rest []string) ([]string, error) {
 	if len(rest) == 0 {
 		return nil, fmt.Errorf("--run takes %s: it names no crew member", crewAddUse)
@@ -225,17 +227,21 @@ func (w *wtx) crewAddProposal(run AskRun) (crewAddSpec, error) {
 	case strings.IndexFunc(role, crewRoleHidden) >= 0 || strings.Contains(role, NoteFilesMark):
 		return crewAddSpec{}, fmt.Errorf("crew add %s: the role text holds control characters or the yard's files mark, which a card would not show as written: write it to a file and type %s in a terminal, with --set prompt=<that file> and %s as its args", name, crewAddTerminal(name, kind, model, preset, dir), crewAddPresetArgs(preset))
 	}
-	// Another member's or group's prompt may be the file that stands here,
-	// under a name no record holds, and it runs as written: a card that
-	// adds must not rewrite what others read.
-	disk, _, err := crewRolePath(w.home, name)
+	// The role goes to the file the yard names by its text's digest, as every
+	// prompt a card sets does (writePrompt). A file that stands there holds
+	// this text, since the digest is of it, and is kept; one that holds other
+	// text, or is no regular file, was put there by something else and may be
+	// what another member or group reads, so it is refused here, at the card,
+	// and not found at the approval: a card that adds must not rewrite what
+	// others read.
+	rolePath, err := w.yardPromptPath("crew member "+name, name, role)
 	if err != nil {
 		return crewAddSpec{}, err
 	}
-	if _, err := os.Lstat(disk); !os.IsNotExist(err) {
-		return crewAddSpec{}, fmt.Errorf("crew member %s: roles/%s.md stands already, and may be another's prompt: this adds, it never replaces: choose another name", name, name)
+	if _, err := promptStands("crew member "+name, rolePath, role); err != nil {
+		return crewAddSpec{}, err
 	}
-	spec.role = role
+	spec.role, spec.rolePath = role, rolePath
 	if dir == "" {
 		spec.dir = w.home
 		return spec, nil
@@ -437,7 +443,7 @@ func (w *wtx) crewAddCard(run AskRun, asking bool) (AskRun, error) {
 		}
 		seenMap["permission preset "+spec.kind+" "+PresetLabel(spec.preset)] = seen(spec.preset, spec.presetArgs, spec.presetNote)
 	}
-	does = append(does, fmt.Sprintf("Its role, written to roles/%s.md on approval, is:", spec.name))
+	does = append(does, fmt.Sprintf("Its role, written to the read-only file %s on approval, is:", spec.rolePath))
 	lines := strings.Split(strings.TrimSuffix(spec.role, "\n"), "\n")
 	does = append(does, lines...)
 	return AskRun{
@@ -456,32 +462,13 @@ func (w *wtx) crewAddStale(seq uint64, was, now AskRun) error {
 	return staleCard(seq, was, now)
 }
 
-// crewRolePath is where approval writes name's role text, and the
-// prompt it sets for it: the yard's roles directory, by the member's
-// name. The path must stay inside it, which checkCrewAdd's name check
-// and this together hold.
-func crewRolePath(home, name string) (disk, prompt string, err error) {
-	home, err = filepath.Abs(home)
-	if err != nil {
-		return "", "", fmt.Errorf("crew member %s: resolve its role path: %w", name, err)
-	}
-	roles := filepath.Join(home, "roles")
-	disk = filepath.Join(roles, name+".md")
-	prompt = disk
-	clean := filepath.Clean(disk)
-	if clean != roles && !strings.HasPrefix(clean, roles+string(filepath.Separator)) {
-		return "", "", fmt.Errorf("crew member %s: that name would write its role outside the yard's roles directory: choose another", name)
-	}
-	return clean, prompt, nil
-}
-
 // writeRoleFile puts the carried text at a path in the yard's roles
 // directory that holds nothing, with the mode given, whole or not at all:
 // the link refuses whatever arrived there since the proposal was read, a
 // symlink included, so nothing is replaced or followed. A member can read
-// only the role the operator approved, and the role stays private. A crew
-// add writes its member's role with it, and the approval of a prompt card
-// writes the prompt (writePrompt).
+// only the role the operator approved, and the role stays private. The
+// approval of every prompt a card sets writes it with this (writePrompt), a
+// crew add's role included.
 func writeRoleFile(home, disk, role string, mode os.FileMode) error {
 	dir := filepath.Dir(disk)
 	roles, err := filepath.Abs(filepath.Join(home, "roles"))
@@ -542,8 +529,9 @@ func writeRoleFile(home, disk, role string, mode os.FileMode) error {
 }
 
 // runCrewAdd adds the crew member as actor: it writes the carried role
-// text, byte for byte, to the yard's roles directory, and saves the
-// member through putCrew with its prompt there, its preset's flags as
+// text, byte for byte, to a read-only file of the yard's own named by its
+// digest (writePrompt, as every prompt a card sets is written), and saves
+// the member through putCrew with its prompt there, its preset's flags as
 // its args, and no grant. The daemon starts an enabled member, as it
 // starts one added in a terminal.
 func runCrewAdd(ctx context.Context, w *wtx, run AskRun, actor string, by *approvedOn) (string, error) {
@@ -551,11 +539,7 @@ func runCrewAdd(ctx context.Context, w *wtx, run AskRun, actor string, by *appro
 	if err != nil {
 		return "", err
 	}
-	disk, prompt, err := crewRolePath(w.home, spec.name)
-	if err != nil {
-		return "", err
-	}
-	config := map[string]any{"kind": spec.kind, "prompt": prompt}
+	config := map[string]any{"kind": spec.kind, "prompt": spec.rolePath}
 	if spec.model != "" {
 		config["model"] = spec.model
 	}
@@ -574,8 +558,8 @@ func runCrewAdd(ctx context.Context, w *wtx, run AskRun, actor string, by *appro
 	if err != nil {
 		return "", err
 	}
-	if err := writeRoleFile(w.home, disk, spec.role, 0o600); err != nil {
-		return "", fmt.Errorf("crew member %s: write its role to %s: %w", spec.name, disk, err)
+	if err := w.writePrompt("crew member "+spec.name, spec.rolePath, spec.role); err != nil {
+		return "", err
 	}
 	return fmt.Sprintf("crew member %s added; the daemon starts it (journal %s)", r.Name, r.Journal), nil
 }

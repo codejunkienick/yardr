@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,10 +13,42 @@ import (
 	"yardr.dev/yardr/internal/store"
 )
 
+// crewRoleFile is the file the approval of a crew add writes a member's role
+// to: the yard's roles directory, by the member's name and the SHA-256 of the
+// text. It is built here from the home as its symlinks resolve it, so a test
+// does not take the path from the code it holds.
+func crewRoleFile(t *testing.T, home, name, text string) string {
+	t.Helper()
+	home, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(text))
+	return filepath.Join(home, "roles", name+"."+hex.EncodeToString(sum[:])+".md")
+}
+
+// crewRoleHolds holds a role file the approval wrote to what it promises: a
+// regular file, read-only, with exactly the text.
+func crewRoleHolds(t *testing.T, path, text string) {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Errorf("the role file: %v", err)
+		return
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o400 {
+		t.Errorf("%s is %v, want a regular file of mode 0400", path, info.Mode())
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != text {
+		t.Errorf("%s holds %q, %v; want the bytes as asked: %q", path, got, err, text)
+	}
+}
+
 // bead ask --run "crew add ..." carries its role text from --run-role,
 // or from the file prompt= names, beside the ask: prime shows the
 // weighty card whole, a file changed after the ask changes nothing, and
-// the weighed approval adds the member with exactly those bytes.
+// the weighed approval adds the member with exactly those bytes, in a
+// read-only file of the yard's own named by their digest.
 func TestBeadAskRunCrewAdd(t *testing.T) {
 	t.Parallel()
 	key := airyKey(t)
@@ -63,16 +97,12 @@ func TestBeadAskRunCrewAdd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Config["kind"] != "claude" || m.Config["model"] != "opus" || m.Config["prompt"] != filepath.Join(m.Dir, "roles", "porter.md") {
+	roleAt := crewRoleFile(t, m.Dir, "porter", role)
+	if m.Config["kind"] != "claude" || m.Config["model"] != "opus" || m.Config["prompt"] != roleAt {
 		t.Fatalf("the member holds %+v", m)
 	}
-	got, err := os.ReadFile(filepath.Join(m.Dir, "roles", "porter.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != role {
-		t.Fatalf("role file = %q, want the bytes as asked, not the changed file", got)
-	}
+	// The bytes as asked, not the changed file.
+	crewRoleHolds(t, roleAt, role)
 
 	// prompt= names the file the same way, without --run-role, and a model
 	// carries its window in brackets as it does at a terminal.
@@ -100,13 +130,11 @@ func TestBeadAskRunCrewAdd(t *testing.T) {
 	if m2.Config["model"] != "opus[1m]" {
 		t.Fatalf("the clerk's model is %v, want opus[1m]", m2.Config["model"])
 	}
-	got2, err := os.ReadFile(filepath.Join(m2.Dir, "roles", "clerk.md"))
-	if err != nil {
-		t.Fatal(err)
+	role2At := crewRoleFile(t, m2.Dir, "clerk", role2)
+	if m2.Config["prompt"] != role2At {
+		t.Fatalf("the clerk's prompt is %v, want %s", m2.Config["prompt"], role2At)
 	}
-	if string(got2) != role2 {
-		t.Fatalf("clerk role file = %q, want %q", got2, role2)
-	}
+	crewRoleHolds(t, role2At, role2)
 	invalidRole := filepath.Join(t.TempDir(), "invalid.md")
 	if err := os.WriteFile(invalidRole, []byte{0xff}, 0o600); err != nil {
 		t.Fatal(err)

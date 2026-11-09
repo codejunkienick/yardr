@@ -563,7 +563,7 @@ func TestSourceAddApproveStale(t *testing.T) {
 			t.Errorf("adding over a name taken = %v", err)
 		}
 		stored.Seen = map[string]string{"source wired": "a fingerprint"}
-		if err := w.deleteSource(y.ctx, "wired", "mckean"); err != nil {
+		if err := w.deleteSource(y.ctx, "wired", "mckean", nil); err != nil {
 			t.Fatal(err)
 		}
 		_, err = runSourceAdd(y.ctx, w, stored, "mckean", nil)

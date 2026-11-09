@@ -30,6 +30,21 @@ func strongHas(t *testing.T, does []string, want ...string) {
 	}
 }
 
+// strongLacks holds the lines of a card to the sentences it must not say.
+func strongLacks(t *testing.T, does []string, unwanted ...string) {
+	t.Helper()
+	joined := strings.Join(does, "\n")
+	for _, u := range unwanted {
+		if strings.Contains(joined, u) {
+			t.Errorf("the card says %q:\n%s", u, joined)
+		}
+	}
+}
+
+// rewrittenSaid is what a prompt card says of a file the yard wrote that
+// holds other text than its name says.
+const rewrittenSaid = "this file no longer holds the text its name says. It holds now:"
+
 // A group set that changes a herdr group's prompt and sets a preset that
 // never asks is a weighty code card that shows what stands now and what will,
 // each whole. Approving it runs exactly that, as the terminal's group set
@@ -69,6 +84,8 @@ func TestRunAskGroupSetCardsThePromptAndAStrongPreset(t *testing.T) {
 		`It starts claude (Claude Code) agents with "--permission-mode" "auto" (the auto preset) now.`,
 		`It will start them with "--dangerously-skip-permissions": the bypass preset, never asks; runs as you with full access.`,
 		"It skips permissions: it runs without asking for permission.")
+	// A path the yard never wrote is shown as it was.
+	strongLacks(t, r.Ask.Run.Does, rewrittenSaid)
 	if r.Ask.Run.Description != "Change some settings of a group and keep the rest" || r.Ask.Run.BackBy != "only the operator" {
 		t.Errorf("description %q, taken back by %q", r.Ask.Run.Description, r.Ask.Run.BackBy)
 	}
@@ -139,6 +156,8 @@ func TestRunAskGroupSetCardsThePromptAndAStrongPreset(t *testing.T) {
 	}
 	strongHas(t, r.Ask.Run.Does, "Its prompt is the file "+newYard+", which each session reads when it starts, and which holds now:",
 		"Look twice.", "On approval the yard writes the text below to the file "+thirdYard+", read-only.", "Count your steps.")
+	// A file the yard wrote that holds what its name says is shown as it was.
+	strongLacks(t, r.Ask.Run.Does, rewrittenSaid)
 	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -175,6 +194,24 @@ func TestRunAskGroupSetCardsThePromptAndAStrongPreset(t *testing.T) {
 			t.Errorf("a proposal naming %s = %v, want it refused", c.file, err)
 		}
 	}
+	// The same text from another file is how a rewrite was passed off: the
+	// card showed it as the prompt that stood and as the one asked for, the
+	// same, with nothing to say it was not what the yard wrote. The card now
+	// says so above the text it holds. It is no refusal, so the approval of
+	// the card as shown still goes through.
+	rewrittenGiven, _ := groupAddFile(t, y, "scout-rewritten", "Rewritten.\n")
+	rewrittenYard := yardPromptFile(t, y, "scouts", "Rewritten.\n")
+	seq = y.ask(t, groupAddAsk("Rewritten.\n", "group", "set", "scouts", "prompt="+rewrittenGiven), "yardmaster")
+	strongHas(t, y.asked(t, seq).Ask.Run.Does,
+		"Its prompt is the file "+newYard+", which each session reads when it starts.", rewrittenSaid, "Rewritten.",
+		"On approval the yard writes the text below to the file "+rewrittenYard+", read-only.", "Rewritten.")
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := y.GetGroup(y.ctx, "scouts"); g.Config["prompt"] != rewrittenYard {
+		t.Errorf("group = %+v, want the prompt the card showed", g)
+	}
+	yardPromptHolds(t, rewrittenYard, "Rewritten.\n")
 }
 
 // A prompt that stands where the card cannot show it is said so on the card,
@@ -202,6 +239,62 @@ func TestRunAskGroupSetSaysWhatItCannotShow(t *testing.T) {
 	}
 	seq = y.ask(t, groupAddAsk(text, "group", "set", "reviewers", "prompt="+given), "yardmaster")
 	strongHas(t, y.asked(t, seq).Ask.Run.Does, "It has no prompt now.", "On approval the yard writes the text below to the file "+yardFile)
+	// A digest-named prompt is said to have changed even when its text is
+	// hidden from the card or longer than the card can hold. Hashing the whole
+	// file must not make the card carry more than its limit.
+	current := yardFile
+	for _, c := range []struct {
+		name, rewrite, why string
+	}{
+		{"hidden", "You review.\n\x1bhidden\n", "it is not text a card shows as written"},
+		{"long", strings.Repeat("x", MaxRunCrewRole+1), fmt.Sprintf("it is longer than the %d bytes a card shows", MaxRunCrewRole)},
+	} {
+		if err := os.Chmod(current, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(current, []byte(c.rewrite), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		group, err := y.GetGroup(y.ctx, "reviewers")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if group.Config["prompt"] != current {
+			if _, err := y.SetGroup(y.ctx, "reviewers", GroupEdit{Set: map[string]any{"prompt": current}}, "mckean"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		nextText := "You review again: " + c.name + ".\n"
+		nextGiven, _ := groupAddFile(t, y, "reviewer-"+c.name, nextText)
+		nextYard := yardPromptFile(t, y, "reviewers", nextText)
+		seq = y.ask(t, groupAddAsk(nextText, "group", "set", "reviewers", "prompt="+nextGiven), "yardmaster")
+		strongHas(t, y.asked(t, seq).Ask.Run.Does,
+			"Its prompt is the file "+current+", which each session reads when it starts.",
+			"this file no longer holds the text its name says.",
+			"This card cannot show it: "+c.why+".",
+			"On approval the yard writes the text below to the file "+nextYard+", read-only.")
+		if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+			t.Fatal(err)
+		}
+		current = nextYard
+	}
+	// Replacing the digest-named file with a symlink to another regular file
+	// under the home is a rewrite of the named prompt too.
+	linked := filepath.Join(y.Store.home, "roles", "ordinary-prompt.md")
+	if err := os.WriteFile(linked, []byte("A linked prompt.\n"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(current); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(linked, current); err != nil {
+		t.Fatal(err)
+	}
+	nextText := "You review the linked prompt.\n"
+	nextGiven, _ := groupAddFile(t, y, "reviewer-linked", nextText)
+	seq = y.ask(t, groupAddAsk(nextText, "group", "set", "reviewers", "prompt="+nextGiven), "yardmaster")
+	strongHas(t, y.asked(t, seq).Ask.Run.Does,
+		"Its prompt is the file "+current+", which each session reads when it starts.", rewrittenSaid, "A linked prompt.")
 }
 
 // A group set of an exec group's command shows the command now and the one

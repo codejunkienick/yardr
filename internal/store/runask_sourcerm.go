@@ -203,7 +203,7 @@ func runSourceRm(ctx context.Context, w *wtx, argv []string, actor string, by *a
 	if err != nil {
 		return "", err
 	}
-	if err := w.deleteSource(ctx, name, actor); err != nil {
+	if err := w.deleteSource(ctx, name, actor, by); err != nil {
 		return "", err
 	}
 	if files {

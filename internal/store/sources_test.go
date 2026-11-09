@@ -96,9 +96,14 @@ func TestDeclaredSource(t *testing.T) {
 			if e.Kind == "source_added" && (e.Data["source"] != "pushover" || e.Data["base"] != "https://api.pushover.net/1") {
 				t.Fatalf("source_added = %+v", e.Data)
 			}
+			// Removed by hand: it names the source and no ask.
+			if e.Kind == "source_removed" && (e.Actor != "jo" || e.Data["source"] != "pushover" || e.Data["approved"] != nil) {
+				t.Fatalf("source_removed = %+v by %s", e.Data, e.Actor)
+			}
 		}
 	}
-	if got := strings.Join(kinds, " "); got != "source_added source_set source_set source_added source_set" {
+	// The second removal found nothing, and logged nothing.
+	if got := strings.Join(kinds, " "); got != "source_added source_set source_set source_added source_set source_removed" {
 		t.Fatalf("events = %s", got)
 	}
 	if raw, _ := json.Marshal(evs); strings.Contains(string(raw), "{credential}") || strings.Contains(string(raw), "messages.json") {

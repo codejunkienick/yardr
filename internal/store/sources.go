@@ -871,18 +871,20 @@ func (w *wtx) keySource(ctx context.Context, home, name string, values map[strin
 	return nil
 }
 
-// DeleteSource removes the source, and with it who was granted its calls.
-// The file its credential is in is the operator's and stays.
+// DeleteSource removes the source, and with it who was granted its calls,
+// and logs a source_removed event naming it. The file its credential is in
+// is the operator's and stays.
 func (s *Store) DeleteSource(ctx context.Context, name, actor string) error {
 	return s.write(func(w *wtx) error {
-		return w.deleteSource(ctx, name, actor)
+		return w.deleteSource(ctx, name, actor, nil)
 	})
 }
 
 // deleteSource is DeleteSource inside the transaction, so that an
 // approved run ask removes the source in the write that records its
-// approval.
-func (w *wtx) deleteSource(ctx context.Context, name, actor string) error {
+// approval: by is then the ask it was approved on, which the event
+// carries, as hook_removed does.
+func (w *wtx) deleteSource(ctx context.Context, name, actor string, by *approvedOn) error {
 	// Alone: removing a source also removes the files of its commands
 	// from disk, which no write of the store takes back.
 	if err := w.may(ctx, actor, ActRemoveSource, Object{Kind: KindSource, Name: name}); err != nil {
@@ -897,5 +899,9 @@ func (w *wtx) deleteSource(ctx context.Context, name, actor string) error {
 	if err := dropSourceRecords(w.Tx, name); err != nil {
 		return err
 	}
-	return nil
+	data := map[string]any{"source": name}
+	if by != nil {
+		data["approved"] = by
+	}
+	return w.event("", "source_removed", actor, data)
 }

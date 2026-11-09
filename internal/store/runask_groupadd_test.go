@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
@@ -484,5 +485,39 @@ func TestRunAskGroupAddRefusals(t *testing.T) {
 	given, _ := groupAddFile(t, y, "builder", text)
 	if _, err := y.AddAsk(y.ctx, y.bead, groupAddAsk(text, "group", "add", "post4", "--runner", "herdr", "--set", "kind=claude", "--set", "prompt="+given), "yardmaster"); err != nil {
 		t.Errorf("a builder-sized prompt was refused: %v", err)
+	}
+}
+
+// A digest-named prompt file longer than the bound is still said to be
+// rewritten, but the hash covers only the bounded read: the card's "now"
+// read runs in the store's write, and a same-user rewrite past the bound
+// may be of any size.
+func TestHomeFileDigestHashesOnlyTheBoundedRead(t *testing.T) {
+	y := newAskYard(t)
+	path := yardPromptFile(t, y, "porter", "You are the porter.\n")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rewrite := strings.Repeat("x", MaxRunCrewRole+100)
+	if err := os.WriteFile(path, []byte(rewrite), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var data, sum []byte
+	if err := y.Store.write(func(w *wtx) error {
+		var err error
+		_, data, sum, err = w.homeFile("crew member porter", path, MaxRunCrewRole, true)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != MaxRunCrewRole+1 {
+		t.Fatalf("homeFile read %d bytes, want the bound and one more (%d)", len(data), MaxRunCrewRole+1)
+	}
+	want := sha256.Sum256([]byte(rewrite[:MaxRunCrewRole+1]))
+	if !bytes.Equal(sum, want[:]) {
+		t.Errorf("homeFile hashed past the bounded read")
+	}
+	if !promptDigestRewritten(path, sum) {
+		t.Errorf("an oversized digest-named file was not said to be rewritten")
 	}
 }

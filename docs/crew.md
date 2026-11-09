@@ -38,14 +38,15 @@ exception: from a crew pane, `yardr bead ask <id> "<question>"
 dir=<dir>" --run-role "<file>"` proposes one on a weighty (`code`) card
 that shows the kind, model, named permission preset (never free `args`),
 directory and whole role text, and says in plain words where the preset
-skips permissions; approving writes those exact bytes to
-`~/.yardr/roles/<name>.md`, sets the member's `prompt` there and starts
-it, and a file changed after the ask changes nothing. `env_file`,
-`env_command`, free `args` and any grant stay out of that card — env
-stays the operator's alone, and grants are proposed apart as `crew set`
-once the member stands — and a name in use, or one whose
-`roles/<name>.md` stands already, is refused, since the card adds and
-never replaces. A new group has a card of its own ([groups.md](groups.md)).
+skips permissions; approving writes those exact bytes to a read-only file of
+the yard's own, `~/.yardr/roles/<name>.<digest>.md` (the digest is the text's
+SHA-256), sets the member's `prompt` there and starts it, and a file changed
+after the ask changes nothing. `env_file`, `env_command`, free `args` and
+any grant stay out of that card — env stays the operator's alone, and
+grants are proposed apart as `crew set` once the member stands — and a name
+in use, or one whose `roles/<name>.<digest>.md` stands already with other
+text than its name says, is refused, since the card adds and never
+replaces. A new group has a card of its own ([groups.md](groups.md)).
 A crew member that needs one of those asks the operator for it, with the
 command whole in the ask; every other setting is changed as above.
 
@@ -62,9 +63,12 @@ approval is refused if that file holds other text by then. Approving writes
 that text to a read-only file of the yard's own, `roles/<name>.<digest>.md`
 under the home (the digest is the text's SHA-256), and sets it as the prompt,
 so a later change to the file the ask named reaches no session; a file the
-yard wrote is not one to name, since a new prompt is a new file. Nothing else
-rides in with them, and a running member keeps its session: the next one
-starts with the new prompt or flags.
+yard wrote is not one to name, since a new prompt is a new file. Where the
+prompt now is a file the yard wrote and it was rewritten in place since, so
+that it no longer holds the text its name says, the card says so above the
+text it shows as the prompt now; it is no refusal. Nothing else rides in
+with them, and a running member keeps its session: the next one starts with
+the new prompt or flags.
 
 The yardmaster's own entry has more on that card, since what the yardmaster
 runs for the operator on their mail never carries it (`yardmaster_delegation`,

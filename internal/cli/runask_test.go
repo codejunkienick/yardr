@@ -1232,17 +1232,12 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if m.Config["kind"] != "claude" || m.Config["model"] != "opus" || m.Config["prompt"] != filepath.Join(m.Dir, "roles", "porter.md") ||
+				roleAt := crewRoleFile(t, m.Dir, "porter", role)
+				if m.Config["kind"] != "claude" || m.Config["model"] != "opus" || m.Config["prompt"] != roleAt ||
 					fmt.Sprint(m.Config["args"]) != "[--permission-mode auto]" {
 					t.Fatalf("%s: the member holds %+v", use, m)
 				}
-				got, err := os.ReadFile(filepath.Join(m.Dir, "roles", "porter.md"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if string(got) != role {
-					t.Fatalf("%s: role file = %q, want the carried bytes", use, got)
-				}
+				crewRoleHolds(t, roleAt, role)
 				continue
 			}
 			if use == groupAddUse {
@@ -1656,7 +1651,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				}
 				var changes []map[string]any
 				for _, kind := range []string{"peer_added", "peer_allowed", "source_set", "source_granted", "subscribed", "user_set",
-					"peer_renamed", "peer_removed", "user_added", "user_removed", "crew_defined", "crew_restart_requested", "setting_changed", "timer_removed", "originator_changed", "source_added", "hook_added", "identity_set", "identity_removed", "sender_unignored", "peer_intake", "peer_identity_set", "peer_url_set", "hook_removed", "device_removed"} {
+					"peer_renamed", "peer_removed", "user_added", "user_removed", "crew_defined", "crew_restart_requested", "setting_changed", "timer_removed", "originator_changed", "source_added", "source_removed", "hook_added", "identity_set", "identity_removed", "sender_unignored", "peer_intake", "peer_identity_set", "peer_url_set", "hook_removed", "device_removed"} {
 					evs, err := y.st.EventsOfKind(ctx, kind, 10)
 					if err != nil {
 						t.Fatal(err)
@@ -1674,10 +1669,10 @@ func TestRunListIsTheCLIs(t *testing.T) {
 						changes = append(changes, map[string]any{"kind": e.Kind, "actor": e.Actor, "data": e.Data})
 					}
 				}
-				// Removing a source logs no event, and a link move logs on the beads
-				// (unlinked, linked): the answer on the bead is the record.
+				// A link move logs on the beads (unlinked, linked): the answer on the
+				// bead is the record.
 				wantChanges := strings.Count(done.Result, "\n") + 1
-				if use == "yardr source rm <name>" || use == "yardr link move --from-source <source> --to-source <source>" {
+				if use == "yardr link move --from-source <source> --to-source <source>" {
 					wantChanges = 0
 				}
 				if len(changes) != wantChanges {

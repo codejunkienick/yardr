@@ -30,10 +30,30 @@ import (
 const yardPromptMode = 0o400
 
 // yardPromptName matches the end of the name of a prompt file the yard
-// writes: the digest of its text, then .md. The name alone decides, whatever
-// stands on the disk, and case does not, since a file system that does not
-// tell case apart reaches the same file by either spelling.
-var yardPromptName = regexp.MustCompile(`(?i)\.[0-9a-f]{64}\.md$`)
+// writes: the digest of its text, which it captures, then .md. The name alone
+// decides, whatever stands on the disk, and case does not, since a file
+// system that does not tell case apart reaches the same file by either
+// spelling.
+var yardPromptName = regexp.MustCompile(`(?i)\.([0-9a-f]{64})\.md$`)
+
+// promptRewritten says whether the file at path, which holds text, is named
+// as the yard names the files it writes and holds other text than the digest
+// in that name: it was rewritten in place since, which its read-only mode
+// does not stop a process of the yard's own user from doing (the limit stated
+// above). A file named otherwise is never said to be rewritten, since its
+// name says nothing of its text.
+func promptRewritten(path, text string) bool {
+	sum := sha256.Sum256([]byte(text))
+	return promptDigestRewritten(path, sum[:])
+}
+
+// promptDigestRewritten says whether a digest-bearing yard prompt name does
+// not match the SHA-256 of the whole file, even when the card cannot show
+// that file's text.
+func promptDigestRewritten(path string, sum []byte) bool {
+	m := yardPromptName.FindStringSubmatch(path)
+	return m != nil && len(sum) != 0 && !strings.EqualFold(m[1], hex.EncodeToString(sum))
+}
 
 // yardPromptPath is the file the approval of a prompt writes the text of
 // name's prompt to, and the path the definition saves: the yard's roles

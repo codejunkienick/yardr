@@ -183,6 +183,7 @@ var eventDataTold = map[string][]string{
 	// calls, the file a hook's secret is read from and the values a call was
 	// made with are an operator's.
 	"source_added":         {"source", "calls", "limits", "replaced", "approved"},
+	"source_removed":       {"source", "approved"},
 	"source_set":           {"source", "approved", "calls_per_hour", "updates_per_hour"},
 	"source_granted":       {"approved", "source", "what", "as", "crew", "group"},
 	"source_call":          {"as", "attempt", "by", "bytes", "call", "crew", "group", "kind", "ms", "params", "session", "source", "status"},

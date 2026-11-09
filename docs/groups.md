@@ -101,7 +101,10 @@ the absolute path of a file under the yard's home, whose text `yardr bead ask`
 carries beside the command, and the approval is refused if that file holds
 other text by then and, as for a new group, writes that text to a read-only
 file of the yard's own which becomes the prompt; `preset` names one of the
-group's kind. Nothing else rides in with them.
+group's kind. Where the prompt now is a file the yard wrote and it was
+rewritten in place since, so that it no longer holds the text its name says,
+the card says so above the text it shows as the prompt now; it is no
+refusal. Nothing else rides in with them.
 
 The runner is not changed this way, since another runner reads another
 config: that is `group add`. `yardr group show <name>` prints one group: its

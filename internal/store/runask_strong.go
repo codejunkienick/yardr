@@ -139,20 +139,24 @@ func noPreset(subject, kind, label, which string) error {
 // as a regular file under the yard's home, is longer than a card holds, or is
 // no text a card shows as written. A card says so then, and the approval is
 // still held to the text it does show, which is the one that will run.
-func (w *wtx) promptBefore(path string) (text, why string) {
+func (w *wtx) promptBefore(path string) (text, why string, rewritten bool) {
 	if !strings.HasPrefix(path, "/") {
-		return "", "it is a relative path, read against each depot"
+		return "", "it is a relative path, read against each depot", false
 	}
-	_, data, err := w.homeFile("", path, MaxRunCrewRole)
+	real, data, sum, err := w.homeFile("", path, MaxRunCrewRole, true)
+	digestName := real
+	if yardPromptName.MatchString(path) {
+		digestName = path
+	}
 	switch {
 	case err != nil:
-		return "", "it does not stand as a regular file under the yard's home"
+		return "", "it does not stand as a regular file under the yard's home", false
 	case len(data) > MaxRunCrewRole:
-		return "", fmt.Sprintf("it is longer than the %d bytes a card shows", MaxRunCrewRole)
+		return "", fmt.Sprintf("it is longer than the %d bytes a card shows", MaxRunCrewRole), promptDigestRewritten(digestName, sum)
 	case !utf8.Valid(data) || strings.IndexFunc(string(data), crewRoleHidden) >= 0 || strings.Contains(string(data), NoteFilesMark) || strings.Contains(string(data), WeightMark):
-		return "", "it is not text a card shows as written"
+		return "", "it is not text a card shows as written", promptDigestRewritten(digestName, sum)
 	}
-	return string(data), ""
+	return string(data), "", promptDigestRewritten(digestName, sum)
 }
 
 // textLines are the lines of a prompt's text as a card shows it.
@@ -169,16 +173,31 @@ func promptWritten(path string) string {
 
 // promptLines are the card's lines for a prompt that changes from the file
 // was (empty for none) to the file path, which the approval writes from
-// text: what stands now and what will, each whole.
+// text: what stands now and what will, each whole. A file the yard wrote
+// that holds other text than its name says is said so, above the text: it was
+// rewritten in place, and a card that only showed the text would pass it off
+// as the prompt the yard wrote. That is no refusal: the approval is still
+// held to the text the card shows.
 func (w *wtx) promptLines(was, path, text string) []string {
 	var lines []string
 	if was == "" {
 		lines = append(lines, "It has no prompt now.")
-	} else if before, why := w.promptBefore(was); why == "" {
-		lines = append(lines, fmt.Sprintf("Its prompt is the file %s, which each session reads when it starts, and which holds now:", was))
+	} else if before, why, rewritten := w.promptBefore(was); why == "" {
+		if rewritten {
+			lines = append(lines, fmt.Sprintf("Its prompt is the file %s, which each session reads when it starts.", was),
+				"The yard names the files it writes by the SHA-256 of their text, and this file no longer holds the text its name says. It holds now:")
+		} else {
+			lines = append(lines, fmt.Sprintf("Its prompt is the file %s, which each session reads when it starts, and which holds now:", was))
+		}
 		lines = append(lines, textLines(before)...)
 	} else {
-		lines = append(lines, fmt.Sprintf("Its prompt is the file %s, which each session reads when it starts. This card cannot show it: %s.", was, why))
+		if rewritten {
+			lines = append(lines, fmt.Sprintf("Its prompt is the file %s, which each session reads when it starts.", was),
+				"The yard names the files it writes by the SHA-256 of their text, and this file no longer holds the text its name says.",
+				fmt.Sprintf("This card cannot show it: %s.", why))
+		} else {
+			lines = append(lines, fmt.Sprintf("Its prompt is the file %s, which each session reads when it starts. This card cannot show it: %s.", was, why))
+		}
 	}
 	lines = append(lines, promptWritten(path))
 	return append(lines, textLines(text)...)
