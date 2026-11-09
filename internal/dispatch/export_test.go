@@ -233,6 +233,13 @@ func NextDue(d *Dispatcher) *time.Time { return d.nextDue() }
 // goroutine reads it.
 func SetLiveGOCACHE(d *Dispatcher, liveOf func() (string, error)) { d.gocache.liveOf = liveOf }
 
+// SetEarlyOf makes d ask earlyOf whether a sweep could take a rotated
+// directory inside its grace, where it asks diskkeep.Early, so that a test need
+// not make the disk short. It is set before a pass, as SetLiveGOCACHE is.
+func SetEarlyOf(d *Dispatcher, earlyOf func(olds []store.GOCACHEDir, at time.Time) bool) {
+	d.gocache.earlyOf = earlyOf
+}
+
 // WaitGOCACHE waits for the sweep of rotated GOCACHE directories in flight,
 // if there is one, to end: a pass run alone starts it and does not wait. It
 // gives up after WaitFuse, leaving the test's own assertions to say what did

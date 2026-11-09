@@ -22,7 +22,12 @@ import (
 // group's cmd, so the keeping the landing runs touches nothing of the
 // machine's go. A GOCACHE exported to the test would win over that file and
 // the keeping refuses to rotate under it, so the cmd blanks it, which go
-// reads as unset. It returns the seeded GOCACHE and GOTMPDIR.
+// reads as unset. The gate's floor is off too (YARDR_TEST_FLOOR_GIB=0, as the
+// gate's own tests have it): the keeping reads the machine's real free space,
+// and where that is under the floor and no go process is older than the
+// rotation, which a run of the compiled test outside go test shows, it takes
+// the cache it rotated away from inside its grace, and the test looks for that
+// cache. It returns the seeded GOCACHE and GOTMPDIR.
 func (y *yard) hermeticGo() (gocache, gotmp string) {
 	y.t.Helper()
 	gocache = filepath.Join(y.home, "gocache")
@@ -34,7 +39,7 @@ func (y *yard) hermeticGo() (gocache, gotmp string) {
 	if err := os.MkdirAll(gotmp, 0o755); err != nil {
 		y.t.Fatal(err)
 	}
-	y.opts = "GOENV=" + shellQuote(goenv) + " GOCACHE= GOTMPDIR=" + shellQuote(gotmp) + " " + y.opts
+	y.opts = "GOENV=" + shellQuote(goenv) + " GOCACHE= GOTMPDIR=" + shellQuote(gotmp) + " YARDR_TEST_FLOOR_GIB=0 " + y.opts
 	return gocache, gotmp
 }
 

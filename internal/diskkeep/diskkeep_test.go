@@ -2,6 +2,7 @@ package diskkeep
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -61,8 +62,17 @@ type keeping struct {
 func newKeeping(t *testing.T, settings map[string]string) (*keeping, map[string]string) {
 	t.Helper()
 	k := &keeping{t: t, st: storetest.New(t), fake: &fakeGo{}, now: time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)}
-	saveFree, saveEnv, saveSet, saveHas, saveNow := freeDisk, goEnv, goEnvSet, hasGo, now
-	t.Cleanup(func() { freeDisk, goEnv, goEnvSet, hasGo, now = saveFree, saveEnv, saveSet, saveHas, saveNow })
+	saveFree, saveEnv, saveSet, saveHas, saveNow, saveTable := freeDisk, goEnv, goEnvSet, hasGo, now, psTable
+	t.Cleanup(func() {
+		freeDisk, goEnv, goEnvSet, hasGo, now, psTable = saveFree, saveEnv, saveSet, saveHas, saveNow, saveTable
+	})
+	// The early removal reads free space and the process table beyond what
+	// these tests script, and the machine's own floor variable must not decide
+	// whether it runs: it is off here, and the tests of it (early_test.go) turn
+	// it on and script both. A table nobody scripted is an error, which holds
+	// every cache, so a test that forgot cannot read the machine's processes.
+	t.Setenv(floorEnv, "0")
+	psTable = func(context.Context) ([]byte, error) { return nil, errors.New("no process table was scripted") }
 	freeDisk = func(string) (uint64, error) {
 		if k.frees >= len(k.free) {
 			t.Fatalf("free space read %d times, scripted %d", k.frees+1, len(k.free))

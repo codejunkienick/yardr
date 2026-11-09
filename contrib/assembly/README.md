@@ -85,7 +85,8 @@ go-build directories in GOTMPDIR older than 3 hours, logging a
 `disk_kept` event with what it did
 (docs/setup.md, "The machine's disk"). The daemon also removes a rotated
 directory when its 30 minutes are over, so one does not wait for the next
-landing. Best effort: a keep that fails is
+landing, and under the gate's floor the keeping and the daemon take one inside
+its 30 minutes when no go process can be using it. Best effort: a keep that fails is
 in the log and the landing goes on to the tests. Where the installed
 yardr predates the command the step is skipped, and activates once the
 new yardr is in.

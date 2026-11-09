@@ -29,6 +29,13 @@ it did as a disk_kept event, and says it gave up when free space is still
 under 10 GB afterwards. Over the threshold it does nothing and says
 nothing.
 
+Where free space is also under the test gate's floor (20 GB;
+YARDR_TEST_FLOOR_GIB gives another, 0 turns this off) it takes a recorded
+directory still inside its 30 minutes when no go process started before it
+was rotated away from, oldest first and no more once the volume is over the
+floor, and says so. The record stays until the 30 minutes are over, so the
+rotation still holds the next one off.
+
 The assembly runs it before every landing's tests run
 (contrib/assembly/merge-local), where a failure is in the log and the
 landing goes on to the tests. Run by hand it reports the same lines, and

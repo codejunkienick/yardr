@@ -2510,7 +2510,8 @@ fi
 # In the two days before this was written, about three in ten keepings left less
 # than 20 GiB free; those landing gates wait until there is room. A yard can set
 # a different floor with YARDR_TEST_FLOOR_GIB. This is the one place the default
-# number is written.
+# number is written in the gate; internal/diskkeep repeats it as FloorGB, for the
+# cache it takes before its grace ends, and a test holds the two together.
 # The volumes are GOCACHE's, GOTMPDIR's where it is set (the go command's own
 # scratch) and TMPDIR's (the tests'). `go env` answers for the first two, since
 # the yard rotates GOCACHE with `go env -w` (internal/diskkeep) and nothing in

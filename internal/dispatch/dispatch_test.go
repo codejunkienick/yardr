@@ -50,6 +50,12 @@ func TestMain(m *testing.M) {
 	// 10 s under load (see pushFuse), and 30 s is little margin over that:
 	// only a hang should cut a command here.
 	source.Timeout = pushFuse
+	// A real sweep of rotated GOCACHE directories reads the machine's own free
+	// space, and takes a cache inside its grace where that is under the gate's
+	// floor and the process table shows no go process older than it. The tests
+	// of the sweep run on a clock of their own, which the table does not follow,
+	// so the check is off, as the gate's own tests turn off the gate's.
+	os.Setenv("YARDR_TEST_FLOOR_GIB", "0")
 	code := m.Run()
 	scripttest.Remove()
 	removePeerTemplates()

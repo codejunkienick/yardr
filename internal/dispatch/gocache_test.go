@@ -268,6 +268,97 @@ func TestPassBacksOffASweepThatCannotTellTheLiveCache(t *testing.T) {
 	}
 }
 
+// While every recorded cache is inside its grace the pass looks at the disk: a
+// sweep starts for it only when diskkeep.Early says a cache could be taken (the
+// disk is short), no sooner than Backoff after the end of the last, and after a
+// look that failed no sooner than twice the wait it ended; the wait is a due for
+// Run's timer. A look that failed does not hold back the removal at a grace's
+// end, which is yardr-mb6e's promise, and looks leave no event of their own: the
+// sweeps run diskkeep.Sweep for real, which takes nothing here (the check is off
+// in these tests) and so says nothing, and it is the pass's part that is shown.
+func TestPassLooksAtTheDiskInsideTheGrace(t *testing.T) {
+	t.Parallel()
+	y := newGOCacheYard(t)
+	t0 := *y.clock.Load()
+	old := y.cache("go-build-7")
+	y.record(old, t0)
+	var short atomic.Bool
+	dispatch.SetEarlyOf(y.d, func([]store.GOCACHEDir, time.Time) bool { return short.Load() })
+	min := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
+	// at runs a pass at the clock's time and checks how many sweeps there have
+	// been and when Run would wake.
+	at := func(now time.Time, sweeps int32, due time.Time) {
+		t.Helper()
+		y.set(now)
+		y.pass()
+		if got := y.asked.Load(); got != sweeps {
+			t.Fatalf("at +%v: %d sweeps, want %d", now.Sub(t0), got, sweeps)
+		}
+		if got := dispatch.GOCACHEDue(y.d); got == nil || !got.Equal(due) {
+			t.Fatalf("at +%v: due = %v, want %v", now.Sub(t0), got, due)
+		}
+	}
+
+	// The disk is not short: nothing starts, and the due is the grace's end.
+	at(min(1), 0, min(30))
+
+	// It is: a sweep, and then the wait for the next look.
+	short.Store(true)
+	at(min(1), 1, min(2))
+	at(min(2).Add(-time.Second), 1, min(2))
+	at(min(2), 2, min(3))
+
+	// Looks that fail (the live cache cannot be told) wait twice as long each
+	// time, and are not told as a removal that failed.
+	y.fail.Store(true)
+	at(min(3), 3, min(5))
+	at(min(5).Add(-time.Second), 3, min(5))
+	at(min(5), 4, min(9))
+	y.fail.Store(false)
+	at(min(9), 5, min(10))
+
+	// The disk is no longer short: the wait is over and nothing starts.
+	short.Store(false)
+	at(min(10), 5, min(30))
+	short.Store(true)
+	at(min(10), 6, min(11))
+
+	// A look whose sweep told an error (a record of a path that is no rotated
+	// sibling, which is dropped and left on the disk) is one that failed too.
+	foreign := filepath.Join(t.TempDir(), "precious")
+	must(t, os.MkdirAll(foreign, 0o755))
+	y.record(foreign, t0)
+	at(min(11), 7, min(13))
+	at(min(13), 8, min(14))
+	if !y.exists(foreign) || slices.Contains(y.recorded(), foreign) {
+		t.Fatalf("the path that is no rotated sibling: standing %v, recorded %v; want it left and dropped", y.exists(foreign), y.recorded())
+	}
+
+	// A look fails just before the grace ends, and its wait (until +31m30s) goes
+	// past the end: Run wakes for the grace's end, and the sweep of the grace's
+	// end starts all the same, and takes the cache.
+	y.fail.Store(true)
+	at(min(30).Add(-30*time.Second), 9, min(30))
+	if !y.exists(old) {
+		t.Fatalf("a look took a cache inside its grace with the check off")
+	}
+	y.fail.Store(false)
+	y.set(min(30))
+	y.pass()
+	if y.asked.Load() != 10 || y.exists(old) || len(y.recorded()) != 0 {
+		t.Fatalf("at the grace's end: %d sweeps, cache standing %v, recorded %v; want the 10th to have removed it", y.asked.Load(), y.exists(old), y.recorded())
+	}
+	if got := dispatch.NextDue(y.d); got != nil {
+		t.Fatalf("Run wakes at %v with nothing recorded", got)
+	}
+	if n := strings.Count(y.log.String(), "not removed"); n != 0 {
+		t.Errorf("%d warnings of a removal past its grace that failed, want none:\n%s", n, y.log.String())
+	}
+	if evs := eventsOf(t, y.s, store.DiskKept); len(evs) != 2 {
+		t.Errorf("%d disk_kept events, want the look that told an error and the grace's end", len(evs))
+	}
+}
+
 // deafStore is a store whose wake-up stream never fires, so that nothing but
 // what a test names wakes Run's loop.
 type deafStore struct{ store.API }

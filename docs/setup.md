@@ -199,14 +199,51 @@ which cache is live (`go` is not on the PATH it runs with), is told once in
 the daemon's log and tried again after a wait that doubles up to an hour. The
 rotation itself stays the landing's keeping, under `disk_keep_gb`.
 
+The 30 minutes are a guess that a build which started before a rotation is
+over by then, and while the disk is short the guess costs more than it guards.
+The test gate refuses to start under 20 GB free
+([the disk floor](testing.md#the-disk-floor)), so while free space on
+GOCACHE's volume is under that floor, a landing's keeping and the daemon also
+take a rotated directory inside its 30 minutes when no go process can be using
+it. `go` reads GOCACHE once, as it starts, and `go test` does not hand it to its
+test binaries, so only a go process that started before the rotation can be
+writing to the directory the rotation left, and the process table (`ps`) says
+whether one is running. The directory of the oldest rotation goes first, and
+none goes once the volume is over the floor. Its record stays until the 30
+minutes are over, so the rotation it marks still holds the next one off, and
+the `disk_keep_gb` keeping does not rotate again at once. The `disk_kept` event
+lists the directories taken this way as `removed_early`. A process table that
+cannot be read (no `ps`, one that fails, a start time it cannot make out) holds
+every directory to its 30 minutes. The daemon looks at the disk on each pass,
+which reads the free space and the directories and no process table, and reads
+the table only when it could take a directory; it looks again no sooner than
+half a minute after the last, and after a look that failed at a wait that
+doubles up to an hour. The floor is the gate's: `YARDR_TEST_FLOOR_GIB` in the
+daemon's or the keeping's environment gives another one, and `0` turns this
+off.
+
+The table does not show everything, and the 30 minutes do not guard it
+either. A virtual machine or a container that mounts the directory can be using
+a directory the host's table shows nobody for. A go command that was given the
+directory as its GOCACHE in its own environment is not the rotation's to know:
+the rule that GOCACHE comes from the go env file (below) guards the keeping and
+the yard's own processes, not a person's. And a tool that is not `go`, a linter
+or an analyzer, can read files from the paths `go list -export` gave it before
+the rotation. A build that has a cache directory taken from under it fails
+(`could not import ... no such file`) and passes when it is run again. All
+three are a rarer exposure than the 30 minutes' own guess, and they apply only
+while the disk is under the floor.
+
 GOCACHE belongs to the machine and the record of rotations to the yard, so
 two yards on one machine each see only their own rotations. A landing
 therefore also records every rotated cache it finds beside the live one that
 no record names, whichever yard left it: a real directory named as the live
 cache is, with a lower number, holding the README Go writes into every cache
 it makes. The moment it finds one counts as the moment it was left, so it
-holds that landing's own rotation and is removed 30 minutes later. The event
-lists these as `adopted`. Name a Go cache of your own differently:
+holds that landing's own rotation and is removed 30 minutes later, or sooner
+where the disk is under the floor and no go process is running at all, since
+none then started before that moment. The event lists these as `adopted`. Name
+a Go cache of your own differently:
 `go-build-3` beside a live `go-build-9` is taken for a rotated cache.
 
 Two things are the operator's. First, GOCACHE must come from the go env

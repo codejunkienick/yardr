@@ -416,7 +416,10 @@ keepings in the two days before this was written left less than 20 GiB free, so
 those landing gates wait until there is room. A yard can set another floor by
 exporting `YARDR_TEST_FLOOR_GIB=<n>` where its gates start (the daemon's
 environment, a pane's profile); 0 turns the check off, and the gate's own tests
-give 0.
+give 0. The daemon and a landing's keeping read the same variable for the floor
+under which they take a rotated GOCACHE directory before its 30 minutes are over
+(below); `diskkeep.FloorGB` repeats the default for them, and
+`TestDiskkeepFloorIsTheGatesFloor` holds it to `floorgib`.
 
 Exit 2 is "could not run" ([line.md](line.md#4-approved-the-assembly-lands-it-on-main)):
 no test line, nothing ran, and the assembly holds a landing instead of sending
@@ -424,7 +427,11 @@ it back, since nothing a builder changes can fix it. A builder who meets it has
 met the machine and not their change: they free nothing that is not their own,
 and tell the yardmaster. The daemon removes a rotated GOCACHE directory itself
 when its 30 minutes are over ([setup.md](setup.md#the-machines-disk)), so one
-that stands beside the live cache past that is worth telling too. A rotation of
+that stands beside the live cache past that is worth telling too. While the disk
+is under the floor it also takes one inside its 30 minutes when no go process
+started before it was rotated away from, so a gate that is stopped at the floor
+by a cache nothing uses need not wait out the 30 minutes; setup.md says how it
+knows, and what it cannot see. A rotation of
 GOCACHE that nothing has built in yet does not exist, so each volume is read at
 the nearest directory that does. A `df` or
 `go env` that cannot be read lets the run go on, since a gate that cannot see

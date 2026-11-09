@@ -65,11 +65,14 @@ it lists every exported name with its comment, faster than grepping.
 - `depotfile`: reads a depot's standing working-rules file.
 - `dispatch`: the daemon's pass: wakes on a committed write, re-reads
   state, routes beads, runs the crew, keeps backups, removes rotated
-  GOCACHE directories when their grace ends, sends the daily telemetry
-  batch when the operator turned it on; never polls.
+  GOCACHE directories when their grace ends (and inside it, while the disk
+  is under the gate's floor and no go process can hold them), sends the
+  daily telemetry batch when the operator turned it on; never polls.
 - `diskkeep`: keeping the machine's disk free for landings' builds
   (GOCACHE rotation, stale go-tmp), run by `yardr disk keep`; its removal
-  of rotated caches past their grace is also the daemon's (`Sweep`).
+  of rotated caches past their grace is also the daemon's (`Sweep`), and so
+  is that of the ones inside it that no go process can hold, while the
+  disk is under the gate's floor (`FloorGB`, held to `floorgib` by a test).
 - `edgelink`: the yard's side of the edge (`yardr edge connect`): fetching
   the edge's key and enrolling the yard by a code, each call signed with the
   yard's key (the member and preview reports among them), and the link

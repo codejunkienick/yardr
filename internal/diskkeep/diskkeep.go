@@ -15,6 +15,12 @@
 // it, so a rotated directory could stand long past its grace and fill the
 // disk that builders then meet. The daemon therefore runs the removal alone
 // (Sweep) at the end of each grace, whatever the disk holds.
+//
+// The grace is a guess that a build which started before a rotation is over in
+// 30 minutes. Where the process table shows no go process that started before
+// the rotation, no build can be writing to the directory, and while the disk is
+// under the floor of the gate (FloorGB) a keeping and a sweep take it before the
+// grace ends (early.go, goprocs.go). The record stays until the grace ends.
 package diskkeep
 
 import (
@@ -24,6 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -115,8 +122,13 @@ type Report struct {
 	// keeping recorded as stood aside from now.
 	Adopted []string `json:"adopted,omitempty"`
 	// Removed is every directory the keeping took from the disk: rotated
-	// GOCACHE directories past their grace, and stale go-tmp.
+	// GOCACHE directories past their grace, those taken before it (Early),
+	// and stale go-tmp.
 	Removed []string `json:"removed"`
+	// Early is the part of Removed that went before its grace ended: rotated
+	// caches no go process could hold, taken while the disk was under the
+	// gate's floor. Their records stand until the grace ends.
+	Early []string `json:"removed_early,omitempty"`
 	// GaveUp is whether free space is still under 10 GB after the keeping.
 	GaveUp bool `json:"gave_up"`
 	// Errors is what went wrong past the rotation, each a sentence: a
@@ -139,6 +151,10 @@ func (r *Report) Lines() []string {
 		lines = append(lines, fmt.Sprintf("adopted %s: no record named it, so its %d minutes start now", dir, int(OldGrace.Minutes())))
 	}
 	for _, dir := range r.Removed {
+		if slices.Contains(r.Early, dir) {
+			lines = append(lines, "removed "+dir+" inside its grace: the disk is under the gate's floor and no go process started before it was rotated away from")
+			continue
+		}
 		lines = append(lines, "removed "+dir)
 	}
 	for _, err := range r.Errors {
@@ -163,7 +179,10 @@ func gigabytes(n uint64) string {
 // Under it, GOCACHE is rotated unless a rotation stands inside OldGrace:
 // that one's directory cannot go yet, so another rotation frees nothing and
 // only starts one more cache from empty. A keeping that holds the rotation
-// still removes what is past its grace, clears go-tmp, and says so.
+// still removes what is past its grace, clears go-tmp, and says so. Where the
+// disk is also under the gate's floor it takes the rotated caches inside their
+// grace that no go process can hold (removeIdle), which leaves their records
+// and so leaves the hold as it was.
 //
 // Past the rotation (or the decision to hold it) everything is best effort:
 // a directory that cannot be removed, or a free-space reading that fails,
@@ -252,6 +271,7 @@ func Keep(ctx context.Context, st store.API, settings map[string]string) (*Repor
 		lock = nil
 	}
 	rep.Removed = append(rep.Removed, removeOld(ctx, st, rep, live, at)...)
+	rep.Removed = append(rep.Removed, removeIdle(ctx, st, rep, live, at)...)
 	rep.Removed = append(rep.Removed, pruneTmp(rep, at)...)
 	conclude(ctx, st, rep, live)
 	return rep, nil
@@ -265,6 +285,12 @@ func Keep(ctx context.Context, st store.API, settings map[string]string) (*Repor
 // disk_keep_gb: a directory past its grace has no use whatever the disk holds,
 // and what rotates stays the landing's keeping. at is the caller's clock, so
 // a sweep can be run at any time a test names.
+//
+// Where the disk is under the gate's floor it also takes the recorded
+// directories inside their grace that no go process can hold (removeIdle), as
+// Keep does, and the daemon starts a sweep for that when Early says there is
+// one, so a builder's gate, which starts no keeping, is not held at the floor by
+// a cache nothing uses. The report says them in Early.
 //
 // It takes no lock on GOCACHE's parent: it moves no pointer and decides no
 // rotation, and what it adopts is stamped at first sight, so a sweep and a
@@ -287,6 +313,7 @@ func Sweep(ctx context.Context, st store.API, live string, at time.Time) (*Repor
 		NotRotated: "a removal alone, which rotates nothing"}
 	rep.Adopted = adopt(ctx, st, rep, strayCaches(rep, olds, live), at)
 	rep.Removed = append(rep.Removed, removeOld(ctx, st, rep, live, at)...)
+	rep.Removed = append(rep.Removed, removeIdle(ctx, st, rep, live, at)...)
 	if len(rep.Adopted)+len(rep.Removed)+len(rep.Errors) == 0 {
 		return &Report{FreeBefore: free, FreeAfter: free}, nil
 	}
@@ -328,6 +355,9 @@ func conclude(ctx context.Context, st store.API, rep *Report, live string) {
 		"rotated_to":   rep.RotatedTo,
 		"removed":      rep.Removed,
 		"gave_up":      rep.GaveUp,
+	}
+	if len(rep.Early) > 0 {
+		data["removed_early"] = rep.Early
 	}
 	if rep.NotRotated != "" {
 		data["not_rotated"] = rep.NotRotated
@@ -531,7 +561,9 @@ func adopt(ctx context.Context, st store.API, rep *Report, strays []string, at t
 // removeOld removes the recorded GOCACHE directories whose grace has
 // passed, except the live one, and drops each from the record once it is
 // gone. A directory that cannot be removed stays recorded for the next
-// keeping or sweep.
+// keeping or sweep. One that is gone already, because removeIdle took it inside
+// its grace, only has its record dropped now: the keeping did not take it, so
+// it is not in the removed.
 func removeOld(ctx context.Context, st store.API, rep *Report, live string, at time.Time) []string {
 	olds, err := st.GOCACHEOldDirs(ctx)
 	if err != nil {
@@ -557,15 +589,21 @@ func removeOld(ctx context.Context, st store.API, rep *Report, live string, at t
 		if at.Sub(old.At) < OldGrace {
 			continue
 		}
-		if err := os.RemoveAll(old.Dir); err != nil {
-			rep.Errors = append(rep.Errors, fmt.Sprintf("could not remove %s: %v", old.Dir, err))
-			continue
+		_, statErr := os.Lstat(old.Dir)
+		gone := os.IsNotExist(statErr)
+		if !gone {
+			if err := os.RemoveAll(old.Dir); err != nil {
+				rep.Errors = append(rep.Errors, fmt.Sprintf("could not remove %s: %v", old.Dir, err))
+				continue
+			}
 		}
 		if err := st.RemoveGOCACHEOld(ctx, old.Dir); err != nil {
 			rep.Errors = append(rep.Errors, fmt.Sprintf("could not drop %s from the record: %v", old.Dir, err))
 			continue
 		}
-		removed = append(removed, old.Dir)
+		if !gone {
+			removed = append(removed, old.Dir)
+		}
 	}
 	return removed
 }

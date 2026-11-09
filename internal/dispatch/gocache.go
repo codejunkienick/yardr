@@ -29,6 +29,10 @@ import (
 // due next, and a daemon that stops or replaces itself in the middle of a
 // removal leaves the record, which is dropped only once the directory is
 // gone, so the next daemon removes what is left.
+//
+// A sweep also starts for the disk's sake, before any grace ends
+// (gocacheearly.go): diskkeep.Sweep takes a directory inside its grace when the
+// disk is under the gate's floor and no go process can hold it.
 
 // gocacheKeeping is the daemon's removal of rotated GOCACHE directories.
 type gocacheKeeping struct {
@@ -57,6 +61,12 @@ type gocacheKeeping struct {
 	// liveOf tells the live GOCACHE; nil asks go (diskkeep.LiveGOCACHE). A
 	// test sets it, so that no go runs.
 	liveOf func() (string, error)
+	// early holds back the looks at the disk (gocacheearly.go): until is when
+	// the next may start, delay how long the last was held back.
+	early outage
+	// earlyOf says whether a sweep could take a directory inside its grace; nil
+	// asks diskkeep.Early. A test sets it, so that the disk need not be short.
+	earlyOf func(olds []store.GOCACHEDir, at time.Time) bool
 }
 
 // gocacheOld is the pass's step of the removal: it notes when the earliest
@@ -87,9 +97,10 @@ func (d *Dispatcher) gocacheOld(ctx context.Context) {
 		g.due = &until
 	case now.Before(due):
 		g.due = &due
+		d.lookGOCACHE(ctx, olds, now)
 	default:
 		g.due, g.done = nil, make(chan struct{})
-		go d.sweepGOCACHE(ctx, g.done, d.poke)
+		go d.sweepGOCACHE(ctx, g.done, d.poke, false)
 	}
 }
 
@@ -101,25 +112,31 @@ func (g *gocacheKeeping) isLive(o store.GOCACHEDir) bool {
 
 // sweepGOCACHE is one sweep on its goroutine: it removes what is past its
 // grace and leaves the pass what it needs of how that went, under g.mu. poke
-// wakes Run's loop (nil outside Run, where the pass is run by hand).
-func (d *Dispatcher) sweepGOCACHE(ctx context.Context, done chan struct{}, poke func()) {
+// wakes Run's loop (nil outside Run, where the pass is run by hand). early is
+// whether it started for the disk's sake, whose outcome is the look's wait
+// and not the outage of a removal past its grace.
+func (d *Dispatcher) sweepGOCACHE(ctx context.Context, done chan struct{}, poke func(), early bool) {
 	g := &d.gocache
-	err := d.sweep(ctx)
+	err := d.sweep(ctx, early)
 	g.mu.Lock()
 	g.done = nil
-	switch {
-	case err == nil:
-		g.down = nil
-	case ctx.Err() != nil:
-		// The daemon was told to stop: the next one removes what is left.
-	case g.down == nil:
-		g.down = &outage{delay: d.Backoff}
-		d.Log.Warn("rotated GOCACHE directories past their grace not removed", "err", err)
-	default:
-		g.down.delay = min(2*g.down.delay, d.BackoffMax)
-	}
-	if g.down != nil {
-		g.down.until = d.now().Add(g.down.delay)
+	if early {
+		d.lookEnded(err != nil)
+	} else {
+		switch {
+		case err == nil:
+			g.down = nil
+		case ctx.Err() != nil:
+			// The daemon was told to stop: the next one removes what is left.
+		case g.down == nil:
+			g.down = &outage{delay: d.Backoff}
+			d.Log.Warn("rotated GOCACHE directories past their grace not removed", "err", err)
+		default:
+			g.down.delay = min(2*g.down.delay, d.BackoffMax)
+		}
+		if g.down != nil {
+			g.down.until = d.now().Add(g.down.delay)
+		}
 	}
 	g.mu.Unlock()
 	close(done)
@@ -129,8 +146,10 @@ func (d *Dispatcher) sweepGOCACHE(ctx context.Context, done chan struct{}, poke 
 }
 
 // sweep asks go which cache is live, runs diskkeep's removal, and says why a
-// directory past its grace still stands: nil when none does.
-func (d *Dispatcher) sweep(ctx context.Context) error {
+// directory past its grace still stands: nil when none does. A sweep that
+// started for the disk's sake (early) also fails on any error the removal told,
+// since the look is repeated and a failure that stays must be repeated less.
+func (d *Dispatcher) sweep(ctx context.Context, early bool) error {
 	g := &d.gocache
 	liveOf := g.liveOf
 	if liveOf == nil {
@@ -146,7 +165,7 @@ func (d *Dispatcher) sweep(ctx context.Context) error {
 		return err
 	}
 	if len(rep.Removed)+len(rep.Adopted) > 0 {
-		d.Log.Info("rotated GOCACHE directories", "removed", rep.Removed, "adopted", rep.Adopted)
+		d.Log.Info("rotated GOCACHE directories", "removed", rep.Removed, "early", rep.Early, "adopted", rep.Adopted)
 	}
 	olds, err := d.Store.GOCACHEOldDirs(ctx)
 	if err != nil {
@@ -165,6 +184,9 @@ func (d *Dispatcher) sweep(ctx context.Context) error {
 	g.mu.Unlock()
 	if due, ok := diskkeep.Due(rest); ok && !at.Before(due) {
 		return fmt.Errorf("a recorded directory stands past its grace: %s", strings.Join(rep.Errors, "; "))
+	}
+	if early && len(rep.Errors) > 0 {
+		return fmt.Errorf("a sweep inside the grace ended in errors: %s", strings.Join(rep.Errors, "; "))
 	}
 	return nil
 }

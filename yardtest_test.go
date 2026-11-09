@@ -19,6 +19,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"yardr.dev/yardr/internal/diskkeep"
 	"yardr.dev/yardr/internal/testload"
 )
 
@@ -3508,6 +3509,23 @@ echo "${FAKE_DF_FS:-/dev/fake} 482797652 400000000 $avail 96% ${FAKE_DF_MOUNT:-/
 			t.Errorf("df was asked about %q, want nothing", asked)
 		}
 	})
+}
+
+// internal/diskkeep takes a rotated GOCACHE directory inside its grace only
+// while the disk is under the gate's floor, and holds the number as a constant
+// of its own beside the script's: a setting would be one more number for an
+// operator to keep equal to it. This holds the two together, so that a floor
+// changed in the script is changed there too (yardr-qzj1).
+func TestDiskkeepFloorIsTheGatesFloor(t *testing.T) {
+	t.Parallel()
+	found := regexp.MustCompile(`(?m)^floorgib=([0-9]+)$`).FindSubmatch(gateScript(t))
+	if found == nil {
+		t.Fatalf("cannot find floorgib in %s: move the probe with the script", yardTest)
+	}
+	floor, _ := strconv.Atoi(string(found[1]))
+	if floor != diskkeep.FloorGB {
+		t.Errorf("floorgib is %d in %s and FloorGB is %d in internal/diskkeep: a cache would be taken before its grace under a floor the gate does not refuse at", floor, yardTest, diskkeep.FloorGB)
+	}
 }
 
 // A gate ended by a signal prints no `pass`: its test line agrees with the
