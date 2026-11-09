@@ -1521,9 +1521,15 @@ func wantLoads(t *testing.T, fake string, landing bool) {
 // call, the GOFLAGS it had, and in loads, a line a call, the YARDR_TEST_LOAD
 // it had. FAKE_RPC_TIMES and FAKE_RPC_LINE fail the rpc step a case's own
 // number of times with a line of its own, beside the FAKE_STEP failure, so a
-// landing can flake in one leg and fail really in the other. gofmt finds
-// nothing to format.
+// landing can flake in one leg and fail really in the other. go env answers
+// with the two directories FAKE_GOCACHE and FAKE_GOTMPDIR name, as the gate
+// asks them of the volumes it writes to, and is no step: it is written down
+// nowhere. gofmt finds nothing to format.
 const fakeGo = `#!/bin/sh
+if [ "$1" = env ]; then
+  printf '%s\n%s\n' "$FAKE_GOCACHE" "$FAKE_GOTMPDIR"
+  exit 0
+fi
 echo "${YARDR_TEST_RPC:+rpc }${GOOS:+$GOOS }$*" >>"$FAKE/calls"
 echo "${YARDR_TEST_RPC:+rpc }${GOOS:+$GOOS }$* load=${YARDR_TEST_LOAD-unset}" >>"$FAKE/loads"
 echo "$GOFLAGS" >>"$FAKE/goflags"
@@ -1579,10 +1585,19 @@ fi
 // A df that writes down its arguments and prints a volume that is full, as df
 // -Pk prints one (a header and the volume's line, in KiB), so that the gate's
 // words for the disk read the same on any machine: 130 MiB free of 460 GiB.
+// A directory under FAKE_DF_ROOMY is on a roomy volume and one under
+// FAKE_DF_MID on a fuller one, as a yard whose directories are on more than one
+// volume has them; neither is set unless a case names it.
 const fakeDf = `#!/bin/sh
 echo "$*" >>"$FAKE/df-calls"
 printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
-printf '/dev/disk3s5 482344960 482211840 133120 100%% /System/Volumes/Data\n'
+if [ -n "$FAKE_DF_ROOMY" ] && [ "${2#"$FAKE_DF_ROOMY"}" != "$2" ]; then
+  printf '/dev/disk5s1 976490576 100000000 876490576 11%% /Volumes/Roomy\n'
+elif [ -n "$FAKE_DF_MID" ] && [ "${2#"$FAKE_DF_MID"}" != "$2" ]; then
+  printf '/dev/disk4s2 976490576 956490576 20000000 98%% /Volumes/Cache\n'
+else
+  printf '/dev/disk3s5 482344960 482211840 133120 100%% /System/Volumes/Data\n'
+fi
 `
 
 // The test command runs a go step once more when it failed because a file
@@ -1931,6 +1946,7 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 		disk          string          // what the first run lost to the disk, as the line that names the disk says it; none when empty
 		diskOnly      bool            // nothing else failed: the run passes with no flaky line, no log line and no filing
 		rerunDisk     bool            // the rerun hit the disk too, which a second line says
+		volumes       bool            // GOCACHE and GOTMPDIR are set, each on a volume of its own beside TMPDIR's: GOTMPDIR's is the full one, GOCACHE's a fuller one than TMPDIR's
 	}{
 		{name: "plain: passes on rerun", times: "1", ok: true, calls: plain, steps: plainSteps},
 		{name: "plain: fails twice", times: "2", ok: false, calls: plain, steps: plainSteps},
@@ -2045,6 +2061,13 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 			yardr:  true, list: other, create: true},
 		{name: "plain: a rerun that hits the full disk fails the step with the disk's state", times: "2", ok: false, calls: plain, steps: plainSteps,
 			line: diskFail, disk: "TestX", rerunDisk: true},
+		// A yard's directories may be on more than one volume: go links a
+		// test binary in GOTMPDIR, a tmpfs /tmp holds the gate's own files and
+		// the build cache is on a third. The state is the fullest volume's,
+		// here GOTMPDIR's, not the one the gate's log is on, in the line of the
+		// first run and of the rerun.
+		{name: "plain: the disk's state is the fullest volume's, not TMPDIR's", times: "2", ok: false, calls: plain, steps: plainSteps,
+			line: diskFail, disk: "TestX", rerunDisk: true, volumes: true},
 		// Landings without a comparable base (CI's shape): the socket
 		// suites run whole, ungated, so these cases exercise the leg
 		// itself rather than the gate.
@@ -2163,6 +2186,15 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 			if c.yardr {
 				env = append(env, "YARDR_FAKE_LIST="+c.list, "YARDR_FAKE_SHOW="+c.show)
 			}
+			if c.volumes {
+				cache, gotmp := filepath.Join(b.fake, "cache"), filepath.Join(b.fake, "gotmp")
+				for _, dir := range []string{cache, gotmp} {
+					if err := os.Mkdir(dir, 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				env = append(env, "FAKE_GOCACHE="+cache, "FAKE_GOTMPDIR="+gotmp, "FAKE_DF_MID="+cache, "FAKE_DF_ROOMY="+b.tmp)
+			}
 			out, code := b.run(t, append(env, c.env...)...)
 			wantCode := 0
 			if !c.ok {
@@ -2193,8 +2225,8 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 				}
 			}
 			// The disk is named in a line for the first run's tests and in
-			// another where the rerun hit it, each with the volume df reports
-			// for the directory the run keeps its own files in; a failure that
+			// another where the rerun hit it, each with the fullest volume df
+			// reports for the directories the run writes to; a failure that
 			// is not the disk's names it nowhere, and asks df nothing.
 			wantDf := 0
 			for _, d := range []struct {
@@ -2214,11 +2246,15 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 			if c.disk == "" && strings.Contains(out, "the disk is full") || !c.rerunDisk && strings.Contains(out, "the disk is full: the rerun") {
 				t.Errorf("the output names the disk for a failure that is not its")
 			}
-			// The directory is the one mktemp makes the run's log in: TMPDIR
-			// on Linux, and on macOS the user's own, whose mktemp ignores it.
+			// df is asked once of each directory a run writes to: TMPDIR's
+			// alone, with GOCACHE and GOTMPDIR unset, else the three.
+			perLine := 1
+			if c.volumes {
+				perLine = 3
+			}
 			calls := splitLines(fakeLog(b.fake, "df-calls"))
-			if len(calls) != wantDf {
-				t.Errorf("df was asked %q, want %d calls", calls, wantDf)
+			if len(calls) != wantDf*perLine {
+				t.Errorf("df was asked %q, want %d calls", calls, wantDf*perLine)
 			}
 			for _, call := range calls {
 				if dir, ok := strings.CutPrefix(call, "-Pk "); !ok {
@@ -2545,11 +2581,11 @@ func TestYardTestKeepsTheFailingLinesOfAFlake(t *testing.T) {
 	if ok {
 		fns, _, ok = strings.Cut("flaky_sep="+fns, "\n# summary prints the run's test line")
 	}
-	for _, fn := range []string{"flakyfails", "flakystuck", "diskfailed", "briefly", "diskstate", "flakylines", "flakybeads", "flakyopen", "flakyfile"} {
+	for _, fn := range []string{"flakyfails", "flakystuck", "diskfailed", "briefly", "diskvolumes", "diskstate", "flakylines", "flakybeads", "flakyopen", "flakyfile"} {
 		ok = ok && strings.Contains(fns, "\n"+fn+"() {")
 	}
 	if !ok {
-		t.Fatalf("cannot cut flakyfails, flakystuck, diskfailed, briefly, diskstate, flakylines, flakybeads, flakyopen and flakyfile out of %s: move the probe with the script", yardTest)
+		t.Fatalf("cannot cut flakyfails, flakystuck, diskfailed, briefly, diskvolumes, diskstate, flakylines, flakybeads, flakyopen and flakyfile out of %s: move the probe with the script", yardTest)
 	}
 	dir := t.TempDir()
 	writeFile(t, dir, "probe.sh", fns+"\n\"$@\"\n")
@@ -2937,30 +2973,83 @@ func TestYardTestKeepsTheFailingLinesOfAFlake(t *testing.T) {
 			t.Errorf("briefly of %q printed %q, %v, want %q", c.in, out, err, c.want)
 		}
 	}
-	// diskstate says how full the volume of a file is, from df -Pk (KiB, as
-	// Linux and macOS print it alike), in the units a person reads, and says
-	// nothing where df says nothing. A df on PATH that prints what its
-	// environment names stands in for the machine's.
-	dfDir := t.TempDir()
-	writeFile(t, dfDir, "df", "#!/bin/sh\n[ -z \"$DF_FAIL\" ] || exit 1\nprintf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n%s\\n' \"$DF_LINE\"\n")
-	if err := os.Chmod(filepath.Join(dfDir, "df"), 0o755); err != nil {
-		t.Fatal(err)
+	// diskstate says how full the fullest volume a run writes to is: of the
+	// directories diskvolumes reads (GOCACHE's and GOTMPDIR's from go env, and
+	// TMPDIR's), the one with the least free, the first where two have as much,
+	// from df -Pk (KiB, as Linux and macOS print it alike), in the units a
+	// person reads. It says nothing where go env or a df says nothing, since a
+	// volume not read could be the one that is full. A go and a df on PATH that
+	// print what their environment names stand in for the machine's: df prints
+	// the line a case gives the directory it is asked about, by where it is under
+	// the case's directory, and fails for a case that gives none.
+	stubs := t.TempDir()
+	writeFile(t, stubs, "go", "#!/bin/sh\n[ \"$1\" = env ] || exit 2\n[ -z \"$GO_FAIL\" ] || exit 1\nprintf '%s\\n%s\\n' \"$DIR/cache\" \"$GOTMP\"\n")
+	writeFile(t, stubs, "df", `#!/bin/sh
+case "$2" in
+"$DIR"/cache*) line=$DF_CACHE ;;
+"$DIR"/gotmp*) line=$DF_GOTMP ;;
+*) line=$DF_TMP ;;
+esac
+[ -n "$line" ] || exit 1
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n%s\n' "$line"
+`)
+	for _, name := range []string{"go", "df"} {
+		if err := os.Chmod(filepath.Join(stubs, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	for _, c := range []struct{ name, line, fail, want string }{
-		{"full to the byte", "/dev/disk3s5 482344960 482344960 0 100% /System/Volumes/Data", "", " (/System/Volumes/Data has 0 KiB free of 460.0 GiB, 100% used)"},
-		{"megabytes free", "/dev/disk3s5 482344960 482211840 133120 100% /System/Volumes/Data", "", " (/System/Volumes/Data has 130 MiB free of 460.0 GiB, 100% used)"},
-		{"gigabytes free", "/dev/sda1 20971520 1048576 19922944 5% /", "", " (/ has 19.0 GiB free of 20.0 GiB, 5% used)"},
-		{"a mount point with a space", "tmpfs 1024 1000 24 98% /mnt/a disk", "", " (/mnt/a disk has 24 KiB free of 1 MiB, 98% used)"},
-		{"df fails", "", "1", ""},
+	const (
+		fullToTheByte = "/dev/disk3s5 482344960 482344960 0 100% /System/Volumes/Data"
+		megabytes     = "/dev/disk3s5 482344960 482211840 133120 100% /System/Volumes/Data"
+		gigabytes     = "/dev/sda1 20971520 1048576 19922944 5% /"
+		spaced        = "tmpfs 1024 1000 24 98% /mnt/a disk"
+		spacedFs      = "map auto_home 1024 1000 24 98% /Volumes/My Disk"
+		roomy         = "/dev/sdb1 1048576000 209715200 838860800 20% /mnt/roomy"
+		middling      = "/dev/sdc1 1048576000 1027604480 20971520 98% /mnt/middling"
+		tight         = "/dev/sdd1 2097152 2096640 512 100% /mnt/tight"
+		equalFirst    = "/dev/sde1 100 50 50 50% /mnt/first"
+		equalSecond   = "/dev/sde2 100 50 50 50% /mnt/second"
+	)
+	for _, c := range []struct {
+		name            string
+		cache, gotmp    string // the df line of each directory's volume: none fails df for it
+		tmp             string
+		noGotmp, goFail bool // go env says GOTMPDIR is unset, or fails
+		want            string
+	}{
+		{name: "full to the byte", cache: fullToTheByte, gotmp: fullToTheByte, tmp: fullToTheByte, want: " (/System/Volumes/Data has 0 KiB free of 460.0 GiB, 100% used)"},
+		{name: "megabytes free", cache: megabytes, gotmp: megabytes, tmp: megabytes, want: " (/System/Volumes/Data has 130 MiB free of 460.0 GiB, 100% used)"},
+		{name: "gigabytes free", cache: gigabytes, gotmp: gigabytes, tmp: gigabytes, want: " (/ has 19.0 GiB free of 20.0 GiB, 5% used)"},
+		{name: "a mount point with a space", cache: spaced, gotmp: spaced, tmp: spaced, want: " (/mnt/a disk has 24 KiB free of 1 MiB, 98% used)"},
+		{name: "a filesystem and a mount point with a space", cache: spacedFs, gotmp: spacedFs, tmp: spacedFs, want: " (/Volumes/My Disk has 24 KiB free of 1 MiB, 98% used)"},
+		{name: "the fullest of three is GOTMPDIR's", cache: middling, gotmp: tight, tmp: roomy, want: " (/mnt/tight has 512 KiB free of 2.0 GiB, 100% used)"},
+		{name: "the fullest of three is GOCACHE's", cache: tight, gotmp: middling, tmp: roomy, want: " (/mnt/tight has 512 KiB free of 2.0 GiB, 100% used)"},
+		{name: "the fullest of three is TMPDIR's", cache: roomy, gotmp: middling, tmp: tight, want: " (/mnt/tight has 512 KiB free of 2.0 GiB, 100% used)"},
+		{name: "two as full as each other: the first", cache: equalFirst, gotmp: roomy, tmp: equalSecond, want: " (/mnt/first has 50 KiB free of 100 KiB, 50% used)"},
+		{name: "a GOTMPDIR that is unset is no volume", cache: middling, gotmp: tight, tmp: roomy, noGotmp: true, want: " (/mnt/middling has 20.0 GiB free of 1000.0 GiB, 98% used)"},
+		{name: "go env fails", cache: tight, gotmp: tight, tmp: tight, goFail: true},
+		{name: "df fails for one volume", cache: roomy, tmp: roomy},
+		{name: "df fails", noGotmp: true},
 	} {
 		t.Run("diskstate: "+c.name, func(t *testing.T) {
 			t.Parallel()
-			file := filepath.Join(t.TempDir(), "log")
-			if err := os.WriteFile(file, nil, 0o644); err != nil {
-				t.Fatal(err)
+			dir := t.TempDir()
+			for _, d := range []string{"cache", "gotmp", "tmp"} {
+				if err := os.Mkdir(filepath.Join(dir, d), 0o755); err != nil {
+					t.Fatal(err)
+				}
 			}
-			cmd := exec.Command("sh", probe, "diskstate", file)
-			cmd.Env = append(os.Environ(), pathWith(dfDir), "DF_LINE="+c.line, "DF_FAIL="+c.fail)
+			gotmp := filepath.Join(dir, "gotmp")
+			if c.noGotmp {
+				gotmp = ""
+			}
+			failed := ""
+			if c.goFail {
+				failed = "1"
+			}
+			cmd := exec.Command("sh", probe, "diskstate")
+			cmd.Env = append(os.Environ(), pathWith(stubs), "DIR="+dir, "GOTMP="+gotmp, "TMPDIR="+filepath.Join(dir, "tmp"),
+				"DF_CACHE="+c.cache, "DF_GOTMP="+c.gotmp, "DF_TMP="+c.tmp, "GO_FAIL="+failed)
 			if out, err := cmd.Output(); err != nil || string(out) != c.want {
 				t.Errorf("diskstate printed %q, %v, want %q", out, err, c.want)
 			}
@@ -3346,12 +3435,13 @@ fi
 // anything, and under the floor on any of them it prints one line and stops
 // with exit 2, "could not run", as for a base it cannot find: no test line, no
 // step, nothing left in TMPDIR (yardr-bc5s). The volumes are GOCACHE's and
-// GOTMPDIR's, as go env gives them, and TMPDIR's. df is a stub that answers
-// for the directory it is asked about, so no case reads the machine's disk. A
-// GOCACHE that was rotated to and not built in yet does not exist, and is read
-// at the nearest directory that does. What cannot be read lets the run go on,
-// and so do a plan and a CI runner; sizes runs no step, so it is not stopped
-// either. A run that goes on meets the next thing that can stop it, a base that
+// GOTMPDIR's, as go env gives them, and TMPDIR's, all read before any is
+// judged, since the gate's disk line reads the same three. df is a stub that
+// answers for the directory it is asked about, so no case reads the machine's
+// disk. A GOCACHE that was rotated to and not built in yet does not exist, and
+// is read at the nearest directory that does. What cannot be read, a go env
+// that fails among it, lets the run go on, and so do a plan and a CI runner;
+// sizes runs no step, so it is not stopped either. A run that goes on meets the next thing that can stop it, a base that
 // is not there, before any step: the rows need no whole gate against fakes to
 // tell a run that went on from one that was stopped.
 func TestYardTestRefusesADiskUnderItsFloor(t *testing.T) {
@@ -3369,10 +3459,11 @@ func TestYardTestRefusesADiskUnderItsFloor(t *testing.T) {
 	kib := func(gib int) string { return strconv.Itoa(gib * 1048576) }
 	roomy := kib(1024)
 	// A go that answers go env GOCACHE GOTMPDIR with the two lines a case gives
-	// it, and writes down every other call, of which a run that is stopped at
-	// the floor makes none.
+	// it, or fails when FAKE_GO_ENV_FAIL says so, and writes down every other
+	// call, of which a run that is stopped at the floor makes none.
 	const envGo = `#!/bin/sh
 if [ "$1" = env ]; then
+  [ -z "$FAKE_GO_ENV_FAIL" ] || exit 1
   printf '%s\n%s\n' "$FAKE_GOCACHE" "$FAKE_GOTMPDIR"
   exit 0
 fi
@@ -3418,18 +3509,22 @@ echo "${FAKE_DF_FS:-/dev/fake} 482797652 400000000 $avail 96% ${FAKE_DF_MOUNT:-/
 		{name: "room on every volume", asked: []string{cache, gotmp, tmp}},
 		{name: "exactly the floor", cache: kib(floor), gotmp: kib(floor), tmp: kib(floor), asked: []string{cache, gotmp, tmp}},
 		{name: "a KiB under the floor on GOCACHE's volume", cache: strconv.Itoa(floor*1048576 - 1),
-			stops: "GOCACHE", shown: strconv.Itoa(floor-1) + ".9", asked: []string{cache}},
+			stops: "GOCACHE", shown: strconv.Itoa(floor-1) + ".9", asked: []string{cache, gotmp, tmp}},
 		{name: "under the floor on GOTMPDIR's volume", gotmp: kib(floor / 2),
-			stops: "GOTMPDIR", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cache, gotmp}},
+			stops: "GOTMPDIR", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cache, gotmp, tmp}},
 		{name: "under the floor on TMPDIR's volume, with no GOTMPDIR", tmp: kib(floor / 2), noGotmp: true,
 			stops: "TMPDIR", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cache, tmp}},
 		{name: "a rotation nothing built in yet is read where it would be", cache: kib(floor / 2), unbuilt: true,
-			stops: "GOCACHE", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cacheUp}},
+			stops: "GOCACHE", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cacheUp, gotmp, tmp}},
 		{name: "a filesystem and a mount point with a space in their names", cache: kib(floor / 2),
 			env:   []string{"FAKE_DF_FS=map auto_home", "FAKE_DF_MOUNT=/Volumes/My Disk"},
-			stops: "GOCACHE", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cache}},
+			stops: "GOCACHE", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cache, gotmp, tmp}},
 		{name: "a floor given for the gate's own tests", cache: kib(floor), floor: floor + 10,
-			stops: "GOCACHE", shown: strconv.Itoa(floor) + ".0", asked: []string{cache}},
+			stops: "GOCACHE", shown: strconv.Itoa(floor) + ".0", asked: []string{cache, gotmp, tmp}},
+		{name: "under the floor on two volumes names the first", cache: kib(floor / 2), gotmp: kib(0),
+			stops: "GOCACHE", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cache, gotmp, tmp}},
+		{name: "a go env that fails leaves TMPDIR's volume to read", tmp: kib(floor / 2), env: []string{"FAKE_GO_ENV_FAIL=1"},
+			stops: "TMPDIR", shown: strconv.Itoa(floor/2) + ".0", asked: []string{tmp}},
 		{name: "a df that fails lets the run go on", env: []string{"FAKE_DF_FAIL=1"}, asked: []string{cache, gotmp, tmp}},
 		{name: "a CI runner is not stopped", cache: kib(0), gotmp: kib(0), tmp: kib(0), env: []string{"GITHUB_ACTIONS=true"}},
 		{name: "a plan is not stopped", cache: kib(0), gotmp: kib(0), tmp: kib(0), env: []string{"YARDR_TEST_PLAN=1"}},

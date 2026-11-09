@@ -15,7 +15,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"io"
-	"yardr.dev/yardr/internal/dispatch"
 	"yardr.dev/yardr/internal/flowdraw"
 	"yardr.dev/yardr/internal/limits"
 	"yardr.dev/yardr/internal/pack"
@@ -90,6 +89,8 @@ flow in a depot's repository has them beside it: ` + store.RepoFlowDir + `/<name
 			if err != nil {
 				return err
 			}
+			// Beside the result, so --json stays the flow.
+			a.warnStagesWithoutAsk(c.ErrOrStderr(), c.Context(), st, saved)
 			return a.out(c.OutOrStdout(), saved, func(w io.Writer) { fmt.Fprintf(w, "flow %s: %d stages\n", saved.Name, len(saved.Stages)) })
 		},
 	}
@@ -444,6 +445,7 @@ func (a *app) showNamedFlow(w io.Writer, ctx context.Context, st store.API, name
 		return err
 	}
 	var broken []string
+	files := map[string]*store.StageFile{}
 	for _, s := range f.Stages {
 		if have[s] == "" {
 			continue
@@ -452,9 +454,14 @@ func (a *app) showNamedFlow(w io.Writer, ctx context.Context, st store.API, name
 		if err != nil {
 			return err
 		}
+		files[s] = sf
 		if b := sf.BrokenAsk(f, s); b != "" {
 			broken = append(broken, b)
 		}
+	}
+	unasked, err := stagesWithoutAsk(ctx, st, f, files)
+	if err != nil {
+		return err
 	}
 	v := map[string]any{"flow": f, "pointed_at_by": users}
 	if len(have) > 0 {
@@ -465,6 +472,9 @@ func (a *app) showNamedFlow(w io.Writer, ctx context.Context, st store.API, name
 	}
 	if len(broken) > 0 {
 		v["broken_stage_files"] = broken
+	}
+	if len(unasked) > 0 {
+		v["stages_without_ask"] = unasked
 	}
 	return a.out(w, v, func(w io.Writer) {
 		var with []string
@@ -480,6 +490,9 @@ func (a *app) showNamedFlow(w io.Writer, ctx context.Context, st store.API, name
 		}
 		for _, s := range broken {
 			fmt.Fprintf(w, "warning: stage file %s\n", s)
+		}
+		for _, s := range unasked {
+			fmt.Fprintf(w, "warning: %s\n", noAskWarning(s))
 		}
 	})
 }
@@ -610,24 +623,11 @@ func flowViews(ctx context.Context, st store.API, depot, home string, viewer ...
 	if err != nil {
 		return nil, err
 	}
-	routes, err := st.Routes(ctx)
+	rt, err := readRouting(ctx, st)
 	if err != nil {
 		return nil, err
 	}
-	dispatch.SortRoutes(routes)
-	settings, err := st.Settings(ctx)
-	if err != nil {
-		return nil, err
-	}
-	operator := settings[store.OperatorSetting]
-	groups, err := st.Groups(ctx)
-	if err != nil {
-		return nil, err
-	}
-	byName := make(map[string]store.Group, len(groups))
-	for _, g := range groups {
-		byName[g.Name] = g
-	}
+	groups := rt.groups
 	who := ""
 	if len(viewer) > 0 {
 		who = viewer[0]
@@ -665,11 +665,9 @@ func flowViews(ctx context.Context, st store.API, depot, home string, viewer ...
 			if next := f.Transitions[s]; len(next) > 0 {
 				sv.Next = next
 			}
-			// Routes may match on type; a depot flow is shown for the default type.
-			// The probe names no originator, so it reads as the operator's.
-			probe := store.Bead{Stage: s, Type: or(rf.Type, "task"), Depot: &depot, Priority: store.DefaultPriority}
+			// A depot flow is shown for the default type.
 			var siding *store.Siding
-			if r := dispatch.Match(routes, probe, operator, byName); r != nil {
+			if r := rt.take(&depot, rf.Type, s); r != nil {
 				sv.Group, sv.Else = r.Worker(), r.Further()
 				if i := slices.IndexFunc(groups, func(g store.Group) bool { return g.Name == sv.Group }); i >= 0 && groups[i].Runner == "manual" {
 					sv.Human, sv.Members = true, groups[i].Members
@@ -710,6 +708,9 @@ func flowViews(ctx context.Context, st store.API, depot, home string, viewer ...
 			}
 			if broken := sf.BrokenAsk(f, s); broken != "" {
 				v.Warnings = append(v.Warnings, "stage file "+broken)
+			}
+			if waitsForPerson(f, sv, rt.byName) && !sf.HasAsk() {
+				v.Warnings = append(v.Warnings, noAskWarning(s))
 			}
 			v.Stages = append(v.Stages, sv)
 		}

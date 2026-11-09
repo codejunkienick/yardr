@@ -251,8 +251,8 @@ it lists every exported name with its comment, faster than grepping.
   A failure the disk caused is no flake: a failed test whose first-run block
   holds `no space left on device`, or a failed package with no named test
   whose output holds it, is named as the disk's in one line beside the rerun's
-  result, with the df of the volume the run writes to, and is left
-  out of the flaky line, the log and the filing, though the log already names
+  result, with the df of the fullest of the volumes the run writes to, and is
+  left out of the flaky line, the log and the filing, though the log already names
   it; a test that failed for another reason in the same run is a flake as
   before, and a rerun that hits the disk too fails the step with the disk's
   state.

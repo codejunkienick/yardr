@@ -565,7 +565,11 @@ yardr has one for every stage of its flows
 A stage file may end in an `## Ask` section: the stage's ask template. When a
 bead enters the stage, the yard puts an ask on it built from the template, to
 the stage's people, and the person's answer moves the bead. A stage file
-without the section has no template, and its beads behave as they always did.
+without the section has no template, and its beads behave as they always did;
+a stage a manual group serves, past the flow's first stage and not terminal,
+whose file has no section is a warning in `yardr flow show` of its depot and
+of the flow and after `yardr flow set`, never a refusal, since its beads reach
+no one's Decide and only `yardr review` moves them.
 Four kinds answer four wants: `choice` offers outcomes the file names, `moves`
 offers the stage's moves as the flow has them, `input` asks for words, `check`
 asks whether something has been done.

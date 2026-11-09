@@ -447,11 +447,13 @@ not take that for a flake. A failed test whose first-run output holds the exact
 text `no space left on device` in its own block (its `--- FAIL:` line and the
 lines under it), or a failed package with no test named whose output holds it,
 is named as the disk's in one line beside the rerun's result, with how full the
-volume the run writes to is. It is left out of the `test: flaky:` line, the
-flaky log and the `Flaky:` bead a repeat would file, and a test that failed for
-another reason in the same run is a flake as before. The failed packages still
-run again; one whose rerun fails with the same text fails the step, with a
-second line for the disk's state, and nothing runs a third time.
+fullest of the volumes the run writes to is: the three the floor reads, so that
+a GOTMPDIR on another volume than TMPDIR shows the volume that is full, and
+nothing where one of them cannot be read. It is left out of the `test: flaky:`
+line, the flaky log and the `Flaky:` bead a repeat would file, and a test that
+failed for another reason in the same run is a flake as before. The failed
+packages still run again; one whose rerun fails with the same text fails the
+step, with a second line for the disk's state, and nothing runs a third time.
 
 ## File size budget
 

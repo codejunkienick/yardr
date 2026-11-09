@@ -5,11 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/limits"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
@@ -257,6 +260,13 @@ func TestFlowShowSiding(t *testing.T) {
 		"warning: dead has fold=4 but no next stage; nothing will fold here\n" +
 		"ready: folds at 3 beads, or 2h after the latest arrives; at most 8 points; the carrier goes to new\n" +
 		"       now 0 waiting, 0 points; folds at 3\n" +
+		// Each manual stage past the first has no stage file here, so none
+		// has an ask: they warn in the flow's order, before the stage with
+		// no route.
+		"warning: " + noAskWarning("siding") + "\n" +
+		"warning: " + noAskWarning("triage") + "\n" +
+		"warning: " + noAskWarning("dead") + "\n" +
+		"warning: " + noAskWarning("ready") + "\n" +
 		"warning: stage new has no route: beads there wait for a human\n"
 	if lines != want {
 		t.Errorf("under the table:\n%s\nwant\n%s", lines, want)
@@ -354,5 +364,149 @@ func TestFlowSetStdin(t *testing.T) {
 	}
 	if !slices.Equal(f.Stages, []string{"a", "b"}) {
 		t.Fatalf("flow stages = %+v", f.Stages)
+	}
+}
+
+// A stage a manual group serves, past the flow's first and not terminal, whose
+// stage file has no ## Ask puts a card in no one's Decide: flow show of the
+// depot and of the flow, and flow set, warn of it (yardr-v0dv), in the same
+// words, and never refuse. A backlog, a stage a script or agents work, a
+// terminal stage, a stage no route takes (its own warning says so) and a stage
+// with an ask do not, and a broken ask has the warning of its own.
+func TestFlowWarnsOfAManualStageWithNoAsk(t *testing.T) {
+	t.Parallel()
+	const text = "backlog -> approve\napprove -> merged | backlog\nmerged terminal"
+	const ask = "Approve it.\n\n## Ask\nkind: moves\nquestion: Ship it?\ncontext:\n- The release waits for you.\n"
+	const broken = "Approve it.\n\n## Ask\nkind: choce\nquestion: Ship it?\ncontext:\n- The release waits for you.\n"
+	groups := []store.Group{
+		{Name: "people", Runner: "manual"},
+		{Name: "script", Runner: "exec", Limit: 1, Config: map[string]any{"cmd": "/srv/step"}},
+		{Name: "robots", Runner: "herdr", Config: map[string]any{"kind": "claude"}},
+		{Name: "spare", Runner: "herdr", Config: map[string]any{"kind": "claude"}},
+	}
+	// noAsk reads the stages the warnings among lines name.
+	noAsk := func(lines string) []string {
+		var out []string
+		for line := range strings.Lines(lines) {
+			line = strings.TrimSuffix(strings.TrimPrefix(line, "warning: "), "\n")
+			if rest, ok := strings.CutPrefix(line, "stage "); ok && strings.Contains(rest, " waits for a person but has no ## Ask: ") {
+				name, _, _ := strings.Cut(rest, " ")
+				out = append(out, name)
+			}
+		}
+		return out
+	}
+	for _, c := range []struct {
+		name    string
+		routes  []store.Route // by stage and group: the case gives them its depot
+		file    string        // the approve stage's file, none when empty
+		nodepot bool          // no depot follows the flow, and its routes name none
+		want    []string      // the stages that warn
+	}{
+		{name: "a manual stage past the first with no stage file", routes: []store.Route{{Stage: "approve", Group: "people"}}, want: []string{"approve"}},
+		{name: "a stage file with no ask", routes: []store.Route{{Stage: "approve", Group: "people"}}, file: "Approve it.\n", want: []string{"approve"}},
+		{name: "a stage file with an ask", routes: []store.Route{{Stage: "approve", Group: "people"}}, file: ask},
+		{name: "a broken ask has its own warning", routes: []store.Route{{Stage: "approve", Group: "people"}}, file: broken},
+		{name: "the flow's first stage, a backlog", routes: []store.Route{{Stage: "backlog", Group: "people"}, {Stage: "approve", Group: "robots"}}},
+		{name: "a stage a script works", routes: []store.Route{{Stage: "approve", Group: "script"}}},
+		{name: "a stage agents work", routes: []store.Route{{Stage: "approve", Group: "robots"}}},
+		{name: "a stage agents work, with a group after else", routes: []store.Route{{Stage: "approve", Group: "robots", Else: []store.RouteGroup{{Name: "spare"}}}}},
+		{name: "a terminal stage a manual group serves", routes: []store.Route{{Stage: "approve", Group: "robots"}, {Stage: "merged", Group: "people"}}},
+		{name: "a stage no route takes", routes: nil},
+		{name: "a flow no depot follows reads the routes that name no depot", routes: []store.Route{{Stage: "approve", Group: "people"}}, nodepot: true, want: []string{"approve"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			st := storetest.New(t)
+			ctx := context.Background()
+			must := func(err error) {
+				t.Helper()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			home := t.TempDir()
+			if c.file != "" {
+				dir := store.HomeStageDir(home, "release")
+				must(os.MkdirAll(dir, 0o755))
+				must(os.WriteFile(filepath.Join(dir, "approve.md"), []byte(c.file), 0o644))
+			}
+			a := &app{st: st, actor: "me", cfg: &config.Config{Home: home}}
+			must(st.PutDepot(ctx, store.Depot{Name: "yard"}, "me"))
+			for _, g := range groups {
+				must(st.PutGroup(ctx, g, "me"))
+			}
+			depot := "yard"
+			for _, r := range c.routes {
+				if !c.nodepot {
+					r.Depot = &depot
+				}
+				_, err := st.AddRoute(ctx, r, "me")
+				must(err)
+			}
+			f, err := store.ParseFlow(text)
+			must(err)
+			f.Name = "release"
+			_, err = st.PutFlow(ctx, *f, "me")
+			must(err)
+			if !c.nodepot {
+				must(st.SetFlowPointer(ctx, "yard", "", "release", "me"))
+			}
+			check := func(where, got string) {
+				t.Helper()
+				if stages := noAsk(got); !slices.Equal(stages, c.want) {
+					t.Errorf("%s warns of stages %v, want %v:\n%s", where, stages, c.want, got)
+				}
+			}
+			// flow show <depot>, in the view and as printed.
+			if !c.nodepot {
+				views, err := flowViews(ctx, st, "yard", home)
+				must(err)
+				if len(views) != 1 {
+					t.Fatalf("views = %+v", views)
+				}
+				check("the view of depot yard", strings.Join(views[0].Warnings, "\n"))
+				out, err := run(t, a.flowCmd(), "show", "yard")
+				must(err)
+				check("flow show yard", out)
+			}
+			// flow show <flow>, as printed and in --json.
+			out, err := run(t, a.flowCmd(), "show", "release")
+			must(err)
+			check("flow show release", out)
+			a.json = true
+			out, err = run(t, a.flowCmd(), "show", "release")
+			a.json = false
+			must(err)
+			var shown struct {
+				Stages []string `json:"stages_without_ask"`
+			}
+			must(json.Unmarshal([]byte(out), &shown))
+			if !slices.Equal(shown.Stages, c.want) {
+				t.Errorf("flow show release --json has stages_without_ask %v, want %v", shown.Stages, c.want)
+			}
+			// flow set puts the warnings beside its result, on the error
+			// stream, so that --json stays the flow.
+			var want strings.Builder
+			for _, s := range c.want {
+				want.WriteString("warning: " + noAskWarning(s) + "\n")
+			}
+			for _, asJSON := range []bool{false, true} {
+				set := a.flowCmd()
+				var errs bytes.Buffer
+				set.SetErr(&errs)
+				set.SetIn(strings.NewReader(text))
+				a.json = asJSON
+				out, err := run(t, set, "set", "release", "-f", "-")
+				a.json = false
+				must(err)
+				if errs.String() != want.String() {
+					t.Errorf("flow set (json %v) says %q on its error stream, want %q", asJSON, errs.String(), want.String())
+				}
+				if strings.Contains(out, "warning") {
+					t.Errorf("flow set (json %v) prints a warning on its output: %q", asJSON, out)
+				}
+			}
+		})
 	}
 }

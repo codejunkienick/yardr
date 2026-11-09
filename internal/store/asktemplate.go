@@ -411,6 +411,17 @@ func parseAsk(lines []string, at int) (*AskTemplate, error) {
 	return t, nil
 }
 
+// HasAsk reports whether the stage file has a ## Ask section, broken or not:
+// a broken one is BrokenAsk's to warn of, so it is no stage without an ask.
+// A nil file, a stage with none, has no section.
+func (sf *StageFile) HasAsk() bool {
+	if sf == nil {
+		return false
+	}
+	_, at := askSectionStart(sf.Text)
+	return at >= 0
+}
+
 // BrokenAsk is why the stage file's ## Ask section is broken under f, the
 // flow the file belongs to, as "<path>: <why>": a section that does not
 // parse, or whose outcomes do not resolve under f. "" when the file has no

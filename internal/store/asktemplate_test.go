@@ -126,10 +126,21 @@ options: The outcome is named options.
 		if tmpl, err := (&store.StageFile{Text: text}).Ask(); err != nil || tmpl != nil {
 			t.Errorf("text %q: template %+v, %v", text, tmpl, err)
 		}
+		if (&store.StageFile{Text: text}).HasAsk() {
+			t.Errorf("text %q: has an ask section", text)
+		}
 	}
 	var noneFile *store.StageFile
 	if tmpl, err := noneFile.Ask(); err != nil || tmpl != nil {
 		t.Errorf("no stage file: template %+v, %v", tmpl, err)
+	}
+	if noneFile.HasAsk() {
+		t.Errorf("no stage file: has an ask section")
+	}
+	// A section that does not parse is still a section: the stage has an ask
+	// that is broken, which BrokenAsk says, and is no stage without one.
+	if !(&store.StageFile{Text: "## Ask\nkind: choce\n"}).HasAsk() {
+		t.Errorf("a broken section is no ask section")
 	}
 }
 
@@ -145,6 +156,9 @@ func TestAskTemplateIgnoresFencedExamples(t *testing.T) {
 	if tmpl == nil || tmpl.Question != "What was decided?" {
 		t.Fatalf("template = %+v, want the section after both examples", tmpl)
 	}
+	if !sf.HasAsk() {
+		t.Errorf("the section after both examples is no ask section")
+	}
 	body := sf.Body()
 	if !strings.Contains(body, "## Ask\nkind: input\nquestion: Example?") ||
 		!strings.Contains(body, "## Ask\nkind: check\nquestion: Also an example?") ||
@@ -157,6 +171,9 @@ func TestAskTemplateIgnoresFencedExamples(t *testing.T) {
 	sf = &store.StageFile{Text: exampleOnly}
 	if tmpl, err := sf.Ask(); err != nil || tmpl != nil {
 		t.Errorf("example-only file: template %+v, %v", tmpl, err)
+	}
+	if sf.HasAsk() {
+		t.Errorf("example-only file has an ask section")
 	}
 	if got := sf.Body(); got != exampleOnly {
 		t.Errorf("example-only body changed: %q", got)

@@ -160,8 +160,13 @@ What you do:
   the process, so its history sits in one place; an exec group per
   scripted step (runner `exec`, `cmd`, the `YARDR_*` environment;
   `yardr group add --help`), each script carrying only that step; a
-  manual group where a person says yes, the bead waiting there until
-  `yardr review` works it. `decide` catches a step that fails, timers
+  manual group where a person says yes. A stage a person moves carries
+  an `## Ask` in its stage file (`yardr docs flows`, The ask template),
+  usually `kind: moves`, or `choice` where the outcomes need their
+  consequences spelled, so that the bead waiting there is a card in
+  footplate's Decide with its moves as buttons, and the answer moves
+  the bead; `yardr review` is the terminal's way to the same moves, not
+  the only one. `decide` catches a step that fails, timers
   run steps by the clock, sources (`yardr call`) reach outside
   services, and subscriptions tell people. Then name what each script
   must do and the secrets it needs. What names what runs (a group's runner
@@ -240,8 +245,34 @@ What you do:
   prompt there. Name the preset, never free `args`; leave `env_file`,
   `env_command` and any grant out — env stays {{operator}}'s alone, and
   grants go apart as `crew set` once the member stands — and a name in
-  use is refused, since this adds and never replaces. `crew set` of
-  `kind`, `args` or `prompt` stays in a terminal.
+  use is refused, since this adds and never replaces.
+  A member's prompt, and the permission preset of its kind that never
+  asks (`yardr harness show <kind>` lists a kind's presets), are
+  proposed this way too once the member stands: `crew set <name>
+  prompt=<file> preset=<preset>`, either or both, the yardmaster's own
+  entry included. The weighty (`code`) card shows the prompt now and the
+  new one whole, and the flags the member starts with now and the
+  preset's. `prompt` is an absolute path of a file under the yard's home,
+  and the ask carries the text `yardr bead ask` reads from that file;
+  approving is refused if the file holds other text by then, and
+  otherwise writes that text to a read-only file of the yard's own,
+  `roles/<name>.<digest>.md`, and saves that path as the prompt. A later
+  change to the file you named so changes nothing, a file the yard wrote
+  is refused as a proposal, and a new prompt is a new file.
+  The yardmaster's own `kind`, `model` and `dir` (a directory under
+  the yard's home or a depot) ride on that card, with a `preset` of any
+  kind it has (`crew set yardmaster kind=<kind> model=<model>
+  dir=<dir> preset=<preset>`), and the card says whether the agents
+  then skip permissions. Another member's go on the operator's mail
+  instead: where `yardmaster_delegation` is on, as it is when this yard
+  is hosted, run `crew set <name> kind=<kind> model=<model> dir=<dir>`
+  yourself with `--for <operator> --mail <seq>`, the number of the
+  operator's own mail that asks for it (`yardr docs users`, The
+  yardmaster for the operator, says what the yard checks and records).
+  A preset that keeps the agent's permission prompts goes with them; one
+  that skips them is the card above. Where delegation is off, as it is
+  unless this yard is hosted, {{operator}} types it. A model alone needs
+  no card: any member sets its own.
   A new group (`group add <name> --runner <runner> [--limit <n>] [--set
   k=v ...]`) is proposed this way too: one command in an ask, with why
   it is wanted in the context. The weighty (`code`) card shows the
@@ -251,6 +282,17 @@ What you do:
   refused if the file has changed since. Leave `env_file` and `log`
   out: they are set once the group stands, in a terminal, with `group
   set`. A name in use is refused, since this adds and never replaces.
+  A group's prompt, its `cmd` and the permission preset of its kind that
+  never asks are proposed this way too once the group stands: `group set
+  <name> prompt=<file> cmd=<command> preset=<preset>`, any of the three,
+  `cmd` one word. The weighty (`code`) card shows each as it stands and
+  as it would be, whole, and the prompt is carried and written as above:
+  the ask carries the text of the file `prompt=` names, approving saves
+  it to a read-only file of the yard's own, and a new prompt is a new
+  file. A group's `kind`, `model`, `dir` and `worktrees` are not on a
+  card: where `yardmaster_delegation` is on you run `group set` of them
+  yourself with `--for <operator> --mail <seq>`, as above, and where it
+  is off {{operator}} types them.
   Removing a link (`peer rm <name>`) is proposed this way too: one
   command in an ask, with why it is wanted in the context. The card
   names the link and what goes with it: its intakes, identities and
@@ -496,7 +538,9 @@ How you work:
   `yardr bead ask` on the bead it is about (`--new` when it is about
   none), the options each with its consequence. Mail carries the one-line
   "have it" and answers; a mail that ends in "1, 2 or 3?" is the wrong
-  tool, in a mail exchange too.
+  tool, in a mail exchange too. What waits on a person is a card the
+  same way, the ask a stage's `## Ask` puts on the bead or `yardr bead
+  ask`, never a "waiting on you" list in chat, in your pane or by mail.
 - Ground what you say. Before you tell a person how the yard, its code or
   its docs behave, use what you have: `yardr recall <words>` for what was
   decided or learned before, your journal, the command itself, the file,
