@@ -90,6 +90,24 @@ func delegatedDepotPackApplyRecordsWhatItDid(t *testing.T) {
 	if err := st.PutDepot(ctx, store.Depot{Name: "web", Path: t.TempDir()}, "jo"); err != nil {
 		t.Fatal(err)
 	}
+	// The yard hears linear and github, which the starter sets a stage map
+	// on each of: a table of stages and a table of says lines whose filters
+	// hold several values, objects a later plan starts from.
+	for _, hears := range []string{"linear", "github"} {
+		decl, err := fs.ReadFile(packs.FS, hears+"/"+hears+".yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.PutSource(ctx, hears+".yaml", string(decl), "jo"); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetIdentity(ctx, "yardmaster", hears, store.Identity{ID: "u-yardmaster"}, "jo"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.PutHook(ctx, store.Hook{Name: hears, Source: hears, SecretFile: filepath.Join(home, hears+".secret")}, "jo"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	reading, err := readEmbeddedPack(ctx, "starter", "web", store.Mappings{}, st, home)
 	if err != nil {
 		t.Fatal(err)
@@ -132,6 +150,24 @@ func delegatedDepotPackApplyRecordsWhatItDid(t *testing.T) {
 	first := apply(store.Mappings{Binds: []string{"builders=claude:opus", "reviewers=claude:opus"}, Members: []string{"backlog=jo", "decisions=jo"}})
 	if first.Flow != "default" || first.Source != reading.Label || first.Groups["builders"] != "web-builders" || len(first.Objects) == 0 {
 		t.Fatalf("the first install's record = %+v, want flow default from %q with the groups mapped", first, reading.Label)
+	}
+	// Its objects are held to the reading's too, and carry what a later plan
+	// starts from: the hash of each file, the binding of the group that binds
+	// as another, and the tables and crew member of the two hooks' maps.
+	hooked := map[string]store.PackObject{}
+	var hashed, bound int
+	for _, o := range first.Objects {
+		switch {
+		case o.Kind == "map":
+			hooked[o.Name] = o
+		case o.Kind == "file" && o.SHA256 != "":
+			hashed++
+		case o.Kind == "group" && o.Binds != "":
+			bound++
+		}
+	}
+	if hashed == 0 || bound == 0 || len(hooked["linear"].Map) == 0 || len(hooked["github"].Says) == 0 || hooked["linear"].CrewMember != "yardmaster" || hooked["github"].CrewMember != "yardmaster" {
+		t.Errorf("the first install's objects = %+v, want files with their hashes, a bound group and the maps of the linear and github hooks", first.Objects)
 	}
 	again := apply(store.Mappings{})
 	if again.Flow != first.Flow || again.Source != first.Source || !reflect.DeepEqual(again.Groups, first.Groups) || !reflect.DeepEqual(again.Crew, first.Crew) {

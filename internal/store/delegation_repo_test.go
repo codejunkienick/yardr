@@ -128,7 +128,7 @@ func TestDelegatedPackFromTheRepository(t *testing.T) {
 	// from, which a later apply by name reads again: no other source, and no
 	// credential, passes.
 	packCtx := store.WithDelegatedPack(ctx, firstID)
-	imp := store.PackImport{Pack: "starter", Depot: "shed", Source: repoURL, Objects: []store.PackObject{{Kind: "group", Name: "builders"}}}
+	imp := store.PackImport{Pack: "starter", Depot: "shed", Source: repoURL, Objects: fakePackImportObjects("the role the pack installs")}
 	for name, bad := range map[string]func(*store.PackImport){
 		"another URL":       func(i *store.PackImport) { i.Source = "https://evil.example/starter/" },
 		"the binary's name": func(i *store.PackImport) { i.Source = "embedded in yardr test" },
@@ -141,6 +141,19 @@ func TestDelegatedPackFromTheRepository(t *testing.T) {
 		if _, err := y.api.RecordPack(packCtx, forged, true, "yardmaster"); err == nil || !strings.Contains(err.Error(), "no other source and no credential") {
 			t.Errorf("an import record with %s: %v", name, err)
 		}
+	}
+	// Its objects are the reading's of the fetched pack, as an embedded
+	// pack's are: the hash of a file edited since refuses, and so does a
+	// record that leaves the file out.
+	edited := imp
+	edited.Objects = fakePackImportObjects("the role as someone edited it")
+	if _, err := y.api.RecordPack(packCtx, edited, true, "yardmaster"); err == nil || !strings.Contains(err.Error(), " with its sha256 as "+store.TextSum("the role the pack installs")) {
+		t.Errorf("an import record of the hash of an edited file from %s: %v", repoURL, err)
+	}
+	unfiled := imp
+	unfiled.Objects = imp.Objects[:1] // the group alone
+	if _, err := y.api.RecordPack(packCtx, unfiled, true, "yardmaster"); err == nil || !strings.Contains(err.Error(), "leaves out") {
+		t.Errorf("an import record that leaves the file out from %s: %v", repoURL, err)
 	}
 	if _, err := y.api.RecordPack(packCtx, imp, true, "yardmaster"); err != nil {
 		t.Errorf("the import's own record from %s: %v", repoURL, err)

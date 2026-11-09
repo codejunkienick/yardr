@@ -363,14 +363,16 @@ type PackReading struct {
 	// mapping answers make it: a delegated write under the record is held
 	// to them, value by value. Nil where the reader carries none.
 	Targets map[string]string
-	// Import is the record of the import the plan would make, its objects
-	// aside (Targets and the plan hold those): the flow, frame, roles and
-	// name mappings it settled and the answers the record keeps. A
-	// delegated pack apply's own record of its import is held to it field
-	// by field (delegation_pack_record.go). The reader derives it from the
-	// same plan and the same mapping answers it hands the start. Nil where
-	// the reader carries none, which holds every field of the record to
-	// empty.
+	// Import is the record of the import the plan would make: the flow,
+	// frame, roles and name mappings it settled, the answers the record
+	// keeps, and its objects as a later plan reads them back (a file's
+	// hash, a group's binding, a map's lines), which Targets and the plan do
+	// not carry. A delegated pack apply's own record of its import is held
+	// to it field by field, each object too and none left out
+	// (delegation_pack_record.go). The reader derives it from the same plan
+	// and the same mapping answers it hands the start. Nil where the reader
+	// carries none, which holds every field of the record to empty, and
+	// refuses every object of it.
 	Import *PackImport
 }
 

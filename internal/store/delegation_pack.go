@@ -795,12 +795,15 @@ func (w *wtx) packRemoveRoute(ctx context.Context, id, actor string) error {
 // packRecordWrite holds an import's record written under a delegated
 // pack record to that record's pack and depot, to its objects, and, field
 // by field, to the record the store's reading of the pack said the run
-// leaves (packImportHeld). That is its origin, which a later apply by name
-// reads the pack again from: the URL the run fetched it from (a pack of
-// the packs repository) or, for a pack yardr embeds, the build the reading
-// names, and no credential, for a delegated run takes none. It is also the
-// flow, frame, mappings and answers a later apply and every page start
-// from, which a caller reaching RecordPack over the socket must not choose.
+// leaves (packImportHeld, and packObjectHeld for each object, none of
+// which the record may leave out: packObjectsLeftOut). That is its
+// origin, which a later apply by name reads the pack again from: the URL
+// the run fetched it from (a pack of the packs repository) or, for a pack
+// yardr embeds, the build the reading names, and no credential, for a
+// delegated run takes none. It is also the flow, frame, mappings and answers
+// a later apply and every page start from, and the hash, binding and map
+// each object carries, which a caller reaching RecordPack over the socket
+// must not choose.
 func (w *wtx) packRecordWrite(ctx context.Context, imp PackImport, actor string) error {
 	if _, pack := DelegatedPackOf(ctx); !pack {
 		return nil
@@ -819,14 +822,18 @@ func (w *wtx) packRecordWrite(ctx context.Context, imp PackImport, actor string)
 		if !recordedObject(rec, po) {
 			return fmt.Errorf("pack %s: object %s %s stands on no delegated pack record %d", imp.Pack, po.Kind, po.Name, rec.ID)
 		}
+		if err := packObjectHeld(rec, imp.Pack, po); err != nil {
+			return err
+		}
 	}
-	return nil
+	return packObjectsLeftOut(rec, imp)
 }
 
 // recordedObject says whether an import record's object po is one the
 // delegated record names, each kind in its own words: a file by the
 // path it was installed at, a route and a pointer by the depot's
 // stage and flow they name, a subscription and a stage map by theirs.
+// That is the identity alone: packObjectHeld holds the rest.
 func recordedObject(rec *Delegation, po PackObject) bool {
 	switch po.Kind {
 	case "file":

@@ -382,12 +382,13 @@ type Delegation struct {
 	// text) is held to the same reading of the pack that started it.
 	Mappings Mappings `json:"mappings,omitzero"`
 	// Import is the record of the import the store's own reading of the
-	// pack said the run would leave, objects aside, with the origin the
-	// run reads the pack from: the write of the import's own record is
-	// held to it field by field (packRecordWrite). Inline as the objects
-	// are, since a pack of the packs repository is not fetched again
-	// inside a write. Nil on a record that holds none, and then every
-	// field is held to empty.
+	// pack said the run would leave, with the origin the run reads the
+	// pack from: the write of the import's own record is held to it field
+	// by field, each of its objects to the one of the reading's that stands
+	// under the same identity, and none left out (packRecordWrite). Inline
+	// as the objects are, since a pack of the packs repository is not
+	// fetched again inside a write. Nil on a record that holds none, and
+	// then every field is held to empty.
 	Import *PackImport `json:"import,omitempty"`
 	DelegatedBody
 	Blob *BlobRef `json:"blob,omitempty"`

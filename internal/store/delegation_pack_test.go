@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,7 +21,17 @@ func fakePackReader(_ context.Context, name string, depot string, _ store.Mappin
 	return &store.PackReading{Name: "starter", Kind: "git", Depot: depot, Digest: "abc123", Plan: &store.AskPlan{Objects: []store.AskPlanObject{
 		{Kind: "group", Name: "builders", Action: "change"},
 		{Kind: "file", Name: "roles/builder.md", Action: "create"},
-	}}}, nil
+	}}, Import: &store.PackImport{Objects: fakePackImportObjects("the role the pack installs")}}, nil
+}
+
+// fakePackImportObjects are the objects the import of fakePackReader's plan
+// records, as the reading says them: the group, and the file by the path it
+// is installed at with the hash of its text.
+func fakePackImportObjects(role string) []store.PackObject {
+	return []store.PackObject{
+		{Kind: "group", Name: "builders"},
+		{Kind: "file", Name: "/yard/packs/starter/roles/builder.md", SHA256: store.TextSum(role)},
+	}
 }
 
 // A delegated pack apply's record is written started before the first
@@ -410,6 +421,12 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 		{Kind: "pointer", Name: "depot shed -> starter.default", Action: "create"},
 		{Kind: "route", Name: "depot shed stage new -> builders", Action: "create"},
 		{Kind: "group", Name: "builders", Action: "change"},
+		{Kind: "file", Name: "roles/builder.md", Action: "create"},
+		{Kind: "source", Name: "linear", Action: "create"},
+		{Kind: "map", Name: "hook linear as builder", Action: "create"},
+		{Kind: "map", Name: "hook github", Action: "create"},
+		{Kind: "subscription", Name: "builder linear assigned", Action: "create"},
+		{Kind: "crew", Name: "builder", Action: "change"},
 	}
 	shedDepot := "shed"
 	standingNew, err := y.api.AddRoute(y.ctx, store.Route{Stage: "new", Depot: &shedDepot, Group: "builders"}, "jo")
@@ -426,7 +443,24 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 		Crew:        map[string]string{"builder": "builder"},
 		OpenThreads: map[string]map[string]bool{"builder": {"linear": true, "slack": false}},
 		Calls:       map[string]map[string]bool{"group shed-builders": {"linear:read": true}},
-		Expose:      map[string]map[string]bool{"builder": {"peerkey": true}}}
+		Expose:      map[string]map[string]bool{"builder": {"peerkey": true}},
+		// And the objects as a later plan reads them back: the hash of a
+		// file and of a declared source, what a group binds, what a map
+		// sets and says and makes, each field set so that a forged row
+		// below differs from it in exactly one.
+		Objects: []store.PackObject{
+			{Kind: "flow", Name: "starter.default"},
+			{Kind: "pointer", Flow: "starter.default"},
+			{Kind: "route", Stage: "new", Group: "builders"},
+			{Kind: "group", Name: "builders", Binds: "reviewers"},
+			{Kind: "file", Name: "/yard/packs/starter/roles/builder.md", SHA256: store.TextSum("the role the pack installs")},
+			{Kind: "source", Name: "linear", SHA256: store.TextSum("the declaration the pack adds")},
+			{Kind: "map", Name: "linear", CrewMember: "builder", Map: map[string]string{"new": "backlog"},
+				Says:  []store.Say{{Where: map[string]string{"type": "issue"}, Outcome: "new"}},
+				Makes: []store.Make{{Where: map[string]string{"type": "issue"}, Type: "task", Stage: "backlog"}}},
+			{Kind: "map", Name: "github", Says: []store.Say{{Where: map[string]string{"type": "pr"}, Outcome: "review"}}},
+			{Kind: "subscription", CrewMember: "builder", Subscription: &store.Subscription{Source: "linear", Scope: "assigned"}},
+		}}
 	y.own.SetPackReader(func(_ context.Context, name string, depot string, _ store.Mappings, _ store.API) (*store.PackReading, error) {
 		if name != "starter" {
 			return nil, errors.New("pack " + name + ": yardr embeds no pack of that name")
@@ -442,6 +476,12 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 		{Kind: "pointer", Name: "depot shed -> starter.default", Action: "create"},
 		{Kind: "route", Name: "depot shed stage new -> builders", Action: "create"},
 		{Kind: "group", Name: "builders", Action: "change"},
+		{Kind: "file", Name: "roles/builder.md", Action: "create"},
+		{Kind: "source", Name: "linear", Action: "create"},
+		{Kind: "map", Name: "hook linear as builder", Action: "create"},
+		{Kind: "map", Name: "hook github", Action: "create"},
+		{Kind: "subscription", Name: "builder linear assigned", Action: "create"},
+		{Kind: "crew", Name: "builder", Action: "change"},
 	}}
 	id, err := y.api.StartDelegatedPack(ctx, start, "yardmaster")
 	if err != nil {
@@ -514,8 +554,8 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 		t.Error("a group removal under a pack record was let through")
 	}
 
-	// record is the import's record as the reading says it, the objects
-	// beside it the record names, each edit forging the fields it touches.
+	// record is the import's record as the reading says it, its objects
+	// the ones the record names, each edit forging the fields it touches.
 	record := func(edit func(*store.PackImport)) store.PackImport {
 		raw, err := json.Marshal(held)
 		if err != nil {
@@ -525,7 +565,6 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 		if err := json.Unmarshal(raw, &imp); err != nil {
 			t.Fatal(err)
 		}
-		imp.Objects = []store.PackObject{{Kind: "group", Name: "builders"}}
 		if edit != nil {
 			edit(&imp)
 		}
@@ -599,6 +638,103 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 			t.Errorf("an import record with %s: %v", name, err)
 		}
 	}
+	// The objects are the reading's too, field by field. A later plan takes
+	// the hash of a file or a declared source for text no one edited, a
+	// group's binding for the one that stands, and a map's table and lines
+	// for the pack's own, so a caller that reaches RecordPack over the
+	// socket chooses none of them: each forged field refuses, naming the
+	// object and the field and saying what the record holds, never the
+	// value given.
+	// objectOf is the record's object of kind, or of kind and name where
+	// "kind name" says one.
+	objectOf := func(imp *store.PackImport, of string) *store.PackObject {
+		kind, name, _ := strings.Cut(of, " ")
+		i := slices.IndexFunc(imp.Objects, func(o store.PackObject) bool { return o.Kind == kind && (name == "" || o.Name == name) })
+		if i < 0 {
+			t.Fatalf("the reading's record has no object %s", of)
+		}
+		return &imp.Objects[i]
+	}
+	editedRole, editedDeclaration := store.TextSum("the role as someone edited it"), store.TextSum("the declaration as someone edited it")
+	for name, tc := range map[string]struct {
+		of    string
+		edit  func(*store.PackObject)
+		field string
+	}{
+		"the hash of a hand-edited file":                      {"file", func(o *store.PackObject) { o.SHA256 = editedRole }, "sha256"},
+		"no hash for a file":                                  {"file", func(o *store.PackObject) { o.SHA256 = "" }, "sha256"},
+		"the hash of a hand-edited source":                    {"source", func(o *store.PackObject) { o.SHA256 = editedDeclaration }, "sha256"},
+		"a hash for a flow":                                   {"flow", func(o *store.PackObject) { o.SHA256 = "forged" }, "sha256"},
+		"a binding the pack never asked":                      {"group", func(o *store.PackObject) { o.Binds = "forged" }, "binds"},
+		"no binding":                                          {"group", func(o *store.PackObject) { o.Binds = "" }, "binds"},
+		"a map the pack never set":                            {"map linear", func(o *store.PackObject) { o.Map = map[string]string{"new": "forged"} }, "map"},
+		"a map line the pack never set":                       {"map linear", func(o *store.PackObject) { o.Map["forged"] = "backlog" }, "map"},
+		"no map":                                              {"map linear", func(o *store.PackObject) { o.Map = nil }, "map"},
+		"a says line the pack never gave":                     {"map linear", func(o *store.PackObject) { o.Says = append(o.Says, store.Say{Outcome: "forged"}) }, "says"},
+		"no says lines":                                       {"map linear", func(o *store.PackObject) { o.Says = nil }, "says"},
+		"a makes line the pack never gave":                    {"map linear", func(o *store.PackObject) { o.Makes = append(o.Makes, store.Make{Type: "task", Stage: "forged"}) }, "makes"},
+		"no makes lines":                                      {"map linear", func(o *store.PackObject) { o.Makes = nil }, "makes"},
+		"a map the pack gave a table alone":                   {"map github", func(o *store.PackObject) { o.Map = map[string]string{"new": "forged"} }, "map"},
+		"a crew member a table alone acts as":                 {"map github", func(o *store.PackObject) { o.CrewMember = "forged" }, "crew"},
+		"a says line of a table alone":                        {"map github", func(o *store.PackObject) { o.Says = nil }, "says"},
+		"a flow on a group, which the reading names none for": {"group", func(o *store.PackObject) { o.Flow = "forged" }, "flow"},
+	} {
+		_, err := y.api.RecordPack(packCtx, record(func(imp *store.PackImport) { tc.edit(objectOf(imp, tc.of)) }), true, "yardmaster")
+		if err == nil || !strings.Contains(err.Error(), " with its "+tc.field+" as ") {
+			t.Errorf("an import record with %s: %v", name, err)
+			continue
+		}
+		for _, given := range []string{"forged", editedRole, editedDeclaration} {
+			if strings.Contains(err.Error(), given) {
+				t.Errorf("an import record with %s: the refusal repeats the value given: %v", name, err)
+			}
+		}
+	}
+	// What the record names by more than the object's own fields was held
+	// before, and still is: another group for a route, another flow for a
+	// pointer, another scope or filter for a subscription, another crew
+	// member for a hook that acts as one. A file installed at a path the
+	// reading never installs it at, and a crew member, which the pack's
+	// import leaves the yard's and never records, name an object the
+	// reading has no counterpart of.
+	for name, edit := range map[string]func(*store.PackImport){
+		"another group for the route":      func(imp *store.PackImport) { objectOf(imp, "route").Group = "forged" },
+		"another flow for the pointer":     func(imp *store.PackImport) { objectOf(imp, "pointer").Flow = "forged" },
+		"another scope for a subscription": func(imp *store.PackImport) { objectOf(imp, "subscription").Subscription.Scope = "forged" },
+		"a filter the subscription lacks": func(imp *store.PackImport) {
+			objectOf(imp, "subscription").Subscription.Where = map[string]string{"type": "forged"}
+		},
+		"another crew member for the hook":        func(imp *store.PackImport) { objectOf(imp, "map linear").CrewMember = "forged" },
+		"a file installed elsewhere":              func(imp *store.PackImport) { objectOf(imp, "file").Name = "/etc/cron.d/builder.md" },
+		"a crew member the reading never records": func(imp *store.PackImport) { imp.Objects = []store.PackObject{{Kind: "crew", Name: "builder"}} },
+	} {
+		if _, err := y.api.RecordPack(packCtx, record(edit), true, "yardmaster"); err == nil || !strings.Contains(err.Error(), "stands on no delegated pack record") {
+			t.Errorf("an import record with %s: %v", name, err)
+		}
+	}
+	// Nor may the record leave one out. The next plan takes a file with no
+	// recorded hash for a file no one edited, so a record without the file
+	// lets the import overwrite a hand edit as a forged hash does; each
+	// kind of object is held so, the one the reading names first refused.
+	for name, left := range map[string]string{
+		"a file":            "file",
+		"a declared source": "source",
+		"a group":           "group",
+		"a map":             "map linear",
+		"a subscription":    "subscription",
+		"a route":           "route",
+	} {
+		_, err := y.api.RecordPack(packCtx, record(func(imp *store.PackImport) {
+			key := objectOf(imp, left).Key()
+			imp.Objects = slices.DeleteFunc(imp.Objects, func(x store.PackObject) bool { return x.Key() == key })
+		}), true, "yardmaster")
+		if err == nil || !strings.Contains(err.Error(), "which this import's record leaves out") {
+			t.Errorf("an import record that leaves out %s: %v", name, err)
+		}
+	}
+	if _, err := y.api.RecordPack(packCtx, record(func(imp *store.PackImport) { imp.Objects = nil }), true, "yardmaster"); err == nil || !strings.Contains(err.Error(), "which this import's record leaves out") {
+		t.Errorf("an import record with no objects: %v", err)
+	}
 	if err := y.api.FinishDelegatedPack(ctx, id, true, nil, "", "yardmaster"); err != nil {
 		t.Fatal(err)
 	}
@@ -617,8 +753,15 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 	if _, err := y.api.RecordPack(bareCtx, record(nil), true, "yardmaster"); err == nil || !strings.Contains(err.Error(), "records the import's flow as none") {
 		t.Errorf("a record of the import against a reading that carries none: %v", err)
 	}
-	if _, err := y.api.RecordPack(bareCtx, store.PackImport{Pack: "starter", Depot: "shed", Source: "embedded in yardr test", Objects: []store.PackObject{{Kind: "group", Name: "builders"}}}, true, "yardmaster"); err != nil {
+	bareRecord := store.PackImport{Pack: "starter", Depot: "shed", Source: "embedded in yardr test"}
+	if _, err := y.api.RecordPack(bareCtx, bareRecord, true, "yardmaster"); err != nil {
 		t.Errorf("the bare record against a reading that carries none: %v", err)
+	}
+	// Nor does it carry an object: the record the plan names one of has
+	// nothing of it to hold the object to.
+	bareRecord.Objects = []store.PackObject{{Kind: "group", Name: "builders"}}
+	if _, err := y.api.RecordPack(bareCtx, bareRecord, true, "yardmaster"); err == nil || !strings.Contains(err.Error(), "stands on no delegated pack record") {
+		t.Errorf("an object against a reading that carries none: %v", err)
 	}
 	if err := y.api.FinishDelegatedPack(ctx, bare, true, nil, "", "yardmaster"); err != nil {
 		t.Fatal(err)
