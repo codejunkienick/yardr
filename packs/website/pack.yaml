@@ -4,10 +4,12 @@
 # secret: the import asks, and they stay in the yard. The format is the
 # starter's (packs/starter/pack.yaml, docs/packs.md).
 #
-# The roles, the stage files but merged.md's, and scripts/merge-local are
-# the starter's, copied: a pack names a group together with the role or the
-# script it runs, and these are the starter's groups. scripts/deploy-void
-# is a copy of contrib/deploy/deploy-void. A test fails when a copy drifts.
+# The roles but the yardmaster's, the stage files but merged.md's, and
+# scripts/merge-local are the starter's, copied: a pack names a group
+# together with the role or the script it runs, and these are the starter's
+# groups. scripts/deploy-void is a copy of contrib/deploy/deploy-void. A test
+# fails when a copy drifts. The yardmaster's role is this pack's own text. It
+# says what the deploy adds to the yardmaster's work.
 
 name: website
 

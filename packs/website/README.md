@@ -15,10 +15,14 @@ checkout. The format and how a pack maps to a yard are in
 [docs/packs.md](../../docs/packs.md).
 
 - `pack.yaml`: the flow, the groups that work it, and the crew.
-- `roles/`, `flows/default/` except `merged.md`, and `scripts/merge-local`
-  are the starter's, copied: a pack names a group together with the role or
-  the script it runs, and these are the starter's groups. A test fails when
-  a copy drifts.
+- `roles/` except `yardmaster.md`, `flows/default/` except `merged.md`, and
+  `scripts/merge-local` are the starter's, copied: a pack names a group
+  together with the role or the script it runs, and these are the starter's
+  groups. A test fails when a copy drifts.
+- `roles/yardmaster.md`: this pack's own yardmaster role. It does the
+  starter's coordinating job and says what the deploy adds to it: a landed bead
+  is not live, a failed deploy goes to `decide`, and the rollback and the token
+  are the operator's.
 - `flows/default/merged.md`: the deploy stage, worked by the deploy group.
 - `scripts/deploy-void` is a copy of `contrib/deploy/deploy-void`; a test
   fails when the two drift.
