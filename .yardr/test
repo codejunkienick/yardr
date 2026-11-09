@@ -101,7 +101,8 @@
 #
 # A red run ends with the lines that say what failed, since a note carries
 # only the end of the output. Exit 2 is "could not run", which the assembly
-# holds a bead on instead of sending it back: the base is not there.
+# holds a bead on instead of sending it back: the base is not there, or the
+# disk is too full to start (diskfloor below).
 #
 # YARDR_TEST_PLAN=1 says what the run would test and stops: no gofmt, vet,
 # build or test. The test of this script runs it so (yardtest_test.go).
@@ -2316,6 +2317,74 @@ if [ "$1" = sizes ]; then
   trap - EXIT
   exit 0
 fi
+# A run that starts on a nearly full disk fails in a way that reads as the
+# branch's own. On 9 Nov 2026 the data volume went to 100% during a builder's
+# gate over 40 packages (a full gate wrote about 13 GB in the minute): test
+# links and writes failed with "no space left on device" in four packages, each
+# reported as a failure of the change (yardr-bc5s). So a run reads the free
+# space of the volumes it writes to before it selects anything, and under
+# floorgib GiB on any of them it stops with exit 2, "could not run", as a base
+# it cannot find does: nothing ran, no test line, and the assembly holds a
+# landing instead of sending it back. A full gate wrote about 13 GB in a minute,
+# so the default floor of 20 GiB leaves several GiB after that observed burst.
+# In the two days before this was written, about three in ten keepings left less
+# than 20 GiB free; those landing gates wait until there is room. A yard can set
+# a different floor with YARDR_TEST_FLOOR_GIB. This is the one place the default
+# number is written.
+# The volumes are GOCACHE's, GOTMPDIR's where it is set (the go command's own
+# scratch) and TMPDIR's (the tests'). `go env` answers for the first two, since
+# the yard rotates GOCACHE with `go env -w` (internal/diskkeep) and nothing in
+# the environment says so. A rotation does not exist until something builds in
+# it, so each is read at the nearest directory that does, as diskkeep reads it.
+# A plan runs nothing, so it is not refused. A CI runner is not the yard's shared
+# machine, nothing else runs on it (legflag), and its free space is its
+# provider's to change, so it is not refused either: a disk that fills there
+# fails the job in its own words. What cannot be read lets the run go on, since a
+# gate that cannot see the disk must not refuse a healthy one.
+# YARDR_TEST_FLOOR_GIB gives another floor and 0 turns the check off: a yard
+# exports it where its gates start, and the gate's own tests give 0 (scriptEnv in
+# yardtest_test.go), as YARDR_TEST_LOADAVG replaces the load reading.
+floorgib=20
+diskfloor() {
+  if [ -n "$YARDR_TEST_PLAN" ] || [ -n "$GITHUB_ACTIONS" ]; then
+    return 0
+  fi
+  gib=${YARDR_TEST_FLOOR_GIB:-$floorgib}
+  case $gib in *[!0-9]*) gib=$floorgib ;; esac
+  if [ "$gib" = 0 ]; then
+    return 0
+  fi
+  goenv=$(go env GOCACHE GOTMPDIR 2>/dev/null) || goenv=
+  for what in GOCACHE GOTMPDIR TMPDIR; do
+    case $what in
+    GOCACHE) dir=$(printf '%s\n' "$goenv" | sed -n 1p) ;;
+    GOTMPDIR) dir=$(printf '%s\n' "$goenv" | sed -n 2p) ;;
+    TMPDIR) dir=${TMPDIR:-/tmp} ;;
+    esac
+    if [ -z "$dir" ]; then
+      continue
+    fi
+    probe=$dir
+    while [ ! -d "$probe" ] && [ "$probe" != "$(dirname "$probe")" ]; do
+      probe=$(dirname "$probe")
+    done
+    # The field before the capacity is the space available: counting from
+    # there keeps a filesystem or a mount point with a space in its name
+    # from shifting it.
+    free=$(df -Pk "$probe" 2>/dev/null | awk 'NR == 2 { for (i = 3; i <= NF; i++) if ($i ~ /^[0-9]+%$/) { print $(i - 1); exit } }')
+    case $free in '' | *[!0-9]*) continue ;; esac
+    if [ "$free" -ge $((gib * 1048576)) ]; then
+      continue
+    fi
+    # Cut, not rounded, so that a disk just under the floor is never shown
+    # at it.
+    shown=$(LC_ALL=C awk -v k="$free" 'BEGIN { printf "%.1f", int(k * 10 / 1048576) / 10 }')
+    # The variable identifies the volume without printing a machine-specific path.
+    echo "test: cannot run: $shown GiB free on the volume of $what, under the floor of $gib GiB: the disk is too full to start, which says nothing of the change" >&2
+    exit 2
+  done
+}
+diskfloor
 # The mark that lets conformance/bdp's test run its script (the header says
 # when) is the run's to give and never the caller's: one the run was started
 # with would run the script in every whole suite. So it starts empty, ahead of

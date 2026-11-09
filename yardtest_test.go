@@ -206,6 +206,11 @@ func goModTemplate(t *testing.T) (template, base, short string) {
 // also reads a quiet machine, a load of 1.5 on 10 cores, whatever the machine
 // and the run: a loaded one would give a landing's race leg a -p of its own
 // (gatepar), and the cases that run a landing assert the go commands it makes.
+// It has no floor of free disk space either (YARDR_TEST_FLOOR_GIB=0): the
+// script's run would read the machine's disk and a machine under the floor, or
+// a CI runner's without room, would refuse every case that runs it, and the
+// fake gos would see the go env call that reads it. The case that means the
+// floor sets it, against a stubbed df.
 // A case sets what it means the script to have, after these, so its own load
 // wins: one that runs the script sets YARDR_RACE_HELD, so its race step shares
 // the hold instead of taking the machine's lock, except the lock's own test,
@@ -220,7 +225,7 @@ func scriptEnvFrom(environ []string) []string {
 		k, _, _ := strings.Cut(kv, "=")
 		return slices.Contains([]string{"YARDR_BASE", "YARDR_LANDING", "YARDR_TEST_PLAN", "YARDR_TEST_RPC", "GOOS", "GOFLAGS", "YARDR_RACE_HELD", "YARDR_R1_STRICT", "YARDR_QUIET_RUN", "YARDR_CONFORMANCE", "YARDR_TEST_LOAD", "YARDR_TEST_BEADS", "YARDR_HOME", "YARDR_BEAD", "YARDR_DEPOT", "YARDR_ACTOR", "YARDR_SESSION", "GITHUB_ACTIONS"}, k)
 	})
-	return append(env, "YARDR_TEST_LOADAVG=1.5", "YARDR_TEST_CORES=10", "YARDR_HOME="+noYardHome)
+	return append(env, "YARDR_TEST_LOADAVG=1.5", "YARDR_TEST_CORES=10", "YARDR_TEST_FLOOR_GIB=0", "YARDR_HOME="+noYardHome)
 }
 
 // gateScript is the test command as this checkout has it.
@@ -3091,6 +3096,175 @@ fi
 			wantEmpty(t, b.tmp)
 		})
 	}
+}
+
+// A run reads the free space of the volumes it writes to before it selects
+// anything, and under the floor on any of them it prints one line and stops
+// with exit 2, "could not run", as for a base it cannot find: no test line, no
+// step, nothing left in TMPDIR (yardr-bc5s). The volumes are GOCACHE's and
+// GOTMPDIR's, as go env gives them, and TMPDIR's. df is a stub that answers
+// for the directory it is asked about, so no case reads the machine's disk. A
+// GOCACHE that was rotated to and not built in yet does not exist, and is read
+// at the nearest directory that does. What cannot be read lets the run go on,
+// and so do a plan and a CI runner; sizes runs no step, so it is not stopped
+// either. A run that goes on meets the next thing that can stop it, a base that
+// is not there, before any step: the rows need no whole gate against fakes to
+// tell a run that went on from one that was stopped.
+func TestYardTestRefusesADiskUnderItsFloor(t *testing.T) {
+	t.Parallel()
+	script := gateScript(t)
+	found := regexp.MustCompile(`(?m)^floorgib=([0-9]+)$`).FindSubmatch(script)
+	if found == nil {
+		t.Fatalf("cannot find floorgib in %s: move the probe with the script", yardTest)
+	}
+	floor, _ := strconv.Atoi(string(found[1]))
+	if floor < 2 {
+		t.Fatalf("floorgib is %d: the rows below want room to put a volume under it", floor)
+	}
+	// What df -P prints for a volume is KiB.
+	kib := func(gib int) string { return strconv.Itoa(gib * 1048576) }
+	roomy := kib(1024)
+	// A go that answers go env GOCACHE GOTMPDIR with the two lines a case gives
+	// it, and writes down every other call, of which a run that is stopped at
+	// the floor makes none.
+	const envGo = `#!/bin/sh
+if [ "$1" = env ]; then
+  printf '%s\n%s\n' "$FAKE_GOCACHE" "$FAKE_GOTMPDIR"
+  exit 0
+fi
+echo "$*" >>"$FAKE/calls"
+`
+	// A df that writes down the directory it was asked about, fails when
+	// FAKE_DF_FAIL says so, and prints the table POSIX df does, with the space
+	// a case gives that directory's volume: FAKE_KIB_CACHE under $FAKE/cache,
+	// FAKE_KIB_GOTMP under $FAKE/gotmp, FAKE_KIB_TMP anywhere else.
+	const stubDf = `#!/bin/sh
+echo "$2" >>"$FAKE/df-calls"
+[ -z "$FAKE_DF_FAIL" ] || exit 1
+case "$2" in
+"$FAKE"/cache*) avail=$FAKE_KIB_CACHE ;;
+"$FAKE"/gotmp*) avail=$FAKE_KIB_GOTMP ;;
+*) avail=$FAKE_KIB_TMP ;;
+esac
+echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
+echo "${FAKE_DF_FS:-/dev/fake} 482797652 400000000 $avail 96% ${FAKE_DF_MOUNT:-/System/Volumes/Data}"
+`
+	// The directories a row names, under the fake directory: GOCACHE's, the
+	// one it is read at when nothing built in it yet, GOTMPDIR's and TMPDIR's.
+	const (
+		cache   = "cache/go-build-9"
+		cacheUp = "cache"
+		gotmp   = "gotmp"
+		tmp     = "tmp"
+	)
+	m := newModGate(t)
+	for _, c := range []struct {
+		name    string
+		cache   string   // KiB free on GOCACHE's volume, roomy for ""
+		gotmp   string   // on GOTMPDIR's
+		tmp     string   // on TMPDIR's
+		floor   int      // the floor the case gives, for 0 the script's own
+		env     []string // the case's variables beyond the volumes
+		unbuilt bool     // GOCACHE is a rotation nothing built in yet
+		noGotmp bool     // go env says GOTMPDIR is unset
+		stops   string   // the volume the line names, "" for a run that goes on
+		shown   string   // the GiB the line shows
+		asked   []string // the directories df was asked about, in order
+	}{
+		{name: "room on every volume", asked: []string{cache, gotmp, tmp}},
+		{name: "exactly the floor", cache: kib(floor), gotmp: kib(floor), tmp: kib(floor), asked: []string{cache, gotmp, tmp}},
+		{name: "a KiB under the floor on GOCACHE's volume", cache: strconv.Itoa(floor*1048576 - 1),
+			stops: "GOCACHE", shown: strconv.Itoa(floor-1) + ".9", asked: []string{cache}},
+		{name: "under the floor on GOTMPDIR's volume", gotmp: kib(floor / 2),
+			stops: "GOTMPDIR", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cache, gotmp}},
+		{name: "under the floor on TMPDIR's volume, with no GOTMPDIR", tmp: kib(floor / 2), noGotmp: true,
+			stops: "TMPDIR", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cache, tmp}},
+		{name: "a rotation nothing built in yet is read where it would be", cache: kib(floor / 2), unbuilt: true,
+			stops: "GOCACHE", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cacheUp}},
+		{name: "a filesystem and a mount point with a space in their names", cache: kib(floor / 2),
+			env:   []string{"FAKE_DF_FS=map auto_home", "FAKE_DF_MOUNT=/Volumes/My Disk"},
+			stops: "GOCACHE", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cache}},
+		{name: "a floor given for the gate's own tests", cache: kib(floor), floor: floor + 10,
+			stops: "GOCACHE", shown: strconv.Itoa(floor) + ".0", asked: []string{cache}},
+		{name: "a df that fails lets the run go on", env: []string{"FAKE_DF_FAIL=1"}, asked: []string{cache, gotmp, tmp}},
+		{name: "a CI runner is not stopped", cache: kib(0), gotmp: kib(0), tmp: kib(0), env: []string{"GITHUB_ACTIONS=true"}},
+		{name: "a plan is not stopped", cache: kib(0), gotmp: kib(0), tmp: kib(0), env: []string{"YARDR_TEST_PLAN=1"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			b := m.box(t, map[string]string{"go": envGo, "df": stubDf})
+			gocache := filepath.Join(b.fake, cache)
+			gotmpdir := filepath.Join(b.fake, gotmp)
+			for _, dir := range []string{filepath.Join(b.fake, cacheUp), gotmpdir} {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !c.unbuilt {
+				if err := os.Mkdir(gocache, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.noGotmp {
+				gotmpdir = ""
+			}
+			free := func(given string) string {
+				if given == "" {
+					return roomy
+				}
+				return given
+			}
+			named := floor
+			own := ""
+			if c.floor != 0 {
+				named = c.floor
+				own = strconv.Itoa(c.floor)
+			}
+			env := append([]string{
+				"YARDR_TEST_FLOOR_GIB=" + own, "YARDR_BASE=nowhere",
+				"FAKE_GOCACHE=" + gocache, "FAKE_GOTMPDIR=" + gotmpdir,
+				"FAKE_KIB_CACHE=" + free(c.cache), "FAKE_KIB_GOTMP=" + free(c.gotmp), "FAKE_KIB_TMP=" + free(c.tmp),
+			}, c.env...)
+			out, code := b.run(t, env...)
+			if c.stops != "" {
+				want := fmt.Sprintf("test: cannot run: %s GiB free on the volume of %s, under the floor of %d GiB: the disk is too full to start, which says nothing of the change\n",
+					c.shown, c.stops, named)
+				if code != 2 || out != want {
+					t.Errorf("exit %d, output %q, want exit 2 and %q", code, out, want)
+				}
+			} else if code != 2 || !strings.Contains(out, "test: cannot compare with nowhere (YARDR_BASE)") || strings.Contains(out, "cannot run") {
+				t.Errorf("exit %d, output %q, want the run to go on to the base it cannot find", code, out)
+			}
+			if strings.Contains(out, "sh .yardr/test @") {
+				t.Errorf("the output has a test line, want none:\n%s", out)
+			}
+			if calls := fakeLog(b.fake, "calls"); calls != "" {
+				t.Errorf("go ran:\n%s", calls)
+			}
+			var asked []string
+			for _, dir := range splitLines(fakeLog(b.fake, "df-calls")) {
+				asked = append(asked, strings.TrimPrefix(dir, b.fake+"/"))
+			}
+			if !slices.Equal(asked, c.asked) {
+				t.Errorf("df was asked about %v, want %v", asked, c.asked)
+			}
+			wantEmpty(t, b.tmp)
+		})
+	}
+	t.Run("sizes is not stopped", func(t *testing.T) {
+		t.Parallel()
+		b := m.box(t, map[string]string{"go": envGo, "df": stubDf})
+		cmd := gateCmd(t, string(script))
+		cmd.Args = append(cmd.Args, "sizes")
+		cmd.Dir = b.dir
+		cmd.Env = boxEnv(b.fake, b.tmp, "YARDR_TEST_FLOOR_GIB=", "FAKE_GOCACHE="+b.fake, "FAKE_KIB_CACHE=0", "FAKE_KIB_GOTMP=0", "FAKE_KIB_TMP=0")
+		if out, code := runCmd(t, cmd); code != 0 || strings.Contains(out, "cannot run") {
+			t.Errorf("exit %d, output %q, want exit 0 and no refusal", code, out)
+		}
+		if asked := fakeLog(b.fake, "df-calls"); asked != "" {
+			t.Errorf("df was asked about %q, want nothing", asked)
+		}
+	})
 }
 
 // A gate ended by a signal prints no `pass`: its test line agrees with the

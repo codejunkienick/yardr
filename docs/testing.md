@@ -393,6 +393,45 @@ attached JSON, with the deltas per package, the new per-bead cost, and
 the same-sha rerun rate counted against R4. Every rule that missed is a
 filed follow-up or a closed wont-fix with the number.
 
+## The disk floor
+
+A gate writes gigabytes while it runs, and a disk that fills under it fails the
+tests in a way that reads as the branch's own: on 9 Nov 2026 the data volume
+went to 100% during a builder's gate over 40 packages (a full gate wrote about
+13 GB in the minute), and test links and writes failed with "no space left on
+device" in four packages, each reported as a failure of the change. So before
+it selects anything the gate reads the free space of the volumes it writes to:
+GOCACHE's and GOTMPDIR's, as `go env` gives them (the yard rotates GOCACHE with
+`go env -w`, so the environment does not say), and TMPDIR's. Under the floor on
+any of them (`floorgib` in `.yardr/test`, the one place the number is set) it
+prints one line, naming the volume, the free space and the floor, and exits 2:
+
+```text
+test: cannot run: 6.2 GiB free on the volume of GOCACHE, under the floor of 20 GiB: the disk is too full to start, which says nothing of the change
+```
+
+The floor is 20 GiB, above the roughly 12.1 GiB a full gate wrote in that
+minute. This leaves several GiB after that observed burst. About three in ten
+keepings in the two days before this was written left less than 20 GiB free, so
+those landing gates wait until there is room. A yard can set another floor by
+exporting `YARDR_TEST_FLOOR_GIB=<n>` where its gates start (the daemon's
+environment, a pane's profile); 0 turns the check off, and the gate's own tests
+give 0.
+
+Exit 2 is "could not run" ([line.md](line.md#4-approved-the-assembly-lands-it-on-main)):
+no test line, nothing ran, and the assembly holds a landing instead of sending
+it back, since nothing a builder changes can fix it. A builder who meets it has
+met the machine and not their change: they free nothing that is not their own,
+and tell the yardmaster. A rotation of GOCACHE that nothing has built in yet does
+not exist, so each volume is read at the nearest directory that does. A `df` or
+`go env` that cannot be read lets the run go on, since a gate that cannot see
+the disk must not refuse a healthy one. A plan (`YARDR_TEST_PLAN`), `sizes` and
+`--race-queue` run no step and are never refused, nor is a CI runner
+(`GITHUB_ACTIONS`), which is not the yard's shared machine and whose free space
+is its provider's. The floor is read once, at the start: a run that waits on the
+race lock is not read again, and several gates that start together each see the
+same free space.
+
 ## File size budget
 
 Every run also judges Go file size: a non-test `.go` file over 1000 lines

@@ -217,7 +217,10 @@ it lists every exported name with its comment, faster than grepping.
   `PATH=`).
 - The test rules are `docs/testing.md` (per-package time budget, sleep
   budget, parallelism); the gate is `sh .yardr/test` in the worktree, and
-  its printed `test:` line is the record of a run.
+  its printed `test:` line is the record of a run. A gate that finds a
+  volume it writes to under its free-space floor (`floorgib`) prints one
+  line and exits 2, with no test line: that is the machine's disk, not the
+  change (docs/testing.md, The disk floor).
 - A non-test Go file over 1000 lines has a ceiling that only falls (the
   `filesizes` table in `.yardr/test`), so a listed file cannot grow by a line
   and one with no row fails at 1000. Before planning a change to a Go file near

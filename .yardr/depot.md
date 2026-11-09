@@ -33,6 +33,13 @@ s` -- the result, the packages `ok` and `FAIL`, the wall seconds, and the
 seconds queued on the race lock (`waited 0 s` for your run, unless its step covered the whole suite).
 A note carries it whole.
 
+Before it selects anything the run reads the free space of the volumes it
+writes to (GOCACHE's, GOTMPDIR's, TMPDIR's), and under its floor on any of
+them it prints one line, `test: cannot run: <n> GiB free on the volume of ...`,
+and exits 2 with no test line (docs/testing.md, The disk floor). That is the
+machine's disk and not your change: free nothing that is not yours, mail the
+yardmaster, and hold the bead until there is room.
+
 A burn inside a builder's or reviewer's session runs at `-x 1` and names one
 suspect test (`contrib/burn/burn -x 1 PACKAGE TEST`, the proof docs/testing.md
 R2 asks of a fix for a test that fails only under load), never at the default

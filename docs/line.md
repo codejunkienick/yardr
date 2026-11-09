@@ -563,7 +563,8 @@ exits.
    red run with the lines that say what failed. The builder reads it with
    `yardr prime --bead <id>`, which shows every note whole. A command that
    says it could not run at all (exit 2: a tool missing, a base it cannot
-   find) holds the bead, since no builder can fix that. Nor can one fix a
+   find, a disk too full to start, as [the disk floor](testing.md#the-disk-floor)
+   has it) holds the bead, since no builder can fix that. Nor can one fix a
    run ended by a signal from outside (exit 128+N; 143 is a `go test`
    killed with SIGTERM after every package printed `ok`): it is run once
    more on the same commit, after a note with the first run's output, and
