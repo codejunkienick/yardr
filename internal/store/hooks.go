@@ -757,7 +757,7 @@ func (w *wtx) putHook(ctx context.Context, h Hook, actor string, by *approvedOn,
 				return nil, fmt.Errorf("hook %s: --as %s: crew member %s: %w", h.Name, h.As, h.As, ErrNotFound)
 			}
 			// A hook that acts as a crew member speaks as it.
-			if err := w.may(ctx, actor, ActSpeakAs, Object{Kind: KindCrew, Name: h.As}); err != nil {
+			if err := w.packHookSpeakAs(ctx, actor, h.As); err != nil {
 				return nil, fmt.Errorf("hook %s: %w", h.Name, err)
 			}
 			if r.Identities[h.Source].zero() {

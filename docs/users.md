@@ -266,8 +266,11 @@ a kind's named permission preset (`preset=<label>`) that keeps the agent's
 permission prompts (never `bypass` or its like); `crew set` of kind, model,
 directory and preset args for a member other than the yardmaster; `depot test`
 and `depot base`; `user set
-<user> notify=<source>` alone; and `hook add` in its card's safe shape (a name,
-`--source`, optional `--unknown`, and the secret file the yard owns for the hook). Free
+<user> notify=<source>` alone; `hook add` in its card's safe shape (a name,
+`--source`, optional `--unknown`, and the secret file the yard owns for the hook);
+and `pack apply` of a pack yardr embeds, with `--depot` and its mappings alone
+and past the pack card's bounds, where its plan asks nothing after them (a plan
+that asks is refused whole, and no answer path is built for it). Free
 args, `env_file`, `env_command`, a prompt, a group's `cmd`, the exec runner,
 the yardmaster's own entry, the switch, and a hook add with `--says`,
 `--makes`, `--map`, `--as` or a secret file of its own each refuse it. A
@@ -282,6 +285,26 @@ held before, and how it is taken back), puts a line on the yardmaster's
 journal naming only the record's id, and mails the operator what ran.
 `yardr delegation show <id>`, and the record's page in the hosted web, read
 it for an operator alone; anyone else is told it is not there.
+
+A delegated pack apply's record is written `started` before its first
+object and rewritten `done` or `failed` at the end: it holds the pack's
+digest, its objects by name, each updated object's diff and the complete
+before-state (in the record up to 4 KiB, in one blob past it, which the
+record's page and `yardr delegation show <id>` read). A record that would
+pass the yard's blob cap refuses before anything writes. The operator is
+mailed when the run starts and how it ended; a failure names the objects
+written, the partial import stays, and applying again finishes it. A
+record left `started` reads as unfinished, never as done. No one command
+takes a pack apply back: the operator sets each updated object back from
+its before-state, or re-applies the pack that stood before. The store
+takes the record's plan from its own reading of the pack the binary
+embeds, never from the caller: a plan that still asks after the mappings
+refuses there too, the record names the reading's objects exactly, each
+write under it (a group, crew member, flow, pointer, route, source, hook
+or the import's own record among them) is held to the object and the
+values that reading names for it, and a grant passes only where the
+run's mappings answered it. A record left `started` carries no write
+after an hour.
 
 On a delegated run the approval is the operator's own cited mail, so the run
 skips the card the same command carries today: the code card of `group add`,

@@ -334,6 +334,7 @@ func TestCallSendsFreshWitness(t *testing.T) {
 		witness    string
 		connection string
 		delegation store.DelegatedCall
+		pack       uint64
 	}
 	var got []headers
 	serve(t, sock, func(w http.ResponseWriter, r *http.Request) {
@@ -347,9 +348,10 @@ func TestCallSendsFreshWitness(t *testing.T) {
 			t.Error(err)
 		} else if d, ok := store.DelegationOf(ctx); ok {
 			h.delegation = d
+			h.pack, _ = store.DelegatedPackOf(ctx)
 			dropDoorHeaders(r)
-			if r.Header.Get(DelegationHeader) != "" {
-				t.Error("a device's request keeps the delegation header")
+			if r.Header.Get(DelegationHeader) != "" || r.Header.Get(DelegatedPackHeader) != "" {
+				t.Error("a device's request keeps a delegated header")
 			}
 		}
 		got = append(got, h)
@@ -368,14 +370,15 @@ func TestCallSendsFreshWitness(t *testing.T) {
 		t.Fatal(err)
 	}
 	delegated := store.DelegatedCall{For: "jo", Mail: 1042, Command: "yardr group set reviewers 'model=opus'\nnext"}
-	if _, err := c.Head(store.WithDelegation(context.Background(), delegated)); err != nil {
+	delegatedCtx := store.WithDelegatedPack(store.WithDelegation(context.Background(), delegated), 87)
+	if _, err := c.Head(delegatedCtx); err != nil {
 		t.Fatal(err)
 	}
 	want := []headers{
 		{witness: "jo " + fmt.Sprint(at.Unix()), connection: "openclaw"},
 		{connection: "terminal"},
 		{},
-		{delegation: delegated},
+		{delegation: delegated, pack: 87},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("context headers = %+v, want %+v", got, want)

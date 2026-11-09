@@ -157,6 +157,10 @@ var Access = map[string]Class{
 	"Delegation":        Read,
 	"DelegationBlob":    Read,
 	"DeliveryBlob":      Read,
+	// A delegated pack apply's record, started and finished by the
+	// yardmaster's run: a crew member's call, checked in the store.
+	"StartDelegatedPack":  Admin,
+	"FinishDelegatedPack": Admin,
 
 	// Asks. An agent asks and takes its ask back; answering is a person's.
 	"AddAsk":               Agent,

@@ -224,7 +224,7 @@ func (s *Store) DeleteGroup(ctx context.Context, name, actor string) (int, error
 			return err
 		}
 		actor = resolved
-		if err := w.may(ctx, actor, ActRemoveGroup, Object{Kind: KindGroup, Name: name}); err != nil {
+		if err := w.packRemoveGroup(ctx, name, actor); err != nil {
 			return err
 		}
 		// Batch reruns this closure when another call in the batch fails, so
@@ -1009,7 +1009,7 @@ func (s *Store) AddRoute(ctx context.Context, r Route, actor string) (*Route, er
 			return err
 		}
 		actor = resolved
-		first, err := checkRouteGroups(w.Tx, r)
+		first, err := w.packCheckRoute(ctx, r, actor)
 		if err != nil {
 			return err
 		}
@@ -1885,7 +1885,7 @@ func (s *Store) DeleteRoute(ctx context.Context, id, actor string) error {
 			return err
 		}
 		actor = resolved
-		if err := w.may(ctx, actor, ActRemoveRoute, Object{Kind: KindRoute, Name: id}); err != nil {
+		if err := w.packRemoveRoute(ctx, id, actor); err != nil {
 			return err
 		}
 		var r Route

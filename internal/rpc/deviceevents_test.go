@@ -93,9 +93,10 @@ var variableSites = map[string]struct {
 	"internal/store/graph.go":       {1, []string{"noted", "journal", "handoff"}},
 	"internal/store/peersend.go": {2, []string{"peer_bead_returned", "peer_bead_refused", "peer_bead_undelivered",
 		"peer_bead_fetched", "peer_bead_not_fetched"}},
-	"internal/store/peertrust.go":     {1, []string{"peer_trust_dropped", "peer_reach_dropped"}},
-	"internal/store/subscriptions.go": {5, []string{"subscribed", "unsubscribed", "identity_set", "identity_removed"}},
-	"internal/store/threads.go":       {1, []string{"thread_opened", "replied"}},
+	"internal/store/peertrust.go":           {1, []string{"peer_trust_dropped", "peer_reach_dropped"}},
+	"internal/store/subscriptions.go":       {3, []string{"subscribed", "unsubscribed", "identity_set", "identity_removed"}},
+	"internal/store/subscriptions_write.go": {2, []string{"subscribed", "unsubscribed"}},
+	"internal/store/threads.go":             {1, []string{"thread_opened", "replied"}},
 	"internal/store/previews.go": {1, []string{"preview_started", "preview_stopped", "preview_refused",
 		"preview_failed", "preview_crashed", "preview_exited", "preview_addressed"}},
 }

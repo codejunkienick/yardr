@@ -60,6 +60,10 @@ type API interface {
 	// not there (delegation.go).
 	Delegation(ctx context.Context, id uint64, actor string) (*Delegation, error)
 	DelegationBlob(ctx context.Context, id uint64, actor string) (*DelegatedBody, error)
+	// StartDelegatedPack and FinishDelegatedPack write and complete the
+	// record of a delegated pack apply (delegation_pack.go).
+	StartDelegatedPack(ctx context.Context, start DelegatedPackStart, actor string) (uint64, error)
+	FinishDelegatedPack(ctx context.Context, id uint64, done bool, written []string, errText string, actor string) error
 	DeliveryBlob(ctx context.Context, hash string) (*BlobRef, error)
 	AddAsk(ctx context.Context, id string, ask Ask, actor string) (uint64, error)
 	AskNew(ctx context.Context, nb NewBead, ask Ask, actor string) (*AskedBead, error)

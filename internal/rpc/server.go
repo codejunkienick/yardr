@@ -224,6 +224,13 @@ func callerCtx(r *http.Request) (context.Context, error) {
 		}
 		ctx = store.WithDelegation(ctx, d)
 	}
+	if raw := r.Header.Get(DelegatedPackHeader); raw != "" {
+		id, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || id == 0 {
+			return nil, fmt.Errorf("the call's delegated pack record names no id")
+		}
+		ctx = store.WithDelegatedPack(ctx, id)
+	}
 	if raw := r.Header.Get(FreshWitnessHeader); raw != "" {
 		fw, err := parseFreshWitness(raw)
 		if err != nil {
@@ -474,4 +481,5 @@ func writeJSON(w http.ResponseWriter, v any) {
 func dropDoorHeaders(r *http.Request) {
 	r.Header.Del(FreshWitnessHeader)
 	r.Header.Del(DelegationHeader)
+	r.Header.Del(DelegatedPackHeader)
 }

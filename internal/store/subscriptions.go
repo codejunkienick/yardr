@@ -814,7 +814,7 @@ func (w *wtx) changeSharedSubscriptions(ctx context.Context, name, actor string,
 		if crewKind == "" {
 			return nil
 		}
-		return w.writeCrewSubs(name, r, crewSubs, crewKind, crewData, resolved)
+		return w.writeCrewSubs(ctx, name, r, crewSubs, crewKind, crewData, resolved)
 	case crewErr == nil:
 		if err := w.may(ctx, actor, ActSubscribeCrew, Object{Kind: KindCrew, Name: name}); err != nil {
 			return err
@@ -822,7 +822,7 @@ func (w *wtx) changeSharedSubscriptions(ctx context.Context, name, actor string,
 		if crewKind == "" {
 			return nil
 		}
-		return w.writeCrewSubs(name, r, crewSubs, crewKind, crewData, resolved)
+		return w.writeCrewSubs(ctx, name, r, crewSubs, crewKind, crewData, resolved)
 	case groupErr == nil:
 		if err := w.may(ctx, actor, ActSubscribeGroup, Object{Kind: KindGroup, Name: g.Name, Group: &g}); err != nil {
 			return err
@@ -889,7 +889,7 @@ func (w *wtx) applyCrew(ctx context.Context, name string, r CrewMember, actor st
 	if err != nil {
 		return err
 	}
-	return w.writeCrewSubs(name, r, subs, kind, data, resolved)
+	return w.writeCrewSubs(ctx, name, r, subs, kind, data, resolved)
 }
 
 // applyUser runs fn on the user's subscriptions and writes what it returns
@@ -927,24 +927,6 @@ func (w *wtx) applyGroup(ctx context.Context, name string, g Group, actor string
 		return err
 	}
 	return w.writeGroupSubs(name, g, subs, kind, data, resolved)
-}
-
-func (w *wtx) writeCrewSubs(name string, r CrewMember, subs []Subscription, kind string, data map[string]any, actor string) error {
-	r.Subscriptions = subs
-	if err := put(w.Tx, bCrew, name, r); err != nil {
-		return err
-	}
-	data["crew"] = name
-	return w.event(r.Journal, kind, actor, data)
-}
-
-func (w *wtx) writeGroupSubs(name string, g Group, subs []Subscription, kind string, data map[string]any, actor string) error {
-	g.Subscriptions = subs
-	if err := put(w.Tx, bGroups, name, g); err != nil {
-		return err
-	}
-	data["group"] = name
-	return w.event("", kind, actor, data)
 }
 
 // boundSub is a subscription as it applies to one crew member: its own, or

@@ -336,8 +336,10 @@ type AskPackFile struct {
 // the store: the pack's name and kind, the build label it is embedded
 // in, each declared source's whole text with its command files' bytes,
 // the pack's presets with their grants, and, for a depot kind, the depot
-// it would be re-applied to, the plan built against the yard, the pack's
-// digest and the files of it that run. Nothing of it is the asker's.
+// it would be re-applied to and the plan built against the yard, or, for
+// a source kind, its plan for the store's delegated-start check. It also
+// carries the pack's digest and the files of it that run. Nothing of it
+// is the asker's.
 type PackReading struct {
 	Name     string
 	Kind     string // pack.KindSource ("source") for a yard pack, else a depot kind
@@ -347,9 +349,20 @@ type PackReading struct {
 	Build    string   // the <build> of Label, kept apart so refusals name it
 	Sources  []AskSource
 	Presets  []AskPreset
-	Plan     *AskPlan
+	Plan     *AskPlan // for a source pack, the store-side plan used by delegated applies
 	Digest   string   // the plan's: the sha256 of the pack's files, before filling
 	Programs []string // the plan's: the files of the pack that run once installed
+	// Grants are the grants the mappings accept, in a delegated record's
+	// words ("threads <crew> <source>", "call <grantee> <source>:<call>"):
+	// what the reading's mapping answers said yes to, and nothing else.
+	// Nil where the reader computed none, in which case a delegated start
+	// derives them from its mappings alone (delegation_pack.go).
+	Grants []string
+	// Targets are the objects a delegated pack apply would write, by
+	// "kind\x00name", each as JSON of the object as the plan and its
+	// mapping answers make it: a delegated write under the record is held
+	// to them, value by value. Nil where the reader carries none.
+	Targets map[string]string
 }
 
 // PackReader reads the embedded pack of a name for a pack apply ask,

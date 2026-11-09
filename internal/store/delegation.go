@@ -190,11 +190,24 @@ func (w *wtx) delegated(ctx context.Context, actor string) (*DelegatedCall, erro
 // delegable is r with the delegated leg beside it: where r refuses a deed
 // its site marks Delegate (Object.Delegate), a call that carries a
 // delegation passing delegatedIn is let through; any other refusal of r
-// stands in r's own words. It widens no other rule, and no other deed.
+// stands in r's own words. It widens no other rule, and no other deed. A
+// delegated pack apply's deed stands on its record instead (packDelegated),
+// whatever its site marks.
 func delegable(r rule) rule {
 	return func(ctx context.Context, tx *bolt.Tx, actor string, act Action, obj Object) error {
 		err := r(ctx, tx, actor, act, obj)
-		if err == nil || !obj.Delegate {
+		if err == nil {
+			return nil
+		}
+		if packDelegated(ctx, tx, actor, act, obj) {
+			return nil
+		}
+		if _, pack := DelegatedPackOf(ctx); pack {
+			// Under a delegated pack apply a deed stands on the pack
+			// record alone, never on the run's own leg.
+			return err
+		}
+		if !obj.Delegate {
 			return err
 		}
 		d, derr := delegatedIn(ctx, tx, actor)
@@ -344,6 +357,30 @@ type Delegation struct {
 	Mail uint64 `json:"mail"`
 	// Of is what the run changed: "group reviewers", "hook linear".
 	Of string `json:"of"`
+	// State is a delegated pack apply's state: "started" while its import
+	// runs, then "done" or "failed" (delegation_pack.go). Empty on every
+	// other record, which is written whole in its run's one write. A
+	// record left at "started" reads as unfinished, never as done.
+	State string `json:"state,omitempty"`
+	// Objects are a delegated pack apply's plan objects by name, "kind
+	// name" each, inline however large the record's body grows: the pack
+	// leg (packDelegated) holds the import's writes to them.
+	Objects []string `json:"objects,omitempty"`
+	// Grants are a delegated pack apply's mapped grants, inline as its
+	// objects are: "threads <crew> <source>", "call <grantee>
+	// <source>:<call>" and "expose <crew> <peer>", the ones its mappings
+	// answered yes to. The pack leg lets a grant through only where one
+	// of these names it.
+	Grants []string `json:"grants,omitempty"`
+	// PackObjects are a delegated pack apply's objects with the fields
+	// the store's reading says each changes, inline as Objects are —
+	// the body's objects stand under the same JSON name, so an inline
+	// body does not keep them — held for the pack leg's field checks.
+	PackObjects []DelegatedPackObject `json:"pack_objects,omitempty"`
+	// Mappings are the mappings a delegated pack apply was started
+	// with, kept so a later write of its import (a declared source's
+	// text) is held to the same reading of the pack that started it.
+	Mappings Mappings `json:"mappings,omitzero"`
 	DelegatedBody
 	Blob *BlobRef `json:"blob,omitempty"`
 }
@@ -355,6 +392,14 @@ type DelegatedBody struct {
 	Command string            `json:"command,omitempty"`
 	Changes []DelegatedChange `json:"changes,omitempty"`
 	Back    string            `json:"back,omitempty"`
+	// A delegated pack apply's record (delegation_pack.go): the pack and
+	// its digest, each plan object with its diff and complete
+	// before-state, what was written before a failure, and the failure.
+	Pack    string                `json:"pack,omitempty"`
+	Digest  string                `json:"digest,omitempty"`
+	Objects []DelegatedPackObject `json:"objects,omitempty"`
+	Written []string              `json:"written,omitempty"`
+	Error   string                `json:"error,omitempty"`
 }
 
 // DelegatedChange is one setting a delegated run changed, as it was and as
@@ -366,6 +411,35 @@ type DelegatedChange struct {
 	Had bool   `json:"had,omitempty"`
 	Is  string `json:"is,omitempty"`
 	Has bool   `json:"has,omitempty"`
+}
+
+// DelegatedPackObject is one object of a delegated pack apply's plan, as
+// its record holds it: what the import would do to it, the diff of an
+// updated object as the pack card computes it, and the complete
+// before-state an operator sets it back from. Before is a file's old text,
+// or the stored object as JSON; Had says it stood at all, so an object the
+// import creates has none.
+type DelegatedPackObject struct {
+	Kind   string `json:"kind"`
+	Name   string `json:"name"`
+	Action string `json:"action"`
+	Diff   string `json:"diff,omitempty"`
+	Before string `json:"before,omitempty"`
+	Had    bool   `json:"had,omitempty"`
+	// Fields are the fields the store's own reading of the pack says
+	// this object changes, filled in at the record's start from that
+	// reading (delegation_pack.go): a write under the record is held
+	// to them, so naming the object alone never opens its every field.
+	Fields []string `json:"fields,omitempty"`
+	// Changes are the changes the reading says this object makes, as
+	// the card prints them, filled in with Fields: where no target
+	// stands, a write's changed values are held to them.
+	Changes []AskChange `json:"changes,omitempty"`
+	// Target is the object as the reading's plan and its mapping
+	// answers would write it, as JSON, filled in with Fields where the
+	// reading carries one: a write under the record is held to it
+	// value by value, so naming the object opens none of its values.
+	Target string `json:"target,omitempty"`
 }
 
 // MaxDelegationInline is how large a record's body stands inline: the
@@ -584,8 +658,13 @@ func (s *Store) DelegationBlob(ctx context.Context, id uint64, actor string) (*D
 var groupFields = map[string]string{"--limit": "--limit", "--members": "--members"}
 
 // delegatedPutGroup is putGroup for PutGroup, with a delegated run held
-// and recorded (delegatedGroup).
+// and recorded (delegatedGroup). A delegated pack apply's groups are the
+// pack record's to audit, not a record of their own, and putGroup holds
+// them to it (checkGroupDefine).
 func (w *wtx) delegatedPutGroup(ctx context.Context, g *Group, actor string) error {
+	if _, pack := DelegatedPackOf(ctx); pack {
+		return putGroup(ctx, w, g, actor, false)
+	}
 	d, err := w.delegated(ctx, actor)
 	if err != nil {
 		return err
@@ -645,6 +724,12 @@ var crewFields = map[string]string{"--dir": "--dir", "--on": "--on", "--max-age"
 // arrives with its role text on the crew add card (3.2), and its values
 // as delegatedDefine reads them.
 func (w *wtx) delegatedCrew(ctx context.Context, def CrewMember, actor string) (*CrewMember, error) {
+	if _, pack := DelegatedPackOf(ctx); pack {
+		if err := w.packCrewWrite(ctx, &def, actor); err != nil {
+			return nil, err
+		}
+		return w.putCrew(ctx, def, actor, nil)
+	}
 	d, err := w.delegated(ctx, actor)
 	if err != nil || d == nil {
 		if err != nil {
@@ -746,6 +831,12 @@ const hookDelegateUse = "yardr hook add <name> --source <declared source> [--unk
 // whole, naming its flag as the card's refusal does, and nothing is
 // stored.
 func (w *wtx) delegatedHook(ctx context.Context, h Hook, actor string) (*Hook, error) {
+	if _, pack := DelegatedPackOf(ctx); pack {
+		if err := w.packHookWrite(ctx, &h, actor); err != nil {
+			return nil, err
+		}
+		return w.putHook(ctx, h, actor, nil, Alone)
+	}
 	d, err := w.delegated(ctx, actor)
 	if err != nil {
 		return nil, err

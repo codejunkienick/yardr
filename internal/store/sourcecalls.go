@@ -200,11 +200,12 @@ func (s *Store) GrantSource(ctx context.Context, src, what string, to Grantee, a
 	return g, nil
 }
 
-// grantSource is GrantSource inside the transaction. by is the ask the
-// grant was approved on, nil for one typed at a terminal: the event then
-// names it (ApproveAsk).
+// grantSource is GrantSource inside the transaction. by is the ask the grant was approved on, nil for one typed at a terminal: the event then names it (ApproveAsk).
 func (w *wtx) grantSource(ctx context.Context, src, what string, to Grantee, as string, actor string, by *approvedOn) (*SourceGrant, error) {
 	if err := w.checkGrantSource(ctx, src, what, to, as, actor); err != nil {
+		return nil, err
+	}
+	if err := w.packCallGrant(ctx, src, what, to, as, actor); err != nil {
 		return nil, err
 	}
 	d, err := declared(w.Tx, src)
@@ -253,10 +254,8 @@ func (w *wtx) grantSource(ctx context.Context, src, what string, to Grantee, as 
 	return g, w.event("", "source_granted", actor, data)
 }
 
-// checkGrantSource is the permission check for giving a source grant. A
-// run ask uses the same check for the asker's leg, and for the leg of the
-// one who would give it: the operator of a plain grant, the named user
-// alone of one as them.
+// checkGrantSource is the permission check for giving a source grant. A run ask
+// uses the same check for the asker's leg, and for the leg of the one who would give it: the operator of a plain grant, the named user alone of one as them.
 func (w *wtx) checkGrantSource(ctx context.Context, src, what string, to Grantee, as, actor string) error {
 	if as == "" {
 		return w.may(ctx, actor, ActGrantSource, Object{Kind: KindSource, Name: src, Ask: Askable})

@@ -221,6 +221,11 @@ func (s *Store) PutSource(ctx context.Context, file, text, actor string) (*Sourc
 		if err := w.may(ctx, actor, ActAddSource, Object{Kind: KindSource, Name: d.Name}); err != nil {
 			return err
 		}
+		if _, pack := DelegatedPackOf(ctx); pack {
+			if err := w.packSourceWrite(ctx, d.Name, text, actor); err != nil {
+				return err
+			}
+		}
 		var err error
 		src, err = w.putSource(d, text, actor, nil)
 		return err

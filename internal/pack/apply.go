@@ -74,6 +74,12 @@ type ApplyOptions struct {
 	// set. The next import takes them as the default unless told anew.
 	SourceBase map[string]string
 	Actor      string
+	// DelegatedMappings are the mappings a delegated apply was shaped
+	// and answered by, as its command's flags gave them: the store
+	// re-reads the embedded pack with exactly these to hold the run's
+	// record to the plan they made. Zero where no command gave any, in
+	// which case the plan's own names stand.
+	DelegatedMappings store.Mappings
 	// ApprovedBead and ApprovedAsk name the run ask this import is
 	// carried out from, where it is one (yardr-bht9 3.5): the record's
 	// event then carries it. Empty for a terminal import.
@@ -183,20 +189,33 @@ func (p *Plan) Missing(a Answers) []Question {
 // that check compared with the plan's hashes, never the pack read again: a
 // pack served over HTTP answers each read afresh. Past that the store
 // has no transaction spanning its calls, so a write that fails stops the
-// import where it is: the objects written so far stay, no record is
-// written, and since every object is matched by name, applying again
-// finishes the import rather than repeating it. A dropped object whose
-// removal fails does not undo the import either: the rest is pruned, the
-// record is written with that object still in it, and the error names it.
+// import where it is: the objects written so far stay, the pack import's
+// own record is not written, and since every object is matched by name,
+// applying again finishes the import rather than repeating it. A failed
+// removal of a dropped object does not undo the import either: the rest is
+// pruned, the record is written with that object still in it, and the error names it.
 // The fold runs after the record, so a source whose links or records are
 // not folded in leaves the import applied and recorded, and the error
 // names the source.
-func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (*Result, error) {
-	res := &Result{Pack: p.Pack, Depot: p.Depot, Pruned: []string{}, Left: []string{}, PruneErrors: []string{}, Restart: []string{}, Granted: []Grant{}, Calls: []CallGrant{}, Exposed: []Exposed{}, Mapped: []MapOp{}, Declared: []string{}, Folds: []Fold{}}
+func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (res *Result, err error) {
+	res = &Result{Pack: p.Pack, Depot: p.Depot, Pruned: []string{}, Left: []string{}, PruneErrors: []string{}, Restart: []string{}, Granted: []Grant{}, Calls: []CallGrant{}, Exposed: []Exposed{}, Mapped: []MapOp{}, Declared: []string{}, Folds: []Fold{}}
 	ck, err := check(p, o)
 	if err != nil {
 		return nil, err
 	}
+	// A delegated run records the import around these writes
+	// (apply_delegated.go): started before the first object, done or
+	// failed at the end, on exactly the error this apply returns.
+	run, err := p.beginDelegated(ctx, st, o, ck)
+	if err != nil {
+		return nil, err
+	}
+	ctx = run.context(ctx)
+	defer func() {
+		if ferr := run.finish(ctx, err); ferr != nil && err == nil {
+			err = ferr
+		}
+	}()
 	for i := range p.Objects {
 		obj := &p.Objects[i]
 		switch obj.Action {
@@ -210,8 +229,9 @@ func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (*Result,
 			continue
 		}
 		if err := write(ctx, st, p, obj, o, ck); err != nil {
-			return nil, fmt.Errorf("%s %s: %w (the import stopped here: what it wrote before stays, nothing is recorded, and applying again finishes it)", obj.Kind, obj.Name, err)
+			return nil, fmt.Errorf("%s %s: %w (the import stopped here: what it wrote before stays, and applying again finishes it)", obj.Kind, obj.Name, err)
 		}
+		run.wrote(*obj)
 		if obj.Action == Create {
 			res.Created++
 		} else {
@@ -242,7 +262,7 @@ func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (*Result,
 		}
 		added, err := st.AllowOpening(ctx, ot.CrewMember, yes, p.Pack, o.Actor)
 		if err != nil {
-			return nil, fmt.Errorf("letting crew member %s open threads in %s: %w (the import stopped here: what it wrote before stays, nothing is recorded, and applying again finishes it)", ot.CrewMember, strings.Join(yes, ", "), err)
+			return nil, fmt.Errorf("letting crew member %s open threads in %s: %w (the import stopped here: what it wrote before stays, and applying again finishes it)", ot.CrewMember, strings.Join(yes, ", "), err)
 		}
 		if len(added) > 0 {
 			res.Granted = append(res.Granted, Grant{CrewMember: ot.CrewMember, Sources: added})
@@ -257,7 +277,7 @@ func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (*Result,
 				continue
 			}
 			if _, err := st.GrantSource(ctx, c.Source, w, c.Grantee(), "", o.Actor); err != nil {
-				return nil, fmt.Errorf("letting %s call %s of the source %s: %w (the import stopped here: what it wrote before stays, nothing is recorded, and applying again finishes it)", c.Grantee(), w, c.Source, err)
+				return nil, fmt.Errorf("letting %s call %s of the source %s: %w (the import stopped here: what it wrote before stays, and applying again finishes it)", c.Grantee(), w, c.Source, err)
 			}
 			yes = append(yes, w)
 		}
@@ -274,7 +294,7 @@ func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (*Result,
 				continue
 			}
 			if _, err := st.AllowPeer(ctx, peer, store.PeerAllow{Expose: []string{ex.CrewMember}}, o.Actor); err != nil {
-				return nil, fmt.Errorf("exposing crew member %s to peer %s: %w (the import stopped here: what it wrote before stays, nothing is recorded, and applying again finishes it)", ex.CrewMember, peer, err)
+				return nil, fmt.Errorf("exposing crew member %s to peer %s: %w (the import stopped here: what it wrote before stays, and applying again finishes it)", ex.CrewMember, peer, err)
 			}
 			to = append(to, peer)
 		}

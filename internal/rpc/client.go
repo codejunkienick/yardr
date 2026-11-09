@@ -73,6 +73,11 @@ const ConnectionHeader = "X-Yardr-Connection"
 // none (dropDoorHeaders).
 const DelegationHeader = "X-Yardr-Delegation"
 
+// DelegatedPackHeader carries the id of the started pack record the call
+// writes under (store.WithDelegatedPack). The socket's server reads it
+// back onto the call; a device's request carries none (dropDoorHeaders).
+const DelegatedPackHeader = "X-Yardr-Delegated-Pack"
+
 var _ store.API = (*Client)(nil)
 
 func NewClient(socket string) *Client {
@@ -189,6 +194,9 @@ func (c *Client) callOnce(ctx context.Context, method string, out any, body []by
 			return err
 		}
 		req.Header.Set(DelegationHeader, base64.StdEncoding.EncodeToString(raw))
+	}
+	if id, ok := store.DelegatedPackOf(ctx); ok {
+		req.Header.Set(DelegatedPackHeader, strconv.FormatUint(id, 10))
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

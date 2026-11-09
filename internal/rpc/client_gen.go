@@ -153,6 +153,13 @@ func (c *Client) Delegation(ctx context.Context, id uint64, actor string) (*stor
 func (c *Client) DelegationBlob(ctx context.Context, id uint64, actor string) (*store.DelegatedBody, error) {
 	return callV[*store.DelegatedBody](c, ctx, "DelegationBlob", id, actor)
 }
+
+func (c *Client) StartDelegatedPack(ctx context.Context, start store.DelegatedPackStart, actor string) (uint64, error) {
+	return callV[uint64](c, ctx, "StartDelegatedPack", start, actor)
+}
+func (c *Client) FinishDelegatedPack(ctx context.Context, id uint64, done bool, written []string, errText string, actor string) error {
+	return c.call(ctx, "FinishDelegatedPack", nil, id, done, written, errText, actor)
+}
 func (c *Client) DeliveryBlob(ctx context.Context, hash string) (*store.BlobRef, error) {
 	return callV[*store.BlobRef](c, ctx, "DeliveryBlob", hash)
 }

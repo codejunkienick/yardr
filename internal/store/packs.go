@@ -227,6 +227,9 @@ func (s *Store) RecordPack(ctx context.Context, rec PackImport, changed bool, ac
 			return err
 		}
 		actor = resolved
+		if err := w.packRecordWrite(ctx, rec, actor); err != nil {
+			return err
+		}
 		written = false
 		if rec.Depot != "" && w.Bucket(bDepots).Get([]byte(rec.Depot)) == nil {
 			return fmt.Errorf("depot %s: %w", rec.Depot, ErrNotFound)

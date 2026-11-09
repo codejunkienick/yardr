@@ -62,6 +62,21 @@ func New(t testing.TB) store.API {
 	return api
 }
 
+// NewRPC returns a fresh store API through a real unix socket regardless of
+// the test process's environment.
+func NewRPC(t testing.TB) store.API {
+	t.Helper()
+	api, _ := newInWithRPC(t, t.TempDir(), true)
+	return api
+}
+
+// NewRPCOwned is NewRPC that also returns the store behind the API, for
+// what only the owning process may register on it (a pack reading).
+func NewRPCOwned(t testing.TB) (store.API, *store.Store) {
+	t.Helper()
+	return newInWithRPC(t, t.TempDir(), true)
+}
+
 // NewOwned is New that also returns the store behind the API, for what
 // only the owning process may do (record a webhook delivery, log any
 // event kind) while the test reads back through the API.
@@ -87,9 +102,13 @@ func NewOwnedIn(t testing.TB, home string) (store.API, *store.Store) {
 }
 
 func newIn(t testing.TB, home string) (store.API, *store.Store) {
+	return newInWithRPC(t, home, config.Getenv("TEST_RPC") != "")
+}
+
+func newInWithRPC(t testing.TB, home string, overRPC bool) (store.API, *store.Store) {
 	t.Helper()
 	s := Open(t, filepath.Join(home, "yard.db"))
-	if config.Getenv("TEST_RPC") == "" {
+	if !overRPC {
 		return s, s
 	}
 	// Over the wire every call has a caller, so the daemon's own writes

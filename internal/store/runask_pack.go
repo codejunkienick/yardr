@@ -30,9 +30,9 @@ import (
 	"yardr.dev/yardr/internal/source"
 )
 
-// AskPlan is a depot pack's plan as a card holds it: every object with
-// its action and changes, the governs, and what the plan still asks or
-// refuses, in the store's own words so no view needs internal/pack.
+// AskPlan is an embedded pack's plan as the store carries it: every
+// object with its action and changes, the governs, and what the plan still
+// asks or refuses, in the store's own words so no view needs internal/pack.
 type AskPlan struct {
 	Objects []AskPlanObject `json:"objects,omitempty"`
 	Governs []AskGovern     `json:"governs,omitempty"`
@@ -227,8 +227,9 @@ func readInventoryFile(path string, want fs.FileInfo) ([]byte, error) {
 }
 
 // packBytesSeen fingerprints a pack reading: its sources' texts, each
-// command file's SHA-256, and a depot plan whole. The build label is
-// held apart (Seen["pack <name>"], with the build beside it), so an
+// command file's SHA-256, and a depot plan whole. A source plan is only
+// for delegated applies and is not part of the source pack's ask card.
+// The build label is held apart (Seen["pack <name>"], with the build beside it), so an
 // approval can tell a build that moved alone, which it runs past, from
 // bytes that moved, which it refuses.
 func packBytesSeen(r *PackReading) string {
@@ -239,7 +240,7 @@ func packBytesSeen(r *PackReading) string {
 			parts = append(parts, f.Program, f.SHA256)
 		}
 	}
-	if r.Plan != nil {
+	if r.Plan != nil && r.Kind != "source" {
 		raw, _ := json.Marshal(r.Plan)
 		parts = append(parts, string(raw))
 	}
@@ -369,9 +370,9 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 	seenMap := map[string]string{
 		"pack " + name:            reading.Label,
 		"pack " + name + " build": reading.Build,
-		"pack " + name + " bytes": packBytesSeen(&PackReading{Sources: carried, Plan: reading.Plan}),
+		"pack " + name + " bytes": packBytesSeen(&PackReading{Kind: reading.Kind, Sources: carried, Plan: reading.Plan}),
 	}
-	if reading.Digest != "" {
+	if reading.Digest != "" && reading.Kind != "source" {
 		seenMap[packDigestKey(name)] = reading.Digest
 	}
 	for i := range carried {
@@ -399,8 +400,12 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 	if reading.Mappings.IsZero() {
 		reading.Mappings = mappings
 	}
+	digest := reading.Digest
+	if reading.Kind == "source" {
+		digest = ""
+	}
 	card := AskRun{Argv: run.Argv, Seen: seenMap, Carried: carried,
-		Pack: &AskPack{Name: name, Kind: reading.Kind, Depot: reading.Depot, Mappings: reading.Mappings, Label: reading.Label, Digest: reading.Digest}}
+		Pack: &AskPack{Name: name, Kind: reading.Kind, Depot: reading.Depot, Mappings: reading.Mappings, Label: reading.Label, Digest: digest}}
 	if reading.Kind == "source" {
 		if named {
 			return AskRun{}, fmt.Errorf("pack %s: it is of kind source, so it goes into the yard and no depot, and a setup card installs it: yardr bead ask <bead> \"<question>\" --setup %s", name, name)

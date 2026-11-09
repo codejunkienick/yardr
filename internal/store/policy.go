@@ -281,24 +281,24 @@ func init() {
 		ActMoveLinks, ActReplaceHook, ActChangeHookSource, ActChangeHookUnknown, ActRemoveHook,
 		ActPair, ActMapPeerIdentity, ActUnmapPeerIdentity, ActAddPeer, ActRemovePeer, ActExposeToPeer,
 		ActTrustPeerName, ActSendAsksToPeer, ActAllowPeerMessages, ActRaisePeerMail, ActChangePeerAddress,
-		ActRenamePeer, ActRoutePeerBeads, ActMoveSource, ActApplyPack, ActSetUpPackSources,
+		ActRenamePeer, ActRoutePeerBeads, ActMoveSource, ActSetUpPackSources,
 		ActBringUp,
 		ActAddUser, ActRemoveUser, ActChangeRole, ActMapIdentity, ActChangeSetting, ActPruneStore,
 		ActGiveHarnessKey, ActGiveCrewCredential, ActGiveHookSecret, ActAllowThreads, ActRemoveTimer,
 		ActConnectEdge, ActDisconnectEdge, ActNameUpgradeDepot, ActInstallRelease, ActListAllTimers, ActDeleteYardHome,
 	} {
-		coreRules[act] = ruleOperator
+		coreRules[act] = packable(ruleOperator)
 	}
 	for _, act := range []Action{ActEnableCrew, ActRestartCrew, ActRemoveFlow, ActRemoveGroup, ActRemoveRoute} {
 		coreRules[act] = ruleOperatorOrYardmaster
 	}
 	// The operator's, with the delegated leg beside it for the deeds a
 	// site marks Delegate (delegation.go).
-	for _, act := range []Action{ActChangeCrew, ActChangeGroup, ActChangeDepotTest, ActChangeDepotBase, ActAddHook} {
+	for _, act := range []Action{ActChangeCrew, ActChangeGroup, ActChangeDepotTest, ActChangeDepotBase, ActAddHook, ActApplyPack} {
 		coreRules[act] = delegable(ruleOperator)
 	}
 	for _, act := range []Action{ActAddSource, ActSetSourceKey, ActRemoveSource, ActIgnoreSender, ActUnignoreSender, ActGrantSource, ActAnswerSourceLogin} {
-		coreRules[act] = maySource
+		coreRules[act] = packable(maySource)
 	}
 	for act, r := range map[Action]rule{
 		ActAddDevice:         mayAddDevice,
@@ -335,7 +335,7 @@ func init() {
 		ActWaitLogin:         mayWaitLogin,
 		ActSee:               ruleSee,
 	} {
-		coreRules[act] = r
+		coreRules[act] = packable(r)
 	}
 }
 

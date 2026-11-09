@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"io/fs"
 	"reflect"
 	"slices"
@@ -31,8 +32,14 @@ func TestReadEmbeddedSourcePack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Kind != "source" || len(r.Sources) != 1 || r.Sources[0].Name != "telegram" {
+	if r.Kind != "source" || len(r.Sources) != 1 || r.Sources[0].Name != "telegram" || r.Digest == "" || r.Plan == nil {
 		t.Fatalf("the telegram reading = %+v", r)
+	}
+	if len(r.Plan.Objects) != 1 || r.Plan.Objects[0].Kind != "source" || r.Plan.Objects[0].Name != "telegram" || r.Plan.Objects[0].Action != "create" {
+		t.Fatalf("the telegram source plan = %+v", r.Plan)
+	}
+	if _, err := readEmbeddedPack(context.Background(), "telegram", "", store.Mappings{Flow: "forged"}, st, t.TempDir()); err == nil {
+		t.Error("a source pack accepted depot mappings")
 	}
 	if !strings.HasPrefix(r.Label, "embedded in yardr ") {
 		t.Fatalf("its label = %q", r.Label)
@@ -204,6 +211,22 @@ func TestReadEmbeddedDepotPack(t *testing.T) {
 		first.Plan.Objects[i].Action != "create" {
 		t.Fatalf("the first-install reading's builders = %+v, want a create in depot web", first.Plan.Objects)
 	}
+	subIndex := slices.IndexFunc(first.Plan.Objects, func(o store.AskPlanObject) bool {
+		return o.Kind == "subscription" && (o.Action == "create" || o.Action == "change")
+	})
+	if subIndex < 0 {
+		t.Fatal("the first-install reading has no subscription to hold")
+	}
+	subObject := first.Plan.Objects[subIndex]
+	var subTarget struct {
+		Crew   string              `json:"crew"`
+		Add    *store.Subscription `json:"add"`
+		Remove *store.Subscription `json:"remove"`
+	}
+	if err := json.Unmarshal([]byte(first.Targets["subscription\x00"+subObject.Name]), &subTarget); err != nil ||
+		subTarget.Crew == "" || subTarget.Add == nil {
+		t.Fatalf("the first-install reading's subscription target = %+v, %v", subTarget, err)
+	}
 
 	// The mappings answer the asks they name: a group the yard has takes
 	// the pack's builders, and a bind answers the reviewers' agent.
@@ -294,10 +317,15 @@ func TestPackApplyTelegramCard(t *testing.T) {
 		t.Fatal(err)
 	}
 	var joined string
+	var telegramRun *store.AskRun
 	for _, r := range store.ResolveAsks(notes, notes[0].At) {
 		if r.Note.Seq == telegramSeq && r.Ask.Run != nil {
 			joined = strings.Join(r.Ask.Run.Does, "\n")
+			telegramRun = r.Ask.Run
 		}
+	}
+	if telegramRun == nil || telegramRun.Pack.Digest != "" || telegramRun.Seen["pack telegram digest"] != "" {
+		t.Fatalf("the source pack's ask card gained a digest: %+v", telegramRun)
 	}
 	for _, want := range []string{
 		"pack telegram (embedded in yardr ",

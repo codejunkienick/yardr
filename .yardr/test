@@ -1986,7 +1986,7 @@ internal/cli/crew.go 2247 the crew, inbox, mail and memory commands
 internal/cli/doctor.go 1255 the doctor examinations and its report
 internal/cli/init.go 1600 yard init, onboarding and settings
 internal/cli/ops.go 1829 the server, daemon, depot, group, route and session commands
-internal/cli/pack.go 2102 pack loading, import planning and its question rounds
+internal/cli/pack.go 2096 pack loading, import planning and its question rounds
 internal/cli/peers.go 1567 the peer identity, intake and ping commands
 internal/cli/routereport.go 1513 the route report and its rendering
 internal/cli/sourcecmd.go 2147 the source command and its builtin checks
@@ -2017,8 +2017,8 @@ internal/store/runask_list.go 1223 ask cards, labels and preset reading
 internal/store/runask_setup.go 1537 the setup ask, its card, and the carrying record
 internal/store/secretask.go 1092 secret asks and harness key files
 internal/store/settings.go 1117 yard settings and their checks
-internal/store/sourcecalls.go 1241 source grants and callables
-internal/store/subscriptions.go 1210 identities, subscriptions and where-clauses
+internal/store/sourcecalls.go 1240 source grants and callables
+internal/store/subscriptions.go 1192 identities, subscriptions and where-clauses
 internal/store/users.go 1301 user records and operator words
 '
 # filesizebudget fails the run when a non-test Go file stands over its

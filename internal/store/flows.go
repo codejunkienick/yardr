@@ -472,7 +472,7 @@ func (s *Store) PutFlow(ctx context.Context, f Flow, actor string) (*Flow, error
 			return err
 		}
 		actor = resolved
-		if err := put(w.Tx, bFlows, f.Name, f); err != nil {
+		if err := w.packPutFlow(ctx, f, actor); err != nil {
 			return err
 		}
 		// With the new version in place, as in SetFlowPointer; an error
@@ -574,7 +574,7 @@ func (s *Store) DeleteFlow(ctx context.Context, name, actor string) error {
 			return err
 		}
 		actor = resolved
-		if err := w.may(ctx, actor, ActRemoveFlow, Object{Kind: KindFlow, Name: name}); err != nil {
+		if err := w.packRemoveFlow(ctx, name, actor); err != nil {
 			return err
 		}
 		k := []byte(name)
@@ -677,8 +677,8 @@ func (s *Store) SetFlowPointer(ctx context.Context, depot, typ, flow, actor stri
 			return err
 		}
 		actor = resolved
-		if w.Bucket(bDepots).Get([]byte(depot)) == nil {
-			return fmt.Errorf("depot %s: %w", depot, ErrNotFound)
+		if err := w.packDepotPointer(ctx, depot, typ, flow, actor); err != nil {
+			return err
 		}
 		k := []byte(join(depot, typ))
 		data := map[string]any{"depot": depot, "type": typ}

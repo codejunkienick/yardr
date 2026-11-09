@@ -19,8 +19,16 @@ import (
 
 // checkGroupDefine holds a group's cmd, dir, env_file, kind, args, prompt
 // and worktrees settings, and a change of its runner to or from exec, to
-// the operator.
+// the operator. Under a delegated pack apply every write of a group,
+// SetGroup's as well as PutGroup's, is first held to the record's values
+// (packGroupWrite): the record lets the deed through below, so its values
+// are checked here, where all of putGroup's callers pass.
 func checkGroupDefine(ctx context.Context, w *wtx, old, want Group, actor string) error {
+	if _, pack := DelegatedPackOf(ctx); pack {
+		if err := w.packGroupWrite(ctx, &want, actor); err != nil {
+			return err
+		}
+	}
 	before, after := asStored(old.Config), asStored(want.Config)
 	for _, key := range []string{"cmd", "dir", "env_file", "kind", "args", "prompt", "worktrees"} {
 		was, had := before[key]

@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -87,6 +90,15 @@ func readEmbeddedPack(ctx context.Context, name string, depot string, mappings s
 		reading.Presets = append(reading.Presets, store.AskPreset{Name: pr.Name, Grants: grants})
 	}
 	if p.Kind == pack.KindSource {
+		if !mappings.IsZero() {
+			return nil, fmt.Errorf("pack %s is of kind source and takes no depot mappings", name)
+		}
+		plan, err := pack.Build(ctx, yard, p, pack.Options{Home: home})
+		if err != nil {
+			return nil, err
+		}
+		reading.Plan = askPlanOf(sub, plan, pack.Answers{}, nil, nil)
+		reading.Digest, reading.Programs = plan.Digest, plan.Programs
 		return reading, nil
 	}
 	target := depot
@@ -124,7 +136,190 @@ func readEmbeddedPack(ctx context.Context, name string, depot string, mappings s
 	reading.Depot = target
 	reading.Plan = askPlanOf(sub, plan, answers, open, calls)
 	reading.Digest, reading.Programs = plan.Digest, plan.Programs
+	reading.Grants = packGrantsOf(open, calls)
+	targets, err := packTargetsOf(ctx, yard, plan, answers)
+	if err != nil {
+		return nil, err
+	}
+	reading.Targets = targets
 	return reading, nil
+}
+
+// packGrantsOf are the grants a reading's mapping answers said yes
+// to, in a delegated record's words (store's Delegation.Grants).
+func packGrantsOf(open, calls map[string]map[string]bool) []string {
+	out := []string{}
+	for crew, sources := range open {
+		for src, yes := range sources {
+			if yes {
+				out = append(out, "threads "+crew+" "+src)
+			}
+		}
+	}
+	for who, granted := range calls {
+		for key, yes := range granted {
+			if yes {
+				out = append(out, "call "+who+" "+key)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// packTargetsOf are the objects a plan would write, by kind and name,
+// each as JSON of the object as the plan and its answers make it: a
+// delegated write under the plan's record is held to them in the
+// store. A file is installed by its bytes, and a declared source by
+// its text, so neither stands here.
+func packTargetsOf(ctx context.Context, yard store.API, plan *pack.Plan, answers pack.Answers) (map[string]string, error) {
+	out := map[string]string{}
+	put := func(kind, name string, v any) error {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		out[kind+"\x00"+name] = string(raw)
+		return nil
+	}
+	for i := range plan.Objects {
+		o := &plan.Objects[i]
+		if o.Action != pack.Create && o.Action != pack.Change {
+			continue
+		}
+		switch o.Kind {
+		case "group":
+			if err := put(o.Kind, o.Name, targetGroup(plan, o, answers)); err != nil {
+				return nil, err
+			}
+		case "flow":
+			if err := put(o.Kind, o.Name, o.Flow); err != nil {
+				return nil, err
+			}
+		case "pointer":
+			if err := put(o.Kind, o.Name, o.Pointer); err != nil {
+				return nil, err
+			}
+		case "route":
+			if err := put(o.Kind, o.Name, o.Route); err != nil {
+				return nil, err
+			}
+		case "crew":
+			def, err := targetCrew(ctx, yard, o, answers)
+			if err != nil {
+				return nil, err
+			}
+			if err := put(o.Kind, o.Name, def); err != nil {
+				return nil, err
+			}
+		case "map":
+			if err := put(o.Kind, o.Name, o.Map); err != nil {
+				return nil, err
+			}
+		case "subscription":
+			if err := put(o.Kind, o.Name, o.Subscription); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return out, nil
+}
+
+// targetGroup is a group object as an import writes it: its plan's
+// group, with the answers for the group it binds as, and its members.
+func targetGroup(plan *pack.Plan, o *pack.Object, answers pack.Answers) store.Group {
+	g := *o.Group
+	g.Config = map[string]any{}
+	for k, v := range o.Group.Config {
+		g.Config[k] = v
+	}
+	answerOf := func(of *pack.Object, field string) (string, bool) {
+		id := of.Kind + "." + of.Name + "." + field
+		v, ok := answers[id]
+		return strings.TrimSpace(v), ok && slices.Contains(of.Asks, id)
+	}
+	agent := o
+	for agent.Binds != "" {
+		i := slices.IndexFunc(plan.Objects, func(x pack.Object) bool { return x.Kind == "group" && x.Name == agent.Binds })
+		if i < 0 {
+			break
+		}
+		agent = &plan.Objects[i]
+	}
+	if v, ok := answerOf(agent, "kind"); ok {
+		g.Config["kind"] = v
+	}
+	if v, ok := answerOf(agent, "model"); ok && v != "" {
+		g.Config["model"] = v
+	}
+	if v, ok := answerOf(agent, "args"); ok && v != "" {
+		var args []any
+		for _, s := range strings.Fields(v) {
+			args = append(args, s)
+		}
+		g.Config["args"] = args
+	}
+	if v, ok := answerOf(o, "members"); ok {
+		g.Members = strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' })
+	}
+	return g
+}
+
+// crewTargetJSON is a crew member object as its target stands on a
+// delegated record: the definition an import writes, and nothing of
+// its runtime.
+type crewTargetJSON struct {
+	Config         map[string]any `json:"config"`
+	Dir            string         `json:"dir"`
+	On             []string       `json:"on"`
+	Runner         string         `json:"runner"`
+	MaxAge         string         `json:"max_age"`
+	HandoffGrace   string         `json:"handoff_grace"`
+	ContextHandoff string         `json:"context_handoff,omitempty"`
+}
+
+// targetCrew is a crew object as an import writes it: the member as
+// it stands with the pack's role and what it hears, or a new one from
+// its answers.
+func targetCrew(ctx context.Context, yard store.API, o *pack.Object, answers pack.Answers) (crewTargetJSON, error) {
+	op := o.CrewMember
+	def := store.CrewMember{Name: op.CrewMember, Runner: "herdr", Config: map[string]any{}, HandoffGrace: "15m"}
+	answer := func(field string) (string, bool) {
+		id := o.Kind + "." + o.Name + "." + field
+		v, ok := answers[id]
+		return strings.TrimSpace(v), ok && slices.Contains(o.Asks, id)
+	}
+	have, err := yard.GetCrew(ctx, op.CrewMember)
+	switch {
+	case err == nil:
+		def = *have
+		if def.Config == nil {
+			def.Config = map[string]any{}
+		}
+	case errors.Is(err, store.ErrNotFound):
+		if v, ok := answer("kind"); ok {
+			def.Config["kind"] = v
+		}
+		if v, ok := answer("model"); ok && v != "" {
+			def.Config["model"] = v
+		}
+		if v, ok := answer("args"); ok && v != "" {
+			var args []any
+			for _, s := range strings.Fields(v) {
+				args = append(args, s)
+			}
+			def.Config["args"] = args
+		}
+		def.Dir, _ = answer("dir")
+	default:
+		return crewTargetJSON{}, err
+	}
+	if op.Prompt != "" {
+		def.Config["prompt"] = op.Prompt
+	}
+	def.On = op.On
+	return crewTargetJSON{Config: def.Config, Dir: def.Dir, On: def.On, Runner: def.Runner,
+		MaxAge: def.MaxAge, HandoffGrace: def.HandoffGrace, ContextHandoff: def.ContextHandoff}, nil
 }
 
 func contains(xs []string, x string) bool {
@@ -144,7 +339,7 @@ func declDirOf(file string) string {
 	return ""
 }
 
-// askPlanOf is a depot plan as a card holds it, with each created or
+// askPlanOf is a pack plan as a card or delegated record holds it, with each created or
 // changed file's text as the import would install it (filled) and its
 // unified diff against the installed text, computed here from the two
 // texts the file's hashes already name. What the mappings already

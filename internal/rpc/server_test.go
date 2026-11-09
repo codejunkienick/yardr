@@ -217,4 +217,15 @@ func TestSocketCarriesAFreshWitness(t *testing.T) {
 	if r.Error == nil || r.Error.Message != "the call's fresh witness names no user and time" {
 		t.Fatalf("a malformed witness header answers %+v", r.Error)
 	}
+
+	req = httptest.NewRequest(http.MethodPost, "/call/Head", strings.NewReader("[]"))
+	req.Header.Set(DelegatedPackHeader, "0")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if err := json.Unmarshal(rec.Body.Bytes(), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Error == nil || r.Error.Message != "the call's delegated pack record names no id" {
+		t.Fatalf("a malformed delegated pack header answers %+v", r.Error)
+	}
 }

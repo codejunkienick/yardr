@@ -559,9 +559,8 @@ type peerAllowPermission struct {
 	mailLimit     int
 }
 
-// checkAllowPeer is the permission and link check for AllowPeer. A run
-// ask uses this same check for the asker's and operator's legs, so the
-// class of a mixed change cannot differ between the row and the command.
+// checkAllowPeer is the permission and link check for AllowPeer. A run ask
+// uses this same check for the asker's and operator's legs, so the class of a mixed change cannot differ between the row and the command.
 func (w *wtx) checkAllowPeer(ctx context.Context, name string, check peerAllowPermission, actor string) (*Peer, error) {
 	// Askable: the card shows trust before and after; check every policy
 	// action, and approveAsk blocks approval through the peer's own reach.
@@ -616,10 +615,11 @@ func changeList(have, add, drop []string) []string {
 	return out
 }
 
-// allowPeer is AllowPeer inside the transaction, so that an approved run
-// ask makes the change in the write that records its approval (ApproveAsk):
-// by is then the ask it was approved on, which the event carries.
+// allowPeer is AllowPeer inside the transaction, so that an approved run ask makes the change in the write that records its approval (ApproveAsk): by is then the ask it was approved on, which the event carries.
 func (w *wtx) allowPeer(ctx context.Context, name string, ch PeerAllow, actor string, by *approvedOn) (p *Peer, err error) {
+	if err := w.packPeerWrite(ctx, name, ch, actor); err != nil {
+		return nil, err
+	}
 	if err := checkKinds(ch.Send, ch.Receive, ch.NoSend, ch.NoReceive); err != nil {
 		return nil, err
 	}

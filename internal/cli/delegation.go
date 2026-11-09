@@ -23,7 +23,7 @@ import (
 
 // delegable are the commands the yardmaster may run for an operator,
 // by their path under yardr (design yardr-m90n 3.2).
-var delegable = [][]string{{"group", "add"}, {"group", "set"}, {"crew", "set"}, {"depot", "test"}, {"depot", "base"}, {"user", "set"}, {"hook", "add"}}
+var delegable = [][]string{{"group", "add"}, {"group", "set"}, {"crew", "set"}, {"depot", "test"}, {"depot", "base"}, {"user", "set"}, {"hook", "add"}, {"pack", "apply"}}
 
 // delegate gives each delegable command under root its --for and --mail,
 // and has it run with the delegation on its context where --for is given,
@@ -270,6 +270,31 @@ func writeDelegation(w io.Writer, rec *store.Delegation) {
 	fmt.Fprintf(w, "ran: %s\n", or(rec.Command, "(no command words were sent)"))
 	for _, ch := range rec.Changes {
 		fmt.Fprintf(w, "  %s: %s -> %s\n", ch.Key, delegatedValue(ch.Was, ch.Had), delegatedValue(ch.Is, ch.Has))
+	}
+	if rec.State != "" {
+		state := rec.State
+		if state == "started" {
+			state = "started (unfinished)"
+		}
+		fmt.Fprintf(w, "state: %s\n", state)
+	}
+	if rec.Pack != "" {
+		fmt.Fprintf(w, "pack %s, digest sha256:%s\n", rec.Pack, rec.Digest)
+		for _, o := range rec.DelegatedBody.Objects {
+			fmt.Fprintf(w, "  %s %s: %s\n", o.Kind, o.Name, o.Action)
+			if o.Diff != "" {
+				fmt.Fprintf(w, "    diff: %s\n", o.Diff)
+			}
+			if o.Had {
+				fmt.Fprintf(w, "    before: %s\n", o.Before)
+			}
+		}
+		if len(rec.Written) > 0 {
+			fmt.Fprintf(w, "written: %s\n", strings.Join(rec.Written, ", "))
+		}
+		if rec.Error != "" {
+			fmt.Fprintf(w, "failed: %s\n", rec.Error)
+		}
 	}
 	if rec.Back != "" {
 		fmt.Fprintf(w, "taken back by: %s\n", rec.Back)

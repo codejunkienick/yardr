@@ -660,13 +660,7 @@ after pack check. The import is recorded (yardr pack list). See docs/packs.md.
   yardr pack apply packs/starter --depot web --yes --crew yardmaster=boss \
     --bind builders=claude:opus --bind reviewers=codex,approve-for-me --members backlog= --members decisions=mckean`,
 		Args: cobra.ExactArgs(1),
-		RunE: func(c *cobra.Command, args []string) error {
-			imp, err := a.planImport(c.OutOrStdout(), c.ErrOrStderr(), c.Context(), "pack apply", args[0], &af, "", nil)
-			if imp == nil || err != nil {
-				return err
-			}
-			return imp.apply(c.OutOrStdout(), c.Context(), a, nil, nil)
-		},
+		RunE: func(c *cobra.Command, args []string) error { return a.packApplyRun(c, args[0], &af) },
 	}
 	af.register(apply, "is")
 	af.registerAnswers(apply)
