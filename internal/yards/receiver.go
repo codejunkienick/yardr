@@ -86,16 +86,14 @@ const (
 	answerTime = 30 * time.Second
 )
 
-// maxRequest bounds what is read of a request before its headers are
-// checked: nobody earns more with an unsigned or badly signed one. Once
-// the header signature holds, the receiver grants maxSealedRequest, the
-// sealed encoding of the largest file body, and checks the body against
-// the signed digest before opening it. Headers-first is what lets the
-// large limit be granted without yardr-zd25's interim slot bound, which
-// this wire removes: a stranger cannot earn the large read, so there is
-// nothing left to bound.
-const maxRequest = store.MaxPeerBody + 4<<10
-
+// maxSealedRequest bounds what is read of a request body, the sealed
+// encoding of the largest file body. Nothing of a body is read before the
+// header signature holds: nobody earns a read with an unsigned or badly
+// signed request. Once it holds, the receiver grants this limit and checks
+// the body against the signed digest before opening it. Headers-first is
+// what lets the large limit be granted without the bound on concurrent
+// large reads that yardr-zd25 put on the old wire: a stranger cannot earn
+// the large read, so there is nothing left to bound.
 var maxSealedRequest = store.SealedFileBound() + 4<<10
 
 // Store is what the receiver needs of the yard: the store itself, in the
@@ -188,8 +186,8 @@ type from struct {
 // verify tells whose a request is, from its headers alone first: the
 // keyid it claims finds the link, Yardr-Peer-To must name this yard, and
 // the RFC 9421 signature over the headers (the covered components and the
-// Content-Digest value among them) must hold, all before a body past
-// maxRequest is read. Only then is the body read, up to the sealed bound,
+// Content-Digest value among them) must hold, all before a byte of the
+// body is read. Only then is the body read, up to maxSealedRequest,
 // checked against its signed digest, and opened; every §2.5 check runs on
 // the opened body, in post and get, as before. A request that is no
 // peer's is answered here, 401 whatever was wrong with it: a key no link

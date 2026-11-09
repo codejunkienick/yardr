@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -322,9 +321,9 @@ func TestReceiverPost(t *testing.T) {
 	}
 	over, _ := json.Marshal(store.PeerMessage{ID: "bigger", Kind: "ping", Body: json.RawMessage(`"` + strings.Repeat("x", store.MaxPeerBody+8<<10) + `"`)})
 	answer(signed(a, b, "POST", yards.Path, over), http.StatusBadRequest)
-	// Past maxRequest under a key no link has: refused 401 from its
-	// headers alone, reading nothing of the body (the count is pinned in
-	// the headers-first subtest below).
+	// Past what a message takes, under a key no link has: refused 401 from
+	// its headers alone, reading nothing of the body (the count is pinned
+	// in the headers-first subtest below).
 	stranger := signed(newYard(t), b, "POST", yards.Path, over)
 	if resp, _ := stranger.send(t, b); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("a request past the limit under a key no link has: %d", resp.StatusCode)
@@ -353,14 +352,13 @@ func TestReceiverPost(t *testing.T) {
 // checkReceiverHeadersFirst pins the headers-first order: a request
 // whose header signature does not hold — a known key with a bad
 // signature, an unknown keyid, or a Yardr-Peer-To for another yard — is
-// refused 401 with no more than maxRequest of its body read, however
-// large the body is. The same body signed well is read and answered.
+// refused 401 with none of its body read, however large the body is. The
+// same body signed well is read and answered.
 func checkReceiverHeadersFirst(t *testing.T) {
 	t.Helper()
 	a, b := newYard(t), newYard(t)
 	b.add(t, "a", a, true, ping, ping)
 	large, _ := json.Marshal(store.PeerMessage{ID: "big", Kind: "ping", Body: json.RawMessage(`"` + strings.Repeat("x", store.MaxPeerBody+8<<10) + `"`)})
-	maxRead := store.MaxPeerBody + 4<<10 // maxRequest
 
 	serve := func(r *request) (int, int) {
 		body := &countingBody{r: bytes.NewReader(r.body)}
@@ -387,8 +385,8 @@ func checkReceiverHeadersFirst(t *testing.T) {
 	// SignPeerRequest signs for the signer's own keyid, which is a's, as
 	// the good one is; only To names the other yard.
 	for name, r := range map[string]*request{"a bad signature": badSig, "an unknown keyid": unknown, "a request for another yard": wrongTo} {
-		if code, read := serve(r); code != http.StatusUnauthorized || read > maxRead {
-			t.Errorf("%s: status %d with %d bytes read, want 401 with at most %d read", name, code, read, maxRead)
+		if code, read := serve(r); code != http.StatusUnauthorized || read != 0 {
+			t.Errorf("%s: status %d with %d bytes read, want 401 with none read", name, code, read)
 		}
 	}
 	// Old way: no RFC 9421 headers at all is the same plain 401.
@@ -415,42 +413,6 @@ func (c *countingBody) Read(p []byte) (int, error) {
 	return n, err
 }
 func (c *countingBody) Close() error { return nil }
-
-// stallBody gives its bytes, then waits for release: a body that stalls
-// where the test wants it to, counting what it gave and the read buffer
-// size. waiting, when non-nil, closes when the body is asked for more than
-// it has, so the read is still pending when the test continues.
-type stallBody struct {
-	left    []byte
-	read    int
-	asked   int
-	release chan struct{}
-	waiting chan struct{}
-	wonce   sync.Once
-}
-
-func (s *stallBody) Read(p []byte) (int, error) {
-	if s.read == 0 {
-		s.asked = len(p)
-	}
-	if len(s.left) == 0 {
-		if s.waiting != nil {
-			s.wonce.Do(func() { close(s.waiting) })
-		}
-		<-s.release
-		return 0, io.EOF
-	}
-	n := copy(p, s.left)
-	s.left = s.left[n:]
-	s.read += n
-	return n, nil
-}
-
-func (s *stallBody) Close() error { return nil }
-
-type noProgressReader struct{}
-
-func (noProgressReader) Read([]byte) (int, error) { return 0, nil }
 
 // A yard with no key of its own, or one whose key file is open to others,
 // takes nothing: it could sign no answer.
