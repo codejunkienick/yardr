@@ -816,14 +816,20 @@ again() {
       ;;
   esac
   retried=0
+  # Every grep of a log, here and in the helpers below, reads it as text (-a).
+  # A test may print a NUL byte, and a grep that takes the log for binary
+  # answers that it matches instead of printing the lines the caller goes on
+  # to read: on macOS "Binary file <log> matches" gave awk the word "file" for
+  # a failed package, so the rerun ran go test file and the package that
+  # failed never ran again.
   # A failure whose log reports a race is run again for neither the cache
   # nor the failed packages below: the race accuses the branch however
   # seldom it reproduces.
   raced=0
-  if [ "$rc" != 0 ] && grep -q 'WARNING: DATA RACE' "$log"; then
+  if [ "$rc" != 0 ] && grep -a -q 'WARNING: DATA RACE' "$log"; then
     raced=1
   fi
-  if [ "$rc" != 0 ] && [ "$raced" = 0 ] && grep -q 'go-build/.*: no such file or directory' "$log"; then
+  if [ "$rc" != 0 ] && [ "$raced" = 0 ] && grep -a -q 'go-build/.*: no such file or directory' "$log"; then
     echo "test: the Go build cache lost a file under us; running again" >&2
     rc=0
     # shellcheck disable=SC2086
@@ -841,7 +847,7 @@ again() {
   if [ "$rc" != 0 ] && [ "$retried" = 0 ]; then
     case " $* " in
       *" go test "*)
-        pkgs=$(grep -E '^FAIL[[:space:]]+[^[:space:]]+' "$log" | awk '{print $2}' | sort -u || true)
+        pkgs=$(grep -a -E '^FAIL[[:space:]]+[^[:space:]]+' "$log" | awk '{print $2}' | sort -u || true)
         if [ -n "$pkgs" ]; then
           pkgs_line=$(printf '%s\n' "$pkgs" | tr '\n' ' ' | sed 's/ $//' || true)
           if [ "$raced" = 1 ]; then
@@ -1089,19 +1095,19 @@ failed() {
   shift
   echo "test: FAILED: $*"
   {
-    grep -E -e '--- FAIL' -e '^FAIL' -e 'panic:' -e 'DATA RACE' -e '^[^[:space:]]+\.go:[0-9]+:[0-9]+:' "$f" || true
+    grep -a -E -e '--- FAIL' -e '^FAIL' -e 'panic:' -e 'DATA RACE' -e '^[^[:space:]]+\.go:[0-9]+:[0-9]+:' "$f" || true
     flakyfails --human "$f"
   } | head -n 60 || true
 }
 # waitcount prints the race-lock seconds one step's log ($1) holds: the
 # `test: waited N s` lines its race legs printed, 0 when there are none.
-waitcount() { grep -E '^test: waited [0-9]+ s for the race lock$' "$1" | awk '{s+=$3} END {print s+0}'; }
+waitcount() { grep -a -E '^test: waited [0-9]+ s for the race lock$' "$1" | awk '{s+=$3} END {print s+0}'; }
 # okcount prints the packages one go test log ($1) passed: the `ok` lines. A
 # package with no tests prints `?`, not `ok`, and is not counted.
-okcount() { grep -c -E '^ok[[:space:]]' "$1" || true; }
+okcount() { grep -a -c -E '^ok[[:space:]]' "$1" || true; }
 # failcount prints the packages one go test log ($1) failed: the FAIL lines,
 # as the flaky retry reads them.
-failcount() { grep -c -E '^FAIL[[:space:]]+[^[:space:]]+' "$1" || true; }
+failcount() { grep -a -c -E '^FAIL[[:space:]]+[^[:space:]]+' "$1" || true; }
 # pkgof prints the packages whose output names one test ($2) in a go test
 # log ($1). Go prints a package's output before its ok/FAIL line, so the
 # names between two such lines belong to the package the second names (as

@@ -887,6 +887,9 @@ func (w *wtx) delegatedHook(ctx context.Context, h Hook, actor string) (*Hook, e
 	if out.Unknown != "" {
 		changes = append(changes, DelegatedChange{Key: "unknown", Is: out.Unknown, Has: true})
 	}
-	back := "removing a hook is the operator's, in a terminal: yardr hook rm " + shellQuote(h.Name)
+	// Removing a hook is a run ask (runask_hookrm.go), a strong card the
+	// operator approves on a device or in the hosted web under a fresh
+	// sign-in: the way back an operator with no terminal has.
+	back := `the hook rm card, approved by the operator: yardr bead ask --run "hook rm ` + shellQuote(h.Name) + `"`
 	return out, w.recordDelegated(d, "hook "+h.Name, DelegatedBody{Changes: changes, Back: back})
 }

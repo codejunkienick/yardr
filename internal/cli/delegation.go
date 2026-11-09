@@ -64,14 +64,20 @@ func delegatedRun(c *cobra.Command) bool {
 // commandWords is the command c runs, as typed: its path, its words and
 // its own flags it was given, --for and --mail aside, each quoted as a
 // terminal reads it. The record keeps it whole; the root's flags (--actor,
-// --json) say who ran it and how it printed, which the record says apart.
+// --json, --home) say who ran it and how it printed, which the record says
+// apart. The flags come in the flag set's order, by name, a repeated flag's
+// values in the order given.
 func commandWords(c *cobra.Command, args []string) string {
 	words := strings.Fields(c.CommandPath())
 	for _, w := range args {
 		words = append(words, shellWord(w))
 	}
-	c.LocalNonPersistentFlags().Visit(func(f *pflag.Flag) {
-		if f.Name == "for" || f.Name == "mail" {
+	// Not Visit: LocalNonPersistentFlags is a copy made with AddFlag, which
+	// lists the flags the copy holds and not the ones that were set, so Visit
+	// walks none. The flag itself is shared with the set that parsed the
+	// command line, and says whether it was given.
+	c.LocalNonPersistentFlags().VisitAll(func(f *pflag.Flag) {
+		if !f.Changed || f.Name == "for" || f.Name == "mail" {
 			return
 		}
 		values := []string{f.Value.String()}

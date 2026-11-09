@@ -86,8 +86,63 @@ func TestDelegatedRunFromTheCLI(t *testing.T) {
 	}
 	mustAs(t, st, "yardmaster", "group", "set", "inherited", "preset=accept-edits", "--for", "jo", "--mail", mail)
 	mustAs(t, st, "yardmaster", "group", "add", "reviewers", "--runner", "herdr", "--set", "preset=accept-edits", "--for", "jo", "--mail", mail)
+	// The record's words keep the flags the command was given, as typed
+	// (preset= is read after the words are kept), and not --for, --mail or the
+	// --actor the helper adds.
+	if show := mustAs(t, st, "jo", "delegation", "show", "4"); !strings.Contains(show, "\nran: yardr group add reviewers --runner herdr --set preset=accept-edits\n") {
+		t.Errorf("the delegated group add's record:\n%s", show)
+	}
 	if _, err := as(t, st, "yardmaster", "hook", "add", "delegated", "--source", "token", "--secret-file", t.TempDir(), "--for", "jo", "--mail", mail); err == nil || !strings.Contains(err.Error(), "--secret-file is the operator's") {
 		t.Errorf("explicit secret file in a delegated hook add: %v", err)
+	}
+}
+
+// A delegated run's record keeps the command as typed: its path, its words and
+// each flag it was given, quoted as a terminal reads them, the flags by name
+// and a repeated flag's values in the order given. A flag it was not given
+// stays out though it has a default. So do --for and --mail, which the record
+// keeps apart, and the root's --actor, --json and --home, which say who ran the
+// command and how it printed.
+func TestDelegatedCommandWords(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name string
+		path []string // the command, under yardr
+		args []string // what follows it, as the shell hands it over
+		want string
+	}{
+		{"two flags", []string{"pack", "apply"}, []string{"starter", "--depot", "web", "--bind", "designers=claude"},
+			"yardr pack apply starter --bind designers=claude --depot web"},
+		{"a repeated flag keeps each value in the order given", []string{"group", "add"},
+			[]string{"reviewers", "--runner", "herdr", "--set", "kind=claude", "--set", "model=opus"},
+			"yardr group add reviewers --runner herdr --set kind=claude --set model=opus"},
+		{"a list flag given as one list is a pair for each value", []string{"group", "add"},
+			[]string{"reviewers", "--members", "ada,hal"},
+			"yardr group add reviewers --members ada --members hal"},
+		{"a value that needs quoting, an empty one among them", []string{"group", "add"},
+			[]string{"reviewers", "--runner", "", "--set", "prompt=it's a prompt", "--set", "worktrees=~/my work"},
+			`yardr group add reviewers --runner '' --set 'prompt=it'\''s a prompt' --set 'worktrees=~/my work'`},
+		{"a word that needs quoting", []string{"depot", "test"}, []string{"shed", "make test"},
+			"yardr depot test shed 'make test'"},
+		{"a flag not given stays out", []string{"group", "add"}, []string{"reviewers"},
+			"yardr group add reviewers"},
+		{"--for, --mail and the root's flags stay out", []string{"depot", "test"},
+			[]string{"shed", "make test", "--for", "jo", "--mail", "7", "--actor", "yardmaster", "--json", "--home", "/yard"},
+			"yardr depot test shed 'make test'"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			cmd, _, err := (&app{}).rootCmd().Find(c.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.ParseFlags(c.args); err != nil {
+				t.Fatal(err)
+			}
+			if got := commandWords(cmd, cmd.Flags().Args()); got != c.want {
+				t.Errorf("commandWords = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 

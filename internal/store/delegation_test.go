@@ -228,6 +228,14 @@ func TestDelegatedRuns(t *testing.T) {
 			if c.name == "group runner change taking-back a manual group" && !strings.Contains(rec.Back, "--members jo,ada") {
 				t.Errorf("manual group's members missing from taking-back command: %q", rec.Back)
 			}
+			// A hook is taken back by its hook rm card, which only the
+			// operator approves, not by a terminal's command: the way back a
+			// hosted operator has.
+			const hookBack = `the hook rm card, approved by the operator: yardr bead ask --run "hook rm tracker"`
+			isHook := c.name == "hook add in the safe shape"
+			if isHook && rec.Back != hookBack {
+				t.Errorf("hook add's taking-back = %q, want %q", rec.Back, hookBack)
+			}
 			// The journal's pointer names the record and nothing the run
 			// carried.
 			ym, err := y.api.GetCrew(y.ctx, "yardmaster")
@@ -249,11 +257,12 @@ func TestDelegatedRuns(t *testing.T) {
 				t.Fatal(err)
 			}
 			var told bool
+			var telling string
 			var change *store.Event
 			for i, e := range evs {
 				if e.Kind == "mail" && e.Actor == "yard" && store.MailReceiver(e) == "jo" {
-					text, _ := e.Data["text"].(string)
-					told = strings.Contains(text, "record "+itoa(rec.ID)) && strings.Contains(text, "your mail "+itoa(y.mail))
+					telling, _ = e.Data["text"].(string)
+					told = strings.Contains(telling, "record "+itoa(rec.ID)) && strings.Contains(telling, "your mail "+itoa(y.mail))
 				}
 				if e.Kind == c.event {
 					change = &evs[i]
@@ -261,6 +270,9 @@ func TestDelegatedRuns(t *testing.T) {
 			}
 			if !told {
 				t.Errorf("no mail to jo names record %d and mail %d", rec.ID, y.mail)
+			}
+			if isHook && !strings.Contains(telling, "taken back by: "+hookBack) {
+				t.Errorf("the telling = %q, want it to name the hook rm card as the way back", telling)
 			}
 			if change == nil {
 				t.Fatalf("no %s event", c.event)

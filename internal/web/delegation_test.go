@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"context"
+	"html"
 	"maps"
 	"net/http"
 	"net/url"
@@ -143,5 +144,115 @@ func TestWebDelegationRecord(t *testing.T) {
 		if r := y.getNoFollow(target, token); r.status != http.StatusNotFound || strings.Contains(r.body, "codex") {
 			t.Errorf("GET %s: %d:\n%s", target, r.status, r.body)
 		}
+	}
+
+	// A delegated pack apply's record says on its page what yardr delegation
+	// show prints of it, in its words: how far the run got (a started one is
+	// unfinished), the pack and its digest, where it came from and the digest
+	// that stood before it, what each object does with its diff and
+	// before-state, what was written and why it failed. The objects stand in
+	// the record's blob once their before-states pass the inline bound, as the
+	// one here does, and the page reads them from it.
+	const origin = "https://repo.example.com/yardr-packs/main/starter/"
+	stood := strings.Repeat("what stood ", 500)
+	plan := &store.AskPlan{Objects: []store.AskPlanObject{
+		{Kind: "group", Name: "builders", Action: "change"},
+		{Kind: "file", Name: "roles/builder.md", Action: "change"},
+		{Kind: "file", Name: "roles/reviewer.md", Action: "create"},
+	}}
+	reading := func(digest string) store.PackReader {
+		return func(_ context.Context, name, depot string, _ store.Mappings, _ store.API) (*store.PackReading, error) {
+			return &store.PackReading{Name: name, Kind: "git", Depot: depot, Digest: digest, Plan: plan}, nil
+		}
+	}
+	y.own.SetPackReader(reading("abc123"))
+	y.own.SetPackFetcher(func(_ context.Context, _, digest string) (store.PackReader, error) { return reading(digest), nil })
+	objects := []store.DelegatedPackObject{
+		{Kind: "group", Name: "builders", Action: "change", Diff: "model: sonnet -> opus", Before: `{"kind":"claude","model":"sonnet"}`, Had: true},
+		{Kind: "file", Name: "roles/builder.md", Action: "change", Diff: "--- roles/builder.md\n+++ roles/builder.md\n@@ -1 +1 @@\n-" + stood + "\n+what stands now", Before: stood, Had: true},
+		{Kind: "file", Name: "roles/reviewer.md", Action: "create"},
+	}
+	bare := []store.DelegatedPackObject{{Kind: "group", Name: "builders", Action: "change"}, {Kind: "file", Name: "roles/builder.md", Action: "change"}, {Kind: "file", Name: "roles/reviewer.md", Action: "create"}}
+	written := []string{"group builders", "file roles/builder.md", "file roles/reviewer.md"}
+	packCtx := store.WithDelegation(ctx, store.DelegatedCall{For: "jo", Mail: mail, Command: "yardr pack apply starter --depot home"})
+	begin := func(from, digest string, objs []store.DelegatedPackObject) uint64 {
+		t.Helper()
+		id, err := y.st.StartDelegatedPack(packCtx, store.DelegatedPackStart{Pack: "starter", Depot: "home", Digest: digest, From: from, Objects: objs}, "yardmaster")
+		must(t, err)
+		return id
+	}
+	finish := func(id uint64, done bool, wrote []string, why string) {
+		t.Helper()
+		must(t, y.st.FinishDelegatedPack(packCtx, id, done, wrote, why, "yardmaster"))
+	}
+	embedded := begin("", "abc123", objects)
+	finish(embedded, true, written, "")
+	// Two runs from the packs repository: the second names the digest the
+	// first left, and fails.
+	first := begin(origin, "aaa111", objects)
+	finish(first, true, written, "")
+	failed := begin(origin, "bbb222", objects)
+	finish(failed, false, written[:1], "route web-builders: the disk is full")
+	started := begin("", "abc123", bare)
+	for _, c := range []struct {
+		name string
+		id   uint64
+		want []string
+		not  []string
+	}{
+		{"done, from the binary", embedded, []string{
+			"Record " + itoa(embedded) + ": yardmaster for jo",
+			"<dt>state</dt><dd>done</dd>",
+			"<dt>pack</dt><dd>starter, digest sha256:abc123</dd>",
+			"<dt>written</dt><dd>group builders, file roles/builder.md, file roles/reviewer.md</dd>",
+			"<code>group builders</code>: change", "<dt>diff</dt>", "model: sonnet -> opus",
+			"<dt>before</dt>", `{"kind":"claude","model":"sonnet"}`, stood,
+			"<code>file roles/reviewer.md</code>: create",
+			"no one command takes a pack apply back",
+		}, []string{"<dt>from</dt>", "<dt>prior digest</dt>", "<dt>failed</dt>", "unfinished"}},
+		{"done, the first from the repository", first, []string{
+			"<dt>state</dt><dd>done</dd>",
+			"<dt>pack</dt><dd>starter, digest sha256:aaa111</dd>",
+			"<dt>from</dt><dd>" + origin + "</dd>",
+			"<dt>prior digest</dt><dd>none known</dd>",
+		}, []string{"<dt>failed</dt>", "unfinished"}},
+		{"failed, with a prior digest", failed, []string{
+			"<dt>state</dt><dd>failed</dd>",
+			"<dt>pack</dt><dd>starter, digest sha256:bbb222</dd>",
+			"<dt>from</dt><dd>" + origin + "</dd>",
+			"<dt>prior digest</dt><dd>sha256:aaa111</dd>",
+			"<dt>written</dt><dd>group builders</dd>",
+			`<dt>failed</dt><dd class="error">route web-builders: the disk is full</dd>`,
+			"<code>file roles/builder.md</code>: change",
+		}, []string{"unfinished", "<dt>state</dt><dd>done</dd>"}},
+		{"started, left unfinished", started, []string{
+			"<dt>state</dt><dd>started (unfinished)</dd>",
+			"<dt>pack</dt><dd>starter, digest sha256:abc123</dd>",
+		}, []string{"<dt>state</dt><dd>done</dd>", "<dt>written</dt>", "<dt>failed</dt>"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			target := "/delegations/" + itoa(c.id)
+			r := y.getNoFollow(target, y.token("jo@example.net"))
+			// The page as read: html/template escapes the quote of a command
+			// and the plus of a diff.
+			body := html.UnescapeString(r.body)
+			if r.status != http.StatusOK {
+				t.Fatalf("GET %s as jo: %d:\n%s", target, r.status, r.body)
+			}
+			for _, want := range c.want {
+				if !strings.Contains(body, want) {
+					t.Errorf("jo's page for record %d lacks %q:\n%s", c.id, want, r.body)
+				}
+			}
+			for _, not := range c.not {
+				if strings.Contains(body, not) {
+					t.Errorf("jo's page for record %d holds %q:\n%s", c.id, not, r.body)
+				}
+			}
+			// A member is told it is not there, and nothing of it.
+			if r := y.getNoFollow(target, y.token("sam@example.net")); r.status != http.StatusNotFound || strings.Contains(r.body, "abc123") || strings.Contains(r.body, "starter") || strings.Contains(r.body, "what stood") {
+				t.Errorf("GET %s as sam: %d:\n%s", target, r.status, r.body)
+			}
+		})
 	}
 }

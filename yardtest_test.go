@@ -1521,7 +1521,10 @@ func wantLoads(t *testing.T, fake string, landing bool) {
 // call, the GOFLAGS it had, and in loads, a line a call, the YARDR_TEST_LOAD
 // it had. FAKE_RPC_TIMES and FAKE_RPC_LINE fail the rpc step a case's own
 // number of times with a line of its own, beside the FAKE_STEP failure, so a
-// landing can flake in one leg and fail really in the other. go env answers
+// landing can flake in one leg and fail really in the other. FAKE_NUL makes
+// each failure print a line holding a NUL byte before its line, as a test that
+// prints a value with one in it does: an environment variable holds none, so
+// FAKE_LINE cannot. go env answers
 // with the two directories FAKE_GOCACHE and FAKE_GOTMPDIR name, as the gate
 // asks them of the volumes it writes to, and is no step: it is written down
 // nowhere. gofmt finds nothing to format.
@@ -1540,6 +1543,7 @@ if [ "$step" = "$FAKE_STEP" ]; then
   n=$((n + 1))
   echo "$n" >"$FAKE/n"
   if [ "$n" -le "$FAKE_TIMES" ]; then
+    [ -z "$FAKE_NUL" ] || printf 'got {Targets:map[group\000builders:1]}\n' >&2
     printf '%s\n' "$FAKE_LINE" >&2
     exit 1
   fi
@@ -1947,6 +1951,7 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 		diskOnly      bool            // nothing else failed: the run passes with no flaky line, no log line and no filing
 		rerunDisk     bool            // the rerun hit the disk too, which a second line says
 		volumes       bool            // GOCACHE and GOTMPDIR are set, each on a volume of its own beside TMPDIR's: GOTMPDIR's is the full one, GOCACHE's a fuller one than TMPDIR's
+		nul           bool            // each failure prints a line holding a NUL byte before its report
 	}{
 		{name: "plain: passes on rerun", times: "1", ok: true, calls: plain, steps: plainSteps},
 		{name: "plain: fails twice", times: "2", ok: false, calls: plain, steps: plainSteps},
@@ -2068,6 +2073,13 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 		// first run and of the rerun.
 		{name: "plain: the disk's state is the fullest volume's, not TMPDIR's", times: "2", ok: false, calls: plain, steps: plainSteps,
 			line: diskFail, disk: "TestX", rerunDisk: true, volumes: true},
+		// A test may print any byte, a NUL among them (yardr-2147). The log is
+		// read as text all the same: a grep that takes it for binary answers
+		// that it matches, where the gate reads the names of the failed
+		// packages (the rerun ran "file" or nothing) and the summary the
+		// failing lines.
+		{name: "plain: a failed log holding a NUL byte runs its package again", times: "1", ok: true, calls: plain, steps: plainSteps, nul: true},
+		{name: "plain: a log holding a NUL byte has its failing lines summarised", times: "2", ok: false, calls: plain, steps: plainSteps, nul: true},
 		// Landings without a comparable base (CI's shape): the socket
 		// suites run whole, ungated, so these cases exercise the leg
 		// itself rather than the gate.
@@ -2175,6 +2187,9 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 			env := []string{"LC_ALL=C", "YARDR_BEAD=", "YARDR_DEPOT=", "FAKE_STEP=test", "FAKE_TIMES=" + c.times, "FAKE_LINE=" + line}
 			if c.barePath {
 				env = append(env, "PATH="+b.fake+string(os.PathListSeparator)+"/usr/bin"+string(os.PathListSeparator)+"/bin")
+			}
+			if c.nul {
+				env = append(env, "FAKE_NUL=1")
 			}
 			if c.rpcTimes != "" {
 				rpcLine := c.rpcLine
@@ -3331,13 +3346,15 @@ func TestYardTestPrintsItsTestLine(t *testing.T) {
 	line := regexp.MustCompile(`^test: sh \.yardr/test @ ([0-9a-f]+): (pass|fail), ([0-9]+) packages ok, ([0-9]+) failed, ([0-9]+) s, waited ([0-9]+) s$`)
 	// A go whose test step reports a wait the way the race lock would, then
 	// fails its first few runs with one package's FAIL lines and passes with
-	// two packages' ok lines.
+	// two packages' ok lines. With FAKE_NUL it prints a line holding a NUL byte
+	// after the wait.
 	const testGo = `#!/bin/sh
 if [ "$1" = test ]; then
   n=$(cat "$FAKE/n" 2>/dev/null || echo 0)
   n=$((n + 1))
   echo "$n" >"$FAKE/n"
   [ -z "$FAKE_WAIT" ] || echo "test: waited $FAKE_WAIT s for the race lock"
+  [ -z "$FAKE_NUL" ] || printf 'got {Targets:map[group\000builders:1]}\n'
   if [ "$n" -le "$FAKE_FAILS" ]; then
     echo "--- FAIL: TestX (0.00s)"
     echo "FAIL"
@@ -3386,6 +3403,10 @@ fi
 	}{
 		{"green", "0", "", 0, "pass", "2", "0", "0", false, nil, false, ""},
 		{"a wait is summed", "0", "3", 0, "pass", "2", "0", "3", false, nil, false, ""},
+		// A log that holds a NUL byte is counted as text (yardr-2147): a grep
+		// that took it for binary summed no wait.
+		{"a wait and the passed packages are counted from a log holding a NUL byte", "0", "3", 0, "pass", "2", "0", "3", false,
+			[]string{"FAKE_NUL=1"}, false, ""},
 		{"a pass on rerun counts as passed", "1", "", 0, "pass", "2", "0", "0", true, nil, false, ""},
 		{"red", "2", "", 1, "fail", "0", "1", "0", false, nil, false, ""},
 		{"a plan prints none", "0", "", 0, "", "", "", "", false, []string{"YARDR_TEST_PLAN=1"}, true, ""},

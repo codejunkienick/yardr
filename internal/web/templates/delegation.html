@@ -1,7 +1,11 @@
 {{define "content"}}
 {{- /* A delegated run's record: what the yardmaster ran for an operator, on
        which of their mails, what each setting held before, and how it is
-       taken back. An operator's alone, as the store's read is. */}}
+       taken back. A pack apply's record also says how far the run got (a
+       started one is unfinished), which pack and digest, where it came from
+       and the digest that stood before it, what each object does with its
+       diff and before-state, what was written and why it failed: the words
+       of yardr delegation show. An operator's alone, as the store's read is. */}}
 <nav class="item filters" aria-label="Config">
   <p><a href="/config">‹ Config</a></p>
 </nav>
@@ -15,6 +19,25 @@
     <div><dt>on mail</dt><dd>{{.Mail}} from {{.For}}</dd></div>
     <div><dt>changed</dt><dd>{{.Of}}</dd></div>
     <div><dt>ran</dt><dd><code>{{or .Command "(no command words were sent)"}}</code></dd></div>
+    {{- with .State}}
+    <div><dt>state</dt><dd>{{if eq . "started"}}started (unfinished){{else}}{{.}}{{end}}</dd></div>
+    {{- end}}
+    {{- if .Pack}}
+    <div><dt>pack</dt><dd>{{.Pack}}, digest sha256:{{.Digest}}</dd></div>
+    {{- if .From}}
+    <div><dt>from</dt><dd>{{.From}}</dd></div>
+    <div><dt>prior digest</dt><dd>{{if .Prior}}sha256:{{.Prior}}{{else}}none known{{end}}</dd></div>
+    {{- end}}
+    {{- /* What was written and why it failed stand with the facts: the
+           objects below carry whole diffs and before-states, which run to
+           the blob cap and would push them off the first screen. */}}
+    {{- with .Written}}
+    <div><dt>written</dt><dd>{{range $i, $w := .}}{{if $i}}, {{end}}{{$w}}{{end}}</dd></div>
+    {{- end}}
+    {{- with .Error}}
+    <div><dt>failed</dt><dd class="error">{{.}}</dd></div>
+    {{- end}}
+    {{- end}}
     {{- with .Back}}
     <div><dt>taken back by</dt><dd><code>{{.}}</code></dd></div>
     {{- end}}
@@ -26,6 +49,26 @@
     <div><dt>{{.Key}}</dt><dd>{{if .Had}}{{.Was}}{{else}}(unset){{end}} → {{if .Has}}{{.Is}}{{else}}(unset){{end}}</dd></div>
     {{- end}}
   </dl>
+  {{- end}}
+  {{- /* The body's objects, by name: .Objects is the record's own list of
+         names, which shadows them. */}}
+  {{- with .DelegatedBody.Objects}}
+  <h3 class="label">objects</h3>
+  {{- range .}}
+  <article class="note">
+    <p><code>{{.Kind}} {{.Name}}</code>: {{.Action}}</p>
+    {{- if or .Diff .Had}}
+    <dl class="facts">
+      {{- with .Diff}}
+      <div><dt>diff</dt><dd><pre class="text file">{{.}}</pre></dd></div>
+      {{- end}}
+      {{- if .Had}}
+      <div><dt>before</dt><dd><pre class="text file">{{.Before}}</pre></dd></div>
+      {{- end}}
+    </dl>
+    {{- end}}
+  </article>
+  {{- end}}
   {{- end}}
 </article>
 {{- end}}
