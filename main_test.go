@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -670,6 +671,27 @@ func TestSecurityPolicy(t *testing.T) {
 			t.Errorf("SECURITY.md has no heading with the anchor #%s", heading)
 		}
 	}
+}
+
+// The UI dependencies still request go-runewidth v0.0.27, whose init builds
+// lookup tables even for commands that never draw. Keep the selected version
+// at the lazy-table release so a dependency change cannot restore that cost.
+func TestRunewidthStartupInitRemainsLazy(t *testing.T) {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		t.Fatal("build info is unavailable")
+	}
+	for _, dep := range info.Deps {
+		if dep.Path != "github.com/mattn/go-runewidth" {
+			continue
+		}
+		if dep.Version != "v0.0.28" {
+			t.Fatalf("go-runewidth %s is selected; review its startup initialization before changing the v0.0.28 pin", dep.Version)
+		}
+		return
+	}
+	// The binary no longer pays this package's initialization cost if the
+	// package is removed from its dependency graph entirely.
 }
 
 // anchors is the anchor of each heading of a Markdown page, as GitHub makes
