@@ -544,7 +544,10 @@ func TestPrimeCrewOpensHowYouWorkWithMemory(t *testing.T) {
 }
 
 // testPrimeCrewHostedYardHasNoTerminal checks the hosted case of the settings
-// that change what a crew prime says.
+// that change what a crew prime says: the section a hosted yard adds, which
+// names the yardmaster's own run of the operator's command where the
+// delegation switch reads on (unset, as hosted reads) and does not where it
+// reads off.
 func testPrimeCrewHostedYardHasNoTerminal(t *testing.T) {
 	t.Helper()
 	st := userYard(t)
@@ -555,7 +558,11 @@ func testPrimeCrewHostedYardHasNoTerminal(t *testing.T) {
 		t.Helper()
 		return mustAs(t, st, name, append([]string{"prime", "--crew", name}, more...)...)
 	}
-	section := "## No terminal\n\n" + noTerminalRule + "\n\n"
+	// The section as a prime prints it: with the delegated run's paragraph
+	// where the switch reads on, as it did before there was one where it
+	// reads off.
+	section := "## No terminal\n\n" + noTerminalDelegatedRule + "\n\n"
+	sectionOff := "## No terminal\n\n" + noTerminalRule + "\n\n"
 
 	plain, plainClerk, plainJSON := prime("yardmaster"), prime("clerk"), prime("yardmaster", "--json")
 	if strings.Contains(plain, "No terminal") || strings.Contains(plainClerk, "No terminal") || strings.Contains(plainJSON, "no_terminal") {
@@ -566,7 +573,15 @@ func testPrimeCrewHostedYardHasNoTerminal(t *testing.T) {
 	if got := prime("yardmaster"); got != plain {
 		t.Errorf("hosted=false changed the prime:\n%s\nwas:\n%s", got, plain)
 	}
+	// The switch makes no section of its own: a yard that is not hosted has a
+	// terminal, so the paragraph is part of the hosted section or nowhere.
+	mustAs(t, st, "jo", "settings", "set", store.DelegationSetting, "true")
+	if got := prime("yardmaster"); got != plain {
+		t.Errorf("delegation on, on a yard that is not hosted, changed the prime:\n%s\nwas:\n%s", got, plain)
+	}
+	mustAs(t, st, "jo", "settings", "set", store.DelegationSetting, "")
 
+	// Hosted, with the switch unset: it reads as hosted does, on.
 	mustAs(t, st, "jo", "settings", "set", "hosted", "true")
 	out := prime("yardmaster")
 	sec := strings.Index(out, section)
@@ -577,24 +592,60 @@ func testPrimeCrewHostedYardHasNoTerminal(t *testing.T) {
 		t.Errorf("the hosted prime is not the plain one with the section added:\n%s\nplain:\n%s", got, plain)
 	}
 	// The words that make it a rule: who has no terminal, what it supersedes,
-	// the three cards, and the fallback for a command none carries.
+	// the three cards, the yardmaster's run beside them (the operator's mail it
+	// takes, the citation it makes, who tells the operator, what it is instead
+	// of, and what stays a card) and the fallback for a command none carries.
 	for _, want := range []string{
 		"no terminal and no ssh",
 		"supersedes every line of your role",
 		"the fenced code block for a command no card carries",
 		"the one for a command that is the operator's alone",
 		"\"hand the command to the operator\"",
-		"Every command for the operator goes as a card",
+		"Requests needing the operator's approval go by card",
 		"a run ask",
 		"`yardr bead ask --help` names under `--run`",
 		"a secret ask",
 		"a setup ask",
+		"Delegation is on here",
+		"Requests needing the operator's approval go by card",
+		"command on the delegated list that the operator asked for in a local mail to the yardmaster is the yardmaster's to run",
+		"with no card and no bead filed for one",
+		"it cites that mail (`--for <sender> --mail <seq>`)",
+		"the yard tells the operator after it ran",
+		"`yardr docs users \"The yardmaster for the operator\"`",
+		"the yardmaster's role (Run an operator's command for them)",
+		"The cards stay for what the list leaves out",
+		"A command that neither a card nor the delegated list carries is one the yard refuses as a run ask",
 		"File a bead for the yard to grow the card (`yardr bead create`",
 		"never mailed as text to type",
 	} {
 		if !strings.Contains(section, want) {
 			t.Errorf("the section lacks %q:\n%s", want, section)
 		}
+	}
+	if strings.Contains(section, "Every command for the operator goes as a card") {
+		t.Errorf("the delegated run still says every command goes by card:\n%s", section)
+	}
+	if !strings.Contains(sectionOff, "Every command for the operator goes as a card") {
+		t.Errorf("the switch-off section no longer reads as it did:\n%s", sectionOff)
+	}
+	// The paragraph stands after the cards and before the fallback. Both name
+	// the delegated list as the other way, so a command it carries is not filed
+	// as a bead.
+	cards := strings.Index(section, "a setup ask")
+	door := strings.Index(section, "Delegation is on here")
+	fallback := strings.Index(section, "A command that neither a card nor the delegated list carries")
+	if !(0 <= cards && cards < door && door < fallback) {
+		t.Errorf("the delegated run is not between the cards and the fallback (cards %d, paragraph %d, fallback %d):\n%s", cards, door, fallback, section)
+	}
+	// What the paragraph sends a reader to is there: the command it names
+	// prints the doc's section, and the role this yard's prime printed has the
+	// section it names.
+	if got := mustAs(t, st, "yardmaster", "docs", "users", "The yardmaster for the operator"); !strings.HasPrefix(got, "## The yardmaster for the operator\n") {
+		t.Errorf("the paragraph names `yardr docs users \"The yardmaster for the operator\"`, which prints:\n%s", got)
+	}
+	if !strings.Contains(out, "**Run an operator's command for them.**") {
+		t.Errorf("the paragraph names the role's \"Run an operator's command for them\", and the yardmaster's role has no such section:\n%s", out)
 	}
 	// After the role and before the rest of the prime. The role's lines it
 	// supersedes are still in the role, and nothing after the section says
@@ -618,11 +669,18 @@ func testPrimeCrewHostedYardHasNoTerminal(t *testing.T) {
 	}
 
 	// The JSON carries the same words, as it carries the role's.
-	var v struct {
-		NoTerminal string `json:"no_terminal"`
+	jsonRule := func() string {
+		t.Helper()
+		var v struct {
+			NoTerminal string `json:"no_terminal"`
+		}
+		if err := json.Unmarshal([]byte(prime("yardmaster", "--json")), &v); err != nil {
+			t.Fatalf("prime --json: %v", err)
+		}
+		return v.NoTerminal
 	}
-	if err := json.Unmarshal([]byte(prime("yardmaster", "--json")), &v); err != nil || v.NoTerminal != noTerminalRule {
-		t.Errorf("prime --json no_terminal = %q, %v, want the section's words", v.NoTerminal, err)
+	if got := jsonRule(); got != noTerminalDelegatedRule {
+		t.Errorf("prime --json no_terminal = %q, want the section's words", got)
 	}
 
 	// A builder's prime has no role text to supersede and says nothing of it.
@@ -630,12 +688,33 @@ func testPrimeCrewHostedYardHasNoTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bead := mustAs(t, st, "jo", "prime", "--bead", b.ID); strings.Contains(bead, "No terminal") {
+	if bead := mustAs(t, st, "jo", "prime", "--bead", b.ID); strings.Contains(bead, "No terminal") || strings.Contains(bead, "Delegation is on here") {
 		t.Errorf("a builder's prime on a hosted yard carries the section:\n%s", bead)
+	}
+
+	// Said outright, on is the same yard as one that never said.
+	mustAs(t, st, "jo", "settings", "set", store.DelegationSetting, "true")
+	if got := prime("yardmaster"); got != out {
+		t.Errorf("delegation=true changed the hosted prime:\n%s\nwas:\n%s", got, out)
+	}
+	// The operator turned it off: the section reads as it did before there was a
+	// delegated run, for the yardmaster, for a member with no role and in the
+	// JSON, and the cards are all it names.
+	mustAs(t, st, "jo", "settings", "set", store.DelegationSetting, "false")
+	off := prime("yardmaster")
+	if want := strings.Replace(out, section, sectionOff, 1); off != want || off == out || strings.Contains(off, "Delegation is on here") {
+		t.Errorf("delegation=false did not give the section as it read before:\n%s\nwant:\n%s", off, want)
+	}
+	if got, want := prime("clerk"), strings.Replace(clerk, section, sectionOff, 1); got != want {
+		t.Errorf("a member with no role, delegation off:\n%s\nwant:\n%s", got, want)
+	}
+	if got := jsonRule(); got != noTerminalRule {
+		t.Errorf("delegation=false: prime --json no_terminal = %q, want the section's words without the paragraph", got)
 	}
 
 	// Unset again, the yard primes as before.
 	mustAs(t, st, "jo", "settings", "set", "hosted", "")
+	mustAs(t, st, "jo", "settings", "set", store.DelegationSetting, "")
 	if got := prime("yardmaster"); got != plain {
 		t.Errorf("unsetting hosted left the section:\n%s", got)
 	}

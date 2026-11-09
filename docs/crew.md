@@ -347,10 +347,13 @@ names its person and its slice.
   few first lines.
 - **Prime:** a new session reads `yardr prime --crew <name>`: its role, on a
   hosted yard a "No terminal" section after it (its people have no terminal,
-  so the yardmaster runs commands on the delegated list on the operator's
-  cited local mail when delegation is on; commands that need approval go by
-  card, and an operator-only command with no card or delegated path is filed
-  as a bead instead of mailed as text to type; the `hosted` setting in
+  so requests needing the operator's approval go by card; where delegation is
+  on, as it is on a hosted yard unless its operator turned it off, a command
+  on the delegated list that the operator asked for in a local mail to the
+  yardmaster is the yardmaster's to run, with no card and no bead filed for
+  one, citing that mail, and the yard tells the operator after it ran; a
+  command that neither a card nor the delegated list carries is filed as a
+  bead and never mailed as text to type; the `hosted` setting in
   [configuration.md](configuration.md#settings)), how the operator wants
   agents to work with them when the yard says
   ([configuration.md](configuration.md#how-agents-work-with-you)), the
