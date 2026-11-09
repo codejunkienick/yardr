@@ -104,7 +104,7 @@ func strongSetOf(argv []string) (name string, sets map[string]string) {
 // strongChanged names what a card of the strong few changes, for its weight.
 func strongChanged(sets map[string]string) []string {
 	var out []string
-	for _, c := range []struct{ key, what string }{{"prompt", "its prompt"}, {"cmd", "its command"}, {"preset", "its permission flags"}} {
+	for _, c := range []struct{ key, what string }{{"prompt", "its prompt"}, {"cmd", "its command"}, {"kind", "its kind"}, {"model", "its model"}, {"dir", "its directory"}, {"preset", "its permission flags"}} {
 		if _, ok := sets[c.key]; ok {
 			out = append(out, c.what)
 		}
@@ -120,11 +120,18 @@ func strongPreset(subject, kind, label string) (Permission, error) {
 	p, ok := HarnessPreset(kind, label)
 	switch {
 	case !ok:
-		return Permission{}, fmt.Errorf("%s: %s has no permission preset %q (it has: %s): name a strong one as preset=<preset> in its one-word form (a dash for a space), as yardr harness show %s lists them", subject, kind, label, or(strings.Join(HarnessPresetLabels(kind), ", "), "none"), kind)
+		return Permission{}, noPreset(subject, kind, label, "a strong one")
 	case !p.Strong:
 		return Permission{}, fmt.Errorf("%s: the %s preset %s does not skip the agent's permission prompts, so it is no card of the strong few: %s. A card carries a preset that never asks", subject, kind, p.Label, strongApart)
 	}
 	return p, nil
+}
+
+// noPreset refuses a permission preset that the kind does not have, in words
+// that name those it has. which says what the card takes of them: "a strong
+// one", or "one" where it takes any.
+func noPreset(subject, kind, label, which string) error {
+	return fmt.Errorf("%s: %s has no permission preset %q (it has: %s): name %s as preset=<preset> in its one-word form (a dash for a space), as yardr harness show %s lists them", subject, kind, label, or(strings.Join(HarnessPresetLabels(kind), ", "), "none"), which, kind)
 }
 
 // promptBefore is the text of the prompt file a definition holds now, as a
@@ -207,30 +214,41 @@ func quotedWords(words []string) string {
 	return strings.Join(quoted, " ")
 }
 
-// presetLines are the card's lines for a permission preset that never asks
-// set where the flags old stand now: the kind's agents, the flags they start
-// with now (and the preset they are, if they are one) and the preset's.
-func presetLines(kind string, old any, p Permission) []string {
+// presetLines are the card's lines for a permission preset set where the
+// flags old stand now: the agents of the kind was, the flags they start with
+// now (and the preset they are, if they are one) and the preset's, which are
+// of the kind they will be, kind (the card of the yardmaster's own entry can
+// change the kind beside it). The sentence that it skips permissions follows
+// the preset's Strong mark, the one rule of the cards and the leg.
+func presetLines(was, kind string, old any, p Permission) []string {
 	words := argWords(old)
 	now := quotedWords(words)
-	for _, q := range HarnessPresets[kind] {
+	for _, q := range HarnessPresets[was] {
 		if len(words) > 0 && slices.Equal(q.Args, words) {
 			now += " (the " + q.Label + " preset)"
 		}
 	}
-	return []string{
-		fmt.Sprintf("It starts %s (%s) agents with %s now.", kind, or(HarnessLabels[kind], kind), now),
-		fmt.Sprintf("It will start them with %s: the %s preset, %s.", quotedWords(p.Args), p.Label, p.Note),
-		"It skips permissions: it runs without asking for permission.",
+	will := "them"
+	if kind != was {
+		will = fmt.Sprintf("%s (%s) agents", kind, or(HarnessLabels[kind], kind))
 	}
+	lines := []string{
+		fmt.Sprintf("It starts %s (%s) agents with %s now.", was, or(HarnessLabels[was], was), now),
+		fmt.Sprintf("It will start %s with %s: the %s preset, %s.", will, quotedWords(p.Args), p.Label, p.Note),
+	}
+	if p.Strong {
+		lines = append(lines, "It skips permissions: it runs without asking for permission.")
+	}
+	return lines
 }
 
 // strongBack is the command that takes a card of the strong few back, in the
 // terminal's words: each key the card set, put back to what the config old
 // held, or unset where it held none. Args are restored as their flags rather
 // than a preset label, since the kind may come from default_kind and change
-// before someone takes the card back.
-func strongBack(command, name string, old map[string]any, set map[string]any) string {
+// before someone takes the card back. flags are words of the terminal's own
+// that put back what no config key holds (the directory of a member, --dir).
+func strongBack(command, name string, old map[string]any, set map[string]any, flags ...string) string {
 	// key=value as one word: bare where the value is, the whole word quoted
 	// otherwise, as the terminal reads it.
 	word := func(k, v string) string {
@@ -241,7 +259,7 @@ func strongBack(command, name string, old map[string]any, set map[string]any) st
 	}
 	back := []string{"yardr " + command, name}
 	var unset []string
-	for _, key := range []string{"prompt", "cmd", "args"} {
+	for _, key := range []string{"prompt", "cmd", "args", "kind", "model"} {
 		if _, ok := set[key]; !ok {
 			continue
 		}
@@ -264,6 +282,7 @@ func strongBack(command, name string, old map[string]any, set map[string]any) st
 			back = append(back, word(key, value))
 		}
 	}
+	back = append(back, flags...)
 	for _, key := range unset {
 		back = append(back, "--unset", key)
 	}

@@ -54,9 +54,37 @@ func TestRunAskCrewAddApproves(t *testing.T) {
 		t.Fatalf("weight = %+v, want one code line", r.Ask.Weight)
 	}
 	joined := strings.Join(r.Ask.Run.Does, "\n")
-	for _, want := range []string{"porter", "codex", "opus", "approve for me", dir, "It skips permissions: it runs without asking for permission."} {
+	for _, want := range []string{"porter", "codex", "opus", "approve for me", dir} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("card does not say %q:\n%s", want, joined)
+		}
+	}
+	// Approve for me is automatic review inside a sandbox: the Strong mark
+	// leaves it out (design yardr-m90n 3.5), and the card follows the mark.
+	const skips = "It skips permissions: it runs without asking for permission."
+	if strings.Contains(joined, skips) {
+		t.Errorf("card says approve for me skips permissions:\n%s", joined)
+	}
+	// A preset the mark names earns the sentence, whatever its note says.
+	hauler := y.ask(t, crewAddAsk(role, "crew", "add", "hauler", "kind=claude", "preset=bypass", "dir="+dirInput), "yardmaster")
+	if bypass := strings.Join(y.asked(t, hauler).Ask.Run.Does, "\n"); !strings.Contains(bypass, skips) {
+		t.Errorf("card for the bypass preset does not say it skips permissions:\n%s", bypass)
+	}
+	// The mark answers for a preset the table names; a label it does not
+	// name keeps the flags check, which fails closed.
+	for _, c := range []struct {
+		kind string
+		p    Permission
+		want bool
+	}{
+		{"codex", Permission{Label: "approve for me", Args: []string{"--approve-for-me"}}, false},
+		{"codex", Permission{Label: "bypass", Args: []string{"--dangerously-bypass-approvals-and-sandbox"}}, true},
+		{"codex", Permission{Label: "not in the table", Args: []string{"--yolo"}}, true},
+		{"codex", Permission{Label: "not in the table", Args: []string{"--approve-for-me"}}, false},
+		{"codex", Permission{Label: "not in the table", Note: "never asks"}, true},
+	} {
+		if got := presetSkips(c.kind, c.p); got != c.want {
+			t.Errorf("presetSkips(%s, %+v) = %v, want %v", c.kind, c.p, got, c.want)
 		}
 	}
 	if r.Ask.Run.Description != "Add a new crew member without replacing one" {

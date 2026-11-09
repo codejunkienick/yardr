@@ -443,6 +443,15 @@ func TestDelegatedRefusals(t *testing.T) {
 		}, "preset auto skips the agent's permission prompts"},
 		"the yardmaster's own":       {func() error { return setCrew("yardmaster", map[string]any{"kind": "codex"}) }, "change kind on crew member yardmaster"},
 		"the yardmaster's own model": {func() error { return setCrew("yardmaster", map[string]any{"model": "opus"}) }, "change model on crew member yardmaster"},
+		"the yardmaster's own dir": {func() error {
+			r, err := y.api.GetCrew(y.ctx, "yardmaster")
+			if err != nil {
+				return err
+			}
+			r.Dir = y.dir
+			_, err = y.api.PutCrew(ctx, *r, "yardmaster")
+			return err
+		}, "change dir on crew member yardmaster"},
 		"a new crew member": {func() error {
 			_, err := y.api.PutCrew(ctx, store.CrewMember{Name: "scribe", Runner: "herdr"}, "yardmaster")
 			return err

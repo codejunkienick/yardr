@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -51,7 +52,7 @@ func launcherPath(shell string) (string, error) {
 		dir = d
 	}
 	p := filepath.Join(dir, filepath.Base(shell))
-	if err := os.WriteFile(p, fmt.Appendf(nil, launcher, shell), 0o755); err != nil {
+	if err := writeLauncher(p, shell); err != nil {
 		return "", err
 	}
 	first := p + "-first"
@@ -63,6 +64,22 @@ func launcherPath(shell string) (string, error) {
 	}
 	launchers[shell] = p
 	return p, nil
+}
+
+// writeLauncher writes the launcher for shell at path, holding syscall.ForkLock
+// for reading from the open to the close. Linux does not start a file while
+// any process holds it open for writing (text file busy), and a fork made
+// beside this write carries its descriptor until the child execs: if that
+// fork came while the file was open, the first run of the launcher, which
+// follows, would find it still held. A fork takes ForkLock for writing, so
+// while the file is open under the read hold no fork can begin, and no child
+// is made holding it (the pattern of holdStray in contrib/assembly, yardr-436j).
+// The hold is the write alone: starting a process takes the lock for writing
+// too, so the first run must not be under it.
+func writeLauncher(path, shell string) error {
+	syscall.ForkLock.RLock()
+	defer syscall.ForkLock.RUnlock()
+	return os.WriteFile(path, fmt.Appendf(nil, launcher, shell), 0o755)
 }
 
 func link(to, path, body string) error {

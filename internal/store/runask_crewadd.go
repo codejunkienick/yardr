@@ -193,15 +193,11 @@ func (w *wtx) crewAddProposal(run AskRun) (crewAddSpec, error) {
 	if kind == "" {
 		return crewAddSpec{}, fmt.Errorf("--run takes %s: it names no kind: name the harness kind as kind=<kind>, as yardr harness list names them", crewAddUse)
 	}
-	if _, ok := HarnessLabels[kind]; !ok {
-		have := mapsKeys(HarnessLabels)
-		slices.Sort(have)
-		return crewAddSpec{}, fmt.Errorf("crew member %s: kind %q is no harness kind the yard knows (it knows: %s): name one as kind=<kind>", name, kind, strings.Join(have, ", "))
+	if err := checkHarnessKind("crew member "+name, kind); err != nil {
+		return crewAddSpec{}, err
 	}
-	// The model goes to the agent as the value of its model flag: a word
-	// that reads as a flag of its own is a free arg by another name.
-	if strings.HasPrefix(model, "-") {
-		return crewAddSpec{}, fmt.Errorf("crew member %s: %q is no model name: free args are not proposed on this card", name, model)
+	if err := checkCardModel("crew member "+name, model); err != nil {
+		return crewAddSpec{}, err
 	}
 	spec := crewAddSpec{name: name, kind: kind, model: model, role: run.Role}
 	if preset != "" && PresetLabel(preset) != "none" {
@@ -250,6 +246,27 @@ func (w *wtx) crewAddProposal(run AskRun) (crewAddSpec, error) {
 	}
 	spec.dir = clean
 	return spec, nil
+}
+
+// checkHarnessKind refuses a kind the yard has no harness for, in words that list
+// those it has. subject names the member ("crew member porter").
+func checkHarnessKind(subject, kind string) error {
+	if _, ok := HarnessLabels[kind]; ok {
+		return nil
+	}
+	have := mapsKeys(HarnessLabels)
+	slices.Sort(have)
+	return fmt.Errorf("%s: kind %q is no harness kind the yard knows (it knows: %s): name one as kind=<kind>", subject, kind, strings.Join(have, ", "))
+}
+
+// checkCardModel refuses a model that a card cannot carry. The model goes to the
+// agent as the value of its model flag: a word that reads as a flag of its
+// own is a free arg by another name.
+func checkCardModel(subject, model string) error {
+	if strings.HasPrefix(model, "-") {
+		return fmt.Errorf("%s: %q is no model name: free args are not proposed on this card", subject, model)
+	}
+	return nil
 }
 
 // knownDir is dir, absolute and with its symlinks resolved, when it is a
@@ -331,10 +348,25 @@ func crewRoleHidden(r rune) bool {
 	return unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) || r == '\u2028' || r == '\u2029'
 }
 
+// presetSkips says whether starting kind's agents with the permission preset p
+// runs them without asking, which a card says in plain words, since approval
+// then starts an agent that never stops to ask. A preset the table names
+// answers by its Strong mark, the one rule the delegated leg and the cards of
+// the strong few read too (design yardr-m90n 3.5), so that no card can say
+// otherwise of a preset: codex's approve for me is automatic review inside a
+// sandbox, which the mark leaves out. A label the table does not name falls
+// back to the flags themselves (presetSkipsPermissions), which fail closed.
+func presetSkips(kind string, p Permission) bool {
+	if known, ok := HarnessPreset(kind, p.Label); ok {
+		return known.Strong
+	}
+	return presetSkipsPermissions(p)
+}
+
 // presetSkipsPermissions says whether a permission preset runs without
-// asking: its flags or its own description say so. The card says it in
-// plain words where it does, since approval then starts an agent that
-// never stops to ask.
+// asking: its flags or its own description say so. It is the check for flags
+// that name no preset of the table, a group add's free args among them, and
+// takes the flags the design lists as skipping (3.5).
 func presetSkipsPermissions(p Permission) bool {
 	note := strings.ToLower(p.Note)
 	for _, s := range []string{"never asks", "without asking", "asks nothing", "no approval", "auto-approve"} {
@@ -344,7 +376,7 @@ func presetSkipsPermissions(p Permission) bool {
 	}
 	for _, a := range p.Args {
 		switch a {
-		case "--approve-for-me", "--dangerously-skip-permissions", "--dangerously-bypass-approvals-and-sandbox", "--yolo", "--always-approve", "--trust-all-tools", "--disable-approval", "--auto":
+		case "--dangerously-skip-permissions", "--dangerously-bypass-approvals-and-sandbox", "--yolo", "--always-approve", "--trust-all-tools", "--disable-approval", "--auto":
 			return true
 		}
 		if strings.HasPrefix(a, "--trust-tools") {
@@ -400,7 +432,7 @@ func (w *wtx) crewAddCard(run AskRun, asking bool) (AskRun, error) {
 			shownArgs = strings.Join(args, " ")
 		}
 		does = append(does, fmt.Sprintf("Permissions: %s — passes %s; %s.", spec.preset, shownArgs, spec.presetNote))
-		if presetSkipsPermissions(Permission{Label: spec.preset, Args: spec.presetArgs, Note: spec.presetNote}) {
+		if presetSkips(spec.kind, Permission{Label: spec.preset, Args: spec.presetArgs, Note: spec.presetNote}) {
 			does = append(does, "It skips permissions: it runs without asking for permission.")
 		}
 		seenMap["permission preset "+spec.kind+" "+PresetLabel(spec.preset)] = seen(spec.preset, spec.presetArgs, spec.presetNote)

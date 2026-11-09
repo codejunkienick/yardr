@@ -221,8 +221,17 @@ var crewDelegates = map[string]bool{"kind": true, "model": true, "args": true, "
 // member name: never on the yardmaster's own entry, whose teller would be
 // the changed party (3.3).
 func (w *wtx) crewDelegate(name, key string) bool {
+	own, err := w.ownEntry(name)
+	return err == nil && crewDelegates[key] && !own
+}
+
+// ownEntry says whether name is the yardmaster's own crew entry, the one the
+// delegated leg never carries (crewDelegate). The card of crew set is the only
+// door to its kind, model and directory, and asks the same question of the
+// same setting, so that the two cannot name different entries.
+func (w *wtx) ownEntry(name string) (bool, error) {
 	ym, err := yardmasterIn(w.Tx)
-	return err == nil && crewDelegates[key] && name != ym
+	return err == nil && name == ym, err
 }
 
 // presetOnly refuses args that are not exactly one named permission

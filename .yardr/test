@@ -240,6 +240,22 @@ listed() { [ -z "$listing" ] || echo "$listing"; }
 # test), that bead is noted with the new log line and nothing is filed. Where
 # the yardr CLI is not there (CI, a fork) the log line stays the record.
 # AGENTS.md says what a hand reading old lines files.
+# A failure the disk caused is no flake (yardr-4pwj). On 9 Nov 2026 the data
+# volume filled, and every run that linked a binary failed "link: mapping
+# output file failed: no space left on device": two tests failed that way
+# before any of their own logic, passed on rerun once space came back, and
+# were logged as flaky and one filed, which sent a builder to look in a test
+# for what the machine did. A failed test whose block in the first run's
+# output (its `--- FAIL:` line and the lines under it) holds `no space left
+# on device`, or a failed package with no named test whose output holds it,
+# is named as the disk's in one line beside the rerun's result, with the df
+# of the volume the run writes to (where the gate keeps its own files), and
+# is left out of the flaky line, the log and the filing. A test
+# that failed for another reason in the same run is a flake as before, and a
+# run with nothing else prints no flaky line. The failed packages still run
+# again: a rerun whose output holds the text fails the step as a package that
+# fails twice does, with a line for the disk's state, and nothing is run a
+# third time or logged.
 # Do not retry more than once: a cache retry consumes the one retry, and a
 # second failure stands.
 # A step's output is kept in its log and printed. Outside the race worker it
@@ -854,17 +870,64 @@ again() {
               # package.
               tests=$(flakystuck "$log" | sort -u || true)
             fi
+            # What this run printed for each failed test, for the log line:
+            # the rerun replaces it, and no other copy is kept. What the disk
+            # failed is not in it (flakyfails).
+            fails=$(flakyfails "$log" || true)
+            # What the disk failed is no flake (yardr-4pwj): a test whose block
+            # holds flaky_disk, or a package with no named test whose output
+            # holds it. The failed packages still run again, but
+            # a pass says nothing of those tests, and a flaky line, a log line or
+            # a bead for one sends a reader to a test for what the machine did.
+            # A test name is only unique in its package: keep the package with
+            # every disk block while removing its exact test from the flakes.
+            diskpairs=$(flakyfails --pairs "$log" | sort -u || true)
+            disktests=$(diskfailed "$log" || true)
+            diskpackages=$(diskfailed --packages "$log" || true)
+            diskall=0
+            if [ "$disktests" = "-" ]; then
+              disktests=
+              [ -n "$diskpackages" ] || diskall=1
+            fi
+            # The packages that are still flaky: those the disk failed and
+            # nothing else did are not.
+            flakypkgs=$pkgs
+            set -f
+            diskpkgs=
+            if [ -n "$disktests$diskpackages" ]; then
+              diskpkgs=$(printf '%s\n%s\n' "$diskpackages" "$diskpairs" | awk 'NF == 1 { print $1 } NF > 1 { print $2 }' | sort -u || true)
+            fi
+            if [ "$diskall" = 1 ]; then
+              tests=
+              flakypkgs=
+            elif [ -n "$diskpairs" ]; then
+              tests=$(for t in $tests; do
+                other=0
+                for p in $(pkgof "$log" "$t"); do
+                  if ! inlist "$t $p" "$diskpairs"; then other=1; break; fi
+                done
+                if [ "$other" = 1 ]; then echo "$t"; fi
+              done)
+            fi
             tests_line=$(printf '%s\n' "$tests" | tr '\n' ' ' | sed 's/ $//' || true)
             # Each failed test's packages, read from this run's log before
             # the rerun replaces it: one "test pkg" line per package whose
             # output names the test, for the Flaky bead's title.
             # Test names are data, not shell glob patterns.
-            set -f
-            tpkgs=$(for t in $tests; do pkgof "$log" "$t" | awk -v t="$t" '{ print t " " $0 }'; done)
+            tpkgs=$(for t in $tests; do
+              for p in $(pkgof "$log" "$t"); do
+                if ! inlist "$t $p" "$diskpairs"; then echo "$t $p"; fi
+              done
+            done)
+            if [ "$diskall" != 1 ] && [ -n "$diskpkgs" ]; then
+              flakypkgs=$(for p in $pkgs; do
+                if ! inlist "$p" "$diskpkgs" || printf '%s\n' "$tpkgs" | awk -v p="$p" '$2 == p { found = 1 } END { exit !found }'; then
+                  echo "$p"
+                fi
+              done)
+            fi
             set +f
-            # What this run printed for each failed test, for the log line:
-            # the rerun replaces it, and no other copy is kept.
-            fails=$(flakyfails "$log" || true)
+            flaky_pkgs_line=$(printf '%s\n' "$flakypkgs" | tr '\n' ' ' | sed 's/ $//' || true)
             # The same flags, the failed packages only: the prefix up to and
             # including "test" (env ... go test), then the flags (what after
             # test starts with -), then the failed packages. Packages and
@@ -893,11 +956,30 @@ again() {
             # The rerun ran only the failed packages: its passes add to the
             # first run's.
             step_ok=$((step_ok + $(okcount "$log")))
-            if [ "$rc" = 0 ]; then
+            # The disk is named beside the rerun's result, in one line each for
+            # the first run and the rerun, with how full the volume is. A rerun
+            # that hit it fails the step as one that failed twice does (rc is
+            # not 0): there is no third run and no flaky line to write.
+            if [ "$diskall" = 1 ]; then
+              echo "test: the disk is full, not a flaky test: $(printf '%s\n' "$pkgs" | briefly) failed the first run with \"$flaky_disk\"$(diskstate "$log")"
+            elif [ -n "$disktests$diskpackages" ]; then
+              disknames=$disktests
+              for p in $diskpackages; do
+                disknames="${disknames}${disknames:+
+}package $p"
+              done
+              echo "test: the disk is full, not a flaky test: $(printf '%s\n' "$disknames" | briefly) failed the first run with \"$flaky_disk\"$(diskstate "$log")"
+            fi
+            rerundisk=$(diskfailed "$log" || true)
+            rerundiskpkgs=$(diskfailed --packages "$log" || true)
+            if [ "$rc" != 0 ] && [ -n "$rerundisk$rerundiskpkgs" ]; then
+              echo "test: the disk is full: the rerun failed with \"$flaky_disk\"$(diskstate "$log")"
+            fi
+            if [ "$rc" = 0 ] && [ -n "$tests$flakypkgs" ]; then
               if [ -n "$tests" ]; then
-                flaky="$tests_line ($pkgs_line) passed on rerun"
+                flaky="$tests_line ($flaky_pkgs_line) passed on rerun"
               else
-                flaky="$pkgs_line passed on rerun"
+                flaky="$flaky_pkgs_line passed on rerun"
               fi
               echo "test: flaky: $flaky"
               # The same line in the log the repo owns: date, short sha, and
@@ -963,7 +1045,7 @@ again() {
                     if [ "$have_yardr" = 1 ] && [ "${sightings:-0}" -ge 2 ]; then
                       handled="$handled $root "
                       pkg=$(printf '%s\n' "$tpkgs" | awk -v t="$t" '$1 == t { printf "%s%s", sep, $2; sep = " " } END { printf "\n" }')
-                      [ -n "$pkg" ] || pkg=$pkgs_line
+                      [ -n "$pkg" ] || pkg=$flaky_pkgs_line
                       flakyfile "$t" "$pkg" "$flakylog" "$depot" "$flakyline"
                     fi
                   fi
@@ -1041,6 +1123,10 @@ pkgof() {
 # kept (flakyfails), this separator and those lines. No head holds the
 # separator: test names and package paths have no spaces.
 flaky_sep=' | '
+# flaky_disk is the text a test's output holds when the disk it wrote to was
+# full: what Go prints for ENOSPC, which a failed build, a link or a file a test
+# wrote all end in. Only that exact text says the disk failed the test.
+flaky_disk='no space left on device'
 # flakyfails prints, on one line, what a go test log ($1) holds for each test
 # that failed, for the flaky log: a block per `--- FAIL:` line, that line and
 # the lines under it, which go indents deeper than it (a subtest's report
@@ -1074,13 +1160,35 @@ flaky_sep=' | '
 # panic line and running tests, five at most) follows the failed tests' blocks
 # when the log holds both; without it, the one-line log form above, which
 # keeps the failed tests alone.
+# A block any of whose lines holds flaky_disk (not only the six kept) is the
+# disk's and not the test's: the log line leaves it out, and with --disk the
+# function prints the names of all such tests, one a line, in place of the
+# blocks. With --pairs it prints each such test beside its package, since a test
+# name can occur in two packages and only one of them may have hit the disk. A
+# parent's block holds its subtests', so a parent of a subtest that hit the disk
+# is named with it. The 20 blocks the log line keeps are the first 20 that are
+# no disk's, as tens of tests fail on a full disk and the one that failed for
+# its own reason may be behind them; the FAILED summary keeps the first 20 blocks.
 flakyfails() {
   human=0
+  disk=0
+  pairs=0
   if [ "$1" = "--human" ]; then human=1; shift; fi
-  LC_ALL=C awk -v sep="$flaky_sep" -v human="$human" '
+  if [ "$1" = "--disk" ]; then disk=1; shift; fi
+  if [ "$1" = "--pairs" ]; then pairs=1; disk=1; shift; fi
+  LC_ALL=C awk -v sep="$flaky_sep" -v human="$human" -v disk="$disk" -v pairs="$pairs" -v text="$flaky_disk" '
     BEGIN {
       br = (human ? "\n" : "\\n")
       if (human) sep = "\n"
+      start = 1
+    }
+    function finish(result,    fields, i) {
+      if (result ~ /^FAIL[ \t]+[^ \t]+/) {
+        split(result, fields, /[ \t]+/)
+        for (i = start; i <= nb; i++) if (hit[i]) print name[i], fields[2]
+      }
+      start = nb + 1
+      sp = 0
     }
     # A cut by bytes can land inside a UTF-8 character: the bytes after its
     # first are 0x80-0xBF, and no character starts with one. So the head backs
@@ -1096,6 +1204,7 @@ flakyfails() {
       return substr(s, 1, h) "..." substr(s, t)
     }
     function keep(b, s) {
+      if (index(s, text)) hit[b] = 1
       if (cnt[b] >= 6) return
       sub(/[ \t\r]+$/, "", s)
       match(s, /^ */)
@@ -1109,6 +1218,10 @@ flakyfails() {
     }
     /^ +$/ { next }
     {
+      if (pairs && /^(ok|FAIL|\?)[ \t]+[^ \t]+/) {
+        finish($0)
+        next
+      }
       match($0, /^ */)
       depth = RLENGTH
       if ($0 ~ /^panic: / && $0 !~ /^panic: test timed out/) {
@@ -1116,9 +1229,12 @@ flakyfails() {
       }
       while (sp > 0 && lvl[stack[sp]] >= depth) sp--
       for (j = 1; j <= sp; j++) keep(stack[j], $0)
-      if ($0 ~ /^ *--- FAIL: / && nb < 20) {
+      if ($0 ~ /^ *--- FAIL: /) {
         nb++
         lvl[nb] = depth
+        name[nb] = $0
+        sub(/.*--- FAIL: /, "", name[nb])
+        sub(/ .*/, "", name[nb])
         keep(nb, $0)
         stack[++sp] = nb
       }
@@ -1152,8 +1268,13 @@ flakyfails() {
       }
     }
     END {
+      if (pairs) exit
+      if (disk) {
+        for (k = 1; k <= nb; k++) if (hit[k]) print name[k]
+        exit
+      }
       if (nb) {
-        for (k = 1; k <= nb; k++) out = out (k > 1 ? sep : "") txt[k]
+        for (k = 1; k <= nb && m < 20; k++) if (human || !hit[k]) out = out (m++ ? sep : "") txt[k]
         # For a human the timeout block follows the blocks of the failed
         # tests: the panic line says that a package timed out, and only its
         # running tests say what it was in. The log line keeps the failed
@@ -1242,6 +1363,65 @@ flakystuck() {
       }
     }
   ' "$1"
+}
+# diskfailed prints what a go test log ($1) shows the disk failed: the names of
+# tests whose blocks hold flaky_disk, or, with --packages, packages whose failed
+# output holds it and has no named test failure. Where no test failed by name
+# and the kept failure lines hold it but no package result names it, a hyphen
+# stands for the failure as a whole. Nothing for any other failure.
+diskfailed() {
+  if [ "$1" = "--packages" ]; then
+    shift
+    awk -v text="$flaky_disk" '
+      function finish(result,    fields) {
+        if (result ~ /^FAIL[ \t]+[^ \t]+/ && !named && hit) {
+          split(result, fields, /[ \t]+/)
+          print fields[2]
+        }
+        named = hit = 0
+      }
+      /^(ok|FAIL|\?)[ \t]+[^ \t]+/ { finish($0); next }
+      {
+        if ($0 ~ /^ *--- FAIL: /) named = 1
+        if (index($0, text)) hit = 1
+      }
+    ' "$1" | sort -u
+  elif [ -z "$(sed -n 's/.*--- FAIL: \([^ ][^ ]*\).*/\1/p' "$1" | head -n 1)" ]; then
+    case $(flakyfails "$1" || true) in *"$flaky_disk"*) echo - ;; esac
+  else
+    flakyfails --disk "$1" | sort -u
+  fi
+}
+# inlist says whether the word $1 is a line of the text $2. It is a literal
+# match: test names and package paths hold characters a pattern would read.
+inlist() { printf '%s\n' "$2" | grep -qxF -- "$1"; }
+# briefly prints the lines it is given on one line, five of them at most and
+# then how many more: a full disk fails every package and tens of tests, and the
+# line it is named in is read by a person.
+briefly() {
+  awk '
+    NR <= 5 { out = out (NR > 1 ? " " : "") $0 }
+    END { if (NR > 5) out = out " and " NR - 5 " more"; print out }
+  '
+}
+# diskstate prints, in brackets and led by a space, how full the volume is that
+# the file $1 is on: the gate's own log, which stands in the temporary directory
+# where a go build links its binaries. It says the mount point, what is free of
+# what the volume holds and what share is used, from POSIX df in KiB, which
+# reads alike on Linux and macOS, and nothing where df says nothing.
+diskstate() {
+  df -Pk "$(dirname "$1")" 2>/dev/null | awk '
+    function human(k) {
+      if (k >= 1048576) return sprintf("%.1f GiB", k / 1048576)
+      if (k >= 1024) return sprintf("%.0f MiB", k / 1024)
+      return k " KiB"
+    }
+    NR == 2 {
+      mount = $6
+      for (i = 7; i <= NF; i++) mount = mount " " $i
+      printf " (%s has %s free of %s, %s used)", mount, human($4), human($2), $5
+    }
+  ' || true
 }
 # flakylines prints the lines of the flaky log ($2) that name a test ($1),
 # in their head: behind the separator are the failing lines of the tests the

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -358,7 +359,15 @@ func TestRunAskStrongSetRefusals(t *testing.T) {
 		{"group set reviewers cmd=./x.sh", "cmd"},
 		{"group set builders preset=bypass", "args"},
 		{"group set reviewers prompt=/etc/hosts", "the ask carries no prompt text"},
-		{"crew set clerk preset=bypass kind=claude", "--run takes " + crewSetUse + ": kind is no part of this card, which carries prompt, preset and nothing else"},
+		{"crew set clerk preset=bypass kind=claude", "kind is on this card for the yardmaster's own entry alone, which the delegated leg never carries: " + strongApart},
+		{"crew set clerk model=opus", "model is on this card for the yardmaster's own entry alone"},
+		{"crew set clerk dir=/yard", "dir is on this card for the yardmaster's own entry alone"},
+		{"crew set yardmaster preset=bypass peers=airy", "--run takes " + crewSetUse + ": peers is no part of this card, which carries prompt, preset, kind, model, dir and nothing else"},
+		{"crew set yardmaster kind=nosuch", `kind "nosuch" is no harness kind the yard knows`},
+		{"crew set yardmaster kind=pi preset=auto", `pi has no permission preset "auto" (it has: none)`},
+		{"crew set yardmaster model=--yolo", `"--yolo" is no model name`},
+		{"crew set yardmaster dir=yard", `dir "yard" is no absolute directory`},
+		{"crew set yardmaster preset=yolo", `claude has no permission preset "yolo"`},
 		{"crew set clerk preset=bypass peers=airy", "peers is no part of this card"},
 		{"crew set clerk prompt=/yard/x.md cmd=./x.sh", "cmd is no part of this card"},
 		{"crew set clerk preset=bypass --unset env_file", "crew set with --unset is no part of this card"},
@@ -368,7 +377,6 @@ func TestRunAskStrongSetRefusals(t *testing.T) {
 		{"crew set clerk preset=yolo", `codex has no permission preset "yolo"`},
 		// A grant, and what the grants row refuses, are the grants row's.
 		{"crew set clerk --unset prompt", "prompt is the operator's alone, typed in a terminal and never proposed as a run ask"},
-		{"crew set clerk kind=claude", "kind is the operator's alone, typed in a terminal and never proposed as a run ask"},
 	} {
 		if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", c.command), "yardmaster"); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("--run %q = %v, want %q", c.command, err, c.want)
@@ -487,6 +495,74 @@ func TestRunAskCrewSetCardsTheYardmastersOwnEntry(t *testing.T) {
 	_, err = y.AddAsk(y.ctx, y.bead, groupAddAsk(rewritten, "crew", "set", "yardmaster", "prompt="+saved, "preset=bypass"), "yardmaster")
 	if err == nil || !strings.Contains(err.Error(), "is one the yard wrote when it approved a prompt") {
 		t.Errorf("a proposal naming the rewritten prompt file = %v, want it refused", err)
+	}
+	// The rest of the own entry rides the same row, which the leg never
+	// carries for it: its kind, its model, its directory and a preset that
+	// asks as it did, which another member's card refuses. The preset is one
+	// of the kind the agents will be, not of the one they are.
+	elsewhere := filepath.Join(y.Store.home, "elsewhere")
+	if err := os.MkdirAll(elsewhere, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(elsewhere)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "dir="+elsewhere, "model=opus", "preset=approve-for-me", "kind=codex"), "yardmaster")
+	r = y.asked(t, seq)
+	if want := []string{"crew", "set", "yardmaster", "preset=approve-for-me", "kind=codex", "model=opus", "dir=" + elsewhere}; !slices.Equal(r.Ask.Run.Argv, want) {
+		t.Errorf("stored command = %q, want %q", r.Ask.Run.Argv, want)
+	}
+	if len(r.Ask.Weight) != 1 || r.Ask.Weight[0].Class != WeightCode || !StrongWeight(r.Ask.Weight) ||
+		!strings.Contains(r.Ask.Weight[0].Line, "its kind, its model, its directory and its permission flags of the crew member yardmaster") {
+		t.Fatalf("weight = %+v, want one strong code line naming what changes", r.Ask.Weight)
+	}
+	strongHas(t, r.Ask.Run.Does,
+		"changes the crew member yardmaster",
+		"It starts claude (Claude Code) agents now.", "It will start codex (Codex) agents.",
+		"It starts them with the agent's own default model now.", "It will start them with the model opus.",
+		"It works in /yard now.", "It will work in "+resolved+".",
+		`It starts claude (Claude Code) agents with "--dangerously-skip-permissions" (the bypass preset) now.`,
+		`It will start codex (Codex) agents with "--approve-for-me": the approve for me preset, automatic review inside a workspace-write sandbox.`)
+	if joined := strings.Join(r.Ask.Run.Does, "\n"); strings.Contains(joined, "It skips permissions") {
+		t.Errorf("a preset that asks is said to skip permissions:\n%s", joined)
+	}
+	if want := `yardr crew set yardmaster 'args=["--dangerously-skip-permissions"]' kind=claude --dir /yard --unset model`; r.Ask.Run.Back != want {
+		t.Errorf("taken back by %q, want %q", r.Ask.Run.Back, want)
+	}
+	if !RunArgvHeld(r.Ask.Run.Argv) || !RunArgvHeld([]string{"crew", "set", "yardmaster", "dir=/yard/x"}) || RunArgvHeld([]string{"crew", "set", "yardmaster", "kind=codex", "model=opus"}) {
+		t.Error("RunArgvHeld holds the wrong crew set: a directory is a path of the yard's machine, a kind and a model are not")
+	}
+	// The member as it stands is not asked about again: the kind lines say
+	// the flags stay where the card sets no preset.
+	if kindOnly := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "kind=pi"), "yardmaster"); kindOnly == seq {
+		t.Fatal("two asks share a seq")
+	} else {
+		strongHas(t, y.asked(t, kindOnly).Ask.Run.Does, "It will start pi (pi) agents.",
+			`It starts them with "--dangerously-skip-permissions", and this card does not change those flags.`)
+	}
+	done, err = y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	strongHas(t, strings.Split(done.Result, "\n"), "crew member yardmaster saved", "  --dir: /yard -> "+resolved,
+		`  args: ["--dangerously-skip-permissions"] -> ["--approve-for-me"]`, "  kind: claude -> codex", "  model: (not set) -> opus")
+	got, err = y.GetCrew(y.ctx, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Dir != resolved || got.Config["kind"] != "codex" || got.Config["model"] != "opus" || fmt.Sprint(got.Config["args"]) != "[--approve-for-me]" || got.Config["prompt"] != saved {
+		t.Errorf("yardmaster = %+v, want the card's kind, model, directory and flags and the prompt it had", got)
+	}
+	// A model on its own is what the gate lets anyone set of their own
+	// entry, so it needs no card: the row changes the mark of the gate's
+	// refusal and nothing else of it.
+	if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", "crew", "set", "yardmaster", "model=sonnet"), "yardmaster"); err == nil || !strings.Contains(err.Error(), "needs no approval: run it yourself") {
+		t.Errorf("a model on its own = %v, want it to need no approval", err)
+	}
+	// Another member's are the leg's or the operator's, on this card too.
+	if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", "crew", "set", "typed", "kind=codex", "preset=bypass"), "yardmaster"); err == nil || !strings.Contains(err.Error(), "kind is on this card for the yardmaster's own entry alone") {
+		t.Errorf("another member's kind = %v, want it refused", err)
 	}
 }
 

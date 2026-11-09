@@ -813,7 +813,7 @@ func TestBeadAskRunPeerSet(t *testing.T) {
 const (
 	groupAddUse = "yardr group add <name> --runner <runner> [--limit <n>] [--set k=v ...]"
 	groupSetUse = "yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset>"
-	crewSetUse  = "yardr crew set <name> prompt=<file> | preset=<preset>"
+	crewSetUse  = "yardr crew set <name> prompt=<file> | preset=<preset> | kind=<kind> | model=<model> | dir=<dir>"
 )
 
 // runCLI are the commands of internal/cli that the rows of the store's
@@ -893,7 +893,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 			"crew set yardmaster peers=airy",
 		},
 		groupSetUse: {"group set builders cmd=./deploy.sh"},
-		crewSetUse:  {"crew set yardmaster preset=bypass"},
+		crewSetUse:  {"crew set yardmaster preset=bypass", "crew set yardmaster kind=claude model=opus preset=auto"},
 		"yardr crew identity <name> --source <source> [--id <id>] [--key <key>]": {
 			"crew identity yardmaster --source crm --id u1 --key boss",
 		},

@@ -31,7 +31,7 @@ func RunCommands() []string {
 // what Settings withholds from a device), source add, whose file is a
 // path on the yard's machine, group add and group set, whose command,
 // directories and prompt file are the operator's machine too, crew set
-// where it names a prompt file, and pack apply with any word past the
+// where it names a prompt file or a directory, and pack apply with any word past the
 // pack's name, whose mappings are the operator's configuration as the
 // card's are (Mappings). Bead and UserAsks tell those words to a device of
 // the operator alone, and the sentence of an approval of one is marked for
@@ -42,7 +42,7 @@ func RunArgvHeld(argv []string) bool {
 		slices.Equal(argv[:2], []string{"source", "add"}) ||
 		slices.Equal(argv[:2], []string{"group", "add"}) ||
 		slices.Equal(argv[:2], []string{"group", "set"}) ||
-		slices.Equal(argv[:2], []string{"crew", "set"}) && slices.ContainsFunc(argv[2:], func(word string) bool { return strings.HasPrefix(word, "prompt=") })) ||
+		slices.Equal(argv[:2], []string{"crew", "set"}) && slices.ContainsFunc(argv[2:], func(word string) bool { return strings.HasPrefix(word, "prompt=") || strings.HasPrefix(word, "dir=") })) ||
 		len(argv) > 3 && slices.Equal(argv[:2], []string{"pack", "apply"})
 }
 

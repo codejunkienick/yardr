@@ -66,6 +66,18 @@ yard wrote is not one to name, since a new prompt is a new file. Nothing else
 rides in with them, and a running member keeps its session: the next one
 starts with the new prompt or flags.
 
+The yardmaster's own entry has more on that card, since what the yardmaster
+runs for the operator on their mail never carries it (`yardmaster_delegation`,
+[users.md](users.md#the-yardmaster-for-the-operator)): `crew set yardmaster kind=<kind>
+model=<model> dir=<dir>` with a `preset=<preset>` of any kind it has, strong
+or not, proposes its kind, model and directory (a directory under the yard's
+home or a depot) beside or instead of the prompt and flags. The card shows
+each as it stands and as it would be, takes the preset from the kind the
+agents will then be, and says that the agents skip permissions only where the
+preset does. Another member's kind, model and directory are not on the card:
+the yardmaster changes those on the operator's mail, or the operator types
+them. A model alone needs no card, since any member may set its own.
+
 The value of a key named like a secret (`token`, `secret`, `password`,
 `…_key`) is not printed. A running crew member keeps its session: what it may
 do (`open_threads`, `set_state`, `peers`), `--on`, `--max-age` and

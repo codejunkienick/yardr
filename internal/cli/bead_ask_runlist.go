@@ -170,19 +170,24 @@ const askRunList = `  peer add <name> <invite>
   crew set <name> open_threads=<sources> | set_state=<sources> | peers=<peers>
       a crew member may open threads or set the status of threads in the
       sources, or mail crew members of the peers
-  crew set <name> prompt=<file> | preset=<preset>
+  crew set <name> prompt=<file> | preset=<preset> | kind=<kind> | model=<model> | dir=<dir>
       a crew member's prompt, the yardmaster's own included, or the
       permission preset of its kind that never asks (a kind's presets
-      are listed by yardr harness show <kind>, and never free args): the
-      card shows the prompt now and the new one whole, the flags now and
-      the preset's (weighty, code), and approving sets exactly that; the
-      prompt is a file under the yard's home, named by prompt=<file>,
+      are listed by yardr harness show <kind>, and never free args); and,
+      for the yardmaster's own entry alone, which the delegated settings
+      never carry, its kind, its model, its directory (under the yard's
+      home or a depot) and any preset of the kind it will then have: the
+      card shows each now and as it will be, whole (weighty, code), the
+      prompt and the flags among them, and approving sets exactly that;
+      the prompt is a file under the yard's home, named by prompt=<file>,
       whose text the ask carries, read from it, and an approval is
       refused when the file holds other text by then; it writes that
       text to a read-only file of the yard's own, roles/<name>.<digest>.md,
       and sets it as the prompt, so a later change to the file named
       reaches no session, and a file the yard wrote is not one to name;
-      no other setting rides in with it
+      no other setting rides in with it, and another member's kind, model
+      and directory are the yardmaster's to run for the operator on their
+      mail
   group set <name> prompt=<file> | cmd=<command> | preset=<preset>
       the same for a group, and for an exec group's command (one word:
       the line is split at spaces); approving a prompt writes its carried

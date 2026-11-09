@@ -270,7 +270,11 @@ and `depot base`; `user set
 `--source`, optional `--unknown`, and the secret file the yard owns for the hook). Free
 args, `env_file`, `env_command`, a prompt, a group's `cmd`, the exec runner,
 the yardmaster's own entry, the switch, and a hook add with `--says`,
-`--makes`, `--map`, `--as` or a secret file of its own each refuse it.
+`--makes`, `--map`, `--as` or a secret file of its own each refuse it. A
+prompt, a group's `cmd`, a preset that skips permission prompts and, for the
+yardmaster's own entry, its kind, model, directory and any preset are cards
+instead: the yardmaster proposes them in a run ask (`group set`, `crew set`,
+[crew.md](crew.md)) and they run when the operator approves.
 
 Each run is told after it runs instead of approved before: the same write
 keeps a record of it (the command whole, the cited mail, what each setting

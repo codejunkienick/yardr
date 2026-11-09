@@ -188,6 +188,13 @@ func TestRunAskGroupAddHerdrHoldsThePrompt(t *testing.T) {
 			t.Errorf("card does not say %q:\n%s", want, joined)
 		}
 	}
+	// Automatic review inside a sandbox is no skipping of permissions (design
+	// yardr-m90n 3.5), so the flags check the card keeps for free args leaves
+	// --approve-for-me out, as crew add's reading of the Strong mark does.
+	review := y.ask(t, groupAddAsk("", "group", "add", "review-builders", "--runner", "herdr", "--set", "args=--approve-for-me"), "yardmaster")
+	if reviewed := strings.Join(y.asked(t, review).Ask.Run.Does, "\n"); !strings.Contains(reviewed, `It starts them with "--approve-for-me".`) || strings.Contains(reviewed, "It skips permissions") {
+		t.Errorf("a card for --approve-for-me:\n%s\nwant its flags and no skipped permissions", reviewed)
+	}
 	if got := r.Ask.Run.Seen["prompt "+yardFile]; len(got) != 64 {
 		t.Errorf("card's prompt fingerprint = %q, want the SHA-256 of the text", got)
 	}

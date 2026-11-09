@@ -193,7 +193,7 @@ func (w *wtx) groupSetCard(run AskRun, _ bool) (AskRun, error) {
 		does = append(does, fmt.Sprintf("Each session will run sh -c with %s, as its program stands when the session starts.", strconv.Quote(cmd)))
 	}
 	if _, ok := sets["preset"]; ok {
-		does = append(does, presetLines(spec.kind, spec.have.Config["args"], spec.preset)...)
+		does = append(does, presetLines(spec.kind, spec.kind, spec.have.Config["args"], spec.preset)...)
 	}
 	return AskRun{
 		Argv:   run.Argv,

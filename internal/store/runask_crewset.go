@@ -3,12 +3,17 @@
 // and set only on the operator's approval (design yardr-m90n 3.5), as
 // runask_groupset.go does for a group. It is the second row to begin with
 // crew set: the first is a member's grants (runask_crewgrant.go), which
-// answers errNotRow for words that name a prompt or a preset, and this row
-// for words that name neither. The yardmaster's own entry is proposable
-// here, and nowhere else: its prompt is the instructions it obeys and its
-// preset what it may do without asking, which no telling after the run can
-// police, since the teller is the changed party (3.3). The delegated leg
-// never carries that entry; a card shown to the operator is the door.
+// answers errNotRow for words that name a prompt, a preset or one of
+// crewOwnKeys, and this row for words that name none of them. The
+// yardmaster's own entry is proposable here, and nowhere else: its prompt is
+// the instructions it obeys and its preset what it may do without asking,
+// which no telling after the run can police, since the teller is the changed
+// party (3.3). The delegated leg never carries that entry; a card shown to
+// the operator is the door, and so it is the door to the rest of that entry
+// too, which the leg carries for every other member: its kind, model and
+// directory, and any preset of its kind (the strong ones are the card's for
+// every member). Words that name those for another member are refused where
+// the yard's records are read.
 //
 // A prompt rides as a crew add's does, beside argv (AskRun.Role), but as a
 // group set's names it: a file under the yard's home, held to the text at
@@ -28,11 +33,16 @@ import (
 )
 
 // crewSetUse is how a refusal names the crew set row of the strong few.
-const crewSetUse = "yardr crew set <name> prompt=<file> | preset=<preset>"
+const crewSetUse = "yardr crew set <name> prompt=<file> | preset=<preset> | kind=<kind> | model=<model> | dir=<dir>"
 
 // crewSetKeys are the settings the row carries, in the order its stored form
 // writes them.
-var crewSetKeys = []string{"prompt", "preset"}
+var crewSetKeys = []string{"prompt", "preset", "kind", "model", "dir"}
+
+// crewOwnKeys are the settings of the row that only the yardmaster's own
+// entry carries: the delegated leg carries them for any other member
+// (crewDelegates) and never for that entry (3.3).
+var crewOwnKeys = []string{"kind", "model", "dir"}
 
 func init() {
 	runList = append(runList, runCommand{
@@ -71,24 +81,29 @@ func parseCrewSet(rest []string) ([]string, error) {
 }
 
 // crewSetSpec is a crew set proposal as the yard holds it: the member as it
-// stands and as the approval would leave it, the config keys the approval
-// writes, the prompt text its file was held to, and the preset resolved to
-// the flags of the kind the member runs.
+// stands and as the approval would leave it (its directory included, which is
+// no config key), the config keys the approval writes, the prompt text its
+// file was held to, the kind its agents start as now (was) and as the
+// approval would leave them, and the preset resolved to the flags of that
+// kind.
 type crewSetSpec struct {
-	name   string
-	have   CrewMember
-	want   CrewMember
-	set    map[string]any
-	prompt string
-	kind   string
-	preset Permission
+	name      string
+	have      CrewMember
+	want      CrewMember
+	set       map[string]any
+	prompt    string
+	was, kind string
+	preset    Permission
 }
 
 // crewSetProposal holds a crew set ask to the yard as it stands: the member
 // is there, a prompt is a file under the yard's home that holds the text the
-// ask carries, a preset is one of its kind's that never asks, and the config
-// that results is one the store would save (configProblems, as putCrew holds
-// it).
+// ask carries, a kind is one the yard has a harness for, a model is no flag,
+// a directory is under a place the yard knows, a preset is one of the kind
+// the agents will start as (that of any other member's that never asks, any
+// of the yardmaster's own entry), and the config that results is one the
+// store would save (configProblems, as putCrew holds it). Kind, model and
+// directory are the yardmaster's own entry's alone.
 func (w *wtx) crewSetProposal(run AskRun) (crewSetSpec, error) {
 	name, sets := strongSetOf(run.Argv)
 	spec := crewSetSpec{name: name, set: map[string]any{}}
@@ -98,6 +113,16 @@ func (w *wtx) crewSetProposal(run AskRun) (crewSetSpec, error) {
 		return crewSetSpec{}, fmt.Errorf("crew member %s: %w", name, ErrNotFound)
 	}
 	subject := "crew member " + name
+	own, err := w.ownEntry(name)
+	if err != nil {
+		return crewSetSpec{}, err
+	}
+	for _, key := range crewOwnKeys {
+		if _, ok := sets[key]; ok && !own {
+			return crewSetSpec{}, fmt.Errorf("%s: %s is on this card for the yardmaster's own entry alone, which the delegated leg never carries: %s", subject, key, strongApart)
+		}
+	}
+	spec.want = spec.have
 	if path, ok := sets["prompt"]; ok {
 		saved, err := w.heldPrompt(name, subject, path, run.Role, promptWords{
 			otherwise: "the prompt is set in a terminal, with yardr crew set " + name + " prompt=<file>", spelled: "prompt=<path>"})
@@ -108,22 +133,45 @@ func (w *wtx) crewSetProposal(run AskRun) (crewSetSpec, error) {
 	} else if run.Role != "" {
 		return crewSetSpec{}, fmt.Errorf("%s: the ask carries prompt text but names no prompt: name the file it was read from as prompt=<path>", subject)
 	}
-	if label, ok := sets["preset"]; ok {
-		kind, err := w.kindOf(spec.have.Config)
+	if spec.was, err = w.kindOf(spec.have.Config); err != nil {
+		return crewSetSpec{}, err
+	}
+	spec.kind = spec.was
+	if kind, ok := sets["kind"]; ok {
+		if err := checkHarnessKind(subject, kind); err != nil {
+			return crewSetSpec{}, err
+		}
+		spec.set["kind"], spec.kind = kind, kind
+	}
+	if model, ok := sets["model"]; ok {
+		if err := checkCardModel(subject, model); err != nil {
+			return crewSetSpec{}, err
+		}
+		spec.set["model"] = model
+	}
+	if dir, ok := sets["dir"]; ok {
+		clean, err := w.knownDir(subject, "dir", dir, "dir=<dir>")
 		if err != nil {
 			return crewSetSpec{}, err
 		}
-		p, err := strongPreset(subject, kind, label)
-		if err != nil {
+		spec.want.Dir = clean
+	}
+	if label, ok := sets["preset"]; ok {
+		var p Permission
+		if own {
+			var found bool
+			if p, found = HarnessPreset(spec.kind, label); !found {
+				return crewSetSpec{}, noPreset(subject, spec.kind, label, "one")
+			}
+		} else if p, err = strongPreset(subject, spec.kind, label); err != nil {
 			return crewSetSpec{}, err
 		}
 		args := make([]any, len(p.Args))
 		for i, a := range p.Args {
 			args[i] = a
 		}
-		spec.kind, spec.preset, spec.set["args"] = kind, p, args
+		spec.preset, spec.set["args"] = p, args
 	}
-	spec.want = spec.have
 	spec.want.Config = maps.Clone(spec.have.Config)
 	if spec.want.Config == nil {
 		spec.want.Config = map[string]any{}
@@ -149,7 +197,7 @@ func checkCrewSet(ctx context.Context, w *wtx, run AskRun, actor string) error {
 	}
 	// The gate lets a change of nothing through as it lets anyone's, which
 	// would read as a command to run yourself.
-	if reflect.DeepEqual(asStored(spec.have.Config), asStored(spec.want.Config)) {
+	if reflect.DeepEqual(asStored(spec.have.Config), asStored(spec.want.Config)) && spec.have.Dir == spec.want.Dir {
 		return fmt.Errorf("crew member %s is set so already, so the command would change nothing", spec.name)
 	}
 	err = w.checkCrewDefine(ctx, spec.have, spec.want, true, actor)
@@ -174,7 +222,17 @@ func (w *wtx) crewSetCard(run AskRun, _ bool) (AskRun, error) {
 	_, sets := strongSetOf(run.Argv)
 	does := []string{fmt.Sprintf("changes the crew member %s: what each of its sessions runs, as the lines below say, and nothing else of it.", spec.name)}
 	c := asStored(spec.have.Config)
-	seenMap := map[string]string{"crew " + spec.name: seen(spec.have.Runner, c["prompt"], c["kind"], c["args"])}
+	// What the member held of the settings the card carries beyond the first
+	// four is kept only by a card that carries them, so that a card written
+	// before the row carried them is the card it was.
+	held := []any{spec.have.Runner, c["prompt"], c["kind"], c["args"]}
+	if _, ok := sets["model"]; ok {
+		held = append(held, c["model"])
+	}
+	if _, ok := sets["dir"]; ok {
+		held = append(held, spec.have.Dir)
+	}
+	seenMap := map[string]string{"crew " + spec.name: seen(held...)}
 	if _, ok := sets["prompt"]; ok {
 		was, _ := spec.have.Config["prompt"].(string)
 		path, _ := spec.set["prompt"].(string)
@@ -182,17 +240,54 @@ func (w *wtx) crewSetCard(run AskRun, _ bool) (AskRun, error) {
 		sum := sha256.Sum256([]byte(spec.prompt))
 		seenMap["prompt "+path] = hex.EncodeToString(sum[:])
 	}
+	if _, ok := sets["kind"]; ok {
+		does = append(does, spec.kindLines(sets)...)
+	}
+	if _, ok := sets["model"]; ok {
+		now := "the agent's own default model"
+		if was, had := spec.have.Config["model"]; had && grantSettingText(was, had) != "" {
+			now = "the model " + grantSettingText(was, had)
+		}
+		does = append(does,
+			fmt.Sprintf("It starts them with %s now.", now),
+			fmt.Sprintf("It will start them with the model %s.", spec.set["model"]))
+	}
+	var flags []string
+	if _, ok := sets["dir"]; ok {
+		does = append(does,
+			fmt.Sprintf("It works in %s now.", or(spec.have.Dir, "the yard's home")),
+			fmt.Sprintf("It will work in %s.", spec.want.Dir))
+		flags = []string{"--dir", shellQuote(spec.have.Dir)}
+	}
 	if _, ok := sets["preset"]; ok {
-		does = append(does, presetLines(spec.kind, spec.have.Config["args"], spec.preset)...)
+		does = append(does, presetLines(spec.was, spec.kind, spec.have.Config["args"], spec.preset)...)
 	}
 	return AskRun{
 		Argv:   run.Argv,
 		Does:   does,
-		Back:   strongBack("crew set", spec.name, spec.have.Config, spec.set),
+		Back:   strongBack("crew set", spec.name, spec.have.Config, spec.set, flags...),
 		BackBy: "only the operator",
 		Seen:   seenMap,
 		Role:   spec.prompt,
 	}, nil
+}
+
+// kindLines are the card's lines for a kind that changes: the kind its agents
+// start as now (the yard's default_kind, where the member names none) and as
+// they will. The flags it holds are not the kind's to translate: where the
+// card sets no preset the card says they stay as they are.
+func (spec crewSetSpec) kindLines(sets map[string]string) []string {
+	now := fmt.Sprintf("It starts %s (%s) agents now", spec.was, or(HarnessLabels[spec.was], spec.was))
+	if _, named := spec.have.Config["kind"]; !named {
+		now += ", the yard's default_kind"
+	}
+	lines := []string{now + ".", fmt.Sprintf("It will start %s (%s) agents.", spec.kind, or(HarnessLabels[spec.kind], spec.kind))}
+	if _, ok := sets["preset"]; !ok {
+		if words := argWords(spec.have.Config["args"]); len(words) > 0 {
+			lines = append(lines, fmt.Sprintf("It starts them with %s, and this card does not change those flags.", quotedWords(words)))
+		}
+	}
+	return lines
 }
 
 // crewSetStale says why the ask seq for crew set is approved no more: the
@@ -208,10 +303,11 @@ func (w *wtx) crewSetStale(seq uint64, was, now AskRun) error {
 }
 
 // crewSetWeight weighs a crew set card: the member's sessions run a program
-// the card shows, its prompt or the flags that never ask.
+// the card shows, its prompt, the agent it starts and where, or the flags it
+// starts it with.
 func crewSetWeight(_ *wtx, run AskRun) ([]AskWeight, error) {
 	name, sets := strongSetOf(run.Argv)
-	return []AskWeight{weighs(WeightCode, fmt.Sprintf("%s of the crew member %s, which each session the yard starts for it then runs as the card shows", strings.Join(strongChanged(sets), " and "), name))}, nil
+	return []AskWeight{weighs(WeightCode, fmt.Sprintf("%s of the crew member %s, which each session the yard starts for it then runs as the card shows", andList(strongChanged(sets)), name))}, nil
 }
 
 // runCrewSet sets the member as actor, through the store function the
@@ -235,7 +331,12 @@ func runCrewSet(ctx context.Context, w *wtx, run AskRun, actor string, by *appro
 	}
 	lines := []string{fmt.Sprintf("crew member %s saved", spec.name)}
 	var atStart []string
-	for _, key := range []string{"args", "prompt"} {
+	// The terminal's order: the field first, then the config keys by name.
+	if spec.want.Dir != spec.have.Dir {
+		lines = append(lines, fmt.Sprintf("  --dir: %s -> %s", or(spec.have.Dir, "(not set)"), or(spec.want.Dir, "(dropped)")))
+		atStart = append(atStart, "--dir")
+	}
+	for _, key := range []string{"args", "kind", "model", "prompt"} {
 		was, had := spec.have.Config[key]
 		is, has := spec.want.Config[key]
 		if a, b := grantSettingText(was, had), grantSettingText(is, has); had != has || a != b {

@@ -2,11 +2,14 @@ package scripttest
 
 import (
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestMain(m *testing.M) {
@@ -90,6 +93,54 @@ func TestStandInStartsWhileItsBodyIsOpenForWriting(t *testing.T) {
 	if !refused {
 		t.Log("this system starts a file that is open for writing, so a stand-in is no different from one here")
 	}
+}
+
+// The launcher is written with syscall.ForkLock held for reading, and only for
+// the write: a fork begun beside it would carry its descriptor until the child
+// execs, and the launcher's first run, which follows, would then find the file
+// busy on Linux (yardr-wqbv). No fork has been seen to do it, so the case looks
+// at the lock instead. The write is aimed at a FIFO, whose open waits for a
+// reader, which holds a write under way for as long as the test likes where a
+// regular file's would be over at once. A fork takes the lock for writing, so
+// a lock that cannot be taken for writing is a write no fork can begin beside.
+func TestLauncherIsWrittenUnderTheForkLock(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "sh")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Skipf("this system makes no FIFO: %v", err)
+	}
+	written := make(chan error, 1)
+	go func() { written <- writeLauncher(fifo, "/bin/sh") }()
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(time.Millisecond) {
+		if !syscall.ForkLock.TryLock() {
+			break
+		}
+		syscall.ForkLock.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("a fork could begin while the launcher was being written: its child would carry the open file")
+		}
+	}
+	// A reader lets the open go on, and the write ends.
+	r, err := os.Open(fifo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(r)
+	r.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-written; err != nil {
+		t.Fatal(err)
+	}
+	if want := "#!/bin/sh\n. \"$0.sh\"\n"; string(got) != want {
+		t.Errorf("the launcher written is %q, want %q", got, want)
+	}
+	// The first run follows the write and starts a process, which takes the
+	// lock for writing: it must have been let go.
+	if !syscall.ForkLock.TryLock() {
+		t.Fatal("the fork lock is held after the launcher was written: the first run could not start")
+	}
+	syscall.ForkLock.Unlock()
 }
 
 // Relink makes stand-ins of the executable scripts under a directory, each

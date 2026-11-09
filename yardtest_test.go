@@ -1575,6 +1575,15 @@ elif [ "$1 $2" = "bead note" ]; then
 fi
 `
 
+// A df that writes down its arguments and prints a volume that is full, as df
+// -Pk prints one (a header and the volume's line, in KiB), so that the gate's
+// words for the disk read the same on any machine: 130 MiB free of 460 GiB.
+const fakeDf = `#!/bin/sh
+echo "$*" >>"$FAKE/df-calls"
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf '/dev/disk3s5 482344960 482211840 133120 100%% /System/Volumes/Data\n'
+`
+
 // The test command runs a go step once more when it failed because a file
 // of Go's build cache was gone, and only then: a second failure stands, a
 // step that failed of itself is not run again, and a log that reports a
@@ -1765,9 +1774,20 @@ func TestYardTestRunsAgainWhenTheBuildCacheLostAFile(t *testing.T) {
 // part before the separator says which tests flaked: a line without it, as
 // the log held before the separator existed, is all of it.
 //
+// A failure the disk caused is no flake (yardr-4pwj). A failed test whose first
+// run's block (its FAIL line and the lines under it) holds "no space left on
+// device", or a failed package with no named test whose output holds it, is
+// named as the disk's in one line beside the rerun's result, with the df of
+// the volume the run keeps its files on, and is left out of the flaky line, the
+// log and the filing, even where the log already names it twice: a run with
+// nothing else prints no flaky line, and a test that failed for a reason of its
+// own in the same run is a flake as before. The failed packages still run
+// again; one that hits the disk again fails the step as a package that fails
+// twice does, with a line for the disk's state, and writes no flake.
+//
 // A row is a whole run of the script, 2 to 3 s apiece, and the rows run in
 // parallel: the root package has little room under R1's 60 s (yardr-fvkm).
-// A case for flakyopen or flakyfile goes in
+// A case for flakyopen, flakyfile or diskfailed goes in
 // TestYardTestKeepsTheFailingLinesOfAFlake, which runs the functions alone.
 func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 	t.Parallel()
@@ -1838,6 +1858,18 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 	// the first output lines.
 	testMainFail := "about to die\nFAIL\t" + pkg + " 0.219s\nFAIL"
 	raceFail := "WARNING: DATA RACE\n" + flakyFail
+	// What a first run lost to a full disk prints. A test that builds a binary
+	// fails before any logic of its own, with the link's words under its FAIL
+	// line (the incident of 9 Nov 2026); a package whose test binary cannot be
+	// linked names no test; and a test of its own reason may fail beside it.
+	const diskText = "no space left on device"
+	const diskLinks = "    x_test.go:12: build: exit status 1\n        # m.test/m\n        link: mapping output file failed: " + diskText + "\n"
+	diskFail := "--- FAIL: TestX (0.50s)\n" + diskLinks + "FAIL\nFAIL\t" + pkg + " 0.5s"
+	diskPkgFail := "# m.test/m.test\nlink: mapping output file failed: " + diskText + "\nFAIL\t" + pkg + " [build failed]"
+	diskPkgMixedFail := "# m.test/disk.test\nlink: mapping output file failed: " + diskText + "\nFAIL\tm.test/disk [build failed]\n" +
+		"--- FAIL: TestOther (0.01s)\n    y_test.go:5: boom\nFAIL\nFAIL\t" + pkg + " 0.123s"
+	diskMixedFail := "--- FAIL: TestDisk (0.50s)\n" + diskLinks + "--- FAIL: TestOther (0.01s)\n    y_test.go:5: boom\nFAIL\nFAIL\t" + pkg + " 0.123s"
+	diskState := " (/System/Volumes/Data has 130 MiB free of 460.0 GiB, 100% used)"
 	racePkg, ordinaryPkg := pkg+"/race", pkg+"/ordinary"
 	raceFailMixed := "WARNING: DATA RACE\n--- FAIL: TestRace (0.00s)\nFAIL\nFAIL\t" + racePkg + " 0.123s\n" +
 		"--- FAIL: TestOrdinary (0.00s)\nFAIL\nFAIL\t" + ordinaryPkg + " 0.123s"
@@ -1865,35 +1897,39 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 	// and runs, so no row commits the same module again.
 	m := newModGate(t)
 	for _, c := range []struct {
-		name     string
-		testName string // override the failed test name
-		glob     bool   // add a path that an accidental test-name glob would match
-		times    string // how often the test step fails: once (flaky) or twice
-		ok       bool
-		flaked   bool   // the step failed although a leg passed on rerun: its flaky line is still printed and logged
-		rpcTimes string // how often the rpc step fails beside the test step: empty for green
-		rpcLine  string // the failure the rpc step fails with: the test step's line when empty
-		calls    []string
-		env      []string // variables of the script's environment beyond the base
-		steps    []string
-		line     string          // the failure the step fails with: empty for a flake
-		racePkgs string          // packages whose output includes the race warning
-		raced    bool            // the failure reports a race, so there is no rerun
-		seed     []time.Duration // ages of the flaky log's prior sightings
-		beads    string          // the beads field the run's own line carries: none when empty
-		load     string          // the load words the run's own line ends with: the pinned load when empty
-		yardr    bool            // a stub yardr is on PATH, answering list and show
-		list     string          // what the stub's bead list prints
-		show     string          // what the stub's bead show prints
-		barePath bool            // PATH holds no yardr at all, as CI's does not
-		create   bool            // the run files the flake through the stub
-		depot    string          // the --depot the filing names: empty for none
-		tests    string          // the tests the flaky line names, space separated: testName when empty
-		kept     string          // what the log line keeps behind the separator: the bare FAIL line when line is empty
-		noTests  bool            // the failure names no test, so the flaky line names the package and the log line keeps nothing
-		seedAs   string          // the text of each seeded sighting after its sha: the short head when empty
-		notes    []string        // "<bead> <test>" for each open bead the run notes with its log line, in order: the test whose pass found it
-		foreign  string          // one more seeded line, which names the test only behind its separator
+		name          string
+		testName      string // override the failed test name
+		rerunPackages string // override the packages named on the retry line
+		glob          bool   // add a path that an accidental test-name glob would match
+		times         string // how often the test step fails: once (flaky) or twice
+		ok            bool
+		flaked        bool   // the step failed although a leg passed on rerun: its flaky line is still printed and logged
+		rpcTimes      string // how often the rpc step fails beside the test step: empty for green
+		rpcLine       string // the failure the rpc step fails with: the test step's line when empty
+		calls         []string
+		env           []string // variables of the script's environment beyond the base
+		steps         []string
+		line          string          // the failure the step fails with: empty for a flake
+		racePkgs      string          // packages whose output includes the race warning
+		raced         bool            // the failure reports a race, so there is no rerun
+		seed          []time.Duration // ages of the flaky log's prior sightings
+		beads         string          // the beads field the run's own line carries: none when empty
+		load          string          // the load words the run's own line ends with: the pinned load when empty
+		yardr         bool            // a stub yardr is on PATH, answering list and show
+		list          string          // what the stub's bead list prints
+		show          string          // what the stub's bead show prints
+		barePath      bool            // PATH holds no yardr at all, as CI's does not
+		create        bool            // the run files the flake through the stub
+		depot         string          // the --depot the filing names: empty for none
+		tests         string          // the tests the flaky line names, space separated: testName when empty
+		kept          string          // what the log line keeps behind the separator: the bare FAIL line when line is empty
+		noTests       bool            // the failure names no test, so the flaky line names the package and the log line keeps nothing
+		seedAs        string          // the text of each seeded sighting after its sha: the short head when empty
+		notes         []string        // "<bead> <test>" for each open bead the run notes with its log line, in order: the test whose pass found it
+		foreign       string          // one more seeded line, which names the test only behind its separator
+		disk          string          // what the first run lost to the disk, as the line that names the disk says it; none when empty
+		diskOnly      bool            // nothing else failed: the run passes with no flaky line, no log line and no filing
+		rerunDisk     bool            // the rerun hit the disk too, which a second line says
 	}{
 		{name: "plain: passes on rerun", times: "1", ok: true, calls: plain, steps: plainSteps},
 		{name: "plain: fails twice", times: "2", ok: false, calls: plain, steps: plainSteps},
@@ -1976,6 +2012,38 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 		{name: "plain: a test named only in another's kept lines is no sighting", times: "1", ok: true, calls: plain, steps: plainSteps,
 			seed: []time.Duration{24 * time.Hour, 48 * time.Hour}, yardr: true, list: other,
 			seedAs: mentions},
+		// A failure the disk caused is no flake: it is named as the disk's,
+		// beside the rerun's result, and nothing is logged or filed for it,
+		// though the log already names the test twice, the way a repeat files.
+		// A package that could not be linked names no test, and is the disk's
+		// as a whole. A test that failed for its own reason beside the disk's
+		// is a flake as before, and the only one filed. A rerun that hits the
+		// disk too fails the step, with the disk's state.
+		{name: "plain: a test the disk failed is named as the disk's, and logs and files nothing", times: "1", ok: true, calls: plain, steps: plainSteps,
+			line: diskFail, disk: "TestX", diskOnly: true,
+			seed: []time.Duration{24 * time.Hour, 48 * time.Hour}, yardr: true, list: other},
+		{name: "plain: a package that could not link on a full disk is the disk's as a whole", times: "1", ok: true, calls: plain, steps: plainSteps,
+			line: diskPkgFail, disk: "package " + pkg, diskOnly: true, yardr: true, list: other},
+		{name: "plain: a package link failure is excluded beside a named test failure", testName: "TestOther", rerunPackages: "m.test/disk " + pkg, times: "1", ok: true,
+			calls: []string{"vet ./...", "build ./...", "test ./...", "test m.test/disk " + pkg}, steps: plainSteps,
+			line: diskPkgMixedFail, disk: "package m.test/disk", tests: "TestOther",
+			kept: "--- FAIL: TestOther (0.01s)" + eol + "    y_test.go:5: boom",
+			seed: []time.Duration{24 * time.Hour, 48 * time.Hour}, yardr: true, list: other, create: true},
+		{name: "plain: a same-named test in another package stays flaky", testName: "TestShared", rerunPackages: "m.test/disk " + pkg, times: "1", ok: true,
+			calls: []string{"vet ./...", "build ./...", "test ./...", "test m.test/disk " + pkg}, steps: plainSteps,
+			line: "--- FAIL: TestShared (0.00s)\n    disk_test.go:1: no space left on device\nFAIL\nFAIL\tm.test/disk 0.123s\n" +
+				"--- FAIL: TestShared (0.00s)\n    other_test.go:1: assertion failed\nFAIL\nFAIL\t" + pkg + " 0.123s",
+			disk: "TestShared", tests: "TestShared",
+			kept: "--- FAIL: TestShared (0.00s)" + eol + "    other_test.go:1: assertion failed",
+			seed: []time.Duration{24 * time.Hour, 48 * time.Hour}, yardr: true, list: other, create: true},
+		{name: "plain: a test that failed for its own reason beside the disk's files alone", times: "1", ok: true, calls: plain, steps: plainSteps,
+			testName: "TestOther", line: diskMixedFail, disk: "TestDisk",
+			kept:   "--- FAIL: TestOther (0.01s)" + eol + "    y_test.go:5: boom",
+			seed:   []time.Duration{24 * time.Hour, 48 * time.Hour},
+			seedAs: "TestDisk TestOther (" + pkg + ") passed on rerun",
+			yardr:  true, list: other, create: true},
+		{name: "plain: a rerun that hits the full disk fails the step with the disk's state", times: "2", ok: false, calls: plain, steps: plainSteps,
+			line: diskFail, disk: "TestX", rerunDisk: true},
 		// Landings without a comparable base (CI's shape): the socket
 		// suites run whole, ungated, so these cases exercise the leg
 		// itself rather than the gate.
@@ -2030,7 +2098,7 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 			if slices.Contains(c.env, "YARDR_LANDING=1") {
 				failedStep = "go test -race -p=3 ./..."
 			}
-			bins := map[string]string{"go": fakeGo}
+			bins := map[string]string{"go": fakeGo, "df": fakeDf}
 			if c.yardr {
 				bins["yardr"] = fakeYardr
 			}
@@ -2114,11 +2182,52 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 				if !strings.Contains(out, raceMessage+"\n") {
 					t.Errorf("the output has no %q line", raceMessage)
 				}
-			} else if !strings.Contains(out, running+"\n") {
-				t.Errorf("the output has no %q line", running)
+			} else {
+				wantRunning := running
+				if c.rerunPackages != "" {
+					wantRunning = "test: running the failed packages again: " + c.rerunPackages
+				}
+				if !strings.Contains(out, wantRunning+"\n") {
+					t.Errorf("the output has no %q line", wantRunning)
+				}
+			}
+			// The disk is named in a line for the first run's tests and in
+			// another where the rerun hit it, each with the volume df reports
+			// for the directory the run keeps its own files in; a failure that
+			// is not the disk's names it nowhere, and asks df nothing.
+			wantDf := 0
+			for _, d := range []struct {
+				say  bool
+				want string
+			}{
+				{c.disk != "", "test: the disk is full, not a flaky test: " + c.disk + ` failed the first run with "` + diskText + `"` + diskState},
+				{c.rerunDisk, "test: the disk is full: the rerun failed with \"" + diskText + `"` + diskState},
+			} {
+				if d.say {
+					wantDf++
+					if !strings.Contains(out, d.want+"\n") {
+						t.Errorf("the output has no %q line", d.want)
+					}
+				}
+			}
+			if c.disk == "" && strings.Contains(out, "the disk is full") || !c.rerunDisk && strings.Contains(out, "the disk is full: the rerun") {
+				t.Errorf("the output names the disk for a failure that is not its")
+			}
+			// The directory is the one mktemp makes the run's log in: TMPDIR
+			// on Linux, and on macOS the user's own, whose mktemp ignores it.
+			calls := splitLines(fakeLog(b.fake, "df-calls"))
+			if len(calls) != wantDf {
+				t.Errorf("df was asked %q, want %d calls", calls, wantDf)
+			}
+			for _, call := range calls {
+				if dir, ok := strings.CutPrefix(call, "-Pk "); !ok {
+					t.Errorf("df was run as %q, want -Pk and a directory", call)
+				} else if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+					t.Errorf("df was asked of %q, which is no directory: %v", dir, err)
+				}
 			}
 			var logged []string
-			if c.ok || c.flaked {
+			if (c.ok || c.flaked) && !c.diskOnly {
 				// One flaky line names the test and its package.
 				n := 0
 				for _, line := range strings.Split(out, "\n") {
@@ -2126,6 +2235,9 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 						n++
 						if line != flaky {
 							t.Errorf("flaky line %q, want %q", line, flaky)
+						}
+						if strings.HasPrefix(c.disk, "package ") && strings.Contains(line, strings.TrimPrefix(c.disk, "package ")) {
+							t.Errorf("flaky line names the disk-failed package %q: %s", c.disk, line)
 						}
 					}
 				}
@@ -2141,6 +2253,12 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 					t.Fatal(err)
 				}
 				logged = splitLines(string(logb))
+				if strings.HasPrefix(c.disk, "package ") && len(logged) > 0 {
+					head, _, _ := strings.Cut(logged[len(logged)-1], sep)
+					if strings.Contains(head, strings.TrimPrefix(c.disk, "package ")) {
+						t.Errorf("flaky log head names the disk-failed package %q: %s", c.disk, head)
+					}
+				}
 				priors := len(c.seed)
 				if c.foreign != "" {
 					priors++
@@ -2196,6 +2314,16 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 					}
 				} else if strings.Contains(out, "test: FAILED") {
 					t.Errorf("a step that passed on rerun is followed by a failure summary")
+				}
+			} else if c.diskOnly {
+				// Nothing flaky: no flaky line, no log line beyond the priors
+				// the case wrote, no failure summary.
+				if strings.Contains(out, "test: flaky:") || strings.Contains(out, "test: FAILED") {
+					t.Errorf("a run whose only failure was the disk's names a flake or a failure:\n%s", out)
+				}
+				logb, _ := os.ReadFile(flakyLog)
+				if got := splitLines(string(logb)); len(got) != len(c.seed) {
+					t.Errorf("the flaky log has %d lines, want the %d the case wrote:\n%s", len(got), len(c.seed), logb)
 				}
 			} else {
 				if strings.Contains(out, "test: flaky:") {
@@ -2416,11 +2544,11 @@ func TestYardTestKeepsTheFailingLinesOfAFlake(t *testing.T) {
 	if ok {
 		fns, _, ok = strings.Cut("flaky_sep="+fns, "\n# summary prints the run's test line")
 	}
-	for _, fn := range []string{"flakyfails", "flakystuck", "flakylines", "flakybeads", "flakyopen", "flakyfile"} {
+	for _, fn := range []string{"flakyfails", "flakystuck", "diskfailed", "briefly", "diskstate", "flakylines", "flakybeads", "flakyopen", "flakyfile"} {
 		ok = ok && strings.Contains(fns, "\n"+fn+"() {")
 	}
 	if !ok {
-		t.Fatalf("cannot cut flakyfails, flakystuck, flakylines, flakybeads, flakyopen and flakyfile out of %s: move the probe with the script", yardTest)
+		t.Fatalf("cannot cut flakyfails, flakystuck, diskfailed, briefly, diskstate, flakylines, flakybeads, flakyopen and flakyfile out of %s: move the probe with the script", yardTest)
 	}
 	dir := t.TempDir()
 	writeFile(t, dir, "probe.sh", fns+"\n\"$@\"\n")
@@ -2495,6 +2623,14 @@ func TestYardTestKeepsTheFailingLinesOfAFlake(t *testing.T) {
 		if i < 20 {
 			manyBlocks = append(manyBlocks, block(fmt.Sprintf("--- FAIL: TestT%02d (0.00s)", i), fmt.Sprintf("    t_test.go:1: boom %02d", i)))
 		}
+	}
+	// A full disk fails tens of tests, more than the 20 blocks a log line
+	// keeps: every one is the disk's, and none takes a block from the test that
+	// failed for a reason of its own behind them.
+	var diskIn, diskNames []string
+	for i := range 25 {
+		diskIn = append(diskIn, fmt.Sprintf("--- FAIL: TestD%02d (0.00s)\n    d_test.go:1: write: no space left on device", i))
+		diskNames = append(diskNames, fmt.Sprintf("TestD%02d", i))
 	}
 	// A test that failed in one package and a timeout in another, as a run of
 	// several prints them, and a timeout that caught seven tests running.
@@ -2571,6 +2707,21 @@ func TestYardTestKeepsTheFailingLinesOfAFlake(t *testing.T) {
 		{"a line of exactly 200 bytes of two-byte characters is kept whole", "--- FAIL: TestA (0.00s)\n    " + strings.Repeat("é", 98) + "\nFAIL\n",
 			[]string{block("--- FAIL: TestA (0.00s)", "    "+strings.Repeat("é", 98))}},
 		{"20 blocks", strings.Join(manyIn, "\n") + "\nFAIL\n", manyBlocks},
+		// What the disk failed is no test's, and its block is left out of the
+		// log line: the text is on any line of the block, not only the six it
+		// would keep, and a test that failed for its own reason beside it, or
+		// under a parent the disk failed, is kept.
+		{"a block the disk failed is left out", "--- FAIL: TestA (0.00s)\n    a_test.go:1: link: no space left on device\n--- FAIL: TestB (0.00s)\n    b_test.go:1: boom\nFAIL\n",
+			[]string{block("--- FAIL: TestB (0.00s)", "    b_test.go:1: boom")}},
+		{"a block the disk failed on its ninth line is left out", "--- FAIL: TestA (0.00s)\n" + strings.Repeat("    a_test.go:1: filler\n", 8) + "    a_test.go:9: write: no space left on device\nFAIL\n", nil},
+		{"the parent of a subtest the disk failed is left out with it", "--- FAIL: TestP (0.01s)\n    --- FAIL: TestP/child (0.00s)\n        p_test.go:21: write: no space left on device\n    p_test.go:26: parent after\nFAIL\n", nil},
+		{"a subtest that failed for its own reason is kept beside the disk's", "--- FAIL: TestP (0.01s)\n    --- FAIL: TestP/disk (0.00s)\n        p_test.go:21: write: no space left on device\n    --- FAIL: TestP/own (0.00s)\n        p_test.go:30: boom\nFAIL\n",
+			[]string{block("--- FAIL: TestP/own (0.00s)", "    p_test.go:30: boom")}},
+		{"the disk's blocks take none of the 20 from a test that failed for its own reason", strings.Join(diskIn, "\n") + "\n--- FAIL: TestZ (0.00s)\n    z_test.go:1: boom\nFAIL\n",
+			[]string{block("--- FAIL: TestZ (0.00s)", "    z_test.go:1: boom")}},
+		{"the text is the disk's only exact", "--- FAIL: TestA (0.00s)\n    a_test.go:1: No space left on device\n    a_test.go:2: no space left on a device\nFAIL\n",
+			[]string{block("--- FAIL: TestA (0.00s)", "    a_test.go:1: No space left on device", "    a_test.go:2: no space left on a device")}},
+		{"output between reports is no block's, whatever it says", "--- FAIL: TestA (0.00s)\n    a_test.go:1: boom\nlink: no space left on device\nFAIL\n", []string{block("--- FAIL: TestA (0.00s)", "    a_test.go:1: boom")}},
 		// go prints a test's panic after its FAIL line, unindented, then a
 		// stack: the panic's line joins every block open at that point.
 		{"a panic", "--- FAIL: TestA (0.00s)\n    --- FAIL: TestA/sub (0.00s)\npanic: boom [recovered]\n\tpanic: boom\n\ngoroutine 7 [running]:\ntesting.tRunner.func1.2({0x1, 0x2})\n\ttesting/testing.go:1631 +0x1c4\nFAIL\tm.test/a 0.1s\n",
@@ -2707,6 +2858,8 @@ func TestYardTestKeepsTheFailingLinesOfAFlake(t *testing.T) {
 			[]string{"--- FAIL: TestA (0.00s)", clipped("    a_test.go:1: " + strings.Repeat("z", 300))}},
 		{"a long line of two-byte characters is cut between them", "--- FAIL: TestA (0.00s)\n" + accents + "\nFAIL\n",
 			[]string{"--- FAIL: TestA (0.00s)", accentsClipped}},
+		{"a block the disk failed is shown, since the summary is of what failed", "--- FAIL: TestA (0.00s)\n    a_test.go:1: link: no space left on device\nFAIL\n",
+			[]string{"--- FAIL: TestA (0.00s)", "    a_test.go:1: link: no space left on device"}},
 		{"a timeout alone is shown once", timeoutB, timeoutBLines},
 		{"a failure and a timeout behind it", failedA + timeoutB, append(slices.Clone(failedALines), timeoutBLines...)},
 		{"a timeout and a failure behind it", timeoutB + failedA, append(slices.Clone(failedALines), timeoutBLines...)},
@@ -2719,6 +2872,96 @@ func TestYardTestKeepsTheFailingLinesOfAFlake(t *testing.T) {
 			t.Parallel()
 			if got, want := run(t, c.in, "flakyfails", "--human"), strings.Join(c.want, "\n"); got != want {
 				t.Errorf("flakyfails --human printed:\n%s\nwant:\n%s", got, want)
+			}
+		})
+	}
+
+	// What the disk failed (diskfailed): tests whose block holds the text, and
+	// packages whose failed output holds it without a named test failure. A
+	// package link failure stays classified when another package has a named
+	// test failure of its own. The text elsewhere in the log is nothing.
+	diskLink := "    x_test.go:12: build: exit status 1\n        link: mapping output file failed: no space left on device\n"
+	for _, c := range []struct {
+		name, in, want string
+	}{
+		{"a test whose build could not link", "--- FAIL: TestX (0.50s)\n" + diskLink + "FAIL\nFAIL\tm.test/m 0.5s\n", "TestX"},
+		{"the text far down a block, past the lines it keeps", "--- FAIL: TestX (0.50s)\n" + strings.Repeat("    x_test.go:1: filler\n", 9) + "    x_test.go:9: no space left on device\nFAIL\n", "TestX"},
+		{"a subtest and its parent", "--- FAIL: TestP (0.01s)\n    --- FAIL: TestP/child (0.00s)\n        p_test.go:21: no space left on device\nFAIL\n", "TestP\nTestP/child"},
+		{"every test the disk failed, past the 20 blocks a log line keeps", strings.Join(diskIn, "\n") + "\nFAIL\n", strings.Join(diskNames, "\n")},
+		{"one test of two", "--- FAIL: TestA (0.00s)\n" + diskLink + "--- FAIL: TestB (0.00s)\n    b_test.go:1: boom\nFAIL\n", "TestA"},
+		{"a test that failed for its own reason", "--- FAIL: TestA (0.00s)\n    a_test.go:1: boom\nFAIL\n", ""},
+		{"the text between reports, in no block", "--- FAIL: TestA (0.00s)\n    a_test.go:1: boom\nlink: no space left on device\nFAIL\n", ""},
+		{"the text of another case", "--- FAIL: TestA (0.00s)\n    a_test.go:1: No space left on device\nFAIL\n", ""},
+		{"a package that could not link names no test", "# m.test/m.test\nlink: mapping output file failed: no space left on device\nFAIL\tm.test/m [build failed]\n", "-"},
+		{"a package that could not link beside a test that failed for its own reason", "--- FAIL: TestA (0.00s)\n    a_test.go:1: boom\nFAIL\nFAIL\tm.test/a 0.1s\n# m.test/b.test\nlink: no space left on device\nFAIL\tm.test/b [build failed]\n", ""},
+		{"a failure with no text", "about to die\nFAIL\tm.test/m 0.2s\n", ""},
+		{"an empty log", "", ""},
+	} {
+		t.Run("disk: "+c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := run(t, c.in, "diskfailed"); got != c.want {
+				t.Errorf("diskfailed printed %q, want %q", got, c.want)
+			}
+		})
+	}
+	// Package-level disk failures are scoped by go test's package result
+	// boundary, so an unrelated named test failure in another package does not
+	// hide the package the disk stopped from linking.
+	for _, c := range []struct {
+		name, in, want string
+	}{
+		{"a package that could not link", "# m.test/m.test\nlink: mapping output file failed: no space left on device\nFAIL\tm.test/m [build failed]\n", "m.test/m"},
+		{"a package link failure beside a named test failure", "--- FAIL: TestA (0.00s)\n    a_test.go:1: boom\nFAIL\nFAIL\tm.test/a 0.1s\n# m.test/b.test\nlink: no space left on device\nFAIL\tm.test/b [build failed]\n", "m.test/b"},
+		{"a named disk test is not a package-only failure", "--- FAIL: TestA (0.00s)\n    a_test.go:1: no space left on device\nFAIL\nFAIL\tm.test/a 0.1s\n", ""},
+		{"a non-disk package failure", "# m.test/m.test\nlink: permission denied\nFAIL\tm.test/m [build failed]\n", ""},
+	} {
+		t.Run("disk package: "+c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := run(t, c.in, "diskfailed", "--packages"); got != c.want {
+				t.Errorf("diskfailed --packages printed %q, want %q", got, c.want)
+			}
+		})
+	}
+	// briefly names at most five of what it is given, and how many more.
+	for _, c := range []struct{ in, want string }{
+		{"", ""},
+		{"a\n", "a"},
+		{"a\nb\nc\nd\ne\n", "a b c d e"},
+		{"a\nb\nc\nd\ne\nf\n", "a b c d e and 1 more"},
+		{"a\nb\nc\nd\ne\nf\ng\nh\n", "a b c d e and 3 more"},
+	} {
+		cmd := exec.Command("sh", probe, "briefly")
+		cmd.Stdin = strings.NewReader(c.in)
+		if out, err := cmd.Output(); err != nil || strings.TrimSuffix(string(out), "\n") != c.want {
+			t.Errorf("briefly of %q printed %q, %v, want %q", c.in, out, err, c.want)
+		}
+	}
+	// diskstate says how full the volume of a file is, from df -Pk (KiB, as
+	// Linux and macOS print it alike), in the units a person reads, and says
+	// nothing where df says nothing. A df on PATH that prints what its
+	// environment names stands in for the machine's.
+	dfDir := t.TempDir()
+	writeFile(t, dfDir, "df", "#!/bin/sh\n[ -z \"$DF_FAIL\" ] || exit 1\nprintf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n%s\\n' \"$DF_LINE\"\n")
+	if err := os.Chmod(filepath.Join(dfDir, "df"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ name, line, fail, want string }{
+		{"full to the byte", "/dev/disk3s5 482344960 482344960 0 100% /System/Volumes/Data", "", " (/System/Volumes/Data has 0 KiB free of 460.0 GiB, 100% used)"},
+		{"megabytes free", "/dev/disk3s5 482344960 482211840 133120 100% /System/Volumes/Data", "", " (/System/Volumes/Data has 130 MiB free of 460.0 GiB, 100% used)"},
+		{"gigabytes free", "/dev/sda1 20971520 1048576 19922944 5% /", "", " (/ has 19.0 GiB free of 20.0 GiB, 5% used)"},
+		{"a mount point with a space", "tmpfs 1024 1000 24 98% /mnt/a disk", "", " (/mnt/a disk has 24 KiB free of 1 MiB, 98% used)"},
+		{"df fails", "", "1", ""},
+	} {
+		t.Run("diskstate: "+c.name, func(t *testing.T) {
+			t.Parallel()
+			file := filepath.Join(t.TempDir(), "log")
+			if err := os.WriteFile(file, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("sh", probe, "diskstate", file)
+			cmd.Env = append(os.Environ(), pathWith(dfDir), "DF_LINE="+c.line, "DF_FAIL="+c.fail)
+			if out, err := cmd.Output(); err != nil || string(out) != c.want {
+				t.Errorf("diskstate printed %q, %v, want %q", out, err, c.want)
 			}
 		})
 	}
