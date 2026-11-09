@@ -347,7 +347,9 @@ func (w *wtx) delegatedDefine(subject string, before, after map[string]any, keys
 // is an operator's (Store.Delegation); everyone else is told it is not
 // there. Command, Changes and Back stand inline while they fit in
 // MaxDelegationInline, and in one blob past it (Blob), which only
-// Store.DelegationBlob serves.
+// Store.DelegationBlob serves. A delegated pack apply's body stands in
+// its blob whatever its size (delegation_pack.go), so a reader of a
+// record that names a pack takes the body from Store.DelegationBlob.
 type Delegation struct {
 	ID         uint64    `json:"id"`
 	Yardmaster string    `json:"yardmaster"`
@@ -373,9 +375,9 @@ type Delegation struct {
 	// of these names it.
 	Grants []string `json:"grants,omitempty"`
 	// PackObjects are a delegated pack apply's objects with the fields
-	// the store's reading says each changes, inline as Objects are —
-	// the body's objects stand under the same JSON name, so an inline
-	// body does not keep them — held for the pack leg's field checks.
+	// the store's reading says each changes, inline as Objects are, held
+	// for the pack leg's field checks. The body's objects, with the diffs
+	// and before-states an operator reads, stand in the blob.
 	PackObjects []DelegatedPackObject `json:"pack_objects,omitempty"`
 	// Mappings are the mappings a delegated pack apply was started
 	// with, kept so a later write of its import (a declared source's
@@ -396,7 +398,11 @@ type Delegation struct {
 
 // DelegatedBody is the part of a record that may be held in its blob: the
 // command as typed, the store's own reading of what changed, and the
-// command that takes it back, or the words that say there is none.
+// command that takes it back, or the words that say there is none. A
+// delegated pack apply's is always held there: its Objects share their
+// JSON name with the record's own (Delegation.Objects), and the record's
+// wins, so a record that carries the body inline writes the names and
+// drops the objects with their diffs.
 type DelegatedBody struct {
 	Command string            `json:"command,omitempty"`
 	Changes []DelegatedChange `json:"changes,omitempty"`
@@ -460,7 +466,8 @@ type DelegatedPackObject struct {
 }
 
 // MaxDelegationInline is how large a record's body stands inline: the
-// bound a journal entry lives under, taken only as a size (3.4).
+// bound a journal entry lives under, taken only as a size (3.4). A
+// delegated pack apply's body never stands inline.
 const MaxDelegationInline = MaxJournalBytes
 
 var bDelegations = []byte("delegations") // seq: Delegation

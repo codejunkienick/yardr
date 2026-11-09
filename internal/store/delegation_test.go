@@ -134,6 +134,18 @@ func (y *delegationYard) latestRecord(t *testing.T) *store.Delegation {
 	return nil
 }
 
+// body is the body of the delegated record id as jo reads it, from its
+// blob: where a pack apply's always stands, however small, so a record
+// with none fails the test.
+func (y *delegationYard) body(t *testing.T, id uint64) store.DelegatedBody {
+	t.Helper()
+	body, err := y.api.DelegationBlob(y.ctx, id, "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return *body
+}
+
 // The delegated commands of the design's 3.2 each run from the yardmaster
 // for the operator on their cited mail, and each leaves its record, a
 // journal pointer naming the record's id alone and a mail to the operator

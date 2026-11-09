@@ -129,12 +129,8 @@ func TestDelegatedPackFromTheRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec, err := y.api.Delegation(y.ctx, firstID, "jo")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := rec.DelegatedBody; rec.Blob != nil || got.From != repoURL || got.Prior != "" || got.Digest != "abc123" || !strings.Contains(got.Back, "no earlier delegated run") {
-		t.Errorf("first record = %+v, want its small body from %s with no prior digest", rec, repoURL)
+	if got := y.body(t, firstID); got.From != repoURL || got.Prior != "" || got.Digest != "abc123" || !strings.Contains(got.Back, "no earlier delegated run") {
+		t.Errorf("first record's body = %+v, want it from %s with no prior digest", got, repoURL)
 	}
 	if text := y.telling(t); !strings.Contains(text, "from "+repoURL+"; the digest that stood before: none known") {
 		t.Errorf("the first telling = %q", text)
@@ -187,10 +183,7 @@ func TestDelegatedPackFromTheRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := y.api.Delegation(y.ctx, secondID, "jo")
-	if err != nil {
-		t.Fatal(err)
-	}
+	second := y.body(t, secondID)
 	if second.Prior != "abc123" {
 		t.Errorf("second record's prior = %q, want abc123", second.Prior)
 	}
@@ -210,8 +203,8 @@ func TestDelegatedPackFromTheRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if third, err := y.api.Delegation(y.ctx, thirdID, "jo"); err != nil || third.Prior != "abc123" {
-		t.Errorf("third record = %+v, %v; want prior abc123 over a failed run", third, err)
+	if third := y.body(t, thirdID); third.Prior != "abc123" {
+		t.Errorf("third record's body = %+v; want prior abc123 over a failed run", third)
 	}
 	finish(thirdID, true)
 
@@ -224,16 +217,16 @@ func TestDelegatedPackFromTheRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec, err := y.api.Delegation(y.ctx, embeddedID, "jo"); err != nil || rec.From != "" || rec.Prior != "" || !strings.Contains(rec.Back, "no one command takes a pack apply back") {
-		t.Errorf("an embedded record = %+v, %v; want no origin and no prior", rec, err)
+	if rec := y.body(t, embeddedID); rec.From != "" || rec.Prior != "" || !strings.Contains(rec.Back, "no one command takes a pack apply back") {
+		t.Errorf("an embedded record's body = %+v; want no origin and no prior", rec)
 	}
 	finish(embeddedID, true)
 	fifthID, err := y.api.StartDelegatedPack(ctx, start("jkl012"), "yardmaster")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fifth, err := y.api.Delegation(y.ctx, fifthID, "jo"); err != nil || fifth.Prior != "" || !strings.Contains(fifth.Back, "no earlier delegated run") {
-		t.Errorf("a repository run after an embedded one = %+v, %v; want no prior", fifth, err)
+	if fifth := y.body(t, fifthID); fifth.Prior != "" || !strings.Contains(fifth.Back, "no earlier delegated run") {
+		t.Errorf("a repository run after an embedded one = %+v; want no prior", fifth)
 	}
 }
 

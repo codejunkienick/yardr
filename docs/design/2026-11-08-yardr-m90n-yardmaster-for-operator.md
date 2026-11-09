@@ -556,6 +556,13 @@ What the record offers instead is named per case below.
 where yardr cannot, the record says so instead of implying a way
 back.
 
+Note, 9 Nov 2026 (yardr-eyr9): a delegated pack apply's record keeps its
+body in the blob whatever its size, not only past 4 KiB. The record's own
+list of object names and the body's objects share a JSON name, and the
+record's wins, so a body kept inline wrote the names and lost the diffs and
+before-states. The names stay in the record, where the pack leg reads them
+in every write; a reader takes the rest from `DelegationBlob`.
+
 Third, mail to the operator the run was for, written by the yard
 in the same write — for a pack apply, in the `started` write and
 again at its end, as above — saying what ran, on which mail, the

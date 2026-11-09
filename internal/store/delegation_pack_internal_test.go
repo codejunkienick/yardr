@@ -66,11 +66,35 @@ func TestDelegatedPackRecordExpires(t *testing.T) {
 	if err := s.PutGroup(packCtx, Group{Name: "builders", Runner: "herdr", Limit: 1, Config: map[string]any{"kind": "claude", "model": "sonnet"}}, "yardmaster"); err == nil {
 		t.Error("a write under an expired started record was let through")
 	}
+	// A record an earlier build started carries its small body in the record,
+	// not in a blob: the finish moves it to the blob, where every pack
+	// record's body stands.
+	if err := s.write(func(w *wtx) error {
+		rec := new(Delegation)
+		if _, err := get(w.Tx, bDelegations, seqKey(id), rec); err != nil {
+			return err
+		}
+		body, err := w.delegationBody(rec)
+		if err != nil {
+			return err
+		}
+		rec.DelegatedBody, rec.Blob = body, nil
+		return put(w.Tx, bDelegations, seqKey(id), rec)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rec, err := s.Delegation(ctx, id, "jo"); err != nil || rec.Blob != nil || rec.Pack != "starter" {
+		t.Fatalf("started record = %+v, %v; want its body in the record", rec, err)
+	}
 	if err := s.FinishDelegatedPack(dctx, id, false, nil, "the run timed out", "yardmaster"); err != nil {
 		t.Errorf("an expired record no longer finishes: %v", err)
 	}
-	if rec, err := s.Delegation(ctx, id, "jo"); err != nil || rec.State != "failed" {
-		t.Errorf("record = %+v, %v; want failed", rec, err)
+	rec, err := s.Delegation(ctx, id, "jo")
+	if err != nil || rec.State != "failed" || rec.Blob == nil || !reflect.DeepEqual(rec.DelegatedBody, DelegatedBody{}) {
+		t.Fatalf("record = %+v, %v; want failed, its body in the blob and none in the record", rec, err)
+	}
+	if body, err := s.DelegationBlob(ctx, id, "jo"); err != nil || body.Pack != "starter" || body.Command == "" || body.Error != "the run timed out" {
+		t.Errorf("body = %+v, %v; want the pack, the command and the error", body, err)
 	}
 }
 

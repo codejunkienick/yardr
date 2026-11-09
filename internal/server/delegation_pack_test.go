@@ -66,11 +66,25 @@ func TestDelegatedPackApplyThroughTheServerReading(t *testing.T) {
 			rec = d
 		}
 	}
-	if rec == nil || rec.State != "done" || rec.DelegatedBody.Pack != "telegram" || rec.DelegatedBody.Digest != plan.Digest {
-		t.Fatalf("record = %+v, want telegram done with digest %s", rec, plan.Digest)
+	if rec == nil || rec.State != "done" {
+		t.Fatalf("record = %+v, want it done", rec)
+	}
+	if body := recordBody(t, st, rec.ID); body.Pack != "telegram" || body.Digest != plan.Digest {
+		t.Fatalf("record body = %+v, want telegram with digest %s", body, plan.Digest)
 	}
 	t.Run("depot pack", delegatedDepotPackApplyRecordsWhatItDid)
 	t.Run("frame pack", delegatedFramePackApplyRecordsItsFrame)
+}
+
+// recordBody is the body of the delegated record id as jo reads it, from
+// its blob: where a pack apply's always stands, however small.
+func recordBody(t *testing.T, st store.API, id uint64) store.DelegatedBody {
+	t.Helper()
+	body, err := st.DelegationBlob(context.Background(), id, "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return *body
 }
 
 // A delegated apply of a pack that names a depot, through the server's own

@@ -766,8 +766,9 @@ func (s *Store) pruneBlobs() (int, error) {
 		}); err != nil {
 			return err
 		}
-		// And a delegated record's body past its inline bound, which no
-		// letter or note names: it stands while its record does.
+		// And a delegated record's body held in a blob, past its inline
+		// bound or as a pack apply's always is, which no letter or note
+		// names: it stands while its record does.
 		return each(tx, bDelegations, "", func(_ []byte, d *Delegation) error {
 			if d.Blob != nil {
 				named[d.Blob.Hash] = true

@@ -196,7 +196,10 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 				Label: packs.Embedded + " in yardr " + build, Build: build,
 				Sources: []store.AskSource{{Name: name, Text: string(text)}}}, nil
 		case "starter":
-			return &store.PackReading{Name: "starter", Kind: "git", Depot: depot, Digest: "abc", Plan: &store.AskPlan{}}, nil
+			return &store.PackReading{Name: "starter", Kind: "git", Depot: depot, Digest: "abc", Plan: &store.AskPlan{Objects: []store.AskPlanObject{
+				{Kind: "group", Name: "web-builders", Action: "change"},
+				{Kind: "file", Name: "roles/builder.md", Action: "create"},
+			}}}, nil
 		}
 		return nil, store.ErrNotFound
 	}
@@ -263,26 +266,41 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 		t.Fatalf("telegram was not applied: %v", err)
 	}
 	rec, err := st.Delegation(ctx, 1, "jo")
-	if err != nil || rec.State != "done" || rec.DelegatedBody.Pack != "telegram" || rec.DelegatedBody.Digest == "" {
-		t.Fatalf("record 1 = %+v, %v; want telegram done with its digest", rec, err)
+	if err != nil || rec.State != "done" || rec.Blob == nil {
+		t.Fatalf("record 1 = %+v, %v; want it done with its body in the blob", rec, err)
+	}
+	if body, err := st.DelegationBlob(ctx, 1, "jo"); err != nil || body.Pack != "telegram" || body.Digest == "" {
+		t.Fatalf("record 1's body = %+v, %v; want telegram with its digest", body, err)
 	}
 	if show := mustAs(t, st, "jo", "delegation", "show", "1"); !strings.Contains(show, "state: done") || !strings.Contains(show, "pack telegram") {
 		t.Errorf("delegation show 1:\n%s", show)
 	}
 
-	// A record left started reads as unfinished, never done.
+	// A record left started reads as unfinished, never done, and a small
+	// one lists its objects with their diffs and before-states as a large
+	// one does.
 	mustAs(t, st, "jo", "mail", "yardmaster", "and starter in web")
 	head, err = st.Head(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dctx := store.WithDelegation(ctx, store.DelegatedCall{For: "jo", Mail: head, Command: "yardr pack apply starter --depot web"})
-	id, err := st.StartDelegatedPack(dctx, store.DelegatedPackStart{Pack: "starter", Depot: "web", Digest: "abc"}, "yardmaster")
+	id, err := st.StartDelegatedPack(dctx, store.DelegatedPackStart{Pack: "starter", Depot: "web", Digest: "abc", Objects: []store.DelegatedPackObject{
+		{Kind: "group", Name: "web-builders", Action: "change", Diff: "model: sonnet -> opus", Before: `{"model":"sonnet"}`, Had: true},
+		{Kind: "file", Name: "roles/builder.md", Action: "create", Diff: "+the role the pack installs"},
+	}}, "yardmaster")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if show := mustAs(t, st, "jo", "delegation", "show", strconv.FormatUint(id, 10)); !strings.Contains(show, "state: started (unfinished)") {
-		t.Errorf("a started record's show:\n%s", show)
+	show := mustAs(t, st, "jo", "delegation", "show", strconv.FormatUint(id, 10))
+	for _, want := range []string{
+		"state: started (unfinished)",
+		"  group web-builders: change\n    diff: model: sonnet -> opus\n    before: {\"model\":\"sonnet\"}\n",
+		"  file roles/builder.md: create\n    diff: +the role the pack installs\n",
+	} {
+		if !strings.Contains(show, want) {
+			t.Errorf("a started record's show lacks %q:\n%s", want, show)
+		}
 	}
 
 	// A plan that asks refuses whole and leaves no record.
@@ -365,8 +383,11 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 		t.Fatalf("pushover was not applied: %v", err)
 	}
 	rec, err = st.Delegation(ctx, id+1, "jo")
-	if err != nil || rec.State != "done" || rec.DelegatedBody.From != from || rec.DelegatedBody.Digest != plan.Digest || rec.DelegatedBody.Prior != "" {
-		t.Fatalf("record %d = %+v, %v; want pushover done from %s", id+1, rec, err, from)
+	if err != nil || rec.State != "done" {
+		t.Fatalf("record %d = %+v, %v; want it done", id+1, rec, err)
+	}
+	if body, err := st.DelegationBlob(ctx, id+1, "jo"); err != nil || body.From != from || body.Digest != plan.Digest || body.Prior != "" {
+		t.Fatalf("record %d's body = %+v, %v; want pushover from %s", id+1, body, err, from)
 	}
 	for _, want := range []string{"from: " + from, "prior digest: none known", "pack pushover, digest " + pin, "state: done"} {
 		if show := mustAs(t, st, "jo", "delegation", "show", strconv.FormatUint(id+1, 10)); !strings.Contains(show, want) {

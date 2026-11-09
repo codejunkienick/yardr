@@ -151,8 +151,9 @@ func TestWebDelegationRecord(t *testing.T) {
 	// unfinished), the pack and its digest, where it came from and the digest
 	// that stood before it, what each object does with its diff and
 	// before-state, what was written and why it failed. The objects stand in
-	// the record's blob once their before-states pass the inline bound, as the
-	// one here does, and the page reads them from it.
+	// the record's blob whatever their size, and the page reads them from it:
+	// a record of small objects lists them with their diffs as one whose
+	// before-state passes the inline bound does.
 	const origin = "https://repo.example.com/yardr-packs/main/starter/"
 	stood := strings.Repeat("what stood ", 500)
 	plan := &store.AskPlan{Objects: []store.AskPlanObject{
@@ -173,6 +174,11 @@ func TestWebDelegationRecord(t *testing.T) {
 		{Kind: "file", Name: "roles/reviewer.md", Action: "create"},
 	}
 	bare := []store.DelegatedPackObject{{Kind: "group", Name: "builders", Action: "change"}, {Kind: "file", Name: "roles/builder.md", Action: "change"}, {Kind: "file", Name: "roles/reviewer.md", Action: "create"}}
+	small := []store.DelegatedPackObject{
+		{Kind: "group", Name: "builders", Action: "change", Diff: "model: sonnet -> opus", Before: `{"kind":"claude","model":"sonnet"}`, Had: true},
+		{Kind: "file", Name: "roles/builder.md", Action: "change", Diff: "-the role that stood\n+what stands now", Before: "the role that stood", Had: true},
+		{Kind: "file", Name: "roles/reviewer.md", Action: "create", Diff: "+the reviewer's role"},
+	}
 	written := []string{"group builders", "file roles/builder.md", "file roles/reviewer.md"}
 	packCtx := store.WithDelegation(ctx, store.DelegatedCall{For: "jo", Mail: mail, Command: "yardr pack apply starter --depot home"})
 	begin := func(from, digest string, objs []store.DelegatedPackObject) uint64 {
@@ -193,6 +199,8 @@ func TestWebDelegationRecord(t *testing.T) {
 	finish(first, true, written, "")
 	failed := begin(origin, "bbb222", objects)
 	finish(failed, false, written[:1], "route web-builders: the disk is full")
+	little := begin("", "abc123", small)
+	finish(little, true, written, "")
 	started := begin("", "abc123", bare)
 	for _, c := range []struct {
 		name string
@@ -210,6 +218,13 @@ func TestWebDelegationRecord(t *testing.T) {
 			"<code>file roles/reviewer.md</code>: create",
 			"no one command takes a pack apply back",
 		}, []string{"<dt>from</dt>", "<dt>prior digest</dt>", "<dt>failed</dt>", "unfinished"}},
+		{"done, objects small enough to stand inline", little, []string{
+			"<dt>state</dt><dd>done</dd>",
+			"<code>group builders</code>: change", "<dt>diff</dt>", "model: sonnet -> opus",
+			"<dt>before</dt>", `{"kind":"claude","model":"sonnet"}`,
+			"<code>file roles/builder.md</code>: change", "-the role that stood", "+what stands now", "the role that stood",
+			"<code>file roles/reviewer.md</code>: create", "+the reviewer's role",
+		}, []string{"<dt>failed</dt>", "unfinished"}},
 		{"done, the first from the repository", first, []string{
 			"<dt>state</dt><dd>done</dd>",
 			"<dt>pack</dt><dd>starter, digest sha256:aaa111</dd>",

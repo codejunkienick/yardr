@@ -135,8 +135,11 @@ func TestDelegatedPackApplyThroughTheServerFetcher(t *testing.T) {
 		t.Fatalf("telegram was not applied: %v", err)
 	}
 	rec, err := st.Delegation(ctx, 1, "jo")
-	if err != nil || rec.State != "done" || rec.DelegatedBody.From != from || rec.DelegatedBody.Digest != plan.Digest || rec.DelegatedBody.Prior != "" {
-		t.Fatalf("record = %+v, %v; want telegram done from %s with digest %s", rec, err, from, plan.Digest)
+	if err != nil || rec.State != "done" {
+		t.Fatalf("record = %+v, %v; want it done", rec, err)
+	}
+	if body := recordBody(t, st, rec.ID); body.From != from || body.Digest != plan.Digest || body.Prior != "" {
+		t.Fatalf("record body = %+v; want telegram from %s with digest %s", body, from, plan.Digest)
 	}
 }
 

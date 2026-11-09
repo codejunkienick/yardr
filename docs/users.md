@@ -380,7 +380,7 @@ What taking a run back costs depends on what it was:
 A delegated pack apply's record is written `started` before its first
 object and rewritten `done` or `failed` at the end: it holds the pack's
 digest, its objects by name, each updated object's diff and the complete
-before-state (in the record up to 4 KiB, in one blob past it, which the
+before-state (kept in one blob, whatever the record's size, which the
 record's page and `yardr delegation show <id>` read). A record that would
 pass the yard's blob cap refuses before anything writes. The operator is
 mailed when the run starts and how it ended; a failure names the objects

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,10 +37,10 @@ func fakePackImportObjects(role string) []store.PackObject {
 }
 
 // A delegated pack apply's record is written started before the first
-// object and rewritten done or failed at its end: past the inline bound
-// its before-state stands in one blob an operator alone reads, a record
-// left started reads as unfinished, and an over-cap record refuses
-// before anything writes.
+// object and rewritten done or failed at its end: its body, with the
+// before-state, stands in one blob an operator alone reads, whatever its
+// size, a record left started reads as unfinished, and an over-cap record
+// refuses before anything writes.
 func TestDelegatedPackRecord(t *testing.T) {
 	t.Parallel()
 	y := newDelegationYard(t)
@@ -150,6 +151,38 @@ func TestDelegatedPackRecord(t *testing.T) {
 		t.Errorf("failed telling = %q", text)
 	}
 
+	// A record whose objects are small reads back as whole as the one
+	// above, before its finish and after it: its body stands in the blob
+	// however small it is, for inline it would keep the objects' names
+	// alone (they share a JSON name with the record's own). The telling
+	// still carries the command, whose length the blob says nothing of.
+	small := []store.DelegatedPackObject{
+		{Kind: "group", Name: "builders", Action: "change", Diff: "model: sonnet -> opus", Before: `{"kind":"claude","model":"sonnet"}`, Had: true},
+		{Kind: "file", Name: "roles/builder.md", Action: "create", Diff: "+the role the pack installs"},
+	}
+	smallID, err := y.api.StartDelegatedPack(ctx, store.DelegatedPackStart{Pack: "starter", Depot: "shed", Digest: "abc123", Objects: small}, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	readSmall := func(stage string) {
+		t.Helper()
+		rec, err := y.api.Delegation(y.ctx, smallID, "jo")
+		if err != nil || rec.Blob == nil || !reflect.DeepEqual(rec.DelegatedBody, store.DelegatedBody{}) {
+			t.Fatalf("%s: record = %+v, %v; want its body in the blob and none in the record", stage, rec, err)
+		}
+		if got := y.body(t, smallID).Objects; !reflect.DeepEqual(got, small) {
+			t.Errorf("%s: objects = %+v, want %+v", stage, got, small)
+		}
+		if text := y.telling(t); !strings.Contains(text, "yardr pack apply starter --depot shed") || strings.Contains(text, "too long for mail") {
+			t.Errorf("%s: telling = %q, want the command", stage, text)
+		}
+	}
+	readSmall("started")
+	if err := y.api.FinishDelegatedPack(ctx, smallID, true, []string{"group builders", "file roles/builder.md"}, "", "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	readSmall("done")
+
 	// Over the blob cap the record refuses before anything writes.
 	if err := y.api.SetSetting(y.ctx, store.BlobMaxSetting, "64", "jo"); err != nil {
 		t.Fatal(err)
@@ -157,7 +190,7 @@ func TestDelegatedPackRecord(t *testing.T) {
 	if _, err := y.api.StartDelegatedPack(ctx, start, "yardmaster"); err == nil || !strings.Contains(err.Error(), "blob cap") {
 		t.Errorf("over-cap start: %v", err)
 	}
-	if _, err := y.api.Delegation(y.ctx, id2+1, "jo"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := y.api.Delegation(y.ctx, smallID+1, "jo"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("an over-cap start left a record: %v", err)
 	}
 }

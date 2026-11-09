@@ -143,12 +143,11 @@ func (w *wtx) priorRepoPack(of string) (*Delegation, DelegatedBody, error) {
 // what was written before a failure and the error. The before-state and
 // diffs stand in the record alone, as every delegated telling's do. A pack
 // of the packs repository names where it came from and the digest that
-// stood before it, the one its take-back is pinned to.
+// stood before it, the one its take-back is pinned to. The command stands
+// as far as half the mail: the record's body is always in its blob, so
+// that says nothing of how long the command is.
 func delegatedPackMail(rec Delegation, body DelegatedBody) string {
 	command := body.Command
-	if rec.Blob != nil {
-		command = "(too long for mail: it is in the record)"
-	}
 	if len(command) > MaxMailBytes/2 {
 		command = command[:MaxMailBytes/2] + "…"
 	}

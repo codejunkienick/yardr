@@ -3,11 +3,12 @@
 // written "started" before the first object and rewritten "done" or
 // "failed" at the end, in the bucket of the other delegated records
 // (delegation.go), with the pack's digest, its plan's objects by name,
-// each updated object's diff and the complete before-state, inline up to
-// MaxDelegationInline and in one blob past it. A record that would pass
-// the blob cap refuses before anything writes. The import's own writes
-// ride the record (WithDelegatedPack, packDelegated): the leg holds
-// them to the objects the started record names.
+// each updated object's diff and the complete before-state: what the leg
+// reads in every write stands in the record, and the body in one blob
+// whatever its size (DelegatedBody). A record that would pass the blob cap
+// refuses before anything writes. The import's own writes ride the record
+// (WithDelegatedPack, packDelegated): the leg holds them to the objects
+// the started record names.
 package store
 
 import (
@@ -132,16 +133,16 @@ func (s *Store) StartDelegatedPack(ctx context.Context, start DelegatedPackStart
 		if int64(len(raw)) > limit {
 			return fmt.Errorf("pack %s: its record of before-state and diffs is %d bytes, over the yard's blob cap of %d (%s): this pack is the operator's to type in a terminal", start.Pack, len(raw), limit, BlobMaxSetting)
 		}
-		rec := Delegation{Yardmaster: ym, For: d.For, At: now(), Mail: d.Mail, Of: of, State: "started", Grants: start.Grants, Mappings: start.Mappings, Import: start.held, DelegatedBody: body}
+		rec := Delegation{Yardmaster: ym, For: d.For, At: now(), Mail: d.Mail, Of: of, State: "started", Grants: start.Grants, Mappings: start.Mappings, Import: start.held}
 		for _, o := range start.Objects {
 			rec.Objects = append(rec.Objects, o.Kind+" "+o.Name)
 			rec.PackObjects = append(rec.PackObjects, DelegatedPackObject{Kind: o.Kind, Name: o.Name, Action: o.Action, Fields: o.Fields, Changes: o.Changes, Target: o.Target})
 		}
-		if len(raw) > MaxDelegationInline {
-			if rec.Blob, err = w.keepDelegationBlob(raw); err != nil {
-				return err
-			}
-			rec.DelegatedBody = DelegatedBody{}
+		// The body goes to its blob whatever its size: inline, the record
+		// writes its Objects (names) under the JSON name the body's objects
+		// carry, and the diffs and before-states are lost.
+		if rec.Blob, err = w.keepDelegationBlob(raw); err != nil {
+			return err
 		}
 		if rec.ID, err = w.Bucket(bDelegations).NextSequence(); err != nil {
 			return err
@@ -194,14 +195,12 @@ func (s *Store) FinishDelegatedPack(ctx context.Context, id uint64, done bool, w
 		if err != nil {
 			return err
 		}
-		if len(raw) > MaxDelegationInline {
-			if rec.Blob, err = w.keepDelegationBlob(raw); err != nil {
-				return err
-			}
-			rec.DelegatedBody = DelegatedBody{}
-		} else {
-			rec.DelegatedBody, rec.Blob = body, nil
+		// A started record an earlier build wrote may carry its small body
+		// inline (delegationBody reads either): it moves to the blob here.
+		if rec.Blob, err = w.keepDelegationBlob(raw); err != nil {
+			return err
 		}
+		rec.DelegatedBody = DelegatedBody{}
 		if err := put(w.Tx, bDelegations, seqKey(id), rec); err != nil {
 			return err
 		}
