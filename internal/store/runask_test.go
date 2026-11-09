@@ -1298,7 +1298,8 @@ func TestRunAskPeerRm(t *testing.T) {
 // Linking a yard is a weighty card of class trust: it names the peer, the
 // yard and its key whole, and where this yard calls it or that it never
 // calls it, and the operator's weighed approval links exactly as the
-// terminal command does. Approving unweighed is refused, an approval
+// terminal command does, the invite's encryption key pinned with its
+// signing key. Approving unweighed is refused, an approval
 // through the peer's own reach is refused, and a peer added under the
 // name since makes the card stale.
 func TestRunAskPeerAdd(t *testing.T) {
@@ -1421,6 +1422,23 @@ func TestRunAskPeerAdd(t *testing.T) {
 	}
 	if p := y.peerOf(t, "south"); p.URL != "" {
 		t.Fatalf("the link without a URL calls %q", p.URL)
+	}
+
+	// An invite that carries an encryption key (yardr-peer-2) has it pinned
+	// by the approval, as the terminal command pins it, so the link is
+	// sealed. One made without the key is refused by the sealed wire until
+	// it is re-linked, and a card that dropped the key would make the same
+	// link again.
+	_, encPub, err := GenerateEnc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, runAsk("peer add sealed "+Invite{Name: "near-yard", Key: mkkey("near"), Enc: encPub}.String()), "yardmaster")
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if p := y.peerOf(t, "sealed"); p.Enc != encPub || !p.Sealed() {
+		t.Fatalf("the link a yardr-peer-2 invite makes by a card = %+v, want its encryption key %q pinned, and sealed", p, encPub)
 	}
 
 	// Asking refuses what the command would refuse, with nothing stored.

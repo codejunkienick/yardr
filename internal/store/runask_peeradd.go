@@ -41,7 +41,9 @@ func (w *wtx) peerAddCard(argv []string, asking bool) (AskRun, error) {
 	if err := w.checkPeerInvite(inv.Key); err != nil {
 		return AskRun{}, err
 	}
-	p := Peer{Name: name, Key: inv.Key, URL: inv.URL, Calls: inv.Name}
+	// The peer the approval will make, as runPeerAdd makes it: what peerFree
+	// checks is what is stored.
+	p := Peer{Name: name, Key: inv.Key, Enc: inv.Enc, URL: inv.URL, Calls: inv.Name}
 	if err := peerFree(w.Tx, &p); err != nil {
 		if asking {
 			return AskRun{}, err
@@ -94,7 +96,10 @@ func runPeerAdd(ctx context.Context, w *wtx, argv []string, actor string, by *ap
 	if err != nil {
 		return "", err
 	}
-	p, err := w.addPeer(ctx, Peer{Name: argv[2], Key: inv.Key, URL: inv.URL, Calls: inv.Name}, actor, by)
+	// The invite's encryption key is pinned with its signing key, as the
+	// terminal command pins it: a peer without it is refused by the sealed
+	// wire until it is re-linked (peersealed.go), however it was added.
+	p, err := w.addPeer(ctx, Peer{Name: argv[2], Key: inv.Key, Enc: inv.Enc, URL: inv.URL, Calls: inv.Name}, actor, by)
 	if err != nil {
 		return "", err
 	}
