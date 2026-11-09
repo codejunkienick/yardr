@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +18,9 @@ import (
 
 // The help names what the server is built on and the revisions it
 // speaks, as its floor asks: a person setting up a client reads here
-// whether theirs can connect at all.
+// whether theirs can connect at all. It names the SDK and no version of
+// it: a version in a help text goes stale at the next bump (this one read
+// v1.7.0 under a go.mod that pinned v1.8.0), and go.mod says which.
 func TestMCPHelpNamesTheSDKAndItsRevisions(t *testing.T) {
 	t.Parallel()
 	out, err := run(t, (&app{env: testEnv(t, t.TempDir())}).mcpCmd(), "--help")
@@ -25,13 +28,18 @@ func TestMCPHelpNamesTheSDKAndItsRevisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"official Go SDK for MCP", "modelcontextprotocol", "go-sdk, v1.7.0",
+		"official Go SDK for MCP", "modelcontextprotocol", "go-sdk",
 		"2026-07-28", "2025-06-18", "2025-11-25",
 		mcp.FloorMessage, "--connection", "answering one message by", "number with mail to its sender",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("yardr mcp --help lacks %q:\n%s", want, out)
 		}
+	}
+	// A dotted number after the SDK's name is a version; the revisions it
+	// speaks are dated with dashes, so they are not taken for one.
+	if version := regexp.MustCompile(`go-sdk\W+v?\d+\.\d+`).FindString(out); version != "" {
+		t.Errorf("yardr mcp --help names a version of the SDK (%q):\n%s", version, out)
 	}
 }
 

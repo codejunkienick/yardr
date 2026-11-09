@@ -89,6 +89,18 @@ func (y readErrorYard) NextStages(ctx context.Context, id string) (*store.NextSt
 	return y.Yard.NextStages(ctx, id)
 }
 
+// noFilerYard lists every piece as one the store holds no filer for, which
+// no store call can make: the store records a filer on every piece it makes.
+type noFilerYard struct{ mcp.Yard }
+
+func (y noFilerYard) ListBeads(ctx context.Context, f store.BeadFilter) ([]store.Bead, error) {
+	beads, err := y.Yard.ListBeads(ctx, f)
+	for i := range beads {
+		beads[i].CreatedBy = nil
+	}
+	return beads, err
+}
+
 func newYard(t *testing.T) *yard {
 	t.Helper()
 	api, owned := storetest.NewOwned(t)
@@ -244,7 +256,7 @@ func TestNoUserRefusesEveryTool(t *testing.T) {
 	y := newYard(t)
 	s := &mcp.Service{Yard: y.st, User: ""}
 	calls := []func() error{
-		func() error { _, err := s.WhatIsHappening(y.ctx, "", ""); return err },
+		func() error { _, err := s.WhatIsHappening(y.ctx, "", "", false); return err },
 		func() error { _, err := s.AskForSomething(y.ctx, "a thing", ""); return err },
 		func() error { _, err := s.WhatWaitsForMe(y.ctx); return err },
 		func() error {
@@ -431,7 +443,7 @@ func TestWhatIsHappening(t *testing.T) {
 	if _, err := y.st.CloseBead(y.ctx, long, longWhy, store.Expect{}, "ada"); err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.WhatIsHappening(y.ctx, "", "")
+	res, err := s.WhatIsHappening(y.ctx, "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +605,7 @@ func TestWhatIsHappening(t *testing.T) {
 	if err := y.st.AddNote(y.ctx, mine, "the figures arrived", "bob"); err != nil {
 		t.Fatal(err)
 	}
-	res, err = s.WhatIsHappening(y.ctx, "", opens.UTC().Format(time.RFC3339Nano))
+	res, err = s.WhatIsHappening(y.ctx, "", opens.UTC().Format(time.RFC3339Nano), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +641,7 @@ func TestWhatIsHappening(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	res, err = s.WhatIsHappening(y.ctx, "", oldSince.UTC().Format(time.RFC3339Nano))
+	res, err = s.WhatIsHappening(y.ctx, "", oldSince.UTC().Format(time.RFC3339Nano), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -662,7 +674,7 @@ func TestWhatIsHappening(t *testing.T) {
 	// work was touched, none of it is changed, and the piece finished after
 	// that is not finished lately, while the open work is still told.
 	early := &mcp.Service{Yard: y.st, User: "ada", Now: func() time.Time { return opens.Add(-time.Hour) }}
-	res, err = early.WhatIsHappening(y.ctx, "", opens.Add(-2*time.Hour).UTC().Format(time.RFC3339Nano))
+	res, err = early.WhatIsHappening(y.ctx, "", opens.Add(-2*time.Hour).UTC().Format(time.RFC3339Nano), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -670,7 +682,7 @@ func TestWhatIsHappening(t *testing.T) {
 		t.Errorf("a window that ends before the work was touched is\n%s", res.Text)
 	}
 	// One piece in full, with its notes.
-	res, err = s.WhatIsHappening(y.ctx, mine, "")
+	res, err = s.WhatIsHappening(y.ctx, mine, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -685,7 +697,7 @@ func TestWhatIsHappening(t *testing.T) {
 	// stuck is not "under way" for being asked about alone.
 	for _, c := range cases {
 		id, _ := byTitle[c.title]["work"].(string)
-		res, err := s.WhatIsHappening(y.ctx, id, "")
+		res, err := s.WhatIsHappening(y.ctx, id, "", false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -716,7 +728,7 @@ func TestWhatIsHappening(t *testing.T) {
 		{landed, "finished", ""},
 		{done, "finished", ""},
 	} {
-		res, err := s.WhatIsHappening(y.ctx, c.work, "")
+		res, err := s.WhatIsHappening(y.ctx, c.work, "", false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -739,14 +751,14 @@ func TestWhatIsHappening(t *testing.T) {
 	// beside its standing, in the account and in the one piece.
 	seq := y.ask(t, done, choicesAsk("ada"))
 	waits := fmt.Sprintf("finished; question %d still waits for you", seq)
-	res, err = s.WhatIsHappening(y.ctx, done, "")
+	res, err = s.WhatIsHappening(y.ctx, done, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(res.Text, "It is "+waits) || fmt.Sprint(res.Structured["waiting_questions"]) != fmt.Sprintf("[%d]", seq) {
 		t.Errorf("the finished piece hides its waiting question:\n%s\n%+v", res.Text, res.Structured)
 	}
-	res, err = s.WhatIsHappening(y.ctx, "", "")
+	res, err = s.WhatIsHappening(y.ctx, "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -757,7 +769,7 @@ func TestWhatIsHappening(t *testing.T) {
 	}
 	// A piece closed early is over as well: its question waits still.
 	seq = y.ask(t, banner, choicesAsk("ada"))
-	res, err = s.WhatIsHappening(y.ctx, banner, "")
+	res, err = s.WhatIsHappening(y.ctx, banner, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -765,7 +777,7 @@ func TestWhatIsHappening(t *testing.T) {
 		fmt.Sprint(res.Structured["waiting_questions"]) != fmt.Sprintf("[%d]", seq) {
 		t.Errorf("the piece closed early hides its waiting question:\n%s\n%+v", res.Text, res.Structured)
 	}
-	res, err = s.WhatIsHappening(y.ctx, "", "")
+	res, err = s.WhatIsHappening(y.ctx, "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -776,7 +788,7 @@ func TestWhatIsHappening(t *testing.T) {
 	}
 	// A window that excludes the finished work drops it, and the work closed
 	// early with it.
-	res, err = s.WhatIsHappening(y.ctx, "", time.Now().Add(time.Hour).UTC().Format(time.RFC3339))
+	res, err = s.WhatIsHappening(y.ctx, "", time.Now().Add(time.Hour).UTC().Format(time.RFC3339), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -790,7 +802,7 @@ func TestWhatIsHappening(t *testing.T) {
 	// that has not started is open work, so it is not that account.
 	quiet := newYard(t)
 	quiet.depot(t, "shop")
-	res, err = svc(quiet, "").WhatIsHappening(quiet.ctx, "", "")
+	res, err = svc(quiet, "").WhatIsHappening(quiet.ctx, "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -804,7 +816,7 @@ func TestWhatIsHappening(t *testing.T) {
 		t.Errorf("an empty account is\n%s\n%+v", res.Text, res.Structured)
 	}
 	quiet.bead(t, store.NewBead{Title: "Plan the stall", Depot: "shop", Stage: "backlog", For: "ada"})
-	res, err = svc(quiet, "").WhatIsHappening(quiet.ctx, "", "")
+	res, err = svc(quiet, "").WhatIsHappening(quiet.ctx, "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -815,27 +827,27 @@ func TestWhatIsHappening(t *testing.T) {
 
 	settingsErr := errors.New("settings unavailable")
 	s.Yard = readErrorYard{Yard: y.st, settingsErr: settingsErr}
-	if _, err := s.WhatIsHappening(y.ctx, "", ""); !errors.Is(err, settingsErr) {
+	if _, err := s.WhatIsHappening(y.ctx, "", "", false); !errors.Is(err, settingsErr) {
 		t.Fatalf("a failed owner lookup = %v, want its settings error", err)
 	}
 	blockersErr := errors.New("blockers unavailable")
 	s.Yard = readErrorYard{Yard: y.st, blockersErr: blockersErr}
-	if _, err := s.WhatIsHappening(y.ctx, "", ""); !errors.Is(err, blockersErr) {
+	if _, err := s.WhatIsHappening(y.ctx, "", "", false); !errors.Is(err, blockersErr) {
 		t.Fatalf("a failed blocker lookup = %v, want its error", err)
 	}
-	if _, err := s.WhatIsHappening(y.ctx, mine, ""); !errors.Is(err, blockersErr) {
+	if _, err := s.WhatIsHappening(y.ctx, mine, "", false); !errors.Is(err, blockersErr) {
 		t.Fatalf("a failed one-piece blocker lookup = %v, want its error", err)
 	}
 	sessionsErr := errors.New("sessions unavailable")
 	s.Yard = readErrorYard{Yard: y.st, sessionsErr: sessionsErr}
-	if _, err := s.WhatIsHappening(y.ctx, "", ""); !errors.Is(err, sessionsErr) {
+	if _, err := s.WhatIsHappening(y.ctx, "", "", false); !errors.Is(err, sessionsErr) {
 		t.Fatalf("a failed session lookup = %v, want its error", err)
 	}
 	// A flow that cannot be read tells nothing of where a closed piece
 	// stopped, so the account still answers and tells each as finished, as it
 	// told every closed piece before the stage was read.
 	s.Yard = readErrorYard{Yard: y.st, flowErr: errors.New("flows unavailable")}
-	res, err = s.WhatIsHappening(y.ctx, "", "")
+	res, err = s.WhatIsHappening(y.ctx, "", "", false)
 	if err != nil {
 		t.Fatalf("a flow that cannot be read fails the account: %v", err)
 	}
@@ -844,10 +856,11 @@ func TestWhatIsHappening(t *testing.T) {
 	}) || strings.Contains(res.Text, "Closed before they were finished") || strings.Contains(res.Text, "closed early") {
 		t.Errorf("a piece whose flow cannot be read is not told finished:\n%s", res.Text)
 	}
-	if res, err = s.WhatIsHappening(y.ctx, banner, ""); err != nil || res.Structured["state"] != "finished" {
+	if res, err = s.WhatIsHappening(y.ctx, banner, "", false); err != nil || res.Structured["state"] != "finished" {
 		t.Errorf("the one piece whose flow cannot be read = %+v, %v; want it finished", res, err)
 	}
 	checkWhatIsHappeningBuildingNow(t)
+	checkWhatIsHappeningFiledByMe(t)
 }
 
 // A piece is building now while a session of the yard is starting or
@@ -884,7 +897,7 @@ func checkWhatIsHappeningBuildingNow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := svc(y, "").WhatIsHappening(y.ctx, "", "")
+	res, err := svc(y, "").WhatIsHappening(y.ctx, "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -933,6 +946,86 @@ func checkWhatIsHappeningBuildingNow(t *testing.T) {
 	}
 	if ended := items[ended]; ended["state"] != "under way" {
 		t.Errorf("the piece whose session died is %v, want it under way again", ended["state"])
+	}
+}
+
+// filed_by_me narrows the account to the pieces the person filed themselves.
+// The account without it is all that is theirs, what the crew filed for them
+// at their request among it; neither lists another person's work, not even a
+// piece the person filed for someone else, since the flag only narrows. The
+// words say which account it is. A piece the store holds no filer for is
+// nobody's filing: none is the person's to list, and nothing fails on it.
+func checkWhatIsHappeningFiledByMe(t *testing.T) {
+	t.Helper()
+	y := newYard(t)
+	y.depot(t, "yardr")
+	s := svc(y, "")
+	bob := &mcp.Service{Yard: y.st, User: "bob", Now: time.Now}
+	// ada filed two herself, one through the tool and one by hand. The crew
+	// filed a third for her at her request: hers, but not her filing.
+	y.filed(t, s, "Order the banner")
+	y.own(t, store.NewBead{Title: "Print the leaflets", Depot: "yardr"})
+	y.work(t, "Book the stall", "yardr", "ada")
+	// The others': bob's own filing, the crew's for bob, and one ada filed for bob.
+	y.filed(t, bob, "Bob's request")
+	y.work(t, "Bob's thing", "yardr", "bob")
+	if _, err := y.st.CreateBead(y.ctx, store.NewBead{Title: "Ada's note for Bob", Type: "task", Depot: "yardr", For: "bob"}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+
+	listed := func(s *mcp.Service, filedByMe bool) (*mcp.Result, []string) {
+		t.Helper()
+		res, err := s.WhatIsHappening(y.ctx, "", "", filedByMe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plain(t, res.Text)
+		var titles []string
+		for _, item := range res.Structured["work_list"].([]map[string]any) {
+			titles = append(titles, item["title"].(string))
+		}
+		slices.Sort(titles)
+		return res, titles
+	}
+	all, titles := listed(s, false)
+	if want := []string{"Book the stall", "Order the banner", "Print the leaflets"}; !slices.Equal(titles, want) {
+		t.Errorf("the account without the flag lists %v, want %v: all of hers and none of the others'", titles, want)
+	}
+	mine, titles := listed(s, true)
+	if want := []string{"Order the banner", "Print the leaflets"}; !slices.Equal(titles, want) {
+		t.Errorf("the account with the flag lists %v, want %v: what she filed herself", titles, want)
+	}
+	if strings.Contains(mine.Text, "Book the stall") {
+		t.Errorf("the account with the flag lists what the crew filed for her:\n%s", mine.Text)
+	}
+	// The words say whose pieces they are, in the opening line and in the
+	// summary a client reads without them; the account without the flag
+	// opens as it always did.
+	for _, c := range []struct {
+		res   *mcp.Result
+		opens string
+	}{
+		{all, "Your work: 3 under way (3 in yardr)."},
+		{mine, "Work you filed yourself: 2 under way (2 in yardr)."},
+	} {
+		if first, _, _ := strings.Cut(c.res.Text, "\n"); first != c.opens {
+			t.Errorf("the account opens with\n%s\nwant\n%s", first, c.opens)
+		}
+		if summary, _ := c.res.Structured["summary"].(map[string]any); summary["text"] != c.opens {
+			t.Errorf("the summary says %v, want %q", summary["text"], c.opens)
+		}
+	}
+	// With no filer on record, none is hers to list: the account says nothing
+	// she filed is open, and not that nothing of hers is, which is false of
+	// what the crew filed for her. Without the flag it lists them as before.
+	unknown := &mcp.Service{Yard: noFilerYard{y.st}, User: "ada", Now: time.Now}
+	none, titles := listed(unknown, true)
+	if summary, _ := none.Structured["summary"].(map[string]any); len(titles) != 0 || summary["text"] != none.Text ||
+		!strings.HasPrefix(none.Text, "Nothing you filed yourself is open, and nothing you filed has finished since ") {
+		t.Errorf("the account with the flag of pieces with no filer on record lists %v and says\n%s", titles, none.Text)
+	}
+	if _, titles := listed(unknown, false); len(titles) != 3 {
+		t.Errorf("the account without the flag of pieces with no filer on record lists %v, want all three of hers", titles)
 	}
 }
 
@@ -1452,12 +1545,15 @@ func TestAskTheYardmasterWait(t *testing.T) {
 	if _, err := s.AskTheYardmaster(y.ctx, "what is the answer?", true, nil); !errors.Is(err, crewErr) {
 		t.Fatalf("a failed yardmaster roster lookup = %v, want its error", err)
 	}
-	// Every result says its words in the structured part too, for a client
-	// that shows only that part (Claude Code showed {"waiting": true}).
+	// Every result says its words in the structured part too, as text, for a
+	// client that shows only that part (Claude Code showed {"waiting": true}):
+	// Wire puts them there for every tool. The words are said once, so the
+	// tool adds no second name for them.
 	wordsInBoth := func(res *mcp.Result, waiting bool) {
 		t.Helper()
-		if res.Structured["message"] != res.Text || res.Structured["waiting"] != waiting {
-			t.Errorf("the structured part = %v, want waiting %v and the result's words:\n%s", res.Structured, waiting, res.Text)
+		_, structured := res.Wire("")
+		if _, found := structured["message"]; found || structured["text"] != res.Text || structured["waiting"] != waiting {
+			t.Errorf("the structured part = %v, want waiting %v, the result's words as text and no message:\n%s", structured, waiting, res.Text)
 		}
 	}
 	s.Yard = replyYard

@@ -124,12 +124,15 @@ func Tools() []ToolDef {
 				"The answer opens with how many pieces are in each of those and in which projects, and marks the pieces being built right now. " +
 				"Pass the work name from an earlier answer to show that one thing in full, with the notes on it and, for a piece closed early, why it was closed. " +
 				"since is a time (for example 2026-11-01T09:00:00Z) widening how far back finished and closed work is shown and what changed is listed; " +
-				"to tell this person what is new since they last asked, pass the time they last asked. Without it, the last day.",
+				"to tell this person what is new since they last asked, pass the time they last asked. Without it, the last day. " +
+				"Pass filed_by_me as true to list only the work this person filed themselves. " +
+				"Work someone else in the yard filed for them at their request is theirs too: it is listed unless filed_by_me is true.",
 			InputSchema: schema(`{
 				"type": "object",
 				"properties": {
 					"work": {"type": "string", "description": "the work name from an earlier answer, to show that one thing in full"},
-					"since": {"type": "string", "description": "a time, how far back finished and closed work is shown and changes are listed; the time this person last asked, for what is new (default: the last day)"}
+					"since": {"type": "string", "description": "a time, how far back finished and closed work is shown and changes are listed; the time this person last asked, for what is new (default: the last day)"},
+					"filed_by_me": {"type": "boolean", "description": "true to list only the work this person filed themselves, leaving out what someone else filed for them at their request (default: false, all of their work)"}
 				},
 				"additionalProperties": false
 			}`),
@@ -402,10 +405,7 @@ type Service struct {
 // Result is one tool's answer: the words written for the person, and,
 // beside them, the structured part a program needs (which thing, which
 // question) for the next call. The identifiers ride there, not in the
-// words the person is shown (design yardr-ts4d 3.5). The exception is
-// ask_the_yardmaster: its structured part carries its words too, as
-// message, because a client that shows only that part showed nothing
-// else of a wait.
+// words the person is shown (design yardr-ts4d 3.5).
 type Result struct {
 	Text       string
 	Structured map[string]any

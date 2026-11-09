@@ -45,6 +45,14 @@ func staleWords(err error) error {
 	return err
 }
 
+// filedBy says user filed b themselves, by the one record of it: the
+// filer, not whom the work is for. It is what reword and withdraw reach by,
+// and what narrows what_is_happening to the person's own filing, so the
+// two cannot differ. A piece with no filer on record is nobody's filing.
+func filedBy(b *store.Bead, user string) bool {
+	return b.CreatedBy != nil && *b.CreatedBy == user
+}
+
 // filed is the request the person means: the piece of work work names,
 // when they filed it and it is still open. A name that matches nothing,
 // one that matches several and one that is another person's are told
@@ -57,7 +65,7 @@ func (s *Service) filed(ctx context.Context, work string) (*store.Bead, error) {
 	case err != nil:
 		return nil, err
 	}
-	if b == nil || b.CreatedBy == nil || *b.CreatedBy != s.User {
+	if b == nil || !filedBy(b, s.User) {
 		return nil, refusal("I can't find that among the requests you filed, so nothing was changed. This only works on a request you filed yourself; for anyone else's, write to the yardmaster")
 	}
 	if b.Status == "closed" {

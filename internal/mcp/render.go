@@ -118,11 +118,12 @@ func section(heading string, groups []projectGroup, line func(piece) string) str
 	return b.String()
 }
 
-// countsLine is the sentence the account opens with: for each state that
-// has pieces, how many, and how many of those in each project ("12 under
-// way (8 in yardr, 3 in footplate, 1 in footplate-ios)"), in the order of
-// the states. states is the same counts for the structured part.
-func countsLine(grouped map[string][]projectGroup) (sentence string, states []map[string]any) {
+// countsLine is the sentence the account opens with, after lead, which says
+// whose pieces they are: for each state that has pieces, how many, and how
+// many of those in each project ("12 under way (8 in yardr, 3 in footplate,
+// 1 in footplate-ios)"), in the order of the states. states is the same
+// counts for the structured part.
+func countsLine(lead string, grouped map[string][]projectGroup) (sentence string, states []map[string]any) {
 	var parts []string
 	states = []map[string]any{}
 	for _, st := range workStates {
@@ -144,7 +145,7 @@ func countsLine(grouped map[string][]projectGroup) (sentence string, states []ma
 		parts = append(parts, fmt.Sprintf("%d %s (%s)", total, st.state, strings.Join(split, ", ")))
 		states = append(states, map[string]any{"state": st.state, "count": total, "projects": projects})
 	}
-	return "Your work: " + strings.Join(parts, ", ") + ".", states
+	return lead + ": " + strings.Join(parts, ", ") + ".", states
 }
 
 // account is the account of the pieces, by state, in the words and in the
@@ -153,8 +154,23 @@ func countsLine(grouped map[string][]projectGroup) (sentence string, states []ma
 // the window that changed again is counted and listed, in the state it was
 // closed in, but is not in that state's section (Finished lately, or Closed
 // before they were finished). The structured list groups every piece by
-// state and project.
-func account(byState, changedOnly map[string][]piece, changed []piece, since, now time.Time) *Result {
+// state and project. Where there is none, it says that nothing is open and
+// nothing finished since the window opened. filedByMe says the pieces are
+// only the ones the person filed themselves, so the words say that and not
+// "your work": the crew files work for them too, and an account of less
+// than all of it must not read as all of it, or, empty, as nothing.
+func account(byState, changedOnly map[string][]piece, changed []piece, since, now time.Time, filedByMe bool) *Result {
+	lead, nothing := "Your work", "Nothing of yours is open, and nothing has finished since "
+	if filedByMe {
+		lead, nothing = "Work you filed yourself", "Nothing you filed yourself is open, and nothing you filed has finished since "
+	}
+	if len(byState) == 0 && len(changedOnly) == 0 {
+		text := nothing + when(since, now) + "."
+		return &Result{
+			Text:       text,
+			Structured: map[string]any{"work_list": []map[string]any{}, "summary": map[string]any{"text": text, "states": []map[string]any{}}},
+		}
+	}
 	grouped := map[string][]projectGroup{}
 	sectionGroups := map[string][]projectGroup{}
 	for _, st := range workStates {
@@ -163,7 +179,7 @@ func account(byState, changedOnly map[string][]piece, changed []piece, since, no
 		pieces = append(pieces, changedOnly[st.state]...)
 		grouped[st.state] = byProject(pieces)
 	}
-	sentence, states := countsLine(grouped)
+	sentence, states := countsLine(lead, grouped)
 	var b strings.Builder
 	b.WriteString(sentence + "\n")
 	if len(changed) > 0 {

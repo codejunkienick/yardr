@@ -17,7 +17,7 @@ import (
 )
 
 // Server is the local adapter over the contract: an MCP server on the
-// official Go SDK (the modelcontextprotocol go-sdk, v1.7.0), serving
+// official Go SDK (the modelcontextprotocol go-sdk), serving
 // the tools of Tools over one connection. It speaks the
 // modern revision (2026-07-28, no handshake, the version on each
 // request) and the legacy revisions 2025-06-18 and 2025-11-25 (an
@@ -175,7 +175,11 @@ func (s *Server) call(ctx context.Context, req *sdkmcp.CallToolRequest, name str
 func (s *Server) dispatch(ctx context.Context, req *sdkmcp.CallToolRequest, svc *Service, name string, args map[string]any) (*Result, error) {
 	switch name {
 	case ToolWhatIsHappening:
-		return svc.WhatIsHappening(ctx, stringArg(args, "work"), stringArg(args, "since"))
+		filedByMe, err := filedByMeArg(args)
+		if err != nil {
+			return nil, err
+		}
+		return svc.WhatIsHappening(ctx, stringArg(args, "work"), stringArg(args, "since"), filedByMe)
 	case ToolAskForSomething:
 		return svc.AskForSomething(ctx, stringArg(args, "request"), stringArg(args, "project"))
 	case ToolWhatWaitsForMe:
@@ -377,6 +381,23 @@ func waitArg(args map[string]any) (bool, error) {
 		return false, fmt.Errorf("wait: say true to wait for the reply, or false to send the message without waiting")
 	}
 	return wait, nil
+}
+
+// filedByMeArg reads what_is_happening's filed_by_me: false where it is
+// absent or null, so a caller that says nothing is told all of the
+// person's work, as it always was. Anything but a boolean is refused in
+// plain words: a client that sends "true" as a string would otherwise be
+// told all of it as though it were only what the person filed.
+func filedByMeArg(args map[string]any) (bool, error) {
+	v, ok := args["filed_by_me"]
+	if !ok || v == nil {
+		return false, nil
+	}
+	filedByMe, ok := v.(bool)
+	if !ok {
+		return false, fmt.Errorf("filed_by_me: say true to list only the work you filed yourself, or leave it out to list all of your work")
+	}
+	return filedByMe, nil
 }
 
 // answerInput reads the answer tool's arguments into an AnswerInput,

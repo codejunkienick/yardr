@@ -487,7 +487,16 @@ the bead is held: that is growth, or a row cut below its file by hand, and
 no landing settles it. merge-local amends the change into the branch's
 head; integrate-train commits it as `assembly: lower filesizes rows to actual`,
 once for the train, so a wagon landing on its train's branch leaves the
-rows alone. The landing's tests then run the base's copy of `.yardr/test`,
+rows alone. The rewrite has a deadline of its own, `YARDR_REWRITE_TIMEOUT`
+seconds, 120 unless set. A value that is not a whole number of seconds
+holds the bead, or the train, before the rewrite runs. The tests that
+follow have a deadline too, `YARDR_TEST_TIMEOUT`, which leaves out the
+seconds the run queued on the race lock. The rewrite waits on no race
+lock, so the script credits nothing to its deadline. Past the deadline the
+script kills the run's whole process tree and holds the bead, or the train
+under `integrate-train`, with a note that carries the last 4000 bytes of
+what the rewrite printed.
+The landing's tests then run the base's copy of `.yardr/test`,
 whose rows still stand above the branch's shrunk files, so at landing
 (`YARDR_LANDING=1`) those two cases pass with a printed note instead of the
 warning:

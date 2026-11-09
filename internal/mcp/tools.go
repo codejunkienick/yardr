@@ -29,11 +29,13 @@ var workStates = []struct{ state, heading string }{
 // work that opens with how many pieces are in each state (workStates) and
 // in which projects, lists what changed inside the window, then each
 // state's pieces under their project, marking those being built this
-// moment; or, with work set, that one thing in full with its notes. It
-// keeps no record of when the person last looked: each call is answered
-// from the window it is given, and a person who wants what is new since
-// they last asked has their client pass that time.
-func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (*Result, error) {
+// moment; or, with work set, that one thing in full with its notes. With
+// filedByMe set the account is of the pieces the person filed themselves,
+// and not of what someone else filed for them, the crew at their request
+// among it. It keeps no record of when the person last looked: each call
+// is answered from the window it is given, and a person who wants what is
+// new since they last asked has their client pass that time.
+func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string, filedByMe bool) (*Result, error) {
 	if err := s.requireUser(); err != nil {
 		return nil, err
 	}
@@ -87,7 +89,9 @@ func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (
 	changedOnly := map[string][]piece{}
 	var changed []piece
 	for _, b := range beads {
-		if !own(b) {
+		// The flag narrows what is the person's, never widens it: a piece
+		// they filed for someone else is that person's.
+		if !own(b) || (filedByMe && !filedBy(&b, s.User)) {
 			continue
 		}
 		state, detail, err := s.workState(ctx, b, since, now)
@@ -144,14 +148,7 @@ func (s *Service) WhatIsHappening(ctx context.Context, work, sinceText string) (
 			changed = append(changed, p)
 		}
 	}
-	if len(byState) == 0 && len(changedOnly) == 0 {
-		text := fmt.Sprintf("Nothing of yours is open, and nothing has finished since %s.", when(since, now))
-		return &Result{
-			Text:       text,
-			Structured: map[string]any{"work_list": []map[string]any{}, "summary": map[string]any{"text": text, "states": []map[string]any{}}},
-		}, nil
-	}
-	return account(byState, changedOnly, changed, since, now), nil
+	return account(byState, changedOnly, changed, since, now, filedByMe), nil
 }
 
 // buildingNow is the pieces of work something is working on this moment,
@@ -710,19 +707,14 @@ func (s *Service) AskTheYardmaster(ctx context.Context, message string, waitForR
 	if err := s.Yard.Mail(ctx, to, message, s.User); err != nil {
 		return nil, err
 	}
-	// Every result carries its words in the structured part too: a client
-	// that shows only that part (Claude Code showed {"waiting": true} and
-	// nothing else) then shows words, and the two cannot differ.
-	said := func(text string, structured map[string]any) *Result {
-		structured["message"] = text
-		return &Result{Text: text, Structured: structured}
-	}
 	// No wait, no progress line and no look at the inbox: the message
 	// stands, and waiting stays true because a reply, if the yardmaster
 	// gives one, comes as mail.
 	if !waitForReply {
-		return said("Sent to the yardmaster; the reply comes by mail. Ask me to read your mail later.",
-			map[string]any{"waiting": true}), nil
+		return &Result{
+			Text:       "Sent to the yardmaster; the reply comes by mail. Ask me to read your mail later.",
+			Structured: map[string]any{"waiting": true},
+		}, nil
 	}
 	wait := s.Wait
 	if wait <= 0 {
@@ -748,11 +740,15 @@ func (s *Service) AskTheYardmaster(ctx context.Context, message string, waitForR
 	for {
 		select {
 		case <-ctx.Done():
-			return said("You stopped the wait; your message is still with the yardmaster, and the answer will come. Ask me to read your mail later, and I will tell you what it says.",
-				map[string]any{"waiting": true}), nil
+			return &Result{
+				Text:       "You stopped the wait; your message is still with the yardmaster, and the answer will come. Ask me to read your mail later, and I will tell you what it says.",
+				Structured: map[string]any{"waiting": true},
+			}, nil
 		case <-deadline.C:
-			return said("Your question is with the yardmaster. The answer will come; ask me to read your mail later, and I will tell you what it says.",
-				map[string]any{"waiting": true}), nil
+			return &Result{
+				Text:       "Your question is with the yardmaster. The answer will come; ask me to read your mail later, and I will tell you what it says.",
+				Structured: map[string]any{"waiting": true},
+			}, nil
 		case <-progressTick.C:
 			if progress != nil {
 				progress("asked; waiting for the answer")
@@ -776,8 +772,10 @@ func (s *Service) AskTheYardmaster(ctx context.Context, message string, waitForR
 				}
 			}
 			if reply != nil {
-				return said(fmt.Sprintf("The yardmaster replied (%s):\n%s", when(reply.At, s.now()), reply.Text),
-					map[string]any{"waiting": false, "reply": reply.Text}), nil
+				return &Result{
+					Text:       fmt.Sprintf("The yardmaster replied (%s):\n%s", when(reply.At, s.now()), reply.Text),
+					Structured: map[string]any{"waiting": false, "reply": reply.Text},
+				}, nil
 			}
 		}
 	}

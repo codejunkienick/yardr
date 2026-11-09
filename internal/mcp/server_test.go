@@ -197,6 +197,23 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 			if !strings.Contains(tool.Description, "opens with how many pieces") || !strings.Contains(tool.Description, "pass the time they last asked") {
 				t.Errorf("%s's description does not say what its answer opens with and what since is for:\n%s", tool.Name, tool.Description)
 			}
+			// filed_by_me is an optional boolean, and its description says that
+			// what someone else filed for the person at their request is left
+			// out of it and listed otherwise.
+			input, _ := json.Marshal(tool.InputSchema)
+			var in struct {
+				Properties map[string]struct {
+					Type string `json:"type"`
+				} `json:"properties"`
+				Required []string `json:"required"`
+			}
+			if err := json.Unmarshal(input, &in); err != nil || in.Properties["filed_by_me"].Type != "boolean" || slices.Contains(in.Required, "filed_by_me") {
+				t.Errorf("%s's input schema = %s, want filed_by_me an optional boolean", tool.Name, input)
+			}
+			if !strings.Contains(tool.Description, "Pass filed_by_me as true to list only the work this person filed themselves") ||
+				!strings.Contains(tool.Description, "filed for them at their request is theirs too: it is listed unless filed_by_me is true") {
+				t.Errorf("%s's description does not say what filed_by_me leaves out:\n%s", tool.Name, tool.Description)
+			}
 		}
 		// read_my_mail's recent is an optional count, and its description
 		// says what passing it does.
@@ -311,6 +328,30 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 	if want := `{"states":[{"count":1,"projects":[{"count":1,"project":"yardr"}],"state":"under way"}],"text":"` + counts + `"}`; string(account["summary"]) != want || !strings.HasPrefix(text, counts+"\n") {
 		t.Errorf("the account's summary = %s, want %s, and the words to open with %q:\n%s", account["summary"], want, counts, text)
 	}
+	// filed_by_me over the wire narrows the account: the one piece here was
+	// filed for the person by the crew, so none is their own filing to list.
+	// A value that is no boolean is refused in words, not taken for a yes or
+	// a no.
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: mcp.ToolWhatIsHappening, Arguments: map[string]any{"filed_by_me": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text = toolText(t, res)
+	plain(t, text)
+	if res.IsError || !strings.HasPrefix(text, "Nothing you filed yourself is open, and nothing you filed has finished since ") {
+		t.Errorf("the account of what the person filed over the wire (error %v):\n%s", res.IsError, text)
+	}
+	structuredText(t, res, text)
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: mcp.ToolWhatIsHappening, Arguments: map[string]any{"filed_by_me": "true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text = toolText(t, res)
+	plain(t, text)
+	if !res.IsError || !strings.Contains(text, "filed_by_me: say true to list only the work you filed yourself") {
+		t.Errorf("a filed_by_me that is no boolean over the wire (error %v):\n%s", res.IsError, text)
+	}
+	structuredText(t, res, text)
 
 	// Every tool's structured part carries its words whole, footer and
 	// all, since a client may hand its model that part alone. A tool
@@ -613,11 +654,12 @@ func TestAskTheYardmasterProgressOverTheWire(t *testing.T) {
 	if text := toolText(t, res); !strings.Contains(text, "done: it is filed") {
 		t.Fatalf("the reply over the wire:\n%s", text)
 	}
-	// The words ride in the structured part too, for a client that shows
-	// only that part.
+	// The words ride in the structured part too, as text, for a client that
+	// shows only that part.
+	structuredText(t, res, toolText(t, res))
 	structured, _ := res.StructuredContent.(map[string]any)
-	if msg, _ := structured["message"].(string); !strings.Contains(msg, "done: it is filed") || structured["waiting"] != false {
-		t.Errorf("the structured part over the wire = %v, want the reply's words in message", structured)
+	if _, found := structured["message"]; found || structured["waiting"] != false {
+		t.Errorf("the structured part over the wire = %v, want waiting false and no message", structured)
 	}
 	// The wait argument over the wire. False sends and ends at once: the
 	// reply this yard lands at every send is not looked for. Null is as
@@ -908,7 +950,7 @@ func TestOutsideTextKeepsItsMark(t *testing.T) {
 func rangeMarks() (string, bool) {
 	fake := &outsideYard{fakeYard: &fakeYard{}}
 	svc := &mcp.Service{Yard: fake, User: "ada"}
-	res, err := svc.WhatIsHappening(context.Background(), "yd-9", "")
+	res, err := svc.WhatIsHappening(context.Background(), "yd-9", "", false)
 	if err != nil {
 		return "", false
 	}

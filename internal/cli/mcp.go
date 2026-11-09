@@ -61,7 +61,7 @@ words naming where it is given instead (the yard's browser view, or
 yardr bead answer in a terminal here), and the question stays open.
 
 Built on the official Go SDK for MCP (the modelcontextprotocol
-go-sdk, v1.7.0). It speaks MCP 2025-06-18 or later: the modern
+go-sdk). It speaks MCP 2025-06-18 or later: the modern
 revision 2026-07-28 (no handshake, the version on each request) and
 the legacy revisions 2025-06-18 and 2025-11-25 (a handshake, then
 its session). ` + mcp.FloorMessage,
