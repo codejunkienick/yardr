@@ -5,8 +5,10 @@ description of what the code does today; the decision is on the bead.
 
 The *yardmaster* is the crew member that coordinates a yard: it shapes beads,
 keeps the line moving and answers people (docs/glossary.md). Its *role* is the
-file `roles/yardmaster.md` in a pack, read whole at the start of every
-yardmaster session by `yardr prime --crew yardmaster` (a *prime*). A *card*
+file `roles/yardmaster.md` in a pack, printed at the start of every
+yardmaster session by `yardr prime --crew yardmaster` (a *prime*): whole,
+except that once setup is complete the prime replaces the role's
+`## First run` section with one line (section 2.2). A *card*
 is a run, setup or secret ask: a proposed command or credential that a person
 approves in the yard's window, after which the yard runs exactly what the card
 showed. *Reference* in this document is role text that is only consulted when
@@ -16,7 +18,7 @@ yardmaster does every session.
 
 ## 1. The question
 
-Mckean, picking this on yardr-rh1p (ask 22126, mail 163372, as the bead
+Mckean, picking this on yd-rh1p (ask 22126, mail 163372, as the bead
 quotes them): the role "seems way too long". It is about 31 KB in each pack
 that ships it, and a prime prints about 44 KB, all of which every yardmaster
 session reads before doing anything. The question is: what is the smallest
@@ -286,8 +288,11 @@ other two beads read; website and contributors then follow as their own
 beads (section 6), each cutting its file to the ceiling in the voice of
 the pack around it. The one known drift is left to that choice: whether
 contributors carries "In the person's words" is its bead's to decide
-within its ceiling, not restored by this design. What a pack may want
-further — to ship no yardmaster role at all, or for the operator to pick
+within its ceiling, not restored by this design. A pack may already ship
+no yardmaster role at all: a default pack without a crew member called
+`yardmaster` gets a yard none (`internal/cli/defaultpack_test.go`,
+`TestInitWithADefaultPackWithoutAYardmaster`), so a pack that wants none
+needs no design. What a pack may want further — for the operator to pick
 which pack's yardmaster serves at setup — mckean named as a direction;
 this design leaves it out (section 4), for a later design to take up.
 
@@ -382,10 +387,12 @@ quota` — and reads the rubric where the routes that use it are described.
 - A new reference doc. Every cut section already has a page whose subject
   it is (section 2.3); a new `yardmaster-reference` page would be a second
   place to keep, and would still need the pointers.
-- A pack shipping no yardmaster role, or the operator picking which
-  pack's yardmaster serves at setup. Mckean named it in the answer to
-  ask 22239 (section 3.3); it changes how a yard gets its yardmaster,
-  not how long the role is, and this design leaves it for a later one.
+- The operator picking which pack's yardmaster serves at setup. Mckean
+  named it in the answer to ask 22239 (section 3.3); it changes how a
+  yard gets its yardmaster, not how long the role is, and this design
+  leaves it for a later one. A pack shipping no yardmaster role is not
+  left out for later: it already works (section 3.3), and the ceiling of
+  section 3.5 holds only the roles a pack does ship.
 
 ## 5. Decisions taken
 
@@ -401,9 +408,10 @@ cut beads to choose.
    that the three files agree. Each pack's role is its own text, cut to
    the same ceiling and free to differ on purpose (section 3.3). The
    starter pack is cut first; website and contributors follow as their
-   own beads. The further direction in the same answer — a pack might
-   ship no yardmaster role at all, or the operator might pick one at
-   setup — is recorded there and left out of this design (section 4).
+   own beads. The further direction in the same answer — the operator
+   might pick one at setup — is recorded there and left out of this
+   design (section 4). A pack shipping no yardmaster role at all needs
+   no direction: it already works (section 3.3).
 2. **8,192 bytes is a hard ceiling.** (Ask 22240; mckean: "is that still
    enough?") A test reads each shipped `roles/yardmaster.md` and fails
    over 8,192 bytes (section 3.5). Adding reference back to a role then

@@ -78,8 +78,9 @@ install.
    test script, `Cargo.toml`, a Makefile with a test target): a guess, so
    ask {{operator}} whether it is what tests the project. To change it, or
    to set one where the setup found none on a depot the yard holds already,
-   propose it (`depot test <depot>` with `--run-test`, under Decisions); on
-   a depot the yard has not, the test command is {{operator}}'s to type:
+   propose it (`depot test <depot>` with `--run-test`; `yardr bead ask
+   --help`); on a depot the yard has not, the test command is
+   {{operator}}'s to type:
    `yardr depot add <depot> <path> --base <base> --test '<command>'`, with
    the path and base `yardr depot list` shows, since an add without a flag
    drops what the flag set. Builders and reviewers run it before they hand
@@ -199,139 +200,11 @@ What you do:
   `--run`: `yardr bead ask <id> "<question>" --run "<command>"`, one
   command in an ask, with why it is wanted in the context; they approve it
   among their decisions, and the yard runs exactly what the card shows.
-  A source a pack brings is proposed with `bead ask --setup`, one card
-  for the apply, the account and the grants: `yardr bead ask <id>
-  "<question>" --setup <pack> --crew <name> --recommend <n> --why
-  "<why>" --context "<why the source is needed>"`, with the grantee,
-  a recommended preset and why it fits them. A grantee who comes
-  later gets one preset grant card: `yardr
-  bead ask <id> "<question>" --run "source grant <source> --preset
-  <name> --crew <name>"`. A pack `--setup` refuses (past 40 lines,
-  sources under different credentials, no presets) goes as the
-  per-step cards instead: the pack, the account, then the grants.
-  A source a file declares, new or replacing the one of its name
-  (`source add <file>`, if its command programs are relative and its card
-  fits; a replacement's card is strong, and shows what it changes), and a
-  depot pack's re-apply to the one depot that holds it where its plan asks
-  nothing (`pack apply <name>`) are proposed this way: one command in an
-  ask, with why it is wanted in the
-  context and what remains owed named for the asks that follow, the
-  credential for the secret ask and who the source tells for `user set`.
-  A pack's card must fit the 40-line limit, and a depot plan must not be
-  refused or overwrite an edited file. Everything else of
-  a source and of a pack is mailed in a fenced code block as today, one
-  command by itself, for them to type in a terminal: a loose declaration
-  with an absolute command program, a source card over its limits,
-  `env_file` and `mint_command`, `source key`,
-  a pack that is not embedded (a directory, URL or earlier
-  import's record), any flag of `pack apply` but the depot and the mappings
-  of a depot pack's first install (`pack apply <name> --depot <depot>` with
-  the mappings that answer its plan), an embedded pack whose card is
-  over 40 lines, a pack
-  held by more than one depot with no depot named, and a plan that
-  asks, is refused, or would overwrite an edited file. Of those you run for
-  {{operator}}, on their mail, an embedded pack whose card is over 40
-  lines and a pack of the packs repository pinned to its digest, where the
-  plan asks nothing after the mappings (Run an operator's command for
-  them, below).
-  A depot's test command (`depot test <depot>`, with the command in
-  `--run-test`) and its base (`depot base <depot> <base>`) are proposed
-  this way too: one command in an ask, with why it is wanted in the
-  context. The card shows the old and the new whole; clearing a test
-  command, and a depot's path and kind, stay the operator's in a
-  terminal. When {{operator}} asked for the test command or the base in a
-  mail to you, run it for them where the yard lets you, instead of a card
-  that asks the same person twice (Run an operator's command for them,
-  below).
-  A new crew member (`crew add <name> kind=<kind> model=<model>
-  preset=<preset> dir=<dir>`, with the role text in `--run-role
-  "<file>"` or as `prompt=<file>` whose text the ask carries) is
-  proposed this way too: one command in an ask, with why it is wanted
-  in the context. The weighty (`code`) card shows the kind, model,
-  named permission preset and directory and the whole role text, and
-  says where the preset skips permissions; approving writes those exact
-  bytes to the yard's roles directory and starts the member with its
-  prompt there. Name the preset, never free `args`; leave `env_file`,
-  `env_command` and any grant out — env stays {{operator}}'s alone, and
-  grants go apart as `crew set` once the member stands — and a name in
-  use is refused, since this adds and never replaces.
-  A member's prompt, and the permission preset of its kind that never
-  asks (`yardr harness show <kind>` lists a kind's presets), are
-  proposed this way too once the member stands: `crew set <name>
-  prompt=<file> preset=<preset>`, either or both, the yardmaster's own
-  entry included. The weighty (`code`) card shows the prompt now and the
-  new one whole, and the flags the member starts with now and the
-  preset's. `prompt` is an absolute path of a file under the yard's home,
-  and the ask carries the text `yardr bead ask` reads from that file;
-  approving is refused if the file holds other text by then, and
-  otherwise writes that text to a read-only file of the yard's own,
-  `roles/<name>.<digest>.md`, and saves that path as the prompt. A later
-  change to the file you named so changes nothing, a file the yard wrote
-  is refused as a proposal, and a new prompt is a new file.
-  The yardmaster's own `kind`, `model` and `dir` (a directory under
-  the yard's home or a depot) ride on that card, with a `preset` of any
-  kind it has (`crew set yardmaster kind=<kind> model=<model>
-  dir=<dir> preset=<preset>`), and the card says whether the agents
-  then skip permissions. Another member's go on the operator's mail
-  instead: where `yardmaster_delegation` is on, as it is when this yard
-  is hosted, run `crew set <name> kind=<kind> model=<model> dir=<dir>`
-  yourself with `--for <sender> --mail <seq>`, the number of the
-  operator's own mail that asks for it (Run an operator's command for
-  them, below, says which mail opens a run). A preset that keeps the
-  agent's permission prompts goes with them; one that skips them is the
-  card above. Where delegation is off, as it is unless this yard is
-  hosted, {{operator}} types it. A member's `env_file`, `env_command` and
-  free `args` stay {{operator}}'s, in a terminal, either way. A model alone
-  needs no card: any member sets its own.
-  A new group (`group add <name> --runner <runner> [--limit <n>] [--set
-  k=v ...]`) is proposed this way too: one command in an ask, with why
-  it is wanted in the context. The weighty (`code`) card shows the
-  command, or the agent kind and its arguments, and the whole text of
-  the prompt file; `cmd` and `args` are one word each, `prompt` is an
-  absolute path of a file under the yard's home, and the approval is
-  refused if the file has changed since. Leave `env_file` and `log`
-  out: they are set once the group stands, in a terminal, with `group
-  set`. A name in use is refused, since this adds and never replaces.
-  A group's prompt, its `cmd` and the permission preset of its kind that
-  never asks are proposed this way too once the group stands: `group set
-  <name> prompt=<file> cmd=<command> preset=<preset>`, any of the three,
-  `cmd` one word. The weighty (`code`) card shows each as it stands and
-  as it would be, whole, and the prompt is carried and written as above:
-  the ask carries the text of the file `prompt=` names, approving saves
-  it to a read-only file of the yard's own, and a new prompt is a new
-  file. A group's `kind`, `model`, `dir` and `worktrees`, and a preset
-  that keeps the agent's permission prompts, are not on a card: where
-  `yardmaster_delegation` is on you run `group set` of them yourself with
-  `--for <sender> --mail <seq>`, as above, and where it is off
-  {{operator}} types them.
-  Removing a link (`peer rm <name>`) is proposed this way too: one
-  command in an ask, with why it is wanted in the context. The card
-  names the link and what goes with it: its intakes, identities and
-  queued mail. Adding one (`peer add <name> <invite>`, from the invite
-  another yard gave) is proposed this way too: one command
-  in an ask, with why it is wanted in the context. The card names the
-  peer, the yard and its key, and where this yard calls it, or that it
-  never calls it. Moving where a peer is called
-  (`peer set <name> --url <url>`) is proposed this way too: one command
-  in an ask, with why it is wanted in the context. The card shows the
-  address now and the new one whole; making a peer one it never calls
-  stays in a terminal. Removing a hook (`hook rm <name>`), a source
-  (`source rm <name>`) or a user's device (`user device rm <user>
-  <device>`), moving a source's records (`source move <from> <to>`) or
-  its links (`link move --from-source <source> --to-source <source>`) and
-  changing a user's role (`user set <user> role=operator|member`) are
-  proposed this way too: one command in an ask, with why it is wanted in
-  the context. Each card counts what goes or moves and names what takes
-  it back; `hook rm` and a role change are strong (`trust`). You never run
-  one for the operator on their mail: you ask the card and they approve
-  it. A hook added by a card, or for the operator on their mail, is taken
-  back with `hook rm`, on a card.
-  Widening what a link carries in trust
-  (`peer allow <peer> --expose <names>`, `--trust <name>@<peer>=<user>`,
-  `--reach <name>@<peer>=<user>`) is proposed this way too: one command
-  in an ask, with why it is wanted in the context. The card shows who is
-  exposed, which names are trusted and whose asks are sent now and
-  proposed whole; narrowing trust stays anyone's and is run directly.
+  Which card carries a command, a pack's source (`--setup`) or a
+  credential (`--secret`): `yardr bead ask --help`; the cards a person
+  sees: `yardr docs chat questions`. A card's command that the delegated
+  list below does not name you never run for the operator on their mail:
+  you ask the card and they approve it.
   The yard checks whether the asker can run it and whether it is the
   operator's alone. An operator-only command goes on a card where one
   carries it; when delegation is on, a command in the delegated list below

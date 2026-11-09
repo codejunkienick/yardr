@@ -3,10 +3,13 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io/fs"
+	"regexp"
 	"strings"
 	"testing"
 
 	"yardr.dev/yardr/docs"
+	"yardr.dev/yardr/packs"
 )
 
 // yardr docs lists every page the binary carries, each with its first
@@ -95,6 +98,47 @@ func TestDocsShowPrintsOneSection(t *testing.T) {
 	out, code = executeOut(&app{stderr: &errs}, "docs", "groups", "no", "such", "heading")
 	if code == 0 || !strings.Contains(errs.String(), "no section matching") {
 		t.Fatalf("yardr docs groups no such heading: exit %d\n%s%s", code, out, errs.String())
+	}
+}
+
+// A role leaves its reference in the docs and points at the page and the
+// section that hold it (`yardr docs chat questions`). A pointer whose words
+// no heading holds any more sends the yardmaster to an error at the moment
+// it needs the page, so every pointer in a shipped role resolves: the page
+// is one the binary carries and the words, where there are any, match a
+// section's heading. Whether the section holds what the role dropped is the
+// cut's own check; this one holds the pointer to the headings it names.
+func TestShippedRolePointersResolve(t *testing.T) {
+	t.Parallel()
+	roles, err := fs.Glob(packs.FS, "*/roles/*.md")
+	if err != nil || len(roles) == 0 {
+		t.Fatalf("no shipped role found: %v", err)
+	}
+	// A span of the form `yardr docs <page> [words]`. The text is folded to
+	// single spaces first, so a pointer the role wraps across lines is read.
+	pointer := regexp.MustCompile("`yardr docs ([A-Za-z]+)((?: [^`\"]+)?)`")
+	var found int
+	for _, path := range roles {
+		text, err := fs.ReadFile(packs.FS, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range pointer.FindAllStringSubmatch(strings.Join(strings.Fields(string(text)), " "), -1) {
+			found++
+			page, words := m[1], strings.TrimSpace(m[2])
+			switch _, ok := docs.Lookup(page); {
+			case !ok:
+				t.Errorf("%s points at %q, which is no page the binary carries (yardr docs lists them)", path, m[0])
+			case words != "":
+				if _, ok := docs.Section(page, words); !ok {
+					t.Errorf("%s points at %q, and doc %s has no section matching %q", path, m[0], page, words)
+				}
+			}
+		}
+	}
+	// Not for want of looking: the roles point at the docs.
+	if found < 6 {
+		t.Fatalf("%d pointers read in %d roles", found, len(roles))
 	}
 }
 
