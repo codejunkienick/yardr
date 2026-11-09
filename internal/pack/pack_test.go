@@ -2,6 +2,7 @@ package pack_test
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -983,6 +984,69 @@ func TestBuilderRoleNamesTheShotTimeout(t *testing.T) {
 	for _, want := range []string{"SHOT_TIMEOUT", "gets a minute"} {
 		if !strings.Contains(string(role), want) {
 			t.Errorf("packs/starter/roles/builder.md does not name %s", want)
+		}
+	}
+}
+
+// yardmasterCeiling is the most bytes a pack's roles/yardmaster.md may hold.
+// Every session of the yardmaster reads the role whole before it does
+// anything, so it is a core, and what a case needs beyond it is read from the
+// docs it points at (design yardr-2vy0 3.1, 3.5).
+const yardmasterCeiling = 8192
+
+// overYardmasterCeiling says how far a role passes the ceiling, and is nil for
+// one that fits: at most the ceiling, so a role of exactly that size does.
+func overYardmasterCeiling(role []byte) error {
+	if n := len(role); n > yardmasterCeiling {
+		return fmt.Errorf("%d bytes, %d over the %d it may hold: point at the docs for the reference", n, n-yardmasterCeiling, yardmasterCeiling)
+	}
+	return nil
+}
+
+// Every pack that ships a yardmaster role holds it to the ceiling, which is a
+// hard one (design yardr-2vy0 5.2): adding reference back to a role has to
+// argue for room, or a core grows back to the 31 KB the three were cut from.
+// Each role is read through packs.FS, as an import installs it, and held on its
+// own: the three texts are independent (3.3), so none is compared with another.
+// Only the total is held; the design's per-section budgets (3.1) guide a cut and
+// are not tested.
+func TestYardmasterRolesFitTheirCeiling(t *testing.T) {
+	// The check itself: a role over the ceiling fails and one at it passes.
+	for _, c := range []struct {
+		name string
+		size int
+		fits bool
+	}{
+		{"a role at the ceiling", yardmasterCeiling, true},
+		{"a role one byte over the ceiling", yardmasterCeiling + 1, false},
+	} {
+		if err := overYardmasterCeiling(make([]byte, c.size)); (err == nil) != c.fits {
+			t.Errorf("%s: overYardmasterCeiling = %v, fits want %v", c.name, err, c.fits)
+		}
+	}
+	// A pack that ships the role joins by a row. One with none would escape
+	// the ceiling unseen, so the rows are the packs that ship it.
+	rows := []string{packs.Starter, packs.Website, packs.Contributors}
+	var held []string
+	for _, name := range rows {
+		held = append(held, name+"/roles/yardmaster.md")
+	}
+	shipped, err := fs.Glob(packs.FS, "*/roles/yardmaster.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(held)
+	slices.Sort(shipped)
+	if !slices.Equal(shipped, held) {
+		t.Fatalf("packs shipping roles/yardmaster.md = %v, but the table holds %v: add a row for the pack, so that its role is held to the ceiling", shipped, held)
+	}
+	for _, name := range rows {
+		role, err := fs.ReadFile(packs.FS, name+"/roles/yardmaster.md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := overYardmasterCeiling(role); err != nil {
+			t.Errorf("packs/%s/roles/yardmaster.md is %v", name, err)
 		}
 	}
 }

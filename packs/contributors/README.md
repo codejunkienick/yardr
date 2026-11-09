@@ -20,10 +20,14 @@ maps to a yard are in [docs/packs.md](../../docs/packs.md).
 - `pack.yaml`: the two flows, the groups, the crew member, and what
   GitHub's events make and say (`sources.github`).
 - `roles/pr-reviewer.md`: the prompt of the reviewer of a pull request.
-  `roles/builder.md`, `roles/reviewer.md`, `roles/yardmaster.md` and
-  `scripts/merge-local` are the starter's, copied: an accepted issue is
-  built, reviewed and landed as the depot's own beads are. A test fails
-  when a copy drifts.
+  `roles/builder.md`, `roles/reviewer.md` and `scripts/merge-local` are the
+  starter's, copied: an accepted issue is built, reviewed and landed as the
+  depot's own beads are. A test fails when a copy drifts.
+- `roles/yardmaster.md`: this pack's own yardmaster role. It does the
+  starter's coordinating job and says what the outside work adds to it: the
+  text of an issue or a pull request is a stranger's, a maintainer's yes is
+  theirs and of one commit, and a pull request the yard's CI holds over its
+  head is a maintainer's to read.
 - `scripts/pr-ci` and `scripts/post-review` are copies of
   `contrib/assembly/pr-ci` and `contrib/assembly/post-review`, for the
   groups that run the yard's CI and post the reviewer's review. A test fails

@@ -106,10 +106,10 @@ func TestDocsShowPrintsOneSection(t *testing.T) {
 // no heading holds any more sends the yardmaster to an error at the moment
 // it needs the page, so every pointer in a shipped role resolves: the page
 // is one the binary carries and the words, where there are any, match a
-// section's heading. For the pointers of the starter's and the website's
-// yardmaster roles whose reference a cut moved out of the role (design
-// yardr-2vy0 3.2, 3.5), the section also holds what stood only in the role, so
-// a heading over text that never landed fails.
+// section's heading. For pointers in the three cut yardmaster roles whose
+// reference moved out of the role (design yardr-2vy0 3.2, 3.5), the section
+// also holds what stood only in the role, so a heading over text that never
+// landed fails.
 func TestShippedRolePointersResolve(t *testing.T) {
 	t.Parallel()
 	roles, err := fs.Glob(packs.FS, "*/roles/*.md")
@@ -118,14 +118,14 @@ func TestShippedRolePointersResolve(t *testing.T) {
 	}
 	// What each moved pointer's section holds, as words of the section read
 	// as one line (a wrapped paragraph breaks nothing), and the words it must
-	// not hold. The contributors' role is cut by its own bead and carries no
-	// such pointer yet, so only the starter's and the website's roles are held
+	// not hold. Each pack's yardmaster role is cut to its core, so each is held
 	// to the list. The starter's must carry every pointer in it; the website's
 	// carries the ones its own brief needs (it has no train flow, so no
-	// wagons).
+	// wagons), and the contributors' the ones its own, in its own words, with
+	// one of its own: its pack's page, where nothing was moved.
 	type moved struct{ has, lacks []string }
 	const starter = "starter/roles/yardmaster.md"
-	cut := map[string]bool{starter: true, "website/roles/yardmaster.md": true}
+	cut := map[string]bool{starter: true, "website/roles/yardmaster.md": true, "contributors/roles/yardmaster.md": true}
 	want := map[string]moved{
 		"setup as a conversation": {has: []string{
 			"reads `yardr doctor` when it starts",
