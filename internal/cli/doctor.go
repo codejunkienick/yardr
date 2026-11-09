@@ -976,10 +976,11 @@ func upgradeFailedLine(home string) (docLine, bool) {
 // configNotes are what yardr doctor notes about the yard's stored config:
 // everything the store would refuse were it written now (a group's or a
 // crew member's config key nothing reads, a value its reader takes as not
-// set, a setting nothing reads), each with how it is removed, and the routes
-// that narrow a stage no subscription is at stake in (narrowedRouteNotes).
-// Notes, not faults: the store took them when it checked nothing, and the
-// yard runs as it did.
+// set, a setting nothing reads), each with how it is removed, the routes
+// that narrow a stage no subscription is at stake in (narrowedRouteNotes),
+// and a group's arguments that fell behind the permission preset they were
+// set from (presetDriftNotes). Notes, not faults: the store took them when
+// it checked nothing, and the yard runs as it did.
 func configNotes(ctx context.Context, st store.API, crew []store.CrewMember, groups []store.Group, yardr string) ([]string, error) {
 	var notes []string
 	all, err := st.Settings(ctx)
@@ -992,21 +993,8 @@ func configNotes(ctx context.Context, st store.API, crew []store.CrewMember, gro
 		for _, err := range store.ConfigProblems(store.GroupConfig, g.Name, g.Runner, g.Config) {
 			notes = append(notes, fmt.Sprintf("%v. Change it: %s group set %s <key>=<value>, or --unset <key>", err, yardr, g.Name))
 		}
-		if who := g.LoginFor(); who != "" && who != operator {
-			if file, _ := g.Config["env_file"].(string); file == "" {
-				notes = append(notes, fmt.Sprintf("group %s declares login_for=%s and names no env_file, so nothing carries the login it declares. Carry it: %s group set %s env_file=<file>", g.Name, who, yardr, g.Name))
-			}
-		}
-		// Absence of login_for declares routing attribution only: a file
-		// already pointing at another login keeps burning it. The folder
-		// is what burns, so a group the operator's for routing whose
-		// folder's login names another account is said, for the eye that
-		// group show's folder login is for.
-		if operator != "" && g.EffectiveLogin(operator) == operator && mine != "" {
-			if theirs := groupFolderAccount(g); theirs != "" && theirs != mine {
-				notes = append(notes, fmt.Sprintf("group %s is the operator's for routing and its folder's login names %s, not the operator's (%s): its sessions burn that account. Declare whose: %s group set %s login_for=<user>", g.Name, theirs, mine, yardr, g.Name))
-			}
-		}
+		notes = append(notes, groupLoginNotes(g, operator, mine, yardr)...)
+		notes = append(notes, presetDriftNotes(g, all[store.DefaultKindSetting], yardr)...)
 	}
 	for _, r := range crew {
 		for _, err := range store.ConfigProblems(store.CrewConfig, r.Name, r.Runner, r.Config) {

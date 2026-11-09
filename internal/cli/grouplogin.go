@@ -59,6 +59,31 @@ func groupReadEnv(ctx context.Context, st store.API, name string) ([]string, sto
 	return f.Env, *g, nil
 }
 
+// groupLoginNotes are what yardr doctor notes of the login a group's
+// sessions carry: a login_for that no env_file carries, and a folder whose
+// login names another account than the operator's, for a group that is the
+// operator's for routing. operator is the operator's name and mine the
+// account the machine's own Claude login names. Notes, not faults.
+func groupLoginNotes(g store.Group, operator, mine, yardr string) []string {
+	var notes []string
+	if who := g.LoginFor(); who != "" && who != operator {
+		if file, _ := g.Config["env_file"].(string); file == "" {
+			notes = append(notes, fmt.Sprintf("group %s declares login_for=%s and names no env_file, so nothing carries the login it declares. Carry it: %s group set %s env_file=<file>", g.Name, who, yardr, g.Name))
+		}
+	}
+	// Absence of login_for declares routing attribution only: a file
+	// already pointing at another login keeps burning it. The folder
+	// is what burns, so a group the operator's for routing whose
+	// folder's login names another account is said, for the eye that
+	// group show's folder login is for.
+	if operator != "" && g.EffectiveLogin(operator) == operator && mine != "" {
+		if theirs := groupFolderAccount(g); theirs != "" && theirs != mine {
+			notes = append(notes, fmt.Sprintf("group %s is the operator's for routing and its folder's login names %s, not the operator's (%s): its sessions burn that account. Declare whose: %s group set %s login_for=<user>", g.Name, theirs, mine, yardr, g.Name))
+		}
+	}
+	return notes
+}
+
 // groupFolderAccount is the account the folder a group's env_file names
 // holds a login for, "" where none can be read: no env_file, one that
 // cannot be read, an env that names no folder, or a folder with no login
