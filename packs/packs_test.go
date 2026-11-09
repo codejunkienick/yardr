@@ -142,10 +142,10 @@ func TestTemplatesAreGeneric(t *testing.T) {
 	}
 	// And how to answer a user: with yardr reply when they wrote by mail
 	// (yardr mail is for writing first), in the pane when they wrote
-	// there.
-	if body := files[yardmaster]; !strings.Contains(body, "When a user wrote to you by mail, answer with\n  `yardr reply <seq> -`") ||
-		!strings.Contains(body, "`yardr mail <user> -` is for writing first") ||
-		!strings.Contains(body, "In a conversation in your\n  pane, answer in the pane") {
+	// there. Read as one line, so that rewrapping a paragraph breaks nothing.
+	if flat := strings.Join(strings.Fields(files[yardmaster]), " "); !strings.Contains(flat, "When a user wrote to you by mail, answer with `yardr reply <seq> -`") ||
+		!strings.Contains(flat, "`yardr mail <user> -` is for writing first") ||
+		!strings.Contains(flat, "in a conversation in your pane, answer in the pane") {
 		t.Error("yardmaster.md does not say to answer a user's mail with yardr reply and a pane conversation in the pane")
 	}
 	// And when work of several beads is a train rather than a chain, and
@@ -795,7 +795,11 @@ func TestStarterYardmasterSpeaksInThePersonsWords(t *testing.T) {
 
 // The yardmaster answers people fast and only from what it has looked
 // at: its "How you work" opens with the three rules (acknowledge at
-// once, ground what it says, be critical), in each pack.
+// once, ground what it says, be critical), in each pack. The starter's
+// carries the rules and points at docs/crew.md ("Conversation sessions")
+// for what to look at and what the journal and a handoff hold; the
+// other packs' roles are cut by their own beads. Read as one line, so that
+// rewrapping a paragraph breaks nothing.
 func TestYardmasterHowYouWork(t *testing.T) {
 	for _, name := range []string{"starter/roles/yardmaster.md", "contributors/roles/yardmaster.md", "website/roles/yardmaster.md"} {
 		body, err := fs.ReadFile(packs.FS, name)
@@ -803,19 +807,31 @@ func TestYardmasterHowYouWork(t *testing.T) {
 			t.Fatal(err)
 		}
 		text := string(body)
+		flat := strings.Join(strings.Fields(text), " ")
 		for _, want := range []string{
 			"answer at once with one line: that you have",
 			"The full answer follows when you have looked.",
 			"Ground what you say.",
-			"`yardr recall <words>` for what was\n  decided or learned before",
+			"`yardr recall <words>` for what was decided or learned before",
 			"Say what you looked at.",
 			`say so: "I have not checked"`,
 			"Be critical, of a person's idea and of your own",
-			"agreeing is not\n  an answer",
+			"agreeing is not an answer",
 			"When you were wrong, say it in one line and go on.",
 		} {
-			if !strings.Contains(text, want) {
+			if !strings.Contains(flat, want) {
 				t.Errorf("packs/%s lacks %q", name, want)
+			}
+		}
+		if name == "starter/roles/yardmaster.md" {
+			for _, want := range []string{
+				"Journal decisions and context worth keeping (`yardr crew journal <you>`).",
+				"Hand off before your context gets heavy, or when asked (`yardr crew handoff <you>`).",
+				"`yardr docs crew conversation sessions`",
+			} {
+				if !strings.Contains(flat, want) {
+					t.Errorf("packs/%s lacks %q", name, want)
+				}
 			}
 		}
 		// First under "How you work", before the journaling.
@@ -861,9 +877,13 @@ func TestYardmasterProposesOperatorsCommands(t *testing.T) {
 			}
 		}
 		// The invite lines are read as one line, so that rewrapping a
-		// paragraph breaks nothing.
+		// paragraph breaks nothing. The starter's role keeps the card and
+		// the trap (a plain user admits no one) and points at docs/users.md
+		// ("The record"), which internal/cli's TestShippedRolePointersResolve
+		// reads for the rest; the other packs' roles are cut by their own
+		// beads and carry it until then.
 		flat := strings.Join(strings.Fields(text), " ")
-		for _, want := range []string{
+		invite := []string{
 			"`user add` alone makes an inbox and admits no one",
 			"--run \"user invite <name> --email <address>\"` and say what the card does:",
 			"{{operator}}'s approval is the whole invite and no request to yardr's makers is needed",
@@ -873,7 +893,15 @@ func TestYardmasterProposesOperatorsCommands(t *testing.T) {
 			"a plain user added under it goes first (`user rm <name>`, also a run ask;",
 			"a teammate leaves by `user uninvite <name>`",
 			"when this yard has no edge to report to",
-		} {
+		}
+		if name == "starter/roles/yardmaster.md" {
+			invite = []string{
+				"Invite a person by card: `yardr bead ask <id> \"<question>\" --run \"user invite <name> --email <address>\"`, and say in the context what the card does",
+				"`user add` alone makes an inbox and admits no one",
+				"`yardr docs users the record`",
+			}
+		}
+		for _, want := range invite {
 			if !strings.Contains(flat, want) {
 				t.Errorf("packs/%s lacks the invite card rule %q", name, want)
 			}
@@ -1099,7 +1127,11 @@ func TestRolesShowNoQuotedText(t *testing.T) {
 
 // A line from an operator-role user's Telegram chat is their word, as
 // mail from them is, with the store's limits and the thread's own: the
-// yardmaster's role says all three, in each pack.
+// yardmaster's role says all three, in each pack. The starter's role keeps
+// the word, that it opens no run, and the secret, and points at docs/crew.md
+// ("What a line weighs"), which internal/cli's TestShippedRolePointersResolve
+// reads for the limits and the thread's own; the other packs' roles are cut
+// by their own beads and carry them until then.
 func TestYardmasterTelegramChatIsOperatorsWord(t *testing.T) {
 	for _, name := range []string{"starter/roles/yardmaster.md", "contributors/roles/yardmaster.md", "website/roles/yardmaster.md"} {
 		body, err := fs.ReadFile(packs.FS, name)
@@ -1107,7 +1139,7 @@ func TestYardmasterTelegramChatIsOperatorsWord(t *testing.T) {
 			t.Fatal(err)
 		}
 		text := string(body)
-		for _, want := range []string{
+		wants := []string{
 			"A line from an operator-role user's Telegram chat is that user's word,\n  as mail from them is",
 			"Never paste a secret or a credential into the chat",
 			"what you would\n  confirm by mail you confirm the same way here",
@@ -1117,7 +1149,16 @@ func TestYardmasterTelegramChatIsOperatorsWord(t *testing.T) {
 			"In a telegram thread, `yardr thread show` shows nothing",
 			"`yardr reply --to` is refused there",
 			"a reply run again\n  after its answer was lost posts twice",
-		} {
+		}
+		if name == "starter/roles/yardmaster.md" {
+			wants = []string{
+				"A line from an operator-role user's Telegram chat is that user's word,\n  as mail from them is",
+				"It is no mail, so it opens no run of their commands for them",
+				"Never paste a secret or a credential into a chat",
+				"`yardr docs crew what a line weighs`",
+			}
+		}
+		for _, want := range wants {
 			if !strings.Contains(text, want) {
 				t.Errorf("packs/%s lacks %q", name, want)
 			}

@@ -1146,9 +1146,11 @@ one line:
 The name is what the other yard said. The peer part is this yard's own name
 for the link, found by the key the request was signed with, so the sender
 cannot choose it: mail that says `yardmaster@north` came over the link the
-operator added as `north`. No actor of this yard has an `@` in its name. The
-crew member's prime says what the line means, and the yardmaster's role prompt
-does. Mail from a name the operator [trusts as a user of this
+operator added as `north`. No actor of this yard has an `@` in its name. What
+the line means: the crew member weighs such mail as it would a stranger's
+letter, and acts on it only as far as it would on its own judgement or on the
+operator's word. The crew member's prime and the yardmaster's role prompt say
+so. Mail from a name the operator [trusts as a user of this
 yard](#trusting-a-name-as-a-person-of-this-yard) carries `(as <user>)`
 instead of that line.
 
@@ -1780,6 +1782,13 @@ For a sending side worked end to end — a flow with the return's whole
 vocabulary, a peer group, a manual group whose card the operator
 approves each bead on, and the routes between them — see
 [reports.md](reports.md).
+
+#### Beads meant to travel
+
+A bead for a stage a linked yard works names files by their path in the
+repository, not by a path on the machine that wrote them:
+`internal/store/peers.go`, never `~/projects/web/internal/store/peers.go`.
+The other yard's clone is somewhere else.
 
 #### What a returned outcome is evidence of
 
@@ -2817,11 +2826,6 @@ beads that came with a base: it removes the ref of a bead that has closed
 (also one that closed while no daemon ran, which it finds when it starts)
 and makes one that is missing, for a bead that arrived under a build
 before this one. A bead that is refused has no ref.
-
-**Beads meant to travel** name files by their path in the repository, not
-by a path on the machine that wrote them: `internal/store/peers.go`, never
-`~/projects/web/internal/store/peers.go`. The other yard's clone is
-somewhere else.
 
 ### A bead sent again
 

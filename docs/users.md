@@ -130,6 +130,10 @@ yardr bead ask <id> "Remove Eve?" --context "she has moved on" \
     --run "user uninvite eve"
 ```
 
+`user add` alone makes an inbox and admits no one, so a person is brought
+in by the invite card, and the operator's approval is the whole invite: no
+request to the people who make yardr is needed.
+
 An invite makes the user a member, or an operator with `--role
 operator` (the card then says the user can approve and administer this
 yard), maps the invited address to them in `web_jwt_users`, and only
@@ -155,6 +159,13 @@ the yard's operator opens on the yard's own screen, as the web
 pairing page now tells them (see [Devices](#devices)). The yard
 side here reports through the edge's signed member door at `/member/add`
 and `/member/remove`; the connected edge must support those reports.
+
+A plain user already under the name goes first (`yardr user rm <name>`,
+also a run ask); where the yard has no edge, a person comes in by `yardr
+user add` and a device pairing ([Devices](#devices)). A new address gets a
+set-password mail from the edge; an address with a verified account gets
+none, so whoever invited the person tells them to sign in, and the crew
+member says so when it reports the invite.
 
 **A user with a login of their own.** A person who builds on their own seat
 of a Claude plan (a Team or Enterprise seat, say) needs more than a
@@ -438,10 +449,34 @@ a bead is refused**: what it has to say to a person goes on its bead
 (`yardr bead note`), and a question ends its stage with the `question`
 outcome. That is a rule of the `mail` command, not of the user's record.
 
+### Answering, and what a mail is for
+
 A crew member answers mail with `yardr reply <seq> <text|->`, the number
 its inbox line starts with: the reply is mail to that mail's sender, or,
 when the sender is a bead's session, a note on that bead.
-`yardr mail` is for writing first.
+`yardr mail <user> -` is for writing first. A person who talks to a crew
+member in its pane is answered in the pane, and that conversation is not
+mailed as well. Mail is what `yardr chat` shows a person, and all it shows.
+
+An answer goes once, where the person wrote. After a reply by mail, a
+question on a bead (`yardr bead ask`) or a reply in a thread, the crew
+member does not write it again in its pane as a summary: who wrote by mail
+does not read the pane, and who watches the pane saw the command that sent
+it. The pane still shows what the crew member is doing.
+
+Nothing nudges a person inside the yard, so what waits for their decision
+goes as an ask (`yardr bead ask`), which stands among their decisions until
+it is answered. A person who wants to be told of events subscribes to them
+(`yardr subscribe <user> yardr --done`) and finds them among the
+notifications. Mail is for talk: a decision that is theirs, a fault they
+should know, an answer. It does not say what a notification says.
+
+What a person is to run, paste or type goes in a fenced code block of its
+own: three backticks on a line before and after, one block for each thing to
+copy, and nothing in the block that is not to be copied: no prompt sign, no
+comment, no placeholder left for them to edit without saying so in the text
+above. Everything else stays plain sentences. A mail holds 4 KB, and a block
+counts.
 
 ### A page in a note
 
@@ -1328,6 +1363,21 @@ From Go the commands are `store.API`'s `AddDevice`, `Devices`,
 `RemoveDevice`, `DevicePairOpen` and `DevicePairClose`. Resolving a token to its device and user is the server's
 own (`(*store.Store).ResolveDevice`) and is no call on the socket; the
 handler of the listener is `rpc.UserServer`.
+
+### Footplate on another machine
+
+A person reads mail and answers asks in footplate. On the yard's own
+machine it talks to the yard over its socket, and nothing needs pairing. On another machine the device calls the yard's listener:
+`hook_addr` sets where it listens, and the operator must make it reachable
+from the device. The `--url` to give is an HTTPS one the device can reach:
+over HTTPS the connection protects the code and the device's token, as the
+sealed form of the QR code does by itself ([below](#enrolled-by-a-code)).
+Only an operator opens a pairing, with `yardr user device pair <user>
+<device> --url <address>`, and reads the code to the person, who types it
+into footplate. A pairing is never opened from an agent's pane, whoever the
+command says it is: a crew member hands the command to the operator. This
+is not `yardr peer pair`, which links two yards
+([peers.md](peers.md#pairing)).
 
 ### Enrolled by a code
 

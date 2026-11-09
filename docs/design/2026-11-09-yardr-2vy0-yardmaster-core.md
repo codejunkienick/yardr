@@ -314,6 +314,24 @@ subsections; the chain-or-train rule has a subsection of its own in
 `docs/line.md` for that reason. The words are those of the headings and carry
 no apostrophe, since the yardmaster types them in a shell.
 
+Bead 3 (yardr-r9sa) does the same for its rows. Where the table says `yardr
+docs crew speaking in sources`, which would print the page's whole last
+section (some 17 KB, with Opening a thread and Setting a thread's status), the
+role points at the two subsections the moved rules stand in, new under it:
+`yardr docs crew what a line weighs` and `yardr docs crew whether to speak`.
+Where it says `yardr docs users`, which prints some 120 KB, the role points at
+`yardr docs users answering` (new, first under Mail, so the pointer prints
+neither the pages nor the files that follow it), `yardr docs users the record` (the invite
+card) and `yardr docs users footplate on another machine` (new, before Enrolled
+by a code, since Devices as a whole is some 65 KB). Where it says `yardr docs
+peers`, which prints some 200 KB, the role points at `yardr docs peers mail
+between crew members` and `yardr docs peers beads meant to travel`, a short
+subsection the path rule moved to from under the refs table of Code that comes
+back. The long tail of How you work points at `yardr docs crew conversation
+sessions`, which now holds the grounding and what the journal and a handoff
+each hold. The backlinks from `docs/crew.md` to the role file, in the Slack
+paragraph and in the closing paragraph, now point at the two subsections.
+
 Nothing is cut without a row: the table plus the kept sections account for
 all 39,500 bytes of the starter role at c6ff1967. The 31,435 of section 2.1
 were measured before two changes. yardr-pdat added 3,038 to Design a
