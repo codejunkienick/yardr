@@ -41,6 +41,12 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	testGitHome = gitHome
+	testGitConfigFile = filepath.Join(gitHome, "gitconfig")
+	if err := os.WriteFile(testGitConfigFile, []byte(testGitConfig), 0o600); err != nil {
+		os.RemoveAll(gitHome)
+		fmt.Fprintf(os.Stderr, "runner tests: write git config: %v\n", err)
+		os.Exit(1)
+	}
 	// The trust tests wait on fakes that answer at once, so the suite
 	// shortens the wait for a real agent once, here, instead of per test
 	// (per-test shortening races under t.Parallel). The one test that

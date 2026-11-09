@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -1278,11 +1279,31 @@ esac`)}
 	}
 }
 
+// testGitConfig is what the tests' git reads in place of the developer's
+// configuration, and it has git start no maintenance of its own. A commit, a
+// push, a fetch and a fast-forward merge each end by running `git maintenance
+// run --auto`, which by default detaches: it forks a daemon and returns, and
+// the daemon takes the repository's objects/maintenance.lock a moment later
+// and drops it a moment after that, a moment the scheduler stretches on a
+// loaded box. A template is copied the instant its build returns (copyDirErr),
+// so a copy that lists the lock can find it gone when it reads it (yardr-03av,
+// in contrib/assembly's copies). Nothing here wants a repository repacked, so
+// no repository is given the chance. gc.auto is the same switch for a git
+// older than maintenance, whose commands run gc --auto themselves.
+const testGitConfig = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n"
+
+// testGitConfigFile is the file TestMain writes testGitConfig to, in the git
+// home that goes with the run.
+var testGitConfigFile string
+
 // testGitEnv is the environment the tests' git runs in: a hermetic base,
 // as sessionGit's, so what the developer or the session configured (notably
 // a core.hooksPath from GIT_CONFIG_*, which would run hooks on every setup
 // commit) reaches neither the test's git nor what it asserts. The private
 // home also keeps Git's default global excludes file out of staged fixtures.
+// What git reads in place of the developer's configuration is the file
+// testGitConfigFile, for the git that builds the templates the tests copy
+// (seedTemplate, seedFetchYard) as for the rest.
 func testGitEnv() []string {
 	var env []string
 	for _, kv := range os.Environ() {
@@ -1297,7 +1318,7 @@ func testGitEnv() []string {
 	return append(env,
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
 		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
-		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+testGitConfigFile,
 		"HOME="+testGitHome)
 }
 
@@ -1307,6 +1328,65 @@ func gitT(t *testing.T, dir string, args ...string) {
 	cmd.Env = testGitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// A template is copied the instant its build returns, and a build ends with a
+// commit, or with a push to the bare repository a fetch template keeps as its
+// origin. Git ends both by running `git maintenance run --auto`, which detaches
+// and may hold the repository's objects/maintenance.lock for a moment after the
+// command has returned, so a copy could list the lock and find it gone
+// (yardr-03av). testGitConfig has git start none. The race itself is the
+// scheduler's, so this pins its cause, which git's trace2 events show whatever
+// the timing: the commit and the push, run in testGitEnv, start no maintenance
+// process.
+func TestMainKeepsGitFromStartingMaintenance(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	repo, origin := filepath.Join(dir, "repo"), filepath.Join(dir, "origin.git")
+	gitT(t, dir, "init", "-q", "-b", "main", repo)
+	gitT(t, dir, "init", "-q", "--bare", "-b", "main", origin)
+	gitT(t, repo, "remote", "add", "origin", origin)
+	for _, step := range []struct {
+		cmd  string
+		args []string
+	}{
+		{"commit", []string{"commit", "-q", "--allow-empty", "-m", "base"}},
+		{"push", []string{"push", "-q", "origin", "main"}},
+	} {
+		trace := filepath.Join(dir, step.cmd+".trace")
+		cmd := exec.Command("git", step.args...)
+		cmd.Dir = repo
+		cmd.Env = append(testGitEnv(), "GIT_TRACE2_EVENT="+trace)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", step.cmd, err, out)
+		}
+		b, err := os.ReadFile(trace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The git commands the run started, as the start events of its trace
+		// name them: the second word of each argv.
+		var ran []string
+		for _, line := range strings.Split(string(b), "\n") {
+			var ev struct {
+				Event string   `json:"event"`
+				Argv  []string `json:"argv"`
+			}
+			if json.Unmarshal([]byte(line), &ev) != nil || len(ev.Argv) < 2 ||
+				(ev.Event != "start" && ev.Event != "child_start") {
+				continue
+			}
+			ran = append(ran, ev.Argv[1])
+		}
+		// A trace that does not show the command itself shows nothing of what
+		// it started either, and the check below would pass for the wrong reason.
+		if !slices.Contains(ran, step.cmd) {
+			t.Fatalf("git %s: its trace2 events hold no start of it, only %q", step.cmd, ran)
+		}
+		if slices.Contains(ran, "maintenance") {
+			t.Errorf("git %s started git maintenance: its daemon can hold objects/maintenance.lock after the command returns", step.cmd)
+		}
 	}
 }
 

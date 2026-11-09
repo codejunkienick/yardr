@@ -2,6 +2,7 @@ package dispatch_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -23,6 +24,19 @@ import (
 	"yardr.dev/yardr/internal/testload"
 )
 
+// gitConfig is what git reads in place of the developer's configuration, and
+// it has git start no maintenance of its own. A commit, a push, a fetch and a
+// fast-forward merge each end by running `git maintenance run --auto`, which
+// by default detaches: it forks a daemon and returns, and the daemon takes the
+// repository's objects/maintenance.lock a moment later and drops it a moment
+// after that, a moment the scheduler stretches on a loaded box. A template is
+// copied the instant its build returns (copyDir), so a copy that lists the
+// lock can find it gone when it stats it (yardr-03av, in contrib/assembly's
+// copies). Nothing here wants a repository repacked, so no repository is given
+// the chance. gc.auto is the same switch for a git older than maintenance,
+// whose commands run gc --auto themselves.
+const gitConfig = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n"
+
 func TestMain(m *testing.M) {
 	// What the pane or hook that runs the tests sets for git goes first:
 	// inherited Git settings reach every subprocess, and GIT_EXEC_PATH can
@@ -38,7 +52,19 @@ func TestMain(m *testing.M) {
 	// same for every test, set here once -- git reads nothing of the
 	// developer's. The serial tests are those that set process environment
 	// (t.Setenv), which parallel tests cannot share; each says so.
-	os.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	//
+	// What git reads instead is a file, gitConfig, in a directory that goes
+	// with the run. It is the process's setting alone: gitIn makes none of
+	// its own, which would win over this one.
+	gitDir, err := os.MkdirTemp("", "yardr-gitconfig")
+	if err != nil {
+		panic(err)
+	}
+	gitconfig := filepath.Join(gitDir, "gitconfig")
+	if err := os.WriteFile(gitconfig, []byte(gitConfig), 0o644); err != nil {
+		panic(err)
+	}
+	os.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
 	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	// The yards' own git calls are many, and on macOS each is two execs, the
 	// system's shim and the git it runs: the real git first on PATH, for
@@ -59,7 +85,65 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	scripttest.Remove()
 	removePeerTemplates()
+	os.RemoveAll(gitDir)
 	os.Exit(code)
+}
+
+// The peer template is copied the instant its build returns, and its build
+// ends with a push to the bare repository it keeps. Git ends a push, and a
+// commit, by running `git maintenance run --auto`, which detaches and may hold
+// the repository's objects/maintenance.lock for a moment after the command has
+// returned, so a copy could list the lock and find it gone (yardr-03av).
+// gitConfig has git start none. The race itself is the scheduler's, so this
+// pins its cause, which git's trace2 events show whatever the timing: the
+// commit and the push, run as gitIn runs them, start no maintenance process.
+func TestMainKeepsGitFromStartingMaintenance(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	repo, origin := filepath.Join(dir, "repo"), filepath.Join(dir, "origin.git")
+	gitIn(t, dir, "init", "-q", "-b", "main", repo)
+	gitIn(t, dir, "init", "-q", "--bare", "-b", "main", origin)
+	gitIn(t, repo, "remote", "add", "origin", origin)
+	for _, step := range []struct {
+		cmd  string
+		args []string
+	}{
+		{"commit", []string{"commit", "-q", "--allow-empty", "-m", "base"}},
+		{"push", []string{"push", "-q", "origin", "main"}},
+	} {
+		trace := filepath.Join(dir, step.cmd+".trace")
+		cmd := gitCmd(repo, step.args...)
+		cmd.Env = append(cmd.Env, "GIT_TRACE2_EVENT="+trace)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", step.cmd, err, out)
+		}
+		b, err := os.ReadFile(trace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The git commands the run started, as the start events of its trace
+		// name them: the second word of each argv.
+		var ran []string
+		for _, line := range strings.Split(string(b), "\n") {
+			var ev struct {
+				Event string   `json:"event"`
+				Argv  []string `json:"argv"`
+			}
+			if json.Unmarshal([]byte(line), &ev) != nil || len(ev.Argv) < 2 ||
+				(ev.Event != "start" && ev.Event != "child_start") {
+				continue
+			}
+			ran = append(ran, ev.Argv[1])
+		}
+		// A trace that does not show the command itself shows nothing of what
+		// it started either, and the check below would pass for the wrong reason.
+		if !slices.Contains(ran, step.cmd) {
+			t.Fatalf("git %s: its trace2 events hold no start of it, only %q", step.cmd, ran)
+		}
+		if slices.Contains(ran, "maintenance") {
+			t.Errorf("git %s started git maintenance: its daemon can hold objects/maintenance.lock after the command returns", step.cmd)
+		}
+	}
 }
 
 // fakeRunner records starts and lets tests kill sessions.

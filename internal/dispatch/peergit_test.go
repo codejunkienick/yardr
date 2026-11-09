@@ -21,15 +21,22 @@ import (
 // peerbeads_test.go, and what they share is a bare repository, of which
 // each has a clone of its own as its depot web.
 
-// gitIn runs git in dir, off the developer's configuration and with a name
-// to commit as.
-func gitIn(t *testing.T, dir string, args ...string) string {
-	t.Helper()
+// gitCmd is git in dir, off the developer's configuration and with a name to
+// commit as. The configuration is the process's, TestMain's file: a setting
+// made here would win over it, and a template built by gitIn would start
+// maintenance again.
+func gitCmd(dir string, args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_AUTHOR_NAME=t",
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_AUTHOR_NAME=t",
 		"GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
-	out, err := cmd.CombinedOutput()
+	return cmd
+}
+
+// gitIn runs gitCmd and fails the test where git does, returning what it printed.
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := gitCmd(dir, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
 	}
