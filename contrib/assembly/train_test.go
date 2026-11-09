@@ -116,6 +116,7 @@ func TestTrainEndToEnd(t *testing.T) {
 	// it tests, which the depot's gate reads for its flaky log.
 	record := filepath.Join(t.TempDir(), "runs")
 	y := newTrainYardCLI(t, `test ! -e RED && echo "$YARDR_BEAD ${YARDR_TEST_BEADS-unset}" >>`+shellQuote(record))
+	y.hooks = true
 	if y.ready("r-e") {
 		t.Fatal("the train is ready while its children are open")
 	}
@@ -346,6 +347,7 @@ func TestMergeLocalTellsTheTestCommandItsBeads(t *testing.T) {
 // approved from the start: its own flow is not what is tested here.
 func TestMergeLocalSquashLandsEachChildAsOneCommitAndTheTrainByRebase(t *testing.T) {
 	y := newYard(t)
+	y.hooks = true
 	y.opts = "YARDR_LAND=squash"
 	y.retype("r-1", "wagon")
 	y.createBead("the train", "r-e", "r", "train", "approved")

@@ -19,7 +19,9 @@ import (
 )
 
 // build runs the script for this machine's target only, with nothing of a
-// yardr or git hook running the tests leaking into it.
+// yardr or git hook running the tests leaking into it. It builds yardr with
+// the real go, which is a link of it: a test whose subject is not the
+// compile puts goStandIn's PATH first instead.
 func build(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	return buildWith(t, nil, args...)
@@ -236,11 +238,89 @@ func TestBuildRefusesAVersionThatIsNoTag(t *testing.T) {
 	}
 }
 
+// fakeGo is the body of a go that links nothing, for the build tests whose
+// subject is what the script does around the compile: sign, notarize, sum and
+// pack. A link of yardr is about two seconds of cpu a build, and the archive
+// checks that read the result through are slower again under -race; a dozen
+// builds of it made this the package that outlasted the 60 s budget, and none of
+// them asked the compile for more than the target and the flags the script
+// gives it. So build notes those, one line a build, in $GO_CALLS (the target
+// and CGO_ENABLED it was given, -trimpath, and the -ldflags with the tag), and
+// writes the yardr it was asked for as a script that prints that tag, as the
+// stamped binary does; every other go command (the script's go env) is the
+// real one's. TestBuildStampsTheVersionAndPacksTheArchive and
+// TestBuildIsReproducibleWithSourceDateEpoch still build with the real go, so
+// the stamping and the bytes of a real build are held there.
+const fakeGo = `[ "$1" = build ] || exec {go} "$@"
+line="build GOOS=$GOOS GOARCH=$GOARCH CGO_ENABLED=$CGO_ENABLED"
+out=
+tag=
+prev=
+for a; do
+  case "$prev" in
+  -o) out=$a ;;
+  -ldflags)
+    tag=${a##*version.tag=}
+    tag=${tag%% *}
+    line="$line -ldflags=$a"
+    ;;
+  esac
+  [ "$a" != -trimpath ] || line="$line -trimpath"
+  prev=$a
+done
+echo "$line" >>"$GO_CALLS"
+printf '#!/bin/sh\necho "%s"\n' "$tag" >"$out"
+chmod +x "$out"`
+
+// writeGoStandIn puts fakeGo into bin as go, in front of the real one's path.
+func writeGoStandIn(t *testing.T, bin string) {
+	t.Helper()
+	realGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := "#!/bin/sh\n" + strings.ReplaceAll(fakeGo, "{go}", realGo) + "\n"
+	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// goStandIn is fakeGo on a PATH of its own, for a build test that needs no
+// other stand-in (standIns has it too), and the environment that leads to it
+// and to the file it notes its builds in.
+func goStandIn(t *testing.T) []string {
+	t.Helper()
+	bin := t.TempDir()
+	writeGoStandIn(t, bin)
+	return []string{
+		"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"GO_CALLS=" + filepath.Join(t.TempDir(), "go-calls"),
+	}
+}
+
+// goBuilds is the line each build of the stand-in go noted, in order, for the
+// environment env (from goStandIn or standIns) led it to.
+func goBuilds(t *testing.T, env []string) []string {
+	t.Helper()
+	for _, kv := range env {
+		if file, ok := strings.CutPrefix(kv, "GO_CALLS="); ok {
+			b, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return strings.Split(strings.TrimSpace(string(b)), "\n")
+		}
+	}
+	t.Fatal("the environment has no GO_CALLS")
+	return nil
+}
+
 // standIns puts a codesign, an xcrun and a zip on a PATH of their own, as no
 // test has a Developer ID or may call Apple, and returns the environment
 // that leads to them and the file each writes its call to. uname is one too,
 // so that the Mac's path runs wherever the tests do. tar is the real one,
-// noting only when an archive is packed.
+// noting only when an archive is packed. go is fakeGo, which notes its builds
+// in the file GO_CALLS names (goBuilds reads it) and not in the one returned.
 //
 //	STANDIN_UNAME    what uname -s prints (Darwin)
 //	STANDIN_STATUS   what the notary service answers (Accepted)
@@ -248,6 +328,7 @@ func standIns(t *testing.T) (env []string, calls string) {
 	t.Helper()
 	bin := t.TempDir()
 	calls = filepath.Join(t.TempDir(), "calls")
+	writeGoStandIn(t, bin)
 	realTar, err := exec.LookPath("tar")
 	if err != nil {
 		t.Fatal(err)
@@ -282,6 +363,7 @@ exec ` + realTar + ` "$@"`,
 	return []string{
 		"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"CALLS=" + calls,
+		"GO_CALLS=" + filepath.Join(t.TempDir(), "go-calls"),
 		"YARDR_RELEASE_SIGN_IDENTITY=Developer ID Application: Stand In (ABCDE12345)",
 		"YARDR_RELEASE_NOTARY_PROFILE=stand-in-profile",
 	}, calls
@@ -316,9 +398,6 @@ func binary(t *testing.T, archive string) string {
 
 func TestBuildSignsAndNotarizesTheDarwinBinaryBeforeItPacksIt(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("builds yardr")
-	}
 	env, calls := standIns(t)
 	dist := t.TempDir()
 	out, err := buildWith(t, append(env, "YARDR_RELEASE_TARGETS=darwin/arm64 linux/amd64"), "v9.8.7", dist)
@@ -351,6 +430,17 @@ func TestBuildSignsAndNotarizesTheDarwinBinaryBeforeItPacksIt(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("the build called\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
+	// Each target was built for itself, static, trimmed and stamped with the tag.
+	builds := goBuilds(t, env)
+	if len(builds) != 2 || !strings.HasPrefix(builds[0], "build GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 -trimpath ") ||
+		!strings.HasPrefix(builds[1], "build GOOS=linux GOARCH=amd64 CGO_ENABLED=0 -trimpath ") {
+		t.Errorf("the script asked go for\n%s\nwant the darwin/arm64 and linux/amd64 builds, static and trimmed", strings.Join(builds, "\n"))
+	}
+	for _, line := range builds {
+		if !strings.Contains(line, "-X yardr.dev/yardr/internal/version.tag=v9.8.7") {
+			t.Errorf("the build %q does not stamp the tag", line)
+		}
+	}
 	for _, arg := range []string{
 		"--sign Developer ID Application: Stand In (ABCDE12345) ",
 		"--options runtime", "--timestamp", "--identifier dev.yardr.yardr", "--force",
@@ -373,9 +463,6 @@ func TestBuildSignsAndNotarizesTheDarwinBinaryBeforeItPacksIt(t *testing.T) {
 
 func TestBuildFailsWithTheNotaryLogWhenAppleRefuses(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("builds yardr")
-	}
 	env, calls := standIns(t)
 	dist := t.TempDir()
 	out, err := buildWith(t, append(env, "YARDR_RELEASE_TARGETS=darwin/arm64", "STANDIN_STATUS=Invalid", "STANDIN_SUBMIT_EXIT=1"), "v9.8.7", dist)
@@ -431,12 +518,9 @@ func TestBuildRefusesSigningItCannotDo(t *testing.T) {
 
 func TestBuildSaysThatUnsignedDarwinBinariesAreNotSigned(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("builds yardr")
-	}
 	env, calls := standIns(t)
 	// The stand-ins and where they write, without the two variables.
-	env = env[:2]
+	env = env[:3]
 	out, err := buildWith(t, append(env, "YARDR_RELEASE_TARGETS=darwin/arm64 linux/amd64"), "v9.8.7", t.TempDir())
 	if err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
@@ -480,12 +564,9 @@ func verify(dir, public string) (string, error) {
 
 func TestBuildSignsTheChecksumsWithTheMinisignKey(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("builds yardr")
-	}
 	secret, public := minisignKey(t)
 	dist := t.TempDir()
-	out, err := buildWith(t, []string{"YARDR_RELEASE_MINISIGN_KEY=" + secret}, "v9.8.7", dist)
+	out, err := buildWith(t, append(goStandIn(t), "YARDR_RELEASE_MINISIGN_KEY="+secret), "v9.8.7", dist)
 	if err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
@@ -530,9 +611,6 @@ func TestBuildSignsTheChecksumsWithTheMinisignKey(t *testing.T) {
 // though the script works from the repository's root.
 func TestBuildFindsAMinisignKeyGivenByARelativePath(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("builds yardr")
-	}
 	secret, public := minisignKey(t)
 	here, err := os.Getwd()
 	if err != nil {
@@ -543,7 +621,7 @@ func TestBuildFindsAMinisignKeyGivenByARelativePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	dist := t.TempDir()
-	if out, err := buildWith(t, []string{"YARDR_RELEASE_MINISIGN_KEY=" + rel}, "v9.8.7", dist); err != nil {
+	if out, err := buildWith(t, append(goStandIn(t), "YARDR_RELEASE_MINISIGN_KEY="+rel), "v9.8.7", dist); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	if out, err := verify(dist, public); err != nil {
@@ -555,15 +633,12 @@ func TestBuildFindsAMinisignKeyGivenByARelativePath(t *testing.T) {
 // of its own, and not the one an earlier build signed other checksums with.
 func TestBuildSaysThatUnsignedChecksumsAreNotSigned(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("builds yardr")
-	}
 	dist := t.TempDir()
 	stale := filepath.Join(dist, "checksums.txt.minisig")
 	if err := os.WriteFile(stale, []byte("of an earlier build\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err := build(t, "v9.8.7", dist)
+	out, err := buildWith(t, goStandIn(t), "v9.8.7", dist)
 	if err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
@@ -626,9 +701,6 @@ func TestBuildRefusesAMinisignKeyItCannotSignWith(t *testing.T) {
 // were to be signed are not left behind as if the release were whole.
 func TestBuildFailsWhenMinisignDoesNotSign(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("builds yardr")
-	}
 	if _, err := exec.LookPath("minisign"); err != nil {
 		t.Skip("no minisign on PATH")
 	}
@@ -637,7 +709,7 @@ func TestBuildFailsWhenMinisignDoesNotSign(t *testing.T) {
 		t.Fatal(err)
 	}
 	dist := t.TempDir()
-	out, err := buildWith(t, []string{"YARDR_RELEASE_MINISIGN_KEY=" + key}, "v9.8.7", dist)
+	out, err := buildWith(t, append(goStandIn(t), "YARDR_RELEASE_MINISIGN_KEY="+key), "v9.8.7", dist)
 	if err == nil || !strings.Contains(out, "minisign did not sign checksums.txt") {
 		t.Fatalf("err %v; want an error saying that minisign did not sign:\n%s", err, out)
 	}

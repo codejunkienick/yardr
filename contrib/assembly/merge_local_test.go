@@ -191,6 +191,7 @@ type yard struct {
 	envFile        string // the group's env_file, when a test's script reads its credentials from one
 	bin            string // the script's YARDR_BIN, when not yardrBin itself
 	path           string // a directory of stand-ins, on the script's PATH behind the recorder (a PATH= in opts would replace it)
+	hooks          bool   // the script's git keeps the yard's hooks the runner points it at (noGitHooks)
 	log            string // what the last run wrote to its group's log
 
 	runs []string // the log of each run, for a failed test (showRuns)
@@ -438,6 +439,18 @@ func (y *yard) commit(dir, file, content string) string {
 // would, and waits for it to exit.
 func (y *yard) assembly() { y.exec("merge-local", "assembly", "r-1") }
 
+// noGitHooks is what a script's command starts with unless its yard keeps the
+// hooks (yard.hooks): the runner points a session's git at the yard's hooks with
+// core.hooksPath in GIT_CONFIG_COUNT, _KEY_0 and _VALUE_0 (and clears
+// GIT_CONFIG_PARAMETERS), and every ref update, checkout and index change of the
+// script's git then starts a shell and a cat, which are about thirty-five
+// firings and a third of a second of cpu in a landing, a tenth of this
+// package's, in repositories that have no hook of their own. Nothing here
+// asserts on them (the suite passes the same without), so a script runs without
+// the setting, and the cases that run a whole flow or write a commit message
+// (yard.hooks) keep it; what the hooks do is internal/runner's tests'.
+const noGitHooks = "env -u GIT_CONFIG_COUNT -u GIT_CONFIG_KEY_0 -u GIT_CONFIG_VALUE_0 -u GIT_CONFIG_PARAMETERS "
+
 // exec runs script (in this directory) for bead id through the exec
 // runner, as the group would whose cmd it is, and waits for it to exit.
 func (y *yard) exec(script, group, id string) {
@@ -452,7 +465,11 @@ func (y *yard) exec(script, group, id string) {
 		y.t.Fatal(err)
 	}
 	logPath := filepath.Join(y.home, group+".log")
-	cmd := script
+	launch := script
+	if !y.hooks {
+		launch = noGitHooks + script
+	}
+	cmd := launch
 	// What the script makes is noted by a mktemp that stands first on its PATH
 	// (stop_test.go): the yard's watch looks at it when the script reports, and
 	// it is looked at once more when the script is gone.
@@ -466,7 +483,7 @@ func (y *yard) exec(script, group, id string) {
 		w.arm(made)
 	}
 	if y.push != "" {
-		cmd = "YARDR_PUSH=" + y.push + " " + script
+		cmd = "YARDR_PUSH=" + y.push + " " + launch
 	}
 	if y.opts != "" {
 		cmd = y.opts + " " + cmd
@@ -761,6 +778,7 @@ func (y *yard) refusedOf(id string) []string {
 
 func TestMergeLocalClean(t *testing.T) {
 	y := newYardCLI(t)
+	y.hooks = true
 	remote := filepath.Join(t.TempDir(), "origin.git")
 	y.git(".", "init", "-q", "--bare", remote)
 	y.git(y.repo, "remote", "add", "origin", remote)
@@ -822,40 +840,6 @@ func TestMergeLocalSaysHowLongTheTestsTook(t *testing.T) {
 	}
 	if want := "== r-1 took: the tests " + m[1] + " s\n"; !strings.Contains(y.log, want) {
 		t.Fatalf("the log lacks %q:\n%s", want, y.log)
-	}
-}
-
-// A failed push is recorded before the landing note's trailing test time.
-func TestMergeLocalPushFailureLeavesTestTimeAtEndOfNote(t *testing.T) {
-	y := newYard(t)
-	y.tests("true")
-	y.push = "missing-remote"
-	y.commit(y.wt, "b.txt", "bead\n")
-
-	y.assembly()
-
-	notes := y.notes()
-	if !regexp.MustCompile(`(?m)^.*merged .*, tested with the command true; pushing main to missing-remote failed \(not forced\) in \d+ s$`).MatchString(notes) {
-		t.Fatalf("the failed push note does not end with the seconds the tests took:\n%s", notes)
-	}
-	if !regexp.MustCompile(`(?m)^== r-1 took: the tests \d+ s, push \d+ s$`).MatchString(y.log) {
-		t.Fatalf("the log does not time the failed push:\n%s", y.log)
-	}
-}
-
-// A red run's seconds are in the log too, before the line that says it
-// failed.
-func TestMergeLocalRedRunSaysHowLongItTook(t *testing.T) {
-	y := newYard(t)
-	y.commit(y.wt, "RED", "red\n")
-
-	y.assembly()
-
-	if b := y.bead(); b.Stage != "new" {
-		t.Fatalf("bead in %s, want back in new", b.Stage)
-	}
-	if !regexp.MustCompile(`(?m)^== r-1 took: the tests \d+ s\n== r-1 failed$`).MatchString(y.log) {
-		t.Fatalf("the log does not say how long the red run took:\n%s", y.log)
 	}
 }
 
@@ -1618,6 +1602,11 @@ func TestMergeLocalRedTests(t *testing.T) {
 		}
 		if got := y.git(y.repo, "rev-parse", "main"); got != main {
 			t.Fatal("main moved on a red run")
+		}
+		// A red run's seconds are in the log too, before the line that says it
+		// failed.
+		if !regexp.MustCompile(`(?m)^== r-1 took: the tests \d+ s\n== r-1 failed$`).MatchString(y.log) {
+			t.Fatalf("the log does not say how long the red run took:\n%s", y.log)
 		}
 	})
 

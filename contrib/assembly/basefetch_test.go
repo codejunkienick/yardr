@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -148,7 +149,8 @@ func TestMergeLocalUnpushedBaseStillLands(t *testing.T) {
 }
 
 // A fetch that fails lands on the base as it is: the bead still merges,
-// and the push fails as it would have.
+// and the push fails as it would have. A failed push is recorded before the
+// landing note's trailing test time, and the log times it.
 func TestMergeLocalFailedFetchLandsOnBaseAsIs(t *testing.T) {
 	y := newYard(t)
 	y.tests("true")
@@ -163,6 +165,13 @@ func TestMergeLocalFailedFetchLandsOnBaseAsIs(t *testing.T) {
 	}
 	if !strings.Contains(y.log, "could not fetch missing-remote, landing on main as it is") {
 		t.Fatalf("the log does not say the fetch failed:\n%s", y.log)
+	}
+	notes := y.notes()
+	if !regexp.MustCompile(`(?m)^.*merged .*, tested with the command true; pushing main to missing-remote failed \(not forced\) in \d+ s$`).MatchString(notes) {
+		t.Fatalf("the failed push note does not end with the seconds the tests took:\n%s", notes)
+	}
+	if !regexp.MustCompile(`(?m)^== r-1 took: the tests \d+ s, push \d+ s$`).MatchString(y.log) {
+		t.Fatalf("the log does not time the failed push:\n%s", y.log)
 	}
 }
 

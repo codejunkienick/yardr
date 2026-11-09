@@ -6,11 +6,12 @@ package assembly
 // Nearly every test in this package starts from one of a few identical
 // states: a yard with a depot and a bead (newYard), a train yard with two
 // children (newTrainYard), one with both children landed (landedTrainYard),
-// one with its train integrated and its pull request open (landYard), or a
-// bare repository with a branch in its worktree (newWatcherRun). Building
-// each from git and the store API costs seconds under -race, and the suite
-// builds them a hundred times over; the R1 budget (docs/testing.md) goes on
-// that repeated setup, not on what the tests assert.
+// one with its train integrated and its pull request open (integratedYard),
+// that one reviewed and in stage land (landYard), or a bare repository with a
+// branch in its worktree (newWatcherRun). Building each from git and the store
+// API costs seconds under -race, and the suite builds them a hundred times
+// over; the R1 budget (docs/testing.md) goes on that repeated setup, not on
+// what the tests assert.
 //
 // So each state is built once, by the first test that needs it, and every
 // test copies it into its own temp dir and fixes what names an absolute
@@ -19,7 +20,9 @@ package assembly
 // bit-identical to a fresh setup, so every assertion reads the same state:
 // sessions are matched by id with no clock the tests trip over, the gh calls
 // a landYard caller counts are only its own run's (pr merge is never called
-// while the template is built), and no test asserts a depot's put history.
+// while the template is built), an integratedYard caller's log has the
+// integration's own calls, as a run of the script in the test would have left
+// them, and no test asserts a depot's put history.
 //
 // The template lives until the tests end: borrowers overlap, but need not,
 // so no borrower's cleanup removes it; TestMain takes every built root away
@@ -593,15 +596,15 @@ func borrowLanded(t *testing.T, check string) *yard {
 	return borrowTrainTpl(t, landedTpl, check)
 }
 
-var landTpl = &yardTemplate{name: "land", build: buildLandTpl}
+var integratedTpl = &yardTemplate{name: "integrated", build: buildIntegratedTpl}
 
-// buildLandTpl is landYard's setup, once, into root: the train template with
-// both children landed, the train integrated and pushed, and its pull
-// request open, the train in stage land. It layers on the train template,
-// not the landed one: landYard lands its children with YARDR_PR=1 and the
-// depot's own test command, as the template must. The fake gh lives in the
+// buildIntegratedTpl is integratedYard's setup, once, into root: the train
+// template with both children landed, the train integrated and pushed, and its
+// pull request open and the train bound to it, in stage review. It layers on
+// the train template, not the landed one: the children land with YARDR_PR=1 and
+// the depot's own test command, as the template must. The fake gh lives in the
 // template, not the builder's temp dir, which ends with the builder.
-func buildLandTpl(t *testing.T, root string) {
+func buildIntegratedTpl(t *testing.T, root string) {
 	t.Helper()
 	train := trainTpl.borrow(t)
 	home := filepath.Join(root, "home")
@@ -631,6 +634,41 @@ func buildLandTpl(t *testing.T, root string) {
 	y.exec("merge-local", "assembly", "r-1")
 	y.exec("merge-local", "assembly", "r-2")
 	y.exec("integrate-train", "yard-integrators", "r-e")
+	if e := y.beadOf("r-e"); e.Stage != "review" {
+		t.Fatalf("train in %s, want review", e.Stage)
+	}
+	y.runs = nil
+}
+
+var landTpl = &yardTemplate{name: "land", build: buildLandTpl}
+
+// buildLandTpl is landYard's setup, once, into root: the integrated template
+// with the train reviewed twice and pushed by pr-train, in stage land.
+func buildLandTpl(t *testing.T, root string) {
+	t.Helper()
+	integrated := integratedTpl.borrow(t)
+	home := filepath.Join(root, "home")
+	repo := filepath.Join(root, "repo")
+	origin := filepath.Join(root, "origin.git")
+	gh := filepath.Join(root, "gh")
+	copyTree(t, filepath.Join(integrated, "home"), home)
+	copyTree(t, filepath.Join(integrated, "repo"), repo)
+	copyTree(t, filepath.Join(integrated, "origin.git"), origin)
+	copyTree(t, filepath.Join(integrated, "gh"), gh)
+	fakeGhs.Store(t, gh)
+	t.Cleanup(func() { fakeGhs.Delete(t) })
+	y := &yard{t: t, home: home, repo: repo}
+	y.env = append(os.Environ(), "YARDR_HOME="+home, "YARDR_ACTOR=test")
+	y.push = "origin"
+	y.opts = "YARDR_PR=1"
+	relinkWorktrees(t, y.repo,
+		filepath.Join(home, "worktrees", "r", "r-1"),
+		filepath.Join(home, "worktrees", "r", "r-2"),
+		filepath.Join(home, "worktrees", "r", "r-e"))
+	y.git(y.repo, "remote", "set-url", "origin", origin)
+	close := serveTemplate(t, home)
+	defer close()
+	y.putDepot("r", y.repo, "main", "test ! -e RED")
 	y.yardr("bead", "done", "r-e")
 	y.yardr("bead", "done", "r-e")
 	y.exec("pr-train", "yard-pr", "r-e")
@@ -646,8 +684,28 @@ func buildLandTpl(t *testing.T, root string) {
 // count only their own run's calls, and the template never called pr merge.
 func borrowLand(t *testing.T) (*yard, string) {
 	t.Helper()
+	y, gh := borrowShipped(t, landTpl, "r-1", "r-2")
+	if err := os.WriteFile(filepath.Join(gh, "calls"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return y, gh
+}
+
+// borrowIntegrated is integratedYard from the template: the same yard and fake
+// gh, copied, with the gh calls of the integration that made it left in the
+// log, as a run of integrate-train in the test would have left them.
+func borrowIntegrated(t *testing.T) (*yard, string) {
+	t.Helper()
+	return borrowShipped(t, integratedTpl, "r-1", "r-2", "r-e")
+}
+
+// borrowShipped copies a template with a pull request in it (the root's home,
+// repository, remote and fake gh) into the test's own temp dir, relinks the
+// worktrees named and points the depot and the remote at the copy.
+func borrowShipped(t *testing.T, tpl *yardTemplate, worktrees ...string) (*yard, string) {
+	t.Helper()
 	t.Parallel()
-	root := landTpl.borrow(t)
+	root := tpl.borrow(t)
 	// The home is short, not the test's temp dir: it holds the store's
 	// unix socket, whose path the kernel bounds.
 	home, err := os.MkdirTemp("", "yr")
@@ -666,15 +724,14 @@ func borrowLand(t *testing.T) (*yard, string) {
 	y.env = append(os.Environ(), "YARDR_HOME="+home, "YARDR_ACTOR=test")
 	y.push = "origin"
 	y.opts = "YARDR_PR=1"
-	relinkWorktrees(t, y.repo,
-		filepath.Join(home, "worktrees", "r", "r-1"),
-		filepath.Join(home, "worktrees", "r", "r-2"))
+	wts := make([]string, len(worktrees))
+	for i, id := range worktrees {
+		wts[i] = filepath.Join(home, "worktrees", "r", id)
+	}
+	relinkWorktrees(t, y.repo, wts...)
 	y.git(y.repo, "remote", "set-url", "origin", origin)
 	serveYard(t, home)
 	y.putDepot("r", y.repo, "main", "test ! -e RED")
-	if err := os.WriteFile(filepath.Join(gh, "calls"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
 	fakeGhs.Store(t, gh)
 	t.Cleanup(func() { fakeGhs.Delete(t) })
 	return y, gh

@@ -15,11 +15,13 @@ package assembly
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"yardr.dev/yardr/internal/config"
@@ -163,25 +165,38 @@ func mergeYard(t *testing.T) (y *yard, gh string) {
 	return y, gh
 }
 
+// contributorsPR is the contributors pack's pr flow as the store takes it,
+// read from the pack once: every merge-pr, pr-ci and post-review case puts the
+// same flow in a yard of its own, and loading and checking the whole pack to get
+// it again for each is work that none of them asserts on.
+var contributorsPR = sync.OnceValues(func() (store.Flow, error) {
+	sub, err := fs.Sub(packs.FS, packs.Contributors)
+	if err != nil {
+		return store.Flow{}, err
+	}
+	p, err := pack.Load(sub, packs.Embedded)
+	if err != nil {
+		return store.Flow{}, err
+	}
+	for _, f := range p.Flows {
+		if f.Name == "pr" {
+			return f.StoreFlow("contributors.pr"), nil
+		}
+	}
+	return store.Flow{}, errors.New("the contributors pack has no pr flow")
+})
+
 // contributorsPRFlow puts the contributors pack's pr flow in the yard exactly
 // as the pack carries it, and points depot r's pull requests at it.
 func (y *yard) contributorsPRFlow() {
 	y.t.Helper()
-	sub, err := fs.Sub(packs.FS, packs.Contributors)
-	if err != nil {
-		y.t.Fatal(err)
-	}
-	p, err := pack.Load(sub, packs.Embedded)
+	flow, err := contributorsPR()
 	if err != nil {
 		y.t.Fatal(err)
 	}
 	st := rpc.NewClient((&config.Config{Home: y.home}).Socket())
-	for _, f := range p.Flows {
-		if f.Name == "pr" {
-			if _, err := st.PutFlow(context.Background(), f.StoreFlow("contributors.pr"), "test"); err != nil {
-				y.t.Fatal(err)
-			}
-		}
+	if _, err := st.PutFlow(context.Background(), flow, "test"); err != nil {
+		y.t.Fatal(err)
 	}
 	y.pointFlow("r", "pr", "contributors.pr")
 }

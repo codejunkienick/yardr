@@ -126,14 +126,10 @@ func readFile(t *testing.T, path string) string {
 }
 
 func TestTrainThroughPullRequest(t *testing.T) {
-	gh := withFakeGh(t)
-	y := newTrainYard(t, "test ! -e RED")
-	y.opts = "YARDR_PR=1"
-	y.exec("merge-local", "assembly", "r-1")
-	y.exec("merge-local", "assembly", "r-2")
-
-	// Integrated: the PR is opened, once, with the train's children.
-	y.exec("integrate-train", "yard-integrators", "r-e")
+	// The children landed and the train integrated, as the template ran them
+	// (integratedYard): the PR is opened, once, with the train's children.
+	y, gh := integratedYard(t)
+	y.hooks = true
 	if e := y.beadOf("r-e"); e.Stage != "review" || e.Metadata["pr_url"] != prURL ||
 		fmt.Sprint(e.Metadata["pr_number"]) != "7" || e.Metadata["pr_head_repo"] != "o/r" {
 		t.Fatalf("train in %s with metadata %v, want review, bound to %s: number 7, head repository o/r", e.Stage, e.Metadata, prURL)
@@ -269,10 +265,7 @@ func TestIntegrateTrainDoesNotAdoptAnUnboundPR(t *testing.T) {
 // An open bound PR whose head repository changed is not silently rebound or
 // edited by integrate-train; the human must correct the binding first.
 func TestIntegrateTrainHoldsWhenBoundPRHeadRepositoryChanges(t *testing.T) {
-	gh := withFakeGh(t)
-	y := landedTrainYard(t, "test ! -e RED")
-	y.opts = "YARDR_PR=1"
-	y.exec("integrate-train", "yard-integrators", "r-e")
+	y, gh := integratedYard(t)
 	if err := os.WriteFile(filepath.Join(gh, "head-owner"), []byte("mallory\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -291,10 +284,7 @@ func TestIntegrateTrainHoldsWhenBoundPRHeadRepositoryChanges(t *testing.T) {
 // A train whose bound pull request was closed gets a new one when it is
 // integrated again, not an edit of the closed one.
 func TestIntegrateTrainOpensANewPRWhenTheBoundOneIsClosed(t *testing.T) {
-	gh := withFakeGh(t)
-	y := landedTrainYard(t, "test ! -e RED")
-	y.opts = "YARDR_PR=1"
-	y.exec("integrate-train", "yard-integrators", "r-e")
+	y, gh := integratedYard(t)
 	if err := os.WriteFile(filepath.Join(gh, "state"), []byte("CLOSED\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -336,6 +326,16 @@ func TestIntegrateTrainPRFailureGoesBackToOpen(t *testing.T) {
 func landYard(t *testing.T) (*yard, string) {
 	t.Helper()
 	return borrowLand(t)
+}
+
+// integratedYard is a train yard whose train r-e is integrated and pushed, with
+// its PR open (the train bound to it), in stage review: what the first run of
+// integrate-train under YARDR_PR=1 leaves, and the fake gh with the calls it
+// made. The yard is the template's, copied (fixture_test.go), and has the
+// switch set, as the run that made it had.
+func integratedYard(t *testing.T) (*yard, string) {
+	t.Helper()
+	return borrowIntegrated(t)
 }
 
 // A merge GitHub refuses goes back to open with gh's message, after one
@@ -482,10 +482,7 @@ func TestPRScriptsHoldOnAPRFromAnotherHeadRepository(t *testing.T) {
 }
 
 func TestPRTrainHoldsOnAPRFromAnotherHeadRepository(t *testing.T) {
-	gh := withFakeGh(t)
-	y := landedTrainYard(t, "test ! -e RED")
-	y.opts = "YARDR_PR=1"
-	y.exec("integrate-train", "yard-integrators", "r-e")
+	y, gh := integratedYard(t)
 	integrated := y.git(y.repo, "rev-parse", "yard/r-e")
 	y.commit(filepath.Join(y.home, "worktrees", "r", "r-e"), "fix.txt", "the reviewer's fix\n")
 	y.yardr("bead", "done", "r-e")
@@ -511,10 +508,7 @@ func TestPRTrainHoldsOnAPRFromAnotherHeadRepository(t *testing.T) {
 // An approved train cannot be sent back to in-pr for a closed PR: the
 // integrator must open a new one before review resumes.
 func TestPRTrainClosedPRGoesBackToOpenWithoutPushing(t *testing.T) {
-	gh := withFakeGh(t)
-	y := landedTrainYard(t, "test ! -e RED")
-	y.opts = "YARDR_PR=1"
-	y.exec("integrate-train", "yard-integrators", "r-e")
+	y, gh := integratedYard(t)
 	integrated := y.git(y.repo, "rev-parse", "yard/r-e")
 	y.commit(filepath.Join(y.home, "worktrees", "r", "r-e"), "fix.txt", "the reviewer's fix\n")
 	y.yardr("bead", "done", "r-e")
@@ -679,10 +673,7 @@ func TestPRTrainNoPRGoesBackToOpen(t *testing.T) {
 }
 
 func TestPRTrainConflictingGoesBackToOpen(t *testing.T) {
-	gh := withFakeGh(t)
-	y := landedTrainYard(t, "test ! -e RED")
-	y.opts = "YARDR_PR=1"
-	y.exec("integrate-train", "yard-integrators", "r-e")
+	y, gh := integratedYard(t)
 	y.yardr("bead", "done", "r-e")
 	y.yardr("bead", "done", "r-e") // review-security -> approved
 	if err := os.WriteFile(filepath.Join(gh, "mergeable"), []byte("CONFLICTING\n"), 0o644); err != nil {

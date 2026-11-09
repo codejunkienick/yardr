@@ -347,6 +347,7 @@ func TestSquashMessage(t *testing.T) {
 	} {
 		t.Run(c.id, func(t *testing.T) {
 			y := newYard(t)
+			y.hooks = true
 			y.commitMsg(y.repo, "base\n", map[string]string{"internal/store/old.go": "old\n"})
 			y.beadWith(c.id, c.title, c.typ, c.labels)
 			wt := filepath.Join(t.TempDir(), c.id)
@@ -401,6 +402,7 @@ func TestSquashMessage(t *testing.T) {
 // cannot be made holds the bead.
 func TestMergeLocalLandMode(t *testing.T) {
 	y := newYard(t)
+	y.hooks = true
 	orig := y.git(y.repo, "rev-parse", "main")
 	one := y.commitMsg(y.wt, "one\n", map[string]string{"b.txt": "b\n"})
 	two := y.commitMsg(y.wt, "two\n", map[string]string{"c.txt": "c\n"})
