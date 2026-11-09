@@ -315,6 +315,13 @@ that keeps the backticks in a review from being run. The runner points
 heredoc is still refused under either of them; Codex runs its commands in
 the login shell, which is zsh on a Mac.
 
+A group bound before the directory was added keeps the arguments it was
+bound with, and they have no `{tmpdir}`. Its sandbox writes nowhere, and every
+heredoc of its reviewer is refused. The role then has the reviewer give the
+same words through a pipe, which makes no file, so the review is still
+stored. `yardr group set <depot>-pr-reviewers preset="read only"` gives the
+group the current arguments, `{tmpdir}` among them, and heredocs work again.
+
 `--bind pr-reviewers=codex,read-only` at the import, or `yardr depot init
 <depot> --bind pr-reviewers=codex,read-only` where a depot is set up from a
 pack that has the group. A kind without the preset is refused by name; give

@@ -1106,7 +1106,9 @@ func TestRolesSayWhatATestMayCost(t *testing.T) {
 //
 // That holds for the contributors' pull request reviewer too: its read-only
 // sandbox lets a shell make the temporary file of a heredoc, in a private
-// directory and nowhere else (yardr-8f5k).
+// directory and nowhere else (yardr-8f5k). Where it does not, as in a group
+// bound before the directory, the role has the same text go through a pipe,
+// which makes no file (yd-yjpa).
 func TestRolesShowNoQuotedText(t *testing.T) {
 	files := packFiles(t)
 	quoted := regexp.MustCompile(`bead note \S+ "|bead (done|advance)\b.*--note "`)
@@ -2890,7 +2892,14 @@ func TestContributorsTextsSayWhatIsNotRun(t *testing.T) {
 			"until a fetch gives the commit you hold",
 			"Never record a head you have not read",
 			"A command the sandbox refuses is not tried another\nway",
-			"When the shell says it cannot create a temporary file\nfor the here-document, the sandbox is not the one this role expects: do not\nwrite the note another way",
+			// A sandbox that lets the shell make no temporary file refuses a
+			// heredoc and nothing else: the same words go through a pipe.
+			// The commands themselves are run by
+			// TestPRReviewerStoresWithoutATemporaryFile.
+			"When the shell says it cannot create a temporary file\nfor the here-document, the sandbox has refused a file and not your note. Give\nthe same words on stdin through a pipe, which makes none.",
+			"make the temporary file of a here-document refuses a form and not the step.",
+			"so write ’ (U+2019) for an apostrophe",
+			"Where the shell refuses the\n   here-document, this update still runs, with an empty review. Give the JSON\n   in single quotes",
 			"yardr mail {{yardmaster}} ",
 		},
 		"contributors/flows/pr/triage.md": {
