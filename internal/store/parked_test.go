@@ -207,8 +207,10 @@ func TestWaitingBeadWithNoFlow(t *testing.T) {
 
 // A bead that carries an open ask to the person stands among their
 // decisions and never twice. Where another member is left to move it, the
-// person's own answer takes it from their queue; a sole member still moves
-// it themselves, and an ask put aside leaves it standing.
+// person's own answer, decline or putting an ask aside takes it from their
+// queue; an ask its asker took back is nobody's answer and takes it from no
+// one's. A sole member still moves it themselves, and an ask put aside
+// leaves it standing.
 func TestWaitingAnAskedBeadStandsAmongDecisionsAlone(t *testing.T) {
 	t.Parallel()
 	s, _, ctx := parkedYard(t)
@@ -256,19 +258,89 @@ func TestWaitingAnAskedBeadStandsAmongDecisionsAlone(t *testing.T) {
 	queue("ada", "pk-siding")
 	answer("pk-review", store.Answer{Ask: seq, Option: 1}, "ada")
 	queue("ada", "pk-siding", "pk-review")
-	// An ask its asker took back is dealt with too, as UserAsks lists it
-	// among the decided and the web's home reads it: hal never answered, but
-	// ada is the member left to move the bead.
-	if _, err := s.CreateBead(ctx, store.NewBead{ID: "pk-extra", Title: "One more", Depot: "shop", Stage: "ready"}, "ada"); err != nil {
+	// What the person did with an ask decides whether their part is in.
+	// Answering it, declining it and putting it aside are: ada is the member
+	// left to move the bead. Its asker taking it back is nobody's answer,
+	// though UserAsks lists it among the decided: hal never took part, and
+	// the bead stays in his queue as it does in ada's.
+	inQueue := func(who, bead string) bool {
+		t.Helper()
+		return slices.Contains(waitingIDs(t, s, ctx, who), bead)
+	}
+	for _, c := range []struct {
+		way  string
+		deal func(bead string, seq uint64)
+		kept bool // the bead stays in hal's queue
+	}{
+		{"answered", func(bead string, seq uint64) { answer(bead, store.Answer{Ask: seq, Option: 1}, "hal") }, false},
+		{"put aside", func(bead string, seq uint64) { answer(bead, store.Answer{Ask: seq, Later: true}, "hal") }, false},
+		{"declined", func(bead string, seq uint64) {
+			answer(bead, store.Answer{Ask: seq, Decline: true, Words: "not mine"}, "hal")
+		}, false},
+		{"taken back", func(bead string, seq uint64) {
+			if err := s.TakeBackAsk(ctx, bead, seq, "asked in error", "eve"); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+	} {
+		bead := "pk-" + strings.ReplaceAll(c.way, " ", "-")
+		if _, err := s.CreateBead(ctx, store.NewBead{ID: bead, Title: "One " + c.way, Depot: "shop", Stage: "ready"}, "ada"); err != nil {
+			t.Fatal(err)
+		}
+		seq := ask(bead, "hal", "eve")
+		if inQueue("hal", bead) || !inQueue("ada", bead) {
+			t.Errorf("%s: with the ask open, hal's queue holds it = %v and ada's = %v, want the first not and the second", c.way, inQueue("hal", bead), inQueue("ada", bead))
+		}
+		c.deal(bead, seq)
+		if got := inQueue("hal", bead); got != c.kept {
+			t.Errorf("%s: hal's queue holds the bead = %v, want %v", c.way, got, c.kept)
+		}
+		if !inQueue("ada", bead) {
+			t.Errorf("%s: ada, who was asked nothing, lost the bead from her queue", c.way)
+		}
+	}
+}
+
+// A bead that leaves a templated stage takes the stage asks still open on it
+// back as it moves, and that is nobody's answer: in the next stage, worked by
+// the same group, it waits in every member's queue. The rule that counted a
+// taken-back ask as the person's own left it in nobody's, though nobody had
+// answered anything.
+func TestWaitingStageAsksTakenBackOnMoveAreNobodysAnswer(t *testing.T) {
+	t.Parallel()
+	s, ctx := stageAskYard(t, stageAskChoice)
+	if _, err := s.AddRoute(ctx, store.Route{Stage: "approved", Group: "reviewers"}, "jo"); err != nil {
 		t.Fatal(err)
 	}
-	seq = ask("pk-extra", "hal", "eve")
-	queue("hal", "pk-ready", "pk-siding")
-	if err := s.TakeBackAsk(ctx, "pk-extra", seq, "asked in error", "eve"); err != nil {
+	b, err := s.CreateBead(ctx, store.NewBead{Title: "x", Depot: "web", Stage: "new"}, "me")
+	if err != nil {
 		t.Fatal(err)
 	}
-	queue("hal", "pk-ready", "pk-siding")
-	queue("ada", "pk-siding", "pk-review", "pk-extra")
+	// In review each member holds the stage ask, open: the bead is among
+	// their decisions and in no queue.
+	if b, err = s.Advance(ctx, b.ID, "review", store.Expect{}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	for _, who := range []string{"ada", "mckean"} {
+		if got := waitingIDs(t, s, ctx, who); len(got) != 0 {
+			t.Errorf("%s's queue in review = %v, want the bead among their decisions alone", who, got)
+		}
+	}
+	// A hand move takes both asks back, the mover's own among them: neither
+	// member answered.
+	if b, err = s.Advance(ctx, b.ID, "approved", store.Expect{}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range stageAsks(t, s, b.ID) {
+		if r.State != store.AskTakenBack {
+			t.Fatalf("the stage ask to %s is %s, want it taken back by the move", r.Ask.To, r.State)
+		}
+	}
+	for _, who := range []string{"ada", "mckean"} {
+		if got := waitingIDs(t, s, ctx, who); !slices.Equal(got, []string{b.ID}) {
+			t.Errorf("%s's queue in approved = %v, want %s: nobody answered", who, got, b.ID)
+		}
+	}
 }
 
 // A held bead is a fault, to mend and not a move to make, and the web's

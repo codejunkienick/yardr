@@ -60,9 +60,11 @@ type repoRead struct {
 //     web's waits and never its parked beads, which this call keeps to;
 //   - no ask to the person stands open on it, which would be among their
 //     decisions;
-//   - and the person's part in it is unanswered: with another member left in
-//     a group of several, a bead the person has decided every ask to them on
-//     is the other member's to move.
+//   - and the person's part in it is not in (PartIn): with another member
+//     left in a group of several, a bead the person answered, declined or
+//     put aside an ask to them on is the other member's to move. An ask its
+//     asker took back is nobody's answer, and takes the bead from no one's
+//     queue.
 //
 // Each flow is resolved once for the call, and each depot's repository once
 // (between two reads of the store, since git must not run inside one), not
@@ -157,8 +159,8 @@ func (s *Store) parked(ctx context.Context, name, actor, viewer string, repos ma
 			if err != nil {
 				return err
 			}
-			asked, decided := asksOf(notes, name, at)
-			if asked || decided && len(g.Members) > 1 && slices.Contains(g.Members, name) {
+			asked, tookPart := asksOf(notes, name, at)
+			if asked || PartIn(g, name, tookPart) {
 				continue
 			}
 			w := WaitingBead{Bead: b.ID, Title: b.Title, Stage: b.Stage, Group: g.Name,
@@ -194,18 +196,48 @@ func (s *Store) parked(ctx context.Context, name, actor, viewer string, repos ma
 }
 
 // asksOf says, from a bead's notes, whether an ask to the person stands open
-// on it and whether the person has dealt with one: answered, declined, put
-// aside, or taken back by its asker, which is what UserAsks lists as decided.
-func asksOf(notes []Note, name string, at time.Time) (open, decided bool) {
+// on it and whether they took part in one (partStates).
+func asksOf(notes []Note, name string, at time.Time) (open, tookPart bool) {
 	for _, r := range ResolveAsks(notes, at) {
 		if r.AskErr != nil || r.Ask.To != name {
 			continue
 		}
 		if r.State == AskOpen {
 			open = true
-		} else {
-			decided = true
+		} else if r.State.tookPart() {
+			tookPart = true
 		}
 	}
-	return open, decided
+	return open, tookPart
+}
+
+// partStates are the states in which an ask stands for a part the person it
+// is put to took in it: they answered it, declined it or put it aside. One
+// still open has none of theirs yet, and one taken back never will: its asker
+// ended it, which is no answer of the person, though UserAsks lists it among
+// the decided. A state a later build adds is none of theirs until it is
+// listed here, so that a bead is never left to nobody by a word this build
+// does not know.
+var partStates = []AskState{AskAnswered, AskAside, AskDeclined}
+
+// tookPart reports whether an ask in this state is one the person took part
+// in (partStates).
+func (s AskState) tookPart() bool { return slices.Contains(partStates, s) }
+
+// TookPart reports whether the person took part in the ask (partStates), as
+// State says it in words, which is all a client of the socket holds.
+func (d DecidedAsk) TookPart() bool {
+	return slices.ContainsFunc(partStates, func(s AskState) bool { return s.String() == d.State })
+}
+
+// PartIn reports whether the person's part in a bead parked in a stage of the
+// manual group g is in, which leaves the bead to another member to move: g
+// lists several members, the person is one of them, and they took part in an
+// ask to them on it (asksOf, DecidedAsk.TookPart). It says nothing of an ask
+// open to the person: while one stands the bead is theirs to answer, and each
+// caller deals with that its own way (Waiting leaves the bead among their
+// decisions, the web's waits shows the ask with the wait). Both ask PartIn
+// the rest, so that Home, /line and the call count the same beads.
+func PartIn(g Group, name string, tookPart bool) bool {
+	return tookPart && len(g.Members) > 1 && slices.Contains(g.Members, name)
 }

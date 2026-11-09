@@ -299,11 +299,12 @@ func TestWaitsManual(t *testing.T) {
 	}
 }
 
-// A bead parked in a manual stage whose every ask to the viewer is decided
-// leaves that viewer's home: its /line Parked row says the answer is in and
-// names who moves it next. A round limit's reason stays beside it. Anyone
-// else still counts it, with the old row, as does a bead with an open ask,
-// one never asked, one in a sole-member or memberless group, and one the
+// A bead parked in a manual stage that the viewer answered, declined or put
+// aside an ask on leaves that viewer's home: its /line Parked row says the
+// answer is in and names who moves it next. A round limit's reason stays
+// beside it. Anyone else still counts it, with the old row, as does a bead
+// with an open ask, one never asked, one whose asks their asker took back
+// (nobody's answer), one in a sole-member or memberless group, and one the
 // viewer answered but may not move.
 func TestWaitsManualAnswered(t *testing.T) {
 	t.Parallel()
@@ -334,6 +335,13 @@ func TestWaitsManualAnswered(t *testing.T) {
 	answer(answered.ID, "anna", store.Answer{Option: 1})
 	declined := askBead(t, f, "declined", "decide")
 	answer(declined.ID, "anna", store.Answer{Decline: true, Words: "not mine"})
+	aside := askBead(t, f, "aside", "decide")
+	answer(aside.ID, "anna", store.Answer{Later: true})
+	// A plain ask to each member, which its asker took back: nobody answered.
+	takenBack := askBead(t, f, "taken back", "decide")
+	for _, to := range []string{"anna", "ben"} {
+		must(t, f.st.TakeBackAsk(ctx, takenBack.ID, askOn(t, f, takenBack.ID, askTo(to)), "asked in error", "yardmaster"))
+	}
 	open := askBead(t, f, "open", "decide")
 	askOn(t, f, open.ID, askTo("anna"))
 	quiet := askBead(t, f, "quiet", "decide")
@@ -367,18 +375,19 @@ func TestWaitsManualAnswered(t *testing.T) {
 		return ""
 	}
 
-	// anna's home lacks the answered and declined beads; the rest count.
-	if got, want := attn(anna), map[string]bool{open.ID: true, quiet.ID: true, lone.ID: true, free.ID: true, other.ID: true}; !reflect.DeepEqual(got, want) {
+	// anna's home lacks the answered, declined and put-aside beads; the rest
+	// count, the one whose asks were taken back among them.
+	if got, want := attn(anna), map[string]bool{open.ID: true, quiet.ID: true, lone.ID: true, free.ID: true, other.ID: true, takenBack.ID: true}; !reflect.DeepEqual(got, want) {
 		t.Errorf("anna's attention %v, want %v", got, want)
 	}
-	if h := homeJSON(t, anna, "/"); h.Answer() != "5 need you." {
-		t.Errorf("anna's answer %q, want five needs", h.Answer())
+	if h := homeJSON(t, anna, "/"); h.Answer() != "6 need you." {
+		t.Errorf("anna's answer %q, want six needs", h.Answer())
 	}
-	if s := answerSection(t, anna.get("/").body); !strings.HasPrefix(s, "5 need you.</p>") {
-		t.Errorf("anna's answer line is %q, want five needs", s)
+	if s := answerSection(t, anna.get("/").body); !strings.HasPrefix(s, "6 need you.</p>") {
+		t.Errorf("anna's answer line is %q, want six needs", s)
 	}
 	// Her Parked rows for them say her answer is in and name ben.
-	for _, id := range []string{answered.ID, declined.ID} {
+	for _, id := range []string{answered.ID, declined.ID, aside.ID} {
 		if got, want := parkedText("anna", anna, id), "you answered; waits for decisions (ben) in decide"; got != want {
 			t.Errorf("anna's parked row for %s is %q, want %q", id, got, want)
 		}
@@ -408,14 +417,16 @@ func TestWaitsManualAnswered(t *testing.T) {
 	}
 
 	// ben's home still counts every bead, with the old row.
-	if got := attn(ben); len(got) != 7 {
-		t.Errorf("ben's attention has %d beads, want seven", len(got))
+	if got := attn(ben); len(got) != 9 {
+		t.Errorf("ben's attention has %d beads, want nine", len(got))
 	}
-	if h := homeJSON(t, ben, "/"); h.Answer() != "7 need you." {
-		t.Errorf("ben's answer %q, want seven needs", h.Answer())
+	if h := homeJSON(t, ben, "/"); h.Answer() != "9 need you." {
+		t.Errorf("ben's answer %q, want nine needs", h.Answer())
 	}
-	if got, want := parkedText("ben", ben, answered.ID), "waits for decisions (anna, ben) in decide"; got != want {
-		t.Errorf("ben's parked row is %q, want %q", got, want)
+	for _, id := range []string{answered.ID, takenBack.ID} {
+		if got, want := parkedText("ben", ben, id), "waits for decisions (anna, ben) in decide"; got != want {
+			t.Errorf("ben's parked row for %s is %q, want %q", id, got, want)
+		}
 	}
 
 	// A bead with an open ask still waits with its question.
@@ -434,12 +445,14 @@ func TestWaitsManualAnswered(t *testing.T) {
 		t.Errorf("anna's waits %+v, without the open bead", got)
 	}
 
-	// A bead never asked, and answered ones in a sole-member or memberless
-	// group, keep the old row and count.
+	// A bead never asked, one whose asks were taken back (anna's too: it
+	// is no answer of hers), and answered ones in a sole-member or
+	// memberless group, keep the old row and count.
 	for _, c := range []struct {
 		id, want string
 	}{
 		{quiet.ID, "waits for decisions (anna, ben) in decide"},
+		{takenBack.ID, "waits for decisions (anna, ben) in decide"},
 		{lone.ID, "waits for solo (anna) in review"},
 		{free.ID, "waits for open in queue"},
 	} {
@@ -466,8 +479,8 @@ func TestWaitsManualAnswered(t *testing.T) {
 		who  string
 		want map[string]bool
 	}{
-		{"anna", map[string]bool{quiet.ID: true, lone.ID: true, free.ID: true, other.ID: true}},
-		{"ben", map[string]bool{answered.ID: true, declined.ID: true, open.ID: true, quiet.ID: true, free.ID: true, other.ID: true}},
+		{"anna", map[string]bool{quiet.ID: true, lone.ID: true, free.ID: true, other.ID: true, takenBack.ID: true}},
+		{"ben", map[string]bool{answered.ID: true, declined.ID: true, aside.ID: true, open.ID: true, quiet.ID: true, free.ID: true, other.ID: true, takenBack.ID: true}},
 		{"cid", map[string]bool{free.ID: true}},
 	} {
 		rows, err := f.st.Waiting(ctx, c.who, c.who, c.who)
