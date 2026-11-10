@@ -205,6 +205,14 @@ const askRunList = `  peer add <name> <invite>
       directory and the rest of a group are not this card's: the
       yardmaster sets those the operator has delegated on their mail, and
       the rest are typed in a terminal
+  group rename <old> <new>
+      the group is called by its new name and everything that names it
+      follows, in one write: its routes, the beads it owns and their live
+      sessions (which go on, none released), the grants its sessions hold,
+      its arrival estimates, the subscriptions that filter on it, the lists
+      of members that name a script group and the pack imports that recorded
+      it; the old name is free after; a name in use, or one that pack imports
+      give a depot's groups (<depot>-<name>), is refused
   crew identity <name> --source <source> [--id <id>] [--key <key>]
       who the crew member is in the source: mentions and assignments of
       the id or key there are then addressed to it

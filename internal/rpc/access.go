@@ -197,6 +197,7 @@ var Access = map[string]Class{
 	"Groups":         Read,
 	"GetGroup":       Read,
 	"DeleteGroup":    Admin,
+	"RenameGroup":    Operator,
 	"AddRoute":       Admin,
 	"SetRoute":       Admin,
 	"Routes":         Read,

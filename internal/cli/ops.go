@@ -792,7 +792,7 @@ yardmaster):
 			})
 		},
 	}
-	cmd.AddCommand(add, a.groupSetCmd(), list, show, rm)
+	cmd.AddCommand(add, a.groupSetCmd(), a.groupRenameCmd(), list, show, rm)
 	return cmd
 }
 

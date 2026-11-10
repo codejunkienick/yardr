@@ -79,6 +79,7 @@ func TestOnlyTheOperatorMay(t *testing.T) {
 		},
 		"remove a peer":                 func(a string) error { return api.DeletePeer(ctx, "north", a) },
 		"rename a peer":                 func(a string) error { _, err := api.RenamePeer(ctx, "north", "up", a); return err },
+		"rename a group":                func(a string) error { _, err := api.RenameGroup(ctx, "no-such", "other", a); return err },
 		"change where a peer is called": func(a string) error { _, err := api.SetPeerURL(ctx, "north", "", a); return err },
 		"allow a peer's messages": func(a string) error {
 			_, err := api.AllowPeer(ctx, "north", store.PeerAllow{Send: []string{store.PeerMail}}, a)

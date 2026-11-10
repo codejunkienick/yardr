@@ -3372,7 +3372,7 @@ A bead stands in one list only, and these are the cases that leave it out. While
 
 A row may carry two fields more, which the example does not show. `flow_error` says why the bead's flow does not resolve: `actions` is then empty, as no move exists until the flow is fixed, and the bead is shown all the same, so that it is not lost. `template_error` says why entering the stage put no ask for its people, where that ask would stand; the bead still moves by hand, and `actions` are its moves.
 
-Read it again on every event that carries a bead, `noted` among them, and on the events without one that move its inputs: `group_set` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated` and `depot_removed`, and `setting_changed` whose `key` is `operator`. A put-aside ask also comes back on its own after 24 hours, with no event, and takes its bead from this list with it: read again then, as for [`UserAsks`](#userasks).
+Read it again on every event that carries a bead, `noted` among them, and on the events without one that move its inputs: `group_set`, `group_renamed` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated` and `depot_removed`, and `setting_changed` whose `key` is `operator`. A put-aside ask also comes back on its own after 24 hours, with no event, and takes its bead from this list with it: read again then, as for [`UserAsks`](#userasks).
 
 ### `MoveBead`
 
@@ -5087,7 +5087,7 @@ The order is the board's: beads with a running session first, then by the low en
 
 Platforms lists the stages the rows stand on, in the order the beads travel: each depot's flow stage order, as the yard draws it on its flows page. Where depots' flows order the same stages differently, the depot with the most travelling beads sets the order and the others' extra stages stand where their own flows put them after the last stage they share with it, and a stage no flow has stands last, in row order.
 
-Read it again on every event that carries a bead, and on the events without one that move its inputs: `group_set` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated`, and `setting_changed` whose `key` is `max_sessions` or `operator`. One minute is the ETA's grain: no timed refresh.
+Read it again on every event that carries a bead, and on the events without one that move its inputs: `group_set`, `group_renamed` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated`, and `setting_changed` whose `key` is `max_sessions` or `operator`. One minute is the ETA's grain: no timed refresh.
 
 ### `Flows`
 
@@ -5476,7 +5476,7 @@ What group a client sees for a bead depends on its claim. A bead no session has 
 
 Every depot stands here, travelling or not, and a removed depot's line leaves with it: `DeleteDepot` refuses while open beads remain. The unassigned rows are the open beads outside the backlog with no depot, the newest change first.
 
-Read it again on every event that carries a bead, and on the events without one that move its inputs: `group_set` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated` and `depot_removed`, and `setting_changed` whose `key` is `max_sessions` or `operator`. One minute is the ETA's grain: no timed refresh.
+Read it again on every event that carries a bead, and on the events without one that move its inputs: `group_set`, `group_renamed` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated` and `depot_removed`, and `setting_changed` whose `key` is `max_sessions` or `operator`. One minute is the ETA's grain: no timed refresh.
 
 ### `AnswerAsk`
 

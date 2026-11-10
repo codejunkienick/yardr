@@ -103,6 +103,7 @@ type API interface {
 	Groups(ctx context.Context) ([]Group, error)
 	GetGroup(ctx context.Context, name string) (*Group, error)
 	DeleteGroup(ctx context.Context, name, actor string) (int, error)
+	RenameGroup(ctx context.Context, name, to, actor string) (*GroupRenamed, error)
 	AddRoute(ctx context.Context, r Route, actor string) (*Route, error)
 	SetRoute(ctx context.Context, id string, e RouteEdit, actor string) (*RouteChange, error)
 	Routes(ctx context.Context) ([]Route, error)

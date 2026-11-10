@@ -13,6 +13,7 @@ by its events (`yardr events`) sees these changes and waits:
 |---|---|---|
 | `group_set` | `group add`, for a new group and for one it changes, `group set` when it changes something, and a pack's import of a group | `name`, `runner`, `limit`, and `members` when it has any; runner config is omitted |
 | `group_removed` | `group rm` | `name`, `routes`: the ids of the routes that went with it (they log no `route_removed`), `released`: how many beads it gave back |
+| `group_renamed` | `group rename` | `from`, `to`; `routes`: the ids of the routes that name it now (they log no `route_set`); `beads` and `sessions`: how many of its open beads and live sessions went on under the new name, none released; `grants`: the grants of source calls that moved; `subscriptions`: who holds a subscription whose `group=` filter followed; `members`: the groups whose list of members named it, which is a script group's; `packs`: the pack imports whose record followed, as the pack's name, and ` in <depot>` for one imported into a depot; `approved`, the `bead` and `ask` of the run ask the operator approved, when it was renamed that way |
 | `route_added` | `route add`, and a pack's import of a route | `id`, `stage`, `group`, and the filters it sets: `type`, `depot`, `label`, `bead_priority`; for a route that asks for more than one label `label` is the first and `labels` all of them ([below](#which-beads-a-route-takes)); for a route with further groups or a quota condition also `groups`: each group in order, `name` and its condition `when` ([below](#a-route-with-further-groups-and-quota-conditions)); `note` where the route carries one |
 | `route_removed` | `route rm` | the same fields, of the route as it was |
 | `route_set` | `route set` | `was`, `is`: the route's fields as `route_added` carries them, before and after |
@@ -166,6 +167,73 @@ The runner is not changed this way, since another runner reads another
 config: that is `group add`. `yardr group show <name>` prints one group: its
 runner and limit, a setting to a line as `group set` takes it back, the
 routes that send it work and the source calls it may make.
+
+## Renaming a group
+
+`yardr group rename <old> <new>` calls a group by another name, in one write,
+and everything that names it follows:
+
+```sh
+yardr group rename webapp-builders builders
+```
+
+- its routes, as their first group or after it, with the condition each group
+  carries there;
+- the beads it owns and their live sessions, which go on running under the new
+  name: nothing is released and no runner is touched. That is what adding the
+  group again, moving each route and `group rm` cannot do, since the last
+  releases the beads its live sessions hold;
+- its settings, members, limit and subscriptions, and the grants of source calls
+  its sessions hold;
+- the subscriptions of crew members, users and groups that filter on it
+  (`--where group=<name>`);
+- for a script (`exec`) group, the lists of members of the other groups that
+  name it: its sessions count as the group where a list does, when they move
+  the beads of that group's stages, so a script group's name that was not
+  changed there would leave its script a member of nothing from the moment it
+  was renamed;
+- what its arrivals have cost, so that the estimates stand
+  ([the estimate cells](#what-a-groups-beads-cost-the-estimate-cells));
+- the pack imports that recorded it. The next `yardr pack apply` finds the
+  renamed group, as the pack's own or as one that took the pack's, and makes
+  no group by the old name beside it: a record that kept the old name would
+  find no group by it, and make one from the depot's name for it
+  ([packs.md](packs.md#how-a-pack-maps-to-the-yard)).
+
+The old name is free afterwards and reaches nothing. The event log, the notes
+and the sessions that ended keep it, since they say what happened, and
+`group_renamed` says when the name changed. A session that is running when the
+group is renamed has the old name in its environment (`YARDR_GROUP`) until it
+ends, so what it writes by that name, the `Yardr-Agent` line of a commit, says
+the old one; the yard knows the session by its record, which is the new name's
+from the rename. What names it outside the yard's records is for you to change: a script, a role prompt, the text of a flow, a
+pack's own files. The yard finds a few groups by their name, and a depot's
+`<depot>-assembly`, which `yardr depot push` changes, is one: it is not a group
+to rename.
+
+A yard default route that names its group by the depot template
+(`{depot}-builders`, [Which beads a route takes](#which-beads-a-route-takes)) is
+not renamed with it: it names the groups of every depot, and so no one of them.
+It stops serving the depot whose group this was, and the command says which, as
+`group rm` does.
+
+A rename is refused when the group is not there; when `<new>` is a group
+already, since a rename never replaces one (remove that one first); when `<new>`
+is a name pack imports give the groups they make for a depot of the yard,
+`<depot>-<name>`, which the next import of a pack would take for its own; and
+when `<new>` is no name a new group may have: a user's or a crew member's name,
+`wait`, or one that is not letters, digits, `.`, `_`, `-` and `/`. A group
+that has such a name, `webapp-builders`, can be renamed out of it, and not
+back.
+
+Only the operator renames a group, since the name is what a script, a role
+prompt or a person reaches it by. The yardmaster asks on a card, which names
+what follows and is approved or declined as the others are:
+`yardr bead ask <id> "<question>" --run "group rename webapp-builders builders"`
+([chat.md](chat.md) lists the cards). The card counts no sessions, since they
+start and end by the minute. It is taken back by the
+reverse rename, except for a group whose old name is one imports give a depot's
+groups, which nobody can rename it back to.
 
 ## Which beads a route takes
 

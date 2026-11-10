@@ -718,6 +718,13 @@ of that name of its own, the import's own name for the group answers that
 none does (`--group builders=web-builders`), which also ends an earlier
 `--group`: the depot gets its own group, and the yard's is left as it is.
 
+A group is renamed with `yardr group rename`
+([Renaming a group](groups.md#renaming-a-group)), the one a pack made as well
+as one it took, and the record of every import that names it follows in the
+same write: the next import finds the group by its new name and makes no group
+by the depot's name for it beside it. A name that begins with a depot of the
+yard and a dash is refused, since an import would take it for its own.
+
 **Flows.** A flow is stored as the named flow `<pack>.<flow>`
 (`starter.default`), and the depot is pointed at it (`yardr depot flow`); a
 flow with `type:` becomes that type's pointer. Of several flows without a

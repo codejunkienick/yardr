@@ -622,12 +622,14 @@ func FlowName(pack, flow string) string { return pack + "." + flow }
 const FlowQuestion = "pack.flow"
 
 // GroupName is the name a pack's group has in the yard: agent and script
-// groups are the depot's, people groups the yard's.
+// groups are the depot's, people groups the yard's. The depot's prefix is
+// the store's, since the names a group may not be renamed to are the ones
+// an import makes (Store.RenameGroup).
 func GroupName(depot string, g Group) string {
 	if g.People {
 		return g.Name
 	}
-	return depot + "-" + g.Name
+	return store.DepotGroupPrefix(depot) + g.Name
 }
 
 // runner is the runner a group of the yard has that the pack's g is set on.
