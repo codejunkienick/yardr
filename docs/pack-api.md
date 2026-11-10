@@ -226,6 +226,7 @@ pack. yardr runs one without a shell, for one job, and stops it after 30 s.
 | the working directory is not the pack's directory | stable | a command finds the files it ships beside itself, through its own path, in the copy yardr makes under `<home>/sources/<name>/` |
 | which directory it is | internal | |
 | a command's stderr | internal | the error of a command that fails ends with it |
+| a `thread.*` command that exits 3 | internal | it refuses for good what it was asked, so the yard does not try again: a stage map's move that gets it is skipped at once, as `failed`. After any other failure the move is tried again |
 
 ## The commands a script runs
 

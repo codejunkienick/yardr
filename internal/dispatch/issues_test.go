@@ -470,9 +470,11 @@ func TestIssueMoveAddsALabel(t *testing.T) {
 }
 
 // A word the source has no status for is skipped at once, with nothing
-// sent, and so is a link that names no issue or pull request (a branch); a
-// state asked of a pull request fails in the script, which reads as the
-// source failing, so the move waits and is tried again.
+// sent, and so is a link that names no issue or pull request (a branch).
+// So is a state asked of a pull request, which the script refuses with the
+// exit status that says no retry changes it: only the read that finds the
+// pull request reaches the source, nothing is set, and the move is not
+// tried again.
 func TestIssueMoveRefusedForGood(t *testing.T) {
 	t.Parallel()
 	y := newIssueYard(t)
@@ -510,14 +512,19 @@ func TestIssueMoveRefusedForGood(t *testing.T) {
 	}
 	want(t, "requests for the branch", y.asked.Load(), int64(0))
 	want(t, "moves left", len(y.pending(t)), 0)
-	// A state asked of a pull request fails in the script, which the
-	// daemon cannot tell from the source failing: the move waits and is
-	// tried again, with nothing set.
+	// A state asked of a pull request is refused by the script with the exit
+	// status that says it is for good, which the daemon tells from the
+	// source failing: the move is skipped at once, as the two above are,
+	// after the one read that found the pull request and with nothing set.
 	y.to(t, "yard-a", "merged")
-	ms := y.pending(t)
-	if len(ms) != 1 || ms[0].Attempts != 1 || !strings.Contains(ms[0].Error, "is a pull request") {
-		t.Fatalf("moves %+v", ms)
+	want(t, "events", y.said(t, "yard-a"), []string{"review skipped: failed", "done skipped: failed"})
+	e = y.skipped(t, "yard-a")
+	if detail, _ := e.Data["detail"].(string); e.Data["state"] != "done" || e.Data["reason"] != store.SkipFailed ||
+		!strings.Contains(detail, "is a pull request") || e.Data["attempts"] != nil {
+		t.Fatalf("skipped %+v", e)
 	}
+	want(t, "requests for the pull request", y.asked.Load(), int64(1))
+	want(t, "moves left", len(y.pending(t)), 0)
 	want(t, "sets", y.src.Sets(), nil)
 }
 

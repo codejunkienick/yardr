@@ -221,9 +221,12 @@ state) # started is open, done is closed as completed. An issue has no
     exit 1
     ;;
   esac
+  # Exit 3 tells the yard the refusal is for good: a stage map's move is
+  # skipped at once, where any other exit is tried again until the yard
+  # gives up.
   if [ "$(jq -r '.pull_request != null' <<<"$issue")" = true ]; then
     echo "$thread is a pull request: the status of issues only is set" >&2
-    exit 1
+    exit 3
   fi
   if [ "$forward" = true ]; then
     # A stage map's move, which never moves backwards: an open issue
