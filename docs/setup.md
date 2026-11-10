@@ -19,12 +19,14 @@ takes only who the terminal's commands act as: your login name, or
 `$YARDR_ACTOR` ([users.md](users.md#who-is-acting)).
 
 The yardmaster's first job is the setup, as a conversation with you: it asks for
-the repository and its base branch, registers the depot, sets it up from the
-yard's default pack with `yardr depot init` (the flow, the groups that build,
-review and land, their roles and their routes, all kept in the yard, and
-nothing in the repository), checks with you what tests the project, and
-offers a first bead to try the line. It asks before anything
-outward, such as a commit.
+the repository and its base branch, registers the depot, proposes setting it
+up from the yard's default pack, and offers an approval card when that pack is
+embedded in yardr. A selected pack from a directory or non-embedded import
+is set up by you in a terminal with `yardr depot init <depot>`. The setup
+imports the flow, the groups that build, review and land, their roles and
+their routes, all kept in the yard and nothing in the repository; it checks
+with you what tests the project and offers a first bead to try the line. It
+asks before anything outward, such as a commit.
 
 What the onboarding itself asks, how it starts the yard and what it does
 when the yardmaster does not come up is in
@@ -81,33 +83,44 @@ The steps, as the yardmaster takes them:
 
 1. **A depot.** It asks for the repository's path and its base branch, then
    `yardr depot add <depot> <path> --base <branch>`.
-2. **The depot's way of working.** `yardr depot init <depot>` sets the depot
-   up in one import, from the yard's default pack: the flow and its stage
-   files, the groups that build, review and land, and their routes. That is
-   every step of the list from the depot's files to the routes
+2. **The depot's way of working.** The depot is set up in one import, from
+   the yard's default pack: the flow and its stage files, the groups that
+   build, review and land, and their routes. That is every step of the list
+   from the depot's files to the routes
    ([one page](#one-page-sets-the-depot-up) does it for the operator). The
    default pack is the setting `default_pack` (`yardr settings get`); unset,
-   it is `starter`, and `dir` for a depot that is a plain directory. In the
-   yardmaster's pane the import asks nothing, so it first reads `yardr pack
-   check <pack> --depot <depot>` ([packs.md](packs.md#yardr-pack-check)): it
-   prints the plan and, under "an import would ask", what is open. The
-   operator gives those answers (the agent and model of each group of
-   agents, who is in each group of people), and the import runs with them:
-   `--bind builders=<kind>[:<model>] --bind reviewers=<kind>`,
-   `--members backlog= --members decisions=<them>`,
-   `--crew yardmaster=<the yardmaster's own name>` and `--yes`.
+   it is `starter`, and `dir` for a depot that is a plain directory. Only
+   the operator records an import. For an embedded depot pack, the yardmaster
+   proposes a run card for the operator to approve: `yardr bead ask --new
+   "Set up depot <depot> from <pack>?" --context "the operator must approve
+   the pack's import" --run "pack apply <pack> --depot <depot>"`, with the
+   mappings that answer its plan
+   ([packs.md](packs.md#proposing-an-embedded-pack); `yardr bead ask --help`).
+   A card carries no questions, so
+   the yardmaster first reads `yardr pack check <pack> --depot <depot>`
+   ([packs.md](packs.md#yardr-pack-check)): it prints the plan and, under
+   "an import would ask", what is open. The operator gives those answers by
+   mail (the agent and model of each group of agents, who is in each group of
+   people), and the card carries them: `--bind builders=<kind>[:<model>]
+   --bind reviewers=<kind>`, `--members backlog= --members decisions=<them>`
+   and `--crew yardmaster=<the yardmaster's own name>`. Approving runs the
+   import as the operator, so the record is the operator's. The card sets no
+   test command: that is the next step's. When the selected default pack
+   resolves outside the yardr binary, the operator runs `yardr depot init
+   <depot>` in a terminal; it reads that pack and its plan there.
 3. **The test command.** `yardr depot show <depot>` prints it as `test:`. For
-   a git depot the import sets one when the repository says how it is tested
-   ([below](#the-test-command)): a guess, so the yardmaster asks the operator
-   whether it is what tests the project. To change it, or to set one where
-   the import found none on a depot the yard holds already, it proposes the
-   change as a card (`depot test <depot>` with `--run-test`; `yardr bead ask
-   --help`). On a depot the yard has not, the test command is the operator's
-   to type: `yardr depot add <depot> <path> --base <base> --test '<command>'`,
-   with the path and base `yardr depot list` shows, since an add without a
-   flag drops what the flag set. Builders and reviewers run it before they
-   hand on, and the assembly runs it on what lands; a depot with none lands
-   untested.
+   a git depot an import in a terminal sets one when the repository says how
+   it is tested ([below](#the-test-command)): a guess, so the yardmaster asks
+   the operator whether it is what tests the project. The card of the step
+   before sets none, so there the yardmaster asks what tests the project
+   instead. To change it, or to set one where the import set none on a depot
+   the yard holds already, it proposes the change as a card (`depot test
+   <depot>` with `--run-test`; `yardr bead ask --help`). On a depot the yard
+   has not, the test command is the operator's to type: `yardr depot add
+   <depot> <path> --base <base> --test '<command>'`, with the path and base
+   `yardr depot list` shows, since an add without a flag drops what the flag
+   set. Builders and reviewers run it before they hand on, and the assembly
+   runs it on what lands; a depot with none lands untested.
 4. **A first bead.** It offers a small one to try the line end to end
    (`yardr bead create - -b - --depot <depot> <<'BEAD'`, then the title, a
    blank line, the goal and what done means, and `BEAD` on a line of its

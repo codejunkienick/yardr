@@ -639,6 +639,11 @@ func TestDelegatedPackFlowPointerRouteAndRecordWrites(t *testing.T) {
 		}
 		return imp
 	}
+	// A delegation alone opens no record write: without the started record
+	// the same call is the operator's to make (RecordPack), and refused.
+	if _, err := y.api.RecordPack(ctx, record(nil), true, "yardmaster"); err == nil || !strings.Contains(err.Error(), "only the operator") {
+		t.Errorf("the import's record under the run's delegation but not its started record: %v", err)
+	}
 	// The import's record of this pack in this depot, as the reading says
 	// it, passes; another pack's, and one naming an object beside the
 	// record, refuse.

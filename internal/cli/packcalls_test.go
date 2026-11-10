@@ -365,17 +365,16 @@ func TestPackApplyCallsFlag(t *testing.T) {
 
 // Only the operator answers: run by anyone else the import does the rest,
 // grants nothing and records nothing, by flag or in a terminal — and then
-// fails loud folding the pack's source, which is the operator's to do.
+// fails at the record, before the fold it would fail folding.
 func TestPackApplyOnlyTheOperatorGrantsCalls(t *testing.T) {
 	dir, _ := deskPack(t)
 	a := deskYard(t, dir)
 	a.actor = "boss"
 	args := append([]string{"apply", dir, "--depot", "web", "--yes"}, deskFlags...)
-	const fold = "source crm is declared, but its links were not folded in: " +
-		"only the operator (me) may move links from one source to another; this is boss"
+	const refused = "only the operator (me) may record the import of pack desk; this is boss"
 	for _, flag := range []string{"builders=crm:read", "builders=crm:none"} {
 		out, err := run(t, a.packCmd(), append(args, "--calls", flag)...)
-		if err == nil || !strings.Contains(err.Error(), fold) || strings.Contains(out, "may now call") {
+		if err == nil || !strings.Contains(err.Error(), refused) || !strings.Contains(err.Error(), "applying again records nothing") || strings.Contains(out, "may now call") {
 			t.Fatalf("--calls %s: %v\n%s", flag, err, out)
 		}
 		if mayCall(t, a) != "" || callRecord(t, a) != nil {
@@ -386,7 +385,7 @@ func TestPackApplyOnlyTheOperatorGrantsCalls(t *testing.T) {
 	asked := 0
 	stubAsk(t, func(fields ...huh.Field) error { asked += len(fields); return nil })
 	if out, err := run(t, a.packCmd(), append([]string{"apply", dir, "--depot", "web"}, deskFlags...)...); err == nil ||
-		!strings.Contains(err.Error(), fold) || asked != 0 {
+		!strings.Contains(err.Error(), refused) || asked != 0 {
 		t.Fatalf("in a terminal: %v, %d asked\n%s", err, asked, out)
 	}
 }

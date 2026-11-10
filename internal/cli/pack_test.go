@@ -1030,9 +1030,10 @@ func TestPackRolesWarnsOnItsErrorStream(t *testing.T) {
 // not overwritten on a plain apply: the error names the file and says where
 // the edit belongs. --yes overwrites it.
 func TestPackApplyRefusesAHandEditedCopy(t *testing.T) {
-	// Its own yard, with no operator: the copy fills {{operator}} with
-	// the default. packApp names one. The import runs as the crew member
-	// it seats, whose own subscriptions it writes.
+	// Its own yard, whose operator is the default: the copy fills
+	// {{operator}} with it. packApp names one. The import runs as the
+	// operator, so each apply is recorded and the next plan reads the
+	// last import's copies.
 	st := storetest.New(t)
 	ctx := context.Background()
 	if _, err := st.PutSource(ctx, "linear.yaml", linearPackDecl, "me"); err != nil {
@@ -1041,7 +1042,10 @@ func TestPackApplyRefusesAHandEditedCopy(t *testing.T) {
 	if err := st.PutDepot(ctx, store.Depot{Name: "web", Base: "main"}, "me"); err != nil {
 		t.Fatal(err)
 	}
-	a := &app{st: st, actor: "boss", cfg: &config.Config{Home: t.TempDir()}}
+	if err := st.SetSetting(ctx, store.OperatorSetting, defaultOperator(), defaultOperator()); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{st: st, actor: defaultOperator(), cfg: &config.Config{Home: t.TempDir()}}
 	setInteractive(t, false)
 	args := append([]string{"apply", "../../packs/starter", "--depot", "web"}, starterFlags...)
 	if out, err := run(t, a.packCmd(), append(args, "--yes")...); err != nil {

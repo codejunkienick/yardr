@@ -296,7 +296,7 @@ never a `todo`, and it is passed over when the next step is named.
 | step (`key` in JSON) | done when |
 |---|---|
 | `a depot` (`depot`) | the yard has a depot |
-| `the depot's .yardr files on its base` (`depot_files`) | every depot has a flow where yardr reads it: in the store when the depot follows a pack's flow (`yardr depot init <depot>`), under `.yardr/flows/` on its base branch for a depot that keeps its own, or in a dir depot's directory |
+| `the depot's .yardr files on its base` (`depot_files`) | every depot has a flow where yardr reads it: in the store when the depot follows a pack's flow (an import: `yardr depot init <depot>` in the operator's terminal for a pack outside yardr, or a run card proposing an embedded `pack apply`), under `.yardr/flows/` on its base branch for a depot that keeps its own, or in a dir depot's directory |
 | `a group that builds` (`builders`) | a route sends stage `new` to a group |
 | `a group that reviews` (`reviewers`) | the same for stage `review` |
 | `a group or person that lands approved beads` (`landing`) | the same for stage `approved`: an assembly or people who merge by hand, either counts once it is routed |
@@ -307,9 +307,14 @@ never a `todo`, and it is passed over when the next step is named.
 
 A group is told by its route and not by its role or its name, so the list
 reads the same for a yard set up from a pack and for one set up by hand. The
-command named for each of the five steps above while it is `todo` is the
-import that does them all, `yardr depot init <depot>`, from the yard's
-default pack: [`yardr setup`](setup.md) runs it as one page.
+command named for each of the five steps above while it is `todo` is a run
+card proposing the import that does them all, `yardr bead ask --new "Set up
+depot <depot> from <pack>?" --context "the operator must approve the pack's
+import" --run "pack apply <pack> --depot <depot>"` with the selected
+embedded depot pack, for the operator to approve. When the selected default
+pack resolves outside yardr, the command is `yardr depot init <depot>` for
+the operator to run in a terminal. [`yardr setup`](setup.md)
+runs the same import as one page in the operator's terminal.
 
 A yard whose depots are all dir depots lands nothing: it has no landing step, its
 routes are `new and review`, and its last step reads `a first bead through to

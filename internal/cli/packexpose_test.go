@@ -207,11 +207,13 @@ func TestPackApplyExposesNobodyUnasked(t *testing.T) {
 	}
 	a.json = false
 
-	// Anyone but the operator: the rest of the import is done.
+	// Anyone but the operator: the rest of the import is done, and the
+	// record is refused.
 	a.actor = "sam"
 	*asked = nil
 	out, err = run(t, a.packCmd(), append([]string{"apply", dir, "--depot", "web"}, starterFlags...)...)
-	if err != nil || slices.ContainsFunc(*asked, func(s string) bool { return strings.HasPrefix(s, "Expose ") }) || exposedTo(t, a, "north") != "" ||
+	if err == nil || !strings.Contains(err.Error(), "only the operator (me) may record the import of pack starter; this is sam") ||
+		slices.ContainsFunc(*asked, func(s string) bool { return strings.HasPrefix(s, "Expose ") }) || exposedTo(t, a, "north") != "" ||
 		!strings.Contains(out, "crew member boss was not exposed to north: only the operator (me) may expose someone of the yard to a peer, and this is sam.") {
 		t.Fatalf("as sam: %v, asked %q\n%s", err, *asked, out)
 	}

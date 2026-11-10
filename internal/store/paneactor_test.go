@@ -1044,7 +1044,10 @@ func TestPeerNoteAndReadFromACrewPaneUseTheCrewActor(t *testing.T) {
 // The setup-path writes stay anyone's, and from a session's or a crew
 // member's pane are recorded as the pane's actor, whatever --actor says:
 // a crew member setting up the yard is not refused, and cannot pass its
-// writes as the operator by naming them.
+// writes as the operator by naming them. The record of an import is not
+// among them (RecordPack): a later apply by name reads the pack from the
+// source it names, so a pane's own, as the operator or as itself, is refused
+// and the operator's record stands.
 func TestSetupWritesFromAPaneAreThatPanesActor(t *testing.T) {
 	t.Parallel()
 	t.Run("crew pane", func(t *testing.T) {
@@ -1057,6 +1060,15 @@ func TestSetupWritesFromAPaneAreThatPanesActor(t *testing.T) {
 		}
 		if _, err := api.GrantSource(ctx, "crm", store.GrantRead, store.Grantee{Crew: "yardmaster"}, "", "jo"); err != nil {
 			t.Fatal(err)
+		}
+		// The operator's record, the one the pane tries to replace: made
+		// from no pane too, since over the socket the pane's own is on
+		// record from the next step on and every call carries it.
+		if err := api.PutDepot(ctx, store.Depot{Name: "shed", Base: "origin/main"}, "jo"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := api.RecordPack(ctx, store.PackImport{Pack: "starter", Depot: "shed", Source: "/packs/starter"}, true, "jo"); err != nil {
+			t.Fatalf("RecordPack as the operator: %v", err)
 		}
 		f, err := store.ParseFlow(outcomeFlow)
 		if err != nil {
@@ -1105,12 +1117,14 @@ func TestSetupWritesFromAPaneAreThatPanesActor(t *testing.T) {
 			t.Fatalf("AddRoute from the pane as the operator: %v", err)
 		}
 		as("route_added")
-		if _, err := api.RecordPack(pane, store.PackImport{Pack: "starter", Depot: "yard"}, true, "jo"); err != nil {
-			t.Fatalf("RecordPack from the pane as the operator: %v", err)
+		for _, by := range []string{"jo", "yardmaster"} {
+			forged := store.PackImport{Pack: "starter", Depot: "shed", Source: "/tmp/evil"}
+			if _, err := api.RecordPack(pane, forged, true, by); err == nil || err.Error() != "only the operator (jo) may record the import of pack starter; this is yardmaster" {
+				t.Fatalf("RecordPack from the pane as %s = %v, want the operator's refusal naming yardmaster", by, err)
+			}
 		}
-		as("pack_applied")
-		if recs, _ := api.Packs(ctx); len(recs) != 1 || recs[0].By != "yardmaster" {
-			t.Fatalf("pack record = %+v, want it by yardmaster", recs)
+		if recs, _ := api.Packs(ctx); len(recs) != 1 || recs[0].By != "jo" || recs[0].Source != "/packs/starter" {
+			t.Fatalf("pack records = %+v, want the operator's alone, as it was", recs)
 		}
 		if g, err := api.RevokeSource(pane, "crm", store.GrantRead, store.Grantee{Crew: "yardmaster"}, "", "jo"); err != nil {
 			t.Fatalf("RevokeSource from the pane as the operator: %v", err)
@@ -1137,6 +1151,9 @@ func TestSetupWritesFromAPaneAreThatPanesActor(t *testing.T) {
 		}
 		if a := lastKindActor(t, s, ctx, "depot_updated"); a != actor {
 			t.Fatalf("depot_updated event actor = %q, want %q", a, actor)
+		}
+		if _, err := s.RecordPack(pane, store.PackImport{Pack: "starter", Depot: "web", Source: "/tmp/evil"}, true, "op"); err == nil || err.Error() != "only the operator (op) may record the import of pack starter; this is "+actor {
+			t.Fatalf("RecordPack from a bead's pane as the operator = %v, want the operator's refusal naming %s", err, actor)
 		}
 	})
 }

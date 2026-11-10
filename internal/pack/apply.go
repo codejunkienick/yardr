@@ -307,6 +307,18 @@ func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (res *Res
 	rec := p.ImportRecord(o)
 	rec.Objects = slices.DeleteFunc(rec.Objects, func(po store.PackObject) bool { return pruned[po.Key()] })
 	if res.Recorded, err = st.RecordPack(ctx, rec, res.Wrote(), o.Actor); err != nil {
+		if strings.Contains(err.Error(), "may record the import of pack ") {
+			// Only the operator records an import, so for anyone else
+			// applying again fails the same way: the road is a run card
+			// the operator approves, which the server carries out as the
+			// operator. Matched as text, since over the socket the
+			// refusal arrives as words alone.
+			run, ask := "pack apply "+p.Pack, "Apply pack "+p.Pack+"?"
+			if p.Depot != "" {
+				run, ask = run+" --depot "+p.Depot, "Apply pack "+p.Pack+" to depot "+p.Depot+"?"
+			}
+			return res, fmt.Errorf("recording the import: %w (the import itself is done; only the operator records it, so applying again records nothing. Propose it as a run card for the operator to approve: yardr bead ask --new %q --context %q --run %q, with the mappings that answer its plan)", err, ask, "the operator must approve the pack's import", run)
+		}
 		return res, fmt.Errorf("recording the import: %w (the import itself is done; applying again records it)", err)
 	}
 	res.FrameMoved = p.FrameUse != "" && res.Recorded

@@ -214,7 +214,12 @@ func answered(by map[string]map[string]bool) map[string]map[string]bool {
 // logs pack_unchanged, the only trace such an import leaves. It reports
 // whether the record was written. From a session's or a crew member's pane
 // the write is recorded as that session's actor or that crew member,
-// whatever actor says; from anywhere else, as given (paneAuthor).
+// whatever actor says; from anywhere else, as given (paneAuthor). It is
+// the operator's to write, or a delegated run's under its started record
+// (packRecordWrite): a later apply by name loads the pack from the source
+// the record names, and plans from its hashes and answers (Packs), so a
+// record that a crew member's pane could write would steer the operator's
+// next run.
 func (s *Store) RecordPack(ctx context.Context, rec PackImport, changed bool, actor string) (bool, error) {
 	if rec.Pack == "" {
 		return false, fmt.Errorf("pack record: pack is required")
@@ -229,6 +234,16 @@ func (s *Store) RecordPack(ctx context.Context, rec PackImport, changed bool, ac
 		actor = resolved
 		if err := w.packRecordWrite(ctx, rec, actor); err != nil {
 			return err
+		}
+		// Recording an import ends applying the pack, so it is asked as that
+		// and not as an action of its own: whoever the policy lets apply a
+		// pack records it, and the core's rule is the operator's. A write
+		// under a delegated pack record has stood on the record alone, held
+		// above, as every write of the run does.
+		if _, pack := DelegatedPackOf(ctx); !pack {
+			if err := w.may(ctx, actor, ActApplyPack, Object{Kind: KindPack, Name: rec.Pack, Does: "record the import of pack " + rec.Pack}); err != nil {
+				return err
+			}
 		}
 		written = false
 		if rec.Depot != "" && w.Bucket(bDepots).Get([]byte(rec.Depot)) == nil {

@@ -110,6 +110,11 @@ func TestOnlyTheOperatorMay(t *testing.T) {
 			return err
 		},
 		"remove a depot": func(a string) error { _, err := api.DeleteDepot(ctx, "no-such", a); return err },
+		// A record names where a later apply by name reads its pack from.
+		"record the import of pack starter": func(a string) error {
+			_, err := api.RecordPack(ctx, store.PackImport{Pack: "starter", Depot: "yard", Source: "/tmp/evil"}, true, a)
+			return err
+		},
 		"change a depot's path": func(a string) error {
 			return api.PutDepot(ctx, store.Depot{Name: "yard", Path: "/srv/other", Base: "origin/main"}, a)
 		},

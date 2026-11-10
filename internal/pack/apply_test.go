@@ -262,25 +262,31 @@ func TestApplyOverAYardSetUpByHand(t *testing.T) {
 	}
 }
 
-// An import subscribes the invoker itself: the setup's import, run by the
-// yardmaster taking the pack's crew seat, lands as the operator's would.
-func TestApplySubscribingTheInvokerItselfPasses(t *testing.T) {
+// An import subscribes the invoker itself, and is left unrecorded: only
+// the operator records an import, so a crew member's ends at the record
+// with the run card named, what it wrote kept.
+func TestApplySubscribingTheInvokerItselfPassesUnrecorded(t *testing.T) {
 	st, o := yard(t)
 	withLinear(t, st)
 	o.Crew = map[string]string{"yardmaster": "boss"}
 	plan := build(t, st, load(t, starter), o)
 	seedGroups(t, st, plan, answered(t, plan, answers))
-	res := applyAs(t, st, plan, answers, "boss")
-	if !res.Wrote() || !res.Recorded {
-		t.Fatalf("result = %+v", res)
+	res, err := pack.Apply(ctx, st, plan, pack.ApplyOptions{Answers: answered(t, plan, answers), Actor: "boss"})
+	if err == nil || !strings.Contains(err.Error(), "only the operator (me) may record the import of pack starter; this is boss") ||
+		!strings.Contains(err.Error(), "applying again records nothing") ||
+		!strings.Contains(err.Error(), `--context "the operator must approve the pack's import"`) ||
+		!strings.Contains(err.Error(), `--run "pack apply starter --depot web"`) {
+		t.Fatalf("apply as boss = %+v, %v; want the import written and the record refused with the run card", res, err)
+	}
+	if res == nil || !res.Wrote() || res.Recorded {
+		t.Fatalf("result = %+v, want it written and unrecorded", res)
 	}
 	boss, err := st.GetCrew(ctx, "boss")
 	if err != nil || len(boss.Subscriptions) != 4 {
 		t.Fatalf("boss = %+v, %v", boss, err)
 	}
-	recs, err := st.Packs(ctx)
-	if err != nil || len(recs) != 1 || recs[0].By != "boss" {
-		t.Fatalf("records = %+v, %v", recs, err)
+	if recs, _ := st.Packs(ctx); len(recs) != 0 {
+		t.Fatalf("a crew member's import was recorded: %+v", recs)
 	}
 }
 
@@ -339,7 +345,9 @@ func TestApplyFailsLoudSubscribingAnotherCrew(t *testing.T) {
 
 // A dropped subscription pruned by anyone but the crew member or the
 // operator degrades like any failed removal: it is left, with why, and
-// what is still there stays.
+// what is still there stays. The import still ends at the record, which
+// only the operator writes: the error names that, with the prune refusal
+// kept in the result.
 func TestApplyPruneDegradesRemovingAnotherCrewsSubscription(t *testing.T) {
 	const want = "only boss or the operator (me) changes what boss is told; this is clerk"
 
@@ -357,8 +365,9 @@ func TestApplyPruneDegradesRemovingAnotherCrewsSubscription(t *testing.T) {
 		t.Fatalf("the unlisted subscription = %+v, want it dropped", so)
 	}
 	res, err := pack.Apply(ctx, st, plan, pack.ApplyOptions{Prune: true, Actor: "clerk"})
-	if err == nil || !strings.Contains(err.Error(), "not everything dropped could be removed") || !strings.Contains(err.Error(), want) {
-		t.Fatalf("prune as another crew = %+v, %v; want it left, with why", res, err)
+	if err == nil || !strings.Contains(err.Error(), "only the operator (me) may record the import of pack starter; this is clerk") ||
+		!strings.Contains(err.Error(), "applying again records nothing") {
+		t.Fatalf("prune as another crew = %+v, %v; want it left, with why, and the record refused", res, err)
 	}
 	if res == nil || !slices.Equal(res.Left, []string{"subscription boss linear involved"}) {
 		t.Fatalf("result = %+v, want the subscription left", res)
@@ -1468,7 +1477,15 @@ func TestApplyMeetsTheStoresConfigCheck(t *testing.T) {
 		t.Fatal("the starter pack plans no herdr group but web-builders to try the refusal on")
 	}
 
-	applyAs(t, st, build(t, st, load(t, starter), o), nil, "yardmaster")
+	plan = build(t, st, load(t, starter), o)
+	res, err := pack.Apply(ctx, st, plan, pack.ApplyOptions{Answers: answered(t, plan, nil), Actor: "yardmaster"})
+	if err == nil || !strings.Contains(err.Error(), "may record the import of pack starter") ||
+		!strings.Contains(err.Error(), "applying again records nothing") {
+		t.Fatalf("the import as yardmaster = %+v, %v; want it written and the record refused", res, err)
+	}
+	if res == nil || res.Recorded {
+		t.Fatalf("result = %+v, want it unrecorded", res)
+	}
 	g, err := st.GetGroup(ctx, "web-builders")
 	if err != nil || g.Config["idel"] != "5m" || g.Config["prompt"] != "/old/builder.md" {
 		t.Fatalf("the group the import kept beside its old key: %+v, %v", g, err)

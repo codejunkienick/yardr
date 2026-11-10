@@ -485,7 +485,7 @@ func TestSetupCancelled(t *testing.T) {
 		{stepDepot, key("base"), "Cancelled at: a depot."},
 		// The import's own confirmation, which is the command's and has no key.
 		{stepDepotFiles, func(fld huh.Field) bool { _, ok := fld.(*huh.Confirm); return ok },
-			"Still to do: the depot's .yardr files on its base: depot web follows no flow of a pack, and has none under .yardr/flows/ on its base main.\n  yardr --home " + home + " depot init web"},
+			"Still to do: the depot's .yardr files on its base: depot web follows no flow of a pack, and has none under .yardr/flows/ on its base main.\n  yardr --home " + home + ` bead ask --new "Set up depot web from starter?" --context "the operator must approve the pack's import" --run "pack apply starter --depot web"`},
 		{stepFirstBead, key("goal"), "Cancelled at: a first bead."},
 	} {
 		if got := todo(t, st); got != tc.step {
@@ -749,7 +749,7 @@ func TestDepotNameFor(t *testing.T) {
 
 // A group does a stage's work once a route sends the stage to it, whatever
 // its prompt: the steps name no role. Every step the import does names the
-// one command, with the pack for the depot's kind.
+// one command, with the configured pack when the yard has one.
 func TestStepsGoByRoutes(t *testing.T) {
 	t.Parallel()
 	s := setupState{depots: []store.Depot{{Name: "docs", Kind: store.DepotDir}, {Name: "web", Kind: store.DepotGit}},
@@ -762,8 +762,10 @@ func TestStepsGoByRoutes(t *testing.T) {
 		return m
 	}
 	steps := byKey()
-	for key, next := range map[string]string{stepBuilders: "yardr depot init docs", stepReviewers: "yardr depot init docs",
-		stepLanding: "yardr depot init web", stepRoutes: "yardr depot init docs"} {
+	for key, next := range map[string]string{stepBuilders: `yardr bead ask --new "Set up depot docs from dir?" --context "the operator must approve the pack's import" --run "pack apply dir --depot docs"`,
+		stepReviewers: `yardr bead ask --new "Set up depot docs from dir?" --context "the operator must approve the pack's import" --run "pack apply dir --depot docs"`,
+		stepLanding:   `yardr bead ask --new "Set up depot web from starter?" --context "the operator must approve the pack's import" --run "pack apply starter --depot web"`,
+		stepRoutes:    `yardr bead ask --new "Set up depot docs from dir?" --context "the operator must approve the pack's import" --run "pack apply dir --depot docs"`} {
 		if step := steps[key]; step.Done || step.Next != next {
 			t.Errorf("%s = %+v, want todo with %q", key, step, next)
 		}
@@ -782,7 +784,25 @@ func TestStepsGoByRoutes(t *testing.T) {
 	if step := steps[stepRoutes]; step.Done || step.Detail != "no route for review" {
 		t.Errorf("routes = %+v", step)
 	}
-	if none := noSetup(); none[1].Next != "yardr depot init <depot>" || none[2].Next != none[1].Next {
+	s.defaultPack = "website"
+	if got := s.packNext("web"); got != `yardr bead ask --new "Set up depot web from website?" --context "the operator must approve the pack's import" --run "pack apply website --depot web"` {
+		t.Errorf("next with a configured embedded pack = %q", got)
+	}
+	s.packImports = []store.PackImport{{Pack: "website", Depot: "web", Source: "private directory"}}
+	if got := s.packNext("web"); got != "yardr depot init web" {
+		t.Errorf("next with a non-embedded import of the configured name = %q", got)
+	}
+	s.packImports = nil
+	s.defaultPack = "~/packs/research"
+	if got := s.packNext("web"); got != "yardr depot init web" {
+		t.Errorf("next with a configured directory pack = %q", got)
+	}
+	s.defaultPack = ""
+	s.packImports = []store.PackImport{{Pack: "starter", Depot: "web", Source: "private directory"}}
+	if got := s.packNext("web"); got != "yardr depot init web" {
+		t.Errorf("next when the default name resolves to a non-embedded import = %q", got)
+	}
+	if none := noSetup(); none[1].Next != `yardr bead ask --new "Set up depot <depot> from starter?" --context "the operator must approve the pack's import" --run "pack apply starter --depot <depot>"` || none[2].Next != none[1].Next {
 		t.Errorf("no yard: %+v", none)
 	}
 }

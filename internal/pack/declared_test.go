@@ -554,8 +554,9 @@ func TestADeclarationThatOnlyReadsDifferentlyIsSaidSo(t *testing.T) {
 }
 
 // Adding a source is the operator's. Run by anyone else the source is
-// neither added nor recorded, and the rest of the pack is imported; the
-// operator's next apply adds it.
+// neither added nor recorded, and the rest of the pack is imported but
+// left unrecorded, with the run card named; the operator's next apply
+// adds it.
 func TestDeclaredSourceRefusedLeavesTheRestOfTheImport(t *testing.T) {
 	st, o := yard(t)
 	if err := st.SetSetting(ctx, store.OperatorSetting, "me", "me"); err != nil {
@@ -570,17 +571,21 @@ func TestDeclaredSourceRefusedLeavesTheRestOfTheImport(t *testing.T) {
 	}
 	seedGroups(t, st, plan, a)
 	res, err := pack.Apply(ctx, st, plan, pack.ApplyOptions{Answers: a, SourceRefused: map[string]string{"pushover": "not the operator"}, Actor: "yardmaster"})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "may record the import of pack small") ||
+		!strings.Contains(err.Error(), "applying again records nothing") || !strings.Contains(err.Error(), `--run "pack apply small --depot web"`) {
+		t.Fatalf("apply as yardmaster = %+v, %v; want the rest imported and the record refused with the run card", res, err)
+	}
+	if res == nil || res.Recorded {
+		t.Fatalf("result = %+v, want it unrecorded", res)
 	}
 	if _, err := st.GetSource(ctx, "pushover"); !errors.Is(err, store.ErrNotFound) || len(res.Declared) != 0 {
 		t.Fatalf("a refused source was added: %v, %+v", err, res)
 	}
-	if _, err := st.GetGroup(ctx, "web-builders"); err != nil || !res.Recorded {
+	if _, err := st.GetGroup(ctx, "web-builders"); err != nil {
 		t.Fatalf("the rest was not imported: %v, %+v", err, res)
 	}
-	if rec := record(t, st); slices.ContainsFunc(rec.Objects, func(po store.PackObject) bool { return po.Kind == "source" }) {
-		t.Fatalf("a refused source is on record: %+v", rec.Objects)
+	if recs, _ := st.Packs(ctx); len(recs) != 0 {
+		t.Fatalf("a crew member's import was recorded: %+v", recs)
 	}
 
 	// Without the refusal the store holds the same line, and says whose it is.

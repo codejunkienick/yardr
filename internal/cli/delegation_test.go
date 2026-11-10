@@ -289,8 +289,11 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 	mail := strconv.FormatUint(head, 10)
 
 	// As the yardmaster types it, the import does the rest and adds no
-	// source: only the delegated run applies the pack whole.
-	if out, err := as(t, st, "yardmaster", "pack", "apply", "telegram"); err != nil || !strings.Contains(out, "was not added") {
+	// source, and is left unrecorded: only the delegated run applies the
+	// pack whole, and only the operator records.
+	if out, err := as(t, st, "yardmaster", "pack", "apply", "telegram"); err == nil ||
+		!strings.Contains(err.Error(), "only the operator (jo) may record the import of pack telegram; this is yardmaster") ||
+		!strings.Contains(err.Error(), "applying again records nothing") || !strings.Contains(out, "was not added") {
 		t.Errorf("pack apply as typed: %q, %v", out, err)
 	}
 	if _, err := st.GetSource(ctx, "telegram"); err == nil {

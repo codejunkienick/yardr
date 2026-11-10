@@ -352,10 +352,10 @@ func TestSetupOfAnAppliedDirectoryIsHeldToItsCommit(t *testing.T) {
 	})
 }
 
-// A setup card is of a pack the operator applied in a terminal: a record
-// of another's apply is refused, since anyone of the crew may write one
-// over the socket. A record of an operator's apply, by role or by the
-// operator setting, is asked.
+// A setup card is of a pack the operator applied in a terminal: another's
+// apply is refused the record itself, since only the operator writes one,
+// so the ask is refused as never applied. A record of an operator's
+// apply, by role or by the operator setting, is asked.
 func TestSetupCardOfAnAppliedDirectoryHoldsTheRecordToTheOperator(t *testing.T) {
 	ctx := context.Background()
 	recordAt := func(t *testing.T, st *store.Store, dir, by string) {
@@ -370,9 +370,13 @@ func TestSetupCardOfAnAppliedDirectoryHoldsTheRecordToTheOperator(t *testing.T) 
 	t.Run("another's apply is refused", func(t *testing.T) {
 		st, _, bead := appliedYard(t)
 		dir := dirPackRepo(t)
-		recordAt(t, st, dir, "yardmaster")
+		commit := dirGit(t, dir, "rev-parse", "HEAD")
+		if _, err := st.RecordPack(ctx, store.PackImport{Pack: "dirmail", Source: dir, Commit: commit}, true, "yardmaster"); err == nil ||
+			!strings.Contains(err.Error(), "may record the import of pack dirmail") {
+			t.Fatalf("the record = %v, want the operator's refusal", err)
+		}
 		_, err := st.AddAsk(ctx, bead, setupAskOf("dirmail", store.Grantee{Crew: "yardmaster"}), "yardmaster")
-		if err == nil || !strings.Contains(err.Error(), "says yardmaster applied it") || !strings.Contains(err.Error(), "yardr pack apply") {
+		if err == nil || !strings.Contains(err.Error(), "has no record of applying one from a directory") || !strings.Contains(err.Error(), "yardr pack apply") {
 			t.Fatalf("the ask = %v", err)
 		}
 		if notes, nerr := st.Notes(ctx, bead); nerr != nil || len(notes) != 0 {

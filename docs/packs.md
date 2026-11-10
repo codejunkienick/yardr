@@ -1422,6 +1422,11 @@ import is logged as `pack_applied` when the record was written and
 `pack_unchanged` when not, with pack, depot, source and commit. Removing a depot
 removes its records.
 
+The record is the operator's to write, or the yardmaster's in a run for the
+operator, under the record that run started: its source is where the next
+`yardr pack apply <name>` reads the pack from. A crew member's own import is
+refused it, whatever actor it passes, and what it wrote before stays.
+
 A crew member is in the mapping and not among the objects: it is the yard's.
 So is a group of the yard that took a group of the pack (`--group`): the
 next import takes it again by that, and a prune never removes it.
@@ -1953,7 +1958,8 @@ yard.
 
 **Proposing an embedded pack.** A crew member may propose applying a
 pack yardr embeds, with a run ask (`yardr bead ask <id> "<question>"
---run "pack apply <name>"`, [chat.md](chat.md#questions-for-you)), for
+--context "<why>" --run "pack apply <name>",
+[chat.md](chat.md#questions-for-you)), for
 the operator to approve on a card: an embedded pack of kind `source`
 with no flag (the packs table above names them), or a pack of a depot
 kind. With no flag a depot pack is re-applied to the one depot that
