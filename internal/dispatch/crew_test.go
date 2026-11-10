@@ -72,9 +72,11 @@ type crewRunner struct {
 	login           string              // the line of the login screen it sits at, "" for none
 	noScreen        bool                // the harness has not drawn its screen (no input mark)
 	ctxUsed         int                 // the context the session holds, when ctxOK
+	ctxWindow       int                 // the declared or reported window, 0 for the model's
 	ctxOK           bool                // ... and whether the session's kind names a source
 	ctxErr          error               // ... or the read fails
 	ctxCalls        int                 // reads of the session's context use
+	ctxStartedAt    time.Time           // the start used to match its session file
 
 	hold    string                         // the crew member whose start waits to be let go
 	entered chan string                    // ... says so when it has entered StartCrew
@@ -368,11 +370,12 @@ func (f *crewRunner) set(agent, status string) {
 	f.status[agent] = status
 }
 
-func (f *crewRunner) Context(context.Context, map[string]any) (int, bool, error) {
+func (f *crewRunner) Context(_ context.Context, _ map[string]any, startedAt time.Time) (int, int, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ctxCalls++
-	return f.ctxUsed, f.ctxOK, f.ctxErr
+	f.ctxStartedAt = startedAt
+	return f.ctxUsed, f.ctxWindow, f.ctxOK, f.ctxErr
 }
 
 func crewSetup(t *testing.T, def store.CrewMember) (store.API, *crewRunner, *dispatch.Dispatcher) {

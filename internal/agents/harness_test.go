@@ -1012,14 +1012,27 @@ func TestHarnessVersion(t *testing.T) {
 	}
 }
 
-// Only claude names where its context use is read: the last assistant
-// line's message.usage, whose input and cache tokens add up to what the
-// session holds. The other kinds have no context-based rotation.
+// Claude adds input and cache; Muse and Codex input already includes cache.
 func TestContextSource(t *testing.T) {
 	for _, h := range Harnesses {
 		if h.Kind == "claude" {
-			if h.Context == nil || h.Context.Type != "assistant" || h.Context.Usage != "message.usage" {
+			if h.Context == nil || h.Context.Type != "assistant" || h.Context.Usage != "message.usage" || h.Context.Window != 0 {
 				t.Fatalf("claude's context source = %+v", h.Context)
+			}
+			continue
+		}
+		if h.Kind == "muse" {
+			if h.Context == nil || h.Context.TypeField != "payload.event.kind" || h.Context.Type != "model_completed" ||
+				h.Context.Usage != "payload.event.usage" || !slices.Equal(h.Context.Tokens, []string{"input_tokens"}) || h.Context.Window != 1007997 {
+				t.Fatalf("Muse's context source = %+v", h.Context)
+			}
+			continue
+		}
+		if h.Kind == "codex" {
+			if h.Context == nil || h.Context.TypeField != "payload.type" || h.Context.Type != "token_count" ||
+				h.Context.Usage != "payload.info.last_token_usage" || !slices.Equal(h.Context.Tokens, []string{"input_tokens"}) ||
+				h.Context.Window != 0 || h.Context.WindowField != "payload.info.model_context_window" {
+				t.Fatalf("Codex's context source = %+v", h.Context)
 			}
 			continue
 		}
@@ -1065,9 +1078,12 @@ func TestContextSource(t *testing.T) {
 func TestContextSourceChecked(t *testing.T) {
 	model := "model:\n  home: .x\n  glob: s/{session}.jsonl\n  field: m.model\n"
 	for name, body := range map[string]string{
-		"no usage": "version: 1\nlabel: Q\n" + model + "context:\n  type: assistant\n",
-		"no model": "version: 1\nlabel: Q\ncontext:\n  type: assistant\n  usage: message.usage\n",
-		"no field": "version: 1\nlabel: Q\n" + model + "context:\n  type: assistant\n  usage: message.usage\n  tokens: [input_tokens, '']\n",
+		"no usage":        "version: 1\nlabel: Q\n" + model + "context:\n  type: assistant\n",
+		"no model":        "version: 1\nlabel: Q\ncontext:\n  type: assistant\n  usage: message.usage\n",
+		"no field":        "version: 1\nlabel: Q\n" + model + "context:\n  type: assistant\n  usage: message.usage\n  tokens: [input_tokens, '']\n",
+		"negative window": "version: 1\nlabel: Q\n" + model + "context:\n  usage: message.usage\n  window: -1\n",
+		"two windows":     "version: 1\nlabel: Q\n" + model + "context:\n  usage: message.usage\n  window: 258400\n  window_field: info.window\n",
+		"empty key":       "version: 1\nlabel: Q\n" + model + "context:\n  usage: message.usage\n  window_field: info..window\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := load(t, map[string]string{"qwen.yaml": body}); err == nil {
@@ -1078,6 +1094,14 @@ func TestContextSourceChecked(t *testing.T) {
 	if _, err := load(t, map[string]string{"qwen.yaml": "version: 1\nlabel: Q\n" + model +
 		"context:\n  type: assistant\n  usage: message.usage\n"}); err != nil {
 		t.Fatalf("a whole source is refused: %v", err)
+	}
+	if hs, err := load(t, map[string]string{"qwen.yaml": "version: 1\nlabel: Q\n" + model +
+		"context:\n  usage: message.usage\n  window: 123456\n"}); err != nil || hs[0].Context.Window != 123456 {
+		t.Fatalf("declared window: %v, %v", hs, err)
+	}
+	if hs, err := load(t, map[string]string{"qwen.yaml": "version: 1\nlabel: Q\n" + model +
+		"context:\n  usage: message.usage\n  window_field: info.window\n"}); err != nil || hs[0].Context.WindowField != "info.window" {
+		t.Fatalf("reported window: %v, %v", hs, err)
 	}
 }
 

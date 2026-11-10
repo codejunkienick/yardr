@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"yardr.dev/yardr/internal/agents"
 	"yardr.dev/yardr/internal/config"
@@ -263,6 +264,8 @@ func (h *Herdr) StartCrew(ctx context.Context, r store.CrewMember, user string) 
 	}
 	prompt := crewPrompt(h.yard(), r, user)
 	handle[firstPrompt] = prompt
+	// CrewStartedFor records its time after Muse can write its session metadata.
+	handle[contextStartedAt] = time.Now().UTC().Format(time.RFC3339Nano)
 	return h.startAgent(ctx, start, name, prompt, handle, trustEntry(r.Config), keyEntry(r.Config),
 		onboardingEntries(r.Config))
 }

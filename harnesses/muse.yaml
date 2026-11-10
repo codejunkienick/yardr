@@ -113,6 +113,18 @@ model:
     at: recorded_at
     at_unit: us
 
+# The last model_completed line holds the current prompt at
+# payload.event.usage.input_tokens, cache included (read from a live Muse
+# Code session, 10 Nov 2026). The next completed call after compaction reads
+# low again. The model catalog (~/.local/share/muse/model-catalog/*.json,
+# read the same day) gives context_limit 1007997 for every Muse text model.
+context:
+  type_field: payload.event.kind
+  type: model_completed
+  usage: payload.event.usage
+  tokens: [input_tokens]
+  window: 1007997
+
 # What a session used, in tokens, read from the same file once the session has
 # ended (docs/design/2026-10-21-yardr-qbqq-session-tokens.md, section 3.3).
 # Read on 22 Oct 2026 from the review-security session of yardr-58xw, a file of

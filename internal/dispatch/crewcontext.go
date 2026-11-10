@@ -4,14 +4,17 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 )
 
 // ContextReader is implemented by runners that read the context a
 // session's agent holds, in tokens (herdr reads the agent's own session
 // file). ok is false when the session's kind names no source, or its
-// file says no use yet.
+// file says no use yet. window is declared or read with the use, 0 for
+// the model name's window. startedAt matches a session file by its worktree
+// when herdr names no session id.
 type ContextReader interface {
-	Context(ctx context.Context, handle map[string]any) (used int, ok bool, err error)
+	Context(ctx context.Context, handle map[string]any, startedAt time.Time) (used, window int, ok bool, err error)
 }
 
 // defaultContextHandoff is the percent of the context window at which an
@@ -43,12 +46,18 @@ func (d *Dispatcher) crewContext(ctx context.Context, runner Runner, s *memberSe
 	if !ok {
 		return false, nil
 	}
-	used, ok, err := r.Context(ctx, s.st.Handle)
+	var startedAt time.Time
+	if s.st.StartedAt != nil {
+		startedAt = *s.st.StartedAt
+	}
+	used, window, ok, err := r.Context(ctx, s.st.Handle, startedAt)
 	if err != nil || !ok {
 		return false, err
 	}
 	model, _ := def.Config["model"].(string)
-	window := ContextWindow(model)
+	if window == 0 {
+		window = ContextWindow(model)
+	}
 	pct := used * 100 / window
 	if err := d.Store.SetContextFor(ctx, def.Name, s.user, pct, window); err != nil {
 		return false, err

@@ -81,7 +81,7 @@ func (h *Herdr) Usage(ctx context.Context, handle map[string]any, startedAt time
 	id, _ := handle[agentSession].(string)
 	if !plainSessionID(id) {
 		worktree, _ := handle["worktree"].(string)
-		matched, ambiguous, err := h.matchWorkspace(kind, worktree, startedAt)
+		matched, ambiguous, err := h.matchWorkspace(kind, worktree, startedAt, 0)
 		if err != nil {
 			return store.Usage{}, false, "", err
 		}
