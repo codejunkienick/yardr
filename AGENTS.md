@@ -278,11 +278,14 @@ it lists every exported name with its comment, faster than grepping.
   a product assertion, a wrong result rather than a timeout) as a bug, not
   a flake; otherwise the log line is the record, named in the handover
   note.
-- `gofmt`, `go vet` and `shellcheck` are clean on every change: shellcheck
-  over `.yardr/test`, `install.sh` and every `contrib` and `conformance`
-  script with a shell shebang, as CI's scan job has it, and the gate fails
-  where it is not installed rather than skip it. The module builds with the
-  Go in `go.mod`.
+- `gofmt`, `go vet`, `staticcheck` and `shellcheck` are clean on every
+  change: shellcheck over `.yardr/test`, `install.sh` and every `contrib` and
+  `conformance` script with a shell shebang, as CI's scan job has it, and the
+  gate fails where it is not installed rather than skip it. staticcheck is
+  the version CI's scan job pins, over every package: the version moves in
+  `.github/workflows/ci.yml` and `.yardr/test` together (a test holds them to
+  one command), and a deliberate exception is a `//lint:ignore` with its
+  reason. The module builds with the Go in `go.mod`.
 
 ## What not to touch
 

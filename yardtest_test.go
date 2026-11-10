@@ -380,6 +380,28 @@ func (j ciJob) runsGate() bool {
 	return slices.ContainsFunc(j.Steps, func(s ciStep) bool { return strings.Contains(s.Run, "sh "+yardTest) })
 }
 
+// ciStaticcheck is the command of the step of CI's scan job that runs
+// staticcheck, as the workflow has it: the one command the gate's staticchecked
+// step follows. The rows write down the call it makes of a fake go, which is
+// the command less its go (call), and the step is timed by the whole command
+// (command), so that a version moved in the workflow is followed here and
+// TestYardTestBudgets holds the script to it.
+func ciStaticcheck(t *testing.T) (command, call string) {
+	t.Helper()
+	var found []string
+	for _, job := range ciYML(t).Jobs {
+		for _, step := range job.Steps {
+			if cmd := strings.TrimSpace(step.Run); strings.HasPrefix(cmd, "go run honnef.co/go/tools/cmd/staticcheck@") {
+				found = append(found, cmd)
+			}
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("ci.yml has %d steps that go run staticcheck, want the one command the gate follows: %q", len(found), found)
+	}
+	return found[0], strings.TrimPrefix(found[0], "go ")
+}
+
 // gateCmd is the command that runs script, the gate's text and any shell text a
 // case puts ahead of it, from a file of the test's own temp dir: sh <file>,
 // never the script as the one argument of sh -c. Linux caps one argument at
@@ -840,6 +862,7 @@ func TestYardTestSelects(t *testing.T) {
 	t.Parallel()
 	script, rows := yardTestRows(t)
 	needTool(t, "go")
+	staticStep, staticCall := ciStaticcheck(t)
 	const pre = "test: "
 	// A file within 50 lines of 1000 where go does not look, a testdata
 	// directory, so that it adds no package: the fixture holds one, and every
@@ -1301,29 +1324,29 @@ func TestYardTestSelects(t *testing.T) {
 		// rows below that have none show their run was not marked.
 		{"a plain run of the docs and a conformance script runs without -race, marked for conformance/bdp's test", nil, []string{"docs/api.md", "docs/design/2026-10-12-a.md", "conformance/bdp/probe-core.sh"},
 			pre + "what changed" + sincePH + plainWhy,
-			[]string{"conformance vet ./...", "conformance build ./...", "conformance test m.test/m m.test/m/conformance/bdp m.test/m/internal/rpc"},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test m.test/m m.test/m/conformance/bdp m.test/m/internal/rpc"}},
+			[]string{"conformance vet ./...", "conformance build ./...", "conformance " + staticCall, "conformance test m.test/m m.test/m/conformance/bdp m.test/m/internal/rpc"},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", staticStep, "go test m.test/m m.test/m/conformance/bdp m.test/m/internal/rpc"}},
 		{"a landing of one design document runs without -race", []string{"YARDR_LANDING=1"}, []string{"docs/design/2026-10-12-a.md"},
 			landing + "nothing compiled changed" + sincePH + unraced,
-			[]string{"vet ./...", "build ./...", "test m.test/m"},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test m.test/m"}},
+			[]string{"vet ./...", "build ./...", staticCall, "test m.test/m"},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", staticStep, "go test m.test/m"}},
 		// A landing races compiled code; a plain run does not. The mark is the run's
 		// to give: one the caller had is dropped, or the script would run in every
 		// whole suite.
 		{"a plain run of a go file runs without -race, and drops a conformance mark the caller had", []string{"YARDR_CONFORMANCE=1"}, []string{"alone/p.go"},
 			pre + "what changed" + sincePH + plainWhy,
-			[]string{"vet ./...", "build ./...", "test m.test/m/alone"},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test m.test/m/alone"}},
+			[]string{"vet ./...", "build ./...", staticCall, "test m.test/m/alone"},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", staticStep, "go test m.test/m/alone"}},
 		{"a plain run of a file no row knows tests every package without -race", []string{"YARDR_RACE_HELD=1"}, []string{"contrib/x.txt"},
 			pre + "what changed" + sincePH + plainWhy,
-			[]string{"vet ./...", "build ./...", "test ./..."},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test ./..."}},
+			[]string{"vet ./...", "build ./...", staticCall, "test ./..."},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", staticStep, "go test ./..."}},
 		// A whole suite is marked when a path under conformance/ is among what
 		// changed, and was not for the file no row knows above.
 		{"a plain run of go.mod and a conformance script tests every package without -race, marked for conformance/bdp's test", []string{"YARDR_RACE_HELD=1"}, []string{"go.mod", "conformance/bdp/probe-core.sh"},
 			pre + "what changed" + sincePH + plainWhy,
-			[]string{"conformance vet ./...", "conformance build ./...", "conformance test ./..."},
-			[]string{"gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test ./..."}},
+			[]string{"conformance vet ./...", "conformance build ./...", "conformance " + staticCall, "conformance test ./..."},
+			[]string{"gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", staticStep, "go test ./..."}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -1376,24 +1399,24 @@ func TestYardTestSelects(t *testing.T) {
 		load    []string // the machine's load, where a row means one: else the quiet one scriptEnv pins
 	}{
 		{"a landing over internal/cli starts no socket leg", "internal/cli/p.go", "internal/cli/p.go changed", selectionSuffix, skipSocket,
-			[]string{"vet ./...", "linux vet ./...", "test -race " + selCLI},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test -race " + selCLI}, nil},
+			[]string{"vet ./...", "linux vet ./...", staticCall, "test -race " + selCLI},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", staticStep, "go test -race " + selCLI}, nil},
 		{"a landing over internal/rpc starts the socket leg", "internal/rpc/p.go", "internal/rpc/p.go changed", selectionSuffix, runSocketStore,
-			[]string{"vet ./...", "linux vet ./...", "test -race " + selRPC, "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test -race " + selRPC,
+			[]string{"vet ./...", "linux vet ./...", staticCall, "test -race " + selRPC, "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", staticStep, "go test -race " + selRPC,
 				"env YARDR_TEST_RPC=1 go test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"}, nil},
 		// A loaded machine, on the row that starts the socket leg: the selection's
 		// race leg takes the cores the load leaves it (gatepar), and the suites
 		// beside it stay go's default. The root package has no seconds to spare
 		// (yardr-fvkm), so this row replaces one instead of adding one.
 		{"a landing over internal/web starts the socket leg, and on a loaded machine runs its race leg with -p=2", "internal/web/p.go", "internal/web/p.go changed", selectionSuffix, runSocketWeb,
-			[]string{"vet ./...", "linux vet ./...", "test -race -p=2 " + selWEB, "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test -race -p=2 " + selWEB,
+			[]string{"vet ./...", "linux vet ./...", staticCall, "test -race -p=2 " + selWEB, "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", staticStep, "go test -race -p=2 " + selWEB,
 				"env YARDR_TEST_RPC=1 go test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"},
 			[]string{"YARDR_TEST_LOADAVG=40", "YARDR_TEST_CORES=10"}},
 		{"a landing over an unknown file starts the socket leg", "contrib/x.txt", "contrib/x.txt, which is read by no known package, changed", wholeSuffix, runSocketAll,
-			[]string{"vet ./...", "linux vet ./...", "test -race ./...", "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test -race ./...",
+			[]string{"vet ./...", "linux vet ./...", staticCall, "test -race ./...", "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", staticStep, "go test -race ./...",
 				"env YARDR_TEST_RPC=1 go test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"}, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -1653,10 +1676,11 @@ func wantLoads(t *testing.T, fake string, landing bool) {
 	}
 }
 
-// A go that fails one of its steps (its first argument, or "rpc" for a call
-// that has YARDR_TEST_RPC: a landing runs that one beside its other go test)
-// the first few times with a line of its own, printed as it is (printf, since
-// some shells' echo reads the backslashes a failing line can have), and writes
+// A go that fails one of its steps (its first argument, "staticcheck" for a go
+// run, or "rpc" for a call that has YARDR_TEST_RPC: a landing runs that one
+// beside its other go test) the first few times with a line of its own,
+// printed as it is (printf, since some shells' echo reads the backslashes a
+// failing line can have), and writes
 // down every call: the arguments, after "rpc" when the call has
 // YARDR_TEST_RPC and after the GOOS it was given, and in goflags, a line a
 // call, the GOFLAGS it had, and in loads, a line a call, the YARDR_TEST_LOAD
@@ -1678,6 +1702,7 @@ echo "${YARDR_TEST_RPC:+rpc }${GOOS:+$GOOS }$*" >>"$FAKE/calls"
 echo "${YARDR_TEST_RPC:+rpc }${GOOS:+$GOOS }$* load=${YARDR_TEST_LOAD-unset}" >>"$FAKE/loads"
 echo "$GOFLAGS" >>"$FAKE/goflags"
 step=$1
+[ "$step" != run ] || step=staticcheck
 [ -z "$YARDR_TEST_RPC" ] || step=rpc
 if [ "$step" = "$FAKE_STEP" ]; then
   n=$(cat "$FAKE/n" 2>/dev/null || echo 0)
@@ -1751,9 +1776,11 @@ fi
 // race is not run again for the cache either. Both runs' output is
 // printed, and a step that failed for good is followed by the lines that
 // say what failed: a failing test's report a third time, its own lines
-// under it the last. A landing runs the socket
-// suites beside the tests, whether those are green or not; each of the two
-// is run again by the same rule, either makes the run red, and the socket
+// under it the last. The staticcheck step is one of them: a finding fails the
+// run before any test, with the finding among those lines, and so does a tool
+// that cannot be fetched or run, which is never skipped. A landing runs the
+// socket suites beside the tests, whether those are green or not; each of the
+// two is run again by the same rule, either makes the run red, and the socket
 // step's output follows the whole of the other's. Every go it runs, each
 // run of a step included, has -trimpath in its GOFLAGS, after the caller's
 // own, so that the Go cache serves one worktree's results to another.
@@ -1763,13 +1790,21 @@ func TestYardTestRunsAgainWhenTheBuildCacheLostAFile(t *testing.T) {
 	const failing = "--- FAIL: TestX (0.00s)"
 	const failingMsg = "--- FAIL: TestX (0.00s)\n    x_test.go:12: x"
 	const compileErr = "internal/foo/foo.go:10:2: undefined: x"
+	// A finding as staticcheck prints one: the file, the line and column, the
+	// message and the check's name.
+	const finding = "internal/foo/foo.go:10:6: func unused is unused (U1000)"
+	// What go says where it cannot fetch the tool: no network and nothing in
+	// the module cache.
+	const unfetched = "go: honnef.co/go/tools/cmd/staticcheck@v0.8.2: dial tcp: lookup proxy.golang.org: no such host"
 	const raceLost = cacheLost + "\nWARNING: DATA RACE\n--- FAIL: TestX (0.00s)\nFAIL\nFAIL\tm.test/m 0.123s"
 	// Thirty failures are more than the summary holds: its which-lines
 	// and why-blocks together are capped at 60.
 	manyFails := strings.Repeat("--- FAIL: TestMany (0.00s)\n    many_test.go:1: boom\n", 30)
+	staticStep, staticCall := ciStaticcheck(t)
 	// The landing rows run at a load of 25.3 on 10 cores: the race leg has -p=3.
-	landing := []string{"vet ./...", "linux vet ./...", "test -race -p=3 ./...", "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"}
-	plain := []string{"vet ./...", "build ./...", "test ./..."}
+	// staticcheck runs after the budgets and before the tests, in both.
+	landing := []string{"vet ./...", "linux vet ./...", staticCall, "test -race -p=3 ./...", "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"}
+	plain := []string{"vet ./...", "build ./...", staticCall, "test ./..."}
 	noBase := []string{"YARDR_LANDING=1", "YARDR_BASE=nowhere", "YARDR_TEST_LOADAVG=25.3", "YARDR_TEST_CORES=10"}
 	m := newModGate(t)
 	for _, c := range []struct {
@@ -1787,9 +1822,21 @@ func TestYardTestRunsAgainWhenTheBuildCacheLostAFile(t *testing.T) {
 		// Run plainly it tests what changed; for a landing, everything, and
 		// the socket suites again.
 		{"build once", "build", "1", cacheLost, true,
-			[]string{plain[0], plain[1], plain[1], plain[2]}, 1, true, nil, ""},
+			[]string{plain[0], plain[1], plain[1], plain[2], plain[3]}, 1, true, nil, ""},
 		{"test twice", "test", "2", cacheLost, false,
-			[]string{plain[0], plain[1], plain[2], plain[2]}, 3, true, nil, "test: FAILED: go test ./..."},
+			[]string{plain[0], plain[1], plain[2], plain[3], plain[3]}, 3, true, nil, "test: FAILED: go test ./..."},
+		// staticcheck is one of the steps a lost file runs again, and a finding
+		// of it fails the run before any test, with the finding in the summary
+		// as a compile error is.
+		{"staticcheck once", "staticcheck", "1", cacheLost, true,
+			[]string{plain[0], plain[1], plain[2], plain[2], plain[3]}, 1, true, nil, ""},
+		{"a staticcheck finding", "staticcheck", "1", finding, false,
+			[]string{plain[0], plain[1], plain[2]}, 3, false, nil, "test: FAILED: " + staticStep + "\n" + finding},
+		// Where the tool cannot be fetched or run, the run fails, with go's own
+		// words in the summary, which a note carries whole: skipping would pass
+		// what CI fails on.
+		{"a staticcheck that cannot run", "staticcheck", "1", unfetched, false,
+			[]string{plain[0], plain[1], plain[2]}, 2, false, nil, "test: FAILED: " + staticStep + "\n" + unfetched},
 		{"a failing test", "test", "1", failing, false,
 			plain, 3, false, nil, "test: FAILED: go test ./...\n" + failing},
 		// The summary carries the failure's own lines under its report:
@@ -1808,12 +1855,16 @@ func TestYardTestRunsAgainWhenTheBuildCacheLostAFile(t *testing.T) {
 		// suites run whole, ungated, so these cases exercise the leg
 		// itself rather than the gate.
 		{"landing: vet once", "vet", "1", cacheLost, true,
-			[]string{landing[0], landing[0], landing[1], landing[2], landing[3]}, 1, true, noBase, ""},
+			[]string{landing[0], landing[0], landing[1], landing[2], landing[3], landing[4]}, 1, true, noBase, ""},
 		{"landing: a failing test", "test", "1", failing, false,
 			landing, 3, false, noBase, "test: FAILED: go test -race -p=3 ./...\n" + failing},
+		// A landing fails on a finding too, before its race leg and the socket
+		// suites beside it start.
+		{"landing: a staticcheck finding", "staticcheck", "1", finding, false,
+			[]string{landing[0], landing[1], landing[2]}, 3, false, noBase, "test: FAILED: " + staticStep + "\n" + finding},
 		// The race leg run again for the lost file has the load factor too.
 		{"landing: the race leg once", "test", "1", cacheLost, true,
-			[]string{landing[0], landing[1], landing[2], landing[2], landing[3]}, 1, true, noBase, ""},
+			[]string{landing[0], landing[1], landing[2], landing[3], landing[3], landing[4]}, 1, true, noBase, ""},
 		// A race accuses the branch whatever the cache lost with it: the
 		// step is not run again for the cache, and the flaky retry
 		// refuses it for the same reason. Only a race leg, and so only a
@@ -1823,9 +1874,9 @@ func TestYardTestRunsAgainWhenTheBuildCacheLostAFile(t *testing.T) {
 		{"landing: a failing socket test", "rpc", "1", failing, false,
 			landing, 3, false, noBase, "test: FAILED: env YARDR_TEST_RPC=1 go test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/\n" + failing},
 		{"landing: the socket step once", "rpc", "1", cacheLost, true,
-			[]string{landing[0], landing[1], landing[2], landing[3], landing[3]}, 1, true, noBase, ""},
+			[]string{landing[0], landing[1], landing[2], landing[3], landing[4], landing[4]}, 1, true, noBase, ""},
 		{"landing: the socket step twice", "rpc", "2", cacheLost, false,
-			[]string{landing[0], landing[1], landing[2], landing[3], landing[3]}, 3, true, noBase, "test: FAILED: env YARDR_TEST_RPC=1 go test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"},
+			[]string{landing[0], landing[1], landing[2], landing[3], landing[4], landing[4]}, 3, true, noBase, "test: FAILED: env YARDR_TEST_RPC=1 go test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -1835,7 +1886,9 @@ func TestYardTestRunsAgainWhenTheBuildCacheLostAFile(t *testing.T) {
 				t.Errorf("exit %d, want ok %v", code, c.ok)
 			}
 			wantGoCalls(t, b.fake, c.calls)
-			wantLoads(t, b.fake, slices.Contains(c.env, "YARDR_LANDING=1"))
+			// A landing runs a race leg, unless it failed before it had one to run.
+			raced := slices.ContainsFunc(c.calls, func(call string) bool { return strings.HasPrefix(call, "test -race ") })
+			wantLoads(t, b.fake, slices.Contains(c.env, "YARDR_LANDING=1") && raced)
 			// Each of those had -trimpath after the caller's own flags: a
 			// line a call, so a go that missed it is told from the rest.
 			wantFlags := "-trimpath"
@@ -1865,7 +1918,7 @@ func TestYardTestRunsAgainWhenTheBuildCacheLostAFile(t *testing.T) {
 			// One line a step says how long it took, both runs of it where
 			// there were two: gofmt's, shellcheck's, then go's in the order
 			// they ran. The sleep budget and the redaction marker scan are
-			// timed too, after the build and before the tests.
+			// timed too, after the build and before staticcheck and the tests.
 			steps := []string{"gofmt -l .", "shellcheck"}
 			for _, call := range slices.Compact(slices.Clone(c.calls)) {
 				call = "go " + call
@@ -1877,7 +1930,7 @@ func TestYardTestRunsAgainWhenTheBuildCacheLostAFile(t *testing.T) {
 				steps = append(steps, call)
 			}
 			for i, step := range steps {
-				if strings.HasPrefix(step, "go test ") {
+				if step == staticStep || strings.HasPrefix(step, "go test ") {
 					steps = slices.Insert(steps, i, "sleep budgets", "file size budgets", "redaction marker scan")
 					break
 				}
@@ -2042,13 +2095,14 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 		return fmt.Sprintf("%-18s %-6s %-4s %-7s %-8s %-7s %-15s %-13s %s\n", id, "", "P3", "task", "backlog", "open", "-", "yardr", title)
 	}
 	other := listHeader + listRow("m-1", "Something else")
-	plainSteps := []string{"gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test ./..."}
-	landingSteps := []string{"gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", "go test -race -p=3 ./...",
+	staticStep, staticCall := ciStaticcheck(t)
+	plainSteps := []string{"gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", staticStep, "go test ./..."}
+	landingSteps := []string{"gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", staticStep, "go test -race -p=3 ./...",
 		"env YARDR_TEST_RPC=1 go test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"}
-	landing := []string{"vet ./...", "linux vet ./...", "test -race -p=3 ./...", "test -race -p=3 " + pkg, "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"}
-	plain := []string{"vet ./...", "build ./...", "test ./...", "test " + pkg}
-	landingNoRetry := []string{"vet ./...", "linux vet ./...", "test -race -p=3 ./...", "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"}
-	landingFlakeReal := []string{"vet ./...", "linux vet ./...", "test -race -p=3 ./...", "test -race -p=3 " + pkg,
+	landing := []string{"vet ./...", "linux vet ./...", staticCall, "test -race -p=3 ./...", "test -race -p=3 " + pkg, "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"}
+	plain := []string{"vet ./...", "build ./...", staticCall, "test ./...", "test " + pkg}
+	landingNoRetry := []string{"vet ./...", "linux vet ./...", staticCall, "test -race -p=3 ./...", "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"}
+	landingFlakeReal := []string{"vet ./...", "linux vet ./...", staticCall, "test -race -p=3 ./...", "test -race -p=3 " + pkg,
 		"rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/", "rpc test " + pkg}
 	// The load is pinned, so what the race leg is given is known: 25.3 on 10
 	// cores is a factor of 2.5 and a -p of 3, which the rerun of its failed
@@ -2188,12 +2242,12 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 		{name: "plain: a package that could not link on a full disk is the disk's as a whole", times: "1", ok: true, calls: plain, steps: plainSteps,
 			line: diskPkgFail, disk: "package " + pkg, diskOnly: true, yardr: true, list: other},
 		{name: "plain: a package link failure is excluded beside a named test failure", testName: "TestOther", rerunPackages: "m.test/disk " + pkg, times: "1", ok: true,
-			calls: []string{"vet ./...", "build ./...", "test ./...", "test m.test/disk " + pkg}, steps: plainSteps,
+			calls: []string{"vet ./...", "build ./...", staticCall, "test ./...", "test m.test/disk " + pkg}, steps: plainSteps,
 			line: diskPkgMixedFail, disk: "package m.test/disk", tests: "TestOther",
 			kept: "--- FAIL: TestOther (0.01s)" + eol + "    y_test.go:5: boom",
 			seed: []time.Duration{24 * time.Hour, 48 * time.Hour}, yardr: true, list: other, create: true},
 		{name: "plain: a same-named test in another package stays flaky", testName: "TestShared", rerunPackages: "m.test/disk " + pkg, times: "1", ok: true,
-			calls: []string{"vet ./...", "build ./...", "test ./...", "test m.test/disk " + pkg}, steps: plainSteps,
+			calls: []string{"vet ./...", "build ./...", staticCall, "test ./...", "test m.test/disk " + pkg}, steps: plainSteps,
 			line: "--- FAIL: TestShared (0.00s)\n    disk_test.go:1: no space left on device\nFAIL\nFAIL\tm.test/disk 0.123s\n" +
 				"--- FAIL: TestShared (0.00s)\n    other_test.go:1: assertion failed\nFAIL\nFAIL\t" + pkg + " 0.123s",
 			disk: "TestShared", tests: "TestShared",
@@ -3928,6 +3982,7 @@ func TestYardTestRaceLegWaitsForTheLock(t *testing.T) {
 	t.Parallel()
 	needTool(t, "perl")
 	script := gateScript(t)
+	_, staticCall := ciStaticcheck(t)
 	home, held := holdRaceLock(t)
 	fake, tmp := fakeBins(t, map[string]string{
 		// The landing's socket step runs beside the race leg and holds no
@@ -3990,7 +4045,7 @@ fi
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	})
-	// The run's linux vet is its last go step before the race leg: hold the
+	// The run's staticcheck is its last go step before the race leg: hold the
 	// lock until the run says it waits, so the wait is real by construction
 	// and spans whole seconds.
 	callsPath := filepath.Join(fake, "calls")
@@ -4005,7 +4060,7 @@ fi
 			t.Fatalf("the run never reached %s, output:\n%s", what, b)
 		})
 	}
-	waitFor("linux vet ./...")
+	waitFor(staticCall)
 	// Let go of the lock only once the run says it waits, however long the
 	// machine takes it to try.
 	plainLockWaitStarted(t, cmd, out)
@@ -4032,7 +4087,7 @@ fi
 	}
 	wantQueued(t, "the run", got)
 	calls, _ := os.ReadFile(callsPath)
-	if got, want := strings.TrimSpace(string(calls)), "vet ./...\nlinux vet ./...\ntest -race ./...\ntest -race -count=1 yardr.dev/yardr/internal/dispatch"; got != want {
+	if got, want := strings.TrimSpace(string(calls)), "vet ./...\nlinux vet ./...\n"+staticCall+"\ntest -race ./...\ntest -race -count=1 yardr.dev/yardr/internal/dispatch"; got != want {
 		t.Errorf("go was run as:\n%s\nwant:\n%s", got, want)
 	}
 	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
@@ -4231,6 +4286,7 @@ func TestYardTestWholePlainRunsSerialize(t *testing.T) {
 	needTool(t, "perl")
 	realGo := needTool(t, "go")
 	script := gateScript(t)
+	_, staticCall := ciStaticcheck(t)
 	home := t.TempDir()
 	order := filepath.Join(t.TempDir(), "order")
 	release := filepath.Join(t.TempDir(), "release")
@@ -4303,7 +4359,7 @@ func TestYardTestWholePlainRunsSerialize(t *testing.T) {
 		t.Errorf("the second run exits with %v:\n%s", err2, b2)
 	}
 	slices.Sort(oks)
-	wantCalls := "vet ./...\nbuild ./...\ntest " + strings.Join(oks, " ")
+	wantCalls := "vet ./...\nbuild ./...\n" + staticCall + "\ntest " + strings.Join(oks, " ")
 	for i, fake := range []string{fake1, fake2} {
 		if calls, _ := os.ReadFile(filepath.Join(fake, "calls")); strings.TrimSpace(string(calls)) != wantCalls {
 			t.Errorf("run %d's go was run as:\n%s\nwant:\n%s", i+1, calls, wantCalls)
@@ -4335,6 +4391,7 @@ func TestYardTestWholePlainPathsQueue(t *testing.T) {
 	needTool(t, "perl")
 	realGo := needTool(t, "go")
 	script := gateScript(t)
+	_, staticCall := ciStaticcheck(t)
 	// One template fixture: each case copies it and changes its own copy,
 	// so the three do not stage the same repository twice.
 	template, base, _ := plainLockFixture(t, script)
@@ -4398,9 +4455,9 @@ func TestYardTestWholePlainPathsQueue(t *testing.T) {
 				t.Fatalf("err %v, output:\n%s", err, got)
 			}
 			wantQueued(t, "the run", got)
-			want := "vet ./...\nbuild ./...\ntest ./..."
+			want := "vet ./...\nbuild ./...\n" + staticCall + "\ntest ./..."
 			if c.marked {
-				want = "conformance vet ./...\nconformance build ./...\nconformance test ./..."
+				want = "conformance vet ./...\nconformance build ./...\nconformance " + staticCall + "\nconformance test ./..."
 			}
 			if calls, _ := os.ReadFile(filepath.Join(fake, "calls")); strings.TrimSpace(string(calls)) != want {
 				t.Errorf("go was run as:\n%s\nwant:\n%s", calls, want)
@@ -4421,6 +4478,7 @@ func TestYardTestLeafPlainRunTakesNoTicket(t *testing.T) {
 	needTool(t, "perl")
 	realGo := needTool(t, "go")
 	script := gateScript(t)
+	_, staticCall := ciStaticcheck(t)
 	home, _ := holdRaceLock(t)
 	dir, base, _ := plainLockFixture(t, script)
 	writeFile(t, dir, "a/p.go", "package p\n\nvar Changed int\n")
@@ -4445,8 +4503,9 @@ func TestYardTestLeafPlainRunTakesNoTicket(t *testing.T) {
 	if raceWaitStarted.MatchString(got) {
 		t.Errorf("the run printed a race-lock wait line:\n%s", got)
 	}
-	if calls, _ := os.ReadFile(filepath.Join(fake, "calls")); strings.TrimSpace(string(calls)) != "vet ./...\nbuild ./...\ntest m.test/m/a" {
-		t.Errorf("go was run as:\n%s\nwant:\n%s", calls, "vet ./...\nbuild ./...\ntest m.test/m/a")
+	want := "vet ./...\nbuild ./...\n" + staticCall + "\ntest m.test/m/a"
+	if calls, _ := os.ReadFile(filepath.Join(fake, "calls")); strings.TrimSpace(string(calls)) != want {
+		t.Errorf("go was run as:\n%s\nwant:\n%s", calls, want)
 	}
 }
 
@@ -4807,6 +4866,7 @@ func TestYardTestRaceLockDiesWithTheRun(t *testing.T) {
 func TestYardTestBudgetRerunSharesTheRaceHold(t *testing.T) {
 	t.Parallel()
 	script := gateScript(t)
+	_, staticCall := ciStaticcheck(t)
 	const (
 		underAlone = "test: R1: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 12.3 s alone: under budget, loaded run"
 		quietSays  = "machine not loaded, or its load unknown"
@@ -4910,6 +4970,7 @@ exec "$@"
 			}
 			wantCalls := "vet ./... held=unset lock=unset load=unset\n" +
 				"linux vet ./... held=unset lock=unset load=unset\n" +
+				staticCall + " held=unset lock=unset load=unset\n" +
 				race + " ./... held=1 lock=1 load=" + c.factor + "\n" +
 				race + " -count=1 yardr.dev/yardr/internal/dispatch held=1 lock=1 load=unset"
 			if got := fakeLog(fake, "calls"); got != wantCalls {
@@ -6666,6 +6727,42 @@ func TestYardTestBudgets(t *testing.T) {
 		}
 		if !strings.Contains(string(gateScript(t)), ci[0]) {
 			t.Errorf("%s does not run CI's command in its shellchecked step: move them together\nCI's command: %s", yardTest, ci[0])
+		}
+	})
+
+	// The staticcheck step runs CI's command too, at the version CI pins: what
+	// the scan job fails on after a landing the gate fails on before it. The
+	// step is read from the workflow as YAML (ciStaticcheck), and the script
+	// has to hold exactly that command in its staticchecked function and call
+	// the function in the plain run and in a landing, so a version moved in one
+	// file and not the other, a flag added to one, or a run that judges the
+	// tree without it fails here, and the gate does not fall behind CI without
+	// anyone seeing it.
+	t.Run("the staticcheck step runs the command of CI's scan job, in a plain run and in a landing", func(t *testing.T) {
+		t.Parallel()
+		command, _ := ciStaticcheck(t)
+		if !regexp.MustCompile(`@v\d+\.\d+\.\d+ \./\.\.\.$`).MatchString(command) {
+			t.Errorf("CI's staticcheck command %q names no exact version over every package: @latest would run code no review saw", command)
+		}
+		script := string(gateScript(t))
+		fn := func(name string) string {
+			t.Helper()
+			_, rest, ok := strings.Cut(script, "\n"+name+"() {\n")
+			if ok {
+				rest, _, ok = strings.Cut(rest, "\n}\n")
+			}
+			if !ok {
+				t.Fatalf("%s has no %s function: move this case with it", yardTest, name)
+			}
+			return rest
+		}
+		if got, want := strings.TrimSpace(fn("staticchecked")), "again "+command; got != want {
+			t.Errorf("%s runs %q in its staticchecked step: move it with CI's command %q", yardTest, got, command)
+		}
+		for _, run := range []string{"built", "whole"} {
+			if !strings.Contains(fn(run)+"\n", "\n  staticchecked\n") {
+				t.Errorf("the %s function of %s does not call staticchecked: a run that judges the tree skips it", run, yardTest)
+			}
 		}
 	})
 

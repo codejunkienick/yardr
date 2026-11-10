@@ -1,12 +1,14 @@
 The depot's test command is `sh .yardr/test`, run in the worktree after the
-last commit. It runs gofmt, shellcheck, go vet, go build, then go test on
-the packages changed since the base (`YARDR_BASE`, which your session has;
-its first line says what it compared with), every package that imports one,
-and the packages its table says read a changed file by path. The checks
-before the tests cover the whole tree, whatever you changed; shellcheck's
-files are `.yardr/test`, `install.sh` and every `contrib` and `conformance`
-script with a shell shebang, as CI's scan job has them, and a machine without
-it fails the run with the line that says how to install it. It runs the tests
+last commit. It runs gofmt, shellcheck, go vet, go build, staticcheck, then
+go test on the packages changed since the base (`YARDR_BASE`, which your
+session has; its first line says what it compared with), every package that
+imports one, and the packages its table says read a changed file by path.
+The checks before the tests cover the whole tree, whatever you changed;
+shellcheck's files are `.yardr/test`, `install.sh` and every `contrib` and
+`conformance` script with a shell shebang, as CI's scan job has them, and a
+machine without it fails the run with the line that says how to install it.
+staticcheck is CI's pinned version, run with `go run` (the first run fetches
+it into the module cache), and any finding fails the run. It runs the tests
 without -race, whatever you changed: the race
 detector runs at landing only (docs/testing.md R4), and the first line says
 so. A run whose step covers the whole suite still queues on the race lock,

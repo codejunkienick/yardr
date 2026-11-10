@@ -67,10 +67,10 @@ func listens(addr string) bool {
 	return true
 }
 
-// freeAddrTries is how many addresses startOnFreeAddr tries. A port taken in
-// the gap is rare, so a second try nearly always lands; a receiver that
-// cannot listen for another reason fails the test after a few tries rather
-// than looping.
+// freeAddrTries is how many addresses startOnFreeAddr and proposeEndedPreview
+// try. A port taken in the gap is rare, so a second try nearly always lands; a
+// receiver or a preview that cannot listen for another reason fails the test
+// after a few tries rather than looping.
 const freeAddrTries = 3
 
 // startOnFreeAddr starts a server for c whose hook receiver listens on a
@@ -426,10 +426,21 @@ func TestUserDevicePairedOnTheListener(t *testing.T) {
 	if code, _ := post(rpc.PairPath, "", `{"code":"`+opened.Code+`"}`); code != http.StatusUnauthorized {
 		t.Errorf("the code again = %d, want 401", code)
 	}
-	devices, err := cl.Devices(ctx, "jo")
-	if err != nil || len(devices) != 1 || devices[0].Name != "phone" || devices[0].LastUsed == nil {
-		t.Fatalf("devices = %+v, %v", devices, err)
-	}
+	// A call records the device's last use only when no other write of the
+	// yard is in flight: a daemon pass, or the pairing's own write, can be,
+	// and the store then answers from its read and leaves the stamp to the
+	// device's next call (ResolveDevice, yardr-wpgc). So the stamp lands on
+	// some call soon, not on a given one, and the device calls until it has.
+	waitFor(t, "a call with the device's token to record its last use", func() bool {
+		if code, body := post("/user/call/GetUser", got.Token, `{}`); code != http.StatusOK || !strings.Contains(body, `"name":"jo"`) {
+			t.Fatalf("POST /user/call/GetUser with the token the device was given, again = %d %s", code, body)
+		}
+		devices, err := cl.Devices(ctx, "jo")
+		if err != nil || len(devices) != 1 || devices[0].Name != "phone" {
+			t.Fatalf("devices = %+v, %v", devices, err)
+		}
+		return devices[0].LastUsed != nil
+	})
 	// The plain answer holds no voucher.
 	if got.Voucher != "" || strings.Contains(body, "voucher") {
 		t.Errorf("the plain answer holds a voucher: %s", body)
