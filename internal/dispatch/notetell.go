@@ -19,8 +19,8 @@ import (
 //
 // It is told when the agent is idle, and never interrupts a turn: a busy
 // agent's notes wait, and one per pass is told, so each is read before the
-// next is typed. A session that waits for the window of a usage limit to
-// reset is told nothing yet: a rate-limited agent cannot read the note. A
+// next is typed. A session stopped by a usage limit is told nothing until
+// it recovers: a rate-limited agent cannot read the note. A
 // runner with no agent to tell (exec, manual, peer) has nothing to wait
 // for, as a crew member's nudge has: the note is marked told at once. If
 // the session ends first, nothing is sent, and the note shows as untold.
@@ -78,10 +78,8 @@ func (d *Dispatcher) tellNotes(ctx context.Context, r Runner, s *store.Session) 
 		// nudge's Enter would answer it (see nudge).
 		return nil
 	}
-	if _, waits := handleTime(s.Handle, harnessResetAt); waits {
-		// It waits for the window of its usage limit to reset, which
-		// prompts it then (harness_reset.go): two prompts would go as one
-		// message, to an agent that can read neither yet.
+	if _, waits := handleTime(s.Handle, harnessResetAt); waits || quotaHeld(s.Handle) {
+		// A quota-stopped agent cannot read a note, even without a known reset.
 		return nil
 	}
 	author := noteAuthor(untold.Author)

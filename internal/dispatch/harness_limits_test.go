@@ -18,7 +18,7 @@ import (
 )
 
 // standIn is a provider of limits in place of the operator's: a script the
-// yard's source "quokka" names for the kinds kimi, codex and pi. It answers
+// yard's source "quokka" names for the agent kinds. It answers
 // with what say last set (or, for one provider, what sayFor did), or exits 1
 // as a provider does after fail, and asks tells for whom it was run, one
 // name per run. While hold is on, a run waits after it is counted: a refresh
@@ -28,16 +28,18 @@ type standIn struct {
 	dir string
 }
 
-func newStandIn(t *testing.T, s store.API) *standIn {
+func newStandIn(t *testing.T, s store.API, extraKinds ...string) *standIn {
 	t.Helper()
 	p := &standIn{t: t, dir: t.TempDir()}
 	script := filepath.Join(p.dir, "provider")
 	scripttest.Write(t, script, "#!/bin/sh\ncd "+p.dir+"\necho \"$1\" >>asked\n"+
 		"while [ -f hold ]; do sleep 0.05; done\n"+
 		"if [ -f fail ]; then echo 'quokka: kimi: not logged in' >&2; exit 1; fi\n"+
+		"if [ -f \"fail-$1\" ]; then echo \"quokka: $1: unavailable\" >&2; exit 1; fi\n"+
 		"if [ -f \"answer-$1\" ]; then cat \"answer-$1\"; else cat answer; fi\n")
+	kinds := append([]string{"kimi: moonshot", "codex: openai", "pi: zai"}, extraKinds...)
 	_, err := s.PutSource(context.Background(), "quokka.yaml", "name: quokka\nlimits:\n  command: ["+script+
-		", \"{provider}\", --json]\n  kinds: { kimi: moonshot, codex: openai, pi: zai }\n", "me")
+		", \"{provider}\", --json]\n  kinds: { "+strings.Join(kinds, ", ")+" }\n", "me")
 	must(t, err)
 	p.say(`{"provider":"Kimi","windows":[]}`)
 	return p
@@ -58,6 +60,11 @@ func (p *standIn) sayFor(provider, report string) {
 func (p *standIn) fail() {
 	p.t.Helper()
 	must(p.t, os.WriteFile(filepath.Join(p.dir, "fail"), nil, 0o600))
+}
+
+func (p *standIn) failFor(provider string) {
+	p.t.Helper()
+	must(p.t, os.WriteFile(filepath.Join(p.dir, "fail-"+provider), nil, 0o600))
 }
 
 // hold makes every run wait, from the moment it is counted in asks, until
@@ -414,27 +421,27 @@ func TestUsageLimitWithNoResetToRead(t *testing.T) {
 	t.Parallel()
 	later := noon().Add(3 * time.Hour).Format(time.RFC3339)
 	for _, c := range []struct {
-		name, report string
-		fail, none   bool
-		window       any
-		hint         string
-		unknown      string
+		name, report     string
+		fail, none, hold bool
+		window           any
+		hint             string
+		unknown          string
 	}{
-		{name: "no window used up",
+		{name: "no window used up", hold: true,
 			report: `{"provider":"Kimi","windows":[{"label":"5h","used_percent":61,"resets_at":"` + later + `"}]}`,
 			hint:   "no window of kimi's subscription is used up, says quokka: the limit is another account's, one model's or a short rate limit; the agent's"},
-		{name: "used up and no reset said",
+		{name: "used up and no reset said", hold: true,
 			report: `{"provider":"Kimi","windows":[{"label":"5h","used":100,"limit":100,"resets_at":"0001-01-01T00:00:00Z"}]}`,
 			window: "5h", hint: "kimi's 5h window is used up, and quokka does not say when it resets; the agent's"},
 		{name: "the window that resets last",
 			report: `{"provider":"Kimi","windows":[{"label":"5h","used_percent":100,"resets_at":"` + later +
 				`"},{"label":"Weekly","used_percent":100,"resets_at":"` + noon().Add(27*time.Hour).Format(time.RFC3339) + `"}]}`,
 			window: "Weekly", hint: "kimi's Weekly window is used up and resets at " + noon().Add(27*time.Hour).Format("Mon 2 Jan 15:04") + " (in 1d 3h); the agent's"},
-		{name: "a provider that fails", fail: true, hint: "the agent's",
+		{name: "a provider that fails", fail: true, hold: true, hint: "the agent's",
 			unknown: "quokka: kimi: not logged in"},
-		{name: "a provider that prints no report", report: "Kimi: 5h 100%", hint: "the agent's",
+		{name: "a provider that prints no report", report: "Kimi: 5h 100%", hold: true, hint: "the agent's",
 			unknown: "not the JSON object the yard reads"},
-		{name: "no source", none: true, hint: "the agent's",
+		{name: "no source", none: true, hold: true, hint: "the agent's",
 			unknown: "no source of this yard says the limits of kimi"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -457,6 +464,9 @@ func TestUsageLimitWithNoResetToRead(t *testing.T) {
 			}
 			data := evs[0].Data
 			hint, _ := data["hint"].(string)
+			if c.hold {
+				c.hint = strings.Replace(c.hint, "the agent's", "the group starts no further session with this model until this session ends or gets going; the agent's", 1)
+			}
 			if !strings.HasPrefix(hint, c.hint) {
 				t.Errorf("hint = %q, want it to begin %q", hint, c.hint)
 			}

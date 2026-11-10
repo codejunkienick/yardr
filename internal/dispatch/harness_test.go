@@ -117,6 +117,9 @@ func TestHarnessErrorOnlyForAKnownLineOfTheKind(t *testing.T) {
 	}{
 		"only idle":             {kind: "codex", tail: "• Committed the change. Waiting for review.\n› Ask Codex to do anything"},
 		"writes about an error": {kind: "codex", tail: "• The reviewer saw \"Selected model is at capacity\" last night.\n› Ask Codex to do anything"},
+		"muse idle":             {kind: "muse", tail: "◆ Finished the change.\n❯ "},
+		"muse quotes a limit":   {kind: "muse", tail: "◆ The pane said 'Usage limit reached'.\n❯ "},
+		"muse input":            {kind: "muse", tail: "❯ This turn stopped because your usage limit was reached.\n❯ "},
 		"another harness's":     {kind: "claude", tail: atCapacity},
 		"a kind with no lines":  {kind: "opencode", tail: atCapacity},
 		"idle off":              {kind: "codex", cfg: map[string]any{"idle": "off"}, tail: atCapacity, want: dispatch.ReasonAtCapacity},
@@ -417,6 +420,12 @@ func TestHarnessErrorLines(t *testing.T) {
 		{"muse", "◆ model failed: server_error: The model failed to generate a response. (request id: 688dfffa-1833-4175-96d6-ae6513c47149, response: resp_6ad2e591f2d29e424980460b)", dispatch.ReasonOther},
 		{"muse", "model failed: stream protocol error: function_call_arguments.done name mismatch for `fc_0192a3f4` (request id: 9a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d)", dispatch.ReasonOther},
 		{"muse", "◆ model failed: stream protocol error: function_call_arguments.done name mismatch for `fc_0192a3f4` (request id: 9a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d)", dispatch.ReasonOther},
+		{"muse", "◆ Usage limit reached", dispatch.ReasonRateLimited},
+		{"muse", "│ This turn stopped because your usage limit was reached.", dispatch.ReasonRateLimited},
+		{"muse", "◆ The pane said 'Usage limit reached' earlier.", ""},
+		{"muse", "◆ 'Usage limit reached' is the error we handle.", ""},
+		{"muse", "❯ Usage limit reached", ""},
+		{"muse", "◆ Usage limit reached in the example, not this turn.", ""},
 		{"muse", "◆ The pane said model failed: server_error last night.", ""},
 		{"muse", "❯ Why did it say model failed: server_error?", ""},
 		{"pi", " Error: Retry failed after 3 attempts: 529: {\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}", dispatch.ReasonOther},
@@ -444,6 +453,31 @@ func TestHarnessErrorLines(t *testing.T) {
 		if reason != tc.want || ok != (tc.want != "") || (ok && line != strings.TrimSpace(tc.line)) {
 			t.Errorf("%s: %q: reason %q line %q, want %q", tc.kind, tc.line, reason, line, tc.want)
 		}
+	}
+	const museStop = "◆ Usage limit reached\n│ This turn stopped because your usage limit was reached."
+	for _, tc := range []struct{ name, kind, pane, want string }{
+		{"muse took a continuation", "muse", museStop + "\n❯ continue\n◆ Work completed\n❯ ", ""},
+		{"muse stopped again", "muse", museStop + "\n❯ continue\n◆ Work completed\n│ Usage limit reached\n❯ ", "│ Usage limit reached"},
+		{"muse input draft", "muse", museStop + "\n❯ half a thought", "│ This turn stopped because your usage limit was reached."},
+		{"muse input hint", "muse", museStop + "\n❯ Send a message", "│ This turn stopped because your usage limit was reached."},
+		{"muse empty message", "muse", museStop + "\n❯ \n◆ Work completed\n❯ ", "│ This turn stopped because your usage limit was reached."},
+		{"claude took a continuation", "claude", "⎿ You've hit your limit · resets 3pm\n❯ continue\n⏺ Work completed\n❯ ", ""},
+		{"codex took a continuation", "codex", "■ You've hit your usage limit.\n› continue\n• Work completed\n› ", ""},
+		{"kimi took a continuation", "kimi", "Error: [provider.rate_limit] 429 Too many requests\n✨ continue\n● Work completed\n> ", ""},
+		{"pi has no message mark", "pi", "Error: Retry failed after 3 attempts: 529:\n❯ continue\nWork completed\n❯ ", "Error: Retry failed after 3 attempts: 529:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reason, line, ok := dispatch.HarnessError(tc.kind, tc.pane)
+			wantReason := dispatch.ReasonRateLimited
+			if tc.want == "" {
+				wantReason = ""
+			} else if tc.kind == "pi" {
+				wantReason = dispatch.ReasonOther
+			}
+			if reason != wantReason || line != tc.want || ok != (tc.want != "") {
+				t.Errorf("reason %q line %q found %t, want %q %q %t", reason, line, ok, wantReason, tc.want, tc.want != "")
+			}
+		})
 	}
 	// Only the pane's end counts: what the agent quoted while it still
 	// worked is further up.

@@ -157,7 +157,8 @@ const (
 
 // HarnessError finds, in the end of a pane, the error line a harness of
 // kind stopped on: the reason, and the line as it stands in the pane. The
-// last such line counts, since it is what the harness said last.
+// last such line counts until a message the agent took since ends the scan,
+// making an error above it history; the last input line may hold a draft.
 func HarnessError(kind, tail string) (reason, line string, ok bool) {
 	h, _ := agents.Lookup(kind)
 	if len(h.Errors) == 0 {
@@ -165,12 +166,19 @@ func HarnessError(kind, tail string) (reason, line string, ok bool) {
 	}
 	marks := " \t" + h.Marks.Error
 	lines := strings.Split(tail, "\n")
+	input := false
 	for i, seen := len(lines)-1, 0; i >= 0 && seen < harnessLines; i-- {
 		l := strings.TrimSpace(lines[i])
 		if l == "" {
 			continue
 		}
 		seen++
+		if h.Marks.Input != "" && !input && strings.HasPrefix(l, h.Marks.Input) {
+			input = true
+		} else if h.Marks.Message != "" && strings.HasPrefix(l, h.Marks.Message) &&
+			strings.TrimSpace(strings.TrimPrefix(l, h.Marks.Message)) != "" {
+			return "", "", false
+		}
 		said := strings.TrimLeft(l, marks)
 		for _, e := range h.Errors {
 			if e.Matches(said) {
@@ -306,16 +314,19 @@ func (d *Dispatcher) harnessError(ctx context.Context, r Runner, s *store.Sessio
 		said, w := d.sessionLimits(ctx, g, kind, provider, data)
 		var wakes string
 		wake, wakes = d.resetWake(r, s.Handle, w, data)
-		if wake != nil {
-			// The next session of the group with this model would stop on
-			// the same limit, so none is started while this one waits (see
-			// holdBack). The model is kept as a stalled session's is.
+		if wake != nil || w == nil || w.ResetsAt == nil {
+			// An unreported reset does not make the stopped model available.
+			if wake == nil {
+				wake = map[string]any{}
+				wakes += "the group starts no further session with this model until this session ends or gets going; "
+			} else {
+				wakes += "the group starts no further session with this model until then; "
+			}
 			model := ""
 			if b, err := d.Store.GetBead(ctx, s.Bead); err == nil {
 				model = modelFor(g, *b)
 			}
 			wake[harnessResetModel], data["model"] = model, model
-			wakes += "the group starts no further session with this model until then; "
 		}
 		data["hint"] = said + wakes + data["hint"].(string)
 		if tries > 0 {
@@ -444,10 +455,27 @@ func inputEmpty(ctx context.Context, r Runner, handle map[string]any) bool {
 
 // harnessOver ends the spell a session_harness_error was raised in, or a
 // try waited in: s's agent is doing something again, so its next error is
-// told again. The count of tries stays: it is for the session's life, or an
-// agent that works for a moment after each would be prompted for ever. A
-// dialog told of ends with it.
-func (d *Dispatcher) harnessOver(ctx context.Context, s *store.Session) {
+// told again. A saved quota hold can also end at idle, when the pane can be
+// read without its quota error. Tries count for the session's life, or an
+// agent that works for a moment after each would be prompted for ever.
+// A dialog told of ends with it.
+func (d *Dispatcher) harnessOver(ctx context.Context, r Runner, s *store.Session, g store.Group) {
+	if quotaHeld(s.Handle) {
+		// A fresh runner may call an unchanged quota-stop pane working.
+		t, ok := r.(Tailer)
+		if !ok {
+			return
+		}
+		done := askTimer(ctx, askPane)
+		tail, err := t.Tail(ctx, s.Handle, stallTail)
+		done()
+		if err != nil {
+			return
+		}
+		if reason, _, _ := HarnessError(harnessKind(g.Config), tail); reason == ReasonRateLimited {
+			return
+		}
+	}
 	for _, key := range []string{HarnessErrorKey, HarnessDialogKey, harnessRetryAt, harnessResetAt, harnessPrompted} {
 		if s.Handle[key] != nil {
 			d.markHarnessError(ctx, s, "", nil)

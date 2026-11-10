@@ -146,9 +146,14 @@ func (d *Dispatcher) worked(ctx context.Context, r Runner, s store.Session) (boo
 	return false, nil
 }
 
+// quotaHeld reports an observed quota stop holding its model, with or without a reset.
+func quotaHeld(handle map[string]any) bool {
+	return handle[HarnessErrorKey] == ReasonRateLimited && handle[harnessResetModel] != nil
+}
+
 // holdBack notes, for this pass (see paused), the models s's group starts
 // no further session with because of s: the one s stalled on, and the one s
-// waits with for the window of its usage limit to reset (harness_reset.go),
+// waits with for its usage limit, including one whose reset is unknown,
 // where the next session would stop on the same limit and wait beside it.
 // It reads s's handle and, for an older reset wait with no saved model, its
 // bead and current group configuration: no provider is asked.
@@ -161,7 +166,10 @@ func (d *Dispatcher) holdBack(ctx context.Context, s store.Session, g store.Grou
 	}
 	// The wait is on the handle only while it lasts: it goes when the agent
 	// is prompted at the reset, and when it is seen doing anything before.
-	if _, _, model, waits := ResetWait(s.Handle); waits {
+	if _, _, model, waits := ResetWait(s.Handle); waits || quotaHeld(s.Handle) {
+		if saved, ok := s.Handle[harnessResetModel].(string); ok {
+			model = saved
+		}
 		// Sessions already waiting when this version starts have no model
 		// key yet. Recover it from the bead and current group configuration
 		// so their wait still holds the model they would otherwise start.
