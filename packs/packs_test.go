@@ -3031,6 +3031,9 @@ func TestContributorsTextsSayWhatIsNotRun(t *testing.T) {
 			"The builder holds no key",
 			"Its checkout is the picked head, detached, never the live tip",
 			"yardr bead update <id> --meta fix_commit=<sha>",
+			// The push script makes the commit again as the App; the builder is told
+			// nothing about whose name to commit under.
+			"made again\nas the yard's GitHub App by the push script",
 			"The push the next stage makes is public before the re-review",
 			"That yes gates the yard's merge only",
 		},
@@ -3040,6 +3043,10 @@ func TestContributorsTextsSayWhatIsNotRun(t *testing.T) {
 			"The script\n  never writes `pr_head` itself.",
 			"is resumed by hand to `triage`\n(`yardr bead advance <id> --to triage`), never by unholding here",
 			"No hand path\nleads back into `push`: every push is a fix round's.",
+			"**Whose name.** The App's.",
+			"A signature on a commit it makes again is dropped, not\n  carried over",
+			"records the commit it pushed as the new\n  `fix_commit`",
+			"commit it cannot make again as the App",
 			"The maintainer's yes gates the yard's merge only",
 		},
 		"contributors/flows/pr/approved.md": {

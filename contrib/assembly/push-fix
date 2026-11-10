@@ -20,10 +20,24 @@
 # below): pushing the fix wants Contents write of it, and reading the pull
 # request wants Pull requests read (GitHub's REST docs, "Get a pull request").
 #
-# What is pushed is the fix the builder committed. The builder works the picked
-# head, detached, and records the commit it made as the bead's metadata
-# fix_commit before it reports done (the contributors pack's flows/pr/fix.md).
-# The script pushes that commit and no other.
+# What is pushed is the fix the builder committed, made again as the App. The
+# builder works the picked head, detached, and records the commit it made as the
+# bead's metadata fix_commit before it reports done (the contributors pack's
+# flows/pr/fix.md), under whatever name its machine's git config gives it: on a
+# stranger's pull request that would read as a person's own hand. So the script
+# asks GitHub who its token is, the bot's login (GraphQL's viewer: GET /user is no
+# call an installation token may make) and then the id of that bot's user (GET
+# /users/<login>), the number GitHub's noreply address begins with, and makes the
+# fix again with that name and address as the author and the committer of each
+# commit of it, the first parents from the recorded commit back to the picked
+# head: the same tree, message and dates, and every parent that is not on that
+# line as it is (a merge of the base keeps the base's commits, none of which is
+# rewritten). A commit that is the App's already is kept, and the same fix is
+# made again as the same commit. A signature is not carried over: it would verify
+# against nothing once the headers change. The script pushes that commit and no
+# other, and records it as the bead's fix_commit once the push is out, so that the
+# recorded commit is the one on the branch. A run that finds the fix made again
+# already on the branch, and not recorded, records it and pushes nothing again.
 #
 # And only on a maintainer's pick. The bead carries the label fix-ok and the
 # picked head as its metadata fix_head, which a maintainer wrote before moving
@@ -68,10 +82,11 @@
 # The outcome at push is done, to triage. Everything that is no push of the
 # fix (no pick, heads that disagree, a head that moved, maintainer edits off,
 # no token, a refused gh, a failed mint or fetch, a pull request that is not
-# open) holds the bead with a note, for the yard to put right: what pushed
-# nothing is unheld and runs again, but a push GitHub refused, or a push whose
-# head never arrived, is resumed by hand to triage, never by unholding here.
-# Nothing here retries.
+# open, GitHub that will not say who the token is, a commit that cannot be made
+# again as the App) holds the bead with a note, for the yard to put right: what
+# pushed nothing is unheld and runs again, but a push GitHub refused, or a push
+# whose head never arrived, is resumed by hand to triage, never by unholding
+# here. Nothing here retries.
 #
 # It reads the environment the exec runner gives it: YARDR_BEAD, YARDR_DEPOT,
 # YARDR_DEPOT_PATH, YARDR_BASE, YARDR_WORKTREE and YARDR_BIN. Option, set in
@@ -229,6 +244,10 @@ gh_() { GH_TOKEN=$token gh "$@"; }
 # --- end of github_binding ---
 
 short() { printf '%s' "$1" | cut -c1-7; }
+# shown is text from outside (a commit's name, what GitHub answered) as a note
+# carries it: printable characters only and cut at 200, since a name is whatever
+# the commit's author typed.
+shown() { printf '%s' "$1" | tr -c '[:print:]' '?' | cut -c1-200; }
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 # fullsha keeps a commit's sha and empties anything else: the heads below go
 # into git's arguments and the pick's comparisons, as merge-pr takes merge_head.
@@ -298,8 +317,9 @@ if [ -n "$triaged" ]; then
     hold "fix_head $(short "$picked") is not the accepted $(short "$accepted"): the pick is stale or was mistyped, and the fix of an old head is never pushed. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD --to triage) for a fresh accept, then pick again."
 fi
 
-# What is pushed is the builder's recorded fix commit: a full sha, and not
-# the picked head itself, which would push nothing new.
+# What is pushed is the builder's recorded fix commit, made again as the App
+# (as_app, below): a full sha, and not the picked head itself, which would push
+# nothing new.
 fix=$(printf '%s' "$bead" | jq -r '.metadata.fix_commit // empty')
 fix=$(fullsha "$fix") || fix=
 [ -n "$fix" ] ||
@@ -308,24 +328,41 @@ fix=$(fullsha "$fix") || fix=
   hold "fix_commit $(short "$fix") is the picked head itself: the builder recorded no fix commit. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD --to triage): the round starts again from a fresh accept and a fresh fix."
 fsh=$(short "$fix")
 
-# The pull request still has the picked head, or the fix is of an old head.
-# One exception: it has the fix commit, which means the push went out and the
-# run ended before it reported it (no author can land on the builder's sha by
-# their own hand). Then there is nothing to push, and the run waits for the
-# head below as a push of its own would.
-if [ "$(lower "$head")" != "$(lower "$picked")" ]; then
-  [ "$(lower "$head")" = "$(lower "$fix")" ] ||
-    hold "head $at is not the picked $(short "$picked"): the pull request moved since the pick, and the fix of an old head is never pushed. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD --to triage) for a fresh accept of $at, then pick again."
-else
+# git_clean is git with none of anyone's config, for what the script does in its
+# own repository: the depot's local config is a builder's to change, and must not
+# redirect the push or add refs to it.
+git_clean() {
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=0 GIT_CONFIG_PARAMETERS='' git "$@"
+}
+pushrepo=$work/repo
+
+# body is the message of the commit object in file, byte for byte: what follows
+# the headers, which end at the first empty line (a signature's own lines begin
+# with a space, so none of them is empty).
+body() {
+  n=$(grep -n -m 1 '^$' "$1" | cut -d: -f1)
+  [ -z "$n" ] || tail -n +"$((n + 1))" "$1"
+}
+
+# as_app sets tip to the recorded fix made again as the App: the commits on the
+# fix's first-parent line, from the recorded one back to the picked head, each
+# with the App as its author and its committer, name and address, and all else of
+# it as the builder made it: its tree, its message byte for byte, its dates, and
+# every parent that is not on that line (a merge of the base keeps the base's
+# commits as they are, and none of them is rewritten). A commit that is the App's
+# already, on a first parent that is unchanged, is kept as it is, so a fix made as
+# the App goes out as it was, and the same fix is made again as the same commit
+# whenever it is: nothing in it varies. A signature is not carried over, for it
+# would verify against nothing once the headers change, nor any other header past
+# the parents, the author and the committer; a commit with an encoding of its own
+# is held, since its message is not made again in another. The tree of each commit
+# made, and its message, are held to the builder's, and so is the tip's tree.
+as_app() {
   # Fetch the fix by sha into a bare repository with an empty template. It
   # shares no local config with the depot and never checks out the stranger's
   # tree, so its attributes cannot run a smudge filter while the App inputs
   # are present. Its temporary directory is removed by bye on every exit.
-  pushrepo=$work/repo
   mkdir "$work/template" "$work/nohooks"
-  git_clean() {
-    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=0 GIT_CONFIG_PARAMETERS='' git "$@"
-  }
   git_clean -C "$REPO" cat-file -e "$fix^{commit}" 2>/dev/null ||
     hold "$REPO has no commit $fsh: the recorded fix is not in the depot. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD): the round starts again from a fresh accept and a fresh fix."
   git_clean init --quiet --bare --template="$work/template" "$pushrepo" >"$errf" 2>&1 ||
@@ -337,25 +374,121 @@ else
   git_clean -C "$pushrepo" merge-base --is-ancestor "$picked" "$fix" 2>/dev/null ||
     hold "fix_commit $fsh is not on the picked $(short "$picked"): it is not the fix of this pick. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD): the round starts again from a fresh accept and a fresh fix."
 
-  # The push, as the trial made it: the head repository's URL and the branch's
-  # ref, named outright, fast-forward only, never forced. The token reaches
-  # git as an Authorization header in git's environment alone: shell variables
-  # passed to git only, never exported, never in the URL and never in a log,
-  # with git's own config off and no prompt and no askpass, so a refused token
-  # cannot be answered by anyone's login. Hooks are off. What is pushed is the
-  # fix commit and only that ref.
-  auth=$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n') || auth=
-  unset token
-  [ -n "$auth" ] || hold "the token could not be given to git; not pushing the fix."
-  pushurl="https://github.com/$headrepo.git"
-  out=$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="Authorization: Basic $auth" GIT_CONFIG_PARAMETERS='' GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=true SSH_ASKPASS=true \
-    git -C "$pushrepo" -c credential.helper= -c core.hooksPath="$work/nohooks" -c push.followTags=false push "$pushurl" "$fix:refs/heads/$ref" 2>&1) || {
-    rc=$?
-    unset auth
-    said=$(printf '%s' "$out" | head -n 10 | head -c 2000)
-    hold "GitHub refused the push of $fsh onto $headrepo $ref (git exit $rc), in git's words: $said. Resume by hand to triage (yardr bead advance $BEAD --to triage): the round starts again from a fresh accept of the head the branch has now."
-  }
-  unset auth out
+  # Who the App is, asked of GitHub as the token and nobody else: the bot's
+  # login, then the id of that bot's user, which is what the noreply address
+  # begins with (not the App's own id). What GitHub answers is held to the shape
+  # of a bot's login and of an id before it is used.
+  botlogin=$(gh_ api graphql -f query='{viewer{login}}' --jq '.data.viewer.login' 2>"$errf") ||
+    hold "asking GitHub who the App is (its token's login) failed: $(head -c 500 "$errf"). The fix cannot be made as the App, so not pushing it."
+  printf '%s' "$botlogin" | grep -Eq '^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\[bot\]$' ||
+    hold "GitHub names the token's login as $(shown "$botlogin"), which is no GitHub App's bot login (<slug>[bot]). The fix cannot be made as the App, so not pushing it."
+  botid=$(gh_ api "users/$(printf '%s' "$botlogin" | sed 's/\[/%5B/g; s/\]/%5D/g')" --jq 'select(.type == "Bot") | .id' 2>"$errf") ||
+    hold "asking GitHub for the id of the user $botlogin failed: $(head -c 500 "$errf"). The fix cannot be made as the App, so not pushing it."
+  case $botid in '' | 0* | *[!0-9]*) hold "GitHub gave no id for the bot user $botlogin that is a number. The fix cannot be made as the App, so not pushing it." ;; esac
+  botmail="$botid+$botlogin@users.noreply.github.com"
+  app="$botlogin <$botmail>"
+
+  # The fix's own commits, oldest first: the first parents from the recorded one
+  # back to the picked head, whose oldest must have the pick as its first parent.
+  # A merge of the pick into the base, instead of the base into the pick, would
+  # have the base's own history on that line, which is nobody's fix.
+  fixline=$(git_clean -C "$pushrepo" rev-list --first-parent --reverse "$picked..$fix" 2>"$errf") ||
+    hold "cannot list the commits of $fsh in the push repository: $(head -c 500 "$errf")"
+  firstown=$(printf '%s\n' "$fixline" | head -n 1)
+  [ -n "$firstown" ] && [ "$(lower "$(git_clean -C "$pushrepo" rev-parse "$firstown^" 2>/dev/null)")" = "$(lower "$picked")" ] ||
+    hold "the first parents of fix_commit $fsh never meet the picked $(short "$picked"): it merges the pick into something else, and the commits on that line are not all the fix's. Not pushing anything. Make the fix as commits on the picked head, with the base merged into it, never the other way; record it (yardr bead update $BEAD --meta fix_commit=<sha>) and unhold, or advance the bead to triage (yardr bead advance $BEAD) for a fresh round."
+  prev=$picked
+  for own in $fixline; do
+    parent=$(git_clean -C "$pushrepo" rev-parse "$own^" 2>/dev/null) ||
+      hold "cannot read the first parent of commit $(short "$own") of the fix in the push repository. Not pushing anything."
+    who=$(git_clean -C "$pushrepo" log -1 --format='%an <%ae>%n%cn <%ce>' "$own" 2>"$errf") ||
+      hold "cannot read commit $(short "$own") of the fix in the push repository: $(head -c 500 "$errf")"
+    authored=$(printf '%s\n' "$who" | sed -n 1p)
+    committed=$(printf '%s\n' "$who" | sed -n 2p)
+    if [ "$authored" = "$app" ] && [ "$committed" = "$app" ] && [ "$(lower "$prev")" = "$(lower "$parent")" ]; then
+      prev=$own
+      continue
+    fi
+    git_clean -C "$pushrepo" cat-file commit "$own" >"$work/raw" 2>"$errf" ||
+      hold "cannot read commit $(short "$own") of the fix in the push repository: $(head -c 500 "$errf")"
+    if sed '/^$/q' "$work/raw" | grep -q '^encoding '; then
+      hold "commit $(short "$own") of the fix names an encoding of its own, which the script does not carry into the commit it makes again as the App. Not pushing anything. Make the commit again in UTF-8 (yardr bead update $BEAD --meta fix_commit=<sha>) and unhold, or advance the bead to triage (yardr bead advance $BEAD) for a fresh round."
+    fi
+    body "$work/raw" >"$work/msg"
+    tree=$(git_clean -C "$pushrepo" rev-parse "$own^{tree}" 2>/dev/null) ||
+      hold "cannot read the tree of commit $(short "$own") of the fix in the push repository. Not pushing anything."
+    adate=$(git_clean -C "$pushrepo" log -1 --format=%ad --date=raw "$own" 2>/dev/null)
+    cdate=$(git_clean -C "$pushrepo" log -1 --format=%cd --date=raw "$own" 2>/dev/null)
+    [ -n "$adate" ] && [ -n "$cdate" ] ||
+      hold "cannot read the dates of commit $(short "$own") of the fix in the push repository, which the commit made again as the App keeps. Not pushing anything."
+    # Its first parent is the commit made before it, and every other parent is
+    # as the builder had it.
+    set -- -p "$prev"
+    for other in $(git_clean -C "$pushrepo" rev-parse "$own^@" 2>/dev/null | tail -n +2); do
+      set -- "$@" -p "$other"
+    done
+    new=$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=0 GIT_CONFIG_PARAMETERS='' \
+      GIT_AUTHOR_NAME="$botlogin" GIT_AUTHOR_EMAIL="$botmail" GIT_AUTHOR_DATE="$adate" \
+      GIT_COMMITTER_NAME="$botlogin" GIT_COMMITTER_EMAIL="$botmail" GIT_COMMITTER_DATE="$cdate" \
+      git -C "$pushrepo" commit-tree "$tree" "$@" -F "$work/msg" 2>"$errf") ||
+      hold "cannot make commit $(short "$own") of the fix again as the App: $(head -c 500 "$errf"). Not pushing anything."
+    git_clean -C "$pushrepo" cat-file commit "$new" >"$work/raw" 2>"$errf" ||
+      hold "cannot read the commit $(short "$new") made again from $(short "$own") in the push repository: $(head -c 500 "$errf")"
+    body "$work/raw" | cmp -s - "$work/msg" && [ "$(git_clean -C "$pushrepo" rev-parse "$new^{tree}" 2>/dev/null)" = "$tree" ] ||
+      hold "commit $(short "$new"), made again from $(short "$own") of the fix as the App, does not have its tree and its message. Not pushing anything."
+    prev=$new
+  done
+  tip=$prev
+  [ "$(git_clean -C "$pushrepo" rev-parse "$tip^{tree}" 2>/dev/null)" = "$(git_clean -C "$pushrepo" rev-parse "$fix^{tree}" 2>/dev/null)" ] ||
+    hold "the fix made again as the App, $(short "$tip"), does not have the tree of the builder's $fsh. Not pushing anything."
+  unset botlogin botid botmail app fixline firstown prev own parent who authored committed tree adate cdate other new
+}
+
+# The pull request still has the picked head, or the fix is of an old head. Two
+# exceptions: it has the recorded fix commit, or it has the fix made again as the
+# App. Either means the push went out and the run ended before it reported it (no
+# author can land on the builder's sha, or on one that is made from it, by their
+# own hand); the second means too that it ended before it recorded the new commit,
+# which a run records once the push is out, since the recorded commit is then not
+# the one on the branch. Then there is nothing to push, and the run waits for the
+# head below as a push of its own would.
+if [ "$(lower "$head")" = "$(lower "$fix")" ]; then
+  tip=$fix
+else
+  as_app
+  if [ "$(lower "$head")" = "$(lower "$picked")" ]; then
+    # The push, as the trial made it: the head repository's URL and the branch's
+    # ref, named outright, fast-forward only, never forced. The token reaches
+    # git as an Authorization header in git's environment alone: shell variables
+    # passed to git only, never exported, never in the URL and never in a log,
+    # with git's own config off and no prompt and no askpass, so a refused token
+    # cannot be answered by anyone's login. Hooks are off. What is pushed is the
+    # fix made as the App and only that ref.
+    auth=$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n') || auth=
+    unset token
+    [ -n "$auth" ] || hold "the token could not be given to git; not pushing the fix."
+    pushurl="https://github.com/$headrepo.git"
+    out=$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="Authorization: Basic $auth" GIT_CONFIG_PARAMETERS='' GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=true SSH_ASKPASS=true \
+      git -C "$pushrepo" -c credential.helper= -c core.hooksPath="$work/nohooks" -c push.followTags=false push "$pushurl" "$tip:refs/heads/$ref" 2>&1) || {
+      rc=$?
+      unset auth
+      said=$(printf '%s' "$out" | head -n 10 | head -c 2000)
+      hold "GitHub refused the push of $(short "$tip") onto $headrepo $ref (git exit $rc), in git's words: $said. Resume by hand to triage (yardr bead advance $BEAD --to triage): the round starts again from a fresh accept of the head the branch has now."
+    }
+    unset auth out
+  elif [ "$(lower "$head")" != "$(lower "$tip")" ]; then
+    hold "head $at is not the picked $(short "$picked"): the pull request moved since the pick, and the fix of an old head is never pushed. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD --to triage) for a fresh accept of $at, then pick again."
+  fi
+fi
+tsh=$(short "$tip")
+
+# The recorded commit is the one on the branch, once the push is out: the commit
+# the builder made is not, when the fix was made again as the App. A record that
+# fails holds the bead with the commit named, and a run again finds the commit on
+# the branch (above) and records it.
+if [ "$(lower "$tip")" != "$(lower "$fix")" ]; then
+  "$Y" bead update "$BEAD" --meta fix_commit="$tip" >"$errf" 2>&1 ||
+    hold "pushed $tsh onto $headrepo $ref, the builder's $fsh made again as the App, but recording it as the bead's fix_commit failed: $(head -c 500 "$errf"). The push is public. Unhold the bead (yardr bead unhold $BEAD): the run finds $tsh on the branch and records it."
 fi
 
 # The bead's head becomes the pushed commit when the yard hears its own push,
@@ -366,10 +499,12 @@ fi
 start=$(date +%s)
 while :; do
   now=$("$Y" bead show "$BEAD" --json 2>/dev/null | jq -r '.metadata.pr_head // empty')
-  [ "$(lower "$now")" = "$(lower "$fix")" ] && break
+  [ "$(lower "$now")" = "$(lower "$tip")" ] && break
   [ "$(($(date +%s) - start))" -ge "$WAIT" ] &&
-    hold "waited $WAIT s for the bead's head to become the pushed $fsh, and it is ${now:-none}: the push is on $headrepo $ref, but the yard has not heard its own event. Advance to triage by hand (yardr bead advance $BEAD --to triage) once pr_head is the pushed commit; the card there freezes the head it shows."
+    hold "waited $WAIT s for the bead's head to become the pushed $tsh, and it is ${now:-none}: the push is on $headrepo $ref, but the yard has not heard its own event. Advance to triage by hand (yardr bead advance $BEAD --to triage) once pr_head is the pushed commit; the card there freezes the head it shows."
   sleep 5
 done
 
-report "done" "pushed $fsh onto $headrepo $ref, and the bead's head is it: the new head returns for a fresh accept in triage, then review, the yard's CI and a fresh maintainer's yes. The push is public already."
+made=
+[ "$(lower "$tip")" = "$(lower "$fix")" ] || made=" (the builder's $fsh made again as the App, and recorded as the bead's fix_commit)"
+report "done" "pushed $tsh$made onto $headrepo $ref, and the bead's head is it: the new head returns for a fresh accept in triage, then review, the yard's CI and a fresh maintainer's yes. The push is public already."

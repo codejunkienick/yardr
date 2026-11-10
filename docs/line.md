@@ -2114,9 +2114,10 @@ The builder pushes nothing.
 
 In `push`, [`contrib/assembly/push-fix`](../contrib/assembly/push-fix), the
 `cmd` of an `exec` group of its own (`push-fix`, limit 1, so one push at a
-time) that the pack's flow gives the stage to, pushes the recorded commit onto
-the pull request's branch as the yard's GitHub App, waits for its own push to
-arrive as the bead's head, and sends the bead back to `triage`. It reads the
+time) that the pack's flow gives the stage to, makes the recorded commit again
+as the yard's GitHub App's own, pushes it onto the pull request's branch as the
+App, records it as the bead's `fix_commit`, waits for its own push to arrive as
+the bead's head, and sends the bead back to `triage`. It reads the
 pull request from the bead's tracks link and asks GitHub as the yard's App
 with an installation token minted for that one repository (the github
 source's `mint_command`, from the App's id and key file in the group's
@@ -2141,11 +2142,28 @@ used), narrowed to Contents write and Pull requests read, and:
   bare repository the script owns, with no checkout of pull request files or
   depot local Git config. This keeps checkout filters and local push settings
   out of the script's App environment. It runs nothing of the builder's
-  worktree and pushes that commit fast-forward only, never forced: the token
-  reaches git as an Authorization header in git's environment alone, and
-  hooks are off. A push GitHub refuses (new commits
-  meanwhile, a branch protection, a fix touching `.github/workflows` without
-  the grant) holds the bead in git's words;
+  worktree and pushes that commit, made again as the App (next), fast-forward
+  only, never forced: the token reaches git as an Authorization header in
+  git's environment alone, and hooks are off. A push GitHub refuses (new
+  commits meanwhile, a branch protection, a fix touching `.github/workflows`
+  without the grant) holds the bead in git's words;
+- re-authors the fix as the App, so that GitHub shows that the yard wrote what
+  is published onto a stranger's branch and no person's name stands on it. It
+  asks GitHub who its token is, the bot's login and then the id of that bot's
+  user (GitHub's noreply address begins with it, and it is not the App's own id
+  in its settings), and makes each commit of the fix, the first parents from
+  `fix_commit` back to the picked head, again with that name and address as its
+  author and committer: the same tree, message and dates, and the parents that
+  are not on that line as they are. A merge of the base into the checkout brings
+  the base's commits as second parents, which are not the fix's and are kept,
+  never rewritten; a commit that is the App's already is kept. A signature on a
+  commit it makes again is dropped, not carried over, since it would verify
+  against nothing once the headers change. A call to GitHub that fails, or a
+  login that is no `<slug>[bot]`, holds the bead naming what GitHub answered,
+  and nothing is pushed. Once the push is out the script records the commit it
+  pushed as the bead's new `fix_commit`; a run that finds that commit on the
+  branch already, and not recorded, makes the same commit again, records it and
+  pushes nothing twice;
 - advances only once the bead's head is the pushed commit. Its own push
   arrives as an event a few seconds later and moves `pr_head` with no stage
   change, and the script waits for it, bounded at five minutes; a timeout

@@ -1739,9 +1739,12 @@ yardr knows the verbs alone:
   hand): a bead's agent may not write the pick on any bead, its own included.
   In `fix` a builder of `builders`, which holds no key, fixes the findings on
   the picked head, detached, never the live tip, commits the fix and records
-  it as `fix_commit`. In `push` the script `push-fix` pushes that commit onto
-  the pull request's branch as the yard's GitHub App, fast-forward only, waits
-  for its own push to arrive as the bead's head, and sends the bead back to
+  it as `fix_commit`. In `push` the script `push-fix` makes that commit again
+  as the yard's GitHub App's own (its name and address replace the builder's;
+  the tree, message and dates stay, and a signature is not carried over),
+  pushes it onto the pull request's branch as the App, fast-forward only,
+  records it as the new `fix_commit`, waits for its own push to arrive as the
+  bead's head, and sends the bead back to
   `triage`: the fresh accept of the new head IS the human look at it, and
   `review`, the yard's CI and a fresh maintainer's yes follow. The push is
   public before all of that, and the yes gates the yard's merge only. The

@@ -32,8 +32,9 @@ bead's `fix_commit` in the update before the builder reports:
 
     yardr bead update <id> --meta fix_commit=<sha>
 
-One commit is the plain way; what is pushed is the recorded commit, on the
-picked head. A pull request that conflicts with the base is resolved by
+One commit is the plain way; what is pushed is the recorded commit, made again
+as the yard's GitHub App by the push script (its name and address replace the
+commit's own), on the picked head. A pull request that conflicts with the base is resolved by
 merging the base into the checkout, never by rebasing it: a merge is on the
 picked head and pushes fast-forward, and a rebase is neither, so the push
 script holds it.

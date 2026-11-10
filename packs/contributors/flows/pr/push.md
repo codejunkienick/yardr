@@ -6,9 +6,10 @@ take the hand path `approved` → `contributor` → `fix` described in
 [approved.md](approved.md); the same pick and head checks apply. No agent and
 no person works this stage:
 `push-fix`, the `cmd` of an exec group of the yard's own, takes the bead,
-pushes the recorded fix commit onto the pull request's branch as the yard's
-GitHub App, waits for its own push to arrive as the bead's head, and sends the
-bead back to `triage` for a fresh accept of the new head.
+makes the recorded fix commit again as the yard's GitHub App's own, pushes it
+onto the pull request's branch as the App, records it as the bead's
+`fix_commit`, waits for its own push to arrive as the bead's head, and sends
+the bead back to `triage` for a fresh accept of the new head.
 
 - **The pick.** The label `fix-ok` and the head `fix_head`, a maintainer's,
   name the round: the script pushes only when the picked head is the head the
@@ -25,10 +26,22 @@ bead back to `triage` for a fresh accept of the new head.
   into a temporary bare repository the script owns. It shares no local Git
   config with the depot and checks out no pull request files, so a builder's
   config or attributes cannot run commands or redirect the push. The script
-  runs nothing of the builder's worktree. What it pushes is that commit,
-  fast-forward only, never forced: a push GitHub refuses (new commits
-  meanwhile, a branch protection, a fix touching `.github/workflows` without
-  the grant) holds the bead in git's words.
+  runs nothing of the builder's worktree. What it pushes is that commit made
+  again as the App (next), fast-forward only, never forced: a push GitHub
+  refuses (new commits meanwhile, a branch protection, a fix touching
+  `.github/workflows` without the grant) holds the bead in git's words.
+- **Whose name.** The App's. The script asks GitHub who its token is (the
+  bot's login, and the id of that bot's user) and makes each commit of the fix,
+  the first parents from the recorded commit back to the picked head, again
+  with the App as its author and committer: the same tree, message and dates,
+  and the parents that are not on that line as they are (a merge of the base
+  keeps the base's commits, none of which is rewritten). A commit that is the
+  App's already is kept. A signature on a commit it makes again is dropped, not
+  carried over: it would verify against nothing once the commit's headers
+  change. Once the push is out it records the commit it pushed as the new
+  `fix_commit`, so that the recorded commit is the one on the branch; a run
+  that finds that commit there already, and not recorded, records it and
+  pushes nothing again.
 - **Whose head afterwards.** The script advances only once the bead's head is
   the pushed commit: its own push arrives as an event a few seconds later and
   moves `pr_head` with no stage change, and the script waits for it, bounded
@@ -55,8 +68,9 @@ script's check of the head holds on one that is not the picked one.
 
 A run that pushed nothing holds the bead here with a note and reports nothing,
 for the yard to put right and unhold: no pick, heads that disagree, a head
-that moved, maintainer edits off, no token, a mint or fetch that failed, or a
-pull request that is not open. But a push GitHub refused, or a push whose head
+that moved, maintainer edits off, no token, a mint or fetch that failed, a
+pull request that is not open, GitHub that will not say who the token is, or a
+commit it cannot make again as the App. But a push GitHub refused, or a push whose head
 never arrived, is resumed by hand to `triage`
 (`yardr bead advance <id> --to triage`), never by unholding here: the round
 starts again from a fresh accept of the head the branch has now. No hand path

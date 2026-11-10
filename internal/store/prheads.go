@@ -119,7 +119,9 @@ const (
 // (yardHeads), refused on any bead with the same write. fix_commit is the
 // builder's own to write, as reviewed_head is the reviewer's: what the field
 // answers is a push between the fix and the push, not a builder that lies
-// about what it committed.
+// about what it committed. The push script writes it too, as the session on its
+// own bead, once the push is out: it makes the builder's commit again as the
+// App's own, and the commit it pushed is then the one on the branch.
 func (w *wtx) checkFixPick(ctx context.Context, b *beadRow, p BeadPatch) error {
 	if slices.Contains(p.AddLabels, labelFixOK) || slices.Contains(p.RemoveLabel, labelFixOK) {
 		sess, err := beadAgent(w.Tx, ctx)

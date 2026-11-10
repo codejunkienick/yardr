@@ -15,9 +15,11 @@ package assembly
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -63,21 +65,77 @@ else
 fi
 `
 
+// The yard's App as the stand-in GitHub names it: the bot's login, the id of
+// its user, and the address a commit of the App carries, which is what push-fix
+// reads from GitHub as the token and holds each commit of a fix to.
+const (
+	appLogin = "yard-app[bot]"
+	appID    = "12345678"
+	appIdent = appLogin + " <" + appID + "+" + appLogin + "@users.noreply.github.com>"
+	// someone is whoever else a commit is by.
+	someone = "Jo Doe <jo@example.com>"
+)
+
+// fakePushGh is gh in front of the merge stand-in, for the two things push-fix
+// asks that merge-pr never does, who its token is: GraphQL's viewer, which is the
+// App's bot (the login in viewer-login, yard-app[bot] unless written, or the
+// error in viewer-fail), and the users API's answer for that bot (its id in
+// bot-id, 12345678 unless written, its type in bot-type, Bot unless written, or
+// the error in user-fail). A call whose GH_TOKEN is not the mint's is refused as
+// GitHub refuses a bad credential, and every call is logged as the merge
+// stand-in logs its own. Any other call is the merge stand-in's.
+const fakePushGh = `#!/bin/sh
+d=$FAKE_GH
+case "$1 $2" in
+"api graphql" | "api users/"*)
+  echo "$*" >>"$d/calls"
+  if [ "$GH_TOKEN" != ` + mintToken + ` ]; then echo "HTTP 401: Bad credentials" >&2; exit 1; fi
+  jq= prev=
+  for a in "$@"; do
+    [ "$prev" = --jq ] && jq=$a
+    prev=$a
+  done
+  login=$(cat "$d/viewer-login" 2>/dev/null || echo ` + "'" + appLogin + "'" + `)
+  case "$2" in
+  graphql)
+    if [ -e "$d/viewer-fail" ]; then cat "$d/viewer-fail" >&2; exit 1; fi
+    json=$(printf '{"data":{"viewer":{"login":"%s"}}}' "$login") ;;
+  *)
+    if [ -e "$d/user-fail" ]; then cat "$d/user-fail" >&2; exit 1; fi
+    want=$(printf 'users/%s' "$login" | sed 's/\[/%5B/g; s/\]/%5D/g')
+    if [ "$2" != "$want" ]; then echo "HTTP 404: Not Found" >&2; exit 1; fi
+    json=$(printf '{"login":"%s","id":%s,"type":"%s"}' "$login" "$(cat "$d/bot-id" 2>/dev/null || echo ` + appID + `)" "$(cat "$d/bot-type" 2>/dev/null || echo Bot)") ;;
+  esac
+  if [ -n "$jq" ]; then printf '%s' "$json" | jq -r "$jq"; else printf '%s\n' "$json"; fi ;;
+*) exec {gh} "$@" ;;
+esac
+`
+
 // pushEndsAt is the yardr the script is given: the real one, that first notes
 // in $FAKE_GH/ended where the script is, and that it made no auxiliary
 // worktree, whenever the script ends its session by reporting or holding.
 // The report watch separately proves the script's temporary repository is
-// gone before this call. Where YARDR_TEST_FLIP_HEAD names a commit,
-// the hook arrives while the script waits: the third look at the bead (the
-// wait's second poll) makes its head that commit first, so the wait sees the
-// old head, sleeps, and then the new one, with no sleep of the test's.
+// gone before this call. It also plays the yard hearing its own push, which the
+// script waits for: the bead's head is made the head of the fork's branch
+// (YARDR_TEST_BRANCH), the commit the script pushed, which is not one the test
+// has before the run, since the script makes it. YARDR_TEST_ARRIVAL says when:
+// now, at each look at the bead, so the push is heard at once; late, from the
+// third look (the wait's second poll), so that the wait sees the old head, sleeps,
+// and then the new one, with no sleep of the test's; never, the default, when the
+// yard hears nothing.
 const pushEndsAt = `#!/bin/sh
 if [ "$1" = bead ] && [ "$2" = show ]; then
   n=$(cat "$FAKE_GH/shows" 2>/dev/null || echo 0)
   n=$((n + 1))
   echo "$n" >"$FAKE_GH/shows"
-  if [ "$n" -ge 3 ] && [ -n "${YARDR_TEST_FLIP_HEAD:-}" ]; then
-    {yardr} bead update "$3" --meta pr_head="$YARDR_TEST_FLIP_HEAD" >/dev/null 2>&1
+  hear=
+  case "${YARDR_TEST_ARRIVAL:-never}" in
+  now) hear=1 ;;
+  late) [ "$n" -lt 3 ] || hear=1 ;;
+  esac
+  if [ -n "$hear" ]; then
+    head=$(git -C "$FAKE_GH/fork.git" rev-parse "refs/heads/$YARDR_TEST_BRANCH" 2>/dev/null)
+    [ -z "$head" ] || {yardr} bead update "$3" --meta pr_head="$head" >/dev/null 2>&1
   fi
 fi
 case "$1 $2" in
@@ -106,6 +164,11 @@ func newFixYard(t *testing.T) *fixYard {
 		t.Fatal(err)
 	}
 	scripttest.Write(t, filepath.Join(gh, "bin", "git"), strings.ReplaceAll(fakePushGit, "{git}", realGit))
+	// The merge stand-in keeps its place behind the one that answers who the
+	// token is: merge-pr's cases, which share it, never ask that.
+	mergeGh := filepath.Join(gh, "bin", "gh-merge")
+	scripttest.Write(t, mergeGh, fakeMergeGh)
+	scripttest.Write(t, filepath.Join(gh, "bin", "gh"), strings.ReplaceAll(fakePushGh, "{gh}", mergeGh))
 	c := &fixYard{yard: y, gh: gh, work: filepath.Join(t.TempDir(), "work"), fork: filepath.Join(gh, "fork.git")}
 	wrapper := filepath.Join(t.TempDir(), "yardr")
 	scripttest.Write(t, wrapper, strings.ReplaceAll(pushEndsAt, "{yardr}", shellQuote(yardrBin)))
@@ -132,8 +195,20 @@ func (c *fixYard) head(files map[string]string) string {
 }
 
 // commitOn makes a commit of files on base in the work repository and returns
-// it, detached, leaving the branch where it was.
+// it, detached, leaving the branch where it was: by the tests' own name, as a
+// pull request's commits are.
 func (c *fixYard) commitOn(base string, files map[string]string) string {
+	return c.commitBy("", "", base, files)
+}
+
+// fixOn is commitOn as a builder is told to make a fix: as the App.
+func (c *fixYard) fixOn(base string, files map[string]string) string {
+	return c.commitBy(appIdent, appIdent, base, files)
+}
+
+// commitBy is commitOn with the commit's author and committer given as
+// "name <address>", the tests' own name where one is empty.
+func (c *fixYard) commitBy(author, committer, base string, files map[string]string) string {
 	c.t.Helper()
 	c.git(c.work, "checkout", "-q", "--detach", base)
 	for name, text := range files {
@@ -143,10 +218,180 @@ func (c *fixYard) commitOn(base string, files map[string]string) string {
 	}
 	c.git(c.work, "add", "-A")
 	// Detached, so the commit's message names what it is on.
-	c.git(c.work, "commit", "-q", "--allow-empty", "-m", "on "+base)
+	c.gitAs(author, committer, "commit", "-q", "--allow-empty", "-m", "on "+base)
 	sha := c.git(c.work, "rev-parse", "HEAD")
 	c.git(c.work, "checkout", "-q", "main")
 	return sha
+}
+
+// mergeBy makes a merge commit of other into base, base its first parent, in the
+// work repository, by who as author and committer, and returns it, detached. It
+// is a merge even where base could be fast-forwarded to other.
+func (c *fixYard) mergeBy(who, base, other string) string {
+	c.t.Helper()
+	c.git(c.work, "checkout", "-q", "--detach", base)
+	c.gitAs(who, who, "merge", "-q", "--no-ff", "-m", "merge "+other[:7], other)
+	sha := c.git(c.work, "rev-parse", "HEAD")
+	c.git(c.work, "checkout", "-q", "main")
+	return sha
+}
+
+// gitAs runs git in the work repository as the author and committer
+// "name <address>" given, the tests' own where one is empty.
+func (c *fixYard) gitAs(author, committer string, args ...string) string {
+	c.t.Helper()
+	// Dates well in the past, apart, and in zones of their own: a commit made again
+	// that took the time it was made at, or the zone of the machine, would show.
+	env := append(slices.Clone(c.env), "GIT_AUTHOR_DATE=1700000000 +0100", "GIT_COMMITTER_DATE=1700000123 -0500")
+	for _, w := range []struct{ who, kind string }{{author, "AUTHOR"}, {committer, "COMMITTER"}} {
+		if w.who == "" {
+			continue
+		}
+		name, rest, _ := strings.Cut(w.who, " <")
+		env = append(env, "GIT_"+w.kind+"_NAME="+name, "GIT_"+w.kind+"_EMAIL="+strings.TrimSuffix(rest, ">"))
+	}
+	cmd := exec.Command("git", args...)
+	cmd.Dir, cmd.Env = c.work, env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		c.t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// commitObject is a commit as git stores it: its headers in order, each with
+// the continuation lines of a signature joined to it, and its message.
+type commitObject struct {
+	tree      string
+	parents   []string
+	author    string // "name <address> <seconds> <zone>", as the header has it
+	committer string
+	extra     []string // the names of the headers besides those four
+	message   string
+}
+
+// commitIn reads commit sha of repo as its stored bytes, not as git shows it.
+func (c *fixYard) commitIn(repo, sha string) commitObject {
+	c.t.Helper()
+	cmd := exec.Command("git", "-C", repo, "cat-file", "commit", sha)
+	cmd.Env = c.env
+	raw, err := cmd.Output()
+	if err != nil {
+		c.t.Fatalf("git cat-file commit %s in %s: %v", sha, repo, err)
+	}
+	head, msg, _ := strings.Cut(string(raw), "\n\n")
+	o := commitObject{message: msg}
+	var name, value string
+	flush := func() {
+		switch name {
+		case "":
+		case "tree":
+			o.tree = value
+		case "parent":
+			o.parents = append(o.parents, value)
+		case "author":
+			o.author = value
+		case "committer":
+			o.committer = value
+		default:
+			o.extra = append(o.extra, name)
+		}
+	}
+	for _, line := range strings.Split(head, "\n") {
+		if strings.HasPrefix(line, " ") {
+			value += "\n" + line
+			continue
+		}
+		flush()
+		name, value, _ = strings.Cut(line, " ")
+	}
+	flush()
+	return o
+}
+
+// ident is the "name <address>" of a commit header, without its date, and when
+// is the "<seconds> <zone>" it ends with.
+func ident(header string) (who, when string) {
+	i := strings.LastIndex(header, "> ")
+	if i < 0 {
+		return header, ""
+	}
+	return header[:i+1], header[i+2:]
+}
+
+// dateOf is the "<seconds> <zone>" a commit header ends with.
+func dateOf(header string) string {
+	_, when := ident(header)
+	return when
+}
+
+// asTheApp asserts that the commits from pick to tip, by first parents, in the
+// fork are the commits of fix, in the work repository, made again as the App:
+// one for one, each with the App as author and committer, name and address, and
+// the builder's tree, message and dates; its first parent the commit before it,
+// and every other parent as the builder had it; and no header past the parents,
+// the author and the committer, a signature among them. It returns the commits
+// of fix and of tip, oldest first, for what a row asserts beyond that.
+func (c *fixYard) asTheApp(what, pick, fix, tip string) (was, now []string) {
+	c.t.Helper()
+	chain := func(repo, top string) []string {
+		return strings.Fields(c.git(repo, "rev-list", "--first-parent", "--reverse", pick+".."+top))
+	}
+	was, now = chain(c.work, fix), chain(c.fork, tip)
+	if len(was) != len(now) || len(now) == 0 {
+		c.t.Fatalf("%s: the fix has %d commits on its first parents and what was pushed has %d", what, len(was), len(now))
+	}
+	prev := pick
+	for i := range was {
+		b, n := c.commitIn(c.work, was[i]), c.commitIn(c.fork, now[i])
+		for kind, got := range map[string]string{"author": n.author, "committer": n.committer} {
+			if who, _ := ident(got); who != appIdent {
+				c.t.Errorf("%s: commit %d of what was pushed has %s %q, want the App %q", what, i+1, kind, who, appIdent)
+			}
+		}
+		for kind, dates := range map[string][2]string{"author": {b.author, n.author}, "committer": {b.committer, n.committer}} {
+			if _, built := ident(dates[0]); dateOf(dates[1]) != built {
+				c.t.Errorf("%s: commit %d has %s %q, the builder's was %q: the dates are kept", what, i+1, kind, dates[1], dates[0])
+			}
+		}
+		if n.tree != b.tree || n.message != b.message {
+			c.t.Errorf("%s: commit %d has tree %s and message %q, the builder's has %s and %q", what, i+1, n.tree, n.message, b.tree, b.message)
+		}
+		if len(n.parents) == 0 || n.parents[0] != prev || !slices.Equal(n.parents[1:], b.parents[1:]) {
+			c.t.Errorf("%s: commit %d has parents %v, want %s first and the builder's others %v", what, i+1, n.parents, prev, b.parents[1:])
+		}
+		if len(n.extra) != 0 {
+			c.t.Errorf("%s: commit %d carries headers %v past the parents, the author and the committer", what, i+1, n.extra)
+		}
+		prev = now[i]
+	}
+	return was, now
+}
+
+// signedOn makes a commit on base that carries a signature, as git writes one: a
+// header of its own, the lines after its first beginning with a space. The
+// signature verifies against nothing, as it would not once the commit's headers
+// change. It returns the commit, in the work repository.
+func (c *fixYard) signedOn(base string, files map[string]string) string {
+	c.t.Helper()
+	plain := c.commitBy("", "", base, files)
+	o := c.commitIn(c.work, plain)
+	raw := "tree " + o.tree + "\nparent " + base + "\nauthor " + o.author + "\ncommitter " + o.committer +
+		"\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEE0000000000000000000000000000000000AAAAAAA\n -----END PGP SIGNATURE-----\n\n" + o.message
+	return c.craft(raw)
+}
+
+// craft stores raw as a commit object of the work repository, as given, and
+// returns it: a commit as git's own commands would not make it.
+func (c *fixYard) craft(raw string) string {
+	c.t.Helper()
+	cmd := exec.Command("git", "-C", c.work, "hash-object", "-t", "commit", "-w", "--stdin")
+	cmd.Env, cmd.Stdin = c.env, strings.NewReader(raw)
+	out, err := cmd.Output()
+	if err != nil {
+		c.t.Fatalf("git hash-object: %v", err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // depotFetch brings commit sha, with its history, into the depot, as the
@@ -302,46 +547,99 @@ func gitCalls(t *testing.T, state string) []string {
 	return strings.Split(strings.TrimSpace(string(b)), "\n")
 }
 
-// push-fix pushes the builder's recorded fix commit onto the pull request's
-// branch as the yard's App, fast-forward only, and reports done once the
-// bead's head is the pushed commit: the bead goes back to triage for a fresh
-// accept of the new head. The remote and the ref are the live pull request's,
-// never local config's; the token is minted for the repository alone,
-// narrowed to Contents write and Pull requests read, and reaches git as an
-// Authorization header in git's environment alone; hooks are off; no git runs
-// in the builder's worktree. Where the head never arrives the run holds and
-// names the wait, with the push on the branch; where the push went out and an
-// earlier run ended before it reported, this one waits for the head and pushes
-// nothing again.
+// short7 is the first seven digits of a commit, as the script names one, empty
+// for none.
+func short7(sha string) string {
+	if len(sha) < 7 {
+		return sha
+	}
+	return sha[:7]
+}
+
+// asksOnly asserts that gh was asked, besides to read the pull request, only who
+// the App is, and that many times each of the token's login and the id of that
+// bot's user: once each in a run that reached the check of a fix's commits, and
+// not at all in one that did not.
+func (c *fixYard) asksOnly(what string, login, id int) {
+	c.t.Helper()
+	for _, call := range ghCalls(c.t, c.gh) {
+		if call != "" && !strings.HasPrefix(call, "pr view ") && !strings.HasPrefix(call, "api graphql ") && !strings.HasPrefix(call, "api users/") {
+			c.t.Errorf("%s: gh was asked more than to read the pull request and who the App is: %q", what, call)
+		}
+	}
+	if n := countCalls(c.t, c.gh, "api graphql "); n != login {
+		c.t.Errorf("%s: gh was asked for the token's login %d times, want %d:\n%v", what, n, login, ghCalls(c.t, c.gh))
+	}
+	if n := countCalls(c.t, c.gh, "api users/"); n != id {
+		c.t.Errorf("%s: gh was asked for the id of the bot's user %d times, want %d:\n%v", what, n, id, ghCalls(c.t, c.gh))
+	}
+}
+
+// push-fix pushes the builder's recorded fix commit, made again as the yard's
+// App, onto the pull request's branch, fast-forward only, records that commit as
+// the bead's fix_commit once the push is out, and reports done once the bead's
+// head is the pushed commit: the bead goes back to triage for a fresh accept of
+// the new head. The remote and the ref are the live pull request's, never local
+// config's; the token is minted for the repository alone, narrowed to Contents
+// write and Pull requests read, and reaches git as an Authorization header in
+// git's environment alone; hooks are off; no git runs in the builder's worktree.
+// A fix made under the builder's own name goes out as the App with the builder's
+// tree, message and dates, commit for commit; one that merges the base in keeps
+// the base's commits, which are second parents and not the fix's; a lower commit
+// that is the App's already is kept, and a fix that is the App's already goes out
+// as it is; a signature is not carried over. Where the head never arrives the run
+// holds and names the wait, with the push on the branch and recorded; where the
+// push went out and an earlier run ended before it reported, this one waits for
+// the head and pushes nothing again, and where it ended before it recorded the
+// commit, this one makes the same commit again and records it.
 func TestPushFixPushesTheFix(t *testing.T) {
 	t.Parallel() // as its subtests are: see TestMain
 	for _, tc := range []struct {
-		what    string
-		triaged bool   // the bead came the pr flow's way, through triage; else made in push directly
-		prhead  string // the bead's pr_head, the picked head unless written: F the fix, flip arriving while it waits
-		live    string // what GitHub says the head is, the picked head unless written F
-		fork    string // where the fork's branch is, the picked head unless written F
-		opts    string // more for the group's cmd
-		filter  bool   // the fix carries an attribute that would run a depot-configured smudge filter on checkout
-		clock   bool   // make the timeout elapse immediately after its first epoch read
-		stage   string // where the bead ends
-		hold    bool
-		wants   []string // in its notes, {fixshort} being the fix
+		what       string
+		triaged    bool   // the bead came the pr flow's way, through triage; else made in push directly
+		prhead     string // when the yard hears its own push: at once unless written; late, from the third look at the bead; never; F, the bead's head is the fix already
+		live       string // what GitHub says the head is, the picked head unless written F
+		fork       string // where the fork's branch is, the picked head unless written F
+		opts       string // more for the group's cmd
+		filter     bool   // the fix carries an attribute that would run a depot-configured smudge filter on checkout
+		shape      string // how the fix is made, one commit under the machine's own name unless written: app, one commit by the App; two, two commits; mixed, two of which the lower is the App's, mixed2, two of which the upper is; base, a merge of the base in; signed, a commit that carries a signature; wrongid, a commit by the App's name under another id
+		unrecorded bool   // then a run on a bead of the same fix, with what the first run pushed already on the branch and the bead's fix_commit still the builder's
+		clock      bool   // make the timeout elapse immediately after its first epoch read
+		stage      string // where the bead ends
+		hold       bool
+		wants      []string // in its notes, {fixshort} being the builder's commit and {tipshort} what was pushed
+		not        []string // and not
 	}{
-		{what: "green, triaged", triaged: true, prhead: "F", stage: "triage",
-			wants: []string{"pushed {fixshort} onto forkowner/forkrepo their-branch", "fresh accept", "public already"}},
-		{what: "green, never triaged", prhead: "F", stage: "triage",
-			wants: []string{"pushed {fixshort} onto forkowner/forkrepo their-branch"}},
-		{what: "its head arrives while it waits", triaged: true, prhead: "flip", stage: "triage",
-			wants: []string{"pushed {fixshort} onto forkowner/forkrepo their-branch"}},
-		{what: "its head never arrives", triaged: true, opts: "YARDR_PUSH_WAIT=1", stage: "push", hold: true,
-			wants: []string{"waited 1 s for the bead's head to become the pushed {fixshort}", "the push is on forkowner/forkrepo their-branch", "Advance to triage by hand"}},
-		{what: "the configured wait cannot exceed five minutes", triaged: true, opts: "YARDR_PUSH_WAIT=301", clock: true, stage: "push", hold: true,
-			wants: []string{"waited 300 s for the bead's head to become the pushed {fixshort}"}},
-		{what: "depot Git config and PR attributes cannot affect the push", filter: true, prhead: "F", stage: "triage",
-			wants: []string{"pushed {fixshort} onto forkowner/forkrepo their-branch"}},
+		{what: "green, triaged", triaged: true, stage: "triage",
+			wants: []string{"pushed {tipshort} (the builder's {fixshort} made again as the App, and recorded as the bead's fix_commit) onto forkowner/forkrepo their-branch", "fresh accept", "public already"}},
+		{what: "green, never triaged", stage: "triage",
+			wants: []string{"pushed {tipshort} (the builder's {fixshort} made again as the App, and recorded as the bead's fix_commit) onto forkowner/forkrepo their-branch"}},
+		{what: "its head arrives while it waits", triaged: true, prhead: "late", stage: "triage",
+			wants: []string{"pushed {tipshort} (the builder's {fixshort} made again as the App, and recorded as the bead's fix_commit) onto forkowner/forkrepo their-branch"}},
+		{what: "its head never arrives", triaged: true, prhead: "never", opts: "YARDR_PUSH_WAIT=1", stage: "push", hold: true,
+			wants: []string{"waited 1 s for the bead's head to become the pushed {tipshort}", "the push is on forkowner/forkrepo their-branch", "Advance to triage by hand"}},
+		{what: "the configured wait cannot exceed five minutes", triaged: true, prhead: "never", opts: "YARDR_PUSH_WAIT=301", clock: true, stage: "push", hold: true,
+			wants: []string{"waited 300 s for the bead's head to become the pushed {tipshort}"}},
+		{what: "depot Git config and PR attributes cannot affect the push", filter: true, stage: "triage",
+			wants: []string{"pushed {tipshort}", "onto forkowner/forkrepo their-branch"}},
 		{what: "already pushed when it runs", triaged: true, live: "F", fork: "F", prhead: "F", stage: "triage",
-			wants: []string{"pushed {fixshort} onto forkowner/forkrepo their-branch"}},
+			wants: []string{"pushed {fixshort} onto forkowner/forkrepo their-branch"}, not: []string{"made again"}},
+		{what: "a fix of two commits", triaged: true, shape: "two", stage: "triage",
+			wants: []string{"pushed {tipshort} (the builder's {fixshort} made again as the App"}},
+		{what: "a fix whose lower commit is the App's already", triaged: true, shape: "mixed", stage: "triage",
+			wants: []string{"pushed {tipshort} (the builder's {fixshort} made again as the App"}},
+		{what: "a fix whose upper commit is the App's already, on a lower one that is not", shape: "mixed2", stage: "triage",
+			wants: []string{"pushed {tipshort} (the builder's {fixshort} made again as the App"}},
+		{what: "a fix that is the App's already goes out as it is", shape: "app", stage: "triage",
+			wants: []string{"pushed {fixshort} onto forkowner/forkrepo their-branch"}, not: []string{"made again"}},
+		{what: "a fix that merges the base in", triaged: true, shape: "base", stage: "triage",
+			wants: []string{"pushed {tipshort} (the builder's {fixshort} made again as the App"}},
+		{what: "a fix with a signature", shape: "signed", stage: "triage",
+			wants: []string{"pushed {tipshort} (the builder's {fixshort} made again as the App"}},
+		{what: "a fix by the App's name under another id", shape: "wrongid", stage: "triage",
+			wants: []string{"pushed {tipshort} (the builder's {fixshort} made again as the App"}},
+		{what: "a push that went out and was not recorded", triaged: true, unrecorded: true, stage: "triage",
+			wants: []string{"pushed {tipshort} (the builder's {fixshort} made again as the App"}},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
 			c := newFixYard(t)
@@ -351,7 +649,34 @@ func TestPushFixPushesTheFix(t *testing.T) {
 			if tc.filter {
 				fixFiles[".gitattributes"] = "feature.txt filter=review\n"
 			}
-			F := c.commitOn(H, fixFiles)
+			again := map[string]string{"feature.txt": "fixed, and again\n"}
+			var F, moved string
+			switch tc.shape {
+			case "app":
+				F = c.fixOn(H, fixFiles)
+			case "two":
+				F = c.commitOn(c.commitOn(H, fixFiles), again)
+			case "mixed":
+				F = c.commitOn(c.fixOn(H, fixFiles), again)
+			case "mixed2":
+				F = c.fixOn(c.commitOn(H, fixFiles), again)
+			case "base":
+				// The base moved on under the pull request, by another hand, and the
+				// builder merged it into its checkout: the merge is the builder's, the
+				// base's commit is its second parent and is not the fix's.
+				moved = c.commitBy(someone, someone, c.git(c.work, "rev-parse", "main"), map[string]string{"base.txt": "moved on\n"})
+				F = c.mergeBy("", c.commitOn(H, fixFiles), moved)
+			case "signed":
+				F = c.signedOn(H, fixFiles)
+				if got := c.commitIn(c.work, F).extra; !slices.Contains(got, "gpgsig") {
+					t.Fatalf("the signed fix has headers %v, want a gpgsig among them", got)
+				}
+			case "wrongid":
+				wrong := appLogin + " <99999+" + appLogin + "@users.noreply.github.com>"
+				F = c.commitBy(wrong, wrong, H, fixFiles)
+			default:
+				F = c.commitOn(H, fixFiles)
+			}
 			c.depotFetch(F)
 			filterRan := filepath.Join(c.gh, "smudge-ran")
 			if tc.filter {
@@ -368,7 +693,6 @@ func TestPushFixPushesTheFix(t *testing.T) {
 			if tc.live == "F" {
 				live = F
 			}
-			fill := strings.NewReplacer("{sha}", H, "{short}", H[:7], "{fix}", F, "{fixshort}", F[:7], "{id}", id)
 			prhead := H
 			if tc.prhead == "F" {
 				prhead = F
@@ -385,13 +709,12 @@ func TestPushFixPushesTheFix(t *testing.T) {
 			}
 			depot := c.git(c.repo, "status", "--porcelain") + c.git(c.repo, "rev-parse", "HEAD")
 			refs := c.git(c.repo, "for-each-ref")
-			opts := c.opts
 			if tc.opts != "" {
 				c.opts += " " + tc.opts
 			}
-			if tc.prhead == "flip" {
-				c.opts += " YARDR_TEST_FLIP_HEAD=" + F
-			}
+			// The yard hears its own push at once, unless the row says it hears it late or never.
+			arrival := map[string]string{"": "now", "late": "late", "never": "never", "F": "now"}[tc.prhead]
+			c.opts += " YARDR_TEST_ARRIVAL=" + arrival + " YARDR_TEST_BRANCH=" + branch
 			if tc.clock {
 				date, err := exec.LookPath("date")
 				if err != nil {
@@ -399,16 +722,51 @@ func TestPushFixPushesTheFix(t *testing.T) {
 				}
 				scripttest.Write(t, filepath.Join(c.gh, "bin", "date"), strings.ReplaceAll(fakePushDate, "{date}", date))
 			}
-			c.push(id, mergeOpts{head: live}, map[string]string{"head-owner": "forkowner", "head-name": "forkrepo", "head-ref": branch})
-			c.opts = opts
+			standing := map[string]string{"head-owner": "forkowner", "head-name": "forkrepo", "head-ref": branch}
+			c.push(id, mergeOpts{head: live}, standing)
 
+			// What was pushed: the builder's commit as it was where the fix is the
+			// App's already or was pushed already, else the fix made again as the App.
+			tip := c.forkHead(branch)
+			fill := strings.NewReplacer("{sha}", H, "{short}", H[:7], "{fix}", F, "{fixshort}", F[:7], "{tipshort}", tip[:7], "{id}", id)
 			c.has(id, tc.what, tc.stage, tc.hold)
 			for _, want := range tc.wants {
 				c.noted(id, tc.what, fill.Replace(want))
 			}
+			for _, not := range tc.not {
+				if notes := c.notesOf(id); strings.Contains(notes, not) {
+					t.Errorf("%s: a note has %q:\n%s", tc.what, not, notes)
+				}
+			}
 			c.clean(id, tc.what)
-			if got := c.forkHead(branch); got != F {
-				t.Errorf("%s: the fork's branch is at %s, want the fix %s", tc.what, got, F)
+			wasApp := tc.what == "already pushed when it runs" || tc.shape == "app"
+			if wasApp {
+				if tip != F {
+					t.Errorf("%s: the fork's branch is at %s, want the builder's commit %s as it was", tc.what, tip, F)
+				}
+			} else {
+				was, now := c.asTheApp(tc.what, H, F, tip)
+				if tip == F {
+					t.Errorf("%s: the commit was pushed as the builder made it", tc.what)
+				}
+				switch tc.shape {
+				case "mixed":
+					if now[0] != was[0] || now[1] == was[1] {
+						t.Errorf("%s: the lower commit %s was made again as %s, and the upper %s as %s: want the lower kept and the upper made again", tc.what, was[0], now[0], was[1], now[1])
+					}
+				case "base":
+					merge := c.commitIn(c.fork, tip)
+					if len(merge.parents) != 2 || merge.parents[1] != moved {
+						t.Errorf("%s: the merge has parents %v, want its second parent %s, the base's commit, as it was", tc.what, merge.parents, moved)
+					}
+					if who, _ := ident(c.commitIn(c.fork, moved).author); who != someone {
+						t.Errorf("%s: the base's commit is by %q after the push, want %q: it is not the fix's and is not made again", tc.what, who, someone)
+					}
+				}
+			}
+			// The recorded commit is the one on the branch.
+			if got := fmt.Sprint(c.beadOf(id).Metadata["fix_commit"]); got != tip {
+				t.Errorf("%s: the bead's fix_commit is %s, want the pushed %s", tc.what, got, tip)
 			}
 			if tc.filter {
 				if _, err := os.Stat(filterRan); !os.IsNotExist(err) {
@@ -422,7 +780,7 @@ func TestPushFixPushesTheFix(t *testing.T) {
 			// only: no force flag, the Authorization header carried in git's
 			// environment, hooks off, and no git in the builder's worktree.
 			calls := strings.Join(gitCalls(t, c.gh), "\n")
-			pushed := "push https://github.com/forkowner/forkrepo.git " + F + ":refs/heads/" + branch
+			pushed := "push https://github.com/forkowner/forkrepo.git " + tip + ":refs/heads/" + branch
 			if tc.what == "already pushed when it runs" {
 				if strings.Contains(calls, " push https://") {
 					t.Errorf("%s: the script pushed again:\n%s", tc.what, calls)
@@ -463,11 +821,14 @@ func TestPushFixPushesTheFix(t *testing.T) {
 			if n := countCalls(t, c.gh, "pr view "); n != 1 {
 				t.Errorf("%s: the pull request was read %d times, want once:\n%v", tc.what, n, ghCalls(t, c.gh))
 			}
-			for _, call := range ghCalls(t, c.gh) {
-				if call != "" && !strings.HasPrefix(call, "pr view ") {
-					t.Errorf("%s: gh was asked more than to read the pull request: %q", tc.what, call)
-				}
+			// Who the App is is asked once, as the token, by a run that makes the
+			// fix again: one that finds the recorded commit on the branch asks
+			// nothing.
+			asks := 1
+			if tc.what == "already pushed when it runs" {
+				asks = 0
 			}
+			c.asksOnly(tc.what, asks, asks)
 			if asked := readFile(t, filepath.Join(c.gh, "mint-stdin")); !strings.Contains(asked, `"scope":"o/r"`) || !strings.Contains(asked, `"permissions":{"contents":"write","pull_requests":"read"}`) {
 				t.Errorf("%s: the mint was asked %s, want the scope o/r narrowed to contents write and pull_requests read", tc.what, asked)
 			}
@@ -482,6 +843,30 @@ func TestPushFixPushesTheFix(t *testing.T) {
 			if after := c.git(c.repo, "for-each-ref"); after != refs {
 				t.Errorf("%s: the depot's refs changed:\n%s\n%s", tc.what, refs, after)
 			}
+
+			// A run on a bead of the same fix after the push went out and was not
+			// recorded: the pull request is at what the first run pushed, and the
+			// bead's fix_commit is still the builder's. The fix is made again as the
+			// same commit, which the head is, so nothing is pushed twice, and it is
+			// recorded.
+			if tc.unrecorded {
+				id2 := "r-q"
+				c.roundToPush(id2, prURLn(num+1), H, H, H, F)
+				c.push(id2, mergeOpts{head: tip}, standing)
+				c.has(id2, tc.what+", run again", "triage", false)
+				c.noted(id2, tc.what+", run again", fill.Replace("pushed {tipshort} (the builder's {fixshort} made again as the App"))
+				if got := fmt.Sprint(c.beadOf(id2).Metadata["fix_commit"]); got != tip {
+					t.Errorf("%s: the run again recorded fix_commit %s, want %s", tc.what, got, tip)
+				}
+				if again := strings.Join(gitCalls(t, c.gh), "\n"); strings.Contains(again, " push https://") {
+					t.Errorf("%s: the run again pushed a second time:\n%s", tc.what, again)
+				}
+				if got := c.forkHead(branch); got != tip {
+					t.Errorf("%s: the run again moved the fork's branch to %s from %s", tc.what, got, tip)
+				}
+				c.asksOnly(tc.what+", run again", 1, 1)
+				c.clean(id2, tc.what+", run again")
+			}
 		})
 	}
 }
@@ -493,8 +878,11 @@ func TestPushFixPushesTheFix(t *testing.T) {
 // has not got, or one that is not on the picked head; a head that moved; a
 // branch that forbids maintainer edits; a pull request that is not open or
 // that GitHub will not show; a token that cannot be had; a link that is no
-// pull request address; a push GitHub refuses, in git's words. The temporary
-// repository is not made for cases rejected before it is.
+// pull request address; a push GitHub refuses, in git's words; a fix with a
+// commit that is not the App's, by author or by committer, name or address, at
+// the tip or lower down, or whose first parents never meet the pick; and a
+// token whose own identity GitHub will not say, or says is no bot's. The
+// temporary repository is not made for cases rejected before it is.
 func TestPushFixHoldsWhatItCannotPush(t *testing.T) {
 	t.Parallel() // as its subtests are: see TestMain
 	zzz := strings.Repeat("z", 40)
@@ -507,12 +895,13 @@ func TestPushFixHoldsWhatItCannotPush(t *testing.T) {
 		pick     string            // fix_head, H unless written: - none, z no sha, B another head
 		reviewed string            // reviewed_head, H unless written: - none, B another
 		accepted string            // accepted_head, for triaged beads: H unless written, - none, B another
-		commit   string            // fix_commit, F unless written: - none, H the picked head, F2 off main, G unknown
+		commit   string            // fix_commit, F unless written: - none, H the picked head, F2 off main, G unknown; R the pick merged into the base, E a commit that names an encoding of its own
 		live     string            // what GitHub says the head is, H unless written: B another
 		fork     string            // where the fork's branch is, H unless written: B another
 		stand    map[string]string // the stand-in's, besides the head
 		change   func(c *fixYard)  // changes the group for this run
 		tried    bool              // the run pushed and GitHub refused it
+		app      string            // how far the run got in asking who the App is, not at all unless written: login (its login alone) or both
 		unasked  bool              // GitHub is not asked about the pull request
 		wants    []string          // in its notes, {id} and {short} being the bead and the picked head
 		not      []string          // and not
@@ -540,7 +929,7 @@ func TestPushFixHoldsWhatItCannotPush(t *testing.T) {
 			wants: []string{"has no commit"}},
 		{what: "a fix that is not on the picked head", commit: "F2",
 			wants: []string{"is not on the picked"}},
-		{what: "a head that moved since the pick", live: "B", fork: "B",
+		{what: "a head that moved since the pick", live: "B", fork: "B", app: "both",
 			wants: []string{"is not the picked", "Advance the bead to triage"}},
 		{what: "a branch that forbids maintainer edits", stand: map[string]string{"edits-off": ""},
 			wants: []string{"forbids maintainer edits", "unhold"}},
@@ -562,8 +951,20 @@ func TestPushFixHoldsWhatItCannotPush(t *testing.T) {
 			wants: []string{"has no GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_FILE", "env_file"}},
 		{what: "a link that is no pull request address", url: "https://github.com/o/r/pull/31/files", unasked: true,
 			wants: []string{"which is not a pull request address", "not pushing the fix"}},
-		{what: "a push GitHub refuses", fork: "B", tried: true,
+		{what: "a push GitHub refuses", fork: "B", tried: true, app: "both",
 			wants: []string{"refused the push", "[rejected]", "their-branch", "Resume by hand to triage"}},
+		{what: "a fix that merges the pick into the base", commit: "R", app: "both",
+			wants: []string{"never meet the picked", "with the base merged into it, never the other way"}},
+		{what: "a fix with a commit that names an encoding of its own", commit: "E", app: "both",
+			wants: []string{"commit {recshort} of the fix names an encoding of its own", "Make the commit again in UTF-8"}},
+		{what: "a token whose login is no bot's", stand: map[string]string{"viewer-login": "jo"}, app: "login",
+			wants: []string{"GitHub names the token's login as jo", "no GitHub App's bot login", "cannot be made as the App"}},
+		{what: "GitHub cannot say who the token is", stand: map[string]string{"viewer-fail": "HTTP 403: Resource not accessible by integration"}, app: "login",
+			wants: []string{"asking GitHub who the App is", "HTTP 403: Resource not accessible by integration", "cannot be made as the App"}},
+		{what: "a bot user GitHub gives no id for", stand: map[string]string{"bot-type": "User"}, app: "both",
+			wants: []string{"GitHub gave no id for the bot user yard-app[bot] that is a number"}},
+		{what: "a bot user GitHub cannot show", stand: map[string]string{"user-fail": "HTTP 404: Not Found"}, app: "both",
+			wants: []string{"asking GitHub for the id of the user yard-app[bot] failed", "HTTP 404: Not Found"}},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
 			c := newFixYard(t)
@@ -576,8 +977,32 @@ func TestPushFixHoldsWhatItCannotPush(t *testing.T) {
 			G := c.commitOn(H, map[string]string{"feature.txt": "never fetched\n"})
 			c.depotFetch(F)
 			c.depotFetch(F2)
+			// The fixes of the rows that are made another way, made when a row asks
+			// for one, and in the depot as a builder's commits are.
+			variants := map[string]string{}
+			variant := func(v string) string {
+				if made, ok := variants[v]; ok {
+					return made
+				}
+				var made string
+				switch v {
+				case "R":
+					// The pick merged into the base, not the base into the pick.
+					made = c.mergeBy("", base, H)
+				case "E":
+					plain := c.commitIn(c.work, c.commitOn(H, map[string]string{"feature.txt": "fix E\n"}))
+					made = c.craft("tree " + plain.tree + "\nparent " + H + "\nauthor " + plain.author + "\ncommitter " + plain.committer + "\nencoding ISO-8859-1\n\n" + plain.message)
+				default:
+					c.t.Fatalf("no fix made as %q", v)
+				}
+				c.depotFetch(made)
+				variants[v] = made
+				return made
+			}
 			sha := func(v, def string) string {
 				switch v {
+				case "R", "E":
+					return variant(v)
 				case "B":
 					return B
 				case "F":
@@ -599,7 +1024,7 @@ func TestPushFixHoldsWhatItCannotPush(t *testing.T) {
 			pick, reviewed, accepted := sha(tc.pick, H), sha(tc.reviewed, H), sha(tc.accepted, H)
 			commit, live, forkAt := sha(tc.commit, F), sha(tc.live, H), sha(tc.fork, H)
 			c.forkTo(branch, forkAt)
-			fill := strings.NewReplacer("{id}", id, "{sha}", H, "{short}", H[:7], "{fix}", F, "{fixshort}", F[:7])
+			fill := strings.NewReplacer("{id}", id, "{sha}", H, "{short}", H[:7], "{fix}", F, "{fixshort}", F[:7], "{recshort}", short7(commit))
 			stage, url := "push", prURLn(num)
 			if tc.stage != "" {
 				stage = tc.stage
@@ -660,14 +1085,22 @@ func TestPushFixHoldsWhatItCannotPush(t *testing.T) {
 			if pushed := strings.Contains(calls, " push https://"); pushed != tc.tried {
 				t.Errorf("%s: pushed = %v, want %v:\n%s", tc.what, pushed, tc.tried, calls)
 			}
+			// Nothing is recorded as the bead's fix_commit for a push that did not go
+			// out: it is the builder's still.
+			if got := fmt.Sprint(c.beadOf(id).Metadata["fix_commit"]); commit != "" && got != commit {
+				t.Errorf("%s: the bead's fix_commit is %s, want the builder's %s", tc.what, got, commit)
+			}
 			if _, err := os.Stat(filepath.Join(c.gh, "calls")); tc.unasked == (err == nil) {
 				t.Errorf("%s: GitHub asked = %v, want %v:\n%v", tc.what, err == nil, !tc.unasked, ghCalls(t, c.gh))
 			}
-			for _, call := range ghCalls(t, c.gh) {
-				if call != "" && !strings.HasPrefix(call, "pr view ") {
-					t.Errorf("%s: gh was asked more than to read the pull request: %q", tc.what, call)
-				}
+			login, botID := 0, 0
+			switch tc.app {
+			case "login":
+				login = 1
+			case "both":
+				login, botID = 1, 1
 			}
+			c.asksOnly(tc.what, login, botID)
 			if tc.what == "a mint that fails" {
 				for where, text := range map[string]string{"log": c.log, "notes": c.notesOf(id)} {
 					if strings.Contains(text, "PRIVATE_KEY_VALUE_SHOULD_NOT_ESCAPE") {
