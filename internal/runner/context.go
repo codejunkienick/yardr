@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -41,7 +42,7 @@ func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt ti
 			match = maps.Clone(handle)
 			match["worktree"] = handle["dir"]
 			if _, has := handle[contextStartedAt]; !has {
-				preStart, err = crewContextAllowance(ctx, handle, startedAt)
+				preStart, err = crewContextAllowance(ctx, handle, startedAt, crewShellStartTimeout)
 				if err != nil {
 					return 0, 0, false, err
 				}
@@ -58,19 +59,36 @@ func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt ti
 	return lastContext(kind.Model.Pattern(h.agentHome(kind), id), *kind.Context)
 }
 
-// crewContextAllowance excludes files from before an older handle's own pane existed.
-func crewContextAllowance(ctx context.Context, handle map[string]any, startedAt time.Time) (time.Duration, error) {
+// crewShellStartTimeout is how long Context gives the ps that reads an older
+// crew handle's shell start time. The read runs in a crew session's keep, and
+// the crew pass joins every keep before it hands starts on and routes beads,
+// so a ps that never answers holds all of that for as long as it is let. ps
+// names one pid in milliseconds: five seconds is far over that and costs the
+// pass little.
+const crewShellStartTimeout = 5 * time.Second
+
+// crewContextAllowance excludes files from before an older handle's own pane
+// existed. It gives no allowance (0, nil) where it cannot read the shell's
+// start time: the shell is gone, or ps did not answer within wait.
+func crewContextAllowance(parent context.Context, handle map[string]any, startedAt time.Time, wait time.Duration) (time.Duration, error) {
 	pid, hasPID := uintOf(handle["shell_pid"])
 	start, hasStart := uintOf(handle["shell_start"])
 	if !hasPID || !hasStart || pid == 0 || uint64(int(pid)) != pid || !peer.HaveStat() || !peer.Alive(int(pid), start) {
 		return 0, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	ctx, cancel := context.WithTimeout(parent, wait)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "ps", "-o", "lstart=", "-p", strconv.FormatUint(pid, 10))
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC0")
 	raw, err := cmd.Output()
 	if !peer.Alive(int(pid), start) {
+		return 0, nil
+	}
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) && parent.Err() == nil {
+		// ps did not answer in time. That is no failure of the read: the
+		// session gets no allowance on this pass, as when its shell is gone,
+		// and the next idle pass asks again. A caller cancellation or deadline
+		// still gets the error below.
 		return 0, nil
 	}
 	if err != nil {

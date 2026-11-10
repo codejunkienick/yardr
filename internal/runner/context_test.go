@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"yardr.dev/yardr/internal/peer"
+	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/store"
 )
 
@@ -19,7 +20,6 @@ import (
 // session id herdr reports. The lines are trimmed from a real transcript
 // of Claude Code 2.1.
 func TestHerdrContextReadsTheLastUse(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	claude := t.TempDir()
 	write := func(path, text string) {
@@ -31,6 +31,64 @@ func TestHerdrContextReadsTheLastUse(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	t.Run("older crew ps deadline", func(t *testing.T) {
+		// This test changes PATH for the stand-in ps, so the enclosing test is
+		// serial rather than parallel.
+		shell, err := peer.Describe(os.Getpid())
+		if err != nil {
+			t.Fatal(err)
+		}
+		// This process is the crew shell: alive, with the start the handle
+		// names, so the call gets past its guards to ps.
+		handle := map[string]any{"shell_pid": float64(os.Getpid()), "shell_start": float64(shell.Start)}
+		shellAt := time.Date(2026, 11, 10, 20, 0, 0, 0, time.UTC)
+		startedAt := shellAt.Add(20 * time.Second)
+		// exec, so the sleep is the process the deadline kills and no child is
+		// left holding ps's output open.
+		bin := t.TempDir()
+		scripttest.Write(t, filepath.Join(bin, "ps"), fmt.Sprintf(`if [ -n "$FAKE_PS_HANG" ]; then exec sleep 30; fi
+echo '%s'
+`, shellAt.Format(time.ANSIC)))
+		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+		// An answering ps gives the 10 s cap, proving the call passes its
+		// guards and reaches ps. Give this step room for a loaded machine.
+		got, err := crewContextAllowance(context.Background(), handle, startedAt, time.Minute)
+		if err != nil || got != 10*time.Second {
+			t.Fatalf("allowance with a ps that answers = %s, %v; want 10s, nil", got, err)
+		}
+
+		// The shorter wait cuts off the stand-in without making this test wait
+		// for its 30 s sleep, whether or not the command has started yet.
+		t.Setenv("FAKE_PS_HANG", "1")
+		start := time.Now()
+		got, err = crewContextAllowance(context.Background(), handle, startedAt, 500*time.Millisecond)
+		if took := time.Since(start); took > 10*time.Second {
+			t.Fatalf("allowance returned after %s; the deadline did not hold", took)
+		}
+		if err != nil || got != 0 {
+			t.Fatalf("allowance with a ps that never answers = %s, %v; want 0, nil", got, err)
+		}
+
+		// A caller's cancellation and deadline are still errors; only the
+		// timeout set for ps itself is forgiven.
+		cancelled, cancelNow := context.WithCancel(context.Background())
+		cancelNow()
+		if got, err := crewContextAllowance(cancelled, handle, startedAt, time.Minute); err == nil {
+			t.Fatalf("allowance after the caller cancelled = %s, %v; want an error", got, err)
+		}
+		callerDeadline, cancelDeadline := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancelDeadline()
+		if got, err := crewContextAllowance(callerDeadline, handle, startedAt, time.Minute); err == nil {
+			t.Fatalf("allowance after the caller deadline = %s, %v; want an error", got, err)
+		}
+
+		// The production wait is checked here; the injected waits above keep
+		// the test from waiting for it.
+		if crewShellStartTimeout > 10*time.Second {
+			t.Fatalf("crewShellStartTimeout = %s; a stuck ps holds the crew pass that long", crewShellStartTimeout)
+		}
+	})
 	write(filepath.Join(claude, "projects", "-tmp-w", "c1.jsonl"), `{"type":"user","message":{"role":"user","content":"Read the brief."}}
 {"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_read_input_tokens":100,"cache_creation_input_tokens":5,"output_tokens":7}}}
 {"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error"}]}}
