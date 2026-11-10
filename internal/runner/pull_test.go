@@ -176,7 +176,9 @@ func TestHerdrPullRequestHeadInTheWorktree(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no valid fix_head") {
 		t.Fatalf("start in fix with no pick: %v", err)
 	}
-	if handle["worktree"] == "" {
+	// Compared with the path, not with "": the handle holds any, so a dropped
+	// handle or a missing key reads as nil, and a nil is not equal to "".
+	if handle["worktree"] != filepath.Join(h.WorktreeRoot, "r", "r-4") {
 		t.Fatalf("handle = %v, want the worktree kept on it", handle)
 	}
 	if calls := string(mustRead(t, log)); strings.Contains(calls, "agent start") {
