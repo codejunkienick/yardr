@@ -1937,7 +1937,10 @@ holds it where its plan asks nothing; a first install names its depot,
 with the mappings that answer its plan (`--run "pack apply <name>
 --depot <depot>"`). A pack of kind `source` named with `--depot` is
 sent to the setup ask instead (`yardr bead ask <id> "<question>"
---setup <pack>`, [chat.md](chat.md#setting-up-a-packs-sources)).
+--setup <pack>`, [chat.md](chat.md#setting-up-a-packs-sources)), which is
+also the one card for a pack of kind `source` that the operator applied
+from a directory in a terminal and has left as it was: a clean git
+checkout still at the commit the apply recorded.
 A card is read whole, so a pack whose card would run past 40 lines is
 refused, and the operator applies it in a terminal, or the yardmaster applies
 it for them on their mail (below). Google is split into

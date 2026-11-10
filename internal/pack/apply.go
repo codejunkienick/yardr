@@ -969,5 +969,8 @@ func Commit(dir string) (sha string, dirty bool) {
 		return "", false
 	}
 	status, err := git("status", "--porcelain", "--", ".")
-	return sha, err == nil && status != ""
+	if err != nil {
+		return "", false
+	}
+	return sha, status != ""
 }

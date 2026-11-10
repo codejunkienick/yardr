@@ -169,6 +169,11 @@ type Store struct {
 	// the binary of the process that owns the store (SetPackReader,
 	// runask_pack.go); nil where no server owns the store.
 	packReader PackReader
+	// appliedReader reads the pack the operator applied from a directory,
+	// for a setup card alone, where packReader says the binary embeds none
+	// of that name (SetAppliedPackReader, packmappings.go); nil where no
+	// server owns the store.
+	appliedReader PackReader
 	// packFetcher fetches a pack of the packs repository for a delegated
 	// pack apply (SetPackFetcher, delegation_repo.go); nil where no
 	// server owns the store.

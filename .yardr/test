@@ -2089,7 +2089,7 @@ internal/store/policy.go 1178 the permission gates and their rules
 internal/store/routing.go 3043 groups, routes and their config merges
 internal/store/runask.go 1018 run asks and their approval
 internal/store/runask_list.go 1223 ask cards, labels and preset reading
-internal/store/runask_setup.go 1537 the setup ask, its card, and the carrying record
+internal/store/runask_setup.go 1535 the setup ask, its card, and the carrying record
 internal/store/secretask.go 1092 secret asks and harness key files
 internal/store/settings.go 1117 yard settings and their checks
 internal/store/sourcecalls.go 1240 source grants and callables

@@ -607,6 +607,22 @@ grantee, and You decide last, which grants the recommended preset. An
 operator who wants no grants declines the card and applies by
 terminal.
 
+The pack is one yardr embeds, or one the operator applied from a
+directory in a terminal (`yardr pack apply <directory>`) and has left as
+it was. The yard's record of that apply names the directory, the git
+commit it was at, and that it was clean; the card is of the directory's
+files as they read now, labelled with the directory and the commit
+where an embedded pack's says the build that embeds it, and it shows
+them whole as it does an embedded pack's. It is refused, naming the
+terminal command, for a pack never applied, one applied from a URL or
+from a directory in no git repository or with uncommitted changes, and
+one whose directory is at another commit or has uncommitted changes
+now; the operator applies it again first. The yard holds the directory
+to that commit again when the card is approved and when it is carried
+out, and a pack that is not of kind source stays a terminal apply.
+Where yardr embeds a pack of the name, that pack is the card's, whatever
+a directory says.
+
 ```
 ask 3101 · open · to mckean · asked by yardmaster · 1m ago
   WEIGHTY · credential: gives a credential or an address to the yard: the account GOOGLE_ACCOUNT of pack google-mail

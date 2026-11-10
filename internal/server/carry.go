@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -146,6 +147,11 @@ func runCarryWatcher(ctx context.Context, st *store.Store, home, boot string, lo
 	}
 }
 
+// isSetupCarry says whether the carrying record is an approved setup's.
+func isSetupCarry(rec *store.Carry) bool {
+	return len(rec.Argv) >= 2 && rec.Argv[0] == "setup"
+}
+
 // carryNext claims the next waiting apply or setup and carries it out,
 // holding the apply lock from the plan's rebuilding through the
 // completion record. It answers false where nothing waited. A failure of
@@ -157,7 +163,7 @@ func (c *carrier) carryNext(ctx context.Context) (bool, error) {
 	if err != nil || rec == nil {
 		return false, err
 	}
-	if len(rec.Argv) >= 2 && rec.Argv[0] == "setup" {
+	if isSetupCarry(rec) {
 		setup, picked, err := c.askSetup(ctx, rec)
 		if err != nil {
 			return true, err
@@ -383,6 +389,14 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 	// recorded depot still names the target it was approved for.
 	depot, mappings := run.Pack.Depot, run.Pack.Mappings
 	reading, err := c.st.ReadPack(ctx, name, depot, mappings)
+	// A setup of a pack yardr does not embed is carried out from the
+	// directory the operator applied it from, loaded once for the reading
+	// held below, the plan and the copy (appliedpack.go). A pack apply card
+	// never is: it stays pinned to the binary.
+	var applied *pack.Pack
+	if errors.Is(err, store.ErrNotEmbedded) && isSetupCarry(rec) {
+		reading, applied, err = readApplied(ctx, name, depot, mappings, c.st, c.home)
+	}
 	if err != nil {
 		return nil, nil, failWords(err.Error(), terminal)
 	}
@@ -398,8 +412,10 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 	if reading.Depot != depot {
 		return nil, nil, staleWords(fmt.Sprintf("pack %s would now be re-applied to depot %s, not %s", name, reading.Depot, depot), terminal)
 	}
-	p, sub, err := c.load(name)
-	if err != nil {
+	p, sub := applied, fs.FS(nil)
+	if applied != nil {
+		sub = os.DirFS(applied.Dir)
+	} else if p, sub, err = c.load(name); err != nil {
 		return nil, nil, failWords(err.Error(), terminal)
 	}
 	plan, err := pack.Build(ctx, c.st, p, packOptions(depot, c.home, mappings))

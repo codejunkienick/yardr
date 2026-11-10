@@ -82,7 +82,8 @@ const askRunList = `  peer add <name> <invite>
       the card comes from the server's own binary and shows each source,
       mapping, object and file diff whole; the server carries it out; a
       directory, URL or imported pack, any other flag and a plan that
-      asks stay in a terminal; --setup installs a pack of kind source
+      asks stay in a terminal; --setup installs a pack of kind source,
+      embedded or applied from a directory in a terminal
   hook add <name> --source <declared source> [--unknown unknown|allow|ignore]
       a new webhook endpoint POST /hooks/<name> for the declared
       source, verified with its signing secret given on the hook's own

@@ -142,6 +142,9 @@ func (r *runner) serve(ctx context.Context) (string, bool, error) {
 	// How a pack apply ask reads the packs this build embeds, and a
 	// preset grant ask their presets by source.
 	st.SetPackReader(packReaderFor(c.Home))
+	// And how a setup card reads a pack this build does not embed: from
+	// the directory the operator applied it from.
+	st.SetAppliedPackReader(appliedReaderFor(c.Home))
 	// And how a delegated pack apply reads a pack of the packs
 	// repository: fetched by the server, held to its pinned digest.
 	st.SetPackFetcher(packFetcherFor(c.Home, pack.Repository))

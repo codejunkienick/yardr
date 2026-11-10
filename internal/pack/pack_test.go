@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -37,6 +38,29 @@ func TestMain(m *testing.M) {
 	}
 	testload.PreferRealGit()
 	os.Exit(m.Run())
+}
+
+// Commit cannot call a directory clean when Git cannot read its index: the
+// commit alone does not say whether the files that will be read match it.
+func TestCommitReturnsNoCommitWhenStatusCannotSay(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	git("config", "user.name", "Ada")
+	git("config", "user.email", "ada@example.invalid")
+	git("commit", "-q", "--allow-empty", "-m", "clean")
+	if err := os.WriteFile(filepath.Join(dir, ".git", "index"), []byte("broken index"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if sha, dirty := pack.Commit(dir); sha != "" || dirty {
+		t.Fatalf("Commit = %q, %v with an unreadable index; want no commit", sha, dirty)
+	}
 }
 
 // starter is the pack the repository ships, and these tests' fixture.

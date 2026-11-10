@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -582,6 +584,59 @@ func TestSetupAskRefusesWhatCannotBeCarded(t *testing.T) {
 	plain, _ := runYard(t)
 	if _, err := plain.AddAsk(plain.ctx, plain.bead, setupAsk(), "yardmaster"); err == nil || !strings.Contains(err.Error(), "no server has registered") {
 		t.Errorf("a setup with no server reading was stored or refused otherwise: %v", err)
+	}
+}
+
+// A setup card reads the pack the operator applied from a directory only
+// where the binary embeds none of that name (ErrNotEmbedded): the embedded
+// pack wins for a name both have, any other refusal of the embedded reading
+// stands without the applied reader being asked, the applied reader's own
+// refusal stands in its words, and a store with none refuses as it did.
+func TestSetupAskReadsAnAppliedPackOnlyWhereNoneIsEmbedded(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	var embeddedErr, appliedErr error
+	asked := 0
+	applied := setupMailPack()
+	applied.label = "/packs/setupmail at 1a2b3c4d5e6f"
+	y.Store.SetPackReader(func(ctx context.Context, name string, depot string, mappings Mappings, yard API) (*PackReading, error) {
+		if embeddedErr != nil {
+			return nil, embeddedErr
+		}
+		return setupMailPack().reading(), nil
+	})
+	y.Store.SetAppliedPackReader(func(ctx context.Context, name string, depot string, mappings Mappings, yard API) (*PackReading, error) {
+		asked++
+		if appliedErr != nil {
+			return nil, appliedErr
+		}
+		return applied.reading(), nil
+	})
+	notEmbedded := fmt.Errorf("pack setupmail: %w: it is the operator's to apply in a terminal", ErrNotEmbedded)
+
+	embeddedErr = notEmbedded
+	seq := y.ask(t, setupAsk(), "yardmaster")
+	if label := y.asked(t, seq).Ask.Setup.Label; label != applied.label || asked != 1 {
+		t.Fatalf("a pack no binary embeds is carded as %q after %d reads of the directory, want %q after one", label, asked, applied.label)
+	}
+	embeddedErr = nil
+	seq = y.ask(t, setupAsk(), "yardmaster")
+	if label := y.asked(t, seq).Ask.Setup.Label; label != "embedded in yardr test1" || asked != 1 {
+		t.Fatalf("a pack both have is carded as %q after %d reads of the directory, want the embedded one after one", label, asked)
+	}
+	embeddedErr = errors.New("pack setupmail: the binary's packs cannot be read")
+	if _, err := y.AddAsk(y.ctx, y.bead, setupAsk(), "yardmaster"); err == nil || !strings.Contains(err.Error(), "cannot be read") || asked != 1 {
+		t.Fatalf("another refusal of the embedded reading = %v after %d reads of the directory, want it to stand after one", err, asked)
+	}
+	embeddedErr, appliedErr = notEmbedded, errors.New("pack setupmail: its directory moved to another commit")
+	// A refused write may be run again by the batch it was in, so the
+	// reads of the directory are counted as more than before, not exactly.
+	if _, err := y.AddAsk(y.ctx, y.bead, setupAsk(), "yardmaster"); err == nil || !strings.Contains(err.Error(), "moved to another commit") || asked < 2 {
+		t.Fatalf("the applied reader's refusal = %v after %d reads of the directory, want it to stand after a read more", err, asked)
+	}
+	y.Store.SetAppliedPackReader(nil)
+	if _, err := y.AddAsk(y.ctx, y.bead, setupAsk(), "yardmaster"); err == nil || !strings.Contains(err.Error(), "embeds no pack of that name") {
+		t.Fatalf("a store with no applied reader = %v, want the embedded reading's refusal", err)
 	}
 }
 
