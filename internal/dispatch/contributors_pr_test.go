@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -38,6 +39,9 @@ import (
 // yard default that outranks the depot's own route of a pr bead in approved to
 // the decisions, at 11. The review stage has no route: the reviewer's report
 // is made by the test, as is what a session of post or of pr-ci reports.
+//
+// The hook carries the pack's stage map as well as its says and makes, and the
+// dispatcher logs to r.logged.
 func newContributorsYard(t *testing.T) *ghDepot {
 	t.Helper()
 	return newContributorsYardIn(t, t.TempDir())
@@ -61,9 +65,16 @@ func newContributorsYardIn(t *testing.T, home string) *ghDepot {
 	must(t, r.api.SetFlowPointer(ctx, "yard", "pr", "contributors.pr", "me"))
 	h, err := r.api.GetHook(ctx, "gh")
 	must(t, err)
-	h.Says, h.Makes = p.Sources[0].Says, p.Sources[0].Makes
+	h.Says, h.Makes, h.Map = p.Sources[0].Says, p.Sources[0].Makes, p.Sources[0].Map
 	_, err = r.api.PutHook(ctx, *h, "me")
 	must(t, err)
+	// The operator of a yard that has its beads move their issues has let the
+	// hook's crew member set a status in github. Without that grant a move the
+	// map queued is skipped quietly (no_grant) and never reaches the source, so
+	// a test could not see one fail and be tried again.
+	_, err = r.api.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "fake", Config: map[string]any{store.SetState: "github"}}, "me")
+	must(t, err)
+	r.d.Log = slog.New(slog.NewTextHandler(&r.logged, nil))
 
 	must(t, r.api.PutGroup(ctx, store.Group{Name: "post", Runner: "fake", Limit: 1}, "me"))
 	must(t, r.api.PutGroup(ctx, store.Group{Name: "pr-ci", Runner: "fake", Limit: 1}, "me"))
@@ -328,6 +339,46 @@ func (r *ghDepot) startedFor(id string) []string {
 		}
 	}
 	return groups
+}
+
+// threadUntouched fails the test when bead id, which ended in stage, has had
+// anything done about its pull request's thread for entering it: a move
+// queued and waiting, a move made or given up (a thread_state or a
+// thread_state_skipped event), or one the daemon logged as made or tried again.
+// The thread command refuses a state asked of a pull request, which the daemon
+// reads as the source failing and tries again (TestIssueMoveRefusedForGood), so
+// the pack's stage map has no line for a pr bead: a pull request is never
+// opened or closed by a stage (docs/links.md, "Forward only"). The pass in
+// between is the daemon's chance to make a move that was queued, so what it
+// did shows.
+func (r *ghDepot) threadUntouched(t *testing.T, id, stage string) {
+	t.Helper()
+	ctx := context.Background()
+	waiting := func() {
+		t.Helper()
+		moves, err := r.api.IssueMoves(ctx)
+		must(t, err)
+		for _, m := range moves {
+			if m.Bead == id && m.Stage == stage {
+				t.Errorf("%s ended in %s and a move of its pull request waits: state %s, %d tries, error %q", id, stage, m.State, m.Attempts, m.Error)
+			}
+		}
+	}
+	waiting()
+	r.pass(t)
+	waiting()
+	evs, err := r.api.Events(ctx, id, 200)
+	must(t, err)
+	for _, e := range evs {
+		if (e.Kind == "thread_state" || e.Kind == "thread_state_skipped") && e.Data["stage"] == stage {
+			t.Errorf("%s ended in %s and its pull request has a %s event: %v", id, stage, e.Kind, e.Data)
+		}
+	}
+	for _, line := range strings.Split(r.logged.String(), "\n") {
+		if strings.Contains(line, "bead="+id) && strings.Contains(line, `msg="issue `) {
+			t.Errorf("%s ended in %s and the daemon logged of its pull request: %s", id, stage, line)
+		}
+	}
 }
 
 // The bead of a bot's bump of Go modules: skips triage into review, is
@@ -781,6 +832,9 @@ func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 				t.Errorf("%s: a pull request %s (%s) left its bead in %s (%s), want %s closed", stage, c.outcome, c.fixture, got.Stage, got.Status, c.to)
 			}
 			wantRules(t, r.rules(t, b.ID), "pull_request made", c.outcome+" "+stage+" -> "+c.to)
+			// The bead ended with its pull request, merged or closed on GitHub:
+			// no stage of it sets a status there.
+			r.threadUntouched(t, b.ID, c.to)
 
 			// Whatever worked the stage is stopped, and neither the posting nor
 			// the yard's CI can report for a pull request that is over.
@@ -1081,6 +1135,9 @@ func TestContributorsTriageCardIsOfTheHead(t *testing.T) {
 	if got := r.bead(t, closing.ID); got.Stage != "closed" || got.Status != "closed" || accepted(closing.ID) != nil {
 		t.Fatalf("after the close %s is %s (%s) with accepted_head %v, want closed with none", closing.ID, got.Stage, got.Status, accepted(closing.ID))
 	}
+	// The pick closes the bead and leaves the pull request open on GitHub, as
+	// the stage file says: nothing is asked of its thread.
+	r.threadUntouched(t, closing.ID, "closed")
 }
 
 // A pull request closed unmerged and then reopened has a bead again. The

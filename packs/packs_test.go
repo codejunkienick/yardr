@@ -1689,7 +1689,11 @@ func TestContributorsPack(t *testing.T) {
 			t.Errorf("a closed issue in stage %s says %q, want no line to match", stage, say.Outcome)
 		}
 	}
-	if want := map[string]string{"issue:new": "started", "issue:merged": "done", "issue:closed": "done", "pr:closed": "done"}; !reflect.DeepEqual(gh.Map, want) {
+	// Only issues are heard: no stage closes a pull request, and the thread
+	// command refuses a state asked of one, so a pr line would queue a move that
+	// fails and is tried again (TestContributorsClosedPullRequestEndsItsBead, in
+	// internal/dispatch, holds that closing a pr bead queues none).
+	if want := map[string]string{"issue:new": "started", "issue:merged": "done", "issue:closed": "done"}; !reflect.DeepEqual(gh.Map, want) {
 		t.Errorf("hears = %v, want %v", gh.Map, want)
 	}
 	// The yardmaster's role says what the outside work adds to its job, which

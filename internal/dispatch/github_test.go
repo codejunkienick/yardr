@@ -62,6 +62,11 @@ type ghDepot struct {
 	// dec is the yard's declared github source, which deliveries to the
 	// gh hook normalize through.
 	dec hooks.Declared
+	// logged is what the dispatcher logs, in the fixtures that point its log
+	// here (newContributorsYardIn). A session's start runs in a goroutine the
+	// pass does not wait for, and logs from it when it fails, so the writes
+	// are serialised.
+	logged lockedWriter
 }
 
 // declareGitHubPack declares the pack's github source in the yard, with
