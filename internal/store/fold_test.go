@@ -1703,9 +1703,8 @@ func TestFoldBeads(t *testing.T) {
 	// each part over a yard of its own: a part's rows run in turn as they
 	// always did, and no row shares with another part.
 	n := min(runtime.GOMAXPROCS(0), len(rows))
-	size := (len(rows) + n - 1) / n
 	for c := range n {
-		part := rows[c*size : min((c+1)*size, len(rows))]
+		part := rows[c*len(rows)/n : (c+1)*len(rows)/n]
 		t.Run(fmt.Sprintf("part %d", c), func(t *testing.T) {
 			t.Parallel()
 			s := foldYard(t)

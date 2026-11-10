@@ -88,7 +88,7 @@ func TestStartCrewRecordsItsPaneBeforeTheAgentStarts(t *testing.T) {
 		t.Fatalf("the pane was recorded after the agent started; herdr's calls before the record:\n%s", st.before)
 	}
 	r, err := st.GetCrew(ctx, "yardmaster")
-	if err != nil || r.Live() || fmt.Sprint(r.Starting["shell_pid"]) != fmt.Sprint(os.Getpid()) {
+	if err != nil || r.Live() || r.Starting["shell_pid"] != float64(os.Getpid()) {
 		t.Fatalf("the yardmaster = %+v, %v: want its starting pane on record", r, err)
 	}
 
@@ -230,7 +230,7 @@ esac`)
 		t.Fatal(err)
 	}
 	r, err = st.GetCrew(ctx, "yardmaster")
-	if err != nil || fmt.Sprint(r.Starting["shell_pid"]) != fmt.Sprint(os.Getpid()) || r.Starting["shell_start"] == nil {
+	if err != nil || r.Starting["shell_pid"] != float64(os.Getpid()) || r.Starting["shell_start"] == nil {
 		t.Fatalf("after a second failed start the yardmaster's starting pane = %v, %v: want the pane the first one left", r.Starting, err)
 	}
 	// The start that was underway may have gone to another herdr session:
