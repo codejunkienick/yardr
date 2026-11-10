@@ -485,10 +485,15 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 		}
 		for _, obj := range after.Objects {
 			// Only what the plan was to write has a planned copy to be held
-			// to. A file of the pack's directories that the pack does not
-			// carry (a backup left by hand) is left alone by the import and
-			// has no planned hash, so it is no failed import.
-			if obj.Kind != "file" || obj.File == nil || obj.Action == pack.NotInPack {
+			// to, so the check names what it holds, not what it leaves out.
+			// The import leaves alone a file of the pack's directories that
+			// the pack does not carry (a backup left by hand) and one it no
+			// longer carries that the yard still has (dropped, which only a
+			// prune removes and a card never prunes). Neither has a planned
+			// hash, so neither is a failed import, and no action the plan
+			// gains later is one either.
+			held := obj.Action == pack.Create || obj.Action == pack.Change || obj.Action == pack.Unchanged
+			if obj.Kind != "file" || obj.File == nil || !held {
 				continue
 			}
 			data, err := os.ReadFile(obj.File.To)
