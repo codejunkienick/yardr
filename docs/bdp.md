@@ -72,6 +72,8 @@ server no terminal runs stays on loopback, and an address off it is refused
 before anything is started or written, as the web view's are. `yardr up`
 refuses a `bdp_addr` off loopback the same way, and starts nothing for it.
 
+## The yard as BDP resources
+
 - Beads are `<scope>beads/<handle>`; dependencies are Links whose source is
   the waiting bead and target its blocker, as in bd. The handle is the BDP
   id because it never changes and is unique within a yard (BDP ids are
