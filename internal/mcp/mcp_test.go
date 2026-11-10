@@ -1241,7 +1241,10 @@ func TestWhatWaitsForMe(t *testing.T) {
 	if len(choices) != 3 || choices[0]["number"] != 1 || choices[0]["label"] != "Move them now" || choices[1]["label"] != "After Friday" || choices[2]["number"] != 3 {
 		t.Errorf("the structured choices = %+v", q["choices"])
 	}
-	if q["asked_by"] != "yardmaster" || q["asked_at"] == "" || q["recommended"] != 1 || q["title"] != "Move the links" {
+	// The time is the store's clock, so there is no value to compare it with. A key
+	// left out reads as nil, which is not "", so it is read as a string first.
+	askedAt, _ := q["asked_at"].(string)
+	if q["asked_by"] != "yardmaster" || askedAt == "" || q["recommended"] != 1 || q["title"] != "Move the links" {
 		t.Errorf("the structured question = %+v", q)
 	}
 	if _, ok := qs[0]["question_text"]; ok {
@@ -1356,15 +1359,18 @@ func TestReadMyMailRecentLooksBackWithoutAcking(t *testing.T) {
 	if len(messages) != 2 {
 		t.Fatalf("the structured look-back = %+v", res.Structured)
 	}
-	if messages[0]["text"] != "third note" || messages[0]["read"] != false {
+	if messages[0]["text"] != "third note" || messages[0]["read"] != false || messages[0]["from"] != "yardmaster" {
 		t.Fatalf("the structured unread = %+v", messages[0])
 	}
-	if messages[1]["text"] != "second note" || messages[1]["read"] != true {
+	if messages[1]["text"] != "second note" || messages[1]["read"] != true || messages[1]["from"] != "bob" {
 		t.Fatalf("the structured read = %+v", messages[1])
 	}
+	// The sender and the words are compared with what was sent. The time is the
+	// store's clock, so there is no value to compare it with: a key left out reads
+	// as nil, which is not "", so it is read as a string first.
 	for _, m := range messages {
-		if m["from"] == "" || m["at"] == "" || m["text"] == "" {
-			t.Fatalf("a structured message lacks its words: %+v", m)
+		if at, _ := m["at"].(string); at == "" {
+			t.Fatalf("a structured message lacks its time: %+v", m)
 		}
 	}
 	if messages[0]["seq"] != thirdSeq || messages[1]["seq"] != secondSeq {

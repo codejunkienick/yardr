@@ -362,8 +362,12 @@ func TestLinksFollowBDPDirection(t *testing.T) {
 		t.Fatalf("links inventory fields: %v", inv.header)
 	}
 	l := links[0].(map[string]any)
+	// The revision is minted by the store, so there is no value to compare it
+	// with. A key left out reads as nil, which is not "", so it is read as a
+	// string first.
+	revision, _ := l["revision"].(string)
 	// "UI depends on API": source is the waiting bead, target its blocker.
-	if l["source"] != scope+"beads/"+waiting.ID || l["target"] != scope+"beads/"+blocker.ID || l["revision"] == "" {
+	if l["source"] != scope+"beads/"+waiting.ID || l["target"] != scope+"beads/"+blocker.ID || revision == "" {
 		t.Fatalf("link = %v", l)
 	}
 	if r := f.get(strings.TrimPrefix(l["id"].(string), scope)); r.json(t)["id"] != l["id"] ||
@@ -701,7 +705,11 @@ func TestIssueLinks(t *testing.T) {
 		byType[l["type"].(string)] = l
 	}
 	l := byType[scope+"types/tracks-linear"]
-	if l == nil || l["source"] != scope+"beads/"+one.ID || l["target"] != lin || l["revision"] == "" ||
+	// The revision is minted by the store, so there is no value to compare it
+	// with. A key left out reads as nil, which is not "", so it is read as a
+	// string first.
+	revision, _ := l["revision"].(string)
+	if l == nil || l["source"] != scope+"beads/"+one.ID || l["target"] != lin || revision == "" ||
 		!strings.HasPrefix(l["id"].(string), scope+"links/") {
 		t.Fatalf("linear tracks link = %v (of %v)", l, tracked)
 	}

@@ -229,7 +229,14 @@ func TestPeerOutbox(t *testing.T) {
 		t.Fatalf("PeerSend with nothing allowed = %v", err)
 	}
 	refused := peerEvents(t, y.api, "peer_message_refused")
-	if len(refused) != 1 || refused[0].Data["direction"] != "out" || refused[0].Data["kind"] != "ping" || refused[0].Data["peer"] != "north" || refused[0].Data["id"] == "" {
+	if len(refused) != 1 {
+		t.Fatalf("peer_message_refused = %+v", refused)
+	}
+	// The message's id is minted here, and a refused message is queued nowhere, so
+	// there is no value to compare it with. A key left out reads as nil, which is
+	// not "", so it is read as a string first.
+	id, _ := refused[0].Data["id"].(string)
+	if refused[0].Data["direction"] != "out" || refused[0].Data["kind"] != "ping" || refused[0].Data["peer"] != "north" || id == "" {
 		t.Fatalf("peer_message_refused = %+v", refused)
 	}
 	if p, _ := y.api.GetPeer(y.ctx, "north"); p.Waiting != 0 {

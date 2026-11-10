@@ -187,7 +187,15 @@ func testDevicePairedByItsCode(t *testing.T) {
 		t.Fatalf("devices = %+v, %v", devices, err)
 	}
 	added := eventsOfKind(t, y.st, "device_added")
-	if len(added) != 1 || added[0].Actor != "jo" || added[0].Data["user"] != "sam" || added[0].Data["device"] != "phone" || added[0].Data["pairing"] == "" {
+	if len(added) != 1 {
+		t.Fatalf("device_added = %+v", added)
+	}
+	// The pairing's id is minted when it is opened, and the test is given only its
+	// code, so there is no value to compare it with. A key left out reads as nil,
+	// which is not "", so it is read as a string first. The opened event's pairing
+	// is compared with this one below.
+	pairing, _ := added[0].Data["pairing"].(string)
+	if added[0].Actor != "jo" || added[0].Data["user"] != "sam" || added[0].Data["device"] != "phone" || pairing == "" {
 		t.Fatalf("device_added = %+v", added)
 	}
 	opened := eventsOfKind(t, y.st, "device_pair_opened")

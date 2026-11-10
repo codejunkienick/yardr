@@ -216,7 +216,10 @@ func TestReplyDeclaredSource(t *testing.T) {
 		t.Fatalf("output %q", out)
 	}
 	in := lastStdin(t, dir, "reply")
-	if in["thread"] != "issue-1" || in["parent"] != "" || in["body"] != "answer" || in["key"] == "" {
+	// The key is a UUID the store mints, so there is no value to compare it with.
+	// A key left out reads as nil, which is not "", so it is read as a string first.
+	key, _ := in["key"].(string)
+	if in["thread"] != "issue-1" || in["parent"] != "" || in["body"] != "answer" || key == "" {
 		t.Fatalf("reply stdin = %v", in)
 	}
 	// The same text again is the same reply: Posted finds it, and no
@@ -360,7 +363,10 @@ func TestThreadOpenDeclaredSource(t *testing.T) {
 		t.Fatalf("output %q", out)
 	}
 	in := lastStdin(t, dir, "open")
-	if in["in"] != "ENG" || in["title"] != "Made" || in["body"] != "words" || in["key"] == "" {
+	// The key is a UUID the store mints, so there is no value to compare it with.
+	// A key left out reads as nil, which is not "", so it is read as a string first.
+	key, _ := in["key"].(string)
+	if in["in"] != "ENG" || in["title"] != "Made" || in["body"] != "words" || key == "" {
 		t.Fatalf("open stdin = %v", in)
 	}
 	out, err = run(t, a.threadOpenCmd(), "acme", "Made", "--in", "ENG", "--body", "words")

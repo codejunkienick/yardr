@@ -824,7 +824,11 @@ func TestHarnessLoginInputTimesOut(t *testing.T) {
 	l.need("choose")
 	l.answer(`{"choose":"Claude subscription"}`)
 	l.need("open_url")
-	if input := l.need("input"); input["login"] == "" {
+	// The reference is minted for the wait, so there is no value to compare it
+	// with. A need with no wait has no login key at all, and a key left out reads
+	// as nil, which is not "", so it is read as a string first.
+	input := l.need("input")
+	if login, _ := input["login"].(string); login == "" {
 		t.Fatalf("the input need names no wait: %v", input)
 	}
 	msg, _ := l.next()["error"].(string)

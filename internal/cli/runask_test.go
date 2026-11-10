@@ -1460,9 +1460,13 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				if len(hits) != 2 {
 					t.Fatalf("%s: the stand-in took %d messages, want one from the approval and one from the terminal", use, len(hits))
 				}
+				// The stand-in decodes each body into a map, where a key the body lacks
+				// reads as nil, which is not "": the message is compared with the one
+				// the check sends, as the other fields are with theirs.
+				_, message := store.SourceCheckMessage("pushover", "ada")
 				for _, hit := range hits {
-					if hit["user"] != "approval-user" || hit["token"] != "approval-token" || hit["message"] == "" {
-						t.Errorf("%s: the stand-in took %v", use, hit)
+					if hit["user"] != "approval-user" || hit["token"] != "approval-token" || hit["message"] != message {
+						t.Errorf("%s: the stand-in took %v, want the message %q", use, hit, message)
 					}
 				}
 				if fmt.Sprint(hits[0]) != fmt.Sprint(hits[1]) {
