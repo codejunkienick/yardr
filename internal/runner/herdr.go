@@ -248,7 +248,10 @@ func (h *Herdr) Start(ctx context.Context, job dispatch.Job) (map[string]any, er
 	}
 	handle["workspace"], handle["worktree"] = wt.Workspace.ID, wt.Worktree.Path
 	if job.Pull != nil {
-		head, err := h.pullHead(ctx, wt.Worktree.Path, job.Pull.Number)
+		if job.Pull.Pinned == "" && job.Bead.Type == "pr" && job.Bead.Stage == "fix" {
+			return handle, dispatch.BeadBlocked(fmt.Errorf("pull request %s is in fix with no valid fix_head recorded: the pick is a maintainer's, yardr bead update %s --add-label fix-ok --meta fix_head=<sha>, and a fix starts on the picked head alone", job.Pull.URL, job.Bead.ID))
+		}
+		head, err := h.pullHead(ctx, wt.Worktree.Path, job.Pull.Number, job.Pull.Pinned)
 		if err != nil {
 			// The handle goes back, so what was opened is torn down. No
 			// agent starts: on the base it would review nothing.
@@ -650,16 +653,16 @@ func baseCheckedOut(ctx context.Context, dir, base string) bool {
 }
 
 // pullHead makes the worktree at path stand on the head of the depot
-// origin's pull request n, detached, and returns that commit. It is run at
-// every start of a session on a bead that tracks the pull request, so one
-// started after the pull request was pushed to stands on the new head. The
-// branch yard/<bead> is left where the base is: herdr makes the worktree by
-// it, and nothing of the pull request is the yard's to land. The fetch and
-// the checkout run none of the pull request's code: hooks and filters are
-// the depot's own, not the tree's. Unlike fetchBase's, a failure here is the
-// session's: the pull request closed and its ref gone, no network, or a
-// worktree with changes the checkout would overwrite, which are left.
-func (h *Herdr) pullHead(ctx context.Context, path string, n int) (string, error) {
+// origin's pull request n, detached, and returns that commit: pinned, where
+// one is given, else the live head, so a session started after a push stands
+// on the new head. The branch yard/<bead> is left where the base is: herdr
+// makes the worktree by it, and nothing of the pull request is the yard's to
+// land. The fetch and the checkout run none of the pull request's code: hooks
+// and filters are the depot's own, not the tree's. Unlike fetchBase's, a
+// failure here is the session's: the pull request closed and its ref gone, no
+// network, a pinned head the remote no longer has, or a worktree with changes
+// the checkout would overwrite, which are left.
+func (h *Herdr) pullHead(ctx context.Context, path string, n int, pinned string) (string, error) {
 	timeout := h.FetchTimeout
 	if timeout == 0 {
 		timeout = FetchTimeout
@@ -667,10 +670,14 @@ func (h *Herdr) pullHead(ctx context.Context, path string, n int) (string, error
 	fctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	// Into the worktree's own FETCH_HEAD: no ref of the depot is made or moved.
-	if err := git(fctx, path, "fetch", "--quiet", "origin", fmt.Sprintf("refs/pull/%d/head", n)); err != nil {
+	want, at := fmt.Sprintf("refs/pull/%d/head", n), "FETCH_HEAD"
+	if pinned != "" {
+		want, at = pinned, pinned
+	}
+	if err := git(fctx, path, "fetch", "--quiet", "origin", want); err != nil {
 		return "", err
 	}
-	if err := git(ctx, path, "checkout", "--quiet", "--detach", "FETCH_HEAD"); err != nil {
+	if err := git(ctx, path, "checkout", "--quiet", "--detach", at); err != nil {
 		return "", err
 	}
 	return gitOut(ctx, path, "rev-parse", "HEAD")

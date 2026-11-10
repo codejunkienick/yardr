@@ -40,12 +40,14 @@ flows:
   # runs the depot's tests on its head, the contributor answers on GitHub, a
   # maintainer merges on GitHub, or the yard does for one marked merge-ok (the
   # exec group of the importing yard's own, which the pack does not carry:
-  # docs/line.md, "Merging pull requests"). Nothing of the yard pushes to the
-  # pull request, and nothing of it runs on the yard's machine until a
-  # reviewer has read it, and then only the depot's tests, in ciwait. A
-  # maintainer's yes is of one commit: new commits on a pull request they
-  # accepted take its bead back to triage, and the tests run only at the
-  # commit that was accepted.
+  # docs/line.md, "Merging pull requests"). A reviewed pull request with
+  # findings is fixed by a builder on the head its maintainer picked and
+  # pushed back onto its branch by the yard's script (fix, push), and returns
+  # for a fresh accept of the new head. Nothing of it runs on the yard's
+  # machine until a reviewer has read it, and then only the depot's tests, in
+  # ciwait, and the fix on the head that was read. A maintainer's yes is of
+  # one commit: new commits on a pull request they accepted take its bead back
+  # to triage, and the tests run only at the commit that was accepted.
   #
   # What became of the pull request is the source's word, and it can come
   # while its bead waits in triage, review, review-post, ciwait, contributor
@@ -101,11 +103,26 @@ flows:
       # after a push, since the bead has left the stage.
       ciwait:      { group: pr-ci, file: flows/pr/ciwait.md, outcomes: { done: approved, changes: contributor, pushed: review, unaccepted: triage, merged: merged, dropped: closed } }
       # Waits for the pull request to change: nobody of the yard works it, and
-      # a maintainer can still merge it on GitHub.
-      contributor: { group: outside,      outcomes: { pushed: review, unaccepted: triage, dropped: closed, merged: merged } }
+      # a maintainer can still merge it on GitHub. A reviewed one with findings
+      # is picked for a fix round by hand to fix, after it is labelled fix-ok
+      # and the reviewed head recorded as fix_head (flows/pr/fix.md). The group
+      # has no members, so the move is ungated; the push script checks the
+      # pick, and a stray move holds.
+      contributor: { group: outside,      outcomes: { pushed: review, unaccepted: triage, dropped: closed, merged: merged }, manual: [fix] }
+      # A reviewed pull request with findings is fixed here, on the head its
+      # maintainer picked. The builder holds no key and reads a stranger's text
+      # as the reviewer does; its checkout is the picked head, detached, never
+      # the live tip. What it commits is pushed by the next stage.
+      fix:         { group: builders,     file: flows/pr/fix.md,   outcomes: { done: push, question: decide, merged: merged, dropped: closed } }
+      # The yard pushes the fix onto the pull request's branch as its GitHub
+      # App, waits for its own push to arrive as the bead's head, and sends the
+      # bead back to triage for a fresh accept of the new head. A held push is
+      # resumed by hand to triage, never straight back to push.
+      push:        { group: push-fix,     file: flows/pr/push.md,  outcomes: { done: triage, merged: merged, dropped: closed }, manual: [triage] }
       # Back to ciwait by hand when the head moved after its run: the yard
-      # merges only a head its CI passed on.
-      approved:    { group: maintainers,  file: flows/pr/approved.md, outcomes: { merged: merged, dropped: closed }, manual: [merged, closed, ciwait] }
+      # merges only a head its CI passed on. A maintainer may also return an
+      # approved bead to contributor before picking a fix of its reviewed head.
+      approved:    { group: maintainers,  file: flows/pr/approved.md, outcomes: { merged: merged, dropped: closed }, manual: [merged, closed, ciwait, contributor] }
       # A reviewer's question waits here for a person, and the pull request can
       # be merged or closed on GitHub meanwhile: the bead ends with it, or it
       # would wait for an answer about a pull request that is over.
@@ -138,6 +155,13 @@ groups:
   # (--group post=yardr-post), once for all its depots; the public line's own
   # posting stages are routed to the same group. One at a time.
   post:         { run: scripts/post-review,    limit: 1 }
+  # The yard's push of a fix onto a pull request's branch (flows/pr/push.md).
+  # It works as the yard's GitHub App too, whose id and key file the group's
+  # env_file gives and the import cannot ask for, so a yard sets the group up
+  # first and maps it (--group push-fix=yardr-push), once for all its depots.
+  # One at a time: pushes onto one branch queue anyway. No other stage routes
+  # here, and no hand path leads into it: every push is a fix round's.
+  push-fix:     { run: scripts/push-fix,       limit: 1 }
   # The import asks who.
   maintainers:  { people: true }
   backlog:      { people: true }

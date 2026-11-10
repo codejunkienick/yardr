@@ -127,8 +127,13 @@ func Brief(job dispatch.Job, actor, workdir, home string, st store.API) (string,
 	case workdir != "" && job.Pull != nil && job.Pull.Head != "":
 		// Somebody else's change, already fetched: the role need not say how
 		// to get it, which a sandbox without network could not do anyway.
-		fmt.Fprintf(&b, "Work in `%s`: it is the head of the pull request %s at `%s`, detached, fetched from the depot's origin when this session started. It is on no branch: `%s` is where `%s` was, and a commit made here lands nowhere.\n\n",
-			workdir, job.Pull.URL, job.Pull.Head, Branch(bead), BaseOf(job))
+		if job.Pull.Pinned != "" {
+			fmt.Fprintf(&b, "Work in `%s`: it is the picked head of the pull request %s at `%s`, detached, fetched from the depot's origin when this session started. It is on no branch: `%s` is where `%s` was. Commit the fix here, on no branch: the yard pushes it onto the pull request.\n\n",
+				workdir, job.Pull.URL, job.Pull.Head, Branch(bead), BaseOf(job))
+		} else {
+			fmt.Fprintf(&b, "Work in `%s`: it is the head of the pull request %s at `%s`, detached, fetched from the depot's origin when this session started. It is on no branch: `%s` is where `%s` was, and a commit made here lands nowhere.\n\n",
+				workdir, job.Pull.URL, job.Pull.Head, Branch(bead), BaseOf(job))
+		}
 	case workdir != "":
 		// Builders never push: the branch is landed from this worktree (the
 		// assembly reads it here; a train's integrator pushes the train's).

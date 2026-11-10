@@ -1,0 +1,375 @@
+#!/bin/sh
+# push-fix: the yard pushes a fix onto a pull request's branch. It takes a pr
+# bead in push, pushes the fix commit its builder recorded onto the pull
+# request's branch as the yard's GitHub App, waits for its own push to arrive
+# as the bead's head, and reports done, to triage, for a fresh accept of the
+# new head. Run it as the cmd of an exec group of its own (push-fix, limit 1:
+# one push at a time), routed for the pr flow's push stage (type pr). The
+# contributors pack's flows/pr/push.md says what the stage is for, and
+# docs/line.md, "Fixing a pull request and pushing the fix", has the setup.
+#
+# The pull request is the one the bead tracks (its tracks link, whose URL must
+# be https://github.com/<owner>/<repo>/pull/<n> and nothing else), never one
+# found by a name in metadata or by a branch. GitHub is asked as an
+# installation token of the yard's App scoped to that repository, as merge-pr
+# asks it, minted by contrib/github-mint (the github source's mint_command, or
+# YARDR_GITHUB_MINT in the group's cmd) from GITHUB_APP_ID and
+# GITHUB_APP_PRIVATE_KEY_FILE, which the group's env_file supplies; the
+# operator's own gh login is never used. Needs gh, jq, git and base64 on PATH.
+# The token is narrowed to Contents write and Pull requests read alone (PERMS
+# below): pushing the fix wants Contents write of it, and reading the pull
+# request wants Pull requests read (GitHub's REST docs, "Get a pull request").
+#
+# What is pushed is the fix the builder committed. The builder works the picked
+# head, detached, and records the commit it made as the bead's metadata
+# fix_commit before it reports done (the contributors pack's flows/pr/fix.md).
+# The script pushes that commit and no other.
+#
+# And only on a maintainer's pick. The bead carries the label fix-ok and the
+# picked head as its metadata fix_head, which a maintainer wrote before moving
+# the bead to fix by hand, and the script checks them before it pushes
+# anything: the label is on the bead, the picked head is the head the
+# maintainer accepted (accepted_head, where the pull request waited in triage)
+# and the head the reviewer read (reviewed_head), all one commit, and the pull
+# request still has it. A pick whose heads disagree, or a head that moved
+# since, holds the bead with the commits named: the fix of an old head is
+# never pushed. A bead's agent may not write the pick on any bead, its own
+# included, and fix_commit on another's.
+#
+# The branch is read from the live pull request, never from local config: the
+# head repository and branch GitHub names when the script runs. The push names
+# that URL and that ref, and only that ref. A pull request whose branch
+# forbids maintainer edits is held, not pushed to.
+#
+# The commit is fetched by its sha into a bare repository the script owns, in
+# its temporary directory. It has no checkout, so neither a checkout filter
+# nor code in the pull request runs with the App's inputs in the environment.
+# Its config is not the depot's: a builder can change the depot's local Git
+# config, and that must not redirect the push or add refs to it. Nothing of the
+# builder's worktree is run or read: no git command runs with it as its
+# directory. The script pushes the commit fast-forward only, never forced. The
+# token reaches git as an Authorization header in its environment alone, a
+# shell variable passed to git only, never exported, never in the URL and never
+# in a log, with global and system config off, no prompt and no askpass, so a
+# refused token cannot be answered by anyone's login; hooks are off. A push
+# GitHub refuses (new commits meanwhile, a branch protection, a fix touching
+# .github/workflows without the grant) holds the bead in git's words, never
+# over-parsed: git's atomic fast-forward check is the real guard against a head
+# that moved between the script's read and its push, and the script's live
+# reads are only the clean errors.
+#
+# The script advances only once the bead's head is the pushed commit. Its own
+# push arrives as an event a few seconds later and moves pr_head with no stage
+# change, and the script waits for it, bounded (YARDR_PUSH_WAIT, below): the
+# card triage puts freezes the head it shows, so advancing on the old head
+# would deal a dead card. A timeout holds the bead and names the wait. The
+# script never writes pr_head itself.
+#
+# The outcome at push is done, to triage. Everything that is no push of the
+# fix (no pick, heads that disagree, a head that moved, maintainer edits off,
+# no token, a refused gh, a failed mint or fetch, a pull request that is not
+# open) holds the bead with a note, for the yard to put right: what pushed
+# nothing is unheld and runs again, but a push GitHub refused, or a push whose
+# head never arrived, is resumed by hand to triage, never by unholding here.
+# Nothing here retries.
+#
+# It reads the environment the exec runner gives it: YARDR_BEAD, YARDR_DEPOT,
+# YARDR_DEPOT_PATH, YARDR_BASE, YARDR_WORKTREE and YARDR_BIN. Option, set in
+# the group's cmd:
+#
+#   YARDR_PUSH_WAIT  seconds the script waits for the bead's head to become
+#                    the pushed commit (default and maximum 300)
+#
+# Every outcome ends in a report or a hold: exiting without one counts as a
+# failed session, and three of those hold the bead.
+set -u
+# A dir depot (YARDR_DEPOT_KIND=dir) has no repository to check a fix out of.
+# A route that hands one over is a mistake in the depot's flow, so refuse to
+# run (exit 2) rather than guess.
+if [ "${YARDR_DEPOT_KIND:-git}" = dir ]; then
+  echo "push-fix: depot ${YARDR_DEPOT:-?} is a dir depot, with no repository to check a fix out of; route its stages to other groups" >&2
+  exit 2
+fi
+: "${YARDR_BEAD:?not run by an exec group}" "${YARDR_DEPOT:?bead has no depot}"
+: "${YARDR_DEPOT_PATH:?}"
+Y=${YARDR_BIN:-yardr}
+BEAD=$YARDR_BEAD
+DEPOT=$YARDR_DEPOT
+REPO=$YARDR_DEPOT_PATH
+WAIT=${YARDR_PUSH_WAIT:-300}
+case $WAIT in '' | *[!0-9]*) WAIT=300 ;; esac
+while [ "${WAIT#0}" != "$WAIT" ]; do WAIT=${WAIT#0}; done
+[ -n "$WAIT" ] || WAIT=0
+case ${#WAIT} in
+1 | 2) ;;
+3) [ "$WAIT" -le 300 ] || WAIT=300 ;;
+*) WAIT=300 ;;
+esac
+echo "== $(date '+%Y-%m-%dT%H:%M:%S%z') push-fix $DEPOT $BEAD"
+# bye takes away everything the script made, whichever of it exists. It is the
+# first thing hold and report do, so that nothing is left to do once the session
+# ends (the daemon stops the script as soon as it has reported), and the EXIT
+# trap, for every other way out. The directory the script works in goes last,
+# and from outside it. TERM and INT are ignored while it runs, so that a stop of
+# the session that comes meanwhile cannot leave it half done.
+bye() {
+  trap '' TERM INT
+  cd /
+  [ -z "${work:-}" ] || rm -rf "${work:?}"
+  return 0
+}
+trap 'bye' EXIT
+# A signal that kills the script does not run its EXIT trap, so TERM and
+# INT clean up first and then report as a shell would, 128+n.
+trap 'bye; exit 143' TERM
+trap 'bye; exit 130' INT
+
+# Reporting ends this session (the daemon stops the script), so it is
+# always the last thing done.
+hold() { bye; echo "== hold $BEAD: $1"; "$Y" bead note "$BEAD" "push-fix: $1"; "$Y" bead hold "$BEAD"; exit 0; }
+report() {
+  bye
+  echo "== $BEAD $1"
+  printf '%s\n' "push-fix: $2" | "$Y" bead "done" "$BEAD" --outcome "$1" --note - && exit 0
+  # The pull request may have ended first: a merge or a close moves a bead in
+  # push out of it, and a bead that left is where the report would have taken
+  # it. A maintainer may have moved it by hand too.
+  left=$("$Y" bead show "$BEAD" --json 2>/dev/null | jq -r '.stage // empty')
+  [ -z "$left" ] || [ "$left" = push ] || { echo "== $BEAD is in $left already"; exit 0; }
+  hold "could not report $1 (does the bead's flow name it for its stage?): $2"
+}
+# gh is run from a directory that is no checkout, so nothing it does to a
+# local branch can reach anyone's work; the run's files are in it too.
+work=$(mktemp -d) && errf=$work/err || exit 1
+cd "$work" || exit 1
+
+command -v gh >/dev/null 2>&1 || hold "gh is not on PATH; not pushing the fix."
+command -v jq >/dev/null 2>&1 || hold "jq is not on PATH; not pushing the fix."
+command -v git >/dev/null 2>&1 || hold "git is not on PATH; not pushing the fix."
+command -v base64 >/dev/null 2>&1 || hold "base64 is not on PATH; not pushing the fix."
+
+# With --json yardr reports an error as {"error": ...} on stdout. Capture
+# stderr for the hold note, then replay it so warnings stay in the group's log.
+bead=$("$Y" bead show "$BEAD" --json 2>"$errf") || {
+  reason=$({ cat "$errf"; printf '%s' "$bead"; } | head -c 500)
+  cat "$errf" >&2
+  hold "reading $BEAD failed: $reason"
+}
+cat "$errf" >&2
+
+# A pull request's branch is pushed nowhere before its fix: a route that sends
+# another stage's bead here (a typo, a copy of the pack's flow under other
+# names) must not push what no builder fixed.
+[ "$(printf '%s' "$bead" | jq -r '.stage // empty')" = push ] ||
+  hold "$BEAD is not in push, the stage after a builder has fixed the picked head, and the yard pushes a pull request's branch nowhere before it. Not pushing anything."
+
+# fix-ok is the pick: a bead without the label (moved here by hand, the label
+# forgotten) is not pushed.
+printf '%s' "$bead" | jq -e '(.labels // []) | index("fix-ok")' >/dev/null ||
+  hold "$BEAD does not carry fix-ok, which picks it for a fix round. Not pushing the fix. A maintainer picks with: yardr bead update $BEAD --add-label fix-ok --meta fix_head=<sha of the head commit they looked at>, then yardr bead unhold $BEAD."
+
+NOT="not pushing the fix" STAGE=push
+# The token's permissions, the least the gh calls below need: pushing the fix
+# wants Contents write of the token, and reading the pull request wants Pull
+# requests read of it (GitHub's REST docs, "Get a pull request"). The shared
+# lines pass them to the mint, which posts them in the access_tokens body.
+PERMS='{"contents":"write","pull_requests":"read"}'
+# --- github_binding: the same text in merge-pr, pr-ci and push-fix (a test holds them equal) ---
+# NOT, STAGE and PERMS are each script's own: what it leaves undone and where
+# the bead waits, and the least permissions its token needs; everything else
+# is one text.
+#
+# The pull request is the one the bead tracks, by the URL of the link and
+# nothing else: owner, repository and number are read from it, and a URL of
+# another shape (another host, an issue, a path past the number) is refused.
+url=$(printf '%s' "$bead" | jq -r '[.links[]? | select(.kind == "tracks" and .source == "github") | .url] | first // empty')
+[ -n "$url" ] ||
+  hold "$BEAD tracks no GitHub pull request (no tracks link of source github); $NOT. Link it with yardr link, or take the bead out of $STAGE."
+printf '%s' "$url" | grep -Eq '^https://github\.com/[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+/pull/[1-9][0-9]*$' ||
+  hold "$BEAD tracks $url, which is not a pull request address (https://github.com/<owner>/<repo>/pull/<n>); $NOT."
+path=${url#https://github.com/}
+owner=${path%%/*}
+rest=${path#*/}
+repo=${rest%%/*}
+case $repo in . | ..) hold "$BEAD tracks $url, which is not a pull request address (https://github.com/<owner>/<repo>/pull/<n>); $NOT." ;; esac
+slug=$owner/$repo
+
+# The token: minted for this repository alone, from the App's id and key file
+# the group's env_file gives, and held in this process's memory for the calls
+# below. It is passed to gh in its environment, never in an argument, and is
+# printed nowhere. The mint command is the github source's own unless the
+# group's cmd names another. The token is narrowed to the permissions PERMS
+# names, each script's own least set above, which the mint posts in the
+# access_tokens body; a name or level outside the mint's list refuses the mint.
+[ -n "${GITHUB_APP_ID:-}" ] && [ -n "${GITHUB_APP_PRIVATE_KEY_FILE:-}" ] ||
+  hold "this group's environment has no GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_FILE, which the yard's GitHub App is minted from (the group's env_file); $NOT."
+mint=${YARDR_GITHUB_MINT:-}
+[ -n "$mint" ] || mint=$("$Y" source show github --json 2>/dev/null | jq -r '.source.mint_command // empty')
+[ -n "$mint" ] ||
+  hold "the github source has no mint_command and the group's cmd sets no YARDR_GITHUB_MINT; $NOT. Install contrib/github-mint, then yardr source set github mint_command=<its path>."
+# mint_command has the same space-split, no-shell contract as yardr's source
+# mint. Disable pathname expansion while forming argv so a configured `*`
+# stays an argument and never grows into files in the runner's directory.
+mint_token() {
+  set -f
+  # shellcheck disable=SC2086
+  set -- $mint
+  set +f
+  [ "$#" -gt 0 ] || return 1
+  YARDR_SOURCE_BASE=https://api.github.com "$@" 2>/dev/null
+}
+tokjson=$(jq -nc --arg id "$GITHUB_APP_ID" --arg key "$GITHUB_APP_PRIVATE_KEY_FILE" --arg scope "$slug" --argjson permissions "$PERMS" \
+  '{inputs: {GITHUB_APP_ID: $id, GITHUB_APP_PRIVATE_KEY_FILE: $key}, scope: $scope, permissions: $permissions}' |
+  mint_token) ||
+  hold "minting a token for $slug failed; the mint's output is not copied to the bead. $NOT."
+token=$(printf '%s' "$tokjson" | jq -r '.token // empty')
+unset tokjson
+[ -n "$token" ] || hold "minting a token for $slug answered no token; $NOT."
+gh_() { GH_TOKEN=$token gh "$@"; }
+# --- end of github_binding ---
+
+short() { printf '%s' "$1" | cut -c1-7; }
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+# fullsha keeps a commit's sha and empties anything else: the heads below go
+# into git's arguments and the pick's comparisons, as merge-pr takes merge_head.
+fullsha() {
+  case $1 in *[!0-9a-fA-F]*) return 1 ;; esac
+  case ${#1} in 40 | 64) printf '%s' "$1" ;; *) return 1 ;; esac
+}
+
+pr=$(gh_ pr view "$url" --json number,state,headRefOid,headRefName,headRepository,headRepositoryOwner,maintainerCanModify 2>"$errf") ||
+  hold "reading pull request $url failed: $(head -c 500 "$errf")"
+state=$(printf '%s' "$pr" | jq -r '.state // empty')
+head=$(printf '%s' "$pr" | jq -r '.headRefOid // empty')
+ref=$(printf '%s' "$pr" | jq -r '.headRefName // empty')
+headrepo=$(printf '%s' "$pr" | jq -r 'if .headRepositoryOwner.login and .headRepository.name then .headRepositoryOwner.login + "/" + .headRepository.name else empty end')
+edits=$(printf '%s' "$pr" | jq -r '.maintainerCanModify | tostring')
+
+# A pull request that is not open has no branch to push to: it was merged or
+# closed while the bead waited. The source says so (merged, dropped, which
+# end the bead), but a run can find it over before the source has, and no
+# event moves a held bead. A maintainer sees it on GitHub and moves the bead.
+[ "$state" = OPEN ] ||
+  hold "pull request $url is in state ${state:-unknown}, not OPEN, so there is no branch to push the fix to. Not pushing anything."
+head=$(fullsha "$head") || head=
+[ -n "$head" ] || hold "GitHub gave no head commit for $url that is a full commit sha; not pushing the fix."
+at=$(short "$head")
+# The ref goes into the push as refs/heads/<branch>: a branch name and
+# nothing else, as git reads one.
+git check-ref-format --branch "${ref:-.}" >/dev/null 2>&1 ||
+  hold "GitHub gave no branch name for $url that git reads as one; not pushing the fix."
+# The head repository goes into the push URL: an owner and a name, as the
+# tracks link reads them.
+printf '%s' "$headrepo" | grep -Eq '^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+$' ||
+  hold "GitHub gave no head repository for $url that is an owner and a name; not pushing the fix."
+case ${headrepo#*/} in . | ..) hold "GitHub gave no head repository for $url that is an owner and a name; not pushing the fix." ;; esac
+# The push lands on the contributor's branch through maintainer edits alone:
+# a branch that forbids them is not pushed to, whatever else holds.
+case $edits in
+true) ;;
+false) hold "pull request $url forbids maintainer edits, so the yard cannot push the fix onto $headrepo $ref. Not pushing anything. Once the author re-enables them, yardr bead unhold $BEAD runs this again; or advance the bead to triage to let the round go." ;;
+*) hold "GitHub gave no maintainerCanModify for $url; not pushing the fix." ;;
+esac
+
+# The pick is the picked head, the accepted head and the reviewed head, all
+# one commit, and the pull request still has it. Each is read as a full sha
+# and compared without regard to case, as pr-ci reads them; anything else one
+# holds is not echoed. Whatever disagrees, or is missing, needs a fresh round:
+# the fix of an old head is never pushed, and the new head returns through
+# triage for a fresh accept. Newer beads keep rounds, and older ones keep
+# visited, so both say whether triage was reached.
+picked=$(printf '%s' "$bead" | jq -r '.metadata.fix_head // empty')
+picked=$(fullsha "$picked") || picked=
+[ -n "$picked" ] ||
+  hold "$BEAD has no fix_head that is a full commit sha (40 hex digits; 64 for a repository on sha256), so there is no telling which head was picked to fix. Not pushing anything. A maintainer picks with: yardr bead update $BEAD --add-label fix-ok --meta fix_head=<sha of the head commit they looked at>, then yardr bead unhold $BEAD."
+reviewed=$(printf '%s' "$bead" | jq -r '.metadata.reviewed_head // empty')
+reviewed=$(fullsha "$reviewed") || reviewed=
+[ -n "$reviewed" ] ||
+  hold "$BEAD has no reviewed_head that is a full commit sha, so there is no telling that the picked $picked was read. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD --to triage) for a fresh accept and review, then pick again."
+[ "$(lower "$picked")" = "$(lower "$reviewed")" ] ||
+  hold "fix_head $(short "$picked") is not the reviewed $(short "$reviewed"): the pick is stale or was mistyped, and the fix of an old head is never pushed. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD --to triage) for a fresh accept and review, then pick again; a mistyped pick is put right with yardr bead update $BEAD --meta fix_head=<sha>, then yardr bead unhold $BEAD."
+triaged=$(printf '%s' "$bead" | jq -r 'if ((.rounds // {}) | has("triage")) or ((.visited // []) | index("triage") != null) then "yes" else empty end')
+if [ -n "$triaged" ]; then
+  accepted=$(printf '%s' "$bead" | jq -r '.metadata.accepted_head // empty')
+  accepted=$(fullsha "$accepted") || accepted=
+  [ -n "$accepted" ] ||
+    hold "$BEAD waited in triage and has no accepted_head that is a full commit sha, so there is no telling that the picked $picked is the one a maintainer accepted. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD --to triage) for a fresh accept, then pick again."
+  [ "$(lower "$picked")" = "$(lower "$accepted")" ] ||
+    hold "fix_head $(short "$picked") is not the accepted $(short "$accepted"): the pick is stale or was mistyped, and the fix of an old head is never pushed. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD --to triage) for a fresh accept, then pick again."
+fi
+
+# What is pushed is the builder's recorded fix commit: a full sha, and not
+# the picked head itself, which would push nothing new.
+fix=$(printf '%s' "$bead" | jq -r '.metadata.fix_commit // empty')
+fix=$(fullsha "$fix") || fix=
+[ -n "$fix" ] ||
+  hold "$BEAD has no fix_commit that is a full commit sha, so there is no telling which commit the fix made. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD --to triage): the round starts again from a fresh accept and a fresh fix."
+[ "$(lower "$fix")" != "$(lower "$picked")" ] ||
+  hold "fix_commit $(short "$fix") is the picked head itself: the builder recorded no fix commit. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD --to triage): the round starts again from a fresh accept and a fresh fix."
+fsh=$(short "$fix")
+
+# The pull request still has the picked head, or the fix is of an old head.
+# One exception: it has the fix commit, which means the push went out and the
+# run ended before it reported it (no author can land on the builder's sha by
+# their own hand). Then there is nothing to push, and the run waits for the
+# head below as a push of its own would.
+if [ "$(lower "$head")" != "$(lower "$picked")" ]; then
+  [ "$(lower "$head")" = "$(lower "$fix")" ] ||
+    hold "head $at is not the picked $(short "$picked"): the pull request moved since the pick, and the fix of an old head is never pushed. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD --to triage) for a fresh accept of $at, then pick again."
+else
+  # Fetch the fix by sha into a bare repository with an empty template. It
+  # shares no local config with the depot and never checks out the stranger's
+  # tree, so its attributes cannot run a smudge filter while the App inputs
+  # are present. Its temporary directory is removed by bye on every exit.
+  pushrepo=$work/repo
+  mkdir "$work/template" "$work/nohooks"
+  git_clean() {
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=0 GIT_CONFIG_PARAMETERS='' git "$@"
+  }
+  git_clean -C "$REPO" cat-file -e "$fix^{commit}" 2>/dev/null ||
+    hold "$REPO has no commit $fsh: the recorded fix is not in the depot. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD): the round starts again from a fresh accept and a fresh fix."
+  git_clean init --quiet --bare --template="$work/template" "$pushrepo" >"$errf" 2>&1 ||
+    hold "cannot make the push repository $pushrepo: $(head -c 500 "$errf")"
+  git_clean -C "$pushrepo" fetch --quiet --no-tags --no-recurse-submodules "$REPO" "$fix" >"$errf" 2>&1 ||
+    hold "cannot fetch $fsh by sha from $REPO into the push repository: $(head -c 500 "$errf")"
+  git_clean -C "$pushrepo" cat-file -e "$fix^{commit}" 2>/dev/null ||
+    hold "the push repository has no commit $fsh after its fetch from $REPO. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD): the round starts again from a fresh accept and a fresh fix."
+  git_clean -C "$pushrepo" merge-base --is-ancestor "$picked" "$fix" 2>/dev/null ||
+    hold "fix_commit $fsh is not on the picked $(short "$picked"): it is not the fix of this pick. Not pushing anything. Advance the bead to triage (yardr bead advance $BEAD): the round starts again from a fresh accept and a fresh fix."
+
+  # The push, as the trial made it: the head repository's URL and the branch's
+  # ref, named outright, fast-forward only, never forced. The token reaches
+  # git as an Authorization header in git's environment alone: shell variables
+  # passed to git only, never exported, never in the URL and never in a log,
+  # with git's own config off and no prompt and no askpass, so a refused token
+  # cannot be answered by anyone's login. Hooks are off. What is pushed is the
+  # fix commit and only that ref.
+  auth=$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n') || auth=
+  unset token
+  [ -n "$auth" ] || hold "the token could not be given to git; not pushing the fix."
+  pushurl="https://github.com/$headrepo.git"
+  out=$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="Authorization: Basic $auth" GIT_CONFIG_PARAMETERS='' GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=true SSH_ASKPASS=true \
+    git -C "$pushrepo" -c credential.helper= -c core.hooksPath="$work/nohooks" -c push.followTags=false push "$pushurl" "$fix:refs/heads/$ref" 2>&1) || {
+    rc=$?
+    unset auth
+    said=$(printf '%s' "$out" | head -n 10 | head -c 2000)
+    hold "GitHub refused the push of $fsh onto $headrepo $ref (git exit $rc), in git's words: $said. Resume by hand to triage (yardr bead advance $BEAD --to triage): the round starts again from a fresh accept of the head the branch has now."
+  }
+  unset auth out
+fi
+
+# The bead's head becomes the pushed commit when the yard hears its own push,
+# an event a few seconds later that moves pr_head with no stage change. The
+# run waits for it, bounded: the card triage puts freezes the head it shows,
+# so reporting on the old head would deal a dead card. The script never writes
+# pr_head itself.
+start=$(date +%s)
+while :; do
+  now=$("$Y" bead show "$BEAD" --json 2>/dev/null | jq -r '.metadata.pr_head // empty')
+  [ "$(lower "$now")" = "$(lower "$fix")" ] && break
+  [ "$(($(date +%s) - start))" -ge "$WAIT" ] &&
+    hold "waited $WAIT s for the bead's head to become the pushed $fsh, and it is ${now:-none}: the push is on $headrepo $ref, but the yard has not heard its own event. Advance to triage by hand (yardr bead advance $BEAD --to triage) once pr_head is the pushed commit; the card there freezes the head it shows."
+  sleep 5
+done
+
+report "done" "pushed $fsh onto $headrepo $ref, and the bead's head is it: the new head returns for a fresh accept in triage, then review, the yard's CI and a fresh maintainer's yes. The push is public already."

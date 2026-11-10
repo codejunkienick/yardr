@@ -306,8 +306,8 @@ func createdData(b *Bead) map[string]any {
 // member's pane the bead is created as that session's actor or that crew
 // member, whatever actor says; from anywhere else, as given (paneAuthor).
 // A bead's agent may not pin the new bead's flow, file it past its flow's
-// first stage where no person looks first, or create it with merge permission
-// or a CI verdict (checkAgentCreate).
+// first stage where no person looks first, or create it with merge permission,
+// a fix pick or a CI verdict (checkAgentCreate).
 func (s *Store) CreateBead(ctx context.Context, nb NewBead, actor string) (*Bead, error) {
 	create, err := s.newBead(ctx, nb, actor)
 	if err != nil {
@@ -600,25 +600,23 @@ func (w *wtx) createBead(ctx context.Context, nb NewBead, actor string, reads *b
 
 // checkAgentCreate refuses a bead's agent (beadAgent) a new bead b, of flow
 // f, that would skip what the flow puts first: a flow pin, which chooses a
-// flow of the agent's own (UpdateBead refuses it too), a merge permission,
-// CI verdict or review's head, or a stage past the flow's first
+// flow of the agent's own (UpdateBead refuses it too), a merge permission, a
+// fix pick, a CI verdict or review's head, or a stage past the flow's first
 // (checkAgentStage).
 func (w *wtx) checkAgentCreate(ctx context.Context, f *Flow, b Bead, stage string) error {
 	sess, err := beadAgent(w.Tx, ctx)
 	if err != nil || sess == nil {
 		return err
 	}
-	if slices.Contains(b.Labels, labelMergeOK) {
-		return fmt.Errorf("the session %s of a bead's agent may not create a bead with merge-ok, whatever actor the command names; a reviewer says it on the pull request it read", sess.ID)
+	for _, no := range agentCreateLabels {
+		if slices.Contains(b.Labels, no.key) {
+			return fmt.Errorf("the session %s of a bead's agent may not create a bead with %s, whatever actor the command names; %s", sess.ID, no.key, no.why)
+		}
 	}
-	if _, ok := b.Metadata[metaMergeHead]; ok {
-		return fmt.Errorf("the session %s of a bead's agent may not create a bead with merge_head, whatever actor the command names; a maintainer's yes is theirs", sess.ID)
-	}
-	if _, ok := b.Metadata[metaCIHead]; ok {
-		return fmt.Errorf("the session %s of a bead's agent may not create a bead with ci_head, whatever actor the command names; the script that ran the tests writes it", sess.ID)
-	}
-	if _, ok := b.Metadata[metaReviewedHead]; ok {
-		return fmt.Errorf("the session %s of a bead's agent may not create a bead with reviewed_head, whatever actor the command names; a reviewer records it on the pull request it read", sess.ID)
+	for _, no := range agentCreateMeta {
+		if _, ok := b.Metadata[no.key]; ok {
+			return fmt.Errorf("the session %s of a bead's agent may not create a bead with %s, whatever actor the command names; %s", sess.ID, no.key, no.why)
+		}
 	}
 	if key, why := yardHead(b.Metadata); key != "" {
 		return fmt.Errorf("the session %s of a bead's agent may not create a bead with %s, whatever actor the command names; %s", sess.ID, key, why)
@@ -1342,11 +1340,11 @@ func (w *wtx) setOriginator(ctx context.Context, id, to string, exp Expect, acto
 // with no live session. From a session's or a crew member's pane the
 // update is recorded as that session's actor or that crew member, whatever
 // actor says; from anywhere else, as given (paneAuthor). A bead's agent
-// may not change a bead's type or depot (checkFlowChange), may say
-// merge-ok only on its own bead and may not record merge_head on any
-// (checkMergeOK), may record reviewed_head only on its own (checkReviewedHead),
-// and may not record ci_head, accepted_head or the heads a card shows on any
-// (checkCIHead, checkAcceptedHead).
+// may not change a bead's type or depot (checkFlowChange), may say merge-ok
+// only on its own bead and no fix-ok on any, may not record merge_head on any
+// (checkMergeOK, checkFixPick), may record reviewed_head or fix_commit only
+// on its own (checkReviewedHead, checkFixPick), and may not record ci_head,
+// accepted_head, fix_head or a card's heads on any (checkCIHead, checkAcceptedHead).
 func (s *Store) UpdateBead(ctx context.Context, id string, p BeadPatch, exp Expect, actor string) (*Bead, error) {
 	if p.Title != nil && strings.TrimSpace(*p.Title) == "" {
 		return nil, fmt.Errorf("a bead needs a title")
@@ -1425,6 +1423,8 @@ func (s *Store) UpdateBead(ctx context.Context, id string, p BeadPatch, exp Expe
 				return "", nil, err
 			}
 			if err := w.checkMergeOK(ctx, b, p); err != nil {
+				return "", nil, err
+			} else if err := w.checkFixPick(ctx, b, p); err != nil {
 				return "", nil, err
 			}
 			if err := w.checkReviewRecords(ctx, b, p); err != nil {

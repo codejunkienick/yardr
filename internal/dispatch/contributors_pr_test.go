@@ -753,24 +753,32 @@ func TestContributorsReviewIsPostedBeforeTheWait(t *testing.T) {
 // A pull request merged or closed on GitHub ends its bead wherever the bead
 // waits but approved, which had the edges first: in triage, under review,
 // while its review is posted, in the wait for the yard's CI, with the
-// contributor and in decide, where a reviewer's question leaves it for a
-// person. The pack's two lines name no stage, so a stage without an edge for
-// them left the event nowhere to go, and the bead open on a pull request that
-// was over. Where the bead is worked its session ends with it: the reviewer's
-// is stopped, and so are the posting's and the yard's CI, whose report is then
-// refused as one from a stage the bead has left, as it is after a push.
+// contributor, in fix and push, and in decide, where a reviewer's question
+// leaves it for a person. The pack's two lines name no stage, so a stage
+// without an edge for them left the event nowhere to go, and the bead open on
+// a pull request that was over. Where the bead is worked its session ends
+// with it: the reviewer's is stopped, and so are the posting's, the yard's
+// CI, the builder's and the push's, whose report is then refused as one from
+// a stage the bead has left, as it is after a push.
 func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 	t.Parallel()
 	r := newContributorsYard(t)
 	r.reviewedBy(t, "pr-reviewers")
 	ctx := context.Background()
 	peopleGroup := r.peopleStages(t)
+	pr, everyone := "pr", store.OriginatorAny
+	must(t, r.api.PutGroup(ctx, store.Group{Name: "builders", Runner: "fake", Limit: 50}, "me"))
+	must(t, r.api.PutGroup(ctx, store.Group{Name: "push-fix", Runner: "fake", Limit: 1}, "me"))
+	_, err := r.api.AddRoute(ctx, store.Route{Stage: "fix", Type: &pr, Originator: &everyone, Group: "builders"}, "me")
+	must(t, err)
+	_, err = r.api.AddRoute(ctx, store.Route{Stage: "push", Type: &pr, Originator: &everyone, Group: "push-fix"}, "me")
+	must(t, err)
 
 	// arrive makes the bead of a new pull request and takes it to stage as its
 	// events and reports would: a stranger's waits in triage, a bot's goes
 	// to the reader, whose verdict sends it on to the posting of its review,
-	// then to the wait for CI or back to its contributor, or to a person with a
-	// question.
+	// then to the wait for CI or back to its contributor, to a fix round by a
+	// maintainer's hand, or to a person with a question.
 	number := 50
 	arrive := func(stage string) *store.Bead {
 		number++
@@ -788,6 +796,14 @@ func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 			r.reviewerSays(t, b.ID, false)
 		case "contributor":
 			r.reviewerAsksChanges(t, b.ID)
+		case "fix", "push":
+			r.reviewerAsksChanges(t, b.ID)
+			_, err := r.api.Advance(ctx, b.ID, "fix", store.Expect{}, "me")
+			must(t, err)
+			if stage == "push" {
+				_, err = r.api.Done(ctx, b.ID, "done", "fixed", store.Expect{Stage: "fix"}, "me")
+				must(t, err)
+			}
 		case "decide":
 			_, err := r.api.Done(ctx, b.ID, "question", "is this change wanted?", store.Expect{Stage: "review"}, "me")
 			must(t, err)
@@ -814,7 +830,7 @@ func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 		return sessions
 	}
 
-	for _, stage := range []string{"triage", "review", "review-post", "ciwait", "contributor", "decide"} {
+	for _, stage := range []string{"triage", "review", "review-post", "ciwait", "contributor", "fix", "push", "decide"} {
 		for _, c := range []struct{ fixture, outcome, to string }{
 			{"pull_request_closed_merged", "merged", "merged"},
 			{"pull_request_closed_unmerged", "dropped", "closed"},
@@ -857,7 +873,79 @@ func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 					t.Errorf("%s in %s with ci_head %v after a late report, want %s with none", b.ID, got.Stage, got.Metadata["ci_head"], c.to)
 				}
 			}
+			if stage == "fix" {
+				if _, err := r.api.Done(ctx, b.ID, "done", "fixed", store.Expect{Stage: "fix"}, "me"); err == nil {
+					t.Errorf("a report from fix on %s was taken after its pull request was %s", b.ID, c.outcome)
+				}
+			}
+			if stage == "push" {
+				if _, err := r.api.Done(ctx, b.ID, "done", "push-fix: pushed", store.Expect{Stage: "push"}, "me"); err == nil {
+					t.Errorf("a report from push on %s was taken after its pull request was %s", b.ID, c.outcome)
+				}
+			}
 		}
+	}
+}
+
+// New commits on a pull request whose bead waits in fix or push move its
+// head and nothing else: neither stage hears pushed or unaccepted, whoever
+// pushed and whether or not a maintainer accepted the pull request, and the
+// round's pick is checked by the push script against the head the pull
+// request has when it runs.
+func TestContributorsPushInFixAndPushMovesTheHeadOnly(t *testing.T) {
+	t.Parallel()
+	r := newContributorsYard(t)
+	r.peopleStages(t)
+	ctx := context.Background()
+	number := 90
+	outsider := func(n int, edits ...func(map[string]any)) []func(map[string]any) {
+		return append([]func(map[string]any){prEvent(n, "someone", "User"), authorIs("NONE")}, edits...)
+	}
+	where := func(id string) (stage string, accepted, pr any) {
+		r.pass(t)
+		b := r.bead(t, id)
+		return b.Stage, b.Metadata["accepted_head"], b.Metadata["pr_head"]
+	}
+	toFix := func(n int) *store.Bead {
+		r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(n)...)
+		b := r.madeIn(t, n, "triage")
+		r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(n, labeledBy("accepted", "a-maintainer", "User"))...)
+		r.pass(t)
+		if st := r.stageOf(t, b.ID); st != "review" {
+			t.Fatalf("%s in %s, want review", b.ID, st)
+		}
+		r.reviewerAsksChanges(t, b.ID)
+		if _, err := r.api.Advance(ctx, b.ID, "fix", store.Expect{}, "me"); err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	for _, stage := range []string{"fix", "push"} {
+		for _, who := range []struct{ login, kind string }{{"someone", "User"}, {"an-app[bot]", "Bot"}} {
+			number++
+			b := toFix(number)
+			if stage == "push" {
+				_, err := r.api.Done(ctx, b.ID, "done", "fixed", store.Expect{Stage: "fix"}, "me")
+				must(t, err)
+			}
+			if got := r.stageOf(t, b.ID); got != stage {
+				t.Fatalf("%s in %s, want %s", b.ID, got, stage)
+			}
+			r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, bearing("accepted"), atHead(movedSHA), pushedBy(who.login, who.kind))...)
+			if got, accepted, pr := where(b.ID); got != stage || accepted != fixtureSHA || pr != movedSHA {
+				t.Errorf("%s pushed to by a %s in %s: %s in %s with accepted_head %v and pr_head %v, want %s with %s and %s",
+					b.ID, who.kind, stage, b.ID, got, accepted, pr, stage, fixtureSHA, movedSHA)
+			}
+		}
+	}
+	// The label may be gone before the push: the bead's triage history still
+	// says unaccepted everywhere else, but fix hears nothing either way.
+	number++
+	b := toFix(number)
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, bearing(), atHead(movedSHA))...)
+	if got, accepted, pr := where(b.ID); got != "fix" || accepted != fixtureSHA || pr != movedSHA {
+		t.Errorf("%s pushed to in fix after its accepted label was removed: %s with accepted_head %v and pr_head %v, want fix with %s and %s",
+			b.ID, got, accepted, pr, fixtureSHA, movedSHA)
 	}
 }
 

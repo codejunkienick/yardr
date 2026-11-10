@@ -136,7 +136,7 @@ NOT="not merging" STAGE=approved
 # required for GitHub Apps" for the deleted branch). The shared lines pass
 # them to the mint, which posts them in the access_tokens body.
 PERMS='{"contents":"write","pull_requests":"read"}'
-# --- github_binding: the same text in merge-pr and pr-ci (a test holds them equal) ---
+# --- github_binding: the same text in merge-pr, pr-ci and push-fix (a test holds them equal) ---
 # NOT, STAGE and PERMS are each script's own: what it leaves undone and where
 # the bead waits, and the least permissions its token needs; everything else
 # is one text.

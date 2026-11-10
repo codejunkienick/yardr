@@ -703,11 +703,11 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 
 // pr-ci takes its binding of a bead to its pull request, and its token, from
 // merge-pr's text, copied: the scripts are installed one file each, so there is
-// none to source. A change to one is made in both, as to the credit loop of the
-// tests' deadline (TestCreditLoopsAreMergeLocals).
+// none to source. A change to one is made in all three, as to the credit loop
+// of the tests' deadline (TestCreditLoopsAreMergeLocals).
 func TestPRCIBindsAsMergePRDoes(t *testing.T) {
 	want, got := markedBlock(t, "merge-pr", bindingOpen, bindingClose), markedBlock(t, "pr-ci", bindingOpen, bindingClose)
 	if got != want {
-		t.Errorf("pr-ci's github_binding differs from merge-pr's: change both\nmerge-pr:\n%s\npr-ci:\n%s", want, got)
+		t.Errorf("pr-ci's github_binding differs from merge-pr's: change all three\nmerge-pr:\n%s\npr-ci:\n%s", want, got)
 	}
 }

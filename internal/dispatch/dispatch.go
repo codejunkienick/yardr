@@ -1363,7 +1363,7 @@ func (d *Dispatcher) route(ctx context.Context, groups map[string]store.Group, a
 			if err != nil {
 				return err
 			}
-			pull = d.pullOf(ctx, links, b.Metadata)
+			pull = d.pullOf(ctx, links, &b)
 		}
 
 		if paused {

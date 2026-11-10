@@ -45,8 +45,9 @@ esac`)
 // worktree on it, detached, with yard/<bead> where the base is and the brief
 // saying which commit it is. A later session fetches again, so it stands on
 // what was pushed meanwhile; a pull request whose ref is gone fails the
-// start with git's error and starts no agent. A bead that tracks none is on
-// its branch as ever.
+// start with git's error and starts no agent. A pr bead in fix is pinned to
+// the head its maintainer picked instead of the live tip, and a fix with no
+// pick starts nothing. A bead that tracks none is on its branch as ever.
 func TestHerdrPullRequestHeadInTheWorktree(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -67,8 +68,8 @@ func TestHerdrPullRequestHeadInTheWorktree(t *testing.T) {
 	depot := store.Depot{Name: "r", Path: repo, Base: "main"}
 	log := filepath.Join(t.TempDir(), "calls")
 	h := &Herdr{Socket: fakeHerdrAPI(t, log), Bin: pullHerdr(t, log), WorktreeRoot: t.TempDir()}
-	job := func(id, stage string, pull *dispatch.Pull) dispatch.Job {
-		return dispatch.Job{Bead: store.Bead{ID: id, Stage: stage}, Group: store.Group{Name: "reviewers"},
+	job := func(id, typ, stage string, pull *dispatch.Pull) dispatch.Job {
+		return dispatch.Job{Bead: store.Bead{ID: id, Type: typ, Stage: stage}, Group: store.Group{Name: "reviewers"},
 			Depot: &depot, Session: store.Session{ID: "s-" + id + "-" + stage}, Pull: pull}
 	}
 	wt := filepath.Join(h.WorktreeRoot, "r", "r-1")
@@ -88,7 +89,7 @@ func TestHerdrPullRequestHeadInTheWorktree(t *testing.T) {
 	}
 
 	pull := &dispatch.Pull{URL: url, Number: 1}
-	handle, err := h.Start(ctx, job("r-1", "review", pull))
+	handle, err := h.Start(ctx, job("r-1", "", "review", pull))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +119,7 @@ func TestHerdrPullRequestHeadInTheWorktree(t *testing.T) {
 	gitT(t, src, "push", "-q", origin, "theirs:refs/pull/1/head")
 	p2 := gitOutT(t, src, "rev-parse", "theirs")
 	os.Remove(log)
-	if handle, err = h.Start(ctx, job("r-1", "review", pull)); err != nil {
+	if handle, err = h.Start(ctx, job("r-1", "", "review", pull)); err != nil {
 		t.Fatal(err)
 	}
 	stands(p2)
@@ -132,17 +133,73 @@ func TestHerdrPullRequestHeadInTheWorktree(t *testing.T) {
 	// Its worktree cleaned up meanwhile: made again from the branch, then
 	// put on the head as the first time.
 	gitT(t, repo, "worktree", "remove", wt)
-	if _, err = h.Start(ctx, job("r-1", "review", pull)); err != nil {
+	if _, err = h.Start(ctx, job("r-1", "", "review", pull)); err != nil {
 		t.Fatal(err)
 	}
 	stands(p2)
+
+	// A pr bead in fix is pinned to the head its maintainer picked, not the
+	// live tip: the pull request moves on, and the fix session's worktree
+	// stands on the picked head, detached, with the brief saying it is the
+	// picked head and that the fix is committed there.
+	gitT(t, src, "commit", "-q", "--allow-empty", "-m", "P3")
+	gitT(t, src, "push", "-q", origin, "theirs:refs/pull/1/head")
+	p3 := gitOutT(t, src, "rev-parse", "theirs")
+	fixpull := &dispatch.Pull{URL: url, Number: 1, Pinned: p1}
+	handle, err = h.Start(ctx, job("r-3", "pr", "fix", fixpull))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt3 := filepath.Join(h.WorktreeRoot, "r", "r-3")
+	if got := gitOutT(t, wt3, "rev-parse", "HEAD"); got != p1 {
+		t.Fatalf("fix worktree at %s, want the picked head %s (live is %s)", got, p1, p3)
+	}
+	if br, err := gitOut(ctx, wt3, "symbolic-ref", "-q", "HEAD"); err == nil {
+		t.Fatalf("fix worktree is on %s, want it detached", br)
+	}
+	if handle["pull_head"] != p1 {
+		t.Fatalf("handle = %v, want pull_head %s", handle, p1)
+	}
+	brief = string(mustRead(t, handle["brief"].(string)))
+	if want := "it is the picked head of the pull request " + url + " at `" + p1 + "`, detached"; !strings.Contains(brief, want) {
+		t.Fatalf("brief lacks %q:\n%s", want, brief)
+	}
+	if !strings.Contains(brief, "Commit the fix here, on no branch") {
+		t.Fatalf("brief still tells the session its commits land nowhere:\n%s", brief)
+	}
+
+	// A pr bead in fix with no pinned head starts nothing: the pick is a
+	// maintainer's, and a fix starts on the picked head alone. Its handle is
+	// kept for the teardown, and no agent is started.
+	os.Remove(log)
+	handle, err = h.Start(ctx, job("r-4", "pr", "fix", &dispatch.Pull{URL: url, Number: 1}))
+	if err == nil || !strings.Contains(err.Error(), "no valid fix_head") {
+		t.Fatalf("start in fix with no pick: %v", err)
+	}
+	if handle["worktree"] == "" {
+		t.Fatalf("handle = %v, want the worktree kept on it", handle)
+	}
+	if calls := string(mustRead(t, log)); strings.Contains(calls, "agent start") {
+		t.Fatalf("an agent was started without the picked head:\n%s", calls)
+	}
+
+	// A pinned head the remote has not got fails the start with git's error,
+	// as a ref gone does, and starts no agent either.
+	os.Remove(log)
+	handle, err = h.Start(ctx, job("r-5", "pr", "fix", &dispatch.Pull{URL: url, Number: 1, Pinned: strings.Repeat("a", 40)}))
+	if err == nil || !strings.Contains(err.Error(), url) {
+		t.Fatalf("start in fix on an unknown head: %v", err)
+	}
+	if calls := string(mustRead(t, log)); strings.Contains(calls, "agent start") {
+		t.Fatalf("an agent was started without the picked head:\n%s", calls)
+	}
 
 	// The pull request's ref is gone: the start fails with what git said,
 	// its handle kept for the teardown, and no agent is started on what the
 	// worktree held before.
 	gitT(t, origin, "update-ref", "-d", "refs/pull/1/head")
 	os.Remove(log)
-	handle, err = h.Start(ctx, job("r-1", "review", pull))
+	handle, err = h.Start(ctx, job("r-1", "", "review", pull))
 	if err == nil || !strings.Contains(err.Error(), url) || !strings.Contains(err.Error(), "refs/pull/1/head") {
 		t.Fatalf("start on a pull request with no ref: %v", err)
 	}
@@ -157,7 +214,7 @@ func TestHerdrPullRequestHeadInTheWorktree(t *testing.T) {
 	}
 
 	// A bead that tracks no pull request: on its branch, at the base.
-	handle, err = h.Start(ctx, job("r-2", "new", nil))
+	handle, err = h.Start(ctx, job("r-2", "", "new", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
