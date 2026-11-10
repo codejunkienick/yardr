@@ -18,7 +18,7 @@ import (
 )
 
 // standIn is a provider of limits in place of the operator's: a script the
-// yard's source "quokka" names for the agent kinds. It answers
+// yard's source "quokka" names for the kinds kimi, codex and pi. It answers
 // with what say last set (or, for one provider, what sayFor did), or exits 1
 // as a provider does after fail, and asks tells for whom it was run, one
 // name per run. While hold is on, a run waits after it is counted: a refresh
@@ -28,18 +28,16 @@ type standIn struct {
 	dir string
 }
 
-func newStandIn(t *testing.T, s store.API, extraKinds ...string) *standIn {
+func newStandIn(t *testing.T, s store.API) *standIn {
 	t.Helper()
 	p := &standIn{t: t, dir: t.TempDir()}
 	script := filepath.Join(p.dir, "provider")
 	scripttest.Write(t, script, "#!/bin/sh\ncd "+p.dir+"\necho \"$1\" >>asked\n"+
 		"while [ -f hold ]; do sleep 0.05; done\n"+
 		"if [ -f fail ]; then echo 'quokka: kimi: not logged in' >&2; exit 1; fi\n"+
-		"if [ -f \"fail-$1\" ]; then echo \"quokka: $1: unavailable\" >&2; exit 1; fi\n"+
 		"if [ -f \"answer-$1\" ]; then cat \"answer-$1\"; else cat answer; fi\n")
-	kinds := append([]string{"kimi: moonshot", "codex: openai", "pi: zai"}, extraKinds...)
 	_, err := s.PutSource(context.Background(), "quokka.yaml", "name: quokka\nlimits:\n  command: ["+script+
-		", \"{provider}\", --json]\n  kinds: { "+strings.Join(kinds, ", ")+" }\n", "me")
+		", \"{provider}\", --json]\n  kinds: { kimi: moonshot, codex: openai, pi: zai }\n", "me")
 	must(t, err)
 	p.say(`{"provider":"Kimi","windows":[]}`)
 	return p
@@ -60,11 +58,6 @@ func (p *standIn) sayFor(provider, report string) {
 func (p *standIn) fail() {
 	p.t.Helper()
 	must(p.t, os.WriteFile(filepath.Join(p.dir, "fail"), nil, 0o600))
-}
-
-func (p *standIn) failFor(provider string) {
-	p.t.Helper()
-	must(p.t, os.WriteFile(filepath.Join(p.dir, "fail-"+provider), nil, 0o600))
 }
 
 // hold makes every run wait, from the moment it is counted in asks, until

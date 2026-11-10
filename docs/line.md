@@ -125,11 +125,12 @@ them, remove them, or attach them to a note (`yardr bead note <id>
 done passes. A person moving the bead is not gated, nor is a session
 whose handle names no worktree.
 
-The telling reaches the session whatever its pane shows. Where the pane
-shows the prompt of its harness the telling is typed into it, as a crew
-member's nudge is ([crew.md](crew.md#text-in-the-input)); where it shows
-none, or none yardr can read (the harness idle at a prompt herdr cannot
-see, a shell of its own, a kind whose marks are unknown), it goes through
+The telling reaches the session whatever its pane shows, unless its agent
+is stopped on a usage limit (below). Where the pane shows the prompt of
+its harness the telling is typed into it, as a crew member's nudge is
+([crew.md](crew.md#text-in-the-input)); where it shows none, or none yardr
+can read (the harness idle at a prompt herdr cannot see, a shell of its
+own, a kind whose marks are unknown), it goes through
 `herdr agent prompt`, which herdr submits itself. The `note_told` event
 says which way with `delivery` (`typed` or `agent prompt`). A telling
 neither way takes is marked untold, with why, and the yardmaster hears it:
@@ -139,6 +140,14 @@ first prompt that was given up is marked untold too: the first prompt goes
 first, and it never arrives. A note behind a first prompt that is stuck on
 a screen that is not there does not wait behind it: through herdr it goes
 at once.
+
+An agent stopped on a usage limit cannot read a note, so a session that
+waits for the window to reset, or that holds its model for a limit with no
+reset known
+([groups.md](groups.md#a-usage-limit-says-its-window-and-when-it-resets)),
+is told nothing. The note stays `will be told`, and is not marked untold,
+until the stop is over; a session that ends first is never told, and
+`yardr bead show` says `ended before it was told`.
 
 An idle session with its bead still in its stage gets one prompt to hand
 on before the idle limit counts, once per idle spell (`session_idle_nudge`).
