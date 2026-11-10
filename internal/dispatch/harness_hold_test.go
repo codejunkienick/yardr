@@ -644,6 +644,62 @@ func TestUntimedQuotaHoldSurvivesRestartUntilPaneRecovers(t *testing.T) {
 	}
 }
 
+func oneSlotHeldYard(t *testing.T) (store.API, *paneRunner, *dispatch.Dispatcher) {
+	t.Helper()
+	s, r, d, p, _, now, _ := elseYard(t, "a", store.Group{Name: "b", Runner: "herdr", Limit: 1,
+		Config: map[string]any{"kind": "codex", "stall": "off"}}, kimiUsed, codexOpen)
+	p.sayFor("moonshot", kimiOpen)
+	*now = now.Add(6 * time.Minute)
+	primeGroupLimits(t, s, d, "a")
+	one := 1
+	_, err := s.SetGroup(context.Background(), "a", store.GroupEdit{Limit: &one}, "me")
+	must(t, err)
+	return s, r, d
+}
+
+func TestQuotaHoldFallsBackAtOneSlot(t *testing.T) {
+	t.Parallel()
+	s, _, d := oneSlotHeldYard(t)
+	b := newBead(t, s, "fallback at one slot")
+	must(t, d.Reconcile(context.Background()))
+	if group, claim := claimedBy(t, s, b.ID); group != "b" || len(claim["passed"].([]any)) != 1 {
+		t.Fatalf("claimed by %q with %v, want fallback b past the held a", group, claim)
+	}
+}
+
+func TestQuotaHoldOtherModelWaitsAtOneSlot(t *testing.T) {
+	t.Parallel()
+	s, _, d := oneSlotHeldYard(t)
+	b, err := s.CreateBead(context.Background(), store.NewBead{Title: "other model", Metadata: map[string]any{"model": "k2"}}, "me")
+	must(t, err)
+	must(t, d.Reconcile(context.Background()))
+	if group, _ := claimedBy(t, s, b.ID); group != "" {
+		t.Fatalf("claimed by %q, want the other model to wait at capacity", group)
+	}
+}
+
+func TestQuotaHoldRespectsGlobalCap(t *testing.T) {
+	t.Parallel()
+	s, _, d := oneSlotHeldYard(t)
+	must(t, s.SetSetting(context.Background(), store.MaxSessionsSetting, "1", "me"))
+	b := newBead(t, s, "global cap")
+	must(t, d.Reconcile(context.Background()))
+	if group, _ := claimedBy(t, s, b.ID); group != "" {
+		t.Fatalf("claimed by %q, want the held session to count against max_sessions", group)
+	}
+}
+
+func TestQuotaHoldRespectsGlobalPause(t *testing.T) {
+	t.Parallel()
+	s, _, d := oneSlotHeldYard(t)
+	must(t, s.SetSetting(context.Background(), store.MaxSessionsSetting, "0", "me"))
+	b := newBead(t, s, "global pause")
+	must(t, d.Reconcile(context.Background()))
+	if group, _ := claimedBy(t, s, b.ID); group != "" {
+		t.Fatalf("claimed by %q, want no claim while max_sessions is zero", group)
+	}
+}
+
 // A session that waits for its model's used-up window, once released by
 // hand, leaves the window gating its group for the route's --else group
 // (yardr-41p5): the hold is gone with the session, but a session started
