@@ -341,6 +341,45 @@ func gateScript(t *testing.T) []byte {
 	return b
 }
 
+type ciStep struct {
+	Run string `yaml:"run"`
+}
+
+type ciJob struct {
+	If     string   `yaml:"if"`
+	RunsOn string   `yaml:"runs-on"`
+	Steps  []ciStep `yaml:"steps"`
+}
+
+// ciWorkflow is the part of .github/workflows/ci.yml the cases that hold it to
+// a rule read. It is read as YAML, not as lines, so that a comment naming a
+// step or a condition cannot stand for it.
+type ciWorkflow struct {
+	Concurrency struct {
+		Group string `yaml:"group"`
+	} `yaml:"concurrency"`
+	Jobs map[string]ciJob `yaml:"jobs"`
+}
+
+// ciYML is the CI workflow as this checkout has it.
+func ciYML(t *testing.T) ciWorkflow {
+	t.Helper()
+	b, err := os.ReadFile(".github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ci ciWorkflow
+	if err := yaml.Unmarshal(b, &ci); err != nil {
+		t.Fatal(err)
+	}
+	return ci
+}
+
+// runsGate says whether a step of the job runs the test command.
+func (j ciJob) runsGate() bool {
+	return slices.ContainsFunc(j.Steps, func(s ciStep) bool { return strings.Contains(s.Run, "sh "+yardTest) })
+}
+
 // gateCmd is the command that runs script, the gate's text and any shell text a
 // case puts ahead of it, from a file of the test's own temp dir: sh <file>,
 // never the script as the one argument of sh -c. Linux caps one argument at
@@ -6639,23 +6678,8 @@ func TestYardTestBudgets(t *testing.T) {
 	// install cannot stand for the step.
 	t.Run("a macOS job of CI's workflow installs shellcheck before it runs the gate", func(t *testing.T) {
 		t.Parallel()
-		workflow, err := os.ReadFile(".github/workflows/ci.yml")
-		if err != nil {
-			t.Fatal(err)
-		}
-		var ci struct {
-			Jobs map[string]struct {
-				RunsOn string `yaml:"runs-on"`
-				Steps  []struct {
-					Run string `yaml:"run"`
-				} `yaml:"steps"`
-			} `yaml:"jobs"`
-		}
-		if err := yaml.Unmarshal(workflow, &ci); err != nil {
-			t.Fatal(err)
-		}
 		gated := 0
-		for name, job := range ci.Jobs {
+		for name, job := range ciYML(t).Jobs {
 			if !strings.HasPrefix(job.RunsOn, "macos-") {
 				continue
 			}
@@ -6673,6 +6697,55 @@ func TestYardTestBudgets(t *testing.T) {
 		}
 		if gated == 0 {
 			t.Error("ci.yml has no macOS job that runs the gate: the leg this test holds to installing shellcheck is gone, or this reads none of its jobs")
+		}
+	})
+
+	// The gate runs on a Mac for a pull request only. On a push to main the
+	// landing has run it on a Mac in the yard already, and on a runner it is by
+	// far the longest job, so a run on main was as long as it. What a landing
+	// leaves out, the plain and rpc runs, is the backstop and stays on every
+	// event. A condition on the wrong job shows only in CI after the landing,
+	// as a run twice as long as it need be or a backstop that is gone.
+	t.Run("a macOS job of CI's workflow runs the gate on pull requests only, the others on every event", func(t *testing.T) {
+		t.Parallel()
+		const prOnly = "github.event_name == 'pull_request'"
+		gated, others := 0, 0
+		for name, job := range ciYML(t).Jobs {
+			if !strings.HasPrefix(job.RunsOn, "macos-") {
+				continue
+			}
+			// An `if:` may carry the ${{ }} that GitHub does not need there.
+			cond := strings.TrimSpace(strings.NewReplacer("${{", "", "}}", "").Replace(job.If))
+			if job.runsGate() {
+				gated++
+				if cond != prOnly {
+					t.Errorf("ci.yml job %s runs the gate on a macOS runner under the condition %q, want %q: the landing ran it on a Mac already, and it is the longest job of a run on main", name, cond, prOnly)
+				}
+				continue
+			}
+			others++
+			if cond != "" {
+				t.Errorf("ci.yml job %s runs on a macOS runner without the gate under the condition %q, want none: what a landing leaves out is the backstop for a push to main", name, cond)
+			}
+		}
+		if gated == 0 || others == 0 {
+			t.Errorf("ci.yml has %d macOS jobs that run the gate and %d that do not: the legs this test holds are gone, or this reads none of its jobs", gated, others)
+		}
+	})
+
+	// A push to main has a concurrency group of its own, its commit. In a group
+	// shared by the ref the next push waited for the run before it, GitHub kept
+	// only the newest of the runs that waited and cancelled the rest before a
+	// job began, and the badge showed each as failing with no test failed. A
+	// pull request keeps its ref, so that a newer push still cancels the run it
+	// supersedes. GitHub evaluates the expression and this test does not: it
+	// holds the text the workflow's comment explains, so that a change to the
+	// expression has to be made here too, and read.
+	t.Run("a push to main has a concurrency group of its own, a pull request one per ref", func(t *testing.T) {
+		t.Parallel()
+		const want = "ci-${{ github.event_name == 'push' && github.sha || github.ref }}"
+		if got := ciYML(t).Concurrency.Group; got != want {
+			t.Errorf("ci.yml concurrency group is %q, want %q: a push must name its commit, so that no run waits for another and none that waits is cancelled, and a pull request its ref, so that a newer push cancels the run it supersedes", got, want)
 		}
 	})
 
