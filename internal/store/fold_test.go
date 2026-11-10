@@ -1702,10 +1702,7 @@ func TestFoldBeads(t *testing.T) {
 	// The rows run in as many parts as the machine runs parallel tests,
 	// each part over a yard of its own: a part's rows run in turn as they
 	// always did, and no row shares with another part.
-	n := min(runtime.GOMAXPROCS(0), len(rows))
-	size := (len(rows) + n - 1) / n
-	for c := range n {
-		part := rows[c*size : min((c+1)*size, len(rows))]
+	for c, part := range foldParts(rows, runtime.GOMAXPROCS(0)) {
 		t.Run(fmt.Sprintf("part %d", c), func(t *testing.T) {
 			t.Parallel()
 			s := foldYard(t)
@@ -1880,6 +1877,53 @@ func foldOrder(fold []int, n int) []int {
 		out[i] = i
 	}
 	return out
+}
+
+// foldParts splits rows, in order, into min(procs, len(rows)) parts whose
+// sizes differ by at most one row, none empty. Each part ends where the next
+// begins, so the last ends at the last row however many procs there are. The
+// table was once cut into parts of ceil(rows/procs) rows, one for every
+// proc, and with 84 rows on 16 cores the sixteenth began at row 90 and
+// panicked with slice bounds out of range [90:84]. Fewer than one proc is
+// one, so that no count of them drops the rows.
+func foldParts[T any](rows []T, procs int) [][]T {
+	n := min(max(procs, 1), len(rows))
+	parts := make([][]T, n)
+	for c := range parts {
+		parts[c] = rows[c*len(rows)/n : (c+1)*len(rows)/n]
+	}
+	return parts
+}
+
+// The parts hold every row once, in order, whatever the number of rows and
+// of cores. TestFoldBeads takes the cores from the machine it runs on, and
+// the split it once made panicked on a machine of 16 or more, which a run on
+// a smaller one never shows: so the split is asked every shape itself, past
+// any machine's count.
+func TestFoldPartsHoldEveryRowOnAnyMachine(t *testing.T) {
+	t.Parallel()
+	for nrows := 0; nrows <= 200; nrows++ {
+		rows := make([]int, nrows)
+		for i := range rows {
+			rows[i] = i
+		}
+		for procs := 1; procs <= 300; procs++ {
+			parts := foldParts(rows, procs)
+			if want := min(procs, nrows); len(parts) != want {
+				t.Fatalf("%d rows over %d procs make %d parts, want %d", nrows, procs, len(parts), want)
+			}
+			if got := slices.Concat(parts...); !slices.Equal(got, rows) {
+				t.Fatalf("%d rows over %d procs: the parts hold %v, want every row once in order", nrows, procs, got)
+			}
+			small, large := nrows, 0
+			for _, p := range parts {
+				small, large = min(small, len(p)), max(large, len(p))
+			}
+			if len(parts) > 0 && (small == 0 || large-small > 1) {
+				t.Fatalf("%d rows over %d procs: parts of %d to %d rows, want none empty and none a row larger than another", nrows, procs, small, large)
+			}
+		}
+	}
 }
 
 // A title that passes 100 characters keeps the titles that fit whole, the
