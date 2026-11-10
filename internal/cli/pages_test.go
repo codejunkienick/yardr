@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -111,16 +113,28 @@ func TestWebServeClosesViewIfPagesAddrIsInUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pages.Close()
-	viewAddr := freeAddr(t)
 	a := &app{st: st, cfg: &config.Config{Home: home}, actor: "me"}
-	if _, err := run(t, a.webCmd(), "serve", "--addr", viewAddr, "--pages-addr", pages.Addr().String()); err == nil {
-		t.Fatal("web serve started with its pages address already in use")
-	}
-	view, err := net.Listen("tcp", viewAddr)
-	if err != nil {
-		t.Fatalf("web serve left its view listener bound after the pages listener failed: %v", err)
-	}
-	_ = view.Close()
+	// The view's address is a free one, and another may take it before the
+	// serve listens on it or after it lets go. The first ends the serve at
+	// the view's listen, not the pages', and the second fails the check that
+	// the view's address is free again: each is tried again on another
+	// address, where a view left bound is bound on every one (onFreeAddrs).
+	onFreeAddrs(t, func(free func() string) error {
+		viewAddr := free()
+		_, err := run(t, a.webCmd(), "serve", "--addr", viewAddr, "--pages-addr", pages.Addr().String())
+		if err == nil {
+			t.Fatal("web serve started with its pages address already in use")
+		}
+		if refusedAt(err, []string{viewAddr}) {
+			return err
+		}
+		view, err := net.Listen("tcp", viewAddr)
+		if err != nil {
+			return fmt.Errorf("web serve left its view listener bound after the pages listener failed: %w", err)
+		}
+		_ = view.Close()
+		return nil
+	})
 }
 
 // A start and an install hand the sandbox origin's flags and --local-read
@@ -344,10 +358,12 @@ func TestServeTakesThePagesSetting(t *testing.T) {
 		host, port, err := net.SplitHostPort(got)
 		return err == nil && host == wantHost && port != "0" && got != store.DefaultWebPagesAddr
 	}
-	// serves runs web serve with args and --addr viewAddr, none for "":
+	// tryServes runs web serve with args and --addr viewAddr, none for "":
 	// the view then takes the address the environment or the setting gives
-	// it, and is wanted on a free port of 127.0.0.1.
-	serves := func(args []string, viewAddr, pagesAddr string) {
+	// it, and is wanted on a free port of 127.0.0.1. Where the serve ends at
+	// a listen refused as in use it returns that error, for onFreeAddrs to
+	// judge; it fails the test on anything else.
+	tryServes := func(args []string, viewAddr, pagesAddr string) error {
 		t.Helper()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -366,6 +382,9 @@ func TestServeTakesThePagesSetting(t *testing.T) {
 		for deadline := time.Now().Add(10 * time.Second); len(up) == 0; time.Sleep(10 * time.Millisecond) {
 			select {
 			case err := <-done:
+				if errors.Is(err, syscall.EADDRINUSE) {
+					return fmt.Errorf("web serve %v ended: %w", args, err)
+				}
 				t.Fatalf("web serve %v ended: %v", args, err)
 			default:
 			}
@@ -432,6 +451,15 @@ func TestServeTakesThePagesSetting(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatalf("web serve did not stop")
 		}
+		return nil
+	}
+	// serves is tryServes for the runs that hold no address freeAddr gave: a
+	// listen refused as in use there is a failure, as any other.
+	serves := func(args []string, viewAddr, pagesAddr string) {
+		t.Helper()
+		if err := tryServes(args, viewAddr, pagesAddr); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// Nothing gives the origin an address, and the view asks for a free
 	// port: so does the origin.
@@ -450,18 +478,52 @@ func TestServeTakesThePagesSetting(t *testing.T) {
 	}
 
 	// An address from the setting, the environment or the flag is taken
-	// as it stands, by a view on a free port as by any other.
-	settingAddr := freeAddr(t)
-	if err := st.SetSetting(ctx, store.WebPagesAddrSetting, settingAddr, "Jo"); err != nil {
-		t.Fatal(err)
+	// as it stands, by a view on a free port as by any other. Each stays
+	// given when the next is, so each is shown to beat the ones before it. A
+	// serve that was refused an address is tried on fresh ones, given again
+	// where the serve reads it (onFreeAddrs).
+	gives := []func(addr string) []string{
+		func(addr string) []string {
+			if err := st.SetSetting(ctx, store.WebPagesAddrSetting, addr, "Jo"); err != nil {
+				t.Fatal(err)
+			}
+			return nil
+		},
+		func(addr string) []string { cfg.WebPagesAddr = addr; return nil },
+		func(addr string) []string { return []string{"--pages-addr", addr} },
 	}
-	serves(nil, freeAddr(t), settingAddr)
-	serves(nil, "127.0.0.1:0", settingAddr)
-	envAddr := freeAddr(t)
-	cfg.WebPagesAddr = envAddr
-	serves(nil, freeAddr(t), envAddr)
-	serves(nil, "127.0.0.1:0", envAddr)
-	flagAddr := freeAddr(t)
-	serves([]string{"--pages-addr", flagAddr}, freeAddr(t), flagAddr)
-	serves([]string{"--pages-addr", flagAddr}, "127.0.0.1:0", flagAddr)
+	tries := 0
+	for _, give := range gives {
+		onFreeAddrs(t, func(free func() string) error {
+			tries++
+			pages, view := free(), free()
+			args := give(pages)
+			if tries == 1 {
+				// Once, on the first try: the origin's address is taken
+				// before the serve can listen on it, as another process takes
+				// one between freeAddr and a listen. The serve then ends at
+				// the refusal on every run, and not only on an unlucky one,
+				// and the next try is the one that serves.
+				held, err := net.Listen("tcp", pages)
+				if err != nil {
+					t.Fatalf("could not hold pages address %s for the first try: %v", pages, err)
+				}
+				defer held.Close()
+				err = tryServes(args, view, pages)
+				if !refusedAt(err, []string{pages}) {
+					t.Fatalf("web serve did not fail on held pages address %s: %v", pages, err)
+				}
+				return err
+			}
+			if err := tryServes(args, view, pages); err != nil {
+				return err
+			}
+			return tryServes(args, "127.0.0.1:0", pages)
+		})
+	}
+	// One try per source and one more for the refusal. Without that one the
+	// taken address was no refusal, and nothing here has shown the retry.
+	if want := len(gives) + 1; tries < want {
+		t.Fatalf("%d tries for %d sources, want %d: the serve was not refused the origin's address that was taken before it", tries, len(gives), want)
+	}
 }

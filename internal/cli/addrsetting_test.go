@@ -3,11 +3,13 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -177,7 +179,12 @@ func TestAddrSettingsAreCheckedAsTheFlag(t *testing.T) {
 }
 
 // freeAddr is a loopback address nothing listens on, as far as one can be
-// had: it was free a moment ago.
+// had: it was free a moment ago, and not for long. A connection another
+// process opens is given its source port from the pool this one came out of,
+// as is a listener that asks for port 0, so the address can be taken between
+// the release here and the listen of whatever is handed it. The listen of a
+// serve on it goes through onFreeAddrs, which tries again on another
+// (yardr-eenj).
 func freeAddr(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -188,6 +195,51 @@ func freeAddr(t *testing.T) string {
 	return ln.Addr().String()
 }
 
+// addrTries is how many sets of free addresses onFreeAddrs spends before it
+// calls the refusals a fault. A port taken by chance is seldom taken again on
+// the next set, so refusals five times in a row are a cause that stays: a
+// serve that listens twice on one address, a listener it leaves bound.
+const addrTries = 5
+
+// onFreeAddrs runs try, which takes the addresses it needs from free and
+// serves on them. Where try ends at a listen refused as in use on an address
+// free gave, something took the port between its release and the listen, and
+// try runs again on fresh addresses. A serve takes an address and not a
+// listener (web.Listen, bdp.Listen), so no test can hold the port up to the
+// listen: this is what is left. try returns nil when it passed, or that
+// refusal; any other failure it reports to t itself. A refusal on an address
+// free did not give (the default origin's port, held on purpose) fails the
+// test at once with the error as it was, and so do addrTries refusals in a
+// row.
+func onFreeAddrs(t *testing.T, try func(free func() string) error) {
+	t.Helper()
+	var err error
+	for range addrTries {
+		var given []string
+		err = try(func() string {
+			addr := freeAddr(t)
+			given = append(given, addr)
+			return addr
+		})
+		if err == nil {
+			return
+		}
+		if !refusedAt(err, given) {
+			t.Fatal(err)
+		}
+	}
+	t.Fatalf("%d sets of free addresses in a row were refused as in use: %v", addrTries, err)
+}
+
+// refusedAt says whether err is a listen on one of addrs that was refused as
+// in use. The address is read from the error, not searched for in its text,
+// for a serve's message names its arguments as well.
+func refusedAt(err error, addrs []string) bool {
+	var op *net.OpError
+	return errors.Is(err, syscall.EADDRINUSE) && errors.As(err, &op) &&
+		op.Op == "listen" && op.Addr != nil && slices.Contains(addrs, op.Addr.String())
+}
+
 // web and BDP serve take the setting, environment or flag in precedence
 // order, listen on it, and report the address in status.
 func TestServeTakesTheAddrSetting(t *testing.T) {
@@ -196,11 +248,10 @@ func TestServeTakesTheAddrSetting(t *testing.T) {
 	cfg := &config.Config{Home: home}
 	a := func() *app { return &app{st: st, cfg: cfg, actor: "me"} }
 	for _, c := range []struct{ kind, key string }{{svcWeb, store.WebAddrSetting}, {svcBDP, store.BDPAddrSetting}} {
-		settingAddr := freeAddr(t)
-		if err := st.SetSetting(context.Background(), c.key, settingAddr, "Jo"); err != nil {
-			t.Fatal(err)
-		}
-		serves := func(args []string, want string) {
+		// serves is one run of the serve, wanted on want. Where the serve
+		// ends at a listen refused as in use it returns that error, for
+		// onFreeAddrs to judge; it fails the test on anything else.
+		serves := func(args []string, want string) error {
 			t.Helper()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -221,6 +272,9 @@ func TestServeTakesTheAddrSetting(t *testing.T) {
 			for deadline := time.Now().Add(10 * time.Second); len(up) == 0; time.Sleep(10 * time.Millisecond) {
 				select {
 				case err := <-done:
+					if errors.Is(err, syscall.EADDRINUSE) {
+						return fmt.Errorf("%s serve %v ended: %w", c.kind, args, err)
+					}
 					t.Fatalf("%s serve %v ended: %v", c.kind, args, err)
 				default:
 				}
@@ -251,15 +305,33 @@ func TestServeTakesTheAddrSetting(t *testing.T) {
 			case <-time.After(10 * time.Second):
 				t.Fatalf("%s serve did not stop", c.kind)
 			}
+			return nil
 		}
-		serves(nil, settingAddr)
-		envAddr, flagAddr := freeAddr(t), freeAddr(t)
-		if c.kind == svcWeb {
-			cfg.WebAddr = envAddr
-		} else {
-			cfg.BDPAddr = envAddr
+		// The setting, then the environment, then the flag: each stays given
+		// when the next is, so each is shown to beat the ones before it. A
+		// serve that was refused its address is tried on a fresh one, given
+		// again where the serve reads it.
+		for _, give := range []func(addr string) []string{
+			func(addr string) []string {
+				if err := st.SetSetting(context.Background(), c.key, addr, "Jo"); err != nil {
+					t.Fatal(err)
+				}
+				return nil
+			},
+			func(addr string) []string {
+				if c.kind == svcWeb {
+					cfg.WebAddr = addr
+				} else {
+					cfg.BDPAddr = addr
+				}
+				return nil
+			},
+			func(addr string) []string { return []string{"--addr", addr} },
+		} {
+			onFreeAddrs(t, func(free func() string) error {
+				addr := free()
+				return serves(give(addr), addr)
+			})
 		}
-		serves(nil, envAddr)
-		serves([]string{"--addr", flagAddr}, flagAddr)
 	}
 }
