@@ -300,6 +300,10 @@ func TestReplyRefusesNeitherHookNorMail(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--file carries files into a source's thread") {
 		t.Fatalf("reply to mail with --file = %v", err)
 	}
+	_, err = run(t, m.replyCmd(), seq, "an answer", "--format", "markdown")
+	if err == nil || !strings.Contains(err.Error(), "--format is for declared source thread replies") {
+		t.Fatalf("reply to mail with --format = %v", err)
+	}
 }
 
 // TestReplyRefusesMailOutsideTheCrewInbox prevents a seq from another

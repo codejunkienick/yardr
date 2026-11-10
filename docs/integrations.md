@@ -1110,6 +1110,28 @@ git:                                  # what git uses to reach the source's repo
   would send the words and drop the files. Files are part of the
   answer, so the same words with other files are another reply, with a
   key of their own.
+- **`thread.reply` takes an explicit format where the file lists it.**
+  `thread.formats: [markdown, plain]` permits `yardr reply <seq> --format
+  markdown <text>` and adds `"format":"markdown"` to the command's input,
+  beside `thread`, `parent`, `body`, `key` and optional `files`. Mode names
+  belong to the source; core transports them and renders nothing. Unknown
+  modes and sources without the capability are refused before reserving or
+  sending a reply. The same flag is refused for mail and peer notes.
+  Explicit bodies preserve input bytes, including surrounding whitespace;
+  file bytes are unchanged. Without the flag, the body keeps its historical
+  trimming, the command receives no `format` field, and the reply's legacy
+  fingerprint and key lookup are unchanged.
+
+  Explicit reservations keep the original source and format and include
+  both in their fingerprint. A confirmed reply replays only for its own
+  mode; another mode has a separate key. When an earlier attempt for the
+  same answer has no confirmed receipt, changing its mode (including to or
+  from the default) is refused. Retry with the original mode: `posted`
+  looks up the original key before another send. An unsuccessful lookup
+  sends nothing; `{}` permits a retry with that same key. The format does
+  not change credential, crew, parent or file permissions. Explicit
+  reservations use the socket call `ReplyingWithFormat`; an older server
+  without it refuses, and the client never falls back to a legacy reply.
 - **`thread.open` takes an `assignee` only where the file says so.**
   `thread.assignee` is `id` or `key`: the part of a person's identity in
   the source (`yardr user identity`) that its threads are assigned by.

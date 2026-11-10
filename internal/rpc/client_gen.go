@@ -660,6 +660,9 @@ func (c *Client) Threads(ctx context.Context, name string) ([]store.Participatio
 func (c *Client) Replying(ctx context.Context, name string, seq uint64, to, body, actor string, files ...store.BlobFile) (*store.Reply, error) {
 	return callV[*store.Reply](c, ctx, "Replying", name, seq, to, body, actor, files)
 }
+func (c *Client) ReplyingWithFormat(ctx context.Context, name string, seq uint64, to, body, format, actor string, files ...store.BlobFile) (*store.Reply, error) {
+	return callV[*store.Reply](c, ctx, "ReplyingWithFormat", name, seq, to, body, format, actor, files)
+}
 func (c *Client) Replied(ctx context.Context, name string, rp store.Reply, actor string) error {
 	return c.call(ctx, "Replied", nil, name, rp, actor)
 }

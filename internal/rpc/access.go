@@ -364,6 +364,7 @@ var Access = map[string]Class{
 	"UnfollowThread":          Admin,
 	"Threads":                 Read,
 	"Replying":                Admin,
+	"ReplyingWithFormat":      Admin,
 	"Replied":                 Admin,
 	"Opening":                 Admin,
 	"Opened":                  Admin,

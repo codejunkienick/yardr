@@ -100,6 +100,35 @@ type Filer interface {
 	ReplyFiles(ctx context.Context, env Envelope, to, body, key string, files []string, cred string) (Message, error)
 }
 
+// FormattedReplier carries an explicit mode only after checking the source's capability.
+type FormattedReplier interface {
+	Replier
+	CheckReplyFormat(format string) error
+	ReplyFormat(ctx context.Context, env Envelope, to, body, key, format string, files []string, cred string) (Message, error)
+}
+
+// CheckReplyFormat refuses modes not declared by the source's thread command.
+func (d Declared) CheckReplyFormat(format string) error {
+	if !d.repliable() {
+		return fmt.Errorf("source %s cannot carry explicit reply formats", d.D.Name)
+	}
+	if err := d.D.Thread.CheckFormat(format); err != nil {
+		return fmt.Errorf("source %s: %w", d.D.Name, err)
+	}
+	return nil
+}
+
+// ReplyFormat posts the unchanged body with its selected mode and optional files.
+func (d Declared) ReplyFormat(ctx context.Context, env Envelope, to, body, key, format string, files []string, cred string) (Message, error) {
+	if err := d.CheckReplyFormat(format); err != nil {
+		return Message{}, err
+	}
+	if len(files) > 0 && !d.fileable() {
+		return Message{}, fmt.Errorf("source %s takes no files", d.D.Name)
+	}
+	return d.reply(ctx, env, to, body, key, format, files, cred)
+}
+
 // FilerFor is the source's Filer, if a reply there takes files: the one
 // built from d, the yard's declared source of that name, when it has
 // the keys a reply takes and says its replies take files, else the
@@ -267,7 +296,7 @@ func declaredThread(d Declared, env Envelope) (string, error) {
 // does not carry it; the key is the comment's own id where the source
 // takes one, so a retry finds it with Posted.
 func (d Declared) Reply(ctx context.Context, env Envelope, to, body, key, cred string) (Message, error) {
-	return d.reply(ctx, env, to, body, key, nil, cred)
+	return d.reply(ctx, env, to, body, key, "", nil, cred)
 }
 
 // ReplyFiles posts body with the local files paths in the thread of the
@@ -276,10 +305,10 @@ func (d Declared) Reply(ctx context.Context, env Envelope, to, body, key, cred s
 // says its replies take files is asked (FilerFor): one that ignores
 // unknown keys would send the words and drop the files.
 func (d Declared) ReplyFiles(ctx context.Context, env Envelope, to, body, key string, files []string, cred string) (Message, error) {
-	return d.reply(ctx, env, to, body, key, files, cred)
+	return d.reply(ctx, env, to, body, key, "", files, cred)
 }
 
-func (d Declared) reply(ctx context.Context, env Envelope, to, body, key string, files []string, cred string) (Message, error) {
+func (d Declared) reply(ctx context.Context, env Envelope, to, body, key, format string, files []string, cred string) (Message, error) {
 	thread, err := declaredThread(d, env)
 	if err != nil {
 		return Message{}, err
@@ -289,6 +318,9 @@ func (d Declared) reply(ctx context.Context, env Envelope, to, body, key string,
 		return Message{}, err
 	}
 	in := map[string]any{"thread": thread, "parent": parent, "body": body, "key": key}
+	if format != "" {
+		in["format"] = format
+	}
 	if len(files) > 0 {
 		in["files"] = files
 	}
