@@ -2073,7 +2073,7 @@ internal/dispatch/harnesslogin.go 1094 harness login leading and onboarding mark
 internal/pack/export.go 1047 pack export and its object shapes
 internal/pack/pack.go 1777 pack reading, checking and its shapes
 internal/rpc/user.go 1377 the user server and callers (pairing is userpair.go, envelopes usere2e.go)
-internal/source/declaration.go 1278 source declarations, credentials and calls
+internal/source/declaration.go 1258 source declarations, credentials and calls
 internal/standin/standin.go 1540 the fake Linear, GitHub and edge APIs
 internal/store/asks.go 1777 ask and answer parsing and storage
 internal/store/beads.go 2563 bead CRUD, queries and dispatch reads

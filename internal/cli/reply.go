@@ -293,7 +293,11 @@ event with the comment's id is logged. Prints the URL of the reply.`,
 			var rp *store.Reply
 			if format != "" {
 				rp, err = st.ReplyingWithFormat(ctx, name, seq, to, body, format, a.who(), blobFiles(refs)...)
-				if err != nil {
+				// Only a server without the method is told to be upgraded: there
+				// is no falling back to a reply without the mode. A refusal of
+				// the store's own reaches the caller as it is, and the one for
+				// an unresolved attempt says what to retry.
+				if isNoSuchMethod(err, "ReplyingWithFormat") {
 					return fmt.Errorf("reserving explicit reply format (yardr server must support ReplyingWithFormat): %w", err)
 				}
 			} else {
@@ -352,6 +356,27 @@ event with the comment's id is logged. Prints the URL of the reply.`,
 	cmd.Flags().StringVar(&format, "format", "", "explicit reply mode declared by the source's thread.formats")
 	cmd.Flags().StringArrayVar(&replyFiles, "file", nil, "a file the reply carries (repeatable)")
 	return cmd
+}
+
+// isNoSuchMethod reports whether err has the exact unknown-method response
+// from an older server, or rpc's exact version-skew wrapper around it. The
+// wire gives that refusal no code of its own, so the message is what there is
+// to go by; keeping the server's words lets this yardr recognize servers
+// already installed if rpc later rewords its refusal.
+func isNoSuchMethod(err error, method string) bool {
+	if err == nil {
+		return false
+	}
+	missing := "no such method " + method
+	message := err.Error()
+	if message == missing {
+		return true
+	}
+	// The RPC client puts this note around an older server's exact refusal
+	// when the two builds differ. An unrelated error may contain the same
+	// words, so only these two wire-derived shapes get the upgrade hint.
+	return strings.HasPrefix(message, "the yardr server (pid ") &&
+		strings.HasSuffix(message, "); run `yardr server stop` ("+missing+")")
 }
 
 // hookFiler is the Filer of source, or why a reply there carries no files:

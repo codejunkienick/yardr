@@ -1314,7 +1314,7 @@ func TestParseThreadLinkRefusals(t *testing.T) {
 		"formats without reply":          {src("thread:\n  formats: [markdown]\n"), "thread.formats: thread.reply, thread.posted and thread.read are required"},
 		"formats of wrong type":          {src("thread:\n  formats: markdown\n"), "thread.formats: want a list"},
 		"invalid format name":            {src("thread:\n  formats: ['two words']\n"), "thread.formats: want distinct format names"},
-		"duplicate format":               {src("thread:\n  formats: [markdown, markdown]\n"), "thread.formats: markdown is listed twice"},
+		"duplicate format":               {src("thread:\n  formats: [markdown, markdown]\n"), "thread.formats: want distinct format names (markdown, plain)"},
 		"an assignee that is no part":    {src("thread:\n  place: team\n  open: [linear/thread, open]\n  assignee: email\n"), "thread.assignee: \"email\": id or key: which part of a person's identity in the source thread.open takes as assignee"},
 		"an assignee with no open":       {src("thread:\n  assignee: id\n"), "thread.assignee: thread.open is missing: the assignee is whom the thread it opens is assigned to"},
 		"labels that are no boolean":     {src("thread:\n  state: [linear/thread, state]\n  states: [started, done]\n  labels: sometimes\n"), "thread.labels: want true or false, got \"sometimes\""},

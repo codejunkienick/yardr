@@ -389,7 +389,9 @@ func (r *reader) thread(e entry) *Thread {
 			t.Files, _ = r.boolean(f.v, f.path)
 		case "formats":
 			formats = &f
-			for _, mode := range r.strs(f.v, f.path) {
+			for _, mode := range r.strsWithDuplicate(f.v, f.path, func(string) string {
+				return "want distinct format names (markdown, plain)"
+			}) {
 				if !validName.MatchString(mode) {
 					r.errf(f.v, f.path, "want distinct format names (markdown, plain)")
 					continue
