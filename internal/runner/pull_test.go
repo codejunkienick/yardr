@@ -184,11 +184,15 @@ func TestHerdrPullRequestHeadInTheWorktree(t *testing.T) {
 	}
 
 	// A pinned head the remote has not got fails the start with git's error,
-	// as a ref gone does, and starts no agent either.
+	// as a ref gone does, its handle kept for the teardown, and starts no
+	// agent either.
 	os.Remove(log)
 	handle, err = h.Start(ctx, job("r-5", "pr", "fix", &dispatch.Pull{URL: url, Number: 1, Pinned: strings.Repeat("a", 40)}))
 	if err == nil || !strings.Contains(err.Error(), url) {
 		t.Fatalf("start in fix on an unknown head: %v", err)
+	}
+	if handle["worktree"] != filepath.Join(h.WorktreeRoot, "r", "r-5") {
+		t.Fatalf("handle = %v, want the worktree kept on it", handle)
 	}
 	if calls := string(mustRead(t, log)); strings.Contains(calls, "agent start") {
 		t.Fatalf("an agent was started without the picked head:\n%s", calls)

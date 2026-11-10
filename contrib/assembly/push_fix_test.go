@@ -156,13 +156,6 @@ func (c *fixYard) depotFetch(sha string) {
 	c.git(c.repo, "fetch", "-q", c.work, sha)
 }
 
-// fetched reports whether the depot has commit sha.
-func (c *fixYard) fetched(sha string) bool {
-	cmd := exec.Command("git", "cat-file", "-e", sha+"^{commit}")
-	cmd.Dir, cmd.Env = c.repo, c.env
-	return cmd.Run() == nil
-}
-
 // forkTo puts the fork's branch on sha, as the pull request's branch stands.
 func (c *fixYard) forkTo(branch, sha string) {
 	c.t.Helper()
