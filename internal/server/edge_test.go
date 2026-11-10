@@ -349,13 +349,9 @@ func TestEdgeLinkFollowsTheSettingBesideTheListener(t *testing.T) {
 			var cl store.API
 			var addr string
 			stopEdge := func() {}
-			if role == "" {
-				addr = freeAddr(t)
-				setHookAddr(t, c, addr)
-			}
 			_, value := edgeYard(t, c, edge, srv, false)
 			if role == "" {
-				start(t, &runner{c: c})
+				addr = startOnFreeAddr(t, c, func(addr string) { setHookAddr(t, c, addr) })
 				client := rpc.NewClient(c.Socket())
 				defer client.Close(ctx)
 				cl = client

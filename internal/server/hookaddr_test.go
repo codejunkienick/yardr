@@ -20,7 +20,9 @@ import (
 	"yardr.dev/yardr/internal/yards"
 )
 
-// freeAddr is a loopback address nothing listens on now.
+// freeAddr is a loopback address nothing listens on now. It stays free only
+// until another process takes it, so a test that hands one to a server, which
+// listens on it later, starts that server with startOnFreeAddr.
 func freeAddr(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -31,8 +33,11 @@ func freeAddr(t *testing.T) string {
 	return ln.Addr().String()
 }
 
-// setHookAddr gives the yard in c the hook_addr setting before its server
-// starts, as an earlier server's yardr settings set left it.
+// setHookAddr gives the yard in c the hook_addr setting while no server runs
+// on it, as an earlier server's yardr settings set left it. A yard whose test
+// named an operator first takes a setting from that operator only, so it is
+// set by them: startOnFreeAddr sets it after the test's own setup, and again
+// for each try.
 func setHookAddr(t *testing.T, c *config.Config, addr string) {
 	t.Helper()
 	st, err := store.Open(c.DBPath())
@@ -40,7 +45,15 @@ func setHookAddr(t *testing.T, c *config.Config, addr string) {
 		t.Fatal(err)
 	}
 	defer st.Close(context.Background())
-	if err := st.SetSetting(context.Background(), hooks.FromSetting, addr, "me"); err != nil {
+	by := "me"
+	all, err := st.Settings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := all[store.OperatorSetting]; op != "" {
+		by = op
+	}
+	if err := st.SetSetting(context.Background(), hooks.FromSetting, addr, by); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -54,14 +67,50 @@ func listens(addr string) bool {
 	return true
 }
 
+// freeAddrTries is how many addresses startOnFreeAddr tries. A port taken in
+// the gap is rare, so a second try nearly always lands; a receiver that
+// cannot listen for another reason fails the test after a few tries rather
+// than looping.
+const freeAddrTries = 3
+
+// startOnFreeAddr starts a server for c whose hook receiver listens on a
+// free loopback address, and returns the address. set puts each address
+// where the server reads it: the hook_addr setting, or c.HookAddr. The
+// address is free when freeAddr gives it but the server listens on it later,
+// and another process can take it between; the server then records why in
+// its state and serves on without the receiver (listenHooks), so a server
+// whose state says it does not listen is stopped and started again on a
+// fresh address.
+func startOnFreeAddr(t *testing.T, c *config.Config, set func(addr string)) string {
+	t.Helper()
+	var last hooks.Listener
+	var known bool
+	for range freeAddrTries {
+		addr := freeAddr(t)
+		set(addr)
+		done, stop := startStoppable(t, &runner{c: c})
+		if last, known = hooks.ReadListener(c); known && last.Listening() {
+			return addr
+		}
+		// The store and the socket are the next server's: wait for this one to
+		// have let go of them.
+		stop()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("server did not stop")
+		}
+	}
+	t.Fatalf("no hook receiver listened in %d tries; the last server said %+v (known %v)", freeAddrTries, last, known)
+	return ""
+}
+
 // The server takes webhooks on the yard's hook_addr setting when the
 // variable is not set where it starts, and says so in its state; with no
 // address at all it runs no receiver and says that.
 func TestHookAddrFromTheSetting(t *testing.T) {
 	c := home(t)
-	addr := freeAddr(t)
-	setHookAddr(t, c, addr)
-	start(t, &runner{c: c})
+	addr := startOnFreeAddr(t, c, func(addr string) { setHookAddr(t, c, addr) })
 	l, known := hooks.ReadListener(c)
 	if !known || !l.Listening() || l.Addr != addr || l.From != hooks.FromSetting {
 		t.Fatalf("listener = %+v (known %v)", l, known)
@@ -80,16 +129,23 @@ func TestHookAddrFromTheSetting(t *testing.T) {
 // YARDR_HOOK_ADDR, set where the server starts, wins over the setting.
 func TestHookAddrVariableWins(t *testing.T) {
 	c := home(t)
-	setting, variable := freeAddr(t), freeAddr(t)
-	setHookAddr(t, c, setting)
-	c.HookAddr = variable
-	start(t, &runner{c: c})
+	// The setting's address is one the server must not use, so it is held for
+	// the whole test and nothing else can take it: a server that read it in
+	// place of the variable would be refused it and say so in its state,
+	// which is checked below. Dialling it would prove nothing.
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	setHookAddr(t, c, held.Addr().String())
+	variable := startOnFreeAddr(t, c, func(addr string) { c.HookAddr = addr })
 	l, known := hooks.ReadListener(c)
 	if !known || !l.Listening() || l.Addr != variable || l.From != hooks.FromVariable {
 		t.Fatalf("listener = %+v (known %v)", l, known)
 	}
-	if !listens(variable) || listens(setting) {
-		t.Fatalf("variable %s listens: %v; setting %s listens: %v", variable, listens(variable), setting, listens(setting))
+	if !listens(variable) {
+		t.Fatalf("nothing listens on the variable %s", variable)
 	}
 }
 
@@ -143,14 +199,41 @@ func TestHookAddrTaken(t *testing.T) {
 	}
 }
 
+// A server whose address was taken before it could listen is started again on
+// a fresh one. The first address is taken here, as another process would take
+// it between freeAddr and the server's listen, so that the server's listen on
+// it is refused whatever the machine is doing; the helper then lands on
+// another address and the server listens there.
+func TestStartOnFreeAddrTriesAgain(t *testing.T) {
+	c := home(t)
+	var tried []string
+	addr := startOnFreeAddr(t, c, func(addr string) {
+		tried = append(tried, addr)
+		// Taking it can lose the very race it stands for; the address is then
+		// taken all the same, and a listen that failed for another reason shows
+		// in the count below.
+		if len(tried) == 1 {
+			if taker, err := net.Listen("tcp", addr); err == nil {
+				t.Cleanup(func() { taker.Close() })
+			}
+		}
+		setHookAddr(t, c, addr)
+	})
+	if len(tried) != 2 || addr != tried[1] {
+		t.Fatalf("addresses tried = %v, returned %s; want two, and the second", tried, addr)
+	}
+	l, known := hooks.ReadListener(c)
+	if !known || !l.Listening() || l.Addr != addr || !listens(addr) {
+		t.Fatalf("listener = %+v (known %v); listens on %s: %v", l, known, addr, listens(addr))
+	}
+}
+
 // The listener that takes webhooks takes the yard's peers too, under
 // /peers/, beside /hooks/: a peer's signed message is taken there, and a
 // yard that is no peer is refused.
 func TestHookListenerTakesPeers(t *testing.T) {
 	c := home(t)
-	addr := freeAddr(t)
-	setHookAddr(t, c, addr)
-	start(t, &runner{c: c})
+	addr := startOnFreeAddr(t, c, func(addr string) { setHookAddr(t, c, addr) })
 	ctx := context.Background()
 	cl := rpc.NewClient(c.Socket())
 	defer cl.Close(ctx)
@@ -224,8 +307,6 @@ func TestHookListenerTakesPeers(t *testing.T) {
 // the doc is not there even with it. A yard with no device has no /user/.
 func TestUserDeviceOnTheListener(t *testing.T) {
 	c := home(t)
-	addr := freeAddr(t)
-	setHookAddr(t, c, addr)
 	st, err := store.Open(c.DBPath())
 	if err != nil {
 		t.Fatal(err)
@@ -245,7 +326,7 @@ func TestUserDeviceOnTheListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.Close(ctx)
-	start(t, &runner{c: c})
+	addr := startOnFreeAddr(t, c, func(addr string) { setHookAddr(t, c, addr) })
 
 	ask := func(addr, method, path, token string) (int, string) {
 		t.Helper()
@@ -281,9 +362,7 @@ func TestUserDeviceOnTheListener(t *testing.T) {
 	}
 
 	none := home(t)
-	bare := freeAddr(t)
-	setHookAddr(t, none, bare)
-	start(t, &runner{c: none})
+	bare := startOnFreeAddr(t, none, func(addr string) { setHookAddr(t, none, addr) })
 	if code, _ := ask(bare, http.MethodGet, "/user/me", d.Token); code != http.StatusNotFound {
 		t.Errorf("/user/me in a yard with no device = %d, want 404", code)
 	}
@@ -296,8 +375,6 @@ func TestUserDeviceOnTheListener(t *testing.T) {
 // code once the pairing was used.
 func TestUserDevicePairedOnTheListener(t *testing.T) {
 	c := home(t)
-	addr := freeAddr(t)
-	setHookAddr(t, c, addr)
 	st, err := store.Open(c.DBPath())
 	if err != nil {
 		t.Fatal(err)
@@ -310,7 +387,7 @@ func TestUserDevicePairedOnTheListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.Close(ctx)
-	start(t, &runner{c: c})
+	addr := startOnFreeAddr(t, c, func(addr string) { setHookAddr(t, c, addr) })
 	cl := rpc.NewClient(c.Socket())
 	defer cl.Close(ctx)
 
