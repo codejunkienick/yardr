@@ -27,7 +27,7 @@ const (
 )
 
 // PromptTries is how often the dispatcher delivers a pending prompt that
-// does not arrive before it gives the session up to a human.
+// does not arrive before it gives up on the prompt.
 const PromptTries = 3
 
 const (
@@ -410,7 +410,8 @@ type promptPass struct {
 	left    bool           // ... or it was not, and herdr saw the agent start on it: it left the screen
 	sends   int            // deliveries by the dispatcher so far
 	lost    int            // the delivery this pass found not to have arrived, 0 for none
-	gaveUp  bool           // ... and it was the last: the session is left to a human
+	gaveUp  bool           // ... and it was the last: the prompt is given up
+	end     bool           // the bead session is to end, failed; crew sessions stay
 	held    hold           // what holds the prompt back in the input, other text or a dialog, on the pass that says so
 	submits int            // times the dispatcher submitted the prompt typed in the input
 	typed   int            // the submit this pass made of it, 0 for none
@@ -439,8 +440,9 @@ type promptPass struct {
 // handle only once it arrived: it shows in the pane, or the agent is
 // working after a delivery. One that did neither PromptWait after it was
 // sent, with the agent idle, was lost and is sent again, PromptTries times
-// in all; then the session is reported and left alone, still watched for
-// the prompt a human gives it by hand.
+// in all; then a bead's session is ended, failed, so it is routed again. A
+// crew member is reported and left alone, still watched for the prompt a
+// human gives it by hand.
 //
 // Found live (yardr-cxsb): a crew member's prime was in Claude Code's input,
 // not sent, and the crew member idle for 95 seconds until a person pressed
@@ -509,7 +511,7 @@ type promptPass struct {
 // PromptStarted, shown, typed, an unreadable pane, or any working in the
 // session's history keeps the answer closed. So does a bead session, which
 // has no status history in the store to rest the answer on.
-func (d *Dispatcher) pendingPrompt(ctx context.Context, r Runner, key string, handle map[string]any, p, status string, cfg map[string]any, trustAllowed, trustBypass bool) promptPass {
+func (d *Dispatcher) pendingPrompt(ctx context.Context, r Runner, key string, handle map[string]any, p, status string, cfg map[string]any, trustAllowed, trustBypass, ends bool) promptPass {
 	pass := promptPass{sends: handleInt(handle[promptSends]), submits: handleInt(handle[promptSubmits])}
 	// Login can look idle, blocked, or like a harness still starting. Read
 	// it before trusting the runtime status or the input marker.
@@ -668,6 +670,7 @@ func (d *Dispatcher) pendingPrompt(ctx context.Context, r Runner, key string, ha
 			}
 			if pass.submits >= PromptTries {
 				pass.gaveUp, pass.unsent, pass.handle = true, true, withHandle(handle, promptLost, true)
+				pass.end = ends
 				return pass
 			}
 		} else if !d.settled(key, now) {
@@ -707,6 +710,7 @@ func (d *Dispatcher) pendingPrompt(ctx context.Context, r Runner, key string, ha
 		pass.lost = pass.sends
 		if pass.sends >= PromptTries {
 			pass.gaveUp, pass.handle = true, withHandle(handle, promptLost, true)
+			pass.end = ends
 			return pass
 		}
 	} else if !d.settled(key, now) {
