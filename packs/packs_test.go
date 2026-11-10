@@ -1593,7 +1593,12 @@ func TestContributorsPack(t *testing.T) {
 		{"user", "bug,accepted", "review", "unaccepted", "triage"},
 		{"bot", "accepted", "approved", "", ""},
 		{"user", "accepted", "approved", "", ""},
-		{"user", "accepted", "triage", "", ""},
+		// A push while the bead waits in triage, whoever pushed and whatever
+		// the pull request bears, makes the stay again: the card there is of
+		// the head it was put for, so a new head is a new card.
+		{"user", "accepted", "triage", "pushed", "triage"},
+		{"user", "", "triage", "pushed", "triage"},
+		{"bot", "", "triage", "pushed", "triage"},
 		// The posting runs in moments and checks the head itself, so a person's
 		// push to a pull request nobody accepted has no line there: it fails the
 		// posting back to review, which reads the new head, and the tests run

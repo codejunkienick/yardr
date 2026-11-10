@@ -89,7 +89,14 @@ func declareGitHubPack(t *testing.T, api store.API) hooks.Declared {
 
 func newGHDepot(t *testing.T, members ...string) *ghDepot {
 	t.Helper()
-	api, own := storetest.NewOwned(t)
+	return newGHDepotIn(t, t.TempDir(), members...)
+}
+
+// newGHDepotIn is newGHDepot in the yard's home home, for a test that puts a
+// flow's stage files there, as an import does.
+func newGHDepotIn(t *testing.T, home string, members ...string) *ghDepot {
+	t.Helper()
+	api, own := storetest.NewOwnedIn(t, home)
 	ctx := context.Background()
 	dec := declareGitHubPack(t, api)
 	_, err := api.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "fake"}, "me")

@@ -55,7 +55,7 @@ hook:
   # outsider is yes on a delivery whose text was written by someone who is
   # none of the repository's own people (association owner, member or
   # collaborator): the yard marks its line as information, not instructions.
-  keys: [event, number, state, merged, conclusion, workflow, head_branch, head_sha, head_repo, base, train, sender, association, outsider]
+  keys: [event, number, state, merged, conclusion, workflow, head_branch, head_sha, head_repo, base, train, sender, association, outsider, additions, deletions, changed_files]
 
 # ---- what it sends about pull requests and CI ------------------------------
 # Which envelopes are CI runs, which tell the pull request's head commit,

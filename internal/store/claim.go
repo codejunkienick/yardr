@@ -683,6 +683,44 @@ func (w *wtx) retireClaimCards(user, source, addr, actor string) error {
 	return nil
 }
 
+// AskIdentity is what a mapping ask maps: the source hearing by
+// identity, the sender's id in it as the delivery carried it, and
+// the channel it arrived in ("" where the envelope named none).
+// Users are the yard's users as the card was written, in the order
+// of the ask's options before someone new, nobody and YouDecide:
+// picking option n writes Users[n-1]'s identity. The card holds the
+// sender as unmapped when it was written; a sender mapped to anyone
+// meanwhile makes its pick stale and nothing is written. Held is
+// how many deliveries wait on the card (held.go), kept current by
+// the write that holds or releases them; their bodies are never in
+// the ask.
+type AskIdentity struct {
+	Source  string   `json:"source"`
+	Sender  string   `json:"sender"`
+	Channel string   `json:"channel,omitempty"`
+	Users   []string `json:"users"`
+	Held    int      `json:"held,omitempty"`
+}
+
+// IdentityAsked is what a mapping ask maps, as a client shows it:
+// the source, the sender's id in it and the channel it arrived in,
+// with how many held deliveries wait on the card.
+type IdentityAsked struct {
+	Source  string `json:"source"`
+	Sender  string `json:"sender"`
+	Channel string `json:"channel,omitempty"`
+	Held    int    `json:"held,omitempty"`
+}
+
+// identityAsked is what the ask a maps, as a client shows it, nil
+// for an ask that maps nobody.
+func (a Ask) identityAsked() *IdentityAsked {
+	if a.Identity == nil {
+		return nil
+	}
+	return &IdentityAsked{Source: a.Identity.Source, Sender: a.Identity.Sender, Channel: a.Identity.Channel, Held: a.Identity.Held}
+}
+
 // answerMapping writes what a mapping ask's pick names, in the write
 // that records the answer: option n names Users[n-1], whose identity
 // in the ask's source becomes the ask's sender; someone new adds the

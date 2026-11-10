@@ -620,8 +620,8 @@ func (w *wtx) checkAgentCreate(ctx context.Context, f *Flow, b Bead, stage strin
 	if _, ok := b.Metadata[metaReviewedHead]; ok {
 		return fmt.Errorf("the session %s of a bead's agent may not create a bead with reviewed_head, whatever actor the command names; a reviewer records it on the pull request it read", sess.ID)
 	}
-	if _, ok := b.Metadata[metaAcceptedHead]; ok {
-		return fmt.Errorf("the session %s of a bead's agent may not create a bead with accepted_head, whatever actor the command names; a maintainer's acceptance is theirs", sess.ID)
+	if key, why := yardHead(b.Metadata); key != "" {
+		return fmt.Errorf("the session %s of a bead's agent may not create a bead with %s, whatever actor the command names; %s", sess.ID, key, why)
 	}
 	if pin := PinnedFlow(&b); pin != "" {
 		return fmt.Errorf("the session %s of a bead's agent may not pin a new bead's flow (metadata flow %s), whatever actor the command names; file it without, and the yard chooses its flow", sess.ID, pin)
@@ -1345,8 +1345,8 @@ func (w *wtx) setOriginator(ctx context.Context, id, to string, exp Expect, acto
 // may not change a bead's type or depot (checkFlowChange), may say
 // merge-ok only on its own bead and may not record merge_head on any
 // (checkMergeOK), may record reviewed_head only on its own (checkReviewedHead),
-// and may not record ci_head or accepted_head on any (checkCIHead,
-// checkAcceptedHead).
+// and may not record ci_head, accepted_head or the heads a card shows on any
+// (checkCIHead, checkAcceptedHead).
 func (s *Store) UpdateBead(ctx context.Context, id string, p BeadPatch, exp Expect, actor string) (*Bead, error) {
 	if p.Title != nil && strings.TrimSpace(*p.Title) == "" {
 		return nil, fmt.Errorf("a bead needs a title")

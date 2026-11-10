@@ -23,8 +23,17 @@
     "action": [
       "synchronize"
     ],
+    "additions": [
+      "120"
+    ],
     "base": [
       "main"
+    ],
+    "changed_files": [
+      "4"
+    ],
+    "deletions": [
+      "30"
     ],
     "event": [
       "pull_request"

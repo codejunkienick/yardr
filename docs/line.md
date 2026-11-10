@@ -1935,13 +1935,17 @@ bead's tracks link and asks GitHub as the yard's App, as merge-pr does
   request that waited in `triage`, unless that is the commit a maintainer
   accepted there, before it fetches anything. The yard records the commit as
   the bead's `accepted_head` when the label `accepted`, put on by a person,
-  moves the bead out of `triage`: the head the event named. A maintainer who
-  moved the bead by hand records the one they looked at, `yardr bead update
+  moves the bead out of `triage`: the head the event named. A person's pick of
+  `accepted` on the bead's card in Decide records it too: the head the card
+  showed, and a pick after the pull request has another head accepts nothing.
+  A maintainer who moved the bead by hand records the one they looked at,
+  `yardr bead update
   <id> --meta accepted_head=<sha>`, and a bead with none recorded, or one
   that is no full sha, is held the same way. The note names both commits and
   the command, and once a maintainer has read the head and recorded it as the
   one they accept, `yardr bead unhold <id>` runs the tests again. A bead's
-  agent may not write `accepted_head`, on its own bead or another's; a bead
+  agent may not write `accepted_head`, nor the head a card shows and what its
+  delivery said (`pr_head`, `pr_head_told`), on its own bead or another's; a bead
   that never waited in `triage` (a trusted author's or a bot's pull request,
   made in `review`) has none and is held to the next check alone;
 - reads the pull request's head from GitHub and holds the bead unless that is
@@ -1990,9 +1994,12 @@ read at the new head. On a pull request that waited in `triage`, every push
 is `unaccepted` instead, whoever pushed and whether or not the label
 `accepted` is still on it: the bead goes back to `triage` from `review`,
 `review-post`, `ciwait` and `contributor`, and nothing of the new head is read
-or run until a person has said yes to it. After looking at the new head, a
-maintainer adds the label `accepted` again; if it is still there, take it off
-and put it on again. A label put by a bot does not say yes. The run is stopped
+or run until a person has said yes to it. The bead comes back with a card of
+the new head: after looking at it, a maintainer picks `accepted` on that card,
+or adds the label `accepted` again; if it is still there, take it off and put
+it on again. A label put by a bot does not say yes. A push while the bead waits
+in `triage` is `pushed`: the bead stays, as a new stay, and the card of the old
+head gives way to one of the new. The run is stopped
 with its session, and a report of it that still comes is refused.
 The script's own reads of the head, against `accepted_head` and
 `reviewed_head` when it starts and against the commit it tested at the end of

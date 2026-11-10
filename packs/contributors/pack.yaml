@@ -56,7 +56,13 @@ flows:
   pr:
     type: pr
     stages:
-      triage:      { group: maintainers,  file: flows/pr/triage.md,   outcomes: { accepted: review, dropped: closed, merged: merged }, manual: [review, closed] }
+      # Where a maintainer decides, on the bead's card in Decide or by the label
+      # (flows/pr/triage.md). pushed is the source's word, as in review below:
+      # new commits while the bead waits here make the stay again, so that the
+      # card of the head it was put for is taken back and the card of the head
+      # the pull request has now is put. The yes a card gives is of the head it
+      # shows, so a pick of the old card accepts nothing.
+      triage:      { group: maintainers,  file: flows/pr/triage.md,   outcomes: { accepted: review, dropped: closed, merged: merged, pushed: triage }, manual: [review, closed] }
       # pushed is the source's word, never the reviewer's: a bot pushed while
       # the pull request was read, so the bead stays and is read again, as a
       # new stay, at the new head (the says table has the line). So is
@@ -214,6 +220,11 @@ sources:
       # label was removed. This line comes before the trusted authors' and
       # bots' lines: the first line an event matches counts.
       - { where: "event=pull_request action=synchronize label=accepted stage=review stage=review-post stage=ciwait stage=contributor type=pr", outcome: unaccepted, note: "new commits since a maintainer accepted the PR" }
+      # New commits while the bead waits in triage, whoever pushed, make the
+      # stay again: the card there names the head it was put for, and the yes
+      # it gives is of that head (see the stage file). Nothing of the new head is
+      # read or run: the bead is where it was, with a card of the new head.
+      - { where: "event=pull_request action=synchronize stage=triage type=pr", outcome: pushed, note: "new commits on the PR while it waited for a maintainer" }
       - { where: "event=pull_request action=synchronize stage=contributor type=pr", outcome: pushed, note: "new commits on the PR" }
       # A bot's push while the pull request is read, its review is posted or it
       # waits on CI starts the read again at its new head. A bot's rebase is the

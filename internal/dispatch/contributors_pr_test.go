@@ -16,6 +16,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -39,7 +40,13 @@ import (
 // is made by the test, as is what a session of post or of pr-ci reports.
 func newContributorsYard(t *testing.T) *ghDepot {
 	t.Helper()
-	r := newGHDepot(t)
+	return newContributorsYardIn(t, t.TempDir())
+}
+
+// newContributorsYardIn is newContributorsYard in the yard's home home.
+func newContributorsYardIn(t *testing.T, home string) *ghDepot {
+	t.Helper()
+	r := newGHDepotIn(t, home)
 	ctx := context.Background()
 	sub, err := fs.Sub(packs.FS, packs.Contributors)
 	must(t, err)
@@ -942,6 +949,140 @@ func TestContributorsAcceptanceIsOfACommit(t *testing.T) {
 	}
 }
 
+// A pull request waiting in triage is a card for the maintainers, with the
+// pack's own stage file: it names the head the deliveries told, a pick of
+// accepted records that head and sends the bead to review, and a push after the
+// card was put never lets the old card accept: the bead stays, the old card is
+// taken back and a card of the new head is put. A pull request returned to
+// triage by a push after a yes comes back with a card of the new head. The label
+// still says yes, beside the card, which it then takes back.
+func TestContributorsTriageCardIsOfTheHead(t *testing.T) {
+	t.Parallel()
+	const lastSHA = "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+	home := t.TempDir()
+	r := newContributorsYardIn(t, home)
+	ctx := context.Background()
+	// The pack's own stage file, its ## Ask included, where an import puts it.
+	file, err := fs.ReadFile(packs.FS, packs.Contributors+"/flows/pr/triage.md")
+	must(t, err)
+	stages := store.HomeStageDir(home, "contributors.pr")
+	must(t, os.MkdirAll(stages, 0o755))
+	must(t, os.WriteFile(filepath.Join(stages, "triage.md"), file, 0o644))
+	r.peopleStages(t)
+	must(t, r.api.SetSetting(ctx, store.OperatorSetting, "jo", "jo"))
+	_, err = r.api.AddUser(ctx, "mckean", "jo")
+	must(t, err)
+	outsider := func(n int, edits ...func(map[string]any)) []func(map[string]any) {
+		return append([]func(map[string]any){prEvent(n, "someone", "User"), authorIs("NONE")}, edits...)
+	}
+	// cards are the open cards on the bead, oldest first.
+	cards := func(id string) []store.ResolvedAsk {
+		t.Helper()
+		notes, err := r.api.Notes(ctx, id)
+		must(t, err)
+		var open []store.ResolvedAsk
+		for _, a := range store.ResolveAsks(notes, time.Now()) {
+			if a.State == store.AskOpen {
+				open = append(open, a)
+			}
+		}
+		return open
+	}
+	// theCard is the one open card of the bead, which shows head and no other.
+	theCard := func(id, head string) store.ResolvedAsk {
+		t.Helper()
+		open := cards(id)
+		if len(open) != 1 || open[0].Ask.Head == nil || open[0].Ask.Head.Sha != head || open[0].Ask.Head.Accepts != "accepted" {
+			var shown []string
+			for _, c := range open {
+				if c.Ask.Head != nil {
+					shown = append(shown, c.Ask.Head.Sha)
+				}
+			}
+			t.Fatalf("%s has %d open cards, showing the heads %v, want one that accepts %s", id, len(open), shown, head)
+		}
+		return open[0]
+	}
+	accepted := func(id string) any { return r.bead(t, id).Metadata["accepted_head"] }
+
+	// Opened by a stranger: the bead waits in triage, and its card names the head
+	// and what the delivery said of it, drawn from the event alone.
+	number := 80
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number)...)
+	b := r.madeIn(t, number, "triage")
+	card := theCard(b.ID, fixtureSHA)
+	if line := card.Ask.Context[1]; !strings.HasPrefix(line, "Head: 4f2c9e1, opened by someone at ") || !strings.HasSuffix(line, " UTC, +12 -0 in 1 file, as the delivery that told it said.") {
+		t.Errorf("the card names the head as %q", line)
+	}
+	if told, _ := r.bead(t, b.ID).Metadata["pr_head_told"].(map[string]any); told["by"] != "someone" || told["action"] != "opened" || told["sha"] != fixtureSHA {
+		t.Errorf("the bead records the delivery as %v", told)
+	}
+	if accepted(b.ID) != nil {
+		t.Fatalf("accepted_head %v before anyone accepted", accepted(b.ID))
+	}
+
+	// A person's pick of accepted: the head shown is the one accepted, and the
+	// bead is in review.
+	must(t, r.api.AddAnswer(ctx, b.ID, store.Answer{Ask: card.Note.Seq, Option: 1}, "mckean"))
+	if got := r.stageOf(t, b.ID); got != "review" || accepted(b.ID) != fixtureSHA {
+		t.Fatalf("after the pick %s is in %s with accepted_head %v, want review with %s", b.ID, got, accepted(b.ID), fixtureSHA)
+	}
+
+	// New commits after the yes bring it back to triage with a card of the new
+	// head, though no label was ever put on it; the old yes stays recorded until
+	// a person gives another.
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, atHead(movedSHA))...)
+	r.pass(t)
+	if got := r.stageOf(t, b.ID); got != "triage" || accepted(b.ID) != fixtureSHA {
+		t.Fatalf("after the push %s is in %s with accepted_head %v, want triage with the earlier %s", b.ID, got, accepted(b.ID), fixtureSHA)
+	}
+	card = theCard(b.ID, movedSHA)
+	if line := card.Ask.Context[1]; !strings.HasPrefix(line, "Head: c0ffee5, pushed by someone at ") || !strings.HasSuffix(line, " UTC, +120 -30 in 4 files, as the delivery that told it said.") {
+		t.Errorf("the card of the pushed head names it as %q", line)
+	}
+
+	// A push while the card waits: the bead stays in triage, the card of the head
+	// before is taken back and the card of the new head is put. The pick of the
+	// old card is refused and accepts nothing.
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, atHead(lastSHA))...)
+	r.pass(t)
+	if got := r.stageOf(t, b.ID); got != "triage" {
+		t.Fatalf("after a push in triage %s is in %s, want triage", b.ID, got)
+	}
+	fresh := theCard(b.ID, lastSHA)
+	if err := r.api.AddAnswer(ctx, b.ID, store.Answer{Ask: card.Note.Seq, Option: 1}, "mckean"); err == nil {
+		t.Fatalf("the pick of the card of %s was taken after the pull request moved to %s", movedSHA, lastSHA)
+	}
+	if got := r.stageOf(t, b.ID); got != "triage" || accepted(b.ID) != fixtureSHA {
+		t.Fatalf("after the refused pick %s is in %s with accepted_head %v, want triage with the earlier %s", b.ID, got, accepted(b.ID), fixtureSHA)
+	}
+	must(t, r.api.AddAnswer(ctx, b.ID, store.Answer{Ask: fresh.Note.Seq, Option: 1}, "mckean"))
+	if got := r.stageOf(t, b.ID); got != "review" || accepted(b.ID) != lastSHA {
+		t.Fatalf("after the pick of the new card %s is in %s with accepted_head %v, want review with %s", b.ID, got, accepted(b.ID), lastSHA)
+	}
+
+	// The label is the other way to the same yes: it records the head its event
+	// named, and takes the card back with the move.
+	number++
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number)...)
+	labeled := r.madeIn(t, number, "triage")
+	theCard(labeled.ID, fixtureSHA)
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number, labeledBy("accepted", "a-maintainer", "User"))...)
+	r.pass(t)
+	if got := r.stageOf(t, labeled.ID); got != "review" || accepted(labeled.ID) != fixtureSHA || len(cards(labeled.ID)) != 0 {
+		t.Fatalf("after the label %s is in %s with accepted_head %v and %d cards, want review with %s and none", labeled.ID, got, accepted(labeled.ID), len(cards(labeled.ID)), fixtureSHA)
+	}
+
+	// The card's other pick closes the bead and accepts nothing.
+	number++
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number)...)
+	closing := r.madeIn(t, number, "triage")
+	must(t, r.api.AddAnswer(ctx, closing.ID, store.Answer{Ask: theCard(closing.ID, fixtureSHA).Note.Seq, Option: 2}, "mckean"))
+	if got := r.bead(t, closing.ID); got.Stage != "closed" || got.Status != "closed" || accepted(closing.ID) != nil {
+		t.Fatalf("after the close %s is %s (%s) with accepted_head %v, want closed with none", closing.ID, got.Stage, got.Status, accepted(closing.ID))
+	}
+}
+
 // A pull request closed unmerged and then reopened has a bead again. The
 // close ended the old one (TestContributorsClosedPullRequestEndsItsBead), so no
 // open bead tracks the thread, and the lines that judged the pull request when
@@ -999,8 +1140,11 @@ func TestContributorsReopenedPullRequestStartsAFreshBead(t *testing.T) {
 	}
 	freshNotes, err := r.api.Notes(ctx, fresh.ID)
 	must(t, err)
-	if len(fresh.Labels) != 0 || len(freshNotes) != 0 || !slices.Equal(slices.Sorted(maps.Keys(fresh.Metadata)), []string{"hook_seq"}) {
-		t.Fatalf("%s starts with labels %v, metadata %v and %d notes, want none but the event that made it", fresh.ID, fresh.Labels, fresh.Metadata, len(freshNotes))
+	// What it has of the event that made it is the event's seq and the head that
+	// event told, with what the delivery said of it (the card of a pull request
+	// in triage shows both): the head the reopen gave, none of the old bead's.
+	if len(fresh.Labels) != 0 || len(freshNotes) != 0 || !slices.Equal(slices.Sorted(maps.Keys(fresh.Metadata)), []string{"hook_seq", "pr_head", "pr_head_told"}) || fresh.Metadata["pr_head"] != movedSHA {
+		t.Fatalf("%s starts with labels %v, metadata %v and %d notes, want none but the event that made it and the head %s it told", fresh.ID, fresh.Labels, fresh.Metadata, len(freshNotes), movedSHA)
 	}
 	wantRules(t, r.rules(t, fresh.ID), "pull_request made "+fresh.ID)
 
@@ -1064,8 +1208,8 @@ func testContributorsReopenedPullRequestInOnePassStartsAFreshBead(t *testing.T) 
 	}
 	freshNotes, err := r.api.Notes(ctx, fresh.ID)
 	must(t, err)
-	if len(fresh.Labels) != 0 || len(freshNotes) != 0 || !slices.Equal(slices.Sorted(maps.Keys(fresh.Metadata)), []string{"hook_seq"}) {
-		t.Fatalf("%s starts with labels %v, metadata %v and %d notes, want none but the event that made it", fresh.ID, fresh.Labels, fresh.Metadata, len(freshNotes))
+	if len(fresh.Labels) != 0 || len(freshNotes) != 0 || !slices.Equal(slices.Sorted(maps.Keys(fresh.Metadata)), []string{"hook_seq", "pr_head", "pr_head_told"}) || fresh.Metadata["pr_head"] != fixtureSHA {
+		t.Fatalf("%s starts with labels %v, metadata %v and %d notes, want none but the event that made it and the head %s it told", fresh.ID, fresh.Labels, fresh.Metadata, len(freshNotes), fixtureSHA)
 	}
 	wantRules(t, r.rules(t, fresh.ID), "pull_request made "+fresh.ID)
 

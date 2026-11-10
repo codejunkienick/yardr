@@ -1658,7 +1658,7 @@ yardr knows the verbs alone:
 | verb | direction | in this pack |
 |---|---|---|
 | `makes` | source -> yard: an event makes a bead for a thread no open bead tracks | an issue opened makes an `issue` bead in `triage`; a pull request opened, marked ready or reopened a `pr` bead in `triage`, or in `review` when its author is an owner or a member of the repository (`association=`) or a bot (`sender=bot`: a kind, never a login, so every bot) |
-| `says` | source -> bead: an event reports an outcome to the bead that tracks its thread | the label `accepted`, put on by a person, says `accepted`; new commits on a pull request that waited in `triage` say `unaccepted` in `review`, `review-post`, `ciwait` and `contributor`, whoever pushed and even if the label was removed; new commits on any other pull request say `pushed` in `contributor`, and in `review` `pushed` when a bot pushed and `outdated` when a person did, in `review-post` `pushed` when a bot pushed and nothing when a person did, in `ciwait` `pushed` when a bot pushed and `changes` when a person did; a merge says `merged`, a close `dropped`: for a pull request in `triage`, `review`, `review-post`, `ciwait`, `contributor`, `approved` and `decide`, for an issue in `triage`, `backlog`, `new`, `review`, `approved` and `decide`. No event of GitHub's CI says anything: the pull request's CI is the yard's own |
+| `says` | source -> bead: an event reports an outcome to the bead that tracks its thread | the label `accepted`, put on by a person, says `accepted`; new commits on a pull request while its bead waits in `triage` say `pushed`, which makes the stay again; new commits on a pull request that waited in `triage` say `unaccepted` in `review`, `review-post`, `ciwait` and `contributor`, whoever pushed and even if the label was removed; new commits on any other pull request say `pushed` in `contributor`, and in `review` `pushed` when a bot pushed and `outdated` when a person did, in `review-post` `pushed` when a bot pushed and nothing when a person did, in `ciwait` `pushed` when a bot pushed and `changes` when a person did; a merge says `merged`, a close `dropped`: for a pull request in `triage`, `review`, `review-post`, `ciwait`, `contributor`, `approved` and `decide`, for an issue in `triage`, `backlog`, `new`, `review`, `approved` and `decide`. No event of GitHub's CI says anything: the pull request's CI is the yard's own |
 | `hears` | bead -> source: a stage of the bead sets a status on the thread | an issue is closed when its bead reaches `merged` or `closed`, a pull request when its bead reaches `closed` |
 
 - **Triage is the pack's advice, and no rule of yardr.** Its stage file
@@ -1666,15 +1666,28 @@ yardr knows the verbs alone:
   before anything of a pull request is run anywhere. Which stage a bead
   starts in is a line of `makes`: a trusted author's pull request starts in
   `review`, and a copy of the pack may trust more authors, or all.
-- **A maintainer's yes is of one commit.** The label `accepted`, put on by a
-  person (one a bot puts moves nothing), moves a pull request's bead out of
-  `triage` and records the head the event named as the bead's `accepted_head`.
-  New commits on a pull request that waited in `triage` take its bead back to
-  `triage` from `review`, `review-post`, `ciwait` and `contributor`, whoever
-  pushed and even if the label was removed, so nothing of another commit is
-  read or run until a person has said yes to it again.
-  A pull request no maintainer accepted, a trusted author's or a bot's own,
-  keeps the lines below for its pushes.
+- **A maintainer's yes is of one commit, and two ways give it.** The label
+  `accepted`, put on by a person (one a bot puts moves nothing), moves a pull
+  request's bead out of `triage` and records the head the event named as the
+  bead's `accepted_head`. Or the bead waits there as a card in Decide, which
+  names the head it would accept (the short commit, who pushed it and when,
+  and how large the change is, from the deliveries the yard heard and nothing
+  fetched or run), and a maintainer's pick of `accepted` records the head the
+  card showed as `accepted_head` and moves the bead to `review` in the same
+  step; another pick closes the bead, and Later or Decline leave it. A push
+  while the bead waits in `triage` says `pushed`, which makes the stay again:
+  the card of the old head is taken back and a card of the new head is put,
+  and a pick of a card whose head the pull request has left accepts nothing.
+  A pull request already waiting in `triage` when the pack is applied has no
+  card until its bead enters the stage again (`yardr bead advance <id> --to
+  triage`). New commits on a pull request that waited in `triage` take its
+  bead back to `triage` from `review`, `review-post`, `ciwait` and
+  `contributor`, whoever pushed and even if the label was removed, with a card
+  of the new head, so nothing of another commit is read or run until a person
+  has said yes to it again. A card is only for a pull request: the issue
+  flow's `triage` has none, since an issue's yes has no head, so there it is
+  the label, or a move by hand. A pull request no maintainer accepted, a
+  trusted author's or a bot's own, keeps the lines below for its pushes.
 - **A reopened pull request gets a new bead.** Its close ended the old
   bead, so no open bead tracks the thread, and the lines of `makes` judge it
   again. `sender` is then whoever reopened it, so a person who reopens a bot's

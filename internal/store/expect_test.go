@@ -434,8 +434,11 @@ func TestMergeOKIsTheOwningSessionToSay(t *testing.T) {
 		{name: "ci_head", nb: store.NewBead{Metadata: map[string]any{"ci_head": sha}}, want: "may not create a bead with ci_head"},
 		{name: "reviewed_head", nb: store.NewBead{Metadata: map[string]any{"reviewed_head": sha}}, want: "may not create a bead with reviewed_head"},
 		{name: "accepted_head", nb: store.NewBead{Metadata: map[string]any{"accepted_head": sha}}, want: "may not create a bead with accepted_head"},
+		// The head a triage card shows, and what the delivery said of it.
+		{name: "pr_head", nb: store.NewBead{Metadata: map[string]any{"pr_head": sha}}, want: "may not create a bead with pr_head"},
+		{name: "pr_head_told", nb: store.NewBead{Metadata: map[string]any{"pr_head_told": map[string]any{"sha": sha, "by": "a-member"}}}, want: "may not create a bead with pr_head_told"},
 	} {
-		id := []string{"yard-forged-merge-ok", "yard-forged-merge-head", "yard-forged-ci-head", "yard-forged-reviewed-head", "yard-forged-accepted-head"}[i]
+		id := []string{"yard-forged-merge-ok", "yard-forged-merge-head", "yard-forged-ci-head", "yard-forged-reviewed-head", "yard-forged-accepted-head", "yard-forged-pr-head", "yard-forged-pr-head-told"}[i]
 		tc.nb.ID, tc.nb.Title, tc.nb.Depot, tc.nb.Stage = id, "forged", "yard", "new"
 		if _, err := s.CreateBead(pane, tc.nb, "yard-a-new"); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("agent created a bead with %s: %v, want refusal %q", tc.name, err, tc.want)
@@ -522,13 +525,17 @@ func TestMergeOKIsTheOwningSessionToSay(t *testing.T) {
 	// accepted_head, the head a maintainer accepted, which pr-ci tests a pull
 	// request that waited in triage at and no other, is a maintainer's and the
 	// dispatcher's to write for the source's word: the pane may not record it
-	// anywhere either, its own bead included.
-	for _, id := range []string{a.ID, b.ID} {
-		if _, err := s.UpdateBead(pane, id, store.BeadPatch{Metadata: map[string]any{"accepted_head": sha}}, unset, "yard-a-new"); err == nil || !strings.Contains(err.Error(), "may not record accepted_head") {
-			t.Errorf("accepted_head on %s from a bead's pane: %v, want it refused", id, err)
-		}
-		if got, _ := s.GetBead(ctx, id); got.Metadata["accepted_head"] != nil {
-			t.Fatalf("a refused accepted_head changed %s: %+v", id, got)
+	// anywhere either, its own bead included. Nor may it record the head the
+	// triage card shows, or what the delivery that told it said (pr_head,
+	// pr_head_told), which a maintainer's yes is then given on.
+	for _, key := range []string{"accepted_head", "pr_head", "pr_head_told"} {
+		for _, id := range []string{a.ID, b.ID} {
+			if _, err := s.UpdateBead(pane, id, store.BeadPatch{Metadata: map[string]any{key: sha}}, unset, "yard-a-new"); err == nil || !strings.Contains(err.Error(), "may not record "+key+",") {
+				t.Errorf("%s on %s from a bead's pane: %v, want it refused", key, id, err)
+			}
+			if got, _ := s.GetBead(ctx, id); got.Metadata[key] != nil {
+				t.Fatalf("a refused %s changed %s: %+v", key, id, got)
+			}
 		}
 	}
 

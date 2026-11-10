@@ -192,7 +192,7 @@ func (t *AskTemplate) stageAsk(to, stage string, entry uint64) Ask {
 		}
 		return Ask{Question: t.Question, To: to, Context: context, Options: options,
 			Recommend: t.Recommend, Why: t.Why, Stage: stage, Move: move, Entry: entry,
-			Moves: t.Kind == AskMoves}
+			Moves: t.Kind == AskMoves, Head: t.askHead()}
 	case AskCheck:
 		done := fmt.Sprintf("the bead leaves %s (outcome %s)", stage, t.Move)
 		return Ask{Question: t.Question, To: to, Context: context,
@@ -260,7 +260,8 @@ func finishLine(notes []Note) string {
 // a notification) decides about a known thing: the question gains the bead's
 // id and title, and the context starts with the bead and its branch and,
 // where the bead carries a finish note, the note's first line (finishLine).
-// The template's own lines stand word for word after them: its authors write
+// A template that accepts: a head has its line after those (headLine). The
+// template's own lines stand word for word after them: its authors write
 // literal text, and nothing in it is filled in. It is a copy, since the
 // template is the stage file's and every member's card is built from it, and
 // the header is frozen into each card as it is put, whatever the bead and
@@ -272,6 +273,12 @@ func (t *AskTemplate) framed(row *beadRow, notes []Note) *AskTemplate {
 	card.Context = []string{fmt.Sprintf("Bead: %s — %s (branch %s)", row.ID, title, Branch(row.ID))}
 	if line := finishLine(notes); line != "" {
 		card.Context = append(card.Context, line)
+	}
+	// A card that offers the yes to a head shows the head the bead tracks
+	// now, and freezes it with the card (stagehead.go).
+	if t.Accepts != "" {
+		card.head = headOf(&row.Bead)
+		card.Context = append(card.Context, headLine(&row.Bead))
 	}
 	card.Context = append(card.Context, t.Context...)
 	return &card
@@ -684,7 +691,9 @@ func stageAnswerSpoofTx(ctx context.Context, tx *bolt.Tx, row *beadRow, actor st
 // earlier stay names the fresh ask where one stands, else says the template
 // went or broke and the bead is moved by hand. Picking the You decide of a
 // card put before the yard dropped it records without moving, as do words
-// with no move. A closed bead moves no more.
+// with no move. A closed bead moves no more. A card that shows a head
+// (stagehead.go) takes the pick that accepts it only while the pull request
+// has that head, and a pick after another is refused whole.
 func (w *wtx) stageAnswer(ctx context.Context, row *beadRow, notes []Note, ans Answer, actor string, repo *RepoFlows, home *stageHome) (outcome, reason string, err error) {
 	var current *ResolvedAsk
 	resolved := ResolveAsks(notes, now())
@@ -731,6 +740,11 @@ func (w *wtx) stageAnswer(ctx context.Context, row *beadRow, notes []Note, ans A
 	}
 	if ask.Entry != entry {
 		return w.earlierStay(row, notes, current, actor, entry, repo, home)
+	}
+	// A card that shows a head takes the pick that accepts it only while the
+	// pull request has that head: the yes is of the commit that was shown.
+	if err := headCurrent(row, ask, ans.Ask, move); err != nil {
+		return "", RefusedAskAnswered, err
 	}
 	return move, "", nil
 }

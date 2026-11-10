@@ -142,44 +142,9 @@ type Ask struct {
 	// weighed in the write that stores the ask from the card the yard
 	// wrote: newAsk clears whatever a caller sends, as it clears Stage.
 	Weight []AskWeight `json:"weight,omitempty"`
-}
-
-// AskIdentity is what a mapping ask maps: the source hearing by
-// identity, the sender's id in it as the delivery carried it, and
-// the channel it arrived in ("" where the envelope named none).
-// Users are the yard's users as the card was written, in the order
-// of the ask's options before someone new, nobody and YouDecide:
-// picking option n writes Users[n-1]'s identity. The card holds the
-// sender as unmapped when it was written; a sender mapped to anyone
-// meanwhile makes its pick stale and nothing is written. Held is
-// how many deliveries wait on the card (held.go), kept current by
-// the write that holds or releases them; their bodies are never in
-// the ask.
-type AskIdentity struct {
-	Source  string   `json:"source"`
-	Sender  string   `json:"sender"`
-	Channel string   `json:"channel,omitempty"`
-	Users   []string `json:"users"`
-	Held    int      `json:"held,omitempty"`
-}
-
-// IdentityAsked is what a mapping ask maps, as a client shows it:
-// the source, the sender's id in it and the channel it arrived in,
-// with how many held deliveries wait on the card.
-type IdentityAsked struct {
-	Source  string `json:"source"`
-	Sender  string `json:"sender"`
-	Channel string `json:"channel,omitempty"`
-	Held    int    `json:"held,omitempty"`
-}
-
-// identityAsked is what the ask a maps, as a client shows it, nil
-// for an ask that maps nobody.
-func (a Ask) identityAsked() *IdentityAsked {
-	if a.Identity == nil {
-		return nil
-	}
-	return &IdentityAsked{Source: a.Identity.Source, Sender: a.Identity.Sender, Channel: a.Identity.Channel, Held: a.Identity.Held}
+	// Head is the head a pull request's card shows and the outcome whose
+	// pick accepts it (stagehead.go): put with the card, and the yard's own.
+	Head *AskHead `json:"head,omitempty"`
 }
 
 // Answer is the JSON of a note of kind answer: what one person did with
@@ -332,7 +297,7 @@ func (s *Store) newAsk(ctx context.Context, ask Ask, actor string) (func(w *wtx,
 	// secret and run asks are stored with the yard's own values: a person
 	// asking by hand puts no stage ask.
 	ask.Stage, ask.Move, ask.Entry, ask.Fallback, ask.Moves = "", nil, 0, false, false
-	ask.Weight = nil
+	ask.Weight, ask.Head = nil, nil
 	ask.Question = strings.TrimSpace(ask.Question)
 	if ask.Question == "" {
 		return nil, fmt.Errorf("an ask needs a question")
@@ -889,7 +854,7 @@ func (s *Store) addAnswer(ctx context.Context, id string, ans Answer, actor, rev
 			if homeErr != nil {
 				return &OperationalError{Err: homeErr}
 			}
-			if _, err := w.move(row.UUID, actor, repo, home, nil, stagePick(move)); err != nil {
+			if _, err := w.move(row.UUID, actor, repo, home, nil, w.stagePickOf(row, ans.Ask, move)); err != nil {
 				return err
 			}
 		}

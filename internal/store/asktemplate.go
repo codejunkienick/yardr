@@ -16,10 +16,15 @@
 //	backlog: The bead goes back to be reshaped by the yardmaster.
 //
 // A line named like a field is that field, so an outcome named question,
-// kind, context, recommend, why, move or options cannot be offered as a bare
-// line. A line of "options:", which takes no value, opens the options
+// kind, context, recommend, why, move, accepts or options cannot be offered
+// as a bare line. A line of "options:", which takes no value, opens the options
 // instead: every line after it is an option whatever its name, to the end of
 // the section.
+//
+// A choice ask of a stage whose beads are pull requests may say "accepts:
+// <outcome>": its card shows the head the bead tracks, and picking that
+// outcome records the head shown as the bead's accepted_head in the write
+// that moves it (stagehead.go).
 //
 // The section is stripped wherever the stage file is shown (StageFile.Body),
 // as the summary: line already is. A section that is present must parse
@@ -30,6 +35,7 @@ package store
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -69,10 +75,21 @@ type AskTemplate struct {
 	// fires; the default done. AskMoveNone on an input ask records the
 	// words and moves nothing. Empty on a choice or moves ask.
 	Move string `json:"move,omitempty"`
+	// Accepts is the outcome of a choice ask whose pick accepts the head the
+	// card shows (the line accepts:): the yard puts the head of the bead's
+	// pull request on the card and records it as the bead's accepted_head
+	// when that outcome is picked. Empty on an ask that shows no head.
+	Accepts string `json:"accepts,omitempty"`
+	// head is the commit the card shows, "" where the bead has none, put in
+	// by framed from the bead the card is for: a copy's own value, never the
+	// stage file's.
+	head string
 	// askLine is the ## Ask line, moveLine the move: line (0 for the
-	// default), both 1-based: where an error about them points.
-	askLine  int
-	moveLine int
+	// default) and acceptsLine the accepts: line, all 1-based: where an
+	// error about them points.
+	askLine     int
+	moveLine    int
+	acceptsLine int
 }
 
 // AskTemplateOption is one option of a choice template: an outcome of the
@@ -203,10 +220,10 @@ type askOptionLine struct {
 func parseAsk(lines []string, at int) (*AskTemplate, error) {
 	t := &AskTemplate{askLine: at + 1, Move: DefaultOutcome}
 	var (
-		seenKind, seenQuestion, seenContext, seenRecommend, seenWhy, seenMove bool
-		contextLine, recommendLine, whyLine, optionsLine                      int // 1-based
-		optionsAbove                                                          int // options before the 'options:' line
-		options                                                               []askOptionLine
+		seenKind, seenQuestion, seenContext, seenRecommend, seenWhy, seenMove, seenAccepts bool
+		contextLine, recommendLine, whyLine, optionsLine                                   int // 1-based
+		optionsAbove                                                                       int // options before the 'options:' line
+		options                                                                            []askOptionLine
 	)
 	fail := func(n int, format string, args ...any) (*AskTemplate, error) {
 		return nil, fmt.Errorf("ask line %d: %s", n, fmt.Sprintf(format, args...))
@@ -299,6 +316,15 @@ func parseAsk(lines []string, at int) (*AskTemplate, error) {
 			}
 			t.Move = value
 			t.moveLine = n
+		case "accepts":
+			if seen(&seenAccepts) {
+				return fail(n, "accepts twice; write it once")
+			}
+			if !validOutcome.MatchString(value) {
+				return fail(n, "accepts %q: the outcome whose pick accepts the head shown, named as the option is", value)
+			}
+			t.Accepts = value
+			t.acceptsLine = n
 		case "options":
 			if value != "" {
 				return fail(n, "options takes the '<outcome>: <consequence>' lines beneath it, not a value")
@@ -355,6 +381,9 @@ func parseAsk(lines []string, at int) (*AskTemplate, error) {
 		if t.Recommend > len(t.Options) {
 			return fail(recommendLine, "recommend %d: the ask has options 1..%d", t.Recommend, len(t.Options))
 		}
+		if seenAccepts && !slices.ContainsFunc(t.Options, func(o AskTemplateOption) bool { return o.Outcome == t.Accepts }) {
+			return fail(t.acceptsLine, "accepts %s: the ask has no option of that name to accept with", t.Accepts)
+		}
 		switch {
 		case t.Recommend != 0 && t.Why == "":
 			if seenWhy {
@@ -377,6 +406,9 @@ func parseAsk(lines []string, at int) (*AskTemplate, error) {
 		if seenMove {
 			return fail(t.moveLine, "a moves ask takes no 'move:': each option is a move of the stage")
 		}
+		if seenAccepts {
+			return fail(t.acceptsLine, "a moves ask takes no 'accepts:': it shows no head, and its options are the stage's moves")
+		}
 		t.Move = ""
 	case AskInput:
 		if firstOption != 0 {
@@ -387,6 +419,9 @@ func parseAsk(lines []string, at int) (*AskTemplate, error) {
 		}
 		if seenWhy {
 			return fail(whyLine, "an input ask takes no 'why:': its answer is words")
+		}
+		if seenAccepts {
+			return fail(t.acceptsLine, "an input ask takes no 'accepts:': its answer is words, and it picks no outcome")
 		}
 		if t.Move != AskMoveNone && !validOutcome.MatchString(t.Move) {
 			return fail(t.moveLine, "move %q: an outcome name uses letters, digits, '.', '_' or '-', or 'none'", t.Move)
@@ -400,6 +435,9 @@ func parseAsk(lines []string, at int) (*AskTemplate, error) {
 		}
 		if seenWhy {
 			return fail(whyLine, "a check ask takes no 'why:': Done is its only option")
+		}
+		if seenAccepts {
+			return fail(t.acceptsLine, "a check ask takes no 'accepts:': Done is its only option, and it shows no head")
 		}
 		if t.Move == AskMoveNone {
 			return fail(t.moveLine, "'move: none' is for an input ask: a check ask moves on Done")

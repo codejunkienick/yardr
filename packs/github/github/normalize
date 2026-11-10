@@ -71,6 +71,14 @@ def field($o; $k; $v): if ($v // "") == "" then $o else $o + {($k): [$v]} end;
                | field(.; "head_sha"; (($item.head // {}).sha // ""))
                | field(.; "head_repo"; ((($item.head // {}).repo // {}).full_name // ""))
                | field(.; "base"; (($item.base // {}).ref // ""))
+               # The size of the change, which the events of a pull request
+               # carry and those of an issue do not: the card a maintainer
+               # decides on shows it beside the head (a field is skipped
+               # when empty, and a count of 0 is kept). No apostrophe in a
+               # comment here: the program is one single-quoted word.
+               | field(.; "additions"; (if $item.additions == null then "" else ($item.additions | tostring) end))
+               | field(.; "deletions"; (if $item.deletions == null then "" else ($item.deletions | tostring) end))
+               | field(.; "changed_files"; (if $item.changed_files == null then "" else ($item.changed_files | tostring) end))
                | ([$item.labels[]?.name | select(. != null and . != "")] as $labels
                   | if ($labels | length) == 0 then . else . + {label: $labels} end)
                # What the writer is to the repository, which is whom a

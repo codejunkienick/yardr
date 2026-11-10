@@ -8,6 +8,9 @@
   "state": "open",
   "draft": false,
   "merged": false,
+  "additions": 120,
+  "deletions": 30,
+  "changed_files": 4,
   "body": "Lands the train. @Yardmaster please review; cc @jane-doe and @acme/core. Mail ops@example.com.",
   "user": {
    "login": "Jane-Doe",
