@@ -484,7 +484,11 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 			return nil, nil, failWords(err.Error(), terminal)
 		}
 		for _, obj := range after.Objects {
-			if obj.Kind != "file" || obj.File == nil {
+			// Only what the plan was to write has a planned copy to be held
+			// to. A file of the pack's directories that the pack does not
+			// carry (a backup left by hand) is left alone by the import and
+			// has no planned hash, so it is no failed import.
+			if obj.Kind != "file" || obj.File == nil || obj.Action == pack.NotInPack {
 				continue
 			}
 			data, err := os.ReadFile(obj.File.To)
