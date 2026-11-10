@@ -46,7 +46,7 @@ func (h *Herdr) Model(ctx context.Context, handle map[string]any, startedAt time
 		return "", err
 	}
 	if id == "" {
-		kind, id, err = h.matchSession(kind, handle, startedAt)
+		kind, id, err = h.matchSession(kind, handle, startedAt, 0)
 		if err != nil || id == "" {
 			return "", err
 		}
@@ -69,7 +69,7 @@ func (h *Herdr) SessionID(ctx context.Context, handle map[string]any, startedAt 
 	if err != nil || id != "" {
 		return id, err
 	}
-	_, id, err = h.matchSession(kind, handle, startedAt)
+	_, id, err = h.matchSession(kind, handle, startedAt, 0)
 	return id, err
 }
 
@@ -77,25 +77,25 @@ func (h *Herdr) SessionID(ctx context.Context, handle map[string]any, startedAt 
 // no id: kind is herdr's when it named an agent, else the handle's own, and
 // id is the worktree match's, "" when no file qualifies or two or more do.
 // An ambiguous match reads as no id here; the count says why (Usage).
-func (h *Herdr) matchSession(kind store.Harness, handle map[string]any, startedAt time.Time) (store.Harness, string, error) {
+func (h *Herdr) matchSession(kind store.Harness, handle map[string]any, startedAt time.Time, preStart time.Duration) (store.Harness, string, error) {
 	if kind.Kind == "" {
 		name, _ := handle[harnessKind].(string)
 		kind, _ = agents.Lookup(name)
 	}
 	worktree, _ := handle["worktree"].(string)
-	id, _, err := h.matchWorkspace(kind, worktree, startedAt)
+	id, _, err := h.matchWorkspace(kind, worktree, startedAt, preStart)
 	return kind, id, err
 }
 
 // matchWorkspace is the id of the session file the worktree match finds for
 // a session herdr reports no id for (a Muse pane): the one file whose
 // workspace line names worktree and whose start, the first of its lines
-// with a time that reads, was written at or after startedAt and within
-// ModelWindow of it. ambiguous is true when two or more files qualify: an
+// with a time that reads, was written no more than preStart before startedAt
+// or ModelWindow after it. ambiguous is true when two or more files qualify: an
 // ambiguous match is never the earliest of them, so no model or count is
 // read from a retry or a manual run. A kind that declares no workspace, or
 // no worktree, matches nothing.
-func (h *Herdr) matchWorkspace(kind store.Harness, worktree string, startedAt time.Time) (id string, ambiguous bool, err error) {
+func (h *Herdr) matchWorkspace(kind store.Harness, worktree string, startedAt time.Time, preStart time.Duration) (id string, ambiguous bool, err error) {
 	if kind.Model == nil || kind.Model.Workspace == nil || worktree == "" {
 		return "", false, nil
 	}
@@ -104,7 +104,7 @@ func (h *Herdr) matchWorkspace(kind store.Harness, worktree string, startedAt ti
 	if err != nil {
 		return "", false, err
 	}
-	end := startedAt.Add(dispatch.ModelWindow)
+	begin, end := startedAt.Add(-preStart), startedAt.Add(dispatch.ModelWindow)
 	var found string
 	for _, path := range files {
 		// The start first: most files are left after their first lines,
@@ -114,7 +114,7 @@ func (h *Herdr) matchWorkspace(kind store.Harness, worktree string, startedAt ti
 		if err != nil {
 			return "", false, err
 		}
-		if !ok || start.Before(startedAt) || start.After(end) {
+		if !ok || start.Before(begin) || start.After(end) {
 			continue
 		}
 		names, err := fileNamesWorktree(kind.Model, path, worktree)

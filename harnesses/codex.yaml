@@ -161,6 +161,18 @@ model:
   type: turn_context
   field: payload.model
 
+# A token_count event's last_token_usage.input_tokens is the prompt of
+# the call just made, including cached_input_tokens, not the running
+# total_token_usage. Read with model_context_window from the same event:
+# different models report different windows (258400 and 475000 observed
+# on 10 Nov 2026), so no fixed size is inferred from a model name.
+context:
+  type_field: payload.type
+  type: token_count
+  usage: payload.info.last_token_usage
+  tokens: [input_tokens]
+  window_field: payload.info.model_context_window
+
 # What a session used, in tokens, read from the same file once the session has
 # ended (docs/design/2026-10-21-yardr-qbqq-session-tokens.md, section 3.3).
 # Read on 22 Oct 2026 from the review session of yardr-mnc8 (session

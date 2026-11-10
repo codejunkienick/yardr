@@ -310,6 +310,12 @@ func printHarness(w io.Writer, h store.Harness, has bool) {
 		fmt.Fprintln(w, "\nThe context its agent holds: a crew member is asked for a handoff at its --context-handoff percent of the window")
 		fmt.Fprintf(w, "  %s: %s at %s of the last %s that has any of them\n",
 			sessionFiles(h.Model), strings.Join(tokens, " + "), c.Usage, lineOf(c.Type, c.TypeField))
+		if c.Window > 0 {
+			fmt.Fprintf(w, "  window: %d tokens\n", c.Window)
+		}
+		if c.WindowField != "" {
+			fmt.Fprintf(w, "  window: from %s of the same line; no reading until it is present\n", c.WindowField)
+		}
 	}
 	if len(h.Usage) > 0 {
 		head := "\nTokens a session used, counted once it has stopped"

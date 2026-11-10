@@ -420,10 +420,16 @@ to write one, and its next session starts from it. The asking is by context
 use first, by the clock as a failsafe.
 
 On a pass where the session is idle, yardr reads what its agent holds from
-the agent's own session file (Claude Code's transcript today: the last
-assistant line's usage), as a percent of its model's window: 200k tokens,
-or 1M where the model the crew member asks for carries `[1m]`
-(`--set model=opus[1m]`). At `--context-handoff` percent (60 unless set, 0
+the agent's own session file: Claude Code's last assistant line's usage,
+Muse's last `model_completed` input, or Codex's last `token_count` call's
+input (not its running total). Muse and Codex input already includes its
+cache. Codex's window is read from the same call's `model_context_window`;
+without it, no reading is recorded. The window is declared by the harness
+where known (1,007,997 tokens for Muse); otherwise it is 200k tokens, or 1M
+where the model the crew member asks for carries `[1m]`
+(`--set model=opus[1m]`). A session with no reading
+yet, or no unique file matching its worktree, waits for a later pass.
+At `--context-handoff` percent (60 unless set, 0
 for never) it nudges once: "Your context is N% of the window. Write your
 handoff when this conversation allows …". The nudge is asked once per
 session and never forced: no grace, no restart. `yardr crew show` prints
