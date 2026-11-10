@@ -141,6 +141,33 @@ func TestGroupSetRefuses(t *testing.T) {
 	}
 	// A key the exec group keeps is not asked for again.
 	mustAs(t, st, "jo", "group", "set", "tick", "dir=/srv/b")
+
+	// An effort is a level of its kind, for a kind that takes one, and not
+	// one the args pass already; each is refused where it is typed, with the
+	// groups as they were (yardr-jkcy). Removing the flag from args and
+	// setting the effort is one write, and unsetting returns to the harness's
+	// own.
+	mustAs(t, st, "jo", "group", "add", "agents", "--runner", "herdr", "--set", "kind=codex", "--set", `args=["-c","model_reasoning_effort=low"]`)
+	mustAs(t, st, "jo", "group", "add", "plain", "--runner", "herdr", "--set", "kind=pi")
+	agents, plain := group(t, st, "agents"), group(t, st, "plain")
+	for want, args := range map[string][]string{
+		`effort "turbo" is no level codex takes (it takes: low, medium, high, xhigh, max, ultra)`:          {"agents", "effort=turbo"},
+		`its args already pass "model_reasoning_effort=low", which effort sets: remove it from args first`: {"agents", "effort=max"},
+		"effort is for the kinds that take one (claude, codex, muse), and pi is not":                       {"plain", "effort=max"},
+		`group tick: unknown config key "effort"`:                                                          {"tick", "effort=max"},
+		`group agents: herdr runner needs config.effort as a string, got the JSON number 5`:                {"agents", "effort=5"},
+	} {
+		refusedAs(t, st, "jo", want, append([]string{"group", "set"}, args...)...)
+	}
+	if !reflect.DeepEqual(group(t, st, "agents"), agents) || !reflect.DeepEqual(group(t, st, "plain"), plain) {
+		t.Fatal("a refused effort changed a group")
+	}
+	if out := mustAs(t, st, "jo", "group", "set", "agents", "--unset", "args", "effort=max"); !strings.Contains(out, "  effort: (not set) -> max\n") {
+		t.Fatalf("set effort printed %q", out)
+	}
+	if out := mustAs(t, st, "jo", "group", "set", "agents", "--unset", "effort"); !strings.Contains(out, "  effort: max -> (dropped)\n") {
+		t.Fatalf("unset effort printed %q", out)
+	}
 }
 
 // A limit of 0 pauses: group set stores it, and the group reads as paused
@@ -207,6 +234,7 @@ func TestGroupShow(t *testing.T) {
 		Harness struct {
 			Kind   string
 			Always []string
+			Effort []string
 		}
 	}
 	if err := json.Unmarshal([]byte(mustAs(t, st, "jo", "group", "show", "agents", "--json")), &shown); err != nil ||
@@ -221,6 +249,22 @@ func TestGroupShow(t *testing.T) {
 	if err := json.Unmarshal([]byte(mustAs(t, st, "jo", "group", "show", "codex", "--json")), &shown); err != nil ||
 		shown.Harness.Kind != "codex" || !reflect.DeepEqual(shown.Harness.Always, []string{"--no-daemon", "--config=check_for_update_on_startup=false"}) {
 		t.Fatalf("group show --json harness = %+v, %v", shown.Harness, err)
+	}
+	// A group's effort is shown as the setting, and as the words its kind's
+	// file makes of it, which are what its agents are started with.
+	mustAs(t, st, "jo", "group", "set", "codex", "effort=max")
+	codex = mustAs(t, st, "jo", "group", "show", "codex")
+	for _, want := range []string{"\n  effort=max\n", "  harness codex passes effort max as: -c model_reasoning_effort=max\n"} {
+		if !strings.Contains(codex, want) {
+			t.Fatalf("group show omitted %q:\n%s", want, codex)
+		}
+	}
+	if err := json.Unmarshal([]byte(mustAs(t, st, "jo", "group", "show", "codex", "--json")), &shown); err != nil ||
+		!reflect.DeepEqual(shown.Harness.Effort, []string{"-c", "model_reasoning_effort=max"}) || shown.Group.Config["effort"] != "max" {
+		t.Fatalf("group show --json = %+v, %v", shown, err)
+	}
+	if out := mustAs(t, st, "jo", "group", "show", "agents"); strings.Contains(out, "passes effort") {
+		t.Fatalf("group show of a group with no effort says how it is passed:\n%s", out)
 	}
 	refusedAs(t, st, "jo", "group nobody: not found", "group", "show", "nobody")
 }

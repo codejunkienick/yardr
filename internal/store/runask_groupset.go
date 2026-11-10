@@ -1,9 +1,10 @@
 // The group set row of the run list (runList): a group's prompt, an exec
-// group's command or a permission preset that never asks, changed on a card
-// and set only on the operator's approval (design yardr-m90n 3.5). What a
-// later session of the group runs is what the change sets, so none of it
-// is told after it runs: the delegated leg refuses all three. The card shows
-// each whole, what stands now and what will, and is weighed code. The words
+// group's command, a permission preset that never asks or its reasoning
+// effort, changed on a card and set only on the operator's approval (design
+// yardr-m90n 3.5). What a later session of the group runs is what the change
+// sets, so none of it is told after it runs: the delegated leg refuses all
+// four. The card shows each whole, what stands now and what will, and is
+// weighed code, but for an effort alone, which brings no program. The words
 // ride as the terminal's own, so the card's command pastes into a terminal,
 // except the preset, which a terminal reads into the kind's flags and the
 // card names by its label (runask_strong.go). A prompt is a file under the
@@ -31,11 +32,11 @@ import (
 )
 
 // groupSetUse is how a refusal names the group set row.
-const groupSetUse = "yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset>"
+const groupSetUse = "yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset> | effort=<level>"
 
 // groupSetKeys are the settings the row carries, in the order its stored
 // form writes them.
-var groupSetKeys = []string{"prompt", "cmd", "preset"}
+var groupSetKeys = []string{"prompt", "cmd", "preset", "effort"}
 
 func init() {
 	runList = append(runList, runCommand{
@@ -105,6 +106,11 @@ func (w *wtx) groupSetProposal(run AskRun) (groupSetSpec, error) {
 	if cmd, ok := sets["cmd"]; ok {
 		spec.set["cmd"] = cmd
 	}
+	if level, ok := sets["effort"]; ok {
+		// Whether it is a level of the group's kind is the config's to
+		// say, below, in the store's own words.
+		spec.set["effort"] = level
+	}
 	if label, ok := sets["preset"]; ok {
 		kind, err := w.kindOf(spec.have.Config)
 		if err != nil {
@@ -160,7 +166,7 @@ func checkGroupSet(ctx context.Context, w *wtx, run AskRun, actor string) error 
 // the runner and the settings the card says something of.
 func groupSetFingerprint(g Group) string {
 	c := asStored(g.Config)
-	return seen(g.Runner, c["prompt"], c["cmd"], c["kind"], c["args"])
+	return seen(g.Runner, c["prompt"], c["cmd"], c["kind"], c["args"], c["effort"])
 }
 
 // groupSetCard is the card of group set <name>: the group, then for each
@@ -192,6 +198,9 @@ func (w *wtx) groupSetCard(run AskRun, _ bool) (AskRun, error) {
 		}
 		does = append(does, fmt.Sprintf("Each session will run sh -c with %s, as its program stands when the session starts.", strconv.Quote(cmd)))
 	}
+	if level, ok := spec.set["effort"].(string); ok {
+		does = append(does, effortLines(spec.have.Config, level)...)
+	}
 	if _, ok := sets["preset"]; ok {
 		does = append(does, presetLines(spec.kind, spec.kind, spec.have.Config["args"], spec.preset)...)
 	}
@@ -203,6 +212,20 @@ func (w *wtx) groupSetCard(run AskRun, _ bool) (AskRun, error) {
 		Seen:   seenMap,
 		Role:   spec.prompt,
 	}, nil
+}
+
+// effortLines are the card's lines for an effort set where the config old
+// holds the group's now: what each session is told at its start now and what
+// it will be, the flags the group's kind takes it by, quoted as the card shows
+// flags. The card sets no kind, so it is the one the group has, and the config
+// it would leave has been held to that kind's levels (groupSetProposal).
+func effortLines(old map[string]any, level string) []string {
+	now := "It sets no effort now, so each session starts at its harness's own."
+	if was, ok := old["effort"].(string); ok {
+		now = fmt.Sprintf("Each session starts at the effort %s now.", was)
+	}
+	e := HarnessEfforts[EffortKind(old)]
+	return []string{now, fmt.Sprintf("Each session will start at the effort %s: %s are added after its other flags.", level, quotedWords(e.Words(level)))}
 }
 
 // groupSetStale says why the ask seq for group set is approved no more: the
@@ -217,9 +240,14 @@ func (w *wtx) groupSetStale(seq uint64, was, now AskRun) error {
 }
 
 // groupSetWeight weighs a group set card: its sessions run a program the
-// card shows, the group's prompt, command or the flags that never ask.
+// card shows, the group's prompt, command or the flags that never ask. A card
+// of an effort alone changes how hard they think and no program, so it is
+// routine.
 func groupSetWeight(_ *wtx, run AskRun) ([]AskWeight, error) {
 	name, sets := strongSetOf(run.Argv)
+	if len(strongChanged(sets)) == 0 {
+		return nil, nil
+	}
 	return []AskWeight{weighs(WeightCode, fmt.Sprintf("%s of the group %s, which each session the yard starts for it then runs as the card shows", strings.Join(strongChanged(sets), " and "), name))}, nil
 }
 
@@ -243,7 +271,7 @@ func runGroupSet(ctx context.Context, w *wtx, run AskRun, actor string, _ *appro
 		}
 	}
 	lines := []string{fmt.Sprintf("group %s saved", spec.name)}
-	for _, key := range []string{"args", "cmd", "prompt"} {
+	for _, key := range []string{"args", "cmd", "effort", "prompt"} {
 		was, had := ch.Was.Config[key]
 		is, has := ch.Is.Config[key]
 		if a, b := grantSettingText(was, had), grantSettingText(is, has); had != has || a != b {

@@ -425,7 +425,7 @@ func TestDelegationSwitch(t *testing.T) {
 
 // What the leg does not carry refuses it in today's words, or in the
 // leg's where a value is held: free args, env_file, env_command, prompt,
-// cmd, the exec runner, a key the list names not, the yardmaster's own
+// cmd, a group's effort, the exec runner, a key the list names not, the yardmaster's own
 // entry, a new crew member, the switch itself, and a hook add with an
 // effectful field or a secret file of the caller's, each naming its flag.
 func TestDelegatedRefusals(t *testing.T) {
@@ -458,10 +458,12 @@ func TestDelegatedRefusals(t *testing.T) {
 		run  func() error
 		want string
 	}{
-		"free args":           {func() error { return setGroup(map[string]any{"args": []any{"--yolo"}}) }, "never carries free args"},
-		"group env_file":      {func() error { return setGroup(map[string]any{"env_file": "/x.env"}) }, "change env_file on group builders"},
-		"group prompt":        {func() error { return setGroup(map[string]any{"prompt": "/roles/b.md"}) }, "change prompt on group builders"},
-		"group cmd":           {func() error { return setGroup(map[string]any{"cmd": "make"}) }, "change cmd on group builders"},
+		"free args":      {func() error { return setGroup(map[string]any{"args": []any{"--yolo"}}) }, "never carries free args"},
+		"group env_file": {func() error { return setGroup(map[string]any{"env_file": "/x.env"}) }, "change env_file on group builders"},
+		"group prompt":   {func() error { return setGroup(map[string]any{"prompt": "/roles/b.md"}) }, "change prompt on group builders"},
+		"group cmd":      {func() error { return setGroup(map[string]any{"cmd": "make"}) }, "change cmd on group builders"},
+		// The operator's, as the args it was a flag of are: a card carries it.
+		"group effort":        {func() error { return setGroup(map[string]any{"effort": "max"}) }, "change effort on group builders"},
 		"worktrees outside":   {func() error { return setGroup(map[string]any{"worktrees": t.TempDir()}) }, "outside the yard's known places"},
 		"crew env_command":    {func() error { return setCrew("clerk", map[string]any{"env_command": "pass x"}) }, "change env_command on crew member clerk"},
 		"crew prompt":         {func() error { return setCrew("clerk", map[string]any{"prompt": "/roles/c.md"}) }, "change prompt on crew member clerk"},

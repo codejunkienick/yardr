@@ -35,6 +35,23 @@ func TestHarnessFiles(t *testing.T) {
 	if want := []string{"claude", "codex", "grok", "kimi", "opencode", "pi", "kiro", "muse"}; !slices.Equal(kinds, want) {
 		t.Errorf("kinds with a file: %v, want %v", kinds, want)
 	}
+	// How each kind takes an effort, as its file says it: Claude Code and Muse
+	// by a flag, Codex as the setting its -c sets. A kind with no entry takes
+	// none, and a group of it refuses the key.
+	wantEffort := map[string]string{
+		"claude": "--effort {level} (low medium high xhigh max)",
+		"codex":  "-c model_reasoning_effort={level} (low medium high xhigh max ultra)",
+		"muse":   "--reasoning-effort {level} (none minimal low medium high xhigh max ultra)",
+	}
+	for _, h := range Harnesses {
+		got := ""
+		if e := h.Flags.Effort; e != nil {
+			got = strings.Join(e.Args, " ") + " (" + strings.Join(e.Levels, " ") + ")"
+		}
+		if got != wantEffort[h.Kind] {
+			t.Errorf("%s: effort %q, want %q", h.Kind, got, wantEffort[h.Kind])
+		}
+	}
 	wantProvider := map[string]string{"claude": "Anthropic", "codex": "OpenAI", "grok": "xAI", "kimi": "Moonshot", "kiro": "AWS", "muse": "Meta"}
 	for _, h := range Harnesses {
 		if h.Provider != wantProvider[h.Kind] {
@@ -670,6 +687,14 @@ func TestLoadRefuses(t *testing.T) {
 		"model, no field":                     {"claude.yaml", "version: 1\nlabel: x\nmodel: {home: .x, glob: '{session}.jsonl'}\n", "home and field are needed"},
 		"a nameless preset":                   {"claude.yaml", "version: 1\nlabel: x\nflags: {permissions: [{args: [--yes]}]}\n", "without label or args"},
 		"model flag is not a flag":            {"claude.yaml", "version: 1\nlabel: x\nflags: {model: model}\n", "is not a flag"},
+		"effort, no flag first":               {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: ['{level}', --effort], levels: [low]}}\n", "flags.effort.args: the first word is the flag"},
+		"effort, no words":                    {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {levels: [low]}}\n", "flags.effort.args: the first word is the flag"},
+		"effort, no level in the words":       {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: [--effort, max], levels: [low]}}\n", "flags.effort.args: {level} is in one word, once"},
+		"effort, the level twice":             {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: [--effort, '{level}', '{level}'], levels: [low]}}\n", "flags.effort.args: {level} is in one word, once"},
+		"effort, no levels":                   {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: [--effort, '{level}']}}\n", "flags.effort.levels: the levels the harness takes are needed"},
+		"effort, a level with a space":        {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: [--effort, '{level}'], levels: ['very high']}}\n", `flags.effort.levels: "very high" is no level`},
+		"effort, an alias that is no flag":    {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: [--effort, '{level}'], levels: [low], aliases: [effort]}}\n", `flags.effort.aliases: "effort" is no flag`},
+		"effort, a field not known":           {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: [--effort, '{level}'], levels: [low], default: low}}\n", "field default not found"},
 		"version text, no version flag":       {"claude.yaml", "version: 1\nlabel: x\nflags: {version_contains: Claude Code}\n", "flags.version_contains: without flags.version"},
 		"two recommended":                     {"claude.yaml", "version: 1\nlabel: x\noffers: [{model: a, label: A, recommended: yardmaster}, {model: b, label: B, recommended: yardmaster}]\n", "offers: 2 recommended, want exactly one"},
 		"none recommended":                    {"claude.yaml", "version: 1\nlabel: x\noffers: [{model: a, label: A}, {model: b, label: B}]\n", "offers: 0 recommended, want exactly one"},

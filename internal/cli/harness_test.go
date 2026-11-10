@@ -30,7 +30,7 @@ func TestHarnessListAndShow(t *testing.T) {
 	}
 	out := ask(0, "harness", "list")
 	wantText(t, out, "KIND", "claude    Claude Code  v1    pane marks, error lines, dialogs told of, login screen, background work, reported model, context use, token count, trust dialog, onboarding screens answered, unattended flags,",
-		"codex     Codex        v1    pane marks, error lines, dialogs told of, reported model, token count, trust dialog, unattended flags, model flag, flags always passed,",
+		"codex     Codex        v1    pane marks, error lines, dialogs told of, reported model, token count, trust dialog, unattended flags, model flag, effort flag, flags always passed,",
 		"muse      Muse Code    v1    pane marks, error lines, login screen, background work, reported model, token count, trust dialog, unattended flags,",
 		"kimi      Kimi         v1    pane marks, error lines, dialogs told of, hints, trust dialog, trust environment, unattended flags,",
 		"pi        pi           v1    error lines, model flag, version flag, one-shot call\n",
@@ -49,6 +49,7 @@ func TestHarnessListAndShow(t *testing.T) {
 		"trust: yardr answers its folder-trust dialog", "input begins with:    ›", "a message it took:    ›",
 		"unattended: --dangerously-bypass-approvals-and-sandbox", "always:     --no-daemon",
 		"model flag: --model",
+		"effort:     -c model_reasoning_effort={level}  (a group's effort=<level>; levels: low, medium, high, xhigh, max, ultra)",
 		"one shot:   exec --skip-git-repo-check <prompt>", `permission "approve for me": --approve-for-me  (automatic review`,
 		"~/.codex (or $CODEX_HOME)/sessions/*/*/*/rollout-*-{session}.jsonl: payload.model of the first line of type turn_context",
 		"at_capacity    ^(Selected model is at capacity|Flex capacity unavailable)",
@@ -122,6 +123,8 @@ func TestHarnessListAndShow(t *testing.T) {
 	wantText(t, ask(0, "harness", "show", "muse"), "muse  Muse Code, by Meta  (harnesses/muse.yaml, version 1)",
 		"trust: yardr answers its folder-trust dialog", "input begins with:    ❯", "a message it took:    ❯",
 		"before an error line: any of ◆", "unattended: --yolo", "model flag: --model", "one shot:   exec <prompt>",
+		"effort:     --reasoning-effort {level}  (a group's effort=<level>; levels: none, minimal, low, medium, high, xhigh, max, ultra)",
+		"also set by --effort, which a group's args may not pass beside effort=",
 		`permission "yolo": --yolo`, `permission "no approval": --disable-approval`,
 		"~/.local/share/muse/sessions/*/*/*/{session}/session.jsonl: payload.record.model_id of the first line whose payload_type is run.model.configured",
 		"Login screen, drawn in place of its input: told of at once (nudge_held), never typed into",
@@ -141,7 +144,7 @@ func TestHarnessListAndShow(t *testing.T) {
 		"none known: nothing is reported, and session_idle with its tail is what there is",
 		"claude-opus-5.5 (Opus 5.5), recommended for a yardmaster", "auto (Auto)", "claude-sonnet-4.5 (Sonnet 4.5)")
 	wantText(t, ask(0, "harness", "show", "claude"), "claude  Claude Code, by Anthropic  (harnesses/claude.yaml, version 1)")
-	wantText(t, ask(0, "harness", "show", "pi"), "Models it offers", "none named: --model takes any id",
+	wantText(t, ask(0, "harness", "show", "pi"), "effort:     none: a group of this kind takes no effort=", "Models it offers", "none named: --model takes any id",
 		"pi  pi  (harnesses/pi.yaml, version 1)", `other   ^Error: Retry failed after \d+ attempts`)
 	shown = store.Harness{}
 	if err := json.Unmarshal([]byte(ask(0, "harness", "show", "pi", "--json")), &shown); err != nil || shown.Provider != "" {

@@ -138,4 +138,25 @@ func TestBeadAskRunSetsThePromptAndPreset(t *testing.T) {
 		!strings.Contains(err.Error(), "group cooks is set so already") {
 		t.Errorf("group set of a preset it has = %v", err)
 	}
+	// An effort is a word of no quotes, so the card carries it where the
+	// flags of args never could, and it weighs nothing (yardr-jkcy): the
+	// yardmaster proposes it, the operator approves it, and the group's
+	// sessions are given the effort. The yardmaster cannot set it itself.
+	out, err = y.as(t, "yardmaster", "ask", b.ID, "Think harder?", "--context", "the cooks cut corners", "--run", "group set cooks effort=max")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seq int
+	if _, err := fmt.Sscanf(out, "ask %d on", &seq); err != nil || !strings.Contains(out, "to approve, yardr group set cooks effort=max\n") {
+		t.Fatalf("bead ask --run group set effort printed %q, %v", out, err)
+	}
+	if _, err := y.st.SetGroup(ctx, "cooks", store.GroupEdit{Set: map[string]any{"effort": "max"}}, "yardmaster"); err == nil || !strings.Contains(err.Error(), "only the operator") {
+		t.Errorf("the yardmaster set the effort itself: %v", err)
+	}
+	if out, err = y.as(t, "jo", "answer", b.ID, fmt.Sprint(seq), "--approve"); err != nil || !strings.Contains(out, "group cooks saved") || !strings.Contains(out, "effort: (not set) -> max") {
+		t.Fatalf("the approval of the effort printed %q, %v", out, err)
+	}
+	if g, err := y.st.GetGroup(ctx, "cooks"); err != nil || g.Config["effort"] != "max" || g.Config["prompt"] != yardFile {
+		t.Fatalf("the group holds %+v, %v", g, err)
+	}
 }

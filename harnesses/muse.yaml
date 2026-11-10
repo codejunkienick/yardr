@@ -49,6 +49,14 @@ marks:
 
 flags:
   model: --model
+  # `muse --help` (Muse Code 1.4.15, 10 Nov 2026): "--reasoning-effort
+  # <EFFORT>  Meta reasoning effort: none|minimal|low|medium|high|xhigh|max|ultra
+  # (default: high; alias: --effort)". A group whose args pass the alias is held
+  # to the flag as it is held to the flag itself.
+  effort:
+    args: [--reasoning-effort, "{level}"]
+    levels: [none, minimal, low, medium, high, xhigh, max, ultra]
+    aliases: [--effort]
   unattended: [--yolo]
   version: [--version]
   one_shot: [exec]

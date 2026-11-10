@@ -80,6 +80,7 @@ var ConfigKeys = []ConfigKey{
 	{"nice", ConfigNice, []string{"exec", "herdr"}, GroupConfig, "the niceness a session and everything it starts run at, so that the daemon is served first when the machine is full; unset: the one it would start with"},
 	{"kind", ConfigString, []string{"herdr"}, "", "the agent kind herdr starts; default: the yard's default_kind"},
 	{"model", ConfigString, []string{"herdr"}, "", "the agent's model; default: the harness's own"},
+	{"effort", ConfigString, []string{"herdr"}, GroupConfig, "the agent's reasoning effort, a level of its kind (yardr harness show <kind> lists them); default: the harness's own"},
 	{"provider", ConfigString, []string{"herdr"}, "", "the subscription the agent burns, named as a source's limits kinds name it; default: the kind's mapping"},
 	{"args", ConfigWords, []string{"herdr"}, "", "arguments the agent is started with"},
 	{"prompt", ConfigString, []string{"herdr"}, "", "the role prompt file a session's brief starts with"},
@@ -200,6 +201,9 @@ func configProblems(of ConfigOf, name, runner string, cfg, old map[string]any) [
 			typed = append(typed, fmt.Errorf("%s: %s runner needs config.%s as %s, got the JSON %s%s",
 				subject, runner, key, k.Type, jsonKind(v), hint))
 		}
+	}
+	if runner == "herdr" && of == GroupConfig {
+		typed = append(typed, effortProblems(subject, cfg, old)...)
 	}
 	out := append(typed, unknown...)
 	if cmd, _ := cfg["cmd"].(string); runner == "exec" && of == GroupConfig && cmd == "" && len(typed) == 0 {

@@ -814,7 +814,7 @@ func TestBeadAskRunPeerSet(t *testing.T) {
 // groupSetUse and crewSetUse the rows of the strong few.
 const (
 	groupAddUse = "yardr group add <name> --runner <runner> [--limit <n>] [--set k=v ...]"
-	groupSetUse = "yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset>"
+	groupSetUse = "yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset> | effort=<level>"
 	crewSetUse  = "yardr crew set <name> prompt=<file> | preset=<preset> | kind=<kind> | model=<model> | dir=<dir>"
 )
 
@@ -894,7 +894,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr crew set <name> open_threads=<sources> | set_state=<sources> | peers=<peers>": {
 			"crew set yardmaster peers=airy",
 		},
-		groupSetUse: {"group set builders cmd=./deploy.sh"},
+		groupSetUse: {"group set builders cmd=./deploy.sh", "group set builders effort=max"},
 		crewSetUse:  {"crew set yardmaster preset=bypass", "crew set yardmaster kind=claude model=opus preset=auto"},
 		"yardr crew identity <name> --source <source> [--id <id>] [--key <key>]": {
 			"crew identity yardmaster --source crm --id u1 --key boss",
@@ -979,6 +979,15 @@ func TestRunListIsTheCLIs(t *testing.T) {
 			if use == "yardr link move --from-source <source> --to-source <source>" {
 				seedLinks(t, approved, ab.ID)
 				seedLinks(t, typed, tb.ID)
+			}
+			if command == "group set builders effort=max" {
+				// An effort is a herdr group's: the yard's builders are an
+				// exec group, which reads none.
+				for _, y := range []*cliYard{approved, typed} {
+					if err := y.st.PutGroup(context.Background(), store.Group{Name: "builders", Runner: "herdr", Config: map[string]any{"kind": "codex"}}, "jo"); err != nil {
+						t.Fatal(err)
+					}
+				}
 			}
 			if use == "yardr user device rm <user> <device>" {
 				for _, y := range []*cliYard{approved, typed} {

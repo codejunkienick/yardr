@@ -97,6 +97,7 @@ func harnessKnown(h store.Harness) []string {
 	add(len(h.Onboarding) > 0, "onboarding screens answered")
 	add(len(h.Flags.Unattended) > 0, "unattended flags")
 	add(h.Flags.Model != "", "model flag")
+	add(h.Flags.Effort != nil, "effort flag")
 	add(len(h.Flags.Always) > 0, "flags always passed")
 	add(len(h.Flags.Permissions) > 0, "permission presets")
 	add(len(h.Flags.Version) > 0, "version flag")
@@ -256,6 +257,14 @@ func printHarness(w io.Writer, h store.Harness, has bool) {
 	fmt.Fprintln(w, "\nFlags")
 	fmt.Fprintf(w, "  unattended: %s\n", args(h.Flags.Unattended))
 	fmt.Fprintf(w, "  model flag: %s\n", or(h.Flags.Model, "--model (runner default)"))
+	if e := h.Flags.Effort; e != nil {
+		fmt.Fprintf(w, "  effort:     %s  (a group's effort=<level>; levels: %s)\n", strings.Join(e.Args, " "), strings.Join(e.Levels, ", "))
+		if len(e.Aliases) > 0 {
+			fmt.Fprintf(w, "              also set by %s, which a group's args may not pass beside effort=\n", strings.Join(e.Aliases, ", "))
+		}
+	} else {
+		fmt.Fprintln(w, "  effort:     none: a group of this kind takes no effort=")
+	}
 	if len(h.Flags.Always) > 0 {
 		fmt.Fprintf(w, "  always:     %s\n", args(h.Flags.Always))
 	}

@@ -321,7 +321,10 @@ A prompt, a group's `cmd`, a preset that skips permission prompts and every
 setting of the yardmaster's own entry are not runs. They rewrite what every
 later session does, so the yardmaster proposes them in a run ask (`group
 set`, `crew set`; [groups.md](groups.md), [crew.md](crew.md)) and they run
-when the operator approves.
+when the operator approves. A group's `effort` is held the same way, since it is
+the operator's as the `args` it was a flag of are: the yardmaster proposes
+`group set <name> effort=<level>` in a run ask, whose card weighs nothing, and
+does not run it.
 
 On a delegated run the approval is the operator's own cited mail, so the run
 skips the card the same command carries today: the code card of `group add`,

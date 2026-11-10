@@ -872,7 +872,8 @@ func (h *Herdr) workspaceAt(ctx context.Context, ws, path string) bool {
 // agent runs with (Codex's --no-daemon, Kiro's chat subcommand), the
 // group's args, then the kind's model flag from the bead's
 // metadata.model, else the group's config.model. A model already in args is
-// replaced, so a bead can override a group default. SocketArg in an
+// replaced, so a bead can override a group default. The words of the kind's
+// effort from the group's config.effort come last (withEffort). SocketArg in an
 // argument is the socket of the yard at home, WorkdirArg the directory the
 // session works in, TmpdirArg the session's temporary directory tmpdir.
 func AgentArgs(job dispatch.Job, home, workdir, tmpdir string) []string {
@@ -947,7 +948,7 @@ func agentArgs(cfg map[string]any, override, home, workdir, tmpdir string) []str
 	}
 	model := modelFor(cfg, override)
 	if model == "" {
-		return args
+		return withEffort(args, cfg, kind)
 	}
 	modelFlag := kind.Flags.Model
 	if modelFlag == "" {
@@ -963,7 +964,7 @@ func agentArgs(cfg map[string]any, override, home, workdir, tmpdir string) []str
 			out = append(out, args[i])
 		}
 	}
-	return append(out, modelFlag, model)
+	return withEffort(append(out, modelFlag, model), cfg, kind)
 }
 
 // codexEnablesMemories reports whether the group's arguments explicitly

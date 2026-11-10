@@ -191,13 +191,15 @@ const askRunList = `  peer add <name> <invite>
       wrote is not one to name; no other setting rides in with it, and
       another member's kind, model and directory are the yardmaster's to
       run for the operator on their mail
-  group set <name> prompt=<file> | cmd=<command> | preset=<preset>
+  group set <name> prompt=<file> | cmd=<command> | preset=<preset> | effort=<level>
       the same for a group, and for an exec group's command (one word:
       the line is split at spaces); approving a prompt writes its carried
       text to a read-only file of the yard's own, roles/<name>.<digest>.md,
       and sets it as the prompt, so a later change to the file named
-      reaches no session, and a file the yard wrote is not one to name; a
-      kind, a directory and the rest of a group are not this card's: the
+      reaches no session, and a file the yard wrote is not one to name; an
+      effort is a level of the group's kind (yardr harness show <kind>
+      lists them), which the card shows as the flags each session is given;
+      a kind, a directory and the rest of a group are not this card's: the
       yardmaster sets those the operator has delegated on their mail, and
       the rest are typed in a terminal
   crew identity <name> --source <source> [--id <id>] [--key <key>]

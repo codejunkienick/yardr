@@ -155,6 +155,10 @@ func parseSGRColor(colour string) (string, error) {
 type Flags struct {
 	// Model is the flag that selects a model when yardr starts an agent.
 	Model string `yaml:"model" json:"model,omitempty"`
+	// Effort is how the kind takes a reasoning effort, which a group names
+	// as effort=<level>; yardr adds it to the agent's arguments at start.
+	// nil for a kind that takes none.
+	Effort *Effort `yaml:"effort" json:"effort,omitempty"`
 	// Unattended are the flags an agent yardr starts runs with by default,
 	// so it does not stop at a prompt nobody is watching: what `yardr init`
 	// gives the yardmaster and what `group add --help` suggests. A kind
@@ -813,6 +817,9 @@ func (h *Harness) Check() error {
 	}
 	if h.Flags.Model != "" && !strings.HasPrefix(h.Flags.Model, "-") {
 		return fmt.Errorf("flags.model: %q is not a flag", h.Flags.Model)
+	}
+	if err := h.Flags.Effort.check(); err != nil {
+		return err
 	}
 	if h.Flags.VersionContains != "" && len(h.Flags.Version) == 0 {
 		return fmt.Errorf("flags.version_contains: without flags.version there is no version output to read it from")

@@ -297,10 +297,9 @@ func TestRunAskGroupSetSaysWhatItCannotShow(t *testing.T) {
 		"Its prompt is the file "+current+", which each session reads when it starts.", rewrittenSaid, "A linked prompt.")
 }
 
-// A group set of an exec group's command shows the command now and the one
-// it will run, and approving sets exactly it. A command it already runs is
-// no card.
-func TestRunAskGroupSetCardsACommand(t *testing.T) {
+// A group set card shows a command or effort now and the one it will run
+// with, and approving sets exactly it. A value it already holds is no card.
+func TestRunAskGroupSetCardsACommandAndEffort(t *testing.T) {
 	t.Parallel()
 	y := listYard(t)
 	seq := y.ask(t, listAsk("mckean", "group", "set", "builders", "cmd=./deploy.sh"), "yardmaster")
@@ -342,6 +341,59 @@ func TestRunAskGroupSetCardsACommand(t *testing.T) {
 	sets, err := ParseSets([]string{`cmd="true"`})
 	if err != nil || sets["cmd"] != "true" {
 		t.Errorf("taking the command back reads cmd as %v, %v; want the string true", sets["cmd"], err)
+	}
+
+	// Effort is the operator's, as the args it was a flag of are, so the
+	// yardmaster proposes it and the operator approves it. Its flags are on
+	// the card, its take-back restores what the group held, and the card is
+	// stale once the group was set since.
+	seq = y.ask(t, listAsk("mckean", "group", "set", "reviewers", "effort=max"), "yardmaster")
+	r = y.asked(t, seq)
+	strongHas(t, r.Ask.Run.Does, "changes the group reviewers on the herdr runner",
+		"It sets no effort now, so each session starts at its harness's own.",
+		`Each session will start at the effort max: "-c" "model_reasoning_effort=max" are added after its other flags.`)
+	if len(r.Ask.Weight) != 0 {
+		t.Errorf("weight = %+v, want none for an effort alone", r.Ask.Weight)
+	}
+	if r.Ask.Run.Back != "yardr group set reviewers --unset effort" || r.Ask.Run.BackBy != "only the operator" {
+		t.Errorf("taken back by %q (%s), want the effort unset", r.Ask.Run.Back, r.Ask.Run.BackBy)
+	}
+	// Run directly, the yardmaster's is refused, with a word for any effort.
+	if _, err := y.SetGroup(y.ctx, "reviewers", GroupEdit{Set: map[string]any{"effort": "max"}}, "yardmaster"); err == nil || !strings.Contains(err.Error(), "only the operator") {
+		t.Errorf("the yardmaster set the effort directly: %v", err)
+	}
+	// A weightless card needs no sight of its weight.
+	done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "group reviewers saved\n  effort: (not set) -> max"; done.Result != want {
+		t.Errorf("approval printed %q, want %q", done.Result, want)
+	}
+	if g, _ := y.GetGroup(y.ctx, "reviewers"); g.Config["effort"] != "max" || g.Config["kind"] != "codex" || g.Config["prompt"] != "roles/reviewer.md" {
+		t.Errorf("group = %+v, want the effort set and the rest kept", g)
+	}
+	// Another level shows the one that stands, and is taken back to it.
+	seq = y.ask(t, listAsk("mckean", "group", "set", "reviewers", "effort=high"), "yardmaster")
+	r = y.asked(t, seq)
+	strongHas(t, r.Ask.Run.Does, "Each session starts at the effort max now.",
+		`Each session will start at the effort high: "-c" "model_reasoning_effort=high" are added`)
+	if r.Ask.Run.Back != "yardr group set reviewers effort=max" {
+		t.Errorf("taken back by %q", r.Ask.Run.Back)
+	}
+	// Set since, it is stale; one it holds already changes nothing.
+	if _, err := y.SetGroup(y.ctx, "reviewers", GroupEdit{Set: map[string]any{"effort": "low"}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y.refusedStale(t, seq, "was written when the group reviewers was another: it was set since")
+	if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", "group", "set", "reviewers", "effort=low"), "yardmaster"); err == nil || !strings.Contains(err.Error(), "is set so already, so the command would change nothing") {
+		t.Errorf("an effort it holds already = %v", err)
+	}
+	// Beside a prompt or a command it rides on that card, which weighs as it
+	// did and names only what it runs.
+	seq = y.ask(t, listAsk("mckean", "group", "set", "builders", "cmd=./deploy.sh"), "yardmaster")
+	if r = y.asked(t, seq); len(r.Ask.Weight) != 1 || strings.Contains(r.Ask.Weight[0].Line, "effort") {
+		t.Errorf("weight = %+v", r.Ask.Weight)
 	}
 }
 
@@ -436,8 +488,16 @@ func TestRunAskStrongSetRefusals(t *testing.T) {
 	if _, err := y.PutCrew(y.ctx, CrewMember{Name: "clerk", Runner: "herdr", Dir: "/yard", Config: map[string]any{"kind": "codex"}}, "mckean"); err != nil {
 		t.Fatal(err)
 	}
+	for _, g := range []Group{
+		{Name: "plain", Runner: "herdr", Config: map[string]any{"kind": "pi"}},
+		{Name: "heavy", Runner: "herdr", Config: map[string]any{"kind": "codex", "args": []any{"-c", "model_reasoning_effort=high"}}},
+	} {
+		if err := y.PutGroup(y.ctx, g, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, c := range []struct{ command, want string }{
-		{"group set reviewers preset=bypass dir=/tmp", "--run takes " + groupSetUse + ": dir is no part of this card, which carries prompt, cmd, preset and nothing else"},
+		{"group set reviewers preset=bypass dir=/tmp", "--run takes " + groupSetUse + ": dir is no part of this card, which carries prompt, cmd, preset, effort and nothing else"},
 		{"group set reviewers preset=bypass kind=claude", "kind is no part of this card"},
 		{"group set reviewers preset=bypass --limit 3", "group set with --limit is no part of this card"},
 		{"group set reviewers preset=bypass --unset idle", "group set with --unset is no part of this card"},
@@ -450,6 +510,15 @@ func TestRunAskStrongSetRefusals(t *testing.T) {
 		{"group set reviewers preset=auto", `codex has no permission preset "auto" (it has: approve for me, bypass, read only)`},
 		{"group set reviewers preset=approve-for-me", "the codex preset approve for me does not skip the agent's permission prompts, so it is no card of the strong few"},
 		{"group set reviewers cmd=./x.sh", "cmd"},
+		// An effort is a level of the group's kind, for a kind that takes
+		// one, which its args do not pass already, on a runner that reads it.
+		{"group set reviewers effort=turbo", `effort "turbo" is no level codex takes (it takes: low, medium, high, xhigh, max, ultra)`},
+		{"group set reviewers effort=", "effort needs its value"},
+		{"group set reviewers effort=5", "effort=5 reads as JSON"},
+		{"group set reviewers effort=max effort=low", "effort is set twice"},
+		{"group set builders effort=max", `unknown config key "effort": nothing reads it. A group of the exec runner takes:`},
+		{"group set plain effort=max", "effort is for the kinds that take one (claude, codex, muse), and pi is not"},
+		{"group set heavy effort=max", `its args already pass "model_reasoning_effort=high", which effort sets: remove it from args first`},
 		{"group set builders preset=bypass", "args"},
 		{"group set reviewers prompt=/etc/hosts", "the ask carries no prompt text"},
 		{"crew set clerk preset=bypass kind=claude", "kind is on this card for the yardmaster's own entry alone, which the delegated leg never carries: " + strongApart},

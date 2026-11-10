@@ -56,6 +56,17 @@ marks:
 
 flags:
   model: --model
+  # Codex takes its reasoning effort as the setting model_reasoning_effort,
+  # which -c sets for one run over ~/.codex/config.toml. It checks no level
+  # itself: `codex exec -c model_reasoning_effort=bogus` (codex-cli 0.160.1,
+  # 10 Nov 2026) starts, prints "reasoning effort: bogus" and fails at its
+  # first request. The levels are the ones `codex debug models` lists, read
+  # the same day: the union over its models, of which some take low to ultra
+  # and others low to max. A level the group's model does not take fails at
+  # the session's first request, as a model the account may not use does.
+  effort:
+    args: [-c, "model_reasoning_effort={level}"]
+    levels: [low, medium, high, xhigh, max, ultra]
   unattended: [--dangerously-bypass-approvals-and-sandbox]
   version: [--version]
   # What the real one says, as for claude: run on 2 Nov 2026, codex-cli

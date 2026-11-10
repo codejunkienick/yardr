@@ -278,7 +278,7 @@ func strongBack(command, name string, old map[string]any, set map[string]any, fl
 	}
 	back := []string{"yardr " + command, name}
 	var unset []string
-	for _, key := range []string{"prompt", "cmd", "args", "kind", "model"} {
+	for _, key := range []string{"prompt", "cmd", "args", "kind", "model", "effort"} {
 		if _, ok := set[key]; !ok {
 			continue
 		}

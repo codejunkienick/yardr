@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -23,8 +24,8 @@ func TestStoreRefusesAConfigKeyNothingReads(t *testing.T) {
 		return s.PutGroup(ctx, store.Group{Name: "g", Runner: runner, Config: cfg}, "me")
 	}
 	for want, err := range map[string]error{
-		`group g: unknown config key "idel": nothing reads it. A group of the herdr runner takes: args, cleanup, env_file, grace, idle, keep, kind, label, login_for, max_age, model, nice, prompt, provider, stall, still, trust, worktrees`: put("herdr", map[string]any{"kind": "claude", "idel": "5m"}),
-		`group g: unknown config key "max-age": nothing reads it. A group of the exec runner takes: cleanup, cmd, dir, env_file, grace, idle, keep, log, max_age, nice, stall, still, timeout, worktrees`:                                     put("exec", map[string]any{"cmd": "true", "max-age": "6h"}),
+		`group g: unknown config key "idel": nothing reads it. A group of the herdr runner takes: args, cleanup, effort, env_file, grace, idle, keep, kind, label, login_for, max_age, model, nice, prompt, provider, stall, still, trust, worktrees`: put("herdr", map[string]any{"kind": "claude", "idel": "5m"}),
+		`group g: unknown config key "max-age": nothing reads it. A group of the exec runner takes: cleanup, cmd, dir, env_file, grace, idle, keep, log, max_age, nice, stall, still, timeout, worktrees`:                                             put("exec", map[string]any{"cmd": "true", "max-age": "6h"}),
 		// A key of another runner, or of a crew member, is read by nothing here.
 		`group g: unknown config key "kind": nothing reads it. A group of the manual runner takes: cleanup, fold, fold_after, fold_max, grace, idle, keep, max_age, notify, stall, still, wait`: put("manual", map[string]any{"kind": "claude"}),
 		`group g: unknown config key "greet"`:       put("herdr", map[string]any{"greet": "jo"}),
@@ -69,6 +70,18 @@ func TestStoreRefusesAConfigKeyNothingReads(t *testing.T) {
 		`group g: herdr runner needs config.nice as a whole number from 0 to 19, got the JSON boolean true`: put("herdr", map[string]any{"kind": "claude", "nice": true}),
 		// A session of a manual group runs nothing to be nice, a peer's runs at the other yard.
 		`group g: unknown config key "nice"`: put("manual", map[string]any{"nice": 10}),
+		// An effort is read where an agent is started, so by a herdr group alone,
+		// and it is a level of the group's kind (claude where it names none),
+		// for a kind that takes one, which the group's args do not pass already.
+		`group g: unknown config key "effort": nothing reads it. A group of the exec runner takes:`:                                  put("exec", map[string]any{"cmd": "true", "effort": "max"}),
+		`group g: unknown config key "effort": nothing reads it. A group of the manual runner takes:`:                                put("manual", map[string]any{"effort": "max"}),
+		`group g: herdr runner needs config.effort as a string, got the JSON number 5; write --set 'effort="5"'`:                     put("herdr", map[string]any{"kind": "claude", "effort": 5}),
+		`group g: effort "turbo" is no level claude takes (it takes: low, medium, high, xhigh, max)`:                                 put("herdr", map[string]any{"kind": "claude", "effort": "turbo"}),
+		`group g: effort "ultra" is no level claude takes`:                                                                           put("herdr", map[string]any{"effort": "ultra"}),
+		`group g: effort is for the kinds that take one (claude, codex, muse), and pi is not: its harness file names no flag for it`: put("herdr", map[string]any{"kind": "pi", "effort": "low"}),
+		`group g: its args already pass "--effort", which effort sets: remove it from args first`:                                    put("herdr", map[string]any{"kind": "claude", "effort": "max", "args": []string{"--effort", "high"}}),
+		`group g: its args already pass "model_reasoning_effort=\"high\"", which effort sets`:                                        put("herdr", map[string]any{"kind": "codex", "effort": "max", "args": []string{"-c", `model_reasoning_effort="high"`}}),
+		`group g: its args already pass "--effort=low", which effort sets`:                                                           put("herdr", map[string]any{"kind": "muse", "effort": "high", "args": []string{"--yolo", "--effort=low"}}),
 	} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("PutGroup = %v, want %s", err, want)
@@ -82,7 +95,7 @@ func TestStoreRefusesAConfigKeyNothingReads(t *testing.T) {
 	// JSON stores it.
 	for runner, cfg := range map[string]map[string]any{
 		"herdr": {"kind": "claude", "args": []string{"--model", "opus"}, "idle": "off", "max_age": 3600, "grace": "0",
-			"stall": "2m", "keep": true, "cleanup": false, "trust": false, "label": "builders", "worktrees": "/srv/wt", "nice": 19},
+			"stall": "2m", "keep": true, "cleanup": false, "trust": false, "label": "builders", "worktrees": "/srv/wt", "nice": 19, "effort": "xhigh"},
 		"manual": {"notify": "yes", "max_age": 90.5, "wait": "1d", "fold": 4, "fold_after": "1d", "fold_max": 6},
 		"exec":   {"cmd": "make", "dir": "/srv", "log": "/srv/log", "idle": "10m", "env_file": "/srv/deploy.env", "timeout": "2h", "nice": 0},
 		// A runner the table does not know is asked nothing.
@@ -109,6 +122,8 @@ func TestStoreRefusesAConfigKeyNothingReads(t *testing.T) {
 		`crew member clerk: unknown config key "max_age": nothing reads it. A crew member of the herdr runner takes: args, env_command, env_file, for, greet, kind, model, open_threads, peers, prompt, provider, set_state, trust`: crew(map[string]any{"max_age": "6h"}),
 		`crew member clerk: herdr runner needs config.env_command as a string or a list, got the JSON boolean true; write --set 'env_command="true"'`:                                                                               crew(map[string]any{"env_command": true}),
 		`crew member clerk: herdr runner needs config.set_state as names separated by commas, or a list, got the JSON boolean true`:                                                                                                 crew(map[string]any{"set_state": true}),
+		// A crew member's effort is not read yet: the key is a group's.
+		`crew member clerk: unknown config key "effort": nothing reads it. A crew member of the herdr runner takes:`: crew(map[string]any{"effort": "max"}),
 	} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("PutCrew = %v, want %s", err, want)
@@ -159,10 +174,10 @@ func TestGroupNice(t *testing.T) {
 	}
 }
 
-// A herdr group may say which subscription it burns: provider is a shared
-// herdr key, named as a source's limits kinds name it (yardr-368s). Any
-// other runner refuses it with the keys it takes.
-func TestStoreTakesProviderOnHerdr(t *testing.T) {
+// A herdr group may name its provider and reasoning effort. Provider is a
+// shared herdr key, named as a source's limits kinds name it (yardr-368s); an
+// effort is held to the group's kind and args. Other runners refuse each key.
+func TestStoreTakesProviderAndEffortOnHerdr(t *testing.T) {
 	t.Parallel()
 	s, ctx := storetest.New(t), context.Background()
 	if err := s.PutGroup(ctx, store.Group{Name: "g", Runner: "herdr", Config: map[string]any{"kind": "pi", "provider": "zai"}}, "me"); err != nil {
@@ -193,6 +208,50 @@ func TestStoreTakesProviderOnHerdr(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("PutGroup = %v, want %s", err, want)
 		}
+	}
+
+	// A group's effort is held to its kind when it is set and when the kind or
+	// args change after it, and a refusal writes nothing. Unsetting returns the
+	// group to its harness's own.
+	if err := s.PutGroup(ctx, store.Group{Name: "effort", Runner: "herdr", Config: map[string]any{"kind": "codex", "args": []string{"--approve-for-me"}}}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	setEffort := func(m map[string]any, unset ...string) (*store.GroupChange, error) {
+		return s.SetGroup(ctx, "effort", store.GroupEdit{Set: m, Unset: unset}, "me")
+	}
+	ch, err = setEffort(map[string]any{"effort": "ultra"})
+	if err != nil || ch.Is.Config["effort"] != "ultra" || ch.Is.Config["kind"] != "codex" {
+		t.Fatalf("SetGroup effort = %+v, %v", ch, err)
+	}
+	stands, err := s.GetGroup(ctx, "effort")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for want, m := range map[string]map[string]any{
+		`effort "turbo" is no level codex takes`:                                     map[string]any{"effort": "turbo"},
+		`effort "ultra" is no level claude takes`:                                    map[string]any{"kind": "claude"},
+		"effort is for the kinds that take one (claude, codex, muse), and pi is not": map[string]any{"kind": "pi"},
+		`its args already pass "model_reasoning_effort=low", which effort sets`:      map[string]any{"args": []string{"-c", "model_reasoning_effort=low"}},
+	} {
+		if _, err := setEffort(m); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("SetGroup %v = %v, want %q", m, err, want)
+		}
+	}
+	if now, err := s.GetGroup(ctx, "effort"); err != nil || !reflect.DeepEqual(now, stands) {
+		t.Fatalf("a refused change wrote the group: %+v, %v, was %+v", now, err, stands)
+	}
+	// A level the new kind takes goes through with it, and unsetting returns
+	// the group to its harness's own.
+	if ch, err = setEffort(map[string]any{"kind": "claude", "effort": "max"}); err != nil || ch.Is.Config["effort"] != "max" {
+		t.Fatalf("SetGroup kind and effort = %+v, %v", ch, err)
+	}
+	if ch, err = setEffort(nil, "effort"); err != nil {
+		t.Fatalf("unsetting effort: %v", err)
+	} else if _, kept := ch.Is.Config["effort"]; kept {
+		t.Fatalf("effort unset and kept: %+v", ch.Is.Config)
+	}
+	if _, err := setEffort(map[string]any{"kind": "pi", "args": []string{"-c", "model_reasoning_effort=low"}}); err != nil {
+		t.Fatalf("a kind with no effort and the flag in its args = %v", err)
 	}
 }
 
