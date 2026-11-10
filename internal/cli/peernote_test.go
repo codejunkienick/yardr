@@ -78,6 +78,7 @@ func TestReplyOnABeadAtAPeer(t *testing.T) {
 	refusedAs(t, st, "jo", "bead "+here+" is not at another yard and never was", "reply", here, "CSV only.")
 	refusedAs(t, st, "jo", "--to answers under another conversation of the thread", "reply", id, "CSV only.", "--to", "abc")
 	refusedAs(t, st, "jo", "--file carries files into a source's thread", "reply", id, "CSV only.", "--file", "shot.png")
+	refusedAs(t, st, "jo", "a peer bead takes no format", "reply", id, "CSV only.", "--format", "markdown")
 	refusedAs(t, st, "jo", "nothing to say: the reply is empty", "reply", id, "  ")
 	// A bead's agent writes to no other yard, and nobody speaks as a crew
 	// member but its own session or the operator.

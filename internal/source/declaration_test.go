@@ -1068,6 +1068,19 @@ func TestParseThreadAndLink(t *testing.T) {
 		t.Fatalf("commands = %v", keys)
 	}
 	t.Run("files", testParseThreadFiles)
+	t.Run("formats", func(t *testing.T) {
+		if th.Formats != nil || th.CheckFormat("markdown") == nil {
+			t.Fatal("undeclared format accepted")
+		}
+		with := strings.Replace(linearish, "thread:\n", "thread:\n  formats: [markdown, plain]\n", 1)
+		d, err := Parse("lin.yaml", []byte(with))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(d.Thread.Formats, ",") != "markdown,plain" || d.Thread.CheckFormat("markdown") != nil || d.Thread.CheckFormat("html") == nil {
+			t.Fatalf("thread formats: %+v", d.Thread)
+		}
+	})
 }
 
 // Labels says the source takes free-form tags: thread.state then takes
@@ -1297,7 +1310,11 @@ func TestParseThreadLinkRefusals(t *testing.T) {
 		"state with empty states":        {src("thread:\n  state: [linear/thread, state]\n  states: []\n"), "thread.states: missing"},
 		"a state the yard has not":       {src("thread:\n  state: [linear/thread, state]\n  states: [started, blocked]\n"), "thread.states: blocked is no state of a thread (started, review, done)"},
 		"a place of two words":           {src("thread:\n  open: [linear/thread, open]\n  place: the team\n"), `thread.place: "the team": one word`},
-		"a key it does not have":         {src("thread:\n  wait: [linear/thread, wait]\n"), "thread.wait: unknown key (known here: reply, posted, read, file, open, opened, state, place, states, labels, assignee, files)"},
+		"a key it does not have":         {src("thread:\n  wait: [linear/thread, wait]\n"), "thread.wait: unknown key (known here: reply, posted, read, file, open, opened, state, place, states, labels, assignee, files, formats)"},
+		"formats without reply":          {src("thread:\n  formats: [markdown]\n"), "thread.formats: thread.reply, thread.posted and thread.read are required"},
+		"formats of wrong type":          {src("thread:\n  formats: markdown\n"), "thread.formats: want a list"},
+		"invalid format name":            {src("thread:\n  formats: ['two words']\n"), "thread.formats: want distinct format names"},
+		"duplicate format":               {src("thread:\n  formats: [markdown, markdown]\n"), "thread.formats: markdown is listed twice"},
 		"an assignee that is no part":    {src("thread:\n  place: team\n  open: [linear/thread, open]\n  assignee: email\n"), "thread.assignee: \"email\": id or key: which part of a person's identity in the source thread.open takes as assignee"},
 		"an assignee with no open":       {src("thread:\n  assignee: id\n"), "thread.assignee: thread.open is missing: the assignee is whom the thread it opens is assigned to"},
 		"labels that are no boolean":     {src("thread:\n  state: [linear/thread, state]\n  states: [started, done]\n  labels: sometimes\n"), "thread.labels: want true or false, got \"sometimes\""},
