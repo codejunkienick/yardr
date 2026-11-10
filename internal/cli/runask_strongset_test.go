@@ -159,4 +159,37 @@ func TestBeadAskRunSetsThePromptAndPreset(t *testing.T) {
 	if g, err := y.st.GetGroup(ctx, "cooks"); err != nil || g.Config["effort"] != "max" || g.Config["prompt"] != yardFile {
 		t.Fatalf("the group holds %+v, %v", g, err)
 	}
+	if out, err = run(t, y.a.groupCmd(), "show", "cooks"); err != nil || !strings.Contains(out, "harness claude passes effort max as: --effort max") {
+		t.Fatalf("group show of the group with an effort printed %q, %v", out, err)
+	}
+	// The word default returns it to the harness's own, which a card cannot
+	// say as --unset (yardr-ewns): the card shows that no effort stands
+	// afterwards, and the approval leaves the group with none.
+	out, err = y.as(t, "yardmaster", "ask", b.ID, "Back to its own?", "--context", "the cooks overthink", "--run", "group set cooks effort=default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Sscanf(out, "ask %d on", &seq); err != nil || !strings.Contains(out, "to approve, yardr group set cooks effort=default\n") {
+		t.Fatalf("bead ask --run group set effort=default printed %q, %v", out, err)
+	}
+	if shown, err = run(t, y.a.primeCmd(), "--bead", b.ID); err != nil || !strings.Contains(shown, "Each session starts at the effort max now.") ||
+		!strings.Contains(shown, "It will set no effort, so each session will start at its harness's own") {
+		t.Errorf("prime lacks the card of effort=default: %v\n%s", err, shown)
+	}
+	if out, err = y.as(t, "jo", "answer", b.ID, fmt.Sprint(seq), "--approve"); err != nil || !strings.Contains(out, "group cooks saved") || !strings.Contains(out, "effort: max -> (dropped)") {
+		t.Fatalf("the approval of effort=default printed %q, %v", out, err)
+	}
+	if g, err := y.st.GetGroup(ctx, "cooks"); err != nil || g.Config["prompt"] != yardFile {
+		t.Fatalf("the group holds %+v, %v", g, err)
+	} else if level, has := g.Config["effort"]; has {
+		t.Errorf("the group still sets the effort %v", level)
+	}
+	if out, err = run(t, y.a.groupCmd(), "show", "cooks"); err != nil || !strings.Contains(out, "cooks") || strings.Contains(out, "passes effort") {
+		t.Fatalf("group show of the group left with no effort printed %q, %v", out, err)
+	}
+	// With none standing it is refused where it is asked.
+	if _, err = y.as(t, "yardmaster", "ask", b.ID, "Again?", "--context", "it was done", "--run", "group set cooks effort=default"); err == nil ||
+		!strings.Contains(err.Error(), "group cooks: it sets no effort, so effort=default") {
+		t.Errorf("effort=default with no effort standing = %v", err)
+	}
 }

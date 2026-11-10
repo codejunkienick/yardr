@@ -894,7 +894,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr crew set <name> open_threads=<sources> | set_state=<sources> | peers=<peers>": {
 			"crew set yardmaster peers=airy",
 		},
-		groupSetUse: {"group set builders cmd=./deploy.sh", "group set builders effort=max"},
+		groupSetUse: {"group set builders cmd=./deploy.sh", "group set builders effort=max", "group set builders effort=default"},
 		crewSetUse:  {"crew set yardmaster preset=bypass", "crew set yardmaster kind=claude model=opus preset=auto"},
 		"yardr crew identity <name> --source <source> [--id <id>] [--key <key>]": {
 			"crew identity yardmaster --source crm --id u1 --key boss",
@@ -980,11 +980,15 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				seedLinks(t, approved, ab.ID)
 				seedLinks(t, typed, tb.ID)
 			}
-			if command == "group set builders effort=max" {
+			if config, ok := map[string]map[string]any{
+				"group set builders effort=max":     {"kind": "codex"},
+				"group set builders effort=default": {"kind": "codex", "effort": "max"},
+			}[command]; ok {
 				// An effort is a herdr group's: the yard's builders are an
-				// exec group, which reads none.
+				// exec group, which reads none. The word default returns one
+				// the group sets, so it stands in both yards.
 				for _, y := range []*cliYard{approved, typed} {
-					if err := y.st.PutGroup(context.Background(), store.Group{Name: "builders", Runner: "herdr", Config: map[string]any{"kind": "codex"}}, "jo"); err != nil {
+					if err := y.st.PutGroup(context.Background(), store.Group{Name: "builders", Runner: "herdr", Config: config}, "jo"); err != nil {
 						t.Fatal(err)
 					}
 				}

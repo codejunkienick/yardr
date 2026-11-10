@@ -198,8 +198,11 @@ const askRunList = `  peer add <name> <invite>
       and sets it as the prompt, so a later change to the file named
       reaches no session, and a file the yard wrote is not one to name; an
       effort is a level of the group's kind (yardr harness show <kind>
-      lists them), which the card shows as the flags each session is given;
-      a kind, a directory and the rest of a group are not this card's: the
+      lists them), which the card shows as the flags each session is given,
+      or the word default, which returns the group to its harness's own
+      effort, as a card takes no --unset: the card shows that no flag is
+      given, and a group that sets no effort refuses it; a kind, a
+      directory and the rest of a group are not this card's: the
       yardmaster sets those the operator has delegated on their mail, and
       the rest are typed in a terminal
   crew identity <name> --source <source> [--id <id>] [--key <key>]

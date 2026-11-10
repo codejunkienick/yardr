@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -98,6 +99,16 @@ func TestDelegatedRunFromTheCLI(t *testing.T) {
 	if _, err := as(t, st, "yardmaster", "hook", "add", "delegated", "--source", "token", "--secret-file", t.TempDir(), "--for", "jo", "--mail", mail); err == nil || !strings.Contains(err.Error(), "--secret-file is the operator's") {
 		t.Errorf("explicit secret file in a delegated hook add: %v", err)
 	}
+	// A group's effort is the operator's, and so is the word that returns it
+	// to the harness's own: a terminal reads it as --unset effort, which the
+	// leg carries no more than it carries a level (yardr-ewns).
+	if err := st.PutGroup(ctx, store.Group{Name: "heavy", Runner: "herdr", Config: map[string]any{"kind": "claude", "effort": "max"}}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	refusedAs(t, st, "yardmaster", "change effort on group heavy", "group", "set", "heavy", "effort=default", "--for", "jo", "--mail", mail)
+	if g, err := st.GetGroup(ctx, "heavy"); err != nil || g.Config["effort"] != "max" {
+		t.Errorf("a refused delegated effort=default changed the group: %+v, %v", g, err)
+	}
 
 	// The operator at a terminal learns preset=<label> from the help of the
 	// three commands that read it, in the same words and with an example
@@ -133,6 +144,19 @@ func TestDelegatedRunFromTheCLI(t *testing.T) {
 			if len(line) > 78 {
 				t.Errorf("the preset paragraph of %s has a line of %d bytes, past the 78 of the other helps: %q", name, len(line), line)
 			}
+		}
+	}
+	// effort=default is group set's alone, the one command whose card carries
+	// an effort, and its help says what it is in the same way (yardr-ewns).
+	for _, path := range delegable {
+		help := strings.Join(strings.Fields(mustAs(t, st, "jo", append(slices.Clone(path), "--help")...)), " ")
+		if got := strings.Contains(help, "effort=default returns the group to its harness's own effort, as --unset effort does."); got != readsEffortDefault(path) {
+			t.Errorf("yardr %s --help says effort=default = %v, but reading it is %v:\n%s", strings.Join(path, " "), got, readsEffortDefault(path), help)
+		}
+	}
+	for _, line := range strings.Split(effortHelp, "\n") {
+		if len(line) > 78 {
+			t.Errorf("the effort paragraph has a line of %d bytes, past the 78 of the other helps: %q", len(line), line)
 		}
 	}
 }

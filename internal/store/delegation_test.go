@@ -463,7 +463,19 @@ func TestDelegatedRefusals(t *testing.T) {
 		"group prompt":   {func() error { return setGroup(map[string]any{"prompt": "/roles/b.md"}) }, "change prompt on group builders"},
 		"group cmd":      {func() error { return setGroup(map[string]any{"cmd": "make"}) }, "change cmd on group builders"},
 		// The operator's, as the args it was a flag of are: a card carries it.
-		"group effort":        {func() error { return setGroup(map[string]any{"effort": "max"}) }, "change effort on group builders"},
+		"group effort": {func() error { return setGroup(map[string]any{"effort": "max"}) }, "change effort on group builders"},
+		// Taking it away is as much a change of it: the card's word for that,
+		// effort=default, is a terminal's --unset by the time it is run.
+		"group effort unset": {func() error {
+			if _, err := y.api.SetGroup(y.ctx, "builders", store.GroupEdit{Set: map[string]any{"effort": "low"}}, "jo"); err != nil {
+				t.Fatal(err)
+			}
+			_, err := y.api.SetGroup(ctx, "builders", store.GroupEdit{Unset: []string{"effort"}}, "yardmaster")
+			if _, undo := y.api.SetGroup(y.ctx, "builders", store.GroupEdit{Unset: []string{"effort"}}, "jo"); undo != nil {
+				t.Fatal(undo)
+			}
+			return err
+		}, "change effort on group builders"},
 		"worktrees outside":   {func() error { return setGroup(map[string]any{"worktrees": t.TempDir()}) }, "outside the yard's known places"},
 		"crew env_command":    {func() error { return setCrew("clerk", map[string]any{"env_command": "pass x"}) }, "change env_command on crew member clerk"},
 		"crew prompt":         {func() error { return setCrew("clerk", map[string]any{"prompt": "/roles/c.md"}) }, "change prompt on crew member clerk"},

@@ -81,6 +81,8 @@ func TestEffortCheck(t *testing.T) {
 		{"an empty level", &Effort{Args: []string{"--effort", LevelArg}, Levels: []string{"low", ""}}, `"" is no level a flag takes`},
 		{"a level with a space", &Effort{Args: []string{"--effort", LevelArg}, Levels: []string{"very high"}}, `"very high" is no level`},
 		{"a level with an equals sign", &Effort{Args: []string{"--effort", LevelArg}, Levels: []string{"a=b"}}, `"a=b" is no level`},
+		// A group set card says it where a level goes, so no kind has it for one.
+		{"the word that returns to the harness's own", &Effort{Args: []string{"--effort", LevelArg}, Levels: []string{"low", EffortDefault}}, `"default" is the word that returns a group to the harness's own effort, so it is no level`},
 		{"an alias that is no flag", &Effort{Args: []string{"--effort", LevelArg}, Levels: []string{"low"}, Aliases: []string{"effort"}}, `"effort" is no flag`},
 	} {
 		err := c.effort.check()
@@ -105,6 +107,10 @@ func TestEffortProblems(t *testing.T) {
 		{"a level", map[string]any{"kind": "codex", "effort": "ultra"}, nil, ""},
 		{"no kind is claude's", map[string]any{"effort": "max"}, nil, ""},
 		{"no level", map[string]any{"kind": "claude", "effort": ""}, nil, "effort is empty: name a level, or unset it"},
+		// Where group set takes it the word is the key unset, so a config
+		// that holds it was written whole, and says so before the kind's levels.
+		{"the word that returns to the harness's own", map[string]any{"kind": "codex", "effort": EffortDefault}, nil, "effort default is no level: it is the word group set takes to return a group to its harness's own, and is never stored"},
+		{"the word of a kind with none", map[string]any{"kind": "pi", "effort": EffortDefault}, nil, "effort default is no level"},
 		{"no kind is claude's levels", map[string]any{"effort": "ultra"}, nil, `effort "ultra" is no level claude takes`},
 		{"a kind with none", map[string]any{"kind": "kimi", "effort": "low"}, nil, "and kimi is not"},
 		{"a kind with no file", map[string]any{"kind": "gemini", "effort": "low"}, nil, "and gemini is not"},

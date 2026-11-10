@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -82,8 +83,8 @@ func wrapWords(s string, width int) string {
 
 // delegate gives each delegable command under root its --for and --mail,
 // and has it run with the delegation on its context where --for is given,
-// its preset=<label> words read first. A command that reads those words
-// says so in its help (presetCommands).
+// its preset=<label> and effort=default words read first. A command that
+// reads those words says so in its help (presetCommands, effortHelp).
 func (a *app) delegate(root *cobra.Command) {
 	for _, path := range delegable {
 		cmd, _, err := root.Find(path)
@@ -96,14 +97,18 @@ func (a *app) delegate(root *cobra.Command) {
 			cmd.Long += "\n\n" + use.help()
 			cmd.Example += "\n  " + use.example + "   # args become the preset's flags"
 		}
+		if readsEffortDefault(path) {
+			cmd.Long += "\n\n" + effortHelp
+		}
 		run := cmd.RunE
 		cmd.RunE = func(c *cobra.Command, args []string) error {
-			// The words as typed, before preset= is read into args.
+			// The words as typed, before preset= and effort=default are read.
 			typed := commandWords(c, args)
 			args, err := a.presetWords(c, path, args)
 			if err != nil {
 				return err
 			}
+			args = effortDefaultWords(c, path, args)
 			if who, _ := c.Flags().GetString("for"); who != "" {
 				mail, _ := c.Flags().GetUint64("mail")
 				c.SetContext(store.WithDelegation(c.Context(), store.DelegatedCall{For: who, Mail: mail, Command: typed}))
@@ -237,6 +242,37 @@ func (a *app) presetWords(c *cobra.Command, path []string, args []string) ([]str
 		return args, c.Flags().Lookup("set").Value.(pflag.SliceValue).Replace(out)
 	}
 	return append([]string{args[0]}, out...), nil
+}
+
+// effortHelp is the paragraph of group set's help on effort=default.
+var effortHelp = wrapWords("effort=default returns the group to its harness's own effort, as --unset effort does. "+
+	"It is the word a run card carries, since a card takes no flags, "+
+	"and a terminal reads it the same, so a card's command pastes into one.", 78)
+
+// readsEffortDefault says whether the command at path reads effort=default:
+// group set, the one command whose card carries an effort.
+func readsEffortDefault(path []string) bool { return strings.Join(path, " ") == "group set" }
+
+// effortDefaultWords reads effort=default in group set's words as --unset
+// effort, since the card of the same words cannot spell that flag
+// (store.EffortDefault). The word is taken out of args and the key is added
+// to those unset, unless the flag names it already. It takes no level's
+// meaning away, since default is never one.
+func effortDefaultWords(c *cobra.Command, path, args []string) []string {
+	if !readsEffortDefault(path) || len(args) == 0 {
+		return args
+	}
+	out := []string{args[0]}
+	for _, word := range args[1:] {
+		if word != "effort="+store.EffortDefault {
+			out = append(out, word)
+		} else if unset, _ := c.Flags().GetStringArray("unset"); !slices.Contains(unset, "effort") {
+			// A flag of the command, so its own check reads the key as it
+			// reads one typed.
+			_ = c.Flags().Set("unset", "effort")
+		}
+	}
+	return out
 }
 
 // depotFieldCmds are depot test and depot base: a depot's test command or

@@ -389,6 +389,66 @@ func TestRunAskGroupSetCardsACommandAndEffort(t *testing.T) {
 	if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", "group", "set", "reviewers", "effort=low"), "yardmaster"); err == nil || !strings.Contains(err.Error(), "is set so already, so the command would change nothing") {
 		t.Errorf("an effort it holds already = %v", err)
 	}
+	// The word default returns it to the harness's own, which a card has no
+	// --unset to say (yardr-ewns): the key is removed, the card says that no
+	// flag is added, and it weighs nothing, as an effort alone does. It is
+	// taken back by the level the group held, and that is a card in its turn.
+	seq = y.ask(t, listAsk("mckean", "group", "set", "reviewers", "effort=default"), "yardmaster")
+	r = y.asked(t, seq)
+	strongHas(t, r.Ask.Run.Does, "changes the group reviewers on the herdr runner",
+		"Each session starts at the effort low now.",
+		"It will set no effort, so each session will start at its harness's own: no flag for an effort is added.")
+	strongLacks(t, r.Ask.Run.Does, "model_reasoning_effort")
+	if len(r.Ask.Weight) != 0 {
+		t.Errorf("weight = %+v, want none for an effort alone", r.Ask.Weight)
+	}
+	back := r.Ask.Run.Back
+	if back != "yardr group set reviewers effort=low" || r.Ask.Run.BackBy != "only the operator" {
+		t.Errorf("taken back by %q (%s), want the level it held", back, r.Ask.Run.BackBy)
+	}
+	// Nor can the yardmaster remove it itself.
+	if _, err := y.SetGroup(y.ctx, "reviewers", GroupEdit{Unset: []string{"effort"}}, "yardmaster"); err == nil || !strings.Contains(err.Error(), "only the operator") {
+		t.Errorf("the yardmaster unset the effort directly: %v", err)
+	}
+	if done, err = y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if want := "group reviewers saved\n  effort: low -> (dropped)"; done.Result != want {
+		t.Errorf("approval printed %q, want %q", done.Result, want)
+	}
+	g, _ := y.GetGroup(y.ctx, "reviewers")
+	if _, has := g.Config["effort"]; has || g.Config["kind"] != "codex" || g.Config["prompt"] != "roles/reviewer.md" {
+		t.Errorf("group = %+v, want the effort removed and the rest kept", g)
+	}
+	seq = y.ask(t, listAsk("mckean", strings.Fields(strings.TrimPrefix(back, "yardr "))...), "yardmaster")
+	if _, err = y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ = y.GetGroup(y.ctx, "reviewers"); g.Config["effort"] != "low" {
+		t.Errorf("group = %+v, want the take-back to set the level it held", g)
+	}
+	// Beside a preset it rides on that card, which weighs as the preset does
+	// and names no effort, and the take-back sets the level again and takes
+	// the flags off.
+	seq = y.ask(t, listAsk("mckean", "group", "set", "reviewers", "effort=default", "preset=bypass"), "yardmaster")
+	r = y.asked(t, seq)
+	strongHas(t, r.Ask.Run.Does, "Each session starts at the effort low now.",
+		"It will set no effort, so each session will start at its harness's own", "the bypass preset")
+	if want := "yardr group set reviewers effort=low --unset args"; r.Ask.Run.Back != want {
+		t.Errorf("taken back by %q, want %q", r.Ask.Run.Back, want)
+	}
+	if len(r.Ask.Weight) != 1 || !strings.Contains(r.Ask.Weight[0].Line, "its permission flags") || strings.Contains(r.Ask.Weight[0].Line, "effort") {
+		t.Errorf("weight = %+v", r.Ask.Weight)
+	}
+	if done, err = y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(done.Result, "  effort: low -> (dropped)") || !strings.Contains(done.Result, "  args: (not set) -> ") {
+		t.Errorf("approval printed %q", done.Result)
+	}
+	if g, _ = y.GetGroup(y.ctx, "reviewers"); g.Config["effort"] != nil || g.Config["args"] == nil {
+		t.Errorf("group = %+v, want the flags set and the effort removed", g)
+	}
 	// Beside a prompt or a command it rides on that card, which weighs as it
 	// did and names only what it runs.
 	seq = y.ask(t, listAsk("mckean", "group", "set", "builders", "cmd=./deploy.sh"), "yardmaster")
@@ -519,6 +579,13 @@ func TestRunAskStrongSetRefusals(t *testing.T) {
 		{"group set builders effort=max", `unknown config key "effort": nothing reads it. A group of the exec runner takes:`},
 		{"group set plain effort=max", "effort is for the kinds that take one (claude, codex, muse), and pi is not"},
 		{"group set heavy effort=max", `its args already pass "model_reasoning_effort=high", which effort sets: remove it from args first`},
+		// The word default returns the effort to the harness's own, so the
+		// group must set one to return, beside another change too.
+		{"group set reviewers effort=default", "group reviewers: it sets no effort, so effort=default, which returns its agents to their harness's own, would change nothing"},
+		{"group set reviewers preset=bypass effort=default", "it sets no effort, so effort=default"},
+		{"group set builders effort=default", "group builders: it sets no effort, so effort=default"},
+		{"group set heavy effort=default", "group heavy: it sets no effort, so effort=default"},
+		{"group set reviewers effort=default effort=default", "effort is set twice"},
 		{"group set builders preset=bypass", "args"},
 		{"group set reviewers prompt=/etc/hosts", "the ask carries no prompt text"},
 		{"crew set clerk preset=bypass kind=claude", "kind is on this card for the yardmaster's own entry alone, which the delegated leg never carries: " + strongApart},
@@ -531,6 +598,10 @@ func TestRunAskStrongSetRefusals(t *testing.T) {
 		{"crew set yardmaster dir=yard", `dir "yard" is no absolute directory`},
 		{"crew set yardmaster preset=yolo", `claude has no permission preset "yolo"`},
 		{"crew set clerk preset=bypass peers=airy", "peers is no part of this card"},
+		// A crew member takes no effort, whatever it is told: a level and the
+		// word that returns it are refused alike.
+		{"crew set clerk effort=default", "effort is no grant of a crew member, and is set directly"},
+		{"crew set clerk preset=bypass effort=default", "effort is no part of this card, which carries prompt, preset, kind, model, dir and nothing else"},
 		{"crew set clerk prompt=/yard/x.md cmd=./x.sh", "cmd is no part of this card"},
 		{"crew set clerk preset=bypass --unset env_file", "crew set with --unset is no part of this card"},
 		{"crew set clerk preset=bypass, ", "',' is none of their characters"},

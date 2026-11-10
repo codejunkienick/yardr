@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -167,6 +168,23 @@ func TestGroupSetRefuses(t *testing.T) {
 	}
 	if out := mustAs(t, st, "jo", "group", "set", "agents", "--unset", "effort"); !strings.Contains(out, "  effort: max -> (dropped)\n") {
 		t.Fatalf("unset effort printed %q", out)
+	}
+	// The word of the card that returns it (yardr-ewns) is --unset effort in a
+	// terminal, so the card's command pastes into one: beside another change,
+	// once where --unset effort is typed as well, and refused where none
+	// stands as that flag is. A group written whole has no such word to take.
+	mustAs(t, st, "jo", "group", "set", "agents", "effort=max")
+	if out := mustAs(t, st, "jo", "group", "set", "agents", "effort=default", "model=opus"); !strings.Contains(out, "  effort: max -> (dropped)\n") || !strings.Contains(out, "  model: (not set) -> opus\n") {
+		t.Fatalf("effort=default printed %q", out)
+	}
+	mustAs(t, st, "jo", "group", "set", "agents", "effort=high")
+	if out := mustAs(t, st, "jo", "group", "set", "agents", "effort=default", "--unset", "effort"); !strings.Contains(out, "  effort: high -> (dropped)\n") {
+		t.Fatalf("effort=default beside --unset effort printed %q", out)
+	}
+	refusedAs(t, st, "jo", "--unset effort: agents has no such setting", "group", "set", "agents", "effort=default")
+	refusedAs(t, st, "jo", "effort default is no level", "group", "add", "fresh", "--runner", "herdr", "--set", "kind=claude", "--set", "effort=default")
+	if _, err := st.GetGroup(context.Background(), "fresh"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a refused group add left the group: %v", err)
 	}
 }
 

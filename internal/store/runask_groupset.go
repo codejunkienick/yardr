@@ -7,12 +7,15 @@
 // weighed code, but for an effort alone, which brings no program. The words
 // ride as the terminal's own, so the card's command pastes into a terminal,
 // except the preset, which a terminal reads into the kind's flags and the
-// card names by its label (runask_strong.go). A prompt is a file under the
-// yard's home as group add's is: its path rides argv and its text rides
-// beside it (AskRun.Role), held to the file at the card and again at the
-// approval, which writes the text to a file of the yard's own and sets that
-// (runask_promptfile.go). Every other setting of a group is not this card's,
-// and refuses beside it in words that say where it goes instead.
+// card names by its label (runask_strong.go), and the word effort=default,
+// which a terminal reads as --unset effort: a card takes no flags, so that is
+// how it returns a group's effort to its harness's own (EffortDefault). A
+// prompt is a file under the yard's home as group add's is: its path rides
+// argv and its text rides beside it (AskRun.Role), held to the file at the
+// card and again at the approval, which writes the text to a file of the
+// yard's own and sets that (runask_promptfile.go). Every other setting of a
+// group is not this card's, and refuses beside it in words that say where it
+// goes instead.
 //
 // The row is registered here, beside its functions, as the peer set row is
 // (runask_peerset.go), and not in runList's literal: runask.go stands at the
@@ -27,6 +30,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -66,23 +70,36 @@ func parseGroupSet(rest []string) ([]string, error) {
 
 // groupSetSpec is a group set proposal as the yard holds it: the group as it
 // stands and as the approval would leave it, the config keys the approval
-// writes, the prompt text its file was held to, and the preset resolved to
-// the flags of the kind the group starts.
+// writes and those it removes, the prompt text its file was held to, and the
+// preset resolved to the flags of the kind the group starts.
 type groupSetSpec struct {
 	name   string
 	have   Group
 	want   Group
 	set    map[string]any
+	unset  []string
 	prompt string
 	kind   string
 	preset Permission
 }
 
+// changed are the config keys the card sets and those it unsets, as the keys
+// of one map, which is all strongBack reads of it: it puts each back to what
+// the group held.
+func (s groupSetSpec) changed() map[string]any {
+	out := maps.Clone(s.set)
+	for _, key := range s.unset {
+		out[key] = nil
+	}
+	return out
+}
+
 // groupSetProposal holds a group set ask to the yard as it stands: the group
 // is there, a prompt is a file under the yard's home that holds the text the
-// ask carries, a preset is one of its kind's that never asks, and the config
-// that results is one the store would save (configProblems, as putGroup holds
-// it), so a command on a runner that reads none of it is refused here in the
+// ask carries, a preset is one of its kind's that never asks, the word
+// default for an effort names a group that sets one, and the config that
+// results is one the store would save (configProblems, as putGroup holds it),
+// so a command on a runner that reads none of it is refused here in the
 // store's words.
 func (w *wtx) groupSetProposal(run AskRun) (groupSetSpec, error) {
 	name, sets := strongSetOf(run.Argv)
@@ -106,7 +123,15 @@ func (w *wtx) groupSetProposal(run AskRun) (groupSetSpec, error) {
 	if cmd, ok := sets["cmd"]; ok {
 		spec.set["cmd"] = cmd
 	}
-	if level, ok := sets["effort"]; ok {
+	if level, ok := sets["effort"]; ok && level == EffortDefault {
+		// A card takes no --unset, so this word is the key removed. A group
+		// that sets none has nothing to return, and the word would sit on
+		// the card beside another change as a line that changes nothing.
+		if _, stands := spec.have.Config["effort"]; !stands {
+			return groupSetSpec{}, fmt.Errorf("%s: it sets no effort, so effort=%s, which returns its agents to their harness's own, would change nothing", subject, EffortDefault)
+		}
+		spec.unset = append(spec.unset, "effort")
+	} else if ok {
 		// Whether it is a level of the group's kind is the config's to
 		// say, below, in the store's own words.
 		spec.set["effort"] = level
@@ -126,12 +151,14 @@ func (w *wtx) groupSetProposal(run AskRun) (groupSetSpec, error) {
 		}
 		spec.kind, spec.preset, spec.set["args"] = kind, p, args
 	}
-	spec.want = spec.have
-	spec.want.Config = maps.Clone(spec.have.Config)
-	if spec.want.Config == nil {
-		spec.want.Config = map[string]any{}
+	// Merged as the approval merges (setGroup), so what the card shows is
+	// what is saved.
+	config, err := MergeConfig(name, spec.have.Config, spec.set, spec.unset)
+	if err != nil {
+		return groupSetSpec{}, err
 	}
-	maps.Copy(spec.want.Config, spec.set)
+	spec.want = spec.have
+	spec.want.Config = config
 	if ps := configProblems(GroupConfig, name, spec.have.Runner, spec.want.Config, spec.have.Config); len(ps) > 0 {
 		return groupSetSpec{}, ps[0]
 	}
@@ -200,6 +227,8 @@ func (w *wtx) groupSetCard(run AskRun, _ bool) (AskRun, error) {
 	}
 	if level, ok := spec.set["effort"].(string); ok {
 		does = append(does, effortLines(spec.have.Config, level)...)
+	} else if slices.Contains(spec.unset, "effort") {
+		does = append(does, effortUnsetLines(spec.have.Config)...)
 	}
 	if _, ok := sets["preset"]; ok {
 		does = append(does, presetLines(spec.kind, spec.kind, spec.have.Config["args"], spec.preset)...)
@@ -207,7 +236,7 @@ func (w *wtx) groupSetCard(run AskRun, _ bool) (AskRun, error) {
 	return AskRun{
 		Argv:   run.Argv,
 		Does:   does,
-		Back:   strongBack("group set", spec.name, spec.have.Config, spec.set),
+		Back:   strongBack("group set", spec.name, spec.have.Config, spec.changed()),
 		BackBy: "only the operator",
 		Seen:   seenMap,
 		Role:   spec.prompt,
@@ -220,12 +249,23 @@ func (w *wtx) groupSetCard(run AskRun, _ bool) (AskRun, error) {
 // flags. The card sets no kind, so it is the one the group has, and the config
 // it would leave has been held to that kind's levels (groupSetProposal).
 func effortLines(old map[string]any, level string) []string {
-	now := "It sets no effort now, so each session starts at its harness's own."
-	if was, ok := old["effort"].(string); ok {
-		now = fmt.Sprintf("Each session starts at the effort %s now.", was)
-	}
 	e := HarnessEfforts[EffortKind(old)]
-	return []string{now, fmt.Sprintf("Each session will start at the effort %s: %s are added after its other flags.", level, quotedWords(e.Words(level)))}
+	return []string{effortNow(old), fmt.Sprintf("Each session will start at the effort %s: %s are added after its other flags.", level, quotedWords(e.Words(level)))}
+}
+
+// effortUnsetLines are the card's lines for the effort removed: what each
+// session is told now, and that it will be told none, so that the harness's
+// own stands.
+func effortUnsetLines(old map[string]any) []string {
+	return []string{effortNow(old), "It will set no effort, so each session will start at its harness's own: no flag for an effort is added."}
+}
+
+// effortNow is the card's line for the effort the config old holds now.
+func effortNow(old map[string]any) string {
+	if was, ok := old["effort"].(string); ok {
+		return fmt.Sprintf("Each session starts at the effort %s now.", was)
+	}
+	return "It sets no effort now, so each session starts at its harness's own."
 }
 
 // groupSetStale says why the ask seq for group set is approved no more: the
@@ -261,7 +301,7 @@ func runGroupSet(ctx context.Context, w *wtx, run AskRun, actor string, _ *appro
 	if err != nil {
 		return "", err
 	}
-	ch, err := w.setGroup(ctx, spec.name, GroupEdit{Set: spec.set}, actor, nil)
+	ch, err := w.setGroup(ctx, spec.name, GroupEdit{Set: spec.set, Unset: spec.unset}, actor, nil)
 	if err != nil {
 		return "", err
 	}

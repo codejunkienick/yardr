@@ -10,6 +10,14 @@ import (
 // LevelArg is where the level goes in the words of an Effort.
 const LevelArg = "{level}"
 
+// EffortDefault is the word that returns a group to its harness's own effort,
+// where a level goes: a group set card carries it, since a card takes no
+// --unset (groupSetProposal), and the terminal reads it as that flag, so the
+// card's command pastes into one. It is reserved, never a level, so that one
+// word does not mean two things: no harness file lists it (Effort.check) and
+// no config holds it (effortProblems).
+const EffortDefault = "default"
+
 // Effort is how a harness kind takes a reasoning effort, as its file says
 // (flags.effort): the words yardr adds to the arguments of an agent of the
 // kind whose group names effort=<level>, and the levels it takes. A kind
@@ -108,6 +116,9 @@ func (e *Effort) check() error {
 		if l == "" || strings.ContainsAny(l, " ={}") {
 			return fmt.Errorf("flags.effort.levels: %q is no level a flag takes", l)
 		}
+		if l == EffortDefault {
+			return fmt.Errorf("flags.effort.levels: %q is the word that returns a group to the harness's own effort, so it is no level", l)
+		}
 	}
 	for _, a := range e.Aliases {
 		if !strings.HasPrefix(a, "-") {
@@ -161,6 +172,11 @@ func effortProblems(subject string, cfg, old map[string]any) []error {
 		// No level is --unset's, which is what returns an agent to its
 		// harness's own; an empty one would stand in the config and say nothing.
 		return []error{fmt.Errorf("%s: effort is empty: name a level, or unset it to return to the harness's own", subject)}
+	case level == EffortDefault:
+		// Where group set takes it, the card or the terminal reads it as the
+		// key unset and no config holds it, so one that does was written whole
+		// (group add, a pack, the socket), which has no effort to return.
+		return []error{fmt.Errorf("%s: effort %s is no level: it is the word group set takes to return a group to its harness's own, and is never stored. Leave effort out, or unset it", subject, EffortDefault)}
 	case !takes:
 		return []error{fmt.Errorf("%s: effort is for the kinds that take one (%s), and %s is not: its harness file names no flag for it. Unset effort, or set the group's kind to one that takes it",
 			subject, strings.Join(slices.Sorted(maps.Keys(HarnessEfforts)), ", "), kind)}
