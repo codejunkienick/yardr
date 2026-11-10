@@ -433,18 +433,23 @@ func TestMergePRMerges(t *testing.T) {
 			}
 			// Every run that asked GitHub asked the mint, for the repository of
 			// the pull request and from the id and key file the group's env_file
-			// gave, and asked GitHub nothing of CI, which is the yard's own: no
-			// call of the api, where the check runs are.
+			// gave, narrowed to contents write and pull_requests read, and asked
+			// GitHub nothing of CI, which is the yard's own: no call of the api,
+			// where the check runs are.
 			if c.flags != "" {
 				var asked struct {
-					Inputs map[string]string `json:"inputs"`
-					Scope  string            `json:"scope"`
+					Inputs      map[string]string `json:"inputs"`
+					Scope       string            `json:"scope"`
+					Permissions map[string]string `json:"permissions"`
 				}
 				if err := json.Unmarshal([]byte(readFile(t, filepath.Join(gh, "mint-stdin"))), &asked); err != nil {
 					t.Fatalf("%s: %v", c.what, err)
 				}
 				if asked.Scope != "o/r" || asked.Inputs["GITHUB_APP_ID"] != "123456" || asked.Inputs["GITHUB_APP_PRIVATE_KEY_FILE"] != filepath.Join(gh, "app.pem") {
 					t.Errorf("%s: the mint was asked %+v, want scope o/r and the env_file's id and key file", c.what, asked)
+				}
+				if len(asked.Permissions) != 2 || asked.Permissions["contents"] != "write" || asked.Permissions["pull_requests"] != "read" {
+					t.Errorf("%s: the mint was asked permissions %+v, want contents write and pull_requests read", c.what, asked.Permissions)
 				}
 				wantArgs := "--from-group\n"
 				if c.source {

@@ -12,6 +12,14 @@
 # endpoints a check call reads. The token is for this call alone: the core
 # caches it in memory, never in the store, an event or a log.
 #
+# A caller that wants less than the whole grant of the installation asks
+# with a top-level "permissions" object beside them ({name: read|write}),
+# which is posted in the access_tokens body; the assembly scripts mint this
+# way, each with the least its calls need. A name or level outside the
+# fixed list below is refused, as is an object that names none: a typo must
+# never mint silently. Absent, the token keeps the whole grant, as the
+# core's calls need.
+#
 # Needs openssl and curl on PATH. Reads no file but the key, writes none,
 # keeps nothing, and prints no token anywhere but stdout's answer; of the
 # inputs only the key's path, where it says what is wrong with the file.
@@ -52,6 +60,43 @@ key=$(first "$input" GITHUB_APP_PRIVATE_KEY_FILE)
 printf '%s' "$input" | grep -q '"scope"' || fail "reads {inputs, scope} on stdin, and got no scope"
 scope=$(first "$input" scope)
 base=${YARDR_SOURCE_BASE:-https://api.github.com}
+
+# The permissions the token is narrowed to, a ,"permissions":{...} fragment
+# for the access_tokens body, or nothing when stdin names none. What is
+# asked is checked against the fixed list below, the repository permissions
+# the endpoint takes (GitHub's REST docs, "Create an installation access
+# token for an app"), and refused before GitHub is called.
+perms=
+if printf '%s' "$input" | grep -q '"permissions"[[:space:]]*:'; then
+  flat=$(printf '%s' "$input" | tr -d '\n')
+  obj=$(printf '%s' "$flat" | grep -o '"permissions"[[:space:]]*:[[:space:]]*{[^}]*}' | head -n 1)
+  [ -n "$obj" ] || fail "its permissions is no object of {name: read|write}"
+  inner=$(printf '%s' "$obj" | sed 's/^[^:]*:[[:space:]]*{//;s/}$//')
+  [ -n "$(printf '%s' "$inner" | tr -d '[:space:]')" ] || fail "its permissions names no permission"
+  body=
+  sep=
+  rest=$inner,
+  while [ -n "$rest" ]; do
+    pair=${rest%%,*}
+    rest=${rest#*,}
+    name=${pair%%:*}
+    level=${pair#*:}
+    name=$(printf '%s' "$name" | tr -d '"[:space:]')
+    level=$(printf '%s' "$level" | tr -d '"[:space:]')
+    case $name in
+    actions|administration|artifact_metadata|attestations|checks|code_quality|codespaces|contents|dependabot_secrets|deployments|discussions|environments|issues|merge_queues|metadata|packages|pages|pull_requests|repository_custom_properties|repository_hooks|repository_projects|secret_scanning_alerts|secrets|security_events|single_file|statuses|vulnerability_alerts|workflows) ;;
+    *) fail "its permissions names \"$name\", which is no repository permission GitHub takes" ;;
+    esac
+    case $level in
+    read) [ "$name" != workflows ] || fail "its permissions gives workflows read, and GitHub takes workflows as write alone" ;;
+    write) ;;
+    *) fail "its permissions gives $name \"$level\", and a permission is read or write" ;;
+    esac
+    body=$body$sep\"$name\":\"$level\"
+    sep=,
+  done
+  perms=',"permissions":{'$body'}'
+fi
 
 # A key path from the home it is under.
 # The quotes match a literal ~/ prefix: unquoted, the tilde would expand
@@ -115,7 +160,7 @@ esac
 inst=$(num "$body" id)
 [ -n "$inst" ] || fail "the installation on $owner/$name came back with no id"
 
-out=$(post -d '{"repositories":["'"$name"'"]}' "$base/app/installations/$inst/access_tokens") || fail "could not reach $base (curl exit $?)"
+out=$(post -d '{"repositories":["'"$name"'"]'"$perms"'}' "$base/app/installations/$inst/access_tokens") || fail "could not reach $base (curl exit $?)"
 code=$(printf '%s' "$out" | tail -n 1)
 body=$(printf '%s' "$out" | sed '$d')
 [ "$code" = "201" ] || fail "minting a token for $owner/$name was answered $code: $(printf '%s' "$body" | head -c 500)"

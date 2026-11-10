@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,8 +21,11 @@ import (
 )
 
 // mintApp is a stand-in GitHub with the App 123456 installed on repos: the
-// server, the stand-in, and the App's key file.
-func mintApp(t *testing.T, repos ...string) (*httptest.Server, *standin.Server, string) {
+// server, the stand-in, the App's key file, and the bodies POSTed for
+// installation tokens, for a test that pins what the mint asked narrowed
+// to. The bodies are kept by the server's wrapper, under its own lock, as
+// the stand-in's file is at its line ceiling and takes no recorder.
+func mintApp(t *testing.T, repos ...string) (*httptest.Server, *standin.Server, string, func() []string) {
 	t.Helper()
 	key := filepath.Join(t.TempDir(), "app.pem")
 	app, err := standin.NewApp("123456", "yardr-test", key, repos...)
@@ -29,9 +33,26 @@ func mintApp(t *testing.T, repos ...string) (*httptest.Server, *standin.Server, 
 		t.Fatal(err)
 	}
 	src := &standin.Server{App: app}
-	srv := httptest.NewServer(src.Handler())
+	h := src.Handler()
+	var mu sync.Mutex
+	var mints []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/access_tokens") {
+			raw, _ := io.ReadAll(r.Body)
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+			mu.Lock()
+			mints = append(mints, string(raw))
+			mu.Unlock()
+		}
+		h.ServeHTTP(w, r)
+	}))
 	t.Cleanup(srv.Close)
-	return srv, src, key
+	bodies := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), mints...)
+	}
+	return srv, src, key, bodies
 }
 
 // mint runs the script with stdin and YARDR_SOURCE_BASE, in an environment
@@ -54,10 +75,16 @@ func stdinFor(id, key, scope string) string {
 	return `{"inputs":{"GITHUB_APP_ID":"` + id + `","GITHUB_APP_PRIVATE_KEY_FILE":"` + key + `"},"scope":"` + scope + `"}`
 }
 
+// stdinPerms is stdinFor with a top-level permissions object, perms as raw
+// JSON, for a caller that asks narrowed.
+func stdinPerms(id, key, scope, perms string) string {
+	return strings.TrimSuffix(stdinFor(id, key, scope), "}") + `,"permissions":` + perms + `}`
+}
+
 // With a scope naming a repository the answer is an installation token
 // narrowed to it: it reads there, and nowhere else.
 func TestGitHubMintNarrowsToTheScope(t *testing.T) {
-	srv, src, key := mintApp(t, "acme/webapp")
+	srv, src, key, bodies := mintApp(t, "acme/webapp")
 	before := time.Now()
 	stdout, stderr, err := mint(t, stdinFor("123456", key, "acme/webapp#7"), srv.URL)
 	if err != nil {
@@ -108,12 +135,42 @@ func TestGitHubMintNarrowsToTheScope(t *testing.T) {
 	if got := src.Minted(); got != 2 {
 		t.Fatalf("tokens asked for: %d, want 2", got)
 	}
+	stdout, stderr, err = mint(t, stdinPerms("123456", key, "acme/webapp", `{"pull_requests":"write","contents":"read"}`), srv.URL)
+	if err != nil {
+		t.Fatalf("mint with permissions: %v\n%s", err, stderr)
+	}
+	if err := json.Unmarshal([]byte(stdout), &o); err != nil || !strings.HasPrefix(o.Token, "ghs_") {
+		t.Fatalf("answer with permissions = %q: %v", stdout, err)
+	}
+	mints := bodies()
+	if len(mints) != 3 {
+		t.Fatalf("bodies asked: %d, want 3", len(mints))
+	}
+	var posted struct {
+		Repositories []string          `json:"repositories"`
+		Permissions  map[string]string `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(mints[2]), &posted); err != nil {
+		t.Fatalf("body = %q: %v", mints[2], err)
+	}
+	if len(posted.Repositories) != 1 || posted.Repositories[0] != "webapp" ||
+		len(posted.Permissions) != 2 || posted.Permissions["pull_requests"] != "write" || posted.Permissions["contents"] != "read" {
+		t.Fatalf("body = %q", mints[2])
+	}
+	for _, body := range mints[:2] {
+		if strings.Contains(body, "permissions") {
+			t.Fatalf("without permissions the body names them: %q", body)
+		}
+	}
+	if got := src.Minted(); got != 3 {
+		t.Fatalf("tokens asked for: %d, want 3", got)
+	}
 }
 
 // With no scope the answer is the App's JWT itself, good for the /app
 // endpoints a check call reads.
 func TestGitHubMintWithoutScopeAnswersTheJWT(t *testing.T) {
-	srv, src, key := mintApp(t, "acme/webapp")
+	srv, src, key, _ := mintApp(t, "acme/webapp")
 	stdout, stderr, err := mint(t, stdinFor("123456", key, ""), srv.URL)
 	if err != nil {
 		t.Fatalf("mint: %v\n%s", err, stderr)
@@ -165,7 +222,7 @@ func TestGitHubMintWithoutScopeAnswersTheJWT(t *testing.T) {
 // no token, and of the inputs only the key's path where the failure is the
 // file.
 func TestGitHubMintRefusals(t *testing.T) {
-	srv, _, key := mintApp(t, "acme/webapp")
+	srv, src, key, _ := mintApp(t, "acme/webapp")
 	badMode := filepath.Join(t.TempDir(), "open.pem")
 	if err := os.WriteFile(badMode, []byte("not a key"), 0o644); err != nil {
 		t.Fatal(err)
@@ -191,6 +248,30 @@ func TestGitHubMintRefusals(t *testing.T) {
 		"a key no good":     {stdinFor("123456", badKey, ""), srv.URL, "signs nothing"},
 		"no service":        {stdinFor("123456", key, "acme/webapp"), "http://127.0.0.1:1", "could not reach http://127.0.0.1:1 (curl exit 7)"},
 		"no service scoped": {stdinFor("123456", key, ""), "http://127.0.0.1:1", ""}, // scope-free mints nothing over the network
+		"a permission unknown": {
+			stdinPerms("123456", key, "acme/webapp", `{"pull_request":"write"}`), srv.URL,
+			`its permissions names "pull_request", which is no repository permission GitHub takes`,
+		},
+		"a level unknown": {
+			stdinPerms("123456", key, "acme/webapp", `{"contents":"admin"}`), srv.URL,
+			`its permissions gives contents "admin", and a permission is read or write`,
+		},
+		"workflows read": {
+			stdinPerms("123456", key, "acme/webapp", `{"workflows":"read"}`), srv.URL,
+			"its permissions gives workflows read, and GitHub takes workflows as write alone",
+		},
+		"permissions no object": {
+			stdinPerms("123456", key, "acme/webapp", `"all"`), srv.URL,
+			"its permissions is no object of {name: read|write}",
+		},
+		"permissions empty": {
+			stdinPerms("123456", key, "acme/webapp", `{}`), srv.URL,
+			"its permissions names no permission",
+		},
+		"a pair malformed": {
+			stdinPerms("123456", key, "acme/webapp", `{"pull_requests":}`), srv.URL,
+			`its permissions gives pull_requests "", and a permission is read or write`,
+		},
 	} {
 		stdout, stderr, err := mint(t, tc.stdin, tc.base)
 		if tc.want == "" {
@@ -213,5 +294,8 @@ func TestGitHubMintRefusals(t *testing.T) {
 				t.Errorf("%s shows %q: %q", name, secret, stderr)
 			}
 		}
+	}
+	if got := src.Minted(); got != 0 {
+		t.Errorf("the refusals minted %d tokens, want none", got)
 	}
 }

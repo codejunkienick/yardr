@@ -407,6 +407,14 @@ https://packs.example.com/acme`). Both are optional and kept as written, and
 prints them first, as the pack's own words. A pack that carries either says
 `api: 5`.
 
+### API 6
+
+The `permissions` field of a mint command's stdin: beside `inputs` and
+`scope`, an object of the permissions the minted token is narrowed to
+(`{"pull_requests": "write"}`), which the command posts when it mints.
+Absent, the token keeps the whole grant, as before. A pack whose mint
+command reads the field says `api: 6`.
+
 ## Left out
 
 These are not in the API, and each can join it by a rise of the number if a

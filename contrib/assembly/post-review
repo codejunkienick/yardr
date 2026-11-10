@@ -64,6 +64,10 @@
 # from GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_FILE, which the group's env_file
 # supplies, exactly as merge-pr has them: the token section below is merge-pr's,
 # copied. The operator's own gh login is never used. Needs gh and jq on PATH.
+# The token is narrowed to pull_requests write alone (PERMS below): posting
+# the review wants Pull requests write of it, and reading the pull request
+# wants read (GitHub's REST docs, "Create a review for a pull request" and
+# "Get a pull request").
 #
 # The review is the reviewer's own text, built into the request by jq from the
 # fields checked here and from nothing else, never interpolated into a shell
@@ -274,13 +278,20 @@ fi
 [ -n "$read_head" ] ||
   report failed "$BEAD has no reviewed_head, the head the review is of (a full commit sha). Push your commits (git push origin $BR), then record it and store the review in one update: yardr bead update $BEAD --meta reviewed_head=\"\$(git rev-parse HEAD)\" --meta review=<JSON>."
 
-# The token section is merge-pr's, copied (a test holds them equal).
+# The token's permissions, the least the gh calls below need: posting the
+# review wants Pull requests write of the token, and reading the pull request
+# wants read (GitHub's REST docs, "Create a review for a pull request" and
+# "Get a pull request"). The token section is merge-pr's, copied (a test
+# holds them equal), with this set above it, as merge-pr has its own.
+PERMS='{"pull_requests":"write"}'
 # --- github_binding: the token, merge-pr's text from "The token" to its end ---
 # The token: minted for this repository alone, from the App's id and key file
 # the group's env_file gives, and held in this process's memory for the calls
 # below. It is passed to gh in its environment, never in an argument, and is
 # printed nowhere. The mint command is the github source's own unless the
-# group's cmd names another.
+# group's cmd names another. The token is narrowed to the permissions PERMS
+# names, each script's own least set above, which the mint posts in the
+# access_tokens body; a name or level outside the mint's list refuses the mint.
 [ -n "${GITHUB_APP_ID:-}" ] && [ -n "${GITHUB_APP_PRIVATE_KEY_FILE:-}" ] ||
   hold "this group's environment has no GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_FILE, which the yard's GitHub App is minted from (the group's env_file); $NOT."
 mint=${YARDR_GITHUB_MINT:-}
@@ -298,8 +309,8 @@ mint_token() {
   [ "$#" -gt 0 ] || return 1
   YARDR_SOURCE_BASE=https://api.github.com "$@" 2>/dev/null
 }
-tokjson=$(jq -nc --arg id "$GITHUB_APP_ID" --arg key "$GITHUB_APP_PRIVATE_KEY_FILE" --arg scope "$slug" \
-  '{inputs: {GITHUB_APP_ID: $id, GITHUB_APP_PRIVATE_KEY_FILE: $key}, scope: $scope}' |
+tokjson=$(jq -nc --arg id "$GITHUB_APP_ID" --arg key "$GITHUB_APP_PRIVATE_KEY_FILE" --arg scope "$slug" --argjson permissions "$PERMS" \
+  '{inputs: {GITHUB_APP_ID: $id, GITHUB_APP_PRIVATE_KEY_FILE: $key}, scope: $scope, permissions: $permissions}' |
   mint_token) ||
   hold "minting a token for $slug failed; the mint's output is not copied to the bead. $NOT."
 token=$(printf '%s' "$tokjson" | jq -r '.token // empty')

@@ -890,7 +890,10 @@ commands the source names use that selected URL.
   `credential.mint` the variables that together select it, names only, and
   the operator sets the command that turns their values into a token
   (`yardr source set <name> mint_command=<program> [args...]`), run with
-  `{inputs, scope}` on stdin for a `{token, expires_at}`. Its environment
+  `{inputs, scope}` on stdin for a `{token, expires_at}`. A caller that
+  wants less than the whole grant adds a top-level `permissions` object
+  beside them (`{"pull_requests": "write"}`), which the command posts when
+  it mints (API 6); absent, the token keeps the whole grant. Its environment
   is `PATH`, `HOME`, `USER` and `LOGNAME`, the proxy and CA variables
   ([below](#commands-a-file-names)), and `YARDR_SOURCE_BASE`, the
   selected base: a helper that reads the user's keyring looks it

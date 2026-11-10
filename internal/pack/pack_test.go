@@ -552,11 +552,11 @@ func TestStrictness(t *testing.T) {
 		// this yardr reads is the pack's one mistake, wherever the key
 		// stands and whatever else is wrong with the pack: the rest would
 		// be this yardr's mistakes, not the pack's.
-		{name: "api above what this yardr reads", old: "name: small\n", new: "name: small\napi: 6\n", key: "api", msg: "this pack is written for pack API 6, and this yardr reads up to 5: upgrade yardr (yardr upgrade)", line: 2},
-		{name: "api far above", old: "name: small\n", new: "name: small\napi: 1000\n", key: "api", msg: "this pack is written for pack API 1000, and this yardr reads up to 5", line: 2},
-		{name: "api above, beside a key this yardr lacks", old: "name: small\n", new: "name: small\napi: 6\nmodel: opus\n", key: "api", msg: "upgrade yardr", line: 2},
-		{name: "api above, beside a file that is missing", old: "name: small\n", new: "name: small\napi: 6\n", files: map[string]string{"roles/builder.md": ""}, key: "api", msg: "upgrade yardr", line: 2},
-		{name: "api above, last in the file and beside a scope that is wrong", old: "      linear: involved\n", new: "      linear: everything\napi: 6\n", key: "api", msg: "this pack is written for pack API 6", line: 22},
+		{name: "api above what this yardr reads", old: "name: small\n", new: "name: small\napi: 7\n", key: "api", msg: "this pack is written for pack API 7, and this yardr reads up to 6: upgrade yardr (yardr upgrade)", line: 2},
+		{name: "api far above", old: "name: small\n", new: "name: small\napi: 1000\n", key: "api", msg: "this pack is written for pack API 1000, and this yardr reads up to 6", line: 2},
+		{name: "api above, beside a key this yardr lacks", old: "name: small\n", new: "name: small\napi: 7\nmodel: opus\n", key: "api", msg: "upgrade yardr", line: 2},
+		{name: "api above, beside a file that is missing", old: "name: small\n", new: "name: small\napi: 7\n", files: map[string]string{"roles/builder.md": ""}, key: "api", msg: "upgrade yardr", line: 2},
+		{name: "api above, last in the file and beside a scope that is wrong", old: "      linear: involved\n", new: "      linear: everything\napi: 7\n", key: "api", msg: "this pack is written for pack API 7", line: 22},
 		{name: "api of none", old: "name: small\n", new: "name: small\napi: 0\n", key: "api", msg: "want a whole number, 1 or more (the pack API this pack is written for, docs/pack-api.md), got int 0", line: 2},
 		{name: "api below zero", old: "name: small\n", new: "name: small\napi: -1\n", key: "api", msg: "got int -1", line: 2},
 		{name: "api is a string", old: "name: small\n", new: "name: small\napi: \"1\"\n", key: "api", msg: `got "1"`, line: 2},
@@ -712,8 +712,8 @@ func TestKindIsTheDepotKindThePackIsFor(t *testing.T) {
 // A pack says which pack API it is written for, or says nothing and is
 // written for API 1, as every pack was before the key.
 func TestAPIIsTheNumberThePackSaysItIsWrittenFor(t *testing.T) {
-	if pack.API != 5 {
-		t.Fatalf("pack.API = %d: this test knows APIs 1 to 5, and so does the page's list of what each number added", pack.API)
+	if pack.API != 6 {
+		t.Fatalf("pack.API = %d: this test knows APIs 1 to 6, and so does the page's list of what each number added", pack.API)
 	}
 	for name, tc := range map[string]struct {
 		text string
@@ -725,6 +725,7 @@ func TestAPIIsTheNumberThePackSaysItIsWrittenFor(t *testing.T) {
 		"api 3":                {text: strings.Replace(small, "name: small\n", "name: small\napi: 3\n", 1), api: 3},
 		"api 4":                {text: strings.Replace(small, "name: small\n", "name: small\napi: 4\n", 1), api: 4},
 		"api 5":                {text: strings.Replace(small, "name: small\n", "name: small\napi: 5\n", 1), api: 5},
+		"api 6":                {text: strings.Replace(small, "name: small\n", "name: small\napi: 6\n", 1), api: 6},
 		"api last in the file": {text: small + "api: 1\n", api: 1},
 	} {
 		if p, err := pack.LoadDir(writePack(t, smallFiles(tc.text))); err != nil || p.API != tc.api {

@@ -21,6 +21,16 @@ good for the `/app` endpoints a check call reads. Either way stdout is
 `{token, expires_at}`, and nothing of either is printed elsewhere; of the
 inputs only the key's path, where it says what is wrong with the file.
 
+A caller that wants less than the whole grant of the installation asks
+with a top-level `permissions` object on stdin beside `inputs` and
+`scope`, `{"pull_requests": "write"}`, which the mint posts in the
+`access_tokens` body: the assembly scripts mint this way, each with the
+least its calls need. A name or level outside the fixed list in the
+script (the endpoint's repository permissions, `read` or `write`, but
+`workflows` write alone) is refused before GitHub is called, as is an
+object that names none. Absent, the token keeps the whole grant, as the
+core's source calls need.
+
 The key file is held to the rule of every file yardr reads a secret from:
 for the owner alone (mode 600 or stricter). The JWT is issued a minute back
 and lives nine minutes, as GitHub allows an App's. The core caches the

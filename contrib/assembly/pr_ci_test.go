@@ -368,6 +368,12 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 					if n := countCalls(t, c.gh, "pr view "); n != 2 {
 						t.Errorf("green: the pull request was read %d times, want twice (before the run, and after it):\n%v", n, ghCalls(t, c.gh))
 					}
+					// The token was minted for the repository alone, narrowed to
+					// pull_requests read: pr-ci reads the pull request and writes
+					// nothing to GitHub.
+					if asked := readFile(t, filepath.Join(c.gh, "mint-stdin")); !strings.Contains(asked, `"scope":"o/r"`) || !strings.Contains(asked, `"permissions":{"pull_requests":"read"}`) {
+						t.Errorf("green: the mint was asked %s, want the scope o/r narrowed to pull_requests read", asked)
+					}
 					for what, text := range map[string]string{"the log": c.log, "the notes": c.notesOf(id), "gh's calls": readFile(t, filepath.Join(c.gh, "calls"))} {
 						if strings.Contains(text, mintToken) {
 							t.Errorf("green: %s hold the token", what)
