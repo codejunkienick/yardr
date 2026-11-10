@@ -663,7 +663,8 @@ func TestBeadAskRunPeerAdd(t *testing.T) {
 	for _, want := range []string{
 		"      yardr peer add north '" + invite + "'",
 		"  what the command does: Add another yard as a peer, from its invite",
-		"  the yard says: links the yard south as the peer north with the key " + south + ", called at " + inviteURL + ".",
+		"  the yard says: links the yard south as the peer north with the key " + south + ", called at " + inviteURL +
+			"; its invite carries no encryption key, so this yard sends it nothing sealed: " + store.ReLinkLine("north") + ".",
 		"  the yard says: The link carries nothing until yardr peer allow north says what.",
 		"  WEIGHTY · trust: widens who the yard listens to: a new peer, north, whose calls and mail then cross as the invite says",
 		"  only the operator can take it back: yardr peer rm north",

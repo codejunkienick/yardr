@@ -152,7 +152,7 @@ remove the peer first to replace it.`,
 				yardr := yardrAt(cfg.Home)
 				fmt.Fprintf(w, "peer %s added (it calls itself %s)\n", p.Name, p.Calls)
 				if !p.Sealed() {
-					fmt.Fprintln(w, "its invite carries no encryption key, so this yard sends it nothing sealed: "+store.ReLinkLine(p.Name))
+					fmt.Fprintln(w, store.NoEncLine(p.Name))
 				}
 				if p.URL == "" {
 					fmt.Fprintln(w, "it gave no URL, so this yard never calls it: it calls this one and asks for what waits here")

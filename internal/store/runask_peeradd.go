@@ -27,11 +27,15 @@ func checkPeerAdd(ctx context.Context, w *wtx, argv []string, actor string) erro
 }
 
 // peerAddCard is the card of peer add <name> <invite>: the yard the invite
-// names linked as the peer, with its key whole and where this yard calls
-// it, or that this yard never calls it, each verbatim, and that the link
-// carries nothing until peer allow says what. The approval is held to the
-// name standing free (Seen). Asking refuses an invite that is none, a name
-// or a key a peer has already, as the command does.
+// names linked as the peer, with its key and its encryption key whole, or,
+// for an invite that carries none, what the terminal command says of it
+// (NoEncLine), and where this yard calls it, or that this yard never calls
+// it, each verbatim, and that the link carries nothing until peer allow
+// says what. The pinned encryption key decides whom bodies are sealed to,
+// as the signing key decides whom they are signed by, so the card shows
+// which link the approval makes. The approval is held to the name standing
+// free (Seen). Asking refuses an invite that is none, a name or a key a
+// peer has already, as the command does.
 func (w *wtx) peerAddCard(argv []string, asking bool) (AskRun, error) {
 	name := argv[2]
 	inv, err := ParseInvite(argv[3])
@@ -61,6 +65,15 @@ func (w *wtx) peerAddCard(argv []string, asking bool) (AskRun, error) {
 	if inv.URL == "" {
 		called = "never called: it calls this one and asks for what waits here"
 	}
+	// The keys the link will pin, as runPeerAdd pins them. An invite without
+	// an encryption key makes a link the sealed wire refuses until it is
+	// re-linked, and the card says so in the terminal command's words.
+	keys, unsealed := "the key "+inv.Key, ""
+	if inv.Enc != "" {
+		keys += " and the encryption key " + inv.Enc
+	} else {
+		unsealed = "; " + NoEncLine(name)
+	}
 	key := ""
 	if have, err := loadPeer(w.Tx, name); err == nil {
 		key = have.Key
@@ -68,7 +81,7 @@ func (w *wtx) peerAddCard(argv []string, asking bool) (AskRun, error) {
 	return AskRun{
 		Argv: argv,
 		Does: []string{
-			fmt.Sprintf("links the yard %s as the peer %s with the key %s, %s.", inv.Name, name, inv.Key, called),
+			fmt.Sprintf("links the yard %s as the peer %s with %s, %s%s.", inv.Name, name, keys, called, unsealed),
 			fmt.Sprintf("The link carries nothing until yardr peer allow %s says what.", name),
 		},
 		Back:   runCommandLine([]string{"peer", "rm", name}),

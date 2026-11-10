@@ -42,7 +42,9 @@ make the temporary file of a here-document refuses a form and not the step.
    (`yardr depot sources <depot>` names where the depot's flows and their
    stage files are):
    - correctness: edge cases, error paths, concurrency, resource leaks
-   - tests that test behaviour, for what the change claims
+   - tests that test behaviour, for what the change claims. Tests larger
+     than what pins the change are a finding: name which cases carry the
+     change and ask for the rest to go.
    - style that matches the surrounding code
    - nothing in it besides what its text says it is
 

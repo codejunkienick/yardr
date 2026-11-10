@@ -25,9 +25,65 @@ import (
 // by their path under yardr (design yardr-m90n 3.2).
 var delegable = [][]string{{"group", "add"}, {"group", "set"}, {"crew", "set"}, {"depot", "test"}, {"depot", "base"}, {"user", "set"}, {"hook", "add"}, {"pack", "apply"}}
 
+// presetUse is how the help of a command that reads preset=<label> tells
+// of it. The commands say the same words, with the command's own way to
+// type the label, whose kind it falls back on and one example.
+type presetUse struct {
+	set     string // "--set " where the words are group add's --set flags
+	has     string // who has a kind of their own to fall back on; none for group add, which writes the group whole
+	example string // the line the help's Examples gain
+}
+
+// presetCommands are the commands that read preset=<label>, by their path
+// under yardr, each with what its help says of it. presetWords reads no
+// other, and the help of no other speaks of it: one table, so that a help
+// cannot name a command that reads no such words or leave one out.
+var presetCommands = map[string]presetUse{
+	"group add": {set: "--set ", example: "yardr group add reviewers --runner herdr --set kind=claude --set preset=read-only"},
+	"group set": {has: "group", example: "yardr group set reviewers preset=read-only"},
+	"crew set":  {has: "crew member", example: "yardr crew set yardmaster preset=auto"},
+}
+
+// help is the paragraph of the command's help on preset=<label>.
+func (u presetUse) help() string {
+	kind := "the one named beside it (" + u.set + "kind=codex), else "
+	if u.has != "" {
+		kind += "the one the " + u.has + " has, else "
+	}
+	// The labels harness show prints have a space in them where a shell
+	// splits the word, so the help gives the spelling with a dash first.
+	return wrapWords(u.set+"preset=<label> sets args to the flags of one of the kind's permission presets, "+
+		"replacing whatever args held. The kind is "+kind+"the yard's default_kind. "+
+		"A label of two words is written with a dash ("+u.set+"preset=read-only) or quoted to keep its space; "+
+		"yardr harness show <kind> lists the labels.", 78)
+}
+
+// wrapWords breaks s at its spaces into lines of at most width bytes, as
+// the other helps are broken by hand. A word longer than width stands on a
+// line of its own.
+func wrapWords(s string, width int) string {
+	var b strings.Builder
+	line := 0
+	for _, w := range strings.Fields(s) {
+		switch {
+		case line == 0:
+		case line+1+len(w) > width:
+			b.WriteByte('\n')
+			line = 0
+		default:
+			b.WriteByte(' ')
+			line++
+		}
+		b.WriteString(w)
+		line += len(w)
+	}
+	return b.String()
+}
+
 // delegate gives each delegable command under root its --for and --mail,
 // and has it run with the delegation on its context where --for is given,
-// its preset=<label> words read first.
+// its preset=<label> words read first. A command that reads those words
+// says so in its help (presetCommands).
 func (a *app) delegate(root *cobra.Command) {
 	for _, path := range delegable {
 		cmd, _, err := root.Find(path)
@@ -36,6 +92,10 @@ func (a *app) delegate(root *cobra.Command) {
 		}
 		cmd.Flags().String("for", "", "the yardmaster runs this for the operator named, on their mail --mail <seq>: recorded (yardr delegation show) and mailed to them")
 		cmd.Flags().Uint64("mail", 0, "with --for: the seq of the operator's own mail to the yardmaster this runs on")
+		if use, reads := presetCommands[strings.Join(path, " ")]; reads {
+			cmd.Long += "\n\n" + use.help()
+			cmd.Example += "\n  " + use.example + "   # args become the preset's flags"
+		}
 		run := cmd.RunE
 		cmd.RunE = func(c *cobra.Command, args []string) error {
 			// The words as typed, before preset= is read into args.
@@ -105,7 +165,7 @@ func shellWord(s string) string {
 // else the one it has).
 func (a *app) presetWords(c *cobra.Command, path []string, args []string) ([]string, error) {
 	cmd := strings.Join(path, " ")
-	if cmd != "group add" && cmd != "group set" && cmd != "crew set" {
+	if _, reads := presetCommands[cmd]; !reads {
 		return args, nil
 	}
 	words := args

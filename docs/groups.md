@@ -63,6 +63,25 @@ key: it runs as it did, a write that leaves the key as it is goes through,
 and [`yardr doctor`](doctor.md#the-yard) notes it with how it is removed
 (`--unset <key>`).
 
+`args` takes a harness's permission flags as a JSON list. To name one of the
+kind's permission presets instead, type `preset=<label>`, or
+`--set preset=<label>` on `group add`. It sets `args` to that preset's flags
+and replaces whatever `args` held. The kind is the one named in the same
+command (`kind=codex preset=read-only`), else the one the group has, else the
+yard's `default_kind`. `group add` writes the group whole, so for it the kind
+is `--set kind=<kind>` or the `default_kind`.
+`yardr harness show <kind>` lists the labels a kind has, and a label it lacks
+is refused with the ones it has. Write a label of two words with a dash, or
+quote it to keep its space:
+
+```sh
+yardr group set reviewers preset=read-only
+yardr group set reviewers 'preset=read only'   # the same, with the label's space
+yardr group add reviewers --runner herdr --set kind=codex --set preset=read-only
+```
+
+The group keeps the flags and not the label.
+
 The `cmd`, `dir`, `env_file`, `kind`, `args`, `prompt` and `worktrees`
 settings, and a change of runner to or from `exec` by `group add` whole,
 are the operator's alone, but for what the yardmaster runs for them on

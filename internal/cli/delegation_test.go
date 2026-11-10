@@ -98,6 +98,43 @@ func TestDelegatedRunFromTheCLI(t *testing.T) {
 	if _, err := as(t, st, "yardmaster", "hook", "add", "delegated", "--source", "token", "--secret-file", t.TempDir(), "--for", "jo", "--mail", mail); err == nil || !strings.Contains(err.Error(), "--secret-file is the operator's") {
 		t.Errorf("explicit secret file in a delegated hook add: %v", err)
 	}
+
+	// The operator at a terminal learns preset=<label> from the help of the
+	// three commands that read it, in the same words and with an example
+	// each, and the help of no other delegable command speaks of it.
+	for _, c := range []struct {
+		path           []string
+		typed, example string
+	}{
+		{[]string{"group", "set"}, "preset=<label>", "yardr group set reviewers preset=read-only"},
+		{[]string{"group", "add"}, "--set preset=<label>", "yardr group add reviewers --runner herdr --set kind=claude --set preset=read-only"},
+		{[]string{"crew", "set"}, "preset=<label>", "yardr crew set yardmaster preset=auto"},
+	} {
+		// The text is read with its line breaks undone, which are the
+		// wrapper's to place.
+		help := strings.Join(strings.Fields(mustAs(t, st, "jo", append(c.path, "--help")...)), " ")
+		for _, want := range []string{
+			c.typed + " sets args to the flags of one of the kind's permission presets, replacing whatever args held.",
+			"yardr harness show <kind> lists the labels.",
+			c.example,
+		} {
+			if !strings.Contains(help, want) {
+				t.Errorf("yardr %s --help lacks %q:\n%s", strings.Join(c.path, " "), want, help)
+			}
+		}
+	}
+	for _, path := range [][]string{{"depot", "test"}, {"depot", "base"}, {"user", "set"}, {"hook", "add"}, {"pack", "apply"}} {
+		if help := mustAs(t, st, "jo", append(path, "--help")...); strings.Contains(help, "preset=<label>") {
+			t.Errorf("yardr %s --help speaks of preset=<label>, which that command does not read:\n%s", strings.Join(path, " "), help)
+		}
+	}
+	for name, use := range presetCommands {
+		for _, line := range strings.Split(use.help(), "\n") {
+			if len(line) > 78 {
+				t.Errorf("the preset paragraph of %s has a line of %d bytes, past the 78 of the other helps: %q", name, len(line), line)
+			}
+		}
+	}
 }
 
 // A delegated run's record keeps the command as typed: its path, its words and

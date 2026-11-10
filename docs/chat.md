@@ -404,7 +404,7 @@ or decline it. The command is one of a fixed list:
 
 | the command | what it is for | who takes it back |
 |---|---|---|
-| `peer add <name> <invite>` | the yard of the invite linked as the peer: the card names the invited yard, its key, and where this yard calls it, or that this yard never calls it | only the operator, with `peer rm <name>` |
+| `peer add <name> <invite>` | the yard of the invite linked as the peer: the card names the invited yard, its key and its encryption key (or that the invite carries none, so this yard sends it nothing sealed until the peer is re-linked), and where this yard calls it, or that this yard never calls it | only the operator, with `peer rm <name>` |
 | `peer allow <peer> --mail-limit <n>` | a link that should take more mail in an hour | anyone, with a lower number |
 | `peer allow <peer> --send <kinds>`, `--receive <kinds>` | what a link may carry each way, of any kind (`ask`, `bead`, `file`, `mail`, `ping`, `thread`): the card names what it carries in and out after the command and before it | anyone where kinds were given, only the operator where they were taken, with the kinds that stood, which the card names |
 | `peer allow <peer> --expose <names>`, `--trust <name>@<peer>=<user>`, `--reach <name>@<peer>=<user>` | who the link shows itself to, whose mail it trusts and whose asks it sends on: the card names each whole, now and proposed | anyone where trust was newly given, only the operator where a trusted name's user moved, with the trust that stood, which the card names |

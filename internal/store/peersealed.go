@@ -153,6 +153,16 @@ func ReLinkLine(name string) string {
 	return fmt.Sprintf("%s was linked before sealed bodies: re-link it — yardr peer rm %s, then link it again by its address or its new invite", name, name)
 }
 
+// NoEncLine is what adding a peer says of an invite that carries no
+// encryption key (a yardr-peer-1 line): the link pins none, so this yard
+// sends the peer nothing sealed until it is re-linked (ReLinkLine). The
+// terminal command prints it after the add, and the add card says it
+// before the approval, in these words, so the person who approves reads
+// what the link will be.
+func NoEncLine(name string) string {
+	return "its invite carries no encryption key, so this yard sends it nothing sealed: " + ReLinkLine(name)
+}
+
 // Sealed reports whether the stored link can carry sealed traffic: it
 // pins the peer's encryption key.
 func (p Peer) Sealed() bool { return p.Enc != "" }

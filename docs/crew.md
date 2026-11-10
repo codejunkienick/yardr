@@ -28,6 +28,22 @@ yardr crew set yardmaster set_state=linear
 yardr crew set yardmaster --unset set_state
 ```
 
+`args` takes a harness's permission flags as a JSON list. To name one of the
+kind's permission presets instead, type `preset=<label>`. It sets `args` to
+that preset's flags and replaces whatever `args` held. The kind is the one
+named in the same command (`kind=codex preset=read-only`), else the one the
+crew member has, else the yard's `default_kind`.
+`yardr harness show <kind>` lists the labels a kind has, and a label it lacks
+is refused with the ones it has. Write a label of two words with a dash, or
+quote it to keep its space:
+
+```sh
+yardr crew set yardmaster preset=accept-edits
+yardr crew set yardmaster 'preset=accept edits'   # the same, with the label's space
+```
+
+The crew member keeps the flags and not the label.
+
 The `env_file`, `env_command`, `kind`, `args` and `prompt` settings, and
 the `--dir` of a crew member the yard has, are the operator's
 alone besides, but for what the yardmaster runs for them on their mail
