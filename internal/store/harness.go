@@ -155,6 +155,10 @@ func parseSGRColor(colour string) (string, error) {
 type Flags struct {
 	// Model is the flag that selects a model when yardr starts an agent.
 	Model string `yaml:"model" json:"model,omitempty"`
+	// Effort is how the kind takes a reasoning effort, which a group names
+	// as effort=<level>; yardr adds it to the agent's arguments at start.
+	// nil for a kind that takes none.
+	Effort *Effort `yaml:"effort" json:"effort,omitempty"`
 	// Unattended are the flags an agent yardr starts runs with by default,
 	// so it does not stop at a prompt nobody is watching: what `yardr init`
 	// gives the yardmaster and what `group add --help` suggests. A kind
@@ -324,52 +328,17 @@ var DefaultContextTokens = []string{"input_tokens", "cache_read_input_tokens", "
 // keys joined by dots to an object, in the last line whose type is Type
 // (any line, for no Type) that has one. Tokens are the fields of that
 // object that add up to what the session holds, DefaultContextTokens
-// when the file names none. The type is read from the key TypeField
+// when the file names none. The type is read from the dot path TypeField
 // names, "type" when the file names none.
 type ContextSource struct {
 	Type      string   `yaml:"type" json:"type,omitempty"`
 	TypeField string   `yaml:"type_field" json:"type_field,omitempty"`
 	Usage     string   `yaml:"usage" json:"usage"`
 	Tokens    []string `yaml:"tokens" json:"tokens,omitempty"`
-}
-
-// tokens is the fields of a usage object that add up to what a session
-// holds: the file's own, or the default.
-func (s ContextSource) tokens() []string {
-	if len(s.Tokens) > 0 {
-		return s.Tokens
-	}
-	return DefaultContextTokens
-}
-
-// UsageIn is the context use one line of the session file holds, ok when
-// the line is of Type and has numbers at Usage. ok is false for any
-// other line, so the last ok line is the session's use.
-func (s ContextSource) UsageIn(line []byte) (used int, ok bool) {
-	var v map[string]any
-	if json.Unmarshal(line, &v) != nil {
-		return 0, false
-	}
-	key := s.TypeField
-	if key == "" {
-		key = "type"
-	}
-	if t, _ := v[key].(string); s.Type != "" && t != s.Type {
-		return 0, false
-	}
-	u := v
-	for _, k := range strings.Split(s.Usage, ".") {
-		if u, _ = u[k].(map[string]any); u == nil {
-			return 0, false
-		}
-	}
-	used, ok = 0, false
-	for _, k := range s.tokens() {
-		if n, is := u[k].(float64); is {
-			used, ok = used+int(n), true
-		}
-	}
-	return used, ok
+	// Window is the kind's context window in tokens, 0 for the model's.
+	Window int `yaml:"window" json:"window,omitempty"`
+	// WindowField reads the window from the same line as Usage, instead of Window.
+	WindowField string `yaml:"window_field" json:"window_field,omitempty"`
 }
 
 // UsageSource is where the tokens a whole session used are read: the agent's
@@ -814,6 +783,9 @@ func (h *Harness) Check() error {
 	if h.Flags.Model != "" && !strings.HasPrefix(h.Flags.Model, "-") {
 		return fmt.Errorf("flags.model: %q is not a flag", h.Flags.Model)
 	}
+	if err := h.Flags.Effort.check(); err != nil {
+		return err
+	}
 	if h.Flags.VersionContains != "" && len(h.Flags.Version) == 0 {
 		return fmt.Errorf("flags.version_contains: without flags.version there is no version output to read it from")
 	}
@@ -833,6 +805,12 @@ func (h *Harness) Check() error {
 			return fmt.Errorf("context: usage is needed, the path to the use its lines hold")
 		case slices.Contains(c.Tokens, ""):
 			return fmt.Errorf("context: tokens names an empty field")
+		case c.Window < 0:
+			return fmt.Errorf("context: window must be positive or 0 for the model's window")
+		case c.Window > 0 && c.WindowField != "":
+			return fmt.Errorf("context: window and window_field cannot both be set")
+		case c.WindowField != "" && slices.Contains(strings.Split(c.WindowField, "."), ""):
+			return fmt.Errorf("context: window_field names an empty key")
 		}
 	}
 	if len(h.Usage) > 0 && h.Model == nil {

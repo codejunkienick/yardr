@@ -663,7 +663,8 @@ func TestBeadAskRunPeerAdd(t *testing.T) {
 	for _, want := range []string{
 		"      yardr peer add north '" + invite + "'",
 		"  what the command does: Add another yard as a peer, from its invite",
-		"  the yard says: links the yard south as the peer north with the key " + south + ", called at " + inviteURL + ".",
+		"  the yard says: links the yard south as the peer north with the key " + south + ", called at " + inviteURL +
+			"; its invite carries no encryption key, so this yard sends it nothing sealed: " + store.ReLinkLine("north") + ".",
 		"  the yard says: The link carries nothing until yardr peer allow north says what.",
 		"  WEIGHTY · trust: widens who the yard listens to: a new peer, north, whose calls and mail then cross as the invite says",
 		"  only the operator can take it back: yardr peer rm north",
@@ -813,7 +814,7 @@ func TestBeadAskRunPeerSet(t *testing.T) {
 // groupSetUse and crewSetUse the rows of the strong few.
 const (
 	groupAddUse = "yardr group add <name> --runner <runner> [--limit <n>] [--set k=v ...]"
-	groupSetUse = "yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset>"
+	groupSetUse = "yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset> | effort=<level>"
 	crewSetUse  = "yardr crew set <name> prompt=<file> | preset=<preset> | kind=<kind> | model=<model> | dir=<dir>"
 )
 
@@ -821,7 +822,7 @@ const (
 // list stand for, by the word a stored command begins with.
 func runCLI(a *app) map[string]*cobra.Command {
 	return map[string]*cobra.Command{"peer": a.peerCmd(), "source": a.sourceCmd(), "subscribe": a.subscribeCmd(),
-		"user": a.userCmd(), "bead": a.beadCmd(), "crew": a.crewCmd(), "settings": a.settingsCmd(), "timer": a.timerCmd(), "hook": a.hookCmd(), "call": a.callCmd(), "link": a.linkCmd()}
+		"user": a.userCmd(), "bead": a.beadCmd(), "crew": a.crewCmd(), "group": a.groupCmd(), "settings": a.settingsCmd(), "timer": a.timerCmd(), "hook": a.hookCmd(), "call": a.callCmd(), "link": a.linkCmd()}
 }
 
 // The store's list of commands a run ask may name is held to the CLI: each
@@ -893,7 +894,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr crew set <name> open_threads=<sources> | set_state=<sources> | peers=<peers>": {
 			"crew set yardmaster peers=airy",
 		},
-		groupSetUse: {"group set builders cmd=./deploy.sh"},
+		groupSetUse: {"group set builders cmd=./deploy.sh", "group set builders effort=max", "group set builders effort=default"},
 		crewSetUse:  {"crew set yardmaster preset=bypass", "crew set yardmaster kind=claude model=opus preset=auto"},
 		"yardr crew identity <name> --source <source> [--id <id>] [--key <key>]": {
 			"crew identity yardmaster --source crm --id u1 --key boss",
@@ -903,6 +904,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		},
 		"yardr settings set <key> <value>":                            {"settings set max_sessions 20"},
 		"yardr peer rename <old> <new>":                               {"peer rename airy north"},
+		"yardr group rename <old> <new>":                              {"group rename builders workers"},
 		"yardr bead update <bead> --originator <user>":                {"bead update yardmaster-journal --originator ada"},
 		"yardr timer rm <id>":                                         {"timer rm t1"},
 		"yardr up":                                                    {"up"},
@@ -978,6 +980,19 @@ func TestRunListIsTheCLIs(t *testing.T) {
 			if use == "yardr link move --from-source <source> --to-source <source>" {
 				seedLinks(t, approved, ab.ID)
 				seedLinks(t, typed, tb.ID)
+			}
+			if config, ok := map[string]map[string]any{
+				"group set builders effort=max":     {"kind": "codex"},
+				"group set builders effort=default": {"kind": "codex", "effort": "max"},
+			}[command]; ok {
+				// An effort is a herdr group's: the yard's builders are an
+				// exec group, which reads none. The word default returns one
+				// the group sets, so it stands in both yards.
+				for _, y := range []*cliYard{approved, typed} {
+					if err := y.st.PutGroup(context.Background(), store.Group{Name: "builders", Runner: "herdr", Config: config}, "jo"); err != nil {
+						t.Fatal(err)
+					}
+				}
 			}
 			if use == "yardr user device rm <user> <device>" {
 				for _, y := range []*cliYard{approved, typed} {
@@ -1445,9 +1460,13 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				if len(hits) != 2 {
 					t.Fatalf("%s: the stand-in took %d messages, want one from the approval and one from the terminal", use, len(hits))
 				}
+				// The stand-in decodes each body into a map, where a key the body lacks
+				// reads as nil, which is not "": the message is compared with the one
+				// the check sends, as the other fields are with theirs.
+				_, message := store.SourceCheckMessage("pushover", "ada")
 				for _, hit := range hits {
-					if hit["user"] != "approval-user" || hit["token"] != "approval-token" || hit["message"] == "" {
-						t.Errorf("%s: the stand-in took %v", use, hit)
+					if hit["user"] != "approval-user" || hit["token"] != "approval-token" || hit["message"] != message {
+						t.Errorf("%s: the stand-in took %v, want the message %q", use, hit, message)
 					}
 				}
 				if fmt.Sprint(hits[0]) != fmt.Sprint(hits[1]) {
@@ -1638,6 +1657,14 @@ func TestRunListIsTheCLIs(t *testing.T) {
 						devices[user] = append(devices[user], d.Name)
 					}
 				}
+				var groupNames []string
+				gs, err := y.st.Groups(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, g := range gs {
+					groupNames = append(groupNames, g.Name)
+				}
 				var linkRows []map[string]any
 				ls, err := y.st.Links(ctx, beads[y])
 				if err != nil {
@@ -1652,7 +1679,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				}
 				var changes []map[string]any
 				for _, kind := range []string{"peer_added", "peer_allowed", "source_set", "source_granted", "subscribed", "user_set",
-					"peer_renamed", "peer_removed", "user_added", "user_removed", "crew_defined", "crew_restart_requested", "setting_changed", "timer_removed", "originator_changed", "source_added", "source_removed", "hook_added", "identity_set", "identity_removed", "sender_unignored", "peer_intake", "peer_identity_set", "peer_url_set", "hook_removed", "device_removed"} {
+					"peer_renamed", "group_renamed", "peer_removed", "user_added", "user_removed", "crew_defined", "crew_restart_requested", "setting_changed", "timer_removed", "originator_changed", "source_added", "source_removed", "hook_added", "identity_set", "identity_removed", "sender_unignored", "peer_intake", "peer_identity_set", "peer_url_set", "hook_removed", "device_removed"} {
 					evs, err := y.st.EventsOfKind(ctx, kind, 10)
 					if err != nil {
 						t.Fatal(err)
@@ -1676,11 +1703,15 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				if use == "yardr link move --from-source <source> --to-source <source>" {
 					wantChanges = 0
 				}
+				if use == "yardr group rename <old> <new>" {
+					// One event says the rename, whatever lines tell what followed.
+					wantChanges = 1
+				}
 				if len(changes) != wantChanges {
 					t.Errorf("%s: %d changes were logged for %q", use, len(changes), done.Result)
 				}
 				text, err := json.Marshal(map[string]any{"peers": peers, "sources": sources, "grants": grants, "hooks": hookRows, "devices": devices, "links": linkRows,
-					"subscriptions": jo.Subscriptions, "tell": jo.Tell, "changes": changes, "users": users,
+					"subscriptions": jo.Subscriptions, "tell": jo.Tell, "changes": changes, "users": users, "groups": groupNames,
 					"crew":     map[string]any{"name": crew.Name, "runner": crew.Runner, "journal": crew.Journal, "config": crew.Config, "identities": crew.Identities},
 					"settings": settings, "timers": timerIDs, "journal": journal.Originator})
 				if err != nil {

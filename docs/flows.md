@@ -626,6 +626,10 @@ backlog: The bead goes back to be reshaped by the yardmaster.
 - `check` asks "has X been done?": `move:` names the outcome Done fires
   (default `done`). There is no explicit Not-yet option: Later, the existing
   action, is the not-yet.
+- `accepts: <outcome>`, on a `choice` alone, is for a stage whose beads are
+  pull requests: the card shows the head the bead tracks, and picking that
+  outcome, which must be one of the options, records the head shown as the
+  bead's `accepted_head` in the write that moves it (below).
 
 A `moves` section, for a `decide` stage whose flow lists no outcomes for it,
 writes the question and nothing of the moves:
@@ -639,8 +643,8 @@ context:
 ```
 
 A line named like a field is that field, so an outcome called `question`,
-`kind`, `context`, `recommend`, `why`, `move` or `options` cannot be offered as
-a bare option line: `question: <consequence>` reads as the question a second
+`kind`, `context`, `recommend`, `why`, `move`, `accepts` or `options` cannot be
+offered as a bare option line: `question: <consequence>` reads as the question a second
 time and is refused, and every stage of the starter flows that has outcomes has
 one named `question`. A line of `options:`, which takes no value, opens the
 options: every line after it is an option, whatever its name, to the end of
@@ -686,6 +690,29 @@ a card put before keeps the text it has. The card offers the template's
 options and no more: a stage's card has no `You decide`, which an ask a person
 writes still gets, since on a card that moves the bead it recorded words and
 moved nothing.
+
+A card that shows a head. A `choice` template that says `accepts: <outcome>`
+puts one more line of the yard's own on its card, after the bead header and
+the finish line: `Head: <short commit>, pushed by <who> at <time> UTC, +<added>
+-<removed> in <n> files, as the delivery that told it said.` It is drawn from
+what the bead records of the deliveries about its pull request and from
+nothing else (`pr_head`, and `pr_head_told`, which the dispatcher writes
+before it moves the bead on a delivery that tells a head, so the card a move
+puts names the head that brought the bead there): nothing of the pull request
+is fetched or run to draw it, and a part the delivery did not tell (who, when,
+how large) is left out. A bead with no head recorded gets a line that says so.
+The card freezes the head it showed. Picking the outcome records that head as
+the bead's `accepted_head` in the write that moves the bead, as the pick of a
+mapping card writes its identity in the answer's write; a pick that arrives
+from a linked yard is held to the same. It is refused whole, with nothing
+recorded and the answer rolled back, when the pull request has another head
+than the card showed (a push came after the card was put) or the card showed
+none: the yes is of the commit the person saw. Any other option takes no head,
+and leaving is Later or Decline. A card of an old head goes by the rules of any
+stage ask: where a move makes the stay again, as the contributors pack's
+`pushed` outcome does for a push in `triage`, the old card is taken back and a
+card of the new head is put. No bead's agent may write `accepted_head`; a
+maintainer's pick is theirs.
 
 The section is stripped wherever the stage file is shown (the brief, prime, the
 web view), as the `summary:` line already is. A section that is present must

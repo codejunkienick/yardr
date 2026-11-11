@@ -103,6 +103,7 @@ context: The outcome is named context.
 recommend: The outcome is named recommend.
 why: The outcome is named why.
 move: The outcome is named move.
+accepts: The outcome is named accepts.
 options: The outcome is named options.
 `}
 	if tmpl, err = named.Ask(); err != nil {
@@ -116,9 +117,20 @@ options: The outcome is named options.
 	for _, o := range tmpl.Options {
 		outcomes = append(outcomes, o.Outcome)
 	}
-	if got := strings.Join(outcomes, " "); got != "done question kind context recommend why move options" ||
+	if got := strings.Join(outcomes, " "); got != "done question kind context recommend why move accepts options" ||
 		tmpl.Options[1].Consequence != "The bead parks in decide for a longer look." {
 		t.Errorf("options: outcomes %q, options %+v", got, tmpl.Options)
+	}
+
+	// A choice ask may say which outcome's pick accepts the head its card
+	// shows; the line is no option, and the other asks have none.
+	accepts := &store.StageFile{Text: "## Ask\nkind: choice\nquestion: Accept it?\naccepts: accepted\ncontext:\n- Why.\naccepted: Go.\ndropped: No.\n"}
+	if tmpl, err = accepts.Ask(); err != nil || tmpl.Accepts != "accepted" || len(tmpl.Options) != 2 ||
+		tmpl.Options[0].Outcome != "accepted" || tmpl.Options[1].Outcome != "dropped" {
+		t.Fatalf("accepts: %+v, %v", tmpl, err)
+	}
+	if tmpl, err = choice.Ask(); err != nil || tmpl.Accepts != "" {
+		t.Errorf("a choice that says no accepts: has %q, %v", tmpl.Accepts, err)
 	}
 
 	// No section is no template, not an error.
@@ -217,6 +229,13 @@ func TestAskTemplateMalformed(t *testing.T) {
 		{"moves with why", "## Ask\nkind: moves\nquestion: Q?\ncontext:\n- Why.\nwhy: Because.\n", "ask line 6: a moves ask takes no 'why:': it recommends nothing"},
 		{"moves with a move", "## Ask\nkind: moves\nquestion: Q?\ncontext:\n- Why.\nmove: done\n", "ask line 6: a moves ask takes no 'move:': each option is a move of the stage"},
 		{"field name as an option without options:", "## Ask\nkind: choice\nquestion: Q?\ncontext:\n- Why.\ndone: Go.\nquestion: Ask.\n", "ask line 7: question twice; write it once"},
+		{"accepts twice", "## Ask\nkind: choice\nquestion: Q?\ncontext:\n- Why.\naccepts: done\ndone: Go.\naccepts: done\n", "ask line 8: accepts twice; write it once"},
+		{"accepts with a bad name", "## Ask\nkind: choice\nquestion: Q?\ncontext:\n- Why.\naccepts: not an outcome\ndone: Go.\n", "ask line 6: accepts \"not an outcome\": the outcome whose pick accepts the head shown, named as the option is"},
+		{"accepts with no outcome", "## Ask\nkind: choice\nquestion: Q?\ncontext:\n- Why.\naccepts:\ndone: Go.\n", "ask line 6: accepts \"\": the outcome whose pick accepts the head shown, named as the option is"},
+		{"accepts an outcome the ask does not offer", "## Ask\nkind: choice\nquestion: Q?\ncontext:\n- Why.\naccepts: accepted\ndone: Go.\n", "ask line 6: accepts accepted: the ask has no option of that name to accept with"},
+		{"input with accepts", "## Ask\nkind: input\nquestion: Q?\ncontext:\n- Why.\naccepts: done\n", "ask line 6: an input ask takes no 'accepts:': its answer is words, and it picks no outcome"},
+		{"check with accepts", "## Ask\nkind: check\nquestion: Done?\ncontext:\n- Why.\naccepts: done\n", "ask line 6: a check ask takes no 'accepts:': Done is its only option, and it shows no head"},
+		{"moves with accepts", "## Ask\nkind: moves\nquestion: Q?\ncontext:\n- Why.\naccepts: done\n", "ask line 6: a moves ask takes no 'accepts:': it shows no head, and its options are the stage's moves"},
 		{"options with a value", "## Ask\nkind: choice\nquestion: Q?\ncontext:\n- Why.\noptions: Go.\n", "ask line 6: options takes the '<outcome>: <consequence>' lines beneath it, not a value"},
 		{"options: with nothing beneath it", "## Ask\nkind: choice\nquestion: Q?\ncontext:\n- Why.\noptions:\n", "ask line 6: options needs at least one '<outcome>: <consequence>' line beneath it"},
 		{"options: with nothing beneath it but an option above", "## Ask\nkind: choice\nquestion: Q?\ncontext:\n- Why.\ndone: Go.\noptions:\n", "ask line 7: options needs at least one '<outcome>: <consequence>' line beneath it"},

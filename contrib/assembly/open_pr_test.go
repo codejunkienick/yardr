@@ -284,9 +284,10 @@ func TestOpenPRPublishesTheBranch(t *testing.T) {
 		t.Errorf("no note that names the pull request:\n%s", note)
 	}
 	// Every call carried the mint's token (the stand-in refuses one that does
-	// not), which was minted for the repository alone.
-	if !strings.Contains(readFile(t, filepath.Join(gh, "mint-stdin")), `"scope":"o/r"`) {
-		t.Errorf("the mint was asked %s, want the scope o/r", readFile(t, filepath.Join(gh, "mint-stdin")))
+	// not), which was minted for the repository alone, narrowed to
+	// pull_requests write.
+	if asked := readFile(t, filepath.Join(gh, "mint-stdin")); !strings.Contains(asked, `"scope":"o/r"`) || !strings.Contains(asked, `"permissions":{"pull_requests":"write"}`) {
+		t.Errorf("the mint was asked %s, want the scope o/r narrowed to pull_requests write", asked)
 	}
 	y.leaked(gh, id)
 

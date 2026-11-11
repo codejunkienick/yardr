@@ -159,7 +159,14 @@ func TestBackupFailureIsToldOnce(t *testing.T) {
 		*now = now.Add(2 * time.Hour)
 	}
 	evs := eventsOf(t, s, dispatch.BackupFailed)
-	if len(evs) != 1 || evs[0].Data["dir"] != dir || evs[0].Data["reason"] == "" || evs[0].Data["every"] != "1h" {
+	if len(evs) != 1 {
+		t.Fatalf("backup_failed events = %+v, want one for %s", evs, dir)
+	}
+	// The reason is the file system's own words, so there is no value to compare
+	// it with. A key left out reads as nil, which is not "", so it is read as a
+	// string first.
+	reason, _ := evs[0].Data["reason"].(string)
+	if evs[0].Data["dir"] != dir || reason == "" || evs[0].Data["every"] != "1h" {
 		t.Fatalf("backup_failed events = %+v, want one for %s", evs, dir)
 	}
 	if _, err := os.Stat(gone); !os.IsNotExist(err) {

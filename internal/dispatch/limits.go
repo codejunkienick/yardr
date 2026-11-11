@@ -122,6 +122,10 @@ func (d *Dispatcher) limits(ctx context.Context, r Runner, s *store.Session, g s
 			}
 			idleNow = true
 		}
+		// Untimed quota holds recover from the pane at any status; other marks end on observed activity.
+		if quotaHeld(s.Handle) && s.Handle[harnessResetAt] == nil || !idleNow && st != "unknown" {
+			d.harnessOver(ctx, r, s, g)
+		}
 		if due, waits := handleTime(s.Handle, harnessResetAt); idleNow && waits {
 			// It waits for the window of its usage limit to reset, which the
 			// yardmaster was told of with the time, and yardr prompts it then
@@ -216,7 +220,6 @@ func (d *Dispatcher) limits(ctx context.Context, r Runner, s *store.Session, g s
 			delete(d.idleTold, s.ID)
 			delete(d.idleNudged, s.ID)
 			delete(d.idleOutcomeTold, s.ID)
-			d.harnessOver(ctx, s)
 			if st == "working" {
 				d.snoozeOver(ctx, s)
 			}

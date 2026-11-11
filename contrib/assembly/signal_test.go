@@ -159,8 +159,9 @@ func TestMergeLocalTestsDeadlineIsRed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Killed, it is gone once its parent, killed too, is reaped by init.
-	for deadline := time.Now().Add(testload.Scale(5 * time.Second)); syscall.Kill(pid, 0) == nil; time.Sleep(20 * time.Millisecond) {
+	// Killed, it is gone once its parent, killed too, is reaped by init; where
+	// init does not reap it stays a zombie, which Running counts as gone.
+	for deadline := time.Now().Add(testload.Scale(5 * time.Second)); testload.Running(pid); time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
 			t.Fatalf("the sleep the test command started (pid %d) outlived the deadline's kill", pid)

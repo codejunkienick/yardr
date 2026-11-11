@@ -14,8 +14,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"maps"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -37,9 +39,18 @@ import (
 // yard default that outranks the depot's own route of a pr bead in approved to
 // the decisions, at 11. The review stage has no route: the reviewer's report
 // is made by the test, as is what a session of post or of pr-ci reports.
+//
+// The hook carries the pack's stage map as well as its says and makes, and the
+// dispatcher logs to r.logged.
 func newContributorsYard(t *testing.T) *ghDepot {
 	t.Helper()
-	r := newGHDepot(t)
+	return newContributorsYardIn(t, t.TempDir())
+}
+
+// newContributorsYardIn is newContributorsYard in the yard's home home.
+func newContributorsYardIn(t *testing.T, home string) *ghDepot {
+	t.Helper()
+	r := newGHDepotIn(t, home)
 	ctx := context.Background()
 	sub, err := fs.Sub(packs.FS, packs.Contributors)
 	must(t, err)
@@ -54,9 +65,16 @@ func newContributorsYard(t *testing.T) *ghDepot {
 	must(t, r.api.SetFlowPointer(ctx, "yard", "pr", "contributors.pr", "me"))
 	h, err := r.api.GetHook(ctx, "gh")
 	must(t, err)
-	h.Says, h.Makes = p.Sources[0].Says, p.Sources[0].Makes
+	h.Says, h.Makes, h.Map = p.Sources[0].Says, p.Sources[0].Makes, p.Sources[0].Map
 	_, err = r.api.PutHook(ctx, *h, "me")
 	must(t, err)
+	// The operator of a yard that has its beads move their issues has let the
+	// hook's crew member set a status in github. Without that grant a move the
+	// map queued is skipped quietly (no_grant) and never reaches the source, so
+	// a test could not see one fail and be tried again.
+	_, err = r.api.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "fake", Config: map[string]any{store.SetState: "github"}}, "me")
+	must(t, err)
+	r.d.Log = slog.New(slog.NewTextHandler(&r.logged, nil))
 
 	must(t, r.api.PutGroup(ctx, store.Group{Name: "post", Runner: "fake", Limit: 1}, "me"))
 	must(t, r.api.PutGroup(ctx, store.Group{Name: "pr-ci", Runner: "fake", Limit: 1}, "me"))
@@ -321,6 +339,46 @@ func (r *ghDepot) startedFor(id string) []string {
 		}
 	}
 	return groups
+}
+
+// threadUntouched fails the test when bead id, which ended in stage, has had
+// anything done about its pull request's thread for entering it: a move
+// queued and waiting, a move made or given up (a thread_state or a
+// thread_state_skipped event), or one the daemon logged as made or tried again.
+// The thread command refuses a state asked of a pull request, which the daemon
+// reads as the source failing and tries again (TestIssueMoveRefusedForGood), so
+// the pack's stage map has no line for a pr bead: a pull request is never
+// opened or closed by a stage (docs/links.md, "Forward only"). The pass in
+// between is the daemon's chance to make a move that was queued, so what it
+// did shows.
+func (r *ghDepot) threadUntouched(t *testing.T, id, stage string) {
+	t.Helper()
+	ctx := context.Background()
+	waiting := func() {
+		t.Helper()
+		moves, err := r.api.IssueMoves(ctx)
+		must(t, err)
+		for _, m := range moves {
+			if m.Bead == id && m.Stage == stage {
+				t.Errorf("%s ended in %s and a move of its pull request waits: state %s, %d tries, error %q", id, stage, m.State, m.Attempts, m.Error)
+			}
+		}
+	}
+	waiting()
+	r.pass(t)
+	waiting()
+	evs, err := r.api.Events(ctx, id, 200)
+	must(t, err)
+	for _, e := range evs {
+		if (e.Kind == "thread_state" || e.Kind == "thread_state_skipped") && e.Data["stage"] == stage {
+			t.Errorf("%s ended in %s and its pull request has a %s event: %v", id, stage, e.Kind, e.Data)
+		}
+	}
+	for _, line := range strings.Split(r.logged.String(), "\n") {
+		if strings.Contains(line, "bead="+id) && strings.Contains(line, `msg="issue `) {
+			t.Errorf("%s ended in %s and the daemon logged of its pull request: %s", id, stage, line)
+		}
+	}
 }
 
 // The bead of a bot's bump of Go modules: skips triage into review, is
@@ -695,24 +753,32 @@ func TestContributorsReviewIsPostedBeforeTheWait(t *testing.T) {
 // A pull request merged or closed on GitHub ends its bead wherever the bead
 // waits but approved, which had the edges first: in triage, under review,
 // while its review is posted, in the wait for the yard's CI, with the
-// contributor and in decide, where a reviewer's question leaves it for a
-// person. The pack's two lines name no stage, so a stage without an edge for
-// them left the event nowhere to go, and the bead open on a pull request that
-// was over. Where the bead is worked its session ends with it: the reviewer's
-// is stopped, and so are the posting's and the yard's CI, whose report is then
-// refused as one from a stage the bead has left, as it is after a push.
+// contributor, in fix and push, and in decide, where a reviewer's question
+// leaves it for a person. The pack's two lines name no stage, so a stage
+// without an edge for them left the event nowhere to go, and the bead open on
+// a pull request that was over. Where the bead is worked its session ends
+// with it: the reviewer's is stopped, and so are the posting's, the yard's
+// CI, the builder's and the push's, whose report is then refused as one from
+// a stage the bead has left, as it is after a push.
 func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 	t.Parallel()
 	r := newContributorsYard(t)
 	r.reviewedBy(t, "pr-reviewers")
 	ctx := context.Background()
 	peopleGroup := r.peopleStages(t)
+	pr, everyone := "pr", store.OriginatorAny
+	must(t, r.api.PutGroup(ctx, store.Group{Name: "builders", Runner: "fake", Limit: 50}, "me"))
+	must(t, r.api.PutGroup(ctx, store.Group{Name: "push-fix", Runner: "fake", Limit: 1}, "me"))
+	_, err := r.api.AddRoute(ctx, store.Route{Stage: "fix", Type: &pr, Originator: &everyone, Group: "builders"}, "me")
+	must(t, err)
+	_, err = r.api.AddRoute(ctx, store.Route{Stage: "push", Type: &pr, Originator: &everyone, Group: "push-fix"}, "me")
+	must(t, err)
 
 	// arrive makes the bead of a new pull request and takes it to stage as its
 	// events and reports would: a stranger's waits in triage, a bot's goes
 	// to the reader, whose verdict sends it on to the posting of its review,
-	// then to the wait for CI or back to its contributor, or to a person with a
-	// question.
+	// then to the wait for CI or back to its contributor, to a fix round by a
+	// maintainer's hand, or to a person with a question.
 	number := 50
 	arrive := func(stage string) *store.Bead {
 		number++
@@ -730,6 +796,14 @@ func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 			r.reviewerSays(t, b.ID, false)
 		case "contributor":
 			r.reviewerAsksChanges(t, b.ID)
+		case "fix", "push":
+			r.reviewerAsksChanges(t, b.ID)
+			_, err := r.api.Advance(ctx, b.ID, "fix", store.Expect{}, "me")
+			must(t, err)
+			if stage == "push" {
+				_, err = r.api.Done(ctx, b.ID, "done", "fixed", store.Expect{Stage: "fix"}, "me")
+				must(t, err)
+			}
 		case "decide":
 			_, err := r.api.Done(ctx, b.ID, "question", "is this change wanted?", store.Expect{Stage: "review"}, "me")
 			must(t, err)
@@ -756,7 +830,7 @@ func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 		return sessions
 	}
 
-	for _, stage := range []string{"triage", "review", "review-post", "ciwait", "contributor", "decide"} {
+	for _, stage := range []string{"triage", "review", "review-post", "ciwait", "contributor", "fix", "push", "decide"} {
 		for _, c := range []struct{ fixture, outcome, to string }{
 			{"pull_request_closed_merged", "merged", "merged"},
 			{"pull_request_closed_unmerged", "dropped", "closed"},
@@ -774,6 +848,9 @@ func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 				t.Errorf("%s: a pull request %s (%s) left its bead in %s (%s), want %s closed", stage, c.outcome, c.fixture, got.Stage, got.Status, c.to)
 			}
 			wantRules(t, r.rules(t, b.ID), "pull_request made", c.outcome+" "+stage+" -> "+c.to)
+			// The bead ended with its pull request, merged or closed on GitHub:
+			// no stage of it sets a status there.
+			r.threadUntouched(t, b.ID, c.to)
 
 			// Whatever worked the stage is stopped, and neither the posting nor
 			// the yard's CI can report for a pull request that is over.
@@ -796,7 +873,79 @@ func TestContributorsClosedPullRequestEndsItsBead(t *testing.T) {
 					t.Errorf("%s in %s with ci_head %v after a late report, want %s with none", b.ID, got.Stage, got.Metadata["ci_head"], c.to)
 				}
 			}
+			if stage == "fix" {
+				if _, err := r.api.Done(ctx, b.ID, "done", "fixed", store.Expect{Stage: "fix"}, "me"); err == nil {
+					t.Errorf("a report from fix on %s was taken after its pull request was %s", b.ID, c.outcome)
+				}
+			}
+			if stage == "push" {
+				if _, err := r.api.Done(ctx, b.ID, "done", "push-fix: pushed", store.Expect{Stage: "push"}, "me"); err == nil {
+					t.Errorf("a report from push on %s was taken after its pull request was %s", b.ID, c.outcome)
+				}
+			}
 		}
+	}
+}
+
+// New commits on a pull request whose bead waits in fix or push move its
+// head and nothing else: neither stage hears pushed or unaccepted, whoever
+// pushed and whether or not a maintainer accepted the pull request, and the
+// round's pick is checked by the push script against the head the pull
+// request has when it runs.
+func TestContributorsPushInFixAndPushMovesTheHeadOnly(t *testing.T) {
+	t.Parallel()
+	r := newContributorsYard(t)
+	r.peopleStages(t)
+	ctx := context.Background()
+	number := 90
+	outsider := func(n int, edits ...func(map[string]any)) []func(map[string]any) {
+		return append([]func(map[string]any){prEvent(n, "someone", "User"), authorIs("NONE")}, edits...)
+	}
+	where := func(id string) (stage string, accepted, pr any) {
+		r.pass(t)
+		b := r.bead(t, id)
+		return b.Stage, b.Metadata["accepted_head"], b.Metadata["pr_head"]
+	}
+	toFix := func(n int) *store.Bead {
+		r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(n)...)
+		b := r.madeIn(t, n, "triage")
+		r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(n, labeledBy("accepted", "a-maintainer", "User"))...)
+		r.pass(t)
+		if st := r.stageOf(t, b.ID); st != "review" {
+			t.Fatalf("%s in %s, want review", b.ID, st)
+		}
+		r.reviewerAsksChanges(t, b.ID)
+		if _, err := r.api.Advance(ctx, b.ID, "fix", store.Expect{}, "me"); err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	for _, stage := range []string{"fix", "push"} {
+		for _, who := range []struct{ login, kind string }{{"someone", "User"}, {"an-app[bot]", "Bot"}} {
+			number++
+			b := toFix(number)
+			if stage == "push" {
+				_, err := r.api.Done(ctx, b.ID, "done", "fixed", store.Expect{Stage: "fix"}, "me")
+				must(t, err)
+			}
+			if got := r.stageOf(t, b.ID); got != stage {
+				t.Fatalf("%s in %s, want %s", b.ID, got, stage)
+			}
+			r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, bearing("accepted"), atHead(movedSHA), pushedBy(who.login, who.kind))...)
+			if got, accepted, pr := where(b.ID); got != stage || accepted != fixtureSHA || pr != movedSHA {
+				t.Errorf("%s pushed to by a %s in %s: %s in %s with accepted_head %v and pr_head %v, want %s with %s and %s",
+					b.ID, who.kind, stage, b.ID, got, accepted, pr, stage, fixtureSHA, movedSHA)
+			}
+		}
+	}
+	// The label may be gone before the push: the bead's triage history still
+	// says unaccepted everywhere else, but fix hears nothing either way.
+	number++
+	b := toFix(number)
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, bearing(), atHead(movedSHA))...)
+	if got, accepted, pr := where(b.ID); got != "fix" || accepted != fixtureSHA || pr != movedSHA {
+		t.Errorf("%s pushed to in fix after its accepted label was removed: %s with accepted_head %v and pr_head %v, want fix with %s and %s",
+			b.ID, got, accepted, pr, fixtureSHA, movedSHA)
 	}
 }
 
@@ -942,6 +1091,143 @@ func TestContributorsAcceptanceIsOfACommit(t *testing.T) {
 	}
 }
 
+// A pull request waiting in triage is a card for the maintainers, with the
+// pack's own stage file: it names the head the deliveries told, a pick of
+// accepted records that head and sends the bead to review, and a push after the
+// card was put never lets the old card accept: the bead stays, the old card is
+// taken back and a card of the new head is put. A pull request returned to
+// triage by a push after a yes comes back with a card of the new head. The label
+// still says yes, beside the card, which it then takes back.
+func TestContributorsTriageCardIsOfTheHead(t *testing.T) {
+	t.Parallel()
+	const lastSHA = "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+	home := t.TempDir()
+	r := newContributorsYardIn(t, home)
+	ctx := context.Background()
+	// The pack's own stage file, its ## Ask included, where an import puts it.
+	file, err := fs.ReadFile(packs.FS, packs.Contributors+"/flows/pr/triage.md")
+	must(t, err)
+	stages := store.HomeStageDir(home, "contributors.pr")
+	must(t, os.MkdirAll(stages, 0o755))
+	must(t, os.WriteFile(filepath.Join(stages, "triage.md"), file, 0o644))
+	r.peopleStages(t)
+	must(t, r.api.SetSetting(ctx, store.OperatorSetting, "jo", "jo"))
+	_, err = r.api.AddUser(ctx, "mckean", "jo")
+	must(t, err)
+	outsider := func(n int, edits ...func(map[string]any)) []func(map[string]any) {
+		return append([]func(map[string]any){prEvent(n, "someone", "User"), authorIs("NONE")}, edits...)
+	}
+	// cards are the open cards on the bead, oldest first.
+	cards := func(id string) []store.ResolvedAsk {
+		t.Helper()
+		notes, err := r.api.Notes(ctx, id)
+		must(t, err)
+		var open []store.ResolvedAsk
+		for _, a := range store.ResolveAsks(notes, time.Now()) {
+			if a.State == store.AskOpen {
+				open = append(open, a)
+			}
+		}
+		return open
+	}
+	// theCard is the one open card of the bead, which shows head and no other.
+	theCard := func(id, head string) store.ResolvedAsk {
+		t.Helper()
+		open := cards(id)
+		if len(open) != 1 || open[0].Ask.Head == nil || open[0].Ask.Head.Sha != head || open[0].Ask.Head.Accepts != "accepted" {
+			var shown []string
+			for _, c := range open {
+				if c.Ask.Head != nil {
+					shown = append(shown, c.Ask.Head.Sha)
+				}
+			}
+			t.Fatalf("%s has %d open cards, showing the heads %v, want one that accepts %s", id, len(open), shown, head)
+		}
+		return open[0]
+	}
+	accepted := func(id string) any { return r.bead(t, id).Metadata["accepted_head"] }
+
+	// Opened by a stranger: the bead waits in triage, and its card names the head
+	// and what the delivery said of it, drawn from the event alone.
+	number := 80
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number)...)
+	b := r.madeIn(t, number, "triage")
+	card := theCard(b.ID, fixtureSHA)
+	if line := card.Ask.Context[1]; !strings.HasPrefix(line, "Head: 4f2c9e1, opened by someone at ") || !strings.HasSuffix(line, " UTC, +12 -0 in 1 file, as the delivery that told it said.") {
+		t.Errorf("the card names the head as %q", line)
+	}
+	if told, _ := r.bead(t, b.ID).Metadata["pr_head_told"].(map[string]any); told["by"] != "someone" || told["action"] != "opened" || told["sha"] != fixtureSHA {
+		t.Errorf("the bead records the delivery as %v", told)
+	}
+	if accepted(b.ID) != nil {
+		t.Fatalf("accepted_head %v before anyone accepted", accepted(b.ID))
+	}
+
+	// A person's pick of accepted: the head shown is the one accepted, and the
+	// bead is in review.
+	must(t, r.api.AddAnswer(ctx, b.ID, store.Answer{Ask: card.Note.Seq, Option: 1}, "mckean"))
+	if got := r.stageOf(t, b.ID); got != "review" || accepted(b.ID) != fixtureSHA {
+		t.Fatalf("after the pick %s is in %s with accepted_head %v, want review with %s", b.ID, got, accepted(b.ID), fixtureSHA)
+	}
+
+	// New commits after the yes bring it back to triage with a card of the new
+	// head, though no label was ever put on it; the old yes stays recorded until
+	// a person gives another.
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, atHead(movedSHA))...)
+	r.pass(t)
+	if got := r.stageOf(t, b.ID); got != "triage" || accepted(b.ID) != fixtureSHA {
+		t.Fatalf("after the push %s is in %s with accepted_head %v, want triage with the earlier %s", b.ID, got, accepted(b.ID), fixtureSHA)
+	}
+	card = theCard(b.ID, movedSHA)
+	if line := card.Ask.Context[1]; !strings.HasPrefix(line, "Head: c0ffee5, pushed by someone at ") || !strings.HasSuffix(line, " UTC, +120 -30 in 4 files, as the delivery that told it said.") {
+		t.Errorf("the card of the pushed head names it as %q", line)
+	}
+
+	// A push while the card waits: the bead stays in triage, the card of the head
+	// before is taken back and the card of the new head is put. The pick of the
+	// old card is refused and accepts nothing.
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, atHead(lastSHA))...)
+	r.pass(t)
+	if got := r.stageOf(t, b.ID); got != "triage" {
+		t.Fatalf("after a push in triage %s is in %s, want triage", b.ID, got)
+	}
+	fresh := theCard(b.ID, lastSHA)
+	if err := r.api.AddAnswer(ctx, b.ID, store.Answer{Ask: card.Note.Seq, Option: 1}, "mckean"); err == nil {
+		t.Fatalf("the pick of the card of %s was taken after the pull request moved to %s", movedSHA, lastSHA)
+	}
+	if got := r.stageOf(t, b.ID); got != "triage" || accepted(b.ID) != fixtureSHA {
+		t.Fatalf("after the refused pick %s is in %s with accepted_head %v, want triage with the earlier %s", b.ID, got, accepted(b.ID), fixtureSHA)
+	}
+	must(t, r.api.AddAnswer(ctx, b.ID, store.Answer{Ask: fresh.Note.Seq, Option: 1}, "mckean"))
+	if got := r.stageOf(t, b.ID); got != "review" || accepted(b.ID) != lastSHA {
+		t.Fatalf("after the pick of the new card %s is in %s with accepted_head %v, want review with %s", b.ID, got, accepted(b.ID), lastSHA)
+	}
+
+	// The label is the other way to the same yes: it records the head its event
+	// named, and takes the card back with the move.
+	number++
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number)...)
+	labeled := r.madeIn(t, number, "triage")
+	theCard(labeled.ID, fixtureSHA)
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number, labeledBy("accepted", "a-maintainer", "User"))...)
+	r.pass(t)
+	if got := r.stageOf(t, labeled.ID); got != "review" || accepted(labeled.ID) != fixtureSHA || len(cards(labeled.ID)) != 0 {
+		t.Fatalf("after the label %s is in %s with accepted_head %v and %d cards, want review with %s and none", labeled.ID, got, accepted(labeled.ID), len(cards(labeled.ID)), fixtureSHA)
+	}
+
+	// The card's other pick closes the bead and accepts nothing.
+	number++
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number)...)
+	closing := r.madeIn(t, number, "triage")
+	must(t, r.api.AddAnswer(ctx, closing.ID, store.Answer{Ask: theCard(closing.ID, fixtureSHA).Note.Seq, Option: 2}, "mckean"))
+	if got := r.bead(t, closing.ID); got.Stage != "closed" || got.Status != "closed" || accepted(closing.ID) != nil {
+		t.Fatalf("after the close %s is %s (%s) with accepted_head %v, want closed with none", closing.ID, got.Stage, got.Status, accepted(closing.ID))
+	}
+	// The pick closes the bead and leaves the pull request open on GitHub, as
+	// the stage file says: nothing is asked of its thread.
+	r.threadUntouched(t, closing.ID, "closed")
+}
+
 // A pull request closed unmerged and then reopened has a bead again. The
 // close ended the old one (TestContributorsClosedPullRequestEndsItsBead), so no
 // open bead tracks the thread, and the lines that judged the pull request when
@@ -999,8 +1285,11 @@ func TestContributorsReopenedPullRequestStartsAFreshBead(t *testing.T) {
 	}
 	freshNotes, err := r.api.Notes(ctx, fresh.ID)
 	must(t, err)
-	if len(fresh.Labels) != 0 || len(freshNotes) != 0 || !slices.Equal(slices.Sorted(maps.Keys(fresh.Metadata)), []string{"hook_seq"}) {
-		t.Fatalf("%s starts with labels %v, metadata %v and %d notes, want none but the event that made it", fresh.ID, fresh.Labels, fresh.Metadata, len(freshNotes))
+	// What it has of the event that made it is the event's seq and the head that
+	// event told, with what the delivery said of it (the card of a pull request
+	// in triage shows both): the head the reopen gave, none of the old bead's.
+	if len(fresh.Labels) != 0 || len(freshNotes) != 0 || !slices.Equal(slices.Sorted(maps.Keys(fresh.Metadata)), []string{"hook_seq", "pr_head", "pr_head_told"}) || fresh.Metadata["pr_head"] != movedSHA {
+		t.Fatalf("%s starts with labels %v, metadata %v and %d notes, want none but the event that made it and the head %s it told", fresh.ID, fresh.Labels, fresh.Metadata, len(freshNotes), movedSHA)
 	}
 	wantRules(t, r.rules(t, fresh.ID), "pull_request made "+fresh.ID)
 
@@ -1064,8 +1353,8 @@ func testContributorsReopenedPullRequestInOnePassStartsAFreshBead(t *testing.T) 
 	}
 	freshNotes, err := r.api.Notes(ctx, fresh.ID)
 	must(t, err)
-	if len(fresh.Labels) != 0 || len(freshNotes) != 0 || !slices.Equal(slices.Sorted(maps.Keys(fresh.Metadata)), []string{"hook_seq"}) {
-		t.Fatalf("%s starts with labels %v, metadata %v and %d notes, want none but the event that made it", fresh.ID, fresh.Labels, fresh.Metadata, len(freshNotes))
+	if len(fresh.Labels) != 0 || len(freshNotes) != 0 || !slices.Equal(slices.Sorted(maps.Keys(fresh.Metadata)), []string{"hook_seq", "pr_head", "pr_head_told"}) || fresh.Metadata["pr_head"] != fixtureSHA {
+		t.Fatalf("%s starts with labels %v, metadata %v and %d notes, want none but the event that made it and the head %s it told", fresh.ID, fresh.Labels, fresh.Metadata, len(freshNotes), fixtureSHA)
 	}
 	wantRules(t, r.rules(t, fresh.ID), "pull_request made "+fresh.ID)
 

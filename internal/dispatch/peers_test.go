@@ -398,8 +398,15 @@ func TestPeersGiveUp(t *testing.T) {
 		clock.now = clock.now.Add(time.Hour)
 	}
 	failed := a.events(t, "peer_message_failed")
-	if len(failed) != 1 || failed[0].Data["id"] != first || failed[0].Data["peer"] != "b" || failed[0].Data["kind"] != "ping" ||
-		failed[0].Data["attempts"] != float64(3) && failed[0].Data["attempts"] != 3 || failed[0].Data["reason"] == "" {
+	if len(failed) != 1 {
+		t.Fatalf("peer_message_failed = %+v", failed)
+	}
+	// The reason is the failed post's own words, so there is no value to compare
+	// it with. A key left out reads as nil, which is not "", so it is read as a
+	// string first.
+	reason, _ := failed[0].Data["reason"].(string)
+	if failed[0].Data["id"] != first || failed[0].Data["peer"] != "b" || failed[0].Data["kind"] != "ping" ||
+		failed[0].Data["attempts"] != float64(3) && failed[0].Data["attempts"] != 3 || reason == "" {
 		t.Fatalf("peer_message_failed = %+v", failed)
 	}
 	p, err := a.api.GetPeer(context.Background(), "b")

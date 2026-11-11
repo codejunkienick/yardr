@@ -111,9 +111,12 @@ func TestLinkAddAndRemove(t *testing.T) {
 	if len(linked) != 2 {
 		t.Fatalf("linked events = %+v", linked)
 	}
-	for _, e := range linked {
-		if e.Actor != "jane" || e.Data["source"] == "" || e.Data["kind"] == "" || e.Data["url"] == "" {
-			t.Fatalf("linked event = %+v", e)
+	// Each event names its link as it was added, in order. A key left out reads as
+	// nil, which is not "", so they are compared with what was added, not with "".
+	for i, want := range []struct{ source, kind, url string }{{"linear", "tracks", linA}, {"github", "relates", ghA}} {
+		e := linked[i]
+		if e.Actor != "jane" || e.Data["source"] != want.source || e.Data["kind"] != want.kind || e.Data["url"] != want.url {
+			t.Fatalf("linked event = %+v, want %s %s %s", e, want.kind, want.source, want.url)
 		}
 	}
 	// A bead named by a prefix or its UUID is the same bead.

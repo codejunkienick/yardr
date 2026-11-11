@@ -147,6 +147,12 @@ func TestAgentArgsCodexRunsWithoutItsSharedDaemon(t *testing.T) {
 		// another setting's, and does not pass for the update check's.
 		{"codex with a -c of its own", map[string]any{"kind": "codex", "args": []any{"-c", "model_reasoning_effort=high"}}, "",
 			memOff + "--no-daemon " + noUpdate + " -c model_reasoning_effort=high"},
+		// yardr-jkcy: a group's effort is Codex's setting model_reasoning_effort,
+		// in a -c of its own after the group's args and the model.
+		{"codex with an effort", map[string]any{"kind": "codex", "effort": "max"}, "",
+			memOff + "--no-daemon " + noUpdate + " -c model_reasoning_effort=max"},
+		{"codex with an effort, args and a model", map[string]any{"kind": "codex", "args": []any{"--approve-for-me"}, "model": "gpt-6-luna", "effort": "max"}, "gpt-6-astra",
+			memOff + "--no-daemon " + noUpdate + " --approve-for-me --model gpt-6-astra -c model_reasoning_effort=max"},
 		{"codex with its memory back on", map[string]any{"kind": "codex", "args": []any{"--enable", "memories"}}, "",
 			"--no-daemon " + noUpdate + " --enable memories"},
 		{"codex with its memory back on as one arg", map[string]any{"kind": "codex", "args": []any{"--enable=memories"}}, "",

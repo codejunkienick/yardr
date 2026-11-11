@@ -1,12 +1,14 @@
 // The settings of a group or a crew member that are held to the operator
-// when a definition is saved: what sessions run, where their environment
-// comes from, and which user's login they burn. A setting the stored
-// definition already holds, with the same value, is kept unasked, as a
-// depot re-put is; everything else stays anyone's. Each check here is
-// Alone: no run ask proposes these except the group-add card, which
-// proposes a new group's (runask_groupadd.go changes the mark to Askable
-// there and nowhere else), so the store and the run-ask refusal name the
-// same settings in the same way. The delegated leg (delegation.go)
+// when a definition is saved: what sessions run, how hard they think (a
+// group's effort, which was a flag of its args and the operator's with them),
+// where their environment comes from, and which user's login they burn. A
+// setting the stored definition already holds, with the same value, is kept
+// unasked, as a depot re-put is; everything else stays anyone's. Each check
+// here is Alone: no run ask proposes these except the group-add card, which
+// proposes a new group's, and the group-set card, which proposes the few it
+// carries (runask_groupadd.go and runask_groupset.go change the mark to
+// Askable there and nowhere else), so the store and the run-ask refusal name
+// the same settings in the same way. The delegated leg (delegation.go)
 // carries the settings its maps name, and its site marks them so.
 package store
 
@@ -17,9 +19,9 @@ import (
 	"slices"
 )
 
-// checkGroupDefine holds a group's cmd, dir, env_file, kind, args, prompt
-// and worktrees settings, and a change of its runner to or from exec, to
-// the operator. Under a delegated pack apply every write of a group,
+// checkGroupDefine holds a group's cmd, dir, env_file, kind, args, prompt,
+// worktrees and effort settings, and a change of its runner to or from exec,
+// to the operator. Under a delegated pack apply every write of a group,
 // SetGroup's as well as PutGroup's, is first held to the record's values
 // (packGroupWrite): the record lets the deed through below, so its values
 // are checked here, where all of putGroup's callers pass.
@@ -30,7 +32,7 @@ func checkGroupDefine(ctx context.Context, w *wtx, old, want Group, actor string
 		}
 	}
 	before, after := asStored(old.Config), asStored(want.Config)
-	for _, key := range []string{"cmd", "dir", "env_file", "kind", "args", "prompt", "worktrees"} {
+	for _, key := range []string{"cmd", "dir", "env_file", "kind", "args", "prompt", "worktrees", "effort"} {
 		was, had := before[key]
 		is, has := after[key]
 		if had == has && reflect.DeepEqual(was, is) {

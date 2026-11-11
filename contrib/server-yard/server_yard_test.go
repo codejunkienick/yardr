@@ -34,6 +34,7 @@ import (
 	"yardr.dev/yardr/contrib/server-yard/managers"
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/peer"
+	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/storetest"
 	"yardr.dev/yardr/internal/testload"
 )
@@ -43,7 +44,9 @@ import (
 // and the daemon of a yard would outlive it (storetest.NameTestBinary).
 func TestMain(m *testing.M) {
 	storetest.NameTestBinary()
-	os.Exit(m.Run())
+	code := m.Run()
+	scripttest.Remove()
+	os.Exit(code)
 }
 
 // yard holds one test's directories: D is short (/tmp/sy.XXXXXX), since a
@@ -267,25 +270,6 @@ func (y *yard) cli(t *testing.T, args ...string) (string, error) {
 	return string(out), err
 }
 
-// running reports whether pid is a live process. A zombie is not running:
-// kill -0 still answers for one, so where it says alive the state is read
-// with ps and a zombie counts as dead. ps listing nothing means the process
-// died between the checks.
-func running(pid int) bool {
-	if pid <= 0 || syscall.Kill(pid, 0) != nil {
-		return false
-	}
-	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return false
-	}
-	return !zombie(strings.TrimSpace(string(out)))
-}
-
-// zombie reports whether a ps STAT word names a process that is not
-// running: a zombie, or nothing at all where ps lists no such process.
-func zombie(stat string) bool { return stat == "" || strings.Contains(stat, "Z") }
-
 // pidIn reads the pid a lock or pid file names, 0 when it names none.
 func pidIn(path string) int {
 	b, err := os.ReadFile(path)
@@ -317,31 +301,11 @@ func environOf(t *testing.T, pid int) string {
 // gone waits up to 10s, on an idle box, for pid to end.
 func gone(pid int) bool {
 	for deadline := time.Now().Add(testload.Scale(10 * time.Second)); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-		if !running(pid) {
+		if !testload.Running(pid) {
 			return true
 		}
 	}
 	return false
-}
-
-// TestZombie pins what running counts as dead: a zombie's STAT word, in
-// either ps's spelling, and nothing listed at all. A real zombie is not
-// kept instead: Go reaps adopted children on GC timing.
-func TestZombie(t *testing.T) {
-	for _, c := range []struct {
-		stat string
-		want bool
-	}{
-		{"Z", true},
-		{"Z+", true},
-		{"Ss", false},
-		{"R", false},
-		{"", true}, // ps lists nothing: dead between the checks
-	} {
-		if got := zombie(c.stat); got != c.want {
-			t.Errorf("zombie(%q) = %v, want %v", c.stat, got, c.want)
-		}
-	}
 }
 
 // TestStoppedAt pins what leads the failure of a run of the script: doctor's
@@ -525,7 +489,7 @@ func (y *yard) waitDaemon(t *testing.T) int {
 	t.Helper()
 	lock := filepath.Join(y.yardhome, "daemon.lock")
 	for deadline := time.Now().Add(testload.Scale(15 * time.Second)); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
-		if pid := pidIn(lock); running(pid) {
+		if pid := pidIn(lock); testload.Running(pid) {
 			return pid
 		}
 	}
@@ -670,7 +634,7 @@ func TestServerYardSetsUpAYard(t *testing.T) {
 		t.Fatalf("daemon install stopped no daemon:\n%s", out)
 	}
 	pid, _ := strconv.Atoi(stopped[1])
-	if running(pid) {
+	if testload.Running(pid) {
 		t.Errorf("daemon %d outlived the install", pid)
 	}
 	daemon := y.waitDaemon(t)
@@ -690,7 +654,7 @@ func TestServerYardSetsUpAYard(t *testing.T) {
 
 	// The server init started is undisturbed.
 	server := pidIn(filepath.Join(y.yardhome, "server.pid"))
-	if !running(server) {
+	if !testload.Running(server) {
 		t.Errorf("no server runs after the script")
 	}
 
@@ -731,10 +695,10 @@ func TestServerYardSetsUpAYard(t *testing.T) {
 			t.Errorf("second run rewrote %s", f)
 		}
 	}
-	if got := pidIn(filepath.Join(y.yardhome, "daemon.lock")); got != daemon || !running(got) {
+	if got := pidIn(filepath.Join(y.yardhome, "daemon.lock")); got != daemon || !testload.Running(got) {
 		t.Errorf("second run: daemon.pid is %d, want the running %d", got, daemon)
 	}
-	if got := pidIn(filepath.Join(y.yardhome, "server.pid")); got != server || !running(got) {
+	if got := pidIn(filepath.Join(y.yardhome, "server.pid")); got != server || !testload.Running(got) {
 		t.Errorf("second run: server.pid is %d, want the running %d", got, server)
 	}
 	for _, line := range y.calls(t, "herdr")[marks["herdr"]:] {
@@ -835,7 +799,7 @@ func TestServerYardWithoutTheHarnessLogin(t *testing.T) {
 	mustRead(t, y.serviceFile(t, "web"))
 	mustContain(t, out, "The yard")
 	daemon := y.waitDaemon(t)
-	if !running(daemon) {
+	if !testload.Running(daemon) {
 		t.Errorf("no daemon runs after the script")
 	}
 }
@@ -1193,9 +1157,10 @@ func TestAHeldDaemonStartsOnlyForARelease(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				if err := os.WriteFile(filepath.Join(bin, "yardr"), []byte("#!/bin/sh\necho \"$*\" >>\"$STARTED\"\n"), 0o755); err != nil {
-					t.Fatal(err)
-				}
+				// A stand-in: the manager starts yardr beside forking tests,
+				// and Linux refuses to start a file a fork beside its
+				// writing still holds open (ETXTBSY).
+				scripttest.Write(t, filepath.Join(bin, "yardr"), "#!/bin/sh\necho \"$*\" >>\"$STARTED\"\n")
 				if c.held {
 					if err := os.WriteFile(filepath.Join(state, "start-hold"), nil, 0o600); err != nil {
 						t.Fatal(err)

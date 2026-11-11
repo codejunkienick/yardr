@@ -72,6 +72,8 @@ server no terminal runs stays on loopback, and an address off it is refused
 before anything is started or written, as the web view's are. `yardr up`
 refuses a `bdp_addr` off loopback the same way, and starts nothing for it.
 
+## The yard as BDP resources
+
 - Beads are `<scope>beads/<handle>`; dependencies are Links whose source is
   the waiting bead and target its blocker, as in bd. The handle is the BDP
   id because it never changes and is unique within a yard (BDP ids are
@@ -97,12 +99,12 @@ refuses a `bdp_addr` off loopback the same way, and starts nothing for it.
   bead's own metadata is a field of bd's row and stays in `properties`.
 - The revision is the compare-and-swap token a BDP write profile will take
   (`If-Match`). It is the bead's `revision` in `yardr bead show --json`, and
-  the store already enforces it: `bead update`, `hold`/`unhold`, `advance`,
-  `done` and `close` take `--revision <rev>` (in Go, `store.Expect.Revision`)
-  and refuse with a `stale` conflict, changing nothing, when the bead has
-  changed since that revision was read. Crew members carry their own `revision`
-  (`yardr crew show --json`) for `crew add`, `start`, `stop`,
-  `restart` and `rm`.
+  the store already enforces it: `bead update`, `advance`, `done`, `close`,
+  `reopen`, `hold`, `unhold` and `release` take `--revision <rev>` (in Go,
+  `store.Expect.Revision`) and refuse with a `stale` conflict, changing
+  nothing, when the bead has changed since that revision was read. Crew members
+  carry their own `revision` (`yardr crew show --json`) for `crew add`, `set`,
+  `start`, `stop`, `restart` and `rm`.
 
 ## Routes, media type and headers
 

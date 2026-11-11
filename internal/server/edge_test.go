@@ -349,13 +349,9 @@ func TestEdgeLinkFollowsTheSettingBesideTheListener(t *testing.T) {
 			var cl store.API
 			var addr string
 			stopEdge := func() {}
-			if role == "" {
-				addr = freeAddr(t)
-				setHookAddr(t, c, addr)
-			}
 			_, value := edgeYard(t, c, edge, srv, false)
 			if role == "" {
-				start(t, &runner{c: c})
+				addr = startOnFreeAddr(t, c, func(addr string) { setHookAddr(t, c, addr) })
 				client := rpc.NewClient(c.Socket())
 				defer client.Close(ctx)
 				cl = client
@@ -734,6 +730,56 @@ func TestEdgeLinkFollowsTheSettingBesideTheListener(t *testing.T) {
 	})
 }
 
+// proposeEndedPreview proposes the app to run a command that exits at once on
+// the port of an address addrs gives, has the operator jo approve it, and
+// returns it once it has ended. The address is free when addrs gives it but
+// the supervisor binds it later, and another process can take it between: the
+// supervisor then fails the preview ("port already in use at", preview.spawn)
+// and it never ends as stopped, so a preview that ended so is forgotten and
+// proposed again on the next address, as startOnFreeAddr starts a server
+// again. A preview that ends any other way, or on none of freeAddrTries
+// addresses, fails the test.
+func proposeEndedPreview(t *testing.T, cl *rpc.Client, app string, addrs func() string) *store.Preview {
+	t.Helper()
+	ctx := context.Background()
+	dir := t.TempDir()
+	var last *store.Preview
+	for range freeAddrTries {
+		_, port, err := net.SplitHostPort(addrs())
+		if err != nil {
+			t.Fatal(err)
+		}
+		n, err := strconv.Atoi(port)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cl.ProposePreview(ctx, store.NewPreview{App: app, Command: "exit 0", Dir: dir, Port: n}, "jo"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cl.ApprovePreview(ctx, app, "jo"); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "the preview "+app+" to end", func() bool {
+			var err error
+			if last, err = cl.GetPreview(ctx, app); err != nil {
+				t.Fatal(err)
+			}
+			return last.State != store.PreviewPending && last.State != store.PreviewApproved && last.State != store.PreviewRunning
+		})
+		if last.State == store.PreviewStopped {
+			return last
+		}
+		if last.State != store.PreviewFailed || !strings.HasPrefix(last.StateDetail, "port already in use at ") {
+			t.Fatalf("preview %s ended %s (%s), want stopped", app, last.State, last.StateDetail)
+		}
+		if _, err := cl.ForgetPreview(ctx, app, "jo"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Fatalf("no preview ended on a free port in %d tries; the last said %s: %s", freeAddrTries, last.State, last.StateDetail)
+	return nil
+}
+
 // A server connected to an edge tells it of its previews, and tells it of them
 // all again each time its preview link comes up: the supervisor is wired to the
 // link KeepEdge keeps for it, and an edge that lost what it was told hears it
@@ -767,17 +813,27 @@ func TestServerReportsItsPreviewsToTheEdgeAndAgainWhenThePreviewLinkComesUp(t *t
 		}
 	}
 
-	_, port, err := net.SplitHostPort(freeAddr(t))
+	// The first preview's port stays held, so its start deterministically fails
+	// after the address is handed out and the retry takes a free one. Any later
+	// retry also gets a fresh address in case another process takes that one.
+	held, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	n, _ := strconv.Atoi(port)
-	ctx := context.Background()
-	if _, err := cl.ProposePreview(ctx, store.NewPreview{App: "demo", Command: "exit 0", Dir: t.TempDir(), Port: n}, "jo"); err != nil {
-		t.Fatal(err)
+	defer held.Close()
+	addresses := 0
+	p := proposeEndedPreview(t, cl, "demo", func() string {
+		addresses++
+		if addresses == 1 {
+			return held.Addr().String()
+		}
+		return freeAddr(t)
+	})
+	if addresses < 2 || p.Port == held.Addr().(*net.TCPAddr).Port {
+		t.Fatalf("preview retried %d addresses and stopped on port %d, want a port after the held one", addresses, p.Port)
 	}
-	if _, err := cl.ApprovePreview(ctx, "demo", "jo"); err != nil {
-		t.Fatal(err)
+	if all, err := cl.Previews(context.Background()); err != nil || len(all) != 1 || all[0].App != "demo" || all[0].Port != p.Port {
+		t.Fatalf("previews = %+v, %v, want only the preview that stopped", all, err)
 	}
 	lastTold := func() standin.EdgePreviewReport {
 		reports := edge.State().PreviewReports

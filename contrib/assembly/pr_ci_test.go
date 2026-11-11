@@ -368,6 +368,12 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 					if n := countCalls(t, c.gh, "pr view "); n != 2 {
 						t.Errorf("green: the pull request was read %d times, want twice (before the run, and after it):\n%v", n, ghCalls(t, c.gh))
 					}
+					// The token was minted for the repository alone, narrowed to
+					// pull_requests read: pr-ci reads the pull request and writes
+					// nothing to GitHub.
+					if asked := readFile(t, filepath.Join(c.gh, "mint-stdin")); !strings.Contains(asked, `"scope":"o/r"`) || !strings.Contains(asked, `"permissions":{"pull_requests":"read"}`) {
+						t.Errorf("green: the mint was asked %s, want the scope o/r narrowed to pull_requests read", asked)
+					}
 					for what, text := range map[string]string{"the log": c.log, "the notes": c.notesOf(id), "gh's calls": readFile(t, filepath.Join(c.gh, "calls"))} {
 						if strings.Contains(text, mintToken) {
 							t.Errorf("green: %s hold the token", what)
@@ -389,7 +395,7 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					for deadline := time.Now().Add(testload.Scale(5 * time.Second)); syscall.Kill(pid, 0) == nil; time.Sleep(20 * time.Millisecond) {
+					for deadline := time.Now().Add(testload.Scale(5 * time.Second)); testload.Running(pid); time.Sleep(20 * time.Millisecond) {
 						if time.Now().After(deadline) {
 							_ = syscall.Kill(pid, syscall.SIGKILL)
 							t.Fatalf("the sleep the test script started (pid %d) outlived the deadline's kill", pid)
@@ -697,11 +703,11 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 
 // pr-ci takes its binding of a bead to its pull request, and its token, from
 // merge-pr's text, copied: the scripts are installed one file each, so there is
-// none to source. A change to one is made in both, as to the credit loop of the
-// tests' deadline (TestCreditLoopsAreMergeLocals).
+// none to source. A change to one is made in all three, as to the credit loop
+// of the tests' deadline (TestCreditLoopsAreMergeLocals).
 func TestPRCIBindsAsMergePRDoes(t *testing.T) {
 	want, got := markedBlock(t, "merge-pr", bindingOpen, bindingClose), markedBlock(t, "pr-ci", bindingOpen, bindingClose)
 	if got != want {
-		t.Errorf("pr-ci's github_binding differs from merge-pr's: change both\nmerge-pr:\n%s\npr-ci:\n%s", want, got)
+		t.Errorf("pr-ci's github_binding differs from merge-pr's: change all three\nmerge-pr:\n%s\npr-ci:\n%s", want, got)
 	}
 }

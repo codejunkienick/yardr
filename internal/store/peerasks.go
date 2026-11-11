@@ -652,7 +652,7 @@ func (w *wtx) takeAnswer(p *Peer, m PeerMessage, extra map[string]any, tk *takin
 		return "", err
 	}
 	if move != "" {
-		if _, err := w.move(row.UUID, by, tk.flows[row.UUID], tk.homes[row.UUID], nil, stagePick(move)); err != nil {
+		if _, err := w.move(row.UUID, by, tk.flows[row.UUID], tk.homes[row.UUID], nil, w.stagePickOf(row, a.Seq, move)); err != nil {
 			return "", err
 		}
 	}

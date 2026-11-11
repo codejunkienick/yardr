@@ -24,6 +24,7 @@ import (
 
 	"yardr.dev/yardr/internal/previewtest"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/testload"
 )
 
 // A preview's app in these tests is this binary again (previewtest).
@@ -620,6 +621,60 @@ func TestFirstAnsweringDialsAtOnce(t *testing.T) {
 	}
 }
 
+// A dial that fails without proving nothing listens reads as answered. A
+// timeout does, first of all: a stalled process runs past the deadline after
+// the handshake has finished, and Go reports the expired deadline all the same,
+// so a look that read it as free would let a preview start onto a taken port.
+// Only a refusal and the errors of no route to the address read as free. Each
+// outcome is forced through the look's dial, so none is staged.
+func TestLoopbackHostReadsOnlyRefusalAndNoRouteAsFree(t *testing.T) {
+	connect := func(errno syscall.Errno) error {
+		return &net.OpError{Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connect", Err: errno}}
+	}
+	timeout := &net.OpError{Op: "dial", Net: "tcp", Err: os.ErrDeadlineExceeded}
+	for _, tc := range []struct {
+		name      string
+		v4, v6    error // nil connects
+		want      string
+		wantDials int
+	}{
+		{"refused on both", connect(syscall.ECONNREFUSED), connect(syscall.ECONNREFUSED), "", 2},
+		{"no route on both", connect(syscall.ENETUNREACH), connect(syscall.EHOSTUNREACH), "", 2},
+		{"no such family", connect(syscall.EAFNOSUPPORT), connect(syscall.ECONNREFUSED), "", 2},
+		{"timeout on the first", timeout, connect(syscall.ECONNREFUSED), "127.0.0.1", 1},
+		{"timeout on the second", connect(syscall.ECONNREFUSED), timeout, "::1", 2},
+		{"another errno", connect(syscall.EACCES), connect(syscall.ECONNREFUSED), "127.0.0.1", 1},
+		{"an error with no errno", errors.New("boom"), connect(syscall.ECONNREFUSED), "127.0.0.1", 1},
+		{"connected", nil, connect(syscall.ECONNREFUSED), "127.0.0.1", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var dialed []string
+			old := dialLoopback
+			t.Cleanup(func() { dialLoopback = old })
+			dialLoopback = func(addr string) (net.Conn, error) {
+				dialed = append(dialed, addr)
+				err := tc.v4
+				if len(dialed) > 1 {
+					err = tc.v6
+				}
+				if err != nil {
+					return nil, err
+				}
+				c, peer := net.Pipe()
+				t.Cleanup(func() { c.Close(); peer.Close() })
+				return c, nil
+			}
+			if got := loopbackHost(43743); got != tc.want {
+				t.Errorf("loopbackHost = %q, want %q", got, tc.want)
+			}
+			wantDialed := []string{"127.0.0.1:43743", "[::1]:43743"}[:tc.wantDials]
+			if strings.Join(dialed, ",") != strings.Join(wantDialed, ",") {
+				t.Errorf("dialled %v, want %v", dialed, wantDialed)
+			}
+		})
+	}
+}
+
 func TestCrashLoopEndsCrashed(t *testing.T) {
 	y := newYard(t)
 	y.run(t)
@@ -756,8 +811,11 @@ func TestCleanExitIsNotRestarted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse background child pid %q: %v", data, err)
 	}
+	// Its parent was gone before the kill, so the init of the machine has it,
+	// and where that one does not reap (a container without an init) it stays
+	// a zombie that kill -0 answers for.
 	waitFor(t, "background child is gone", func() bool {
-		return errors.Is(syscall.Kill(child, 0), syscall.ESRCH)
+		return !testload.Running(child)
 	})
 }
 

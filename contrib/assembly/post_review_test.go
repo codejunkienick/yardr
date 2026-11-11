@@ -325,8 +325,11 @@ func TestPostReviewPosts(t *testing.T) {
 			if got := y.refusedMoves(id); len(got) != 0 {
 				t.Errorf("post-review tried moves the flow refuses: %v", got)
 			}
-			if !strings.Contains(readFile(t, filepath.Join(gh, "mint-stdin")), `"scope":"o/r"`) {
-				t.Errorf("the mint was asked %s, want the scope o/r", readFile(t, filepath.Join(gh, "mint-stdin")))
+			// The token was minted for the repository alone, narrowed to
+			// pull_requests write: post-review reads the pull request and posts
+			// the review, and nothing else.
+			if asked := readFile(t, filepath.Join(gh, "mint-stdin")); !strings.Contains(asked, `"scope":"o/r"`) || !strings.Contains(asked, `"permissions":{"pull_requests":"write"}`) {
+				t.Errorf("the mint was asked %s, want the scope o/r narrowed to pull_requests write", asked)
 			}
 			y.leaked(gh, id)
 		})

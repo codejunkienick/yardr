@@ -718,6 +718,13 @@ of that name of its own, the import's own name for the group answers that
 none does (`--group builders=web-builders`), which also ends an earlier
 `--group`: the depot gets its own group, and the yard's is left as it is.
 
+A group is renamed with `yardr group rename`
+([Renaming a group](groups.md#renaming-a-group)), the one a pack made as well
+as one it took, and the record of every import that names it follows in the
+same write: the next import finds the group by its new name and makes no group
+by the depot's name for it beside it. A name that begins with a depot of the
+yard and a dash is refused, since an import would take it for its own.
+
 **Flows.** A flow is stored as the named flow `<pack>.<flow>`
 (`starter.default`), and the depot is pointed at it (`yardr depot flow`); a
 flow with `type:` becomes that type's pointer. Of several flows without a
@@ -1415,6 +1422,11 @@ import is logged as `pack_applied` when the record was written and
 `pack_unchanged` when not, with pack, depot, source and commit. Removing a depot
 removes its records.
 
+The record is the operator's to write, or the yardmaster's in a run for the
+operator, under the record that run started: its source is where the next
+`yardr pack apply <name>` reads the pack from. A crew member's own import is
+refused it, whatever actor it passes, and what it wrote before stays.
+
 A crew member is in the mapping and not among the objects: it is the yard's.
 So is a group of the yard that took a group of the pack (`--group`): the
 next import takes it again by that, and a prune never removes it.
@@ -1642,7 +1654,7 @@ yardr pack apply contributors --depot web \
 | flow | stages |
 |---|---|
 | `issue` | `triage` (maintainers) -> `backlog` -> `new` -> `review` -> `approved` -> `merged`, or `closed`: from `backlog` on, the starter's stages and groups |
-| `pr` | `triage` (maintainers) -> `review` (pr-reviewers) -> `review-post` (post) -> `ciwait` -> `contributor` (outside) -> `approved` (maintainers) -> `merged`, or `closed` |
+| `pr` | `triage` (maintainers) -> `review` (pr-reviewers) -> `review-post` (post) -> `ciwait` -> `contributor` (outside) -> `approved` (maintainers) -> `merged`, or `closed`; a maintainer's pick sends `contributor` -> `fix` (builders) -> `push` (push-fix) -> `triage` |
 
 What moves a bead through them is the pack's `sources.github`, in three
 verbs. The stages, the label and who is trusted are the pack's lines;
@@ -1651,29 +1663,42 @@ yardr knows the verbs alone:
 | verb | direction | in this pack |
 |---|---|---|
 | `makes` | source -> yard: an event makes a bead for a thread no open bead tracks | an issue opened makes an `issue` bead in `triage`; a pull request opened, marked ready or reopened a `pr` bead in `triage`, or in `review` when its author is an owner or a member of the repository (`association=`) or a bot (`sender=bot`: a kind, never a login, so every bot) |
-| `says` | source -> bead: an event reports an outcome to the bead that tracks its thread | the label `accepted`, put on by a person, says `accepted`; new commits on a pull request that waited in `triage` say `unaccepted` in `review`, `review-post`, `ciwait` and `contributor`, whoever pushed and even if the label was removed; new commits on any other pull request say `pushed` in `contributor`, and in `review` `pushed` when a bot pushed and `outdated` when a person did, in `review-post` `pushed` when a bot pushed and nothing when a person did, in `ciwait` `pushed` when a bot pushed and `changes` when a person did; a merge says `merged`, a close `dropped`: for a pull request in `triage`, `review`, `review-post`, `ciwait`, `contributor`, `approved` and `decide`, for an issue in `triage`, `backlog`, `new`, `review`, `approved` and `decide`. No event of GitHub's CI says anything: the pull request's CI is the yard's own |
-| `hears` | bead -> source: a stage of the bead sets a status on the thread | an issue is closed when its bead reaches `merged` or `closed`, a pull request when its bead reaches `closed` |
+| `says` | source -> bead: an event reports an outcome to the bead that tracks its thread | the label `accepted`, put on by a person, says `accepted`; new commits on a pull request while its bead waits in `triage` say `pushed`, which makes the stay again; new commits on a pull request that waited in `triage` say `unaccepted` in `review`, `review-post`, `ciwait` and `contributor`, whoever pushed and even if the label was removed; new commits on any other pull request say `pushed` in `contributor`, and in `review` `pushed` when a bot pushed and `outdated` when a person did, in `review-post` `pushed` when a bot pushed and nothing when a person did, in `ciwait` `pushed` when a bot pushed and `changes` when a person did; in `fix` and `push` a push moves the bead's head and says nothing, and the push script holds on a moved head; a merge says `merged`, a close `dropped`: for a pull request in `triage`, `review`, `review-post`, `ciwait`, `contributor`, `fix`, `push`, `approved` and `decide`, for an issue in `triage`, `backlog`, `new`, `review`, `approved` and `decide`. No event of GitHub's CI says anything: the pull request's CI is the yard's own |
+| `hears` | bead -> source: a stage of the bead sets a status on the thread | an issue is closed when its bead reaches `merged` or `closed`; a pull request is untouched by its bead's stage and stays open until it is merged or closed on GitHub |
 
 - **Triage is the pack's advice, and no rule of yardr.** Its stage file
   says a maintainer checks whether the person and the code are legit
   before anything of a pull request is run anywhere. Which stage a bead
   starts in is a line of `makes`: a trusted author's pull request starts in
   `review`, and a copy of the pack may trust more authors, or all.
-- **A maintainer's yes is of one commit.** The label `accepted`, put on by a
-  person (one a bot puts moves nothing), moves a pull request's bead out of
-  `triage` and records the head the event named as the bead's `accepted_head`.
-  New commits on a pull request that waited in `triage` take its bead back to
-  `triage` from `review`, `review-post`, `ciwait` and `contributor`, whoever
-  pushed and even if the label was removed, so nothing of another commit is
-  read or run until a person has said yes to it again.
-  A pull request no maintainer accepted, a trusted author's or a bot's own,
-  keeps the lines below for its pushes.
+- **A maintainer's yes is of one commit, and two ways give it.** The label
+  `accepted`, put on by a person (one a bot puts moves nothing), moves a pull
+  request's bead out of `triage` and records the head the event named as the
+  bead's `accepted_head`. Or the bead waits there as a card in Decide, which
+  names the head it would accept (the short commit, who pushed it and when,
+  and how large the change is, from the deliveries the yard heard and nothing
+  fetched or run), and a maintainer's pick of `accepted` records the head the
+  card showed as `accepted_head` and moves the bead to `review` in the same
+  step; another pick closes the bead, and Later or Decline leave it. A push
+  while the bead waits in `triage` says `pushed`, which makes the stay again:
+  the card of the old head is taken back and a card of the new head is put,
+  and a pick of a card whose head the pull request has left accepts nothing.
+  A pull request already waiting in `triage` when the pack is applied has no
+  card until its bead enters the stage again (`yardr bead advance <id> --to
+  triage`). New commits on a pull request that waited in `triage` take its
+  bead back to `triage` from `review`, `review-post`, `ciwait` and
+  `contributor`, whoever pushed and even if the label was removed, with a card
+  of the new head, so nothing of another commit is read or run until a person
+  has said yes to it again. A card is only for a pull request: the issue
+  flow's `triage` has none, since an issue's yes has no head, so there it is
+  the label, or a move by hand. A pull request no maintainer accepted, a
+  trusted author's or a bot's own, keeps the lines below for its pushes.
 - **A reopened pull request gets a new bead.** Its close ended the old
   bead, so no open bead tracks the thread, and the lines of `makes` judge it
   again. `sender` is then whoever reopened it, so a person who reopens a bot's
   pull request leaves it in `triage`. The new bead starts with none of the old
   one's notes, labels or heads (`accepted_head`, `reviewed_head`, `ci_head`,
-  `merge_head`), and
+  `merge_head`, `fix_head`, `fix_commit`), and
   the old bead stays closed with a link to the thread that only relates.
 - **`merge-ok` is the reviewer's to give for one kind of pull request.** A
   bump of Go modules from a bot (title opening `build(deps)`, diff changing
@@ -1712,6 +1737,28 @@ yardr knows the verbs alone:
   GitHub App, whose id and key file are the group's `env_file`, so a yard
   makes the group first and maps it
   (`--group pr-ci=pr-ci`, [line.md](line.md#the-yard-as-the-ci-of-a-pull-request)).
+- **`fix` and `push` fix a reviewed pull request and push the fix.** A pull
+  request the reviewer found wanting is picked by a maintainer
+  (`yardr bead update <id> --add-label fix-ok --meta fix_head=<sha>` with the
+  reviewed head, then `yardr bead advance <id> --to fix` from `contributor` by
+  hand): a bead's agent may not write the pick on any bead, its own included.
+  In `fix` a builder of `builders`, which holds no key, fixes the findings on
+  the picked head, detached, never the live tip, commits the fix and records
+  it as `fix_commit`. In `push` the script `push-fix` makes that commit again
+  as the yard's GitHub App's own (its name and address replace the builder's;
+  the tree, message and dates stay, and a signature is not carried over),
+  pushes it onto the pull request's branch as the App, fast-forward only,
+  records it as the new `fix_commit`, waits for its own push to arrive as the
+  bead's head, and sends the bead back to
+  `triage`: the fresh accept of the new head IS the human look at it, and
+  `review`, the yard's CI and a fresh maintainer's yes follow. The push is
+  public before all of that, and the yes gates the yard's merge only. The
+  script checks the pick, the heads, the live branch and maintainer edits
+  before it pushes anything, and holds in git's words what GitHub refuses. It
+  works as the yard's GitHub App, whose id and key file are the group's
+  `env_file`, so a yard makes the group first and maps it
+  (`--group push-fix=yardr-push`,
+  [line.md](line.md#fixing-a-pull-request-and-pushing-the-fix)).
 - **A bot's push starts the read again.** A bot's rebase is the only push
   it makes, so a bead sent to `contributor` by it would wait there for one
   that does not come. A push by a bot (`sender=bot`) while the pull request
@@ -1728,10 +1775,12 @@ yardr knows the verbs alone:
   `triage`, every push says `unaccepted`, even after the label was removed.
 - **`contributor` is held by `outside`, a people group with no members.**
   A bead there waits for the pull request to change; nobody of the yard
-  works it, and `yardr review` shows where it waits.
+  works it, and `yardr review` shows where it waits. A reviewed one with
+  findings is picked for a fix round from here, by hand to `fix` (above).
 - **A merge or a close ends the bead.** `merged` and `dropped` are the
   source's word, said by two lines that name no stage, and `triage`,
-  `review`, `review-post`, `ciwait`, `contributor`, `approved` and `decide` each lead them
+  `review`, `review-post`, `ciwait`, `contributor`, `fix`, `push`, `approved`
+  and `decide` each lead them
   to `merged` and `closed`: a maintainer can merge a pull request nobody of
   the yard has read, and its author can close one under review. A reviewer's
   `question` sends the bead to `decide` to wait for a member of `decisions`,
@@ -1909,7 +1958,8 @@ yard.
 
 **Proposing an embedded pack.** A crew member may propose applying a
 pack yardr embeds, with a run ask (`yardr bead ask <id> "<question>"
---run "pack apply <name>"`, [chat.md](chat.md#questions-for-you)), for
+--context "<why>" --run "pack apply <name>",
+[chat.md](chat.md#questions-for-you)), for
 the operator to approve on a card: an embedded pack of kind `source`
 with no flag (the packs table above names them), or a pack of a depot
 kind. With no flag a depot pack is re-applied to the one depot that
@@ -1917,7 +1967,10 @@ holds it where its plan asks nothing; a first install names its depot,
 with the mappings that answer its plan (`--run "pack apply <name>
 --depot <depot>"`). A pack of kind `source` named with `--depot` is
 sent to the setup ask instead (`yardr bead ask <id> "<question>"
---setup <pack>`, [chat.md](chat.md#setting-up-a-packs-sources)).
+--setup <pack>`, [chat.md](chat.md#setting-up-a-packs-sources)), which is
+also the one card for a pack of kind `source` that the operator applied
+from a directory in a terminal and has left as it was: a clean git
+checkout still at the commit the apply recorded.
 A card is read whole, so a pack whose card would run past 40 lines is
 refused, and the operator applies it in a terminal, or the yardmaster applies
 it for them on their mail (below). Google is split into

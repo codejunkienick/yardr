@@ -776,11 +776,14 @@ func TestDeclaredHeldRunsNoThreadCommand(t *testing.T) {
 	}
 }
 
-// A failing command's stderr reaches the user, and its stdout does not.
+// A failing command's stderr reaches the user, and its stdout does not. Its
+// exit status says whether a retry can change the failure: 3 is a command
+// refusing for good, and its failure is Final whichever thread command it
+// is; any other status, and a signal, is a failure that may pass.
 func TestDeclaredCommandFailure(t *testing.T) {
 	dir := t.TempDir()
 	scripts := acmeScripts(dir)
-	scripts["reply"] = "#!/bin/sh\necho 'secret-stdout'\necho 'boom-stderr' >&2\nexit 3\n"
+	scripts["reply"] = "#!/bin/sh\necho 'secret-stdout'\necho 'boom-stderr' >&2\nexit 1\n"
 	ad := threadDecl(t, acmeThread, scripts)
 	_, err := ad.Reply(context.Background(),
 		hooks.Envelope{Source: "acme", Type: "issue", Thread: hooks.Thread{ID: "issue-1"}},
@@ -799,5 +802,45 @@ func TestDeclaredCommandFailure(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "not an object") {
 		t.Fatalf("state stdout reached the user: %v", err)
+	}
+	if hooks.Final(err) {
+		t.Fatalf("an answer that is no object is for good: %v", err)
+	}
+
+	// Every thread command, failing with each status in turn. The words are
+	// the same whether the failure is Final or not.
+	ctx := context.Background()
+	env := hooks.Envelope{Source: "acme", Type: "issue", Thread: hooks.Thread{ID: "issue-1"}}
+	calls := map[string]func(ad hooks.Declared) error{
+		"reply":  func(ad hooks.Declared) error { _, err := ad.Reply(ctx, env, "", "answer", "k", "tok"); return err },
+		"posted": func(ad hooks.Declared) error { _, err := ad.Posted(ctx, env, "k", "tok"); return err },
+		"read":   func(ad hooks.Declared) error { _, err := ad.Thread(ctx, env, "tok"); return err },
+		"open":   func(ad hooks.Declared) error { _, err := ad.Open(ctx, "ENG", "t", "b", "k", "", "tok"); return err },
+		"opened": func(ad hooks.Declared) error { _, err := ad.Opened(ctx, "ENG", "k", "tok", time.Time{}); return err },
+		"state":  func(ad hooks.Declared) error { _, err := ad.Forward(ctx, "issue-1", "started", "tok"); return err },
+	}
+	for _, c := range []struct {
+		ends  string // what the script ends with
+		final bool
+	}{
+		{"exit 1", false},
+		{"exit 2", false}, // misuse, as the pack's scripts say of a command they do not know
+		{"exit 3", true},
+		{"exit 127", false}, // a tool the script needs is missing
+		{"kill -9 $$", false},
+	} {
+		scripts := acmeScripts(dir)
+		for name := range calls {
+			scripts[name] = "#!/bin/sh\necho 'secret-stdout'\necho 'why-stderr' >&2\n" + c.ends + "\n"
+		}
+		ad := threadDecl(t, acmeThread, scripts)
+		for name, call := range calls {
+			err := call(ad)
+			if err == nil || !strings.Contains(err.Error(), "why-stderr") || strings.Contains(err.Error(), "secret-stdout") {
+				t.Errorf("%s ending %q: %v", name, c.ends, err)
+			} else if hooks.Final(err) != c.final {
+				t.Errorf("%s ending %q: Final is %v, want %v: %v", name, c.ends, hooks.Final(err), c.final, err)
+			}
+		}
 	}
 }

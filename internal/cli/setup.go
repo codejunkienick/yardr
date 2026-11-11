@@ -3,11 +3,14 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"slices"
 	"strings"
 
+	"yardr.dev/yardr/internal/pack"
 	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/packs"
 )
 
 // setupStep is one step from a yard that exists to a first merged bead:
@@ -47,6 +50,10 @@ type setupState struct {
 	routes  []store.Route
 	sources []store.Source
 	beads   []store.Bead // closed ones too
+	// packImports keep the same source precedence as pack apply by name.
+	packImports []store.PackImport
+	// defaultPack is the store's default_pack setting, when it has one.
+	defaultPack string
 	// flows are the flows on each depot's base (in a dir depot's directory), by
 	// depot; flowErr is why a depot's could not be read.
 	flows   map[string]int
@@ -66,6 +73,14 @@ func setupSteps(ctx context.Context, st store.API) ([]setupStep, error) {
 	var s setupState
 	var err error
 	if s.depots, err = st.Depots(ctx); err != nil {
+		return nil, err
+	}
+	settings, err := st.Settings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.defaultPack = settings[defaultPackSetting]
+	if s.packImports, err = st.Packs(ctx); err != nil {
 		return nil, err
 	}
 	if s.routes, err = st.Routes(ctx); err != nil {
@@ -174,10 +189,46 @@ func (s setupState) steps() []setupStep {
 
 // packNext is the command that sets depot up from a pack: the one command
 // for the depot's flow, its groups and their routes, so every step between
-// the depot and the first bead names it. It names no pack: the depot gets
-// the yard's default (defaultPack).
+// the depot and the first bead names it. An embedded depot pack can be
+// proposed as a run card, which the server carries out as the approving
+// operator. A selected pack outside the binary stays an operator command
+// because a run card carries only the server's embedded pack bytes.
 func (s setupState) packNext(depot string) string {
-	return "yardr depot init " + depot
+	name := s.defaultPack
+	if name == "" {
+		name = packs.Starter
+		for _, r := range s.depots {
+			if r.Name == depot && r.IsDir() {
+				name = packs.Dir
+			}
+		}
+	}
+	if !s.embeddedDepotPack(name, depot) {
+		return "yardr depot init " + depot
+	}
+	return fmt.Sprintf("yardr bead ask --new %q --context %q --run %q",
+		"Set up depot "+depot+" from "+name+"?", "the operator must approve the pack's import", "pack apply "+name+" --depot "+depot)
+}
+
+// embeddedDepotPack reports whether name resolves to a depot pack the server
+// can carry in a run card. A matching import from elsewhere takes precedence
+// over a pack in the binary, as it does for a terminal apply.
+func (s setupState) embeddedDepotPack(name, depot string) bool {
+	var rec *store.PackImport
+	for i, r := range s.packImports {
+		if r.Pack == name && (rec == nil || r.Depot == depot || (rec.Depot != depot && r.At.After(rec.At))) {
+			rec = &s.packImports[i]
+		}
+	}
+	if rec != nil && !fromEmbedded(rec.Source) {
+		return false
+	}
+	sub, err := fs.Sub(packs.FS, name)
+	if err != nil {
+		return false
+	}
+	p, err := pack.Load(sub, packs.Embedded)
+	return err == nil && p != nil && p.Kind != pack.KindSource
 }
 
 func (s setupState) depotStep() setupStep {

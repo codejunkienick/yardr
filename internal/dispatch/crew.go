@@ -697,7 +697,7 @@ func (d *Dispatcher) crewRunning(ctx context.Context, runner Runner, s *memberSe
 				trustBypass = !worked
 			}
 		}
-		pass := d.pendingPrompt(ctx, runner, key, s.st.Handle, p, status, def.Config, trustAllowed, trustBypass)
+		pass := d.pendingPrompt(ctx, runner, key, s.st.Handle, p, status, def.Config, trustAllowed, trustBypass, false)
 		if pass.handle != nil {
 			if err := d.Store.SetCrewHandleFor(ctx, def.Name, s.user, pass.handle); err != nil {
 				return err

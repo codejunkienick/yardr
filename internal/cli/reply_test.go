@@ -60,6 +60,12 @@ func replyScripts(dir string) map[string]string {
 // seqs, and the directory the commands record in.
 func replyYard(t *testing.T) (*app, store.API, map[string]string, string) {
 	t.Helper()
+	a, st, seqs, dir, _ := replyYardOwned(t)
+	return a, st, seqs, dir
+}
+
+func replyYardOwned(t *testing.T) (*app, store.API, map[string]string, string, *store.Store) {
+	t.Helper()
 	home, declDir, dir := t.TempDir(), t.TempDir(), t.TempDir()
 	st, own := storetest.NewOwnedIn(t, home)
 	ctx := context.Background()
@@ -113,7 +119,7 @@ func replyYard(t *testing.T) (*app, store.API, map[string]string, string) {
 		"gp": record("github", hooks.Envelope{Source: "github", Type: "comment", Action: "create",
 			Thread: hooks.Thread{ID: "octo/repo#9", Title: "Nine"}, Message: "c1"}),
 	}
-	return &app{st: st, actor: "yard-10-new", cfg: &config.Config{Home: home}, env: testEnv(t, "")}, st, seqs, dir
+	return &app{st: st, actor: "yard-10-new", cfg: &config.Config{Home: home}, env: testEnv(t, "")}, st, seqs, dir, own
 }
 
 func replyKeys(t *testing.T, dir string) []string {
@@ -205,6 +211,7 @@ func TestReply(t *testing.T) {
 		t.Fatalf("cursor after a hook reply = %+v, was %+v, %v", after, before, err)
 	}
 	t.Run("files", testReplyWithFiles)
+	t.Run("formats", testReplyFormats)
 }
 
 // With --file, given more than once for several, the reply carries files

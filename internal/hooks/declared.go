@@ -589,6 +589,8 @@ func (d Declared) Normalize(h http.Header, body []byte) (*Envelope, error) {
 // declaration, and nothing else of the yard.
 // cred is what the core was called with: the adapter looks nothing up
 // itself. read says in the caller's words what the answer lacks.
+// A command that exits 3 refuses for good: its failure is Final, and any
+// other failure is not (exitRefused).
 func (d Declared) runThread(ctx context.Context, key string, argv []string, in map[string]any, cred string, read func(out []byte) error) error {
 	// Neither a mint is made nor the program started for a credential held
 	// from the host the command would send it to.
@@ -601,7 +603,7 @@ func (d Declared) runThread(ctx context.Context, key string, argv []string, in m
 	}
 	full := slices.Clone(argv)
 	full[0] = source.Command{Key: key, Argv: argv}.Program(d.Home, d.D.Name)
-	return source.Run(ctx, key+" of source "+d.D.Name, full, in, d.D.CommandEnv(token), d.Home, 0, read)
+	return finalIfRefused(source.Run(ctx, key+" of source "+d.D.Name, full, in, d.D.CommandEnv(token), d.Home, 0, read))
 }
 
 // threadCredential is the credential the thread command is handed under

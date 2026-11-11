@@ -5,18 +5,18 @@
 # on what lands (contrib/assembly/merge-local), so an edit to it on a bead's
 # branch judges nothing until it has landed.
 #
-# Run plainly it is meant to take seconds: everything still has to be
-# formatted, shellchecked, vetted and built, but only the packages the
-# branch touched, and the packages that import those, are tested. A change
-# in a package nearly everything imports (store, config) makes it nearly the
-# whole suite, which is right; a leaf package takes seconds. It is also what
-# a wagon of a train passes to land on its train's branch. A plain run is
-# never raced: the race detector runs at landing only (docs/testing.md R4),
-# so a plain run tests with a plain go test. A plain run that covers the
-# whole suite (70% of its packages or more, wholeplain below) still queues
-# on the race lock, as class 1 behind landings (see lockplain below): two
-# whole-suite runs at once overload the machine. A smaller selection takes
-# no ticket, whatever it changed.
+# Run plainly it tests little: everything still has to be
+# formatted, shellchecked, vetted, built and staticchecked, but only the
+# packages the branch touched, and the packages that import those, are
+# tested. A change in a package nearly everything imports (store, config)
+# makes it nearly the whole suite, which is right; a leaf package takes
+# seconds of tests. It is also what a wagon of a train passes to land on
+# its train's branch. A plain run is never raced: the race detector runs at
+# landing only (docs/testing.md R4), so a plain run tests with a plain go
+# test. A plain run that covers the whole suite (70% of its packages or
+# more, wholeplain below) still queues on the race lock, as class 1 behind
+# landings (see lockplain below): two whole-suite runs at once overload the
+# machine. A smaller selection takes no ticket, whatever it changed.
 #
 # With YARDR_LANDING=1, as the assembly sets it for what lands on main, a
 # landing that changes code runs the plain selection plus always the six
@@ -2060,7 +2060,7 @@ internal/cli/beads.go 1099 the bead show, list and history commands and their pr
 internal/cli/crew.go 2212 the crew, inbox, mail and memory commands
 internal/cli/doctor.go 1243 the doctor examinations and its report
 internal/cli/init.go 1600 yard init, onboarding and settings
-internal/cli/ops.go 1793 the server, daemon, depot, group, route and session commands
+internal/cli/ops.go 1791 the server, daemon, depot, group, route and session commands
 internal/cli/pack.go 2096 pack loading, import planning and its question rounds
 internal/cli/peers.go 1564 the peer identity, intake and ping commands
 internal/cli/routereport.go 1513 the route report and its rendering
@@ -2068,14 +2068,14 @@ internal/cli/sourcecmd.go 2147 the source command and its builtin checks
 internal/cli/subscriptions.go 1148 the identity, subscribe and thread commands
 internal/cli/updown.go 1302 yard up and down with their handoffs
 internal/cli/users.go 1055 the user command, inboxes and conversations
-internal/dispatch/dispatch.go 1564 the daemon routing pass and its runners
+internal/dispatch/dispatch.go 1501 the daemon routing pass and its runners
 internal/dispatch/harnesslogin.go 1094 harness login leading and onboarding marks
 internal/pack/export.go 1047 pack export and its object shapes
 internal/pack/pack.go 1777 pack reading, checking and its shapes
 internal/rpc/user.go 1377 the user server and callers (pairing is userpair.go, envelopes usere2e.go)
-internal/source/declaration.go 1278 source declarations, credentials and calls
+internal/source/declaration.go 1258 source declarations, credentials and calls
 internal/standin/standin.go 1540 the fake Linear, GitHub and edge APIs
-internal/store/asks.go 1777 ask and answer parsing and storage
+internal/store/asks.go 1742 ask and answer parsing and storage
 internal/store/beads.go 2563 bead CRUD, queries and dispatch reads
 internal/store/crew.go 1461 crew records and their events
 internal/store/flows.go 1358 flow parsing and storage
@@ -2089,7 +2089,7 @@ internal/store/policy.go 1178 the permission gates and their rules
 internal/store/routing.go 3043 groups, routes and their config merges
 internal/store/runask.go 1018 run asks and their approval
 internal/store/runask_list.go 1223 ask cards, labels and preset reading
-internal/store/runask_setup.go 1537 the setup ask, its card, and the carrying record
+internal/store/runask_setup.go 1535 the setup ask, its card, and the carrying record
 internal/store/secretask.go 1092 secret asks and harness key files
 internal/store/settings.go 1117 yard settings and their checks
 internal/store/sourcecalls.go 1240 source grants and callables
@@ -2366,6 +2366,24 @@ shellchecked() {
     exit 1
   fi
 }
+# The staticchecked step fails the run when staticcheck finds anything in the
+# module's Go: the command of CI's scan job (.github/workflows/ci.yml) at the
+# version it pins, over the whole tree. CI fails on a finding after the
+# landing, so the landing must fail on it first: two findings in a landed
+# test file (yardr-k5r6) and a pull request's unused helper both got through
+# the gate for want of this step. Every run judges the whole tree, like gofmt
+# and vet, whatever was selected, and a deliberate exception is a
+# //lint:ignore with its reason, as CI has it. It runs through again, as vet
+# and build do, so that a file of the shared build cache lost under it is run
+# again, and a failure ends with the lines that say what it found (failed
+# keeps each file.go:line:col: line). The tool is fetched by go run into the
+# module cache the build uses: where it cannot be, with no network and
+# nothing cached, go's own error fails the run, since skipping would reopen
+# the hole this step closes (the rule shellchecked and addblackbox follow).
+# The version is CI's and moves with it: a test holds the two to one command.
+staticchecked() {
+  again go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+}
 # The six black-box suites (docs/testing.md R5): each builds the tree's
 # binary and drives it without importing the changed packages, so the
 # plain selection alone misses them. A landing that changes code runs
@@ -2462,6 +2480,9 @@ whole() {
   sleepbudget
   filesizebudget
   nomarkers
+  # The slowest of the whole-tree checks, so after the ones that fail in
+  # seconds.
+  staticchecked
   if [ "$2" = selection ] && [ -n "$tmp" ]; then
     [ ! -s "$tmp/rows" ] || cat "$tmp/rows"
     pkgs=$(sort -u "$tmp/run")
@@ -2801,6 +2822,7 @@ built() {
   sleepbudget
   filesizebudget
   nomarkers
+  staticchecked
 }
 # No renames, here and in the two diffs below: a move is the deletion of the
 # old path and the addition of the new, and both are judged. git's rename

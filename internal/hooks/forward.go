@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os/exec"
 	"slices"
 	"strings"
 
@@ -111,6 +112,25 @@ func final(err error) error { return &finalError{err} }
 func Final(err error) bool {
 	var fe *finalError
 	return errors.As(err, &fe)
+}
+
+// exitRefused is the exit status with which a thread command says it
+// refuses for good what it was asked: a state for a pull request, say,
+// which would close it unmerged. The same call is refused again, so the
+// failure is Final: a move is skipped at once, where after any other
+// failure it is tried again until it is given up. A command opts in by
+// choosing 3, which is none of 1 (a failure), 2 (a misuse) or the 126 and
+// up that a shell or a signal reports (docs/pack-api.md).
+const exitRefused = 3
+
+// finalIfRefused is err made Final when it is the exit of a command with
+// status exitRefused, and err as it is otherwise. Its words do not change.
+func finalIfRefused(err error) error {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == exitRefused {
+		return final(err)
+	}
+	return err
 }
 
 // Declared

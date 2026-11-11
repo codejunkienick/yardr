@@ -89,9 +89,10 @@ type AskSetup struct {
 	// by source name with its file and the shared values it holds, in the
 	// order of their names. Empty where none matches.
 	Candidates []AskCandidate `json:"candidates,omitempty"`
-	// Carried are the pack's sources as the server read them from its own
-	// binary, with what the yard's copies of a source they would replace
-	// hold; Presets are the pack's presets with their grants.
+	// Carried are the pack's sources as the server read them (from its own
+	// binary, or the directory the operator applied the pack from), with
+	// what the yard's copies of a source they would replace hold; Presets
+	// are the pack's presets with their grants.
 	Carried []AskSource `json:"carried,omitempty"`
 	Presets []AskPreset `json:"presets,omitempty"`
 	// Does are the yard's sentences, and Back the commands that take the
@@ -156,7 +157,8 @@ type AskSetupApproved struct {
 // asker's.
 type SetupAsked struct {
 	Pack string `json:"pack"`
-	// Label is the build the pack is embedded in, as the card shows it.
+	// Label is where the pack was read from, as the card shows it: the build
+	// it is embedded in, or the directory it was applied from and the commit.
 	Label string `json:"label,omitempty"`
 	// Account are the names to type unseen beside the preset pick, and
 	// AccountFile the file the value goes to, on the yard's machine.
@@ -453,16 +455,12 @@ func normSetupTo(to []Grantee) []Grantee {
 }
 
 // setupCard is the card of setting up pack for the grantees to: the
-// server's own pack in the yard's sentences, the account line, and the
-// grants the presets give to whom. Asking refuses what the row refuses;
-// an approval reads it again and setupStale says what moved. base is the
-// region base the setup's calls go to, held to the pack's declarations.
+// server's reading of it (setupReading) in the yard's sentences, the account
+// line, and the grants the presets give to whom. Asking refuses what the
+// row refuses; an approval reads it again and setupStale says what moved.
+// base is the region base the setup's calls go to, held to the declarations.
 func (w *wtx) setupCard(pack string, to []Grantee, base string) (*AskSetup, error) {
-	read := w.packReaderOf()
-	if read == nil {
-		return nil, fmt.Errorf("pack %s: no server has registered its reading of the packs yardr embeds on this store, so no card can be written from the binary that runs the yard: a setup is proposed from a yard its server runs", pack)
-	}
-	reading, err := read(context.Background(), pack, "", Mappings{}, w.store)
+	reading, err := w.setupReading(pack)
 	if err != nil {
 		return nil, err
 	}

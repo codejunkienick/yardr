@@ -79,6 +79,7 @@ func TestOnlyTheOperatorMay(t *testing.T) {
 		},
 		"remove a peer":                 func(a string) error { return api.DeletePeer(ctx, "north", a) },
 		"rename a peer":                 func(a string) error { _, err := api.RenamePeer(ctx, "north", "up", a); return err },
+		"rename a group":                func(a string) error { _, err := api.RenameGroup(ctx, "no-such", "other", a); return err },
 		"change where a peer is called": func(a string) error { _, err := api.SetPeerURL(ctx, "north", "", a); return err },
 		"allow a peer's messages": func(a string) error {
 			_, err := api.AllowPeer(ctx, "north", store.PeerAllow{Send: []string{store.PeerMail}}, a)
@@ -109,6 +110,11 @@ func TestOnlyTheOperatorMay(t *testing.T) {
 			return err
 		},
 		"remove a depot": func(a string) error { _, err := api.DeleteDepot(ctx, "no-such", a); return err },
+		// A record names where a later apply by name reads its pack from.
+		"record the import of pack starter": func(a string) error {
+			_, err := api.RecordPack(ctx, store.PackImport{Pack: "starter", Depot: "yard", Source: "/tmp/evil"}, true, a)
+			return err
+		},
 		"change a depot's path": func(a string) error {
 			return api.PutDepot(ctx, store.Depot{Name: "yard", Path: "/srv/other", Base: "origin/main"}, a)
 		},

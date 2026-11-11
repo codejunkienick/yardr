@@ -209,6 +209,7 @@ var eventDataTold = map[string][]string{
 	"flow_pointer_cleared": {"depot", "type"},
 	"group_set":            {"limit", "members", "name", "runner"},
 	"group_removed":        {"name", "released", "routes"},
+	"group_renamed":        {"approved", "beads", "from", "grants", "members", "packs", "routes", "sessions", "subscriptions", "to"},
 	"route_added":          {"id", "stage", "group", "priority", "label", "labels", "bead_priority", "type", "depot", "originator"},
 	"route_removed":        {"id", "stage", "group", "priority", "label", "labels", "bead_priority", "type", "depot", "originator"},
 	"route_set":            {},

@@ -136,7 +136,7 @@ func TestRunAskIsStoredInTheYardsForm(t *testing.T) {
 func TestRunAskRefusals(t *testing.T) {
 	t.Parallel()
 	y, _ := runYard(t)
-	const list = "--run takes a command of the list (" + "yardr peer add <name> <invite>, yardr peer allow <peer> --send <kinds> | --receive <kinds> | --expose <names> | --trust <name>@<peer>=<user> | --reach <name>@<peer>=<user> | --mail-limit <n>, yardr peer intake <peer> --depot <depot> --flow <flow> [--limit <n>] [--default], yardr peer identity <peer> <crew> --source <source> --id <id>, yardr peer rm <name>, yardr source set <source> calls_per_hour=<n>|updates_per_hour=<n>, yardr source grant <source> read|<call>|--preset <preset> --group <group>|--crew <crew member> [--as <user>], yardr source add <file>, yardr source ignore <source> --rm <id>, yardr source check <source> --user <user>, " + PackApplyUse + ", yardr hook add <name> --source <declared source> [--unknown unknown|allow|ignore], yardr subscribe <user> yardr [--done] [--where <key>=<value>], yardr user set <user> tell=<parts>, yardr user key <user> <source>, yardr user add <name>, yardr user rm <name>, yardr user invite <name> --email <address> [--role operator], yardr user uninvite <name>, yardr crew add <name> kind=<kind> model=<model> preset=<preset> dir=<dir>, yardr group add <name> --runner <runner> [--limit <n>] [--set k=v ...], yardr crew set <name> open_threads=<sources> | set_state=<sources> | peers=<peers>, yardr crew identity <name> --source <source> [--id <id>] [--key <key>], yardr user identity <user> --source <source> [--id <id>] [--key <key>], yardr settings set <key> <value>, yardr peer rename <old> <new>, yardr bead update <bead> --originator <user>, yardr timer rm <id>, yardr up, yardr crew restart <name> [--for <user>], yardr depot test <depot>, yardr depot base <depot> <base>, yardr call <source> <call> [param=value ...] [--as <user>], yardr crew set <name> prompt=<file> | preset=<preset> | kind=<kind> | model=<model> | dir=<dir>, " + deviceRmUse + ", yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset>, " + hookRmUse + ", " + linkMoveUse + ", yardr peer set <name> --url <url>, " + sourceMoveUse + ", " + sourceRmUse + ", " + userRoleUse + "): anything else is run directly, or typed by the operator in a terminal"
+	const list = "--run takes a command of the list (" + "yardr peer add <name> <invite>, yardr peer allow <peer> --send <kinds> | --receive <kinds> | --expose <names> | --trust <name>@<peer>=<user> | --reach <name>@<peer>=<user> | --mail-limit <n>, yardr peer intake <peer> --depot <depot> --flow <flow> [--limit <n>] [--default], yardr peer identity <peer> <crew> --source <source> --id <id>, yardr peer rm <name>, yardr source set <source> calls_per_hour=<n>|updates_per_hour=<n>, yardr source grant <source> read|<call>|--preset <preset> --group <group>|--crew <crew member> [--as <user>], yardr source add <file>, yardr source ignore <source> --rm <id>, yardr source check <source> --user <user>, " + PackApplyUse + ", yardr hook add <name> --source <declared source> [--unknown unknown|allow|ignore], yardr subscribe <user> yardr [--done] [--where <key>=<value>], yardr user set <user> tell=<parts>, yardr user key <user> <source>, yardr user add <name>, yardr user rm <name>, yardr user invite <name> --email <address> [--role operator], yardr user uninvite <name>, yardr crew add <name> kind=<kind> model=<model> preset=<preset> dir=<dir>, yardr group add <name> --runner <runner> [--limit <n>] [--set k=v ...], yardr crew set <name> open_threads=<sources> | set_state=<sources> | peers=<peers>, yardr crew identity <name> --source <source> [--id <id>] [--key <key>], yardr user identity <user> --source <source> [--id <id>] [--key <key>], yardr settings set <key> <value>, yardr peer rename <old> <new>, yardr bead update <bead> --originator <user>, yardr timer rm <id>, yardr up, yardr crew restart <name> [--for <user>], yardr depot test <depot>, yardr depot base <depot> <base>, yardr call <source> <call> [param=value ...] [--as <user>], yardr crew set <name> prompt=<file> | preset=<preset> | kind=<kind> | model=<model> | dir=<dir>, " + deviceRmUse + ", " + groupRenameUse + ", yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset> | effort=<level>, " + hookRmUse + ", " + linkMoveUse + ", yardr peer set <name> --url <url>, " + sourceMoveUse + ", " + sourceRmUse + ", " + userRoleUse + "): anything else is run directly, or typed by the operator in a terminal"
 	for _, c := range []struct {
 		name  string
 		ask   func(a *Ask)
@@ -1296,12 +1296,12 @@ func TestRunAskPeerRm(t *testing.T) {
 }
 
 // Linking a yard is a weighty card of class trust: it names the peer, the
-// yard and its key whole, and where this yard calls it or that it never
-// calls it, and the operator's weighed approval links exactly as the
-// terminal command does, the invite's encryption key pinned with its
-// signing key. Approving unweighed is refused, an approval
-// through the peer's own reach is refused, and a peer added under the
-// name since makes the card stale.
+// yard and its key whole, its encryption key whole or that the invite
+// carries none, and where this yard calls it or that it never calls it,
+// and the operator's weighed approval links exactly as the terminal
+// command does, the invite's encryption key pinned with its signing key.
+// Approving unweighed is refused, an approval through the peer's own reach
+// is refused, and a peer added under the name since makes the card stale.
 func TestRunAskPeerAdd(t *testing.T) {
 	t.Parallel()
 	y, airyKey := runYard(t)
@@ -1332,7 +1332,8 @@ func TestRunAskPeerAdd(t *testing.T) {
 		Argv:        []string{"peer", "add", "north", invite},
 		Description: "Add another yard as a peer, from its invite",
 		Does: []string{
-			"links the yard south-yard as the peer north with the key " + key + ", called at " + inviteURL + ".",
+			"links the yard south-yard as the peer north with the key " + key + ", called at " + inviteURL +
+				"; its invite carries no encryption key, so this yard sends it nothing sealed: " + ReLinkLine("north") + ".",
 			"The link carries nothing until yardr peer allow north says what.",
 		},
 		Back:   "yardr peer rm north",
@@ -1414,7 +1415,8 @@ func TestRunAskPeerAdd(t *testing.T) {
 	// approval links it with none.
 	seq = y.ask(t, runAsk("peer add south "+Invite{Name: "far-yard", Key: bare}.String()), "yardmaster")
 	run = *y.asked(t, seq).Ask.Run
-	if want := "links the yard far-yard as the peer south with the key " + bare + ", never called: it calls this one and asks for what waits here."; run.Does[0] != want {
+	if want := "links the yard far-yard as the peer south with the key " + bare + ", never called: it calls this one and asks for what waits here" +
+		"; its invite carries no encryption key, so this yard sends it nothing sealed: " + ReLinkLine("south") + "."; run.Does[0] != want {
 		t.Fatalf("the card without a URL says %q, want %q", run.Does[0], want)
 	}
 	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
@@ -1426,14 +1428,20 @@ func TestRunAskPeerAdd(t *testing.T) {
 
 	// An invite that carries an encryption key (yardr-peer-2) has it pinned
 	// by the approval, as the terminal command pins it, so the link is
-	// sealed. One made without the key is refused by the sealed wire until
-	// it is re-linked, and a card that dropped the key would make the same
-	// link again.
+	// sealed, and the card shows the key whole beside the signing key and
+	// says nothing of a missing one. One made without the key is refused by
+	// the sealed wire until it is re-linked, and a card that dropped the key
+	// would make the same link again.
 	_, encPub, err := GenerateEnc()
 	if err != nil {
 		t.Fatal(err)
 	}
-	seq = y.ask(t, runAsk("peer add sealed "+Invite{Name: "near-yard", Key: mkkey("near"), Enc: encPub}.String()), "yardmaster")
+	near := mkkey("near")
+	seq = y.ask(t, runAsk("peer add sealed "+Invite{Name: "near-yard", Key: near, Enc: encPub}.String()), "yardmaster")
+	run = *y.asked(t, seq).Ask.Run
+	if want := "links the yard near-yard as the peer sealed with the key " + near + " and the encryption key " + encPub + ", never called: it calls this one and asks for what waits here."; run.Does[0] != want {
+		t.Fatalf("the card of a yardr-peer-2 invite says %q, want %q", run.Does[0], want)
+	}
 	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
 		t.Fatal(err)
 	}

@@ -419,8 +419,20 @@ func TestSourceUpdateAsAUserHasItsOwnKey(t *testing.T) {
 	if err != nil || string(res.Answer) != `{"customer":"7","id":"n1"}` {
 		t.Fatalf("the same call as ada again = %+v, %v", res, err)
 	}
-	if _, data := lastCall(t, s); !strings.Contains(data, `"status":201`) || !strings.Contains(data, `"attempt":2`) || !strings.Contains(data, `"as":"ada"`) {
-		t.Fatalf("its event = %s", data)
+	// Its event is found by its values, not taken as the newest: over the
+	// socket the client returns from the first call as it is cancelled, while
+	// the server ends that call once it has seen the client go, so the event
+	// of the first call can come after this one's. An event carries an
+	// attempt only where an update was sent again, so the one that does is
+	// this call's, and no other may.
+	var retried []string
+	for _, e := range calls(t, s) {
+		if raw, _ := json.Marshal(e.Data); strings.Contains(string(raw), `"attempt"`) {
+			retried = append(retried, string(raw))
+		}
+	}
+	if len(retried) != 1 || !strings.Contains(retried[0], `"status":201`) || !strings.Contains(retried[0], `"attempt":2`) || !strings.Contains(retried[0], `"as":"ada"`) {
+		t.Fatalf("the events of an update sent again = %v, want ada's second try, answered 201", retried)
 	}
 	if notes, asked := crm.CustomerNotes(), crm.NotesAsked(); len(notes) != 2 || asked != 3 {
 		t.Fatalf("after ada's retry the service has %+v, asked %d times", notes, asked)

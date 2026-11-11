@@ -226,6 +226,7 @@ pack. yardr runs one without a shell, for one job, and stops it after 30 s.
 | the working directory is not the pack's directory | stable | a command finds the files it ships beside itself, through its own path, in the copy yardr makes under `<home>/sources/<name>/` |
 | which directory it is | internal | |
 | a command's stderr | internal | the error of a command that fails ends with it |
+| a `thread.*` command that exits 3 | internal | it refuses for good what it was asked, so the yard does not try again: a stage map's move that gets it is skipped at once, as `failed`. After any other failure the move is tried again |
 
 ## The commands a script runs
 
@@ -405,6 +406,14 @@ https://packs.example.com/acme`). Both are optional and kept as written, and
 [the files table above says what each is held to](#the-files). `pack show`
 prints them first, as the pack's own words. A pack that carries either says
 `api: 5`.
+
+### API 6
+
+The `permissions` field of a mint command's stdin: beside `inputs` and
+`scope`, an object of the permissions the minted token is narrowed to
+(`{"pull_requests": "write"}`), which the command posts when it mints.
+Absent, the token keeps the whole grant, as before. A pack whose mint
+command reads the field says `api: 6`.
 
 ## Left out
 

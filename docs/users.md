@@ -321,7 +321,10 @@ A prompt, a group's `cmd`, a preset that skips permission prompts and every
 setting of the yardmaster's own entry are not runs. They rewrite what every
 later session does, so the yardmaster proposes them in a run ask (`group
 set`, `crew set`; [groups.md](groups.md), [crew.md](crew.md)) and they run
-when the operator approves.
+when the operator approves. A group's `effort` is held the same way, since it is
+the operator's as the `args` it was a flag of are: the yardmaster proposes
+`group set <name> effort=<level>` in a run ask, whose card weighs nothing, and
+does not run it.
 
 On a delegated run the approval is the operator's own cited mail, so the run
 skips the card the same command carries today: the code card of `group add`,
@@ -1168,6 +1171,7 @@ covered below under Strong cards. Row by row:
 | `crew identity <name> --source <source> --id <id> --key <key>`: a crew member's identity in a source set | Mentions and assignments of the id or key there are then addressed to that crew member, and what it does there is its own: the holder can have what is meant for another reach a member it directs by mail, or blind a member to what is meant for it. Only the operator sets it back |
 | `user identity <user> --source <source> [--id <id>] [--key <key>]`: who a user is in a source | Threads opened there for them are assigned to the id or key, and where the source hears by identity a delivery from them is heard as theirs; an ignored id or key is cleared in the same write. The user or the operator sets it back |
 | `settings set <key> <value>`: a setting changed | The yard runs under another number or name. The `operator` setting and the settings of where the yard reads and serves from are no run ask's; `hook_public_url` is one, so a holder that has it approved points later hook registrations at an address of their own |
+| `group rename <old> <new>`: a group called another name | The group, its routes, the beads it owns and their live sessions go on under the new name, and nothing is released, as the card named them. What names the old name outside the yard's records, a script or a role prompt, reaches no group, and a default route that names its group by the depot template stops serving the depot whose group it was. The old name is free. Only the operator renames it back, and nobody can where the old name is one pack imports give a depot's groups |
 | `peer rename <old> <new>`: a link renamed | A linked yard's name here changed: its key, address and what it carries stay, and what waited for it moves with it. Mail to the old name reaches nothing |
 | `peer rm <name>`: a link removed | That link is gone on this side, with its intakes, identities and queued mail; the beads of this yard that were there end as undelivered, and the beads it sent stay and say their link is removed. The other yard stands, and still has this one as a peer until its operator removes it there; its requests are refused here from now on. Only the operator adds it back, from a fresh invite |
 | `bead update <bead> --originator <user>`: a bead's originator changed | A bead is for another user. Whose work it counts as changes; the work stands |

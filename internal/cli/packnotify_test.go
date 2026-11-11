@@ -192,26 +192,23 @@ func TestPackApplySourceBaseKeepsRegion(t *testing.T) {
 	}
 }
 
-// A base the import may not set is skipped with why, and recorded no
-// more than it is set.
+// A base the import may not set is set nowhere: run by anyone else the
+// import adds no source and ends at the record, before the base is even
+// attempted.
 func TestPackApplySourceBaseSkipped(t *testing.T) {
 	t.Parallel()
 	a := openApp(t)
 	a.actor = "web-builder-1"
 	out, err := run(t, a.packCmd(), "apply", "posthog", "--yes", "--source-base", "posthog=eu")
-	if err != nil {
+	if err == nil || !strings.Contains(err.Error(), "only the operator (me) may record the import of pack posthog; this is web-builder-1") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	const skip = "the base of source posthog was not set: the source was not added (adding a source is the operator's (me), and this is web-builder-1)\n"
-	if !strings.Contains(out, skip) {
-		t.Errorf("pack apply lacks %q:\n%s", skip, out)
+	const notAdded = "the source posthog was not added: adding a source is the operator's (me), and this is web-builder-1"
+	if !strings.Contains(out, notAdded) {
+		t.Errorf("pack apply lacks %q:\n%s", notAdded, out)
 	}
-	recs, err := a.st.Packs(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(recs) != 1 || len(recs[0].SourceBase) != 0 {
-		t.Fatalf("the import recorded %+v", recs)
+	if recs, err := a.st.Packs(context.Background()); err != nil || len(recs) != 0 {
+		t.Fatalf("another session's import recorded %+v, %v", recs, err)
 	}
 }
 
@@ -473,8 +470,8 @@ func TestPackApplyNotifyRefusesBeforeWriting(t *testing.T) {
 }
 
 // Setting a source's file is the operator's, and telling a user theirs or
-// the operator's: run by anyone else the import does the rest and sets
-// neither.
+// the operator's: run by anyone else the import does the rest, sets
+// neither, and ends at the record, before the sets are even attempted.
 func TestPackApplyNotifyByAnother(t *testing.T) {
 	t.Parallel()
 	a := openApp(t)
@@ -486,17 +483,12 @@ func TestPackApplyNotifyByAnother(t *testing.T) {
 	userEnv := envFile(t, "PUSHOVER_USER=u9f2k4xq71ab03cd55ef8gh2ij6kl9\n", 0o600)
 	out, err := run(t, a.packCmd(), "apply", "pushover", "--yes",
 		"--source-env", "pushover="+srcEnv, "--notify", "ada=pushover,"+userEnv)
-	if err != nil {
+	if err == nil || !strings.Contains(err.Error(), "only the operator (me) may record the import of pack pushover; this is web-builder-1") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	for _, want := range []string{
-		"the source pushover was not added: adding a source is the operator's (me), and this is web-builder-1. The rest of the import does not depend on it\n",
-		"the env_file of source pushover was not set: the source was not added (adding a source is the operator's (me), and this is web-builder-1)\n",
-		"user ada was not told through pushover: the source was not added (adding a source is the operator's (me), and this is web-builder-1)\n",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("pack apply lacks %q:\n%s", want, out)
-		}
+	const notAdded = "the source pushover was not added: adding a source is the operator's (me), and this is web-builder-1. The rest of the import does not depend on it\n"
+	if !strings.Contains(out, notAdded) {
+		t.Errorf("pack apply lacks %q:\n%s", notAdded, out)
 	}
 	if strings.Contains(out, "next, for source pushover") {
 		t.Errorf("a source that was not added has nothing to set next:\n%s", out)
@@ -506,24 +498,20 @@ func TestPackApplyNotifyByAnother(t *testing.T) {
 	}
 
 	// Even the user themselves cannot be told through a source this import
-	// was not allowed to add. The dependent set is skipped with the source
-	// refusal, and the import succeeds with neither setting written.
+	// was not allowed to add: the import ends at the record with neither
+	// setting written.
 	b := openApp(t)
 	if _, err := run(t, b.userCmd(), "add", "ada"); err != nil {
 		t.Fatal(err)
 	}
 	b.actor = "ada"
 	out, err = run(t, b.packCmd(), "apply", "pushover", "--yes", "--notify", "ada=pushover")
-	if err != nil {
+	if err == nil || !strings.Contains(err.Error(), "only the operator (me) may record the import of pack pushover; this is ada") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	for _, want := range []string{
-		"the source pushover was not added: adding a source is the operator's (me), and this is ada.",
-		"user ada was not told through pushover: the source was not added (adding a source is the operator's (me), and this is ada)",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("pack apply lacks %q:\n%s", want, out)
-		}
+	const adaNotAdded = "the source pushover was not added: adding a source is the operator's (me), and this is ada."
+	if !strings.Contains(out, adaNotAdded) {
+		t.Errorf("pack apply lacks %q:\n%s", adaNotAdded, out)
 	}
 	if u, _ := b.st.GetUser(context.Background(), "ada"); u.Notify != "" || u.EnvFile != "" {
 		t.Fatalf("the skipped notify was written: %+v", u)

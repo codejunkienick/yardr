@@ -255,9 +255,17 @@ tell, identity or test message, that user or the operator) and for
 linked yard. A crew member or a user writes one. An agent
 working a bead does not: it says what it needs in a note on the bead.
 
---setup <pack> sets up an embedded pack of kind source as one decision:
-the apply, the account and the grants. It takes --crew <name> and --group
-<group>, repeatable, at least one: who the grants are for. --source-base
+--setup <pack> sets up a pack of kind source as one decision: the apply,
+the account and the grants. The pack is one yardr embeds, or one the
+operator applied from a directory in a terminal (yardr pack apply
+<directory>) and left as it was: the yard's record of that apply names the
+directory and its git commit, and the card is refused for a pack never
+applied, applied from a URL or from a directory in no git repository, or
+whose directory is at another commit or has uncommitted changes now; the
+operator applies it again in a terminal first. The card shows the
+directory's files whole, as it shows an embedded pack's. It takes --crew
+<name> and --group <group>, repeatable, at least one: who the grants are
+for. --source-base
 <name> calls the pack's region base <name>, for a pack whose source
 declares bases; the card shows the base it will call. --recommend
 counts the card's preset options as yardr pack show prints them, with
@@ -773,7 +781,7 @@ what the person asked does, and this is the asker's own.`,
 	ask.Flags().StringVar(&askRun, "run", "", "propose this yardr command for the operator to approve, as it is typed: one the yard runs from a card (yardr bead ask --help; R: on stdin)")
 	ask.Flags().StringVar(&askRunTest, "run-test", "", "with --run depot test <depot> (R:): the test command the ask proposes (T:), carried beside the command since --run quotes nothing")
 	ask.Flags().StringVar(&askRunRole, "run-role", "", "with --run crew add <name> ... (R:): the file whose role text the ask carries beside the command, shown whole on the card")
-	ask.Flags().StringVar(&askSetup, "setup", "", "set up this embedded pack of kind source as one decision: the apply, the account and the grants, with --crew/--group naming who the grants are for")
+	ask.Flags().StringVar(&askSetup, "setup", "", "set up this pack of kind source (one yardr embeds, or one the operator applied from a directory and left as it was) as one decision: the apply, the account and the grants, with --crew/--group naming who the grants are for")
 	ask.Flags().StringVar(&askDepotPush, "depot-push", "", "turn this depot's push to its origin on as one decision for the operator to approve: YARDR_PUSH=origin in <depot>-assembly's cmd and the pack's helper in the depot's git config, carried out by the server")
 	ask.Flags().StringVar(&askDepotPushOff, "depot-push-off", "", "turn this depot's push off as one decision for the operator to approve: the exact reverse of --depot-push for the depot")
 	ask.Flags().StringArrayVar(&askCrew, "crew", nil, "with --setup: the grants are for this crew member (repeatable; at least one of --crew and --group)")

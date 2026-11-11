@@ -580,6 +580,28 @@ func TestMergeLocalWatcherLeavesNoSleepBehind(t *testing.T) {
 // daemon's does, and cuts nothing short.
 func TestMergeLocalKilledWithTermLeavesNoSleepBehind(t *testing.T) {
 	t.Parallel()
+	t.Run("a killed child nobody waited for", func(t *testing.T) {
+		sleep := exec.Command("sleep", "300")
+		if err := sleep.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_ = sleep.Process.Kill()
+			_ = sleep.Wait()
+		})
+		pid := sleep.Process.Pid
+		file := filepath.Join(t.TempDir(), "pid")
+		if err := os.WriteFile(file, []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// The test does not wait for the killed child until cleanup, so both
+		// helpers must count its zombie as gone even where init reaps orphans.
+		if err := sleep.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		assertGone(t, pid, "a killed child")
+		waitGone(t, file)
+	})
 	pidFile := filepath.Join(t.TempDir(), "testpid")
 	w := newWatcherRun(t, "sleep 300 & echo $! >"+shellQuote(pidFile)+"; wait", "1789", 0)
 	bin := filepath.Join(filepath.Dir(w.record), "bin")

@@ -125,20 +125,29 @@ them, remove them, or attach them to a note (`yardr bead note <id>
 done passes. A person moving the bead is not gated, nor is a session
 whose handle names no worktree.
 
-The telling reaches the session whatever its pane shows. Where the pane
-shows the prompt of its harness the telling is typed into it, as a crew
-member's nudge is ([crew.md](crew.md#text-in-the-input)); where it shows
-none, or none yardr can read (the harness idle at a prompt herdr cannot
-see, a shell of its own, a kind whose marks are unknown), it goes through
+The telling reaches the session whatever its pane shows, unless its agent
+is stopped on a usage limit (below). Where the pane shows the prompt of
+its harness the telling is typed into it, as a crew member's nudge is
+([crew.md](crew.md#text-in-the-input)); where it shows none, or none yardr
+can read (the harness idle at a prompt herdr cannot see, a shell of its
+own, a kind whose marks are unknown), it goes through
 `herdr agent prompt`, which herdr submits itself. The `note_told` event
 says which way with `delivery` (`typed` or `agent prompt`). A telling
 neither way takes is marked untold, with why, and the yardmaster hears it:
 `note_untold` is of the class `attention`, and `yardr bead show` says
-`could not be told: <why>` where it said `will be told`. One behind a
-first prompt that was given up is marked untold too: the first prompt goes
-first, and it never arrives. A note behind a first prompt that is stuck on
+`could not be told: <why>` where it said `will be told`. A session whose
+first prompt was given up is ended instead, and its notes wait for the
+bead's next session. A note behind a first prompt that is stuck on
 a screen that is not there does not wait behind it: through herdr it goes
 at once.
+
+An agent stopped on a usage limit cannot read a note, so a session that
+waits for the window to reset, or that holds its model for a limit with no
+reset known
+([groups.md](groups.md#a-usage-limit-says-its-window-and-when-it-resets)),
+is told nothing. The note stays `will be told`, and is not marked untold,
+until the stop is over; a session that ends first is never told, and
+`yardr bead show` says `ended before it was told`.
 
 An idle session with its bead still in its stage gets one prompt to hand
 on before the idle limit counts, once per idle spell (`session_idle_nudge`).
@@ -820,6 +829,10 @@ the next ready bead at once; the worktree and its branch stay. Beads get held:
 
 - by yardr, after 3 failed sessions in one stage (an agent that died or
   exited without advancing);
+- by yardr, when a session ended as failed, released or held in a group that
+  keeps its agents running (`keep: true`): the agent is still there, and the
+  bead stays held until someone has looked at it and closed its pane
+  ([groups.md](groups.md#runners));
 - by an agent that is stuck or finds the bead unclear: it notes the question
   and runs `yardr bead hold`;
 - by the reviewer, instead of a third send-back;
@@ -1935,13 +1948,17 @@ bead's tracks link and asks GitHub as the yard's App, as merge-pr does
   request that waited in `triage`, unless that is the commit a maintainer
   accepted there, before it fetches anything. The yard records the commit as
   the bead's `accepted_head` when the label `accepted`, put on by a person,
-  moves the bead out of `triage`: the head the event named. A maintainer who
-  moved the bead by hand records the one they looked at, `yardr bead update
+  moves the bead out of `triage`: the head the event named. A person's pick of
+  `accepted` on the bead's card in Decide records it too: the head the card
+  showed, and a pick after the pull request has another head accepts nothing.
+  A maintainer who moved the bead by hand records the one they looked at,
+  `yardr bead update
   <id> --meta accepted_head=<sha>`, and a bead with none recorded, or one
   that is no full sha, is held the same way. The note names both commits and
   the command, and once a maintainer has read the head and recorded it as the
   one they accept, `yardr bead unhold <id>` runs the tests again. A bead's
-  agent may not write `accepted_head`, on its own bead or another's; a bead
+  agent may not write `accepted_head`, nor the head a card shows and what its
+  delivery said (`pr_head`, `pr_head_told`), on its own bead or another's; a bead
   that never waited in `triage` (a trusted author's or a bot's pull request,
   made in `review`) has none and is held to the next check alone;
 - reads the pull request's head from GitHub and holds the bead unless that is
@@ -1990,9 +2007,12 @@ read at the new head. On a pull request that waited in `triage`, every push
 is `unaccepted` instead, whoever pushed and whether or not the label
 `accepted` is still on it: the bead goes back to `triage` from `review`,
 `review-post`, `ciwait` and `contributor`, and nothing of the new head is read
-or run until a person has said yes to it. After looking at the new head, a
-maintainer adds the label `accepted` again; if it is still there, take it off
-and put it on again. A label put by a bot does not say yes. The run is stopped
+or run until a person has said yes to it. The bead comes back with a card of
+the new head: after looking at it, a maintainer picks `accepted` on that card,
+or adds the label `accepted` again; if it is still there, take it off and put
+it on again. A label put by a bot does not say yes. A push while the bead waits
+in `triage` is `pushed`: the bead stays, as a new stay, and the card of the old
+head gives way to one of the new. The run is stopped
 with its session, and a report of it that still comes is refused.
 The script's own reads of the head, against `accepted_head` and
 `reviewed_head` when it starts and against the commit it tested at the end of
@@ -2076,6 +2096,135 @@ upgraded daemon sends a changed head back to `triage` even if the label was
 removed. One accepted before then has no `accepted_head`, and is held until a
 maintainer records the commit they accept, `yardr bead update <id> --meta
 accepted_head=<sha>`, and unholds it.
+
+## Fixing a pull request and pushing the fix
+
+A pull request from outside that the reviewer found wanting is a `pr` bead of
+the contributors pack ([packs.md](packs.md#the-contributors-pack)) waiting in
+`contributor`, and a maintainer's pick sends it to a fix round: the label
+`fix-ok` with the reviewed head, then by hand to `fix`:
+
+```sh
+yardr bead update <id> --add-label fix-ok --meta fix_head=<sha>
+yardr bead advance <id> --to fix
+```
+
+If the pull request is already in `approved` when a review finds changes to
+make (for example, to resolve a conflict with the base), a maintainer can send
+the bead to `contributor` first, then use the same pick above. The previous
+yes was for the earlier head; the push returns through `triage` for a fresh
+accept of the new one.
+
+A bead's agent may not write the pick on any bead, its own included: no
+`fix-ok`, no `fix_head`, whatever actor the command names. In `fix` a builder
+of `builders`, which holds no key, fixes the reviewer's findings on the picked
+head. Its checkout is the picked head, detached, never the live tip: at the
+start of a session on a `pr` bead in `fix` the yard checks out `fix_head`
+instead of `refs/pull/<n>/head`, and a fix with none recorded starts nothing.
+The builder commits the fix on no branch and records it as the bead's
+`fix_commit` before it reports `done`; it writes that on its own bead only.
+The builder pushes nothing.
+
+In `push`, [`contrib/assembly/push-fix`](../contrib/assembly/push-fix), the
+`cmd` of an `exec` group of its own (`push-fix`, limit 1, so one push at a
+time) that the pack's flow gives the stage to, makes the recorded commit again
+as the yard's GitHub App's own, pushes it onto the pull request's branch as the
+App, records it as the bead's `fix_commit`, waits for its own push to arrive as
+the bead's head, and sends the bead back to `triage`. It reads the
+pull request from the bead's tracks link and asks GitHub as the yard's App
+with an installation token minted for that one repository (the github
+source's `mint_command`, from the App's id and key file in the group's
+`env_file`: no secret of its own, and the operator's `gh` login is never
+used), narrowed to Contents write and Pull requests read, and:
+
+- refuses a bead that is not in `push`, before it reads anything: the stage
+  is the one after a builder has fixed the picked head, and the yard pushes a
+  pull request's branch nowhere before that;
+- checks the pick before it pushes anything: the label `fix-ok` is on the
+  bead, `fix_head` is a full sha, and it is the head the maintainer accepted
+  (`accepted_head`, where the pull request waited in `triage`) and the head
+  the reviewer read (`reviewed_head`), all one commit, and the pull request
+  still has it. A pick whose heads disagree, or a head that moved since,
+  holds the bead with the commits named: the fix of an old head is never
+  pushed;
+- reads the branch from the live pull request, never from local config: the
+  head repository and branch it names now. The push names that URL and that
+  ref, and only that ref. A pull request whose branch forbids maintainer
+  edits is held, not pushed to;
+- fetches the builder's recorded `fix_commit` by its sha into a temporary
+  bare repository the script owns, with no checkout of pull request files or
+  depot local Git config. This keeps checkout filters and local push settings
+  out of the script's App environment. It runs nothing of the builder's
+  worktree and pushes that commit, made again as the App (next), fast-forward
+  only, never forced: the token reaches git as an Authorization header in
+  git's environment alone, and hooks are off. A push GitHub refuses (new
+  commits meanwhile, a branch protection, a fix touching `.github/workflows`
+  without the grant) holds the bead in git's words;
+- re-authors the fix as the App, so that GitHub shows that the yard wrote what
+  is published onto a stranger's branch and no person's name stands on it. It
+  asks GitHub who its token is, the bot's login and then the id of that bot's
+  user (GitHub's noreply address begins with it, and it is not the App's own id
+  in its settings), and makes each commit of the fix, the first parents from
+  `fix_commit` back to the picked head, again with that name and address as its
+  author and committer: the same tree, message and dates, and the parents that
+  are not on that line as they are. A merge of the base into the checkout brings
+  the base's commits as second parents, which are not the fix's and are kept,
+  never rewritten; a commit that is the App's already is kept. A signature on a
+  commit it makes again is dropped, not carried over, since it would verify
+  against nothing once the headers change. A call to GitHub that fails, or a
+  login that is no `<slug>[bot]`, holds the bead naming what GitHub answered,
+  and nothing is pushed. Once the push is out the script records the commit it
+  pushed as the bead's new `fix_commit`; a run that finds that commit on the
+  branch already, and not recorded, makes the same commit again, records it and
+  pushes nothing twice;
+- advances only once the bead's head is the pushed commit. Its own push
+  arrives as an event a few seconds later and moves `pr_head` with no stage
+  change, and the script waits for it, bounded at five minutes; a timeout
+  holds the bead and names the wait. The script never writes `pr_head`
+  itself.
+
+`done` sends the bead to `triage` with the pushed commit as the bead's head:
+the fresh accept IS the human look at it, and `review`, the yard's CI and a
+fresh maintainer's yes follow, of that commit. The push is public before all
+of that: the commit is on the contributor's branch where anyone can read it.
+That yes gates the yard's merge only: not the publication, and not the
+author's own merge on GitHub, which needs no yard yes.
+
+A push to the pull request while the bead waits in `fix` or `push` moves the
+bead's head and says nothing: neither stage hears `pushed` or `unaccepted`,
+and the script's check of the head is the author-push guard. A merge or a
+close ends the bead from either stage, as from the others. A run that pushed
+nothing holds the bead in `push` with a note and reports nothing, for the
+operator to put right and unhold; but a push GitHub refused, or a push whose
+head never arrived, is resumed by hand to `triage`
+(`yardr bead advance <id> --to triage`), never by unholding in `push`: the
+round starts again from a fresh accept of the head the branch has now. No hand
+path leads back into `push`: every push is a fix round's.
+
+### Setup
+
+```sh
+install contrib/assembly/push-fix ~/.yardr/scripts/               # from main
+yardr group add yardr-push --runner exec --limit 1 \
+  --set cmd="$HOME/.yardr/scripts/push-fix" \
+  --set env_file="$HOME/.yardr/env/pr-merges.env" \
+  --set log="$HOME/.yardr/logs/push-fix.log"
+yardr pack apply contributors --depot <depot> --group push-fix=yardr-push …   # the pack's flow, and its route for push
+```
+
+The `env_file` is the App's id and the path of its key file, the two lines
+merge-pr's group has ("Merging pull requests", below): the same file serves
+all three, and the github source's `mint_command` is the mint, as there. The
+App needs Contents write on the repositories, for the push, and Pull requests
+read, for the pull request. The group is the yard's, made once, and
+`--group push-fix=yardr-push` maps the pack's group to it for every depot, so
+their pushes queue one behind another. The apply writes the route for each
+depot: `push`, type `pr`, to `push-fix`. A yard whose `pr` flow is its own
+routes the stage by hand instead (`yardr route add --stage push --type pr
+--originator any --group push-fix`), a default that a later apply with the
+mapping leaves to work the stage. The script is refreshed by `yardr upgrade`
+from the checkout it builds, once installed ([upgrade.md](upgrade.md#the-scripts));
+the pack carries a copy that a test holds equal.
 
 ## Merging pull requests
 

@@ -217,7 +217,8 @@ func runGitHubThreadStory(t *testing.T) []goldenStep {
 
 // runGitHubForwardStory is a stage map's move: a closed issue asked to
 // started stays, reported as not moved with no second call, and an open
-// one asked to done moves.
+// one asked to done moves. A pull request asked to done is refused for
+// good, after the one read that finds it, and stays as it is.
 func runGitHubForwardStory(t *testing.T) []goldenStep {
 	t.Helper()
 	g := newGitHubGolden(t)
@@ -236,6 +237,14 @@ func runGitHubForwardStory(t *testing.T) []goldenStep {
 	}
 	steps = append(steps, goldenStep{Name: "forward-moves", Calls: g.calls(),
 		Result: map[string]any{"forwarded": fw, "status": g.s.Status("github", "acme/yardr#23")}})
+	// The refusal is the script's exit 3, which makes the failure Final.
+	g.s.Add(standin.Issue{Source: "github", Key: "acme/yardr#17", Title: "PR flow", Status: "open", Pull: true})
+	_, err = g.dec.Forward(ctx, "acme/yardr#17", "done", cred)
+	if err == nil || !hooks.Final(err) {
+		t.Fatalf("a state asked of a pull request was not refused for good: %v", err)
+	}
+	steps = append(steps, goldenStep{Name: "forward-pull-refused", Calls: g.calls(),
+		Result: map[string]any{"error": err.Error(), "status": g.s.Status("github", "acme/yardr#17")}})
 	return steps
 }
 

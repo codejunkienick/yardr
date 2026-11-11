@@ -33,6 +33,7 @@ import (
 
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/peer"
+	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/storetest"
 	"yardr.dev/yardr/internal/testload"
 )
@@ -194,17 +195,6 @@ func pidIn(t *testing.T, file string) int {
 	return 0
 }
 
-// running reports whether pid is a live process (one that ended and was
-// not reaped yet is not).
-func running(pid int) bool {
-	if syscall.Kill(pid, 0) != nil {
-		return false
-	}
-	out, _ := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
-	s := strings.TrimSpace(string(out))
-	return s != "" && !strings.HasPrefix(s, "Z")
-}
-
 // down runs `isolated-yard down d` and checks that it removed d and that
 // none of pids is left.
 func down(t *testing.T, d string, pids ...int) {
@@ -217,7 +207,7 @@ func down(t *testing.T, d string, pids ...int) {
 		t.Errorf("%s is still there (%v)", d, err)
 	}
 	for _, pid := range pids {
-		if running(pid) {
+		if testload.Running(pid) {
 			state, _ := exec.Command("ps", "-o", "pid=,ppid=,pgid=,stat=,command=", "-p", strconv.Itoa(pid)).CombinedOutput()
 			t.Errorf("pid %d outlived down:\n%s\n%s", pid, out, state)
 		}
@@ -274,8 +264,8 @@ func TestDownAfterTheBinaryWasRebuilt(t *testing.T) {
 	if err := os.Rename(bin+".new", bin); err != nil {
 		t.Fatal(err)
 	}
-	if !running(server) || !running(daemon) {
-		t.Fatalf("server running=%v daemon running=%v before down", running(server), running(daemon))
+	if !testload.Running(server) || !testload.Running(daemon) {
+		t.Fatalf("server running=%v daemon running=%v before down", testload.Running(server), testload.Running(daemon))
 	}
 	down(t, d, server, daemon)
 }
@@ -301,7 +291,7 @@ func TestDownStopsAServerStartedFromAnotherBinary(t *testing.T) {
 		t.Fatalf("server start: %v\n%s", err, out)
 	}
 	server := pidIn(t, filepath.Join(home, "server.pid"))
-	if !running(server) {
+	if !testload.Running(server) {
 		t.Fatal("no server before down")
 	}
 	down(t, d, server)
@@ -369,7 +359,7 @@ func TestDownStopsAnExecGroupsRunningScript(t *testing.T) {
 	}) {
 		t.Fatalf("exec script did not start its child (session pid %d)", execPid)
 	}
-	if !running(childPid) {
+	if !testload.Running(childPid) {
 		t.Fatalf("exec child %d did not stay running", childPid)
 	}
 	pgid, err := exec.Command("ps", "-o", "pgid=", "-p", strconv.Itoa(childPid)).Output()
@@ -380,7 +370,7 @@ func TestDownStopsAnExecGroupsRunningScript(t *testing.T) {
 	// shell leader exits and send KILL to the same group.
 	t.Cleanup(func() {
 		for _, pid := range []int{execPid, childPid} {
-			if running(pid) {
+			if testload.Running(pid) {
 				_ = syscall.Kill(pid, syscall.SIGKILL)
 			}
 		}
@@ -590,18 +580,21 @@ func TestDownMeetsAnotherRemover(t *testing.T) {
 			}
 			t.Cleanup(func() { os.RemoveAll(d) })
 			bin := t.TempDir()
-			files := map[string]string{
+			// The yard's own files stay plain: down reads them but never
+			// runs them. The stubs are stand-ins: down runs them beside
+			// forking tests, and Linux refuses to start a file a fork
+			// beside its writing still holds open (ETXTBSY).
+			for path, body := range map[string]string{
 				filepath.Join(d, ".isolated-yard"): d + "\n",
 				filepath.Join(d, "e"):              "#!/bin/sh\nexit 0\n",
+			} {
+				if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+					t.Fatal(err)
+				}
 			}
 			for name, body := range map[string]string{"chmod": c.chmod, "rm": c.rm} {
 				if body != "" {
-					files[filepath.Join(bin, name)] = "#!/bin/sh\n" + body + "\n"
-				}
-			}
-			for path, body := range files {
-				if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-					t.Fatal(err)
+					scripttest.Write(t, filepath.Join(bin, name), "#!/bin/sh\n"+body+"\n")
 				}
 			}
 			if c.gone {
@@ -681,19 +674,28 @@ func TestDownWhenAnotherRemoverTakesTheYardBetweenListings(t *testing.T) {
 			}
 			t.Cleanup(func() { os.RemoveAll(d) })
 			bin := t.TempDir()
-			files := map[string]string{
+			// The yard's own files stay plain: down reads them but never
+			// runs them. The stub below is a stand-in: down runs it beside
+			// forking tests, and Linux refuses to start a file a fork
+			// beside its writing still holds open (ETXTBSY).
+			for path, body := range map[string]string{
 				filepath.Join(d, ".isolated-yard"): d + "\n",
 				filepath.Join(d, "e"):              "#!/bin/sh\nexit 0\n",
+			} {
+				if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+					t.Fatal(err)
+				}
 			}
+			stub := func(name, body string) { scripttest.Write(t, filepath.Join(bin, name), body) }
 			if c.atMark {
 				// Down reads the mark once of itself, at its start.
-				files[filepath.Join(bin, "cat")] = `#!/bin/sh
-if [ -f "` + filepath.Join(bin, "cat.read") + `" ]; then
-  /bin/rm -rf "` + d + `"
+				stub("cat", `#!/bin/sh
+if [ -f "`+filepath.Join(bin, "cat.read")+`" ]; then
+  /bin/rm -rf "`+d+`"
 fi
-: > "` + filepath.Join(bin, "cat.read") + `"
-exec "` + realCat + `" "$@"
-`
+: > "`+filepath.Join(bin, "cat.read")+`"
+exec "`+realCat+`" "$@"
+`)
 			} else {
 				stuck := ""
 				if c.stuck {
@@ -702,20 +704,15 @@ exec "` + realCat + `" "$@"
 				// The first listing takes the yard after down's read of the
 				// mark for it (home_pids reads the mark before it runs ps); the
 				// later ones find it gone.
-				files[filepath.Join(bin, "ps")] = `#!/bin/sh
+				stub("ps", `#!/bin/sh
 case " $* " in
 *" axeww "*) ;;
-*) exec "` + realPs + `" "$@" ;;
+*) exec "`+realPs+`" "$@" ;;
 esac
-/bin/rm -rf "` + d + `"
-"` + realPs + `" "$@" || exit 1
-` + stuck + `
-`
-			}
-			for path, body := range files {
-				if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-					t.Fatal(err)
-				}
+/bin/rm -rf "`+d+`"
+"`+realPs+`" "$@" || exit 1
+`+stuck+`
+`)
 			}
 
 			cmd := exec.Command(scriptPath(t), "down", d)
@@ -797,7 +794,9 @@ func TestMain(m *testing.M) {
 		return
 	}
 	storetest.NameTestBinary()
-	os.Exit(m.Run())
+	code := m.Run()
+	scripttest.Remove()
+	os.Exit(code)
 }
 
 // sleeper starts a process with the given YARDR_HOME that does nothing, and
@@ -882,7 +881,7 @@ func deadOwner(t *testing.T) string {
 func TestSleeperEndsWhenItsOwnerIsGone(t *testing.T) {
 	t.Parallel()
 	pid := startSleeper(t, filepath.Join(t.TempDir(), "home"), deadOwner(t))
-	if !waitFor(ownerGoneFuse, func() bool { return !running(pid) }) {
+	if !waitFor(ownerGoneFuse, func() bool { return !testload.Running(pid) }) {
 		t.Errorf("the sleeper (pid %d) is still running", pid)
 	}
 }
@@ -924,7 +923,7 @@ func TestDownLeavesTheProcessesOfOtherYards(t *testing.T) {
 	}
 	down(t, d, mine...)
 	for _, pid := range others {
-		if !running(pid) {
+		if !testload.Running(pid) {
 			t.Errorf("down stopped pid %d, which is not of the yard", pid)
 		}
 	}

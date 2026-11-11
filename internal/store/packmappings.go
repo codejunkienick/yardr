@@ -402,6 +402,39 @@ func (s *Store) ReadPack(ctx context.Context, name string, depot string, mapping
 	return s.packReader(ctx, name, depot, mappings, s)
 }
 
+// ErrNotEmbedded is what the PackReader answers for a name the binary of
+// the process that owns the store embeds no pack of. Every pack card
+// refuses it, and a setup card alone goes on from it: to the pack the
+// operator applied from a directory (SetAppliedPackReader). A reader wraps
+// it with %w, so the words of its refusal stay its own.
+var ErrNotEmbedded = errors.New("yardr embeds no pack of that name")
+
+// SetAppliedPackReader tells the store how its owning process reads the
+// pack the operator applied from a directory, as SetPackReader tells it how
+// it reads the packs yardr embeds. Only a setup card asks it, and only for
+// a name the embedded reading refused with ErrNotEmbedded: the store has
+// neither the pack package nor git, and a pack apply card stays pinned to
+// the binary. A store with none refuses such a setup as the embedded
+// reading does.
+func (s *Store) SetAppliedPackReader(r PackReader) { s.appliedReader = r }
+
+// setupReading is the server's reading of the pack a setup card is of: the
+// embedded pack of the name, as every pack card is read, and where the
+// binary embeds none, the pack the operator applied from a directory. The
+// embedded pack wins for a name both have. A refusal of either stands in
+// the reader's own words.
+func (w *wtx) setupReading(pack string) (*PackReading, error) {
+	read := w.packReaderOf()
+	if read == nil {
+		return nil, fmt.Errorf("pack %s: no server has registered its reading of the packs yardr embeds on this store, so no card can be written from the binary that runs the yard: a setup is proposed from a yard its server runs", pack)
+	}
+	reading, err := read(context.Background(), pack, "", Mappings{}, w.store)
+	if errors.Is(err, ErrNotEmbedded) && w.store.appliedReader != nil {
+		return w.store.appliedReader(context.Background(), pack, "", Mappings{}, w.store)
+	}
+	return reading, err
+}
+
 // packReaderOf is the reading registered on the store this write
 // belongs to, nil where there is none.
 func (w *wtx) packReaderOf() PackReader {

@@ -155,6 +155,82 @@ func TestFollowThread(t *testing.T) {
 // posted with the comment's id, which the replied event carries too.
 func TestReplying(t *testing.T) {
 	t.Parallel()
+	t.Run("formats", func(t *testing.T) {
+		s, own := storetest.NewOwned(t)
+		ctx := context.Background()
+		member(t, s, "inv", false)
+		declarePack(t, s, "linear")
+		src, err := s.GetSource(ctx, "linear")
+		if err != nil {
+			t.Fatal(err)
+		}
+		decl := strings.Replace(src.Text, "thread:\n", "thread:\n  files: true\n  formats: [markdown, plain]\n", 1)
+		if _, err := s.PutSource(ctx, "linear.yaml", decl, "me"); err != nil {
+			t.Fatal(err)
+		}
+		seq := record(t, own, hooks.Envelope{Source: "linear", Type: "comment", Thread: hooks.Thread{ID: "T"}})
+		reserve := func(body, mode string, files ...store.BlobFile) *store.Reply {
+			t.Helper()
+			var rp *store.Reply
+			var err error
+			if mode == "" {
+				rp, err = s.Replying(ctx, "inv", seq, "", body, "inv", files...)
+			} else {
+				rp, err = s.ReplyingWithFormat(ctx, "inv", seq, "", body, mode, "inv", files...)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			return rp
+		}
+		confirm := func(rp *store.Reply) {
+			t.Helper()
+			if err := s.Replied(ctx, "inv", store.Reply{Key: rp.Key, Seq: seq, Source: "linear", Thread: "T", Format: rp.Format, Message: "c1"}, "inv"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		md := reserve("answer", "markdown")
+		if md.Source != "linear" || md.Format != "markdown" || md.AnswerHash == "" {
+			t.Fatalf("explicit identity: %+v", md)
+		}
+		for _, mode := range []string{"plain", ""} {
+			var err error
+			if mode == "" {
+				_, err = s.Replying(ctx, "inv", seq, "", "answer", "inv")
+			} else {
+				_, err = s.ReplyingWithFormat(ctx, "inv", seq, "", "answer", mode, "inv")
+			}
+			if err == nil || !strings.Contains(err.Error(), "unresolved attempt") {
+				t.Fatalf("changed unconfirmed mode %q: %v", mode, err)
+			}
+		}
+		confirm(md)
+		plain := reserve("answer", "plain")
+		if plain.Key == md.Key || plain.Hash == md.Hash || plain.Posted {
+			t.Fatalf("another mode replayed markdown: %+v", plain)
+		}
+		confirm(plain)
+		for mode, original := range map[string]*store.Reply{"markdown": md, "plain": plain} {
+			if got := reserve("answer", mode); got.Key != original.Key || !got.Posted {
+				t.Fatalf("confirmed %s replay: %+v", mode, got)
+			}
+		}
+		// Legacy API callers keep raw whitespace, with or without files.
+		for _, files := range [][]store.BlobFile{nil, {{Hash: strings.Repeat("a", 64), Name: "evidence.diff"}}} {
+			const body = "  old API answer  \n"
+			legacy := reserve(body, "", files...)
+			if legacy.Format != "" || legacy.AnswerHash != "" {
+				t.Fatalf("legacy identity: %+v", legacy)
+			}
+			if _, err := s.ReplyingWithFormat(ctx, "inv", seq, "", body, "markdown", "inv", files...); err == nil || !strings.Contains(err.Error(), "unresolved attempt") {
+				t.Fatalf("changed mode bypassed raw legacy reply: %v", err)
+			}
+			confirm(legacy)
+			if got := reserve(body, "", files...); got.Key != legacy.Key || !got.Posted {
+				t.Fatalf("legacy replay changed: %+v", got)
+			}
+		}
+	})
 	s := storetest.New(t)
 	ctx := context.Background()
 	member(t, s, "inv", false)

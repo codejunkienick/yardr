@@ -53,7 +53,9 @@ func presetReaderFor() store.PresetReader {
 // the pack, as a re-apply always has.
 func readEmbeddedPack(ctx context.Context, name string, depot string, mappings store.Mappings, yard store.API, home string) (*store.PackReading, error) {
 	if _, err := fs.Stat(packs.FS, name+"/pack.yaml"); err != nil {
-		return nil, fmt.Errorf("pack %s: yardr embeds no pack of that name: a pack that is a directory, a URL or an earlier import's record is the operator's to apply in a terminal (yardr pack check %s shows its plan there)", name, name)
+		// The sentinel is the word a setup card goes on from, to the
+		// directory the operator applied the pack from (appliedReaderFor).
+		return nil, fmt.Errorf("pack %s: %w: a pack that is a directory, a URL or an earlier import's record is the operator's to apply in a terminal (yardr pack check %s shows its plan there)", name, store.ErrNotEmbedded, name)
 	}
 	sub, err := fs.Sub(packs.FS, name)
 	if err != nil {

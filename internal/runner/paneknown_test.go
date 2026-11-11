@@ -49,6 +49,17 @@ func (p *paneStore) CrewStartingFor(ctx context.Context, name, user string, hand
 	return p.API.CrewStartingFor(ctx, name, user, handle)
 }
 
+// startingShell is the pid of the shell on r's starting pane as the store
+// gives it back: a float64, as JSON makes a number. fmt writes one of a
+// million or more as 2.003381e+06, and a pid gets that far on a Linux box
+// that has been up a while (pid_max is 4194304), where a Mac's stops at
+// 99999 and a fresh CI runner's is low. So a pid read back is never
+// compared by what fmt prints of it.
+func startingShell(r *store.CrewMember) uint64 {
+	pid, _ := uintOf(r.Starting["shell_pid"])
+	return pid
+}
+
 // shellHerdr is envHerdr whose panes tell their shell: this process.
 func shellHerdr(t *testing.T, wt string) (*Herdr, *paneStore) {
 	h, calls, _ := envHerdr(t, wt)
@@ -88,7 +99,7 @@ func TestStartCrewRecordsItsPaneBeforeTheAgentStarts(t *testing.T) {
 		t.Fatalf("the pane was recorded after the agent started; herdr's calls before the record:\n%s", st.before)
 	}
 	r, err := st.GetCrew(ctx, "yardmaster")
-	if err != nil || r.Live() || fmt.Sprint(r.Starting["shell_pid"]) != fmt.Sprint(os.Getpid()) {
+	if err != nil || r.Live() || startingShell(r) != uint64(os.Getpid()) {
 		t.Fatalf("the yardmaster = %+v, %v: want its starting pane on record", r, err)
 	}
 
@@ -209,7 +220,11 @@ func TestStartCrewKeepsThePaneAFailedStartLeft(t *testing.T) {
 	if _, err := st.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr"}, "me"); err != nil {
 		t.Fatal(err)
 	}
-	left := map[string]any{"pane": "p0", "shell_pid": os.Getpid(), "shell_start": 7, store.HandleHerdrSession: "gc"}
+	// The shell of the pane that was left has seven digits, whatever the
+	// machine's pids are: nothing here signals it, and the store gives it
+	// back as a float64 that fmt writes as 2.003381e+06 (startingShell).
+	const leftShell = 2003381
+	left := map[string]any{"pane": "p0", "shell_pid": leftShell, "shell_start": 7, store.HandleHerdrSession: "gc"}
 	if err := st.API.CrewStarting(ctx, "yardmaster", left); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +245,7 @@ esac`)
 		t.Fatal(err)
 	}
 	r, err = st.GetCrew(ctx, "yardmaster")
-	if err != nil || fmt.Sprint(r.Starting["shell_pid"]) != fmt.Sprint(os.Getpid()) || r.Starting["shell_start"] == nil {
+	if err != nil || startingShell(r) != leftShell || r.Starting["shell_start"] == nil {
 		t.Fatalf("after a second failed start the yardmaster's starting pane = %v, %v: want the pane the first one left", r.Starting, err)
 	}
 	// The start that was underway may have gone to another herdr session:

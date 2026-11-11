@@ -35,5 +35,15 @@
       },
       "status": "closed"
     }
+  },
+  {
+    "name": "forward-pull-refused",
+    "calls": [
+      "github read acme/yardr#17"
+    ],
+    "result": {
+      "error": "thread.state of source github: exit status 3; its stderr ended: acme/yardr#17 is a pull request: the status of issues only is set",
+      "status": "open"
+    }
   }
 ]

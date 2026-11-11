@@ -1648,6 +1648,17 @@ func TestAgentArgsModel(t *testing.T) {
 		{"bead beats group key", job(map[string]any{"model": "haiku"}, map[string]any{"model": "opus"}),
 			[]string{"--model", "opus"}},
 		{"nothing", job(map[string]any{}, nil), nil},
+		// yardr-jkcy: a group's effort is the kind's own words after the
+		// group's args and the model's flag, and a kind with none passes none.
+		{"claude effort", job(map[string]any{"kind": "claude", "effort": "max"}, nil), []string{"--effort", "max"}},
+		{"effort after the args and the model", job(map[string]any{"kind": "claude", "args": args, "model": "haiku", "effort": "high"}, map[string]any{"model": "opus"}),
+			[]string{"--permission-mode", "auto", "--model", "opus", "--effort", "high"}},
+		{"effort with no model and args", job(map[string]any{"args": []any{"--permission-mode", "auto"}, "effort": "low"}, nil),
+			[]string{"--permission-mode", "auto", "--effort", "low"}},
+		{"muse effort", job(map[string]any{"kind": "muse", "args": []any{"--yolo"}, "model": "muse-spark-1.3", "effort": "xhigh"}, nil),
+			[]string{"--yolo", "--model", "muse-spark-1.3", "--reasoning-effort", "xhigh"}},
+		{"a kind that takes none", job(map[string]any{"kind": "pi", "effort": "max"}, nil), nil},
+		{"an effort that is no string", job(map[string]any{"kind": "claude", "effort": 5}, nil), nil},
 	}
 	for _, c := range cases {
 		if got := AgentArgs(c.job, "", "", ""); strings.Join(got, " ") != strings.Join(c.want, " ") {

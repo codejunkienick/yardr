@@ -40,6 +40,25 @@ func TestStoreTablesMatchCatalogue(t *testing.T) {
 			}
 		}
 	}
+	for _, h := range Harnesses {
+		got, takes := store.HarnessEfforts[h.Kind]
+		switch e := h.Flags.Effort; {
+		case e == nil && takes:
+			t.Errorf("store.HarnessEfforts names %q, whose file says no effort", h.Kind)
+		case e != nil && (!takes || !slices.Equal(got.Args, e.Args) || !slices.Equal(got.Levels, e.Levels) || !slices.Equal(got.Aliases, e.Aliases)):
+			t.Errorf("store.HarnessEfforts[%q] = %+v, the file says %+v", h.Kind, got, *e)
+		}
+	}
+	for kind := range store.HarnessEfforts {
+		if _, ok := store.HarnessLabels[kind]; !ok {
+			t.Errorf("store.HarnessEfforts names %q, which has no harness file", kind)
+		}
+	}
+	// A config that names no kind is the one the runner starts, which holds
+	// its effort to that kind's levels.
+	if store.EffortKind(nil) != DefaultKind {
+		t.Errorf("store.EffortKind(nil) = %q, the runner starts %q", store.EffortKind(nil), DefaultKind)
+	}
 	for kind := range store.HarnessLoginEnv {
 		if _, ok := store.HarnessLabels[kind]; !ok {
 			t.Errorf("store.HarnessLoginEnv names %q, which has no harness file", kind)

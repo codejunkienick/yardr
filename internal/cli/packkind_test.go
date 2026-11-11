@@ -205,7 +205,7 @@ func TestPackApplySourcePack(t *testing.T) {
 }
 
 // Adding is the operator's: run by anyone else, the import adds no source,
-// and copies no file.
+// copies no file, and ends at the record.
 func TestPackApplySourcePackByAnotherSessionAddsNoSource(t *testing.T) {
 	t.Parallel()
 	a := openApp(t)
@@ -213,7 +213,7 @@ func TestPackApplySourcePackByAnotherSessionAddsNoSource(t *testing.T) {
 	dir := kindPack(t)
 	const refusal = "adding a source is the operator's (me), and this is web-builder-1"
 	out, err := run(t, a.packCmd(), "apply", dir, "--yes")
-	if err != nil {
+	if err == nil || !strings.Contains(err.Error(), "only the operator (me) may record the import of pack acme-pack; this is web-builder-1") {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	for _, want := range []string{

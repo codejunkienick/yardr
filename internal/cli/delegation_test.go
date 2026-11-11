@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -97,6 +98,66 @@ func TestDelegatedRunFromTheCLI(t *testing.T) {
 	}
 	if _, err := as(t, st, "yardmaster", "hook", "add", "delegated", "--source", "token", "--secret-file", t.TempDir(), "--for", "jo", "--mail", mail); err == nil || !strings.Contains(err.Error(), "--secret-file is the operator's") {
 		t.Errorf("explicit secret file in a delegated hook add: %v", err)
+	}
+	// A group's effort is the operator's, and so is the word that returns it
+	// to the harness's own: a terminal reads it as --unset effort, which the
+	// leg carries no more than it carries a level (yardr-ewns).
+	if err := st.PutGroup(ctx, store.Group{Name: "heavy", Runner: "herdr", Config: map[string]any{"kind": "claude", "effort": "max"}}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	refusedAs(t, st, "yardmaster", "change effort on group heavy", "group", "set", "heavy", "effort=default", "--for", "jo", "--mail", mail)
+	if g, err := st.GetGroup(ctx, "heavy"); err != nil || g.Config["effort"] != "max" {
+		t.Errorf("a refused delegated effort=default changed the group: %+v, %v", g, err)
+	}
+
+	// The operator at a terminal learns preset=<label> from the help of the
+	// three commands that read it, in the same words and with an example
+	// each, and the help of no other delegable command speaks of it.
+	for _, c := range []struct {
+		path           []string
+		typed, example string
+	}{
+		{[]string{"group", "set"}, "preset=<label>", "yardr group set reviewers preset=read-only"},
+		{[]string{"group", "add"}, "--set preset=<label>", "yardr group add reviewers --runner herdr --set kind=claude --set preset=read-only"},
+		{[]string{"crew", "set"}, "preset=<label>", "yardr crew set yardmaster preset=auto"},
+	} {
+		// The text is read with its line breaks undone, which are the
+		// wrapper's to place.
+		help := strings.Join(strings.Fields(mustAs(t, st, "jo", append(c.path, "--help")...)), " ")
+		for _, want := range []string{
+			c.typed + " sets args to the flags of one of the kind's permission presets, replacing whatever args held.",
+			"yardr harness show <kind> lists the labels.",
+			c.example,
+		} {
+			if !strings.Contains(help, want) {
+				t.Errorf("yardr %s --help lacks %q:\n%s", strings.Join(c.path, " "), want, help)
+			}
+		}
+	}
+	for _, path := range [][]string{{"depot", "test"}, {"depot", "base"}, {"user", "set"}, {"hook", "add"}, {"pack", "apply"}} {
+		if help := mustAs(t, st, "jo", append(path, "--help")...); strings.Contains(help, "preset=<label>") {
+			t.Errorf("yardr %s --help speaks of preset=<label>, which that command does not read:\n%s", strings.Join(path, " "), help)
+		}
+	}
+	for name, use := range presetCommands {
+		for _, line := range strings.Split(use.help(), "\n") {
+			if len(line) > 78 {
+				t.Errorf("the preset paragraph of %s has a line of %d bytes, past the 78 of the other helps: %q", name, len(line), line)
+			}
+		}
+	}
+	// effort=default is group set's alone, the one command whose card carries
+	// an effort, and its help says what it is in the same way (yardr-ewns).
+	for _, path := range delegable {
+		help := strings.Join(strings.Fields(mustAs(t, st, "jo", append(slices.Clone(path), "--help")...)), " ")
+		if got := strings.Contains(help, "effort=default returns the group to its harness's own effort, as --unset effort does."); got != readsEffortDefault(path) {
+			t.Errorf("yardr %s --help says effort=default = %v, but reading it is %v:\n%s", strings.Join(path, " "), got, readsEffortDefault(path), help)
+		}
+	}
+	for _, line := range strings.Split(effortHelp, "\n") {
+		if len(line) > 78 {
+			t.Errorf("the effort paragraph has a line of %d bytes, past the 78 of the other helps: %q", len(line), line)
+		}
 	}
 }
 
@@ -228,8 +289,11 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 	mail := strconv.FormatUint(head, 10)
 
 	// As the yardmaster types it, the import does the rest and adds no
-	// source: only the delegated run applies the pack whole.
-	if out, err := as(t, st, "yardmaster", "pack", "apply", "telegram"); err != nil || !strings.Contains(out, "was not added") {
+	// source, and is left unrecorded: only the delegated run applies the
+	// pack whole, and only the operator records.
+	if out, err := as(t, st, "yardmaster", "pack", "apply", "telegram"); err == nil ||
+		!strings.Contains(err.Error(), "only the operator (jo) may record the import of pack telegram; this is yardmaster") ||
+		!strings.Contains(err.Error(), "applying again records nothing") || !strings.Contains(out, "was not added") {
 		t.Errorf("pack apply as typed: %q, %v", out, err)
 	}
 	if _, err := st.GetSource(ctx, "telegram"); err == nil {

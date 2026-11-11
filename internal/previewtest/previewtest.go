@@ -110,6 +110,13 @@ func pickPort(host string, from, count int) (int, error) {
 	return 0, fmt.Errorf("%w from %d up to %d on %s", errNoFreePort, from, from+count, host)
 }
 
+// dialLoopback dials addr on TCP with the timeout of the supervisor's own look
+// at a port. It is a variable so a test can force a dial outcome, a timeout
+// above all, instead of staging one.
+var dialLoopback = func(addr string) (net.Conn, error) {
+	return net.DialTimeout("tcp", addr, 200*time.Millisecond)
+}
+
 // loopbackAnswers reports whether a dial of port connects on 127.0.0.1 or on ::1,
 // the set and the timeout of the supervisor's own look at a port
 // (preview.loopbackHost). A bind cannot see what that dial does: a bind of
@@ -118,15 +125,40 @@ func pickPort(host string, from, count int) (int, error) {
 // supervisor then refuses the start as "port already in use". The set is
 // repeated here, not shared with the supervisor: its probe is product code, and
 // this is a check made as a test draws.
+//
+// A dial that fails without proving nothing listens reads as answered. A
+// timeout proves nothing either way: a stalled process runs past the deadline
+// after the handshake has finished, and Go reports the expired deadline all the
+// same. Only a refusal and the errors of no route to the address read as free;
+// any other outcome keeps the draw looking for another port.
 func loopbackAnswers(port int) bool {
 	for _, host := range []string{"127.0.0.1", "::1"} {
-		c, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 200*time.Millisecond)
+		c, err := dialLoopback(net.JoinHostPort(host, strconv.Itoa(port)))
 		if err == nil {
 			c.Close()
 			return true
 		}
+		if dialProvesFree(err) {
+			continue
+		}
+		return true
 	}
 	return false
+}
+
+// dialProvesFree reports whether a failed dial of a loopback address proves
+// nothing listens on the port: a refusal, no route to the address, or no such
+// address family (a dial of ::1 where IPv6 does not exist). It matches by code,
+// which holds on macOS and Linux alike; message text does not. Anything else, a
+// timeout first, proves nothing, so it reads as answered.
+func dialProvesFree(err error) bool {
+	if os.IsTimeout(err) {
+		return false
+	}
+	return errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.ENETUNREACH) ||
+		errors.Is(err, syscall.EHOSTUNREACH) ||
+		errors.Is(err, syscall.EAFNOSUPPORT)
 }
 
 // LateWide is the command of an app that listens on loopback until its first

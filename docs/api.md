@@ -3302,9 +3302,9 @@ POST /call/UserAsks
 | `open[].run.back` | string | the command that takes the change back |
 | `open[].run.back_by` | string, may be absent | who may run it, as `Bead` says it; absent where that is anyone |
 | `open[].setup` | object, may be absent | the setup a setup ask proposes, as `Bead` says it; absent on any other ask |
-| `open[].setup.pack` | string | the embedded pack to set up, of kind source |
+| `open[].setup.pack` | string | the pack to set up, of kind source: one yardr embeds, or one the operator applied from a directory and left as it was |
 | `open[].setup.base` | string, may be absent | the selected region base name; absent when calls go to the declaration's own base |
-| `open[].setup.label` | string, may be absent | the build the pack is embedded in, as the card shows it |
+| `open[].setup.label` | string, may be absent | where the pack was read from, as the card shows it: the build it is embedded in, or the directory the operator applied it from and the commit it was at |
 | `open[].setup.account` | array of string | the names to type unseen beside the preset pick |
 | `open[].setup.account_file` | string, may be absent | the file the value goes to, on the yard's machine. A device of the current operator is told it, whoever the ask was put to. Any other device is told the card with the field absent, even the device of a user the ask was put to while they were the operator, and so is every device of a yard with no operator. The socket tells the whole card |
 | `open[].setup.given` | bool, may be absent | on an update, where the yard already holds the source the pack brings: `true` when its account file already holds every name of `setup.account`, so that a bare preset pick keeps it; absent on a first setup, where nothing stands yet, and where the file lacks a name (`setup.missing`) |
@@ -3358,9 +3358,9 @@ POST /call/UserAsks
 | `decided[].run.back` | string | the command that takes the change back |
 | `decided[].run.back_by` | string, may be absent | who may run it, as `Bead` says it; absent where that is anyone |
 | `decided[].setup` | object, may be absent | the setup a setup ask proposes, as `Bead` says it; absent on any other ask |
-| `decided[].setup.pack` | string | the embedded pack to set up, of kind source |
+| `decided[].setup.pack` | string | the pack to set up, of kind source: one yardr embeds, or one the operator applied from a directory and left as it was |
 | `decided[].setup.base` | string, may be absent | the selected region base name; absent when calls go to the declaration's own base |
-| `decided[].setup.label` | string, may be absent | the build the pack is embedded in, as the card shows it |
+| `decided[].setup.label` | string, may be absent | where the pack was read from, as the card shows it: the build it is embedded in, or the directory the operator applied it from and the commit it was at |
 | `decided[].setup.account` | array of string | the names to type unseen beside the preset pick |
 | `decided[].setup.account_file` | string, may be absent | the file the value goes to, on the yard's machine. A device of the current operator is told it, whoever the ask was put to. Any other device is told the card with the field absent, even the device of a user the ask was put to while they were the operator, and so is every device of a yard with no operator. The socket tells the whole card |
 | `decided[].setup.given` | bool, may be absent | on an update, where the yard already holds the source the pack brings: `true` when its account file already holds every name of `setup.account`, so that a bare preset pick keeps it; absent on a first setup, where nothing stands yet, and where the file lacks a name (`setup.missing`) |
@@ -3466,7 +3466,7 @@ A bead stands in one list only, and these are the cases that leave it out. While
 
 A row may carry two fields more, which the example does not show. `flow_error` says why the bead's flow does not resolve: `actions` is then empty, as no move exists until the flow is fixed, and the bead is shown all the same, so that it is not lost. `template_error` says why entering the stage put no ask for its people, where that ask would stand; the bead still moves by hand, and `actions` are its moves.
 
-Read it again on every event that carries a bead, `noted` among them, and on the events without one that move its inputs: `group_set` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated` and `depot_removed`, and `setting_changed` whose `key` is `operator`. A put-aside ask also comes back on its own after 24 hours, with no event, and takes its bead from this list with it: read again then, as for [`UserAsks`](#userasks).
+Read it again on every event that carries a bead, `noted` among them, and on the events without one that move its inputs: `group_set`, `group_renamed` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated` and `depot_removed`, and `setting_changed` whose `key` is `operator`. A put-aside ask also comes back on its own after 24 hours, with no event, and takes its bead from this list with it: read again then, as for [`UserAsks`](#userasks).
 
 ### `MoveBead`
 
@@ -5082,9 +5082,9 @@ POST /call/Bead
 | `asks[].ran.result` | string | what the command printed, made by the yard: a line for each thing it changed, with a line break between them; on a setup ask or depot-push ask not yet carried out, `approved, to be carried out`, and afterwards what the carrying out printed. Its line `the account <names> is set in <file>` names the file the account is set in, which is the candidate's when the approval took one, and the words of a carrying out that failed can name it too, and the candidate's source: both are told to a device of the operator alone ([over the network](#over-the-network)). A depot-push result is told to a device of the operator alone too; any other device is told `the account <names> is set` for that line and, for a failure, that it failed and no more; so is every device of a yard with no operator. The socket tells the whole result |
 | `asks[].ran.pending_reason` | string, may be absent | while an approved member invite or removal is still owed after a signed 429 or 503, why the edge refused its report, in the edge's words. It is cleared when the report lands or the carrying out fails, and is told to a device of the current operator alone; other devices are told none |
 | `asks[].setup` | object, may be absent | the setup a setup ask proposes: the pack with the yard's sentences for what approving it does, the account to type beside the preset pick or the candidates to take instead (on an update, the account that already stands), and the presets the ask's options count. Absent on any other ask. `AnswerAsk` refuses a pick and words on it, `DeferAsk` and `DeclineAsk` take it as any ask, and it is approved with [`ApproveSetup`](#for-the-operator-alone), by the operator: at the yard (`yardr bead answer <bead> <ask> <n> --secret`, `--account <source>` where the card lists a candidate, or a bare `<n>` where the card is `given`), or from a device of the operator, but for the account typed down the link from the edge, which a yard that is not hosted refuses ([TLS is yours](#tls-is-yours-and-the-clients-rule)). A strong card ([weighty cards](#weighty-cards)) is approved from a device as any weighty card is; the bead page approves it only on a hosted yard, under a fresh sign-in. All of `setup` is the yard's, made when the ask was written, and none of it the asker's: show it apart from `question` and `context`, which are the asker's words, and draw those as plain text |
-| `asks[].setup.pack` | string | the embedded pack to set up, of kind source, whose `yardr pack show <pack>` prints the presets numbered |
+| `asks[].setup.pack` | string | the pack to set up, of kind source (one yardr embeds, or one the operator applied from a directory and left as it was), whose `yardr pack show <pack>` prints the presets numbered |
 | `asks[].setup.base` | string, may be absent | the selected region base name; absent when calls go to the declarations' own bases |
-| `asks[].setup.label` | string, may be absent | the build the pack is embedded in, as the card shows it |
+| `asks[].setup.label` | string, may be absent | where the pack was read from, as the card shows it: the build it is embedded in, or the directory the operator applied it from and the commit it was at |
 | `asks[].setup.account` | array of string | the names the account is made of: the mint's inputs where the pack's credential is minted, else every credential name. A first setup types every one beside the preset pick; an update says by `given` and `missing` which of them the account file that stands holds. Where the card lists candidates, the answer names one of them instead |
 | `asks[].setup.account_file` | string, may be absent | the file a typed value goes to, on the yard's machine; on an update, the account file that stands. Told to a device of the operator alone ([over the network](#over-the-network)): absent on any other device's card, and on every device's of a yard with no operator. The socket tells the whole card |
 | `asks[].setup.given` | bool, may be absent | on an update, where the yard already holds the source the pack brings: `true` when its account file already holds every name of `setup.account`, so that a bare preset pick keeps it, typing every name changes it, and a candidate may be taken instead; absent on a first setup, where nothing stands yet, and where the file lacks a name (`setup.missing`) |
@@ -5220,7 +5220,7 @@ The order is the board's: beads with a running session first, then by the low en
 
 Platforms lists the stages the rows stand on, in the order the beads travel: each depot's flow stage order, as the yard draws it on its flows page. Where depots' flows order the same stages differently, the depot with the most travelling beads sets the order and the others' extra stages stand where their own flows put them after the last stage they share with it, and a stage no flow has stands last, in row order.
 
-Read it again on every event that carries a bead, and on the events without one that move its inputs: `group_set` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated`, and `setting_changed` whose `key` is `max_sessions` or `operator`. One minute is the ETA's grain: no timed refresh.
+Read it again on every event that carries a bead, and on the events without one that move its inputs: `group_set`, `group_renamed` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated`, and `setting_changed` whose `key` is `max_sessions` or `operator`. One minute is the ETA's grain: no timed refresh.
 
 ### `Flows`
 
@@ -5609,7 +5609,7 @@ What group a client sees for a bead depends on its claim. A bead no session has 
 
 Every depot stands here, travelling or not, and a removed depot's line leaves with it: `DeleteDepot` refuses while open beads remain. The unassigned rows are the open beads outside the backlog with no depot, the newest change first.
 
-Read it again on every event that carries a bead, and on the events without one that move its inputs: `group_set` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated` and `depot_removed`, and `setting_changed` whose `key` is `max_sessions` or `operator`. One minute is the ETA's grain: no timed refresh.
+Read it again on every event that carries a bead, and on the events without one that move its inputs: `group_set`, `group_renamed` and `group_removed`, `route_added`, `route_set` and `route_removed`, `flow_set`, `flow_removed`, `flow_pointer_set` and `flow_pointer_cleared`, `depot_updated` and `depot_removed`, and `setting_changed` whose `key` is `max_sessions` or `operator`. One minute is the ETA's grain: no timed refresh.
 
 ### `AnswerAsk`
 

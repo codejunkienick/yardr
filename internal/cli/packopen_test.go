@@ -519,8 +519,8 @@ func TestPackApplyOpenThreadsFlag(t *testing.T) {
 // Letting a crew member open threads is the operator's, by the check yardr
 // crew add makes. Run by anyone else, a crew member's own session say, the
 // import does everything else, grants nothing whatever the flag says,
-// records no answer, and names who may grant it. The operator's next apply
-// is then asked.
+// records no answer, and names who may grant it, and ends at the record.
+// The operator's next apply is then asked.
 func TestPackApplyOnlyTheOperatorGrants(t *testing.T) {
 	a := openApp(t, "linear")
 	ctx := context.Background()
@@ -529,21 +529,28 @@ func TestPackApplyOnlyTheOperatorGrants(t *testing.T) {
 	a.actor = "boss"
 	args := append([]string{"apply", dir, "--depot", "web", "--yes"}, starterFlags...)
 	const says = "crew member boss was not let open threads in linear: only the operator (me) may grant that, and this is boss."
+	const refused = "only the operator (me) may record the import of pack starter; this is boss"
 
 	setInteractive(t, false)
 	out, err := run(t, a.packCmd(), append(args, "--open-threads", "yardmaster=linear")...)
-	if err != nil || !strings.Contains(out, "applied pack starter to depot web: ") || !strings.Contains(out, says) || strings.Contains(out, "may now open") {
+	if err == nil || !strings.Contains(err.Error(), refused) || !strings.Contains(out, "applied pack starter to depot web: ") || !strings.Contains(out, says) || strings.Contains(out, "may now open") {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	if g, err := a.st.GetGroup(ctx, "web-builders"); err != nil || g.Config["kind"] != "claude" {
 		t.Fatalf("the rest of the import: %+v, %v", g, err)
 	}
-	if bossMayOpen(t, a) != "" || openRecord(t, a) != nil {
-		t.Fatalf("boss may open %q, record %v", bossMayOpen(t, a), openRecord(t, a))
+	if bossMayOpen(t, a) != "" {
+		t.Fatalf("boss may open %q", bossMayOpen(t, a))
+	}
+	if recs, _ := a.st.Packs(ctx); len(recs) != 0 {
+		t.Fatalf("a crew member's import was recorded: %+v", recs)
 	}
 	// Nor may it say no for the operator.
-	if out, err = run(t, a.packCmd(), append(args, "--open-threads", "yardmaster=none")...); err != nil || !strings.Contains(out, says) || openRecord(t, a) != nil {
-		t.Fatalf("none from a crew member: %v, record %v\n%s", err, openRecord(t, a), out)
+	if out, err = run(t, a.packCmd(), append(args, "--open-threads", "yardmaster=none")...); err == nil || !strings.Contains(err.Error(), refused) || !strings.Contains(out, says) {
+		t.Fatalf("none from a crew member: %v\n%s", err, out)
+	}
+	if recs, _ := a.st.Packs(ctx); len(recs) != 0 {
+		t.Fatalf("a crew member's no was recorded: %+v", recs)
 	}
 	// In a terminal it is not asked, and is told the same.
 	setInteractive(t, true)
@@ -551,11 +558,11 @@ func TestPackApplyOnlyTheOperatorGrants(t *testing.T) {
 	asked := answerForms(t, &say)
 	plain := append([]string{"apply", dir, "--depot", "web"}, starterFlags...)
 	head, _ := a.st.Head(ctx)
-	if out, err = run(t, a.packCmd(), plain...); err != nil || len(*asked) != 0 || !strings.Contains(out, says) || bossMayOpen(t, a) != "" {
+	if out, err = run(t, a.packCmd(), plain...); err == nil || !strings.Contains(err.Error(), refused) || len(*asked) != 0 || !strings.Contains(out, says) || bossMayOpen(t, a) != "" {
 		t.Fatalf("in a terminal: %v, asked %q\n%s", err, *asked, out)
 	}
-	if evs, _ := a.st.EventsSince(ctx, head, 0); len(evs) != 1 || evs[0].Kind != "pack_unchanged" {
-		t.Fatalf("an apply that granted nothing logged %+v", evs)
+	if evs, _ := a.st.EventsSince(ctx, head, 0); len(evs) != 0 {
+		t.Fatalf("an apply that granted and recorded nothing logged %+v", evs)
 	}
 
 	// The operator: asked, and granted.

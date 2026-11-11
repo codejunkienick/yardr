@@ -632,12 +632,12 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	}
 	// The store's wake stream ends if its server restarts: reconnect, and
 	// wake once afterwards since changes may have been missed meanwhile.
+	// The first subscription too: it comes up beside the first pass, and a
+	// commit between that pass's read and it is announced by nothing.
 	go func() {
 		for first := true; ctx.Err() == nil; first = false {
 			if ch, err := d.Store.Wake(ctx); err == nil {
-				if !first {
-					poke()
-				}
+				poke()
 				forward(ch)
 			} else if first {
 				d.Log.Warn("store wake-ups unavailable; retrying", "err", err)
@@ -1042,60 +1042,16 @@ func runnerName(s store.Session, groups map[string]store.Group) string {
 	return groups[s.Group].Runner
 }
 
-func (d *Dispatcher) end(ctx context.Context, s store.Session, state, reason string) {
+// end ends s in state; its error is the store's, the session still running.
+func (d *Dispatcher) end(ctx context.Context, s store.Session, state, reason string) error {
 	d.Log.Info("session ended", "session", s.ID, "bead", s.Bead, "state", state, "reason", reason)
-	if err := d.Store.EndSession(ctx, s.ID, state, reason); err != nil {
+	err := d.Store.EndSession(ctx, s.ID, state, reason)
+	if err != nil {
 		d.Log.Error("end session", "session", s.ID, "err", err)
 	}
 	d.retryAfter[s.Bead] = d.now().Add(d.Backoff)
 	d.forget(s.ID)
-}
-
-// returnsPage bounds the events backingOff reads per bead: the returns it
-// counts are the latest, and a bead with more events than this since it
-// last entered its stage otherwise is retried as if it had this many.
-const returnsPage = 200
-
-// backingOff reports whether b is to wait before being dispatched again:
-// its flow has sent it back to the stage it is in n times in a row (an
-// advance from and to b.Stage, as open -> open on failed when integrating
-// a train fails for a reason no child fixes), and the last was less than
-// Backoff doubled n-1 times, up to BackoffMax, ago. The count is read from
-// the bead's events, so a restarted daemon keeps waiting, and it starts
-// over when the bead enters the stage any other way or a human un-holds
-// it. Each wait is logged once on the bead as a backoff event.
-func (d *Dispatcher) backingOff(ctx context.Context, b store.Bead) (bool, error) {
-	evs, err := d.Store.Events(ctx, b.ID, returnsPage)
-	if err != nil {
-		return false, err
-	}
-	n, last := 0, time.Time{}
-	for i := len(evs) - 1; i >= 0; i-- {
-		e := evs[i]
-		if e.Kind == "unheld" {
-			break
-		}
-		if e.Kind != "advanced" {
-			continue
-		}
-		if e.Data["from"] != b.Stage || e.Data["to"] != b.Stage {
-			break
-		}
-		if n == 0 {
-			last = e.At
-		}
-		n++
-	}
-	if n == 0 {
-		return false, nil
-	}
-	wait := min(d.Backoff<<min(n-1, 30), d.BackoffMax)
-	until := last.Add(wait)
-	if !d.now().Before(until) {
-		return false, nil
-	}
-	d.reportOnce(ctx, b, "backoff", fmt.Sprintf("sent back to %s %d times in a row; next try at %s", b.Stage, n, until.UTC().Format(time.RFC3339)))
-	return true, nil
+	return err
 }
 
 // now is the dispatcher's clock, time.Now unless a test sets clock. Every
@@ -1124,36 +1080,6 @@ func (d *Dispatcher) forget(id string) {
 	delete(d.dialogs, id)
 	delete(d.nudged, id)
 	delete(d.unsent, id)
-}
-
-// teardown stops runner resources for sessions that ended, unless the group
-// asks to keep them (config keep=true) for inspection. On the way it marks the
-// count of a session whose agent is counted as due (markCountDue), having asked
-// the runner once more for the id of the agent's session while its tab is still
-// open (lastAgentSession).
-func (d *Dispatcher) teardown(ctx context.Context, groups map[string]store.Group) error {
-	ended, err := d.Store.Unstopped(ctx)
-	if err != nil {
-		return err
-	}
-	for _, s := range ended {
-		g := groups[s.Group]
-		r := d.runnerFor(s, groups)
-		id := d.lastAgentSession(ctx, r, s)
-		if r != nil && g.Config["keep"] != true && len(s.Handle) > 0 {
-			if err := r.Stop(ctx, s.Handle); err != nil {
-				d.Log.Warn("stop", "session", s.ID, "err", err)
-				continue
-			}
-		}
-		if err := d.markCountDue(ctx, r, s, g, id); err != nil {
-			return err
-		}
-		if err := d.Store.MarkStopped(ctx, s.ID); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // cleanup removes what runners left behind for beads that are now closed,
@@ -1221,6 +1147,10 @@ func (d *Dispatcher) route(ctx context.Context, groups map[string]store.Group, a
 	for _, b := range lost {
 		lostByID[b.Bead] = b
 	}
+	unstopped, err := d.liveUnstopped(ctx)
+	if err != nil {
+		return err
+	}
 
 	for _, rb := range ready {
 		// What a server of a build from before ReadyBead answers with
@@ -1240,6 +1170,13 @@ func (d *Dispatcher) route(ctx context.Context, groups map[string]store.Group, a
 			continue
 		}
 		if t, ok := d.retryAfter[b.ID]; ok && d.now().Before(t) {
+			continue
+		}
+		// Past the backoff, a bead still waits for its ended session to be
+		// stopped: teardown tries on every pass, and a session started now
+		// would share the old agent's checkout.
+		if s, ok := unstopped[b.ID]; ok {
+			d.reportOnce(ctx, b, "backoff", fmt.Sprintf("session %s ended as %s and its agent is not stopped yet; the bead starts when it is", s.ID, s.State))
 			continue
 		}
 		operator := settings[store.OperatorSetting]
@@ -1363,7 +1300,7 @@ func (d *Dispatcher) route(ctx context.Context, groups map[string]store.Group, a
 			if err != nil {
 				return err
 			}
-			pull = d.pullOf(ctx, links, b.Metadata)
+			pull = d.pullOf(ctx, links, &b)
 		}
 
 		if paused {
@@ -1424,7 +1361,7 @@ func (d *Dispatcher) route(ctx context.Context, groups map[string]store.Group, a
 // runtimeDown notes that g's runtime could not start anything. The first
 // failure of an outage is logged as runtime_down for the group, so the
 // yardmaster hears of it once; later ones only lengthen the wait, doubling up
-// to RuntimeBackoffMax.
+// to RuntimeBackoffMax. The dispatcher clock sets and checks the deadline.
 func (d *Dispatcher) runtimeDown(ctx context.Context, g store.Group, err error) {
 	o := d.down[g.Name]
 	if o == nil {
@@ -1438,7 +1375,7 @@ func (d *Dispatcher) runtimeDown(ctx context.Context, g store.Group, err error) 
 	} else {
 		o.delay = min(2*o.delay, d.RuntimeBackoffMax)
 	}
-	o.until = time.Now().Add(o.delay)
+	o.until = d.now().Add(o.delay)
 }
 
 // runtimeUp ends g's outage, if it had one, once a Start got past the

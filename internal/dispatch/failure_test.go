@@ -526,3 +526,373 @@ func TestUnheldBeadSurvivesPruningTheUnheldEvent(t *testing.T) {
 		t.Fatalf("failures after unhold and prune = %d, want 0", n)
 	}
 }
+
+// checkoutRunner is a runner whose agents work in their bead's checkout, as
+// herdr's do (one worktree per bead, opened again by every later session of
+// it), and run until a Stop of theirs lands or a person closes their pane.
+// beside names each start into a checkout another agent still held: two
+// agents in one checkout.
+type checkoutRunner struct {
+	*fakeRunner
+	live      map[string]string // session -> its checkout, while its agent runs
+	beside    []string
+	stopErr   error // every Stop fails with it while it is set
+	afterOpen error // the next Start opens its agent, then fails with it
+}
+
+// open puts session's agent in bead's checkout and returns the handle that
+// says so.
+func (c *checkoutRunner) open(session, bead string) map[string]any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	at := "/worktrees/" + bead
+	for other, held := range c.live {
+		if held == at {
+			c.beside = append(c.beside, session+" beside "+other)
+		}
+	}
+	c.live[session] = at
+	return map[string]any{"session": session, "worktree": at}
+}
+
+func (c *checkoutRunner) Start(ctx context.Context, j dispatch.Job) (map[string]any, error) {
+	if _, err := c.fakeRunner.Start(ctx, j); err != nil {
+		return nil, err
+	}
+	h := c.open(j.Session.ID, j.Bead.ID)
+	c.mu.Lock()
+	err := c.afterOpen
+	c.afterOpen = nil
+	c.mu.Unlock()
+	return h, err
+}
+
+func (c *checkoutRunner) Stop(ctx context.Context, h map[string]any) error {
+	c.mu.Lock()
+	err := c.stopErr
+	if err == nil {
+		delete(c.live, h["session"].(string))
+	}
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return c.fakeRunner.Stop(ctx, h)
+}
+
+// runs says whether session's agent is still there.
+func (c *checkoutRunner) runs(session string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.live[session]
+	return ok
+}
+
+// closePane is a person closing the pane of session's agent.
+func (c *checkoutRunner) closePane(session string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.live, session)
+}
+
+func (c *checkoutRunner) sharing() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.beside)
+}
+
+// checkoutYard is a yard whose group g (with config cfg) works stage new and
+// group reviewers stage review, both with agents in per-bead checkouts, with
+// one bead in stage new and a clock the test moves.
+type checkoutYard struct {
+	t    *testing.T
+	s    store.API
+	r    *checkoutRunner
+	d    *dispatch.Dispatcher
+	bead store.Bead
+	now  time.Time
+}
+
+func newCheckoutYard(t *testing.T, cfg map[string]any) *checkoutYard {
+	t.Helper()
+	s := storetest.New(t)
+	r := &checkoutRunner{fakeRunner: &fakeRunner{dead: map[string]bool{}}, live: map[string]string{}}
+	y := &checkoutYard{t: t, s: s, r: r, now: time.Now(),
+		d: &dispatch.Dispatcher{Store: s, Runners: map[string]dispatch.Runner{"fake": r}, Backoff: time.Nanosecond}}
+	dispatch.SetClock(y.d, func() time.Time { return y.now })
+	ctx := context.Background()
+	for group, stage := range map[string]string{"g": "new", "reviewers": "review"} {
+		must(t, s.PutGroup(ctx, store.Group{Name: group, Runner: "fake", Config: cfg}, "me"))
+		_, err := s.AddRoute(ctx, store.Route{Stage: stage, Group: group}, "me")
+		must(t, err)
+	}
+	y.bead = newBead(t, s, "feature")
+	return y
+}
+
+// pass runs one pass an hour on: the backoff of a session that ended is over.
+func (y *checkoutYard) pass() {
+	y.t.Helper()
+	y.now = y.now.Add(time.Hour)
+	passes(y.t, y.d, 1)
+}
+
+// claims is how many times the bead has been claimed, one for each session
+// the yard started for it.
+func (y *checkoutYard) claims() int {
+	y.t.Helper()
+	return len(eventKinds(y.t, y.s, y.bead.ID, "claimed"))
+}
+
+func (y *checkoutYard) held() *store.Bead {
+	y.t.Helper()
+	b, err := y.s.GetBead(context.Background(), y.bead.ID)
+	must(y.t, err)
+	return b
+}
+
+type checkoutEnd struct {
+	name, state string
+	why         string // what the error of the session ended says, so that each row is known to take its own way
+	end         func(y *checkoutYard) string
+	unhold      func(y *checkoutYard, session string)
+}
+
+// failedEnds are the places that end a session as failed with its agent in the
+// checkout, each starting the bead's first session and returning it: the
+// pass's reap, which fails a start that no worker owns after five minutes (a
+// daemon died halfway through it) and a running session whose first prompt was
+// given up on, and the start's own worker, which fails a start that opened the
+// agent and then went wrong. The fence stands in the route that every one of
+// them leaves the bead to, not at any of them.
+var failedEnds = []checkoutEnd{
+	{name: "an interrupted start", state: "failed", why: "start interrupted", end: func(y *checkoutYard) string {
+		ctx := context.Background()
+		sess, err := y.s.Claim(ctx, y.bead.ID, "g", y.bead.Stage, "yard")
+		must(y.t, err)
+		must(y.t, y.s.SetHandle(ctx, sess.ID, y.r.open(sess.ID, y.bead.ID)))
+		y.pass()
+		return sess.ID
+	}},
+	{name: "a first prompt given up on", state: "failed", why: "first prompt", end: func(y *checkoutYard) string {
+		ctx := context.Background()
+		sess, err := y.s.Claim(ctx, y.bead.ID, "g", y.bead.Stage, "yard")
+		must(y.t, err)
+		h := y.r.open(sess.ID, y.bead.ID)
+		h["prompt_lost"] = true
+		must(y.t, y.s.MarkRunning(ctx, sess.ID, h))
+		passes(y.t, y.d, 1)
+		return sess.ID
+	}},
+	{name: "a failed start", state: "failed", why: "the pane is gone", end: func(y *checkoutYard) string {
+		y.r.afterOpen = errors.New("sending the first prompt: the pane is gone")
+		passes(y.t, y.d, 1)
+		return y.r.jobs[0].Session.ID
+	}},
+}
+
+type keptEnd struct {
+	checkoutEnd
+	heldBy string
+	note   string
+}
+
+func keptEnds() []keptEnd {
+	ends := make([]keptEnd, 0, len(failedEnds)+2)
+	for _, site := range failedEnds {
+		ends = append(ends, keptEnd{checkoutEnd: site, heldBy: "yard", note: "yardr bead unhold"})
+	}
+	return append(ends,
+		keptEnd{checkoutEnd: checkoutEnd{name: "released", state: "released", end: func(y *checkoutYard) string {
+			passes(y.t, y.d, 1)
+			session := y.r.jobs[0].Session.ID
+			_, err := y.s.Release(context.Background(), y.bead.ID, "hand to another group", store.Expect{}, "yardmaster")
+			must(y.t, err)
+			return session
+		}}, heldBy: "yard", note: "yardr bead unhold"},
+		keptEnd{checkoutEnd: checkoutEnd{name: "held", state: "held", end: func(y *checkoutYard) string {
+			passes(y.t, y.d, 1)
+			session := y.r.jobs[0].Session.ID
+			_, err := y.s.SetHold(context.Background(), y.bead.ID, true, store.Expect{}, "yardmaster")
+			must(y.t, err)
+			y.pass()
+			return session
+		}}, heldBy: "yardmaster", note: "close its pane before unholding"},
+	)
+}
+
+// A bead is not started again while a session that may still have its agent
+// in the checkout is unstopped: when Stop fails, the bead waits past any
+// backoff and starts once the stop lands, with the old agent gone.
+func TestSessionsWhoseAgentsMayStillActWaitUntilStopped(t *testing.T) {
+	t.Parallel()
+	ends := append(slices.Clone(failedEnds),
+		checkoutEnd{name: "released", state: "released", end: func(y *checkoutYard) string {
+			passes(y.t, y.d, 1)
+			session := y.r.jobs[0].Session.ID
+			_, err := y.s.Release(context.Background(), y.bead.ID, "hand to another group", store.Expect{}, "yardmaster")
+			must(y.t, err)
+			return session
+		}},
+		checkoutEnd{name: "held then unheld", state: "held", end: func(y *checkoutYard) string {
+			passes(y.t, y.d, 1)
+			session := y.r.jobs[0].Session.ID
+			_, err := y.s.SetHold(context.Background(), y.bead.ID, true, store.Expect{}, "yardmaster")
+			must(y.t, err)
+			y.pass() // teardown's failed Stop leaves the held session unstopped
+			return session
+		}, unhold: func(y *checkoutYard, _ string) {
+			_, err := y.s.SetHold(context.Background(), y.bead.ID, false, store.Expect{}, "yardmaster")
+			must(y.t, err)
+		}},
+		checkoutEnd{name: "aborted start", state: "aborted", why: "the socket is gone", end: func(y *checkoutYard) string {
+			y.d.RuntimeBackoff = time.Nanosecond // y.pass advances the dispatcher's outage clock
+			y.r.afterOpen = dispatch.Runtime(errors.New("herdr: the socket is gone"))
+			passes(y.t, y.d, 1)
+			return y.r.jobs[0].Session.ID
+		}},
+	)
+	for _, site := range ends {
+		t.Run(site.name, func(t *testing.T) {
+			t.Parallel()
+			y := newCheckoutYard(t, nil)
+			y.r.stopErr = errors.New("herdr: closing the tab failed")
+			session := site.end(y)
+			sess, how := getSession(t, y.s, session), ""
+			if sess.Error != nil {
+				how = *sess.Error
+			}
+			if sess.State != site.state || (site.why != "" && !strings.Contains(how, site.why)) {
+				t.Fatalf("session ended %s: %q, want %s with %q in its error", sess.State, how, site.state, site.why)
+			}
+			if site.unhold != nil {
+				site.unhold(y, session)
+			}
+			for range 3 {
+				y.pass()
+			}
+			if n, beside := y.claims(), y.r.sharing(); n != 1 || len(beside) != 0 || !y.r.runs(session) {
+				t.Fatalf("claims = %d, agents beside another = %v, old agent running = %v: the bead was started again while its %s session was not stopped",
+					n, beside, y.r.runs(session), site.state)
+			}
+			if got := y.held(); got.Hold {
+				t.Fatalf("bead held: it only waits for the stop: %+v", got)
+			}
+			waits := eventKinds(t, y.s, y.bead.ID, "backoff")
+			if len(waits) != 1 || !strings.Contains(fmt.Sprint(waits[0].Data["reason"]), session) {
+				t.Fatalf("backoff events = %+v, want one that names %s", waits, session)
+			}
+			if !strings.Contains(fmt.Sprint(waits[0].Data["reason"]), site.state) {
+				t.Fatalf("backoff reason = %v, want the session state %s", waits[0].Data["reason"], site.state)
+			}
+
+			y.r.stopErr = nil
+			y.pass()
+			if n, beside := y.claims(), y.r.sharing(); n != 2 || len(beside) != 0 || y.r.runs(session) {
+				t.Fatalf("after the stop landed: claims = %d (want 2), agents beside another = %v, old agent running = %v", n, beside, y.r.runs(session))
+			}
+		})
+	}
+}
+
+// A kept session that may still have its agent in the checkout leaves a note
+// and holds its bead if it is open. An already-held bead keeps its hold, and
+// the note warns whoever unholds it to close the pane first.
+func TestKeptSessionsThatMayStillActHoldTheirBead(t *testing.T) {
+	t.Parallel()
+	for _, site := range keptEnds() {
+		t.Run(site.name, func(t *testing.T) {
+			t.Parallel()
+			y := newCheckoutYard(t, map[string]any{"keep": true})
+			session := site.end(y)
+			for range 3 {
+				y.pass()
+			}
+			if n, beside := y.claims(), y.r.sharing(); n != 1 || len(beside) != 0 {
+				t.Fatalf("claims = %d, agents beside another = %v: the bead was started again beside the kept agent", n, beside)
+			}
+			got := y.held()
+			if !got.Hold || got.HeldBy != site.heldBy {
+				t.Fatalf("bead held by %q, want %q: %+v", got.HeldBy, site.heldBy, got)
+			}
+			if sess := getSession(t, y.s, session); !sess.Stopped || !y.r.runs(session) || len(y.r.stopped) != 0 {
+				t.Fatalf("session = %+v, agent running %v, stopped %v: want it kept, marked stopped and left running", sess, y.r.runs(session), y.r.stopped)
+			}
+			notes, err := y.s.Notes(context.Background(), y.bead.ID)
+			must(t, err)
+			var said bool
+			for _, n := range notes {
+				said = said || n.Author == "yard" && strings.Contains(n.Text, session) && strings.Contains(n.Text, "keep") &&
+					strings.Contains(n.Text, site.state) && strings.Contains(n.Text, site.note)
+			}
+			if !said {
+				t.Fatalf("no note by the yard names %s, keep, %s and %q: %+v", session, site.state, site.note, notes)
+			}
+			if site.heldBy == "yard" {
+				// The note is the last thing before the yard's hold, by the same
+				// actor: that is where the web view reads a hold's reason.
+				evs, err := y.s.Events(context.Background(), y.bead.ID, 0)
+				must(t, err)
+				for i, e := range evs {
+					if e.Kind == "held" && e.Actor == "yard" &&
+						(i == 0 || evs[i-1].Kind != "noted" || evs[i-1].Actor != e.Actor) {
+						t.Fatalf("the hold is not right after the yard's note: %+v", evs)
+					}
+				}
+			}
+
+			// A person looks at the agent, closes its pane and unholds: the
+			// bead starts again with fresh attempts.
+			y.r.closePane(session)
+			_, err = y.s.SetHold(context.Background(), y.bead.ID, false, store.Expect{}, "yardmaster")
+			must(t, err)
+			y.pass()
+			if n, beside := y.claims(), y.r.sharing(); n != 2 || len(beside) != 0 {
+				t.Fatalf("after the unhold: claims = %d (want 2), agents beside another = %v", n, beside)
+			}
+			if n, _ := y.s.FailureCount(context.Background(), y.bead.ID, "new"); n != 0 {
+				t.Fatalf("failures after the unhold = %d, want a fresh start", n)
+			}
+		})
+	}
+}
+
+// A session that ended done or died leaves its bead to be routed as it was,
+// whatever its group keeps and whether its Stop lands: the fence is for an
+// end whose agent may still act (failed, released, held, aborted), not for a
+// session that finished (done) or whose runner says its agent is gone (died).
+func TestSessionsThatEndedDoneOrDiedDoNotFenceTheirBead(t *testing.T) {
+	t.Parallel()
+	keep := map[string]any{"keep": true}
+	stops := errors.New("herdr: closing the tab failed")
+	died := func(y *checkoutYard, session string) { y.r.dead[session] = true }
+	done := func(y *checkoutYard, _ string) {
+		_, err := y.s.Advance(context.Background(), y.bead.ID, "review", store.Expect{}, "builder")
+		must(y.t, err)
+	}
+	for _, row := range []struct {
+		name    string
+		cfg     map[string]any
+		stopErr error
+		end     func(y *checkoutYard, session string)
+	}{
+		{"died in a group that keeps its agents", keep, nil, died},
+		{"died with a Stop that fails", nil, stops, died},
+		{"done in a group that keeps its agents", keep, nil, done},
+		{"done with a Stop that fails", nil, stops, done},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			y := newCheckoutYard(t, row.cfg)
+			y.r.stopErr = row.stopErr
+			passes(t, y.d, 1)
+			row.end(y, y.r.jobs[0].Session.ID)
+			for range 2 {
+				y.pass()
+			}
+			if got := y.held(); got.Hold || y.claims() != 2 {
+				t.Fatalf("held = %v, claims = %d: want the bead routed again, not held", got.Hold, y.claims())
+			}
+		})
+	}
+}

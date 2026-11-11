@@ -1343,8 +1343,18 @@ func TestSetupStepsDirDepot(t *testing.T) {
 	if !slices.Equal(keys, []string{stepDepot, stepDepotFiles, stepBuilders, stepReviewers, stepRoutes, stepLimits, stepFirstBead, stepMerged}) {
 		t.Fatalf("keys = %v", keys)
 	}
-	if n := nextStep(steps); n.Key != stepDepotFiles || n.Next != "yardr depot init docs" {
+	if n := nextStep(steps); n.Key != stepDepotFiles || n.Next != `yardr bead ask --new "Set up depot docs from dir?" --context "the operator must approve the pack's import" --run "pack apply dir --depot docs"` {
 		t.Fatalf("next = %+v", n)
+	}
+	if err := st.SetSetting(ctx, defaultPackSetting, "research", "me"); err != nil {
+		t.Fatal(err)
+	}
+	steps, err = setupSteps(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := nextStep(steps); n.Next != "yardr depot init docs" {
+		t.Fatalf("next for a configured non-embedded pack = %+v", n)
 	}
 	ownDepotFiles(t, depot)
 	steps, err = setupSteps(ctx, st)

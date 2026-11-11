@@ -23,8 +23,17 @@
     "action": [
       "opened"
     ],
+    "additions": [
+      "12"
+    ],
     "base": [
       "main"
+    ],
+    "changed_files": [
+      "1"
+    ],
+    "deletions": [
+      "0"
     ],
     "event": [
       "pull_request"

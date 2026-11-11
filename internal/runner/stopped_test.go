@@ -122,6 +122,13 @@ esac`)}
 	status("working", "muse's error has just been printed")
 	later("w1:p3")
 	status("idle", "muse's error has stood for stopStill")
+	// A taken continuation makes the old error history even when the pane stands still.
+	show(museStopped+"\n❯ continue\n◆ Work completed\n❯ ", muse)
+	status("working", "muse took a continuation below its old error")
+	if _, ok := h.stops["w1:p3"]; ok {
+		later("w1:p3")
+	}
+	status("working", "muse's historical error has stood for stopStill")
 
 	// A pane with no error at its end is never remembered.
 	handle = map[string]any{"agent": "yardr-embp-new", "pane": "w1:p2", "kind": "kimi"}

@@ -629,8 +629,9 @@ func TestStageMapNeedsTheCrewIdentity(t *testing.T) {
 }
 
 // A map the import was told not to set (the run is not the operator's) is
-// neither written nor recorded, and the rest of the pack is imported. The
-// operator's next apply sets it.
+// neither written nor recorded, and the rest of the pack is imported but
+// left unrecorded, with the run card named. The operator's next apply
+// sets it.
 func TestStageMapRefusedLeavesTheRestOfTheImport(t *testing.T) {
 	st, o := yard(t)
 	o.Crew = map[string]string{"yardmaster": "boss"}
@@ -645,17 +646,21 @@ func TestStageMapRefusedLeavesTheRestOfTheImport(t *testing.T) {
 	}
 	seedGroups(t, st, plan, a)
 	res, err := pack.Apply(ctx, st, plan, pack.ApplyOptions{Answers: a, MapRefused: map[string]string{"linear": "not the operator"}, Actor: "boss"})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "only the operator (me) may record the import of pack starter; this is boss") ||
+		!strings.Contains(err.Error(), "applying again records nothing") {
+		t.Fatalf("apply as boss = %+v, %v; want the rest imported and the record refused with the run card", res, err)
+	}
+	if res == nil || res.Recorded {
+		t.Fatalf("result = %+v, want it unrecorded", res)
 	}
 	if h := getHook(t, st, "linear"); h.As != "" || len(h.Map) != 0 || len(res.Mapped) != 0 {
 		t.Fatalf("a refused map was set: %+v, %+v", h, res)
 	}
-	if _, err := st.GetGroup(ctx, "web-builders"); err != nil || !res.Recorded {
+	if _, err := st.GetGroup(ctx, "web-builders"); err != nil {
 		t.Fatalf("the rest was not imported: %v, %+v", err, res)
 	}
-	if rec := record(t, st); slices.ContainsFunc(rec.Objects, func(po store.PackObject) bool { return po.Kind == "map" }) {
-		t.Fatalf("a refused map is on record: %+v", rec.Objects)
+	if recs, _ := st.Packs(ctx); len(recs) != 0 {
+		t.Fatalf("a crew member's import was recorded: %+v", recs)
 	}
 
 	plan = build(t, st, p, o)

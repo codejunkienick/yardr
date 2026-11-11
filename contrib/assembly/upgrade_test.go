@@ -157,6 +157,23 @@ func TestPostReviewCopyInThePackIsIdentical(t *testing.T) {
 	}
 }
 
+// The contributors pack carries push-fix for the group that pushes a fix onto
+// a pull request's branch, byte for byte the one in contrib/assembly that a
+// yard installs and `yardr upgrade` refreshes: a change to one is made in both.
+func TestPushFixCopyInThePackIsIdentical(t *testing.T) {
+	want, err := os.ReadFile("push-fix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile("../../packs/contributors/scripts/push-fix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Error("packs/contributors/scripts/push-fix differs from contrib/assembly/push-fix: change both")
+	}
+}
+
 // A landing on the depot upgrade_from names installs the landed build and
 // notes the outcome: the summary joins the landing note, the seconds the
 // log line, and the install's own lines the log. The install also refreshes

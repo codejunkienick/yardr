@@ -49,6 +49,14 @@ marks:
 
 flags:
   model: --model
+  # `muse --help` (Muse Code 1.4.15, 10 Nov 2026): "--reasoning-effort
+  # <EFFORT>  Meta reasoning effort: none|minimal|low|medium|high|xhigh|max|ultra
+  # (default: high; alias: --effort)". A group whose args pass the alias is held
+  # to the flag as it is held to the flag itself.
+  effort:
+    args: [--reasoning-effort, "{level}"]
+    levels: [none, minimal, low, medium, high, xhigh, max, ultra]
+    aliases: [--effort]
   unattended: [--yolo]
   version: [--version]
   one_shot: [exec]
@@ -104,6 +112,18 @@ model:
     field: payload.record.workspace_root
     at: recorded_at
     at_unit: us
+
+# The last model_completed line holds the current prompt at
+# payload.event.usage.input_tokens, cache included (read from a live Muse
+# Code session, 10 Nov 2026). The next completed call after compaction reads
+# low again. The model catalog (~/.local/share/muse/model-catalog/*.json,
+# read the same day) gives context_limit 1007997 for every Muse text model.
+context:
+  type_field: payload.event.kind
+  type: model_completed
+  usage: payload.event.usage
+  tokens: [input_tokens]
+  window: 1007997
 
 # What a session used, in tokens, read from the same file once the session has
 # ended (docs/design/2026-10-21-yardr-qbqq-session-tokens.md, section 3.3).
@@ -174,7 +194,9 @@ login:
   - pattern: '^(Log in with browser|Set an API key)'
   - pattern: '^↓↑ to select · Esc to quit'
 
-# The lines a Muse pane stops on. `muse exec` fails out loud (missing
+# The usage-stop title and sentence are matched in full so quoted limit
+# prose does not hold a model; the title survives a wrapped explanation.
+# The other lines a Muse pane stops on: `muse exec` fails out loud (missing
 # meta credentials, a model that does not exist), but the TUI shows its
 # login screen for the first and answers anyway for the second (read
 # live, Muse Code 1.4.9), so neither line ever ends a pane; a dead base
@@ -189,6 +211,10 @@ login:
 # It is no capacity yardr retries, as a 529 is, but a turn that failed,
 # as claude's API Error: 500 is: other.
 errors:
+  - reason: rate_limited
+    pattern: '^Usage limit reached$'
+  - reason: rate_limited
+    pattern: '^This turn stopped because your usage limit was reached\.$'
   - reason: other
     pattern: '^model failed:'
 

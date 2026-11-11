@@ -133,6 +133,11 @@ type Reply struct {
 	Seq  uint64 `json:"seq,omitempty"`
 	Hash string `json:"hash,omitempty"`
 	In   string `json:"in,omitempty"`
+	// Format and Source are fixed at reservation for an explicit reply.
+	// AnswerHash groups modes by the legacy trimmed body and files, without
+	// changing the body sent, so changing mode cannot bypass an unknown outcome.
+	Format     string `json:"format,omitempty"`
+	AnswerHash string `json:"answer_hash,omitempty"`
 	// Attempts counts the Replying calls: more than one means an earlier
 	// attempt did not get as far as Replied, so the source may hold the
 	// comment already.
@@ -181,21 +186,80 @@ func newReplyKey() string {
 // key. It is where anyone but the crew member and the operator is refused
 // (maySpeakAs), as actor.
 func (s *Store) Replying(ctx context.Context, name string, seq uint64, to, body, actor string, files ...BlobFile) (*Reply, error) {
+	return s.replying(ctx, name, seq, to, body, "", actor, files)
+}
+
+// ReplyingWithFormat reserves an explicit reply only if the delivery's
+// declared source supports that mode. A separate call makes old servers
+// refuse the request instead of ignoring an unknown optional argument.
+func (s *Store) ReplyingWithFormat(ctx context.Context, name string, seq uint64, to, body, format, actor string, files ...BlobFile) (*Reply, error) {
+	if format == "" {
+		return nil, fmt.Errorf("replying with format: a format is required")
+	}
+	return s.replying(ctx, name, seq, to, body, format, actor, files)
+}
+
+func (s *Store) replying(ctx context.Context, name string, seq uint64, to, body, format, actor string, files []BlobFile) (*Reply, error) {
 	if seq == 0 || body == "" {
 		return nil, fmt.Errorf("replying: the delivery's seq and a body are required")
 	}
 	if len(files) > MaxMailFiles {
 		return nil, fmt.Errorf("replying: a reply carries at most %d files, not %d", MaxMailFiles, len(files))
 	}
-	hash := replyHash(to, body, files)
+	legacyHash := replyHash(to, body, files)
+	hash := legacyHash
+	answerHash := replyHash(to, strings.TrimSpace(body), files)
 	var out *Reply
 	err := s.changeCrew(name, func(w *wtx, r *CrewMember) error {
 		if err := w.may(ctx, actor, ActSpeakAs, Object{Kind: KindCrew, Name: name}); err != nil {
 			return err
 		}
+		source := ""
+		if format != "" {
+			var e Event
+			if ok, err := get(w.Tx, bEvents, seqKey(seq), &e); err != nil {
+				return err
+			} else if !ok || e.Kind != "hook" {
+				return fmt.Errorf("replying with format: event %d is not a hook delivery", seq)
+			}
+			source, _ = e.Data["source"].(string)
+			var src Source
+			if ok, err := get(w.Tx, bSources, source, &src); err != nil {
+				return fmt.Errorf("replying with format: source %s: %w", source, err)
+			} else if !ok {
+				return fmt.Errorf("replying with format: source %s: %w", source, ErrNotFound)
+			}
+			d, err := src.Declaration()
+			if err != nil {
+				return err
+			}
+			if d.Credential == nil {
+				return fmt.Errorf("source %s cannot carry explicit reply formats without a credential", source)
+			}
+			if err := d.Thread.CheckFormat(format); err != nil {
+				return fmt.Errorf("replying in source %s: %w", source, err)
+			}
+			if len(files) > 0 && !d.Thread.Files {
+				return fmt.Errorf("source %s takes no files", source)
+			}
+			sum := sha256.Sum256([]byte(source + "\x00" + format + "\x00" + hash))
+			hash = hex.EncodeToString(sum[:])
+		}
 		out = nil
 		err := each(w.Tx, bReplies, name+"\x00", func(_ []byte, rp *Reply) error {
-			if rp.Seq == seq && rp.Hash == hash {
+			if rp.Seq != seq {
+				return nil
+			}
+			priorAnswer := rp.Hash
+			if rp.Format != "" {
+				priorAnswer = rp.AnswerHash
+			}
+			// Legacy API callers may have hashed a body with surrounding whitespace.
+			sameAnswer := priorAnswer == answerHash || rp.Format == "" && rp.Hash == legacyHash
+			if sameAnswer && !rp.Posted && (rp.Format != format || format != "" && rp.Source != source) {
+				return fmt.Errorf("reply to event %d has an unresolved attempt with another source or format; retry the original reply to reconcile it", seq)
+			}
+			if rp.Hash == hash && rp.Format == format && (format == "" || rp.Source == source) {
 				out = rp
 			}
 			return nil
@@ -205,6 +269,9 @@ func (s *Store) Replying(ctx context.Context, name string, seq uint64, to, body,
 		}
 		if out == nil {
 			out = &Reply{Key: newReplyKey(), Seq: seq, Hash: hash, At: now()}
+			if format != "" {
+				out.Source, out.Format, out.AnswerHash = source, format, answerHash
+			}
 		}
 		out.Attempts++
 		return put(w.Tx, bReplies, replyKey(name, out.Key), out)
@@ -235,6 +302,20 @@ func (s *Store) posted(ctx context.Context, name string, rp Reply, how, kind, ac
 	return s.changeCrew(name, func(w *wtx, r *CrewMember) error {
 		if err := w.may(ctx, actor, ActSpeakAs, Object{Kind: KindCrew, Name: name}); err != nil {
 			return err
+		}
+		if rp.Key != "" {
+			var rec Reply
+			ok, err := get(w.Tx, bReplies, replyKey(name, rp.Key), &rec)
+			if err != nil {
+				return err
+			}
+			if rec.Format != "" || rp.Format != "" {
+				if !ok || rec.Format != rp.Format || rec.Source != rp.Source || rec.Seq != rp.Seq {
+					return fmt.Errorf("reply record: source, format and delivery must match the reserved reply")
+				}
+			}
+		} else if rp.Format != "" {
+			return fmt.Errorf("reply record: explicit format requires a reserved reply key")
 		}
 		if !participates(w.Tx, name, rp.Source, rp.Thread) {
 			p := Participation{CrewMember: name, Source: rp.Source, Thread: rp.Thread, Title: rp.Title, URL: rp.ThreadURL,

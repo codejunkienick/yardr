@@ -13,6 +13,7 @@ by its events (`yardr events`) sees these changes and waits:
 |---|---|---|
 | `group_set` | `group add`, for a new group and for one it changes, `group set` when it changes something, and a pack's import of a group | `name`, `runner`, `limit`, and `members` when it has any; runner config is omitted |
 | `group_removed` | `group rm` | `name`, `routes`: the ids of the routes that went with it (they log no `route_removed`), `released`: how many beads it gave back |
+| `group_renamed` | `group rename` | `from`, `to`; `routes`: the ids of the routes that name it now (they log no `route_set`); `beads` and `sessions`: how many of its open beads and live sessions went on under the new name, none released; `grants`: the grants of source calls that moved; `subscriptions`: who holds a subscription whose `group=` filter followed; `members`: the groups whose list of members named it, which is a script group's; `packs`: the pack imports whose record followed, as the pack's name, and ` in <depot>` for one imported into a depot; `approved`, the `bead` and `ask` of the run ask the operator approved, when it was renamed that way |
 | `route_added` | `route add`, and a pack's import of a route | `id`, `stage`, `group`, and the filters it sets: `type`, `depot`, `label`, `bead_priority`; for a route that asks for more than one label `label` is the first and `labels` all of them ([below](#which-beads-a-route-takes)); for a route with further groups or a quota condition also `groups`: each group in order, `name` and its condition `when` ([below](#a-route-with-further-groups-and-quota-conditions)); `note` where the route carries one |
 | `route_removed` | `route rm` | the same fields, of the route as it was |
 | `route_set` | `route set` | `was`, `is`: the route's fields as `route_added` carries them, before and after |
@@ -63,12 +64,31 @@ key: it runs as it did, a write that leaves the key as it is goes through,
 and [`yardr doctor`](doctor.md#the-yard) notes it with how it is removed
 (`--unset <key>`).
 
-The `cmd`, `dir`, `env_file`, `kind`, `args`, `prompt` and `worktrees`
-settings, and a change of runner to or from `exec` by `group add` whole,
-are the operator's alone, but for what the yardmaster runs for them on
+`args` takes a harness's permission flags as a JSON list. To name one of the
+kind's permission presets instead, type `preset=<label>`, or
+`--set preset=<label>` on `group add`. It sets `args` to that preset's flags
+and replaces whatever `args` held. The kind is the one named in the same
+command (`kind=codex preset=read-only`), else the one the group has, else the
+yard's `default_kind`. `group add` writes the group whole, so for it the kind
+is `--set kind=<kind>` or the `default_kind`.
+`yardr harness show <kind>` lists the labels a kind has, and a label it lacks
+is refused with the ones it has. Write a label of two words with a dash, or
+quote it to keep its space:
+
+```sh
+yardr group set reviewers preset=read-only
+yardr group set reviewers 'preset=read only'   # the same, with the label's space
+yardr group add reviewers --runner herdr --set kind=codex --set preset=read-only
+```
+
+The group keeps the flags and not the label.
+
+The `cmd`, `dir`, `env_file`, `kind`, `args`, `prompt`, `worktrees` and
+`effort` settings, and a change of runner to or from `exec` by `group add`
+whole, are the operator's alone, but for what the yardmaster runs for them on
 their mail (below): the store refuses each from anyone else, a crew
 member's pane included, and no `group set` run ask proposes one but `cmd`,
-`prompt` and a permission preset that never asks, below. A new group is the
+`prompt`, `effort` and a permission preset that never asks, below. A new group is the
 other exception: from a crew pane, `yardr bead ask <id>
 "<question>" --run "group add <name> --runner <runner> [--limit <n>]
 [--set k=v ...]"` proposes one on a weighty (`code`) card that shows the
@@ -121,10 +141,99 @@ rewritten in place since, so that it no longer holds the text its name says,
 the card says so above the text it shows as the prompt now; it is no
 refusal. Nothing else rides in with them.
 
+A group's `effort` ([Models](#models)) has a card too, which is `effort=<level>`
+in the same command: `yardr bead ask <id> "<question>" --run "group set
+reviewers effort=max"`. A level is one word with no quotes, which the flag in
+`args` that it replaces never was, so the change needs no terminal. The card
+shows the effort the group has now, or that it has none and its agents work at
+their harness's own, and the flags each session will be given; approving sets
+exactly that, and the card is taken back by what the group had. It weighs
+nothing, since no program runs differently, and a card that carries a prompt, a
+command or a preset beside it is weighty as it was. A level its kind lacks is
+refused where the card is drawn.
+
+A card takes no flags, so it cannot say `--unset effort`. It says
+`effort=default` instead, which returns the group to its harness's own:
+`yardr bead ask <id> "<question>" --run "group set reviewers effort=default"`.
+`default` is never a level. A harness file that already lists `default` as a
+level must use another word; `default` is reserved for returning a group to its
+harness's own effort. The card shows the level the group has now and that no
+flag is added for it, and taking the card back sets that level again. A group
+that sets no effort has nothing to return, so the card is refused there, beside
+other settings too. A terminal reads `effort=default` as `--unset effort`, so
+the command the card prints pastes into one.
+
 The runner is not changed this way, since another runner reads another
 config: that is `group add`. `yardr group show <name>` prints one group: its
 runner and limit, a setting to a line as `group set` takes it back, the
 routes that send it work and the source calls it may make.
+
+## Renaming a group
+
+`yardr group rename <old> <new>` calls a group by another name, in one write,
+and everything that names it follows:
+
+```sh
+yardr group rename webapp-builders builders
+```
+
+- its routes, as their first group or after it, with the condition each group
+  carries there;
+- the beads it owns and their live sessions, which go on running under the new
+  name: nothing is released and no runner is touched. That is what adding the
+  group again, moving each route and `group rm` cannot do, since the last
+  releases the beads its live sessions hold;
+- its settings, members, limit and subscriptions, and the grants of source calls
+  its sessions hold;
+- the subscriptions of crew members, users and groups that filter on it
+  (`--where group=<name>`);
+- for a script (`exec`) group, the lists of members of the other groups that
+  name it: its sessions count as the group where a list does, when they move
+  the beads of that group's stages, so a script group's name that was not
+  changed there would leave its script a member of nothing from the moment it
+  was renamed;
+- what its arrivals have cost, so that the estimates stand
+  ([the estimate cells](#what-a-groups-beads-cost-the-estimate-cells));
+- the pack imports that recorded it. The next `yardr pack apply` finds the
+  renamed group, as the pack's own or as one that took the pack's, and makes
+  no group by the old name beside it: a record that kept the old name would
+  find no group by it, and make one from the depot's name for it
+  ([packs.md](packs.md#how-a-pack-maps-to-the-yard)).
+
+The old name is free afterwards and reaches nothing. The event log, the notes
+and the sessions that ended keep it, since they say what happened, and
+`group_renamed` says when the name changed. A session that is running when the
+group is renamed has the old name in its environment (`YARDR_GROUP`) until it
+ends, so what it writes by that name, the `Yardr-Agent` line of a commit, says
+the old one; the yard knows the session by its record, which is the new name's
+from the rename. What names it outside the yard's records is for you to change: a script, a role prompt, the text of a flow, a
+pack's own files. The yard finds a few groups by their name, and a depot's
+`<depot>-assembly`, which `yardr depot push` changes, is one: it is not a group
+to rename.
+
+A yard default route that names its group by the depot template
+(`{depot}-builders`, [Which beads a route takes](#which-beads-a-route-takes)) is
+not renamed with it: it names the groups of every depot, and so no one of them.
+It stops serving the depot whose group this was, and the command says which, as
+`group rm` does.
+
+A rename is refused when the group is not there; when `<new>` is a group
+already, since a rename never replaces one (remove that one first); when `<new>`
+is a name pack imports give the groups they make for a depot of the yard,
+`<depot>-<name>`, which the next import of a pack would take for its own; and
+when `<new>` is no name a new group may have: a user's or a crew member's name,
+`wait`, or one that is not letters, digits, `.`, `_`, `-` and `/`. A group
+that has such a name, `webapp-builders`, can be renamed out of it, and not
+back.
+
+Only the operator renames a group, since the name is what a script, a role
+prompt or a person reaches it by. The yardmaster asks on a card, which names
+what follows and is approved or declined as the others are:
+`yardr bead ask <id> "<question>" --run "group rename webapp-builders builders"`
+([chat.md](chat.md) lists the cards). The card counts no sessions, since they
+start and end by the minute. It is taken back by the
+reverse rename, except for a group whose old name is one imports give a depot's
+groups, which nobody can rename it back to.
 
 ## Which beads a route takes
 
@@ -514,11 +623,15 @@ prints them as `builders@Weekly<80,5h<90 else spare-builders`.
   conditions, however many beads are ready; the built-in machine source
   is re-read every pass, about every 30 seconds, since load moves faster
   than any provider's windows.
-- **A group at its limit is waited for, not passed over.** So is one whose
-  runtime is down or that is held back for a model. Only a quota condition
-  sends a bead to a further group, and what the yard runs at once stays
-  bounded by the groups' limits. The bead gets one `group_wait` event,
-  logged once per stage and route until it starts, as `quota_wait` is:
+- **A group at its limit is waited for, not passed over, unless the bead's
+  exact model is held.** A model hold passes the group over for the route's
+  next group even when the held session occupies its last slot. A pause
+  (limit 0), a runtime outage or a start in flight still waits. The next
+  group must satisfy its own quota and limit, and held sessions still count
+  against `max_sessions`. With no available group the bead waits, with a
+  `quota_wait` if the remaining groups fail their quota conditions. A wait
+  for a group's limit, runtime or model gets one `group_wait` event, logged
+  once per stage and route until it starts, as `quota_wait` is:
   `route`, `groups` (each group with its `reason` in words: at its limit,
   its runtime down, or held back for the bead's model), `reason` (the same
   on one line) and `hint`. A group at limit 0 says paused instead of
@@ -795,6 +908,31 @@ An agent may also run another model than the one asked for without saying
 so. The running session is the only place the truth shows, so yardr checks
 there, not when the model is set: no command asks an agent about a model.
 
+**Effort.** A herdr group's `effort` is how hard its agents reason, as a level
+of its kind: `yardr group set reviewers effort=max`. The kind's file says how a
+level reaches the agent and which levels there are (`yardr harness show <kind>`
+prints both), and the runner adds the words after the group's own `args` and
+its `model`: Claude Code is given `--effort <level>`, Muse `--reasoning-effort
+<level>` and Codex `-c model_reasoning_effort=<level>`. A kind whose file names
+none (Grok, Kimi, Kiro, opencode and pi) refuses the key, and a level the kind
+lacks is refused with the ones it has, as it is where the group is added or a
+pack imports it; nothing is written. Codex checks no level itself, its model
+does, at the session's first request, so its list is the union of those of
+`codex debug models` and a level the group's model lacks fails there. Unset
+(`yardr group set reviewers --unset effort`, or `effort=default`, which a run
+ask can carry), an agent works at its harness's own, which the harness's own
+configuration can set (Codex reads `~/.codex/config.toml`), so a group that
+names no effort is not at one level for sure. `default` is never a level, and
+no harness file may list it as one. `args` that already pass the flag are
+refused beside an `effort`, and an `effort` beside them: take the flag out of
+`args` first, which is one `yardr group set` with `--unset args` or the list
+without it, so that no flag is passed twice. Muse's `--effort` is its
+`--reasoning-effort` and is held the
+same. The key is the operator's, as the `args` it was a flag of are, and a run
+ask proposes it ([Changing a group](#changing-a-group)); `yardr group show`
+prints it with the words it becomes (`harness.effort` in its `--json`), and a
+crew member takes none yet.
+
 **The model the agent reports.** Once a bead session's agent has answered
 its first prompt, the daemon reads the model the agent itself reports and
 keeps it on the session's handle as `model_reported`, next to `model_asked`
@@ -907,9 +1045,10 @@ screen, so a still pane for that long is not working.
 
 **`session_harness_error`.** The pane says what herdr's status cannot. On
 each pass in the first 2 minutes of an idle spell (status `idle` or `done`)
-the daemon reads the end of the agent's
-pane, and a line among its last 20 that is a known error of the group's
-`kind` raises one event on the bead, at once and not at the `idle` limit:
+the daemon reads the end of the agent's pane. A message the agent took since
+ends the scan, so an error above it is history. A line among its last 20
+that is a known error of the group's `kind` raises one event on the bead,
+at once and not at the `idle` limit:
 
 | field | |
 |---|---|
@@ -1000,6 +1139,8 @@ before the general one:
 | `kimi` | `at_capacity` | `^Error: \[provider\.overloaded\]` |
 | `kimi` | `not_logged_in` | `^Error: \[(auth\.(login_required\|token_missing\|token_unauthorized)\|provider\.auth_error)\]` |
 | `pi` | `other` | `^Error: Retry failed after \d+ attempts` |
+| `muse` | `rate_limited` | `^Usage limit reached$` |
+| `muse` | `rate_limited` | `^This turn stopped because your usage limit was reached\.$` |
 | `muse` | `other` | `^model failed:` |
 | any other | | none known: nothing is reported, and `session_idle` with its `tail` is what there is |
 <!-- /harness errors -->
@@ -1122,7 +1263,19 @@ reset at 00:02 (3m ago)`. With no window used up the hint says so (`no
 window of kimi's subscription is used up, says aiquokka: …`): the limit the
 harness hit is then one the provider does not report, another account's, one
 model's or a short rate limit, and the yardmaster reads the pane as before.
-With `limits_unknown` the hint is what it was.
+With `limits_unknown` the hint explains the stop without a window or reset.
+
+When the source names no used-up window or gives no reset time, the
+observed usage stop still holds the session's model in its group. The
+route can pass it over for an `--else` group; with no available fallback,
+new beads wait. The hold survives a daemon restart and ends when the
+pane can be read without a current usage stop, or the session ends; status
+alone does not end it. No reset is guessed and no prompt is scheduled.
+A note written for the session stays queued while the hold lasts, as it
+does during a known reset's wait: the agent cannot read it, and it is told
+once the hold has ended, or never if the session ends first.
+An empty or unavailable report without an observed stop keeps the route's
+usual policy. A known reset continues to use the wait described below.
 
 A session's answer is for the login its group burns, read with the group's
 env (`yardr limits --group <group>` reads the same); a crew member's is for
@@ -1148,7 +1301,7 @@ command runs inside the dispatcher's pass, so one that hangs holds that
 pass for up to 30 seconds, once in a minute. The 60 seconds are fixed; no
 key sets them.
 
-The group goes on starting sessions whatever the event says.
+Other models and groups are held only by their own stops and route conditions.
 
 #### A window that resets within six hours is waited for
 
@@ -1161,7 +1314,7 @@ hours away, the daemon comes back for it:
 | | |
 |---|---|
 | at the stop | the event is raised at once, as above, with `wakes_at`: the reset and one minute. The hint says `yardr asks again at 00:03 and prompts the agent when the window is open`. The time is kept on the handle (`harness_reset_at`, with `harness_reset_window` and, for a session, `harness_reset_model`), so a daemon that replaced itself wakes for it too |
-| while it waits | a session's idle spell is not counted: no `session_idle`, and a group with `grace` does not end it. `max_age` applies as ever. Nothing is typed, and the source is not asked. An agent that is seen working, or a crew member whose inbox was emptied, ends the wait |
+| while it waits | a session's idle spell is not counted: no `session_idle`, and a group with `grace` does not end it. `max_age` applies as ever. Nothing is typed, a note written for a session is not told, and the source is not asked. An agent that is seen working, or a crew member whose inbox was emptied, ends the wait |
 | the group, while a session waits | starts no further session with the model that session waits with: each would stop on the same limit, and three would wait where one does. The event says so, with `model`. A bead with another `--meta model` still starts, as beside a stalled session ([above](#models)), and so do the group's beads once its model is changed. The hold is read from the waiting sessions' handles on each pass and asks the source nothing; it ends with the wait: at the prompt, when the agent is seen working, or when the session ends (`yardr bead release <bead>`). `yardr session list` says it under its table: `builders starts no further session with model k3 until 00:03 (in 42m): session … (bead …) waits for the 5h window of its usage limit to reset`, and as `reset_wait` (`until`, `window`, `model`) in `--json`. Another group on the same subscription is not held: its next session stops, is told of, and then holds its own group |
 | at `wakes_at` | the source is asked once more. A window that is still used up, with a later reset or none said, is told again as at the stop (a second `session_harness_error`, with the new `resets_at` and `wakes_at`, or none for a reset more than 6 hours off): what the first event said no longer holds. A window that counts for a single model holds nothing here while no other is used up: the agent may be of another model, and one of that model stops on its window again after the prompt and is told of it then, with that window's `resets_at` and no `wakes_at` for a reset more than 6 hours off. A source that gives no answer does not hold the prompt back |
 | the prompt | given when the usage limit still ends the pane, the input is empty and no first prompt is on its way. A session that has done nothing (as `session_stalled` asks) gets its first prompt again. One stopped mid-work gets one line: `yardr: the usage limit your harness stopped on (kimi, 5h window) has reset. Go on where you stopped.` A crew member gets that line and its inbox's count (`… 3 new in your inbox: run yardr inbox to read them, and yardr inbox --ack <seq> through the last you handled.`), which counts as its nudge for them |
@@ -1563,6 +1716,35 @@ A session ends when the bead is advanced, closed or released. If the runner
 reports the work gone (process exited, herdr agent gone) the session is marked
 `died` and the bead is routed again after a backoff; after 3 failures in one
 stage the bead is held (`yardr bead unhold` grants fresh attempts).
+
+A session that ended with its agent possibly still at work — the yard ended it
+as `failed` (it sat idle or ran past its limits, its first prompt was given up
+on, or its start went wrong), or it was released, held or aborted — has its
+bead routed again after the same backoff, but not while its agent may still be
+at work. herdr opens one worktree for a bead and every session of it works
+there, so a second agent would share the checkout with the first. The daemon
+stops the agent of such a session as it does of any ended session (for herdr,
+it closes the tab), and tries again on every pass while that fails (herdr is
+down, or refuses the close). Until it lands the bead waits, past its backoff
+(a release sets none, so the wait is the only thing between the old agent and
+its replacement), and gets one `backoff` event whose `reason` names the session
+and how it ended. Closing the tab by hand ends the wait too, since the next try
+finds it gone.
+
+A group with `keep: true` leaves its agents running and stops none, so the bead
+of a session that ended there as failed, released or held is held instead, with
+a note by `yard` that names the session and the way on. The yardmaster hears of
+the hold as of any other (`held` is of the class `attention`). The bead stays
+held until a person or a crew member has looked at the agent, closed its pane
+and run `yardr bead unhold <bead>`, which routes it again from its stage with
+fresh attempts. An agent cannot lift a hold. When the bead is already held, as
+it usually is for a held end, only the note is written: it warns whoever
+unholds it to close the agent's pane first.
+
+A session that ended `done` or `died` is not waited for, whatever the group
+keeps: a kept session that ended `done` is left running, and its bead goes on
+to its next stage, as before.
+
 A runner that cannot start anything (herdr missing or down) is an outage, not
 a failure of the bead: the group backs off and logs `runtime_down` once, and
 each bead that waits for the group gets one `group_wait` event naming it.
@@ -1650,7 +1832,7 @@ built into the binary and read once when yardr starts:
 | `fetch` | how the harness gets onto a Mac that has no package manager and nobody at a terminal: one file of one version at its maker's address, with its sha256 ([doctor.md](doctor.md#a-program-fetched-on-a-mac)). Printed, never fetched by yardr. Claude Code and Codex have one; a kind with none is installed by hand | `yardr doctor --json`, `yardr harness show --json`, for a program that fetches |
 | `trust` | the folder-trust dialog yardr answers: `dialog` (the text that marks it), `answers` (those that accept it, one string or a list, one entry per harness version that renamed it; the old `answer` reads as one), `cursor` (the mark of its selected answer), and optional `env` (`KEY=VALUE` entries that let the harness skip the dialog). The runner sets the values only when trust is automatic; with `trust=false` it clears them, and a group's `env_file` cannot override them. A kind with no `trust` is left for a person | the herdr runner, at start |
 | `marks` | `input`, `message`, `edge`: what its pane is read by ([herdr setup](#herdr-setup)); `placeholder`: the input's hint when it holds nothing, which reads empty, for a harness that draws one in no faint style ([Kiro](#kiro)'s is gray); `error`: the marks taken off a line before it is read for an error | the herdr runner; the daemon |
-| `flags` | `model` (selects the model), `unattended` (what `yardr init` gives the yardmaster and the forms preselect), `version` (prints its version and exits), `version_contains` (what that output must contain for the program to be this harness, since any executable can be called `claude`: plain text, looked for anywhere in everything the flag printed. A program that exits 0 from the flag without it is [another program](doctor.md#a-program-that-answers-as-another), not found by doctor, not chosen by the onboarding and not called by `--try`. Claude Code's is `Claude Code` and Codex's `codex-cli`, each read from the real program; a kind with none takes any program that answers), `one_shot` (answers one prompt and exits: `yardr doctor --try`), `always` (added first to every agent of the kind, before the group's own: [Codex](#codex)'s `--no-daemon` and its update check off, [Kiro](#kiro)'s `chat` subcommand), `permissions` (named flag sets, each with `label`, `args`, `description`). `{socket}` in an argument, a preset's or a group's own `args`, is the path of the yard's socket, put in by the runner when the agent starts: for a kind whose sandbox denies unix sockets and can be told of one to let through (the `read only` presets). `{workdir}` is the directory the session works in (a bead's worktree, a crew member's directory), put in the same way: for a sandbox that is told what to deny by an absolute path (Claude Code's `read only`). `{tmpdir}` is a private temporary directory the runner makes for the session when an argument names it, beside the worktrees and for the yard's user alone, and removes when the session ends; `TMPDIR` and `TMPPREFIX` (zsh's) name it in the session's environment: for a sandbox that writes nowhere else and must still let a shell make the file of a here-document (Codex's `read only`) | `yardr init`, `group add`, `pack apply`, `doctor`; the herdr runner |
+| `flags` | `model` (selects the model), `effort` (how the kind takes a reasoning effort, a group's `effort=<level>`: `args`, the words added to the agent's arguments with `{level}` in one of them (`--effort {level}`, or `-c`, `model_reasoning_effort={level}` where the harness takes a setting), `levels` it takes, weakest first (never `default`, which a group's `effort=default` reads as the harness's own effort and no file may list as a level), and `aliases`, other flags of the harness that set the same effort, which a group's `args` are held to as to the flag itself; Claude Code, Codex and Muse have one, a kind with none refuses the key), `unattended` (what `yardr init` gives the yardmaster and the forms preselect), `version` (prints its version and exits), `version_contains` (what that output must contain for the program to be this harness, since any executable can be called `claude`: plain text, looked for anywhere in everything the flag printed. A program that exits 0 from the flag without it is [another program](doctor.md#a-program-that-answers-as-another), not found by doctor, not chosen by the onboarding and not called by `--try`. Claude Code's is `Claude Code` and Codex's `codex-cli`, each read from the real program; a kind with none takes any program that answers), `one_shot` (answers one prompt and exits: `yardr doctor --try`), `always` (added first to every agent of the kind, before the group's own: [Codex](#codex)'s `--no-daemon` and its update check off, [Kiro](#kiro)'s `chat` subcommand), `permissions` (named flag sets, each with `label`, `args`, `description`). `{socket}` in an argument, a preset's or a group's own `args`, is the path of the yard's socket, put in by the runner when the agent starts: for a kind whose sandbox denies unix sockets and can be told of one to let through (the `read only` presets). `{workdir}` is the directory the session works in (a bead's worktree, a crew member's directory), put in the same way: for a sandbox that is told what to deny by an absolute path (Claude Code's `read only`). `{tmpdir}` is a private temporary directory the runner makes for the session when an argument names it, beside the worktrees and for the yard's user alone, and removes when the session ends; `TMPDIR` and `TMPPREFIX` (zsh's) name it in the session's environment: for a sandbox that writes nowhere else and must still let a shell make the file of a here-document (Codex's `read only`) | `yardr init`, `group add`, `pack apply`, `doctor`; the herdr runner |
 | `offers` | the models to pick from: each a `model` id the kind's `--model` flag takes, a `label` a person reads, and what it is `recommended` for (`yardmaster` on the one frontier model a yardmaster should run on). A suggestion, not a check: `init --model` takes any id, whether the file names it or not. Claude Code, Codex, Kimi, Muse and Kiro name one each; a kind with none suggests no model | `yardr harness show`, `yardr doctor --json`, for a program that offers them |
 | `model` | where the model an agent reports is read ([Models](#models)): `home` and `home_env` (the harness's own directory), `glob` (the session file, `{session}` being the id herdr reports), `type` and `field` (which line, and where in it; `type_field` names the key that holds the type when it is not `type`), and `workspace` (how the file of a session herdr reports no id for is found instead: `type` and `field` name the line that holds the worktree, `at` the line's own time as `usage` reads it; Muse has one) | the daemon |
 | `context` | where the context an agent holds is read, in the session file `model` finds ([Rotation](crew.md#rotation)): `type` (which lines are read, all of them when none is named; `type_field` names the key that holds the type when it is not `type`), `usage` (a path of keys, joined by dots, to the object that holds the numbers) and `tokens` (the fields that add up to what the session holds; `input_tokens`, `cache_read_input_tokens` and `cache_creation_input_tokens` when the file names none). The last line that has numbers at `usage` is the reading. Claude Code names one; a kind with none has no context rotation, the failsafe alone | the daemon, for an idle crew member |
@@ -2008,8 +2190,11 @@ check the footer's model instead.
   seconds was lost (`session_prompt_lost`) and is made again, three times in
   all; after the third, `session_prompt_gave_up` tells the yardmaster, its `hint`
   being the command that gives the prompt by hand (`herdr agent prompt
-  <agent> '<text>'`), and the session is left as it is. A prompt given by
-  hand ends the wait like any other that shows. A prompt whose text is in
+  <agent> '<text>'`). A bead's session is then ended, failed, with a note on
+  the bead that says why: the bead is routed again after the backoff, and
+  held once its stage has failed as often as the daemon tries (three times).
+  A crew member is left as it is, and a prompt given by hand ends its wait
+  like any other that shows. A prompt whose text is in
   the agent's input and was not submitted has not arrived either: "shows"
   means above the input, where a harness echoes a message it took. The
   pane is read by two marks of its kind (`kind` on the session's handle):
@@ -2039,7 +2224,10 @@ check the footer's model instead.
   With the agent idle the daemon sends Enter alone, never the text a second
   time (`session_prompt_typed`, its `submit` the count), three times in
   all, ten seconds apart; after the third, `session_prompt_gave_up` has
-  `typed: true` and the hint `herdr pane send-keys <pane> enter`.
+  `typed: true` and the hint `herdr pane send-keys <pane> enter`, and a
+  bead's session is ended as above. A prompt given up (`prompt_lost`) stays
+  given up: a bead's session is ended on every pass until the end lands,
+  before herdr is asked anything of it. Until then it still holds its slot.
   `session_prompted` is the arrival, not the sending: `shown: true` when the
   prompt was found in the pane, `deliveries` how often the daemon had sent
   it, `submits` how often it had sent Enter for it, and `unseen` (a

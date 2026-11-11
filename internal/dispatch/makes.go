@@ -374,11 +374,18 @@ func madeBead(ev ruleEvent, line *store.Make, depot string) store.NewBead {
 	if url := cmp.Or(str(ev.data["url"]), ev.threadURL); url != "" {
 		body = strings.TrimSpace(body + "\n\n" + url)
 	}
+	meta := map[string]any{metaHookSeq: ev.seq}
+	// A pull request made from an event that tells its head has the head, and
+	// what the delivery said of it, from the start: the card it waits on in
+	// triage is put in this write (prhead.go).
+	if line.Type == "pr" && ev.tellsHead && ev.sha != "" {
+		maps.Copy(meta, headMeta(&store.Bead{Type: line.Type}, ev))
+	}
 	return store.NewBead{
 		Title: cmp.Or(str(thread["title"]), ev.threadURL), Body: body,
 		Type: line.Type, Stage: line.Stage, Depot: depot,
 		Priority:  store.DefaultPriority,
-		Metadata:  map[string]any{metaHookSeq: ev.seq},
+		Metadata:  meta,
 		Links:     []store.NewLink{{Kind: store.LinkTracks, Source: ev.source, URL: ev.threadURL, Thread: str(thread["id"])}},
 		Untracked: true,
 	}

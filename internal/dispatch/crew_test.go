@@ -72,9 +72,11 @@ type crewRunner struct {
 	login           string              // the line of the login screen it sits at, "" for none
 	noScreen        bool                // the harness has not drawn its screen (no input mark)
 	ctxUsed         int                 // the context the session holds, when ctxOK
+	ctxWindow       int                 // the declared or reported window, 0 for the model's
 	ctxOK           bool                // ... and whether the session's kind names a source
 	ctxErr          error               // ... or the read fails
 	ctxCalls        int                 // reads of the session's context use
+	ctxStartedAt    time.Time           // the start used to match its session file
 
 	hold    string                         // the crew member whose start waits to be let go
 	entered chan string                    // ... says so when it has entered StartCrew
@@ -368,11 +370,12 @@ func (f *crewRunner) set(agent, status string) {
 	f.status[agent] = status
 }
 
-func (f *crewRunner) Context(context.Context, map[string]any) (int, bool, error) {
+func (f *crewRunner) Context(_ context.Context, _ map[string]any, startedAt time.Time) (int, int, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ctxCalls++
-	return f.ctxUsed, f.ctxOK, f.ctxErr
+	f.ctxStartedAt = startedAt
+	return f.ctxUsed, f.ctxWindow, f.ctxOK, f.ctxErr
 }
 
 func crewSetup(t *testing.T, def store.CrewMember) (store.API, *crewRunner, *dispatch.Dispatcher) {
@@ -1292,11 +1295,12 @@ func TestPendingPromptThatDidNotShowIsSentOnce(t *testing.T) {
 // nudgeRunner is a bead runner whose agents can be blocked and prompted.
 type nudgeRunner struct {
 	*fakeRunner
-	status string
-	nudges []string
-	shown  bool // the pane shows the first prompt
-	drop   int  // deliveries of the first prompt the agent still drops
-	block  int  // deliveries of the first prompt that end with the agent at a dialog
+	status    string
+	statusErr error // herdr cannot say the agent's status
+	nudges    []string
+	shown     bool // the pane shows the first prompt
+	drop      int  // deliveries of the first prompt the agent still drops
+	block     int  // deliveries of the first prompt that end with the agent at a dialog
 
 	typed   bool // the first prompt is in the agent's input, not submitted
 	stick   int  // deliveries of the first prompt the agent still leaves in its input
@@ -1392,7 +1396,9 @@ func (n *nudgeRunner) Start(ctx context.Context, j dispatch.Job) (map[string]any
 	}
 	return h, err
 }
-func (n *nudgeRunner) Status(context.Context, map[string]any) (string, error) { return n.status, nil }
+func (n *nudgeRunner) Status(context.Context, map[string]any) (string, error) {
+	return n.status, n.statusErr
+}
 func (n *nudgeRunner) Nudge(_ context.Context, _ map[string]any, text string) error {
 	n.nudges = append(n.nudges, text)
 	if n.block > 0 {
@@ -1486,6 +1492,13 @@ func nudgeSetup(t *testing.T) (store.API, *nudgeRunner, *dispatch.Dispatcher, *s
 	return s, r, d, b
 }
 
+func mustBead(t *testing.T, s store.API, bead string) *store.Bead {
+	t.Helper()
+	got, err := s.GetBead(context.Background(), bead)
+	must(t, err)
+	return got
+}
+
 func handleOf(t *testing.T, s store.API, bead string) map[string]any {
 	t.Helper()
 	got, err := s.GetBead(context.Background(), bead)
@@ -1533,18 +1546,19 @@ func TestPendingPromptDroppedOnceIsDeliveredAgain(t *testing.T) {
 
 // One that is dropped every time is sent PromptTries times and no more:
 // the session is reported, with the command that gives the prompt by hand,
-// and left alone. The prompt a human then gives it ends the wait.
+// and ended, failed, so that its bead is released for a fresh start with a
+// note that says why. Found live: a session left to a human sat six hours.
 func TestPendingPromptDroppedEveryTimeIsGivenUp(t *testing.T) {
 	t.Parallel()
 	s, r, d, b := nudgeSetup(t)
 	ctx := context.Background()
 	r.status, r.drop = "idle", 1000
+	sess := *mustBead(t, s, b.ID).Session
 	for range 10 {
 		must(t, d.Reconcile(ctx))
 	}
-	h := handleOf(t, s, b.ID)
-	if len(r.nudges) != dispatch.PromptTries || h[store.PendingPrompt] != "read your brief" {
-		t.Fatalf("nudges %v, handle %v", r.nudges, h)
+	if len(r.nudges) != dispatch.PromptTries {
+		t.Fatalf("nudges %v, want %d", r.nudges, dispatch.PromptTries)
 	}
 	if n := len(eventKinds(t, s, b.ID, "session_prompt_lost")); n != dispatch.PromptTries {
 		t.Fatalf("session_prompt_lost logged %d times, want one per delivery", n)
@@ -1558,15 +1572,114 @@ func TestPendingPromptDroppedEveryTimeIsGivenUp(t *testing.T) {
 	if n := len(eventKinds(t, s, b.ID, "session_prompted")); n != 0 {
 		t.Fatalf("session_prompted logged for a prompt that never arrived: %d", n)
 	}
-	// By hand: it shows, and the session is an ordinary one again.
-	r.shown = true
-	must(t, d.Reconcile(ctx))
-	must(t, d.Reconcile(ctx))
-	if h := handleOf(t, s, b.ID); len(h) != 1 || len(r.nudges) != dispatch.PromptTries {
-		t.Fatalf("after the prompt was given by hand: nudges %v, handle %v", r.nudges, h)
+	ended, err := s.GetSession(ctx, sess)
+	must(t, err)
+	if ended.State != "failed" || ended.Error == nil || !strings.Contains(*ended.Error, "never showed") {
+		t.Fatalf("session after its prompt was given up = %+v, want it ended failed", ended)
 	}
-	if n := len(eventKinds(t, s, b.ID, "session_prompted")); n != 1 {
-		t.Fatalf("session_prompted logged %d times", n)
+	if got := mustBead(t, s, b.ID); got.Session != nil || got.Group != nil || got.Hold {
+		t.Fatalf("bead after its session gave up = %+v, want it released", got)
+	}
+	if n := len(eventKinds(t, s, b.ID, "noted")); n != 1 {
+		t.Fatalf("notes on the bead = %d, want the one that says why its session ended", n)
+	}
+}
+
+// endFailingStore fails the first fails EndSessions, as a store that is
+// briefly down does.
+type endFailingStore struct {
+	store.API
+	ends, fails int
+}
+
+func (s *endFailingStore) EndSession(ctx context.Context, id, state, reason string) error {
+	if s.ends++; s.ends <= s.fails {
+		return errors.New("store unavailable")
+	}
+	return s.API.EndSession(ctx, id, state, reason)
+}
+
+// A session whose first prompt was given up, and whose end did not land, is
+// ended on a later pass, by the same daemon or a restarted one, from the
+// prompt_lost on its handle and without its prompt sent again, whatever
+// that pass sees: a pane it cannot read, the prompt shown, or the agent
+// working are no arrival of a prompt given up, and a status herdr cannot
+// give, or gives empty, holds no such end back. Until it is ended it still
+// runs, and holds its slot under max_sessions.
+func TestGivenUpPromptWhoseEndFailedIsEndedLater(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name    string
+		restart bool
+		set     func(r *nudgeRunner)
+	}{
+		{"same daemon", false, func(*nudgeRunner) {}},
+		{"restarted", true, func(*nudgeRunner) {}},
+		{"blind pane", false, func(r *nudgeRunner) { r.blind = true }},
+		{"prompt shown", false, func(r *nudgeRunner) { r.shown = true }},
+		{"agent working", false, func(r *nudgeRunner) { r.status = "working" }},
+		{"status unreadable", false, func(r *nudgeRunner) { r.statusErr = errors.New("herdr unavailable") }},
+		{"status unreadable, restarted", true, func(r *nudgeRunner) { r.statusErr = errors.New("herdr unavailable") }},
+		{"status empty", false, func(r *nudgeRunner) { r.status = "" }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			restart := c.name
+			s, r, d, b := nudgeSetup(t)
+			ctx := context.Background()
+			r.status, r.drop = "idle", 1000
+			sess := *mustBead(t, s, b.ID).Session
+			must(t, s.PutGroup(ctx, store.Group{Name: "g", Runner: "fake", Limit: 2}, "me"))
+			must(t, s.SetSetting(ctx, store.MaxSessionsSetting, "1", "me"))
+			next, _ := s.CreateBead(ctx, store.NewBead{Title: "y"}, "me")
+			failing := &endFailingStore{API: s, fails: 1}
+			d.Store = failing
+			for i := 0; failing.ends == 0; i++ {
+				if i > 4*dispatch.PromptTries {
+					t.Fatalf("%s: no EndSession after %d passes", restart, i)
+				}
+				must(t, d.Reconcile(ctx))
+			}
+			if h := handleOf(t, s, b.ID); h["prompt_lost"] != true {
+				t.Fatalf("%s: handle %v, want prompt_lost after the failed end", restart, h)
+			}
+			if got := mustBead(t, s, next.ID); got.Session != nil {
+				t.Fatalf("%s: a second session started under max_sessions 1 while the given-up one runs", restart)
+			}
+			failing.fails = 2 // The end on the next pass fails too.
+			must(t, d.Reconcile(ctx))
+			if got := mustBead(t, s, next.ID); got.Session != nil || mustBead(t, s, b.ID).Session == nil {
+				t.Fatalf("%s: a second session started under max_sessions 1 while the given-up one runs", restart)
+			}
+			if n := len(eventKinds(t, s, b.ID, "noted")); n != 0 {
+				t.Fatalf("%s: %d notes say the bead is released while its session runs", restart, n)
+			}
+			if c.restart {
+				d = &dispatch.Dispatcher{Store: s, Runners: map[string]dispatch.Runner{"fake": r}, PromptSettle: -1, PromptWait: -1}
+			}
+			c.set(r)
+			must(t, d.Reconcile(ctx))
+			ended, err := s.GetSession(ctx, sess)
+			must(t, err)
+			if ended.State != "failed" || ended.Error == nil || !strings.Contains(*ended.Error, "given up on an earlier pass") {
+				t.Fatalf("%s: session = %+v, want it ended failed", restart, ended)
+			}
+			if got := mustBead(t, s, b.ID); got.Session != nil {
+				t.Fatalf("%s: bead %+v, want it released", restart, got)
+			}
+			if len(r.nudges) != dispatch.PromptTries {
+				t.Fatalf("%s: nudges %v, want no delivery after it was given up", restart, r.nudges)
+			}
+			if n := len(eventKinds(t, s, b.ID, "session_prompt_gave_up")); n != 1 {
+				t.Fatalf("%s: session_prompt_gave_up logged %d times, want 1", restart, n)
+			}
+			if n := len(eventKinds(t, s, b.ID, "noted")); n != 1 {
+				t.Fatalf("%s: notes on the bead = %d, want the one that says why its session ended", restart, n)
+			}
+			if n := len(eventKinds(t, s, b.ID, "session_prompted")); n != 0 {
+				t.Fatalf("%s: session_prompted logged %d times for a prompt given up", restart, n)
+			}
+		})
 	}
 }
 
@@ -1745,12 +1858,13 @@ func TestFirstPromptLateScreenSubmittedUntilEmptyAndNoNudgeWhilePending(t *testi
 
 // One whose Enter never takes is submitted PromptTries times, PromptWait
 // apart, and no more: the session is reported, Enter in its pane being all
-// it needs, and left alone. The Enter a human then gives it ends the wait.
+// it needs, and ended, failed, its bead released for a fresh start.
 func TestPendingPromptWhoseSubmitNeverTakesIsGivenUp(t *testing.T) {
 	t.Parallel()
 	s, r, d, b := nudgeSetup(t)
 	ctx := context.Background()
-	d.PromptSettle, d.PromptWait = 3*time.Second, 10*time.Second
+	d.PromptSettle, d.PromptWait, d.Backoff = 3*time.Second, 10*time.Second, time.Hour
+	sess := *mustBead(t, s, b.ID).Session
 	var skew time.Duration
 	dispatch.SetClock(d, func() time.Time { return time.Now().Add(skew) })
 	r.status, r.typed, r.deaf = "idle", true, true
@@ -1771,9 +1885,8 @@ func TestPendingPromptWhoseSubmitNeverTakesIsGivenUp(t *testing.T) {
 		skew += 11 * time.Second
 		must(t, d.Reconcile(ctx))
 	}
-	h := handleOf(t, s, b.ID)
-	if r.submits != dispatch.PromptTries || len(r.nudges) != 0 || h[store.PendingPrompt] != "read your brief" {
-		t.Fatalf("submits %d, nudges %v, handle %v", r.submits, r.nudges, h)
+	if r.submits != dispatch.PromptTries || len(r.nudges) != 0 {
+		t.Fatalf("submits %d, nudges %v", r.submits, r.nudges)
 	}
 	if n := len(eventKinds(t, s, b.ID, "session_prompt_typed")); n != dispatch.PromptTries {
 		t.Fatalf("session_prompt_typed logged %d times, want one per submit", n)
@@ -1788,14 +1901,13 @@ func TestPendingPromptWhoseSubmitNeverTakesIsGivenUp(t *testing.T) {
 	if n := len(eventKinds(t, s, b.ID, "session_prompted")); n != 0 {
 		t.Fatalf("session_prompted logged for a prompt that was never taken: %d", n)
 	}
-	// By hand: the agent works on it, whatever its pane shows.
-	r.status = "working"
-	must(t, d.Reconcile(ctx))
-	if h := handleOf(t, s, b.ID); len(h) != 1 || r.submits != dispatch.PromptTries {
-		t.Fatalf("after Enter by hand: submits %d, handle %v", r.submits, h)
+	ended, err := s.GetSession(ctx, sess)
+	must(t, err)
+	if ended.State != "failed" || ended.Error == nil || !strings.Contains(*ended.Error, "stayed in the agent's input") {
+		t.Fatalf("session after its prompt was given up = %+v, want it ended failed", ended)
 	}
-	if n := len(eventKinds(t, s, b.ID, "session_prompted")); n != 1 {
-		t.Fatalf("session_prompted logged %d times", n)
+	if got := mustBead(t, s, b.ID); got.Session != nil || got.Group != nil || got.Hold {
+		t.Fatalf("bead after its session gave up = %+v, want it released", got)
 	}
 }
 
@@ -1902,7 +2014,11 @@ func TestCrewPromptTypedAndNotSubmittedIsSubmitted(t *testing.T) {
 }
 
 // Crew members go the same way: a prime that is dropped is sent again, and one
-// dropped every time is reported on the crew member's journal.
+// dropped every time is reported on the crew member's journal. It is then left
+// running, as a bead's session is not (promptGaveUp ends that one): its handle
+// is on its crew record, which reap does not list, so no pass of this daemon
+// or of a restarted one, which finds prompt_lost on the handle, asks the store
+// to end it.
 func TestCrewPendingPromptIsCheckedForArrival(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ drop, nudges, lost, gaveUp, prompted int }{
@@ -1912,15 +2028,29 @@ func TestCrewPendingPromptIsCheckedForArrival(t *testing.T) {
 	} {
 		s, f, d := crewSetup(t, store.CrewMember{})
 		ctx := context.Background()
+		// Every end fails here: one asked for a crew member would be counted,
+		// and asked again on the next pass, as a bead session's failed end is.
+		ends := &endFailingStore{API: s, fails: 1000}
+		d.Store = ends
 		f.blocked, f.drop = true, c.drop
 		must(t, d.Reconcile(ctx))
 		f.set(agentOf(t, s), "idle")
 		for range 10 {
 			must(t, d.Reconcile(ctx))
 		}
+		if c.gaveUp > 0 {
+			d = &dispatch.Dispatcher{Store: ends, Runners: map[string]dispatch.Runner{"fake": f}, PromptSettle: -1, PromptWait: -1}
+			for range 3 {
+				must(t, d.Reconcile(ctx))
+			}
+		}
 		r, _ := s.GetCrew(ctx, "yardmaster")
 		if len(f.nudges) != c.nudges || (r.Handle[store.PendingPrompt] == nil) != (c.prompted == 1) {
 			t.Fatalf("drop %d: nudges %v, handle %v", c.drop, f.nudges, r.Handle)
+		}
+		if ends.ends != 0 || !r.Live() || f.n != 1 || f.stops != 0 || (r.Handle["prompt_lost"] == true) != (c.gaveUp > 0) {
+			t.Fatalf("drop %d: %d ends asked, crew member %+v, starts %d, stops %d; want it running as it started, with no end asked",
+				c.drop, ends.ends, r, f.n, f.stops)
 		}
 		for kind, want := range map[string]int{"session_prompt_lost": c.lost, "session_prompt_gave_up": c.gaveUp, "session_prompted": c.prompted} {
 			evs := eventKinds(t, s, r.Journal, kind)

@@ -56,6 +56,17 @@ marks:
 
 flags:
   model: --model
+  # Codex takes its reasoning effort as the setting model_reasoning_effort,
+  # which -c sets for one run over ~/.codex/config.toml. It checks no level
+  # itself: `codex exec -c model_reasoning_effort=bogus` (codex-cli 0.160.1,
+  # 10 Nov 2026) starts, prints "reasoning effort: bogus" and fails at its
+  # first request. The levels are the ones `codex debug models` lists, read
+  # the same day: the union over its models, of which some take low to ultra
+  # and others low to max. A level the group's model does not take fails at
+  # the session's first request, as a model the account may not use does.
+  effort:
+    args: [-c, "model_reasoning_effort={level}"]
+    levels: [low, medium, high, xhigh, max, ultra]
   unattended: [--dangerously-bypass-approvals-and-sandbox]
   version: [--version]
   # What the real one says, as for claude: run on 2 Nov 2026, codex-cli
@@ -149,6 +160,18 @@ model:
   glob: sessions/*/*/*/rollout-*-{session}.jsonl
   type: turn_context
   field: payload.model
+
+# A token_count event's last_token_usage.input_tokens is the prompt of
+# the call just made, including cached_input_tokens, not the running
+# total_token_usage. Read with model_context_window from the same event:
+# different models report different windows (258400 and 475000 observed
+# on 10 Nov 2026), so no fixed size is inferred from a model name.
+context:
+  type_field: payload.type
+  type: token_count
+  usage: payload.info.last_token_usage
+  tokens: [input_tokens]
+  window_field: payload.info.model_context_window
 
 # What a session used, in tokens, read from the same file once the session has
 # ended (docs/design/2026-10-21-yardr-qbqq-session-tokens.md, section 3.3).

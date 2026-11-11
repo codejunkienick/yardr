@@ -82,7 +82,8 @@ const askRunList = `  peer add <name> <invite>
       the card comes from the server's own binary and shows each source,
       mapping, object and file diff whole; the server carries it out; a
       directory, URL or imported pack, any other flag and a plan that
-      asks stay in a terminal; --setup installs a pack of kind source
+      asks stay in a terminal; --setup installs a pack of kind source,
+      embedded or applied from a directory in a terminal
   hook add <name> --source <declared source> [--unknown unknown|allow|ignore]
       a new webhook endpoint POST /hooks/<name> for the declared
       source, verified with its signing secret given on the hook's own
@@ -191,15 +192,28 @@ const askRunList = `  peer add <name> <invite>
       wrote is not one to name; no other setting rides in with it, and
       another member's kind, model and directory are the yardmaster's to
       run for the operator on their mail
-  group set <name> prompt=<file> | cmd=<command> | preset=<preset>
+  group set <name> prompt=<file> | cmd=<command> | preset=<preset> | effort=<level>
       the same for a group, and for an exec group's command (one word:
       the line is split at spaces); approving a prompt writes its carried
       text to a read-only file of the yard's own, roles/<name>.<digest>.md,
       and sets it as the prompt, so a later change to the file named
-      reaches no session, and a file the yard wrote is not one to name; a
-      kind, a directory and the rest of a group are not this card's: the
+      reaches no session, and a file the yard wrote is not one to name; an
+      effort is a level of the group's kind (yardr harness show <kind>
+      lists them), which the card shows as the flags each session is given,
+      or the word default, which returns the group to its harness's own
+      effort, as a card takes no --unset: the card shows that no flag is
+      given, and a group that sets no effort refuses it; a kind, a
+      directory and the rest of a group are not this card's: the
       yardmaster sets those the operator has delegated on their mail, and
       the rest are typed in a terminal
+  group rename <old> <new>
+      the group is called by its new name and everything that names it
+      follows, in one write: its routes, the beads it owns and their live
+      sessions (which go on, none released), the grants its sessions hold,
+      its arrival estimates, the subscriptions that filter on it, the lists
+      of members that name a script group and the pack imports that recorded
+      it; the old name is free after; a name in use, or one that pack imports
+      give a depot's groups (<depot>-<name>), is refused
   crew identity <name> --source <source> [--id <id>] [--key <key>]
       who the crew member is in the source: mentions and assignments of
       the id or key there are then addressed to it

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/testload"
 )
 
@@ -256,7 +257,9 @@ func TestMain(m *testing.M) {
 		}
 	}
 	testload.PreferRealGit()
-	os.Exit(m.Run())
+	code := m.Run()
+	scripttest.Remove()
+	os.Exit(code)
 }
 
 // sumCmd is what checksums are made and checked with here.
@@ -278,15 +281,31 @@ func newStage(t *testing.T) *stage {
 	// canned answers, the repositories), so it runs beside the others from
 	// here on.
 	t.Parallel()
+	return newStageInner(t)
+}
+
+// newStageSerial is newStage for the tests that run the checkout's fake
+// build: a serial test, since the build must stay a plain file (a stand-in
+// would leave its body untracked beside the link, which the stage refuses
+// as a dirty tree), and a fork of a test beside its writing would fail its
+// start with ETXTBSY.
+func newStageSerial(t *testing.T) *stage {
+	t.Helper()
+	return newStageInner(t)
+}
+
+func newStageInner(t *testing.T) *stage {
+	t.Helper()
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("jq is not on PATH, which the stage script needs")
 	}
 	s := &stage{t: t, dir: t.TempDir(), bin: t.TempDir()}
 	write := func(name, content string) {
 		t.Helper()
-		if err := os.WriteFile(filepath.Join(s.bin, name), []byte(content), 0o755); err != nil {
-			t.Fatal(err)
-		}
+		// A stand-in: the stage runs these beside forking tests, and Linux
+		// refuses to start a file a fork beside its writing still holds
+		// open (ETXTBSY).
+		scripttest.Write(t, filepath.Join(s.bin, name), content)
 	}
 	write("yardr", fakeYardr)
 	write("gh", fakeGh)
@@ -419,7 +438,11 @@ func (s *stage) repo() (checkout, origin string) {
 
 // build installs the fake release build script in the checkout and pushes
 // it, as the real one rides main: the stage runs it from there when
-// Actions are disabled, and refuses a dirty or behind checkout first.
+// Actions are disabled, and refuses a dirty or behind checkout first. A
+// plain file, not a stand-in: the stage refuses an untracked file beside
+// the link as a dirty tree, so the tests that run it are serial
+// (newStageSerial), lest a fork beside its writing fail its start with
+// ETXTBSY.
 func (s *stage) build(checkout string) {
 	s.t.Helper()
 	dir := filepath.Join(checkout, "contrib", "release")
@@ -646,7 +669,7 @@ func (s *stage) uploaded() map[string]string {
 }
 
 func TestStageBuildTagsPushesAndWaitsForTheDraft(t *testing.T) {
-	s := newStage(t)
+	s := newStageSerial(t)
 	checkout, origin := s.repo()
 	s.build(checkout)
 	s.ci(fakeInstaller)
@@ -748,7 +771,7 @@ func TestStageBuildTagsPushesAndWaitsForTheDraft(t *testing.T) {
 }
 
 func TestStageBuildBuildsOnThisMachineWhenActionsIsOff(t *testing.T) {
-	s := newStage(t)
+	s := newStageSerial(t)
 	checkout, origin := s.repo()
 	s.build(checkout)
 	// No release standing: the build makes the draft itself, never waiting.
@@ -817,7 +840,7 @@ func TestStageBuildBuildsOnThisMachineWhenActionsIsOff(t *testing.T) {
 // Another depot's release flow runs this script too, with a build that writes
 // no installer: nothing is uploaded under that name.
 func TestStageBuildUploadsNoInstallerThatTheBuildDidNotWrite(t *testing.T) {
-	s := newStage(t)
+	s := newStageSerial(t)
 	checkout, _ := s.repo()
 	s.build(checkout)
 	s.view(viewAbsent)
@@ -832,7 +855,7 @@ func TestStageBuildUploadsNoInstallerThatTheBuildDidNotWrite(t *testing.T) {
 }
 
 func TestStageBuildAdoptsAStandingDraftWhenActionsIsOff(t *testing.T) {
-	s := newStage(t)
+	s := newStageSerial(t)
 	checkout, _ := s.repo()
 	s.build(checkout)
 	// A run that died after tagging: the tag is already at the base, and a
@@ -856,7 +879,7 @@ func TestStageBuildAdoptsAStandingDraftWhenActionsIsOff(t *testing.T) {
 }
 
 func TestStageBuildRejectsAnIncompleteLocalTargetSet(t *testing.T) {
-	s := newStage(t)
+	s := newStageSerial(t)
 	checkout, _ := s.repo()
 	s.build(checkout)
 	s.show("yardr v1.2.3", "notes")
@@ -885,7 +908,7 @@ func TestStageBuildResumesAfterTagging(t *testing.T) {
 		{"a draft that already holds the darwin archives", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := newStage(t)
+			s := newStageSerial(t)
 			checkout, _ := s.repo()
 			s.build(checkout)
 			ci := map[string]string{linuxAMD64: "linux amd64\n", linuxARM64: "linux arm64\n", "install.sh": fakeInstaller}
@@ -982,7 +1005,7 @@ func TestStageBuildTimeoutNamesTheRun(t *testing.T) {
 }
 
 func TestStageBuildFailsWhenTheNotesAreNotSet(t *testing.T) {
-	s := newStage(t)
+	s := newStageSerial(t)
 	checkout, _ := s.repo()
 	s.build(checkout)
 	s.ci(fakeInstaller)
@@ -1016,7 +1039,7 @@ func TestStageBuildRefusesToShipDarwinUnsigned(t *testing.T) {
 				name = tc.name + ", Actions is off"
 			}
 			t.Run(name, func(t *testing.T) {
-				s := newStage(t)
+				s := newStageSerial(t)
 				checkout, _ := s.repo()
 				s.build(checkout)
 				s.show("yardr v1.2.3", "notes")
@@ -1065,7 +1088,7 @@ func TestStageBuildFailsWhenTheDarwinArchivesCannotBeAdded(t *testing.T) {
 		{name: "the upload fails", installer: fakeInstaller, env: []string{"FAKE_GH_UPLOAD_RC=1"}, want: "uploading the darwin archives and the whole checksums.txt to the draft for v1.2.3 failed", uploaded: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := newStage(t)
+			s := newStageSerial(t)
 			checkout, _ := s.repo()
 			s.build(checkout)
 			if tc.sourceInst {

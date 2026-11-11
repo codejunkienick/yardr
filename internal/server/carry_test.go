@@ -853,7 +853,7 @@ const miniPack = `name: mini
 flows:
   default:
     stages:
-      new:    { group: builders, outcomes: { done: review, question: decide }, manual: [decide] }
+      new:    { group: builders, file: flows/default/new.md, outcomes: { done: review, question: decide }, manual: [decide] }
       review: { group: assembly, outcomes: { done: merged } }
       decide: { group: people, manual: [new] }
       merged: { end: true }
@@ -869,10 +869,11 @@ crew:
 func writeMiniPack(t *testing.T, dir, builder, yardmaster string) {
 	t.Helper()
 	files := map[string]string{
-		"pack.yaml":           miniPack,
-		"roles/builder.md":    builder,
-		"roles/yardmaster.md": yardmaster,
-		"scripts/land":        "#!/bin/sh\n",
+		"pack.yaml":            miniPack,
+		"roles/builder.md":     builder,
+		"roles/yardmaster.md":  yardmaster,
+		"scripts/land":         "#!/bin/sh\n",
+		"flows/default/new.md": "the new stage, v1\n",
 	}
 	for name, text := range files {
 		p := filepath.Join(dir, filepath.FromSlash(name))
@@ -965,7 +966,10 @@ func drainMini(t *testing.T, st *store.Store, home, dir string) {
 // A depot carrying out finishes a half-applied plan object by object:
 // one changed file already installed is finishing, not staleness,
 // and every carded object reads unchanged after it. One whose object
-// the yard moved fails with nothing further applied.
+// the yard moved fails with nothing further applied. A file the pack does
+// not carry, in its installed directory or a flow's stage-file directory,
+// is left alone and fails nothing, and so is one the pack no longer carries
+// that its last import installed (dropped, which a card never prunes).
 func TestCarryDepotPack(t *testing.T) {
 	st, home, bead, dir := depotYard(t)
 	writeMiniPack(t, dir, "build v2\n", "yardmaster v2\n")
@@ -990,6 +994,8 @@ func TestCarryDepotPack(t *testing.T) {
 	}
 
 	t.Run("first install with mappings", carryFirstInstallWithMappings)
+	t.Run("files the pack does not carry", carryStrayFiles)
+	t.Run("a file the pack no longer carries", carryDroppedFile)
 
 	st2, home2, bead2, dir2 := depotYard(t)
 	writeMiniPack(t, dir2, "build v2\n", "yardmaster v2\n")
@@ -1004,6 +1010,88 @@ func TestCarryDepotPack(t *testing.T) {
 	}
 	if data, err := os.ReadFile(builder2); err != nil || string(data) != "build by hand\n" {
 		t.Fatalf("the moved file was applied over: %q, %v", data, err)
+	}
+}
+
+// carryStrayFiles checks the stray-file case of TestCarryDepotPack: an apply
+// whose plan writes only a stage file, with a file the pack does not carry
+// standing in its installed roles directory (a backup left by hand) and in
+// its flow's stage-file directory, is carried out whole. The import leaves
+// such a file alone and the card showed it as left alone, so the carrier has
+// no planned copy to hold it to; it stands as it was.
+func carryStrayFiles(t *testing.T) {
+	st, home, bead, dir := depotYard(t)
+	stage := filepath.Join(home, "flows", "mini.default", "new.md")
+	strays := map[string]string{
+		filepath.Join(home, "packs", "mini", "roles", ".yardmaster.md.before-edit"): "a backup left by hand\n",
+		filepath.Join(home, "flows", "mini.default", "old.md"):                      "a stage written by hand\n",
+	}
+	for path, text := range strays {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Only the stage file differs from what the depot's import installed.
+	if err := os.WriteFile(filepath.Join(dir, "flows", "default", "new.md"), []byte("the new stage, v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seq := askApprove(t, st, bead, packAskOf("mini"))
+	drainMini(t, st, home, dir)
+	if rec := carryState(t, st, bead, seq); rec.State != store.CarryDone {
+		t.Fatalf("the carrying record = %+v", rec)
+	}
+	if lines := resolvedLines(t, st, bead, seq); !strings.Contains(lines, "approved, ran: yardr pack apply mini") || !strings.Contains(lines, "1 changed") {
+		t.Fatalf("the carried-out card reads:\n%s", lines)
+	}
+	if data, err := os.ReadFile(stage); err != nil || string(data) != "the new stage, v2\n" {
+		t.Fatalf("the installed stage file = %q, %v", data, err)
+	}
+	for path, text := range strays {
+		if data, err := os.ReadFile(path); err != nil || string(data) != text {
+			t.Errorf("the stray file %s = %q, %v, want it as it was left", path, data, err)
+		}
+	}
+}
+
+// carryDroppedFile checks the dropped-file case of TestCarryDepotPack: a pack
+// that stops carrying its stage file and changes a role, applied by card over
+// a yard that still has the stage file its last import installed, is carried
+// out whole. The plan holds that copy as dropped, which only a prune removes
+// and a card never prunes, so the import leaves it alone and the carrier has
+// no planned hash to hold it to; it stands as it was, beside the role the
+// import did write.
+func carryDroppedFile(t *testing.T) {
+	st, home, bead, dir := depotYard(t)
+	stage := filepath.Join(home, "flows", "mini.default", "new.md")
+	builder := filepath.Join(home, "packs", "mini", "roles", "builder.md")
+	writeMiniPack(t, dir, "build v2\n", "yardmaster v1\n")
+	// The pack's stage no longer names a file, and the file is gone from it.
+	dropped := strings.Replace(miniPack, " file: flows/default/new.md,", "", 1)
+	if dropped == miniPack {
+		t.Fatal("the mini pack's stage names no file to drop")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pack.yaml"), []byte(dropped), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "flows", "default", "new.md")); err != nil {
+		t.Fatal(err)
+	}
+	seq := askApprove(t, st, bead, packAskOf("mini"))
+	drainMini(t, st, home, dir)
+	if rec := carryState(t, st, bead, seq); rec.State != store.CarryDone {
+		t.Fatalf("the carrying record = %+v", rec)
+	}
+	if lines := resolvedLines(t, st, bead, seq); !strings.Contains(lines, "approved, ran: yardr pack apply mini") || !strings.Contains(lines, "1 changed") {
+		t.Fatalf("the carried-out card reads:\n%s", lines)
+	}
+	if data, err := os.ReadFile(builder); err != nil || string(data) != "build v2\n" {
+		t.Fatalf("the installed builder role = %q, %v", data, err)
+	}
+	if data, err := os.ReadFile(stage); err != nil || string(data) != "the new stage, v1\n" {
+		t.Fatalf("the installed stage file = %q, %v, want it as it stood", data, err)
 	}
 }
 

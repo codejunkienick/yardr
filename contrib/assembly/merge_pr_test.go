@@ -45,7 +45,9 @@ const (
 // head commit), and files a test writes to change the answer: state
 // (OPEN unless it says MERGED or CLOSED), bot (the author is a bot),
 // head-owner and head-name (the repository the head is in, o/r unless
-// written), title and body (bump and a line of text unless written),
+// written), head-ref (the branch the head is on, patch-1 unless written),
+// title and body (bump and a line of text unless written), edits-off (the
+// branch forbids maintainer edits) and edits-absent (no answer about them),
 // view-fail and refuse (the error of that call), race (the commit
 // the head moves to as the merge starts) and head-next (the commit the head
 // moves to once the next look at the pull request has been answered). A call whose GH_TOKEN is not
@@ -60,8 +62,11 @@ if [ "$GH_TOKEN" != ` + mintToken + ` ]; then echo "HTTP 401: Bad credentials" >
 case "$1 $2" in
 "pr view")
   if [ -e "$d/view-fail" ]; then cat "$d/view-fail" >&2; exit 1; fi
-  printf '{"number":7,"state":"%s","headRefOid":"%s","headRepository":{"name":"%s"},"headRepositoryOwner":{"login":"%s"},"author":{"is_bot":%s,"login":"%s"},"title":"%s","body":"%s"}\n' \
-    "$(cat "$d/state" 2>/dev/null || echo OPEN)" "$(cat "$d/head")" "$(cat "$d/head-name" 2>/dev/null || echo r)" \
+  mcm=',"maintainerCanModify":true'
+  if [ -e "$d/edits-off" ]; then mcm=',"maintainerCanModify":false'; fi
+  if [ -e "$d/edits-absent" ]; then mcm=; fi
+  printf '{"number":7,"state":"%s","headRefOid":"%s","headRefName":"%s"%s,"headRepository":{"name":"%s"},"headRepositoryOwner":{"login":"%s"},"author":{"is_bot":%s,"login":"%s"},"title":"%s","body":"%s"}\n' \
+    "$(cat "$d/state" 2>/dev/null || echo OPEN)" "$(cat "$d/head")" "$(cat "$d/head-ref" 2>/dev/null || echo patch-1)" "$mcm" "$(cat "$d/head-name" 2>/dev/null || echo r)" \
     "$(cat "$d/head-owner" 2>/dev/null || echo o)" "$([ -e "$d/bot" ] && echo true || echo false)" "$([ -e "$d/bot" ] && echo app/dependabot || echo jo)" \
     "$(cat "$d/title" 2>/dev/null || echo bump)" "$(cat "$d/body" 2>/dev/null || echo a body of one line)"
   if [ -e "$d/head-next" ]; then mv "$d/head-next" "$d/head"; fi ;;
@@ -225,7 +230,7 @@ func (y *yard) prBeadIn(id, url, stage string, label bool) {
 // calls, its answers, its failures.
 func standIn(t *testing.T, gh string, o mergeOpts, files map[string]string) {
 	t.Helper()
-	for _, name := range []string{"calls", "state", "bot", "head-owner", "head-name", "title", "body", "view-fail", "refuse", "race", "head-next", "mint-fail", "mint-stdin", "mint-args"} {
+	for _, name := range []string{"calls", "state", "bot", "head-owner", "head-name", "head-ref", "edits-off", "edits-absent", "title", "body", "view-fail", "refuse", "race", "head-next", "mint-fail", "mint-stdin", "mint-args"} {
 		if err := os.Remove(filepath.Join(gh, name)); err != nil && !os.IsNotExist(err) {
 			t.Fatal(err)
 		}
@@ -433,18 +438,23 @@ func TestMergePRMerges(t *testing.T) {
 			}
 			// Every run that asked GitHub asked the mint, for the repository of
 			// the pull request and from the id and key file the group's env_file
-			// gave, and asked GitHub nothing of CI, which is the yard's own: no
-			// call of the api, where the check runs are.
+			// gave, narrowed to contents write and pull_requests read, and asked
+			// GitHub nothing of CI, which is the yard's own: no call of the api,
+			// where the check runs are.
 			if c.flags != "" {
 				var asked struct {
-					Inputs map[string]string `json:"inputs"`
-					Scope  string            `json:"scope"`
+					Inputs      map[string]string `json:"inputs"`
+					Scope       string            `json:"scope"`
+					Permissions map[string]string `json:"permissions"`
 				}
 				if err := json.Unmarshal([]byte(readFile(t, filepath.Join(gh, "mint-stdin"))), &asked); err != nil {
 					t.Fatalf("%s: %v", c.what, err)
 				}
 				if asked.Scope != "o/r" || asked.Inputs["GITHUB_APP_ID"] != "123456" || asked.Inputs["GITHUB_APP_PRIVATE_KEY_FILE"] != filepath.Join(gh, "app.pem") {
 					t.Errorf("%s: the mint was asked %+v, want scope o/r and the env_file's id and key file", c.what, asked)
+				}
+				if len(asked.Permissions) != 2 || asked.Permissions["contents"] != "write" || asked.Permissions["pull_requests"] != "read" {
+					t.Errorf("%s: the mint was asked permissions %+v, want contents write and pull_requests read", c.what, asked.Permissions)
 				}
 				wantArgs := "--from-group\n"
 				if c.source {

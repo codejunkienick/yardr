@@ -415,8 +415,8 @@ func TestSourcePackAppliesIntoAYardWithNoDepot(t *testing.T) {
 }
 
 // Adding is the operator's, as for a declared source of a pack for a
-// depot: run by anyone else, the import adds no source, and copies no
-// file.
+// depot: run by anyone else, the import adds no source, copies no file,
+// and is left unrecorded, with the run card named.
 func TestSourcePackApplyByACrewMemberAddsNoSource(t *testing.T) {
 	st := storetest.New(t)
 	if err := st.SetSetting(ctx, store.OperatorSetting, "me", "me"); err != nil {
@@ -425,8 +425,12 @@ func TestSourcePackApplyByACrewMemberAddsNoSource(t *testing.T) {
 	home := t.TempDir()
 	plan := build(t, st, load(t, writePack(t, sourcePackFiles())), pack.Options{Home: home})
 	res, err := pack.Apply(ctx, st, plan, pack.ApplyOptions{SourceRefused: map[string]string{"acme": "adding is the operator's"}, Actor: "ann"})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "only the operator (me) may record the import of pack acme-pack; this is ann") ||
+		!strings.Contains(err.Error(), "applying again records nothing") || !strings.Contains(err.Error(), `--run "pack apply acme-pack"`) {
+		t.Fatalf("apply as ann = %+v, %v; want nothing added and the record refused with the run card", res, err)
+	}
+	if res == nil || res.Recorded {
+		t.Fatalf("result = %+v, want it unrecorded", res)
 	}
 	if _, err := st.GetSource(ctx, "acme"); !errors.Is(err, store.ErrNotFound) || len(res.Declared) != 0 {
 		t.Fatalf("a refused source was added: %v, %+v", err, res)
@@ -434,8 +438,8 @@ func TestSourcePackApplyByACrewMemberAddsNoSource(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "sources", "acme")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a refused source's files were copied: %v", err)
 	}
-	if !res.Recorded {
-		t.Fatalf("the import was not recorded: %+v", res)
+	if recs, _ := st.Packs(ctx); len(recs) != 0 {
+		t.Fatalf("a crew member's import was recorded: %+v", recs)
 	}
 }
 
@@ -655,11 +659,11 @@ func TestSourcePackApplyFoldFailureKeepsTheImport(t *testing.T) {
 	}
 }
 
-// A fold refused to a non-operator fails the import loud: moving links
-// and records from one source to another is the operator's to do. The
-// import itself stays applied and recorded, as with any fold failure,
-// and nothing is folded.
-func TestSourcePackApplyFoldRefusedToNonOperator(t *testing.T) {
+// An import by a non-operator ends at the record, before the fold: only
+// the operator records, so the fold's own refusal is never reached. The
+// import itself stays applied, the first record stands, and nothing is
+// folded.
+func TestSourcePackApplyByNonOperatorEndsAtTheRecord(t *testing.T) {
 	st := storetest.New(t)
 	if _, err := st.PutCrew(ctx, store.CrewMember{Name: "yardmaster"}, "me"); err != nil {
 		t.Fatal(err)
@@ -674,15 +678,15 @@ func TestSourcePackApplyFoldRefusedToNonOperator(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := pack.Apply(ctx, st, build(t, st, p, o), pack.ApplyOptions{Actor: "yardmaster"})
-	if err == nil || !strings.Contains(err.Error(), "source acme is declared, but its links were not folded in: "+
-		"only the operator may move links from one source to another; this is the crew member yardmaster") {
-		t.Fatalf("err = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "may record the import of pack acme-pack") ||
+		!strings.Contains(err.Error(), "applying again records nothing") {
+		t.Fatalf("err = %v, want the record refused before the fold", err)
 	}
 	if h, _ := st.GetHook(ctx, "acme-declared"); h.Source != "acme-declared" {
 		t.Fatalf("hook source = %q, want nothing folded", h.Source)
 	}
-	if recs, _ := st.Packs(ctx); len(recs) != 1 {
-		t.Fatalf("the import was not recorded: %+v", recs)
+	if recs, _ := st.Packs(ctx); len(recs) != 1 || recs[0].By != "me" {
+		t.Fatalf("records = %+v, want the first import's alone", recs)
 	}
 }
 

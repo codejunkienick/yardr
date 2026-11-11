@@ -87,7 +87,7 @@ func hookEnvelope(ctx context.Context, st store.API, arg string) (uint64, hooks.
 }
 
 func (a *app) replyCmd() *cobra.Command {
-	var member, to string
+	var member, to, format string
 	var replyFiles []string
 	cmd := &cobra.Command{
 		Use:   "reply <seq|bead> <text|->",
@@ -120,6 +120,13 @@ fits, else it is sent first and the files follow without one. A source
 whose file does not say its replies take files is refused: --file there
 would send the words and drop the files. Mail and a note on another
 yard's bead take no --file.
+
+With --format <mode>, the declared source must list that mode in
+thread.formats. The mode and the input text, including surrounding
+whitespace, reach its reply command unchanged. Without --format, text is
+trimmed and the source keeps its usual default. Mail and peer notes take
+no --format. An unresolved reply must be retried with its original mode
+before another mode can be sent for the same answer.
 
 Mail to the crew member is answered by mail to its sender: mail from this
 yard (a user or a crew member) as yardr mail <sender> would send it; mail
@@ -161,6 +168,9 @@ event with the comment's id is logged. Prints the URL of the reply.`,
   yardr reply 13974 - < noted.md
   yardr reply web-d5zc - < csv-only.md`,
 		Args: func(c *cobra.Command, args []string) error {
+			if c.Flags().Changed("format") && format == "" {
+				return fmt.Errorf("--format requires a mode declared by the source's thread.formats")
+			}
 			if len(replyFiles) > store.MaxMailFiles {
 				return fmt.Errorf("a reply carries at most %d files, not %d", store.MaxMailFiles, len(replyFiles))
 			}
@@ -177,8 +187,11 @@ event with the comment's id is logged. Prints the URL of the reply.`,
 					}
 					body = string(b)
 				}
-				if body = strings.TrimSpace(body); body == "" {
+				if strings.TrimSpace(body) == "" {
 					return "", fmt.Errorf("nothing to say: the reply is empty")
+				}
+				if format == "" {
+					body = strings.TrimSpace(body)
 				}
 				return body, nil
 			}
@@ -190,6 +203,9 @@ event with the comment's id is logged. Prints the URL of the reply.`,
 				// either, saying so names the way out.
 				if st, serr := a.store(ctx); serr == nil {
 					if bead := awayBead(ctx, st, args[0]); bead != "" {
+						if format != "" {
+							return fmt.Errorf("--format is for declared source thread replies; a peer bead takes no format")
+						}
 						if len(replyFiles) > 0 {
 							return fmt.Errorf("--file carries files into a source's thread: %s is a bead at another yard, answered with a note", bead)
 						}
@@ -206,6 +222,9 @@ event with the comment's id is logged. Prints the URL of the reply.`,
 				return err
 			}
 			if bead := awayBead(ctx, st, args[0]); bead != "" {
+				if format != "" {
+					return fmt.Errorf("--format is for declared source thread replies; a peer bead takes no format")
+				}
 				if len(replyFiles) > 0 {
 					return fmt.Errorf("--file carries files into a source's thread: %s is a bead at another yard, answered with a note", bead)
 				}
@@ -223,6 +242,9 @@ event with the comment's id is logged. Prints the URL of the reply.`,
 				return err
 			}
 			if e.Kind == "mail" {
+				if format != "" {
+					return fmt.Errorf("--format is for declared source thread replies; event %d is mail", seq)
+				}
 				if len(replyFiles) > 0 {
 					return fmt.Errorf("--file carries files into a source's thread: event %d is mail, answered by mail", seq)
 				}
@@ -234,6 +256,17 @@ event with the comment's id is logged. Prints the URL of the reply.`,
 			seq, env, r, err := hookEvent(ctx, st, a.home(), args[0])
 			if err != nil {
 				return err
+			}
+			var formatted hooks.FormattedReplier
+			if format != "" {
+				var ok bool
+				formatted, ok = r.(hooks.FormattedReplier)
+				if !ok {
+					return fmt.Errorf("source %s cannot carry explicit reply formats", env.Source)
+				}
+				if err := formatted.CheckReplyFormat(format); err != nil {
+					return err
+				}
 			}
 			// With files the source must take them, said before any is
 			// put: a reply command that ignores unknown keys would send
@@ -257,7 +290,19 @@ event with the comment's id is logged. Prints the URL of the reply.`,
 			}
 			// The reply is on record, with its key, before anything is
 			// posted; a record already posted is the whole answer.
-			rp, err := st.Replying(ctx, name, seq, to, body, a.who(), blobFiles(refs)...)
+			var rp *store.Reply
+			if format != "" {
+				rp, err = st.ReplyingWithFormat(ctx, name, seq, to, body, format, a.who(), blobFiles(refs)...)
+				// Only a server without the method is told to be upgraded: there
+				// is no falling back to a reply without the mode. A refusal of
+				// the store's own reaches the caller as it is, and the one for
+				// an unresolved attempt says what to retry.
+				if isNoSuchMethod(err, "ReplyingWithFormat") {
+					return fmt.Errorf("reserving explicit reply format (yardr server must support ReplyingWithFormat): %w", err)
+				}
+			} else {
+				rp, err = st.Replying(ctx, name, seq, to, body, a.who(), blobFiles(refs)...)
+			}
 			if err != nil {
 				return err
 			}
@@ -280,7 +325,9 @@ event with the comment's id is logged. Prints the URL of the reply.`,
 				}
 				if !already {
 					if filer != nil {
-						m, err = postWithFiles(ctx, filer, a.home(), env, to, body, rp.Key, refs, cred)
+						m, err = postWithFiles(ctx, filer, a.home(), env, to, body, rp.Key, refs, cred, format)
+					} else if formatted != nil {
+						m, err = formatted.ReplyFormat(ctx, env, to, body, rp.Key, format, nil, cred)
 					} else {
 						m, err = r.Reply(ctx, env, to, body, rp.Key, cred)
 					}
@@ -289,7 +336,7 @@ event with the comment's id is logged. Prints the URL of the reply.`,
 					}
 				}
 				rec := store.Reply{Source: env.Source, Thread: env.Thread.ID, Title: env.Thread.Title, ThreadURL: env.Thread.URL,
-					URL: m.URL, Key: rp.Key, Message: m.ID, Seq: seq}
+					URL: m.URL, Key: rp.Key, Message: m.ID, Seq: seq, Format: rp.Format}
 				if err := st.Replied(ctx, name, rec, name); err != nil {
 					return fmt.Errorf("posted %s, but could not record it: %w", printable(m.URL), err)
 				}
@@ -306,8 +353,30 @@ event with the comment's id is logged. Prints the URL of the reply.`,
 	}
 	cmd.Flags().StringVar(&member, "crew", "", "who is replying (default $YARDR_CREW)")
 	cmd.Flags().StringVar(&to, "to", "", "answer under this message's conversation (an id from yardr thread show)")
+	cmd.Flags().StringVar(&format, "format", "", "explicit reply mode declared by the source's thread.formats")
 	cmd.Flags().StringArrayVar(&replyFiles, "file", nil, "a file the reply carries (repeatable)")
 	return cmd
+}
+
+// isNoSuchMethod reports whether err has the exact unknown-method response
+// from an older server, or rpc's exact version-skew wrapper around it. The
+// wire gives that refusal no code of its own, so the message is what there is
+// to go by; keeping the server's words lets this yardr recognize servers
+// already installed if rpc later rewords its refusal.
+func isNoSuchMethod(err error, method string) bool {
+	if err == nil {
+		return false
+	}
+	missing := "no such method " + method
+	message := err.Error()
+	if message == missing {
+		return true
+	}
+	// The RPC client puts this note around an older server's exact refusal
+	// when the two builds differ. An unrelated error may contain the same
+	// words, so only these two wire-derived shapes get the upgrade hint.
+	return strings.HasPrefix(message, "the yardr server (pid ") &&
+		strings.HasSuffix(message, "); run `yardr server stop` ("+missing+")")
 }
 
 // hookFiler is the Filer of source, or why a reply there carries no files:
@@ -331,7 +400,7 @@ func hookFiler(ctx context.Context, st store.API, home string, seq uint64, sourc
 // when the post is over, so that what the service shows a person is the
 // name, not the blob's hash. Where a link cannot be made the blob's own
 // path stands.
-func postWithFiles(ctx context.Context, filer hooks.Filer, home string, env hooks.Envelope, to, body, key string, refs []store.BlobRef, cred string) (hooks.Message, error) {
+func postWithFiles(ctx context.Context, filer hooks.Filer, home string, env hooks.Envelope, to, body, key string, refs []store.BlobRef, cred, format string) (hooks.Message, error) {
 	paths := make([]string, len(refs))
 	for i, r := range refs {
 		paths[i] = store.BlobPath(home, r.Hash)
@@ -350,6 +419,13 @@ func postWithFiles(ctx context.Context, filer hooks.Filer, home string, env hook
 				}
 			}
 		}
+	}
+	if format != "" {
+		formatted, ok := filer.(hooks.FormattedReplier)
+		if !ok {
+			return hooks.Message{}, fmt.Errorf("source %s cannot carry explicit reply formats", env.Source)
+		}
+		return formatted.ReplyFormat(ctx, env, to, body, key, format, paths, cred)
 	}
 	return filer.ReplyFiles(ctx, env, to, body, key, paths, cred)
 }

@@ -733,7 +733,7 @@ yardmaster):
 			}
 			kind, _ := g.Config["kind"].(string)
 			if h, ok := agents.Lookup(kind); ok {
-				out["harness"] = map[string]any{"kind": kind, "always": h.Flags.Always}
+				out["harness"] = harnessOf(kind, h, g.Config)
 			}
 			if len(mayCall) > 0 {
 				out["calls"] = mayCall
@@ -746,9 +746,7 @@ yardmaster):
 			operator := settings[store.OperatorSetting]
 			return a.out(c.OutOrStdout(), out, func(w io.Writer) {
 				fmt.Fprintf(w, "%s  %s\n", g.Name, describe(*g))
-				if h, ok := agents.Lookup(kind); ok && len(h.Flags.Always) > 0 {
-					fmt.Fprintf(w, "  harness %s always: %s\n", kind, strings.Join(h.Flags.Always, " "))
-				}
+				harnessLines(w, kind, g.Config)
 				// One key to a line, as group set takes it back; values
 				// named like secrets stay out of terminal scrollback.
 				for _, k := range slices.Sorted(maps.Keys(g.Config)) {
@@ -794,7 +792,7 @@ yardmaster):
 			})
 		},
 	}
-	cmd.AddCommand(add, a.groupSetCmd(), list, show, rm)
+	cmd.AddCommand(add, a.groupSetCmd(), a.groupRenameCmd(), list, show, rm)
 	return cmd
 }
 
@@ -816,7 +814,7 @@ group add, which writes the group whole.
 
 It prints each setting changed, as it was and as it is. The value of a key
 named like a secret (token, secret, password, key) is not printed.`,
-		Example: `  yardr group set webapp/builders model=opus
+		Example: `  yardr group set webapp/builders model=opus effort=high
   yardr group set webapp/builders --limit 3
   yardr group set webapp/builders --limit 0   # pause: nothing new starts; set back to resume
   yardr group set webapp/builders 'args=["--permission-mode","auto"]' --unset idle

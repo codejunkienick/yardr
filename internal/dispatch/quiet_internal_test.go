@@ -3,7 +3,6 @@ package dispatch
 import (
 	"bufio"
 	"context"
-	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -16,6 +15,7 @@ import (
 
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
+	"yardr.dev/yardr/internal/testload"
 )
 
 func TestLandingsSinceQuietKeepsOlderDepotMarker(t *testing.T) {
@@ -77,15 +77,11 @@ func TestQuietCommandCancelsItsProcessGroup(t *testing.T) {
 	if err := cmd.Wait(); err == nil {
 		t.Fatal("canceled command succeeded")
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		err := syscall.Kill(child, 0)
-		if errors.Is(err, syscall.ESRCH) {
-			return
-		}
-		if err != nil {
-			t.Fatalf("check child process %d: %v", child, err)
-		}
+	// The child's parent is the command that was killed, so the init of the
+	// machine has it, and where that one does not reap (a container without
+	// an init) it stays a zombie that kill -0 answers for.
+	deadline := time.Now().Add(testload.Scale(2 * time.Second))
+	for testload.Running(child) {
 		if time.Now().After(deadline) {
 			t.Fatalf("child process %d survived cancellation", child)
 		}

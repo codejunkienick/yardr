@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"yardr.dev/yardr/internal/config"
+	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/testload"
 )
 
@@ -234,7 +235,7 @@ func TestWatchdogTakesTheYardDownWhenItsOwnerIsGone(t *testing.T) {
 	if !slices.Contains(strings.Fields(out), strconv.Itoa(dog)) {
 		t.Errorf("pids lists %q, which lacks the watchdog (pid %d): down would not stop it", out, dog)
 	}
-	if !running(dog) {
+	if !testload.Running(dog) {
 		t.Fatalf("the watchdog (pid %d) is not running although this binary is", dog)
 	}
 
@@ -254,7 +255,7 @@ func TestWatchdogTakesTheYardDownWhenItsOwnerIsGone(t *testing.T) {
 	if _, err := os.Stat(d); !os.IsNotExist(err) {
 		t.Errorf("%s is still there (%v)", d, err)
 	}
-	if running(dog) {
+	if testload.Running(dog) {
 		t.Errorf("the yard's own watchdog (pid %d) outlived the down", dog)
 	}
 }
@@ -330,9 +331,10 @@ func TestWatchdogTakesAYardDownOnlyForAGoneOwner(t *testing.T) {
 			if err := os.Mkdir(filepath.Join(d, "bin"), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(d, "bin", "alive"), []byte(stubAlive), 0o755); err != nil {
-				t.Fatal(err)
-			}
+			// A stand-in: the watchdog runs alive beside forking tests, and
+			// Linux refuses to start a file a fork beside its writing
+			// still holds open (ETXTBSY).
+			scripttest.Write(t, filepath.Join(d, "bin", "alive"), stubAlive)
 
 			// Not through D/e: the yard has nothing a watchdog does not use,
 			// and the name it needs is the one thing it is given.
@@ -470,9 +472,9 @@ func TestBareRunsWhatItsWatchdogStartsOnce(t *testing.T) {
 printf '#!/bin/sh\necho "%s $*" >>"%s"\n' "$(basename "$3")" "$ISOLATED_TEST_LOG" >"$3"
 chmod +x "$3"
 `
-	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(goStub), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	// A stand-in: bare runs go beside forking tests, and Linux refuses to
+	// start a file a fork beside its writing still holds open (ETXTBSY).
+	scripttest.Write(t, filepath.Join(bin, "go"), goStub)
 	// No name for a test binary, so the yard's watchdog has nothing to watch
 	// and runs nothing: what the log holds when bare returns is bare's own.
 	bareEnv(t, []string{"PATH=" + bin + ":/usr/bin:/bin:/usr/sbin:/sbin", "ISOLATED_TEST_LOG=" + ran})

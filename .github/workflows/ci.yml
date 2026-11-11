@@ -11,13 +11,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # A push to main gets a group of its own, its commit, and a pull request one
+  # per ref. Runs on main once shared a group, so the next push waited for the
+  # run before it, and GitHub keeps only the newest of the runs that wait: an
+  # older one was cancelled before it began a job, and the badge showed that
+  # as failing though no test had failed. Now every push to main starts at
+  # once, side by side, and is tested.
+  group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
   # A pull request's run is cancelled when a newer push supersedes it. A run
   # on main is not: it is the backstop for what a landing leaves out
   # (docs/design/2026-10-14-yardr-022s-landing-tests.md, "The backstop"), and
   # a landing often follows the one before within the time a run takes, so
-  # cancelling it at each push would leave none to finish. The next push waits
-  # for it instead, and GitHub keeps only the newest of the runs that wait.
+  # cancelling it at each push would leave none to finish.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -166,8 +171,8 @@ jobs:
   # path too long for a unix socket) is on the pull request and not first on a
   # Mac in the yard. It ran go vet and internal/peer alone while a runner's
   # minutes were counted; the standard runners cost none on a public
-  # repository, so it runs the lot. Keep the steps in step with the test
-  # jobs', whose comments say what each is for.
+  # repository, so on a pull request it runs the lot. Keep the steps in step
+  # with the test jobs', whose comments say what each is for.
   #
   # It is three jobs, as the linux run is, and for the same reason. The three
   # steps were one job with 30 minutes. The depot's tests took 9 minutes on a
@@ -179,7 +184,14 @@ jobs:
   # The depot's run has 45 minutes, because 30 left too little room over the
   # 28 it took on three cores. A run that outgrows its limit is cut off, and a
   # cut-off says nothing about the tests.
+  #
+  # It runs on pull requests only. On a push to main it repeats what the
+  # landing ran on a Mac in the yard, and at 23 to 38 minutes on a runner,
+  # about twice the Linux run, it was the job a run on main waited for. On a
+  # pull request it is the only Mac the change meets before review, so it
+  # stays there. The two jobs below run on both: a landing leaves them out.
   test-macos:
+    if: github.event_name == 'pull_request'
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -212,7 +224,7 @@ jobs:
   # after a success, so a run that times out leaves the next one as cold as
   # itself. Neither job installs shellcheck, because neither runs the gate.
   # The root package's tests that call the real tool skip without it, and
-  # they run in test-macos.
+  # they run in test-macos, so on a Mac only for a pull request.
   test-macos-plain:
     runs-on: macos-latest
     timeout-minutes: 30

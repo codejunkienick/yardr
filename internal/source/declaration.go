@@ -596,26 +596,6 @@ func (r *reader) str(n *yaml.Node, key string) (string, bool) {
 	return n.Value, true
 }
 
-func (r *reader) strs(n *yaml.Node, key string) []string {
-	if n.Kind != yaml.SequenceNode {
-		r.errf(n, key, "want a list ([a, b]), got %s", describe(n))
-		return nil
-	}
-	var out []string
-	for _, c := range n.Content {
-		s, ok := r.str(c, key)
-		if !ok {
-			continue
-		}
-		if slices.Contains(out, s) {
-			r.errf(c, key, "%s is listed twice", s)
-			continue
-		}
-		out = append(out, s)
-	}
-	return out
-}
-
 func (r *reader) boolean(n *yaml.Node, key string) (value, ok bool) {
 	if n.Kind != yaml.ScalarNode || n.Tag != "!!bool" || (n.Value != "true" && n.Value != "false") {
 		r.errf(n, key, "want true or false, got %s", describe(n))

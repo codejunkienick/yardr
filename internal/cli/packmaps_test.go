@@ -235,7 +235,8 @@ func TestPackApplyWithoutTheHookSaysWhatToAdd(t *testing.T) {
 
 // A hook that acts as a crew member speaks as it, so only the operator or that
 // crew member's own session has the import set the map: anyone else gets the
-// refusal yardr hook add --as gives and the rest of the pack.
+// refusal yardr hook add --as gives and the rest of the pack, and every
+// non-operator ends at the record.
 func TestPackApplyByAnotherSessionSetsNoStageMap(t *testing.T) {
 	t.Parallel()
 	a := mapApp(t, "linear")
@@ -255,7 +256,12 @@ func TestPackApplyByAnotherSessionSetsNoStageMap(t *testing.T) {
 	seedPackHeld(t, a, "../../packs/starter")
 	a.actor = "web-builder-1"
 	const refusal = "only boss's own session or the operator (me) may speak as boss; this is web-builder-1"
-	out := applyStarter(t, a)
+	const unrecorded = "only the operator (me) may record the import of pack starter; this is web-builder-1"
+	args := append([]string{"apply", "../../packs/starter", "--depot", "web", "--yes"}, starterFlags...)
+	out, err := run(t, a.packCmd(), args...)
+	if err == nil || !strings.Contains(err.Error(), unrecorded) {
+		t.Fatalf("as another session: %v\n%s", err, out)
+	}
 	for _, want := range []string{
 		"\nstage map of source linear, as crew member boss\n  the pack says " + starterMapLines + "\n  not set on hook linear: ",
 		"\napplied pack starter to depot web: ",
@@ -271,9 +277,8 @@ func TestPackApplyByAnotherSessionSetsNoStageMap(t *testing.T) {
 	if _, err := a.st.GetGroup(ctx, "web-builders"); err != nil {
 		t.Fatalf("the rest of the pack was not imported: %v", err)
 	}
-	recs, _ := a.st.Packs(ctx)
-	if len(recs) != 1 || slices.ContainsFunc(recs[0].Objects, func(po store.PackObject) bool { return po.Kind == "map" }) {
-		t.Fatalf("records = %+v", recs)
+	if recs, _ := a.st.Packs(ctx); len(recs) != 0 {
+		t.Fatalf("another session's import was recorded: %+v", recs)
 	}
 
 	// As data too, and still not set on a second run by the same session.
@@ -284,15 +289,19 @@ func TestPackApplyByAnotherSessionSetsNoStageMap(t *testing.T) {
 			Mapped []any `json:"mapped"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal([]byte(applyStarter(t, a)), &got); err != nil || !strings.Contains(got.Refused["linear"], refusal) || len(got.Result.Mapped) != 0 {
-		t.Fatalf("--json: %v, %+v", err, got)
+	out, err = run(t, a.packCmd(), args...)
+	if jerr := json.Unmarshal([]byte(out), &got); err == nil || !strings.Contains(err.Error(), unrecorded) || jerr != nil || !strings.Contains(got.Refused["linear"], refusal) || len(got.Result.Mapped) != 0 {
+		t.Fatalf("--json: %v, %v, %+v\n%s", err, jerr, got, out)
 	}
 	a.json = false
 
-	// The crew member's own session may, as it may run hook add --as itself.
+	// The crew member's own session may set the map, as it may run hook
+	// add --as itself — but only the operator records.
 	a.actor = "boss"
-	if out = applyStarter(t, a); !strings.Contains(out, "\nhook linear now moves tracked linear issues as boss: ") {
-		t.Fatalf("as boss:\n%s", out)
+	out, err = run(t, a.packCmd(), args...)
+	if err == nil || !strings.Contains(err.Error(), "only the operator (me) may record the import of pack starter; this is boss") ||
+		!strings.Contains(out, "\nhook linear now moves tracked linear issues as boss: ") {
+		t.Fatalf("as boss: %v\n%s", err, out)
 	}
 	if h := linearHook(t, a); h.As != "boss" {
 		t.Fatalf("hook = %+v", h)

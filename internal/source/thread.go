@@ -1,6 +1,7 @@
 package source
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
@@ -55,6 +56,17 @@ type Thread struct {
 	// A source without it is refused --file: a reply command that
 	// ignores unknown keys would send the words and drop the files.
 	Files bool `json:"files,omitempty"`
+	// Formats are the explicit reply modes the command understands. Absent,
+	// replies take no format field and keep the command's default behavior.
+	Formats []string `json:"formats,omitempty"`
+}
+
+// CheckFormat refuses a mode the thread command has not declared.
+func (t *Thread) CheckFormat(format string) error {
+	if t == nil || format == "" || !slices.Contains(t.Formats, format) {
+		return fmt.Errorf("thread.formats does not support the selected reply format")
+	}
+	return nil
 }
 
 // The parts of an identity a thread.assignee names.
@@ -331,8 +343,8 @@ func expandLink(tmpl string, groups []string) string {
 // that is no part of an identity or has no open to take it.
 func (r *reader) thread(e entry) *Thread {
 	t := &Thread{}
-	var place, states, assignee *entry
-	for _, f := range r.entries(e.v, e.path, "reply", "posted", "read", "file", "open", "opened", "state", "place", "states", "labels", "assignee", "files") {
+	var place, states, assignee, formats *entry
+	for _, f := range r.entries(e.v, e.path, "reply", "posted", "read", "file", "open", "opened", "state", "place", "states", "labels", "assignee", "files", "formats") {
 		switch f.key {
 		case "reply":
 			t.Reply = r.command(f, "linear/thread, reply")
@@ -375,6 +387,17 @@ func (r *reader) thread(e entry) *Thread {
 			}
 		case "files":
 			t.Files, _ = r.boolean(f.v, f.path)
+		case "formats":
+			formats = &f
+			for _, mode := range r.strsWithDuplicate(f.v, f.path, func(string) string {
+				return "want distinct format names (markdown, plain)"
+			}) {
+				if !validName.MatchString(mode) {
+					r.errf(f.v, f.path, "want distinct format names (markdown, plain)")
+					continue
+				}
+				t.Formats = append(t.Formats, mode)
+			}
 		}
 	}
 	if e.v.Kind != yaml.MappingNode {
@@ -385,6 +408,9 @@ func (r *reader) thread(e entry) *Thread {
 	}
 	if assignee != nil && t.Open == nil {
 		r.errf(assignee.v, assignee.path, "thread.open is missing: the assignee is whom the thread it opens is assigned to")
+	}
+	if formats != nil && (len(t.Reply) == 0 || len(t.Posted) == 0 || len(t.Read) == 0) {
+		r.errf(formats.v, formats.path, "thread.reply, thread.posted and thread.read are required for explicit reply formats")
 	}
 	// A states given but with no word the yard knows is refused above, word
 	// by word; an empty one is as good as none.

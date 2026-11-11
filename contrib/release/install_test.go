@@ -25,6 +25,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"yardr.dev/yardr/internal/scripttest"
 )
 
 const installTag = "v9.8.7"
@@ -319,9 +321,10 @@ func newInstallWorld(t *testing.T, site *fixtureSite) *installWorld {
 
 func (w *installWorld) standIn(name, body string) {
 	w.t.Helper()
-	if err := os.WriteFile(filepath.Join(w.bin, name), []byte(body), 0o755); err != nil {
-		w.t.Fatal(err)
-	}
+	// A stand-in: the installer runs these beside forking tests, and Linux
+	// refuses to start a file a fork beside its writing still holds open
+	// (ETXTBSY).
+	scripttest.Write(w.t, filepath.Join(w.bin, name), body)
 }
 
 // setenv sets a variable for the next runs; the last setting wins.

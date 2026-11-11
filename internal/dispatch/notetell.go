@@ -19,8 +19,8 @@ import (
 //
 // It is told when the agent is idle, and never interrupts a turn: a busy
 // agent's notes wait, and one per pass is told, so each is read before the
-// next is typed. A session that waits for the window of a usage limit to
-// reset is told nothing yet: a rate-limited agent cannot read the note. A
+// next is typed. A session stopped by a usage limit is told nothing until
+// it recovers: a rate-limited agent cannot read the note. A
 // runner with no agent to tell (exec, manual, peer) has nothing to wait
 // for, as a crew member's nudge has: the note is marked told at once. If
 // the session ends first, nothing is sent, and the note shows as untold.
@@ -32,9 +32,9 @@ import (
 // submits it itself. The note_told event says which way with delivery. A
 // telling neither way takes is marked untold, with why, and the yardmaster
 // hears it (note_untold is of the class attention): the note then says
-// "could not be told", and "will be told" is said no more. One behind a
-// first prompt that was given up is marked untold too: the first prompt
-// goes first, and it never arrives.
+// "could not be told", and "will be told" is said no more. A session whose
+// first prompt was given up is ended before it is told anything (see
+// promptGaveUp).
 func (d *Dispatcher) tellNotes(ctx context.Context, r Runner, s *store.Session) error {
 	notes, err := d.Store.Notes(ctx, s.Bead)
 	if err != nil {
@@ -57,20 +57,11 @@ func (d *Dispatcher) tellNotes(ctx context.Context, r Runner, s *store.Session) 
 		return nil
 	}
 	direct := !d.paneHasPrompt(ctx, r, s.Handle)
-	if s.Handle[store.PendingPrompt] != nil {
-		if s.Handle[promptLost] == true {
-			// Given up: the first prompt never arrives, so a note
-			// behind it never goes either. Marked untold with why,
-			// not left for a pass that never comes.
-			return d.Store.MarkNoteUntold(ctx, s.Bead, untold.Seq, s.ID,
-				"the session's first prompt never arrived and was given up, and a note is not told before it")
-		}
-		if !direct {
-			// The first prompt goes first while its harness screen is up.
-			// With no readable screen, the note goes through herdr instead
-			// of waiting for the harness to draw one.
-			return nil
-		}
+	if s.Handle[store.PendingPrompt] != nil && !direct {
+		// The first prompt goes first while its harness screen is up.
+		// With no readable screen, the note goes through herdr instead
+		// of waiting for the harness to draw one.
+		return nil
 	}
 	if s.Handle[harnessPrompted] != nil {
 		// The prompt yardr gave at a usage limit's reset is not known to
@@ -78,10 +69,8 @@ func (d *Dispatcher) tellNotes(ctx context.Context, r Runner, s *store.Session) 
 		// nudge's Enter would answer it (see nudge).
 		return nil
 	}
-	if _, waits := handleTime(s.Handle, harnessResetAt); waits {
-		// It waits for the window of its usage limit to reset, which
-		// prompts it then (harness_reset.go): two prompts would go as one
-		// message, to an agent that can read neither yet.
+	if _, waits := handleTime(s.Handle, harnessResetAt); waits || quotaHeld(s.Handle) {
+		// A quota-stopped agent cannot read a note, even without a known reset.
 		return nil
 	}
 	author := noteAuthor(untold.Author)

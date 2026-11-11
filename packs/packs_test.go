@@ -107,8 +107,8 @@ func TestTemplatesAreGeneric(t *testing.T) {
 	// Eighteen roles (the starter's five, the dir pack's two, the
 	// contributors pack's four, the design pack's two, the website pack's
 	// five) and the stage files of the seven flows: an import installs them
-	// in any yard. The contributors pack's pr flow has one more than it had,
-	// review-post's.
+	// in any yard. The contributors pack's pr flow has three more than it
+	// had: review-post's, fix's and push's.
 	var roles, stages int
 	for name := range files {
 		if strings.Contains(name, "/roles/") {
@@ -117,8 +117,8 @@ func TestTemplatesAreGeneric(t *testing.T) {
 			stages++
 		}
 	}
-	if roles != 18 || stages != 36 {
-		t.Fatalf("embedded: %d roles and %d stage files, want 18 and 36", roles, stages)
+	if roles != 18 || stages != 38 {
+		t.Fatalf("embedded: %d roles and %d stage files, want 18 and 38", roles, stages)
 	}
 	for name, body := range files {
 		for i, line := range strings.Split(body, "\n") {
@@ -1301,15 +1301,17 @@ func TestContributorsPack(t *testing.T) {
 	}
 	if want := map[string][]string{
 		"issue": {"triage", "backlog", "new", "review", "approved", "decide", "merged", "closed"},
-		"pr":    {"triage", "review", "review-post", "ciwait", "contributor", "approved", "decide", "merged", "closed"},
+		"pr":    {"triage", "review", "review-post", "ciwait", "contributor", "fix", "push", "approved", "decide", "merged", "closed"},
 	}; !reflect.DeepEqual(flows, want) {
 		t.Errorf("flows = %v, want %v", flows, want)
 	}
 	// The posting of the reviewer's review is worked by its script, post-review,
-	// and the wait for the yard's CI by pr-ci.
+	// the wait for the yard's CI by pr-ci, the fix by a builder, and the push
+	// of the fix by push-fix.
 	for stage, want := range map[string]string{
 		"issue:triage": "maintainers", "pr:triage": "maintainers", "pr:review": "pr-reviewers",
-		"pr:review-post": "post", "pr:ciwait": "pr-ci", "pr:contributor": "outside", "pr:approved": "maintainers",
+		"pr:review-post": "post", "pr:ciwait": "pr-ci", "pr:contributor": "outside", "pr:fix": "builders",
+		"pr:push": "push-fix", "pr:approved": "maintainers",
 	} {
 		if groups[stage] != want {
 			t.Errorf("stage %s is worked by %q, want %q", stage, groups[stage], want)
@@ -1323,8 +1325,10 @@ func TestContributorsPack(t *testing.T) {
 	// bot's push leads from the read, the posting and the wait back to review.
 	// New commits on a pull request a maintainer accepted lead from the read,
 	// the posting, the wait and the contributor back to triage, to be accepted
-	// again. The pull request's merge or close ends the bead in every stage it
-	// waits in while it is open.
+	// again. A maintainer's pick sends the contributor's bead to fix, whose
+	// builder sends it to push, whose script sends it back to triage for a
+	// fresh accept. The pull request's merge or close ends the bead in every
+	// stage it waits in while it is open.
 	var prFlow store.Flow
 	for _, f := range p.Flows {
 		if f.Name != "pr" {
@@ -1346,11 +1350,29 @@ func TestContributorsPack(t *testing.T) {
 			{"ciwait", "done", "approved"}, {"ciwait", "changes", "contributor"}, {"ciwait", "pushed", "review"},
 			{"ciwait", "unaccepted", "triage"}, {"ciwait", "merged", "merged"}, {"ciwait", "dropped", "closed"},
 			{"contributor", "pushed", "review"}, {"contributor", "unaccepted", "triage"}, {"contributor", "merged", "merged"}, {"contributor", "dropped", "closed"},
+			{"fix", "done", "push"}, {"fix", "question", "decide"}, {"fix", "merged", "merged"}, {"fix", "dropped", "closed"},
+			{"push", "done", "triage"}, {"push", "merged", "merged"}, {"push", "dropped", "closed"},
 			{"approved", "merged", "merged"}, {"approved", "dropped", "closed"},
 			{"decide", "merged", "merged"}, {"decide", "dropped", "closed"},
 		} {
 			if to, err := sf.Resolve(e.stage, e.outcome); err != nil || to != e.to {
 				t.Errorf("pr flow: %s on %s goes to %q (%v), want %s", e.stage, e.outcome, to, err, e.to)
+			}
+		}
+		// Neither fix nor push hears a push: no pushed or unaccepted edge, so
+		// new commits move the bead's head and leave the bead where it is,
+		// and the push script holds on a head that is not the picked one.
+		for stage, want := range map[string][]string{
+			"fix":  {"done", "dropped", "merged", "question"},
+			"push": {"done", "dropped", "merged"},
+		} {
+			var got []string
+			for _, o := range sf.OutcomesFrom(stage) {
+				got = append(got, o.Name)
+			}
+			slices.Sort(got)
+			if !slices.Equal(got, want) {
+				t.Errorf("pr flow: %s has the outcomes %v, want %v alone", stage, got, want)
 			}
 		}
 		var ciwait []string
@@ -1390,6 +1412,46 @@ func TestContributorsPack(t *testing.T) {
 		if !sf.Allows("approved", "ciwait") {
 			t.Errorf("pr flow: a bead in approved may not be moved to ciwait")
 		}
+		if !sf.Allows("approved", "contributor") {
+			t.Errorf("pr flow: an approved bead may not be returned to contributor for a fix round")
+		}
+		// A maintainer's pick moves a contributor's bead to fix by hand, and
+		// a held push is resumed by hand to triage. An approved bead can go
+		// back through contributor for a conflicted fix round.
+		if !sf.Allows("contributor", "fix") {
+			t.Errorf("pr flow: a bead in contributor may not be moved to fix")
+		}
+		if !sf.Allows("push", "triage") {
+			t.Errorf("pr flow: a bead in push may not be moved to triage")
+		}
+	}
+	// Those are the hand paths of a fix round, and none leads into push,
+	// whose bead comes from fix alone; fix itself takes no hand move.
+	manual := map[string][]string{}
+	for _, f := range p.Flows {
+		if f.Name != "pr" {
+			continue
+		}
+		for _, s := range f.Stages {
+			manual[s.Name] = s.Manual
+		}
+	}
+	if !slices.Contains(manual["contributor"], "fix") {
+		t.Errorf("pr flow: a bead in contributor may not be moved to fix by hand")
+	}
+	if !slices.Contains(manual["approved"], "contributor") {
+		t.Errorf("pr flow: an approved bead may not be sent back through contributor for a fix round")
+	}
+	if !slices.Equal(manual["push"], []string{"triage"}) {
+		t.Errorf("pr flow: push allows the hand moves %v, want triage alone", manual["push"])
+	}
+	if len(manual["fix"]) != 0 {
+		t.Errorf("pr flow: fix allows the hand moves %v, want none", manual["fix"])
+	}
+	for stage, to := range manual {
+		if slices.Contains(to, "push") {
+			t.Errorf("pr flow: a bead in %s may be moved to push by hand", stage)
+		}
 	}
 	// A stage file says when each way out of its stage applies, in a bullet
 	// named for the outcome, the source's word among them (`pushed`, `merged`,
@@ -1426,6 +1488,11 @@ func TestContributorsPack(t *testing.T) {
 			// The same, for the script that posts the review.
 			if g.Run != "scripts/post-review" || g.Limit != 1 {
 				t.Errorf("post = %+v", g)
+			}
+		case "push-fix":
+			// The same, for the script that pushes the fix.
+			if g.Run != "scripts/push-fix" || g.Limit != 1 {
+				t.Errorf("push-fix = %+v", g)
 			}
 		case "maintainers", "outside":
 			if !g.People {
@@ -1593,7 +1660,12 @@ func TestContributorsPack(t *testing.T) {
 		{"user", "bug,accepted", "review", "unaccepted", "triage"},
 		{"bot", "accepted", "approved", "", ""},
 		{"user", "accepted", "approved", "", ""},
-		{"user", "accepted", "triage", "", ""},
+		// A push while the bead waits in triage, whoever pushed and whatever
+		// the pull request bears, makes the stay again: the card there is of
+		// the head it was put for, so a new head is a new card.
+		{"user", "accepted", "triage", "pushed", "triage"},
+		{"user", "", "triage", "pushed", "triage"},
+		{"bot", "", "triage", "pushed", "triage"},
 		// The posting runs in moments and checks the head itself, so a person's
 		// push to a pull request nobody accepted has no line there: it fails the
 		// posting back to review, which reads the new head, and the tests run
@@ -1684,7 +1756,11 @@ func TestContributorsPack(t *testing.T) {
 			t.Errorf("a closed issue in stage %s says %q, want no line to match", stage, say.Outcome)
 		}
 	}
-	if want := map[string]string{"issue:new": "started", "issue:merged": "done", "issue:closed": "done", "pr:closed": "done"}; !reflect.DeepEqual(gh.Map, want) {
+	// Only issues are heard: no stage closes a pull request, and the thread
+	// command refuses a state asked of one, so a pr line would queue a move that
+	// fails and is tried again (TestContributorsClosedPullRequestEndsItsBead, in
+	// internal/dispatch, holds that closing a pr bead queues none).
+	if want := map[string]string{"issue:new": "started", "issue:merged": "done", "issue:closed": "done"}; !reflect.DeepEqual(gh.Map, want) {
 		t.Errorf("hears = %v, want %v", gh.Map, want)
 	}
 	// The yardmaster's role says what the outside work adds to its job, which
@@ -2948,6 +3024,31 @@ func TestContributorsTextsSayWhatIsNotRun(t *testing.T) {
 			"A run that is no verdict on the pull request holds the bead instead",
 			"`yardr bead unhold <id>`",
 		},
+		"contributors/flows/pr/fix.md": {
+			"merging the base into the checkout, never by rebasing it",
+			"yardr bead update <id> --add-label fix-ok --meta fix_head=<sha>",
+			"That is how a pick reaches the bead, whoever types it. A bead's agent may not:\n`fix-ok` and `fix_head` are refused to it on any bead, its own included",
+			"The builder holds no key",
+			"Its checkout is the picked head, detached, never the live tip",
+			"yardr bead update <id> --meta fix_commit=<sha>",
+			// The push script makes the commit again as the App; the builder is told
+			// nothing about whose name to commit under.
+			"made again\nas the yard's GitHub App by the push script",
+			"The push the next stage makes is public before the re-review",
+			"That yes gates the yard's merge only",
+		},
+		"contributors/flows/pr/push.md": {
+			"No agent and\nno person works this stage",
+			"fast-forward only, never forced",
+			"The script\n  never writes `pr_head` itself.",
+			"is resumed by hand to `triage`\n(`yardr bead advance <id> --to triage`), never by unholding here",
+			"No hand path\nleads back into `push`: every push is a fix round's.",
+			"**Whose name.** The App's.",
+			"A signature on a commit it makes again is dropped, not\n  carried over",
+			"records the commit it pushed as the new\n  `fix_commit`",
+			"commit it cannot make again as the App",
+			"The maintainer's yes gates the yard's merge only",
+		},
 		"contributors/flows/pr/approved.md": {
 			"The yard posted the reviewer's review on the pull request in `review-post`",
 			"Running it beyond that is here, and a person's",
@@ -2958,7 +3059,7 @@ func TestContributorsTextsSayWhatIsNotRun(t *testing.T) {
 			"yardr bead update <id> --add-label merge-ok --meta merge_head=<sha>",
 			"That is how a yes reaches the bead, whoever types it. A bead's agent may not:\n`merge_head` is refused to it on any bead, its own included.",
 			"a head that\nmoved since is held, not merged",
-			"Nothing of the yard pushes to a pull\nrequest",
+			"Nothing here pushes to a pull request:\nthe yard's only push onto one is a fix round's",
 		},
 	} {
 		for _, want := range wants {

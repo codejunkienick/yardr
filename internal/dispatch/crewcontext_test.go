@@ -27,6 +27,9 @@ func TestContextAsksOnceAndNeverForces(t *testing.T) {
 	if r.ContextAskedAt == nil || r.ContextPct != 60 || r.ContextWindow != 200000 || r.ContextAt == nil {
 		t.Fatalf("after the ask: %+v", r.CrewSession)
 	}
+	if r.StartedAt == nil || !f.ctxStartedAt.Equal(*r.StartedAt) {
+		t.Fatalf("context start = %v, want %v", f.ctxStartedAt, r.StartedAt)
+	}
 	evs := eventKinds(t, s, r.Journal, "crew_context_asked")
 	if len(evs) != 1 || evs[0].Data["pct"] != float64(60) || evs[0].Data["window"] != float64(200000) {
 		t.Fatalf("crew_context_asked events = %+v", evs)
@@ -93,6 +96,20 @@ func TestContextThresholds(t *testing.T) {
 			t.Fatalf("reading = %+v", r.CrewSession)
 		}
 	})
+	t.Run("a declared window takes precedence", func(t *testing.T) {
+		t.Parallel()
+		s, f, d := crewSetup(t, store.CrewMember{Config: map[string]any{"kind": "muse", "model": "example[200k]"}})
+		f.ctxOK, f.ctxUsed = true, 600000 // 59% of Muse's window, below the default threshold.
+		f.ctxWindow = 1007997
+		must(t, d.Reconcile(ctx))
+		must(t, d.Reconcile(ctx))
+		if len(f.nudges) != 0 {
+			t.Fatalf("nudges %v", f.nudges)
+		}
+		if r, _ := s.GetCrew(ctx, "yardmaster"); r.ContextPct != 59 || r.ContextWindow != 1007997 {
+			t.Fatalf("reading = %+v", r.CrewSession)
+		}
+	})
 	t.Run("0 asks never", func(t *testing.T) {
 		t.Parallel()
 		s, f, d := crewSetup(t, store.CrewMember{ContextHandoff: "0"})
@@ -105,6 +122,21 @@ func TestContextThresholds(t *testing.T) {
 		}
 		if r, _ := s.GetCrew(ctx, "yardmaster"); r.ContextAskedAt != nil || r.ContextPct != 95 {
 			t.Fatalf("reading = %+v", r.CrewSession)
+		}
+	})
+	t.Run("a reported window follows the current call", func(t *testing.T) {
+		t.Parallel()
+		s, f, d := crewSetup(t, store.CrewMember{Config: map[string]any{"kind": "codex", "model": "example[1m]"}})
+		f.ctxOK, f.ctxUsed, f.ctxWindow = true, 190000, 475000 // 40%, regardless of the model name.
+		must(t, d.Reconcile(ctx))
+		must(t, d.Reconcile(ctx))
+		if r, _ := s.GetCrew(ctx, "yardmaster"); r.ContextPct != 40 || r.ContextWindow != 475000 || len(f.nudges) != 0 {
+			t.Fatalf("first window: %+v; nudges %v", r.CrewSession, f.nudges)
+		}
+		f.ctxUsed, f.ctxWindow = 155040, 258400 // The next call holds 60% of its own window.
+		must(t, d.Reconcile(ctx))
+		if r, _ := s.GetCrew(ctx, "yardmaster"); r.ContextPct != 60 || r.ContextWindow != 258400 || r.ContextAskedAt == nil || len(f.nudges) != 1 {
+			t.Fatalf("changed window: %+v; nudges %v", r.CrewSession, f.nudges)
 		}
 	})
 }

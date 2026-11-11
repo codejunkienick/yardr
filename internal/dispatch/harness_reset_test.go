@@ -130,6 +130,10 @@ func TestSessionAtItsUsageLimitIsPromptedWhenTheWindowHasReset(t *testing.T) {
 		t.Fatalf("data = %v, want wakes_at a minute after the reset and the hint saying so", evs[0].Data)
 	}
 
+	// A note written in the wait is not told either: its agent cannot read it.
+	_, err := s.AddNotedAs(ctx, b.ID, "read the review", "yardmaster", "")
+	must(t, err)
+
 	// The wait: nothing typed, nothing asked, by this daemon or its next.
 	for _, by := range []time.Duration{time.Second, 20 * time.Minute, 42 * time.Minute} {
 		*now = noon().Add(by)
@@ -140,6 +144,9 @@ func TestSessionAtItsUsageLimitIsPromptedWhenTheWindowHasReset(t *testing.T) {
 	must(t, d2.Reconcile(ctx))
 	if asks := p.asks(); len(r.nudges) != 0 || len(asks) != 1 {
 		t.Fatalf("in the wait: typed %q, the provider run %d times; want nothing typed and the one ask of the stop", r.nudges, len(asks))
+	}
+	if notes, err := s.Notes(ctx, b.ID); err != nil || len(notes) != 1 || notes[0].Told || notes[0].Untold != "" {
+		t.Fatalf("notes = %v, err = %v; want the note written in the wait queued, neither told nor untold", notes, err)
 	}
 
 	// The wake, first with no fresh answer on this daemon: its cache is

@@ -66,8 +66,9 @@ const (
 	metaCloseSeq = "close_seq"
 	// metaPRHead is the head commit of the train's pull request as the last
 	// pull_request (or review) event for it gave it: what CI must have run
-	// on for its conclusion to count.
-	metaPRHead = "pr_head"
+	// on for its conclusion to count. A pull request's own bead has it too,
+	// and the card of its triage shows it (store.MetaPRHead).
+	metaPRHead = store.MetaPRHead
 	// metaAcceptedHead is the head commit an event told when the source said
 	// accepted and the bead moved on it: the commit a maintainer accepted the
 	// pull request at (the contributors pack's triage stage). Unlike pr_head it
@@ -115,6 +116,11 @@ type ruleEvent struct {
 	// threadURL is the URL of the issue or pull request the event is about,
 	// and actor who did what it tells of, by its id in the source.
 	threadURL, actor string
+	// by is who acted as the source spells them (the login), and size the
+	// size of the change where the delivery told it: what a pull request's
+	// card shows of its head (prhead.go).
+	by   string
+	size *store.HeadSize
 	// run is whether ev is about a run of CI, whatever became of it, and
 	// tellsHead whether it tells the pull request's head commit (sha):
 	// an event about the pull request itself, or a review of it.
@@ -142,7 +148,8 @@ func readRuleEvent(e store.Event, decl *source.Declaration) ruleEvent {
 	ev := ruleEvent{seq: e.Seq, at: e.At, hook: str(e.Data["hook"]), data: e.Data, typ: str(e.Data["type"]), action: str(e.Data["action"]),
 		source: str(e.Data["source"]), sha: field("head_sha"), train: field("train"),
 		repo: field("repo"), number: field("number"), headRepo: field("head_repo"),
-		threadURL: str(thread["url"]), actor: str(who["id"])}
+		threadURL: str(thread["url"]), actor: str(who["id"]), by: cmp.Or(str(who["name"]), str(who["id"])),
+		size: headSize(field)}
 	if decl != nil && decl.Events != nil {
 		ev.run = slices.Contains(decl.Events.Runs, ev.typ)
 		ev.tellsHead = slices.Contains(decl.Events.HeadFrom, ev.typ)
@@ -449,6 +456,12 @@ func (d *Dispatcher) hookEvent(ctx context.Context, ev ruleEvent, pass *hookPass
 	case bead.Hold:
 		res = ignored("%s is held", beadWord(bead))
 	default:
+		// The card a move into triage puts shows the head this event told, so
+		// the bead has it before the move (prhead.go); the write below, with
+		// the event marked seen, is what makes the record sure.
+		if head && ev.sha != "" {
+			d.recordHead(ctx, bead, ev)
+		}
 		res = d.said(ctx, ev, bead, pr, line, decl, h)
 	}
 	if res != nil {
@@ -462,7 +475,7 @@ func (d *Dispatcher) hookEvent(ctx context.Context, ev ruleEvent, pass *hookPass
 		meta[metaCloseSeq] = ev.seq
 	}
 	if head && ev.sha != "" && elsewhere == "" {
-		meta[metaPRHead] = ev.sha
+		maps.Copy(meta, headMeta(bead, ev))
 		// A maintainer's yes is of the commit its event names, written with
 		// the mark that the event was judged: a yes whose commit was not told
 		// leaves none, and what waits on it holds the bead for a person to

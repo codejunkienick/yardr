@@ -109,6 +109,7 @@ type API interface {
 	Groups(ctx context.Context) ([]Group, error)
 	GetGroup(ctx context.Context, name string) (*Group, error)
 	DeleteGroup(ctx context.Context, name, actor string) (int, error)
+	RenameGroup(ctx context.Context, name, to, actor string) (*GroupRenamed, error)
 	AddRoute(ctx context.Context, r Route, actor string) (*Route, error)
 	SetRoute(ctx context.Context, id string, e RouteEdit, actor string) (*RouteChange, error)
 	Routes(ctx context.Context) ([]Route, error)
@@ -248,6 +249,7 @@ type API interface {
 	UnfollowThread(ctx context.Context, name, source, thread, actor string) error
 	Threads(ctx context.Context, name string) ([]Participation, error)
 	Replying(ctx context.Context, name string, seq uint64, to, body, actor string, files ...BlobFile) (*Reply, error)
+	ReplyingWithFormat(ctx context.Context, name string, seq uint64, to, body, format, actor string, files ...BlobFile) (*Reply, error)
 	Replied(ctx context.Context, name string, rp Reply, actor string) error
 	Opening(ctx context.Context, name, source, in, title, body, actor string) (*Reply, error)
 	Opened(ctx context.Context, name string, rp Reply, actor string) error

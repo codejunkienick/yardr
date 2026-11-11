@@ -172,6 +172,14 @@ func TestFreePortIsPickedBelowTheKernelsOwnRange(t *testing.T) {
 // held port and nothing else, which makes the held port the only draw there is;
 // once the listener is gone the same range gives the port, so it is the held
 // port that is refused and not every port.
+//
+// That last draw races every other process on the machine. The listener's port
+// came from the kernel, which deals it again to the next process that binds port
+// 0: a server of another package's tests, or another copy of this test. That
+// process can hold the port through all the hundred tries of the draw, and the
+// draw is right to refuse it. After a failed draw, the test checks with plain
+// binds and dials whether a process still holds the port; only a refusal with no
+// current holder is the draw's fault.
 func TestFreePortSkipsAPortAWildcardListenerHolds(t *testing.T) {
 	for _, tc := range []struct{ name, network, addr, host string }{
 		{"dual-stack", "tcp", ":0", "127.0.0.1"},
@@ -185,9 +193,19 @@ func TestFreePortSkipsAPortAWildcardListenerHolds(t *testing.T) {
 			}
 			defer wide.Close()
 			held := wide.Addr().(*net.TCPAddr).Port
+			// Check before pickPort fills the listener's accept queue. A timeout
+			// from a later dial would not distinguish a full queue from a stalled
+			// test process.
+			if heldNow(held) == "" {
+				t.Fatalf("plain bind and dial checks did not find the listener on %s holding port %d", wide.Addr(), held)
+			}
+			start := time.Now()
 			got, err := pickPort(tc.host, held, 1)
 			if err == nil {
-				t.Fatalf("pickPort(%s, %d, 1) = %d, want no free port: a listener on %s holds it", tc.host, held, got, wide.Addr())
+				// A draw that took as long as a dial's timeout read a timeout as no
+				// answer: this process was not run for that long, and the listener never
+				// showed itself.
+				t.Fatalf("pickPort(%s, %d, 1) = %d after %v, want no free port: a listener on %s holds it", tc.host, held, got, time.Since(start).Round(time.Millisecond), wide.Addr())
 			}
 			if !errors.Is(err, errNoFreePort) {
 				// The host cannot be bound at all, which FreePort fails a test for and
@@ -195,11 +213,103 @@ func TestFreePortSkipsAPortAWildcardListenerHolds(t *testing.T) {
 				t.Skipf("%s is unavailable: %v", tc.host, err)
 			}
 			wide.Close()
-			if got, err := pickPort(tc.host, held, 1); err != nil || got != held {
-				t.Errorf("pickPort(%s, %d, 1) = %d, %v once the listener is gone, want the port", tc.host, held, got, err)
+			got, err = pickPort(tc.host, held, 1)
+			if err == nil && got == held {
+				return
+			}
+			if why := heldNow(held); why != "" {
+				t.Skipf("another process holds port %d once the listener is gone: %s", held, why)
+			}
+			t.Errorf("pickPort(%s, %d, 1) = %d, %v once the listener is gone, though plain binds and dials find no holder, want the port", tc.host, held, got, err)
+		})
+	}
+}
+
+// A dial that fails without proving nothing listens reads as answered. A
+// timeout does, first of all: a stalled process runs past the deadline after
+// the handshake has finished, and Go reports the expired deadline all the same,
+// so a draw that read it as free would hand out a port a listener holds. Only
+// a refusal and the errors of no route to the address read as free. Each
+// outcome is forced through the draw's dial, so none is staged.
+func TestLoopbackAnswersReadsOnlyRefusalAndNoRouteAsFree(t *testing.T) {
+	connect := func(errno syscall.Errno) error {
+		return &net.OpError{Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connect", Err: errno}}
+	}
+	timeout := &net.OpError{Op: "dial", Net: "tcp", Err: os.ErrDeadlineExceeded}
+	for _, tc := range []struct {
+		name      string
+		v4, v6    error // nil connects
+		want      bool
+		wantDials int
+	}{
+		{"refused on both", connect(syscall.ECONNREFUSED), connect(syscall.ECONNREFUSED), false, 2},
+		{"no route on both", connect(syscall.ENETUNREACH), connect(syscall.EHOSTUNREACH), false, 2},
+		{"no such family", connect(syscall.EAFNOSUPPORT), connect(syscall.ECONNREFUSED), false, 2},
+		{"timeout on the first", timeout, connect(syscall.ECONNREFUSED), true, 1},
+		{"timeout on the second", connect(syscall.ECONNREFUSED), timeout, true, 2},
+		{"another errno", connect(syscall.EACCES), connect(syscall.ECONNREFUSED), true, 1},
+		{"an error with no errno", errors.New("boom"), connect(syscall.ECONNREFUSED), true, 1},
+		{"connected", nil, connect(syscall.ECONNREFUSED), true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var dialed []string
+			old := dialLoopback
+			t.Cleanup(func() { dialLoopback = old })
+			dialLoopback = func(addr string) (net.Conn, error) {
+				dialed = append(dialed, addr)
+				err := tc.v4
+				if len(dialed) > 1 {
+					err = tc.v6
+				}
+				if err != nil {
+					return nil, err
+				}
+				c, peer := net.Pipe()
+				t.Cleanup(func() { c.Close(); peer.Close() })
+				return c, nil
+			}
+			if got := loopbackAnswers(43743); got != tc.want {
+				t.Errorf("loopbackAnswers = %v, want %v", got, tc.want)
+			}
+			wantDialed := []string{"127.0.0.1:43743", "[::1]:43743"}[:tc.wantDials]
+			if strings.Join(dialed, ",") != strings.Join(wantDialed, ",") {
+				t.Errorf("dialled %v, want %v", dialed, wantDialed)
 			}
 		})
 	}
+}
+
+// heldNow says what shows that a process holds port: a bind of the same
+// loopback address or wildcard address is refused because it is in use, or a
+// dial of either loopback address connects. A dial timeout is inconclusive: a
+// listener with a full queue and a stalled test process both cause one. It
+// makes these calls itself, not the draw's, so a draw that refuses a port
+// nobody holds is not excused by its own reading of the port.
+func heldNow(port int) string {
+	for _, endpoint := range []struct{ network, host string }{
+		{"tcp", "127.0.0.1"},
+		{"tcp", "::1"},
+		{"tcp4", "0.0.0.0"},
+		{"tcp6", "::"},
+	} {
+		addr := net.JoinHostPort(endpoint.host, strconv.Itoa(port))
+		ln, err := net.Listen(endpoint.network, addr)
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return "a bind of " + addr + " fails: " + err.Error()
+		}
+		if err == nil {
+			ln.Close()
+		}
+	}
+	for _, h := range []string{"127.0.0.1", "::1"} {
+		addr := net.JoinHostPort(h, strconv.Itoa(port))
+		c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		if err == nil {
+			c.Close()
+			return "a dial of " + addr + " connects"
+		}
+	}
+	return ""
 }
 
 // waitFor polls cond until it holds. The deadline is a fuse against a hang,

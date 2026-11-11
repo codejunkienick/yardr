@@ -35,6 +35,23 @@ func TestHarnessFiles(t *testing.T) {
 	if want := []string{"claude", "codex", "grok", "kimi", "opencode", "pi", "kiro", "muse"}; !slices.Equal(kinds, want) {
 		t.Errorf("kinds with a file: %v, want %v", kinds, want)
 	}
+	// How each kind takes an effort, as its file says it: Claude Code and Muse
+	// by a flag, Codex as the setting its -c sets. A kind with no entry takes
+	// none, and a group of it refuses the key.
+	wantEffort := map[string]string{
+		"claude": "--effort {level} (low medium high xhigh max)",
+		"codex":  "-c model_reasoning_effort={level} (low medium high xhigh max ultra)",
+		"muse":   "--reasoning-effort {level} (none minimal low medium high xhigh max ultra)",
+	}
+	for _, h := range Harnesses {
+		got := ""
+		if e := h.Flags.Effort; e != nil {
+			got = strings.Join(e.Args, " ") + " (" + strings.Join(e.Levels, " ") + ")"
+		}
+		if got != wantEffort[h.Kind] {
+			t.Errorf("%s: effort %q, want %q", h.Kind, got, wantEffort[h.Kind])
+		}
+	}
 	wantProvider := map[string]string{"claude": "Anthropic", "codex": "OpenAI", "grok": "xAI", "kimi": "Moonshot", "kiro": "AWS", "muse": "Meta"}
 	for _, h := range Harnesses {
 		if h.Provider != wantProvider[h.Kind] {
@@ -670,6 +687,14 @@ func TestLoadRefuses(t *testing.T) {
 		"model, no field":                     {"claude.yaml", "version: 1\nlabel: x\nmodel: {home: .x, glob: '{session}.jsonl'}\n", "home and field are needed"},
 		"a nameless preset":                   {"claude.yaml", "version: 1\nlabel: x\nflags: {permissions: [{args: [--yes]}]}\n", "without label or args"},
 		"model flag is not a flag":            {"claude.yaml", "version: 1\nlabel: x\nflags: {model: model}\n", "is not a flag"},
+		"effort, no flag first":               {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: ['{level}', --effort], levels: [low]}}\n", "flags.effort.args: the first word is the flag"},
+		"effort, no words":                    {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {levels: [low]}}\n", "flags.effort.args: the first word is the flag"},
+		"effort, no level in the words":       {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: [--effort, max], levels: [low]}}\n", "flags.effort.args: {level} is in one word, once"},
+		"effort, the level twice":             {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: [--effort, '{level}', '{level}'], levels: [low]}}\n", "flags.effort.args: {level} is in one word, once"},
+		"effort, no levels":                   {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: [--effort, '{level}']}}\n", "flags.effort.levels: the levels the harness takes are needed"},
+		"effort, a level with a space":        {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: [--effort, '{level}'], levels: ['very high']}}\n", `flags.effort.levels: "very high" is no level`},
+		"effort, an alias that is no flag":    {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: [--effort, '{level}'], levels: [low], aliases: [effort]}}\n", `flags.effort.aliases: "effort" is no flag`},
+		"effort, a field not known":           {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: [--effort, '{level}'], levels: [low], default: low}}\n", "field default not found"},
 		"version text, no version flag":       {"claude.yaml", "version: 1\nlabel: x\nflags: {version_contains: Claude Code}\n", "flags.version_contains: without flags.version"},
 		"two recommended":                     {"claude.yaml", "version: 1\nlabel: x\noffers: [{model: a, label: A, recommended: yardmaster}, {model: b, label: B, recommended: yardmaster}]\n", "offers: 2 recommended, want exactly one"},
 		"none recommended":                    {"claude.yaml", "version: 1\nlabel: x\noffers: [{model: a, label: A}, {model: b, label: B}]\n", "offers: 0 recommended, want exactly one"},
@@ -987,14 +1012,27 @@ func TestHarnessVersion(t *testing.T) {
 	}
 }
 
-// Only claude names where its context use is read: the last assistant
-// line's message.usage, whose input and cache tokens add up to what the
-// session holds. The other kinds have no context-based rotation.
+// Claude adds input and cache; Muse and Codex input already includes cache.
 func TestContextSource(t *testing.T) {
 	for _, h := range Harnesses {
 		if h.Kind == "claude" {
-			if h.Context == nil || h.Context.Type != "assistant" || h.Context.Usage != "message.usage" {
+			if h.Context == nil || h.Context.Type != "assistant" || h.Context.Usage != "message.usage" || h.Context.Window != 0 {
 				t.Fatalf("claude's context source = %+v", h.Context)
+			}
+			continue
+		}
+		if h.Kind == "muse" {
+			if h.Context == nil || h.Context.TypeField != "payload.event.kind" || h.Context.Type != "model_completed" ||
+				h.Context.Usage != "payload.event.usage" || !slices.Equal(h.Context.Tokens, []string{"input_tokens"}) || h.Context.Window != 1007997 {
+				t.Fatalf("Muse's context source = %+v", h.Context)
+			}
+			continue
+		}
+		if h.Kind == "codex" {
+			if h.Context == nil || h.Context.TypeField != "payload.type" || h.Context.Type != "token_count" ||
+				h.Context.Usage != "payload.info.last_token_usage" || !slices.Equal(h.Context.Tokens, []string{"input_tokens"}) ||
+				h.Context.Window != 0 || h.Context.WindowField != "payload.info.model_context_window" {
+				t.Fatalf("Codex's context source = %+v", h.Context)
 			}
 			continue
 		}
@@ -1040,9 +1078,12 @@ func TestContextSource(t *testing.T) {
 func TestContextSourceChecked(t *testing.T) {
 	model := "model:\n  home: .x\n  glob: s/{session}.jsonl\n  field: m.model\n"
 	for name, body := range map[string]string{
-		"no usage": "version: 1\nlabel: Q\n" + model + "context:\n  type: assistant\n",
-		"no model": "version: 1\nlabel: Q\ncontext:\n  type: assistant\n  usage: message.usage\n",
-		"no field": "version: 1\nlabel: Q\n" + model + "context:\n  type: assistant\n  usage: message.usage\n  tokens: [input_tokens, '']\n",
+		"no usage":        "version: 1\nlabel: Q\n" + model + "context:\n  type: assistant\n",
+		"no model":        "version: 1\nlabel: Q\ncontext:\n  type: assistant\n  usage: message.usage\n",
+		"no field":        "version: 1\nlabel: Q\n" + model + "context:\n  type: assistant\n  usage: message.usage\n  tokens: [input_tokens, '']\n",
+		"negative window": "version: 1\nlabel: Q\n" + model + "context:\n  usage: message.usage\n  window: -1\n",
+		"two windows":     "version: 1\nlabel: Q\n" + model + "context:\n  usage: message.usage\n  window: 258400\n  window_field: info.window\n",
+		"empty key":       "version: 1\nlabel: Q\n" + model + "context:\n  usage: message.usage\n  window_field: info..window\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := load(t, map[string]string{"qwen.yaml": body}); err == nil {
@@ -1053,6 +1094,14 @@ func TestContextSourceChecked(t *testing.T) {
 	if _, err := load(t, map[string]string{"qwen.yaml": "version: 1\nlabel: Q\n" + model +
 		"context:\n  type: assistant\n  usage: message.usage\n"}); err != nil {
 		t.Fatalf("a whole source is refused: %v", err)
+	}
+	if hs, err := load(t, map[string]string{"qwen.yaml": "version: 1\nlabel: Q\n" + model +
+		"context:\n  usage: message.usage\n  window: 123456\n"}); err != nil || hs[0].Context.Window != 123456 {
+		t.Fatalf("declared window: %v, %v", hs, err)
+	}
+	if hs, err := load(t, map[string]string{"qwen.yaml": "version: 1\nlabel: Q\n" + model +
+		"context:\n  usage: message.usage\n  window_field: info.window\n"}); err != nil || hs[0].Context.WindowField != "info.window" {
+		t.Fatalf("reported window: %v, %v", hs, err)
 	}
 }
 

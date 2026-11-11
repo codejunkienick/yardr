@@ -17,6 +17,10 @@
 # the group's cmd) from GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_FILE, which the
 # group's env_file supplies; the operator's own gh login is never used. Needs gh
 # and jq on PATH. Nothing is written to GitHub: no commit status, no check run.
+# The token is narrowed to pull_requests read alone (PERMS below): reading a
+# pull request wants Pull requests read of it (GitHub's REST docs, "Get a
+# pull request"), and the calls ask for the number, state and head alone, no
+# check or status field.
 #
 # What is tested is the head the reviewer read. The reviewer records the commit
 # it read as the bead's metadata reviewed_head before it reports done (the
@@ -251,9 +255,16 @@ cat "$errf" >&2
   hold "depot $DEPOT has no test command, so the yard has nothing to run as the CI of the pull request, and a pull request is not called green untested. Set one (yardr depot add $DEPOT $REPO --test <command>), then unhold. Not running anything."
 
 NOT="not running the tests" STAGE=ciwait
-# --- github_binding: the same text in merge-pr and pr-ci (a test holds them equal) ---
-# NOT and STAGE are each script's own words for what it leaves undone and where
-# the bead waits; everything else is one text.
+# The token's permissions, the least the gh calls below need: reading a pull
+# request wants Pull requests read of the token (GitHub's REST docs, "Get a
+# pull request"), and the calls ask for the number, state and head alone, no
+# check or status field. The shared lines pass them to the mint, which posts
+# them in the access_tokens body.
+PERMS='{"pull_requests":"read"}'
+# --- github_binding: the same text in merge-pr, pr-ci and push-fix (a test holds them equal) ---
+# NOT, STAGE and PERMS are each script's own: what it leaves undone and where
+# the bead waits, and the least permissions its token needs; everything else
+# is one text.
 #
 # The pull request is the one the bead tracks, by the URL of the link and
 # nothing else: owner, repository and number are read from it, and a URL of
@@ -274,7 +285,9 @@ slug=$owner/$repo
 # the group's env_file gives, and held in this process's memory for the calls
 # below. It is passed to gh in its environment, never in an argument, and is
 # printed nowhere. The mint command is the github source's own unless the
-# group's cmd names another.
+# group's cmd names another. The token is narrowed to the permissions PERMS
+# names, each script's own least set above, which the mint posts in the
+# access_tokens body; a name or level outside the mint's list refuses the mint.
 [ -n "${GITHUB_APP_ID:-}" ] && [ -n "${GITHUB_APP_PRIVATE_KEY_FILE:-}" ] ||
   hold "this group's environment has no GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_FILE, which the yard's GitHub App is minted from (the group's env_file); $NOT."
 mint=${YARDR_GITHUB_MINT:-}
@@ -292,8 +305,8 @@ mint_token() {
   [ "$#" -gt 0 ] || return 1
   YARDR_SOURCE_BASE=https://api.github.com "$@" 2>/dev/null
 }
-tokjson=$(jq -nc --arg id "$GITHUB_APP_ID" --arg key "$GITHUB_APP_PRIVATE_KEY_FILE" --arg scope "$slug" \
-  '{inputs: {GITHUB_APP_ID: $id, GITHUB_APP_PRIVATE_KEY_FILE: $key}, scope: $scope}' |
+tokjson=$(jq -nc --arg id "$GITHUB_APP_ID" --arg key "$GITHUB_APP_PRIVATE_KEY_FILE" --arg scope "$slug" --argjson permissions "$PERMS" \
+  '{inputs: {GITHUB_APP_ID: $id, GITHUB_APP_PRIVATE_KEY_FILE: $key}, scope: $scope, permissions: $permissions}' |
   mint_token) ||
   hold "minting a token for $slug failed; the mint's output is not copied to the bead. $NOT."
 token=$(printf '%s' "$tokjson" | jq -r '.token // empty')

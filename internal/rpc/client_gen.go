@@ -267,6 +267,9 @@ func (c *Client) GetGroup(ctx context.Context, name string) (*store.Group, error
 func (c *Client) DeleteGroup(ctx context.Context, name, actor string) (int, error) {
 	return callV[int](c, ctx, "DeleteGroup", name, actor)
 }
+func (c *Client) RenameGroup(ctx context.Context, name, to, actor string) (*store.GroupRenamed, error) {
+	return callV[*store.GroupRenamed](c, ctx, "RenameGroup", name, to, actor)
+}
 func (c *Client) AddRoute(ctx context.Context, r store.Route, actor string) (*store.Route, error) {
 	return callV[*store.Route](c, ctx, "AddRoute", r, actor)
 }
@@ -669,6 +672,9 @@ func (c *Client) Threads(ctx context.Context, name string) ([]store.Participatio
 }
 func (c *Client) Replying(ctx context.Context, name string, seq uint64, to, body, actor string, files ...store.BlobFile) (*store.Reply, error) {
 	return callV[*store.Reply](c, ctx, "Replying", name, seq, to, body, actor, files)
+}
+func (c *Client) ReplyingWithFormat(ctx context.Context, name string, seq uint64, to, body, format, actor string, files ...store.BlobFile) (*store.Reply, error) {
+	return callV[*store.Reply](c, ctx, "ReplyingWithFormat", name, seq, to, body, format, actor, files)
 }
 func (c *Client) Replied(ctx context.Context, name string, rp store.Reply, actor string) error {
 	return c.call(ctx, "Replied", nil, name, rp, actor)

@@ -345,7 +345,8 @@ func TestPackOmitsTheEnvFileACrewMemberHolds(t *testing.T) {
 }
 
 // Adding a source is the operator's. Run by anyone else the import says so
-// in the plan and the result, adds none, and does the rest.
+// in the plan and the result, adds none, does the rest, and ends at the
+// record.
 func TestPackApplyByAnotherSessionAddsNoSource(t *testing.T) {
 	t.Parallel()
 	a := openApp(t)
@@ -353,9 +354,10 @@ func TestPackApplyByAnotherSessionAddsNoSource(t *testing.T) {
 	dir := pushoverPack(t)
 	a.actor = "web-builder-1"
 	const refusal = "adding a source is the operator's (me), and this is web-builder-1"
+	const unrecorded = "only the operator (me) may record the import of pack notify; this is web-builder-1"
 
 	out, err := run(t, a.packCmd(), "apply", dir, "--depot", "web", "--yes")
-	if err != nil {
+	if err == nil || !strings.Contains(err.Error(), unrecorded) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	for _, want := range []string{
@@ -372,11 +374,8 @@ func TestPackApplyByAnotherSessionAddsNoSource(t *testing.T) {
 	if _, err := a.st.GetSource(ctx, "pushover"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("the source was added: %v", err)
 	}
-	recs, _ := a.st.Packs(ctx)
-	if slices.ContainsFunc(recs, func(r store.PackImport) bool {
-		return slices.ContainsFunc(r.Objects, func(po store.PackObject) bool { return po.Kind == "source" })
-	}) {
-		t.Fatalf("records = %+v", recs)
+	if recs, _ := a.st.Packs(ctx); len(recs) != 0 {
+		t.Fatalf("another session's import was recorded: %+v", recs)
 	}
 
 	a.json = true
@@ -387,7 +386,7 @@ func TestPackApplyByAnotherSessionAddsNoSource(t *testing.T) {
 			Declared []string `json:"declared"`
 		} `json:"result"`
 	}
-	if jerr := json.Unmarshal([]byte(out), &got); err != nil || jerr != nil || got.Refused["pushover"] != refusal || len(got.Result.Declared) != 0 {
+	if jerr := json.Unmarshal([]byte(out), &got); err == nil || !strings.Contains(err.Error(), unrecorded) || jerr != nil || got.Refused["pushover"] != refusal || len(got.Result.Declared) != 0 {
 		t.Fatalf("--json: %v, %v, %+v\n%s", err, jerr, got, out)
 	}
 	a.json = false

@@ -67,10 +67,26 @@ A write through the yard's GitHub App is not proven everywhere:
 check the comment appeared on the pull request.
 
 The bead leaves on what comes of the pull request on GitHub, and the
-merge by the yard is one of those. Nothing of the yard pushes to a pull
-request:
+merge by the yard is one of those. Nothing here pushes to a pull request:
+the yard's only push onto one is a fix round's (`fix`, `push`), which
+returns for a fresh accept before it comes here:
 
 - `merged`: the pull request is merged. The bead goes to `merged`.
 - `dropped`: it is closed unmerged. The bead goes to `closed`.
+
+If the review found changes after the pull request was approved (for example,
+the fix builder needs to resolve a conflict with the base), a maintainer may
+send it back to `contributor` and pick the accepted, reviewed head for a fix
+round:
+
+    yardr bead advance <id> --to contributor
+    yardr bead update <id> --add-label fix-ok --meta fix_head=<sha>
+    yardr bead advance <id> --to fix
+
+The pick must name the head the reviewer read and, if this bead waited in
+`triage`, the head a maintainer accepted; the push stage checks both before it
+publishes the fix. A push returns through `triage` for a fresh accept of the
+new head. This yes at `approved` was for the earlier head, so it does not carry
+forward.
 
 Or by hand: `yardr bead advance <id> --to merged`, or `--to closed`.

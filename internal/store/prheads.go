@@ -99,6 +99,65 @@ func (w *wtx) checkReview(ctx context.Context, b *beadRow, p BeadPatch) error {
 		b.ID, sess.ID, handlesIn(w.Tx).of(sess.Bead), b.ID)
 }
 
+// labelFixOK is the maintainer's pick of a pull request's bead for a fix
+// round (the contributors pack's fix stage): with metaFixHead it says which
+// reviewed head the yard may fix and push back onto the pull request.
+// metaFixCommit is the commit the fix builder made on that head, which the
+// push script pushes.
+const (
+	labelFixOK    = "fix-ok"
+	metaFixHead   = "fix_head"
+	metaFixCommit = "fix_commit"
+)
+
+// checkFixPick refuses a bead's agent (beadAgent) a patch that grants or
+// takes the fix-ok label on any bead, its own included, and one that records
+// fix_commit on a bead its session does not own. The pick is a maintainer's,
+// in the merge-ok shape but stricter: checkMergeOK lets a session say the
+// label on its own bead, and a self-pick here would route the bead to fix,
+// whose push script pushes as the App. fix_head rides with the yard's heads
+// (yardHeads), refused on any bead with the same write. fix_commit is the
+// builder's own to write, as reviewed_head is the reviewer's: what the field
+// answers is a push between the fix and the push, not a builder that lies
+// about what it committed. The push script writes it too, as the session on its
+// own bead, once the push is out: it makes the builder's commit again as the
+// App's own, and the commit it pushed is then the one on the branch.
+func (w *wtx) checkFixPick(ctx context.Context, b *beadRow, p BeadPatch) error {
+	if slices.Contains(p.AddLabels, labelFixOK) || slices.Contains(p.RemoveLabel, labelFixOK) {
+		sess, err := beadAgent(w.Tx, ctx)
+		if err != nil || sess == nil {
+			return err
+		}
+		return fmt.Errorf("bead %s: the session %s of a bead's agent may not say fix-ok on any bead, whatever actor the command names; the pick of a pull request to fix is a maintainer's: yardr bead note %s - with the words on stdin (why it should be fixed)",
+			b.ID, sess.ID, b.ID)
+	}
+	if _, ok := p.Metadata[metaFixCommit]; !ok {
+		return nil
+	}
+	sess, err := beadAgent(w.Tx, ctx)
+	if err != nil || sess == nil || sess.Bead == b.UUID {
+		return err
+	}
+	return fmt.Errorf("bead %s: the session %s of a bead's agent may record fix_commit only on its own bead %s, whatever actor the command names; it says which commit the fix made, and the builder records it on the pull request it fixed: yardr bead note %s - with the words on stdin (which commit should be pushed)",
+		b.ID, sess.ID, handlesIn(w.Tx).of(sess.Bead), b.ID)
+}
+
+// agentCreateLabels are the labels a bead's agent may not create a bead
+// with, and agentCreateMeta the metadata keys, each with the words the
+// refusal gives for who writes it instead. checkAgentCreate asks them as one
+// loop; the yard's heads (yardHeads) are asked beside them.
+var agentCreateLabels = []struct{ key, why string }{
+	{labelMergeOK, "a reviewer says it on the pull request it read"},
+	{labelFixOK, "a maintainer's pick is theirs"},
+}
+
+var agentCreateMeta = []struct{ key, why string }{
+	{metaMergeHead, "a maintainer's yes is theirs"},
+	{metaCIHead, "the script that ran the tests writes it"},
+	{metaReviewedHead, "a reviewer records it on the pull request it read"},
+	{metaFixCommit, "the builder records it on the pull request it fixed"},
+}
+
 // checkReviewRecords runs the two checks on what a reviewer records of the
 // pull request it read: the head (checkReviewedHead) and the review of it
 // (checkReview), which the reviewer writes in one update.
@@ -135,25 +194,55 @@ func (w *wtx) checkCIHead(ctx context.Context, b *beadRow, p BeadPatch) error {
 
 // metaAcceptedHead is the commit a maintainer accepted a pull request at, as
 // the dispatcher records it when the source says accepted (the contributors
-// pack's triage stage) and as a maintainer records it by hand: pr-ci runs the
-// depot's tests on the head of a pull request that waited in triage only when
-// it is this commit.
+// pack's triage stage), as the yard records it when a maintainer picks the
+// accepting option of the card that showed the commit (stagehead.go), and as
+// a maintainer records it by hand: pr-ci runs the depot's tests on the head
+// of a pull request that waited in triage only when it is this commit.
 const metaAcceptedHead = "accepted_head"
 
+// yardHeads are the head records of a pull request's bead that a bead's agent
+// may not write on any bead, its own included, each with what writes it:
+// accepted_head, which says what a maintainer accepted, fix_head, which says
+// what a maintainer picked to fix, and pr_head and pr_head_told, which the
+// card a maintainer says yes on shows the head by (stagehead.go). An agent
+// that could write them could show a maintainer a head the pull request never
+// had, and who pushed it, and the agent that reads a pull request's text is
+// exactly the one a pull request would try to talk into it.
+var yardHeads = []struct{ key, why string }{
+	{metaAcceptedHead, "it says which head a maintainer accepted, and the maintainer writes it"},
+	{metaFixHead, "it says which head a maintainer picked to fix, and the maintainer writes it"},
+	{MetaPRHead, "it is the head the pull request's deliveries told, which the dispatcher records and the card a maintainer says yes on shows"},
+	{MetaPRHeadTold, "it is what the delivery that told the head said of it, which the dispatcher records and the card a maintainer says yes on shows"},
+}
+
+// yardHead is the first of the yard's head records that meta holds, and why a
+// bead's agent may not write it; "" for none.
+func yardHead(meta map[string]any) (key, why string) {
+	for _, h := range yardHeads {
+		if _, ok := meta[h.key]; ok {
+			return h.key, h.why
+		}
+	}
+	return "", ""
+}
+
 // checkAcceptedHead refuses a bead's agent (beadAgent) a patch that records
-// accepted_head, on any bead, its own included. It says which commit a person
-// judged before the yard ran any of it, so an agent that could write it could
-// make the head it was handed the accepted one, and the agent that reads a
-// pull request's text is exactly the one a pull request would try to talk into
-// it. The dispatcher records it for the source's word, and a person may.
+// the yard's heads (yardHeads: accepted_head, fix_head, pr_head, pr_head_told),
+// on any bead, its own included. accepted_head says which commit a person judged
+// before the yard ran
+// any of it, so an agent that could write it could make the head it was handed
+// the accepted one. The dispatcher records the heads for the source's word, and
+// a person may; a maintainer's pick of a card records accepted_head too, past
+// this check, which is of an agent's patch alone.
 func (w *wtx) checkAcceptedHead(ctx context.Context, b *beadRow, p BeadPatch) error {
-	if _, ok := p.Metadata[metaAcceptedHead]; !ok {
+	key, why := yardHead(p.Metadata)
+	if key == "" {
 		return nil
 	}
 	sess, err := beadAgent(w.Tx, ctx)
 	if err != nil || sess == nil {
 		return err
 	}
-	return fmt.Errorf("bead %s: the session %s of a bead's agent may not record accepted_head, whatever actor the command names; it says which head a maintainer accepted, and the maintainer writes it: yardr bead note %s - with the words on stdin (which head should be accepted)",
-		b.ID, sess.ID, b.ID)
+	return fmt.Errorf("bead %s: the session %s of a bead's agent may not record %s, whatever actor the command names; %s: yardr bead note %s - with the words on stdin (which head should be recorded)",
+		b.ID, sess.ID, key, why, b.ID)
 }

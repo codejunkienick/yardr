@@ -16,6 +16,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"yardr.dev/yardr/internal/scripttest"
 )
 
 // build runs the script for this machine's target only, with nothing of a
@@ -280,9 +282,9 @@ func writeGoStandIn(t *testing.T, bin string) {
 		t.Fatal(err)
 	}
 	body := "#!/bin/sh\n" + strings.ReplaceAll(fakeGo, "{go}", realGo) + "\n"
-	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	// A stand-in: the build runs go beside forking tests, and Linux refuses
+	// to start a file a fork beside its writing still holds open (ETXTBSY).
+	scripttest.Write(t, filepath.Join(bin, "go"), body)
 }
 
 // goStandIn is fakeGo on a PATH of its own, for a build test that needs no
@@ -358,9 +360,10 @@ esac`,
 		"tar": `case " $* " in *" -czf "*) echo "tar $2" >>"$CALLS" ;; esac
 exec ` + realTar + ` "$@"`,
 	} {
-		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
+		// Stand-ins: the build runs these beside forking tests, and Linux
+		// refuses to start a file a fork beside its writing still holds
+		// open (ETXTBSY).
+		scripttest.Write(t, filepath.Join(bin, name), "#!/bin/sh\n"+body+"\n")
 	}
 	return []string{
 		"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
@@ -880,9 +883,10 @@ func TestReleaseWorkflowCreateReleaseStep(t *testing.T) {
 				"  if [ \"$GH_VIEW_DRAFT\" = missing ]; then exit 1; fi\n" +
 				"  printf '%s\\n' \"$GH_VIEW_DRAFT\"\n" +
 				"fi\nexit 0\n"
-			if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(gh), 0o755); err != nil {
-				t.Fatal(err)
-			}
+			// A stand-in: the release step runs gh beside forking tests, and
+			// Linux refuses to start a file a fork beside its writing
+			// still holds open (ETXTBSY).
+			scripttest.Write(t, filepath.Join(bin, "gh"), gh)
 			calls := filepath.Join(dir, "gh-args")
 			cmd := exec.Command("/bin/bash", "-e", "-c", script)
 			cmd.Dir = dir

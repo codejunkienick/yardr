@@ -1697,6 +1697,9 @@ func TestRunAskNewRowsRefusals(t *testing.T) {
 		{"settings set operator eve", "may change a setting; this is yardmaster; it is the operator's alone"},
 		{"peer rename airy airy", "has that name already"},
 		{"peer rename eve north", "peer eve: not found"},
+		{"group rename eve north", "group eve: not found"},
+		{"group rename eve", "two names, not 1 words"},
+		{"group rename a b c", "two names, not 3 words"},
 		{"peer rm", "one peer, not 0 words"},
 		{"peer rm airy north", "one peer, not 2 words"},
 		{"peer rm eve", "peer eve: not found"},
@@ -1776,6 +1779,13 @@ func TestRunAskNewRowsAreHeldToTheirCards(t *testing.T) {
 			if _, err := y.UpdateBead(y.ctx, y.bead, BeadPatch{Originator: &to}, Expect{}, "mckean"); err != nil {
 				t.Fatal(err)
 			}
+		}
+	}
+	// builders is the group a rename card names.
+	builders := func(t *testing.T, y *askYard) {
+		t.Helper()
+		if err := y.PutGroup(y.ctx, Group{Name: "builders", Runner: "herdr"}, "mckean"); err != nil {
+			t.Fatal(err)
 		}
 	}
 	for _, c := range []struct {
@@ -1858,6 +1868,27 @@ func TestRunAskNewRowsAreHeldToTheirCards(t *testing.T) {
 					t.Fatal(err)
 				}
 			}, "peer airy: not found"},
+		{"a group renamed since", builders,
+			func(y *askYard) string { return "group rename builders makers" },
+			func(t *testing.T, y *askYard) {
+				if _, err := y.RenameGroup(y.ctx, "builders", "east", "mckean"); err != nil {
+					t.Fatal(err)
+				}
+			}, "group builders: not found"},
+		{"the new name taken since", builders,
+			func(y *askYard) string { return "group rename builders makers" },
+			func(t *testing.T, y *askYard) {
+				if err := y.PutGroup(y.ctx, Group{Name: "makers", Runner: "manual"}, "mckean"); err != nil {
+					t.Fatal(err)
+				}
+			}, "group makers is there already: a rename never replaces a group"},
+		{"a route to the group added since", builders,
+			func(y *askYard) string { return "group rename builders makers" },
+			func(t *testing.T, y *askYard) {
+				if _, err := y.AddRoute(y.ctx, Route{Stage: "new", Group: "builders"}, "mckean"); err != nil {
+					t.Fatal(err)
+				}
+			}, "the card is from before that changed"},
 		{"a peer's address set since", nil,
 			func(y *askYard) string { return "peer rm airy" },
 			func(t *testing.T, y *askYard) {
