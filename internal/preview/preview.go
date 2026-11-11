@@ -675,18 +675,52 @@ func (s *Supervisor) refuseBind(ctx context.Context, app, addr string) {
 	}
 }
 
+// dialLoopback dials addr on TCP with the timeout of the supervisor's own look
+// at a port. It is a variable so a test can force a dial outcome, a timeout
+// above all, instead of staging one.
+var dialLoopback = func(addr string) (net.Conn, error) {
+	return net.DialTimeout("tcp", addr, 200*time.Millisecond)
+}
+
 // loopbackHost returns the approved loopback address the preview answers
 // on. Both loopback addresses are valid — 127.0.0.1 first, then ::1 —
 // though an app only needs one.
+//
+// A dial that fails without proving nothing listens reads as answered. A
+// timeout proves nothing either way: a stalled process runs past the deadline
+// after the handshake has finished, and Go reports the expired deadline all the
+// same. Only a refusal and the errors of no route to the address read as free;
+// any other outcome keeps the port held, so the spawn gate refuses the start
+// instead of starting onto a taken port.
 func loopbackHost(port int) string {
 	for _, host := range []string{"127.0.0.1", "::1"} {
 		addr := net.JoinHostPort(host, strconv.Itoa(port))
-		if c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond); err == nil {
+		c, err := dialLoopback(addr)
+		if err == nil {
 			c.Close()
 			return host
 		}
+		if dialProvesFree(err) {
+			continue
+		}
+		return host
 	}
 	return ""
+}
+
+// dialProvesFree reports whether a failed dial of a loopback address proves
+// nothing listens on the port: a refusal, no route to the address, or no such
+// address family (a dial of ::1 where IPv6 does not exist). It matches by code,
+// which holds on macOS and Linux alike; message text does not. Anything else, a
+// timeout first, proves nothing, so it reads as answered.
+func dialProvesFree(err error) bool {
+	if os.IsTimeout(err) {
+		return false
+	}
+	return errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.ENETUNREACH) ||
+		errors.Is(err, syscall.EHOSTUNREACH) ||
+		errors.Is(err, syscall.EAFNOSUPPORT)
 }
 
 func listeningAddress(port int) string {
