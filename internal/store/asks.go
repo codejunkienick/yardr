@@ -395,7 +395,7 @@ func (s *Store) newAsk(ctx context.Context, ask Ask, actor string) (func(w *wtx,
 			return nil, err
 		}
 		if err == nil && c.ready != nil {
-			if repos, err = c.ready(ctx, s, argv); err != nil {
+			if repos, err = c.ready(ctx, s, *ask.Run, argv); err != nil {
 				return nil, err
 			}
 		}

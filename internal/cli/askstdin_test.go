@@ -28,6 +28,10 @@ func TestParseAskStdin(t *testing.T) {
 				why:     "the test passed", run: "depot test web", runTest: "go test ./..."}},
 		{"labels in any order", "C: why.\nW: because\nQ: Go?\n", askStdin{question: "Go?", context: []string{"why."}, why: "because"}},
 		{"a label's text keeps its colons", "Q: Rename 'depot'? Yes: no\nO: Keep: it\n", askStdin{question: "Rename 'depot'? Yes: no", options: []string{"Keep: it"}}},
+		{"says and makes lines in order", "Q: Replace the hook?\nC: why.\nR: hook add linear --source linear\nS: action=opened event=issues -> done\nS: action=closed event=issues -> changes\nM: action=opened event=issues -> task:new\n",
+			askStdin{question: "Replace the hook?", context: []string{"why."}, run: "hook add linear --source linear",
+				says:  []string{"action=opened event=issues -> done", "action=closed event=issues -> changes"},
+				makes: []string{"action=opened event=issues -> task:new"}}},
 	} {
 		got, err := parseAskStdin(tc.in)
 		if err != nil || !reflect.DeepEqual(got, tc.want) {
@@ -57,6 +61,8 @@ func TestParseAskStdin(t *testing.T) {
 		{"two tests", "Q: Go?\nR: depot test web\nT: a\nT: b", "the label T: on lines 3 and 4", false},
 		{"no question", "C: why.\nO: Go: it goes", "no Q: line", true},
 		{"a test with no command", "Q: Go?\nC: why.\nT: go test ./...", "T: with no R: after it", false},
+		{"a says line with no command", "Q: Go?\nC: why.\nS: action=opened event=issues -> done\n", "S: with no R: after it", false},
+		{"a makes line with no command", "Q: Go?\nC: why.\nM: action=opened event=issues -> task:new\n", "M: with no R: after it", false},
 	} {
 		_, err := parseAskStdin(tc.in)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -129,7 +135,7 @@ func testBeadAskStdin(t *testing.T) {
 	// With -, no text is a flag's: each is refused, in words, and nothing is
 	// stored.
 	before := len(notes())
-	for _, flag := range [][]string{{"--context", "why."}, {"--option", "Go: it goes"}, {"--why", "because"}, {"--run", "settings set max_sessions 20"}, {"--run-test", "go test ./..."}} {
+	for _, flag := range [][]string{{"--context", "why."}, {"--option", "Go: it goes"}, {"--why", "because"}, {"--run", "settings set max_sessions 20"}, {"--run-test", "go test ./..."}, {"--run-says", "action=opened event=issues -> done"}, {"--run-makes", "action=opened event=issues -> task:new"}} {
 		if _, err := ask("Go?\nwhy.\n", append([]string{id, "-"}, flag...)...); err == nil ||
 			!strings.Contains(err.Error(), "with -, put every text on stdin: "+flag[0]+" is given beside it") {
 			t.Errorf("- with %s = %v", flag[0], err)

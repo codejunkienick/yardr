@@ -24,8 +24,9 @@ import (
 // typed, in one string, for the yard to split and parse, and what that
 // command carries beside it, each read once here so the store holds the
 // bytes the card shows. test and role are the values of --run-test and
-// --run-role, and testSet and roleSet say whether they were given.
-func askRunCarried(command, test string, testSet bool, role string, roleSet bool) (*store.AskRun, error) {
+// --run-role, and testSet and roleSet say whether they were given; says
+// and makes are the values of --run-says and --run-makes.
+func askRunCarried(command, test string, testSet bool, role string, roleSet bool, says, makes []string) (*store.AskRun, error) {
 	run := &store.AskRun{Argv: []string{command}}
 	// Source add carries its file: read once here, beside the ask, so the
 	// store holds the bytes the card shows.
@@ -65,7 +66,49 @@ func askRunCarried(command, test string, testSet bool, role string, roleSet bool
 			return nil, err
 		}
 	}
+	// Hook add carries its says and makes lines beside the command: a
+	// line needs spaces, -> and free-text notes, none of which a --run
+	// word holds. Each is shape-read here, and the card holds it to the
+	// yard's records.
+	if hookAddCommand(command) {
+		if run.HookTable, err = hookTableCarried(says, makes); err != nil {
+			return nil, err
+		}
+	}
 	return run, nil
+}
+
+// hookAddCommand reports whether command is the run ask hook add <name>
+// ...: those words, with or without the leading yardr. The store parses
+// it; this only says the ask may carry says and makes lines beside it.
+func hookAddCommand(command string) bool {
+	words := strings.Fields(command)
+	if len(words) > 0 && words[0] == "yardr" {
+		words = words[1:]
+	}
+	return len(words) >= 3 && words[0] == "hook" && words[1] == "add"
+}
+
+// hookTableCarried reads what a run ask of hook add ... carries: the
+// --run-says and --run-makes lines, each in the order given. A line of
+// no shape is refused here, in the parser's words, and nothing is
+// stored; what the yard's records refuse is the card's. It answers nil
+// where the ask carries no line, so a safe-shape ask carries nothing.
+func hookTableCarried(says, makes []string) (*store.AskHookTable, error) {
+	if len(says) == 0 && len(makes) == 0 {
+		return nil, nil
+	}
+	for _, line := range says {
+		if _, err := store.ParseSay(line); err != nil {
+			return nil, fmt.Errorf("--run-says %w", err)
+		}
+	}
+	for _, line := range makes {
+		if _, err := store.ParseMake(line); err != nil {
+			return nil, fmt.Errorf("--run-makes %w", err)
+		}
+	}
+	return &store.AskHookTable{Says: says, Makes: makes}, nil
 }
 
 // plainRunLine reports whether command has only the characters a run ask's

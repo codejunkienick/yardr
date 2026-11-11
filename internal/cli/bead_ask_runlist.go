@@ -84,13 +84,17 @@ const askRunList = `  peer add <name> <invite>
       directory, URL or imported pack, any other flag and a plan that
       asks stay in a terminal; --setup installs a pack of kind source,
       embedded or applied from a directory in a terminal
-  hook add <name> --source <declared source> [--unknown unknown|allow|ignore]
+  hook add <name> --source <declared source> [--unknown unknown|allow|ignore] [--as <crew member>] [--map <type>:<stage>=<state>]
       a new webhook endpoint POST /hooks/<name> for the declared
-      source, verified with its signing secret given on the hook's own
-      secret card (--secret-hook) into the file the yard owns for it;
+      source, or the hook that stands replaced whole, verified with
+      its signing secret given on the hook's own secret card
+      (--secret-hook) into the file the yard owns for it, a
+      replacement keeping the file it stands with; --says and --makes
+      lines ride beside --run (--run-says and --run-makes, S: and M:
+      on stdin), and the card shows each table now and after, whole;
       for a source that hears by identity, --unknown names what an
-      unmapped sender is (unknown without it); --map, --as and a
-      replacement stay in a terminal
+      unmapped sender is (unknown without it); a secret file of its
+      own stays in a terminal
   hook rm <name>
       the hook is removed: POST /hooks/<name> takes no more deliveries,
       what it accepted stays, the issue moves it still had to make are

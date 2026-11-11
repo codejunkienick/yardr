@@ -139,9 +139,11 @@ func (w *wtx) hookRmCard(argv []string, asking bool) (AskRun, error) {
 // hookRmBack is the way back a card can offer for removing h. A safe shape
 // is not enough when its source is gone or no longer declares a hook; and a
 // source that registers its own secret makes it again without a secret card.
+// What it was set to do comes back on a hook add card carrying its table;
+// only a secret file of the operator's is typed in a terminal.
 func (w *wtx) hookRmBack(h Hook) (string, string) {
-	if !hookSafeShape(w.home, h) {
-		return "no card brings it back: what it was set to do, or a secret file of the operator's, is typed by the operator in a terminal (yardr hook add)", "nobody"
+	if h.SecretFile != HookSecretFile(w.home, h.Name) {
+		return "no card brings it back: a secret file of the operator's is typed by the operator in a terminal (yardr hook add)", "nobody"
 	}
 	_, d, err := sourceIn(w.Tx, h.Source)
 	if err != nil {
@@ -152,6 +154,20 @@ func (w *wtx) hookRmBack(h Hook) (string, string) {
 	}
 	if h.Unknown != "" && !d.HearsByIdentity() {
 		return fmt.Sprintf("no hook add card brings it back: the source %s no longer hears by identity, so its --unknown setting cannot be restored; restore identity hearing in a terminal first", h.Source), "only the operator"
+	}
+	if !hookSafeShape(w.home, h) {
+		back := "a hook add card carrying the table that stood brings it back: yardr bead ask <bead> - with Q: <question> and R: " + runCommandLine(hookTableRestoreArgv(h))
+		if len(h.Says) > 0 || len(h.Makes) > 0 {
+			back += " and S: and M: lines of that table (the hook_added event holds what stood)"
+		}
+		back += " on stdin"
+		if d.Hook.RegistersSecret() {
+			if _, err := w.hookPublicURL(h.Name); err != nil {
+				return fmt.Sprintf("no hook add card brings it back: %s has no valid public hook address; set one in a terminal first", HookPublicURLSetting), "only the operator"
+			}
+			return back + " (the yard makes the signing secret again when it registers the hook)", "only the operator"
+		}
+		return back + " (its signing secret is given again on the hook's own secret card)", "only the operator"
 	}
 	back := runCommandLine(hookAddArgv(h))
 	if d.Hook.RegistersSecret() {

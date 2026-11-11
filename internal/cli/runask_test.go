@@ -876,14 +876,14 @@ func TestRunListIsTheCLIs(t *testing.T) {
 			"source check pushover --user ada",
 		},
 		store.PackApplyUse: {"pack apply telegram"},
-		"yardr hook add <name> --source <declared source> [--unknown unknown|allow|ignore]": {"hook add linear --source linear"},
-		"yardr subscribe <user> yardr [--done] [--where <key>=<value>]":                     {"subscribe jo yardr --where label=ui --done --where label=web"},
-		"yardr user set <user> tell=<parts>":                                                {"user set jo tell=asks,notifications"},
-		"yardr user key <user> <source>":                                                    {"user key jo pushover"},
-		"yardr user add <name>":                                                             {"user add eve"},
-		"yardr user rm <name>":                                                              {"user rm ada"},
-		"yardr user invite <name> --email <address> [--role operator]":                      {"user invite eve --email eve@example.net"},
-		"yardr user uninvite <name>":                                                        {"user uninvite eve"},
+		"yardr hook add <name> --source <declared source> [--unknown unknown|allow|ignore] [--as <crew member>] [--map <type>:<stage>=<state>]": {"hook add linear --source linear"},
+		"yardr subscribe <user> yardr [--done] [--where <key>=<value>]":                                                                         {"subscribe jo yardr --where label=ui --done --where label=web"},
+		"yardr user set <user> tell=<parts>":                           {"user set jo tell=asks,notifications"},
+		"yardr user key <user> <source>":                               {"user key jo pushover"},
+		"yardr user add <name>":                                        {"user add eve"},
+		"yardr user rm <name>":                                         {"user rm ada"},
+		"yardr user invite <name> --email <address> [--role operator]": {"user invite eve --email eve@example.net"},
+		"yardr user uninvite <name>":                                   {"user uninvite eve"},
 		"yardr crew add <name> kind=<kind> model=<model> preset=<preset> dir=<dir>": {
 			"crew add porter kind=claude model=opus preset=auto",
 		},
@@ -1494,7 +1494,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 			// yard it is given on its card, and at a terminal it stands
 			// in the file the command names.
 			var typedSecret string
-			if use == "yardr hook add <name> --source <declared source> [--unknown unknown|allow|ignore]" {
+			if use == "yardr hook add <name> --source <declared source> [--unknown unknown|allow|ignore] [--as <crew member>] [--map <type>:<stage>=<state>]" {
 				secretSeq, err := approved.st.AddAsk(ctx, ab.ID, store.Ask{Question: "The signing secret for it?", To: "jo",
 					Context: []string{"why"}, Secret: &store.AskSecret{Source: "linear", Hook: "linear"}}, "yardmaster")
 				if err != nil {
@@ -1796,11 +1796,94 @@ func TestBeadAskHookSetup(t *testing.T) {
 	for _, args := range [][]string{
 		{"ask", b.ID, "No source", "--secret-hook", "linear", "--context", "x"},
 		{"ask", b.ID, "No hook name", "--secret-hook", "", "--source", "linear", "--context", "x"},
-		{"ask", b.ID, "Map stays put", "--context", "x", "--run", "hook add linear --source linear --map action=open"},
+		{"ask", b.ID, "Map without shape", "--context", "x", "--run", "hook add linear --source linear --map action=open"},
 	} {
 		if _, err := y.as(t, "yardmaster", args...); err == nil {
 			t.Errorf("bead %v was taken", args)
 		}
+	}
+}
+
+// A hook add ask carries its says and makes lines beside --run, as flags
+// or as S: and M: lines on stdin: the card shows the table the ask
+// proposes. Lines of no shape, and lines beside any other command, are
+// refused with nothing stored.
+func TestBeadAskHookTable(t *testing.T) {
+	t.Parallel()
+	key := airyKey(t)
+	y, b := runYardCLI(t, "hooktable", key)
+	ctx := context.Background()
+	if err := y.st.PutDepot(ctx, store.Depot{Name: "web", Base: "origin/main"}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := store.ParseFlow("new -> review on done | new on failed\nreview -> merged on done | new on changes\nmerged terminal\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Name = "web"
+	if _, err := y.st.PutFlow(ctx, *f, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.st.SetFlowPointer(ctx, "web", "", "web", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.st.SetIdentity(ctx, "yardmaster", "linear", store.Identity{ID: "u-yardmaster"}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Carry the table?",
+		"--context", "the hook should say and make",
+		"--run", "hook add linear --source linear --as yardmaster --map task:new=started",
+		"--run-says", "action=opened event=issues -> done",
+		"--run-makes", "action=opened event=issues -> task:new"); err != nil {
+		t.Fatal(err)
+	}
+	askStdin := func(stdin string, args ...string) (string, error) {
+		t.Helper()
+		y.a.actor = "yardmaster"
+		defer func() { y.a.actor = "jo" }()
+		c := y.a.beadCmd()
+		c.SetIn(strings.NewReader(stdin))
+		return run(t, c, append([]string{"ask"}, args...)...)
+	}
+	if _, err := askStdin("Q: Carry the table again?\nC: the hook should say and make\nR: hook add linear --source linear --as yardmaster --map task:new=started\nS: action=opened event=issues -> done\nM: action=opened event=issues -> task:new\n", b.ID, "-"); err != nil {
+		t.Fatalf("the ask on stdin: %v", err)
+	}
+	notes, err := y.st.Notes(ctx, b.ID)
+	if err != nil || len(notes) != 2 {
+		t.Fatalf("notes = %d, %v", len(notes), err)
+	}
+	for _, n := range notes {
+		ask, err := store.ParseAsk(n)
+		if err != nil || ask.Run == nil || ask.Run.HookTable == nil {
+			t.Fatalf("note %d holds %+v, %v", n.Seq, ask.Run, err)
+		}
+		if !slices.Equal(ask.Run.HookTable.Says, []string{"action=opened event=issues -> done"}) ||
+			!slices.Equal(ask.Run.HookTable.Makes, []string{"action=opened event=issues -> task:new"}) {
+			t.Fatalf("note %d carries %+v", n.Seq, ask.Run.HookTable)
+		}
+		does := strings.Join(ask.Run.Does, "\n")
+		for _, want := range []string{
+			"it acts as the crew member yardmaster (now it acts as none).",
+			"+action=opened event=issues -> done",
+			"+action=opened event=issues -> task:new",
+			"+task:new=started",
+		} {
+			if !strings.Contains(does, want) {
+				t.Errorf("note %d says:\n%s\nwant %q", n.Seq, does, want)
+			}
+		}
+	}
+	for _, args := range [][]string{
+		{"ask", b.ID, "Shapeless", "--context", "x", "--run", "hook add linear --source linear", "--run-says", "nonsense"},
+		{"ask", b.ID, "Beside another command", "--context", "x", "--run", "settings set max_sessions 20", "--run-says", "action=opened event=issues -> done"},
+		{"ask", b.ID, "Alone", "--context", "x", "--run-makes", "action=opened event=issues -> task:new"},
+	} {
+		if _, err := y.as(t, "yardmaster", args...); err == nil {
+			t.Errorf("bead %v was taken", args)
+		}
+	}
+	if notes, err := y.st.Notes(ctx, b.ID); err != nil || len(notes) != 2 {
+		t.Fatalf("a refused ask left %d notes, %v", len(notes), err)
 	}
 }
 

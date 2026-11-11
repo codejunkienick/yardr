@@ -19,6 +19,7 @@ func (a *app) newBeadAskCmd() *cobra.Command {
 	var askNew bool
 	var askBead store.NewBead
 	var askSecret, askForUser, askForCrew, askAs, askRun, askRunTest, askRunRole, askSecretLogin, askSecretHook, askHookSource string
+	var askRunSays, askRunMakes []string
 	var askSetup string
 	var askDepotPush, askDepotPushOff string
 	var askCrew, askGroup []string
@@ -58,12 +59,15 @@ field continues on the next:
   W: why the recommended one, once (--recommend names it)
   R: the command a run ask proposes, once (--run)
   T: its test command, once, with R: a depot test (--run-test)
+  S: a says line of a hook add, in order, with R: a hook add (--run-says)
+  M: a makes line of one, in order, with R: a hook add (--run-makes)
 
 A line with no label among labeled ones, a label among unlabeled ones, an
 unknown label and a label with no words are refused, and nothing is asked.
-With - no text is a flag: --context, --option, --why, --run and --run-test
-are refused beside it, and so is --new's -b -, which would read the same
-stdin. The flags that name no prose (--to, --recommend, --about, --setup,
+With - no text is a flag: --context, --option, --why, --run, --run-test,
+--run-says and --run-makes are refused beside it, and so is --new's -b -,
+which would read the same stdin. The flags that name no prose (--to,
+--recommend, --about, --setup,
 --crew and the rest) go beside it. The secret flags name a source, a user, a
 crew member or a login, and never read stdin: the value is typed unseen
 where it is given (yardr bead answer <id> <ask> --secret), so that no
@@ -229,7 +233,8 @@ stays one word and the yardkey invite reader validates all of it, including
 its URL; line breaks are refused. A comma is accepted only in a list the
 command takes or in the peer-add invite (the parts of tell=, the kinds peer
 allow carries, the grants crew set gives). A depot's test command goes beside --run, in --run-test <command> or T: <command>, since it needs those
-characters. It checks the
+characters, and a hook add's says and makes lines go beside it in --run-says <line> and --run-makes <line>
+(S: and M:), each repeatable in order, since a line needs spaces, -> and free-text notes. It checks the
 command against the yard as it stands, and refuses one the yard would
 refuse and one that would change nothing (a peer, source, group, crew
 member, user, setting, timer or bead the yard has not, a number out of
@@ -531,6 +536,10 @@ what the person asked does, and this is the asker's own.`,
 				return fmt.Errorf("--run-test is the command the run ask depot test <depot> proposes: it goes with that command")
 			case c.Flags().Changed("run-role") && (!c.Flags().Changed("run") || !crewAddCommand(askRun)):
 				return fmt.Errorf("--run-role is the role file the run ask crew add <name> ... carries: it goes with that command")
+			case c.Flags().Changed("run-says") && (!c.Flags().Changed("run") || !hookAddCommand(askRun)):
+				return fmt.Errorf("--run-says is a says line the run ask hook add <name> ... carries: it goes with that command")
+			case c.Flags().Changed("run-makes") && (!c.Flags().Changed("run") || !hookAddCommand(askRun)):
+				return fmt.Errorf("--run-makes is a makes line the run ask hook add <name> ... carries: it goes with that command")
 			}
 			return nil
 		},
@@ -603,7 +612,7 @@ what the person asked does, and this is the asker's own.`,
 				q.DepotPush = &store.AskDepotPush{Depot: askDepotPushOff, Off: true}
 			}
 			if c.Flags().Changed("run") {
-				if q.Run, err = askRunCarried(askRun, askRunTest, c.Flags().Changed("run-test"), askRunRole, c.Flags().Changed("run-role")); err != nil {
+				if q.Run, err = askRunCarried(askRun, askRunTest, c.Flags().Changed("run-test"), askRunRole, c.Flags().Changed("run-role"), askRunSays, askRunMakes); err != nil {
 					return err
 				}
 			}
@@ -781,6 +790,8 @@ what the person asked does, and this is the asker's own.`,
 	ask.Flags().StringVar(&askRun, "run", "", "propose this yardr command for the operator to approve, as it is typed: one the yard runs from a card (yardr bead ask --help; R: on stdin)")
 	ask.Flags().StringVar(&askRunTest, "run-test", "", "with --run depot test <depot> (R:): the test command the ask proposes (T:), carried beside the command since --run quotes nothing")
 	ask.Flags().StringVar(&askRunRole, "run-role", "", "with --run crew add <name> ... (R:): the file whose role text the ask carries beside the command, shown whole on the card")
+	ask.Flags().StringArrayVar(&askRunSays, "run-says", nil, "with --run hook add <name> ... (R:): a says line the ask proposes (S:), repeatable in order, carried beside the command since a line needs spaces, -> and notes")
+	ask.Flags().StringArrayVar(&askRunMakes, "run-makes", nil, "with --run hook add <name> ... (R:): a makes line the ask proposes (M:), repeatable in order, carried beside the command since a line needs spaces and ->")
 	ask.Flags().StringVar(&askSetup, "setup", "", "set up this pack of kind source (one yardr embeds, or one the operator applied from a directory and left as it was) as one decision: the apply, the account and the grants, with --crew/--group naming who the grants are for")
 	ask.Flags().StringVar(&askDepotPush, "depot-push", "", "turn this depot's push to its origin on as one decision for the operator to approve: YARDR_PUSH=origin in <depot>-assembly's cmd and the pack's helper in the depot's git config, carried out by the server")
 	ask.Flags().StringVar(&askDepotPushOff, "depot-push-off", "", "turn this depot's push off as one decision for the operator to approve: the exact reverse of --depot-push for the depot")

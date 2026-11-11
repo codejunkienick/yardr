@@ -131,76 +131,19 @@ type AskRun struct {
 	// the others' after they hold the file prompt= names to it. No other row
 	// keeps it: askedRun throws a writer's Role away with its Does and Seen.
 	Role string `json:"role,omitempty"`
+	// HookTable is the says and makes lines a hook add row carries
+	// beside argv, in the order given: a line needs spaces, -> and
+	// free-text notes, none of which a --run word holds, so they go
+	// beside it as a depot test's command does (--run-says and
+	// --run-makes, S: and M: on stdin). The card shows them whole
+	// against the table that stands, and the approval installs exactly
+	// these lines. No other row keeps it: askedRun throws a writer's
+	// HookTable away with its Does and Seen.
+	HookTable *AskHookTable `json:"hook_table,omitempty"`
 }
 
-// TakenBack is the card's line for the command that takes the change back,
-// with who may run it.
-func (r AskRun) TakenBack() string { return or(r.BackBy, "anyone") + " can take it back: " + r.Back }
-
-// Command is the command whole, as typed in a terminal; no view shortens it.
-func (r AskRun) Command() string { return runCommandLine(r.Argv) }
-
-// CarryPending is what an approval of a pack apply, of an up, of a
-// source add that names commands, or of a teammate invite or removal,
-// records until the yard's server has carried it out (design
-// yardr-bht9 3.5): the ask reads as being carried out while its answer
-// holds these words, and as ran or failed once the carrying out
-// completes it.
-const CarryPending = "approved, to be carried out"
-
-func runCommandLine(argv []string) string { return "yardr " + strings.Join(typedWords(argv), " ") }
-
-// RunAsked is the command a run ask proposes, as a client shows it: the
-// command whole, the yard's sentences for what it changes, and the command
-// that takes it back. All of it is the yard's, and none of it the asker's.
-type RunAsked struct {
-	Argv        []string `json:"argv"`
-	Command     string   `json:"command"`
-	Description string   `json:"description,omitempty"`
-	Does        []string `json:"does"`
-	Back        string   `json:"back"`
-	// BackBy is who may run Back, in words that stand before "can take it
-	// back"; absent where that is anyone.
-	BackBy string `json:"back_by,omitempty"`
-	// Carried is what adding a source takes, for a client to show the
-	// texts behind the card; absent on any other command.
-	Carried []AskSource `json:"carried,omitempty"`
-	// Pack is the pack a pack apply ask names, for a client to show
-	// the plan behind the card; absent on any other command.
-	Pack *AskPack `json:"pack,omitempty"`
-	// Ask are the names the approval gives values for in the clear,
-	// one field on the card each; absent on any other command.
-	Ask []string `json:"ask,omitempty"`
-}
-
-// proposed is the command of the ask a as a client shows it, nil for an
-// ask that proposes none.
-func (a Ask) proposed() *RunAsked {
-	if a.Run == nil {
-		return nil
-	}
-	return &RunAsked{Argv: a.Run.Argv, Command: a.Run.Command(), Description: a.Run.Description,
-		Does: a.Run.Does, Back: a.Run.Back, BackBy: a.Run.BackBy, Carried: a.Run.Carried, Pack: a.Run.Pack,
-		Ask: a.Run.Ask}
-}
-
-// AskApproved is what ApproveAsk did: the ask and who asked it, the command
-// as it ran with the yard's sentences for it, and what it printed.
-type AskApproved struct {
-	Bead   string   `json:"bead"`
-	Ask    uint64   `json:"ask"`
-	Asker  string   `json:"asker"`
-	Argv   []string `json:"argv"`
-	Does   []string `json:"does"`
-	Result string   `json:"result"`
-}
-
-// approvedOn is the ask a change was approved on, as the change's own event
-// carries it, so that the events tie the change to what proposed it.
-type approvedOn struct {
-	Bead string `json:"bead"`
-	Ask  uint64 `json:"ask"`
-}
+// What an ask proposes and what its approval did, as commands and
+// clients show them, is in runask_proposed.go, beside the list.
 
 // runCommand is one command of the list.
 type runCommand struct {
@@ -267,9 +210,11 @@ type runCommand struct {
 	// would then change the link it speaks through on its own word.
 	link func(argv []string) (peers []string, rule string)
 	// ready reads before the write what the card needs of git, which must
-	// not run inside one: the repository flows, by depot, of the depot the
-	// command names (wtx.repos). nil for a command whose card reads none.
-	ready func(ctx context.Context, s *Store, argv []string) (map[string]*RepoFlows, error)
+	// not run inside one: the repository flows, by depot, that the card
+	// reads (wtx.repos). run is the ask as sent, argv the command parsed;
+	// nil for a command whose card reads none, and none read where the
+	// ask carries nothing they are read for.
+	ready func(ctx context.Context, s *Store, run AskRun, argv []string) (map[string]*RepoFlows, error)
 	// commas says a word of the command holds commas: a list with commas
 	// between, as the parts of tell= are, or the invite peer add takes.
 	// No other command takes the character.
@@ -412,14 +357,15 @@ var runList = []runCommand{{
 	runRun:      runPackApply,
 }, {
 	words:       []string{"hook", "add"},
-	use:         "yardr hook add <name> --source <declared source> [--unknown unknown|allow|ignore]",
-	description: "Create a webhook endpoint POST /hooks/<name> (a replacement stays in a terminal)",
+	use:         hookAddUse,
+	description: "Create a webhook endpoint POST /hooks/<name>",
 	parse:       parseHookAdd,
-	check:       checkHookAdd,
-	card:        (*wtx).hookAddCard,
+	checkRun:    checkHookAdd,
+	cardRun:     (*wtx).hookAddCard,
 	stale:       (*wtx).hookAddStale,
 	weigh:       hookAddWeight,
-	run:         runHookAdd,
+	runRun:      runHookAdd,
+	ready:       readyHookAdd,
 }, {
 	words:       []string{"subscribe"},
 	use:         "yardr subscribe <user> yardr [--done] [--where <key>=<value>]",
@@ -683,7 +629,7 @@ func (w *wtx) askedRun(ctx context.Context, run AskRun, to, actor string) (*AskR
 	// The command in the yard's own form, with what the writer carried
 	// beside it: the carried bytes are the row's to keep or throw away,
 	// as Does and Seen are.
-	sent := AskRun{Argv: argv, Carried: run.Carried, Test: run.Test, Role: run.Role}
+	sent := AskRun{Argv: argv, Carried: run.Carried, Test: run.Test, Role: run.Role, HookTable: run.HookTable}
 	check := c.check
 	if c.checkRun != nil {
 		check = func(ctx context.Context, w *wtx, _ []string, actor string) error {
@@ -856,7 +802,7 @@ func (s *Store) approvalRepos(ctx context.Context, id string, seq uint64) (map[s
 			return nil, nil
 		}
 		if c, argv, err := parseRow(ask.Run.Argv); err == nil && c.ready != nil {
-			return c.ready(ctx, s, argv)
+			return c.ready(ctx, s, *ask.Run, argv)
 		}
 	}
 	return nil, nil

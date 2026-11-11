@@ -40,8 +40,9 @@ func hookRmAsk(command string) Ask {
 // set to do, the issue moves it still had are counted and dropped, only the
 // hook named is removed, and the approval is held to the hook as the card
 // saw it. It is the way back from a hook add, and says so: a hook made as
-// the card makes it is added again by that card, and one set to do more is
-// not brought back by any card.
+// the card makes it is added again by that card, one set to do more comes
+// back on a card carrying its table, and only a secret file of the
+// operator's is typed in a terminal.
 func TestRunAskHookRm(t *testing.T) {
 	t.Parallel()
 	y := hookRmYard(t)
@@ -108,8 +109,8 @@ func TestRunAskHookRm(t *testing.T) {
 	}
 	y.approved(t, evs[0], seq)
 
-	// The hook that stands apart is described by what goes with it, and no
-	// card brings it back.
+	// The hook that stands apart with a secret file of the operator's is
+	// described by what goes with it, and no card brings it back.
 	seq = y.ask(t, hookRmAsk("hook rm crm"), "ada")
 	run = y.asked(t, seq).Ask.Run
 	if !slices.Contains(run.Does, "What it was set to do goes with it: 1 line it says of a bead.") {
@@ -119,16 +120,35 @@ func TestRunAskHookRm(t *testing.T) {
 		t.Errorf("the card is taken back by %q, %q", run.Back, run.BackBy)
 	}
 
+	// One set to do more, with the file the yard owns for it, comes back
+	// on a hook add card carrying its table.
+	if _, err := y.PutHook(y.ctx, Hook{Name: "tab", Source: "linear", SecretFile: HookSecretFile(y.home, "tab"),
+		Says: []Say{{Where: map[string]string{"stage": "review"}, Outcome: "done"}}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, hookRmAsk("hook rm tab"), "ada")
+	run = y.asked(t, seq).Ask.Run
+	want := "a hook add card carrying the table that stood brings it back: yardr bead ask <bead> - with Q: <question> and R: yardr hook add tab --source linear and S: and M: lines of that table (the hook_added event holds what stood) on stdin (its signing secret is given again on the hook's own secret card)"
+	if run.Back != want || run.BackBy != "only the operator" {
+		t.Errorf("the card is taken back by %q, %q; want %q", run.Back, run.BackBy, want)
+	}
+
 	t.Run("source removed", func(t *testing.T) {
 		y := hookRmYard(t)
+		if _, err := y.PutHook(y.ctx, Hook{Name: "tab", Source: "linear", SecretFile: HookSecretFile(y.home, "tab"),
+			Says: []Say{{Where: map[string]string{"stage": "review"}, Outcome: "done"}}}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
 		if err := y.DeleteSource(y.ctx, "linear", "mckean"); err != nil {
 			t.Fatal(err)
 		}
-		seq := y.ask(t, hookRmAsk("hook rm linear"), "yardmaster")
-		run := y.asked(t, seq).Ask.Run
-		want := "no hook add card brings it back: the source linear is gone; add it and its hook declaration in a terminal first"
-		if run.Back != want || run.BackBy != "only the operator" {
-			t.Errorf("the card is taken back by %q, %q; want %q", run.Back, run.BackBy, want)
+		for _, command := range []string{"hook rm linear", "hook rm tab"} {
+			seq := y.ask(t, hookRmAsk(command), "yardmaster")
+			run := y.asked(t, seq).Ask.Run
+			want := "no hook add card brings it back: the source linear is gone; add it and its hook declaration in a terminal first"
+			if run.Back != want || run.BackBy != "only the operator" {
+				t.Errorf("%s is taken back by %q, %q; want %q", command, run.Back, run.BackBy, want)
+			}
 		}
 	})
 
@@ -163,6 +183,10 @@ calls:
 		if _, err := y.PutHook(y.ctx, Hook{Name: "linear", Source: "linear", SecretFile: HookSecretFile(y.home, "linear")}, "mckean"); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := y.PutHook(y.ctx, Hook{Name: "tab", Source: "linear", SecretFile: HookSecretFile(y.home, "tab"),
+			Says: []Say{{Where: map[string]string{"stage": "review"}, Outcome: "done"}}}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := y.PutSource(y.ctx, "linear.yaml", hookLinear, "mckean"); err != nil {
 			t.Fatal(err)
 		}
@@ -171,6 +195,11 @@ calls:
 		want := "no hook add card brings it back: the source linear no longer hears by identity, so its --unknown setting cannot be restored; restore identity hearing in a terminal first"
 		if run.Back != want || run.BackBy != "only the operator" {
 			t.Errorf("the card is taken back by %q, %q; want %q", run.Back, run.BackBy, want)
+		}
+		seq = y.ask(t, hookRmAsk("hook rm tab"), "yardmaster")
+		run = y.asked(t, seq).Ask.Run
+		if run.Back != want || run.BackBy != "only the operator" {
+			t.Errorf("the table card is taken back by %q, %q; want %q", run.Back, run.BackBy, want)
 		}
 	})
 
@@ -204,6 +233,15 @@ calls:
 		want := "no hook add card brings it back: hook_public_url has no valid public hook address; set one in a terminal first"
 		if run.Back != want || run.BackBy != "only the operator" {
 			t.Errorf("the card is taken back by %q, %q; want %q", run.Back, run.BackBy, want)
+		}
+		if _, err := y.PutHook(y.ctx, Hook{Name: "bot-table", Source: "bot", SecretFile: HookSecretFile(y.home, "bot-table"),
+			Says: []Say{{Where: map[string]string{"stage": "review"}, Outcome: "done"}}}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		seq = y.ask(t, hookRmAsk("hook rm bot-table"), "yardmaster")
+		run = y.asked(t, seq).Ask.Run
+		if run.Back != want || run.BackBy != "only the operator" {
+			t.Errorf("the table card is taken back by %q, %q; want %q", run.Back, run.BackBy, want)
 		}
 	})
 }

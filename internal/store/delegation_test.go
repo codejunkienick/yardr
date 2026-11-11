@@ -592,6 +592,29 @@ func TestDelegatedRefusals(t *testing.T) {
 	}
 }
 
+// A delegated run adds a new hook in the card's safe shape: replacing one
+// the yard has is the operator's in a terminal, as a table is, and stores
+// nothing.
+func TestDelegatedHookReplacementRefused(t *testing.T) {
+	t.Parallel()
+	y := newDelegationYard(t)
+	h := store.Hook{Name: "tracker", Source: "token", SecretFile: store.HookSecretFile(y.own.HomeDir(), "tracker")}
+	if _, err := y.api.PutHook(y.ctx, h, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := y.as(y.mail, "")
+	if _, err := y.api.PutHook(ctx, h, "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "a delegated run adds a new hook, and replacing one is the operator's to type in a terminal") {
+		t.Fatalf("a delegated hook replacement = %v", err)
+	}
+	if hooks, err := y.api.Hooks(y.ctx); err != nil || len(hooks) != 1 {
+		t.Fatalf("the refused replacement stored %v, %v", hooks, err)
+	}
+	if _, err := y.api.Delegation(y.ctx, 1, "jo"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a refused run left a record: %v", err)
+	}
+}
+
 // The record's one read is an operator's: the one it was for and another
 // alike; a member, the yardmaster that ran it and a call that names
 // nobody are told it is not there. A record past the inline bound holds

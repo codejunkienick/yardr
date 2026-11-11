@@ -122,7 +122,7 @@ func checkPeerIntake(ctx context.Context, w *wtx, argv []string, actor string) e
 // readyPeerIntake reads, before the write, the repository flows of the
 // depot an intake names, when its flow is one of them: git does not run
 // inside a write, and the card reads the flow's first stage.
-func readyPeerIntake(ctx context.Context, s *Store, argv []string) (map[string]*RepoFlows, error) {
+func readyPeerIntake(ctx context.Context, s *Store, _ AskRun, argv []string) (map[string]*RepoFlows, error) {
 	_, in, none := peerIntakeOf(argv)
 	if none {
 		return nil, nil

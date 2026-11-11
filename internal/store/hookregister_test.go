@@ -700,8 +700,8 @@ func TestHookRegisterPostHogRetryChecksFirst(t *testing.T) {
 			}
 		}
 		// The declaration restored, the credential is not given again. The
-		// held hook stands (only the operator replaces one), so the card is of
-		// another hook of the source.
+		// held hook stands, so the card is of another hook of the source: a
+		// replacement would run with no register call, and this retries one.
 		y.declareAt(t, "posthog", given)
 		done, err := y.ApproveAsk(y.ctx, y.bead, hookAdd("posthog-again"), "mckean", true, map[string]string{"project": "48291"})
 		if err != nil {
@@ -887,5 +887,65 @@ hook:
 	}
 	if err := y.SetSetting(y.ctx, HookPublicURLSetting, "http://yard.example/hooks", "mckean"); err == nil {
 		t.Fatal("a public http address was taken")
+	}
+}
+
+// A new hook the yard registers itself may carry a table: the phased
+// approval makes the hook with it and registers once.
+func TestHookTableRegisterNew(t *testing.T) {
+	t.Parallel()
+	var hits []registerHit
+	status := http.StatusOK
+	y := registerYard(t, &hits, &status)
+	if err := y.SetIdentity(y.ctx, "yardmaster", "bot", Identity{ID: "u-yardmaster"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq := y.ask(t, hookTableAsk("hook add bot --source bot --as yardmaster", nil, nil), "yardmaster")
+	if does := strings.Join(y.asked(t, seq).Ask.Run.Does, "\n"); !strings.Contains(does, "it acts as the crew member yardmaster (now it acts as none).") {
+		t.Fatalf("the register card says:\n%s", does)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	hook, err := y.GetHook(y.ctx, "bot")
+	if err != nil || hook.As != "yardmaster" {
+		t.Fatalf("the registered hook stands as %+v, %v", hook, err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("the approval made %d register calls, want 1", len(hits))
+	}
+}
+
+// A replacement of a hook the yard registered runs with no register
+// call: its name and URL stand. Moving its source across a registration
+// stays in a terminal.
+func TestHookTableRegisterReplacement(t *testing.T) {
+	t.Parallel()
+	var hits []registerHit
+	status := http.StatusOK
+	y := registerYard(t, &hits, &status)
+	file := HookSecretFile(y.home, "bot")
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte(hookSecretValue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.PutHook(y.ctx, Hook{Name: "bot", Source: "bot", SecretFile: file}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq := y.ask(t, hookTableAsk("hook add bot --source bot", nil, nil), "yardmaster")
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("the replacement made %d register calls, want none", len(hits))
+	}
+	if hook, err := y.GetHook(y.ctx, "bot"); err != nil || hook.SecretFile != file {
+		t.Fatalf("the hook stands as %+v, %v", hook, err)
+	}
+	if _, err := y.AddAsk(y.ctx, y.bead, hookTableAsk("hook add bot --source linear", nil, nil), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "registers its webhooks itself") {
+		t.Fatalf("moving the source across a registration = %v", err)
 	}
 }

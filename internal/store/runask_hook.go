@@ -1,9 +1,10 @@
 // The hook add row of the run-ask list: a new webhook endpoint for a
-// declared source, whose signing secret is given on the hook's own
-// secret card (secretask.go) into the file the yard owns for the hook.
-// The card names no secret file of the asker's and takes no map or
-// acting crew member: those stay the operator's in a terminal, as a
-// replacement does.
+// declared source, or the hook that stands replaced whole, whose signing
+// secret is given on the hook's own secret card (secretask.go) into the
+// file the yard owns for the hook. The card names no secret file of the
+// asker's: one stays the operator's in a terminal, and a replacement
+// keeps the file it stands with. The table it carries is in
+// runask_hooktable.go, beside the card that shows it.
 package store
 
 import (
@@ -23,17 +24,19 @@ import (
 )
 
 // hookAddUse is how a refusal names the hook add a run ask takes.
-const hookAddUse = "yardr hook add <name> --source <declared source> [--unknown unknown|allow|ignore]"
+const hookAddUse = "yardr hook add <name> --source <declared source> [--unknown unknown|allow|ignore] [--as <crew member>] [--map <type>:<stage>=<state>]"
 
 // parseHookAdd reads the words of hook add <name> --source <source>
-// [--unknown <word>]. The secret file is the yard's to name, so no file
-// flag is read: one that is given, and --map and --as, are refused as
-// the operator's to type in a terminal by runWords. --unknown is read
-// by name, each flag at most once, and its word held to the three the
-// hook takes; that it names a source hearing by identity is the
+// [--unknown <word>] [--as <crew member>] [--map <line>]. The secret file
+// is the yard's to name, so no file flag is read: one that is given is
+// refused as the operator's to type in a terminal by runWords, as --says
+// and --makes are, which ride beside argv instead (AskHookTable). --source
+// and --as are read once each, --unknown once and held to the three the
+// hook takes, and --map sorted however it was typed; that --unknown names
+// a source hearing by identity, and what each map line says, is the
 // card's to refuse, from the declaration it reads.
 func parseHookAdd(rest []string) ([]string, error) {
-	args, values, err := runWords(hookAddUse, "hook add", "the operator's", rest, map[string]bool{"--source": true, "--unknown": true})
+	args, values, err := runWords(hookAddUse, "hook add", "the operator's", rest, map[string]bool{"--source": true, "--unknown": true, "--as": true, "--map": true})
 	if err != nil {
 		return nil, err
 	}
@@ -49,6 +52,9 @@ func parseHookAdd(rest []string) ([]string, error) {
 	if len(values["--unknown"]) > 1 {
 		return nil, fmt.Errorf("--run takes %s: --unknown once, with the word the hook stores for an unmapped sender", hookAddUse)
 	}
+	if len(values["--as"]) > 1 {
+		return nil, fmt.Errorf("--run takes %s: --as once, with the crew member the hook moves tracked issues as", hookAddUse)
+	}
 	out := []string{args[0], "--source", values["--source"][0]}
 	if len(values["--unknown"]) == 1 {
 		word := values["--unknown"][0]
@@ -57,6 +63,16 @@ func parseHookAdd(rest []string) ([]string, error) {
 		}
 		out = append(out, "--unknown", word)
 	}
+	if len(values["--as"]) == 1 {
+		out = append(out, "--as", values["--as"][0])
+	}
+	// The map in one order however it was typed, so two ways of typing
+	// one command are stored as one.
+	maps := slices.Clone(values["--map"])
+	slices.Sort(maps)
+	for _, line := range maps {
+		out = append(out, "--map", line)
+	}
 	return out, nil
 }
 
@@ -64,13 +80,15 @@ func parseHookAdd(rest []string) ([]string, error) {
 // flag name rather than by position, so a stored command carrying
 // --unknown is read as one without it is.
 func hookAddOf(argv []string) (name, source string) {
-	name, source, _ = hookAddParts(argv)
+	name, source, _, _, _ = hookAddParts(argv)
 	return name, source
 }
 
-// hookAddParts is the hook, the source and the --unknown word of a
-// parsed hook add, the word "" when the command names none.
-func hookAddParts(argv []string) (name, source, unknown string) {
+// hookAddParts is the hook, the source, the --unknown word, the --as crew
+// member and the --map lines of a parsed hook add, each "" or none when
+// the command names none. --map repeats, so unlike the others it is read
+// however many times it stands.
+func hookAddParts(argv []string) (name, source, unknown, as string, maps []string) {
 	if len(argv) > 2 {
 		name = argv[2]
 	}
@@ -80,9 +98,13 @@ func hookAddParts(argv []string) (name, source, unknown string) {
 			source = argv[i+1]
 		case "--unknown":
 			unknown = argv[i+1]
+		case "--as":
+			as = argv[i+1]
+		case "--map":
+			maps = append(maps, argv[i+1])
 		}
 	}
-	return name, source, unknown
+	return name, source, unknown, as, maps
 }
 
 // hookUnknownSays is a card's sentence for the --unknown word a hook
@@ -100,12 +122,12 @@ func hookUnknownSays(effective string) string {
 }
 
 // checkHookAdd is adding a hook's own check as the asker: a new hook
-// may be proposed, and replacing one the yard has is the operator's
-// alone, in the words putHook refuses a replacement with.
-func checkHookAdd(ctx context.Context, w *wtx, argv []string, actor string) error {
-	name, _ := hookAddOf(argv)
+// may be proposed, and replacing one the yard has may be proposed too,
+// on the card that shows the hook now and after.
+func checkHookAdd(ctx context.Context, w *wtx, run AskRun, actor string) error {
+	name, _ := hookAddOf(run.Argv)
 	if w.Bucket(bHooks).Get([]byte(name)) != nil {
-		return w.may(ctx, actor, ActReplaceHook, Object{Kind: KindHook, Name: name})
+		return w.may(ctx, actor, ActReplaceHook, Object{Kind: KindHook, Name: name, Ask: Askable})
 	}
 	return w.may(ctx, actor, ActAddHook, Object{Kind: KindHook, Name: name, Ask: Askable})
 }
@@ -117,11 +139,21 @@ func checkHookAdd(ctx context.Context, w *wtx, argv []string, actor string) erro
 // takes the source's signing secret, given on the hook's own card into
 // the file the yard owns for the hook. The approval is held to the
 // source as it was, to the hook's name being free and to the word it
-// stores (Seen). Asking refuses a name the yard has, a source the yard
-// does not declare, one whose declaration has no hook key, and an
-// --unknown word for a source with no identity hearing.
-func (w *wtx) hookAddCard(argv []string, asking bool) (AskRun, error) {
-	name, sourceName, unknownWord := hookAddParts(argv)
+// stores (Seen). Asking refuses a source the yard does not declare, one
+// whose declaration has no hook key, and an --unknown word for a source
+// with no identity hearing. An ask carrying a table, and one naming a
+// hook the yard has, is the table's card (hookTableCard) instead.
+func (w *wtx) hookAddCard(run AskRun, asking bool) (AskRun, error) {
+	name, _ := hookAddOf(run.Argv)
+	// A table, a hook that stands, and an ask stored as a replacement
+	// are the table's card; a new hook with no table is the safe
+	// shape's, and an approval re-reading one whose name was taken
+	// since stays its stale.
+	if !hookTableEmpty(run) || run.Seen["hook "+name] != "" || (asking && w.Bucket(bHooks).Get([]byte(name)) != nil) {
+		return w.hookTableCard(run, asking)
+	}
+	argv := run.Argv
+	name, sourceName, unknownWord, _, _ := hookAddParts(argv)
 	if !hookName.MatchString(name) {
 		return AskRun{}, fmt.Errorf("hook name %q: use lowercase letters, digits, - and _", name)
 	}
@@ -129,11 +161,9 @@ func (w *wtx) hookAddCard(argv []string, asking bool) (AskRun, error) {
 	if had, err := get(w.Tx, bHooks, name, &was); err != nil {
 		return AskRun{}, err
 	} else if had {
-		if asking {
-			return AskRun{}, fmt.Errorf("hook %s is in the yard already: adding it again would replace it, which is the operator's to type in a terminal (yardr hook add %s --source %s --secret-file <file>)", name, name, sourceName)
-		}
 		// The name was taken since the card was written: say so in one
-		// sentence, so the approval is held to it as stale.
+		// sentence, so the approval is held to it as stale. Asking with
+		// a name the yard has is the table's card, above.
 		seenMap := map[string]string{"hook " + name: seen(was.Source, was.SecretFile)}
 		if src, d, err := sourceIn(w.Tx, sourceName); err == nil {
 			fingerprint, err := w.sourceSeen(src)
@@ -266,9 +296,13 @@ func (w *wtx) hookRegisterDoes(name, sourceName string, d *source.Declaration) (
 // hookAddStale says why the ask seq for hook add is approved no more:
 // the source is another under its name, the hook's name was taken, or
 // the --unknown word the hook stands with now is not the word the card
-// would store.
+// would store. An ask stored as a replacement is the table's stale
+// (hookTableStale) instead.
 func (w *wtx) hookAddStale(seq uint64, was, now AskRun) error {
-	name, sourceName, unknownWord := hookAddParts(was.Argv)
+	name, sourceName, unknownWord, _, _ := hookAddParts(was.Argv)
+	if was.Seen["hook "+name] != "" {
+		return w.hookTableStale(seq, name, sourceName, was, now)
+	}
 	if err := w.staleSource(seq, sourceName, was, now); err != nil {
 		return err
 	}
@@ -298,19 +332,51 @@ func (w *wtx) hookAddStale(seq uint64, was, now AskRun) error {
 	return staleCard(seq, was, now)
 }
 
-// runHookAdd adds the hook as actor through putHook, naming the secret
-// file the yard owns for it, and answers what the command prints at a
-// terminal. The secret must stand in that file already, given on the
-// hook's secret card: without it the hook would take nothing, so the
-// approval runs only after that giving.
-func runHookAdd(ctx context.Context, w *wtx, argv []string, actor string, by *approvedOn) (string, error) {
-	name, sourceName, unknownWord := hookAddParts(argv)
+// runHookAdd adds the hook as actor through putHook, with the table the
+// ask carries, and answers what the command prints at a terminal. A new
+// hook names the secret file the yard owns for it, whose secret must
+// stand in that file already, given on the hook's secret card: without
+// it the hook would take nothing, so the approval runs only after that
+// giving. A replacement keeps the secret file it stands with, whose
+// secret stands from before, and needs no secret ask on this bead; its
+// name and URL stand too, so even one the yard registers itself runs in
+// this write, with no register call.
+func runHookAdd(ctx context.Context, w *wtx, run AskRun, actor string, by *approvedOn) (string, error) {
+	name, sourceName, unknownWord, _, _ := hookAddParts(run.Argv)
+	as, mapping, says, makes, err := hookTableOf(run)
+	if err != nil {
+		return "", err
+	}
 	_, d, err := sourceIn(w.Tx, sourceName)
 	if err != nil {
 		return "", err
 	}
 	if d.Hook == nil {
 		return "", fmt.Errorf("source %s: its declaration has no hook key, so the yard hears nothing from it", sourceName)
+	}
+	var standing Hook
+	had, err := get(w.Tx, bHooks, name, &standing)
+	if err != nil {
+		return "", err
+	}
+	if had {
+		if standing.Source != sourceName {
+			if _, wasD, err := sourceIn(w.Tx, standing.Source); err == nil && (wasD.Hook.RegistersSecret() || d.Hook.RegistersSecret()) {
+				return "", fmt.Errorf("hook %s: its source would move from %s to %s, and one of them registers its webhooks itself: %s", name, standing.Source, sourceName, hookTableTerminal(name, sourceName))
+			}
+		}
+		secret, _, err := ReadSecretFile(standing.SecretFile)
+		if err != nil {
+			return "", fmt.Errorf("hook %s: its signing secret file %s cannot be read: write the secret to it in a terminal: %w", name, standing.SecretFile, err)
+		}
+		if len(secret) == 0 {
+			return "", fmt.Errorf("hook %s: its signing secret file %s is empty: write the secret to it in a terminal, since a card keeps the file a replacement stands with", name, standing.SecretFile)
+		}
+		saved, err := w.putHook(ctx, Hook{Name: name, Source: sourceName, SecretFile: standing.SecretFile, Unknown: unknownWord, As: as, Map: mapping, Says: says, Makes: makes}, actor, by, Askable)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("hook %s saved: POST /hooks/%s (%s)", saved.Name, saved.Name, saved.Source), nil
 	}
 	if d.Hook.RegistersSecret() {
 		// ApproveAsk makes this hook in its own phased approval (the
@@ -331,7 +397,7 @@ func runHookAdd(ctx context.Context, w *wtx, argv []string, actor string, by *ap
 	if len(secret) == 0 {
 		return "", fmt.Errorf("hook %s: give its signing secret on the hook's secret card for %s first: the secret file %s is empty", name, name, file)
 	}
-	saved, err := w.putHook(ctx, Hook{Name: name, Source: sourceName, SecretFile: file, Unknown: unknownWord}, actor, by, Askable)
+	saved, err := w.putHook(ctx, Hook{Name: name, Source: sourceName, SecretFile: file, Unknown: unknownWord, As: as, Map: mapping, Says: says, Makes: makes}, actor, by, Askable)
 	if err != nil {
 		return "", err
 	}
@@ -392,6 +458,11 @@ func (s *Store) hookRegisterTarget(id string, seq uint64) (string, bool) {
 				continue
 			}
 			hookName, sourceName := hookAddOf(argv)
+			if r.Ask.Run.Seen["hook "+hookName] != "" {
+				// Stored as a replacement: its name and URL stand, so
+				// no register call is made and the plain approval runs it.
+				continue
+			}
 			_, d, err := sourceIn(tx, sourceName)
 			if err == nil && d.Hook.RegistersSecret() {
 				name = hookName
@@ -437,8 +508,15 @@ type hookRegisterJob struct {
 // hook, so a call the service took but never answered is not made
 // twice; the first approval always registers.
 func (s *Store) approveHookRegister(ctx context.Context, id string, seq uint64, actor string, weighed bool, values map[string]string) (*AskApproved, error) {
+	// What the ask's card needs of git is read before the write, as the
+	// plain approval reads it: a table is held to the flows' edges again.
+	repos, err := s.approvalRepos(ctx, id, seq)
+	if err != nil {
+		return nil, fmt.Errorf("ask %d: %w. %s", seq, err, nothingRan)
+	}
 	var job *hookRegisterJob
-	err := s.writeVia(ctx, func(w *wtx) (err error) {
+	err = s.writeVia(ctx, func(w *wtx) (err error) {
+		w.repos = repos
 		job, err = w.prepareHookRegister(ctx, id, seq, actor, weighed, values)
 		return err
 	})
@@ -667,7 +745,12 @@ func (w *wtx) prepareHookRegister(ctx context.Context, id string, seq uint64, ac
 	if err := w.gateRefusal(seq, weight, r.Ask.Weight, actor, weighed); err != nil {
 		return nil, err
 	}
-	name, sourceName, unknownWord := hookAddParts(argv)
+	name, sourceName, unknownWord, _, _ := hookAddParts(argv)
+	as, mapping, says, makes, err := hookTableOf(was)
+	if err != nil {
+		return nil, fmt.Errorf("ask %d: %w. %s", seq, err, nothingRan)
+	}
+	proposed := Hook{Name: name, Source: sourceName, Unknown: unknownWord, As: as, Map: mapping, Says: says, Makes: makes}
 	src, d, err := sourceIn(w.Tx, sourceName)
 	if err != nil {
 		return nil, fmt.Errorf("ask %d: %w. %s", seq, err, nothingRan)
@@ -676,7 +759,14 @@ func (w *wtx) prepareHookRegister(ctx context.Context, id string, seq uint64, ac
 	if !d.Hook.RegistersSecret() {
 		return nil, fmt.Errorf("ask %d: source %s names no register call with scheme secret now. %s", seq, sourceName, nothingRan)
 	}
-	does, publicURL, err := w.hookRegisterDoes(name, sourceName, d)
+	effectiveUnknown := unknownWord
+	if effectiveUnknown == "" && d.HearsByIdentity() {
+		effectiveUnknown = HookUnknownUnknown
+	}
+	// The same composition the card showed: on a retry the hook this
+	// ask made stands, and the comparison below reads the card as it
+	// was written, without the hook in the way.
+	does, publicURL, err := w.hookTableRegisterDoes(name, sourceName, d, effectiveUnknown, nil, proposed)
 	if err != nil {
 		return nil, fmt.Errorf("ask %d: %w. %s", seq, err, nothingRan)
 	}
@@ -693,7 +783,7 @@ func (w *wtx) prepareHookRegister(ctx context.Context, id string, seq uint64, ac
 	by := &approvedOn{Bead: row.ID, Ask: seq}
 	switch {
 	case had && (existing.Source != sourceName || existing.SecretFile != file || !w.hookAddedBy(row.ID, seq, name)):
-		card, err := w.hookAddCard(argv, false)
+		card, err := w.hookAddCard(was, false)
 		if err != nil {
 			return nil, fmt.Errorf("ask %d: %w. %s", seq, err, nothingRan)
 		}
@@ -703,7 +793,7 @@ func (w *wtx) prepareHookRegister(ctx context.Context, id string, seq uint64, ac
 			return nil, staleCard(seq, was, AskRun{Does: does})
 		}
 	default:
-		card, err := w.hookAddCard(argv, false)
+		card, err := w.hookAddCard(was, false)
 		if err != nil {
 			return nil, fmt.Errorf("ask %d: %w. %s", seq, err, nothingRan)
 		}
@@ -787,7 +877,8 @@ func (w *wtx) prepareHookRegister(ctx context.Context, id string, seq uint64, ac
 		}
 	}
 	if !had {
-		if _, err := w.putHook(ctx, Hook{Name: name, Source: sourceName, SecretFile: file, Unknown: unknownWord}, actor, by, Askable); err != nil {
+		proposed.SecretFile = file
+		if _, err := w.putHook(ctx, proposed, actor, by, Askable); err != nil {
 			return nil, err
 		}
 	}

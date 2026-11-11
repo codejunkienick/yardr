@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -257,7 +258,7 @@ func TestHookAskSetup(t *testing.T) {
 			t.Fatalf("the card says:\n%s\nwant %q", does, want)
 		}
 	}
-	if runAsk.Ask.Run.Description != "Create a webhook endpoint POST /hooks/<name> (a replacement stays in a terminal)" ||
+	if runAsk.Ask.Run.Description != "Create a webhook endpoint POST /hooks/<name>" ||
 		runAsk.Ask.Run.Back != "yardr hook rm linear" {
 		t.Fatalf("the run ask = %+v", runAsk.Ask.Run)
 	}
@@ -510,8 +511,10 @@ func TestHookAskRefusals(t *testing.T) {
 		{"a secret with a bad hook name", hookSecretAsk("linear", "Linear"), `hook name "Linear"`},
 		{"a run for an undeclared source", hookRunAsk("hook add linear --source nope"), "source nope: not found"},
 		{"a run for a source with no hook key", hookRunAsk("hook add fresh --source crm"), "its declaration has no hook key"},
-		{"a run with --map", hookRunAsk("hook add linear --source linear --map action=open"), "hook add with --map is the operator's to type in a terminal"},
-		{"a run with --as", hookRunAsk("hook add linear --source linear --as yardmaster"), "hook add with --as is the operator's to type in a terminal"},
+		{"a run with a shapeless --map", hookRunAsk("hook add linear --source linear --map action=open"), `--map "action=open": want <bead type>:<stage>=<state>`},
+		{"a run with --as and no identity", hookRunAsk("hook add linear --source linear --as yardmaster"), "crew member yardmaster has no identity in linear"},
+		{"a run with --says", hookRunAsk("hook add linear --source linear --says event=issues"), "hook add with --says is the operator's to type in a terminal"},
+		{"a run with --makes", hookRunAsk("hook add linear --source linear --makes event=issues"), "hook add with --makes is the operator's to type in a terminal"},
 		{"a run with --secret-file", hookRunAsk("hook add linear --source linear --secret-file /tmp/x"), "hook add with --secret-file is the operator's to type in a terminal"},
 		{"a run with no source", hookRunAsk("hook add linear"), "--source once"},
 	} {
@@ -527,8 +530,9 @@ func TestHookAskRefusals(t *testing.T) {
 		})
 	}
 
-	// A hook the yard has: neither ask is taken; the secret giving
-	// that races its making is refused too.
+	// A hook the yard has: the secret ask is not taken, but the run ask
+	// is, as a replacement; the secret giving that races its making is
+	// refused too.
 	y := hookYard(t)
 	if _, err := y.PutHook(y.ctx, Hook{Name: "linear", Source: "linear", SecretFile: filepath.Join(y.home, "elsewhere.secret")}, "mckean"); err != nil {
 		t.Fatal(err)
@@ -537,9 +541,9 @@ func TestHookAskRefusals(t *testing.T) {
 		!strings.Contains(err.Error(), "hook linear is in the yard already") {
 		t.Fatalf("a secret ask for a hook the yard has = %v", err)
 	}
-	if _, err := y.AddAsk(y.ctx, y.bead, hookRunAsk("hook add linear --source linear"), "yardmaster"); err == nil ||
-		!strings.Contains(err.Error(), "replace a hook") || !strings.Contains(err.Error(), "operator's alone") {
-		t.Fatalf("a run ask for a hook the yard has = %v", err)
+	replaced := y.ask(t, hookRunAsk("hook add linear --source linear"), "yardmaster")
+	if does := strings.Join(y.asked(t, replaced).Ask.Run.Does, "\n"); !strings.Contains(does, "it replaces the hook linear:") {
+		t.Fatalf("a run ask for a hook the yard has says:\n%s", does)
 	}
 
 	y = hookYard(t)
@@ -756,8 +760,8 @@ func TestHookAskUnknown(t *testing.T) {
 		{"repeated --unknown", "hook add chatx --source chatx --unknown allow --unknown ignore", "--unknown once"},
 		{"a word outside the three", "hook add chatx --source chatx --unknown shrug", `--unknown "shrug": want unknown, allow, ignore`},
 		{"a word for no identity hearing", "hook add linear --source linear --unknown allow", "for a source with no identity hearing"},
-		{"--map with --unknown", "hook add chatx --source chatx --unknown allow --map action=open", "hook add with --map is the operator's to type in a terminal"},
-		{"--as with --unknown", "hook add chatx --source chatx --unknown allow --as yardmaster", "hook add with --as is the operator's to type in a terminal"},
+		{"--map with --unknown", "hook add chatx --source chatx --unknown allow --map action=open", `--map "action=open": want <bead type>:<stage>=<state>`},
+		{"--as with --unknown", "hook add chatx --source chatx --unknown allow --as yardmaster", "crew member yardmaster has no identity in chatx"},
 		{"--secret-file with --unknown", "hook add chatx --source chatx --unknown allow --secret-file /tmp/x", "hook add with --secret-file is the operator's to type in a terminal"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -817,4 +821,477 @@ func TestHookAskUnknownRegisteredHook(t *testing.T) {
 	if err != nil || hook.UnknownPolicy() != HookUnknownAllow {
 		t.Fatalf("registered hook = %+v, %v; want unknown allow", hook, err)
 	}
+}
+
+// hookTableFlow is the flow the hook table tests' depot follows: beads
+// report done, failed and changes, and task beads are made in new and review.
+const hookTableFlow = `
+new -> review on done | new on failed
+review -> merged on done | new on changes
+merged terminal
+`
+
+// hookTableYard is a hook yard whose depot web follows hookTableFlow, with
+// crew member yardmaster holding an identity in linear.
+func hookTableYard(t *testing.T) *askYard {
+	t.Helper()
+	y := hookYard(t)
+	if err := y.PutDepot(y.ctx, Depot{Name: "web", Base: "origin/main"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := ParseFlow(hookTableFlow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Name = "web"
+	if _, err := y.PutFlow(y.ctx, *f, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.SetFlowPointer(y.ctx, "web", "", "web", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.SetIdentity(y.ctx, "yardmaster", "linear", Identity{ID: "u-yardmaster"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	return y
+}
+
+// hookTableAsk is a hook add run ask carrying says and makes lines beside argv.
+func hookTableAsk(command string, says, makes []string) Ask {
+	ask := hookRunAsk(command)
+	if len(says) > 0 || len(makes) > 0 {
+		ask.Run.HookTable = &AskHookTable{Says: says, Makes: makes}
+	}
+	return ask
+}
+
+// hookTableSecret writes the signing secret file a replacement stands with.
+func hookTableSecret(t *testing.T, file string) {
+	t.Helper()
+	if err := os.WriteFile(file, []byte(hookSecretValue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A run ask replaces the hook that stands with the table it carries: the
+// card shows each table now and after as a diff, whole, with --as and the
+// secret file, and the approval stands the hook as the card showed, keeping
+// the secret file. The card is weighed trust, and approved only weighed.
+func TestHookTableReplacement(t *testing.T) {
+	t.Parallel()
+	y := hookTableYard(t)
+	file := filepath.Join(t.TempDir(), "linear.secret")
+	hookTableSecret(t, file)
+	standing := Hook{Name: "linear", Source: "linear", SecretFile: file, As: "yardmaster",
+		Map: map[string]string{"task:new": "started"},
+		Says: []Say{
+			{Where: map[string]string{"action": "opened", "event": "issues"}, Outcome: "done"},
+			{Where: map[string]string{"action": "closed", "event": "issues"}, Outcome: "changes", Note: "Closed out of turn"},
+		},
+		Makes: []Make{{Where: map[string]string{"action": "opened", "event": "issues"}, Type: "task", Stage: "new"}},
+	}
+	if _, err := y.PutHook(y.ctx, standing, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq := y.ask(t, hookTableAsk("hook add linear --source linear --as yardmaster --map task:new=started --map task:review=review",
+		[]string{
+			"action=opened event=issues -> done",
+			"action=closed event=issues -> failed: CI failed it",
+			"action=added event=team -> changes",
+		}, nil), "yardmaster")
+	got := y.asked(t, seq)
+	run := got.Ask.Run
+	does := strings.Join(run.Does, "\n")
+	for _, want := range []string{
+		"it replaces the hook linear: POST /hooks/linear takes deliveries from the source linear (https://api.linear.app).",
+		"the signing secret stays in " + file + " (mode 0600), the file the hook stands with",
+		"it acts as the crew member yardmaster, as now.",
+		"its says table changes from 2 lines to 3 lines (2 insertions, 1 deletion):",
+		"--- was",
+		"+++ is",
+		"-action=closed event=issues -> changes: Closed out of turn",
+		"+action=closed event=issues -> failed: CI failed it",
+		"+action=added event=team -> changes",
+		"its makes table changes from 1 line to 0 lines (0 insertions, 1 deletion):",
+		"-action=opened event=issues -> task:new",
+		"its map changes from 1 line to 2 lines (1 insertion, 0 deletions):",
+		"+task:review=review",
+	} {
+		if !strings.Contains(does, want) {
+			t.Errorf("the card says:\n%s\nwant %q", does, want)
+		}
+	}
+	if want := "yardr bead ask <bead> - with Q: <question> and R: yardr hook add linear --source linear --as yardmaster --map task:new=started and S: and M: lines of the table that stands now (yardr hook show linear shows it) on stdin"; run.Back != want || run.BackBy != "only the operator" {
+		t.Errorf("the card is taken back by %q, %q; want %q", run.Back, run.BackBy, want)
+	}
+	if len(got.Ask.Weight) != 1 || got.Ask.Weight[0].Class != WeightTrust || !StrongWeight(got.Ask.Weight) {
+		t.Fatalf("the ask weighs %+v, want trust, which is strong", got.Ask.Weight)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "weighty (trust)") {
+		t.Fatalf("approving without the weight seen = %v", err)
+	}
+	done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done.Result != "hook linear saved: POST /hooks/linear (linear)" {
+		t.Fatalf("the approval recorded %q", done.Result)
+	}
+	hook, err := y.GetHook(y.ctx, "linear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hook.Source != "linear" || hook.SecretFile != file || hook.As != "yardmaster" {
+		t.Fatalf("the hook stands as %+v", hook)
+	}
+	if !SameSays(hook.Says, []Say{
+		{Where: map[string]string{"action": "opened", "event": "issues"}, Outcome: "done"},
+		{Where: map[string]string{"action": "closed", "event": "issues"}, Outcome: "failed", Note: "CI failed it"},
+		{Where: map[string]string{"action": "added", "event": "team"}, Outcome: "changes"},
+	}) {
+		t.Fatalf("its says stand as %q", SayLines(hook.Says))
+	}
+	if len(hook.Makes) != 0 {
+		t.Fatalf("its makes stand as %q", MakeLines(hook.Makes))
+	}
+	if len(hook.Map) != 2 || hook.Map["task:new"] != "started" || hook.Map["task:review"] != "review" {
+		t.Fatalf("its map stands as %v", hook.Map)
+	}
+	if raw, err := os.ReadFile(file); err != nil || string(raw) != hookSecretValue {
+		t.Fatalf("the secret file holds %q, %v", raw, err)
+	}
+}
+
+// Order counts on a hook's tables: moving a line shows as removed and
+// added, and the approval stands the new order.
+func TestHookTableOrderDiff(t *testing.T) {
+	t.Parallel()
+	y := hookTableYard(t)
+	file := filepath.Join(t.TempDir(), "linear.secret")
+	hookTableSecret(t, file)
+	if _, err := y.PutHook(y.ctx, Hook{Name: "linear", Source: "linear", SecretFile: file,
+		Says: []Say{
+			{Where: map[string]string{"action": "opened", "event": "issues"}, Outcome: "done"},
+			{Where: map[string]string{"action": "closed", "event": "issues"}, Outcome: "changes"},
+		},
+	}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq := y.ask(t, hookTableAsk("hook add linear --source linear",
+		[]string{
+			"action=closed event=issues -> changes",
+			"action=opened event=issues -> done",
+		}, nil), "yardmaster")
+	does := strings.Join(y.asked(t, seq).Ask.Run.Does, "\n")
+	for _, want := range []string{
+		"its says table changes from 2 lines to 2 lines (1 insertion, 1 deletion):",
+		"-action=opened event=issues -> done",
+		" action=closed event=issues -> changes",
+		"+action=opened event=issues -> done",
+	} {
+		if !strings.Contains(does, want) {
+			t.Fatalf("the card says:\n%s\nwant %q", does, want)
+		}
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	hook, err := y.GetHook(y.ctx, "linear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !SameSays(hook.Says, []Say{
+		{Where: map[string]string{"action": "closed", "event": "issues"}, Outcome: "changes"},
+		{Where: map[string]string{"action": "opened", "event": "issues"}, Outcome: "done"},
+	}) {
+		t.Fatalf("its says stand as %q", SayLines(hook.Says))
+	}
+}
+
+// A hook add carrying a table is refused as the terminal refuses it: a
+// line no bead could take the outcome of or be made in, a map without
+// the crew member it acts as, a crew member the yard has not or without
+// an identity in the source, a line of no shape, and a table past the
+// card's byte and line caps. Each leaves no note.
+func TestHookTableRefusals(t *testing.T) {
+	t.Parallel()
+	long := make([]string, 35)
+	for i := range long {
+		long[i] = fmt.Sprintf("action=opened event=issues label=l%d -> done", i)
+	}
+	for _, c := range []struct {
+		name    string
+		bare    bool
+		command string
+		says    []string
+		makes   []string
+		want    string
+	}{
+		{"an outcome no flow edge has", false, "hook add linear --source linear",
+			[]string{"action=closed event=issues -> shipped"}, nil, "no stage has an outcome shipped"},
+		{"an outcome the stage has not", false, "hook add linear --source linear",
+			[]string{"action=closed event=issues stage=new -> changes"}, nil, "stage new has no outcome changes"},
+		{"an outcome no bead of the type could take", false, "hook add linear --source linear",
+			[]string{"action=closed event=issues type=task -> shipped"}, nil, "no bead of type task of the yard's depots could take it"},
+		{"a stage no bead can be made in", false, "hook add linear --source linear",
+			nil, []string{"action=opened event=issues -> task:merged"}, "no stage merged a bead can be made in"},
+		{"a depot the yard has not", false, "hook add linear --source linear",
+			nil, []string{"action=opened event=issues -> task:new@gone"}, "depot gone: not found"},
+		{"a map without its crew member", false, "hook add linear --source linear --map task:new=started",
+			nil, nil, "a map needs the crew member it acts as"},
+		{"a crew member the yard has not", false, "hook add linear --source linear --as ghost",
+			nil, nil, "crew member ghost: not found"},
+		{"a says line of no shape", false, "hook add linear --source linear",
+			[]string{"nonsense"}, nil, "--says"},
+		{"a makes line of no shape", false, "hook add linear --source linear",
+			nil, []string{"nonsense"}, "--makes"},
+		{"a map line twice with two states", false, "hook add linear --source linear --as yardmaster --map task:new=started --map task:new=review",
+			nil, nil, "is mapped to"},
+		{"a table past the byte bound", false, "hook add linear --source linear",
+			[]string{strings.Repeat("a", MaxRunHookTable+1)}, nil, "a card holds at most 8192"},
+		{"a table past the line cap", false, "hook add linear --source linear",
+			long, nil, "a card is read whole"},
+		{"a makes line with no depot to make in", true, "hook add linear --source linear",
+			nil, []string{"action=opened event=issues -> task:new"}, "the yard has no depot to make a bead in"},
+		{"a says line with no depot to take it", true, "hook add linear --source linear",
+			[]string{"action=closed event=issues -> done"}, nil, "no bead of the yard's depots could take it"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			y := hookTableYard(t)
+			if c.bare {
+				y = hookYard(t)
+			}
+			if _, err := y.AddAsk(y.ctx, y.bead, hookTableAsk(c.command, c.says, c.makes), "yardmaster"); err == nil ||
+				!strings.Contains(err.Error(), c.want) {
+				t.Fatalf("AddAsk = %v, want %q", err, c.want)
+			}
+			if notes, err := y.Notes(y.ctx, y.bead); err != nil || len(notes) != 0 {
+				t.Fatalf("the refused ask left %d notes, %v", len(notes), err)
+			}
+		})
+	}
+}
+
+// A new hook carrying a table is set up as the safe shape is, with its
+// secret given first: the card shows the table against nothing, and the
+// approval makes the hook with it.
+func TestHookTableNewWithTable(t *testing.T) {
+	t.Parallel()
+	y := hookTableYard(t)
+	secretSeq := y.ask(t, hookSecretAsk("linear", "atlas"), "yardmaster")
+	if _, err := y.GiveSecret(y.ctx, y.bead, secretSeq,
+		map[string]string{"ATLAS_SIGNING_SECRET": hookSecretValue}, "mckean", true); err != nil {
+		t.Fatal(err)
+	}
+	seq := y.ask(t, hookTableAsk("hook add atlas --source linear --as yardmaster --map task:new=started",
+		[]string{"action=opened event=issues -> done"},
+		[]string{"action=opened event=issues -> task:new"}), "yardmaster")
+	does := strings.Join(y.asked(t, seq).Ask.Run.Does, "\n")
+	for _, want := range []string{
+		"it adds the hook atlas: POST /hooks/atlas takes deliveries from the source linear (https://api.linear.app).",
+		"it acts as the crew member yardmaster (now it acts as none).",
+		"its says table changes from 0 lines to 1 line (1 insertion, 0 deletions):",
+		"+action=opened event=issues -> done",
+		"its makes table changes from 0 lines to 1 line (1 insertion, 0 deletions):",
+		"+action=opened event=issues -> task:new",
+		"its map changes from 0 lines to 1 line (1 insertion, 0 deletions):",
+		"+task:new=started",
+	} {
+		if !strings.Contains(does, want) {
+			t.Fatalf("the card says:\n%s\nwant %q", does, want)
+		}
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	hook, err := y.GetHook(y.ctx, "atlas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hook.Source != "linear" || hook.SecretFile != HookSecretFile(y.home, "atlas") || hook.As != "yardmaster" {
+		t.Fatalf("the hook stands as %+v", hook)
+	}
+	if !SameSays(hook.Says, []Say{{Where: map[string]string{"action": "opened", "event": "issues"}, Outcome: "done"}}) {
+		t.Fatalf("its says stand as %q", SayLines(hook.Says))
+	}
+	if !SameMakes(hook.Makes, []Make{{Where: map[string]string{"action": "opened", "event": "issues"}, Type: "task", Stage: "new"}}) {
+		t.Fatalf("its makes stand as %q", MakeLines(hook.Makes))
+	}
+	if len(hook.Map) != 1 || hook.Map["task:new"] != "started" {
+		t.Fatalf("its map stands as %v", hook.Map)
+	}
+}
+
+// A replacement may move the hook's source: the card shows the source
+// now and after, and the approval keeps the secret file it stands with.
+func TestHookTableSourceChange(t *testing.T) {
+	t.Parallel()
+	y := hookTableYard(t)
+	text := strings.Replace(hookLinear, "name: linear", "name: lin2", 1)
+	if _, err := y.PutSource(y.ctx, "lin2.yaml", text, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "linear.secret")
+	hookTableSecret(t, file)
+	if _, err := y.PutHook(y.ctx, Hook{Name: "linear", Source: "linear", SecretFile: file}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq := y.ask(t, hookTableAsk("hook add linear --source lin2", nil, nil), "yardmaster")
+	does := strings.Join(y.asked(t, seq).Ask.Run.Does, "\n")
+	if !strings.Contains(does, "takes deliveries from the source lin2 (https://api.linear.app). It serves the source linear now.") {
+		t.Fatalf("the card says:\n%s", does)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	hook, err := y.GetHook(y.ctx, "linear")
+	if err != nil || hook.Source != "lin2" || hook.SecretFile != file {
+		t.Fatalf("the hook stands as %+v, %v", hook, err)
+	}
+
+	t.Run("identity hearing removed", func(t *testing.T) {
+		y := chatxYard(t)
+		file := filepath.Join(t.TempDir(), "chatx.secret")
+		hookTableSecret(t, file)
+		if _, err := y.PutHook(y.ctx, Hook{Name: "chatx", Source: "chatx", SecretFile: file, Unknown: HookUnknownAllow}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		seq := y.ask(t, hookTableAsk("hook add chatx --source linear", nil, nil), "yardmaster")
+		does := strings.Join(y.asked(t, seq).Ask.Run.Does, "\n")
+		if !strings.Contains(does, "it has no --unknown policy now; before, it stored --unknown allow.") {
+			t.Fatalf("the card says:\n%s", does)
+		}
+		if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+			t.Fatal(err)
+		}
+		if hook, err := y.GetHook(y.ctx, "chatx"); err != nil || hook.Source != "linear" || hook.Unknown != "" {
+			t.Fatalf("the hook stands as %+v, %v", hook, err)
+		}
+	})
+
+	t.Run("identity hearing added", func(t *testing.T) {
+		y := chatxYard(t)
+		file := filepath.Join(t.TempDir(), "move.secret")
+		hookTableSecret(t, file)
+		if _, err := y.PutHook(y.ctx, Hook{Name: "move", Source: "linear", SecretFile: file}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		seq := y.ask(t, hookTableAsk("hook add move --source chatx", nil, nil), "yardmaster")
+		does := strings.Join(y.asked(t, seq).Ask.Run.Does, "\n")
+		if !strings.Contains(does, "it stores --unknown unknown for an unmapped sender") ||
+			!strings.Contains(does, "Before, it had no --unknown policy.") {
+			t.Fatalf("the card says:\n%s", does)
+		}
+		if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+			t.Fatal(err)
+		}
+		if hook, err := y.GetHook(y.ctx, "move"); err != nil || hook.Source != "chatx" || hook.Unknown != HookUnknownUnknown {
+			t.Fatalf("the hook stands as %+v, %v", hook, err)
+		}
+	})
+}
+
+// A table ask is held to the hook as its card saw it: changed, removed,
+// or added since, the approval runs nothing and says what moved.
+func TestHookTableStale(t *testing.T) {
+	t.Parallel()
+	t.Run("changed since", func(t *testing.T) {
+		y := hookTableYard(t)
+		file := filepath.Join(t.TempDir(), "linear.secret")
+		hookTableSecret(t, file)
+		if _, err := y.PutHook(y.ctx, Hook{Name: "linear", Source: "linear", SecretFile: file}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		seq := y.ask(t, hookTableAsk("hook add linear --source linear",
+			[]string{"action=opened event=issues -> done"}, nil), "yardmaster")
+		if _, err := y.PutHook(y.ctx, Hook{Name: "linear", Source: "linear", SecretFile: file,
+			Says: []Say{{Where: map[string]string{"action": "opened", "event": "issues"}, Outcome: "done"}}}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil ||
+			!strings.Contains(err.Error(), "it was added again or changed since") {
+			t.Fatalf("approving after the hook changed = %v", err)
+		}
+	})
+	t.Run("removed since", func(t *testing.T) {
+		y := hookTableYard(t)
+		file := filepath.Join(t.TempDir(), "linear.secret")
+		hookTableSecret(t, file)
+		if _, err := y.PutHook(y.ctx, Hook{Name: "linear", Source: "linear", SecretFile: file}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		seq := y.ask(t, hookTableAsk("hook add linear --source linear",
+			[]string{"action=opened event=issues -> done"}, nil), "yardmaster")
+		if err := y.DeleteHook(y.ctx, "linear", "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil ||
+			!strings.Contains(err.Error(), "it was removed since") {
+			t.Fatalf("approving after the hook was removed = %v", err)
+		}
+	})
+	t.Run("added since", func(t *testing.T) {
+		y := hookTableYard(t)
+		seq := y.ask(t, hookTableAsk("hook add atlas --source linear",
+			[]string{"action=opened event=issues -> done"}, nil), "yardmaster")
+		file := filepath.Join(t.TempDir(), "atlas.secret")
+		hookTableSecret(t, file)
+		if _, err := y.PutHook(y.ctx, Hook{Name: "atlas", Source: "linear", SecretFile: file}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil ||
+			!strings.Contains(err.Error(), "it was added since") {
+			t.Fatalf("approving after the hook was added = %v", err)
+		}
+	})
+}
+
+// What the card refused at asking it refuses again at approval: an
+// identity or a flow edge gone since, and the approval runs nothing.
+func TestHookTableApprovalRechecks(t *testing.T) {
+	t.Parallel()
+	t.Run("identity gone since", func(t *testing.T) {
+		y := hookTableYard(t)
+		file := filepath.Join(t.TempDir(), "linear.secret")
+		hookTableSecret(t, file)
+		if _, err := y.PutHook(y.ctx, Hook{Name: "linear", Source: "linear", SecretFile: file}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		seq := y.ask(t, hookTableAsk("hook add linear --source linear --as yardmaster", nil, nil), "yardmaster")
+		if err := y.SetIdentity(y.ctx, "yardmaster", "linear", Identity{}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil ||
+			!strings.Contains(err.Error(), "has no identity in linear") {
+			t.Fatalf("approving after the identity went = %v", err)
+		}
+		if hook, err := y.GetHook(y.ctx, "linear"); err != nil || hook.As != "" {
+			t.Fatalf("the refused approval changed the hook: %+v, %v", hook, err)
+		}
+	})
+	t.Run("flow edge gone since", func(t *testing.T) {
+		y := hookTableYard(t)
+		file := filepath.Join(t.TempDir(), "linear.secret")
+		hookTableSecret(t, file)
+		if _, err := y.PutHook(y.ctx, Hook{Name: "linear", Source: "linear", SecretFile: file}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		seq := y.ask(t, hookTableAsk("hook add linear --source linear",
+			[]string{"action=closed event=issues -> changes"}, nil), "yardmaster")
+		narrower, err := ParseFlow("new -> merged on done\nmerged terminal\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		narrower.Name = "web"
+		if _, err := y.PutFlow(y.ctx, *narrower, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil ||
+			!strings.Contains(err.Error(), "no bead of the yard's depots could take it") {
+			t.Fatalf("approving after the flow edge went = %v", err)
+		}
+		if hook, err := y.GetHook(y.ctx, "linear"); err != nil || len(hook.Says) != 0 {
+			t.Fatalf("the refused approval changed the hook: %+v, %v", hook, err)
+		}
+	})
 }
