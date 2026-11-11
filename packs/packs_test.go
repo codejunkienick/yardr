@@ -1878,6 +1878,19 @@ func TestGitHubPack(t *testing.T) {
 	if want := []string{"thread.reply", "thread.posted", "thread.read", "thread.open", "thread.opened", "thread.state", "hook.normalize", "events.pr", "events.ci", "git.credential"}; !slices.Equal(keys, want) {
 		t.Fatalf("commands = %v, want %v", keys, want)
 	}
+	// Its calls: who the credential acts as, one read per kind of
+	// credential — user for a personal token, app for an App
+	// credential — and nothing else.
+	var calls []string
+	for _, c := range p.Declared[0].Declaration.Calls {
+		calls = append(calls, c.Name)
+		if c.Kind != source.Read {
+			t.Errorf("call %s is %s, want read", c.Name, c.Kind)
+		}
+	}
+	if want := []string{"user", "app"}; !slices.Equal(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
 	// Its setup notes: where the webhook is made, the hook and its
 	// secret, the crew member's credential and identity, the grants, how
 	// to test. The secret and the token are typed unseen, never as a

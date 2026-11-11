@@ -133,16 +133,23 @@ git:
 
 # ---- (today) what an agent may ask of it, through `yardr call` ------------
 # Who the credential acts as, and nothing else: the file's calls are what
-# keep its base and credential (a file with none has neither), and one read
-# call is what that takes. It names no check call on purpose: no one
-# endpoint answers for a static token and for the JWT a scope-free mint
-# returns, so `yardr source check` looks at the credential and the thread
-# commands above, and sends nothing.
+# keep its base and credential (a file with none has neither), one read
+# call per kind of credential. A personal token answers for itself at
+# /user, which refuses the JWT an App credential's calls run as (a
+# scope-free mint); /app answers for that one instead. It names no check
+# call on purpose: no one endpoint answers for both kinds, so
+# `yardr source check` looks at the credential and the thread commands
+# above, and sends nothing.
 
 base: https://api.github.com
 calls:
   user:
     kind: read
-    about: Who the credential acts as.
+    about: Who a personal token acts as (for an App credential, see app).
     request: { method: GET, path: /user }
     answer: { select: [login, type] }
+  app:
+    kind: read
+    about: Who an App credential acts as (for a personal token, see user).
+    request: { method: GET, path: /app }
+    answer: { select: [slug, id] }
