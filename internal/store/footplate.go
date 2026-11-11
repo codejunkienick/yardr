@@ -547,31 +547,23 @@ func (s *Store) FootDue(ctx context.Context) ([]FootItem, error) {
 // note before its due, an end — drops now, and what waits its return is
 // kept. It answers how many went each way, and is the server's to ask,
 // and no method of the API.
+//
+// The server sweeps every second, so the sweep looks in a read first and
+// writes only when a row goes: every committed write wakes the store's
+// subscribers, and a write that changed nothing woke the daemon into a
+// pass a second, forever.
 func (s *Store) FootSweep(ctx context.Context) (expired, stale int, err error) {
 	at := now()
+	var gone []string
+	if err = s.read(func(tx *bolt.Tx) error {
+		gone, expired, stale, err = footPastTelling(tx, at)
+		return err
+	}); err != nil || len(gone) == 0 {
+		return expired, stale, err
+	}
+	// Judged again in the write: a row may have changed since the read.
 	err = s.write(func(w *wtx) error {
-		rd := &readers{tx: w.Tx}
-		var gone []string
-		err := each(w.Tx, bFoot, "", func(k []byte, f *FootItem) error {
-			if at.Sub(f.At) > FootMaxAge {
-				expired++
-				gone = append(gone, string(k))
-				return nil
-			}
-			when := at
-			if f.delayed() && f.Due.After(when) {
-				when = f.Due
-			}
-			fresh, err := f.fresh(w.Tx, rd, when)
-			if err != nil {
-				return err
-			}
-			if !fresh {
-				stale++
-				gone = append(gone, string(k))
-			}
-			return nil
-		})
+		gone, expired, stale, err = footPastTelling(w.Tx, at)
 		for _, k := range gone {
 			if err == nil {
 				err = w.Bucket(bFoot).Delete([]byte(k))
@@ -580,6 +572,33 @@ func (s *Store) FootSweep(ctx context.Context) (expired, stale int, err error) {
 		return err
 	})
 	return expired, stale, err
+}
+
+// footPastTelling is the keys of the rows FootSweep drops at at, with how
+// many aged out and how many are no longer news.
+func footPastTelling(tx *bolt.Tx, at time.Time) (gone []string, expired, stale int, err error) {
+	rd := &readers{tx: tx}
+	err = each(tx, bFoot, "", func(k []byte, f *FootItem) error {
+		if at.Sub(f.At) > FootMaxAge {
+			expired++
+			gone = append(gone, string(k))
+			return nil
+		}
+		when := at
+		if f.delayed() && f.Due.After(when) {
+			when = f.Due
+		}
+		fresh, err := f.fresh(tx, rd, when)
+		if err != nil {
+			return err
+		}
+		if !fresh {
+			stale++
+			gone = append(gone, string(k))
+		}
+		return nil
+	})
+	return gone, expired, stale, err
 }
 
 // footByID is the key of the row with the event id, "" when none stands.

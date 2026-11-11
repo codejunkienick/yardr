@@ -531,6 +531,22 @@ func TestFootSweepAndRetry(t *testing.T) {
 	}
 	first, second := rows[0].EventID, rows[1].EventID
 
+	// The server sweeps every second: a sweep that drops nothing commits
+	// nothing, so it wakes no subscriber (the daemon, which would pass on
+	// it). The store pings before its write returns, so no wait is needed.
+	wake, err := y.Wake(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired, stale, err := y.FootSweep(y.ctx); err != nil || expired != 0 || stale != 0 {
+		t.Fatalf("sweep of fresh rows = %d expired, %d stale, %v", expired, stale, err)
+	}
+	select {
+	case <-wake:
+		t.Fatal("a sweep that dropped nothing woke the store's subscribers")
+	default:
+	}
+
 	kept, err := y.FootRetry(y.ctx, first)
 	if err != nil || !kept {
 		t.Fatalf("retry = %v, %v", kept, err)
@@ -582,8 +598,18 @@ func TestFootSweepAndRetry(t *testing.T) {
 	if rows := y.due(t); len(rows) != 0 {
 		t.Fatalf("due past the age = %+v", rows)
 	}
+	// Drain what the writes since woke, so the sweep's own wake is seen.
+	select {
+	case <-wake:
+	default:
+	}
 	if expired, stale, err := y.FootSweep(y.ctx); err != nil || expired != 1 || stale != 0 {
 		t.Fatalf("sweep past the age = %d expired, %d stale, %v", expired, stale, err)
+	}
+	select {
+	case <-wake:
+	default:
+		t.Fatal("a sweep that dropped a row woke no subscriber")
 	}
 
 	// A new link never saw what waits for an ack: it goes again.
