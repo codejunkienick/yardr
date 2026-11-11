@@ -179,6 +179,10 @@ func (c *Client) AddAnswerExpected(ctx context.Context, id string, ans store.Ans
 func (c *Client) UserAsks(ctx context.Context, name, actor string, viewer ...string) (*store.AskQueue, error) {
 	return callV[*store.AskQueue](c, ctx, "UserAsks", name, actor, viewer)
 }
+
+func (c *Client) OpenAskBeads(ctx context.Context, name, actor string, ids []string) ([]string, error) {
+	return callV[[]string](c, ctx, "OpenAskBeads", name, actor, ids)
+}
 func (c *Client) Waiting(ctx context.Context, name, actor string, viewer ...string) ([]store.WaitingBead, error) {
 	return callV[[]store.WaitingBead](c, ctx, "Waiting", name, actor, viewer)
 }

@@ -278,6 +278,45 @@ func (s *Store) UserAsks(ctx context.Context, name, actor string, viewer ...stri
 	return q, nil
 }
 
+// OpenAskBeads answers which of the beads ids carry an open ask to the
+// user name, in the order ids gives them: the lamp dots of the flows
+// view, which reads only the open beads it draws. It is UserAsks' open
+// section cut to the beads asked about, without the rows: a bead with
+// several open asks to the user stands once, and one with none, or with
+// asks answered, put aside, declined or taken back, stands nowhere. Only
+// the user reads it, and an operator any user's (mayReadInbox); actor is
+// who reads, and left out is the user. A name that is no user of the
+// yard is refused, as UserAsks refuses it.
+func (s *Store) OpenAskBeads(ctx context.Context, name, actor string, ids []string) ([]string, error) {
+	if err := s.read(func(tx *bolt.Tx) error {
+		if _, err := getUser(tx, name); err != nil {
+			return err
+		}
+		_, err := s.mayReadInbox(ctx, tx, name, actor, "read")
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	now := now()
+	out := []string{}
+	for _, id := range ids {
+		notes, err := s.Notes(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range ResolveAsks(notes, now) {
+			if r.AskErr != nil || r.Ask.To != name {
+				continue
+			}
+			if r.State == AskOpen {
+				out = append(out, id)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 // decidedBy fills in what was done with the ask r, which is not open: the
 // pick with its label, the words, and when a put-aside one comes back.
 func (d *DecidedAsk) decidedBy(r ResolvedAsk) {

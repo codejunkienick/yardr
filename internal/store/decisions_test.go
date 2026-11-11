@@ -252,6 +252,79 @@ func TestUserAsksQueue(t *testing.T) {
 	}
 }
 
+// OpenAskBeads answers which of the given beads carry an open ask to the
+// user, in the order given: open asks stand, answered, declined and
+// put-aside ones do not, and neither do asks to anyone else, asks on
+// beads not given, nor beads with no asks. A closed bead given stands
+// where its ask is open: the method reads what it is given. Only the
+// user reads it, and an operator any user's, as UserAsks; a name that is
+// no user is refused as UserAsks refuses it.
+func TestOpenAskBeads(t *testing.T) {
+	// Sequential: the package's fake clock.
+	pinClockFixed(t, askNow)
+	y := decisionYard(t)
+	pinClock(t, &y.now)
+	light := y.makeBead(t, NewBead{Title: "Open ask"})
+	y.askOn(t, light, wordsAsk("mckean"), "yardmaster")
+	shut := y.makeBead(t, NewBead{Title: "Answered ask"})
+	seq := y.askOn(t, shut, wordsAsk("mckean"), "yardmaster")
+	y.answerOn(t, shut, Answer{Ask: seq, Words: "warmly"}, "mckean")
+	turned := y.makeBead(t, NewBead{Title: "Declined ask"})
+	declined := y.askOn(t, turned, wordsAsk("mckean"), "yardmaster")
+	y.answerOn(t, turned, Answer{Ask: declined, Words: "not mine to take", Decline: true}, "mckean")
+	aside := y.makeBead(t, NewBead{Title: "Put-aside ask"})
+	put := y.askOn(t, aside, wordsAsk("mckean"), "yardmaster")
+	y.answerOn(t, aside, Answer{Ask: put, Later: true}, "mckean")
+	other := y.makeBead(t, NewBead{Title: "Another's ask"})
+	y.askOn(t, other, wordsAsk("ada"), "yardmaster")
+	plain := y.makeBead(t, NewBead{Title: "No ask"})
+	off := y.makeBead(t, NewBead{Title: "Not given"})
+	y.askOn(t, off, wordsAsk("mckean"), "yardmaster")
+	shutopen := y.makeBead(t, NewBead{Title: "Closed with an open ask"})
+	y.askOn(t, shutopen, wordsAsk("mckean"), "yardmaster")
+	if _, err := y.Store.CloseBead(y.ctx, shutopen, "done", Expect{}, "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	lit, err := y.Store.OpenAskBeads(y.ctx, "mckean", "mckean", []string{plain, aside, turned, shut, other, light, shutopen})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A closed bead given stands where its ask is open: the method reads
+	// what it is given, and the open-only narrowing is the caller's, in
+	// the ids it passes.
+	if !slices.Equal(lit, []string{light, shutopen}) {
+		t.Fatalf("lit = %v, want [%s %s]", lit, light, shutopen)
+	}
+	// A name that is no user of the yard is refused, as UserAsks
+	// refuses it, and another user's beads are theirs and the
+	// operator's alone to read. Left out, the reader is the user.
+	if _, err := y.Store.OpenAskBeads(y.ctx, "nobody", "nobody", []string{light}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("OpenAskBeads(nobody) = %v, want not found", err)
+	}
+	if _, err := y.Store.AddUser(y.ctx, "ada", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.Store.AddUser(y.ctx, "jo", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.Store.SetUser(y.ctx, "jo", map[string]string{UserRole: RoleOperator}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name, actor string
+		ok          bool
+	}{
+		{"mckean", "mckean", true},
+		{"mckean", "", true},
+		{"mckean", "jo", true},
+		{"mckean", "ada", false},
+	} {
+		if _, err := y.Store.OpenAskBeads(y.ctx, c.name, c.actor, []string{light}); (err == nil) != c.ok {
+			t.Errorf("OpenAskBeads(%s) by %q = %v", c.name, c.actor, err)
+		}
+	}
+}
+
 // A stage card as a person reads it in their queue and on the bead: the
 // question names the bead, the context opens with the bead and its branch,
 // and the options are the template's alone, so a pick past them is refused

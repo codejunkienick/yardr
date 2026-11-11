@@ -867,25 +867,24 @@ func flowLamps(ctx context.Context, st store.API, beads []store.Bead, live []sto
 			agents[sess.Bead] = append(agents[sess.Bead], sess)
 		}
 	}
-	// The open asks to the operator, on the yard's open beads: a question
-	// from another yard stands in no row, as on the panel. A yard that
-	// names no operator, or no user by that name, waits without asks.
+	// The open asks to the operator, on the open beads drawn: which of
+	// them carry one, read for those beads alone, not for the whole
+	// yard as the queue reads. A yard that names no operator, or no
+	// user by that name, waits without asks.
 	asked := map[string]bool{}
 	if operator != "" {
-		q, err := st.UserAsks(ctx, operator, operator, operator)
+		var ids []string
+		for _, b := range beads {
+			ids = append(ids, b.ID)
+		}
+		lit, err := st.OpenAskBeads(ctx, operator, operator, ids)
 		if err != nil {
 			if !errors.Is(err, store.ErrNotFound) {
 				return nil, err
 			}
 		} else {
-			open := map[string]bool{}
-			for _, b := range beads {
-				open[b.ID] = true
-			}
-			for _, o := range q.Open {
-				if open[o.Bead] && !strings.Contains(o.Bead, "@") {
-					asked[o.Bead] = true
-				}
+			for _, id := range lit {
+				asked[id] = true
 			}
 		}
 	}

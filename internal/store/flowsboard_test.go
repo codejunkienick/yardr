@@ -13,6 +13,7 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
+	"yardr.dev/yardr/internal/eta"
 	"yardr.dev/yardr/internal/store"
 )
 
@@ -393,11 +394,25 @@ func TestFlowsHeldBy(t *testing.T) {
 	}
 }
 
+// asksCountingAPI is the store counting the beads one flows call asks
+// after: the ids each OpenAskBeads call names.
+type asksCountingAPI struct {
+	store.API
+	asked [][]string
+}
+
+func (a *asksCountingAPI) OpenAskBeads(ctx context.Context, name, actor string, ids []string) ([]string, error) {
+	a.asked = append(a.asked, ids)
+	return a.API.OpenAskBeads(ctx, name, actor, ids)
+}
+
 // TestFlowsLamps pins the fault/turn rule: a prompt nobody answers is a
 // fault; a hold, a manual group's stage and an open ask to the operator
 // are the person's turn; an answered prompt, an ask to anyone else and a
 // plain bead light nothing. A stage with a bead worked in it lights no
-// lamp at all: it is moving.
+// lamp at all: it is moving. One flows call asks after the open beads it
+// draws, and after no closed bead: a closed bead's open ask to the
+// operator lights nothing and is not asked after.
 func TestFlowsLamps(t *testing.T) {
 	// Sequential: the package's fake clock and process environment (via newArrivalsTest).
 	y := newArrivalsTest(t)
@@ -458,6 +473,13 @@ func TestFlowsLamps(t *testing.T) {
 	must(err)
 	must(y.MarkRunning(ctx, ssess.ID, map[string]any{"agent": "stuck-new"}))
 	must(y.LogDispatch(ctx, stuck.ID, "session_blocked", "yard", map[string]any{"session": ssess.ID}))
+	// A closed bead with an open ask to the operator: closing answers
+	// nothing, so the ask stands open, off the board.
+	shut := y.travel(t, "shut", "quiet", "new")
+	_, err = y.AddAsk(ctx, shut.ID, store.Ask{Question: "Ship it?", To: "op", Context: []string{"the release is green."}}, "yard")
+	must(err)
+	_, err = y.CloseBead(ctx, shut.ID, "done", store.Expect{}, "me")
+	must(err)
 	stageLamp := func(board *store.FlowsBoard, depot, stage string) string {
 		t.Helper()
 		for _, d := range board.Depots {
@@ -514,6 +536,32 @@ func TestFlowsLamps(t *testing.T) {
 	}
 	if got := stageLamp(board, "quiet", "new"); got != "turn" {
 		t.Errorf("quiet new lamp = %q after the operator's ask, want turn", got)
+	}
+	// Read again through the counting store: the turn lamp still burns,
+	// and the call asked after the open beads alone, never the shut
+	// bead.
+	counting := &asksCountingAPI{API: y.Store}
+	board, err = eta.FlowsViaStore(ctx, counting, "", y.now)
+	must(err)
+	if got := stageLamp(board, "quiet", "new"); got != "turn" {
+		t.Errorf("quiet new lamp = %q through the counting call, want turn", got)
+	}
+	beads, err := y.ListBeads(ctx, store.BeadFilter{})
+	must(err)
+	open := map[string]bool{}
+	for _, b := range beads {
+		open[b.ID] = true
+	}
+	if len(counting.asked) != 1 {
+		t.Fatalf("flows asked after beads %d times, want once", len(counting.asked))
+	}
+	if len(counting.asked[0]) != len(open) {
+		t.Fatalf("flows asked after %d beads, want the %d open ones", len(counting.asked[0]), len(open))
+	}
+	for _, id := range counting.asked[0] {
+		if !open[id] {
+			t.Errorf("flows asked after %q, which is no open bead", id)
+		}
 	}
 }
 
