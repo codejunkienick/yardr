@@ -142,10 +142,13 @@ type Preview struct {
 	// has no command, port or approval: Dir is the directory it serves.
 	Kind string `json:"kind,omitempty"`
 	// Bead and Stage are a watch's: the bead whose worktree it serves, and
-	// the stage that bead was in when the watch began. The watch ends when
-	// the bead is no longer in that stage.
-	Bead  string `json:"bead,omitempty"`
-	Stage string `json:"stage,omitempty"`
+	// the stage that bead was in when the watch began. Through is the stage
+	// a watch started with --through lives past its start into: the watch
+	// ends when the bead is in neither. Without it the watch ends when the
+	// bead is no longer in the stage it began in.
+	Bead    string `json:"bead,omitempty"`
+	Stage   string `json:"stage,omitempty"`
+	Through string `json:"through,omitempty"`
 	// Host is the host the edge answered the supervisor's report of the
 	// preview with, which a person opens it at (https://<host>/). It is the
 	// edge's to give: empty while the yard is connected to none, or the edge

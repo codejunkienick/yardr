@@ -90,7 +90,11 @@ func (s *Supervisor) serveWatch(w http.ResponseWriter, r *http.Request, p *store
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Content-Type-Options", "nosniff")
 	if p.State != store.PreviewRunning {
-		http.Error(w, fmt.Sprintf("the watch of %s ended (%s): yardr preview watch %s starts it again", p.Bead, p.StateDetail, p.Bead), http.StatusNotFound)
+		restart := "yardr preview watch " + p.Bead
+		if p.Through != "" {
+			restart += " --through " + p.Through
+		}
+		http.Error(w, fmt.Sprintf("the watch of %s ended (%s): %s starts it again", p.Bead, p.StateDetail, restart), http.StatusNotFound)
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -360,12 +364,13 @@ func (s *Supervisor) serveWatchEvents(w http.ResponseWriter, r *http.Request, p 
 }
 
 // reapWatch ends the running watch p if it is over, for the shared reaper
-// (reconcile): it is PreviewAgeLimit old, its bead has left the stage it
-// was watched in or is closed or gone, or it has stood idle PreviewIdle
-// with no request in flight (a stream open is one). The row is then
-// stopped with the reason, and the same command starts it again. inflight
-// is the pass's copy of what is in flight, read before the rows it judges by;
-// a request admitted after that copy is checked live before the stop.
+// (reconcile): it is PreviewAgeLimit old, its bead is in neither the stage
+// it was watched in nor, for a watch started with --through, the through
+// stage, or is closed or gone, or it has stood idle PreviewIdle with no
+// request in flight (a stream open is one). The row is then stopped with
+// the reason, and the same command starts it again. inflight is the pass's
+// copy of what is in flight, read before the rows it judges by; a request
+// admitted after that copy is checked live before the stop.
 func (s *Supervisor) reapWatch(ctx context.Context, p store.Preview, now time.Time, idle time.Duration, inflight map[string]int) {
 	started := now
 	if p.StartedAt != nil {
@@ -385,7 +390,9 @@ func (s *Supervisor) reapWatch(ctx context.Context, p store.Preview, now time.Ti
 		// Not read: judged again on the next pass.
 	case b.ClosedAt != nil:
 		reason = "bead closed"
-	case b.Stage != p.Stage:
+	case b.Stage != p.Stage && (p.Through == "" || b.Stage != p.Through):
+		// A through stage the bead never enters ends the watch on the
+		// first move, as leaving its start does without one.
 		reason = "stage left"
 	case now.Sub(last) > idle:
 		if inflight[p.App] == 0 && !s.hasInFlight(p.App) {

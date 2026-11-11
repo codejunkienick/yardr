@@ -147,7 +147,7 @@ func TestReportPassTellsTheEdgeOfAWatchWithNoPort(t *testing.T) {
 	must(t, err)
 	step("ended", "stopped")
 
-	again, err := y.st.WatchPreview(ctx, b.ID, "", "ada")
+	again, err := y.st.WatchPreview(ctx, b.ID, "", "", "ada")
 	must(t, err)
 	if again.Host != host {
 		t.Fatalf("a watch started again has host %q at once, want the one it had, %q", again.Host, host)

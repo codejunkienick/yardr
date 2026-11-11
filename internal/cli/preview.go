@@ -98,7 +98,8 @@ func (a *app) previewProposeCmd() *cobra.Command {
 }
 
 func (a *app) previewWatchCmd() *cobra.Command {
-	return &cobra.Command{
+	var through string
+	c := &cobra.Command{
 		Use:   "watch <bead> [dir]",
 		Short: "Serve a bead's worktree files live, reloading the page when one changes",
 		Long: `Serve the files of a directory of a bead's worktree through the preview
@@ -119,6 +120,12 @@ watch, which the command waits a few seconds for; where the edge gives
 none the command says there is no address yet, and the words the edge
 refused with are printed beneath it.
 
+With --through <stage> the watch lives past the stage it began in, and
+ends when the bead leaves that stage instead, so the files a person is
+asked to judge in the next stage are still served while they judge. The
+stage must be one the bead's flow has; one the bead never enters ends
+the watch on the first move.
+
 A watch serves plain files. A site that needs a build step runs the
 builder's code, and is an app: yardr preview propose.`,
 		Args: cobra.RangeArgs(1, 2),
@@ -131,7 +138,7 @@ builder's code, and is an app: yardr preview propose.`,
 			if err != nil {
 				return err
 			}
-			p, err := st.WatchPreview(c.Context(), args[0], dir, a.who())
+			p, err := st.WatchPreview(c.Context(), args[0], dir, through, a.who())
 			if err != nil {
 				return err
 			}
@@ -151,10 +158,12 @@ builder's code, and is an app: yardr preview propose.`,
 					fmt.Fprintf(w, "%s\n", p.StateDetail)
 				}
 				fmt.Fprintf(w, "ends when %s leaves %s, after %s without a request, or in %s\n",
-					p.Bead, p.Stage, store.Span(store.PreviewIdle(settings)), store.Span(store.PreviewAgeLimit))
+					p.Bead, cmp.Or(p.Through, p.Stage), store.Span(store.PreviewIdle(settings)), store.Span(store.PreviewAgeLimit))
 			})
 		},
 	}
+	c.Flags().StringVar(&through, "through", "", "the stage the watch lives into past the one it began in")
+	return c
 }
 
 // previewHostWait is how long yardr preview watch waits for the host of a
@@ -231,9 +240,13 @@ func (a *app) previewListCmd() *cobra.Command {
 						last = p.LastRequestAt.Format(time.RFC3339)
 					}
 					// A watch holds no commit or port: it serves a worktree as it is.
+					// One that lives past its start names the stage it lives into.
 					kind, port := "app", strconv.Itoa(p.Port)
 					if p.Kind == store.PreviewKindWatch {
 						kind, port = p.Kind, "-"
+						if p.Through != "" {
+							kind += "→" + p.Through
+						}
 					}
 					host := p.Host
 					if host == "" {

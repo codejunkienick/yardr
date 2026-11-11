@@ -164,6 +164,33 @@ func TestPreviewWatchStartsAndListsAWatch(t *testing.T) {
 		t.Fatalf("list printed %q, lacking its KIND and HOST columns", out)
 	}
 
+	// Through a later stage the watch says it ends leaving that stage, and
+	// is listed as the watch it is, with the record whole in --json.
+	out, err = run(t, a.previewCmd(), "watch", b.ID, "mockups", "--through", "review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "ends when "+b.ID+" leaves review, after 4h without a request, or in 7d") {
+		t.Errorf("watch --through printed %q, want the new end", out)
+	}
+	out, err = run(t, a.previewCmd(), "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`(?m)^` + name + `\s+running\s+-\s+-\s+-\s+watch→review\s+-$`).MatchString(out) {
+		t.Fatalf("list printed %q, want the through stage in its KIND cell", out)
+	}
+	a.json = true
+	out, err = run(t, a.previewCmd(), "list")
+	a.json = false
+	if err != nil || !strings.Contains(out, `"through": "review"`) {
+		t.Fatalf("list --json printed %q, %v, want the through stage in the row", out, err)
+	}
+	// A stage the flow does not have is refused.
+	if _, err := run(t, a.previewCmd(), "watch", b.ID, "--through", "nowhere"); err == nil || !strings.Contains(err.Error(), "stage nowhere is not in flow") {
+		t.Fatalf("watch --through nowhere = %v", err)
+	}
+
 	// Connected to an edge, the command waits for the host the supervisor
 	// keeps on the row once the edge has answered the report. Here the test is
 	// the supervisor: it answers as soon as the watch has a row to answer.

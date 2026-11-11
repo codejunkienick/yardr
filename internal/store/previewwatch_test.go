@@ -132,7 +132,7 @@ func TestWatchPreviewServesADirectoryOfTheWorktree(t *testing.T) {
 	ctx := context.Background()
 	real := y.wt
 
-	p, err := y.s.WatchPreview(ctx, y.bead.ID, "", "jo")
+	p, err := y.s.WatchPreview(ctx, y.bead.ID, "", "", "jo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestWatchPreviewServesADirectoryOfTheWorktree(t *testing.T) {
 	// A directory of the worktree, by name, by a link inside it, and by its
 	// own path.
 	for _, dir := range []string{"mockups", "in", filepath.Join(real, "mockups")} {
-		got, err := y.s.WatchPreview(ctx, y.bead.ID, dir, "jo")
+		got, err := y.s.WatchPreview(ctx, y.bead.ID, dir, "", "jo")
 		if err != nil {
 			t.Fatalf("watch of %s: %v", dir, err)
 		}
@@ -168,12 +168,85 @@ func TestWatchPreviewServesADirectoryOfTheWorktree(t *testing.T) {
 		"index.html":     "not a directory",
 		"nowhere":        "not a directory of its worktree",
 	} {
-		if _, err := y.s.WatchPreview(ctx, y.bead.ID, dir, "jo"); err == nil || !strings.Contains(err.Error(), want) {
+		if _, err := y.s.WatchPreview(ctx, y.bead.ID, dir, "", "jo"); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("watch of %q = %v, want a refusal saying %q", dir, err, want)
 		}
 	}
 	if got, _ := y.s.GetPreview(ctx, p.App); got.Dir != filepath.Join(real, "mockups") {
 		t.Fatalf("a refused watch changed the one standing: %+v", got)
+	}
+}
+
+// A watch started through a stage keeps it on its record and names it in
+// its event; a stage the bead's flow does not have is refused, while a
+// bead no flow governs may be watched through any stage, as it may move
+// to any.
+func TestWatchPreviewThroughStage(t *testing.T) {
+	t.Parallel()
+	y := newWatchYard(t)
+	ctx := context.Background()
+
+	p, err := y.s.WatchPreview(ctx, y.bead.ID, "", "review", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Stage != "new" || p.Through != "review" {
+		t.Fatalf("watch = %+v, want stage new through review", p)
+	}
+	evs, err := y.s.EventsOfKind(ctx, "preview_watched", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 1 || evs[0].Data["stage"] != "new" || evs[0].Data["through"] != "review" {
+		t.Fatalf("preview_watched events = %+v, want one naming stage new through review", evs)
+	}
+
+	// The stage it began in is a through stage too: later-ness is not enforced.
+	if _, err := y.s.WatchPreview(ctx, y.bead.ID, "", "new", "jo"); err != nil {
+		t.Fatalf("watch through its own stage: %v", err)
+	}
+	// A stage the flow does not have is refused, and leaves the standing watch.
+	if _, err := y.s.WatchPreview(ctx, y.bead.ID, "", "nowhere", "jo"); err == nil || !strings.Contains(err.Error(), "stage nowhere is not in flow") {
+		t.Fatalf("watch through nowhere = %v", err)
+	}
+	if got, _ := y.s.GetPreview(ctx, p.App); got.Through != "new" {
+		t.Fatalf("a refused watch changed the one standing: %+v", got)
+	}
+	// Without the flag there is no through stage, and the event names none.
+	plain, err := y.s.WatchPreview(ctx, y.bead.ID, "", "", "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.Through != "" {
+		t.Fatalf("watch without through = %+v", plain)
+	}
+	evs, err = y.s.EventsOfKind(ctx, "preview_watched", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := evs[len(evs)-1]; last.Data["stage"] != "new" {
+		t.Fatalf("last preview_watched event = %+v, want the plain watch's", last)
+	} else if _, ok := last.Data["through"]; ok {
+		t.Fatalf("plain watch's event names through: %+v", last.Data)
+	}
+
+	// A bead no flow governs is watched through any stage.
+	if err := y.s.PutDepot(ctx, store.Depot{Name: "plain", Base: "origin/main"}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	free, err := y.s.CreateBead(ctx, store.NewBead{Title: "flowless", Depot: "plain", Stage: "new"}, "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := y.s.Claim(ctx, free.ID, "builders", "new", "yard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := y.s.SetHandle(ctx, sess.ID, map[string]any{"worktree": y.link}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.s.WatchPreview(ctx, free.ID, "", "anywhere", "jo"); err != nil {
+		t.Fatalf("watch of a bead no flow governs: %v", err)
 	}
 }
 
@@ -185,7 +258,7 @@ func TestWatchPreviewHasToHaveAWorktreeAndAnOpenBead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := y.s.WatchPreview(ctx, b2.ID, "", "jo"); err == nil || !strings.Contains(err.Error(), "no worktree to watch") {
+	if _, err := y.s.WatchPreview(ctx, b2.ID, "", "", "jo"); err == nil || !strings.Contains(err.Error(), "no worktree to watch") {
 		t.Fatalf("watch of a bead with no session = %v", err)
 	}
 	// A session that recorded no worktree, a cleaned one and one whose
@@ -197,20 +270,20 @@ func TestWatchPreviewHasToHaveAWorktreeAndAnOpenBead(t *testing.T) {
 	if err := y.s.SetHandle(ctx, sess.ID, map[string]any{"worktree": filepath.Join(t.TempDir(), "gone")}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := y.s.WatchPreview(ctx, b2.ID, "", "jo"); err == nil || !strings.Contains(err.Error(), "no worktree to watch") {
+	if _, err := y.s.WatchPreview(ctx, b2.ID, "", "", "jo"); err == nil || !strings.Contains(err.Error(), "no worktree to watch") {
 		t.Fatalf("watch of a bead whose worktree is gone = %v", err)
 	}
 	// A dir depot's bead is worked in the depot's directory itself.
 	if err := y.s.SetHandle(ctx, sess.ID, map[string]any{"dir": y.wt}); err != nil {
 		t.Fatal(err)
 	}
-	if p, err := y.s.WatchPreview(ctx, b2.ID, "mockups", "jo"); err != nil || p.Dir != filepath.Join(y.wt, "mockups") {
+	if p, err := y.s.WatchPreview(ctx, b2.ID, "mockups", "", "jo"); err != nil || p.Dir != filepath.Join(y.wt, "mockups") {
 		t.Fatalf("watch of a dir depot's bead = %+v, %v", p, err)
 	}
 	if _, err := y.s.CloseBead(ctx, b2.ID, "done", store.Expect{}, "jo"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := y.s.WatchPreview(ctx, b2.ID, "", "jo"); err == nil || !strings.Contains(err.Error(), "is closed") {
+	if _, err := y.s.WatchPreview(ctx, b2.ID, "", "", "jo"); err == nil || !strings.Contains(err.Error(), "is closed") {
 		t.Fatalf("watch of a closed bead = %v", err)
 	}
 }
@@ -222,14 +295,14 @@ func TestWatchPreviewIsForTheBeadsAgentItsOriginatorAndAnOperator(t *testing.T) 
 	refused := "only an agent working " + y.bead.ID + ", the user it is for or the operator (jo) may watch its files"
 
 	// Nobody who is not one of the three.
-	if _, err := y.s.WatchPreview(ctx, y.bead.ID, "", "lee"); err == nil || !strings.Contains(err.Error(), refused+"; this is lee") {
+	if _, err := y.s.WatchPreview(ctx, y.bead.ID, "", "", "lee"); err == nil || !strings.Contains(err.Error(), refused+"; this is lee") {
 		t.Fatalf("watch by lee = %v, want %q", err, refused)
 	}
 	if got, err := y.s.Previews(ctx); err != nil || len(got) != 0 {
 		t.Fatalf("a refused watch left %+v, %v", got, err)
 	}
 	// The user the bead is for.
-	if _, err := y.s.WatchPreview(ctx, y.bead.ID, "", "kim"); err != nil {
+	if _, err := y.s.WatchPreview(ctx, y.bead.ID, "", "", "kim"); err != nil {
 		t.Fatalf("watch by the originator: %v", err)
 	}
 
@@ -244,14 +317,14 @@ func TestWatchPreviewIsForTheBeadsAgentItsOriginatorAndAnOperator(t *testing.T) 
 		t.Fatal(err)
 	}
 	pane := y.pane(t, other, "yardr-b-new")
-	if _, err := y.s.WatchPreview(pane, y.bead.ID, "", "jo"); err == nil || !strings.Contains(err.Error(), refused+"; this is yardr-b-new") {
+	if _, err := y.s.WatchPreview(pane, y.bead.ID, "", "", "jo"); err == nil || !strings.Contains(err.Error(), refused+"; this is yardr-b-new") {
 		t.Fatalf("watch from another bead's pane = %v, want %q", err, refused)
 	}
 	if err := y.s.SetHandle(ctx, other.ID, map[string]any{"agent": "yardr-b-new"}); err != nil {
 		t.Fatal(err)
 	}
 	pane = y.pane(t, y.sess, "yardr-a-new")
-	p, err := y.s.WatchPreview(pane, y.bead.ID, "mockups", "lee")
+	p, err := y.s.WatchPreview(pane, y.bead.ID, "mockups", "", "lee")
 	if err != nil {
 		t.Fatalf("watch from the bead's own pane: %v", err)
 	}
@@ -271,7 +344,7 @@ func TestWatchPreviewStartsAnEndedWatchInPlace(t *testing.T) {
 	t.Parallel()
 	y := newWatchYard(t)
 	ctx := context.Background()
-	first, err := y.s.WatchPreview(ctx, y.bead.ID, "", "jo")
+	first, err := y.s.WatchPreview(ctx, y.bead.ID, "", "", "jo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +364,7 @@ func TestWatchPreviewStartsAnEndedWatchInPlace(t *testing.T) {
 	if _, err := y.s.Advance(ctx, y.bead.ID, "review", store.Expect{}, "jo"); err != nil {
 		t.Fatal(err)
 	}
-	again, err := y.s.WatchPreview(ctx, y.bead.ID, "mockups", "jo")
+	again, err := y.s.WatchPreview(ctx, y.bead.ID, "mockups", "", "jo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +401,7 @@ func TestWatchPreviewStartsAnEndedWatchInPlace(t *testing.T) {
 	if _, err := y.s.ProposePreview(ctx, store.NewPreview{App: again.App, Command: "serve", Dir: y.wt, Port: 8080}, "builder"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := y.s.WatchPreview(ctx, y.bead.ID, "", "jo"); err == nil || !strings.Contains(err.Error(), "already in the yard") {
+	if _, err := y.s.WatchPreview(ctx, y.bead.ID, "", "", "jo"); err == nil || !strings.Contains(err.Error(), "already in the yard") {
 		t.Fatalf("watch under the name of an app preview = %v", err)
 	}
 }
@@ -337,7 +410,7 @@ func TestWatchesTakeNoneOfTheAppPreviewPlaces(t *testing.T) {
 	t.Parallel()
 	y := newWatchYard(t)
 	ctx := context.Background()
-	if _, err := y.s.WatchPreview(ctx, y.bead.ID, "", "jo"); err != nil {
+	if _, err := y.s.WatchPreview(ctx, y.bead.ID, "", "", "jo"); err != nil {
 		t.Fatal(err)
 	}
 	for i := range store.PreviewLimit {

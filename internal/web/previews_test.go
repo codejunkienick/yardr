@@ -331,7 +331,7 @@ func TestPreviewsPageDrawsARunningWatch(t *testing.T) {
 	if err := f.st.SetHandle(ctx, sess.ID, map[string]any{"worktree": tree}); err != nil {
 		t.Fatal(err)
 	}
-	p, err := f.st.WatchPreview(ctx, b.ID, "mockups", "ada")
+	p, err := f.st.WatchPreview(ctx, b.ID, "mockups", "", "ada")
 	if err != nil {
 		t.Fatal(err)
 	}

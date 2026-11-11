@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -49,14 +50,19 @@ func WatchApp(bead string) string {
 // it is in now, it goes PreviewIdle without a request, or the watch is
 // PreviewAgeLimit old. dir is read against the worktree and must resolve
 // inside it, to a directory, with no part of its path starting with a dot.
-// The worktree is the one the bead's newest session recorded.
+// The worktree is the one the bead's newest session recorded. through, when
+// not empty, is the stage the watch lives past its start into: the watch
+// then ends when the bead is in neither, and a stage the bead's flow does
+// not have is refused.
 //
 // An agent working the bead, the bead's originator and an operator may
 // watch it (ActWatchPreview). A watch of the same bead that has ended is
 // started in place, so the address it had stands; a preview of another
 // kind, or another bead's watch, under the name is refused.
-func (s *Store) WatchPreview(ctx context.Context, bead, dir, actor string) (*Preview, error) {
+func (s *Store) WatchPreview(ctx context.Context, bead, dir, through, actor string) (*Preview, error) {
 	var id string
+	var depot *string
+	var typ, pin string
 	// Asked before anything of the machine is read, so a caller the gate
 	// refuses learns nothing of the worktree.
 	err := s.read(func(tx *bolt.Tx) error {
@@ -65,6 +71,7 @@ func (s *Store) WatchPreview(ctx context.Context, bead, dir, actor string) (*Pre
 			return err
 		}
 		id = row.ID
+		depot, typ, pin = row.Depot, row.Type, PinnedFlow(&row.Bead)
 		resolved, err := paneAuthor(tx, callerOf(ctx), actor)
 		if err != nil {
 			return err
@@ -73,6 +80,18 @@ func (s *Store) WatchPreview(ctx context.Context, bead, dir, actor string) (*Pre
 	})
 	if err != nil {
 		return nil, err
+	}
+	// The repository flows the through check resolves the bead's flow
+	// through, read before the write: git must not run inside one.
+	repos := map[string]*RepoFlows{}
+	if through != "" && depot != nil {
+		// Best effort, as the blockers' are (withUntilRepos): a checkout
+		// git cannot read leaves the through stage unverified, and the
+		// watch then ends on the first move past a stage its flow lacks,
+		// as a through stage the bead never enters does.
+		if rf, err := s.repoFor(ctx, depot, typ, pin); err == nil && rf != nil {
+			repos[*depot] = rf
+		}
 	}
 	app := WatchApp(id)
 	if err := CheckPreviewApp(app); err != nil {
@@ -99,6 +118,15 @@ func (s *Store) WatchPreview(ctx context.Context, bead, dir, actor string) (*Pre
 		if row.ClosedAt != nil {
 			return fmt.Errorf("bead %s is closed: nothing is being built for a watch to show", row.ID)
 		}
+		if through != "" {
+			// Membership only, as a creation's is (checkCreateStage): where
+			// no flow governs the bead, or none could be read, any stage
+			// may be entered, as a move may. Later-ness is not enforced.
+			look := &untilLooks{repos: repos, memo: flowMemo{}}
+			if f := look.flowOf(w.Tx, row); f != nil && !slices.Contains(f.Stages, through) {
+				return fmt.Errorf("bead %s: stage %s is not in flow %s; stages: %s", row.ID, through, f.Name, strings.Join(f.Stages, ", "))
+			}
+		}
 		var old Preview
 		if ok, err := get(w.Tx, bPreviews, app, &old); err != nil {
 			return err
@@ -108,7 +136,7 @@ func (s *Store) WatchPreview(ctx context.Context, bead, dir, actor string) (*Pre
 		at := now()
 		// The host is the edge's for the watch's name and outlives the watch:
 		// the one it had stands when the watch is started again.
-		*p = Preview{App: app, Kind: PreviewKindWatch, Bead: row.ID, Stage: row.Stage, Dir: served, Host: old.Host,
+		*p = Preview{App: app, Kind: PreviewKindWatch, Bead: row.ID, Stage: row.Stage, Through: through, Dir: served, Host: old.Host,
 			State: PreviewRunning, Proposer: actor, ProposedAt: at, StartedAt: &at}
 		if row.Depot != nil {
 			p.Depot = *row.Depot
@@ -116,8 +144,11 @@ func (s *Store) WatchPreview(ctx context.Context, bead, dir, actor string) (*Pre
 		if err := put(w.Tx, bPreviews, app, p); err != nil {
 			return err
 		}
-		return w.event("", "preview_watched", actor, map[string]any{
-			"app": app, "bead": row.ID, "stage": row.Stage, "dir": served})
+		data := map[string]any{"app": app, "bead": row.ID, "stage": row.Stage, "dir": served}
+		if through != "" {
+			data["through"] = through
+		}
+		return w.event("", "preview_watched", actor, data)
 	})
 	if err != nil {
 		return nil, err

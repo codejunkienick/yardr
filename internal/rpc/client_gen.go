@@ -928,8 +928,8 @@ func (c *Client) PreviewStop(ctx context.Context, app, actor string) (*store.Pre
 func (c *Client) ForgetPreview(ctx context.Context, app, actor string) (*store.Preview, error) {
 	return callV[*store.Preview](c, ctx, "ForgetPreview", app, actor)
 }
-func (c *Client) WatchPreview(ctx context.Context, bead, dir, actor string) (*store.Preview, error) {
-	return callV[*store.Preview](c, ctx, "WatchPreview", bead, dir, actor)
+func (c *Client) WatchPreview(ctx context.Context, bead, dir, through, actor string) (*store.Preview, error) {
+	return callV[*store.Preview](c, ctx, "WatchPreview", bead, dir, through, actor)
 }
 
 func (c *Client) RecordPack(ctx context.Context, rec store.PackImport, changed bool, actor string) (bool, error) {

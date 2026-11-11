@@ -8,6 +8,7 @@ file changes.
 ```sh
 yardr preview watch yardr-1a2b            # the worktree itself
 yardr preview watch yardr-1a2b mockups    # one directory of it
+yardr preview watch yardr-1a2b --through pick   # past the stage it began in
 ```
 
 ```text
@@ -96,6 +97,13 @@ A watch ends, and its address then says so and how to start it again, when:
   open in a browser holds a stream, which is a request in flight;
 - it is seven days old;
 - `yardr preview stop <app>` stops it (its starter or an operator).
+
+With `--through <stage>` the watch lives past the stage it began in, and
+ends when the bead leaves that stage instead, so the files a person is
+asked to judge in the next stage are still served while they judge. The
+stage must be one the bead's flow has; one the bead never enters ends the
+watch on the first move. In `yardr preview list` such a watch reads
+`watch→<stage>` in its `KIND` column.
 
 The same `yardr preview watch <bead>` starts it again, at the same address. A
 server restart, an upgrade among them, does not end a watch.

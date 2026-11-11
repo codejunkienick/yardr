@@ -17,13 +17,15 @@ import (
 )
 
 // siteFlow is the flow of a bead a watch is made for: the stages a builder's
-// bead passes.
+// bead passes, and the directions a site's person judges in pick.
 const siteFlow = `
 backlog  -> new
 new      -> review on done | decide on question | backlog
 review   -> approved on done | new on changes | decide on question
 approved -> new on failed | merged
 decide   -> backlog | new
+directions -> pick
+pick -> review | directions
 merged terminal
 `
 
@@ -31,6 +33,13 @@ merged terminal
 // holding files (a name to its content; a name ending in a slash is an
 // empty directory), and starts ada's watch of it.
 func (y *yard) watching(t *testing.T, files map[string]string) (*store.Preview, *store.Bead, string) {
+	t.Helper()
+	return y.watchingIn(t, files, "new", "")
+}
+
+// watchingIn is watching for a bead that starts in stage, whose watch ada
+// starts through through (empty: no through stage).
+func (y *yard) watchingIn(t *testing.T, files map[string]string, stage, through string) (*store.Preview, *store.Bead, string) {
 	t.Helper()
 	ctx := context.Background()
 	dir, err := filepath.EvalSymlinks(t.TempDir())
@@ -54,12 +63,12 @@ func (y *yard) watching(t *testing.T, files map[string]string) (*store.Preview, 
 	must(t, err)
 	must(t, y.st.SetFlowPointer(ctx, "site", "", "site", "ada"))
 	must(t, y.st.PutGroup(ctx, store.Group{Name: "builders", Runner: "herdr"}, "ada"))
-	b, err := y.st.CreateBead(ctx, store.NewBead{Title: "site", Depot: "site", Stage: "new"}, "ada")
+	b, err := y.st.CreateBead(ctx, store.NewBead{Title: "site", Depot: "site", Stage: stage}, "ada")
 	must(t, err)
-	sess, err := y.st.Claim(ctx, b.ID, "builders", "new", "site")
+	sess, err := y.st.Claim(ctx, b.ID, "builders", stage, "site")
 	must(t, err)
 	must(t, y.st.SetHandle(ctx, sess.ID, map[string]any{"worktree": dir}))
-	p, err := y.st.WatchPreview(ctx, b.ID, "", "ada")
+	p, err := y.st.WatchPreview(ctx, b.ID, "", through, "ada")
 	must(t, err)
 	return p, b, dir
 }
@@ -349,36 +358,48 @@ func TestWatchEventsAreOnePerSettledChange(t *testing.T) {
 
 func TestWatchEnds(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		end    func(t *testing.T, y *yard, p *store.Preview, b *store.Bead)
-		detail string
+		name, stage, through, enter string
+		end                         func(t *testing.T, y *yard, p *store.Preview, b *store.Bead)
+		detail                      string
 	}{
-		{"the bead leaves its stage", func(t *testing.T, y *yard, _ *store.Preview, b *store.Bead) {
+		{"the bead leaves its stage", "", "", "", func(t *testing.T, y *yard, _ *store.Preview, b *store.Bead) {
 			_, err := y.st.Advance(context.Background(), b.ID, "review", store.Expect{}, "ada")
 			must(t, err)
 		}, "stage left"},
-		{"the bead is closed", func(t *testing.T, y *yard, _ *store.Preview, b *store.Bead) {
+		{"the bead is closed", "", "", "", func(t *testing.T, y *yard, _ *store.Preview, b *store.Bead) {
 			_, err := y.st.CloseBead(context.Background(), b.ID, "dropped", store.Expect{}, "ada")
 			must(t, err)
 		}, "bead closed"},
-		{"it stands idle", func(t *testing.T, y *yard, p *store.Preview, _ *store.Bead) {
+		{"it stands idle", "", "", "", func(t *testing.T, y *yard, p *store.Preview, _ *store.Bead) {
 			old := time.Now().Add(-5 * time.Hour)
 			_, err := y.st.UpdatePreview(context.Background(), p.App, store.PreviewUpdate{LastRequest: &old})
 			must(t, err)
 		}, "idle"},
-		{"it is as old as a preview may be", func(t *testing.T, y *yard, p *store.Preview, _ *store.Bead) {
+		{"it is as old as a preview may be", "", "", "", func(t *testing.T, y *yard, p *store.Preview, _ *store.Bead) {
 			old := time.Now().Add(-store.PreviewAgeLimit - time.Hour)
 			_, err := y.st.UpdatePreview(context.Background(), p.App, store.PreviewUpdate{StartedAt: &old})
 			must(t, err)
 		}, "aged"},
-		{"it is stopped", func(t *testing.T, y *yard, p *store.Preview, _ *store.Bead) {
+		{"it is stopped", "", "", "", func(t *testing.T, y *yard, p *store.Preview, _ *store.Bead) {
 			_, err := y.st.PreviewStop(context.Background(), p.App, "ada")
 			must(t, err)
 		}, "stopped"},
+		{"it serves in its through stage, then stops when it leaves", "directions", "pick", "pick", func(t *testing.T, y *yard, _ *store.Preview, b *store.Bead) {
+			_, err := y.st.Advance(context.Background(), b.ID, "review", store.Expect{}, "ada")
+			must(t, err)
+		}, "stage left"},
+		{"its through stage is never entered", "directions", "review", "", func(t *testing.T, y *yard, _ *store.Preview, b *store.Bead) {
+			_, err := y.st.Advance(context.Background(), b.ID, "pick", store.Expect{}, "ada")
+			must(t, err)
+		}, "stage left"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			y := newYard(t)
-			p, b, _ := y.watching(t, map[string]string{"index.html": "<body>one</body>"})
+			stage := tc.stage
+			if stage == "" {
+				stage = "new"
+			}
+			p, b, _ := y.watchingIn(t, map[string]string{"index.html": "<body>one</body>"}, stage, tc.through)
 			srv := httptest.NewServer(y.sup.Handler())
 			defer srv.Close()
 			ctx := context.Background()
@@ -393,6 +414,18 @@ func TestWatchEnds(t *testing.T) {
 				t.Fatalf("a running watch answers %d", status)
 			}
 
+			if tc.enter != "" {
+				_, err := y.st.Advance(ctx, b.ID, tc.enter, store.Expect{}, "ada")
+				must(t, err)
+				y.sup.reconcile(ctx, false)
+				if got := y.state(p.App); got.State != store.PreviewRunning {
+					t.Fatalf("after entering %s = %+v, want running", tc.enter, got)
+				}
+				if status, _, _ := fetch(t, "GET", srv.URL+"/preview/"+p.App+"/"); status != 200 {
+					t.Fatalf("a watch through %s answers %d in that stage", tc.through, status)
+				}
+			}
+
 			tc.end(t, y, p, b)
 			y.sup.reconcile(ctx, false)
 			got := y.state(p.App)
@@ -400,8 +433,12 @@ func TestWatchEnds(t *testing.T) {
 				t.Fatalf("after the end = %s (%s), want stopped (%s)", got.State, got.StateDetail, tc.detail)
 			}
 			// Its address says it ended, and how to start it again.
+			restart := "yardr preview watch " + b.ID
+			if tc.through != "" {
+				restart += " --through " + tc.through
+			}
 			status, h, body := fetch(t, "GET", srv.URL+"/preview/"+p.App+"/")
-			if status != 404 || !strings.Contains(body, "ended ("+tc.detail+")") || !strings.Contains(body, "yardr preview watch "+b.ID) ||
+			if status != 404 || !strings.Contains(body, "ended ("+tc.detail+")") || !strings.Contains(body, restart) ||
 				h.Get("Cache-Control") != "no-store" {
 				t.Fatalf("an ended watch answers %d %q, cached as %q", status, body, h.Get("Cache-Control"))
 			}
@@ -412,7 +449,7 @@ func TestWatchEnds(t *testing.T) {
 				return // there is nothing left to watch
 			}
 			// Started again, it is a running watch of the same app.
-			again, err := y.st.WatchPreview(ctx, b.ID, "", "ada")
+			again, err := y.st.WatchPreview(ctx, b.ID, "", "", "ada")
 			must(t, err)
 			y.sup.reconcile(ctx, false)
 			if got := y.state(p.App); again.App != p.App || got.State != store.PreviewRunning {
