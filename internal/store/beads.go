@@ -735,7 +735,7 @@ func (w *wtx) insertBead(row *beadRow, prefix, handle, actor string) error {
 	if err := w.Bucket(bHandles).Put([]byte(row.ID), []byte(row.UUID)); err != nil {
 		return err
 	}
-	row.enter(row.Stage, false)
+	row.enter(nil, row.Stage, false)
 	return w.mintBead(row, actor)
 }
 
@@ -1341,9 +1341,9 @@ func (w *wtx) setOriginator(ctx context.Context, id, to string, exp Expect, acto
 // update is recorded as that session's actor or that crew member, whatever
 // actor says; from anywhere else, as given (paneAuthor). A bead's agent
 // may not change a bead's type or depot (checkFlowChange), may say merge-ok
-// only on its own bead and no fix-ok on any, may not record merge_head on any
-// (checkMergeOK, checkFixPick), may record reviewed_head or fix_commit only
-// on its own (checkReviewedHead, checkFixPick), and may not record ci_head,
+// only on its own bead, no fix-ok or ci-ok on any, no merge_head on any
+// (checkMergeOK, checkPicks), may record reviewed_head or fix_commit only
+// on its own (checkReviewedHead, checkPicks), and may not record ci_head,
 // accepted_head, fix_head or a card's heads on any (checkCIHead, checkAcceptedHead).
 func (s *Store) UpdateBead(ctx context.Context, id string, p BeadPatch, exp Expect, actor string) (*Bead, error) {
 	if p.Title != nil && strings.TrimSpace(*p.Title) == "" {
@@ -1424,7 +1424,7 @@ func (s *Store) UpdateBead(ctx context.Context, id string, p BeadPatch, exp Expe
 			}
 			if err := w.checkMergeOK(ctx, b, p); err != nil {
 				return "", nil, err
-			} else if err := w.checkFixPick(ctx, b, p); err != nil {
+			} else if err := w.checkPicks(ctx, b, p); err != nil {
 				return "", nil, err
 			}
 			if err := w.checkReviewRecords(ctx, b, p); err != nil {
@@ -2019,7 +2019,7 @@ func (w *wtx) move(id, actor string, repo *RepoFlows, home *stageHome, may func(
 		outcome, _ = data["outcome"].(string)
 		insteadOf, _ = data["instead_of"].(string)
 		savedData = data
-		if err := checkWagon(w.Tx, f, b, stage); err != nil {
+		if err := checkMove(w.Tx, f, b, stage); err != nil {
 			return "", nil, refuse(RefusedNotAllowed, err)
 		}
 		if may != nil {
@@ -2036,7 +2036,7 @@ func (w *wtx) move(id, actor string, repo *RepoFlows, home *stageHome, may func(
 		// the bead back to a stage it had been in; any other move, a
 		// person's or the yard's, adds none (see rounds.go). Before
 		// exitStay, which lists the stage as visited.
-		b.enter(stage, outcome != "")
+		b.enter(f, stage, outcome != "")
 		// A limit that sent the bead on has used its rounds: the stage it
 		// kept the bead from starts its count again, with its key (see
 		// rounds.go).

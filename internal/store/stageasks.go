@@ -763,7 +763,7 @@ func (w *wtx) checkStageMove(row *beadRow, move string, repo *RepoFlows) error {
 	if err != nil {
 		return err
 	}
-	return checkWagon(w.Tx, f, row, to)
+	return checkMove(w.Tx, f, row, to)
 }
 
 // earlierStay refuses a pick on a stage ask put for the bead row's stage in

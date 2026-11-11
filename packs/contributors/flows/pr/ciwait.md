@@ -12,8 +12,9 @@ This is the first place anything of the pull request runs on the yard's
 machine, and it runs as whoever runs the yard. A fork's code runs here too,
 on this machine, and only after a reviewer has read the pull request: the
 stage is not the end of `review` because the reviewer runs nothing, and the
-bead reaches this one only by the reviewer's report. A script that finds a
-bead anywhere else refuses it.
+bead reaches this one by the reviewer's report, or by a maintainer's hand
+from `contributor` (below). A script that finds a bead anywhere else refuses
+it.
 
 What runs is the depot's test command, in a checkout of its own, with
 `YARDR_LANDING=1`: this is the pull request's landing run, and no landing by
@@ -61,6 +62,26 @@ has read the head records it as the commit they accept and
 `yardr bead unhold <id>` lets the run go on. A pull request that never waited
 in `triage` (a trusted author's, a bot's) has none, and is held to the
 reviewer's record alone.
+
+A bead that left for `contributor` may also be sent back here by a
+maintainer's hand, at the head its reviewer read: a "not blocking" on the
+reviewed pull request, or a run that failed outside the code, reaches CI
+without another full review. The move needs the label `ci-ok` and a note
+with who decided and why:
+
+    yardr bead update <id> --add-label ci-ok
+    yardr bead note <id> - (who decided and why, on stdin)
+    yardr bead advance <id> --to ciwait
+
+That is how a pick reaches the bead, whoever types it. A bead's agent may
+not: `ci-ok` is refused to it on any bead, its own included, as `fix-ok`
+is, and the move is refused without the label. The run still tests only the
+head the reviewer read, and the head a maintainer accepted where one was
+asked, exactly as above: a head that moved since holds for a fresh review.
+When the run starts, pr-ci spends the label, so each run takes a fresh
+pick; a run that holds before it starts keeps it. A pick a push overtakes
+is void: leaving `contributor` for anywhere but here, or leaving here,
+drops the label, so the next move needs a fresh pick.
 
 The bead leaves on how the run went, or on what comes of the pull request
 meanwhile:

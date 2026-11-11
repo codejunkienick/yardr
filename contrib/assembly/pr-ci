@@ -40,6 +40,11 @@
 # ciwait. A bead that never waited in triage, one the pack's own lines let into
 # review (a trusted author's, a bot's), is held to the reviewer's record alone.
 #
+# A bead sent back by a maintainer's hand from contributor carries the pick
+# ci-ok, which let it move (flows/pr/ciwait.md). Past the checks above, when
+# the run starts, the script spends it: each run takes a fresh pick. A bead
+# the reviewer's report sent has none, and runs as it did.
+#
 # The code is the head GitHub says the pull request has now, merged into the
 # base. The head is fetched from the depot's remote origin by the ref GitHub
 # keeps for the pull request, a fork's included (git fetch origin
@@ -399,6 +404,14 @@ rereview="Send it back to be read: yardr bead advance $BEAD --to review, then ya
   hold "$BEAD has no reviewed_head that is a full commit sha (40 hex digits; 64 for a repository on sha256), so there is no telling that the head of $url, $head, was read. Not running anything. $rereview"
 [ "$(lower "$reviewed")" = "$(lower "$head")" ] ||
   hold "head $head is not the reviewed $reviewed: needs re-review. Nothing of $url was fetched or run. $rereview"
+
+# A bead sent back by a maintainer's hand carries ci-ok, the pick that let it
+# move from contributor to ciwait: the run spends it now that it starts, so a
+# fresh pick takes a fresh run. A bead the reviewer's report sent has none.
+if printf '%s' "$bead" | jq -e '(.labels // []) | index("ci-ok")' >/dev/null; then
+  "$Y" bead update "$BEAD" --remove-label ci-ok >"$errf" 2>&1 ||
+    hold "the run starts on $url at $at, but ci-ok could not be spent on $BEAD: $(head -c 500 "$errf"). Unhold to run it again."
+fi
 
 # The head, fetched from the remote the pull request is on by the ref GitHub
 # keeps for it (a fork's pull request has one too), with the operator's own git

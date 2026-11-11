@@ -1416,17 +1416,22 @@ func TestContributorsPack(t *testing.T) {
 			t.Errorf("pr flow: an approved bead may not be returned to contributor for a fix round")
 		}
 		// A maintainer's pick moves a contributor's bead to fix by hand, and
-		// a held push is resumed by hand to triage. An approved bead can go
+		// one whose head only needs the tests run again back to ciwait; a
+		// held push is resumed by hand to triage. An approved bead can go
 		// back through contributor for a conflicted fix round.
 		if !sf.Allows("contributor", "fix") {
 			t.Errorf("pr flow: a bead in contributor may not be moved to fix")
+		}
+		if !sf.Allows("contributor", "ciwait") {
+			t.Errorf("pr flow: a bead in contributor may not be moved to ciwait")
 		}
 		if !sf.Allows("push", "triage") {
 			t.Errorf("pr flow: a bead in push may not be moved to triage")
 		}
 	}
-	// Those are the hand paths of a fix round, and none leads into push,
-	// whose bead comes from fix alone; fix itself takes no hand move.
+	// Those are the hand paths of a fix round and of a run again, and none
+	// leads into push, whose bead comes from fix alone; fix itself takes no
+	// hand move.
 	manual := map[string][]string{}
 	for _, f := range p.Flows {
 		if f.Name != "pr" {
@@ -1438,6 +1443,9 @@ func TestContributorsPack(t *testing.T) {
 	}
 	if !slices.Contains(manual["contributor"], "fix") {
 		t.Errorf("pr flow: a bead in contributor may not be moved to fix by hand")
+	}
+	if !slices.Contains(manual["contributor"], "ciwait") {
+		t.Errorf("pr flow: a bead in contributor may not be moved to ciwait by hand")
 	}
 	if !slices.Contains(manual["approved"], "contributor") {
 		t.Errorf("pr flow: an approved bead may not be sent back through contributor for a fix round")

@@ -105,10 +105,12 @@ flows:
       # Waits for the pull request to change: nobody of the yard works it, and
       # a maintainer can still merge it on GitHub. A reviewed one with findings
       # is picked for a fix round by hand to fix, after it is labelled fix-ok
-      # and the reviewed head recorded as fix_head (flows/pr/fix.md). The group
-      # has no members, so the move is ungated; the push script checks the
-      # pick, and a stray move holds.
-      contributor: { group: outside,      outcomes: { pushed: review, unaccepted: triage, dropped: closed, merged: merged }, manual: [fix] }
+      # and the reviewed head recorded as fix_head (flows/pr/fix.md), and one
+      # whose head only needs the tests run again is picked by hand to ciwait,
+      # after it is labelled ci-ok (flows/pr/ciwait.md). The group has no
+      # members: a stray move to fix holds at the push script, which checks the
+      # pick, while the move to ciwait is refused without the label.
+      contributor: { group: outside,      outcomes: { pushed: review, unaccepted: triage, dropped: closed, merged: merged }, manual: [fix, ciwait] }
       # A reviewed pull request with findings is fixed here, on the head its
       # maintainer picked. The builder holds no key and reads a stranger's text
       # as the reviewer does; its checkout is the picked head, detached, never

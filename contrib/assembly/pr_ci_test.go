@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -174,6 +175,17 @@ func (c *ciYard) reviewed(id, head string) {
 	}
 }
 
+// bless picks bead id to run CI on again, as a maintainer's hand does before
+// moving it back to ciwait from contributor: the ci-ok label, which the run
+// spends when it starts.
+func (c *ciYard) bless(id string) {
+	c.t.Helper()
+	ctx, st := context.Background(), rpc.NewClient((&config.Config{Home: c.home}).Socket())
+	if _, err := st.UpdateBead(ctx, id, store.BeadPatch{AddLabels: []string{"ci-ok"}}, store.Expect{}, "test"); err != nil {
+		c.t.Fatal(err)
+	}
+}
+
 // accepted brings pr bead id to ciwait the way the pr flow does for a pull
 // request a maintainer let in: made in triage, accepted into review, reported
 // done by its reviewer (which records its own head, as reviewed does) and by
@@ -275,7 +287,9 @@ func (c *ciYard) checkoutGone(id, what string) {
 // the script, however the pull request edited it, taken from the base that was
 // fetched and not from the depot's own main, which may lag it, with
 // YARDR_LANDING=1 and without the App's inputs. It records the head it passed
-// on as ci_head and reports done. A pull request that is only behind the base is
+// on as ci_head and reports done. A bead its maintainer sent back by hand
+// carries ci-ok, which the run spends when it starts, past the head checks.
+// A pull request that is only behind the base is
 // done when its merge is green, as the head alone, which lacks what the base
 // has gained, would not be; one that conflicts with the base is changes, naming
 // the cure, and nothing runs. A red run, one past its deadline and a head that
@@ -299,6 +313,7 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 		head     string            // what GitHub says the head is at first, the pull request's commit unless written
 		reviewed string            // what the reviewer recorded, the head GitHub says unless written; {SHA} is the pull request's commit in capitals
 		accepted string            // what a maintainer accepted, for a bead that waited in triage (it did not unless written); {sha} and {SHA} as above
+		blessed  bool              // the bead carries the maintainer's ci-ok pick, which the run spends
 		tests    string            // the depot's test command, ci.sh (a file of the base) unless written
 		opts     string            // more for the group's cmd
 		stage    string            // where the bead ends
@@ -309,6 +324,11 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 		not      []string // and not
 	}{
 		{what: "green", files: map[string]string{"feature.txt": "new\n"}, reviewed: "{SHA}", stage: "approved",
+			wants: []string{"the tests passed on {url} at {sha} merged into main at {base} (the base's copy of ci.sh,", "ci_head={sha}"}},
+		// A bead its maintainer sent back by hand from contributor runs as a
+		// green one does, and the run spends its ci-ok pick: each run takes a
+		// fresh one.
+		{what: "green on a bead its maintainer sent back", files: map[string]string{"feature.txt": "new\n"}, blessed: true, stage: "approved",
 			wants: []string{"the tests passed on {url} at {sha} merged into main at {base} (the base's copy of ci.sh,", "ci_head={sha}"}},
 		// A pull request made before main moved on is behind it. What is tested
 		// is its merge into main as origin has it now, so the base's script, which
@@ -383,6 +403,9 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 				c.prBeadIn(id, prURLn(num), "ciwait", false)
 			}
 			c.reviewed(id, fill.Replace(or(tc.reviewed, or(tc.head, sha))))
+			if tc.blessed {
+				c.bless(id)
+			}
 			c.tests(or(tc.tests, "ci.sh"))
 			if tc.base != "" {
 				c.putDepot("r", c.repo, tc.base, or(tc.tests, "ci.sh"))
@@ -440,6 +463,11 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 				// Done records the head it passed on, and nothing else does.
 				if got, _ := b.Metadata["ci_head"].(string); (tc.stage == "approved" && got != sha) || (tc.stage != "approved" && b.Metadata["ci_head"] != nil) {
 					t.Errorf("%s: ci_head = %v, want %s only for a bead that passed", tc.what, b.Metadata["ci_head"], sha)
+				}
+				// A run that started spends the maintainer's pick, if the bead
+				// carried one.
+				if tc.blessed && slices.Contains(b.Labels, "ci-ok") {
+					t.Errorf("%s: ci-ok is still on the bead after the run started", tc.what)
 				}
 				for _, call := range ghCalls(t, c.gh) {
 					if call != "" && !strings.HasPrefix(call, "pr view ") {
@@ -643,6 +671,7 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 		head      string            // what GitHub says the head is, the pull request's unless written
 		reviewed  string            // what the reviewer recorded, the head GitHub says unless written, - for nothing
 		accepted  string            // what a maintainer accepted, for a bead that waited in triage (it did not unless written), - for nothing
+		blessed   bool              // the bead carries the maintainer's ci-ok pick, which a held run keeps
 		legacy    bool              // omit rounds and retain the stage list, as a bead from before rounds were recorded
 		tests     *string           // the depot's test command, ci.sh unless written
 		change    func(c *ciYard)   // changes the group for this run
@@ -655,6 +684,10 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 			wants: []string{"is not in ciwait", "runs a pull request's code nowhere before it"}},
 		{what: "a head that is not the one its reviewer read", reviewed: headB, asked: true, unfetched: true,
 			wants: []string{"head {sha} is not the reviewed " + headB + ": needs re-review", "Nothing of https://github.com/o/r/pull/{n} was fetched or run", "yardr bead advance {id} --to review, then yardr bead unhold {id}"}},
+		// The pick is spent when the run starts, past the head checks: a head
+		// that holds for a fresh review keeps it.
+		{what: "a blessed head that is not the one its reviewer read", reviewed: headB, blessed: true, asked: true, unfetched: true,
+			wants: []string{"head {sha} is not the reviewed " + headB + ": needs re-review", "Nothing of https://github.com/o/r/pull/{n} was fetched or run"}},
 		{what: "a bead whose reviewer recorded no head", reviewed: "-", asked: true, unfetched: true,
 			wants: []string{"{id} has no reviewed_head that is a full commit sha", "the head of https://github.com/o/r/pull/{n}, {sha}", "yardr bead advance {id} --to review"}},
 		{what: "a recorded head that is no sha, and not copied to the bead", reviewed: strings.Repeat("z", 40), asked: true, unfetched: true,
@@ -727,6 +760,9 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 			if reviewed := or(tc.reviewed, or(tc.head, sha)); reviewed != "-" {
 				c.reviewed(id, fill.Replace(reviewed))
 			}
+			if tc.blessed {
+				c.bless(id)
+			}
 			c.tests(tests)
 			envFile, opts := c.envFile, c.opts
 			if tc.change != nil {
@@ -753,6 +789,10 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 			}
 			if b := c.beadOf(id); b.Metadata["ci_head"] != nil {
 				t.Errorf("%s: ci_head = %v on a bead no verdict was given for", tc.what, b.Metadata["ci_head"])
+			}
+			// A run that holds before it starts keeps the maintainer's pick.
+			if tc.blessed && !slices.Contains(c.beadOf(id).Labels, "ci-ok") {
+				t.Errorf("%s: a held run spent ci-ok", tc.what)
 			}
 			if _, err := os.Stat(filepath.Join(c.gh, "calls")); tc.asked != (err == nil) {
 				t.Errorf("%s: GitHub asked = %v, want %v:\n%v", tc.what, err == nil, tc.asked, ghCalls(t, c.gh))

@@ -486,10 +486,20 @@ func TestContributorsRedCIAndPushesSendItBack(t *testing.T) {
 	// of the head it had is refused, and approves nothing.
 	pushed := open(23)
 	r.reviewerSays(t, pushed.ID, false)
+	// A ci-ok left by a run that held before it started must not survive a push
+	// out of ciwait: a later hand move needs a fresh maintainer's pick.
+	_, err := r.api.UpdateBead(context.Background(), pushed.ID, store.BeadPatch{AddLabels: []string{"ci-ok"}}, store.Expect{}, "me")
+	must(t, err)
 	r.deliverJSON(t, "pull_request", "pull_request_synchronize", prEvent(23, "dependabot[bot]", "Bot"), pushedBy("a-maintainer", "User"))
 	r.pass(t)
 	if st := r.stageOf(t, pushed.ID); st != "contributor" {
 		t.Fatalf("%s in %s after the pull request changed while it waited on CI, want contributor", pushed.ID, st)
+	}
+	if got := r.bead(t, pushed.ID); slices.Contains(got.Labels, "ci-ok") {
+		t.Fatalf("%s kept ci-ok after leaving ciwait: %v", pushed.ID, got.Labels)
+	}
+	if _, err := r.api.Advance(context.Background(), pushed.ID, "ciwait", store.Expect{}, "me"); err == nil || !strings.Contains(err.Error(), "needs the label ci-ok") {
+		t.Fatalf("advance to ciwait after the push: %v, want the stale pick refused", err)
 	}
 	if note := r.lastNote(t, pushed.ID); !strings.Contains(note, "the PR changed while waiting on CI") {
 		t.Fatalf("note of the move: %q", note)
@@ -1420,5 +1430,94 @@ func TestContributorsWhoSkipTriage(t *testing.T) {
 		if again := r.madeIn(t, c.number, c.reopened); again.ID == first.ID {
 			t.Fatalf("pull request %d reopened: %s is still its bead", c.number, again.ID)
 		}
+	}
+}
+
+// A maintainer's "not blocking" on a reviewed pull request sends its bead back
+// to ciwait by hand, at the head its reviewer read, without another full
+// review: the ci-ok label with a note saying who decided and why. The move is
+// refused without the label, naming the pick, and once picked the bead waits
+// for the yard's CI again.
+func TestContributorsCIOKSendsItBackToCI(t *testing.T) {
+	t.Parallel()
+	r := newContributorsYard(t)
+	ctx := context.Background()
+	r.deliverJSON(t, "pull_request", "pull_request_opened", prEvent(27, "dependabot[bot]", "Bot"))
+	b := r.madeIn(t, 27, "review")
+	r.reviewerAsksChanges(t, b.ID)
+	if st := r.stageOf(t, b.ID); st != "contributor" {
+		t.Fatalf("%s in %s after the reviewer asked changes, want contributor", b.ID, st)
+	}
+
+	// Without the pick the move is refused, naming it, and the bead stays.
+	if _, err := r.api.Advance(ctx, b.ID, "ciwait", store.Expect{}, "me"); err == nil ||
+		!strings.Contains(err.Error(), "needs the label ci-ok") ||
+		!strings.Contains(err.Error(), "yardr bead update "+b.ID+" --add-label ci-ok") {
+		t.Fatalf("advance to ciwait without ci-ok: %v, want it refused naming the pick", err)
+	}
+	if st := r.stageOf(t, b.ID); st != "contributor" {
+		t.Fatalf("%s in %s after a refused move, want contributor", b.ID, st)
+	}
+
+	// The pick, as a maintainer's hand does it: the label and a note saying
+	// who decided and why, then the move, and the yard's CI takes the bead.
+	if _, err := r.api.UpdateBead(ctx, b.ID, store.BeadPatch{AddLabels: []string{"ci-ok"}}, store.Expect{}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.api.AddNote(ctx, b.ID, "a-maintainer: not blocking, the findings are style only; run CI again on the reviewed head", "me"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.api.Advance(ctx, b.ID, "ciwait", store.Expect{}, "me"); err != nil {
+		t.Fatalf("advance to ciwait with ci-ok: %v", err)
+	}
+	r.pass(t)
+	if got := r.startedFor(b.ID); !slices.Equal(got, []string{"pr-ci"}) {
+		t.Fatalf("%s given to %v in ciwait, want pr-ci", b.ID, got)
+	}
+}
+
+// A ci-ok pick a push overtakes is void: the bead leaves contributor for
+// review before the hand move, and after the next review asks changes the
+// stale pick must not authorize the move back to ciwait. Only a fresh pick,
+// for the head just reviewed, does.
+func TestContributorsOvertakenPickNeedsANewOne(t *testing.T) {
+	t.Parallel()
+	r := newContributorsYard(t)
+	ctx := context.Background()
+	r.deliverJSON(t, "pull_request", "pull_request_opened", prEvent(29, "dependabot[bot]", "Bot"))
+	b := r.madeIn(t, 29, "review")
+	r.reviewerAsksChanges(t, b.ID)
+	if st := r.stageOf(t, b.ID); st != "contributor" {
+		t.Fatalf("%s in %s after the reviewer asked changes, want contributor", b.ID, st)
+	}
+
+	// The pick, overtaken: a push moves the bead back to review before the
+	// hand move, and the next review asks changes again.
+	if _, err := r.api.UpdateBead(ctx, b.ID, store.BeadPatch{AddLabels: []string{"ci-ok"}}, store.Expect{}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", prEvent(29, "dependabot[bot]", "Bot"), pushedBy("a-maintainer", "User"))
+	r.pass(t)
+	if st := r.stageOf(t, b.ID); st != "review" {
+		t.Fatalf("%s in %s after the push overtook the pick, want review", b.ID, st)
+	}
+	r.reviewerAsksChanges(t, b.ID)
+	if st := r.stageOf(t, b.ID); st != "contributor" {
+		t.Fatalf("%s in %s after the second review asked changes, want contributor", b.ID, st)
+	}
+
+	// The stale pick is gone, and the move is refused naming it, until a
+	// fresh pick for the head just reviewed.
+	if got := r.bead(t, b.ID); slices.Contains(got.Labels, "ci-ok") {
+		t.Fatalf("%s kept ci-ok after a push overtook the pick: %v", b.ID, got.Labels)
+	}
+	if _, err := r.api.Advance(ctx, b.ID, "ciwait", store.Expect{}, "me"); err == nil || !strings.Contains(err.Error(), "needs the label ci-ok") {
+		t.Fatalf("advance to ciwait on an overtaken pick: %v, want it refused naming the pick", err)
+	}
+	if _, err := r.api.UpdateBead(ctx, b.ID, store.BeadPatch{AddLabels: []string{"ci-ok"}}, store.Expect{}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.api.Advance(ctx, b.ID, "ciwait", store.Expect{}, "me"); err != nil {
+		t.Fatalf("advance to ciwait with a fresh pick: %v", err)
 	}
 }

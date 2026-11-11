@@ -31,11 +31,19 @@ func (b *beadRow) been(stage string) (rounds int, ok bool) {
 // enter records that the bead is entering stage. A stage it had not been in
 // gets its key at zero. One it had been in keeps its count when a person
 // moved the bead, and gets one more round when an outcome brought it back
-// (byOutcome), a same-stage outcome included. It runs before exitStay, which
-// lists the stage as visited: a stage without a key that the list holds
-// counts as one the bead has been in, so after it every first arrival would
-// read as a return.
-func (b *beadRow) enter(stage string, byOutcome bool) {
+// (byOutcome), a same-stage outcome included. An unspent ci-ok pick is dropped
+// when a contributors.pr bead leaves ciwait, where a run that held before it
+// started may keep it, or leaves contributor for anywhere but ciwait, where a
+// push may overtake it before the hand move: either way a later review must
+// not reuse it for a new head. A bead that stays where it is keeps it.
+// It runs before exitStay, which lists the stage as visited: a stage without a
+// key that the list holds counts as one the bead has been in, so after it every
+// first arrival would read as a return.
+func (b *beadRow) enter(f *Flow, stage string, byOutcome bool) {
+	if f != nil && f.Name == flowContributorsPR && stage != b.Stage && stage != "ciwait" &&
+		(b.Stage == "ciwait" || b.Stage == "contributor") {
+		b.Labels = slices.DeleteFunc(b.Labels, func(label string) bool { return label == labelCIOK })
+	}
 	rounds, been := b.been(stage)
 	if byOutcome && been {
 		rounds++

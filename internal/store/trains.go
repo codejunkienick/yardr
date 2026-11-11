@@ -77,6 +77,18 @@ func checkWagon(tx *bolt.Tx, f *Flow, row *beadRow, stage string) error {
 		row.ID, firstStage(f), why, row.ID, row.ID)
 }
 
+// checkMove refuses a move the move path's gates refuse: a wagon past its
+// flow's first stage with no train (checkWagon), and a pull request's bead
+// sent from contributor back to ciwait without its maintainer's pick
+// (checkCIOK). move asks it as one call, and the stage answer's pre-check
+// too, so every move path is held to the same gates.
+func checkMove(tx *bolt.Tx, f *Flow, row *beadRow, stage string) error {
+	if err := checkWagon(tx, f, row, stage); err != nil {
+		return err
+	}
+	return checkCIOK(f, row, stage)
+}
+
 // Branch is the git branch bead handle is worked on. It is built from the
 // handle, which never changes (a migrated bead keeps its old id as handle),
 // so a bead's branch and worktree stay valid for its whole life.

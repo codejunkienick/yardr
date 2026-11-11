@@ -110,26 +110,33 @@ const (
 	metaFixCommit = "fix_commit"
 )
 
-// checkFixPick refuses a bead's agent (beadAgent) a patch that grants or
-// takes the fix-ok label on any bead, its own included, and one that records
-// fix_commit on a bead its session does not own. The pick is a maintainer's,
-// in the merge-ok shape but stricter: checkMergeOK lets a session say the
-// label on its own bead, and a self-pick here would route the bead to fix,
-// whose push script pushes as the App. fix_head rides with the yard's heads
-// (yardHeads), refused on any bead with the same write. fix_commit is the
-// builder's own to write, as reviewed_head is the reviewer's: what the field
-// answers is a push between the fix and the push, not a builder that lies
-// about what it committed. The push script writes it too, as the session on its
-// own bead, once the push is out: it makes the builder's commit again as the
-// App's own, and the commit it pushed is then the one on the branch.
-func (w *wtx) checkFixPick(ctx context.Context, b *beadRow, p BeadPatch) error {
-	if slices.Contains(p.AddLabels, labelFixOK) || slices.Contains(p.RemoveLabel, labelFixOK) {
-		sess, err := beadAgent(w.Tx, ctx)
-		if err != nil || sess == nil {
-			return err
+// checkPicks refuses a bead's agent (beadAgent) a patch that grants or
+// takes a maintainer's pick label on any bead, its own included: fix-ok,
+// the pick of a pull request to fix, and ci-ok, the pick of one to run the
+// yard's CI on again. The pick is a maintainer's, in the merge-ok shape but
+// stricter: checkMergeOK lets a session say the label on its own bead, and a
+// self-pick here would route the bead to fix, whose push script pushes as the
+// App, or back to ciwait, spending a reviewer's changes verdict. fix_head
+// rides with the yard's heads (yardHeads), refused on any bead with the same
+// write. fix_commit is the builder's own to write, as reviewed_head is the
+// reviewer's: what the field answers is a push between the fix and the push,
+// not a builder that lies about what it committed. The push script writes it
+// too, as the session on its own bead, once the push is out: it makes the
+// builder's commit again as the App's own, and the commit it pushed is then
+// the one on the branch.
+func (w *wtx) checkPicks(ctx context.Context, b *beadRow, p BeadPatch) error {
+	for _, pick := range []struct{ label, why, note string }{
+		{labelFixOK, "the pick of a pull request to fix is a maintainer's", "why it should be fixed"},
+		{labelCIOK, "the pick of a pull request to run CI on again is a maintainer's", "why CI should run again"},
+	} {
+		if slices.Contains(p.AddLabels, pick.label) || slices.Contains(p.RemoveLabel, pick.label) {
+			sess, err := beadAgent(w.Tx, ctx)
+			if err != nil || sess == nil {
+				return err
+			}
+			return fmt.Errorf("bead %s: the session %s of a bead's agent may not say %s on any bead, whatever actor the command names; %s: yardr bead note %s - with the words on stdin (%s)",
+				b.ID, sess.ID, pick.label, pick.why, b.ID, pick.note)
 		}
-		return fmt.Errorf("bead %s: the session %s of a bead's agent may not say fix-ok on any bead, whatever actor the command names; the pick of a pull request to fix is a maintainer's: yardr bead note %s - with the words on stdin (why it should be fixed)",
-			b.ID, sess.ID, b.ID)
 	}
 	if _, ok := p.Metadata[metaFixCommit]; !ok {
 		return nil
@@ -142,6 +149,35 @@ func (w *wtx) checkFixPick(ctx context.Context, b *beadRow, p BeadPatch) error {
 		b.ID, sess.ID, handlesIn(w.Tx).of(sess.Bead), b.ID)
 }
 
+// labelCIOK is a maintainer's pick of a pull request's bead to run the yard's
+// CI on again (the contributors pack's ciwait stage): on a bead waiting in
+// contributor it lets a hand move it back to ciwait at the head its reviewer
+// read, and pr-ci spends it when its run starts, so each run takes a fresh
+// pick.
+const labelCIOK = "ci-ok"
+
+// flowContributorsPR is the flow of a pull request from outside, as an import
+// of the contributors pack names it.
+const flowContributorsPR = "contributors.pr"
+
+// checkCIOK refuses moving row, a pull request's bead waiting in contributor,
+// back to ciwait without its maintainer's pick, the ci-ok label. The stage's
+// group has no members, so the move is ungated without it, and any agent
+// could spend a reviewer's changes verdict without a maintainer's override;
+// pr-ci's head checks stop wrong heads, not skipped re-reviews. With the
+// label the move goes, and pr-ci spends it when its run starts. Any other
+// flow or move is allowed, as a bead no flow governs is.
+func checkCIOK(f *Flow, row *beadRow, stage string) error {
+	if f == nil || f.Name != flowContributorsPR || row.Stage != "contributor" || stage != "ciwait" {
+		return nil
+	}
+	if slices.Contains(row.Labels, labelCIOK) {
+		return nil
+	}
+	return fmt.Errorf("bead %s: contributor -> ciwait is a maintainer's pick of the pull request to run CI on again at the head its reviewer read, and needs the label ci-ok and a note saying who decided and why: yardr bead update %s --add-label ci-ok, then yardr bead note %s - with the words on stdin (who decided and why). pr-ci spends the label when its run starts, so each run takes a fresh pick",
+		row.ID, row.ID, row.ID)
+}
+
 // agentCreateLabels are the labels a bead's agent may not create a bead
 // with, and agentCreateMeta the metadata keys, each with the words the
 // refusal gives for who writes it instead. checkAgentCreate asks them as one
@@ -149,6 +185,7 @@ func (w *wtx) checkFixPick(ctx context.Context, b *beadRow, p BeadPatch) error {
 var agentCreateLabels = []struct{ key, why string }{
 	{labelMergeOK, "a reviewer says it on the pull request it read"},
 	{labelFixOK, "a maintainer's pick is theirs"},
+	{labelCIOK, "a maintainer's pick is theirs"},
 }
 
 var agentCreateMeta = []struct{ key, why string }{

@@ -372,10 +372,12 @@ func TestReusedPidIsNobodysPane(t *testing.T) {
 // passed on, and accepted_head, the commit a maintainer accepted, it does not
 // say at all. fix-ok, the maintainer's pick of a pull request to fix, with
 // fix_head, the commit the pick recorded, it does not say at all either, its
-// own bead included: a self-pick would route the bead to fix. fix_commit, the
-// commit the fix made, it says on its own bead only. Anyone else (no pane at
-// all) is checked as before, and any other label or metadata still goes
-// anywhere.
+// own bead included: a self-pick would route the bead to fix. ci-ok, the pick
+// of a pull request to run CI on again, it does not say at all either, its own
+// bead included: a self-pick would spend the reviewer's changes verdict
+// without a maintainer's override. fix_commit, the commit the fix made, it
+// says on its own bead only. Anyone else (no pane at all) is checked as
+// before, and any other label or metadata still goes anywhere.
 func TestMergeOKIsTheOwningSessionToSay(t *testing.T) {
 	t.Parallel()
 	s, ctx := flowDepot(t)
@@ -398,11 +400,11 @@ func TestMergeOKIsTheOwningSessionToSay(t *testing.T) {
 	sha := "9f2c9e1a7b3d5e6f8091a2b3c4d5e6f708192a3b"
 	if got, err := s.CreateBead(ctx, store.NewBead{
 		ID: "yard-person-pr", Title: "person", Depot: "yard", Stage: "new",
-		Labels: []string{"merge-ok", "fix-ok"}, Metadata: map[string]any{"merge_head": sha, "ci_head": sha, "reviewed_head": sha, "accepted_head": sha, "fix_head": sha, "fix_commit": sha},
+		Labels: []string{"merge-ok", "fix-ok", "ci-ok"}, Metadata: map[string]any{"merge_head": sha, "ci_head": sha, "reviewed_head": sha, "accepted_head": sha, "fix_head": sha, "fix_commit": sha},
 	}, "me"); err != nil {
-		t.Fatalf("a person creating a bead with merge permission, a fix pick, CI verdict, reviewed head and accepted head: %v", err)
-	} else if !slices.Contains(got.Labels, "merge-ok") || !slices.Contains(got.Labels, "fix-ok") || got.Metadata["merge_head"] != sha || got.Metadata["ci_head"] != sha || got.Metadata["reviewed_head"] != sha || got.Metadata["accepted_head"] != sha || got.Metadata["fix_head"] != sha || got.Metadata["fix_commit"] != sha {
-		t.Fatalf("a person's merge permission, fix pick, CI verdict, reviewed head and accepted head were not stored: %+v", got)
+		t.Fatalf("a person creating a bead with merge permission, a fix pick, a CI pick, CI verdict, reviewed head and accepted head: %v", err)
+	} else if !slices.Contains(got.Labels, "merge-ok") || !slices.Contains(got.Labels, "fix-ok") || !slices.Contains(got.Labels, "ci-ok") || got.Metadata["merge_head"] != sha || got.Metadata["ci_head"] != sha || got.Metadata["reviewed_head"] != sha || got.Metadata["accepted_head"] != sha || got.Metadata["fix_head"] != sha || got.Metadata["fix_commit"] != sha {
+		t.Fatalf("a person's merge permission, fix pick, CI pick, CI verdict, reviewed head and accepted head were not stored: %+v", got)
 	}
 	if got, err := s.UpdateBead(ctx, c.ID, store.BeadPatch{Metadata: map[string]any{"merge_head": sha, "ci_head": sha, "reviewed_head": sha, "accepted_head": sha, "fix_head": sha, "fix_commit": sha}}, store.Expect{}, "me"); err != nil || got.Metadata["merge_head"] != sha || got.Metadata["ci_head"] != sha || got.Metadata["reviewed_head"] != sha || got.Metadata["accepted_head"] != sha || got.Metadata["fix_head"] != sha || got.Metadata["fix_commit"] != sha {
 		t.Fatalf("a person's merge_head, ci_head, reviewed_head, accepted_head, fix_head and fix_commit: %+v, %v", got, err)
@@ -414,7 +416,7 @@ func TestMergeOKIsTheOwningSessionToSay(t *testing.T) {
 	// c carries the label before the pane is on record: over the socket
 	// the server reads the caller from its peer, so past MarkRunning
 	// every call of this process is the pane's.
-	if _, err := s.UpdateBead(ctx, c.ID, store.BeadPatch{AddLabels: []string{"merge-ok", "fix-ok"}}, store.Expect{}, "me"); err != nil {
+	if _, err := s.UpdateBead(ctx, c.ID, store.BeadPatch{AddLabels: []string{"merge-ok", "fix-ok", "ci-ok"}}, store.Expect{}, "me"); err != nil {
 		t.Fatal(err)
 	}
 	// This test process is the shell of a's tab.
@@ -425,10 +427,10 @@ func TestMergeOKIsTheOwningSessionToSay(t *testing.T) {
 	unset := store.Expect{}
 	want := "may say merge-ok only on its own bead"
 
-	// Creating a bead directly with a permission, a fix pick, a verdict,
-	// reviewed head or accepted head would skip the update guards and could
-	// make merge-pr trust a head nobody reviewed or ran, pr-ci run one nobody
-	// read or accepted, or push-fix push a fix nobody picked.
+	// Creating a bead directly with a permission, a fix pick, a CI pick, a
+	// verdict, reviewed head or accepted head would skip the update guards and
+	// could make merge-pr trust a head nobody reviewed or ran, pr-ci run one
+	// nobody read or accepted, or push-fix push a fix nobody picked.
 	for i, tc := range []struct {
 		name string
 		nb   store.NewBead
@@ -444,10 +446,11 @@ func TestMergeOKIsTheOwningSessionToSay(t *testing.T) {
 		{name: "pr_head_told", nb: store.NewBead{Metadata: map[string]any{"pr_head_told": map[string]any{"sha": sha, "by": "a-member"}}}, want: "may not create a bead with pr_head_told"},
 		// The maintainer's pick of a pull request to fix, and the fix commit.
 		{name: "fix-ok", nb: store.NewBead{Labels: []string{"fix-ok"}}, want: "may not create a bead with fix-ok"},
+		{name: "ci-ok", nb: store.NewBead{Labels: []string{"ci-ok"}}, want: "may not create a bead with ci-ok"},
 		{name: "fix_head", nb: store.NewBead{Metadata: map[string]any{"fix_head": sha}}, want: "may not create a bead with fix_head"},
 		{name: "fix_commit", nb: store.NewBead{Metadata: map[string]any{"fix_commit": sha}}, want: "may not create a bead with fix_commit"},
 	} {
-		id := []string{"yard-forged-merge-ok", "yard-forged-merge-head", "yard-forged-ci-head", "yard-forged-reviewed-head", "yard-forged-accepted-head", "yard-forged-pr-head", "yard-forged-pr-head-told", "yard-forged-fix-ok", "yard-forged-fix-head", "yard-forged-fix-commit"}[i]
+		id := []string{"yard-forged-merge-ok", "yard-forged-merge-head", "yard-forged-ci-head", "yard-forged-reviewed-head", "yard-forged-accepted-head", "yard-forged-pr-head", "yard-forged-pr-head-told", "yard-forged-fix-ok", "yard-forged-ci-ok", "yard-forged-fix-head", "yard-forged-fix-commit"}[i]
 		tc.nb.ID, tc.nb.Title, tc.nb.Depot, tc.nb.Stage = id, "forged", "yard", "new"
 		if _, err := s.CreateBead(pane, tc.nb, "yard-a-new"); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("agent created a bead with %s: %v, want refusal %q", tc.name, err, tc.want)
@@ -511,6 +514,33 @@ func TestMergeOKIsTheOwningSessionToSay(t *testing.T) {
 	for _, id := range []string{a.ID, b.ID} {
 		if got, _ := s.GetBead(ctx, id); slices.Contains(got.Labels, "fix-ok") {
 			t.Fatalf("a refused fix-ok changed %s: %+v", id, got)
+		}
+	}
+	// ci-ok, the maintainer's pick of a pull request to run CI on again, is
+	// refused to the pane on any bead, its own included: a self-pick would
+	// send the bead back to ciwait, spending the reviewer's changes verdict
+	// without a maintainer's override. Granting it is refused, and taking it
+	// off, and nothing changes.
+	noCI := "may not say ci-ok on any bead"
+	for _, tc := range []struct {
+		name  string
+		bead  string
+		patch store.BeadPatch
+	}{
+		{"grant on another bead", b.ID, store.BeadPatch{AddLabels: []string{"ci-ok"}}},
+		{"grant on its own bead", a.ID, store.BeadPatch{AddLabels: []string{"ci-ok"}}},
+		{"ungrant on another bead", c.ID, store.BeadPatch{RemoveLabel: []string{"ci-ok"}}},
+	} {
+		if _, err := s.UpdateBead(pane, tc.bead, tc.patch, unset, "yard-a-new"); err == nil || !strings.Contains(err.Error(), noCI) {
+			t.Errorf("%s from its pane: %v, want %q", tc.name, err, noCI)
+		}
+	}
+	if got, _ := s.GetBead(ctx, c.ID); !slices.Contains(got.Labels, "ci-ok") {
+		t.Fatalf("a refused ungrant took ci-ok off: %+v", got)
+	}
+	for _, id := range []string{a.ID, b.ID} {
+		if got, _ := s.GetBead(ctx, id); slices.Contains(got.Labels, "ci-ok") {
+			t.Fatalf("a refused ci-ok changed %s: %+v", id, got)
 		}
 	}
 	// Its own bead the pane says the label on, which is the reviewer's whole
