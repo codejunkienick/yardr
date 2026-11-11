@@ -296,3 +296,7 @@ var QuietRunOutputs = quietRunOutputs
 // QuietRunKey is the key a red run that names no package keeps its output
 // under.
 const QuietRunKey = quietRunKey
+
+// QuietNotJudged names the packages a strict whole-suite output refused to
+// judge, each with the times and the load its "not judged" line named.
+var QuietNotJudged = quietNotJudged

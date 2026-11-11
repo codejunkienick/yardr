@@ -20,8 +20,9 @@ import (
 // that names a blob without scanning every record (DeliveryBlob).
 //
 // A hook event's own "files" are the source's refs, never BlobRefs:
-// EventFiles reads mail and quiet_failed alone, and these records are
-// read here, so the two are never taken for each other.
+// EventFiles reads mail and the quiet run's failed and unjudged alone,
+// and these records are read here, so the two are never taken for each
+// other.
 //
 // The files land after the delivery is kept, and so after the notification
 // of it: a client that read DeliveryFiles then read none. The record is

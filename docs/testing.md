@@ -25,10 +25,9 @@ Several over-budget packages are re-run up to three at a time, and every
 one is judged by the single load pair sampled around the batch. With
 `YARDR_R1_STRICT` set, which only the quiet run does (R6), they are re-run
 one after another instead, each judged by the pair sampled around its own
-re-run, so a failure line names the load that package sat in: three race
-suites side by side make a load and times of their own, and a run that
-fails a package over 60 s alone however loaded the machine would convict
-it for those (yardr-t4c0).
+re-run, so a package's line names the load that package sat in: three race
+suites side by side make a load and times of their own, and a time over
+60 s must be the package's own to judge it by (yardr-t4c0).
 Over 60 s alone fails the run and names both times; 60 s or less passes
 with a `test: R1:` line naming both times and marking the first run as loaded.
 Load multiplies package times up to ~2.5x, so the first run's time by
@@ -38,15 +37,18 @@ gate legs, not every test on the machine. Over 60 s alone on a loaded
 machine -- the one-minute load average past the core count -- passes with
 a `test: R1:` line naming both times and the load instead of failing
 (yardr-wq5h), unless `YARDR_R1_STRICT` is set by the quiet run (R6): then
-over 60 s alone fails however loaded the machine. The load is sampled when
+over 60 s alone on a loaded machine is refused the verdict, in a
+`test: R1:` line naming both times and the load, and the run ends neither
+passed nor failed (exit 3); over 60 s alone on a quiet machine fails as
+before. The load is sampled when
 the re-runs start and again when the last ends, and the machine is loaded when
 either sample is (yardr-f5f7): the average lags, so the end sample alone
 read a load that dipped before the check as quiet, while the start sample
 holds the loaded minutes the re-run was about to sit in. The line names the
-start sample's load where that is loaded, else the end's. On a loaded
-machine, the failure line names both times and the load beside them; on a
-machine quiet at both samples it names both times. Unknown load counts as
-quiet and fails as before. A landing's `-p` follows the same load: past the
+start sample's load where that is loaded, else the end's. Under the strict
+verdict a refusal names both times and the load, a quiet-sample failure
+both times, and a failure beside a refusal still fails the run. Unknown
+load counts as quiet and fails as before. A landing's `-p` follows the same load: past the
 core count the race leg runs `go test -race -p=N`, N the cores squared over the
 load, rounded down (at least 2, at most the cores), and logs one `test: go test
 -p=N (load A on C cores)` line; a quiet or unknown load runs go's default and
@@ -347,7 +349,7 @@ no bead waits in `approved` for the assembly anywhere in the yard, no
 bead session that runs something on this machine is live anywhere in
 the yard, and at least `quiet_landings` code landings (ten while unset:
 about two hours at the 60-140 landings a day of 14-16 Oct 2026) have
-landed on that depot's base since its last quiet run started. The
+landed on that depot's base since its last judged quiet run started. The
 sessions that count are the ones `max_sessions` counts
 ([groups.md](groups.md#how-many-sessions-the-machine-carries)): those of
 a `herdr` or an `exec` group, a builder, a reviewer or an assembly
@@ -369,14 +371,24 @@ a second, and the trigger re-arms only when the first finishes. A green
 run is logged and told as `quiet_passed`, a red base as `quiet_failed`
 naming the failing packages, the failing tests and the base commit, each
 with its wall time and starting load. The strict setting, which only the
-quiet run sets, turns off R1's loaded pass: a package over 60 s alone
-fails however loaded the machine. On a loaded host its failure line
-names both times and the load; on a quiet host it names both times, so a
-slowdown cannot hide behind a loaded host (yardr-8gdt). It also re-runs
+quiet run sets, turns off R1's loaded pass: a package over 60 s alone on
+a loaded machine is refused the verdict instead of passing, in a
+`test: R1:` line naming both times and the load, and the run ends neither
+passed nor failed (exit 3). Such a run is told as `quiet_unjudged`,
+beadless and of no attention class, carrying the refused packages with
+their times and loads and the run's own output as `run.log`; the landings
+are counted since the last judged run's start -- the last `quiet_started`
+below the last `quiet_passed` or `quiet_failed` -- so a refused run leaves
+the count; the trigger retries when the run ends if the yard is still
+quiet. Three refusals in a row are told as `quiet_failed` instead, naming
+the bound, so a machine that never quiets still accuses its base. On a
+quiet host a package over
+60 s alone fails as before, so a slowdown cannot hide behind a loaded host
+(yardr-8gdt). The strict run also re-runs
 the packages over budget one after another, not up to three at a time, so
-that the time a package is failed by is its own and not what three race
-suites side by side made of it, and the load a failure line names is the
-one around that package's own re-run (R1, yardr-t4c0).
+that the time a package is judged by is its own and not what three race
+suites side by side made of it, and the load a line names is the one
+around that package's own re-run (R1, yardr-t4c0).
 
 `YARDR_QUIET_RUN=1`, which like `YARDR_R1_STRICT` only the quiet run sets, is
 the mark a test reads when it costs minutes and belongs to no other run.

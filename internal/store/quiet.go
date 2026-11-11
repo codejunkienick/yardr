@@ -8,11 +8,14 @@ import "strconv"
 // matches a yardr subscription on kind alone (deliverBeadless). QuietFailed
 // is of the class attention too, so the yardmaster hears of a red base
 // through its default --on: the base is red with no bead to send back, and
-// somebody must be told.
+// somebody must be told. QuietUnjudged is not: the strict R1 verdict
+// refused the run for load, the landings count stays, and the next quiet
+// event fires the run again by itself.
 const (
-	QuietStarted = "quiet_started"
-	QuietPassed  = "quiet_passed"
-	QuietFailed  = "quiet_failed"
+	QuietStarted  = "quiet_started"
+	QuietPassed   = "quiet_passed"
+	QuietFailed   = "quiet_failed"
+	QuietUnjudged = "quiet_unjudged"
 )
 
 // QuietLandingsSetting is how many code landings on a depot's base pass

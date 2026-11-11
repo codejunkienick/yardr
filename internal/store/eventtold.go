@@ -288,6 +288,7 @@ var eventDataTold = map[string][]string{
 	"quiet_started":     {"base", "depot", "landings"},
 	"quiet_passed":      {"base", "commit", "depot", "landings", "load", "wall_s"},
 	"quiet_failed":      {"base", "commit", "depot", "landings", "load", "wall_s"},
+	"quiet_unjudged":    {"base", "commit", "depot", "landings", "load", "wall_s"},
 	"user_refused":      {"count", "last", "reason", "status"},
 	"edge_link_up":      {},
 	"edge_link_down":    {},

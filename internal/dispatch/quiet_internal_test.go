@@ -34,6 +34,9 @@ func TestLandingsSinceQuietKeepsOlderDepotMarker(t *testing.T) {
 	if err := s.LogDispatch(ctx, "", store.QuietStarted, "review", map[string]any{"depot": "target"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.LogDispatch(ctx, "", store.QuietPassed, "review", map[string]any{"depot": "target"}); err != nil {
+		t.Fatal(err)
+	}
 	// Other depots can run often enough that a bounded global tail no
 	// longer contains target's marker.
 	for i := 0; i < 501; i++ {
@@ -48,6 +51,18 @@ func TestLandingsSinceQuietKeepsOlderDepotMarker(t *testing.T) {
 	}
 	if since != 0 {
 		t.Fatalf("landings since target's quiet run = %d, want 0", since)
+	}
+	// A start with no telling behind it -- a refused run, or one
+	// interrupted -- leaves the epoch where the last judged run put it.
+	if err := s.LogDispatch(ctx, "", store.QuietStarted, "review", map[string]any{"depot": "target"}); err != nil {
+		t.Fatal(err)
+	}
+	since, err = (&Dispatcher{Store: s}).landingsSinceQuiet(ctx, "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if since != 0 {
+		t.Fatalf("landings since target's untold start = %d, want 0", since)
 	}
 }
 

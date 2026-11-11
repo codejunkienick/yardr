@@ -346,11 +346,12 @@ func OneLine(s string) string {
 }
 
 // EventFiles are the files the event e carries, nil for one without any:
-// a mail's files, or a red quiet run's failing packages' output
-// (quiet_failed), each stored as a blob and named as mail names them.
+// a mail's files, a red quiet run's failing packages' output
+// (quiet_failed), or a refused run's own output (quiet_unjudged), each
+// stored as a blob and named as mail names them.
 func EventFiles(e Event) []BlobRef {
 	raw, ok := e.Data["files"]
-	if !ok || (e.Kind != "mail" && e.Kind != QuietFailed) {
+	if !ok || (e.Kind != "mail" && e.Kind != QuietFailed && e.Kind != QuietUnjudged) {
 		return nil
 	}
 	// As the log holds them: decoded, a list of objects.
@@ -722,9 +723,9 @@ func (s *Store) pruneBlobs() (int, error) {
 	}
 	named := map[string]bool{}
 	err = s.read(func(tx *bolt.Tx) error {
-		// The kinds whose events carry files (EventFiles): a mail's, and
-		// a red quiet run's failing packages' output.
-		for _, prefix := range [][]byte{[]byte("mail\x00"), []byte(QuietFailed + "\x00")} {
+		// The kinds whose events carry files (EventFiles): a mail's, a red
+		// quiet run's failing packages' output, and a refused run's own.
+		for _, prefix := range [][]byte{[]byte("mail\x00"), []byte(QuietFailed + "\x00"), []byte(QuietUnjudged + "\x00")} {
 			c := tx.Bucket(bEventsKd).Cursor()
 			for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
 				var e Event

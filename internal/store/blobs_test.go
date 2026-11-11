@@ -317,6 +317,9 @@ func TestEventFiles(t *testing.T) {
 	if got := store.EventFiles(store.Event{Kind: store.QuietFailed, Data: map[string]any{"files": refs}}); len(got) != 1 || got[0] != *png {
 		t.Errorf("a quiet_failed's files = %+v", got)
 	}
+	if got := store.EventFiles(store.Event{Kind: store.QuietUnjudged, Data: map[string]any{"files": refs}}); len(got) != 1 || got[0] != *png {
+		t.Errorf("a quiet_unjudged's files = %+v", got)
+	}
 	for _, e := range []store.Event{
 		{Kind: "mail"},
 		{Kind: "mail", Data: map[string]any{"files": refs[:0]}},
@@ -818,38 +821,43 @@ func TestPruneBlobsKeepsNoteFiles(t *testing.T) {
 	}
 }
 
-// A red quiet run's failing output lives with its event: a blob a
-// quiet_failed names survives the prune, while one nothing names past its
-// grace does not.
-func TestPruneBlobsKeepsQuietFailedFiles(t *testing.T) {
+// A quiet run's output lives with its event: a blob a quiet_failed names,
+// or a quiet_unjudged names for a run refused the verdict, survives the
+// prune, while one nothing names past its grace does not.
+func TestPruneBlobsKeepsQuietRunFiles(t *testing.T) {
 	t.Parallel()
-	api, s := storetest.NewOwned(t)
-	ctx := context.Background()
-	named, err := api.PutBlob(ctx, pngBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loose, err := api.PutBlob(ctx, jpegBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	named.Name = "yardr.dev_yardr_internal_store.log"
-	if err := api.LogDispatch(ctx, "", store.QuietFailed, "yard", map[string]any{
-		"depot": "yard", "files": []store.BlobRef{*named}}); err != nil {
-		t.Fatal(err)
-	}
-	old := time.Now().Add(-2 * store.BlobGrace)
-	for _, ref := range []*store.BlobRef{named, loose} {
-		if err := os.Chtimes(s.BlobPath(ref.Hash), old, old); err != nil {
-			t.Fatal(err)
-		}
-	}
-	res, err := api.Prune(ctx, store.Retention{}, "jo")
-	if err != nil || res.Blobs != 1 {
-		t.Fatalf("prune = %+v, %v", res, err)
-	}
-	if got := blobFiles(t, s); len(got) != 1 || got[0] != named.Hash {
-		t.Errorf("after the prune the yard holds %v, want the quiet run's %s", got, named.Hash)
+	for _, kind := range []string{store.QuietFailed, store.QuietUnjudged} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			api, s := storetest.NewOwned(t)
+			ctx := context.Background()
+			named, err := api.PutBlob(ctx, pngBytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			loose, err := api.PutBlob(ctx, jpegBytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			named.Name = "yardr.dev_yardr_internal_store.log"
+			if err := api.LogDispatch(ctx, "", kind, "yard", map[string]any{
+				"depot": "yard", "files": []store.BlobRef{*named}}); err != nil {
+				t.Fatal(err)
+			}
+			old := time.Now().Add(-2 * store.BlobGrace)
+			for _, ref := range []*store.BlobRef{named, loose} {
+				if err := os.Chtimes(s.BlobPath(ref.Hash), old, old); err != nil {
+					t.Fatal(err)
+				}
+			}
+			res, err := api.Prune(ctx, store.Retention{}, "jo")
+			if err != nil || res.Blobs != 1 {
+				t.Fatalf("prune = %+v, %v", res, err)
+			}
+			if got := blobFiles(t, s); len(got) != 1 || got[0] != named.Hash {
+				t.Errorf("after the prune the yard holds %v, want the quiet run's %s", got, named.Hash)
+			}
+		})
 	}
 }
 

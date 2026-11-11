@@ -8,7 +8,7 @@ user's inbox, kept apart from the mail ([below](#users-as-subscribers)):
 | source | what it delivers | how a crew member subscribes |
 |---|---|---|
 | a hook source (`github`, `linear`, `token`) | webhook deliveries taken by `yardr hook` | `yardr subscribe <name> linear …` |
-| `yardr` | yardr's own events: bead events (created, advanced, noted, closed, …), and `install_failed`, `rolled_back`, `hook_quiet` and the quiet whole-suite run's `quiet_started`, `quiet_passed` and `quiet_failed`, about no bead | `yardr subscribe <name> yardr …`, `yardr bead watch` |
+| `yardr` | yardr's own events: bead events (created, advanced, noted, closed, …), and `install_failed`, `rolled_back`, `hook_quiet` and the quiet whole-suite run's `quiet_started`, `quiet_passed`, `quiet_failed` and `quiet_unjudged`, about no bead | `yardr subscribe <name> yardr …`, `yardr bead watch` |
 | `peer` | what a linked yard says of the beads this yard has away at it: arrived, advanced, held, unheld, gave_up ([below](#the-peer-source)) | `yardr subscribe <name> peer …`, `yardr thread follow <name> --source peer <bead>` |
 | `--on` on the crew member | event kinds, or `attention`, the class of kinds that need someone (the default); every bead, and events not about a bead | `yardr crew add --on …`, `yardr crew set <name> --on …` |
 
@@ -531,7 +531,8 @@ The name goes where a kind goes, and what is stored is the name:
   `rolled_back`, `hook_quiet` and the quiet-run events, which are about
   no bead, match a filter on kind alone: `kind=install_failed`,
   `kind=rolled_back`, `kind=hook_quiet`, `kind=quiet_started`,
-  `kind=quiet_passed`, `kind=quiet_failed`, or `kind=attention`, with no
+  `kind=quiet_passed`, `kind=quiet_failed`, `kind=quiet_unjudged`, or
+  `kind=attention`, with no
   bead key (`bead`, `depot`, `stage`, …) beside it. `runtime_down` and
   `backup_failed`, about no bead, and `crew_gave_up`, which is on a crew
   member's journal, come through `--on` alone.
@@ -921,20 +922,27 @@ ends the spell, and the next quiet logs anew.
 
 A quiet whole-suite run (testing.md R6) is told the same way, about no
 bead: `quiet_started` carries `depot`, `base` and `landings` (how many
-landings owed it), and its end is `quiet_passed` or `quiet_failed`, each
-carrying `depot`, `base`, `commit`, `wall_s` and `load`; a failure also
+landings owed it), and its end is `quiet_passed`, `quiet_failed` or
+`quiet_unjudged`, each carrying `depot`, `base`, `commit`, `wall_s` and
+`load`; a failure also
 carries `packages`, the packages that failed, `tests`, the failing test
 names as the gate's flaky lines read them (capped), `reason`, and
 `files`: one file per failing package, named `<package, slashes
 flattened>.log` and holding the package's output; a failure that names
 no package carries the end of the run's whole output as one file,
-`run.log`.
+`run.log`. An unjudged run carries `packages` refused for load,
+`not_judged` with each package's run time, alone time and load, and its
+whole output as `run.log`; it is neither passed nor failed, leaves the
+landings count where the last judged run left it, and the trigger retries
+when the run ends if the yard is still quiet. Three refusals in a row are
+told as `quiet_failed` instead, naming the bound.
 `quiet_failed` is of the class [`attention`](#the-class-attention), so
 the yardmaster hears of a red base through its default `--on`. The
-three quiet-run events match a yardr subscription on kind alone, like
+four quiet-run events match a yardr subscription on kind alone, like
 the upgrade's failure kinds:
 `yardr subscribe <name> yardr --where kind=quiet_failed` carries
-red-base events.
+red-base events, and `kind=quiet_unjudged` carries refusals. An unjudged
+run is not of the `attention` class; its trigger re-arms the run itself.
 
 Only the server's webhook listener records deliveries. The store socket has no
 method to record one, nor to log an event of an arbitrary kind: clients log

@@ -3,6 +3,7 @@ package dispatch
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -48,21 +49,41 @@ import (
 // test command so (YARDR_RACE_HELD), so it never overlaps a landing leg.
 // A green run is told as quiet_passed, a red base as quiet_failed naming
 // the failing packages, the failing tests and the base commit; each
-// carries the wall time and the load the run started under.
+// carries the wall time and the load the run started under. A run the
+// strict R1 verdict refused for load is told as quiet_unjudged instead,
+// with the refused packages and the run's own output: neither passed nor
+// failed, the count stays, and the next quiet event fires the run again.
 
 // QuietResult is how one quiet whole-suite run ended, as QuietRun (or the
 // real runner) reports it: the base commit it tested, how long it took,
 // the load it started under, and, on a red run, the packages that failed,
 // the failing test names, capped, and each failing package's output, by
 // package. A red run that names no package keeps its whole output under
-// quietRunKey instead. A passing run keeps nothing: Outputs is nil.
+// quietRunKey instead. A passing run keeps nothing: Outputs is nil. A run
+// the strict R1 verdict refused for load sets Unjudged, with the refused
+// packages in NotJudged; Packages stays empty, as no FAIL line names one,
+// and the whole output is kept under quietRunKey, as a red run that names
+// no package keeps it.
 type QuietResult struct {
-	Commit   string
-	Wall     time.Duration
-	Load     string
-	Packages []string
-	Tests    []string
-	Outputs  map[string]string
+	Commit    string
+	Wall      time.Duration
+	Load      string
+	Packages  []string
+	Tests     []string
+	Outputs   map[string]string
+	Unjudged  bool
+	NotJudged []NotJudgedPackage
+}
+
+// NotJudgedPackage is one package a strict quiet run refused to judge: over
+// the 60 s budget alone on a loaded machine, so neither a pass nor a fail.
+// Run and Alone are the seconds it took in the run and alone, Load the load
+// its re-run sat in, as the run's "not judged" line named them.
+type NotJudgedPackage struct {
+	Package string `json:"package"`
+	Run     string `json:"run_s"`
+	Alone   string `json:"alone_s"`
+	Load    string `json:"load"`
 }
 
 // quietRelevant says whether an event can change whether a quiet run is
@@ -217,13 +238,43 @@ func (d *Dispatcher) quietReady(ctx context.Context, depot store.Depot, n int) (
 	return true, since, nil
 }
 
-// landingsSinceQuiet counts a depot's code landings since its last quiet
-// run started: beads advanced to merged after that run's quiet_started,
-// wagons left out (they land on a train's branch; the train's own landing
-// on the base is the one that counts). The epoch is the run's start, not
-// its end, so a landing that passes while a run tests an older base is
-// counted toward the next run, never covered unseen.
+// quietLastJudged is the seq of the depot's last judged quiet run: its
+// last quiet_passed or quiet_failed, 0 where no run was ever judged. A run
+// the strict R1 verdict refused is told as quiet_unjudged instead, which
+// moves neither the landings epoch nor the bound's count: both read from
+// here, so the count stays and the next quiet event fires the run again.
+func (d *Dispatcher) quietLastJudged(ctx context.Context, depot string) (uint64, error) {
+	var last uint64
+	for _, kind := range []string{store.QuietPassed, store.QuietFailed} {
+		evs, err := d.Store.EventsOfKind(ctx, kind, int(^uint(0)>>1))
+		if err != nil {
+			return 0, err
+		}
+		for _, e := range evs {
+			if name, _ := e.Data["depot"].(string); name == depot && e.Seq > last {
+				last = e.Seq
+			}
+		}
+	}
+	return last, nil
+}
+
+// landingsSinceQuiet counts a depot's code landings since its last judged
+// quiet run started: beads advanced to merged after that run's
+// quiet_started, wagons left out (they land on a train's branch; the
+// train's own landing on the base is the one that counts). The epoch is
+// the last quiet_started below the last quiet_passed or quiet_failed, 0
+// where no run was ever judged, so a refused run leaves it and the next
+// quiet event fires again. Single-flight ordering makes the pairing exact:
+// each judged run's start is the nearest start below its telling. The
+// epoch stays a start, not an end, so a landing that passes while a run
+// tests an older base is counted toward the next run, never covered
+// unseen.
 func (d *Dispatcher) landingsSinceQuiet(ctx context.Context, depot string) (int, error) {
+	judged, err := d.quietLastJudged(ctx, depot)
+	if err != nil {
+		return 0, err
+	}
 	var epoch uint64
 	// Keep a marker for every depot. A fixed cap could drop a quieter
 	// depot's last start behind runs from other depots, then count its old
@@ -233,7 +284,7 @@ func (d *Dispatcher) landingsSinceQuiet(ctx context.Context, depot string) (int,
 		return 0, err
 	}
 	for _, e := range started {
-		if name, _ := e.Data["depot"].(string); name == depot && e.Seq > epoch {
+		if name, _ := e.Data["depot"].(string); name == depot && e.Seq > epoch && e.Seq < judged {
 			epoch = e.Seq
 		}
 	}
@@ -291,6 +342,10 @@ func (d *Dispatcher) runQuietDepot(ctx context.Context, depot store.Depot, since
 	res, err := run(ctx, depot)
 	data := map[string]any{"depot": depot.Name, "base": base, "commit": res.Commit,
 		"wall_s": int(res.Wall.Round(time.Second).Seconds()), "load": res.Load, "landings": since}
+	if err == nil && res.Unjudged {
+		d.tellQuietUnjudged(ctx, depot, res, data)
+		return
+	}
 	if err != nil {
 		data["packages"] = res.Packages
 		data["tests"] = res.Tests
@@ -312,12 +367,80 @@ func (d *Dispatcher) runQuietDepot(ctx context.Context, depot store.Depot, since
 	}
 }
 
+// quietUnjudgedBound is how many quiet runs in a row the strict R1 verdict
+// may refuse for load before the next is told as failed instead: three
+// refusals in a row say the machine never quiets, and a base that is never
+// judged is accused rather than left untold.
+const quietUnjudgedBound = 3
+
+// tellQuietUnjudged tells a quiet run the strict R1 verdict refused: every
+// over-budget package sat in load, so the run is neither passed nor failed.
+// It is told as quiet_unjudged, beadless and of no attention class, carrying
+// the refused packages with their times and loads and the run's own output
+// as run.log, as a red run that names no package carries it. The landings
+// epoch stays where the last judged run left it (landingsSinceQuiet), so
+// the trigger's re-arm fires the next run at once, with no landing owed in
+// between. Past the bound, the refusal is told as quiet_failed instead,
+// naming the bound, with the same data: a machine that never quiets still
+// accuses its base.
+func (d *Dispatcher) tellQuietUnjudged(ctx context.Context, depot store.Depot, res QuietResult, data map[string]any) {
+	var pkgs []string
+	for _, r := range res.NotJudged {
+		pkgs = append(pkgs, r.Package)
+	}
+	data["packages"] = pkgs
+	data["not_judged"] = res.NotJudged
+	if files := d.quietFiles(ctx, depot, res); len(files) > 0 {
+		data["files"] = files
+	}
+	prior, err := d.quietUnjudgedSince(ctx, depot.Name)
+	if err != nil {
+		d.Log.Warn("quiet run: counting unjudged runs", "depot", depot.Name, "err", err)
+	}
+	if prior+1 >= quietUnjudgedBound {
+		data["tests"] = res.Tests
+		data["reason"] = fmt.Sprintf("the strict R1 verdict refused %d quiet runs in a row for load, reaching the bound of %d: told as failed (docs/testing.md R6)", prior+1, quietUnjudgedBound)
+		d.Log.Error("quiet whole-suite run failed past the unjudged bound", "depot", depot.Name, "commit", res.Commit,
+			"wall", res.Wall.Round(time.Second), "load", res.Load, "packages", pkgs)
+		if lerr := d.Store.LogDispatch(ctx, "", store.QuietFailed, actor, data); lerr != nil {
+			d.Log.Warn("quiet run: failed event", "depot", depot.Name, "err", lerr)
+		}
+		return
+	}
+	d.Log.Warn("quiet whole-suite run not judged", "depot", depot.Name, "commit", res.Commit,
+		"wall", res.Wall.Round(time.Second), "load", res.Load, "packages", pkgs)
+	if lerr := d.Store.LogDispatch(ctx, "", store.QuietUnjudged, actor, data); lerr != nil {
+		d.Log.Warn("quiet run: unjudged event", "depot", depot.Name, "err", lerr)
+	}
+}
+
+// quietUnjudgedSince counts the depot's quiet_unjudged runs since its last
+// judged one: the consecutive refusals the bound judges this run by.
+func (d *Dispatcher) quietUnjudgedSince(ctx context.Context, depot string) (int, error) {
+	judged, err := d.quietLastJudged(ctx, depot)
+	if err != nil {
+		return 0, err
+	}
+	evs, err := d.Store.EventsOfKind(ctx, store.QuietUnjudged, int(^uint(0)>>1))
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, e := range evs {
+		if name, _ := e.Data["depot"].(string); name == depot && e.Seq > judged {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // quietFiles stores a red run's failing packages' output, each as a blob,
 // and answers the refs, as mail names the files it carries: one blob per
 // failing package, in the packages' order, named for the package. A red run
 // that names no package keeps one blob in their place, its whole output
-// named run.log. One past the yard's blob cap is truncated to it, since
-// PutBlob refuses over-cap with nothing stored: a package's output keeps its
+// named run.log, as a refused run keeps its own. One past the yard's blob
+// cap is truncated to it, since PutBlob refuses over-cap with nothing
+// stored: a package's output keeps its
 // start, the run's keeps its end, as its verdict comes last. A package with
 // no output, or one the yard will not keep, names nothing: the failure is
 // told either way.
@@ -416,6 +539,23 @@ func quietPackages(out string) []string {
 	return pkgs
 }
 
+// notJudgedLine is a strict run's refusal for one package: over budget
+// alone on a loaded machine, so not judged, with both times and the load.
+// The load is the machine's own line ("load 72.4 on 10 cores"), as the
+// gate's machineload prints it.
+var notJudgedLine = regexp.MustCompile(`(?m)^test: R1: (\S+) took (\S+) s in the run, (\S+) s alone: over budget, loaded machine \((load [^)]+)\), not judged$`)
+
+// quietNotJudged names the packages a strict whole-suite output refused to
+// judge: one per "not judged" line, in the order printed, each with the
+// times and the load its line named.
+func quietNotJudged(out string) []NotJudgedPackage {
+	var refused []NotJudgedPackage
+	for _, m := range notJudgedLine.FindAllStringSubmatch(out, -1) {
+		refused = append(refused, NotJudgedPackage{Package: m[1], Run: m[2], Alone: m[3], Load: m[4]})
+	}
+	return refused
+}
+
 var failTest = regexp.MustCompile(`--- FAIL: (\S+)`)
 
 // quietTestCap is how many failing test names a red quiet run carries: a
@@ -495,12 +635,12 @@ func quietOutputs(out string) map[string]string {
 	return outputs
 }
 
-// quietRunOutputs is what a red run keeps of its output: each failing
-// package's (quietOutputs) or, where no FAIL line names a package, the whole
-// output under quietRunKey. A package over the 60 s budget under the strict
-// R1 verdict (YARDR_R1_STRICT) and a vet or build error fail a run with no
-// such line, and without its output the reader runs the whole suite again to
-// learn which it was.
+// quietRunOutputs is what a red or refused run keeps of its output: each
+// failing package's (quietOutputs) or, where no FAIL line names a package,
+// the whole output under quietRunKey. A package over the 60 s budget under
+// the strict R1 verdict (YARDR_R1_STRICT) refuses a run with no such line,
+// and a vet or build error fails one with none, and without its output the
+// reader runs the whole suite again to learn which it was.
 func quietRunOutputs(out string) map[string]string {
 	if outputs := quietOutputs(out); outputs != nil {
 		return outputs
@@ -577,17 +717,24 @@ func quietCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	return cmd
 }
 
+// quietUnjudgedExit is the gate's exit where the strict R1 verdict refused
+// the run: every over-budget package sat in load, so the run is neither
+// passed nor failed.
+const quietUnjudgedExit = 3
+
 // execQuietRun is the real quiet run: the depot's base in a worktree of
 // its own, tested as a landing tests it (the depot's test command with
 // YARDR_LANDING=1), under the race lock throughout, except that R1 is
 // judged strictly (YARDR_R1_STRICT, which the quiet run alone sets): a
-// package over 60 s alone fails however loaded the machine, so a slowdown
-// cannot loud-pass here as it may at a landing. YARDR_QUIET_RUN is the
-// quiet run's other mark, for the tests themselves: a test that costs
-// minutes (the yard-shape matrix, contrib/isolated-yard/matrix_test.go)
-// runs only where it is set, so neither a builder's gate nor a landing
-// pays for it. The depot's own checkout is never touched, and the
-// worktree goes with the run.
+// package over 60 s alone on a loaded machine is refused the verdict
+// instead of loud-passing as it may at a landing, and the run ends
+// neither passed nor failed (exit 3), so a slowdown cannot hide behind a
+// loaded host and a loaded host cannot convict a package either.
+// YARDR_QUIET_RUN is the quiet run's other mark, for the tests
+// themselves: a test that costs minutes (the yard-shape matrix,
+// contrib/isolated-yard/matrix_test.go) runs only where it is set, so
+// neither a builder's gate nor a landing pays for it. The depot's own
+// checkout is never touched, and the worktree goes with the run.
 func (d *Dispatcher) execQuietRun(ctx context.Context, depot store.Depot) (QuietResult, error) {
 	base := depot.Base
 	if base == "" {
@@ -647,6 +794,13 @@ func (d *Dispatcher) execQuietRun(ctx context.Context, depot store.Depot) (Quiet
 	res := QuietResult{Commit: commit, Wall: time.Since(start), Load: load,
 		Packages: quietPackages(out.String()), Tests: quietTests(out.String())}
 	if runErr != nil {
+		var exit *exec.ExitError
+		if errors.As(runErr, &exit) && exit.ExitCode() == quietUnjudgedExit {
+			res.Unjudged = true
+			res.NotJudged = quietNotJudged(out.String())
+			res.Outputs = quietRunOutputs(out.String())
+			return res, nil
+		}
 		res.Outputs = quietRunOutputs(out.String())
 		return res, fmt.Errorf("the whole suite failed on %s at %s: %w", base, commit, runErr)
 	}

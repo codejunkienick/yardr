@@ -56,11 +56,11 @@
 # quiet machine fails the run; on a loaded machine (loaded as the re-runs
 # started or as the last ended) it passes with an R1 line naming both times and
 # the load, unless YARDR_R1_STRICT is set by the quiet run. Then over budget
-# alone fails however loaded the machine, and on a loaded machine the
-# failure line names the load beside both times; its re-runs go one after
-# another, each judged by the load around itself, where a landing's go up to
-# three at a time under one load pair, so that a time over budget is not made
-# by the re-runs' own contention;
+# alone on a loaded machine is refused the verdict (exit 3), in an R1 line
+# naming both times and the load, and on a quiet one fails as before; its
+# re-runs go one after another, each judged by the load around itself, where
+# a landing's go up to three at a time under one load pair, so that a time
+# over budget is not made by the re-runs' own contention;
 # the run fails when a test file sleeps over budget at a site that is not.
 # A run without -race judges no package's time, R1 being defined under -race:
 # a plain run, which is never raced, judges none, and the landing and the quiet
@@ -808,7 +808,8 @@ again() {
     pkgs_ok=$((pkgs_ok + child_ok))
     pkgs_failed=$((pkgs_failed + child_failed))
     took "$t0" "$*"
-    [ "$rc" = 0 ] || failed "$log" "$@"
+    # A run the budget refused to judge (3) names no failure, as below.
+    [ "$rc" = 0 ] || [ "$rc" = 3 ] || failed "$log" "$@"
     rm -f "$log" "$log.rc" "$acc" "$status"
     return "$rc"
   fi
@@ -1080,7 +1081,10 @@ again() {
   if [ "$rc" = 0 ] && [ "$race" = 1 ]; then
     packagebudget "$acc" "$@" || rc=$?
   fi
-  [ -n "$race_leg_child" ] || [ "$rc" = 0 ] || failed "$log" "$@"
+  # A run the budget refused to judge (3) names no failure: the re-runs'
+  # own lines say what it would not judge, and a FAILED header would accuse
+  # a package of what the run would not say of it.
+  [ -n "$race_leg_child" ] || [ "$rc" = 0 ] || [ "$rc" = 3 ] || failed "$log" "$@"
   case " $* " in
     *" go test "*)
       # The failures are the final log's: a package that passed on rerun is
@@ -1611,11 +1615,12 @@ flakyfile() {
   fi
   echo "test: filed $filed: $title"
 }
-# summary prints the run's test line ($1 is its exit status: 0 passed): the
-# result, the packages passed and failed, the wall seconds, and the seconds
-# queued on the race lock. A note carries it whole (docs/testing.md R4).
+# summary prints the run's test line ($1 is its exit status: 0 passed, 3 not
+# judged): the result, the packages passed and failed, the wall seconds, and
+# the seconds queued on the race lock. A note carries it whole
+# (docs/testing.md R4).
 summary() {
-  if [ "$1" = 0 ]; then res=pass; else res=fail; fi
+  if [ "$1" = 0 ]; then res=pass; elif [ "$1" = 3 ]; then res="not judged"; else res=fail; fi
   echo "test: sh .yardr/test @ $(git rev-parse --short HEAD): $res, $pkgs_ok packages ok, $pkgs_failed failed, $(($(date +%s) - started)) s, waited $waited_total s"
 }
 # The packages over the 60 s budget (docs/testing.md R1): a directory, the
@@ -1627,8 +1632,9 @@ summary() {
 # over 60 s again on a quiet machine; over again on a loaded one passes
 # with the load named (loaded as the re-run started or as it ended), unless
 # YARDR_R1_STRICT is set by the quiet run.
-# Then the loaded pass is off: over 60 s alone fails however loaded the
-# machine. The fix beads delete the rows;
+# Then the loaded pass is off: over 60 s alone on a loaded machine is not
+# judged (exit 3), and on a quiet one fails as before. The fix beads delete
+# the rows;
 # a row whose package is gone fails nothing, since no result line maps to
 # it, but delete it anyway.
 over60='
@@ -1775,9 +1781,13 @@ legflag() {
 # itself, and judged by the re-run: over 60 s alone fails on a quiet
 # machine, naming both times, and passes with both times and the load on a
 # loaded one (loadedmachine), unless YARDR_R1_STRICT is set by the quiet
-# run. Then the loaded pass is off: over 60 s alone fails however loaded
-# the machine, and on a loaded machine the failure line names the load
-# beside both times. The machine is sampled twice, as the re-runs start and
+# run. Then the loaded pass is off: over 60 s alone on a loaded machine is
+# refused the verdict, in a `test: R1:` line naming both times and the load,
+# and the run ends neither passed nor failed (exit 3, which only a strict
+# run returns, so only the quiet run ever sees it); over 60 s alone on a
+# quiet machine fails as before, and a quiet-sample failure or a failed
+# re-run beside a refusal still fails the run (exit 1). The machine is
+# sampled twice, as the re-runs start and
 # when the last ends, and is loaded when either sample is (loadedeither);
 # the load a line names is the start's where that is loaded, else the end's.
 # A strict run samples it twice for each re-run instead, as that re-run
@@ -1790,7 +1800,7 @@ legflag() {
 # timeout (yardr-cecb), with margin, on any machine. On a quiet leg with two
 # over-budget packages or more, the re-runs' own contention can read as
 # loaded and pass what one re-run after another would convict. A strict run
-# passes nothing for load, so what it convicts on is the time itself, and
+# passes nothing for load, so what it judges is the time itself, and
 # three suites side by side made that: the quiet run's alone times were
 # 60-84 s for packages that took 30-57 s one after another (yardr-t4c0). It
 # therefore re-runs one at a time, and a time over 60 s is the package's own.
@@ -1945,8 +1955,12 @@ packagebudget() {
       if awk -v s="$alone" 'BEGIN { exit !(s + 0 > 60) }'; then
         if load=$(loadedeither "$load_start" "$load_end"); then
           if [ -n "$YARDR_R1_STRICT" ]; then
-            echo "test: $pkg took $secs s with -race, $alone s alone, over the 60 s budget (docs/testing.md R1), loaded machine ($load)"
-            st=1
+            echo "test: R1: $pkg took $secs s in the run, $alone s alone: over budget, loaded machine ($load), not judged"
+            # A refusal, not a failure: exit 3, unless a package already
+            # failed the run, which still fails it.
+            if [ "$st" != 1 ]; then
+              st=3
+            fi
           else
             echo "test: R1: $pkg took $secs s in the run, $alone s alone: over budget, loaded machine ($load), not failed"
           fi
@@ -2535,12 +2549,17 @@ whole() {
   beside=
   beside_counts=
   # Red when either leg is, keeping the first leg's status; green when
-  # both are.
-  if [ "$first" != 0 ]; then
+  # both are. A failure beats a refusal to judge: the first leg not judged
+  # (3) with the second red still fails, so a red socket leg is never told
+  # as unjudged.
+  if [ "$first" != 0 ] && [ "$first" != 3 ]; then
     exit "$first"
   fi
   if [ "$second" != 0 ]; then
     exit "$second"
+  fi
+  if [ "$first" != 0 ]; then
+    exit "$first"
   fi
   exit 0
 }

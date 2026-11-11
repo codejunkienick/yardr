@@ -458,10 +458,9 @@ func TestQuietRedRunNamesPackagesTestsAndCommit(t *testing.T) {
 	}
 }
 
-// A red run that names no failing package (a package over the 60 s budget
-// under the strict R1 verdict fails the run with no FAIL line) still
-// carries what it printed: one file, run.log, whose text ends with the
-// run's last lines, the verdict among them.
+// A red run that names no failing package (a vet or build error fails the
+// run with no FAIL line) still carries what it printed: one file, run.log,
+// whose text ends with the run's last lines, the verdict among them.
 func TestQuietRedRunWithNoFailingPackageKeepsTheRunsOutput(t *testing.T) {
 	y := newQuietYard(t)
 	verdict := "test: yardr.dev/yardr/internal/x took 70 s with -race, 65 s alone, over the 60 s budget (docs/testing.md R1), loaded machine (6.4)\n"
@@ -486,6 +485,145 @@ func TestQuietRedRunWithNoFailingPackageKeepsTheRunsOutput(t *testing.T) {
 	must(t, err)
 	if string(got) != out || !strings.HasSuffix(string(got), verdict+closing) {
 		t.Fatalf("the named blob = %q, want the run's output ending in its verdict and closing line", got)
+	}
+}
+
+// notJudgedOf decodes an event's refused packages: data "not_judged" as the
+// log holds it, a list of objects.
+func notJudgedOf(t *testing.T, e store.Event) []dispatch.NotJudgedPackage {
+	t.Helper()
+	list, _ := e.Data["not_judged"].([]any)
+	var out []dispatch.NotJudgedPackage
+	for _, item := range list {
+		m, _ := item.(map[string]any)
+		out = append(out, dispatch.NotJudgedPackage{
+			Package: fmt.Sprint(m["package"]),
+			Run:     fmt.Sprint(m["run_s"]),
+			Alone:   fmt.Sprint(m["alone_s"]),
+			Load:    fmt.Sprint(m["load"]),
+		})
+	}
+	return out
+}
+
+// A run the strict R1 verdict refused for load is told as quiet_unjudged,
+// neither passed nor failed: the refused packages with their times and
+// loads, the run's wall time, starting load and base commit, and no reason,
+// with the run's own output as one file, run.log. The landings count stays,
+// so the trigger's re-arm fires the next run at once with nothing new
+// landed; the third refusal in a row is told as quiet_failed instead,
+// naming the bound, with the same data, and then the count starts over.
+func TestQuietUnjudgedRefiresAndThirdFails(t *testing.T) {
+	y := newQuietYard(t)
+	verdict := "test: R1: yardr.dev/yardr/internal/store took 85.8 s in the run, 94.1 s alone: over budget, loaded machine (load 40.59 on 10 cores), not judged\n"
+	closing := "test: sh .yardr/test @ slow123: not judged, 54 packages ok, 0 failed\n"
+	out := "ok  \tyardr.dev/yardr/internal/cli\t1.0s\n" + verdict + closing
+	refused := []dispatch.NotJudgedPackage{
+		{Package: "yardr.dev/yardr/internal/store", Run: "85.8", Alone: "94.1", Load: "load 40.59 on 10 cores"},
+	}
+	y.res = dispatch.QuietResult{Commit: "slow123", Wall: 91 * time.Second, Load: "40.59",
+		Unjudged: true, NotJudged: refused,
+		Outputs: map[string]string{dispatch.QuietRunKey: out}}
+	ctx := context.Background()
+	y.land(t, "one")
+	y.land(t, "two")
+	dispatch.QuietMaybe(y.d, ctx)
+	evs := waitQuiet(t, y.s, store.QuietUnjudged, 1)
+	if got := evs[0].Data["commit"]; got != "slow123" {
+		t.Fatalf("quiet_unjudged commit = %v, want slow123", got)
+	}
+	pkgs, _ := evs[0].Data["packages"].([]any)
+	if len(pkgs) != 1 || pkgs[0] != "yardr.dev/yardr/internal/store" {
+		t.Fatalf("quiet_unjudged packages = %v, want the refused package named", evs[0].Data["packages"])
+	}
+	if got := notJudgedOf(t, evs[0]); !slices.Equal(got, refused) {
+		t.Fatalf("quiet_unjudged not_judged = %+v, want %+v", got, refused)
+	}
+	for key, want := range map[string]string{"wall_s": "91", "load": "40.59", "landings": "2"} {
+		if got := fmt.Sprint(evs[0].Data[key]); got != want {
+			t.Errorf("quiet_unjudged %s = %v, want %s", key, evs[0].Data[key], want)
+		}
+	}
+	if _, ok := evs[0].Data["reason"]; ok {
+		t.Errorf("quiet_unjudged carries a reason: %v", evs[0].Data["reason"])
+	}
+	files := store.EventFiles(evs[0])
+	if len(files) != 1 || files[0].Name != "run.log" {
+		t.Fatalf("quiet_unjudged files = %+v, want the run's output named run.log", files)
+	}
+	got, err := os.ReadFile(y.own.BlobPath(files[0].Hash))
+	must(t, err)
+	if string(got) != out || !strings.HasSuffix(string(got), verdict+closing) {
+		t.Fatalf("the named blob = %q, want the run's output ending in its verdict and closing line", got)
+	}
+	// The count stayed, so the re-arm fired the next run with nothing new
+	// landed; the third refusal is told as failed, naming the bound.
+	again := waitQuiet(t, y.s, store.QuietUnjudged, 2)
+	if got := fmt.Sprint(again[1].Data["landings"]); got != "2" {
+		t.Errorf("the second quiet_unjudged landings = %v, want the count stayed at 2", again[1].Data["landings"])
+	}
+	failed := waitQuiet(t, y.s, store.QuietFailed, 1)
+	reason, _ := failed[0].Data["reason"].(string)
+	if !strings.Contains(reason, "bound of 3") {
+		t.Errorf("the bound's quiet_failed reason = %q, want it to name the bound", reason)
+	}
+	if got := notJudgedOf(t, failed[0]); !slices.Equal(got, refused) {
+		t.Errorf("the bound's quiet_failed not_judged = %+v, want %+v", got, refused)
+	}
+	if files := store.EventFiles(failed[0]); len(files) != 1 || files[0].Name != "run.log" {
+		t.Errorf("the bound's quiet_failed files = %+v, want the run's output named run.log", files)
+	}
+	if n := y.runCalls(); n != 3 {
+		t.Fatalf("calls = %d, want two refusals and the bound's failure", n)
+	}
+	// The bound's failure is judged: the count starts over, and nothing
+	// more is owed.
+	dispatch.QuietMaybe(y.d, ctx)
+	if n := y.runCalls(); n != 3 {
+		t.Fatalf("calls = %d, want no fourth run after the bound failed", n)
+	}
+}
+
+// The bound counts consecutive refusals since the last judged run: two
+// refusals, then a pass, then two landings owe a run that is refused again,
+// not failed, and the landings before the judged run's start stay covered.
+func TestQuietUnjudgedBoundResetsAfterAJudgedRun(t *testing.T) {
+	y := newQuietYard(t)
+	y.res = dispatch.QuietResult{Commit: "slow123", Wall: time.Second, Load: "40.59",
+		Unjudged: true,
+		NotJudged: []dispatch.NotJudgedPackage{
+			{Package: "yardr.dev/yardr/internal/store", Run: "85.8", Alone: "94.1", Load: "load 40.59 on 10 cores"},
+		},
+		Outputs: map[string]string{dispatch.QuietRunKey: "test: R1: yardr.dev/yardr/internal/store took 85.8 s in the run, 94.1 s alone: over budget, loaded machine (load 40.59 on 10 cores), not judged\n"}}
+	ctx := context.Background()
+	y.land(t, "before the judged history")
+	// Two refused runs, then a judged one, as the log told them: each
+	// run's start, then its telling.
+	for i, kind := range []string{store.QuietUnjudged, store.QuietUnjudged, store.QuietPassed} {
+		must(t, y.s.LogDispatch(ctx, "", store.QuietStarted, "yard",
+			map[string]any{"depot": "yard", "base": "main", "landings": 2}))
+		must(t, y.s.LogDispatch(ctx, "", kind, "yard",
+			map[string]any{"depot": "yard", "base": "main", "commit": fmt.Sprintf("old%d", i),
+				"wall_s": 700 + i, "load": "40.59", "landings": 2}))
+	}
+	y.land(t, "after one")
+	y.land(t, "after two")
+	dispatch.QuietMaybe(y.d, ctx)
+	// Two refusals stand in the log already; the run's own is the third
+	// told, but the first since the pass, so it is refused again.
+	evs := waitQuiet(t, y.s, store.QuietUnjudged, 3)
+	if got := fmt.Sprint(evs[2].Data["landings"]); got != "2" {
+		t.Fatalf("the refused run's landings = %v, want 2: the epoch is the judged run's start", evs[2].Data["landings"])
+	}
+	// The chain behind it is two refusals and the bound's failure, as
+	// ever: drain it, so no run is in flight past the test.
+	waitQuiet(t, y.s, store.QuietUnjudged, 4)
+	failed := waitQuiet(t, y.s, store.QuietFailed, 1)
+	if reason, _ := failed[0].Data["reason"].(string); !strings.Contains(reason, "bound of 3") {
+		t.Errorf("the bound's quiet_failed reason = %q, want it to name the bound", reason)
+	}
+	if n := y.runCalls(); n != 3 {
+		t.Fatalf("calls = %d, want two refusals and the bound's failure", n)
 	}
 }
 
@@ -582,6 +720,26 @@ func TestQuietTestsNamesTheFailingTests(t *testing.T) {
 	}
 	if slices.Contains(tests, "TestPaint") {
 		t.Fatalf("QuietTests names a passing test: %v", tests)
+	}
+}
+
+// A strict run's "not judged" lines name the refused packages with their
+// times and the load each sat in, in the order printed; a landing's "not
+// failed" line refuses nothing, and a run with no refusal names none.
+func TestQuietNotJudgedNamesTheRefusedPackages(t *testing.T) {
+	out := "ok  \tyardr.dev/yardr/internal/cli\t1.0s\n" +
+		"test: R1: yardr.dev/yardr/internal/store took 85.8 s in the run, 94.1 s alone: over budget, loaded machine (load 40.59 on 10 cores), not judged\n" +
+		"test: R1: yardr.dev/yardr/internal/pack took 61.3 s in the run, 66.6 s alone: over budget, loaded machine (load 72.4 on 10 cores), not failed\n" +
+		"test: R1: yardr.dev/yardr/internal/bdp took 61.1 s in the run, 66.6 s alone: over budget, loaded machine (load 26.4 on 10 cores), not judged\n"
+	want := []dispatch.NotJudgedPackage{
+		{Package: "yardr.dev/yardr/internal/store", Run: "85.8", Alone: "94.1", Load: "load 40.59 on 10 cores"},
+		{Package: "yardr.dev/yardr/internal/bdp", Run: "61.1", Alone: "66.6", Load: "load 26.4 on 10 cores"},
+	}
+	if got := dispatch.QuietNotJudged(out); !slices.Equal(got, want) {
+		t.Fatalf("QuietNotJudged = %+v, want %+v", got, want)
+	}
+	if got := dispatch.QuietNotJudged("ok  \tyardr.dev/yardr/internal/cli\t1.0s\n"); got != nil {
+		t.Fatalf("QuietNotJudged of a run with no refusal = %+v, want none", got)
 	}
 }
 
@@ -759,24 +917,30 @@ func quietTriggerResumesAfterServerInterruption(t *testing.T) {
 // check at its head commit. The run tests that commit in its own
 // worktree, and the yard is told it failed, with the package, the failing
 // tests, the commit and the failing output, kept as a blob and named on
-// the event. A check that fails with no FAIL line (a package over the R1
-// budget under the strict verdict) names no package, and the yard is
-// told its whole output as one blob, run.log.
+// the event. A check that fails with no FAIL line (a vet or build error)
+// names no package, and the yard is told its whole output as one blob,
+// run.log. A check that refuses the verdict (exit 3, a "not judged" line)
+// is told as quiet_unjudged instead, with the refused package, its times
+// and load, and the same run.log.
 func TestQuietExecRunAgainstARedBase(t *testing.T) {
 	// printf makes the tabs of go test's FAIL line: sh's echo does only in
 	// dash and macOS's sh, and prints a backslash and a t in bash and busybox.
 	over := "test: yardr.dev/fixture/slow took 70 s with -race, 65 s alone, over the 60 s budget (docs/testing.md R1), loaded machine (6.4)"
+	refused := "test: R1: yardr.dev/fixture/slow took 70 s in the run, 65 s alone: over budget, loaded machine (load 6.4 on 4 cores), not judged"
 	for _, tc := range []struct {
 		name     string
 		script   string
+		kind     string
 		packages []string
 		tests    []string
+		refused  []dispatch.NotJudgedPackage
 		file     string
 		want     string
 	}{
 		{
 			name:     "a failing package",
 			script:   "echo '--- FAIL: TestPaint (0.1s)'\nprintf 'FAIL\\tyardr.dev/fixture/bad\\t0.1s\\n'\nexit 1\n",
+			kind:     store.QuietFailed,
 			packages: []string{"yardr.dev/fixture/bad"},
 			tests:    []string{"TestPaint"},
 			file:     "yardr.dev_fixture_bad.log",
@@ -785,8 +949,20 @@ func TestQuietExecRunAgainstARedBase(t *testing.T) {
 		{
 			name:   "no failing package",
 			script: "printf 'ok  \\tyardr.dev/fixture/good\\t0.1s\\n'\necho '" + over + "'\nexit 1\n",
+			kind:   store.QuietFailed,
 			file:   "run.log",
 			want:   "ok  \tyardr.dev/fixture/good\t0.1s\n" + over + "\n",
+		},
+		{
+			name:     "refused for load",
+			script:   "printf 'ok  \\tyardr.dev/fixture/good\\t0.1s\\n'\necho '" + refused + "'\nexit 3\n",
+			kind:     store.QuietUnjudged,
+			packages: []string{"yardr.dev/fixture/slow"},
+			refused: []dispatch.NotJudgedPackage{
+				{Package: "yardr.dev/fixture/slow", Run: "70", Alone: "65", Load: "load 6.4 on 4 cores"},
+			},
+			file: "run.log",
+			want: "ok  \tyardr.dev/fixture/good\t0.1s\n" + refused + "\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -821,9 +997,9 @@ func TestQuietExecRunAgainstARedBase(t *testing.T) {
 			_, err = s.Advance(ctx, b.ID, "merged", store.Expect{}, "me")
 			must(t, err)
 			dispatch.QuietMaybe(d, ctx)
-			evs := waitQuiet(t, s, store.QuietFailed, 1)
+			evs := waitQuiet(t, s, tc.kind, 1)
 			if got := evs[0].Data["commit"]; got != red {
-				t.Fatalf("quiet_failed commit = %v, want the red base %s", got, red)
+				t.Fatalf("%s commit = %v, want the red base %s", tc.kind, got, red)
 			}
 			names := func(v any) []string {
 				var out []string
@@ -834,17 +1010,27 @@ func TestQuietExecRunAgainstARedBase(t *testing.T) {
 				return out
 			}
 			if got := names(evs[0].Data["packages"]); !slices.Equal(got, tc.packages) {
-				t.Fatalf("quiet_failed packages = %v, want %v", got, tc.packages)
+				t.Fatalf("%s packages = %v, want %v", tc.kind, got, tc.packages)
 			}
 			if got := names(evs[0].Data["tests"]); !slices.Equal(got, tc.tests) {
-				t.Fatalf("quiet_failed tests = %v, want %v", got, tc.tests)
+				t.Fatalf("%s tests = %v, want %v", tc.kind, got, tc.tests)
+			}
+			if got := notJudgedOf(t, evs[0]); !slices.Equal(got, tc.refused) {
+				t.Fatalf("%s not_judged = %+v, want %+v", tc.kind, got, tc.refused)
 			}
 			files := store.EventFiles(evs[0])
 			if len(files) != 1 || files[0].Name != tc.file {
-				t.Fatalf("quiet_failed files = %+v, want the fixture's output named %s", files, tc.file)
+				t.Fatalf("%s files = %+v, want the fixture's output named %s", tc.kind, files, tc.file)
 			}
 			if got, err := os.ReadFile(own.BlobPath(files[0].Hash)); err != nil || string(got) != tc.want {
 				t.Fatalf("the named blob = %q, %v, want the fixture's output %q", got, err, tc.want)
+			}
+			if tc.kind == store.QuietUnjudged {
+				// The re-arm refires the fixture twice more behind this
+				// telling, and the bound fails the third: drain both, so
+				// no run is in flight past the test.
+				waitQuiet(t, s, store.QuietUnjudged, 2)
+				waitQuiet(t, s, store.QuietFailed, 1)
 			}
 			// The depot's own checkout was never the worktree: it is still
 			// clean and on its base.
@@ -879,8 +1065,8 @@ func TestQuietExecRunEnvironment(t *testing.T) {
 		{
 			// The real run judges R1 strictly: it starts the gate with
 			// YARDR_R1_STRICT, which the quiet run alone sets, so a
-			// package over 60 s alone fails however loaded the machine
-			// instead of loud-passing as at a landing.
+			// package over 60 s alone on a loaded machine is refused
+			// the verdict instead of loud-passing as at a landing.
 			name:   "SetsStrictR1",
 			script: "[ \"$YARDR_R1_STRICT\" = 1 ] && [ \"$YARDR_LANDING\" = 1 ] && [ \"$YARDR_RACE_HELD\" = 1 ]\n",
 		},
