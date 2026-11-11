@@ -890,6 +890,12 @@ answer working`)
 	}
 }
 
+// grokPlain is Grok's input box, unstyled, around row: its bottom carries
+// the model and mode.
+func grokPlain(row string) string {
+	return " ╭────╮\n" + row + "\n ╰── Grok 4.7 (low) · always-approve ─╯\n\n Shift+Tab:mode  │  Ctrl+.:shortcuts"
+}
+
 func TestPromptPlace(t *testing.T) {
 	t.Parallel()
 	prompt := "Read /Users/x/repo/.git/worktrees/b1/yardr/brief-1x7.md and follow it."
@@ -968,6 +974,13 @@ func TestPromptPlace(t *testing.T) {
 		{"Muse, mid-turn", "muse", "  Muse Code 1.4.9\n\n❯ " + prompt + "\n\n◆ Thinking (3s · esc to interrupt)\n\n── Voice input (alt(option)+v to start) ──\n❯ \n" + rule, true, false, false},
 		{"Muse, empty", "muse", rule + "\n❯ \n" + rule, false, false, false},
 		{"Muse, still coming up", "muse", "$ muse\n" + prompt + "\n", false, false, true},
+		// Grok's input is in a box whose bottom has words in it, and a
+		// message it took is echoed above with the same mark, no edge before
+		// it, a timestamp after (Grok 1.0.77, 11 Nov 2026).
+		{"Grok, in the input", "grok", grokPlain(" │ ❯ " + prompt + " │"), false, true, false},
+		{"Grok, echoed", "grok", "   ❯ " + prompt + "   9:57 AM\n\n   Reading the brief.\n" + grokPlain(" │ ❯  │"), true, false, false},
+		{"Grok, empty", "grok", grokPlain(" │ ❯  │"), false, false, false},
+		{"Grok, its input mark and no box", "grok", "❯ " + prompt + "\n", false, false, true},
 		// Kiro's input is under its status line, begun with ›, an empty
 		// one showing its placeholder; a message it took is echoed above
 		// as a plain indented paragraph, with no mark, so above the input

@@ -37,6 +37,8 @@ import (
 // and goes. A word typed in a scratch pane the same day is drawn in
 // 38;2;204;211;219, not the hint's grey.
 //
+// Grok 1.0.77's idle pane was read with `herdr pane read --format ansi`.
+//
 // Kiro CLI 2.25's is the idle pane of awslabs/cli-agent-orchestrator's TUI
 // fixtures, narrowed: the input under the status line, begun with ›, an
 // empty one showing the placeholder in gray (not faint) with ↵ after it
@@ -93,6 +95,22 @@ const (
 	museWorking = museHead + "❯ hi\r\n\r\n◆ Thinking (3s · esc to interrupt)\r\n\r\n" +
 		museVoice + musePrompt + museRule + museFooter
 
+	grokBg    = "\x1b[48;2;20;20;20m"
+	grokEdge  = "\x1b[0m\x1b[38;2;80;80;88m" + grokBg + "│"
+	grokTaken = "\x1b[0m" + grokBg + "  \x1b[0m\x1b[48;2;36;36;36m \x1b[0m\x1b[38;2;200;200;200m\x1b[48;2;36;36;36m❯ " +
+		"\x1b[0m\x1b[38;2;225;225;225m\x1b[48;2;36;36;36mRun the tests and report back.\x1b[0m\x1b[48;2;36;36;36m " +
+		"\x1b[0m\x1b[38;2;108;108;108m\x1b[48;2;36;36;36m 9:57 AM\x1b[0m\r\n" +
+		"\x1b[0m" + grokBg + "  \x1b[0m\x1b[38;2;225;225;225m" + grokBg + "Done.\x1b[0m\r\n" +
+		"\x1b[0m" + grokBg + "  \x1b[0m\x1b[38;2;108;108;108m" + grokBg + "Worked for 48s\x1b[0m\r\n" +
+		"\x1b[0m" + grokBg + "                                            \x1b[0m\r\n"
+	grokTop    = "\x1b[0m" + grokBg + "  \x1b[0m\x1b[38;2;80;80;88m" + grokBg + "╭────────────────────────────────────────╮\x1b[0m" + grokBg + "  \x1b[0m\r\n"
+	grokBottom = "\x1b[0m" + grokBg + "  \x1b[0m\x1b[38;2;80;80;88m" + grokBg + "╰────── \x1b[0m" +
+		"\x1b[38;2;128;128;128m" + grokBg + "Grok 4.7 (low)\x1b[0m\x1b[38;2;88;88;88m" + grokBg + " · \x1b[0m" +
+		"\x1b[38;2;108;108;108m" + grokBg + "always-approve\x1b[0m\x1b[38;2;80;80;88m" + grokBg + " ─╯\x1b[0m" + grokBg + "  \x1b[0m\r\n" +
+		"\x1b[0m" + grokBg + "                                            \x1b[0m\r\n" +
+		"\x1b[0m" + grokBg + "  \x1b[0m\x1b[1m\x1b[38;2;200;200;200m" + grokBg + "Shift+Tab\x1b[0m\x1b[38;2;108;108;108m" + grokBg + ":mode" +
+		"\x1b[0m\x1b[2m\x1b[38;2;108;108;108m" + grokBg + "  │  \x1b[0m\x1b[1m\x1b[38;2;200;200;200m" + grokBg + "Ctrl+.\x1b[0m" +
+		"\x1b[38;2;108;108;108m" + grokBg + ":shortcuts\x1b[0m\r\n"
 	kiroSep     = "\x1b[0m\x1b[38;2;38;38;38m────────────────────────────────────────\x1b[0m\r\n"
 	kiroStatus  = "developer · auto · ◔ 3%              ~/project · (main)\r\n"
 	kiroIdle    = "›  \x1b[0m\x1b[38;2;158;158;158mask a question or describe a task ↵\x1b[0m\r\n"
@@ -102,6 +120,18 @@ const (
 	kiroTaken   = "  earlier message, sent\r\n\r\n• An answer.\r\n\r\n▸ Credits: 0.24 • Time: 3s\r\n\r\n"
 	kiroWorking = "›  Kiro is working · 10s · Type to steer · Ctrl+S to queue\r\n"
 )
+
+var (
+	grokEmpty = grokTaken + grokTop + grokRow("") + grokBottom
+	grokDraft = grokTaken + grokTop + grokRow("half a thought") + grokBottom
+)
+
+// grokRow is the row of Grok's input box with text typed after its mark,
+// padded to the box's width as Grok draws it.
+func grokRow(text string) string {
+	return "\x1b[0m" + grokBg + "  " + grokEdge + "\x1b[0m\x1b[38;2;225;225;225m" + grokBg + " \x1b[0m\x1b[38;2;200;200;200m" + grokBg + "❯ " +
+		"\x1b[0m\x1b[38;2;225;225;225m" + grokBg + text + strings.Repeat(" ", 37-len(text)) + grokEdge + "\x1b[0m" + grokBg + "  \x1b[0m\r\n"
+}
 
 // inputScreen is the input of a harness of kind as its pane shows it, with
 // lines typed there: Kimi's in its box, Codex's above its footer, and
@@ -144,6 +174,8 @@ func TestInputText(t *testing.T) {
 		"draft of two lines": {"claude", rule + "❯ first line\r\n  second line\r\n" + rule + claudeFooter, "first line\nsecond line", true},
 		"draft begun with an empty first line": {
 			"claude", rule + "❯ \r\n  second line\r\n" + rule + claudeFooter, "second line", true},
+		"claude draft with box corners": {"claude", inputScreen("claude", "", "╰diagram╯"), "╰diagram╯", true},
+		"codex draft with box corners":  {"codex", inputScreen("codex", "", "╰diagram╯"), "╰diagram╯", true},
 		// A person who types a placeholder's words has typed text: the
 		// attribute is asked, not the wording.
 		"placeholder's words, typed": {"codex", "\x1b[0m\x1b[1m›\x1b[0m Ask Codex to do anything\r\n" + codexFooter, "Ask Codex to do anything", true},
@@ -195,6 +227,11 @@ func TestInputText(t *testing.T) {
 		// The busy line also begins with ›, but the later input stays the
 		// empty placeholder while Kiro works.
 		"kiro, mid-turn with empty input": {"kiro", kiroWorking + kiroEmpty, "", true},
+		// Grok's input is in a box too, its bottom with words in it; the
+		// echo of a message it took begins with the same mark, no edge
+		// before it, and is never read as the input.
+		"grok empty": {"grok", grokEmpty, "", true},
+		"grok draft": {"grok", grokDraft, "half a thought", true},
 		// Without its own mark a pane is read by the others': enough to
 		// type nothing after it.
 		"kimi, a line with Claude Code's mark": {"kimi", claudeDraft, "some creative..", true},
@@ -256,6 +293,15 @@ func TestInputTextOfABoxReadUnwrapped(t *testing.T) {
 	t.Parallel()
 	if text, ok := inputText(kimiCaptured, "kimi"); text != "" || !ok {
 		t.Errorf("the captured pane: inputText = %q, %v; want an empty input", text, ok)
+	}
+	// Grok's bottom has words in it, and is where its rows end all the same.
+	for text, pane := range map[string]string{
+		"":               grokTaken + grokTop + strings.TrimSuffix(grokRow(""), "\r\n") + grokBottom,
+		"half a thought": grokTaken + strings.TrimSuffix(grokTop, "\r\n") + strings.TrimSuffix(grokRow("half a thought"), "\r\n") + grokBottom,
+	} {
+		if got, ok := inputText(pane, "grok"); got != text || !ok {
+			t.Errorf("grok, joined: inputText = %q, %v; want %q", got, ok, text)
+		}
 	}
 	two := []string{"Read /Users/x/repo/.git/worktrees/b1/", "yardr/brief-1x7.md and follow it."}
 	for name, c := range map[string]struct {
@@ -417,14 +463,18 @@ func TestNudgeIsNotTypedIntoAnInputThatHoldsText(t *testing.T) {
 		kind, mark, empty, screen string
 		held                      bool
 	}{
-		"claude draft":       {"claude", "❯", claudeEmpty, claudeDraft, true},
-		"codex draft":        {"codex", "›", codexEmpty, codexDraft, true},
-		"claude placeholder": {"claude", "❯", claudeEmpty, claudePlaceholder, false},
-		"codex placeholder":  {"codex", "›", codexEmpty, codexPlaceholder, false},
-		"codex empty":        {"codex", "›", codexEmpty, codexEmpty, false},
-		"kimi draft":         {"kimi", "✨", kimiEmpty, kimiDraft, true},
-		"kimi empty":         {"kimi", "✨", kimiEmpty, kimiEmpty, false},
-		"no mark":            {"acme", ">", noMark, noMark, false},
+		"claude draft":                  {"claude", "❯", claudeEmpty, claudeDraft, true},
+		"codex draft":                   {"codex", "›", codexEmpty, codexDraft, true},
+		"claude draft with box corners": {"claude", "❯", claudeEmpty, inputScreen("claude", "", "╰diagram╯"), true},
+		"codex draft with box corners":  {"codex", "›", codexEmpty, inputScreen("codex", "", "╰diagram╯"), true},
+		"claude placeholder":            {"claude", "❯", claudeEmpty, claudePlaceholder, false},
+		"codex placeholder":             {"codex", "›", codexEmpty, codexPlaceholder, false},
+		"codex empty":                   {"codex", "›", codexEmpty, codexEmpty, false},
+		"kimi draft":                    {"kimi", "✨", kimiEmpty, kimiDraft, true},
+		"kimi empty":                    {"kimi", "✨", kimiEmpty, kimiEmpty, false},
+		"grok draft":                    {"grok", "❯", grokEmpty, grokDraft, true},
+		"grok empty":                    {"grok", "❯", grokEmpty, grokEmpty, false},
+		"no mark":                       {"acme", ">", noMark, noMark, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -821,7 +871,7 @@ func TestNudgeAtKimisCacheMenuIsToldOfOnce(t *testing.T) {
 func TestInputMarked(t *testing.T) {
 	t.Parallel()
 	h := &Herdr{}
-	for kind, want := range map[string]bool{"claude": true, "codex": true, "kimi": true, "kiro": true, "acme": false, "": false} {
+	for kind, want := range map[string]bool{"claude": true, "codex": true, "kimi": true, "kiro": true, "grok": true, "acme": false, "": false} {
 		handle := map[string]any{}
 		if kind != "" {
 			handle[harnessKind] = kind
