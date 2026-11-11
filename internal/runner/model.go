@@ -235,20 +235,40 @@ func sessionFile(pattern string) (string, error) {
 // eachLine calls each with the lines of the file at path in turn, the last
 // one too when it has no newline yet, until each answers true.
 func eachLine(path string, each func(line []byte) (stop bool)) error {
+	_, err := eachLineFrom(path, 0, each)
+	return err
+}
+
+// eachLineFrom is eachLine read from offset, which rests on a line boundary,
+// and the offset it read to at the last line boundary: the end of the file
+// when its last line ends in a newline, else the start of its trailing
+// half-written line, which the next read takes whole.
+func eachLineFrom(path string, offset int64, each func(line []byte) (stop bool)) (end int64, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return offset, err
 	}
 	defer f.Close()
+	if offset > 0 {
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return offset, err
+		}
+	}
+	end, pos := offset, offset
 	// A line holds a whole message, tool output included: no fixed buffer.
 	r := bufio.NewReader(f)
 	for {
 		line, err := r.ReadBytes('\n')
-		if each(line) || err == io.EOF {
-			return nil
+		stop := each(line)
+		pos += int64(len(line))
+		if len(line) > 0 && line[len(line)-1] == '\n' {
+			end = pos
+		}
+		if stop || err == io.EOF {
+			return end, nil
 		}
 		if err != nil {
-			return err
+			return end, err
 		}
 	}
 }

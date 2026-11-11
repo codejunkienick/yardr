@@ -7,10 +7,13 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"yardr.dev/yardr/internal/agents"
 	"yardr.dev/yardr/internal/peer"
 	"yardr.dev/yardr/internal/store"
 )
@@ -22,11 +25,18 @@ const contextStartedAt = "context_started_at"
 // (store.ContextSource). ok is false when the kind names no source, or
 // the file says no use yet (no reply, or none with numbers). The file is
 // found as the model source's is (see Model).
+//
+// The daemon asks on every idle pass, so both halves are remembered across
+// calls: the transcript a worktree match found is pinned while its file
+// stands and the session dir holds the same files, and a transcript whose
+// size and time are as at the last read is not opened again. A grown file
+// is read from where the last read ended.
 func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt time.Time) (used, window int, ok bool, err error) {
 	kind, id, err := h.sessionKind(ctx, handle)
 	if err != nil {
 		return 0, 0, false, err
 	}
+	var path, key string
 	if id == "" {
 		var preStart time.Duration
 		if at, has := handle[contextStartedAt]; has {
@@ -48,15 +58,160 @@ func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt ti
 				}
 			}
 		}
-		kind, id, err = h.matchSession(kind, match, startedAt, preStart)
-		if err != nil || id == "" {
-			return 0, 0, false, err
+		if kind.Kind == "" {
+			// As matchSession resolves it: herdr named no agent, so the
+			// handle's own kind says what the pin below is under.
+			if name, _ := match[harnessKind].(string); name != "" {
+				kind, _ = agents.Lookup(name)
+			}
+		}
+		key = contextMatchKey(kind, match, startedAt)
+		if kind.Model != nil {
+			path = h.pinnedContext(key, kind.Model.Pattern(h.agentHome(kind), "*"))
+		}
+		if path == "" {
+			kind, id, err = h.matchSession(kind, match, startedAt, preStart)
+			if err != nil || id == "" {
+				return 0, 0, false, err
+			}
 		}
 	}
 	if kind.Model == nil || kind.Context == nil {
 		return 0, 0, false, nil
 	}
-	return lastContext(kind.Model.Pattern(h.agentHome(kind), id), *kind.Context)
+	if path == "" {
+		p, err := sessionFile(kind.Model.Pattern(h.agentHome(kind), id))
+		if p == "" || err != nil {
+			return 0, 0, false, err
+		}
+		path = p
+		if key != "" {
+			h.pinContext(key, p, kind.Model.Pattern(h.agentHome(kind), "*"))
+		}
+	}
+	return h.cachedContext(path, *kind.Context)
+}
+
+// contextMatchKey identifies one session's transcript match: the kind the
+// match runs under, the agent and worktree it matches by, and the start it
+// matches from. The pre-start allowance is none of it: it narrows as the
+// shell ages, and the pin stands past that.
+func contextMatchKey(kind store.Harness, match map[string]any, startedAt time.Time) string {
+	name := kind.Kind
+	if name == "" {
+		name, _ = match[harnessKind].(string)
+	}
+	agent, _ := match["agent"].(string)
+	worktree, _ := match["worktree"].(string)
+	return name + "\x00" + agent + "\x00" + worktree + "\x00" + strconv.FormatInt(startedAt.UnixNano(), 10)
+}
+
+// contextPin is the transcript a session's worktree match found. It keeps
+// the sorted paths and the stat of every other candidate, so a later retry,
+// by-hand run, or candidate completed after the match is seen on the next
+// call.
+type contextPin struct {
+	path       string
+	files      []string
+	otherFiles []contextFileState
+}
+
+// contextFileState is a candidate transcript other than the pinned one. A
+// candidate that was incomplete or did not qualify can become a match as it
+// is written, without changing the glob's paths, so its stat must still be
+// checked on each pass.
+type contextFileState struct {
+	path  string
+	size  int64
+	mtime int64
+}
+
+// pinnedContext is the transcript pinned for key, "" when none is, the
+// pinned file no longer stands, or the candidate paths or their state
+// changed. A dropped pin forgets the match but keeps the last reading, which
+// is keyed by the file: a re-match that finds the same file alone still skips
+// its read. The glob and stats open nothing; the match it stands in for opens
+// every candidate.
+func (h *Herdr) pinnedContext(key, pattern string) string {
+	h.contextMu.Lock()
+	pin, ok := h.contextMatch[key]
+	h.contextMu.Unlock()
+	if !ok {
+		return ""
+	}
+	if _, err := os.Stat(pin.path); err != nil {
+		h.dropContextPin(key, pin, true)
+		return ""
+	}
+	files, err := filepath.Glob(pattern)
+	if err == nil {
+		slices.Sort(files)
+	}
+	if err != nil || !slices.Equal(files, pin.files) {
+		h.dropContextPin(key, pin, false)
+		return ""
+	}
+	otherFiles, err := contextFileStates(files, pin.path)
+	if err != nil || !slices.Equal(otherFiles, pin.otherFiles) {
+		h.dropContextPin(key, pin, false)
+		return ""
+	}
+	return pin.path
+}
+
+// dropContextPin forgets the pin only if it is still the one the caller
+// checked: another concurrent call may have installed a newer match.
+func (h *Herdr) dropContextPin(key string, pin contextPin, forgetRead bool) {
+	h.contextMu.Lock()
+	if current, ok := h.contextMatch[key]; ok && current.path == pin.path && slices.Equal(current.files, pin.files) && slices.Equal(current.otherFiles, pin.otherFiles) {
+		delete(h.contextMatch, key)
+		if forgetRead {
+			delete(h.contextLast, pin.path)
+		}
+	}
+	h.contextMu.Unlock()
+}
+
+// pinContext remembers path as the transcript key matched, with the other
+// candidates as they are. Only an unambiguous match pins: ambiguity and no
+// match return no id and so never reach here.
+func (h *Herdr) pinContext(key, path, pattern string) {
+	files, err := filepath.Glob(pattern)
+	if err != nil {
+		return
+	}
+	slices.Sort(files)
+	if !slices.Contains(files, path) {
+		return
+	}
+	otherFiles, err := contextFileStates(files, path)
+	if err != nil {
+		return
+	}
+	h.contextMu.Lock()
+	defer h.contextMu.Unlock()
+	if h.contextMatch == nil {
+		h.contextMatch = map[string]contextPin{}
+	}
+	h.contextMatch[key] = contextPin{path: path, files: files, otherFiles: otherFiles}
+}
+
+// contextFileStates snapshots candidates other than the pinned transcript.
+// The pinned transcript may grow normally; another candidate changing can
+// make the match ambiguous, so a later pass must run the matcher again.
+func contextFileStates(files []string, pinned string) ([]contextFileState, error) {
+	states := make([]contextFileState, 0, len(files))
+	for _, path := range files {
+		if path == pinned {
+			continue
+		}
+		fi, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+		states = append(states, contextFileState{path: path, size: fi.Size(), mtime: fi.ModTime().UnixNano()})
+	}
+	return states, nil
 }
 
 // crewShellStartTimeout is how long Context gives the ps that reads an older
@@ -102,14 +257,41 @@ func crewContextAllowance(parent context.Context, handle map[string]any, started
 	return min(10*time.Second, max(0, startedAt.Sub(at.Add(2*time.Second)))), nil
 }
 
-// lastContext keeps a call's use and window together as the window can change.
-func lastContext(pattern string, source store.ContextSource) (used, window int, ok bool, err error) {
-	path, err := sessionFile(pattern)
-	if path == "" || err != nil {
+// contextRead is what the last read of one transcript saw: its size and
+// time, the offset it read to at the last line boundary, and the use,
+// window and reading it ended with. A call's use and window stay together
+// as the window can change.
+type contextRead struct {
+	size         int64
+	mtime        time.Time
+	offset       int64
+	used, window int
+	ok           bool
+}
+
+// cachedContext is the last use and window the transcript at path holds,
+// remembered across calls: an unchanged file (its size and time as at the
+// last read) is not opened again, a grown one is read from where the last
+// read ended, and a shrunk one (a rotation or truncation) from the start.
+// The offset rests on line boundaries, so a line the last read left
+// half-written is read whole.
+func (h *Herdr) cachedContext(path string, source store.ContextSource) (used, window int, ok bool, err error) {
+	fi, err := os.Stat(path)
+	if err != nil {
 		return 0, 0, false, err
 	}
+	h.contextMu.Lock()
+	last, seen := h.contextLast[path]
+	h.contextMu.Unlock()
+	if seen && fi.Size() == last.size && fi.ModTime().Equal(last.mtime) {
+		return last.used, last.window, last.ok, nil
+	}
+	start := int64(0)
+	if seen && fi.Size() >= last.size {
+		start, used, window, ok = last.offset, last.used, last.window, last.ok
+	}
 	var readErr error
-	err = eachLine(path, func(line []byte) bool {
+	end, err := eachLineFrom(path, start, func(line []byte) bool {
 		n, w, has, e := source.ReadIn(line)
 		if e != nil {
 			readErr = e
@@ -130,5 +312,11 @@ func lastContext(pattern string, source store.ContextSource) (used, window int, 
 	if readErr != nil {
 		return 0, 0, false, fmt.Errorf("read session context: %w", readErr)
 	}
+	h.contextMu.Lock()
+	if h.contextLast == nil {
+		h.contextLast = map[string]contextRead{}
+	}
+	h.contextLast[path] = contextRead{size: fi.Size(), mtime: fi.ModTime(), offset: end, used: used, window: window, ok: ok}
+	h.contextMu.Unlock()
 	return used, window, ok, nil
 }

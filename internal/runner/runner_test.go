@@ -1217,7 +1217,7 @@ func TestExecEnvWorktreesConfig(t *testing.T) {
 
 // fakeHerdrBin writes a script that answers like herdr: results on stdout,
 // error objects on stderr with exit status 1.
-func fakeHerdrBin(t *testing.T, script string) string {
+func fakeHerdrBin(t testing.TB, script string) string {
 	t.Helper()
 	// As a real pane: the prompt an agent was sent shows in it.
 	return deafHerdrBin(t, `case "$1 $2" in
@@ -1253,7 +1253,7 @@ answer() {
 
 // deafHerdrBin is fakeHerdrBin without a pane that shows what was sent: an
 // agent that takes no keys, unless the script says otherwise.
-func deafHerdrBin(t *testing.T, script string) string {
+func deafHerdrBin(t testing.TB, script string) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "herdr")
 	scripttest.Write(t, p, "#!/bin/sh\n"+herdrAnswers+script)
