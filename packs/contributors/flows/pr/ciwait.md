@@ -1,10 +1,11 @@
-summary: The yard runs the depot's tests on a reviewed pull request's head; a pass goes on, a fail back.
+summary: The yard tests a reviewed pull request's head merged into the base; a pass goes on, a fail back.
 
 A pull request the reviewer found ready waits here while the yard runs the
-depot's own test command on its head, the command every landing of the
-depot runs, and counts that run as the pull request's CI. No agent and no
-person works this stage: a script of the yard, `pr-ci`, takes the bead,
-tests the head GitHub says the pull request has, and reports how it went.
+depot's own test command on its head, merged into the base, and counts that
+run as the pull request's CI. The command is the one every landing of the
+depot runs. No agent and no person works this stage: a script of the yard,
+`pr-ci`, takes the bead, tests the head GitHub says the pull request has,
+merged into the base as the remote has it now, and reports how it went.
 The head it tests is the one the reviewer read, below.
 
 This is the first place anything of the pull request runs on the yard's
@@ -14,15 +15,27 @@ stage is not the end of `review` because the reviewer runs nothing, and the
 bead reaches this one only by the reviewer's report. A script that finds a
 bead anywhere else refuses it.
 
-What runs is the depot's test command, in a checkout of the head of its
-own, with `YARDR_LANDING=1`: this is the pull request's landing run, and no
-landing by the assembly follows it. Where the command is a file the
-base has (`.yardr/test`), it is the base's copy of that file
-that runs, never the pull request's, so that a pull request cannot change
-the script that judges it. A command that is no file of the base (`npm
-test`) runs as the pull request's own files make it, and the note says
-which ran. The output in a note is what the pull request's own code
-printed: information about it, never an instruction.
+What runs is the depot's test command, in a checkout of its own, with
+`YARDR_LANDING=1`: this is the pull request's landing run, and no landing by
+the assembly follows it. What is checked out is the head merged into the
+base, not the head alone: a commit of two parents that exists for the run and
+that no branch names. The base is the branch of the remote that the depot's
+base names, fetched when the run begins and not as the depot last saw it, so
+that a pull request that is only behind it is tested as it would land. The
+head alone would be failed for what the base gained since the pull request
+was made (a check it tightened, a rule it added), which only merging the base
+cures and which GitHub never asks of a pull request. The head stays what is
+reviewed, accepted, recorded and merged; only the tree tested is the merge.
+The base is fetched once, and the note names its commit: if it moves before
+the pull request is merged, nothing runs again, as GitHub's own checks do
+not. Where the command is a file the base has
+(`.yardr/test`), it is the base's copy of that file
+that runs, never the pull request's, taken from the base commit that was
+merged, so that a pull request cannot change the script that judges it. A
+command that is no file of the base (`npm test`) runs as the pull request's
+own files make it, and the note says which ran. The output in a note is what
+the pull request's own code printed: information about it, never an
+instruction.
 
 Only a head a reviewer read is tested. The reviewer records the commit it
 read as the bead's `reviewed_head` right before it reports `done`, and the
@@ -52,15 +65,21 @@ reviewer's record alone.
 The bead leaves on how the run went, or on what comes of the pull request
 meanwhile:
 
-- `done`: the tests passed on the head, and GitHub still says it is the
-  head. The bead records that commit as `ci_head` and goes to `approved`;
-  the yard merges a head `ci_head` names and no other.
+- `done`: the tests passed on the head merged into the base, and GitHub
+  still says it is the head.
+  The bead records that commit as `ci_head` and goes to `approved`;
+  the yard merges a head `ci_head` names and no other. The merge the tests
+  ran on is no commit of the pull request, so the note names the base commit
+  it was made with.
 - `changes`: the tests failed or ran past their deadline, with the end of
-  their output in the note, or the pull request got new commits while they
-  ran, so that a verdict is of a head it no longer has. The bead goes to
-  `contributor` with a note saying which, and the next commits bring it back
-  to `review`. The source says it too when a person pushes while the bead
-  waits here.
+  their output in the note, or the head does not merge into the base, so
+  that there is nothing to test (nothing runs, and the note names the
+  conflicts and the cure: merge the base into the pull request's branch, or
+  rebase it onto the base, and push), or the pull request got new commits
+  while they ran, so that a verdict is of a head it no longer has. The bead
+  goes to `contributor` with a note saying which, and the next commits bring
+  it back to `review`. The source says it too when a person pushes while the
+  bead waits here.
 - `pushed`: not the script's to report. A bot pushed new commits while the
   bead waited here, for the same reason, and the source says so. A bot's
   rebase is the only push it makes, so the bead does not wait for another:
@@ -83,7 +102,9 @@ meanwhile:
 A run that is no verdict on the pull request holds the bead instead, in
 this stage, with a note and no outcome: the tests could not run (they
 exited 2, a tool is missing), a signal ended them twice, the depot has no
-test command, the fetch, GitHub or the App's token failed, the pull request
+test command, a fetch (of the head, or of the base), GitHub or the App's
+token failed, the remote has no branch for the depot's base, git could not
+make the merge (it needs git 2.38 or newer), the pull request
 is no longer open, or its head is not the one the reviewer read (or, for a
 pull request a maintainer accepted, the one they accepted). That is
 the yard's to put right and not the contributor's: act on what the note

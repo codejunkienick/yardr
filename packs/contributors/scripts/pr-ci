@@ -1,10 +1,11 @@
 #!/bin/sh
 # pr-ci: the yard as the CI of a pull request. It runs the depot's test
-# command on the head of the pull request a pr bead tracks, when the bead is in
-# ciwait, and says how it went: done, with the head it tested recorded as the
-# bead's metadata ci_head, which merge-pr reads before it merges anything; or
-# changes, with the failing tests and the end of the output, and the full
-# output attached beside it. Run it as the cmd of an exec group of its
+# command on the head of the pull request a pr bead tracks, merged into the
+# base, when the bead is in ciwait, and says how it went: done, with the head it
+# tested recorded as the bead's metadata ci_head, which merge-pr reads before it
+# merges anything; or changes, with the failing tests and the end of the output,
+# and the full output attached beside it, or with the conflicts of a head that
+# does not merge into the base. Run it as the cmd of an exec group of its
 # own (pr-ci, limit 1: one run at a time), routed for the pr flow's ciwait stage
 # (type pr). The contributors pack's flows/pr/ciwait.md says what the stage is
 # for, and docs/line.md, "The yard as the CI of a pull request", has the setup.
@@ -22,13 +23,14 @@
 # pull request"), and the calls ask for the number, state and head alone, no
 # check or status field.
 #
-# What is tested is the head the reviewer read. The reviewer records the commit
-# it read as the bead's metadata reviewed_head before it reports done (the
-# contributors pack's roles/pr-reviewer.md), and the head GitHub says the pull
-# request has now is tested only if it is that commit: a pull request pushed to
-# between the review and this run, whose event came late or not at all, holds
-# the bead for a new review before anything of it is fetched or run. A bead with
-# no reviewed_head holds too, since nothing says which head was read.
+# What is tested is the head the reviewer read, merged into the base. The
+# reviewer records the commit it read as the bead's metadata reviewed_head
+# before it reports done (the contributors pack's roles/pr-reviewer.md), and the
+# head GitHub says the pull request has now is tested only if it is that
+# commit: a pull request pushed to between the review and this run, whose event
+# came late or not at all, holds the bead for a new review before anything of it
+# is fetched or run. A bead with no reviewed_head holds too, since nothing says
+# which head was read.
 #
 # And, for a pull request that waited in triage, the head a maintainer accepted.
 # The bead carries that commit as its metadata accepted_head (the yard records
@@ -38,14 +40,32 @@
 # ciwait. A bead that never waited in triage, one the pack's own lines let into
 # review (a trusted author's, a bot's), is held to the reviewer's record alone.
 #
-# The code is the head GitHub says the pull request has now. It is fetched from
-# the depot's remote origin by the ref GitHub keeps for the pull request, a
-# fork's included (git fetch origin refs/pull/<n>/head), with the operator's own
-# git credentials, and checked out detached in a worktree of its own beside the
-# bead's, which is removed when the script ends, however it ends. A bead that is
-# not in ciwait is refused before anything is fetched: ciwait is the stage after
-# a reviewer has read the pull request, and the yard runs a pull request's code
+# The code is the head GitHub says the pull request has now, merged into the
+# base. The head is fetched from the depot's remote origin by the ref GitHub
+# keeps for the pull request, a fork's included (git fetch origin
+# refs/pull/<n>/head), and so is the base: the branch of origin that the
+# depot's base names (main, for main and origin/main alike), as origin has it
+# now and not as the depot last saw it. Both are fetched with the operator's own
+# git credentials, and neither moves a ref of the depot. git merge-tree merges
+# the head into the base in the object store alone; a clean merge is made a
+# commit of two parents, the base and the head, that no ref names, and that
+# commit is checked out detached in a worktree of its own beside the bead's,
+# which is removed when the script ends, however it ends. A bead that is not in
+# ciwait is refused before anything is fetched: ciwait is the stage after a
+# reviewer has read the pull request, and the yard runs a pull request's code
 # nowhere before that.
+#
+# The merge is what is tested because it is the nearest a test gets to what
+# landing makes: merge-pr has GitHub merge the head into the base. A head that
+# is only behind the base, tested alone, would be judged by the base's rules on
+# a tree the base has since left (a check it tightened, a test it mended), a
+# failure that only merging the base cures and that GitHub never asks of a pull
+# request. The head stays what is reviewed, accepted, recorded (ci_head) and
+# merged; only the tree that is tested is the merge. The base is the commit
+# origin had when the run began, which the notes name, and it is not asked again
+# before the pull request is merged. A head that conflicts with the base has no
+# merge to test: it is changes, with the conflicts and the cure, merging the
+# base into the pull request's branch, which the contributor does.
 #
 # The contributors pack carries a copy of this script (scripts/pr-ci) for the
 # group that works ciwait, which a test holds equal: a change is made to both.
@@ -59,15 +79,17 @@
 #                       waited for the race lock (default 1800)
 #
 # The test command is the one every landing runs, run as merge-local runs it,
-# in the checkout of the head and with YARDR_LANDING=1. This run is the pull
+# in the checkout of the merge and with YARDR_LANDING=1. This run is the pull
 # request's landing run: merge-pr merges a head it passed on and no landing by
 # the assembly follows, so no other run of the command stands between the head
 # and the base. Where the command is the path of a file the base has
-# (test=.yardr/test), the base's copy of that file is what runs, with sh: a
-# pull request cannot change the script that judges it, which matters most for
-# a fork's. Anything else is a command for sh -c, which the pull request's own
-# files may change (a package.json's scripts); the note says which ran. The run
-# does not get the App's id and key file, which are for the token alone.
+# (test=.yardr/test), the base's copy of that file is what runs, with sh, the
+# one of the base commit that was merged, so that the script and the tree agree
+# on the base's side: a pull request cannot change the script that judges it,
+# which matters most for a fork's. Anything else is a command for sh -c, which
+# the pull request's own files may change (a package.json's scripts); the note
+# says which ran. The run does not get the App's id and key file, which are for
+# the token alone.
 #
 # Exit 1, or any other not named here, is a red run, the contributor's to fix.
 # Exit 2 is the command saying it could not run at all (a tool missing, a base
@@ -77,11 +99,13 @@
 # request: it is run once more, and held if a signal ends it again. The kill at
 # the deadline is not this: it is a red run.
 #
-# The outcomes at ciwait are done and changes. Green on the head, which GitHub
-# still says is the head after the run, is done; a red run, or a head that
-# moved while it ran (the tests said nothing of the head it has now), is changes.
-# Done is never reported without a green run on the exact head. Everything that
-# is no verdict on the pull request (no token, a refused gh, a failed fetch, a
+# The outcomes at ciwait are done and changes. Green on the merge of the head,
+# which GitHub still says is the head after the run, is done; a red run, a head
+# that does not merge into the base, or a head that moved while it ran (the
+# tests said nothing of the head it has now), is changes. Done is never reported
+# without a green run on a merge of the exact head. Everything that is no
+# verdict on the pull request (no token, a refused gh, a failed fetch of the
+# head or of the base, a base branch origin lacks, a merge git cannot make, a
 # depot with no test command, a run that could not run, a pull request that is
 # not open, a head no reviewer read) holds the bead with a note, for a
 # maintainer to put right and unhold. Nothing here retries.
@@ -382,7 +406,10 @@ rereview="Send it back to be read: yardr bead advance $BEAD --to review, then ya
 # above, whatever the ref holds by now; the sha is the whole of the claim, and
 # a commit the fetch did not bring is not tested.
 to=; command -v timeout >/dev/null && to="timeout 120"
-GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=true SSH_ASKPASS=true $to git -C "$REPO" fetch --quiet --no-tags origin "refs/pull/$number/head" 2>"$errf" ||
+# origin_git is git in the depot, asked of origin: with no prompt for a
+# credential, and ended after two minutes where there is a timeout to end it.
+origin_git() { GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=true SSH_ASKPASS=true $to git -C "$REPO" "$@"; }
+origin_git fetch --quiet --no-tags origin "refs/pull/$number/head" 2>"$errf" ||
   hold "fetching refs/pull/$number/head from origin in $REPO failed: $(head -c 500 "$errf"). Not running anything."
 if ! git -C "$REPO" cat-file -e "$head^{commit}" 2>/dev/null; then
   # Pushed to between GitHub's answer and the fetch, or origin is not the
@@ -393,22 +420,77 @@ if ! git -C "$REPO" cat-file -e "$head^{commit}" 2>/dev/null; then
   fi
   hold "origin did not give the commit $head of $url by refs/pull/$number/head: is origin the repository the pull request is on? Not running anything."
 fi
-scratch_gone
-git -C "$REPO" worktree add --detach --quiet "$WT" "$head" >"$errf" 2>&1 ||
-  hold "cannot check out $at of $url in $WT: $(head -c 500 "$errf")"
 
-# The depot's test command runs on exactly the head GitHub named, as merge-local
-# runs it for a bead. Where the command is the path of a file the base has
-# (test=.yardr/test), the base's copy of that file is what runs, with sh, in the
-# checkout of the head; anything else is a command for sh -c. With
-# YARDR_LANDING=1: this is the pull request's landing run, and what a depot's
-# command makes of that is its own.
-if [ "$(git -C "$REPO" cat-file -t "$BASE:$TEST" 2>/dev/null)" = blob ]; then
+# The base, as origin has it now and not as the depot last saw it, for the head
+# is tested merged into it. The depot's base is a branch (main) or the
+# remote-tracking one of origin (origin/main), and the branch is the same one of
+# origin's either way. Its commit is asked for first and the branch fetched
+# after, so that the commit is the one that was asked for: FETCH_HEAD, which
+# any other fetch in the depot overwrites (merge-local's, say), is not trusted
+# to say which it was. --refmap= leaves out the remote-tracking branch the fetch
+# would move, so that no ref of the depot does.
+bbranch=${BASE#origin/}
+asked=$(origin_git ls-remote origin "refs/heads/$bbranch" 2>"$errf") ||
+  hold "asking origin in $REPO for its branch $bbranch, which the depot's base $BASE names, failed: $(head -c 500 "$errf"). Not running anything."
+basesha=$(printf '%s\n' "$asked" | awk -v ref="refs/heads/$bbranch" '$2 == ref { print $1; exit }')
+case $basesha in *[!0-9a-fA-F]*) basesha= ;; esac
+case ${#basesha} in 40 | 64) ;; *) basesha= ;; esac
+[ -n "$basesha" ] ||
+  hold "origin has no branch $bbranch, which the depot's base $BASE names, so there is nothing to merge the head of $url into. Not running anything."
+origin_git fetch --quiet --no-tags --refmap= origin "refs/heads/$bbranch" 2>"$errf" ||
+  hold "fetching $bbranch from origin in $REPO failed: $(head -c 500 "$errf"). Not running anything."
+git -C "$REPO" cat-file -e "$basesha^{commit}" 2>/dev/null ||
+  hold "origin did not give the commit $basesha of its branch $bbranch: was it pushed over while it was fetched? Not running anything; unhold runs the tests again."
+bat=$(short "$basesha")
+# What the notes name as what ran: the head, merged into the base.
+tested="$at merged into $bbranch at $bat"
+
+# The head merged into the base, by git merge-tree, which makes the merge in the
+# object store alone: no checkout, no index, no ref of the depot is touched, and
+# no hook runs. A clean merge answers its tree and exits 0. With conflicts it
+# answers the tree it could make, the entries in conflict and what happened,
+# and exits 1; but 1 is what git says as well of a commit it cannot merge at
+# all, with nothing on stdout, which is no conflict of the pull request's: a
+# conflict is a 1 that left a tree. Any other exit is git failing (128 for
+# histories with nothing in common, 129 from a git older than 2.38, which has no
+# --write-tree), and is no verdict on the pull request. The CONFLICT lines are
+# picked out by their English prefix, so the locale is pinned.
+mrc=0
+mout=$(LC_ALL=C git -C "$REPO" merge-tree --write-tree "$basesha" "$head" 2>"$errf") || mrc=$?
+tree=$(printf '%s\n' "$mout" | head -n 1)
+case $tree in *[!0-9a-fA-F]*) tree= ;; esac
+case ${#tree} in 40 | 64) ;; *) tree= ;; esac
+if [ "$mrc" = 1 ] && [ -n "$tree" ]; then
+  # The tree it could make is never checked out: it holds the conflict markers.
+  conflicts=$(printf '%s\n' "$mout" | grep '^CONFLICT' | head -n 20)
+  report changes "the head $at of $url does not merge into $bbranch at $bat, so there is nothing to test and nothing was run. To resolve the conflicts, merge $bbranch into the pull request's branch (or rebase it onto $bbranch) and push; the next commits bring it back to review. Git's CONFLICT lines, up to 20:
+$conflicts"
+fi
+[ "$mrc" = 0 ] && [ -n "$tree" ] ||
+  hold "git could not merge the head $at of $url into $bbranch at $bat (git merge-tree --write-tree, exit $mrc; a git older than 2.38 has none): $(head -c 500 "$errf"). Not running anything."
+# The merge is made a commit so that the checkout is one: a detached HEAD the
+# tests can name. commit-tree runs no hook and signs nothing, and wants an
+# identity that no machine can be relied on to have; no ref names the commit,
+# which the checkout's HEAD keeps until the checkout is removed.
+merged=$(GIT_AUTHOR_NAME=pr-ci GIT_AUTHOR_EMAIL=pr-ci@yardr.dev GIT_COMMITTER_NAME=pr-ci GIT_COMMITTER_EMAIL=pr-ci@yardr.dev \
+  git -C "$REPO" commit-tree "$tree" -p "$basesha" -p "$head" -m "pr-ci: $head of $url merged into $bbranch at $basesha" 2>"$errf") ||
+  hold "cannot make the merge of $tested to test: $(head -c 500 "$errf")"
+scratch_gone
+git -C "$REPO" worktree add --detach --quiet "$WT" "$merged" >"$errf" 2>&1 ||
+  hold "cannot check out the merge of $tested of $url in $WT: $(head -c 500 "$errf")"
+
+# The depot's test command runs on the head GitHub named merged into the base,
+# as merge-local runs it for a bead. Where the command is the path of a file the
+# base has (test=.yardr/test), the base's copy of that file is what runs, with
+# sh, in the checkout of the merge, the copy of the commit that was merged;
+# anything else is a command for sh -c. With YARDR_LANDING=1: this is the pull
+# request's landing run, and what a depot's command makes of that is its own.
+if [ "$(git -C "$REPO" cat-file -t "$basesha:$TEST" 2>/dev/null)" = blob ]; then
   WHAT="the base's copy of $TEST"
 else
   WHAT="the command $TEST"
 fi
-echo "== the tests on $url at $at: $WHAT"
+echo "== the tests on $url at $tested: $WHAT"
 
 # --- closefds: the same text in merge-local, integrate-train, pr-ci, deploy-dokku and deploy-void (a test holds them equal) ---
 # closefds closes every descriptor above 2 that the subshell it is called in
@@ -521,7 +603,7 @@ runtest() {
   copy=
   if [ "$WHAT" = "the base's copy of $TEST" ]; then
     copy=$(mktemp "$work/copy.XXXXXX") || hold "cannot make a file for the copy of $TEST"
-    git -C "$REPO" show "$BASE:$TEST" >"$copy" || hold "cannot read $TEST from $BASE"
+    git -C "$REPO" show "$basesha:$TEST" >"$copy" || hold "cannot read $TEST from $bbranch at $bat"
   fi
   t0=$(date +%s)
   (
@@ -676,8 +758,8 @@ shown() {
 # saying the output was too large to keep instead.
 attach_log() {
   [ -n "${log:-}" ] && [ -f "$log" ] || return 0
-  "$Y" bead note "$BEAD" "pr-ci: full gate output of the failed run on $url at $at ($WHAT, exit $rc)" --file "$log" >/dev/null 2>&1 && return 0
-  "$Y" bead note "$BEAD" "pr-ci: the full gate output of the failed run on $url at $at ($WHAT, exit $rc) was too large to keep" >/dev/null 2>&1 || true
+  "$Y" bead note "$BEAD" "pr-ci: full gate output of the failed run on $url at $tested ($WHAT, exit $rc)" --file "$log" >/dev/null 2>&1 && return 0
+  "$Y" bead note "$BEAD" "pr-ci: the full gate output of the failed run on $url at $tested ($WHAT, exit $rc) was too large to keep" >/dev/null 2>&1 || true
   return 0
 }
 
@@ -702,7 +784,7 @@ fi
 secs=0
 runtest
 if [ "$rc" -gt 128 ] && [ -z "$late" ]; then
-  first="the tests on $url at $at ($WHAT) were ended by signal $((rc - 128)) (exit $rc), not by a failing test"
+  first="the tests on $url at $tested ($WHAT) were ended by signal $((rc - 128)) (exit $rc), not by a failing test"
   echo "== $first; running them once more"
   "$Y" bead note "$BEAD" "pr-ci: $first; running them once more on the same commit. Of the first run, $(shown):
 ${fails:+$fails
@@ -724,32 +806,33 @@ ${fails:+$fails
 fi
 if [ -n "$late" ]; then
   attach_log
-  report changes "the tests on $url at $at ($WHAT) ran past their deadline of ${LIMIT}s and were killed; $(shown):
+  report changes "the tests on $url at $tested ($WHAT) ran past their deadline of ${LIMIT}s and were killed; $(shown):
 ${fails:+$fails
 }$out"
 fi
 case $rc in
 0) ;;
-2) attach_log; hold "the tests could not run on $url at $at ($WHAT said so: exit 2); $(shown):
+2) attach_log; hold "the tests could not run on $url at $tested ($WHAT said so: exit 2); $(shown):
 ${fails:+$fails
 }$out" ;;
-*) attach_log; report changes "the tests failed on $url at $at ($WHAT, exit $rc); $(shown):
+*) attach_log; report changes "the tests failed on $url at $tested ($WHAT, exit $rc); $(shown):
 ${fails:+$fails
 }$out" ;;
 esac
 
 # Green. It counts for the head the tests ran on and no other: a pull request
 # pushed to during the run has a head they said nothing of. GitHub is asked once
-# more, and only the same head is recorded.
+# more, and only the same head is recorded; the base is not asked again, as
+# GitHub asks nothing again of a pull request between its checks and its merge.
 now=$(live_head)
 [ -n "$now" ] ||
-  hold "the tests passed on $url at $at ($WHAT), but GitHub would not say what its head is now: $(head -c 500 "$errf"). Nothing was recorded; unhold to run them again."
+  hold "the tests passed on $url at $tested ($WHAT), but GitHub would not say what its head is now: $(head -c 500 "$errf"). Nothing was recorded; unhold to run them again."
 [ "$(lower "$now")" = "$(lower "$head")" ] ||
-  report changes "the PR changed while CI ran: the tests passed on $at ($WHAT), but the head is $(short "$now") now. Nothing was recorded; the next commits bring it back to review."
+  report changes "the PR changed while CI ran: the tests passed on $tested ($WHAT), but the head is $(short "$now") now. Nothing was recorded; the next commits bring it back to review."
 "$Y" bead update "$BEAD" --meta "ci_head=$head" >"$errf" 2>&1 ||
-  hold "the tests passed on $url at $at ($WHAT), but ci_head could not be recorded on $BEAD: $(head -c 500 "$errf"). Unhold to run them again."
+  hold "the tests passed on $url at $tested ($WHAT), but ci_head could not be recorded on $BEAD: $(head -c 500 "$errf"). Unhold to run them again."
 # The gate's own last line, when that is what the run ended with, is the record
 # of what it ran; nothing else of the output is copied on a green run.
 last=$(printf '%s\n' "$out" | tail -n 1)
 case $last in "test: "*) said=" Its last line: $last" ;; *) said= ;; esac
-report "done" "the tests passed on $url at $head ($WHAT, $secs s). CI is the yard's own run of the depot's test command on that head: ci_head=$head.$said"
+report "done" "the tests passed on $url at $head merged into $bbranch at $basesha ($WHAT, $secs s). CI is the yard's own run of the depot's test command on that merge: ci_head=$head.$said"

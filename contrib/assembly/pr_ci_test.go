@@ -7,7 +7,10 @@ package assembly
 // test command is a script of the base, as yardr's .yardr/test is, which does
 // what a test chose through files in the stand-in's directory. A pull request's
 // commit is made in a clone of that remote, so the depot has it only once
-// pr-ci has fetched it.
+// pr-ci has fetched it. The remote's main can move on after a pull request is
+// made (mainMoves), and the depot's own main does not follow it, as the main of
+// a depot that nobody pulls into does not: the pull request is then behind the
+// base, which is what it is merged into and tested on.
 //
 // Each case has a yard of its own (a copy of the template yard, which is
 // cheaper than a run of the script), so the cases run beside one another. A
@@ -21,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -35,12 +39,16 @@ import (
 )
 
 // baseCI is the depot's test script, a file of the base. It says where it ran
-// and on what, then does what the files of $FAKE_GH tell it: ci-signals (end
-// itself by SIGTERM that many times), ci-sleep (sleep, in a child whose pid it
-// writes to sleep-pid), during (the commit the pull request's head moves to
-// while it runs) and ci-exit (exit with that status). A tree with a file RED
-// is red.
+// and on what (the commit, and the parents of that commit, which are the base
+// and the pull request's head when what ran is their merge), then does what
+// the files of $FAKE_GH tell it: ci-signals (end itself by SIGTERM that many
+// times), ci-sleep (sleep, in a child whose pid it writes to sleep-pid), during
+// (the commit the pull request's head moves to while it runs) and ci-exit (exit
+// with that status). A tree with a file RED is red, and so is one that lacks a
+// file that needs lists: a stand-in for a rule of the base that a head which
+// predates it breaks.
 const baseCI = `echo "ci.sh of the base: in $(pwd), at $(git rev-parse HEAD), landing=${YARDR_LANDING-unset}, app=${GITHUB_APP_ID-unset}"
+echo "ci.sh of the base: parents $(git rev-list --parents -n 1 HEAD | cut -d' ' -f2-)"
 d=$FAKE_GH
 if [ -s "$d/ci-signals" ]; then
   left=$(cat "$d/ci-signals"); echo $((left - 1)) >"$d/ci-signals"
@@ -56,6 +64,9 @@ if [ -e "$d/ci-sleep" ]; then sh -c 'sleep 300 & echo $! >"$1"; wait' sh "$d/sle
 [ ! -e "$d/during" ] || cp "$d/during" "$d/head"
 [ ! -e "$d/ci-exit" ] || exit "$(cat "$d/ci-exit")"
 test ! -e RED || { echo "RED is in the tree"; exit 1; }
+if [ -e "$d/needs" ]; then
+  for f in $(cat "$d/needs"); do test -e "$f" || { echo "$f is missing from the tree"; exit 1; }; done
+fi
 echo "test: ci.sh @ $(git rev-parse --short HEAD): pass"
 `
 
@@ -108,15 +119,46 @@ func newCIYard(t *testing.T) *ciYard {
 func (c *ciYard) pull(n int, files map[string]string) string {
 	c.t.Helper()
 	c.git(c.work, "reset", "-q", "--hard", "origin/main")
+	c.stage(fmt.Sprintf("pull request %d", n), files)
+	c.git(c.work, "push", "-q", "-f", "origin", fmt.Sprintf("HEAD:refs/pull/%d/head", n))
+	return c.git(c.work, "rev-parse", "HEAD")
+}
+
+// pullUnrelated is pull for a head that has no history in common with main, as
+// a branch started from nothing has: it puts that head on origin and returns
+// its commit.
+func (c *ciYard) pullUnrelated(n int) string {
+	c.t.Helper()
+	c.git(c.work, "checkout", "-q", "--orphan", fmt.Sprintf("unrelated-%d", n))
+	c.git(c.work, "rm", "-rqf", ".")
+	c.stage(fmt.Sprintf("pull request %d, from nothing", n), map[string]string{"unrelated.txt": "z\n"})
+	c.git(c.work, "push", "-q", "-f", "origin", fmt.Sprintf("HEAD:refs/pull/%d/head", n))
+	return c.git(c.work, "rev-parse", "HEAD")
+}
+
+// mainMoves puts a commit of files on origin's main, as another pull request
+// merged meanwhile would, so that a pull request made before it is behind main.
+// The depot's own main stays where it was, as the main of a depot nobody pulls
+// into does, and so does the depot's remote-tracking branch: neither is fetched.
+// It returns the commit, which is the base the pull request is then merged into.
+func (c *ciYard) mainMoves(files map[string]string) string {
+	c.t.Helper()
+	c.git(c.work, "reset", "-q", "--hard", "origin/main")
+	c.stage("main moves on", files)
+	c.git(c.work, "push", "-q", "origin", "HEAD:refs/heads/main")
+	return c.git(c.work, "rev-parse", "HEAD")
+}
+
+// stage commits files in the clone of origin, on whatever it has checked out.
+func (c *ciYard) stage(message string, files map[string]string) {
+	c.t.Helper()
 	for name, text := range files {
 		if err := os.WriteFile(filepath.Join(c.work, name), []byte(text), 0o644); err != nil {
 			c.t.Fatal(err)
 		}
 	}
 	c.git(c.work, "add", "-A")
-	c.git(c.work, "commit", "-q", "--allow-empty", "-m", fmt.Sprintf("pull request %d", n))
-	c.git(c.work, "push", "-q", "-f", "origin", fmt.Sprintf("HEAD:refs/pull/%d/head", n))
-	return c.git(c.work, "rev-parse", "HEAD")
+	c.git(c.work, "commit", "-q", "--allow-empty", "-m", message)
 }
 
 // reviewed records on bead id the commit its reviewer read, as the reviewer does
@@ -169,7 +211,7 @@ func (c *ciYard) ci(id string, o mergeOpts, files map[string]string) {
 
 func (c *ciYard) ciGroup(id, group string, o mergeOpts, files map[string]string) {
 	c.t.Helper()
-	for _, name := range []string{"ci-signals", "ci-sleep", "sleep-pid", "ci-exit", "during", "ended", "signal-parent"} {
+	for _, name := range []string{"ci-signals", "ci-sleep", "sleep-pid", "ci-exit", "during", "ended", "signal-parent", "needs"} {
 		if err := os.Remove(filepath.Join(c.gh, name)); err != nil && !os.IsNotExist(err) {
 			c.t.Fatal(err)
 		}
@@ -228,23 +270,31 @@ func (c *ciYard) checkoutGone(id, what string) {
 }
 
 // pr-ci runs the depot's test command on the head GitHub names when it is the
-// one the bead's reviewer recorded (in any case of its letters), in a checkout
-// of its own: the base's copy of the script, however the pull request edited
-// it, with YARDR_LANDING=1 and without the App's inputs, and records the head
-// it passed on as ci_head and reports done; a red run, one past its deadline
-// and a head that moved while it ran report changes, with the end of the output
-// where there is one; a run that cannot run holds the bead, as one that a
-// signal ended twice does, and one ended once is run again. Whichever it is,
-// the checkout is gone afterwards, the depot's own checkout and refs are as
-// they were, and GitHub was asked only to read the pull request, with a token
-// that is nowhere but gh's environment. A test command that is no file of the
-// base runs as a command, in the same environment: the landing's switch is set
-// over whatever the group's cmd left in it.
+// one the bead's reviewer recorded (in any case of its letters), merged into
+// the base as origin has it now, in a checkout of its own: the base's copy of
+// the script, however the pull request edited it, taken from the base that was
+// fetched and not from the depot's own main, which may lag it, with
+// YARDR_LANDING=1 and without the App's inputs. It records the head it passed
+// on as ci_head and reports done. A pull request that is only behind the base is
+// done when its merge is green, as the head alone, which lacks what the base
+// has gained, would not be; one that conflicts with the base is changes, naming
+// the cure, and nothing runs. A red run, one past its deadline and a head that
+// moved while it ran report changes, with the end of the output where there is
+// one; a run that cannot run holds the bead, as one that a signal ended twice
+// does, and one ended once is run again. Whichever it is, the checkout is gone
+// afterwards, the depot's own checkout and refs are as they were (origin's
+// main, which moved ahead of them, is not fetched into them), and GitHub was
+// asked only to read the pull request, with a token that is nowhere but gh's
+// environment. A test command that is no file of the base runs as a command, in
+// the same environment: the landing's switch is set over whatever the group's
+// cmd left in it.
 func TestPRCIJudgesTheHead(t *testing.T) {
 	t.Parallel() // as its subtests are: see TestMain
 	for _, tc := range []struct {
 		what     string
 		files    map[string]string // the pull request's, on top of main
+		main     map[string]string // origin's main moves on after the pull request is made, a commit of these files, so that the pull request is behind it
+		base     string            // the depot's base, main unless written
 		stand    map[string]string // the stand-in's, besides the head; {sha} is the pull request's commit
 		head     string            // what GitHub says the head is at first, the pull request's commit unless written
 		reviewed string            // what the reviewer recorded, the head GitHub says unless written; {SHA} is the pull request's commit in capitals
@@ -259,23 +309,47 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 		not      []string // and not
 	}{
 		{what: "green", files: map[string]string{"feature.txt": "new\n"}, reviewed: "{SHA}", stage: "approved",
-			wants: []string{"the tests passed on {url} at {sha} (the base's copy of ci.sh,", "ci_head={sha}", "Its last line: test: ci.sh @ {short}: pass"}},
+			wants: []string{"the tests passed on {url} at {sha} merged into main at {base} (the base's copy of ci.sh,", "ci_head={sha}"}},
+		// A pull request made before main moved on is behind it. What is tested
+		// is its merge into main as origin has it now, so the base's script, which
+		// wants the file main gained, passes it; the head alone, which lacks that
+		// file as a head that predates a rule of the base does, would not. And
+		// the depot's own main, which was not pulled, does not matter: the base is
+		// asked of origin.
+		{what: "a head that is only behind the base", files: map[string]string{"feature.txt": "new\n"}, main: map[string]string{"main-only.txt": "landed\n"},
+			stand: map[string]string{"needs": "feature.txt main-only.txt"}, stage: "approved",
+			wants: []string{"the tests passed on {url} at {sha} merged into main at {base} (the base's copy of ci.sh,", "ci_head={sha}"}},
+		// The depot's base may be the remote-tracking branch, which a depot made
+		// by `depot add` has by default: it names the same branch of origin.
+		{what: "a depot whose base is the remote-tracking main", files: map[string]string{"feature.txt": "new\n"}, main: map[string]string{"main-only.txt": "landed\n"}, base: "origin/main",
+			stand: map[string]string{"needs": "feature.txt main-only.txt"}, stage: "approved",
+			wants: []string{"the tests passed on {url} at {sha} merged into main at {base} (the base's copy of ci.sh,", "ci_head={sha}"}},
+		// The base's copy of the script is the fetched base's, so that the script
+		// and the tree agree on the base's side: the one origin's main has now
+		// runs, not the one the depot's own main, left behind, still holds.
+		{what: "the base's script is the fetched base's", main: map[string]string{"ci.sh": "echo \"the fetched base's copy\"\n" + baseCI}, stage: "approved",
+			wants: []string{"the tests passed on {url} at {sha} merged into main at {base} (the base's copy of ci.sh,", "ci_head={sha}"}},
+		// A head that conflicts with main has no merge to test: nothing runs, and
+		// the contributor is told the cure with the conflicts, as for any red run.
+		{what: "a head that conflicts with the base", files: map[string]string{"a.txt": "the pull request's line\n"}, main: map[string]string{"a.txt": "main's line\n"}, stage: "contributor", norun: true,
+			wants: []string{"the head {short} of {url} does not merge into main at {bshort}", "nothing was run", "merge main into the pull request's branch", "CONFLICT (content): Merge conflict in a.txt"},
+			not:   []string{"the tests failed"}},
 		// A pull request a maintainer accepted is tested at the commit they
 		// accepted, however the letters of the record are cased, and records that
 		// commit as it does any other.
 		{what: "green at the head a maintainer accepted", files: map[string]string{"feature.txt": "new\n"}, accepted: "{SHA}", stage: "approved",
-			wants: []string{"the tests passed on {url} at {sha} (the base's copy of ci.sh,", "ci_head={sha}"}},
+			wants: []string{"the tests passed on {url} at {sha} merged into main at {base} (the base's copy of ci.sh,", "ci_head={sha}"}},
 		// A command no file of the base has runs with sh -c, and gets the landing
 		// run's switch as the base's copy does. The group's cmd leaves the switch
 		// empty, as a stray one in the daemon's environment would: a depot's command
 		// reads that as no landing, so it is set, not defaulted.
 		{what: "a test command that is no file of the base", tests: `echo "the command: landing=${YARDR_LANDING-unset}, app=${GITHUB_APP_ID-unset}"`, opts: "YARDR_LANDING=", stage: "approved",
-			wants: []string{"the tests passed on {url} at {sha} (the command echo ", "ci_head={sha}"}, not: []string{"the base's copy"}},
+			wants: []string{"the tests passed on {url} at {sha} merged into main at {base} (the command echo ", "ci_head={sha}"}, not: []string{"the base's copy"}},
 		{what: "red, though the pull request rewrote the test script to pass", files: map[string]string{"ci.sh": "echo the copy on the branch\nexit 0\n", "RED": "red\n"}, stage: "contributor",
-			wants: []string{"the tests failed on {url} at {short} (the base's copy of ci.sh, exit 1); its output:", "ci.sh of the base: in ", "RED is in the tree"},
+			wants: []string{"the tests failed on {url} at {short} merged into main at {bshort} (the base's copy of ci.sh, exit 1); its output:", "ci.sh of the base: in ", "RED is in the tree"},
 			not:   []string{"the copy on the branch"}},
 		{what: "a script that exits 2", stand: map[string]string{"ci-exit": "2"}, stage: "ciwait", hold: true,
-			wants: []string{"the tests could not run on {url} at {short} (the base's copy of ci.sh said so: exit 2); its output:"}},
+			wants: []string{"the tests could not run on {url} at {short} merged into main at {bshort} (the base's copy of ci.sh said so: exit 2); its output:"}},
 		{what: "ended by a signal once", stand: map[string]string{"ci-signals": "1"}, stage: "approved",
 			wants: []string{"were ended by signal 15 (exit 143), not by a failing test", "running them once more on the same commit", "the tests passed on {url}"}},
 		{what: "ended by a signal twice", stand: map[string]string{"ci-signals": "2"}, stage: "ciwait", hold: true,
@@ -286,7 +360,7 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 		{what: "a head that moved before the tests started", head: headB, stand: map[string]string{"head-next": "{sha}"}, stage: "contributor", norun: true,
 			wants: []string{"the PR changed while CI started: GitHub said its head was 9b8a7c6 and says {short} now", "Nothing was run"}},
 		{what: "a head that moved while the tests ran", stand: map[string]string{"during": headB}, stage: "contributor",
-			wants: []string{"the PR changed while CI ran: the tests passed on {short} (the base's copy of ci.sh), but the head is 9b8a7c6 now", "Nothing was recorded"}},
+			wants: []string{"the PR changed while CI ran: the tests passed on {short} merged into main at {bshort} (the base's copy of ci.sh), but the head is 9b8a7c6 now", "Nothing was recorded"}},
 		{what: "the script stopped while its tests run", stand: map[string]string{"signal-parent": ""}, signal: true},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
@@ -295,7 +369,14 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 			refs := c.git(c.repo, "for-each-ref")
 			id, num := "r-j", 20
 			sha := c.pull(num, tc.files)
-			fill := strings.NewReplacer("{url}", prURLn(num), "{sha}", sha, "{short}", sha[:7], "{SHA}", strings.ToUpper(sha))
+			// The base the pull request is merged into is origin's main as the
+			// run finds it: where it was, or where it moved after the pull
+			// request was made.
+			base := c.git(c.origin, "rev-parse", "refs/heads/main")
+			if tc.main != nil {
+				base = c.mainMoves(tc.main)
+			}
+			fill := strings.NewReplacer("{url}", prURLn(num), "{sha}", sha, "{short}", sha[:7], "{SHA}", strings.ToUpper(sha), "{base}", base, "{bshort}", base[:7])
 			if tc.accepted != "" {
 				c.accepted(id, prURLn(num), fill.Replace(tc.accepted))
 			} else {
@@ -303,6 +384,9 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 			}
 			c.reviewed(id, fill.Replace(or(tc.reviewed, or(tc.head, sha))))
 			c.tests(or(tc.tests, "ci.sh"))
+			if tc.base != "" {
+				c.putDepot("r", c.repo, tc.base, or(tc.tests, "ci.sh"))
+			}
 			opts := c.opts
 			if tc.opts != "" {
 				c.opts += " " + tc.opts
@@ -337,6 +421,13 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 				if tc.norun && strings.Contains(c.log, "ci.sh of the base") {
 					t.Errorf("%s: the tests ran:\n%s", tc.what, c.log)
 				}
+				// Whatever ran, ran on a commit of two parents, the base and the
+				// head: the merge, and never the head alone.
+				if strings.Contains(c.log, "ci.sh of the base: in ") {
+					if want := "ci.sh of the base: parents " + base + " " + sha; !strings.Contains(c.log, want) {
+						t.Errorf("%s: the tests did not run on the merge of the head into the base: the log lacks %q:\n%s", tc.what, want, c.log)
+					}
+				}
 				for _, want := range tc.wants {
 					c.noted(id, tc.what, fill.Replace(want))
 				}
@@ -357,14 +448,18 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 				}
 				switch tc.what {
 				case "green":
-					// The depot has the commit now, and the test ran on it, in a
-					// checkout of its own, with the landing's switch set and the App's
-					// inputs left out of its environment. TestMain leaves no YARDR_
-					// variable in this process, so the switch is pr-ci's own.
+					// The depot has the commit now, and the test ran on its merge into
+					// the base, in a checkout of its own, with the landing's switch set
+					// and the App's inputs left out of its environment. TestMain leaves
+					// no YARDR_ variable in this process, so the switch is pr-ci's own.
 					c.git(c.repo, "cat-file", "-e", sha+"^{commit}")
-					if want := "ci.sh of the base: in " + filepath.Join(c.home, "worktrees", "r", id+"-ci") + ", at " + sha + ", landing=1, app=unset"; !strings.Contains(c.log, want) {
-						t.Errorf("green: the log lacks %q:\n%s", want, c.log)
+					ran := regexp.MustCompile("ci.sh of the base: in " + regexp.QuoteMeta(filepath.Join(c.home, "worktrees", "r", id+"-ci")) + ", at ([0-9a-f]{40}), landing=1, app=unset").FindStringSubmatch(c.log)
+					if ran == nil {
+						t.Fatalf("green: the log lacks where the tests ran, with the landing's switch set and no App inputs:\n%s", c.log)
 					}
+					// The note quotes the gate's last line, which names the commit it
+					// ran on: the merge, which no ref of the depot holds.
+					c.noted(id, "green", "Its last line: test: ci.sh @ "+ran[1][:7]+": pass")
 					if n := countCalls(t, c.gh, "pr view "); n != 2 {
 						t.Errorf("green: the pull request was read %d times, want twice (before the run, and after it):\n%v", n, ghCalls(t, c.gh))
 					}
@@ -378,6 +473,12 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 						if strings.Contains(text, mintToken) {
 							t.Errorf("green: %s hold the token", what)
 						}
+					}
+				case "the base's script is the fetched base's":
+					// The script that ran is the one origin's main has, which the
+					// depot's own main, left behind, does not.
+					if want := "the fetched base's copy"; !strings.Contains(c.log, want) {
+						t.Errorf("%s: the log lacks %q, so the base's script was not the fetched base's:\n%s", tc.what, want, c.log)
 					}
 				case "a test command that is no file of the base":
 					// It ran as a command with the same environment: the switch set over
@@ -521,9 +622,12 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 // pushed to since, or its bead's link swapped for another pull request's), or a
 // bead whose reviewer recorded none or no full sha; a depot with no test
 // command; a pull request that is not open or that GitHub will not show; a
-// remote that does not give the head or does not have the pull request; a token
-// that cannot be had; a link that is no pull request address. Nothing is fetched
-// or run for the ones that are known before it is, and the bead's checkout is
+// remote that does not give the head or does not have the pull request, or does
+// not have the branch the depot's base names for the head to be merged into; a
+// head that git cannot merge into the base at all (a conflict is the pull
+// request's, and reported as changes: TestPRCIJudgesTheHead); a token that
+// cannot be had; a link that is no pull request address. Nothing is fetched or
+// run for the ones that are known before it is, and the bead's checkout is
 // never made.
 func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 	t.Parallel() // as its subtests are: see TestMain
@@ -533,6 +637,8 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 		stage     string            // the bead's stage, ciwait unless written
 		url       string            // its link, its pull request's unless written
 		bare      bool              // origin has no head for its pull request
+		nobase    bool              // origin has no branch for the depot's base
+		unrelated bool              // the head has no history in common with the base
 		stand     map[string]string // the stand-in's, besides the head
 		head      string            // what GitHub says the head is, the pull request's unless written
 		reviewed  string            // what the reviewer recorded, the head GitHub says unless written, - for nothing
@@ -581,6 +687,14 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 			wants: []string{"fetching refs/pull/{n}/head from origin", "failed"}},
 		{what: "a remote that gives another commit than GitHub's head", head: headB, asked: true,
 			wants: []string{"origin did not give the commit " + headB, "is origin the repository the pull request is on?"}},
+		// The head is fetched by then, and the base is the yard's side as the head
+		// is: nothing is merged, and nothing runs.
+		{what: "a remote that has no branch for the depot's base", nobase: true, asked: true,
+			wants: []string{"origin has no branch main, which the depot's base main names", "Not running anything"}},
+		// git's own words, which a git too old for --write-tree gives as well (its
+		// usage, exit 129): no verdict on the pull request, and not a conflict.
+		{what: "a head with no history in common with the base", unrelated: true, asked: true,
+			wants: []string{"git could not merge the head", "(git merge-tree --write-tree, exit 128;", "refusing to merge unrelated histories", "Not running anything"}},
 		{what: "a mint that fails", stand: map[string]string{"mint-fail": "PRIVATE_KEY_VALUE_SHOULD_NOT_ESCAPE"},
 			wants: []string{"minting a token for o/r failed", "not running the tests"}},
 		{what: "no env_file", change: func(c *ciYard) { c.envFile, c.opts = "", c.opts+" GITHUB_APP_ID= GITHUB_APP_PRIVATE_KEY_FILE=" },
@@ -591,7 +705,14 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 			id, num := "r-h", 30
 			sha := headA
 			if !tc.bare && tc.url == "" {
-				sha = c.pull(num, map[string]string{"feature.txt": "new\n"})
+				if tc.unrelated {
+					sha = c.pullUnrelated(num)
+				} else {
+					sha = c.pull(num, map[string]string{"feature.txt": "new\n"})
+				}
+			}
+			if tc.nobase {
+				c.git(c.origin, "update-ref", "-d", "refs/heads/main")
 			}
 			stage, url, tests := or(tc.stage, "ciwait"), or(tc.url, prURLn(num)), "ci.sh"
 			if tc.tests != nil {
