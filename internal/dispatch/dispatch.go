@@ -892,10 +892,10 @@ func (d *Dispatcher) Reconcile(ctx context.Context) error {
 	d.drainCrewCompletions(ctx)
 	pass.step("begin_home")
 	d.beginHomePass()
-	// One snapshot of each pane for the whole pass, whatever checks read
-	// from it (see PaneCache).
+	// One snapshot of each pane, and one resolution of the limits
+	// answerers, for the whole pass (see PaneCache, AnswerersCache).
 	pass.step("pane_cache")
-	ctx = WithPaneCache(ctx)
+	ctx = WithPaneCache(WithAnswerersCache(ctx))
 	d.lookDue, d.pushDue = nil, nil
 	pass.step("groups")
 	groups, err := d.Store.Groups(ctx)

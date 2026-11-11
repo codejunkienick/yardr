@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1778,4 +1779,65 @@ func TestWarmedLimitsGateFromTheFirstPass(t *testing.T) {
 			t.Fatalf("claimed by %q with %v, want a: 99.9%% is not used up", group, data)
 		}
 	})
+}
+
+// sourcesCounter counts the store's Sources listings: each resolution of
+// the yard's limits answerers is one listing plus a declaration parse per
+// source, so the count is the declaration reads in units of whole yards.
+type sourcesCounter struct {
+	store.API
+	n atomic.Int64
+}
+
+func (c *sourcesCounter) Sources(ctx context.Context) ([]store.Source, error) {
+	c.n.Add(1)
+	return c.API.Sources(ctx)
+}
+
+// One pass over N waiting beads reads the yard's sources once: route
+// choosing resolves the limits answerers a single time per pass, however
+// many conditions it judges, not once per condition per bead. Each group
+// below fails both its conditions, so every bead is judged on both groups'
+// providers and on the machine source, and waits: nothing is claimed. The
+// count is taken on the second pass, after the hourly checks' own listing.
+// The yard mirrors the one this was found on: sixteen sources more beside
+// the limits one and the machine one, and both groups on their own logins
+// from env files.
+func TestOnePassReadsTheSourcesDeclarationsOnce(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, _, d, p, _, _ := quotaYard(t, "a@Weekly<80,machine.load<80", "b@Weekly<80,machine.load<80")
+	say, _ := machineStandIn(t, s)
+	for i := range 16 {
+		name := fmt.Sprintf("dummy-%d", i)
+		_, err := s.PutSource(ctx, name+".yaml", "name: "+name+"\nlimits:\n  command: [/bin/true]\n", "me")
+		must(t, err)
+	}
+	groups, err := s.Groups(ctx)
+	must(t, err)
+	for _, g := range groups {
+		if g.Name == "a" || g.Name == "b" {
+			g.Config["env_file"] = loginEnv(t, g.Name+"-login")
+			must(t, s.PutGroup(ctx, g, "me"))
+		}
+	}
+	p.say(weekly(90, 10))
+	say(loadReport(93))
+	primeGroupLimits(t, s, d, "a")
+	primeGroupLimits(t, s, d, "b")
+	dispatch.PrimeSourceLimits(d, ctx, "machine")
+	const n = 25
+	for i := range n {
+		newBead(t, s, fmt.Sprint("w", i))
+	}
+	counted := &sourcesCounter{API: s}
+	d.Store = counted
+	must(t, d.Reconcile(ctx)) // the hourly checks list the sources once beside route choosing
+	counted.n.Store(0)
+	start := time.Now()
+	must(t, d.Reconcile(ctx)) // the beads still wait, and are still judged
+	t.Logf("one pass over %d waiting beads: %d Sources listings in %s", n, counted.n.Load(), time.Since(start))
+	if got := counted.n.Load(); got != 1 {
+		t.Fatalf("Sources listings in one pass = %d, want 1: the pass resolves the limits answerers once", got)
+	}
 }

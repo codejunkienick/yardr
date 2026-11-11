@@ -167,13 +167,25 @@ func (r limitRead) unknown() string {
 	return "no fresh answer yet: the limits command is being asked in the background"
 }
 
+// passAnswerers is the yard's limits answerers, read once per pass: route
+// choosing resolves them for every condition of every waiting bead, and
+// each resolution lists every source and parses every declaration, so the
+// reads of a pass share the pass's AnswerersCache. A context without one
+// reads them directly, as before.
+func (d *Dispatcher) passAnswerers(ctx context.Context) ([]limits.Answerer, error) {
+	if c := AnswerersCacheFrom(ctx); c != nil {
+		return c.get(ctx, d.Store, d.Home)
+	}
+	return limits.Answerers(ctx, d.Store, d.Home)
+}
+
 // cachedLimits is what the yard's source says of the subscription an
 // agent of kind with the provider setting burns, read under env, from
 // the memory the background refresher keeps: never a run of the command
-// and never a wait for one. Its whole cost is resolving the answerer
-// (limits.Answerers over the store's sources, then Resolve or, with a
-// provider setting, the first source by name whose kinds table names
-// it, even where no table lists the kind) and the cache lookup under
+// and never a wait for one. Its whole cost is resolving the answerer,
+// once per pass (passAnswerers over the store's sources, then Resolve or,
+// with a provider setting, the first source by name whose kinds table
+// names it, even where no table lists the kind) and the cache lookup under
 // limitsMu. A key whose answer is missing or stale is noted as wanted
 // at the caller's age before limitNone is returned.
 func (d *Dispatcher) cachedLimits(ctx context.Context, kind, provider string, age time.Duration, env []string) limitRead {
@@ -182,7 +194,7 @@ func (d *Dispatcher) cachedLimits(ctx context.Context, kind, provider string, ag
 		// crew.go): the cache and its lock are the pass's, not the clone's.
 		return d.host.cachedLimits(ctx, kind, provider, age, env)
 	}
-	as, err := limits.Answerers(ctx, d.Store, d.Home)
+	as, err := d.passAnswerers(ctx)
 	if err != nil {
 		return limitRead{err: err, state: limitUnresolvable}
 	}
@@ -217,7 +229,7 @@ func (d *Dispatcher) cachedSource(ctx context.Context, source string, age time.D
 	if d.host != nil {
 		return d.host.cachedSource(ctx, source, age)
 	}
-	as, err := limits.Answerers(ctx, d.Store, d.Home)
+	as, err := d.passAnswerers(ctx)
 	if err != nil {
 		return limitRead{err: err, state: limitUnresolvable}
 	}
