@@ -750,13 +750,8 @@ func (w *wtx) answerMapping(ctx context.Context, row *beadRow, ask Ask, ans Answ
 	if id == nil || ans.Later {
 		return nil
 	}
-	if ans.Decline || ans.Option != 0 {
-		does := fmt.Sprintf("asks who %s in %s is of %s, the operator", id.Sender, id.Source, ask.To)
-		if err := w.may(ctx, actor, ActAnswerIdentityAsk, Object{
-			Kind: KindAsk, Name: row.ID, Seq: ans.Ask, To: ask.To, Does: does,
-		}); err != nil {
-			return err
-		}
+	if err := w.mayAnswerMapping(ctx, row, ask, ans, actor); err != nil {
+		return err
 	}
 	if ans.Decline {
 		// A decline ends the card, as a pick that writes does, so it is
@@ -815,6 +810,24 @@ func (w *wtx) answerMapping(ctx context.Context, row *beadRow, ask Ask, ans Answ
 	}
 	_, err := w.setUserIdentity(ctx, user, id.Source, Identity{ID: id.Sender}, actor, nil)
 	return err
+}
+
+// mayAnswerMapping asks whether actor may give ans to the mapping card ask on
+// row: a decline or a pick is the operator's the card asks, as
+// ActAnswerIdentityAsk says. A put-aside and words alone come to no gate:
+// the first writes nothing, and answerable refuses the second whoever gives
+// it. answerMapping asks it as it writes, and guard before it compares what
+// the caller read, so that a caller refused is told nothing of what was
+// written since.
+func (w *wtx) mayAnswerMapping(ctx context.Context, row *beadRow, ask Ask, ans Answer, actor string) error {
+	if !ans.Decline && ans.Option == 0 {
+		return nil
+	}
+	id := ask.Identity
+	does := fmt.Sprintf("asks who %s in %s is of %s, the operator", id.Sender, id.Source, ask.To)
+	return w.may(ctx, actor, ActAnswerIdentityAsk, Object{
+		Kind: KindAsk, Name: row.ID, Seq: ans.Ask, To: ask.To, Does: does,
+	})
 }
 
 // answerLetIn delivers what the card held as SpeakerOutside, in
