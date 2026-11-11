@@ -148,7 +148,9 @@ flow file or a pack with no yard.`,
 				return err
 			}
 			if len(views) == 0 {
-				return a.out(c.OutOrStdout(), views, func(w io.Writer) { fmt.Fprintf(w, "depot %s has no flow: beads may move to any stage\n", args[0]) })
+				return a.out(c.OutOrStdout(), views, func(w io.Writer) {
+					fmt.Fprintf(w, "depot %s has no flow: beads may move to a stage with a matching route\n", args[0])
+				})
 			}
 			return a.out(c.OutOrStdout(), views, func(w io.Writer) {
 				for i, v := range views {

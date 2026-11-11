@@ -30,7 +30,7 @@ type BeadPage struct {
 	ETA  *eta.ETA  `json:"eta,omitempty"`
 	Late *eta.Late `json:"late,omitempty"`
 	// Flow is the flow that governs the bead, absent when none does: the
-	// bead may then move to any stage.
+	// bead may then move to a stage with a matching route.
 	Flow *BeadFlow `json:"flow,omitempty"`
 	// Base is what the bead's branch starts from and lands on: its train's
 	// branch, else the depot's base.
@@ -121,6 +121,11 @@ type BoardEntry struct {
 // the yard: a blocker that closes or a child that moves changes the page
 // as the bead's own events do.
 func (p BeadPage) Self() string { return "/beads/" + url.PathEscape(p.Bead.ID) }
+
+// FoldMoves reports whether the page folds the moves behind one "Move to
+// ..." control: more than six of them, all plain advances
+// (store.FoldMoves). The JSON keeps the full list; only the buttons fold.
+func (p BeadPage) FoldMoves() bool { return store.FoldMoves(p.Moves) }
 
 // BeadFlow is the flow governing a bead and where it comes from.
 type BeadFlow struct {

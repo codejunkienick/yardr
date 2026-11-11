@@ -97,7 +97,7 @@ func reviewQueue(ctx context.Context, st store.API, actor string, only []string)
 		if next, err := st.NextStages(ctx, b.ID); err != nil {
 			it.FlowError, it.Actions = err.Error(), lookActions()
 		} else {
-			it.Actions = reviewActions(b, next, routes)
+			it.Actions = reviewActions(b, next, routes, operator)
 			it.TemplateError = next.TemplateError
 		}
 		items = append(items, it)
@@ -114,9 +114,9 @@ func reviewQueue(ctx context.Context, st store.API, actor string, only []string)
 // reviewActions is what a reviewer may do with b: the moves the yard offers
 // for it (store.MovesFor, which the web and the Waiting call offer too), then
 // always open diff and skip.
-func reviewActions(b store.Bead, next *store.NextStages, routes []store.Route) []reviewAction {
+func reviewActions(b store.Bead, next *store.NextStages, routes []store.Route, operator string) []reviewAction {
 	var out []reviewAction
-	for _, m := range store.MovesFor(&b, next, routes) {
+	for _, m := range store.MovesFor(&b, next, routes, operator) {
 		out = append(out, reviewAction{Kind: m.Kind, Label: m.Label, Stage: m.To, Outcome: m.Outcome,
 			NoteRequired: m.NoteRequired, Terminal: m.Terminal})
 	}

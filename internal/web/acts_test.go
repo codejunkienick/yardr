@@ -1042,3 +1042,71 @@ func TestBeadSecretGiveRefused(t *testing.T) {
 		t.Errorf("no secret: the ask is %s", v.Asks[0].State)
 	}
 }
+
+// A bead page with more than six plain moves folds them behind one Move to
+// ... control, which posts the pick as a button would; six stay flat
+// buttons, and the JSON keeps the full list either way.
+func TestBeadMoveFold(t *testing.T) {
+	t.Parallel()
+	foldYard := func(t *testing.T, stages ...string) (*fixture, *store.Bead) {
+		t.Helper()
+		f, _ := talkFixture(t, "jo")
+		ctx := context.Background()
+		must(t, func() error { _, err := f.st.AddUser(ctx, "jo", "jo"); return err }())
+		must(t, f.st.PutDepot(ctx, store.Depot{Name: "home", Base: "origin/main"}, "jo"))
+		must(t, f.st.PutGroup(ctx, store.Group{Name: "decisions", Runner: "manual", Members: []string{"jo"}}, "jo"))
+		for _, s := range append([]string{"backlog"}, stages...) {
+			must(t, func() error {
+				_, err := f.st.AddRoute(ctx, store.Route{Stage: s, Group: "decisions"}, "jo")
+				return err
+			}())
+		}
+		b, err := f.st.CreateBead(ctx, store.NewBead{Title: "a door", Stage: "backlog", Depot: "home"}, "jo")
+		must(t, err)
+		return f, b
+	}
+	// Seven plain moves fold behind one control.
+	f, b := foldYard(t, "s1", "s2", "s3", "s4", "s5", "s6", "s7")
+	r := f.get("/beads/" + b.ID)
+	for _, want := range []string{
+		`none: it may move to a stage with a matching route`,
+		`<select name="to" aria-label="Stage">`,
+		`<option value="s3">Move to s3</option>`,
+		`<button type="submit">Move to ...</button>`,
+	} {
+		if !strings.Contains(r.body, want) {
+			t.Errorf("the folded page lacks %q:\n%s", want, r.body)
+		}
+	}
+	if n := strings.Count(r.body, "<option value="); n != 7 {
+		t.Errorf("the folded page holds %d options, want 7", n)
+	}
+	if strings.Contains(r.body, `<button type="submit" name="to"`) {
+		t.Errorf("the folded page still lists buttons:\n%s", r.body)
+	}
+	var folded web.BeadPage
+	if r := f.get("/beads/"+b.ID, "Accept", "application/json"); json.Unmarshal([]byte(r.body), &folded) != nil {
+		t.Fatal("the folded page is no JSON")
+	} else if len(folded.Moves) != 7 {
+		t.Errorf("the folded JSON holds %d moves, want 7", len(folded.Moves))
+	}
+	// The pick posts as a button press would.
+	moved := f.postForm("/beads/"+b.ID, url.Values{"rev": {revOf(t, f, b.ID)}, "to": {"s3"}}, "Origin", f.ts.URL)
+	if moved.status != http.StatusSeeOther {
+		t.Fatalf("the folded pick: status %d, want 303:\n%s", moved.status, moved.body)
+	}
+	if b, err := f.st.GetBead(context.Background(), b.ID); err != nil {
+		t.Fatal(err)
+	} else if b.Stage != "s3" {
+		t.Fatalf("the folded pick left the bead at %s", b.Stage)
+	}
+	// Six stay flat.
+	f6, b6 := foldYard(t, "s1", "s2", "s3", "s4", "s5", "s6")
+	r6 := f6.get("/beads/" + b6.ID)
+	if strings.Contains(r6.body, "<select") {
+		t.Errorf("six moves fold:\n%s", r6.body)
+	}
+	if n := strings.Count(r6.body, `<button type="submit" name="to"`); n != 6 {
+		t.Errorf("six moves show %d buttons, want 6:\n%s", n, r6.body)
+	}
+}

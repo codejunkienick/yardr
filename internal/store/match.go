@@ -74,6 +74,14 @@ func Matches(r RouteMatch, b BeadMatch, operator string) bool {
 	if r.Stage != b.Stage {
 		return false
 	}
+	return MatchesExceptStage(r, b, operator)
+}
+
+// MatchesExceptStage reports whether r could take b from another stage:
+// every filter it sets — the type, the depot, each label, the bead
+// priority and the originator — without the stage check, which cannot
+// apply when collecting other stages.
+func MatchesExceptStage(r RouteMatch, b BeadMatch, operator string) bool {
 	if r.Type != nil && *r.Type != b.Type {
 		return false
 	}

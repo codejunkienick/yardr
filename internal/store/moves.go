@@ -36,17 +36,24 @@ type Move struct {
 // report somewhere the flow's edge does not name. Under a flow without: the
 // stages it allows for this bead. Returning to a question's asker needs no
 // new note because the answer is already on the bead; other earlier stages
-// need one. Without a flow: any stage a route uses. The labels are the
-// yard's words for each move, the same on the terminal, the web and the
-// socket, so the three can never offer one bead two different moves. Nil
-// where there is none.
-func MovesFor(b *Bead, next *NextStages, routes []Route) []Move {
+// need one. Without a flow: the stages with a route that could take the
+// bead, matching its type, depot, labels, priority and originator, once
+// each and sorted; nil when no route could. Advancing by hand stays free
+// to name any stage. The labels are the yard's words for each move, the
+// same on the terminal, the web and the socket, so the three can never
+// offer one bead two different moves. Nil where there is none.
+func MovesFor(b *Bead, next *NextStages, routes []Route, operator string) []Move {
 	if next == nil || next.Flow == nil {
+		bm := viewBead(*b)
 		var stages []string
 		for _, r := range routes {
-			if r.Stage != b.Stage && !slices.Contains(stages, r.Stage) {
-				stages = append(stages, r.Stage)
+			if r.Stage == b.Stage || slices.Contains(stages, r.Stage) {
+				continue
 			}
+			if !MatchesExceptStage(viewRoute(r), bm, operator) {
+				continue
+			}
+			stages = append(stages, r.Stage)
 		}
 		slices.Sort(stages)
 		var out []Move
@@ -97,6 +104,23 @@ func MovesFor(b *Bead, next *NextStages, routes []Route) []Move {
 		out = append(out, m)
 	}
 	return out
+}
+
+// FoldMoves reports whether moves fold behind one "Move to ..." control:
+// more than six of them, where every one is a plain advance, with no
+// note required and no terminal. The predicate is uniformity, not flow
+// presence: a flow bead whose moves are all plain stages folds too, and
+// a flow outcome (kind done) never does.
+func FoldMoves(moves []Move) bool {
+	if len(moves) <= 6 {
+		return false
+	}
+	for _, m := range moves {
+		if m.Kind != MoveAdvance || m.NoteRequired || m.Terminal {
+			return false
+		}
+	}
+	return true
 }
 
 // ManualGroup is the manual group whose turn b waits for: the group working

@@ -28,7 +28,7 @@
   <section class="item">
     <dl class="facts">
       {{- with .Bead.Depot}}<div><dt>depot</dt><dd>{{.}}</dd></div>{{end}}
-      <div><dt>flow</dt><dd>{{with .Flow}}{{.Name}} <span class="faint">({{.Source}})</span>{{else}}<span class="faint">none: it may move to any stage</span>{{end}}</dd></div>
+      <div><dt>flow</dt><dd>{{with .Flow}}{{.Name}} <span class="faint">({{.Source}})</span>{{else}}<span class="faint">none: it may move to a stage with a matching route</span>{{end}}</dd></div>
       {{- range .RoundsLines}}<div><dt>rounds</dt><dd>{{.}}</dd></div>{{end}}
       {{- with .Base}}<div><dt>base</dt><dd>{{.}}</dd></div>{{end}}
       {{- with .Train}}<div><dt>train</dt><dd><a class="bead" href="/beads/{{.ID}}">{{.ID}}</a> {{.Title}}</dd></div>{{end}}
@@ -88,7 +88,7 @@
     <h3 class="label">send on as {{.As}}</h3>
     {{- /* The form posts and puts the page's answer in place of the bead;
            without scripts it posts and loads the bead it lands on. */}}
-    <form class="move-form" method="post" action="{{.Self}}" hx-post="{{.Self}}" hx-target="#bead" hx-select="#bead > *" hx-swap="innerHTML ignoreTitle:true"><input type="hidden" name="rev" value="{{.Bead.Revision}}">{{template "csrf"}}<input type="text" name="note" placeholder="Note with the move" aria-label="Note">{{range .Moves}}{{if .Outcome}}<button type="submit" name="outcome" value="{{.Outcome}}">{{.Label}}</button>{{else}}<button type="submit" name="to" value="{{.To}}">{{.Label}}</button>{{end}}{{end}}</form>
+    <form class="move-form" method="post" action="{{.Self}}" hx-post="{{.Self}}" hx-target="#bead" hx-select="#bead > *" hx-swap="innerHTML ignoreTitle:true"><input type="hidden" name="rev" value="{{.Bead.Revision}}">{{template "csrf"}}<input type="text" name="note" placeholder="Note with the move" aria-label="Note">{{if .FoldMoves}}<select name="to" aria-label="Stage">{{range .Moves}}<option value="{{.To}}">{{.Label}}</option>{{end}}</select><button type="submit">Move to ...</button>{{else}}{{range .Moves}}{{if .Outcome}}<button type="submit" name="outcome" value="{{.Outcome}}">{{.Label}}</button>{{else}}<button type="submit" name="to" value="{{.To}}">{{.Label}}</button>{{end}}{{end}}{{end}}</form>
   </section>
   {{- else if .Outcomes}}
   <section class="item">

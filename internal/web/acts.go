@@ -52,7 +52,7 @@ func (s *Server) moveActions(ctx context.Context, b *store.Bead, next *store.Nex
 	if len(g.Members) > 0 && !slices.Contains(g.Members, s.acting(ctx)) {
 		return nil, nil
 	}
-	return store.MovesFor(b, next, routes), nil
+	return store.MovesFor(b, next, routes, operator), nil
 }
 
 // openBeadAsks are the bead's open asks to the user the request acts as,

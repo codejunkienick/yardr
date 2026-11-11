@@ -178,7 +178,7 @@ func (s *Store) parked(ctx context.Context, name, actor, viewer string, repos ma
 					}
 				}
 				w.TemplateError = next.TemplateError
-				if moves := MovesFor(&b.Bead, next, routes); moves != nil {
+				if moves := MovesFor(&b.Bead, next, routes, operator); moves != nil {
 					w.Actions = moves
 				}
 			}
