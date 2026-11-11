@@ -632,12 +632,12 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	}
 	// The store's wake stream ends if its server restarts: reconnect, and
 	// wake once afterwards since changes may have been missed meanwhile.
+	// The first subscription too: it comes up beside the first pass, and a
+	// commit between that pass's read and it is announced by nothing.
 	go func() {
 		for first := true; ctx.Err() == nil; first = false {
 			if ch, err := d.Store.Wake(ctx); err == nil {
-				if !first {
-					poke()
-				}
+				poke()
 				forward(ch)
 			} else if first {
 				d.Log.Warn("store wake-ups unavailable; retrying", "err", err)

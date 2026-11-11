@@ -46,9 +46,9 @@ func waitEvent(t *testing.T, s store.API, id, kind string) {
 
 // nudge makes a store write no route takes, which wakes a daemon's loop for
 // a pass. A write made before Run's wake subscription is up wakes nothing
-// (Store.Wake delivers the commits after it), and a loop with a long
-// Interval then waits for its next tick, so a test that needs a pass nudges
-// until one has run (passRan, or the gate's awaitPass).
+// (Store.Wake delivers the commits after it), but the loop runs a pass once
+// the subscription is up, and that pass reads the write. A test that needs a
+// pass of its own nudges until one has run (passRan, or the gate's awaitPass).
 func nudge(t *testing.T, s store.API) *store.Bead {
 	t.Helper()
 	b, err := s.CreateBead(context.Background(), store.NewBead{Title: "wake", Stage: "limbo"}, "me")

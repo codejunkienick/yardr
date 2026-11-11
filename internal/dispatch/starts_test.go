@@ -319,6 +319,24 @@ func (s *gatedEndStore) EndSession(ctx context.Context, id, state, reason string
 	return err
 }
 
+// lateWakeStore holds the loop's wake subscription back until release is
+// closed or the context ends, as a starved process or a slow socket can leave
+// it beside the first pass. Store.Wake delivers the commits after it comes up
+// and none before it, so what is committed meanwhile is announced by no wake.
+type lateWakeStore struct {
+	store.API
+	release chan struct{}
+}
+
+func (s *lateWakeStore) Wake(ctx context.Context) (<-chan struct{}, error) {
+	select {
+	case <-s.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return s.API.Wake(ctx)
+}
+
 // The same blocked group's first start then fails as a runtime error:
 // the runner has been called once, the second bead is still unclaimed —
 // it is considered only by a later pass, under the recorded outage,
@@ -332,17 +350,26 @@ func (s *gatedEndStore) EndSession(ctx context.Context, id, state, reason string
 // comes first is up to the machine, so the first row takes either reason;
 // the second holds the worker between the two until a pass has reported,
 // so the stale reason is the one it must get.
+//
+// The third row holds the loop's wake subscription back until the abort is
+// committed, as a starved process can: the first pass's writes and the abort
+// are announced by no wake, and the pass in the gap is the one the loop runs
+// when the subscription comes up.
 func TestRuntimeStartFailureLeavesNextBeadToALaterPass(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		// gap holds the worker between its abort commit and its completion
 		// until a pass has run in between.
-		gap     bool
-		reasons []string
+		gap bool
+		// lateWake holds the wake subscription back until the abort is
+		// committed.
+		lateWake bool
+		reasons  []string
 	}{
-		{"either order", false, []string{"runtime is down", "starting a session"}},
-		{"pass in the gap", true, []string{"starting a session"}},
+		{"either order", false, false, []string{"runtime is down", "starting a session"}},
+		{"pass in the gap", true, false, []string{"starting a session"}},
+		{"subscription up after the abort", true, true, []string{"starting a session"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -350,10 +377,14 @@ func TestRuntimeStartFailureLeavesNextBeadToALaterPass(t *testing.T) {
 			r := newGateRunner("builders")
 			r.err = dispatch.Runtime(errors.New("herdr is down"))
 			var daemonStore store.API = s
-			var gap chan struct{}
+			var gap, wakeUp chan struct{}
+			if tc.lateWake {
+				wakeUp = make(chan struct{})
+				daemonStore = &lateWakeStore{API: daemonStore, release: wakeUp}
+			}
 			if tc.gap {
 				gap = make(chan struct{})
-				daemonStore = &gatedEndStore{API: s, release: gap}
+				daemonStore = &gatedEndStore{API: daemonStore, release: gap}
 			}
 			d := &dispatch.Dispatcher{Store: daemonStore, Runners: map[string]dispatch.Runner{"fake": r},
 				Backoff: time.Nanosecond, RuntimeBackoff: time.Hour, Interval: time.Hour}
@@ -395,11 +426,16 @@ func TestRuntimeStartFailureLeavesNextBeadToALaterPass(t *testing.T) {
 			if n := r.callsFor("builders"); n != 1 {
 				t.Fatalf("builders starts = %d, want 1: the worker retried on its own", n)
 			}
+			if tc.lateWake {
+				// Everything the loop has done so far went unannounced; the
+				// subscription comes up now, after it all.
+				close(wakeUp)
+			}
 			if tc.gap {
 				// The abort is committed and the worker is held before its
-				// post, so the pass that commit woke finds the start in
-				// flight and the bead is told so; the worker goes on only
-				// once that is on record.
+				// post. The commit woke the loop, so a pass runs now, finds
+				// the start in flight and tells the bead so; the worker goes
+				// on only once that is on record.
 				until(t, "a pass between the abort and the completion", func() bool {
 					return len(eventKinds(t, s, b1.ID, "group_wait")) > 0
 				})
