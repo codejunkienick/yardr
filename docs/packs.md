@@ -2003,8 +2003,11 @@ the build, the pack's bytes and digest and the yard's sources as carded,
 and is carried out by the server after it, which holds the plan to the
 digest before anything is written. A pack that is a directory, a URL or
 an earlier import's record, any flag of `pack apply` but the depot and the
-mappings of a depot pack's first install, and a plan that asks, is refused
-to a terminal, where `yardr pack check <name>` shows the plan. The
+mappings of a depot pack's first install and `--yes` over files edited by
+hand, and a plan that asks, is refused to a terminal, where `yardr pack
+check <name>` shows the plan. With `--yes` the card shows each file the
+plan says was edited by hand whole, with both hashes and the diff, and
+approval overwrites exactly those copies. The
 yardmaster has a road of its own beside the card, for a pack that yardr
 embeds and for one that the packs repository serves.
 

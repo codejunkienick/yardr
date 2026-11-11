@@ -395,6 +395,13 @@ func askPlanFrom(read func(rel string) ([]byte, error), plan *pack.Plan, answers
 	out.Edited = plan.EditedFiles()
 	for _, o := range plan.Objects {
 		ao := store.AskPlanObject{Kind: o.Kind, Name: o.Name, Action: o.Action, Keeps: o.Keeps, Shadows: o.Shadows, Env: o.Env}
+		if o.Kind == "file" && o.File != nil {
+			ao.Edited = o.Edited
+			// A program, a role or a script the yard runs: not a stage
+			// file, and not the page frame, which only a reader's
+			// browser runs.
+			ao.Runs = o.File.Flow == "" && (plan.Frame == nil || o.Name != plan.Frame.File)
+		}
 		for _, ch := range o.Changes {
 			ao.Changes = append(ao.Changes, store.AskChange{Field: ch.Field, Old: planValue(ch.Old), New: planValue(ch.New)})
 		}

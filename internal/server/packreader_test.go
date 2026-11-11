@@ -228,6 +228,34 @@ func TestReadEmbeddedDepotPack(t *testing.T) {
 		t.Fatalf("the first-install reading's subscription target = %+v, %v", subTarget, err)
 	}
 
+	// Every installed file says whether its copy was edited by hand and
+	// whether the yard runs it: a fresh checkout edits none, the yard
+	// runs its roles and scripts, and its stage files are not programs.
+	var roles, stages int
+	for _, o := range first.Plan.Objects {
+		if o.Kind != "file" || (o.Action != "create" && o.Action != "change") {
+			continue
+		}
+		if o.Edited {
+			t.Errorf("the fresh file %s reads edited", o.Name)
+		}
+		switch {
+		case strings.HasPrefix(o.Name, "roles/"), strings.HasPrefix(o.Name, "scripts/"):
+			roles++
+			if !o.Runs {
+				t.Errorf("the file %s reads as one the yard does not run", o.Name)
+			}
+		case strings.HasPrefix(o.Name, "flows/"):
+			stages++
+			if o.Runs {
+				t.Errorf("the stage file %s reads as one the yard runs", o.Name)
+			}
+		}
+	}
+	if roles == 0 || stages == 0 {
+		t.Fatalf("the reading holds %d roles or scripts and %d stage files, want both", roles, stages)
+	}
+
 	// The mappings answer the asks they name: a group the yard has takes
 	// the pack's builders, and a bind answers the reviewers' agent.
 	if err := st.PutGroup(ctx, store.Group{Name: "takers", Runner: "herdr", Config: map[string]any{"kind": "claude"}}, "mckean"); err != nil {
@@ -280,6 +308,47 @@ func TestReadEmbeddedDepotPack(t *testing.T) {
 	again, err := readEmbeddedPack(ctx, "starter", "web", store.Mappings{}, st, home)
 	if err != nil || again.Depot != "web" || again.Plan == nil {
 		t.Fatalf("a pack held by two depots, named to one = %+v, %v", again, err)
+	}
+	askPlanMarksEditedAndRuns(t)
+}
+
+// askPlanFrom marks each installed file for a --yes card: whether its copy
+// was edited by hand, and whether the yard runs it — a program, a role or
+// a script, not a stage file or the page frame, which only a reader's
+// browser runs.
+func askPlanMarksEditedAndRuns(t *testing.T) {
+	t.Helper()
+	read := func(rel string) ([]byte, error) { return nil, fs.ErrNotExist }
+	plan := &pack.Plan{
+		Frame: &pack.FrameFile{File: "page.html"},
+		Objects: []pack.Object{
+			{Kind: "file", Name: "roles/a.md", Action: pack.Change, Edited: true, File: &pack.FileOp{To: "nowhere/a.md", Mode: "0644"}},
+			{Kind: "file", Name: "scripts/land", Action: pack.Change, File: &pack.FileOp{To: "nowhere/land", Mode: "0755"}},
+			{Kind: "file", Name: "flows/default/new.md", Action: pack.Change, File: &pack.FileOp{To: "nowhere/new.md", Flow: "mini.default"}},
+			{Kind: "file", Name: "page.html", Action: pack.Change, File: &pack.FileOp{To: "nowhere/page.html", Mode: "0644"}},
+		},
+	}
+	got := askPlanFrom(read, plan, pack.Answers{}, nil, nil)
+	if len(got.Edited) != 1 || !strings.Contains(got.Edited[0], "nowhere/a.md") {
+		t.Fatalf("the plan's edited = %q, want the role's line", got.Edited)
+	}
+	for _, want := range []struct {
+		name         string
+		edited, runs bool
+	}{
+		{"roles/a.md", true, true},
+		{"scripts/land", false, true},
+		{"flows/default/new.md", false, false},
+		{"page.html", false, false},
+	} {
+		i := slices.IndexFunc(got.Objects, func(o store.AskPlanObject) bool { return o.Name == want.name })
+		if i < 0 {
+			t.Fatalf("the plan holds no %s", want.name)
+		}
+		if got.Objects[i].Edited != want.edited || got.Objects[i].Runs != want.runs {
+			t.Errorf("%s: edited %v runs %v, want edited %v runs %v",
+				want.name, got.Objects[i].Edited, got.Objects[i].Runs, want.edited, want.runs)
+		}
 	}
 }
 

@@ -47,22 +47,27 @@ func (m Mappings) Bound() []string {
 }
 
 // PackApplyUse is how a refusal names the row.
-const PackApplyUse = "yardr pack apply <name> [--depot <depot> [--flow <flow>] [--crew <pack>=<yard>] [--group <pack>=<yard>] [--bind <spec>] [--members <group>=<a,b>] [--open-threads <crew>=<sources>] [--calls <who>=<source>:<calls>]]"
+const PackApplyUse = "yardr pack apply <name> [--yes] [--depot <depot> [--flow <flow>] [--crew <pack>=<yard>] [--group <pack>=<yard>] [--bind <spec>] [--members <group>=<a,b>] [--open-threads <crew>=<sources>] [--calls <who>=<source>:<calls>]]"
 
-// packApplyFlags are the words a card carries: the depot, and the
-// mappings a plan's questions are answered by. Every other flag of the
-// terminal's shapes the import in a way a card holds no word for.
-var packApplyFlags = map[string]bool{"--depot": true, "--flow": true, "--crew": true, "--group": true,
+// packApplyFlags are the words a card carries: --yes over the files the
+// plan says were edited by hand, the depot, and the mappings a plan's
+// questions are answered by. Every other flag of the terminal's shapes
+// the import in a way a card holds no word for.
+var packApplyFlags = map[string]bool{"--yes": false, "--depot": true, "--flow": true, "--crew": true, "--group": true,
 	"--bind": true, "--members": true, "--open-threads": true, "--calls": true}
 
 // parsePackApply reads the words of pack apply into the row's one stored
-// form: the name, the depot, then the mappings in packMappingFlags' order.
+// form: the name, --yes, the depot, then the mappings in
+// packMappingFlags' order.
 func parsePackApply(rest []string) ([]string, error) {
-	name, depot, m, err := packApplyWords(rest)
+	name, depot, m, yes, err := packApplyWords(rest)
 	if err != nil {
 		return nil, err
 	}
 	out := []string{name}
+	if yes {
+		out = append(out, "--yes")
+	}
 	if depot != "" {
 		out = append(out, "--depot", depot)
 	}
@@ -73,25 +78,27 @@ func parsePackApply(rest []string) ([]string, error) {
 	return out, nil
 }
 
-// packApplyWords reads the pack's name, the depot and the mappings out of
-// the words of pack apply. A mapping answers a plan for a depot, so it
-// needs --depot; with none the words are a bare name, a re-apply. Each
-// value stands on the card as it was typed, and draws no line of its own
-// there: parseRow has held the line to names, numbers and flags.
-func packApplyWords(rest []string) (string, string, Mappings, error) {
+// packApplyWords reads the pack's name, the depot, the mappings and --yes
+// out of the words of pack apply. A mapping answers a plan for a depot,
+// so it needs --depot; with none the words are a bare name, a re-apply.
+// Each value stands on the card as it was typed, and draws no line of its
+// own there: parseRow has held the line to names, numbers and flags.
+func packApplyWords(rest []string) (string, string, Mappings, bool, error) {
 	var m Mappings
 	for _, word := range rest {
 		flag, _, _ := strings.Cut(word, "=")
-		if strings.HasPrefix(word, "-") && !packApplyFlags[flag] {
-			return "", "", m, fmt.Errorf("--run takes %s, and pack apply with %s shapes the import, which a card answers none of: it is the operator's to type in a terminal (yardr pack check %s shows its plan there)", PackApplyUse, flag, "<name>")
+		// Membership, not the value: --yes is carried with false, since
+		// it takes none.
+		if _, ok := packApplyFlags[flag]; strings.HasPrefix(word, "-") && !ok {
+			return "", "", m, false, fmt.Errorf("--run takes %s, and pack apply with %s shapes the import, which a card answers none of: it is the operator's to type in a terminal (yardr pack check %s shows its plan there)", PackApplyUse, flag, "<name>")
 		}
 	}
 	args, values, err := runWords(PackApplyUse, "pack apply", "the operator's", rest, packApplyFlags)
 	if err != nil {
-		return "", "", m, err
+		return "", "", m, false, err
 	}
 	if len(args) != 1 {
-		return "", "", m, fmt.Errorf("--run takes %s: one pack's name, not %d words", PackApplyUse, len(args))
+		return "", "", m, false, fmt.Errorf("--run takes %s: one pack's name, not %d words", PackApplyUse, len(args))
 	}
 	once := func(flag string) (string, error) {
 		if len(values[flag]) > 1 {
@@ -118,22 +125,25 @@ func packApplyWords(rest []string) (string, string, Mappings, error) {
 	}
 	depot, err := once("--depot")
 	if err != nil {
-		return "", "", m, err
+		return "", "", m, false, err
 	}
 	if m.Flow, err = once("--flow"); err != nil {
-		return "", "", m, err
+		return "", "", m, false, err
 	}
 	if m.Crew, err = takes("--crew"); err != nil {
-		return "", "", m, err
+		return "", "", m, false, err
 	}
 	if m.Groups, err = takes("--group"); err != nil {
-		return "", "", m, err
+		return "", "", m, false, err
 	}
 	m.Binds, m.Members, m.OpenThreads, m.Calls = values["--bind"], values["--members"], values["--open-threads"], values["--calls"]
 	if depot == "" && !m.IsZero() {
-		return "", "", m, fmt.Errorf("--run takes %s: a mapping answers the plan for a named depot, so it needs --depot", PackApplyUse)
+		return "", "", m, false, fmt.Errorf("--run takes %s: a mapping answers the plan for a named depot, so it needs --depot", PackApplyUse)
 	}
-	return args[0], depot, m, nil
+	if len(values["--yes"]) > 1 {
+		return "", "", m, false, fmt.Errorf("--run takes %s: one --yes, not %d", PackApplyUse, len(values["--yes"]))
+	}
+	return args[0], depot, m, len(values["--yes"]) == 1, nil
 }
 
 // packTargetKey starts each Seen key a named depot's card holds for what
@@ -320,6 +330,10 @@ type AskPack struct {
 	Digest   string        `json:"digest,omitempty"`
 	Summary  bool          `json:"summary,omitempty"`
 	Files    []AskPackFile `json:"files,omitempty"`
+	// Yes says the ask carried --yes over the plan's edited files, which
+	// the card shows whole: approval overwrites exactly those copies,
+	// held to the hashes the card showed.
+	Yes bool `json:"yes,omitempty"`
 }
 
 // AskPackFile ties a file of a summary card to its line, so a client

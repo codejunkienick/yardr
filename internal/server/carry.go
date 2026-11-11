@@ -360,8 +360,8 @@ func plural(n int, word string) string {
 // again from the embedded pack, holds it as 3.4 holds it (the pack's
 // side whole, the yard's a source at a time; 3.7 an object at a time
 // for a depot pack) before anything writes, applies it as the
-// operator with no answers, no prune and no overwrite, and verifies
-// what it wrote.
+// operator with no answers and no prune, overwriting only the edited
+// copies a --yes card showed, and verifies what it wrote.
 func (c *carrier) carryPack(ctx context.Context, rec *store.Carry, run *store.AskRun) (string, string) {
 	res, plan, failure := c.carryPackApply(ctx, rec, run)
 	if failure != "" {
@@ -469,9 +469,12 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 			return nil, nil, failWords(failure, terminal)
 		}
 	}
+	// Overwrite is the card's --yes: the hold above pinned the edited
+	// set to the card's, and each file to its carded old hash, so exactly
+	// those copies are overwritten.
 	res, err := pack.Apply(ctx, c.st, plan, pack.ApplyOptions{
 		Answers: answers, OpenThreads: open, Calls: calls, Actor: rec.Actor,
-		ApprovedBead: rec.Bead, ApprovedAsk: rec.Ask,
+		ApprovedBead: rec.Bead, ApprovedAsk: rec.Ask, Overwrite: run.Pack.Yes,
 	})
 	if err != nil {
 		return nil, nil, failWords(err.Error(), terminal)
@@ -582,11 +585,43 @@ func sameSources(a, b []store.AskSource) bool {
 // identical or unchanged — the planner reading unchanged is what
 // "already as the pack says" means — each carded unchanged must
 // rebuild unchanged, and each dropped must still read dropped.
+// holdEdited holds the rebuilt plan's edited files to the card's set: a
+// file edited since the ask, or one the card showed that stands unedited
+// now, carries out nothing. A card asked without --yes shows none, so any
+// edited file refuses as before.
+func holdEdited(carded, rebuilt []string) error {
+	was := map[string]bool{}
+	for _, line := range carded {
+		was[line] = true
+	}
+	is := map[string]bool{}
+	for _, line := range rebuilt {
+		is[line] = true
+	}
+	for _, line := range rebuilt {
+		if !was[line] {
+			return fmt.Errorf("the plan now needs a hand-edited file the card did not show: %s", line)
+		}
+	}
+	for _, line := range carded {
+		if !is[line] {
+			return fmt.Errorf("the card's hand-edited file stands unedited now: %s", line)
+		}
+	}
+	return nil
+}
+
 func holdDepotObjects(carded, rebuilt *store.AskPlan) error {
-	for _, lines := range [][]string{rebuilt.Missing, rebuilt.Asks, rebuilt.Refused, rebuilt.Edited, rebuilt.NonText} {
+	for _, lines := range [][]string{rebuilt.Missing, rebuilt.Asks, rebuilt.Refused, rebuilt.NonText} {
 		if len(lines) > 0 {
 			return fmt.Errorf("the plan now asks, refuses, or needs a hand-edited or non-text file: %s", strings.Join(lines, "; "))
 		}
+	}
+	// Edited files the card showed whole with --yes are held to the
+	// card's set, each to its old hash with the objects below: one edited
+	// since, or one standing unedited now, carries out nothing.
+	if err := holdEdited(carded.Edited, rebuilt.Edited); err != nil {
+		return err
 	}
 	byKey := map[string]store.AskPlanObject{}
 	for _, o := range rebuilt.Objects {

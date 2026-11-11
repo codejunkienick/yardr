@@ -996,6 +996,9 @@ func TestCarryDepotPack(t *testing.T) {
 	t.Run("first install with mappings", carryFirstInstallWithMappings)
 	t.Run("files the pack does not carry", carryStrayFiles)
 	t.Run("a file the pack no longer carries", carryDroppedFile)
+	t.Run("a file edited by hand, overwritten with --yes", carryEditedWithYes)
+	t.Run("a file edited again after approval", carryEditedAgain)
+	t.Run("a second file edited after approval", carryEditedSince)
 
 	st2, home2, bead2, dir2 := depotYard(t)
 	writeMiniPack(t, dir2, "build v2\n", "yardmaster v2\n")
@@ -1092,6 +1095,94 @@ func carryDroppedFile(t *testing.T) {
 	}
 	if data, err := os.ReadFile(stage); err != nil || string(data) != "the new stage, v1\n" {
 		t.Fatalf("the installed stage file = %q, %v, want it as it stood", data, err)
+	}
+}
+
+// carryEditedWithYes checks the --yes case of TestCarryDepotPack: a role
+// the pack changed and a hand edited meanwhile is shown whole on the card,
+// and the carrying out installs the pack's bytes over the hand edit.
+func carryEditedWithYes(t *testing.T) {
+	st, home, bead, dir := depotYard(t)
+	writeMiniPack(t, dir, "build v2\n", "yardmaster v2\n")
+	builder := filepath.Join(home, "packs", "mini", "roles", "builder.md")
+	if err := os.WriteFile(builder, []byte("build by hand\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ask := packAskOf("mini")
+	ask.Run.Argv = []string{"pack apply mini --yes"}
+	ctx := context.Background()
+	seq, err := st.AddAsk(ctx, bead, ask, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := resolvedLines(t, st, bead, seq); !strings.Contains(lines, "approval overwrites the copy edited by hand with the pack's bytes and keeps no other copy of the edit") {
+		t.Fatalf("the --yes card reads:\n%s", lines)
+	}
+	if _, err := st.ApproveAsk(ctx, bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	drainMini(t, st, home, dir)
+	if rec := carryState(t, st, bead, seq); rec.State != store.CarryDone {
+		t.Fatalf("the carrying record = %+v", rec)
+	}
+	for name, want := range map[string]string{"builder.md": "build v2\n", "yardmaster.md": "yardmaster v2\n"} {
+		data, err := os.ReadFile(filepath.Join(home, "packs", "mini", "roles", name))
+		if err != nil || string(data) != want {
+			t.Fatalf("the installed %s = %q, %v", name, data, err)
+		}
+	}
+}
+
+// carryEditedAgain checks the hold of TestCarryDepotPack's --yes case: a
+// copy edited again after the approval is not the card's old hash, so the
+// carrying out fails and the latest hand edit stands.
+func carryEditedAgain(t *testing.T) {
+	st, home, bead, dir := depotYard(t)
+	writeMiniPack(t, dir, "build v2\n", "yardmaster v2\n")
+	builder := filepath.Join(home, "packs", "mini", "roles", "builder.md")
+	if err := os.WriteFile(builder, []byte("build by hand\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ask := packAskOf("mini")
+	ask.Run.Argv = []string{"pack apply mini --yes"}
+	seq := askApprove(t, st, bead, ask)
+	if err := os.WriteFile(builder, []byte("build by hand again\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	drainMini(t, st, home, dir)
+	if rec := carryState(t, st, bead, seq); rec.State != store.CarryFailed || !strings.Contains(rec.Result, "roles/builder.md") {
+		t.Fatalf("an edited-again record = %+v", rec)
+	}
+	if data, err := os.ReadFile(builder); err != nil || string(data) != "build by hand again\n" {
+		t.Fatalf("the re-edited file was applied over: %q, %v", data, err)
+	}
+}
+
+// carryEditedSince checks the hold of TestCarryDepotPack's --yes case for
+// a second copy edited after the approval: the plan names what the card
+// did not show, so nothing is carried out and both hand edits stand.
+func carryEditedSince(t *testing.T) {
+	st, home, bead, dir := depotYard(t)
+	writeMiniPack(t, dir, "build v2\n", "yardmaster v2\n")
+	roles := filepath.Join(home, "packs", "mini", "roles")
+	if err := os.WriteFile(filepath.Join(roles, "builder.md"), []byte("build by hand\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ask := packAskOf("mini")
+	ask.Run.Argv = []string{"pack apply mini --yes"}
+	seq := askApprove(t, st, bead, ask)
+	if err := os.WriteFile(filepath.Join(roles, "yardmaster.md"), []byte("yardmaster by hand\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	drainMini(t, st, home, dir)
+	if rec := carryState(t, st, bead, seq); rec.State != store.CarryFailed || !strings.Contains(rec.Result, "did not show") {
+		t.Fatalf("an edited-since record = %+v", rec)
+	}
+	for name, want := range map[string]string{"builder.md": "build by hand\n", "yardmaster.md": "yardmaster by hand\n"} {
+		data, err := os.ReadFile(filepath.Join(roles, name))
+		if err != nil || string(data) != want {
+			t.Fatalf("the installed %s = %q, %v, want the hand edit standing", name, data, err)
+		}
 	}
 }
 
@@ -1325,5 +1416,24 @@ func TestDepotPlanHolding(t *testing.T) {
 	madeMeanwhile := &store.AskPlan{Objects: []store.AskPlanObject{{Kind: "group", Name: "assembly", Action: "unchanged"}}}
 	if err := holdDepotObjects(cardedEnv, madeMeanwhile); err != nil {
 		t.Fatalf("a group made meanwhile held: %v", err)
+	}
+
+	// Edited files are held to the card's set: the same set holds, one
+	// edited since or one standing unedited now carries out nothing, and
+	// a card asked without --yes holds any edited file as before.
+	edited := &store.AskPlan{Edited: []string{"roles/a.md was edited by hand"}, Objects: carded.Objects}
+	if err := holdDepotObjects(edited, &store.AskPlan{Edited: []string{"roles/a.md was edited by hand"}, Objects: carded.Objects}); err != nil {
+		t.Fatalf("the card's edited set held: %v", err)
+	}
+	since := &store.AskPlan{Objects: carded.Objects, Edited: []string{"roles/a.md was edited by hand", "roles/b.md was edited by hand"}}
+	if err := holdDepotObjects(edited, since); err == nil || !strings.Contains(err.Error(), "roles/b.md") {
+		t.Fatalf("a file edited since held: %v", err)
+	}
+	if err := holdDepotObjects(carded, since); err == nil || !strings.Contains(err.Error(), "roles/a.md") {
+		t.Fatalf("an edited file without --yes held: %v", err)
+	}
+	unedited := &store.AskPlan{Objects: carded.Objects}
+	if err := holdDepotObjects(edited, unedited); err == nil || !strings.Contains(err.Error(), "unedited") {
+		t.Fatalf("an edit standing unedited now held: %v", err)
 	}
 }

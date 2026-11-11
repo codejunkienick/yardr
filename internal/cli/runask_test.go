@@ -2263,9 +2263,14 @@ func TestBeadAskRunPackApply(t *testing.T) {
 		t.Fatalf("a pack approval applied the pack in its write")
 	}
 	// A flag a card holds no word for is refused before anything is stored,
-	// and a source pack's depot points to its setup card.
-	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Apply it?", "--context", "why", "--run", "pack apply telegram --yes"); err == nil || !strings.Contains(err.Error(), "pack apply with --yes") {
+	// --yes over a plan that names no edited file is refused with the
+	// words to propose without it, and a source pack's depot points to
+	// its setup card.
+	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Apply it?", "--context", "why", "--run", "pack apply telegram --prune"); err == nil || !strings.Contains(err.Error(), "pack apply with --prune") {
 		t.Fatalf("a refused flag: %v", err)
+	}
+	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Apply it?", "--context", "why", "--run", "pack apply telegram --yes"); err == nil || !strings.Contains(err.Error(), "propose the apply without it") {
+		t.Fatalf("a --yes that overwrites nothing: %v", err)
 	}
 	if err := y.st.PutDepot(context.Background(), store.Depot{Name: "web", Path: t.TempDir()}, "jo"); err != nil {
 		t.Fatal(err)

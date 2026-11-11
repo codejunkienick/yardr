@@ -53,8 +53,15 @@ type AskPlanObject struct {
 	Name    string      `json:"name"`
 	Action  string      `json:"action"`
 	Changes []AskChange `json:"changes,omitempty"`
-	Keeps   []string    `json:"keeps,omitempty"`
-	Shadows []string    `json:"shadows,omitempty"`
+	// Edited says the installed copy was changed by hand since the last
+	// import: a card shows it only with --yes, and approval overwrites it.
+	Edited bool `json:"edited,omitempty"`
+	// Runs says the yard runs this file once installed: a program, a
+	// role or a script, not a stage file or the page frame. Overwriting
+	// a hand-edited copy of one weighs code, as installing one does.
+	Runs    bool     `json:"runs,omitempty"`
+	Keeps   []string `json:"keeps,omitempty"`
+	Shadows []string `json:"shadows,omitempty"`
 	// Env are the assignments a script group the import creates has
 	// before its script in its cmd, from the pack's env: part of what the
 	// approval has the yard write, so the card shows them and the carrying
@@ -316,7 +323,7 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 	// approval is held to the plan the card showed. What a writer sends
 	// beside argv never reaches here, since an ask keeps argv and carried
 	// bytes alone (askedRun).
-	_, depot, mappings, err := packApplyWords(run.Argv[2:])
+	_, depot, mappings, yes, err := packApplyWords(run.Argv[2:])
 	if err != nil {
 		return AskRun{}, err
 	}
@@ -410,6 +417,9 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 		if named {
 			return AskRun{}, fmt.Errorf("pack %s: it is of kind source, so it goes into the yard and no depot, and a setup card installs it: yardr bead ask <bead> - --setup %s, with the question and context on stdin", name, name)
 		}
+		if yes {
+			return AskRun{}, packYesNothing(name)
+		}
 		does, err := w.packSourceDoes(name, reading, carried, decls)
 		if err != nil {
 			return AskRun{}, err
@@ -426,10 +436,14 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 		if reading.Depot == "" || reading.Plan == nil {
 			return AskRun{}, fmt.Errorf("pack %s: it has no single depot to re-apply to: a first install, and one of several depots, is asked with its depot named and the mappings that answer its plan (the run ask pack apply %s --depot <depot>); a plan that still asks is the operator's to type in a terminal (yardr pack check %s --depot <depot> shows its plan there)", name, name, name)
 		}
-		for _, group := range [][]string{reading.Plan.Missing, reading.Plan.Asks, reading.Plan.Refused, reading.Plan.Edited, reading.Plan.NonText} {
+		for _, group := range [][]string{reading.Plan.Missing, reading.Plan.Asks, reading.Plan.Refused, reading.Plan.NonText} {
 			if len(group) > 0 {
 				return AskRun{}, fmt.Errorf("pack %s: its plan asks or refuses, so no card can apply it: %s: it is the operator's to type in a terminal (yardr pack check %s --depot %s shows its plan there)", name, strings.Join(group, "; "), name, reading.Depot)
 			}
+		}
+		shown, err := packYesEdited(name, reading.Depot, reading.Plan, yes)
+		if err != nil {
+			return AskRun{}, err
 		}
 		for _, o := range reading.Plan.Objects {
 			payload += len(o.Text) + len(o.Diff)
@@ -450,8 +464,12 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 				return AskRun{}, err
 			}
 		}
+		if len(shown) > 0 {
+			does = packYesDoes(does, shown)
+		}
 		card.Does = does
 		card.Pack.Plan = reading.Plan
+		card.Pack.Yes = len(shown) > 0
 		card.Description = fmt.Sprintf("Import a pack into depot %s: set the yard to what the pack says", reading.Depot)
 		card.Back = fmt.Sprintf("no one command takes it back: read the standing state with yardr pack check %s --depot %s in a terminal", name, reading.Depot)
 		card.BackBy = "the operator"
@@ -459,9 +477,14 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 	for i := range card.Does {
 		card.Does[i] = safeSourceCardLine(card.Does[i])
 	}
-	summary, err := w.packSummary(&card, reading, carried, decls, named, payload)
-	if err != nil {
-		return AskRun{}, err
+	// A card that shows edited files whole is whole or refused: the
+	// summary shape would fold the diffs approval overwrites by.
+	summary := false
+	if !card.Pack.Yes {
+		summary, err = w.packSummary(&card, reading, carried, decls, named, payload)
+		if err != nil {
+			return AskRun{}, err
+		}
 	}
 	if payload > MaxRunPackFiles && !summary {
 		return AskRun{}, fmt.Errorf("pack %s: its carried file texts and diffs run to %d bytes: a card holds at most %d together, so this is the operator's to type in a terminal (yardr pack check %s shows it there)", name, payload, MaxRunPackFiles, name)
