@@ -66,7 +66,7 @@ func (a *app) delegatedPack(c *cobra.Command, name string, f *importFlags) (*pac
 	if pack.IsURL(name) {
 		return a.delegatedRepositoryPack(c, name, f)
 	}
-	if packDir(name) {
+	if store.IsPackDir(name) {
 		return nil, fmt.Errorf("pack %s: a delegated run applies a pack yardr embeds, by name, or one of the packs repository, by its URL and --sha256: a directory is the operator's to type in a terminal", name)
 	}
 	if _, err := fs.Stat(packs.FS, name+"/pack.yaml"); err != nil {

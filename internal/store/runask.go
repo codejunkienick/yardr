@@ -98,7 +98,8 @@ type AskRun struct {
 	// and Seen.
 	Carried []AskSource `json:"carried,omitempty"`
 	// Pack is the pack a pack apply ask names, as the server read it
-	// from its own binary; set on that row alone.
+	// from its own binary, or for a directory from the depot checkout
+	// it stands in; set on that row alone.
 	Pack *AskPack `json:"pack,omitempty"`
 	// Value is the address a user key row carries: the value it writes
 	// under the source's notify variable into the user's env file,

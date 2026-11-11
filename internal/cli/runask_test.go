@@ -2219,6 +2219,36 @@ func TestSourceAddCarriedReadBounds(t *testing.T) {
 	}
 }
 
+// A pack apply of a relative directory is sent absolute, against the
+// directory the ask is typed in; anything else stands as typed.
+func TestPackApplyAbsDir(t *testing.T) {
+	t.Parallel()
+	abs := func(rel string) string {
+		t.Helper()
+		out, err := filepath.Abs(rel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	for _, c := range []struct{ in, want string }{
+		{"pack apply ./rel --depot web", "pack apply " + abs("./rel") + " --depot web"},
+		{"pack apply packs/team --sha256 " + strings.Repeat("d", 64), "pack apply " + abs("packs/team") + " --sha256 " + strings.Repeat("d", 64)},
+		{"yardr pack apply ../up", "yardr pack apply " + abs("../up")},
+		{"pack apply .", "pack apply " + abs(".")},
+		{"pack apply /abs/team --depot web", "pack apply /abs/team --depot web"},
+		{"pack apply team", "pack apply team"},
+		{"pack apply https://example.com/packs/team/", "pack apply https://example.com/packs/team/"},
+		{"pack apply", "pack apply"},
+		{"source add x/y.yaml", "source add x/y.yaml"},
+		{"pack apply a,b", "pack apply a,b"},
+	} {
+		if got, err := packApplyAbsDir(c.in); err != nil || got != c.want {
+			t.Errorf("packApplyAbsDir(%q) = %q, %v, want %q", c.in, got, err, c.want)
+		}
+	}
+}
+
 // yardr bead ask --run "pack apply <name>" sends argv alone: the card is
 // the server's own pack, shown by prime, and the approval is recorded
 // to be carried out.
@@ -2277,5 +2307,62 @@ func TestBeadAskRunPackApply(t *testing.T) {
 	}
 	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Apply it?", "--context", "why", "--run", "pack apply telegram --depot web"); err == nil || !strings.Contains(err.Error(), "--setup telegram") {
 		t.Fatalf("a source pack to a depot: %v", err)
+	}
+	// A directory inside a depot's main checkout is a card, shown by
+	// prime with the digest the card pins.
+	checkout := t.TempDir()
+	dir := filepath.Join(checkout, "packs", "team")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.st.PutDepot(context.Background(), store.Depot{Name: "site", Path: checkout}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	const teamDigest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	y.own.SetDirectoryPackReader(func(ctx context.Context, dir string, depot string, mappings store.Mappings, yard store.API) (*store.PackReading, error) {
+		return &store.PackReading{Name: "team", Kind: "git", Depot: depot, Mappings: mappings,
+			Label: "directory " + dir + " in yardr test", Build: "test", Digest: teamDigest,
+			Plan: &store.AskPlan{Objects: []store.AskPlanObject{{Kind: "file", Name: "roles/a.md", Action: "create",
+				FileNewSHA: strings.Repeat("b", 64), Text: "role\n", Diff: "+role\n"}}}}, nil
+	})
+	out, err = y.as(t, "yardmaster", "ask", b.ID, "Apply the team pack?", "--context", "why", "--run", "pack apply "+dir+" --depot site")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "to approve, yardr pack apply "+dir+" --depot site") {
+		t.Fatalf("bead ask --run pack apply <dir> printed %q", out)
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown, err = run(t, y.a.primeCmd(), "--bead", b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"pack team (directory " + resolved + " in yardr test), of kind git, into depot site",
+		"digest sha256:" + teamDigest,
+	} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("prime lacks %q:\n%s", want, shown)
+		}
+	}
+	// Outside every checkout, at a URL, and relative: the relative word
+	// reaches the yard absolute, against where the ask is typed, and is
+	// refused by its place there.
+	outside := filepath.Join(t.TempDir(), "team")
+	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Apply it?", "--context", "why", "--run", "pack apply "+outside); err == nil || !strings.Contains(err.Error(), "not inside a registered depot's main checkout") {
+		t.Fatalf("a directory outside every checkout: %v", err)
+	}
+	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Apply it?", "--context", "why", "--run", "pack apply https://example.com/packs/team/"); err == nil || !strings.Contains(err.Error(), "a pack at a URL is the operator's to apply in a terminal") {
+		t.Fatalf("a URL: %v", err)
+	}
+	relAbs, err := filepath.Abs(filepath.Join("rel", "team"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Apply it?", "--context", "why", "--run", "pack apply rel/team"); err == nil || !strings.Contains(err.Error(), "pack "+relAbs+": "+relAbs+" is not inside") {
+		t.Fatalf("a relative directory: %v", err)
 	}
 }

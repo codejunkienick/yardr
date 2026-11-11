@@ -1084,8 +1084,9 @@ told of the event. A device of an operator gets all of it whole.
 
 What a device can still read is text written about one thing that happened,
 as it was written. That is the command a run ask's asker typed, but for one
-that sets a setting or adds a source, whose value or path is the operator's
-alone; a note the yard wrote on a bead about what it did or what failed,
+that sets a setting, adds a source or applies a pack from a directory,
+whose value or path is the operator's alone; a note the yard wrote on a
+bead about what it did or what failed,
 such as a landing's line, which names the test command it ran, or a fetch
 that did not work; and the words of an error a call returns when the yard's
 own file operation failed, such as a depot it could not read. Rows from
@@ -1154,6 +1155,7 @@ covered below under Strong cards. Row by row:
 | `pack apply <name>`, with no flag: an embedded pack whose card fits 40 lines | Of kind source, the pack's sources added, or replaced with their diffs on the card, with the pack's command files installed from the yardr build the yard runs. Of a depot kind, re-applied to the one depot that holds it where its plan asks nothing and is not refused, the plan's objects created and changed as the card showed them: flows, groups, roles and scripts; where the only block is files edited by hand, `--yes` carries them on its own row below. Either still grants no call, makes no hook and sets no credential's file |
 | `pack apply <name>`, first install of an embedded depot pack to a named depot | The pack is installed to the named depot with the mappings and plan the card showed. Where the pack brings a program or trust the card is strong, and what the install made stands after the device is removed; a credential by itself does not make a card strong. A pack too large for a whole card, whether first installed or re-applied to a named depot, is a summary card, gated by its weight. A pack of kind source named with `--depot` is not this row's: it is sent to `bead ask --setup`, and named bare it is the row above's, with its sources whole on the card |
 | `pack apply <name> --yes`, over the hand-edited files the card named: a pack whose edited copies are overwritten | The pack's bytes stand where the operator's hand edits stood: each edited file the card named whole, with both hashes and the diff, is overwritten, and no other copy of an edit is kept. Where an edited file is a program, a role or a script the card is strong (code). It stands after the device is removed, and only the operator restores an edit, from outside the yard |
+| `pack apply <dir>`, a directory inside a depot's main checkout, pinned by its digest: a pack applied from files that stand in that checkout | The card applies the pack as its kind calls for: a source pack adds its declarations and command files to the yard; a depot pack changes flows, groups, roles and scripts in its depot and adds any declared sources to the yard. The holder must first have the pack files standing in a depot checkout. A stolen token cannot write to that checkout, but approving the card can still change yard sources or depot state; those changes stand after the device is removed. Only the operator takes them back, by restoring the prior sources and depot files from the card's plan |
 | `hook add <name> --source <source>`: a new webhook endpoint for a declared source | A URL on the yard, `POST /hooks/<name>`, that runs the source's normalize command on each delivery it verifies with the signing secret the holder gave on the hook's own secret card: the holder knows the secret, so can send deliveries the yard hears as the source's, which reach whoever subscribes to it. Where the yard registers the hook itself the secret is the yard's made one, which the holder never sees, and the approval registers it at the service with the values the holder gives the card's asked names. It maps no stage and acts as no crew member; a hook with a table is the next row's |
 | `hook add <name> --source <source>`, replacing the hook that stands or carrying `--says`, `--makes`, `--map` or `--as`: a hook's table replaced | The events of the source move and make beads as the holder wrote: each says line reports its outcome for the bead the event is about, each makes line makes a bead where none tracks the thread, and each map entry moves a tracked issue as the named crew member. The card is strong (`trust`) and shows each table now and after, whole. It stands after the device is removed, and only the operator takes it back, with another card carrying the table that stood |
 | `subscribe <user> yardr …`, asked of the operator: a subscription to the yard's own events, the operator's or another user's | That user is told of more of what happens in the yard, as notifications in their inbox and, where a source tells them, outside the yard. The holder reads those events in the stream already |
@@ -1226,9 +1228,10 @@ address is read from, a hook add that keeps a secret file of its own,
 reading a source's
 credential or setting where it is read from or the command that mints one,
 free `args` of a group or a crew member that stands and any env setting of
-one, and applying a pack from a directory, or from a URL but the packs
-repository's, with a flag beyond the depot, the mappings, the pin and
-`--yes` over the hand-edited files the card names, or where its plan asks.
+one, and applying a pack from a directory outside every depot's main
+checkout, or from a URL but the packs repository's, with a flag beyond
+the depot, the mappings, the pin and `--yes` over the hand-edited files
+the card names, or where its plan asks.
 The delegation switch it can move either way, as it
 approves any card, through the operator's own doors
 ([above](#the-yardmaster-for-the-operator)). A stolen device still cannot

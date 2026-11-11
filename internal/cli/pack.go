@@ -160,7 +160,7 @@ func resolvePack(ctx context.Context, st store.API, arg, depot, auth, home strin
 	if pack.IsURL(arg) {
 		return loadURLPack(arg, auth, home)
 	}
-	if packDir(arg) {
+	if store.IsPackDir(arg) {
 		if auth != "" {
 			return nil, fmt.Errorf("--auth %q is for a pack at a URL: %s is a directory", auth, arg)
 		}
@@ -278,13 +278,6 @@ func embeddedPacks() []string {
 	return out
 }
 
-// packDir reports whether arg, a command's pack, is a directory and no
-// name: it has a path separator in it, or is . or .., which have none and
-// can be no pack's name.
-func packDir(arg string) bool {
-	return strings.ContainsRune(arg, filepath.Separator) || strings.Contains(arg, "/") || arg == "." || arg == ".."
-}
-
 // openPack completes f's options for this yard (packOptions) and reads the
 // pack arg names. A directory is read first, before the store is opened: a
 // pack that is not valid is told its mistakes wherever it is checked, with
@@ -293,7 +286,7 @@ func packDir(arg string) bool {
 // check lets through for the directory's sake, makes that check there.
 func (a *app) openPack(w, warn io.Writer, ctx context.Context, arg string, f *packFlags, yard func() error, validate bool) (store.API, *config.Config, *pack.Pack, error) {
 	var p *pack.Pack
-	if packDir(arg) {
+	if store.IsPackDir(arg) {
 		// Home for a URL pack's --auth, from the config alone and creating
 		// nothing: the store is not opened until the pack has been read.
 		home := f.opts.Home

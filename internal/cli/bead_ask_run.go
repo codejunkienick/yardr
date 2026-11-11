@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"unicode/utf8"
 
+	"yardr.dev/yardr/internal/pack"
 	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/store"
 )
@@ -25,8 +26,14 @@ import (
 // command carries beside it, each read once here so the store holds the
 // bytes the card shows. test and role are the values of --run-test and
 // --run-role, and testSet and roleSet say whether they were given; says
-// and makes are the values of --run-says and --run-makes.
+// and makes are the values of --run-says and --run-makes. A pack apply of
+// a relative directory is sent absolute, against the directory the ask is
+// typed in, since a relative path means nothing to the yard's server.
 func askRunCarried(command, test string, testSet bool, role string, roleSet bool, says, makes []string) (*store.AskRun, error) {
+	command, err := packApplyAbsDir(command)
+	if err != nil {
+		return nil, err
+	}
 	run := &store.AskRun{Argv: []string{command}}
 	// Source add carries its file: read once here, beside the ask, so the
 	// store holds the bytes the card shows.
@@ -109,6 +116,36 @@ func hookTableCarried(says, makes []string) (*store.AskHookTable, error) {
 		}
 	}
 	return &store.AskHookTable{Says: says, Makes: makes}, nil
+}
+
+// packApplyAbsDir is a pack apply run ask's command with a relative
+// directory made absolute, against the directory the ask is typed in: the
+// yard stores the command as its server reads it, and a relative path
+// means nothing there. A bare name, a URL and an absolute directory stand
+// as typed, as does any other command, and a line the store will refuse
+// is refused there, rewritten or not.
+func packApplyAbsDir(command string) (string, error) {
+	if !plainRunLine(command) {
+		return command, nil
+	}
+	words := strings.Fields(command)
+	at := 0
+	if len(words) > 0 && words[0] == "yardr" {
+		at = 1
+	}
+	if len(words)-at < 3 || words[at] != "pack" || words[at+1] != "apply" {
+		return command, nil
+	}
+	dir := words[at+2]
+	if !store.IsPackDir(dir) || pack.IsURL(dir) || filepath.IsAbs(dir) {
+		return command, nil
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	words[at+2] = abs
+	return strings.Join(words, " "), nil
 }
 
 // plainRunLine reports whether command has only the characters a run ask's

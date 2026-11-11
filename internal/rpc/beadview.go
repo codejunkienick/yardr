@@ -121,7 +121,8 @@ func withoutAccount(card *store.SetupAsked, ran *store.AskRan) (*store.SetupAske
 // A pack ask keeps the pack's name and the depot it is for. Where the typed
 // words themselves carry a value or a path (store.RunArgvHeld), argv and
 // command are cut too, and an approval's argv with them: what the asker typed
-// is then the question and the command's help line. The card and the
+// is then the question and the command's help line. A directory pack's label
+// is cut too, because it includes the path the argv holds. The card and the
 // result are copied, not changed, and an ask with no run comes back as it is.
 func withoutRunWords(run *store.RunAsked, ran *store.AskRan) (*store.RunAsked, *store.AskRan) {
 	if run == nil {
@@ -137,6 +138,9 @@ func withoutRunWords(run *store.RunAsked, ran *store.AskRan) (*store.RunAsked, *
 		pack := *bare.Pack
 		pack.Plan, pack.Mappings, pack.Files = nil, store.Mappings{}, nil
 		pack.Digest, pack.Summary = "", false
+		if heldPackDirectory(run.Argv) {
+			pack.Label = ""
+		}
 		bare.Pack = &pack
 	}
 	if ran != nil {
@@ -148,6 +152,13 @@ func withoutRunWords(run *store.RunAsked, ran *store.AskRan) (*store.RunAsked, *
 		ran = &told
 	}
 	return &bare, ran
+}
+
+// heldPackDirectory reports whether argv names a directory pack whose path
+// is held from devices that are not the operator. Its path also appears in
+// the pack label, which the run card otherwise keeps beside its name.
+func heldPackDirectory(argv []string) bool {
+	return len(argv) >= 3 && slices.Equal(argv[:2], []string{"pack", "apply"}) && store.IsPackDir(argv[2])
 }
 
 // withoutWeightWords cuts a run ask's weight along with its words: where

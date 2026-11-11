@@ -174,6 +174,11 @@ type Store struct {
 	// of that name (SetAppliedPackReader, packmappings.go); nil where no
 	// server owns the store.
 	appliedReader PackReader
+	// directoryReader reads the pack in a directory for a pack apply run
+	// ask of one, from a depot checkout of the yard (SetDirectoryPackReader,
+	// runask_packdir.go); nil where no server owns the store. No other
+	// row reads it: a setup card never reads a directory.
+	directoryReader PackReader
 	// packFetcher fetches a pack of the packs repository for a delegated
 	// pack apply (SetPackFetcher, delegation_repo.go); nil where no
 	// server owns the store.

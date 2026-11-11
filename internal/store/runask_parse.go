@@ -33,7 +33,8 @@ func RunCommands() []string {
 // directories and prompt file are the operator's machine too, crew set
 // where it names a prompt file or a directory, and pack apply with any word past the
 // pack's name, whose mappings are the operator's configuration as the
-// card's are (Mappings). Bead and UserAsks tell those words to a device of
+// card's are (Mappings), or of a directory, whose path is the yard's
+// machine's too. Bead and UserAsks tell those words to a device of
 // the operator alone, and the sentence of an approval of one is marked for
 // WithoutHeld. Every other row's words are names and numbers the stream and
 // the calls tell every device already.
@@ -43,7 +44,7 @@ func RunArgvHeld(argv []string) bool {
 		slices.Equal(argv[:2], []string{"group", "add"}) ||
 		slices.Equal(argv[:2], []string{"group", "set"}) ||
 		slices.Equal(argv[:2], []string{"crew", "set"}) && slices.ContainsFunc(argv[2:], func(word string) bool { return strings.HasPrefix(word, "prompt=") || strings.HasPrefix(word, "dir=") })) ||
-		len(argv) > 3 && slices.Equal(argv[:2], []string{"pack", "apply"})
+		len(argv) >= 3 && slices.Equal(argv[:2], []string{"pack", "apply"}) && (len(argv) > 3 || IsPackDir(argv[2]))
 }
 
 // errNotRow is when the words name no row of the list: askedRun then

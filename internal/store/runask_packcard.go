@@ -72,7 +72,7 @@ func packActionCounts(plan *AskPlan) map[string]int {
 func packDepotLine(name string, reading *PackReading, counts map[string]int) string {
 	kind := reading.Kind
 	if kind == "" {
-		kind = "of no kind"
+		kind = "no kind"
 	} else {
 		kind = "kind " + kind
 	}

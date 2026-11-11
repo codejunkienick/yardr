@@ -388,11 +388,24 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 	// A card written before mappings were carried has no mappings; its
 	// recorded depot still names the target it was approved for.
 	depot, mappings := run.Pack.Depot, run.Pack.Mappings
-	reading, err := c.st.ReadPack(ctx, name, depot, mappings)
+	dir := name
+	var reading *store.PackReading
+	var err error
+	if store.IsPackDir(name) {
+		// As the card resolved it, so the reading below is held to the
+		// label the card pins.
+		if dir, err = store.ResolvePackDir(name); err != nil {
+			return nil, nil, failWords(err.Error(), terminal)
+		}
+		reading, err = c.st.ReadDirPack(ctx, dir, depot, mappings)
+	} else {
+		reading, err = c.st.ReadPack(ctx, name, depot, mappings)
+	}
 	// A setup of a pack yardr does not embed is carried out from the
 	// directory the operator applied it from, loaded once for the reading
 	// held below, the plan and the copy (appliedpack.go). A pack apply card
-	// never is: it stays pinned to the binary.
+	// of a name stays pinned to the binary; one of a directory is read
+	// from it, held to the card's digest below.
 	var applied *pack.Pack
 	if errors.Is(err, store.ErrNotEmbedded) && isSetupCarry(rec) {
 		reading, applied, err = readApplied(ctx, name, depot, mappings, c.st, c.home)
@@ -413,10 +426,22 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 		return nil, nil, staleWords(fmt.Sprintf("pack %s would now be re-applied to depot %s, not %s", name, reading.Depot, depot), terminal)
 	}
 	p, sub := applied, fs.FS(nil)
-	if applied != nil {
+	switch {
+	case applied != nil:
 		sub = os.DirFS(applied.Dir)
-	} else if p, sub, err = c.load(name); err != nil {
-		return nil, nil, failWords(err.Error(), terminal)
+	case store.IsPackDir(name):
+		// A directory card's pack, loaded from the directory the card
+		// names: the plan below is held to the card's digest before
+		// anything writes.
+		var dirPack *pack.Pack
+		if dirPack, err = pack.LoadDir(dir); err != nil {
+			return nil, nil, failWords(err.Error(), terminal)
+		}
+		p, sub = dirPack, os.DirFS(dirPack.Dir)
+	default:
+		if p, sub, err = c.load(name); err != nil {
+			return nil, nil, failWords(err.Error(), terminal)
+		}
 	}
 	plan, err := pack.Build(ctx, c.st, p, packOptions(depot, c.home, mappings))
 	if err != nil {

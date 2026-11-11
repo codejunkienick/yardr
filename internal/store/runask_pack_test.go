@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -25,18 +28,26 @@ type fakePack struct {
 	mappings Mappings
 	digest   string
 	programs []string
+	// name is the pack's name where it is not wired: what a
+	// directory's pack.yaml names.
+	name string
 	// noSources reads a pack that declares none, as the four large
 	// packs are.
 	noSources bool
 	// What the last reading was asked for.
 	readDepot    string
 	readMappings Mappings
+	readDir      string
 }
 
 func (f *fakePack) reading() *PackReading {
 	kind := f.kind
 	if kind == "" {
 		kind = "source"
+	}
+	name := f.name
+	if name == "" {
+		name = "wired"
 	}
 	files := f.files
 	if files == nil {
@@ -45,7 +56,7 @@ func (f *fakePack) reading() *PackReading {
 	// In the declaration's command order, as a server reading builds it.
 	var srcs []AskSource
 	_ = srcs
-	r := &PackReading{Name: "wired", Kind: kind, Depot: f.depot, Mappings: f.mappings, Label: f.label, Build: f.build,
+	r := &PackReading{Name: name, Kind: kind, Depot: f.depot, Mappings: f.mappings, Label: f.label, Build: f.build,
 		Plan: f.plan, Digest: f.digest, Programs: f.programs}
 	if !f.noSources {
 		r.Sources = []AskSource{{Name: "wired", Text: wiredDecl, Files: askFilesOrdered(files)}}
@@ -74,6 +85,51 @@ func (y *askYard) setPack(f *fakePack) {
 		return r, nil
 	})
 }
+
+// setDirPack wires f as the yard's directory-pack reading: the pack of
+// any directory, read for the depot and mappings the card holds, under
+// the name the directory's pack.yaml names.
+func (y *askYard) setDirPack(f *fakePack) {
+	y.Store.SetDirectoryPackReader(func(ctx context.Context, dir string, depot string, mappings Mappings, yard API) (*PackReading, error) {
+		f.readDepot, f.readMappings, f.readDir = depot, mappings, dir
+		return f.reading(), nil
+	})
+}
+
+// dirCheckout is a depot main checkout holding a pack directory: depot
+// web stands on checkout, and dir is the pack's directory in it, made.
+// It answers the checkout and the directory as typed, and the directory
+// resolved, as the card names it.
+func dirCheckout(t *testing.T, y *askYard) (checkout, dir, resolved string) {
+	t.Helper()
+	checkout = t.TempDir()
+	if err := y.PutDepot(y.ctx, Depot{Name: "web", Path: checkout}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	dir = filepath.Join(checkout, "packs", "team")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return checkout, dir, resolved
+}
+
+// dirGit runs git in dir for a directory-pack test, as the store's git
+// tests do: no config but the test's own name.
+func dirGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// dirPackDigest is the digest a directory-pack test pins: 64 hex digits,
+// as pack check prints them.
+const dirPackDigest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 func errFakeNoPack(name string) error {
 	return &fakeNoPack{name}
@@ -455,7 +511,8 @@ func TestPackApplyFirstInstallCardAndStale(t *testing.T) {
 	if !StrongWeight(got.Ask.Weight) || !strings.Contains(WeightWords(got.Ask.Weight), "code") {
 		t.Fatalf("the card's weight = %+v", got.Ask.Weight)
 	}
-	if !RunArgvHeld(run.Argv) || RunArgvHeld([]string{"pack", "apply", "starter"}) {
+	if !RunArgvHeld(run.Argv) || RunArgvHeld([]string{"pack", "apply", "starter"}) ||
+		!RunArgvHeld([]string{"pack", "apply", "/depots/web/packs/team"}) {
 		t.Errorf("RunArgvHeld holds the wrong pack apply")
 	}
 	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "approve it where its weight is shown") {
@@ -1638,5 +1695,360 @@ func TestPackApplySummaryReapply(t *testing.T) {
 	bound := y.asked(t, y.ask(t, ask, "yardmaster"))
 	if !bound.Ask.Run.Pack.Summary || !StrongWeight(bound.Ask.Weight) {
 		t.Fatalf("a re-apply with a bind = %+v, weight %+v", bound.Ask.Run.Pack, bound.Ask.Weight)
+	}
+}
+
+// A directory inside a depot's main checkout is a card: read at the ask
+// into the whole card, pinned by its digest, carded under the pack its
+// pack.yaml names. The card is strong, and a paired device approves it
+// with weighed as it does any strong card.
+func TestPackApplyDirectoryCard(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	_, dir, resolved := dirCheckout(t, y)
+	f := &fakePack{name: "team", label: "directory " + resolved + " in yardr test1", build: "test1",
+		kind: "git", depot: "web", digest: dirPackDigest, plan: firstInstallPlan(), noSources: true}
+	y.setDirPack(f)
+	ask := packAsk()
+	ask.Run.Argv = []string{"pack apply " + dir + " --depot web --flow fresh --sha256 " + dirPackDigest}
+	seq := y.ask(t, ask, "yardmaster")
+	got := y.asked(t, seq)
+	run := got.Ask.Run
+	wantArgv := "pack apply " + dir + " --sha256 " + dirPackDigest + " --depot web --flow fresh"
+	if strings.Join(run.Argv, " ") != wantArgv {
+		t.Fatalf("the stored argv = %q, want %q", run.Argv, wantArgv)
+	}
+	if f.readDir != resolved || f.readDepot != "web" || f.readMappings.Flow != "fresh" {
+		t.Fatalf("the reading was asked for dir %q, depot %q, mappings %+v", f.readDir, f.readDepot, f.readMappings)
+	}
+	if run.Pack.Name != "team" || run.Pack.Digest != dirPackDigest || run.Pack.Summary {
+		t.Fatalf("the stored pack = %+v, want team pinned, whole", run.Pack)
+	}
+	if run.Seen[packDigestKey(dir)] != dirPackDigest {
+		t.Fatalf("the stored seen holds %q for the digest", run.Seen)
+	}
+	joined := strings.Join(run.Does, "\n")
+	for _, want := range []string{
+		"pack team (directory " + resolved + " in yardr test1), of kind git, into depot web: 3 to create, 0 to change, 0 unchanged, and 0 dropped and left where they stand, digest sha256:" + dirPackDigest + ". It asks nothing.",
+		"the plan uses mapping --flow fresh.",
+		"this is a first install: depot web holds no import of pack team.",
+		"file roles/a.md: create, sha256 (none) -> sha256 " + strings.Repeat("b", 64),
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the card lacks %q:\n%s", want, joined)
+		}
+	}
+	if !StrongWeight(got.Ask.Weight) {
+		t.Fatalf("the card's weight = %+v, want strong", got.Ask.Weight)
+	}
+	if !RunArgvHeld(run.Argv) {
+		t.Errorf("RunArgvHeld does not hold a directory pack apply")
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "approve it where its weight is shown") {
+		t.Fatalf("an unweighed approval = %v", err)
+	}
+	if done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil || done.Result != "approved, to be carried out" {
+		t.Fatalf("the weighed approval = %+v, %v", done, err)
+	}
+	if done, err := y.ApproveAsk(WithVia(y.ctx, "mckean", "phone"), y.bead, y.ask(t, ask, "yardmaster"), "mckean", true, nil); err != nil || done.Result != "approved, to be carried out" {
+		t.Fatalf("a device's approval = %+v, %v", done, err)
+	}
+	if ev := lastAnswer(t, y); Via(ev) != "phone" {
+		t.Fatalf("the device's approval is via %q, want phone", Via(ev))
+	}
+}
+
+// A directory changed, added to or emptied since the ask stales the
+// approval and nothing runs: the digest, the plan and the read each hold
+// it, as does the checkout the directory stands in.
+func TestPackApplyDirectoryStale(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	_, dir, resolved := dirCheckout(t, y)
+	f := &fakePack{name: "team", label: "directory " + resolved + " in yardr test1", build: "test1",
+		kind: "git", depot: "web", digest: dirPackDigest, plan: firstInstallPlan(), noSources: true}
+	y.setDirPack(f)
+	ask := packAsk()
+	ask.Run.Argv = []string{"pack apply " + dir + " --depot web"}
+	seq := y.ask(t, ask, "yardmaster")
+	if joined := strings.Join(y.asked(t, seq).Ask.Run.Does, "\n"); !strings.Contains(joined, "digest sha256:"+dirPackDigest) {
+		t.Fatalf("a card with no pin named prints no digest:\n%s", joined)
+	}
+	for _, c := range []struct {
+		name, want string
+		move       func()
+		back       func()
+	}{
+		{"the digest", "whose pack differs",
+			func() { f.digest = strings.Repeat("e", 64) }, func() { f.digest = dirPackDigest }},
+		{"a changed file", "the object file roles/a.md",
+			func() { f.plan.Objects[0].Text = "role changed\n" }, func() { f.plan.Objects[0].Text = "role\n" }},
+		{"an added file", "differs at its objects",
+			func() {
+				f.plan.Objects = append(f.plan.Objects, AskPlanObject{Kind: "file", Name: "roles/b.md", Action: "create", FileNewSHA: strings.Repeat("c", 64), Text: "b\n", Diff: "+b\n"})
+			}, func() { f.plan.Objects = f.plan.Objects[:3] }},
+		{"a removed file", "the object file roles/a.md",
+			func() { f.plan.Objects = f.plan.Objects[1:] }, func() { f.plan = firstInstallPlan() }},
+	} {
+		c.move()
+		if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil ||
+			!strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), nothingRan) {
+			t.Errorf("%s: ApproveAsk = %v, want %q with nothing run", c.name, err, c.want)
+		}
+		c.back()
+	}
+	// The directory holds no pack now: the read fails, and the approval
+	// is refused as the stale it is.
+	y.Store.SetDirectoryPackReader(func(ctx context.Context, dir string, depot string, mappings Mappings, yard API) (*PackReading, error) {
+		return nil, errors.New("pack.yaml: not found: a pack is a directory with a pack.yaml")
+	})
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil ||
+		!strings.Contains(err.Error(), "holds no pack now") || !strings.Contains(err.Error(), "from before that changed") || !strings.Contains(err.Error(), nothingRan) {
+		t.Fatalf("an emptied directory: ApproveAsk = %v", err)
+	}
+	y.setDirPack(f)
+	// The directory stands in no checkout now: the depot moved away.
+	other := t.TempDir()
+	if err := y.write(func(w *wtx) error { return put(w.Tx, bDepots, "web", Depot{Name: "web", Path: other}) }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil ||
+		!strings.Contains(err.Error(), "not inside a registered depot's main checkout") || !strings.Contains(err.Error(), nothingRan) {
+		t.Fatalf("a moved checkout: ApproveAsk = %v", err)
+	}
+}
+
+// A directory past any bound is refused at the ask in the embedded row's
+// words, naming pack check: no summary is written for one. A pin that
+// names another directory, or that is no digest, is refused too.
+func TestPackApplyDirectoryRefusals(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	_, dir, resolved := dirCheckout(t, y)
+	label := "directory " + resolved + " in yardr test1"
+	newAsk := func(words string) Ask {
+		ask := packAsk()
+		ask.Run.Argv = []string{"pack apply " + dir + words}
+		return ask
+	}
+	// A pin in any form pack check prints it is held to the directory as
+	// read: upper case with its sha256: prefix pins too.
+	y.setDirPack(&fakePack{name: "team", label: label, build: "test1", kind: "git",
+		depot: "web", digest: dirPackDigest, plan: firstInstallPlan(), noSources: true})
+	if _, err := y.AddAsk(y.ctx, y.bead, newAsk(" --depot web --sha256 sha256:"+strings.ToUpper(dirPackDigest)), "yardmaster"); err != nil {
+		t.Fatalf("a pin with its prefix in upper case: AddAsk = %v", err)
+	}
+	wrong := strings.Repeat("f", 64)
+	for _, c := range []struct {
+		name, words, want string
+		plan              *AskPlan
+	}{
+		{"a pin naming another directory", " --depot web --sha256 " + wrong, "the pin is sha256:" + wrong + ", and the directory " + resolved + " as read has sha256:" + dirPackDigest, firstInstallPlan()},
+		{"a pin that is no digest", " --depot web --sha256 abc", `"abc": not a digest`, firstInstallPlan()},
+		{"past the file bound", " --depot web", "a card holds at most 65536 together, so this is the operator's to type in a terminal (yardr pack check " + dir + " shows it there)", &AskPlan{Objects: []AskPlanObject{{Kind: "file", Name: "big", Action: "create", Text: strings.Repeat("a", MaxRunPackFiles+1)}}}},
+		{"a plan that asks", " --depot web", "its plan asks or refuses, so no card can apply it", &AskPlan{Missing: []string{"group.web-builders.kind: which agent?"}}},
+		{"an edited file", " --depot web", "its plan asks or refuses, so no card can apply it", &AskPlan{Edited: []string{"roles/a.md"}}},
+		{"a --yes that overwrites nothing", " --depot web --yes", "propose the apply without it", firstInstallPlan()},
+	} {
+		y.setDirPack(&fakePack{name: "team", label: label, build: "test1", kind: "git",
+			depot: "web", digest: dirPackDigest, plan: c.plan, noSources: true})
+		_, err := y.AddAsk(y.ctx, y.bead, newAsk(c.words), "yardmaster")
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: AddAsk = %v, want %q", c.name, err, c.want)
+		} else if strings.Contains(err.Error(), "summary") {
+			t.Errorf("%s: the refusal writes a summary: %v", c.name, err)
+		}
+	}
+	// Past the line bound with no digest and no depot the whole card's
+	// words refuse it; a named depot with a digest is summary-shaped for
+	// an embedded pack, and still refused whole for a directory.
+	var dropped []AskPlanObject
+	for i := range 45 {
+		dropped = append(dropped, AskPlanObject{Kind: "file", Name: "roles/gone" + itoa(uint64(i)) + ".md", Action: "dropped"})
+	}
+	y.setDirPack(&fakePack{name: "team", label: label, build: "test1", kind: "git",
+		depot: "web", digest: dirPackDigest, plan: &AskPlan{Objects: dropped}, noSources: true})
+	if _, err := y.AddAsk(y.ctx, y.bead, newAsk(" --depot web"), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "its card would run to") || !strings.Contains(err.Error(), "a card is read whole") || strings.Contains(err.Error(), "summary") {
+		t.Fatalf("past the line bound: AddAsk = %v", err)
+	}
+	// Past the declaration bound the embedded row's words name pack apply.
+	// One declaration past it is refused by the parser first, so two
+	// large ones trip the bound together.
+	bigDecl := wiredDecl + "\n# " + strings.Repeat("p", 200000)
+	bigDecl2 := strings.Replace(wiredDecl, "name: wired", "name: w2", 1) + "\n# " + strings.Repeat("q", 200000)
+	y.Store.SetDirectoryPackReader(func(ctx context.Context, dir string, depot string, mappings Mappings, yard API) (*PackReading, error) {
+		return &PackReading{Name: "team", Kind: "git", Depot: "web", Label: label, Build: "test1",
+			Plan: firstInstallPlan(), Digest: dirPackDigest,
+			Sources: []AskSource{
+				{Name: "wired", Text: bigDecl, Files: askFilesOrdered(wiredFiles)},
+				{Name: "w2", Text: bigDecl2, Files: askFilesOrdered(wiredFiles)},
+			}}, nil
+	})
+	if _, err := y.AddAsk(y.ctx, y.bead, newAsk(" --depot web"), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "a card holds at most 262144") || !strings.Contains(err.Error(), "yardr pack apply "+dir) {
+		t.Fatalf("past the declaration bound: AddAsk = %v", err)
+	}
+	// A source pack to a depot names dropping the depot, not a setup.
+	y.setDirPack(&fakePack{name: "team", label: label, build: "test1", kind: "source", digest: dirPackDigest})
+	if _, err := y.AddAsk(y.ctx, y.bead, newAsk(" --depot web"), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "propose the apply with no depot (the run ask pack apply "+dir+")") {
+		t.Fatalf("a source pack to a depot: AddAsk = %v", err)
+	}
+	// A depot the yard has not is refused as for any ask.
+	if _, err := y.AddAsk(y.ctx, y.bead, newAsk(" --depot nosuch"), "yardmaster"); err == nil || !strings.Contains(err.Error(), "depot nosuch") {
+		t.Fatalf("a missing depot: AddAsk = %v", err)
+	}
+	// A directory the reading fails on is the operator's in a terminal.
+	y.Store.SetDirectoryPackReader(func(ctx context.Context, dir string, depot string, mappings Mappings, yard API) (*PackReading, error) {
+		return nil, errors.New("pack.yaml: not found: a pack is a directory with a pack.yaml")
+	})
+	if _, err := y.AddAsk(y.ctx, y.bead, newAsk(" --depot web"), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "not found: a pack is a directory with a pack.yaml") || !strings.Contains(err.Error(), "yardr pack check "+dir+" shows its plan there") {
+		t.Fatalf("an unreadable directory: AddAsk = %v", err)
+	}
+}
+
+// A directory outside every checkout, a worktree, a relative path, a URL
+// and an earlier import's record are each refused at the ask, naming the
+// rule and the terminal road, before any directory is read. An unknown
+// name keeps the reader's words.
+func TestPackApplyDirectoryPathRefusals(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	_, _, _ = dirCheckout(t, y)
+	var dirCalled bool
+	y.Store.SetDirectoryPackReader(func(ctx context.Context, dir string, depot string, mappings Mappings, yard API) (*PackReading, error) {
+		dirCalled = true
+		return nil, errors.New("no directory is read for a refused form")
+	})
+	y.Store.SetPackReader(func(ctx context.Context, name string, depot string, mappings Mappings, yard API) (*PackReading, error) {
+		if name == "oldteam" {
+			return nil, fmt.Errorf("pack %s: %w: a pack that is a directory, a URL or an earlier import's record is the operator's to apply in a terminal", name, ErrNotEmbedded)
+		}
+		return nil, errFakeNoPack(name)
+	})
+	// An earlier import's record, read again from where it came from.
+	if err := y.write(func(w *wtx) error {
+		return put(w.Tx, bPacks, join("web", "oldteam"), PackImport{Pack: "oldteam", Depot: "web", Source: "/elsewhere/oldteam"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "packs", "team")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name, argv, want string
+	}{
+		{"outside every checkout", "pack apply " + outside, outside + " is not inside a registered depot's main checkout of this yard (a worktree of a depot is not its main checkout)"},
+		{"a relative path", "pack apply packs/team", `"packs/team" is no absolute directory: a card names the directory as an absolute path inside a registered depot's main checkout`},
+		{"a URL", "pack apply https://example.com/packs/team/", "pack https://example.com/packs/team/: a pack at a URL is the operator's to apply in a terminal"},
+		{"a URL with a pin", "pack apply https://example.com/packs/team/ --sha256 " + dirPackDigest, "a pack at a URL is the operator's to apply in a terminal"},
+		{"a record", "pack apply oldteam", "pack oldteam: this yard imported it from /elsewhere/oldteam, and a card applies a pack yardr embeds or a directory inside a depot's main checkout"},
+		{"an unknown name", "pack apply nosuch", "pack nosuch: yardr embeds no pack of that name: it is the operator's to apply in a terminal (yardr pack check nosuch)"},
+	} {
+		dirCalled = false
+		ask := packAsk()
+		ask.Run.Argv = []string{c.argv}
+		_, err := y.AddAsk(y.ctx, y.bead, ask, "yardmaster")
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: AddAsk = %v, want %q", c.name, err, c.want)
+		}
+		if dirCalled {
+			t.Errorf("%s: the directory was read for a refused form", c.name)
+		}
+	}
+	// A worktree of the depot is not its main checkout: a real linked
+	// worktree of a real main checkout refuses by its place, not its kind.
+	repo := t.TempDir()
+	dirGit(t, repo, "init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module m\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirGit(t, repo, "add", "-A")
+	dirGit(t, repo, "commit", "-qm", "main")
+	wt := filepath.Join(t.TempDir(), "wt")
+	dirGit(t, repo, "worktree", "add", "-q", "-b", "teamwt", wt)
+	if err := y.PutDepot(y.ctx, Depot{Name: "gitweb", Path: repo}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	wtdir := filepath.Join(wt, "packs", "team")
+	if err := os.MkdirAll(wtdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dirCalled = false
+	ask := packAsk()
+	ask.Run.Argv = []string{"pack apply " + wtdir + " --depot gitweb"}
+	if _, err := y.AddAsk(y.ctx, y.bead, ask, "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "is not inside a registered depot's main checkout") || !strings.Contains(err.Error(), "yardr pack apply "+wtdir) {
+		t.Errorf("a worktree: AddAsk = %v", err)
+	}
+	if dirCalled {
+		t.Errorf("a worktree: the directory was read for a refused form")
+	}
+	// A worktree nested under the registered checkout is still another
+	// checkout, even though lexical path containment alone would accept it.
+	nested := filepath.Join(repo, "nested-worktree")
+	dirGit(t, repo, "worktree", "add", "-q", "-b", "teamwt-nested", nested)
+	nestedPack := filepath.Join(nested, "packs", "team")
+	if err := os.MkdirAll(nestedPack, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dirCalled = false
+	ask = packAsk()
+	ask.Run.Argv = []string{"pack apply " + nestedPack + " --depot gitweb"}
+	if _, err := y.AddAsk(y.ctx, y.bead, ask, "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "inside a nested checkout, not the registered depot's main checkout") {
+		t.Errorf("a worktree nested under the main checkout: AddAsk = %v", err)
+	}
+	if dirCalled {
+		t.Errorf("a nested worktree: the directory was read for a refused form")
+	}
+	// With no directory reading the ask names the server.
+	plain, _ := runYard(t)
+	if err := plain.PutDepot(plain.ctx, Depot{Name: "web", Path: t.TempDir()}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	ask = packAsk()
+	ask.Run.Argv = []string{"pack apply " + filepath.Join(t.TempDir(), "team")}
+	if _, err := plain.AddAsk(plain.ctx, plain.bead, ask, "yardmaster"); err == nil || !strings.Contains(err.Error(), "no server has registered its reading of a directory pack") {
+		t.Errorf("no directory reading: AddAsk = %v", err)
+	}
+}
+
+// A directory pack of kind source is carded whole with its digest pinned
+// and printed, where an embedded one's card pins no digest.
+func TestPackApplyDirectorySourceCard(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	_, dir, resolved := dirCheckout(t, y)
+	y.setDirPack(&fakePack{name: "team", label: "directory " + resolved + " in yardr test1", build: "test1",
+		kind: "source", digest: dirPackDigest})
+	ask := packAsk()
+	ask.Run.Argv = []string{"pack apply " + dir}
+	seq := y.ask(t, ask, "yardmaster")
+	got := y.asked(t, seq)
+	run := got.Ask.Run
+	if run.Pack.Name != "team" || run.Pack.Digest != dirPackDigest {
+		t.Fatalf("the stored pack = %+v, want team pinned", run.Pack)
+	}
+	if run.Seen[packDigestKey(dir)] != dirPackDigest {
+		t.Fatalf("the stored seen holds %q for the digest", run.Seen)
+	}
+	joined := strings.Join(run.Does, "\n")
+	for _, want := range []string{
+		"pack team (directory " + resolved + " in yardr test1), digest sha256:" + dirPackDigest + ", of kind source, into the yard: it adds 1 source",
+		"source wired: its calls go to https://wired.example.com/v1",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the card lacks %q:\n%s", want, joined)
+		}
+	}
+	if !StrongWeight(got.Ask.Weight) {
+		t.Fatalf("the card's weight = %+v, want strong", got.Ask.Weight)
+	}
+	if done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil || done.Result != "approved, to be carried out" {
+		t.Fatalf("the weighed approval = %+v, %v", done, err)
 	}
 }

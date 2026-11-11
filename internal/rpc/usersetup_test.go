@@ -596,6 +596,17 @@ func TestWithoutRunWordsHoldsAPackCardsMappings(t *testing.T) {
 	if run.Pack.Mappings.IsZero() || run.Pack.Plan == nil {
 		t.Errorf("the cut changed the card it was given: %+v", run.Pack)
 	}
+	path := "/home/jo/projects/yardr/packs/team"
+	directory := &store.RunAsked{Argv: []string{"pack", "apply", path},
+		Command: "yardr pack apply " + path,
+		Pack:    &store.AskPack{Name: "team", Depot: "yardr", Label: "directory " + path + " in yardr test1"}}
+	bareDirectory, _ := withoutRunWords(directory, nil)
+	if len(bareDirectory.Argv) != 0 || bareDirectory.Command != "" || strings.Contains(bareDirectory.Pack.Label, path) {
+		t.Errorf("the device is told a directory pack's path in its words or label: %+v", bareDirectory)
+	}
+	if !strings.Contains(directory.Pack.Label, path) {
+		t.Errorf("the cut changed the card it was given: %+v", directory.Pack)
+	}
 	// The same mappings as the asker's words are held with them.
 	run.Argv = []string{"pack", "apply", "starter", "--depot", "web", "--members", "decisions=sam"}
 	run.Command = "yardr pack apply starter --depot web --members decisions=sam"

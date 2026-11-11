@@ -94,7 +94,11 @@ type AskGovern struct {
 // operator's, proposable where the server registered its reading, and
 // refused naming the server where none did.
 func checkPackApply(ctx context.Context, w *wtx, run AskRun, actor string) error {
-	if w.packReaderOf() == nil {
+	if IsPackDir(run.Argv[2]) {
+		if w.directoryReaderOf() == nil {
+			return packDirNoReader(run.Argv[2])
+		}
+	} else if w.packReaderOf() == nil {
 		return fmt.Errorf("pack %s: no server has registered its reading of the packs yardr embeds on this store, so no card can be written from the binary that runs the yard: a pack is proposed from a yard its server runs", run.Argv[2])
 	}
 	return w.may(ctx, actor, ActApplyPack, Object{Kind: KindPack, Name: run.Argv[2], Ask: Askable})
@@ -314,16 +318,12 @@ func validatePackSource(carried AskSource, packName string) (*source.Declaration
 // again and stale says what moved.
 func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 	name := run.Argv[2]
-	read := w.packReaderOf()
-	if read == nil {
-		return AskRun{}, fmt.Errorf("pack %s: no server has registered its reading of the packs yardr embeds on this store, so no card can be written from the binary that runs the yard: a pack is proposed from a yard its server runs", name)
-	}
 	// The depot and mappings are the command's own words. A stored re-apply
 	// names no depot: it rebuilds from the depot its card holds, so the
 	// approval is held to the plan the card showed. What a writer sends
 	// beside argv never reaches here, since an ask keeps argv and carried
 	// bytes alone (askedRun).
-	_, depot, mappings, yes, err := packApplyWords(run.Argv[2:])
+	_, depot, mappings, yes, sha, err := packApplyWords(run.Argv[2:])
 	if err != nil {
 		return AskRun{}, err
 	}
@@ -339,12 +339,16 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 			return AskRun{}, fmt.Errorf("pack %s: depot %s: %w", name, depot, ErrNotFound)
 		}
 	}
-	reading, err := read(context.Background(), name, depot, mappings, w.store)
+	reading, dirForm, err := w.packCardReading(context.Background(), name, depot, mappings, sha, asking)
 	if err != nil {
 		return AskRun{}, err
 	}
-	if reading == nil || reading.Name != name {
-		return AskRun{}, fmt.Errorf("pack %s: the server's reading named another pack: nothing was stored", name)
+	// A directory is carded under the pack its pack.yaml names, not the
+	// word the command named it by: the records the card rests on are
+	// keyed by that name.
+	packName := name
+	if dirForm {
+		packName = reading.Name
 	}
 	declTotal, payload := 0, 0
 	carried := make([]AskSource, 0, len(reading.Sources))
@@ -379,7 +383,7 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 		"pack " + name + " build": reading.Build,
 		"pack " + name + " bytes": packBytesSeen(&PackReading{Kind: reading.Kind, Sources: carried, Plan: reading.Plan}),
 	}
-	if reading.Digest != "" && reading.Kind != "source" {
+	if reading.Digest != "" && (reading.Kind != "source" || dirForm) {
 		seenMap[packDigestKey(name)] = reading.Digest
 	}
 	for i := range carried {
@@ -408,21 +412,27 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 		reading.Mappings = mappings
 	}
 	digest := reading.Digest
-	if reading.Kind == "source" {
+	if reading.Kind == "source" && !dirForm {
 		digest = ""
 	}
 	card := AskRun{Argv: run.Argv, Seen: seenMap, Carried: carried,
-		Pack: &AskPack{Name: name, Kind: reading.Kind, Depot: reading.Depot, Mappings: reading.Mappings, Label: reading.Label, Digest: digest}}
+		Pack: &AskPack{Name: packName, Kind: reading.Kind, Depot: reading.Depot, Mappings: reading.Mappings, Label: reading.Label, Digest: digest}}
 	if reading.Kind == "source" {
 		if named {
+			if dirForm {
+				return AskRun{}, fmt.Errorf("pack %s: it is of kind source, so it goes into the yard and no depot: propose the apply with no depot (the run ask pack apply %s)", name, name)
+			}
 			return AskRun{}, fmt.Errorf("pack %s: it is of kind source, so it goes into the yard and no depot, and a setup card installs it: yardr bead ask <bead> - --setup %s, with the question and context on stdin", name, name)
 		}
 		if yes {
 			return AskRun{}, packYesNothing(name)
 		}
-		does, err := w.packSourceDoes(name, reading, carried, decls)
+		does, err := w.packSourceDoes(packName, reading, carried, decls)
 		if err != nil {
 			return AskRun{}, err
+		}
+		if dirForm {
+			does = packDirDigestLine(does, digest, false)
 		}
 		card.Does = does
 		card.Description = "Import a pack into the yard: set the yard to what the pack says"
@@ -448,19 +458,22 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 		for _, o := range reading.Plan.Objects {
 			payload += len(o.Text) + len(o.Diff)
 		}
-		does, err := w.packDepotDoes(name, reading, carried, decls)
+		does, err := w.packDepotDoes(packName, reading, carried, decls)
 		if err != nil {
 			return AskRun{}, err
 		}
+		if dirForm {
+			does = packDirDigestLine(does, digest, true)
+		}
 		if named {
-			first, err := w.packFirstInstall(name, depot)
+			first, err := w.packFirstInstall(packName, depot)
 			if err != nil {
 				return AskRun{}, err
 			}
 			if first {
-				does = slices.Insert(does, 1, fmt.Sprintf("this is a first install: depot %s holds no import of pack %s.", depot, name))
+				does = slices.Insert(does, 1, fmt.Sprintf("this is a first install: depot %s holds no import of pack %s.", depot, packName))
 			}
-			if err := w.packTargetsSeen(seenMap, name, depot, mappings); err != nil {
+			if err := w.packTargetsSeen(seenMap, packName, depot, mappings); err != nil {
 				return AskRun{}, err
 			}
 		}
@@ -478,9 +491,10 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 		card.Does[i] = safeSourceCardLine(card.Does[i])
 	}
 	// A card that shows edited files whole is whole or refused: the
-	// summary shape would fold the diffs approval overwrites by.
+	// summary shape would fold the diffs approval overwrites by. A
+	// directory is whole or refused too: it has no summary shape.
 	summary := false
-	if !card.Pack.Yes {
+	if !card.Pack.Yes && !dirForm {
 		summary, err = w.packSummary(&card, reading, carried, decls, named, payload)
 		if err != nil {
 			return AskRun{}, err

@@ -2001,15 +2001,28 @@ would replace changes to with each command file's diff, and for a depot
 pack each object with each changed file's diff. The approval is held to
 the build, the pack's bytes and digest and the yard's sources as carded,
 and is carried out by the server after it, which holds the plan to the
-digest before anything is written. A pack that is a directory, a URL or
-an earlier import's record, any flag of `pack apply` but the depot and the
-mappings of a depot pack's first install and `--yes` over files edited by
-hand, and a plan that asks, is refused to a terminal, where `yardr pack
-check <name>` shows the plan. With `--yes` the card shows each file the
-plan says was edited by hand whole, with both hashes and the diff, and
-approval overwrites exactly those copies. The
+digest before anything is written. A pack that is a directory outside
+every depot's main checkout, a URL or an earlier import's record, any
+flag of `pack apply` but the depot and the mappings of a depot pack's
+first install and `--yes` over files edited by hand, and a plan that
+asks, is refused to a terminal, where `yardr pack check <name>` shows
+the plan. With `--yes` the card shows each file the plan says was edited
+by hand whole, with both hashes and the diff, and approval overwrites
+exactly those copies. The
 yardmaster has a road of its own beside the card, for a pack that yardr
 embeds and for one that the packs repository serves.
+
+**Proposing a pack from a directory.** A directory inside a registered
+depot's main checkout is proposed the same way (`--run "pack apply
+<dir>"`, written absolute or relative to where the ask is typed), and is
+read at the ask into the same whole card, pinned by the digest `yardr
+pack check <dir>` prints: `--sha256` names that digest and refuses where
+it names another, and with none named the card prints the digest it pins.
+A file changed, added or removed since the ask makes the approval stale
+and nothing runs. Past the whole-card bounds no card is written, and a
+directory outside every checkout, a worktree, a URL and an earlier
+import's record are each refused at the ask; each is the operator's in a
+terminal.
 
 **Running a pack for the operator.** Where the yardmaster's delegation is on
 ([users.md](users.md#the-yardmaster-for-the-operator)), the yardmaster

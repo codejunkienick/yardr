@@ -47,26 +47,30 @@ func (m Mappings) Bound() []string {
 }
 
 // PackApplyUse is how a refusal names the row.
-const PackApplyUse = "yardr pack apply <name> [--yes] [--depot <depot> [--flow <flow>] [--crew <pack>=<yard>] [--group <pack>=<yard>] [--bind <spec>] [--members <group>=<a,b>] [--open-threads <crew>=<sources>] [--calls <who>=<source>:<calls>]]"
+const PackApplyUse = "yardr pack apply <name> [--yes] [--sha256 <digest>] [--depot <depot> [--flow <flow>] [--crew <pack>=<yard>] [--group <pack>=<yard>] [--bind <spec>] [--members <group>=<a,b>] [--open-threads <crew>=<sources>] [--calls <who>=<source>:<calls>]]"
 
 // packApplyFlags are the words a card carries: --yes over the files the
-// plan says were edited by hand, the depot, and the mappings a plan's
+// plan says were edited by hand, --sha256 pinning a directory to the
+// digest pack check printed, the depot, and the mappings a plan's
 // questions are answered by. Every other flag of the terminal's shapes
 // the import in a way a card holds no word for.
-var packApplyFlags = map[string]bool{"--yes": false, "--depot": true, "--flow": true, "--crew": true, "--group": true,
+var packApplyFlags = map[string]bool{"--yes": false, "--sha256": true, "--depot": true, "--flow": true, "--crew": true, "--group": true,
 	"--bind": true, "--members": true, "--open-threads": true, "--calls": true}
 
 // parsePackApply reads the words of pack apply into the row's one stored
-// form: the name, --yes, the depot, then the mappings in
+// form: the name, --yes, --sha256, the depot, then the mappings in
 // packMappingFlags' order.
 func parsePackApply(rest []string) ([]string, error) {
-	name, depot, m, yes, err := packApplyWords(rest)
+	name, depot, m, yes, sha, err := packApplyWords(rest)
 	if err != nil {
 		return nil, err
 	}
 	out := []string{name}
 	if yes {
 		out = append(out, "--yes")
+	}
+	if sha != "" {
+		out = append(out, "--sha256", sha)
 	}
 	if depot != "" {
 		out = append(out, "--depot", depot)
@@ -78,27 +82,32 @@ func parsePackApply(rest []string) ([]string, error) {
 	return out, nil
 }
 
-// packApplyWords reads the pack's name, the depot, the mappings and --yes
-// out of the words of pack apply. A mapping answers a plan for a depot,
-// so it needs --depot; with none the words are a bare name, a re-apply.
-// Each value stands on the card as it was typed, and draws no line of its
-// own there: parseRow has held the line to names, numbers and flags.
-func packApplyWords(rest []string) (string, string, Mappings, bool, error) {
+// packApplyWords reads the pack's name, the depot, the mappings, --yes
+// and --sha256 out of the words of pack apply. A mapping answers a plan
+// for a depot, so it needs --depot; with none the words are a bare name,
+// a re-apply. Each value stands on the card as it was typed, and draws no
+// line of its own there: parseRow has held the line to names, numbers and
+// flags. A URL is refused for its form, whatever flags it carries, and
+// --sha256 with any name but a directory's, which alone it pins.
+func packApplyWords(rest []string) (string, string, Mappings, bool, string, error) {
 	var m Mappings
 	for _, word := range rest {
 		flag, _, _ := strings.Cut(word, "=")
 		// Membership, not the value: --yes is carried with false, since
 		// it takes none.
 		if _, ok := packApplyFlags[flag]; strings.HasPrefix(word, "-") && !ok {
-			return "", "", m, false, fmt.Errorf("--run takes %s, and pack apply with %s shapes the import, which a card answers none of: it is the operator's to type in a terminal (yardr pack check %s shows its plan there)", PackApplyUse, flag, "<name>")
+			return "", "", m, false, "", fmt.Errorf("--run takes %s, and pack apply with %s shapes the import, which a card answers none of: it is the operator's to type in a terminal (yardr pack check %s shows its plan there)", PackApplyUse, flag, "<name>")
 		}
 	}
 	args, values, err := runWords(PackApplyUse, "pack apply", "the operator's", rest, packApplyFlags)
 	if err != nil {
-		return "", "", m, false, err
+		return "", "", m, false, "", err
 	}
 	if len(args) != 1 {
-		return "", "", m, false, fmt.Errorf("--run takes %s: one pack's name, not %d words", PackApplyUse, len(args))
+		return "", "", m, false, "", fmt.Errorf("--run takes %s: one pack's name, not %d words", PackApplyUse, len(args))
+	}
+	if isPackURL(args[0]) {
+		return "", "", m, false, "", packURLRefusal(args[0])
 	}
 	once := func(flag string) (string, error) {
 		if len(values[flag]) > 1 {
@@ -125,25 +134,32 @@ func packApplyWords(rest []string) (string, string, Mappings, bool, error) {
 	}
 	depot, err := once("--depot")
 	if err != nil {
-		return "", "", m, false, err
+		return "", "", m, false, "", err
+	}
+	sha, err := once("--sha256")
+	if err != nil {
+		return "", "", m, false, "", err
+	}
+	if sha != "" && !IsPackDir(args[0]) {
+		return "", "", m, false, "", fmt.Errorf("--run takes %s, and pack apply with --sha256 shapes the import, which a card answers none of: it is the operator's to type in a terminal (yardr pack check %s shows its plan there)", PackApplyUse, "<name>")
 	}
 	if m.Flow, err = once("--flow"); err != nil {
-		return "", "", m, false, err
+		return "", "", m, false, "", err
 	}
 	if m.Crew, err = takes("--crew"); err != nil {
-		return "", "", m, false, err
+		return "", "", m, false, "", err
 	}
 	if m.Groups, err = takes("--group"); err != nil {
-		return "", "", m, false, err
+		return "", "", m, false, "", err
 	}
 	m.Binds, m.Members, m.OpenThreads, m.Calls = values["--bind"], values["--members"], values["--open-threads"], values["--calls"]
 	if depot == "" && !m.IsZero() {
-		return "", "", m, false, fmt.Errorf("--run takes %s: a mapping answers the plan for a named depot, so it needs --depot", PackApplyUse)
+		return "", "", m, false, "", fmt.Errorf("--run takes %s: a mapping answers the plan for a named depot, so it needs --depot", PackApplyUse)
 	}
 	if len(values["--yes"]) > 1 {
-		return "", "", m, false, fmt.Errorf("--run takes %s: one --yes, not %d", PackApplyUse, len(values["--yes"]))
+		return "", "", m, false, "", fmt.Errorf("--run takes %s: one --yes, not %d", PackApplyUse, len(values["--yes"]))
 	}
-	return args[0], depot, m, len(values["--yes"]) == 1, nil
+	return args[0], depot, m, len(values["--yes"]) == 1, sha, nil
 }
 
 // packTargetKey starts each Seen key a named depot's card holds for what
@@ -314,7 +330,9 @@ func sortedMappingKeys(m map[string]string) []string {
 
 // AskPack is a pack apply ask's pack as the yard's server read it: its
 // name, its kind, the depot a depot kind would be re-applied to, and
-// the build label the pack is embedded in. A depot kind carries the
+// the build label the pack is embedded in. For a directory the name is
+// the pack's from its pack.yaml, and the directory is the command's word
+// in Argv. A depot kind carries the
 // plan the server built inside the write that stored the ask, and the
 // pack's digest. Summary says the card is the summary shape: Does names
 // the pack by its digest and each file by its hash, and the texts stand
@@ -456,4 +474,34 @@ func (w *wtx) packReaderOf() PackReader {
 		return nil
 	}
 	return w.store.packReader
+}
+
+// SetDirectoryPackReader tells the store how its owning process reads the
+// pack in a directory for a pack apply ask of one, as SetPackReader tells
+// it how it reads the packs yardr embeds. Only that row asks it, and only
+// for a directory inside a registered depot's main checkout
+// (runask_packdir.go). The store has neither the pack package nor git, and
+// a setup card never reads a directory. A store with none refuses such an
+// ask naming the server.
+func (s *Store) SetDirectoryPackReader(r PackReader) { s.directoryReader = r }
+
+// ReadDirPack reads the pack in a directory through the registered
+// directory reading, for the server's carrying out of an approved pack
+// apply of one: the same reading the approval was held to, taken again,
+// for the depot and with the mappings the card holds. The directory
+// stands resolved, as the card resolved it (ResolvePackDir).
+func (s *Store) ReadDirPack(ctx context.Context, dir string, depot string, mappings Mappings) (*PackReading, error) {
+	if s.directoryReader == nil {
+		return nil, fmt.Errorf("pack %s: no server has registered its reading of a directory pack on this store", dir)
+	}
+	return s.directoryReader(ctx, dir, depot, mappings, s)
+}
+
+// directoryReaderOf is the directory reading registered on the store this
+// write belongs to, nil where there is none.
+func (w *wtx) directoryReaderOf() PackReader {
+	if w.store == nil {
+		return nil
+	}
+	return w.store.directoryReader
 }

@@ -383,7 +383,7 @@ func fileDiagram(warn io.Writer, arg, which string) (*flowdraw.Diagram, error) {
 	}
 	var p *pack.Pack
 	var err error
-	if packDir(arg) {
+	if store.IsPackDir(arg) {
 		p, err = pack.LoadDir(arg)
 	} else if _, serr := fs.Stat(packs.FS, arg+"/"+pack.File); serr == nil {
 		var sub fs.FS

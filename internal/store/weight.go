@@ -586,7 +586,7 @@ func packApplyWeight(w *wtx, run AskRun) ([]AskWeight, error) {
 	}
 	// Over edited files the card shows whole, with or without a depot.
 	out = append(out, packYesWeight(run)...)
-	_, depot, m, _, err := packApplyWords(run.Argv[2:])
+	_, depot, m, _, _, err := packApplyWords(run.Argv[2:])
 	if err != nil || depot == "" || run.Pack == nil {
 		return out, err
 	}

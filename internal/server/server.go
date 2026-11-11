@@ -145,6 +145,9 @@ func (r *runner) serve(ctx context.Context) (string, bool, error) {
 	// And how a setup card reads a pack this build does not embed: from
 	// the directory the operator applied it from.
 	st.SetAppliedPackReader(appliedReaderFor(c.Home))
+	// And how a pack apply card reads a pack in a directory: from the
+	// depot checkout it stands in, judged by the store before it is read.
+	st.SetDirectoryPackReader(directoryReaderFor(c.Home))
 	// And how a delegated pack apply reads a pack of the packs
 	// repository: fetched by the server, held to its pinned digest.
 	st.SetPackFetcher(packFetcherFor(c.Home, pack.Repository))
