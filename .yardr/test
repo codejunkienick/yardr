@@ -2068,7 +2068,7 @@ internal/cli/sourcecmd.go 2147 the source command and its builtin checks
 internal/cli/subscriptions.go 1148 the identity, subscribe and thread commands
 internal/cli/updown.go 1302 yard up and down with their handoffs
 internal/cli/users.go 1055 the user command, inboxes and conversations
-internal/dispatch/dispatch.go 1564 the daemon routing pass and its runners
+internal/dispatch/dispatch.go 1520 the daemon routing pass and its runners
 internal/dispatch/harnesslogin.go 1094 harness login leading and onboarding marks
 internal/pack/export.go 1047 pack export and its object shapes
 internal/pack/pack.go 1777 pack reading, checking and its shapes

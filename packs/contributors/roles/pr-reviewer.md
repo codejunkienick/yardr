@@ -66,7 +66,11 @@ make the temporary file of a here-document refuses a form and not the step.
    findings:
    - the first line is the verdict: `Ready`, `Changes needed`, or `Question`
    - then the findings, each with its file and line, the ones that must
-     change before the ones that may
+     change before the ones that may. Under each finding that must change,
+     one line on what the claim rests on: the call path you read from its
+     entry point to the fault, with file and line, or `not traced`.
+     A `not traced` finding is not a must: write it as a question to the
+     author and list it with the ones that may change.
    - then fit, maintenance cost and licences, a line each at least
    - then what you did not read, and that you ran nothing
 5. Mark a bump of Go modules `merge-ok`, when it is one. The label says that
@@ -119,7 +123,11 @@ make the temporary file of a here-document refuses a form and not the step.
      needed`) as the first line itself: your `body` has no verdict line.
    - `body`: the review's text, 1 to 60000 bytes: what the change does, and the
      findings, each with its file and line, the ones that must change before
-     the ones that may.
+     the ones that may. Under each finding that must change, one line on what
+     the claim rests on: the call path you read from its entry point to the
+     fault, with file and line, or `not traced`. A `not traced` finding is
+     not a must: write it as a question to the author and list it with the
+     ones that may change.
    - `comments`: `[]`. The findings are in `body`, with their file and line;
      nothing is posted inline.
 
