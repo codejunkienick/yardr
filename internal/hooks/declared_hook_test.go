@@ -339,6 +339,43 @@ func TestDeclaredSecretDelivery(t *testing.T) {
 	if code := r.post(t, "/hooks/sentry-open", body, map[string]string{"Sentry-Secret": secret}); code != http.StatusInternalServerError {
 		t.Fatalf("empty secret: %d", code)
 	}
+	// A body-carried secret follows the same delivery path, and is removed
+	// from the payload retained for `yardr hook show`.
+	r = secretDepot(t, "    scheme: secret\n    signature: { body: token }\n")
+	good := []byte(`{"token":"` + secret + `","note":"hello"}`)
+	if code := r.post(t, "/hooks/sentry", good, nil); code != http.StatusOK {
+		t.Fatalf("good secret: %d", code)
+	}
+	// The token and the JSON formatting do not distinguish the same
+	// delivery sent again: bodies unique.
+	retry := []byte("{\n  \"note\": \"hello\",\n  \"token\": \"" + secret + "\"\n}\n")
+	if code := r.post(t, "/hooks/sentry", retry, nil); code != http.StatusOK {
+		t.Fatalf("redelivery: %d", code)
+	}
+	for name, body := range map[string][]byte{
+		"wrong secret":   []byte(`{"token":"nope","note":"hello"}`),
+		"missing secret": []byte(`{"note":"hello"}`),
+		"no JSON body":   []byte(`plain`),
+	} {
+		if code := r.post(t, "/hooks/sentry", body, nil); code != http.StatusUnauthorized {
+			t.Fatalf("%s: %d", name, code)
+		}
+	}
+	events := r.hookEvents(t)
+	if n := len(events); n != 1 {
+		t.Fatalf("want 1 hook event, got %d", n)
+	}
+	payload, err := r.st.HookPayload(context.Background(), events[0].Seq)
+	if err != nil || strings.Contains(string(payload), secret) {
+		t.Fatalf("stored payload = %q, %v; want no body secret", payload, err)
+	}
+	var kept map[string]any
+	if err := json.Unmarshal(payload, &kept); err != nil {
+		t.Fatalf("stored payload %q is not JSON: %v", payload, err)
+	}
+	if _, ok := kept["token"]; ok || kept["note"] != "hello" {
+		t.Fatalf("stored payload = %v, want the note without token", kept)
+	}
 }
 
 // A retry the service re-serialized is still the same delivery when the
@@ -689,6 +726,13 @@ func TestDeclaredVerify(t *testing.T) {
 	// sha256=.
 	const listed = "    scheme: hmac-sha256\n    signed: body\n    signature: { header: Q-Sig, encoding: hex, prefix: \"sha256=\", list: \",\" }\n    delivery: { header: Q-Delivery }\n"
 	old, older := "sha256="+sign("old-secret", []byte(`{}`)), "sha256="+sign("older-secret", []byte(`{}`))
+	wantError := map[string]string{
+		"a wrong body secret":             "body field token",
+		"a missing body secret":           "body field token",
+		"a body secret in no JSON":        "body field token",
+		"a body secret that is no scalar": "body field token",
+	}
+	wantOmitted := map[string]string{"a wrong body secret": "nope"}
 	for _, tc := range []struct {
 		name     string
 		verify   string
@@ -736,6 +780,24 @@ func TestDeclaredVerify(t *testing.T) {
 		{"a secret with a stale timestamp",
 			"    scheme: secret\n    signature: { header: Q-Secret }\n    timestamp: { header: Q-Sent, unit: s, window: 5m }\n",
 			map[string]string{"Q-Secret": secret, "Q-Sent": fmt.Sprint(now.Add(-6 * time.Minute).Unix())}, `{}`, "unauthorized", ""},
+		{"a secret in the body",
+			"    scheme: secret\n    signature: { body: token }\n",
+			nil, `{"token":"` + secret + `"}`, "", ""},
+		{"a secret at a nested body path",
+			"    scheme: secret\n    signature: { body: data.token }\n",
+			nil, `{"data":{"token":"` + secret + `"}}`, "", ""},
+		{"a wrong body secret",
+			"    scheme: secret\n    signature: { body: token }\n",
+			nil, `{"token":"nope"}`, "unauthorized", ""},
+		{"a missing body secret",
+			"    scheme: secret\n    signature: { body: token }\n",
+			nil, `{}`, "unauthorized", ""},
+		{"a body secret in no JSON",
+			"    scheme: secret\n    signature: { body: token }\n",
+			nil, `plain`, "unauthorized", ""},
+		{"a body secret that is no scalar",
+			"    scheme: secret\n    signature: { body: token }\n",
+			nil, `{"token":{"n":1}}`, "unauthorized", ""},
 		{"a delivery id in the body",
 			"    scheme: hmac-sha256\n    signed: body\n    signature: { header: Q-Sig, encoding: hex }\n    delivery: { body: update_id }\n",
 			map[string]string{"Q-Sig": sig("", []byte(`{"update_id":42}`))}, `{"update_id":42}`, "", "42"},
@@ -801,6 +863,14 @@ func TestDeclaredVerify(t *testing.T) {
 		case "unauthorized":
 			if !errors.Is(err, hooks.ErrUnauthorized) {
 				t.Errorf("%s: err = %v, want unauthorized", tc.name, err)
+			} else if strings.Contains(err.Error(), secret) {
+				// A refusal names what is missing, never the value it
+				// compared: the reason is logged, and the secret is not.
+				t.Errorf("%s: err = %v, want it to carry no secret", tc.name, err)
+			} else if want := wantError[tc.name]; want != "" && !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: err = %v, want it to name %q", tc.name, err, want)
+			} else if omit := wantOmitted[tc.name]; omit != "" && strings.Contains(err.Error(), omit) {
+				t.Errorf("%s: err = %v, want it to omit %q", tc.name, err, omit)
 			}
 		case "bad request":
 			if !errors.Is(err, hooks.ErrBadRequest) {
@@ -1404,49 +1474,79 @@ func TestDeclaredChallengeAnsweredAfterVerify(t *testing.T) {
 	}
 }
 
-// With scheme secret the header holds the hook's secret itself, so the
-// command is not handed it: the signing secret reaches no command. The
-// other headers arrive as they do with a signature.
+// With scheme secret the header holds the hook's secret itself, or a
+// field of the body does, so the command is not handed it: the signing
+// secret reaches no command. The other headers, and the other fields,
+// arrive as they do with a signature.
 func TestDeclaredNormalizeNotHandedSecret(t *testing.T) {
-	home, declDir := t.TempDir(), t.TempDir()
-	seen := filepath.Join(t.TempDir(), "stdin.json")
-	script := "#!/bin/sh\ncat > " + seen + "\nprintf '%s' '{\"type\":\"ping\"}'\n"
-	if err := os.WriteFile(filepath.Join(declDir, "normalize"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	d, err := source.Parse("q.yaml", []byte("name: q\nhook:\n  verify:\n    scheme: secret\n    signature: { header: q-secret }\n  bodies: unique\n  normalize: [normalize]\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := d.CopyCommandFiles(declDir, home); err != nil {
-		t.Fatal(err)
-	}
-	scripttest.Relink(t, filepath.Join(home, "sources", d.Name))
-	h := http.Header{}
-	h.Set("Q-Secret", secret)
-	h.Set("Q-Event", "ping")
-	if _, err := (hooks.Declared{D: d, Home: home}).Normalize(h, []byte(`{}`)); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(seen)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), secret) {
-		t.Fatalf("the command was handed the secret: %s", raw)
-	}
-	var in struct {
-		Headers map[string][]string `json:"headers"`
-	}
-	if err := json.Unmarshal(raw, &in); err != nil {
-		t.Fatal(err)
-	}
-	if len(in.Headers["Q-Event"]) != 1 {
-		t.Fatalf("the other headers are gone: %s", raw)
-	}
-	// The request's own headers are left as they came.
-	if h.Get("Q-Secret") != secret {
-		t.Fatal("Normalize changed the request's headers")
+	for _, tc := range []struct {
+		name      string
+		signature string
+		headers   map[string]string
+		body      string
+	}{
+		{"in a header", "{ header: q-secret }", map[string]string{"Q-Secret": secret, "Q-Event": "ping"}, `{}`},
+		{"in the body", "{ body: token }", map[string]string{"Q-Event": "ping"}, `{"token":"` + secret + `","note":"hi"}`},
+		{"at a nested body path", "{ body: data.token }", map[string]string{"Q-Event": "ping"}, `{"data":{"token":"` + secret + `","note":"hi"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home, declDir := t.TempDir(), t.TempDir()
+			seen := filepath.Join(t.TempDir(), "stdin.json")
+			script := "#!/bin/sh\ncat > " + seen + "\nprintf '%s' '{\"type\":\"ping\"}'\n"
+			if err := os.WriteFile(filepath.Join(declDir, "normalize"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			d, err := source.Parse("q.yaml", []byte("name: q\nhook:\n  verify:\n    scheme: secret\n    signature: "+tc.signature+"\n  bodies: unique\n  normalize: [normalize]\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := d.CopyCommandFiles(declDir, home); err != nil {
+				t.Fatal(err)
+			}
+			scripttest.Relink(t, filepath.Join(home, "sources", d.Name))
+			h := http.Header{}
+			for k, v := range tc.headers {
+				h.Set(k, v)
+			}
+			if _, err := (hooks.Declared{D: d, Home: home}).Normalize(h, []byte(tc.body)); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(seen)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(raw), secret) {
+				t.Fatalf("the command was handed the secret: %s", raw)
+			}
+			var in struct {
+				Headers map[string][]string `json:"headers"`
+				Body    map[string]any      `json:"body"`
+			}
+			if err := json.Unmarshal(raw, &in); err != nil {
+				t.Fatal(err)
+			}
+			if len(in.Headers["Q-Event"]) != 1 {
+				t.Fatalf("the other headers are gone: %s", raw)
+			}
+			if _, ok := in.Body["token"]; ok {
+				t.Fatalf("the token field reaches the command: %s", raw)
+			}
+			if note := in.Body["note"]; note != nil && note != "hi" {
+				t.Fatalf("the other fields are gone: %s", raw)
+			}
+			if data, ok := in.Body["data"].(map[string]any); ok {
+				if _, present := data["token"]; present {
+					t.Fatalf("the nested token field reaches the command: %s", raw)
+				}
+				if data["note"] != "hi" {
+					t.Fatalf("the other nested fields are gone: %s", raw)
+				}
+			}
+			// The request's own headers are left as they came.
+			if h.Get("Q-Secret") != tc.headers["Q-Secret"] {
+				t.Fatal("Normalize changed the request's headers")
+			}
+		})
 	}
 }
 

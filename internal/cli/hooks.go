@@ -14,6 +14,7 @@ import (
 	"io"
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/hooks"
+	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/store"
 )
 
@@ -31,8 +32,8 @@ which runs when the yard has an address for it: yardr settings set hook_addr
 which is used instead of the setting. The server reads the address when it
 starts. A session the yard starts and a script group's command do not inherit
 YARDR_HOOK_ADDR, so a server started from one does not listen there. The listener serves POST /hooks/<name>, the yard's peers under
-/peers/ (yardr peer --help), and nothing else. Each verified delivery becomes one 'hook' event; its raw body is
-kept for 'yardr hook show <seq>'. A redelivery (the same Linear or GitHub body,
+/peers/ (yardr peer --help), and nothing else. Each verified delivery becomes one 'hook' event; its body is
+kept for 'yardr hook show <seq>', with a declared body secret removed. A redelivery (the same Linear or GitHub body,
 or a repeated Linear-Delivery, X-GitHub-Delivery or Yard-Delivery id) is
 answered 200 and dropped. The listener is plain HTTP: an address reachable from
 beyond a network you trust needs a TLS terminator in front of it
@@ -282,8 +283,8 @@ no hook's (unknown_hook). See docs/subscriptions.md.`,
 
 	show := &cobra.Command{
 		Use:   "show <event seq|name>",
-		Short: "Print the raw payload of a hook event, or a hook's definition",
-		Long: `With the seq of a hook event, prints the delivery's raw body, and the files
+		Short: "Print the stored payload of a hook event, or a hook's definition",
+		Long: `With the seq of a hook event, prints the delivery's stored body, with a declared body secret removed, and the files
 fetched of it under it: each by its path in the yard, or why it was not
 taken. With a hook's
 name, prints its definition: the source, the secret file's path, the crew member
@@ -700,4 +701,57 @@ func hookAddrTakes(cfg *config.Config) string {
 // as what to change.
 func variableWins(l hooks.Listener) string {
 	return fmt.Sprintf("The running server was started with %s=%s, which is used instead of the setting while it is set there.", hooks.FromVariable, l.Addr)
+}
+
+// verifyLine says in a line how a hook's deliveries are verified. A
+// signature is named by what it covers, never assumed to be the body: the
+// declaration may sign a template over the timestamp and the delivery id
+// beside it. The line then says how the signature arrives (encoding,
+// prefix, and the separator where one header carries several) and the key
+// it is made with where the secret writes one. The HMAC is named by its
+// hash, which the scheme's name does not say where algorithm picks another
+// than SHA-256. The ask card says the same in full (hookSays in the store);
+// a knob added to hook.verify is named in both.
+func verifyLine(d *source.Declaration) string {
+	v := d.Hook.Verify
+	if v.Scheme == source.HookSecret {
+		// Nothing is signed: the header or the body holds the secret
+		// itself. A dot path is quoted, as a signed template is: it may
+		// hold any text with something between its dots.
+		if v.Signature.Body != "" {
+			return fmt.Sprintf("hook.verify: secret in the body field %q, the hook's secret itself, compared as it arrives", v.Signature.Body)
+		}
+		return fmt.Sprintf("hook.verify: secret in the header %s, the hook's secret itself, compared as it arrives", v.Signature.Header)
+	}
+	// An unset signed is the body alone, as the receiver reads it.
+	over := v.Signed
+	if over == "" || over == source.HookSigned {
+		over = "the body"
+	} else {
+		// A declaration's literal template may contain control characters;
+		// quote it so it stays one safe line in a terminal.
+		over = fmt.Sprintf("%q", over)
+	}
+	arrives := "as " + v.Signature.Encoding
+	if sep := v.Signature.List; sep != "" {
+		// Several signatures may stand side by side, and one that matches
+		// is enough.
+		each := "with no prefix"
+		if v.Signature.Prefix != "" {
+			each = fmt.Sprintf("past the prefix %q", v.Signature.Prefix)
+		}
+		arrives += fmt.Sprintf(", one or more separated by %q, each %s, any one of them passing", sep, each)
+	} else if v.Signature.Prefix != "" {
+		arrives += fmt.Sprintf(" past the prefix %q", v.Signature.Prefix)
+	}
+	line := fmt.Sprintf("hook.verify: hmac-%s over %s, the signature in the header %s %s", v.Hash(), over, v.Signature.Header, arrives)
+	// A key the secret writes is not the secret's own bytes.
+	if k := v.Key; k != nil {
+		from := "the whole secret"
+		if k.Prefix != "" {
+			from = fmt.Sprintf("what follows the prefix %q in the secret", k.Prefix)
+		}
+		line += fmt.Sprintf("; the HMAC key is %s, read as %s", from, k.Encoding)
+	}
+	return line
 }

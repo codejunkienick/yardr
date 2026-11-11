@@ -2078,7 +2078,7 @@ internal/cli/ops.go 1791 the server, daemon, depot, group, route and session com
 internal/cli/pack.go 2089 pack loading, import planning and its question rounds
 internal/cli/peers.go 1564 the peer identity, intake and ping commands
 internal/cli/routereport.go 1513 the route report and its rendering
-internal/cli/sourcecmd.go 2147 the source command and its builtin checks
+internal/cli/sourcecmd.go 2103 the source command and its builtin checks
 internal/cli/subscriptions.go 1148 the identity, subscribe and thread commands
 internal/cli/updown.go 1302 yard up and down with their handoffs
 internal/cli/users.go 1055 the user command, inboxes and conversations
@@ -2094,7 +2094,7 @@ internal/store/beads.go 2563 bead CRUD, queries and dispatch reads
 internal/store/crew.go 1461 crew records and their events
 internal/store/flows.go 1358 flow parsing and storage
 internal/store/graph.go 1311 the dependency graph and its queries
-internal/store/hooks.go 1092 webhook parsing and the say shapes
+internal/store/hooks.go 1091 webhook parsing and the say shapes
 internal/store/peerasks.go 1076 peer asks, their answers and ask copies
 internal/store/peerbeads.go 1736 peer bead intake and fetching
 internal/store/peers.go 1529 peer records and their allowances

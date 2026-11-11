@@ -622,6 +622,16 @@ func TestHookAskGenericSource(t *testing.T) {
 	if err != nil || hook.Source != "tracker" {
 		t.Fatalf("the hook = %+v, %v", hook, err)
 	}
+	bodyDecl := strings.Replace(trackerDecl, "name: tracker\n", "name: chat\n", 1)
+	bodyDecl = strings.Replace(bodyDecl, "signature: { header: X-Tracker-Secret }", "signature: { body: data.token }", 1)
+	if _, err := y.PutSource(y.ctx, "chat.yaml", bodyDecl, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	bodySeq := y.ask(t, hookRunAsk("hook add chat --source chat"), "yardmaster")
+	bodyDoes := strings.Join(y.asked(t, bodySeq).Ask.Run.Does, "\n")
+	if !strings.Contains(bodyDoes, "deliveries are verified by the body field data.token holding the hook's secret itself (scheme secret)") {
+		t.Fatalf("the body-secret card says:\n%s", bodyDoes)
+	}
 }
 
 // A chmod of a command copy under the hook's source after the ask

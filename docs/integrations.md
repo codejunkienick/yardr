@@ -133,10 +133,13 @@ crew members it reached, each with the reason), `notified` (the users) and
 `new_mentions`.
 
 *What is kept.* The event keeps the envelope, for as long as events are
-kept (90 days unless `YARDR_EVENT_RETENTION` says otherwise). The raw body,
-up to 1 MiB, is kept beside it under the event's seq for `yardr hook show
-<seq>`, for 30 days (`YARDR_HOOK_PAYLOAD_RETENTION`). A larger body is
-refused with 413
+kept (90 days unless `YARDR_EVENT_RETENTION` says otherwise). The request
+body, up to 1 MiB, is kept beside it under the event's seq for `yardr hook
+show <seq>`, for 30 days (`YARDR_HOOK_PAYLOAD_RETENTION`). For a declared
+source whose `hook.verify.scheme` is `secret` and whose
+`hook.verify.signature.body` names a field, the receiver removes that field
+before keeping or hashing the body; `hook show` prints the remaining JSON.
+A larger body is refused with 413
 ([configuration.md](configuration.md#retention-keeping-yarddb-bounded)).
 The delivery's dedupe keys (below) go with the event, but not while a replay
 of the delivery could still pass a source's timestamp window: a key is kept
@@ -161,6 +164,10 @@ a `repeat` source that names none is refused with 400 (`no_delivery`): a
 `token` sender sets `Yard-Delivery` on every delivery, a new id for each
 one it means, and the same id again for a resend.
 
+A body-secret delivery is decoded and encoded as JSON again after its secret
+field is removed, so JSON whitespace and key order do not distinguish a
+redelivery.
+
 A duplicate is answered 200 and leaves no event
 ([subscriptions.md](subscriptions.md#redeliveries)).
 
@@ -172,7 +179,7 @@ ten minutes
 ([subscriptions.md](subscriptions.md#a-refused-delivery)).
 
 *Where a user sees it.* `yardr hook add`, `hook list`, `hook show <name>`,
-`hook show <seq>` (the raw body), `yardr events`, `yardr doctor`'s hooks
+`hook show <seq>` (the stored body), `yardr events`, `yardr doctor`'s hooks
 lines.
 
 ### Identify
@@ -1258,8 +1265,13 @@ hook:
   names `{timestamp}` and `{body}` once each and `{delivery}` at most
   once. It reads `{delivery}` from a header only, so an id in the body
   refuses it when the file is added. With `secret` the header holds the
-  secret itself, compared as it arrives, in constant time; `signed`,
-  `algorithm`, `encoding`, `prefix`, `list` and `key` do not apply to it.
+  secret itself (`signature: { header: X-Service-Secret }`), or a field
+  of the body does (`signature: { body: token }`), compared as it
+  arrives, in constant time; exactly one of the two is named. `signed`,
+  `algorithm`, `encoding`, `prefix`, `list` and `key` do not apply to it,
+  and with `hmac-sha256` a signature stays in a header. A body secret
+  field cannot also name a delivery or timestamp, or be used by a
+  challenge.
 
   The scheme keeps the name `hmac-sha256` for every hash: `algorithm` says
   which hash the HMAC is made with, `sha256` (what a file that leaves it
@@ -1330,9 +1342,11 @@ hook:
   With `secret` nothing signs a timestamp, so its window does not stop a
   captured delivery from being sent again. A delivery with a bad signature
   or secret, or a timestamp outside the window, is refused, as Linear's
-  is. The signing secret is handed to no command, and an unverified body
-  reaches none: with `secret`, normalize is handed the request's headers
-  without the one that holds it.
+  is. A body that is no JSON carries no token, and is refused the same
+  way, naming the field and never the value. The signing secret is
+  handed to no command, and an unverified body reaches none: with
+  `secret`, normalize is handed the request's headers without the one
+  that holds it, and the body without the field that holds it.
 - **Delivery** is the service's id of the delivery: in the header
   `delivery` names, or in the body at the dot path (`delivery: { body:
   update_id }`). A retry shares the id and is answered 200 with no event,
@@ -1422,8 +1436,11 @@ hook:
   with a missing `body`, `value` or `answer` or one that is no dot path
   into the body, an encoding of a signature or of a key that is neither
   `hex` nor `base64`, a `key` with no `encoding`, a `list` or a `prefix`
-  that is no string, a delivery id in a header and in the body, bodies
-  that repeat with no delivery, a timestamp in the body and in a header,
+  that is no string, a secret in a header and in the body, or in neither,
+  a `signature.body` with scheme `hmac-sha256`, a body secret field also
+  used as a delivery id or timestamp, a body secret field used by a
+  challenge, a delivery id in a header and in the body, bodies that repeat
+  with no delivery, a timestamp in the body and in a header,
   or in neither, `signed: body` with the timestamp in a header, a unit
   that is not `ms` or `s`, a window that is no
   positive duration, bodies that are none of `unique`, `unique-per-hook`

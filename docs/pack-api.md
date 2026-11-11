@@ -124,8 +124,8 @@ maintainers decide that each time, and this page records it with a
 
 A declaration belongs to the pack that names it and has no `api` key of its
 own. One added with `yardr source add <file>` belongs to no pack, so it
-carries no API number either. It is the yard's own, and it is read as API 1,
-the only API there is so far. Nothing is promised for it beyond what
+carries no API number either. It is the yard's own, and it is read as the
+highest API here. Nothing is promised for it beyond what
 [integrations.md](integrations.md#a-declared-source) says of a declared
 source, and a yard accepts keys in it that a pack may not bring, such as
 `limits`. The day a declaration ships alone, outside a pack, it gets the key
@@ -414,6 +414,15 @@ The `permissions` field of a mint command's stdin: beside `inputs` and
 (`{"pull_requests": "write"}`), which the command posts when it mints.
 Absent, the token keeps the whole grant, as before. A pack whose mint
 command reads the field says `api: 6`.
+
+### API 7
+
+The `body` key of a hook's `verify.signature`: with scheme `secret`
+the secret itself may arrive as a JSON string, number or boolean at the dot
+path (`signature: { body: token }`), compared in constant time as written.
+The field is removed before the normalize command receives the body and
+before the body is stored or hashed for deduplication. A pack whose
+declaration names it says `api: 7`.
 
 ## Left out
 

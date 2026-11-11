@@ -30,8 +30,8 @@ const (
 	// names, made with SHA-256 or the hash algorithm names. It keeps its
 	// name for every hash: a rename would break every pack for nothing.
 	HookScheme = "hmac-sha256"
-	// HookSecret is a scheme of hook.verify: the header holds the hook's
-	// secret itself, compared as it arrives.
+	// HookSecret is a scheme of hook.verify: the header or the body
+	// holds the hook's secret itself, compared as it arrives.
 	HookSecret = "secret"
 	// HookSigned is what the signature covers when it covers the body
 	// alone: the word body.
@@ -176,7 +176,7 @@ type HookChallenge struct {
 // signing secret reaches no command, and an unverified body reaches none.
 type HookVerify struct {
 	// Scheme is how a delivery is verified: hmac-sha256, or secret, the
-	// header holding the hook's secret itself. Signed is what the
+	// header or the body holding the hook's secret itself. Signed is what the
 	// signature covers, for hmac-sha256 alone: the word body for the raw
 	// body alone, or a template over {timestamp} and {body}, each named
 	// once, and {delivery}, named at most once, with the literal text
@@ -222,9 +222,14 @@ func (v HookVerify) Hash() string {
 	return v.Algorithm
 }
 
-// HookSignature is where a delivery's signature arrives.
+// HookSignature is where a delivery's signature arrives: in a header, or
+// with scheme secret in the body at the dot path.
 type HookSignature struct {
 	Header string `json:"header"`
+	// Body is the dot path into the body of the field that holds the
+	// secret (token), with scheme secret; "" for a secret in a header,
+	// and for hmac-sha256, whose signature arrives in a header alone.
+	Body string `json:"body,omitempty"`
 	// Encoding is how it arrives: hex or padded base64. For hmac-sha256 alone.
 	Encoding string `json:"encoding"`
 	// Prefix is what stands before it ("sha256=", "v1,"), "" for none;
@@ -295,11 +300,12 @@ type Events struct {
 // the keys its events' fields may carry. Refused is what would fail at
 // every delivery: no way to verify one, a command that is no list of
 // strings or has no program, a timestamp in two places or none, a header
-// timestamp that signed: body leaves unsigned, a delivery id in two places,
-// and bodies that may come again with no delivery id to tell a retry by.
+// timestamp that signed: body leaves unsigned, a secret in two places or
+// in none, a delivery id in two places, and bodies that may come again
+// with no delivery id to tell a retry by.
 func (r *reader) hook(e entry) *Hook {
 	h := &Hook{}
-	var verify, bodies, normalize, register *entry
+	var verify, bodies, challenge, normalize, register *entry
 	var deliveryNamed bool
 	for _, f := range r.entries(e.v, e.path, "verify", "bodies", "challenge", "normalize", "keys", "register", "untimed") {
 		switch f.key {
@@ -307,6 +313,7 @@ func (r *reader) hook(e entry) *Hook {
 			verify = &f
 			h.Verify, deliveryNamed = r.hookVerify(f)
 		case "challenge":
+			challenge = &f
 			h.Challenge = r.hookChallenge(f)
 		case "bodies":
 			bodies = &f
@@ -350,6 +357,14 @@ func (r *reader) hook(e entry) *Hook {
 	}
 	if normalize == nil {
 		r.errf(e.v, join(e.path, "normalize"), "missing: the command that turns a verified body into the envelope")
+	}
+	if challenge != nil && h.Verify.Scheme == HookSecret && h.Verify.Signature.Body != "" && h.Challenge != nil {
+		if h.Challenge.Body == h.Verify.Signature.Body {
+			r.errf(challenge.v, join(challenge.path, "body"), "the body field holding the secret cannot name a challenge")
+		}
+		if h.Challenge.Answer == h.Verify.Signature.Body {
+			r.errf(challenge.v, join(challenge.path, "answer"), "the body field holding the secret cannot be a challenge answer")
+		}
 	}
 	// A body that may come again is told from its retry by the service's
 	// id alone. With hmac-sha256 a delivery is always named, so this is
@@ -461,14 +476,14 @@ func (r *reader) hookExisting(e entry) *HookExisting {
 }
 
 // hookVerify reads how the core proves a delivery came from the source:
-// an HMAC over the body, or the secret itself in a header. Signed,
-// algorithm, key, and the signature's encoding, prefix and list are for the
-// signature alone; the delivery id is in a header or in the body, and a
-// service that sends none says no delivery with scheme secret. It reports
-// whether a delivery was named, for the bodies check in hook.
+// an HMAC over the body, or the secret itself in a header or in the body.
+// Signed, algorithm, key, and the signature's encoding, prefix and list
+// are for the signature alone; the delivery id is in a header or in the
+// body, and a service that sends none says no delivery with scheme secret.
+// It reports whether a delivery was named, for the bodies check in hook.
 func (r *reader) hookVerify(e entry) (HookVerify, bool) {
 	v := HookVerify{}
-	var scheme, signed, signature, algorithm, key, delivery *entry
+	var scheme, signed, signature, algorithm, key, delivery, timestamp *entry
 	for _, f := range r.entries(e.v, e.path, "scheme", "signed", "signature", "algorithm", "key", "delivery", "timestamp") {
 		switch f.key {
 		case "scheme":
@@ -489,6 +504,7 @@ func (r *reader) hookVerify(e entry) (HookVerify, bool) {
 		case "delivery":
 			delivery = &f
 		case "timestamp":
+			timestamp = &f
 			v.Timestamp = r.hookTimestamp(f)
 		}
 	}
@@ -506,7 +522,7 @@ func (r *reader) hookVerify(e entry) (HookVerify, bool) {
 			r.errf(e.v, join(e.path, "signed"), "missing: what the signature covers (%s)", HookSigned)
 		}
 	} else if secret {
-		r.errf(signed.v, signed.path, "is for scheme %s: with %s the header holds the secret itself", HookScheme, HookSecret)
+		r.errf(signed.v, signed.path, "is for scheme %s: with %s the header or the body holds the secret itself", HookScheme, HookSecret)
 	} else if s, ok := r.str(signed.v, signed.path); ok {
 		if signed, ok := r.signedTemplate(*signed, s, v.Timestamp); ok {
 			v.Signed = signed
@@ -514,7 +530,7 @@ func (r *reader) hookVerify(e entry) (HookVerify, bool) {
 	}
 	if signature == nil {
 		if secret {
-			r.errf(e.v, join(e.path, "signature"), "missing: the header the secret arrives in ({ header })")
+			r.errf(e.v, join(e.path, "signature"), "missing: where the secret arrives (header: its name, or body: a dot path into it)")
 		} else {
 			r.errf(e.v, join(e.path, "signature"), "missing: the header the signature arrives in ({ header, encoding, prefix })")
 		}
@@ -523,7 +539,7 @@ func (r *reader) hookVerify(e entry) (HookVerify, bool) {
 	}
 	if algorithm != nil {
 		if secret {
-			r.errf(algorithm.v, algorithm.path, "is for scheme %s: with %s the header holds the secret itself", HookScheme, HookSecret)
+			r.errf(algorithm.v, algorithm.path, "is for scheme %s: with %s the header or the body holds the secret itself", HookScheme, HookSecret)
 		} else if s, ok := r.str(algorithm.v, algorithm.path); ok && !slices.Contains(hookAlgorithms, s) {
 			r.errf(algorithm.v, algorithm.path, "%q: want %s", s, strings.Join(hookAlgorithms, ", "))
 		} else if ok {
@@ -532,7 +548,7 @@ func (r *reader) hookVerify(e entry) (HookVerify, bool) {
 	}
 	if key != nil {
 		if secret {
-			r.errf(key.v, key.path, "is for scheme %s: with %s the header holds the secret itself", HookScheme, HookSecret)
+			r.errf(key.v, key.path, "is for scheme %s: with %s the header or the body holds the secret itself", HookScheme, HookSecret)
 		} else {
 			v.Key = r.hookSigningKey(*key)
 		}
@@ -543,6 +559,17 @@ func (r *reader) hookVerify(e entry) (HookVerify, bool) {
 		}
 	} else {
 		v.Delivery = r.hookDelivery(*delivery)
+	}
+	// A body secret cannot also be a delivery id or timestamp: the receiver
+	// records the id, and timestamp refusals can describe how far the
+	// value is from the clock.
+	if secret && v.Signature.Body != "" {
+		if delivery != nil && v.Signature.Body == v.Delivery.Body {
+			r.errf(delivery.v, join(delivery.path, "body"), "the body field holding the secret cannot also name the delivery id")
+		}
+		if timestamp != nil && v.Signature.Body == v.Timestamp.Body {
+			r.errf(timestamp.v, join(timestamp.path, "body"), "the body field holding the secret cannot also be a timestamp")
+		}
 	}
 	// A delivery named in a header and in the body, or in neither, is
 	// hookDelivery's own error, and a missing one is said above; only an id
@@ -673,12 +700,12 @@ func (r *reader) hookChallenge(e entry) *HookChallenge {
 
 // hookSignature reads where a delivery's signature arrives: the header, in
 // hex or base64, past the prefix, one or several at the list separator.
-// With scheme secret the header holds the secret itself, and encoding,
-// prefix and list do not apply.
+// With scheme secret the secret itself arrives in the header or at the
+// body dot path, and encoding, prefix and list do not apply.
 func (r *reader) hookSignature(e entry, secret bool) HookSignature {
 	s := HookSignature{}
-	var header, encoding *entry
-	for _, f := range r.entries(e.v, e.path, "header", "encoding", "prefix", "list") {
+	var header, body, encoding *entry
+	for _, f := range r.entries(e.v, e.path, "header", "body", "encoding", "prefix", "list") {
 		switch f.key {
 		case "header":
 			header = &f
@@ -687,10 +714,19 @@ func (r *reader) hookSignature(e entry, secret bool) HookSignature {
 			} else if ok {
 				s.Header = name
 			}
+		case "body":
+			body = &f
+			if !secret {
+				r.errf(f.v, f.path, "is for scheme %s: with %s the signature arrives in a header", HookSecret, HookScheme)
+			} else if p, ok := r.str(f.v, f.path); ok && !hookPath(p) {
+				r.errf(f.v, f.path, "%q: a dot path into the body (token)", p)
+			} else if ok {
+				s.Body = p
+			}
 		case "encoding":
 			encoding = &f
 			if secret {
-				r.errf(f.v, f.path, "is for scheme %s: with %s the header holds the secret itself", HookScheme, HookSecret)
+				r.errf(f.v, f.path, "is for scheme %s: with %s the header or the body holds the secret itself", HookScheme, HookSecret)
 			} else if enc, ok := r.str(f.v, f.path); ok && !slices.Contains(hookEncodings, enc) {
 				r.errf(f.v, f.path, "%q: a signature arrives %s", enc, strings.Join(hookEncodings, " or "))
 			} else if ok {
@@ -698,7 +734,7 @@ func (r *reader) hookSignature(e entry, secret bool) HookSignature {
 			}
 		case "prefix":
 			if secret {
-				r.errf(f.v, f.path, "is for scheme %s: with %s the header holds the secret itself", HookScheme, HookSecret)
+				r.errf(f.v, f.path, "is for scheme %s: with %s the header or the body holds the secret itself", HookScheme, HookSecret)
 			} else if f.v.Kind == yaml.ScalarNode && f.v.Tag == "!!str" {
 				// An explicit "" is no prefix, as leaving it out is.
 				s.Prefix = f.v.Value
@@ -707,7 +743,7 @@ func (r *reader) hookSignature(e entry, secret bool) HookSignature {
 			}
 		case "list":
 			if secret {
-				r.errf(f.v, f.path, "is for scheme %s: with %s the header holds the secret itself", HookScheme, HookSecret)
+				r.errf(f.v, f.path, "is for scheme %s: with %s the header or the body holds the secret itself", HookScheme, HookSecret)
 			} else if f.v.Kind == yaml.ScalarNode && f.v.Tag == "!!str" {
 				// An explicit "" is one signature, as leaving it out is.
 				s.List = f.v.Value
@@ -719,12 +755,15 @@ func (r *reader) hookSignature(e entry, secret bool) HookSignature {
 	if e.v.Kind != yaml.MappingNode {
 		return s
 	}
-	if header == nil {
-		if secret {
-			r.errf(e.v, join(e.path, "header"), "missing: the header the secret arrives in")
-		} else {
-			r.errf(e.v, join(e.path, "header"), "missing: the header the signature arrives in (Linear-Signature)")
+	if secret {
+		if header != nil && body != nil {
+			r.errf(header.v, header.path, "a secret is in a header or in the body, not both")
 		}
+		if header == nil && body == nil {
+			r.errf(e.v, join(e.path, "header"), "missing: where the secret arrives (header: its name, or body: a dot path into it)")
+		}
+	} else if header == nil {
+		r.errf(e.v, join(e.path, "header"), "missing: the header the signature arrives in (Linear-Signature)")
 	}
 	if encoding == nil && !secret {
 		r.errf(e.v, join(e.path, "encoding"), "missing: how the signature arrives (%s)", strings.Join(hookEncodings, ", "))

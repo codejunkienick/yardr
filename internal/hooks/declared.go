@@ -183,12 +183,17 @@ func Hold[A any](a A, src *store.Source) A {
 func (d Declared) Verify(r *http.Request, body, secret []byte, now time.Time) (string, error) {
 	v := d.D.Hook.Verify
 	if v.Scheme == source.HookSecret {
-		// The header holds the secret itself, compared as it arrives,
-		// in constant time, as the token adapter compares its Bearer token.
-		// A missing header compares as "": it never equals the secret,
-		// which the receiver refused empty before this runs.
-		text := strings.TrimSpace(r.Header.Get(v.Signature.Header))
-		if subtle.ConstantTimeCompare([]byte(text), secret) != 1 {
+		// The secret itself arrives in the header or at the body dot
+		// path, compared as it arrives, in constant time, as the token
+		// adapter compares its Bearer token. A missing header, a body
+		// that is no JSON and a body without the field all compare as
+		// "": none ever equals the secret, which the receiver refused
+		// empty before this runs.
+		if v.Signature.Body != "" {
+			if subtle.ConstantTimeCompare([]byte(hookSecret(body, v.Signature.Body)), secret) != 1 {
+				return "", unauthorized("bad or missing body field %s", v.Signature.Body)
+			}
+		} else if text := strings.TrimSpace(r.Header.Get(v.Signature.Header)); subtle.ConstantTimeCompare([]byte(text), secret) != 1 {
 			return "", unauthorized("bad or missing %s", v.Signature.Header)
 		}
 	} else {
@@ -475,6 +480,66 @@ func hookScalar(v any) string {
 	}
 }
 
+// hookSecret is the secret at the dot path in the body, as the sender
+// wrote it: a string as it is, a number as written. "" for a body that
+// is no JSON, one without the field, and one whose field is no scalar:
+// each compares against the secret as "", which never equals it. The
+// value is exact, with no trim: a JSON string carries no header
+// whitespace, and Verify names only the field, never the value.
+func hookSecret(body []byte, path string) string {
+	parsed, err := hookJSON(body)
+	if err != nil {
+		return ""
+	}
+	v, ok := hookAt(parsed, path)
+	if !ok {
+		return ""
+	}
+	return hookScalar(v)
+}
+
+// hookDel deletes the field at the dot path from v, decoded from a body:
+// a secret in the body is stripped before any command is handed it. A
+// path through no map, or to no field, deletes nothing.
+func hookDel(v any, path string) {
+	segs := strings.Split(path, ".")
+	for _, seg := range segs[:len(segs)-1] {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return
+		}
+		v, ok = m[seg]
+		if !ok {
+			return
+		}
+	}
+	if m, ok := v.(map[string]any); ok {
+		delete(m, segs[len(segs)-1])
+	}
+}
+
+// storedBody removes a body-carried secret before the receiver keeps or
+// hashes a delivery. The secret authenticates the request; it is not part
+// of the delivery the yard records. Verify has already required this to be
+// JSON with a scalar at the named path, so a decode or encode failure here
+// must fail closed rather than keep the original bytes.
+func (d Declared) storedBody(body []byte) ([]byte, error) {
+	v := d.D.Hook.Verify
+	if v.Scheme != source.HookSecret || v.Signature.Body == "" {
+		return body, nil
+	}
+	parsed, err := hookJSON(body)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the verified body")
+	}
+	hookDel(parsed, v.Signature.Body)
+	clean, err := json.Marshal(parsed)
+	if err != nil {
+		return nil, fmt.Errorf("could not remove the body secret")
+	}
+	return clean, nil
+}
+
 // hookTime is when the delivery was sent, from the timestamp the
 // declaration names: in the body at the dot path, or in a header, in ms or
 // s. Errors wrap ErrUnauthorized, or ErrBadRequest for a body that is no
@@ -545,10 +610,14 @@ func (d Declared) Normalize(h http.Header, body []byte) (*Envelope, error) {
 	}
 	// With scheme secret the header verify names holds the hook's secret
 	// itself, and the secret reaches no command: the command is handed
-	// the other headers.
+	// the other headers. A secret in the body is stripped the same way:
+	// the named field is deleted from the parsed body first.
 	if hv := d.D.Hook.Verify; hv.Scheme == source.HookSecret {
 		h = h.Clone()
 		h.Del(hv.Signature.Header)
+		if hv.Signature.Body != "" {
+			hookDel(v, hv.Signature.Body)
+		}
 	}
 	in := map[string]any{"headers": map[string][]string(h), "body": v}
 	cmd := source.Command{Key: "hook.normalize", Argv: d.D.Hook.Normalize}

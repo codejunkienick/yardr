@@ -1105,6 +1105,12 @@ func TestSourceShowHookVerify(t *testing.T) {
 		{"sha256 said outright", plain + `    algorithm: sha256
     signature: { header: X-Sig-256, encoding: hex, prefix: "sha256=" }
 `, `hook.verify: hmac-sha256 over the body, the signature in the header X-Sig-256 as hex past the prefix "sha256="`},
+		// A secret in the body is named by its field, quoted as a signed
+		// template is: a dot path may hold any text with something
+		// between its dots.
+		{"a secret in the body", `    scheme: secret
+    signature: { body: token }
+`, `hook.verify: secret in the body field "token", the hook's secret itself, compared as it arrives`},
 	} {
 		name := fmt.Sprintf("hook%d", i)
 		if _, err := st.PutSource(context.Background(), name+".yaml", decl(name, tc.verify), "jo"); err != nil {

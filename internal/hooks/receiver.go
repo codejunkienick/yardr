@@ -167,6 +167,14 @@ func (rc *Receiver) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	payload := body
+	if dec, ok := ad.(Declared); ok {
+		payload, err = dec.storedBody(body)
+		if err != nil {
+			rc.reject(w, h, name, "payload", http.StatusInternalServerError, err)
+			return
+		}
+	}
 	env, err := ad.Normalize(r.Header, body)
 	if err != nil {
 		rc.reject(w, h, name, "bad_request", http.StatusBadRequest, err)
@@ -241,7 +249,7 @@ func (rc *Receiver) serve(w http.ResponseWriter, r *http.Request) {
 						if cs := env.Fields["channel"]; len(cs) > 0 {
 							channel = cs[0]
 						}
-						if _, err := rc.st.HoldIdentity(r.Context(), name, dec.D.Name, values[0], channel, env.Map(), body, DedupeKeys(name, h.Source, ad, body, delivery)); err != nil {
+						if _, err := rc.st.HoldIdentity(r.Context(), name, dec.D.Name, values[0], channel, env.Map(), payload, DedupeKeys(name, h.Source, ad, payload, delivery)); err != nil {
 							rc.log.Warn("mapping card not offered", "hook", name, "source", dec.D.Name, "err", err)
 						}
 					}
@@ -281,7 +289,7 @@ func (rc *Receiver) serve(w http.ResponseWriter, r *http.Request) {
 	// Dedupe after Verify, so only the source can claim a body or a
 	// delivery id; the store checks and records the keys in the write that
 	// records the delivery, so a concurrent redelivery cannot slip through.
-	seq, dup, err := rc.st.RecordHook(r.Context(), name, env.Map(), body, DedupeKeys(name, h.Source, ad, body, delivery))
+	seq, dup, err := rc.st.RecordHook(r.Context(), name, env.Map(), payload, DedupeKeys(name, h.Source, ad, payload, delivery))
 	if err != nil {
 		rc.reject(w, h, name, "store", http.StatusInternalServerError, err)
 		return

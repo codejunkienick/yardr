@@ -691,7 +691,14 @@ func hookSays(d *source.Declaration) string {
 	v := h.Verify
 	var verified string
 	if v.Scheme == source.HookSecret {
-		verified = fmt.Sprintf("deliveries are verified by the header %s holding the hook's secret itself (scheme secret)", v.Signature.Header)
+		where := "the header " + v.Signature.Header
+		if v.Signature.Body != "" {
+			// A dot path is quoted like the delivery's and the
+			// timestamp's below: it may hold any text with something
+			// between its dots.
+			where = "the body field " + displaySourceValue(v.Signature.Body)
+		}
+		verified = fmt.Sprintf("deliveries are verified by %s holding the hook's secret itself (scheme secret)", where)
 	} else {
 		// The prefix and the template are the declaration's own text, and the
 		// reader takes any literal text in them, a newline and an escape

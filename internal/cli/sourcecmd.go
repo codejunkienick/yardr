@@ -420,8 +420,10 @@ the prefix (prefix: "sha256=", or none). signature.list is the separator
 of the several signatures a service may send in one header (list: " "),
 any one of which may match; key says the secret writes the key, not the
 key's own bytes (key: { prefix: "whsec_", encoding: base64 }). With
-scheme secret the header holds the secret itself, compared as it
-arrives. delivery is where the service's id of the delivery arrives: in
+scheme secret the secret itself arrives in the header (signature: {
+header: X-Service-Secret }) or in the body at the dot path (signature:
+{ body: token }), compared as it arrives. delivery is where the
+service's id of the delivery arrives: in
 a header, or in the body at the dot path (delivery: { body: update_id });
 with scheme secret it is left out for a service that sends none. After
 the check comes the timestamp, in the body at the dot path or in a
@@ -442,8 +444,10 @@ algorithm that is none of sha256, sha1 and sha512, a signed
 template with a missing or repeated {body} or {timestamp}, a repeated
 {delivery}, an unknown placeholder, or {delivery} with no delivery in a
 header, signed: body with the timestamp in a header, an encoding that is
-neither hex nor base64, a verify key with no encoding, a delivery id in
-a header and in the body, bodies that repeat with no delivery, a
+neither hex nor base64, a verify key with no encoding, a secret in a
+header and in the body, a body secret with scheme hmac-sha256, a
+delivery id in a header and in the body, bodies that repeat with no
+delivery, a
 timestamp in the body and in a header, or in neither, a unit that is not
 ms or s, a window that is no positive duration, bodies that are none of
 unique, unique-per-hook and repeat, a command that is no list of strings
@@ -1839,54 +1843,6 @@ func limitsLine(d *source.Declaration) string {
 		return "limits: its command says what the source itself carries (yardr limits)"
 	}
 	return fmt.Sprintf("limits: its command says what the subscription of %s still carries (yardr limits <kind>)", strings.Join(d.Limits.KindNames(), ", "))
-}
-
-// verifyLine says in a line how a hook's deliveries are verified. A
-// signature is named by what it covers, never assumed to be the body: the
-// declaration may sign a template over the timestamp and the delivery id
-// beside it. The line then says how the signature arrives (encoding,
-// prefix, and the separator where one header carries several) and the key
-// it is made with where the secret writes one. The HMAC is named by its
-// hash, which the scheme's name does not say where algorithm picks another
-// than SHA-256. The ask card says the same in full (hookSays in the store);
-// a knob added to hook.verify is named in both.
-func verifyLine(d *source.Declaration) string {
-	v := d.Hook.Verify
-	if v.Scheme == source.HookSecret {
-		// Nothing is signed: the header holds the secret itself.
-		return fmt.Sprintf("hook.verify: secret in the header %s, the hook's secret itself, compared as it arrives", v.Signature.Header)
-	}
-	// An unset signed is the body alone, as the receiver reads it.
-	over := v.Signed
-	if over == "" || over == source.HookSigned {
-		over = "the body"
-	} else {
-		// A declaration's literal template may contain control characters;
-		// quote it so it stays one safe line in a terminal.
-		over = fmt.Sprintf("%q", over)
-	}
-	arrives := "as " + v.Signature.Encoding
-	if sep := v.Signature.List; sep != "" {
-		// Several signatures may stand side by side, and one that matches
-		// is enough.
-		each := "with no prefix"
-		if v.Signature.Prefix != "" {
-			each = fmt.Sprintf("past the prefix %q", v.Signature.Prefix)
-		}
-		arrives += fmt.Sprintf(", one or more separated by %q, each %s, any one of them passing", sep, each)
-	} else if v.Signature.Prefix != "" {
-		arrives += fmt.Sprintf(" past the prefix %q", v.Signature.Prefix)
-	}
-	line := fmt.Sprintf("hook.verify: hmac-%s over %s, the signature in the header %s %s", v.Hash(), over, v.Signature.Header, arrives)
-	// A key the secret writes is not the secret's own bytes.
-	if k := v.Key; k != nil {
-		from := "the whole secret"
-		if k.Prefix != "" {
-			from = fmt.Sprintf("what follows the prefix %q in the secret", k.Prefix)
-		}
-		line += fmt.Sprintf("; the HMAC key is %s, read as %s", from, k.Encoding)
-	}
-	return line
 }
 
 // commandFileLine is one command's program in a line of yardr source show:

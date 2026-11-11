@@ -696,6 +696,30 @@ func TestHearByIdentityOffersMappingCard(t *testing.T) {
 			t.Fatalf("%s: open asks = %v, %v, want none", word, q, err)
 		}
 	}
+
+	// A held delivery keeps its useful body for the operator, but not the
+	// body field that authenticated it.
+	bodySecretText := strings.Replace(fmt.Sprintf(talkText, "normalize"),
+		"signature: { header: Talk-Secret }", "signature: { body: token }", 1)
+	r = heldDepotWithSource(t, bodySecretText)
+	heldBody, _ := json.Marshal(map[string]string{
+		"token": secret, "sender": "U999", "channel": "C1", "text": "held message",
+	})
+	if code := r.post(t, "/hooks/talk", heldBody, nil); code != http.StatusOK {
+		t.Fatalf("body-secret held delivery answered %d", code)
+	}
+	card = heldCard(t, r, "U999")
+	bodies, err := r.st.IdentityHeldPayloads(ctx, card.Bead, card.Ask, "op")
+	if err != nil || len(bodies) != 1 || strings.Contains(bodies[0], secret) {
+		t.Fatalf("held payloads = %q, %v; want one payload without the body secret", bodies, err)
+	}
+	var kept map[string]any
+	if err := json.Unmarshal([]byte(bodies[0]), &kept); err != nil {
+		t.Fatalf("held payload %q is not JSON: %v", bodies[0], err)
+	}
+	if _, ok := kept["token"]; ok || kept["text"] != "held message" {
+		t.Fatalf("held payload = %v, want message without token", kept)
+	}
 }
 
 // heldCard is the open mapping card waiting for sender, with how

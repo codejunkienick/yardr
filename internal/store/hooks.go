@@ -19,7 +19,7 @@ import (
 
 var (
 	bHooks        = []byte("hooks")
-	bHookPayloads = []byte("hook_payloads") // <event seq>: the raw body as received
+	bHookPayloads = []byte("hook_payloads") // <event seq>: the stored delivery body
 	bHookSeen     = []byte("hook_seen")     // <dedupe key>: seq of the event that recorded it, and when (seenValue)
 	bHookMentions = []byte("hook_mentions") // <source> 0 <entity>: who its text mentioned last
 )
@@ -932,13 +932,11 @@ func (s *Store) RejectHook(ctx context.Context, name, reason string, status, cou
 }
 
 // RecordHook logs an accepted delivery as one `hook` event carrying the
-// normalized envelope, and keeps the raw payload beside it under the
-// event's seq. The envelope is what routing reads; the payload is there
-// for `yardr hook show` when the envelope is not enough. Which crew members it
-// reaches, and why, is decided here against their subscriptions as they
-// are now, and kept on the event as "deliveries"; the users it reaches are
-// kept as "notified" and each gets a notification. A crew member that is the
-// delivery's actor becomes a participant in its thread from then on.
+// normalized envelope and keeps the supplied payload; the receiver strips
+// a declared body secret before passing it. The payload is available to
+// `yardr hook show` when the envelope is not enough. Crew and users it
+// reaches are recorded as "deliveries" and "notified"; a crew member who
+// is its actor becomes a participant in its thread.
 //
 // dedupe are the keys that identify this delivery (see hooks.DedupeKeys).
 // When any of them was recorded before, nothing is written and RecordHook
@@ -1077,7 +1075,8 @@ func freshMentions(tx *bolt.Tx, data map[string]any) error {
 	return b.Put(key, raw)
 }
 
-// HookPayload returns the raw body of the delivery logged as event seq.
+// HookPayload returns the stored body of event seq, after the receiver removes
+// any declared body secret.
 func (s *Store) HookPayload(ctx context.Context, seq uint64) ([]byte, error) {
 	var out []byte
 	err := s.read(func(tx *bolt.Tx) error {
