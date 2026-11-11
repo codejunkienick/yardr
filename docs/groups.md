@@ -1716,6 +1716,30 @@ A session ends when the bead is advanced, closed or released. If the runner
 reports the work gone (process exited, herdr agent gone) the session is marked
 `died` and the bead is routed again after a backoff; after 3 failures in one
 stage the bead is held (`yardr bead unhold` grants fresh attempts).
+
+A session the yard ends as `failed` (it sat idle or ran past its limits, its
+first prompt was given up on, or its start went wrong) has its bead routed again
+after the same backoff, but not while its agent may still be at work. herdr opens one worktree for a bead and
+every session of it works there, so a second agent would share the checkout
+with the first. The daemon stops the agent of a failed session as it does of
+any ended session (for herdr, it closes the tab), and tries again on every pass
+while that fails (herdr is down, or refuses the close). Until it lands the bead
+waits, past its backoff, and gets one `backoff` event whose `reason` names the
+session. Closing the tab by hand ends the wait too, since the next try finds it
+gone.
+
+A group with `keep: true` leaves its agents running and stops none, so the bead
+of a session that failed there is held instead, with a note by `yard` that names
+the session and the way on. The yardmaster hears of the hold as of any other
+(`held` is of the class `attention`). The bead stays held until a person or a
+crew member has looked at the agent, closed its pane and run
+`yardr bead unhold <bead>`, which routes it again from its stage with fresh
+attempts. An agent cannot lift a hold.
+
+A session that ended `done`, `died` or `aborted` is not waited for, whatever the
+group keeps: a kept session that ended `done` is left running, and its bead
+goes on to its next stage, as before.
+
 A runner that cannot start anything (herdr missing or down) is an outage, not
 a failure of the bead: the group backs off and logs `runtime_down` once, and
 each bead that waits for the group gets one `group_wait` event naming it.

@@ -1082,36 +1082,6 @@ func (d *Dispatcher) forget(id string) {
 	delete(d.unsent, id)
 }
 
-// teardown stops runner resources for sessions that ended, unless the group
-// asks to keep them (config keep=true) for inspection. On the way it marks the
-// count of a session whose agent is counted as due (markCountDue), having asked
-// the runner once more for the id of the agent's session while its tab is still
-// open (lastAgentSession).
-func (d *Dispatcher) teardown(ctx context.Context, groups map[string]store.Group) error {
-	ended, err := d.Store.Unstopped(ctx)
-	if err != nil {
-		return err
-	}
-	for _, s := range ended {
-		g := groups[s.Group]
-		r := d.runnerFor(s, groups)
-		id := d.lastAgentSession(ctx, r, s)
-		if r != nil && g.Config["keep"] != true && len(s.Handle) > 0 {
-			if err := r.Stop(ctx, s.Handle); err != nil {
-				d.Log.Warn("stop", "session", s.ID, "err", err)
-				continue
-			}
-		}
-		if err := d.markCountDue(ctx, r, s, g, id); err != nil {
-			return err
-		}
-		if err := d.Store.MarkStopped(ctx, s.ID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // cleanup removes what runners left behind for beads that are now closed,
 // unless the group sets cleanup=false.
 func (d *Dispatcher) cleanup(ctx context.Context, groups map[string]store.Group) error {
@@ -1177,6 +1147,10 @@ func (d *Dispatcher) route(ctx context.Context, groups map[string]store.Group, a
 	for _, b := range lost {
 		lostByID[b.Bead] = b
 	}
+	unstopped, err := d.failedUnstopped(ctx)
+	if err != nil {
+		return err
+	}
 
 	for _, rb := range ready {
 		// What a server of a build from before ReadyBead answers with
@@ -1196,6 +1170,13 @@ func (d *Dispatcher) route(ctx context.Context, groups map[string]store.Group, a
 			continue
 		}
 		if t, ok := d.retryAfter[b.ID]; ok && d.now().Before(t) {
+			continue
+		}
+		// Past the backoff, a bead still waits for the agent of its failed
+		// session to be stopped: teardown tries on every pass, and a session
+		// started now would share the old agent's checkout.
+		if s, ok := unstopped[b.ID]; ok {
+			d.reportOnce(ctx, b, "backoff", fmt.Sprintf("session %s ended as failed and its agent is not stopped yet; the bead starts when it is", s.ID))
 			continue
 		}
 		operator := settings[store.OperatorSetting]
