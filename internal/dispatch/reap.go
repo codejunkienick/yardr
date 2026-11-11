@@ -211,7 +211,7 @@ func (d *Dispatcher) reap(ctx context.Context, groups map[string]store.Group) (m
 	var wg sync.WaitGroup
 	for i, s := range sessions {
 		r := d.runnerFor(s, groups)
-		if r == nil || s.State == "starting" {
+		if r == nil || s.State == "starting" || givenUp(s) {
 			continue
 		}
 		// The status snapshot decides only whether the worker reads the
@@ -240,6 +240,14 @@ func (d *Dispatcher) reap(ctx context.Context, groups map[string]store.Group) (m
 		switch {
 		case r == nil:
 			live(s) // cannot judge; leave it alone
+		case givenUp(s):
+			// Its first prompt was given up on an earlier pass whose end did
+			// not land: ended from the stored handle, before any runtime ask
+			// (judgeSession's status, a pane read) can fail and defer it.
+			// One whose end fails again still runs, and holds its slot.
+			if d.promptGaveUp(ctx, s, promptPass{}) != nil {
+				live(s)
+			}
 		case s.State == "starting":
 			// A start runs on its group's worker now, and may still be
 			// running healthily: one a live worker of this daemon owns
@@ -289,6 +297,15 @@ func (d *Dispatcher) reap(ctx context.Context, groups map[string]store.Group) (m
 					}
 					if pass.arrived {
 						d.prompted(r, s.ID)
+					}
+					// A prompt given up on this pass: its session is ended,
+					// from prompt_lost stored above. One given up on an
+					// earlier pass is ended before it is judged (givenUp).
+					if pass.end {
+						if d.promptGaveUp(ctx, s, pass) != nil {
+							live(s)
+						}
+						continue
 					}
 					trusted = pass.trusted
 				} else {
@@ -350,6 +367,16 @@ func (d *Dispatcher) reap(ctx context.Context, groups map[string]store.Group) (m
 	return active, nil
 }
 
+// givenUp reports whether s is a running session whose first prompt the
+// store says was given up (prompt_lost): its end is due, whatever its runner
+// would say. It is asked of a bead's session alone: a crew member's handle is
+// on its crew record, which reap does not list, so the prompt_lost that a
+// crew member's given-up prompt leaves there is no end due here, on this
+// pass, on a later one or on a restarted daemon's.
+func givenUp(s store.Session) bool {
+	return s.State != "starting" && s.Handle[promptLost] == true
+}
+
 // judgeSession asks the runner about s for one reap worker and times
 // each ask (see askLog): the status call, the pending prompt's pane
 // reads and typings where the session has a prompt pending, and the
@@ -390,7 +417,7 @@ func (d *Dispatcher) judgeSession(ctx context.Context, s store.Session, r Runner
 		// the prompt may have left what the runner reads of its pane. No
 		// counted-but-untaken bypass: a bead session has no status history
 		// in the store to rest the answer on, so a counted send stays shut.
-		pass := clone.pendingPrompt(ctx, r, s.ID, s.Handle, p, status, cfg, true, false)
+		pass := clone.pendingPrompt(ctx, r, s.ID, s.Handle, p, status, cfg, true, false, true)
 		out.pass, out.hasPass, out.trusted = pass, true, pass.trusted
 	} else {
 		_, out.own = clone.ownInputWork(ctx, r, s.ID, s.Bead, map[string]any{"session": s.ID}, s.Handle, status)

@@ -135,9 +135,9 @@ own, a kind whose marks are unknown), it goes through
 says which way with `delivery` (`typed` or `agent prompt`). A telling
 neither way takes is marked untold, with why, and the yardmaster hears it:
 `note_untold` is of the class `attention`, and `yardr bead show` says
-`could not be told: <why>` where it said `will be told`. One behind a
-first prompt that was given up is marked untold too: the first prompt goes
-first, and it never arrives. A note behind a first prompt that is stuck on
+`could not be told: <why>` where it said `will be told`. A session whose
+first prompt was given up is ended instead, and its notes wait for the
+bead's next session. A note behind a first prompt that is stuck on
 a screen that is not there does not wait behind it: through herdr it goes
 at once.
 

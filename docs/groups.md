@@ -2161,8 +2161,11 @@ check the footer's model instead.
   seconds was lost (`session_prompt_lost`) and is made again, three times in
   all; after the third, `session_prompt_gave_up` tells the yardmaster, its `hint`
   being the command that gives the prompt by hand (`herdr agent prompt
-  <agent> '<text>'`), and the session is left as it is. A prompt given by
-  hand ends the wait like any other that shows. A prompt whose text is in
+  <agent> '<text>'`). A bead's session is then ended, failed, with a note on
+  the bead that says why: the bead is routed again after the backoff, and
+  held once its stage has failed as often as the daemon tries (three times).
+  A crew member is left as it is, and a prompt given by hand ends its wait
+  like any other that shows. A prompt whose text is in
   the agent's input and was not submitted has not arrived either: "shows"
   means above the input, where a harness echoes a message it took. The
   pane is read by two marks of its kind (`kind` on the session's handle):
@@ -2192,7 +2195,10 @@ check the footer's model instead.
   With the agent idle the daemon sends Enter alone, never the text a second
   time (`session_prompt_typed`, its `submit` the count), three times in
   all, ten seconds apart; after the third, `session_prompt_gave_up` has
-  `typed: true` and the hint `herdr pane send-keys <pane> enter`.
+  `typed: true` and the hint `herdr pane send-keys <pane> enter`, and a
+  bead's session is ended as above. A prompt given up (`prompt_lost`) stays
+  given up: a bead's session is ended on every pass until the end lands,
+  before herdr is asked anything of it. Until then it still holds its slot.
   `session_prompted` is the arrival, not the sending: `shown: true` when the
   prompt was found in the pane, `deliveries` how often the daemon had sent
   it, `submits` how often it had sent Enter for it, and `unseen` (a

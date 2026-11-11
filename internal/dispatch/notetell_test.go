@@ -454,9 +454,9 @@ func TestNoteBehindAPendingFirstPrompt(t *testing.T) {
 }
 
 // A note behind a first prompt the dispatcher gave up on is never told:
-// the first prompt goes first, and it never arrives. It is marked untold
-// with why, so the yardmaster hears, not left for a pass that never comes.
-func TestNoteBehindAGivenUpFirstPromptIsUntold(t *testing.T) {
+// the session is ended instead, and the note waits for the bead's next
+// session.
+func TestNoteBehindAGivenUpFirstPromptIsNotTold(t *testing.T) {
 	t.Parallel()
 	s, f, d := noteSetup(t)
 	ctx := context.Background()
@@ -466,7 +466,7 @@ func TestNoteBehindAGivenUpFirstPromptIsUntold(t *testing.T) {
 	sess := liveSession(t, s, b.ID)
 	f.screen(false, false) // the first prompt is lost even though no screen is readable
 	// The first prompt was delivered and given up ("prompt_lost", as
-	// pendingPrompt leaves it): it still goes first.
+	// pendingPrompt leaves it).
 	must(t, s.SetHandle(ctx, sess, map[string]any{
 		"session": sess, store.PendingPrompt: "read the brief", "prompt_lost": true,
 	}))
@@ -474,27 +474,34 @@ func TestNoteBehindAGivenUpFirstPromptIsUntold(t *testing.T) {
 	if _, err := s.AddNotedAs(ctx, b.ID, "narrower", "yardmaster", ""); err != nil {
 		t.Fatal(err)
 	}
+	d.Store = &endFailingStore{API: s, fails: 1}
 	must(t, d.Reconcile(ctx))
-	must(t, d.Reconcile(ctx))
+	still, err := s.GetSession(ctx, sess)
+	must(t, err)
+	if still.State != "running" {
+		t.Fatalf("session after a refused end = %+v, want it still running", still)
+	}
 	notes, err := s.Notes(ctx, b.ID)
 	must(t, err)
-	if len(notes) != 1 || notes[0].Told || notes[0].Untold == "" {
-		t.Fatalf("Notes = %+v, want the one untold with why", notes)
+	if len(notes) != 1 || notes[0].Told || notes[0].Untold != "" {
+		t.Fatalf("Notes after a refused end = %+v, want the note still waiting", notes)
 	}
-	if !strings.Contains(notes[0].Untold, "first prompt") {
-		t.Fatalf("untold reason = %q, want it to name the first prompt", notes[0].Untold)
+	must(t, d.Reconcile(ctx))
+	ended, err := s.GetSession(ctx, sess)
+	must(t, err)
+	if ended.State != "failed" {
+		t.Fatalf("session = %+v, want it ended failed", ended)
 	}
-	evs := eventKinds(t, s, b.ID, "note_untold")
-	if len(evs) != 1 || evs[0].Data["session"] != sess || evs[0].Data["reason"] == nil {
-		t.Fatalf("note_untold events = %+v", evs)
+	notes, err = s.Notes(ctx, b.ID)
+	must(t, err)
+	if len(notes) == 0 || notes[0].Text != "narrower" || notes[0].Told || notes[0].Untold != "" {
+		t.Fatalf("Notes = %+v, want the yardmaster's note not told", notes)
+	}
+	if evs := eventKinds(t, s, b.ID, "note_untold"); len(evs) != 0 {
+		t.Fatalf("note_untold events = %+v, want none", evs)
 	}
 	if got := len(f.told()) + len(f.submitted()); got != 0 {
 		t.Fatalf("tellings = %d, want nothing sent", got)
-	}
-	// Marked once: no second event on a later pass.
-	must(t, d.Reconcile(ctx))
-	if len(eventKinds(t, s, b.ID, "note_untold")) != 1 {
-		t.Fatal("a second note_untold")
 	}
 }
 
