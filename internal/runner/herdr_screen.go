@@ -137,18 +137,19 @@ func rowsOf(kind string, plain, typed []string) (rows, typedRows []string) {
 
 // boxWidth is the width of the box a pane's input is drawn in, corner to
 // corner: that of the last bottom of a box that ends a line, 0 for a pane
-// with none. The input is the last box a harness draws.
+// with none. The input is the last box a harness draws. A bottom may have
+// words in it (see isBottom), from its last "╰─" on.
 func boxWidth(plain []string) int {
 	for i := len(plain) - 1; i >= 0; i-- {
 		rs := []rune(strings.TrimSpace(plain[i]))
 		j := len(rs) - 1
-		if j < 1 || rs[j] != '╯' {
+		if j < 1 || rs[j] != '╯' || rs[j-1] != '─' {
 			continue
 		}
-		for j--; j > 0 && rs[j] == '─'; j-- {
+		for j--; j > 0 && !(rs[j] == '╰' && rs[j+1] == '─'); j-- {
 		}
 		if rs[j] == '╰' {
-			return len(rs) - j
+			return ansi.StringWidth(string(rs[j:]))
 		}
 	}
 	return 0
@@ -297,8 +298,8 @@ func (h *Herdr) InputText(ctx context.Context, handle map[string]any) (text stri
 // line that begins with one (see promptPlace), and the lines after it down
 // to the first empty line or rule, which is where Codex's and Claude Code's
 // input ends and their footer begins, as the bottom of its box is for
-// Kimi's, whose rows are read one to a line however the read joined them
-// (see rowsOf). ok is false for a pane with no such line.
+// Kimi's and Grok's, whose rows are read one to a line however the read
+// joined them (see rowsOf). ok is false for a pane with no such line.
 //
 // The mark is the kind's own. Where the pane shows none of it, or the kind
 // is one yardr knows no marks for, any of inputMarks is taken for one: what
@@ -334,7 +335,7 @@ func inputText(styled, kind string) (text string, ok bool) {
 	}
 	var lines []string
 	for i := input; i < len(plain); i++ {
-		if i > input && (strings.TrimSpace(plain[i]) == "" || isRule(plain[i])) {
+		if i > input && (strings.TrimSpace(plain[i]) == "" || isRule(plain[i]) || m.edge != "" && isBottom(plain[i])) {
 			break
 		}
 		l := m.unboxed(typed[i])
@@ -502,7 +503,7 @@ func inputDialog(styled, kind string) (dialog, line string) {
 		from--
 	}
 	for i := from; i < len(plain); i++ {
-		if i > input && (strings.TrimSpace(plain[i]) == "" || isRule(plain[i])) {
+		if i > input && (strings.TrimSpace(plain[i]) == "" || isRule(plain[i]) || isBottom(plain[i])) {
 			break
 		}
 		l := m.unboxed(plain[i])
@@ -542,6 +543,14 @@ func loginLine(text, kind string) string {
 		}
 	}
 	return ""
+}
+
+// isBottom reports whether line is the bottom of a box with words in it,
+// as Grok's input has its model and mode ("╰── Grok 4.7 (low) ─╯"): no
+// rule, and still where the input ends.
+func isBottom(line string) bool {
+	line = strings.TrimSpace(line)
+	return strings.HasPrefix(line, "╰") && strings.HasSuffix(line, "╯")
 }
 
 // isRule reports whether line is drawn of box-drawing characters alone, as

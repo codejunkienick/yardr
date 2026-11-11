@@ -3,6 +3,20 @@ version: 1
 label: Grok
 provider: xAI
 
+# Grok's input is a box whose bottom carries its model and mode (read live,
+# Grok 1.0.77, 11 Nov 2026), and an empty input shows nothing after the mark:
+#
+#   ╭────────────────────────────────────────╮
+#   │ ❯ half a thought                       │
+#   ╰────── Grok 4.7 (low) · always-approve ─╯
+#
+# A message it took is echoed above with the same mark and no edge, so the
+# input mark is asked for after the edge only.
+marks:
+  input: "❯"
+  message: "❯"
+  edge: "│"
+
 flags:
   model: --model
   version: [--version]

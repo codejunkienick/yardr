@@ -2204,6 +2204,7 @@ check the footer's model instead.
   |---|---|---|
   | `claude` | `❯` | `❯` |
   | `codex` | `›` | `›` |
+  | `grok` | `❯` after `│`, the edge of the box its input is drawn in; the edges are no part of the text | `❯` |
   | `kimi` | `>` after `│`, the edge of the box its input is drawn in; the edges are no part of the text | `✨` |
   | `kiro` | `›` | no mark: the prompt anywhere above the input |
   | `muse` | `❯` | `❯` |
@@ -2213,7 +2214,7 @@ check the footer's model instead.
   The input is what the pane holds from its last line that begins with the
   input mark. A harness that is still starting has drawn no input yet, and
   the pane's terminal echoes keys that come then. So in the pane of a
-  `claude`, `codex`, `kimi`, `muse` or `kiro` session only that kind's marks
+  `claude`, `codex`, `kimi`, `grok`, `muse` or `kiro` session only that kind's marks
   tell: without its input mark the text proves nothing, and the look ends
   as `no input`, the prompt pending; and above the input the prompt shows
   only where it begins a line with the message mark, as a message the agent
