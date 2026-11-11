@@ -13,6 +13,7 @@ import (
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/notify"
 	"yardr.dev/yardr/internal/rpc"
+	"yardr.dev/yardr/internal/runner"
 	"yardr.dev/yardr/internal/server"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/version"
@@ -303,6 +304,38 @@ func (a *app) upgradeRun(w, warn io.Writer, ctx context.Context, cfg *config.Con
 		scripts = upgradeScriptsInstall(ctx, depot.Path, yards, warn)
 	}
 	fmt.Fprintf(w, "%-9s  %s\n", "scripts", scripts.summary())
+	// An installed pack's copy of a refreshed script is not refreshed
+	// with it: an import owns those, and hand edits exist. The line names
+	// the stale copies until the pack is re-applied, with the command
+	// that does, so the yard that runs the installed copy is not left
+	// failing for a reason outside the code; merge-local reads it into
+	// the landing note. Only the run's refreshed scripts are compared. A
+	// release carries no checkout, so nothing is stale.
+	if depot != nil && len(scripts.names()) > 0 {
+		packsOf := func(home string) ([]store.PackImport, string, bool) {
+			var recs []store.PackImport
+			var yardSettings map[string]string
+			var err error
+			if home == cfg.Home {
+				recs, err = st.Packs(ctx)
+				yardSettings = settings
+			} else {
+				c := rpc.NewClient(config.At(home).Socket())
+				recs, err = c.Packs(ctx)
+				yardSettings, _ = c.Settings(ctx)
+				_ = c.Close(ctx)
+			}
+			yardName := runner.YardName(home, yardSettings)
+			if err != nil {
+				fmt.Fprintf(warn, "warn: the pack imports for %s could not be read, so stale copies there cannot be matched to re-apply commands\n", yardName)
+				return nil, yardName, false
+			}
+			return recs, yardName, true
+		}
+		if stale := upgradeStalePackLine(depot.Path, yards, scripts.names(), packsOf); stale != "" {
+			fmt.Fprintf(w, "%-9s  %s\n", "packscripts", stale)
+		}
+	}
 
 	// A stopped server is started first, per yard, so there is always a
 	// server to verify; nothing else is started.

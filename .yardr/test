@@ -2056,7 +2056,7 @@ sleepbudget() {
 # rows to non-test Go files.
 filesizes='
 internal/chat/chat.go 1070 the chat TUI model, state and rendering
-internal/cli/beads.go 1099 the bead show, list and history commands and their printing
+internal/cli/beads.go 1098 the bead show, list and history commands and their printing
 internal/cli/crew.go 2212 the crew, inbox, mail and memory commands
 internal/cli/doctor.go 1243 the doctor examinations and its report
 internal/cli/init.go 1600 yard init, onboarding and settings

@@ -1720,10 +1720,13 @@ yardr knows the verbs alone:
   [line.md](line.md#posting-a-pull-requests-review)).
 - **`ciwait` is the yard's own CI, worked by the script group `pr-ci`.** A
   reviewed pull request waits there while `pr-ci` runs the depot's test
-  command on its head, the one every landing runs; green is `done` to
-  `approved` with the commit recorded as the bead's `ci_head`, red or a
-  person's new commits meanwhile `changes` to `contributor`, a bot's new
-  commits meanwhile `pushed` back to `review`. The reviewer runs nothing,
+  command on its head merged into the base, the one every landing runs;
+  green on the merge is `done` to `approved` with the head recorded as the
+  bead's `ci_head`, red or a person's new commits meanwhile `changes` to
+  `contributor`, a head that does not merge into the base `changes` too
+  with the conflicts and the cure, merging the base into the pull
+  request's branch, a bot's new commits meanwhile `pushed` back to
+  `review`. The reviewer runs nothing,
   which is why the wait is a stage of its own and not the end of `review`,
   and a fork's code runs on the yard's machine only after a reviewer has
   read it. The head tested is the one the reviewer read: it records the

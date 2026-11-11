@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"yardr.dev/yardr/internal/store"
 )
 
 // upgradeScriptSources are the scripts a yard installs by hand from the
@@ -154,6 +156,143 @@ func upgradeScriptSyntax(ctx context.Context, path string) error {
 		return fmt.Errorf("the new file fails sh -n: %s", why)
 	}
 	return fmt.Errorf("the new file could not be checked with sh -n: %w", err)
+}
+
+// upgradeStalePackScript is an installed pack copy of a script the run
+// refreshed whose bytes differ from the fresh ones: the import that owns
+// it has not been re-applied since. Depot is a depot the pack is imported
+// into, for the re-apply command, "" for a yard-wide import; recorded is
+// whether any import of the pack is recorded at all.
+type upgradeStalePackScript struct {
+	pack, name string
+	depot      string
+	recorded   bool
+	readable   bool
+}
+
+// upgradeStalePackLine is the upgrade's line about the installed pack
+// copies of the scripts it refreshed: each stale copy with the exact
+// command that re-applies its pack, joined, or "" when none is stale.
+// Only the run's refreshed scripts are compared, each against the
+// <home>/packs/<pack>/scripts/<name> copies; the tree is not scanned.
+// One installed copy serves every scope of a yard, so the re-apply names
+// the pack's first recorded depot, whatever scope runs the copy. A copy
+// with no recorded import is named with no command. Where several yards
+// are covered, the line names each yard without exposing its home path.
+func upgradeStalePackLine(checkout string, homes, names []string, packsOf func(home string) ([]store.PackImport, string, bool)) string {
+	if len(homes) == 0 || len(names) == 0 {
+		return ""
+	}
+	imports := make(map[string][]store.PackImport, len(homes))
+	yardNames := make(map[string]string, len(homes))
+	readable := make(map[string]bool, len(homes))
+	usedNames := map[string]int{}
+	for _, home := range homes {
+		recs, yardName, ok := packsOf(home)
+		if yardName == "" {
+			yardName = "unnamed yard"
+		}
+		usedNames[yardName]++
+		if usedNames[yardName] > 1 {
+			yardName = fmt.Sprintf("%s (%d)", yardName, usedNames[yardName])
+		}
+		yardNames[home] = yardName
+		if ok {
+			imports[home] = recs
+			readable[home] = true
+		}
+	}
+	var out []string
+	for _, name := range names {
+		fresh, ok := upgradeScriptFresh(checkout, name)
+		if !ok {
+			continue
+		}
+		for _, home := range homes {
+			copies, listed := upgradeStalePackCopies(home, name, fresh, imports[home])
+			if !listed {
+				out = append(out, "pack copies of "+name+" in "+yardNames[home]+" could not be listed, so staleness is unknown")
+				continue
+			}
+			for _, stale := range copies {
+				where := "packs/" + stale.pack + "/scripts/" + stale.name
+				if len(homes) > 1 {
+					where = "yard " + yardNames[home] + ": " + where
+				}
+				if !stale.readable {
+					out = append(out, where+" could not be read, so its staleness is unknown")
+					continue
+				}
+				if !readable[home] {
+					out = append(out, where+" is stale; pack imports for "+yardNames[home]+" could not be read, so the re-apply command is unknown")
+					continue
+				}
+				if !stale.recorded {
+					out = append(out, where+" is stale; pack "+stale.pack+" has no recorded import, so re-apply it by hand")
+					continue
+				}
+				cmd := "yardr pack apply " + stale.pack
+				if stale.depot != "" {
+					cmd += " --depot " + stale.depot
+				}
+				out = append(out, where+" is stale until the pack is re-applied: "+cmd)
+			}
+		}
+	}
+	return strings.Join(out, "; ")
+}
+
+// upgradeScriptFresh is the checkout's bytes of the source named name, or
+// false when the checkout has no source of that name.
+func upgradeScriptFresh(checkout, name string) ([]byte, bool) {
+	for _, rel := range upgradeScriptSources {
+		if filepath.Base(rel) != name {
+			continue
+		}
+		fresh, err := os.ReadFile(filepath.Join(checkout, filepath.FromSlash(rel)))
+		if err != nil {
+			return nil, false
+		}
+		return fresh, true
+	}
+	return nil, false
+}
+
+// upgradeStalePackCopies are the installed pack copies of the refreshed
+// script name under home whose bytes differ from fresh, each with its
+// re-apply depot from the home's import records, in pack order. A copy
+// that matches, and a pack without one, are no entry.
+func upgradeStalePackCopies(home, name string, fresh []byte, recs []store.PackImport) ([]upgradeStalePackScript, bool) {
+	entries, err := os.ReadDir(filepath.Join(home, "packs"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, true
+	}
+	if err != nil {
+		return nil, false
+	}
+	var out []upgradeStalePackScript
+	for _, e := range entries {
+		have, err := os.ReadFile(filepath.Join(home, "packs", e.Name(), "scripts", name))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		stale := upgradeStalePackScript{pack: e.Name(), name: name, readable: err == nil}
+		if err != nil {
+			out = append(out, stale)
+			continue
+		}
+		if bytes.Equal(have, fresh) {
+			continue
+		}
+		for _, r := range recs {
+			if r.Pack == e.Name() {
+				stale.depot, stale.recorded = r.Depot, true
+				break
+			}
+		}
+		out = append(out, stale)
+	}
+	return out, true
 }
 
 // names are the scripts the run replaced, once each, in the order of the

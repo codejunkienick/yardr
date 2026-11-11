@@ -179,7 +179,10 @@ func TestPushFixCopyInThePackIsIdentical(t *testing.T) {
 // log line, and the install's own lines the log. The install also refreshes
 // the scripts the yard already has from the tree that landed, and the note
 // names them, so a fix landed in merge-local is live for the next landing
-// with no hand step; a script the yard lacks is not added.
+// with no hand step; a script the yard lacks is not added. An installed
+// pack copy of a refreshed script is not refreshed with it, so the note
+// names the stale copy with the exact re-apply command until the pack is
+// re-applied.
 func TestMergeLocalInstallsOnTheNamedDepot(t *testing.T) {
 	y := newYardServer(t)
 	y.tests("true")
@@ -200,7 +203,20 @@ func TestMergeLocalInstallsOnTheNamedDepot(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(scripts, "merge-local"), []byte(old), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// The installed contributors pack's copy of merge-local, stale from
+	// the last import, with the record the re-apply command is read from.
+	installed := filepath.Join(y.home, "packs", "contributors", "scripts")
+	if err := os.MkdirAll(installed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installed, "merge-local"), []byte(old), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	y.upgradeFrom("r")
+	st := rpc.NewClient((&config.Config{Home: y.home}).Socket())
+	if _, err := st.RecordPack(context.Background(), store.PackImport{Pack: "contributors", Depot: "r", Source: "embedded test"}, true, "test"); err != nil {
+		t.Fatal(err)
+	}
 	bin := t.TempDir()
 	y.bin = yardrCopy(t, bin)
 	y.opts = "PATH=" + shellQuote(filepath.Dir(fakeGo(t))) + ":$PATH"
@@ -213,6 +229,9 @@ func TestMergeLocalInstallsOnTheNamedDepot(t *testing.T) {
 	if !regexp.MustCompile(`; install ok in \d+ s \(scripts refreshed: merge-local\)`).MatchString(y.notes()) {
 		t.Fatalf("no install summary naming the refreshed script in the landing note:\n%s", y.notes())
 	}
+	if !regexp.MustCompile(`\(stale pack copies: packs/contributors/scripts/merge-local is stale until the pack is re-applied: yardr pack apply contributors --depot r\)`).MatchString(y.notes()) {
+		t.Fatalf("no stale pack copy with its re-apply command in the landing note:\n%s", y.notes())
+	}
 	if !regexp.MustCompile(`(?m)^== r-1 took: the tests \d+ s, upgrade \d+ s$`).MatchString(y.log) {
 		t.Fatalf("the log line has no upgrade seconds:\n%s", y.log)
 	}
@@ -222,7 +241,7 @@ func TestMergeLocalInstallsOnTheNamedDepot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"backup", "keep", "install    " + installed + " at ", "scripts    merge-local refreshed", "health     ok in "} {
+	for _, want := range []string{"backup", "keep", "install    " + installed + " at ", "scripts    merge-local refreshed", "packscripts  packs/contributors/scripts/merge-local is stale", "health     ok in "} {
 		if !strings.Contains(y.log, want) {
 			t.Fatalf("the log lacks the install's %q line:\n%s", want, y.log)
 		}

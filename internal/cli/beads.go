@@ -1074,8 +1074,7 @@ func (a *app) primeCmd() *cobra.Command {
 					if as == nil {
 						as = map[string]string{}
 					}
-					blocks := store.NoteBlocksMarked(notes, time.Now(), as, a.mailHome())
-					for _, block := range blocks {
+					for _, block := range primeNoteBlocks(b.ID, notes, as, a.mailHome()) {
 						fmt.Fprintf(w, "  %s\n\n", strings.ReplaceAll(block, "\n", "\n  "))
 					}
 					// A broken template put no fresh ask: the error stands

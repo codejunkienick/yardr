@@ -549,6 +549,7 @@ func (sc *upgradeScene) upgrade(t *testing.T, flags ...string) (string, error) {
 // signing puts the previous binary back before the gates come down.
 func TestUpgradeRunRefreshesScripts(t *testing.T) {
 	t.Run("refreshes scripts", func(t *testing.T) { testUpgradeRunRefreshesScripts(t) })
+	t.Run("prints stale pack copies", func(t *testing.T) { testUpgradeRunPrintsStalePackCopies(t) })
 	t.Run("signs installed binary on darwin", func(t *testing.T) { testUpgradeRunSignsInstalledBinaryOnDarwin(t) })
 	t.Run("leaves binary unsigned", func(t *testing.T) { testUpgradeRunLeavesBinaryUnsigned(t) })
 	t.Run("sign failure restores previous binary", func(t *testing.T) { testUpgradeRunSignFailureRestoresPrevious(t) })
@@ -621,5 +622,171 @@ func TestUpgradeRunRollbackPutsScriptsBack(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("the output lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+// packsCopy installs body as the home's installed pack copy of the pack's
+// script name, as a pack import leaves it.
+func packsCopy(t *testing.T, home, pack, name, body string) {
+	t.Helper()
+	dir := filepath.Join(home, "packs", pack, "scripts")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The stale-pack line names each installed pack copy of a refreshed script
+// whose bytes differ, with the exact command that re-applies its pack: a
+// matching copy, a script the run did not refresh, and a yard with no
+// packs directory are no entry. A pack imported into the yard itself
+// re-applies with no --depot; the first recorded depot is the command's
+// where several imported the pack; a copy with no recorded import is named
+// with no command.
+func TestUpgradeStalePackLine(t *testing.T) {
+	t.Parallel()
+	checkout := scriptsCheckout(t, map[string]string{"pr-ci": scriptNew, "merge-local": scriptNew})
+	home := scriptsHome(t, map[string]string{"pr-ci": scriptOld})
+	packsCopy(t, home, "contributors", "pr-ci", scriptOld)
+	packsCopy(t, home, "starter", "pr-ci", scriptNew)
+	packsCopy(t, home, "contributors", "merge-local", scriptOld)
+	packsOf := func(home string) ([]store.PackImport, string, bool) {
+		return []store.PackImport{
+			{Pack: "contributors", Depot: "zebra"},
+			{Pack: "contributors", Depot: "alpha"},
+			{Pack: "linear", Depot: ""},
+		}, "yardr", true
+	}
+	for _, tc := range []struct {
+		name  string
+		names []string
+		want  string
+	}{
+		{"stale names the copy and the first depot's command, and a matching copy is no entry", []string{"pr-ci"},
+			"packs/contributors/scripts/pr-ci is stale until the pack is re-applied: yardr pack apply contributors --depot zebra"},
+		{"unrefreshed script is no entry", []string{"pr-train"}, ""},
+		{"unknown name is no entry", []string{"nosuch"}, ""},
+		{"no names is no entry", nil, ""},
+	} {
+		if got := upgradeStalePackLine(checkout, []string{home}, tc.names, packsOf); got != tc.want {
+			t.Errorf("%s: line = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+
+	// Two stale copies join on one line, in the order of the names.
+	if got, want := upgradeStalePackLine(checkout, []string{home}, []string{"pr-ci", "merge-local"}, packsOf),
+		"packs/contributors/scripts/pr-ci is stale until the pack is re-applied: yardr pack apply contributors --depot zebra; packs/contributors/scripts/merge-local is stale until the pack is re-applied: yardr pack apply contributors --depot zebra"; got != want {
+		t.Errorf("two stale copies: line = %q, want %q", got, want)
+	}
+
+	// A pack imported into the yard itself re-applies with no --depot.
+	linear := scriptsHome(t, map[string]string{"pr-ci": scriptOld})
+	packsCopy(t, linear, "linear", "pr-ci", scriptOld)
+	if got, want := upgradeStalePackLine(checkout, []string{linear}, []string{"pr-ci"}, packsOf),
+		"packs/linear/scripts/pr-ci is stale until the pack is re-applied: yardr pack apply linear"; got != want {
+		t.Errorf("yard-wide pack: line = %q, want %q", got, want)
+	}
+
+	// A stale copy with no recorded import is named with no command.
+	hand := scriptsHome(t, map[string]string{"pr-ci": scriptOld})
+	packsCopy(t, hand, "handmade", "pr-ci", scriptOld)
+	if got, want := upgradeStalePackLine(checkout, []string{hand}, []string{"pr-ci"}, packsOf),
+		"packs/handmade/scripts/pr-ci is stale; pack handmade has no recorded import, so re-apply it by hand"; got != want {
+		t.Errorf("unrecorded pack: line = %q, want %q", got, want)
+	}
+
+	// A yard with no packs directory has no stale copy.
+	bare := scriptsHome(t, map[string]string{"pr-ci": scriptOld})
+	if got := upgradeStalePackLine(checkout, []string{bare}, []string{"pr-ci"}, packsOf); got != "" {
+		t.Errorf("bare yard: line = %q, want empty", got)
+	}
+
+	// A failed records read names the stale copy but does not claim that no
+	// import exists or invent a re-apply command.
+	if got, want := upgradeStalePackLine(checkout, []string{home}, []string{"pr-ci"}, func(string) ([]store.PackImport, string, bool) {
+		return nil, "yardr", false
+	}), "packs/contributors/scripts/pr-ci is stale; pack imports for yardr could not be read, so the re-apply command is unknown"; got != want {
+		t.Errorf("unreadable pack records: line = %q, want %q", got, want)
+	}
+
+	// An installed copy that cannot be read is named as unknown, not treated
+	// as absent or stale.
+	unreadable := scriptsHome(t, map[string]string{"pr-ci": scriptOld})
+	badCopy := filepath.Join(unreadable, "packs", "broken", "scripts", "pr-ci")
+	if err := os.MkdirAll(badCopy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := upgradeStalePackLine(checkout, []string{unreadable}, []string{"pr-ci"}, func(string) ([]store.PackImport, string, bool) {
+		return nil, "yardr", true
+	}), "packs/broken/scripts/pr-ci could not be read, so its staleness is unknown"; got != want {
+		t.Errorf("unreadable pack copy: line = %q, want %q", got, want)
+	}
+
+	// A packs directory that cannot be listed also reports an unknown state.
+	unlistable := scriptsHome(t, map[string]string{"pr-ci": scriptOld})
+	if err := os.WriteFile(filepath.Join(unlistable, "packs"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := upgradeStalePackLine(checkout, []string{unlistable}, []string{"pr-ci"}, func(string) ([]store.PackImport, string, bool) {
+		return nil, "yardr", true
+	}), "pack copies of pr-ci in yardr could not be listed, so staleness is unknown"; got != want {
+		t.Errorf("unlistable pack copies: line = %q, want %q", got, want)
+	}
+
+	// Where several yards are covered the line uses each yard's name rather
+	// than exposing its home path.
+	first := scriptsHome(t, map[string]string{"pr-ci": scriptOld})
+	second := scriptsHome(t, map[string]string{"pr-ci": scriptOld})
+	packsCopy(t, second, "contributors", "pr-ci", scriptOld)
+	packsOfSeveral := func(home string) ([]store.PackImport, string, bool) {
+		if home == second {
+			return []store.PackImport{{Pack: "contributors", Depot: "r"}}, "second-yard", true
+		}
+		return nil, "first-yard", true
+	}
+	want := "yard second-yard: packs/contributors/scripts/pr-ci is stale until the pack is re-applied: yardr pack apply contributors --depot r"
+	if got := upgradeStalePackLine(checkout, []string{first, second}, []string{"pr-ci"}, packsOfSeveral); got != want {
+		t.Errorf("several yards: line = %q, want %q", got, want)
+	}
+	duplicateNames := func(home string) ([]store.PackImport, string, bool) {
+		if home == second {
+			return []store.PackImport{{Pack: "contributors", Depot: "r"}}, "yardr", true
+		}
+		return nil, "yardr", true
+	}
+	want = "yard yardr (2): packs/contributors/scripts/pr-ci is stale until the pack is re-applied: yardr pack apply contributors --depot r"
+	if got := upgradeStalePackLine(checkout, []string{first, second}, []string{"pr-ci"}, duplicateNames); got != want {
+		t.Errorf("duplicate yard names: line = %q, want %q", got, want)
+	}
+}
+
+// The upgrade prints the stale-pack line after the scripts line when a
+// refreshed script's installed pack copy differs, and no such line when
+// none does.
+func testUpgradeRunPrintsStalePackCopies(t *testing.T) {
+	ctx := context.Background()
+	plain := newUpgradeScene(t)
+	out, err := plain.upgrade(t)
+	if err != nil {
+		t.Fatalf("upgrade: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "packscripts") {
+		t.Fatalf("the output names stale copies with none installed:\n%s", out)
+	}
+
+	sc := newUpgradeScene(t)
+	packsCopy(t, sc.home, "contributors", "merge-local", scriptOld)
+	if _, err := sc.st.RecordPack(ctx, store.PackImport{Pack: "contributors", Depot: "yardr", Source: "embedded test"}, true, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	out, err = sc.upgrade(t)
+	if err != nil {
+		t.Fatalf("upgrade: %v\n%s", err, out)
+	}
+	want := "packscripts  packs/contributors/scripts/merge-local is stale until the pack is re-applied: yardr pack apply contributors --depot yardr\n"
+	if !strings.Contains(out, want) {
+		t.Fatalf("the output lacks %q:\n%s", want, out)
 	}
 }

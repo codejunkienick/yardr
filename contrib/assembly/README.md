@@ -285,29 +285,37 @@ docs/line.md, "Posting a pull request's review", has the rules and the setup.
 read a pull request of the contributors pack, which carries a copy of it that
 a test holds equal, and is the yard's CI of it, whether or not the repository
 has GitHub Actions: it runs the depot's test command on the pull request's
-head, on the yard's machine. It is the only CI of a repository with Actions
-off, and where Actions runs it is still the check merge-pr relies on
-(`ci_head`). It asks GitHub as the yard's App, as merge-pr does (the same
-`env_file` and mint, and the same text for the tracks link and the token, held
-equal by a test), reads the head and compares it, for a bead that waited
-in `triage`, with the bead's `accepted_head`, the commit a maintainer accepted
-(the yard records it from the label; a full sha, compared without regard to
-case), and with the bead's `reviewed_head`, the commit its reviewer recorded as
-the one it read (likewise): another head, or none recorded, holds the bead,
-naming both commits and the command that records the acceptance or sends the
-bead back to review, and nothing is fetched. Then it fetches `refs/pull/<n>/head` from the
-depot's `origin` and checks that commit out, detached, in a worktree of its
-own (`<worktrees>/<depot>/<bead>-ci`), removed when the script ends. It runs
-`YARDR_TEST` there as merge-local does, with the base's copy of a test file
-the base has, with `YARDR_LANDING=1` (the run is the pull request's landing
-run: no landing by the assembly follows it), red on exit 1, held on exit 2, run
-once more when a signal ended it, and killed and red past `YARDR_TEST_TIMEOUT`.
-Green on the head GitHub still names records it as the bead's `ci_head` and
-reports `done`, to `approved`; red, or a head that moved meanwhile, reports
-`changes`, to `contributor`, with the end of the output. Whatever is no
-verdict (no token, a refused gh or fetch, a depot with no test command, a
-bead not in `ciwait`, a pull request no longer open) holds the bead with a
-note. Nothing is written to GitHub. Needs `gh`, `jq` and `git` on PATH.
+head merged into the base, on the yard's machine. It is the only CI of a
+repository with Actions off, and where Actions runs it is still the check
+merge-pr relies on (`ci_head`). It asks GitHub as the yard's App, as merge-pr
+does (the same `env_file` and mint, and the same text for the tracks link and
+the token, held equal by a test), reads the head and compares it, for a bead
+that waited in `triage`, with the bead's `accepted_head`, the commit a
+maintainer accepted (the yard records it from the label; a full sha, compared
+without regard to case), and with the bead's `reviewed_head`, the commit its
+reviewer recorded as the one it read (likewise): another head, or none
+recorded, holds the bead, naming both commits and the command that records the
+acceptance or sends the bead back to review, and nothing is fetched. Then it
+fetches `refs/pull/<n>/head` from the depot's `origin`, and so is the base:
+the branch of `origin` that the depot's base names, as `origin` has it now.
+`git merge-tree` merges the head into the base in the object store alone; a
+clean merge is made a commit of two parents, the base and the head, that no
+ref names, and that commit is checked out detached in a worktree of its own
+(`<worktrees>/<depot>/<bead>-ci`), removed when the script ends. It runs
+`YARDR_TEST` there as merge-local does, with the base commit's copy of a test
+file the base has, with `YARDR_LANDING=1` (the run is the pull request's
+landing run: no landing by the assembly follows it), red on exit 1, held on
+exit 2, run once more when a signal ended it, and killed and red past
+`YARDR_TEST_TIMEOUT`. Green on the merge of the head GitHub still names
+records that head as the bead's `ci_head` and reports `done`, to `approved`;
+red, or a head that moved meanwhile, reports `changes`, to `contributor`,
+with the end of the output. A head that does not merge into the base has no
+merge to test: it is `changes` too, with the conflicts and the cure, merging
+the base into the pull request's branch. Whatever is no verdict (no token, a
+refused gh or fetch, a `git merge-tree` error that is not a reported conflict,
+a depot with no test command, a bead not in `ciwait`, a pull request no longer
+open) holds the bead with a note. Nothing is written to GitHub. Needs `gh`,
+`jq` and `git` on PATH.
 docs/line.md, "The yard as the CI of a pull request", has the setup.
 
 **Environment.** The four above read what the exec runner sets: `YARDR_BEAD`,

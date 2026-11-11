@@ -148,13 +148,19 @@ route, and the group needs its `env_file` and the mint before it runs.
 
 **The stage `ciwait` is the yard's own CI, worked by `pr-ci`.** A reviewed
 pull request waits there while the script runs the depot's test command on
-its head: the one every landing runs, from the base's copy where the command
-is a file the base has, in a checkout of the head of its own. Green is
-`done`, to `approved`, with the commit recorded as `ci_head`; red, or a
-person's new commits meanwhile, is `changes`, to `contributor`; a bot's new
-commits meanwhile are `pushed`, back to `review` (below); new commits
-meanwhile on a pull request a maintainer accepted are `unaccepted`, back to
-`triage`. It is a stage of
+its head merged into the base: the one every landing runs, from the base
+commit's copy where the command is a file the base has, in its own checkout
+of that merge. The base is fetched fresh and the head merged into
+it, a commit of two parents that no ref names; the head stays what is
+reviewed, accepted, recorded (`ci_head`) and merged, and only the tree
+that is tested is the merge. Green on the merge is `done`, to `approved`,
+with the head recorded as `ci_head`; red, or a person's new commits
+meanwhile, is `changes`, to `contributor`; a head that does not merge into
+the base is `changes` too, with the conflicts and the cure, merging the
+base into the pull request's branch; a bot's new commits meanwhile are
+`pushed`, back to `review` (below); new commits meanwhile on a pull
+request a maintainer accepted are `unaccepted`, back to `triage`. It is a
+stage of
 its own, not the end of `review`, because the reviewer runs nothing (its
 sandbox reaches the yard's socket and nothing else), and because a fork's
 code runs on the yard's machine only after a reviewer has read it, which

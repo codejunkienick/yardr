@@ -1941,8 +1941,8 @@ Actions. A `pr` bead of the contributors pack
 waits in `ciwait`, and [`contrib/assembly/pr-ci`](../contrib/assembly/pr-ci),
 the `cmd` of an `exec` group of its own (`pr-ci`, limit 1, so one run at a
 time) that the pack's flow gives the stage to, runs the depot's own test
-command on the exact head the reviewer read, on the yard's machine, and says
-how it went. It is the only CI of a repository with Actions off, and where
+command on the exact head the reviewer read, merged into the base, on the
+yard's machine, and says how it went. It is the only CI of a repository with Actions off, and where
 Actions runs it is still the check merge-pr relies on (`ci_head`, below):
 GitHub's own check runs are not asked. It reads the pull request from the
 bead's tracks link and asks GitHub as the yard's App, as merge-pr does
@@ -1982,30 +1982,42 @@ bead's tracks link and asks GitHub as the yard's App, as merge-pr does
   whatever actor the command names), and a person on any, a maintainer who has
   read the head themselves included;
 - fetches `refs/pull/<n>/head` from the depot's `origin` with the operator's
-  own git credentials, and checks that exact commit out, detached, in a
+  own git credentials, and so is the base: the branch of `origin` that the
+  depot's base names, as `origin` has it now and not as the depot last saw
+  it. `git merge-tree` merges the head into the base in the object store
+  alone; a clean merge is made a commit of two parents, the base and the
+  head, that no ref names, and that commit is checked out detached in a
   worktree of its own beside the bead's (`<worktrees>/<depot>/<bead>-ci`),
-  which it removes when it ends, however it ends;
+  which it removes when it ends, however it ends. The merge is what is
+  tested because it is the nearest a test gets to what landing makes: the
+  head stays what is reviewed, accepted, recorded (`ci_head`) and merged,
+  and only the tree that is tested is the merge;
 - runs the depot's test command there, the one every landing runs
   (`yardr depot show`). Where the command is a file the base has
-  (`.yardr/test`), the **base's** copy of it runs, never the pull request's,
-  so that a pull request cannot change the script that judges it; any other
-  command runs as the pull request's own files make it. It runs with
-  `YARDR_LANDING=1` and without the App's id and key file, because this is
-  the pull request's landing run: merge-pr merges a head this run passed on
-  and no landing by the assembly follows, so no other run of the command
-  stands between the head and the base. Depot yardr's `.yardr/test` then runs
-  what a bead's landing does, the selection plus the six black-box suites
-  under `-race`, and the whole suite for a change it cannot select (a
-  dependency bump's `go.mod` or `go.sum`). The exit codes mean what they do
-  in merge-local: 1 and the like are red, 2 is "could not run", above 128 is
-  a signal and is run once more, and a run past `YARDR_TEST_TIMEOUT` (1800
-  seconds besides what it waited for the race lock) is killed and is red;
-- on green, asks GitHub for the head once more. The same commit is recorded
-  on the bead as `ci_head` and reported `done`, to `approved`, with a note
-  naming the commit and which test ran; another commit means the pull
-  request was pushed to meanwhile and is reported `changes`;
+  (`.yardr/test`), the **base commit's** copy of it runs, never the pull
+  request's, so that a pull request cannot change the script that judges
+  it; any other command runs as the pull request's own files make it. It
+  runs with `YARDR_LANDING=1` and without the App's id and key file,
+  because this is the pull request's landing run: merge-pr merges a head
+  this run passed on and no landing by the assembly follows, so no other
+  run of the command stands between the head and the base. Depot yardr's
+  `.yardr/test` then runs what a bead's landing does, the selection plus
+  the six black-box suites under `-race`, and the whole suite for a change
+  it cannot select (a dependency bump's `go.mod` or `go.sum`). The exit
+  codes mean what they do in merge-local: 1 and the like are red, 2 is
+  "could not run", above 128 is a signal and is run once more, and a run
+  past `YARDR_TEST_TIMEOUT` (1800 seconds besides what it waited for the
+  race lock) is killed and is red;
+- on green, asks GitHub for the head once more. The same head commit is
+  recorded on the bead as `ci_head` and reported `done`, to `approved`,
+  with a note naming the commit and which test ran; another commit means
+  the pull request was pushed to meanwhile and is reported `changes`. The
+  base is not asked again before the pull request is merged;
 - on red reports `changes`, to `contributor`, with the end of the output
-  (200 lines) in the note.
+  (200 lines) in the note. A head that does not merge into the base has no
+  merge to test: it is `changes` too, with the conflicts and the cure,
+  merging the base into the pull request's branch, which the contributor
+  does.
 
 A push to the pull request while the bead waits or the tests run moves the
 bead before any report, by the pack's lines for the source: a person's push is
@@ -2328,8 +2340,8 @@ Depot yardr has a second line, on which its own work goes through a pull
 request on GitHub, in public: the bead's branch is pushed and opened as a pull
 request by the yard's GitHub App, the reviewers read it and store their review
 on the bead, a script of the yard posts each review on the pull request as the
-same App, the yard runs the depot's tests on the head they read, and the App
-merges it. It is the flow
+same App, the yard runs the depot's tests on the head they read merged into
+the base, and the App merges it. It is the flow
 [`yardr.public`](../.yardr/flows/yardr.public.flow), with its stage files in
 [`.yardr/flows/yardr.public/`](../.yardr/flows/yardr.public): the default flow
 with four stages added, `pr` after `new`, `review-post` after `review`,
@@ -2351,7 +2363,7 @@ new ──▶ pr ──▶ review ──▶ review-post ──▶ review-securit
 | `pr` | [`open-pr`](../contrib/assembly/open-pr) | pushes `yard/<bead>`, opens its pull request or updates the one it has, as the App; the bead tracks it |
 | `review`, `review-security` | the reviewers | read the branch as before, push the commits they make, store their review on the bead with the head they read (`review`, `reviewed_head`), and report `done`, `done-safe` or `changes` as before; they post nothing |
 | `review-post`, `review-security-post` | [`post-review`](../contrib/assembly/post-review) | posts the stored review on the pull request as the App, gives `merge-ok` with the approval that sends the bead to the tests, and sends the bead on the way the review says |
-| `ciwait` | [`pr-ci`](../contrib/assembly/pr-ci) | runs the depot's test command on that head ([above](#the-yard-as-the-ci-of-a-pull-request)) |
+| `ciwait` | [`pr-ci`](../contrib/assembly/pr-ci) | runs the depot's test command on that head merged into the base ([above](#the-yard-as-the-ci-of-a-pull-request)) |
 | `approved` | [`merge-pr`](../contrib/assembly/merge-pr) | merges it as the App ([above](#merging-pull-requests)), squashed where the group says `YARDR_LAND=squash` |
 
 Changes go back to `new` from `pr` (nothing to publish, or a conflict with the

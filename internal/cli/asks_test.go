@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -316,6 +317,47 @@ func TestPrimeShowsAsks(t *testing.T) {
 		if strings.Contains(out, raw) {
 			t.Errorf("prime shows raw JSON %q:\n%s", raw, out)
 		}
+	}
+	// A bead back from a failed landing carries the assembly's long log and
+	// then the handoff saying why: prime leads with the latest notes, each
+	// bound, with a pointer to the full text. Bead show and --json keep
+	// every note whole.
+	var log strings.Builder
+	for i := 1; i <= 30; i++ {
+		fmt.Fprintf(&log, "assembly log line %d\n", i)
+	}
+	if _, err := run(t, yard.beadCmd(), "note", id, strings.TrimRight(log.String(), "\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, yard.beadCmd(), "note", id, "HANDOFF: land what is green by hand"); err != nil {
+		t.Fatal(err)
+	}
+	out, err = run(t, me.primeCmd(), "--bead", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hand, first := strings.Index(out, "HANDOFF"), strings.Index(out, "assembly log line 1"); hand < 0 || first < 0 || hand > first {
+		t.Errorf("prime leads not with the handoff:\n%s", out)
+	}
+	if !strings.Contains(out, "assembly log line 19") || strings.Contains(out, "assembly log line 20") {
+		t.Errorf("prime bounds not at twenty lines:\n%s", out)
+	}
+	if want := "... and 11 more lines: yardr bead show " + id + " has the note whole"; !strings.Contains(out, want) {
+		t.Errorf("prime names no pointer %q:\n%s", want, out)
+	}
+	out, err = run(t, me.beadCmd(), "show", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "assembly log line 30") {
+		t.Errorf("bead show lost the log's tail:\n%s", out)
+	}
+	jout, err := run(t, (&app{st: st, actor: "mckean", json: true}).primeCmd(), "--bead", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(jout, "assembly log line 30") {
+		t.Errorf("prime --json lost the log's tail:\n%s", jout)
 	}
 }
 

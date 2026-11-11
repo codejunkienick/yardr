@@ -1213,6 +1213,11 @@ if [ -n "$LANDING" ]; then
         # fix this landing carried to one of them is live from the next one.
         refreshed=$(printf '%s\n' "$upgrade_out" | sed -n 's/^scripts  *\(.*\) refreshed$/\1/p' | tail -n 1)
         [ -z "$refreshed" ] || upgrade_note="$upgrade_note (scripts refreshed: $refreshed)"
+        # An installed pack's copy of a refreshed script is not refreshed
+        # with it: an import owns those. The note names the stale copies
+        # until the pack is re-applied, with the command that does.
+        stale=$(printf '%s\n' "$upgrade_out" | sed -n 's/^packscripts  *\(.*\)$/\1/p' | tail -n 1)
+        [ -z "$stale" ] || upgrade_note="$upgrade_note (stale pack copies: $stale)"
       else
         line=$(printf '%s\n' "$upgrade_out" | grep '^yardr: ' | tail -n 1)
         line=${line#yardr: }
