@@ -390,6 +390,14 @@ func inputLine(plain []string, kind string) (input int, m paneMarks) {
 	}
 	if input < 0 {
 		for i, l := range plain {
+			// A line that begins with the kind's own message mark is a
+			// message it took, echoed above the input, never input being
+			// typed: with no box in the read such a line is skipped, so a
+			// kind whose input is drawn in a box is not read by its echo.
+			// A kind with no message mark skips nothing.
+			if known && m.message != "" && strings.HasPrefix(strings.TrimSpace(l), m.message) {
+				continue
+			}
 			for _, mark := range inputMarks {
 				if strings.HasPrefix(strings.TrimSpace(l), mark) {
 					input, m = i, paneMarks{input: mark}

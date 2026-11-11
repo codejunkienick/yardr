@@ -232,6 +232,10 @@ func TestInputText(t *testing.T) {
 		// before it, and is never read as the input.
 		"grok empty": {"grok", grokEmpty, "", true},
 		"grok draft": {"grok", grokDraft, "half a thought", true},
+		// Grok's echo without its box is not positively the input: with no
+		// box in the read an unboxed mark line is a message taken, never
+		// input being typed.
+		"grok, echo and no box": {"grok", grokTaken, "", false},
 		// Without its own mark a pane is read by the others': enough to
 		// type nothing after it.
 		"kimi, a line with Claude Code's mark": {"kimi", claudeDraft, "some creative..", true},
@@ -474,6 +478,7 @@ func TestNudgeIsNotTypedIntoAnInputThatHoldsText(t *testing.T) {
 		"kimi empty":                    {"kimi", "✨", kimiEmpty, kimiEmpty, false},
 		"grok draft":                    {"grok", "❯", grokEmpty, grokDraft, true},
 		"grok empty":                    {"grok", "❯", grokEmpty, grokEmpty, false},
+		"grok echo, no box":             {"grok", "❯", grokEmpty, grokTaken, false},
 		"no mark":                       {"acme", ">", noMark, noMark, false},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -542,12 +547,13 @@ func TestOwnTextLeftInTheInputOfAnIdleAgentIsSubmitted(t *testing.T) {
 		after             string // typed after the prompt, by a person
 		enters            int
 	}{
-		"claude":                       {"claude", "❯", claudeEmpty, "", 1},
-		"codex":                        {"codex", "›", codexEmpty, "", 1},
-		"kimi":                         {"kimi", "✨", kimiEmpty, "", 1},
-		"unknown kind":                 {"acme", "❯", claudeEmpty, "", 0},
-		"a person's words after":       {"claude", "❯", claudeEmpty, " and one more thing", 0},
-		"kimi, a person's words after": {"kimi", "✨", kimiEmpty, " and one more thing", 0},
+		"claude":                          {"claude", "❯", claudeEmpty, "", 1},
+		"codex":                           {"codex", "›", codexEmpty, "", 1},
+		"kimi":                            {"kimi", "✨", kimiEmpty, "", 1},
+		"grok, prompt echoed with no box": {"grok", "❯", grokEmpty, "", 0},
+		"unknown kind":                    {"acme", "❯", claudeEmpty, "", 0},
+		"a person's words after":          {"claude", "❯", claudeEmpty, " and one more thing", 0},
+		"kimi, a person's words after":    {"kimi", "✨", kimiEmpty, " and one more thing", 0},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
