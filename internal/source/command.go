@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -319,8 +320,20 @@ func (d *Declaration) CopyCommandFilesFS(fsys fs.FS, declDir, home string) error
 }
 
 // writeCommandFiles writes the copies under <home>/sources/<name>/, the
-// directory made anew.
+// directory made anew, holding syscall.ForkLock for reading from the first
+// open to the last close. Linux does not start a file while any process
+// holds it open for writing (text file busy), and a fork made beside one of
+// these writes carries its descriptor until the child execs: a setup check
+// that runs the copy it just wrote would then find the file busy, refused
+// in words that tell the person nothing they can act on (yardr-61fd). A fork
+// takes ForkLock for writing, so while the copies are written under the read
+// hold no fork can begin, and no child is made holding one (the pattern of
+// writeLauncher in internal/scripttest). The hold is the writes alone: the
+// execs that run the copies stay outside it, since starting a process takes
+// the lock for writing too.
 func writeCommandFiles(home, name string, copies []commandCopy) error {
+	syscall.ForkLock.RLock()
+	defer syscall.ForkLock.RUnlock()
 	dest := filepath.Join(home, "sources", name)
 	if err := os.RemoveAll(dest); err != nil {
 		return err

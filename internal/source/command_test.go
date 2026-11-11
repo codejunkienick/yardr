@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/user"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -391,4 +393,62 @@ func TestCopyCommandFilesFromAnFS(t *testing.T) {
 		!strings.Contains(err.Error(), "a command's program linear/thread is a file beside the declaration's file") {
 		t.Fatalf("a missing program: %v", err)
 	}
+}
+
+// The command copies are written with syscall.ForkLock held for reading,
+// from the first open to the last close: a fork begun beside one of the
+// writes would carry its descriptor until the child execs, and a setup
+// check that runs the copy it just wrote would then find the file busy on
+// Linux (yardr-61fd). No fork has been seen to do it outside the one CI met,
+// so the case looks at the lock instead, in the manner of
+// TestLauncherIsWrittenUnderTheForkLock. The copy is aimed at a FIFO, whose
+// open waits for a reader, which holds a write under way for as long as the
+// test likes where a regular file's would be over at once. The FIFO stands
+// beside the destination, which the write removes first, so the copy names
+// it with "..". A fork takes the lock for writing, so a lock that cannot be
+// taken for writing is a write no fork can begin beside.
+func TestCommandCopiesAreWrittenUnderTheForkLock(t *testing.T) {
+	home := t.TempDir()
+	fifo := filepath.Join(home, "sources", "held")
+	if err := os.MkdirAll(filepath.Dir(fifo), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Skipf("this system makes no FIFO: %v", err)
+	}
+	written := make(chan error, 1)
+	go func() {
+		written <- writeCommandFiles(home, "setupchecked", []commandCopy{{rel: "../held", data: []byte("#!/bin/sh\necho '{}'\n")}})
+	}()
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(time.Millisecond) {
+		if !syscall.ForkLock.TryLock() {
+			break
+		}
+		syscall.ForkLock.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("a fork could begin while a command copy was being written: its child would carry the open file")
+		}
+	}
+	// A reader lets the open go on, and the write ends.
+	r, err := os.Open(fifo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(r)
+	r.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-written; err != nil {
+		t.Fatal(err)
+	}
+	if want := "#!/bin/sh\necho '{}'\n"; string(got) != want {
+		t.Errorf("the copy written is %q, want %q", got, want)
+	}
+	// The execs that run the copies follow the writes and start processes,
+	// which take the lock for writing: it must have been let go.
+	if !syscall.ForkLock.TryLock() {
+		t.Fatal("the fork lock is held after the copies were written: a check could not start")
+	}
+	syscall.ForkLock.Unlock()
 }
