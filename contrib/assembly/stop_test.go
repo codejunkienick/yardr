@@ -223,10 +223,11 @@ func awaitTestChild(t *testing.T, file string) int {
 }
 
 // assertGone fails unless process pid is gone within the wait: a killed
-// process takes a moment to go, one nothing killed never does.
+// process takes a moment to go, one nothing killed never does. A zombie nobody
+// reaps is gone (testload.Running): where init does not reap, it stays one.
 func assertGone(t *testing.T, pid int, what string) {
 	t.Helper()
-	for deadline := time.Now().Add(testload.Scale(10 * time.Second)); syscall.Kill(pid, 0) == nil; time.Sleep(20 * time.Millisecond) {
+	for deadline := time.Now().Add(testload.Scale(10 * time.Second)); testload.Running(pid); time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
 			t.Errorf("%s (pid %d) outlived the script", what, pid)

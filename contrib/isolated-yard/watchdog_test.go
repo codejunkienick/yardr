@@ -235,7 +235,7 @@ func TestWatchdogTakesTheYardDownWhenItsOwnerIsGone(t *testing.T) {
 	if !slices.Contains(strings.Fields(out), strconv.Itoa(dog)) {
 		t.Errorf("pids lists %q, which lacks the watchdog (pid %d): down would not stop it", out, dog)
 	}
-	if !running(dog) {
+	if !testload.Running(dog) {
 		t.Fatalf("the watchdog (pid %d) is not running although this binary is", dog)
 	}
 
@@ -255,7 +255,7 @@ func TestWatchdogTakesTheYardDownWhenItsOwnerIsGone(t *testing.T) {
 	if _, err := os.Stat(d); !os.IsNotExist(err) {
 		t.Errorf("%s is still there (%v)", d, err)
 	}
-	if running(dog) {
+	if testload.Running(dog) {
 		t.Errorf("the yard's own watchdog (pid %d) outlived the down", dog)
 	}
 }

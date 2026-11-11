@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/testload"
 )
 
 // sources is a yard's store as an ask reads it.
@@ -631,13 +632,14 @@ func TestAskGivesUpAtTheTimeoutAndLeavesNoProcess(t *testing.T) {
 }
 
 // groupGone reports whether the process group pgid is gone, giving a
-// killed child a moment to be reaped, which is not ours to do. It only
-// looks, never signals: a group id the kernel has handed to unrelated
-// processes since must never be killed. (yardr-4wfs: the SIGKILL here
-// used to fire at whatever group had the id after the wait.)
+// killed child a moment to go: one nobody reaps, which is not ours to do,
+// counts as gone (testload.GroupRunning). It only looks, never signals: a
+// group id the kernel has handed to unrelated processes since must never
+// be killed. (yardr-4wfs: the SIGKILL here used to fire at whatever group
+// had the id after the wait.)
 func groupGone(pgid int, wait time.Duration) bool {
 	for deadline := time.Now().Add(wait); ; time.Sleep(10 * time.Millisecond) {
-		if syscall.Kill(-pgid, 0) == syscall.ESRCH {
+		if !testload.GroupRunning(pgid) {
 			return true
 		}
 		if time.Now().After(deadline) {
@@ -647,7 +649,8 @@ func groupGone(pgid int, wait time.Duration) bool {
 }
 
 // groupGone only looks: a group id that now belongs to unrelated
-// processes is reported present, never signalled.
+// processes is reported present, never signalled. A group of a zombie is
+// gone, as the orphans of a killed command are where nothing reaps them.
 func TestGroupGoneLeavesAForeignGroupAlone(t *testing.T) {
 	cmd := exec.Command("sleep", "30")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -662,8 +665,14 @@ func TestGroupGoneLeavesAForeignGroupAlone(t *testing.T) {
 	if err := syscall.Kill(pgid, 0); err != nil {
 		t.Fatalf("the foreign group was signalled: %v", err)
 	}
-	// And a group that is gone reads as gone.
+	// A group whose process is killed and not waited for yet is gone: kill -0
+	// on the group answers for the zombie, as a child of the test it stays one
+	// on any machine.
 	_ = cmd.Process.Kill()
+	if !groupGone(pgid, 5*time.Second) {
+		t.Fatal("a group of a zombie reads as present")
+	}
+	// And a group that is gone reads as gone.
 	_ = cmd.Wait()
 	if !groupGone(pgid, 50*time.Millisecond) {
 		t.Fatal("a gone group reads as present")

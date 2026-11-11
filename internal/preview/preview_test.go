@@ -24,6 +24,7 @@ import (
 
 	"yardr.dev/yardr/internal/previewtest"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/testload"
 )
 
 // A preview's app in these tests is this binary again (previewtest).
@@ -810,8 +811,11 @@ func TestCleanExitIsNotRestarted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse background child pid %q: %v", data, err)
 	}
+	// Its parent was gone before the kill, so the init of the machine has it,
+	// and where that one does not reap (a container without an init) it stays
+	// a zombie that kill -0 answers for.
 	waitFor(t, "background child is gone", func() bool {
-		return errors.Is(syscall.Kill(child, 0), syscall.ESRCH)
+		return !testload.Running(child)
 	})
 }
 

@@ -694,7 +694,7 @@ func (y *yard) stopDaemon(t *testing.T, pid int) {
 	if !stop.Stopped || stop.PID != pid {
 		t.Fatalf("daemon stop: %+v, want it to have stopped pid %d", stop, pid)
 	}
-	if !waitFor(10*time.Second, func() bool { return !running(pid) }) {
+	if !waitFor(10*time.Second, func() bool { return !testload.Running(pid) }) {
 		t.Fatalf("daemon %d still runs after daemon stop", pid)
 	}
 }
@@ -704,7 +704,7 @@ func stepDaemonStart(t *testing.T, y *yard) {
 		PID int `json:"pid"`
 	}
 	y.ok(t, &start, "daemon", "start")
-	if d := y.daemon(t); start.PID == 0 || !d.Running || d.PID != start.PID || !running(start.PID) {
+	if d := y.daemon(t); start.PID == 0 || !d.Running || d.PID != start.PID || !testload.Running(start.PID) {
 		t.Fatalf("daemon start: %+v; daemon status %+v", start, d)
 	}
 	// A yard has one daemon: a second start is refused, naming the first.

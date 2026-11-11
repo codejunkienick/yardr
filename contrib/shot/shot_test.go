@@ -1405,7 +1405,9 @@ func sleeper(t *testing.T, line string, child bool) (env []string, pids string) 
 }
 
 // dead fails the test unless every PID in pids is gone: the kill the
-// timeout promises, waited on, not slept for.
+// timeout promises, waited on, not slept for. A killed process nobody has
+// waited for counts as gone (testload.Running): where PID 1 does not reap, what
+// the script killed and orphaned stays a zombie that kill -0 answers for.
 func dead(t *testing.T, pids string) {
 	deadWithin(t, pids, 10*time.Second)
 }
@@ -1425,7 +1427,7 @@ func deadWithin(t *testing.T, pids string, within time.Duration) {
 		if err != nil || pid <= 0 {
 			t.Fatalf("the stand-in recorded %q, not a PID", field)
 		}
-		for syscall.Kill(pid, 0) == nil {
+		for testload.Running(pid) {
 			if time.Now().After(giveUp) {
 				t.Fatalf("process %d is still alive after %s", pid, within)
 			}
@@ -1559,6 +1561,26 @@ func TestShotKillsAChromeThatDoesNotFinish(t *testing.T) {
 		t.Skip("no curl: it checks the page before the shot")
 	}
 	s := page(t)
+	t.Run("a killed child nobody waited for", func(t *testing.T) {
+		sleep := exec.Command("sleep", "300")
+		if err := sleep.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_ = sleep.Process.Kill()
+			_ = sleep.Wait()
+		})
+		pids := filepath.Join(t.TempDir(), "pids")
+		if err := os.WriteFile(pids, []byte(strconv.Itoa(sleep.Process.Pid)+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// The test does not wait for the killed child until cleanup, so it is
+		// a zombie for dead to count as gone even where init reaps orphans.
+		if err := sleep.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		dead(t, pids)
+	})
 	t.Run("the script's SHOT_TIMEOUT", func(t *testing.T) {
 		env, pids := sleeper(t, "chrome is warming up", false)
 		// The watchdog's clock waits for the stand-in: sleep holds it

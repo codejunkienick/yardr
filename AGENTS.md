@@ -130,7 +130,11 @@ it lists every exported name with its comment, faster than grepping.
   is armed; `Scale` makes a wait written for an idle box that many times
   longer, and `Loaded` says the factor is above 1; the contrib suites'
   fuses go through `Scale`; `PreferRealGit` puts git itself ahead of
-  macOS's shim on PATH, for a suite whose tests make many git calls.
+  macOS's shim on PATH, for a suite whose tests make many git calls;
+  `Running` and `GroupRunning` say whether a process, or a group, is still
+  running, a zombie counting as dead, for a test that waits for what it
+  killed (kill -0 answers for a zombie, and a container whose PID 1 does not
+  reap leaves every orphan it killed one).
 - `telemetry`: the opt-in telemetry switch, install id, day builder and
   the one POST of a batch to the compiled endpoint, behind `yardr
   telemetry on|off|show` and the daemon's telemetry pass; when to send,

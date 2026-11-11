@@ -12,7 +12,9 @@
 // verdict, for the rare test that must tell a slow machine from a slow program.
 //
 // What else the suites share is the git they run: PreferRealGit makes it git
-// itself, where macOS would put its shim in front.
+// itself, where macOS would put its shim in front; and what a process they
+// killed counts as: Running and GroupRunning count a zombie as dead, as a wait
+// for a killed process must where nothing reaps it.
 package testload
 
 import (

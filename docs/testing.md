@@ -108,6 +108,15 @@ in whatever time the machine takes, and keep only the one elapsed-time
 assertion (at least 200 ms over five 50 ms pauses) whose direction load
 cannot falsify.
 
+A test that waits for a process it killed asks `testload.Running`, or
+`testload.GroupRunning` for a process group, never `kill -0`: a killed
+process nobody has waited for is a zombie, and `kill -0` answers for a zombie.
+Whatever adopted an orphan reaps it, except in a container whose first process
+does not (`go` itself, in a `docker run` without `--init`), where it stays one
+for the rest of the run and the wait runs out. Both helpers count a zombie as
+dead. A check that a process the test did not kill is still alive may use
+`kill -0`.
+
 A fix for a test that fails only under load is proved the way it failed:
 `contrib/burn/burn -n 100 ./internal/dispatch TestName` runs the test a
 hundred times beside five times as many busy loops as the machine has cpus

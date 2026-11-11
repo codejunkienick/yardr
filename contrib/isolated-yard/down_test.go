@@ -195,17 +195,6 @@ func pidIn(t *testing.T, file string) int {
 	return 0
 }
 
-// running reports whether pid is a live process (one that ended and was
-// not reaped yet is not).
-func running(pid int) bool {
-	if syscall.Kill(pid, 0) != nil {
-		return false
-	}
-	out, _ := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
-	s := strings.TrimSpace(string(out))
-	return s != "" && !strings.HasPrefix(s, "Z")
-}
-
 // down runs `isolated-yard down d` and checks that it removed d and that
 // none of pids is left.
 func down(t *testing.T, d string, pids ...int) {
@@ -218,7 +207,7 @@ func down(t *testing.T, d string, pids ...int) {
 		t.Errorf("%s is still there (%v)", d, err)
 	}
 	for _, pid := range pids {
-		if running(pid) {
+		if testload.Running(pid) {
 			state, _ := exec.Command("ps", "-o", "pid=,ppid=,pgid=,stat=,command=", "-p", strconv.Itoa(pid)).CombinedOutput()
 			t.Errorf("pid %d outlived down:\n%s\n%s", pid, out, state)
 		}
@@ -275,8 +264,8 @@ func TestDownAfterTheBinaryWasRebuilt(t *testing.T) {
 	if err := os.Rename(bin+".new", bin); err != nil {
 		t.Fatal(err)
 	}
-	if !running(server) || !running(daemon) {
-		t.Fatalf("server running=%v daemon running=%v before down", running(server), running(daemon))
+	if !testload.Running(server) || !testload.Running(daemon) {
+		t.Fatalf("server running=%v daemon running=%v before down", testload.Running(server), testload.Running(daemon))
 	}
 	down(t, d, server, daemon)
 }
@@ -302,7 +291,7 @@ func TestDownStopsAServerStartedFromAnotherBinary(t *testing.T) {
 		t.Fatalf("server start: %v\n%s", err, out)
 	}
 	server := pidIn(t, filepath.Join(home, "server.pid"))
-	if !running(server) {
+	if !testload.Running(server) {
 		t.Fatal("no server before down")
 	}
 	down(t, d, server)
@@ -370,7 +359,7 @@ func TestDownStopsAnExecGroupsRunningScript(t *testing.T) {
 	}) {
 		t.Fatalf("exec script did not start its child (session pid %d)", execPid)
 	}
-	if !running(childPid) {
+	if !testload.Running(childPid) {
 		t.Fatalf("exec child %d did not stay running", childPid)
 	}
 	pgid, err := exec.Command("ps", "-o", "pgid=", "-p", strconv.Itoa(childPid)).Output()
@@ -381,7 +370,7 @@ func TestDownStopsAnExecGroupsRunningScript(t *testing.T) {
 	// shell leader exits and send KILL to the same group.
 	t.Cleanup(func() {
 		for _, pid := range []int{execPid, childPid} {
-			if running(pid) {
+			if testload.Running(pid) {
 				_ = syscall.Kill(pid, syscall.SIGKILL)
 			}
 		}
@@ -892,7 +881,7 @@ func deadOwner(t *testing.T) string {
 func TestSleeperEndsWhenItsOwnerIsGone(t *testing.T) {
 	t.Parallel()
 	pid := startSleeper(t, filepath.Join(t.TempDir(), "home"), deadOwner(t))
-	if !waitFor(ownerGoneFuse, func() bool { return !running(pid) }) {
+	if !waitFor(ownerGoneFuse, func() bool { return !testload.Running(pid) }) {
 		t.Errorf("the sleeper (pid %d) is still running", pid)
 	}
 }
@@ -934,7 +923,7 @@ func TestDownLeavesTheProcessesOfOtherYards(t *testing.T) {
 	}
 	down(t, d, mine...)
 	for _, pid := range others {
-		if !running(pid) {
+		if !testload.Running(pid) {
 			t.Errorf("down stopped pid %d, which is not of the yard", pid)
 		}
 	}

@@ -395,7 +395,7 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					for deadline := time.Now().Add(testload.Scale(5 * time.Second)); syscall.Kill(pid, 0) == nil; time.Sleep(20 * time.Millisecond) {
+					for deadline := time.Now().Add(testload.Scale(5 * time.Second)); testload.Running(pid); time.Sleep(20 * time.Millisecond) {
 						if time.Now().After(deadline) {
 							_ = syscall.Kill(pid, syscall.SIGKILL)
 							t.Fatalf("the sleep the test script started (pid %d) outlived the deadline's kill", pid)
