@@ -1147,7 +1147,7 @@ func (d *Dispatcher) route(ctx context.Context, groups map[string]store.Group, a
 	for _, b := range lost {
 		lostByID[b.Bead] = b
 	}
-	unstopped, err := d.failedUnstopped(ctx)
+	unstopped, err := d.liveUnstopped(ctx)
 	if err != nil {
 		return err
 	}
@@ -1172,11 +1172,11 @@ func (d *Dispatcher) route(ctx context.Context, groups map[string]store.Group, a
 		if t, ok := d.retryAfter[b.ID]; ok && d.now().Before(t) {
 			continue
 		}
-		// Past the backoff, a bead still waits for the agent of its failed
-		// session to be stopped: teardown tries on every pass, and a session
-		// started now would share the old agent's checkout.
+		// Past the backoff, a bead still waits for its ended session to be
+		// stopped: teardown tries on every pass, and a session started now
+		// would share the old agent's checkout.
 		if s, ok := unstopped[b.ID]; ok {
-			d.reportOnce(ctx, b, "backoff", fmt.Sprintf("session %s ended as failed and its agent is not stopped yet; the bead starts when it is", s.ID))
+			d.reportOnce(ctx, b, "backoff", fmt.Sprintf("session %s ended as %s and its agent is not stopped yet; the bead starts when it is", s.ID, s.State))
 			continue
 		}
 		operator := settings[store.OperatorSetting]
@@ -1361,7 +1361,7 @@ func (d *Dispatcher) route(ctx context.Context, groups map[string]store.Group, a
 // runtimeDown notes that g's runtime could not start anything. The first
 // failure of an outage is logged as runtime_down for the group, so the
 // yardmaster hears of it once; later ones only lengthen the wait, doubling up
-// to RuntimeBackoffMax.
+// to RuntimeBackoffMax. The dispatcher clock sets and checks the deadline.
 func (d *Dispatcher) runtimeDown(ctx context.Context, g store.Group, err error) {
 	o := d.down[g.Name]
 	if o == nil {
@@ -1375,7 +1375,7 @@ func (d *Dispatcher) runtimeDown(ctx context.Context, g store.Group, err error) 
 	} else {
 		o.delay = min(2*o.delay, d.RuntimeBackoffMax)
 	}
-	o.until = time.Now().Add(o.delay)
+	o.until = d.now().Add(o.delay)
 }
 
 // runtimeUp ends g's outage, if it had one, once a Start got past the

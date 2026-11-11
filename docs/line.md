@@ -829,9 +829,9 @@ the next ready bead at once; the worktree and its branch stay. Beads get held:
 
 - by yardr, after 3 failed sessions in one stage (an agent that died or
   exited without advancing);
-- by yardr, when a session ended as failed in a group that keeps its agents
-  running (`keep: true`): the agent is still there, and the bead stays held
-  until someone has looked at it and closed its pane
+- by yardr, when a session ended as failed, released or held in a group that
+  keeps its agents running (`keep: true`): the agent is still there, and the
+  bead stays held until someone has looked at it and closed its pane
   ([groups.md](groups.md#runners));
 - by an agent that is stuck or finds the bead unclear: it notes the question
   and runs `yardr bead hold`;

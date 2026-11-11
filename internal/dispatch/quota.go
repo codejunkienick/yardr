@@ -174,7 +174,7 @@ func (d *Dispatcher) waitReason(g store.Group, b store.Bead, active map[string]i
 	if active[g.Name] >= g.Limit && !held {
 		return waitedGroup{Group: g.Name, Reason: fmt.Sprintf("group %s runs as many sessions as its limit (%d) allows; the bead starts when one ends, or the limit is raised (yardr group set %s --limit <n>)", g.Name, g.Limit, g.Name)}, true
 	}
-	if o := d.down[g.Name]; o != nil && time.Now().Before(o.until) {
+	if o := d.down[g.Name]; o != nil && d.now().Before(o.until) {
 		return waitedGroup{Group: g.Name, Reason: fmt.Sprintf("group %s's runtime is down (see the group's runtime_down event); the bead starts when it is tried again", g.Name)}, true
 	}
 	// One start in flight per group, and no queue (starts.go): while its
