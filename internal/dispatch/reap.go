@@ -368,7 +368,10 @@ func (d *Dispatcher) reap(ctx context.Context, groups map[string]store.Group) (m
 
 // givenUp reports whether s is a running session whose first prompt the
 // store says was given up (prompt_lost): its end is due, whatever its runner
-// would say.
+// would say. It is asked of a bead's session alone: a crew member's handle is
+// on its crew record, which reap does not list, so the prompt_lost that a
+// crew member's given-up prompt leaves there is no end due here, on this
+// pass, on a later one or on a restarted daemon's.
 func givenUp(s store.Session) bool {
 	return s.State != "starting" && s.Handle[promptLost] == true
 }

@@ -2011,7 +2011,11 @@ func TestCrewPromptTypedAndNotSubmittedIsSubmitted(t *testing.T) {
 }
 
 // Crew members go the same way: a prime that is dropped is sent again, and one
-// dropped every time is reported on the crew member's journal.
+// dropped every time is reported on the crew member's journal. It is then left
+// running, as a bead's session is not (promptGaveUp ends that one): its handle
+// is on its crew record, which reap does not list, so no pass of this daemon
+// or of a restarted one, which finds prompt_lost on the handle, asks the store
+// to end it.
 func TestCrewPendingPromptIsCheckedForArrival(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ drop, nudges, lost, gaveUp, prompted int }{
@@ -2021,15 +2025,29 @@ func TestCrewPendingPromptIsCheckedForArrival(t *testing.T) {
 	} {
 		s, f, d := crewSetup(t, store.CrewMember{})
 		ctx := context.Background()
+		// Every end fails here: one asked for a crew member would be counted,
+		// and asked again on the next pass, as a bead session's failed end is.
+		ends := &endFailingStore{API: s, fails: 1000}
+		d.Store = ends
 		f.blocked, f.drop = true, c.drop
 		must(t, d.Reconcile(ctx))
 		f.set(agentOf(t, s), "idle")
 		for range 10 {
 			must(t, d.Reconcile(ctx))
 		}
+		if c.gaveUp > 0 {
+			d = &dispatch.Dispatcher{Store: ends, Runners: map[string]dispatch.Runner{"fake": f}, PromptSettle: -1, PromptWait: -1}
+			for range 3 {
+				must(t, d.Reconcile(ctx))
+			}
+		}
 		r, _ := s.GetCrew(ctx, "yardmaster")
 		if len(f.nudges) != c.nudges || (r.Handle[store.PendingPrompt] == nil) != (c.prompted == 1) {
 			t.Fatalf("drop %d: nudges %v, handle %v", c.drop, f.nudges, r.Handle)
+		}
+		if ends.ends != 0 || !r.Live() || f.n != 1 || f.stops != 0 || (r.Handle["prompt_lost"] == true) != (c.gaveUp > 0) {
+			t.Fatalf("drop %d: %d ends asked, crew member %+v, starts %d, stops %d; want it running as it started, with no end asked",
+				c.drop, ends.ends, r, f.n, f.stops)
 		}
 		for kind, want := range map[string]int{"session_prompt_lost": c.lost, "session_prompt_gave_up": c.gaveUp, "session_prompted": c.prompted} {
 			evs := eventKinds(t, s, r.Journal, kind)
