@@ -45,6 +45,10 @@ func (s *Server) SetLimitsEvery(d time.Duration) { s.limitsEvery = d }
 // Age is how the pages say a duration.
 func Age(d time.Duration) string { return age(d) }
 
+// RunnerOf is the runner that owns a session and what it runs there, as
+// the sessions page shows it.
+func RunnerOf(s store.Session) string { return runnerOf(s) }
+
 // AgeJWTKeys moves the JWT key cache's fetch and attempt back by d, for
 // tests of the hourly refresh.
 func (s *Server) AgeJWTKeys(d time.Duration) {

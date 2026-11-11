@@ -330,7 +330,7 @@ func TestStarterIntoAnEmptyYard(t *testing.T) {
 		t.Fatalf("backlog = %+v, want a people group at the default of people, 50", g)
 	}
 	// The one program the starter runs, the script of that group, is named
-	// in the plan as a path in the pack, as check prints it above the digest.
+	// in the plan as a path in the pack, as check prints it after the digest.
 	if !slices.Equal(plan.Programs, []string{"scripts/merge-local"}) {
 		t.Fatalf("programs = %v, want the starter's assembly script", plan.Programs)
 	}

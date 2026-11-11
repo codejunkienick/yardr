@@ -1293,6 +1293,42 @@ func TestRunAskPeerRm(t *testing.T) {
 		t.Fatal(err)
 	}
 	y.refusedStale(t, seq, "peer airy: not found")
+
+	// Traffic between filing and approval moves the queued count but
+	// refuses nothing: the link reaches mckean, so a later ask for them
+	// queues another message for it, and the rm card still approves.
+	y = intakeYard(t)
+	if err := y.PeerHeard(y.ctx, "airy", y.asKey(t), &PeerSays{Understands: []string{PeerMail, PeerAsk},
+		Roster: []PeerRosterEntry{{Name: "mckean", Kind: RosterUser, Mail: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.AllowPeer(y.ctx, "airy", PeerAllow{Send: []string{PeerAsk}, Receive: []string{PeerAsk},
+		Trust: map[string]string{"mckean": "mckean"}, Reach: map[string]string{"mckean": "mckean"}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, runAsk("peer rm airy"), "yardmaster")
+	y.ask(t, Ask{Question: "Which?", To: "mckean", Context: []string{"c"}}, "yardmaster")
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil); err != nil {
+		t.Fatalf("ApproveAsk after later traffic = %v", err)
+	}
+	if _, err := y.GetPeer(y.ctx, "airy"); err == nil {
+		t.Fatal("the link is still there after the approval")
+	}
+
+	// The count moving is forgiven, but not the link's intakes or
+	// identities moving: those still refuse the card.
+	y = intakeYard(t)
+	seq = y.ask(t, runAsk("peer rm airy"), "yardmaster")
+	if _, err := y.SetPeerIntake(y.ctx, "airy", &PeerIntake{Depot: "web", Flow: "incoming", Limit: 3}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y.refusedStale(t, seq, "held other intakes")
+	y = intakeYard(t)
+	seq = y.ask(t, runAsk("peer rm airy"), "yardmaster")
+	if _, err := y.SetPeerIdentity(y.ctx, "airy", PeerIdentity{Source: "talk", ID: "U1", Crew: "mayor"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y.refusedStale(t, seq, "held other identities")
 }
 
 // Linking a yard is a weighty card of class trust: it names the peer, the

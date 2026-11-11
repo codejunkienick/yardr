@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 // A session's runner is the one it recorded, and, for a session from before
 // sessions recorded one, the one its handle tells; a manual group's claim is
@@ -42,6 +45,8 @@ func TestSessionRunnerShown(t *testing.T) {
 	}{
 		{"herdr with its agent", Session{Runner: "herdr", Handle: map[string]any{"agent": "builder-2"}}, "herdr builder-2"},
 		{"exec with its pid", Session{Runner: "exec", Handle: map[string]any{"pid": 7}}, "exec pid 7"},
+		{"seven-digit pid through JSON", Session{Runner: "exec", Handle: jsonHandle(t, `{"pid": 2003381}`)}, "exec pid 2003381"},
+		{"corrupt pid still shows", Session{Runner: "exec", Handle: map[string]any{"pid": "abc"}}, "exec pid abc"},
 		{"agent takes precedence over pid", Session{Runner: "herdr", Handle: map[string]any{"agent": "builder-2", "pid": 7}}, "herdr builder-2"},
 		{"starting, no handle yet", Session{Runner: "herdr"}, "herdr"},
 		{"old herdr session", Session{Handle: map[string]any{"agent": "builder-2"}}, "herdr builder-2"},
@@ -51,4 +56,15 @@ func TestSessionRunnerShown(t *testing.T) {
 			t.Errorf("%s: RunnerShown() = %q, want %q", c.name, got, c.want)
 		}
 	}
+}
+
+// jsonHandle is obj as the store hands a handle back: through JSON, so a
+// pid is a float64.
+func jsonHandle(t *testing.T, obj string) map[string]any {
+	t.Helper()
+	var out map[string]any
+	if err := json.Unmarshal([]byte(obj), &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

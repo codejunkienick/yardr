@@ -2046,7 +2046,7 @@ func (s Session) RunnerShown() string {
 	if v, ok := s.Handle["agent"]; ok {
 		return fmt.Sprintf("%s %v", runner, v)
 	} else if v, ok := s.Handle["pid"]; ok {
-		return fmt.Sprintf("%s pid %v", runner, v)
+		return fmt.Sprintf("%s pid %s", runner, pidShown(v))
 	}
 	return runner
 }

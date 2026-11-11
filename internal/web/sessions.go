@@ -75,18 +75,8 @@ func (r SessionRow) Dot() string {
 func isManual(s store.Session) bool { return s.Manual() }
 
 // runnerOf is the runner that owns a session and what it runs there, as
-// `yardr session list` shows it. A session from before sessions recorded
-// their runner is known by its handle.
-func runnerOf(s store.Session) string {
-	runner := s.RunnerName()
-	if v, ok := s.Handle["agent"]; ok {
-		return fmt.Sprintf("%s %v", runner, v)
-	}
-	if v, ok := s.Handle["pid"]; ok {
-		return fmt.Sprintf("%s pid %v", runner, v)
-	}
-	return runner
-}
+// `yardr session list` shows it: the session's own shown runner.
+func runnerOf(s store.Session) string { return s.RunnerShown() }
 
 // age says a duration the way a person would: its two largest units.
 func age(d time.Duration) string {

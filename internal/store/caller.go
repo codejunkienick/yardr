@@ -230,6 +230,17 @@ func uintIn(v any) (uint64, bool) {
 	return 0, false
 }
 
+// pidShown is a handle pid as the sessions surfaces show it: whole, since
+// JSON leaves the store's handles a float64, which %v renders in
+// scientific notation from a million up. A value pidIn refuses still
+// shows as %v, so a corrupt handle shows rather than hides.
+func pidShown(v any) string {
+	if n, ok := pidIn(v); ok {
+		return strconv.Itoa(n)
+	}
+	return fmt.Sprintf("%v", v)
+}
+
 // CallerKind is who a call over the socket is, as the store's records of
 // panes and of the daemon tell it (CallerOf). rpc reads it to refuse a call
 // before it reaches the store (rpc.Access); the store's own checks are read

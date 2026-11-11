@@ -11,6 +11,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -129,7 +130,35 @@ func (w *wtx) peerRmStale(seq uint64, was, now AskRun) error {
 		}
 		return fmt.Errorf("ask %d was written when the link with %s held other identities. %s", seq, name, nothingRan)
 	}
-	return staleCard(seq, was, now)
+	// The queued count moves under the card: any ask or mail for a name
+	// the link reaches queues another message between filing and approval,
+	// so the exact count is left out of the comparison, as the build label
+	// is for pack and setup cards (doesWithoutBuild). The card still shows
+	// the number; the link's key, address, intakes and identities are held
+	// above.
+	wasDoes := doesWithoutQueued(was.Does)
+	nowDoes := doesWithoutQueued(now.Does)
+	if slices.Equal(wasDoes, nowDoes) && was.Back == now.Back && was.BackBy == now.BackBy {
+		return nil
+	}
+	return staleCard(seq, AskRun{Does: wasDoes}, AskRun{Does: nowDoes})
+}
+
+// queuedCount is the exact queued-messages clause of a peer rm card's
+// first sentence ("2 messages queued for it go", "1 message ..."), the
+// live count the staleness check leaves out of its comparison.
+var queuedCount = regexp.MustCompile(`\d+ messages? queued for it go`)
+
+// doesWithoutQueued is a peer rm card's sentences with the exact queued
+// count masked: traffic for a name the link reaches moves it between
+// filing and approval, so comparing it exactly would refuse the approval
+// on a busy link.
+func doesWithoutQueued(does []string) []string {
+	out := make([]string, len(does))
+	for i, line := range does {
+		out[i] = queuedCount.ReplaceAllString(line, "messages queued for it go")
+	}
+	return out
 }
 
 // runPeerRm removes the peer as actor through deletePeer, and answers

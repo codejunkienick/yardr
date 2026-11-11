@@ -45,6 +45,7 @@ func TestStaleRevisionRefused(t *testing.T) {
 		"advance with note": func() (*store.Bead, error) { return s.AdvanceNote(ctx, b.ID, "review", "n", old, "me") },
 		"done":              func() (*store.Bead, error) { return s.Done(ctx, b.ID, "", "n", old, "me") },
 		"close":             func() (*store.Bead, error) { return s.CloseBead(ctx, b.ID, "x", old, "me") },
+		"release":           func() (*store.Bead, error) { return s.Release(ctx, b.ID, "x", old, "me") },
 	}
 	for name, write := range stale {
 		_, err := write()
@@ -57,6 +58,33 @@ func TestStaleRevisionRefused(t *testing.T) {
 	}
 	if notes, _ := s.Notes(ctx, b.ID); len(notes) != 0 {
 		t.Fatalf("a refused write left a note: %+v", notes)
+	}
+
+	// Reopen needs a closed bead, so it stands beside the map: closed at
+	// the revision read, changed by another actor since, the stale reopen
+	// is refused and changes nothing.
+	c, err := s.CreateBead(ctx, store.NewBead{Title: "y", Depot: "yard", Stage: "new"}, "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shut, err := s.CloseBead(ctx, c.ID, "x", store.Expect{}, "me")
+	if err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	readShut := shut.Revision
+	if _, err := s.Reopen(ctx, c.ID, store.Expect{Revision: readShut}, "other"); err != nil {
+		t.Fatalf("reopen at the current revision: %v", err)
+	}
+	curShut, err := s.CloseBead(ctx, c.ID, "x", store.Expect{}, "other")
+	if err != nil {
+		t.Fatalf("close again: %v", err)
+	}
+	if _, err := s.Reopen(ctx, c.ID, store.Expect{Revision: readShut}, "me"); !errors.Is(err, store.ErrConflict) ||
+		!strings.Contains(err.Error(), "is at revision "+curShut.Revision+", not "+readShut) {
+		t.Errorf("reopen at a stale revision: %v, want a conflict", err)
+	}
+	if got, _ := s.GetBead(ctx, c.ID); got.Revision != curShut.Revision || got.Status != "closed" {
+		t.Fatalf("a refused reopen changed the bead: %+v", got)
 	}
 
 	// At the current revision a move with a note goes through: the note
