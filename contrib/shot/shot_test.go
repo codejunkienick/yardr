@@ -894,39 +894,48 @@ func TestShotShootsAnErrorPageOnlyWhenTold(t *testing.T) {
 // The final answer's body is kept only where SHOT_ANY_STATUS=1 asks the empty-
 // answer check of it: without the switch the fetch discards the body, as it
 // always did, so a page that never stops sending cannot fill the disk in the
-// minute curl is given. A stand-in Chrome lists the throwaway profile it is run
-// with, the one place the body could be; the page's headers, which the script
-// does keep there, show the listing is of the profile.
+// minute curl is given. A stand-in Chrome keeps a link to each file of the
+// throwaway profile it is run with, the one place the body could be, for the
+// test to look at once the script has removed the profile as it exits; the
+// page's headers, which the script does keep there, show the files are the
+// profile's. Their modes are read with os.Stat and not from an ls -l listing,
+// whose mode field ends in a character of its own for a file that carries an
+// extended attribute ("@", which macOS puts on the files some processes make)
+// or an ACL ("+").
 func TestShotKeepsNoBodyUnlessTold(t *testing.T) {
 	if _, err := exec.LookPath("curl"); err != nil {
 		t.Skip("no curl: it checks the page before the shot")
 	}
 	s := errorPages(t)
 	dir := t.TempDir()
-	listing := filepath.Join(dir, "listing")
+	// A link is the very file the script made, with the mode it gave it. It needs
+	// the profile's filesystem, and this directory is under the machine's temp dir
+	// as the script's TMPDIR (suiteTmp) is. Each run replaces the last one's, as
+	// the listing was; a link that cannot be made fails the stand-in, so that the
+	// shot reports why.
+	kept := filepath.Join(dir, "kept")
 	bin := filepath.Join(dir, "chrome")
 	scripttest.Write(t, bin, "#!/bin/sh\n"+
 		"for a in \"$@\"; do case \"$a\" in\n"+
 		"  --user-data-dir=*) prof=${a#--user-data-dir=};;\n"+
 		"  --screenshot=*) out=${a#--screenshot=};;\n"+
 		"esac; done\n"+
-		"ls -l \"$prof\" >\""+listing+"\"\n"+
+		"kept=\""+kept+"\"\n"+
+		"rm -rf \"$kept\" && mkdir \"$kept\" && ln \"${prof:?}\"/* \"$kept\" || exit 1\n"+
 		"printf shot >\"$out\"\n")
-	profileModes := func() map[string]string {
+	const want os.FileMode = 0o600
+	profileModes := func() map[string]os.FileMode {
 		t.Helper()
-		raw, err := os.ReadFile(listing)
-		if err != nil {
-			t.Fatal(err)
-		}
-		modes := make(map[string]string)
-		for _, line := range strings.Split(string(raw), "\n") {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				name := fields[len(fields)-1]
-				if name == "headers" || name == "body" {
-					modes[name] = fields[0]
-				}
+		modes := make(map[string]os.FileMode)
+		for _, name := range []string{"headers", "body"} {
+			info, err := os.Stat(filepath.Join(kept, name))
+			if errors.Is(err, os.ErrNotExist) {
+				continue
 			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			modes[name] = info.Mode().Perm()
 		}
 		return modes
 	}
@@ -941,8 +950,8 @@ func TestShotKeepsNoBodyUnlessTold(t *testing.T) {
 	if _, ok := modes["body"]; ok {
 		t.Errorf("the profile holds %v: the body of a page was kept without SHOT_ANY_STATUS=1", modes)
 	}
-	if modes["headers"] != "-rw-------" {
-		t.Errorf("the profile's headers have mode %q, want -rw-------", modes["headers"])
+	if modes["headers"] != want {
+		t.Errorf("the profile's headers have mode %v, want %v", modes["headers"], want)
 	}
 
 	out = filepath.Join(t.TempDir(), "error-shot.png")
@@ -951,8 +960,12 @@ func TestShotKeepsNoBodyUnlessTold(t *testing.T) {
 	}
 	modes = profileModes()
 	for _, name := range []string{"headers", "body"} {
-		if modes[name] != "-rw-------" {
-			t.Errorf("the profile's %s have mode %q, want -rw-------", name, modes[name])
+		mode, ok := modes[name]
+		switch {
+		case !ok:
+			t.Errorf("the profile holds %v, want its %s", modes, name)
+		case mode != want:
+			t.Errorf("the profile's %s have mode %v, want %v", name, mode, want)
 		}
 	}
 }
