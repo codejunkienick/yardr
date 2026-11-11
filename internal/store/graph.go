@@ -796,7 +796,8 @@ type Note struct {
 	// that session itself. "" when the bead had no live session, or the
 	// note went through any other write. The daemon tells that session
 	// once, when its agent is idle, and never interrupts a turn; if the
-	// session ends first, nothing is sent.
+	// session ends before acknowledging, the bead's live session may ack
+	// the note instead, and Notify then names that reader.
 	Notify string `json:"notify,omitempty"`
 	// Told says the session's agent was nudged about the note
 	// (MarkNoteTold, the note_told event), and Acked that the session
@@ -975,10 +976,10 @@ func (s *Store) AddNotedAs(ctx context.Context, id, text, actor, session string,
 }
 
 // AckNote records that session has read the bead's note seq (yardr bead
-// note --ack): the session the note was told to, and no other. An ack of
-// a note still untold cancels its telling: the session read it from the
-// bead. Acking twice is the note again. The ack keeps no name, only that
-// the session read it.
+// note --ack): the session the note was told to or, once that one has
+// ended, the bead's live session (ackedBy). An ack of a note still untold
+// cancels its telling: the session read it from the bead. Acking twice is
+// the note again. The ack keeps no name, only that the session read it.
 //
 // session is the caller's word ($YARDR_SESSION). A call that comes from a
 // session's pane (WithCaller, as a move is checked: see Expect) acks as
@@ -1013,14 +1014,8 @@ func (s *Store) AckNote(ctx context.Context, id string, seq uint64, session, _ s
 		if n.Notify == "" {
 			return fmt.Errorf("note %d on %s was told to no session: nothing to ack", seq, row.ID)
 		}
-		if n.Notify != session {
-			return fmt.Errorf("note %d on %s was told to session %s: ack it as that session", seq, row.ID, n.Notify)
-		}
-		if !n.Acked {
-			n.Acked = true
-			if err := put(w.Tx, bNotes, join(row.UUID, seqKey(seq)), n); err != nil {
-				return err
-			}
+		if err := ackedBy(w.Tx, row, seq, &n, session); err != nil {
+			return err
 		}
 		n.Bead = row.ID
 		out = &n

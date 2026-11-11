@@ -112,8 +112,9 @@ A test that waits for a process it killed asks `testload.Running`, or
 `testload.GroupRunning` for a process group, never `kill -0`: a killed
 process nobody has waited for is a zombie, and `kill -0` answers for a zombie.
 Whatever adopted an orphan reaps it, except in a container whose first process
-does not (`go` itself, in a `docker run` without `--init`), where it stays one
-for the rest of the run and the wait runs out. Both helpers count a zombie as
+does not (`go` itself, in a `docker run` without `--init`, which the Linux
+recipe below always passes), where it stays one for the rest of the run and the
+wait runs out. Both helpers count a zombie as
 dead. A check that a process the test did not kill is still alive may use
 `kill -0`.
 
@@ -206,6 +207,9 @@ Keep the copy outside the worktree and never commit it. Build the old code's
 binary and the fix's with the same cut, so that the code is the only
 difference. With it, yd-rc1t's old code failed 10 of 10 runs and its fix passed
 10 of 10. The note names the label, the cut deadline and the counts for each.
+
+A failure only Linux shows is proved the same way, in a container, by the
+recipe in "Running a package's tests on Linux" below.
 
 R3. A package over the R1 budget with over 100 tests runs its tests
 parallel: `t.Parallel` on every test that owns its state, allow-list for
@@ -401,6 +405,136 @@ week after the last fix bead lands, against the design's table and its
 attached JSON, with the deltas per package, the new per-bead cost, and
 the same-sha rerun rate counted against R4. Every rule that missed is a
 filed follow-up or a closed wont-fix with the number.
+
+## Running a package's tests on Linux
+
+CI's Linux legs are the first to see what only Linux does, and a gate on a
+Mac cannot: a file open for writing that a forked child carries into its exec
+(`ETXTBSY`), one argument capped at 128 KiB, a `/proc` file that vanishes
+under a read, `dash` for `sh` and uutils for `mkdir`, a seven-digit pid, a
+`_linux_test.go` file the Mac never compiles. A builder's pane shows none of
+them, so a fix for one is proved on Linux from the pane, as R2's launchd
+recipe proves a macOS one: the package's tests in a container, in one stream,
+first on the code as it was and then on the fix. The gate runs none of this.
+
+The image is `ubuntu:26.04`, the userland of the CI runner that showed
+uutils's `mkdir` losing a race: its `sh` is `dash`, and the git it installs is
+2.5x. CI's own `ubuntu-latest` moves on, so the pin is the recipe's, held to
+CI's by no test. The test binary is built for Linux on the Mac, which takes
+seconds once its build cache holds the package's Linux build, and puts no
+toolchain, module download or build cache in the container. A `docker` command
+that runs Linux containers is the one requirement
+([Docker's install page](https://docs.docker.com/get-started/get-docker/)
+covers macOS and Linux). Set the package, the test and the count, then run
+the commands as they stand:
+
+```sh
+PKG=internal/peer                        # the package, from the worktree's root
+RUN='^TestProcessExitingMidReadIsGone$'  # -test.run: one test, or . for all
+COUNT=1                                  # -test.count: runs in one process
+T=$(mktemp -d)
+GOOS=linux GOARCH=$(go env GOARCH) CGO_ENABLED=0 go test -c -o "$T/pkg.test" ./$PKG
+docker run --rm --init --cpus 3 --user 1000:1000 \
+  -v "$PWD":/src:ro -v "$T":/t:ro -w /src/$PKG ubuntu:26.04 \
+  /t/pkg.test -test.run "$RUN" -test.count="$COUNT" -test.v -test.timeout 10m
+```
+
+Remove `$T` afterwards, as a command of its own (`T=<the directory>; rm -rf
+"${T:?}"`). The build is seconds of the Mac's cpu and the run is the test's
+own time on at most three cpus; the image is pulled once.
+
+What each part is for:
+
+- `GOARCH=$(go env GOARCH)`: Docker runs the Mac's own architecture, so the
+  binary runs natively and nothing is emulated. `CGO_ENABLED=0`: the Mac has
+  no C cross-compiler, and a static binary needs nothing of the image's libc.
+- `-v "$PWD":/src:ro` and `-w /src/$PKG`: `go test` runs a package's tests in
+  its directory, and they read `testdata` by a relative path. The tree is
+  read-only, so a test that writes beside its source fails there, which is a
+  finding.
+- `--init`: without it the test binary is the container's PID 1 and reaps
+  nothing, so a killed orphan stays a zombie that `kill -0` still answers for
+  (R2, `testload.Running`).
+- `--cpus 3`: the builders' cap, and Go's: it sizes GOMAXPROCS from the quota
+  (3 here; 2 for `--cpus 1`), so the test sees three procs, not the Mac's.
+  Run no second container beside it.
+- `--user 1000:1000`: CI's runner is not root, and as root a test of a
+  permission refusal has nothing to refuse and skips
+  (`TestConnectDeniedFailsAtOnce` in `internal/server`). In this image that uid
+  is its `ubuntu` user, with a home it can write.
+- `-test.timeout 10m`: `go test` gives a test binary ten minutes and a bare
+  binary has none, so a hang would hold three cpus until someone stopped it.
+- `COUNT`: a rare failure is shown by `-test.count` in one process, the way
+  R2's launchd job and `contrib/burn` run it, not by parallel copies of the
+  container.
+
+Two of the cases the recipe was drawn from fit it with those first lines set
+and nothing else changed: `PKG=.` with
+`RUN='^TestYardTestBudgets$/^over-budget_packages_are_re-run_up_to_three_at_a_time,_and_one_at_a_time_in_a_strict_run$'`
+for the uutils `mkdir` that was no lock, and `PKG=internal/web` with
+`RUN='^TestLimits'` for the `ETXTBSY` a fork of a parallel test caused, which
+failed three runs in three hundred, so `COUNT` in the hundreds.
+
+Where the case needs more:
+
+- A test that starts `git`, `perl`, `ps`, `jq`, `shellcheck` or `go` (it
+  builds yardr, or runs `go env`), a package that needs cgo, or the race
+  detector. The bare image has none of them, and a test that starts one fails
+  with `executable file not found in $PATH`; the Mac cannot cross-build cgo.
+  Build an image that has them, on the same ubuntu for its git, with Go copied
+  from the golang image, and run `go test` in it with a cache directory on the
+  Mac: uid 1000 can write there, and cannot in a fresh Docker volume:
+
+  ```sh
+  docker build -q -t yardr-linux-test - <<'EOF'
+  FROM ubuntu:26.04
+  RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates git perl procps gawk jq shellcheck gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+  COPY --from=golang:1.27 /usr/local/go /usr/local/go
+  ENV PATH=/usr/local/go/bin:$PATH GOTOOLCHAIN=auto
+  EOF
+  T=$(mktemp -d); mkdir "$T/tmp"
+  docker run --rm --init --cpus 3 --user 1000:1000 \
+    -e GOPATH=/g -e GOCACHE=/g/cache -e GOTMPDIR=/g/tmp -e GOFLAGS=-buildvcs=false \
+    -v "$PWD":/src:ro -v "$T":/g -w /src yardr-linux-test \
+    go test -count="$COUNT" -run "$RUN" ./$PKG
+  ```
+
+  `-race` goes beside `-run`. The golang tag moves by patch release and
+  go.mod names one, so the image's Go may be older: `GOTOOLCHAIN=auto` fetches
+  the one go.mod names into `$T`, over the network, a few hundred MB, so keep
+  `$T` for the bead's runs and remove it at the end, with `docker rmi
+  yardr-linux-test`. Go keeps its module cache read-only, so `rm -rf` of `$T`
+  needs `chmod -R u+w "${T:?}"` first, as a command of its own.
+  `-buildvcs=false`: the tree is a worktree whose `.git` is a file naming a
+  directory outside the mount, and Go would stop at it.
+- A case about git. The golang image's Debian git is older than CI's, and a
+  git before 2.48 reads a copied worktree's links differently, which broke
+  fixtures until their copies wrote the links themselves. The image above
+  takes Ubuntu's, as CI does. To see a difference between gits, run the same
+  test binary in `golang:1.27-trixie` too, where uid 1000 has no home: add
+  `-e HOME=/tmp`.
+- A host that other gates load. A container's cpu quota is invisible to the
+  load average `testload` reads, so a suite whose fuses scale with load (the
+  contrib suites, R2) is given the factor by hand: `-e YARDR_TEST_LOAD=4`, the
+  gate's cap.
+- The code as it was. Build the first binary with `-overlay <file>` on the
+  `go test -c` line, the file mapping the changed product file to the base's
+  copy of it (`git show <base>:<path>`, kept outside the worktree), as R2 does
+  for a cut deadline. The note names both runs, each with the image, the
+  variables as set, and the counts it printed.
+
+The race lock (R4, R5) is the gate's. `racelocked` in `.yardr/test` takes it
+for a race leg, a landing's or the quiet run's, and for a plain step that
+covers most of the suite, and no other command takes it: `contrib/burn` runs
+beside it, and so does a leaf gate run. A run of this recipe is a leaf run, one
+package or a few in one stream on three cpus, and takes no ticket. `sh
+.yardr/test --race-queue` shows who holds the lock and who waits without taking
+a place, and is worth a look before a run of minutes. A run that would cover
+the whole suite, or most of it, is the load the lock exists for, and a
+container run cannot queue for it: the lock is reached only through the gate's
+own steps. CI's Linux legs run the whole suite after the landing.
 
 ## The disk floor
 

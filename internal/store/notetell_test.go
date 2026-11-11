@@ -156,6 +156,47 @@ func TestAckNote(t *testing.T) {
 	if notes, _ := s.Notes(ctx, b.ID); !notes[0].Acked {
 		t.Fatalf("Notes = %+v, want the ack", notes)
 	}
+
+	// A note told to a session that has since ended is acked by the bead's
+	// live session, and by no other. The note is then that session's, so the
+	// one who wrote it sees who read it, and a note the ended session had
+	// read stays its own.
+	late, err := s.AddNotedAs(ctx, b.ID, "wider: the fence too", "yardmaster", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if late.Notify != sess.ID {
+		t.Fatalf("Notify = %q, want the live session %s", late.Notify, sess.ID)
+	}
+	if err := s.EndSession(ctx, sess.ID, "died", "x"); err != nil {
+		t.Fatal(err)
+	}
+	for _, as := range []string{"", "another"} {
+		if _, err := s.AckNote(ctx, b.ID, late.Seq, as, "builder"); err == nil || !strings.Contains(err.Error(), "which has ended") {
+			t.Fatalf("session %q acked a note told to an ended session, the bead having none live: %v", as, err)
+		}
+	}
+	sess2, err := s.Claim(ctx, b.ID, "g", "new", "yard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AckNote(ctx, b.ID, late.Seq, "another", "builder"); err == nil || !strings.Contains(err.Error(), "only the bead's live session") {
+		t.Fatalf("a session that is not the bead's acked a note told to an ended one: %v", err)
+	}
+	got, err = s.AckNote(ctx, b.ID, late.Seq, sess2.ID, "builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Acked || got.Notify != sess2.ID {
+		t.Fatalf("note acked by the live session = %+v, want it acked and its own", got)
+	}
+	if got, err = s.AckNote(ctx, b.ID, n.Seq, sess2.ID, "builder"); err != nil || got.Notify != sess.ID {
+		t.Fatalf("the live session's ack of a note the ended one had read = %+v, %v; want it left as the ended session's", got, err)
+	}
+	notes, _ := s.Notes(ctx, b.ID)
+	if !notes[0].Acked || notes[0].Notify != sess.ID || !notes[2].Acked || notes[2].Notify != sess2.ID {
+		t.Fatalf("Notes = %+v, want the first read by %s and %d read by %s", notes, sess.ID, late.Seq, sess2.ID)
+	}
 }
 
 // Marking a note told records it with its event, once: the second mark

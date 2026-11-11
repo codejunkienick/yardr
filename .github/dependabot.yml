@@ -7,6 +7,13 @@ updates:
     groups:
       all:
         patterns: ["*"]
+    ignore:
+      # huh/spinner is a module of its own that go.mod pins by pseudo-version,
+      # since upstream has tagged no spinner/v1.x release. Dependabot looks
+      # for the tag spinner/v1.0.0, which does not exist, so its whole
+      # go_modules run failed with "unknown revision spinner/v1.0.0". Take
+      # this ignore out when upstream tags spinner/v1.x.
+      - dependency-name: "github.com/charmbracelet/huh/spinner"
   - package-ecosystem: github-actions
     directory: /
     schedule:

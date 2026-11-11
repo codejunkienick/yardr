@@ -6,6 +6,8 @@ Nothing ends your session but `yardr bead done <id>` (or `--outcome question`,
 closing, or holding).
 
 1. Read the bead first (`yardr prime --bead <id>`): its goal, notes and edges.
+   The base may have moved since the shape, so re-resolve its where-to-look
+   pointers (files, lines, names) before you plan.
    When you have read the bead and the files it names, write a plan note
    (`yardr bead note <id>`, as under "Writing a note"): the decisions the
    bead asks for and the files you will change. Then start. If after about
@@ -13,7 +15,9 @@ closing, or holding).
    start from it; the note keeps what you learned out of your head.
 2. Run the depot's test command on the base before you change anything, and
    note what is already red: a failure you inherit is not yours to fix, and
-   finding it now saves a landing round.
+   finding it now saves a landing round. A command that tests only what
+   changed selects nothing on an unchanged tree, so run the tests of the
+   packages or files the bead will touch by hand for the baseline.
 3. Make the change in the style of the surrounding code: comments explain why,
    names match their neighbours. Prefer extending what is there over a new
    concept, flag, setting or special case. Where the bead forces one, say

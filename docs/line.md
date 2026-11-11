@@ -149,6 +149,13 @@ is told nothing. The note stays `will be told`, and is not marked untold,
 until the stop is over; a session that ends first is never told, and
 `yardr bead show` says `ended before it was told`.
 
+A session that ends with a note unread leaves it on the bead, and the bead's
+next session reads it there (`yardr bead show`, `yardr prime`). That session
+may ack it, though the note was told to the one that ended: such a note is
+acked by the bead's live session, and `yardr bead show` then says that
+session read it. A note told to a session that is still live is that
+session's alone to ack, and one the ended session had acked stays its own.
+
 An idle session with its bead still in its stage gets one prompt to hand
 on before the idle limit counts, once per idle spell (`session_idle_nudge`).
 One with no note of its own gets `your bead is still in <stage>: write your

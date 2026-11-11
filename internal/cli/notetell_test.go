@@ -121,6 +121,44 @@ func TestBeadNoteAck(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &acked); err != nil || acked["bead"] != "yd-1" || acked["acked"] != "ok" {
 		t.Fatalf("bead note --ack --json = %q, %v", out, err)
 	}
+
+	// The session ends with the note neither told nor read, and the bead's
+	// next session reads it from the bead: it may ack it, which no other
+	// session may, and bead show then says the next session read it, as the
+	// first still read the one it acked.
+	a.json = false
+	if err := st.EndSession(ctx, sess.ID, "died", "gone"); err != nil {
+		t.Fatal(err)
+	}
+	next, err := st.Claim(ctx, "yd-1", "g", "new", "yard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	yardEnv(t, st)["YARDR_SESSION"] = "another"
+	if _, err := run(t, a.beadCmd(), "note", "yd-1", "--ack", fmt.Sprint(lost)); err == nil ||
+		!strings.Contains(err.Error(), "only the bead's live session") {
+		t.Fatalf("another session's ack of a note told to an ended session: %v", err)
+	}
+	yardEnv(t, st)["YARDR_SESSION"] = next.ID
+	out, err = run(t, a.beadCmd(), "note", "yd-1", "--ack", fmt.Sprint(lost))
+	if err != nil {
+		t.Fatalf("the live session's ack of a note told to the ended one: %v", err)
+	}
+	if want := fmt.Sprintf("note %d on yd-1 acked\n", lost); out != want {
+		t.Fatalf("bead note --ack = %q, want %q", out, want)
+	}
+	out, err = run(t, a.beadCmd(), "show", "yd-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		fmt.Sprintf("(note %d), read by session %s", lost, next.ID),
+		fmt.Sprintf("(note %d), read by session %s", seq, sess.ID),
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("bead show lacks %q:\n%s", want, out)
+		}
+	}
 }
 
 // yardr bead done from the session working the bead is refused while a

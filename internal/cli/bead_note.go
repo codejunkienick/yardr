@@ -56,7 +56,9 @@ page. yardr page show prints the frame, and what it offers a fragment, before
 you write one. --title is required with --page and refused without it.
 
 --ack <seq> writes nothing: it records that this session read note <seq>,
-and takes no text, no --file and no --page.`,
+and takes no text, no --file and no --page. A note told to a session that has
+ended may be acked by the bead's live session, and bead show then says that
+session read it; a note told to a session still live is that session's to ack.`,
 		Args: func(c *cobra.Command, args []string) error {
 			if c.Flags().Changed("ack") {
 				if c.Flags().Changed("file") || c.Flags().Changed("page") || c.Flags().Changed("title") {
