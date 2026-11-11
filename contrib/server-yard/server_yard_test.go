@@ -34,6 +34,7 @@ import (
 	"yardr.dev/yardr/contrib/server-yard/managers"
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/peer"
+	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/storetest"
 	"yardr.dev/yardr/internal/testload"
 )
@@ -43,7 +44,9 @@ import (
 // and the daemon of a yard would outlive it (storetest.NameTestBinary).
 func TestMain(m *testing.M) {
 	storetest.NameTestBinary()
-	os.Exit(m.Run())
+	code := m.Run()
+	scripttest.Remove()
+	os.Exit(code)
 }
 
 // yard holds one test's directories: D is short (/tmp/sy.XXXXXX), since a
@@ -1193,9 +1196,10 @@ func TestAHeldDaemonStartsOnlyForARelease(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				if err := os.WriteFile(filepath.Join(bin, "yardr"), []byte("#!/bin/sh\necho \"$*\" >>\"$STARTED\"\n"), 0o755); err != nil {
-					t.Fatal(err)
-				}
+				// A stand-in: the manager starts yardr beside forking tests,
+				// and Linux refuses to start a file a fork beside its
+				// writing still holds open (ETXTBSY).
+				scripttest.Write(t, filepath.Join(bin, "yardr"), "#!/bin/sh\necho \"$*\" >>\"$STARTED\"\n")
 				if c.held {
 					if err := os.WriteFile(filepath.Join(state, "start-hold"), nil, 0o600); err != nil {
 						t.Fatal(err)

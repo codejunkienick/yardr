@@ -21,6 +21,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"yardr.dev/yardr/internal/diskkeep"
+	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/testload"
 )
 
@@ -74,6 +75,7 @@ func TestMain(m *testing.M) {
 	testload.PreferRealGit()
 	code := m.Run()
 	os.RemoveAll(gitDir)
+	scripttest.Remove()
 	os.Exit(code)
 }
 
@@ -452,13 +454,14 @@ func runCmd(t *testing.T, cmd *exec.Cmd) (string, int) {
 	return string(out), exitCode(t, err)
 }
 
-// writeBins writes fake programs into dir.
+// writeBins writes fake programs into dir. Each is a stand-in, a link to the
+// one launcher: the tests that run them run beside forking tests, and Linux
+// refuses to start a file a fork beside its writing still holds open
+// (ETXTBSY), where it starts the launcher, written once.
 func writeBins(t *testing.T, dir string, bins map[string]string) {
 	t.Helper()
 	for name, text := range bins {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o755); err != nil {
-			t.Fatal(err)
-		}
+		scripttest.Write(t, filepath.Join(dir, name), text)
 	}
 }
 
@@ -5048,9 +5051,10 @@ func raceLockDriver(t *testing.T) (driver, home string) {
 	driver = filepath.Join(t.TempDir(), "driver.sh")
 	// The worker re-enters this driver with YARDR_TEST_RACE_LEG set. Drop
 	// its status path and run the command, as the real script's worker does.
-	if err := os.WriteFile(driver, []byte("#!/bin/sh\n"+fn+"\nif [ -n \"$YARDR_TEST_RACE_LEG\" ]; then shift; exec \"$@\"; fi\nracelocked \"$@\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	// A stand-in: the tests that run the driver run beside forking tests,
+	// and Linux refuses to start a file a fork beside its writing still
+	// holds open (ETXTBSY).
+	scripttest.Write(t, driver, "#!/bin/sh\n"+fn+"\nif [ -n \"$YARDR_TEST_RACE_LEG\" ]; then shift; exec \"$@\"; fi\nracelocked \"$@\"\n")
 	return driver, home
 }
 
@@ -5475,7 +5479,8 @@ func TestYardTestRaceLockTermDuringTicketCreationLeavesNoQueueFiles(t *testing.T
 			// Each probe locks under its own home: run beside each
 			// other, one would read the other's ticket as left behind.
 			driver, home := raceLockDriver(t)
-			b, err := os.ReadFile(driver)
+			// The driver's text is the body beside its link.
+			b, err := os.ReadFile(driver + ".sh")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -5484,9 +5489,10 @@ func TestYardTestRaceLockTermDuringTicketCreationLeavesNoQueueFiles(t *testing.T
 			}
 			probe := filepath.Join(t.TempDir(), "probe.sh")
 			patched := strings.Replace(string(b), tc.point, "      kill(\"TERM\", $$);\n"+tc.point, 1)
-			if err := os.WriteFile(probe, []byte(patched), 0o755); err != nil {
-				t.Fatal(err)
-			}
+			// A stand-in: the probe runs beside forking tests, and Linux
+			// refuses to start a file a fork beside its writing still
+			// holds open (ETXTBSY).
+			scripttest.Write(t, probe, patched)
 			cmd := exec.Command(probe, filepath.Join(home, "worker.status"), "true")
 			cmd.Env = append(scriptEnv(), "HOME="+home)
 			out, err := cmd.CombinedOutput()
