@@ -122,6 +122,11 @@ func TestGuardedAnswerOverTheWire(t *testing.T) {
 	if got := call(t, h, y.phone, "AnswerAskExpected", pick); !strings.Contains(got, `"code":"conflict"`) {
 		t.Fatalf("jo's device again from the same read = %s, want a conflict", got)
 	}
+	// The card is at turn 1 now, and ada's device still holds its read of
+	// turn 0: she is refused as before and told nothing of the turn.
+	if got := call(t, h, y.tabs, "AnswerAskExpected", pick); !strings.Contains(got, `"error"`) || strings.Contains(got, "conflict") || strings.Contains(got, "at turn") {
+		t.Fatalf("ada's device from a stale read = %s, want it refused as not hers, and no turn", got)
+	}
 	if got := y.ask(t, y.asks[2]); got.Option != 1 || got.Turn != 1 {
 		t.Fatalf("the card jo's device answered = %+v", got)
 	}

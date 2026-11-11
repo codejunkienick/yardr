@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 
+	bolt "go.etcd.io/bbolt"
+
 	"yardr.dev/yardr/internal/store"
 )
 
@@ -296,13 +298,33 @@ func TestGuardedAnswerTurns(t *testing.T) {
 // The turn adds a check and takes none away: who may answer, what the ask
 // takes and whether it is asked still are refused as the unguarded calls
 // refuse them, writing nothing; a bead of another yard takes no turn; and a
-// turn is never negative.
+// turn is never negative. Who may answer is asked first, so a caller the
+// policy turns away is refused in its words whatever turn it read, and is
+// told neither the ask's turn nor the bead's revision: by the core's rule of
+// an ask's addressee (ada), by a policy that turns an operator away (jo), and
+// by one that hides the bead from a caller it lets answer (kim). A caller who
+// may answer is told, ahead of the refusals of an ask that is taken back.
 func TestGuardedAnswerKeepsTheRules(t *testing.T) {
 	t.Parallel()
-	s, ctx := stageAskYard(t, stageAskChoice)
-	id, seqs := turnBead(t, s, ctx, "Move this yard's links now?", "Close sketch PR #3?")
-	ask, back := seqs[0], seqs[1]
+	s, own, ctx := stageAskYardOwned(t, stageAskChoice)
+	own.SetPolicy(policyFunc(func(ctx context.Context, tx *bolt.Tx, actor string, act store.Action, obj store.Object) error {
+		switch {
+		case actor == "jo" && act == store.ActAnswerAsk:
+			return errors.New("the policy turns jo away")
+		case actor == "kim" && act == store.ActSee:
+			return errors.New("the policy hides the bead from kim")
+		case actor == "kim" && act == store.ActAnswerAsk:
+			return nil
+		}
+		return store.CorePolicy.May(ctx, tx, actor, act, obj)
+	}))
+	id, seqs := turnBead(t, s, ctx, "Move this yard's links now?", "Close sketch PR #3?", "Send them to build?")
+	ask, back, moved := seqs[0], seqs[1], seqs[2]
 	if err := s.TakeBackAsk(ctx, id, back, "asked no more", "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	// The third ask took an answer after the clients below read it at turn 0.
+	if err := s.AnswerAsk(ctx, id, moved, 2, "external answer", "mckean", false); err != nil {
 		t.Fatal(err)
 	}
 	bad := []struct {
@@ -322,22 +344,58 @@ func TestGuardedAnswerKeepsTheRules(t *testing.T) {
 			return s.AnswerAskExpected(ctx, "yd-ledger@north", 9, 0, 1, "", "mckean", false)
 		}, "another yard's bead"},
 		{"a negative turn", func() error { return s.DeferAskExpected(ctx, id, ask, -1, "mckean") }, "from 0"},
+		{"another user's stale pick", func() error { return s.AnswerAskExpected(ctx, id, moved, 0, 1, "", "ada", false) }, "mckean"},
+		{"another user's stale put-aside", func() error { return s.DeferAskExpected(ctx, id, moved, 0, "ada") }, "mckean"},
+		{"another user's stale decline", func() error { return s.DeclineAskExpected(ctx, id, moved, 0, "no", "ada") }, "mckean"},
+		{"another user's stale revision", func() error {
+			return s.AddAnswerExpected(ctx, id, store.Answer{Ask: moved, Option: 1}, "ada", "01STALE")
+		}, "mckean"},
+		{"a stale pick by the operator a policy turns away", func() error { return s.AnswerAskExpected(ctx, id, moved, 0, 1, "", "jo", false) }, "turns jo away"},
+		{"a stale pick on a bead hidden from the caller", func() error { return s.AnswerAskExpected(ctx, id, moved, 0, 1, "", "kim", false) }, "not found"},
+		{"a stale revision on a bead hidden from the caller", func() error {
+			return s.AddAnswerExpected(ctx, id, store.Answer{Ask: moved, Option: 1}, "kim", "01STALE")
+		}, "not found"},
+		// An ask that is none takes no guard, so no caller is told the
+		// revision by naming one.
+		{"a stale revision on no ask", func() error {
+			return s.AddAnswerExpected(ctx, id, store.Answer{Ask: 999999, Option: 1}, "mckean", "01STALE")
+		}, "has no ask"},
 	}
 	for _, c := range bad {
 		err := c.call()
-		if err == nil || errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s = %v, want a refusal saying %q", c.name, err, c.want)
+		if err == nil || errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), c.want) ||
+			strings.Contains(err.Error(), "at turn") || strings.Contains(err.Error(), "at revision") {
+			t.Errorf("%s = %v, want a refusal saying %q and no turn or revision", c.name, err, c.want)
 		}
 	}
 	if got := beadAsk(t, s, ctx, id, ask); got.State != "open" || got.Turn != 0 {
 		t.Fatalf("after the refusals the ask is %s at turn %d, want open at 0", got.State, got.Turn)
+	}
+	if got := beadAsk(t, s, ctx, id, moved); got.State != "answered" || got.Option != 2 || got.Turn != 1 {
+		t.Fatalf("after the stale reads the third ask is %s with option %d at turn %d, want the external answer alone at 1", got.State, got.Option, got.Turn)
+	}
+
+	// The addressee is told the same reads are stale, and one drawn from
+	// before the ask was taken back is a conflict, not what it is refused for.
+	for name, call := range map[string]func() error{
+		"a stale pick": func() error { return s.AnswerAskExpected(ctx, id, moved, 0, 1, "", "mckean", false) },
+		"a stale revision": func() error {
+			return s.AddAnswerExpected(ctx, id, store.Answer{Ask: moved, Option: 1}, "mckean", "01STALE")
+		},
+		"a pick from before the ask was taken back": func() error { return s.AnswerAskExpected(ctx, id, back, 0, 1, "", "mckean", false) },
+	} {
+		if err := call(); !errors.Is(err, store.ErrConflict) {
+			t.Errorf("%s by the addressee = %v, want a conflict", name, err)
+		}
 	}
 }
 
 // A card the yard put for a stage takes a guarded pick as it takes any: the
 // pick moves the bead in its write, and a pick drawn from the same read by
 // another member is refused, so the bead moves once. Leaving the stage
-// takes the other cards back, so their reads are stale too.
+// takes the other cards back, so their reads are stale too. A stale read
+// from one who is no member is refused as the group's rule refuses them, and
+// names no turn.
 func TestGuardedAnswerOnAStageAsk(t *testing.T) {
 	t.Parallel()
 	s, ctx := stageAskYard(t, stageAskChoice)
@@ -359,6 +417,18 @@ func TestGuardedAnswerOnAStageAsk(t *testing.T) {
 	ada, mckean := cards["ada"], cards["mckean"]
 	if ada.Turn != 0 || mckean.Turn != 0 {
 		t.Fatalf("the stage cards = %+v", cards)
+	}
+	// ada puts mckean's card aside, so that a read of it at turn 0 is stale
+	// while the bead is in its stage still.
+	if err := s.DeferAsk(ctx, b.ID, mckean.Ask, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	err = s.AnswerAskExpected(ctx, b.ID, mckean.Ask, mckean.Turn, 1, "", "kim", false)
+	if err == nil || errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "only members of group reviewers") || strings.Contains(err.Error(), "at turn") {
+		t.Fatalf("kim, no member, from a stale read = %v, want the group's refusal and no turn", err)
+	}
+	if err := s.AnswerAskExpected(ctx, b.ID, mckean.Ask, mckean.Turn, 1, "", "mckean", false); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("mckean from the same stale read = %v, want a conflict", err)
 	}
 	if err := s.AnswerAskExpected(ctx, b.ID, ada.Ask, ada.Turn, 2, "", "ada", false); err != nil {
 		t.Fatal(err)

@@ -18,11 +18,13 @@ import (
 // DeclineAskExpected) names the turn its caller read, and is refused with
 // ErrConflict, writing nothing, when the ask is at another: a client that
 // read an ask open cannot replace a pick someone else made in the gap, nor
-// put aside or decline what was settled meanwhile. The turn is checked in
-// the answer's own write, ahead of the rules of who may answer and what the
-// ask takes, which stand as the unguarded answer's: who may answer (answerable, stageAnswer), the weighty
-// word (weighedRefusal), and what the answer moves. The unguarded calls are
-// unchanged: a newer pick still replaces an older one there.
+// put aside or decline what was settled meanwhile. The turn says that
+// someone wrote on the ask, which only a caller who may answer it is told, so
+// it is checked in the answer's own write after the rules of who may answer
+// (guard), and ahead of the rest, which stand as the unguarded answer's:
+// what the ask takes (answerable), the weighty word (weighedRefusal), and
+// what the answer moves (stageAnswer). The unguarded calls are unchanged: a
+// newer pick still replaces an older one there.
 
 // Turn is the ask's turn: how many answers it has taken.
 func (r ResolvedAsk) Turn() int { return len(r.Answers) }
@@ -47,23 +49,68 @@ func expectTurn(turn int) (answerExpect, error) {
 	return answerExpect{turn: turn, turned: true}, nil
 }
 
-// check refuses the answer to the ask seq on the bead row, whose notes are
-// notes, when e no longer holds. An ask that is none is answerable's to
-// refuse.
-func (e answerExpect) check(row *beadRow, notes []Note, seq uint64) error {
+// check refuses the answer to the ask r on the bead row when e no longer
+// holds.
+func (e answerExpect) check(row *beadRow, r *ResolvedAsk) error {
 	if e.revision != "" && row.Revision != e.revision {
 		return fmt.Errorf("%w: bead %s is at revision %s, not %s; read it again", ErrConflict, row.ID, row.Revision, e.revision)
 	}
-	if !e.turned {
-		return nil
-	}
-	for _, r := range ResolveAsks(notes, now()) {
-		if r.Note.Seq == seq && r.AskErr == nil && r.Turn() != e.turn {
-			return fmt.Errorf("%w: ask %d on bead %s is at turn %d, not %d: it was answered, put aside, declined or taken back since; read it again",
-				ErrConflict, seq, row.ID, r.Turn(), e.turn)
-		}
+	if e.turned && r.Turn() != e.turn {
+		return fmt.Errorf("%w: ask %d on bead %s is at turn %d, not %d: it was answered, put aside, declined or taken back since; read it again",
+			ErrConflict, r.Note.Seq, row.ID, r.Turn(), e.turn)
 	}
 	return nil
+}
+
+// guard refuses the answer ans, by actor, to the ask it names on the bead
+// row, whose notes are notes, when e no longer holds (check). A conflict
+// names the revision the bead is at or the turn the ask has reached, which
+// tells that someone wrote since, and only a caller who may answer the ask is
+// to be told that. So the policy speaks first, in the same write: a bead
+// actor may not see is not found, as MoveBead has it, and the gate the answer
+// meets further on is asked now, so that a caller it turns away is refused as
+// the unguarded answer refuses it, whatever it read. Then e is checked, ahead
+// of what answerable says of an ask answered, declined or taken back since, so
+// that a stale caller who may answer is told its read is stale, and not what
+// the ask would be refused for.
+//
+// The gate is the ask kind's own, as the answer meets it: the group's members
+// for a stage ask (stageAnswerAuth, which stageAnswer asks), the operator the
+// card asks for a mapping card (mayAnswerMapping, which answerMapping asks),
+// and for any other ask its addressee or an operator (mayAnswer, which
+// answerable asks). That last holds a pick or words on a card that takes an
+// approval too, which answerable refuses whoever gives them. An ask that is
+// none takes no guard: answerable refuses it.
+func (w *wtx) guard(ctx context.Context, e answerExpect, row *beadRow, notes []Note, ans Answer, actor string, mayAnswer func(to string) error) error {
+	if !e.guards() {
+		return nil
+	}
+	if err := w.may(ctx, actor, ActSee, Object{Kind: KindBead, Name: row.ID}); err != nil {
+		return fmt.Errorf("bead %s: %w", row.ID, ErrNotFound)
+	}
+	var r *ResolvedAsk
+	resolved := ResolveAsks(notes, now())
+	for i := range resolved {
+		if resolved[i].Note.Seq == ans.Ask && resolved[i].AskErr == nil {
+			r = &resolved[i]
+		}
+	}
+	if r == nil {
+		return nil
+	}
+	var err error
+	switch ask := r.Ask; {
+	case ask.Stage != "":
+		err = w.stageAnswerAuth(ctx, row, ask, actor)
+	case ask.Identity != nil:
+		err = w.mayAnswerMapping(ctx, row, ask, ans, actor)
+	default:
+		err = mayAnswer(ask.To)
+	}
+	if err != nil {
+		return err
+	}
+	return e.check(row, r)
 }
 
 // AnswerAskExpected is AnswerAsk drawn from the ask at turn, the Turn its

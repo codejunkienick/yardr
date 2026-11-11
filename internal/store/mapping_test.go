@@ -176,7 +176,9 @@ func mapBehindTheCards(t *testing.T, y *askYard, user, source string, id Identit
 // showing the member id and channel without message text that agents
 // could read before the answer. Picking a user writes their identity,
 // closes the card's bead with what was written, and the sender offers
-// no second card, by then or once mapped.
+// no second card, by then or once mapped. A guarded pick from a read of the
+// card gone stale is refused for one who is not the operator as it is at the
+// card's own turn, and says nothing of the turn.
 func TestClaimIdentityPickWritesIdentity(t *testing.T) {
 	t.Parallel()
 	y := mappingYard(t)
@@ -220,6 +222,19 @@ func TestClaimIdentityPickWritesIdentity(t *testing.T) {
 	}
 	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, pick, "", "mckean", false); err == nil || !strings.Contains(err.Error(), "weighed") {
 		t.Fatalf("the operator's guarded pick without its weight = %v", err)
+	}
+	wantCardOpen(t, y, open.Bead)
+	// The operator puts the card aside, so that a read of it at its first
+	// turn is stale: ada's pick from it is refused as before, and names no
+	// turn; the operator's own is a conflict.
+	if err := y.DeferAsk(y.ctx, open.Bead, open.Ask, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, pick, "", "ada", true); err == nil || errors.Is(err, ErrConflict) || strings.Contains(err.Error(), "at turn") {
+		t.Fatalf("ada's guarded pick from a stale read = %v, want her refusal and no turn", err)
+	}
+	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, pick, "", "mckean", true); !errors.Is(err, ErrConflict) {
+		t.Fatalf("the operator's guarded pick from the same stale read = %v, want a conflict", err)
 	}
 	wantCardOpen(t, y, open.Bead)
 	if err := y.AnswerAsk(y.ctx, open.Bead, open.Ask, pick, "", "mckean", true); err != nil {

@@ -777,7 +777,7 @@ func (s *Store) AddAnswerExpected(ctx context.Context, id string, ans Answer, ac
 }
 
 // addAnswer is AddAnswer's write, refused whole when expect no longer holds
-// (answerExpect). weighed is the caller's word that its person saw the weight
+// (guard). weighed is the caller's word that its person saw the weight
 // of a mapping card whose pick writes an identity (weighedRefusal).
 func (s *Store) addAnswer(ctx context.Context, id string, ans Answer, actor string, expect answerExpect, weighed bool) error {
 	unlock := s.askLocks.lock(askLockKey(id, ans.Ask))
@@ -819,11 +819,11 @@ func (s *Store) addAnswer(ctx context.Context, id string, ans Answer, actor stri
 		if err != nil {
 			return err
 		}
-		if err := expect.check(row, notes, ans.Ask); err != nil {
-			return err
-		}
 		mayAnswer := func(to string) error {
 			return w.may(ctx, actor, ActAnswerAsk, Object{Kind: KindAsk, Name: row.ID, Seq: ans.Ask, To: to})
+		}
+		if err := w.guard(ctx, expect, row, notes, ans, actor, mayAnswer); err != nil {
+			return err
 		}
 		if _, err := answerable(row.ID, notes, ans, now(), actor, mayAnswer); err != nil {
 			return err
