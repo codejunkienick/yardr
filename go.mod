@@ -1,6 +1,6 @@
 module yardr.dev/yardr
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/backkem/spake2-go v0.0.1
