@@ -26,6 +26,9 @@ func (p *paneRunner) Status(ctx context.Context, h map[string]any) (string, erro
 	own, ok := p.panes[h["session"].(string)]
 	p.mu.Unlock()
 	if ok {
+		if own[0] == "status-error" {
+			return "", fmt.Errorf("synthetic runner status unavailable")
+		}
 		return own[0], nil
 	}
 	return p.retryRunner.Status(ctx, h)
@@ -34,9 +37,10 @@ func (p *paneRunner) Status(ctx context.Context, h map[string]any) (string, erro
 func (p *paneRunner) Tail(ctx context.Context, h map[string]any, n int) (string, error) {
 	p.mu.Lock()
 	own, ok := p.panes[h["session"].(string)]
+	err := p.tailErr
 	p.mu.Unlock()
 	if ok {
-		return own[1], nil
+		return own[1], err
 	}
 	return p.retryRunner.Tail(ctx, h, n)
 }
@@ -54,10 +58,9 @@ func (p *paneRunner) showBead(t *testing.T, s store.API, b store.Bead, status, t
 	p.panes[*got.Session] = [2]string{status, tail}
 }
 
-// holdYard is a yard whose group g runs up to three kimi sessions with the
-// model k3, one of them started for the bead returned and seen working,
-// with a stand-in provider of limits and a clock the test moves.
-func holdYard(t *testing.T) (s store.API, r *paneRunner, d *dispatch.Dispatcher, b store.Bead, p *standIn, now *time.Time) {
+// holdYard starts a session with model k3, a stand-in provider and a movable
+// clock. Its group runs up to three of kimi, unless the test names another kind.
+func holdYard(t *testing.T, kinds ...string) (s store.API, r *paneRunner, d *dispatch.Dispatcher, b store.Bead, p *standIn, now *time.Time) {
 	t.Helper()
 	r = &paneRunner{retryRunner: &retryRunner{agentRunner: &agentRunner{statusRunner: &statusRunner{
 		fakeRunner: &fakeRunner{dead: map[string]bool{}}, status: "working"}, worked: true}}, panes: map[string][2]string{}}
@@ -68,8 +71,12 @@ func holdYard(t *testing.T) (s store.API, r *paneRunner, d *dispatch.Dispatcher,
 	now = &at
 	dispatch.SetClock(d, func() time.Time { return *now })
 	ctx := context.Background()
+	kind := "kimi"
+	if len(kinds) != 0 {
+		kind = kinds[0]
+	}
 	must(t, s.PutGroup(ctx, store.Group{Name: "g", Runner: "fake", Limit: 3,
-		Config: map[string]any{"kind": "kimi", "stall": "off", "model": "k3"}}, "me"))
+		Config: map[string]any{"kind": kind, "stall": "off", "model": "k3"}}, "me"))
 	_, err := s.AddRoute(ctx, store.Route{Stage: "new", Group: "g"}, "me")
 	must(t, err)
 	bead, err := s.CreateBead(ctx, store.NewBead{Title: "x"}, "me")
@@ -600,6 +607,96 @@ func TestClaimPassesOverAGroupHeldByAUsageWait(t *testing.T) {
 				t.Fatalf("claimed by %q, want a again", group)
 			}
 		})
+	}
+}
+
+func TestUntimedQuotaHoldSurvivesRestartUntilPaneRecovers(t *testing.T) {
+	t.Parallel()
+	const museQuotaStop = "◆ Usage limit reached\n❯ "
+	s, r, d, b, _, now := holdYard(t, "muse")
+	ctx := context.Background()
+	r.showBead(t, s, b, "idle", museQuotaStop)
+	must(t, d.Reconcile(ctx))
+	n, err := s.AddNotedAs(ctx, b.ID, "continue after recovery", "yardmaster", "")
+	must(t, err)
+	must(t, d.Reconcile(ctx))
+	if notes, err := s.Notes(ctx, b.ID); err != nil || len(notes) != 1 || notes[0].Told || len(r.nudges) != 0 {
+		t.Fatalf("notes = %v, err = %v, nudges = %v; want the note queued", notes, err, r.nudges)
+	}
+	r.showBead(t, s, b, "status-error", museQuotaStop)
+	d = &dispatch.Dispatcher{Store: s, Runners: map[string]dispatch.Runner{"fake": r}}
+	t.Cleanup(func() { dispatch.WaitLimitsIdle(d) })
+	dispatch.SetClock(d, func() time.Time { return *now })
+	next := newBead(t, s, "after restart")
+	must(t, d.Reconcile(ctx))
+	r.showBead(t, s, b, "working", museQuotaStop)
+	must(t, d.Reconcile(ctx))
+	r.setTailError(fmt.Errorf("synthetic pane unavailable"))
+	must(t, d.Reconcile(ctx))
+	if group, _ := claimedBy(t, s, next.ID); group != "" {
+		t.Fatalf("claimed by %q, want working status alone to retain the hold", group)
+	}
+	r.setTailError(nil)
+	r.showBead(t, s, b, "idle", museQuotaStop+"\n❯ continue\n◆ Completed\n❯ ")
+	must(t, d.Reconcile(ctx))
+	if notes, err := s.Notes(ctx, b.ID); err != nil || len(notes) != 1 || !notes[0].Told || len(r.nudges) != 1 || !strings.Contains(r.nudges[0], fmt.Sprintf("(note %d)", n.Seq)) {
+		t.Fatalf("notes = %v, err = %v, nudges = %v; want the queued note delivered once", notes, err, r.nudges)
+	}
+}
+
+func oneSlotHeldYard(t *testing.T) (store.API, *paneRunner, *dispatch.Dispatcher) {
+	t.Helper()
+	s, r, d, p, _, now, _ := elseYard(t, "a", store.Group{Name: "b", Runner: "herdr", Limit: 1,
+		Config: map[string]any{"kind": "codex", "stall": "off"}}, kimiUsed, codexOpen)
+	p.sayFor("moonshot", kimiOpen)
+	*now = now.Add(6 * time.Minute)
+	primeGroupLimits(t, s, d, "a")
+	one := 1
+	_, err := s.SetGroup(context.Background(), "a", store.GroupEdit{Limit: &one}, "me")
+	must(t, err)
+	return s, r, d
+}
+
+func TestQuotaHoldFallsBackAtOneSlot(t *testing.T) {
+	t.Parallel()
+	s, _, d := oneSlotHeldYard(t)
+	b := newBead(t, s, "fallback at one slot")
+	must(t, d.Reconcile(context.Background()))
+	if group, claim := claimedBy(t, s, b.ID); group != "b" || len(claim["passed"].([]any)) != 1 {
+		t.Fatalf("claimed by %q with %v, want fallback b past the held a", group, claim)
+	}
+}
+
+func TestQuotaHoldOtherModelWaitsAtOneSlot(t *testing.T) {
+	t.Parallel()
+	s, _, d := oneSlotHeldYard(t)
+	b, err := s.CreateBead(context.Background(), store.NewBead{Title: "other model", Metadata: map[string]any{"model": "k2"}}, "me")
+	must(t, err)
+	must(t, d.Reconcile(context.Background()))
+	if group, _ := claimedBy(t, s, b.ID); group != "" {
+		t.Fatalf("claimed by %q, want the other model to wait at capacity", group)
+	}
+}
+
+func TestQuotaHoldRespectsGlobalCap(t *testing.T) {
+	t.Parallel()
+	s, _, d := oneSlotHeldYard(t)
+	must(t, s.SetSetting(context.Background(), store.MaxSessionsSetting, "1", "me"))
+	b := newBead(t, s, "global cap")
+	must(t, d.Reconcile(context.Background()))
+	if group, _ := claimedBy(t, s, b.ID); group != "" {
+		t.Fatalf("claimed by %q, want the held session to count against max_sessions", group)
+	}
+}
+
+func TestQuotaHoldRespectsGlobalPause(t *testing.T) {
+	t.Parallel()
+	s, _, d := oneSlotHeldYard(t)
+	must(t, s.SetSetting(context.Background(), store.MaxSessionsSetting, "0", "me"))
+	b := newBead(t, s, "global pause")
+	must(t, d.Reconcile(context.Background()))
+	if group, _ := claimedBy(t, s, b.ID); group != "" {
+		t.Fatalf("claimed by %q, want no claim while max_sessions is zero", group)
 	}
 }
 

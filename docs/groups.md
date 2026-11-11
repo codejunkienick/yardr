@@ -623,11 +623,15 @@ prints them as `builders@Weekly<80,5h<90 else spare-builders`.
   conditions, however many beads are ready; the built-in machine source
   is re-read every pass, about every 30 seconds, since load moves faster
   than any provider's windows.
-- **A group at its limit is waited for, not passed over.** So is one whose
-  runtime is down or that is held back for a model. Only a quota condition
-  sends a bead to a further group, and what the yard runs at once stays
-  bounded by the groups' limits. The bead gets one `group_wait` event,
-  logged once per stage and route until it starts, as `quota_wait` is:
+- **A group at its limit is waited for, not passed over, unless the bead's
+  exact model is held.** A model hold passes the group over for the route's
+  next group even when the held session occupies its last slot. A pause
+  (limit 0), a runtime outage or a start in flight still waits. The next
+  group must satisfy its own quota and limit, and held sessions still count
+  against `max_sessions`. With no available group the bead waits, with a
+  `quota_wait` if the remaining groups fail their quota conditions. A wait
+  for a group's limit, runtime or model gets one `group_wait` event, logged
+  once per stage and route until it starts, as `quota_wait` is:
   `route`, `groups` (each group with its `reason` in words: at its limit,
   its runtime down, or held back for the bead's model), `reason` (the same
   on one line) and `hint`. A group at limit 0 says paused instead of
@@ -1041,9 +1045,10 @@ screen, so a still pane for that long is not working.
 
 **`session_harness_error`.** The pane says what herdr's status cannot. On
 each pass in the first 2 minutes of an idle spell (status `idle` or `done`)
-the daemon reads the end of the agent's
-pane, and a line among its last 20 that is a known error of the group's
-`kind` raises one event on the bead, at once and not at the `idle` limit:
+the daemon reads the end of the agent's pane. A message the agent took since
+ends the scan, so an error above it is history. A line among its last 20
+that is a known error of the group's `kind` raises one event on the bead,
+at once and not at the `idle` limit:
 
 | field | |
 |---|---|
@@ -1134,6 +1139,8 @@ before the general one:
 | `kimi` | `at_capacity` | `^Error: \[provider\.overloaded\]` |
 | `kimi` | `not_logged_in` | `^Error: \[(auth\.(login_required\|token_missing\|token_unauthorized)\|provider\.auth_error)\]` |
 | `pi` | `other` | `^Error: Retry failed after \d+ attempts` |
+| `muse` | `rate_limited` | `^Usage limit reached$` |
+| `muse` | `rate_limited` | `^This turn stopped because your usage limit was reached\.$` |
 | `muse` | `other` | `^model failed:` |
 | any other | | none known: nothing is reported, and `session_idle` with its `tail` is what there is |
 <!-- /harness errors -->
@@ -1256,7 +1263,19 @@ reset at 00:02 (3m ago)`. With no window used up the hint says so (`no
 window of kimi's subscription is used up, says aiquokka: …`): the limit the
 harness hit is then one the provider does not report, another account's, one
 model's or a short rate limit, and the yardmaster reads the pane as before.
-With `limits_unknown` the hint is what it was.
+With `limits_unknown` the hint explains the stop without a window or reset.
+
+When the source names no used-up window or gives no reset time, the
+observed usage stop still holds the session's model in its group. The
+route can pass it over for an `--else` group; with no available fallback,
+new beads wait. The hold survives a daemon restart and ends when the
+pane can be read without a current usage stop, or the session ends; status
+alone does not end it. No reset is guessed and no prompt is scheduled.
+A note written for the session stays queued while the hold lasts, as it
+does during a known reset's wait: the agent cannot read it, and it is told
+once the hold has ended, or never if the session ends first.
+An empty or unavailable report without an observed stop keeps the route's
+usual policy. A known reset continues to use the wait described below.
 
 A session's answer is for the login its group burns, read with the group's
 env (`yardr limits --group <group>` reads the same); a crew member's is for
@@ -1282,7 +1301,7 @@ command runs inside the dispatcher's pass, so one that hangs holds that
 pass for up to 30 seconds, once in a minute. The 60 seconds are fixed; no
 key sets them.
 
-The group goes on starting sessions whatever the event says.
+Other models and groups are held only by their own stops and route conditions.
 
 #### A window that resets within six hours is waited for
 
@@ -1295,7 +1314,7 @@ hours away, the daemon comes back for it:
 | | |
 |---|---|
 | at the stop | the event is raised at once, as above, with `wakes_at`: the reset and one minute. The hint says `yardr asks again at 00:03 and prompts the agent when the window is open`. The time is kept on the handle (`harness_reset_at`, with `harness_reset_window` and, for a session, `harness_reset_model`), so a daemon that replaced itself wakes for it too |
-| while it waits | a session's idle spell is not counted: no `session_idle`, and a group with `grace` does not end it. `max_age` applies as ever. Nothing is typed, and the source is not asked. An agent that is seen working, or a crew member whose inbox was emptied, ends the wait |
+| while it waits | a session's idle spell is not counted: no `session_idle`, and a group with `grace` does not end it. `max_age` applies as ever. Nothing is typed, a note written for a session is not told, and the source is not asked. An agent that is seen working, or a crew member whose inbox was emptied, ends the wait |
 | the group, while a session waits | starts no further session with the model that session waits with: each would stop on the same limit, and three would wait where one does. The event says so, with `model`. A bead with another `--meta model` still starts, as beside a stalled session ([above](#models)), and so do the group's beads once its model is changed. The hold is read from the waiting sessions' handles on each pass and asks the source nothing; it ends with the wait: at the prompt, when the agent is seen working, or when the session ends (`yardr bead release <bead>`). `yardr session list` says it under its table: `builders starts no further session with model k3 until 00:03 (in 42m): session … (bead …) waits for the 5h window of its usage limit to reset`, and as `reset_wait` (`until`, `window`, `model`) in `--json`. Another group on the same subscription is not held: its next session stops, is told of, and then holds its own group |
 | at `wakes_at` | the source is asked once more. A window that is still used up, with a later reset or none said, is told again as at the stop (a second `session_harness_error`, with the new `resets_at` and `wakes_at`, or none for a reset more than 6 hours off): what the first event said no longer holds. A window that counts for a single model holds nothing here while no other is used up: the agent may be of another model, and one of that model stops on its window again after the prompt and is told of it then, with that window's `resets_at` and no `wakes_at` for a reset more than 6 hours off. A source that gives no answer does not hold the prompt back |
 | the prompt | given when the usage limit still ends the pane, the input is empty and no first prompt is on its way. A session that has done nothing (as `session_stalled` asks) gets its first prompt again. One stopped mid-work gets one line: `yardr: the usage limit your harness stopped on (kimi, 5h window) has reset. Go on where you stopped.` A crew member gets that line and its inbox's count (`… 3 new in your inbox: run yardr inbox to read them, and yardr inbox --ack <seq> through the last you handled.`), which counts as its nudge for them |

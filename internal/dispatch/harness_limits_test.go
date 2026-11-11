@@ -414,27 +414,27 @@ func TestUsageLimitWithNoResetToRead(t *testing.T) {
 	t.Parallel()
 	later := noon().Add(3 * time.Hour).Format(time.RFC3339)
 	for _, c := range []struct {
-		name, report string
-		fail, none   bool
-		window       any
-		hint         string
-		unknown      string
+		name, report     string
+		fail, none, hold bool
+		window           any
+		hint             string
+		unknown          string
 	}{
-		{name: "no window used up",
+		{name: "no window used up", hold: true,
 			report: `{"provider":"Kimi","windows":[{"label":"5h","used_percent":61,"resets_at":"` + later + `"}]}`,
 			hint:   "no window of kimi's subscription is used up, says quokka: the limit is another account's, one model's or a short rate limit; the agent's"},
-		{name: "used up and no reset said",
+		{name: "used up and no reset said", hold: true,
 			report: `{"provider":"Kimi","windows":[{"label":"5h","used":100,"limit":100,"resets_at":"0001-01-01T00:00:00Z"}]}`,
 			window: "5h", hint: "kimi's 5h window is used up, and quokka does not say when it resets; the agent's"},
 		{name: "the window that resets last",
 			report: `{"provider":"Kimi","windows":[{"label":"5h","used_percent":100,"resets_at":"` + later +
 				`"},{"label":"Weekly","used_percent":100,"resets_at":"` + noon().Add(27*time.Hour).Format(time.RFC3339) + `"}]}`,
 			window: "Weekly", hint: "kimi's Weekly window is used up and resets at " + noon().Add(27*time.Hour).Format("Mon 2 Jan 15:04") + " (in 1d 3h); the agent's"},
-		{name: "a provider that fails", fail: true, hint: "the agent's",
+		{name: "a provider that fails", fail: true, hold: true, hint: "the agent's",
 			unknown: "quokka: kimi: not logged in"},
-		{name: "a provider that prints no report", report: "Kimi: 5h 100%", hint: "the agent's",
+		{name: "a provider that prints no report", report: "Kimi: 5h 100%", hold: true, hint: "the agent's",
 			unknown: "not the JSON object the yard reads"},
-		{name: "no source", none: true, hint: "the agent's",
+		{name: "no source", none: true, hold: true, hint: "the agent's",
 			unknown: "no source of this yard says the limits of kimi"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -457,6 +457,9 @@ func TestUsageLimitWithNoResetToRead(t *testing.T) {
 			}
 			data := evs[0].Data
 			hint, _ := data["hint"].(string)
+			if c.hold {
+				c.hint = strings.Replace(c.hint, "the agent's", "the group starts no further session with this model until this session ends or gets going; the agent's", 1)
+			}
 			if !strings.HasPrefix(hint, c.hint) {
 				t.Errorf("hint = %q, want it to begin %q", hint, c.hint)
 			}
