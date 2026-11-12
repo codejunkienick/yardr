@@ -32,7 +32,7 @@ google packs' shared setup, said once in `yardr docs google`.
    ```sh
    yardr pack apply google-docs
    # applied pack google-docs to the yard: 2 created, 0 changed, 0 unchanged
-   # source google-docs is declared: 6 calls under https://docs.googleapis.com (yardr source show google-docs)
+   # source google-docs is declared: 7 calls under https://docs.googleapis.com (yardr source show google-docs)
    # source google-slides is declared: 2 calls under https://slides.googleapis.com (yardr source show google-slides)
    ```
 3. **The account.** The yard's Google account for `google-docs`
@@ -78,11 +78,19 @@ google packs' shared setup, said once in `yardr docs google`.
    yardr source grant google-docs style --crew yardmaster
    yardr source grant google-slides slide --crew yardmaster
    ```
+   `edit` is in no preset, so it is granted singly, on its own card:
+   ```sh
+   yardr bead ask <bead> "Let the yardmaster edit Docs freely" --run "source grant google-docs edit --crew yardmaster" --context "The yardmaster makes edits the narrow calls cannot express; the card names the call it covers."
+   ```
+   By hand it is the operator's to type:
+   ```sh
+   yardr source grant google-docs edit --crew yardmaster
+   ```
    As ada, the same grants with `--as ada`, on cards addressed to
    ada and approved by ada alone: the shared card is in
    `yardr docs google` ("Calling as a user"), one card per grant, with
-   `read`, `write`, `replace`, `image`, `table`, `style` and `slide`
-   from above. There is no typed way beside these: a grant `as` ada
+   `read`, `write`, `replace`, `image`, `table`, `style`, `edit` and
+   `slide` from above. There is no typed way beside these: a grant `as` ada
    is ada's to give.
    `yardr source show google-docs` lists each call with its kind and
    who may make it, plain and `as` each user.
@@ -165,6 +173,25 @@ google packs' shared setup, said once in `yardr docs google`.
    yardr call google-docs style docId=<the doc's id> find='Total' bold=true
    yardr call google-docs style docId=<the doc's id> find='{{price_1}}' align=right
    ```
+   Any other edit goes with edit, which sends one JSON array of Docs
+   batchUpdate requests as the caller wrote them, pinned to the
+   revision the caller read: fonts on named styles, footers, deletes,
+   document-wide settings. The narrow calls stay the first choice where
+   they fit; edit gives up what they do for the caller. The caller
+   counts UTF-16 indices itself from a doc read, whose answer carries
+   the revisionId to pin; every edit changes the revision, so each call
+   needs a fresh read; and a wrong index inside the document lands
+   without an error. The yard keeps no record of an edit's requests,
+   only the docId and the replies. The revision must come from a read
+   under the same credential: a revisionId is not shared across users
+   and is valid about 24 hours. On a document the account can only
+   read, documents.get answers no revisionId, so edit cannot be used
+   there. A comment request notifies collaborators as a comment made by
+   hand does, and an insertPerson mention may notify the person named.
+   ```sh
+   yardr call google-docs doc docId=<the doc's id>
+   yardr call google-docs edit docId=<the doc's id> revision=<its revisionId> requests='[{"updateDocumentStyle":{"documentStyle":{"marginTop":{"magnitude":72,"unit":"PT"}},"fields":"marginTop"}}]'
+   ```
    A slide is the same shape: an empty deck the drive source makes,
    then a slide with the caller's own id for it, unique in the deck:
    ```sh
@@ -179,10 +206,11 @@ with their own credential — is the shared setup too:
 What is not there, on purpose: Sheets, which joins this pack when a
 sheets source exists; Tasks, which is no source yet, so no pack
 wires it in (Calendar is the google-calendar pack); paging past the
-first page; a picture in a header, a footer or a slide, or sent up
-from a file on the yard's machine; resizing or moving a picture
-already placed; column widths, merged cells, and rows or columns
-added to a table that stands; bullets; and no call the pack does not
-list. The yard's source
+first page; a picture in a slide, or sent up from a file on the
+yard's machine; resizing or moving a picture already placed; and no
+call the pack does not list. Header and footer content, column
+widths, merged cells, rows or columns added to a table that stands,
+and bullets are edit's: no narrow call does them, and edit places
+them by the caller's own indices. The yard's source
 format cannot express what is not listed, and the pack does not
 change yardr.

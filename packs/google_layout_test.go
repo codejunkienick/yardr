@@ -602,19 +602,172 @@ func TestGoogleDocsStyleRoundTrip(t *testing.T) {
 	}
 }
 
-// No argument of a process either script starts holds the credential, the
-// cells' texts or the match: an argument is readable by every process on
-// the machine while it runs, so the scripts hand curl its header as a
-// config line on a pipe and its batchUpdate body on another, and jq the
-// parameters and the document on its stdin. A stand-in curl and a stand-in
-// jq first on PATH record their arguments and delegate to the real ones.
+// The edit call builds its batchUpdate per call without reading
+// anything: its build script sends the caller's requests as it wrote
+// them, with no allow-list, pinned to the revision it was given. A
+// delete and a document-wide setting pass unchanged, as does an opaque
+// revision the yard checks no pattern of. The stand-in hears nothing of
+// any build below. No test calls Google.
+func TestGoogleDocsEditBuilds(t *testing.T) {
+	fifty := `[` + strings.TrimSuffix(strings.Repeat(`{"insertText":{"location":{"index":1},"text":"x"}},`, 50), ",") + `]`
+	for _, tc := range []struct {
+		name     string
+		revision string
+		requests string
+	}{
+		{name: "one request", revision: "rev-one",
+			requests: `[{"updateTextStyle":{"range":{"startIndex":1,"endIndex":6},"textStyle":{"bold":true},"fields":"bold"}}]`},
+		{name: "several requests", revision: "rev-9x",
+			requests: `[{"insertText":{"location":{"index":7},"text":"Friday"}},{"updateTextStyle":{"range":{"startIndex":7,"endIndex":13},"textStyle":{"bold":true},"fields":"bold"}}]`},
+		{name: "a delete passes unchanged", revision: "rev-one",
+			requests: `[{"deleteContentRange":{"range":{"startIndex":7,"endIndex":15,"tabId":"t.0"}}}]`},
+		{name: "a document-wide setting passes unchanged", revision: "rev-one",
+			requests: `[{"updateDocumentStyle":{"documentStyle":{"marginTop":{"magnitude":72,"unit":"PT"}},"fields":"marginTop"}}]`},
+		{name: "fifty requests pass", revision: "rev-fifty", requests: fifty},
+		{name: "an opaque revision passes through quoted", revision: `r"ev\9`,
+			requests: `[{"updateTextStyle":{"range":{"startIndex":1,"endIndex":6},"textStyle":{"bold":true},"fields":"bold"}}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			standin, srv := imageStandin(t)
+			defer srv.Close()
+			docs := googleDeclaration(t, "google-docs.yaml", "https://docs.googleapis.com", srv.URL)
+			body, err := source.BuildBody(context.Background(), docs, "edit",
+				map[string]string{"docId": standin.doc("one"), "revision": tc.revision, "requests": tc.requests},
+				"tok", layoutHome(t), store.ReadSecretFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			golden := `{"requests":` + tc.requests + `,"writeControl":{"requiredRevisionId":` + strconv.Quote(tc.revision) + `}}`
+			var got, want any
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatalf("built body = %s: %v", body, err)
+			}
+			if err := json.Unmarshal([]byte(golden), &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("built body = %s, want %s", body, golden)
+			}
+			if n := len(standin.requests()); n != 0 {
+				t.Fatalf("the stand-in heard %d requests, want none: the edit reads nothing", n)
+			}
+		})
+	}
+}
+
+// What the edit call refuses to build: nothing is printed for the yard to
+// send, and the caller reads the script's own words. The stand-in hears
+// nothing of any refusal, since no refusal needs the document.
+func TestGoogleDocsEditRefusals(t *testing.T) {
+	standin, srv := imageStandin(t)
+	defer srv.Close()
+	docs := googleDeclaration(t, "google-docs.yaml", "https://docs.googleapis.com", srv.URL)
+	home := layoutHome(t)
+	many := `[` + strings.TrimSuffix(strings.Repeat(`{"a":1},`, 51), ",") + `]`
+	noArray := "requests is no JSON array of Docs batchUpdate requests"
+	noRequest := "is no Docs request: one object with exactly one key"
+	for _, tc := range []struct {
+		name     string
+		revision string // "" hands an empty revision; "-" leaves it out for the core to refuse
+		requests string // "-" leaves requests out for the core to refuse
+		words    string
+		reason   string
+	}{
+		{"requests are no JSON", "r", "nope", noArray, source.BuildRefused},
+		{"requests are no array", "r", "3", noArray, source.BuildRefused},
+		{"requests are null", "r", "null", noArray, source.BuildRefused},
+		{"requests are empty", "r", "", noArray, source.BuildRefused},
+		{"requests hold no request", "r", "[]", "requests holds no request to send", source.BuildRefused},
+		{"requests hold fifty-one", "r", many, "requests holds 51 requests, and an edit sends at most 50", source.BuildRefused},
+		{"a request that is a number", "r", "[3]", "request 1 " + noRequest, source.BuildRefused},
+		{"a request that is null", "r", "[null]", "request 1 " + noRequest, source.BuildRefused},
+		{"a request that is an array", "r", `[[{"a":1}]]`, "request 1 " + noRequest, source.BuildRefused},
+		{"a request with two keys", "r", `[{"a":1,"b":2}]`, "request 1 " + noRequest, source.BuildRefused},
+		{"a request with no key", "r", `[{}]`, "request 1 " + noRequest, source.BuildRefused},
+		{"the second request bad", "r", `[{"a":1},"x"]`, "request 2 " + noRequest, source.BuildRefused},
+		{"the third request bad", "r", `[{"a":1},{"b":2},7]`, "request 3 " + noRequest, source.BuildRefused},
+		{"an empty revision", "", `[{"a":1}]`, "edit was handed no revision", source.BuildRefused},
+		{"no revision", "-", `[{"a":1}]`, "parameter revision is missing", source.BadParam},
+		{"no requests", "r", "-", "parameter requests is missing", source.BadParam},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := map[string]string{"docId": standin.doc("one")}
+			if tc.revision != "-" {
+				params["revision"] = tc.revision
+			}
+			if tc.requests != "-" {
+				params["requests"] = tc.requests
+			}
+			_, err := source.BuildBody(context.Background(), docs, "edit", params, "tok", home, store.ReadSecretFile)
+			var refused *source.CallError
+			if !errors.As(err, &refused) || refused.Reason != tc.reason || !strings.Contains(err.Error(), tc.words) {
+				t.Fatalf("err = %v, want %s containing %q", err, tc.reason, tc.words)
+			}
+			if n := len(standin.requests()); n != 0 {
+				t.Fatalf("the stand-in heard %d requests, want none: a refusal sends nothing", n)
+			}
+		})
+	}
+}
+
+// The built body posted: an edit sends its requests in one batchUpdate
+// and the answer carries one reply per request. The stand-in hears the
+// post alone, with no pre-read before it.
+func TestGoogleDocsEditRoundTrip(t *testing.T) {
+	standin, srv := imageStandin(t)
+	defer srv.Close()
+	docs := googleDeclaration(t, "google-docs.yaml", "https://docs.googleapis.com", srv.URL)
+	home := layoutHome(t)
+	params := map[string]string{"docId": standin.doc("one"), "revision": "rev-one",
+		"requests": `[{"updateTextStyle":{"range":{"startIndex":1,"endIndex":6},"textStyle":{"bold":true},"fields":"bold"}},{"deleteContentRange":{"range":{"startIndex":7,"endIndex":15}}}]`}
+	body, err := source.BuildBody(context.Background(), docs, "edit", params, "tok", home, store.ReadSecretFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := source.DoKeyedBody(context.Background(), docs, "edit", params, "tok", "", body, store.ReadSecretFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotReqs := standin.requests()
+	if len(gotReqs) != 1 {
+		t.Fatalf("the stand-in heard %d requests, want the post alone", len(gotReqs))
+	}
+	post := gotReqs[0]
+	if post.method != "POST" || post.path != "/v1/documents/"+standin.doc("one")+":batchUpdate" {
+		t.Fatalf("post = %s %s", post.method, post.path)
+	}
+	if post.auth != "Bearer tok" {
+		t.Fatalf("post Authorization = %q", post.auth)
+	}
+	var got, want any
+	if err := json.Unmarshal(post.body, &got); err != nil {
+		t.Fatalf("posted body = %s: %v", post.body, err)
+	}
+	if err := json.Unmarshal(body, &want); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("posted body = %s, want the built %s", post.body, body)
+	}
+	if want := `{"documentId":"` + standin.doc("one") + `","replies":[{},{}]}`; string(res.Answer) != want {
+		t.Fatalf("answer = %s, want %s", res.Answer, want)
+	}
+}
+
+// No argument of a process any of the three scripts starts holds the
+// credential, the cells' texts, the match, or the edit's revision and
+// requests: an argument is readable by every process on the machine while
+// it runs, so the scripts hand curl its header as a config line on a pipe
+// and its batchUpdate body on another, and jq the parameters and the
+// document on its stdin. A stand-in curl and a stand-in jq first on PATH
+// record their arguments and delegate to the real ones.
 func TestGoogleDocsLayoutHandsNoSecretToAnyArgument(t *testing.T) {
 	bin := t.TempDir()
 	argv := filepath.Join(bin, "argv")
 	for _, tool := range []string{"curl", "jq"} {
 		real, err := exec.LookPath(tool)
 		if err != nil {
-			t.Skip(tool + " is not installed, and the table and style build scripts run it")
+			t.Skip(tool + " is not installed, and the table, style and edit build scripts run it")
 		}
 		scripttest.Write(t, filepath.Join(bin, tool),
 			"printf '%s\n' \"$@\" >> \""+argv+"\"\nexec \""+real+"\" \"$@\"\n")
@@ -636,16 +789,25 @@ func TestGoogleDocsLayoutHandsNoSecretToAnyArgument(t *testing.T) {
 		"the-secret-token", home, store.ReadSecretFile); err != nil {
 		t.Fatal(err)
 	}
+	// The edit call reads no doc at all: its revision and requests reach
+	// jq on its stdin, never as an argument.
+	if _, err := source.BuildBody(context.Background(), docs, "edit",
+		map[string]string{"docId": standin.doc("one"), "revision": "rev-s3cr3t",
+			"requests": `[{"insertText":{"location":{"index":7},"text":"s3cr3t-text"}}]`},
+		"the-secret-token", home, store.ReadSecretFile); err != nil {
+		t.Fatal(err)
+	}
 	recorded, err := os.ReadFile(argv)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{"the-secret-token", "s3cr3t-price", "{{logo}}"} {
+	for _, secret := range []string{"the-secret-token", "s3cr3t-price", "{{logo}}", "rev-s3cr3t", "s3cr3t-text"} {
 		if strings.Contains(string(recorded), secret) {
 			t.Fatalf("a process was called with %q in an argument: %s", secret, recorded)
 		}
 	}
-	// The reads and the place took the credential, out of the arguments.
+	// The reads and the place took the credential, out of the arguments;
+	// the edit sent nothing.
 	reqs := standin.requests()
 	if len(reqs) != 4 {
 		t.Fatalf("the stand-in heard %d requests, want the table's three and the style's read", len(reqs))
@@ -657,20 +819,20 @@ func TestGoogleDocsLayoutHandsNoSecretToAnyArgument(t *testing.T) {
 	}
 }
 
-// layoutHome installs the table and style calls' build scripts from the
-// embedded pack, as a source add copies them, and returns the home they
-// stand under. The scripts read docs with curl and lay their text out
-// with jq.
+// layoutHome installs the table, style and edit calls' build scripts from
+// the embedded pack, as a source add copies them, and returns the home
+// they stand under. The table and style scripts read docs with curl and
+// lay their text out with jq; the edit script needs jq alone.
 func layoutHome(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("curl"); err != nil {
 		t.Skip("curl is not installed, and the table and style build scripts read the doc with it")
 	}
 	if _, err := exec.LookPath("jq"); err != nil {
-		t.Skip("jq is not installed, and the table and style build scripts find the placeholder with it")
+		t.Skip("jq is not installed, and the table, style and edit build scripts shape their bodies with it")
 	}
 	var copies []source.FileCopy
-	for _, prog := range []string{"google-docs/build-table", "google-docs/build-style"} {
+	for _, prog := range []string{"google-docs/build-table", "google-docs/build-style", "google-docs/build-edit"} {
 		script, err := fs.ReadFile(packs.FS, "google-docs/"+prog)
 		if err != nil {
 			t.Fatal(err)

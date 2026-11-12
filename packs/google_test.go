@@ -127,6 +127,7 @@ func TestGoogleDeclarations(t *testing.T) {
 			{Name: "doc", Kind: source.Read}, {Name: "write", Kind: source.Update},
 			{Name: "replace", Kind: source.Update}, {Name: "image", Kind: source.Update},
 			{Name: "table", Kind: source.Update}, {Name: "style", Kind: source.Update},
+			{Name: "edit", Kind: source.Update},
 		},
 		"google-slides.yaml": {
 			{Name: "deck", Kind: source.Read}, {Name: "slide", Kind: source.Update},
@@ -172,6 +173,26 @@ func TestGoogleDeclarations(t *testing.T) {
 		}
 		if d.Check != check {
 			t.Errorf("%s: check %q, want %q", file, d.Check, check)
+		}
+		if file == "google-docs.yaml" {
+			edit, ok := d.Call("edit")
+			if !ok {
+				t.Fatalf("%s declares no edit call", file)
+			}
+			if strings.Contains(edit.About, "\n") {
+				t.Errorf("edit about is no one line: %q", edit.About)
+			}
+			for _, want := range []string{
+				"any edit",
+				"deletes and document-wide settings",
+				"the caller's own indices",
+				"nothing checks where it lands",
+				"comments notify",
+			} {
+				if !strings.Contains(edit.About, want) {
+					t.Errorf("edit about lacks %q: %q", want, edit.About)
+				}
+			}
 		}
 	}
 }
@@ -511,7 +532,7 @@ func TestGoogleCallsAgainstTheStandin(t *testing.T) {
 			wantAnswer: `{"id":"` + madeReplyID + `","content":"Fixed.","action":"resolve"}`},
 		{name: "docs doc", d: docs, call: "doc", params: map[string]string{"docId": docID},
 			method: "GET", path: "/v1/documents/" + docID,
-			wantAnswer: `{"body":{"content":[{"paragraph":{"elements":[{"textRun":{"content":"Lunch places"}}]},"startIndex":1,"endIndex":13}]},"title":"lunch"}`},
+			wantAnswer: `{"body":{"content":[{"paragraph":{"elements":[{"textRun":{"content":"Lunch places"}}]},"startIndex":1,"endIndex":13}]},"title":"lunch","revisionId":"9"}`},
 		// The write call builds its body per call; its goldens and round
 		// trip are TestGoogleDocsWriteBuilds and TestGoogleDocsWriteRoundTrip.
 		// So does the replace call; its are TestGoogleDocsReplaceBuilds and
@@ -519,7 +540,10 @@ func TestGoogleCallsAgainstTheStandin(t *testing.T) {
 		// TestGoogleDocsImageBuilds and TestGoogleDocsImageRoundTrip. So do
 		// the table and style calls; theirs are TestGoogleDocsTableBuilds,
 		// TestGoogleDocsTableRoundTrip, TestGoogleDocsStyleBuilds and
-		// TestGoogleDocsStyleRoundTrip.
+		// TestGoogleDocsStyleRoundTrip. So does the edit call, which reads
+		// nothing and pins the caller's own requests to the revision it was
+		// given; its are TestGoogleDocsEditBuilds and
+		// TestGoogleDocsEditRoundTrip.
 		{name: "deck", d: slides, call: "deck", params: map[string]string{"id": deckID},
 			method: "GET", path: "/v1/presentations/" + deckID,
 			wantAnswer: `{"slides":[{"objectId":"friday_1"}],"title":"friday"}`},
@@ -703,6 +727,12 @@ func TestGoogleCallParamsRefused(t *testing.T) {
 		{"style sideways align", docs, "style", map[string]string{"docId": "abc", "find": "x", "align": "justify"}, "parameter align is one of left, center, right"},
 		{"style dots", docs, "style", map[string]string{"docId": "..", "find": "x", "bold": "true"}, "parameter docId does not match its pattern"},
 		{"style text", docs, "style", map[string]string{"docId": "abc", "find": "x", "bold": "true", "text": "y"}, `"text" is no parameter`},
+		{"edit without revision", docs, "edit", map[string]string{"docId": "abc", "requests": `[{"a":1}]`}, "parameter revision is missing"},
+		{"edit without requests", docs, "edit", map[string]string{"docId": "abc", "revision": "r"}, "parameter requests is missing"},
+		{"edit long revision", docs, "edit", map[string]string{"docId": "abc", "revision": strings.Repeat("x", 401), "requests": `[{"a":1}]`}, "parameter revision is 401 characters, and at most 400"},
+		{"edit long requests", docs, "edit", map[string]string{"docId": "abc", "revision": "r", "requests": strings.Repeat("x", 60001)}, "parameter requests is 60001 characters, and at most 60000"},
+		{"edit dots", docs, "edit", map[string]string{"docId": "..", "revision": "r", "requests": `[{"a":1}]`}, "parameter docId does not match its pattern"},
+		{"edit text", docs, "edit", map[string]string{"docId": "abc", "revision": "r", "requests": `[{"a":1}]`, "text": "y"}, `"text" is no parameter`},
 		{"slide short id", slides, "slide", map[string]string{"id": "abc", "slide": "ab", "title": "t", "body": "b"}, "parameter slide does not match its pattern"},
 		{"slide dashed id", slides, "slide", map[string]string{"id": "abc", "slide": "-abcde", "title": "t", "body": "b"}, "parameter slide does not match its pattern"},
 		{"slide long id", slides, "slide", map[string]string{"id": "abc", "slide": strings.Repeat("a", 45), "title": "t", "body": "b"}, "parameter slide does not match its pattern"},

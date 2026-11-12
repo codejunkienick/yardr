@@ -449,7 +449,7 @@ func TestPackApplyGoogleCardsFit(t *testing.T) {
 	}{
 		{"google-mail", []string{"google-mail"}, 17},
 		{"google-drive", []string{"google-drive"}, 24},
-		{"google-docs", []string{"google-docs", "google-slides"}, 29},
+		{"google-docs", []string{"google-docs", "google-slides"}, 32},
 		{"google-calendar", []string{"google-calendar"}, 16},
 	} {
 		t.Run(tc.pack, func(t *testing.T) {
@@ -611,12 +611,12 @@ func TestPackApplyGoogleDocsChangeCardFits(t *testing.T) {
 	if len(does) > store.MaxRunSourceCardLines {
 		t.Fatalf("the google-docs change card runs to %d lines, over the %d a card holds", len(does), store.MaxRunSourceCardLines)
 	}
-	// 33 of the 40 a card holds: the credential line of the change says the
-	// mint command the pack now brings (yardr-66qd), each of the five build
+	// 36 of the 40 a card holds: the credential line of the change says the
+	// mint command the pack now brings (yardr-66qd), each of the six build
 	// files' changes has its line, and what a source lacks is one line and not
 	// nine (sourceDoesChanged), which leaves room for the pack's next calls.
-	if len(does) != 33 {
-		t.Errorf("the google-docs change card runs to %d lines, want the pinned 33", len(does))
+	if len(does) != 36 {
+		t.Errorf("the google-docs change card runs to %d lines, want the pinned 36", len(does))
 	}
 	joined := strings.Join(does, "\n")
 	for _, want := range []string{

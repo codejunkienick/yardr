@@ -3,7 +3,9 @@
 # guarded find, given one picture where a placeholder stands, and laid out
 # with a table where a placeholder stands and styled text. One source per
 # host, so Docs is its own; the empty file it fills is made by the drive
-# source's doc call. No other batchUpdate request is declared.
+# source's doc call. The edit call sends any batchUpdate requests as the
+# caller wrote them, deletes and document-wide settings included, pinned
+# to the revision the caller read; nothing checks their kinds or indices.
 #
 # Checked against the discovery document
 # (https://www.googleapis.com/discovery/v1/apis/docs/v1/rest) on 16
@@ -69,7 +71,9 @@
 # refuses, the placeholder being gone. A table tried again after a lost
 # answer finds its placeholder gone too, which it refuses; where the place
 # landed and the fill did not, the empty table stands to be removed by
-# hand. A style tried again styles again, to the same end.
+# hand. A style tried again styles again, to the same end. An edit tried
+# again after a lost answer is pinned to the same revision, which the
+# first changed if it landed, so the second is refused.
 name: google-docs
 about: Google Docs read and appended to, several styled paragraphs in one call, replaced in place, given a picture, and laid out with a table and styled text.
 base: https://docs.googleapis.com
@@ -89,7 +93,7 @@ calls:
     request:
       method: GET
       path: /v1/documents/{docId}
-    answer: { select: [title, body], max: 262144 }   # the text is in body's paragraphs
+    answer: { select: [title, body, revisionId], max: 262144 }   # the text is in body's paragraphs; the revision pins an edit
   write:
     kind: update
     about: Append paragraphs at the end, each with its style
@@ -209,4 +213,27 @@ calls:
       method: POST
       path: /v1/documents/{docId}:batchUpdate
     build: [google-docs/build-style]
+    answer: { select: [documentId, replies] }
+  edit:
+    kind: update
+    about: Make any edit to a document, deletes and document-wide settings included, placed by the caller's own indices; nothing checks where it lands, and comments notify collaborators as comments made by hand do
+    params:
+      docId: { type: string, pattern: "^[A-Za-z0-9_-]+$", max: 200, log: true }
+      # The revisionId the caller read, from a doc call under the same
+      # credential, which the edit is pinned to: every edit changes the
+      # revision, so each call needs a fresh read. Opaque: its shape may
+      # change, so the yard checks no pattern. Free text: its value is in
+      # no event.
+      revision: { type: string, max: 400 }
+      # One JSON array of Docs batchUpdate requests, sent as the caller
+      # wrote them, with no allow-list: deletes and document-wide
+      # settings pass. At most 50, each one object with exactly one key.
+      # The caller counts UTF-16 indices itself from doc, and a wrong
+      # index inside the document lands without an error. Free text: its
+      # value is in no event.
+      requests: { type: string, max: 60000 }
+    request:
+      method: POST
+      path: /v1/documents/{docId}:batchUpdate
+    build: [google-docs/build-edit]
     answer: { select: [documentId, replies] }

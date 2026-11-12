@@ -1,0 +1,40 @@
+#!/bin/bash
+# build-edit: the body of the google-docs edit call, built per call. One
+# JSON object on stdin ({"params": {"docId", "revision", "requests"}}),
+# the batchUpdate body on stdout. Needs jq alone: the script reads
+# nothing from Google.
+#
+# requests is one JSON array of Docs batchUpdate requests, sent as the
+# caller wrote them, with no allow-list: deletes and document-wide
+# settings pass. At most 50, each one object with exactly one key. The
+# body pins them to the revision the caller read, so a collaborator's
+# intervening edit refuses the batch instead of shifting it. Anything
+# the body cannot be built from is a refusal: words on stderr, exit 1,
+# nothing sent. revision and requests stay out of the arguments of every
+# process the script starts: an argument can be read by every process on
+# the machine while it runs.
+set -euo pipefail
+in=$(cat)
+# The yard has checked docId's characters and the lengths already.
+built=$(jq -c '
+  .params as $p
+  | (($p.requests // "") | fromjson? // "bad") as $reqs
+  | if ($p.docId // "") == "" then {refusal: "edit was handed no docId"}
+    elif ($p.revision // "") == "" then {refusal: "edit was handed no revision"}
+    elif ($reqs | type) != "array" then {refusal: "requests is no JSON array of Docs batchUpdate requests"}
+    elif ($reqs | length) == 0 then {refusal: "requests holds no request to send"}
+    elif ($reqs | length) > 50 then {refusal: "requests holds \($reqs | length) requests, and an edit sends at most 50"}
+    else
+      ([range(0; ($reqs | length))
+        | . as $i | $reqs[$i]
+        | if type != "object" or length != 1
+          then "request \($i + 1) is no Docs request: one object with exactly one key"
+          else empty end]
+        | .[0]) as $bad
+      | if $bad != null then {refusal: $bad}
+        else {body: {requests: $reqs, writeControl: {requiredRevisionId: $p.revision}}} end
+    end
+' <<<"$in")
+refusal=$(jq -r '.refusal // empty' <<<"$built")
+[ -z "$refusal" ] || { echo "$refusal" >&2; exit 1; }
+jq -c '.body' <<<"$built"

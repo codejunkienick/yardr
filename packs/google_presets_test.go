@@ -17,7 +17,8 @@ import (
 // preset for the reads and some updates, and everything for all the pack
 // lists. The test holds each preset's calls to the declaration's: read
 // grants read alone, everything grants read and every update call the
-// declaration names, and the middle preset stands between the two.
+// declaration names but what everythingExcludes reserves for a single
+// grant, and the middle preset stands between the two.
 func TestGooglePresetsMatchDeclarations(t *testing.T) {
 	middle := map[string]string{
 		"google-mail":     "drafts",
@@ -27,6 +28,12 @@ func TestGooglePresetsMatchDeclarations(t *testing.T) {
 	}
 	middleExcludes := map[string][]string{
 		"google-drive": {"copy"},
+	}
+	// everythingExcludes names update calls no preset grants:
+	// google-docs' edit, which the operator grants singly, by its name
+	// (TestGoogleDocsEditInNoPreset pins that no preset names it).
+	everythingExcludes := map[string][]string{
+		"google-docs": {"edit"},
 	}
 	for _, name := range []string{"google-mail", "google-calendar", "google-docs", "google-drive"} {
 		t.Run(name, func(t *testing.T) {
@@ -64,6 +71,21 @@ func TestGooglePresetsMatchDeclarations(t *testing.T) {
 				}
 				return nil
 			}
+			if name == "google-docs" {
+				for _, pr := range p.Presets {
+					for _, g := range pr.Grants {
+						if g.Source == "google-docs" && slices.Contains(g.Calls, "edit") {
+							t.Errorf("preset %s grants edit of google-docs, want edit in no preset", pr.Name)
+						}
+					}
+				}
+				if want := "Read and append to documents and decks, replace document text in place, place a picture in a document, and lay a table out and style text in one"; byName["everything"].About != want {
+					t.Errorf("preset everything says %q, want %q", byName["everything"].About, want)
+				}
+				if got, want := words(byName["everything"], "google-docs"), []string{"read", "write", "replace", "image", "table", "style"}; !reflect.DeepEqual(got, want) {
+					t.Errorf("preset everything grants %v of google-docs, want the six it had", got)
+				}
+			}
 			var between, narrower bool
 			for _, d := range p.Declared {
 				var updates []string
@@ -72,13 +94,23 @@ func TestGooglePresetsMatchDeclarations(t *testing.T) {
 						updates = append(updates, c.Name)
 					}
 				}
+				for _, excluded := range everythingExcludes[d.Name] {
+					if !slices.Contains(updates, excluded) {
+						t.Errorf("%s excludes %s from everything, which is no update call it declares", d.Name, excluded)
+					}
+				}
 				if got := words(byName["read"], d.Name); !reflect.DeepEqual(got, []string{store.GrantRead}) {
 					t.Errorf("preset read of %s grants %v, want [%s] alone", d.Name, got, store.GrantRead)
 				}
-				want := append([]string{store.GrantRead}, updates...)
+				want := []string{store.GrantRead}
+				for _, u := range updates {
+					if !slices.Contains(everythingExcludes[d.Name], u) {
+						want = append(want, u)
+					}
+				}
 				all := words(byName["everything"], d.Name)
 				if !reflect.DeepEqual(all, want) {
-					t.Errorf("preset everything of %s grants %v, want %v: every update call the declaration names", d.Name, all, want)
+					t.Errorf("preset everything of %s grants %v, want %v: every update call the declaration names but what no preset grants", d.Name, all, want)
 				}
 				mid := words(byName[middle[name]], d.Name)
 				if mid == nil {
