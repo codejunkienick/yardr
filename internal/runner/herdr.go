@@ -66,7 +66,7 @@ type Herdr struct {
 	stops  map[string]paneStop
 	// contextMatch pins, per session, the transcript a worktree match or a
 	// known id found, while its file stands and nothing the lookup judged
-	// has moved; contextLast keeps, per transcript path, what the last read
+	// has moved into a match; contextLast keeps, per transcript path, what the last read
 	// saw, so an unchanged file is not opened again and a grown one is
 	// read from where the last read ended (see Context).
 	contextMu    sync.Mutex

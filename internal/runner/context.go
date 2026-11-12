@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"yardr.dev/yardr/internal/agents"
+	"yardr.dev/yardr/internal/dispatch"
 	"yardr.dev/yardr/internal/peer"
 	"yardr.dev/yardr/internal/store"
 )
@@ -28,9 +29,10 @@ const contextStartedAt = "context_started_at"
 //
 // The daemon asks on every idle pass, so both halves are remembered across
 // calls: the transcript is pinned while its file stands and, for a worktree
-// match, nothing the match judged has moved (see pinnedContext), and a
-// transcript whose size and time are as at the last read is not opened
-// again. A grown file is read from where the last read ended.
+// match, nothing the match judged has moved into a match (see
+// pinnedContext), and a transcript whose size and time are as at the last
+// read is not opened again. A grown file is read from where the last read
+// ended.
 func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt time.Time) (used, window int, ok bool, err error) {
 	kind, id, err := h.sessionKind(ctx, handle)
 	if err != nil {
@@ -38,6 +40,7 @@ func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt ti
 	}
 	// wide is the glob of every file a match judges, "" for an id herdr named.
 	var path, key, wide string
+	var judge contextJudge
 	if id == "" {
 		var preStart time.Duration
 		if at, has := handle[contextStartedAt]; has {
@@ -69,6 +72,11 @@ func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt ti
 		key = contextMatchKey(kind, match, startedAt)
 		if kind.Model != nil {
 			wide = kind.Model.Pattern(h.agentHome(kind), "*")
+			judge = contextJudge{
+				src: kind.Model, home: h.agentHome(kind),
+				worktree: str(match, "worktree", ""), wide: wide,
+				begin: startedAt.Add(-preStart), end: startedAt.Add(dispatch.ModelWindow),
+			}
 			path = h.pinnedContext(key)
 		}
 		if path == "" {
@@ -94,7 +102,7 @@ func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt ti
 			return 0, 0, false, err
 		}
 		path = p
-		h.pinContext(key, p, wide)
+		h.pinContext(key, p, judge)
 	}
 	return h.cachedContext(path, *kind.Context)
 }
@@ -119,11 +127,42 @@ func contextMatchKey(kind store.Harness, match map[string]any, startedAt time.Ti
 // candidate (one that was incomplete or did not qualify can become a match as
 // it is written, with no new path) and on every directory a candidate stands
 // in or could appear through, so a retry, a by-hand run or a candidate
-// completed after the match is seen; a known id rests on its file alone. A
-// pin is not changed once installed.
+// completed after the match is seen; a known id rests on its file alone.
+// What moved under a pin is re-judged alone (see pinnedContext), and a moved
+// file's new stat then replaces the one the pin holds, so the judgement the
+// pin stands on is the match's own, kept beside it as judge.
 type contextPin struct {
-	path string
-	rest []contextFileState
+	path  string
+	files []contextFileState
+	dirs  []contextFileState
+	judge contextJudge
+}
+
+// contextJudge is one worktree match's judgement of a candidate: the source
+// and home the match read under, the worktree it matched, and the window a
+// file's start had to fall in. It is empty for a known id's pin, which no
+// other file can displace. begin and end are the pin's own, which the match
+// key already fixes: the pre-start allowance narrows as a crew shell ages
+// and the pin stands past that, and the window at pin time covers a later
+// one, so a candidate kept out by it is kept out of a fresh match too.
+type contextJudge struct {
+	src      *store.ModelSource
+	home     string
+	worktree string
+	wide     string
+	begin    time.Time
+	end      time.Time
+}
+
+// qualifies reports whether the match this judge is from would judge the
+// candidate at path a match now, as matchWorkspace judges it.
+func (j contextJudge) qualifies(path string) (bool, error) {
+	in, err := fileNamesWorktree(j.src, path, j.worktree, j.begin, j.end)
+	if err != nil || !in {
+		return false, err
+	}
+	id, ok := j.src.SessionIn(j.home, path)
+	return ok && plainSessionID(id), nil
 }
 
 // contextFileState is a file or directory a pin rests on, as it was.
@@ -134,11 +173,20 @@ type contextFileState struct {
 }
 
 // pinnedContext is the transcript pinned for key, "" when none is, the
-// pinned file no longer stands, or anything the pin rests on has changed. A
-// dropped pin forgets the match but keeps the last reading, which is keyed by
-// the file: a re-match that finds the same file alone still skips its read.
-// The check is stats alone: it lists no directory and opens no candidate,
-// where the match it stands in for lists them all and opens each.
+// pinned file no longer stands, or what the pin rests on has moved into a
+// match since. A dropped pin forgets the match but keeps the last reading,
+// which is keyed by the file: a re-match that finds the same file alone
+// still skips its read. Nothing moved is the ordinary pass, and it is stats
+// alone: no directory is listed and no candidate opened, where the match it
+// stands in for lists them all and opens each. What has moved is judged
+// alone, and only it: a candidate file that moved is read again as the
+// match would judge it, and a directory that moved (a candidate added or
+// removed under it) lists the candidates again, so a new one is judged. A moved file that now qualifies drops the pin, as
+// a fresh match would answer it or answer none for the ambiguity; one that
+// still does not has its new stat stand in the pin in its old one's place,
+// so the next pass that finds it quiet judges nothing. The pin is never
+// answered from where a full match run now would answer another file or
+// none.
 func (h *Herdr) pinnedContext(key string) string {
 	h.contextMu.Lock()
 	pin := h.contextMatch[key]
@@ -150,12 +198,104 @@ func (h *Herdr) pinnedContext(key string) string {
 		h.dropContextPin(key, pin, true)
 		return ""
 	}
-	for _, was := range pin.rest {
-		if now, err := contextStat(was.path); err != nil || now != was {
+	if pin.judge.wide == "" {
+		return pin.path
+	}
+	var moved map[string]contextFileState
+	dirMoved := false
+	for _, was := range pin.files {
+		now, err := contextStat(was.path)
+		if err != nil {
 			h.dropContextPin(key, pin, false)
 			return ""
 		}
+		if now != was {
+			if moved == nil {
+				moved = make(map[string]contextFileState)
+			}
+			moved[was.path] = now
+		}
 	}
+	for _, was := range pin.dirs {
+		now, err := contextStat(was.path)
+		if err != nil {
+			h.dropContextPin(key, pin, false)
+			return ""
+		}
+		if now != was {
+			dirMoved = true
+		}
+	}
+	if len(moved) == 0 && !dirMoved {
+		return pin.path
+	}
+	// Work on a copy: the pin in the map is the one other calls check, and
+	// it changes only here, whole, once the moved files are judged.
+	updated := *pin
+	updated.files = slices.Clone(pin.files)
+	if dirMoved {
+		files, err := filepath.Glob(pin.judge.wide)
+		if err != nil || !slices.Contains(files, pin.path) {
+			h.dropContextPin(key, pin, false)
+			return ""
+		}
+		known := make(map[string]bool, len(files))
+		for _, path := range files {
+			known[path] = true
+		}
+		// A candidate the listing no longer holds but stats still find is
+		// one the match would not judge as the pin did: the listing is
+		// not the one the pin rested on, and the pin cannot stand on it.
+		for _, was := range pin.files {
+			if !known[was.path] {
+				h.dropContextPin(key, pin, false)
+				return ""
+			}
+		}
+		held := make(map[string]bool, len(updated.files))
+		for _, was := range updated.files {
+			held[was.path] = true
+		}
+		for _, path := range files {
+			if path == pin.path || held[path] {
+				continue
+			}
+			now, err := contextStat(path)
+			if err != nil {
+				h.dropContextPin(key, pin, false)
+				return ""
+			}
+			if moved == nil {
+				moved = make(map[string]contextFileState)
+			}
+			moved[path] = now
+			updated.files = append(updated.files, now)
+		}
+		dirs, err := contextFileStates(contextDirs(pin.judge.wide), "")
+		if err != nil {
+			h.dropContextPin(key, pin, false)
+			return ""
+		}
+		updated.dirs = dirs
+	}
+	for path, now := range moved {
+		qualifies, err := pin.judge.qualifies(path)
+		if err != nil || qualifies {
+			h.dropContextPin(key, pin, false)
+			return ""
+		}
+		for i := range updated.files {
+			if updated.files[i].path == path {
+				updated.files[i] = now
+				break
+			}
+		}
+	}
+	h.contextMu.Lock()
+	if h.contextMatch[key] == pin {
+		h.contextMatch[key] = &updated
+	}
+	h.contextMu.Unlock()
 	return pin.path
 }
 
@@ -172,17 +312,21 @@ func (h *Herdr) dropContextPin(key string, pin *contextPin, forgetRead bool) {
 	h.contextMu.Unlock()
 }
 
-// pinContext remembers path as the transcript key found. wide is the glob of
-// every file the match judged, "" for a known id. Only an unambiguous match
-// pins: ambiguity and no match return no id and so never reach here.
-func (h *Herdr) pinContext(key, path, wide string) {
-	var rest []contextFileState
-	if wide != "" {
-		files, err := filepath.Glob(wide)
+// pinContext remembers path as the transcript key found, with the judgement
+// that found it: judge.wide is the glob of every file the match judged, ""
+// for a known id. Only an unambiguous match pins: ambiguity and no match
+// return no id and so never reach here.
+func (h *Herdr) pinContext(key, path string, judge contextJudge) {
+	pin := &contextPin{path: path, judge: judge}
+	if judge.wide != "" {
+		files, err := filepath.Glob(judge.wide)
 		if err != nil || !slices.Contains(files, path) {
 			return
 		}
-		if rest, err = contextFileStates(append(files, contextDirs(wide)...), path); err != nil {
+		if pin.files, err = contextFileStates(files, path); err != nil {
+			return
+		}
+		if pin.dirs, err = contextFileStates(contextDirs(judge.wide), ""); err != nil {
 			return
 		}
 	}
@@ -191,7 +335,7 @@ func (h *Herdr) pinContext(key, path, wide string) {
 	if h.contextMatch == nil {
 		h.contextMatch = map[string]*contextPin{}
 	}
-	h.contextMatch[key] = &contextPin{path: path, rest: rest}
+	h.contextMatch[key] = pin
 }
 
 // contextDirs are the directories a file of pattern stands in or could
@@ -209,8 +353,8 @@ func contextDirs(pattern string) (dirs []string) {
 }
 
 // contextFileStates snapshots paths other than the pinned transcript.
-// The pinned transcript may grow normally; another candidate changing can
-// make the match ambiguous, so a later pass must run the matcher again.
+// The pinned transcript may grow normally; another candidate changing is
+// judged again on its own before it can make the match ambiguous.
 func contextFileStates(paths []string, pinned string) ([]contextFileState, error) {
 	states := make([]contextFileState, 0, len(paths))
 	for _, path := range paths {

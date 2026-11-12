@@ -34,6 +34,31 @@ func moveDir(t *testing.T, dir string) {
 	}
 }
 
+// appendLine appends text to the transcript at path and gives it a
+// modification time it never had, as moveDir does for a directory: another
+// session writing to its own transcript between two passes.
+func appendLine(t *testing.T, path, text string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(text); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := fi.ModTime().Add(time.Second)
+	if err := os.Chtimes(path, at, at); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // closeDirs makes each of dirs searchable but not readable, so a stat of a
 // path under it works and a listing of it finds nothing, and restores them
 // when the test ends. A caller skips as root first: root lists what mode 111
@@ -711,6 +736,75 @@ esac`)
 		check(5, "a hidden directory changed")
 	})
 
+	t.Run("pin holds while another transcript grows", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root lists what chmod 111 closes")
+		}
+		home := t.TempDir()
+		startedAt := time.Date(2026, 11, 10, 20, 0, 0, 0, time.UTC)
+		metadata := func(worktree string, at time.Time) string {
+			return fmt.Sprintf("{\"recorded_at\":%d,\"payload_type\":\"runtime.session.metadata\",\"payload\":{\"record\":{\"workspace_root\":%q}}}\n", at.UnixMicro(), worktree)
+		}
+		calls := func(input int) string {
+			return fmt.Sprintf("{\"payload\":{\"event\":{\"kind\":\"model_completed\",\"usage\":{\"input_tokens\":%d}}}}\n", input)
+		}
+		sessions := filepath.Join(home, "sessions")
+		day := filepath.Join(sessions, "2026", "11", "10")
+		m1 := filepath.Join(day, "m1", "session.jsonl")
+		other := filepath.Join(day, "m0", "session.jsonl")
+		write(m1, metadata("/work/crew", startedAt.Add(time.Second))+calls(700000))
+		write(other, metadata("/work/other", startedAt.Add(2*time.Second))+calls(111))
+		h := &Herdr{AgentHomes: map[string]string{"muse": home}, Bin: fakeHerdrBin(t, `echo '{"id":"x","result":{"type":"agent_info","agent":{"agent":"muse","agent_status":"idle"}}}'`)}
+		handle := map[string]any{"agent": "muse", "worktree": "/work/crew"}
+		check := func(want int, has bool, what string) {
+			t.Helper()
+			used, window, ok, err := h.Context(ctx, handle, startedAt)
+			if err != nil || used != want || ok != has || (has && window != 1007997) || (!has && window != 0) {
+				t.Fatalf("%s: context = %d, %d, %v, %v; want %d, %v", what, used, window, ok, err, want, has)
+			}
+		}
+		check(700000, true, "the match")
+		// Another session writes to its own transcript between passes, as
+		// every other crew and bead session of the kind does all the time.
+		// Its file still names another worktree, so the match stands.
+		appendLine(t, other, calls(222))
+		// A full match would find nothing now: the directories list no
+		// candidate. The reading below comes from the pin alone, so it
+		// holds only if the pin survived the other transcript's growth.
+		closeDirs(t, sessions, filepath.Join(sessions, "2026"), filepath.Join(sessions, "2026", "11"), day, filepath.Dir(m1), filepath.Dir(other))
+		check(700000, true, "the pin after another transcript grew")
+	})
+
+	t.Run("transcript grown to qualify drops the pin", func(t *testing.T) {
+		home := t.TempDir()
+		startedAt := time.Date(2026, 11, 10, 20, 0, 0, 0, time.UTC)
+		metadata := func(worktree string, at time.Time) string {
+			return fmt.Sprintf("{\"recorded_at\":%d,\"payload_type\":\"runtime.session.metadata\",\"payload\":{\"record\":{\"workspace_root\":%q}}}\n", at.UnixMicro(), worktree)
+		}
+		calls := func(input int) string {
+			return fmt.Sprintf("{\"payload\":{\"event\":{\"kind\":\"model_completed\",\"usage\":{\"input_tokens\":%d}}}}\n", input)
+		}
+		day := filepath.Join(home, "sessions", "2026", "11", "10")
+		m1 := filepath.Join(day, "m1", "session.jsonl")
+		other := filepath.Join(day, "m2", "session.jsonl")
+		write(m1, metadata("/work/crew", startedAt.Add(time.Second))+calls(700000))
+		write(other, metadata("/work/other", startedAt.Add(2*time.Second))+calls(111))
+		h := &Herdr{AgentHomes: map[string]string{"muse": home}, Bin: fakeHerdrBin(t, `echo '{"id":"x","result":{"type":"agent_info","agent":{"agent":"muse","agent_status":"idle"}}}'`)}
+		handle := map[string]any{"agent": "muse", "worktree": "/work/crew"}
+		used, window, ok, err := h.Context(ctx, handle, startedAt)
+		if err != nil || !ok || used != 700000 || window != 1007997 {
+			t.Fatalf("context = %d, %d, %v, %v; want 700000, 1007997, true, nil", used, window, ok, err)
+		}
+		// The other transcript grows into a match for this worktree inside
+		// the window: a full match now is ambiguous and answers none, so
+		// the pin must go rather than keep answering m1.
+		appendLine(t, other, metadata("/work/crew", startedAt.Add(3*time.Second)))
+		used, window, ok, err = h.Context(ctx, handle, startedAt)
+		if err != nil || ok || used != 0 || window != 0 {
+			t.Fatalf("context after the other transcript qualified = %d, %d, %v, %v; want 0, 0, false, nil", used, window, ok, err)
+		}
+	})
+
 	t.Run("concurrent sessions read side by side", func(t *testing.T) {
 		home := t.TempDir()
 		startedAt := time.Date(2026, 11, 10, 20, 0, 0, 0, time.UTC)
@@ -823,6 +917,51 @@ func BenchmarkHerdrContextCachedAtScale(b *testing.B) {
 	home, startedAt := museTranscripts(b, 3000, 30)
 	h := &Herdr{AgentHomes: map[string]string{"muse": home}}
 	benchContext(b, h, map[string]any{"kind": "muse", "worktree": "/work/crew"}, startedAt, 700000)
+}
+
+// BenchmarkHerdrContextCachedOthersWriting is the at-scale pass while
+// other sessions write: between calls one other transcript, still naming
+// another worktree, is appended to, as the yard's other crew and bead
+// sessions of the kind write all the time. The pin must hold through it,
+// so a timed call re-judges the one file that moved and no other.
+func BenchmarkHerdrContextCachedOthersWriting(b *testing.B) {
+	home, startedAt := museTranscripts(b, 3000, 30)
+	metadata := fmt.Sprintf("{\"recorded_at\":%d,\"payload_type\":\"runtime.session.metadata\",\"payload\":{\"record\":{\"workspace_root\":\"/work/other\"}}}\n", startedAt.Add(time.Second).UnixMicro())
+	call := "{\"payload\":{\"event\":{\"kind\":\"model_completed\",\"usage\":{\"input_tokens\":111}}}}\n"
+	var actives []string
+	for i := range 4 {
+		p := filepath.Join(home, "sessions", "2026", "11", "10", fmt.Sprintf("active-%d", i), "session.jsonl")
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			b.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(metadata+call), 0o600); err != nil {
+			b.Fatal(err)
+		}
+		actives = append(actives, p)
+	}
+	h := &Herdr{AgentHomes: map[string]string{"muse": home}}
+	handle := map[string]any{"kind": "muse", "worktree": "/work/crew"}
+	ctx := context.Background()
+	if used, _, ok, err := h.Context(ctx, handle, startedAt); err != nil || !ok || used != 700000 {
+		b.Fatalf("warm context = %d, %v, %v; want 700000, true, nil", used, ok, err)
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := range b.N {
+		f, err := os.OpenFile(actives[i%len(actives)], os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if _, err := f.WriteString(call); err != nil {
+			b.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			b.Fatal(err)
+		}
+		if _, _, ok, err := h.Context(ctx, handle, startedAt); err != nil || !ok {
+			b.Fatalf("context = %v, %v; want true, nil", ok, err)
+		}
+	}
 }
 
 // BenchmarkHerdrContextKnownID is the pass for a session herdr names an id
