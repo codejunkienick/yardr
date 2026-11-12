@@ -1364,6 +1364,7 @@ func TestSettingRunAskClassesAreExplicit(t *testing.T) {
 		PreviewIdleSetting:       Alone,
 		ProviderTermsSetting:     Alone,
 		TelemetrySetting:         Alone,
+		GeneralCardsSetting:      Alone,
 
 		WebJWTPrivilegedSessionMaxAgeSetting: Alone,
 		// Its run ask's two values are settingSetAsk's exception.

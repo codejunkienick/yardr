@@ -47,6 +47,13 @@ func RunArgvHeld(argv []string) bool {
 		len(argv) >= 3 && slices.Equal(argv[:2], []string{"pack", "apply"}) && (len(argv) > 3 || IsPackDir(argv[2]))
 }
 
+// RunHeld reports whether the run ask run holds words a device that is
+// no operator's is not told: a general card's words always, since the
+// yard has not checked them, and otherwise what RunArgvHeld holds.
+func RunHeld(run AskRun) bool {
+	return run.General != nil || RunArgvHeld(run.Argv)
+}
+
 // errNotRow is when the words name no row of the list: askedRun then
 // tries what is the operator's alone, and approveAsk refuses what the
 // yard did not write. A row's parse answers it too for words that are

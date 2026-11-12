@@ -240,6 +240,8 @@ func (w *wtx) weighAsk(a Ask) ([]AskWeight, error) {
 		return secretWeight(*a.Secret), nil
 	case a.DepotPush != nil:
 		return depotPushWeight(*a.DepotPush), nil
+	case a.Run != nil && a.Run.General != nil:
+		return generalWeight(w, *a.Run)
 	case a.Run != nil:
 		c, _, err := parseRow(a.Run.Argv)
 		if err != nil {

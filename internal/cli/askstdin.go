@@ -10,17 +10,18 @@ import (
 
 // askLabels is what a refusal of an ask's stdin says the labels are, so that
 // whoever read none of the help is told what to write.
-const askLabels = "Q: the question, C: a line of context, O: an option as <label>: <consequence>, W: why the recommended option, R: the command a run ask proposes, T: its depot test command, S: a says line of a hook add, M: a makes line of one"
+const askLabels = "Q: the question, C: a line of context, O: an option as <label>: <consequence>, W: why the recommended option, R: the command a run ask proposes, G: a word of a general run ask's command, T: its depot test command, S: a says line of a hook add, M: a makes line of one"
 
 // askStdin is the ask that stdin carried: the texts bead ask otherwise takes
 // as a quoted argument and as the flags --context, --option, --why, --run,
-// --run-test, --run-says and --run-makes, written once where the shell
-// expands nothing.
+// --run-word, --run-test, --run-says and --run-makes, written once where the
+// shell expands nothing.
 type askStdin struct {
 	question          string
 	context, options  []string
 	why, run, runTest string
 	says, makes       []string
+	general           []string
 }
 
 // askLine is one non-blank line of stdin with the number it has there, for a
@@ -35,7 +36,8 @@ type askLine struct {
 // makes every line a labeled field: Q: the question, once and required; C: a
 // line of context; O: an option as <label>: <consequence>; W: why the
 // recommended option, at most once; R: the command a run ask proposes, at most
-// once; T: its depot test command, at most once and only with R:; S: a says
+// once; G: a word of a general run ask's command, repeatable in order and
+// never with R:; T: its depot test command, at most once and only with R:; S: a says
 // line of a hook add, and M: a makes line of one, each repeatable in
 // order and only with R:. Any other first line is the question, and each
 // line after it a line of context, as
@@ -72,11 +74,11 @@ func parseAskStdin(text string) (askStdin, error) {
 		switch {
 		case !labeled:
 			return askStdin{}, fmt.Errorf("stdin line %d has no label: the first line has one, so every line is a field, and a field is one line (%s)", l.n, askLabels)
-		case !strings.Contains("QCOWRTSM", string(label)):
+		case !strings.Contains("QCOWRTSMG", string(label)):
 			return askStdin{}, fmt.Errorf("stdin line %d has the label %c:, which is none of them (%s)", l.n, label, askLabels)
 		case value == "":
 			return askStdin{}, fmt.Errorf("stdin line %d is %c: with no words after it (%s)", l.n, label, askLabels)
-		case label != 'C' && label != 'O' && label != 'S' && label != 'M' && seen[label] != 0:
+		case label != 'C' && label != 'O' && label != 'S' && label != 'M' && label != 'G' && seen[label] != 0:
 			return askStdin{}, fmt.Errorf("stdin has the label %c: on lines %d and %d, and it is given once", label, seen[label], l.n)
 		}
 		seen[label] = l.n
@@ -97,11 +99,15 @@ func parseAskStdin(text string) (askStdin, error) {
 			got.says = append(got.says, value)
 		case 'M':
 			got.makes = append(got.makes, value)
+		case 'G':
+			got.general = append(got.general, value)
 		}
 	}
 	switch {
 	case got.question == "":
 		return askStdin{}, fmt.Errorf("stdin has no Q: line, and the question is the one line every ask needs (%s)", askLabels)
+	case len(got.general) > 0 && got.run != "":
+		return askStdin{}, fmt.Errorf("stdin has R: and G:, and a run ask proposes a command of the list or a general card's words: one of the two")
 	case got.runTest != "" && got.run == "":
 		return askStdin{}, fmt.Errorf("stdin has T: with no R: after it, and the test command goes beside the depot test command it is for")
 	case len(got.says) > 0 && got.run == "":
@@ -140,7 +146,7 @@ func askFromStdin(c *cobra.Command, args []string) error {
 	if len(args) == 0 || args[len(args)-1] != "-" || c.Flags().Changed("take-back") {
 		return nil
 	}
-	for _, name := range []string{"context", "option", "why", "run", "run-test", "run-says", "run-makes"} {
+	for _, name := range []string{"context", "option", "why", "run", "run-word", "run-test", "run-says", "run-makes"} {
 		if c.Flags().Changed(name) {
 			return fmt.Errorf("with -, put every text on stdin: --%s is given beside it (%s)", name, askLabels)
 		}
@@ -162,7 +168,7 @@ func askFromStdin(c *cobra.Command, args []string) error {
 		texts []string
 	}{
 		{"context", got.context}, {"option", got.options}, {"why", []string{got.why}},
-		{"run", []string{got.run}}, {"run-test", []string{got.runTest}},
+		{"run", []string{got.run}}, {"run-word", got.general}, {"run-test", []string{got.runTest}},
 		{"run-says", got.says}, {"run-makes", got.makes},
 	} {
 		for _, text := range set.texts {

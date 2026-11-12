@@ -178,6 +178,9 @@ func (c *carrier) carryNext(ctx context.Context) (bool, error) {
 	if err != nil || rec == nil {
 		return false, err
 	}
+	if rec.General {
+		return c.carryGeneralClaimed(ctx, rec)
+	}
 	if isSetupCarry(rec) {
 		setup, picked, err := c.askSetup(ctx, rec)
 		if err != nil {

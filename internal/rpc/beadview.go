@@ -130,9 +130,9 @@ func withoutRunWords(run *store.RunAsked, ran *store.AskRan) (*store.RunAsked, *
 	}
 	bare := *run
 	bare.Does, bare.Back, bare.BackBy, bare.Carried = []string{}, "", "", nil
-	held := store.RunArgvHeld(run.Argv)
+	held := store.RunHeld(store.AskRun{Argv: run.Argv, General: run.General})
 	if held {
-		bare.Argv, bare.Command = []string{}, ""
+		bare.Argv, bare.Command, bare.General = []string{}, "", nil
 	}
 	if bare.Pack != nil {
 		pack := *bare.Pack
@@ -168,7 +168,7 @@ func heldPackDirectory(argv []string) bool {
 // to draw the card as weighty, and loses the lines that quote those words. It
 // reads the card as the store has it, so it goes before withoutRunWords.
 func withoutWeightWords(run *store.RunAsked, weight []store.AskWeight) []store.AskWeight {
-	if run == nil || !store.RunArgvHeld(run.Argv) {
+	if run == nil || !store.RunHeld(store.AskRun{Argv: run.Argv, General: run.General}) {
 		return weight
 	}
 	return store.WithoutWeightWords(weight)

@@ -19,7 +19,7 @@ func (a *app) newBeadAskCmd() *cobra.Command {
 	var askNew bool
 	var askBead store.NewBead
 	var askSecret, askForUser, askForCrew, askAs, askRun, askRunTest, askRunRole, askSecretLogin, askSecretHook, askHookSource string
-	var askRunSays, askRunMakes []string
+	var askRunSays, askRunMakes, askRunWords []string
 	var askSetup string
 	var askDepotPush, askDepotPushOff string
 	var askCrew, askGroup []string
@@ -58,14 +58,15 @@ field continues on the next:
   O: <label>: <consequence>, one line for each option
   W: why the recommended one, once (--recommend names it)
   R: the command a run ask proposes, once (--run)
+  G: one verbatim word of a general run ask's command, in order (--run-word)
   T: its test command, once, with R: a depot test (--run-test)
   S: a says line of a hook add, in order, with R: a hook add (--run-says)
   M: a makes line of one, in order, with R: a hook add (--run-makes)
 
 A line with no label among labeled ones, a label among unlabeled ones, an
 unknown label and a label with no words are refused, and nothing is asked.
-With - no text is a flag: --context, --option, --why, --run, --run-test,
---run-says and --run-makes are refused beside it, and so is --new's -b -,
+With - no text is a flag: --context, --option, --why, --run, --run-word,
+--run-test, --run-says and --run-makes are refused beside it, and so is --new's -b -,
 which would read the same stdin. The flags that name no prose (--to,
 --recommend, --about, --setup,
 --crew and the rest) go beside it. The secret flags name a source, a user, a
@@ -259,6 +260,23 @@ tell, identity or test message, that user or the operator) and for
 --to <person>@<peer>; no copy goes to a
 linked yard. A crew member or a user writes one. An agent
 working a bead does not: it says what it needs in a note on the bead.
+
+--run-word <word>, repeatable, or G: <word> on stdin, proposes any
+yardr command no card of the list fits, as verbatim words, one word a
+use and in order: no line is split and no quoting is parsed, so a
+command with spaces rides as one word. Only the yardmaster files one,
+only for the operator, and only while the operator has turned
+general_cards on in a terminal (yardr settings set general_cards
+true); it is off until then and never rides a card itself. The card
+shows the command whole and unchecked, one word a line with its
+length, says the yard has not checked it and that no way back is
+shown, and is good for one hour. What the list carries is refused,
+naming its own card as the only door; what settles another ask, what
+rewrites the yard and what acts on a seq, thread, file or credential
+the card does not show never rides. Approving runs the words as
+typed, as the operator, once, and what the command prints is told to
+the asker. --run-word goes with no --run and no --run-test,
+--run-role, --run-says or --run-makes.
 
 --setup <pack> sets up a pack of kind source as one decision: the apply,
 the account and the grants. The pack is one yardr embeds, or one the
@@ -534,6 +552,16 @@ what the person asked does, and this is the asker's own.`,
 				return fmt.Errorf("--run proposes a command and --secret-login asks for a value: one of the two")
 			case c.Flags().Changed("run") && c.Flags().Changed("secret-hook"):
 				return fmt.Errorf("--run proposes a command and --secret-hook asks for a value: one of the two; ask for the hook's secret and the hook as two asks, the secret first")
+			case c.Flags().Changed("setup") && c.Flags().Changed("run-word"):
+				return fmt.Errorf("--setup sets up a pack and --run-word gives a general card's words: one of the two")
+			case (c.Flags().Changed("depot-push") || c.Flags().Changed("depot-push-off")) && c.Flags().Changed("run-word"):
+				return fmt.Errorf("--depot-push turns a depot's push on or off and --run-word gives a general card's words: one of the two")
+			case c.Flags().Changed("run-word") && c.Flags().Changed("run"):
+				return fmt.Errorf("--run proposes a command of the list and --run-word gives a general card's words: one of the two")
+			case c.Flags().Changed("run-word") && (c.Flags().Changed("secret") || c.Flags().Changed("secret-login") || c.Flags().Changed("secret-hook")):
+				return fmt.Errorf("--run-word gives a general card's words and a secret flag asks for a value: one of the two")
+			case c.Flags().Changed("run-word") && (c.Flags().Changed("run-test") || c.Flags().Changed("run-role") || c.Flags().Changed("run-says") || c.Flags().Changed("run-makes")):
+				return fmt.Errorf("--run-word gives a general card's words whole: --run-test, --run-role, --run-says and --run-makes go beside --run, not beside it")
 			case c.Flags().Changed("run-test") && (!c.Flags().Changed("run") || !depotTestCommand(askRun)):
 				return fmt.Errorf("--run-test is the command the run ask depot test <depot> proposes: it goes with that command")
 			case c.Flags().Changed("run-role") && (!c.Flags().Changed("run") || !crewAddCommand(askRun)):
@@ -613,8 +641,8 @@ what the person asked does, and this is the asker's own.`,
 			if c.Flags().Changed("depot-push-off") {
 				q.DepotPush = &store.AskDepotPush{Depot: askDepotPushOff, Off: true}
 			}
-			if c.Flags().Changed("run") {
-				if q.Run, err = askRunCarried(askRun, askRunTest, c.Flags().Changed("run-test"), askRunRole, c.Flags().Changed("run-role"), askRunSays, askRunMakes); err != nil {
+			if c.Flags().Changed("run") || c.Flags().Changed("run-word") {
+				if q.Run, err = askRunCarried(askRun, askRunWords, askRunTest, c.Flags().Changed("run-test"), askRunRole, c.Flags().Changed("run-role"), askRunSays, askRunMakes); err != nil {
 					return err
 				}
 			}
@@ -790,6 +818,7 @@ what the person asked does, and this is the asker's own.`,
 	ask.Flags().StringVar(&askForCrew, "for-crew", "", "with --secret: ask for this crew member's own credential in the source (the variables its credential names), kept in the crew member's env_file")
 	ask.Flags().StringVar(&askAs, "as", "", "with --secret: ask for this user's own credential in the source (the names a call made as them reads), kept in the user's env_file; with --secret-login: the login is this user's own, and theirs to give")
 	ask.Flags().StringVar(&askRun, "run", "", "propose this yardr command for the operator to approve, as it is typed: one the yard runs from a card (yardr bead ask --help; R: on stdin)")
+	ask.Flags().StringArrayVar(&askRunWords, "run-word", nil, "with a general run ask: one verbatim word of the command, in order, no line split and no quoting parsed (repeatable; G: on stdin): the yardmaster proposes any command no card fits, while general_cards stands true")
 	ask.Flags().StringVar(&askRunTest, "run-test", "", "with --run depot test <depot> (R:): the test command the ask proposes (T:), carried beside the command since --run quotes nothing")
 	ask.Flags().StringVar(&askRunRole, "run-role", "", "with --run crew add <name> ... (R:): the file whose role text the ask carries beside the command, shown whole on the card")
 	ask.Flags().StringArrayVar(&askRunSays, "run-says", nil, "with --run hook add <name> ... (R:): a says line the ask proposes (S:), repeatable in order, carried beside the command since a line needs spaces, -> and notes")

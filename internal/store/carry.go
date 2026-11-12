@@ -117,6 +117,11 @@ type Carry struct {
 	// a retry neither brings back a user the operator removed since nor
 	// removes a user added since under the same name.
 	TeammateWritten bool `json:"teammate_written,omitempty"`
+	// General marks a general run card's carrying out (runask_general.go):
+	// the server runs the command as typed, at most once per approval.
+	// An old server leaves the record approved, since it does not know
+	// the mark.
+	General bool `json:"general,omitempty"`
 }
 
 // CarrySource is one source's credential standing at approval, by name.
@@ -136,6 +141,9 @@ func carryKey(bead string, ask uint64) string { return join(bead, seqKey(ask)) }
 // whose command copies are to go, and a teammate invite or removal, whose
 // edge report cannot be one store write.
 func needsCarry(was AskRun) bool {
+	if was.General != nil {
+		return true
+	}
 	if len(was.Argv) >= 2 && was.Argv[0] == "pack" && was.Argv[1] == "apply" {
 		return true
 	}
@@ -157,7 +165,7 @@ func needsCarry(was AskRun) bool {
 // what each source it names stands with now, which the stale comparison
 // has just held to the card.
 func (w *wtx) recordCarry(bead string, seq uint64, was AskRun, actor string) error {
-	rec := Carry{Bead: bead, Ask: seq, Argv: was.Argv, State: CarryApproved, Actor: actor}
+	rec := Carry{Bead: bead, Ask: seq, Argv: was.Argv, State: CarryApproved, Actor: actor, General: was.General != nil}
 	rec.TeammateEmails = teammateEmails(w, was.Argv)
 	for _, carried := range was.Carried {
 		snap := CarrySource{Name: carried.Name}
@@ -211,6 +219,9 @@ func (s *Store) PendingCarry(ctx context.Context, at time.Time) (bool, error) {
 // how to carry rec. A record for a later carrying kind stays approved until
 // the build that knows it takes it up.
 func carryHandledHere(rec *Carry) bool {
+	if rec.General {
+		return true
+	}
 	if IsDepotPushCarry(rec.Argv) {
 		return true
 	}
@@ -357,6 +368,22 @@ func (s *Store) ResumeCarry(ctx context.Context, boot string) (int, error) {
 			return err
 		}
 		for _, rec := range recs {
+			if rec.General {
+				// A general command runs at most once per approval: one an
+				// earlier boot claimed is never carried again, since whether
+				// it finished is not known and running it again may double it.
+				const words = "the yard stopped while this ran; whether it finished is not known. Ask again if it is still wanted."
+				rec.State, rec.Result = CarryFailed, words
+				rec.RetryAfter, rec.Defers = time.Time{}, 0
+				if err := put(w.Tx, bCarry, carryKey(rec.Bead, rec.Ask), rec); err != nil {
+					return err
+				}
+				if err := w.completeAnswer(rec.Bead, rec.Ask, words, true); err != nil {
+					return err
+				}
+				n++
+				continue
+			}
 			rec.Boot, rec.ClaimedAt = boot, now()
 			if err := put(w.Tx, bCarry, carryKey(rec.Bead, rec.Ask), rec); err != nil {
 				return err

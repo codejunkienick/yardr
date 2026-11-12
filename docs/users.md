@@ -1178,6 +1178,7 @@ covered below under Strong cards. Row by row:
 | `crew identity <name> --source <source> --id <id> --key <key>`: a crew member's identity in a source set | Mentions and assignments of the id or key there are then addressed to that crew member, and what it does there is its own: the holder can have what is meant for another reach a member it directs by mail, or blind a member to what is meant for it. Only the operator sets it back |
 | `user identity <user> --source <source> [--id <id>] [--key <key>]`: who a user is in a source | Threads opened there for them are assigned to the id or key, and where the source hears by identity a delivery from them is heard as theirs; an ignored id or key is cleared in the same write. The user or the operator sets it back |
 | `settings set <key> <value>`: a setting changed | The yard runs under another number or name. The `operator` setting and the settings of where the yard reads and serves from are no run ask's; `hook_public_url` is one, so a holder that has it approved points later hook registrations at an address of their own |
+| a general run card (`--run-word`, `G:`): any yardr command no card fits, shown whole and unchecked | With `general_cards` on, the holder mails the yardmaster as the operator and approves what it files, so any command not refused at filing runs as the operator, once: what it makes stands after the device is removed, as any approval's does. The card is strong (`code`). With the setting off, which is how it stands until the operator turns it on in a terminal, no such card is filed |
 | `group rename <old> <new>`: a group called another name | The group, its routes, the beads it owns and their live sessions go on under the new name, and nothing is released, as the card named them. What names the old name outside the yard's records, a script or a role prompt, reaches no group, and a default route that names its group by the depot template stops serving the depot whose group it was. The old name is free. Only the operator renames it back, and nobody can where the old name is one pack imports give a depot's groups |
 | `peer rename <old> <new>`: a link renamed | A linked yard's name here changed: its key, address and what it carries stay, and what waited for it moves with it. Mail to the old name reaches nothing |
 | `peer rm <name>`: a link removed | That link is gone on this side, with its intakes, identities and queued mail; the beads of this yard that were there end as undelivered, and the beads it sent stay and say their link is removed. The other yard stands, and still has this one as a peer until its operator removes it there; its requests are refused here from now on. Only the operator adds it back, from a fresh invite |
@@ -1229,12 +1230,17 @@ What it still cannot have run, by a card or by the yardmaster on its mail:
 adding a device, changing the operator, where a user's
 address is read from, a hook add that keeps a secret file of its own,
 reading a source's
-credential or setting where it is read from or the command that mints one,
-free `args` of a group or a crew member that stands and any env setting of
-one, and applying a pack from a directory outside every depot's main
-checkout, or from a URL but the packs repository's, with a flag beyond
+credential or setting where it is read from (`env_file`) or the command
+that mints one (`mint_command`), and applying a pack from a directory
+outside every depot's main checkout, or from a URL but the packs
+repository's, with a flag beyond
 the depot, the mappings, the pin and `--yes` over the hand-edited files
-the card names, or where its plan asks.
+the card names, or where its plan asks. When `general_cards` stands on,
+free `args` of a group or a crew member and a crew member's
+`env_command` are no longer shut: their words ride the general card
+whole, as an `exec` group's command does on its own card. A device, the
+operator, credentials and mints, `env_file` and a pack from outside stay
+shut either way.
 The delegation switch it can move either way, as it
 approves any card, through the operator's own doors
 ([above](#the-yardmaster-for-the-operator)). A stolen device still cannot

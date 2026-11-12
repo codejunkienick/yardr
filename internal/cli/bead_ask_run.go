@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"unicode/utf8"
@@ -26,10 +27,19 @@ import (
 // command carries beside it, each read once here so the store holds the
 // bytes the card shows. test and role are the values of --run-test and
 // --run-role, and testSet and roleSet say whether they were given; says
-// and makes are the values of --run-says and --run-makes. A pack apply of
-// a relative directory is sent absolute, against the directory the ask is
-// typed in, since a relative path means nothing to the yard's server.
-func askRunCarried(command, test string, testSet bool, role string, roleSet bool, says, makes []string) (*store.AskRun, error) {
+// and makes are the values of --run-says and --run-makes. Words given
+// (the --run-word values, in order) make a general run ask instead: the
+// verbatim words whole, with nothing read beside them, and the two
+// forms together are refused. A pack apply of a relative directory is
+// sent absolute, against the directory the ask is typed in, since a
+// relative path means nothing to the yard's server.
+func askRunCarried(command string, words []string, test string, testSet bool, role string, roleSet bool, says, makes []string) (*store.AskRun, error) {
+	if len(words) > 0 {
+		if command != "" {
+			return nil, fmt.Errorf("--run proposes a command of the list and --run-word gives a general card's words: one of the two")
+		}
+		return &store.AskRun{General: slices.Clone(words)}, nil
+	}
 	command, err := packApplyAbsDir(command)
 	if err != nil {
 		return nil, err

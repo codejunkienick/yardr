@@ -255,6 +255,16 @@ says which cards carry each. Every secret ask carries `credential`. A card
 that narrows what the yard does, a revoke or a lower limit for instance, is
 routine and has no such line.
 
+A **general run card** carries any yardr command no card of the list fits,
+as verbatim words (`yardr bead ask --help`, `--run-word` and `G:`). Only
+the yardmaster files one, only for the operator, and only while the
+operator has turned `general_cards` on in a terminal; it is off until
+then. The card shows the command whole and unchecked, one word a line
+with its length, says the yard has not checked it and that no way back
+is shown, and is good for one hour. It always weighs `code`, so it is
+strong. Approving runs the words as typed, as the operator, once, and
+what the command prints is told to the asker.
+
 The view draws the `WEIGHTY` lines in the style it gives a crew member that
 is `blocked`, `failed to start` or `not logged in`, the one for what a
 person has to act on. It draws the rest of the card as it draws any card.

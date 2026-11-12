@@ -464,8 +464,8 @@ var KnownSettings = append([]Setting{
 			}
 			return nil
 		}},
-	{Key: ProviderTermsSetting, Help: "the provider-terms records the hosted Google setup made, one JSON list: each record's provider, the terms page the operator read (terms_url), the date read (read_on) and whether those terms bar creating, training or improving a general model from the data (bars_general_training); written by yardr edge setup-google on the operator's reading alone, and read by the agent gate for hosted Google calls",
-		Check: checkProviderTermsSetting},
+	{Key: ProviderTermsSetting, Help: "the provider-terms records the hosted Google setup made, one JSON list: each record's provider, the terms page the operator read (terms_url), the date read (read_on) and whether those terms bar creating, training or improving a general model from the data (bars_general_training); written by yardr edge setup-google on the operator's reading alone, and read by the agent gate for hosted Google calls", Check: checkProviderTermsSetting},
+	{Key: GeneralCardsSetting, Help: "whether the yardmaster may file a general run card (true), a yardr command no specific card fits, shown whole and unchecked for the operator to approve, or not (false): off until the operator turns it on in a terminal with yardr settings set general_cards true; it never rides a card", Default: "false", Check: checkGeneralCards},
 	{Key: PreviewIdleSetting, Help: "how long a preview may go without a request before the supervisor stops it, such as 4h or 1d; the approval stands, and the next visit starts it again",
 		Default: Span(DefaultPreviewIdle), Check: func(v string) error {
 			d, err := ParseSpan(v)

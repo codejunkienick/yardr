@@ -218,23 +218,28 @@ func grantSetOf(sets []string) string {
 	return strings.Join(out, " ")
 }
 
-// checkAlone refuses the words as a run ask when they name what is the
-// operator's alone or the asker's own to run, and answers errNotRow for
-// none the yard runs from a card. It reads the yard's records through
-// the commands' own checks, as askedRun reads them for a row.
-func (w *wtx) checkAlone(ctx context.Context, sent []string, actor string) error {
-	words := strings.Fields(strings.Join(sent, " "))
-	if len(words) > 0 && words[0] == "yardr" {
-		words = words[1:]
-	}
-	comma := strings.Contains(strings.Join(sent, " "), ",")
+// matchAlone refuses the words when they name what is the operator's
+// alone or the asker's own to run, and answers nil for none the yard
+// names so: verbatim says the words are a general card's, never joined
+// and split, so a comma in one is data, the group-set entry is skipped
+// (its keys ride the general card) and a form no entry reads whole is
+// no match, which the carrying out refuses through the CLI's own
+// validation. It reads the yard's records through the commands' own
+// checks, as askedRun reads them for a row.
+func (w *wtx) matchAlone(ctx context.Context, words []string, actor string, verbatim bool) error {
 	for i := range aloneList {
 		e := &aloneList[i]
+		if verbatim && slices.Equal(e.words, []string{"group", "set"}) {
+			continue
+		}
 		if len(words) < len(e.words) || !slices.Equal(words[:len(e.words)], e.words) {
 			continue
 		}
 		rest, handled, err := e.parse(words[len(e.words):])
 		if err != nil {
+			if verbatim {
+				continue
+			}
 			return err
 		}
 		if !handled {
@@ -251,6 +256,22 @@ func (w *wtx) checkAlone(ctx context.Context, sent []string, actor string) error
 			return err
 		}
 		return needsNoApproval(argv)
+	}
+	return nil
+}
+
+// checkAlone refuses the words as a run ask when they name what is the
+// operator's alone or the asker's own to run, and answers errNotRow for
+// none the yard runs from a card. It reads the yard's records through
+// the commands' own checks, as askedRun reads them for a row.
+func (w *wtx) checkAlone(ctx context.Context, sent []string, actor string) error {
+	words := strings.Fields(strings.Join(sent, " "))
+	if len(words) > 0 && words[0] == "yardr" {
+		words = words[1:]
+	}
+	comma := strings.Contains(strings.Join(sent, " "), ",")
+	if err := w.matchAlone(ctx, words, actor, false); err != nil {
+		return err
 	}
 	if comma {
 		return runNoneChar(',')

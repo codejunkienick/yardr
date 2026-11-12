@@ -32,6 +32,8 @@ func TestParseAskStdin(t *testing.T) {
 			askStdin{question: "Replace the hook?", context: []string{"why."}, run: "hook add linear --source linear",
 				says:  []string{"action=opened event=issues -> done", "action=closed event=issues -> changes"},
 				makes: []string{"action=opened event=issues -> task:new"}}},
+		{"general words in order", "Q: Run it?\nC: why.\nG: bead\nG: create\nG: hello there\n",
+			askStdin{question: "Run it?", context: []string{"why."}, general: []string{"bead", "create", "hello there"}}},
 	} {
 		got, err := parseAskStdin(tc.in)
 		if err != nil || !reflect.DeepEqual(got, tc.want) {
@@ -63,6 +65,7 @@ func TestParseAskStdin(t *testing.T) {
 		{"a test with no command", "Q: Go?\nC: why.\nT: go test ./...", "T: with no R: after it", false},
 		{"a says line with no command", "Q: Go?\nC: why.\nS: action=opened event=issues -> done\n", "S: with no R: after it", false},
 		{"a makes line with no command", "Q: Go?\nC: why.\nM: action=opened event=issues -> task:new\n", "M: with no R: after it", false},
+		{"a command and its words", "Q: Go?\nR: up\nG: bead\n", "R: and G:", false},
 	} {
 		_, err := parseAskStdin(tc.in)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -135,7 +138,7 @@ func testBeadAskStdin(t *testing.T) {
 	// With -, no text is a flag's: each is refused, in words, and nothing is
 	// stored.
 	before := len(notes())
-	for _, flag := range [][]string{{"--context", "why."}, {"--option", "Go: it goes"}, {"--why", "because"}, {"--run", "settings set max_sessions 20"}, {"--run-test", "go test ./..."}, {"--run-says", "action=opened event=issues -> done"}, {"--run-makes", "action=opened event=issues -> task:new"}} {
+	for _, flag := range [][]string{{"--context", "why."}, {"--option", "Go: it goes"}, {"--why", "because"}, {"--run", "settings set max_sessions 20"}, {"--run-word", "bead"}, {"--run-test", "go test ./..."}, {"--run-says", "action=opened event=issues -> done"}, {"--run-makes", "action=opened event=issues -> task:new"}} {
 		if _, err := ask("Go?\nwhy.\n", append([]string{id, "-"}, flag...)...); err == nil ||
 			!strings.Contains(err.Error(), "with -, put every text on stdin: "+flag[0]+" is given beside it") {
 			t.Errorf("- with %s = %v", flag[0], err)
@@ -162,6 +165,27 @@ func testBeadAskStdin(t *testing.T) {
 	// the shell's history, and the answer to a secret ask is typed at a
 	// terminal, never an argument. The question is typed here, so that any
 	// stdin read would be a flag's.
+	// A general ask on stdin files its words in order, as the flags
+	// would: the yardmaster's card for a command with its space whole.
+	if err := st.SetSetting(ctx, store.GeneralCardsSetting, "true", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr", Dir: "/yard"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	out, err = ask("Q: Make the group?\nC: no card carries its args.\nG: group\nG: set\nG: builders\nG: args=--do it\n", id, "-")
+	if err != nil {
+		t.Fatalf("a general ask on stdin: %v\n%s", err, out)
+	}
+	all := notes()
+	stored, err := askedRun(ctx, st, id, all[len(all)-1].Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stored.General; len(got) != 4 || got[3] != "args=--do it" {
+		t.Errorf("the general ask on stdin stores %v, want the words in order with the last whole", got)
+	}
+
 	const unread = "a question\nand a line of context\n"
 	for _, flag := range [][]string{{"--secret", "-"}, {"--secret", "-", "--for-user", "-"}, {"--secret", "-", "--for-crew", "-"}, {"--secret", "-", "--as", "-"}, {"--secret-login", "-"}, {"--secret-hook", "-", "--source", "-"}} {
 		in := strings.NewReader(unread)
@@ -175,4 +199,40 @@ func testBeadAskStdin(t *testing.T) {
 		}
 	}
 
+}
+
+// --run-word keeps its words in order as a general ask, is refused
+// beside the --run family, and is named in the help with G:.
+func TestBeadAskRunWord(t *testing.T) {
+	t.Parallel()
+	got, err := askRunCarried("", []string{"group", "set", "builders", "args=--do it"}, "", false, "", false, nil, nil)
+	if err != nil || got.Argv != nil || len(got.General) != 4 || got.General[3] != "args=--do it" {
+		t.Errorf("askRunCarried words = %+v, %v, want them in order as General alone", got, err)
+	}
+	if _, err := askRunCarried("up", []string{"up"}, "", false, "", false, nil, nil); err == nil ||
+		!strings.Contains(err.Error(), "one of the two") {
+		t.Errorf("askRunCarried with both forms = %v, want one of the two", err)
+	}
+	a := &app{}
+	help, _, err := a.beadCmd().Find([]string{"ask"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"--run-word", "G: one verbatim word", "general_cards"} {
+		if !strings.Contains(help.Long, want) {
+			t.Errorf("yardr bead ask --help does not name %q", want)
+		}
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"ask", "yardr-x", "Run it?", "--context", "c", "--run", "up", "--run-word", "up"}, "one of the two"},
+		{[]string{"ask", "yardr-x", "Run it?", "--context", "c", "--run-word", "up", "--run-test", "go test ./..."}, "go beside --run"},
+		{[]string{"ask", "yardr-x", "Run it?", "--context", "c", "--run-word", "up", "--run-says", "a -> b"}, "go beside --run"},
+	} {
+		if _, err := run(t, a.beadCmd(), tc.args...); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("bead ask %v = %v, want %q", tc.args, err, tc.want)
+		}
+	}
 }

@@ -635,6 +635,24 @@ func TestWithoutRunWordsHoldsAPackCardsMappings(t *testing.T) {
 	if held.PendingReason != "" || waiting.PendingReason == "" {
 		t.Errorf("the nonoperator's cut has pending reason %q, and changed the original %q", held.PendingReason, waiting.PendingReason)
 	}
+	// A general card's words are the yard's unchecked ones: a device
+	// that is no operator's is told none of them, in the card or in
+	// what it ran, and keeps the question and the help line alone.
+	general := &store.RunAsked{Argv: []string{"bead", "create", "Plans"}, General: []string{"bead", "create", "Plans"},
+		Command: "yardr bead create Plans", Description: "a yardr command no card fits, shown whole and unchecked",
+		Does: []string{"1: (4) bead"}}
+	ran := &store.AskRan{Argv: general.Argv, Result: "made bead yardr-x"}
+	bareGeneral, bareRan := withoutRunWords(general, ran)
+	if len(bareGeneral.Argv) != 0 || bareGeneral.Command != "" || bareGeneral.General != nil ||
+		len(bareGeneral.Does) != 0 || bareRan.Result != "" || len(bareRan.Argv) != 0 {
+		t.Errorf("the device is told a general card's words: %+v, %+v", bareGeneral, bareRan)
+	}
+	if bareGeneral.Description != general.Description || len(general.Argv) == 0 || ran.Result == "" {
+		t.Errorf("the cut lost the help line or changed its card: %+v", bareGeneral)
+	}
+	if got := withoutWeightWords(general, []store.AskWeight{{Class: store.WeightCode, Line: "brings a program the yard will run: bead create Plans"}}); got[0].Line != "brings a program the yard will run" {
+		t.Errorf("the device is told a general card's weight line: %+v", got)
+	}
 }
 
 // A weight line quotes the words argv holds, so the device keeps the class

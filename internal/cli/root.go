@@ -109,7 +109,10 @@ func execute(a *app, args []string) int {
 	}
 	root := a.rootCmd()
 	root.SetArgs(args)
-	err := root.ExecuteContext(context.Background())
+	err := a.generalCommandNamed(root, args)
+	if err == nil {
+		err = root.ExecuteContext(context.Background())
+	}
 	if a.st != nil {
 		_ = a.st.Close(context.Background())
 	}

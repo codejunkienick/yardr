@@ -31,6 +31,7 @@ func runCommandLine(argv []string) string { return "yardr " + strings.Join(typed
 // that takes it back. All of it is the yard's, and none of it the asker's.
 type RunAsked struct {
 	Argv        []string `json:"argv"`
+	General     []string `json:"general,omitempty"`
 	Command     string   `json:"command"`
 	Description string   `json:"description,omitempty"`
 	Does        []string `json:"does"`
@@ -55,7 +56,7 @@ func (a Ask) proposed() *RunAsked {
 	if a.Run == nil {
 		return nil
 	}
-	return &RunAsked{Argv: a.Run.Argv, Command: a.Run.Command(), Description: a.Run.Description,
+	return &RunAsked{Argv: a.Run.Argv, General: a.Run.General, Command: a.Run.Command(), Description: a.Run.Description,
 		Does: a.Run.Does, Back: a.Run.Back, BackBy: a.Run.BackBy, Carried: a.Run.Carried, Pack: a.Run.Pack,
 		Ask: a.Run.Ask}
 }

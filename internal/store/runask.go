@@ -71,6 +71,11 @@ type AskRun struct {
 	// and in an order of the yard's own, so that two ways of typing one
 	// command are stored as one.
 	Argv []string `json:"argv"`
+	// General is the command of a general card as verbatim words, where
+	// no specific card fits (runask_general.go): stored whole as Argv
+	// too, so every argv renderer keeps working. Nil on every other
+	// row; an old build ignores it.
+	General []string `json:"general,omitempty"`
 	// Description is the command's one-line Short from its help, shown
 	// beneath the command so the person asked need not parse its flags.
 	Description string `json:"description,omitempty"`
@@ -92,46 +97,30 @@ type AskRun struct {
 	BackBy string `json:"back_by,omitempty"`
 	// Carried holds what adding a source takes, for the rows that add
 	// one (source add here, pack apply in B2): each source's declaration
-	// text with its command files' bytes. It is the ask's own, kept as
-	// Does and Seen are because every view renders an ask from its note
-	// alone, and an approval adds exactly what it holds. No other row
-	// keeps it: askedRun throws a writer's Carried away with its Does
-	// and Seen.
+	// text with its command files' bytes, kept as Does and Seen are
+	// because every view renders an ask from its note alone, and an
+	// approval adds exactly what it holds. No other row keeps it.
 	Carried []AskSource `json:"carried,omitempty"`
 	// Pack is the pack a pack apply ask names, as the server read it
 	// from its own binary, or for a directory from the depot checkout
 	// it stands in; set on that row alone.
 	Pack *AskPack `json:"pack,omitempty"`
-	// Value is the address a user key row carries: the value it writes
-	// under the source's notify variable into the user's env file,
-	// shown on the card in Does as the command's own words never show
-	// it (yardr user key types it unseen). It comes from a delivery
-	// the yard dropped (ClaimAddress), never from a command line: a
-	// --run typed in a terminal carries none, and its card is refused.
-	// No other row keeps it.
+	// Value is the address a user key row carries, shown on the card in
+	// Does as the command's own words never show it. It comes from a
+	// delivery the yard dropped (ClaimAddress), never from a command
+	// line. No other row keeps it.
 	Value string `json:"value,omitempty"`
-	// Ask are the names the approval gives values for in the clear,
-	// one field on the card each, in this order: a hook add the yard
-	// registers itself asks for its register call's asked parameters.
-	// It is kept on the ask because the views render an ask from its
-	// note alone, as Carried is. No other row keeps it: askedRun
-	// throws a writer's Ask away with its Does and Seen.
+	// Ask are the names the approval gives values for in the clear, one
+	// field on the card each, kept as Carried is. No other row keeps it.
 	Ask []string `json:"ask,omitempty"`
-	// Test is the test command a depot test row carries: the command
-	// the approval sets as the depot's, shown on the card in Does as
-	// the command's own words never show it (--run quotes nothing, so
-	// it goes beside argv, in the ask's --run-test). No other row
-	// keeps it: askedRun throws a writer's Test away with its Does
-	// and Seen.
+	// Test is the test command a depot test row carries beside argv, in
+	// the ask's --run-test. No other row keeps it.
 	Test string `json:"test,omitempty"`
 	// Role is the prompt text a crew add, group add, group set or crew set
-	// row carries, shown on the card in Does as the command's own words
-	// never show it (it goes beside argv, in the ask's --run-role, or read
-	// from the file prompt= names when the ask is written). The approval of
-	// each writes it to a file the yard names by its digest
-	// (runask_promptfile.go): a crew add's as the new member's prompt, and
-	// the others' after they hold the file prompt= names to it. No other row
-	// keeps it: askedRun throws a writer's Role away with its Does and Seen.
+	// row carries beside argv (the ask's --run-role, or the file prompt=
+	// names), shown on the card in Does. The approval writes it to a file
+	// the yard names by its digest (runask_promptfile.go). No other row
+	// keeps it.
 	Role string `json:"role,omitempty"`
 	// HookTable is the says and makes lines a hook add row carries
 	// beside argv, in the order given: a line needs spaces, -> and
@@ -601,6 +590,9 @@ var runList = []runCommand{{
 // whatever actor it names. Asking gives the asker nothing: the ask is words
 // until its required approver approves it.
 func (w *wtx) askedRun(ctx context.Context, run AskRun, to, actor string) (*AskRun, error) {
+	if run.General != nil {
+		return w.askedGeneral(ctx, run, to, actor)
+	}
 	c, argv, err := parseRow(run.Argv)
 	if err != nil && err != errNotRow {
 		return nil, err
@@ -905,7 +897,7 @@ func (w *wtx) approveAsk(ctx context.Context, id string, seq uint64, actor strin
 		return nil, fmt.Errorf("ask %d takes no values: its card asks for none", seq)
 	}
 	was := *r.Ask.Run
-	c, argv, err := parseRun(was.Argv)
+	c, argv, err := rowFor(was)
 	if err != nil {
 		return nil, fmt.Errorf("ask %d: %w", seq, err)
 	}
@@ -945,7 +937,7 @@ func (w *wtx) approveAsk(ctx context.Context, id string, seq uint64, actor strin
 	if err != nil {
 		return nil, fmt.Errorf("ask %d: %w. %s", seq, err, nothingRan)
 	}
-	if !sameMap(card.Seen, was.Seen) || !slices.Equal(card.Does, was.Does) || card.Back != was.Back || card.BackBy != was.BackBy {
+	if was.General != nil || !sameMap(card.Seen, was.Seen) || !slices.Equal(card.Does, was.Does) || card.Back != was.Back || card.BackBy != was.BackBy {
 		if err := c.stale(w, seq, was, card); err != nil {
 			return nil, err
 		}

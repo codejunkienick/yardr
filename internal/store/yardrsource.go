@@ -366,7 +366,7 @@ func answerOf(tx *bolt.Tx, row *beadRow, e *Event) *answeredAsk {
 	}
 	_, wordsHeld := HeldYardWords(e.Actor, ans.Words)
 	return &answeredAsk{asker: askNote.Author, session: askNote.Session, stage: ask.Stage, line: answerSentence(e.Actor, row.ID, askNote.Author, ans.Ask, ask, ans, n, prev),
-		held: ans.Ran != nil && (ask.Run != nil && RunArgvHeld(ask.Run.Argv) || ask.DepotPush != nil) || ans.TakeBack && wordsHeld}
+		held: ans.Ran != nil && (ask.Run != nil && RunHeld(*ask.Run) || ask.DepotPush != nil) || ans.TakeBack && wordsHeld}
 }
 
 // answerSentence is an answer as one line of an inbox: who, which bead and
