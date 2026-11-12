@@ -205,7 +205,21 @@ ancestors() {
 # directory, which is unique to one run. It fails where home_pids does.
 pids() {
   hp=$(home_pids "$1") || return 1
-  lp=$(lsof -t "$1"/bin/* 2>/dev/null) || true
+  # Only the yard's own files in bin: lsof goes by the file's inode, not its
+  # name, so a symlink there to a file outside it (a test's stand-in, which
+  # links to the one launcher every stand-in shares) would match whatever
+  # runs through that file, in any yard. What build puts here are regular
+  # files, so those alone are asked for.
+  bins=
+  for f in "$1"/bin/*; do
+    if [ -f "$f" ] && [ ! -L "$f" ]; then bins="$bins $f"; fi
+  done
+  if [ -n "$bins" ]; then
+    # shellcheck disable=SC2086
+    lp=$(lsof -t $bins 2>/dev/null) || true
+  else
+    lp=
+  fi
   ep=$(exec_pids "$1" "$hp" 2>/dev/null) || true
   printf '%s\n%s\n%s\n' "$hp" "$lp" "$ep" | A="$(ancestors)" awk '
     BEGIN { n = split(ENVIRON["A"], a, "\n"); for (i = 1; i <= n; i++) skip[a[i]] }
@@ -324,6 +338,9 @@ down() {
       # shellcheck disable=SC2086
       echo "isolated-yard: still running, $d already removed:" $left >&2
     fi
+    for p in $left; do
+      ps -o pid=,ppid=,command= -p "$p" >&2 || true
+    done
     exit 1
   fi
   # A version probe (`claude --version`, what yardr doctor runs) and a

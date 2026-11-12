@@ -900,6 +900,34 @@ func TestDownLeavesTheProcessesOfOtherYards(t *testing.T) {
 		sleeper(t, ""),
 		sleeper(t, "/"),
 	}
+	// lsof follows the shared scripttest launcher by inode, even through a
+	// different yard's symlink. Keep one foreign stand-in running while pids
+	// and down look, so it must be left out with the other foreign processes.
+	standin := filepath.Join(d, "bin", "other")
+	scripttest.Write(t, standin, "exit 0\n")
+	foreign := filepath.Join(t.TempDir(), "other")
+	scripttest.Write(t, foreign, "read line\n")
+	cmd := exec.Command(foreign)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stdin.Close(); cmd.Process.Kill(); cmd.Wait() })
+	pid := cmd.Process.Pid
+	if !waitFor(10*time.Second, func() bool {
+		out, err := exec.Command("lsof", "-t", foreign).Output()
+		if err != nil {
+			return false
+		}
+		return slices.Contains(strings.Fields(string(out)), strconv.Itoa(pid))
+	}) {
+		t.Fatalf("the foreign stand-in (pid %d) never held its launcher open", pid)
+	}
+	others = append(others, pid)
+
 	out, err := script(t, "pids", d)
 	if err != nil {
 		t.Fatalf("isolated-yard pids: %v\n%s", err, out)
