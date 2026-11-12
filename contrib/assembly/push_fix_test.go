@@ -156,9 +156,48 @@ type fixYard struct {
 	fork string // the fork, where the push lands
 }
 
-func newFixYard(t *testing.T) *fixYard {
+// fixCommits are the commits of the fix template's work repository, which
+// every push-fix case starts from: the base main is on, the pull request's
+// head, the builder's fix of it, another head where the fork's branch or the
+// live pull request stands instead, a fix off main, and a fix the depot has
+// not got. The cases use them as given and make only the fix each shape is
+// about.
+type fixCommits struct {
+	base      string
+	head      string
+	fix       string
+	pushed    string
+	offMain   string
+	unfetched string
+}
+
+var fixTpl = &yardTemplate{name: "fix", build: buildFixTpl}
+
+// buildFixTpl is the fix yard's setup, once, into root: merge-pr's yard over
+// the yard template, the gh and git stand-ins, the work repository with the
+// commits every case starts from, and the empty fork. The template's commits
+// carry fixed dates, as the cases' own do, so the shas file beside them names
+// every borrower's commits: the cases read it instead of making them.
+func buildFixTpl(t *testing.T, root string) {
 	t.Helper()
-	y, gh := mergeYard(t)
+	from := yardTpl.borrow(t)
+	home := filepath.Join(root, "home")
+	repo := filepath.Join(root, "repo")
+	work := filepath.Join(root, "work")
+	fork := filepath.Join(root, "fork.git")
+	gh := filepath.Join(root, "gh")
+	copyTree(t, filepath.Join(from, "home"), home)
+	copyTree(t, filepath.Join(from, "repo"), repo)
+	y := &yard{t: t, home: home, repo: repo, wt: filepath.Join(home, "worktrees", "r", "r-1")}
+	y.env = append(os.Environ(), "YARDR_HOME="+home, "YARDR_ACTOR=test",
+		"GIT_AUTHOR_DATE=1700000000 +0100", "GIT_COMMITTER_DATE=1700000123 -0500")
+	relinkWorktrees(t, y.repo, y.wt)
+	close := serveTemplate(t, home)
+	defer close()
+	y.putDepot("r", y.repo, "main", "test ! -e RED")
+	if err := os.MkdirAll(filepath.Join(gh, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	realGit, err := exec.LookPath("git")
 	if err != nil {
 		t.Fatal(err)
@@ -169,13 +208,21 @@ func newFixYard(t *testing.T) *fixYard {
 	mergeGh := filepath.Join(gh, "bin", "gh-merge")
 	scripttest.Write(t, mergeGh, fakeMergeGh)
 	scripttest.Write(t, filepath.Join(gh, "bin", "gh"), strings.ReplaceAll(fakePushGh, "{gh}", mergeGh))
-	c := &fixYard{yard: y, gh: gh, work: filepath.Join(t.TempDir(), "work"), fork: filepath.Join(gh, "fork.git")}
-	wrapper := filepath.Join(t.TempDir(), "yardr")
-	scripttest.Write(t, wrapper, strings.ReplaceAll(pushEndsAt, "{yardr}", shellQuote(yardrBin)))
-	y.bin = wrapper
-	y.git(".", "init", "-q", "--bare", "-b", "main", c.fork)
-	y.git(".", "init", "-q", "-b", "main", c.work)
-	y.commit(c.work, "track.txt", "base\n")
+	scripttest.Write(t, filepath.Join(gh, "bin", "github-mint"), fakeGithubMint)
+	y.git(".", "init", "-q", "--bare", "-b", "main", fork)
+	y.git(".", "init", "-q", "-b", "main", work)
+	y.commit(work, "track.txt", "base\n")
+	c := &fixYard{yard: y, gh: gh, work: work, fork: fork}
+	H := c.head(map[string]string{"feature.txt": "theirs\n"})
+	F := c.commitOn(H, map[string]string{"feature.txt": "fixed\n"})
+	B := c.commitOn(H, map[string]string{"feature.txt": "theirs, pushed\n"})
+	base := c.git(work, "rev-parse", "main")
+	F2 := c.commitOn(base, map[string]string{"feature.txt": "another line\n"})
+	G := c.commitOn(H, map[string]string{"feature.txt": "never fetched\n"})
+	shas := "base=" + base + "\nhead=" + H + "\nfix=" + F + "\npushed=" + B + "\noffMain=" + F2 + "\nunfetched=" + G + "\n"
+	if err := os.WriteFile(filepath.Join(root, "shas"), []byte(shas), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	// A hook that fails, in the hooks of the depot's own repository: the
 	// push runs with hooks off, so it never fires, and a run that let them
 	// on would fail here.
@@ -183,7 +230,86 @@ func newFixYard(t *testing.T) *fixYard {
 	if err := os.WriteFile(filepath.Join(y.repo, ".git", "hooks", "pre-push"), []byte(hook), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return c
+}
+
+// borrowFix is the fix yard from the template: the same yard, work repository,
+// fork and stand-ins, copied into the test's own temp dir, with the worktree
+// relinked to the copy and the depot pointing at it. The gh stand-in that
+// answers who the token is names the template's gh, so it is written again
+// for the borrower's; the env file and the yardr wrapper name the borrower's
+// temp dir too. The flow the template put in its store is the borrower's.
+func borrowFix(t *testing.T) (*fixYard, fixCommits) {
+	t.Helper()
+	t.Parallel()
+	root := fixTpl.borrow(t)
+	// The home is short, not the test's temp dir: it holds the store's
+	// unix socket, whose path the kernel bounds.
+	home, err := os.MkdirTemp("", "yr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	repo := filepath.Join(t.TempDir(), "repo")
+	work := filepath.Join(t.TempDir(), "work")
+	gh := filepath.Join(t.TempDir(), "gh")
+	copyTree(t, filepath.Join(root, "home"), home)
+	copyTree(t, filepath.Join(root, "repo"), repo)
+	copyTree(t, filepath.Join(root, "work"), work)
+	copyTree(t, filepath.Join(root, "gh"), gh)
+	// The fork is the gh directory's, where the stand-in git points a push
+	// to a pull request's URL: $FAKE_GH/fork.git.
+	fork := filepath.Join(gh, "fork.git")
+	copyTree(t, filepath.Join(root, "fork.git"), fork)
+	y := &yard{t: t, home: home, repo: repo, wt: filepath.Join(home, "worktrees", "r", "r-1")}
+	y.env = append(os.Environ(), "YARDR_HOME="+home, "YARDR_ACTOR=test")
+	relinkWorktrees(t, y.repo, y.wt)
+	serveYard(t, home)
+	y.putDepot("r", y.repo, "main", "test ! -e RED")
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scripttest.Write(t, filepath.Join(gh, "bin", "git"), strings.ReplaceAll(fakePushGit, "{git}", realGit))
+	mergeGh := filepath.Join(gh, "bin", "gh-merge")
+	scripttest.Write(t, filepath.Join(gh, "bin", "gh"), strings.ReplaceAll(fakePushGh, "{gh}", mergeGh))
+	fakeGhs.Store(t, gh)
+	t.Cleanup(func() { fakeGhs.Delete(t) })
+	y.envFile = filepath.Join(t.TempDir(), "pr-merges.env")
+	if err := os.WriteFile(y.envFile, []byte("GITHUB_APP_ID=123456\nGITHUB_APP_PRIVATE_KEY_FILE="+filepath.Join(gh, "app.pem")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	y.opts = "YARDR_GITHUB_MINT=" + shellQuote(filepath.Join(gh, "bin", "github-mint")+" --from-group")
+	c := &fixYard{yard: y, gh: gh, work: work, fork: fork}
+	wrapper := filepath.Join(t.TempDir(), "yardr")
+	scripttest.Write(t, wrapper, strings.ReplaceAll(pushEndsAt, "{yardr}", shellQuote(yardrBin)))
+	y.bin = wrapper
+	var made fixCommits
+	for _, line := range strings.Split(readFile(t, filepath.Join(root, "shas")), "\n") {
+		name, sha, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch name {
+		case "base":
+			made.base = sha
+		case "head":
+			made.head = sha
+		case "fix":
+			made.fix = sha
+		case "pushed":
+			made.pushed = sha
+		case "offMain":
+			made.offMain = sha
+		case "unfetched":
+			made.unfetched = sha
+		default:
+			t.Fatalf("the fix template's shas name %q", name)
+		}
+	}
+	if made.base == "" || made.head == "" || made.fix == "" || made.pushed == "" || made.offMain == "" || made.unfetched == "" {
+		t.Fatalf("the fix template's shas are incomplete: %+v", made)
+	}
+	return c, made
 }
 
 // head makes a commit on main in the work repository and returns it: the pull
@@ -642,9 +768,9 @@ func TestPushFixPushesTheFix(t *testing.T) {
 			wants: []string{"pushed {tipshort} (the builder's {fixshort} made again as the App"}},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
-			c := newFixYard(t)
+			c, made := borrowFix(t)
 			id, num, branch := "r-p", 20, "their-branch"
-			H := c.head(map[string]string{"feature.txt": "theirs\n"})
+			H := made.head
 			fixFiles := map[string]string{"feature.txt": "fixed\n"}
 			if tc.filter {
 				fixFiles[".gitattributes"] = "feature.txt filter=review\n"
@@ -729,10 +855,12 @@ func TestPushFixPushesTheFix(t *testing.T) {
 			// App's already or was pushed already, else the fix made again as the App.
 			tip := c.forkHead(branch)
 			fill := strings.NewReplacer("{sha}", H, "{short}", H[:7], "{fix}", F, "{fixshort}", F[:7], "{tipshort}", tip[:7], "{id}", id)
-			c.has(id, tc.what, tc.stage, tc.hold)
-			for _, want := range tc.wants {
-				c.noted(id, tc.what, fill.Replace(want))
+			b := c.has(id, tc.what, tc.stage, tc.hold)
+			wants := make([]string, len(tc.wants))
+			for i, want := range tc.wants {
+				wants[i] = fill.Replace(want)
 			}
+			c.noted(id, tc.what, wants...)
 			for _, not := range tc.not {
 				if notes := c.notesOf(id); strings.Contains(notes, not) {
 					t.Errorf("%s: a note has %q:\n%s", tc.what, not, notes)
@@ -765,7 +893,7 @@ func TestPushFixPushesTheFix(t *testing.T) {
 				}
 			}
 			// The recorded commit is the one on the branch.
-			if got := fmt.Sprint(c.beadOf(id).Metadata["fix_commit"]); got != tip {
+			if got := fmt.Sprint(b.Metadata["fix_commit"]); got != tip {
 				t.Errorf("%s: the bead's fix_commit is %s, want the pushed %s", tc.what, got, tip)
 			}
 			if tc.filter {
@@ -967,14 +1095,10 @@ func TestPushFixHoldsWhatItCannotPush(t *testing.T) {
 			wants: []string{"asking GitHub for the id of the user yard-app[bot] failed", "HTTP 404: Not Found"}},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
-			c := newFixYard(t)
+			c, made := borrowFix(t)
 			id, num, branch := "r-h", 30, "their-branch"
-			H := c.head(map[string]string{"feature.txt": "theirs\n"})
-			F := c.commitOn(H, map[string]string{"feature.txt": "fixed\n"})
-			B := c.commitOn(H, map[string]string{"feature.txt": "theirs, pushed\n"})
-			base := c.git(c.work, "rev-parse", "main")
-			F2 := c.commitOn(base, map[string]string{"feature.txt": "another line\n"})
-			G := c.commitOn(H, map[string]string{"feature.txt": "never fetched\n"})
+			H, F, B, F2, G := made.head, made.fix, made.pushed, made.offMain, made.unfetched
+			base := made.base
 			c.depotFetch(F)
 			c.depotFetch(F2)
 			// The fixes of the rows that are made another way, made when a row asks
@@ -1068,10 +1192,12 @@ func TestPushFixHoldsWhatItCannotPush(t *testing.T) {
 			c.push(id, mergeOpts{head: live}, stand)
 			c.envFile, c.opts = envFile, opts
 
-			c.has(id, tc.what, stage, true)
-			for _, want := range tc.wants {
-				c.noted(id, tc.what, fill.Replace(want))
+			b := c.has(id, tc.what, stage, true)
+			wants := make([]string, len(tc.wants))
+			for i, want := range tc.wants {
+				wants[i] = fill.Replace(want)
 			}
+			c.noted(id, tc.what, wants...)
 			for _, not := range tc.not {
 				if notes := c.notesOf(id); strings.Contains(notes, not) {
 					t.Errorf("%s: a note has %q:\n%s", tc.what, not, notes)
@@ -1087,7 +1213,7 @@ func TestPushFixHoldsWhatItCannotPush(t *testing.T) {
 			}
 			// Nothing is recorded as the bead's fix_commit for a push that did not go
 			// out: it is the builder's still.
-			if got := fmt.Sprint(c.beadOf(id).Metadata["fix_commit"]); commit != "" && got != commit {
+			if got := fmt.Sprint(b.Metadata["fix_commit"]); commit != "" && got != commit {
 				t.Errorf("%s: the bead's fix_commit is %s, want the builder's %s", tc.what, got, commit)
 			}
 			if _, err := os.Stat(filepath.Join(c.gh, "calls")); tc.unasked == (err == nil) {

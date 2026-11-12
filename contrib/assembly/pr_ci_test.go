@@ -100,19 +100,83 @@ type ciYard struct {
 	work   string // a clone of it, where the commit of a pull request is made
 }
 
-func newCIYard(t *testing.T) *ciYard {
+var ciTpl = &yardTemplate{name: "ci", build: buildCITpl}
+
+// buildCITpl is the CI yard's setup, once, into root: merge-pr's yard over
+// the yard template, the gh stand-ins, the depot's ci.sh committed, the bare
+// origin with main pushed to it, and the clone of it where a pull request's
+// commit is made. The borrowers point the two remotes at their own origin.
+func buildCITpl(t *testing.T, root string) {
 	t.Helper()
-	y, gh := mergeYard(t)
-	c := &ciYard{yard: y, gh: gh, origin: filepath.Join(t.TempDir(), "origin.git"), work: filepath.Join(t.TempDir(), "work")}
+	from := yardTpl.borrow(t)
+	home := filepath.Join(root, "home")
+	repo := filepath.Join(root, "repo")
+	origin := filepath.Join(root, "origin.git")
+	work := filepath.Join(root, "work")
+	gh := filepath.Join(root, "gh")
+	copyTree(t, filepath.Join(from, "home"), home)
+	copyTree(t, filepath.Join(from, "repo"), repo)
+	y := &yard{t: t, home: home, repo: repo, wt: filepath.Join(home, "worktrees", "r", "r-1")}
+	y.env = append(os.Environ(), "YARDR_HOME="+home, "YARDR_ACTOR=test")
+	relinkWorktrees(t, y.repo, y.wt)
+	close := serveTemplate(t, home)
+	defer close()
+	y.putDepot("r", y.repo, "main", "ci.sh")
+	if err := os.MkdirAll(filepath.Join(gh, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scripttest.Write(t, filepath.Join(gh, "bin", "gh"), fakeMergeGh)
+	scripttest.Write(t, filepath.Join(gh, "bin", "github-mint"), fakeGithubMint)
+	y.commit(y.repo, "ci.sh", baseCI)
+	y.git(".", "init", "-q", "--bare", "-b", "main", origin)
+	y.git(y.repo, "remote", "add", "origin", origin)
+	y.git(y.repo, "push", "-q", "origin", "main")
+	y.git(".", "clone", "-q", origin, work)
+}
+
+// borrowCI is the CI yard from the template: the same yard, origin, clone
+// and stand-ins, copied into the test's own temp dir, with the worktree
+// relinked to the copy, the depot pointing at it, and both remotes pointing
+// at the copied origin. The test command is the depot's ci.sh, as the cases
+// run it; a case with its own command or base puts it.
+func borrowCI(t *testing.T) *ciYard {
+	t.Helper()
+	t.Parallel()
+	root := ciTpl.borrow(t)
+	// The home is short, not the test's temp dir: it holds the store's
+	// unix socket, whose path the kernel bounds.
+	home, err := os.MkdirTemp("", "yr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	repo := filepath.Join(t.TempDir(), "repo")
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	work := filepath.Join(t.TempDir(), "work")
+	gh := filepath.Join(t.TempDir(), "gh")
+	copyTree(t, filepath.Join(root, "home"), home)
+	copyTree(t, filepath.Join(root, "repo"), repo)
+	copyTree(t, filepath.Join(root, "origin.git"), origin)
+	copyTree(t, filepath.Join(root, "work"), work)
+	copyTree(t, filepath.Join(root, "gh"), gh)
+	y := &yard{t: t, home: home, repo: repo, wt: filepath.Join(home, "worktrees", "r", "r-1")}
+	y.env = append(os.Environ(), "YARDR_HOME="+home, "YARDR_ACTOR=test")
+	relinkWorktrees(t, y.repo, y.wt)
+	y.git(y.repo, "remote", "set-url", "origin", origin)
+	y.git(work, "remote", "set-url", "origin", origin)
+	serveYard(t, home)
+	y.putDepot("r", y.repo, "main", "ci.sh")
+	fakeGhs.Store(t, gh)
+	t.Cleanup(func() { fakeGhs.Delete(t) })
+	y.envFile = filepath.Join(t.TempDir(), "pr-merges.env")
+	if err := os.WriteFile(y.envFile, []byte("GITHUB_APP_ID=123456\nGITHUB_APP_PRIVATE_KEY_FILE="+filepath.Join(gh, "app.pem")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	y.opts = "YARDR_GITHUB_MINT=" + shellQuote(filepath.Join(gh, "bin", "github-mint")+" --from-group")
+	c := &ciYard{yard: y, gh: gh, origin: origin, work: work}
 	wrapper := filepath.Join(t.TempDir(), "yardr")
 	scripttest.Write(t, wrapper, strings.ReplaceAll(endsAt, "{yardr}", shellQuote(yardrBin)))
 	y.bin = wrapper
-	y.commit(y.repo, "ci.sh", baseCI)
-	y.tests("ci.sh")
-	y.git(".", "init", "-q", "--bare", "-b", "main", c.origin)
-	y.git(y.repo, "remote", "add", "origin", c.origin)
-	y.git(y.repo, "push", "-q", "origin", "main")
-	y.git(".", "clone", "-q", c.origin, c.work)
 	return c
 }
 
@@ -397,7 +461,7 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 		{what: "the script stopped while its tests run", stand: map[string]string{"signal-parent": ""}, signal: true},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
-			c := newCIYard(t)
+			c := borrowCI(t)
 			depot := c.git(c.repo, "status", "--porcelain") + c.git(c.repo, "rev-parse", "HEAD")
 			refs := c.git(c.repo, "for-each-ref")
 			id, num := "r-j", 20
@@ -464,9 +528,11 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 						t.Errorf("%s: the tests did not run on the merge of the head into the base: the log lacks %q:\n%s", tc.what, want, c.log)
 					}
 				}
-				for _, want := range tc.wants {
-					c.noted(id, tc.what, fill.Replace(want))
+				wants := make([]string, len(tc.wants))
+				for i, want := range tc.wants {
+					wants[i] = fill.Replace(want)
 				}
+				c.noted(id, tc.what, wants...)
 				for _, not := range tc.not {
 					if notes := c.notesOf(id); strings.Contains(notes, not) {
 						t.Errorf("%s: a note has %q:\n%s", tc.what, not, notes)
@@ -566,7 +632,7 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 	// now reads, pr-ci passes the bump to approved with that head, and merge-pr
 	// merges it. The yard's CI is the only CI asked.
 	t.Run("a bot's bump rebased after its review", func(t *testing.T) {
-		c := newCIYard(t)
+		c := borrowCI(t)
 		ctx, st := context.Background(), rpc.NewClient((&config.Config{Home: c.home}).Socket())
 		id, num := "r-e", 60
 		read := c.pull(num, map[string]string{"go.sum": "bump\n"})
@@ -588,13 +654,13 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 		reviewerDone(read)
 		pushed := c.pull(num, map[string]string{"go.sum": "bump, rebased\n"})
 		c.ci(id, mergeOpts{head: pushed}, nil)
-		c.has(id, "pushed to after its review, the event lost", "ciwait", true)
+		b := c.has(id, "pushed to after its review, the event lost", "ciwait", true)
 		c.noted(id, "pushed to after its review", "head "+pushed+" is not the reviewed "+read+": needs re-review")
 		c.clean(id, "pushed to after its review")
 		if c.fetched(pushed) {
 			t.Errorf("pr-ci fetched the head %s, which no reviewer read", pushed)
 		}
-		if b := c.beadOf(id); b.Metadata["ci_head"] != nil {
+		if b.Metadata["ci_head"] != nil {
 			t.Errorf("ci_head = %v on a bead held for a head no reviewer read", b.Metadata["ci_head"])
 		}
 		if _, err := st.Advance(ctx, id, "review", store.Expect{}, "test"); err != nil {
@@ -623,7 +689,7 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 	// the maintainer's: they read the head, record it as the commit they accept
 	// and unhold the bead, and pr-ci tests it.
 	t.Run("a pull request pushed to after its acceptance", func(t *testing.T) {
-		c := newCIYard(t)
+		c := borrowCI(t)
 		ctx, st := context.Background(), rpc.NewClient((&config.Config{Home: c.home}).Socket())
 		id, num := "r-a", 62
 		accepted := c.pull(num, map[string]string{"feature.txt": "accepted\n"})
@@ -632,13 +698,13 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 		c.reviewed(id, pushed)
 		c.ci(id, mergeOpts{head: pushed}, nil)
 		what := "pushed to after its acceptance"
-		c.has(id, what, "ciwait", true)
+		b := c.has(id, what, "ciwait", true)
 		c.noted(id, what, "head "+pushed+" is not the accepted "+accepted+": needs a maintainer's acceptance", "Nothing of "+prURLn(num)+" was fetched or run")
 		c.clean(id, what)
 		if c.fetched(pushed) {
 			t.Errorf("pr-ci fetched the head %s, which no maintainer accepted", pushed)
 		}
-		if b := c.beadOf(id); b.Metadata["ci_head"] != nil {
+		if b.Metadata["ci_head"] != nil {
 			t.Errorf("ci_head = %v on a bead held for a head no maintainer accepted", b.Metadata["ci_head"])
 		}
 		if strings.Contains(c.log, "ci.sh of the base") {
@@ -752,7 +818,7 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 			wants: []string{"has no GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_FILE", "env_file"}},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
-			c := newCIYard(t)
+			c := borrowCI(t)
 			id, num := "r-h", 30
 			sha := headA
 			if !tc.bare && tc.url == "" {
@@ -792,13 +858,15 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 			c.ci(id, mergeOpts{head: or(tc.head, sha)}, tc.stand)
 			c.envFile, c.opts = envFile, opts
 
-			c.has(id, tc.what, stage, true)
+			b := c.has(id, tc.what, stage, true)
 			if strings.Contains(c.log, "ci.sh of the base: in ") {
 				t.Errorf("%s: a pre-run hold started the test command:\n%s", tc.what, c.log)
 			}
-			for _, want := range tc.wants {
-				c.noted(id, tc.what, fill.Replace(want))
+			wants := make([]string, len(tc.wants))
+			for i, want := range tc.wants {
+				wants[i] = fill.Replace(want)
 			}
+			c.noted(id, tc.what, wants...)
 			for _, not := range tc.not {
 				if notes := c.notesOf(id); strings.Contains(notes, not) {
 					t.Errorf("%s: a note has %q:\n%s", tc.what, not, notes)
@@ -808,11 +876,11 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 			if tc.unfetched && c.fetched(sha) {
 				t.Errorf("%s: the depot has the commit %s of the pull request, which pr-ci was to leave where it was", tc.what, sha)
 			}
-			if b := c.beadOf(id); b.Metadata["ci_head"] != nil {
+			if b.Metadata["ci_head"] != nil {
 				t.Errorf("%s: ci_head = %v on a bead no verdict was given for", tc.what, b.Metadata["ci_head"])
 			}
 			// A run that holds before it starts keeps the maintainer's pick.
-			if tc.blessed && !slices.Contains(c.beadOf(id).Labels, "ci-ok") {
+			if tc.blessed && !slices.Contains(b.Labels, "ci-ok") {
 				t.Errorf("%s: a held run spent ci-ok", tc.what)
 			}
 			if _, err := os.Stat(filepath.Join(c.gh, "calls")); tc.asked != (err == nil) {
@@ -844,7 +912,7 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 	// bead past triage (a bead's agent is refused by store.AddLink), as a
 	// maintainer would by hand: the link removed, the other added.
 	t.Run("a link swapped for another pull request's after the review", func(t *testing.T) {
-		c := newCIYard(t)
+		c := borrowCI(t)
 		id, num, to := "r-s", 70, 71
 		read := c.pull(num, map[string]string{"feature.txt": "read\n"})
 		swapped := c.pull(to, map[string]string{"feature.txt": "swapped in\n"})

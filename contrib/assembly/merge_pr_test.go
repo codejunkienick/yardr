@@ -167,14 +167,14 @@ func mergeYard(t *testing.T) (y *yard, gh string) {
 	y.envFile = filepath.Join(t.TempDir(), "pr-merges.env")
 	write(y.envFile, "GITHUB_APP_ID=123456\nGITHUB_APP_PRIVATE_KEY_FILE="+filepath.Join(gh, "app.pem")+"\n", 0o600)
 	y.opts = "YARDR_GITHUB_MINT=" + shellQuote(mint+" --from-group")
-	y.contributorsPRFlow()
 	return y, gh
 }
 
 // contributorsPR is the contributors pack's pr flow as the store takes it,
-// read from the pack once: every merge-pr, pr-ci and post-review case puts the
-// same flow in a yard of its own, and loading and checking the whole pack to get
-// it again for each is work that none of them asserts on.
+// read from the pack once: the yard template puts it in the store every
+// merge-pr, pr-ci, push-fix and post-review case copies, and loading and
+// checking the whole pack to get it again for each is work that none of them
+// asserts on.
 var contributorsPR = sync.OnceValues(func() (store.Flow, error) {
 	sub, err := fs.Sub(packs.FS, packs.Contributors)
 	if err != nil {

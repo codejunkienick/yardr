@@ -94,7 +94,6 @@ func postYard(t *testing.T) (y *yard, gh string) {
 	y.opts = "YARDR_GITHUB_MINT=" + shellQuote(mint+" --from-group")
 	y.putFlowFile("yardr.public", storetest.RepoFlow(t, "yardr.public"))
 	y.pointFlow("r", "", "yardr.public")
-	y.contributorsPRFlow()
 	return y, gh
 }
 

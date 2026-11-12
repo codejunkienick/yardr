@@ -7,8 +7,11 @@ package assembly
 // states: a yard with a depot and a bead (newYard), a train yard with two
 // children (newTrainYard), one with both children landed (landedTrainYard),
 // one with its train integrated and its pull request open (integratedYard),
-// that one reviewed and in stage land (landYard), or a bare repository with a
-// branch in its worktree (newWatcherRun). Building each from git and the store
+// that one reviewed and in stage land (landYard), a bare repository with a
+// branch in its worktree (newWatcherRun), merge-pr's yard with the work
+// repository and fork a push-fix case starts from (borrowFix), or that yard
+// with the origin and clone a pr-ci case starts from (borrowCI). Building each
+// from git and the store
 // API costs seconds under -race, and the suite builds them a hundred times
 // over; the R1 budget (docs/testing.md) goes on that repeated setup, not on
 // what the tests assert.
@@ -434,7 +437,9 @@ func TestRelinkedWorktreesBelongToTheCopyNotTheTemplate(t *testing.T) {
 var yardTpl = &yardTemplate{name: "yard", build: buildYardTpl}
 
 // buildYardTpl is newYard's setup, once, into root: a yard with depot r over
-// a fresh repository and bead r-1 in approved on yard/r-1 in its worktree.
+// a fresh repository and bead r-1 in approved on yard/r-1 in its worktree,
+// and the contributors pack's pr flow for beads of type pr, which every
+// merge-pr, pr-ci, push-fix and post-review case puts in its yard.
 func buildYardTpl(t *testing.T, root string) {
 	t.Helper()
 	home, repo := filepath.Join(root, "home"), filepath.Join(root, "repo")
@@ -451,6 +456,7 @@ func buildYardTpl(t *testing.T, root string) {
 	y.putDepot("r", y.repo, "main", "test ! -e RED")
 	y.putFlow("f", flow)
 	y.pointFlow("r", "", "f")
+	y.contributorsPRFlow()
 	y.createBead("work", "r-1", "r", "", "approved")
 	y.git(y.repo, "branch", "yard/r-1")
 	y.git(y.repo, "worktree", "add", "-q", y.wt, "yard/r-1")

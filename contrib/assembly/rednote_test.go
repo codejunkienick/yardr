@@ -236,7 +236,7 @@ func TestMergeLocalGreenAttachesNothing(t *testing.T) {
 // pr-ci's red note names the failing test ahead of the tail, and the full
 // output rides beside the note.
 func TestPRCIRedTestsNoteNamesFailingTests(t *testing.T) {
-	c := newCIYard(t)
+	c := borrowCI(t)
 	const num = 40
 	sha := c.pull(num, map[string]string{"feature.txt": "new\n"})
 	const id = "r-j40"
