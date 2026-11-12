@@ -560,15 +560,26 @@ func (r *reader) hookVerify(e entry) (HookVerify, bool) {
 	} else {
 		v.Delivery = r.hookDelivery(*delivery)
 	}
-	// A body secret cannot also be a delivery id or timestamp: the receiver
-	// records the id, and timestamp refusals can describe how far the
-	// value is from the clock.
-	if secret && v.Signature.Body != "" {
-		if delivery != nil && v.Signature.Body == v.Delivery.Body {
-			r.errf(delivery.v, join(delivery.path, "body"), "the body field holding the secret cannot also name the delivery id")
+	// A secret cannot also be a delivery id or timestamp: the receiver
+	// records the id on the envelope, and timestamp refusals can describe
+	// how far the value is from the clock. Headers compare without regard
+	// to case, as the receiver reads them; body dot paths compare exact.
+	if secret {
+		if v.Signature.Body != "" {
+			if delivery != nil && v.Signature.Body == v.Delivery.Body {
+				r.errf(delivery.v, join(delivery.path, "body"), "the body field %q holding the secret cannot also name the delivery id", v.Signature.Body)
+			}
+			if timestamp != nil && v.Signature.Body == v.Timestamp.Body {
+				r.errf(timestamp.v, join(timestamp.path, "body"), "the body field %q holding the secret cannot also be a timestamp", v.Signature.Body)
+			}
 		}
-		if timestamp != nil && v.Signature.Body == v.Timestamp.Body {
-			r.errf(timestamp.v, join(timestamp.path, "body"), "the body field holding the secret cannot also be a timestamp")
+		if v.Signature.Header != "" {
+			if delivery != nil && strings.EqualFold(v.Signature.Header, v.Delivery.Header) {
+				r.errf(delivery.v, join(delivery.path, "header"), "the header %s holding the secret cannot also name the delivery id", v.Signature.Header)
+			}
+			if timestamp != nil && strings.EqualFold(v.Signature.Header, v.Timestamp.Header) {
+				r.errf(timestamp.v, join(timestamp.path, "header"), "the header %s holding the secret cannot also be a timestamp", v.Signature.Header)
+			}
 		}
 	}
 	// A delivery named in a header and in the body, or in neither, is

@@ -1583,6 +1583,26 @@ func TestParseHookSecret(t *testing.T) {
 			"    scheme: hmac-sha256\n    signed: body\n    signature: { header: Q-Sig, encoding: hex }\n    delivery: { body: meta.id }\n",
 			"repeat", "hmac-sha256", "body", "Q-Sig", "", "hex", "", "meta.id",
 		},
+		"an hmac signature sharing its delivery header": {
+			"    scheme: hmac-sha256\n    signed: body\n    signature: { header: Q-Sig, encoding: hex }\n    delivery: { header: Q-Sig }\n",
+			"repeat", "hmac-sha256", "body", "Q-Sig", "", "hex", "Q-Sig", "",
+		},
+		"a header secret beside a body delivery of the same name": {
+			"    scheme: secret\n    signature: { header: token }\n    delivery: { body: token }\n",
+			"repeat", "secret", "", "token", "", "", "", "token",
+		},
+		"a body secret beside a header delivery of the same name": {
+			"    scheme: secret\n    signature: { body: token }\n    delivery: { header: token }\n",
+			"repeat", "secret", "", "", "token", "", "token", "",
+		},
+		"a body secret beside a delivery of another case": {
+			"    scheme: secret\n    signature: { body: token }\n    delivery: { body: Token }\n",
+			"repeat", "secret", "", "", "token", "", "", "Token",
+		},
+		"a body secret beside a header timestamp of the same name": {
+			"    scheme: secret\n    signature: { body: token }\n    timestamp: { header: token, unit: s, window: 5m }\n",
+			"unique", "secret", "", "", "token", "", "", "",
+		},
 	} {
 		d, err := Parse("q.yaml", []byte("name: q\nhook:\n  verify:\n"+tc.verify+
 			"  bodies: "+tc.bodies+"\n  normalize: [normalize]\n"))
@@ -1745,8 +1765,11 @@ func TestParseHookRefusals(t *testing.T) {
 		"a secret in a header and in the body": {hooked("  verify:\n    scheme: secret\n    signature: { header: S-Secret, body: token }\n  bodies: unique\n  normalize: [normalize]\n"), "hook.verify.signature.header: a secret is in a header or in the body, not both"},
 		"a secret in neither":                  {hooked("  verify:\n    scheme: secret\n    signature: {}\n  bodies: unique\n  normalize: [normalize]\n"), "hook.verify.signature.header: missing: where the secret arrives (header: its name, or body: a dot path into it)"},
 		"a secret body that is no path":        {hooked("  verify:\n    scheme: secret\n    signature: { body: data..token }\n  bodies: unique\n  normalize: [normalize]\n"), `"data..token": a dot path into the body (token)`},
-		"body secret = delivery":               {hooked("  verify:\n    scheme: secret\n    signature: { body: token }\n    delivery: { body: token }\n  bodies: unique\n  normalize: [normalize]\n"), "hook.verify.delivery.body: the body field holding the secret cannot also name the delivery id"},
-		"body secret = timestamp":              {hooked("  verify:\n    scheme: secret\n    signature: { body: token }\n    timestamp: { body: token, unit: s, window: 5m }\n  bodies: unique\n  normalize: [normalize]\n"), "hook.verify.timestamp.body: the body field holding the secret cannot also be a timestamp"},
+		"body secret = delivery":               {hooked("  verify:\n    scheme: secret\n    signature: { body: token }\n    delivery: { body: token }\n  bodies: unique\n  normalize: [normalize]\n"), `hook.verify.delivery.body: the body field "token" holding the secret cannot also name the delivery id`},
+		"body secret = timestamp":              {hooked("  verify:\n    scheme: secret\n    signature: { body: token }\n    timestamp: { body: token, unit: s, window: 5m }\n  bodies: unique\n  normalize: [normalize]\n"), `hook.verify.timestamp.body: the body field "token" holding the secret cannot also be a timestamp`},
+		"header secret = delivery":             {hooked("  verify:\n    scheme: secret\n    signature: { header: S-Secret }\n    delivery: { header: S-Secret }\n  bodies: unique\n  normalize: [normalize]\n"), "hook.verify.delivery.header: the header S-Secret holding the secret cannot also name the delivery id"},
+		"header secret = timestamp":            {hooked("  verify:\n    scheme: secret\n    signature: { header: S-Secret }\n    timestamp: { header: S-Secret, unit: s, window: 5m }\n  bodies: unique\n  normalize: [normalize]\n"), "hook.verify.timestamp.header: the header S-Secret holding the secret cannot also be a timestamp"},
+		"header secret = delivery, other case": {hooked("  verify:\n    scheme: secret\n    signature: { header: S-Secret }\n    delivery: { header: s-secret }\n  bodies: unique\n  normalize: [normalize]\n"), "hook.verify.delivery.header: the header S-Secret holding the secret cannot also name the delivery id"},
 		"secret is challenge body":             {hooked("  verify:\n    scheme: secret\n    signature: { body: token }\n  bodies: unique\n  challenge: { body: token, value: verify, answer: challenge }\n  normalize: [normalize]\n"), "hook.challenge.body: the body field holding the secret cannot name a challenge"},
 		"secret is challenge answer":           {hooked("  verify:\n    scheme: secret\n    signature: { body: token }\n  bodies: unique\n  challenge: { body: type, value: verify, answer: token }\n  normalize: [normalize]\n"), "hook.challenge.answer: the body field holding the secret cannot be a challenge answer"},
 		"a body secret with hmac":              {hooked("  verify:\n    scheme: hmac-sha256\n    signed: body\n    signature: { header: S-Sig, encoding: hex, body: token }\n    delivery: { header: S-Delivery }\n  bodies: unique\n  normalize: [normalize]\n"), "hook.verify.signature.body: is for scheme secret: with hmac-sha256 the signature arrives in a header"},

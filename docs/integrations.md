@@ -1269,9 +1269,9 @@ hook:
   of the body does (`signature: { body: token }`), compared as it
   arrives, in constant time; exactly one of the two is named. `signed`,
   `algorithm`, `encoding`, `prefix`, `list` and `key` do not apply to it,
-  and with `hmac-sha256` a signature stays in a header. A body secret
-  field cannot also name a delivery or timestamp, or be used by a
-  challenge.
+  and with `hmac-sha256` a signature stays in a header. A field
+  holding the secret cannot also name a delivery or timestamp, and a
+  body secret field cannot be used by a challenge.
 
   The scheme keeps the name `hmac-sha256` for every hash: `algorithm` says
   which hash the HMAC is made with, `sha256` (what a file that leaves it
