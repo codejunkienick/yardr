@@ -68,13 +68,20 @@ type Herdr struct {
 	// known id found, while its file stands and nothing the lookup judged
 	// has moved into a match; contextLast keeps, per transcript path, what the last read
 	// saw, so an unchanged file is not opened again and a grown one is
-	// read from where the last read ended (see Context).
-	contextMu    sync.Mutex
-	contextMatch map[string]*contextPin
-	contextLast  map[string]contextRead
-	Bin          string
-	WorktreeRoot string
-	YardHome     string // passed to crew members, so their yard commands reach this yard
+	// read from where the last read ended (see Context). Both maps are
+	// bounded by least-recently-touched eviction (see contextCacheCap):
+	// contextMatchUsed and contextLastUsed order each map's entries by the
+	// clock every use advances, so a session that is gone stops holding
+	// its pin and reading once newer sessions arrive.
+	contextMu        sync.Mutex
+	contextMatch     map[string]*contextPin
+	contextLast      map[string]contextRead
+	contextClock     uint64
+	contextMatchUsed map[string]uint64
+	contextLastUsed  map[string]uint64
+	Bin              string
+	WorktreeRoot     string
+	YardHome         string // passed to crew members, so their yard commands reach this yard
 	// YardBin is this yard's executable. Agents are told to use it by path:
 	// an agent's shell may find an older yard first on its PATH.
 	YardBin string

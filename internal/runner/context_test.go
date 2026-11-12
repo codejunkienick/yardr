@@ -839,6 +839,140 @@ esac`)
 		}
 		wg.Wait()
 	})
+
+	t.Run("least-recently-touched entries are evicted past the cap", func(t *testing.T) {
+		const extra = 10
+		var zero store.ContextSource
+		// Worktree pins, each on its own transcript.
+		home := t.TempDir()
+		day := filepath.Join(home, "sessions", "2026", "11", "10")
+		paths := make([]string, 0, contextCacheCap+extra)
+		for i := range contextCacheCap + extra {
+			p := filepath.Join(day, fmt.Sprintf("m%d", i), "session.jsonl")
+			write(p, "{}\n")
+			paths = append(paths, p)
+		}
+		h := &Herdr{}
+		wkey := func(i int) string { return fmt.Sprintf("worktree-%d", i) }
+		// Each pin's wide names its own transcript alone: the pins still
+		// take the worktree path (wide is set), without every insert
+		// restating every other candidate.
+		for i := range contextCacheCap {
+			h.pinContext(wkey(i), paths[i], contextJudge{wide: paths[i]})
+		}
+		if n := len(h.contextMatch); n != contextCacheCap {
+			t.Fatalf("worktree pins after %d inserts = %d, want %d", contextCacheCap, n, contextCacheCap)
+		}
+		for i := range 5 {
+			if got := h.pinnedContext(wkey(i)); got != paths[i] {
+				t.Fatalf("touched worktree pin %d = %q, want %q", i, got, paths[i])
+			}
+		}
+		// Two last readings, one under the oldest untouched pin and one
+		// under a touched pin: the evicted pin's reading dies with it.
+		for _, i := range []int{5, 0} {
+			if _, _, _, err := h.cachedContext(paths[i], zero); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i := contextCacheCap; i < contextCacheCap+extra; i++ {
+			h.pinContext(wkey(i), paths[i], contextJudge{wide: paths[i]})
+		}
+		if n := len(h.contextMatch); n != contextCacheCap {
+			t.Fatalf("worktree pins after %d more inserts = %d, want %d", extra, n, contextCacheCap)
+		}
+		for i := range 5 {
+			if _, ok := h.contextMatch[wkey(i)]; !ok {
+				t.Errorf("touched worktree pin %d was evicted", i)
+			}
+		}
+		for i := 5; i < 5+extra; i++ {
+			if _, ok := h.contextMatch[wkey(i)]; ok {
+				t.Errorf("untouched worktree pin %d survived", i)
+			}
+		}
+		if _, ok := h.contextLast[paths[5]]; ok {
+			t.Error("evicted worktree pin's last reading survived")
+		}
+		if _, ok := h.contextLast[paths[0]]; !ok {
+			t.Error("touched worktree pin's last reading is missing")
+		}
+		if n, m := len(h.contextMatch), len(h.contextMatchUsed); n != m {
+			t.Errorf("worktree pins = %d with %d orderings, want the same", n, m)
+		}
+		// Known-id pins over one file.
+		shared := filepath.Join(t.TempDir(), "c1.jsonl")
+		write(shared, "{}\n")
+		k := &Herdr{}
+		kkey := func(i int) string { return fmt.Sprintf("known-%d", i) }
+		for i := range contextCacheCap {
+			k.pinContext(kkey(i), shared, contextJudge{})
+		}
+		for i := range 5 {
+			if got := k.pinnedContext(kkey(i)); got != shared {
+				t.Fatalf("touched known-id pin %d = %q, want %q", i, got, shared)
+			}
+		}
+		for i := contextCacheCap; i < contextCacheCap+extra; i++ {
+			k.pinContext(kkey(i), shared, contextJudge{})
+		}
+		if n := len(k.contextMatch); n != contextCacheCap {
+			t.Fatalf("known-id pins after %d more inserts = %d, want %d", extra, n, contextCacheCap)
+		}
+		for i := range 5 {
+			if _, ok := k.contextMatch[kkey(i)]; !ok {
+				t.Errorf("touched known-id pin %d was evicted", i)
+			}
+		}
+		for i := 5; i < 5+extra; i++ {
+			if _, ok := k.contextMatch[kkey(i)]; ok {
+				t.Errorf("untouched known-id pin %d survived", i)
+			}
+		}
+		if n, m := len(k.contextMatch), len(k.contextMatchUsed); n != m {
+			t.Errorf("known-id pins = %d with %d orderings, want the same", n, m)
+		}
+		// Last readings, each of its own file.
+		ldir := t.TempDir()
+		lpaths := make([]string, 0, contextCacheCap+extra)
+		for i := range contextCacheCap + extra {
+			p := filepath.Join(ldir, fmt.Sprintf("t%d.jsonl", i))
+			write(p, "{}\n")
+			lpaths = append(lpaths, p)
+		}
+		l := &Herdr{}
+		for _, p := range lpaths[:contextCacheCap] {
+			if _, _, _, err := l.cachedContext(p, zero); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, p := range lpaths[:5] {
+			if _, _, _, err := l.cachedContext(p, zero); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, p := range lpaths[contextCacheCap:] {
+			if _, _, _, err := l.cachedContext(p, zero); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if n := len(l.contextLast); n != contextCacheCap {
+			t.Fatalf("last readings after %d more inserts = %d, want %d", extra, n, contextCacheCap)
+		}
+		for i, p := range lpaths[:5] {
+			if _, ok := l.contextLast[p]; !ok {
+				t.Errorf("touched last reading %d was evicted", i)
+			}
+		}
+		for i, p := range lpaths[5 : 5+extra] {
+			if _, ok := l.contextLast[p]; ok {
+				t.Errorf("untouched last reading %d survived", 5+i)
+			}
+		}
+		if n, m := len(l.contextLast), len(l.contextLastUsed); n != m {
+			t.Errorf("last readings = %d with %d orderings, want the same", n, m)
+		}
+	})
 }
 
 // museTranscripts is a Muse session dir for a benchmark: others sessions of

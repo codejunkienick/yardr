@@ -21,6 +21,18 @@ import (
 
 const contextStartedAt = "context_started_at"
 
+// contextCacheCap bounds each of Herdr's context maps, the transcript pins
+// and the last readings, by least-recently-touched eviction. A live session
+// is asked on every idle pass, so it keeps its entries, and a session that
+// is gone stops holding its once newer sessions arrive. 200 covers the
+// yard's live sessions (tens) with headroom: a known-id pin measures a few
+// hundred bytes and a last reading a few hundred more, so 200 of each is
+// tens of KB a map. A worktree pin on a yard-sized session dir measures
+// about 1 MB (one state per other candidate and per directory above them),
+// and only sessions herdr names no id for hold one; the cap bounds how
+// many such pins dead sessions keep, not what one remembers.
+const contextCacheCap = 200
+
 // Context is the context the session's agent holds, in tokens: the last
 // use and window its own session file holds, by the kind's context source
 // (store.ContextSource). ok is false when the kind names no source, or
@@ -190,6 +202,9 @@ type contextFileState struct {
 func (h *Herdr) pinnedContext(key string) string {
 	h.contextMu.Lock()
 	pin := h.contextMatch[key]
+	if pin != nil {
+		h.touchContextPinLocked(key)
+	}
 	h.contextMu.Unlock()
 	if pin == nil {
 		return ""
@@ -305,11 +320,87 @@ func (h *Herdr) dropContextPin(key string, pin *contextPin, forgetRead bool) {
 	h.contextMu.Lock()
 	if h.contextMatch[key] == pin {
 		delete(h.contextMatch, key)
+		delete(h.contextMatchUsed, key)
 		if forgetRead {
 			delete(h.contextLast, pin.path)
+			delete(h.contextLastUsed, pin.path)
 		}
 	}
 	h.contextMu.Unlock()
+}
+
+// touchContextPinLocked marks key as used now. The caller holds contextMu.
+func (h *Herdr) touchContextPinLocked(key string) {
+	if h.contextMatchUsed == nil {
+		h.contextMatchUsed = map[string]uint64{}
+	}
+	h.contextClock++
+	h.contextMatchUsed[key] = h.contextClock
+}
+
+// touchContextLastLocked marks path as used now. The caller holds contextMu.
+func (h *Herdr) touchContextLastLocked(path string) {
+	if h.contextLastUsed == nil {
+		h.contextLastUsed = map[string]uint64{}
+	}
+	h.contextClock++
+	h.contextLastUsed[path] = h.contextClock
+}
+
+// evictContextPins drops the least-recently-touched pins past the cap, via
+// dropContextPin so each evicted pin's last reading dies with it. A drop
+// that finds another call replaced the pin drops nothing, and the next
+// pass picks again.
+func (h *Herdr) evictContextPins() {
+	for {
+		h.contextMu.Lock()
+		if len(h.contextMatch) <= contextCacheCap {
+			h.contextMu.Unlock()
+			return
+		}
+		oldest := oldestContextKey(h.contextMatch, h.contextMatchUsed)
+		pin := h.contextMatch[oldest]
+		h.contextMu.Unlock()
+		if pin == nil {
+			h.contextMu.Lock()
+			if h.contextMatch[oldest] == nil {
+				delete(h.contextMatch, oldest)
+				delete(h.contextMatchUsed, oldest)
+			}
+			h.contextMu.Unlock()
+			continue
+		}
+		h.dropContextPin(oldest, pin, true)
+	}
+}
+
+// evictContextLasts drops the least-recently-touched last readings past the
+// cap. Forgetting a reading only rereads the file on the next pass.
+func (h *Herdr) evictContextLasts() {
+	h.contextMu.Lock()
+	defer h.contextMu.Unlock()
+	for len(h.contextLast) > contextCacheCap {
+		oldest := oldestContextKey(h.contextLast, h.contextLastUsed)
+		delete(h.contextLast, oldest)
+		delete(h.contextLastUsed, oldest)
+	}
+}
+
+// oldestContextKey is the key of the least-recently-touched entry of entries
+// by used. Entries with no ordering lose first; the caller holds contextMu
+// and entries is not empty.
+func oldestContextKey[V any](entries map[string]V, used map[string]uint64) string {
+	oldest, at, found := "", uint64(0), false
+	for key := range entries {
+		u, ok := used[key]
+		if !ok {
+			return key
+		}
+		if !found || u < at {
+			oldest, at, found = key, u, true
+		}
+	}
+	return oldest
 }
 
 // pinContext remembers path as the transcript key found, with the judgement
@@ -331,11 +422,17 @@ func (h *Herdr) pinContext(key, path string, judge contextJudge) {
 		}
 	}
 	h.contextMu.Lock()
-	defer h.contextMu.Unlock()
 	if h.contextMatch == nil {
 		h.contextMatch = map[string]*contextPin{}
 	}
+	if h.contextMatchUsed == nil {
+		h.contextMatchUsed = map[string]uint64{}
+	}
 	h.contextMatch[key] = pin
+	h.contextClock++
+	h.contextMatchUsed[key] = h.contextClock
+	h.contextMu.Unlock()
+	h.evictContextPins()
 }
 
 // contextDirs are the directories a file of pattern stands in or could
@@ -447,10 +544,14 @@ func (h *Herdr) cachedContext(path string, source store.ContextSource) (used, wi
 	}
 	h.contextMu.Lock()
 	last, seen := h.contextLast[path]
-	h.contextMu.Unlock()
+	if seen {
+		h.touchContextLastLocked(path)
+	}
 	if seen && fi.Size() == last.size && fi.ModTime().Equal(last.mtime) {
+		h.contextMu.Unlock()
 		return last.used, last.window, last.ok, nil
 	}
+	h.contextMu.Unlock()
 	start := int64(0)
 	if seen && fi.Size() >= last.size {
 		start, used, window, ok = last.offset, last.used, last.window, last.ok
@@ -481,7 +582,12 @@ func (h *Herdr) cachedContext(path string, source store.ContextSource) (used, wi
 	if h.contextLast == nil {
 		h.contextLast = map[string]contextRead{}
 	}
+	if h.contextLastUsed == nil {
+		h.contextLastUsed = map[string]uint64{}
+	}
 	h.contextLast[path] = contextRead{size: fi.Size(), mtime: fi.ModTime(), offset: end, used: used, window: window, ok: ok}
+	h.touchContextLastLocked(path)
 	h.contextMu.Unlock()
+	h.evictContextLasts()
 	return used, window, ok, nil
 }
