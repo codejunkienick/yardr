@@ -52,7 +52,7 @@ func TestRailReadsInboxOnce(t *testing.T) {
 		token := srv.ActAs("jo")
 		ts := httptest.NewServer(srv)
 		t.Cleanup(func() { shut(ts) })
-		f := &fixture{t: t, st: st, ts: ts, home: home}
+		f := &fixture{t: t, client: testClient(t), st: st, ts: ts, home: home}
 		f.signIn(srv, token)
 		ctx := context.Background()
 		must(t, func() error { _, err := st.AddUser(ctx, "jo", "jo"); return err }())
@@ -84,7 +84,7 @@ func TestRailReadsInboxOnce(t *testing.T) {
 	must(t, err)
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: st, ts: ts, home: home}
+	f := &fixture{t: t, client: testClient(t), st: st, ts: ts, home: home}
 	if r := f.get("/"); r.status != 200 {
 		t.Fatalf("/: status %d: %s", r.status, r.body)
 	}

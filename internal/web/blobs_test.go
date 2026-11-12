@@ -35,7 +35,7 @@ func blobFixture(t *testing.T) *fixture {
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	return &fixture{t: t, st: st, ts: ts, home: dir}
+	return &fixture{t: t, client: testClient(t), st: st, ts: ts, home: dir}
 }
 
 // as serves f's yard on its own view, acting as the user as: the store's
@@ -49,7 +49,7 @@ func (f *fixture) as(t *testing.T, as string) *fixture {
 	token := srv.ActAs(as)
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	acting := &fixture{t: t, st: f.st, ts: ts, home: f.home}
+	acting := &fixture{t: t, client: testClient(t), st: f.st, ts: ts, home: f.home}
 	acting.signIn(srv, token)
 	return acting
 }

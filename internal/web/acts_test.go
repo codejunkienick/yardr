@@ -137,7 +137,7 @@ func mappingActYard(t *testing.T) (*fixture, *store.Bead, uint64) {
 	must(t, err)
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: api, ts: ts, home: home}
+	f := &fixture{t: t, client: testClient(t), st: api, ts: ts, home: home}
 	f.signIn(srv, srv.ActAs("mckean"))
 	ctx := context.Background()
 	must(t, func() error { _, err := f.st.AddUser(ctx, "mckean", "mckean"); return err }())
@@ -624,7 +624,7 @@ func TestBeadConcurrentAnswers(t *testing.T) {
 	token := srv.ActAs("jo")
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: base.st, ts: ts, home: base.home}
+	f := &fixture{t: t, client: testClient(t), st: base.st, ts: ts, home: base.home}
 	f.signIn(srv, token)
 	rev := revOf(t, f, b.ID)
 	var wg sync.WaitGroup

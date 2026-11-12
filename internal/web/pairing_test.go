@@ -221,7 +221,7 @@ func TestPairingRefusedWithoutJWT(t *testing.T) {
 	if r := acting.get("/pairing"); r.status != http.StatusForbidden || strings.Contains(r.body, `href="/pairing"`) {
 		t.Errorf("an acting view's page: status %d, want 403", r.status)
 	}
-	actingUser := &fixture{t: t, st: plain.st, ts: acting.view, home: plain.home}
+	actingUser := &fixture{t: t, client: testClient(t), st: plain.st, ts: acting.view, home: plain.home}
 	actingUser.signIn(srv, token)
 	r = actingUser.postForm("/pairing", url.Values{"action": {"open"}, "device": {"phone"}}, "Origin", acting.view.URL)
 	if r.status != http.StatusForbidden || !strings.Contains(r.body, "signed-in view only") {

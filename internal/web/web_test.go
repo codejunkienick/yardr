@@ -41,6 +41,11 @@ type fixture struct {
 	st  store.API
 	own *store.Store
 	ts  *httptest.Server
+	// client is the fixture's own, with its own transport: the tests run
+	// in parallel, and a request through http.DefaultClient breaks when
+	// another test closes the shared transport's idle connections under
+	// it (TestGoneClients does, and every shut does through ts.Close).
+	client *http.Client
 	// home is the yard's home, where a store flow's stage files are.
 	home string
 	// token, session and csrf are those of a view that acts, once signIn
@@ -63,7 +68,19 @@ func newFixture(t *testing.T) *fixture {
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	return &fixture{t: t, st: st, own: own, ts: ts, home: home}
+	return &fixture{t: t, client: testClient(t), st: st, own: own, ts: ts, home: home}
+}
+
+// testClient is a test's own HTTP client, with its own transport instead
+// of the shared one, so no other test's CloseIdleConnections breaks its
+// requests. Every fixture literal carries one; do calls it only through
+// the fixture, never lazily, because do runs concurrently on one fixture
+// and bare copies the fixture by value.
+func testClient(t *testing.T) *http.Client {
+	t.Helper()
+	c := &http.Client{Transport: &http.Transport{}}
+	t.Cleanup(c.CloseIdleConnections)
+	return c
 }
 
 type resp struct {
@@ -86,7 +103,7 @@ func (f *fixture) do(method, target string, headers ...string) resp {
 		req.Header.Add(headers[i], headers[i+1])
 	}
 	f.authorize(req)
-	r, err := http.DefaultClient.Do(req)
+	r, err := f.client.Do(req)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -749,7 +766,7 @@ func TestRailPages(t *testing.T) {
 	token := srv.ActAs("ada")
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: api, ts: ts}
+	f := &fixture{t: t, client: testClient(t), st: api, ts: ts}
 	f.signIn(srv, token)
 	ctx := context.Background()
 	must(t, f.st.SetSetting(ctx, store.OperatorSetting, "ada", "ada"))
@@ -930,7 +947,7 @@ func TestUnsafeHost(t *testing.T) {
 	srv.AllowNetwork("DevBox.local")
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: st, ts: ts}
+	f := &fixture{t: t, client: testClient(t), st: st, ts: ts}
 	for _, host := range []string{"192.168.178.90:8791", "192.168.178.90", "10.0.0.1:1", "[2001:db8::1]:8791", "[fe80::1]",
 		"devbox", "devbox.local:8791", "DEVBOX.LOCAL", "localhost:8791", "127.0.0.1:8791", "[::1]:8791"} {
 		if r := f.get("/", "Host", host); r.status != 200 {
@@ -956,7 +973,7 @@ func TestUnsafeHost(t *testing.T) {
 	bare.AllowNetwork("")
 	bts := httptest.NewServer(bare)
 	t.Cleanup(func() { shut(bts) })
-	bf := &fixture{t: t, st: st, ts: bts}
+	bf := &fixture{t: t, client: testClient(t), st: st, ts: bts}
 	if r := bf.get("/", "Host", "10.0.0.1"); r.status != 200 {
 		t.Errorf("no host name, Host 10.0.0.1: status %d", r.status)
 	}
@@ -983,7 +1000,7 @@ func TestGivenHost(t *testing.T) {
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: st, ts: ts}
+	f := &fixture{t: t, client: testClient(t), st: st, ts: ts}
 	for _, host := range []string{"yard.tailnet-name.ts.net", "yard.tailnet-name.ts.net:8791", "YARD.Tailnet-Name.ts.net:8791",
 		"yard.example.net:443", "YARD.EXAMPLE.NET", "devbox.local:8791", "192.168.178.90:8791"} {
 		if r := f.get("/", "Host", host); r.status != 200 {
@@ -1032,7 +1049,7 @@ func TestLoopbackHost(t *testing.T) {
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: st, ts: ts}
+	f := &fixture{t: t, client: testClient(t), st: st, ts: ts}
 	for _, host := range []string{"yard.tailnet-name.ts.net", "yard.tailnet-name.ts.net:8791", "YARD.Tailnet-Name.ts.net:443",
 		"yard.example.net:443", "YARD.EXAMPLE.NET", "localhost:8791", "127.0.0.1:8791", "[::1]:8791"} {
 		if r := f.get("/", "Host", host); r.status != 200 {
@@ -1080,7 +1097,7 @@ func TestLoopbackHost(t *testing.T) {
 	named.AllowHosts("devbox", "devbox.local")
 	nts := httptest.NewServer(named)
 	t.Cleanup(func() { shut(nts) })
-	nf := &fixture{t: t, st: st, ts: nts}
+	nf := &fixture{t: t, client: testClient(t), st: st, ts: nts}
 	for _, host := range []string{"devbox:8791", "DevBox.local"} {
 		if r := nf.get("/", "Host", host); r.status != 200 {
 			t.Errorf("given, Host %s: status %d", host, r.status)

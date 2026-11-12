@@ -32,7 +32,7 @@ func serveEstimates(t *testing.T, f *fixture, est map[string]*eta.Result) *fixtu
 	})
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	return &fixture{t: t, st: f.st, ts: ts, home: home}
+	return &fixture{t: t, client: testClient(t), st: f.st, ts: ts, home: home}
 }
 
 // etaRunning is a bead's estimate as the store answers it: an ETA range

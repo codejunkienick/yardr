@@ -38,7 +38,7 @@ func previewFixture(t *testing.T) *fixture {
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: st, own: own, ts: ts, home: home}
+	f := &fixture{t: t, client: testClient(t), st: st, own: own, ts: ts, home: home}
 	// A wait that times out says what it waited for; the cards say why it
 	// never came (a preview the supervisor gave up on, and what it logged).
 	t.Cleanup(func() {

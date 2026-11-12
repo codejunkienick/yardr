@@ -137,7 +137,7 @@ func TestFeedOtherWords(t *testing.T) {
 	token := srv.ActAs("ada")
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: api, ts: ts}
+	f := &fixture{t: t, client: testClient(t), st: api, ts: ts}
 	f.signIn(srv, token)
 	ctx := context.Background()
 	b, err := api.CreateBead(ctx, store.NewBead{Title: "a window", Stage: "new"}, "me")
@@ -978,7 +978,7 @@ func TestFeedTimers(t *testing.T) {
 	token := srv.ActAs("ada")
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: api, ts: ts}
+	f := &fixture{t: t, client: testClient(t), st: api, ts: ts}
 	f.signIn(srv, token)
 	ctx := context.Background()
 	_, err = api.AddUser(ctx, "jo", "me")

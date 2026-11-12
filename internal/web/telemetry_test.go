@@ -44,7 +44,7 @@ func telemetryFixture(t *testing.T, as string) *fixture {
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: st, own: own, ts: ts, home: home}
+	f := &fixture{t: t, client: testClient(t), st: st, own: own, ts: ts, home: home}
 	if as != "" {
 		f.signIn(srv, token)
 	}
@@ -236,7 +236,7 @@ func TestTelemetryPage(t *testing.T) {
 	}
 	jwtTS := httptest.NewServer(jwtServer)
 	t.Cleanup(func() { shut(jwtTS) })
-	hosted := &fixture{t: t, st: jwtStore, own: jwtOwn, ts: jwtTS, home: jwtHome}
+	hosted := &fixture{t: t, client: testClient(t), st: jwtStore, own: jwtOwn, ts: jwtTS, home: jwtHome}
 	operatorJWT := signRSA(t, keys.a, "a", jwtClaims("jo@example.net"))
 	memberJWT := signRSA(t, keys.a, "a", jwtClaims("sam@example.net"))
 	const jwtHeader = web.DefaultJWTHeader

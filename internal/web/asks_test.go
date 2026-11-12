@@ -380,7 +380,7 @@ changes: The bead goes back for changes.
 	must(t, err)
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: api, own: own, ts: ts, home: home}
+	f := &fixture{t: t, client: testClient(t), st: api, own: own, ts: ts, home: home}
 	f.signIn(srv, srv.ActAs("mckean"))
 	ctx := context.Background()
 	must(t, api.PutDepot(ctx, store.Depot{Name: "home", Base: "origin/main"}, "mckean"))
@@ -773,7 +773,7 @@ func TestHomeSetupCard(t *testing.T) {
 	must(t, err)
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: api, own: own, ts: ts, home: home}
+	f := &fixture{t: t, client: testClient(t), st: api, own: own, ts: ts, home: home}
 	f.signIn(srv, srv.ActAs("mckean"))
 	ctx := context.Background()
 	must(t, func() error { _, err := api.AddUser(ctx, "mckean", "mckean"); return err }())

@@ -38,7 +38,7 @@ func ownedFixture(t *testing.T, as string) (*fixture, *store.Store) {
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: api, ts: ts}
+	f := &fixture{t: t, client: testClient(t), st: api, ts: ts}
 	if as != "" {
 		f.signIn(srv, token)
 	}

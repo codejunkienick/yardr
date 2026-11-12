@@ -28,6 +28,8 @@ type pagesFixture struct {
 	view    *httptest.Server
 	sandbox *httptest.Server
 	local   *httptest.Server
+	// client is the fixture's own, with its own transport: see fixture.
+	client *http.Client
 }
 
 func newPagesFixture(t *testing.T) *pagesFixture {
@@ -64,7 +66,7 @@ func newPagesJWTFixture(t *testing.T, jwks *jwksStub, users map[string]string) *
 // and its local-read listener beside them.
 func servePagesFixture(t *testing.T, st store.API, srv *web.Server, dir string) *pagesFixture {
 	t.Helper()
-	f := &pagesFixture{t: t, st: st, srv: srv, home: dir}
+	f := &pagesFixture{t: t, client: testClient(t), st: st, srv: srv, home: dir}
 	f.view = httptest.NewServer(srv)
 	t.Cleanup(func() { shut(f.view) })
 	f.sandbox = httptest.NewServer(srv.PagesHandler())
@@ -87,7 +89,7 @@ func (f *pagesFixture) do(ts *httptest.Server, method, target string, headers ..
 		}
 		req.Header.Add(headers[i], headers[i+1])
 	}
-	r, err := http.DefaultClient.Do(req)
+	r, err := f.client.Do(req)
 	if err != nil {
 		f.t.Fatal(err)
 	}

@@ -215,7 +215,7 @@ func TestLocalReadAsksNoCookie(t *testing.T) {
 	token := srv.ActAs("jo")
 	local := httptest.NewServer(srv.LocalReadHandler())
 	t.Cleanup(func() { shut(local) })
-	f := &pagesFixture{t: t, st: st, srv: srv, local: local}
+	f := &pagesFixture{t: t, client: testClient(t), st: st, srv: srv, local: local}
 
 	for _, target := range []string{"/depots", "/depots?token=" + token} {
 		r := f.getLocal(target)

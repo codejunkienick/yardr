@@ -40,7 +40,7 @@ func talkFixture(t *testing.T, as string) (*fixture, *web.Server) {
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: st, ts: ts, home: home}
+	f := &fixture{t: t, client: testClient(t), st: st, ts: ts, home: home}
 	if as != "" {
 		f.signIn(srv, token)
 	}
@@ -515,7 +515,7 @@ func talkBlobFixture(t *testing.T, as string) *fixture {
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: st, ts: ts, home: dir}
+	f := &fixture{t: t, client: testClient(t), st: st, ts: ts, home: dir}
 	if as != "" {
 		f.signIn(srv, token)
 	}

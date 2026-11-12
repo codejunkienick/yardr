@@ -242,7 +242,7 @@ func jwtFixture(t *testing.T, jwks *jwksStub, header string, users map[string]st
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	return &fixture{t: t, st: st, ts: ts, home: home}
+	return &fixture{t: t, client: testClient(t), st: st, ts: ts, home: home}
 }
 
 // jwtClaims is a valid token's claims for email.

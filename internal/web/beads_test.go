@@ -1035,7 +1035,7 @@ func TestBeadPageMarksTrustedNoteAuthor(t *testing.T) {
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: st, ts: ts, home: home}
+	f := &fixture{t: t, client: testClient(t), st: st, ts: ts, home: home}
 
 	body := f.get("/beads/" + b.ID).body
 	for _, want := range []string{
@@ -1125,7 +1125,7 @@ func TestBeadPageMarksHistoryActor(t *testing.T) {
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: st, ts: ts, home: home}
+	f := &fixture{t: t, client: testClient(t), st: st, ts: ts, home: home}
 
 	body := f.get("/beads/" + b.ID).body
 	histAt := strings.Index(body, `id="history"`)
@@ -1179,7 +1179,7 @@ func TestBeadPageMarksForeignNoteWhenTrustsUnreadable(t *testing.T) {
 	}
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: st, ts: ts, home: home}
+	f := &fixture{t: t, client: testClient(t), st: st, ts: ts, home: home}
 
 	body := f.get("/beads/" + b.ID).body
 	notesAt, histAt := strings.Index(body, `id="notes"`), strings.Index(body, `id="history"`)
@@ -1449,7 +1449,7 @@ func TestBeadPageReadsItsOwnSessions(t *testing.T) {
 	must(t, err)
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: st, ts: ts}
+	f := &fixture{t: t, client: testClient(t), st: st, ts: ts}
 	ctx := context.Background()
 	must(t, f.st.PutGroup(ctx, store.Group{Name: "builders", Runner: "fake", Limit: 5}, "me"))
 	var beads []*store.Bead
@@ -1503,7 +1503,7 @@ func TestBeadsReadsTheYardOnce(t *testing.T) {
 	must(t, err)
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { shut(ts) })
-	f := &fixture{t: t, st: st, ts: ts}
+	f := &fixture{t: t, client: testClient(t), st: st, ts: ts}
 	ctx := context.Background()
 	must(t, f.st.PutDepot(ctx, store.Depot{Name: "line", Base: "origin/main"}, "me"))
 	must(t, f.st.PutDepot(ctx, store.Depot{Name: "loose", Base: "origin/main"}, "me"))
