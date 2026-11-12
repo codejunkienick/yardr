@@ -103,10 +103,11 @@ its operator.
 
 TLS ends at Cloudflare and at the router, so the edge reads every webhook
 payload and its headers, and the yard's answer, in the clear. A device's
-calls pass it in the clear too
+plain-token calls pass it in the clear too
 ([below](#footplate-through-the-link)). The yard-key
-signatures prove who sent a frame; they hide nothing. Nothing through the
-edge is end-to-end encrypted.
+signatures prove who sent a frame; they hide nothing. End-to-end
+encryption holds for a sealed channel's calls alone: they cross as
+ciphertext the edge carries but cannot open.
 
 It never holds:
 
@@ -158,11 +159,18 @@ An answer larger than one frame of the link, such as a blob download,
 crosses as a stream — the head, then the body in pieces — up to the
 edge's 16 MiB bound; past it the edge cuts the response.
 
-What the edge reads of it: every call and its answer — conversations, beads,
-mail, asks, notes — and the device token each call carries, with which the
-edge could act as that device within what the device may do. The edge is
-ours, and connecting needs a verified account, not the invite: an account
-the invite list does not name may connect its own yard, up to the account
+What the edge reads of it depends on the call. A plain token call it
+reads whole — the call and its answer, conversations, beads, mail,
+asks, notes — and the device token the call carries, with which the
+edge could act as that device within what the device may do. A sealed
+channel call (`POST /user/e2e`) keeps its contents from the edge: the
+call and its answer cross as ciphertext the edge carries but cannot
+open. The edge still sees the outer request and its envelope metadata,
+but no token is handed over — the channel key authenticates the call
+instead, so nothing the edge holds lets it act as the device.
+The edge is ours, and connecting needs a verified account, not the
+invite: an account the invite list does not name may connect its own yard,
+up to the account
 cap below, and gets no hosted yard, which still needs the invite list. A
 token is revoked per device on the yard: `yardr user device rm <user> <device>`.
 
@@ -183,20 +191,25 @@ until `yardr user device rm` removes it.
 Approvals cross the link: `ApproveAsk` and `ApproveSetup` are taken from a
 paired device of the operator down the link, as from the yard's own
 machine — pairing is the grant, and `yardr user device rm` is the revoke.
+Each approval and its answer reads as any call does: whole, with the
+token, on a plain call; ciphertext, with no token, over a sealed channel.
 A setup approval that types the account is the exception on a connected yard,
 since what is typed is a secret (below). One secret crosses with them on every
 yard: the code a harness's sign-in page shows, when the yard leads the
 harness's login for the operator
 ([crew.md](crew.md#the-yard-leads-a-harnesss-login)). A paired device of the
 operator gives it with `GiveSecret`, so a phone with no terminal behind it
-can sign the assistant in. The edge reads the code with the device's token,
-as it reads every call. The code is used once, within minutes, and the yard
+can sign the assistant in. On a plain call the edge reads the code with the
+device's token, as it reads every plain call; over a sealed channel the
+code crosses as ciphertext and no token crosses with it. The code is used
+once, within minutes, and the yard
 hands it to the waiting login in its memory and keeps it nowhere.
 A session's screen crosses with the approvals: `SessionScreen` is taken from
 a paired device of the operator down the link, as from the yard's own
-machine. The edge reads the screen with the device's token, as it reads
-every call; a member's device is answered as for a method the yard does not
-have.
+machine. On a plain call the edge reads the screen with the device's
+token, as it reads every plain call; over a sealed channel the screen
+crosses as ciphertext and no token crosses with it. A member's device
+is answered as for a method the yard does not have.
 Teammates cross with them too: `Teammates` and `UninviteTeammate` are taken
 from a paired device of the operator down the link, as from the yard's own
 machine, so the operator's paired device reads the yard's teammates and

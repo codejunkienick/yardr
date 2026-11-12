@@ -24,9 +24,14 @@ internal/source*/**
 # Declared sources' calls live in the packs, beside their manifests: what a
 # call may do, where a credential is sent, and what a pack brings.
 packs/*/*.yaml
+# What a harness install fetches and what checks it: the fetch specs and
+# their loader.
+harnesses/**
 # New dependencies.
 go.mod
 go.sum
+# What installs yardr: the release it fetches and the checks before it lands.
+install.sh
 # What judges a bead (the flows, the roles, the test gate) and what lands it.
 .yardr/**
 contrib/assembly/**
