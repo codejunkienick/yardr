@@ -53,6 +53,10 @@ import (
 // strict R1 verdict refused for load is told as quiet_unjudged instead,
 // with the refused packages and the run's own output: neither passed nor
 // failed, the count stays, and the next quiet event fires the run again.
+// A run that fails only on the R1 budget while a session starts mid-run
+// is told as quiet_unjudged too, with the over-budget packages and the
+// starters: the load average lags, so a starter shows in neither sample,
+// and quiet readings convict nothing.
 
 // QuietResult is how one quiet whole-suite run ended, as QuietRun (or the
 // real runner) reports it: the base commit it tested, how long it took,
@@ -63,7 +67,9 @@ import (
 // the strict R1 verdict refused for load sets Unjudged, with the refused
 // packages in NotJudged; Packages stays empty, as no FAIL line names one,
 // and the whole output is kept under quietRunKey, as a red run that names
-// no package keeps it.
+// no package keeps it. Exit is the gate's exit code where the gate ran;
+// a run that never reached it (no base, no worktree, no race lock) keeps
+// the zero value, as a passing run does.
 type QuietResult struct {
 	Commit    string
 	Wall      time.Duration
@@ -73,17 +79,30 @@ type QuietResult struct {
 	Outputs   map[string]string
 	Unjudged  bool
 	NotJudged []NotJudgedPackage
+	Exit      int
 }
 
-// NotJudgedPackage is one package a strict quiet run refused to judge: over
-// the 60 s budget alone on a loaded machine, so neither a pass nor a fail.
-// Run and Alone are the seconds it took in the run and alone, Load the load
-// its re-run sat in, as the run's "not judged" line named them.
+// NotJudgedPackage is one package a strict quiet run did not judge: over
+// the 60 s budget alone, so neither a pass nor a fail. Run and Alone are
+// the seconds it took in the run and alone. Load is the load its re-run
+// sat in, as the run's "not judged" line named it; it is empty where quiet
+// samples failed the package and sessions that started mid-run downgraded
+// it instead, which the telling names beside this.
 type NotJudgedPackage struct {
 	Package string `json:"package"`
 	Run     string `json:"run_s"`
 	Alone   string `json:"alone_s"`
 	Load    string `json:"load"`
+}
+
+// MidRunSession is one session that started while a quiet run ran: the
+// starters a downgraded quiet_unjudged telling names, each with the bead
+// it works and when it started, inside the run's window.
+type MidRunSession struct {
+	ID        string    `json:"id"`
+	Bead      string    `json:"bead"`
+	Group     string    `json:"group"`
+	StartedAt time.Time `json:"started_at"`
 }
 
 // quietRelevant says whether an event can change whether a quiet run is
@@ -339,7 +358,9 @@ func (d *Dispatcher) runQuietDepot(ctx context.Context, depot store.Depot, since
 	if run == nil {
 		run = d.execQuietRun
 	}
+	start := time.Now()
 	res, err := run(ctx, depot)
+	end := time.Now()
 	data := map[string]any{"depot": depot.Name, "base": base, "commit": res.Commit,
 		"wall_s": int(res.Wall.Round(time.Second).Seconds()), "load": res.Load, "landings": since}
 	if err == nil && res.Unjudged {
@@ -347,6 +368,9 @@ func (d *Dispatcher) runQuietDepot(ctx context.Context, depot store.Depot, since
 		return
 	}
 	if err != nil {
+		if d.quietDowngrade(ctx, depot, start, end, &res, data) {
+			return
+		}
 		data["packages"] = res.Packages
 		data["tests"] = res.Tests
 		data["reason"] = err.Error()
@@ -365,6 +389,48 @@ func (d *Dispatcher) runQuietDepot(ctx context.Context, depot store.Depot, since
 	if lerr := d.Store.LogDispatch(ctx, "", store.QuietPassed, actor, data); lerr != nil {
 		d.Log.Warn("quiet run: passed event", "depot", depot.Name, "err", lerr)
 	}
+}
+
+// quietDowngrade tells a failed run as quiet_unjudged instead of
+// quiet_failed where the yard stopped being quiet while it ran: the gate
+// exited 1, no FAIL line names a package, the output holds an R1
+// over-budget line, and a session that runs something on this machine
+// started inside the run's window. The one-minute average lags, so a
+// builder that starts as a re-run starts shows in neither load sample, and
+// the gate fails the package on quiet readings; the sessions that started
+// say the machine was no longer quiet. The telling is tellQuietUnjudged's,
+// with the over-budget packages (both times, no load) and the starters
+// named, and past the bound it fails as a refusal does. Anything else -- a
+// FAIL line, another exit, no over-budget line, no starter -- is not told,
+// and the run fails as before. It reports whether it told anything.
+func (d *Dispatcher) quietDowngrade(ctx context.Context, depot store.Depot, start, end time.Time, res *QuietResult, data map[string]any) bool {
+	if res.Exit != 1 || len(res.Packages) != 0 {
+		return false
+	}
+	over := quietOverBudget(res.Outputs[quietRunKey])
+	if len(over) == 0 {
+		return false
+	}
+	sessions, err := d.Store.Sessions(ctx, true)
+	if err != nil {
+		d.Log.Warn("quiet run: sessions", "depot", depot.Name, "err", err)
+		return false
+	}
+	var starters []MidRunSession
+	for _, s := range sessions {
+		if !store.RunsHere(s.RunnerName()) || s.StartedAt.Before(start) || s.StartedAt.After(end) {
+			continue
+		}
+		starters = append(starters, MidRunSession{ID: s.ID, Bead: s.Bead, Group: s.Group, StartedAt: s.StartedAt})
+	}
+	if len(starters) == 0 {
+		return false
+	}
+	res.Unjudged = true
+	res.NotJudged = over
+	data["sessions"] = starters
+	d.tellQuietUnjudged(ctx, depot, *res, data)
+	return true
 }
 
 // quietUnjudgedBound is how many quiet runs in a row the strict R1 verdict
@@ -554,6 +620,24 @@ func quietNotJudged(out string) []NotJudgedPackage {
 		refused = append(refused, NotJudgedPackage{Package: m[1], Run: m[2], Alone: m[3], Load: m[4]})
 	}
 	return refused
+}
+
+// overBudgetLine is a strict run's R1 failure for one package: over budget
+// alone on quiet samples, with both times. A package whose re-run itself
+// failed prints no alone time and matches nothing: its cause is unknown,
+// and the run fails as before.
+var overBudgetLine = regexp.MustCompile(`(?m)^test: (\S+) took (\S+) s with -race, (\S+) s alone, over the 60 s budget \(docs/testing\.md R1\)$`)
+
+// quietOverBudget names the packages a whole-suite output failed on the R1
+// budget: one per over-budget line, in the order printed, each with both
+// times its line named and no load, as the samples that failed it read
+// quiet.
+func quietOverBudget(out string) []NotJudgedPackage {
+	var over []NotJudgedPackage
+	for _, m := range overBudgetLine.FindAllStringSubmatch(out, -1) {
+		over = append(over, NotJudgedPackage{Package: m[1], Run: m[2], Alone: m[3]})
+	}
+	return over
 }
 
 var failTest = regexp.MustCompile(`--- FAIL: (\S+)`)
@@ -795,11 +879,14 @@ func (d *Dispatcher) execQuietRun(ctx context.Context, depot store.Depot) (Quiet
 		Packages: quietPackages(out.String()), Tests: quietTests(out.String())}
 	if runErr != nil {
 		var exit *exec.ExitError
-		if errors.As(runErr, &exit) && exit.ExitCode() == quietUnjudgedExit {
-			res.Unjudged = true
-			res.NotJudged = quietNotJudged(out.String())
-			res.Outputs = quietRunOutputs(out.String())
-			return res, nil
+		if errors.As(runErr, &exit) {
+			res.Exit = exit.ExitCode()
+			if exit.ExitCode() == quietUnjudgedExit {
+				res.Unjudged = true
+				res.NotJudged = quietNotJudged(out.String())
+				res.Outputs = quietRunOutputs(out.String())
+				return res, nil
+			}
 		}
 		res.Outputs = quietRunOutputs(out.String())
 		return res, fmt.Errorf("the whole suite failed on %s at %s: %w", base, commit, runErr)

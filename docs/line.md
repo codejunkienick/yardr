@@ -369,7 +369,10 @@ verdict is there to read and the suite need not run again to find it
 `quiet_unjudged` instead, neither passed nor failed, with the refused
 packages and the same `run.log`; the landings count stays, so the trigger
 retries when the run ends if the yard is still quiet, and the third
-refusal in a row is told as failed.
+refusal in a row is told as failed. A run that fails only on the R1 budget
+while sessions started mid-run is told as `quiet_unjudged` too, with the
+over-budget packages and the sessions that started, since the one-minute
+average lags and shows starters in neither sample.
 
 The runs that race take one machine-wide lock at a time, and a landing
 goes first in its queue (yardr-0cw8). The queue is a ticket for each

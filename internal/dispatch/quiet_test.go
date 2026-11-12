@@ -743,6 +743,164 @@ func TestQuietNotJudgedNamesTheRefusedPackages(t *testing.T) {
 	}
 }
 
+// A quiet run that fails only on the R1 budget while a session starts
+// mid-run is told as quiet_unjudged, not quiet_failed: the yard stopped
+// being quiet while it ran, and the one-minute average lags, so a builder
+// that starts as the re-run starts shows in neither load sample
+// (yardr-fth5). The telling names the over-budget packages with both times
+// and the sessions that started mid-run. The same run with no mid-run
+// session, with a FAIL line, or with another exit fails as before.
+func TestQuietR1OnlyFailureWithMidRunSessionIsUnjudged(t *testing.T) {
+	r1Store := "test: yardr.dev/yardr/internal/store took 78.879 s with -race, 80.928 s alone, over the 60 s budget (docs/testing.md R1)\n"
+	r1CLI := "test: yardr.dev/yardr/internal/cli took 65.1 s with -race, 61.0 s alone, over the 60 s budget (docs/testing.md R1)\n"
+	rerunFailed := "test: yardr.dev/yardr/internal/pack took 65.1 s with -race, over the 60 s budget (docs/testing.md R1), and its re-run alone failed\n"
+	failLine := "--- FAIL: TestPaint (0.1s)\nFAIL\tyardr.dev/yardr/internal/store\t0.1s\n"
+
+	// r1Yard is a quiet yard whose canned suite ends as exit says with out
+	// as its whole output. Where claim is set, the run claims a builder
+	// session and ends it while it runs, so its start lands inside the
+	// run's window: "once" on the first run alone, so the re-arm's run has
+	// no mid-run session, "every" on each run.
+	r1Yard := func(t *testing.T, out string, pkgs []string, exit int, claim string) *quietYard {
+		t.Helper()
+		y := newQuietYard(t)
+		ctx := context.Background()
+		must(t, y.s.PutGroup(ctx, store.Group{Name: "builders", Runner: "herdr", Limit: 5}, "me"))
+		y.res = dispatch.QuietResult{Commit: "r1only", Wall: 649 * time.Second, Load: "4.26",
+			Exit: exit, Packages: pkgs, Outputs: map[string]string{dispatch.QuietRunKey: out}}
+		y.err = errors.New("the whole suite failed")
+		y.d.QuietRun = func(ctx context.Context, depot store.Depot) (dispatch.QuietResult, error) {
+			y.mu.Lock()
+			y.calls++
+			n := y.calls
+			y.mu.Unlock()
+			if claim == "every" || (claim == "once" && n == 1) {
+				b, err := y.s.CreateBead(ctx, store.NewBead{Title: "mid-run work"}, "me")
+				if err != nil {
+					t.Errorf("claim a mid-run session: create bead: %v", err)
+				} else if sess, err := y.s.Claim(ctx, b.ID, "builders", "new", "me"); err != nil {
+					t.Errorf("claim a mid-run session: %v", err)
+				} else if err := y.s.EndSession(ctx, sess.ID, "failed", "ended for the test"); err != nil {
+					t.Errorf("end the mid-run session: %v", err)
+				}
+			}
+			return y.res, y.err
+		}
+		y.land(t, "one")
+		y.land(t, "two")
+		return y
+	}
+	// sessionsOf decodes an event's mid-run sessions: data "sessions" as
+	// the log holds it, a list of objects.
+	sessionsOf := func(t *testing.T, e store.Event) []dispatch.MidRunSession {
+		t.Helper()
+		list, _ := e.Data["sessions"].([]any)
+		var out []dispatch.MidRunSession
+		for _, item := range list {
+			m, _ := item.(map[string]any)
+			var at time.Time
+			if raw, _ := m["started_at"].(string); raw != "" {
+				var err error
+				if at, err = time.Parse(time.RFC3339Nano, raw); err != nil {
+					t.Fatalf("mid-run session started_at = %q, not a time: %v", raw, err)
+				}
+			}
+			out = append(out, dispatch.MidRunSession{
+				ID:        fmt.Sprint(m["id"]),
+				Bead:      fmt.Sprint(m["bead"]),
+				Group:     fmt.Sprint(m["group"]),
+				StartedAt: at,
+			})
+		}
+		return out
+	}
+
+	t.Run("mid-run session downgrades, then the re-arm without one fails", func(t *testing.T) {
+		y := r1Yard(t, "ok  \tyardr.dev/yardr/internal/web\t1.0s\n"+r1Store+r1CLI+rerunFailed, nil, 1, "once")
+		ctx := context.Background()
+		dispatch.QuietMaybe(y.d, ctx)
+		evs := waitQuiet(t, y.s, store.QuietUnjudged, 1)
+		pkgs, _ := evs[0].Data["packages"].([]any)
+		if len(pkgs) != 2 || pkgs[0] != "yardr.dev/yardr/internal/store" || pkgs[1] != "yardr.dev/yardr/internal/cli" {
+			t.Fatalf("quiet_unjudged packages = %v, want the two over-budget packages, not the re-run failure", evs[0].Data["packages"])
+		}
+		want := []dispatch.NotJudgedPackage{
+			{Package: "yardr.dev/yardr/internal/store", Run: "78.879", Alone: "80.928"},
+			{Package: "yardr.dev/yardr/internal/cli", Run: "65.1", Alone: "61.0"},
+		}
+		if got := notJudgedOf(t, evs[0]); !slices.Equal(got, want) {
+			t.Fatalf("quiet_unjudged not_judged = %+v, want %+v", got, want)
+		}
+		sess := sessionsOf(t, evs[0])
+		if len(sess) != 1 || sess[0].ID == "" || sess[0].Bead == "" || sess[0].Group != "builders" || sess[0].StartedAt.IsZero() {
+			t.Fatalf("quiet_unjudged sessions = %+v, want the one mid-run builder session with its bead and start", sess)
+		}
+		if _, ok := evs[0].Data["reason"]; ok {
+			t.Errorf("quiet_unjudged carries a reason: %v", evs[0].Data["reason"])
+		}
+		if files := store.EventFiles(evs[0]); len(files) != 1 || files[0].Name != "run.log" {
+			t.Fatalf("quiet_unjudged files = %+v, want the run's output named run.log", files)
+		}
+		// The count stayed, so the re-arm fired the next run at once; with
+		// no new session inside its window it fails as before.
+		failed := waitQuiet(t, y.s, store.QuietFailed, 1)
+		if pkgs, _ := failed[0].Data["packages"].([]any); len(pkgs) != 0 {
+			t.Fatalf("quiet_failed packages = %v, want none named", failed[0].Data["packages"])
+		}
+		if n := y.runCalls(); n != 2 {
+			t.Fatalf("calls = %d, want the downgraded run and the re-arm's failure", n)
+		}
+	})
+
+	t.Run("no mid-run session fails", func(t *testing.T) {
+		y := r1Yard(t, r1Store, nil, 1, "never")
+		// A builder session that ran before the run is no starter: its
+		// start is outside the window, so the run still fails.
+		ctx := context.Background()
+		before, err := y.s.CreateBead(ctx, store.NewBead{Title: "earlier work"}, "me")
+		must(t, err)
+		sess, err := y.s.Claim(ctx, before.ID, "builders", "new", "me")
+		must(t, err)
+		must(t, y.s.EndSession(ctx, sess.ID, "failed", "ended for the test"))
+		dispatch.QuietMaybe(y.d, ctx)
+		evs := waitQuiet(t, y.s, store.QuietFailed, 1)
+		if pkgs, _ := evs[0].Data["packages"].([]any); len(pkgs) != 0 {
+			t.Fatalf("quiet_failed packages = %v, want none named", evs[0].Data["packages"])
+		}
+		if files := store.EventFiles(evs[0]); len(files) != 1 || files[0].Name != "run.log" {
+			t.Fatalf("quiet_failed files = %+v, want the run's output named run.log", files)
+		}
+		if n := y.runCalls(); n != 1 {
+			t.Fatalf("calls = %d, want the failed run alone", n)
+		}
+	})
+
+	t.Run("a FAIL line still fails", func(t *testing.T) {
+		y := r1Yard(t, failLine+r1Store, []string{"yardr.dev/yardr/internal/store"}, 1, "every")
+		dispatch.QuietMaybe(y.d, context.Background())
+		evs := waitQuiet(t, y.s, store.QuietFailed, 1)
+		pkgs, _ := evs[0].Data["packages"].([]any)
+		if len(pkgs) != 1 || pkgs[0] != "yardr.dev/yardr/internal/store" {
+			t.Fatalf("quiet_failed packages = %v, want the failing package named", evs[0].Data["packages"])
+		}
+		if n := y.runCalls(); n != 1 {
+			t.Fatalf("calls = %d, want the failed run alone", n)
+		}
+	})
+
+	t.Run("another exit still fails", func(t *testing.T) {
+		y := r1Yard(t, r1Store, nil, 2, "every")
+		dispatch.QuietMaybe(y.d, context.Background())
+		evs := waitQuiet(t, y.s, store.QuietFailed, 1)
+		if pkgs, _ := evs[0].Data["packages"].([]any); len(pkgs) != 0 {
+			t.Fatalf("quiet_failed packages = %v, want none named", evs[0].Data["packages"])
+		}
+		if n := y.runCalls(); n != 1 {
+			t.Fatalf("calls = %d, want the failed run alone", n)
+		}
+	})
+}
+
 // The trigger itself, on the stream: landings committed after it starts
 // fire the run with no judging by hand and no clock waited on.
 func TestQuietTriggerFiresOnLandingEvents(t *testing.T) {
