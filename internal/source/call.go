@@ -76,12 +76,12 @@ func (e *CallError) Error() string {
 // Result is what a call that was answered returns.
 type Result struct {
 	// Status is the service's. An answer that is no success (4xx, 5xx) is
-	// a Result too, without an Answer: what a service says of a request it
-	// refused may repeat the request, which is not kept. A command's answer
-	// (RunCall) is 200: it is a success or it is no Result at all.
+	// a Result too, keeping at most the call's answer.errors: the rest may
+	// repeat the request, which is not kept. A command's answer (RunCall)
+	// is 200: it is a success or it is no Result at all.
 	Status int `json:"status"`
-	// Answer is the JSON of a success, after the call's select; empty for
-	// a success that said nothing.
+	// Answer is the JSON of a success, after the call's select, or of a
+	// refusal, after its errors; empty where nothing was said or kept.
 	Answer json.RawMessage `json:"answer,omitempty"`
 	// Bytes is how much the service sent.
 	Bytes int           `json:"bytes"`
@@ -301,7 +301,24 @@ func doKeyed(ctx context.Context, d *Declaration, name string, params map[string
 		return nil, fail(Redirect, resp.StatusCode, "%s answered %d, a redirect%s: yardr follows none, since the request and its credential would go where the redirect points",
 			where, resp.StatusCode, to)
 	case !res.OK():
-		res.Took = time.Since(start)
+		// Without errors declared the refusal is returned unread, since it may repeat the request.
+		if len(c.Answer.Errors) == 0 {
+			res.Took = time.Since(start)
+			return res, nil
+		}
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, AnswerLimit+1))
+		res.Bytes, res.Took = len(raw), time.Since(start)
+		if err != nil {
+			return nil, fail(unsent(ctx, err), resp.StatusCode, "the answer of %s broke off: %s", where, cause(ctx, err, start))
+		} else if len(raw) > AnswerLimit {
+			return nil, fail(TooLarge, resp.StatusCode, "the answer is over %d bytes, the most yardr reads of one: it is refused, not cut, since half a JSON document misleads", AnswerLimit)
+		}
+		kept := errorsKept(raw, c.Answer.Errors)
+		if len(kept) > c.Answer.Max {
+			return nil, fail(TooLarge, resp.StatusCode, "the answer is %d bytes, over the call's bound of %d (answer.max in the declaration raises it, to %d at most): it is refused, not cut, since half a JSON document misleads",
+				len(kept), c.Answer.Max, AnswerLimit)
+		}
+		res.Answer = kept
 		return res, nil
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, AnswerLimit+1))
@@ -923,4 +940,60 @@ func selected(raw []byte, keys []string) []byte {
 		return out
 	}
 	return buf.Bytes()
+}
+
+// errorsKept keeps paths of the refused answer raw, each a dot path into its JSON object
+// rebuilt nested ([error.message] keeps {"error":{"message":m}}). All steps but the last
+// cross objects only; the last is kept whole, and a path that lands nowhere keeps nothing.
+func errorsKept(raw []byte, paths []string) []byte {
+	var body map[string]json.RawMessage
+	if t := bytes.TrimSpace(raw); len(t) == 0 || t[0] != '{' || json.Unmarshal(t, &body) != nil {
+		return nil
+	}
+	out := map[string]any{}
+	for _, p := range paths {
+		segs := strings.Split(p, ".")
+		node := body
+		var leaf json.RawMessage
+		for i, s := range segs {
+			v, ok := node[s]
+			if !ok {
+				break
+			}
+			if i == len(segs)-1 {
+				leaf = v
+				break
+			}
+			var next map[string]json.RawMessage
+			if t := bytes.TrimSpace(v); len(t) == 0 || t[0] != '{' || json.Unmarshal(t, &next) != nil {
+				break
+			}
+			node = next
+		}
+		// A null leaf is still four bytes; only an unlanded path leaves leaf nil.
+		if leaf == nil {
+			continue
+		}
+		at := out
+		for _, s := range segs[:len(segs)-1] {
+			child, ok := at[s].(map[string]any)
+			if !ok {
+				if _, kept := at[s]; kept {
+					at = nil // a shorter path kept this subtree whole already
+					break
+				}
+				child = map[string]any{}
+				at[s] = child
+			}
+			at = child
+		}
+		if at != nil {
+			at[segs[len(segs)-1]] = leaf
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	b, _ := json.Marshal(out)
+	return b
 }

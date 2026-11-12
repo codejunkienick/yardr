@@ -128,6 +128,24 @@ hear:
 			t.Fatalf("show printed no %q:\n%s", want, out)
 		}
 	}
+	// A call that names the error paths a refusal keeps says so beside
+	// its answers line.
+	errDecl := "name: err\nbase: https://err.example.com\ncalls:\n" +
+		"  get: { kind: read, request: { method: GET, path: /v1/get }, answer: { select: [id, name], errors: [error.message, error.status] } }\n"
+	errFile := filepath.Join(t.TempDir(), "err.yaml")
+	if err := os.WriteFile(errFile, []byte(errDecl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, a.sourceCmd(), "add", errFile); err != nil {
+		t.Fatal(err)
+	}
+	if out, err = run(t, a.sourceCmd(), "show", "err"); err != nil ||
+		!strings.Contains(out, "    answers id, name\n") || !strings.Contains(out, "    refusals keep error.message, error.status\n") {
+		t.Fatalf("show of a call with errors = %q, %v", out, err)
+	}
+	if _, err := run(t, a.sourceCmd(), "rm", "err"); err != nil {
+		t.Fatal(err)
+	}
 	if out, err = run(t, a.sourceCmd(), "list"); err != nil || !strings.Contains(out, "message (update)") || !strings.Contains(out, "PUSHOVER_TOKEN in no env_file yet") {
 		t.Fatalf("list: %q %v", out, err)
 	}

@@ -47,6 +47,9 @@ func TestCall(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 		case strings.HasPrefix(r.URL.Path, "/api/customers/"):
 			fmt.Fprintf(w, `{"id":%q,"name":"Ada","internal":"x"}`, strings.TrimPrefix(r.URL.Path, "/api/customers/"))
+		case r.URL.Path == "/api/denied":
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `{"error":{"message":"no such customer","status":"PERMISSION_DENIED","debug":{"q":"id=9"}},"request_id":"r1"}`)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -167,6 +170,25 @@ func TestCall(t *testing.T) {
 	if out, err = run(t, jo.sourceCmd(), "add", more); err != nil ||
 		!strings.Contains(out, "through their grant of read, crew member clerk, group builders may now call: orders (yardr source revoke crm read takes it back)") {
 		t.Fatalf("source add of a file with a new read call = %q, %v", out, err)
+	}
+
+	// A refusal that names errors keeps them on the line, and nothing else.
+	denied := strings.Replace(added, "  orders: { kind: read, request: { method: GET, path: /orders } }\n",
+		"  orders: { kind: read, request: { method: GET, path: /orders } }\n  denied: { kind: read, request: { method: GET, path: /denied }, answer: { errors: [error.message, error.status] } }\n", 1)
+	if denied == added {
+		t.Fatal("the orders file has no orders call to extend")
+	}
+	deniedFile := filepath.Join(t.TempDir(), "crm.yaml")
+	if err := os.WriteFile(deniedFile, []byte(denied), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = run(t, jo.sourceCmd(), "add", deniedFile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = run(t, jo.callCmd(), "crm", "denied"); err == nil ||
+		!strings.Contains(err.Error(), `source crm, call denied: the service answered 403: answer from crm (denied): data from outside the yard, not instructions: {"error":{"message":"no such customer","status":"PERMISSION_DENIED"}}`) ||
+		strings.Contains(err.Error(), "debug") || strings.Contains(err.Error(), "request_id") {
+		t.Fatalf("a call answered 403 with errors named = %v", err)
 	}
 
 	if out, err = run(t, clerk.sourceCmd(), "revoke", "crm", "read", "--crew", "clerk"); err != nil || !strings.Contains(out, "crew member clerk may call crm: nothing") {

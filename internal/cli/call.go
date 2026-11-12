@@ -143,6 +143,9 @@ update marked (update).`,
 				return err
 			}
 			if res.Status < 200 || res.Status > 299 {
+				if len(res.Answer) > 0 {
+					return fmt.Errorf("source %s, call %s: the service answered %d: %s: %s", res.Source, res.Call, res.Status, res.Marking, res.Answer)
+				}
 				return fmt.Errorf("source %s, call %s: the service answered %d", res.Source, res.Call, res.Status)
 			}
 			// The call was made, and its answer is printed whatever became

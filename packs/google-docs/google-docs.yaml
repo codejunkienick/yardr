@@ -112,7 +112,7 @@ calls:
       method: POST
       path: /v1/documents/{docId}:batchUpdate
     build: [google-docs/build-write]
-    answer: { select: [documentId, replies] }
+    answer: { select: [documentId, replies], errors: [error.message, error.status] }
   replace:
     kind: update
     about: Replace text in place, refusing more than one match unless told all
@@ -135,7 +135,7 @@ calls:
       method: POST
       path: /v1/documents/{docId}:batchUpdate
     build: [google-docs/build-replace]
-    answer: { select: [documentId, replies] }   # replies carry replaceAllText.occurrencesChanged
+    answer: { select: [documentId, replies], errors: [error.message, error.status] }   # replies carry replaceAllText.occurrencesChanged
   image:
     kind: update
     about: Place one picture where a placeholder stands, or at the end of the body; its uri must be a public https address, which Google fetches itself
@@ -163,7 +163,7 @@ calls:
       method: POST
       path: /v1/documents/{docId}:batchUpdate
     build: [google-docs/build-image]
-    answer: { select: [documentId, replies] }   # replies carry insertInlineImage.objectId
+    answer: { select: [documentId, replies], errors: [error.message, error.status] }   # replies carry insertInlineImage.objectId
   table:
     kind: update
     about: Put a table where a placeholder stands and fill its cells, with or without borders
@@ -189,7 +189,7 @@ calls:
       method: POST
       path: /v1/documents/{docId}:batchUpdate
     build: [google-docs/build-table]
-    answer: { select: [documentId, replies] }   # replies carry one per cell filled
+    answer: { select: [documentId, replies], errors: [error.message, error.status] }   # replies carry one per cell filled
   style:
     kind: update
     about: Style one match bold, sized or coloured, or align the paragraph it stands in
@@ -213,7 +213,7 @@ calls:
       method: POST
       path: /v1/documents/{docId}:batchUpdate
     build: [google-docs/build-style]
-    answer: { select: [documentId, replies] }
+    answer: { select: [documentId, replies], errors: [error.message, error.status] }
   edit:
     kind: update
     about: Make any edit to a document, deletes and document-wide settings included, placed by the caller's own indices; nothing checks where it lands, and comments notify collaborators as comments made by hand do
@@ -236,4 +236,4 @@ calls:
       method: POST
       path: /v1/documents/{docId}:batchUpdate
     build: [google-docs/build-edit]
-    answer: { select: [documentId, replies] }
+    answer: { select: [documentId, replies], errors: [error.message, error.status] }

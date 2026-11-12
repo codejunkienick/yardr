@@ -176,8 +176,7 @@ type Credential struct {
 	URL bool `json:"url,omitempty"`
 }
 
-// Minted reports whether the credential may be minted: the file names the variables a mint takes. Nil-safe, for a
-// file that names no credential.
+// Minted reports whether the credential may be minted (nil-safe): the file names the variables a mint takes.
 func (c *Credential) Minted() bool { return c != nil && len(c.Mint) > 0 }
 
 // EnvOf is the name of the variable a call of kind is sent with.
@@ -216,10 +215,9 @@ func (c *Credential) Variables() []string {
 	return append(append([]string{}, c.Mint...), c.Envs()...)
 }
 
-// MintOrStatic are the names a user's own credential in the source goes by
-// unprompted: the mint's inputs where the credential is minted, else the static
-// ones. A call mints from the former and falls back to the latter; an ask for
-// a user's credential asks for these unless --env names others.
+// MintOrStatic are the names a user's own credential goes by unprompted, the
+// mint's inputs where minted else the static ones: a call mints from the former
+// and falls back to the latter, and an ask asks for these unless --env names others.
 func (c *Credential) MintOrStatic() []string {
 	if c == nil {
 		return nil
@@ -311,6 +309,9 @@ type Answer struct {
 	// Select keeps these top-level keys, of each element when the answer
 	// is a list; without it the answer is returned as it is.
 	Select []string `json:"select,omitempty"`
+	// Errors keeps these dot paths of a refused answer's JSON object,
+	// rebuilt nested; without it a refusal keeps nothing of what was said.
+	Errors []string `json:"errors,omitempty"`
 	// Max is the most a call returns, in bytes after Select: AnswerMax
 	// unless the file raises it, AnswerLimit at most.
 	Max int `json:"max"`
@@ -496,9 +497,8 @@ func join(key, name string) string {
 }
 
 // entries are a mapping's keys and values in file order. With allowed, a
-// key outside it is an error. A key YAML reads as a boolean, a key that is
-// not a string and a key given twice are errors always, and such an entry
-// is left out.
+// key outside it is an error; a key YAML reads as a boolean, a non-string
+// key and a repeated key are errors always, and such an entry is left out.
 func (r *reader) entries(n *yaml.Node, key string, allowed ...string) []entry {
 	if n.Kind != yaml.MappingNode {
 		r.errf(n, key, "want a mapping (key: value), got %s", describe(n))

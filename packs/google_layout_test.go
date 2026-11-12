@@ -366,10 +366,11 @@ func TestGoogleDocsTableRoundTrip(t *testing.T) {
 				t.Fatalf("posted body = %s, want %s", post.body, fill)
 			}
 			if tc.replies == "" {
-				// The refusal is a Result with the status and no answer: what
-				// a service says of a request it refused is not kept.
-				if res.Status != 400 || len(res.Answer) != 0 {
-					t.Fatalf("the fill was answered %d %s, want 400 and no answer", res.Status, res.Answer)
+				// The refusal keeps the table call's named error paths: the
+				// stand-in speaks Google's 400 in words the yard now keeps.
+				want := `{"error":{"message":"requests[0].updateTableCellStyle: borderTop has no opaque color, and a table cell border cannot be transparent"}}`
+				if res.Status != 400 || string(res.Answer) != want {
+					t.Fatalf("the fill was answered %d %s, want 400 %s", res.Status, res.Answer, want)
 				}
 				return
 			}

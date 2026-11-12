@@ -536,7 +536,7 @@ type SourceAnswer struct {
 	Source string `json:"source"`
 	Call   string `json:"call"`
 	Kind   string `json:"kind"`
-	// Status is the service's, 200 for a command's. An answer that is no success has no Answer.
+	// Status is the service's, 200 for a command's. An answer that is no success has only its errors.
 	Status int             `json:"status"`
 	Answer json.RawMessage `json:"answer,omitempty"`
 	Bytes  int             `json:"bytes"`

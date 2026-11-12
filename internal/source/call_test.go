@@ -651,8 +651,9 @@ calls:
 }
 
 // An answer that is no JSON is refused; one that is no success is returned
-// with its status and nothing of what the service said; a success that
-// says nothing is one.
+// with its status and nothing of what the service said, unless the call
+// names answer.errors, which keeps those dot paths of its object; a
+// success that says nothing is one.
 func TestDoAnswers(t *testing.T) {
 	status, body := 200, "<html>hello</html>"
 	s := newStandin(t, func(w http.ResponseWriter, _ *http.Request) {
@@ -675,6 +676,59 @@ func TestDoAnswers(t *testing.T) {
 	status, body = 204, ""
 	if res, err := Do(context.Background(), d, "ping", nil, token, noSecrets); err != nil || !res.OK() || res.Answer != nil {
 		t.Fatalf("a 204 = %+v, %v", res, err)
+	}
+
+	// With errors named, a refusal keeps those paths rebuilt nested, and
+	// nothing else: select stays for successes. A body that is no object,
+	// a key that is not there, and a path that crosses a scalar or a list
+	// keep nothing and fail nothing.
+	errs := declared(t, `name: crm
+base: https://crm.example.com/api/v2
+calls:
+  get:   { kind: read, request: { method: GET, path: /me }, answer: { select: [unrelated], errors: [error.message, error.status] } }
+  flat:  { kind: read, request: { method: GET, path: /me }, answer: { errors: [message] } }
+  small: { kind: read, request: { method: GET, path: /me }, answer: { errors: [error.message], max: 20 } }
+`, "https://crm.example.com/api/v2", s.URL)
+	for _, tc := range []struct {
+		name, call string
+		status     int
+		body, want string
+	}{
+		{"nested paths", "get", 400, `{"error":{"message":"bad border","status":"INVALID_ARGUMENT","details":[{"x":1}]},"request_id":"r1"}`,
+			`{"error":{"message":"bad border","status":"INVALID_ARGUMENT"}}`},
+		{"top level", "flat", 403, `{"message":"no","other":1}`, `{"message":"no"}`},
+		{"missing keys", "get", 400, `{"error":{"code":400}}`, ""},
+		{"no JSON", "get", 500, "<html>down</html>", ""},
+		{"a list", "get", 500, `[{"error":{"message":"x"}}]`, ""},
+		{"a scalar", "get", 500, `"down"`, ""},
+		{"nothing", "get", 500, "", ""},
+		{"a path across a scalar", "get", 400, `{"error":"bad border"}`, ""},
+		{"a path across a list", "get", 400, `{"error":["bad border"]}`, ""},
+	} {
+		status, body = tc.status, tc.body
+		res, err := Do(context.Background(), errs, tc.call, nil, token, noSecrets)
+		if err != nil || res.Status != tc.status || res.OK() || res.Bytes != len(tc.body) {
+			t.Fatalf("%s = %+v, %v", tc.name, res, err)
+		}
+		if string(res.Answer) != tc.want {
+			t.Fatalf("%s keeps %s, want %s", tc.name, res.Answer, tc.want)
+		}
+	}
+	// Kept past the call's bound, the refusal fails TooLarge naming the
+	// bound, with none of what was said in the error.
+	status, body = 400, `{"error":{"message":"a message far too long for the bound"}}`
+	if _, err := Do(context.Background(), errs, "small", nil, token, noSecrets); reason(err) != TooLarge ||
+		!strings.Contains(err.Error(), "over the call's bound of 20") || strings.Contains(err.Error(), "too long") {
+		t.Fatalf("over answer.max = %v", err)
+	}
+	// Errors never apply to a success: it is selected, whole where the
+	// call selects nothing.
+	status, body = 200, `{"error":{"message":"m","status":"s"},"unrelated":1}`
+	if res, err := Do(context.Background(), errs, "get", nil, token, noSecrets); err != nil || string(res.Answer) != `{"unrelated":1}` {
+		t.Fatalf("a success with errors named = %+v, %v", res, err)
+	}
+	if res, err := Do(context.Background(), errs, "flat", nil, token, noSecrets); err != nil || string(res.Answer) != body {
+		t.Fatalf("a success that selects nothing = %+v, %v", res, err)
 	}
 }
 

@@ -121,6 +121,20 @@ func TestParseCRM(t *testing.T) {
 	if d.Calls[0].Name != "ping" || d.Calls[2].Name != "note" {
 		t.Fatalf("calls are not in file order: %+v", d.Calls)
 	}
+	// answer.errors names the dot paths a refusal keeps, beside select.
+	withErrors := strings.Replace(crm, "answer: { select: [id, name, plan, owner, open_tickets] }",
+		"answer: { select: [id, name], errors: [error.message, error.status] }", 1)
+	if withErrors == crm {
+		t.Fatal("the CRM file has no select to extend with errors")
+	}
+	d, err = Parse("crm.yaml", []byte(withErrors))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := d.Call("customer"); strings.Join(c.Answer.Select, ",") != "id,name" ||
+		strings.Join(c.Answer.Errors, ",") != "error.message,error.status" || c.Answer.Max != AnswerMax {
+		t.Fatalf("customer with errors = %+v", c.Answer)
+	}
 }
 
 // A default is a typed value sent when its parameter is left out, and makes
@@ -604,6 +618,8 @@ func TestParseRefuses(t *testing.T) {
 			"name", "peer is a source yardr has built in (peer, token, yardr)"},
 		{"a key it does not know", crm + "retries: 3\n",
 			"retries", "unknown key"},
+		{"an answer key it does not know", with("answer: { select: [id, name, plan, owner, open_tickets] }", "answer: { select: [id], retry: 3 }"),
+			"calls.customer.answer.retry", "unknown key (known here: select, errors, max)"},
 		{"a check that is an update", with("check: ping ", "check: note "),
 			"check", "note is an update"},
 		{"a check that needs a parameter", with("check: ping ", "check: customer "),

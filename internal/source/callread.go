@@ -51,10 +51,12 @@ func (r *reader) call(e entry, credential, inPath, address bool) Call {
 			run = &f
 			c.Run = r.callCommand(f, "a run's")
 		case "answer":
-			for _, a := range r.entries(f.v, f.path, "select", "max") {
+			for _, a := range r.entries(f.v, f.path, "select", "errors", "max") {
 				switch a.key {
 				case "select":
 					c.Answer.Select = r.strs(a.v, a.path)
+				case "errors":
+					c.Answer.Errors = r.strs(a.v, a.path)
 				case "max":
 					if n, ok := r.count(a.v, a.path, AnswerLimit); ok {
 						c.Answer.Max = n

@@ -161,8 +161,8 @@ replaced by the value, escaped by where it stands; a file stands alone as
 a value of the body. The body is sent as JSON, or as a multipart upload
 when it names a file parameter, and a value that is exactly {param} is
 sent as the parameter's type; one whose optional parameter was not given
-is left out. The answer is JSON: select keeps the named top-level keys,
-and it is at most 64 KB (answer.max raises that, to 1 MiB at most).
+is left out. The answer is JSON: select keeps the named top-level keys of a success and
+errors the named dot paths of a refusal, at most 64 KB (answer.max raises that, to 1 MiB at most).
 
 The file holds no secret. {credential} stands for the value of the variable
 credential.env names, read at each call from the file the operator gives it
@@ -831,6 +831,9 @@ credential in it whether their file sets that. The value is never printed.
 					}
 					if len(call.Answer.Select) > 0 {
 						fmt.Fprintf(w, "    answers %s\n", strings.Join(call.Answer.Select, ", "))
+					}
+					if len(call.Answer.Errors) > 0 {
+						fmt.Fprintf(w, "    refusals keep %s\n", strings.Join(call.Answer.Errors, ", "))
 					}
 					if who := grantedCall(grants, &call); len(who) > 0 {
 						fmt.Fprintf(w, "    may be called by %s\n", strings.Join(who, ", "))
@@ -1633,13 +1636,11 @@ process for it. Nothing of the request is written anywhere.`,
 				if !res.OK() {
 					return fmt.Errorf("source %s: the check call %s (%s)%s was answered %d%s", d.Name, d.Check, call.Line(), saidAs, res.Status, source.StatusHint(res.Status, d))
 				}
-				// The check call's selection is what setup may read: a
-				// successful check shows the selected top-level fields the
-				// answer carries, one per line under the status line, and
-				// carries the same selected answer under answer with --json.
-				// A selected field the answer does not carry prints no line;
-				// the check succeeds or fails on the status alone, as without
-				// a selection, and no other call's answer is ever shown.
+				// The check call's selection is what setup may read: a successful check
+				// shows the selected top-level fields the answer carries, one per line,
+				// and carries the same answer under answer with --json. A field the answer
+				// does not carry prints no line; status alone decides success or failure,
+				// and no other call's answer is ever shown.
 				var selected []string
 				if len(call.Answer.Select) > 0 && len(res.Answer) > 0 {
 					var anyJSON any
@@ -1904,9 +1905,8 @@ func checkCommands(d *source.Declaration, home string) (cmds []commandCheck, ok 
 	return cmds, ok
 }
 
-// checkField renders one selected field of a check call's answer for
-// its line: a string as it is, a number or a boolean as its JSON, and an
-// object or a list as compact JSON, as the answer already holds it.
+// checkField renders one selected field of a check call's answer for its line:
+// a string as it is, a number or boolean as its JSON, an object or list as compact JSON.
 func checkField(raw json.RawMessage) string {
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
