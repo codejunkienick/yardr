@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -42,6 +43,11 @@ type limitWant struct {
 	provider string
 	name     string
 	isSource bool
+	// log is the logger as of the want's last registration or renewal,
+	// read on the registering goroutine: the run's tail logs through it
+	// instead of d.Log, which defaults() may write while the run is in
+	// flight.
+	log *slog.Logger
 	// warm is a want Run's warm-up registered that no read has renewed:
 	// it is dropped when its first answer lands, under the same lease.
 	warm bool
@@ -69,8 +75,10 @@ func (d *Dispatcher) registerLimitWant(w limitWant, warm bool) {
 			old.age = w.age
 		}
 		old.answerer, old.kind, old.provider, old.name, old.isSource = w.answerer, w.kind, w.provider, w.name, w.isSource
+		old.log = d.Log
 	} else {
 		w.lastRead, w.warm = now, warm
+		w.log = d.Log
 		d.limitsWants[w.key] = &w
 	}
 	d.limitsMu.Unlock()
@@ -115,6 +123,7 @@ func (d *Dispatcher) renewLimitWant(w limitWant) {
 			old.age = w.age
 		}
 		old.answerer, old.kind, old.provider, old.name, old.isSource = w.answerer, w.kind, w.provider, w.name, w.isSource
+		old.log = d.Log
 	}
 	d.limitsMu.Unlock()
 }
@@ -324,11 +333,11 @@ func (d *Dispatcher) runLimitRefresh(ctx context.Context, w limitWant, startedAt
 	}
 	notify := d.limitsNotify
 	d.limitsMu.Unlock()
-	if err != nil && d.Log != nil {
+	if err != nil && w.log != nil {
 		if w.isSource {
-			d.Log.Warn("limits of a source not known", "source", w.answerer.Source, "err", err)
+			w.log.Warn("limits of a source not known", "source", w.answerer.Source, "err", err)
 		} else {
-			d.Log.Warn("limits of a harness kind not known", "kind", w.kind, "source", w.answerer.Source, "err", err)
+			w.log.Warn("limits of a harness kind not known", "kind", w.kind, "source", w.answerer.Source, "err", err)
 		}
 	}
 	d.nudgeLimitsRefresher()

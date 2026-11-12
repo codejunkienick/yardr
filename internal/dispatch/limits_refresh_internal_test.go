@@ -10,6 +10,7 @@ import (
 
 	"yardr.dev/yardr/internal/limits"
 	"yardr.dev/yardr/internal/scripttest"
+	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/storetest"
 	"yardr.dev/yardr/internal/testload"
 )
@@ -102,5 +103,38 @@ func TestLimitsWantRegisteredAsLoopLeavesStillRuns(t *testing.T) {
 	d.limitsMu.Unlock()
 	if !kept {
 		t.Fatalf("the cache keeps no answer for %q after the run", want.key)
+	}
+}
+
+// A refresh whose ask fails runs against defaults() on a dispatcher with a
+// nil Log (yardr-j59p): the run's tail must not read d.Log, which a pass's
+// defaults() writes with no lock. The run starts on its own goroutine, as
+// startDueLimitRefreshes starts it; the start channel puts the write after
+// the spawn, and the done channel joins the tail, so both accesses always
+// execute and are unordered without the fix. The ask fails with no process:
+// the kind is mapped by no source.
+func TestLimitRefreshFailureAgainstDefaults(t *testing.T) {
+	t.Parallel()
+	d := &Dispatcher{} // nil Log, as the tests build it
+	want := limitWant{
+		key: "test\x00", age: time.Minute, answerer: limits.Answerer{
+			Source: "test", Limits: &source.Limits{},
+		}, kind: "kimi",
+	}
+	started := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		close(started)
+		d.runLimitRefresh(context.Background(), want, time.Now())
+		close(done)
+	}()
+	<-started
+	d.defaults()
+	<-done
+	d.limitsMu.Lock()
+	ans, ok := d.limitsAsked[want.key]
+	d.limitsMu.Unlock()
+	if !ok || ans.err == nil {
+		t.Fatalf("answer kept = %+v, ok = %v, want the ask's failure kept", ans, ok)
 	}
 }
