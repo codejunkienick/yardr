@@ -110,6 +110,57 @@ func typesAccount(body []byte) bool {
 	return len(values) > 0
 }
 
+// ownPairApproval reports whether body, the arguments of ApproveAsk
+// from the device c of a user who is not the operator, names a device
+// pair ask for that user's own device (design yardr-6maq 3.4). That
+// approval is the user's own to make, as a giving of their own address
+// is: the pairing it opens is for their device, and its code is
+// answered to the approver alone. For every other ask, and for
+// arguments that name none, the call stays what it is to anyone but
+// the operator: not there. Who may approve is still the store's to
+// decide, with the user of the device's token as the actor (asUser).
+func (u *UserServer) ownPairApproval(ctx context.Context, c *Caller, body []byte) bool {
+	if c.User == "" {
+		return false
+	}
+	ask := u.namedAsk(ctx, body)
+	return ask != nil && ask.To == c.User && ask.Run != nil &&
+		store.IsDevicePairRun(ask.Run.Argv) && ask.Run.Argv[3] == c.User
+}
+
+// namedAsk is the ask that the body, the arguments of an approval, names:
+// nil for arguments that name no ask of a bead. Only the bead and the ask
+// are read from the arguments, and nothing of what is found is said back.
+func (u *UserServer) namedAsk(ctx context.Context, body []byte) *store.Ask {
+	var named map[string]json.RawMessage
+	if json.Unmarshal(body, &named) != nil {
+		return nil
+	}
+	var id string
+	if json.Unmarshal(named["bead"], &id) != nil || id == "" {
+		return nil
+	}
+	var ask uint64
+	if json.Unmarshal(named["ask"], &ask) != nil {
+		return nil
+	}
+	notes, err := u.st.Notes(ctx, id)
+	if err != nil {
+		return nil
+	}
+	for _, n := range notes {
+		if n.Seq != ask || n.Kind != store.NoteAsk {
+			continue
+		}
+		parsed, err := store.ParseAsk(n)
+		if err != nil {
+			return nil
+		}
+		return &parsed
+	}
+	return nil
+}
+
 // namedSecret is the secret that the ask body, the arguments of GiveSecret,
 // names asks for: nil for arguments that name no ask of a bead, and for an ask
 // that asks for none. Only the bead and the ask are read from the arguments,

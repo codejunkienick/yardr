@@ -159,6 +159,15 @@ const askRunList = `  peer add <name> <invite>
       it held are closed and what was queued to tell it is dropped; what it
       did stands, and the card says how many devices the user keeps; asked
       of the user whose it is or of the operator, and either approves it
+  user device pair <user> <device> [--url <address>]
+      a pairing is opened for the device when approved: its code, good
+      for ten minutes and for one device, is answered once to the
+      approver alone and kept nowhere, and the card names the user, the
+      device, the address the device reaches the yard at (--url, or the
+      listener's, or the edge's where the yard listens nowhere) and every
+      device the user then has; asked of the user whose it is or of the
+      operator, and either approves it (strong, trust); user device add
+      stays in a terminal, since its token has nowhere lawful to rest
   crew add <name> kind=<kind> model=<model> preset=<preset> dir=<dir>
       a new crew member on the kind the yard knows, with its model, the
       kind's named permission preset (never free args) and a directory

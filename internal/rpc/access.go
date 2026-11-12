@@ -324,8 +324,11 @@ var Access = map[string]Class{
 	"DevicePairClose":  Operator,
 	// One's own pairing from the web view: the socket lets a person's own
 	// process (the view among them) call it, and no agent's pane; the user
-	// it names is the web session's, which the view alone supplies. It is
-	// in neither Calls nor OperatorCalls, so no device is served it.
+	// it names is the web session's, which the view alone supplies.
+	// OpenSelf and CodeSelf are in neither Calls nor OperatorCalls, so no
+	// device is served them; CloseSelf is in Calls with its user as its
+	// self argument, so the listener serves it to any device for its own
+	// user's pairing alone (asUser holds the user to the caller's).
 	"DevicePairOpenSelf":   Operator,
 	"DevicePairCloseSelf":  Operator,
 	"DevicePairCodeSelf":   Operator,

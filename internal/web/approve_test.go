@@ -335,8 +335,74 @@ func TestWebApprovesARoutineRunCard(t *testing.T) {
 // htmx follows a 303 as an XHR and would swap the sign-in page into the
 // card's place; the state it carries is the one followed through the return
 // here.
+// A pairing approval in the hosted web answers in its own response:
+// the QR page with the code, marked never to be stored, the code in no
+// URL, and gone on the next visit to the bead. The signed-in user
+// approves their own first pairing here under the fresh sign-in.
+func webPairingApprovalAnswersInItsResponse(t *testing.T) {
+	y := newApproveYard(t, true)
+	ctx := context.Background()
+	b := y.bead("pair the watch")
+	seq := y.askRun(b.ID, "sam", "user", "device", "pair", "sam", "watch", "--url", "https://mac.example.net")
+	// The card says this door's sentence before approval.
+	page := y.surfaceBody("/beads/"+b.ID, y.token("sam@example.net"))
+	if !strings.Contains(page, "whoever has it within its minutes, the carrier of this approval included, could spend it first") {
+		t.Fatalf("the bead page lacks the door's sentence: %s", page)
+	}
+	r := y.post("/beads/"+b.ID, y.token("sam@example.net"), y.approveForm(b.ID, seq))
+	if r.status != http.StatusSeeOther {
+		t.Fatalf("POST the approval: %d: %s", r.status, r.body)
+	}
+	loc, err := url.Parse(r.header.Get("Location"))
+	if err != nil || loc.Path != "/edge/reauth" {
+		t.Fatalf("the approval goes to %q, want the gateway re-authentication", r.header.Get("Location"))
+	}
+	back := loc.Query().Get("return_to")
+	fresh := y.token("sam@example.net", authAt(time.Now().Add(5*time.Second)))
+	r = y.getNoFollow(back, fresh)
+	if r.status != http.StatusOK {
+		t.Fatalf("GET the return: %d: %s", r.status, r.body)
+	}
+	if cc := r.header.Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+		t.Fatalf("the pairing response is stored: Cache-Control %q", cc)
+	}
+	marker := "code <code>"
+	_, after, ok := strings.Cut(r.body, marker)
+	if !ok {
+		t.Fatalf("the pairing response has no code field: %s", r.body)
+	}
+	code, _, ok := strings.Cut(after, "</code>")
+	if !ok || code == "" {
+		t.Fatalf("the pairing response has no code: %s", r.body)
+	}
+	if !strings.Contains(r.body, code) || !strings.Contains(r.body, "https://mac.example.net") {
+		t.Fatalf("the pairing response lacks the code or address: %s", r.body)
+	}
+	if strings.Contains(r.header.Get("Location"), code) {
+		t.Fatal("the code stands in a redirect target")
+	}
+	if _, err := y.own.DevicePairCodeSelf(ctx, "sam"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the approval code could be read again by the user: %v", err)
+	}
+	if _, err := y.own.DevicePairState(ctx); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the approval code could be read again by an operator: %v", err)
+	}
+	// Gone on the next visit: the bead shows only the stored sentence.
+	page = y.surfaceBody("/beads/"+b.ID, y.token("sam@example.net"))
+	if strings.Contains(page, code) {
+		t.Fatal("the bead page holds the code after the approval")
+	}
+	if !strings.Contains(page, "shown to the approver alone") {
+		t.Fatalf("the bead page lacks the safe sentence: %s", page)
+	}
+	if _, err := y.own.DevicePairRedeem(ctx, code); err != nil {
+		t.Fatalf("the answered code %q does not pair: %v", code, err)
+	}
+}
+
 func TestWebStrongCardChallengeAndReturn(t *testing.T) {
 	t.Parallel()
+	t.Run("pairing approval answers in its response", webPairingApprovalAnswersInItsResponse)
 	y := newApproveYard(t, true)
 	ctx := context.Background()
 	b := y.bead("add a user")

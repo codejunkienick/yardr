@@ -77,14 +77,41 @@ func (s *Server) beadApprove(w http.ResponseWriter, r *http.Request, b *store.Be
 				ask.Ask, store.WeightWords(ask.Weight), b.ID, ask.Ask, approveAgain(ask)))
 			return
 		}
-		if err := s.approveNow(ctx, b.ID, ask, option, values, account, user, store.FreshWitness{}, false); err != nil {
+		done, err := s.approveNow(ctx, b.ID, ask, option, values, account, user, store.FreshWitness{}, false)
+		if err != nil {
 			s.beadAgain(w, r, b.ID, err.Error())
+			return
+		}
+		if done != nil && done.Pairing != nil {
+			s.pairingApproved(w, r, b.ID, done.Pairing)
 			return
 		}
 		http.Redirect(w, r, "/beads/"+url.PathEscape(b.ID), http.StatusSeeOther)
 		return
 	}
 	s.approveStrong(w, r, b, ask, option, values, account)
+}
+
+// pairingOwn reports whether ask is a device pair card asked of user
+// themselves: the one strong card a member approves in the hosted web
+// without being an operator, for their own first device, under the
+// same fresh sign-in (design yardr-6maq 3.4, question 3). Its fresh
+// witness is judged as an operator's is, without the operator's
+// session the fresh gate otherwise stands on (freshSession).
+func pairingOwn(ask store.BeadAsk, user string) bool {
+	return ask.To == user && ask.Run != nil && store.IsDevicePairRun(ask.Run.Argv) && ask.Run.Argv[3] == user
+}
+
+// freshFor is the fresh sign-in's word for ask as user: the operator's
+// (freshSession), or the named user's own on a pairing card.
+func (s *Server) freshFor(ctx context.Context, ask store.BeadAsk, user string, since time.Time) bool {
+	if s.freshSession(ctx, since) {
+		return true
+	}
+	if s.jwt == nil || !pairingOwn(ask, user) {
+		return false
+	}
+	return jwtIdentityOf(ctx).freshAt(time.Now(), s.jwt.privilegedSessionMaxAge, since)
 }
 
 // approveAgain is what goes after "yardr bead answer <bead> <ask>" to
@@ -162,8 +189,13 @@ func (s *Server) approveStrong(w http.ResponseWriter, r *http.Request, b *store.
 	}
 	if auth, since, ok := s.strongAuth(ctx, user); ok && s.freshSession(ctx, since) {
 		fw := store.FreshWitness{User: user, AuthTime: auth}
-		if err := s.approveNow(ctx, b.ID, ask, option, values, account, user, fw, true); err != nil {
+		done, err := s.approveNow(ctx, b.ID, ask, option, values, account, user, fw, true)
+		if err != nil {
 			s.beadAgain(w, r, b.ID, err.Error())
+			return
+		}
+		if done != nil && done.Pairing != nil {
+			s.pairingApproved(w, r, b.ID, done.Pairing)
 			return
 		}
 		http.Redirect(w, r, "/beads/"+url.PathEscape(b.ID), http.StatusSeeOther)
@@ -239,15 +271,6 @@ func (s *Server) handleFresh(w http.ResponseWriter, r *http.Request) {
 		s.beadAgain(w, r, id, "that sign-in was raised for another card: approve this one again")
 		return
 	}
-	if !s.freshSession(ctx, ch.at) {
-		s.beadAgain(w, r, id, "that sign-in is not fresh: the gateway authenticated before the card's challenge, or outside its window. Approve the card again")
-		return
-	}
-	auth := jwtIdentityOf(ctx).authTime
-	if !s.consumeFresh(state, ch, user, auth) {
-		s.beadAgain(w, r, id, "that sign-in was used already, expired, or never started: approve the card again")
-		return
-	}
 	// The card may have moved while its operator signed in: approve what
 	// stands now, as the bead's page reads it, and let the store judge the
 	// rest.
@@ -266,9 +289,23 @@ func (s *Server) handleFresh(w http.ResponseWriter, r *http.Request) {
 		s.beadAgain(w, r, id, fmt.Sprintf("ask %d on bead %s is answered already, or asked of another; read it again", ch.ask, id))
 		return
 	}
+	if !s.freshFor(ctx, *ask, user, ch.at) {
+		s.beadAgain(w, r, id, "that sign-in is not fresh: the gateway authenticated before the card's challenge, or outside its window. Approve the card again")
+		return
+	}
+	auth := jwtIdentityOf(ctx).authTime
+	if !s.consumeFresh(state, ch, user, auth) {
+		s.beadAgain(w, r, id, "that sign-in was used already, expired, or never started: approve the card again")
+		return
+	}
 	fw := store.FreshWitness{User: user, AuthTime: auth}
-	if err := s.approveNow(ctx, id, *ask, ch.option, ch.values, ch.account, user, fw, true); err != nil {
+	done, err := s.approveNow(ctx, id, *ask, ch.option, ch.values, ch.account, user, fw, true)
+	if err != nil {
 		s.beadAgain(w, r, id, err.Error())
+		return
+	}
+	if done != nil && done.Pairing != nil {
+		s.pairingApproved(w, r, id, done.Pairing)
 		return
 	}
 	http.Redirect(w, r, "/beads/"+url.PathEscape(id), http.StatusSeeOther)
@@ -297,16 +334,18 @@ func (s *Server) consumeFresh(state string, challenge freshChallenge, user strin
 // approveNow approves the run or setup card ask with the store, saying the
 // person's word where the card is weighty, and carrying the fresh witness
 // where the sign-in is fresh. The store judges the card again in the
-// write.
-func (s *Server) approveNow(ctx context.Context, id string, ask store.BeadAsk, option int, values map[string]string, account, user string, fw store.FreshWitness, fresh bool) error {
+// write. A run approval's return is the approving call's alone: where it
+// carries a pairing, the caller answers with it in that response instead
+// of the redirect to the bead (pairingApproved). A setup approval's is
+// nil, as every other run approval's is beside its error.
+func (s *Server) approveNow(ctx context.Context, id string, ask store.BeadAsk, option int, values map[string]string, account, user string, fw store.FreshWitness, fresh bool) (*store.AskApproved, error) {
 	if fresh {
 		ctx = store.WithFreshWitness(ctx, fw.User, fw.AuthTime)
 	}
 	weighed := len(ask.Weight) > 0
 	if ask.Run != nil {
-		_, err := s.st.ApproveAsk(ctx, id, ask.Ask, user, weighed, values)
-		return err
+		return s.st.ApproveAsk(ctx, id, ask.Ask, user, weighed, values)
 	}
 	_, err := s.st.ApproveSetup(ctx, id, ask.Ask, option, values, account, user, weighed)
-	return err
+	return nil, err
 }

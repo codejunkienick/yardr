@@ -6,6 +6,7 @@ package store
 
 import (
 	"strings"
+	"time"
 )
 
 // TakenBack is the card's line for the command that takes the change back,
@@ -59,6 +60,29 @@ func (a Ask) proposed() *RunAsked {
 		Ask: a.Run.Ask}
 }
 
+// AskPairing is a pairing just opened by the approval of a device pair
+// ask, answered once to the approver alone: the user and device, the
+// code as it is shown, the address the device reaches the yard at, the
+// yard's name there where the address is the edge's, when the code runs
+// out, the yard's channel public key where it has one, and the QR string
+// those fields make (PairingQR). It is a return value and nothing
+// else: it stands in no note, answer, event, mail, log or file, no
+// later read returns it, and a client that logs its calls drops it as
+// it drops a secret's values. Every other approval's is absent.
+type AskPairing struct {
+	User    string    `json:"user"`
+	Device  string    `json:"device"`
+	Code    string    `json:"code"`
+	Address string    `json:"address"`
+	Yard    string    `json:"yard,omitempty"`
+	Expires time.Time `json:"expires"`
+	// ChannelKey is the yard's channel public key, the QR string's
+	// fourth field; absent where the yard has none, and the pairing is
+	// then a plain one.
+	ChannelKey string `json:"channel_key,omitempty"`
+	QR         string `json:"qr"`
+}
+
 // AskApproved is what ApproveAsk did: the ask and who asked it, the command
 // as it ran with the yard's sentences for it, and what it printed.
 type AskApproved struct {
@@ -68,6 +92,10 @@ type AskApproved struct {
 	Argv   []string `json:"argv"`
 	Does   []string `json:"does"`
 	Result string   `json:"result"`
+	// Pairing is the pairing a device pair approval opened, answered to
+	// the approver alone and stored nowhere (AskPairing); absent on
+	// every other approval.
+	Pairing *AskPairing `json:"pairing,omitempty"`
 }
 
 // approvedOn is the ask a change was approved on, as the change's own event

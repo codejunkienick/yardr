@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -24,6 +25,9 @@ type replies struct {
 	answered []answerCall
 	approved []approveCall
 	fail     error
+	// pairing is the transient the next approval answers, where a test
+	// sets one.
+	pairing *store.AskPairing
 }
 
 type answerCall struct {
@@ -53,7 +57,7 @@ func (r *replies) ApproveAsk(_ context.Context, id string, ask uint64, actor str
 	if r.fail != nil {
 		return nil, r.fail
 	}
-	return &store.AskApproved{Bead: id, Ask: ask, Argv: []string{"user", "add", "grace"}}, nil
+	return &store.AskApproved{Bead: id, Ask: ask, Argv: []string{"user", "add", "grace"}, Pairing: r.pairing}, nil
 }
 
 func ctrlR() tea.Msg { return tea.KeyMsg{Type: tea.KeyCtrlR} }
@@ -269,6 +273,31 @@ func TestAnswerARunAsk(t *testing.T) {
 	if _, err := st.GetUser(context.Background(), "grace"); err != nil {
 		t.Fatalf("the yard ran nothing: %v", err)
 	}
+	t.Run("pairing approval shows its answer once", answerPairingAsk)
+}
+
+// A pairing approval shows its code in this sitting alone: the field
+// says so before approval, and the approval's message carries the code,
+// the address and the expiry once.
+func answerPairingAsk(t *testing.T) {
+	st, bead := secretYard(t)
+	seq, err := st.AddAsk(context.Background(), bead, store.Ask{Question: "Pair the tablet?", To: me,
+		Context: []string{"The tablet arrived."}, Run: &store.AskRun{Argv: []string{"user", "device", "pair", "ada", "tablet", "--url", "https://mac.example.net"}}}, "chief")
+	must(t, err)
+	r := &replies{API: st, pairing: &store.AskPairing{User: "ada", Device: "tablet", Code: "K7QM-2XPD",
+		Address: "https://mac.example.net", Yard: "ada/home", ChannelKey: "CHANNEL", Expires: time.Now().Add(10 * time.Minute),
+		QR: "https://mac.example.net#K7QM-2XPD#ada/home#CHANNEL"}}
+	v := withAsks(t, r, "chief", 200, 40)
+	v.press(ctrlR())
+	v.shows("a pairing approval shows its code in this sitting alone: no edge carries it, and it is kept nowhere")
+	v.press(runes(fmt.Sprint(seq)))
+	v.key(tea.KeyEnter)
+	if len(r.approved) != 1 {
+		t.Fatalf("the yard was called %+v", r.approved)
+	}
+	v.shows("pairing for the device tablet of ada: address https://mac.example.net, code K7QM-2XPD")
+	v.shows("yard: ada/home")
+	v.shows("channel key: CHANNEL")
 }
 
 // With several asks that wait the field first asks which, by the number the

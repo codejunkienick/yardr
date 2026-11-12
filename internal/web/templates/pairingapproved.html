@@ -1,0 +1,21 @@
+{{define "content"}}
+<div id="pairing-approved">
+  {{- /* This page is one approval's answer, not a standing pairing page:
+        it exists only as the response to the approval that opened the
+        pairing, holds the code in no URL, and is gone on the next visit
+        to the bead, which shows only its stored sentence. */}}
+  <section class="item">
+    <p>Pairing is open for the device {{.Data.Device}} of {{.Data.User}}, until {{.Data.Expires}} (about {{.Data.Minutes}} minutes). Scan this QR code with the device, or give it the address and the code:</p>
+    {{- if .Data.SVG}}
+    <p>{{.Data.SVG}}</p>
+    {{- end}}
+    <p>address <code>{{.Data.Address}}</code></p>
+    {{- if .Data.Yard}}
+    <p>yard <code>{{.Data.Yard}}</code></p>
+    {{- end}}
+    <p>code <code>{{.Data.Code}}</code></p>
+    <p class="faint">Show the code to the device and to nobody else: whoever has it within its minutes is answered with that device's token. This page is the approval's answer alone and is kept nowhere: leaving it does not end the pairing, and <code>yardr user device pair --end</code> on the yard's machine does.</p>
+    <p><a href="/beads/{{.Data.Bead}}">Back to the bead</a></p>
+  </section>
+</div>
+{{end}}

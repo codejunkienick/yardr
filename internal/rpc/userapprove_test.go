@@ -244,6 +244,7 @@ func TestUserApprovesARunAsk(t *testing.T) {
 			}
 		}
 	})
+	t.Run("a member approves and ends their own pairing", userApprovesOwnPairing)
 }
 
 // ApproveAsk is on the listener for a device of the yard's operator and for
@@ -270,7 +271,10 @@ func TestUserApproveAskIsForTheOperatorsDeviceAlone(t *testing.T) {
 	}
 	t.Run("a device of another user", func(t *testing.T) {
 		y := newRunYard(t)
-		notThere(t, y.approve(onTheMachine, y.sam, unread{t}))
+		// The body is read for the one judgement that is the body's to
+		// make (a pairing of the device's own user, ownPairApproval),
+		// and this ask is none: not there, as before.
+		notThere(t, y.approve(onTheMachine, y.sam, strings.NewReader(y.args())))
 		y.nothingRan(t, "sam's device")
 		// A strong card is no way round the door: the call is the operator's
 		// device's, whatever the ask and whatever the word.
@@ -290,7 +294,7 @@ func TestUserApproveAskIsForTheOperatorsDeviceAlone(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		notThere(t, y.approve(onTheMachine, y.sam, unread{t}))
+		notThere(t, y.approve(onTheMachine, y.sam, strings.NewReader(fmt.Sprintf(`{"bead":"yd-crm","ask":%d}`, own))))
 		if evs := eventsOfKind(t, y.st, "subscribed"); len(evs) != 0 {
 			t.Errorf("%d subscribed events", len(evs))
 		}
@@ -336,7 +340,7 @@ func TestUserApproveAskIsForTheOperatorsDeviceAlone(t *testing.T) {
 		if _, err := y.st.SetUser(ctx, "jo", map[string]string{store.UserRole: store.RoleMember}, "sam"); err != nil {
 			t.Fatal(err)
 		}
-		notThere(t, y.approve(onTheMachine, y.jo, unread{t}))
+		notThere(t, y.approve(onTheMachine, y.jo, strings.NewReader(y.args())))
 		y.nothingRan(t, "an operator made a member")
 		kim := y.strongAsk(t, "sam", "kim")
 		notThere(t, y.approve(onTheMachine, y.jo, strings.NewReader(strongArgs(kim))))

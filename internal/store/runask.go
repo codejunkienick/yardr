@@ -759,6 +759,9 @@ func (s *Store) ApproveAsk(ctx context.Context, id string, ask uint64, actor str
 	if strings.Contains(id, "@") {
 		return nil, fmt.Errorf("ask %d on %s is a command of another yard's operator: it is approved in the yard that asked, never over a link", ask, id)
 	}
+	if s.devicePairTarget(id, ask) {
+		return s.approveDevicePair(ctx, id, ask, actor, weighed, values)
+	}
 	if name, ok := s.hookRegisterTarget(id, ask); ok {
 		defer s.askLocks.lock(askLockKey(id, ask))()
 		defer s.askLocks.lock(hookLockKey(name))()

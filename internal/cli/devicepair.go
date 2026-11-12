@@ -25,26 +25,6 @@ import (
 // user, and the device that calls the yard with the code is answered with
 // its token. Nobody types or pastes the token, and no command prints it.
 
-// pairQR is what the QR code of a device's pairing holds: the address the
-// device reaches the yard at, then '#', then the code, and where the address
-// is the edge's, '#' and the yard's handle/name at the edge beside them, so
-// the device knows which of the account's yards it pairs with. Where the
-// yard has a channel key, '#' and its public half stand as the fourth
-// field — the yard field empty before it where no yard is named — and
-// the device pins that key and redeems the code inside a Noise
-// handshake to it, answered sealed. With no channel key it is the text
-// it always was: a pairing with no key field is a plain one. An address
-// has no '#' of its own (store.CleanURL).
-func pairQR(address, code, yard, channel string) string {
-	if channel == "" {
-		if yard == "" {
-			return address + "#" + code
-		}
-		return address + "#" + code + "#" + yard
-	}
-	return address + "#" + code + "#" + yard + "#" + channel
-}
-
 // drawQR draws text as a QR code in the terminal's characters, two modules
 // to a line, inside the quiet zone a reader wants around it. With colour it
 // is black on white whatever the terminal's own colours are; without, the
@@ -121,7 +101,7 @@ type devicePaired struct {
 	ChannelKey       string    `json:"channel_key,omitempty"`
 	ChannelSignature string    `json:"channel_signature,omitempty"`
 	Expires          time.Time `json:"expires"`
-	// QR is what a QR code of the pairing holds (pairQR).
+	// QR is what a QR code of the pairing holds (store.PairingQR).
 	QR string `json:"qr"`
 }
 
@@ -248,7 +228,7 @@ a person.`,
 			} else {
 				fmt.Fprintf(c.ErrOrStderr(), "the yard's key could not be read or made (%v): this pairing is a plain one, with no key in its QR code\n", ierr)
 			}
-			out.QR = pairQR(addr, opened.Code, out.Yard, out.ChannelKey)
+			out.QR = store.PairingQR(addr, opened.Code, out.Yard, out.ChannelKey)
 			var picture string
 			if draw && !a.json {
 				if picture, err = drawQR(out.QR, term.IsTerminal(int(os.Stdout.Fd()))); err != nil {

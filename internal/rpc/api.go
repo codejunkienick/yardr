@@ -71,6 +71,12 @@ var Calls = map[string][]string{
 	"AddNote":              {"bead", "text", "actor", "files"},
 	"DeliveryFiles":        {"seq"},
 	"RegisterChannelKey":   {"channel_key"},
+	// DevicePairCloseSelf ends the caller's own open pairing, as they
+	// end it from their own yard screen: its user is the caller's (the
+	// self argument asUser holds it to), so a device ends its own
+	// user's pairing and no other, and another user's pairing is no
+	// pairing to it in the store's words.
+	"DevicePairCloseSelf": {"user"},
 }
 
 // listenerOnly are the calls of Calls the socket does not serve: a
@@ -175,8 +181,10 @@ var listenerOnly = map[string]bool{
 //
 // DevicePairOpen opens a pairing for one device of one user, as `yardr
 // user device pair` does, and answers its code and expiry;
-// DevicePairState reads the open pairing back with its code and QR
-// string, so a reopened window shows the same pairing again; and
+// DevicePairState reads a directly opened pairing back with its code and
+// QR string, so a reopened window shows the same pairing again. It does
+// not read an approval-opened pairing, whose code is returned only in
+// that approval's AskApproved.Pairing response; and
 // DevicePairClose ends it, as `yardr user device pair --end` does. The
 // three are the socket's alone: a device token never opens a pairing, so
 // the listener serves them to no device, not even the operator's, and

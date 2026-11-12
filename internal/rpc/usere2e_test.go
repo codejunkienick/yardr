@@ -190,6 +190,79 @@ func TestE2EWholeCallSealedEndToEnd(t *testing.T) {
 	if innerHeader.Get("Content-Type") != "image/png" || outerHeader.Get("Content-Type") == "image/png" {
 		t.Errorf("inner type %q, outer type %q: the inner head travels only sealed", innerHeader.Get("Content-Type"), outerHeader.Get("Content-Type"))
 	}
+	t.Run("pairing approval", func(t *testing.T) {
+		e2ePairingApprovalSealed(t, y, d)
+	})
+}
+
+// A sealed device approves its own pairing ask: the approval crosses
+// the edge only as ciphertext, and the transient inside it — the new
+// pairing's code — is readable nowhere on the wire.
+func e2ePairingApprovalSealed(t *testing.T, y *pairYard, d *e2eDevice) {
+	ctx := context.Background()
+	if _, err := y.st.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr", Config: map[string]any{"kind": "claude"}}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := y.st.CreateBead(ctx, store.NewBead{Title: "Pair the watch"}, "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq, err := y.st.AddAsk(ctx, b.ID, store.Ask{Question: "Pair the watch?", To: "sam",
+		Context: []string{"the watch arrived"},
+		Run:     &store.AskRun{Argv: []string{"user", "device", "pair", "sam", "watch", "--url", "https://mac.example.net"}}}, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := bindFor("", false)
+	body, _ := json.Marshal(map[string]any{"bead": b.ID, "ask": seq, "weighed": true})
+	outer, _, sealed, call := d.callRaw(t, http.MethodPost, "/user/call/ApproveAsk", nil, body, plain, plain)
+	if outer != http.StatusOK {
+		t.Fatalf("the sealed approval outer %d (%s)", outer, sealed)
+	}
+	inner, err := d.session.OpenWhole(sealed, call, plain)
+	if err != nil {
+		t.Fatalf("the sealed answer does not open: %v", err)
+	}
+	_, innerBody, err := splitE2EHead(inner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Result *store.AskApproved `json:"result"`
+	}
+	if err := json.Unmarshal(innerBody, &got); err != nil || got.Result == nil || got.Result.Pairing == nil {
+		t.Fatalf("the sealed approval answered %s (%v)", innerBody, err)
+	}
+	code := got.Result.Pairing.Code
+	if code == "" || strings.Contains(string(sealed), code) {
+		t.Fatalf("the sealed answer carries the code %q in the clear", code)
+	}
+	if !y.st.DevicePairOpened(ctx) {
+		t.Fatal("the sealed approval opened no pairing")
+	}
+	channel, err := yardkey.ParseChannelPublic(got.Result.Pairing.ChannelKey)
+	if err != nil {
+		t.Fatalf("the pairing answer's channel key is absent or invalid: %v", err)
+	}
+	if want := "https://mac.example.net#" + code + "##" + got.Result.Pairing.ChannelKey; got.Result.Pairing.QR != want {
+		t.Fatalf("the pairing answer's QR is %q, want %q", got.Result.Pairing.QR, want)
+	}
+	device, err := yardkey.GenerateChannelKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, opening, err := yardkey.StartPairingHandshake(device, channel, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, reply := y.postSealed(t, first)
+	if status != http.StatusOK || strings.Contains(reply, code) {
+		t.Fatalf("the scanned QR's sealed redemption = %d %s", status, reply)
+	}
+	paired := openSealed(t, opening, reply)
+	if paired.User != "sam" || paired.Device != "watch" || paired.Token == "" {
+		t.Fatalf("the sealed answer to the scanned QR = %+v", paired)
+	}
 }
 
 // An inner refusal is sealed like any answer: the outer head is 200

@@ -78,6 +78,21 @@ type DevicePairingState struct {
 	QR string `json:"qr"`
 }
 
+// PairingQR is what a QR code of a device pairing holds: the address the
+// device reaches the yard at, then '#', then the code, and the yard's
+// handle/name beside it where the address is the edge's, with the yard's
+// channel public key as its fourth field where it has one. The yard field
+// stands empty before the channel key where no yard is named.
+func PairingQR(address, code, yard, channel string) string {
+	if channel == "" {
+		if yard == "" {
+			return address + "#" + code
+		}
+		return address + "#" + code + "#" + yard
+	}
+	return address + "#" + code + "#" + yard + "#" + channel
+}
+
 // devicePairings holds the yard's device pairing. Its lock is taken before
 // any of the store's, never after.
 type devicePairings struct {
@@ -95,6 +110,9 @@ type devicePairing struct {
 	// code is the code in the form both sides compute from, until it is
 	// used or the pairing ends.
 	code string
+	// approvalOnly says this pairing's code was returned once by an
+	// ApproveAsk call, so the existing readbacks cannot return it again.
+	approvalOnly bool
 }
 
 func (p *devicePairing) event(extra map[string]any) map[string]any {
@@ -275,20 +293,19 @@ func (s *Store) channelPublic() string {
 	return enc.EncodeToString(key.PublicKey().Bytes())
 }
 
-// DevicePairState answers the yard's open device pairing with its code,
+// DevicePairState answers a directly opened device pairing with its code,
 // as it was shown when it was opened, and the QR string that holds the
 // address, the code and the yard, so a window reopened shows the same
-// pairing again. The address is the edge setting's, and the yard its
-// handle/name; with no edge setting the QR string is empty, and the code
-// is given where it is asked for. With no pairing open it is no pairing,
-// in the same words as DevicePairCodeSelf's. It is the operator's read
-// (rpc.OperatorCalls): on the socket an operator-class call, and never
+// pairing again. An approval-opened pairing is not read back: its code is
+// returned only by the approving call. With no readable pairing it is no
+// pairing, in the same words as DevicePairCodeSelf's. It is the operator's
+// read (rpc.OperatorCalls): on the socket an operator-class call, and never
 // served to a device, which would read the pairing's whole credential
 // here. A device token never opens a pairing.
 func (s *Store) DevicePairState(ctx context.Context) (*DevicePairingState, error) {
 	s.devPair.mu.Lock()
 	p := s.devicePairing(ctx)
-	if p == nil || p.State != PairOpened {
+	if p == nil || p.State != PairOpened || p.approvalOnly {
 		s.devPair.mu.Unlock()
 		return nil, fmt.Errorf("an open device pairing: %w (one lives in the server's memory, and ends with it)", ErrNotFound)
 	}
@@ -299,10 +316,7 @@ func (s *Store) DevicePairState(ctx context.Context) (*DevicePairingState, error
 		return nil, err
 	}
 	if e, connected, err := EdgeOf(all); err == nil && connected {
-		out.QR = e.URL + "#" + out.Code + "#" + e.HandleName()
-		if channel := s.channelPublic(); channel != "" {
-			out.QR += "#" + channel
-		}
+		out.QR = PairingQR(e.URL, out.Code, e.HandleName(), s.channelPublic())
 	}
 	return &out, nil
 }
@@ -323,16 +337,17 @@ func (s *Store) DevicePairCloseSelf(ctx context.Context, user string) (*DevicePa
 	return &out, nil
 }
 
-// DevicePairCodeSelf answers the user's own open pairing with its code, as
-// it was shown when it was opened, so the web view's pairing page shows the
-// same QR again on a reload. Another user's pairing, and none, are both no
-// pairing to them. The code is the one in the server's memory: it is gone
-// when the pairing ends, and this answers none then.
+// DevicePairCodeSelf answers a directly opened pairing of the user's own
+// with its code, as it was shown when it opened, so a web page may show the
+// same code again on a reload. An approval-opened pairing is not read back:
+// its code is returned only by the approving call. Another user's pairing,
+// and none, are both no pairing to them. The code is the one in the server's
+// memory: it is gone when the pairing ends, and this answers none then.
 func (s *Store) DevicePairCodeSelf(ctx context.Context, user string) (*DevicePairingCode, error) {
 	s.devPair.mu.Lock()
 	defer s.devPair.mu.Unlock()
 	p := s.devicePairing(ctx)
-	if p == nil || p.State != PairOpened || p.User != user {
+	if p == nil || p.State != PairOpened || p.User != user || p.approvalOnly {
 		return nil, fmt.Errorf("an open device pairing: %w (one lives in the server's memory, and ends with it)", ErrNotFound)
 	}
 	return &DevicePairingCode{DevicePairing: p.DevicePairing, Code: displayCode(p.code)}, nil

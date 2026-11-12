@@ -638,6 +638,11 @@ func (s *Service) Answer(ctx context.Context, in AnswerInput, weighed bool) (*Re
 		if in.Pick > 0 || in.Words != "" {
 			return nil, fmt.Errorf("approving question %d takes nothing with it: no pick and no words", in.Question)
 		}
+		if ask.Run != nil && store.IsDevicePairRun(ask.Run.Argv) {
+			// A pairing approval answers its code once to the approver,
+			// which no transcript here may hold: refused, never called.
+			return nil, fmt.Errorf("question %d pairs a device, and its approval answers the pairing's code once, which never passes through here, so nothing was run and question %d is still open. Approve it in footplate, in the yard's window in your browser, or in a terminal on the machine the yard runs on: yardr bead answer %s %d --approve", in.Question, in.Question, view.ID, in.Question)
+		}
 		if len(ask.Weight) > 0 && !weighed {
 			return &Result{Weighed: &WeighedPrompt{Number: in.Question, Message: weighedMessage(*ask, view.Title)}}, nil
 		}

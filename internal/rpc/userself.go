@@ -38,6 +38,7 @@ var selfArg = map[string][]string{
 	"ApproveSetup":         {"actor"},
 	"UninviteTeammate":     {"actor"},
 	"TelemetrySet":         {"actor"},
+	"DevicePairCloseSelf":  {"user"},
 }
 
 // asUser is the arguments body of the call method as user makes it: each

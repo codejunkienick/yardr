@@ -165,6 +165,15 @@ type Store struct {
 	// home is the yard's home, the directory of the store file: where the
 	// blobs are (blobs.go).
 	home string
+	// pairAddr answers where a device reaches this yard at for a device
+	// pair ask the command named no --url for, from the process that
+	// owns the store (SetPairAddress, runask_devicepair.go); nil where
+	// no server owns the store.
+	pairAddr PairAddress
+	// pairChannelKey makes or reads the channel key a device pairing's QR
+	// carries (SetPairChannelKey, runask_devicepair.go); nil where no
+	// server owns the store.
+	pairChannelKey PairChannelKey
 	// packReader reads an embedded pack for a pack apply run ask, from
 	// the binary of the process that owns the store (SetPackReader,
 	// runask_pack.go); nil where no server owns the store.
@@ -451,6 +460,21 @@ type wtx struct {
 	// write, since the origin must not be read inside one
 	// (runCommand.fetch); nil for a write that needs none.
 	urlPack PackReader
+	// pairID, pairCode and pairExpires are the pairing a device pair
+	// approval made once before its write (approveDevicePair), so a
+	// batch that runs the transaction again opens the same one. pairCode
+	// is the code in its stored form. pairPending is the pairing the run
+	// opened in this transaction, published to the store's memory only
+	// after commit, and pairShown the transient answered from it: both
+	// nil on every other write.
+	pairID      string
+	pairCode    string
+	pairExpires time.Time
+	// pairChannelKey is read or made before the approval write, once for a
+	// batch that may run the transaction again.
+	pairChannelKey string
+	pairPending    *devicePairing
+	pairShown      *AskPairing
 }
 
 // write runs fn in a batched write transaction, then nudges the pump to

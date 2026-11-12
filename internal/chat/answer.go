@@ -114,6 +114,12 @@ func (f *answerField) hint() string {
 // rule is what the rule above the field says: of a card that weighs, that the
 // number shows as it is typed, which is the secret's gate over again.
 func (f *answerField) rule() string {
+	if f.approves() && f.on.Ask.Run != nil && store.IsDevicePairRun(f.on.Ask.Run.Argv) {
+		// This sitting is on the yard's own machine, as a terminal is:
+		// no edge carries its answer, and the code approval shows here
+		// is shown here alone.
+		return "a pairing approval shows its code in this sitting alone: no edge carries it, and it is kept nowhere"
+	}
 	if f.approves() && len(f.on.Ask.Weight) > 0 {
 		return "a weighty card: its number shows as you type it"
 	}
@@ -341,6 +347,18 @@ func (m *Model) approveWith(r store.ResolvedAsk) tea.Cmd {
 		text := fmt.Sprintf("%s approved ask %d", me, r.Note.Seq)
 		if done != nil {
 			text += ", and the yard ran it: " + store.AskRan{Argv: done.Argv}.Command()
+		}
+		if done != nil && done.Pairing != nil {
+			// The pairing's code, answered once in this sitting and kept
+			// nowhere, as a terminal shows it once.
+			p := done.Pairing
+			text += fmt.Sprintf("\npairing for the device %s of %s: address %s, code %s, until %s — show it to the device and to nobody else", p.Device, p.User, p.Address, p.Code, p.Expires.Local().Format("15:04:05"))
+			if p.Yard != "" {
+				text += "\nyard: " + p.Yard
+			}
+			if p.ChannelKey != "" {
+				text += "\nchannel key: " + p.ChannelKey
+			}
 		}
 		return gaveMsg{text: text}
 	}

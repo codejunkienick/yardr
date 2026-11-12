@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -118,11 +119,17 @@ func TestHookAddrFromTheSetting(t *testing.T) {
 	if !listens(addr) {
 		t.Fatalf("nothing listens on %s", addr)
 	}
+	if got, err := listenerAddress(c); err != nil || got != "http://"+addr {
+		t.Fatalf("pairing address = %q, %v; want the listening address", got, err)
+	}
 
 	none := home(t)
 	start(t, &runner{c: none})
 	if l, known := hooks.ReadListener(none); !known || l.Addr != "" || l.From != "" || l.Listening() {
 		t.Fatalf("listener without an address = %+v (known %v)", l, known)
+	}
+	if _, err := listenerAddress(none); err == nil {
+		t.Fatal("a yard with no listener got a pairing address")
 	}
 }
 
@@ -166,6 +173,9 @@ func TestHookAddrTaken(t *testing.T) {
 	l, known := hooks.ReadListener(second)
 	if !known || l.Listening() || l.Addr != addr || l.From != hooks.FromSetting || !strings.Contains(l.Error, "address already in use") {
 		t.Fatalf("second = %+v (known %v)", l, known)
+	}
+	if _, err := listenerAddress(second); err == nil {
+		t.Fatal("a yard whose receiver failed got a pairing address")
 	}
 	ctx := context.Background()
 	cl := rpc.NewClient(second.Socket())
@@ -446,27 +456,53 @@ func TestUserDevicePairedOnTheListener(t *testing.T) {
 		t.Errorf("the plain answer holds a voucher: %s", body)
 	}
 
-	// The key files the server was wired with (serveHooks): a device that
-	// pairs sealed, by the channel key a QR carries, is answered with a
-	// voucher signed by the yard's identity, whose public half is what the
-	// edge holds, and it names the device that paired.
+	// The server makes its channel key for the approval's QR before the
+	// first device pairs; the sealed answer carries a voucher signed by the
+	// yard's identity and names the device that paired.
 	identity, _, err := yardkey.Ensure(c.PeerKey())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := cl.AddUser(ctx, "sam", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cl.AddUser(ctx, "kim", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := cl.CreateBead(ctx, store.NewBead{Title: "Pair a device"}, "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq, err := cl.AddAsk(ctx, b.ID, store.Ask{Question: "Pair the tablet?", To: "jo",
+		Context: []string{"the tablet arrived"},
+		Run:     &store.AskRun{Argv: []string{"user", "device", "pair", "sam", "tablet"}}}, "kim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := cl.ApproveAsk(ctx, b.ID, seq, "jo", true, nil)
+	if err != nil || approved == nil || approved.Pairing == nil {
+		t.Fatalf("the operator's approval = %+v, %v", approved, err)
+	}
+	p := approved.Pairing
+	if p.User != "sam" || p.Device != "tablet" || p.Address != "http://"+addr || p.ChannelKey == "" {
+		t.Fatalf("the first-device approval answered %+v", p)
+	}
+	channelPublic, err := yardkey.ParseChannelPublic(p.ChannelKey)
+	if err != nil {
+		t.Fatalf("the first-device approval's channel key = %q (%v)", p.ChannelKey, err)
 	}
 	channel, _, err := yardkey.EnsureChannel(c.ChannelKey())
 	if err != nil {
 		t.Fatal(err)
 	}
-	opened, err = cl.DevicePairOpen(ctx, "jo", "tablet", "jo")
-	if err != nil {
-		t.Fatal(err)
+	if !bytes.Equal(channelPublic, channel.Public) {
+		t.Fatal("the first-device approval carries a channel key different from the listener's")
 	}
 	device, err := yardkey.GenerateChannelKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, opening, err := yardkey.StartPairingHandshake(device, channel.Public, opened.Code)
+	first, opening, err := yardkey.StartPairingHandshake(device, channelPublic, p.Code)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,11 +523,11 @@ func TestUserDevicePairedOnTheListener(t *testing.T) {
 		t.Fatalf("the device could not open its answer: %v", err)
 	}
 	var paired rpc.Paired
-	if err := json.Unmarshal(plain, &paired); err != nil || paired.Device != "tablet" || paired.Voucher == "" {
+	if err := json.Unmarshal(plain, &paired); err != nil || paired.User != "sam" || paired.Device != "tablet" || paired.Voucher == "" {
 		t.Fatalf("the sealed answer = %s (%v), want the tablet's token and a voucher", plain, err)
 	}
 	v, err := yardkey.VerifyVoucher(store.Public(identity), paired.Voucher, time.Now())
-	if err != nil || v.User != "jo" || v.Device != "tablet" || v.Yard != paired.Yard || v.Yard == "" {
-		t.Errorf("the voucher verifies as %+v (%v) against the yard's identity, want jo's tablet at %q", v, err, paired.Yard)
+	if err != nil || v.User != "sam" || v.Device != "tablet" || v.Yard != paired.Yard || v.Yard == "" {
+		t.Errorf("the voucher verifies as %+v (%v) against the yard's identity, want sam's tablet at %q", v, err, paired.Yard)
 	}
 }

@@ -113,7 +113,7 @@ func TestDevicePairCommand(t *testing.T) {
 	out = mustAs(t, st, "jo", "user", "device", "pair", "ada", "laptop", "--url", "https://mac.example.net/", "--qr", "--json")
 	if err := json.Unmarshal([]byte(out), &opened); err != nil || opened.User != "ada" || opened.Device != "laptop" || opened.Pairing == "" ||
 		opened.Address != "https://mac.example.net" || opened.Yard != "" || len(opened.ChannelKey) != 43 || opened.ChannelSignature == "" ||
-		opened.QR != pairQR("https://mac.example.net", opened.Code, "", opened.ChannelKey) ||
+		opened.QR != store.PairingQR("https://mac.example.net", opened.Code, "", opened.ChannelKey) ||
 		time.Until(opened.Expires) > store.TTL || time.Until(opened.Expires) < store.TTL-time.Minute || strings.Contains(out, "█") {
 		t.Fatalf("device pair --json: %+v, %v\n%s", opened, err, out)
 	}
@@ -176,7 +176,7 @@ func TestDevicePairQR(t *testing.T) {
 		t.Fatalf("the pair shows channel %q, want the yard's %q", m[4], yardkey.ChannelPublic(channel))
 	}
 	holds := m[1] + "#" + m[3] + "##" + m[4]
-	if holds != pairQR("https://mac.example.net", m[3], "", m[4]) {
+	if holds != store.PairingQR("https://mac.example.net", m[3], "", m[4]) {
 		t.Fatalf("the QR code holds %q", holds)
 	}
 	want, err := qr.Encode(holds, qr.M)

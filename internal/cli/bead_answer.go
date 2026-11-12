@@ -211,6 +211,12 @@ options go as mail to the asker instead (yardr mail <asker>@<peer>).`,
 					}
 					values[name] = value
 				}
+				if card, ok := askedCard(c.Context(), st, id, askSeq); ok && card.Run != nil && store.IsDevicePairRun(card.Run.Argv) {
+					// A terminal is on the yard's own machine: no edge carries
+					// this approval or its answer, and the code it shows is
+					// shown in this sitting alone.
+					fmt.Fprintln(c.ErrOrStderr(), "a pairing approval at this terminal shows its code here alone: no edge carries it, and it is kept nowhere.")
+				}
 				weighed, err := a.gate(c, st, id, askSeq, "approve", "--approve")
 				if err != nil {
 					return err
@@ -226,6 +232,20 @@ options go as mail to the asker instead (yardr mail <asker>@<peer>).`,
 						fmt.Fprintln(w, does)
 					}
 					fmt.Fprintf(w, "%s approved it, and the yard ran it:\n%s\n", a.who(), done.Result)
+					if p := done.Pairing; p != nil {
+						// The pairing's code, answered once to the approver
+						// alone and kept nowhere: shown here, in this
+						// sitting, as a device token is shown once.
+						fmt.Fprintf(w, "\nPairing is open for the device %s of %s, until %s. Give the device this yard's address and the code:\n\n  address  %s\n", p.Device, p.User, p.Expires.Local().Format("15:04:05"), p.Address)
+						if p.Yard != "" {
+							fmt.Fprintf(w, "  yard     %s\n", p.Yard)
+						}
+						fmt.Fprintf(w, "  code     %s\n", p.Code)
+						if p.ChannelKey != "" {
+							fmt.Fprintf(w, "  channel  %s\n", p.ChannelKey)
+						}
+						fmt.Fprintf(w, "\nShow the code to the device and to nobody else: whoever has it within its minutes is answered with that device's token.\n")
+					}
 				})
 			}
 			if len(ansValue) > 0 {

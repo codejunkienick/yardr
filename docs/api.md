@@ -299,7 +299,7 @@ Mail was queued for one of a linked yard: the conversation with `<data.to>@<data
 
 ```json
 {
-  "seq": 191,
+  "seq": 193,
   "kind": "mail",
   "actor": "jo",
   "data": {
@@ -327,7 +327,7 @@ A user or a crew member acknowledged its mail. Every letter to `data.reader` wit
 
 ```json
 {
-  "seq": 193,
+  "seq": 195,
   "kind": "mail_read",
   "data": {
     "reader": "jo",
@@ -471,7 +471,7 @@ A user acknowledged their notifications, in this client or another.
 
 ```json
 {
-  "seq": 194,
+  "seq": 196,
   "kind": "notifications_read",
   "data": {
     "reader": "jo",
@@ -1354,7 +1354,7 @@ POST /call/Head
 {}
 
 {
-  "result": 188
+  "result": 190
 }
 ```
 
@@ -1867,7 +1867,7 @@ POST /call/Conversation
       "as": "jo"
     },
     {
-      "seq": 189,
+      "seq": 191,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -1875,7 +1875,7 @@ POST /call/Conversation
       "read": false
     },
     {
-      "seq": 190,
+      "seq": 192,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -1901,7 +1901,7 @@ POST /call/Conversation
 {
   "result": [
     {
-      "seq": 189,
+      "seq": 191,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -1909,7 +1909,7 @@ POST /call/Conversation
       "read": false
     },
     {
-      "seq": 190,
+      "seq": 192,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -1936,7 +1936,7 @@ POST /call/Conversation
 {
   "result": [
     {
-      "seq": 191,
+      "seq": 193,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "clerk@north",
@@ -2675,10 +2675,54 @@ POST /call/UserAsks
         ]
       },
       {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 65,
+        "question": "Pair jo's watch?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "run": {
+          "argv": ["user", "device", "pair", "jo", "watch", "--url", "https://mac.example.net"],
+          "command": "yardr user device pair jo watch --url https://mac.example.net",
+          "does": ["opens a pairing for the device watch of jo, reached at https://mac.example.net.", "jo has 1 device: phone (never used).", "Approval opens the pairing for that device alone: its code is good for ten minutes and for one device, and whoever has the code within those minutes is answered with that device's token.", "Nothing in the yard keeps the code after it is used or runs out.", "The new device then calls as jo until yardr user device rm jo watch, and jo will then have 2 devices."],
+          "back": "yardr user device pair --end ends it while it stands; once the code is used, yardr user device rm jo watch removes the device"
+        },
+        "weight": [
+          {
+            "class": "trust",
+            "line": "widens who the yard listens to: a new device watch of jo speaks as them: whoever holds its token calls as jo until the device is removed"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 66,
+        "question": "Pair jo's second phone?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "run": {
+          "argv": ["user", "device", "pair", "jo", "phone2", "--url", "https://mac.example.net"],
+          "command": "yardr user device pair jo phone2 --url https://mac.example.net",
+          "does": ["opens a pairing for the device phone2 of jo, reached at https://mac.example.net.", "jo has 1 device: phone (never used).", "Approval opens the pairing for that device alone: its code is good for ten minutes and for one device, and whoever has the code within those minutes is answered with that device's token.", "Nothing in the yard keeps the code after it is used or runs out.", "The new device then calls as jo until yardr user device rm jo phone2, and jo will then have 2 devices."],
+          "back": "yardr user device pair --end ends it while it stands; once the code is used, yardr user device rm jo phone2 removes the device"
+        },
+        "weight": [
+          {
+            "class": "trust",
+            "line": "widens who the yard listens to: a new device phone2 of jo speaks as them: whoever holds its token calls as jo until the device is removed"
+          }
+        ]
+      },
+      {
         "bead": "yd-greet",
         "bead_title": "The greeting",
         "topic": "",
-        "ask": 67,
+        "ask": 69,
         "question": "Welcome the newcomer on Monday?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
@@ -2688,7 +2732,7 @@ POST /call/UserAsks
         "bead": "yd-greet",
         "bead_title": "The greeting",
         "topic": "",
-        "ask": 68,
+        "ask": 70,
         "question": "A lunch for the newcomer?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
@@ -2698,7 +2742,7 @@ POST /call/UserAsks
         "bead": "yd-greet",
         "bead_title": "The greeting",
         "topic": "",
-        "ask": 69,
+        "ask": 71,
         "question": "A desk by the window?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
@@ -2710,7 +2754,7 @@ POST /call/UserAsks
         "bead": "yd-crm",
         "bead_title": "Read the CRM",
         "topic": "",
-        "ask": 65,
+        "ask": 67,
         "question": "Invite Rhea to the yard?",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
@@ -4952,6 +4996,52 @@ POST /call/Bead
         "to": "jo",
         "asker": "yardmaster",
         "since": "2026-10-08T09:30:00Z",
+        "question": "Pair jo's watch?",
+        "context": ["The watch arrived."],
+        "options": [],
+        "state": "open",
+        "turn": 0,
+        "run": {
+          "argv": ["user", "device", "pair", "jo", "watch", "--url", "https://mac.example.net"],
+          "command": "yardr user device pair jo watch --url https://mac.example.net",
+          "does": ["opens a pairing for the device watch of jo, reached at https://mac.example.net.", "jo has 1 device: phone (never used).", "Approval opens the pairing for that device alone: its code is good for ten minutes and for one device, and whoever has the code within those minutes is answered with that device's token.", "Nothing in the yard keeps the code after it is used or runs out.", "The new device then calls as jo until yardr user device rm jo watch, and jo will then have 2 devices."],
+          "back": "yardr user device pair --end ends it while it stands; once the code is used, yardr user device rm jo watch removes the device"
+        },
+        "weight": [
+          {
+            "class": "trust",
+            "line": "widens who the yard listens to: a new device watch of jo speaks as them: whoever holds its token calls as jo until the device is removed"
+          }
+        ]
+      },
+      {
+        "ask": 66,
+        "to": "jo",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "question": "Pair jo's second phone?",
+        "context": ["The second phone arrived."],
+        "options": [],
+        "state": "open",
+        "turn": 0,
+        "run": {
+          "argv": ["user", "device", "pair", "jo", "phone2", "--url", "https://mac.example.net"],
+          "command": "yardr user device pair jo phone2 --url https://mac.example.net",
+          "does": ["opens a pairing for the device phone2 of jo, reached at https://mac.example.net.", "jo has 1 device: phone (never used).", "Approval opens the pairing for that device alone: its code is good for ten minutes and for one device, and whoever has the code within those minutes is answered with that device's token.", "Nothing in the yard keeps the code after it is used or runs out.", "The new device then calls as jo until yardr user device rm jo phone2, and jo will then have 2 devices."],
+          "back": "yardr user device pair --end ends it while it stands; once the code is used, yardr user device rm jo phone2 removes the device"
+        },
+        "weight": [
+          {
+            "class": "trust",
+            "line": "widens who the yard listens to: a new device phone2 of jo speaks as them: whoever holds its token calls as jo until the device is removed"
+          }
+        ]
+      },
+      {
+        "ask": 67,
+        "to": "jo",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
         "question": "Invite Rhea to the yard?",
         "context": ["Rhea works with the builders."],
         "options": [],
@@ -5070,7 +5160,7 @@ POST /call/Bead
 | `asks[].depot_push.does` | array of string | what approving changes and what stands now, in the yard's words |
 | `asks[].depot_push.back` | string | the filing that takes the change back |
 | `asks[].depot_push.back_by` | string, may be absent | who may file `back`, in words that stand before `can take it back`; absent where that is anyone |
-| `asks[].run` | object, may be absent | the command a run ask proposes: one yardr command that is the operator's to give, which the yard runs when the operator approves the ask. Absent on any other ask. Such an ask has no options and takes no words: `AnswerAsk` refuses a pick and words on it, `DeferAsk` and `DeclineAsk` take it as any ask, and it is approved with [`ApproveAsk`](#for-the-operator-alone), by the operator: at the yard (`yardr bead answer <bead> <ask> --approve`, with `--value <name>=<value>` where the card asks for values in the clear), or from a device of the operator. A strong card ([weighty cards](#weighty-cards)) is approved from a device as any weighty card is; the bead page approves it only on a hosted yard, under a fresh sign-in. A command that is a user's own (`subscribe <user> yardr`, `user set <user> tell=<parts>`, `user key <user> <source>`, `user device rm <user> <device>`) is approved at the yard by the one it was asked of, that user or the operator. All of `run` is the yard's, made when the ask was written, and none of it the asker's: show it apart from `question` and `context`, which are the asker's words, and draw those as plain text |
+| `asks[].run` | object, may be absent | the command a run ask proposes: one yardr command that is the operator's to give, which the yard runs when the operator approves the ask. Absent on any other ask. Such an ask has no options and takes no words: `AnswerAsk` refuses a pick and words on it, `DeferAsk` and `DeclineAsk` take it as any ask, and it is approved with [`ApproveAsk`](#for-the-operator-alone), by the operator: at the yard (`yardr bead answer <bead> <ask> --approve`, with `--value <name>=<value>` where the card asks for values in the clear), or from a device of the operator. A strong card ([weighty cards](#weighty-cards)) is approved from a device as any weighty card is; the bead page approves it only on a hosted yard, under a fresh sign-in. A command that is a user's own (`subscribe <user> yardr`, `user set <user> tell=<parts>`, `user key <user> <source>`, `user device rm <user> <device>`, `user device pair <user> <device>`) is approved at the yard by the one it was asked of, that user or the operator. All of `run` is the yard's, made when the ask was written, and none of it the asker's: show it apart from `question` and `context`, which are the asker's words, and draw those as plain text |
 | `asks[].run.argv` | array of string | the command in words, without the leading `yardr`, as the yard parsed it. On a run ask that sets a setting, adds a source, or applies a pack with a depot or mappings named, told to a device of the operator alone ([over the network](#over-the-network)): `[]` on any other device's card, and on every device's of a yard with no operator. The socket tells the whole card |
 | `asks[].run.command` | string | the command whole, as it is typed in a terminal and as it would run. Never shorten it: a view that cannot show it whole says where the ask can be read instead. On a run ask that sets a setting, adds a source, or applies a pack with a depot or mappings named, told to a device of the operator alone ([over the network](#over-the-network)): `""` on any other device's card, and on every device's of a yard with no operator. The socket tells the whole card |
 | `asks[].run.does` | array of string | what the command changes and what is there now, in the yard's words, a sentence each, with what it names as the yard knows it |
@@ -5683,14 +5773,14 @@ POST /call/DeclineAsk
 
 ```
 POST /call/AnswerAskExpected
-{"bead":"yd-greet","ask":67,"turn":0,"option":1,"words":"Monday it is","actor":"jo"}
+{"bead":"yd-greet","ask":69,"turn":0,"option":1,"words":"Monday it is","actor":"jo"}
 
 {}
 ```
 
 ```
 POST /call/AnswerAskExpected
-{"bead":"yd-greet","ask":67,"turn":1,"option":2,"actor":"jo"}
+{"bead":"yd-greet","ask":69,"turn":1,"option":2,"actor":"jo"}
 
 {}
 ```
@@ -5708,7 +5798,7 @@ POST /call/AnswerAskExpected
 
 ```
 POST /call/DeferAskExpected
-{"bead":"yd-greet","ask":68,"turn":0,"actor":"jo"}
+{"bead":"yd-greet","ask":70,"turn":0,"actor":"jo"}
 
 {}
 ```
@@ -5728,7 +5818,7 @@ POST /call/DeferAskExpected
 
 ```
 POST /call/DeclineAskExpected
-{"bead":"yd-greet","ask":69,"turn":0,"words":"the desk is taken","actor":"jo"}
+{"bead":"yd-greet","ask":71,"turn":0,"words":"the desk is taken","actor":"jo"}
 
 {}
 ```
@@ -5848,6 +5938,35 @@ POST /call/RegisterChannelKey
 | `yard_key` | string | the yard identity's public key, base64url, which `channel_signature` verifies against |
 
 The device list says `sealed (in place)` of the device from then on, against `sealed (paired)` for one that pinned its key at a pairing: an edge active at this one call could put its own key in place of the device's, or of the yard's, and so hold the device's channel until it is re-paired by QR. Re-pairing lifts the label, and is never required.
+
+### `DevicePairCloseSelf`
+
+Ends the open pairing of the user it names, as that user ends it from their own yard screen: nothing is added, and the code is good for nothing then. Another user's pairing, and none, are both no pairing to them, with the error `not-found`. On the socket its Operator class refuses agent and crew panes; on the listener it is served to any device, with its user held to the device's own (asUser), so a device ends its own user's pairing and no other.
+
+| argument | type | |
+|---|---|---|
+| `user` | string | the user whose pairing ends: the caller's own |
+
+```
+POST /call/DevicePairCloseSelf
+{"user":"jo"}
+
+{
+  "result": {
+    "user": "jo",
+    "device": "phone2",
+    "state": "ended",
+    "expires": "2026-10-08T09:30:00Z"
+  }
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `user` | string | the user the pairing was for |
+| `device` | string | the device's name |
+| `state` | string | `ended` |
+| `expires` | time | when the code would have run out |
 
 <!-- /calls -->
 
@@ -6199,7 +6318,7 @@ The file and the store are two writes. When the yard wrote the file and could no
 
 ### `ApproveAsk`
 
-Approves a run ask (an ask of `Bead` with `run`), and the yard runs the command the ask holds, as the one who approves: `run.command`, whole, and nothing else. It is what `yardr bead answer --approve` does, with `--value <name>=<value>` where the card asks for values in the clear (`run.ask`): a hook add the yard registers itself carries them to its register call with the URL and the secret, and keeps none; where the declaration names a check, a retry first lists what stands and adopts a webhook already aimed at the hook. In one write the yard checks that it would write the same card now, makes the change under the command's own check, and records the answer, which holds `ran`. A refused approval changes nothing, records nothing and leaves the ask open. It is the operator's to approve: on the socket it is refused for anyone else and for a call that comes from the pane of an agent, whatever `actor` says, and on the listener it is there for a device of the operator and for no other caller. A command that is a user's own (`subscribe <user> yardr`, `user set <user> tell=<parts>`, `user key <user> <source>`, `user device rm <user> <device>`) is approved by the one it was asked of, that user or the operator, on the socket; a device of that user is not served the call. Refused too: an ask that proposes no command; one that was declined, taken back or approved already, since a command runs once for one ask; a `bead@peer`, since a command is approved in the yard that asked and never over a link; values the card asks for nothing of, and a missing one where it asks for any; and an ask whose card is from before the yard changed, where what the command names was replaced under its name or what it changes is no longer what `run.does` says. That one is declined, and asked again if it is still wanted. A weighty card ([weighty cards](#weighty-cards)) is refused unless the call says `weighed`; that refusal changes nothing and leaves the ask open, as it is. A routine card asks for no such word. A strong card — one the yard weighs `trust` or `code` ([weighty cards](#weighty-cards)) — is approved from a device as any weighty card is, with `weighed`: the command runs, and the answer's event carries `via` and no `data.witness`. On a hosted yard the bead page approves it only under a fresh sign-in, which the answer's event records (`data.witness`); a stale witness, or another user's, refuses with the ask open. The answer is then a `noted` event in the stream, and the change is the command's own event, which carries `approved` with the bead and the ask.
+Approves a run ask (an ask of `Bead` with `run`), and the yard runs the command the ask holds, as the one who approves: `run.command`, whole, and nothing else. It is what `yardr bead answer --approve` does, with `--value <name>=<value>` where the card asks for values in the clear (`run.ask`): a hook add the yard registers itself carries them to its register call with the URL and the secret, and keeps none; where the declaration names a check, a retry first lists what stands and adopts a webhook already aimed at the hook. In one write the yard checks that it would write the same card now, makes the change under the command's own check, and records the answer, which holds `ran`. A refused approval changes nothing, records nothing and leaves the ask open. It is the operator's to approve: on the socket it is refused for anyone else and for a call that comes from the pane of an agent, whatever `actor` says, and on the listener it is there for a device of the operator and for no other caller. A command that is a user's own (`subscribe <user> yardr`, `user set <user> tell=<parts>`, `user key <user> <source>`, `user device rm <user> <device>`, `user device pair <user> <device>`) is approved by the one it was asked of, that user or the operator, on the socket; a device of that user is not served the call, except for a device pair approval for their own device, which the listener serves to it as it serves a giving of their own address, judged from the call's body, and `DevicePairCloseSelf`, which ends their own open pairing from their own device the same way. Refused too: an ask that proposes no command; one that was declined, taken back or approved already, since a command runs once for one ask; a `bead@peer`, since a command is approved in the yard that asked and never over a link; values the card asks for nothing of, and a missing one where it asks for any; and an ask whose card is from before the yard changed, where what the command names was replaced under its name or what it changes is no longer what `run.does` says. That one is declined, and asked again if it is still wanted. A weighty card ([weighty cards](#weighty-cards)) is refused unless the call says `weighed`; that refusal changes nothing and leaves the ask open, as it is. A routine card asks for no such word. A strong card — one the yard weighs `trust` or `code` ([weighty cards](#weighty-cards)) — is approved from a device as any weighty card is, with `weighed`: the command runs, and the answer's event carries `via` and no `data.witness`. On a hosted yard the bead page approves it only under a fresh sign-in, which the answer's event records (`data.witness`); a stale witness, or another user's, refuses with the ask open. The answer is then a `noted` event in the stream, and the change is the command's own event, which carries `approved` with the bead and the ask.
 
 | argument | type | |
 |---|---|---|
@@ -6225,6 +6344,30 @@ POST /call/ApproveAsk
 }
 ```
 
+```
+POST /call/ApproveAsk
+{"bead":"yd-crm","ask":65,"actor":"jo","weighed":true}
+
+{
+  "result": {
+    "bead": "yd-crm",
+    "ask": 65,
+    "asker": "yardmaster",
+    "argv": ["user", "device", "pair", "jo", "watch", "--url", "https://mac.example.net"],
+    "does": ["opens a pairing for the device watch of jo, reached at https://mac.example.net.", "jo has 1 device: phone (never used).", "Approval opens the pairing for that device alone: its code is good for ten minutes and for one device, and whoever has the code within those minutes is answered with that device's token.", "Nothing in the yard keeps the code after it is used or runs out.", "The new device then calls as jo until yardr user device rm jo watch, and jo will then have 2 devices."],
+    "result": "a pairing was opened for the device watch of jo, good until 09:30:00: the code was shown to the approver alone and is kept nowhere",
+    "pairing": {
+      "user": "jo",
+      "device": "watch",
+      "code": "K7QM-2XPD",
+      "address": "https://mac.example.net",
+      "expires": "2026-10-08T09:30:00Z",
+      "qr": "https://mac.example.net#K7QM-2XPD"
+    }
+  }
+}
+```
+
 | field of the result | type | |
 |---|---|---|
 | `bead` | string | the bead |
@@ -6233,8 +6376,15 @@ POST /call/ApproveAsk
 | `argv` | array of string | the command as it ran, in words, without the leading `yardr`: the one the ask proposed |
 | `does` | array of string | what the command changed, in the yard's words, as the card had them |
 | `result` | string | what the command printed, made by the yard: a line for each thing it changed, with a line break between them |
+| `pairing` | object, may be absent | a pairing just opened, on the approval of a `user device pair` ask alone: beside the fields below it carries `yard`, this yard's name at the edge where the address is the edge's, and `channel_key`, the yard's channel public key where it has one, each absent where there is none. It is the direct return of this call alone: it stands in no note, answer, event or later read, the recorded `result` keeps only that a pairing was opened and that the code was shown to the approver alone, and a client that logs its calls drops this field as it drops a secret's values |
+| `pairing.user` | string | the user the pairing is for |
+| `pairing.device` | string | the device's name |
+| `pairing.code` | string | the code as it is shown (`XXXX-XXXX`), answered to the approver alone |
+| `pairing.address` | string | the address the device reaches the yard at |
+| `pairing.expires` | time | when the code runs out |
+| `pairing.qr` | string | what a QR code of the pairing holds: `<address>#<code>`, with `#<yard>` where the address is the edge's and the channel key as a fourth field where the yard has one |
 
-The change and the answer are one write: the command ran and the ask is approved, or neither. For a depot-push ask, the approval records `ran` as pending; the server then checks the card, source and token again before writing the assembly command and the depot's local Git config. It verifies both writes, never runs `git push`, and updates `ran` to say whether it ran or failed. A depot-push card and its answer are sent to the current operator alone on the listener, and its approval sentence is held from nonoperator devices in the event stream. When the call ends without a reply (the server went away), a client cannot know which: say "the yard did not answer; read the card again", never "approved", and read `Bead` again, where `asks[].ran` is there once the command ran.
+The change and the answer are one write: the command ran and the ask is approved, or neither. For a `user device pair` approval the pairing opens in that same write and is published to the server's memory only once it commits: a refused approval — a stale card, a pairing already open (refused in the pairing's words, the ask staying open), a refused leave, a taken device name, a removed user — opens none and answers no code, and a pairing whose time has run out is ended in the transaction that opens the next. For a depot-push ask, the approval records `ran` as pending; the server then checks the card, source and token again before writing the assembly command and the depot's local Git config. It verifies both writes, never runs `git push`, and updates `ran` to say whether it ran or failed. A depot-push card and its answer are sent to the current operator alone on the listener, and its approval sentence is held from nonoperator devices in the event stream. When the call ends without a reply (the server went away), a client cannot know which: say "the yard did not answer; read the card again", never "approved", and read `Bead` again, where `asks[].ran` is there once the command ran.
 
 ### `ApproveSetup`
 
@@ -6497,7 +6647,7 @@ POST /call/UninviteTeammate
 {
   "result": {
     "bead": "yd-uninvite",
-    "ask": 93
+    "ask": 97
   }
 }
 ```
@@ -6546,7 +6696,7 @@ When the call ends without a reply (the server went away), a client cannot know 
 
 ### `DevicePairState`
 
-Reads the yard's open device pairing back, so a window reopened shows the same pairing again: the device, the code as it was shown when it opened, when it runs out, and the QR string a phone scans in place of typing. The QR string is `<address>#<code>#<yard>`, the yard's `edge` address with its handle/name there, and the yard's channel public key as its fourth field where the yard has a channel key; with no edge setting the yard names no address and `qr` is empty, and the code is given where it is asked for. With no pairing open the error is `not-found`. It is the operator's to read: on the socket its Operator class refuses agent and crew panes. A device token never opens a pairing: on the listener the call is answered as a method the yard does not have, to a device of the operator too, and down the yard link from the edge alike.
+Reads a directly opened device pairing back, so a window reopened shows the same pairing again: the device, the code as it was shown when it opened, when it runs out, and the QR string a phone scans in place of typing. The QR string is `<address>#<code>#<yard>`, the yard's `edge` address with its handle/name there, and the yard's channel public key as its fourth field where the yard has a channel key; with no edge setting the yard names no address and `qr` is empty, and the code is given where it is asked for. A pairing opened by approving a run ask is not read back here: its code is returned only in that approval's `AskApproved.Pairing` result. With no readable pairing the error is `not-found`. It is the operator's to read: on the socket its Operator class refuses agent and crew panes. A device token never opens a pairing: on the listener the call is answered as a method the yard does not have, to a device of the operator too, and down the yard link from the edge alike.
 
 ```
 POST /call/DevicePairState

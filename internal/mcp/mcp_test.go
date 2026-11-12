@@ -1118,7 +1118,7 @@ calls:
 // fakeGiveSecret is unreachable through the tools by construction: the
 // Yard interface has no secret call. This test holds the observable
 // half: the refusal, in its plain words, with the question left open.
-func TestSecretAnswerIsRefusedAndStaysOpen(t *testing.T) {
+func TestSecretAndPairingAnswersAreRefusedAndStaysOpen(t *testing.T) {
 	y := newYard(t)
 	y.depot(t, "yardr")
 	if _, err := y.st.PutSource(y.ctx, "crm.yaml", crmSource, "ada"); err != nil {
@@ -1147,6 +1147,38 @@ func TestSecretAnswerIsRefusedAndStaysOpen(t *testing.T) {
 	// Putting it aside or declining it stays the person's to do here.
 	if _, err := s.Answer(y.ctx, mcp.AnswerInput{Work: bead, Question: seq, PutAside: true}, false); err != nil {
 		t.Fatalf("putting a secret question aside: %v", err)
+	}
+	t.Run("pairing answer", pairingAnswerIsRefusedAndStaysOpen)
+}
+
+// A pairing approval is refused here without calling ApproveAsk: its
+// answer would hold the code in a transcript. The ask stays open and
+// no pairing is opened.
+func pairingAnswerIsRefusedAndStaysOpen(t *testing.T) {
+	y := newYard(t)
+	y.depot(t, "yardr")
+	bead := y.work(t, "Pair the tablet", "yardr", "ada")
+	seq := y.ask(t, bead, store.Ask{
+		Question: "Pair ada's tablet?", To: "ada",
+		Context: []string{"The tablet arrived."},
+		Run:     &store.AskRun{Argv: []string{"user", "device", "pair", "ada", "tablet", "--url", "https://mac.example.net"}},
+	})
+	s := svc(y, "")
+	_, err := s.Answer(y.ctx, mcp.AnswerInput{Work: bead, Question: seq, Approve: true}, true)
+	if err == nil {
+		t.Fatal("a pairing approval was taken through MCP")
+	}
+	for _, want := range []string{"never passes through here", "still open", "footplate", "yardr bead answer " + bead} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal lacks %q: %v", want, err)
+		}
+	}
+	q, err := y.st.UserAsks(y.ctx, "ada", "ada")
+	if err != nil || len(q.Open) != 1 || q.Open[0].Ask != seq {
+		t.Fatalf("the pairing question after the refusal: %+v, %v", q, err)
+	}
+	if y.owned.DevicePairOpened(y.ctx) {
+		t.Fatal("the refused approval opened a pairing")
 	}
 }
 

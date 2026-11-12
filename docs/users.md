@@ -1169,6 +1169,7 @@ covered below under Strong cards. Row by row:
 | `user rm <name>`: a user removed | That user is no more: their subscriptions, devices and telling outside the yard go, and what waited to be told them; so do the group that carries their own login with its routes, every route for their beads, and the yardmaster's conversation with them. The mail stays in the log, and so do their login folder and env file on disk. The operator is not removed this way |
 | `user invite <name> --email <address> [--role operator]`: a teammate invited | A user the holder names is added, as an operator where the card says `--role operator`, their address is mapped to them in `web_jwt_users`, and the invite is reported to the edge, so the holder can have a second person admitted to this yard as that user, as an operator where the card names it. Until the report lands nobody is admitted. The card is strong (trust), and the person admitted stands after the device is removed |
 | `user device rm <user> <device>`: a user's device removed | That device's token is refused from now on, and the streams it held are closed. What the device did stands. A holder can have a lost device of another user cut off, and can have the operator's own other devices removed, leaving the holder's, until an operator pairs one again; the yard's terminal and the hosted web sign-in are untouched. The card says how many devices the user keeps. Only the operator pairs a device again |
+| `user device pair <user> <device>`: a pairing opened for one device of the user | A second device of that user is paired once its code is used, and calls as that user from then on. Removing the holder's device leaves the new one standing, and removing the new one leaves the holder's: the holder keeps a way in until both are removed, which the card names by listing the devices the user then has. Only the operator or that user pairs another, and either removes one |
 | `user uninvite <name>`: a teammate removed | That teammate is no more at the edge or here: the removal is reported first, then the user, their devices and the mapping go. The member's own account and any yard of their own stand |
 | `crew set <name> open_threads=<sources>`, `set_state=<sources>` or `peers=<peers>`: a crew member's grants widened | A crew member the holder directs by mail may do more outside the yard: open threads in a source, set the state of threads, or mail a linked yard's crew. Its runner, directory and the rest of its definition stay as they are |
 | `group add <name> --runner <runner> …` or `crew add <name> kind=<kind> …`: a new group or crew member | The group or member the holder names stands, with the command of an `exec` group, the prompt, the agent kind and the permission preset as the card showed them whole. The card is weighty (`code`) and says where a preset skips permissions. A group does nothing until a route sends it work, which the yardmaster shapes on the operator's mail, so the holder can have that done too. It stands after the device is removed. The operator or the yardmaster takes a group or a crew member away with `group rm` or `crew rm`; only the operator removes the yardmaster's own entry |
@@ -1225,7 +1226,7 @@ preset's calls granted (the `source grant` row). It is asked as a run ask
 is, by mail to the yardmaster.
 
 What it still cannot have run, by a card or by the yardmaster on its mail:
-adding a device or pairing one, changing the operator, where a user's
+adding a device, changing the operator, where a user's
 address is read from, a hook add that keeps a secret file of its own,
 reading a source's
 credential or setting where it is read from or the command that mints one,
@@ -1237,7 +1238,7 @@ the card names, or where its plan asks.
 The delegation switch it can move either way, as it
 approves any card, through the operator's own doors
 ([above](#the-yardmaster-for-the-operator)). A stolen device still cannot
-pair another device or change the `operator` setting. It can approve any card,
+change the `operator` setting. It can approve any card,
 though, and a card can make a way in: one that links a yard of the
 holder's (`peer add`), admits a second person as an operator (`user invite
 … --role operator`, or `user set … role=operator` for a user the yard has),
@@ -1427,6 +1428,21 @@ user, the yard shows a short code, and the device that calls the yard with
 the code is answered with its token. Nobody types or pastes the token, and
 no command prints it. It is the pairing by which [two yards are
 linked](peers.md#pairing), with what a device has no use for left out.
+
+A pairing is opened from a card too: `user device pair <user> <device>
+[--url <address>]` as a run ask, asked of the user it names or of the
+operator, and either approves it (strong, `trust`). Asking opens
+nothing; approval opens the pairing and answers its code once, to the
+approver alone — at a terminal, in chat's sitting, on a device the user
+already holds, or in the hosted web under a fresh sign-in, where the
+approval's own response shows the QR code and the code and is kept
+nowhere. The code stands in no card, note, answer or event, and no
+later read answers it. While a pairing stands, an approval that would
+open another is refused in the pairing's words and the ask stays open.
+The user whose pairing it is ends it from their own device
+(`DevicePairCloseSelf`), as they end it from their own yard screen;
+`yardr user device add`, whose token has nowhere lawful to rest, stays
+in a terminal.
 
 ```text
 $ yardr user device pair mckean phone --url https://mac.example.net --qr

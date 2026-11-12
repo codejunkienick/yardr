@@ -441,6 +441,32 @@ func TestBeadAskRunAndApprove(t *testing.T) {
 	if m, err := y.st.GetCrew(context.Background(), "yardmaster"); err != nil || m.Identities["crm"] != (store.Identity{Key: "yardr[bot]"}) {
 		t.Fatalf("the crew member = %+v, %v", m, err)
 	}
+
+	// The terminal's door sentence precedes the one-time pairing answer,
+	// which prints its address and code in the approving sitting.
+	asked, err = ask("yardmaster", "user device pair jo tablet --url https://mac.example.net")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pairing uint64
+	if _, err := fmt.Sscanf(asked, "ask %d on", &pairing); err != nil {
+		t.Fatalf("bead ask printed %q: %v", asked, err)
+	}
+	out, errOut, err = gated(t, y, true, strings.NewReader(fmt.Sprint(pairing)+"\n"), b.ID, fmt.Sprint(pairing), "--approve")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"a pairing approval at this terminal shows its code here alone: no edge carries it, and it is kept nowhere.",
+		"Pairing is open for the device tablet of jo, until ",
+		"address  https://mac.example.net",
+		"code     ",
+		"Show the code to the device and to nobody else",
+	} {
+		if !strings.Contains(out+errOut, want) {
+			t.Errorf("the terminal pairing approval lacks %q:\nstdout: %s\nstderr: %s", want, out, errOut)
+		}
+	}
 }
 
 // A crew member proposes where a peer's beads go, and who a peer's crew member
@@ -917,6 +943,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr source move <from> <to>":                               {"source move crm linear"},
 		"yardr source rm <name>":                                      {"source rm crm"},
 		"yardr user device rm <user> <device>":                        {"user device rm ada phone"},
+		"yardr user device pair <user> <device> [--url <address>]":    {"user device pair ada tablet --url https://mac.example.net"},
 		"yardr user set <user> role=operator|member":                  {"user set ada role=operator"},
 	}
 	if len(asks) != len(store.RunCommands()) {
@@ -1119,6 +1146,38 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				done, err := approved.st.ApproveAsk(ctx, ab.ID, seq, "jo", true, nil)
 				if err != nil || done.Result != "approved, to be carried out" {
 					t.Fatalf("%s approval = %+v, %v", use, done, err)
+				}
+				continue
+			}
+			if use == "yardr user device pair <user> <device> [--url <address>]" {
+				ctx := context.Background()
+				// Approval opens a pairing and answers its code once, which
+				// no typed state compares with: the row is held to its card
+				// and to the pairing the approval left open.
+				seq, err := approved.st.AddAsk(ctx, ab.ID, store.Ask{Question: "Run it?", To: "jo", Context: []string{"why"},
+					Run: &store.AskRun{Argv: []string{command}}}, "yardmaster")
+				if err != nil {
+					t.Fatalf("%s: %v", use, err)
+				}
+				notes, err := approved.st.Notes(ctx, ab.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var description string
+				for _, asked := range store.ResolveAsks(notes, time.Now()) {
+					if asked.Note.Seq == seq && asked.Ask.Run != nil {
+						description = asked.Ask.Run.Description
+					}
+				}
+				if description != "Enrol a device by a short code, or a QR code, with no token to copy" {
+					t.Errorf("%s card description %q, want the command help's", use, description)
+				}
+				done, err := approved.st.ApproveAsk(ctx, ab.ID, seq, "jo", true, nil)
+				if err != nil || done.Pairing == nil || done.Pairing.Code == "" || strings.Contains(done.Result, done.Pairing.Code) {
+					t.Fatalf("%s approval = %+v, %v", use, done, err)
+				}
+				if !approved.own.DevicePairOpened(ctx) {
+					t.Fatalf("%s: the approval opened no pairing", use)
 				}
 				continue
 			}

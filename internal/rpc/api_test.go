@@ -611,7 +611,7 @@ var apiCalls = []apiCall{
 			{"asks[].depot_push.does", "array of string", "what approving changes and what stands now, in the yard's words"},
 			{"asks[].depot_push.back", "string", "the filing that takes the change back"},
 			{"asks[].depot_push.back_by", "string?", "who may file `back`, in words that stand before `can take it back`; absent where that is anyone"},
-			{"asks[].run", "object?", "the command a run ask proposes: one yardr command that is the operator's to give, which the yard runs when the operator approves the ask. Absent on any other ask. Such an ask has no options and takes no words: `AnswerAsk` refuses a pick and words on it, `DeferAsk` and `DeclineAsk` take it as any ask, and it is approved with [`ApproveAsk`](#for-the-operator-alone), by the operator: at the yard (`yardr bead answer <bead> <ask> --approve`, with `--value <name>=<value>` where the card asks for values in the clear), or from a device of the operator. A strong card ([weighty cards](#weighty-cards)) is approved from a device as any weighty card is; the bead page approves it only on a hosted yard, under a fresh sign-in. A command that is a user's own (`subscribe <user> yardr`, `user set <user> tell=<parts>`, `user key <user> <source>`, `user device rm <user> <device>`) is approved at the yard by the one it was asked of, that user or the operator. All of `run` is the yard's, made when the ask was written, and none of it the asker's: show it apart from `question` and `context`, which are the asker's words, and draw those as plain text"},
+			{"asks[].run", "object?", "the command a run ask proposes: one yardr command that is the operator's to give, which the yard runs when the operator approves the ask. Absent on any other ask. Such an ask has no options and takes no words: `AnswerAsk` refuses a pick and words on it, `DeferAsk` and `DeclineAsk` take it as any ask, and it is approved with [`ApproveAsk`](#for-the-operator-alone), by the operator: at the yard (`yardr bead answer <bead> <ask> --approve`, with `--value <name>=<value>` where the card asks for values in the clear), or from a device of the operator. A strong card ([weighty cards](#weighty-cards)) is approved from a device as any weighty card is; the bead page approves it only on a hosted yard, under a fresh sign-in. A command that is a user's own (`subscribe <user> yardr`, `user set <user> tell=<parts>`, `user key <user> <source>`, `user device rm <user> <device>`, `user device pair <user> <device>`) is approved at the yard by the one it was asked of, that user or the operator. All of `run` is the yard's, made when the ask was written, and none of it the asker's: show it apart from `question` and `context`, which are the asker's words, and draw those as plain text"},
 			{"asks[].run.argv", "array of string", "the command in words, without the leading `yardr`, as the yard parsed it. On a run ask that sets a setting, adds a source, or applies a pack with a depot or mappings named, told to a device of the operator alone ([over the network](#over-the-network)): `[]` on any other device's card, and on every device's of a yard with no operator. The socket tells the whole card"},
 			{"asks[].run.command", "string", "the command whole, as it is typed in a terminal and as it would run. Never shorten it: a view that cannot show it whole says where the ask can be read instead. On a run ask that sets a setting, adds a source, or applies a pack with a depot or mappings named, told to a device of the operator alone ([over the network](#over-the-network)): `\"\"` on any other device's card, and on every device's of a yard with no operator. The socket tells the whole card"},
 			{"asks[].run.does", "array of string", "what the command changes and what is there now, in the yard's words, a sentence each, with what it names as the yard knows it"},
@@ -837,6 +837,20 @@ var apiCalls = []apiCall{
 		},
 		after: "The device list says `sealed (in place)` of the device from then on, against `sealed (paired)` for one that pinned its key at a pairing: an edge active at this one call could put its own key in place of the device's, or of the yard's, and so hold the device's channel until it is re-paired by QR. Re-pairing lifts the label, and is never required.",
 	},
+	{
+		method: "DevicePairCloseSelf",
+		says:   "Ends the open pairing of the user it names, as that user ends it from their own yard screen: nothing is added, and the code is good for nothing then. Another user's pairing, and none, are both no pairing to them, with the error `not-found`. On the socket its Operator class refuses agent and crew panes; on the listener it is served to any device, with its user held to the device's own (asUser), so a device ends its own user's pairing and no other.",
+		args: []field{
+			{"user", "string", "the user whose pairing ends: the caller's own"},
+		},
+		requests: []string{`{"user":"jo"}`},
+		fields: []field{
+			{"user", "string", "the user the pairing was for"},
+			{"device", "string", "the device's name"},
+			{"state", "string", "`ended`"},
+			{"expires", "time", "when the code would have run out"},
+		},
+	},
 }
 
 // apiDeviceChannelKey is the channel public key the doc's device
@@ -891,7 +905,7 @@ var apiOperatorCalls = []apiCall{
 	},
 	{
 		method: "ApproveAsk",
-		says:   "Approves a run ask (an ask of `Bead` with `run`), and the yard runs the command the ask holds, as the one who approves: `run.command`, whole, and nothing else. It is what `yardr bead answer --approve` does, with `--value <name>=<value>` where the card asks for values in the clear (`run.ask`): a hook add the yard registers itself carries them to its register call with the URL and the secret, and keeps none; where the declaration names a check, a retry first lists what stands and adopts a webhook already aimed at the hook. In one write the yard checks that it would write the same card now, makes the change under the command's own check, and records the answer, which holds `ran`. A refused approval changes nothing, records nothing and leaves the ask open. It is the operator's to approve: on the socket it is refused for anyone else and for a call that comes from the pane of an agent, whatever `actor` says, and on the listener it is there for a device of the operator and for no other caller. A command that is a user's own (`subscribe <user> yardr`, `user set <user> tell=<parts>`, `user key <user> <source>`, `user device rm <user> <device>`) is approved by the one it was asked of, that user or the operator, on the socket; a device of that user is not served the call. Refused too: an ask that proposes no command; one that was declined, taken back or approved already, since a command runs once for one ask; a `bead@peer`, since a command is approved in the yard that asked and never over a link; values the card asks for nothing of, and a missing one where it asks for any; and an ask whose card is from before the yard changed, where what the command names was replaced under its name or what it changes is no longer what `run.does` says. That one is declined, and asked again if it is still wanted. A weighty card ([weighty cards](#weighty-cards)) is refused unless the call says `weighed`; that refusal changes nothing and leaves the ask open, as it is. A routine card asks for no such word. A strong card — one the yard weighs `trust` or `code` ([weighty cards](#weighty-cards)) — is approved from a device as any weighty card is, with `weighed`: the command runs, and the answer's event carries `via` and no `data.witness`. On a hosted yard the bead page approves it only under a fresh sign-in, which the answer's event records (`data.witness`); a stale witness, or another user's, refuses with the ask open. The answer is then a `noted` event in the stream, and the change is the command's own event, which carries `approved` with the bead and the ask.",
+		says:   "Approves a run ask (an ask of `Bead` with `run`), and the yard runs the command the ask holds, as the one who approves: `run.command`, whole, and nothing else. It is what `yardr bead answer --approve` does, with `--value <name>=<value>` where the card asks for values in the clear (`run.ask`): a hook add the yard registers itself carries them to its register call with the URL and the secret, and keeps none; where the declaration names a check, a retry first lists what stands and adopts a webhook already aimed at the hook. In one write the yard checks that it would write the same card now, makes the change under the command's own check, and records the answer, which holds `ran`. A refused approval changes nothing, records nothing and leaves the ask open. It is the operator's to approve: on the socket it is refused for anyone else and for a call that comes from the pane of an agent, whatever `actor` says, and on the listener it is there for a device of the operator and for no other caller. A command that is a user's own (`subscribe <user> yardr`, `user set <user> tell=<parts>`, `user key <user> <source>`, `user device rm <user> <device>`, `user device pair <user> <device>`) is approved by the one it was asked of, that user or the operator, on the socket; a device of that user is not served the call, except for a device pair approval for their own device, which the listener serves to it as it serves a giving of their own address, judged from the call's body, and `DevicePairCloseSelf`, which ends their own open pairing from their own device the same way. Refused too: an ask that proposes no command; one that was declined, taken back or approved already, since a command runs once for one ask; a `bead@peer`, since a command is approved in the yard that asked and never over a link; values the card asks for nothing of, and a missing one where it asks for any; and an ask whose card is from before the yard changed, where what the command names was replaced under its name or what it changes is no longer what `run.does` says. That one is declined, and asked again if it is still wanted. A weighty card ([weighty cards](#weighty-cards)) is refused unless the call says `weighed`; that refusal changes nothing and leaves the ask open, as it is. A routine card asks for no such word. A strong card — one the yard weighs `trust` or `code` ([weighty cards](#weighty-cards)) — is approved from a device as any weighty card is, with `weighed`: the command runs, and the answer's event carries `via` and no `data.witness`. On a hosted yard the bead page approves it only under a fresh sign-in, which the answer's event records (`data.witness`); a stale witness, or another user's, refuses with the ask open. The answer is then a `noted` event in the stream, and the change is the command's own event, which carries `approved` with the bead and the ask.",
 		args: []field{
 			{"bead", "string", "the bead"},
 			{"ask", "number", "the ask note's seq"},
@@ -899,7 +913,7 @@ var apiOperatorCalls = []apiCall{
 			{"weighed", "bool", "`true` once the person has seen the card's weight and passed the client's gate; left out, `false`, and a weighty card is refused. A routine card takes it so"},
 			{"values", "object", "each name of `run.ask` to the value the person gave in the clear; left out where the card asks for none"},
 		},
-		requests: []string{`{"bead":"yd-crm","ask":%d,"actor":"jo","weighed":true}`},
+		requests: []string{`{"bead":"yd-crm","ask":%d,"actor":"jo","weighed":true}`, `{"bead":"yd-crm","ask":%d,"actor":"jo","weighed":true}`},
 		fields: []field{
 			{"bead", "string", "the bead"},
 			{"ask", "number", "the ask that was approved"},
@@ -907,8 +921,15 @@ var apiOperatorCalls = []apiCall{
 			{"argv", "array of string", "the command as it ran, in words, without the leading `yardr`: the one the ask proposed"},
 			{"does", "array of string", "what the command changed, in the yard's words, as the card had them"},
 			{"result", "string", "what the command printed, made by the yard: a line for each thing it changed, with a line break between them"},
+			{"pairing", "object?", "a pairing just opened, on the approval of a `user device pair` ask alone: beside the fields below it carries `yard`, this yard's name at the edge where the address is the edge's, and `channel_key`, the yard's channel public key where it has one, each absent where there is none. It is the direct return of this call alone: it stands in no note, answer, event or later read, the recorded `result` keeps only that a pairing was opened and that the code was shown to the approver alone, and a client that logs its calls drops this field as it drops a secret's values"},
+			{"pairing.user", "string", "the user the pairing is for"},
+			{"pairing.device", "string", "the device's name"},
+			{"pairing.code", "string", "the code as it is shown (`XXXX-XXXX`), answered to the approver alone"},
+			{"pairing.address", "string", "the address the device reaches the yard at"},
+			{"pairing.expires", "time", "when the code runs out"},
+			{"pairing.qr", "string", "what a QR code of the pairing holds: `<address>#<code>`, with `#<yard>` where the address is the edge's and the channel key as a fourth field where the yard has one"},
 		},
-		after: "The change and the answer are one write: the command ran and the ask is approved, or neither. For a depot-push ask, the approval records `ran` as pending; the server then checks the card, source and token again before writing the assembly command and the depot's local Git config. It verifies both writes, never runs `git push`, and updates `ran` to say whether it ran or failed. A depot-push card and its answer are sent to the current operator alone on the listener, and its approval sentence is held from nonoperator devices in the event stream. When the call ends without a reply (the server went away), a client cannot know which: say \"the yard did not answer; read the card again\", never \"approved\", and read `Bead` again, where `asks[].ran` is there once the command ran.",
+		after: "The change and the answer are one write: the command ran and the ask is approved, or neither. For a `user device pair` approval the pairing opens in that same write and is published to the server's memory only once it commits: a refused approval — a stale card, a pairing already open (refused in the pairing's words, the ask staying open), a refused leave, a taken device name, a removed user — opens none and answers no code, and a pairing whose time has run out is ended in the transaction that opens the next. For a depot-push ask, the approval records `ran` as pending; the server then checks the card, source and token again before writing the assembly command and the depot's local Git config. It verifies both writes, never runs `git push`, and updates `ran` to say whether it ran or failed. A depot-push card and its answer are sent to the current operator alone on the listener, and its approval sentence is held from nonoperator devices in the event stream. When the call ends without a reply (the server went away), a client cannot know which: say \"the yard did not answer; read the card again\", never \"approved\", and read `Bead` again, where `asks[].ran` is there once the command ran.",
 	},
 	{
 		method: "ApproveSetup",
@@ -1039,7 +1060,7 @@ var apiOperatorCalls = []apiCall{
 	},
 	{
 		method: "DevicePairState",
-		says:   "Reads the yard's open device pairing back, so a window reopened shows the same pairing again: the device, the code as it was shown when it opened, when it runs out, and the QR string a phone scans in place of typing. The QR string is `<address>#<code>#<yard>`, the yard's `edge` address with its handle/name there, and the yard's channel public key as its fourth field where the yard has a channel key; with no edge setting the yard names no address and `qr` is empty, and the code is given where it is asked for. With no pairing open the error is `not-found`. It is the operator's to read: on the socket its Operator class refuses agent and crew panes. A device token never opens a pairing: on the listener the call is answered as a method the yard does not have, to a device of the operator too, and down the yard link from the edge alike.",
+		says:   "Reads a directly opened device pairing back, so a window reopened shows the same pairing again: the device, the code as it was shown when it opened, when it runs out, and the QR string a phone scans in place of typing. The QR string is `<address>#<code>#<yard>`, the yard's `edge` address with its handle/name there, and the yard's channel public key as its fourth field where the yard has a channel key; with no edge setting the yard names no address and `qr` is empty, and the code is given where it is asked for. A pairing opened by approving a run ask is not read back here: its code is returned only in that approval's `AskApproved.Pairing` result. With no readable pairing the error is `not-found`. It is the operator's to read: on the socket its Operator class refuses agent and crew panes. A device token never opens a pairing: on the listener the call is answered as a method the yard does not have, to a device of the operator too, and down the yard link from the edge alike.",
 		// The QR string's address and yard are the edge the fixture
 		// sets for the depot-push cards.
 		requests: []string{`{}`},
@@ -2015,6 +2036,14 @@ calls:
 	must(err)
 	_, err = st.ResolveDevice(ctx, tablet.Token, "203.0.113.9")
 	must(err)
+	// A pairing ask for sam, which the doc's second approval opens: its
+	// answer alone carries a pairing.
+	apiPairAsk = ask(crm.ID, store.Ask{Question: "Pair jo's watch?", To: "jo",
+		Context: []string{"The watch arrived."},
+		Run:     &store.AskRun{Argv: []string{"user", "device", "pair", "jo", "watch", "--url", "https://mac.example.net"}}})
+	apiCloseAsk = ask(crm.ID, store.Ask{Question: "Pair jo's second phone?", To: "jo",
+		Context: []string{"The second phone arrived."},
+		Run:     &store.AskRun{Argv: []string{"user", "device", "pair", "jo", "phone2", "--url", "https://mac.example.net"}}})
 	// An owed member report shows its signed refusal in the card. This is
 	// the last fixture write so the documented seqs above keep their values.
 	pendingInvite := ask(crm.ID, store.Ask{Question: "Invite Rhea to the yard?", To: "jo",
@@ -2088,6 +2117,14 @@ var apiDelivery uint64
 // apiRunAsk is the run ask ApproveAsk approves in the doc, by seq, as the
 // fixture last made it.
 var apiRunAsk uint64
+
+// apiPairAsk is the device pair ask ApproveAsk approves in the doc, by
+// seq, as the fixture last made it: its answer alone carries a pairing.
+var apiPairAsk uint64
+
+// apiCloseAsk is the device pair ask runAPI approves unrecorded before
+// DevicePairCloseSelf, so that call has a pairing of jo's to end.
+var apiCloseAsk uint64
 
 // apiSetupAsks are the four setup asks ApproveSetup approves in the doc, by
 // seq, as the fixture last made them: a first setup whose account is typed,
@@ -2260,10 +2297,20 @@ func runAPI(t *testing.T, network bool) *apiRun {
 	calls := append(slices.Clone(apiCalls), apiOperatorCalls...)
 	for _, c := range calls {
 		for i, body := range c.requests {
+			if c.method == "DevicePairCloseSelf" {
+				// The pairing it ends is opened by approving its own ask
+				// here, unrecorded: the recorded approvals run after
+				// these calls, and a pairing is opened by one alone.
+				post(t, hc, "ApproveAsk", fmt.Sprintf(`{"bead":"yd-crm","ask":%d,"actor":"jo","weighed":true}`, apiCloseAsk))
+			}
 			if c.method == "GiveSecret" {
 				body = fmt.Sprintf(body, apiSecretAsks[i])
 			} else if c.method == "ApproveAsk" {
-				body = fmt.Sprintf(body, apiRunAsk)
+				seq := apiRunAsk
+				if i == 1 {
+					seq = apiPairAsk
+				}
+				body = fmt.Sprintf(body, seq)
 			} else if c.method == "ApproveSetup" {
 				body = fmt.Sprintf(body, apiSetupAsks[i])
 			} else if c.method == "TakeBackAsk" {
@@ -2316,6 +2363,13 @@ func runAPI(t *testing.T, network bool) *apiRun {
 			run.requests[c.method] = append(run.requests[c.method], body)
 			run.replies[c.method] = append(run.replies[c.method], result)
 			run.more[c.method] = append(run.more[c.method], more)
+			if c.method == "ApproveAsk" && i == 1 {
+				// The pairing the doc's approval opened ends here, so the
+				// pairing calls below open theirs on a yard with none
+				// open. On the listener the ending is the socket's alone,
+				// as those calls are, and is refused there unread.
+				post(t, hc, "DevicePairClose", `{"actor":"jo"}`)
+			}
 		}
 	}
 	for _, e := range apiErrors {
@@ -2402,8 +2456,8 @@ func TestCallsAreTheDocs(t *testing.T) {
 	// answers as no method at all, and the socket answers so the one call
 	// of Calls a device's token alone makes (listenerOnly): a call is
 	// added to either on purpose, here too.
-	if len(Calls) != 32 || len(OperatorCalls) != 12 || len(listenerOnly) != 1 {
-		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 32, 12 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
+	if len(Calls) != 33 || len(OperatorCalls) != 12 || len(listenerOnly) != 1 {
+		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 33, 12 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
 	}
 	for name := range listenerOnly {
 		if _, ok := Calls[name]; !ok {
@@ -2807,6 +2861,10 @@ var (
 	pairCode = regexp.MustCompile(`"code": "[A-Z0-9]{4}-[A-Z0-9]{4}"`)
 	// The code in a QR string, between its address and its yard.
 	pairQRCode = regexp.MustCompile(`#[A-Z0-9]{4}-[A-Z0-9]{4}#`)
+	// The code at a QR string's end, where no yard or key follows it.
+	pairQREnd = regexp.MustCompile(`#[A-Z0-9]{4}-[A-Z0-9]{4}"`)
+	// The expiry a pairing approval's recorded sentence names.
+	pairingUntil = regexp.MustCompile(`good until [0-9]{2}:[0-9]{2}:[0-9]{2}`)
 )
 
 // exampleRevision stands for a bead's revision in the doc: a revision is
@@ -2874,6 +2932,8 @@ func callsDoc(run *apiRun, calls []apiCall) []string {
 			shown = telemetryOS.ReplaceAllString(shown, `"os": "darwin"`)
 			shown = pairCode.ReplaceAllString(shown, `"code": "`+examplePairCode+`"`)
 			shown = pairQRCode.ReplaceAllString(shown, `#`+examplePairCode+`#`)
+			shown = pairQREnd.ReplaceAllString(shown, `#`+examplePairCode+`"`)
+			shown = pairingUntil.ReplaceAllString(shown, "good until 09:30:00")
 			shown = beadRevision.ReplaceAllString(shown, `"revision": "`+exampleRevision+`"`)
 			shown = scrubUUIDs(shown)
 			out = append(out, fenced("", "POST /call/"+c.method, body, "", shown)...)

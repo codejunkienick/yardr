@@ -55,6 +55,7 @@ func newPairYard(t *testing.T) *pairYard {
 		t.Fatal(err)
 	}
 	y.channel = channel
+	st.SetPairChannelKey(func() string { return yardkey.ChannelPublic(channel) })
 	y.u.SetChannelKeyFile(channelPath)
 	identityPath := filepath.Join(t.TempDir(), "peer.key")
 	if y.identity, _, err = yardkey.Ensure(identityPath); err != nil {

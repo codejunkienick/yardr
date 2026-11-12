@@ -75,6 +75,9 @@
   {{- with .FullText}}
   <p class="entry-note"><a class="opens" href="{{.}}">Read the full text from the first file</a></p>
   {{- end}}
+  {{- with .Door}}
+  <p class="entry-note">{{.}}</p>
+  {{- end}}
   {{- /* A weighty run card whose approval does not stand has no gate in
          this window, and the card is approved where the line names. A
          strong card approves below, under a fresh sign-in, where the

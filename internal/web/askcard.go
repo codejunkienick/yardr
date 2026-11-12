@@ -94,6 +94,11 @@ type cardSecret struct {
 type cardRun struct {
 	Command string
 	Does    []string
+	// Door is the approving surface's own sentence for a card whose
+	// approval answers a secret once (a device pairing): what this
+	// door's carrier can read, said with the card before approval.
+	// Absent on every other card.
+	Door string
 	// Pages maps the index of a sentence of Does to the page of the file it
 	// names, and FullText is the page of the first file of the full text:
 	// the links of a summary card (packFileLinks), on the bead's page for
@@ -210,6 +215,12 @@ func (p BeadPage) Card(a store.BeadAsk) AskCard {
 	}
 	if a.Run != nil {
 		out.Run = &cardRun{Command: a.Run.Command, Does: a.Run.Does, Back: a.Run.Back, BackBy: a.Run.BackBy, Ask: a.Run.Ask}
+		if store.IsDevicePairRun(a.Run.Argv) {
+			// The hosted web is a readable door: its gateway carries the
+			// approval's answer, code and all, so the card says so here,
+			// before approval, as each door says its own.
+			out.Run.Door = "Approving here answers with the pairing's code in this response alone: show it to the device and to nobody else, since whoever has it within its minutes, the carrier of this approval included, could spend it first. To approve where no carrier can read it, approve at a terminal on the yard's machine or from a device paired by QR code."
+		}
 		// The files behind a summary card open for an operator alone, as the
 		// pages answer: a link to a page that would not open is not drawn.
 		if p.site.Operator {

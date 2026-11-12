@@ -152,6 +152,12 @@ func (r *runner) serve(ctx context.Context) (string, bool, error) {
 	// And how a delegated pack apply reads a pack of the packs
 	// repository: fetched by the server, held to its pinned digest.
 	st.SetPackFetcher(packFetcherFor(c.Home, pack.Repository))
+	// Where a device reaches this yard at, for a device pair card that
+	// named no --url: this yard's listener, or its edge (pairaddress.go).
+	st.SetPairAddress(pairAddressFor(c, st))
+	// Make the yard's channel key before a run-ask approval opens a pairing,
+	// so its QR can be sealed on a first device too (pairaddress.go).
+	st.SetPairChannelKey(pairChannelKeyFor(c))
 	st.SetPresetReader(presetReaderFor())
 	// How a hosted-Google source call mints: in-process through the edge,
 	// never by running the mint command its setting names.
