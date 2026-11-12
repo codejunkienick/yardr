@@ -1,8 +1,8 @@
 # Google Docs as a declared source: a document read, appended to at the
-# end with several styled paragraphs in one call, and replaced in place
-# with a guarded find. One source per host, so Docs is its own; the empty
-# file it fills is made by the drive source's doc call. No other
-# batchUpdate request is declared.
+# end with several styled paragraphs in one call, replaced in place with a
+# guarded find, and given one picture where a placeholder stands. One
+# source per host, so Docs is its own; the empty file it fills is made by
+# the drive source's doc call. No other batchUpdate request is declared.
 #
 # Checked against the discovery document
 # (https://www.googleapis.com/discovery/v1/apis/docs/v1/rest) on 16
@@ -19,7 +19,19 @@
 # 2026, takes containsText with text and matchCase, and replaceText, and
 # answers occurrencesChanged in its reply; the replace call's build
 # script reads the document for its text, counts the matches itself, and
-# refuses more than one unless all is true.
+# refuses more than one unless all is true. InsertInlineImage, checked on
+# 12 November 2026 (discovery revision 20261106), takes a uri, an optional
+# objectSize whose one given dimension keeps the picture's ratio, and
+# either a location (an index, and a tabId) or an endOfSegmentLocation,
+# which is the end of the body or of a header or footer; the uri must be
+# publicly accessible, at most 2 kB, and a PNG, JPEG or GIF under 50 MB
+# and 25 megapixels. documents.batchUpdate lists the documents scope
+# among its own, so the scope this pack asks for covers it. The image
+# call's build script finds the one place its placeholder stands, as the
+# replace call counts, and prints a deleteContentRange of the placeholder
+# and an insertInlineImage at its index, pinned to the revision read; with
+# no placeholder it prints one insertInlineImage at the end of the body and
+# reads nothing.
 #
 # The credential mints like google-mail's: GOOGLE_ACCOUNT names the
 # account (an address, no secret) and google-mint, beside this file,
@@ -27,9 +39,11 @@
 # takes no idempotency key, so the file names none: a write tried again
 # after a lost answer is appended twice. A replace tried again counts
 # again first, so it sends a second change only where the first left
-# matches.
+# matches. An image tried again after a lost answer is placed twice at the
+# end of the body; at a placeholder it finds none the second time, which it
+# refuses, the placeholder being gone.
 name: google-docs
-about: Google Docs read and appended to, several styled paragraphs in one call, and replaced in place.
+about: Google Docs read and appended to, several styled paragraphs in one call, replaced in place, and given a picture.
 base: https://docs.googleapis.com
 credential:
   env: GOOGLE_TOKEN
@@ -90,3 +104,31 @@ calls:
       path: /v1/documents/{docId}:batchUpdate
     build: [google-docs/build-replace]
     answer: { select: [documentId, replies] }   # replies carry replaceAllText.occurrencesChanged
+  image:
+    kind: update
+    about: Place one picture where a placeholder stands, or at the end of the body; its uri must be a public https address, which Google fetches itself
+    params:
+      docId: { type: string, pattern: "^[A-Za-z0-9_-]+$", max: 200, log: true }
+      # Where Google fetches the picture from: https only, public (no login,
+      # so no file on this machine and no private Drive file), a PNG, JPEG
+      # or GIF under 50 MB and 25 megapixels, at most 2 kB of address. The
+      # build script refuses an address that is no https one in words that
+      # say why. Free text: its value is in no event, since a signed address
+      # carries its signature.
+      uri: { type: string, max: 2000 }
+      # The placeholder text to put the picture in the place of: literal and
+      # case-sensitive, in the body of the document (not in a header, a
+      # footer or a footnote), one line, matching exactly one place; the
+      # text is removed and the picture takes its place. Left out, the
+      # picture goes at the end of the body (the first tab's), in its last
+      # paragraph. Free text: its value is in no event.
+      find: { type: string, max: 1000, optional: true }
+      # The picture's width in points, 72 to an inch; its height follows the
+      # picture's own ratio. Left out, Google sizes the picture from its
+      # resolution, which for a large one may be wider than the page.
+      width: { type: int, optional: true }
+    request:
+      method: POST
+      path: /v1/documents/{docId}:batchUpdate
+    build: [google-docs/build-image]
+    answer: { select: [documentId, replies] }   # replies carry insertInlineImage.objectId

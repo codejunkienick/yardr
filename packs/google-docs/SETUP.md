@@ -1,9 +1,9 @@
 # Setting up Docs and Slides
 
 The pack wires Google Docs and Slides into the yard as the declared
-sources `google-docs` (documents read, appended to and replaced in
-place) and `google-slides` (decks read, slides with title and body
-appended).
+sources `google-docs` (documents read, appended to, replaced in
+place and given a picture) and `google-slides` (decks read, slides
+with title and body appended).
 Each call goes out with a short-lived token minted from a gws login
 on this machine, so no new copy of a secret is stored anywhere.
 The login, the account, the mint and calling as a user are the four
@@ -31,7 +31,7 @@ google packs' shared setup, said once in `yardr docs google`.
    ```sh
    yardr pack apply google-docs
    # applied pack google-docs to the yard: 2 created, 0 changed, 0 unchanged
-   # source google-docs is declared: 3 calls under https://docs.googleapis.com (yardr source show google-docs)
+   # source google-docs is declared: 4 calls under https://docs.googleapis.com (yardr source show google-docs)
    # source google-slides is declared: 2 calls under https://slides.googleapis.com (yardr source show google-slides)
    ```
 3. **The account.** The yard's Google account for `google-docs`
@@ -54,9 +54,11 @@ google packs' shared setup, said once in `yardr docs google`.
       and `slide` on `google-slides`: paragraphs appended at the end
       of a doc, each with its style, and slides appended to a deck,
       with title and body; replaces nothing.
-   3. `everything`: what `append` grants, and `replace` on
-      `google-docs`: text replaced in place, more than one match
-      refused unless the call passes all=true.
+   3. `everything`: what `append` grants, and `replace` and `image`
+      on `google-docs`: text replaced in place, more than one match
+      refused unless the call passes all=true, and one picture placed
+      where a placeholder text stands (the text goes), or at the end
+      of the body.
    A grantee who comes later gets one preset grant card per source:
    ```sh
    yardr bead ask <bead> "Let the reviewers read Docs" --run "source grant google-docs --preset read --group reviewers" --context "The reviewers read docs to check a bead's work; the card names each call it covers."
@@ -67,13 +69,14 @@ google packs' shared setup, said once in `yardr docs google`.
    for s in google-docs google-slides; do yardr source grant $s read --crew yardmaster; done
    yardr source grant google-docs write --crew yardmaster
    yardr source grant google-docs replace --crew yardmaster
+   yardr source grant google-docs image --crew yardmaster
    yardr source grant google-slides slide --crew yardmaster
    ```
    As ada, the same grants with `--as ada`, on cards addressed to
    ada and approved by ada alone: the shared card is in
    `yardr docs google` ("Calling as a user"), one card per grant, with
-   `read`, `write`, `replace` and `slide` from above. There is no typed way
-   beside these: a grant `as` ada is ada's to give.
+   `read`, `write`, `replace`, `image` and `slide` from above. There is no
+   typed way beside these: a grant `as` ada is ada's to give.
    `yardr source show google-docs` lists each call with its kind and
    who may make it, plain and `as` each user.
 6. **Check it.** Neither source names a check call, so each check
@@ -101,6 +104,29 @@ google packs' shared setup, said once in `yardr docs google`.
    ```sh
    yardr call google-docs replace docId=<the doc's id> find="Friday" with="Saturday"
    ```
+   A picture is placed with image, in the place of a placeholder text
+   typed in the doc where the picture is to go: the text is removed and
+   the picture takes its place. The call reads the doc for the
+   placeholder's index, and refuses a placeholder that is not there and
+   one that stands in more than one place, each in words that say so.
+   The match is literal and case-sensitive, found across a change of
+   style inside the text, in the body of every tab; a header, a footer
+   or a footnote is not searched. With no find the picture goes at the
+   end of the body (the first tab's), in its last paragraph. width is in
+   points, 72 to an inch, and the height follows the picture's own
+   ratio; left out, Google sizes the picture from its resolution, which
+   for a large one may be wider than the page.
+   ```sh
+   yardr call google-docs image docId=<the doc's id> uri=https://example.com/logo.png find='{{logo}}' width=120
+   ```
+   Google fetches the picture itself, so uri is an https address it can
+   reach without a login, a public URL, of a PNG, JPEG or GIF under
+   50 MB and 25 megapixels, and at most 2 kB long. A file on the machine
+   the yard runs on, an http address and a private Drive file cannot be
+   placed, and the call has no upload. The address is kept out of the
+   record of the call, since a signed one carries its signature; Google
+   saves it with the picture in the document, though, so use one that
+   anyone who can read the document may see.
    A slide is the same shape: an empty deck the drive source makes,
    then a slide with the caller's own id for it, unique in the deck:
    ```sh
@@ -115,6 +141,9 @@ with their own credential — is the shared setup too:
 What is not there, on purpose: Sheets, which joins this pack when a
 sheets source exists; Tasks, which is no source yet, so no pack
 wires it in (Calendar is the google-calendar pack); paging past the
-first page; and no call the pack does not list. The yard's source
+first page; a picture in a header, a footer or a slide, or sent up
+from a file on the yard's machine; resizing or moving a picture
+already placed; tables and bullets; and no call the pack does not
+list. The yard's source
 format cannot express what is not listed, and the pack does not
 change yardr.

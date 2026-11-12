@@ -1,7 +1,8 @@
 # Docs and Slides as a pack of kind source: the integration, imported
 # into the yard and into no depot. What they are here: the declared
 # sources google-docs and google-slides, which read documents and decks,
-# append text and slides to them, and replace document text in place.
+# append text and slides to them, replace document text in place, and
+# place a picture in a document.
 # Each source's credential mints from a gws login on this machine, by
 # google-mint, the mint command the pack brings beside its declaration:
 # applying the pack sets it, with no command typed, and a mint_command
@@ -44,7 +45,7 @@ presets:
       google-docs: [read, write]
       google-slides: [read, slide]
   everything:
-    about: Read and append to documents and decks, and replace document text in place
+    about: Read and append to documents and decks, replace document text in place, and place a picture in a document
     grants:
-      google-docs: [read, write, replace]
+      google-docs: [read, write, replace, image]
       google-slides: [read, slide]

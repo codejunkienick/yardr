@@ -125,7 +125,7 @@ func TestGoogleDeclarations(t *testing.T) {
 		},
 		"google-docs.yaml": {
 			{Name: "doc", Kind: source.Read}, {Name: "write", Kind: source.Update},
-			{Name: "replace", Kind: source.Update},
+			{Name: "replace", Kind: source.Update}, {Name: "image", Kind: source.Update},
 		},
 		"google-slides.yaml": {
 			{Name: "deck", Kind: source.Read}, {Name: "slide", Kind: source.Update},
@@ -513,7 +513,8 @@ func TestGoogleCallsAgainstTheStandin(t *testing.T) {
 		// The write call builds its body per call; its goldens and round
 		// trip are TestGoogleDocsWriteBuilds and TestGoogleDocsWriteRoundTrip.
 		// So does the replace call; its are TestGoogleDocsReplaceBuilds and
-		// TestGoogleDocsReplaceRoundTrip.
+		// TestGoogleDocsReplaceRoundTrip. So does the image call; its are
+		// TestGoogleDocsImageBuilds and TestGoogleDocsImageRoundTrip.
 		{name: "deck", d: slides, call: "deck", params: map[string]string{"id": deckID},
 			method: "GET", path: "/v1/presentations/" + deckID,
 			wantAnswer: `{"slides":[{"objectId":"friday_1"}],"title":"friday"}`},
@@ -676,6 +677,12 @@ func TestGoogleCallParamsRefused(t *testing.T) {
 		{"replace all maybe", docs, "replace", map[string]string{"docId": "abc", "find": "x", "with": "x", "all": "maybe"}, "parameter all is true or false"},
 		{"replace dots", docs, "replace", map[string]string{"docId": "..", "find": "x", "with": "x"}, "parameter docId does not match its pattern"},
 		{"replace text", docs, "replace", map[string]string{"docId": "abc", "find": "x", "with": "x", "text": "y"}, `"text" is no parameter`},
+		{"image without uri", docs, "image", map[string]string{"docId": "abc"}, "parameter uri is missing"},
+		{"image long uri", docs, "image", map[string]string{"docId": "abc", "uri": "https://example.com/" + strings.Repeat("x", 1981)}, "parameter uri is 2001 characters, and at most 2000"},
+		{"image long find", docs, "image", map[string]string{"docId": "abc", "uri": "https://example.com/a.png", "find": strings.Repeat("x", 1001)}, "parameter find is 1001 characters, and at most 1000"},
+		{"image fractional width", docs, "image", map[string]string{"docId": "abc", "uri": "https://example.com/a.png", "width": "12.5"}, "parameter width is no whole number"},
+		{"image dots", docs, "image", map[string]string{"docId": "..", "uri": "https://example.com/a.png"}, "parameter docId does not match its pattern"},
+		{"image text", docs, "image", map[string]string{"docId": "abc", "uri": "https://example.com/a.png", "text": "y"}, `"text" is no parameter`},
 		{"slide short id", slides, "slide", map[string]string{"id": "abc", "slide": "ab", "title": "t", "body": "b"}, "parameter slide does not match its pattern"},
 		{"slide dashed id", slides, "slide", map[string]string{"id": "abc", "slide": "-abcde", "title": "t", "body": "b"}, "parameter slide does not match its pattern"},
 		{"slide long id", slides, "slide", map[string]string{"id": "abc", "slide": strings.Repeat("a", 45), "title": "t", "body": "b"}, "parameter slide does not match its pattern"},

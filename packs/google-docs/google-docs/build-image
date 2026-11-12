@@ -1,0 +1,117 @@
+#!/bin/bash
+# build-image: the body of the google-docs image call, built per call. One
+# JSON object on stdin ({"params": {"docId", "uri", "find", "width"}}), the
+# batchUpdate body on stdout. GOOGLE_TOKEN and YARDR_SOURCE_BASE, the
+# declaration's base, are in the environment. Needs curl and jq.
+#
+# Without find the picture goes at the end of the body (the first tab's), in
+# one insertInlineImage with endOfSegmentLocation: no index is needed, so the
+# document is not read. With find the script reads the document, finds the
+# one place the placeholder stands, and prints a deleteContentRange of it and
+# an insertInlineImage at its start, pinned to the revision read so a
+# collaborator's intervening edit cannot shift the index. The match is
+# literal and case-sensitive, as replace's is, over the body of every tab
+# (child tabs too) and nowhere else: a header, a footer or a footnote is not
+# searched, since a picture there needs a segment id this call does not give.
+#
+# Indices are UTF-16 code units. The script lays each body's text runs out
+# against their start indices, one code unit at a time (a character past
+# U+FFFF is two), with a gap marker for every index no text run covers, an
+# inline image or a table's own structure: a placeholder split across runs
+# by a style change is still found, and none is found across such a gap.
+# More than one match is refused, as is none: one picture goes in one place.
+# Anything the body cannot be built from is a refusal: words on stderr, exit
+# 1, nothing sent. uri and find stay out of the arguments of every process
+# the script starts: an argument can be read by every process on the machine
+# while it runs, and a picture's address may carry a signature.
+set -euo pipefail
+in=$(cat)
+# What is wrong with the parameters alone is refused before the document is
+# read. The yard has checked docId's characters and the lengths already.
+checked=$(jq -c '
+  .params as $p
+  | ($p.uri // "") as $uri
+  | if ($p.docId // "") == "" then {refusal: "image was handed no docId"}
+    elif ($uri | ascii_downcase | startswith("https://") | not) or ($uri | length) <= 8 then
+      {refusal: "uri is no https address: Google fetches the picture itself, so it needs a public https URL, which a file on this machine, an http address or a private Drive file is not"}
+    elif ($uri | explode | any(. <= 32 or . == 127)) then
+      {refusal: "uri holds a space or control character"}
+    elif ($p | has("width")) and (($p.width | type) != "number" or $p.width <= 0) then
+      {refusal: "width is a whole number of points above 0"}
+    elif ($p | has("find")) and $p.find == "" then
+      {refusal: "find is empty: leave it out to place the picture at the end of the body"}
+    elif ($p.find // "" | contains("\n")) then
+      {refusal: "find holds a line break: a placeholder is one line of text"}
+    else {ok: true} end
+' <<<"$in")
+refusal=$(jq -r '.refusal // empty' <<<"$checked")
+[ -z "$refusal" ] || { echo "$refusal" >&2; exit 1; }
+if jq -e '.params | has("find") | not' <<<"$in" >/dev/null; then
+  jq -c '
+    .params
+    | {requests: [{insertInlineImage: (
+        {endOfSegmentLocation: {}, uri: .uri}
+        + (if .width then {objectSize: {width: {magnitude: .width, unit: "PT"}}} else {} end))}]}
+  ' <<<"$in"
+  exit 0
+fi
+docId=$(jq -r '.params.docId' <<<"$in")
+: "${GOOGLE_TOKEN:?GOOGLE_TOKEN is not set}"
+: "${YARDR_SOURCE_BASE:?YARDR_SOURCE_BASE is not set}"
+# The token goes to curl as a config line on its stdin, written by the shell
+# itself, as the other scripts of the pack hand theirs over. The read is the
+# one replace makes, so the two calls ask Google for a document the same way.
+doc=$(printf 'header = "Authorization: Bearer %s"\n' "$GOOGLE_TOKEN" \
+  | curl -sS --fail-with-body --get -K - \
+  --data-urlencode "includeTabsContent=true" \
+  --data-urlencode "fields=revisionId,tabs" \
+  "$YARDR_SOURCE_BASE/v1/documents/$docId") || {
+  echo "document $docId could not be read (curl exit $?)" >&2; exit 1
+}
+# The parameters and the document go to jq as two values on its stdin, not as
+# arguments: the document can be far past what one argument may hold.
+built=$(printf '%s\n%s\n' "$in" "$doc" | jq -c -s '
+  def units: explode | map(if . > 65535
+      then [55296 + ((. - 65536) / 1024 | floor), 56320 + ((. - 65536) % 1024)]
+      else . end) | flatten;
+  def layout:
+    reduce ([.. | select(type == "object" and has("textRun"))][]) as $r
+      ({base: null, units: [], bad: false};
+        ($r.startIndex // 0) as $s
+        | (.base // $s) as $base
+        | ($base + (.units | length)) as $next
+        | if $s < $next then .bad = true
+          else .base = $base
+            | .units += [range($next; $s) | -1] + ($r.textRun.content // "" | units) end);
+  def hits($find): . as $l | ($find | length) as $n
+    | [range(0; ($l.units | length) - $n + 1)
+       | select($l.units[. : . + $n] == $find) | $l.base + .];
+  .[0].params as $p
+  | .[1] as $doc
+  | ($p.find | units) as $find
+  | [$doc.tabs[]? | recurse(.childTabs[]?)
+     | {tab: (.tabProperties.tabId // ""), layout: (.documentTab.body | layout)}] as $tabs
+  | [$tabs[] | .tab as $tab | (.layout | hits($find))[] | {tab: $tab, start: .}] as $at
+  | if ($doc.revisionId // "") == "" then {refusal: "document \($p.docId) answered no revision id"}
+    elif ($doc.tabs | type) != "array" or ($doc.tabs | length) == 0 then
+      {refusal: "document \($p.docId) answered no tabs"}
+    elif any($tabs[]; .layout.bad) then
+      {refusal: "document \($p.docId) answered text runs whose indices overlap, so no index in it can be trusted"}
+    elif ($at | length) == 0 then
+      {refusal: "no match: find is in no text of the body (it is case-sensitive, and headers, footers and footnotes are not searched)"}
+    elif ($at | length) > 1 then
+      {refusal: "\($at | length) matches of find in the body: a picture goes in one place, so make find match exactly one"}
+    else
+      $at[0] as $m
+      | (if $m.tab == "" then {} else {tabId: $m.tab} end) as $t
+      | {body: {requests: [
+          {deleteContentRange: {range: ({startIndex: $m.start, endIndex: ($m.start + ($find | length))} + $t)}},
+          {insertInlineImage: (
+            {location: ({index: $m.start} + $t), uri: $p.uri}
+            + (if $p.width then {objectSize: {width: {magnitude: $p.width, unit: "PT"}}} else {} end))}],
+         writeControl: {requiredRevisionId: $doc.revisionId}}}
+    end
+')
+refusal=$(jq -r '.refusal // empty' <<<"$built")
+[ -z "$refusal" ] || { echo "$refusal" >&2; exit 1; }
+jq -c '.body' <<<"$built"

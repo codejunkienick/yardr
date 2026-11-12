@@ -325,7 +325,18 @@ func sourceDoesChanged(d *source.Declaration, carried AskSource, diffs map[strin
 	for i := range d.Calls {
 		does = append(does, callSaysWhole(d, &d.Calls[i])...)
 	}
-	does = append(does, checkSays(d))
+	// What the declaration names none of is said once, in one line after the
+	// parts it does name, and not in a line to each: nine such lines to a
+	// source left a card of two sources no room for its calls, and a card is
+	// read whole (MaxRunSourceCardLines). Every part is still named, in the
+	// declaration's own order, so approving the card approves nothing it has
+	// not said.
+	var lacks []string
+	if line, ok := checkSays(d); ok {
+		does = append(does, line)
+	} else {
+		lacks = append(lacks, "no check call", "no idempotency header")
+	}
 	if d.Notify != nil {
 		n := d.Notify
 		var fills []string
@@ -347,7 +358,7 @@ func sourceDoesChanged(d *source.Declaration, carried AskSource, diffs map[strin
 		line := fmt.Sprintf("it can tell a user: the call %s, whose %s takes the person's address, read as %s from the person's own env file; %s", n.Call, n.Address, n.AddressEnv, strings.Join(fills, " and "))
 		does = append(does, line+".")
 	} else {
-		does = append(does, "it can tell no user.")
+		lacks = append(lacks, "no way to tell a user")
 	}
 	if d.Hear != nil {
 		who := "every told user's"
@@ -356,37 +367,40 @@ func sourceDoesChanged(d *source.Declaration, carried AskSource, diffs map[strin
 		}
 		does = append(does, fmt.Sprintf("it hears deliveries: only one whose %s is the address of a user told through it, read as %s, and %s: another's, and a stranger's, is dropped after verification.", d.Hear.Field, d.Hear.Address.Env, who))
 	} else {
-		does = append(does, "it hears no deliveries.")
+		lacks = append(lacks, "no way to hear deliveries")
 	}
 	if d.Limits != nil {
 		does = append(does, limitsSays(d))
 	} else {
-		does = append(does, "it names no limits command.")
+		lacks = append(lacks, "no limits command")
 	}
 	if d.Thread != nil {
 		does = append(does, threadSays(d))
 	} else {
-		does = append(does, "it speaks in no threads.")
+		lacks = append(lacks, "no way to speak in threads")
 	}
 	if d.Link != nil {
 		does = append(does, linkSays(d))
 	} else {
-		does = append(does, "its issues are no bead's link.")
+		lacks = append(lacks, "no bead link")
 	}
 	if d.Identity != nil {
 		does = append(does, fmt.Sprintf("its identity keys fold to lowercase (identity fold: %s), so one spelling is stored however it was typed.", d.Identity.Fold))
 	} else {
-		does = append(does, "its identity keys keep their case.")
+		lacks = append(lacks, "no identity fold (its identity keys keep their case)")
 	}
 	if d.Hook != nil {
 		does = append(does, hookSays(d))
 	} else {
-		does = append(does, "it sends no hook deliveries into the yard.")
+		lacks = append(lacks, "no hook deliveries into the yard")
 	}
 	if d.Events != nil {
 		does = append(does, eventsSays(d))
 	} else {
-		does = append(does, "it sends no pull-request or CI events.")
+		lacks = append(lacks, "no pull-request or CI events")
+	}
+	if len(lacks) > 0 {
+		does = append(does, "it has "+andList(lacks)+".")
 	}
 	does = append(does, commandSaysChanged(d, carried, diffs)...)
 	var owed []string
@@ -607,18 +621,19 @@ func displaySourceValue(s string) string {
 	return s
 }
 
-// checkSays is the source's check call and idempotency header, or that it
-// names neither.
-func checkSays(d *source.Declaration) string {
+// checkSays is the source's check call and idempotency header, with ok
+// false where it names neither: the card says that with the rest the
+// declaration lacks, in one line (sourceDoesChanged).
+func checkSays(d *source.Declaration) (line string, ok bool) {
 	switch {
 	case d.Check == "" && d.Idempotency == "":
-		return "The source names no check call and no idempotency header."
+		return "", false
 	case d.Check == "":
-		return fmt.Sprintf("The source names no check call; updates carry their key in the header %s.", d.Idempotency)
+		return fmt.Sprintf("The source names no check call; updates carry their key in the header %s.", d.Idempotency), true
 	case d.Idempotency == "":
-		return fmt.Sprintf("Its check call is %s; it names no idempotency header.", d.Check)
+		return fmt.Sprintf("Its check call is %s; it names no idempotency header.", d.Check), true
 	default:
-		return fmt.Sprintf("Its check call is %s, and updates carry their key in the header %s.", d.Check, d.Idempotency)
+		return fmt.Sprintf("Its check call is %s, and updates carry their key in the header %s.", d.Check, d.Idempotency), true
 	}
 }
 

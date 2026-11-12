@@ -337,12 +337,102 @@ calls:
 	}
 }
 
+// What a declaration names none of is said once, in one line after what it
+// names, so a source that does little does not spend nine lines of a card
+// saying so (MaxRunSourceCardLines). A part it names keeps its own sentence
+// and is not said missing; a check call or an idempotency header named alone
+// keeps a sentence of its own that says the other is not named.
+func TestSourceAddCardSaysWhatItLacksInOneLine(t *testing.T) {
+	t.Parallel()
+	const checked = `name: checked
+base: https://checked.example.com
+credential: { env: CHECKED_TOKEN, header: "Authorization: Bearer {credential}" }
+calls:
+  ping: { kind: read, request: { method: GET, path: /me } }
+  send: { kind: update, request: { method: POST, path: /send } }
+`
+	// wiredDecl names a limits command, thread, hook and events; the rest
+	// is added, so that this one names every part there is.
+	everything := strings.Replace(wiredDecl, "  ping: { kind: read, request: { method: GET, path: /me } }\n",
+		"  ping: { kind: read, request: { method: GET, path: /me } }\n"+
+			"  send: { kind: update, params: { to: { type: string }, text: { type: string } }, request: { method: POST, path: /send, body: { to: \"{to}\", text: \"{text}\" } } }\n", 1) +
+		"check: ping\nidempotency: Idempotency-Key\n" +
+		"notify:\n  call: send\n  address: { param: to, env: WIRED_USER }\n  text: text\n" +
+		"hear:\n  field: team\n  address: { env: WIRED_USER }\n" +
+		"link:\n  host: wired.example.com\n  issue: '^/([^/]+)/issue/([A-Z]+-[0-9]+)'\n  fixed: \"https://wired.example.com/{1}/issue/{2}\"\n  thread: \"{2}\"\n" +
+		"identity:\n  fold: lower\n"
+	const checkedLacks = "it has no way to tell a user, no way to hear deliveries, no limits command, no way to speak in threads, no bead link, no identity fold (its identity keys keep their case), no hook deliveries into the yard and no pull-request or CI events."
+	for _, tc := range []struct {
+		name  string
+		decl  string
+		lacks string   // the one line, "" where the declaration lacks nothing
+		named []string // the start of each sentence of a part it names
+	}{
+		{"nothing", tgDecl,
+			"it has no check call, no idempotency header, no way to tell a user, no way to hear deliveries, no limits command, no way to speak in threads, no bead link, no identity fold (its identity keys keep their case), no hook deliveries into the yard and no pull-request or CI events.",
+			nil},
+		{"some", wiredDecl,
+			"it has no check call, no idempotency header, no way to tell a user, no way to hear deliveries, no bead link and no identity fold (its identity keys keep their case).",
+			[]string{"its limits command ", "it speaks in threads: ", "what it sends in: ", "what it sends of pull requests and CI: "}},
+		{"a check call alone", checked + "check: ping\n", checkedLacks,
+			[]string{"Its check call is ping; it names no idempotency header."}},
+		{"an idempotency header alone", checked + "idempotency: Idempotency-Key\n", checkedLacks,
+			[]string{"The source names no check call; updates carry their key in the header Idempotency-Key."}},
+		{"both", checked + "check: ping\nidempotency: Idempotency-Key\n", checkedLacks,
+			[]string{"Its check call is ping, and updates carry their key in the header Idempotency-Key."}},
+		{"everything", everything, "",
+			[]string{"Its check call is ping, and updates carry their key in the header Idempotency-Key.", "it can tell a user: ", "it hears deliveries: ",
+				"its limits command ", "it speaks in threads: ", "its issues are a bead's link: ", "its identity keys fold to lowercase ",
+				"what it sends in: ", "what it sends of pull requests and CI: "}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := source.Parse("test.yaml", []byte(tc.decl))
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := sourceDoes(d, AskSource{Name: d.Name, Text: tc.decl})
+			lacksAt, saw := -1, 0
+			for i, line := range lines {
+				if strings.HasPrefix(line, "it has no ") {
+					lacksAt = i
+					saw++
+					if line != tc.lacks {
+						t.Errorf("the card says it lacks:\n%s\nwant:\n%s", line, tc.lacks)
+					}
+				}
+			}
+			if (tc.lacks == "") != (saw == 0) || saw > 1 {
+				t.Fatalf("the card has %d lines of what it lacks, want one unless it lacks nothing:\n%s", saw, strings.Join(lines, "\n"))
+			}
+			for _, start := range tc.named {
+				at := slices.IndexFunc(lines, func(line string) bool { return strings.HasPrefix(line, start) })
+				if at < 0 {
+					t.Errorf("the card has no sentence starting %q:\n%s", start, strings.Join(lines, "\n"))
+				} else if lacksAt >= 0 && at > lacksAt {
+					t.Errorf("the sentence starting %q stands after what it lacks, want it before", start)
+				}
+			}
+			// Not the nine lines a card once said it in.
+			joined := strings.Join(lines, "\n")
+			for _, gone := range []string{"it can tell no user.", "it hears no deliveries.", "it names no limits command.", "it speaks in no threads.",
+				"its issues are no bead's link.", "its identity keys keep their case.", "it sends no hook deliveries into the yard.",
+				"it sends no pull-request or CI events.", "The source names no check call and no idempotency header."} {
+				if strings.Contains(joined, gone) {
+					t.Errorf("the card still says %q on its own:\n%s", gone, joined)
+				}
+			}
+		})
+	}
+}
+
 func TestSourceAddCardLineBound(t *testing.T) {
 	t.Parallel()
 	y, _ := runYard(t)
 	var decl strings.Builder
 	decl.WriteString("name: many\nbase: https://many.example.com\ncalls:\n")
-	for i := 0; i < 18; i++ {
+	// A call takes two lines of the card and the card's own first two more,
+	// so this is over the bound whatever else the card says.
+	for i := 0; i < MaxRunSourceCardLines/2; i++ {
 		fmt.Fprintf(&decl, "  call%d: { kind: read, request: { method: GET, path: /call%d } }\n", i, i)
 	}
 	carried := carriedOf(t, decl.String(), nil)
