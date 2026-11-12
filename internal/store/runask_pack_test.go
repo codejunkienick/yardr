@@ -1373,9 +1373,9 @@ func TestPackApplyStoreRefusals(t *testing.T) {
 	for k := range wiredFiles {
 		big[k] = wiredFiles[k]
 	}
-	big["wired/limits"] = strings.Repeat("a", 70000)
+	big["wired/limits"] = strings.Repeat("a", MaxRunPackFiles+1)
 	y.setPack(&fakePack{label: "embedded in yardr test1", files: big})
-	if _, err := y.AddAsk(y.ctx, y.bead, packAsk(), "yardmaster"); err == nil || !strings.Contains(err.Error(), "a card holds at most 65536") {
+	if _, err := y.AddAsk(y.ctx, y.bead, packAsk(), "yardmaster"); err == nil || !strings.Contains(err.Error(), "a card holds at most 131072") {
 		t.Fatalf("a payload past the bound: AddAsk = %v", err)
 	}
 }
@@ -1447,7 +1447,7 @@ func TestPackApplySummaryCard(t *testing.T) {
 	y, _ := runYard(t)
 	y.firstInstallDepot(t)
 	f := &fakePack{label: "embedded in yardr test1", kind: "git", depot: "web", digest: summaryDigest,
-		programs: []string{"scripts/merge-local"}, plan: largePlan(20, 5000)}
+		programs: []string{"scripts/merge-local"}, plan: largePlan(20, 7000)}
 	y.setPack(f)
 	seq := y.ask(t, summaryAsk(), "yardmaster")
 	got := y.asked(t, seq)
@@ -1462,7 +1462,7 @@ func TestPackApplySummaryCard(t *testing.T) {
 	for _, want := range []string{
 		"pack starter (embedded in yardr test1), of kind git, into depot web: 23 to create, 1 to change, 1 unchanged, and 1 dropped and left where they stand, digest sha256:" + summaryDigest + ". It asks nothing. It runs 1 program of the pack: scripts/merge-local.",
 		"this is a first install: depot web holds no import of pack starter.",
-		"file roles/0.md: create, sha256 (none) -> sha256 " + strings.Repeat("b", 64) + ", 5001 bytes (1 insertions, 0 deletions).",
+		"file roles/0.md: create, sha256 (none) -> sha256 " + strings.Repeat("b", 64) + ", 7001 bytes (1 insertions, 0 deletions).",
 		"groups to create: web-builders, web-assembly.",
 		"group web-assembly: cmd sets YARDR_LAND=squash before the script.",
 		"crew yardmaster: change (on: a -> b).",
@@ -1586,7 +1586,7 @@ func TestPackApplySummaryFold(t *testing.T) {
 		{room + 1, 2, MaxRunSourceCardLines},
 		{60, 31, MaxRunSourceCardLines},
 	} {
-		f.plan = largePlan(c.files, 3000)
+		f.plan = largePlan(c.files, 7000)
 		for i := range c.files {
 			if i != 0 && (c.folded == 0 || i < c.files-c.folded) {
 				continue
@@ -1619,7 +1619,7 @@ func TestPackApplySummaryFold(t *testing.T) {
 			}
 			continue
 		}
-		want := countNoun(c.folded, "more file") + ", " + itoa(uint64(c.folded*(3001+len(changedDiff)))) + " bytes"
+		want := countNoun(c.folded, "more file") + ", " + itoa(uint64(c.folded*(7001+len(changedDiff)))) + " bytes"
 		if !strings.Contains(line, want) || !strings.Contains(line, "under digest sha256:"+summaryDigest) {
 			t.Errorf("%d files: the closing line %q lacks %q", c.files, line, want)
 		}
@@ -1632,7 +1632,7 @@ func TestPackApplySummaryFold(t *testing.T) {
 			t.Errorf("%d files: summary sentences are out of order: file=%d fold=%d groups=%d counts=%d full text=%d",
 				c.files, lastFile, foldLine, groups, counts, fullText)
 		}
-		fullBytes := c.files*3001 + (1+c.folded)*len(changedDiff)
+		fullBytes := c.files*7001 + (1+c.folded)*len(changedDiff)
 		wantFullText := "the full text stands behind this card, on this bead's page: " + countNoun(c.files, "file") + ", " + itoa(uint64(fullBytes)) + " bytes."
 		if !slices.Contains(run.Does, wantFullText) {
 			t.Errorf("%d files: full text line lacks changed-file diffs: want %q", c.files, wantFullText)
@@ -1663,10 +1663,10 @@ func TestPackApplySummaryRefusals(t *testing.T) {
 	t.Parallel()
 	y, _ := runYard(t)
 	y.firstInstallDepot(t)
-	f := &fakePack{label: "embedded in yardr test1", kind: "git", depot: "web", digest: summaryDigest, plan: largePlan(20, 5000)}
+	f := &fakePack{label: "embedded in yardr test1", kind: "git", depot: "web", digest: summaryDigest, plan: largePlan(20, 7000)}
 	home := y.Store.home
 	y.setPack(f)
-	wholeWords := "a card holds at most 65536 together, so this is the operator's to type in a terminal"
+	wholeWords := "a card holds at most 131072 together, so this is the operator's to type in a terminal"
 
 	f.digest = ""
 	if _, err := y.AddAsk(y.ctx, y.bead, summaryAsk(), "yardmaster"); err == nil || !strings.Contains(err.Error(), wholeWords) {
@@ -1684,7 +1684,7 @@ func TestPackApplySummaryRefusals(t *testing.T) {
 	if _, err := y.AddAsk(y.ctx, y.bead, summaryAsk(), "yardmaster"); err == nil || !strings.Contains(err.Error(), "a summary card carries at most 1048576 together, so this is the operator's to type in a terminal") {
 		t.Errorf("past the carried bound: AddAsk = %v", err)
 	}
-	f.plan = largePlan(20, 5000)
+	f.plan = largePlan(20, 7000)
 
 	// Copies a removed source left under its name: no record stands, and
 	// the import would still replace them.
@@ -1717,7 +1717,7 @@ func TestPackApplySummaryReapply(t *testing.T) {
 	if _, err := y.RecordPack(y.ctx, PackImport{Pack: "starter", Depot: "web", Source: "x"}, true, "mckean"); err != nil {
 		t.Fatal(err)
 	}
-	f := &fakePack{label: "embedded in yardr test1", kind: "git", depot: "web", digest: summaryDigest, noSources: true, plan: largePlan(20, 5000)}
+	f := &fakePack{label: "embedded in yardr test1", kind: "git", depot: "web", digest: summaryDigest, noSources: true, plan: largePlan(20, 7000)}
 	y.setPack(f)
 	seq := y.ask(t, summaryAsk(), "yardmaster")
 	got := y.asked(t, seq)
@@ -1885,7 +1885,7 @@ func TestPackApplyDirectoryRefusals(t *testing.T) {
 	}{
 		{"a pin naming another directory", " --depot web --sha256 " + wrong, "the pin is sha256:" + wrong + ", and the directory " + resolved + " as read has sha256:" + dirPackDigest, firstInstallPlan()},
 		{"a pin that is no digest", " --depot web --sha256 abc", `"abc": not a digest`, firstInstallPlan()},
-		{"past the file bound", " --depot web", "a card holds at most 65536 together, so this is the operator's to type in a terminal (yardr pack check " + dir + " shows it there)", &AskPlan{Objects: []AskPlanObject{{Kind: "file", Name: "big", Action: "create", Text: strings.Repeat("a", MaxRunPackFiles+1)}}}},
+		{"past the file bound", " --depot web", "a card holds at most 131072 together, so this is the operator's to type in a terminal (yardr pack check " + dir + " shows it there)", &AskPlan{Objects: []AskPlanObject{{Kind: "file", Name: "big", Action: "create", Text: strings.Repeat("a", MaxRunPackFiles+1)}}}},
 		{"a plan that asks", " --depot web", "its plan asks or refuses, so no card can apply it", &AskPlan{Missing: []string{"group.web-builders.kind: which agent?"}}},
 		{"an edited file", " --depot web", "its plan asks or refuses, so no card can apply it", &AskPlan{Edited: []string{"roles/a.md"}}},
 		{"a --yes that overwrites nothing", " --depot web --yes", "propose the apply without it", firstInstallPlan()},
@@ -2101,7 +2101,7 @@ func TestPackApplyURLSummaryCard(t *testing.T) {
 	y, _ := runYard(t)
 	y.firstInstallDepot(t)
 	f := &fakePack{name: "team", build: "test1", kind: "git",
-		depot: "web", digest: urlPackDigest, plan: largePlan(20, 5000)}
+		depot: "web", digest: urlPackDigest, plan: largePlan(20, 7000)}
 	u := &urlFetcher{f: f}
 	y.Store.SetPackFetcher(u.fetch)
 	ask := packAsk()

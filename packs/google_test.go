@@ -126,6 +126,7 @@ func TestGoogleDeclarations(t *testing.T) {
 		"google-docs.yaml": {
 			{Name: "doc", Kind: source.Read}, {Name: "write", Kind: source.Update},
 			{Name: "replace", Kind: source.Update}, {Name: "image", Kind: source.Update},
+			{Name: "table", Kind: source.Update}, {Name: "style", Kind: source.Update},
 		},
 		"google-slides.yaml": {
 			{Name: "deck", Kind: source.Read}, {Name: "slide", Kind: source.Update},
@@ -193,6 +194,7 @@ type googleRequest struct {
 	method, path string
 	query        url.Values
 	auth         string
+	contentType  string
 	body         []byte
 }
 
@@ -514,7 +516,10 @@ func TestGoogleCallsAgainstTheStandin(t *testing.T) {
 		// trip are TestGoogleDocsWriteBuilds and TestGoogleDocsWriteRoundTrip.
 		// So does the replace call; its are TestGoogleDocsReplaceBuilds and
 		// TestGoogleDocsReplaceRoundTrip. So does the image call; its are
-		// TestGoogleDocsImageBuilds and TestGoogleDocsImageRoundTrip.
+		// TestGoogleDocsImageBuilds and TestGoogleDocsImageRoundTrip. So do
+		// the table and style calls; theirs are TestGoogleDocsTableBuilds,
+		// TestGoogleDocsTableRoundTrip, TestGoogleDocsStyleBuilds and
+		// TestGoogleDocsStyleRoundTrip.
 		{name: "deck", d: slides, call: "deck", params: map[string]string{"id": deckID},
 			method: "GET", path: "/v1/presentations/" + deckID,
 			wantAnswer: `{"slides":[{"objectId":"friday_1"}],"title":"friday"}`},
@@ -683,6 +688,21 @@ func TestGoogleCallParamsRefused(t *testing.T) {
 		{"image fractional width", docs, "image", map[string]string{"docId": "abc", "uri": "https://example.com/a.png", "width": "12.5"}, "parameter width is no whole number"},
 		{"image dots", docs, "image", map[string]string{"docId": "..", "uri": "https://example.com/a.png"}, "parameter docId does not match its pattern"},
 		{"image text", docs, "image", map[string]string{"docId": "abc", "uri": "https://example.com/a.png", "text": "y"}, `"text" is no parameter`},
+		{"table without find", docs, "table", map[string]string{"docId": "abc", "cells": `[["x"]]`}, "parameter find is missing"},
+		{"table without cells", docs, "table", map[string]string{"docId": "abc", "find": "x"}, "parameter cells is missing"},
+		{"table long find", docs, "table", map[string]string{"docId": "abc", "find": strings.Repeat("x", 1001), "cells": `[["x"]]`}, "parameter find is 1001 characters, and at most 1000"},
+		{"table long cells", docs, "table", map[string]string{"docId": "abc", "find": "x", "cells": strings.Repeat("x", 60001)}, "parameter cells is 60001 characters, and at most 60000"},
+		{"table borders maybe", docs, "table", map[string]string{"docId": "abc", "find": "x", "cells": `[["x"]]`, "borders": "maybe"}, "parameter borders is true or false"},
+		{"table dots", docs, "table", map[string]string{"docId": "..", "find": "x", "cells": `[["x"]]`}, "parameter docId does not match its pattern"},
+		{"table text", docs, "table", map[string]string{"docId": "abc", "find": "x", "cells": `[["x"]]`, "text": "y"}, `"text" is no parameter`},
+		{"style without find", docs, "style", map[string]string{"docId": "abc", "bold": "true"}, "parameter find is missing"},
+		{"style long find", docs, "style", map[string]string{"docId": "abc", "find": strings.Repeat("x", 1001), "bold": "true"}, "parameter find is 1001 characters, and at most 1000"},
+		{"style bold maybe", docs, "style", map[string]string{"docId": "abc", "find": "x", "bold": "maybe"}, "parameter bold is true or false"},
+		{"style fractional size", docs, "style", map[string]string{"docId": "abc", "find": "x", "size": "12.5"}, "parameter size is no whole number"},
+		{"style long color", docs, "style", map[string]string{"docId": "abc", "find": "x", "color": "1234567"}, "parameter color is 7 characters, and at most 6"},
+		{"style sideways align", docs, "style", map[string]string{"docId": "abc", "find": "x", "align": "justify"}, "parameter align is one of left, center, right"},
+		{"style dots", docs, "style", map[string]string{"docId": "..", "find": "x", "bold": "true"}, "parameter docId does not match its pattern"},
+		{"style text", docs, "style", map[string]string{"docId": "abc", "find": "x", "bold": "true", "text": "y"}, `"text" is no parameter`},
 		{"slide short id", slides, "slide", map[string]string{"id": "abc", "slide": "ab", "title": "t", "body": "b"}, "parameter slide does not match its pattern"},
 		{"slide dashed id", slides, "slide", map[string]string{"id": "abc", "slide": "-abcde", "title": "t", "body": "b"}, "parameter slide does not match its pattern"},
 		{"slide long id", slides, "slide", map[string]string{"id": "abc", "slide": strings.Repeat("a", 45), "title": "t", "body": "b"}, "parameter slide does not match its pattern"},
@@ -1397,7 +1417,8 @@ func TestGoogleDocsReplaceRefusals(t *testing.T) {
 
 // The built body posted: a replace sends its replaceAllText in one
 // batchUpdate, and the answer's occurrencesChanged says how many changed,
-// none where the find matched nothing.
+// none where the find matched nothing. A match in a table cell is filled
+// like one in the body.
 func TestGoogleDocsReplaceRoundTrip(t *testing.T) {
 	standin, srv := replaceStandin(t)
 	defer srv.Close()
@@ -1405,13 +1426,16 @@ func TestGoogleDocsReplaceRoundTrip(t *testing.T) {
 	home := replaceHome(t)
 	for _, tc := range []struct {
 		doc     string
+		find    string
+		with    string
 		changed string
 	}{
-		{"one", "1"},
-		{"none", "0"},
+		{"one", "Lunch", "Dinner", "1"},
+		{"none", "Lunch", "Dinner", "0"},
+		{"cells", "rota", "menu", "1"},
 	} {
 		before := len(standin.requests())
-		params := map[string]string{"docId": standin.doc(tc.doc), "find": "Lunch", "with": "Dinner"}
+		params := map[string]string{"docId": standin.doc(tc.doc), "find": tc.find, "with": tc.with}
 		body, err := source.BuildBody(context.Background(), docs, "replace", params, "tok", home, store.ReadSecretFile)
 		if err != nil {
 			t.Fatal(err)

@@ -1,0 +1,203 @@
+#!/bin/bash
+# build-table: the body of the google-docs table call, built per call. One
+# JSON object on stdin ({"params": {"docId", "find", "cells", "borders"}}),
+# the batchUpdate body that fills the table's cells on stdout.
+# GOOGLE_TOKEN and YARDR_SOURCE_BASE, the declaration's base, are in the
+# environment. Needs curl and jq.
+#
+# A table and its cells' texts take two batchUpdates: an insertion index
+# past a table inserted in the same batch is shifted past it, so the cells
+# cannot be filled in the one that places it. The script reads the
+# document, finds the one place the placeholder stands, sends the place
+# itself - a deleteContentRange of the placeholder and an insertTable at
+# its start, pinned to the revision read - reads the document again for
+# the new revision and to see the table where it put it, and prints the
+# fill: an insertText per non-empty cell, from the last cell backwards so
+# no index shifts under it, and with borders=false one
+# updateTableCellStyle taking every border away. The caller never passes
+# an index. The table stands one index past where the placeholder stood, a
+# newline before it, and an empty cell runs two units, so cell (r, c) of a
+# table of C columns is filled at S+4+r(1+2C)+2c for a placeholder at S.
+# The match is literal and case-sensitive, as image's is, over the body of
+# every tab (child tabs too) and nowhere else: a header, a footer or a
+# footnote is not searched. More than one match is refused, as is none: a
+# table goes in one place.
+#
+# Where the place lands and the fill cannot be printed, the empty table
+# stands: the refusal says to remove it, restore the placeholder, and call
+# table again. The script never removes it itself: a table that moved
+# under a collaborator's edit is not at the index it would delete.
+#
+# Indices are UTF-16 code units. The index code is build-image's, copied:
+# each body's text runs are laid out against their start indices, one code
+# unit at a time (a character past U+FFFF is two), with a gap marker for
+# every index no text run covers. Anything the body cannot be built from
+# is a refusal: words on stderr, exit 1, nothing further sent. find and
+# the cells' texts stay out of the arguments of every process the script
+# starts: an argument can be read by every process on the machine while it
+# runs.
+set -euo pipefail
+in=$(cat)
+# What is wrong with the parameters alone is refused before the document is
+# read. The yard has checked docId's characters and the lengths already.
+checked=$(jq -c '
+  .params as $p
+  | (($p.cells // "") | fromjson? // "bad") as $cells
+  | if ($p.docId // "") == "" then {refusal: "table was handed no docId"}
+    elif ($p.find // "") == "" then {refusal: "find names no placeholder to put the table in the place of"}
+    elif ($p.find | contains("\n")) then
+      {refusal: "find holds a line break: a placeholder is one line of text"}
+    elif ($p | has("borders")) and (($p.borders | type) != "boolean") then
+      {refusal: "borders is true or false"}
+    elif ($cells | type) != "array" then {refusal: "cells is no JSON array of rows, each an array of cell texts"}
+    elif ($cells | length) == 0 then {refusal: "cells holds no row to put"}
+    elif ($cells | length) > 20 then {refusal: "cells holds \($cells | length) rows, and a table holds at most 20"}
+    else
+      ($cells[0] | if type == "array" then length else -1 end) as $cols
+      | ([range(0; ($cells | length))
+          | . as $r | $cells[$r] as $row
+          | (if ($row | type) != "array" then "row \($r + 1) is no array of cell texts"
+             elif ($row | length) == 0 then "row \($r + 1) holds no cell"
+             elif ($row | length) > 6 then "row \($r + 1) holds \($row | length) cells, and a table holds at most 6 columns"
+             elif ($row | length) != $cols then "row \($r + 1) holds \($row | length) cells, want \($cols) like the first row"
+             else ([range(0; ($row | length))
+                    | . as $c | $row[$c] as $cell
+                    | if ($cell | type) != "string" then "row \($r + 1) cell \($c + 1) is no text"
+                      elif ($cell | length) > 2000 then "row \($r + 1) cell \($c + 1) is \($cell | length) characters, and at most 2000"
+                      elif ($cell | any(explode[]; . <= 8 or (. >= 12 and . <= 31) or (. >= 57344 and . <= 63743))) then
+                        "row \($r + 1) cell \($c + 1) holds a control or private-use character Google Docs strips"
+                      else empty end] | .[0])
+             end) | select(. != null)] | .[0]) as $bad
+      | if $bad != null then {refusal: $bad}
+        elif ([$cells[][] | select(. != "")] | length) == 0 then {refusal: "cells holds no text: every cell is empty"}
+        else {ok: true} end
+    end
+' <<<"$in")
+refusal=$(jq -r '.refusal // empty' <<<"$checked")
+[ -z "$refusal" ] || { echo "$refusal" >&2; exit 1; }
+docId=$(jq -r '.params.docId' <<<"$in")
+: "${GOOGLE_TOKEN:?GOOGLE_TOKEN is not set}"
+: "${YARDR_SOURCE_BASE:?YARDR_SOURCE_BASE is not set}"
+# The token goes to curl as a config line on its stdin, written by the shell
+# itself, as the other scripts of the pack hand theirs over. The read is the
+# one replace makes, so the calls that find their place ask Google for a
+# document the same way.
+doc=$(printf 'header = "Authorization: Bearer %s"\n' "$GOOGLE_TOKEN" \
+  | curl -sS --fail-with-body --get -K - \
+  --data-urlencode "includeTabsContent=true" \
+  --data-urlencode "fields=revisionId,tabs" \
+  "$YARDR_SOURCE_BASE/v1/documents/$docId") || {
+  echo "document $docId could not be read (curl exit $?)" >&2; exit 1
+}
+# The parameters and the document go to jq as two values on its stdin, not as
+# arguments: the document can be far past what one argument may hold. What
+# comes back is the match with the place it asks for, and the table's size.
+found=$(printf '%s\n%s\n' "$in" "$doc" | jq -c -s '
+  def units: explode | map(if . > 65535
+      then [55296 + ((. - 65536) / 1024 | floor), 56320 + ((. - 65536) % 1024)]
+      else . end) | flatten;
+  def layout:
+    reduce ([.. | select(type == "object" and has("textRun"))][]) as $r
+      ({base: null, units: [], bad: false};
+        ($r.startIndex // 0) as $s
+        | (.base // $s) as $base
+        | ($base + (.units | length)) as $next
+        | if $s < $next then .bad = true
+          else .base = $base
+            | .units += [range($next; $s) | -1] + ($r.textRun.content // "" | units) end);
+  def hits($find): . as $l | ($find | length) as $n
+    | [range(0; ($l.units | length) - $n + 1)
+       | select($l.units[. : . + $n] == $find) | $l.base + .];
+  .[0].params as $p
+  | .[1] as $doc
+  | ($p.find | units) as $find
+  | ($p.cells | fromjson) as $cells
+  | ($cells | length) as $rows
+  | ($cells[0] | length) as $cols
+  | [$doc.tabs[]? | recurse(.childTabs[]?)
+     | {tab: (.tabProperties.tabId // ""), layout: (.documentTab.body | layout)}] as $tabs
+  | [$tabs[] | .tab as $tab | (.layout | hits($find))[] | {tab: $tab, start: .}] as $at
+  | if ($doc.revisionId // "") == "" then {refusal: "document \($p.docId) answered no revision id"}
+    elif ($doc.tabs | type) != "array" or ($doc.tabs | length) == 0 then
+      {refusal: "document \($p.docId) answered no tabs"}
+    elif any($tabs[]; .layout.bad) then
+      {refusal: "document \($p.docId) answered text runs whose indices overlap, so no index in it can be trusted"}
+    elif ($at | length) == 0 then
+      {refusal: "no match: find is in no text of the body (it is case-sensitive, and headers, footers and footnotes are not searched)"}
+    elif ($at | length) > 1 then
+      {refusal: "\($at | length) matches of find in the body: a table goes in one place, so make find match exactly one"}
+    else
+      $at[0] as $m
+      | (if $m.tab == "" then {} else {tabId: $m.tab} end) as $t
+      | {match: {tab: $m.tab, start: $m.start}, revision: $doc.revisionId, rows: $rows, cols: $cols,
+         place: {requests: [
+           {deleteContentRange: {range: ({startIndex: $m.start, endIndex: ($m.start + ($find | length))} + $t)}},
+           {insertTable: {location: ({index: $m.start} + $t), rows: $rows, columns: $cols}}],
+          writeControl: {requiredRevisionId: $doc.revisionId}}}
+    end
+')
+refusal=$(jq -r '.refusal // empty' <<<"$found")
+[ -z "$refusal" ] || { echo "$refusal" >&2; exit 1; }
+place=$(jq -c '.place' <<<"$found")
+# The place goes itself, pinned to the revision read: the fill the script
+# prints is a second batchUpdate, which the yard sends. The body reaches
+# curl through a pipe, not an argument, as the token does.
+printf 'header = "Authorization: Bearer %s"\n' "$GOOGLE_TOKEN" \
+  | curl -sS --fail-with-body -K - -H 'Content-Type: application/json' \
+      --data-binary @<(printf '%s' "$place") \
+  "$YARDR_SOURCE_BASE/v1/documents/$docId:batchUpdate" >/dev/null || {
+  echo "the table could not be placed in document $docId (curl exit $?)" >&2; exit 1
+}
+# Past the place every refusal leaves the empty table standing, to be
+# removed by hand with the placeholder restored.
+cleanup="remove the empty table, restore the placeholder, and call table again"
+doc2=$(printf 'header = "Authorization: Bearer %s"\n' "$GOOGLE_TOKEN" \
+  | curl -sS --fail-with-body --get -K - \
+  --data-urlencode "includeTabsContent=true" \
+  --data-urlencode "fields=revisionId,tabs" \
+  "$YARDR_SOURCE_BASE/v1/documents/$docId") || {
+  echo "the table was placed but the document could not be read again (curl exit $?): $cleanup" >&2; exit 1
+}
+# The second read pins the fill and proves the table stands where the
+# script put it: a table one index past the placeholder's start, with the
+# rows and columns asked for. The fill's cell indices follow from that
+# place, from the last cell backwards.
+built=$(printf '%s\n%s\n%s\n' "$in" "$found" "$doc2" | jq -c -s '
+  .[0].params as $p
+  | .[1] as $f
+  | .[2] as $doc
+  | ($p.cells | fromjson) as $cells
+  | ($f.match.start + 1) as $t
+  | (if $f.match.tab == "" then {} else {tabId: $f.match.tab} end) as $tab
+  | ([$doc.tabs[]? | recurse(.childTabs[]?)
+      | select((.tabProperties.tabId // "") == $f.match.tab)
+      | (.documentTab.body | [.. | select(type == "object" and has("table"))]
+        | map(select(.startIndex == $t
+          and (.table.tableRows | length) == $f.rows
+          and all(.table.tableRows[]; (.tableCells | length) == $f.cols))))
+     ] | add // []) as $tables
+  | if ($doc.revisionId // "") == "" then {refusal: "the table was placed but a second read answered no revision id"}
+    elif ($tables | length) == 0 then
+      {refusal: "the table was placed but a second read shows no \($f.rows)x\($f.cols) table at index \($t)"}
+    else
+      {width: {magnitude: 0, unit: "PT"}} as $noborder
+      | ((if ($p | has("borders")) and $p.borders == false then
+            [{updateTableCellStyle: {
+                tableStartLocation: ({index: $t} + $tab),
+                tableCellStyle: {borderTop: $noborder, borderBottom: $noborder,
+                  borderLeft: $noborder, borderRight: $noborder},
+                fields: "borderTop,borderBottom,borderLeft,borderRight"}}]
+          else [] end)
+         + [range($f.rows - 1; -1; -1) as $r
+            | range($f.cols - 1; -1; -1) as $c
+            | $cells[$r][$c] as $text
+            | select($text != "")
+            | {insertText: {
+                location: ({index: ($f.match.start + 4 + $r * (1 + 2 * $f.cols) + 2 * $c)} + $tab),
+                text: $text}}]) as $reqs
+      | {body: {requests: $reqs, writeControl: {requiredRevisionId: $doc.revisionId}}}
+    end
+')
+refusal=$(jq -r '.refusal // empty' <<<"$built")
+[ -z "$refusal" ] || { echo "$refusal: $cleanup" >&2; exit 1; }
+jq -c '.body' <<<"$built"

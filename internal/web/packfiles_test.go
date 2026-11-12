@@ -38,7 +38,7 @@ func hexSum(s string) string {
 }
 
 // starterReading is the server's reading of a depot pack of 40 files, too
-// large for a whole card: its texts pass the card's 64 KiB, and its files
+// large for a whole card: its texts pass the card's 128 KiB, and its files
 // pass the card's lines, so the last of them have none. One file is a
 // change and one carries text that must be written as text. The pack adds
 // the source fresh, so its full text holds a declaration and a command file
@@ -47,7 +47,7 @@ func starterReading() (*store.PackReading, []packFileWant) {
 	plan := &store.AskPlan{}
 	var wants []packFileWant
 	for i := range 40 {
-		text := strings.Repeat(fmt.Sprintf("line %d of the file\n", i), 110)
+		text := strings.Repeat(fmt.Sprintf("line %d of the file\n", i), 180)
 		w := packFileWant{kind: "file", name: fmt.Sprintf("roles/%02d.md", i), action: "create", newSHA: hexSum(text), text: text}
 		diff := "--- was\n+++ is\n@@ -0,0 +1,1 @@\n+role\n"
 		switch i {

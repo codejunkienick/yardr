@@ -2,8 +2,9 @@
 
 The pack wires Google Docs and Slides into the yard as the declared
 sources `google-docs` (documents read, appended to, replaced in
-place and given a picture) and `google-slides` (decks read, slides
-with title and body appended).
+place, given a picture, and laid out with a table and styled text)
+and `google-slides` (decks read, slides with title and body
+appended).
 Each call goes out with a short-lived token minted from a gws login
 on this machine, so no new copy of a secret is stored anywhere.
 The login, the account, the mint and calling as a user are the four
@@ -31,7 +32,7 @@ google packs' shared setup, said once in `yardr docs google`.
    ```sh
    yardr pack apply google-docs
    # applied pack google-docs to the yard: 2 created, 0 changed, 0 unchanged
-   # source google-docs is declared: 4 calls under https://docs.googleapis.com (yardr source show google-docs)
+   # source google-docs is declared: 6 calls under https://docs.googleapis.com (yardr source show google-docs)
    # source google-slides is declared: 2 calls under https://slides.googleapis.com (yardr source show google-slides)
    ```
 3. **The account.** The yard's Google account for `google-docs`
@@ -54,11 +55,14 @@ google packs' shared setup, said once in `yardr docs google`.
       and `slide` on `google-slides`: paragraphs appended at the end
       of a doc, each with its style, and slides appended to a deck,
       with title and body; replaces nothing.
-   3. `everything`: what `append` grants, and `replace` and `image`
-      on `google-docs`: text replaced in place, more than one match
-      refused unless the call passes all=true, and one picture placed
-      where a placeholder text stands (the text goes), or at the end
-      of the body.
+   3. `everything`: what `append` grants, and `replace`, `image`,
+      `table` and `style` on `google-docs`: text replaced in place,
+      more than one match refused unless the call passes all=true, one
+      picture placed where a placeholder text stands (the text goes),
+      or at the end of the body, a table put where a placeholder text
+      stands (the text goes) with its cells filled, with or without
+      borders, and one match styled bold, sized or coloured, or its
+      paragraph aligned.
    A grantee who comes later gets one preset grant card per source:
    ```sh
    yardr bead ask <bead> "Let the reviewers read Docs" --run "source grant google-docs --preset read --group reviewers" --context "The reviewers read docs to check a bead's work; the card names each call it covers."
@@ -70,13 +74,16 @@ google packs' shared setup, said once in `yardr docs google`.
    yardr source grant google-docs write --crew yardmaster
    yardr source grant google-docs replace --crew yardmaster
    yardr source grant google-docs image --crew yardmaster
+   yardr source grant google-docs table --crew yardmaster
+   yardr source grant google-docs style --crew yardmaster
    yardr source grant google-slides slide --crew yardmaster
    ```
    As ada, the same grants with `--as ada`, on cards addressed to
    ada and approved by ada alone: the shared card is in
    `yardr docs google` ("Calling as a user"), one card per grant, with
-   `read`, `write`, `replace`, `image` and `slide` from above. There is no
-   typed way beside these: a grant `as` ada is ada's to give.
+   `read`, `write`, `replace`, `image`, `table`, `style` and `slide`
+   from above. There is no typed way beside these: a grant `as` ada
+   is ada's to give.
    `yardr source show google-docs` lists each call with its kind and
    who may make it, plain and `as` each user.
 6. **Check it.** Neither source names a check call, so each check
@@ -127,6 +134,35 @@ google packs' shared setup, said once in `yardr docs google`.
    record of the call, since a signed one carries its signature; Google
    saves it with the picture in the document, though, so use one that
    anyone who can read the document may see.
+   A table is put with table, in the place of a placeholder text typed
+   in the doc where the table is to go: the text is removed, its
+   paragraph split around the table, and the cells filled from the
+   call's rows. The call reads the doc for the placeholder's index,
+   and refuses a placeholder that is not there and one that stands in
+   more than one place, each in words that say so. The match is
+   literal and case-sensitive, in the body of every tab, table cells
+   included; a header, a footer or a footnote is not searched. Every
+   row holds the same number of cells: at most 20 rows of 6. A cell's
+   text may run to a few lines, and may itself be a placeholder that
+   replace fills later.
+   ```sh
+   yardr call google-docs table docId=<the doc's id> find='{{prices}}' cells='[["Item","CHF"],["Bread","{{price_1}}"]]'
+   ```
+   The table keeps its borders unless the call passes borders=false,
+   for a block of columns side by side. The call places the table and
+   fills its cells in two writes; where the place lands and the fill
+   fails, the refusal says to remove the empty table, restore the
+   placeholder, and call table again.
+   Text is styled with style, which finds one match: bold=true makes it
+   bold and bold=false removes bold; size sets whole points, color takes
+   six hex digits, and align sets the paragraph's alignment. Table cells
+   are included. At least one of the four is passed. The match
+   is literal and case-sensitive, in the body of every tab; none and
+   more than one are refused, each in words that say so.
+   ```sh
+   yardr call google-docs style docId=<the doc's id> find='Total' bold=true
+   yardr call google-docs style docId=<the doc's id> find='{{price_1}}' align=right
+   ```
    A slide is the same shape: an empty deck the drive source makes,
    then a slide with the caller's own id for it, unique in the deck:
    ```sh
@@ -143,7 +179,8 @@ sheets source exists; Tasks, which is no source yet, so no pack
 wires it in (Calendar is the google-calendar pack); paging past the
 first page; a picture in a header, a footer or a slide, or sent up
 from a file on the yard's machine; resizing or moving a picture
-already placed; tables and bullets; and no call the pack does not
+already placed; column widths, merged cells, and rows or columns
+added to a table that stands; bullets; and no call the pack does not
 list. The yard's source
 format cannot express what is not listed, and the pack does not
 change yardr.

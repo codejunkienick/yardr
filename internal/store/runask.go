@@ -38,9 +38,10 @@ const (
 	// MaxRunPackDeclarations is the most declaration text a pack ask
 	// holds together, and MaxRunPackFiles the most its command files,
 	// their diffs and a depot plan's file texts and diffs hold together
-	// (yardr-bht9 3.3): past either the pack is read at a desk.
+	// (yardr-bht9 3.3, 128 KiB since a pack's own files grew past 64 KiB
+	// with legitimate calls, ask 24349): past either the pack is read at a desk.
 	MaxRunPackDeclarations = 256 << 10
-	MaxRunPackFiles        = 64 << 10
+	MaxRunPackFiles        = 128 << 10
 	// MaxRunDepotTest is the most a depot test ask carries: a card
 	// shows the command whole, so past this it is the operator's to
 	// type in a terminal.

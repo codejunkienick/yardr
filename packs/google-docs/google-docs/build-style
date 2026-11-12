@@ -1,0 +1,123 @@
+#!/bin/bash
+# build-style: the body of the google-docs style call, built per call. One
+# JSON object on stdin ({"params": {"docId", "find", "bold", "size",
+# "color", "align"}}), the batchUpdate body on stdout. GOOGLE_TOKEN and
+# YARDR_SOURCE_BASE, the declaration's base, are in the environment. Needs
+# curl and jq.
+#
+# The script reads the document, finds the one match of find, and prints
+# the one batchUpdate styling it, pinned to the revision read: an
+# updateTextStyle over the match for bold, size and color, and an
+# updateParagraphStyle over the same range for align, which styles the
+# paragraph the range overlaps - the match's own, since a match holds no
+# line break. At least one of the four properties is given, else there is
+# nothing to change; bold is set to the boolean given. The match is
+# literal and case-sensitive, as image's is, over the body of every tab
+# (child tabs too) and nowhere else: a header, a footer or a footnote is
+# not searched, and a match in a table cell counts. More than one match
+# is refused, as is none: one style goes on one match.
+#
+# Indices are UTF-16 code units. The index code is build-image's, copied:
+# each body's text runs are laid out against their start indices, one code
+# unit at a time (a character past U+FFFF is two), with a gap marker for
+# every index no text run covers. Anything the body cannot be built from
+# is a refusal: words on stderr, exit 1, nothing sent. find and color stay
+# out of the arguments of every process the script starts: an argument can
+# be read by every process on the machine while it runs.
+set -euo pipefail
+in=$(cat)
+# What is wrong with the parameters alone is refused before the document is
+# read. The yard has checked docId's characters and the lengths already.
+checked=$(jq -c '
+  .params as $p
+  | if ($p.docId // "") == "" then {refusal: "style was handed no docId"}
+    elif ($p.find // "") == "" then {refusal: "find names no text to style"}
+    elif ($p.find | contains("\n")) then
+      {refusal: "find holds a line break: the match stands in one paragraph"}
+    elif ($p | has("bold")) and (($p.bold | type) != "boolean") then
+      {refusal: "bold is true or false"}
+    elif ($p | has("size")) and (($p.size | type) != "number" or $p.size <= 0) then
+      {refusal: "size is a whole number of points above 0"}
+    elif ($p | has("color")) and (($p.color | type) != "string" or ($p.color | test("^[0-9a-fA-F]{6}$") | not)) then
+      {refusal: "color is six hex digits, such as 808080"}
+    elif ($p | has("align")) and (["left", "center", "right"] | index($p.align) | not) then
+      {refusal: "align is one of left, center, right"}
+    elif ($p | has("bold") | not) and ($p | has("size") | not) and ($p | has("color") | not) and ($p | has("align") | not) then
+      {refusal: "style names no property to change: one of bold, size, color, align"}
+    else {ok: true} end
+' <<<"$in")
+refusal=$(jq -r '.refusal // empty' <<<"$checked")
+[ -z "$refusal" ] || { echo "$refusal" >&2; exit 1; }
+docId=$(jq -r '.params.docId' <<<"$in")
+: "${GOOGLE_TOKEN:?GOOGLE_TOKEN is not set}"
+: "${YARDR_SOURCE_BASE:?YARDR_SOURCE_BASE is not set}"
+# The token goes to curl as a config line on its stdin, written by the shell
+# itself, as the other scripts of the pack hand theirs over. The read is the
+# one replace makes, so the calls that find their place ask Google for a
+# document the same way.
+doc=$(printf 'header = "Authorization: Bearer %s"\n' "$GOOGLE_TOKEN" \
+  | curl -sS --fail-with-body --get -K - \
+  --data-urlencode "includeTabsContent=true" \
+  --data-urlencode "fields=revisionId,tabs" \
+  "$YARDR_SOURCE_BASE/v1/documents/$docId") || {
+  echo "document $docId could not be read (curl exit $?)" >&2; exit 1
+}
+# The parameters and the document go to jq as two values on its stdin, not as
+# arguments: the document can be far past what one argument may hold.
+built=$(printf '%s\n%s\n' "$in" "$doc" | jq -c -s '
+  def units: explode | map(if . > 65535
+      then [55296 + ((. - 65536) / 1024 | floor), 56320 + ((. - 65536) % 1024)]
+      else . end) | flatten;
+  def layout:
+    reduce ([.. | select(type == "object" and has("textRun"))][]) as $r
+      ({base: null, units: [], bad: false};
+        ($r.startIndex // 0) as $s
+        | (.base // $s) as $base
+        | ($base + (.units | length)) as $next
+        | if $s < $next then .bad = true
+          else .base = $base
+            | .units += [range($next; $s) | -1] + ($r.textRun.content // "" | units) end);
+  def hits($find): . as $l | ($find | length) as $n
+    | [range(0; ($l.units | length) - $n + 1)
+       | select($l.units[. : . + $n] == $find) | $l.base + .];
+  def hexval: {"0":0,"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,
+    "a":10,"b":11,"c":12,"d":13,"e":14,"f":15}[.];
+  def hexpair: split("") | map(hexval) | .[0] * 16 + .[1];
+  .[0].params as $p
+  | .[1] as $doc
+  | ($p.find | units) as $find
+  | [$doc.tabs[]? | recurse(.childTabs[]?)
+     | {tab: (.tabProperties.tabId // ""), layout: (.documentTab.body | layout)}] as $tabs
+  | [$tabs[] | .tab as $tab | (.layout | hits($find))[] | {tab: $tab, start: .}] as $at
+  | if ($doc.revisionId // "") == "" then {refusal: "document \($p.docId) answered no revision id"}
+    elif ($doc.tabs | type) != "array" or ($doc.tabs | length) == 0 then
+      {refusal: "document \($p.docId) answered no tabs"}
+    elif any($tabs[]; .layout.bad) then
+      {refusal: "document \($p.docId) answered text runs whose indices overlap, so no index in it can be trusted"}
+    elif ($at | length) == 0 then
+      {refusal: "no match: find is in no text of the body (it is case-sensitive, and headers, footers and footnotes are not searched)"}
+    elif ($at | length) > 1 then
+      {refusal: "\($at | length) matches of find in the body: style one match at a time, so make find match exactly one"}
+    else
+      $at[0] as $m
+      | (if $m.tab == "" then {} else {tabId: $m.tab} end) as $t
+      | ({startIndex: $m.start, endIndex: ($m.start + ($find | length))} + $t) as $range
+      | ($p.color // "" | ascii_downcase) as $color
+      | ((if ($p | has("bold")) then [{key: "bold", style: {bold: $p.bold}}] else [] end)
+         + (if ($p | has("size")) then [{key: "fontSize", style: {fontSize: {magnitude: $p.size, unit: "PT"}}}] else [] end)
+         + (if ($p | has("color")) then [{key: "foregroundColor", style: {foregroundColor: {color: {rgbColor: {
+             red: ($color[0:2] | hexpair / 255),
+             green: ($color[2:4] | hexpair / 255),
+             blue: ($color[4:6] | hexpair / 255)}}}}}] else [] end)) as $text
+      | ((if $text | length > 0 then [{updateTextStyle: {range: $range,
+             textStyle: (reduce $text[] as $s ({}; . + $s.style)),
+             fields: ([$text[].key] | join(","))}}] else [] end)
+         + (if ($p | has("align")) then [{updateParagraphStyle: {range: $range,
+             paragraphStyle: {alignment: {left: "START", center: "CENTER", right: "END"}[$p.align]},
+             fields: "alignment"}}] else [] end)) as $reqs
+      | {body: {requests: $reqs, writeControl: {requiredRevisionId: $doc.revisionId}}}
+    end
+')
+refusal=$(jq -r '.refusal // empty' <<<"$built")
+[ -z "$refusal" ] || { echo "$refusal" >&2; exit 1; }
+jq -c '.body' <<<"$built"

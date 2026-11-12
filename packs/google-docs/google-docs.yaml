@@ -1,8 +1,9 @@
 # Google Docs as a declared source: a document read, appended to at the
 # end with several styled paragraphs in one call, replaced in place with a
-# guarded find, and given one picture where a placeholder stands. One
-# source per host, so Docs is its own; the empty file it fills is made by
-# the drive source's doc call. No other batchUpdate request is declared.
+# guarded find, given one picture where a placeholder stands, and laid out
+# with a table where a placeholder stands and styled text. One source per
+# host, so Docs is its own; the empty file it fills is made by the drive
+# source's doc call. No other batchUpdate request is declared.
 #
 # Checked against the discovery document
 # (https://www.googleapis.com/discovery/v1/apis/docs/v1/rest) on 16
@@ -31,7 +32,25 @@
 # replace call counts, and prints a deleteContentRange of the placeholder
 # and an insertInlineImage at its index, pinned to the revision read; with
 # no placeholder it prints one insertInlineImage at the end of the body and
-# reads nothing.
+# reads nothing. InsertTable, checked on 12 November 2026 (discovery
+# revision 20261106), takes rows, columns and a location, and puts the
+# table one index past it, a newline before it. A table and its cells'
+# texts take two batchUpdates: an insertion index past a table inserted in
+# the same batch is shifted past it, so the cells cannot be filled in the
+# one that places it. The table call's build script reads the document,
+# sends the place itself (a deleteContentRange of the placeholder and an
+# insertTable at its start, pinned to the revision read), reads again for
+# the new revision and to see the table where it put it, and prints the
+# fill: an insertText per non-empty cell from the last cell backwards, and
+# with borders=false one updateTableCellStyle taking every border away.
+# UpdateTextStyle, UpdateParagraphStyle and UpdateTableCellStyle, checked
+# the same day, take a range with a textStyle (bold, fontSize,
+# foregroundColor) or a paragraphStyle (alignment) and fields, and the
+# table's start with a tableCellStyle and fields; a border of width 0 is
+# hidden. The style call's build script finds the one match of its text,
+# in a table cell too, and prints the one batchUpdate styling it, pinned
+# to the revision read; align styles the paragraph the match's range
+# overlaps, which is the match's own, since a match holds no line break.
 #
 # The credential mints like google-mail's: GOOGLE_ACCOUNT names the
 # account (an address, no secret) and google-mint, beside this file,
@@ -41,9 +60,12 @@
 # again first, so it sends a second change only where the first left
 # matches. An image tried again after a lost answer is placed twice at the
 # end of the body; at a placeholder it finds none the second time, which it
-# refuses, the placeholder being gone.
+# refuses, the placeholder being gone. A table tried again after a lost
+# answer finds its placeholder gone too, which it refuses; where the place
+# landed and the fill did not, the empty table stands to be removed by
+# hand. A style tried again styles again, to the same end.
 name: google-docs
-about: Google Docs read and appended to, several styled paragraphs in one call, replaced in place, and given a picture.
+about: Google Docs read and appended to, several styled paragraphs in one call, replaced in place, given a picture, and laid out with a table and styled text.
 base: https://docs.googleapis.com
 credential:
   env: GOOGLE_TOKEN
@@ -132,3 +154,53 @@ calls:
       path: /v1/documents/{docId}:batchUpdate
     build: [google-docs/build-image]
     answer: { select: [documentId, replies] }   # replies carry insertInlineImage.objectId
+  table:
+    kind: update
+    about: Put a table where a placeholder stands and fill its cells, with or without borders
+    params:
+      docId: { type: string, pattern: "^[A-Za-z0-9_-]+$", max: 200, log: true }
+      # The placeholder text to put the table in the place of: literal and
+      # case-sensitive, in the body of the document (not in a header, a
+      # footer or a footnote), one line, matching exactly one place; the
+      # text is removed and the table takes its place. The placeholder's
+      # paragraph is split around the table. Free text: its value is in no
+      # event.
+      find: { type: string, max: 1000 }
+      # The table's rows as one JSON array of rows, each an array of
+      # strings: [["Item","CHF"],["Bread","1.20"]]. Every row holds the
+      # same number of cells: at most 20 rows of 6, each cell's text a few
+      # lines at most. A cell's text may itself be a placeholder that
+      # replace fills later. Free text: its value is in no event.
+      cells: { type: string, max: 60000 }
+      # Left out or true, the table keeps its borders; false takes them
+      # all away, for a block of columns side by side.
+      borders: { type: bool, optional: true }
+    request:
+      method: POST
+      path: /v1/documents/{docId}:batchUpdate
+    build: [google-docs/build-table]
+    answer: { select: [documentId, replies] }   # replies carry one per cell filled
+  style:
+    kind: update
+    about: Style one match bold, sized or coloured, or align the paragraph it stands in
+    params:
+      docId: { type: string, pattern: "^[A-Za-z0-9_-]+$", max: 200, log: true }
+      # The text to style: literal and case-sensitive, in the body of the
+      # document (not in a header, a footer or a footnote), table cells
+      # included, one line, matching exactly one place. Free text: its
+      # value is in no event.
+      find: { type: string, max: 1000 }
+      # True bolds the match; false removes bold; left out leaves it as it is.
+      bold: { type: bool, optional: true }
+      # The match's size in whole points, above 0.
+      size: { type: int, optional: true }
+      # The match's colour as six hex digits, such as 808080. Free text:
+      # its value is in no event.
+      color: { type: string, max: 6, optional: true }
+      # The alignment of the paragraph the match stands in.
+      align: { type: enum, values: [left, center, right], optional: true }
+    request:
+      method: POST
+      path: /v1/documents/{docId}:batchUpdate
+    build: [google-docs/build-style]
+    answer: { select: [documentId, replies] }

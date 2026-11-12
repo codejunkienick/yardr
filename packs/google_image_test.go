@@ -339,17 +339,23 @@ func imageHome(t *testing.T) string {
 	return home
 }
 
-// imageDoc is one doc the image stand-in serves: its id and the
-// documents.get answer it is read with.
+// imageDoc is one doc the image stand-in serves: its id, the
+// documents.get answer it is read with, and, for a doc a table is put in,
+// the revision of the read past its place, which answers the table the
+// first batchUpdate placed. A doc whose batchUpdate fails fails it.
 type imageDoc struct {
-	id  string
-	get string
+	id        string
+	get       string
+	placedRev string // "" serves get to every read
+	failPost  bool
 }
 
 // imageDocs answers documents.get for docs whose text runs carry the indices
 // Docs gives them, and batchUpdate with one reply per request, as Docs does:
 // an insertInlineImage answers the new picture's object id and every other
-// request an empty reply. It keeps every request it was sent.
+// request an empty reply. For a doc with a placed revision, a read past its
+// first batchUpdate answers the table it placed, with empty cells. It keeps
+// every request it was sent.
 type imageDocs struct {
 	t    *testing.T
 	mu   sync.Mutex
@@ -426,13 +432,22 @@ func imageStandin(t *testing.T) (*imageDocs, *httptest.Server) {
 		para(1, 12, run(1, 7, "abcdef"), run(4, 12, "{{logo}}")))))
 	norev := `{"tabs":[` + tab("t.0", only(para(1, 7, run(1, 7, "Lunch\n")))) + `]}`
 	notabs := `{"revisionId":"rev-no-tabs"}`
+	// plain and reject read like one: plain answers no placed table, so
+	// the table call's second read finds none, and reject fails the
+	// batchUpdate that would place it.
+	plain := doc("rev-plain", tab("t.0", only(
+		para(1, 23, run(1, 7, "Lunch "), run(7, 15, "{{logo}}"), run(15, 23, " places\n")),
+		para(23, 39, run(23, 39, "Friday we ship.\n")))))
+	reject := doc("rev-reject", tab("t.0", only(
+		para(1, 23, run(1, 7, "Lunch "), run(7, 15, "{{logo}}"), run(15, 23, " places\n")),
+		para(23, 39, run(23, 39, "Friday we ship.\n")))))
 	s := &imageDocs{t: t, docs: map[string]imageDoc{
-		"one":         {id: "1ImgOne0123456789abcdefghijklmno", get: one},
-		"split":       {id: "1ImgSplit0123456789abcdefghijklm", get: split},
-		"emoji":       {id: "1ImgEmoji0123456789abcdefghijkl", get: emoji},
-		"cell":        {id: "1ImgCell0123456789abcdefghijklmn", get: cell},
-		"gap":         {id: "1ImgGap0123456789abcdefghijklmno", get: gap},
-		"second":      {id: "1ImgSecond0123456789abcdefghijkl", get: second},
+		"one":         {id: "1ImgOne0123456789abcdefghijklmno", get: one, placedRev: "rev-one-placed"},
+		"split":       {id: "1ImgSplit0123456789abcdefghijklm", get: split, placedRev: "rev-split-placed"},
+		"emoji":       {id: "1ImgEmoji0123456789abcdefghijkl", get: emoji, placedRev: "rev-emoji-placed"},
+		"cell":        {id: "1ImgCell0123456789abcdefghijklmn", get: cell, placedRev: "rev-cell-placed"},
+		"gap":         {id: "1ImgGap0123456789abcdefghijklmno", get: gap, placedRev: "rev-gap-placed"},
+		"second":      {id: "1ImgSecond0123456789abcdefghijkl", get: second, placedRev: "rev-second-placed"},
 		"twice":       {id: "1ImgTwice0123456789abcdefghijklm", get: twice},
 		"tabled":      {id: "1ImgTabled0123456789abcdefghijkl", get: tabled},
 		"twotabs":     {id: "1ImgTwoTabs0123456789abcdefghijk", get: twotabs},
@@ -440,19 +455,30 @@ func imageStandin(t *testing.T) (*imageDocs, *httptest.Server) {
 		"overlap":     {id: "1ImgOverlap0123456789abcdefghijk", get: overlap},
 		"no-revision": {id: "1ImgNoRev0123456789abcdefghijklm", get: norev},
 		"no-tabs":     {id: "1ImgNoTabs0123456789abcdefghijkl", get: notabs},
+		"plain":       {id: "1ImgPlain0123456789abcdefghijklm", get: plain},
+		"reject":      {id: "1ImgReject0123456789abcdefghijk", get: reject, failPost: true},
 	}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		s.mu.Lock()
-		s.got = append(s.got, googleRequest{method: r.Method, path: r.URL.Path, query: r.URL.Query(), auth: r.Header.Get("Authorization"), body: body})
+		s.got = append(s.got, googleRequest{method: r.Method, path: r.URL.Path, query: r.URL.Query(), auth: r.Header.Get("Authorization"), contentType: r.Header.Get("Content-Type"), body: body})
 		s.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		for _, d := range s.docs {
 			switch {
 			case r.Method == "GET" && r.URL.Path == "/v1/documents/"+d.id:
+				if placed := s.placed(d); placed != "" {
+					io.WriteString(w, placed)
+					return
+				}
 				io.WriteString(w, d.get)
 				return
 			case r.Method == "POST" && r.URL.Path == "/v1/documents/"+d.id+":batchUpdate":
+				if d.failPost {
+					w.WriteHeader(http.StatusBadRequest)
+					io.WriteString(w, `{"error":{"code":400,"message":"the table does not fit"}}`)
+					return
+				}
 				var posted struct {
 					Requests []map[string]json.RawMessage `json:"requests"`
 				}
@@ -476,6 +502,76 @@ func imageStandin(t *testing.T) (*imageDocs, *httptest.Server) {
 		io.WriteString(w, `{"error":{"code":404,"message":"no such doc"}}`)
 	}))
 	return s, srv
+}
+
+// placed is the documents.get answer for a doc whose table the stand-in
+// was already sent: the table the first batchUpdate placed, with empty
+// cells, one past the placeholder it deleted, under the doc's placed
+// revision. It follows the Tables how-to's index table: the table stands
+// one index past its location, an empty cell runs two units, and a row
+// one past its cells. "" where the doc takes no table, or none was sent
+// yet.
+func (s *imageDocs) placed(d imageDoc) string {
+	if d.placedRev == "" {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, r := range s.got {
+		if r.method != "POST" || r.path != "/v1/documents/"+d.id+":batchUpdate" {
+			continue
+		}
+		var posted struct {
+			Requests []struct {
+				DeleteContentRange struct {
+					Range struct {
+						StartIndex int    `json:"startIndex"`
+						TabID      string `json:"tabId"`
+					} `json:"range"`
+				} `json:"deleteContentRange"`
+				InsertTable struct {
+					Rows    int `json:"rows"`
+					Columns int `json:"columns"`
+				} `json:"insertTable"`
+			} `json:"requests"`
+		}
+		if err := json.Unmarshal(r.body, &posted); err != nil {
+			continue
+		}
+		if len(posted.Requests) < 2 || posted.Requests[1].InsertTable.Rows == 0 {
+			continue
+		}
+		at := posted.Requests[0].DeleteContentRange.Range
+		in := posted.Requests[1].InsertTable
+		return placedTable(d.placedRev, at.TabID, at.StartIndex+1, in.Rows, in.Columns)
+	}
+	return ""
+}
+
+// placedTable is a documents.get answer for a doc holding one table of
+// empty cells at tableStart in tab, under revision rev.
+func placedTable(rev, tab string, tableStart, rows, cols int) string {
+	itoa := strconv.Itoa
+	end := tableStart + 2 + rows*(1+2*cols)
+	var rs []string
+	for r := 0; r < rows; r++ {
+		rowStart := tableStart + 1 + r*(1+2*cols)
+		var cs []string
+		for c := 0; c < cols; c++ {
+			cellStart := rowStart + 1 + 2*c
+			para := cellStart + 1
+			cs = append(cs, `{"startIndex":`+itoa(cellStart)+`,"endIndex":`+itoa(cellStart+2)+
+				`,"content":[{"startIndex":`+itoa(para)+`,"endIndex":`+itoa(para+1)+
+				`,"paragraph":{"elements":[{"startIndex":`+itoa(para)+`,"endIndex":`+itoa(para+1)+
+				`,"textRun":{"content":"\n"}}]}}]}`)
+		}
+		rs = append(rs, `{"startIndex":`+itoa(rowStart)+`,"endIndex":`+itoa(rowStart+1+2*cols)+
+			`,"tableCells":[`+strings.Join(cs, ",")+`]}`)
+	}
+	return `{"revisionId":` + strconv.Quote(rev) + `,"tabs":[{"tabProperties":{"tabId":` + strconv.Quote(tab) +
+		`},"documentTab":{"body":{"content":[{"endIndex":1,"sectionBreak":{}},` +
+		`{"startIndex":` + itoa(tableStart) + `,"endIndex":` + itoa(end) + `,"table":{"tableRows":[` +
+		strings.Join(rs, ",") + `]}}]}}}]}`
 }
 
 // doc is the id of the image stand-in's named doc; "missing" is one it has
