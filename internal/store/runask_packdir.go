@@ -27,12 +27,6 @@ func IsPackDir(arg string) bool {
 	return strings.ContainsRune(arg, filepath.Separator) || strings.Contains(arg, "/") || arg == "." || arg == ".."
 }
 
-// isPackURL reports whether the pack word names a pack by where it is
-// served: as pack.IsURL reads it, which the store does not import.
-func isPackURL(s string) bool {
-	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
-}
-
 // packDirNoReader refuses a directory pack where no server registered its
 // directory reading on the store.
 func packDirNoReader(dir string) error {
@@ -46,6 +40,15 @@ func packDirNoReader(dir string) error {
 // directory as read. At approval a directory that holds no pack reads as
 // the stale it is, and nothing runs.
 func (w *wtx) packCardReading(ctx context.Context, name, depot string, mappings Mappings, sha string, asking bool) (*PackReading, bool, error) {
+	// A URL holds a slash, so it reads as a directory below: judge it
+	// first, through the fetching the write was given before it.
+	if IsPackURL(name) {
+		reading, err := w.packURLCardReading(ctx, name, depot, mappings, asking)
+		if err != nil {
+			return nil, false, err
+		}
+		return reading, false, nil
+	}
 	if !IsPackDir(name) {
 		read := w.packReaderOf()
 		if read == nil {
@@ -154,7 +157,7 @@ func (w *wtx) packDirCheckout(dir string) (string, error) {
 		return "", fmt.Errorf("pack %s: %s is inside a nested checkout, not the registered depot's main checkout (a worktree of a depot is not its main checkout): it is the operator's to apply in a terminal (yardr pack apply %s)", dir, resolved, dir)
 	}
 	if !inside {
-		return "", fmt.Errorf("pack %s: %s is not inside a registered depot's main checkout of this yard (a worktree of a depot is not its main checkout): a card applies a pack yardr embeds or a directory inside one; it is the operator's to apply in a terminal (yardr pack apply %s)", dir, resolved, dir)
+		return "", fmt.Errorf("pack %s: %s is not inside a registered depot's main checkout of this yard (a worktree of a depot is not its main checkout): a card applies a pack yardr embeds, a directory inside one, or the packs repository's URL pinned with --sha256; it is the operator's to apply in a terminal (yardr pack apply %s)", dir, resolved, dir)
 	}
 	return resolved, nil
 }
@@ -204,12 +207,7 @@ func packRecordRefusal(name string, rec *PackImport) error {
 	if from == "" {
 		from = "an import the record names nowhere"
 	}
-	return fmt.Errorf("pack %s: this yard imported it from %s, and a card applies a pack yardr embeds or a directory inside a depot's main checkout: it is the operator's to apply in a terminal (yardr pack apply %s)", name, from, name)
-}
-
-// packURLRefusal refuses a pack at a URL: no card fetches one.
-func packURLRefusal(name string) error {
-	return fmt.Errorf("pack %s: a pack at a URL is the operator's to apply in a terminal (yardr pack apply %s): a card applies a pack yardr embeds or a directory inside a depot's main checkout", name, name)
+	return fmt.Errorf("pack %s: this yard imported it from %s, and a card applies a pack yardr embeds, a directory inside a depot's main checkout, or the packs repository's URL pinned with --sha256: it is the operator's to apply in a terminal (yardr pack apply %s)", name, from, name)
 }
 
 // packDirDigest reads the digest a --sha256 flag names, as

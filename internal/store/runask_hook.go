@@ -510,7 +510,7 @@ type hookRegisterJob struct {
 func (s *Store) approveHookRegister(ctx context.Context, id string, seq uint64, actor string, weighed bool, values map[string]string) (*AskApproved, error) {
 	// What the ask's card needs of git is read before the write, as the
 	// plain approval reads it: a table is held to the flows' edges again.
-	repos, err := s.approvalRepos(ctx, id, seq)
+	repos, _, err := s.approvalRepos(ctx, id, seq)
 	if err != nil {
 		return nil, fmt.Errorf("ask %d: %w. %s", seq, err, nothingRan)
 	}

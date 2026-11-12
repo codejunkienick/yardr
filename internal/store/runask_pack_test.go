@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"yardr.dev/yardr/internal/source"
 )
@@ -1943,9 +1944,9 @@ func TestPackApplyDirectoryPathRefusals(t *testing.T) {
 	}{
 		{"outside every checkout", "pack apply " + outside, outside + " is not inside a registered depot's main checkout of this yard (a worktree of a depot is not its main checkout)"},
 		{"a relative path", "pack apply packs/team", `"packs/team" is no absolute directory: a card names the directory as an absolute path inside a registered depot's main checkout`},
-		{"a URL", "pack apply https://example.com/packs/team/", "pack https://example.com/packs/team/: a pack at a URL is the operator's to apply in a terminal"},
-		{"a URL with a pin", "pack apply https://example.com/packs/team/ --sha256 " + dirPackDigest, "a pack at a URL is the operator's to apply in a terminal"},
-		{"a record", "pack apply oldteam", "pack oldteam: this yard imported it from /elsewhere/oldteam, and a card applies a pack yardr embeds or a directory inside a depot's main checkout"},
+		{"a URL", "pack apply https://example.com/packs/team/", "pack https://example.com/packs/team/: a pack at a URL is applied pinned: name its digest (--sha256, as yardr pack check https://example.com/packs/team/ prints it)"},
+		{"a URL with a pin", "pack apply https://example.com/packs/team/ --sha256 " + dirPackDigest, "pack https://example.com/packs/team/: no server has registered its fetching of the packs repository on this store"},
+		{"a record", "pack apply oldteam", "pack oldteam: this yard imported it from /elsewhere/oldteam, and a card applies a pack yardr embeds, a directory inside a depot's main checkout, or the packs repository's URL pinned with --sha256"},
 		{"an unknown name", "pack apply nosuch", "pack nosuch: yardr embeds no pack of that name: it is the operator's to apply in a terminal (yardr pack check nosuch)"},
 	} {
 		dirCalled = false
@@ -2039,6 +2040,360 @@ func TestPackApplyDirectorySourceCard(t *testing.T) {
 	joined := strings.Join(run.Does, "\n")
 	for _, want := range []string{
 		"pack team (directory " + resolved + " in yardr test1), digest sha256:" + dirPackDigest + ", of kind source, into the yard: it adds 1 source",
+		"source wired: its calls go to https://wired.example.com/v1",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the card lacks %q:\n%s", want, joined)
+		}
+	}
+	if !StrongWeight(got.Ask.Weight) {
+		t.Fatalf("the card's weight = %+v, want strong", got.Ask.Weight)
+	}
+	if done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil || done.Result != "approved, to be carried out" {
+		t.Fatalf("the weighed approval = %+v, %v", done, err)
+	}
+}
+
+// A repository pack past the whole-card bounds is written as a summary
+// card, as an embedded pack is: the URL and digest on its head line,
+// each file by its hash, the texts behind it.
+func TestPackApplyURLSummaryCard(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	y.firstInstallDepot(t)
+	f := &fakePack{name: "team", build: "test1", kind: "git",
+		depot: "web", digest: urlPackDigest, plan: largePlan(20, 5000)}
+	u := &urlFetcher{f: f}
+	y.Store.SetPackFetcher(u.fetch)
+	ask := packAsk()
+	ask.Run.Argv = []string{"pack apply " + urlPackURL + " --depot web --sha256 " + urlPackDigest}
+	seq := y.ask(t, ask, "yardmaster")
+	got := y.asked(t, seq)
+	run := got.Ask.Run
+	if !run.Pack.Summary || run.Pack.Digest != urlPackDigest || run.Seen[packDigestKey(urlPackURL)] != urlPackDigest {
+		t.Fatalf("the stored pack = %+v, seen %v", run.Pack, run.Seen)
+	}
+	if len(run.Does) > MaxRunSourceCardLines {
+		t.Fatalf("the summary runs to %d lines", len(run.Does))
+	}
+	joined := strings.Join(run.Does, "\n")
+	for _, want := range []string{
+		"pack team (" + urlPackURL + "), of kind git, into depot web: 23 to create, 1 to change, 1 unchanged, and 1 dropped and left where they stand, digest sha256:" + urlPackDigest + ".",
+		"file roles/0.md: create, sha256 (none) -> sha256 " + strings.Repeat("b", 64),
+		"in all: 23 to create, 1 to change, 1 unchanged, 0 not in the pack, 1 no longer in it.",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the summary lacks %q:\n%s", want, joined)
+		}
+	}
+	if !StrongWeight(got.Ask.Weight) {
+		t.Fatalf("the summary's weight = %+v, want the whole card's strong", got.Ask.Weight)
+	}
+	if done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil || done.Result != "approved, to be carried out" {
+		t.Fatalf("the weighed approval = %+v, %v", done, err)
+	}
+}
+
+// urlPackOrigin is the origin of the packs repository a pack-URL test
+// fetches from, and urlPackURL the repository's URL of the team pack.
+const urlPackOrigin = "https://repo.example.com/yardr-packs/main/"
+
+const urlPackURL = urlPackOrigin + "team/"
+
+// urlPackDigest is the digest a pack-URL test pins: 64 hex digits, as
+// pack check prints them.
+const urlPackDigest = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+
+// urlFetcher is the fetching of the packs repository a pack-URL test
+// store stands with: it counts its fetches, may run something while it
+// fetches, and answers the reading of the pack f holds, labelled with
+// the URL. Like the server's, it refuses what is not the repository's
+// before any fetch, holds the pack to its pin, and holds the pack's
+// name to its directory's.
+type urlFetcher struct {
+	f       *fakePack
+	calls   int
+	during  func()
+	readErr error
+}
+
+func (u *urlFetcher) fetch(_ context.Context, from, digest string) (PackReader, error) {
+	// The origin and one pack's name, canonically written, as the
+	// repository's packing holds it: anything else is refused before
+	// any fetch.
+	rest, ok := strings.CutPrefix(from, urlPackOrigin)
+	name := strings.TrimSuffix(rest, "/")
+	if !ok || name == "" || strings.Contains(name, "/") {
+		return nil, fmt.Errorf("%s is not in the packs repository (%s): a card applies a pack of that repository alone, written as %s<name>/", from, urlPackOrigin, urlPackOrigin)
+	}
+	if from != urlPackOrigin+name+"/" {
+		return nil, fmt.Errorf("pack URL %s: write it as %s", from, urlPackOrigin+name+"/")
+	}
+	u.calls++
+	if u.during != nil {
+		u.during()
+	}
+	if u.f.name != name {
+		return nil, fmt.Errorf("%s holds the pack %s, not %s: a pack of the repository is called what its directory is", from, u.f.name, name)
+	}
+	pin, err := packDirDigest(digest)
+	if err != nil {
+		return nil, fmt.Errorf("%q: %w", digest, err)
+	}
+	if u.f.digest != pin {
+		return nil, fmt.Errorf("pack %s is not the one pinned: the pin is sha256:%s, the pack read has sha256:%s; nothing was changed", name, pin, u.f.digest)
+	}
+	return func(_ context.Context, called string, depot string, mappings Mappings, _ API) (*PackReading, error) {
+		if called != "" {
+			return nil, fmt.Errorf("a run ask of a URL claims no name, and the card called the reading with %q", called)
+		}
+		if u.readErr != nil {
+			return nil, u.readErr
+		}
+		u.f.readDepot, u.f.readMappings = depot, mappings
+		r := u.f.reading()
+		r.Label = from
+		r.Digest = pin
+		return r, nil
+	}, nil
+}
+
+// A pack of the packs repository, named by its URL and pinned, is carded
+// in the embedded card's shape from the fetched bytes: the URL whole
+// where the label stands, the pack's name held to its directory's, and
+// the digest printed whole. The fetch runs before the store's write, and
+// the approval is carried out after it.
+func TestPackApplyURLCard(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	if err := y.PutDepot(y.ctx, Depot{Name: "web", Path: t.TempDir()}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakePack{name: "team", build: "test1", kind: "git",
+		depot: "web", digest: urlPackDigest, plan: firstInstallPlan(), noSources: true}
+	u := &urlFetcher{f: f}
+	y.Store.SetPackFetcher(u.fetch)
+	// The fetch runs before the store's write: a write made while it
+	// runs completes at once. Were the fetch inside the ask's write,
+	// that write would wait for the ask's own; it waits here in a
+	// goroutine of its own, so that the failure is this message and not
+	// a package that hangs.
+	u.during = func() {
+		wrote := make(chan error, 1)
+		go func() { wrote <- y.Mail(y.ctx, "yardmaster", "written while the pack is fetched", "mckean") }()
+		select {
+		case err := <-wrote:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("the pack was fetched inside the store's write: a write made meanwhile did not complete")
+		}
+	}
+	ask := packAsk()
+	ask.Run.Argv = []string{"pack apply " + urlPackURL + " --depot web --flow fresh --sha256 " + urlPackDigest}
+	seq := y.ask(t, ask, "yardmaster")
+	u.during = nil
+	if u.calls != 1 {
+		t.Fatalf("the ask fetched the pack %d times, want once", u.calls)
+	}
+	got := y.asked(t, seq)
+	run := got.Ask.Run
+	wantArgv := "pack apply " + urlPackURL + " --sha256 " + urlPackDigest + " --depot web --flow fresh"
+	if strings.Join(run.Argv, " ") != wantArgv {
+		t.Fatalf("the stored argv = %q, want %q", run.Argv, wantArgv)
+	}
+	if f.readDepot != "web" || f.readMappings.Flow != "fresh" {
+		t.Fatalf("the reading was asked for depot %q, mappings %+v", f.readDepot, f.readMappings)
+	}
+	if run.Pack.Name != "team" || run.Pack.Digest != urlPackDigest || run.Pack.Summary {
+		t.Fatalf("the stored pack = %+v, want team pinned, whole", run.Pack)
+	}
+	if run.Seen[packDigestKey(urlPackURL)] != urlPackDigest {
+		t.Fatalf("the stored seen holds %q for the digest", run.Seen)
+	}
+	joined := strings.Join(run.Does, "\n")
+	for _, want := range []string{
+		"pack team (" + urlPackURL + "), of kind git, into depot web: 3 to create, 0 to change, 0 unchanged, and 0 dropped and left where they stand, digest sha256:" + urlPackDigest + ". It asks nothing.",
+		"the plan uses mapping --flow fresh.",
+		"this is a first install: depot web holds no import of pack team.",
+		"file roles/a.md: create, sha256 (none) -> sha256 " + strings.Repeat("b", 64),
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the card lacks %q:\n%s", want, joined)
+		}
+	}
+	if !StrongWeight(got.Ask.Weight) {
+		t.Fatalf("the card's weight = %+v, want strong", got.Ask.Weight)
+	}
+	if !RunArgvHeld(run.Argv) {
+		t.Errorf("RunArgvHeld does not hold a repository pack apply")
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "approve it where its weight is shown") {
+		t.Fatalf("an unweighed approval = %v", err)
+	}
+	if done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil || done.Result != "approved, to be carried out" {
+		t.Fatalf("the weighed approval = %+v, %v", done, err)
+	}
+	// The refused unweighed attempt fetched too: the approval reads the
+	// card's bytes before its write, whatever refuses inside it.
+	if u.calls != 3 {
+		t.Fatalf("the ask and its two approvals fetched the pack %d times in all, want 3", u.calls)
+	}
+	if done, err := y.ApproveAsk(WithVia(y.ctx, "mckean", "phone"), y.bead, y.ask(t, ask, "yardmaster"), "mckean", true, nil); err != nil || done.Result != "approved, to be carried out" {
+		t.Fatalf("a device's approval = %+v, %v", done, err)
+	}
+	if ev := lastAnswer(t, y); Via(ev) != "phone" {
+		t.Fatalf("the device's approval is via %q, want phone", Via(ev))
+	}
+	if u.calls != 5 {
+		t.Fatalf("two cards written and approved fetched the pack %d times in all, want one fetch per write", u.calls)
+	}
+}
+
+// A pack the origin no longer serves at the card's digest stales the
+// approval and nothing runs, and the ask stays open: once the origin
+// serves those bytes again the approval runs. A reading that fails reads
+// as the stale it is.
+func TestPackApplyURLStale(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	if err := y.PutDepot(y.ctx, Depot{Name: "web", Path: t.TempDir()}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakePack{name: "team", build: "test1", kind: "git",
+		depot: "web", digest: urlPackDigest, plan: firstInstallPlan(), noSources: true}
+	u := &urlFetcher{f: f}
+	y.Store.SetPackFetcher(u.fetch)
+	ask := packAsk()
+	ask.Run.Argv = []string{"pack apply " + urlPackURL + " --depot web --sha256 " + urlPackDigest}
+	seq := y.ask(t, ask, "yardmaster")
+	// The origin moved: it serves other bytes at the URL now.
+	f.digest = strings.Repeat("e", 64)
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil ||
+		!strings.Contains(err.Error(), "is not the one pinned") || !strings.Contains(err.Error(), nothingRan) {
+		t.Fatalf("a moved origin: ApproveAsk = %v", err)
+	}
+	// The ask stays open: the origin serves the pinned bytes again.
+	f.digest = urlPackDigest
+	if done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil || done.Result != "approved, to be carried out" {
+		t.Fatalf("after the origin serves the pin again: ApproveAsk = %+v, %v", done, err)
+	}
+	// The origin holds no pack now: the read fails, and the approval is
+	// refused as the stale it is.
+	seq = y.ask(t, ask, "yardmaster")
+	u.readErr = errors.New("pack.yaml: not found: a pack is a directory with a pack.yaml")
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil ||
+		!strings.Contains(err.Error(), "holds no pack now") || !strings.Contains(err.Error(), "from before that changed") || !strings.Contains(err.Error(), nothingRan) {
+		t.Fatalf("an unreadable origin: ApproveAsk = %v", err)
+	}
+}
+
+// A URL without its pin, a pin that names other bytes or is no digest, a
+// pack not called what its directory is, and each URL that is not the
+// repository's refuse at the ask, before any card. Nothing is fetched
+// for a URL the yard refuses for its form.
+func TestPackApplyURLRefusals(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	if err := y.PutDepot(y.ctx, Depot{Name: "web", Path: t.TempDir()}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakePack{name: "team", build: "test1", kind: "git",
+		depot: "web", digest: urlPackDigest, plan: firstInstallPlan(), noSources: true}
+	u := &urlFetcher{f: f}
+	y.Store.SetPackFetcher(u.fetch)
+	newAsk := func(words string) Ask {
+		ask := packAsk()
+		ask.Run.Argv = []string{"pack apply " + words}
+		return ask
+	}
+	// A pin in any form pack check prints it pins: upper case with its
+	// prefix pins too.
+	if _, err := y.AddAsk(y.ctx, y.bead, newAsk(urlPackURL+" --depot web --sha256 sha256:"+strings.ToUpper(urlPackDigest)), "yardmaster"); err != nil {
+		t.Fatalf("a pin with its prefix in upper case: AddAsk = %v", err)
+	}
+	wrong := strings.Repeat("f", 64)
+	for _, c := range []struct {
+		name, words, want string
+		fetched           bool
+	}{
+		{"no pin", urlPackURL + " --depot web", "a pack at a URL is applied pinned: name its digest (--sha256, as yardr pack check " + urlPackURL + " prints it)", false},
+		{"a pin that is no digest", urlPackURL + " --depot web --sha256 abc", `"abc": not a digest`, true},
+		{"a pin naming other bytes", urlPackURL + " --depot web --sha256 " + wrong, "the pin is sha256:" + wrong + ", the pack read has sha256:" + urlPackDigest, true},
+		{"another host", "https://evil.example.com/yardr-packs/main/team/ --sha256 " + urlPackDigest, "is not in the packs repository", false},
+		{"a fork's commit path", urlPackOrigin + "abc123/team/ --sha256 " + urlPackDigest, "is not in the packs repository", false},
+		{"plain http", "http://repo.example.com/yardr-packs/main/team/ --sha256 " + urlPackDigest, "is not in the packs repository", false},
+		{"a sub-path", urlPackURL + "extra --sha256 " + urlPackDigest, "is not in the packs repository", false},
+		{"no trailing slash", strings.TrimSuffix(urlPackURL, "/") + " --sha256 " + urlPackDigest, "write it as " + urlPackURL, false},
+		{"a query", urlPackURL + "?x=1 --sha256 " + urlPackDigest, "'?' is none of their characters", false},
+	} {
+		calls := u.calls
+		_, err := y.AddAsk(y.ctx, y.bead, newAsk(c.words), "yardmaster")
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: AddAsk = %v, want %q", c.name, err, c.want)
+		}
+		if !c.fetched && u.calls != calls {
+			t.Errorf("%s: the origin was fetched for a refused form", c.name)
+		}
+	}
+	// A pack not called what its directory is: the fetch holds the name
+	// before the card is read, and nothing is stored.
+	f.name = "other"
+	if _, err := y.AddAsk(y.ctx, y.bead, newAsk(urlPackURL+" --depot web --sha256 "+urlPackDigest), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "holds the pack other, not team") {
+		t.Errorf("a name that is not its directory's: AddAsk = %v", err)
+	}
+	f.name = "team"
+	// A source pack to a depot names dropping the depot, with the pin to
+	// propose it with, not a setup.
+	f.kind = "source"
+	if _, err := y.AddAsk(y.ctx, y.bead, newAsk(urlPackURL+" --depot web --sha256 "+urlPackDigest), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "propose the apply with no depot (the run ask pack apply "+urlPackURL+" --sha256 "+urlPackDigest+")") {
+		t.Errorf("a source pack to a depot: AddAsk = %v", err)
+	}
+	f.kind = "git"
+	// A pack the reading fails on is the operator's in a terminal.
+	u.readErr = errors.New("pack.yaml: not found: a pack is a directory with a pack.yaml")
+	if _, err := y.AddAsk(y.ctx, y.bead, newAsk(urlPackURL+" --depot web --sha256 "+urlPackDigest), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "not found: a pack is a directory with a pack.yaml") || !strings.Contains(err.Error(), "yardr pack check "+urlPackURL+" shows its plan there") {
+		t.Errorf("an unreadable origin: AddAsk = %v", err)
+	}
+	u.readErr = nil
+	// With no fetching the ask names the server.
+	plain, _ := runYard(t)
+	if err := plain.PutDepot(plain.ctx, Depot{Name: "web", Path: t.TempDir()}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	ask := packAsk()
+	ask.Run.Argv = []string{"pack apply " + urlPackURL + " --sha256 " + urlPackDigest}
+	if _, err := plain.AddAsk(plain.ctx, plain.bead, ask, "yardmaster"); err == nil || !strings.Contains(err.Error(), "no server has registered its fetching of the packs repository") {
+		t.Errorf("no fetching: AddAsk = %v", err)
+	}
+}
+
+// A repository pack of kind source is carded whole with its digest pinned
+// and printed, where an embedded one's card pins no digest.
+func TestPackApplyURLSourceCard(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	f := &fakePack{name: "team", build: "test1", kind: "source", digest: urlPackDigest}
+	u := &urlFetcher{f: f}
+	y.Store.SetPackFetcher(u.fetch)
+	ask := packAsk()
+	ask.Run.Argv = []string{"pack apply " + urlPackURL + " --sha256 " + urlPackDigest}
+	seq := y.ask(t, ask, "yardmaster")
+	got := y.asked(t, seq)
+	run := got.Ask.Run
+	if run.Pack.Name != "team" || run.Pack.Digest != urlPackDigest {
+		t.Fatalf("the stored pack = %+v, want team pinned", run.Pack)
+	}
+	if run.Seen[packDigestKey(urlPackURL)] != urlPackDigest {
+		t.Fatalf("the stored seen holds %q for the digest", run.Seen)
+	}
+	joined := strings.Join(run.Does, "\n")
+	for _, want := range []string{
+		"pack team (" + urlPackURL + "), digest sha256:" + urlPackDigest + ", of kind source, into the yard: it adds 1 source",
 		"source wired: its calls go to https://wired.example.com/v1",
 	} {
 		if !strings.Contains(joined, want) {

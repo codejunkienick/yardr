@@ -446,6 +446,11 @@ type wtx struct {
 	// and that were read before the write, since git must not run inside
 	// one (runCommand.ready); nil for a write that needs none.
 	repos map[string]*RepoFlows
+	// urlPack is the reading of the pack of the packs repository that a
+	// pack apply card of a URL needs and that was fetched before the
+	// write, since the origin must not be read inside one
+	// (runCommand.fetch); nil for a write that needs none.
+	urlPack PackReader
 }
 
 // write runs fn in a batched write transaction, then nudges the pump to

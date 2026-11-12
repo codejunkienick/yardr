@@ -87,8 +87,8 @@ func parsePackApply(rest []string) ([]string, error) {
 // for a depot, so it needs --depot; with none the words are a bare name,
 // a re-apply. Each value stands on the card as it was typed, and draws no
 // line of its own there: parseRow has held the line to names, numbers and
-// flags. A URL is refused for its form, whatever flags it carries, and
-// --sha256 with any name but a directory's, which alone it pins.
+// flags. A URL is applied pinned, and --sha256 with any name but a
+// directory's or a URL's, which alone it pins, is refused.
 func packApplyWords(rest []string) (string, string, Mappings, bool, string, error) {
 	var m Mappings
 	for _, word := range rest {
@@ -105,9 +105,6 @@ func packApplyWords(rest []string) (string, string, Mappings, bool, string, erro
 	}
 	if len(args) != 1 {
 		return "", "", m, false, "", fmt.Errorf("--run takes %s: one pack's name, not %d words", PackApplyUse, len(args))
-	}
-	if isPackURL(args[0]) {
-		return "", "", m, false, "", packURLRefusal(args[0])
 	}
 	once := func(flag string) (string, error) {
 		if len(values[flag]) > 1 {
@@ -140,7 +137,11 @@ func packApplyWords(rest []string) (string, string, Mappings, bool, string, erro
 	if err != nil {
 		return "", "", m, false, "", err
 	}
-	if sha != "" && !IsPackDir(args[0]) {
+	if IsPackURL(args[0]) {
+		if sha == "" {
+			return "", "", m, false, "", fmt.Errorf("pack %s: a pack at a URL is applied pinned: name its digest (--sha256, as yardr pack check %s prints it)", args[0], args[0])
+		}
+	} else if sha != "" && !IsPackDir(args[0]) {
 		return "", "", m, false, "", fmt.Errorf("--run takes %s, and pack apply with --sha256 shapes the import, which a card answers none of: it is the operator's to type in a terminal (yardr pack check %s shows its plan there)", PackApplyUse, "<name>")
 	}
 	if m.Flow, err = once("--flow"); err != nil {
@@ -495,6 +496,23 @@ func (s *Store) ReadDirPack(ctx context.Context, dir string, depot string, mappi
 		return nil, fmt.Errorf("pack %s: no server has registered its reading of a directory pack on this store", dir)
 	}
 	return s.directoryReader(ctx, dir, depot, mappings, s)
+}
+
+// ReadRepoPack reads the pack of the packs repository at a URL through the
+// registered fetching, for the server's carrying out of an approved pack
+// apply of one: the same reading the approval was held to, taken again,
+// for the depot and with the mappings the card holds, pinned to the
+// digest the card names. The pack's name comes from the fetched bytes,
+// held to its directory's by the fetching itself.
+func (s *Store) ReadRepoPack(ctx context.Context, url, digest, depot string, mappings Mappings) (*PackReading, error) {
+	if s.packFetcher == nil {
+		return nil, packURLNoFetcher(url)
+	}
+	read, err := s.packFetcher(ctx, url, digest)
+	if err != nil {
+		return nil, err
+	}
+	return read(ctx, "", depot, mappings, s)
 }
 
 // directoryReaderOf is the directory reading registered on the store this

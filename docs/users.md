@@ -465,10 +465,11 @@ record's before-state is the way back by hand. A commit's URL is refused on
 purpose: GitHub serves a fork's commit under its parent's path, so only the
 branch the owner writes stands for the owner.
 
-A pack of the packs repository has no card to read it on. An operator who
-wants to read every line of one before it runs reads the repository first, or
-does not delegate packs. [packs.md](packs.md) says where this road stands
-beside the card.
+A pack of the packs repository has a card of its own beside this road:
+`pack apply <url> --sha256 <digest>` is asked as a run ask and approved
+as an embedded pack's is, with the URL and the digest whole on the card.
+An operator who wants to read every line of one before it runs asks the
+card. [packs.md](packs.md) says where the card stands beside this road.
 
 ## Mail
 
@@ -1156,6 +1157,7 @@ covered below under Strong cards. Row by row:
 | `pack apply <name>`, first install of an embedded depot pack to a named depot | The pack is installed to the named depot with the mappings and plan the card showed. Where the pack brings a program or trust the card is strong, and what the install made stands after the device is removed; a credential by itself does not make a card strong. A pack too large for a whole card, whether first installed or re-applied to a named depot, is a summary card, gated by its weight. A pack of kind source named with `--depot` is not this row's: it is sent to `bead ask --setup`, and named bare it is the row above's, with its sources whole on the card |
 | `pack apply <name> --yes`, over the hand-edited files the card named: a pack whose edited copies are overwritten | The pack's bytes stand where the operator's hand edits stood: each edited file the card named whole, with both hashes and the diff, is overwritten, and no other copy of an edit is kept. Where an edited file is a program, a role or a script the card is strong (code). It stands after the device is removed, and only the operator restores an edit, from outside the yard |
 | `pack apply <dir>`, a directory inside a depot's main checkout, pinned by its digest: a pack applied from files that stand in that checkout | The card applies the pack as its kind calls for: a source pack adds its declarations and command files to the yard; a depot pack changes flows, groups, roles and scripts in its depot and adds any declared sources to the yard. The holder must first have the pack files standing in a depot checkout. A stolen token cannot write to that checkout, but approving the card can still change yard sources or depot state; those changes stand after the device is removed. Only the operator takes them back, by restoring the prior sources and depot files from the card's plan |
+| `pack apply <url> --sha256 <digest>`, the packs repository's URL alone: a pack fetched and held to its digest | The pack the card showed, fetched from the repository, stands as an embedded pack's approval leaves it, and stands after the device is removed. No other URL is applied this way. Only the operator takes it back, by hand from the card's plan |
 | `hook add <name> --source <source>`: a new webhook endpoint for a declared source | A URL on the yard, `POST /hooks/<name>`, that runs the source's normalize command on each delivery it verifies with the signing secret the holder gave on the hook's own secret card: the holder knows the secret, so can send deliveries the yard hears as the source's, which reach whoever subscribes to it. Where the yard registers the hook itself the secret is the yard's made one, which the holder never sees, and the approval registers it at the service with the values the holder gives the card's asked names. It maps no stage and acts as no crew member; a hook with a table is the next row's |
 | `hook add <name> --source <source>`, replacing the hook that stands or carrying `--says`, `--makes`, `--map` or `--as`: a hook's table replaced | The events of the source move and make beads as the holder wrote: each says line reports its outcome for the bead the event is about, each makes line makes a bead where none tracks the thread, and each map entry moves a tracked issue as the named crew member. The card is strong (`trust`) and shows each table now and after, whole. It stands after the device is removed, and only the operator takes it back, with another card carrying the table that stood |
 | `subscribe <user> yardr …`, asked of the operator: a subscription to the yard's own events, the operator's or another user's | That user is told of more of what happens in the yard, as notifications in their inbox and, where a source tells them, outside the yard. The holder reads those events in the stream already |

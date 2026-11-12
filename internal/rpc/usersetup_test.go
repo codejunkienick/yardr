@@ -607,6 +607,19 @@ func TestWithoutRunWordsHoldsAPackCardsMappings(t *testing.T) {
 	if !strings.Contains(directory.Pack.Label, path) {
 		t.Errorf("the cut changed the card it was given: %+v", directory.Pack)
 	}
+	// A repository pack's URL is its public address, and stays on the
+	// label beside its name.
+	url := "https://repo.example.com/yardr-packs/main/team/"
+	repository := &store.RunAsked{Argv: []string{"pack", "apply", url, "--sha256", strings.Repeat("a", 64)},
+		Command: "yardr pack apply " + url + " --sha256 " + strings.Repeat("a", 64),
+		Pack:    &store.AskPack{Name: "team", Label: url}}
+	bareRepository, _ := withoutRunWords(repository, nil)
+	if bareRepository.Pack.Label != url || bareRepository.Pack.Name != "team" {
+		t.Errorf("the device lost a repository pack's URL or name: %+v", bareRepository.Pack)
+	}
+	if len(bareRepository.Argv) != 0 || bareRepository.Command != "" {
+		t.Errorf("the device is told a repository pack's words: %q, %q", bareRepository.Argv, bareRepository.Command)
+	}
 	// The same mappings as the asker's words are held with them.
 	run.Argv = []string{"pack", "apply", "starter", "--depot", "web", "--members", "decisions=sam"}
 	run.Command = "yardr pack apply starter --depot web --members decisions=sam"

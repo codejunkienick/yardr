@@ -94,7 +94,13 @@ type AskGovern struct {
 // operator's, proposable where the server registered its reading, and
 // refused naming the server where none did.
 func checkPackApply(ctx context.Context, w *wtx, run AskRun, actor string) error {
-	if IsPackDir(run.Argv[2]) {
+	// A URL holds a slash, so it reads as a directory below: judge it
+	// first, against the fetching its card is written from.
+	if IsPackURL(run.Argv[2]) {
+		if w.store == nil || w.store.packFetcher == nil {
+			return packURLNoFetcher(run.Argv[2])
+		}
+	} else if IsPackDir(run.Argv[2]) {
 		if w.directoryReaderOf() == nil {
 			return packDirNoReader(run.Argv[2])
 		}
@@ -343,11 +349,12 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 	if err != nil {
 		return AskRun{}, err
 	}
-	// A directory is carded under the pack its pack.yaml names, not the
-	// word the command named it by: the records the card rests on are
-	// keyed by that name.
+	// A directory, and a URL, are carded under the pack their reading
+	// names, not the word the command named them by: the records the card
+	// rests on are keyed by that name.
+	urlForm := IsPackURL(name)
 	packName := name
-	if dirForm {
+	if dirForm || urlForm {
 		packName = reading.Name
 	}
 	declTotal, payload := 0, 0
@@ -383,7 +390,7 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 		"pack " + name + " build": reading.Build,
 		"pack " + name + " bytes": packBytesSeen(&PackReading{Kind: reading.Kind, Sources: carried, Plan: reading.Plan}),
 	}
-	if reading.Digest != "" && (reading.Kind != "source" || dirForm) {
+	if reading.Digest != "" && (reading.Kind != "source" || dirForm || urlForm) {
 		seenMap[packDigestKey(name)] = reading.Digest
 	}
 	for i := range carried {
@@ -412,13 +419,16 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 		reading.Mappings = mappings
 	}
 	digest := reading.Digest
-	if reading.Kind == "source" && !dirForm {
+	if reading.Kind == "source" && !dirForm && !urlForm {
 		digest = ""
 	}
 	card := AskRun{Argv: run.Argv, Seen: seenMap, Carried: carried,
 		Pack: &AskPack{Name: packName, Kind: reading.Kind, Depot: reading.Depot, Mappings: reading.Mappings, Label: reading.Label, Digest: digest}}
 	if reading.Kind == "source" {
 		if named {
+			if urlForm {
+				return AskRun{}, fmt.Errorf("pack %s: it is of kind source, so it goes into the yard and no depot: propose the apply with no depot (the run ask pack apply %s --sha256 %s)", name, name, sha)
+			}
 			if dirForm {
 				return AskRun{}, fmt.Errorf("pack %s: it is of kind source, so it goes into the yard and no depot: propose the apply with no depot (the run ask pack apply %s)", name, name)
 			}
@@ -431,7 +441,7 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 		if err != nil {
 			return AskRun{}, err
 		}
-		if dirForm {
+		if dirForm || urlForm {
 			does = packDirDigestLine(does, digest, false)
 		}
 		card.Does = does
@@ -462,7 +472,7 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 		if err != nil {
 			return AskRun{}, err
 		}
-		if dirForm {
+		if dirForm || urlForm {
 			does = packDirDigestLine(does, digest, true)
 		}
 		if named {

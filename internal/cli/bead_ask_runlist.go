@@ -76,8 +76,9 @@ const askRunList = `  peer add <name> <invite>
   call <source> <call> [param=value ...] [--as <user>]
       one call of a declared source, made when approved; a file is shown by its digest and a secret-file by its file alone
   pack apply <name> [--yes] [--sha256 <digest>] [--depot <depot> [--flow <flow>] [--crew <pack>=<yard>] [--group <pack>=<yard>] [--bind <spec>] [--members <group>=<a,b>] [--open-threads <crew>=<sources>] [--calls <who>=<source>:<calls>]]
-      a pack yardr embeds, or a directory inside a depot's main
-      checkout, read at the ask and pinned by its digest: of kind
+      a pack yardr embeds, a directory inside a depot's main
+      checkout, or the packs repository's URL pinned with --sha256,
+      read at the ask and pinned by its digest: of kind
       source with no flag, a depot kind re-applied to the one depot
       that holds it, or a depot pack's first install to a named depot
       with the mappings that answer its plan; a relative directory is
@@ -89,10 +90,10 @@ const askRunList = `  peer add <name> <invite>
       summarized; the server carries it out; with --yes over files
       the plan says were edited by hand, which the card shows whole
       and approval overwrites, keeping no other copy, and a --yes
-      that overwrites nothing is refused; a URL, an imported pack, a
-      directory outside every checkout, any other flag and a plan
-      that asks stay in a terminal; --setup installs a pack of kind
-      source, embedded or applied from a directory in a terminal
+      that overwrites nothing is refused; any other URL, an imported
+      pack, a directory outside every checkout, any other flag and a
+      plan that asks stay in a terminal; --setup installs a pack of
+      kind source, embedded or applied from a directory in a terminal
   hook add <name> --source <declared source> [--unknown unknown|allow|ignore] [--as <crew member>] [--map <type>:<stage>=<state>]
       a new webhook endpoint POST /hooks/<name> for the declared
       source, or the hook that stands replaced whole, verified with

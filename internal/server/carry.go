@@ -55,6 +55,16 @@ func embeddedPack(name string) (*pack.Pack, fs.FS, error) {
 	return p, sub, err
 }
 
+// loadRepoPack is the carrier's load of the packs repository's pack at a
+// URL, held to its pin: from the repository the packs serve from, or
+// from the test's stand-in origin.
+func (c *carrier) loadRepoPack(url, digest string) (*pack.Pack, error) {
+	if c.loadURL != nil {
+		return c.loadURL(url, digest)
+	}
+	return pack.LoadRepository(pack.Repository, url, digest)
+}
+
 // carrier carries out approved applies against one store, under one
 // boot. load reads the pack to apply; the watcher uses embeddedPack,
 // and a test may read a pack of its own the same way. up starts yardr
@@ -66,7 +76,12 @@ type carrier struct {
 	boot string
 	log  *slog.Logger
 	load func(name string) (*pack.Pack, fs.FS, error)
-	up   func(home string) (int, error)
+	// loadURL fetches the pack of the packs repository at a URL, held
+	// to its pin, for the carrying out of an approved pack apply of
+	// one; nil is the load from the repository the packs serve from,
+	// and a test gives the one from its stand-in's origin.
+	loadURL func(url, digest string) (*pack.Pack, error)
+	up      func(home string) (int, error)
 	// edgeHTTP makes the carrier's member reports; nil is the client
 	// with the system's roots, and a test gives the one that trusts its
 	// stand-in edge.
@@ -380,6 +395,11 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 	if run.Pack != nil && run.Pack.Depot != "" {
 		terminal += " --depot " + run.Pack.Depot
 	}
+	if store.IsPackURL(name) && run.Pack != nil && run.Pack.Digest != "" {
+		// A repository pack can only be applied pinned, so recovery words
+		// for its card carry the digest it was approved against.
+		terminal += " --sha256 " + run.Pack.Digest
+	}
 	if run.Pack == nil {
 		return nil, nil, failWords("the ask holds no pack reading to carry out", terminal)
 	}
@@ -391,7 +411,12 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 	dir := name
 	var reading *store.PackReading
 	var err error
-	if store.IsPackDir(name) {
+	// A URL holds a slash, so it reads as a directory below: judge it
+	// first, through the fetching its card was written from, pinned to
+	// the digest the card names.
+	if store.IsPackURL(name) {
+		reading, err = c.st.ReadRepoPack(ctx, name, run.Pack.Digest, depot, mappings)
+	} else if store.IsPackDir(name) {
 		// As the card resolved it, so the reading below is held to the
 		// label the card pins.
 		if dir, err = store.ResolvePackDir(name); err != nil {
@@ -426,9 +451,18 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 		return nil, nil, staleWords(fmt.Sprintf("pack %s would now be re-applied to depot %s, not %s", name, reading.Depot, depot), terminal)
 	}
 	p, sub := applied, fs.FS(nil)
+	var urlPack *pack.Pack
 	switch {
 	case applied != nil:
 		sub = os.DirFS(applied.Dir)
+	case store.IsPackURL(name):
+		// A repository card's pack, fetched again and held to the digest
+		// the card names: the plan below is held to it before anything
+		// writes, so a second fetch decides no different bytes.
+		if urlPack, err = c.loadRepoPack(name, run.Pack.Digest); err != nil {
+			return nil, nil, failWords(err.Error(), terminal)
+		}
+		p = urlPack
 	case store.IsPackDir(name):
 		// A directory card's pack, loaded from the directory the card
 		// names: the plan below is held to the card's digest before
@@ -442,6 +476,13 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 		if p, sub, err = c.load(name); err != nil {
 			return nil, nil, failWords(err.Error(), terminal)
 		}
+	}
+	// planFiles reads a file of the pack by its path in it: from the
+	// fetched bytes for a repository pack, never from a second answer of
+	// the server, and from the pack's files otherwise.
+	planFiles := func(rel string) ([]byte, error) { return fs.ReadFile(sub, rel) }
+	if urlPack != nil {
+		planFiles = urlPack.ReadFile
 	}
 	plan, err := pack.Build(ctx, c.st, p, packOptions(depot, c.home, mappings))
 	if err != nil {
@@ -476,7 +517,7 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 	}
 	// A depot pack's yard side is its objects, one at a time (3.7).
 	if run.Pack.Plan != nil {
-		if err := holdDepotObjects(run.Pack.Plan, askPlanOf(sub, plan, answers, open, calls)); err != nil {
+		if err := holdDepotObjects(run.Pack.Plan, askPlanFrom(planFiles, plan, answers, open, calls)); err != nil {
 			return nil, nil, staleWords(fmt.Sprintf("ask %d: %s", rec.Ask, err), terminal)
 		}
 	}
@@ -524,7 +565,7 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 		if err != nil {
 			return nil, nil, failWords(err.Error(), terminal)
 		}
-		if err := verifyDepotObjects(run.Pack.Plan, askPlanOf(sub, after, answers, open, calls)); err != nil {
+		if err := verifyDepotObjects(run.Pack.Plan, askPlanFrom(planFiles, after, answers, open, calls)); err != nil {
 			return nil, nil, failWords(err.Error(), terminal)
 		}
 		for _, obj := range after.Objects {

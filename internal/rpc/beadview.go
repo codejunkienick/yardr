@@ -156,9 +156,11 @@ func withoutRunWords(run *store.RunAsked, ran *store.AskRan) (*store.RunAsked, *
 
 // heldPackDirectory reports whether argv names a directory pack whose path
 // is held from devices that are not the operator. Its path also appears in
-// the pack label, which the run card otherwise keeps beside its name.
+// the pack label, which the run card otherwise keeps beside its name. A
+// URL holds a slash, so it reads as a directory: it is the repository's
+// public address, and stays.
 func heldPackDirectory(argv []string) bool {
-	return len(argv) >= 3 && slices.Equal(argv[:2], []string{"pack", "apply"}) && store.IsPackDir(argv[2])
+	return len(argv) >= 3 && slices.Equal(argv[:2], []string{"pack", "apply"}) && store.IsPackDir(argv[2]) && !store.IsPackURL(argv[2])
 }
 
 // withoutWeightWords cuts a run ask's weight along with its words: where

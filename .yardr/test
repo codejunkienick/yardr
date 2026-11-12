@@ -2089,7 +2089,7 @@ internal/pack/pack.go 1777 pack reading, checking and its shapes
 internal/rpc/user.go 1377 the user server and callers (pairing is userpair.go, envelopes usere2e.go)
 internal/source/declaration.go 1258 source declarations, credentials and calls
 internal/standin/standin.go 1540 the fake Linear, GitHub and edge APIs
-internal/store/asks.go 1742 ask and answer parsing and storage
+internal/store/asks.go 1741 ask and answer parsing and storage
 internal/store/beads.go 2563 bead CRUD, queries and dispatch reads
 internal/store/crew.go 1461 crew records and their events
 internal/store/flows.go 1358 flow parsing and storage

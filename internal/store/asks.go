@@ -389,15 +389,14 @@ func (s *Store) newAsk(ctx context.Context, ask Ask, actor string) (func(w *wtx,
 		// the write: a command no row reads. What names no row is told
 		// apart inside, with the records: the asker's own to run, the
 		// operator's alone, or none the yard runs from a card. A row whose
-		// card reads git has it read here, before the write.
+		// card reads git or the packs repository has it read here.
 		c, argv, err := parseRow(ask.Run.Argv)
 		if err != nil && err != errNotRow {
 			return nil, err
 		}
-		if err == nil && c.ready != nil {
-			if repos, err = c.ready(ctx, s, *ask.Run, argv); err != nil {
-				return nil, err
-			}
+		repos, ctx, err = prewriteRun(ctx, s, *ask.Run, c, argv)
+		if err != nil {
+			return nil, err
 		}
 	}
 	if ask.Setup != nil {
@@ -442,7 +441,7 @@ func (s *Store) newAsk(ctx context.Context, ask Ask, actor string) (func(w *wtx,
 		}
 	}
 	return func(w *wtx, id string) (uint64, error) {
-		w.repos = repos
+		w.repos, w.urlPack = repos, urlPackOf(ctx)
 		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
 		if err != nil {
 			return 0, err

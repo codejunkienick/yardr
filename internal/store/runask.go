@@ -216,6 +216,11 @@ type runCommand struct {
 	// nil for a command whose card reads none, and none read where the
 	// ask carries nothing they are read for.
 	ready func(ctx context.Context, s *Store, run AskRun, argv []string) (map[string]*RepoFlows, error)
+	// fetch reads before the write what the card needs of the packs
+	// repository, which must not be read inside one: the reading of the
+	// pack a URL names, held to its pin, that the card reads (wtx.urlPack).
+	// argv is the command parsed; nil where the card reads none.
+	fetch func(ctx context.Context, s *Store, argv []string) (PackReader, error)
 	// commas says a word of the command holds commas: a list with commas
 	// between, as the parts of tell= are, or the invite peer add takes.
 	// No other command takes the character.
@@ -356,6 +361,7 @@ var runList = []runCommand{{
 	stale:       (*wtx).packApplyStale,
 	weigh:       packApplyWeight,
 	runRun:      runPackApply,
+	fetch:       fetchPackURL,
 }, {
 	words:       []string{"hook", "add"},
 	use:         hookAddUse,
@@ -768,14 +774,15 @@ func (s *Store) ApproveAsk(ctx context.Context, id string, ask uint64, actor str
 	if name, ok := s.hookRmTarget(id, ask); ok {
 		defer s.askLocks.lock(hookLockKey(name))()
 	}
-	// What the ask's card needs of git is read before the write.
-	repos, err := s.approvalRepos(ctx, id, ask)
+	// What the ask's card needs of git, or of the packs repository, is
+	// read before the write.
+	repos, ctx, err := s.approvalRepos(ctx, id, ask)
 	if err != nil {
 		return nil, fmt.Errorf("ask %d: %w. %s", ask, err, nothingRan)
 	}
 	var out *AskApproved
 	err = s.writeVia(ctx, func(w *wtx) (err error) {
-		w.repos = repos
+		w.repos, w.urlPack = repos, urlPackOf(ctx)
 		out, err = w.approveAsk(ctx, id, ask, actor, weighed, values)
 		return err
 	})
@@ -785,14 +792,38 @@ func (s *Store) ApproveAsk(ctx context.Context, id string, ask uint64, actor str
 	return out, nil
 }
 
+// prewriteRun reads before the write what the row's card needs outside
+// one (runCommand.ready and runCommand.fetch): the flows and the call's
+// context carrying the fetched reading. A nil row reads none.
+func prewriteRun(ctx context.Context, s *Store, run AskRun, c *runCommand, argv []string) (map[string]*RepoFlows, context.Context, error) {
+	if c == nil {
+		return nil, ctx, nil
+	}
+	var repos map[string]*RepoFlows
+	if c.ready != nil {
+		var err error
+		if repos, err = c.ready(ctx, s, run, argv); err != nil {
+			return nil, ctx, err
+		}
+	}
+	if c.fetch != nil {
+		read, err := c.fetch(ctx, s, argv)
+		if err != nil {
+			return nil, ctx, err
+		}
+		ctx = context.WithValue(ctx, urlPackKey{}, read)
+	}
+	return repos, ctx, nil
+}
+
 // approvalRepos reads, before the write that approves the run ask seq on
-// the bead id, what its row's card needs of git (runCommand.ready). An ask
-// that cannot be read here (no bead, no run) is left to the write, which
-// refuses it in its own words.
-func (s *Store) approvalRepos(ctx context.Context, id string, seq uint64) (map[string]*RepoFlows, error) {
+// the bead id, what its row's card needs of git or of the packs
+// repository (prewriteRun). An ask that cannot be read here (no bead, no
+// run) is left to the write, which refuses it in its own words.
+func (s *Store) approvalRepos(ctx context.Context, id string, seq uint64) (map[string]*RepoFlows, context.Context, error) {
 	notes, err := s.Notes(ctx, id)
 	if err != nil {
-		return nil, nil
+		return nil, ctx, nil
 	}
 	for _, n := range notes {
 		if n.Seq != seq || n.Kind != NoteAsk {
@@ -800,13 +831,13 @@ func (s *Store) approvalRepos(ctx context.Context, id string, seq uint64) (map[s
 		}
 		ask, err := ParseAsk(n)
 		if err != nil || ask.Run == nil {
-			return nil, nil
+			return nil, ctx, nil
 		}
-		if c, argv, err := parseRow(ask.Run.Argv); err == nil && c.ready != nil {
-			return c.ready(ctx, s, *ask.Run, argv)
+		if c, argv, err := parseRow(ask.Run.Argv); err == nil {
+			return prewriteRun(ctx, s, *ask.Run, c, argv)
 		}
 	}
-	return nil, nil
+	return nil, ctx, nil
 }
 
 // approveAsk is ApproveAsk inside the transaction. A batch may run it twice

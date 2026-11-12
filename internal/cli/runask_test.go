@@ -2348,14 +2348,54 @@ func TestBeadAskRunPackApply(t *testing.T) {
 			t.Errorf("prime lacks %q:\n%s", want, shown)
 		}
 	}
-	// Outside every checkout, at a URL, and relative: the relative word
-	// reaches the yard absolute, against where the ask is typed, and is
-	// refused by its place there.
+	// A pack of the packs repository, named by its URL and pinned, is a
+	// card, shown by prime with the URL whole and the digest the card
+	// pins. Another host is refused at the ask, before any card.
+	const repoOrigin = "https://repo.example.com/yardr-packs/main/"
+	const repoURL = repoOrigin + "phone/"
+	const repoDigest = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	y.own.SetPackFetcher(func(ctx context.Context, from, digest string) (store.PackReader, error) {
+		if from != repoURL {
+			return nil, fmt.Errorf("%s is not in the packs repository (%s): a card applies a pack of that repository alone, written as %s<name>/", from, repoOrigin, repoOrigin)
+		}
+		if digest != repoDigest {
+			return nil, fmt.Errorf("pack phone is not the one pinned: the pin is sha256:%s, the pack read has sha256:%s; nothing was changed", digest, repoDigest)
+		}
+		return func(ctx context.Context, name string, depot string, mappings store.Mappings, yard store.API) (*store.PackReading, error) {
+			return &store.PackReading{Name: "phone", Kind: "source", Label: from, Build: "test", Digest: digest,
+				Sources: []store.AskSource{{Name: "phone", Text: "name: phone\nbase: https://phone.example.com/v1\ncredential: { env: PHONE_TOKEN, header: \"Authorization: Bearer {credential}\" }\ncalls:\n  ping: { kind: read, request: { method: GET, path: /me } }\n"}}}, nil
+		}, nil
+	})
+	out, err = y.as(t, "yardmaster", "ask", b.ID, "Apply the phone pack?", "--context", "why", "--run", "pack apply "+repoURL+" --sha256 "+repoDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "to approve, yardr pack apply "+repoURL+" --sha256 "+repoDigest) {
+		t.Fatalf("bead ask --run pack apply <url> printed %q", out)
+	}
+	shown, err = run(t, y.a.primeCmd(), "--bead", b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"pack phone (" + repoURL + "), digest sha256:" + repoDigest + ", of kind source",
+		"source phone: its calls go to https://phone.example.com/v1",
+	} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("prime lacks %q:\n%s", want, shown)
+		}
+	}
+	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Apply it?", "--context", "why", "--run", "pack apply https://evil.example.com/phone/ --sha256 "+repoDigest); err == nil || !strings.Contains(err.Error(), "is not in the packs repository") {
+		t.Fatalf("another host: %v", err)
+	}
+	// Outside every checkout, an unpinned URL, and relative: the
+	// relative word reaches the yard absolute, against where the ask is
+	// typed, and is refused by its place there.
 	outside := filepath.Join(t.TempDir(), "team")
 	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Apply it?", "--context", "why", "--run", "pack apply "+outside); err == nil || !strings.Contains(err.Error(), "not inside a registered depot's main checkout") {
 		t.Fatalf("a directory outside every checkout: %v", err)
 	}
-	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Apply it?", "--context", "why", "--run", "pack apply https://example.com/packs/team/"); err == nil || !strings.Contains(err.Error(), "a pack at a URL is the operator's to apply in a terminal") {
+	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Apply it?", "--context", "why", "--run", "pack apply https://example.com/packs/team/"); err == nil || !strings.Contains(err.Error(), "a pack at a URL is applied pinned: name its digest") {
 		t.Fatalf("a URL: %v", err)
 	}
 	relAbs, err := filepath.Abs(filepath.Join("rel", "team"))

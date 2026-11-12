@@ -35,7 +35,10 @@ func packFetcherFor(home, origin string) store.PackFetcher {
 			return nil, err
 		}
 		return func(ctx context.Context, name string, depot string, mappings store.Mappings, yard store.API) (*store.PackReading, error) {
-			if name != p.Name {
+			// A run ask of the URL claims no name: it takes the pack's
+			// from the fetched bytes, held to its directory's by the
+			// load above.
+			if name != "" && name != p.Name {
 				return nil, fmt.Errorf("pack %s: the pack fetched from %s is %s: nothing was written", name, p.Dir, p.Name)
 			}
 			reading, err := readPack(ctx, p, p.ReadFile, p.Dir, name, depot, mappings, yard, home)

@@ -2002,7 +2002,8 @@ pack each object with each changed file's diff. The approval is held to
 the build, the pack's bytes and digest and the yard's sources as carded,
 and is carried out by the server after it, which holds the plan to the
 digest before anything is written. A pack that is a directory outside
-every depot's main checkout, a URL or an earlier import's record, any
+every depot's main checkout, a URL but the packs repository's pinned
+with `--sha256`, or an earlier import's record, any
 flag of `pack apply` but the depot and the mappings of a depot pack's
 first install and `--yes` over files edited by hand, and a plan that
 asks, is refused to a terminal, where `yardr pack check <name>` shows
@@ -2020,8 +2021,19 @@ pack check <dir>` prints: `--sha256` names that digest and refuses where
 it names another, and with none named the card prints the digest it pins.
 A file changed, added or removed since the ask makes the approval stale
 and nothing runs. Past the whole-card bounds no card is written, and a
-directory outside every checkout, a worktree, a URL and an earlier
+directory outside every checkout, a worktree, a URL but the packs
+repository's pinned with `--sha256`, and an earlier
 import's record are each refused at the ask; each is the operator's in a
+terminal.
+
+**Proposing a pack from the packs repository.** The repository's URL
+pinned with `--sha256` is proposed the same way (`--run "pack apply
+<url> --sha256 <digest>"`), and is read at the ask from the fetched
+bytes, held to the digest before anything is read of them, into the
+embedded card's shape: the URL whole where the label stands, the pack's
+name held to its directory's, and the digest printed whole. A wrong
+digest, a name that is not its directory's, and any other URL each
+refuse at the ask, before any card; each is the operator's in a
 terminal.
 
 **Running a pack for the operator.** Where the yardmaster's delegation is on

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -187,5 +188,96 @@ func TestRepositoryReadingMatchesTheEmbeddedReading(t *testing.T) {
 	}
 	if len(want.Plan.Objects) == 0 || want.Digest == "" {
 		t.Errorf("the reading holds no plan: %+v", want)
+	}
+}
+
+// A repository pack goes from the ask to the installed source: the card
+// shows the URL whole with the digest it pins, the approval is held to
+// those bytes, and the carrying out applies exactly what the card
+// showed. Another origin refuses before any request goes out, and
+// another digest refuses with nothing stored.
+func TestRepositoryPackApplyEndToEnd(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st, home, bead := carryYard(t)
+	origin, hits := serveRepositoryPack(t, "telegram")
+	from := origin + "telegram/"
+	st.SetPackFetcher(packFetcherFor(home, origin))
+	embedded, err := readEmbeddedPack(ctx, "telegram", "", store.Mappings{}, st, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := embedded.Digest
+	ask := packAskOf(from)
+	ask.Run.Argv = []string{"pack apply " + from + " --sha256 " + digest}
+	seq, err := st.AddAsk(ctx, bead, ask, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := resolvedLines(t, st, bead, seq)
+	for _, want := range []string{
+		"pack telegram (" + from + "), digest sha256:" + digest + ", of kind source, into the yard: it adds 1 source",
+		"source telegram: its calls go to https://api.telegram.org",
+	} {
+		if !strings.Contains(lines, want) {
+			t.Errorf("the card lacks %q:\n%s", want, lines)
+		}
+	}
+	if _, err := st.ApproveAsk(ctx, bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	// The carrying out fetches from the stand-in's origin, held to the
+	// card's digest, and applies exactly what the card showed.
+	c := testCarrier(st, home, "boot-one")
+	c.loadURL = func(url, dg string) (*pack.Pack, error) {
+		return pack.LoadRepository(origin, url, dg)
+	}
+	if _, err := st.ResumeCarry(ctx, "boot-one"); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		did, err := c.carryNext(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !did {
+			break
+		}
+	}
+	if rec := carryState(t, st, bead, seq); rec.State != store.CarryDone {
+		t.Fatalf("the record = %+v", rec)
+	}
+	src, err := st.GetSource(ctx, "telegram")
+	if err != nil || src.Text != embedded.Sources[0].Text {
+		t.Fatalf("telegram stands as %+v, %v", src, err)
+	}
+	// If the repository stops serving the pinned pack before carrying out,
+	// the recovery command still has the pin URL applies require.
+	st.SetPackFetcher(func(context.Context, string, string) (store.PackReader, error) {
+		return nil, errors.New("the pack is unavailable")
+	})
+	urlRun := &store.AskRun{Argv: []string{"pack", "apply", from, "--sha256", digest},
+		Pack: &store.AskPack{Name: "telegram", Digest: digest}}
+	_, _, failure := c.carryPackApply(ctx, &store.Carry{Bead: bead, Ask: seq, Actor: "mckean"}, urlRun)
+	wantRecovery := "Finish it with yardr pack apply " + from + " --sha256 " + digest + " in a terminal"
+	if !strings.Contains(failure, wantRecovery) {
+		t.Fatalf("a failed repository carry suggests %q, want %q", failure, wantRecovery)
+	}
+	st.SetPackFetcher(packFetcherFor(home, origin))
+	// Another origin refuses before any request goes out, and another
+	// digest refuses with nothing stored.
+	before := hits.Load()
+	other := packAskOf("telegram")
+	other.Run.Argv = []string{"pack apply " + strings.Replace(from, "yardr-packs", "other-packs", 1) + " --sha256 " + digest}
+	if _, err := st.AddAsk(ctx, bead, other, "yardmaster"); err == nil || !strings.Contains(err.Error(), "is not in the packs repository") {
+		t.Errorf("another origin: %v", err)
+	}
+	if hits.Load() != before {
+		t.Errorf("an ask refused for its URL cost %d requests", hits.Load()-before)
+	}
+	wrong := packAskOf(from)
+	wrong.Run.Argv = []string{"pack apply " + from + " --sha256 " + strings.Repeat("0", 64)}
+	if _, err := st.AddAsk(ctx, bead, wrong, "yardmaster"); err == nil || !strings.Contains(err.Error(), "is not the one pinned") {
+		t.Errorf("another digest: %v", err)
 	}
 }
