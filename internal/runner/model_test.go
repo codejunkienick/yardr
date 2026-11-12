@@ -67,6 +67,20 @@ func TestHerdrModelReadsTheAgentsSessionFile(t *testing.T) {
 	museFile("ml", wtA, "muse-spark-1.3-contributor", claimA.Add(15*time.Minute+4*time.Second))
 	museFile("mq1", wtQ, "muse-spark-1.3-contributor", time.Date(2026, 10, 21, 18, 50, 0, 0, time.UTC))
 	museFile("mq2", wtQ, "muse-wonder-1.0", time.Date(2026, 10, 21, 18, 55, 0, 0, time.UTC))
+	// A file may name its worktree before its first line with a time: its
+	// start is still the first timed line, and the worktree line counts
+	// wherever it stands.
+	wtW := "/work/wt-w"
+	claimW := time.Date(2026, 10, 21, 17, 0, 0, 0, time.UTC)
+	write(filepath.Join(muse, "sessions", "2026", "10", "21", "mw", "session.jsonl"),
+		fmt.Sprintf("{\"payload_type\":\"runtime.session.metadata\",\"payload\":{\"record\":{\"workspace_root\":%q}}}\n", wtW)+
+			fmt.Sprintf("{\"recorded_at\":%d,\"payload_type\":\"run.model.configured\",\"payload\":{\"record\":{\"model_id\":\"muse-wonder-1.0\"}}}\n", claimW.Add(2*time.Second).UnixMicro()))
+	// Go's * matches a leading dot, and Muse keeps its index trees in hidden
+	// directories beside the year directories, rewritten while it runs: a
+	// file there is no session, so this one, which would otherwise be a
+	// second file of wtA's first session, makes nothing ambiguous.
+	write(filepath.Join(muse, "sessions", ".msp-view-g11", "a", "b", "hid", "session.jsonl"),
+		fmt.Sprintf("{\"sequence\":3,\"recorded_at\":%d,\"payload_type\":\"runtime.session.metadata\",\"payload\":{\"record\":{\"workspace_root\":%q}}}\n", claimA.Add(4*time.Second).UnixMicro(), wtA))
 	h := &Herdr{AgentHomes: map[string]string{"claude": claude, "codex": codex, "muse": muse}, Bin: fakeHerdrBin(t, `agent() { echo '{"id":"x","result":{"type":"agent_info","agent":{"agent":"'"$1"'","agent_session":{"kind":"id","value":"'"$2"'"},"agent_status":"idle"}}}'; }
 case "$3" in
   answered) agent claude c1 ;;
@@ -111,6 +125,10 @@ esac`)}
 		{name: "the second session's own file", handle: map[string]any{"kind": "muse", "worktree": wtA}, startedAt: claimB, model: "muse-wonder-1.0", id: "mb"},
 		// Two qualifying files match nothing, never the earliest.
 		{name: "ambiguous match", handle: map[string]any{"kind": "muse", "worktree": wtQ}, startedAt: claimQ},
+		// A worktree line before the first timed line still names the file's
+		// worktree; the start, from the timed line after it, still bounds it.
+		{name: "worktree line before the first timed line", handle: map[string]any{"kind": "muse", "worktree": wtW}, startedAt: claimW, model: "muse-wonder-1.0", id: "mw"},
+		{name: "worktree line before a start outside the window", handle: map[string]any{"kind": "muse", "worktree": wtW}, startedAt: claimW.Add(time.Hour)},
 		// A file that starts before the start or after the window is not matched.
 		{name: "every file before the start", handle: map[string]any{"kind": "muse", "worktree": wtA}, startedAt: time.Date(2026, 10, 21, 20, 0, 0, 0, time.UTC)},
 		{name: "every file after the window", handle: map[string]any{"kind": "muse", "worktree": wtA}, startedAt: time.Date(2026, 10, 21, 18, 0, 0, 0, time.UTC)},

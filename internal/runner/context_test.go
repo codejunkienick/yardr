@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,40 @@ import (
 	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/store"
 )
+
+// dirMoves numbers the times moveDir gives, so no two are alike.
+var dirMoves atomic.Int64
+
+// moveDir gives dir a modification time it never had. A pin tells a
+// directory that gained or lost an entry by its time, and a filesystem that
+// stamps by a coarse clock gives two changes inside one tick the same time:
+// a test whose change must be seen sets the time by hand after it, as the
+// candidate rewrites below do for a file.
+func moveDir(t *testing.T, dir string) {
+	t.Helper()
+	at := time.Unix(1_000_000_000+dirMoves.Add(1), 0)
+	if err := os.Chtimes(dir, at, at); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// closeDirs makes each of dirs searchable but not readable, so a stat of a
+// path under it works and a listing of it finds nothing, and restores them
+// when the test ends. A caller skips as root first: root lists what mode 111
+// closes.
+func closeDirs(t *testing.T, dirs ...string) {
+	t.Helper()
+	for _, d := range dirs {
+		if err := os.Chmod(d, 0o111); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, d := range dirs {
+			_ = os.Chmod(d, 0o700)
+		}
+	})
+}
 
 // Context reads the last use the agent's session file holds, found by the
 // session id herdr reports. The lines are trimmed from a real transcript
@@ -398,6 +433,27 @@ esac`)
 		}
 		write(path, string(raw)+"{\"type\":\"assistant\",\"message\":{\"model\":\"m\",\"usage\":{\"input_tokens\":5,\"cache_read_input_tokens\":50}}}\n")
 		check(55)
+		// A session herdr names an id for is found once and then known by its
+		// file: with its directories searchable but not readable, a glob for
+		// the id would find nothing, and the reading still comes.
+		projects, project := filepath.Join(home, "projects"), filepath.Dir(path)
+		closeDirs(t, projects, project)
+		check(55)
+		if err := os.Chmod(projects, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(project, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// A file that has moved is found again by the glob, read in full.
+		moved := filepath.Join(projects, "-tmp-x", "c1.jsonl")
+		if err := os.MkdirAll(filepath.Dir(moved), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(path, moved); err != nil {
+			t.Fatal(err)
+		}
+		check(55)
 	})
 
 	t.Run("grown transcript resumes at the remembered offset", func(t *testing.T) {
@@ -505,13 +561,15 @@ esac`)
 		write(m1, metadata(startedAt.Add(time.Second))+calls(700000))
 		check(700000, true)
 		write(m2, metadata(startedAt.Add(2*time.Second))+calls(111))
+		moveDir(t, filepath.Dir(filepath.Dir(m2)))
 		check(0, false) // a second candidate drops the pin
 		if err := os.Remove(m1); err != nil {
 			t.Fatal(err)
 		}
 		check(111, true) // the one file left is matched and pinned
 		write(m1, metadata(startedAt.Add(time.Second))+calls(700000))
-		check(0, false) // ambiguous again
+		moveDir(t, filepath.Dir(m1)) // m1's directory stood empty at the pin
+		check(0, false)              // ambiguous again
 		if err := os.Remove(m2); err != nil {
 			t.Fatal(err)
 		}
@@ -520,6 +578,7 @@ esac`)
 		// so the match runs again and finds m1 alone, whose last reading
 		// still skips its read.
 		write(m3, metadata(startedAt.Add(-24*time.Hour))+calls(222))
+		moveDir(t, filepath.Dir(filepath.Dir(m3)))
 		check(700000, true)
 		// An existing transcript can become a candidate when its metadata
 		// is completed. Its path set is unchanged, but the pin must re-match.
@@ -554,6 +613,102 @@ esac`)
 		if err != nil || !ok || used != 111 || window != 1007997 {
 			t.Fatalf("resolved context = %d, %d, %v, %v; want 111, 1007997, true, nil", used, window, ok, err)
 		}
+		// The pin now rests on m2 and on every directory a candidate stands
+		// in or could appear through, empty ones too. m1's directory has
+		// stood empty since its file went: a qualifying file written into
+		// it moves nothing above it, only its own time.
+		again := func(want int, has bool, what string) {
+			t.Helper()
+			used, window, ok, err := fresh.Context(ctx, handle, startedAt)
+			if err != nil || used != want || ok != has || (has && window != 1007997) || (!has && window != 0) {
+				t.Fatalf("%s: context = %d, %d, %v, %v; want %d, %v", what, used, window, ok, err, want, has)
+			}
+		}
+		write(m1, metadata(startedAt.Add(time.Second))+calls(700000))
+		moveDir(t, filepath.Dir(m1))
+		again(0, false, "a file in an empty session directory")
+		if err := os.Remove(m1); err != nil {
+			t.Fatal(err)
+		}
+		again(111, true, "the empty session directory again")
+		// A day directory made since the pin is caught by the month it
+		// stands in; one that stood empty at the pin, by its own time.
+		day11 := filepath.Join(home, "sessions", "2026", "11", "11")
+		write(filepath.Join(day11, "m4", "session.jsonl"), metadata(startedAt.Add(3*time.Second))+calls(222))
+		moveDir(t, filepath.Dir(day11))
+		again(0, false, "a candidate in a new day directory")
+		if err := os.RemoveAll(day11); err != nil {
+			t.Fatal(err)
+		}
+		again(111, true, "the new day directory gone")
+		day12 := filepath.Join(home, "sessions", "2026", "11", "12")
+		if err := os.Mkdir(day12, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		moveDir(t, filepath.Dir(day12))
+		again(111, true, "an empty day directory made") // the pin is taken again with it in
+		write(filepath.Join(day12, "m5", "session.jsonl"), metadata(startedAt.Add(4*time.Second))+calls(333))
+		moveDir(t, day12)
+		again(0, false, "a candidate in an empty day directory")
+		if err := os.RemoveAll(day12); err != nil {
+			t.Fatal(err)
+		}
+		again(111, true, "the empty day directory gone")
+		// The pinned file going is no candidate going: nothing is left.
+		if err := os.Remove(m2); err != nil {
+			t.Fatal(err)
+		}
+		again(0, false, "the pinned file gone")
+	})
+
+	t.Run("pinned match is checked with no listing", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root lists what chmod 111 closes")
+		}
+		home := t.TempDir()
+		startedAt := time.Date(2026, 11, 10, 20, 0, 0, 0, time.UTC)
+		metadata := func(at time.Time) string {
+			return fmt.Sprintf("{\"recorded_at\":%d,\"payload_type\":\"runtime.session.metadata\",\"payload\":{\"record\":{\"workspace_root\":\"/work/crew\"}}}\n", at.UnixMicro())
+		}
+		calls := func(input int) string {
+			return fmt.Sprintf("{\"payload\":{\"event\":{\"kind\":\"model_completed\",\"usage\":{\"input_tokens\":%d}}}}\n", input)
+		}
+		sessions := filepath.Join(home, "sessions")
+		day := filepath.Join(sessions, "2026", "11", "10")
+		m1, m0 := filepath.Join(day, "m1", "session.jsonl"), filepath.Join(day, "m0", "session.jsonl")
+		write(m1, metadata(startedAt.Add(time.Second))+calls(700000))
+		write(m0, metadata(startedAt.Add(-24*time.Hour))+calls(1)) // another session's, not a match
+		// Muse's own index tree, which it rewrites while a session runs.
+		view := filepath.Join(sessions, ".msp-view-g11", "m1")
+		write(filepath.Join(view, "HEAD.json"), "{}\n")
+		h := &Herdr{AgentHomes: map[string]string{"muse": home}, Bin: fakeHerdrBin(t, `echo '{"id":"x","result":{"type":"agent_info","agent":{"agent":"muse","agent_status":"idle"}}}'`)}
+		handle := map[string]any{"agent": "muse", "worktree": "/work/crew"}
+		check := func(want int, what string) {
+			t.Helper()
+			used, window, ok, err := h.Context(ctx, handle, startedAt)
+			if err != nil || !ok || used != want || window != 1007997 {
+				t.Fatalf("%s: context = %d, %d, %v, %v; want %d, 1007997, true, nil", what, used, window, ok, err, want)
+			}
+		}
+		check(700000, "the match") // and its pin
+		// Every directory a candidate stands in is searchable but not
+		// readable from here on: a stat of a path under it still works, and
+		// a listing finds no candidate at all. A check that listed would
+		// see the pinned file's directory empty, drop the pin and match
+		// nothing; the reading below comes from stats alone.
+		closeDirs(t, sessions, filepath.Join(sessions, "2026"), filepath.Join(sessions, "2026", "11"), day, filepath.Dir(m1), filepath.Dir(m0))
+		check(700000, "the pin checked with no listing")
+		// The pinned transcript still grows, and a rotation or truncation of
+		// it still reads from the start, under the pin.
+		write(m1, metadata(startedAt.Add(time.Second))+calls(700000)+calls(800000))
+		check(800000, "a grown pinned transcript")
+		write(m1, metadata(startedAt.Add(time.Second))+calls(5))
+		check(5, "a shrunk pinned transcript")
+		// The hidden tree is no part of what the pin rests on, whatever it
+		// does: its directory changing is no candidate appearing.
+		write(filepath.Join(view, "snapshot.json"), "{}\n")
+		moveDir(t, view)
+		check(5, "a hidden directory changed")
 	})
 
 	t.Run("concurrent sessions read side by side", func(t *testing.T) {
@@ -592,21 +747,21 @@ esac`)
 	})
 }
 
-// BenchmarkHerdrContextCached is the daemon's per-pass cost of one crew
-// session's context reading on a crew-sized transcript: a session dir with
-// fifty other sessions' files and a 20 MB transcript of its own. The first
-// call matches and reads it; every timed call is a later pass.
-func BenchmarkHerdrContextCached(b *testing.B) {
-	ctx := context.Background()
-	home := b.TempDir()
-	startedAt := time.Date(2026, 11, 10, 20, 0, 0, 0, time.UTC)
-	dir := filepath.Join(home, "sessions", "2026", "11", "10")
-	for i := range 50 {
-		p := filepath.Join(dir, fmt.Sprintf("old-%d", i), "session.jsonl")
+// museTranscripts is a Muse session dir for a benchmark: others sessions of
+// other worktrees spread over days day directories, and a 20 MB transcript of
+// the crew session's own. It returns the dir and the start the own
+// transcript matches from.
+func museTranscripts(b *testing.B, others, days int) (home string, startedAt time.Time) {
+	b.Helper()
+	home = b.TempDir()
+	startedAt = time.Date(2026, 11, 10, 20, 0, 0, 0, time.UTC)
+	dir := filepath.Join(home, "sessions", "2026", "11")
+	old := fmt.Sprintf("{\"recorded_at\":%d,\"payload_type\":\"runtime.session.metadata\",\"payload\":{\"record\":{\"workspace_root\":\"/work/elsewhere\"}}}\n", startedAt.Add(-48*time.Hour).UnixMicro())
+	for i := range others {
+		p := filepath.Join(dir, fmt.Sprintf("%02d", 1+i%days), fmt.Sprintf("old-%d", i), "session.jsonl")
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			b.Fatal(err)
 		}
-		old := fmt.Sprintf("{\"recorded_at\":%d,\"payload_type\":\"runtime.session.metadata\",\"payload\":{\"record\":{\"workspace_root\":\"/work/elsewhere\"}}}\n", startedAt.Add(-48*time.Hour).UnixMicro())
 		if err := os.WriteFile(p, []byte(old), 0o600); err != nil {
 			b.Fatal(err)
 		}
@@ -618,7 +773,7 @@ func BenchmarkHerdrContextCached(b *testing.B) {
 	for sb.Len() < 20<<20 {
 		sb.WriteString(call)
 	}
-	path := filepath.Join(dir, "m1", "session.jsonl")
+	path := filepath.Join(dir, "10", "m1", "session.jsonl")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		b.Fatal(err)
 	}
@@ -628,10 +783,16 @@ func BenchmarkHerdrContextCached(b *testing.B) {
 	if fi, err := os.Stat(path); err != nil || fi.Size() < 20<<20 {
 		b.Fatalf("transcript stat = %v, %v; want at least 20 MB", fi, err)
 	}
-	h := &Herdr{AgentHomes: map[string]string{"muse": home}, Bin: fakeHerdrBin(b, `echo '{"id":"x","result":{"type":"agent_info","agent":{"agent":"muse","agent_status":"idle"}}}'`)}
-	handle := map[string]any{"agent": "muse", "worktree": "/work/crew"}
-	if used, _, ok, err := h.Context(ctx, handle, startedAt); err != nil || !ok || used != 700000 {
-		b.Fatalf("warm context = %d, %v, %v; want 700000, true, nil", used, ok, err)
+	return home, startedAt
+}
+
+// benchContext times h.Context(handle) after one warm call that reads the
+// transcript: every timed call is a later pass, with nothing new to read.
+func benchContext(b *testing.B, h *Herdr, handle map[string]any, startedAt time.Time, want int) {
+	b.Helper()
+	ctx := context.Background()
+	if used, _, ok, err := h.Context(ctx, handle, startedAt); err != nil || !ok || used != want {
+		b.Fatalf("warm context = %d, %v, %v; want %d, true, nil", used, ok, err, want)
 	}
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -640,4 +801,54 @@ func BenchmarkHerdrContextCached(b *testing.B) {
 			b.Fatalf("context = %v, %v; want true, nil", ok, err)
 		}
 	}
+}
+
+// BenchmarkHerdrContextCached is the daemon's per-pass cost of one crew
+// session's context reading on a crew-sized transcript: a session dir with
+// fifty other sessions' files and a 20 MB transcript of its own. The first
+// call matches and reads it; every timed call is a later pass. Each call also
+// starts the stand-in herdr that names the agent, which dominates its time:
+// allocs/op shows what the reading itself costs.
+func BenchmarkHerdrContextCached(b *testing.B) {
+	home, startedAt := museTranscripts(b, 50, 1)
+	h := &Herdr{AgentHomes: map[string]string{"muse": home}, Bin: fakeHerdrBin(b, `echo '{"id":"x","result":{"type":"agent_info","agent":{"agent":"muse","agent_status":"idle"}}}'`)}
+	benchContext(b, h, map[string]any{"agent": "muse", "worktree": "/work/crew"}, startedAt, 700000)
+}
+
+// BenchmarkHerdrContextCachedAtScale is the same pass on the session dir a
+// yard has after weeks (three thousand sessions over thirty days), with a
+// handle that names no agent, so no herdr is started and the time is the
+// match's memory being checked.
+func BenchmarkHerdrContextCachedAtScale(b *testing.B) {
+	home, startedAt := museTranscripts(b, 3000, 30)
+	h := &Herdr{AgentHomes: map[string]string{"muse": home}}
+	benchContext(b, h, map[string]any{"kind": "muse", "worktree": "/work/crew"}, startedAt, 700000)
+}
+
+// BenchmarkHerdrContextKnownID is the pass for a session herdr names an id
+// for, on a Claude home that holds three hundred project directories: the
+// one file the id names is found each time, then not read again.
+func BenchmarkHerdrContextKnownID(b *testing.B) {
+	home := b.TempDir()
+	line := "{\"type\":\"assistant\",\"message\":{\"model\":\"m\",\"usage\":{\"input_tokens\":10,\"cache_read_input_tokens\":100,\"output_tokens\":7}}}\n"
+	for i := range 300 {
+		for _, id := range []string{fmt.Sprintf("old-%d-a", i), fmt.Sprintf("old-%d-b", i)} {
+			p := filepath.Join(home, "projects", fmt.Sprintf("-work-%d", i), id+".jsonl")
+			if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+				b.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(line), 0o600); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+	own := filepath.Join(home, "projects", "-work-crew", "c1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(own), 0o700); err != nil {
+		b.Fatal(err)
+	}
+	if err := os.WriteFile(own, []byte(line), 0o600); err != nil {
+		b.Fatal(err)
+	}
+	h := &Herdr{AgentHomes: map[string]string{"claude": home}, Bin: fakeHerdrBin(b, `echo '{"id":"x","result":{"type":"agent_info","agent":{"agent":"claude","agent_session":{"kind":"id","value":"c1"},"agent_status":"idle"}}}'`)}
+	benchContext(b, h, map[string]any{"agent": "crew"}, time.Time{}, 110)
 }

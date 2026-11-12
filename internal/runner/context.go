@@ -27,16 +27,17 @@ const contextStartedAt = "context_started_at"
 // found as the model source's is (see Model).
 //
 // The daemon asks on every idle pass, so both halves are remembered across
-// calls: the transcript a worktree match found is pinned while its file
-// stands and the session dir holds the same files, and a transcript whose
-// size and time are as at the last read is not opened again. A grown file
-// is read from where the last read ended.
+// calls: the transcript is pinned while its file stands and, for a worktree
+// match, nothing the match judged has moved (see pinnedContext), and a
+// transcript whose size and time are as at the last read is not opened
+// again. A grown file is read from where the last read ended.
 func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt time.Time) (used, window int, ok bool, err error) {
 	kind, id, err := h.sessionKind(ctx, handle)
 	if err != nil {
 		return 0, 0, false, err
 	}
-	var path, key string
+	// wide is the glob of every file a match judges, "" for an id herdr named.
+	var path, key, wide string
 	if id == "" {
 		var preStart time.Duration
 		if at, has := handle[contextStartedAt]; has {
@@ -67,7 +68,8 @@ func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt ti
 		}
 		key = contextMatchKey(kind, match, startedAt)
 		if kind.Model != nil {
-			path = h.pinnedContext(key, kind.Model.Pattern(h.agentHome(kind), "*"))
+			wide = kind.Model.Pattern(h.agentHome(kind), "*")
+			path = h.pinnedContext(key)
 		}
 		if path == "" {
 			kind, id, err = h.matchSession(kind, match, startedAt, preStart)
@@ -79,15 +81,20 @@ func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt ti
 	if kind.Model == nil || kind.Context == nil {
 		return 0, 0, false, nil
 	}
+	if key == "" {
+		// Herdr named the session: the file its id names is the session's, and
+		// no other file can make it another, so that pin rests on the file
+		// alone.
+		key = kind.Model.Pattern(h.agentHome(kind), id)
+		path = h.pinnedContext(key)
+	}
 	if path == "" {
 		p, err := sessionFile(kind.Model.Pattern(h.agentHome(kind), id))
 		if p == "" || err != nil {
 			return 0, 0, false, err
 		}
 		path = p
-		if key != "" {
-			h.pinContext(key, p, kind.Model.Pattern(h.agentHome(kind), "*"))
-		}
+		h.pinContext(key, p, wide)
 	}
 	return h.cachedContext(path, *kind.Context)
 }
@@ -106,20 +113,20 @@ func contextMatchKey(kind store.Harness, match map[string]any, startedAt time.Ti
 	return name + "\x00" + agent + "\x00" + worktree + "\x00" + strconv.FormatInt(startedAt.UnixNano(), 10)
 }
 
-// contextPin is the transcript a session's worktree match found. It keeps
-// the sorted paths and the stat of every other candidate, so a later retry,
-// by-hand run, or candidate completed after the match is seen on the next
-// call.
+// contextPin is the transcript a session's lookup found, with what the lookup
+// rested on, each by its stat, so that whatever could have made it answer
+// otherwise is seen on the next call. A worktree match rests on every other
+// candidate (one that was incomplete or did not qualify can become a match as
+// it is written, with no new path) and on every directory a candidate stands
+// in or could appear through, so a retry, a by-hand run or a candidate
+// completed after the match is seen; a known id rests on its file alone. A
+// pin is not changed once installed.
 type contextPin struct {
-	path       string
-	files      []string
-	otherFiles []contextFileState
+	path string
+	rest []contextFileState
 }
 
-// contextFileState is a candidate transcript other than the pinned one. A
-// candidate that was incomplete or did not qualify can become a match as it
-// is written, without changing the glob's paths, so its stat must still be
-// checked on each pass.
+// contextFileState is a file or directory a pin rests on, as it was.
 type contextFileState struct {
 	path  string
 	size  int64
@@ -127,43 +134,36 @@ type contextFileState struct {
 }
 
 // pinnedContext is the transcript pinned for key, "" when none is, the
-// pinned file no longer stands, or the candidate paths or their state
-// changed. A dropped pin forgets the match but keeps the last reading, which
-// is keyed by the file: a re-match that finds the same file alone still skips
-// its read. The glob and stats open nothing; the match it stands in for opens
-// every candidate.
-func (h *Herdr) pinnedContext(key, pattern string) string {
+// pinned file no longer stands, or anything the pin rests on has changed. A
+// dropped pin forgets the match but keeps the last reading, which is keyed by
+// the file: a re-match that finds the same file alone still skips its read.
+// The check is stats alone: it lists no directory and opens no candidate,
+// where the match it stands in for lists them all and opens each.
+func (h *Herdr) pinnedContext(key string) string {
 	h.contextMu.Lock()
-	pin, ok := h.contextMatch[key]
+	pin := h.contextMatch[key]
 	h.contextMu.Unlock()
-	if !ok {
+	if pin == nil {
 		return ""
 	}
 	if _, err := os.Stat(pin.path); err != nil {
 		h.dropContextPin(key, pin, true)
 		return ""
 	}
-	files, err := filepath.Glob(pattern)
-	if err == nil {
-		slices.Sort(files)
-	}
-	if err != nil || !slices.Equal(files, pin.files) {
-		h.dropContextPin(key, pin, false)
-		return ""
-	}
-	otherFiles, err := contextFileStates(files, pin.path)
-	if err != nil || !slices.Equal(otherFiles, pin.otherFiles) {
-		h.dropContextPin(key, pin, false)
-		return ""
+	for _, was := range pin.rest {
+		if now, err := contextStat(was.path); err != nil || now != was {
+			h.dropContextPin(key, pin, false)
+			return ""
+		}
 	}
 	return pin.path
 }
 
 // dropContextPin forgets the pin only if it is still the one the caller
 // checked: another concurrent call may have installed a newer match.
-func (h *Herdr) dropContextPin(key string, pin contextPin, forgetRead bool) {
+func (h *Herdr) dropContextPin(key string, pin *contextPin, forgetRead bool) {
 	h.contextMu.Lock()
-	if current, ok := h.contextMatch[key]; ok && current.path == pin.path && slices.Equal(current.files, pin.files) && slices.Equal(current.otherFiles, pin.otherFiles) {
+	if h.contextMatch[key] == pin {
 		delete(h.contextMatch, key)
 		if forgetRead {
 			delete(h.contextLast, pin.path)
@@ -172,46 +172,67 @@ func (h *Herdr) dropContextPin(key string, pin contextPin, forgetRead bool) {
 	h.contextMu.Unlock()
 }
 
-// pinContext remembers path as the transcript key matched, with the other
-// candidates as they are. Only an unambiguous match pins: ambiguity and no
-// match return no id and so never reach here.
-func (h *Herdr) pinContext(key, path, pattern string) {
-	files, err := filepath.Glob(pattern)
-	if err != nil {
-		return
-	}
-	slices.Sort(files)
-	if !slices.Contains(files, path) {
-		return
-	}
-	otherFiles, err := contextFileStates(files, path)
-	if err != nil {
-		return
+// pinContext remembers path as the transcript key found. wide is the glob of
+// every file the match judged, "" for a known id. Only an unambiguous match
+// pins: ambiguity and no match return no id and so never reach here.
+func (h *Herdr) pinContext(key, path, wide string) {
+	var rest []contextFileState
+	if wide != "" {
+		files, err := filepath.Glob(wide)
+		if err != nil || !slices.Contains(files, path) {
+			return
+		}
+		if rest, err = contextFileStates(append(files, contextDirs(wide)...), path); err != nil {
+			return
+		}
 	}
 	h.contextMu.Lock()
 	defer h.contextMu.Unlock()
 	if h.contextMatch == nil {
-		h.contextMatch = map[string]contextPin{}
+		h.contextMatch = map[string]*contextPin{}
 	}
-	h.contextMatch[key] = contextPin{path: path, files: files, otherFiles: otherFiles}
+	h.contextMatch[key] = &contextPin{path: path, rest: rest}
 }
 
-// contextFileStates snapshots candidates other than the pinned transcript.
+// contextDirs are the directories a file of pattern stands in or could
+// appear through: what each prefix of the pattern matches, from the file's
+// own directory up to the fixed one, the empty ones too. A candidate added
+// or removed moves the time of one of them.
+func contextDirs(pattern string) (dirs []string) {
+	for dir := filepath.Dir(pattern); ; dir = filepath.Dir(dir) {
+		found, _ := filepath.Glob(dir) // the pattern itself globbed, so its prefixes are well formed
+		dirs = append(dirs, found...)
+		if !strings.ContainsAny(dir, "*?[") {
+			return dirs
+		}
+	}
+}
+
+// contextFileStates snapshots paths other than the pinned transcript.
 // The pinned transcript may grow normally; another candidate changing can
 // make the match ambiguous, so a later pass must run the matcher again.
-func contextFileStates(files []string, pinned string) ([]contextFileState, error) {
-	states := make([]contextFileState, 0, len(files))
-	for _, path := range files {
+func contextFileStates(paths []string, pinned string) ([]contextFileState, error) {
+	states := make([]contextFileState, 0, len(paths))
+	for _, path := range paths {
 		if path == pinned {
 			continue
 		}
-		fi, err := os.Stat(path)
+		s, err := contextStat(path)
 		if err != nil {
 			return nil, err
 		}
-		states = append(states, contextFileState{path: path, size: fi.Size(), mtime: fi.ModTime().UnixNano()})
+		states = append(states, s)
 	}
 	return states, nil
+}
+
+// contextStat is the state of the file or directory at path now.
+func contextStat(path string) (contextFileState, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return contextFileState{}, err
+	}
+	return contextFileState{path: path, size: fi.Size(), mtime: fi.ModTime().UnixNano()}, nil
 }
 
 // crewShellStartTimeout is how long Context gives the ps that reads an older

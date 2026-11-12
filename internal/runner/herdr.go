@@ -64,13 +64,13 @@ type Herdr struct {
 	// while it shows an error its harness stops on, and since when (stopped).
 	stopMu sync.Mutex
 	stops  map[string]paneStop
-	// contextMatch pins, per crew session, the transcript a worktree match
-	// found, while its file stands and the session dir holds the same
-	// files; contextLast keeps, per transcript path, what the last read
+	// contextMatch pins, per session, the transcript a worktree match or a
+	// known id found, while its file stands and nothing the lookup judged
+	// has moved; contextLast keeps, per transcript path, what the last read
 	// saw, so an unchanged file is not opened again and a grown one is
 	// read from where the last read ended (see Context).
 	contextMu    sync.Mutex
-	contextMatch map[string]contextPin
+	contextMatch map[string]*contextPin
 	contextLast  map[string]contextRead
 	Bin          string
 	WorktreeRoot string

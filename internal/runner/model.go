@@ -107,24 +107,14 @@ func (h *Herdr) matchWorkspace(kind store.Harness, worktree string, startedAt ti
 	begin, end := startedAt.Add(-preStart), startedAt.Add(dispatch.ModelWindow)
 	var found string
 	for _, path := range files {
-		// The start first: most files are left after their first lines,
-		// and only a file that started in the session's window is read
-		// for its worktree.
-		start, ok, err := fileStart(kind.Model, path)
-		if err != nil {
-			return "", false, err
-		}
-		if !ok || start.Before(begin) || start.After(end) {
-			continue
-		}
-		names, err := fileNamesWorktree(kind.Model, path, worktree)
+		in, err := fileNamesWorktree(kind.Model, path, worktree, begin, end)
 		if err != nil {
 			return "", false, err
 		}
 		id, okID := kind.Model.SessionIn(dir, path)
 		// A file that names no id it can be read by is no candidate: it
 		// can be neither the match nor what makes one ambiguous.
-		if !names || !okID || !plainSessionID(id) {
+		if !in || !okID || !plainSessionID(id) {
 			continue
 		}
 		if found != "" {
@@ -135,33 +125,27 @@ func (h *Herdr) matchWorkspace(kind store.Harness, worktree string, startedAt ti
 	return found, false, nil
 }
 
-// fileStart is when the session file at path started: the time of its first
-// line with one that reads. ok is false when no line has one.
-func fileStart(src *store.ModelSource, path string) (start time.Time, ok bool, err error) {
-	err = eachLine(path, func(line []byte) bool {
-		l, has := src.WorkspaceIn(line)
-		if !has || l.At.IsZero() {
-			return false
-		}
-		start = l.At
-		return true
-	})
-	if err != nil {
-		return time.Time{}, false, err
-	}
-	return start, !start.IsZero(), nil
-}
-
-// fileNamesWorktree reports whether one of the session file's lines names
-// worktree.
-func fileNamesWorktree(src *store.ModelSource, path, worktree string) (bool, error) {
-	var names bool
+// fileNamesWorktree reports whether the session file at path started from
+// begin to end, its start being the time of its first line with one that
+// reads, and one of its lines names worktree. One read answers both: a file
+// that started outside the window is left after its first lines, and a
+// worktree line the read passed on its way to the start still counts.
+func fileNamesWorktree(src *store.ModelSource, path, worktree string, begin, end time.Time) (bool, error) {
+	var start time.Time
+	var names, outside bool
 	err := eachLine(path, func(line []byte) bool {
 		l, has := src.WorkspaceIn(line)
-		names = has && l.Workspace == worktree
-		return names
+		if !has {
+			return false
+		}
+		if start.IsZero() && !l.At.IsZero() {
+			start = l.At
+			outside = start.Before(begin) || start.After(end)
+		}
+		names = names || l.Workspace == worktree
+		return outside || (names && !start.IsZero())
 	})
-	return names, err
+	return !outside && names && !start.IsZero(), err
 }
 
 // sessionKind is the harness kind of the agent handle names and its

@@ -801,7 +801,7 @@ func TestModelIn(t *testing.T) {
 	if got, want := codex.Model.Pattern("/h", "x1"), "/h/sessions/*/*/*/rollout-*-x1.jsonl"; got != want {
 		t.Errorf("pattern %q, want %q", got, want)
 	}
-	if got, want := muse.Model.Pattern("/h", "x1"), "/h/sessions/*/*/*/x1/session.jsonl"; got != want {
+	if got, want := muse.Model.Pattern("/h", "x1"), "/h/sessions/[0-9]*/[0-9]*/[0-9]*/x1/session.jsonl"; got != want {
 		t.Errorf("pattern %q, want %q", got, want)
 	}
 }

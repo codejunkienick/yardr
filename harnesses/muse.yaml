@@ -101,9 +101,16 @@ offers:
 # retained_frame wrapper with no time of its own (all 578 files of 20-24
 # Oct 2026, Muse Code 1.4.11-1.4.12). When herdr reports a Muse id it takes
 # precedence and the match stays the fallback.
+#
+# The three date levels are digits only: a glob's * matches a leading dot,
+# and Muse keeps its own index trees in hidden directories beside the year
+# directories (sessions/.msp-view-g11/<id>/, thousands of entries on a yard
+# that has run Muse for weeks, one of them rewritten every few seconds while
+# a session runs). None holds a session, and a match that walked them would
+# list them on every call and find them changed under a pin.
 model:
   home: .local/share/muse
-  glob: sessions/*/*/*/{session}/session.jsonl
+  glob: sessions/[0-9]*/[0-9]*/[0-9]*/{session}/session.jsonl
   type_field: payload_type
   type: run.model.configured
   field: payload.record.model_id
