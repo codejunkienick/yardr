@@ -352,7 +352,7 @@ func (rc *Receiver) adapter(ctx context.Context, name string) (Adapter, bool) {
 	var d *source.Declaration
 	if src, err := rc.st.GetSource(ctx, name); err == nil {
 		if declared, err := src.Declaration(); err == nil {
-			d = declared.WithBase(src.Base)
+			d = src.Resolved(declared)
 		}
 	}
 	return AdapterFor(name, d, rc.home)

@@ -360,7 +360,7 @@ func prOf(st store.API, url string) (decl *source.Declaration, src *store.Source
 // hook and no crew member to read as. Without either command, or the
 // credential, the snapshot is unavailable with why.
 func declaredChecks(home string, decl *source.Declaration, src *store.Source, repo, number, url string) string {
-	decl = decl.WithBase(src.Base)
+	decl = src.Resolved(decl)
 	if decl.Events == nil || len(decl.Events.PR) == 0 {
 		return "checks: unavailable (source " + decl.Name + " declares no pr command (events.pr))"
 	}

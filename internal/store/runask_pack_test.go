@@ -20,15 +20,16 @@ import (
 // packReaderOf returns a reader of one fake embedded pack, wired, whose
 // label and files the test moves between asking and approving.
 type fakePack struct {
-	label    string
-	build    string
-	files    map[string]string
-	plan     *AskPlan
-	kind     string
-	depot    string
-	mappings Mappings
-	digest   string
-	programs []string
+	label      string
+	sourceText string
+	build      string
+	files      map[string]string
+	plan       *AskPlan
+	kind       string
+	depot      string
+	mappings   Mappings
+	digest     string
+	programs   []string
 	// name is the pack's name where it is not wired: what a
 	// directory's pack.yaml names.
 	name string
@@ -60,7 +61,11 @@ func (f *fakePack) reading() *PackReading {
 	r := &PackReading{Name: name, Kind: kind, Depot: f.depot, Mappings: f.mappings, Label: f.label, Build: f.build,
 		Plan: f.plan, Digest: f.digest, Programs: f.programs}
 	if !f.noSources {
-		r.Sources = []AskSource{{Name: "wired", Text: wiredDecl, Files: askFilesOrdered(files)}}
+		text := f.sourceText
+		if text == "" {
+			text = wiredDecl
+		}
+		r.Sources = []AskSource{{Name: "wired", Text: text, Files: askFilesOrdered(files)}}
 	}
 	return r
 }
@@ -820,11 +825,19 @@ func TestPackApplyReplacementCard(t *testing.T) {
 	t.Parallel()
 	y, _ := runYard(t)
 	dir := plantWired(t, y)
+	hosted := strings.Replace(wiredDecl, "base: https://wired.example.com/v1\n",
+		"base: https://wired.example.com/v1\nbase_template: https://{host}/v1\n", 1)
+	if _, err := y.PutSource(y.ctx, "wired.yaml", hosted, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.SetSource(y.ctx, "wired", SourceHost, "nas.local", "mckean"); err != nil {
+		t.Fatal(err)
+	}
 	// The standing copy of wired/thread differs from the pack's.
 	if err := os.WriteFile(filepath.Join(dir, "wired", "thread"), []byte("#!/bin/sh\n# thread, as the yard has it\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	y.setPack(&fakePack{label: "embedded in yardr test1"})
+	y.setPack(&fakePack{label: "embedded in yardr test1", sourceText: hosted})
 	seq := y.ask(t, packAsk(), "yardmaster")
 	got := y.asked(t, seq)
 	carried := got.Ask.Run.Carried[0]
@@ -842,6 +855,7 @@ func TestPackApplyReplacementCard(t *testing.T) {
 	}
 	joined := strings.Join(got.Ask.Run.Does, "\n")
 	for _, want := range []string{
+		"source wired: its calls go to https://nas.local/v1",
 		"it would replace the source wired the yard has under that name.",
 		"command file wired/thread: [wired/thread, reply] (thread.reply, handed the credential): sha256 " + diff.OldSHA256 + " -> sha256 " + diff.NewSHA256 + ", mode 0700 (1 insertions, 1 deletions).",
 		"the copy would remove extra.txt, which neither declaration names: sha256 ",
@@ -1041,6 +1055,31 @@ func TestPackReplacementDiffShowsWholeDeclarationKeys(t *testing.T) {
 	} {
 		if got := strings.Join(packDeclDiffLines("wired", c.was, c.now), "\n"); got != c.want {
 			t.Errorf("bases %s: card lines = %q, want %q", c.name, got, c.want)
+		}
+	}
+
+	// A template is where the credential may go too, to a host the operator
+	// types, so a change of it alone is one line as well.
+	hosted, err := source.Parse("new", []byte(wiredDecl+"base_template: https://{host}/v1\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved, err := source.Parse("new", []byte(wiredDecl+"base_template: https://{host}/v2\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name     string
+		was, now *source.Declaration
+		want     string
+	}{
+		{"a template added", noBases, hosted, `source wired base_template: none -> "https://{host}/v1".`},
+		{"a template dropped", hosted, noBases, `source wired base_template: "https://{host}/v1" -> none.`},
+		{"a template moved", hosted, moved, `source wired base_template: "https://{host}/v1" -> "https://{host}/v2".`},
+		{"the same template", hosted, hosted, ""},
+	} {
+		if got := strings.Join(packDeclDiffLines("wired", c.was, c.now), "\n"); got != c.want {
+			t.Errorf("%s: card lines = %q, want %q", c.name, got, c.want)
 		}
 	}
 }

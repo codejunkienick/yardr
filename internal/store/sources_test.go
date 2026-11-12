@@ -167,6 +167,7 @@ func TestDeclaredSourceBase(t *testing.T) {
 		!strings.Contains(err.Error(), "the declaration names no bases") {
 		t.Fatalf("base=eu without bases: %v", err)
 	}
+	t.Run("host", testDeclaredSourceHost)
 	evs, err := st.EventsSince(ctx, 0, 100)
 	if err != nil {
 		t.Fatal(err)
@@ -177,6 +178,160 @@ func TestDeclaredSourceBase(t *testing.T) {
 		}
 	}
 	t.Fatalf("no source_set event carries base=eu: %+v", evs)
+}
+
+const sourceFileHosted = `name: crm
+base: https://api.crm.example.com/1
+bases:
+  eu: https://eu.api.crm.example.com/1
+base_template: https://{host}/api/1
+credential: { env: CRM_TOKEN }
+calls:
+  ping: { kind: read, request: { method: GET, path: /ping } }
+`
+
+// A source whose declaration names a base_template sends its calls to the host
+// the operator types, filled into it, in place of its base: a host the checks
+// refuse is refused in their words and changes nothing, one on a private
+// network over https is taken, the host and a region base replace each other,
+// and replacing the file keeps the host as it keeps the base. The credential
+// is paired with the host it was given for, and a host never carries it:
+// the calls are held until it is given again, a base that takes the source
+// off a host holds it too, and a base set where no host stood pairs it as it
+// always did.
+func testDeclaredSourceHost(t *testing.T) {
+	_, st := storetest.NewOwned(t)
+	ctx := context.Background()
+	if err := st.SetSetting(ctx, store.OperatorSetting, "jo", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutSource(ctx, "single.yaml", sourceFileSingle, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetSource(ctx, "single", store.SourceHost, "crm.example.net", "jo"); err == nil ||
+		!strings.Contains(err.Error(), "the declaration names no base_template") {
+		t.Fatalf("host=crm.example.net without a template: %v", err)
+	}
+	src, err := st.PutSource(ctx, "crm.yaml", sourceFileHosted, "jo")
+	if err != nil || src.Host != "" {
+		t.Fatalf("host unset = %q, %v", src.Host, err)
+	}
+	d, err := src.Declaration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for host, want := range map[string]string{
+		"user@crm.example.net":    "the address it makes has a user or password in it",
+		"crm.example.net?x=1":     "the address it makes has a query or a fragment",
+		"crm.example.net/x":       "a host is a name or an address with an optional port",
+		"https://crm.example.net": "a host has no scheme",
+		"crm.example.net:99999":   "the port is a number from 1 to 65535",
+	} {
+		if _, err := st.SetSource(ctx, "crm", store.SourceHost, host, "jo"); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("host=%s: %v, want %q", host, err, want)
+		}
+	}
+	if got, err := st.GetSource(ctx, "crm"); err != nil || got.Host != "" {
+		t.Fatalf("a refused host was kept: %+v, %v", got, err)
+	}
+	paired := func(host, when string) {
+		t.Helper()
+		if got, err := st.GetSource(ctx, "crm"); err != nil || got.KeyedHost != host {
+			t.Fatalf("%s: paired with %q, %v; want %q", when, got.KeyedHost, err, host)
+		}
+	}
+	held := func(from, to, when string) {
+		t.Helper()
+		got, err := st.GetSource(ctx, "crm")
+		if err != nil {
+			t.Fatal(err)
+		}
+		why := got.CredentialHeld(d)
+		for _, want := range []string{"its credential was given for " + from, "the source's calls go to " + to + " now", "yardr source key crm"} {
+			if !strings.Contains(why, want) {
+				t.Fatalf("%s: held = %q; want it to say %q", when, why, want)
+			}
+		}
+	}
+	free := func(when string) {
+		t.Helper()
+		if got, err := st.GetSource(ctx, "crm"); err != nil || got.CredentialHeld(d) != "" {
+			t.Fatalf("%s: held = %q, %v", when, got.CredentialHeld(d), err)
+		}
+	}
+	key := func() {
+		t.Helper()
+		if _, err := st.KeySource(ctx, "crm", map[string]string{"CRM_TOKEN": "tok"}, "jo"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key()
+	paired("https://api.crm.example.com", "the key given at the base")
+
+	// A host on a private network over https is taken; the base setting it
+	// replaces is cleared, and the credential, given for the base, is held.
+	src, err = st.SetSource(ctx, "crm", store.SourceHost, "192.168.1.20:8443", "jo")
+	if err != nil || src.Host != "192.168.1.20:8443" || src.Base != "" {
+		t.Fatalf("host=192.168.1.20:8443: %+v, %v", src, err)
+	}
+	if got := src.Resolved(d).Base; got != "https://192.168.1.20:8443/api/1" {
+		t.Fatalf("calls go to %q", got)
+	}
+	if got := src.CalledAt(d); got != "https://192.168.1.20:8443/api/1 (host 192.168.1.20:8443)" {
+		t.Fatalf("CalledAt = %q", got)
+	}
+	paired("https://api.crm.example.com", "a host set: nothing carries the key to it")
+	held("https://api.crm.example.com", "https://192.168.1.20:8443", "a host set")
+	key()
+	paired("https://192.168.1.20:8443", "the key given again at the host")
+	free("the key given again at the host")
+
+	// Replacing the file, as a second pack apply does, keeps the host and
+	// where the key was given.
+	changed := strings.Replace(sourceFileHosted, "path: /ping", "path: /status", 1)
+	if src, err = st.PutSource(ctx, "crm.yaml", changed, "jo"); err != nil || src.Host != "192.168.1.20:8443" {
+		t.Fatalf("replaced = %+v, %v", src, err)
+	}
+	free("the file replaced")
+
+	// A base replaces the host, and holds the key it was not given for.
+	if src, err = st.SetSource(ctx, "crm", store.SourceBase, "eu", "jo"); err != nil || src.Host != "" || src.Base != "eu" {
+		t.Fatalf("base=eu: %+v, %v", src, err)
+	}
+	if got := src.CalledAt(d); got != "https://eu.api.crm.example.com/1 (base eu)" {
+		t.Fatalf("CalledAt = %q", got)
+	}
+	held("https://192.168.1.20:8443", "https://eu.api.crm.example.com", "a base that took the source off the host")
+	paired("https://192.168.1.20:8443", "a base that took the source off the host")
+
+	// And the host replaces the base; "" is the declaration's own base.
+	if src, err = st.SetSource(ctx, "crm", store.SourceHost, "crm.example.net", "jo"); err != nil || src.Base != "" || src.Host != "crm.example.net" {
+		t.Fatalf("host=crm.example.net: %+v, %v", src, err)
+	}
+	if src, err = st.SetSource(ctx, "crm", store.SourceHost, "", "jo"); err != nil || src.Host != "" || src.Base != "" || src.Resolved(d) != d {
+		t.Fatalf("host cleared: %+v, %v", src, err)
+	}
+	held("https://192.168.1.20:8443", "https://api.crm.example.com", "the host cleared")
+
+	// Where no host stood a base pairs the key with where the calls go, as
+	// it always did.
+	key()
+	if _, err = st.SetSource(ctx, "crm", store.SourceBase, "eu", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	paired("https://eu.api.crm.example.com", "a base set where no host stood")
+	free("a base set where no host stood")
+
+	evs, err := st.EventsSince(ctx, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range evs {
+		if e.Kind == "source_set" && e.Data["source"] == "crm" && e.Data["host"] == "192.168.1.20:8443" {
+			return
+		}
+	}
+	t.Fatalf("no source_set event carries host=192.168.1.20:8443: %+v", evs)
 }
 
 // What the parser refuses is not kept, and the error names the file as the
@@ -253,6 +408,9 @@ func TestDeclaredSourceIsTheOperators(t *testing.T) {
 	}
 	if _, err := own.SetSource(pane, "pushover", store.SourceBase, "eu", "jo"); err == nil || !strings.Contains(err.Error(), "this is the crew member yardmaster") {
 		t.Fatalf("SetSource base from the yardmaster's pane as jo = %v", err)
+	}
+	if _, err := own.SetSource(pane, "pushover", store.SourceHost, "crm.example.net", "jo"); err == nil || !strings.Contains(err.Error(), "this is the crew member yardmaster") {
+		t.Fatalf("SetSource host from the yardmaster's pane as jo = %v", err)
 	}
 	if _, err := own.KeySource(pane, "pushover", map[string]string{"PUSHOVER_TOKEN": "s3cret"}, "jo"); err == nil || !strings.Contains(err.Error(), "setting a source's credential is the operator's (jo)") || !strings.Contains(err.Error(), "this is the crew member yardmaster") {
 		t.Fatalf("KeySource from the yardmaster's pane as jo = %v", err)

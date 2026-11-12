@@ -250,7 +250,7 @@ func (w *wtx) askedSecret(sec AskSecret, to string) (*AskSecret, error) {
 	if err != nil {
 		return nil, err
 	}
-	d = d.WithBase(src.Base)
+	d = src.Resolved(d)
 	if sec.Hook != "" {
 		hook := strings.TrimSpace(sec.Hook)
 		if hook == "" {
@@ -760,7 +760,7 @@ func (w *wtx) giveSecret(ctx context.Context, s *Store, home, id string, ask uin
 	if err != nil {
 		return err
 	}
-	d = d.WithBase(src.Base)
+	d = src.Resolved(d)
 	if host := sourceHost(d); host != sec.Host {
 		return fmt.Errorf("ask %d says the secret is for the source %s at %s, and the source's calls go to %s now: the ask is from before the source was replaced, and is to be asked again",
 			ask, sec.Source, sec.Host, host)

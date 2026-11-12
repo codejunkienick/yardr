@@ -798,6 +798,67 @@ The operator chooses one by name with `yardr source set <source> base=<name>`;
 sent. `yardr source show` and `list` show the host in use. Calls and
 commands the source names use that selected URL.
 
+A service the operator may run on a machine of their own declares the
+address that server answers at beside `base`, which stays the default (the
+service's own):
+
+```yaml
+base: https://api.example.com/v1
+base_template: https://{host}/api/v1
+```
+
+`base_template` is `https://{host}` and the path every call is under: the
+mark `{host}` stands once, straight after `https://`, and nothing but a `/`
+follows it, so the file decides the scheme and the path and the operator
+decides the machine. It is held to the checks of a base with a stand-in host
+in the mark (https only, no user, query or fragment, no `..`), and it is
+refused beside `credential.url`, in a file with no calls and without a
+`base` to be the default. The operator gives the host with `yardr source set
+<source> host=<host>`, on a setup card, or in neither place at all:
+
+```sh
+yardr source set crm host=crm.example.net        # https://crm.example.net/api/v1
+yardr source set crm host=192.168.1.20:8443      # a machine on the local network, over https
+yardr source set crm host=                       # the declaration's own base again
+```
+
+A host is a name or an address with an optional port and nothing else: no
+scheme, path, user, query or fragment, which the template says. The address
+it makes is held to the checks of a base again, and a host that fails them
+is refused in their words (`has a user or password in it`, `has a query or a
+fragment`), so a private-network host over https passes and plain http does
+not. A source set to a host sends its calls there and the base setting is
+cleared, as setting a base clears the host: the two replace each other. The
+setting survives `yardr pack apply` of the same pack, which keeps it as it
+keeps `base`; a declaration that no longer has a template sends the calls to
+its own base again, and a host the checks refuse sends them nowhere.
+
+Which host the credential goes to is the operator's word alone, so the host
+is typed by them in a terminal or on the setup card ([below](#a-declared-source))
+and an agent has no way to say one: `yardr source set` is refused from an
+agent's pane, and a run ask cannot propose it. A credential is given for the
+host the calls go to, and setting a host never carries one to it: while the
+declaration or the setting sends to another host than the one the key was
+given for, the source's calls, `yardr source check` and whatever else would
+send it there are held back naming both hosts, until `yardr source key`
+gives it again for this one. A base setting that takes the source off a host
+holds the key back the same way.
+
+The setup card of a pack whose source declares a template
+([chat.md](chat.md#setting-up-a-packs-sources)) asks cloud or self-hosted
+above the account: its host line says where the calls go now and how to send
+them to a server of your own. The operator types the host with the approval,
+in the host field above the account on the bead's page or as `--host <host>`
+beside `yardr bead answer <id> <ask> <n> --secret`, `<n> --account <source>`
+or a bare `<n>` that keeps an account that stands. The yard holds it to what a
+base is, tries the typed account's check call against it, and sets the source
+to it before it writes the account, so the key is given once, for that host.
+An account that stands was given for the host in use, so a host given with a
+bare pick that keeps it holds it back until it is typed again, which the
+carried-out card says, and a card with only part of the account standing takes
+every name typed with a host. The asker has no flag for it: `yardr bead ask
+--setup` takes `--source-base` for a region and nothing for a host.
+
 - **The file holds no secret.** It names the variable the credential is in;
   the value is read from the `env_file` at each call (mode 0600, as every
   env file). So the declaration is kept in the store, shown, and carried by
@@ -1028,10 +1089,12 @@ commands the source names use that selected URL.
   removed on a card too (`source rm <name>`), and its records and its
   links move to another source on one (`source move`, `link move`). Every
   other command of a source stays the operator's to type in a terminal:
-  `source set env_file=`, `mint_command=`
-  and `base=`, and `source key` (a key is asked for with a secret ask). A
+  `source set env_file=`, `mint_command=`, `base=`
+  and `host=`, and `source key` (a key is asked for with a secret ask). A
   source's region `base` alone is changed by a setup ask instead
-  (`yardr bead ask ... --setup <pack> --source-base <name>`). Their words
+  (`yardr bead ask ... --setup <pack> --source-base <name>`), and its `host`
+  is typed on that card by the operator when it asks one: the asker has no
+  flag for it, since a host decides where the credential goes. Their words
   are a file, a path, a program or the name
   of where the credential is sent, and a command that is approved from a
   card has only names the yard holds, numbers and flags: `source add` is

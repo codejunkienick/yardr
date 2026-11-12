@@ -89,9 +89,9 @@ func sourceFingerprint(src *Source, home string) (string, error) {
 		return "", err
 	}
 	if len(inv) > 0 {
-		return seen(src.Text, src.EnvFile, src.MintCommand, src.Base, inv), nil
+		return seen(src.Text, src.EnvFile, src.MintCommand, src.where(), inv), nil
 	}
-	return seen(src.Text, src.EnvFile, src.MintCommand, src.Base), nil
+	return seen(src.Text, src.EnvFile, src.MintCommand, src.where()), nil
 }
 
 // lastEvent is the newest event of the kind kind that match takes, among
@@ -139,16 +139,16 @@ func (w *wtx) staleSource(seq uint64, name string, was, now AskRun) error {
 		return nil
 	}
 	added := lastEvent(w.Tx, "source_added", naming("source", name))
+	settings := []string{SourceEnvFile, SourceMintCommand, SourceBase, SourceHost}
 	set := lastEvent(w.Tx, "source_set", func(e Event) bool {
-		_, file := e.Data[SourceEnvFile]
-		_, mint := e.Data[SourceMintCommand]
-		_, base := e.Data[SourceBase]
-		return e.Data["source"] == name && (file || mint || base)
+		return e.Data["source"] == name && slices.ContainsFunc(settings, func(k string) bool { _, ok := e.Data[k]; return ok })
 	})
 	switch {
 	case set != nil && (added == nil || set.Seq > added.Seq):
-		if _, base := set.Data[SourceBase]; base {
-			return fmt.Errorf("ask %d was written when the source %s used another base: its base was set since%s. %s", seq, name, since(set), nothingRan)
+		for _, k := range []string{SourceBase, SourceHost} {
+			if _, ok := set.Data[k]; ok {
+				return fmt.Errorf("ask %d was written when the source %s used another %s: its %s was set since%s. %s", seq, name, k, k, since(set), nothingRan)
+			}
 		}
 		what := SourceEnvFile
 		if _, mint := set.Data[SourceMintCommand]; mint {
@@ -254,12 +254,12 @@ func parseSourceLimit(rest []string) ([]string, error) {
 	switch {
 	case !ok:
 		return nil, fmt.Errorf("--run takes %s: %q is no setting", use, args[1])
-	case key != SourceCallsPerHour && key != SourceUpdatesPerHour && key != SourceEnvFile && key != SourceMintCommand && key != SourceBase:
+	case key != SourceCallsPerHour && key != SourceUpdatesPerHour && key != SourceEnvFile && key != SourceMintCommand && key != SourceBase && key != SourceHost:
 		return nil, fmt.Errorf("source %s: %s is no setting of a source (it has: %s)", name, key, strings.Join(SourceSettings, ", "))
 	case value == "":
 		return nil, fmt.Errorf("--run takes %s, and source set with %s= and nothing after it is the operator's to type in a terminal", use, key)
 	}
-	if key == SourceEnvFile || key == SourceMintCommand || key == SourceBase {
+	if key == SourceEnvFile || key == SourceMintCommand || key == SourceBase || key == SourceHost {
 		return []string{name, args[1]}, nil
 	}
 	n, err := sourceSetting(name, key, value)
@@ -316,7 +316,7 @@ func (w *wtx) sourceLimitCard(argv []string, asking bool) (AskRun, error) {
 	if err != nil {
 		return AskRun{}, err
 	}
-	d = d.WithBase(src.Base)
+	d = src.Resolved(d)
 	has := limitOf(src, key)
 	if asking && n == has {
 		return AskRun{}, fmt.Errorf("source %s: %s is %d already, so the command would change nothing", name, key, has)
@@ -610,7 +610,7 @@ func (w *wtx) grantCard(argv []string, asking bool) (AskRun, error) {
 	if err != nil {
 		return AskRun{}, err
 	}
-	d = d.WithBase(src.Base)
+	d = src.Resolved(d)
 	var pack, label, build string
 	calls := []string{what}
 	if preset != "" {

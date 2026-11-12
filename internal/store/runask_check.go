@@ -128,7 +128,7 @@ func (w *wtx) sourceCheckCard(argv []string, asking bool) (AskRun, error) {
 	if err != nil {
 		return AskRun{}, err
 	}
-	d = d.WithBase(src.Base)
+	d = src.Resolved(d)
 	if d.Notify == nil {
 		return AskRun{}, fmt.Errorf("the source %s has no notify key, so its file names no call that tells a person", srcName)
 	}
@@ -314,7 +314,7 @@ func (s *Store) approveSourceCheck(ctx context.Context, id string, seq uint64, a
 	// The test message goes to the source's chosen base, as a call does:
 	// the declaration with the base setting in place of its own, so the
 	// credential, the mint and the request all go to one address.
-	job.d = job.d.WithBase(job.src.Base)
+	job.d = job.src.Resolved(job.d)
 	// The source's own credential goes only to the host it was given for. The
 	// approval fails, as it does for a credential that cannot be read, before
 	// that is read or minted, and the ask stays open.

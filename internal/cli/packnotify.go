@@ -242,7 +242,7 @@ func applyNotify(ctx context.Context, st store.API, plan *pack.Plan, actor strin
 			if err != nil {
 				return sets, err
 			}
-			sets.add(true, b.source, fmt.Sprintf("source %s: %s", src.Name, baseState(d, src.Base)))
+			sets.add(true, b.source, fmt.Sprintf("source %s: %s", src.Name, baseState(d, src)))
 			continue
 		}
 		saved, err := st.SetSource(ctx, b.source, store.SourceBase, b.name, actor)
@@ -253,7 +253,7 @@ func applyNotify(ctx context.Context, st store.API, plan *pack.Plan, actor strin
 		if err != nil {
 			return sets, err
 		}
-		sets.add(true, b.source, fmt.Sprintf("source %s: %s", saved.Name, baseState(d, saved.Base)))
+		sets.add(true, b.source, fmt.Sprintf("source %s: %s", saved.Name, baseState(d, saved)))
 	}
 	for _, n := range tos {
 		if why := refused[n.source]; why != "" {

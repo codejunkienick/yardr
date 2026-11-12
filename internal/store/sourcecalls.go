@@ -1175,7 +1175,7 @@ func (s *Store) CallSource(ctx context.Context, req SourceCall) (*SourceAnswer, 
 	// The call goes to the source's chosen base: the declaration with
 	// the base setting in place of its own, so the credential, the mint
 	// and the request all go to one address.
-	d = d.WithBase(src.Base)
+	d = src.Resolved(d)
 	var cred string
 	if argv := src.mintIn(s.home); isHostedMint(argv) {
 		// The hosted mint is not run: the server mints it in-process

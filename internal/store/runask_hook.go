@@ -189,7 +189,7 @@ func (w *wtx) hookAddCard(run AskRun, asking bool) (AskRun, error) {
 	if err != nil {
 		return AskRun{}, err
 	}
-	d = d.WithBase(src.Base)
+	d = src.Resolved(d)
 	if d.Hook == nil {
 		return AskRun{}, fmt.Errorf("source %s: its declaration has no hook key, so the yard hears nothing from it", sourceName)
 	}
@@ -527,7 +527,7 @@ func (s *Store) approveHookRegister(ctx context.Context, id string, seq uint64, 
 	// The register call goes to the source's chosen base, as a call
 	// does: the declaration with the base setting in place of its own,
 	// so the credential, the mint and the request all go to one address.
-	job.d = job.d.WithBase(job.src.Base)
+	job.d = job.src.Resolved(job.d)
 	finish := func(result string) (*AskApproved, error) {
 		var out *AskApproved
 		if err := s.writeVia(ctx, func(w *wtx) error {
@@ -755,7 +755,7 @@ func (w *wtx) prepareHookRegister(ctx context.Context, id string, seq uint64, ac
 	if err != nil {
 		return nil, fmt.Errorf("ask %d: %w. %s", seq, err, nothingRan)
 	}
-	d = d.WithBase(src.Base)
+	d = src.Resolved(d)
 	if !d.Hook.RegistersSecret() {
 		return nil, fmt.Errorf("ask %d: source %s names no register call with scheme secret now. %s", seq, sourceName, nothingRan)
 	}

@@ -441,7 +441,7 @@ func (w *wtx) hookTableCard(run AskRun, asking bool) (AskRun, error) {
 	if err != nil {
 		return AskRun{}, err
 	}
-	d = d.WithBase(src.Base)
+	d = src.Resolved(d)
 	if d.Hook == nil {
 		return AskRun{}, fmt.Errorf("source %s: its declaration has no hook key, so the yard hears nothing from it", sourceName)
 	}

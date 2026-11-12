@@ -102,7 +102,7 @@ type API interface {
 	LoginWait(ctx context.Context, id, group string) (string, error)
 	LoginWaitReady(ctx context.Context, id string) error
 	ApproveAsk(ctx context.Context, id string, ask uint64, actor string, weighed bool, values map[string]string) (*AskApproved, error)
-	ApproveSetup(ctx context.Context, id string, ask uint64, option int, values map[string]string, account, actor string, weighed bool) (*AskSetupApproved, error)
+	ApproveSetup(ctx context.Context, id string, ask uint64, option int, values map[string]string, account, actor string, weighed bool, host string) (*AskSetupApproved, error)
 
 	PutDepot(ctx context.Context, r Depot, actor string) error
 	Depots(ctx context.Context) ([]Depot, error)

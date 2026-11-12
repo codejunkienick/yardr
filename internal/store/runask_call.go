@@ -205,7 +205,7 @@ func (w *wtx) sourceCallCard(argv []string, asking bool) (AskRun, error) {
 	if !ok {
 		return AskRun{}, fmt.Errorf("source %s has no call %q (it has: %s)", d.Name, callName, or(strings.Join(callNames(d), ", "), "none"))
 	}
-	d = d.WithBase(src.Base)
+	d = src.Resolved(d)
 	params, err = call.ParamsWithDefaults(params)
 	if err != nil {
 		return AskRun{}, err

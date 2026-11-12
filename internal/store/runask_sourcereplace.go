@@ -1,7 +1,7 @@
 // The replacement half of the source add row of the run-ask list: the card
 // of a declaration whose name the yard has already. A replacement keeps
-// the source's settings (its env_file, mint_command, call limits, base and
-// ignored senders) and every grant of it, so a declaration that changes
+// the source's settings (its env_file, mint_command, call limits, base or
+// host and ignored senders) and every grant of it, so a declaration that changes
 // little can still move where the standing credential is sent and which
 // programs the yard runs for it. The card shows the declaration that
 // stands against the one the ask carries, and weighs as code in every form
@@ -59,7 +59,7 @@ func (w *wtx) sourceReplaceCard(run AskRun, d *source.Declaration, carried AskSo
 	case len(carried.Inventory) > 0:
 		copies = "copies no command files, and removes the command copies that stand"
 	}
-	does := append([]string{safeSourceCardLine(fmt.Sprintf("it replaces one source and %s, and changes nothing else. It grants no call, makes no hook, and sets no credential's file: the source keeps its env_file, mint_command, region base, call limits and ignored senders, and every grant of it stands, now for this declaration.", copies))}, lines...)
+	does := append([]string{safeSourceCardLine(fmt.Sprintf("it replaces one source and %s, and changes nothing else. It grants no call, makes no hook, and sets no credential's file: the source keeps its env_file, mint_command, base or host, call limits and ignored senders, and every grant of it stands, now for this declaration.", copies))}, lines...)
 	if len(does) > MaxRunSourceCardLines {
 		return AskRun{}, cardTooLong(d.Name, len(does), file)
 	}

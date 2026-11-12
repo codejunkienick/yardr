@@ -48,8 +48,8 @@ func (c *carrier) askSetup(ctx context.Context, rec *store.Carry) (*store.AskSet
 }
 
 // carrySetup carries out the approved setup setup with the preset picked:
-// the apply, the base, the account and the grants, each verified back. A
-// failure of any step stops the rest and is recorded on the ask
+// the apply, the base, the host, the account and the grants, each verified
+// back. A failure of any step stops the rest and is recorded on the ask
 // (FailCarry).
 func (c *carrier) carrySetup(ctx context.Context, rec *store.Carry, setup *store.AskSetup, picked int) (string, string) {
 	lines, failure := c.carrySetupApply(ctx, rec, setup)
@@ -61,11 +61,17 @@ func (c *carrier) carrySetup(ctx context.Context, rec *store.Carry, setup *store
 		return "", failure
 	}
 	lines = append(lines, based...)
+	hosted, failure := c.carrySetupHost(ctx, rec, setup)
+	if failure != "" {
+		return "", failure
+	}
+	lines = append(lines, hosted...)
 	file, failure := c.carrySetupAccount(ctx, rec, setup, picked)
 	if failure != "" {
 		return "", failure
 	}
 	lines = append(lines, store.AccountSetWords(setup.Account)+" in "+file)
+	lines = append(lines, c.carrySetupHeld(ctx, rec, setup)...)
 	grants, failure := c.carrySetupGrants(ctx, rec, setup, picked, file)
 	if failure != "" {
 		return "", failure
@@ -124,6 +130,68 @@ func (c *carrier) carrySetupBase(ctx context.Context, rec *store.Carry, setup *s
 		lines = append(lines, fmt.Sprintf("source %s: calls go to %s (base %s)", saved.Name, url, saved.Base))
 	}
 	return lines, ""
+}
+
+// carrySetupHost is a setup's host step: each carried source whose
+// declaration names a base_template is set to the host the approval carried,
+// as the operator, before the account is written, so that the key is given
+// once, for the host the calls go to. A host replaces the base the asker
+// chose, as setting one does (yardr source set).
+// Nothing is set where the approval carried none. It answers what it set, a
+// line a source.
+func (c *carrier) carrySetupHost(ctx context.Context, rec *store.Carry, setup *store.AskSetup) ([]string, string) {
+	if rec.Host == "" {
+		return nil, ""
+	}
+	var lines []string
+	for _, carried := range setup.Carried {
+		failed := func(err error) ([]string, string) {
+			return nil, failWords(fmt.Sprintf("pack %s is applied, but the host of source %s was not set: %v", setup.Pack, carried.Name, err),
+				"yardr source set "+carried.Name+" host="+rec.Host)
+		}
+		src, err := c.st.GetSource(ctx, carried.Name)
+		if err != nil {
+			return failed(err)
+		}
+		d, err := src.Declaration()
+		if err != nil {
+			return failed(err)
+		}
+		if d.BaseTemplate == "" {
+			continue
+		}
+		saved, err := c.st.SetSource(ctx, carried.Name, store.SourceHost, rec.Host, rec.Actor)
+		if err != nil {
+			return failed(err)
+		}
+		lines = append(lines, fmt.Sprintf("source %s: calls go to %s", saved.Name, saved.CalledAt(d)))
+	}
+	return lines, ""
+}
+
+// carrySetupHeld says, for each carried source the host step set, what holds
+// its credential back from that host: an account the approval kept, given for
+// the host in use, is not sent to the one the operator typed until it is given
+// again, and the line says how. None where the account step paired it with the
+// host (an account typed or taken) or the approval carried no host. A line a
+// source.
+func (c *carrier) carrySetupHeld(ctx context.Context, rec *store.Carry, setup *store.AskSetup) []string {
+	if rec.Host == "" {
+		return nil
+	}
+	var lines []string
+	for _, carried := range setup.Carried {
+		src, err := c.st.GetSource(ctx, carried.Name)
+		if err != nil {
+			continue
+		}
+		if d, err := src.Declaration(); err == nil && d.BaseTemplate != "" {
+			if held := src.CredentialHeld(d); held != "" {
+				lines = append(lines, fmt.Sprintf("source %s: %s", carried.Name, held))
+			}
+		}
+	}
+	return lines
 }
 
 // carrySetupAccount is a setup's account step: for a typed approval the

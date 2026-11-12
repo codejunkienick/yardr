@@ -236,6 +236,50 @@ func TestCoreComparesNoSourceName(t *testing.T) {
 	}
 }
 
+// A source's calls go where its settings say: the region base its base
+// setting names, or the host its host setting fills the declaration's
+// template with. Every call, check and pairing of a credential asks
+// store.Source.Resolved for the declaration it is made against, so that none
+// reads the declaration's own base while the operator has set a host: a call
+// would go to one address with the key given for another. The declaration's
+// WithBase is called by what makes the choice alone: internal/source, which
+// defines it, Resolved, and the places a setup card chooses a base or a host
+// that no source holds yet: the sentences of its card, what its presets
+// grant, and the check of the account typed with it.
+func TestCallsAreMadeAgainstWhatTheSourceResolves(t *testing.T) {
+	t.Parallel()
+	allowed := map[string]int{
+		"internal/store/sourcehost.go":           1,
+		"internal/store/runask_setup.go":         1,
+		"internal/store/runask_setup_address.go": 1,
+		"internal/store/runask_setup_approve.go": 1,
+	}
+	files, err := loadRepoGoFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var read int
+	for _, f := range files {
+		if !strings.HasPrefix(f.path, "internal/") || strings.HasPrefix(f.path, "internal/source/") {
+			continue
+		}
+		read++
+		var seen int
+		for i, line := range f.lines {
+			if !strings.Contains(line, ".WithBase(") {
+				continue
+			}
+			if seen++; seen > allowed[f.path] {
+				t.Errorf("%s:%d calls WithBase: ask store.Source.Resolved for the declaration a source's calls are made against, so that its host is in place: %s", f.path, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+	// Not for want of looking: the walk read the core.
+	if read < 100 {
+		t.Fatalf("%d Go files read", read)
+	}
+}
+
 // A service that tells a user outside the yard is a pack: no Go code yardr
 // is built from names one, so none can know one from another. The packs
 // live in packs/, their fixtures in tests, and the telling in each pack's

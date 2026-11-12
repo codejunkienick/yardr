@@ -133,6 +133,77 @@ func TestBeadAskSetupAndAnswer(t *testing.T) {
 		t.Fatalf("answer printed %q, want %q", out, want)
 	}
 	beadAskSetupSourceBase(t)
+	beadAnswerSetupHost(t)
+}
+
+// beadAnswerSetupHost checks that --host goes with a setup ask's account and
+// nothing else, that the gate names it where it says how to approve, that a
+// host the checks refuse is refused in their words with the ask left open, and
+// that an approval carries the host to the carrying record and says who gave
+// it.
+func beadAnswerSetupHost(t *testing.T) {
+	y, b := setupYardCLI(t)
+	decl := strings.Replace(cliSetupDecl, "base: https://clipphone.example.com\n",
+		"base: https://clipphone.example.com\nbase_template: https://{host}/api\n", 1)
+	if decl == cliSetupDecl {
+		t.Fatal("the test adds no template")
+	}
+	reading := cliSetupReading()
+	reading.Sources[0].Text = decl
+	y.own.SetPackReader(func(ctx context.Context, name string, depot string, mappings store.Mappings, yard store.API) (*store.PackReading, error) {
+		if name != "clipphone" {
+			return nil, errFakeNoPackCLI(name)
+		}
+		return reading, nil
+	})
+	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Set up clipphone for the yardmaster?",
+		"--setup", "clipphone", "--crew", "yardmaster",
+		"--context", "The yardmaster rings the person when a bead needs them."); err != nil {
+		t.Fatal(err)
+	}
+	notes, err := y.st.Notes(context.Background(), b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var setup *store.AskSetup
+	for _, r := range store.ResolveAsks(notes, time.Now()) {
+		if r.Note.Seq == 1 {
+			setup = r.Ask.Setup
+		}
+	}
+	if setup == nil || setup.HostTemplate != "https://{host}/api" {
+		t.Fatalf("the stored setup = %+v", setup)
+	}
+	if out, err := y.as(t, "jo", "answer", b.ID, "1", "1", "--host", "192.168.1.20:8443"); err == nil ||
+		!strings.Contains(err.Error(), "--host goes with a setup ask's approval") {
+		t.Errorf("--host with a bare pick of a card whose account does not stand was taken or refused otherwise: %v\n%s", err, out)
+	}
+	// With no terminal the gate declines before a value is read, and the
+	// command it says to run in a terminal carries the host.
+	in := strings.NewReader("CLIPHONE_ACCOUNT=1555\n")
+	c := y.a.beadCmd()
+	c.SetIn(in)
+	if _, err := run(t, c, "answer", b.ID, "1", "1", "--secret", "--host", "192.168.1.20:8443"); err == nil ||
+		!strings.HasSuffix(err.Error(), "yardr bead answer "+b.ID+" 1 1 --secret --host 192.168.1.20:8443") || in.Len() != len("CLIPHONE_ACCOUNT=1555\n") {
+		t.Fatalf("approving with a host and no terminal = %v (%d bytes of input left)", err, in.Len())
+	}
+	if out, err := answerFrom(t, y.a, "CLIPHONE_ACCOUNT=1555\n", b.ID, "1", "1", "--secret", "--host", "user@evil.example"); err == nil ||
+		!strings.Contains(err.Error(), "the address it makes has a user or password in it") {
+		t.Fatalf("a host with a user in it was taken or refused otherwise: %v\n%s", err, out)
+	}
+	if got := askState(context.Background(), y.st, b.ID, 1); got != "open" {
+		t.Fatalf("the setup ask is %q after the refused approvals, want it open", got)
+	}
+	out, err := answerFrom(t, y.a, "CLIPHONE_ACCOUNT=1555\n", b.ID, "1", "1", "--secret", "--host", "192.168.1.20:8443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "ask 1, asked by yardmaster: setup of pack clipphone, preset read to crew yardmaster\njo gave CLIPHONE_ACCOUNT\njo gave the host 192.168.1.20:8443\njo approved it: approved, to be carried out\n"; out != want {
+		t.Fatalf("answer printed %q, want %q", out, want)
+	}
+	if rec, err := y.own.CarryOf(context.Background(), b.ID, 1); err != nil || rec.Host != "192.168.1.20:8443" {
+		t.Fatalf("the carrying record = %+v, %v", rec, err)
+	}
 }
 
 // beadAskSetupSourceBase checks that --source-base reaches a setup ask's
@@ -239,6 +310,15 @@ func TestBeadAnswerSetupRefusals(t *testing.T) {
 		!strings.Contains(err.Error(), "takes nothing else") {
 		t.Errorf("a pick with --secret on a secret ask was taken or refused otherwise: %v\n%s", err, out)
 	}
+	// A host goes with a setup ask's account: a secret ask has none, and the
+	// value is not given with it.
+	if out, err := answerFrom(t, y.a, "CRM_TOKEN=s3cret\n", b.ID, "3", "--secret", "--host", "crm.example.net"); err == nil ||
+		!strings.Contains(err.Error(), "--host goes with a setup ask's account, and ask 3 asks for a secret, which has no host") {
+		t.Errorf("--host on a secret ask was taken or refused otherwise: %v\n%s", err, out)
+	}
+	if got := askState(context.Background(), y.st, b.ID, 3); got != "open" {
+		t.Errorf("the secret ask is %q after the refused answers, want it open", got)
+	}
 }
 
 // yardr bead answer <n> --account takes a listed candidate's account
@@ -331,5 +411,62 @@ func TestBeadAnswerSetupKeep(t *testing.T) {
 	}
 	if want := "ask 1, asked by yardmaster: setup of pack clipphone, preset read to crew yardmaster\njo kept the standing account\njo approved it: approved, to be carried out\n"; out != want {
 		t.Fatalf("answer printed %q, want %q", out, want)
+	}
+	beadAnswerSetupKeepHost(t)
+}
+
+// beadAnswerSetupKeepHost checks that the bare pick that keeps a drift card's
+// account takes a host beside it: the gate names the host in the command it
+// says to run, the approval says who gave it and records it, and --host beside
+// anything else a bare pick is not is refused.
+func beadAnswerSetupKeepHost(t *testing.T) {
+	y, b := setupYardCLI(t)
+	ctx := context.Background()
+	hosted := strings.Replace(cliSetupDecl, "base: https://clipphone.example.com\n",
+		"base: https://clipphone.example.com\nbase_template: https://{host}/api\n", 1)
+	if hosted == cliSetupDecl {
+		t.Fatal("the test adds no template")
+	}
+	reading := cliSetupReading()
+	reading.Sources[0].Text = hosted
+	y.own.SetPackReader(func(ctx context.Context, name string, depot string, mappings store.Mappings, yard store.API) (*store.PackReading, error) {
+		if name != "clipphone" {
+			return nil, errFakeNoPackCLI(name)
+		}
+		return reading, nil
+	})
+	if _, err := y.st.PutSource(ctx, "clipphone.yaml", hosted, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "clipphone.env")
+	if err := os.WriteFile(file, []byte("CLIPHONE_ACCOUNT=1555\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.st.SetSource(ctx, "clipphone", store.SourceEnvFile, file, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Set up clipphone?", "--setup", "clipphone",
+		"--crew", "yardmaster", "--context", "The yardmaster rings the person."); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := y.as(t, "jo", "answer", b.ID, "1", "--later", "--host", "192.168.1.20:8443"); err == nil ||
+		!strings.Contains(err.Error(), "--host goes with a setup ask's approval") {
+		t.Errorf("--host with --later was taken or refused otherwise: %v\n%s", err, out)
+	}
+	c := y.a.beadCmd()
+	c.SetIn(strings.NewReader(""))
+	if _, err := run(t, c, "answer", b.ID, "1", "1", "--host", "192.168.1.20:8443"); err == nil ||
+		!strings.HasSuffix(err.Error(), "yardr bead answer "+b.ID+" 1 1 --host 192.168.1.20:8443") {
+		t.Fatalf("keeping the account with a host and no terminal = %v", err)
+	}
+	out, err := y.as(t, "jo", "answer", b.ID, "1", "1", "--host", "192.168.1.20:8443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "ask 1, asked by yardmaster: setup of pack clipphone, preset read to crew yardmaster\njo kept the standing account\njo gave the host 192.168.1.20:8443\njo approved it: approved, to be carried out\n"; out != want {
+		t.Fatalf("answer printed %q, want %q", out, want)
+	}
+	if rec, err := y.own.CarryOf(ctx, b.ID, 1); err != nil || rec.Host != "192.168.1.20:8443" || !rec.Keep {
+		t.Fatalf("the carrying record = %+v, %v", rec, err)
 	}
 }

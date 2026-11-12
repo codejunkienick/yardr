@@ -120,8 +120,8 @@ func (w *wtx) hookRmCard(argv []string, asking bool) (AskRun, error) {
 		sentences = append(sentences, "What it was set to do goes with it: "+andList(goes)+".")
 	}
 	sentences = append(sentences, fmt.Sprintf("Its signing secret stays in %s: no card removes a file.", h.SecretFile))
-	if _, d, err := sourceIn(w.Tx, h.Source); err == nil && d.Hook != nil && d.Hook.Register != nil {
-		sentences = append(sentences, fmt.Sprintf("The webhook the yard registered at %s for it stays registered there: remove it at the service.", d.Address()))
+	if src, d, err := sourceIn(w.Tx, h.Source); err == nil && d.Hook != nil && d.Hook.Register != nil {
+		sentences = append(sentences, fmt.Sprintf("The webhook the yard registered at %s for it stays registered there: remove it at the service.", src.CalledAt(d)))
 	}
 	back, backBy := w.hookRmBack(h)
 	return AskRun{

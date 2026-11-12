@@ -119,6 +119,10 @@ type cardSetup struct {
 	Back    string
 	BackBy  string
 	Account []string
+	// Host is the address a host of the operator's own fills, with {host}
+	// where it goes, where the card asks one above the account; "" where it
+	// asks none.
+	Host string
 }
 
 // cardSite is where a card stands: the yard for its head and sentences,
@@ -228,7 +232,7 @@ func (p BeadPage) Card(a store.BeadAsk) AskCard {
 		}
 	}
 	if a.Setup != nil {
-		out.Setup = &cardSetup{Pack: a.Setup.Pack, Does: a.Setup.Does, Back: a.Setup.Back, BackBy: a.Setup.BackBy, Account: a.Setup.Account}
+		out.Setup = &cardSetup{Pack: a.Setup.Pack, Does: a.Setup.Does, Back: a.Setup.Back, BackBy: a.Setup.BackBy, Account: a.Setup.Account, Host: a.Setup.HostTemplate}
 	}
 	return out
 }
@@ -260,7 +264,7 @@ func (w Waiting) Card(r Reason) AskCard {
 		out.Run = &cardRun{Command: r.RunCommand, Does: r.RunDoes, Back: r.RunBack, BackBy: r.RunBackBy, Ask: r.RunAsk}
 	}
 	if r.SetupPack != "" {
-		out.Setup = &cardSetup{Pack: r.SetupPack, Does: r.SetupDoes, Back: r.SetupBack, BackBy: r.SetupBackBy, Account: r.SetupAccount}
+		out.Setup = &cardSetup{Pack: r.SetupPack, Does: r.SetupDoes, Back: r.SetupBack, BackBy: r.SetupBackBy, Account: r.SetupAccount, Host: r.SetupHost}
 	}
 	return out
 }

@@ -239,7 +239,7 @@ func (p declared) pictured() bool { return len(p.d.Notify.Image) > 0 }
 func (p declared) send(ctx context.Context, home string, env map[string]string, m Message) (int, error) {
 	// The telling goes to the source's chosen base, the call and the
 	// image command alike.
-	p.d = p.d.WithBase(p.src.Base)
+	p.d = p.src.Resolved(p.d)
 	// The source's own credential goes only to the host it was given for. A
 	// telling that would send it elsewhere is not tried, and the image command
 	// is not run with it: it is reached from here, after the credential is

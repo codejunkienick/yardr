@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -335,6 +336,8 @@ func TestParseRefusesACredentialThatIsTheAddress(t *testing.T) {
 			"base", "the credential is the address every call goes to (credential.url: true), so the file names no base beside it"},
 		{"region bases beside it", with("credential:", "bases:\n  eu: https://eu.hooks.example.com\ncredential:"),
 			"bases", "the credential is the address every call goes to (credential.url: true), so the file names no bases beside it"},
+		{"a base_template beside it", with("credential:", "base_template: https://{host}/hooks\ncredential:"),
+			"base_template", "the credential is the address every call goes to (credential.url: true), so the file names no base_template beside it"},
 		{"a header to send it in", with("  url: true", "  url: true\n  header: \"X-Hook: {credential}\""),
 			"credential.header", "the credential is the address every call goes to (url: true), and is not sent in a header"},
 		{"a path to put it in", with("  url: true", "  url: true\n  in_path: true"),
@@ -427,6 +430,83 @@ func TestParseBases(t *testing.T) {
 	}
 	if err := plain.CheckBase("eu"); err == nil || !strings.Contains(err.Error(), "names no bases") {
 		t.Fatalf(`CheckBase("eu") without bases = %v`, err)
+	}
+	t.Run("base template", testBaseTemplate)
+}
+
+// A service the operator may run on a machine of their own declares the
+// address its host fills beside its base, which stays the default: the
+// source setting host fills it, "" is the base itself, and a host is a name
+// or an address with an optional port and nothing else. A host that makes an
+// address a base may not be is refused in the checks' words, a private-LAN
+// one over https is not refused, and a host the checks refuse leaves a call
+// no address, never the base's.
+func testBaseTemplate(t *testing.T) {
+	text := strings.Replace(crm, "base: https://crm.example.com/api/v2\n",
+		"base: https://crm.example.com/api/v2\nbase_template: https://{host}/api/v2/\n", 1)
+	d, err := Parse("crm.yaml", []byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Base != "https://crm.example.com/api/v2" || d.BaseTemplate != "https://{host}/api/v2" {
+		t.Fatalf("base = %q, template = %q", d.Base, d.BaseTemplate)
+	}
+	if got := d.WithHost(""); got != d {
+		t.Fatalf(`WithHost("") copies the declaration`)
+	}
+	at := d.WithHost("crm.example.net")
+	if at == d || at.Base != "https://crm.example.net/api/v2" || at.Name != d.Name || d.Base != "https://crm.example.com/api/v2" {
+		t.Fatalf("WithHost(crm.example.net) = %+v, and the declaration is %q", at, d.Base)
+	}
+	plain, err := Parse("crm.yaml", []byte(crm))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plain.WithHost("crm.example.net"); got != plain {
+		t.Fatalf("WithHost of a declaration with no template is not the declaration itself")
+	}
+	if err := plain.CheckHost("crm.example.net"); err == nil || !strings.Contains(err.Error(), "names no base_template") {
+		t.Fatalf("CheckHost without a template = %v", err)
+	}
+	if err := d.CheckHost(""); err != nil {
+		t.Fatalf(`CheckHost("") = %v`, err)
+	}
+	for _, host := range []string{"crm.example.net", "Crm-1.example.net:443", "nas.local", "192.168.1.20:8443", "10.0.0.5", "[fd00::1]:8443", "my_crm:8080"} {
+		if err := d.CheckHost(host); err != nil {
+			t.Errorf("CheckHost(%q) = %v", host, err)
+		}
+		if got, want := d.WithHost(host).Base, "https://"+host+"/api/v2"; got != want {
+			t.Errorf("WithHost(%q).Base = %q, want %q", host, got, want)
+		}
+	}
+	for host, want := range map[string]string{
+		"https://crm.example.net": "a host has no scheme",
+		"user@crm.example.net":    "the address it makes has a user or password in it",
+		"user:pw@crm.example.net": "the address it makes has a user or password in it",
+		"crm.example.net?x=1":     "the address it makes has a query or a fragment",
+		"crm.example.net#x":       "the address it makes has a query or a fragment",
+		"crm.example.net/..":      "the address it makes has a '..', '//' or '\\' in its path",
+		"crm.example.net\\x":      "the address it makes is no address",
+		"crm.example.net/x":       "a host is a name or an address with an optional port",
+		"crm example":             "the address it makes is no address",
+		"crm.example.net:http":    "the address it makes is no address",
+		":8443":                   "a host is a name or an address with an optional port",
+		"crm.example.net:0":       "the port is a number from 1 to 65535",
+		"crm.example.net:99999":   "the port is a number from 1 to 65535",
+	} {
+		err := d.CheckHost(host)
+		if err == nil || !strings.Contains(err.Error(), want) || !strings.HasPrefix(err.Error(), fmt.Sprintf("source crm: host=%q: ", host)) {
+			t.Errorf("CheckHost(%q) = %v, want %q", host, err, want)
+		}
+		if got := d.WithHost(host).Base; got != "" {
+			t.Errorf("WithHost(%q).Base = %q: a host the checks refuse is no address to send to", host, got)
+		}
+	}
+	// A call of a source set to a host the checks refuse has no address to
+	// go to: it is refused before anything is sent, and is never sent to the
+	// base the operator did not choose.
+	if _, err := Do(context.Background(), d.WithHost("user@crm.example.net"), "ping", nil, "tok", noSecrets); reason(err) != Refused || !strings.Contains(err.Error(), "its base is no address") {
+		t.Errorf("a call to a host the checks refuse: %v", err)
 	}
 }
 
@@ -540,6 +620,24 @@ func TestParseRefuses(t *testing.T) {
 			"bases.EU", "use lowercase letters"},
 		{"no region base", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\nbases: {}\n"),
 			"bases", "no base: bases names the regions' bases beside base, or is left out"},
+		{"a template with no mark", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\nbase_template: https://crm.internal.example.com/api/v2\n"),
+			"base_template", "want {host} once, where the host goes"},
+		{"a template with the mark twice", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\nbase_template: https://{host}/{host}/api/v2\n"),
+			"base_template", "want {host} once, where the host goes"},
+		{"a template over plain http", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\nbase_template: http://{host}/api/v2\n"),
+			"base_template", "{host} stands right after https://, as the whole host"},
+		{"a template with the mark in a name", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\nbase_template: https://api.{host}/api/v2\n"),
+			"base_template", "{host} stands right after https://, as the whole host"},
+		{"a template with a port by the mark", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\nbase_template: https://{host}:8443/api/v2\n"),
+			"base_template", "{host} is the whole host, so nothing but a / follows it"},
+		{"a template with a query", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\nbase_template: https://{host}/api/v2?x=1\n"),
+			"base_template", "the template with a host in it has a query or a fragment"},
+		{"a template with dots in its path", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\nbase_template: https://{host}/../v2\n"),
+			"base_template", "the template with a host in it has a '..', '//' or '\\' in its path"},
+		{"a template that is no string", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\nbase_template: [https, host]\n"),
+			"base_template", "want a string"},
+		{"a template and no base", with("base: https://crm.example.com/api/v2\n", "base_template: https://{host}/api/v2\n"),
+			"base", "missing: the address every call's path is under"},
 		{"no calls", "name: x\nbase: https://x.example.com\n", "calls", "missing"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -808,6 +906,7 @@ func TestParseLimitsRefusals(t *testing.T) {
 		"a key it does not have":          {limits(cmd + kinds + "  timeout: 5\n"), "limits.timeout: unknown key (known here: command, kinds)"},
 		"a base and no calls":             {"name: q\nbase: https://q.example.com\n" + limits(cmd + kinds)[len("name: q\n"):], "f:2: base: is for the calls of a source, and this file declares none"},
 		"region bases and no calls":       {"name: q\nbases:\n  eu: https://eu.q.example.com\n" + limits(cmd + kinds)[len("name: q\n"):], "f:2: bases: is for the calls of a source, and this file declares none"},
+		"a base_template and no calls":    {"name: q\nbase_template: https://{host}/v1\n" + limits(cmd + kinds)[len("name: q\n"):], "f:2: base_template: is for the calls of a source, and this file declares none"},
 		"a credential and no calls":       {"name: q\ncredential: { env: Q }\n" + limits(cmd + kinds)[len("name: q\n"):], "f:2: credential: is for the calls of a source"},
 		"neither calls nor limits":        {"name: q\n", "calls: missing: a source is the calls it declares, or its limits command"},
 		"calls, limits and no base":       {strings.Replace(pushover, "base: https://api.pushover.net/1\n", "", 1) + "limits:\n" + cmd + kinds, "base: missing: the address every call's path is under"},

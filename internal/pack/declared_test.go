@@ -105,7 +105,7 @@ func TestDeclaredSourceRefusals(t *testing.T) {
 		msg         string
 	}{
 		{name: "a limits key", declaration: strings.Replace(pushover, "calls:\n", "limits:\n  hour: 60\ncalls:\n", 1),
-			file: "sources/pushover.yaml", key: "limits", line: 6, msg: "a declaration in a pack has name, about, base, bases, credential, check, idempotency, calls, notify and no other key"},
+			file: "sources/pushover.yaml", key: "limits", line: 6, msg: "a declaration in a pack has name, about, base, bases, base_template, credential, check, idempotency, calls, notify and no other key"},
 		// limits stays refused in every pack: it is the yard's to ask.
 		{name: "a limits command", declaration: pushover + "limits:\n  command: [/opt/q, \"{provider}\"]\n  kinds: { kimi: kimi }\n",
 			file: "sources/pushover.yaml", key: "limits", line: 25, msg: "what else a source may have is set in the yard, by its operator"},
@@ -453,6 +453,26 @@ func TestApplyReplacesADeclaredSourceAndThePlanShowsWhatChanges(t *testing.T) {
 		got = find(t, plan, "source", "pushover")
 		if got.Action != pack.Change || !slices.Equal(got.Changes, step.want) {
 			t.Fatalf("bases %s: source = %s %+v, want a change of %+v", step.name, got.Action, got.Changes, step.want)
+		}
+		apply(t, st, plan, nil)
+	}
+
+	// A template is where the credential may go too, to a host the operator
+	// types: a pack that differs in it alone is a change of it.
+	tpl, tpl2 := "https://{host}/1", "https://{host}/2"
+	withTemplate := func(template string) string { return changed + "base_template: " + template + "\n" }
+	for _, step := range []struct {
+		name, text string
+		want       []pack.Diff
+	}{
+		{"added", withTemplate(tpl), []pack.Diff{{Field: "base_template", Old: "", New: tpl}}},
+		{"moved", withTemplate(tpl2), []pack.Diff{{Field: "base_template", Old: tpl, New: tpl2}}},
+		{"dropped", changed, []pack.Diff{{Field: "base_template", Old: tpl2, New: ""}}},
+	} {
+		plan = build(t, st, load(t, writePack(t, declaredFiles(smallDeclared, step.text))), o)
+		got = find(t, plan, "source", "pushover")
+		if got.Action != pack.Change || !slices.Equal(got.Changes, step.want) {
+			t.Fatalf("base_template %s: source = %s %+v, want a change of %+v", step.name, got.Action, got.Changes, step.want)
 		}
 		apply(t, st, plan, nil)
 	}

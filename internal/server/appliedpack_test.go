@@ -50,8 +50,14 @@ func dirGit(t *testing.T, dir string, args ...string) string {
 // dirPack writes the pack into a new directory, in no repository.
 func dirPack(t *testing.T) string {
 	t.Helper()
+	return dirPackWith(t, dirPackDecl)
+}
+
+// dirPackWith is dirPack with the declaration decl in place of the pack's own.
+func dirPackWith(t *testing.T, decl string) string {
+	t.Helper()
 	dir := t.TempDir()
-	for name, text := range map[string]string{"pack.yaml": dirPackYAML, "dirmail.yaml": dirPackDecl, "dirmail-mint": dirPackMint} {
+	for name, text := range map[string]string{"pack.yaml": dirPackYAML, "dirmail.yaml": decl, "dirmail-mint": dirPackMint} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -70,7 +76,13 @@ func dirPack(t *testing.T) string {
 // dirPackRepo is dirPack committed, so it is at a commit and clean.
 func dirPackRepo(t *testing.T) string {
 	t.Helper()
-	dir := dirPack(t)
+	return dirPackRepoWith(t, dirPackDecl)
+}
+
+// dirPackRepoWith is dirPackWith committed.
+func dirPackRepoWith(t *testing.T, decl string) string {
+	t.Helper()
+	dir := dirPackWith(t, decl)
 	dirGit(t, dir, "init", "-q")
 	dirGit(t, dir, "add", "-A")
 	dirGit(t, dir, "commit", "-q", "-m", "the pack")
@@ -146,7 +158,7 @@ func TestSetupCardOfAnAppliedDirectoryIsCarriedOut(t *testing.T) {
 	if carried.Text != dirPackDecl || len(carried.Files) != 1 || carried.Files[0].Program != "dirmail-mint" || carried.Files[0].Text != dirPackMint {
 		t.Fatalf("the card carries %+v", carried)
 	}
-	if _, err := st.ApproveSetup(ctx, bead, seq, 1, map[string]string{"DIRMAIL_ACCOUNT": "ops@example.com"}, "", "mckean", true); err != nil {
+	if _, err := st.ApproveSetup(ctx, bead, seq, 1, map[string]string{"DIRMAIL_ACCOUNT": "ops@example.com"}, "", "mckean", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, st, home, "boot-one")
@@ -312,7 +324,7 @@ func TestSetupOfAnAppliedDirectoryIsHeldToItsCommit(t *testing.T) {
 			t.Fatal(err)
 		}
 		dirGit(t, dir, "commit", "-q", "--allow-empty", "-m", "later")
-		_, err = st.ApproveSetup(ctx, bead, seq, 1, map[string]string{"DIRMAIL_ACCOUNT": "ops@example.com"}, "", "mckean", true)
+		_, err = st.ApproveSetup(ctx, bead, seq, 1, map[string]string{"DIRMAIL_ACCOUNT": "ops@example.com"}, "", "mckean", true, "")
 		if err == nil || !strings.Contains(err.Error(), "is at the commit") {
 			t.Fatalf("the approval = %v", err)
 		}

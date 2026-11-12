@@ -29,7 +29,7 @@ func askSetupApprove(t *testing.T, st *store.Store, bead, pack string, option in
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.ApproveSetup(ctx, bead, seq, option, values, "", "mckean", true); err != nil {
+	if _, err := st.ApproveSetup(ctx, bead, seq, option, values, "", "mckean", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	return seq
@@ -173,6 +173,213 @@ calls:
 	setup = &store.AskSetup{Pack: "widget", Carried: []store.AskSource{{Name: "widget", Text: text}}}
 	if lines, failure := c.carrySetupBase(ctx, rec, setup); failure != "" || len(lines) != 0 {
 		t.Fatalf("with no base chosen: %q, %q", lines, failure)
+	}
+}
+
+// A setup that carried a host sets each carried source whose declaration
+// names a template to it, as the operator, and says where its calls go. A
+// setup that carried none sets nothing, a carried source without a template
+// is left out, and a host the declaration refuses stops the step with the
+// command that finishes it.
+func TestCarrySetupHost(t *testing.T) {
+	ctx := context.Background()
+	st, home, _ := carryYard(t)
+	text := `name: widget
+base: https://widget.example.com
+base_template: https://{host}/api
+credential: { env: WIDGET_TOKEN }
+calls:
+  ping: { kind: read, request: { method: GET, path: /ping } }
+`
+	if _, err := st.PutSource(ctx, "widget.yaml", text, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	plain := `name: plain
+base: https://plain.example.com
+credential: { env: PLAIN_TOKEN }
+calls:
+  ping: { kind: read, request: { method: GET, path: /ping } }
+`
+	if _, err := st.PutSource(ctx, "plain.yaml", plain, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	c := testCarrier(st, home, "boot-one")
+	setup := &store.AskSetup{Pack: "widget", Carried: []store.AskSource{{Name: "widget", Text: text}, {Name: "plain", Text: plain}}}
+	if lines, failure := c.carrySetupHost(ctx, &store.Carry{Bead: "yardr-x", Ask: 1, Actor: "mckean"}, setup); failure != "" || len(lines) != 0 {
+		t.Fatalf("with no host given: %q, %q", lines, failure)
+	}
+	if src, err := st.GetSource(ctx, "widget"); err != nil || src.Host != "" {
+		t.Fatalf("the source after a step that was given no host = %+v, %v", src, err)
+	}
+	rec := &store.Carry{Bead: "yardr-x", Ask: 1, Actor: "mckean", Host: "192.168.1.20:8443"}
+	lines, failure := c.carrySetupHost(ctx, rec, setup)
+	if failure != "" {
+		t.Fatal(failure)
+	}
+	if want := "source widget: calls go to https://192.168.1.20:8443/api (host 192.168.1.20:8443)"; len(lines) != 1 || lines[0] != want {
+		t.Fatalf("lines = %q, want only %q", lines, want)
+	}
+	if src, err := st.GetSource(ctx, "widget"); err != nil || src.Host != "192.168.1.20:8443" {
+		t.Fatalf("the source after the host step = %+v, %v", src, err)
+	}
+	if src, err := st.GetSource(ctx, "plain"); err != nil || src.Host != "" {
+		t.Fatalf("the source without a template after the host step = %+v, %v", src, err)
+	}
+	rec.Host = "user@evil.example"
+	_, failure = c.carrySetupHost(ctx, rec, setup)
+	for _, want := range []string{"pack widget is applied, but the host of source widget was not set", "has a user or password in it", "yardr source set widget host=user@evil.example"} {
+		if !strings.Contains(failure, want) {
+			t.Fatalf("the failure lacks %q: %s", want, failure)
+		}
+	}
+	if src, err := st.GetSource(ctx, "widget"); err != nil || src.Host != "192.168.1.20:8443" {
+		t.Fatalf("a refused host changed the source: %+v, %v", src, err)
+	}
+
+	// An account the approval kept was given for the host in use: the host
+	// holds it back, and the carried-out card says so and how to give it
+	// again. Nothing is said where the account was given again for the host
+	// or the approval carried no host.
+	if _, err := st.SetSource(ctx, "widget", store.SourceHost, "", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	env := filepath.Join(home, "widget.env")
+	if err := os.WriteFile(env, []byte("WIDGET_TOKEN=tok\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetSource(ctx, "widget", store.SourceEnvFile, env, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	rec.Host = "192.168.1.20:8443"
+	if _, failure := c.carrySetupHost(ctx, rec, setup); failure != "" {
+		t.Fatal(failure)
+	}
+	held := c.carrySetupHeld(ctx, rec, setup)
+	if len(held) != 1 {
+		t.Fatalf("held = %q, want one line", held)
+	}
+	for _, want := range []string{"source widget: its credential was given for https://widget.example.com", "the source's calls go to https://192.168.1.20:8443 now", "yardr source key widget"} {
+		if !strings.Contains(held[0], want) {
+			t.Fatalf("the held line lacks %q: %s", want, held[0])
+		}
+	}
+	if lines := c.carrySetupHeld(ctx, &store.Carry{Bead: "yardr-x", Ask: 1, Actor: "mckean"}, setup); len(lines) != 0 {
+		t.Fatalf("an approval with no host says %q", lines)
+	}
+	if _, err := st.KeySource(ctx, "widget", map[string]string{"WIDGET_TOKEN": "tok2"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if lines := c.carrySetupHeld(ctx, rec, setup); len(lines) != 0 {
+		t.Fatalf("an account given again for the host is said held: %q", lines)
+	}
+}
+
+// A setup approved with a host is carried out with the host set before the
+// account is written, so the key is given once and for the host the calls go
+// to: the source is paired with it and holds nothing back. The pack applied
+// again keeps the host and the key's pairing, since the host is the
+// operator's and a replacement is not.
+func TestCarrySetupWithAHostKeepsTheKeyForIt(t *testing.T) {
+	ctx := context.Background()
+	st, home, bead := appliedYard(t)
+	hosted := strings.Replace(dirPackDecl, "base: https://dirmail.example.com/v1\n",
+		"base: https://dirmail.example.com/v1\nbase_template: https://{host}/api/v1\n", 1)
+	if hosted == dirPackDecl {
+		t.Fatal("the test adds no template")
+	}
+	dir := dirPackRepoWith(t, hosted)
+	applyDir(t, st, home, dir)
+	to := store.Grantee{Crew: "yardmaster"}
+	seq, err := st.AddAsk(ctx, bead, setupAskOf("dirmail", to), "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := setupOf(t, st, bead, seq); got.HostTemplate != "https://{host}/api/v1" {
+		t.Fatalf("the card asks for the template %q", got.HostTemplate)
+	}
+	const host = "192.168.1.20:8443"
+	if _, err := st.ApproveSetup(ctx, bead, seq, 1, map[string]string{"DIRMAIL_ACCOUNT": "ops@example.com"}, "", "mckean", true, host); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, st, home, "boot-one")
+	if rec := carryState(t, st, bead, seq); rec.State != store.CarryDone {
+		t.Fatalf("the record = %+v", rec)
+	}
+	standing := func(when string) {
+		t.Helper()
+		src, err := st.GetSource(ctx, "dirmail")
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, err := src.Declaration()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if src.Host != host || src.Base != "" || src.KeyedHost != "https://"+host || src.CredentialHeld(d) != "" {
+			t.Fatalf("%s: the source is set to host %q and base %q, its key is given for %q, and it is held: %q", when, src.Host, src.Base, src.KeyedHost, src.CredentialHeld(d))
+		}
+		if got := src.Resolved(d).Base; got != "https://"+host+"/api/v1" {
+			t.Fatalf("%s: calls go to %q", when, got)
+		}
+	}
+	standing("after the setup")
+	lines := resolvedLines(t, st, bead, seq)
+	for _, want := range []string{"source dirmail: calls go to https://" + host + "/api/v1 (host " + host + ")", "the account DIRMAIL_ACCOUNT is set in"} {
+		if !strings.Contains(lines, want) {
+			t.Fatalf("the carried-out card has no %q:\n%s", want, lines)
+		}
+	}
+	// The pack applied again, with a declaration that moved a call, keeps
+	// the host and where the key was given.
+	if err := os.WriteFile(filepath.Join(dir, "dirmail.yaml"), []byte(strings.Replace(hosted, "path: /messages", "path: /mail", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirGit(t, dir, "commit", "-q", "-am", "move the call")
+	applyDir(t, st, home, dir)
+	if src, err := st.GetSource(ctx, "dirmail"); err != nil || !strings.Contains(src.Text, "path: /mail") {
+		t.Fatalf("the second apply left %+v, %v", src, err)
+	}
+	standing("after the pack applied again")
+
+	// A second card, for an update whose account stands, keeps it and gives
+	// another host: the source is set to it, the key given for the first host
+	// is held back, the carried-out card says how to give it again, and giving
+	// it pairs it with the new host.
+	const other = "192.168.1.30:8443"
+	seq2, err := st.AddAsk(ctx, bead, setupAskOf("dirmail", to), "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := setupOf(t, st, bead, seq2); !got.Given || got.HostTemplate == "" {
+		t.Fatalf("the update card is given %v and asks the template %q", got.Given, got.HostTemplate)
+	}
+	if _, err := st.ApproveSetup(ctx, bead, seq2, 1, nil, "", "mckean", true, other); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, st, home, "boot-two")
+	if rec := carryState(t, st, bead, seq2); rec.State != store.CarryDone {
+		t.Fatalf("the record = %+v", rec)
+	}
+	src, err := st.GetSource(ctx, "dirmail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := src.Declaration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	why := src.CredentialHeld(d)
+	if src.Host != other || src.KeyedHost != "https://"+host || !strings.Contains(why, "its credential was given for https://"+host) || !strings.Contains(why, "yardr source key dirmail") {
+		t.Fatalf("after the host moved the source is set to %q, its key is given for %q, and it is held: %q", src.Host, src.KeyedHost, why)
+	}
+	if lines := resolvedLines(t, st, bead, seq2); !strings.Contains(lines, "source dirmail: calls go to https://"+other+"/api/v1 (host "+other+")") || !strings.Contains(lines, "source dirmail: its credential was given for https://"+host) {
+		t.Fatalf("the carried-out card of the host moved:\n%s", lines)
+	}
+	if _, err := st.KeySource(ctx, "dirmail", map[string]string{"DIRMAIL_ACCOUNT": "ops@example.com"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if src, err = st.GetSource(ctx, "dirmail"); err != nil || src.KeyedHost != "https://"+other || src.CredentialHeld(d) != "" {
+		t.Fatalf("after the key is given again: %+v, %v", src, err)
 	}
 }
 

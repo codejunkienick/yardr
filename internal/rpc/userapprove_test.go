@@ -363,7 +363,7 @@ func TestUserApproveAskIsForTheOperatorsDeviceAlone(t *testing.T) {
 			{"ApproveAsk", fmt.Sprintf(`{"bead":"yd-crm","ask":%d,"actor":"sam"}`, y.run), `this device calls as jo: \"actor\" is jo or left out`},
 			{"ApproveAsk", fmt.Sprintf(`["yd-crm", %d, "jo"]`, y.run), "takes them as a JSON object, by name"},
 			{"ApproveAsk", stray, `"message":"an argument: ApproveAsk has none of that name (it takes bead, ask, actor, weighed, values)"`},
-			{"ApproveSetup", stray, `"message":"an argument: ApproveSetup has none of that name (it takes bead, ask, option, values, account, actor, weighed)"`},
+			{"ApproveSetup", stray, `"message":"an argument: ApproveSetup has none of that name (it takes bead, ask, option, values, account, actor, weighed, host)"`},
 			{"GiveSecret", stray, `"message":"an argument: GiveSecret has none of that name (it takes bead, ask, values, actor, weighed)"`},
 		} {
 			if w := y.post(c.method, onTheMachine, y.jo, strings.NewReader(c.body)); !strings.Contains(w.Body.String(), c.want) {

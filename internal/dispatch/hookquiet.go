@@ -150,7 +150,7 @@ func (d *Dispatcher) webhookBroken(ctx context.Context, h store.Hook) (broken st
 		return "", false
 	}
 	// The probe goes to the source's chosen base, as a call does.
-	decl = decl.WithBase(src.Base)
+	decl = src.Resolved(decl)
 	// The source's own credential goes only to the host it was given for. A
 	// probe that would send it elsewhere is not tried: that is no answer, as a
 	// credential that cannot be read is none, and so never a break.

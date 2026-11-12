@@ -178,6 +178,50 @@ hear:
 	if out, err = run(t, a.sourceCmd(), "set", "pushover", "base="); err != nil || !strings.Contains(out, "source pushover: calls go to https://api.pushover.net/1\n") {
 		t.Fatalf("clear region base: %q %v", out, err)
 	}
+	// A declaration that names a template lets the operator type the host
+	// of a server of their own: its calls go there, the two settings
+	// replace each other, and one that no longer names a template sends the
+	// calls to its base again.
+	hosted := strings.Replace(string(decl), "base: https://api.pushover.net/1\n", "base: https://api.pushover.net/1\nbase_template: https://{host}/api/1\n", 1)
+	if hosted == string(decl) {
+		t.Fatal("the test adds no template")
+	}
+	hostFile := filepath.Join(t.TempDir(), "pushover.yaml")
+	if err := os.WriteFile(hostFile, []byte(hosted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, a.sourceCmd(), "add", hostFile); err != nil {
+		t.Fatal(err)
+	}
+	if out, err = run(t, a.sourceCmd(), "show", "pushover"); err != nil ||
+		!strings.Contains(out, "host: none set; yardr source set pushover host=<host> sends the calls to https://<host>/api/1 for a server of your own") {
+		t.Fatalf("show with a template and no host: %q %v", out, err)
+	}
+	if out, err = run(t, a.sourceCmd(), "set", "pushover", "host=user@evil.example"); err == nil || !strings.Contains(err.Error(), "the address it makes has a user or password in it") {
+		t.Fatalf("set host=user@evil.example: %q %v", out, err)
+	}
+	out, err = run(t, a.sourceCmd(), "set", "pushover", "host=192.168.1.20:8443")
+	if err != nil || !strings.Contains(out, "source pushover: calls go to https://192.168.1.20:8443/api/1 (host 192.168.1.20:8443)") {
+		t.Fatalf("set host: %q %v", out, err)
+	}
+	out, err = run(t, a.sourceCmd(), "show", "pushover")
+	if err != nil || !strings.Contains(out, "pushover  https://192.168.1.20:8443/api/1 (host 192.168.1.20:8443)") ||
+		!strings.Contains(out, "host: 192.168.1.20:8443, which fills https://<host>/api/1") {
+		t.Fatalf("show with a host: %q %v", out, err)
+	}
+	if out, err = run(t, a.sourceCmd(), "list"); err != nil || !strings.Contains(out, "https://192.168.1.20:8443/api/1 (host 192.168.1.20:8443)") {
+		t.Fatalf("list with a host: %q %v", out, err)
+	}
+	if _, err := st.PutSource(context.Background(), "pushover.yaml", string(decl), "jo"); err != nil {
+		t.Fatal(err)
+	}
+	out, err = run(t, a.sourceCmd(), "show", "pushover")
+	if err != nil || !strings.Contains(out, "pushover  https://api.pushover.net/1\n") || strings.Contains(out, "(host") {
+		t.Fatalf("show after the declaration drops its template: %q %v", out, err)
+	}
+	if out, err = run(t, a.sourceCmd(), "set", "pushover", "host="); err != nil || !strings.Contains(out, "source pushover: calls go to https://api.pushover.net/1\n") {
+		t.Fatalf("clear host: %q %v", out, err)
+	}
 	out, err = run(t, a.sourceCmd(), "check", "pushover")
 	if err != nil || !strings.Contains(out, "names no check call") || !strings.Contains(out, "nothing was sent") || strings.Contains(out, "tok-of-the-yard") {
 		t.Fatalf("check of a source without a check call: %q %v", out, err)

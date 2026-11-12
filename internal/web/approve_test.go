@@ -622,6 +622,32 @@ func TestWebStrongCardStaysTerminalOffHosted(t *testing.T) {
 		!strings.Contains(r.body, "at a terminal on the yard&#39;s machine") {
 		t.Fatalf("POST off a hosted yard: %d: %s", r.status, r.body)
 	}
+	// A setup's command at the terminal carries the host typed on the form,
+	// where it is one word of what a host is made of, and drops what is not
+	// rather than print it into a command.
+	servesSetupmailOf(y.own, strings.Replace(approveSetupDecl, "base: https://setupmail.example.com/v1\n",
+		"base: https://setupmail.example.com/v1\nbase_template: https://{host}/v1\n", 1))
+	setupBead := y.bead("set up mail on a server of our own")
+	setupSeq := y.askSetup(setupBead.ID)
+	for host, want := range map[string]string{
+		"192.168.1.20:8443": "&lt;n&gt; --secret --host 192.168.1.20:8443",
+		"crm.example.net":   "&lt;n&gt; --secret --host crm.example.net",
+		"x; echo hi":        "&lt;n&gt; --secret",
+		"":                  "&lt;n&gt; --secret",
+	} {
+		form := y.approveForm(setupBead.ID, setupSeq)
+		form.Set("option", "1")
+		form.Set("secret-SETUP_ACCOUNT", "ops@example.com")
+		form.Set("host", host)
+		r := y.post("/beads/"+setupBead.ID, fresh, form)
+		said := "yardr bead answer " + setupBead.ID + " " + strconv.FormatUint(setupSeq, 10) + " " + want
+		if r.status != 200 || !strings.Contains(r.body, said) {
+			t.Errorf("POST a setup with the host %q off a hosted yard: %d, want the command %q in:\n%s", host, r.status, said, r.body)
+		}
+		if !strings.Contains(want, "--host") && strings.Contains(r.body, said+" --host") {
+			t.Errorf("the command carries the host %q, which is not one word of what a host is made of:\n%s", host, r.body)
+		}
+	}
 
 	f, _ := talkFixture(t, "jo")
 	ctx := context.Background()
@@ -855,7 +881,11 @@ const approveSetupMint = "#!/bin/sh\n# mint a token from the account\n"
 // setupmail, whose source mints its token from an account (a credential),
 // brings the mint command (code) and offers a preset that updates
 // (outside).
-func servesSetupmail(own *store.Store) {
+func servesSetupmail(own *store.Store) { servesSetupmailOf(own, approveSetupDecl) }
+
+// servesSetupmailOf is servesSetupmail with the declaration decl in place of
+// the pack's own.
+func servesSetupmailOf(own *store.Store, decl string) {
 	sum := sha256.Sum256([]byte(approveSetupMint))
 	own.SetPackReader(func(ctx context.Context, name string, depot string, mappings store.Mappings, yard store.API) (*store.PackReading, error) {
 		if name != "setupmail" {
@@ -863,7 +893,7 @@ func servesSetupmail(own *store.Store) {
 		}
 		return &store.PackReading{Name: "setupmail", Kind: pack.KindSource,
 			Label: "embedded in yardr test1", Build: "test1",
-			Sources: []store.AskSource{{Name: "setupmail", Text: approveSetupDecl,
+			Sources: []store.AskSource{{Name: "setupmail", Text: decl,
 				Files: []store.AskFile{{Program: "setup-mint", Text: approveSetupMint, SHA256: hex.EncodeToString(sum[:])}}}},
 			Presets: []store.AskPreset{
 				{Name: "read", Grants: []store.AskPresetGrant{{Source: "setupmail", Calls: []string{"search"}}}},
@@ -918,6 +948,9 @@ func TestWebApprovesAStrongSetupCard(t *testing.T) {
 				t.Errorf("%s: the setup card lacks %q:\n%s", s.name, want, body)
 			}
 		}
+		if strings.Contains(body, `name="host"`) {
+			t.Errorf("%s: the card of a pack with no template asks a host:\n%s", s.name, body)
+		}
 		// A preset is picked in the approval, never answered by a button,
 		// and a setup takes no words as a note.
 		for _, foreign := range []string{`<button type="submit" name="option"`, `value="send"`, `hx-target="#bead"`} {
@@ -970,6 +1003,48 @@ func TestWebApprovesAStrongSetupCard(t *testing.T) {
 	}
 	if w := y.witness(); w != store.WitnessFreshSignIn {
 		t.Fatalf("the setup approval is witnessed %q, want a fresh sign-in", w)
+	}
+	t.Run("host", testWebSetupCardAsksAHostAndCarriesItThroughTheSignIn)
+}
+
+// A setup whose source declares a template asks the host above the account on
+// its form, on the bead's page and from Home and the line alike, and the host
+// posted with the approval goes through the fresh sign-in with the rest of it
+// and reaches the carrying record.
+func testWebSetupCardAsksAHostAndCarriesItThroughTheSignIn(t *testing.T) {
+	y := newApproveYard(t, true)
+	servesSetupmailOf(y.own, strings.Replace(approveSetupDecl, "base: https://setupmail.example.com/v1\n",
+		"base: https://setupmail.example.com/v1\nbase_template: https://{host}/v1\n", 1))
+	b := y.bead("set up mail on a server of our own")
+	seq := y.askSetup(b.ID)
+	tok := y.token("jo@example.net")
+	const hostField = `<input type="text" name="host" placeholder="Host of a server of your own: https://{host}/v1" aria-label="Host" autocomplete="off" spellcheck="false">`
+	for _, s := range approveSurfaces {
+		body := y.surfaceBody(s.path(b.ID), tok)
+		at, account := strings.Index(body, hostField), strings.Index(body, `<input type="password" name="secret-SETUP_ACCOUNT"`)
+		if at < 0 || account < 0 || at > account {
+			t.Errorf("%s: the host field stands at %d and the account's at %d, want the host's above the account's:\n%s", s.name, at, account, body)
+		}
+	}
+	form := y.approveForm(b.ID, seq)
+	form.Set("option", "1")
+	form.Set("secret-SETUP_ACCOUNT", "ops@example.com")
+	form.Set("host", " 192.168.1.20:8443 ")
+	r := y.post("/beads/"+b.ID, tok, form)
+	loc, err := url.Parse(r.header.Get("Location"))
+	if r.status != http.StatusSeeOther || err != nil || loc.Path != "/edge/reauth" {
+		t.Fatalf("POST the approval: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	fresh := y.token("jo@example.net", authAt(time.Now().Add(5*time.Second)))
+	r = y.getNoFollow(loc.Query().Get("return_to"), fresh)
+	if r.status != http.StatusSeeOther || r.header.Get("Location") != "/beads/"+b.ID {
+		t.Fatalf("GET the return: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	if got := y.askedState(b.ID, seq, "jo"); got != "answered" {
+		t.Fatalf("the ask is %s after the return, want it answered", got)
+	}
+	if rec, err := y.own.CarryOf(context.Background(), b.ID, seq); err != nil || rec.Host != "192.168.1.20:8443" {
+		t.Fatalf("the carrying record = %+v, %v", rec, err)
 	}
 }
 

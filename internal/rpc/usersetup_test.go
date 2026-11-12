@@ -287,7 +287,7 @@ func (y *secretYard) carriedOut(t *testing.T, user string, seq uint64, account, 
 	if account == "" {
 		typed = map[string]string{"COURIER_ACCOUNT": "typed@courier.example.test"}
 	}
-	if _, err := y.st.ApproveSetup(ctx, "yd-crm", seq, 1, typed, account, user, true); err != nil {
+	if _, err := y.st.ApproveSetup(ctx, "yd-crm", seq, 1, typed, account, user, true, ""); err != nil {
 		t.Fatal(err)
 	}
 	rec, err := y.st.ClaimCarry(ctx, "boot", time.Now())

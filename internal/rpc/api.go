@@ -118,7 +118,12 @@ var listenerOnly = map[string]bool{
 // ApproveAsk it is the operator's device's and no other's. Down the link from
 // the edge the account typed is a secret as GiveSecret's is: a hosted yard
 // takes it, and any other refuses it, but takes the other two
-// (UserServer.call).
+// (UserServer.call). The argument host is the host of a server of the
+// operator's own that the card asked for (the card's host_template names the
+// address it fills): typed by them on the card, never an asker's, held to what
+// a base is, and carried out before the account is written so that the key is
+// given for the host the calls go to. A client from before it leaves it out,
+// and the calls go to the pack's own address.
 //
 // Each of the three, and AnswerAsk for a pick on a mapping ask, takes the
 // argument weighed: the client's word that its person saw the weight of a
@@ -193,7 +198,7 @@ var listenerOnly = map[string]bool{
 var OperatorCalls = map[string][]string{
 	"GiveSecret":       {"bead", "ask", "values", "actor", "weighed"},
 	"ApproveAsk":       {"bead", "ask", "actor", "weighed", "values"},
-	"ApproveSetup":     {"bead", "ask", "option", "values", "account", "actor", "weighed"},
+	"ApproveSetup":     {"bead", "ask", "option", "values", "account", "actor", "weighed", "host"},
 	"SourceGrants":     {"source"},
 	"SessionScreen":    {"session"},
 	"Teammates":        {},

@@ -186,7 +186,7 @@ func TestSetupDriftPresetHeldNewCoveredWaiting(t *testing.T) {
 	}
 	// A drift card whose pack would change anything is approved even
 	// where the preset is held: the update itself still wants applying.
-	done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true)
+	done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, "")
 	if err != nil {
 		t.Fatalf("an approval of a held preset on drift was refused: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestSetupDriftAccountGivenKeep(t *testing.T) {
 		t.Errorf("the terminal card lacks the bare pick answer:\n%s", lines)
 	}
 	// Kept with a bare pick: no values, no candidate.
-	done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true)
+	done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestSetupDriftAccountGivenKeep(t *testing.T) {
 	// Typed another to change it.
 	seq = y.ask(t, setupAsk(), "yardmaster")
 	done, err = y.ApproveSetup(y.ctx, y.bead, seq, 1,
-		map[string]string{"SETUP_ACCOUNT": "new@example.com"}, "", "mckean", true)
+		map[string]string{"SETUP_ACCOUNT": "new@example.com"}, "", "mckean", true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestSetupDriftAccountGivenKeep(t *testing.T) {
 	}
 	// A candidate's file to take.
 	seq = y.ask(t, setupAsk(), "yardmaster")
-	done, err = y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "setupcal", "mckean", true)
+	done, err = y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "setupcal", "mckean", true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,10 +252,11 @@ func TestSetupDriftAccountGivenKeep(t *testing.T) {
 	// A partial typing is refused: the whole account changes it, or the
 	// bare pick keeps it.
 	seq = y.ask(t, setupAsk(), "yardmaster")
-	if _, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, map[string]string{"SETUP_ACCOUNT": "x", "EXTRA": "y"}, "", "mckean", true); err == nil ||
+	if _, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, map[string]string{"SETUP_ACCOUNT": "x", "EXTRA": "y"}, "", "mckean", true, ""); err == nil ||
 		!strings.Contains(err.Error(), "given a name it did not ask for") {
 		t.Errorf("an approval with a forged name was recorded or refused otherwise: %v", err)
 	}
+	t.Run("host", testSetupDriftCardAsksAHost)
 }
 
 // Where the updated declaration needs a mint input name the old file does
@@ -291,16 +292,112 @@ func TestSetupDriftAccountMissing(t *testing.T) {
 		}
 	}
 	// Kept is refused: the missing name wants typing.
-	if _, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true); err == nil ||
+	if _, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, ""); err == nil ||
 		!strings.Contains(err.Error(), "missing account SETUP_PROJECT") {
 		t.Errorf("an approval keeping a missing account was recorded or refused otherwise: %v", err)
 	}
 	done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1,
-		map[string]string{"SETUP_PROJECT": "proj-1"}, "", "mckean", true)
+		map[string]string{"SETUP_PROJECT": "proj-1"}, "", "mckean", true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(done.Given) != 1 || done.Given[0] != "SETUP_PROJECT" {
 		t.Errorf("the approval gave %+v, want the missing name", done)
 	}
+}
+
+// driftHostYard is a drift card's yard whose pack's source declares a
+// template, with a second account name the standing file lacks where partial.
+func driftHostYard(t *testing.T, partial bool) *askYard {
+	t.Helper()
+	y := driftYard(t)
+	text := strings.Replace(driftNewDecl, "base: https://setupmail.example.com/v2\n",
+		"base: https://setupmail.example.com/v2\nbase_template: https://{host}/v2\n", 1)
+	if partial {
+		text = strings.Replace(text, "mint: [SETUP_ACCOUNT]", "mint: [SETUP_ACCOUNT, SETUP_PROJECT]", 1)
+	}
+	f := driftPack()
+	f.sources[0].text = text
+	y.setSetupPack(f)
+	return y
+}
+
+// A card for an update asks the host where the pack's source declares a
+// template, as a first setup does, and says the address in use. An account
+// that stands was given for the host in use, so a host given with the approval
+// holds it back until it is typed again: a bare pick that keeps it keeps it
+// held, a card with part of it standing takes every name typed with a host so
+// that no name that stands is paired with it unseen, and a card whose pack
+// declares no template takes none.
+func testSetupDriftCardAsksAHost(t *testing.T) {
+	const held = "The account that stands was given for the host in use, so a new host holds it back until you type it again."
+	t.Run("the account stands", func(t *testing.T) {
+		t.Parallel()
+		y := driftHostYard(t, false)
+		seq := y.ask(t, setupAsk(), "yardmaster")
+		setup := y.asked(t, seq).Ask.Setup
+		joined := strings.Join(setup.Does, "\n")
+		if !setup.Given || setup.HostTemplate != "https://{host}/v2" ||
+			!strings.Contains(joined, "the host of source setupmail: its calls go to https://setupmail.example.com/v2. To send them to a server of your own") ||
+			!strings.Contains(joined, held) {
+			t.Fatalf("the drift card: given %v, template %q:\n%s", setup.Given, setup.HostTemplate, joined)
+		}
+		done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, "crm.example.net")
+		if err != nil || done.Host != "crm.example.net" || !done.Keep {
+			t.Fatalf("keeping the account with a host: %+v, %v", done, err)
+		}
+		if rec, err := y.CarryOf(y.ctx, y.bead, seq); err != nil || rec.Host != "crm.example.net" || !rec.Keep {
+			t.Fatalf("the carrying record = %+v, %v", rec, err)
+		}
+	})
+	t.Run("nothing of the account stands", func(t *testing.T) {
+		t.Parallel()
+		y := driftHostYard(t, false)
+		if err := os.Remove(filepath.Join(y.home, "sources", "setupmail.env")); err != nil {
+			t.Fatal(err)
+		}
+		seq := y.ask(t, setupAsk(), "yardmaster")
+		setup := y.asked(t, seq).Ask.Setup
+		joined := strings.Join(setup.Does, "\n")
+		if setup.HostTemplate == "" || !strings.Contains(joined, "the host of source setupmail") || strings.Contains(joined, held) {
+			t.Fatalf("the card of a source with no account standing: template %q:\n%s", setup.HostTemplate, joined)
+		}
+	})
+	t.Run("part of the account stands", func(t *testing.T) {
+		t.Parallel()
+		y := driftHostYard(t, true)
+		seq := y.ask(t, setupAsk(), "yardmaster")
+		if setup := y.asked(t, seq).Ask.Setup; setup.Given || len(setup.Missing) != 1 || setup.HostTemplate == "" || !strings.Contains(strings.Join(setup.Does, "\n"), held) {
+			t.Fatalf("the drift card is given=%v missing=%v template %q", setup.Given, setup.Missing, setup.HostTemplate)
+		}
+		for name, values := range map[string]map[string]string{
+			"the account kept":           nil,
+			"the missing name alone":     {"SETUP_PROJECT": "proj-1"},
+			"the name that stands alone": {"SETUP_ACCOUNT": "ops@example.com"},
+		} {
+			if _, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, values, "", "mckean", true, "crm.example.net"); err == nil ||
+				!strings.Contains(err.Error(), "asks for the account SETUP_ACCOUNT and SETUP_PROJECT") {
+				t.Errorf("%s with a host: %v, want every name asked for", name, err)
+			}
+		}
+		if r := y.asked(t, seq); r.State != AskOpen {
+			t.Fatalf("the refused approvals left the ask %v", r.State)
+		}
+		done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, map[string]string{"SETUP_ACCOUNT": "ops@example.com", "SETUP_PROJECT": "proj-1"}, "", "mckean", true, "crm.example.net")
+		if err != nil || done.Host != "crm.example.net" || len(done.Given) != 2 {
+			t.Fatalf("typing every name with a host: %+v, %v", done, err)
+		}
+	})
+	t.Run("the pack declares no template", func(t *testing.T) {
+		t.Parallel()
+		y := driftYard(t)
+		seq := y.ask(t, setupAsk(), "yardmaster")
+		if setup := y.asked(t, seq).Ask.Setup; setup.HostTemplate != "" || strings.Contains(strings.Join(setup.Does, "\n"), "the host of source") {
+			t.Fatalf("a card of a pack with no template asks a host: %q", setup.HostTemplate)
+		}
+		if _, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, "crm.example.net"); err == nil ||
+			!strings.Contains(err.Error(), "takes no host") {
+			t.Fatalf("a host on a card that asks none: %v", err)
+		}
+	})
 }

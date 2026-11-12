@@ -295,6 +295,20 @@ func TestRunAskIsHeldToTheSource(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, "ask 1 was written when the source crm used another base: its base was set since (source_set, 12 Oct 14:00, by mckean). "},
+		{"host changed", "source grant crm read --group builders", func(t *testing.T, y *askYard) {
+			src := y.source(t)
+			text := strings.Replace(src.Text, "base: https://crm.example.com/v1\n", "base: https://crm.example.com/v1\nbase_template: https://{host}/v1\n", 1)
+			if text == src.Text {
+				t.Fatal("the test adds no template")
+			}
+			if _, err := y.PutSource(y.ctx, "crm.yaml", text, "mckean"); err != nil {
+				t.Fatal(err)
+			}
+		}, func(t *testing.T, y *askYard) {
+			if _, err := y.SetSource(y.ctx, "crm", SourceHost, "crm.example.net", "mckean"); err != nil {
+				t.Fatal(err)
+			}
+		}, "ask 1 was written when the source crm used another host: its host was set since (source_set, 12 Oct 14:00, by mckean). "},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			pinClockFixed(t, askNow)
@@ -304,11 +318,11 @@ func TestRunAskIsHeldToTheSource(t *testing.T) {
 			}
 			seq := y.ask(t, listAsk("mckean", c.command), "yardmaster")
 			c.change(t, y)
-			if c.name == "base changed" {
+			if c.name == "base changed" || c.name == "host changed" {
 				was := *y.asked(t, seq).Ask.Run
 				now := y.card(t, was)
 				if slices.Equal(now.Does, was.Does) {
-					t.Errorf("the card still names the old source base: %q", now.Does)
+					t.Errorf("the card still names the old source address: %q", now.Does)
 				}
 			} else {
 				y.sameCard(t, seq, "source crm")
@@ -319,6 +333,7 @@ func TestRunAskIsHeldToTheSource(t *testing.T) {
 			}
 		})
 	}
+	t.Run("host fingerprint", testSourceFingerprintHoldsTheHost)
 }
 
 // A grant of a source's calls names each call with its method and path,
@@ -658,6 +673,8 @@ func TestRunAskListRefusals(t *testing.T) {
 		{"source set crm mint_command=", "source set with mint_command= and nothing after it is " + terminal},
 		{"source set crm base=eu", alone},
 		{"source set crm base=", "source set with base= and nothing after it is " + terminal},
+		{"source set crm host=crm.example.net", alone},
+		{"source set crm host=", "source set with host= and nothing after it is " + terminal},
 		{"source set crm calls_per_hour=", "source set with calls_per_hour= and nothing after it is " + terminal},
 		{"source set crm calls_per_hour=200 --actor mckean", "source set with --actor is " + terminal},
 		{"source set crm calls_per_hour=200 updates_per_hour=3", "one source and one setting, not 3 words"},
@@ -2462,5 +2479,31 @@ func TestRunAskCrewRestartUsesItsStoreCheck(t *testing.T) {
 	}
 	if masterErr != nil {
 		t.Errorf("yardmaster's crew restart check = %v, want allowed", masterErr)
+	}
+}
+
+// A card holds the host a source is set to with the rest of where its calls
+// go, so one written before the host was set reads as stale. A source with
+// none is held as it was before the host was a setting, so no card written
+// then is made stale by the setting's coming.
+func testSourceFingerprintHoldsTheHost(t *testing.T) {
+	home := t.TempDir()
+	src := &Source{Name: "crm", Text: "text", EnvFile: "/keys/crm.env", MintCommand: "mint", Base: "eu"}
+	was, err := sourceFingerprint(src, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := seen(src.Text, src.EnvFile, src.MintCommand, src.Base); was != want {
+		t.Fatalf("a source with no host is held as %s, want what a build before the host held: %s", was, want)
+	}
+	hosted := *src
+	hosted.Base, hosted.Host = "", "crm.example.net"
+	now, err := sourceFingerprint(&hosted, home)
+	if err != nil || now == was {
+		t.Fatalf("a host set leaves the fingerprint at %s, %v", now, err)
+	}
+	hosted.Host = "crm.example.org"
+	if other, err := sourceFingerprint(&hosted, home); err != nil || other == now || other == was {
+		t.Fatalf("another host holds %s, %v", other, err)
 	}
 }

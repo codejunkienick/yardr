@@ -63,7 +63,7 @@ func sourcesPart(ctx context.Context, cfg *config.Config, st store.API, try bool
 			continue
 		}
 		// The check call goes to the source's chosen base, as a call does.
-		d = d.WithBase(src.Base)
+		d = src.Resolved(d)
 		granted := slices.ContainsFunc(grants, func(g store.SourceGrant) bool { return g.Source == d.Name })
 		told := slices.ContainsFunc(users, func(u store.User) bool { return u.Notify == d.Name })
 		// Looked at, not run: a mint is made only for a call below.

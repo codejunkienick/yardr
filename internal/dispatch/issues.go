@@ -227,7 +227,7 @@ func declaredSource(ctx context.Context, st store.API, name string) (*source.Dec
 	if err != nil {
 		return nil, nil, fmt.Errorf("source %s: its declaration is not read by this yardr: %w", name, err)
 	}
-	return d.WithBase(src.Base), src, nil
+	return src.Resolved(d), src, nil
 }
 
 // allDeclarations lists the yard's declared sources, skipping ones no
@@ -240,7 +240,7 @@ func allDeclarations(ctx context.Context, st store.API) []*source.Declaration {
 	var out []*source.Declaration
 	for i := range srcs {
 		if d, err := srcs[i].Declaration(); err == nil {
-			out = append(out, d.WithBase(srcs[i].Base))
+			out = append(out, srcs[i].Resolved(d))
 		}
 	}
 	return out

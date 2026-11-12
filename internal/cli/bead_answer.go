@@ -12,7 +12,7 @@ import (
 )
 
 func (a *app) newBeadAnswerCmd() *cobra.Command {
-	var ansWords, ansDecline, ansAccount string
+	var ansWords, ansDecline, ansAccount, ansHost string
 
 	var ansLater, ansSecret, ansApprove bool
 	var ansValue []string
@@ -31,6 +31,7 @@ older one for display, and every pick stays as a note. Nothing is deleted.
   yardr bead answer <id> <ask> --secret            give the secret a secret ask asks for
   yardr bead answer <id> <ask> <n> --secret        pick a setup ask's preset with the account typed
   yardr bead answer <id> <ask> <n> --account <source>   pick a setup ask's preset, taking a listed account
+  yardr bead answer <id> <ask> <n> --secret --host <host>   the same, for a server of your own at <host>
   yardr bead answer <id> <ask> <n>                 pick a drift card's preset, keeping the standing account
   yardr bead answer <id> <ask> --approve           approve the command a run ask proposes
   yardr bead answer <id> <ask> --approve --value <name>=<value>   approve it giving the values the card asks for
@@ -104,6 +105,17 @@ is refused from the pane of an agent. A pick with --secret or --account
 is allowed on a setup ask only, as a bare pick that keeps is; everywhere
 else a secret answer still takes no pick.
 
+--host <host> beside either, or beside a bare <n> that keeps a card's standing
+account, where the card asks one (its host line, above the account: a pack
+whose source declares a base_template), sends the pack's calls to a server of
+your own: a name or an address with an optional port and nothing else, held to
+what a base is. The account typed or taken is given for that host, and the yard
+sets the host before it writes the account. The account that stands, kept with
+a bare <n>, was given for the host in use: the new host holds it back until it
+is typed again (yardr source key), and a card with part of it standing takes
+every name typed with a host. The host is the operator's to type, here or on
+the card, and an agent has no word for it.
+
 --approve answers a run ask (yardr bead ask --run): the yard runs the
 command the ask holds, exactly as its card shows it, as the operator, and
 records on the bead what ran and what it printed. It is the operator's to
@@ -174,6 +186,9 @@ options go as mail to the asker instead (yardr mail <asker>@<peer>).`,
 			if ansSecret && ansAccount != "" {
 				return fmt.Errorf("--secret types the account and --account takes a listed one: one of the two")
 			}
+			if ansHost != "" && !ansSecret && ansAccount == "" && !keepsAccount(c.Context(), st, id, askSeq, args, ansWords, ansLater, declined) {
+				return fmt.Errorf("--host goes with a setup ask's approval: yardr bead answer %s %d <n> --secret --host <host>, <n> --account <source> --host <host>, or a bare <n> --host <host> where the card's account stands", id, askSeq)
+			}
 			if ansAccount != "" {
 				if len(args) != 3 || ansWords != "" || ansLater || declined || len(ansValue) > 0 {
 					return fmt.Errorf("--account takes a candidate of a setup ask with its preset pick: yardr bead answer %s %d <n> --account <source>", id, askSeq)
@@ -182,20 +197,23 @@ options go as mail to the asker instead (yardr mail <asker>@<peer>).`,
 				if pickErr != nil || n < 1 {
 					return fmt.Errorf("--account takes a candidate of a setup ask with its preset pick: yardr bead answer %s %d <n> --account <source>", id, askSeq)
 				}
-				return a.approveSetupAccount(c, st, id, askSeq, n, ansAccount)
+				return a.approveSetupAccount(c, st, id, askSeq, n, ansAccount, ansHost)
 			}
 			if ansSecret {
 				if len(args) > 2 || ansWords != "" || ansLater || declined || len(ansValue) > 0 {
 					// A pick with --secret settles a setup ask alone.
 					if len(args) == 3 && ansWords == "" && !ansLater && !declined && len(ansValue) == 0 {
 						if n, pickErr := strconv.Atoi(args[2]); pickErr == nil && n >= 1 {
-							return a.approveSetup(c, st, id, askSeq, n)
+							return a.approveSetup(c, st, id, askSeq, n, ansHost)
 						}
 					}
 					return fmt.Errorf("--secret gives the secret and takes nothing else: the value is typed at a terminal")
 				}
 				if setup, err := askedSetup(c.Context(), st, id, askSeq); err == nil && setup != nil {
 					return fmt.Errorf("ask %d sets up a pack: pick its preset with the account: yardr bead answer %s %d <n> --secret (or --account <source> where the card lists one)", askSeq, id, askSeq)
+				}
+				if ansHost != "" {
+					return fmt.Errorf("--host goes with a setup ask's account, and ask %d asks for a secret, which has no host: yardr bead answer %s %d --secret", askSeq, id, askSeq)
 				}
 				return a.giveSecret(c, st, id, askSeq)
 			}
@@ -276,7 +294,7 @@ options go as mail to the asker instead (yardr mail <asker>@<peer>).`,
 				}
 				if len(args) == 3 && ans.Words == "" {
 					if setup, err := askedSetup(c.Context(), st, id, askSeq); err == nil && setup != nil && setup.Given && len(setup.Missing) == 0 {
-						return a.approveSetupKeep(c, st, id, askSeq, n)
+						return a.approveSetupKeep(c, st, id, askSeq, n, ansHost)
 					}
 				}
 			} else {
@@ -323,5 +341,6 @@ options go as mail to the asker instead (yardr mail <asker>@<peer>).`,
 	answer.Flags().StringArrayVar(&ansValue, "value", nil, "with --approve: <name>=<value> the approval gives in the clear, one the card asks for (repeatable)")
 	answer.Flags().BoolVar(&ansSecret, "secret", false, "give the secret a secret ask asks for: typed unseen at a terminal, after its card's gate")
 	answer.Flags().StringVar(&ansAccount, "account", "", "with a preset pick on a setup ask: take this listed candidate's account instead of typing one")
+	answer.Flags().StringVar(&ansHost, "host", "", "with a setup ask's account, or the bare pick that keeps it, where the card asks a host: the host of a server of your own that the pack's calls go to, in place of the address in use")
 	return answer
 }

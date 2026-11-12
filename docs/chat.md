@@ -484,7 +484,8 @@ yard has is refused: a replacement is proposed as a card, or typed by you.
 A source's region `base` has a door of its own where the base is the only
 change: a setup ask names it (`yardr bead ask <id> "<question>" --setup
 <pack> --crew <name> --source-base <name>`, above), and the card shows the
-base it will call. Anything else of that setting is typed.
+base it will call. Anything else of that setting is typed, and so is a
+`host`: only the operator types one, in a terminal or on the setup card.
 `hook_public_url` is the exception among the addresses: it binds nothing,
 only says where the yard is reached from outside, so a crew member may
 propose it and its card shows the whole URL each hook is registered at.
@@ -600,6 +601,22 @@ least one). `--recommend` counts the card's preset options as `yardr
 pack show` prints them, with `--why` saying why, as on any option ask.
 `--source-base <name>` calls the pack's region base `<name>`, for a pack
 whose source declares bases; the card shows the base it will call.
+Where the pack's source declares a `base_template`
+([integrations.md](integrations.md#a-declared-source)) the card asks cloud or
+self-hosted above the account: its host line says where the calls go now and
+how to send them to a server of your own. The operator types that host with
+the approval, as `--host <host>` beside `<n> --secret` or `<n> --account
+<source>` at a terminal, and in the host field above the account on the
+bead's page; the asker has no flag for it, since a host decides where the
+credential goes. The yard holds it to what a base is, tries the typed
+account's check call against it, sets the source to it before it writes the
+account, and the key is given for that host, once. On an update card, whose
+account stands already, the account that stands was given for the host in use:
+a host given with a bare pick that keeps it holds it back until it is typed
+again (`yardr source key <source>`), which the carried-out card says, and a
+card with only part of the account standing takes every name typed with a
+host, so that no name that stands is paired with it unseen. A host left out
+leaves the host in use as it is.
 The card shows the pack's declaration whole with its mint, the account
 to type unseen or the listed candidates to take, and one option per
 preset, each rendered by the yard from the declarations with the

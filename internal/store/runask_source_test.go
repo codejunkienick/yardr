@@ -892,7 +892,7 @@ func TestSourceAddReplacementCard(t *testing.T) {
 	joined := strings.Join(run.Does, "\n")
 	for _, want := range []string{
 		"it replaces one source and copies 4 command files (5 commands), and changes nothing else.",
-		"the source keeps its env_file, mint_command, region base, call limits and ignored senders, and every grant of it stands",
+		"the source keeps its env_file, mint_command, base or host, call limits and ignored senders, and every grant of it stands",
 		"still owed after it: the credential, by a secret ask for wired.",
 		"source wired: its calls go to https://wired.example.org/v2.",
 		"it would replace the source wired the yard has under that name.",

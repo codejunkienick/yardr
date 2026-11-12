@@ -723,15 +723,27 @@ func changedCopyLines(carried AskSource, diffs map[string]AskFileDiff) []string 
 // carries its change on its own command line; only a file the pack drops
 // keeps a line of its own, having no command line to carry it. Where
 // settleAccount the credential is no part of what stays owed after: the
-// card settles the account itself, as a setup card does. base is the
-// region base a setup ask chose for this source, "" for the declaration's
-// own.
+// card settles the account itself, as a setup card does. base is the region
+// base a setup ask chose; with none, an existing source's settings decide
+// where its calls go.
 func (w *wtx) packOneSourceDoes(carried AskSource, d *source.Declaration, settleAccount bool, base string) ([]string, error) {
+	src, was, err := sourceIn(w.Tx, carried.Name)
+	sourceMissing := errors.Is(err, ErrNotFound)
+	if err != nil && !sourceMissing {
+		return nil, err
+	}
+	display := d
+	if !sourceMissing {
+		resolved := *src
+		if base != "" {
+			resolved.Base, resolved.Host = base, ""
+		}
+		display, base = resolved.Resolved(d), resolved.Base
+	}
 	diffs := commandDiffs(d, carried)
-	full := sourceDoesChanged(d, carried, diffs, settleAccount, base)
+	full := sourceDoesChanged(display, carried, diffs, settleAccount, base)
 	lines := full[1:] // the pack line stands for the adding line
-	_, was, err := sourceIn(w.Tx, carried.Name)
-	if errors.Is(err, ErrNotFound) {
+	if sourceMissing {
 		if len(carried.Inventory) == 0 {
 			return lines, nil
 		}
@@ -741,9 +753,6 @@ func (w *wtx) packOneSourceDoes(carried AskSource, d *source.Declaration, settle
 		out = append(out, extra...)
 		out = append(out, lines[1:]...)
 		return out, nil
-	}
-	if err != nil {
-		return nil, err
 	}
 	var extra []string
 	extra = append(extra, fmt.Sprintf("it would replace the source %s the yard has under that name.", carried.Name))
@@ -779,7 +788,7 @@ func packDeclDiffLines(name string, was, now *source.Declaration) []string {
 		return []string{fmt.Sprintf("source %s: the yard's declaration is one this yardr does not read, and the pack's replaces it.", name)}
 	}
 	var out []string
-	for _, key := range []string{"base", "bases", "credential", "check", "idempotency", "calls", "notify", "hear", "limits", "thread", "link", "identity", "hook", "events", "git"} {
+	for _, key := range []string{"base", "bases", "base_template", "credential", "check", "idempotency", "calls", "notify", "hear", "limits", "thread", "link", "identity", "hook", "events", "git"} {
 		old, new := declarationKey(was, key), declarationKey(now, key)
 		if old != new {
 			out = append(out, safeSourceCardLine(fmt.Sprintf("source %s %s: %s -> %s.", name, key, or(old, "none"), or(new, "none"))))
@@ -801,6 +810,11 @@ func declarationKey(d *source.Declaration, key string) string {
 			return "" // an absent map and an empty one are alike: no regions, not "null"
 		}
 		v = d.Bases
+	case "base_template":
+		if d.BaseTemplate == "" {
+			return "" // no template reads as none, not as an empty string
+		}
+		v = d.BaseTemplate
 	case "credential":
 		v = d.Credential
 	case "check":

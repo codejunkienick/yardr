@@ -173,6 +173,16 @@ base: https://acme.example.com
 bases:
   us: https://acme.example.com
   eu: https://eu.acme.example.com
+# Drop base_template where the service is only run by its maker. Where
+# the operator may run it on a machine of their own, it is the address
+# such a server's calls go to, with {host} where the operator's host
+# goes, once and straight after https://, and the path the pack's:
+# `yardr source set acme host=acme.example.net` then sends every call to
+# https://acme.example.net, and the setup card asks cloud or self-hosted
+# above the key. base stays the default. Only the host is the operator's
+# to say, and a key given for another host is held back until it is
+# given again for this one.
+base_template: https://{host}
 check: ping
 idempotency: Idempotency-Key
 # Each call is a separately grantable request. Keep the calls the service

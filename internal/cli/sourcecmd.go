@@ -223,6 +223,16 @@ credential goes only to a host the file declares.
     us: https://crm.example.com/api/v2
     eu: https://eu.crm.example.com/api/v2
 
+A service the operator may run on a server of their own declares the address
+that server answers at under base_template, with {host} once, straight after
+https://, and the path every call is under: yardr source set <name> host=<host>
+sends the calls to it, and to the base with none set. The host is a name or an
+address with an optional port and nothing else, typed by the operator alone,
+and the address it makes is held to what a base is.
+
+  base: https://api.crm.example.com/v2
+  base_template: https://{host}/api/v2
+
 idempotency names the header a service takes a key in, by which it tells an
 update it was sent before from a new one. yardr call then sends each update
 with a key, and the same key when the same caller makes the same call with
@@ -594,7 +604,7 @@ program they run is not carried: it is the operator's to install.`,
 					}
 					fmt.Fprintf(w, "source %s saved: no call, %s\n", d.Name, alone)
 				} else {
-					fmt.Fprintf(w, "source %s saved: %s under %s\n", d.Name, plural(len(d.Calls), "call"), baseInUse(d, saved.Base))
+					fmt.Fprintf(w, "source %s saved: %s under %s\n", d.Name, plural(len(d.Calls), "call"), saved.CalledAt(d))
 				}
 				for _, l := range changes {
 					fmt.Fprintln(w, "  "+l)
@@ -694,7 +704,7 @@ program they run is not carried: it is the operator's to install.`,
 					if src.Builtin {
 						name += " (built in)"
 					}
-					rows = append(rows, []string{name, or(baseInUse(d, src.Base), "-"), or(strings.Join(names, ", "), "-"), cred, or(d.Check, "-"), notify, kinds})
+					rows = append(rows, []string{name, or(src.CalledAt(d), "-"), or(strings.Join(names, ", "), "-"), cred, or(d.Check, "-"), notify, kinds})
 				}
 				table(w, "NAME\tBASE\tCALLS\tCREDENTIAL\tCHECK\tNOTIFY\tLIMITS", rows)
 			})
@@ -782,12 +792,14 @@ credential in it whether their file sets that. The value is never printed.
 				out["as"] = as
 			}
 			return a.out(c.OutOrStdout(), out, func(w io.Writer) {
-				fmt.Fprintf(w, "%s  %s\n", d.Name, or(baseInUse(d, src.Base), "no calls"))
+				fmt.Fprintf(w, "%s  %s\n", d.Name, or(src.CalledAt(d), "no calls"))
 				if d.About != "" {
 					fmt.Fprintf(w, "  %s\n", d.About)
 				}
-				if line := basesLine(d); line != "" {
-					fmt.Fprintf(w, "  %s\n", line)
+				for _, line := range []string{basesLine(d), hostLine(d, src)} {
+					if line != "" {
+						fmt.Fprintf(w, "  %s\n", line)
+					}
 				}
 				fmt.Fprintf(w, "  credential: %s\n", state)
 				if d.Credential.Minted() {
@@ -1105,9 +1117,22 @@ none, and a name it has not is refused with the names it has: no free-text
 base is accepted, so the credential goes only to a host the file declares.
 base= with nothing after it is the declaration's own base again.
 
+host is the host of a server of your own, for a service whose declaration
+names a base_template: a name or an address with an optional port and
+nothing else (crm.example.net, 192.168.1.20:8443), which fills the template,
+so the calls go to https://<host>/ and the path the declaration gives. It is
+held to the checks of a base (https, no user, query or fragment), refused
+where the file names no template, and typed by the operator alone: an agent
+is refused it, on its pane and as a card. host and base replace each other,
+and host= with nothing after it is the declaration's own base again. A
+credential given for another host is held back from this one, naming both,
+until it is given again (yardr source key): setting a host never carries a
+key to it.
+
 Setting env_file or base is where a credential comes from and where it is
 sent, so it also pairs the credential with the host the source's calls go to
-afterwards (see yardr source key).`,
+afterwards (see yardr source key), but for a base that takes the source off a
+host: that key is held back too.`,
 		Example: `  umask 077
   IFS= read -rs v && printf 'CRM_TOKEN=%s\n' "$v" > ~/.yardr/sources/crm.env; unset v
   chmod 600 ~/.yardr/sources/crm.env
@@ -1115,12 +1140,13 @@ afterwards (see yardr source key).`,
   yardr source set crm mint_command=/Users/me/bin/crm-mint
   yardr source set crm calls_per_hour=20
   yardr source set crm updates_per_hour=3
-  yardr source set posthog base=eu`,
+  yardr source set posthog base=eu
+  yardr source set crm host=crm.example.net`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(c *cobra.Command, args []string) error {
 			key, value, ok := strings.Cut(args[1], "=")
 			if !ok || !slices.Contains(store.SourceSettings, key) {
-				return fmt.Errorf("%q: want %s=<file>, %s=<program> [args...], %s=<n>, %s=<n> or %s=<name>, the settings a source has", args[1], store.SourceEnvFile, store.SourceMintCommand, store.SourceCallsPerHour, store.SourceUpdatesPerHour, store.SourceBase)
+				return fmt.Errorf("%q: want %s=<file>, %s=<program> [args...], %s=<n>, %s=<n>, %s=<name> or %s=<host>, the settings a source has", args[1], store.SourceEnvFile, store.SourceMintCommand, store.SourceCallsPerHour, store.SourceUpdatesPerHour, store.SourceBase, store.SourceHost)
 			}
 			st, err := a.store(c.Context())
 			if err != nil {
@@ -1187,12 +1213,12 @@ afterwards (see yardr source key).`,
 			}
 			switch key {
 			case store.SourceEnvFile, store.SourceMintCommand:
-			case store.SourceBase:
+			case store.SourceBase, store.SourceHost:
 				d, err := saved.Declaration()
 				if err != nil {
 					return err
 				}
-				state = baseState(d, saved.Base)
+				state = baseState(d, saved)
 			default:
 				state = saved.LimitsLine()
 			}
@@ -1527,7 +1553,7 @@ process for it. Nothing of the request is written anywhere.`,
 				return err
 			}
 			// The check call goes to the source's chosen base, as a call does.
-			d = d.WithBase(src.Base)
+			d = src.Resolved(d)
 			// With --as the credential looked at and read is the user's,
 			// from the file their record names, and the check call is made
 			// as them.
@@ -1760,43 +1786,6 @@ func (a *app) checkTells(w io.Writer, ctx context.Context, st store.API, name, u
 func notifyLine(d *source.Declaration) string {
 	n := d.Notify
 	return fmt.Sprintf("notify: the call %s tells a user, at the %s of their env_file (yardr user set <name> %s=%s)", n.Call, n.AddressEnv, store.UserNotify, d.Name)
-}
-
-// baseInUse is the base the source's calls go to, in words: its address,
-// with the setting's name where one is chosen. "" for a source that
-// declares no call.
-func baseInUse(d *source.Declaration, base string) string {
-	addr := d.WithBase(base).Address()
-	if addr == "" {
-		return ""
-	}
-	if _, ok := d.BaseURL(base); base != "" && ok {
-		addr += " (base " + base + ")"
-	}
-	return addr
-}
-
-// baseState is the source's base as yardr source set prints it after a
-// base was set: where its calls go.
-func baseState(d *source.Declaration, base string) string {
-	if addr := baseInUse(d, base); addr != "" {
-		return "calls go to " + addr
-	}
-	return "the file declares no call"
-}
-
-// basesLine lists the region bases the file declares beside its own base,
-// in a line for yardr source show; "" for a service that runs in one
-// region.
-func basesLine(d *source.Declaration) string {
-	if len(d.Bases) == 0 {
-		return ""
-	}
-	var each []string
-	for _, name := range d.BaseNames() {
-		each = append(each, name+" "+d.Bases[name])
-	}
-	return "bases: " + strings.Join(each, ", ")
 }
 
 // hearLine says in a line which deliveries of a source are kept: one whose

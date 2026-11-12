@@ -73,7 +73,7 @@ func declaredSource(ctx context.Context, st store.API, name string) (*source.Dec
 	if err != nil {
 		return nil, nil, fmt.Errorf("source %s: its declaration is not read by this yardr: %w", name, err)
 	}
-	return d.WithBase(s.Base), s, nil
+	return s.Resolved(d), s, nil
 }
 
 // mintOf is the source's mint_command setting, "" when the yard declares

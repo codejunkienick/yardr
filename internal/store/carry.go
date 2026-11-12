@@ -101,6 +101,11 @@ type Carry struct {
 	// values, no picked candidate. The carrying out verifies the file
 	// still holds every name and goes on to the grants.
 	Keep bool `json:"keep,omitempty"`
+	// Host is the host a setup approval gave: the carrying out sets each
+	// source the pack carries whose declaration names a template to it,
+	// before the account is written, so that the key is given for the
+	// host the calls go to. "" for none.
+	Host string `json:"host,omitempty"`
 	// TeammateEmails are the addresses a teammate invite or removal
 	// reports, held at approval: a removal's stand in the mapping the
 	// carrying out itself removes, so a report still owed after that

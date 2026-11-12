@@ -31,7 +31,6 @@ package source
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"net"
 	"net/url"
 	"regexp"
@@ -76,8 +75,15 @@ type Declaration struct {
 	// default: name -> URL, without a trailing slash. A source setting
 	// base names one of them, "" for Base; each is held to Base's
 	// checks. Empty for a service that runs in one region.
-	Bases      map[string]string `json:"bases,omitempty"`
-	Credential *Credential       `json:"credential,omitempty"`
+	Bases map[string]string `json:"bases,omitempty"`
+	// BaseTemplate is the address a host the operator types fills, for a
+	// service they may run on a machine of their own: https://{host} and
+	// the path every call's path is under, without a trailing slash. Base
+	// stays the default; a source set to a host sends its calls to the
+	// filled address instead (WithHost). Empty for a service that is only
+	// where Base says.
+	BaseTemplate string      `json:"base_template,omitempty"`
+	Credential   *Credential `json:"credential,omitempty"`
 	// Check names the call `yardr source check` makes: a read call that
 	// needs no parameter, sent as a request or answered by its run command
 	// (DoCheck). Empty when the file names none.
@@ -318,50 +324,6 @@ func (d *Declaration) Address() string {
 		return "the URL in " + d.Credential.Env
 	}
 	return d.Base
-}
-
-// BaseURL is the address the source's calls go to when its base setting names
-// name: the base for "", the named one of bases. ok is false for a name the
-// file declares none of: no free-text base is accepted from anyone, anywhere,
-// so the credential goes only to a host the file declares.
-func (d *Declaration) BaseURL(name string) (url string, ok bool) {
-	if name == "" {
-		return d.Base, true
-	}
-	u, ok := d.Bases[name]
-	return u, ok
-}
-
-// WithBase is d with the base setting name in place of its own: what a call of a source set to name is made against.
-// "" and a name the file declares none of are d itself: the setting names nothing under a declaration that lost it,
-// and the call goes to the default base.
-func (d *Declaration) WithBase(name string) *Declaration {
-	u, ok := d.BaseURL(name)
-	if !ok || u == d.Base {
-		return d
-	}
-	c := *d
-	c.Base = u
-	return &c
-}
-
-// BaseNames are the names the file declares bases under, in order: what a refusal of an unknown one lists.
-func (d *Declaration) BaseNames() []string {
-	return slices.Sorted(maps.Keys(d.Bases))
-}
-
-// CheckBase holds value to the file's bases: "" is the base itself, and anything else names one of bases.
-func (d *Declaration) CheckBase(value string) error {
-	if value == "" {
-		return nil
-	}
-	if len(d.Bases) == 0 {
-		return fmt.Errorf("source %s: base=%q: the declaration names no bases, so there is nothing a base would choose", d.Name, value)
-	}
-	if _, ok := d.Bases[value]; !ok {
-		return fmt.Errorf("source %s: base=%q: the declaration has no such base (it has: %s)", d.Name, value, strings.Join(d.BaseNames(), ", "))
-	}
-	return nil
 }
 
 // Call returns the call of that name.
@@ -620,9 +582,9 @@ func (r *reader) count(n *yaml.Node, key string, most int) (int, bool) {
 }
 
 func (r *reader) declaration(d *Declaration, root *yaml.Node) {
-	var calls, check, notify, hear, base, bases, credential, idempotency, hook, git *entry
+	var calls, check, notify, hear, base, bases, baseTemplate, credential, idempotency, hook, git *entry
 	named := false
-	for _, e := range r.entries(root, "", "name", "about", "base", "bases", "credential", "check", "idempotency", "calls", "notify", "hear", "limits", "thread", "link", "hook", "identity", "events", "git") {
+	for _, e := range r.entries(root, "", "name", "about", "base", "bases", "base_template", "credential", "check", "idempotency", "calls", "notify", "hear", "limits", "thread", "link", "hook", "identity", "events", "git") {
 		switch e.key {
 		case "name":
 			named = true
@@ -646,6 +608,9 @@ func (r *reader) declaration(d *Declaration, root *yaml.Node) {
 		case "bases":
 			bases = &e
 			d.Bases = r.bases(e)
+		case "base_template":
+			baseTemplate = &e
+			d.BaseTemplate = r.baseTemplate(e)
 		case "credential":
 			credential = &e
 			d.Credential = r.credential(e)
@@ -697,7 +662,7 @@ func (r *reader) declaration(d *Declaration, root *yaml.Node) {
 		} else if d.Hook != nil {
 			alone = "hook alone"
 		}
-		for _, e := range []*entry{base, bases, credential, check, idempotency, notify} {
+		for _, e := range []*entry{base, bases, baseTemplate, credential, check, idempotency, notify} {
 			if e != nil {
 				r.errf(e.k, e.path, "is for the calls of a source, and this file declares none (it has %s)", alone)
 			}
@@ -705,7 +670,7 @@ func (r *reader) declaration(d *Declaration, root *yaml.Node) {
 		if git != nil {
 			r.errf(git.k, git.path, "carries the source's token to git, and this file declares no credential (it has %s)", alone)
 		}
-		d.Base, d.Bases, d.Credential = "", nil, nil
+		d.Base, d.Bases, d.BaseTemplate, d.Credential = "", nil, "", nil
 		if hear != nil {
 			d.Hear = r.hear(d, *hear, alone)
 		}
@@ -719,6 +684,8 @@ func (r *reader) declaration(d *Declaration, root *yaml.Node) {
 		r.errf(base.k, base.path, "the credential is the address every call goes to (credential.url: true), so the file names no base beside it")
 	case bases != nil && address:
 		r.errf(bases.k, bases.path, "the credential is the address every call goes to (credential.url: true), so the file names no bases beside it")
+	case baseTemplate != nil && address:
+		r.errf(baseTemplate.k, baseTemplate.path, "the credential is the address every call goes to (credential.url: true), so the file names no base_template beside it")
 	case base == nil && !address:
 		r.errf(root, "base", "missing: the address every call's path is under (https://…), or credential.url: true where the credential is the address itself")
 	}

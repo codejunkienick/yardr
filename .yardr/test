@@ -2079,7 +2079,7 @@ internal/cli/ops.go 1699 the server, daemon, depot, group, route and session com
 internal/cli/pack.go 2089 pack loading, import planning and its question rounds
 internal/cli/peers.go 1564 the peer identity, intake and ping commands
 internal/cli/routereport.go 1513 the route report and its rendering
-internal/cli/sourcecmd.go 2103 the source command and its builtin checks
+internal/cli/sourcecmd.go 2092 the source command and its builtin checks
 internal/cli/subscriptions.go 1148 the identity, subscribe and thread commands
 internal/cli/updown.go 1302 yard up and down with their handoffs
 internal/cli/users.go 1055 the user command, inboxes and conversations
@@ -2088,7 +2088,7 @@ internal/dispatch/harnesslogin.go 1094 harness login leading and onboarding mark
 internal/pack/export.go 1047 pack export and its object shapes
 internal/pack/pack.go 1777 pack reading, checking and its shapes
 internal/rpc/user.go 1061 the user server and callers (pairing is userpair.go, envelopes usere2e.go)
-internal/source/declaration.go 1258 source declarations, credentials and calls
+internal/source/declaration.go 1225 source declarations, credentials and calls
 internal/standin/standin.go 1540 the fake Linear, GitHub and edge APIs
 internal/store/asks.go 1741 ask and answer parsing and storage
 internal/store/beads.go 2563 bead CRUD, queries and dispatch reads
@@ -2103,7 +2103,7 @@ internal/store/peersend.go 1261 sending beads to peers and settling them
 internal/store/policy.go 1178 the permission gates and their rules
 internal/store/routing.go 3043 groups, routes and their config merges
 internal/store/runask_list.go 1223 ask cards, labels and preset reading
-internal/store/runask_setup.go 1535 the setup ask, its card, and the carrying record
+internal/store/runask_setup.go 1533 the setup ask, its card, and the carrying record
 internal/store/secretask.go 1092 secret asks and harness key files
 internal/store/settings.go 1117 yard settings and their checks
 internal/store/sourcecalls.go 1240 source grants and callables

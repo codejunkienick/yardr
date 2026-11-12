@@ -27,19 +27,21 @@ func init() { allBuckets = append(allBuckets, bSources) }
 // The settings of a declared source: the file its credential is read from,
 // the command that mints it where the file names a mint, how many calls of
 // it one caller makes in an hour (SourceCallLimit when unset), how many
-// of those are updates (SourceUpdateLimit), and which of the declaration's
-// region bases its calls go to (the declaration's own base when unset).
+// of those are updates (SourceUpdateLimit), which of the declaration's
+// region bases its calls go to (the declaration's own base when unset), and
+// the host its template is filled with in place of the base.
 const (
 	SourceEnvFile        = "env_file"
 	SourceMintCommand    = "mint_command"
 	SourceCallsPerHour   = "calls_per_hour"
 	SourceUpdatesPerHour = "updates_per_hour"
 	SourceBase           = "base"
+	SourceHost           = "host"
 )
 
 // SourceSettings are the settings a source has, as yardr source set names
 // them.
-var SourceSettings = []string{SourceEnvFile, SourceMintCommand, SourceCallsPerHour, SourceUpdatesPerHour, SourceBase}
+var SourceSettings = []string{SourceEnvFile, SourceMintCommand, SourceCallsPerHour, SourceUpdatesPerHour, SourceBase, SourceHost}
 
 // Source is a declared source: its file as it was added, and where the
 // yard keeps the credential the file names. The file holds no secret and
@@ -96,6 +98,12 @@ type Source struct {
 	// base. Empty until the operator sets it; PutSource keeps what the
 	// source has.
 	Base string `json:"base,omitempty"`
+	// Host is the host the declaration's base_template is filled with, a
+	// bare host and an optional port the operator typed: the source's
+	// calls go to the filled address in place of the base, and Base is
+	// then empty (the two are never set together). Empty until the
+	// operator sets it; PutSource keeps what the source has.
+	Host string `json:"host,omitempty"`
 	// Ignored are the sender ids in this source the operator has
 	// answered for in particular: a delivery from one is dropped
 	// without a card under any hook word, until the entry is removed
@@ -138,12 +146,16 @@ func (s Source) UpdateLimit() int {
 
 // CalledAt is where the source's calls go under its declaration d, as
 // yardr source add says it: the address, and beside it the name of the
-// region base the source is set to where that names one of d's bases (a
-// setting a replacement keeps). "" for a declaration that makes no call.
+// region base the source is set to where that names one of d's bases, or the
+// host where d has a template to fill (settings a replacement keeps). ""
+// for a declaration that makes no call.
 func (s Source) CalledAt(d *source.Declaration) string {
-	addr := d.WithBase(s.Base).Address()
+	addr := s.Resolved(d).Address()
 	if _, ok := d.BaseURL(s.Base); addr != "" && s.Base != "" && ok {
 		addr += " (base " + s.Base + ")"
+	}
+	if addr != "" && s.Host != "" && d.BaseTemplate != "" {
+		addr += " (host " + s.Host + ")"
 	}
 	return addr
 }
@@ -158,14 +170,15 @@ func baseHost(base string) (host string, ok bool) {
 }
 
 // pairCredential records where the credential in the source's env_file goes
-// from now on: the host its calls go to under d, with the base setting in
-// place. A source with no env_file holds no credential and is paired with
-// nothing. It is the one place the pairing is made, for KeySource and for
-// the operator's own env_file and base settings.
+// from now on: the host its calls go to under d, with the base or the host
+// setting in place. A source with no env_file holds no credential and is
+// paired with nothing. It is the one place the pairing is made, for KeySource
+// and for the operator's own env_file and base settings; the host setting
+// pairs nothing, so a key is given again for a host it was not given for.
 func (s *Source) pairCredential(d *source.Declaration) {
 	s.KeyedHost = ""
 	if s.EnvFile != "" {
-		s.KeyedHost = sourceHost(d.WithBase(s.Base))
+		s.KeyedHost = sourceHost(s.Resolved(d))
 	}
 }
 
@@ -187,7 +200,7 @@ func (s Source) CredentialHeld(d *source.Declaration) string {
 	if s.EnvFile == "" || d.Credential == nil || d.Credential.URL {
 		return ""
 	}
-	d = d.WithBase(s.Base)
+	d = s.Resolved(d)
 	if _, ok := baseHost(d.Base); !ok {
 		return ""
 	}
@@ -249,7 +262,7 @@ func (w *wtx) putSource(d *source.Declaration, text, actor string, by *approvedO
 	if err != nil {
 		return nil, err
 	}
-	src.EnvFile, src.MintCommand, src.CallsPerHour, src.UpdatesPerHour, src.Base = was.EnvFile, was.MintCommand, was.CallsPerHour, was.UpdatesPerHour, was.Base
+	src.EnvFile, src.MintCommand, src.CallsPerHour, src.UpdatesPerHour, src.Base, src.Host = was.EnvFile, was.MintCommand, was.CallsPerHour, was.UpdatesPerHour, was.Base, was.Host
 	// The pairing stands through a replacement, whatever the new text says
 	// of its base: moving it is for whoever gives the credential again.
 	src.KeyedHost = was.KeyedHost
@@ -360,10 +373,11 @@ func fileStands(path string) bool {
 // SourceMintCommand, to the command that mints it where the file names a
 // mint, or to "" for none; SourceCallsPerHour or SourceUpdatesPerHour,
 // to a whole number from 1, or to "" for SourceCallLimit and
-// SourceUpdateLimit; or SourceBase, to the name of one of the
-// declaration's bases, or to "" for the declaration's own base. The path
-// and the command are kept as given: whoever calls resolves them, since
-// the server may run in another directory.
+// SourceUpdateLimit; SourceBase, to the name of one of the declaration's
+// bases, or to "" for the declaration's own base; or SourceHost, to the host
+// its template is filled with, or to "" for the base. A base and a host
+// replace each other. The path and the command are kept as given: whoever
+// calls resolves them, since the server may run in another directory.
 func (s *Store) SetSource(ctx context.Context, name, key, value, actor string) (*Source, error) {
 	perHour, err := sourceSetting(name, key, value)
 	if err != nil {
@@ -382,11 +396,11 @@ func (s *Store) SetSource(ctx context.Context, name, key, value, actor string) (
 
 // sourceSetting checks a setting of the source name as SetSource takes it,
 // and answers the number of one that is a limit, 0 for none. A base names
-// one of the declaration's bases, which takes the stored source to check:
-// sourceSetCheck holds it, with the source in hand.
+// one of the declaration's bases and a host fills its template, which take
+// the stored source to check: setSource holds them, with the source in hand.
 func sourceSetting(name, key, value string) (perHour int, err error) {
 	switch key {
-	case SourceEnvFile, SourceMintCommand, SourceBase:
+	case SourceEnvFile, SourceMintCommand, SourceBase, SourceHost:
 	case SourceCallsPerHour, SourceUpdatesPerHour:
 		if value != "" {
 			n, err := strconv.Atoi(value)
@@ -423,15 +437,24 @@ func (w *wtx) setSource(ctx context.Context, name, key, value string, perHour in
 	if err != nil {
 		return nil, err
 	}
-	if key == SourceBase {
+	if key == SourceBase || key == SourceHost {
 		d, err := src.Declaration()
 		if err != nil {
 			return nil, err
 		}
-		if err := d.CheckBase(value); err != nil {
+		check := d.CheckBase
+		if key == SourceHost {
+			check = d.CheckHost
+		}
+		if err := check(value); err != nil {
 			return nil, err
 		}
 	}
+	// A host the operator typed is where the credential goes by their word
+	// alone, so only giving it again pairs it with anywhere else
+	// (CredentialHeld): not the host setting, and not a base that takes the
+	// source off the host.
+	typed := src.Host != ""
 	switch key {
 	case SourceEnvFile:
 		src.EnvFile = value
@@ -442,13 +465,16 @@ func (w *wtx) setSource(ctx context.Context, name, key, value string, perHour in
 	case SourceUpdatesPerHour:
 		src.UpdatesPerHour = perHour
 	case SourceBase:
-		src.Base = value
+		src.Base, src.Host = value, ""
+	case SourceHost:
+		src.Host, src.Base = value, ""
 	}
 	// Where a credential comes from and where it is sent are the operator's
-	// alone (sourceSetAsk), so their own setting of either pairs the
-	// credential with where the calls go afterwards. A declaration this
-	// build cannot read pairs it with nothing: no call of it is made either.
-	if key == SourceEnvFile || key == SourceBase {
+	// alone (sourceSetAsk), so their own setting of the file, or of a base
+	// where no host stood, pairs the credential with where the calls go
+	// afterwards. A declaration this build cannot read pairs it with nothing:
+	// no call of it is made either.
+	if key == SourceEnvFile || (key == SourceBase && !typed) {
 		if d, err := src.Declaration(); err == nil {
 			src.pairCredential(d)
 		} else {

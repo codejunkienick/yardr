@@ -70,6 +70,30 @@ func TestRunAskHookRm(t *testing.T) {
 	if len(got.Ask.Weight) != 1 || got.Ask.Weight[0].Class != WeightTrust || !StrongWeight(got.Ask.Weight) {
 		t.Fatalf("the ask weighs %+v, want trust, which is strong", got.Ask.Weight)
 	}
+	t.Run("registration address uses the source host", func(t *testing.T) {
+		var hits []registerHit
+		status := 200
+		y := registerYard(t, &hits, &status)
+		src, err := y.GetSource(y.ctx, "bot")
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := strings.Replace(src.Text, "credential:", "base_template: https://{host}/api\ncredential:", 1)
+		if _, err := y.PutSource(y.ctx, "bot.yaml", text, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := y.SetSource(y.ctx, "bot", SourceHost, "nas.local", "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := y.PutHook(y.ctx, Hook{Name: "bot", Source: "bot", SecretFile: HookSecretFile(y.home, "bot")}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+		seq := y.ask(t, hookRmAsk("hook rm bot"), "yardmaster")
+		line := strings.Join(y.asked(t, seq).Ask.Run.Does, "\n")
+		if want := "The webhook the yard registered at https://nas.local/api (host nas.local) for it stays registered there"; !strings.Contains(line, want) {
+			t.Fatalf("the card says %q, want it to name %q", line, want)
+		}
+	})
 	// ApproveAsk holds the hook's lock across the approval, as DeleteHook
 	// does, for this ask and no other.
 	if name, ok := y.hookRmTarget(y.bead, seq); !ok || name != "linear" {
