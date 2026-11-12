@@ -8,11 +8,13 @@ on what lands, with it (R4). R1 and R2 are script behavior: R2 is enforced
 on every run, R1 on every race leg; the rest are rules the gate, the roles
 and the assembly keep between them.
 
-An allow-list in `.yardr/test` names what is over budget today, each entry
-with why and which bead brings it under. A fix deletes its entries; a row
-whose site is gone is deleted with the fix, not left for later. One row has
-no fix: `contrib/isolated-yard`'s, since the yard-shape matrix is long by
-design and runs only in the quiet run (R6).
+An allow-list in `.yardr/test` names what is over budget today. Each entry
+says why; entries with a fix name the bead that brings them under. A fix
+deletes its entries; a row whose site is gone is deleted with the fix, not
+left for later. Two rows have a fix bead: `internal/cli`'s (yardr-2xke) and
+`contrib/assembly`'s (yardr-4n6h). One row has none: `contrib/isolated-yard`'s,
+since the yard-shape matrix is long by design and runs only in the quiet run
+(R6).
 
 R1. A package's tests finish in 60 s under `-race`, or the gate fails.
 Only a race leg is judged, and only the landing and the quiet run (R6) have
