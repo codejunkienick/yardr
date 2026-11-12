@@ -215,14 +215,14 @@ func (c *Client) DeclineAsk(ctx context.Context, id string, ask uint64, words, a
 	return c.call(ctx, "DeclineAsk", nil, id, ask, words, actor)
 }
 
-func (c *Client) AnswerAskExpected(ctx context.Context, id string, ask uint64, turn, option int, words, actor string, weighed bool) error {
-	return c.call(ctx, "AnswerAskExpected", nil, id, ask, turn, option, words, actor, weighed)
+func (c *Client) AnswerAskExpected(ctx context.Context, id string, ask uint64, turn, option int, words, actor string, weighed bool, held int) error {
+	return c.call(ctx, "AnswerAskExpected", nil, id, ask, turn, option, words, actor, weighed, held)
 }
 func (c *Client) DeferAskExpected(ctx context.Context, id string, ask uint64, turn int, actor string) error {
 	return c.call(ctx, "DeferAskExpected", nil, id, ask, turn, actor)
 }
-func (c *Client) DeclineAskExpected(ctx context.Context, id string, ask uint64, turn int, words, actor string) error {
-	return c.call(ctx, "DeclineAskExpected", nil, id, ask, turn, words, actor)
+func (c *Client) DeclineAskExpected(ctx context.Context, id string, ask uint64, turn int, words, actor string, held int) error {
+	return c.call(ctx, "DeclineAskExpected", nil, id, ask, turn, words, actor, held)
 }
 func (c *Client) TakeBackAsk(ctx context.Context, id string, ask uint64, reason, actor string) error {
 	return c.call(ctx, "TakeBackAsk", nil, id, ask, reason, actor)

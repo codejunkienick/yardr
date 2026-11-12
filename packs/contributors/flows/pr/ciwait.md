@@ -127,7 +127,8 @@ test command, a fetch (of the head, or of the base), GitHub or the App's
 token failed, the remote has no branch for the depot's base, git could not
 make the merge (it needs git 2.38 or newer), the pull request
 is no longer open, or its head is not the one the reviewer read (or, for a
-pull request a maintainer accepted, the one they accepted). That is
+pull request a maintainer accepted, the one they accepted), or it targets a
+branch that is not the depot's base, which a maintainer decides. That is
 the yard's to put right and not the contributor's: act on what the note
 says, then `yardr bead unhold <id>` runs the tests again. A pull request
 that is no longer open is usually the source's to say first (`merged`,

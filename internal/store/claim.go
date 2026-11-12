@@ -736,8 +736,8 @@ func (a Ask) identityAsked() *IdentityAsked {
 // one who declined: the sender stays unmapped, and their next
 // delivery offers a new card, as one is offered after none, and
 // after a let-in pick. Later and a YouDecide pick write nothing,
-// keep what the card held and leave the card open. It refuses a pick or a decline
-// by anyone but the operator the card asks, one from an agent pane
+// keep what the card held and leave the card open. It refuses a pick, a decline
+// or a put-aside by anyone but the operator the card asks, one from an agent pane
 // (mayIdentify, as a terminal mapping is), and a stale pick: a sender
 // mapped to anyone since the card was written, or a user gone since,
 // writes nothing and leaves the card open. A pick that writes an identity
@@ -747,7 +747,7 @@ func (a Ask) identityAsked() *IdentityAsked {
 // the answer is recorded before this runs.
 func (w *wtx) answerMapping(ctx context.Context, row *beadRow, ask Ask, ans Answer, actor string, weighed bool) error {
 	id := ask.Identity
-	if id == nil || ans.Later {
+	if id == nil {
 		return nil
 	}
 	if err := w.mayAnswerMapping(ctx, row, ask, ans, actor); err != nil {
@@ -813,16 +813,11 @@ func (w *wtx) answerMapping(ctx context.Context, row *beadRow, ask Ask, ans Answ
 }
 
 // mayAnswerMapping asks whether actor may give ans to the mapping card ask on
-// row: a decline or a pick is the operator's the card asks, as
-// ActAnswerIdentityAsk says. A put-aside and words alone come to no gate:
-// the first writes nothing, and answerable refuses the second whoever gives
-// it. answerMapping asks it as it writes, and guard before it compares what
-// the caller read, so that a caller refused is told nothing of what was
-// written since.
+// row: a decline, a pick, a put-aside and words alone are each the
+// operator's the card asks, as ActAnswerIdentityAsk says. answerMapping
+// asks it as it writes, and guard before it compares what the caller read,
+// so that a caller refused is told nothing of what was written since.
 func (w *wtx) mayAnswerMapping(ctx context.Context, row *beadRow, ask Ask, ans Answer, actor string) error {
-	if !ans.Decline && ans.Option == 0 {
-		return nil
-	}
 	id := ask.Identity
 	does := fmt.Sprintf("asks who %s in %s is of %s, the operator", id.Sender, id.Source, ask.To)
 	return w.may(ctx, actor, ActAnswerIdentityAsk, Object{

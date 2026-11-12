@@ -25,17 +25,27 @@ import (
 // what the ask takes (answerable), the weighty word (weighedRefusal), and
 // what the answer moves (stageAnswer). The unguarded calls are unchanged: a
 // newer pick still replaces an older one there.
+//
+// A guarded pick or decline on a mapping card names the held count its
+// caller read too: syncHeldCount rewrites the card's count in place, with
+// no new note, so the turn alone cannot say a delivery was held since,
+// and a pick would deliver, or a decline drop, what the rendering the
+// person answered did not count. A stale put-aside is harmless, the card
+// coming back current, so only the pick and the decline carry the count.
 
 // Turn is the ask's turn: how many answers it has taken.
 func (r ResolvedAsk) Turn() int { return len(r.Answers) }
 
 // answerExpect is what a guarded answer expects, checked in the answer's
 // write: the bead's revision (AddAnswerExpected), or the ask's turn when
-// turned. The zero value expects nothing, as the unguarded calls do.
+// turned, with the held count the caller read when heldSet, on a mapping
+// card. The zero value expects nothing, as the unguarded calls do.
 type answerExpect struct {
 	revision string
 	turn     int
 	turned   bool
+	held     int
+	heldSet  bool
 }
 
 // guards reports whether e expects anything.
@@ -49,8 +59,21 @@ func expectTurn(turn int) (answerExpect, error) {
 	return answerExpect{turn: turn, turned: true}, nil
 }
 
+// expectTurnHeld is the expectation of a pick or a decline drawn from the
+// mapping card read at turn, holding held deliveries.
+func expectTurnHeld(turn, held int) (answerExpect, error) {
+	if turn < 0 {
+		return answerExpect{}, fmt.Errorf("turn %d: an ask's turn counts its answers, from 0", turn)
+	}
+	if held < 0 {
+		return answerExpect{}, fmt.Errorf("held %d: a card's held count counts its waiting deliveries, from 0", held)
+	}
+	return answerExpect{turn: turn, turned: true, held: held, heldSet: true}, nil
+}
+
 // check refuses the answer to the ask r on the bead row when e no longer
-// holds.
+// holds. The held count is a mapping card's alone: any other ask takes
+// the pick or the decline whatever held it names.
 func (e answerExpect) check(row *beadRow, r *ResolvedAsk) error {
 	if e.revision != "" && row.Revision != e.revision {
 		return fmt.Errorf("%w: bead %s is at revision %s, not %s; read it again", ErrConflict, row.ID, row.Revision, e.revision)
@@ -58,6 +81,10 @@ func (e answerExpect) check(row *beadRow, r *ResolvedAsk) error {
 	if e.turned && r.Turn() != e.turn {
 		return fmt.Errorf("%w: ask %d on bead %s is at turn %d, not %d: it was answered, put aside, declined or taken back since; read it again",
 			ErrConflict, r.Note.Seq, row.ID, r.Turn(), e.turn)
+	}
+	if id := r.Ask.Identity; e.heldSet && id != nil && id.Held != e.held {
+		return fmt.Errorf("%w: ask %d on bead %s holds %d deliveries, not %d: one was held or released since; read it again",
+			ErrConflict, r.Note.Seq, row.ID, id.Held, e.held)
 	}
 	return nil
 }
@@ -115,9 +142,11 @@ func (w *wtx) guard(ctx context.Context, e answerExpect, row *beadRow, notes []N
 
 // AnswerAskExpected is AnswerAsk drawn from the ask at turn, the Turn its
 // caller read: refused with ErrConflict, and nothing written, when the ask
-// has taken another answer since.
-func (s *Store) AnswerAskExpected(ctx context.Context, id string, ask uint64, turn, option int, words, actor string, weighed bool) error {
-	expect, err := expectTurn(turn)
+// has taken another answer since. On a mapping card held is the Held its
+// caller read, and a card that holds another count is refused so too,
+// before anything it holds is delivered; on any other ask held is ignored.
+func (s *Store) AnswerAskExpected(ctx context.Context, id string, ask uint64, turn, option int, words, actor string, weighed bool, held int) error {
+	expect, err := expectTurnHeld(turn, held)
 	if err != nil {
 		return err
 	}
@@ -135,9 +164,10 @@ func (s *Store) DeferAskExpected(ctx context.Context, id string, ask uint64, tur
 }
 
 // DeclineAskExpected is DeclineAsk drawn from the ask at turn, refused as
-// AnswerAskExpected is.
-func (s *Store) DeclineAskExpected(ctx context.Context, id string, ask uint64, turn int, words, actor string) error {
-	expect, err := expectTurn(turn)
+// AnswerAskExpected is, with its held count on a mapping card: a card that
+// holds another count drops nothing.
+func (s *Store) DeclineAskExpected(ctx context.Context, id string, ask uint64, turn int, words, actor string, held int) error {
+	expect, err := expectTurnHeld(turn, held)
 	if err != nil {
 		return err
 	}

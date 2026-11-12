@@ -36,7 +36,8 @@ const ClientHeader = "X-Yardr-Client"
 // UserAsks or Bead. A new name, not a new argument of the old three: a yard
 // from before them answers a call of one as a method it does not have, and
 // the old three refuse a turn by name or a further argument in an array, so
-// no yard takes a guarded answer as an unguarded one.
+// no yard takes a guarded answer as an unguarded one. On a mapping card the
+// pick and the decline are guarded by the held count read too.
 var Calls = map[string][]string{
 	"Head":                 {},
 	"Settings":             {},
@@ -63,9 +64,9 @@ var Calls = map[string][]string{
 	"AnswerAsk":            {"bead", "ask", "option", "words", "actor", "weighed"},
 	"DeferAsk":             {"bead", "ask", "actor"},
 	"DeclineAsk":           {"bead", "ask", "words", "actor"},
-	"AnswerAskExpected":    {"bead", "ask", "turn", "option", "words", "actor", "weighed"},
+	"AnswerAskExpected":    {"bead", "ask", "turn", "option", "words", "actor", "weighed", "held"},
 	"DeferAskExpected":     {"bead", "ask", "turn", "actor"},
-	"DeclineAskExpected":   {"bead", "ask", "turn", "words", "actor"},
+	"DeclineAskExpected":   {"bead", "ask", "turn", "words", "actor", "held"},
 	"TakeBackAsk":          {"bead", "ask", "reason", "actor"},
 	"AddNote":              {"bead", "text", "actor", "files"},
 	"DeliveryFiles":        {"seq"},

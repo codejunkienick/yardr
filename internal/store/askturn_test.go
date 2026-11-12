@@ -93,7 +93,7 @@ func TestGuardedAnswerKeepsAnExternalAnswer(t *testing.T) {
 	if err := s.AnswerAsk(ctx, id, ask, 2, "external answer", "mckean", false); err != nil {
 		t.Fatal(err)
 	}
-	err = s.AnswerAskExpected(ctx, id, ask, read.Turn, 1, "", "mckean", false)
+	err = s.AnswerAskExpected(ctx, id, ask, read.Turn, 1, "", "mckean", false, 0)
 	if !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "at turn 1, not 0") {
 		t.Fatalf("the stale guarded pick = %v, want a conflict at turn 1", err)
 	}
@@ -147,13 +147,15 @@ func TestGuardedAnswerRefusesEveryStaleTurn(t *testing.T) {
 			return s.TakeBackAsk(ctx, id, seq, "asked no more", "yardmaster")
 		},
 		"a guarded pick": func(id string, seq uint64) error {
-			return s.AnswerAskExpected(ctx, id, seq, 0, 2, "", "mckean", false)
+			return s.AnswerAskExpected(ctx, id, seq, 0, 2, "", "mckean", false, 0)
 		},
 	}
 	guarded := map[string]func(id string, seq uint64) error{
-		"pick":    func(id string, seq uint64) error { return s.AnswerAskExpected(ctx, id, seq, 0, 1, "", "mckean", false) },
+		"pick": func(id string, seq uint64) error {
+			return s.AnswerAskExpected(ctx, id, seq, 0, 1, "", "mckean", false, 0)
+		},
 		"defer":   func(id string, seq uint64) error { return s.DeferAskExpected(ctx, id, seq, 0, "mckean") },
-		"decline": func(id string, seq uint64) error { return s.DeclineAskExpected(ctx, id, seq, 0, "stale", "mckean") },
+		"decline": func(id string, seq uint64) error { return s.DeclineAskExpected(ctx, id, seq, 0, "stale", "mckean", 0) },
 	}
 	for ename, ext := range external {
 		for gname, call := range guarded {
@@ -182,10 +184,14 @@ func TestGuardedAnswerRace(t *testing.T) {
 	t.Parallel()
 	s, ctx := stageAskYard(t, stageAskChoice)
 	calls := []func(id string, seq uint64) error{
-		func(id string, seq uint64) error { return s.AnswerAskExpected(ctx, id, seq, 0, 1, "", "mckean", false) },
-		func(id string, seq uint64) error { return s.AnswerAskExpected(ctx, id, seq, 0, 2, "", "jo", false) },
+		func(id string, seq uint64) error {
+			return s.AnswerAskExpected(ctx, id, seq, 0, 1, "", "mckean", false, 0)
+		},
+		func(id string, seq uint64) error { return s.AnswerAskExpected(ctx, id, seq, 0, 2, "", "jo", false, 0) },
 		func(id string, seq uint64) error { return s.DeferAskExpected(ctx, id, seq, 0, "mckean") },
-		func(id string, seq uint64) error { return s.DeclineAskExpected(ctx, id, seq, 0, "not mine", "mckean") },
+		func(id string, seq uint64) error {
+			return s.DeclineAskExpected(ctx, id, seq, 0, "not mine", "mckean", 0)
+		},
 	}
 	for i := range calls {
 		for j := range calls {
@@ -232,19 +238,19 @@ func TestGuardedAnswerTurns(t *testing.T) {
 	id, seqs := turnBead(t, s, ctx, "Move this yard's links now?", "Close sketch PR #3?", "Send them to build?")
 	pick, aside, decline := seqs[0], seqs[1], seqs[2]
 
-	if err := s.AnswerAskExpected(ctx, id, pick, 0, 2, "after friday", "mckean", false); err != nil {
+	if err := s.AnswerAskExpected(ctx, id, pick, 0, 2, "after friday", "mckean", false, 0); err != nil {
 		t.Fatal(err)
 	}
 	// The reply was lost: the client sends it again, and the retry is
 	// refused, so the pick is written once.
-	if err := s.AnswerAskExpected(ctx, id, pick, 0, 2, "after friday", "mckean", false); !errors.Is(err, store.ErrConflict) {
+	if err := s.AnswerAskExpected(ctx, id, pick, 0, 2, "after friday", "mckean", false, 0); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("the retried pick = %v, want a conflict", err)
 	}
 	if n := answersOn(t, s, ctx, id, pick); n != 1 {
 		t.Fatalf("answer notes after the retry = %d, want 1", n)
 	}
 	read := beadAsk(t, s, ctx, id, pick)
-	if err := s.AnswerAskExpected(ctx, id, pick, read.Turn, 1, "", "mckean", false); err != nil {
+	if err := s.AnswerAskExpected(ctx, id, pick, read.Turn, 1, "", "mckean", false, 0); err != nil {
 		t.Fatalf("a pick drawn from the answered card = %v", err)
 	}
 	if got := beadAsk(t, s, ctx, id, pick); got.Option != 1 || got.PicksBefore != 1 || got.Turn != 2 {
@@ -280,14 +286,14 @@ func TestGuardedAnswerTurns(t *testing.T) {
 	if turns[aside] != 1 || turns[decline] != 0 || turns[pick] != 102 {
 		t.Fatalf("the queue's turns (decided +100) = %v, want aside open at 1, decline open at 0, pick decided at 2", turns)
 	}
-	if err := s.AnswerAskExpected(ctx, id, aside, 0, 1, "", "mckean", false); !errors.Is(err, store.ErrConflict) {
+	if err := s.AnswerAskExpected(ctx, id, aside, 0, 1, "", "mckean", false, 0); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("a pick drawn from before the put-aside = %v, want a conflict", err)
 	}
-	if err := s.AnswerAskExpected(ctx, id, aside, 1, 1, "", "mckean", false); err != nil {
+	if err := s.AnswerAskExpected(ctx, id, aside, 1, 1, "", "mckean", false, 0); err != nil {
 		t.Fatalf("a pick drawn from the card come back = %v", err)
 	}
 
-	if err := s.DeclineAskExpected(ctx, id, decline, 0, "not mine", "mckean"); err != nil {
+	if err := s.DeclineAskExpected(ctx, id, decline, 0, "not mine", "mckean", 0); err != nil {
 		t.Fatal(err)
 	}
 	if got := beadAsk(t, s, ctx, id, decline); got.State != "declined" || got.Words != "not mine" || got.Turn != 1 {
@@ -332,26 +338,26 @@ func TestGuardedAnswerKeepsTheRules(t *testing.T) {
 		call func() error
 		want string
 	}{
-		{"another user's pick", func() error { return s.AnswerAskExpected(ctx, id, ask, 0, 1, "", "ada", false) }, "mckean"},
+		{"another user's pick", func() error { return s.AnswerAskExpected(ctx, id, ask, 0, 1, "", "ada", false, 0) }, "mckean"},
 		{"another user's put-aside", func() error { return s.DeferAskExpected(ctx, id, ask, 0, "ada") }, "mckean"},
-		{"another user's decline", func() error { return s.DeclineAskExpected(ctx, id, ask, 0, "no", "ada") }, "mckean"},
-		{"words alone on options", func() error { return s.AnswerAskExpected(ctx, id, ask, 0, 0, "a thought", "mckean", false) }, "leave the ask open"},
-		{"an option it has not", func() error { return s.AnswerAskExpected(ctx, id, ask, 0, 9, "", "mckean", false) }, "has options 1..3"},
-		{"a decline without words", func() error { return s.DeclineAskExpected(ctx, id, ask, 0, "", "mckean") }, "needs words"},
-		{"an ask taken back, at its turn", func() error { return s.AnswerAskExpected(ctx, id, back, 1, 1, "", "mckean", false) }, "asked no more"},
-		{"no such ask", func() error { return s.AnswerAskExpected(ctx, id, 999999, 0, 1, "", "mckean", false) }, "has no ask"},
+		{"another user's decline", func() error { return s.DeclineAskExpected(ctx, id, ask, 0, "no", "ada", 0) }, "mckean"},
+		{"words alone on options", func() error { return s.AnswerAskExpected(ctx, id, ask, 0, 0, "a thought", "mckean", false, 0) }, "leave the ask open"},
+		{"an option it has not", func() error { return s.AnswerAskExpected(ctx, id, ask, 0, 9, "", "mckean", false, 0) }, "has options 1..3"},
+		{"a decline without words", func() error { return s.DeclineAskExpected(ctx, id, ask, 0, "", "mckean", 0) }, "needs words"},
+		{"an ask taken back, at its turn", func() error { return s.AnswerAskExpected(ctx, id, back, 1, 1, "", "mckean", false, 0) }, "asked no more"},
+		{"no such ask", func() error { return s.AnswerAskExpected(ctx, id, 999999, 0, 1, "", "mckean", false, 0) }, "has no ask"},
 		{"another yard's bead", func() error {
-			return s.AnswerAskExpected(ctx, "yd-ledger@north", 9, 0, 1, "", "mckean", false)
+			return s.AnswerAskExpected(ctx, "yd-ledger@north", 9, 0, 1, "", "mckean", false, 0)
 		}, "another yard's bead"},
 		{"a negative turn", func() error { return s.DeferAskExpected(ctx, id, ask, -1, "mckean") }, "from 0"},
-		{"another user's stale pick", func() error { return s.AnswerAskExpected(ctx, id, moved, 0, 1, "", "ada", false) }, "mckean"},
+		{"another user's stale pick", func() error { return s.AnswerAskExpected(ctx, id, moved, 0, 1, "", "ada", false, 0) }, "mckean"},
 		{"another user's stale put-aside", func() error { return s.DeferAskExpected(ctx, id, moved, 0, "ada") }, "mckean"},
-		{"another user's stale decline", func() error { return s.DeclineAskExpected(ctx, id, moved, 0, "no", "ada") }, "mckean"},
+		{"another user's stale decline", func() error { return s.DeclineAskExpected(ctx, id, moved, 0, "no", "ada", 0) }, "mckean"},
 		{"another user's stale revision", func() error {
 			return s.AddAnswerExpected(ctx, id, store.Answer{Ask: moved, Option: 1}, "ada", "01STALE")
 		}, "mckean"},
-		{"a stale pick by the operator a policy turns away", func() error { return s.AnswerAskExpected(ctx, id, moved, 0, 1, "", "jo", false) }, "turns jo away"},
-		{"a stale pick on a bead hidden from the caller", func() error { return s.AnswerAskExpected(ctx, id, moved, 0, 1, "", "kim", false) }, "not found"},
+		{"a stale pick by the operator a policy turns away", func() error { return s.AnswerAskExpected(ctx, id, moved, 0, 1, "", "jo", false, 0) }, "turns jo away"},
+		{"a stale pick on a bead hidden from the caller", func() error { return s.AnswerAskExpected(ctx, id, moved, 0, 1, "", "kim", false, 0) }, "not found"},
 		{"a stale revision on a bead hidden from the caller", func() error {
 			return s.AddAnswerExpected(ctx, id, store.Answer{Ask: moved, Option: 1}, "kim", "01STALE")
 		}, "not found"},
@@ -378,11 +384,11 @@ func TestGuardedAnswerKeepsTheRules(t *testing.T) {
 	// The addressee is told the same reads are stale, and one drawn from
 	// before the ask was taken back is a conflict, not what it is refused for.
 	for name, call := range map[string]func() error{
-		"a stale pick": func() error { return s.AnswerAskExpected(ctx, id, moved, 0, 1, "", "mckean", false) },
+		"a stale pick": func() error { return s.AnswerAskExpected(ctx, id, moved, 0, 1, "", "mckean", false, 0) },
 		"a stale revision": func() error {
 			return s.AddAnswerExpected(ctx, id, store.Answer{Ask: moved, Option: 1}, "mckean", "01STALE")
 		},
-		"a pick from before the ask was taken back": func() error { return s.AnswerAskExpected(ctx, id, back, 0, 1, "", "mckean", false) },
+		"a pick from before the ask was taken back": func() error { return s.AnswerAskExpected(ctx, id, back, 0, 1, "", "mckean", false, 0) },
 	} {
 		if err := call(); !errors.Is(err, store.ErrConflict) {
 			t.Errorf("%s by the addressee = %v, want a conflict", name, err)
@@ -423,14 +429,14 @@ func TestGuardedAnswerOnAStageAsk(t *testing.T) {
 	if err := s.DeferAsk(ctx, b.ID, mckean.Ask, "ada"); err != nil {
 		t.Fatal(err)
 	}
-	err = s.AnswerAskExpected(ctx, b.ID, mckean.Ask, mckean.Turn, 1, "", "kim", false)
+	err = s.AnswerAskExpected(ctx, b.ID, mckean.Ask, mckean.Turn, 1, "", "kim", false, 0)
 	if err == nil || errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "only members of group reviewers") || strings.Contains(err.Error(), "at turn") {
 		t.Fatalf("kim, no member, from a stale read = %v, want the group's refusal and no turn", err)
 	}
-	if err := s.AnswerAskExpected(ctx, b.ID, mckean.Ask, mckean.Turn, 1, "", "mckean", false); !errors.Is(err, store.ErrConflict) {
+	if err := s.AnswerAskExpected(ctx, b.ID, mckean.Ask, mckean.Turn, 1, "", "mckean", false, 0); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("mckean from the same stale read = %v, want a conflict", err)
 	}
-	if err := s.AnswerAskExpected(ctx, b.ID, ada.Ask, ada.Turn, 2, "", "ada", false); err != nil {
+	if err := s.AnswerAskExpected(ctx, b.ID, ada.Ask, ada.Turn, 2, "", "ada", false, 0); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := s.GetBead(ctx, b.ID); err != nil || got.Stage != "new" {
@@ -438,10 +444,10 @@ func TestGuardedAnswerOnAStageAsk(t *testing.T) {
 	}
 	// mckean's card went with the stay: taken back by the yard, its turn
 	// moved, and the pick drawn from the read before is refused.
-	if err := s.AnswerAskExpected(ctx, b.ID, ada.Ask, 0, 1, "", "ada", false); !errors.Is(err, store.ErrConflict) {
+	if err := s.AnswerAskExpected(ctx, b.ID, ada.Ask, 0, 1, "", "ada", false, 0); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("ada's second pick from the same read = %v, want a conflict", err)
 	}
-	if err := s.AnswerAskExpected(ctx, b.ID, mckean.Ask, mckean.Turn, 1, "", "mckean", false); !errors.Is(err, store.ErrConflict) {
+	if err := s.AnswerAskExpected(ctx, b.ID, mckean.Ask, mckean.Turn, 1, "", "mckean", false, 0); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("mckean's pick from before the move = %v, want a conflict", err)
 	}
 	if got, err := s.GetBead(ctx, b.ID); err != nil || got.Stage != "new" {

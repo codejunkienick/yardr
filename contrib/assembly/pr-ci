@@ -348,9 +348,9 @@ short() { printf '%s' "$1" | cut -c1-7; }
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 # live_head prints the head GitHub says the pull request has now, and nothing
 # when it cannot say (the error is left in $errf).
-live_head() { gh_ pr view "$url" --json number,state,headRefOid 2>"$errf" | jq -r '.headRefOid // empty'; }
+live_head() { gh_ pr view "$url" --json number,state,headRefOid,baseRefName 2>"$errf" | jq -r '.headRefOid // empty'; }
 
-pr=$(gh_ pr view "$url" --json number,state,headRefOid 2>"$errf") ||
+pr=$(gh_ pr view "$url" --json number,state,headRefOid,baseRefName 2>"$errf") ||
   hold "reading pull request $url failed: $(head -c 500 "$errf")"
 state=$(printf '%s' "$pr" | jq -r '.state // empty')
 head=$(printf '%s' "$pr" | jq -r '.headRefOid // empty')
@@ -405,6 +405,15 @@ rereview="Send it back to be read: yardr bead advance $BEAD --to review, then ya
 [ "$(lower "$reviewed")" = "$(lower "$head")" ] ||
   hold "head $head is not the reviewed $reviewed: needs re-review. Nothing of $url was fetched or run. $rereview"
 
+# A pull request that is not for the depot's base needs a maintainer to
+# decide what becomes of it. Do this before spending ci-ok or fetching code:
+# no run starts for a target the yard cannot judge.
+bbranch=${BASE#origin/}
+target=$(printf '%s' "$pr" | jq -r '.baseRefName // empty')
+[ -n "$target" ] || hold "GitHub gave no target branch for $url; not running the tests."
+[ "$target" = "$bbranch" ] ||
+  hold "pull request $url targets branch $target, not the depot's base $bbranch: a maintainer decides what becomes of it. No merge was attempted and nothing ran."
+
 # A bead sent back by a maintainer's hand carries ci-ok, the pick that let it
 # move from contributor to ciwait: the run spends it now that it starts, so a
 # fresh pick takes a fresh run. A bead the reviewer's report sent has none.
@@ -442,7 +451,6 @@ fi
 # any other fetch in the depot overwrites (merge-local's, say), is not trusted
 # to say which it was. --refmap= leaves out the remote-tracking branch the fetch
 # would move, so that no ref of the depot does.
-bbranch=${BASE#origin/}
 asked=$(origin_git ls-remote origin "refs/heads/$bbranch" 2>"$errf") ||
   hold "asking origin in $REPO for its branch $bbranch, which the depot's base $BASE names, failed: $(head -c 500 "$errf"). Not running anything."
 basesha=$(printf '%s\n' "$asked" | awk -v ref="refs/heads/$bbranch" '$2 == ref { print $1; exit }')
@@ -624,6 +632,11 @@ runtest() {
     # The landing run's switch is set here, never inherited: a depot's command
     # reads an empty one as no landing, and this run is the pull request's.
     export YARDR_LANDING=1
+    # The base the head was merged into, as the commit that was fetched, so the
+    # test command selects exactly the pull request's change: the base's name,
+    # which the run otherwise inherits, resolves in the checkout to the depot's
+    # own ref, which lags what was fetched.
+    export YARDR_BASE="$basesha"
     # The tests of a pull request have no use for the App's id and key file,
     # which are for the token alone.
     unset GITHUB_APP_ID GITHUB_APP_PRIVATE_KEY_FILE
@@ -833,15 +846,22 @@ ${fails:+$fails
 }$out" ;;
 esac
 
-# Green. It counts for the head the tests ran on and no other: a pull request
-# pushed to during the run has a head they said nothing of. GitHub is asked once
-# more, and only the same head is recorded; the base is not asked again, as
-# GitHub asks nothing again of a pull request between its checks and its merge.
-now=$(live_head)
-[ -n "$now" ] ||
-  hold "the tests passed on $url at $tested ($WHAT), but GitHub would not say what its head is now: $(head -c 500 "$errf"). Nothing was recorded; unhold to run them again."
-[ "$(lower "$now")" = "$(lower "$head")" ] ||
-  report changes "the PR changed while CI ran: the tests passed on $tested ($WHAT), but the head is $(short "$now") now. Nothing was recorded; the next commits bring it back to review."
+# Green. It counts for the head and target the tests ran on and no other: a
+# pull request pushed to or retargeted during the run has a head or target they
+# said nothing of. GitHub is asked once more, and only the same head at the
+# depot's base is recorded.
+now=$(gh_ pr view "$url" --json number,state,headRefOid,baseRefName 2>"$errf") ||
+  hold "the tests passed on $url at $tested ($WHAT), but GitHub would not say what its head and target are now: $(head -c 500 "$errf"). Nothing was recorded; unhold to run them again."
+now_head=$(printf '%s' "$now" | jq -r '.headRefOid // empty')
+now_target=$(printf '%s' "$now" | jq -r '.baseRefName // empty')
+[ -n "$now_head" ] ||
+  hold "the tests passed on $url at $tested ($WHAT), but GitHub gave no head now: $(head -c 500 "$errf"). Nothing was recorded; unhold to run them again."
+[ "$(lower "$now_head")" = "$(lower "$head")" ] ||
+  report changes "the PR changed while CI ran: the tests passed on $tested ($WHAT), but the head is $(short "$now_head") now. Nothing was recorded; the next commits bring it back to review."
+[ -n "$now_target" ] ||
+  hold "the tests passed on $url at $tested ($WHAT), but GitHub gave no target branch now. Nothing was recorded; unhold to run them again."
+[ "$now_target" = "$bbranch" ] ||
+  hold "the tests passed on $url at $tested ($WHAT), but the pull request now targets branch $now_target, not the depot's base $bbranch: a maintainer decides. The tests ran against the depot's base; nothing was recorded."
 "$Y" bead update "$BEAD" --meta "ci_head=$head" >"$errf" 2>&1 ||
   hold "the tests passed on $url at $tested ($WHAT), but ci_head could not be recorded on $BEAD: $(head -c 500 "$errf"). Unhold to run them again."
 # The gate's own last line, when that is what the run ended with, is the record

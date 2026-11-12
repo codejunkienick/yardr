@@ -101,10 +101,11 @@ func stageOf(t *testing.T, s store.API, ctx context.Context, id string) string {
 // goes straight to approved.
 func TestDoneSafeRefusedOnASecurityPath(t *testing.T) {
 	t.Parallel()
-	s, ctx, dir := securityRepo(t, "# what the second review may not be skipped for\n\ninternal/store/**\ngo.mod\n")
+	s, ctx, dir := securityRepo(t, "# what the second review may not be skipped for\n\ninternal/store/**\npacks/*/*.yaml\ngo.mod\n")
 	reviewed(t, s, ctx, dir, "web-a", "main", touching(t, "internal/store/new.go", "docs/b.md"))
 	reviewed(t, s, ctx, dir, "web-m", "main", touching(t, "go.mod"))
-	reviewed(t, s, ctx, dir, "web-d", "main", touching(t, "docs/b.md", "internal/other.go"))
+	reviewed(t, s, ctx, dir, "web-p", "main", touching(t, "packs/github/github.yaml"))
+	reviewed(t, s, ctx, dir, "web-d", "main", touching(t, "docs/b.md", "internal/other.go", "packs/starter/SETUP.md"))
 
 	_, err := s.Done(ctx, "web-a", store.DoneSafe, "", store.Expect{}, "me")
 	if err == nil {
@@ -128,6 +129,9 @@ func TestDoneSafeRefusedOnASecurityPath(t *testing.T) {
 
 	if _, err := s.Done(ctx, "web-m", store.DoneSafe, "", store.Expect{}, "me"); err == nil || !strings.Contains(err.Error(), "go.mod") {
 		t.Fatalf("done-safe on go.mod: %v", err)
+	}
+	if _, err := s.Done(ctx, "web-p", store.DoneSafe, "", store.Expect{}, "me"); err == nil || !strings.Contains(err.Error(), "packs/github/github.yaml") {
+		t.Fatalf("done-safe on a pack declaration: %v", err)
 	}
 	if b, err := s.Done(ctx, "web-d", store.DoneSafe, "", store.Expect{}, "me"); err != nil || b.Stage != "approved" {
 		t.Fatalf("done-safe on a diff that touches no security path: %+v, %v", b, err)
@@ -385,7 +389,7 @@ func TestYardrsOwnSecurityPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"internal/store/**", "internal/rpc/**", "internal/web/**", "internal/hooks/**", "internal/peer/**",
-		"internal/pairing/**", "internal/source*/**", "internal/yards/**", "go.mod", "go.sum", ".yardr/**", "contrib/assembly/**"} {
+		"internal/pairing/**", "internal/source*/**", "internal/yards/**", "packs/*/*.yaml", "go.mod", "go.sum", ".yardr/**", "contrib/assembly/**"} {
 		if !slices.Contains(got, ":(glob)"+want) {
 			t.Errorf("%s lacks %s", store.SecurityPathsFile, want)
 		}

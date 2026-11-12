@@ -742,7 +742,7 @@ var apiCalls = []apiCall{
 	},
 	{
 		method: "AnswerAskExpected",
-		says:   "`AnswerAsk` guarded by the ask's turn: it picks or answers with words as `AnswerAsk` does, only while the ask is at the turn the client read. " + guardIntro + " A pick drawn from an answered ask at its turn replaces the pick, as the person chose having seen it; the examples are a first pick at turn 0 and a changed pick at turn 1. It answers nothing; the answer is then a `noted` event in the stream.",
+		says:   "`AnswerAsk` guarded by the ask's turn: it picks or answers with words as `AnswerAsk` does, only while the ask is at the turn the client read. " + guardIntro + " On a mapping ask (an ask of `Bead` with `identity`) it also names the count of held deliveries the client read: a card that holds another count is refused with the code `conflict` so too, before the pick delivers anything it holds, and the client reads the card again. A pick drawn from an answered ask at its turn replaces the pick, as the person chose having seen it; the examples are a first pick at turn 0 and a changed pick at turn 1. It answers nothing; the answer is then a `noted` event in the stream.",
 		args: []field{
 			{"bead", "string", "the bead"},
 			{"ask", "number", "the ask note's seq"},
@@ -751,6 +751,7 @@ var apiCalls = []apiCall{
 			{"words", "string", "as `AnswerAsk`'s"},
 			{"actor", "string", "who answers: the user's name"},
 			{"weighed", "bool", "as `AnswerAsk`'s"},
+			{"held", "number", "on a mapping ask, the count of held deliveries the client read (`held` of the ask's `identity`); a card that holds another count is refused with `conflict`, before anything it holds is delivered or dropped. Ignored on any other ask; left out, `0`"},
 		},
 		requests: []string{`{"bead":"yd-greet","ask":%d,"turn":0,"option":1,"words":"Monday it is","actor":"jo"}`,
 			`{"bead":"yd-greet","ask":%d,"turn":1,"option":2,"actor":"jo"}`},
@@ -768,13 +769,14 @@ var apiCalls = []apiCall{
 	},
 	{
 		method: "DeclineAskExpected",
-		says:   "`DeclineAsk` guarded by the ask's turn: it declines the ask as `DeclineAsk` does, only while the ask is at the turn the client read. " + guardIntro + " It answers nothing; declining is then a `noted` event in the stream.",
+		says:   "`DeclineAsk` guarded by the ask's turn: it declines the ask as `DeclineAsk` does, only while the ask is at the turn the client read. " + guardIntro + " On a mapping ask (an ask of `Bead` with `identity`) it also names the count of held deliveries the client read: a card that holds another count is refused with the code `conflict` so too, before the decline drops anything it holds, and the client reads the card again. It answers nothing; declining is then a `noted` event in the stream.",
 		args: []field{
 			{"bead", "string", "the bead"},
 			{"ask", "number", "the ask note's seq"},
 			{"turn", "number", "the ask's `turn` as the client read it; left out, `0`: an ask nobody has written on"},
 			{"words", "string", "why they will not decide it"},
 			{"actor", "string", "who declines: the user's name"},
+			{"held", "number", "on a mapping ask, the count of held deliveries the client read (`held` of the ask's `identity`); a card that holds another count is refused with `conflict`, before anything it holds is dropped. Ignored on any other ask; left out, `0`"},
 		},
 		requests: []string{`{"bead":"yd-greet","ask":%d,"turn":0,"words":"the desk is taken","actor":"jo"}`},
 	},

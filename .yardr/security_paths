@@ -21,6 +21,9 @@ internal/pairing/**
 internal/yards/**
 # Declared sources: where a credential is sent, and what a call may do.
 internal/source*/**
+# Declared sources' calls live in the packs, beside their manifests: what a
+# call may do, where a credential is sent, and what a pack brings.
+packs/*/*.yaml
 # New dependencies.
 go.mod
 go.sum

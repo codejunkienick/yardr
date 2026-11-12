@@ -92,10 +92,11 @@ type API interface {
 	DeclineAsk(ctx context.Context, id string, ask uint64, words, actor string) error
 	// AnswerAskExpected, DeferAskExpected and DeclineAskExpected are the
 	// three guarded by the ask's turn as the caller read it, checked in the
-	// same write as the answer (askturn.go).
-	AnswerAskExpected(ctx context.Context, id string, ask uint64, turn, option int, words, actor string, weighed bool) error
+	// same write as the answer (askturn.go). The pick and the decline
+	// carry the mapping card's held count as read too.
+	AnswerAskExpected(ctx context.Context, id string, ask uint64, turn, option int, words, actor string, weighed bool, held int) error
 	DeferAskExpected(ctx context.Context, id string, ask uint64, turn int, actor string) error
-	DeclineAskExpected(ctx context.Context, id string, ask uint64, turn int, words, actor string) error
+	DeclineAskExpected(ctx context.Context, id string, ask uint64, turn int, words, actor string, held int) error
 	TakeBackAsk(ctx context.Context, id string, ask uint64, reason, actor string) error
 	GiveSecret(ctx context.Context, id string, ask uint64, values map[string]string, actor string, weighed bool) (*SourceKeyed, error)
 	LoginWait(ctx context.Context, id, group string) (string, error)

@@ -45,10 +45,11 @@ import (
 // the files of $FAKE_GH tell it: ci-signals (end itself by SIGTERM that many
 // times), ci-sleep (sleep, in a child whose pid it writes to sleep-pid), during
 // (the commit the pull request's head moves to while it runs) and ci-exit (exit
-// with that status). A tree with a file RED is red, and so is one that lacks a
-// file that needs lists: a stand-in for a rule of the base that a head which
-// predates it breaks.
-const baseCI = `echo "ci.sh of the base: in $(pwd), at $(git rev-parse HEAD), landing=${YARDR_LANDING-unset}, app=${GITHUB_APP_ID-unset}"
+// with that status), during-base (the target branch the pull request changes
+// to while the tests run). A tree with a file RED is red, and so is one that
+// lacks a file that needs lists: a stand-in for a rule of the base that a head
+// which predates it breaks.
+const baseCI = `echo "ci.sh of the base: in $(pwd), at $(git rev-parse HEAD), landing=${YARDR_LANDING-unset}, app=${GITHUB_APP_ID-unset}, base=${YARDR_BASE-unset}"
 echo "ci.sh of the base: parents $(git rev-list --parents -n 1 HEAD | cut -d' ' -f2-)"
 d=$FAKE_GH
 if [ -s "$d/ci-signals" ]; then
@@ -63,6 +64,7 @@ if [ -e "$d/signal-parent" ]; then
 fi
 if [ -e "$d/ci-sleep" ]; then sh -c 'sleep 300 & echo $! >"$1"; wait' sh "$d/sleep-pid"; fi
 [ ! -e "$d/during" ] || cp "$d/during" "$d/head"
+[ ! -e "$d/during-base" ] || cp "$d/during-base" "$d/base-ref"
 [ ! -e "$d/ci-exit" ] || exit "$(cat "$d/ci-exit")"
 test ! -e RED || { echo "RED is in the tree"; exit 1; }
 if [ -e "$d/needs" ]; then
@@ -223,7 +225,7 @@ func (c *ciYard) ci(id string, o mergeOpts, files map[string]string) {
 
 func (c *ciYard) ciGroup(id, group string, o mergeOpts, files map[string]string) {
 	c.t.Helper()
-	for _, name := range []string{"ci-signals", "ci-sleep", "sleep-pid", "ci-exit", "during", "ended", "signal-parent", "needs"} {
+	for _, name := range []string{"ci-signals", "ci-sleep", "sleep-pid", "ci-exit", "during", "during-base", "ended", "signal-parent", "needs"} {
 		if err := os.Remove(filepath.Join(c.gh, name)); err != nil && !os.IsNotExist(err) {
 			c.t.Fatal(err)
 		}
@@ -286,13 +288,15 @@ func (c *ciYard) checkoutGone(id, what string) {
 // the base as origin has it now, in a checkout of its own: the base's copy of
 // the script, however the pull request edited it, taken from the base that was
 // fetched and not from the depot's own main, which may lag it, with
-// YARDR_LANDING=1 and without the App's inputs. It records the head it passed
-// on as ci_head and reports done. A bead its maintainer sent back by hand
-// carries ci-ok, which the run spends when it starts, past the head checks.
-// A pull request that is only behind the base is
+// YARDR_LANDING=1, YARDR_BASE naming the base commit it was merged into, and
+// without the App's inputs. It records the head it passed on as ci_head and
+// reports done. A bead its maintainer sent back by hand carries ci-ok, which
+// the run spends when it starts, past the head checks. A pull request that is
+// only behind the base is
 // done when its merge is green, as the head alone, which lacks what the base
 // has gained, would not be; one that conflicts with the base is changes, naming
-// the cure, and nothing runs. A red run, one past its deadline and a head that
+// the cure, and nothing runs. One that targets another branch than the base is
+// held for a maintainer to decide, with no merge attempted. A red run, one past its deadline and a head that
 // moved while it ran report changes, with the end of the output where there is
 // one; a run that cannot run holds the bead, as one that a signal ended twice
 // does, and one ended once is run again. Whichever it is, the checkout is gone
@@ -354,6 +358,15 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 		{what: "a head that conflicts with the base", files: map[string]string{"a.txt": "the pull request's line\n"}, main: map[string]string{"a.txt": "main's line\n"}, stage: "contributor", norun: true,
 			wants: []string{"the head {short} of {url} does not merge into main at {bshort}", "nothing was run", "merge main into the pull request's branch", "CONFLICT (content): Merge conflict in a.txt"},
 			not:   []string{"the tests failed"}},
+		// A pull request that targets another branch than the depot's base is
+		// held for a maintainer to decide, with no merge attempted and nothing
+		// run: what would run is the target branch's copy of the test command.
+		{what: "a pull request that targets another branch", files: map[string]string{"feature.txt": "new\n"}, stand: map[string]string{"base-ref": "release"}, stage: "ciwait", hold: true, norun: true,
+			wants: []string{"pull request {url} targets branch release, not the depot's base main", "a maintainer decides", "No merge was attempted and nothing ran"},
+			not:   []string{"merge main", "the tests failed", "the tests passed"}},
+		{what: "a pull request retargeted while the tests ran", stand: map[string]string{"during-base": "release"}, stage: "ciwait", hold: true,
+			wants: []string{"the pull request now targets branch release, not the depot's base main", "a maintainer decides", "The tests ran against the depot's base; nothing was recorded"},
+			not:   []string{"nothing ran"}},
 		// A pull request a maintainer accepted is tested at the commit they
 		// accepted, however the letters of the record are cased, and records that
 		// commit as it does any other.
@@ -477,13 +490,14 @@ func TestPRCIJudgesTheHead(t *testing.T) {
 				switch tc.what {
 				case "green":
 					// The depot has the commit now, and the test ran on its merge into
-					// the base, in a checkout of its own, with the landing's switch set
-					// and the App's inputs left out of its environment. TestMain leaves
-					// no YARDR_ variable in this process, so the switch is pr-ci's own.
+					// the base, in a checkout of its own, with the landing's switch set,
+					// the base's commit as what the run selects against, and the App's
+					// inputs left out of its environment. TestMain leaves no YARDR_
+					// variable in this process, so the switch and the base are pr-ci's own.
 					c.git(c.repo, "cat-file", "-e", sha+"^{commit}")
-					ran := regexp.MustCompile("ci.sh of the base: in " + regexp.QuoteMeta(filepath.Join(c.home, "worktrees", "r", id+"-ci")) + ", at ([0-9a-f]{40}), landing=1, app=unset").FindStringSubmatch(c.log)
+					ran := regexp.MustCompile("ci.sh of the base: in " + regexp.QuoteMeta(filepath.Join(c.home, "worktrees", "r", id+"-ci")) + ", at ([0-9a-f]{40}), landing=1, app=unset, base=" + base).FindStringSubmatch(c.log)
 					if ran == nil {
-						t.Fatalf("green: the log lacks where the tests ran, with the landing's switch set and no App inputs:\n%s", c.log)
+						t.Fatalf("green: the log lacks where the tests ran, with the landing's switch set, the base's commit and no App inputs:\n%s", c.log)
 					}
 					// The note quotes the gate's last line, which names the commit it
 					// ran on: the merge, which no ref of the depot holds.
@@ -712,6 +726,10 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 			wants: []string{"which is not a pull request address", "not running the tests"}},
 		{what: "a pull request that is closed", stand: map[string]string{"state": "CLOSED"}, asked: true,
 			wants: []string{"is in state CLOSED, not OPEN", "Not running anything"}},
+		// An off-base target is known from GitHub's pull request view. It
+		// holds before the run starts, so a maintainer's ci-ok pick remains.
+		{what: "a pull request that targets another branch", stand: map[string]string{"base-ref": "release"}, blessed: true, asked: true, unfetched: true,
+			wants: []string{"targets branch release, not the depot's base main", "a maintainer decides", "No merge was attempted and nothing ran"}},
 		{what: "a pull request gh cannot read", stand: map[string]string{"view-fail": "HTTP 404: Not Found"}, asked: true,
 			wants: []string{"failed: HTTP 404: Not Found"}},
 		{what: "a head that is no commit sha", head: "../../etc", asked: true,
@@ -775,6 +793,9 @@ func TestPRCIHoldsWhatItCannotJudge(t *testing.T) {
 			c.envFile, c.opts = envFile, opts
 
 			c.has(id, tc.what, stage, true)
+			if strings.Contains(c.log, "ci.sh of the base: in ") {
+				t.Errorf("%s: a pre-run hold started the test command:\n%s", tc.what, c.log)
+			}
 			for _, want := range tc.wants {
 				c.noted(id, tc.what, fill.Replace(want))
 			}

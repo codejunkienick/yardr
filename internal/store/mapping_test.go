@@ -178,7 +178,9 @@ func mapBehindTheCards(t *testing.T, y *askYard, user, source string, id Identit
 // closes the card's bead with what was written, and the sender offers
 // no second card, by then or once mapped. A guarded pick from a read of the
 // card gone stale is refused for one who is not the operator as it is at the
-// card's own turn, and says nothing of the turn.
+// card's own turn, and says nothing of the turn, as a put-aside and words
+// alone are, fresh or stale: every answer on the card meets the operator's
+// rule.
 func TestClaimIdentityPickWritesIdentity(t *testing.T) {
 	t.Parallel()
 	y := mappingYard(t)
@@ -214,13 +216,21 @@ func TestClaimIdentityPickWritesIdentity(t *testing.T) {
 	if err := y.AnswerAsk(y.ctx, open.Bead, open.Ask, pick, "", "ada", false); err == nil {
 		t.Fatal("ada picked who a sender is")
 	}
+	// A put-aside is the operator's too: anyone else's is refused, guarded
+	// or not, and not as a conflict.
+	if err := y.DeferAsk(y.ctx, open.Bead, open.Ask, "ada"); err == nil {
+		t.Fatal("ada put a mapping card aside")
+	}
+	if err := y.DeferAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, "ada"); err == nil || errors.Is(err, ErrConflict) {
+		t.Fatalf("ada's guarded put-aside of a mapping card = %v", err)
+	}
 	wantCardOpen(t, y, open.Bead)
 	// The guarded pick at the card's own turn is held to the same rules:
 	// the operator's alone, and with the person's word on its weight.
-	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, pick, "", "ada", true); err == nil || errors.Is(err, ErrConflict) {
+	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, pick, "", "ada", true, open.Identity.Held); err == nil || errors.Is(err, ErrConflict) {
 		t.Fatalf("ada's guarded pick of who a sender is = %v", err)
 	}
-	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, pick, "", "mckean", false); err == nil || !strings.Contains(err.Error(), "weighed") {
+	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, pick, "", "mckean", false, open.Identity.Held); err == nil || !strings.Contains(err.Error(), "weighed") {
 		t.Fatalf("the operator's guarded pick without its weight = %v", err)
 	}
 	wantCardOpen(t, y, open.Bead)
@@ -230,10 +240,18 @@ func TestClaimIdentityPickWritesIdentity(t *testing.T) {
 	if err := y.DeferAsk(y.ctx, open.Bead, open.Ask, "mckean"); err != nil {
 		t.Fatal(err)
 	}
-	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, pick, "", "ada", true); err == nil || errors.Is(err, ErrConflict) || strings.Contains(err.Error(), "at turn") {
+	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, pick, "", "ada", true, open.Identity.Held); err == nil || errors.Is(err, ErrConflict) || strings.Contains(err.Error(), "at turn") {
 		t.Fatalf("ada's guarded pick from a stale read = %v, want her refusal and no turn", err)
 	}
-	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, pick, "", "mckean", true); !errors.Is(err, ErrConflict) {
+	// Her put-aside and her words alone from the same stale read are refused
+	// as before too, naming no turn: the gate speaks before the turn check.
+	if err := y.DeferAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, "ada"); err == nil || errors.Is(err, ErrConflict) || strings.Contains(err.Error(), "at turn") {
+		t.Fatalf("ada's guarded put-aside from a stale read = %v, want her refusal and no turn", err)
+	}
+	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, 0, "a thought", "ada", false, open.Identity.Held); err == nil || errors.Is(err, ErrConflict) || strings.Contains(err.Error(), "at turn") {
+		t.Fatalf("ada's guarded words alone from a stale read = %v, want her refusal and no turn", err)
+	}
+	if err := y.AnswerAskExpected(y.ctx, open.Bead, open.Ask, open.Turn, pick, "", "mckean", true, open.Identity.Held); !errors.Is(err, ErrConflict) {
 		t.Fatalf("the operator's guarded pick from the same stale read = %v, want a conflict", err)
 	}
 	wantCardOpen(t, y, open.Bead)
@@ -554,7 +572,8 @@ func TestClaimIdentityNobodyIgnores(t *testing.T) {
 // Let in, once delivers what the card held as outside in arrival
 // order, writes no identity, answers the ask and closes the card's
 // bead: the sender stays unmapped, and their next message offers a
-// fresh card holding that message alone.
+// fresh card holding that message alone. A guarded pick past a delivery
+// held since the read is refused, and delivers nothing.
 func TestClaimIdentityLetInOnceClosesCard(t *testing.T) {
 	t.Parallel()
 	y := mappingYard(t)
@@ -621,6 +640,31 @@ func TestClaimIdentityLetInOnceClosesCard(t *testing.T) {
 		t.Fatalf("hook speakers after the fresh card's pick = %v, want %v", got, want)
 	}
 	wantCardClosed(t, y, fresh.Bead, "U999 is ada in talk")
+	// A delivery held between the read and a guarded let-in pick refuses
+	// it: the card holds another count than the caller read, so nothing
+	// is delivered and the card stays open.
+	read := holdTalk(t, y, "U777", "held before the read")
+	holdTalk(t, y, "U777", "held after the read")
+	letIn := pickFor(t, y, read.Bead, MappingLetIn)
+	if err := y.AnswerAskExpected(y.ctx, read.Bead, read.Ask, read.Turn, letIn, "", "mckean", false, read.Identity.Held); !errors.Is(err, ErrConflict) {
+		t.Fatalf("a guarded let-in pick past a held delivery = %v, want a conflict", err)
+	}
+	if got := hookSpeakers(t, y); len(got) != 3 {
+		t.Fatalf("hook speakers after the refused pick = %v, want the three above alone", got)
+	}
+	wantCardOpen(t, y, read.Bead)
+	if got := cardHeldCount(t, y, read.Bead); got != 2 {
+		t.Fatalf("the card holds %d messages, want 2", got)
+	}
+	// A guarded decline from the same read is refused so too, and drops
+	// nothing.
+	if err := y.DeclineAskExpected(y.ctx, read.Bead, read.Ask, read.Turn, "not now", "mckean", read.Identity.Held); !errors.Is(err, ErrConflict) {
+		t.Fatalf("a guarded decline past a held delivery = %v, want a conflict", err)
+	}
+	if got := cardHeldCount(t, y, read.Bead); got != 2 {
+		t.Fatalf("the card holds %d messages after the refused decline, want 2", got)
+	}
+	wantCardOpen(t, y, read.Bead)
 }
 
 // A let-in pick recorded before let-in closed its card reads as that

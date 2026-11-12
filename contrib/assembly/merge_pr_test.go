@@ -46,6 +46,7 @@ const (
 // (OPEN unless it says MERGED or CLOSED), bot (the author is a bot),
 // head-owner and head-name (the repository the head is in, o/r unless
 // written), head-ref (the branch the head is on, patch-1 unless written),
+// base-ref (the branch the pull request targets, main unless written),
 // title and body (bump and a line of text unless written), edits-off (the
 // branch forbids maintainer edits) and edits-absent (no answer about them),
 // view-fail and refuse (the error of that call), race (the commit
@@ -65,8 +66,8 @@ case "$1 $2" in
   mcm=',"maintainerCanModify":true'
   if [ -e "$d/edits-off" ]; then mcm=',"maintainerCanModify":false'; fi
   if [ -e "$d/edits-absent" ]; then mcm=; fi
-  printf '{"number":7,"state":"%s","headRefOid":"%s","headRefName":"%s"%s,"headRepository":{"name":"%s"},"headRepositoryOwner":{"login":"%s"},"author":{"is_bot":%s,"login":"%s"},"title":"%s","body":"%s"}\n' \
-    "$(cat "$d/state" 2>/dev/null || echo OPEN)" "$(cat "$d/head")" "$(cat "$d/head-ref" 2>/dev/null || echo patch-1)" "$mcm" "$(cat "$d/head-name" 2>/dev/null || echo r)" \
+  printf '{"number":7,"state":"%s","headRefOid":"%s","headRefName":"%s","baseRefName":"%s"%s,"headRepository":{"name":"%s"},"headRepositoryOwner":{"login":"%s"},"author":{"is_bot":%s,"login":"%s"},"title":"%s","body":"%s"}\n' \
+    "$(cat "$d/state" 2>/dev/null || echo OPEN)" "$(cat "$d/head")" "$(cat "$d/head-ref" 2>/dev/null || echo patch-1)" "$(cat "$d/base-ref" 2>/dev/null || echo main)" "$mcm" "$(cat "$d/head-name" 2>/dev/null || echo r)" \
     "$(cat "$d/head-owner" 2>/dev/null || echo o)" "$([ -e "$d/bot" ] && echo true || echo false)" "$([ -e "$d/bot" ] && echo app/dependabot || echo jo)" \
     "$(cat "$d/title" 2>/dev/null || echo bump)" "$(cat "$d/body" 2>/dev/null || echo a body of one line)"
   if [ -e "$d/head-next" ]; then mv "$d/head-next" "$d/head"; fi ;;
@@ -230,7 +231,7 @@ func (y *yard) prBeadIn(id, url, stage string, label bool) {
 // calls, its answers, its failures.
 func standIn(t *testing.T, gh string, o mergeOpts, files map[string]string) {
 	t.Helper()
-	for _, name := range []string{"calls", "state", "bot", "head-owner", "head-name", "head-ref", "edits-off", "edits-absent", "title", "body", "view-fail", "refuse", "race", "head-next", "mint-fail", "mint-stdin", "mint-args"} {
+	for _, name := range []string{"calls", "state", "bot", "head-owner", "head-name", "head-ref", "base-ref", "edits-off", "edits-absent", "title", "body", "view-fail", "refuse", "race", "head-next", "mint-fail", "mint-stdin", "mint-args"} {
 		if err := os.Remove(filepath.Join(gh, name)); err != nil && !os.IsNotExist(err) {
 			t.Fatal(err)
 		}

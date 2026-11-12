@@ -94,7 +94,7 @@ func TestGuardedAnswerOverTheWire(t *testing.T) {
 	if got := string(post(t, hc, "AnswerAskExpected", stale)); !strings.Contains(got, `"code":"conflict"`) || !strings.Contains(got, "at turn 1, not 0") {
 		t.Fatalf("the stale guarded pick by name = %s, want a conflict", got)
 	}
-	if err := c.AnswerAskExpected(ctx, y.bead, y.asks[0], read.Turn, 1, "", "jo", false); !errors.Is(err, store.ErrConflict) {
+	if err := c.AnswerAskExpected(ctx, y.bead, y.asks[0], read.Turn, 1, "", "jo", false, 0); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("the stale guarded pick through the client = %v, want store.ErrConflict", err)
 	}
 	if got := y.ask(t, y.asks[0]); got.Option != 2 || got.Words != "external answer" || got.Turn != 1 {
@@ -154,9 +154,9 @@ func TestGuardedAnswerFailsClosedOnAnOlderYard(t *testing.T) {
 	})
 	old := NewClient(oldSock)
 	for name, err := range map[string]error{
-		"AnswerAskExpected":  old.AnswerAskExpected(ctx, y.bead, seq, 0, 1, "", "jo", false),
+		"AnswerAskExpected":  old.AnswerAskExpected(ctx, y.bead, seq, 0, 1, "", "jo", false, 0),
 		"DeferAskExpected":   old.DeferAskExpected(ctx, y.bead, seq, 0, "jo"),
-		"DeclineAskExpected": old.DeclineAskExpected(ctx, y.bead, seq, 0, "no", "jo"),
+		"DeclineAskExpected": old.DeclineAskExpected(ctx, y.bead, seq, 0, "no", "jo", 0),
 	} {
 		if err == nil || !strings.Contains(err.Error(), "no such method "+name) {
 			t.Errorf("%s on the older yard = %v, want no such method", name, err)
