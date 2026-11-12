@@ -578,6 +578,80 @@ func TestMergePRHoldsUnlessTheYardsCIPassed(t *testing.T) {
 	})
 }
 
+// A pull request retargeted after CI holds, and nothing is merged: GitHub
+// merges into whatever the pull request targets now, so it would land on
+// another branch. The depot's base is the only lawful target; a maintainer
+// points it back at the base on GitHub and unholds. With no target from
+// GitHub, or no base on the depot to judge it against, there is no telling
+// it is lawful, and the bead holds too.
+func TestMergePRHoldsARetargetedPullRequest(t *testing.T) {
+	t.Parallel() // as its subtests are: see TestMain
+	for _, c := range []struct {
+		what  string
+		base  string // the depot's base, main unless written
+		files map[string]string
+		wants []string
+	}{
+		{"retargeted after CI", "main", map[string]string{"base-ref": "release"},
+			[]string{"was retargeted after CI passed on 4f2c9e1", "targets branch release now, not the depot's base main", "Not merging", "Point it back at main on GitHub, then unhold r-p"}},
+		{"no target from GitHub", "main", map[string]string{"base-ref": ""},
+			[]string{"gave no target branch for " + prURL, "not merging"}},
+		{"no base on the depot", "", nil,
+			[]string{"names no depot base", "yardr depot base <depot> <branch>", "unhold r-p"}},
+	} {
+		t.Run(c.what, func(t *testing.T) {
+			y, gh := mergeYard(t)
+			if c.base != "main" {
+				y.putDepot("r", y.repo, c.base, "test ! -e RED")
+			}
+			y.prBead("r-p", prURL, true)
+			y.mergePR(gh, "r-p", mergeOpts{}, c.files)
+
+			y.held(gh, "r-p", c.what, 0, c.wants...)
+		})
+	}
+
+	// The look at the pull request asks GitHub for its target: the stand-in
+	// answers every field whatever the query names, so only its argv says
+	// the script reads the target it judges.
+	t.Run("the look asks for the target", func(t *testing.T) {
+		y, gh := mergeYard(t)
+		y.prBead("r-p", prURL, true)
+		y.mergePR(gh, "r-p", mergeOpts{}, nil)
+
+		var view string
+		for _, c := range ghCalls(t, gh) {
+			if strings.HasPrefix(c, "pr view ") {
+				view = c
+			}
+		}
+		if !strings.Contains(view, "baseRefName") {
+			t.Errorf("the look did not ask for baseRefName:\n%v", ghCalls(t, gh))
+		}
+	})
+
+	// A maintainer points it back at the base on GitHub and unholds: the
+	// pull request merges as it always did.
+	t.Run("pointed back at the base merges", func(t *testing.T) {
+		y, gh := mergeYard(t)
+		y.prBead("r-p", prURL, true)
+		y.mergePR(gh, "r-p", mergeOpts{}, map[string]string{"base-ref": "release"})
+		y.held(gh, "r-p", "a pull request retargeted after CI", 0, "was retargeted after CI passed on 4f2c9e1")
+		y.mergePR(gh, "r-p", mergeOpts{}, nil)
+		y.mergedAs(gh, "r-p", "pointed back at the base", "merged", "pr merge "+prURL+" --rebase --delete-branch --match-head-commit "+headA)
+	})
+
+	// The depot's base names the branch with or without its remote: a base
+	// of origin/main is met by a pull request on main.
+	t.Run("a base of origin/main meets main", func(t *testing.T) {
+		y, gh := mergeYard(t)
+		y.putDepot("r", y.repo, "origin/main", "test ! -e RED")
+		y.prBead("r-p", prURL, true)
+		y.mergePR(gh, "r-p", mergeOpts{}, nil)
+		y.mergedAs(gh, "r-p", "a base of origin/main", "merged", "pr merge "+prURL+" --rebase --delete-branch --match-head-commit "+headA)
+	})
+}
+
 // unreadableBead is a yardr that is the real one for everything but a bead
 // show, which it says a line of its own on stderr for and then answers as the
 // real one does for a bead the yard never made: exit 3, and on stdout, which is

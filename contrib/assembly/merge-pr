@@ -33,8 +33,10 @@
 # another commit now is held: "moved since your yes". The yard's CI must have
 # passed on that commit: the bead's metadata ci_head, which pr-ci records in
 # ciwait, is it, and GitHub's check runs are not asked (one source of truth is
-# enough, Actions or not). A fork is merged with a merge commit and its
-# branch is left alone, being its author's; a branch of the repository's own is
+# enough, Actions or not). The pull request must still target the depot's base:
+# one retargeted after CI passed would land on another branch. A fork is merged
+# with a merge commit and its branch is left alone, being its author's; a branch
+# of the repository's own is
 # rebased on and deleted. --match-head-commit closes the gap between the look
 # and the merge.
 #
@@ -190,7 +192,7 @@ unset tokjson
 gh_() { GH_TOKEN=$token gh "$@"; }
 # --- end of github_binding ---
 
-pr=$(gh_ pr view "$url" --json number,state,headRefOid,headRepository,headRepositoryOwner,author,title,body 2>"$errf") ||
+pr=$(gh_ pr view "$url" --json number,state,headRefOid,headRepository,headRepositoryOwner,author,title,body,baseRefName 2>"$errf") ||
   hold "reading pull request $url failed: $(head -c 500 "$errf")"
 state=$(printf '%s' "$pr" | jq -r '.state // empty')
 head=$(printf '%s' "$pr" | jq -r '.headRefOid // empty')
@@ -199,6 +201,7 @@ bot=$(printf '%s' "$pr" | jq -r '.author.is_bot // false')
 author=$(printf '%s' "$pr" | jq -r '.author.login // "unknown"')
 title=$(printf '%s' "$pr" | jq -r '.title // empty')
 body=$(printf '%s' "$pr" | jq -r '.body // empty')
+target=$(printf '%s' "$pr" | jq -r '.baseRefName // empty')
 
 # A pull request that is not open is nothing to merge: the merge is done
 # already (by a maintainer, or by an earlier run that could not report it), or
@@ -255,6 +258,21 @@ passed=nothing
 [ -z "$ciat" ] || passed=$(short "$ciat")
 { [ -n "$ciat" ] && [ "$(lower "$ciat")" = "$(lower "$sha")" ]; } ||
   hold "CI has not passed on $(short "$sha") (yard CI passed $passed). Not merging. The yard runs CI on a pull request's head in ciwait (pr-ci), and only on a head a reviewer read; to have it run on the head as it is now: yardr bead advance $BEAD --to ciwait, then yardr bead unhold $BEAD. A head no reviewer read is held there, with the command that sends the bead to review."
+
+# The target: the depot's base, and nothing else. pr-ci records ci_head only
+# for a pull request on the base, but the target can be changed on GitHub
+# after that, and gh pr merge merges into whatever it targets now: a
+# retargeted pull request would land on another branch. The depot's base is
+# the bead's own (.base), read here because this script's environment carries
+# no YARDR_BASE; pr-ci holds off-base pull requests at arrival, and this is
+# the race after that check.
+base=$(printf '%s' "$bead" | jq -r '.base // empty')
+bbranch=${base#origin/}
+[ -n "$bbranch" ] ||
+  hold "$BEAD names no depot base, so there is no telling that $url targets the depot's base; not merging. Set the depot's base (yardr depot base <depot> <branch>), then unhold $BEAD; or merge the pull request on GitHub yourself, and the next run reports it merged."
+[ -n "$target" ] || hold "GitHub gave no target branch for $url; not merging."
+[ "$target" = "$bbranch" ] ||
+  hold "pull request $url was retargeted after CI passed on $(short "$sha"): it targets branch $target now, not the depot's base $bbranch. Not merging. Point it back at $bbranch on GitHub, then unhold $BEAD; or merge it there yourself, and the next run reports it merged."
 
 # The merge. --match-head-commit makes GitHub refuse when the head is no
 # longer the commit looked at; gh can merge and still exit non-zero (a local
