@@ -23,10 +23,25 @@
 # footnote is not searched. More than one match is refused, as is none: a
 # table goes in one place.
 #
+# A border taken away is sent whole. The reference says a table cell
+# border cannot be transparent, that a color left unset is transparent,
+# and that a field the mask names is replaced whole, so a border given
+# with its width alone is left with no color. Google answered 400 to that
+# body (12 November 2026), and the fill it refused took the cells' texts
+# with it, since a batchUpdate applies all of its requests or none. Each
+# border therefore carries an opaque color beside its width of 0, which
+# is what hides it, and the dash style the reference gives as the
+# default. The color's value is of no account. That these three fields
+# are all Google wants is the reference's silence, not its word, since it
+# marks no field required: a live call on a copy of a document is what
+# shows it.
+#
 # Where the place lands and the fill cannot be printed, the empty table
 # stands: the refusal says to remove it, restore the placeholder, and call
-# table again. The script never removes it itself: a table that moved
-# under a collaborator's edit is not at the index it would delete.
+# table again. A fill the service refuses leaves it standing too, and the
+# yard's refusal of that one says only the status. The script never
+# removes it itself: a table that moved under a collaborator's edit is not
+# at the index it would delete.
 #
 # Indices are UTF-16 code units. The index code is build-image's, copied:
 # each body's text runs are laid out against their start indices, one code
@@ -180,7 +195,8 @@ built=$(printf '%s\n%s\n%s\n' "$in" "$found" "$doc2" | jq -c -s '
     elif ($tables | length) == 0 then
       {refusal: "the table was placed but a second read shows no \($f.rows)x\($f.cols) table at index \($t)"}
     else
-      {width: {magnitude: 0, unit: "PT"}} as $noborder
+      {color: {color: {rgbColor: {red: 0, green: 0, blue: 0}}},
+       width: {magnitude: 0, unit: "PT"}, dashStyle: "SOLID"} as $noborder
       | ((if ($p | has("borders")) and $p.borders == false then
             [{updateTableCellStyle: {
                 tableStartLocation: ({index: $t} + $tab),

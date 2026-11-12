@@ -32,14 +32,20 @@ type tableInsert struct {
 // its start, pinned to the revision read - reads again for the new
 // revision and to see the table where it put it, and prints the fill: an
 // insertText per non-empty cell, from the last cell backwards, and with
-// borders=false one updateTableCellStyle taking every border away. The
-// table stands one index past the placeholder, a newline before it, and
-// an empty cell runs two units, so the fill's indices follow from the
-// placeholder's start alone. Every index below is counted by hand from
-// the document the stand-in serves and the Tables how-to's index table,
-// not worked out the way the script does. No test calls Google.
+// borders=false one updateTableCellStyle taking every border away, each
+// border sent whole. The table stands one index past the placeholder, a
+// newline before it, and an empty cell runs two units, so the fill's
+// indices follow from the placeholder's start alone. Every index below is
+// counted by hand from the document the stand-in serves and the Tables
+// how-to's index table, not worked out the way the script does. No test
+// calls Google.
 func TestGoogleDocsTableBuilds(t *testing.T) {
-	noborder := `{"width":{"magnitude":0,"unit":"PT"}}`
+	// A border taken away carries every field of TableCellBorder: the
+	// width of 0 that hides it, an opaque color, since a table cell
+	// border cannot be transparent and an unset color is, and the dash
+	// style the reference gives as the default. The golden below is
+	// compared whole, so a field dropped from the script fails here.
+	noborder := `{"color":{"color":{"rgbColor":{"red":0,"green":0,"blue":0}}},"width":{"magnitude":0,"unit":"PT"},"dashStyle":"SOLID"}`
 	for _, tc := range []struct {
 		name    string
 		doc     string // the stand-in's doc
@@ -287,16 +293,30 @@ func TestGoogleDocsTableRefusals(t *testing.T) {
 
 // The fill posted: a table sends its place itself and the yard sends the
 // fill, each answered with one reply per request. The stand-in hears the
-// pre-read, the place, the second read and the fill.
+// pre-read, the place, the second read and the fill. It answers 400 to a
+// fill whose borders carry a width alone, which is the body the table call
+// first printed for borders=false and Google refused: the borderless row,
+// whose fill it accepts, and the last row, whose fill it refuses, are the
+// two halves of one proof that the script's body is the whole border.
 func TestGoogleDocsTableRoundTrip(t *testing.T) {
+	widthAlone := `{"width":{"magnitude":0,"unit":"PT"}}`
+	oldFill := `{"requests":[{"updateTableCellStyle":{"tableStartLocation":{"index":8,"tabId":"t.0"},` +
+		`"tableCellStyle":{"borderTop":` + widthAlone + `,"borderBottom":` + widthAlone +
+		`,"borderLeft":` + widthAlone + `,"borderRight":` + widthAlone + `},` +
+		`"fields":"borderTop,borderBottom,borderLeft,borderRight"}},` +
+		`{"insertText":{"location":{"index":13,"tabId":"t.0"},"text":"CHF"}},` +
+		`{"insertText":{"location":{"index":11,"tabId":"t.0"},"text":"Item"}}],` +
+		`"writeControl":{"requiredRevisionId":"rev-one-placed"}}`
 	for _, tc := range []struct {
 		name    string
 		cells   string
 		borders string // "" leaves borders out
-		replies string
+		sent    string // posted in place of the fill built; "" posts the built one
+		replies string // "" where the stand-in refuses the fill
 	}{
-		{"with borders", `[["Item","CHF"],["Bread","1.20"]]`, "", `[{},{},{},{}]`},
-		{"without borders", `[["Item","CHF"]]`, "false", `[{},{},{}]`},
+		{"with borders", `[["Item","CHF"],["Bread","1.20"]]`, "", "", `[{},{},{},{}]`},
+		{"without borders", `[["Item","CHF"]]`, "false", "", `[{},{},{}]`},
+		{"borders with a width alone are refused", `[["Item","CHF"]]`, "false", oldFill, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			standin, srv := imageStandin(t)
@@ -311,7 +331,11 @@ func TestGoogleDocsTableRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			res, err := source.DoKeyedBody(context.Background(), docs, "table", params, "tok", "", body, store.ReadSecretFile)
+			fill := body
+			if tc.sent != "" {
+				fill = json.RawMessage(tc.sent)
+			}
+			res, err := source.DoKeyedBody(context.Background(), docs, "table", params, "tok", "", fill, store.ReadSecretFile)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -335,11 +359,19 @@ func TestGoogleDocsTableRoundTrip(t *testing.T) {
 			if err := json.Unmarshal(post.body, &got); err != nil {
 				t.Fatalf("posted body = %s: %v", post.body, err)
 			}
-			if err := json.Unmarshal(body, &want); err != nil {
+			if err := json.Unmarshal(fill, &want); err != nil {
 				t.Fatal(err)
 			}
 			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("posted body = %s, want the built %s", post.body, body)
+				t.Fatalf("posted body = %s, want %s", post.body, fill)
+			}
+			if tc.replies == "" {
+				// The refusal is a Result with the status and no answer: what
+				// a service says of a request it refused is not kept.
+				if res.Status != 400 || len(res.Answer) != 0 {
+					t.Fatalf("the fill was answered %d %s, want 400 and no answer", res.Status, res.Answer)
+				}
+				return
 			}
 			if want := `{"documentId":"` + standin.doc("one") + `","replies":` + tc.replies + `}`; string(res.Answer) != want {
 				t.Fatalf("answer = %s, want %s", res.Answer, want)

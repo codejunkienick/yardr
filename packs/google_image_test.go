@@ -353,9 +353,10 @@ type imageDoc struct {
 // imageDocs answers documents.get for docs whose text runs carry the indices
 // Docs gives them, and batchUpdate with one reply per request, as Docs does:
 // an insertInlineImage answers the new picture's object id and every other
-// request an empty reply. For a doc with a placed revision, a read past its
-// first batchUpdate answers the table it placed, with empty cells. It keeps
-// every request it was sent.
+// request an empty reply, and refuses with a 400 an updateTableCellStyle that
+// gives a border no opaque color (transparentBorder). For a doc with a
+// placed revision, a read past its first batchUpdate answers the table it
+// placed, with empty cells. It keeps every request it was sent.
 type imageDocs struct {
 	t    *testing.T
 	mu   sync.Mutex
@@ -486,6 +487,15 @@ func imageStandin(t *testing.T) (*imageDocs, *httptest.Server) {
 					http.Error(w, `{"error":{"code":400,"message":"no requests"}}`, http.StatusBadRequest)
 					return
 				}
+				for i, req := range posted.Requests {
+					if style, ok := req["updateTableCellStyle"]; ok {
+						if why := transparentBorder(style); why != "" {
+							w.WriteHeader(http.StatusBadRequest)
+							io.WriteString(w, `{"error":{"code":400,"message":"requests[`+itoa(i)+`].updateTableCellStyle: `+why+`"}}`)
+							return
+						}
+					}
+				}
 				var replies []string
 				for _, req := range posted.Requests {
 					if _, ok := req["insertInlineImage"]; ok {
@@ -502,6 +512,44 @@ func imageStandin(t *testing.T) (*imageDocs, *httptest.Server) {
 		io.WriteString(w, `{"error":{"code":404,"message":"no such doc"}}`)
 	}))
 	return s, srv
+}
+
+// transparentBorder says why the stand-in refuses an updateTableCellStyle: a
+// border that its fields name and its tableCellStyle gives, so replaced
+// whole, with no opaque color. The reference says a table cell border
+// cannot be transparent and that an unset color is transparent, and a
+// border given with its width alone was answered 400 live. That Google
+// reads the color a body leaves out as transparent is the reading that
+// joins the two, and no sentence of the reference states it. The stand-in
+// does not refuse a border without a width or a dash style, since nothing
+// says Google does. A border the fields name and the style does not give
+// is reset to its default, which the reference allows. "" for a request it
+// accepts.
+func transparentBorder(raw json.RawMessage) string {
+	var req struct {
+		TableCellStyle map[string]json.RawMessage `json:"tableCellStyle"`
+		Fields         string                     `json:"fields"`
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return "the request is no updateTableCellStyle: " + err.Error()
+	}
+	for _, name := range strings.Split(req.Fields, ",") {
+		given, ok := req.TableCellStyle[name]
+		if !ok || !strings.HasPrefix(name, "border") {
+			continue
+		}
+		var border struct {
+			Color struct {
+				Color struct {
+					RgbColor json.RawMessage `json:"rgbColor"`
+				} `json:"color"`
+			} `json:"color"`
+		}
+		if err := json.Unmarshal(given, &border); err != nil || len(border.Color.Color.RgbColor) == 0 || string(border.Color.Color.RgbColor) == "null" {
+			return name + " has no opaque color, and a table cell border cannot be transparent"
+		}
+	}
+	return ""
 }
 
 // placed is the documents.get answer for a doc whose table the stand-in

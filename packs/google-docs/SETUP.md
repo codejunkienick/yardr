@@ -151,8 +151,10 @@ google packs' shared setup, said once in `yardr docs google`.
    The table keeps its borders unless the call passes borders=false,
    for a block of columns side by side. The call places the table and
    fills its cells in two writes; where the place lands and the fill
-   fails, the refusal says to remove the empty table, restore the
-   placeholder, and call table again.
+   fails, whether the call refuses it or the service does, the empty
+   table stands: remove it, restore the placeholder, and call table
+   again. The call's own refusals say so; the service's answer is only
+   its status.
    Text is styled with style, which finds one match: bold=true makes it
    bold and bold=false removes bold; size sets whole points, color takes
    six hex digits, and align sets the paragraph's alignment. Table cells

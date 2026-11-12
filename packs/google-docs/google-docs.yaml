@@ -47,7 +47,13 @@
 # the same day, take a range with a textStyle (bold, fontSize,
 # foregroundColor) or a paragraphStyle (alignment) and fields, and the
 # table's start with a tableCellStyle and fields; a border of width 0 is
-# hidden. The style call's build script finds the one match of its text,
+# hidden. The reference also says a table cell border cannot be transparent
+# and that a color left unset is, and a border given with its width alone
+# was answered 400 on 12 November 2026, in words the yard did not keep, so
+# the table call sends each border whole: an opaque color and the default
+# dash style beside the width of 0. The reference marks no field of a
+# border required, so that shape is its reading and not its word. The
+# style call's build script finds the one match of its text,
 # in a table cell too, and prints the one batchUpdate styling it, pinned
 # to the revision read; align styles the paragraph the match's range
 # overlaps, which is the match's own, since a match holds no line break.
