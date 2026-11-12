@@ -18,15 +18,19 @@ same run. Both act as the operator the onboarding made, since its "Your name"
 takes only who the terminal's commands act as: your login name, or
 `$YARDR_ACTOR` ([users.md](users.md#who-is-acting)).
 
-The yardmaster's first job is the setup, as a conversation with you: it asks for
-the repository and its base branch, registers the depot, proposes setting it
-up from the yard's default pack, and offers an approval card when that pack is
-embedded in yardr. A selected pack from a directory or non-embedded import
-is set up by you in a terminal with `yardr depot init <depot>`. The setup
-imports the flow, the groups that build, review and land, their roles and
-their routes, all kept in the yard and nothing in the repository; it checks
-with you what tests the project and offers a first bead to try the line. It
-asks before anything outward, such as a commit.
+The yardmaster's first job is the setup, as a conversation with you: it asks
+what you want to hand over first, in plain words, and goes on in the words of
+your answer. Work on code goes to a depot: it asks for the repository and its
+base branch, registers the depot, proposes setting it up from the yard's
+default pack, and offers an approval card when that pack is embedded in
+yardr. A folder of files goes to a dir depot, for which it asks for the
+folder's path and nothing else. A process or a service goes to `yardr docs
+flows designing a process` and the source packs. A selected pack from a
+directory or non-embedded import is set up by you in a terminal with
+`yardr depot init <depot>`. The setup imports the flow, the groups that build, review and land,
+their roles and their routes, all kept in the yard and nothing in the
+repository; it checks with you what tests the project and offers a first bead
+to try the line. It asks before anything outward, such as a commit.
 
 What the onboarding itself asks, how it starts the yard and what it does
 when the yardmaster does not come up is in
@@ -68,8 +72,9 @@ says where to get what is missing, which is the operator's to install.
 The onboarding ends in [`yardr chat`](chat.md#from-the-onboarding), which shows
 the operator the mail between them and the yardmaster and nothing of its pane.
 So when the yardmaster's first prompt asks it to greet them, it does so by
-mail: `yardr mail <operator> - <<'MAIL'`, then what it needs from them for the
-next step, and `MAIL` on a line of its own. The setup is then a conversation
+mail: `yardr mail <operator> - <<'MAIL'`, first what they want to hand over
+first, in plain words, then what it needs from them for the next step, and
+`MAIL` on a line of its own. The setup is then a conversation
 by mail: the operator answers in the chat, the answer reaches the
 yardmaster's inbox, and it writes back with `yardr mail <operator> -`. It
 stays by mail for as long as they write by mail, since what the yardmaster
@@ -86,8 +91,11 @@ list ([below](#where-no-form-runs)).
 
 The steps, as the yardmaster takes them:
 
-1. **A depot.** When the work first needs one, it asks for the repository's
-   path and its base branch, then `yardr depot add <depot> <path> --base <branch>`.
+1. **A depot.** When the work first needs one, it asks what the work is on.
+   Work on code goes to a depot: it asks for the repository's path and its
+   base branch, then `yardr depot add <depot> <path> --base <branch>`. A
+   folder of files goes to a dir depot: it asks for the folder's path, then
+   `yardr depot add <name> <path> --kind dir`.
 2. **The depot's way of working.** The depot is set up in one import, from
    the yard's default pack: the flow and its stage files, the groups that
    build, review and land, and their routes. That is every step of the list
@@ -125,12 +133,20 @@ The steps, as the yardmaster takes them:
    <depot> <path> --base <base> --test '<command>'`, with the path and base
    `yardr depot list` shows, since an add without a flag drops what the flag
    set. Builders and reviewers run it before they hand on, and the assembly
-   runs it on what lands; a depot with none lands untested.
+   runs it on what lands; a depot with none lands untested. A dir depot gets
+   no guess ([below](#the-test-command)), so there the yardmaster asks what
+   checks the work instead, and sets it the same way: `yardr depot add <name>
+   <path> --kind dir --test '<command>'`, or the card on a depot the yard
+   holds already. Nothing lands from a dir depot, so the builder and the
+   reviewer are the ones who run it.
 4. **A first bead.** It offers a small one to try the line end to end
    (`yardr bead create - -b - --depot <depot> <<'BEAD'`, then the title, a
    blank line, the goal and what done means, and `BEAD` on a line of its
    own), and advances it to `new` once it is shaped, as with any bead. The
-   setup is over when that bead is merged: `yardr doctor` then says so.
+   setup is over when that bead is merged: `yardr doctor` then says so. On a
+   yard of dir depots only it is over when that bead reaches the end of its
+   flow instead, and a yard whose first work needs no depot is set up with
+   none ([above](#one-list-of-steps)).
 
 ## The pages
 

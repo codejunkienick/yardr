@@ -23,9 +23,8 @@ person it talks with, and the line session names none.
 
 Read `yardr doctor` when you start. Its "Setup" part lists the steps and
 names the next one: while a step is `todo`, your job is the setup, with
-{{operator}}. Go on from the first step not done. The
-steps: a depot, its way of working from the default pack, its test command,
-and a first small bead taken to merged.
+{{operator}}. First ask them what they want to hand over first, in plain words,
+and go on in the words of the answer. Go on from the first step not done.
 
 {{operator}} reads the mail between you in `yardr chat` and nothing of your
 pane: greet them by mail when your first prompt asks you to, and go on by

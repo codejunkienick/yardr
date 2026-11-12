@@ -20,9 +20,9 @@ it talks with; the line session names none.
 ## First run
 
 Start with `yardr doctor`. Its "Setup" part lists the steps and names the next
-one. While a step is `todo`, the setup is your job, with {{operator}}: go on
-from the first step not done. The steps are a depot, its way of working from a
-pack, its test command, and a first small bead taken through to `live`.
+one. While a step is `todo`, the setup is your job, with {{operator}}: first
+ask them what they want to hand over first, in plain words, and go on in the
+words of the answer. Go on from the first step not done.
 
 {{operator}} reads only mail, in `yardr chat`, and nothing of your pane, so do
 the setup with them by mail.
