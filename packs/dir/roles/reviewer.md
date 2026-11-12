@@ -58,7 +58,10 @@ it too: each reads `-` as stdin, as shown below.
    `yardr bead hold <id>`; a held bead waits for whoever runs the yard.
 3. It is a question about the bead itself (an unclear goal, a choice only
    {{operator}} can make): that is for the stage's outcomes, not for a new
-   bead. Your brief says which outcome takes a question.
+   bead. Your brief says which outcome takes a question. When you end with
+   `question`, write the question note first and lead it with the move you
+   suggest and why in its first lines (`Suggest <move>: <why in one line>`),
+   then the question itself: the card the person gets quotes those lines.
 
 ## A bead labelled `eyes`
 

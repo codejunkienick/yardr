@@ -684,8 +684,13 @@ carries a finish note, that note's first line as its writer wrote it (cut at
 600 characters); then the template's lines, word for word. A finish note is a
 plain note with a line of its own `test: <command> @ <commit>: pass, ...`, and
 the one shown is the latest by the author of the bead's first, the builder's,
-so that a reviewer's verdict after it does not take its place. A bead with no
-finish note, as one made in the stage, gets the header without that line, and
+so that a reviewer's verdict after it does not take its place. Where the bead
+entered on a `question` outcome, the header quotes the sending session's
+question note instead of the finish line: the latest plain note by the session
+that reported the outcome, else the latest plain note, in its first three
+non-empty lines (cut at 600 characters whole). A question with no note to
+quote keeps the finish line. A bead with no finish note, as one made in the
+stage, gets the header without that line, and
 a card put before keeps the text it has. The card offers the template's
 options and no more: a stage's card has no `You decide`, which an ask a person
 writes still gets, since on a card that moves the bead it recorded words and

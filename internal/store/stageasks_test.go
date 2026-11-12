@@ -257,6 +257,82 @@ func TestStageAskHeaderFinishNote(t *testing.T) {
 	}
 }
 
+// A bead that enters a templated stage on a question outcome carries the
+// sending session's question on its card: the entry event's outcome names
+// the question and its actor the note to quote, in place of the builder's
+// handover. A bead that enters the same stage by hand quotes the finish
+// line.
+func TestStageAskQuestionEntry(t *testing.T) {
+	t.Parallel()
+	const pass = "test: sh .yardr/test @ abc1234: pass, 3 packages ok, 0 failed"
+	dir := gitRepo(t, map[string]string{
+		".yardr/flows/default.flow":      "new -> decide on question | review on done\ndecide -> new on back\nreview -> merged\nmerged terminal\n",
+		".yardr/flows/default/decide.md": "Decide where it goes.\n\n## Ask\nkind: choice\nquestion: Where should this bead go next?\ncontext:\n- Your call.\nback: The bead goes back to new with your words as the note.\n",
+	})
+	s, _ := storetest.NewOwned(t)
+	ctx := context.Background()
+	if err := s.PutDepot(ctx, store.Depot{Name: "web", Path: dir, Base: "main"}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSetting(ctx, store.OperatorSetting, "jo", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddUser(ctx, "ada", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutGroup(ctx, store.Group{Name: "deciders", Runner: "manual", Members: []string{"ada"}}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddRoute(ctx, store.Route{Stage: "decide", Group: "deciders"}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	handover := "Done. No new commits this session.\n" + pass
+	question := "Suggest done: the branch is green.\nAccept the two updates, or send it back to new?\nThe second file is only formatting."
+	head := func(id string) string { return "Bead: " + id + " — the work (branch yard/" + id + ")" }
+	enter := func(outcome string) string {
+		t.Helper()
+		b, err := s.CreateBead(ctx, store.NewBead{Title: "the work", Depot: "web", Stage: "new"}, "me")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.AddNote(ctx, b.ID, handover, "builder"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.AddNote(ctx, b.ID, question, "reviewer"); err != nil {
+			t.Fatal(err)
+		}
+		if outcome == "" {
+			_, err = s.Advance(ctx, b.ID, "decide", store.Expect{}, "me")
+		} else {
+			_, err = s.Done(ctx, b.ID, outcome, "", store.Expect{}, "reviewer")
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b.ID
+	}
+	for _, c := range []struct {
+		name    string
+		outcome string // "" enters by hand
+		quote   []string
+	}{
+		{"a question entry quotes the sending note", "question",
+			[]string{"Suggest done: the branch is green.", "Accept the two updates, or send it back to new?", "The second file is only formatting."}},
+		{"an entry by hand quotes the finish line", "",
+			[]string{"Done. No new commits this session."}},
+	} {
+		id := enter(c.outcome)
+		got := stageAsks(t, s, id)
+		if len(got) != 1 || got[0].Ask.Stage != "decide" || got[0].Ask.To != "ada" {
+			t.Fatalf("%s: asks = %+v, want ada's decide card", c.name, got)
+		}
+		want := append(append([]string{head(id)}, c.quote...), "Your call.")
+		if !slices.Equal(got[0].Ask.Context, want) {
+			t.Errorf("%s: context = %q, want %q", c.name, got[0].Ask.Context, want)
+		}
+	}
+}
+
 // Creating a bead directly in a templated stage puts its ask with the
 // created event as Entry.
 func TestStageAskCreateBeadEntry(t *testing.T) {

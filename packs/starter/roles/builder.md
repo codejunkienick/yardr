@@ -206,7 +206,10 @@ after your last commit and your test run, and attach it to the note:
    orders the two with `yardr dep add`.
 3. It is a question about the bead itself (an unclear goal, a design
    choice): that is for the stage's outcomes, not for a new bead. Your brief
-   says which outcome takes a question, or hold as above.
+   says which outcome takes a question, or hold as above. When you end with
+   `question`, write the question note first and lead it with the move you
+   suggest and why in its first lines (`Suggest <move>: <why in one line>`),
+   then the question itself: the card the person gets quotes those lines.
 
 ## The Go build cache is shared
 

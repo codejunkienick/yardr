@@ -255,25 +255,94 @@ func finishLine(notes []Note) string {
 	return line
 }
 
+// questionQuote is the sending session's question note as a card quotes it:
+// the latest plain note by actor, else the latest plain note, in its first
+// three non-empty lines. The quote is cut whole at maxFinishLine runes, the
+// line that crosses the cap taking the cut as a finish line does, and what
+// follows it left out. Nil where no plain note stands, or none has a line
+// to quote. notes are in seq order.
+func questionQuote(notes []Note, actor string) []string {
+	text, found := "", false
+	for _, n := range notes {
+		if n.Kind != "" && n.Kind != NoteNote {
+			continue
+		}
+		if n.Author == actor {
+			text, found = n.Text, true
+		}
+	}
+	if !found {
+		for _, n := range notes {
+			if n.Kind != "" && n.Kind != NoteNote {
+				continue
+			}
+			text, found = n.Text, true
+		}
+	}
+	if !found {
+		return nil
+	}
+	var lines []string
+	for _, line := range strings.Split(text, "\n") {
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		lines = append(lines, OneLine(line))
+		if len(lines) == 3 {
+			break
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	var out []string
+	left := maxFinishLine
+	for _, line := range lines {
+		if r := []rune(line); len(r) > left {
+			switch {
+			case left > 0:
+				out = append(out, strings.TrimSpace(string(r[:left]))+"…")
+			case len(out) > 0:
+				out[len(out)-1] += "…"
+			}
+			break
+		} else {
+			out = append(out, line)
+			left -= len(r)
+		}
+	}
+	return out
+}
+
 // framed is the template with the yard's bead header written in, so that a
 // person answering away from the bead (on paper, on the hosted screen, from
 // a notification) decides about a known thing: the question gains the bead's
 // id and title, and the context starts with the bead and its branch and,
 // where the bead carries a finish note, the note's first line (finishLine).
-// A template that accepts: a head has its line after those (headLine). The
-// template's own lines stand word for word after them: its authors write
-// literal text, and nothing in it is filled in. It is a copy, since the
-// template is the stage file's and every member's card is built from it, and
-// the header is frozen into each card as it is put, whatever the bead and
-// its notes become.
-func (t *AskTemplate) framed(row *beadRow, notes []Note) *AskTemplate {
+// On a question entry, questionBy is the entry event's actor, and the header
+// quotes that session's question note (questionQuote) instead of the finish
+// line, whose handover is no account of the question asked; with no note to
+// quote, the finish line stands as before. A template that accepts: a head
+// has its line after those (headLine). The template's own lines stand word
+// for word after them: its authors write literal text, and nothing in it is
+// filled in. It is a copy, since the template is the stage file's and every
+// member's card is built from it, and the header is frozen into each card as
+// it is put, whatever the bead and its notes become.
+func (t *AskTemplate) framed(row *beadRow, notes []Note, questionBy string) *AskTemplate {
 	card := *t
 	title := OneLine(row.Title)
 	card.Question = fmt.Sprintf("%s — %s: %s", t.Question, row.ID, title)
 	card.Context = []string{fmt.Sprintf("Bead: %s — %s (branch %s)", row.ID, title, Branch(row.ID))}
-	if line := finishLine(notes); line != "" {
-		card.Context = append(card.Context, line)
+	var quote []string
+	if questionBy != "" {
+		quote = questionQuote(notes, questionBy)
 	}
+	if len(quote) == 0 {
+		if line := finishLine(notes); line != "" {
+			quote = []string{line}
+		}
+	}
+	card.Context = append(card.Context, quote...)
 	// A card that offers the yes to a head shows the head the bead tracks
 	// now, and freezes it with the card (stagehead.go).
 	if t.Accepts != "" {
@@ -338,8 +407,20 @@ func (w *wtx) putStageAsks(row *beadRow, stage string, entry uint64, f *Flow, tm
 		}
 		tmpl.Options = movesOf(f, stage, row, back)
 	}
-	// The same header on every card of the entry, put as it is now.
-	card := tmpl.framed(row, notes)
+	// The same header on every card of the entry, put as it is now. A
+	// question entry quotes the sending session's question note instead
+	// of the finish line (framed): the entry event carries the outcome
+	// and who reported it, and any other entry quotes as before.
+	questionBy := ""
+	var entryEvent Event
+	if ok, err := get(w.Tx, bEvents, seqKey(entry), &entryEvent); err != nil {
+		return err
+	} else if ok {
+		if outcome, _ := entryEvent.Data["outcome"].(string); outcome == "question" {
+			questionBy = entryEvent.Actor
+		}
+	}
+	card := tmpl.framed(row, notes, questionBy)
 	got := 0
 	for _, member := range g.Members {
 		if strings.Contains(member, "@") {

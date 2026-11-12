@@ -357,7 +357,7 @@ func TestStageCardInTheQueue(t *testing.T) {
 			return err
 		}
 		stage = row.Stage
-		card := tmpl.framed(row, notes).stageAsk("mckean", row.Stage, entry)
+		card := tmpl.framed(row, notes, "").stageAsk("mckean", row.Stage, entry)
 		n, err := w.storeStageAsk(row, card)
 		if err != nil {
 			return err
@@ -427,6 +427,64 @@ func TestStageCardInTheQueue(t *testing.T) {
 	if len(q.Open) != 1 || q.Open[0].Ask != current || len(q.Decided) != 1 || q.Decided[0].Ask != older ||
 		q.Decided[0].OptionLabel != YouDecide {
 		t.Fatalf("queue after You decide: open %+v, decided %+v", q.Open, q.Decided)
+	}
+}
+
+// A card put on a question entry quotes the sending session's question note
+// instead of the builder's handover: the latest plain note by the entry's
+// actor, else the latest plain note, in its first three non-empty lines. Any
+// other entry, and a question with no note to quote, quotes the finish line
+// as before.
+func TestStageCardQuestionQuote(t *testing.T) {
+	t.Parallel()
+	const pass = "test: sh .yardr/test @ abc1234: pass, 3 packages ok, 0 failed"
+	handover := "Done. No new commits this session.\n" + pass
+	question := "Suggest done: the branch is green.\nAccept the two updates, or send it back to new?\nThe second file is only formatting.\nA fourth line stays out."
+	long := "Suggest changes: " + strings.Repeat("a", 700)
+	note := func(author, text string) Note { return Note{Author: author, Text: text} }
+	tmpl := &AskTemplate{Kind: AskChoice, Question: "Where should this bead go next?", Context: []string{"Your call."}}
+	row := &beadRow{Bead: Bead{ID: "yd-test", Title: "the work"}}
+	head := "Bead: yd-test — the work (branch yard/yd-test)"
+	with := func(quote ...string) []string {
+		return append(append([]string{head}, quote...), "Your call.")
+	}
+	for _, c := range []struct {
+		name  string
+		notes []Note
+		by    string // the entry's actor on a question entry, "" otherwise
+		want  []string
+	}{
+		{"a question quotes the sending note's first three lines, not the handover",
+			[]Note{note("builder", handover), note("reviewer", question)}, "reviewer",
+			with("Suggest done: the branch is green.", "Accept the two updates, or send it back to new?", "The second file is only formatting.")},
+		{"a question takes the actor's latest note",
+			[]Note{note("reviewer", "First thought: sleep on it."), note("builder", handover), note("reviewer", question)}, "reviewer",
+			with("Suggest done: the branch is green.", "Accept the two updates, or send it back to new?", "The second file is only formatting.")},
+		{"a question with no note by the actor quotes the latest plain note",
+			[]Note{note("builder", handover)}, "reviewer",
+			with("Done. No new commits this session.", pass)},
+		{"a question skips blank lines and journal entries",
+			[]Note{note("builder", handover), {Kind: NoteJournal, Author: "reviewer", Text: "Journal: " + question}}, "reviewer",
+			with("Done. No new commits this session.", pass)},
+		{"a question quotes three lines whole under the cap",
+			[]Note{note("reviewer", "One.\n\nTwo.\n \nThree.")}, "reviewer",
+			with("One.", "Two.", "Three.")},
+		{"a long question is cut at 600 runes",
+			[]Note{note("builder", handover), note("reviewer", long)}, "reviewer",
+			with(long[:600] + "…")},
+		{"a question with no note falls back to the finish line",
+			[]Note{note("builder", handover), note("reviewer", "\n  \n")}, "reviewer",
+			with("Done. No new commits this session.")},
+		{"a question on a bead with no notes quotes nothing",
+			nil, "reviewer",
+			with()},
+		{"any other entry quotes the finish line",
+			[]Note{note("builder", handover), note("reviewer", question)}, "",
+			with("Done. No new commits this session.")},
+	} {
+		if got := tmpl.framed(row, c.notes, c.by).Context; !slices.Equal(got, c.want) {
+			t.Errorf("%s: context = %q, want %q", c.name, got, c.want)
+		}
 	}
 }
 
