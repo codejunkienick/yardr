@@ -45,6 +45,7 @@ var allowSerial = map[string]string{
 	"TestDaemonInstallSystemd":                              "stubLookPath,stubServices",
 	"TestDaemonInstallUninstall":                            "stub:userHomeDir,stubLookPath,stubServices",
 	"TestDaemonKeepsHerdrSessionsOnStop":                    "daemonUp",
+	"TestDaemonPprofServedOnlyWhenAsked":                    "daemonUp,t.Setenv",
 	"TestDaemonServiceReachesTheHerdrSessionSet":            "stubLookPath,stubServices,t.Setenv",
 	"TestDaemonSkipsHerdrSessionsItCannotClose":             "daemonUp",
 	"TestDaemonStopAndStatus":                               "holdDaemon,stubServices",

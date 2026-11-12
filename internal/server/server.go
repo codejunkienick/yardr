@@ -22,6 +22,7 @@ import (
 	"yardr.dev/yardr/internal/hooks"
 	"yardr.dev/yardr/internal/pack"
 	"yardr.dev/yardr/internal/peer"
+	"yardr.dev/yardr/internal/pprof"
 	"yardr.dev/yardr/internal/preview"
 	"yardr.dev/yardr/internal/rpc"
 	runners "yardr.dev/yardr/internal/runner"
@@ -298,7 +299,7 @@ func (r *runner) serve(ctx context.Context) (string, bool, error) {
 		<-supervisorDone
 	}()
 	stopPreviewLink := KeepEdge(ctx, c, st, "preview", supervisor.Handler(), log, supervisor.LinkUp)
-	defer servePprof(config.Getenv(PprofEnv), log)()
+	defer pprof.Serve(config.Getenv(pprof.ServerEnv), log)()
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ln) }()
 	log.Info("yardr server ready", "store", c.DBPath(), "socket", c.Socket(), "revision", version.Show(r.rev))

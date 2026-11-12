@@ -442,12 +442,13 @@ func TestUseHome(t *testing.T) {
 }
 
 // What a yard starts for work is started without the settings of the
-// yard's server, and with everything else it had;
+// yard's server and daemon, and with everything else it had;
 // where the environment can only be added to, they are set to nothing,
 // which Getenv reads as unset.
 func TestWithoutServerSettings(t *testing.T) {
 	environ := []string{"PATH=/bin", "YARDR_HOOK_ADDR=127.0.0.1:1", "YARDR_WEB_ADDR=127.0.0.1:2", "YARDR_WEB_AS=jo", "YARDR_BDP_ADDR=127.0.0.1:3", "YARDR_BEAD=web-3",
 		"YARDR_EVENT_RETENTION=1d", "YARDR_HOOK_PAYLOAD_RETENTION=3d", "YARDR_WEB_PAGES_ADDR=127.0.0.1:4", "YARDR_WEB_PAGES_HOST=pages.example.net",
+		"YARDR_DAEMON_PPROF=/y1/daemon.sock",
 		"YARDR_INBOX_RETENTION=5d", "YARDR_HOOK_ADDRESS=x"}
 	before := slices.Clone(environ)
 	got := WithoutServerSettings(environ)

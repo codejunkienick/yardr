@@ -41,11 +41,14 @@ const (
 // the page's leaves layer, measured at f75abf88 minus shared and udiff,
 // which yardr-g1sf folded into store, and minus agents, which yardr-8nca
 // made import store for the harness types, and plus pairing, which
-// yardr-rxk9 left with the pairing paths alone. A leaf that gains an
-// internal import fails rule (b) below; a rename updates this list with it.
+// yardr-rxk9 left with the pairing paths alone, and plus pprof, which
+// yardr-0bgq moved out of server so the daemon serves profiles too. A
+// leaf that gains an internal import fails rule (b) below; a rename
+// updates this list with it.
 var leafPkgs = []string{
 	peerPkg,
 	internalPrefix + "pairing",
+	internalPrefix + "pprof",
 	internalPrefix + "rpc/clientgen",
 	internalPrefix + "scripttest",
 	internalPrefix + "version",

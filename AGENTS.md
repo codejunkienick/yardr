@@ -97,6 +97,8 @@ it lists every exported name with its comment, faster than grepping.
 - `pairing`: the pairing request paths under the peers' listener; a leaf.
 - `peer`: who is on the other end of a unix socket (pid, process tree), so
   the store recognises a call from a session's pane.
+- `pprof`: Go's `net/http/pprof` on a unix socket of its own for the
+  server (`YARDR_PPROF`) and the daemon (`YARDR_DAEMON_PPROF`); a leaf.
 - `preview`: the yard's preview supervisor (part of `yardr server`): starts
   approved previews, keeps them running under their caps, captures their
   logs and carries their traffic on its yard-side endpoint; serves the

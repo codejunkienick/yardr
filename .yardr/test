@@ -119,9 +119,10 @@
 # that no change edits the row of a file it shrinks. It is no gate run either.
 set -e
 filesizewarnings_done=
-# The settings of the yard's server are not the tests': a server one of them
-# starts would listen on this yard's webhook address (config.ServerSettings).
-unset YARDR_HOOK_ADDR YARDR_EVENT_RETENTION YARDR_HOOK_PAYLOAD_RETENTION YARDR_PPROF
+# The settings of the yard's server and daemon are not the tests': a server
+# one of them starts would listen on this yard's webhook address, and a
+# daemon on its profiling socket (config.ServerSettings).
+unset YARDR_HOOK_ADDR YARDR_EVENT_RETENTION YARDR_HOOK_PAYLOAD_RETENTION YARDR_PPROF YARDR_DAEMON_PPROF
 # The load factor is the race leg's to give (sizewaits). One the run was started
 # with, by a hand or by the race leg of a test that runs this script, would size
 # the plain run and the re-run of a package alone as well.
@@ -2074,7 +2075,7 @@ internal/cli/beads.go 1098 the bead show, list and history commands and their pr
 internal/cli/crew.go 2212 the crew, inbox, mail and memory commands
 internal/cli/doctor.go 1243 the doctor examinations and its report
 internal/cli/init.go 1600 yard init, onboarding and settings
-internal/cli/ops.go 1791 the server, daemon, depot, group, route and session commands
+internal/cli/ops.go 1699 the server, daemon, depot, group, route and session commands
 internal/cli/pack.go 2089 pack loading, import planning and its question rounds
 internal/cli/peers.go 1564 the peer identity, intake and ping commands
 internal/cli/routereport.go 1513 the route report and its rendering

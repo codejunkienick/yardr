@@ -96,14 +96,15 @@ Each cross-concept verb is owned by exactly one interface:
 
 ## Layers
 
-38 packages under `internal/` at f75abf88, each in one layer (36 since
-the store-as-leaf splits folded `shared` and `udiff` into `store`):
+38 packages under `internal/` at f75abf88, each in one layer (37 since
+the store-as-leaf splits folded `shared` and `udiff` into `store` and
+`pprof` moved out of `server` so the daemon serves profiles too):
 
-- leaves, importing no internal package (5): `pairing`, `peer`, `rpc/clientgen`, `scripttest`, `version`.
+- leaves, importing no internal package (6): `pairing`, `peer`, `pprof`, `rpc/clientgen`, `scripttest`, `version`.
 - store (1): `store`. Measured: 160 non-test Go files, a 296-method `store.API`, 2 internal imports — the peer and source exceptions under the rules. Shared types the leaf splits move stay in store itself: there is no separate types package.
 - services (26): `agents`, `bdp`, `chat`, `config`, `depotfile`, `diskkeep`, `edgelink`, `eta`, `flowdraw`, `flowdraw/gen`, `hooks`, `limits`, `notify`, `otel`, `pack`, `preview`, `rpc`, `rpc/gen`, `source`, `standin`, `storetest`, `telemetry`, `testload`, `web`, `yardkey`, `yards`. (`storetest` and `testload` are test-only helpers; `rpc/gen` and `flowdraw/gen` are generators.)
 - dispatch, runner, server (3): the control loop and the process owners.
-- cli (1): `cli`. Measured: imports 27 of the 36 internal packages.
+- cli (1): `cli`. Measured: imports 28 of the 37 internal packages.
 - main: the root package, the binary; the only importer of `cli`.
 
 ## Import rules
