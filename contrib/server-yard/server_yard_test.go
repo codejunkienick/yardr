@@ -325,7 +325,7 @@ func TestStoppedAt(t *testing.T) {
 			"  " + fault,
 			"  FAULT  yardmaster  yardmaster is not running",
 			"1 fault: something the yard needs is missing or not working (FAULT above).",
-			"Next step: a depot.",
+			"The setup is complete.",
 		}, "\n"), "doctor, the script's last step, named a fault:\n" + fault},
 		{"the script stopped itself", strings.Join([]string{
 			"server-yard: waiting for the daemon to come up (up to 2 s)",

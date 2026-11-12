@@ -141,11 +141,12 @@ func TestDoctorEmptyHome(t *testing.T) {
 		"ok     git ", "ok     herdr ", "a harness a yard can be created on: answers its version flag (2.1.310 (Claude Code))",
 		// A harness nothing runs on yet that does not work is said, and is no fault.
 		"note   grok ", "its version flag fails: exit status 3: broken install",
-		"todo   a depot: ", "todo   a first merged bead: ", "Nothing the yard needs is missing.")
+		"note   the subscriptions' limits, from aiquokka (optional): no source named aiquokka is declared",
+		"Nothing the yard needs is missing.")
 	if strings.Contains(out, herdrInstall) {
 		t.Errorf("doctor says to install herdr when it is already on PATH:\n%s", out)
 	}
-	if strings.Contains(out, "The yard\n") || strings.Contains(out, "Optional") || strings.Contains(out, "Next step") {
+	if strings.Contains(out, "The yard\n") || strings.Contains(out, "Optional") || strings.Contains(out, "Next step") || strings.Contains(out, "todo ") {
 		t.Errorf("a home with no yard has no yard to report on:\n%s", out)
 	}
 	if strings.Contains(out, "Tell us it landed") {
@@ -170,7 +171,7 @@ func TestDoctorEmptyHome(t *testing.T) {
 		"    curl -fsSL https://herdr.dev/install.sh | sh\n",
 		"FAULT  a harness ", "2 faults")
 	rep, err := doctorJSONOn(t, newApp())
-	if !errors.Is(err, errCheckFailed) || rep.Yard || rep.State != nil || len(rep.Faults) != 2 || len(rep.Steps) == 0 || rep.Steps[0].Done {
+	if !errors.Is(err, errCheckFailed) || rep.Yard || rep.State != nil || len(rep.Faults) != 2 || len(rep.Steps) != 1 || rep.Steps[0].Key != stepLimits || rep.Next != nil {
 		t.Fatalf("json: %v %+v", err, rep)
 	}
 	if _, err := os.Stat(filepath.Join(home, "yard.db")); err == nil {
@@ -219,8 +220,8 @@ func TestDoctorEmptyHome(t *testing.T) {
 }
 
 // After init and before anything else: the daemon and the yardmaster are what
-// is missing (exit 1), no step is done, and the next one is the depot. The
-// store is as it was.
+// is missing (exit 1), and with no depot and no work the setup reads done:
+// the limits note alone, no next step. The store is as it was.
 func TestDoctorFreshYard(t *testing.T) {
 	home := newHomeDir(t)
 	answeredTools(t, "git", "herdr", "claude")
@@ -246,25 +247,19 @@ func TestDoctorFreshYard(t *testing.T) {
 	wantText(t, out, "yardr doctor: the yard in ", "Needed on this machine", "The yard", "Setup", "Optional",
 		"the harness of the yard's default, crew member yardmaster: answers its version flag (tool 1.2.3)",
 		"FAULT  daemon ", hereAt(home, "yardr init --start"), "FAULT  yardmaster  ", "yardmaster is not running: the daemon starts it",
-		"ok     crew ", "ok     held ", "todo   a depot: no repository is a depot of this yard yet",
-		"todo   routes for new, review and approved: no route for new, review and approved",
+		"ok     crew ", "ok     held ", "note   the subscriptions' limits, from aiquokka (optional): no source named aiquokka is declared",
 		"not configured  web view: ", "not configured  hooks: ", "not configured  sources: ", "not configured  packs: ", "not configured  login service: ",
-		"2 faults", "Next step: a depot.\n  ", hereAt(home, "yardr depot add <depot> <path> --base <branch>"))
-	if strings.Contains(out, "done ") {
-		t.Errorf("a step is done on a fresh yard:\n%s", out)
+		"2 faults", "The setup is complete.")
+	if strings.Contains(out, "done ") || strings.Contains(out, "todo ") || strings.Contains(out, "Next step") {
+		t.Errorf("a fresh yard names a depot step or a next step:\n%s", out)
 	}
 	rep, err := doctorJSON(t, st)
 	if !errors.Is(err, errCheckFailed) || !rep.Yard || rep.State == nil || rep.State.Daemon || rep.State.Yardmaster == nil ||
-		!rep.State.Yardmaster.CrewMember || rep.State.Yardmaster.Running || rep.Next == nil || rep.Next.Key != stepDepot || len(rep.Optional) != 8 {
+		!rep.State.Yardmaster.CrewMember || rep.State.Yardmaster.Running || rep.Next != nil || len(rep.Steps) != 1 || rep.Steps[0].Key != stepLimits || len(rep.Optional) != 8 {
 		t.Fatalf("json: %v %+v", err, rep)
 	}
-	// For a home that is not the default, the next step's command names it
-	// like every other.
-	if !config.IsDefaultHome(rep.Home) && !strings.Contains(out, "\n  yardr --home "+rep.Home+" depot add <depot>") {
-		t.Errorf("the next step's command goes to another yard:\n%s", out)
-	}
-	if rep.Next.Next != "yardr depot add <depot> <path> --base <branch>" {
-		t.Errorf("json next = %q", rep.Next.Next)
+	if rep.Steps[0].Depot != "" || rep.Steps[0].Next != "yardr source add aiquokka, once aiquokka is on PATH (installing it: yardr docs integrations)" {
+		t.Errorf("json limits step = %+v", rep.Steps[0])
 	}
 	if after, _ := st.Head(ctx); after != before {
 		t.Fatalf("doctor wrote to the store: head %d, was %d", after, before)
@@ -403,7 +398,7 @@ func TestDoctorSetUpYard(t *testing.T) {
 			t.Fatalf("next step = %s, want %s: %+v", got, want, steps)
 		}
 	}
-	next(stepDepot)
+	next("complete") // no depot and no work: the setup reads done
 	depot := gitDepot(t, st)
 	next(stepDepotFiles) // written, not committed: not where yardr reads them
 	commitDepot(t, depot)
@@ -1371,8 +1366,9 @@ func TestSetupStepsDirDepot(t *testing.T) {
 	if strings.Contains(out.String(), "Tell us it landed") {
 		t.Fatalf("a dir depot landed nothing, yet doctor says to tell us it landed:\n%s", out.String())
 	}
-	// The steps of no yard are those of a yard with a repository to come.
-	if none := noSetup(); len(none) != 9 || none[4].Key != stepLanding || nextStep(none).Key != stepDepot {
+	// The steps of no yard are those of a yard with nothing waiting on a
+	// depot: the yard-level step alone, which the setup does not wait for.
+	if none := noSetup(); len(none) != 1 || none[0].Key != stepLimits || nextStep(none) != nil {
 		t.Fatalf("no yard: %+v", none)
 	}
 }

@@ -149,6 +149,13 @@ func landedBead(steps []setupStep) bool {
 }
 
 func (s setupState) steps() []setupStep {
+	// A yard whose first work needs no depot is set up with none: with
+	// no depot and no work waiting on one, the list holds only the
+	// yard-level step. The depot steps start when the work first needs
+	// one, and once a depot exists they read as before.
+	if len(s.depots) == 0 && !slices.ContainsFunc(s.beads, needsDepot) {
+		return []setupStep{s.limitsStep()}
+	}
 	depot := "<depot>"
 	if len(s.depots) > 0 {
 		depot = s.depots[0].Name
@@ -369,6 +376,11 @@ func (s setupState) limitsStep() setupStep {
 // work reports whether b is a bead of work in a depot: not a crew member's
 // journal or a memory.
 func work(b store.Bead) bool { return b.Depot != nil && !store.NotWork[b.Type] }
+
+// needsDepot reports whether b is work with no depot to do it in: of a work
+// type, as work's type half says, but made without a depot. A depot-less
+// bead is what starts the depot steps on a yard with no depot.
+func needsDepot(b store.Bead) bool { return b.Depot == nil && !store.NotWork[b.Type] }
 
 func (s setupState) beadStep(depot string) setupStep {
 	step := setupStep{Key: stepFirstBead, Title: "a first bead"}

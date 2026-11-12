@@ -236,6 +236,16 @@ func setup(t *testing.T, st store.API, args ...string) string {
 	return out
 }
 
+// depotlessWork files a bead of work with no depot: the work that starts
+// the depot steps on a yard with none, so a setup test walks the depot's
+// pages as it did when every yard needed one first.
+func depotlessWork(t *testing.T, st store.API) {
+	t.Helper()
+	if _, err := st.CreateBead(context.Background(), store.NewBead{Title: "work before the depot", Body: "Done when it is done."}, "me"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // todo is the key of the first setup step not done, "" when all are.
 func todo(t *testing.T, st store.API) string {
 	t.Helper()
@@ -273,6 +283,7 @@ func TestSetupForms(t *testing.T) {
 	f := &former{answers: map[string]any{"title": "Say hello", "goal": "HELLO.md says hello. Done when it is committed."},
 		goes: []string{goHere, goHere, goHere}}
 	home, st, repo := setupYard(t, f)
+	depotlessWork(t, st)
 	ctx := context.Background()
 	// Something staged in the checkout stays as it is: the setup commits nothing.
 	if err := os.WriteFile(filepath.Join(repo, "wip.txt"), []byte("wip\n"), 0o644); err != nil {
@@ -384,6 +395,7 @@ func TestSetupForms(t *testing.T) {
 func TestSetupGoesOnWhereTheYardStands(t *testing.T) {
 	f := &former{answers: map[string]any{"name": "web", "title": "Say hello", "goal": "HELLO.md says hello."}}
 	home, st, _ := setupYard(t, f)
+	depotlessWork(t, st)
 	for _, tc := range []struct {
 		step  string
 		asked []string // the page's keyed fields, then how to go on
@@ -455,6 +467,7 @@ func TestSetupDirDepot(t *testing.T) {
 	}
 	f := &former{answers: map[string]any{"path": dir}, goes: []string{goHere}}
 	home, st, _ := setupYard(t, f)
+	depotlessWork(t, st)
 	out := setup(t, st)
 	wantText(t, out, "$ yardr --home "+home+" depot init notes", "applied pack dir to depot notes: ", "test: none set. Depot notes is a directory depot")
 	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
@@ -474,6 +487,7 @@ func TestSetupDirDepot(t *testing.T) {
 func TestSetupCancelled(t *testing.T) {
 	f := &former{answers: map[string]any{"name": "web", "title": "Say hello", "goal": "HELLO.md says hello."}}
 	home, st, repo := setupYard(t, f)
+	depotlessWork(t, st)
 	key := func(k string) func(huh.Field) bool {
 		return func(fld huh.Field) bool { return fld.GetKey() == k }
 	}
@@ -526,6 +540,7 @@ func TestSetupCancelled(t *testing.T) {
 func TestSetupBaseThatIsNoLocalBranch(t *testing.T) {
 	f := &former{answers: map[string]any{"name": "web"}, goes: []string{goHere}}
 	_, st, repo := setupYard(t, f)
+	depotlessWork(t, st)
 	// A tag resolves as a base and is no branch an assembly could land on.
 	gitIn(t, repo, "tag", "v1")
 	f.answers["base"] = "v1"
@@ -547,6 +562,7 @@ func TestSetupBaseThatIsNoLocalBranch(t *testing.T) {
 func TestSetupTalkToTheYardmaster(t *testing.T) {
 	f := &former{answers: map[string]any{"name": "app", "title": "Say hello", "goal": "HELLO.md says hello."}, goes: []string{goYardmaster}}
 	home, st, _ := setupYard(t, f)
+	depotlessWork(t, st)
 	mustAs(t, st, "Jo", "user", "add", "me")
 	// The setup runs as me, who is its operator here: the import
 	// subscribes the yard it makes.
@@ -606,10 +622,40 @@ func TestSetupTalkToTheYardmaster(t *testing.T) {
 }
 
 // Where no form can run (no terminal, --json, an agent's own pane) setup
-// prints the steps and the command for the next one, and asks nothing.
+// prints the steps and the command for the next one, and asks nothing. With
+// no depot and no work it prints the short done list instead: the limits
+// note alone, no next step.
 func TestSetupWithoutForms(t *testing.T) {
-	f := &former{}
+	f := &former{answers: map[string]any{"link": false}}
 	home, st, _ := setupYard(t, f)
+	// With forms, there is no depot page to offer: the only setup action is
+	// the completion message. The separate link offer still runs.
+	withForms := setup(t, st)
+	wantText(t, withForms, "The setup is complete.")
+	if strings.Contains(withForms, "\nSetup: ") || !slices.Equal(f.asked, []string{"link"}) {
+		t.Fatalf("setup offered a page or asked something besides linking: %v\n%s", f.asked, withForms)
+	}
+	f.asked = nil
+	setInteractive(t, false)
+	out := setup(t, st)
+	wantText(t, out, "  note   the subscriptions' limits, from aiquokka (optional): no source named aiquokka is declared")
+	for _, not := range []string{"todo ", "Next step"} {
+		if strings.Contains(out, not) {
+			t.Fatalf("a yard with no depot and no work names %q:\n%s", not, out)
+		}
+	}
+	if len(f.asked) != 0 || todo(t, st) != "" {
+		t.Fatalf("asked %v, next %q", f.asked, todo(t, st))
+	}
+	var done setupReport
+	if err := json.Unmarshal([]byte(setup(t, st, "--json")), &done); err != nil {
+		t.Fatal(err)
+	}
+	if len(done.Steps) != 1 || done.Steps[0].Key != stepLimits || done.Next != nil {
+		t.Fatalf("json %+v", done)
+	}
+	// Once work needs a depot, the depot steps show, starting at a depot.
+	depotlessWork(t, st)
 	check := func(out string) {
 		t.Helper()
 		wantText(t, out, "  todo   a depot: ", "Next step: a depot.", hereAt(home, "yardr depot add <depot> <path> --base <branch>"))
@@ -617,7 +663,6 @@ func TestSetupWithoutForms(t *testing.T) {
 			t.Fatalf("asked %v", f.asked)
 		}
 	}
-	setInteractive(t, false)
 	check(setup(t, st))
 	setInteractive(t, true)
 	env := yardEnv(t, st)
@@ -635,8 +680,9 @@ func TestSetupWithoutForms(t *testing.T) {
 }
 
 // Once the first bead has merged, yardr setup lists herdr's server at
-// login as optional; before that it lists nothing of it, and never a todo
-// that would hold the setup open.
+// login as optional, as it does on a fresh yard, which reads done; on a
+// yard on its way it lists nothing of it, and never a todo that would
+// hold the setup open.
 func TestSetupListsHerdrLoginWhenComplete(t *testing.T) {
 	t.Parallel()
 	home := newHomeDir(t)
@@ -649,8 +695,8 @@ func TestSetupListsHerdrLoginWhenComplete(t *testing.T) {
 	if _, err := run(t, a.rootCmd(), "init", "--harness", "claude", "--operator", "me"); err != nil {
 		t.Fatal(err)
 	}
-	if out := setup(t, st); strings.Contains(out, "Optional") || strings.Contains(out, "herdr's server") {
-		t.Fatalf("listed on a fresh yard:\n%s", out)
+	if out := setup(t, st); !strings.Contains(out, "\nOptional\n") || !strings.Contains(out, "herdr's server") {
+		t.Fatalf("not listed on a fresh yard, which reads done:\n%s", out)
 	}
 	depot := committedDepot(t, st)
 	group := func(name, runner string, cfg map[string]any) {
@@ -706,32 +752,33 @@ func TestSetupListsHerdrLoginWhenComplete(t *testing.T) {
 	}
 }
 
-// The onboarding ends in the same forms: once the yardmaster is up it asks
-// whether to talk to the yardmaster or keep going here, and "here" is the first
-// page of the setup. Run for yardr setup itself, the command asks no second
+// The onboarding ends in the hand-off: with no depot and no work the setup
+// reads done, so no page is offered to keep going to, and the only answer
+// is the yardmaster. Run for yardr setup itself, the command asks no second
 // time.
 func TestOnboardingKeepsGoing(t *testing.T) {
 	home := newHomeDir(t)
+	actAsOperator(t)
 	setInteractive(t, true)
 	stubLookPath(t, "claude", "git", "herdr")
 	st := storetest.New(t)
 	stubStart(t, st, yardmasterHandle())
 	stubPane(t, answeredPane)
-	focused := stubFocus(t)
-	f := &former{t: t, goes: []string{goHere}, abort: func(fld huh.Field) bool { return fld.GetKey() == "path" }}
+	chats := stubChat(t)
+	f := &former{t: t, goes: []string{goYardmaster}}
 	stubAsk(t, f.ask)
 
-	out, err := run(t, testApp(t, st, home).rootCmd(), "setup")
+	out, err := run(t, testApp(t, st, home, "USER="+os.Getenv("USER")).rootCmd(), "setup")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantText(t, out, "yard created", "yardmaster is running, in herdr", "Setup: a depot",
-		"Cancelled at: a depot.", "`yardr --home "+home+" setup` goes on from here")
-	if len(*focused) != 0 {
-		t.Errorf("focused %v for an answer of here", *focused)
+	wantText(t, out, "yard created", "yardmaster is running, in herdr",
+		"You left the chat; yardmaster keeps running. To come back: yardr --home "+home+" chat\n")
+	if !slices.Equal(*chats, []string{"yardmaster, expecting yardmaster"}) {
+		t.Errorf("chats %v:\n%s", *chats, out)
 	}
-	if n := strings.Count(out, "Setup: a depot"); n != 1 {
-		t.Errorf("the depot's page ran %d times:\n%s", n, out)
+	if strings.Contains(out, "\nSetup: ") {
+		t.Errorf("a setup page ran on a yard that reads done:\n%s", out)
 	}
 	if n := len(slices.DeleteFunc(slices.Clone(f.asked), func(k string) bool { return k != "go" })); n != 1 {
 		t.Errorf("asked how to go on %d times: %v", n, f.asked)
@@ -802,7 +849,13 @@ func TestStepsGoByRoutes(t *testing.T) {
 	if got := s.packNext("web"); got != "yardr depot init web" {
 		t.Errorf("next when the default name resolves to a non-embedded import = %q", got)
 	}
-	if none := noSetup(); none[1].Next != `yardr bead ask --new "Set up depot <depot> from starter?" --context "the operator must approve the pack's import" --run "pack apply starter --depot <depot>"` || none[2].Next != none[1].Next {
+	// Work with no depot starts the depot steps: the steps name the import
+	// for the depot to come.
+	started := setupState{beads: []store.Bead{{Type: "task"}}}.steps()
+	if len(started) != 9 || started[1].Next != `yardr bead ask --new "Set up depot <depot> from starter?" --context "the operator must approve the pack's import" --run "pack apply starter --depot <depot>"` || started[2].Next != started[1].Next {
+		t.Errorf("work with no depot: %+v", started)
+	}
+	if none := noSetup(); len(none) != 1 || none[0].Key != stepLimits || nextStep(none) != nil {
 		t.Errorf("no yard: %+v", none)
 	}
 }

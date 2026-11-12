@@ -274,6 +274,7 @@ func TestSetupGuideShowsNoCommands(t *testing.T) {
 			f := &former{answers: map[string]any{"title": "Say hello", "goal": "HELLO.md says hello."},
 				goes: []string{goHere, goHere, goHere}}
 			_, st, _ := setupYard(t, f)
+			depotlessWork(t, st)
 			if _, err := run(t, (&app{st: st}).rootCmd(), "settings", "set", styleSetting, style, "--actor", yardOperator(context.Background(), st)); err != nil {
 				t.Fatal(err)
 			}

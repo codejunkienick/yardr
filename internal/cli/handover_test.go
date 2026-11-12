@@ -169,6 +169,7 @@ func TestOnboardingWithASilentYardmasterOpensNoChat(t *testing.T) {
 func TestHandOverAsSomeoneWhoIsNoUser(t *testing.T) {
 	f := &former{answers: map[string]any{"name": "web"}, goes: []string{goYardmaster}}
 	home, st, _ := setupYard(t, f)
+	depotlessWork(t, st)
 	focused := stubFocus(t)
 	chats := stubChat(t)
 	if err := st.CrewStarted(context.Background(), "yardmaster", yardmasterHandle()); err != nil {
@@ -187,6 +188,7 @@ func TestHandOverAsSomeoneWhoIsNoUser(t *testing.T) {
 func TestHandOverReportsAViewThatFails(t *testing.T) {
 	f := &former{answers: map[string]any{"name": "web"}, goes: []string{goYardmaster}}
 	_, st, _ := setupYard(t, f)
+	depotlessWork(t, st)
 	mustAs(t, st, "Jo", "user", "add", "me")
 	if err := st.CrewStarted(context.Background(), "yardmaster", yardmasterHandle()); err != nil {
 		t.Fatal(err)

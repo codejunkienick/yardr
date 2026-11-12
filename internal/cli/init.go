@@ -347,11 +347,11 @@ func (a *app) resume(w, warn io.Writer, ctx context.Context, cfg *config.Config)
 	if err != nil {
 		return err
 	}
-	steps, err := setupSteps(ctx, st)
+	depots, err := st.Depots(ctx) // the depot, not the next step: none reads done
 	if err != nil {
 		return err
 	}
-	if next := nextStep(steps); next == nil || next.Key != stepDepot {
+	if len(depots) > 0 {
 		return nil // a yard with a depot is past its onboarding
 	}
 	crew, err := st.Crew(ctx)

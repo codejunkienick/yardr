@@ -304,6 +304,7 @@ func TestSetupOffersToBeToldOfLandedBeads(t *testing.T) {
 	f := &former{answers: map[string]any{"title": "Say hello", "goal": "HELLO.md says hello.", "landed": true, "link": false},
 		goes: []string{goHere, goHere, goHere, goHere, goHere, goHere, goHere}}
 	home, st, _ := setupYard(t, f)
+	depotlessWork(t, st)
 	ctx := context.Background()
 	if _, err := st.AddUser(ctx, "me", "Jo"); err != nil {
 		t.Fatal(err)

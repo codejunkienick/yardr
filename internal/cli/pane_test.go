@@ -312,6 +312,7 @@ func TestOnboardingOffersTheYardmastersPane(t *testing.T) {
 func TestSetupTalkToTheYardmasterOffersItsPane(t *testing.T) {
 	f := &former{answers: map[string]any{"name": "web"}, goes: []string{goYardmaster}, panes: []string{paneOpen, paneOpen}}
 	home, st, _ := setupYard(t, f)
+	depotlessWork(t, st)
 	mustAs(t, st, "Jo", "user", "add", "me")
 	chats := stubChat(t)
 	// No herdr pane: the run's map carries none, and the process blank

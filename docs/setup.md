@@ -44,6 +44,11 @@ and takes the first one not done. It keeps no state of its own, so it goes on
 where the yard stands, whoever did the steps before: these forms, the yardmaster
 in conversation with you, or you on the command line. Run it again at any time.
 
+With no depot the list reads done: a yard whose first work needs no depot is
+set up with none, and `yardr doctor` and `yardr setup` print that. The depot
+steps start when the work first needs one, a bead of work with no depot to do
+it in, and read as before once a depot exists.
+
 The yardmaster's first run reads the same list through `yardr doctor`. There
 is no second list to keep in step with it.
 
@@ -81,8 +86,8 @@ list ([below](#where-no-form-runs)).
 
 The steps, as the yardmaster takes them:
 
-1. **A depot.** It asks for the repository's path and its base branch, then
-   `yardr depot add <depot> <path> --base <branch>`.
+1. **A depot.** When the work first needs one, it asks for the repository's
+   path and its base branch, then `yardr depot add <depot> <path> --base <branch>`.
 2. **The depot's way of working.** The depot is set up in one import, from
    the yard's default pack: the flow and its stage files, the groups that
    build, review and land, and their routes. That is every step of the list
@@ -407,7 +412,7 @@ operator's.
 |---|---|---|
 | 1 | `yardr doctor --json` | `yard`: `false` on a home with no yard, and nothing is created by asking. `machine`: each program with `found` (a harness that answers its version flag as another program is not found: [doctor.md](doctor.md#a-program-that-answers-as-another)) and, for a harness, `harness`, the kind to give `init` ([doctor.md](doctor.md#json)). Exit 1 while something the yard needs is missing |
 | 2 | `yardr init --harness <kind> [--operator <name>] [--yardmaster <name>] [--model <model>] [--style <style>] [--about "<line>"] --json` | `home`, `harness`, `yardmaster`, `operator`, `operator_style`, `operator_note`, and what a second run kept: `yardmaster_kept` and `settings_kept` (a list, empty on a new yard). Run again it makes nothing twice. A run that finished one cut short has `found` and `added` ([configuration.md](configuration.md#creating-a-yard-the-onboarding-and-yardr-init)). It needs no herdr server and starts nothing without `--start` |
-| 3 | `yardr setup --json`, here and after any step | `home`, `steps` (each `key`, `title`, `done`, `detail`, `next`, and `optional` on a step the setup does not wait for) and `next`, the first step not done that the setup waits for, with its `depot` once there is one. The keys, in order: `depot`, `depot_files`, `builders`, `reviewers`, `landing`, `routes`, `limits` (optional), `first_bead`, `merged_bead`. Exit 2 before step 2 |
+| 3 | `yardr setup --json`, here and after any step | `home`, `steps` (each `key`, `title`, `done`, `detail`, `next`, and `optional` on a step the setup does not wait for) and `next`, the first step not done that the setup waits for, with its `depot` once there is one. The keys, in order: `depot`, `depot_files`, `builders`, `reviewers`, `landing`, `routes`, `limits` (optional), `first_bead`, `merged_bead`. With no depot and no bead of work waiting on one, `steps` holds only `limits` and `next` is null. Exit 2 before step 2 |
 | 4 | `yardr depot add <depot> <path> --base <branch> --json`; for a directory that is no git checkout, without `--base` | `name`, `path`, `kind` (`git` or `dir`) and `base` (`""` for a dir depot). Run again it changes the depot to what it says, except that only the operator changes its path, base or test command |
 | 5 | `yardr depot init <depot> --yes --json` | exit 2 and `missing`, a list of flags, each `--<flag> <name>=<what is wanted>`: `--bind <group>=<kind>[:<model>]` wants a harness for a group of agents, `--members <group>=<users>` the users of a group of people, by comma, or nothing after the `=` for anyone |
 | 6 | the same with a flag for each entry of `missing`, the name kept: `yardr depot init <depot> --yes --bind builders=claude --bind reviewers=claude --members backlog= --members decisions=<operator> --json` | `result`, with `pack`, `depot` and how many objects were `created`, `changed` and `unchanged`; `plan` and `answers`, what it wrote and with which answers; `test`, the depot's test command where the repository says one ([above](#the-test-command)). Run again, `created` is 0. Still exit 2 with `missing`: ask for those too |

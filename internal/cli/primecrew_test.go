@@ -12,19 +12,25 @@ import (
 	"yardr.dev/yardr/internal/store"
 )
 
-// A fresh yard's yardmaster still primes with its First run section: the
-// setup's steps are its job until every step is done.
+// A fresh yard reads done, so its yardmaster primes with the done line and
+// no First run section; once work needs a depot the setup is todo again,
+// and the section is back: the setup's steps are its job until every step
+// is done.
 func TestPrimeCrewKeepsFirstRunWhileSetupTodo(t *testing.T) {
 	t.Parallel()
 	st := userYard(t)
+	if out := mustAs(t, st, "yardmaster", "prime", "--crew", "yardmaster"); !strings.Contains(out, setupDoneLine) || strings.Contains(out, "## First run") {
+		t.Errorf("a fresh yard's prime is not the done line:\n%s", out)
+	}
+	depotlessWork(t, st)
 	out := mustAs(t, st, "yardmaster", "prime", "--crew", "yardmaster")
 	for _, want := range []string{"## First run", "Go on from the first step not done", "`yardr docs setup as a conversation`"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("a fresh yard's prime lacks %q:\n%s", want, out)
+			t.Errorf("a yard whose setup is todo primes without %q:\n%s", want, out)
 		}
 	}
 	if strings.Contains(out, setupDoneLine) {
-		t.Errorf("a fresh yard's prime says the setup is done:\n%s", out)
+		t.Errorf("a yard whose setup is todo primes done:\n%s", out)
 	}
 }
 
@@ -35,6 +41,7 @@ func TestPrimeCrewReplacesFirstRunWhenSetupComplete(t *testing.T) {
 	t.Parallel()
 	st := userYard(t)
 	ctx := context.Background()
+	depotlessWork(t, st) // the fresh prime carries the section to measure
 	fresh := mustAs(t, st, "yardmaster", "prime", "--crew", "yardmaster")
 
 	depot := committedDepot(t, st)
@@ -563,6 +570,12 @@ func testPrimeCrewHostedYardHasNoTerminal(t *testing.T) {
 	t.Helper()
 	st := userYard(t)
 	ctx := context.Background()
+	// Filed first: work with no depot keeps every prime below on a setup
+	// still todo, so the comparisons read the section, not the list.
+	b, err := st.CreateBead(ctx, store.NewBead{Title: "first"}, "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
 	// A member with no role file is told as well.
 	mustAs(t, st, "jo", "crew", "add", "clerk", "--set", "kind=claude")
 	prime := func(name string, more ...string) string {
@@ -695,10 +708,6 @@ func testPrimeCrewHostedYardHasNoTerminal(t *testing.T) {
 	}
 
 	// A builder's prime has no role text to supersede and says nothing of it.
-	b, err := st.CreateBead(ctx, store.NewBead{Title: "first"}, "jo")
-	if err != nil {
-		t.Fatal(err)
-	}
 	if bead := mustAs(t, st, "jo", "prime", "--bead", b.ID); strings.Contains(bead, "No terminal") || strings.Contains(bead, "Delegation is on here") {
 		t.Errorf("a builder's prime on a hosted yard carries the section:\n%s", bead)
 	}

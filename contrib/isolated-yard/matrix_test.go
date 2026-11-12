@@ -434,9 +434,9 @@ func stepDoctor(t *testing.T, y *yard) {
 	if rep.State.Server != "running" || !rep.State.Daemon || !rep.State.Yardmaster.Running {
 		t.Fatalf("doctor: %+v; want the server, the daemon and the yardmaster running", rep.State)
 	}
-	// A yard with nothing in it asks for a depot first.
-	if rep.Next == nil || rep.Next.Key != "depot" {
-		t.Fatalf("doctor: next step %+v, want depot", rep.Next)
+	// A yard with nothing in it reads done: no depot, no work waiting on one.
+	if rep.Next != nil {
+		t.Fatalf("doctor: next step %+v, want the setup done", rep.Next)
 	}
 }
 

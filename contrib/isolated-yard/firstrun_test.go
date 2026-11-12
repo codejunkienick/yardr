@@ -63,8 +63,9 @@ type refusal struct {
 }
 
 // nextStep is the key of the first setup step not done, from yardr setup
-// --json, and the depot it is about.
-func nextStep(t *testing.T, d string, as ...string) (key, depot string) {
+// --json, the depot it is about, and the keys of the whole list; the key
+// is "" when the setup reads done.
+func nextStep(t *testing.T, d string, as ...string) (key, depot string, keys []string) {
 	t.Helper()
 	var s struct {
 		Home  string `json:"home"`
@@ -77,10 +78,16 @@ func nextStep(t *testing.T, d string, as ...string) (key, depot string) {
 			Depot string `json:"depot"`
 		} `json:"next"`
 	}
-	if code := drive(t, d, &s, append(as, "setup")...); code != 0 || s.Next == nil || len(s.Steps) == 0 {
+	if code := drive(t, d, &s, append(as, "setup")...); code != 0 || len(s.Steps) == 0 {
 		t.Fatalf("setup --json: exit %d, %+v", code, s)
 	}
-	return s.Next.Key, s.Next.Depot
+	for _, step := range s.Steps {
+		keys = append(keys, step.Key)
+	}
+	if s.Next == nil {
+		return "", "", keys
+	}
+	return s.Next.Key, s.Next.Depot, keys
 }
 
 // The whole first run of a yard, as docs/setup.md ("For a program that
@@ -161,8 +168,11 @@ func TestFirstRunWithStdinClosed(t *testing.T) {
 	if code := drive(t, d, &again, initArgs...); code != 0 || !again.YardmasterKept || again.Operator != operator {
 		t.Fatalf("init again: exit %d, %+v", code, again)
 	}
-	if key, _ := nextStep(t, d, as...); key != "depot" {
-		t.Fatalf("after init the next step is %q, want depot", key)
+	// With no depot and no work the setup reads done: the limits step
+	// alone, no next. The program adds the depot all the same, and the
+	// depot steps start there.
+	if key, _, keys := nextStep(t, d, as...); key != "" || !slices.Equal(keys, []string{"limits"}) {
+		t.Fatalf("after init the next step is %q of %q, want the setup done with limits alone", key, keys)
 	}
 
 	// The depot: a repository with one commit on main.
@@ -184,7 +194,7 @@ func TestFirstRunWithStdinClosed(t *testing.T) {
 		dep != (depot{"web", repo, "git", "main"}) {
 		t.Fatalf("depot add: exit %d, %+v", code, dep)
 	}
-	if key, of := nextStep(t, d, as...); key != "depot_files" || of != "web" {
+	if key, of, _ := nextStep(t, d, as...); key != "depot_files" || of != "web" {
 		t.Fatalf("after depot add the next step is %q of %q, want depot_files of web", key, of)
 	}
 
@@ -241,7 +251,7 @@ func TestFirstRunWithStdinClosed(t *testing.T) {
 	if code := drive(t, d, &imp, append(importArgs, "--yes")...); code != 0 || imp.Result.Created != 0 {
 		t.Fatalf("depot init again: exit %d, created %d; want nothing made twice", code, imp.Result.Created)
 	}
-	if key, of := nextStep(t, d, as...); key != "first_bead" || of != "web" {
+	if key, of, _ := nextStep(t, d, as...); key != "first_bead" || of != "web" {
 		t.Fatalf("after depot init the next step is %q of %q, want first_bead of web", key, of)
 	}
 
@@ -265,7 +275,7 @@ func TestFirstRunWithStdinClosed(t *testing.T) {
 	if code := drive(t, d, &no, append(as, "bead", "advance", "web-none", "--to", "new")...); code != 3 || no.Error == "" {
 		t.Fatalf("advance of no bead: exit %d, %+v; want 3 and an error", code, no)
 	}
-	if key, _ := nextStep(t, d, as...); key != "merged_bead" {
+	if key, _, _ := nextStep(t, d, as...); key != "merged_bead" {
 		t.Fatalf("after the first bead the next step is %q, want merged_bead (the line's)", key)
 	}
 
