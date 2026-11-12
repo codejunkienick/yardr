@@ -36,8 +36,12 @@ closing, or holding).
    must be true before the bead leaves the stage. The note lists every file
    you wrote or changed, by path: with no diff to read, it is how the
    reviewer finds your work. End it with the test line, which has no commit
-   here:
+   here, and the change's size:
    `test: <command>: pass` (or `test: none`, for a depot with no test command).
+   `lines: +A -R product Go, +A -R tests, +A -R docs, +A -R other`,
+   counted across the files the note lists. Product Go is `*.go` without
+   `*_test.go`; tests are `*_test.go`; docs are `*.md`; everything else is
+   other, in one bucket.
 
 If you are stuck and the stage offers no outcome for it, write a note on the
 bead (below), then `yardr bead hold <id>`; a held bead waits for whoever runs

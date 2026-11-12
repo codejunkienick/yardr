@@ -276,6 +276,52 @@ func TestBuilderRolesNameWhereTheHarnessRefusesRm(t *testing.T) {
 	}
 }
 
+// Every builder role has its handover state the change's size in four
+// buckets (yardr-smtb), so the growth of the codebase is visible per bead
+// where a person and a reviewer read it: product Go, tests, docs, and the
+// rest in one bucket, so non-Go diffs stay meaningful. In a git depot the
+// note keeps its order (the test line, the size, Friction last: the
+// friction trial reads notes' last lines); a directory depot has no branch
+// to take numstat from, so its builder counts across the files the note
+// lists. The sentences are compared with the lines folded, so rewrapping
+// breaks nothing; the line's form is exact.
+func TestBuilderRolesStateTheChangeSize(t *testing.T) {
+	files := packFiles(t)
+	git := []string{"starter/roles/builder.md", "contributors/roles/builder.md", "design/roles/builder.md", "website/roles/builder.md"}
+	for _, name := range append(slices.Clone(git), "dir/roles/builder.md") {
+		if want := "`lines: +A -R product Go, +A -R tests, +A -R docs, +A -R other`"; !strings.Contains(files[name], want) {
+			t.Errorf("%s lacks the size line %s", name, want)
+		}
+		folded := strings.Join(strings.Fields(files[name]), " ")
+		if want := "Product Go is `*.go` without `*_test.go`; tests are `*_test.go`; docs are `*.md`; everything else is other, in one bucket."; !strings.Contains(folded, want) {
+			t.Errorf("%s lacks the bucket definitions: %s", name, want)
+		}
+	}
+	for _, name := range git {
+		body := files[name]
+		test := strings.Index(body, "`test: <command> @ <commit>: pass, <n> ok, 0 failed`")
+		lines := strings.Index(body, "`lines: +A -R product Go")
+		friction := strings.Index(body, "After the test line, one last line: `Friction: <what>`")
+		switch {
+		case test < 0 || lines < 0 || friction < 0:
+			t.Errorf("%s: test %d, lines %d, friction %d: the handover is not all there", name, test, lines, friction)
+		case !(test < lines && lines < friction):
+			t.Errorf("%s: the size rule sits outside the test line and the Friction line", name)
+		}
+		folded := strings.Join(strings.Fields(body), " ")
+		if want := "counted from the numstat of the branch against the base."; !strings.Contains(folded, want) {
+			t.Errorf("%s lacks %q", name, want)
+		}
+	}
+	dir := files["dir/roles/builder.md"]
+	if test, lines := strings.Index(dir, "`test: <command>: pass`"), strings.Index(dir, "`lines: +A -R product Go"); test < 0 || lines < 0 || test > lines {
+		t.Errorf("dir/roles/builder.md: the size rule does not follow the test line")
+	}
+	if want := "counted across the files the note lists."; !strings.Contains(strings.Join(strings.Fields(dir), " "), want) {
+		t.Errorf("dir/roles/builder.md lacks %q", want)
+	}
+}
+
 // A pack's stage file's one line on the map of the flow (yardr prime
 // --bead, the brief) is its `summary:` line, else its first sentence, and
 // the map cuts it at store.SummaryMax characters. Most pack summaries fit
