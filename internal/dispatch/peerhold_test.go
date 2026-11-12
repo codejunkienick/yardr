@@ -308,6 +308,50 @@ func (y *peerYard) run(t *testing.T) (stop func()) {
 	return stop
 }
 
+// testClock is a clock the test moves: load reads it, add moves it
+// forward, and tick advances it with real time until the test ends. The
+// peer tests' clock stands still, so a wait set under it (a failed push's
+// retry, a peer left alone) never expires; a yard's clock is the wall's,
+// and a daemon test that fails a push needs one that moves too. Reads and
+// writes are atomic: the daemon and the receiver read it from their own
+// goroutines while the test moves it.
+type testClock struct {
+	now atomic.Int64 // unix nanos
+}
+
+func newTestClock(from time.Time) *testClock {
+	c := &testClock{}
+	c.now.Store(from.UnixNano())
+	return c
+}
+
+func (c *testClock) load() time.Time { return time.Unix(0, c.now.Load()).UTC() }
+
+func (c *testClock) add(d time.Duration) { c.now.Add(int64(d)) }
+
+// tick advances the clock with real time, a tenth of a second at a time,
+// until the test ends, so waits expire about when they would on a yard
+// while request stamps stay within skew of the receiver's check, which
+// reads the same clock.
+func (c *testClock) tick(t *testing.T) {
+	t.Helper()
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+	go func() {
+		step := 100 * time.Millisecond
+		tick := time.NewTicker(step)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tick.C:
+				c.add(step)
+			}
+		}
+	}()
+}
+
 // The daemon asks a yard that holds no question at the rhythm of before
 // (PeerPoll), and holds from the first question the yard does hold: then it
 // asks once a hold, and what is queued for it arrives as it is queued, with
@@ -389,16 +433,56 @@ func TestPeersDaemonHoldsOrPolls(t *testing.T) {
 // holding.
 func TestPeersDaemonGetsWhatQueuedWhileAway(t *testing.T) {
 	t.Parallel()
+	t.Run("retries a pong after its peer comes back", func(t *testing.T) {
+		clock := newClock()
+		a, b := newPeerYard(t, "a", clock), newPeerYard(t, "b", clock)
+		link(t, a, b, false, true)
+		now := newTestClock(clock.now)
+		now.tick(t)
+		dispatch.SetClock(b.d, now.load)
+		a.rc.SetClock(now.load)
+		ctx := context.Background()
+
+		// Taking the held ping queues its pong at b, as the ghost's take
+		// would have done while the daemon was stopped.
+		id := a.send(t, "b")
+		held := a.waiting(t, "b")
+		if len(held) != 1 || held[0].ID != id {
+			t.Fatalf("a holds %+v, want the ping %s", held, id)
+		}
+		if _, err := b.own.PeerReceive(ctx, "a", a.pub, []store.PeerMessage{held[0].PeerMessage}); err != nil {
+			t.Fatalf("b takes the ping: %v", err)
+		}
+		a.down.Store(true)
+		b.run(t)
+		until(t, "b tries the pong while a is down", func() bool {
+			w := b.waiting(t, "a")
+			return len(w) == 1 && w[0].Attempts == 1
+		})
+		a.down.Store(false)
+		until(t, "the pong tried while a was down", func() bool { return a.pong(t, id) != nil })
+		until(t, "nothing waits at b for a", func() bool { return len(b.waiting(t, "a")) == 0 })
+	})
+
 	clock := newClock()
 	a, b := newPeerYard(t, "a", clock), newPeerYard(t, "b", clock)
 	link(t, a, b, false, true)
+	// The clock moves with real time, as a yard's does. The daemon is
+	// stopped with a pull held and restarted into a down window, and the
+	// stopped daemon's pull can take the ping queued meanwhile; the
+	// restarted daemon's first push of its pong then fails, and under a
+	// clock that stands still that failure never expires.
+	now := newTestClock(clock.now)
+	now.tick(t)
+	dispatch.SetClock(b.d, now.load)
+	a.rc.SetClock(now.load)
 	first := a.send(t, "b")
 	stop := b.run(t)
 	until(t, "the ping queued before b's daemon ran", func() bool { return a.pong(t, first) != nil })
 	// The pong has arrived before b has written that it was posted. A
-	// daemon stopped between the two posts it again, here to a yard that
-	// is down, and waits Backoff by a clock that stands still in this
-	// test: the second pong would wait behind it for good.
+	// daemon stopped between the two posts it again; the ticking clock
+	// expires that wait as a yard's would, and the guard keeps the two
+	// phases apart anyway.
 	until(t, "b has written that the pong was posted", func() bool { return len(b.waiting(t, "a")) == 0 })
 	stop()
 
