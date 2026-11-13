@@ -34,8 +34,9 @@ type watched struct {
 }
 
 // newWatched is the yard of one case: command is the app's, given the port the
-// yard chose for it. A backoff of zero is the yard's own.
-func newWatched(t *testing.T, byRequest bool, command func(port int) string, backoff time.Duration, watchPortWait, bindGate bool) *watched {
+// yard chose for it. A backoff of zero is the yard's own; a bind wait of zero
+// is the watched minute.
+func newWatched(t *testing.T, byRequest bool, command func(port int) string, backoff, bindWait time.Duration, watchPortWait, bindGate bool) *watched {
 	t.Helper()
 	w := &watched{yard: newYard(t), app: "demo", dir: t.TempDir(), port: freePort(t), byRequest: byRequest}
 	if bindGate {
@@ -59,6 +60,17 @@ func newWatched(t *testing.T, byRequest bool, command func(port int) string, bac
 	}
 	if backoff > 0 {
 		w.sup.Backoffs = []time.Duration{backoff}
+	}
+	// A start may take a minute to bind, not the supervisor's own ten seconds
+	// as in newYard: the app sits held at the FIFO while start, request, probe,
+	// release, exec and bind run in turn, and on a loaded machine that staging
+	// outlasts the product's patience, so watchBind's verdict would kill an app
+	// the test was about to release. Production apps are never gated, so the
+	// room is the test's own; a case that stages the verdict itself gives its
+	// own wait.
+	w.sup.BindWait = time.Minute
+	if bindWait > 0 {
+		w.sup.BindWait = bindWait
 	}
 	if err := os.WriteFile(filepath.Join(w.dir, "index.html"), []byte("hello"), 0o600); err != nil {
 		t.Fatal(err)
@@ -235,6 +247,7 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 		command       func(port int) string
 		listens       bool          // the app listens, so Run's start waits for it to
 		backoff       time.Duration // what a crash waits before its restart, in place of the yard's
+		bindWait      time.Duration // what a start may take to bind, in place of the watched minute
 		watchPortWait bool
 		bindGate      bool
 		check         func(t *testing.T, w *watched)
@@ -349,6 +362,31 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 				}
 			},
 		},
+		{
+			// The gate is held and never released, so the no-listen verdict is
+			// certain and the waiter's answer is the row's, pinned with the bind
+			// wait lowered instead of any loaded rerun. The case above stages the
+			// same answer by hand while the request waits; this one lets the
+			// supervisor give it.
+			name:     "an app that never binds is failed while the request waits for it",
+			command:  func(port int) string { return "cat bind.gate >/dev/null; exec " + loopbackApp(port) },
+			bindWait: 5 * time.Second, bindGate: true,
+			check: func(t *testing.T, w *watched) {
+				answer := w.getAsync()
+				got := takePreviewAnswer(t, answer)
+				if got.code != http.StatusServiceUnavailable || !strings.Contains(got.body, "preview demo is failed") {
+					t.Fatalf("the answer = %d %q, want the row's: 503 preview demo is failed", got.code, got.body)
+				}
+				if row := w.state(w.app); row.State != store.PreviewFailed || row.StateDetail != "no listen" || w.sup.Running(w.app) {
+					t.Fatalf("after the answer = %+v running %v, want failed with no listen and the app stopped", row, w.sup.Running(w.app))
+				}
+				waitFor(t, "the request to end", func() bool {
+					w.sup.mu.Lock()
+					defer w.sup.mu.Unlock()
+					return w.sup.inflight[w.app] == 0
+				})
+			},
+		},
 	}
 	for _, byRequest := range []bool{true, false} {
 		name := "started by Run"
@@ -361,7 +399,7 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
-					w := newWatched(t, byRequest, tc.command, tc.backoff, tc.watchPortWait, tc.bindGate)
+					w := newWatched(t, byRequest, tc.command, tc.backoff, tc.bindWait, tc.watchPortWait, tc.bindGate)
 					w.up(t, tc.listens)
 					tc.check(t, w)
 				})
