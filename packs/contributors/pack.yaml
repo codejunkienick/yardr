@@ -31,7 +31,7 @@ flows:
       new:      { group: builders,    outcomes: { done: review, question: decide, dropped: closed }, manual: [backlog] }
       review:   { group: reviewers,   outcomes: { done: approved, changes: new, question: decide, dropped: closed } }
       approved: { group: assembly,    outcomes: { done: merged, failed: new, question: decide, dropped: closed } }
-      decide:   { group: decisions,   outcomes: { dropped: closed }, manual: [backlog, new] }
+      decide:   { group: decisions,   file: flows/issue/decide.md, outcomes: { dropped: closed }, manual: [backlog, new] }
       merged:   { end: true }
       closed:   { end: true }
 
@@ -130,7 +130,7 @@ flows:
       # would wait for an answer about a pull request that is over.
       # review-post is for a person to run the posting again, once the stored
       # review is put right after a second failure.
-      decide:      { group: decisions,    outcomes: { merged: merged, dropped: closed }, manual: [review, review-post, closed] }
+      decide:      { group: decisions,    file: flows/pr/decide.md, outcomes: { merged: merged, dropped: closed }, manual: [review, review-post, closed] }
       merged:      { end: true }
       closed:      { end: true }
 
