@@ -46,7 +46,10 @@ func TestInviteCardAndApprovalDefersToCarrier(t *testing.T) {
 		t.Fatalf("the invite stores %+v", got)
 	}
 	joined := strings.Join(got.Does, " ")
-	for _, want := range []string{"adds the user eve with the role operator", "maps eve@example.net to eve in web_jwt_users", "reports the invite to the edge for the yard mckean/edgeyard (member add)", "can approve and administer this yard"} {
+	for _, want := range []string{"adds the user eve with the role operator", "maps eve@example.net to eve in web_jwt_users", "reports the invite to the edge for the yard mckean/edgeyard (member add)", "can approve and administer this yard",
+		"eve can write to yardmaster", "Their answers spend the operator's subscription until eve has a login of their own",
+		"eve's beads wait, since no route takes them",
+		"eve gets no web view: the edge refuses a member", "they come in by a paired device"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the invite card lacks %q:\n%s", want, joined)
 		}
@@ -119,6 +122,64 @@ func TestInviteCardAndApprovalDefersToCarrier(t *testing.T) {
 	}
 	if _, err := y3.GetUser(y3.ctx, "eve"); err == nil {
 		t.Fatal("an operator invite wrote the user after the role gate refused")
+	}
+
+	// Where a route takes the invited name's beads to an agent group on
+	// the operator's login, the card says whose accounts they build on,
+	// and names every serving crew member, sorted.
+	y4 := teammateYard(t)
+	if _, err := y4.PutCrew(y4.ctx, CrewMember{Name: "mayor", Runner: "herdr"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if err := y4.PutGroup(y4.ctx, Group{Name: "builders", Runner: "herdr", Config: map[string]any{"kind": "claude"}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	everyone := OriginatorAny
+	if _, err := y4.AddRoute(y4.ctx, Route{Stage: "new", Group: "builders", Originator: &everyone}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq4 := y4.ask(t, teammateAsk("user invite eve --email eve@example.net"), "yardmaster")
+	joined4 := strings.Join(y4.asked(t, seq4).Ask.Run.Does, " ")
+	for _, want := range []string{"eve can write to mayor and yardmaster", "eve's beads build on the operator's accounts on the routes that take them"} {
+		if !strings.Contains(joined4, want) {
+			t.Errorf("the invite card lacks %q:\n%s", want, joined4)
+		}
+	}
+	if strings.Contains(joined4, "wait, since no route takes them") {
+		t.Errorf("the invite card says no route takes eve's beads beside the subsidy:\n%s", joined4)
+	}
+
+	// Where every crew member's for= leaves the invited name out, the
+	// card says they can write to none, with no subscription sentence.
+	y5 := teammateYard(t)
+	y5.crew(t, map[string]any{"for": "ada"})
+	seq5 := y5.ask(t, teammateAsk("user invite eve --email eve@example.net"), "yardmaster")
+	joined5 := strings.Join(y5.asked(t, seq5).Ask.Run.Does, " ")
+	if !strings.Contains(joined5, "eve can write to none of the crew") {
+		t.Errorf("the invite card lacks the no-crew line:\n%s", joined5)
+	}
+	if strings.Contains(joined5, "spend the operator's subscription") {
+		t.Errorf("the invite card spends the subscription with no crew serving eve:\n%s", joined5)
+	}
+
+	// A matching manual route takes the bead without spending the
+	// operator's agent subscription, so the card must not say it waits
+	// because no route takes it.
+	y6 := teammateYard(t)
+	if err := y6.PutGroup(y6.ctx, Group{Name: "people", Runner: "manual"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	any6 := OriginatorAny
+	if _, err := y6.AddRoute(y6.ctx, Route{Stage: "new", Group: "people", Originator: &any6}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq6 := y6.ask(t, teammateAsk("user invite eve --email eve@example.net"), "yardmaster")
+	joined6 := strings.Join(y6.asked(t, seq6).Ask.Run.Does, " ")
+	if !strings.Contains(joined6, "eve's beads may be routed, but they do not build on the operator's accounts") {
+		t.Errorf("the invite card lacks the no-subscription route line:\n%s", joined6)
+	}
+	if strings.Contains(joined6, "eve's beads wait, since no route takes them") {
+		t.Errorf("the invite card says no route takes eve's beads beside a matching manual route:\n%s", joined6)
 	}
 }
 

@@ -153,6 +153,27 @@ func (w *wtx) userInviteCard(argv []string, asking bool) (AskRun, error) {
 		fmt.Sprintf("reports the invite to the edge for the yard %s/%s (member add): until the report lands the card reads as not yet at the edge, and nobody is admitted meanwhile.", edge.Handle, edge.Name),
 		"they set a password from the mail the edge sends to this email, then sign in; nothing the operator holds admits them.",
 	}
+	served, err := w.inviteServedCrew(name)
+	if err != nil {
+		return AskRun{}, err
+	}
+	if len(served) == 0 {
+		does = append(does, fmt.Sprintf("%s can write to none of the crew.", name))
+	} else {
+		does = append(does, fmt.Sprintf("%s can write to %s. Their answers spend the operator's subscription until %s has a login of their own.", name, strings.Join(served, " and "), name))
+	}
+	spend, hasRoute, err := w.inviteBeadsSpend(name)
+	if err != nil {
+		return AskRun{}, err
+	}
+	if spend {
+		does = append(does, fmt.Sprintf("%s's beads build on the operator's accounts on the routes that take them.", name))
+	} else if hasRoute {
+		does = append(does, fmt.Sprintf("%s's beads may be routed, but they do not build on the operator's accounts.", name))
+	} else {
+		does = append(does, fmt.Sprintf("%s's beads wait, since no route takes them.", name))
+	}
+	does = append(does, fmt.Sprintf("%s gets no web view: the edge refuses a member, and they come in by a paired device.", name))
 	if role == RoleOperator {
 		does = append(does, fmt.Sprintf("the user %s can approve and administer this yard: they hold the operator role, not only a member's.", name))
 	}
@@ -167,6 +188,64 @@ func (w *wtx) userInviteCard(argv []string, asking bool) (AskRun, error) {
 			"edge":          seen(edge.Handle, edge.Name, edge.URL),
 		},
 	}, nil
+}
+
+// inviteServedCrew are the crew members serving name, sorted: bbolt
+// iterates keys in order. Serves is the same predicate the write gate
+// uses, so a for= that already names the invited person counts as
+// serving them.
+func (w *wtx) inviteServedCrew(name string) ([]string, error) {
+	var out []string
+	err := each(w.Tx, bCrew, "", func(_ []byte, r *CrewMember) error {
+		if r.Serves(name) {
+			out = append(out, r.Name)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// inviteBeadsSpend reports whether any route would take name's beads to
+// a first group that starts agents on the operator's login: the route
+// takes them (MatchesOriginator), and the first group declares no
+// login_for for them (IsPersonalRoute false), so their beads build on
+// the operator's accounts. It also reports whether any route takes the
+// name's beads at all, since a route to a group that starts no agents or
+// a personal route does not spend the operator's subscription.
+func (w *wtx) inviteBeadsSpend(name string) (bool, bool, error) {
+	operator, err := operatorIn(w.Tx)
+	if err != nil {
+		return false, false, err
+	}
+	var routes []Route
+	if err := each(w.Tx, bRoutes, "", func(_ []byte, r *Route) error {
+		routes = append(routes, *r)
+		return nil
+	}); err != nil {
+		return false, false, err
+	}
+	byName := map[string]Group{}
+	if err := each(w.Tx, bGroups, "", func(_ []byte, g *Group) error {
+		byName[g.Name] = *g
+		return nil
+	}); err != nil {
+		return false, false, err
+	}
+	def := w.settingValue(DefaultKindSetting)
+	var hasRoute bool
+	for _, r := range routes {
+		if !r.MatchesOriginator(name, operator) {
+			continue
+		}
+		hasRoute = true
+		if IsPersonalRoute(r, byName, name, operator) {
+			continue
+		}
+		if g, ok := byName[r.Worker()]; ok && g.StartsAgents(def) {
+			return true, true, nil
+		}
+	}
+	return false, hasRoute, nil
 }
 
 // userInviteStale says why an invite approval is refused: the mapping or

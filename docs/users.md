@@ -138,6 +138,15 @@ An invite makes the user a member, or an operator with `--role
 operator` (the card then says the user can approve and administer this
 yard), maps the invited address to them in `web_jwt_users`, and only
 then reports the invite to the edge this yard is connected to. The
+card also says what the invited person can and cannot do: the crew
+members they can write to, by name (those serving them, normally the
+ones with `for=` unset; where none serves them, that they can write
+to none), whose answers spend the operator's subscription until the
+person has a login of their own; whether their beads build on the
+operator's accounts on the routes that take them, may be routed without
+building on the operator's accounts, or wait since no route takes them;
+and that they get no web view (the edge refuses a member) and come in by
+a paired device. The
 card refuses, before anything is written, a name a user or crew member
 already holds, an address the mapping already maps to anyone (an
 address is never re-pointed to a new user), and a yard connected to no
