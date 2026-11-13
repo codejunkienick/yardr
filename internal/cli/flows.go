@@ -141,7 +141,7 @@ flow file or a pack with no yard.`,
 				return fmt.Errorf("--mini shapes the drawing --svg draws: without --svg every flow is shown")
 			}
 			if _, err := st.GetDepot(c.Context(), args[0]); errors.Is(err, store.ErrNotFound) {
-				return a.showNamedFlow(c.OutOrStdout(), c.Context(), st, args[0])
+				return a.showNamedFlow(c.OutOrStdout(), c.ErrOrStderr(), c.Context(), st, args[0])
 			}
 			views, err := flowViews(c.Context(), st, args[0], a.home(), a.who())
 			if err != nil {
@@ -157,45 +157,7 @@ flow file or a pack with no yard.`,
 					if i > 0 {
 						fmt.Fprintln(w)
 					}
-					fmt.Fprintf(w, "flow %s (%s)\n", v.Flow.Name, v.Source)
-					rows := [][]string{}
-					for _, s := range v.Stages {
-						// Edges names the outcome that takes each move, if any.
-						next := strings.Join(v.Flow.Edges(s.Stage), " | ")
-						switch {
-						case s.Terminal:
-							next = "(terminal: closes the bead)"
-						case len(s.Next) == 0:
-							next = "(no transitions: any stage)"
-						case v.Flow.QuestionBack(s.Stage):
-							// A bead a question brought here may move back
-							// to the stage that asked, past the listed moves.
-							next += " (back)"
-						}
-						members := "-"
-						if s.Human {
-							members = or(strings.Join(s.Members, ","), "anyone")
-						} else if s.Yard != "" {
-							// Who works it is another yard, not anyone here.
-							members = "yard " + s.Yard
-						}
-						file := "-"
-						if s.StageFile != "" {
-							file = "yes"
-						}
-						rows = append(rows, []string{s.Stage, or(strings.Join(append([]string{s.Group}, s.Else...), " else "), "-"), members, strconv.Itoa(s.Open), file, next})
-					}
-					table(w, "STAGE\tGROUP\tMEMBERS\tOPEN\tFILE\tNEXT", rows)
-					for _, s := range v.Stages {
-						if s.Siding != nil {
-							for _, line := range sidingLines(s.Stage, s.Siding, time.Now()) {
-								fmt.Fprintln(w, line)
-							}
-						}
-					}
-					for _, warning := range v.Warnings {
-						fmt.Fprintf(w, "warning: %s\n", warning)
-					}
+					writeFlowView(w, v)
 				}
 			})
 		},
@@ -316,7 +278,7 @@ func depotDiagram(warn io.Writer, ctx context.Context, st store.API, name, which
 	if _, err := st.GetDepot(ctx, name); errors.Is(err, store.ErrNotFound) {
 		f, err := st.GetFlow(ctx, name)
 		if errors.Is(err, store.ErrNotFound) {
-			return nil, fmt.Errorf("%s is neither a depot nor a named flow: %w", name, store.ErrNotFound)
+			return repoDiagram(warn, ctx, st, name, which)
 		} else if err != nil {
 			return nil, err
 		}
@@ -423,11 +385,12 @@ func fileDiagram(warn io.Writer, arg, which string) (*flowdraw.Diagram, error) {
 }
 
 // showNamedFlow prints a named flow from the store and the depots and types
-// pointing at it.
-func (a *app) showNamedFlow(w io.Writer, ctx context.Context, st store.API, name string) error {
+// pointing at it, or the repositories' flows of that name when the store
+// has none.
+func (a *app) showNamedFlow(w, warn io.Writer, ctx context.Context, st store.API, name string) error {
 	f, err := st.GetFlow(ctx, name)
 	if errors.Is(err, store.ErrNotFound) {
-		return fmt.Errorf("%s is neither a depot nor a named flow: %w", name, store.ErrNotFound)
+		return a.showRepoNamedFlow(w, warn, ctx, st, name)
 	} else if err != nil {
 		return err
 	}
@@ -613,6 +576,52 @@ type sidingView struct {
 	Warning string `json:"warning,omitempty"`
 }
 
+// writeFlowView writes one view as flow show <depot> prints it: the flow
+// with its source, each stage's group, members, open beads, stage file
+// and next, the siding lines and the warnings. A repository flow shown
+// by name is written the same way, under its depot's heading.
+func writeFlowView(w io.Writer, v flowView) {
+	fmt.Fprintf(w, "flow %s (%s)\n", v.Flow.Name, v.Source)
+	rows := [][]string{}
+	for _, s := range v.Stages {
+		// Edges names the outcome that takes each move, if any.
+		next := strings.Join(v.Flow.Edges(s.Stage), " | ")
+		switch {
+		case s.Terminal:
+			next = "(terminal: closes the bead)"
+		case len(s.Next) == 0:
+			next = "(no transitions: any stage)"
+		case v.Flow.QuestionBack(s.Stage):
+			// A bead a question brought here may move back
+			// to the stage that asked, past the listed moves.
+			next += " (back)"
+		}
+		members := "-"
+		if s.Human {
+			members = or(strings.Join(s.Members, ","), "anyone")
+		} else if s.Yard != "" {
+			// Who works it is another yard, not anyone here.
+			members = "yard " + s.Yard
+		}
+		file := "-"
+		if s.StageFile != "" {
+			file = "yes"
+		}
+		rows = append(rows, []string{s.Stage, or(strings.Join(append([]string{s.Group}, s.Else...), " else "), "-"), members, strconv.Itoa(s.Open), file, next})
+	}
+	table(w, "STAGE\tGROUP\tMEMBERS\tOPEN\tFILE\tNEXT", rows)
+	for _, s := range v.Stages {
+		if s.Siding != nil {
+			for _, line := range sidingLines(s.Stage, s.Siding, time.Now()) {
+				fmt.Fprintln(w, line)
+			}
+		}
+	}
+	for _, warning := range v.Warnings {
+		fmt.Fprintf(w, "warning: %s\n", warning)
+	}
+}
+
 // flowViews describes the flows governing depot's beads, the depot's own first.
 // home is the yard's home, where the stage files of a store flow are. A stage
 // file named after no stage is a warning: a store flow's in the home, and
@@ -629,7 +638,6 @@ func flowViews(ctx context.Context, st store.API, depot, home string, viewer ...
 	if err != nil {
 		return nil, err
 	}
-	groups := rt.groups
 	who := ""
 	if len(viewer) > 0 {
 		who = viewer[0]
@@ -648,90 +656,16 @@ func flowViews(ctx context.Context, st store.API, depot, home string, viewer ...
 	if err != nil {
 		return nil, err
 	}
+	rd := viewReads{rt: rt, beads: beads, typed: typed, repo: repo, home: home}
 	views := []flowView{}
 	for _, rf := range all {
-		f := rf.Flow
-		v := flowView{Flow: *f, Type: rf.Type, Source: rf.Source}
-		files := rf.StageFiles
-		if rf.Source.InStore() {
-			var stray []string
-			if files, stray, err = store.HomeStageFiles(home, f); err != nil {
-				return nil, err
-			}
-			for _, s := range stray {
-				v.Warnings = append(v.Warnings, "stage file "+s)
-			}
-		}
-		for _, s := range f.Stages {
-			sv := stageView{Stage: s, Next: []string{}, Terminal: f.IsTerminal(s), StageFile: files[s]}
-			if next := f.Transitions[s]; len(next) > 0 {
-				sv.Next = next
-			}
-			// A depot flow is shown for the default type.
-			var siding *store.Siding
-			if r := rt.take(&depot, rf.Type, s); r != nil {
-				sv.Group, sv.Else = r.Worker(), r.Further()
-				if i := slices.IndexFunc(groups, func(g store.Group) bool { return g.Name == sv.Group }); i >= 0 && groups[i].Runner == "manual" {
-					sv.Human, sv.Members = true, groups[i].Members
-					if si, ok := store.SidingOf(groups[i]); ok {
-						siding = &si
-					}
-				} else if i >= 0 {
-					sv.Yard = groups[i].AtPeer()
-				}
-			} else if !sv.Terminal {
-				v.Warnings = append(v.Warnings, fmt.Sprintf("stage %s has no route: beads there wait for a human", s))
-			}
-			var waiting []string
-			for _, b := range beads {
-				// A bead that pins its flow follows that one instead.
-				governed := store.PinnedFlow(&b) == "" && (b.Type == rf.Type || (rf.Type == "" && !typed[b.Type]))
-				if governed && b.Stage == s {
-					sv.Open++
-					waiting = append(waiting, b.ID)
-				}
-			}
-			if siding != nil {
-				if sv.Siding, err = newSidingView(ctx, st, *siding, sv, waiting); err != nil {
-					return nil, err
-				}
-			}
-			// A broken ## Ask section in the stage's file warns beside
-			// it: the repository's, or the yard's home for a store flow.
-			var sf *store.StageFile
-			if rf.Source.InStore() {
-				if files[s] != "" {
-					if sf, err = store.HomeStageFile(home, f.Name, s); err != nil {
-						return nil, err
-					}
-				}
-			} else {
-				sf = repo.StageFile(rf.Flow.Name, s)
-			}
-			if broken := sf.BrokenAsk(f, s); broken != "" {
-				v.Warnings = append(v.Warnings, "stage file "+broken)
-			}
-			if waitsForPerson(f, sv, rt.byName) && !sf.HasAsk() {
-				v.Warnings = append(v.Warnings, noAskWarning(s))
-			}
-			v.Stages = append(v.Stages, sv)
+		v, err := flowViewOf(ctx, st, depot, rf, rd)
+		if err != nil {
+			return nil, err
 		}
 		views = append(views, v)
 	}
-	// A stage file on the base that belongs to no stage, under the flow whose
-	// directory it is in, else under the depot's own: nobody is shown it.
-	for _, s := range repo.StrayStageFiles() {
-		// The longest directory wins: type/train/x.md is type/train.flow's.
-		at, most := 0, 0
-		for i, v := range views {
-			if dir := strings.TrimSuffix(v.Source.Path, ".flow") + "/"; !v.Source.InStore() && strings.HasPrefix(s, dir) && len(dir) > most {
-				at, most = i, len(dir)
-			}
-		}
-		if len(views) > 0 {
-			views[at].Warnings = append(views[at].Warnings, "stage file "+s)
-		}
-	}
+	attachStrays(views, repo)
 	// Beads in a stage their flow lacks, under the flow that lacks it; a
 	// bead pinning a flow the depot does not follow is told under the depot's.
 	stranded, err := st.Stranded(ctx, depot)
@@ -746,10 +680,120 @@ func flowViews(ctx context.Context, st store.API, depot, home string, viewer ...
 			views = append(views, flowView{Flow: store.Flow{Name: sb.Flow}, Source: sb.Source})
 			i = len(views) - 1
 		}
-		views[i].Warnings = append(views[i].Warnings,
-			fmt.Sprintf("bead %s: it is not routed and waits until someone advances it (yardr bead advance %s --to <stage>)", sb, sb.Bead))
+		views[i].Warnings = append(views[i].Warnings, strandedWarning(sb))
 	}
 	return views, nil
+}
+
+// viewReads is what one depot's views are built from, read once: the
+// routing, the depot's beads, which types have a flow of their own, the
+// depot's repository flows and the yard's home.
+type viewReads struct {
+	rt    *routing
+	beads []store.Bead
+	typed map[string]bool
+	repo  *store.RepoFlows
+	home  string
+}
+
+// flowViewOf describes one of depot's flows: its stages with the group
+// each is routed to, the open beads standing in them, and its warnings,
+// as flow show prints them. rf is one of the depot's governing flows,
+// or a repository flow shown by name that governs nothing yet.
+func flowViewOf(ctx context.Context, st store.API, depot string, rf store.DepotFlow, rd viewReads) (flowView, error) {
+	f := rf.Flow
+	v := flowView{Flow: *f, Type: rf.Type, Source: rf.Source}
+	var err error
+	groups := rd.rt.groups
+	files := rf.StageFiles
+	if rf.Source.InStore() {
+		var stray []string
+		if files, stray, err = store.HomeStageFiles(rd.home, f); err != nil {
+			return flowView{}, err
+		}
+		for _, s := range stray {
+			v.Warnings = append(v.Warnings, "stage file "+s)
+		}
+	}
+	for _, s := range f.Stages {
+		sv := stageView{Stage: s, Next: []string{}, Terminal: f.IsTerminal(s), StageFile: files[s]}
+		if next := f.Transitions[s]; len(next) > 0 {
+			sv.Next = next
+		}
+		// A depot flow is shown for the default type.
+		var siding *store.Siding
+		if r := rd.rt.take(&depot, rf.Type, s); r != nil {
+			sv.Group, sv.Else = r.Worker(), r.Further()
+			if i := slices.IndexFunc(groups, func(g store.Group) bool { return g.Name == sv.Group }); i >= 0 && groups[i].Runner == "manual" {
+				sv.Human, sv.Members = true, groups[i].Members
+				if si, ok := store.SidingOf(groups[i]); ok {
+					siding = &si
+				}
+			} else if i >= 0 {
+				sv.Yard = groups[i].AtPeer()
+			}
+		} else if !sv.Terminal {
+			v.Warnings = append(v.Warnings, fmt.Sprintf("stage %s has no route: beads there wait for a human", s))
+		}
+		var waiting []string
+		for _, b := range rd.beads {
+			// A bead that pins its flow follows that one instead.
+			governed := store.PinnedFlow(&b) == "" && (b.Type == rf.Type || (rf.Type == "" && !rd.typed[b.Type]))
+			if governed && b.Stage == s {
+				sv.Open++
+				waiting = append(waiting, b.ID)
+			}
+		}
+		if siding != nil {
+			if sv.Siding, err = newSidingView(ctx, st, *siding, sv, waiting); err != nil {
+				return flowView{}, err
+			}
+		}
+		// A broken ## Ask section in the stage's file warns beside
+		// it: the repository's, or the yard's home for a store flow.
+		var sf *store.StageFile
+		if rf.Source.InStore() {
+			if files[s] != "" {
+				if sf, err = store.HomeStageFile(rd.home, f.Name, s); err != nil {
+					return flowView{}, err
+				}
+			}
+		} else {
+			sf = rd.repo.StageFile(rf.Flow.Name, s)
+		}
+		if broken := sf.BrokenAsk(f, s); broken != "" {
+			v.Warnings = append(v.Warnings, "stage file "+broken)
+		}
+		if waitsForPerson(f, sv, rd.rt.byName) && !sf.HasAsk() {
+			v.Warnings = append(v.Warnings, noAskWarning(s))
+		}
+		v.Stages = append(v.Stages, sv)
+	}
+	return v, nil
+}
+
+// attachStrays warns of a stage file on the base that belongs to no
+// stage, under the flow whose directory it is in, else under the depot's
+// own: nobody is shown it.
+func attachStrays(views []flowView, repo *store.RepoFlows) {
+	for _, s := range repo.StrayStageFiles() {
+		// The longest directory wins: type/train/x.md is type/train.flow's.
+		at, most := 0, 0
+		for i, v := range views {
+			if dir := strings.TrimSuffix(v.Source.Path, ".flow") + "/"; !v.Source.InStore() && strings.HasPrefix(s, dir) && len(dir) > most {
+				at, most = i, len(dir)
+			}
+		}
+		if len(views) > 0 {
+			views[at].Warnings = append(views[at].Warnings, "stage file "+s)
+		}
+	}
+}
+
+// strandedWarning is what flow show says of a bead in a stage its flow
+// lacks, under the flow that lacks it.
+func strandedWarning(sb store.StrandedBead) string {
+	return fmt.Sprintf("bead %s: it is not routed and waits until someone advances it (yardr bead advance %s --to <stage>)", sb, sb.Bead)
 }
 
 // newSidingView describes the stage sv as a siding that folds by si, with the

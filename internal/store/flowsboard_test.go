@@ -454,6 +454,12 @@ func TestFlowsLamps(t *testing.T) {
 	y.travel(t, "parked", "shop", "review")
 	_, err = y.AddRoute(ctx, store.Route{Stage: "review", Group: "deciders"}, "me")
 	must(err)
+	// Stall is a siding: its beads wait for the fold (yardr-txmc).
+	y.flowDepot(t, "side", "side-flow", "stall", "onward")
+	must(y.PutGroup(ctx, store.Group{Name: "siders", Runner: "manual", Limit: 10, Config: map[string]any{"fold": 4}}, "me"))
+	_, err = y.AddRoute(ctx, store.Route{Stage: "stall", Group: "siders"}, "me")
+	must(err)
+	folding := y.travel(t, "folding", "side", "stall")
 	solo := y.travel(t, "solo", "quiet", "new")
 	_, err = y.AddAsk(ctx, solo.ID, store.Ask{Question: "For zed?", To: "zed", Context: []string{"zed's call."}}, "yard")
 	must(err)
@@ -507,6 +513,8 @@ func TestFlowsLamps(t *testing.T) {
 	// held one: none, it is moving, and the stranded bead stands off the
 	// line. Quiet's new holds only the bead asked of zed: none; its done
 	// a held bead alone: turn; its later a blocked session alone: fault.
+	// Side's stall holds only folding beads: none, the fold is no
+	// person's turn.
 	for _, tt := range []struct{ depot, stage, lamp string }{
 		{"shop", "new", "fault"},
 		{"shop", "review", "turn"},
@@ -514,10 +522,35 @@ func TestFlowsLamps(t *testing.T) {
 		{"quiet", "new", "none"},
 		{"quiet", "done", "turn"},
 		{"quiet", "later", "fault"},
+		{"side", "stall", "none"},
 	} {
 		if got := stageLamp(board, tt.depot, tt.stage); got != tt.lamp {
 			t.Errorf("%s %s lamp = %q, want %q", tt.depot, tt.stage, got, tt.lamp)
 		}
+	}
+	// A held bead in the siding is the person's turn; unheld, the
+	// stage burns none again, until a question to the operator stands
+	// open on it.
+	_, err = y.SetHold(ctx, folding.ID, true, store.Expect{}, "me")
+	must(err)
+	board, err = y.Flows(ctx)
+	must(err)
+	if got := stageLamp(board, "side", "stall"); got != "turn" {
+		t.Errorf("side stall lamp = %q with a held bead, want turn", got)
+	}
+	_, err = y.SetHold(ctx, folding.ID, false, store.Expect{}, "me")
+	must(err)
+	board, err = y.Flows(ctx)
+	must(err)
+	if got := stageLamp(board, "side", "stall"); got != "none" {
+		t.Errorf("side stall lamp = %q unheld, want none", got)
+	}
+	_, err = y.AddAsk(ctx, folding.ID, store.Ask{Question: "Fold now?", To: "op", Context: []string{"four wait."}}, "yard")
+	must(err)
+	board, err = y.Flows(ctx)
+	must(err)
+	if got := stageLamp(board, "side", "stall"); got != "turn" {
+		t.Errorf("side stall lamp = %q with an open ask, want turn", got)
 	}
 	if got := flowBeads(board.Depots[0].Elsewhere); !reflect.DeepEqual(got, []string{"stray"}) {
 		t.Errorf("bare elsewhere = %v, want the stranded bead", got)

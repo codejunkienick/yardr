@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -508,5 +509,173 @@ func TestFlowWarnsOfAManualStageWithNoAsk(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// flow show <name> shows a repository named flow by name, not only a store
+// one (yardr-kq2c): every depot whose repository carries the file, each
+// under its own depot heading, depots sorted, in the view flow show
+// <depot> prints for that flow — the governing one when a pointer names
+// it, the file itself when nothing does yet. A name nowhere keeps the
+// store miss's error, and a store flow still shows with who points at it.
+func TestFlowShowNamedRepoFlow(t *testing.T) {
+	t.Parallel()
+	st := storetest.New(t)
+	ctx := context.Background()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	home := t.TempDir()
+	a := &app{st: st, actor: "me", cfg: &config.Config{Home: home}}
+	const text = "draft -> review\nreview -> merged\nmerged terminal\n"
+	write := func(dir, name, text string) {
+		t.Helper()
+		p := filepath.Join(dir, ".yardr", "flows", name)
+		must(os.MkdirAll(filepath.Dir(p), 0o755))
+		must(os.WriteFile(p, []byte(text), 0o644))
+	}
+	// Dir depots carry the flow files on disk, no git: three depots with
+	// the same flow name, and a stage file in alpha's repository alone.
+	aDir, bDir, gDir, gitDir := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+	for _, dir := range []string{aDir, bDir, gDir} {
+		write(dir, "posting.post.flow", text)
+	}
+	write(aDir, filepath.Join("posting.post", "draft.md"), "Draft it.\n")
+	write(gDir, filepath.Join("posting.post", "orphan.md"), "Not a stage.\n")
+	write(gDir, filepath.Join("unrelated", "orphan.md"), "Not this flow.\n")
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", gitDir, "-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	write(gitDir, "posting.post.flow", text)
+	write(gitDir, filepath.Join("posting.post", "draft.md"), "Draft it.\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "add posting flow")
+	must(st.PutDepot(ctx, store.Depot{Name: "alpha", Path: aDir, Kind: store.DepotDir}, "me"))
+	must(st.PutDepot(ctx, store.Depot{Name: "beta", Path: bDir, Kind: store.DepotDir}, "me"))
+	must(st.PutDepot(ctx, store.Depot{Name: "gamma", Path: gDir, Kind: store.DepotDir}, "me"))
+	must(st.PutDepot(ctx, store.Depot{Name: "git-source", Path: gitDir, Base: "main", Kind: store.DepotGit}, "me"))
+	// Alpha's post beads follow the file by a type pointer, beta's beads
+	// by the depot's own, and git-source's by its type pointer; gamma
+	// points nothing at it yet.
+	must(st.SetFlowPointer(ctx, "alpha", "post", "posting.post", "me"))
+	must(st.SetFlowPointer(ctx, "beta", "", "posting.post", "me"))
+	must(st.SetFlowPointer(ctx, "git-source", "post", "posting.post", "me"))
+	must(st.PutGroup(ctx, store.Group{Name: "crew", Runner: "manual", Members: []string{"ada"}}, "me"))
+	_, err := st.AddRoute(ctx, store.Route{Stage: "draft", Group: "crew"}, "me")
+	must(err)
+
+	// The pointed depots' sections are exactly the views flow show
+	// <depot> prints for the flow, under depot headings, sorted; gamma's
+	// section shows the unpointed file, from its own repository.
+	showAlpha, err := run(t, a.flowCmd(), "show", "alpha")
+	must(err)
+	showBeta, err := run(t, a.flowCmd(), "show", "beta")
+	must(err)
+	showGit, err := run(t, a.flowCmd(), "show", "git-source")
+	must(err)
+	out, err := run(t, a.flowCmd(), "show", "posting.post")
+	must(err)
+	heads := []string{"depot alpha:\n" + showAlpha, "depot beta:\n" + showBeta}
+	if !strings.HasPrefix(out, heads[0]+"\n"+heads[1]+"\ndepot gamma:\n") {
+		t.Fatalf("flow show posting.post:\n%s\nwant the alpha and beta depot views, then gamma and git-source", out)
+	}
+	rest := out[len(heads[0]+"\n"+heads[1]+"\ndepot gamma:\n"):]
+	if !strings.HasPrefix(rest, "flow posting.post (repo (directory))") {
+		t.Errorf("gamma shows %q, want the repository flow with its stages", strings.SplitN(rest, "\n", 2)[0])
+	}
+	for _, stage := range []string{"draft", "review", "merged"} {
+		if !strings.Contains(rest, stage) {
+			t.Errorf("gamma view lacks stage %s:\n%s", stage, rest)
+		}
+	}
+	if !strings.Contains(rest, "stage file .yardr/flows/posting.post/orphan.md") {
+		t.Errorf("gamma view lacks its stray stage-file warning:\n%s", rest)
+	}
+	if strings.Contains(rest, ".yardr/flows/unrelated/orphan.md") {
+		t.Errorf("gamma view includes another flow's stray stage-file warning:\n%s", rest)
+	}
+	if !strings.Contains(out, "depot git-source:\n"+showGit) {
+		t.Errorf("flow show posting.post's git section differs from flow show git-source:\n%s", out)
+	}
+	// The FILE column reads each depot's own repository: alpha's draft
+	// has a stage file, beta's and gamma's do not.
+	fileOf := func(section, stage string) string {
+		t.Helper()
+		for line := range strings.Lines(section) {
+			if f := strings.Fields(line); len(f) >= 6 && f[0] == stage {
+				return f[4]
+			}
+		}
+		t.Fatalf("no %s row:\n%s", stage, section)
+		return ""
+	}
+	sections := strings.Split(out, "depot ")
+	if len(sections) != 5 || !strings.HasPrefix(sections[1], "alpha:") ||
+		!strings.HasPrefix(sections[2], "beta:") || !strings.HasPrefix(sections[3], "gamma:") ||
+		!strings.HasPrefix(sections[4], "git-source:") {
+		t.Fatalf("want four depot-headed sections, sorted:\n%s", out)
+	}
+	if got := []string{fileOf(sections[1], "draft"), fileOf(sections[2], "draft"), fileOf(sections[3], "draft"), fileOf(sections[4], "draft")}; !slices.Equal(got, []string{"yes", "-", "-", "yes"}) {
+		t.Errorf("draft FILE = %v, want [yes - - yes]:\n%s", got, out)
+	}
+	// The crew works draft in every depot's view, pointed or not.
+	for i, section := range sections[1:] {
+		if !strings.Contains(section, "crew") || !strings.Contains(section, "ada") {
+			t.Errorf("section %d names no crew:\n%s", i, section)
+		}
+	}
+	if _, err := run(t, a.flowCmd(), "show", "posting.post", "--svg"); err == nil || !strings.Contains(err.Error(), "depots alpha, beta, gamma, git-source") {
+		t.Errorf("flow show posting.post --svg err = %v, want the sorted depot choices", err)
+	}
+	soloDir := t.TempDir()
+	write(soloDir, "solo.flow", text)
+	must(st.PutDepot(ctx, store.Depot{Name: "source", Path: soloDir, Kind: store.DepotDir}, "me"))
+	svg, err := run(t, a.flowCmd(), "show", "solo", "--svg")
+	must(err)
+	if !strings.HasPrefix(strings.TrimSpace(svg), "<svg") {
+		t.Errorf("flow show solo --svg = %q, want an SVG", svg)
+	}
+
+	// --json serves each depot beside its view, sorted.
+	a.json = true
+	out, err = run(t, a.flowCmd(), "show", "posting.post")
+	a.json = false
+	must(err)
+	var shown []namedFlowView
+	must(json.Unmarshal([]byte(out), &shown))
+	if len(shown) != 4 || shown[0].Depot != "alpha" || shown[1].Depot != "beta" || shown[2].Depot != "gamma" || shown[3].Depot != "git-source" {
+		t.Fatalf("--json depots = %v, want [alpha beta gamma git-source]:\n%s", shown, out)
+	}
+	for _, v := range shown {
+		if v.Flow.Name != "posting.post" || len(v.Stages) != 3 {
+			t.Errorf("--json view = %+v, want the posting.post flow with 3 stages", v)
+		}
+	}
+
+	// A store flow still shows with who points at it.
+	f, err := store.ParseFlow("new -> merged\nmerged terminal")
+	must(err)
+	f.Name = "code"
+	_, err = st.PutFlow(ctx, *f, "me")
+	must(err)
+	out, err = run(t, a.flowCmd(), "show", "code")
+	must(err)
+	if !strings.Contains(out, "flow code: 2 stages, pointed at by nothing") {
+		t.Errorf("flow show code:\n%s", out)
+	}
+
+	// A name nowhere keeps today's error.
+	_, err = run(t, a.flowCmd(), "show", "nosuch")
+	if err == nil || !strings.Contains(err.Error(), "nosuch is neither a depot nor a named flow") {
+		t.Errorf("flow show nosuch err = %v, want the neither-a-depot error", err)
 	}
 }

@@ -318,7 +318,11 @@ func arrivalInputs(ctx context.Context, st store.API, beads []store.Bead, now ti
 			group = r.Worker()
 		}
 		if g, ok := byName[group]; ok && g.Runner == "manual" {
-			if len(g.Members) > 0 {
+			if _, siding := store.SidingOf(g); siding {
+				// A siding waits for the fold, not for its
+				// members: nobody's turn has come.
+				in.Fold = true
+			} else if len(g.Members) > 0 {
 				in.WaitsFor = strings.Join(g.Members, ", ")
 			} else {
 				in.WaitsFor = g.Name
@@ -837,8 +841,9 @@ func newestFirstBeads(bs []store.Bead) {
 // flowLamps answers each bead's lamp: fault where a session waits on a
 // prompt or the bead lacks what its route needs; turn where the bead is
 // held or only a person's turn waits, a manual group's stage or an open
-// ask to the operator; none where nothing waits. A bead blocked only
-// behind another bead lights none: ordinary waiting.
+// ask to the operator; none where nothing waits. A bead in a siding
+// waits for the fold, not for a person, and lights none; a bead blocked
+// only behind another bead lights none: ordinary waiting.
 // The panel's fault/turn rule, without the words: a wait that is only an
 // ask, with a manual reason if any, is the person's turn, and a bead
 // whose reasons are all manual is parked, so both light turn.
@@ -848,7 +853,11 @@ func flowLamps(ctx context.Context, st store.API, beads []store.Bead, live []sto
 	for _, g := range groups {
 		byName[g.Name] = g
 		if g.Runner == "manual" {
-			manualGroup[g.Name] = true
+			// A siding is no person's turn: its beads wait
+			// for the fold, which moves them without a hand.
+			if _, siding := store.SidingOf(g); !siding {
+				manualGroup[g.Name] = true
+			}
 		}
 	}
 	stranded, err := st.Stranded(ctx, "")

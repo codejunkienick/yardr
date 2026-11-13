@@ -11,10 +11,9 @@ and the assembly keep between them.
 An allow-list in `.yardr/test` names what is over budget today. Each entry
 says why; entries with a fix name the bead that brings them under. A fix
 deletes its entries; a row whose site is gone is deleted with the fix, not
-left for later. Two rows have a fix bead: `internal/cli`'s (yardr-2xke) and
-`contrib/assembly`'s (yardr-4n6h). One row has none: `contrib/isolated-yard`'s,
-since the yard-shape matrix is long by design and runs only in the quiet run
-(R6).
+left for later. One row has a fix bead: `internal/cli`'s (yardr-2xke).
+One row has none: `contrib/isolated-yard`'s, since the yard-shape matrix
+is long by design and runs only in the quiet run (R6).
 
 R1. A package's tests finish in 60 s under `-race`, or the gate fails.
 Only a race leg is judged, and only the landing and the quiet run (R6) have

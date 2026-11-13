@@ -9,8 +9,9 @@
 // order and the remark are signalbox src/board.ts, ported so the two
 // cannot drift: running sessions first, then by the low end of the
 // expected arrival in minutes, then by stage age and id, capped; the
-// remark held, stalled, blocked by an open bead, waiting for a person,
-// late, in that order. No via and no badge: the row carries neither. The
+// remark held, stalled, blocked by an open bead, waiting for the fold,
+// waiting for a person, late, in that order. No via and no badge: the
+// row carries neither. The
 // departures are two: a hold names its holder where the yard knows it
 // ("held by nell"), and a late bead says by how much where the yard can
 // tell ("late by 40m"), as the board's own beads do not.
@@ -62,6 +63,10 @@ type ArrivalBead struct {
 	// waits for nobody: the members routed there, else the group, else
 	// "a person".
 	WaitsFor string
+	// Fold says the bead waits in a siding for the fold, which moves
+	// it without a hand: its remark names the fold, in no tone. Set
+	// instead of WaitsFor, never beside it.
+	Fold bool
 	// Low and High are the expected arrival as the yard printed it, ""
 	// where it serves none.
 	Low  string
@@ -75,7 +80,8 @@ type ArrivalBead struct {
 
 // An ArrivalRow is one row of the board: everything it shows of one
 // bead, as text. The remark is blank when there is none; its tone is
-// the board's red block or its yellow, "none" with no remark. HeldBy is
+// the board's red block or its yellow, "none" with no remark or with
+// the fold's, which waits in no tone. HeldBy is
 // who holds a held bead, beside the remark that says it, so a reader can
 // tell its own holds from another's without parsing the remark; absent
 // where the bead is not held and where the holder is not known.
@@ -169,12 +175,13 @@ func arrivalTime(b ArrivalBead) string {
 }
 
 // arrivalRemark is the row's remark: held, stalled, blocked by an open
-// bead, waiting for a person, late, in that order, else blank. A hold
-// and a session that came to no good end are the board's red block;
-// blocked, waiting and late are its yellow. A hold says who holds the
-// bead where the yard knows: "held by nell", else "held". A late bead
-// says by how much where the yard can tell, in its usual span format:
-// "late by 1h 5m", else "late".
+// bead, waiting for the fold, waiting for a person, late, in that order,
+// else blank. A hold and a session that came to no good end are the
+// board's red block; blocked, waiting and late are its yellow, and the
+// fold waits in no tone. A hold says who holds the bead where the yard
+// knows: "held by nell", else "held". A late bead says by how much where
+// the yard can tell, in its usual span format: "late by 1h 5m", else
+// "late".
 func arrivalRemark(b ArrivalBead) (remark, tone string) {
 	if b.Hold {
 		if b.HeldBy != "" {
@@ -187,6 +194,9 @@ func arrivalRemark(b ArrivalBead) (remark, tone string) {
 	}
 	if b.BlockedBy != "" {
 		return "blocked by " + b.BlockedBy, "amber"
+	}
+	if b.Fold {
+		return "waits for the fold", "none"
 	}
 	if b.WaitsFor != "" {
 		return "waits for " + b.WaitsFor, "amber"

@@ -1625,8 +1625,8 @@ summary() {
   echo "test: sh .yardr/test @ $(git rev-parse --short HEAD): $res, $pkgs_ok packages ok, $pkgs_failed failed, $(($(date +%s) - started)) s, waited $waited_total s"
 }
 # The packages over the 60 s budget (docs/testing.md R1): a directory, the
-# bead that brings it under, and why it is over. Two rows are packages
-# measured over budget with a fix bead; the third is the quiet run's
+# bead that brings it under, and why it is over. One row is a package
+# measured over budget with a fix bead; the other is the quiet run's
 # yard-shape matrix, an acceptance test that runs only where
 # YARDR_QUIET_RUN is set.
 # A race leg that runs one of these over 60 s still passes;
@@ -1640,7 +1640,6 @@ summary() {
 # a row whose package is gone fails nothing, since no result line maps to
 # it, but delete it anyway.
 over60='
-contrib/assembly yardr-4n6h about 76 s alone on main, since the cuts of yardr-3426 and yardr-jfxj crept back; yardr-4n6h profiles it and cuts it back under
 contrib/isolated-yard yardr-n9ss TestYardShapes (the yard-shape matrix) walks three yards, 35-50 s beside one another, and runs only where YARDR_QUIET_RUN is set, which is the quiet run (docs/testing.md R6); the package is 18 s without it. No bead brings it under: it is an acceptance test, not a slow unit test
 internal/cli yardr-2xke the 390 serial tests, sharing process or package state through about 15 seams, take over 60 s by themselves (76.6 s alone at R1-quiet); threading each seam is its own bead under yardr-2xke
 '

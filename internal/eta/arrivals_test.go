@@ -203,15 +203,69 @@ func TestArrivalsRemarkHeldBy(t *testing.T) {
 }
 
 // Mirrors "at a people's stage it waits for who is routed there, in
-// yellow".
+// yellow" and "at a siding it waits for the fold, in no tone" (yardr-txmc).
 func TestArrivalsRemarkWaits(t *testing.T) {
-	rows := Arrivals([]ArrivalBead{
-		arrivalBead("wharf-a", func(b *ArrivalBead) {
-			b.Stage, b.WaitsFor = "decide", "nell, yardmaster"
-		}),
-	})
-	if rows[0].Remark != "waits for nell, yardmaster" || rows[0].Tone != "amber" {
-		t.Fatalf("waits: %+v", rows[0])
+	for _, tt := range []struct {
+		name   string
+		bead   ArrivalBead
+		remark string
+		tone   string
+	}{
+		{
+			name: "person's turn",
+			bead: arrivalBead("wharf-a", func(b *ArrivalBead) {
+				b.Stage, b.WaitsFor = "decide", "nell, yardmaster"
+			}),
+			remark: "waits for nell, yardmaster",
+			tone:   "amber",
+		},
+		{
+			name: "siding fold",
+			bead: arrivalBead("wharf-b", func(b *ArrivalBead) {
+				b.Stage, b.Fold = "siding", true
+			}),
+			remark: "waits for the fold",
+			tone:   "none",
+		},
+		{
+			name: "fold before wait and lateness",
+			bead: arrivalBead("wharf-c", func(b *ArrivalBead) {
+				b.Stage, b.Fold, b.WaitsFor, b.Late = "siding", true, "nell", true
+			}),
+			remark: "waits for the fold",
+			tone:   "none",
+		},
+		{
+			name: "blocked before fold",
+			bead: arrivalBead("wharf-d", func(b *ArrivalBead) {
+				b.Stage, b.Fold, b.BlockedBy = "siding", true, "wharf-x"
+			}),
+			remark: "blocked by wharf-x",
+			tone:   "amber",
+		},
+		{
+			name: "held before fold",
+			bead: arrivalBead("wharf-e", func(b *ArrivalBead) {
+				b.Stage, b.Fold, b.Hold = "siding", true, true
+			}),
+			remark: "held",
+			tone:   "red",
+		},
+		{
+			name: "stalled before fold",
+			bead: arrivalBead("wharf-f", func(b *ArrivalBead) {
+				b.Stage, b.Fold, b.Fault = "siding", true, true
+			}),
+			remark: "stalled",
+			tone:   "red",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rows := Arrivals([]ArrivalBead{tt.bead})
+			if len(rows) != 1 || rows[0].Remark != tt.remark || rows[0].Tone != tt.tone {
+				t.Fatalf("remark = %+v, want %q in %s", rows, tt.remark, tt.tone)
+			}
+		})
 	}
 }
 

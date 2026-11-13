@@ -391,28 +391,72 @@ func TestArrivalsHeldBy(t *testing.T) {
 // held_by.
 type arrivalRow struct{ remark, tone, heldBy string }
 
-func TestArrivalsWaitsWithoutMembers(t *testing.T) {
-	// Sequential: the package's fake clock and process environment (via newArrivalsTest).
-	y := newArrivalsTest(t)
-	ctx := context.Background()
-	if err := y.PutGroup(ctx, store.Group{Name: "lonely", Runner: "manual", Limit: 10}, "me"); err != nil {
-		t.Fatal(err)
-	}
-	// Decide is routed to deciders; lonely has no stage. Route review
-	// to lonely and stand there.
-	if _, err := y.AddRoute(ctx, store.Route{Stage: "review", Group: "lonely"}, "me"); err != nil {
-		t.Fatal(err)
-	}
-	y.create(t, "wharf-a", "review")
-	board, err := y.Arrivals(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows := board.Rows
-	// Board: "No members listed: the group itself."
-	if len(rows) != 1 || rows[0].Remark != "waits for lonely" || rows[0].Tone != "amber" {
-		t.Fatalf("waits: %+v", rows)
-	}
+func TestArrivalsWaits(t *testing.T) {
+	t.Run("without members", func(t *testing.T) {
+		// Sequential: the package's fake clock and process environment (via newArrivalsTest).
+		y := newArrivalsTest(t)
+		ctx := context.Background()
+		if err := y.PutGroup(ctx, store.Group{Name: "lonely", Runner: "manual", Limit: 10}, "me"); err != nil {
+			t.Fatal(err)
+		}
+		// Decide is routed to deciders; lonely has no stage. Route review
+		// to lonely and stand there.
+		if _, err := y.AddRoute(ctx, store.Route{Stage: "review", Group: "lonely"}, "me"); err != nil {
+			t.Fatal(err)
+		}
+		y.create(t, "wharf-a", "review")
+		board, err := y.Arrivals(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Board: "No members listed: the group itself."
+		if len(board.Rows) != 1 || board.Rows[0].Remark != "waits for lonely" || board.Rows[0].Tone != "amber" {
+			t.Fatalf("waits: %+v", board.Rows)
+		}
+	})
+	t.Run("for the fold", func(t *testing.T) {
+		// Sequential: the package's fake clock and process environment (via newArrivalsTest).
+		y := newArrivalsTest(t)
+		ctx := context.Background()
+		// Siders is a manual group with members that folds: its beads wait
+		// for the fold, not for the members (yardr-txmc).
+		if err := y.PutGroup(ctx, store.Group{Name: "siders", Runner: "manual", Limit: 10, Members: []string{"nell", "yardmaster"}, Config: map[string]any{"fold": 4, "fold_after": "8h"}}, "me"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := y.AddRoute(ctx, store.Route{Stage: "siding", Group: "siders"}, "me"); err != nil {
+			t.Fatal(err)
+		}
+		y.create(t, "wharf-a", "siding")
+		y.create(t, "wharf-b", "decide")
+		y.create(t, "wharf-h", "new")
+		if _, err := y.CreateBead(ctx, store.NewBead{Title: "wharf-c", ID: "wharf-c", Stage: "siding", BlockedBy: []string{"wharf-h"}}, "me"); err != nil {
+			t.Fatal(err)
+		}
+		d := y.create(t, "wharf-d", "siding")
+		if _, err := y.SetHold(ctx, d.ID, true, store.Expect{}, "me"); err != nil {
+			t.Fatal(err)
+		}
+		board, err := y.Arrivals(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		byID := map[string]eta.ArrivalRow{}
+		for _, r := range board.Rows {
+			byID[r.Bead] = r
+		}
+		if r := byID["wharf-a"]; r.Remark != "waits for the fold" || r.Tone != "none" {
+			t.Errorf("siding bead: %+v", r)
+		}
+		if r := byID["wharf-b"]; r.Remark != "waits for nell, yardmaster" || r.Tone != "amber" {
+			t.Errorf("decide bead: %+v", r)
+		}
+		if r := byID["wharf-c"]; r.Remark != "blocked by wharf-h" || r.Tone != "amber" {
+			t.Errorf("siding bead blocked by an open bead: %+v", r)
+		}
+		if r := byID["wharf-d"]; r.Remark != "held by me" || r.Tone != "red" {
+			t.Errorf("held siding bead: %+v", r)
+		}
+	})
 }
 
 func TestArrivalsWaitsForClaimedGroupAfterRouteRemoval(t *testing.T) {
