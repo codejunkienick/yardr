@@ -25,6 +25,12 @@ import (
 // see holdBack.)
 const DefaultStallLimit = 2 * time.Minute
 
+// DefaultCrewBlockedLimit is how long a crew session may stand blocked
+// before the operator is told, once per block: a blocked crew member halts
+// the line, so nearer the stall limit than the idle one, with ten passes
+// of confirmation at the default interval.
+const DefaultCrewBlockedLimit = 5 * time.Minute
+
 // Handle keys: when session_stalled was raised for the session, and the
 // model its agent was started with. They are kept on the handle, not in
 // memory, so a daemon that replaces itself still holds the group back.

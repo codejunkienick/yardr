@@ -251,6 +251,7 @@ func (d *Dispatcher) keepSession(ctx context.Context, runner Runner, starter Cre
 		}
 		idle := status == "idle" || status == "done"
 		d.crewSeen(ctx, s, status)
+		d.crewBlocked(ctx, runner, s, status)
 		grace := durationOr(def.HandoffGrace, defaultHandoffGrace)
 		// A session that has lived MinSessionLife started for good, running
 		// still or gone since: the starts that failed before it are over.

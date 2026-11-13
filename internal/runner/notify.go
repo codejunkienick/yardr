@@ -150,6 +150,13 @@ func NotificationText(bead, beadTitle, stage, group string) (title, body string)
 	return title, body
 }
 
+// Notify shows a notification through herdr, as HerdrNotifier does: the
+// dispatcher tells through it beside yard-mail. It implements
+// dispatch.Notifier.
+func (h *Herdr) Notify(ctx context.Context, title, body string) error {
+	return HerdrNotifier(h.Bin)(ctx, title, body)
+}
+
 // HerdrNotifier shows notifications with `herdr notification show`. herdr
 // answers success even when it showed nothing, so its result is checked:
 // only "shown" counts.
