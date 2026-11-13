@@ -1874,12 +1874,19 @@ argument, note or log. What a pull request from outside changes:
   a maintainer's, and a request for changes would stand on the pull request
   after its author had acted, since nothing posts again: the bead's routing
   carries the consequence, and the review is a comment whatever it says. The
-  first line is still the verdict, written by the script (`Approved`, `Changes
-  needed`), and the stored review is emptied once it is posted, so that it is
-  posted once.
-- **No label.** The script gives the bead no `merge-ok` and takes none off. The
-  reviewer's grant for a bot's bump of Go modules and a maintainer's yes are as
-  they were ("Merging pull requests", below).
+  first line is the yard's own, written by the script, and it is no approval:
+  the review is the yard's first read, and a maintainer decides on the merge.
+  It reads `Reviewed by the yard: nothing that must change. A maintainer decides
+  on the merge.` for `done` (not "no findings": the body may list findings that
+  may change) and `Reviewed by the yard: changes needed.` for `changes`. Where
+  the bead carries `merge-ok`, which the yard merges from `approved` itself, no
+  maintainer decides, and the `done` line is `Reviewed by the yard: nothing that
+  must change.` alone. The stored review is emptied once it is posted, so that
+  it is posted once.
+- **No label.** The script gives the bead no `merge-ok` and takes none off; it
+  reads the one the reviewer put there, for the first line, and no other label.
+  The reviewer's grant for a bot's bump of Go modules and a maintainer's yes are
+  as they were ("Merging pull requests", below).
 - **Findings are in the body.** The reviewer stores `comments` as `[]` and puts
   each finding in `body` with its file and line; the script still checks inline
   comments as it does for the public line, and posts one if it is given.

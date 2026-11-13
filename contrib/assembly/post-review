@@ -23,13 +23,15 @@
 # the GitHub review is made from it: APPROVE for the two approvals and
 # REQUEST_CHANGES for changes, with the verdict ("Approved", "Changes needed")
 # written as the first line of the body by this script, so that the two cannot
-# disagree. Each comment is on a line of the pull request's diff (the right
-# side), by path in the repository and line number in the head the reviewer
-# read. A question for a person is not posted: it never comes here.
+# disagree (a pull request from outside has first lines of its own, below).
+# Each comment is on a line of the pull request's diff (the right side), by path
+# in the repository and line number in the head the reviewer read. A question
+# for a person is not posted: it never comes here.
 #
 # What it reads of the bead is its stage, its type, its tracks link, own_pr,
-# reviewed_head and review, and nothing else: no body, no note. On the public
-# line, the pull request is the one the bead tracks (its URL must be
+# reviewed_head and review, and nothing else: no body, no note (a pull request
+# from outside has its labels read too, below). On the public line, the pull
+# request is the one the bead tracks (its URL must be
 # https://github.com/<owner>/<repo>/pull/<n> and nothing else), which must also
 # be the bead's own_pr and be from the bead's branch of that repository: a bead
 # whose metadata was written to point at another pull request is held, not
@@ -48,10 +50,18 @@
 # review, never an approval or a request for changes: merging is a maintainer's,
 # and a request for changes would stand on the pull request after its author
 # had acted, since nothing here posts again. Its stored outcomes are done and
-# changes (the pack's flow has no done-safe), the verdict is still the first
-# line, and the script gives the bead no merge-ok and touches no label. What it
-# sends back to the reviewer never tells it to push: the pull request is its
-# author's, and the reviewer pushes nothing of it.
+# changes (the pack's flow has no done-safe). Its first line is not the verdict
+# of an approval: the review is the yard's first read, and a maintainer decides
+# on the merge. For done it is "Reviewed by the yard: nothing that must change. A
+# maintainer decides on the merge." (not "no findings": a done review may list
+# findings that may change, and the line must not contradict the body under it),
+# and for changes "Reviewed by the yard: changes needed." Where the bead carries
+# the label merge-ok, which the yard merges from approved itself (a dependency
+# bot's bump of Go modules, which the reviewer marked), no maintainer decides,
+# and the done line is "Reviewed by the yard: nothing that must change." alone.
+# The script gives the bead no merge-ok and touches no label; it reads the one
+# the reviewer put there. What it sends back to the reviewer never tells it to
+# push: the pull request is its author's, and the reviewer pushes nothing of it.
 #
 # On the public line, GitHub does not let the App approve or ask changes of the
 # pull request it opened (open-pr). The review is then posted as a comment
@@ -259,8 +269,25 @@ changes) event=REQUEST_CHANGES verdict="Changes needed" ;;
 esac
 # A pull request from outside gets a comment review whatever the outcome: it is
 # not the yard's to approve, and a request for changes would stay on it after its
-# author acts, since nothing posts again. The verdict is still the first line.
-[ -z "$fork" ] || event=COMMENT
+# author acts, since nothing posts again. For the same reason its first line is
+# not an approval: the review is the yard's first read and a maintainer decides
+# on the merge, so an approval there would tell the contributor a decision that
+# is not made yet, over a body that may still list what a maintainer will weigh.
+# merge-ok on the bead is the one case with no maintainer to decide: the yard
+# merges that from approved itself. The label is read from the bead's JSON as the
+# script already has it, and labels that jq cannot read as a list are none, so
+# the sentence stays.
+if [ -n "$fork" ]; then
+  event=COMMENT
+  case $outcome in
+  changes) verdict="Reviewed by the yard: changes needed." ;;
+  *)
+    verdict="Reviewed by the yard: nothing that must change."
+    printf '%s' "$bead" | jq -e '(.labels // []) | any(. == "merge-ok")' >/dev/null 2>&1 ||
+      verdict="$verdict A maintainer decides on the merge."
+    ;;
+  esac
+fi
 case $stage:$outcome in review-post:done-safe | review-security-post:done) yes=1 ;; esac
 
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }

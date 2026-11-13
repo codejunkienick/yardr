@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -228,7 +229,10 @@ func aReview(outcome, pwned string) map[string]any {
 // is: a contributor's branch of a fork, so no branch of the yard's is looked
 // for, and the pull request the hook linked. Its review is a comment review at
 // once, whatever it says, and the bead goes on the way the contributors pack's
-// flow says, with no merge-ok and no label touched.
+// flow says, with no merge-ok and no label touched. Its first line is the yard's
+// first read and no approval, since a maintainer decides on the merge: it never
+// says Approved, and drops the sentence about the maintainer only where the bead
+// carries merge-ok, which the yard merges itself.
 func TestPostReviewPosts(t *testing.T) {
 	t.Parallel() // as its subtests are: see TestMain
 	pwned := filepath.Join(t.TempDir(), "pwned")
@@ -240,7 +244,7 @@ func TestPostReviewPosts(t *testing.T) {
 		to      string   // where the bead goes
 		events  []string // the reviews GitHub is asked for, in order
 		verdict string   // the first line of the body
-		yes     bool     // merge-ok is on the bead after
+		yes     bool     // merge-ok is on the bead after (a fork's has it from before: the script gives none)
 		fork    bool     // a pull request from outside, from a fork
 	}{
 		{"an approval that needs the security review", "review-post", "done", nil,
@@ -256,17 +260,26 @@ func TestPostReviewPosts(t *testing.T) {
 		{"an approval of the pull request the App opened", "review-post", "done-safe", map[string]string{"self": ""},
 			"ciwait", []string{"APPROVE", "COMMENT"}, "Approved", true, false},
 		{"a fork's pull request that is ready", "review-post", "done", nil,
-			"ciwait", []string{"COMMENT"}, "Approved", false, true},
+			"ciwait", []string{"COMMENT"}, "Reviewed by the yard: nothing that must change. A maintainer decides on the merge.", false, true},
 		{"a fork's pull request that needs changes", "review-post", "changes", nil,
-			"contributor", []string{"COMMENT"}, "Changes needed", false, true},
+			"contributor", []string{"COMMENT"}, "Reviewed by the yard: changes needed.", false, true},
+		{"a fork's pull request the yard merges itself", "review-post", "done", nil,
+			"ciwait", []string{"COMMENT"}, "Reviewed by the yard: nothing that must change.", true, true},
 	} {
 		t.Run(c.what, func(t *testing.T) {
 			y, gh := postYard(t)
 			const id = "r-post"
 			review, files := map[string]any{"review": aReview(c.outcome, pwned)}, c.files
+			var before []string // the labels of a fork's bead as the reviewer left it
 			if c.fork {
 				y.forkBead(id, c.stage, forkMeta(review), "hook:gh")
 				files = withFork(files)
+				if c.yes {
+					// The reviewer marks a dependency bot's bump of Go modules
+					// before it reports; the script reads the label and gives none.
+					y.yardr("bead", "update", id, "--add-label", "merge-ok")
+					before = []string{"merge-ok"}
+				}
 			} else {
 				y.postBead(id, c.stage, postMeta(review), true)
 			}
@@ -280,8 +293,8 @@ func TestPostReviewPosts(t *testing.T) {
 			if got := strings.Contains(strings.Join(b.Labels, ","), "merge-ok"); got != c.yes {
 				t.Errorf("labels = %v, want merge-ok = %v", b.Labels, c.yes)
 			}
-			if c.fork && len(b.Labels) != 0 {
-				t.Errorf("the review of a pull request from outside left labels on the bead: %v", b.Labels)
+			if c.fork && !slices.Equal(b.Labels, before) {
+				t.Errorf("the review of a pull request from outside changed the labels of the bead: %v, were %v", b.Labels, before)
 			}
 			if b.Metadata["review"] != "" {
 				t.Errorf("the review is still stored after it was posted: %v", b.Metadata["review"])
@@ -302,6 +315,11 @@ func TestPostReviewPosts(t *testing.T) {
 				if !strings.Contains(got[0], want) {
 					t.Errorf("the request lacks %s:\n%s", want, got[0])
 				}
+			}
+			// The yard has read a fork's pull request, and a maintainer decides: the
+			// body never says it is approved, whatever the review says.
+			if c.fork && strings.Contains(got[0], "Approved") {
+				t.Errorf("a pull request from outside was told it is approved:\n%s", got[0])
 			}
 			// A comment review is the same review with the other event.
 			if len(got) == 2 && strings.Replace(got[0], `"event":"APPROVE"`, `"event":"COMMENT"`, 1) != got[1] {

@@ -43,7 +43,8 @@ request as a comment (`review-post`, the next stage). Outcomes:
 - `question`: it needs a decision only {{operator}} or a maintainer can
   make (does the project want this at all). The note has the question and
   the options, and the bead goes to `decide`. Nothing is stored and nothing
-  is posted.
+  is posted. What a maintainer asked with the accept pick, and the worktree
+  cannot settle, is a question too.
 - `pushed`: not the reviewer's to report. A bot pushed to the pull request
   while it was read, and the source says so: the session ends, and the bead
   stays here for a new one at the new head.

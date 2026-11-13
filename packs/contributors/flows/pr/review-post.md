@@ -12,8 +12,10 @@ as the App.
 
 - **What is posted.** One GitHub review on the pull request the bead tracks,
   made from the stored review (the bead's metadata `review`: `outcome`, `body`,
-  `comments`) and from nothing else of the bead: its text and its notes are not
-  read. The verdict (`Approved`, `Changes needed`) is written as the first line.
+  `comments`) and from nothing else of the bead but whether it carries
+  `merge-ok`: its text and its notes are not read. The first line is the yard's
+  own, written by the script: the review is the yard's first read, and a
+  maintainer decides on the merge (the lines are under the outcomes, below).
   It is always a comment review, never an approval or a request for changes:
   merging is a maintainer's, and a request for changes would stand on the pull
   request after its author has acted, since nothing posts again. The review is
@@ -28,18 +30,23 @@ as the App.
   pull request has that head now, anchored to it.
 - **Once.** When the review is posted the stored review is emptied, so that no
   later round finds it, and the bead is reported.
-- **No label.** The script gives the bead no `merge-ok` and takes none off. The
-  reviewer's grant for a bot's bump of Go modules is the reviewer's own, and a
-  maintainer's yes is theirs.
+- **No label.** The script gives the bead no `merge-ok` and takes none off; it
+  reads the one the reviewer put there, for the first line. The reviewer's grant
+  for a bot's bump of Go modules is the reviewer's own, and a maintainer's yes
+  is theirs.
 
 Outcomes, the review's own, and `failed`:
 
-- `done`: posted, with `Approved` as its first line. The bead goes to `ciwait`,
-  where the yard runs the depot's tests on the head that was read. The word is
-  the verdict on the change and not a yes to merge it.
-- `changes`: posted, with `Changes needed` as its first line. The bead goes to
-  `contributor` and comes back to `review` when the pull request has new
-  commits.
+- `done`: posted, with `Reviewed by the yard: nothing that must change. A
+  maintainer decides on the merge.` as its first line. The bead goes to
+  `ciwait`, where the yard runs the depot's tests on the head that was read.
+  The line is the yard's read of the change and not a yes to merge it, and the
+  body under it may list findings that may change. Where the bead carries
+  `merge-ok`, which the yard merges from `approved` itself, no maintainer
+  decides and the line is `Reviewed by the yard: nothing that must change.`
+- `changes`: posted, with `Reviewed by the yard: changes needed.` as its first
+  line. The bead goes to `contributor` and comes back to `review` when the pull
+  request has new commits.
 - `failed`: the review could not be posted as the reviewer stored it, and the
   note says why: none stored, a field wrong, an outcome this stage does not take
   (`done-safe` is no outcome of this flow), no head recorded, a pull request that

@@ -76,7 +76,10 @@ would accept (the short commit, who pushed it and when, and how large the
 change is) and offers `accepted` and `dropped`; Later and Decline leave it. One
 pick of `accepted` records the head the card showed as `accepted_head` and
 moves the bead to `review` in the same step, and `dropped` closes the bead and
-leaves the pull request on GitHub as it is. The card is drawn from the
+leaves the pull request on GitHub as it is. Words written with an `accepted`
+pick are the reviewer's to answer: they are part of its brief, as information
+about what to look at, and its note answers each under `Asked by <user>:`
+(`roles/pr-reviewer.md`). The card is drawn from the
 deliveries the yard heard and nothing else: nothing of the pull request is
 fetched or run to draw it. Only the maintainers' picks count. The label keeps
 working beside the card, and a label that moves the bead takes its card back.
@@ -128,13 +131,19 @@ yard posts it on the pull request as the yard's GitHub App and sends the bead
 on, `done` to `ciwait` and `changes` to `contributor`. It is always a comment,
 never an approval or a request for changes: merging is a maintainer's, and a
 request for changes would stand on the pull request after its author had
-acted, since nothing posts again. The comment's first line is the verdict
-(`Approved`, `Changes needed`), written by the script, which posts only what
-it checks: the pull request is the one the bead tracks, linked by the hook that
-made the bead (a link made by a person or an agent of the yard is held, not
+acted, since nothing posts again. The comment's first line is the yard's own
+word, written by the script and not the reviewer: `Reviewed by the yard:
+nothing that must change. A maintainer decides on the merge.` for `done`, and
+`Reviewed by the yard: changes needed.` for `changes`. It is the yard's first
+read and no approval. Where the bead carries `merge-ok`, which the yard merges
+from `approved` itself, no maintainer decides, and the `done` line is
+`Reviewed by the yard: nothing that must change.` alone. The script posts only
+what it checks: the pull request is the one the bead tracks, linked by the hook
+that made the bead (a link made by a person or an agent of the yard is held, not
 posted on), it is open, and it has the head the reviewer read, else the review
 goes back to the reviewer once and then to `decide`. The script gives the bead
-no label, and a question is never posted.
+no label (it reads `merge-ok` for the first line and nothing else), and a
+question is never posted.
 
 **`post-review` works as the yard's GitHub App, so the yard sets its group up
 first.** The script is `scripts/post-review`, the copy of
