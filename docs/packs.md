@@ -103,9 +103,9 @@ claude, codex, grok, kimi and muse still carry, so a route's condition can
 gate builders on token use. A pack may not bring a `limits` key (below), so
 there is no `yardr pack apply aiquokka`. yardr carries the source itself,
 apart from the packs, and the operator adds it by its name with `yardr source
-add aiquokka`; a crew member proposes it with `yardr bead ask <bead> "…"
---context "…" --run "source add aiquokka"`, for the operator to approve on
-its card. Where `aiquokka` is on PATH and the yard declares no such source,
+add aiquokka`; a crew member proposes it with `yardr bead ask <bead> -` and
+`Q:`, `C:` and `R: source add aiquokka` lines on stdin, for the operator to
+approve on its card. Where `aiquokka` is on PATH and the yard declares no such source,
 `yardr doctor` proposes the add. Installing aiquokka, and the route's
 condition, are in
 [integrations.md](integrations.md#say-what-a-subscription-still-carries).
@@ -938,7 +938,7 @@ declared sources
 declared source pushover, from sources/pushover.yaml
   its calls go to https://api.pushover.net/1: message (update)
   would be added to the yard's sources
-  missing  env file     no env_file is set for it, and a pack neither carries nor names one: yardr source key pushover gives PUSHOVER_TOKEN, or yardr source set pushover env_file=<file> names a file the operator keeps themselves; an agent asks from its pane: yardr bead ask <bead> "<question>" --secret pushover --context "<where to get it>"
+  missing  env file     no env_file is set for it, and a pack neither carries nor names one: yardr source key pushover gives PUSHOVER_TOKEN, or yardr source set pushover env_file=<file> names a file the operator keeps themselves; an agent asks from its pane: yardr bead ask <bead> - --secret pushover, with the question and where to get it on stdin
   missing  notify       it can tell a user outside the yard and no user names it. The import names none: yardr user key <user> pushover gives their PUSHOVER_USER, then yardr user set <user> notify=pushover
 ```
 
@@ -1036,7 +1036,7 @@ calls of source crm, for group web-builders
 calls of source crm, for group web-support
   the pack asks for note (update)
   lacks     note (update): nothing is asked or granted
-    missing  env file     no env_file is set for it, and a pack neither carries nor names one: yardr source key crm gives CRM_TOKEN and CRM_UPDATE_TOKEN, or yardr source set crm env_file=<file> names a file the operator keeps themselves; an agent asks from its pane: yardr bead ask <bead> "<question>" --secret crm --context "<where to get it>", then apply the pack again
+    missing  env file     no env_file is set for it, and a pack neither carries nor names one: yardr source key crm gives CRM_TOKEN and CRM_UPDATE_TOKEN, or yardr source set crm env_file=<file> names a file the operator keeps themselves; an agent asks from its pane: yardr bead ask <bead> - --secret crm, with the question and where to get it on stdin, then apply the pack again
 ```
 
 | the plan says | meaning |
@@ -1840,7 +1840,9 @@ that already follows a pack for its own work:
 
 ```sh
 yardr pack apply design --depot web
-yardr bead create "How should retries work?" --depot web --type design
+yardr bead create - --depot web --type design <<'BEAD'
+How should retries work?
+BEAD
 ```
 
 | stage | worked by | |
@@ -1961,17 +1963,17 @@ else the import adds none. `yardr pack list` shows the import into the
 yard.
 
 **Proposing an embedded pack.** A crew member may propose applying a
-pack yardr embeds, with a run ask (`yardr bead ask <id> "<question>"
---context "<why>" --run "pack apply <name>",
+pack yardr embeds, with a run ask (`yardr bead ask <id> -` with `Q:`,
+`C:` and `R: pack apply <name>` lines on stdin,
 [chat.md](chat.md#questions-for-you)), for
 the operator to approve on a card: an embedded pack of kind `source`
 with no flag (the packs table above names them), or a pack of a depot
 kind. With no flag a depot pack is re-applied to the one depot that
 holds it where its plan asks nothing; a first install names its depot,
-with the mappings that answer its plan (`--run "pack apply <name>
---depot <depot>"`). A pack of kind `source` named with `--depot` is
-sent to the setup ask instead (`yardr bead ask <id> "<question>"
---setup <pack>`, [chat.md](chat.md#setting-up-a-packs-sources)), which is
+with the mappings that answer its plan (`R: pack apply <name>
+--depot <depot>`). A pack of kind `source` named with `--depot` is
+sent to the setup ask instead (`yardr bead ask <id> - --setup <pack>`,
+[chat.md](chat.md#setting-up-a-packs-sources)), which is
 also the one card for a pack of kind `source` that the operator applied
 from a directory in a terminal and has left as it was: a clean git
 checkout still at the commit the apply recorded.
@@ -2015,8 +2017,8 @@ yardmaster has a road of its own beside the card, for a pack that yardr
 embeds and for one that the packs repository serves.
 
 **Proposing a pack from a directory.** A directory inside a registered
-depot's main checkout is proposed the same way (`--run "pack apply
-<dir>"`, written absolute or relative to where the ask is typed), and is
+depot's main checkout is proposed the same way (`R: pack apply
+<dir>`, written absolute or relative to where the ask is typed), and is
 read at the ask into the same whole card, pinned by the digest `yardr
 pack check <dir>` prints: `--sha256` names that digest and refuses where
 it names another, and with none named the card prints the digest it pins.
@@ -2028,8 +2030,8 @@ import's record are each refused at the ask; each is the operator's in a
 terminal.
 
 **Proposing a pack from the packs repository.** The repository's URL
-pinned with `--sha256` is proposed the same way (`--run "pack apply
-<url> --sha256 <digest>"`), and is read at the ask from the fetched
+pinned with `--sha256` is proposed the same way (`R: pack apply
+<url> --sha256 <digest>`), and is read at the ask from the fetched
 bytes, held to the digest before anything is read of them, into the
 embedded card's shape: the URL whole where the label stands, the pack's
 name held to its directory's, and the digest printed whole. A wrong
@@ -2066,7 +2068,7 @@ other from the record's diffs. The card stays for the operator who would
 rather approve first.
 
 **A pack updated is one card again.** A setup ask on a pack already
-applied (`yardr bead ask <id> "<question>" --setup <pack>`,
+applied (`yardr bead ask <id> - --setup <pack>`,
 [chat.md](chat.md#setting-up-a-packs-sources)) is the same setup card
 again, showing the difference: each source's declaration diff old against
 new and each command file's old and new sha256 with its unified diff, as

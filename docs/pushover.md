@@ -84,10 +84,14 @@ value goes from that field to the yard's server and into the same file,
 and no agent is shown it.
 
 ```sh
-yardr bead ask <bead> "Pushover's application token" --secret pushover \
-  --context "Create one at pushover.net/apps/build, with any name."
-yardr bead ask <bead> "Your Pushover user key" --secret pushover --for-user mckean \
-  --context "It is on the first page of pushover.net after login: Your User Key."
+yardr bead ask <bead> - --secret pushover <<'ASK'
+Pushover's application token
+Create one at pushover.net/apps/build, with any name.
+ASK
+yardr bead ask <bead> - --secret pushover --for-user mckean <<'ASK'
+Your Pushover user key
+It is on the first page of pushover.net after login: Your User Key.
+ASK
 ```
 
 The first asks the operator; the second asks `mckean`, and is theirs or

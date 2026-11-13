@@ -154,7 +154,9 @@ from an earlier yardr keeps them, and works from them as before.
 ### 3. A bead
 
 ```sh
-yardr bead create "Summarize each PDF in 2025-09/ into 2025-09/summary.md" -d invoices -s new
+yardr bead create - -d invoices -s new <<'BEAD'
+Summarize each PDF in 2025-09/ into 2025-09/summary.md
+BEAD
 ```
 
 What happens, with the daemon running (`yardr daemon`):

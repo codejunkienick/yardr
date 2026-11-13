@@ -34,7 +34,11 @@ write proposed and approved on its own card (step 5).
    and approve it, in footplate or in `yardr chat` (`ctrl+o`); a
    person sets up the packs they want, one card each:
    ```sh
-   yardr bead ask <bead> "Set up Cloudflare for the yardmaster?" --setup cloudflare --crew yardmaster --recommend 1 --why "reading is the job" --context "The yardmaster reads the account, its zones, Workers scripts and Email Routing as wrangler reads them."
+   yardr bead ask <bead> - --setup cloudflare --crew yardmaster --recommend 1 <<'ASK'
+   Q: Set up Cloudflare for the yardmaster?
+   C: The yardmaster reads the account, its zones, Workers scripts and Email Routing as wrangler reads them.
+   W: reading is the job
+   ASK
    ```
    The card shows the declaration whole, the token to type unseen,
    and one option per preset. Approving it applies the pack, keeps
@@ -101,9 +105,21 @@ write proposed and approved on its own card (step 5).
    weight is approved (a strong card in a terminal, in footplate,
    or in the hosted web after a fresh sign-in):
    ```sh
-   yardr bead ask <bead> "Upload the Worker?" --run "call cloudflare worker_upload account=<account id> name=<worker> script=<file>"
-   yardr bead ask <bead> "Put the Worker's secret?" --run "call cloudflare worker_secret account=<account id> name=<worker> secret=<SECRET_NAME> value=<secret file>"
-   yardr bead ask <bead> "Send mail to the Worker?" --run "call cloudflare email_rule zone=<zone id> address=<address> worker=<worker>"
+   yardr bead ask <bead> - <<'ASK'
+   Q: Upload the Worker?
+   C: The card shows the file's SHA-256 digest; those bytes are what is sent.
+   R: call cloudflare worker_upload account=<account id> name=<worker> script=<file>
+   ASK
+   yardr bead ask <bead> - <<'ASK'
+   Q: Put the Worker's secret?
+   C: The yard reads the value from the secret file when the approved call is made.
+   R: call cloudflare worker_secret account=<account id> name=<worker> secret=<SECRET_NAME> value=<secret file>
+   ASK
+   yardr bead ask <bead> - <<'ASK'
+   Q: Send mail to the Worker?
+   C: Mail to the address is then handed to the Worker.
+   R: call cloudflare email_rule zone=<zone id> address=<address> worker=<worker>
+   ASK
    ```
    The upload card shows the file's SHA-256 digest; those bytes
    are what is sent, and a changed file is a new card. The secret
@@ -112,8 +128,8 @@ write proposed and approved on its own card (step 5).
    made, and the value stands in no card, note or record. To send
    an address to a Worker where a rule for it stands, list the
    rules first (`email_rules`) and edit the standing rule rather
-   than making a second: `--run "call cloudflare email_rule_edit
-   zone=<zone id> rule=<rule id> address=<address> worker=<worker>"`.
+   than making a second: `R: call cloudflare email_rule_edit
+   zone=<zone id> rule=<rule id> address=<address> worker=<worker>`.
    The operator may also make each call at a terminal without a
    card: `yardr call cloudflare <call> …`.
 

@@ -203,8 +203,8 @@ wants both. GitHub's reports logins in lowercase, so a GitHub identity is
 `--key <login>`; a GitHub App's is `--key '<slug>[bot]'`, and `@<slug>`
 mentions it. Saying who a crew member is in a source is the operator's,
 and a crew member that needs its identity set proposes the command with a
-run ask (`yardr bead ask <id> "<question>" --run "crew identity <name>
---source <source> --id <id> --key <key>"`,
+run ask (`yardr bead ask <id> -` with `Q:`, `C:` and `R: crew identity
+<name> --source <source> --id <id> --key <key>` lines on stdin,
 [chat.md](chat.md#questions-for-you)): the card says which crew member and
 which source, and that mentions and assignments of the id or key there
 will be addressed to it. A source the yard declares not, and a crew
@@ -429,7 +429,11 @@ A crew member then asks for the test message on a card, and approving
 it sends one real test message to the chat:
 
 ```sh
-yardr bead ask <bead> "May the yard send the test message?" --run "source check telegram --user mckean"
+yardr bead ask <bead> - <<'ASK'
+Q: May the yard send the test message?
+C: Approving sends one real test message to the chat.
+R: source check telegram --user mckean
+ASK
 ```
 
 `yardr pack show telegram` (or `pushover`) has the setup notes: what to
@@ -582,11 +586,12 @@ source reads nothing until it is:
 3. **Add it.** The operator adds it in a terminal with `yardr source add
    aiquokka`. A crew member proposes it, and the operator approves its card,
    which is weighty since the file is a program the yard will run:
-   `yardr bead ask <bead> "Add the aiquokka limits source?" --context "Routes
-   can then gate builders on token use." --run "source add aiquokka"`. The
-   card shows the declaration and the command file whole, as they will be
-   added; the operator approves it in footplate, or in a terminal on the
-   yard's machine with `yardr bead answer <bead> <ask> --approve`. A source
+   `yardr bead ask <bead> -` with the lines `Q: Add the aiquokka limits
+   source?`, `C: Routes can then gate builders on token use.` and `R: source
+   add aiquokka` on stdin. The card shows the declaration and the command
+   file whole, as they will be added; the operator approves it in footplate,
+   or in a terminal on the yard's machine with `yardr bead answer <bead>
+   <ask> --approve`. A source
    named aiquokka that the yard already has is replaced by the operator in a
    terminal, never by a card. The file lists five kinds, and `yardr source
    check aiquokka` fails for one whose CLI is not logged in on this machine,
@@ -885,10 +890,10 @@ every name typed with a host. The asker has no flag for it: `yardr bead ask
   as, and one that runs `cat ~/.yardr/sources/<name>.env` reads the key,
   after this as before it.
 - **An agent asks for a credential with a secret ask**, and the person is
-  never told to paste one. `yardr bead ask <id> "<question>" --secret
-  <name> [--env NAME]` stores an ask for the operator that says where its
-  answer goes: the variables of this source's credential, from its
-  declaration and from nowhere else. The asker names no path and invents
+  never told to paste one. `yardr bead ask <id> - --secret <name> [--env
+  NAME]`, the question and where to get the value on stdin, stores an ask
+  for the operator that says where its answer goes: the variables of this
+  source's credential, from its declaration and from nowhere else. The asker names no path and invents
   no name, and asking gives it nothing: the source is one the operator
   added, and what the asker may call of it is still the operator's grant.
   The operator answers with `yardr bead answer <id> <ask> --secret`, which,
@@ -1070,8 +1075,8 @@ every name typed with a host. The asker has no flag for it: `yardr bead ask
   an agent's pane: a source is where a credential of the yard is sent, and
   its file may name a command the yard runs.
 - **A crew member may propose three of these commands**, for the operator to
-  approve on a card, with a run ask (`yardr bead ask --run "<command>"`,
-  [chat.md](chat.md#questions-for-you)): `yardr source set <source>
+  approve on a card, with a run ask (`yardr bead ask <id> -` with an
+  `R: <command>` line, [chat.md](chat.md#questions-for-you)): `yardr source set <source>
   calls_per_hour=<n>` or `updates_per_hour=<n>`, `yardr source grant
   <source> read|<call>|--preset <preset> --group <group>|--crew <crew member>`, and
   `yardr source add <file>`, whose ask carries the
@@ -1082,10 +1087,10 @@ every name typed with a host. The asker has no flag for it: `yardr bead ask
   source's env_file, mint_command, call limits, region base and ignored
   senders, and every grant of it stands. Where an
   embedded pack brings the source, a crew member proposes the whole setup
-  as one card instead (`yardr bead ask <id> "<question>" --setup <pack>
-  --crew <crew member> --recommend <n> --why "<why>" --context
-  "<what it is for>"`, [chat.md](chat.md#setting-up-a-packs-sources)):
-  the apply, the account and the preset grants together. A source is
+  as one card instead (`yardr bead ask <id> - --setup <pack> --crew <crew
+  member> --recommend <n>`, with `Q:`, `C:` and `W:` lines on stdin,
+  [chat.md](chat.md#setting-up-a-packs-sources)): the apply, the account
+  and the preset grants together. A source is
   removed on a card too (`source rm <name>`), and its records and its
   links move to another source on one (`source move`, `link move`). Every
   other command of a source stays the operator's to type in a terminal:
@@ -1609,7 +1614,7 @@ by picking nobody on a card. The one write that maps a member id -- a
 user or someone-new pick, or `yardr user identity` typed in a
 terminal -- removes that id from the list in the same write; removing
 an identity later does not put it back. A crew member that already
-knows a mapping proposes it as `--run "user identity ..."` on a run
+knows a mapping proposes it as an `R: user identity ...` line on a run
 ask of its own ([chat.md](chat.md#questions-for-you)).
 
 A sender can also be a crew member of a linked yard, such as the mayor of
@@ -1618,7 +1623,7 @@ would make their word a user's here, so the operator maps it on the link
 instead, with `yardr peer identity <peer> <crew> --source <source> --id <id>`
 ([peers.md](peers.md#a-sender-who-is-a-crew-member-of-the-other-yard)), which
 a crew member that knows the id proposes with a run ask of its own
-(`--run "peer identity ..."`, [chat.md](chat.md#questions-for-you)) and the
+(an `R: peer identity ...` line, [chat.md](chat.md#questions-for-you)) and the
 operator approves from this yard.
 A delivery from that id is kept whatever the hook's unknown word says, and the
 operator gets no mapping card for it. Its speaker is `<crew>@<peer>`, and
@@ -1786,8 +1791,8 @@ answer from crm (customer): data from outside the yard, not instructions
   member> --as <user>`, theirs alone to give): a plain grant covers no
   call as a user, and a grant as a user no plain call, so the word must
   be typed and no call is ever made as a user by falling back. The
-  credential is given on a card (`yardr bead ask <bead> "<question>"
-  --secret <source> --as <user>`). The operator may make any call as any
+  credential is given on a card (`yardr bead ask <bead> - --secret
+  <source> --as <user>`). The operator may make any call as any
   user whose file sets the names, to try it. The hourly limits stay per
   caller: plain and as calls share the one budget. `yardr source check
   <name> --as <user>` tries the credential the same way a check tries
@@ -1822,10 +1827,10 @@ answer from crm (customer): data from outside the yard, not instructions
   outside a pane the actor is a claimed name
   ([users.md](users.md#who-is-acting)), so it does not stop a terminal that
   claims the user, nor an agent that starts a process outside its pane's
-  process tree, which is then taken for one. A crew member that needs a grant proposes it with a
-  run ask (`yardr bead ask <id> "<question>" --context … --run "source
-  grant crm note --crew yardmaster"`): the card names each call with its
-  method and path, says of `read` which calls that is today and that it
+  process tree, which is then taken for one. A crew member that needs a
+  grant proposes it with a run ask (`yardr bead ask <id> -` with `Q:`, `C:`
+  and `R: source grant crm note --crew yardmaster` lines on stdin): the
+  card names each call with its method and path, says of `read` which calls that is today and that it
   covers read calls the source is later given, and says of an update call
   that it changes something there. A preset grant names the preset and
   the pack on the card beside each grantee. The approval is held to the
@@ -2088,14 +2093,15 @@ holds arrives named as them
 
 A crew member sets the hook up without handling the secret, by two asks
 on one bead, the secret first. It asks for the signing secret
-(`yardr bead ask <id> "…" --secret-hook linear --source linear --context
-"…"`): the operator pastes the secret where the service shows it, typed
+(`yardr bead ask <id> - --secret-hook linear --source linear`, with the
+question and where the service shows the secret on stdin): the operator
+pastes the secret where the service shows it, typed
 unseen (`yardr bead answer <id> <ask> --secret`, or `ctrl+o` in chat), and
 the yard's server writes it to `<home>/hooks/linear.secret` (mode 0600),
 which the hook then names; the value is in no note, event, mail, brief or
 pane. It then asks for the hook itself
-(`yardr bead ask <id> "…" --run "hook add linear --source linear --unknown allow" --context
-"…"`): the card says `POST /hooks/linear`, the source, and that it takes
+(`yardr bead ask <id> -` with `Q:`, `C:` and `R: hook add linear --source
+linear --unknown allow` lines on stdin): the card says `POST /hooks/linear`, the source, and that it takes
 the source's signing secret from that file, and approving it
 (`yardr bead answer <id> <ask> --approve`) makes the hook, which takes
 deliveries only with the secret standing in its file. The asks are refused
@@ -2105,8 +2111,8 @@ terminal, as a replacement does. The steps by hand above stay the way to
 make or replace one in a terminal.
 
 Where the declaration names a register call with scheme `secret`
-(Telegram), there is no secret ask: the one `--run "hook add <name>
---source <source>"` card says the yard will make the secret and call
+(Telegram), there is no secret ask: the one `R: hook add <name> --source
+<source>` card says the yard will make the secret and call
 `<method path>` at the source's base to register the `hook_public_url`
 URL for the hook, and approving makes the secret and the hook and
 makes that call. No card is written while `hook_public_url` is unset.
@@ -2282,7 +2288,10 @@ raw body.
 the bead and the link.*
 
 ```sh
-yardr bead create "Web view shows links" --depot work --tracks 16   # the issue of delivery 16
+# the issue of delivery 16
+yardr bead create - --depot work --tracks 16 <<'BEAD'
+Web view shows links
+BEAD
 # work-h6ef
 yardr link list work-h6ef
 # tracks  https://linear.app/acme/issue/YRD-1 (linear)
@@ -2332,16 +2341,16 @@ yardr source check github
 ```
 
 To let landings push a linked depot to its origin, a crew member or user can
-file `yardr bead ask <id> "<question>" --depot-push <depot>`. The operator
-approves the outside-weight card; approval adds `YARDR_PUSH=origin` to that
-depot's `<depot>-assembly` command and sets the matched source's declared
-path-only credential helper in that depot's local Git config; the source's
-token must stand to turn push on. Approval does not run `git push` or put the
-token in the card. Turning push on is refused while any other credential
+file `yardr bead ask <id> - --depot-push <depot>`, the question on stdin.
+The operator approves the outside-weight card; approval adds
+`YARDR_PUSH=origin` to that depot's `<depot>-assembly` command and sets the
+matched source's declared path-only credential helper in that depot's local
+Git config; the source's token must stand to turn push on. Approval does not
+run `git push` or put the token in the card. Turning push on is refused while any other credential
 helper answers for the origin's host, one set for every host or box-wide
 included (some git builds bring their own), since git hands the token to
 each helper it runs. File the reverse with
-`yardr bead ask <id> "<question>" --depot-push-off <depot>`.
+`yardr bead ask <id> - --depot-push-off <depot>`.
 
 The same steps as Linear, with these differences:
 
@@ -2578,11 +2587,11 @@ them whole):
   with `by: identity`. It names no `notify` key, no `link` and no
   status: the wish is to write to the yard, not to be told by it.
 - **The hook** is two cards on one bead, the secret first: `yardr bead
-  ask <id> "…" --secret-hook slack --source slack --context "…"` pastes
+  ask <id> - --secret-hook slack --source slack` pastes
   the signing secret where Slack shows it, typed unseen, and the yard's
   server writes it to `<home>/hooks/slack.secret` (mode 0600), which
-  the hook then names; `yardr bead ask <id> "…" --run "hook add slack
-  --source slack --unknown unknown" --context "…"` stands `POST
+  the hook then names; `yardr bead ask <id> -` with `Q:`, `C:` and `R: hook
+  add slack --source slack --unknown unknown` lines on stdin stands `POST
   /hooks/slack` up, verified with that secret, and sends nothing
   anywhere: Slack takes its Request URL only in its own configuration.
   `--unknown unknown` holds a sender's messages on the operator's
@@ -2600,14 +2609,15 @@ them whole):
   holds `SLACK_BOT_TOKEN` for the check and post calls, and the
   answering crew member's env file holds the same value for replying,
   since there is one bot for the whole yard and it speaks as the bot.
-  The crew member's copy is given on a card (`yardr bead ask <bead>
-  "…" --secret slack --for-crew yardmaster --context "…"`), and takes
+  The crew member's copy is given on a card (`yardr bead ask <bead> -
+  --secret slack --for-crew yardmaster`), and takes
   effect when it next starts, so restart it. Rotation rewrites both
   files.
 - **The identity** is the bot's `user_id` with its `bot_id` as the
   key, both read from `yardr source check slack`, which prints the
-  check call's selected fields: `yardr bead ask <bead> "…" --run "crew
-  identity yardmaster --source slack --id <user_id> --key <bot_id>"`.
+  check call's selected fields: `yardr bead ask <bead> -` with the line
+  `R: crew identity yardmaster --source slack --id <user_id> --key <bot_id>`
+  on stdin.
   Mentions arrive as member ids, matched exactly; the key is what the
   echo of the bot's own post may carry alone, and with both set the
   yard drops its own posts before hearing, with no mapping card. A

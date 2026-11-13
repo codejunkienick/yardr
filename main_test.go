@@ -370,23 +370,26 @@ func quotedTextShapes(t *testing.T) []quotedTextShape {
 			dash:   `yardr thread open <source> --crew <member> --in <place> --assign <user> -b body -`},
 		// An ask's texts are the question after the bead (or --new, or a
 		// take-back's reason after the ask) and the flags that carry the rest,
-		// which a wrapped example shows on lines of their own. The docs show
-		// all four shapes still (docsLeft, yardr-w4dj).
-		{name: "an ask's texts", docsLeft: "yardr-w4dj",
-			pattern: `bead ask (\S+ ){1,3}\\?"|--take-back (\S+ ){2}\\?"|--(context|option|why|run|run-test) \\?"`,
+		// which a wrapped example shows on lines of their own. An inline code
+		// span can wrap the command before the quoted text too.
+		{name: "an ask's texts",
+			pattern: `bead ask\s+(\S+\s+){1,3}\\?"|--take-back\s+(\S+\s+){2}\\?"|--(context|option|why|run|run-test)\s+\\?"`,
 			quoted:  `yardr bead ask <id> "<question>" --to <person>`, dash: `yardr bead ask <id> - --to <person>`,
 			also: []string{`yardr bead ask --new "<question>"`, `yardr bead ask --take-back <id> <ask> "<reason>"`, `%s --take-back <id> <ask> "<reason>"`,
+				`yardr bead ask
+<id> "<question>"`, `yardr bead ask --new
+"<question>"`,
 				`    --context "<line>" \`, `    --option "<label>: <consequence>" \`, `    --why "<why>"`, `    --run "<command>"`, `    --run-test "<command>"`}},
 		// A pick's words follow its number, and --words and --decline take the
 		// others; a link's "yardr bead answer <bead> <ask> " + flag shows no
 		// text, and is no quote.
-		{name: "an answer's words", docsLeft: "yardr-w4dj",
+		{name: "an answer's words",
 			pattern: `bead answer \S+ \S+ (\d+|<n>|%[sd]) \\?"|--(words|decline) \\?"`,
 			quoted:  `yardr bead answer <id> <ask> 2 "not before Friday"`, dash: `yardr bead answer <id> <ask> --words -`,
 			also: []string{`yardr bead answer <id> <ask> --words "<text>"`, `yardr bead answer <id> <ask> --decline "<words>"`}},
-		{name: "a timer's reason", docsLeft: "yardr-w4dj", pattern: `timer add (\S+ ){1,9}\\?"`,
+		{name: "a timer's reason", pattern: `timer add (\S+ ){1,9}\\?"`,
 			quoted: `yardr timer add --in 40m "<reason>"`, dash: `yardr timer add --in 40m -`},
-		{name: "a bead's title or body", docsLeft: "yardr-w4dj", pattern: `bead create (\S+ ){0,9}\\?"`,
+		{name: "a bead's title or body", pattern: `bead create (\S+ ){0,9}\\?"`,
 			quoted: `yardr bead create "<title>" --depot web -b "<goal>"`, dash: `yardr bead create - --depot web -b -`},
 	}
 	// The line yardr doctor prints once a yard's first bead has merged, which
@@ -476,11 +479,11 @@ func TestNoGoCodeShowsAQuotedText(t *testing.T) {
 // journal entry, a thread's title, an ask, an answer, a timer or a bead's title
 // or body as a double-quoted argument teaches the
 // same shape, whose backtick spans and $( ) the shell runs before yardr
-// starts. So the docs and the packs' setup notes are held to the shapes the
-// Go texts are, and show the - form, which reads the words from stdin
+// starts. So the README, docs and the packs' setup notes are held to the
+// shapes the Go texts are, and show the - form, which reads the words from stdin
 // (yardr-ctwf rewrote 33 examples, and nothing held the next one back). The
-// files are the ones git lists under docs/ and packs/*/SETUP.md, less
-// docs/design/, which is history and shows the forms of its day. Test
+// files are README.md, the ones git lists under docs/ less docs/design/,
+// which is history and shows the forms of its day, and packs/*/SETUP.md. Test
 // fixtures (testdata/) and contrib/ are outside these globs, and a wider glob
 // leaves them out: no agent learns a command from a fixture, and contrib/'s
 // READMEs are for the people who run its tools.
@@ -490,12 +493,13 @@ func TestNoGoCodeShowsAQuotedText(t *testing.T) {
 func TestDocsShowNoQuotedText(t *testing.T) {
 	t.Parallel()
 	shapes := quotedTextShapes(t)
-	listed, err := exec.Command("git", "ls-files", "-z", "--", "docs/*.md", "packs/*/SETUP.md").Output()
+	listed, err := exec.Command("git", "ls-files", "-z", "--", "README.md", "docs/*.md", "packs/*/SETUP.md").Output()
 	if err != nil {
 		t.Fatalf("git ls-files: %v", err)
 	}
 	var files int
 	left := map[string]int{}
+	wrappedCode := regexp.MustCompile("`([^`]*\\n[^`]*)`")
 	for path := range strings.SplitSeq(strings.TrimSuffix(string(listed), "\x00"), "\x00") {
 		if strings.HasPrefix(path, "docs/design/") {
 			continue
@@ -510,7 +514,8 @@ func TestDocsShowNoQuotedText(t *testing.T) {
 			t.Fatal(err)
 		}
 		files++
-		for n, line := range strings.Split(string(body), "\n") {
+		bodyText := string(body)
+		for n, line := range strings.Split(bodyText, "\n") {
 			// Every shape needs the quote, and most lines have none.
 			if !strings.Contains(line, `"`) {
 				continue
@@ -527,13 +532,40 @@ func TestDocsShowNoQuotedText(t *testing.T) {
 				break
 			}
 		}
+		// Markdown lets an inline code span wrap in the source. The line walk
+		// above cannot see a command whose quoted text starts on the next line,
+		// so check those spans with their line breaks folded to spaces as well.
+		for _, match := range wrappedCode.FindAllStringSubmatchIndex(bodyText, -1) {
+			span := bodyText[match[2]:match[3]]
+			folded := strings.ReplaceAll(span, "\n", " ")
+			for _, sh := range shapes {
+				if !sh.re.MatchString(folded) {
+					continue
+				}
+				if sh.docsLeft != "" {
+					left[sh.name]++
+					continue
+				}
+				lineMatch := false
+				for _, line := range strings.Split(span, "\n") {
+					if sh.re.MatchString(line) {
+						lineMatch = true
+						break
+					}
+				}
+				if !lineMatch {
+					line := strings.Count(bodyText[:match[0]], "\n") + 1
+					t.Errorf("%s:%d shows %s as a double-quoted argument across a wrapped inline code span, which the shell expands: show the - form, which reads the words from stdin (%s): %s", path, line, sh.name, sh.dash, strings.Join(strings.Fields(span), " "))
+				}
+			}
+		}
 	}
 	for _, sh := range shapes {
 		if sh.docsLeft != "" && left[sh.name] == 0 {
 			t.Errorf("no doc shows %s as a double-quoted argument any more: delete its docsLeft (%s), so that the docs are held to the shape", sh.name, sh.docsLeft)
 		}
 	}
-	// Not for want of looking: git lists the docs and the setup notes.
+	// Not for want of looking: git lists the README, docs and setup notes.
 	if files < 40 {
 		t.Fatalf("%d docs read", files)
 	}

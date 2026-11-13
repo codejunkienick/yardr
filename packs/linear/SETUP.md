@@ -37,11 +37,11 @@ means in Linear is a flow pack's to say, not this file's.
 
    A crew member sets the hook up without handling the secret, by two
    asks on one bead, the secret first: it asks for the signing secret
-   (`yardr bead ask <id> "…" --secret-hook linear --source linear
-   --context "…"`) and then for the hook itself
-   (`yardr bead ask <id> "…" --run "hook add linear --source linear --unknown allow"
-   --context "…"`). The operator pastes the secret where Linear shows
-   it, typed unseen; the yard's server writes it to
+   (`yardr bead ask <id> - --secret-hook linear --source linear`, with the
+   question and where Linear shows it on stdin) and then for the hook itself
+   (`yardr bead ask <id> -` with `Q:`, `C:` and `R: hook add linear --source
+   linear --unknown allow` lines on stdin). The operator pastes the secret
+   where Linear shows it, typed unseen; the yard's server writes it to
    `<home>/hooks/linear.secret` (mode 0600), which the hook then names,
    and it is in no note or pane. Approving the hook then makes
    `POST /hooks/linear`. `--map` and `--as`, and replacing a hook, stay
@@ -51,7 +51,10 @@ means in Linear is a flow pack's to say, not this file's.
    for it, and answer on its card, in footplate or in `yardr chat`
    (`ctrl+o`), where the field shows dots:
    ```sh
-   yardr bead ask <bead> "The token it answers with" --secret linear --for-crew <name> --context "The token of the Linear OAuth application made for it."
+   yardr bead ask <bead> - --secret linear --for-crew <name> <<'ASK'
+   The token it answers with
+   The token of the Linear OAuth application made for it.
+   ASK
    ```
    The yard's server writes it into the crew member's env file, or with
    none set into `~/.yardr/crew/<name>.env`, which is then set as `yardr
@@ -93,7 +96,11 @@ means in Linear is a flow pack's to say, not this file's.
    A crew member setting itself up proposes it instead, from its session,
    and the operator approves it on the card:
    ```sh
-   yardr bead ask <bead> "Who am I in Linear?" --run "crew identity <name> --source linear --id <user id> --key <handle>"
+   yardr bead ask <bead> - <<'ASK'
+   Q: Who am I in Linear?
+   C: Mentions and assignments of this id and handle in Linear should reach me.
+   R: crew identity <name> --source linear --id <user id> --key <handle>
+   ASK
    ```
    A mention is matched by the handle when the delivery carries markdown
    only, and by the id otherwise: with the id alone, the test of 11 Oct

@@ -47,7 +47,10 @@ inbox.
    Or have a crew member ask for it, and answer on its card, in
    footplate or in `yardr chat` (`ctrl+o`), where the field shows dots:
    ```sh
-   yardr bead ask <bead> "The Telegram bot's token" --secret telegram --context "@BotFather answered /newbot with it."
+   yardr bead ask <bead> - --secret telegram <<'ASK'
+   The Telegram bot's token
+   @BotFather answered /newbot with it.
+   ASK
    ```
    The secret goes nowhere else: not into mail, chat, a bead or a pack.
 5. **The chat id: write to the bot, and confirm it is you.** No
@@ -81,7 +84,10 @@ inbox.
    the chat id by hand, and a crew member can still ask for it on a
    card, answered where the field shows dots:
    ```sh
-   yardr bead ask <bead> "Your Telegram chat id" --secret telegram --for-user mckean --context "The chat id the claim card showed, or the one under result at getUpdates."
+   yardr bead ask <bead> - --secret telegram --for-user mckean <<'ASK'
+   Your Telegram chat id
+   The chat id the claim card showed, or the one under result at getUpdates.
+   ASK
    ```
    Declining the claim card drops it and writes nothing. Once the
    chat id is written, step 7's test message can be sent, and the
@@ -90,7 +96,11 @@ inbox.
 7. **One test message, on a card.** A crew member asks for it with one
    ask on one bead:
    ```sh
-   yardr bead ask <bead> "May the yard send the test message?" --run "source check telegram --user mckean"
+   yardr bead ask <bead> - <<'ASK'
+   Q: May the yard send the test message?
+   C: Approving sends one real test message to the chat.
+   R: source check telegram --user mckean
+   ASK
    ```
    Its card says it will send one real test message to that user's
    chat, with the message whole, and on approval the yard sends it. The
@@ -149,8 +159,8 @@ There is no `thread open telegram`, no status and no bead link to a chat.
    ```
    The URL of the telegram hook is then
    `https://<his host>/hooks/telegram`. A crew member then sets the
-   hook up with one ask on one bead (`--run "hook add telegram
-   --source telegram"`; no secret ask, and no secret typed): its card
+   hook up with one ask on one bead (an `R: hook add telegram --source
+   telegram` line on stdin; no secret ask, and no secret typed): its card
    says it will call `POST /bot{credential}/setWebhook` at
    `https://api.telegram.org` to register that URL, and on approval
    the yard makes the signing secret (no one types it), keeps it in
@@ -189,7 +199,10 @@ There is no `thread open telegram`, no status and no bead link to a chat.
    its card, in footplate or in `yardr chat` (`ctrl+o`), where the field
    shows dots:
    ```sh
-   yardr bead ask <bead> "The token it answers with" --secret telegram --for-crew yardmaster --context "@BotFather answered /newbot with it."
+   yardr bead ask <bead> - --secret telegram --for-crew yardmaster <<'ASK'
+   The token it answers with
+   @BotFather answered /newbot with it.
+   ASK
    ```
    The yard's server writes it into the crew member's env file, or with
    none set into `~/.yardr/crew/yardmaster.env`, which is then set as

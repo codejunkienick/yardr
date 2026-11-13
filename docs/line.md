@@ -1044,8 +1044,8 @@ Work that spans several beads and must land as one unit is a
 A dependency's kind is a free word. Only `blocks` (the default) keeps a bead
 from being ready, and only `parent` makes a child of a train; any other kind
 is a record. One has a meaning of its own: `discovered-from`, from a bead to
-a bead that was found while working on it. `yardr bead create "<title>"
---discovered-from <bead>` makes the bead and the edge in one write (the
+a bead that was found while working on it. `yardr bead create -
+--discovered-from <bead>` (the title on stdin) makes the bead and the edge in one write (the
 origin may be open or closed, in any depot; an unknown one creates nothing),
 and the new bead inherits nothing from it. `yardr bead show` says
 "discovered from" on the one and "led to" on the other,
@@ -1166,7 +1166,9 @@ unit. It is a bead of type `train`; its children are the beads with a
 `parent` edge from it:
 
 ```sh
-yardr bead create "Trains" -t train -d yardr
+yardr bead create - -t train -d yardr <<'BEAD'
+Trains
+BEAD
 yardr dep add <train> <child> -k parent
 ```
 
@@ -1256,8 +1258,12 @@ security alone) happen once, on the whole train, before main moves. Everything a
 and below: nothing changes in what a train needs to reach main.
 
 ```sh
-yardr bead create "Trains" -t train -d yardr
-yardr bead create "The parser" -t wagon -d yardr
+yardr bead create - -t train -d yardr <<'BEAD'
+Trains
+BEAD
+yardr bead create - -t wagon -d yardr <<'BEAD'
+The parser
+BEAD
 yardr dep add <train> <wagon> -k parent
 ```
 

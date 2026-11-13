@@ -104,10 +104,10 @@ The steps, as the yardmaster takes them:
    default pack is the setting `default_pack` (`yardr settings get`); unset,
    it is `starter`, and `dir` for a depot that is a plain directory. Only
    the operator records an import. For an embedded depot pack, the yardmaster
-   proposes a run card for the operator to approve: `yardr bead ask --new
-   "Set up depot <depot> from <pack>?" --context "the operator must approve
-   the pack's import" --run "pack apply <pack> --depot <depot>"`, with the
-   mappings that answer its plan
+   proposes a run card for the operator to approve: `yardr bead ask --new -`
+   with `Q: Set up depot <depot> from <pack>?`, `C: the operator must approve
+   the pack's import` and `R: pack apply <pack> --depot <depot>` lines on
+   stdin, with the mappings that answer its plan
    ([packs.md](packs.md#proposing-an-embedded-pack); `yardr bead ask --help`).
    A card carries no questions, so
    the yardmaster first reads `yardr pack check <pack> --depot <depot>`
@@ -164,7 +164,7 @@ the pages show them.
 |---|---|---|
 | a depot | the repository's path (it starts at the directory you are in, when that is a checkout's top), the depot's name (the directory's, in lowercase), the base branch (the branch checked out) | `yardr depot add <depot> <path> --base <branch>`. A directory that is no git checkout is asked for no base and becomes a dir depot |
 | the depot's `.yardr` files on its base; a group that builds; a group that reviews; a group or person that lands approved beads; routes for new, review and approved | what the import asks (below) | `yardr depot init <depot>`, which takes the yard's default pack |
-| a first bead | its title and its goal | `yardr bead create "<title>" --depot <depot> -b "<goal>"`, then `yardr bead advance <id> --to new` |
+| a first bead | its title and its goal | `yardr bead create - --depot <depot> -b -`, the title and then the goal on stdin, then `yardr bead advance <id> --to new` |
 
 The subscriptions' limits (`yardr source add aiquokka`, once aiquokka is on
 PATH) are an optional step with no page: the setup does not wait for it, so
@@ -432,7 +432,7 @@ operator's.
 | 4 | `yardr depot add <depot> <path> --base <branch> --json`; for a directory that is no git checkout, without `--base` | `name`, `path`, `kind` (`git` or `dir`) and `base` (`""` for a dir depot). Run again it changes the depot to what it says, except that only the operator changes its path, base or test command |
 | 5 | `yardr depot init <depot> --yes --json` | exit 2 and `missing`, a list of flags, each `--<flag> <name>=<what is wanted>`: `--bind <group>=<kind>[:<model>]` wants a harness for a group of agents, `--members <group>=<users>` the users of a group of people, by comma, or nothing after the `=` for anyone |
 | 6 | the same with a flag for each entry of `missing`, the name kept: `yardr depot init <depot> --yes --bind builders=claude --bind reviewers=claude --members backlog= --members decisions=<operator> --json` | `result`, with `pack`, `depot` and how many objects were `created`, `changed` and `unchanged`; `plan` and `answers`, what it wrote and with which answers; `test`, the depot's test command where the repository says one ([above](#the-test-command)). Run again, `created` is 0. Still exit 2 with `missing`: ask for those too |
-| 7 | `yardr bead create "<title>" --depot <depot> -b "<goal>" --json` | the bead: `id`, `title`, `stage` (the flow's first, `backlog`), `depot`, `status` |
+| 7 | `yardr bead create - --depot <depot> -b - --json`, with the title and then the goal on stdin | the bead: `id`, `title`, `stage` (the flow's first, `backlog`), `depot`, `status` |
 | 8 | `yardr bead advance <id> --to new --json` | the bead, its `stage` now `new`. A second run is exit 1: the bead is there already, which `yardr bead show <id> --json` says |
 | 9 | `yardr subscribe <operator> yardr --done --where depot=<depot> --json`, if the person wants to be told when beads land | the user's subscriptions, a list of `source`, `scope` and `where`; this one has `where.state` `done`. Run again it adds nothing |
 
@@ -468,7 +468,11 @@ yardr watch                             # live event stream
 yardr session list --running            # what agents and scripts work on now; without the flag, also what a person holds and what another yard works
 yardr bead list -a                      # closed beads too: the newest 200 (-n <N> for more, --all for every one); session list -a likewise
 
-yardr bead create "Add login page" --depot webapp -t feature -b "Use the OAuth flow"
+yardr bead create - --depot webapp -t feature -b - <<'BEAD'
+Add login page
+
+Use the OAuth flow
+BEAD
 # it starts in the flow's first stage, backlog; the yardmaster shapes it and advances it to new
 ```
 

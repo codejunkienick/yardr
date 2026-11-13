@@ -30,8 +30,14 @@ phone. Docs has the longer telling: `yardr docs pushover`.
    Or have a crew member ask for them, and answer each on its card, in
    footplate or in `yardr chat` (`ctrl+o`), where the field shows dots:
    ```sh
-   yardr bead ask <bead> "Pushover's application token" --secret pushover --context "pushover.net/apps/build"
-   yardr bead ask <bead> "Your Pushover user key" --secret pushover --for-user mckean --context "The first page of pushover.net after login."
+   yardr bead ask <bead> - --secret pushover <<'ASK'
+   Pushover's application token
+   pushover.net/apps/build
+   ASK
+   yardr bead ask <bead> - --secret pushover --for-user mckean <<'ASK'
+   Your Pushover user key
+   The first page of pushover.net after login.
+   ASK
    ```
    The keys go nowhere else: not into mail, chat, a bead or a pack.
 4. **One test message.**

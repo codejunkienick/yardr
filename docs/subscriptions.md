@@ -311,9 +311,11 @@ A crew member that thinks a person wants to hear of something proposes
 the subscription instead, with a run ask ([chat.md](chat.md#questions-for-you)):
 
 ```
-yardr bead ask <id> "Hear of each bead of yardr that lands?" \
-    --context "You asked yesterday what had merged overnight." \
-    --run "subscribe bo yardr --done --where depot=yardr" --to bo
+yardr bead ask <id> - --to bo <<'ASK'
+Q: Hear of each bead of yardr that lands?
+C: You asked yesterday what had merged overnight.
+R: subscribe bo yardr --done --where depot=yardr
+ASK
 ```
 
 It is for the yard's own events alone (the source `yardr`), with `--done`,

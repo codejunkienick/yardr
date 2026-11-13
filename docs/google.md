@@ -46,7 +46,11 @@ the yard: both refuse a name it has not. Have a crew member ask for
 it, and approve its card:
 
 ```sh
-yardr bead ask <bead> "Add ada as a user of the yard" --run "user add ada" --context "Ada's Google account is set up next; the yard needs her as a user first."
+yardr bead ask <bead> - <<'ASK'
+Q: Add ada as a user of the yard
+C: Ada's Google account is set up next; the yard needs her as a user first.
+R: user add ada
+ASK
 ```
 
 The card is the operator's to approve (`yardr bead answer <bead>
@@ -168,10 +172,26 @@ another: the address is typed once, then picked. Run only the cards
 for the packs the yard uses:
 
 ```sh
-yardr bead ask <bead> "Set up Gmail for the crew?" --setup google-mail --crew <name> --recommend 1 --why "reading is the job; drafts can follow" --context "The address step 1 showed: the address alone, no token."
-yardr bead ask <bead> "Set up Drive for the crew?" --setup google-drive --crew <name> --recommend 1 --why "reading is the job; making and sharing can follow" --context "The address step 1 showed: the address alone, no token."
-yardr bead ask <bead> "Set up Docs and Slides for the crew?" --setup google-docs --crew <name> --recommend 1 --why "reading is the job; appending can follow" --context "The address step 1 showed: the address alone, no token."
-yardr bead ask <bead> "Set up Calendar for the crew?" --setup google-calendar --crew <name> --recommend 1 --why "reading is the job; creating can follow" --context "The address step 1 showed: the address alone, no token."
+yardr bead ask <bead> - --setup google-mail --crew <name> --recommend 1 <<'ASK'
+Q: Set up Gmail for the crew?
+C: The address step 1 showed: the address alone, no token.
+W: reading is the job; drafts can follow
+ASK
+yardr bead ask <bead> - --setup google-drive --crew <name> --recommend 1 <<'ASK'
+Q: Set up Drive for the crew?
+C: The address step 1 showed: the address alone, no token.
+W: reading is the job; making and sharing can follow
+ASK
+yardr bead ask <bead> - --setup google-docs --crew <name> --recommend 1 <<'ASK'
+Q: Set up Docs and Slides for the crew?
+C: The address step 1 showed: the address alone, no token.
+W: reading is the job; appending can follow
+ASK
+yardr bead ask <bead> - --setup google-calendar --crew <name> --recommend 1 <<'ASK'
+Q: Set up Calendar for the crew?
+C: The address step 1 showed: the address alone, no token.
+W: reading is the job; creating can follow
+ASK
 ```
 
 Each names the grantee and recommends a preset with why, as any
@@ -228,7 +248,11 @@ since a call `as ada` reads her file by her record. The card names
 source instead:
 
 ```sh
-yardr bead ask <bead> "Your Google account for your mail" --secret google-mail --as ada --context "The address of the login step 1 made for you: the address alone, no token." --context "The yard reads your Gmail as you once you grant it (step 5)."
+yardr bead ask <bead> - --secret google-mail --as ada <<'ASK'
+Your Google account for your mail
+The address of the login step 1 made for you: the address alone, no token.
+The yard reads your Gmail as you once you grant it (step 5).
+ASK
 ```
 
 This is `--as`, not `--for-user`: that asks for the address in a
@@ -248,7 +272,11 @@ setup for the yard's calls, one for calls as him, since either may
 change alone.
 
 ```sh
-yardr bead ask <bead> "Your Google account, to be called as" --secret google-mail --as mckean --context "The address step 1 showed: the address alone, no token." --context "Kept apart from the yard's own: one setup for its calls, one for calls as you."
+yardr bead ask <bead> - --secret google-mail --as mckean <<'ASK'
+Your Google account, to be called as
+The address step 1 showed: the address alone, no token.
+Kept apart from the yard's own: one setup for its calls, one for calls as you.
+ASK
 ```
 
 `yardr source show google-mail` says of each user whether their
@@ -286,10 +314,10 @@ kept in memory alone.
 Which program runs with a person's login stays the operator's:
 
 - A pack that later brings another `google-mint` uses one drift card:
-  a setup ask on the applied pack (`yardr bead ask <bead> "Take the
-  new <pack>?" --setup <pack> --crew <name> --recommend 1 --why
-  "reading is the job; keep new calls narrow" --context
-  "Review the new mint while keeping the existing account."`) shows
+  a setup ask on the applied pack (`yardr bead ask <bead> - --setup <pack>
+  --crew <name> --recommend 1`, with `Q: Take the new <pack>?`, `C: Review
+  the new mint while keeping the existing account.` and `W: reading is the
+  job; keep new calls narrow` on stdin) shows
   the copy's old and new sha256 with the diff beside the account as
   it stands and each preset held and new, and nothing is copied until
   the operator approves it (or types `yardr pack apply` and says yes)
@@ -321,7 +349,12 @@ It takes three things, beside the pack and its grants:
    to them and approved by them alone — the yardmaster asks, ada
    allows, and the operator cannot allow it for her:
    ```sh
-   yardr bead ask <bead> "Let the yardmaster read your Gmail as you" --run "source grant google-mail read --crew yardmaster --as ada" --to ada --context "The yardmaster reads your mail as you when your beads need it." --context "You approve this yourself; the operator cannot approve it for you."
+   yardr bead ask <bead> - --to ada <<'ASK'
+   Q: Let the yardmaster read your Gmail as you
+   C: The yardmaster reads your mail as you when your beads need it.
+   C: You approve this yourself; the operator cannot approve it for you.
+   R: source grant google-mail read --crew yardmaster --as ada
+   ASK
    ```
    `--to ada` is what addresses it to her: without it the card is
    refused. Each update call `as` her is its own card the same way,

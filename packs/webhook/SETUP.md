@@ -122,7 +122,10 @@ separate, and you can set up either without the other.
    A crew member can ask for it instead. You answer on its card in
    footplate or in `yardr chat` (`ctrl+o`), where the field shows dots:
    ```sh
-   yardr bead ask <bead> "the webhook URL of the Zap" --secret webhook --context "Webhooks by Zapier, Catch Hook, the Test tab."
+   yardr bead ask <bead> - --secret webhook <<'ASK'
+   the webhook URL of the Zap
+   Webhooks by Zapier, Catch Hook, the Test tab.
+   ASK
    ```
    The URL goes nowhere else. It is not in mail, chat, a bead or a pack, and
    no error, event or command of the yard repeats it. A yard has one URL,

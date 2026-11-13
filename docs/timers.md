@@ -5,11 +5,19 @@ at that time, unless what I am waiting for happened first. It is a record in
 the store and the daemon fires it, so it outlives the session that set it.
 
 ```sh
-yardr timer add --in 40m "look at the deploy again"
-yardr timer add --at 09:00 "read the night's CI"
-yardr timer add --every 1d --for 14d --unless bead=yardr-1a2b "yardr-1a2b is still open"
-yardr timer add --in 30m --to mckean --unless bead=yardr-1a2b,stage=review \
-  "yardr-1a2b is stuck in new"         # a crew member, for a user
+yardr timer add --in 40m - <<'TIMER'
+look at the deploy again
+TIMER
+yardr timer add --at 09:00 - <<'TIMER'
+read the night's CI
+TIMER
+yardr timer add --every 1d --for 14d --unless bead=yardr-1a2b - <<'TIMER'
+yardr-1a2b is still open
+TIMER
+# a crew member, for a user
+yardr timer add --in 30m --to mckean --unless bead=yardr-1a2b,stage=review - <<'TIMER'
+yardr-1a2b is stuck in new
+TIMER
 
 yardr timer list                         # those you set and those that tell you
 yardr timer list --all                   # the operator: every timer of the yard
@@ -25,9 +33,13 @@ minutes"), or a check by the clock ("read the night's CI at nine").
 ## Setting one
 
 `yardr timer add (--in <duration> | --at <time> | --every <duration>)
-[--to <name>] [--unless bead=<id>[,stage=<stage>]] "<reason>"`
+[--to <name>] [--unless bead=<id>[,stage=<stage>]] <reason|->`
 
 The reason is required. It is what the receiver reads when the timer fires.
+It is the last argument, or `-` to read it from stdin, as the examples above
+do: a reason that quotes code or file names goes that way, since inside a
+double-quoted argument the shell runs every backtick span and `$(` before
+yardr starts, and a heredoc with a quoted delimiter expands nothing.
 
 | flag | when it fires |
 |---|---|

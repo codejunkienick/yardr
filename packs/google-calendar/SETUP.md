@@ -20,7 +20,11 @@ once in `yardr docs google`.
    and approve it, in footplate or in `yardr chat` (`ctrl+o`); a
    person sets up the packs they want, one card each:
    ```sh
-   yardr bead ask <bead> "Set up Calendar for the yardmaster?" --setup google-calendar --crew yardmaster --recommend 1 --why "reading is the job; creating can follow" --context "The yardmaster lists and reads calendar events to work beads."
+   yardr bead ask <bead> - --setup google-calendar --crew yardmaster --recommend 1 <<'ASK'
+   Q: Set up Calendar for the yardmaster?
+   C: The yardmaster lists and reads calendar events to work beads.
+   W: reading is the job; creating can follow
+   ASK
    ```
    The card shows the declaration whole with its mint, the account
    to type or take (step 3), and one option per preset (step 5).
@@ -54,7 +58,11 @@ once in `yardr docs google`.
       invitations go out.
    A grantee who comes later gets one preset grant card:
    ```sh
-   yardr bead ask <bead> "Let the reviewers read Calendar" --run "source grant google-calendar --preset read --group reviewers" --context "The reviewers list and read calendar events to check a bead's work; the card names each call it covers."
+   yardr bead ask <bead> - <<'ASK'
+   Q: Let the reviewers read Calendar
+   C: The reviewers list and read calendar events to check a bead's work; the card names each call it covers.
+   R: source grant google-calendar --preset read --group reviewers
+   ASK
    ```
    By hand they are the operator's to type:
    ```sh

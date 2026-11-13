@@ -37,7 +37,10 @@ assigning an issue stays in PostHog's pages.
    Or have a crew member ask for it, and answer on its card, in
    footplate or in `yardr chat` (`ctrl+o`), where the field shows dots:
    ```sh
-   yardr bead ask <bead> "PostHog's personal API key" --secret posthog --context "Settings → Personal API keys, scopes query:read, error_tracking:read, user:read, session_recording:read, replay_scanner:read, hog_function:read, hog_function:write."
+   yardr bead ask <bead> - --secret posthog <<'ASK'
+   PostHog's personal API key
+   Settings → Personal API keys, scopes query:read, error_tracking:read, user:read, session_recording:read, replay_scanner:read, hog_function:read, hog_function:write.
+   ASK
    ```
    The key goes nowhere else: not into mail, chat, a bead or a pack.
 5. **Grant the calls and test them.** Reading is the operator's to
@@ -90,7 +93,11 @@ assigning an issue stays in PostHog's pages.
    address first (`yardr settings set hook_public_url
    https://<host>/hooks`).
    ```sh
-   yardr bead ask <bead> "Hook PostHog's new error issues up?" --run "hook add posthog --source posthog"
+   yardr bead ask <bead> - <<'ASK'
+   Q: Hook PostHog's new error issues up?
+   C: The yard makes the signing secret and the destination in PostHog; the card needs the project id.
+   R: hook add posthog --source posthog
+   ASK
    yardr bead answer <bead> <ask> --approve --value project=<id>
    # hook posthog saved: POST /hooks/posthog (posthog); registered with POST /api/projects/{project}/hog_functions/ at https://us.posthog.com (201)
    ```

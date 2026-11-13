@@ -86,7 +86,7 @@ yardr depot init webapp                 # flow, groups, roles and routes from th
 yardr depot show webapp                 # test: the command builders, reviewers and the assembly run; none is set when the repository does not say
 
 # one bead down the line: backlog, new, review (then review-security, if its diff needs it), clear (your yes to land it), approved, merged
-id=$(yardr bead create "Add login page" --depot webapp -b "Use the OAuth flow") # it starts in backlog
+id=$(printf '%s\n\n%s\n' 'Add login page' 'Use the OAuth flow' | yardr bead create - --depot webapp -b -) # title and body on stdin; it starts in backlog
 yardr bead advance "$id" --to new       # a builder takes it from here, then a reviewer, then the assembly lands it
 yardr watch                             # every event as it happens
 yardr session list --running            # what agents and scripts work on now

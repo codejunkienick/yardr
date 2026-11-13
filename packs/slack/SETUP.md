@@ -43,13 +43,20 @@ yard if it differs.
 2. **Apply the pack, on a card.** A crew member proposes it and the
    operator approves:
    ```sh
-   yardr bead ask <bead> "Add Slack to the yard?" --run "pack apply slack" --context "The yard hears the workspace's mentions and direct messages through it."
+   yardr bead ask <bead> - <<'ASK'
+   Q: Add Slack to the yard?
+   C: The yard hears the workspace's mentions and direct messages through it.
+   R: pack apply slack
+   ASK
    ```
    The card shows the declaration whole, as the apply card renders every
    field of it, the two scripts with their checksums among them.
 3. **The bot token, on a secret card.**
    ```sh
-   yardr bead ask <bead> "The Slack bot token" --secret slack --context "OAuth & Permissions in the Slack app, after install: xoxb-…"
+   yardr bead ask <bead> - --secret slack <<'ASK'
+   The Slack bot token
+   OAuth & Permissions in the Slack app, after install: xoxb-…
+   ASK
    ```
    Typed unseen, written by the server to the source's env file as
    `SLACK_BOT_TOKEN`; in no note, as every secret ask.
@@ -72,7 +79,11 @@ yard if it differs.
    there rather than guessing an id from elsewhere.
 5. **The public hook address, on a card if it is not already set.**
    ```sh
-   yardr bead ask <bead> "Where the yard is reached for webhooks" --run "settings set hook_public_url https://<his host>/hooks" --context "Slack posts the workspace's events to the hook's URL under it."
+   yardr bead ask <bead> - <<'ASK'
+   Q: Where the yard is reached for webhooks
+   C: Slack posts the workspace's events to the hook's URL under it.
+   R: settings set hook_public_url https://<his host>/hooks
+   ASK
    ```
    The URL of the slack hook is then
    `https://<his host>/hooks/slack`. The address reaching the yard — a
@@ -82,11 +93,18 @@ yard if it differs.
 6. **The signing secret and the hook, on two cards, then the events in
    the browser.** First the secret:
    ```sh
-   yardr bead ask <bead> "Slack's signing secret" --secret-hook slack --source slack --context "Basic Information in the Slack app."
+   yardr bead ask <bead> - --secret-hook slack --source slack <<'ASK'
+   Slack's signing secret
+   Basic Information in the Slack app.
+   ASK
    ```
    then the hook:
    ```sh
-   yardr bead ask <bead> "Set up the Slack webhook?" --run "hook add slack --source slack --unknown unknown" --context "The yard takes the workspace's mentions and direct messages at POST /hooks/slack."
+   yardr bead ask <bead> - <<'ASK'
+   Q: Set up the Slack webhook?
+   C: The yard takes the workspace's mentions and direct messages at POST /hooks/slack.
+   R: hook add slack --source slack --unknown unknown
+   ASK
    ```
    `--unknown unknown` is the decided word, for the whole workspace: a
    sender no user maps is dropped and offers the operator a mapping
@@ -119,7 +137,11 @@ yard if it differs.
 7. **The bot's identity, on a card.** With the `user_id` and the
    `bot_id` step 4 printed, so `@bot` is a mention of the yardmaster:
    ```sh
-   yardr bead ask <bead> "Whose mention the bot's is" --run "crew identity yardmaster --source slack --id <user_id from step 4> --key <bot_id from step 4>" --context "The user_id and bot_id yardr source check slack printed in step 4."
+   yardr bead ask <bead> - <<'ASK'
+   Q: Whose mention the bot's is
+   C: The user_id and bot_id yardr source check slack printed in step 4.
+   R: crew identity yardmaster --source slack --id <user_id from step 4> --key <bot_id from step 4>
+   ASK
    ```
    The key is the bot id because the echo of the bot's own post may
    carry only `bot_id`: with both set the yard drops its own posts
@@ -129,7 +151,10 @@ yard if it differs.
    `yardr reply` speaks with the answering crew member's copy of the
    bot token:
    ```sh
-   yardr bead ask <bead> "The token it answers with" --secret slack --for-crew yardmaster --context "OAuth & Permissions in the Slack app, after install: xoxb-…"
+   yardr bead ask <bead> - --secret slack --for-crew yardmaster <<'ASK'
+   The token it answers with
+   OAuth & Permissions in the Slack app, after install: xoxb-…
+   ASK
    ```
    The yard's server writes it into the crew member's env file, or with
    none set into `~/.yardr/crew/yardmaster.env`, which is then set as

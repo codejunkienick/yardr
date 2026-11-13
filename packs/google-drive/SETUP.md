@@ -21,7 +21,11 @@ shared setup, said once in `yardr docs google`.
    and approve it, in footplate or in `yardr chat` (`ctrl+o`); a
    person sets up the packs they want, one card each:
    ```sh
-   yardr bead ask <bead> "Set up Drive for the yardmaster?" --setup google-drive --crew yardmaster --recommend 1 --why "reading is the job; making and sharing can follow" --context "The yardmaster lists and reads Drive files to work beads."
+   yardr bead ask <bead> - --setup google-drive --crew yardmaster --recommend 1 <<'ASK'
+   Q: Set up Drive for the yardmaster?
+   C: The yardmaster lists and reads Drive files to work beads.
+   W: reading is the job; making and sharing can follow
+   ASK
    ```
    The card shows the declaration whole with its mint, the account
    to type or take (step 3), and one option per preset (step 5).
@@ -56,7 +60,11 @@ shared setup, said once in `yardr docs google`.
       whole file, and shares of one file with any address.
    A grantee who comes later gets one preset grant card:
    ```sh
-   yardr bead ask <bead> "Let the reviewers read Drive" --run "source grant google-drive --preset read --group reviewers" --context "The reviewers list and read Drive files to check a bead's work; the card names each call it covers."
+   yardr bead ask <bead> - <<'ASK'
+   Q: Let the reviewers read Drive
+   C: The reviewers list and read Drive files to check a bead's work; the card names each call it covers.
+   R: source grant google-drive --preset read --group reviewers
+   ASK
    ```
    By hand they are the operator's to type:
    ```sh

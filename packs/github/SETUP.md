@@ -34,8 +34,8 @@ file's.
    One hook serves every crew member.
 
    A crew member sets the hook up by two asks on one bead, the secret
-   first (`--secret-hook gh --source github`, then `--run "hook add gh
-   --source github"`): the operator pastes the secret typed unseen, the
+   first (`--secret-hook gh --source github`, then an `R: hook add gh
+   --source github` line on stdin): the operator pastes the secret typed unseen, the
    server keeps it in `<home>/hooks/gh.secret` (mode 0600), and
    approving the hook makes `POST /hooks/gh`. The manual steps above
    remain available; `--map`, `--says` and `--as` stay in a terminal.
@@ -44,7 +44,10 @@ file's.
    for it, and answer on its card, in footplate or in `yardr chat`
    (`ctrl+o`), where the field shows dots:
    ```sh
-   yardr bead ask <bead> "The token it answers with" --secret github --for-crew <name> --env GITHUB_TOKEN --context "Make a fine-grained token for this one repository: on GitHub, open Settings, then Developer settings, then Fine-grained tokens, and make a token for this repository with Contents set to read and write, and Issues and Pull requests set to read and write."
+   yardr bead ask <bead> - --secret github --for-crew <name> --env GITHUB_TOKEN <<'ASK'
+   The token it answers with
+   Make a fine-grained token for this one repository: on GitHub, open Settings, then Developer settings, then Fine-grained tokens, and make a token for this repository with Contents set to read and write, and Issues and Pull requests set to read and write.
+   ASK
    ```
    The yard's server writes it into the crew member's env file, or with
    none set into `~/.yardr/crew/<name>.env`, which is then set as `yardr
@@ -110,7 +113,11 @@ file's.
    A crew member setting itself up proposes the login instead, from its
    session, and the operator approves it on the card:
    ```sh
-   yardr bead ask <bead> "Who am I on GitHub?" --run "crew identity <name> --source github --key <login>"
+   yardr bead ask <bead> - <<'ASK'
+   Q: Who am I on GitHub?
+   C: Mentions and assignments of this login on GitHub should reach me.
+   R: crew identity <name> --source github --key <login>
+   ASK
    ```
    A bot login (`<slug>[bot]`) has characters no run ask carries, so it
    stays typed. A login is kept lowercase, however it was typed. What the

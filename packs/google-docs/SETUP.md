@@ -22,7 +22,11 @@ google packs' shared setup, said once in `yardr docs google`.
    and approve it, in footplate or in `yardr chat` (`ctrl+o`); a
    person sets up the packs they want, one card each:
    ```sh
-   yardr bead ask <bead> "Set up Docs and Slides for the yardmaster?" --setup google-docs --crew yardmaster --recommend 1 --why "reading is the job; appending can follow" --context "The yardmaster reads docs and decks to work beads."
+   yardr bead ask <bead> - --setup google-docs --crew yardmaster --recommend 1 <<'ASK'
+   Q: Set up Docs and Slides for the yardmaster?
+   C: The yardmaster reads docs and decks to work beads.
+   W: reading is the job; appending can follow
+   ASK
    ```
    The card shows both declarations whole with their mint, the
    account to type or take (step 3), and one option per preset
@@ -65,8 +69,16 @@ google packs' shared setup, said once in `yardr docs google`.
       paragraph aligned.
    A grantee who comes later gets one preset grant card per source:
    ```sh
-   yardr bead ask <bead> "Let the reviewers read Docs" --run "source grant google-docs --preset read --group reviewers" --context "The reviewers read docs to check a bead's work; the card names each call it covers."
-   yardr bead ask <bead> "Let the reviewers read Slides" --run "source grant google-slides --preset read --group reviewers" --context "The reviewers read decks to check a bead's work; the card names each call it covers."
+   yardr bead ask <bead> - <<'ASK'
+   Q: Let the reviewers read Docs
+   C: The reviewers read docs to check a bead's work; the card names each call it covers.
+   R: source grant google-docs --preset read --group reviewers
+   ASK
+   yardr bead ask <bead> - <<'ASK'
+   Q: Let the reviewers read Slides
+   C: The reviewers read decks to check a bead's work; the card names each call it covers.
+   R: source grant google-slides --preset read --group reviewers
+   ASK
    ```
    By hand they are the operator's to type:
    ```sh
@@ -80,7 +92,11 @@ google packs' shared setup, said once in `yardr docs google`.
    ```
    `edit` is in no preset, so it is granted singly, on its own card:
    ```sh
-   yardr bead ask <bead> "Let the yardmaster edit Docs freely" --run "source grant google-docs edit --crew yardmaster" --context "The yardmaster makes edits the narrow calls cannot express; the card names the call it covers."
+   yardr bead ask <bead> - <<'ASK'
+   Q: Let the yardmaster edit Docs freely
+   C: The yardmaster makes edits the narrow calls cannot express; the card names the call it covers.
+   R: source grant google-docs edit --crew yardmaster
+   ASK
    ```
    By hand it is the operator's to type:
    ```sh

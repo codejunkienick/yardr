@@ -89,9 +89,9 @@ whole, are the operator's alone, but for what the yardmaster runs for them on
 their mail (below): the store refuses each from anyone else, a crew
 member's pane included, and no `group set` run ask proposes one but `cmd`,
 `prompt`, `effort` and a permission preset that never asks, below. A new group is the
-other exception: from a crew pane, `yardr bead ask <id>
-"<question>" --run "group add <name> --runner <runner> [--limit <n>]
-[--set k=v ...]"` proposes one on a weighty (`code`) card that shows the
+other exception: from a crew pane, `yardr bead ask <id> -` with an `R: group
+add <name> --runner <runner> [--limit <n>] [--set k=v ...]` line on stdin
+proposes one on a weighty (`code`) card that shows the
 runner and limit, the command of an `exec` group or the agent kind and
 arguments of a `herdr` one, and the whole text of its prompt; approving adds
 the group as `group add` does. The `--set` words carry `cmd`, `args`, `dir`,
@@ -128,9 +128,9 @@ never part of it. Every other setting is changed as above.
 A group's `cmd`, its `prompt` and the permission preset of its kind that
 never asks (`yardr harness show <kind>` lists the presets; free `args` are
 never proposed) are what every later session of the group runs, so they have
-a card of their own: `yardr bead ask <id> "<question>" --run "group set <name>
-prompt=<file> cmd=<command> preset=<preset>"` proposes any of the three on a
-weighty (`code`) card that shows each as it stands and as it would be, whole,
+a card of their own: `yardr bead ask <id> -` with an `R: group set <name>
+prompt=<file> cmd=<command> preset=<preset>` line on stdin proposes any of
+the three on a weighty (`code`) card that shows each as it stands and as it would be, whole,
 and approving sets exactly that. `cmd` is one word, as above; `prompt` is
 the absolute path of a file under the yard's home, whose text `yardr bead ask`
 carries beside the command, and the approval is refused if that file holds
@@ -142,8 +142,8 @@ the card says so above the text it shows as the prompt now; it is no
 refusal. Nothing else rides in with them.
 
 A group's `effort` ([Models](#models)) has a card too, which is `effort=<level>`
-in the same command: `yardr bead ask <id> "<question>" --run "group set
-reviewers effort=max"`. A level is one word with no quotes, which the flag in
+in the same command: `yardr bead ask <id> -` with an `R: group set
+reviewers effort=max` line on stdin. A level is one word with no quotes, which the flag in
 `args` that it replaces never was, so the change needs no terminal. The card
 shows the effort the group has now, or that it has none and its agents work at
 their harness's own, and the flags each session will be given; approving sets
@@ -154,7 +154,7 @@ refused where the card is drawn.
 
 A card takes no flags, so it cannot say `--unset effort`. It says
 `effort=default` instead, which returns the group to its harness's own:
-`yardr bead ask <id> "<question>" --run "group set reviewers effort=default"`.
+`R: group set reviewers effort=default` on the stdin of `yardr bead ask <id> -`.
 `default` is never a level. A harness file that already lists `default` as a
 level must use another word; `default` is reserved for returning a group to its
 harness's own effort. The card shows the level the group has now and that no
@@ -229,7 +229,7 @@ back.
 Only the operator renames a group, since the name is what a script, a role
 prompt or a person reaches it by. The yardmaster asks on a card, which names
 what follows and is approved or declined as the others are:
-`yardr bead ask <id> "<question>" --run "group rename webapp-builders builders"`
+`yardr bead ask <id> -` with the line `R: group rename webapp-builders builders`
 ([chat.md](chat.md) lists the cards). The card counts no sessions, since they
 start and end by the minute. It is taken back by the
 reverse rename, except for a group whose old name is one imports give a depot's

@@ -221,9 +221,10 @@ ask 412 · open · to mckean · asked by yardmaster · 2h ago
 Each card's last line is the command that answers it from a terminal and,
 on a card the view answers itself, the key that does so before it.
 `yardr bead answer <id> <ask> <n> [words]` picks option n with words
-alongside; `--words` answers an ask with no options; `--later` puts it
-aside for 24 hours, or until the asker writes on the bead; `--decline
-"<words>"` refuses it (`yardr bead answer --help`). The view answers a pick,
+alongside; `--words -` answers an ask with no options, its words on
+stdin; `--later` puts it aside for 24 hours, or until the asker writes on
+the bead; `--decline -` refuses it, its words on stdin (`yardr bead
+answer --help`). The view answers a pick,
 words and the approval of a command itself, with
 [`ctrl+r`](#answering-a-question), and a secret with
 [`ctrl+o`](#typing-a-secret). Putting an ask aside and declining it have no
@@ -300,10 +301,10 @@ no flag does. A routine card has no gate. The field that
 [approves a command](#answering-a-question).
 
 Whoever asked takes an open question back when it is asked no more:
-`yardr bead ask --take-back <id> <ask> "<reason>"`. The operator may too,
-and nobody else. The ask leaves the open decisions and reads `taken back by
-<who>: <reason>` from then on, which is no answer of the person asked; a
-pick afterwards is refused with those words.
+`yardr bead ask --take-back <id> <ask> -`, with the reason on stdin. The
+operator may too, and nobody else. The ask leaves the open decisions and
+reads `taken back by <who>: <reason>` from then on, which is no answer of
+the person asked; a pick afterwards is refused with those words.
 If a pick replaces the current pick, the line names both picks. A crew
 asker's line is in `yardr inbox`; a user asker's line is in their notifications.
 
@@ -311,9 +312,9 @@ A question asked by someone with no row here (an agent working a bead)
 shows in `prime --bead` and `review`, not in a conversation.
 
 A crew member that needs a key or a token of a declared source asks for
-it with a secret ask, `yardr bead ask <id> "<question>" --secret <source>`,
-and never has you paste it into a shell. Its card has no options and wants
-no words:
+it with a secret ask, `yardr bead ask <id> - --secret <source>` (the
+question on stdin, then where to get it), and never has you paste it into
+a shell. Its card has no options and wants no words:
 
 ```
 ask 2650 · open · to mckean · asked by yardmaster · 1m ago
@@ -403,14 +404,14 @@ exists, changing its secret stays in a terminal. If the yard says the value is
 written and could not be recorded, give it again. Words, a pick, and a
 decline's words are refused on such an ask and kept nowhere, so the value
 cannot land in a note by mistake: `--later` puts it aside as any ask, and
-`--decline ""` declines it. Nothing of a secret ask goes to a linked yard.
+`--decline ''` declines it. Nothing of a secret ask goes to a linked yard.
 No agent is shown the value without going looking for it, which is a
 line, not a wall ([integrations.md](integrations.md)).
 
 A crew member that needs a command only you may give does not mail you a
 line to paste into a terminal either. It proposes the command with a run
-ask, `yardr bead ask <id> "<question>" --run "<command>"`, and you approve
-or decline it. The command is one of a fixed list:
+ask, `yardr bead ask <id> -` with `Q:`, `C:` and `R: <command>` lines on
+stdin, and you approve or decline it. The command is one of a fixed list:
 
 | the command | what it is for | who takes it back |
 |---|---|---|
@@ -455,13 +456,14 @@ or decline it. The command is one of a fixed list:
 | `timer rm <id>` | another's timer removed, and what it would have told | whoever can add it back; the card says who, or that no one can |
 | `up` | everything the yard needs that is not running started, and what runs left alone; safe to repeat, so an approval is never stale | anyone, with `down` |
 | `crew restart <name> [--for <user>]` | a fresh session of the crew member once the current one is idle; with `--for`, of its conversation session for the user | no one: a requested restart cannot be taken back |
-| `depot test <depot>` | a depot's test command changed, to the command `--run-test` carries beside the ask: the card shows the depot, the command now and the proposed one whole | only the operator, with another card carrying the old command, which the card names |
+| `depot test <depot>` | a depot's test command changed, to the command the ask's `T:` line (`--run-test`) carries beside the command: the card shows the depot, the command now and the proposed one whole | only the operator, with another card carrying the old command, which the card names |
 | `depot base <depot> <base>` | the base bead branches of the depot start from | only the operator, with the base that stood, which the card names |
 
 A card is read whole, so one that is too big, or whose plan is open, is refused, and the command is typed in a terminal instead. A `source add` whose card would run past 40 lines, or past the 128 KiB of file text and diffs a card carries, is refused. So is a `pack apply` of a source pack whose card would run past 40 lines; a depot pack's card past the same bounds is written as a summary instead ([packs.md](packs.md#an-integration-pack-kind-source)). A `pack apply` whose plan asks, is refused or would overwrite an edited file is refused whole, and `yardr pack check <name> --depot <depot>` shows the plan. A card that adds a source leaves things owed for the asks that follow: its credential, which a secret ask gives, and, for a source that tells people, whom it tells, which `user set <user> notify=<source>` sets. The ask that adds the source names them in its context.
 
-A crew member or user can also file a depot-push card: `yardr bead ask
-<id> "<question>" --depot-push <depot>` turns a depot's push to its HTTPS
+A crew member or user can also file a depot-push card with
+`yardr bead ask <id> - --depot-push <depot>`, providing the question and
+context as `Q:` and `C:` lines on stdin. It turns a depot's push to its HTTPS
 origin on, and `--depot-push-off <depot>` turns it off. The operator alone
 approves it, and only the operator's device is told the card and its result.
 The yard needs an edge and a source with a path-only credential helper for
@@ -492,9 +494,9 @@ serves at a digest
 ([users.md](users.md#the-yardmaster-for-the-operator)). A crew member's own `source add` for a name the
 yard has is refused: a replacement is proposed as a card, or typed by you.
 A source's region `base` has a door of its own where the base is the only
-change: a setup ask names it (`yardr bead ask <id> "<question>" --setup
-<pack> --crew <name> --source-base <name>`, above), and the card shows the
-base it will call. Anything else of that setting is typed, and so is a
+change: a setup ask names it (`yardr bead ask <id> - --setup <pack> --crew
+<name> --source-base <name>`, above), and the card shows the base it will
+call. Anything else of that setting is typed, and so is a
 `host`: only the operator types one, in a terminal or on the setup card.
 `hook_public_url` is the exception among the addresses: it binds nothing,
 only says where the yard is reached from outside, so a crew member may
@@ -600,15 +602,17 @@ matters, so a replaced file whose calls read the same, and a group given
 another prompt, make the ask stale. What the card does not cover leaves
 the approval good: the source's other limit, another grantee's grant, a
 group's limit, whether a crew member runs. A pick and words are refused on a run ask and approve nothing;
-`--later` puts it aside and `--decline "<words>"` ends it, as for any ask.
+`--later` puts it aside and `--decline -` ends it, its words on stdin, as
+for any ask.
 
 #### Setting up a pack's sources
 
 Setting up a pack's sources is apply, account and grants, and one card
-carries the three as one decision: `yardr bead ask <id> "<question>"
---setup <pack> --crew <name>` (or `--group <group>`, repeatable, at
-least one). `--recommend` counts the card's preset options as `yardr
-pack show` prints them, with `--why` saying why, as on any option ask.
+carries the three as one decision: `yardr bead ask <id> - --setup <pack>
+--crew <name>` (or `--group <group>`, repeatable, at least one), with
+the question, its context and why on stdin (`Q:`, `C:` and `W:` lines).
+`--recommend` counts the card's preset options as `yardr pack show`
+prints them, with the `W:` line saying why, as on any option ask.
 `--source-base <name>` calls the pack's region base `<name>`, for a pack
 whose source declares bases; the card shows the base it will call.
 Where the pack's source declares a `base_template`
@@ -748,8 +752,8 @@ yard as `yardr bead answer` does:
 
 | The card | The field takes | It is |
 |---|---|---|
-| numbered options | the number of the option, and words after it if you like: `2 not before Friday`; a pick that is no number (`go ahead`) is not sent, since talk about a question stays in the conversation as mail | `yardr bead answer <id> <ask> 2 "not before Friday"` |
-| `words wanted` | the words | `yardr bead answer <id> <ask> --words "<text>"` |
+| numbered options | the number of the option, and words after it if you like: `2 not before Friday`; a pick that is no number (`go ahead`) is not sent, since talk about a question stays in the conversation as mail | `yardr bead answer <id> <ask> 2 --words -`, the words on stdin |
+| `words wanted` | the words | `yardr bead answer <id> <ask> --words -`, the words on stdin |
 | a command to approve (`approve with:`) | the ask's number typed back, in the clear, with the card's `WEIGHTY` lines above it; another number closes the field and the yard is not called | `yardr bead answer <id> <ask> --approve` |
 
 A command is approved with its number typed back whether the card is weighty
@@ -825,9 +829,9 @@ secret`. It is the key for a secret ask; a pick, words and the approval of
 a command are [`ctrl+r`](#answering-a-question)'s, and Later and Decline are
 the terminal's.
 
-A question that is about no bead is asked with `yardr bead ask --new
-"<question>"`: it makes a bead titled with the question, under no flow
-unless `--depot` places it, and the ask on it. The bead is of the type
+A question that is about no bead is asked with `yardr bead ask --new -`, the
+question and its context on stdin: it makes a bead titled with the question,
+under no flow unless `--depot` places it, and the ask on it. The bead is of the type
 `question`, which nothing routes, and the asker closes it when the answer
 is on it.
 

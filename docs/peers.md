@@ -469,9 +469,9 @@ incoming it posts to this yard under /peers/: …
 ```
 
 A crew member that wants the address moved proposes the command for the
-operator to approve, with a run ask (`yardr bead ask --run "peer set
-<name> --url <url>"`, [chat.md](chat.md#questions-for-you)): the card
-names the peer and the address now and proposed, each whole. The card is
+operator to approve, with a run ask (`yardr bead ask <id> -` with the line
+`R: peer set <name> --url <url>`, [chat.md](chat.md#questions-for-you)): the
+card names the peer and the address now and proposed, each whole. The card is
 strong: the hosted web approves it only with the operator's fresh sign-in,
 and a terminal on the yard's machine or a paired device approves it as it
 approves any card. Taking the address away (`--url ""`) stays in a
@@ -766,7 +766,7 @@ yardr peer allow airy --no-reach mckean@airy
 ```
 
 **What it does.** From then on every ask for that user
-(`yardr bead ask <id> "..." --to mckean`, which is the default for the
+(`yardr bead ask <id> - --to mckean`, which is the default for the
 operator) is queued for that name as well, in the write that stores it. The
 message is the one [an ask addressed across](#questions-for-a-person-of-another-yard)
 sends, so the other yard needs no change and shows it among the person's
@@ -797,15 +797,17 @@ yard within the 20 seconds is still told by the other unless the answer,
 or the settle described below, got there first.
 
 **A question that is about no bead** follows as any ask does. An ask
-stands on a bead, so `yardr bead ask --new "<question>"` makes one for it,
+stands on a bead, so `yardr bead ask --new -` makes one for it,
 titled with the question, and the ask on it, in one write. An ask that is
 refused makes no bead:
 
 ```text
-$ yardr bead ask --new "Rename 'depot'?" --label topic:words \
-    --context "The glossary keeps it as the yard's word for a repository." \
-    --option "Keep depot: nothing changes" \
-    --option "Rename it: every command, page and document changes once"
+$ yardr bead ask --new - --label topic:words <<'ASK'
+Q: Rename 'depot'?
+C: The glossary keeps it as the yard's word for a repository.
+O: Keep depot: nothing changes
+O: Rename it: every command, page and document changes once
+ASK
 ask 2611 · open · to mckean · asked by yardmaster · 0m ago
   Rename 'depot'?
   The glossary keeps it as the yard's word for a repository.
@@ -1004,7 +1006,7 @@ that before it reads any mapping.
 **Who may.** Only the operator sets an id or takes it back, and a crew
 member's session is refused both. Taking one back (`--rm`) is typed in a
 terminal. A crew member that knows the id proposes setting it with a run ask,
-`--run "peer identity <peer> <crew> --source <source> --id <id>"`
+an `R: peer identity <peer> <crew> --source <source> --id <id>` line
 ([chat.md](chat.md#questions-for-you)), and the operator approves it from this
 yard. The card says whose word the sender is then, `<crew>@<peer>` and no user,
 and what the crew member has in the source now. An approval that arrives
@@ -1035,7 +1037,7 @@ what this yard may send the peer, `--receive` for what it takes from it.
 | `mail` | `yardr mail <name>@<peer>`: [mail between crew members](#mail-between-crew-members), and between the people of the two yards. `--send` lets this yard's crew and users write to whom the peer exposes, `--receive` puts the peer's mail in the inbox of the crew member or user it names, when the link [exposes](#the-roster-whom-a-peer-may-see-and-write-to) that name to the peer |
 | `file` | `yardr mail <name>@<peer> --file`: [the files mail carries](#a-file-with-the-mail), each a message of its own that crosses before its mail. `--send` lets this yard's mail to the peer carry files, `--receive` lets the peer's bytes land in this yard's `blobs`. It is apart from `mail`, and from [whom the link trusts](#trusting-a-name-as-a-person-of-this-yard): that says whose word counts, this says whether bytes may land |
 | `bead` | [a bead one yard works for the other](#beads-from-a-linked-yard). `--receive` lets this yard take the peer's beads and send back how each ended; `--send` lets it send the peer beads and take what comes back. One word covers the bead and its answer (the messages `bead` and `bead-return`), so a yard that only receives can be sent work and can send none |
-| `ask` | `yardr bead ask <id> "<question>" --to <person>@<peer>`: a question asked of a person of the other yard, which stands among their decisions there; their pick comes back onto the bead. `--send` lets this yard's crew and users ask (each crew member needs the peer in its `peers` setting too), `--receive` lets the peer's asks stand among this yard's decisions. The answer is a message of kind `ask` too, so each yard allows the kind both ways |
+| `ask` | `yardr bead ask <id> - --to <person>@<peer>`: a question asked of a person of the other yard, which stands among their decisions there; their pick comes back onto the bead. `--send` lets this yard's crew and users ask (each crew member needs the peer in its `peers` setting too), `--receive` lets the peer's asks stand among this yard's decisions. The answer is a message of kind `ask` too, so each yard allows the kind both ways |
 | `thread` | [what a yard says of a bead it works for the other while the bead is there](#while-a-bead-is-at-the-other-yard). `--send` lets this yard tell the peer how the beads it took from it stand; `--receive` lets this yard keep what the peer says of this yard's beads there. The word is the kind of no message itself. It covers the message `bead-event`, which goes the way the word is allowed, and the message `bead-read`, [a read of the other yard's bead](#reading-the-other-yards-bead) and its answer, which needs the word both ways on both sides, and the message `bead-note`, [a note on the other yard's bead](#answering-on-the-other-yards-bead), which goes against the events: the yard whose bead is away sends it, the yard that works the bead receives it |
 
 A message of a kind not allowed out is refused before it is queued. One that
@@ -1241,8 +1243,8 @@ mail: takes 100 mails and asks an hour, and 800 files
   than the link does is the operator's; to take less is anyone's, as
   stopping a kind is. It logs `peer_allowed` with `mail_limit`. A crew
   member that wants the link to take more proposes the command for the
-  operator to approve, with a run ask (`yardr bead ask --run "peer allow
-  <peer> --mail-limit <n>"`, [chat.md](chat.md#questions-for-you)), and
+  operator to approve, with a run ask (`yardr bead ask <id> -` with the line
+  `R: peer allow <peer> --mail-limit <n>`, [chat.md](chat.md#questions-for-you)), and
   one that wants the link to carry a kind proposes that apart from
   the limit: the kinds and the limit are two asks. A kind of any sort is
   askable, each way ([who may do what](#who-may-do-what)); `peer allow`
@@ -1420,7 +1422,11 @@ the question stands among that person's decisions there, as a card with its
 context and options; the pick comes back onto the bead it was asked on.
 
 ```sh
-yardr bead ask yardr-n8ta "Move them now?" --to mckean@north --context "The links file declares the new source." --option "Move them now: all 64 links point at the new source tonight"
+yardr bead ask yardr-n8ta - --to mckean@north <<'ASK'
+Q: Move them now?
+C: The links file declares the new source.
+O: Move them now: all 64 links point at the new source tonight
+ASK
 ask for mckean@north queued; the daemon delivers it, and yardr peer show north lists it while it waits
 ```
 
@@ -1912,7 +1918,7 @@ none: a bead it sends is refused`.
 `--depot` with `--none` removes that depot's intake; `--none` on its own
 removes every intake. Setting an intake is the operator's, as allowing what
 the link carries is; a crew member proposes it with a run ask (`yardr bead ask
---run "peer intake <peer> --depot <depot> --flow <flow>"`,
+<id> -` with the line `R: peer intake <peer> --depot <depot> --flow <flow>`,
 [chat.md](chat.md#questions-for-you)), whose card names the depot, the flow,
 the stage the beads arrive in and who works it, and which the operator
 approves from this yard, never through the reach of that peer ([who may do

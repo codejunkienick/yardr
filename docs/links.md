@@ -12,7 +12,9 @@ yardr link list yardr-k3f9                # the bead's links
 yardr link list --issue https://linear.app/acme/issue/YRD-12             # the issue's beads, its tracker first
 yardr link move https://linear.app/acme/issue/YRD-12 --to yardr-e2ab     # another bead tracks it from now on
 yardr link rm yardr-k3f9 https://linear.app/acme/issue/YRD-12
-yardr bead create "Web view shows links" --depot yardr --tracks https://linear.app/acme/issue/YRD-12
+yardr bead create - --depot yardr --tracks https://linear.app/acme/issue/YRD-12 <<'BEAD'
+Web view shows links
+BEAD
 ```
 
 Linking only records, and calls neither Linear nor GitHub. What acts on a
@@ -79,9 +81,9 @@ whose source moved: a builtin one to a declared one on the same host. The
 URLs stay as they are, so the two must share the host. A bead that would
 then track two issues of the new source refuses the whole move, and nothing
 changes. Moving back undoes it. An operator with no terminal approves the move
-as a card (`yardr bead ask --run "link move --from-source <source>
---to-source <source>"`, [chat.md](chat.md#questions-for-you)), which counts
-the links and names their beads first.
+as a card (`yardr bead ask <id> -` with the line `R: link move --from-source
+<source> --to-source <source>`, [chat.md](chat.md#questions-for-you)), which
+counts the links and names their beads first.
 
 `bead create --tracks` and `--relates` make the links in the write that
 creates the bead: a refused link creates no bead.
@@ -104,7 +106,9 @@ yardr hook add linear --source linear --secret-file ~/.yardr/linear.secret --as 
     --map task:new=started --map task:review=review --map task:merged=done \
     --map train:open=started --map train:done=done
 
-yardr bead create "Web view shows links" --depot webapp --tracks https://linear.app/acme/issue/YRD-12
+yardr bead create - --depot webapp --tracks https://linear.app/acme/issue/YRD-12 <<'BEAD'
+Web view shows links
+BEAD
 yardr bead advance webapp-k3f9 --to new    # YRD-12: Todo -> In Progress
 yardr bead done webapp-k3f9                # into review: In Progress -> In Review
 #   … approved is not in the map: nothing

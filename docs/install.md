@@ -727,7 +727,7 @@ machine instead and `verify` skips the attestations
 ([below](#with-actions-off)).
 
 ```sh
-yardr bead create "yardr v1.2.3" -t release -d yardr -b - < notes.md
+{ printf '%s\n\n' 'yardr v1.2.3'; cat notes.md; } | yardr bead create - -t release -d yardr -b -
 yardr bead advance <id> --to build
 ```
 

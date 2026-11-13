@@ -308,9 +308,10 @@ never a `todo`, and it is passed over when the next step is named.
 A group is told by its route and not by its role or its name, so the list
 reads the same for a yard set up from a pack and for one set up by hand. The
 command named for each of the five steps above while it is `todo` is a run
-card proposing the import that does them all, `yardr bead ask --new "Set up
-depot <depot> from <pack>?" --context "the operator must approve the pack's
-import" --run "pack apply <pack> --depot <depot>"` with the selected
+card proposing the import that does them all, `yardr bead ask --new -` with
+`Q: Set up depot <depot> from <pack>?`, `C: the operator must approve the
+pack's import` and `R: pack apply <pack> --depot <depot>` lines on stdin,
+with the selected
 embedded depot pack, for the operator to approve. When the selected default
 pack resolves outside yardr, the command is `yardr depot init <depot>` for
 the operator to run in a terminal. [`yardr setup`](setup.md)
@@ -358,7 +359,7 @@ never a fault. Not printed on a home with no yard.
 | `not configured sources: no service outside the yard is declared, so no agent calls one through the yard; yardr source add <file> (yardr source --help, docs/integrations.md)` | no declared source ([integrations.md](integrations.md#a-declared-source)) |
 | `note sources: aiquokka is on PATH and no source named aiquokka is declared, so the yard does not read what the subscriptions of its agents still carry: yardr source add aiquokka (docs/integrations.md)` | `aiquokka` is found on the PATH of the command that runs doctor (the daemon's PATH is its own), and the yard declares no source of that name, with other sources or none. It proposes the command and adds nothing: the source is the operator's to add. No line where aiquokka is not found, or the source is declared |
 | `configured sources: <name> (<n> calls), …` | the declared sources, each with how many calls its file has. Nothing was sent to any: doctor read the file each one's credential is in, the grants, and how its last call ended, from the events |
-| `note sources: source <name>: no call of it can be made: <NAME> is not set up: yardr source key <name> gives <NAMES>, or yardr source set <name> env_file=<file> names a file the operator keeps themselves; an agent asks from its pane: yardr bead ask <bead> "<question>" --secret <name> --context "<where to get it>"` | the source's file names a credential and the operator has set no file it is read from |
+| `note sources: source <name>: no call of it can be made: <NAME> is not set up: yardr source key <name> gives <NAMES>, or yardr source set <name> env_file=<file> names a file the operator keeps themselves; an agent asks from its pane: yardr bead ask <bead> - --secret <name>, with the question and where to get it on stdin` | the source's file names a credential and the operator has set no file it is read from |
 | `note sources: source <name>: no call of it can be made: <why>` | the file that is set cannot be used, read under the rule of every `env_file`: it is gone (`no such file or directory`), `is open to others (mode 0644); chmod 600 it`, or `does not set <NAME>`. Every `yardr call` of the source ends `no_credential` until it is set right |
 | `note sources: source <name>: no call of it can be made: its credential was given for <host>, and the source's calls go to <host> now (the declaration or the base setting changed since), so it is not sent there. Restore the declaration it was given for, or give it again with yardr source key <name>, which pairs it with <host>` | the credential is set, but the host recorded for it, where the source's calls went when `yardr source key` wrote it or the operator set `env_file` or `base`, is not the one they go to now: a declaration that was replaced (`yardr source add`, a pack applied again) names another base. Every `yardr call` of the source, but not one made `--as` a user, ends `credential_held`, `yardr source check` fails the same way, and nothing is sent. A source with no host recorded (only one whose file this yardr could not read when it was upgraded) says `the yard has no record of the host its credential was given for` instead |
 | `note sources: source <name>: an update call of it cannot be made: <why>` | the file sets the read credential but not the one the source's updates name (`update_env`): read calls can be made, every update ends `no_credential` |

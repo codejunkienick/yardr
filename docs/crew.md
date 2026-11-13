@@ -50,9 +50,9 @@ alone besides, but for what the yardmaster runs for them on their mail
 (below): the store refuses each from anyone else, a crew member's
 pane included, and no `crew set` run ask proposes one but a prompt and a
 permission preset that never asks, below. A new member is the other
-exception: from a crew pane, `yardr bead ask <id> "<question>"
---run "crew add <name> kind=<kind> model=<model> preset=<preset>
-dir=<dir>" --run-role "<file>"` proposes one on a weighty (`code`) card
+exception: from a crew pane, `yardr bead ask <id> - --run-role <file>`
+with an `R: crew add <name> kind=<kind> model=<model> preset=<preset>
+dir=<dir>` line on stdin proposes one on a weighty (`code`) card
 that shows the kind, model, named permission preset (never free `args`),
 directory and whole role text, and says in plain words where the preset
 skips permissions; approving writes those exact bytes to a read-only file of
@@ -86,8 +86,8 @@ A member's `prompt`, and the permission preset of its kind that never asks
 (`yardr harness show <kind>` lists the presets; free `args` are never
 proposed), are what every later session of the member runs, so they have a
 card of their own, the yardmaster's own entry included: `yardr bead ask <id>
-"<question>" --run "crew set <name> prompt=<file> preset=<preset>"` proposes
-either or both on a weighty (`code`) card that shows the prompt now and the
+-` with an `R: crew set <name> prompt=<file> preset=<preset>` line on stdin
+proposes either or both on a weighty (`code`) card that shows the prompt now and the
 new one whole, and the flags the member starts with now and the preset's.
 The `prompt` is the absolute path of a file under the yard's home, whose text
 `yardr bead ask` reads from the file and carries beside the command, and the
@@ -341,7 +341,7 @@ names its person and its slice.
   through a manual group it is a member of, a route for the label and a
   subscription. The worked example is in
   [groups.md](groups.md#example-a-crew-member-reviews-the-beads-with-a-label).
-- **Timers:** `yardr timer add --in 40m "…"` has the yard put a `timer`
+- **Timers:** `yardr timer add --in 40m -` (the reason on stdin) has the yard put a `timer`
   event in the inbox later, once or recurring, unless an awaited bead moved
   first (`--unless bead=<id>,stage=<stage>`); `--to <user>` tells a user
   instead, by mail, and wakes no crew member. An event is the better way to

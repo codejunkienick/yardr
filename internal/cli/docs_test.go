@@ -247,7 +247,7 @@ func TestShippedRolePointersResolve(t *testing.T) {
 		}},
 		"users which door a command takes": {has: []string{
 			"A command that is the operator's to give goes as a run ask when `yardr bead ask --help` names it under `--run`",
-			"`yardr bead ask <id> \"<question>\" --run \"<command>\"`, one command in an ask, with why it is wanted in the context",
+			"`yardr bead ask <id> -` with `Q:`, `C:` and `R: <command>` lines on stdin, one command in an ask, with why it is wanted in the context",
 			"The operator approves it among their decisions, and the yard runs exactly what the card shows",
 			"The yard checks whether the asker can run it and whether it is the operator's alone",
 			"An operator-only command goes on a card where one carries it",
@@ -291,13 +291,13 @@ func TestShippedRolePointersResolve(t *testing.T) {
 			"A mail holds 4 KB, and a block counts",
 		}},
 		"users the record": {has: []string{
-			`--run "user invite eve --email eve@example.net"`,
+			"R: user invite eve --email eve@example.net",
 			"`user add` alone makes an inbox and admits no one",
 			"the operator's approval is the whole invite: no request to the people who make yardr is needed",
 			"or an operator with `--role operator`",
 			"A plain user already under the name goes first (`yardr user rm <name>`, also a run ask)",
 			"where the yard has no edge, a person comes in by `yardr user add` and a device pairing",
-			`--run "user uninvite eve"`,
+			"R: user uninvite eve",
 			"A new address gets a set-password mail from the edge; an address with a verified account gets none, so whoever invited the person tells them to sign in",
 		}},
 		"users footplate on another machine": {has: []string{

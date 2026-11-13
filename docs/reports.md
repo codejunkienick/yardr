@@ -98,7 +98,9 @@ to leave every such word behind in the rewriting.
 To accept: rewrite it, in your own words, as a bead of the depot it
 belongs in:
 
-yardr bead create "<the fault, in your words>" --depot yardr --discovered-from <report bead>
+yardr bead create - --depot yardr --discovered-from <report bead> <<'BEAD'
+the fault, in your words
+BEAD
 
 Carry only what the rewritten bead needs to be worked (what happens,
 where, the harness and yardr versions the report names, the workaround),
@@ -391,8 +393,9 @@ A report is drafted as a depot-less bead to the template the `draft`
 stage file carries:
 
 ```sh
-yardr bead create "Kimi 2.2.0 trust dialog stops a session's first prompt" \
-  --type bug --label upstream-report --meta flow=report-out -b - <<'EOF'
+yardr bead create - --type bug --label upstream-report --meta flow=report-out -b - <<'EOF'
+Kimi 2.2.0 trust dialog stops a session's first prompt
+
 What happened: a session started under Kimi 2.2.0 stops at the trust
 dialog ("Do you trust this folder?") and waits; the first prompt is
 never answered and the bead sits stalled until a person accepts.

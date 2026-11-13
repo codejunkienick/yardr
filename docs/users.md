@@ -90,9 +90,9 @@ Only the user reads their queue of decisions
 the reader is the call's `actor`, as for the inbox.
 
 `yardr user set <user> role=operator` or `role=member` is an operator's to
-give: typed at the shell, or approved on a card (`yardr bead ask --run "user
-set <user> role=operator"`, [chat.md](chat.md#questions-for-you)), which the
-yard weighs strong (`trust`) whichever way the role goes. A teammate invite may also create an operator with
+give: typed at the shell, or approved on a card (`yardr bead ask <id> -` with
+an `R: user set <user> role=operator` line, [chat.md](chat.md#questions-for-you)),
+which the yard weighs strong (`trust`) whichever way the role goes. A teammate invite may also create an operator with
 `--role operator`, named on its approval card. Nobody sets their own role.
 The yard refuses to make a member of, or to remove, its last operator: with
 none, it would take every change from anyone who is no agent of its own.
@@ -124,10 +124,16 @@ run ask an operator approves, and approval does the yard user, the
 A crew member proposes one as any other run ask:
 
 ```sh
-yardr bead ask <id> "Invite Eve?" --context "she works with us daily" \
-    --run "user invite eve --email eve@example.net"
-yardr bead ask <id> "Remove Eve?" --context "she has moved on" \
-    --run "user uninvite eve"
+yardr bead ask <id> - <<'ASK'
+Q: Invite Eve?
+C: she works with us daily
+R: user invite eve --email eve@example.net
+ASK
+yardr bead ask <id> - <<'ASK'
+Q: Remove Eve?
+C: she has moved on
+R: user uninvite eve
+ASK
 ```
 
 `user add` alone makes an inbox and admits no one, so a person is brought
@@ -267,8 +273,8 @@ A yard whose operator has no terminal on its machine, a hosted one first,
 can let its yardmaster run some of the operator's defining commands for
 them. The switch is the `yardmaster_delegation` setting: unset, it reads as
 `hosted` does, on for a hosted yard and off for one you run yourself. The
-operator turns it off with a run ask (`yardr bead ask --run "settings set
-yardmaster_delegation false"`), approved as any card that narrows, or with
+operator turns it off with a run ask (`yardr bead ask <id> -` with the line
+`R: settings set yardmaster_delegation false`), approved as any card that narrows, or with
 the button on the hosted web's Config page; turning it back on takes the
 same two doors under the fresh sign-in a strong card takes. The yardmaster
 never changes it.
@@ -364,8 +370,9 @@ operator has no terminal, each row names the door they have instead.
 ### Which door a command takes
 
 A command that is the operator's to give goes as a run ask when `yardr bead
-ask --help` names it under `--run`: `yardr bead ask <id> "<question>" --run
-"<command>"`, one command in an ask, with why it is wanted in the context.
+ask --help` names it under `--run`: `yardr bead ask <id> -` with `Q:`, `C:`
+and `R: <command>` lines on stdin, one command in an ask, with why it is
+wanted in the context.
 The operator approves it among their decisions, and the yard runs exactly what
 the card shows ([chat.md](chat.md#questions-for-you) shows the cards). The
 yard checks whether the asker can run it and whether it is the operator's
@@ -781,7 +788,8 @@ yard's server writes it: into the user's `env_file`, with every other line
 kept, or with none set into `~/.yardr/users/<user>.env`, mode 0600, which
 is then the user's `env_file`. It is refused for a source with no `notify`
 key. An agent that needs the address asks for it with a secret ask,
-`yardr bead ask <id> "<question>" --secret <source> --for-user <user>`,
+`yardr bead ask <id> - --secret <source> --for-user <user>` (the question
+and where to get the address on stdin),
 which stands among that user's decisions (or the operator's, with `--to`)
 and is answered where the field shows dots: in footplate, in `yardr chat`
 with `ctrl+o`, or with `yardr bead answer <id> <ask> --secret`
@@ -840,9 +848,11 @@ phone proposes it with a run ask ([chat.md](chat.md#questions-for-you)),
 of that user or of the operator (`--to`), and the one asked approves it:
 
 ```sh
-yardr bead ask <id> "Leave mail off your phone?" \
-    --context "You said an evening's mail is too much there." \
-    --run "user set ada tell=notifications,asks" --to ada
+yardr bead ask <id> - --to ada <<'ASK'
+Q: Leave mail off your phone?
+C: You said an evening's mail is too much there.
+R: user set ada tell=notifications,asks
+ASK
 ```
 
 The card says in the yard's words of which parts the source tells them
@@ -1400,8 +1410,8 @@ the stream when it no longer resolves.
 **A device that is lost, with no terminal at hand.** `yardr user device rm`
 needs a terminal on the yard's machine, and the operator of a hosted yard has
 none there. The operator can still have the yard remove it: they ask the
-yardmaster for the card (`yardr bead ask --run "user device rm <user>
-<device>"`) and approve it from another paired device, which ends the token
+yardmaster for the card (`yardr bead ask <id> -` with the line `R: user
+device rm <user> <device>`) and approve it from another paired device, which ends the token
 on the yard itself ([chat.md](chat.md#questions-for-you) has the card). The
 person whose device it is can also cut it off at [the
 edge](edge.md#footplate-through-the-link), whose gate in front of a yard is
