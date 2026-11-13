@@ -552,7 +552,9 @@ not. It takes the token from the view's record, so a view that was started
 again, with a token of its own, is opened the same way. `--addr <host:port>`
 names the view when several run. Where no browser opens (a machine with no
 display), it prints the URL, token included, since that is all there is to
-open it by. The browser is started with the URL on its command line, which
+open it by. `--print` prints that URL instead of opening it, and opens no
+browser: the line to copy into a browser on this machine, or to hand a
+headless one. The browser is started with the URL on its command line, which
 another user of this machine could read from the process list for as long as
 that process lives: on a machine with other users, open the URL by hand.
 

@@ -62,6 +62,7 @@ func webViewToOpen(cfg *config.Config, views []webView, addr string) (webView, e
 
 func (a *app) webOpenCmd() *cobra.Command {
 	var addr string
+	var printOnly bool
 	cmd := &cobra.Command{
 		Use:   "open",
 		Short: "Open the web view that runs in this machine's browser, where it acts as a user too",
@@ -82,10 +83,15 @@ is printed instead, and it is the one to open in a browser on this machine.
 It holds the token, as the file does: it is for you alone
 (docs/web.md, "Acting as a user").
 
+--print prints the view's URL instead of opening it, and opens no browser:
+the line to copy into a browser on this machine, or to hand a headless one.
+It holds the token, as above: it is for you alone.
+
 More than one view may run on a yard: --addr names the one to open by the
 host:port it listens on (the error that lists them says them so).`,
 		Example: `  yardr web open
-  yardr web open --addr 127.0.0.1:9000`,
+  yardr web open --addr 127.0.0.1:9000
+  yardr web open --print`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			cfg, err := a.config()
@@ -96,17 +102,26 @@ host:port it listens on (the error that lists them says them so).`,
 			if err != nil {
 				return err
 			}
-			open := a.browser
-			if open == nil {
-				open = openBrowser
-			}
 			url := v.openURL()
-			opened := open(url)
-			res := map[string]any{"address": v.Addr, "url": url, "opened": opened == nil}
+			var opened error
+			if !printOnly {
+				open := a.browser
+				if open == nil {
+					open = openBrowser
+				}
+				opened = open(url)
+			}
+			res := map[string]any{"address": v.Addr, "url": url, "opened": !printOnly && opened == nil}
 			if v.As != "" {
 				res["acts_as"] = v.As
 			}
 			return a.out(c.OutOrStdout(), res, func(w io.Writer) {
+				if printOnly {
+					// The token is in the URL: it is printed because it
+					// was asked for, for the operator alone.
+					fmt.Fprintln(w, url)
+					return
+				}
 				if opened != nil {
 					// The token is in the URL: it is printed only when it is
 					// all there is to open it by.
@@ -122,5 +137,6 @@ host:port it listens on (the error that lists them says them so).`,
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", "", "the host:port of the view to open, when several run")
+	cmd.Flags().BoolVar(&printOnly, "print", false, "print the view's URL instead of opening it")
 	return cmd
 }

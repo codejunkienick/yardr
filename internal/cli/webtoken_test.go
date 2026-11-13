@@ -278,7 +278,7 @@ func TestWebServeActsRequiresItsTokenRecord(t *testing.T) {
 // yardr web open opens the URL of the view that runs: with its token where
 // the view acts, plain where it does not. It does not print the token where
 // a browser took it, prints it where none did, and names the views when it
-// cannot tell which to open.
+// cannot tell which to open. --print prints the URL and opens no browser.
 func TestWebOpen(t *testing.T) {
 	t.Parallel()
 	home := newHomeDir(t)
@@ -331,6 +331,12 @@ func TestWebOpen(t *testing.T) {
 	}
 	openErr = nil
 
+	// --print prints the URL and opens no browser, even where one would open.
+	out, err = open("--print")
+	if err != nil || len(opened) != 0 || out != "http://127.0.0.1:9000/?token="+token+"\n" {
+		t.Errorf("--print: opened %v, %q (%v), want no browser and the URL with the token", opened, out, err)
+	}
+
 	// The JSON says what was opened.
 	opened = nil
 	jsonOut, err := run(t, command(true).webCmd(), "open")
@@ -343,6 +349,18 @@ func TestWebOpen(t *testing.T) {
 	if err != nil || json.Unmarshal([]byte(jsonOut), &got) != nil || got.URL != "http://127.0.0.1:9000/?token="+token || !got.Opened ||
 		got.Address != "127.0.0.1:9000" || got.ActsAs != "Jo" {
 		t.Errorf("--json: %q (%v), want the address, the URL with the token, who it acts as and opened", jsonOut, err)
+	}
+
+	// --print with --json keeps the URL and reports opened false.
+	opened = nil
+	jsonPrint, err := run(t, command(true).webCmd(), "open", "--print")
+	var printed struct {
+		URL    string `json:"url"`
+		Opened bool   `json:"opened"`
+	}
+	if err != nil || json.Unmarshal([]byte(jsonPrint), &printed) != nil || len(opened) != 0 ||
+		printed.URL != "http://127.0.0.1:9000/?token="+token || printed.Opened {
+		t.Errorf("--print --json: %q (%v), opened %v, want the URL with the token and opened false", jsonPrint, err, opened)
 	}
 
 	// Two views: it asks which, and --addr says. One that does not act is

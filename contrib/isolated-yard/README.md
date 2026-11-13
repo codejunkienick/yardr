@@ -210,6 +210,15 @@ Each of these cost a run when the rehearsal was first made by hand.
   name as it arrived. The document's name holds `;` and `,`, which curl's
   `-F` read as syntax until the pack quoted them, and no quote.
 
+## Serving a view that acts as a user
+
+A trial whose headless browser must hold the view's cookie serves a view
+that acts as a user: start the view through `D/e`, take its URL with `D/e
+yardr web open --print`, and give that URL to the trial's headless browser.
+Never run plain `yardr web open` there: it opens the machine's own browser.
+The printed URL holds the view's token, as the view's record does, and is
+for the trial alone.
+
 ## The yard-shape matrix
 
 `matrix_test.go` walks every way a yard is set up through the same list of
