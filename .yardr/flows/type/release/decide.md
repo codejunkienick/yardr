@@ -13,3 +13,10 @@ outcomes; the person answering moves it (`yardr review -g decisions`, or
 - to `publish`, when the sync bead is to be filed again;
 - to `backlog`, when the answer changes what the release is and the
   yardmaster must reshape it.
+
+## Ask
+kind: moves
+question: Where should this bead go next?
+context:
+- The bead waits for a person; what it needs is in its notes.
+- Pick where it goes. Your words with the pick stay on the bead for whoever works it next.

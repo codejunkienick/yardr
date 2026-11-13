@@ -9,3 +9,10 @@ the person answering moves it (`yardr review -g decisions`, or
 - to `new`, when a builder can now finish it;
 - to `backlog`, when the answer changes what the wagon is and the yardmaster must
   reshape it. An answer that changes the train is a note on the train too.
+
+## Ask
+kind: moves
+question: Where should this bead go next?
+context:
+- The bead waits for a person; what it needs is in its notes.
+- Pick where it goes. Your words with the pick stay on the bead for whoever works it next.
