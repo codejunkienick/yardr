@@ -35,12 +35,12 @@ func contextThreshold(s string) int {
 	return defaultContextHandoff
 }
 
-// crewContext reads the session's context use on an idle pass and, past
-// its threshold, asks once for a handoff. asked is true when the nudge
-// went out on this pass. The ask is never forced: no grace, no restart,
+// crewContext reads the session's context use and, when idle past its
+// threshold, asks once for a handoff. asked is true when the nudge went
+// out on this pass. The ask is never forced: no grace, no restart,
 // and it is asked again only in a new session. A session already asked
 // for its age is not asked for its use too.
-func (d *Dispatcher) crewContext(ctx context.Context, runner Runner, s *memberSession) (asked bool, err error) {
+func (d *Dispatcher) crewContext(ctx context.Context, runner Runner, s *memberSession, idle bool) (asked bool, err error) {
 	def := s.member
 	r, ok := runner.(ContextReader)
 	if !ok {
@@ -63,7 +63,7 @@ func (d *Dispatcher) crewContext(ctx context.Context, runner Runner, s *memberSe
 		return false, err
 	}
 	threshold := contextThreshold(def.ContextHandoff)
-	if threshold <= 0 || pct < threshold || s.st.ContextAskedAt != nil || s.st.RotationAskedAt != nil {
+	if !idle || threshold <= 0 || pct < threshold || s.st.ContextAskedAt != nil || s.st.RotationAskedAt != nil {
 		return false, nil
 	}
 	typed, err := d.nudge(ctx, runner, s, fmt.Sprintf(
