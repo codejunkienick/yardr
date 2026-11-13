@@ -622,6 +622,7 @@ func TestBeadsHTML(t *testing.T) {
 		{"/beads?all=1&depot=line", rows{
 			depot: []chip{{"all", "/beads?all=1", 7, false}, {"line", "/beads?all=1&depot=line", 5, true}, {"loose", "/beads?all=1&depot=loose", 1, false}},
 			stage: []chip{{"all", "/beads?all=1&depot=line", 5, true}, {"backlog", "/beads?all=1&depot=line&stage=backlog", 2, false},
+				{"closed", "/beads?all=1&depot=line&stage=closed", 1, false},
 				{"new", "/beads?all=1&depot=line&stage=new", 2, false}, {"triage", "/beads?all=1&depot=line&stage=triage", 1, false}},
 		}},
 	}

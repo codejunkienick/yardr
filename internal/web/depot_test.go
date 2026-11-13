@@ -49,20 +49,30 @@ func TestDepotJSON(t *testing.T) {
 	must(t, err)
 	_, err = f.st.AdvanceNote(ctx, seven.ID, "merged", "assembly: merged 70dabcd", store.Expect{}, "assembly")
 	must(t, err)
+	docs, err := store.ParseFlow("draft -> done\ndone terminal\n")
+	must(t, err)
+	docs.Name = "docs"
+	_, err = f.st.PutFlow(ctx, *docs, "me")
+	must(t, err)
+	must(t, f.st.SetFlowPointer(ctx, "line", "doc", "docs", "me"))
+	nine, err := f.st.CreateBead(ctx, store.NewBead{Title: "nine", Type: "doc", Stage: "draft", Depot: "line"}, "me")
+	must(t, err)
+	_, err = f.st.AdvanceNote(ctx, nine.ID, "done", "done", store.Expect{}, "me")
+	must(t, err)
 
 	var got web.DepotPage
 	f.getJSON("/depots/line", &got)
 	if got.Name != "line" || got.Kind != store.DepotGit || got.Tag != "" || got.Error != "" {
 		t.Errorf("depot %+v, want line, git, no tag, no error", got)
 	}
-	if got.ActiveFlows != 2 || got.QuietFlows != 0 || len(got.Quiet) != 0 {
-		t.Errorf("flows %d active, %d quiet (%v), want 2 active, none quiet", got.ActiveFlows, got.QuietFlows, got.Quiet)
+	if got.ActiveFlows != 2 || got.QuietFlows != 1 || !reflect.DeepEqual(got.Quiet, []string{"docs"}) {
+		t.Errorf("flows %d active, %d quiet (%v), want 2 active and docs quiet", got.ActiveFlows, got.QuietFlows, got.Quiet)
 	}
 	// Waiting 1: three's ask. Transit 1: three past backlog. Backlog 3:
-	// one, two and five in their first stages. Landed 1: seven; four was
-	// dropped.
-	if got.Waiting != 1 || got.Transit != 1 || got.Backlog != 3 || got.Landed != 1 {
-		t.Errorf("counts waiting %d, transit %d, backlog %d, landed %d, want 1, 1, 3, 1",
+	// one, two and five in their first stages. Landed 2: seven at merged
+	// and nine at done; four was dropped.
+	if got.Waiting != 1 || got.Transit != 1 || got.Backlog != 3 || got.Landed != 2 {
+		t.Errorf("counts waiting %d, transit %d, backlog %d, landed %d, want 1, 1, 3, 2",
 			got.Waiting, got.Transit, got.Backlog, got.Landed)
 	}
 	wantFlows := []web.DepotFlowRow{
@@ -83,10 +93,19 @@ func TestDepotJSON(t *testing.T) {
 	if len(got.Waits) != 1 || got.Waits[0].Bead != bs["three"].ID || got.Waits[0].Flow != "code" || got.Waits[0].Stage != "new" {
 		t.Errorf("waits %+v, want three's ask in code · new", got.Waits)
 	}
-	if len(got.Landings) != 1 || got.Landings[0].ID != seven.ID || got.Landings[0].Title != "seven" {
-		t.Errorf("landings %+v, want seven", got.Landings)
-	} else if got.Landings[0].Age == "" || time.Since(got.Landings[0].ClosedAt) > time.Minute {
-		t.Errorf("landing %+v, want a fresh close with its age", got.Landings[0])
+	if len(got.Landings) != 2 {
+		t.Errorf("landings %+v, want seven at merged and nine at done", got.Landings)
+	} else {
+		ids := map[string]bool{}
+		for _, landing := range got.Landings {
+			ids[landing.ID] = true
+			if landing.Age == "" || time.Since(landing.ClosedAt) > time.Minute {
+				t.Errorf("landing %+v, want a fresh close with its age", landing)
+			}
+		}
+		if !ids[seven.ID] || !ids[nine.ID] {
+			t.Errorf("landings %+v, want seven and nine", got.Landings)
+		}
 	}
 	// Waiting equals the line's asked beads in this depot: the rail
 	// pill's predicate restricted to it, with the depot-less ask left
@@ -110,33 +129,61 @@ func TestDepotJSON(t *testing.T) {
 }
 
 // Landed keeps the beads that landed in the depot in the rolling 24
-// hours, the newest first: an older landing, a dropped bead, an open one,
-// one with no close time, and beads of another depot or none stand in
-// none of it.
+// hours, the newest first: each at its flow's own landing terminal, merged,
+// done or live. An older landing, a dropped bead, an open one, one with no
+// close time, and beads of another depot or none stand in none of it, as
+// does a bead closed at merged in a flow that ends in done, and one closed
+// anywhere in a flow with no landing terminal. A bead no flow governs keeps
+// the old rule, Stage merged.
 func TestDepotLandedWindow(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
 	at := func(d time.Duration) *time.Time { t := now.Add(-d); return &t }
 	line, loose := "line", "loose"
-	mk := func(id, stage, status string, depot *string, closedAt *time.Time) store.Bead {
-		return store.Bead{ID: id, Title: id, Stage: stage, Status: status, Depot: depot, ClosedAt: closedAt}
+	mk := func(id, typ, stage, status string, depot *string, closedAt *time.Time) store.Bead {
+		return store.Bead{ID: id, Title: id, Type: typ, Stage: stage, Status: status, Depot: depot, ClosedAt: closedAt}
 	}
+	d := &web.HomeDepot{Name: "line", Flows: []web.HomeFlow{
+		{Name: "code", Terminal: []string{"merged"}},
+		{Name: "docs", Type: "doc", Terminal: []string{"done"}},
+		{Name: "site", Type: "web", Terminal: []string{"live"}},
+		{Name: "ops", Type: "op", Terminal: []string{"closed"}},
+	}}
 	beads := []store.Bead{
-		mk("fresh", "merged", "closed", &line, at(time.Hour)),
-		mk("old", "merged", "closed", &line, at(25*time.Hour)),
-		mk("edge", "merged", "closed", &line, at(24*time.Hour)),
-		mk("dropped", "dropped", "closed", &line, at(time.Hour)),
-		mk("open", "merged", "open", &line, nil),
-		mk("noclose", "merged", "closed", &line, nil),
-		mk("elsewhere", "merged", "closed", &loose, at(time.Hour)),
-		mk("adrift", "merged", "closed", nil, at(time.Hour)),
+		mk("fresh", "", "merged", "closed", &line, at(time.Hour)),
+		mk("old", "", "merged", "closed", &line, at(25*time.Hour)),
+		mk("edge", "", "merged", "closed", &line, at(24*time.Hour)),
+		mk("dropped", "", "dropped", "closed", &line, at(time.Hour)),
+		mk("open", "", "merged", "open", &line, nil),
+		mk("noclose", "", "merged", "closed", &line, nil),
+		mk("elsewhere", "", "merged", "closed", &loose, at(time.Hour)),
+		mk("adrift", "", "merged", "closed", nil, at(time.Hour)),
+		mk("donefresh", "doc", "done", "closed", &line, at(2*time.Hour)),
+		mk("doneold", "doc", "done", "closed", &line, at(25*time.Hour)),
+		mk("donemerged", "doc", "merged", "closed", &line, at(time.Hour)),
+		mk("livefresh", "web", "live", "closed", &line, at(3*time.Hour)),
+		mk("fixedland", "op", "closed", "closed", &line, at(time.Hour)),
+		mk("opmerged", "op", "merged", "closed", &line, at(time.Hour)),
 	}
 	var ids []string
-	for _, b := range web.LandedSince(beads, "line", now) {
+	for _, b := range web.LandedSince(beads, d, now) {
 		ids = append(ids, b.ID)
 	}
-	if !reflect.DeepEqual(ids, []string{"fresh", "edge"}) {
-		t.Errorf("landed %v, want fresh and edge, newest first", ids)
+	if !reflect.DeepEqual(ids, []string{"fresh", "donefresh", "livefresh", "edge"}) {
+		t.Errorf("landed %v, want fresh, donefresh, livefresh and edge, newest first", ids)
+	}
+	// No flow governs the beads of a depot with none: merged lands, done
+	// does not.
+	bare := &web.HomeDepot{Name: "loose"}
+	var off []string
+	for _, b := range web.LandedSince([]store.Bead{
+		mk("offmerged", "", "merged", "closed", &loose, at(time.Hour)),
+		mk("offdone", "", "done", "closed", &loose, at(time.Hour)),
+	}, bare, now) {
+		off = append(off, b.ID)
+	}
+	if !reflect.DeepEqual(off, []string{"offmerged"}) {
+		t.Errorf("landed off-flow %v, want offmerged alone", off)
 	}
 }
 

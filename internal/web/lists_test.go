@@ -737,6 +737,15 @@ func TestBeadsAll(t *testing.T) {
 	if len(got.Beads) != 2 || got.Beads[1].Title != "two" || !got.Beads[1].Hold || !got.Beads[1].Held {
 		t.Errorf("the held bead: %+v", got.Beads)
 	}
+	// The flow list's closed group uses a status filter: it keeps the closed
+	// bead even though its actual stage is not named closed.
+	f.getJSON("/beads?all=1&depot=line&stage=closed", &got)
+	if len(got.Beads) != 1 || got.Beads[0].Title != "four" || got.Stage != "closed" {
+		t.Errorf("closed group link lists %+v, want four closed at its own stage", got.Beads)
+	}
+	if got.StageCounts["closed"] != 1 || got.DepotCounts["line"] != 1 {
+		t.Errorf("closed filter counts: stages %v, depots %v, want one closed in line", got.StageCounts, got.DepotCounts)
+	}
 	// The newest change first, the closed bead among them; a filter keeps all.
 	f.getJSON("/beads?all=1&depot=line", &got)
 	if want := []string{"one", "four", "two", "five", "three"}; !reflect.DeepEqual(titles(cards(got.Beads)), want) {

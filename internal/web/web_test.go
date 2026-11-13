@@ -1262,9 +1262,11 @@ func TestNoOtherHost(t *testing.T) {
 		beadPage = beadPage || strings.HasPrefix(path, "/beads/")
 	}
 	// The walk must have reached what it is there to check: every page of
-	// the rail, a bead's own page, the depots' pages, the error page.
+	// the rail, a bead's own page, the depots' pages and their flows'
+	// lists, the error page.
 	for _, path := range []string{"/", "/talk", "/line", "/flows", "/flows?panel=1", "/beads", "/sessions", "/crew",
-		"/previews", "/config", "/depots", "/depots/line", "/depots/loose", "/groups", "/routes", "/peers", "/deps", "/limits", "/telemetry", "/nowhere"} {
+		"/previews", "/config", "/depots", "/depots/line", "/depots/loose", "/depots/line/code", "/depots/line/bugs",
+		"/groups", "/routes", "/peers", "/deps", "/limits", "/telemetry", "/nowhere"} {
 		if !seen[path] {
 			t.Errorf("the walk did not reach %s: %v", path, seen)
 		}

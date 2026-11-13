@@ -94,10 +94,16 @@ func Updated(data map[string]any) string { return updated(data) }
 // at most ten.
 func ClosedToday(beads []store.Bead, now time.Time) []HomeClosed { return closedToday(beads, now) }
 
-// LandedSince are the beads that landed in depot in the day before now,
-// the newest first.
-func LandedSince(beads []store.Bead, depot string, now time.Time) []store.Bead {
-	return landedSince(beads, depot, now)
+// LandedSince are the beads that landed in the depot in the day before
+// now, the newest first.
+func LandedSince(beads []store.Bead, d *HomeDepot, now time.Time) []store.Bead {
+	return landedSince(beads, d, now)
+}
+
+// FlowList regroups the overview and the closed read into one flow's list:
+// d is the depot's overview row, j its flow's index.
+func FlowList(d *HomeDepot, j int, open []store.Bead, all []store.Bead, now time.Time) *FlowPage {
+	return flowPage(d, j, open, all, now)
 }
 
 // ProviderOf is the subscription a herdr group or crew member with cfg

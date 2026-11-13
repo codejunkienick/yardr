@@ -196,19 +196,25 @@ func hasStage(counts []StageCount, stage string) bool {
 	return slices.ContainsFunc(counts, func(c StageCount) bool { return c.Stage == stage })
 }
 
-// landedSince are the beads of all that landed in depot in the day before
-// now, the newest first: closed with their close keeping them in merged.
-// A bead put aside stands in dropped instead, and an older landing outside
-// the window.
-func landedSince(all []store.Bead, depot string, now time.Time) []store.Bead {
+// landedSince are the beads of all that landed in the depot in the day
+// before now, the newest first: closed at their flow's landing terminal,
+// merged, done or live, whichever the flow ends in. A bead no flow governs
+// keeps the old rule, Stage merged, so a depot whose flows cannot be read
+// still counts what landed. A bead put aside stands in dropped instead,
+// and an older landing outside the window.
+func landedSince(all []store.Bead, d *HomeDepot, now time.Time) []store.Bead {
 	since := now.Add(-landedWithin)
 	var out []store.Bead
 	for i := range all {
 		b := &all[i]
-		if b.Status != "closed" || b.Stage != "merged" || b.ClosedAt == nil || !in(b, depot) {
+		if b.Status != "closed" || b.ClosedAt == nil || !in(b, d.Name) {
 			continue
 		}
-		if b.ClosedAt.Before(since) {
+		want := "merged"
+		if j := d.flowIndex(b.Type); j >= 0 {
+			want = landingTerminal(d.Flows[j].Terminal)
+		}
+		if b.Stage != want || b.ClosedAt.Before(since) {
 			continue
 		}
 		out = append(out, *b)
@@ -296,7 +302,7 @@ func depotPage(d *HomeDepot, open []store.Bead, l *Line, all []store.Bead, now t
 		out.Waits = append(out.Waits, DepotWait{Bead: w.Bead, Title: w.Title, Flow: flow, Stage: w.Stage})
 	}
 	// What landed in the last day, the newest first.
-	landed := landedSince(all, d.Name, now)
+	landed := landedSince(all, d, now)
 	out.Landed = len(landed)
 	landedPerFlow := make([]int, len(d.Flows))
 	for i := range landed {
@@ -345,18 +351,24 @@ func depotPage(d *HomeDepot, open []store.Bead, l *Line, all []store.Bead, now t
 	}
 	out.ActiveFlows = len(out.Flows)
 	out.QuietFlows = len(out.Quiet)
-	// The title block's tag: the depot's own flow's commit. A dir
-	// depot's source reads "repo (directory)", and a store flow names no
-	// commit, so neither carries one.
+	out.Tag = depotTag(d)
+	return out
+}
+
+// depotTag is the title block's tag: the depot's own flow's commit. A dir
+// depot's source reads "repo (directory)", and a store flow names no
+// commit, so neither carries one. The depot's page and its flows' lists
+// carry the same tag.
+func depotTag(d *HomeDepot) string {
 	for j := range d.Flows {
 		if d.Flows[j].Type == "" {
 			if src := d.Flows[j].Src; strings.HasPrefix(src, "repo@") {
-				out.Tag = src
+				return src
 			}
 			break
 		}
 	}
-	return out
+	return ""
 }
 
 func (s *Server) handleDepot(w http.ResponseWriter, r *http.Request) {

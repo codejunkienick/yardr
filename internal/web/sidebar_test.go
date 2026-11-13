@@ -90,10 +90,10 @@ func TestSidebarCounts(t *testing.T) {
 		}
 		// The asked bead's flow shows the dot; the other flow shows
 		// nothing.
-		if want := `<a class="side-flow" href="/flows" title="code — waits for you" aria-label="code — waits for you"><span class="side-dot" aria-hidden="true"></span><span class="side-label">code</span></a>`; !strings.Contains(s, want) {
+		if want := `<a class="side-flow" href="/depots/line/code" title="code — waits for you" aria-label="code — waits for you"><span class="side-dot" aria-hidden="true"></span><span class="side-label">code</span></a>`; !strings.Contains(s, want) {
 			t.Errorf("the sidebar lacks %s: %s", want, s)
 		}
-		if want := `<a class="side-flow" href="/flows" title="bugs" aria-label="bugs"><span class="side-label">bugs</span></a>`; !strings.Contains(s, want) {
+		if want := `<a class="side-flow" href="/depots/line/bugs" title="bugs" aria-label="bugs"><span class="side-label">bugs</span></a>`; !strings.Contains(s, want) {
 			t.Errorf("the sidebar lacks %s: %s", want, s)
 		}
 	})
@@ -141,7 +141,7 @@ func TestSidebarCounts(t *testing.T) {
 		if !strings.Contains(s, "1 quiet flow") {
 			t.Errorf("the sidebar folds no quiet flow: %s", s)
 		}
-		if want := `<a class="side-flow" href="/flows"><span class="side-label">docs</span></a>`; !strings.Contains(s, want) {
+		if want := `<a class="side-flow" href="/depots/line/docs"><span class="side-label">docs</span></a>`; !strings.Contains(s, want) {
 			t.Errorf("the sidebar lacks %s: %s", want, s)
 		}
 	})
@@ -160,7 +160,7 @@ func TestSidebarCounts(t *testing.T) {
 			`<a class="side-row" href="/line" title="Arrivals`,
 			`<a class="side-row" href="/" title="Decide`,
 			`<a class="side-row" href="/depots/line" title="line`,
-			`<a class="side-flow" href="/flows" title="code`,
+			`<a class="side-flow" href="/depots/line/code" title="code`,
 			`<a class="side-row" href="/config" title="Settings"`,
 		} {
 			if !strings.Contains(s, want) {

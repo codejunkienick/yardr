@@ -161,7 +161,7 @@ ul, ol { list-style: none; }
 .side-row { display: flex; align-items: center; gap: 10px; min-height: 30px; padding: 0 8px; border-radius: 6px; }
 .side-row:hover { color: var(--accent-hover); }
 /* The depot the page stands on: its row stands filled. */
-.side-row[aria-current="page"] { background: var(--panel); }
+.side-row[aria-current="page"], .side-flow[aria-current="page"] { background: var(--panel); }
 .side-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-icon { flex: none; color: var(--dim); }
 .side-icon .teeth { stroke-dasharray: 3.2 2.6; }
@@ -743,8 +743,50 @@ a.depot-card:hover .depot-card-num { color: var(--accent-hover); }
 .depot-row-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .depot-where { font-size: 12px; color: var(--dim); flex: none; }
 .depot-none { color: var(--faint); }
+
+/* One flow's list: the canvas's list board — the open beads grouped by
+   stage in flow order, the empty stages folded into one row, the landing
+   terminal as the last day's log above every other closed bead. The page
+   reads in the sans face throughout, as the depot's page does, with bead
+   ids in mono. The head rows stand on the ground, the rows on the panel,
+   as the depot's table does; every corner stays square. */
+.flow { display: flex; flex-direction: column; gap: 20px; padding: 28px var(--gap); font-family: var(--sans); font-size: 13px; }
+.flow-tag { font-size: 12px; color: var(--dim); padding-left: 4px; }
+.flow-list { display: flex; flex-direction: column; border: 1px solid var(--hairline); background: var(--panel); overflow: hidden; }
+.flow-list > * + * { border-top: 1px solid var(--hairline); }
+.flow-head { display: flex; align-items: center; gap: 10px; padding: 9px 20px; background: var(--ground); }
+.flow-chev { color: var(--dim); transform: rotate(90deg); flex: none; }
+.flow-dot { color: var(--faint); flex: none; }
+.flow-check { color: var(--running); flex: none; }
+.flow-name { font-weight: 600; }
+.flow-count { color: var(--dim); }
+.flow-note { font-size: 12px; color: var(--dim); }
+/* An open row links to its bead; a terminal row is plain. */
+.flow-rows li { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 20px 0 42px; }
+.flow-rows li + li { border-top: 1px solid var(--hairline); }
+.flow-rows li:has(> a) { padding: 0; }
+.flow-rows li > a { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; min-height: 40px; padding: 0 20px 0 42px; }
+.flow-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flow-next { font-size: 12px; color: var(--dim); flex: none; min-width: 72px; text-align: right; white-space: nowrap; }
+.flow-id { font-family: var(--mono); font-size: 12px; color: var(--dim); flex: none; min-width: 40px; }
+.flow-more { display: flex; align-items: center; min-height: 36px; padding: 0 20px 0 42px; font-size: 12px; color: var(--dim); }
+.flow-none { padding: 10px 20px 10px 42px; color: var(--faint); }
+/* The folded empty stages: their count and names, opening to their empty
+   headers. */
+.flow-empty summary { display: flex; align-items: center; gap: 10px; padding: 9px 20px; background: var(--ground); cursor: pointer; list-style: none; }
+.flow-empty summary::-webkit-details-marker { display: none; }
+.flow-empty summary::marker { content: ""; }
+.flow-empty summary:hover { color: var(--accent-hover); }
+.flow-empty[open] > summary .side-chev { transform: rotate(90deg); }
+.flow-empty-n { font-weight: 600; color: var(--dim); }
+.flow-empty-names { font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
+.flow-empty .flow-head { border-top: 1px solid var(--hairline); }
 @media (max-width: 699px) {
   .depot-cards { grid-template-columns: 1fr; }
+  .flow-head { padding: 9px 12px; }
+  .flow-rows li, .flow-rows li > a { padding-left: 28px; padding-right: 12px; }
+  .flow-more, .flow-none { padding-left: 28px; padding-right: 12px; }
+  .flow-empty summary { padding: 9px 12px; }
 }
 
 /* --- narrower windows ---------------------------------------------------- */

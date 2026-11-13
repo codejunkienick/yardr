@@ -84,6 +84,15 @@ func (b Beads) Link(depot, stage string) string {
 // something happens in the yard.
 func (b Beads) Self() string { return b.Link(b.Depot, b.Stage) }
 
+// beadStage matches the stage filter, where "closed" is the list of every
+// closed bead, whatever stage it closed at.
+func beadStage(bead *store.Bead, stage string) bool {
+	if stage == "closed" {
+		return bead.Status == "closed"
+	}
+	return stage == "" || bead.Stage == stage
+}
+
 // tally sets the counts of the filters' links from beads, the listed set
 // before either filter is applied: a bead counts for a depot when it stands
 // in the stage filter, and for a stage when it stands in the depot filter,
@@ -96,7 +105,7 @@ func (b *Beads) tally(beads []store.Bead) {
 	}
 	for i := range beads {
 		bead := &beads[i]
-		if b.Stage == "" || bead.Stage == b.Stage {
+		if beadStage(bead, b.Stage) {
 			b.AnyDepot++
 			if bead.Depot != nil {
 				b.DepotCounts[*bead.Depot]++
@@ -105,6 +114,9 @@ func (b *Beads) tally(beads []store.Bead) {
 		if b.Depot == "" || in(bead, b.Depot) {
 			b.AnyStage++
 			b.StageCounts[bead.Stage]++
+			if bead.Status == "closed" && bead.Stage != "closed" {
+				b.StageCounts["closed"]++
+			}
 		}
 	}
 }
@@ -154,7 +166,10 @@ func (s *Server) handleBeads(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		d.Stages = append(d.Stages, b.Stage)
-		if d.Stage == "" || b.Stage == d.Stage {
+		if d.All && b.Status == "closed" {
+			d.Stages = append(d.Stages, "closed")
+		}
+		if beadStage(&b, d.Stage) {
 			row := BeadRow{Bead: b, Held: b.Hold, Working: working(&b, manual)}
 			if est := ests[b.ID]; est != nil {
 				row.ETA, row.Late = est.ETA, est.Late

@@ -765,6 +765,7 @@ origin; the test allows those and only those ([One bead](#one-bead)).
 | `/delegations/<id>` | a delegated run's record: what the yardmaster ran for an operator, on which of their mails, what each setting held before and how the run is taken back (`yardr delegation show`); in the JSON a pack apply's objects stand by name under `record.objects` and whole, with their diffs and before-states, under `record.plan`; an operator's alone, any operator's, and a 404 for anyone else | `DelegationPage` |
 | `/depots` | the yard's depots: each with its kind, path, base and test command (`yardr depot list`), live | `Depots` |
 | `/depots/<name>` | one depot: its four counts, its flows with their stage strips, what waits on the viewer there, what landed in the last day ([One depot](#one-depot)) | `DepotPage` |
+| `/depots/<name>/<flow>` | one flow's list: its open beads grouped by stage in flow order, the empty stages folded, the landing terminal as the last day's log ([One flow's list](#one-flows-list)) | `FlowPage` |
 | `/groups` | the yard's groups: each with its runner, limit, members and config (`yardr group list`), live | `Groups` |
 | `/routes` | the yard's routes in match order: each with its stage, filters and group, or its groups in order with their quota conditions (`yardr route list`), live | `Routes` |
 | `/peers` | the yards this one is linked with: each with its URL, what the link carries and what waits for it (`yardr peer list`), live | `Peers` |
@@ -1532,8 +1533,8 @@ the title block, four counts, the flows with their stage strips, what
 waits on the viewer in this depot, what landed in the last day. An
 unknown depot is a 404. The page is a snapshot: reload it to see the
 depot change. The sidebar's depot rows link here, with the current
-depot marked; its flow rows stay on `/flows` until the flow list gives
-them a page of their own.
+depot marked; its flow rows link to each flow's list
+([One flow's list](#one-flows-list)), with the current flow marked.
 
 ```json
 {
@@ -1570,8 +1571,8 @@ them a page of their own.
   of no depot standing under no row. `transit` counts those past their
   flow's first stage with those off their flow, `backlog` those sitting
   in it: the sidebar's per-depot counts. `landed` counts the beads that
-  landed in the last rolling 24 hours: closed with their close keeping
-  them in `merged`.
+  landed in the last rolling 24 hours: closed at their flow's landing
+  terminal, `merged`, `done` or `live`, whichever the flow ends in.
 - `flows` are the depot's flows that are not quiet, in the depot's
   order. `src` is where the flow comes from: the type with its source
   for a bead type's flow, the source alone for the depot's own.
@@ -1594,6 +1595,62 @@ On the page the breadcrumb reads Depots › the name, and the title block
 links, to `/`; a waiting row links to its bead, a landed row is plain.
 Below 700 px the cards stack and the phone bar stands as today.
 
+## One flow's list
+
+`/depots/<name>/<flow>` shows one flow as the canvas's list board draws
+it: its open beads grouped by stage in flow order, the empty stages
+folded into one row, the flow's landing terminal as the last day's log
+above every other closed bead. An unknown depot or flow is a 404. The
+page is a snapshot: reload it to see the flow change. The sidebar's flow
+rows link here, with the current depot and flow marked.
+
+```json
+{
+  "depot": "yardr", "flow": "default", "tag": "repo@52e22d5",
+  "groups": [
+    {"stage": "backlog", "count": 49, "next": "shape", "note": "waits on shaping",
+     "rows": [{"bead": "yardr-3k9q", "title": "read the canvas whole"}],
+     "more": 43, "more_link": "/beads?depot=yardr&stage=backlog"}
+  ],
+  "empty": [
+    {"stage": "shape", "count": 0, "next": "siding", "rows": []}
+  ],
+  "landing": {"stage": "merged", "count": 17,
+    "rows": [{"id": "yardr-am42", "title": "show the repository named",
+              "verb": "landed", "age": "6h", "closed_at": "2026-11-13T14:02:11Z"}],
+    "more": 11, "more_link": "/beads?all=1&depot=yardr&stage=merged"},
+  "closed": {"stage": "closed", "count": 3,
+    "rows": [{"id": "yardr-9c2k", "title": "pick the port",
+              "verb": "closed", "age": "2d 5h", "closed_at": "2026-11-11T09:14:02Z"}]}
+}
+```
+
+- `tag` is the depot's own flow's repository commit, shortened; a dir
+  depot and one with no repo flow carry none, as on the depot's page.
+- `groups` are the flow's open stages that hold a bead, in flow order;
+  `empty` the ones that hold none, folded into one row. `next` is the
+  following stage in the flow's order including the terminal, so the
+  last open stage names the flow's actual terminal. `note` is what the
+  header carries past the count: `waits on shaping` on the flow's first
+  stage when it is named `backlog`.
+- `landing` is the flow's landing terminal — the first of `merged`,
+  `done` or `live` among its terminals, since not every flow ends in
+  `merged` — with what landed in the last rolling 24 hours. A flow that
+  ends in none of them carries no `landing`. `closed` is every other
+  closed bead of the flow.
+- A group names 6 rows, the newest first — open beads by their last
+  change, terminal beads by their close — and `more` with `more_link`
+  carries the rest to the filtered bead list (`all=1` for the terminal
+  groups).
+- A terminal row's `verb` is how it reads its close: `landed` in the
+  landing log, its real close stage under closed — `landed` for `merged`
+  and `live`, `done` for `done`, `closed` anywhere else — with how long
+  ago in the feed's words.
+
+On the page the breadcrumb reads the depot › the flow with the tag. An
+open row links to its bead, a terminal row is plain. Below 700 px the
+rows narrow and the phone bar stands as today.
+
 ## Beads
 
 `/beads` lists the open beads, the newest change first. `?depot=` keeps one
@@ -1607,6 +1664,8 @@ the others. A depot or stage nobody has gives an empty list, not an error.
 A filter with nothing to choose is left out.
 `?all=1` lists the closed beads too, every one, as `yardr bead list --all`
 (`"all": true` in the JSON); the filters keep it.
+With `?all=1&stage=closed`, `stage=closed` keeps every closed bead,
+whatever stage it closed at; the flow list's closed group links here.
 
 ```json
 {

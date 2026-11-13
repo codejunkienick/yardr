@@ -210,6 +210,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /delegations/{id}", s.handleDelegation)
 	s.mux.HandleFunc("GET /depots", s.handleDepots)
 	s.mux.HandleFunc("GET /depots/{name}", s.handleDepot)
+	s.mux.HandleFunc("GET /depots/{name}/{flow}", s.handleFlow)
 	s.mux.HandleFunc("GET /groups", s.handleGroups)
 	s.mux.HandleFunc("GET /routes", s.handleRoutes)
 	s.mux.HandleFunc("GET /peers", s.handlePeers)
@@ -470,6 +471,9 @@ type Page struct {
 	// depot is the depot the page stands on, "" on any other page: the
 	// sidebar marks its row current.
 	depot string
+	// flow is the depot's flow the page stands on, "" on any other page:
+	// the sidebar marks its row current.
+	flow string
 	// line is the shell's line, for a handler that has read the yard
 	// already; respond reads it otherwise.
 	line *Line
@@ -593,9 +597,9 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request, p Page) {
 	// An error page renders the sidebar bare: the yard and the fixed
 	// rows, no counts, no depots.
 	if p.Template == "error" {
-		v.Sidebar = sidebarFor(v.Yard, nil, nil, "")
+		v.Sidebar = sidebarFor(v.Yard, nil, nil, "", "")
 	} else {
-		v.Sidebar = sidebarFor(v.Yard, ov, v.Aside, p.depot)
+		v.Sidebar = sidebarFor(v.Yard, ov, v.Aside, p.depot, p.flow)
 	}
 	// Rendered whole before the first byte: a template that fails halfway
 	// must not leave half a page under a 200.
@@ -649,7 +653,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	// when the yard can answer it. Keep the error itself renderable when
 	// those reads failed.
 	v.Rail = s.rail(r.Context(), "", r.URL.EscapedPath(), nil, nil)
-	v.Sidebar = sidebarFor(v.Yard, nil, nil, "")
+	v.Sidebar = sidebarFor(v.Yard, nil, nil, "", "")
 	if ov, overviewErr := s.overview(r.Context(), nil); overviewErr == nil {
 		if l, lineErr := s.line(r.Context(), ov); lineErr == nil {
 			v.Needs = len(attention(ov, l))

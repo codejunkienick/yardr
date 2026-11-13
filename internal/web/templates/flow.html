@@ -1,0 +1,74 @@
+{{define "flowhead"}}
+<div class="flow-head">
+  <svg class="flow-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+  <svg class="flow-dot" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="4" cy="4" r="3.25"/></svg>
+  <span class="flow-name">{{.Stage}}</span>
+  <span class="flow-count">{{.Count}}</span>
+  {{- with .Note}}<span class="flow-note">· {{.}}</span>{{end}}
+</div>
+{{end}}
+{{define "content"}}
+{{- with .Data}}
+<nav class="item filters" aria-label="Depots">
+  <p><a href="/depots/{{.Depot}}">{{.Depot}}</a> <span aria-hidden="true">›</span> {{.Flow}}{{with .Tag}} <span class="flow-tag">{{.}}</span>{{end}}</p>
+</nav>
+<div class="flow">
+  <div class="flow-list">
+    {{- range .Groups}}
+    {{template "flowhead" .}}
+    <ul class="flow-rows">
+      {{- $next := .Next}}
+      {{- range .Rows}}
+      <li><a href="/beads/{{.Bead}}"><svg class="flow-dot" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="4" cy="4" r="3.25"/></svg><span class="flow-title">{{.Title}}</span>{{if $next}}<span class="flow-next">→ {{$next}}</span>{{end}}</a></li>
+      {{- end}}
+    </ul>
+    {{- if .More}}<a class="flow-more" href="{{.MoreLink}}">Show {{.More}} more</a>{{end}}
+    {{- end}}
+    {{- if .Empty}}
+    <details class="flow-empty">
+      <summary><svg class="side-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="flow-empty-n">{{.EmptyLabel}}</span><span class="flow-empty-names">{{.EmptyNames}}</span></summary>
+      {{- range .Empty}}
+      {{template "flowhead" .}}
+      {{- end}}
+    </details>
+    {{- end}}
+    {{- with .Landing}}
+    <div class="flow-head">
+      <svg class="flow-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+      <svg class="flow-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg>
+      <span class="flow-name">{{.Stage}}</span>
+      <span class="flow-count">{{.Count}}</span>
+      <span class="flow-note">· last 24h · terminal</span>
+    </div>
+    {{- if .Rows}}
+    <ul class="flow-rows">
+      {{- range .Rows}}
+      <li><svg class="flow-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg><span class="flow-id">{{.ShortID}}</span><span class="flow-title">{{.Title}}</span><span class="flow-next">{{.Words}}</span></li>
+      {{- end}}
+    </ul>
+    {{- else}}
+    <p class="flow-none">Nothing landed in the last 24h.</p>
+    {{- end}}
+    {{- if .More}}<a class="flow-more" href="{{.MoreLink}}">Show {{.More}} more</a>{{end}}
+    {{- end}}
+    <div class="flow-head">
+      <svg class="flow-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+      <svg class="flow-dot" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="4" cy="4" r="3.25"/></svg>
+      <span class="flow-name">{{.Closed.Stage}}</span>
+      <span class="flow-count">{{.Closed.Count}}</span>
+      <span class="flow-note">· terminal</span>
+    </div>
+    {{- if .Closed.Rows}}
+    <ul class="flow-rows">
+      {{- range .Closed.Rows}}
+      <li><svg class="flow-dot" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="4" cy="4" r="3.25"/></svg><span class="flow-id">{{.ShortID}}</span><span class="flow-title">{{.Title}}</span><span class="flow-next">{{.Words}}</span></li>
+      {{- end}}
+    </ul>
+    {{- else}}
+    <p class="flow-none">Nothing closed.</p>
+    {{- end}}
+    {{- if .Closed.More}}<a class="flow-more" href="{{.Closed.MoreLink}}">Show {{.Closed.More}} more</a>{{end}}
+  </div>
+</div>
+{{- end}}
+{{end}}

@@ -27,11 +27,16 @@ import (
 // shows its dot or nothing: no per-flow count.
 type sidebarFlow struct {
 	Name string
+	// Depot is the depot the row stands under: the list's first segment.
+	Depot string
 	// Dot is whether a bead of the flow carries an open ask.
 	Dot bool
 	// Title is the row's title and aria-label: the flow, with the wait in
 	// words where the dot stands.
 	Title string
+	// Current is whether the page stands on this flow: its row is marked,
+	// as the rail marks the open mode.
+	Current bool
 }
 
 // sidebarDepot is one depot's row: its name and its beads in transit,
@@ -48,10 +53,12 @@ type sidebarDepot struct {
 	// marked, as the rail marks the open mode.
 	Current bool
 	Flows   []sidebarFlow
-	// Quiet are the depot's quiet flows' names: nothing in transit, no
-	// backlog, no open ask. QuietLabel is the folded row's words.
-	Quiet      []string
-	QuietLabel string
+	// Quiet are the depot's quiet flows: nothing in transit, no backlog,
+	// no open ask. QuietLabel is the folded row's words; QuietCurrent
+	// opens the fold when it holds the current flow.
+	Quiet        []sidebarFlow
+	QuietLabel   string
+	QuietCurrent bool
 }
 
 // sidebarQuietDepot is folded under Quiet; the page opens that group and
@@ -111,8 +118,10 @@ func transitWords(n int) string {
 // sidebarFor is the shell's sidebar for the page: ov is the overview, l
 // the shell's line. Either nil renders it bare, for an error page, as the
 // rail with a nil line carries no pills. current is the depot the page
-// stands on, "" on any other page: its row is marked current.
-func sidebarFor(yard string, ov *Home, l *Line, current string) sidebar {
+// stands on, "" on any other page: its row is marked current. flow is the
+// depot's flow the page stands on, "" on any other page: its row is marked
+// current too.
+func sidebarFor(yard string, ov *Home, l *Line, current, flow string) sidebar {
 	out := sidebar{Yard: yard, Chip: chipLetters(yard), Shade: yardSlot(yard)}
 	if ov == nil || l == nil {
 		out.Bare = true
@@ -208,13 +217,15 @@ func sidebarFor(yard string, ov *Home, l *Line, current string) sidebar {
 			Title:   d.Name + " — " + transitWords(transit),
 			Current: d.Name == current}
 		for j := range d.Flows {
-			if inTransit[j] == 0 && inBacklog[j] == 0 && !dotted[di][j] {
-				sd.Quiet = append(sd.Quiet, d.Flows[j].Name)
-				continue
-			}
-			sf := sidebarFlow{Name: d.Flows[j].Name, Dot: dotted[di][j], Title: d.Flows[j].Name}
+			sf := sidebarFlow{Name: d.Flows[j].Name, Depot: d.Name, Dot: dotted[di][j],
+				Title: d.Flows[j].Name, Current: d.Name == current && d.Flows[j].Name == flow}
 			if sf.Dot {
 				sf.Title += " — waits for you"
+			}
+			if inTransit[j] == 0 && inBacklog[j] == 0 && !dotted[di][j] {
+				sd.Quiet = append(sd.Quiet, sf)
+				sd.QuietCurrent = sd.QuietCurrent || sf.Current
+				continue
 			}
 			sd.Flows = append(sd.Flows, sf)
 		}
