@@ -156,20 +156,12 @@ func (s *Server) overview(ctx context.Context, y *yard) (*Home, error) {
 		if errs[i] != nil {
 			hr.Error = errs[i].Error()
 		}
-		// byType maps a bead type to the index of its flow; the depot's own
-		// flow, when it has one, takes every other type.
-		byType, own := map[string]int{}, -1
 		for _, rf := range flows {
 			hf := HomeFlow{Name: rf.Flow.Name, Type: rf.Type, Stages: []StageCount{}}
 			for _, st := range rf.Flow.Stages {
 				if !slices.Contains(rf.Flow.Terminal, st) {
 					hf.Stages = append(hf.Stages, StageCount{Stage: st})
 				}
-			}
-			if rf.Type == "" {
-				own = len(hr.Flows)
-			} else {
-				byType[rf.Type] = len(hr.Flows)
 			}
 			hr.Flows = append(hr.Flows, hf)
 		}
@@ -181,10 +173,7 @@ func (s *Server) overview(ctx context.Context, y *yard) (*Home, error) {
 			if b.Hold {
 				hr.Held++
 			}
-			i, ok := byType[b.Type]
-			if !ok {
-				i = own
-			}
+			i := hr.flowIndex(b.Type)
 			if i < 0 || !count(hr.Flows[i].Stages, b.Stage) {
 				if !count(hr.Elsewhere, b.Stage) {
 					hr.Elsewhere = append(hr.Elsewhere, StageCount{Stage: b.Stage, Open: 1})
@@ -213,28 +202,39 @@ func count(counts []StageCount, stage string) bool {
 	return false
 }
 
+// flowIndex is the index of the flow that governs beads of typ in the
+// depot: its type's flow when there is one, else the depot's own, -1 when
+// no flow governs them. The overview and the sidebar assign beads to flows
+// by this one rule.
+func (d *HomeDepot) flowIndex(typ string) int {
+	own := -1
+	for j := range d.Flows {
+		if f := &d.Flows[j]; f.Type == typ {
+			if typ != "" {
+				return j
+			}
+			if own < 0 {
+				own = j
+			}
+		} else if f.Type == "" && own < 0 {
+			own = j
+		}
+	}
+	return own
+}
+
 // firstStage reports whether stage is the first stage of the flow that
-// governs beads of typ in depot: where its beads start. A bead is governed
-// by its type's flow when there is one, else by the depot's own, as in
-// overview. What no flow governs (no depot, no flows, an empty flow) has no
-// first stage.
+// governs beads of typ in depot: where its beads start. What no flow
+// governs (no depot, no flows, an empty flow) has no first stage.
 func (h *Home) firstStage(depot, typ, stage string) bool {
 	for i := range h.Depots {
-		d := &h.Depots[i]
-		if d.Name != depot {
-			continue
-		}
-		var own *HomeFlow
-		for j := range d.Flows {
-			f := &d.Flows[j]
-			if f.Type == typ {
-				return len(f.Stages) > 0 && f.Stages[0].Stage == stage
+		if d := &h.Depots[i]; d.Name == depot {
+			if j := d.flowIndex(typ); j >= 0 {
+				st := d.Flows[j].Stages
+				return len(st) > 0 && st[0].Stage == stage
 			}
-			if f.Type == "" {
-				own = f
-			}
+			return false
 		}
-		return own != nil && len(own.Stages) > 0 && own.Stages[0].Stage == stage
 	}
 	return false
 }
@@ -441,10 +441,10 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	if !ov.All && before == 0 {
 		stream = "home"
 	}
-	s.respond(w, r, Page{Template: "home", Title: "Home", Menu: "home", Data: ov, line: l, head: feed.Head, stream: stream})
+	s.respond(w, r, Page{Template: "home", Title: "Home", Menu: "home", Data: ov, line: l, ov: ov, head: feed.Head, stream: stream})
 }
 
-// Unbuilt is the Data of a rail page no child of the train has built yet.
+// Unbuilt is the Data of a bar page no child of the train has built yet.
 type Unbuilt struct {
 	Page  string `json:"page"`
 	Built bool   `json:"built"`

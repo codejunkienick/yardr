@@ -8,13 +8,12 @@ import (
 	"yardr.dev/yardr/internal/store"
 )
 
-// The shell's left edge is footplate's rail: the yard's chip, the three
-// mode tiles in the rail's order, and Settings at the foot, with the open
-// mode's column of rows beside it. Each tile opens a page — Crew Talk,
-// Decide the Line page, Lines the Yard panel, Settings the Config hub —
-// and the column holds the pages the rail does not name. No page changes
-// its address, its handler or its centre; the rail only changes how a
-// person reaches them.
+// The rail is the phone's bottom bar: the three mode tiles in the rail's
+// order, and More with the open mode's rows. Each tile opens a page —
+// Crew Talk, Decide the Line page, Lines the Yard panel — and More holds
+// the pages the bar does not name, ending in Settings. On a wider window
+// the sidebar stands instead. No page changes its address, its handler or
+// its centre; the rail only changes how a person reaches them.
 
 // railTile is one of the rail's tiles: a mode with its glyph, and the pill
 // it carries where the mode waits on the person reading.
@@ -37,7 +36,7 @@ type railTile struct {
 	Title string
 }
 
-// railRow is one row of the open mode's column.
+// railRow is one row of the open mode's rows, under the bar's More.
 type railRow struct {
 	Label string
 	Path  string
@@ -45,24 +44,16 @@ type railRow struct {
 	Current bool
 }
 
-// railColumn is the open mode's column: its head and its rows.
+// railColumn is the open mode's rows: its head and its rows.
 type railColumn struct {
 	// Head names the open mode, in the section face.
 	Head string
 	Rows []railRow
 }
 
-// rail is the shell's left edge: the yard's chip, the tiles, and the open
-// mode's column.
+// rail is the phone's bottom bar: the tiles, and the open mode's rows
+// under More.
 type rail struct {
-	// Yard is the yard's name, the chip's words.
-	Yard string
-	// Chip are its first two letters, on the chip.
-	Chip string
-	// Shade is the chip's rust shade, 0 to 2: the shell's chip-0 through
-	// chip-2. A number, not a colour, because the page's policy refuses
-	// inline style.
-	Shade  int
 	Tiles  []railTile
 	Column *railColumn // nil where no mode is open (an error page)
 }
@@ -76,7 +67,7 @@ var railModes = []railTile{
 }
 
 // modeFor is the mode the page with menu entry name stands in: the tile the
-// shell marks open and the column it shows. "" opens none (an error page).
+// bar marks open and the rows More shows. "" opens none (an error page).
 func modeFor(name string) string {
 	switch name {
 	case "talk", "crew", "sessions":
@@ -148,7 +139,7 @@ func (s *Server) settingsRows(ctx context.Context) []columnRow {
 	return rows
 }
 
-// columnFor is the open mode's column: its head and rows, with the current
+// columnFor is the open mode's rows: its head and rows, with the current
 // page marked. The three modes' rows mark by menu name; the Settings rows
 // share one, so each marks by its own path. Nil where no mode is open.
 func (s *Server) columnFor(ctx context.Context, menu, path string) *railColumn {
@@ -199,8 +190,8 @@ func decideWords(n int) string {
 	return fmt.Sprintf("%d wait for you", n)
 }
 
-// rail is the shell's left edge for the page: the yard's chip, the tiles
-// with their pills, and the open mode's column. inbox is the acting user's
+// rail is the phone's bottom bar for the page: the tiles with their
+// pills, and the open mode's rows under More. inbox is the acting user's
 // inbox read, nil where the view acts as no user; l is the shell's line,
 // nil on an error page. Crew's pill is the inbox's aggregate unread at
 // this render — the web view acknowledges nothing, so it falls only when
@@ -211,8 +202,7 @@ func decideWords(n int) string {
 // keeps no per-person watermark to count its changed beads against. No
 // pill stands at zero, and none stands on an error page.
 func (s *Server) rail(ctx context.Context, menu, path string, l *Line, inbox *store.Mailbox) rail {
-	yard := s.yardName(ctx)
-	out := rail{Yard: yard, Chip: chipLetters(yard), Shade: yardSlot(yard)}
+	var out rail
 	open := modeFor(menu)
 	decide := 0
 	if l != nil {

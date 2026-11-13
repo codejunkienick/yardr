@@ -2264,7 +2264,7 @@ Reload the page.
 footplate: the server's build and start time, whether the daemon holds
 its lock, on which build, and when it last completed a pass, and the
 view's own build. It is a machine route: JSON to every client, with no
-template and no rail entry.
+template and no sidebar entry.
 
 ```sh
 curl -s http://127.0.0.1:8791/health
@@ -2293,9 +2293,9 @@ head sequence is deliberately not among it.
 
 ## Telemetry
 
-`/telemetry` is the yard's opt-in telemetry switch for a browser, a row
-of the rail's Settings column: off unless turned on, and turning on
-only on an explicit click. Every reader gets the consent words the switch is
+`/telemetry` is the yard's opt-in telemetry switch for a browser: off
+unless turned on, and turning on only on an explicit click. Every reader
+gets the consent words the switch is
 turned on under — the four questions the batch answers and where it
 goes, the id-only profile, the pseudonymous sentence — while the
 switch itself, the install id and the next payload are the operator's
@@ -2339,15 +2339,17 @@ it. `head` is the yard's newest seq from before the preview was read.
 
 ## Layout
 
-Four columns on a desktop, the centre fluid. Simplicity is the point:
+Three columns on a desktop, the centre fluid. Simplicity is the point:
 **a new view is a new feed in the centre column, never a new
 arrangement.**
 
-- **Left**, 64px: the rail — the yard's chip, the Crew, Decide and
-  Lines tiles, and Settings at the foot — with the open mode's column
-  of rows beside it, 200px, under its section head.
+- **Left**, 248px: the sidebar — the yard's chip and name, Arrivals
+  and Decide with their counts, Crew bare, the depots with their flows,
+  and Settings at the foot. Arrivals counts the open beads in transit;
+  Decide the beads carrying an open ask for the viewer, as the bar's
+  pill counts; a flow's dot means a bead of that flow carries one.
 - **Centre**: the page. At 1100px and wider it takes all the width the
-  rail, the column and the aside leave, so every page fills the window;
+  sidebar and the aside leave, so every page fills the window;
   home and the line keep the aside, and every other page counts what
   waits in its header instead.
 - **Right**, 300px, beside home and the line alone: what waits for a
@@ -2360,16 +2362,17 @@ time at the right edge; running text (a bead's body, a note: `.text`,
 pairs (`.figures`, `.rows`, `.facts`) use the width.
 
 The page scrolls as a document: no column has a scrollbar of its own, at
-any width. The rail and the column stay in view while the page scrolls
-under them; the aside scrolls with the page. Wide text that must not
+any width. The sidebar stays in view while the page scrolls
+under it; the aside scrolls with the page. Wide text that must not
 wrap (a stage file, `.text.file`) still scrolls sideways inside its
-block.
+block. An error page renders the sidebar bare: the yard and the fixed
+rows, no counts, no depots.
 
 | window | arrangement |
 |---|---|
-| 1100px and wider | rail, column, a fluid centre, right beside home and the line |
-| 700px to 1099px | rail, column and centre, up to 600px and centred; the aside goes |
-| under 700px (a phone) | the centre column alone; the rail is a bar at the bottom — Crew, Decide, Lines, More — which stays in view while the page scrolls. More opens the open mode's column above the bar and ends in a Settings row; on a Settings page the column is Settings' own rows, which add none |
+| 1100px and wider | sidebar, a fluid centre, right beside home and the line |
+| 700px to 1099px | sidebar and centre, up to 600px and centred; the aside goes |
+| under 700px (a phone) | the centre column alone; the rail is a bar at the bottom — Crew, Decide, Lines, More — which stays in view while the page scrolls. More opens the open mode's rows above the bar and ends in a Settings row; on a Settings page the rows are Settings' own, which add none |
 
 The shell is `internal/web/templates/shell.html`; the aside is the
 `aside` template (`aside.html`), which `/line` renders in the centre too.
@@ -2384,7 +2387,7 @@ anywhere else.
 | token | value | for |
 |---|---|---|
 | `--ground` | `#161718` | the page |
-| `--panel` | `#1c1d1f` | panels, the phone's rail bar |
+| `--panel` | `#1c1d1f` | panels, the phone's bar |
 | `--hairline` | `#27282b` | rules between entries, panel borders |
 | `--hairline-strong` | `#333538` | a rule that must show on a panel |
 | `--ink` | `#e9e9ea` | text |
@@ -2394,6 +2397,7 @@ anywhere else.
 | `--accent-hover` | `#e2794a` | the accent's hover |
 | `--landed` | faint | status: landed |
 | `--shade` | `rgba(16, 17, 18, 0.45)` from `--dusk-950` | the backdrop that dims the page under the phone's More sheet |
+| `--link` | `#7aa2f7` | the sidebar's transit counts |
 | `--working` | the accent | status: a session is working |
 | `--running` | `#4cc38a` | status: running only |
 | `--held` | `#e5675a` | status: blocked or held, and errors |
@@ -2409,11 +2413,12 @@ anywhere else.
 | `--text`, `--small`, `--large` | | | 14px, 11px (labels), 20px (names and figures; on home the answer line alone) |
 | `--gap` | | | 16px, the one spacing unit |
 | `--label-spacing` | | | 0.14em, for uppercase labels |
-| `--rail-width`, `--column-width`, `--centre-width`, `--right-width` | | | the four columns |
+| `--sidebar-width`, `--centre-width`, `--right-width` | | | the three columns |
 
-The view is dark only: there is no light theme. Its colours are the
-yardr design system's (dusk surfaces, one rust accent, green only for
-running); each token in the stylesheet names the design token it came
+The view is dark by default, with the design system's light theme for a
+visitor whose system asks for light (`prefers-color-scheme`). Its colours
+are the yardr design system's (dusk surfaces, one rust accent, green only
+for running); each token in the stylesheet names the design token it came
 from. The faces are the reader's own: none is downloaded, so a machine
 without IBM Plex Sans or Plex Mono shows its system sans and monospace.
 
@@ -2426,9 +2431,10 @@ Rules the stylesheet holds to, and a test checks the second:
   (ids, counts, times, stages) monospace; every row and feed line one
   line, ending in an ellipsis.
 - Corners are square everywhere (`border-radius: 0`). Circles are a
-  status dot (`.dot`, with `.working`, `.running` or `.held`) and the
-  rail's chip, tiles and pills, which keep footplate's rounded corners;
-  the Beads filters' chips are pills too.
+  status dot (`.dot`, with `.working`, `.running` or `.held`), the bar's
+  tiles and pills, which keep footplate's rounded corners, and the
+  sidebar's chip, rows, dots and pills, which keep the canvas's; the
+  Beads filters' chips are pills too.
 - Words come from the yard: line, landed, held, waits for you.
 
 Classes a page builds from: `.item` (one entry of the centre feed, with a
@@ -2482,8 +2488,8 @@ A page is one template and one handler, in `internal/web`.
    }
    ```
 
-   `Menu` names the page for the rail: its mode's tile stands open and
-   its column row is marked current.
+   `Menu` names the page for the bar: its mode's tile stands open and
+   its row under More is marked current.
 
    A live page reads the yard's head before its data and gives it to the
    page (`head`; `respond` reads one itself only for a page that gives
@@ -2494,11 +2500,11 @@ A page is one template and one handler, in `internal/web`.
    <div id="live" hx-get="/sessions" hx-trigger="sse:message" hx-select="#live > *" hx-swap="innerHTML ignoreTitle:true">
    ```
 4. **The route**, in `routes` (`server.go`), with its method:
-   `s.mux.HandleFunc("GET /beads", s.handleBeads)`. For a page the rail
+   `s.mux.HandleFunc("GET /beads", s.handleBeads)`. For a page the bar
    already links to, take its name out of `unbuilt`.
 5. **Tests** in `web_test.go`, with `httptest`: the JSON and the HTML of the
    same request. `TestNoOtherHost` walks every link from Home, so a new
-   page is checked for other hosts and inline styles once the rail or a
+   page is checked for other hosts and inline styles once the bar or a
    page links to it; add the page to those the walk must reach.
 6. **This file**: the row in Pages, and the JSON's shape.
 

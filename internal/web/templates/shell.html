@@ -19,40 +19,77 @@
        (Page.stream): each has an unnamed message per event, which is all
        the column needs. An error page has no column and no stream. */}}
 <div class="shell{{if .Wide}} wide{{end}}"{{if .Aside}} hx-ext="sse" sse-connect="/events?after={{.Head}}{{with .Stream}}&amp;format={{.}}{{end}}"{{end}}>
-  {{- /* The rail: the yard's chip, the three mode tiles in the rail's
-         order, and Settings at the foot. Each tile links to its page;
-         the open one stands marked, and a tile whose mode waits on the
-         person carries its numeral, with the count in words in its title
-         and aria-label. The glyphs are footplate's own drawings on its
-         24-grid, in the current colour. */}}
+  {{- /* The rail is the phone's bottom bar: the three mode tiles and
+         More, in the rail's order. Each tile links to its page; the open
+         one stands marked, and a tile whose mode waits on the person
+         carries its numeral, with the count in words in its title and
+         aria-label. More opens the open mode's rows above the bar and ends
+         in Settings, which the bar has no tile for. A Settings page's rows
+         are Settings' own, so it adds none; an error page has no rows, so
+         Settings is its one row. The stylesheet shows the rail below
+         700 px only; on a wider window the sidebar stands instead. The
+         glyphs are footplate's own drawings on its 24-grid, in the
+         current colour. */}}
   <nav class="rail" aria-label="Modes">
-    <a class="chip chip-{{.Rail.Shade}}" href="/line" title="{{.Rail.Yard}}" aria-label="{{.Rail.Yard}}">{{.Rail.Chip}}</a>
     <ul class="tiles">
       {{- range .Rail.Tiles}}{{if ne .Name "settings"}}<li>{{template "tile" .}}</li>{{end}}{{end}}
     </ul>
     <div class="foot">{{range .Rail.Tiles}}{{if eq .Name "settings"}}{{template "tile" .}}{{end}}{{end}}</div>
-    {{- /* The phone's bottom bar is the three mode tiles and More; the
-           stylesheet hides the foot there. More opens the open mode's
-           column above the bar and ends in Settings, which the bar has
-           no tile for. A Settings page's column is Settings' own rows, so
-           it adds none; an error page has no column, so Settings is its
-           one row. The stylesheet shows More below 700 px only. */}}
     <div class="more"><details><summary>More</summary><ul>
       {{- with .Rail.Column}}{{range .Rows}}<li><a href="{{.Path}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a></li>{{end}}{{end}}
       {{- range .Rail.Tiles}}{{if and (eq .Name "settings") (not .Open)}}<li><a href="{{.Path}}">{{.Label}}</a></li>{{end}}{{end -}}
     </ul></details></div>
   </nav>
-  {{- /* The open mode's column beside the rail, under its section head. */}}
-  {{with .Rail.Column}}
-  <nav class="rail-column" aria-label="{{.Head}}">
-    <p class="section-head">{{.Head}}</p>
-    <ul>
-      {{- range .Rows}}
-      <li><a href="{{.Path}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a></li>
+  {{- /* The sidebar: the yard's chip and name, Arrivals and Decide with
+         their counts, Crew bare, the depots with their flows, and Settings
+         at the foot. A flow's dot means a bead of that flow carries an
+         open ask for the viewer. Depot and flow rows go to the flows page
+         until the depot overview and the flow list give them pages of
+         their own. An error page renders it bare: the yard and the fixed
+         rows, no counts, no depots. */}}
+  <nav class="sidebar" aria-label="Depots and flows">
+    <a class="yard-row" href="/line" title="{{.Sidebar.Yard}}" aria-label="{{.Sidebar.Yard}}"><span class="chip chip-{{.Sidebar.Shade}}">{{.Sidebar.Chip}}</span><span class="yard-name">{{.Sidebar.Yard}}</span></a>
+    <ul class="side-places">
+      <li><a class="side-row" href="/line" title="{{.Sidebar.ArrivalsTitle}}" aria-label="{{.Sidebar.ArrivalsTitle}}"><svg class="side-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 13h5l2 3h4l2-3h5"/><path d="M5 5h14l2 8v6H3v-6z"/></svg><span class="side-label">Arrivals</span>{{if not .Sidebar.Bare}}<span class="side-count">{{.Sidebar.Arrivals}}</span>{{end}}</a></li>
+      <li><a class="side-row" href="/" title="{{.Sidebar.DecideTitle}}" aria-label="{{.Sidebar.DecideTitle}}"><svg class="side-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg><span class="side-label">Decide</span>{{if .Sidebar.DecidePill}}<span class="side-pill" aria-hidden="true">{{.Sidebar.DecidePill}}</span>{{end}}</a></li>
+      <li><a class="side-row" href="/talk" title="Crew" aria-label="Crew"><svg class="side-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 010 6.8M18.5 14.8c1.6.8 2.6 2.5 3 5.2"/></svg><span class="side-label">Crew</span></a></li>
+    </ul>
+    {{- if not .Sidebar.Bare}}
+    <p class="side-head">Depots</p>
+    <ul class="side-depots">
+      {{- range .Sidebar.Depots}}
+      <li><a class="side-row" href="/flows" title="{{.Title}}" aria-label="{{.Title}}"><span class="side-label">{{.Name}}</span><span class="side-transit">{{.Transit}}</span></a>
+        {{- if or .Flows .Quiet}}
+        <ul class="side-flows">
+          {{- range .Flows}}
+          <li><a class="side-flow" href="/flows" title="{{.Title}}" aria-label="{{.Title}}">{{if .Dot}}<span class="side-dot" aria-hidden="true"></span>{{end}}<span class="side-label">{{.Name}}</span></a></li>
+          {{- end}}
+          {{- if .Quiet}}
+          <li><details class="side-quiet"><summary><svg class="side-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>{{.QuietLabel}}</summary>
+            <ul class="side-flows">
+              {{- range .Quiet}}
+              <li><a class="side-flow" href="/flows"><span class="side-label">{{.}}</span></a></li>
+              {{- end}}
+            </ul>
+          </details></li>
+          {{- end}}
+        </ul>
+        {{- end}}
+      </li>
       {{- end}}
     </ul>
+    {{- if .Sidebar.Quiet}}
+    <details class="side-quiet"><summary><svg class="side-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>{{.Sidebar.QuietLabel}}</summary>
+      <ul class="side-depots">
+        {{- range .Sidebar.Quiet}}
+        <li><a class="side-row" href="/flows"><span class="side-label">{{.}}</span></a></li>
+        {{- end}}
+      </ul>
+    </details>
+    {{- end}}
+    {{- end}}
+    <div class="side-foot"><a class="side-row" href="/config" title="Settings" aria-label="Settings"><svg class="side-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><circle class="teeth" cx="12" cy="12" r="7"/></svg><span class="side-label">Settings</span></a></div>
   </nav>
-  {{end}}
   <main class="centre" id="centre">
     {{- /* Home lists what waits in its centre and the line keeps it in
            its own; every other page counts it in its header, one line

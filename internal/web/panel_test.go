@@ -723,7 +723,7 @@ func TestYardPageIsWide(t *testing.T) {
 	css, err := os.ReadFile("assets/yard.css")
 	must(t, err)
 	for _, want := range []string{
-		".shell.wide { grid-template-columns: var(--rail-width) var(--column-width) minmax(0, 1fr); }",
+		".shell.wide { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }",
 		"#panel { display: flex; flex-wrap: wrap; column-gap: var(--gap); }",
 		"#panel > .item { flex: 1 1 max-content; max-width: 100%; min-width: 0; }",
 	} {

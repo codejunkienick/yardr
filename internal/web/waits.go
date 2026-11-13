@@ -844,7 +844,7 @@ func (s *Server) handleLine(w http.ResponseWriter, r *http.Request) {
 	// aside, which /line also serves after every event beside home.
 	column := *l
 	column.Late = nil
-	s.respond(w, r, Page{Template: "line", Title: "Line", Menu: "line", Data: l, line: &column, head: head})
+	s.respond(w, r, Page{Template: "line", Title: "Line", Menu: "line", Data: l, line: &column, ov: ov, head: head})
 }
 
 // lateRows lists the open beads running past their usual time, the newest

@@ -280,7 +280,7 @@ func TestHomeHTML(t *testing.T) {
 	text := squash(r.body)
 	for _, want := range []string{
 		"<title>Home · depot</title>",
-		`<a class="chip chip-2" href="/line" title="depot" aria-label="depot">de</a>`,
+		`<a class="yard-row" href="/line" title="depot" aria-label="depot"><span class="chip chip-2">de</span><span class="yard-name">depot</span></a>`,
 		`<p class="answer">1 needs you. 1 fault.</p>`,
 		`<a href="/beads/` + bs["two"].ID + `"><span class="dot held"></span><span class="held">held</span><span class="separator" aria-hidden="true">·</span><span class="entry-title">two</span><span class="separator" aria-hidden="true">·</span><span class="label">` + shortID(bs["two"].ID) + `</span><span class="faint">`,
 		`<li><a href="/flows?panel=1">Yard 5 · held 1 ›</a></li>`,
@@ -312,7 +312,8 @@ func TestHomeHTML(t *testing.T) {
 		t.Errorf("the JSON lost the depots or the closed title: %+v %+v", h.Depots, h.Closed)
 	}
 	must(t, f.st.SetSetting(context.Background(), "name", "plantime", "me"))
-	if body := f.get("/").body; !strings.Contains(body, `href="/line" title="plantime" aria-label="plantime">pl</a>`) {
+	if body := f.get("/").body; !strings.Contains(body, `href="/line" title="plantime" aria-label="plantime"><span class="chip chip-`) ||
+		!strings.Contains(body, `>pl</span><span class="yard-name">plantime</span></a>`) {
 		t.Errorf("a named yard's chip carries no name: %s", body)
 	}
 }
@@ -751,8 +752,8 @@ func TestLine(t *testing.T) {
 	}
 }
 
-// Every page of the rail answers: the tiles in the rail's order, each
-// opening its page, and each mode's column holding its rows. The pages
+// Every page of the bar answers: the tiles in the rail's order, each
+// opening its page, and each mode's rows under More. The pages
 // later children add say so, in both forms, under a status no client
 // takes for an empty answer.
 func TestRailPages(t *testing.T) {
@@ -781,28 +782,31 @@ func TestRailPages(t *testing.T) {
 	if want := []string{"/talk", "/line", "/flows?panel=1", "/config"}; !slices.Equal(hrefs, want) {
 		t.Errorf("the rail's tiles open %v, want %v", hrefs, want)
 	}
-	for _, mode := range []struct{ path, tile, head string }{
-		{"/talk", "/talk", "Crew"},
-		{"/line", "/line", "Decide"},
-		{"/flows?panel=1", "/flows?panel=1", "Lines"},
-		{"/config", "/config", "Settings"},
+	for _, mode := range []struct{ path, tile string }{
+		{"/talk", "/talk"},
+		{"/line", "/line"},
+		{"/flows?panel=1", "/flows?panel=1"},
+		{"/config", "/config"},
 	} {
 		body := f.get(mode.path).body
 		if want := `<a class="tile open" href="` + mode.tile + `"`; !strings.Contains(body, want) {
 			t.Errorf("%s leaves no tile open for %s", mode.path, want)
 		}
-		if want := `<p class="section-head">` + mode.head + `</p>`; !strings.Contains(body, want) {
-			t.Errorf("%s shows no %s column", mode.path, mode.head)
+		if !strings.Contains(body, `<nav class="sidebar"`) {
+			t.Errorf("%s renders no sidebar", mode.path)
 		}
 	}
-	// One page per mode exposes every column; the rail itself names
-	// seventeen pages for the operator.
-	column := regexp.MustCompile(`(?s)<nav class="rail-column".*?</nav>`)
+	// One page per mode exposes every row; More itself names seventeen
+	// pages for the operator.
 	links := regexp.MustCompile(`<li><a href="([^"]+)"`)
 	var paths []string
 	seen := map[string]bool{}
 	for _, page := range []string{"/talk", "/line", "/flows?panel=1", "/config"} {
-		for _, l := range links.FindAllStringSubmatch(column.FindString(f.get(page).body), -1) {
+		rows, ok := moreRows(f.get(page).body)
+		if !ok {
+			t.Fatalf("%s has no More list", page)
+		}
+		for _, l := range links.FindAllStringSubmatch(rows, -1) {
 			if !seen[l[1]] {
 				seen[l[1]] = true
 				paths = append(paths, l[1])
@@ -810,7 +814,7 @@ func TestRailPages(t *testing.T) {
 		}
 	}
 	if len(paths) != 17 {
-		t.Fatalf("the rail has %d pages, want 17: %v", len(paths), paths)
+		t.Fatalf("More names %d pages, want 17: %v", len(paths), paths)
 	}
 	for _, path := range paths {
 		r := f.get(path)
@@ -832,13 +836,13 @@ func TestRailPages(t *testing.T) {
 			}
 		}
 		if !strings.Contains(r.body, `<a href="`+path+`" aria-current="page">`) {
-			t.Errorf("%s does not mark its own column row", path)
+			t.Errorf("%s does not mark its own row under More", path)
 		}
 	}
 	bead := f.get("/beads/" + run.ID)
 	if bead.status != http.StatusOK || !strings.Contains(bead.body, `<a class="tile open" href="/flows?panel=1"`) ||
 		!strings.Contains(bead.body, `<a href="/beads" aria-current="page">Beads</a>`) {
-		t.Errorf("a bead page does not stand under the Lines column: %s", bead.body)
+		t.Errorf("a bead page does not stand with the Lines tile open: %s", bead.body)
 	}
 }
 
@@ -847,9 +851,22 @@ func TestNotFound(t *testing.T) {
 	f := newFixture(t)
 	if r := f.get("/nowhere"); r.status != 404 || !strings.Contains(r.body, "no page at /nowhere") || !strings.Contains(r.body, `class="rail"`) {
 		t.Errorf("status %d, want 404 inside the shell: %s", r.status, r.body)
-	} else if strings.Contains(r.body, `class="tile open"`) || strings.Contains(r.body, `<nav class="rail-column"`) ||
-		strings.Contains(r.body, `class="pill"`) {
-		t.Errorf("the error page opens a mode, column or pill: %s", r.body)
+	} else if strings.Contains(r.body, `class="tile open"`) || strings.Contains(r.body, `class="pill"`) {
+		t.Errorf("the error page opens a mode or a pill: %s", r.body)
+	} else {
+		// The sidebar stands bare: the yard and the fixed rows, no
+		// counts, no depots.
+		s := sidebarSection(t, r.body)
+		for _, want := range []string{`<a class="yard-row"`, `>Arrivals</span>`, `>Decide</span>`, `>Crew</span>`, `>Settings</span>`} {
+			if !strings.Contains(s, want) {
+				t.Errorf("the bare sidebar lacks %s: %s", want, s)
+			}
+		}
+		for _, not := range []string{"side-count", "side-pill", "side-transit", "side-dot", "side-head", "side-quiet", ">Depots</p>"} {
+			if strings.Contains(s, not) {
+				t.Errorf("the bare sidebar carries %q: %s", not, s)
+			}
+		}
 	}
 	r := f.get("/nowhere", "Accept", "application/json")
 	var got map[string]string
@@ -1328,17 +1345,17 @@ func TestTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(css), "@media (prefers-color-scheme: light)") {
-		t.Error("a light theme, which the view does not have")
+	if !strings.Contains(string(css), "@media (prefers-color-scheme: light) {") {
+		t.Error("no light theme for a visitor whose system asks for light")
 	}
-	if !strings.Contains(string(css), "color-scheme: dark;") {
-		t.Error("the view's colour scheme is not dark")
+	if !strings.Contains(string(css), "color-scheme: dark light;") {
+		t.Error("the view's colour scheme is not dark with light beside it")
 	}
 	tokens := map[string]string{
 		"ground": "#161718", "panel": "#1c1d1f", "hairline": "#27282b", "hairline-strong": "#333538",
 		"ink": "#e9e9ea", "dim": "#abadb0", "faint": "#808286",
 		"accent": "#d3602f", "accent-hover": "#e2794a", "landed": "var(--faint)",
-		"shade":   "rgba(16, 17, 18, 0.45)",
+		"shade": "rgba(16, 17, 18, 0.45)", "link": "#7aa2f7",
 		"working": "var(--accent)", "running": "#4cc38a", "held": "#e5675a",
 		"late": "#e8a33d", "done": "var(--faint)",
 	}
@@ -1353,6 +1370,7 @@ func TestTokens(t *testing.T) {
 		"faint": "--text-disabled", "accent": "--yard-500", "accent-hover": "--yard-400", "pill": "--yard-600",
 		"landed": "--text-disabled", "shade": "--dusk-950", "working": "--yard-500",
 		"running": "--signal-green", "held": "--signal-red", "done": "--text-disabled",
+		"link": "--text-link",
 	} {
 		line := regexp.MustCompile(`(?m)^\s*--` + regexp.QuoteMeta(name) + `: [^;]+; /\* ` + regexp.QuoteMeta(source) + ` \*/$`)
 		if !line.Match(css) {
@@ -1375,16 +1393,18 @@ func TestTokens(t *testing.T) {
 	if !strings.Contains(cssRule(t, ".panel-svg .block.running"), "var(--running)") {
 		t.Error("a running bead does not use the running green")
 	}
-	// Square corners everywhere; circles only for status dots and the
-	// rail's chip, tiles and pills, which keep footplate's rounded
-	// corners, as the talk page's composer keeps its card radius, and
-	// pills only for the Beads filters' chips.
+	// Square corners everywhere; circles only for status dots, the bar's
+	// tiles and pills, which keep footplate's rounded corners, and the
+	// sidebar's chip, rows, dots and pills, which keep the canvas's, as
+	// the talk page's composer keeps its card radius, and pills only for
+	// the Beads filters' chips.
 	radii := regexp.MustCompile(`(?m)^(.*)border-radius:\s*([^;]+);`).FindAllStringSubmatch(string(css), -1)
 	for _, r := range radii {
 		before := strings.TrimSpace(r[1])
 		round := strings.HasPrefix(before, ".dot ") || strings.HasPrefix(before, ".chip ") ||
 			strings.HasPrefix(before, ".tile ") || strings.HasPrefix(before, ".pill ") ||
-			strings.HasPrefix(before, ".chips a ") || strings.HasPrefix(before, "#send ")
+			strings.HasPrefix(before, ".chips a ") || strings.HasPrefix(before, "#send ") ||
+			strings.HasPrefix(before, ".side-")
 		if r[2] != "0" && !round {
 			t.Errorf("a corner that is not square: %s", r[0])
 		}

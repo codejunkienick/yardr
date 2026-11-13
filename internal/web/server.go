@@ -38,9 +38,9 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
-// unbuilt are the rail's pages no child of the train has built yet: each
+// unbuilt are the bar's pages no child of the train has built yet: each
 // answers with the "not built yet" page. A child that builds one removes it
-// here and registers its handler in routes. Every page of the rail is
+// here and registers its handler in routes. Every page of the bar is
 // built now; a new entry starts here.
 var unbuilt = []string{}
 
@@ -221,7 +221,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /assets/{file}", s.handleAsset)
 	// The yard's liveness facts for a monitor, a proxy or footplate: a
 	// machine route, answered directly as JSON, with no template and no
-	// rail entry.
+	// sidebar entry.
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	// A browser asks for one unbidden; the view has no image, and an empty
 	// answer keeps its console clear of a 404.
@@ -462,13 +462,16 @@ type Page struct {
 	Template string
 	// Title is the browser's title for the page; the yard's name follows it.
 	Title string
-	// Menu is the name the rail knows the page by: its mode's tile
-	// stands open and its column row is marked current. "" for none.
+	// Menu is the name the bar knows the page by: its mode's tile
+	// stands open and its row under More is marked current. "" for none.
 	Menu string
 	Data any
 	// line is the shell's line, for a handler that has read the yard
 	// already; respond reads it otherwise.
 	line *Line
+	// ov is the overview, for a handler that passes its line: respond
+	// builds the sidebar from it instead of reading the yard again.
+	ov *Home
 	// yard is the yard's open work, for a handler that has read it and
 	// not the line: respond makes the line from it instead of reading the
 	// beads again.
@@ -501,9 +504,10 @@ type errorData struct {
 // itself shows around it.
 type view struct {
 	Page
-	Yard  string
-	Rail  rail
-	Aside *Line
+	Yard    string
+	Rail    rail
+	Sidebar sidebar
+	Aside   *Line
 	// Needs counts what waits for the visitor, as home lists it: the
 	// header's line on a page without the aside, nothing at zero.
 	Needs int
@@ -537,6 +541,7 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request, p Page) {
 	// The shell shows the yard's name on every page: the aside beside
 	// home and the line, and the header's count elsewhere.
 	v := view{Page: p, Yard: s.yardName(r.Context()), Aside: p.line, Head: p.head, Stream: p.stream}
+	ov := p.ov
 	if v.Aside == nil {
 		var err error
 		// A handler's own head stands: it is from before the handler read
@@ -547,10 +552,11 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request, p Page) {
 				return
 			}
 		}
-		ov, err := s.overview(r.Context(), p.yard)
-		if err != nil {
-			s.fail(w, r, err)
-			return
+		if ov == nil {
+			if ov, err = s.overview(r.Context(), p.yard); err != nil {
+				s.fail(w, r, err)
+				return
+			}
 		}
 		if v.Aside, err = s.line(r.Context(), ov); err != nil {
 			s.fail(w, r, err)
@@ -580,6 +586,13 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request, p Page) {
 		}
 	}
 	v.Rail = s.rail(r.Context(), p.Menu, r.URL.EscapedPath(), v.Aside, inbox)
+	// An error page renders the sidebar bare: the yard and the fixed
+	// rows, no counts, no depots.
+	if p.Template == "error" {
+		v.Sidebar = sidebarFor(v.Yard, nil, nil)
+	} else {
+		v.Sidebar = sidebarFor(v.Yard, ov, v.Aside)
+	}
 	// Rendered whole before the first byte: a template that fails halfway
 	// must not leave half a page under a 200.
 	var buf bytes.Buffer
@@ -627,10 +640,12 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 	v := view{Page: p, Yard: s.yardName(r.Context())}
-	// An error page stands under the rail with no open mode and no pills;
-	// it still carries the header's count when the yard can answer it.
-	// Keep the error itself renderable when those reads failed.
+	// An error page stands under the rail with no open mode and no pills,
+	// and under the sidebar bare; it still carries the header's count
+	// when the yard can answer it. Keep the error itself renderable when
+	// those reads failed.
 	v.Rail = s.rail(r.Context(), "", r.URL.EscapedPath(), nil, nil)
+	v.Sidebar = sidebarFor(v.Yard, nil, nil)
 	if ov, overviewErr := s.overview(r.Context(), nil); overviewErr == nil {
 		if l, lineErr := s.line(r.Context(), ov); lineErr == nil {
 			v.Needs = len(attention(ov, l))

@@ -4,7 +4,7 @@
    the panel's own track colours, which have no matching token. */
 
 :root {
-  color-scheme: dark;
+  color-scheme: dark light;
 
   /* ground and ink */
   --ground: #161718; /* --surface-app */
@@ -22,6 +22,8 @@
   /* a tile's pill fill: rust 600, which carries white text at 5.2:1
      where the accent fill cannot (the design readme) */
   --pill: #b54e22; /* --yard-600 */
+  /* the sidebar's transit counts, in link blue */
+  --link: #7aa2f7; /* --text-link */
   /* A landed bead is done, so it shares the quiet done text tier. */
   --landed: var(--faint); /* --text-disabled */
   /* The phone's More sheet dims the page with a translucent dusk ground. */
@@ -57,11 +59,10 @@
   --gap: 16px;
   --label-spacing: 0.14em;
 
-  /* the columns: the rail, the open mode's column and the right column
-     keep their width, and the centre takes the rest; --centre-width caps
-     it only where the window has no room for the right column */
-  --rail-width: 64px;
-  --column-width: 200px;
+  /* the columns: the sidebar and the right column keep their width,
+     and the centre takes the rest; --centre-width caps it only where the
+     window has no room for the right column */
+  --sidebar-width: 248px;
   --centre-width: 600px;
   --right-width: 300px;
 
@@ -70,6 +71,29 @@
      clock sets at the left of a letter */
   --reading-width: 880px;
   --letter-gutter: 3.5rem;
+}
+
+/* The light look: the same tokens with the design system's light values,
+   for a visitor whose system asks for light. Dark stays the default. The
+   accent, the pill and the chips are the same in both, and the yard panel
+   keeps its dark board, as a dark object on either ground. */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    --ground: #F7F7F6; /* --surface-app */
+    --panel: #FFFFFF; /* --surface-raised */
+    --hairline: #E2E2DF; /* --border-subtle */
+    --hairline-strong: #CFCFCB; /* --border-strong */
+    --ink: #161718; /* --text-primary */
+    --dim: #5B5E64; /* --text-secondary */
+    --faint: #8E9196; /* --text-disabled */
+
+    --running: #1F9A60; /* --status-running */
+    --held: #B3382C; /* --status-error */
+
+    --link: #1A56C8; /* --text-link */
+  }
 }
 
 * { box-sizing: border-box; border-radius: 0; }
@@ -93,30 +117,26 @@ ul, ol { list-style: none; }
 
 /* --- the shell ---------------------------------------------------------- */
 
-/* On a desktop the centre takes all the width the rail, the column and
-   the aside leave, so every page fills the window and each stands in the
-   same place on every page that has it. */
+/* On a desktop the centre takes all the width the sidebar and the aside
+   leave, so every page fills the window and each stands in the same place
+   on every page that has it. */
 .shell {
   display: grid;
-  grid-template-columns: var(--rail-width) var(--column-width) minmax(0, 1fr) var(--right-width);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--right-width);
   min-height: 100vh;
   min-height: 100dvh;
 }
 
-/* The rail: the window's far left edge, 64 pixels, in footplate's order:
-   the yard's chip, the three mode tiles, and Settings at the foot. It
-   stays in view while the page scrolls under it. The chip and the tiles
-   keep footplate's rounded corners; the reset above squares everything
-   else. */
-.rail { position: sticky; top: 0; align-self: start; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 100vh; min-height: 100dvh; padding: 8px 6px var(--gap); border-right: 1px solid var(--hairline); }
-.chip { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 8px; color: #161718; font-family: var(--sans); font-size: 15px; font-weight: 600; }
+/* The rail is the phone's bottom bar; on a wider window it leaves the
+   shell to the sidebar. Its tiles keep footplate's rounded corners; the
+   reset above squares everything else. */
+.rail { display: none; }
+.chip { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; color: #161718; font-family: var(--sans); font-size: 11px; font-weight: 600; flex: none; }
 .chip-0 { background: #eba17e; } /* --yard-300 */
 .chip-1 { background: #e2794a; } /* --yard-400 */
 .chip-2 { background: #d3602f; } /* --yard-500 */
-.tiles { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 52px; padding: 4px 0; border-radius: 8px; color: var(--dim); }
 .tile:hover { color: var(--ink); }
-.tile.open { background: var(--panel); color: var(--ink); }
 .tile .glyph { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 2; }
 .glyph .heavy { stroke-width: 3; }
 .glyph .solid { fill: currentColor; stroke: none; }
@@ -126,19 +146,47 @@ ul, ol { list-style: none; }
    right, in the accent; the tile's title and aria-label carry the count
    in words. */
 .pill { position: absolute; top: 0; right: 0; display: flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--pill); color: #fff; font-size: var(--small); font-weight: 600; }
-.rail .foot { margin-top: auto; }
-
-/* The open mode's column beside the rail: its section head and rows. It
-   stays in view with the rail. */
-.rail-column { position: sticky; top: 0; align-self: start; padding: var(--gap); }
 .section-head { font-family: var(--sans); font-size: 13px; font-weight: 600; }
-.rail-column ul { margin-top: 4px; }
-.rail-column li a { display: block; padding: 8px 0; color: var(--dim); font-family: var(--sans); font-size: 13px; }
-.rail-column li a:hover { color: var(--accent-hover); }
-.rail-column li a[aria-current="page"] { color: var(--ink); box-shadow: inset 2px 0 0 var(--accent); padding-left: 10px; }
 /* The phone's More entry shows below 700 px only, where the bottom bar
-   has no room for the open mode's column or for Settings. */
+   has no room for the open mode's rows or for Settings. */
 .rail .more { display: none; }
+
+/* The sidebar: the window's left edge, 248 pixels: the yard's chip and
+   name, Arrivals, Decide and Crew, the depots with their flows, and
+   Settings at the foot. It stays in view while the page scrolls under it. */
+.sidebar { position: sticky; top: 0; align-self: start; display: flex; flex-direction: column; gap: 2px; min-height: 100vh; min-height: 100dvh; padding: 12px 10px; border-right: 1px solid var(--hairline); font-family: var(--sans); font-size: 13px; }
+.yard-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px 10px; font-weight: 600; }
+.yard-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-places { display: flex; flex-direction: column; gap: 2px; }
+.side-row { display: flex; align-items: center; gap: 10px; min-height: 30px; padding: 0 8px; border-radius: 6px; }
+.side-row:hover { color: var(--accent-hover); }
+.side-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-icon { flex: none; color: var(--dim); }
+.side-icon .teeth { stroke-dasharray: 3.2 2.6; }
+/* Arrivals' count stands quiet; Decide's pill carries white on the pill's
+   rust, as the rail's did. */
+.side-count { flex: none; font-size: 12px; color: var(--dim); }
+.side-pill { flex: none; font-size: 11px; font-weight: 600; color: #fff; background: var(--pill); border-radius: 9px; padding: 1px 7px; }
+.side-head { padding: 18px 8px 6px; font-size: 12px; font-weight: 500; color: var(--dim); }
+.side-depots { display: flex; flex-direction: column; gap: 2px; }
+.side-depots .side-row { gap: 8px; }
+.side-transit { flex: none; font-size: 12px; color: var(--link); }
+/* A depot's flows stand under its row, inside the hairline. */
+.side-flows { display: flex; flex-direction: column; gap: 1px; margin-left: 15px; padding-left: 8px; border-left: 1px solid var(--hairline); }
+.side-flow { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 8px; border-radius: 6px; }
+.side-flow:hover { color: var(--accent-hover); }
+/* A flow's dot: a bead of the flow carries an open ask for the viewer. */
+.side-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--accent); }
+/* The folded rows: a depot's quiet flows, the quiet depots. The chevron
+   turns down while open. */
+.side-quiet summary { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 8px; border-radius: 6px; color: var(--dim); cursor: pointer; list-style: none; }
+.side-quiet summary::-webkit-details-marker { display: none; }
+.side-quiet summary::marker { content: ""; }
+.side-quiet summary:hover { color: var(--accent-hover); }
+.side-chev { flex: none; }
+.side-quiet[open] > summary .side-chev { transform: rotate(90deg); }
+.side-foot { margin-top: auto; }
+.side-foot .side-row { color: var(--dim); }
 
 .centre {
   border-left: 1px solid var(--hairline);
@@ -151,18 +199,15 @@ ul, ol { list-style: none; }
    window's edge, as the yard page's does. Below 1100 px the narrower
    rule below already centres a fixed-width centre, with or without it. */
 @media (min-width: 1100px) {
-  .shell:not(:has(aside.right)) { grid-template-columns: var(--rail-width) var(--column-width) minmax(0, 1fr); }
+  .shell:not(:has(aside.right)) { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
 }
 
 /* The yard page has no right column, so its centre runs to the window's
    edge, with the depots in as many columns as fit. On a phone they
    stack, as every page does. */
 @media (min-width: 700px) {
-  .shell.wide { grid-template-columns: var(--rail-width) var(--column-width) minmax(0, 1fr); }
+  .shell.wide { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
 }
-/* An error page stands under the rail with no open mode and no column:
-   its centre runs from the rail to the window's edge. */
-.shell:not(:has(nav.rail-column)) { grid-template-columns: var(--rail-width) minmax(0, 1fr); }
 /* The yard panel: each depot as wide as its widest plan needs, depots
    side by side where there is room and wrapping where not. A depot wider
    than the window keeps to it, and its diagrams pan inside, as on a
@@ -392,8 +437,8 @@ ul, ol { list-style: none; }
 /* The Beads page's choices: each row a label over a wrapping run of chips.
    A chip is a link at least 36 px high holding the choice and the number of
    beads it lists; the current one is filled with the pill's rust, which
-   carries white text, and the rest stay quiet. (.chip is the rail's yard
-   chip, one element; these are a row's links.) */
+   carries white text, and the rest stay quiet. (.chip is the sidebar's
+   yard chip, one element; these are a row's links.) */
 .chips p { display: flex; flex-wrap: wrap; gap: 6px; }
 .chips p + p { margin-top: 12px; }
 .chips .label { flex: 1 0 100%; }
@@ -498,9 +543,9 @@ ul, ol { list-style: none; }
 .letter img { display: block; max-width: 100%; height: auto; margin-top: 8px; }
 .letter .label { margin-top: 4px; }
 /* The composer: the form stands in the reading column under the mail, a
-   framed box on the raised ground, with a hairline and the card radius (8px,
-   as the rail's chip and tiles keep theirs where the reset squares the
-   rest). It is as wide as the mail less the gutter the letters keep, so its
+   framed box on the raised ground, with a hairline and the card radius
+   (8px, where the reset squares the rest). It is as wide as the mail less
+   the gutter the letters keep, so its
    edges stand on the hairlines of the day breaks above it, and centred past
    the reading width. The label stands small and quiet at its top, the line
    has no border of its own, and the Send row is its foot. The form stands
@@ -632,31 +677,31 @@ code { font: inherit; color: var(--dim); overflow-wrap: anywhere; }
 /* No room for four columns: the right one goes. The centre keeps its
    width, centred, as on every narrower window. */
 @media (max-width: 1099px) {
-  .shell { grid-template-columns: var(--rail-width) var(--column-width) minmax(0, var(--centre-width)); justify-content: center; }
-  .shell:not(:has(nav.rail-column)) { grid-template-columns: var(--rail-width) minmax(0, var(--centre-width)); justify-content: center; }
+  .shell { grid-template-columns: var(--sidebar-width) minmax(0, var(--centre-width)); justify-content: center; }
   .right { display: none; }
   /* The talk page's centre gives way to the reading width. */
-  .shell:has(#talk) { grid-template-columns: var(--rail-width) var(--column-width) minmax(0, var(--reading-width)); }
+  .shell:has(#talk) { grid-template-columns: var(--sidebar-width) minmax(0, var(--reading-width)); }
 }
 
 /* A phone: the centre column alone, the rail a bar at the bottom in its
    order — Crew, Decide, Lines, More — four targets of about 97 px at
-   390 px, none cut, each 48 high. Settings, the rail's foot on a wide
-   window, is the last row of More's list here. The bar stays in view
-   while the page scrolls, as the rail does on a wide window, and the
-   open mode's column opens under More, above the bar. */
+   390 px, none cut, each 48 high. Settings, which the sidebar keeps at
+   its foot on a wide window, is the last row of More's list here. The
+   bar stays in view while the page scrolls, as the sidebar does on a
+   wide window, and the open mode's rows open under More, above the bar. */
 @media (max-width: 699px) {
   .shell { display: flex; flex-direction: column; }
   /* min-width: 0, as the grids' minmax(0, ...) above: what is wider than
      the window (a diagram, a stage file) pans inside its block instead of
      widening the page and pushing the bar off it. */
   .centre { order: 1; flex: 1 0 auto; min-width: 0; border-left: 0; border-right: 0; }
-  .rail-column { display: none; }
+  .sidebar { display: none; }
   .rail {
     order: 2;
     position: sticky;
     bottom: 0;
     align-self: stretch;
+    display: flex;
     flex-direction: row;
     align-items: stretch;
     gap: 0;
@@ -668,7 +713,6 @@ code { font: inherit; color: var(--dim); overflow-wrap: anywhere; }
     /* Visible, so More opens above the bar. */
     overflow: visible;
   }
-  .rail .chip { display: none; }
   /* The list items stand aside with the list: else each tile would keep
      its 52 px inside an item of its own, and More would take the rest. */
   .rail .tiles, .rail .tiles li { display: contents; }

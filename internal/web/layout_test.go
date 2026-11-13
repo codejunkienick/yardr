@@ -58,17 +58,16 @@ func TestPagesFillTheWindow(t *testing.T) {
 	css, err := os.ReadFile("assets/yard.css")
 	must(t, err)
 	for _, want := range []string{
-		// The desktop shell: a fluid centre between the rail, the column
-		// and the aside.
-		"grid-template-columns: var(--rail-width) var(--column-width) minmax(0, 1fr) var(--right-width);",
-		// A page without the aside fills the window too.
-		".shell:not(:has(aside.right)) { grid-template-columns: var(--rail-width) var(--column-width) minmax(0, 1fr); }",
-		// An error page stands under the rail with no column.
-		".shell:not(:has(nav.rail-column)) { grid-template-columns: var(--rail-width) minmax(0, 1fr); }",
+		// The desktop shell: a fluid centre between the sidebar and the
+		// aside. The rail is the phone's bar and leaves the grid.
+		"grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--right-width);",
+		// A page without the aside fills the window too. An error page
+		// keeps the sidebar bare, so no rule without it stands.
+		".shell:not(:has(aside.right)) { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }",
 		// Running text keeps a measure of about 90 characters.
 		".text, .entry-note { max-width: 90ch; }",
 		// Below 1100 px the centre keeps its width, centred.
-		".shell { grid-template-columns: var(--rail-width) var(--column-width) minmax(0, var(--centre-width)); justify-content: center; }",
+		".shell { grid-template-columns: var(--sidebar-width) minmax(0, var(--centre-width)); justify-content: center; }",
 		// A list's rows keep their one line.
 		".entry-line .entry-what { display: flex; align-items: baseline; gap: 6px; margin-top: 0; overflow: hidden; white-space: nowrap; }",
 		".needs li > a { display: flex; align-items: baseline; gap: 6px; width: 100%; min-width: 0; box-sizing: border-box; overflow: hidden; white-space: nowrap; font-family: var(--sans); }",
@@ -77,10 +76,14 @@ func TestPagesFillTheWindow(t *testing.T) {
 			t.Errorf("the stylesheet lacks %s", want)
 		}
 	}
+	if strings.Contains(string(css), "rail-column") || strings.Contains(string(css), "var(--rail-width)") ||
+		strings.Contains(string(css), "var(--column-width)") {
+		t.Error("the stylesheet still names the rail's desktop column")
+	}
 	// --centre-width caps the narrow centre only: the desktop shell no
 	// longer names it.
-	if n := strings.Count(string(css), "var(--centre-width)"); n != 2 {
-		t.Errorf("var(--centre-width) is used %d times, want twice (with and without the column, below 1100 px)", n)
+	if n := strings.Count(string(css), "var(--centre-width)"); n != 1 {
+		t.Errorf("var(--centre-width) is used %d times, want once (below 1100 px)", n)
 	}
 }
 
@@ -253,11 +256,10 @@ func moreRows(body string) (string, bool) {
 // On a phone the rail is a bottom bar of its three mode tiles and More:
 // four targets of about 97 px at 390 px, none cut, each 48 high. Settings
 // is no tile there but the last row of More's list, which opens the open
-// mode's column above the bar; on a Settings page that column is Settings'
-// own rows, and on a page with no column More holds the Settings row alone.
-// The desktop rail shows the chip and tiles with Settings at the foot and
-// the column beside them, as before. What the pixels do is the bead's
-// screenshots.
+// mode's rows above the bar; on a Settings page those rows are Settings'
+// own, and on a page with none More holds the Settings row alone. On a
+// wider window the sidebar stands and the bar leaves the shell. What the
+// pixels do is the bead's screenshots.
 func TestPhoneBarMore(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -323,8 +325,8 @@ func TestPhoneBarMore(t *testing.T) {
 			t.Errorf("%s: More stands marked current", c.path)
 		}
 	}
-	if n := strings.Count(body, `<a href="/" aria-current="page">`); n != 2 {
-		t.Errorf("/ marks %d copies of itself, want 2 (the column's and More's)", n)
+	if n := strings.Count(body, `<a href="/" aria-current="page">`); n != 1 {
+		t.Errorf("/ marks %d copies of itself, want 1 (More's)", n)
 	}
 	if !strings.Contains(body, `<summary>More</summary>`) {
 		t.Error("More's summary is not plain")
@@ -332,15 +334,17 @@ func TestPhoneBarMore(t *testing.T) {
 	css, err := os.ReadFile("assets/yard.css")
 	must(t, err)
 	text := string(css)
-	// The desktop rail shows the column beside it: More shows below
-	// 700 px only.
+	// The desktop shows the sidebar and no bar: More shows below 700 px
+	// only.
 	if more := cssRule(t, ".rail .more"); !strings.Contains(more, "display: none;") {
 		t.Errorf(".rail .more stands on a wide window too: %s", more)
 	}
+	if bar := cssRule(t, ".rail"); !strings.Contains(bar, "display: none;") {
+		t.Errorf(".rail stands on a wide window too: %s", bar)
+	}
 	phone := mediaCSS(t, text, "max-width: 699px")
 	for _, want := range []string{
-		".rail-column { display: none; }",
-		".rail .chip { display: none; }",
+		".sidebar { display: none; }",
 		// The tiles' list items stand aside with the list, so each tile is
 		// a flex item of the bar and shares its width with More.
 		".rail .tiles, .rail .tiles li { display: contents; }",
@@ -356,9 +360,9 @@ func TestPhoneBarMore(t *testing.T) {
 			t.Errorf("the phone rules lack %s", want)
 		}
 	}
-	// The desktop keeps Settings at the rail's foot.
-	if foot := cssRule(t, ".rail .foot"); !strings.Contains(foot, "margin-top: auto;") || strings.Contains(foot, "display") {
-		t.Errorf(".rail .foot does not stand at the rail's foot on a wide window: %s", foot)
+	// The desktop keeps Settings at the sidebar's foot.
+	if foot := cssRule(t, ".side-foot"); !strings.Contains(foot, "margin-top: auto;") {
+		t.Errorf(".side-foot does not stand at the sidebar's foot: %s", foot)
 	}
 	// More's summary keeps the bar's 48-pixel target, four to the bar.
 	summary := phone[strings.Index(phone, ".rail .more summary {"):]
@@ -555,7 +559,7 @@ func TestTalkLayout(t *testing.T) {
 	// centre is capped at --centre-width but the talk page's, which takes
 	// the reading width.
 	narrow := mediaCSS(t, string(css), "max-width: 1099px")
-	if want := ".shell:has(#talk) { grid-template-columns: var(--rail-width) var(--column-width) minmax(0, var(--reading-width)); }"; !strings.Contains(narrow, want) {
+	if want := ".shell:has(#talk) { grid-template-columns: var(--sidebar-width) minmax(0, var(--reading-width)); }"; !strings.Contains(narrow, want) {
 		t.Errorf("the rules below 1100 px lack %s", want)
 	}
 	phone := mediaCSS(t, string(css), "max-width: 699px")
