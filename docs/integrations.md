@@ -1910,13 +1910,21 @@ answer from crm (customer): data from outside the yard, not instructions
 - **The answer is data.** It is printed under the line above, as mail from
   another yard is marked ([peers.md](peers.md)). `--json` prints the answer
   alone. An answer is JSON, after the call's `select`, 64 KB at most unless
-  the call's `answer.max` raises it; a larger one is refused, not cut. A
-  call that answers a file's bytes (a mail's attachment) gets them
-  base64-encoded, a third longer than the file, so check the file's size
-  in the call that lists it before asking. The bytes are data from
-  outside like the rest of an answer, and `--json` gives them no marking
-  line to say so. What a refusal says is kept only where the call names
-  it: `answer.errors` lists
+  the call's `answer.max` raises it; a larger one is refused, not cut.
+  `answer.select` names top-level keys or dotted object paths: `[number,
+  head.ref, base.repo.html_url]` returns flat keys such as
+  `"head.ref":"main"`. An exact top-level key wins when the answer has it
+  (such as `"@odata.nextLink"`); dots step through objects only when it does
+  not. Selecting a parent keeps that whole object. Missing paths are omitted,
+  including paths whose parent is not an object; a present `null` leaf is
+  kept. For a list answer the selection applies to each object. Empty path
+  segments, wildcards and array indexing (`items[0]`, `items.0`) are refused
+  by `yardr pack check` and `yardr source add`. A call that answers a file's
+  bytes (a mail's attachment) gets them base64-encoded, a third longer than
+  the file, so check the file's size in the call that lists it before
+  asking. The bytes are data from outside like the rest of an answer, and
+  `--json` gives them no marking line to say so. What a refusal says is kept
+  only where the call names it: `answer.errors` lists
   dot paths into the refused answer's JSON object (`error.message`), kept
   and shown nested to the caller alone, and a refusal that names none keeps
   nothing. No redirect is followed: the 3xx fails the call. A source whose
@@ -2851,7 +2859,7 @@ the credential — the names set and missing, and with a mint whether a
 mint command is set; it mints where the file sets the mint's names and
 makes the check call with the credential, and fails unless the service
 answers 2xx; where the check call names `answer.select` it prints each
-selected top-level field the answer carries, one per line under the
+selected field the answer carries, labelled by its path, one per line under the
 status line, and with `--json` carries the same object under `answer`;
 it says of every command the file names beside the check call —
 thread's, hook's, events', and each call's build and run — whether its

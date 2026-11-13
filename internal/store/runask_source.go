@@ -577,7 +577,7 @@ func callSaysWhole(d *source.Declaration, c *source.Call) []string {
 		for i, name := range c.Answer.Select {
 			selects[i] = displaySourceValue(name)
 		}
-		second += fmt.Sprintf(". Its answer keeps %s", strings.Join(selects, ", "))
+		second += fmt.Sprintf(". Its answer keeps %s as flat keys (exact top-level keys win over traversal)", strings.Join(selects, ", "))
 	} else {
 		second += ". Its answer is returned as it comes"
 	}
