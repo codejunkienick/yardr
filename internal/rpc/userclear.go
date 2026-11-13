@@ -54,7 +54,8 @@ const linkRemoteAddr = "edge:0"
 // caller is a user who is not the operator. A member's giving crosses for the
 // code of their own sign-in from a sealed device alone (memberLoginCode); every
 // other is refused in one sentence, the same on a hosted yard and on any other,
-// plain or sealed. On a hosted yard every secret crosses, for a device of the
+// except that a sealed call's refusal drops the sentence saying the edge saw
+// what was sent, which crossed as ciphertext. On a hosted yard every secret crosses, for a device of the
 // operator: the hosting service runs the edge and the machine the yard lives
 // on, so a refusal would guard nothing it does not hold, and would leave a
 // person with no shell on that machine unable to give a key at all (hosted).
@@ -62,9 +63,11 @@ const linkRemoteAddr = "edge:0"
 // crosses from the operator's device, the code a harness's sign-in page shows
 // (loginCode), which is used once, within minutes, and kept nowhere: the
 // refusal of every other names that reason, answers on the yard's own machine
-// as the fix, and says the edge saw what this one carried, so the key is
-// remade. A setup approval that types the account is such a giving and is
-// refused the same way; one that takes a candidate or keeps the account holds
+// as the fix, and, for a call that came plain, says the edge saw what this
+// one carried, so the key is remade; a sealed call's refusal carries no such
+// sentence, since what it sent crossed the edge as ciphertext. A setup
+// approval that types the account is such a giving and is refused the same
+// way; one that takes a candidate or keeps the account holds
 // no secret and crosses.
 // An approval crosses on either: a paired device of the operator is the
 // operator (design yardr-xpf8), pairing is the grant and `yardr user device
@@ -119,17 +122,25 @@ func inTheClear(r *http.Request, name, router string, crosses, member bool) stri
 			return ""
 		}
 		const seen = " The edge saw what was sent with it: if it was a real key, make a new one at the service."
+		// A call that came sealed crossed the edge as ciphertext, so the
+		// edge read nothing of what was sent with it and the sentence
+		// saying it did is dropped; a plain call keeps it. Only
+		// serveInner sets the session, so nothing a client sends claims
+		// a call came sealed.
+		tail := seen
+		if _, sealed := r.Context().Value(e2eSessionKey{}).(*e2eSession); sealed {
+			tail = ""
+		}
 		if member {
 			// The member has no shell on the yard's machine, so no ssh is
 			// offered, and the operator's device gives only where the yard is
-			// hosted. Nothing here says whether the call came plain or
-			// sealed: a sealed device is told what makes one, and is never
-			// told its own is refused.
+			// hosted. The sentence is one either way; only the tail
+			// differs, since a sealed call crossed as ciphertext.
 			return "a secret from a member's device does not cross the edge, except the code of their own sign-in from a sealed device (pairing the device with the QR makes it one); " +
-				"the operator gives any other on the yard's machine, or from their own paired device where the yard is hosted." + seen
+				"the operator gives any other on the yard's machine, or from their own paired device where the yard is hosted." + tail
 		}
 		return "a secret never crosses the edge: this request came down the link from the edge. " +
-			"Answer on the yard's machine (ssh -t <host> yardr bead answer <bead> <ask> " + flag + ")." + seen
+			"Answer on the yard's machine (ssh -t <host> yardr bead answer <bead> <ask> " + flag + ")." + tail
 	}
 	if ip := net.ParseIP(remote(r)); ip == nil || !ip.IsLoopback() {
 		if name == "GiveSecret" && fromRouter(r, router) {

@@ -244,8 +244,9 @@ func readInventoryFile(path string, want fs.FileInfo) ([]byte, error) {
 }
 
 // packBytesSeen fingerprints a pack reading: its sources' texts, each
-// command file's SHA-256, and a depot plan whole. A source plan is only
-// for delegated applies and is not part of the source pack's ask card.
+// command file's SHA-256, and a depot plan without the objects the pack
+// does not carry (packPlanMoved's skip). A source plan is only for
+// delegated applies and is not part of the source pack's ask card.
 // The build label is held apart (Seen["pack <name>"], with the build beside it), so an
 // approval can tell a build that moved alone, which it runs past, from
 // bytes that moved, which it refuses.
@@ -258,7 +259,10 @@ func packBytesSeen(r *PackReading) string {
 		}
 	}
 	if r.Plan != nil && r.Kind != "source" {
-		raw, _ := json.Marshal(r.Plan)
+		plan := *r.Plan
+		// not_in_pack is pack.NotInPack (store cannot import pack); skipped as in packPlanMoved.
+		plan.Objects = slices.DeleteFunc(slices.Clone(plan.Objects), func(o AskPlanObject) bool { return o.Action == "not_in_pack" })
+		raw, _ := json.Marshal(&plan)
 		parts = append(parts, string(raw))
 	}
 	return seen(parts...)
@@ -885,26 +889,11 @@ func (w *wtx) packApplyStale(seq uint64, was, now AskRun) error {
 		}
 	}
 	if was.Pack != nil && was.Pack.Plan != nil {
-		wasRaw, _ := json.Marshal(was.Pack.Plan)
-		var nowRaw []byte
+		differ := "its objects"
 		if now.Pack != nil && now.Pack.Plan != nil {
-			nowRaw, _ = json.Marshal(now.Pack.Plan)
+			differ = packPlanMoved(was.Pack.Plan, now.Pack.Plan)
 		}
-		if string(wasRaw) != string(nowRaw) {
-			differ := "its objects"
-			if now.Pack != nil && now.Pack.Plan != nil {
-				for i, o := range was.Pack.Plan.Objects {
-					oRaw, _ := json.Marshal(o)
-					var nRaw []byte
-					if i < len(now.Pack.Plan.Objects) {
-						nRaw, _ = json.Marshal(now.Pack.Plan.Objects[i])
-					}
-					if string(oRaw) != string(nRaw) {
-						differ = fmt.Sprintf("the object %s %s", o.Kind, o.Name)
-						break
-					}
-				}
-			}
+		if differ != "" {
 			return fmt.Errorf("ask %d was written from the plan of pack %s for depot %s, and the plan the yard builds now differs at %s: the card is from before that changed. %s", seq, name, was.Pack.Depot, differ, nothingRan)
 		}
 	}
@@ -947,6 +936,36 @@ func (w *wtx) packApplyStale(seq uint64, was, now AskRun) error {
 		return nil
 	}
 	return staleCard(seq, was, now)
+}
+
+// packPlanMoved names what moved between two depot plans of one pack apply, "" when the approval still stands.
+func packPlanMoved(was, now *AskPlan) string {
+	// not_in_pack is pack.NotInPack (store cannot import pack); the apply writes nothing for such objects.
+	wasObjs := slices.DeleteFunc(slices.Clone(was.Objects), func(o AskPlanObject) bool { return o.Action == "not_in_pack" })
+	nowObjs := slices.DeleteFunc(slices.Clone(now.Objects), func(o AskPlanObject) bool { return o.Action == "not_in_pack" })
+	wasKept, nowKept := *was, *now
+	wasKept.Objects, nowKept.Objects = wasObjs, nowObjs
+	wasRaw, _ := json.Marshal(wasKept)
+	nowRaw, _ := json.Marshal(nowKept)
+	if string(wasRaw) == string(nowRaw) {
+		return ""
+	}
+	for _, o := range wasObjs {
+		raw, _ := json.Marshal(o)
+		i := slices.IndexFunc(nowObjs, func(n AskPlanObject) bool { return n.Kind == o.Kind && n.Name == o.Name })
+		if i < 0 {
+			return fmt.Sprintf("the object %s %s", o.Kind, o.Name)
+		}
+		if nraw, _ := json.Marshal(nowObjs[i]); string(nraw) != string(raw) {
+			return fmt.Sprintf("the object %s %s", o.Kind, o.Name)
+		}
+	}
+	for _, n := range nowObjs {
+		if !slices.ContainsFunc(wasObjs, func(o AskPlanObject) bool { return o.Kind == n.Kind && o.Name == n.Name }) {
+			return fmt.Sprintf("the object %s %s", n.Kind, n.Name)
+		}
+	}
+	return "its objects"
 }
 
 // inventoryMoved names the first entry that stands otherwise between

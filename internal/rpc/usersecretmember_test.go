@@ -18,11 +18,20 @@ import (
 
 // memberRefusal is what a member's device is told of a secret it gives down
 // the link from the edge that is not the code of its own sign-in from a sealed
-// device: one sentence, the same on a hosted yard and on any other, plain or
-// sealed, with no ssh in it, since a member has no shell on the yard's machine.
+// device: one sentence, the same on a hosted yard and on any other, with no
+// ssh in it, since a member has no shell on the yard's machine. A call that
+// came plain is told the edge saw what was sent with it; a sealed call's
+// refusal (memberRefusalSealed) drops that sentence, since it crossed as
+// ciphertext.
 const memberRefusal = "a secret from a member's device does not cross the edge, except the code of their own sign-in from a sealed device (pairing the device with the QR makes it one); " +
 	"the operator gives any other on the yard's machine, or from their own paired device where the yard is hosted." +
 	" The edge saw what was sent with it: if it was a real key, make a new one at the service."
+
+// memberRefusalSealed is memberRefusal for a call that came sealed: the one
+// sentence without the tail, since the edge read nothing of what crossed as
+// ciphertext.
+const memberRefusalSealed = "a secret from a member's device does not cross the edge, except the code of their own sign-in from a sealed device (pairing the device with the QR makes it one); " +
+	"the operator gives any other on the yard's machine, or from their own paired device where the yard is hosted."
 
 // memberYard is a yard whose member sam has a login of their own waiting for
 // the code its sign-in page shows: the group that carries sam's login, the ask
@@ -277,10 +286,11 @@ func TestMemberGivesTheirOwnLoginCodeDownTheLink(t *testing.T) {
 
 // Down the link from a member's sealed device only the code of its own sign-in
 // is taken: the rest of what a member may give on the socket is refused in the
-// one sentence, a login code of anyone else's ask is not there as it is not on
-// the socket, and a body that is anything but that ask's values is refused. No
-// refusal serves the call: the waiting login is handed nothing, the bead is not
-// answered and sam has no file.
+// one sentence without the tail a plain call is told, a login code of anyone
+// else's ask is not there as it is not on the socket, and a body that is
+// anything but that ask's values is refused. No refusal serves the call:
+// the waiting login is handed nothing, the bead is not answered and sam
+// has no file.
 func TestMemberGiveSecretDownTheLinkIsOnlyTheirOwnLoginCode(t *testing.T) {
 	for _, hosted := range []bool{false, true} {
 		name := "connected yard"
@@ -297,18 +307,18 @@ func TestMemberGiveSecretDownTheLinkIsOnlyTheirOwnLoginCode(t *testing.T) {
 				body []byte
 				want string // the words it is refused in
 			}{
-				{"their own source credential", giveArgs(t, y.ask(t, "sam", &store.AskSecret{Source: "crm", As: "sam"}), map[string]string{"CRM_TOKEN": memberCode}), memberRefusal},
-				{"their own address", giveArgs(t, y.ask(t, "sam", &store.AskSecret{Source: "push", User: "sam"}), map[string]string{"PUSH_USER": memberCode}), memberRefusal},
+				{"their own source credential", giveArgs(t, y.ask(t, "sam", &store.AskSecret{Source: "crm", As: "sam"}), map[string]string{"CRM_TOKEN": memberCode}), memberRefusalSealed},
+				{"their own address", giveArgs(t, y.ask(t, "sam", &store.AskSecret{Source: "push", User: "sam"}), map[string]string{"PUSH_USER": memberCode}), memberRefusalSealed},
 				{"another user's login code", giveArgs(t, y.ask(t, "kim", &store.AskSecret{Login: "claude-kim", As: "kim"}), own), noSuchMethodMessage},
 				{"the operator's login code", giveArgs(t, y.ask(t, "jo", &store.AskSecret{Login: "claude-op"}), own), noSuchMethodMessage},
 				{"an extra value", login(func(a map[string]any) {
 					a["values"] = map[string]string{"INPUT": memberCode, "EXTRA_TOKEN": memberCode}
-				}), memberRefusal},
-				{"no value", login(func(a map[string]any) { a["values"] = map[string]string{} }), memberRefusal},
-				{"another name", login(func(a map[string]any) { a["values"] = map[string]string{"OTHER": memberCode} }), memberRefusal},
-				{"another actor", login(func(a map[string]any) { a["actor"] = "jo" }), memberRefusal},
-				{"an unweighed giving", login(func(a map[string]any) { a["weighed"] = false }), memberRefusal},
-				{"an unknown argument", login(func(a map[string]any) { a["extra"] = memberCode }), memberRefusal},
+				}), memberRefusalSealed},
+				{"no value", login(func(a map[string]any) { a["values"] = map[string]string{} }), memberRefusalSealed},
+				{"another name", login(func(a map[string]any) { a["values"] = map[string]string{"OTHER": memberCode} }), memberRefusalSealed},
+				{"another actor", login(func(a map[string]any) { a["actor"] = "jo" }), memberRefusalSealed},
+				{"an unweighed giving", login(func(a map[string]any) { a["weighed"] = false }), memberRefusalSealed},
+				{"an unknown argument", login(func(a map[string]any) { a["extra"] = memberCode }), memberRefusalSealed},
 			} {
 				t.Run(c.name, func(t *testing.T) {
 					given, refused := y.sealedGive(t, sam, c.body)
@@ -323,13 +333,17 @@ func TestMemberGiveSecretDownTheLinkIsOnlyTheirOwnLoginCode(t *testing.T) {
 		})
 	}
 	// The operator's sealed device is no member's: on a yard that is not hosted
-	// a member's login code from it is refused as it is from a plain one, with
-	// the operator's way to give it, and the exception is not its own.
+	// a member's login code from it is refused with the operator's way to give
+	// it, and the exception is not its own. The refusal is the operator's
+	// sentence without the tail, since the call crossed as ciphertext; the
+	// same call plain keeps it (TestUserGiveSecretIsNotTakenOverTheLink).
 	t.Run("the operator's sealed device, on a connected yard", func(t *testing.T) {
 		y := newMemberYard(t, false)
 		given, refused := y.sealedGive(t, newE2EDevice(t, y.pairYard, "jo", "laptop"), giveArgs(t, y.login, map[string]string{"INPUT": memberCode}))
-		if given != nil || !strings.HasPrefix(refused, "a secret never crosses the edge: this request came down the link from the edge. Answer on the yard's machine (ssh -t <host> yardr bead answer <bead> <ask> --secret).") {
-			t.Errorf("answered %+v, refused %q, want the operator's refusal with its way to answer on the machine", given, refused)
+		const want = "a secret never crosses the edge: this request came down the link from the edge. " +
+			"Answer on the yard's machine (ssh -t <host> yardr bead answer <bead> <ask> --secret)."
+		if given != nil || refused != want {
+			t.Errorf("answered %+v, refused %q, want the operator's sealed refusal %q", given, refused, want)
 		}
 		y.nothingGiven(t, "the operator's sealed device")
 	})

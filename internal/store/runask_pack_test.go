@@ -1823,7 +1823,7 @@ func TestPackApplyDirectoryStale(t *testing.T) {
 			func() { f.digest = strings.Repeat("e", 64) }, func() { f.digest = dirPackDigest }},
 		{"a changed file", "the object file roles/a.md",
 			func() { f.plan.Objects[0].Text = "role changed\n" }, func() { f.plan.Objects[0].Text = "role\n" }},
-		{"an added file", "differs at its objects",
+		{"an added file", "the object file roles/b.md",
 			func() {
 				f.plan.Objects = append(f.plan.Objects, AskPlanObject{Kind: "file", Name: "roles/b.md", Action: "create", FileNewSHA: strings.Repeat("c", 64), Text: "b\n", Diff: "+b\n"})
 			}, func() { f.plan.Objects = f.plan.Objects[:3] }},
@@ -1855,6 +1855,64 @@ func TestPackApplyDirectoryStale(t *testing.T) {
 	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil ||
 		!strings.Contains(err.Error(), "not inside a registered depot's main checkout") || !strings.Contains(err.Error(), nothingRan) {
 		t.Fatalf("a moved checkout: ApproveAsk = %v", err)
+	}
+}
+
+// A subscription the pack does not carry comes, goes or changes without
+// staling the card: the apply writes nothing for a not_in_pack object and
+// the card shows nothing of it, so the approval still stands. A change to
+// what the apply would do still refuses in the same words, and a dropped
+// object that goes still refuses: those stay compared.
+func TestPackApplyStaleSkipsNotInPack(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	_, dir, resolved := dirCheckout(t, y)
+	base := func() *AskPlan {
+		plan := firstInstallPlan()
+		plan.Objects = append(plan.Objects,
+			AskPlanObject{Kind: "subscription", Name: "yardmaster yardr all bead=yd-1 state=done", Action: "not_in_pack"},
+			AskPlanObject{Kind: "file", Name: "roles/old.md", Action: "dropped"})
+		return plan
+	}
+	f := &fakePack{name: "team", label: "directory " + resolved + " in yardr test1", build: "test1",
+		kind: "git", depot: "web", digest: dirPackDigest, plan: base(), noSources: true}
+	y.setDirPack(f)
+	for _, c := range []struct {
+		name, want string
+		approve    bool
+		move       func()
+	}{
+		{"a not_in_pack subscription removed", "", true, func() {
+			f.plan.Objects = slices.DeleteFunc(f.plan.Objects, func(o AskPlanObject) bool { return o.Action == "not_in_pack" })
+		}},
+		{"a not_in_pack subscription added", "", true, func() {
+			f.plan.Objects = append(f.plan.Objects, AskPlanObject{Kind: "subscription", Name: "yardmaster yardr all bead=yd-2 state=done", Action: "not_in_pack"})
+		}},
+		{"a not_in_pack subscription changed", "", true, func() {
+			f.plan.Objects[3].Changes = []AskChange{{Field: "state", Old: "done", New: "open"}}
+		}},
+		{"a changed file", "the object file roles/a.md", false, func() {
+			f.plan.Objects[0].Text = "role changed\n"
+		}},
+		{"a removed dropped file", "the object file roles/old.md", false, func() {
+			f.plan.Objects = slices.DeleteFunc(f.plan.Objects, func(o AskPlanObject) bool { return o.Action == "dropped" })
+		}},
+	} {
+		f.plan = base()
+		ask := packAsk()
+		ask.Run.Argv = []string{"pack apply " + dir + " --depot web"}
+		seq := y.ask(t, ask, "yardmaster")
+		c.move()
+		done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil)
+		if c.approve {
+			if err != nil || done.Result != "approved, to be carried out" {
+				t.Errorf("%s: ApproveAsk = %+v, %v, want approval", c.name, done, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), nothingRan) {
+			t.Errorf("%s: ApproveAsk = %v, want %q with nothing run", c.name, err, c.want)
+		}
 	}
 }
 
