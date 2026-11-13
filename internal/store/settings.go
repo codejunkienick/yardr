@@ -247,7 +247,7 @@ var KnownSettings = append([]Setting{
 		}},
 	{Key: HostedSetting, Help: "whether this is a hosted yard, made and run by the hosting service (true), and not one you run yourself, connected to the edge or not (false): " +
 		"the provisioner writes it when it makes a yard. On a hosted yard GiveSecret is taken for every secret down the edge link from the operator's devices, and so is ApproveSetup with the account typed; " +
-		"on any other yard down the link GiveSecret is taken for a harness login's code alone, and ApproveSetup only without an account typed. Read on every call; default: false",
+		"on any other yard down the link GiveSecret is taken for a harness login's code alone, and ApproveSetup only without an account typed; on either, a member may give the code of their own sign-in from a sealed device. Read on every call; default: false",
 		Default: "false", Check: func(v string) error {
 			if v != "true" && v != "false" {
 				return fmt.Errorf("%s %q: true or false", HostedSetting, v)

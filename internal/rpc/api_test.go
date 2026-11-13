@@ -273,7 +273,7 @@ var apiCalls = []apiCall{
 			{"files_max", "string", "how many files one mail or note may carry, a whole number in a string; the yard's own count, so a client needs no copy of the number"},
 		},
 		after: "The operator's words are what every session of an agent reads when it starts (`yardr prime`), so the socket tells them to whoever calls, and every other setting with them. Over the network a device is told these keys alone: the words and `hosted` to a device of an operator and to no other, and to none in a yard with no operator. A `setting_changed` in a device's stream has its `value` only for a key the device is told; for any other it has the `key` and no `value`.\n\n" +
-			"`hosted` is how a client down the link from the edge learns which yard it has reached: a hosted yard takes `GiveSecret` there for every secret, and any other yard for a harness login's code alone ([TLS is yours](#tls-is-yours-and-the-clients-rule)).",
+			"`hosted` is how a client down the link from the edge learns which yard it has reached: a hosted yard takes `GiveSecret` there from the operator's device for every secret, and any other yard for a harness login's code alone; either takes a member's own sign-in code from their sealed device ([TLS is yours](#tls-is-yours-and-the-clients-rule)).",
 	},
 	{
 		method:   "Users",

@@ -923,11 +923,11 @@ func (u *UserServer) call(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if own || overLink {
-		// A user's own secret giving is refused down the link, hosted or
-		// not. Their own pairing approval may cross as an approval, under
-		// the same transport rule that keeps it off a plain connection.
-		crosses := overLink && (u.hosted(r.Context()) || u.crossesConnected(r.Context(), name, body, c.User))
-		if why := inTheClear(r, name, u.routerAddr(r.Context()), crosses, u.hosted(r.Context())); why != "" {
+		// A member's own secret crosses the link, hosted or not, only as the code of their
+		// own sign-in from a sealed device (memberLoginCode); their pairing approval, as an approval.
+		crosses := overLink && (u.hosted(r.Context()) || u.crossesConnected(r.Context(), name, body, c.User)) ||
+			own && name == "GiveSecret" && u.memberLoginCode(r.Context(), body, c.User)
+		if why := inTheClear(r, name, u.routerAddr(r.Context()), crosses, own); why != "" {
 			writeJSON(w, reply{Error: toWire(errors.New(why))})
 			return
 		}

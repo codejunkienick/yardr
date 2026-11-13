@@ -50,21 +50,22 @@ const linkRemoteAddr = "edge:0"
 // only call can say it, since the ask, or the account typed, is in the body:
 // crosses is its word that this giving, or this setup approval with the
 // account typed, is one the yard takes down the link, and it passes false
-// for every call it judges before the body is read. hosted is the yard's
-// hosted setting, read the same way: on
-// a hosted yard the operator's giving crosses, so a giving refused down the
-// link is a member's own, and its refusal names the operator's paired
-// device as the fix. On a hosted yard every secret crosses, for a device of the
+// for every call it judges before the body is read. member is whether the
+// caller is a user who is not the operator. A member's giving crosses for the
+// code of their own sign-in from a sealed device alone (memberLoginCode); every
+// other is refused in one sentence, the same on a hosted yard and on any other,
+// plain or sealed. On a hosted yard every secret crosses, for a device of the
 // operator: the hosting service runs the edge and the machine the yard lives
 // on, so a refusal would guard nothing it does not hold, and would leave a
 // person with no shell on that machine unable to give a key at all (hosted).
 // On a yard connected to the edge from the person's own machine one giving
-// crosses, the code a harness's sign-in page shows (loginCode), which is used
-// once, within minutes, and kept nowhere: the refusal of every other names
-// that reason, answers on the yard's own machine as the fix, and says the
-// edge saw what this one carried, so the key is remade. A setup approval
-// that types the account is such a giving and is refused the same way; one
-// that takes a candidate or keeps the account holds no secret and crosses.
+// crosses from the operator's device, the code a harness's sign-in page shows
+// (loginCode), which is used once, within minutes, and kept nowhere: the
+// refusal of every other names that reason, answers on the yard's own machine
+// as the fix, and says the edge saw what this one carried, so the key is
+// remade. A setup approval that types the account is such a giving and is
+// refused the same way; one that takes a candidate or keeps the account holds
+// no secret and crosses.
 // An approval crosses on either: a paired device of the operator is the
 // operator (design yardr-xpf8), pairing is the grant and `yardr user device
 // rm` is the revoke, and the command an approval runs is fixed on the ask. A
@@ -77,7 +78,7 @@ const linkRemoteAddr = "edge:0"
 // (call). If the edge says the device reached it over plain HTTP, the
 // approval, the secret, the screen, the list and the filing are still
 // refused.
-func inTheClear(r *http.Request, name, router string, crosses, hosted bool) string {
+func inTheClear(r *http.Request, name, router string, crosses, member bool) string {
 	if name == "SourceGrants" {
 		return sourceGrantsInTheClear(r, router)
 	}
@@ -107,25 +108,28 @@ func inTheClear(r *http.Request, name, router string, crosses, hosted bool) stri
 	}
 	if r.RemoteAddr == linkRemoteAddr {
 		if name == "ApproveAsk" || (name == "ApproveSetup" || name == "GiveSecret") && crosses {
-			// Only a device of the operator reaches here (operatorCall),
-			// and call says crosses for no other caller.
+			// A device of the operator reaches here (operatorCall), and a
+			// member's only for their own pairing approval (ownPairApproval)
+			// and, as call says crosses, the code of their own sign-in from
+			// a sealed device (memberLoginCode).
 			if forwardedPlain(r) {
 				return what + " is taken over https only, or from the yard's own machine: the proxy in front of the yard says this request came to it in plain HTTP. " +
 					"Give the device the yard's https:// address." + crossed
 			}
 			return ""
 		}
-		if hosted {
-			// The operator's giving crosses on a hosted yard (call), so
-			// this is a member's own: the member has no shell on the
-			// yard's machine, and the fix is the operator's device.
-			return "a secret never crosses the edge from a member's device: this request came down the link from the edge. " +
-				"Ask the operator to give it from their paired device." +
-				" The edge saw what was sent with it: if it was a real key, make a new one at the service."
+		const seen = " The edge saw what was sent with it: if it was a real key, make a new one at the service."
+		if member {
+			// The member has no shell on the yard's machine, so no ssh is
+			// offered, and the operator's device gives only where the yard is
+			// hosted. Nothing here says whether the call came plain or
+			// sealed: a sealed device is told what makes one, and is never
+			// told its own is refused.
+			return "a secret from a member's device does not cross the edge, except the code of their own sign-in from a sealed device (pairing the device with the QR makes it one); " +
+				"the operator gives any other on the yard's machine, or from their own paired device where the yard is hosted." + seen
 		}
 		return "a secret never crosses the edge: this request came down the link from the edge. " +
-			"Answer on the yard's machine (ssh -t <host> yardr bead answer <bead> <ask> " + flag + ")." +
-			" The edge saw what was sent with it: if it was a real key, make a new one at the service."
+			"Answer on the yard's machine (ssh -t <host> yardr bead answer <bead> <ask> " + flag + ")." + seen
 	}
 	if ip := net.ParseIP(remote(r)); ip == nil || !ip.IsLoopback() {
 		if name == "GiveSecret" && fromRouter(r, router) {

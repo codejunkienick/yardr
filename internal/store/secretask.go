@@ -421,8 +421,8 @@ func (w *wtx) askedLogin(sec AskSecret, to string) (*AskSecret, error) {
 // harness's sign-in page shows (askInput in dispatch). The whole of the
 // struct is compared with that form, so a field AskSecret gains later makes
 // an ask not this one until this says it is. It is what the listener takes
-// down the link from the edge on any yard, and on one that is not hosted the
-// only secret it takes there (rpc.UserServer.loginCode).
+// from the operator's device down the link on any yard, and on one that is not
+// hosted the only secret it takes from it (rpc.UserServer.loginCode).
 func (s AskSecret) OperatorLoginInput() bool {
 	return s.Login != "" && reflect.DeepEqual(s, AskSecret{Env: []string{loginInputName}, Login: s.Login})
 }

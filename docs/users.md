@@ -192,7 +192,11 @@ The page to sign in on is mailed to the person, and the code it shows comes
 back as an ask of their own, which goes to the waiting login and is kept
 nowhere. They read the mail and give the code in a [device](#devices) (footplate,
 or the web view), so a new user is paired one while the sign-in waits, which
-takes up to a quarter of an hour. The sign-in ends with one short call to
+takes up to a quarter of an hour. A device that reaches the yard through the
+edge gives the code when its calls are sealed, which a device paired with the
+QR's key does and one [sealed in place](#sealed-in-place) does; a plain one is
+refused, and pairing it again with the QR seals its calls (the rule is under
+[Devices](#devices)). The sign-in ends with one short call to
 Claude Code on their seat, which proves the login answers, and with their
 conversation with the yardmaster started again on it: it started on a folder
 with no login in it, and the operator is asked nothing about it meanwhile. One
@@ -1263,7 +1267,8 @@ command runs once for one ask; an approval is taken only from a request
 that reached the listener from the yard's own machine, where TLS ends, or
 down the link from the edge ([edge.md](edge.md#footplate-through-the-link);
 a secret is taken besides from the yard's router, and down the link when the
-yard is hosted or the secret is a harness login's code, a setup approval that
+yard is hosted or the secret is a harness login's code, or the code of a
+member's own sign-in from their sealed device, a setup approval that
 types the account being such a secret,
 [api.md](api.md#tls-is-yours-and-the-clients-rule));
 and each approval through a device is marked `via
@@ -1296,11 +1301,27 @@ the link as from the yard's own machine. The edge reads the code with the
 device's token. The code is used once, within minutes, and the yard hands it
 to the waiting login in its memory and keeps it nowhere. On a yard the
 operator runs and has connected to the edge it is the only secret that
-crosses: an API key, a source's credential, the account a setup approval
-types, a hook's signing secret and a user's own login code are refused down
-the link and answered at the yard's own machine. A setup approved by taking a
-candidate or keeping the account types nothing, and crosses. `yardr user
-device rm` ends a device's reach at its next request.
+crosses from the operator's device: an API key, a source's credential, the
+account a setup approval types, a hook's signing secret and another user's
+login code are refused down the link and answered at the yard's own machine.
+A setup approved by taking a candidate or keeping the account types nothing,
+and crosses. `yardr user device rm` ends a device's reach at its next request.
+
+**A member's own sign-in code crosses the edge from a sealed device.** A member
+whose only way into the yard is a device paired through the edge finishes their
+own sign-in there ([a user with a login of their own](#the-record)): the code
+the sign-in page shows, given with `GiveSecret` from their own device, is taken
+down the link, on a hosted yard and on one the operator runs, when the call came
+sealed. A device paired with the QR's key calls sealed, and so does one
+[sealed in place](#sealed-in-place); the edge carries the call as ciphertext and
+reads nothing of the code. A call that came plain is refused, and pairing the
+device again with the QR makes its calls sealed. The operator's device
+does not give it for them on a yard connected to the edge, where only the
+operator's own login's code crosses. It is the one secret a member's device
+gives down the link: every other, a credential or an address of their own among
+them, is refused in one sentence, whether the call came plain or sealed. The
+code is used once, within ten minutes, and the yard hands it to the waiting
+login, the member's own, in its memory and keeps it nowhere.
 
 **On a hosted yard every secret crosses the edge.** A hosted yard is one the
 service made and runs, and its `hosted` setting is `true`
@@ -1312,8 +1333,9 @@ approval types, a hook's signing secret, a user's own address or credential,
 and the login's code. The edge reads the
 value with the device's token, as it reads every call; the yard writes it to
 its file, as it does for a giving at the yard's own machine. A device of a
-user who is not the operator still gives nothing down the link, hosted or
-not, and a call that the edge says came in plain HTTP is refused as ever.
+user who is not the operator gives nothing down the link, hosted or not, but
+the code of their own sign-in on a sealed call (above), and a call that the edge
+says came in plain HTTP is refused as ever.
 `yardr user device rm` ends a device's reach at its next request.
 
 **A session's screen crosses the edge too.** A paired device of the operator

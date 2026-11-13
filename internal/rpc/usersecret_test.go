@@ -831,11 +831,14 @@ calls:
 
 // Down the link from the edge a secret is refused with the link's own
 // reason, whatever the ask: the edge saw what this one carried, and the fix
-// is to answer on the yard's own machine. The one giving taken there is the
-// daemon's ask for a harness login's code (TestUserGivesALoginInput), so the
-// yard reads which ask a call names before it refuses, and says nothing of
-// what it found. Nothing is given, and a code the edge says came in plain
-// HTTP is refused as an approval is. This is the yard that is not hosted,
+// is to answer on the yard's own machine. The one giving taken there from the
+// operator's device is the daemon's ask for a harness login's code
+// (TestUserGivesALoginInput), and from a member's the code of their own
+// sign-in on a sealed call (TestMemberGivesTheirOwnLoginCodeDownTheLink), so
+// the yard reads which ask a call names before it refuses, and says nothing
+// of what it found. A member's device is refused every other in the one
+// sentence of memberRefusal. Nothing is given, and a code the edge says came
+// in plain HTTP is refused as an approval is. This is the yard that is not hosted,
 // which is every yard until its hosted setting says otherwise
 // (TestUserGiveSecretIsNotTakenOverTheLink/hosted).
 func TestUserGiveSecretIsNotTakenOverTheLink(t *testing.T) {
@@ -873,10 +876,10 @@ func TestUserGiveSecretIsNotTakenOverTheLink(t *testing.T) {
 		{"a harness's API key", y.jo, ask("jo", &store.AskSecret{Harness: "claude", Crew: "yardmaster"}, "ANTHROPIC_API_KEY")},
 		{"a hook's signing secret", y.jo, ask("jo", &store.AskSecret{Source: "linear", Hook: "linear"}, "LINEAR_SIGNING_SECRET")},
 		// A user's own login code is the operator's to give for them and the
-		// user's own: the exception is the operator's login alone.
+		// user's own: the exception for the operator's device is the operator's
+		// login alone, and the user's own is theirs from a sealed device
+		// (TestMemberGivesTheirOwnLoginCodeDownTheLink).
 		{"a user's login code, from the operator's device", y.jo, userLogin},
-		{"a user's login code, from their device", y.sam, userLogin},
-		{"a user's own address", y.sam, ask("sam", &store.AskSecret{Source: "push", User: "sam"}, "PUSH_USER")},
 		// Arguments that name no ask of the daemon's are refused the same.
 		{"an ask that asks for no secret", y.jo, ask("jo", nil, "INPUT")},
 		{"an ask of no bead", y.jo, `{"bead":"yd-none","ask":1,"values":{"INPUT":"` + value + `"}}`},
@@ -909,6 +912,26 @@ func TestUserGiveSecretIsNotTakenOverTheLink(t *testing.T) {
 				if strings.Contains(w.Body.String(), not) {
 					t.Errorf("answered %s, want none of %q", w.Body, not)
 				}
+			}
+		})
+	}
+	// A member's device is refused in the one sentence of memberRefusal, which
+	// names no shell on the yard's machine, for its own login code from a plain
+	// call and for every other secret of theirs.
+	for _, c := range []struct{ name, body string }{
+		{"a user's login code, from their device, plain", userLogin},
+		{"a user's own address", ask("sam", &store.AskSecret{Source: "push", User: "sam"}, "PUSH_USER")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := y.give(edgelink.RemoteAddr, y.sam, strings.NewReader(c.body))
+			var got struct {
+				Error *wireError `json:"error"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || got.Error == nil || got.Error.Message != memberRefusal {
+				t.Errorf("answered %s (%v), want the member's refusal %q", w.Body, err, memberRefusal)
+			}
+			if strings.Contains(w.Body.String(), value) {
+				t.Errorf("answered %s, with the value", w.Body)
 			}
 		})
 	}
@@ -951,9 +974,12 @@ func TestUserGiveSecretIsNotTakenOverTheLink(t *testing.T) {
 // written to their files as they are from the yard's own machine, and the
 // answer on the bead says the giving came by the edge. (The login's code is
 // taken on any yard: TestUserGivesALoginInput.) Only the operator's devices
-// give: a member's device is refused its own ask with the link's words and
-// the operator's as a method the yard does not have, and a giving the edge
-// says came in plain HTTP is refused as an approval is. A yard whose hosted
+// give every one: a member's device is refused its own ask in the one
+// sentence of memberRefusal, the same here and on a yard that is not hosted,
+// but for the code of its own sign-in on a sealed call
+// (TestMemberGivesTheirOwnLoginCodeDownTheLink), and the operator's ask as a
+// method the yard does not have, and a giving the edge says came in plain
+// HTTP is refused as an approval is. A yard whose hosted
 // setting is false is the yard that is not hosted
 // (TestUserGiveSecretIsNotTakenOverTheLink).
 func testUserGiveSecretIsTakenDownTheLinkOfAHostedYard(t *testing.T) {
@@ -1019,17 +1045,14 @@ func testUserGiveSecretIsTakenDownTheLinkOfAHostedYard(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &refused); err != nil || refused.Error == nil {
 			t.Fatalf("sam's own ask is answered %s (%v), want a refusal", w.Body, err)
 		}
-		const hostedMember = "a secret never crosses the edge from a member's device: this request came down the link from the edge. " +
-			"Ask the operator to give it from their paired device." +
-			" The edge saw what was sent with it: if it was a real key, make a new one at the service."
-		if refused.Error.Message != hostedMember {
-			t.Errorf("sam's own ask is told %q, want %q", refused.Error.Message, hostedMember)
+		if refused.Error.Message != memberRefusal {
+			t.Errorf("sam's own ask is told %q, want %q", refused.Error.Message, memberRefusal)
 		}
 		if strings.Contains(w.Body.String(), value) {
 			t.Errorf("sam's own ask is answered %s, with the value", w.Body)
 		}
-		// On a yard that is not hosted the same ask is refused with the
-		// yard's-machine sentence, word for word.
+		// On a yard that is not hosted the same ask is refused in the same
+		// sentence, word for word: a member has no shell to be sent to.
 		if err := y.st.SetSetting(ctx, store.HostedSetting, "false", "jo"); err != nil {
 			t.Fatal(err)
 		}
@@ -1038,11 +1061,8 @@ func testUserGiveSecretIsTakenDownTheLinkOfAHostedYard(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &refused); err != nil || refused.Error == nil {
 			t.Fatalf("sam's own ask, unhosted, is answered %s (%v), want a refusal", w.Body, err)
 		}
-		const connectedMember = "a secret never crosses the edge: this request came down the link from the edge. " +
-			"Answer on the yard's machine (ssh -t <host> yardr bead answer <bead> <ask> --secret)." +
-			" The edge saw what was sent with it: if it was a real key, make a new one at the service."
-		if refused.Error.Message != connectedMember {
-			t.Errorf("sam's own ask, unhosted, is told %q, want %q", refused.Error.Message, connectedMember)
+		if refused.Error.Message != memberRefusal {
+			t.Errorf("sam's own ask, unhosted, is told %q, want %q", refused.Error.Message, memberRefusal)
 		}
 		none, _ := json.Marshal(noSuchMethod("GiveSecret"))
 		w = y.give(edgelink.RemoteAddr, y.sam, strings.NewReader(y.args(map[string]string{"CRM_TOKEN": value})))
