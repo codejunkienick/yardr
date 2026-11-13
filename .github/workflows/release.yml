@@ -93,9 +93,9 @@ jobs:
     timeout-minutes: 15
     env:
       # The BDP commit conformance/bdp/README.md records as last verified:
-      # a4fd83a, the Core era. Moving it is a deliberate change, made
+      # f4913eb, the Core era. Moving it is a deliberate change, made
       # together with the README, once probe-core.sh passes at the new commit.
-      BDP_REF: a4fd83a2ce3bc77c28f98c5f023ade997e4a1642
+      BDP_REF: f4913ebb8f85bfa9ade74e638edc63958596b7a5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

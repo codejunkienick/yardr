@@ -35,8 +35,8 @@ var DefaultLimits = Limits{
 // checkout, the last commit to change Core, Write, Types or Events. It names
 // the protocol text and not a yardr build, so nothing derives it. It moves when
 // someone has read what Core changed since and run conformance/bdp/probe-core.sh
-// against the BDP commit it is taken from; the value here is BDP main a4fd83a2's.
-const SpecRevision = "f168d60f1ce5155d03ecb5324e328310c21b8ed0"
+// against the BDP commit it is taken from; the value here is BDP main f4913eb's.
+const SpecRevision = "564657d8f123bf510dc9295156f5f92f6c775895"
 
 // The fields Core's reads of Beads and Links carry: the kind of the Resource a
 // read returns, and of the Resources a page of them lists.

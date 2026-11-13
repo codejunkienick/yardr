@@ -6,7 +6,7 @@ the BDP commit pinned below. To run it yourself:
 
 ```sh
 git clone https://github.com/gastownhall/bdp ~/src/bdp
-git -C ~/src/bdp checkout a4fd83a2ce3bc77c28f98c5f023ade997e4a1642
+git -C ~/src/bdp checkout f4913ebb8f85bfa9ade74e638edc63958596b7a5
 BDP_REPO=~/src/bdp conformance/bdp/probe-core.sh
 ```
 
@@ -89,7 +89,7 @@ no case for. [docs/bdp.md](../../docs/bdp.md#conformance) says what yardr claims
 
 `BDP_REF` in the `conformance` job of `.github/workflows/ci.yml` and `release.yml`
 is the BDP commit CI checks out, and it is the one recorded here:
-`a4fd83a2ce3bc77c28f98c5f023ade997e4a1642`, of 7 Nov 2026. BDP moves and the kit
+`f4913ebb8f85bfa9ade74e638edc63958596b7a5`, of 12 Nov 2026. BDP moves and the kit
 gains rows, so a newer commit can fail where this one passes. To move the pin, run
 the script at the new commit first, then change both workflows and this file in
 one commit. A step of the job fails when this file does not contain `BDP_REF`, so
@@ -99,7 +99,7 @@ the two cannot drift apart unseen.
 `internal/bdp` should name. It is older than the pin when BDP's later commits left
 Core's text alone.
 
-Last run: BDP a4fd83a2, yardr 6d67c83b, 8 Nov 2026. 3 pass, 5 not run, 53 not
+Last run: BDP f4913eb, yardr c7d879657, 13 Nov 2026. 3 pass, 5 not run, 53 not
 applicable (20 required, 33 optional), 0 fail.
 
 ## History
