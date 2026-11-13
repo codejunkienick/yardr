@@ -1961,6 +1961,43 @@ func TestReadHookKeysDigitLeadingName(t *testing.T) {
 // carried out.
 func TestBeadAskRunSourceAdd(t *testing.T) {
 	t.Parallel()
+	t.Run("nested select", func(t *testing.T) {
+		y, b := runYardCLI(t, "mac", airyKey(t))
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			io.WriteString(w, `{"number":7,"head":{"ref":"main","sha":"abc","other":true},"base":{"repo":{"html_url":"https://repo.example.com","private":true}}}`)
+		}))
+		defer srv.Close()
+		text := "name: nested\nbase: " + srv.URL + "\ncalls:\n  ping: { kind: read, request: { method: GET, path: /me }, answer: { select: [number, head.ref, head.sha, base.repo.html_url, head.missing] } }\n"
+		file := filepath.Join(t.TempDir(), "nested.yaml")
+		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := y.as(t, "yardmaster", "ask", b.ID, "Add the nested source?", "--context", "read selected fields", "--run", "source add "+file); err != nil {
+			t.Fatal(err)
+		}
+		shown, err := run(t, y.a.primeCmd(), "--bead", b.ID)
+		if err != nil || !strings.Contains(shown, "as flat keys (dots traverse objects)") || !strings.Contains(shown, "base.repo.html_url") {
+			t.Fatalf("the card must describe the selected paths: %v\n%s", err, shown)
+		}
+		// Approval must use the declaration shown, even after the file changes.
+		if err := os.WriteFile(file, []byte(strings.Replace(text, "number, head.ref, head.sha, base.repo.html_url, head.missing", "head", 1)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := y.as(t, "jo", "answer", b.ID, "1", "--approve"); err != nil {
+			t.Fatal(err)
+		}
+		ctx := context.Background()
+		if src, err := y.st.GetSource(ctx, "nested"); err != nil || src.Text != text {
+			t.Fatalf("approval changed the proposed selection: %+v, %v", src, err)
+		}
+		res, err := y.st.CallSource(ctx, store.SourceCall{Source: "nested", Call: "ping", Actor: "jo"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := `{"base.repo.html_url":"https://repo.example.com","head.ref":"main","head.sha":"abc","number":7}`; string(res.Answer) != want {
+			t.Fatalf("approved selection = %s, want %s", res.Answer, want)
+		}
+	})
 	key := airyKey(t)
 	y, b := runYardCLI(t, "mac", key)
 	dir := t.TempDir()

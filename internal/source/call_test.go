@@ -677,6 +677,67 @@ func TestDoAnswers(t *testing.T) {
 	if res, err := Do(context.Background(), d, "ping", nil, token, noSecrets); err != nil || !res.OK() || res.Answer != nil {
 		t.Fatalf("a 204 = %+v, %v", res, err)
 	}
+	t.Run("nested select", func(t *testing.T) {
+		status, body = 200, `{"number":7,"head":{"ref":"main","sha":"abc"},"base":{"repo":{"html_url":"https://repo.example.com","private":true}},"extra":1}`
+		nested := declared(t, `name: nested
+base: https://nested.example.com
+calls:
+  ping:
+    kind: read
+    request: { method: GET, path: /me }
+    answer: { select: [number, head.ref, base.repo.html_url] }
+`, "https://nested.example.com", s.URL)
+		res, err := Do(context.Background(), nested, "ping", nil, token, noSecrets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := `{"base.repo.html_url":"https://repo.example.com","head.ref":"main","number":7}`; string(res.Answer) != want {
+			t.Fatalf("nested select = %s, want %s", res.Answer, want)
+		}
+		for _, tc := range []struct {
+			name, body, want string
+		}{
+			{"missing", `{"head":{},"base":{"repo":{}}}`, `{}`},
+			{"null parent", `{"head":null,"base":null}`, `{}`},
+			{"scalar parent", `{"head":true,"base":"text"}`, `{}`},
+			{"array parent", `{"head":[{"ref":"main"}],"base":[]}`, `{}`},
+			{"leaf values", `{"number":9007199254740993,"head":{"ref":null},"base":{"repo":{"html_url":false}}}`, `{"base.repo.html_url":false,"head.ref":null,"number":9007199254740993}`},
+			{"literal dotted key", `{"head.ref":"literal","head":{"ref":"nested"},"base.repo.html_url":"literal"}`, `{"head.ref":"nested"}`},
+			{"literal dotted key only", `{"head.ref":"literal"}`, `{}`},
+			{"list", `[{"number":7,"head":{"ref":"main","sha":"abc"}}, {"base":{"repo":{"html_url":"url"}}}, {}]`, `[{"head.ref":"main","number":7},{"base.repo.html_url":"url"},{}]`},
+			{"empty list", `[]`, `[]`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				body = tc.body
+				res, err := Do(context.Background(), nested, "ping", nil, token, noSecrets)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(res.Answer) != tc.want {
+					t.Fatalf("answer = %s, want %s", res.Answer, tc.want)
+				}
+			})
+		}
+		for _, paths := range []string{"head, head.ref, head.sha", "head.sha, head.ref, head"} {
+			t.Run(paths, func(t *testing.T) {
+				body = `{"head":{"ref":"main","sha":"abc","other":1}}`
+				whole := declared(t, strings.Replace(crm, "[id, name, plan, owner, open_tickets]", "["+paths+"]", 1), "https://crm.example.com/api/v2", s.URL)
+				res, err := Do(context.Background(), whole, "customer", map[string]string{"id": "1"}, token, noSecrets)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if want := `{"head":{"ref":"main","sha":"abc","other":1},"head.ref":"main","head.sha":"abc"}`; string(res.Answer) != want {
+					t.Fatalf("overlapping paths = %s, want %s", res.Answer, want)
+				}
+			})
+		}
+		t.Run("bound after nested selection", func(t *testing.T) {
+			body = `{"head":{"ref":"` + strings.Repeat("x", AnswerMax) + `"}}`
+			if _, err := Do(context.Background(), nested, "ping", nil, token, noSecrets); reason(err) != TooLarge {
+				t.Fatalf("oversized selected field: %v", err)
+			}
+		})
+	})
 
 	// With errors named, a refusal keeps those paths rebuilt nested, and
 	// nothing else: select stays for successes. A body that is no object,

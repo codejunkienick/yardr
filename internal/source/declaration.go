@@ -306,8 +306,8 @@ type QueryValue struct {
 
 // Answer is what of the service's answer a call returns.
 type Answer struct {
-	// Select keeps these top-level keys, of each element when the answer
-	// is a list; without it the answer is returned as it is.
+	// Select keeps object paths as flat keys, of each element for a list;
+	// dots traverse objects. Without it the answer is returned as it is.
 	Select []string `json:"select,omitempty"`
 	// Errors keeps these dot paths of a refused answer's JSON object,
 	// rebuilt nested; without it a refusal keeps nothing of what was said.

@@ -161,8 +161,8 @@ replaced by the value, escaped by where it stands; a file stands alone as
 a value of the body. The body is sent as JSON, or as a multipart upload
 when it names a file parameter, and a value that is exactly {param} is
 sent as the parameter's type; one whose optional parameter was not given
-is left out. The answer is JSON: select keeps the named top-level keys of a success and
-errors the named dot paths of a refusal, at most 64 KB (answer.max raises that, to 1 MiB at most).
+is left out. The answer is JSON: select keeps object paths of a success as flat keys (dots
+traverse objects), and errors the named dot paths of a refusal, at most 64 KB (answer.max raises that, to 1 MiB at most).
 
 The file holds no secret. {credential} stands for the value of the variable
 credential.env names, read at each call from the file the operator gives it
@@ -1497,7 +1497,7 @@ may revoke.`,
 declaration names as check: a read call without parameters, sent as a request
 or, where it names run, answered by its command. Prints the status the service
 answered with, and fails on anything but a success. Where the check call names
-answer.select, a successful check also prints each selected top-level field
+answer.select, a successful check also prints each selected field
 the answer carries, one per line under the status line (and carries the same
 object under answer with --json); a field the answer does not carry prints no
 line. A source whose file names no check call is sent nothing: its credential
@@ -1637,8 +1637,8 @@ process for it. Nothing of the request is written anywhere.`,
 					return fmt.Errorf("source %s: the check call %s (%s)%s was answered %d%s", d.Name, d.Check, call.Line(), saidAs, res.Status, source.StatusHint(res.Status, d))
 				}
 				// The check call's selection is what setup may read: a successful check
-				// shows the selected top-level fields the answer carries, one per line,
-				// and carries the same answer under answer with --json. A field the answer
+				// shows the selected fields carried in the answer, one per line,
+				// and carries the same selected answer under answer with --json. A field the answer
 				// does not carry prints no line; status alone decides success or failure,
 				// and no other call's answer is ever shown.
 				var selected []string

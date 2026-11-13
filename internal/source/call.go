@@ -905,9 +905,9 @@ func writeFilePart(w *multipart.Writer, key, path string, data []byte) error {
 	return err
 }
 
-// selected is the answer raw with only keys kept: of the object it is, or
-// of each object in the list it is. Anything else, and an answer without
-// keys to keep, is returned as it is, without its spaces.
+// selected keeps object paths as flat keys, in one object or each object
+// of a list. Anything else, and an answer without keys to keep, is
+// returned as it is, without its spaces.
 func selected(raw []byte, keys []string) []byte {
 	pick := func(obj json.RawMessage) json.RawMessage {
 		var m map[string]json.RawMessage
@@ -916,7 +916,7 @@ func selected(raw []byte, keys []string) []byte {
 		}
 		out := map[string]json.RawMessage{}
 		for _, k := range keys {
-			if v, ok := m[k]; ok {
+			if v, ok := selectedField(m, k); ok {
 				out[k] = v
 			}
 		}

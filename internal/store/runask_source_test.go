@@ -206,7 +206,7 @@ func TestSourceAddCardNamesBuiltAndRunCalls(t *testing.T) {
 		"command file docs/build-write:",
 		"sha256 " + hex.EncodeToString(sum[:]),
 		"call find (read): runs docs/find search. It takes query (string, required, at most 200).",
-		"call find is answered by that command, run with the credential at each call and free to make requests of its own with it, since the yard sends none. Its answer keeps hits, at most 65536 bytes.",
+		"call find is answered by that command, run with the credential at each call and free to make requests of its own with it, since the yard sends none. Its answer keeps hits as flat keys (dots traverse objects), at most 65536 bytes.",
 		"(call.find.run, handed the credential)",
 		"command file docs/find:",
 		"sha256 " + hex.EncodeToString(found[:]),
@@ -511,6 +511,7 @@ func TestSourceAddRefusals(t *testing.T) {
 		want    string
 	}{
 		{"does not parse", []AskSource{{Name: "x", Text: "not a declaration"}}, "want a mapping"},
+		{"unsupported select", []AskSource{{Name: "phone", Text: strings.Replace(phoneDecl, "path: /me } }", "path: /me }, answer: { select: [head..ref] } }", 1)}}, "calls.ping.answer.select"},
 		{"another name carried", func() []AskSource { c := carriedOf(t, phoneDecl, nil); c[0].Name = "other"; return c }(), "its declaration names phone"},
 		{"an absolute program", carriedOf(t, strings.Replace(wiredDecl, "[wired/limits,", "[/bin/limits,", 1), wiredFiles), "it is the operator's alone"},
 		// The yard has crm: these are refused as they are for a free name,
@@ -676,6 +677,12 @@ func TestSourceAddApproveStale(t *testing.T) {
 	}{
 		{"replaced since", func(t *testing.T, y *askYard, _ string) {
 			if _, err := y.PutSource(y.ctx, "wired.yaml", wiredDecl+"# another\n", "mckean"); err != nil {
+				t.Fatal(err)
+			}
+		}, "was written from another declaration of the source wired: it was replaced since"},
+		{"select changed since", func(t *testing.T, y *askYard, _ string) {
+			text := strings.Replace(wiredDecl, "path: /me } }", "path: /me }, answer: { select: [head.ref] } }", 1)
+			if _, err := y.PutSource(y.ctx, "wired.yaml", text, "mckean"); err != nil {
 				t.Fatal(err)
 			}
 		}, "was written from another declaration of the source wired: it was replaced since"},
