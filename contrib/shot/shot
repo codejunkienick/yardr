@@ -18,6 +18,13 @@
 # it, or its own error page. Unset, empty or 0 leaves the switch off, and any
 # other value is refused.
 #
+# A page whose assets arrive late can be shot before they do: headless
+# Chrome shoots as the page finishes loading, so a CDN typeface still on
+# its way shows as its fallback face, or as no text at all. SHOT_WAIT
+# seconds waits them out (SHOT_WAIT=5 holds the shot five virtual seconds
+# for late arrivals); unset or empty, the shot goes as Chrome finishes
+# loading, as before.
+#
 # Chrome is SHOT_CHROME where that names an executable, else the first of
 # google-chrome, google-chrome-stable, chromium and chromium-browser on PATH,
 # else the macOS application. The page is fetched first with curl, which must
@@ -125,6 +132,20 @@ case "${SHOT_ANY_STATUS:-0}" in
   1) fail='' body=$prof/body ;;
   *) echo "shot: SHOT_ANY_STATUS=$SHOT_ANY_STATUS is not 1 (on) or 0 (off)" >&2; exit 1 ;;
 esac
+# A SHOT_WAIT that is not a positive number of seconds is refused, before
+# the page is fetched, rather than read as no wait: whoever wrote it would
+# otherwise be told the page is missing, or handed a shot the wait was
+# meant to save.
+wait_flags=
+if [ -n "${SHOT_WAIT:-}" ]; then
+  case "$SHOT_WAIT" in
+    ""|*[!0-9]*) { echo "shot: SHOT_WAIT=$SHOT_WAIT is not a positive number of seconds" >&2; exit 1; } ;;
+  esac
+  [ "$SHOT_WAIT" -gt 0 ] 2>/dev/null || { echo "shot: SHOT_WAIT=$SHOT_WAIT is not a positive number of seconds" >&2; exit 1; }
+  # The budget is milliseconds: seconds with three zeros, not arithmetic, in
+  # which a leading zero reads as octal and 08 is no number.
+  wait_flags="--virtual-time-budget=${SHOT_WAIT}000"
+fi
 # The headers are kept for the framing check on the wrapper path below. The
 # status goes to stdout and curl's reason to a file, which is what a refusal
 # prints.
@@ -241,7 +262,10 @@ trap 'stop_sig=HUP; stop_code=129; stop_shot' HUP
 # without it a Chrome that failed on its own keeps its own reason. If Chrome
 # finishes first, the watchdog stops and reaps its timer instead of leaving
 # a sleeper behind.
-"$chrome" --headless --disable-gpu --user-data-dir="$prof" \
+# Unquoted: empty wait_flags passes nothing, and set it is one flag with no
+# spaces.
+# shellcheck disable=SC2086
+"$chrome" --headless --disable-gpu --user-data-dir="$prof" $wait_flags \
   --screenshot="$out" --window-size="$SHOT_WIDTH,800" "$shoot" </dev/null &
 pid=$!
 # The watcher and its timer are stopped with a signal that the shell which

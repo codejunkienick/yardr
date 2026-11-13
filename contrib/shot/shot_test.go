@@ -425,6 +425,58 @@ func TestShotPassesFlagsToChrome(t *testing.T) {
 	}
 }
 
+// With SHOT_WAIT set, Chrome is passed a virtual-time budget of that many
+// seconds in milliseconds, so a page whose assets arrive late is shot with
+// them; without it, unset or empty, Chrome is passed no budget flag at all,
+// exactly the flags it takes today. The budget composes with a narrow
+// window: a framed shot carries it too.
+func TestShotPassesWaitBudgetToChrome(t *testing.T) {
+	if _, err := exec.LookPath("curl"); err != nil {
+		t.Skip("no curl: it checks the page before the shot")
+	}
+	s := page(t)
+	for _, c := range []struct {
+		name   string
+		env    []string
+		budget string // the budget flag Chrome is passed, or "" for none
+	}{
+		{"SHOT_WAIT unset", nil, ""},
+		{"SHOT_WAIT empty", []string{"SHOT_WAIT="}, ""},
+		{"SHOT_WAIT=1", []string{"SHOT_WAIT=1"}, "--virtual-time-budget=1000"},
+		{"SHOT_WAIT=5", []string{"SHOT_WAIT=5"}, "--virtual-time-budget=5000"},
+		{"SHOT_WAIT=5 at SHOT_WIDTH=390", []string{"SHOT_WAIT=5", "SHOT_WIDTH=390"}, "--virtual-time-budget=5000"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			env, argsFile := standin(t, "shot", 0)
+			out := filepath.Join(t.TempDir(), "shot.png")
+			rc, text := runShot(shotCtx(t), t, []string{s.URL + "/page", out}, append(env, c.env...)...)
+			if rc != 0 {
+				t.Fatalf("shot: exit %d: %s", rc, text)
+			}
+			raw, err := os.ReadFile(argsFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := string(raw)
+			var budgets []string
+			for _, field := range strings.Fields(args) {
+				if strings.HasPrefix(field, "--virtual-time-budget=") {
+					budgets = append(budgets, field)
+				}
+			}
+			switch {
+			case c.budget == "" && len(budgets) != 0:
+				t.Errorf("Chrome was passed %q, want no virtual-time budget without SHOT_WAIT", args)
+			case c.budget != "" && !slices.Equal(budgets, []string{c.budget}):
+				t.Errorf("Chrome was passed %q, want the one budget flag %s", args, c.budget)
+			}
+			if !strings.Contains(args, s.URL+"/page") && !strings.Contains(args, "file://") {
+				t.Errorf("Chrome was passed %q, which names neither the page nor its frame", args)
+			}
+		})
+	}
+}
+
 // The frame carries the page's URL in an attribute, so what would break out
 // of it is escaped: &<>". The page is never fetched here, a stand-in curl
 // answers, since the URL's only purpose is what the frame makes of it.
@@ -542,8 +594,8 @@ func TestShotRefusesAFramingForbiddenPage(t *testing.T) {
 }
 
 // A setting outside its accepted values is refused naming the variable, and
-// Chrome never runs. An invalid SHOT_ANY_STATUS is checked before the page is
-// fetched, so its cases use a port nothing listens on.
+// Chrome never runs. An invalid SHOT_ANY_STATUS or SHOT_WAIT is checked
+// before the page is fetched, so their cases use a port nothing listens on.
 func TestShotRefusesABadSetting(t *testing.T) {
 	if _, err := exec.LookPath("curl"); err != nil {
 		t.Skip("no curl: it checks the page before the shot")
@@ -570,6 +622,14 @@ func TestShotRefusesABadSetting(t *testing.T) {
 			url:     "http://" + shut + "/page",
 			refusal: func(value string) string {
 				return "SHOT_ANY_STATUS=" + value + " is not 1 (on) or 0 (off)"
+			},
+		},
+		{
+			setting: "SHOT_WAIT",
+			values:  []string{"abc", "0", "00", "-5", "12.5", "5s", "3 0", "99999999999999999999"},
+			url:     "http://" + shut + "/page",
+			refusal: func(value string) string {
+				return "SHOT_WAIT=" + value + " is not a positive number of seconds"
 			},
 		},
 	} {

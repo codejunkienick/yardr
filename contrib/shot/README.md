@@ -32,6 +32,15 @@ own. Chrome gets `SHOT_TIMEOUT` seconds to finish, a minute when that is
 unset; a slower shot fails with `shot: chrome did not finish within ...` and
 what Chrome printed so far.
 
+A page whose assets arrive late can be shot before they do: headless
+Chrome shoots as the page finishes loading, so a CDN typeface still on
+its way shows as its fallback face, or as no text at all. `SHOT_WAIT`
+seconds waits them out (`SHOT_WAIT=5 contrib/shot/shot <url> <file>`
+holds the shot five virtual seconds for late arrivals); unset or empty,
+the shot goes as Chrome finishes loading, as before. A `SHOT_WAIT` that
+is not a positive number is refused, naming it, before the page is
+fetched.
+
 A page that answers 4xx or 5xx counts as not there, with the status in the
 reason: an error page and a missing route can answer with the same status and
 the same body, so only the person shooting can say the page is meant to.

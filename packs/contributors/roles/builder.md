@@ -171,10 +171,12 @@ after your last commit and your test run, and attach it to the note:
   either way. The window is 1280 wide (`SHOT_WIDTH` pixels changes it;
   `SHOT_WIDTH=390` is a phone's) and 800 high. Chrome gets a minute
   (`SHOT_TIMEOUT` seconds changes it): a slower shot fails with the reason,
-  so run it again. Where the page needs driving first (a click, a scroll),
-  drive it with `agent-browser` and shoot with `agent-browser screenshot`. A
-  depot may carry its own shot script instead: the depot's README or
-  `.yardr/depot.md` names it.
+  so run it again. A page whose assets arrive late (a CDN typeface) can be
+  shot before they do (`SHOT_WAIT` seconds waits them out); unset, the shot
+  goes as Chrome finishes loading. Where the page needs driving first (a
+  click, a scroll), drive it with `agent-browser` and shoot with
+  `agent-browser screenshot`. A depot may carry its own shot script instead:
+  the depot's README or `.yardr/depot.md` names it.
 - Never shoot a deployed preview, wherever it is hosted: the preview stage
   deploys after review, so at build time it shows the previous push, or
   nothing yet.
