@@ -44,11 +44,30 @@ type sidebarDepot struct {
 	// Title is the row's title and aria-label: the depot, with the count
 	// in words.
 	Title string
-	Flows []sidebarFlow
+	// Current is whether the page stands on this depot: its row is
+	// marked, as the rail marks the open mode.
+	Current bool
+	Flows   []sidebarFlow
 	// Quiet are the depot's quiet flows' names: nothing in transit, no
 	// backlog, no open ask. QuietLabel is the folded row's words.
 	Quiet      []string
 	QuietLabel string
+}
+
+// sidebarQuietDepot is folded under Quiet; the page opens that group and
+// marks its row when this depot is current.
+type sidebarQuietDepot struct {
+	Name    string
+	Current bool
+}
+
+// quietFlowsLabel is n quiet flows in words: the folded row's words, the
+// sidebar's and the depot page's alike.
+func quietFlowsLabel(n int) string {
+	if n == 1 {
+		return "1 quiet flow"
+	}
+	return strconv.Itoa(n) + " quiet flows"
 }
 
 // sidebar is the shell's sidebar for the page.
@@ -73,10 +92,11 @@ type sidebar struct {
 	DecidePill  string
 	DecideTitle string
 	Depots      []sidebarDepot
-	// Quiet are the quiet depots' names: nothing in transit, no backlog.
-	// QuietLabel is the folded row's words.
-	Quiet      []string
-	QuietLabel string
+	// Quiet are the quiet depots, folded under QuietLabel. QuietCurrent
+	// opens the fold when it holds the current depot.
+	Quiet        []sidebarQuietDepot
+	QuietCurrent bool
+	QuietLabel   string
 }
 
 // transitWords is n beads in transit in words, for a row's title and
@@ -90,8 +110,9 @@ func transitWords(n int) string {
 
 // sidebarFor is the shell's sidebar for the page: ov is the overview, l
 // the shell's line. Either nil renders it bare, for an error page, as the
-// rail with a nil line carries no pills.
-func sidebarFor(yard string, ov *Home, l *Line) sidebar {
+// rail with a nil line carries no pills. current is the depot the page
+// stands on, "" on any other page: its row is marked current.
+func sidebarFor(yard string, ov *Home, l *Line, current string) sidebar {
 	out := sidebar{Yard: yard, Chip: chipLetters(yard), Shade: yardSlot(yard)}
 	if ov == nil || l == nil {
 		out.Bare = true
@@ -178,11 +199,14 @@ func sidebarFor(yard string, ov *Home, l *Line) sidebar {
 		}
 		out.Arrivals += transit
 		if transit == 0 && backlog == 0 {
-			out.Quiet = append(out.Quiet, d.Name)
+			currentDepot := d.Name == current
+			out.Quiet = append(out.Quiet, sidebarQuietDepot{Name: d.Name, Current: currentDepot})
+			out.QuietCurrent = out.QuietCurrent || currentDepot
 			continue
 		}
 		sd := sidebarDepot{Name: d.Name, Transit: transit,
-			Title: d.Name + " — " + transitWords(transit)}
+			Title:   d.Name + " — " + transitWords(transit),
+			Current: d.Name == current}
 		for j := range d.Flows {
 			if inTransit[j] == 0 && inBacklog[j] == 0 && !dotted[di][j] {
 				sd.Quiet = append(sd.Quiet, d.Flows[j].Name)
@@ -195,10 +219,7 @@ func sidebarFor(yard string, ov *Home, l *Line) sidebar {
 			sd.Flows = append(sd.Flows, sf)
 		}
 		if len(sd.Quiet) > 0 {
-			sd.QuietLabel = strconv.Itoa(len(sd.Quiet)) + " quiet flows"
-			if len(sd.Quiet) == 1 {
-				sd.QuietLabel = "1 quiet flow"
-			}
+			sd.QuietLabel = quietFlowsLabel(len(sd.Quiet))
 		}
 		out.Depots = append(out.Depots, sd)
 	}

@@ -94,6 +94,12 @@ func Updated(data map[string]any) string { return updated(data) }
 // at most ten.
 func ClosedToday(beads []store.Bead, now time.Time) []HomeClosed { return closedToday(beads, now) }
 
+// LandedSince are the beads that landed in depot in the day before now,
+// the newest first.
+func LandedSince(beads []store.Bead, depot string, now time.Time) []store.Bead {
+	return landedSince(beads, depot, now)
+}
+
 // ProviderOf is the subscription a herdr group or crew member with cfg
 // burns, resolved against as without asking.
 func ProviderOf(runner string, cfg map[string]any, as []limits.Answerer) string {

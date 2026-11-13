@@ -119,9 +119,16 @@ type HomeDepot struct {
 type HomeFlow struct {
 	Name string `json:"name"`
 	Type string `json:"type,omitempty"`
+	// Src is where the flow comes from, as `yardr flow show` says it:
+	// "store", "repo@0f415ee".
+	Src string `json:"src"`
 	// Stages are the flow's stages an open bead can sit in, in the flow's
 	// order: a terminal stage closes the bead that enters it.
 	Stages []StageCount `json:"stages"`
+	// Terminal are the flow's terminal stages, in the flow's order: the
+	// stages Stages leaves out, which the depot's page draws its strip
+	// with.
+	Terminal []string `json:"terminal,omitempty"`
 }
 
 type StageCount struct {
@@ -157,9 +164,11 @@ func (s *Server) overview(ctx context.Context, y *yard) (*Home, error) {
 			hr.Error = errs[i].Error()
 		}
 		for _, rf := range flows {
-			hf := HomeFlow{Name: rf.Flow.Name, Type: rf.Type, Stages: []StageCount{}}
+			hf := HomeFlow{Name: rf.Flow.Name, Type: rf.Type, Src: rf.Source.String(), Stages: []StageCount{}}
 			for _, st := range rf.Flow.Stages {
-				if !slices.Contains(rf.Flow.Terminal, st) {
+				if rf.Flow.IsTerminal(st) {
+					hf.Terminal = append(hf.Terminal, st)
+				} else {
 					hf.Stages = append(hf.Stages, StageCount{Stage: st})
 				}
 			}

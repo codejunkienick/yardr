@@ -216,8 +216,8 @@ func (f *fixture) populate() {
 
 var wantHome = web.Home{Yard: "depot", Depots: []web.HomeDepot{
 	{Name: "line", Kind: store.DepotGit, Open: 4, Held: 1, Flows: []web.HomeFlow{
-		{Name: "code", Stages: []web.StageCount{{Stage: "backlog", Open: 2}, {Stage: "new", Open: 1}, {Stage: "review"}}},
-		{Name: "bugs", Type: "bug", Stages: []web.StageCount{{Stage: "triage", Open: 1}}},
+		{Name: "code", Src: "store", Stages: []web.StageCount{{Stage: "backlog", Open: 2}, {Stage: "new", Open: 1}, {Stage: "review"}}, Terminal: []string{"merged"}},
+		{Name: "bugs", Type: "bug", Src: "store, type bug", Stages: []web.StageCount{{Stage: "triage", Open: 1}}, Terminal: []string{"fixed"}},
 	}},
 	{Name: "loose", Kind: store.DepotGit, Open: 1, Flows: []web.HomeFlow{},
 		Elsewhere: []web.StageCount{{Stage: "inbox", Open: 1}}},
@@ -1262,9 +1262,9 @@ func TestNoOtherHost(t *testing.T) {
 		beadPage = beadPage || strings.HasPrefix(path, "/beads/")
 	}
 	// The walk must have reached what it is there to check: every page of
-	// the rail, a bead's own page, the error page.
+	// the rail, a bead's own page, the depots' pages, the error page.
 	for _, path := range []string{"/", "/talk", "/line", "/flows", "/flows?panel=1", "/beads", "/sessions", "/crew",
-		"/previews", "/config", "/depots", "/groups", "/routes", "/peers", "/deps", "/limits", "/telemetry", "/nowhere"} {
+		"/previews", "/config", "/depots", "/depots/line", "/depots/loose", "/groups", "/routes", "/peers", "/deps", "/limits", "/telemetry", "/nowhere"} {
 		if !seen[path] {
 			t.Errorf("the walk did not reach %s: %v", path, seen)
 		}
@@ -1395,7 +1395,8 @@ func TestTokens(t *testing.T) {
 	}
 	// Square corners everywhere; circles only for status dots, the bar's
 	// tiles and pills, which keep footplate's rounded corners, and the
-	// sidebar's chip, rows, dots and pills, which keep the canvas's, as
+	// sidebar's chip, rows, dots and pills and the depot page's cards,
+	// table, rows, dots and segments, which keep the canvas's, as
 	// the talk page's composer keeps its card radius, and pills only for
 	// the Beads filters' chips.
 	radii := regexp.MustCompile(`(?m)^(.*)border-radius:\s*([^;]+);`).FindAllStringSubmatch(string(css), -1)
@@ -1404,7 +1405,8 @@ func TestTokens(t *testing.T) {
 		round := strings.HasPrefix(before, ".dot ") || strings.HasPrefix(before, ".chip ") ||
 			strings.HasPrefix(before, ".tile ") || strings.HasPrefix(before, ".pill ") ||
 			strings.HasPrefix(before, ".chips a ") || strings.HasPrefix(before, "#send ") ||
-			strings.HasPrefix(before, ".side-")
+			strings.HasPrefix(before, ".side-") || strings.HasPrefix(before, ".depot-") ||
+			strings.HasPrefix(before, ".seg ")
 		if r[2] != "0" && !round {
 			t.Errorf("a corner that is not square: %s", r[0])
 		}

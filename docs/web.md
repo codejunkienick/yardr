@@ -764,6 +764,7 @@ origin; the test allows those and only those ([One bead](#one-bead)).
 | `/config` | the hub of the configuration pages: links to the lists, with Telemetry for the operator, and, drawn for the operator alone, the yardmaster's delegation switch as it stands (`delegation`: `on` or `off`) with the button for the other state. Turning it off takes the operator check alone; turning it on takes the fresh sign-in a strong card takes, and on a view with no gateway to prove one it stays a terminal's ([users.md](users.md#the-yardmaster-for-the-operator)) | `Config` |
 | `/delegations/<id>` | a delegated run's record: what the yardmaster ran for an operator, on which of their mails, what each setting held before and how the run is taken back (`yardr delegation show`); in the JSON a pack apply's objects stand by name under `record.objects` and whole, with their diffs and before-states, under `record.plan`; an operator's alone, any operator's, and a 404 for anyone else | `DelegationPage` |
 | `/depots` | the yard's depots: each with its kind, path, base and test command (`yardr depot list`), live | `Depots` |
+| `/depots/<name>` | one depot: its four counts, its flows with their stage strips, what waits on the viewer there, what landed in the last day ([One depot](#one-depot)) | `DepotPage` |
 | `/groups` | the yard's groups: each with its runner, limit, members and config (`yardr group list`), live | `Groups` |
 | `/routes` | the yard's routes in match order: each with its stage, filters and group, or its groups in order with their quota conditions (`yardr route list`), live | `Routes` |
 | `/peers` | the yards this one is linked with: each with its URL, what the link carries and what waits for it (`yardr peer list`), live | `Peers` |
@@ -791,8 +792,8 @@ Home as JSON:
       "name": "yardr", "kind": "git",
       "open": 6, "working": 1, "held": 1,
       "flows": [
-        {"name": "default", "stages": [{"stage": "backlog", "open": 4}, {"stage": "new", "open": 1}, {"stage": "review", "open": 1}]},
-        {"name": "yardr.train", "type": "train", "stages": [{"stage": "open", "open": 0}]}
+        {"name": "default", "src": "repo@0f415ee", "stages": [{"stage": "backlog", "open": 4}, {"stage": "new", "open": 1}, {"stage": "review", "open": 1}], "terminal": ["merged"]},
+        {"name": "yardr.train", "type": "train", "src": "store, type train", "stages": [{"stage": "open", "open": 0}]}
       ],
       "elsewhere": [{"stage": "inbox", "open": 1}]
     }
@@ -832,8 +833,9 @@ Home as JSON:
 - `flows` are the flows that govern the depot (`yardr flow show <depot>`): its
   own first, then one per bead type that has its own (`type`). A bead is
   counted under its type's flow when there is one, else under the depot's.
-  Terminal stages are left out: entering one closes the bead, so no open
-  bead sits there.
+  Each flow names its source (`src`, as `yardr flow show` says it) and its
+  terminal stages in order (`terminal`). Terminal stages are left out of
+  `stages`: entering one closes the bead, so no open bead sits there.
 - `elsewhere` counts open beads in a stage their flow lacks: a bead pinned
   to another flow, one a changed flow left behind, or every bead of a depot
   with no flow.
@@ -1522,6 +1524,75 @@ answers the same with it as without it. Every colour the panel uses is a
 named token of the stylesheet (`--panel-*` for the track, with `--running`,
 `--held` and `--accent` for running green, fault red and person's-turn rust,
 and `--late` for the late ring), so the palette changes in one edit.
+
+## One depot
+
+`/depots/<name>` shows one depot as the canvas's depot board draws it:
+the title block, four counts, the flows with their stage strips, what
+waits on the viewer in this depot, what landed in the last day. An
+unknown depot is a 404. The page is a snapshot: reload it to see the
+depot change. The sidebar's depot rows link here, with the current
+depot marked; its flow rows stay on `/flows` until the flow list gives
+them a page of their own.
+
+```json
+{
+  "name": "yardr", "kind": "git", "tag": "repo@52e22d5",
+  "active_flows": 3, "quiet_flows": 4,
+  "waiting": 2, "transit": 2, "backlog": 54, "landed": 17,
+  "flows": [
+    {"name": "default", "src": "repo@52e22d5",
+     "stages": [
+       {"stage": "backlog", "open": 49, "kind": "first"},
+       {"stage": "new", "open": 0, "kind": "empty"},
+       {"stage": "merged", "open": 17, "kind": "merged"}],
+     "on_you": 0, "transit": 0, "backlog": 49, "landed": 17},
+    {"name": "contributors.pr", "type": "pr", "src": "pr · store, type pr",
+     "stages": [{"stage": "contributor", "open": 2, "kind": "ask"}],
+     "on_you": 2, "transit": 2, "backlog": 0, "landed": 0}
+  ],
+  "quiet": ["design"],
+  "waits": [
+    {"bead": "yardr-ypxa", "title": "read crew context without the herdr idle game",
+     "flow": "contributors.pr", "stage": "contributor"}
+  ],
+  "landings": [
+    {"id": "yardr-am42", "title": "show the repository named", "age": "6h",
+     "closed_at": "2026-11-13T14:02:11Z"}
+  ]
+}
+```
+
+- `tag` is the depot's own flow's repository commit, shortened; a dir
+  depot and one with no repo flow carry none.
+- `waiting` counts the depot's open beads carrying an open ask for the
+  viewer: the rail pill's predicate restricted to the depot, with beads
+  of no depot standing under no row. `transit` counts those past their
+  flow's first stage with those off their flow, `backlog` those sitting
+  in it: the sidebar's per-depot counts. `landed` counts the beads that
+  landed in the last rolling 24 hours: closed with their close keeping
+  them in `merged`.
+- `flows` are the depot's flows that are not quiet, in the depot's
+  order. `src` is where the flow comes from: the type with its source
+  for a bead type's flow, the source alone for the depot's own.
+  `on_you`, `transit`, `backlog` and `landed` slice the four counts by
+  flow. `quiet` are the quiet flows' names: nothing in transit, no
+  backlog, no open ask.
+- A strip's `stages` stand in flow order with the terminals last: `ask`
+  holds the viewer's open asks, `merged` is the landed stage and counts
+  its landings in the last 24 hours, `first` the flow's first stage,
+  `closed` the dropped one, `open` any other stage with beads, `empty` a
+  stage with none. The ask orange wins over every other kind.
+- `waits` are the depot's asked beads, the newest first, with the flow
+  and stage each waits in. `landings` are what landed, the 5 newest,
+  with how long ago each landed in the feed's words.
+- `error`, on the depot, is why its flows could not be read; its beads
+  are then all counted in transit.
+
+On the page the breadcrumb reads Depots › the name, and the title block
+`Depot · N active flows, M quiet` with the tag. Only the Waiting card
+links, to `/`; a waiting row links to its bead, a landed row is plain.
+Below 700 px the cards stack and the phone bar stands as today.
 
 ## Beads
 
@@ -2433,7 +2504,8 @@ Rules the stylesheet holds to, and a test checks the second:
 - Corners are square everywhere (`border-radius: 0`). Circles are a
   status dot (`.dot`, with `.working`, `.running` or `.held`), the bar's
   tiles and pills, which keep footplate's rounded corners, and the
-  sidebar's chip, rows, dots and pills, which keep the canvas's; the
+  sidebar's chip, rows, dots and pills and the depot page's cards,
+  table, rows, dots and segments, which keep the canvas's; the
   Beads filters' chips are pills too.
 - Words come from the yard: line, landed, held, waits for you.
 

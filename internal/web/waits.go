@@ -260,12 +260,7 @@ func (w Waiting) AnsweredOnly() bool {
 
 // ShortID is the bead's short id for the row's end: what stands after the
 // last dash (yardr-evd6 reads as evd6), the whole id when there is none.
-func (w Waiting) ShortID() string {
-	if i := strings.LastIndex(w.Bead, "-"); i >= 0 {
-		return w.Bead[i+1:]
-	}
-	return w.Bead
-}
+func (w Waiting) ShortID() string { return shortBead(w.Bead) }
 
 // Age is how long the bead has waited, about: since its last change.
 func (w Waiting) Age() string { return age(time.Since(w.Since)) }

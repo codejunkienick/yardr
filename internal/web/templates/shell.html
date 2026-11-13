@@ -43,10 +43,11 @@
   {{- /* The sidebar: the yard's chip and name, Arrivals and Decide with
          their counts, Crew bare, the depots with their flows, and Settings
          at the foot. A flow's dot means a bead of that flow carries an
-         open ask for the viewer. Depot and flow rows go to the flows page
-         until the depot overview and the flow list give them pages of
-         their own. An error page renders it bare: the yard and the fixed
-         rows, no counts, no depots. */}}
+         open ask for the viewer. Depot rows go to the depot's page, with
+         the current depot marked; flow rows go to the flows page until
+         the flow list gives them a page of their own. An error page
+         renders it bare: the yard and the fixed rows, no counts, no
+         depots. */}}
   <nav class="sidebar" aria-label="Depots and flows">
     <a class="yard-row" href="/line" title="{{.Sidebar.Yard}}" aria-label="{{.Sidebar.Yard}}"><span class="chip chip-{{.Sidebar.Shade}}">{{.Sidebar.Chip}}</span><span class="yard-name">{{.Sidebar.Yard}}</span></a>
     <ul class="side-places">
@@ -58,7 +59,7 @@
     <p class="side-head">Depots</p>
     <ul class="side-depots">
       {{- range .Sidebar.Depots}}
-      <li><a class="side-row" href="/flows" title="{{.Title}}" aria-label="{{.Title}}"><span class="side-label">{{.Name}}</span><span class="side-transit">{{.Transit}}</span></a>
+      <li><a class="side-row" href="/depots/{{.Name}}" title="{{.Title}}" aria-label="{{.Title}}"{{if .Current}} aria-current="page"{{end}}><span class="side-label">{{.Name}}</span><span class="side-transit">{{.Transit}}</span></a>
         {{- if or .Flows .Quiet}}
         <ul class="side-flows">
           {{- range .Flows}}
@@ -79,10 +80,10 @@
       {{- end}}
     </ul>
     {{- if .Sidebar.Quiet}}
-    <details class="side-quiet"><summary><svg class="side-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>{{.Sidebar.QuietLabel}}</summary>
+    <details class="side-quiet"{{if .Sidebar.QuietCurrent}} open{{end}}><summary><svg class="side-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>{{.Sidebar.QuietLabel}}</summary>
       <ul class="side-depots">
         {{- range .Sidebar.Quiet}}
-        <li><a class="side-row" href="/flows"><span class="side-label">{{.}}</span></a></li>
+        <li><a class="side-row" href="/depots/{{.Name}}"{{if .Current}} aria-current="page"{{end}}><span class="side-label">{{.Name}}</span></a></li>
         {{- end}}
       </ul>
     </details>

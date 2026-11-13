@@ -160,6 +160,8 @@ ul, ol { list-style: none; }
 .side-places { display: flex; flex-direction: column; gap: 2px; }
 .side-row { display: flex; align-items: center; gap: 10px; min-height: 30px; padding: 0 8px; border-radius: 6px; }
 .side-row:hover { color: var(--accent-hover); }
+/* The depot the page stands on: its row stands filled. */
+.side-row[aria-current="page"] { background: var(--panel); }
 .side-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-icon { flex: none; color: var(--dim); }
 .side-icon .teeth { stroke-dasharray: 3.2 2.6; }
@@ -671,6 +673,79 @@ code { font: inherit; color: var(--dim); overflow-wrap: anywhere; }
 .dot.working { background: var(--working); }
 .dot.running { background: var(--running); }
 .dot.held { background: var(--held); }
+
+/* One depot: the canvas's depot board — the title block, four counts, the
+   flows with their stage strips, what waits on the viewer, what landed.
+   The page reads in the sans face throughout, as the sidebar does, with
+   bead ids in mono; the cards, the table and the segments keep the
+   canvas's rounded corners. */
+.depot { display: flex; flex-direction: column; gap: 28px; padding: 28px var(--gap); font-family: var(--sans); font-size: 13px; }
+.depot-title h2 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.depot-title p { margin-top: 6px; color: var(--dim); }
+/* The four counts: the Waiting card links to Decide and stands in rust,
+   the transit counts in link blue, the rest plain. */
+.depot-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.depot-card { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--panel); }
+.depot-card-label { font-size: 12px; color: var(--dim); }
+.depot-card-num { font-size: var(--large); font-weight: 600; font-variant-numeric: tabular-nums; }
+.depot-wait { border-color: var(--hairline-strong); background: var(--panel); border-color: color-mix(in srgb, var(--accent) 35%, var(--hairline)); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.depot-wait .depot-card-num { color: var(--accent); }
+a.depot-card:hover .depot-card-num { color: var(--accent-hover); }
+.depot-transit { color: var(--link); }
+.depot-onyou { color: var(--accent); }
+.depot-error { overflow-wrap: anywhere; }
+/* The flows: one row per flow that is not quiet, with its strip and its
+   four counts, and one folded row for the quiet ones. The head row stands
+   on the ground, the rows on the panel. */
+.depot-flows { border: 1px solid var(--hairline); border-radius: 10px; background: var(--panel); overflow: hidden; }
+.depot-scroll { overflow-x: auto; }
+.depot-flow { display: grid; grid-template-columns: minmax(170px, 1.2fr) minmax(260px, 2fr) 80px 80px 80px 80px; gap: 12px; align-items: center; min-width: 640px; padding: 12px 16px; }
+.depot-flow + .depot-flow { border-top: 1px solid var(--hairline); }
+.depot-head { padding: 10px 16px; background: var(--ground); font-size: 12px; color: var(--dim); }
+.depot-flow-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.depot-src { font-size: 12px; font-weight: 400; color: var(--dim); overflow-wrap: anywhere; }
+.depot-strip { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.depot-n { text-align: right; font-variant-numeric: tabular-nums; }
+/* A strip's segments: orange holds the viewer's asks, green is merged,
+   grey the first stage and closed, blue any other stage with beads, and
+   an empty stage a tick. The tints mix the token over the row, with a
+   plain hairline where the browser cannot mix. */
+.seg { display: inline-flex; align-items: center; justify-content: center; height: 20px; min-width: 26px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.seg-ask { background: var(--pill); color: #fff; }
+.seg-merged { color: var(--running); background: var(--hairline); background: color-mix(in srgb, var(--running) 16%, transparent); }
+.seg-muted { color: var(--dim); background: var(--hairline); }
+.seg-open { color: var(--link); background: var(--hairline); background: color-mix(in srgb, var(--link) 16%, transparent); }
+.seg-empty { min-width: 0; width: 12px; height: 6px; padding: 0; background: var(--hairline-strong); }
+.depot-quiet { border-top: 1px solid var(--hairline); }
+.depot-quiet summary { display: flex; align-items: center; gap: 8px; padding: 12px 16px; color: var(--dim); cursor: pointer; list-style: none; }
+.depot-quiet summary::-webkit-details-marker { display: none; }
+.depot-quiet summary::marker { content: ""; }
+.depot-quiet summary:hover { color: var(--accent-hover); }
+.depot-quiet[open] > summary .side-chev { transform: rotate(90deg); }
+.depot-quiet ul { padding: 0 16px 12px 36px; color: var(--dim); }
+.depot-quiet li { padding: 2px 0; }
+/* What waits and what landed, side by side where there is room. A waiting
+   row links to its bead; a landed row is plain. */
+.depot-cols { display: flex; flex-wrap: wrap; gap: 20px; }
+.depot-sec { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.depot-sec-head { display: flex; align-items: baseline; gap: 8px; }
+.depot-sec-head h3 { font-size: 14px; font-weight: 600; }
+.depot-sec-sub { color: var(--dim); }
+.depot-open { margin-left: auto; font-size: 12px; color: var(--dim); white-space: nowrap; }
+.depot-rows { display: flex; flex-direction: column; border: 1px solid var(--hairline); border-radius: 10px; background: var(--panel); overflow: hidden; }
+.depot-rows li { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+.depot-rows li + li { border-top: 1px solid var(--hairline); }
+.depot-rows li:has(> a) { padding: 0; }
+.depot-rows li > a { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 10px 14px; }
+.depot-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.depot-check { flex: none; color: var(--running); }
+.depot-id { font-family: var(--mono); font-size: 12px; color: var(--dim); flex: none; }
+.depot-row-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.depot-where { font-size: 12px; color: var(--dim); flex: none; }
+.depot-none { color: var(--faint); }
+@media (max-width: 699px) {
+  .depot-cards { grid-template-columns: 1fr; }
+}
 
 /* --- narrower windows ---------------------------------------------------- */
 

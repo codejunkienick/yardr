@@ -55,8 +55,8 @@ func TestSidebarCounts(t *testing.T) {
 			t.Errorf("the sidebar lacks %s: %s", want, s)
 		}
 		for _, want := range []string{
-			`<a class="side-row" href="/flows" title="line — 1 in transit" aria-label="line — 1 in transit"><span class="side-label">line</span><span class="side-transit">1</span></a>`,
-			`<a class="side-row" href="/flows" title="loose — 1 in transit" aria-label="loose — 1 in transit"><span class="side-label">loose</span><span class="side-transit">1</span></a>`,
+			`<a class="side-row" href="/depots/line" title="line — 1 in transit" aria-label="line — 1 in transit"><span class="side-label">line</span><span class="side-transit">1</span></a>`,
+			`<a class="side-row" href="/depots/loose" title="loose — 1 in transit" aria-label="loose — 1 in transit"><span class="side-label">loose</span><span class="side-transit">1</span></a>`,
 		} {
 			if !strings.Contains(s, want) {
 				t.Errorf("the sidebar lacks %s: %s", want, s)
@@ -121,7 +121,7 @@ func TestSidebarCounts(t *testing.T) {
 		if !strings.Contains(s, "Quiet depots · 1") {
 			t.Errorf("the sidebar folds no quiet depot: %s", s)
 		}
-		if want := `<a class="side-row" href="/flows"><span class="side-label">empty</span></a>`; !strings.Contains(s, want) {
+		if want := `<a class="side-row" href="/depots/empty"><span class="side-label">empty</span></a>`; !strings.Contains(s, want) {
 			t.Errorf("the sidebar lacks %s: %s", want, s)
 		}
 		if strings.Contains(s, `>empty</span><span class="side-transit"`) {
@@ -159,7 +159,7 @@ func TestSidebarCounts(t *testing.T) {
 			`<a class="yard-row" href="/line"`,
 			`<a class="side-row" href="/line" title="Arrivals`,
 			`<a class="side-row" href="/" title="Decide`,
-			`<a class="side-row" href="/flows" title="line`,
+			`<a class="side-row" href="/depots/line" title="line`,
 			`<a class="side-flow" href="/flows" title="code`,
 			`<a class="side-row" href="/config" title="Settings"`,
 		} {

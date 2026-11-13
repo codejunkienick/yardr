@@ -1,0 +1,98 @@
+{{define "content"}}
+{{- with .Data}}
+<nav class="item filters" aria-label="Depots">
+  <p><a href="/depots">Depots</a> <span aria-hidden="true">›</span> {{.Name}}</p>
+</nav>
+<div class="depot">
+  <div class="depot-title">
+    <h2>{{.Name}}</h2>
+    <p>{{.Subhead}}</p>
+  </div>
+  <section class="depot-cards" aria-label="Counts">
+    <a class="depot-card depot-wait" href="/">
+      <span class="depot-card-label">Waiting on you</span>
+      <span class="depot-card-num">{{.Waiting}}</span>
+    </a>
+    <div class="depot-card">
+      <span class="depot-card-label">In transit</span>
+      <span class="depot-card-num depot-transit">{{.Transit}}</span>
+    </div>
+    <div class="depot-card">
+      <span class="depot-card-label">Backlog · waits on shaping</span>
+      <span class="depot-card-num">{{.Backlog}}</span>
+    </div>
+    <div class="depot-card">
+      <span class="depot-card-label">Landed · last 24h</span>
+      <span class="depot-card-num">{{.Landed}}</span>
+    </div>
+  </section>
+  {{- if .Error}}
+  <p class="depot-error held">{{.Error}}</p>
+  {{- end}}
+  {{- if or .Flows .Quiet}}
+  <section class="depot-flows" aria-label="Flows">
+    <div class="depot-scroll">
+      <div class="depot-flow depot-head" aria-hidden="true">
+        <span>Flow</span><span>Stages</span><span>On you</span><span>In transit</span><span>Backlog</span><span>Landed 24h</span>
+      </div>
+      {{- range .Flows}}
+      <div class="depot-flow">
+        <span class="depot-flow-name"><span>{{.Name}}</span><span class="depot-src">{{.Src}}</span></span>
+        <span class="depot-strip">{{- range .Stages}}<span class="seg seg-{{.Class}}" title="{{.Title}}">{{if .Open}}{{.Open}}{{end}}</span>{{end}}</span>
+        <span class="depot-n depot-onyou">{{.OnYou}}</span>
+        <span class="depot-n depot-transit">{{.Transit}}</span>
+        <span class="depot-n">{{.Backlog}}</span>
+        <span class="depot-n">{{.Landed}}</span>
+      </div>
+      {{- end}}
+    </div>
+    {{- if .Quiet}}
+    <details class="depot-quiet">
+      <summary><svg class="side-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>{{.QuietLabel}}</summary>
+      <ul>
+        {{- range .Quiet}}
+        <li>{{.}}</li>
+        {{- end}}
+      </ul>
+    </details>
+    {{- end}}
+  </section>
+  {{- else if not .Error}}
+  <p class="depot-none faint">No flow governs this depot.</p>
+  {{- end}}
+  <div class="depot-cols">
+    <section class="depot-sec" aria-label="Waiting on you">
+      <div class="depot-sec-head">
+        <h3>Waiting on you</h3>
+        <span class="depot-sec-sub">{{.Waiting}} in {{.Name}}</span>
+        <a class="depot-open" href="/">Open Decide</a>
+      </div>
+      {{- if .Waits}}
+      <ul class="depot-rows">
+        {{- range .Waits}}
+        <li><a href="/beads/{{.Bead}}"><span class="depot-dot" aria-hidden="true"></span><span class="depot-id">{{.ShortID}}</span><span class="depot-row-title">{{.Title}}</span><span class="depot-where">{{.Where}}</span></a></li>
+        {{- end}}
+      </ul>
+      {{- else}}
+      <p class="depot-none faint">Nothing waits on you in this depot.</p>
+      {{- end}}
+    </section>
+    <section class="depot-sec" aria-label="Landed">
+      <div class="depot-sec-head">
+        <h3>Landed</h3>
+        <span class="depot-sec-sub">{{.Landed}} in the last 24h</span>
+      </div>
+      {{- if .Landings}}
+      <ul class="depot-rows">
+        {{- range .Landings}}
+        <li><svg class="depot-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg><span class="depot-id">{{.ShortID}}</span><span class="depot-row-title">{{.Title}}</span><span class="depot-where">{{.Age}} ago</span></li>
+        {{- end}}
+      </ul>
+      {{- else}}
+      <p class="depot-none faint">Nothing landed in the last 24h.</p>
+      {{- end}}
+    </section>
+  </div>
+</div>
+{{- end}}
+{{end}}
