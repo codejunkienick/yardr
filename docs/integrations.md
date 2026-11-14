@@ -2574,6 +2574,26 @@ A line from the phone, sent to the isolated yard, was recorded as
     42 10-13 17:40  hook (all) telegram message create by mckean on "mckean": Can the shed land on Monday?
 ```
 
+- **An outside polling bridge.** A separate project polls Telegram with
+  `getUpdates` and declares the yard source `tgbridge` over loopback: the
+  pack-API way for a long-lived process, which stays outside yardr
+  ([pack-api.md](pack-api.md#left-out)). There is no public hook URL.
+  Replies are ledger-backed, so a retry after a lost answer posts once,
+  and `thread show` reads the whole message. It adds topics, buttons,
+  pins, reactions, typing, optional on-host voice transcription, and
+  optional operator cards. It costs a separate Python service and install
+  per bot, with its own update, rollback, secrets and state files, and it
+  is not part of yardr: yardr promises nothing for it. One bot takes this
+  or the bundled pack, never both: `setWebhook` stops `getUpdates`.
+  Public source only until a compatible public release and a re-check of
+  the exact candidate: the unchanged pack passed check and the basic
+  hook-to-reply slice on public core 52e22d57, while release v0.17.0
+  refuses `thread.formats`. Its setup's first eleven steps are that basic
+  slice, without native home or operator keys; skill add and `skills=`
+  need a fork and are skipped on public core. A newer core is not covered
+  until it is proved the same way. Bridge:
+  https://github.com/codejunkienick/yardr-telegram at `0f7debb`.
+
 ### Slack, where it differs
 
 The same steps, with these differences (`yardr pack show slack` walks
