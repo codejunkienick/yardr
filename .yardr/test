@@ -2110,7 +2110,7 @@ internal/store/secretask.go 1092 secret asks and harness key files
 internal/store/settings.go 1117 yard settings and their checks
 internal/store/sourcecalls.go 1240 source grants and callables
 internal/store/subscriptions.go 1192 identities, subscriptions and where-clauses
-internal/store/users.go 1301 user records and operator words
+internal/store/users.go 1300 user records and operator words
 '
 # filesizebudget fails the run when a non-test Go file stands over its
 # ceiling in the table above, or when one with no row stands over 1000

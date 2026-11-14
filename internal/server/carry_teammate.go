@@ -69,27 +69,33 @@ func (c *carrier) carryTeammate(ctx context.Context, rec *store.Carry, run *stor
 	return c.carryUninvite(ctx, rec, run)
 }
 
-// inviteOf is the name, the address and the role of a parsed invite,
-// the role a member's where the command names none.
-func inviteOf(argv []string) (name, email, role string) {
+// inviteOf is the name, the address, the role and the crew-talk of a parsed
+// invite: the role a member's where the command names none, and crew-talk
+// whether the person may write to the crew on the operator's subscription,
+// absent reading as no for a member and yes for an operator. No new carry
+// state: the flag rides the approved argv, pinned at approval.
+func inviteOf(argv []string) (name, email, role string, crewTalk bool) {
 	name, role = argv[2], store.RoleMember
+	var filed string
 	for i := 3; i+1 < len(argv); i += 2 {
 		switch argv[i] {
 		case "--email":
 			email = argv[i+1]
 		case "--role":
 			role = argv[i+1]
+		case "--crew-talk":
+			filed = argv[i+1]
 		}
 	}
-	return name, email, role
+	return name, email, role, role == store.RoleOperator || filed == "yes"
 }
 
 func (c *carrier) carryInvite(ctx context.Context, rec *store.Carry, run *store.AskRun) (string, string, error) {
-	name, email, role := inviteOf(run.Argv)
+	name, email, role, crewTalk := inviteOf(run.Argv)
 	if email == "" && len(rec.TeammateEmails) > 0 {
 		email = rec.TeammateEmails[0]
 	}
-	if err := c.st.CarryInvite(ctx, rec.Bead, rec.Ask, c.boot, name, email, role, rec.Actor); err != nil {
+	if err := c.st.CarryInvite(ctx, rec.Bead, rec.Ask, c.boot, name, email, role, crewTalk, rec.Actor); err != nil {
 		return "", fmt.Sprintf("the invite of %s did not land at the yard: %v", name, err), nil
 	}
 	if err := c.reportMemberAdd(ctx, email, name, rec.Actor); err != nil {

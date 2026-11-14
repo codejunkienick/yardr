@@ -276,18 +276,18 @@ func IsEnvForKey(key string) bool {
 	return len(key) > len(EnvForPrefix) && strings.HasPrefix(key, EnvForPrefix)
 }
 
-// Serves reports whether r serves user: everyone when its for= is unset
-// or empty, else the users it names.
-func (r CrewMember) Serves(user string) bool {
-	return configServes(r.Config, user)
+// Serves reports whether r serves user: for= membership, and for a member
+// marked own-login-only only once their env with r stands.
+func (r CrewMember) Serves(user string, marked bool) bool {
+	return configServes(r.Config, user, marked)
 }
 
-// configServes is Serves of a config: everyone when for= is unset or
-// empty, else membership. The read receipt (readers.letter) asks it of a
-// config it decoded for cursors alone.
-func configServes(cfg map[string]any, user string) bool {
+// configServes is Serves of a config. The read receipt (readers.letter)
+// asks it of a config it decoded for cursors alone.
+func configServes(cfg map[string]any, user string, marked bool) bool {
 	list := servedList(cfg)
-	return len(list) == 0 || slices.Contains(list, user)
+	path, _ := cfg[EnvForPrefix+user].(string)
+	return (len(list) == 0 || slices.Contains(list, user)) && (!marked || path != "")
 }
 
 // servedList is the users r's for= names, sorted, nil when unset or empty.
@@ -335,9 +335,9 @@ func (r CrewMember) EnvFor(user string) string {
 }
 
 // HasConversation reports whether r keeps a conversation session for
-// user: served, with its env_for_ key set.
+// user: served unmarked with its env_for_ key set (env presence makes the mark moot).
 func (r CrewMember) HasConversation(user string) bool {
-	return user != "" && r.Serves(user) && r.EnvFor(user) != ""
+	return user != "" && r.Serves(user, false) && r.EnvFor(user) != ""
 }
 
 // sliced reports whether r reads a slice for user: a conversation the
@@ -353,11 +353,11 @@ func (r CrewMember) sliced(user string) bool {
 }
 
 // ConversationUsers are the users r keeps a conversation session for,
-// sorted.
+// sorted, asked unmarked as HasConversation is.
 func (r CrewMember) ConversationUsers() []string {
 	var out []string
 	for key := range r.Config {
-		if user := EnvForUser(key); user != "" && r.Serves(user) && r.EnvFor(user) != "" {
+		if user := EnvForUser(key); user != "" && r.Serves(user, false) && r.EnvFor(user) != "" {
 			out = append(out, user)
 		}
 	}

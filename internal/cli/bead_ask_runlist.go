@@ -144,12 +144,14 @@ const askRunList = `  peer add <name> <invite>
       a person becomes a user of the yard, and reads mail from now on
   user rm <name>
       a user goes, with their subscriptions and devices; the mail stays
-  user invite <name> --email <address> [--role operator]
+  user invite <name> --email <address> [--role operator] [--crew-talk yes|no]
       a teammate is invited by email: a user is made (a member, or an
       operator with --role operator), the address is mapped to them in
       web_jwt_users, and the invite is reported to the edge the yard is
       connected to; the approval is carried out by the server after it,
-      and there is no such command at a terminal: the card is the way in
+      and there is no such command at a terminal: the card is the way in;
+      --crew-talk says whether a member may write to the crew on the
+      operator's subscription, no unless filed yes (an operator always may)
   user uninvite <name>
       a teammate goes: the removal is reported to the edge first, then
       the user, their devices and the mapping go; a plain user, whom no

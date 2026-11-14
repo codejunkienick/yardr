@@ -13,13 +13,14 @@ import (
 
 // The settings of a user: the source that tells them outside the yard of
 // what lands in their inbox, the file their own address in it is read
-// from, which parts they are told of, and their role (RoleOperator or
-// RoleMember).
+// from, which parts they are told of, their role (RoleOperator or
+// RoleMember), and whether a member is on their own login only.
 const (
-	UserNotify  = "notify"
-	UserEnvFile = "env_file"
-	UserTell    = "tell"
-	UserRole    = "role"
+	UserNotify       = "notify"
+	UserEnvFile      = "env_file"
+	UserTell         = "tell"
+	UserRole         = "role"
+	UserOwnLoginOnly = "own_login_only"
 )
 
 // TellParts are the parts a user can be told of outside the yard, as
@@ -123,21 +124,22 @@ func notifySources(tx *bolt.Tx) ([]string, error) {
 // tells them ("" for none), UserEnvFile to the path of the file their
 // address in it is read from ("" for none), UserTell to the parts they are
 // told of, a list of TellParts with commas between ("" for all of them),
-// UserRole to RoleOperator or RoleMember, which an operator alone sets. A
-// source that cannot tell a user is refused with the ones that can, and a
-// part that is none with the three. The path is kept as given: whoever
-// calls resolves it, since the server may run in another directory, and
-// reads the file, which the store never does.
+// UserRole to RoleOperator or RoleMember, which an operator alone sets,
+// and UserOwnLoginOnly to yes or no, a member's mark an operator alone
+// sets. A source that cannot tell a user is refused with the ones that
+// can, and a part that is none with the three. The path is kept as given:
+// whoever calls resolves it, since the server may run in another
+// directory, and reads the file, which the store never does.
 func (s *Store) SetUser(ctx context.Context, name string, set map[string]string, actor string) (*User, error) {
 	keys := make([]string, 0, len(set))
 	for k := range set {
-		if k != UserNotify && k != UserEnvFile && k != UserTell && k != UserRole {
-			return nil, fmt.Errorf("user %s: %s is no setting of a user (it has: %s, %s, %s, %s)", name, k, UserNotify, UserEnvFile, UserTell, UserRole)
+		if k != UserNotify && k != UserEnvFile && k != UserTell && k != UserRole && k != UserOwnLoginOnly {
+			return nil, fmt.Errorf("user %s: %s is no setting of a user (it has: %s, %s, %s, %s, %s)", name, k, UserNotify, UserEnvFile, UserTell, UserRole, UserOwnLoginOnly)
 		}
 		keys = append(keys, k)
 	}
 	if len(keys) == 0 {
-		return nil, fmt.Errorf("user %s: nothing to set (%s=<source>, %s=<file>, %s=<parts>, %s=%s|%s)", name, UserNotify, UserEnvFile, UserTell, UserRole, RoleOperator, RoleMember)
+		return nil, fmt.Errorf("user %s: nothing to set (%s=<source>, %s=<file>, %s=<parts>, %s=%s|%s, %s=yes|no)", name, UserNotify, UserEnvFile, UserTell, UserRole, RoleOperator, RoleMember, UserOwnLoginOnly)
 	}
 	sort.Strings(keys)
 	var u *User
@@ -159,16 +161,29 @@ func (w *wtx) setUser(ctx context.Context, name string, keys []string, set map[s
 	if err != nil {
 		return nil, err
 	}
-	// The role says who may change the yard and approve what it runs, so
-	// it is an operator's to give, never the user's own, and is typed in a
-	// terminal (Alone). The other settings are where the user is told,
-	// theirs or an operator's (mayTell).
+	// The role says who may change the yard and approve what it runs, and
+	// the mark whether a member writes on the operator's subscription, so
+	// both are an operator's to give, never the user's own, and are typed
+	// in a terminal (Alone): a marked member must not unmark themselves.
+	// The other settings are where the user is told, theirs or an
+	// operator's (mayTell).
 	if _, ok := set[UserRole]; ok {
 		if err := w.may(ctx, actor, ActChangeRole, Object{Kind: KindUser, Name: name}); err != nil {
 			return nil, err
 		}
 	}
-	if len(keys) > 1 || keys[0] != UserRole {
+	if _, ok := set[UserOwnLoginOnly]; ok {
+		if err := w.may(ctx, actor, ActChangeRole, Object{Kind: KindUser, Name: name}); err != nil {
+			return nil, err
+		}
+	}
+	told := false
+	for _, k := range keys {
+		if k != UserRole && k != UserOwnLoginOnly {
+			told = true
+		}
+	}
+	if told {
 		// The delegated leg carries notify= alone (delegation.go).
 		if err := w.may(ctx, actor, ActTell, Object{Kind: KindUser, Name: name, Delegate: len(keys) == 1 && keys[0] == UserNotify}); err != nil {
 			return nil, err
@@ -205,6 +220,12 @@ func (w *wtx) setUser(ctx context.Context, name string, keys []string, set map[s
 		case UserRole:
 			switch v {
 			case RoleOperator:
+				// An operator is never marked: naming one clears the
+				// mark, and the event says so where one stood.
+				if u.OwnLoginOnly {
+					u.OwnLoginOnly = false
+					data[UserOwnLoginOnly] = "no"
+				}
 			case RoleMember:
 				if u.IsOperator() {
 					if err := keepsOperator(w.Tx, u, "made a member"); err != nil {
@@ -215,6 +236,29 @@ func (w *wtx) setUser(ctx context.Context, name string, keys []string, set map[s
 				return nil, fmt.Errorf("user %s: %s=%q: a user's role is %s or %s", name, UserRole, v, RoleOperator, RoleMember)
 			}
 			u.Role = v
+		case UserOwnLoginOnly:
+			if v != "yes" && v != "no" {
+				return nil, fmt.Errorf("user %s: %s=%q: yes marks them, no clears it", name, UserOwnLoginOnly, v)
+			}
+			// Only members carry the mark: yes on an operator is refused,
+			// and naming one an operator while marking them refuses the
+			// call whole as contradictory. A same-call role=member counts
+			// as the member it makes them; no with role=operator is let
+			// through (naming one clears the mark anyway), while no alone
+			// on an operator is refused as meaningless.
+			role := u.RoleOf()
+			if r, ok := set[UserRole]; ok {
+				role = r
+			}
+			switch {
+			case v == "yes" && set[UserRole] == RoleOperator:
+				return nil, fmt.Errorf("user %s: %s=yes with %s=%s in one call is contradictory: an operator is never marked", name, UserOwnLoginOnly, UserRole, RoleOperator)
+			case v == "yes" && role == RoleOperator:
+				return nil, fmt.Errorf("user %s is an operator, and %s is set on members alone", name, UserOwnLoginOnly)
+			case v == "no" && u.IsOperator() && set[UserRole] != RoleMember:
+				return nil, fmt.Errorf("user %s is an operator, and %s is set on members alone", name, UserOwnLoginOnly)
+			}
+			u.OwnLoginOnly = v == "yes"
 		}
 		data[k] = v
 	}

@@ -113,8 +113,8 @@ func TestCarryInviteReportsAfterUserAndMapping(t *testing.T) {
 		t.Fatalf("carryNext = %v, %v", did, err)
 	}
 	u, err := st.GetUser(ctx, "eve")
-	if err != nil || u.IsOperator() {
-		t.Fatalf("the invited user = %+v, %v, want a member", u, err)
+	if err != nil || u.IsOperator() || !u.OwnLoginOnly {
+		t.Fatalf("the invited user = %+v, %v, want a marked member", u, err)
 	}
 	if all, _ := st.Settings(ctx); all[store.WebJWTUsersSetting] != "eve@example.net=eve" {
 		t.Fatalf("the mapping = %q", all[store.WebJWTUsersSetting])
@@ -134,14 +134,23 @@ func TestCarryInviteReportsAfterUserAndMapping(t *testing.T) {
 		t.Fatalf("the carried-out card reads:\n%s", lines)
 	}
 
-	// An operator invite makes an operator.
+	// An operator invite makes an operator, never marked.
 	st2, _, bead2, _, _, c2, _ := teammateCarrierYard(t)
 	askApprove(t, st2, bead2, inviteAsk("user invite eve --email eve@example.net --role operator"))
 	if did, err := c2.carryNext(ctx); err != nil || !did {
 		t.Fatalf("carryNext (operator) = %v, %v", did, err)
 	}
-	if u, err := st2.GetUser(ctx, "eve"); err != nil || !u.IsOperator() {
+	if u, err := st2.GetUser(ctx, "eve"); err != nil || !u.IsOperator() || u.OwnLoginOnly {
 		t.Fatalf("the operator invite made %+v, %v", u, err)
+	}
+	// A member invited with crew-talk is not marked.
+	st3, _, bead3, _, _, c3, _ := teammateCarrierYard(t)
+	askApprove(t, st3, bead3, inviteAsk("user invite eve --email eve@example.net --crew-talk yes"))
+	if did, err := c3.carryNext(ctx); err != nil || !did {
+		t.Fatalf("carryNext (crew-talk) = %v, %v", did, err)
+	}
+	if u, err := st3.GetUser(ctx, "eve"); err != nil || u.IsOperator() || u.OwnLoginOnly {
+		t.Fatalf("the crew-talk invite made %+v, %v", u, err)
 	}
 }
 
@@ -188,7 +197,7 @@ func TestCarryInviteEdgeDownLeavesYardWritesAndRetries(t *testing.T) {
 func TestCarryUninviteReportsBeforeUserGoes(t *testing.T) {
 	ctx := context.Background()
 	st, home, bead, edge, wrapped, c, srv := teammateCarrierYard(t)
-	if err := st.InviteTeammate(ctx, "eve", "eve@example.net", store.RoleMember, "mckean"); err != nil {
+	if err := st.InviteTeammate(ctx, "eve", "eve@example.net", store.RoleMember, false, "mckean"); err != nil {
 		t.Fatal(err)
 	}
 	yard, err := store.Load(config.At(home).PeerKey())
@@ -233,7 +242,7 @@ func TestCarryUninviteReportsBeforeUserGoes(t *testing.T) {
 func TestCarryUninviteEdgeDownStillRemovesAndRetries(t *testing.T) {
 	ctx := context.Background()
 	st, _, bead, edge, wrapped, c, _ := teammateCarrierYard(t)
-	if err := st.InviteTeammate(ctx, "eve", "eve@example.net", store.RoleMember, "mckean"); err != nil {
+	if err := st.InviteTeammate(ctx, "eve", "eve@example.net", store.RoleMember, false, "mckean"); err != nil {
 		t.Fatal(err)
 	}
 	seq := askApprove(t, st, bead, inviteAsk("user uninvite eve"))
@@ -362,7 +371,7 @@ func TestCarryMemberRefusalFailsWithEdgeWords(t *testing.T) {
 	}
 
 	st4, _, bead4, edge4, _, c4, _ := teammateCarrierYard(t)
-	if err := st4.InviteTeammate(ctx, "eve", "eve@example.net", store.RoleMember, "mckean"); err != nil {
+	if err := st4.InviteTeammate(ctx, "eve", "eve@example.net", store.RoleMember, false, "mckean"); err != nil {
 		t.Fatal(err)
 	}
 	edge4.Behave(func(b *standin.EdgeBehaviour) {
@@ -436,7 +445,7 @@ func TestCarryInviteOwedRetryKeepsOperatorsRemoval(t *testing.T) {
 func TestCarryUninviteOwedRetryKeepsNewUser(t *testing.T) {
 	ctx := context.Background()
 	st, _, bead, edge, wrapped, c, _ := teammateCarrierYard(t)
-	if err := st.InviteTeammate(ctx, "eve", "eve@example.net", store.RoleMember, "mckean"); err != nil {
+	if err := st.InviteTeammate(ctx, "eve", "eve@example.net", store.RoleMember, false, "mckean"); err != nil {
 		t.Fatal(err)
 	}
 	seq := askApprove(t, st, bead, inviteAsk("user uninvite eve"))

@@ -152,7 +152,16 @@ person has a login of their own; whether their beads build on the
 operator's accounts on the routes that take them, may be routed without
 building on the operator's accounts, or wait since no route takes them;
 and that they get no web view (the edge refuses a member) and come in by
-a paired device. The
+a paired device. Whether a member may write to the crew on the
+operator's subscription is the invite's `--crew-talk`, no unless filed
+yes: with no the person is marked own-login-only, writes to no crew
+member on the operator's subscription, and each crew member serves them
+only where its `for=` allows them and their own env with it stands; with
+yes the card says they are not marked, and they write as any member does.
+An operator is never marked.
+The mark is the member's `own_login_only`, which the operator sets by
+hand with `yardr user set <name> own_login_only=yes|no` (`yardr user
+show` names it); naming them an operator clears it. The
 card refuses, before anything is written, a name a user or crew member
 already holds, an address the mapping already maps to anyone (an
 address is never re-pointed to a new user), and a yard connected to no

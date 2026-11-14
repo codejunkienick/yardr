@@ -189,3 +189,40 @@ func TestUserMailIsIndexedAsMail(t *testing.T) {
 		t.Fatalf("mail that left for a peer is in an inbox here: %v", got)
 	}
 }
+
+func TestSendMailRefusesUnreadableUserRecord(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "yard.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close(ctx) })
+	if err := s.SetSetting(ctx, OperatorSetting, "jo", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddUser(ctx, "ada", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PutCrew(ctx, CrewMember{Name: "yardmaster", Runner: "herdr"}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.Head(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(bUsers).Put([]byte("ada"), []byte("{"))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err = s.write(func(w *wtx) error {
+		return s.sendMail(w, "yardmaster", "hello", "ada", nil, nil, 0)
+	})
+	if err == nil {
+		t.Fatal("mail from an unreadable user record was taken")
+	}
+	if after, err := s.Head(ctx); err != nil || after != before {
+		t.Fatalf("a refused mail changed the log: head %d, %v; was %d", after, err, before)
+	}
+}

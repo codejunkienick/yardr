@@ -160,22 +160,41 @@ func TestOnlyOperatorChangesConversationSettings(t *testing.T) {
 	}
 }
 
-// Serving is everyone where for= is unset or empty, else membership; a
-// conversation is a served user with its env set.
+// Serving is for= membership, and for a marked member only once their own
+// env stands: everyone where for= is unset or empty, else membership, and
+// the mark adds the env requirement without overriding for=. A
+// conversation is a served user with its env set, asked unmarked.
 func TestCrewServes(t *testing.T) {
 	t.Parallel()
-	r := store.CrewMember{}
-	if !r.Serves("hal") || !r.Serves("jo") {
-		t.Errorf("unset for= serves nobody: %+v", r)
+	for _, c := range []struct {
+		name   string
+		config map[string]any
+		user   string
+		marked bool
+		want   bool
+	}{
+		{"unset serves the unmarked", nil, "hal", false, true},
+		{"unset with env serves the unmarked", map[string]any{"env_for_hal": "/h.env"}, "hal", false, true},
+		{"unset serves nobody marked without env", nil, "hal", true, false},
+		{"unset with env serves the marked", map[string]any{"env_for_hal": "/h.env"}, "hal", true, true},
+		{"unset with another's env serves nobody marked", map[string]any{"env_for_ada": "/a.env"}, "hal", true, false},
+		{"empty serves the unmarked", map[string]any{"for": ""}, "hal", false, true},
+		{"empty serves nobody marked without env", map[string]any{"for": ""}, "hal", true, false},
+		{"empty with env serves the marked", map[string]any{"for": "", "env_for_hal": "/h.env"}, "hal", true, true},
+		{"set serves a named unmarked user", map[string]any{"for": "hal, ada"}, "hal", false, true},
+		{"set with env serves a named unmarked user", map[string]any{"for": "hal, ada", "env_for_hal": "/h.env"}, "hal", false, true},
+		{"set serves no unnamed user", map[string]any{"for": "hal, ada"}, "jo", false, false},
+		{"set serves no named marked user without env", map[string]any{"for": "hal, ada"}, "hal", true, false},
+		{"set with env serves a named marked user", map[string]any{"for": "hal, ada", "env_for_hal": "/h.env"}, "hal", true, true},
+		{"set with env serves no unnamed marked user", map[string]any{"for": "hal, ada", "env_for_jo": "/j.env"}, "jo", true, false},
+		{"set with another's env serves no named marked user", map[string]any{"for": "hal, ada", "env_for_ada": "/a.env"}, "hal", true, false},
+	} {
+		r := store.CrewMember{Config: c.config}
+		if got := r.Serves(c.user, c.marked); got != c.want {
+			t.Errorf("%s: Serves = %v, want %v", c.name, got, c.want)
+		}
 	}
-	r.Config = map[string]any{"for": ""}
-	if !r.Serves("hal") {
-		t.Errorf("empty for= serves nobody")
-	}
-	r.Config = map[string]any{"for": "hal, ada", "env_for_hal": "/h.env"}
-	if !r.Serves("hal") || !r.Serves("ada") || r.Serves("jo") {
-		t.Errorf("for=hal,ada serves wrongly")
-	}
+	r := store.CrewMember{Config: map[string]any{"for": "hal, ada", "env_for_hal": "/h.env"}}
 	if !r.HasConversation("hal") || r.HasConversation("ada") || r.HasConversation("jo") || r.HasConversation("") {
 		t.Errorf("HasConversation wrong: %+v", r.ConversationUsers())
 	}
@@ -216,6 +235,19 @@ func TestMailRefusedForUnservedUser(t *testing.T) {
 		if err := s.Mail(ctx, "yardmaster", "from "+from, from); err != nil {
 			t.Errorf("mail from %s with for= unset = %v, want ok", from, err)
 		}
+	}
+	// A marked member it serves writes only once their own env stands.
+	if _, err := s.SetUser(ctx, "hal", map[string]string{store.UserOwnLoginOnly: "yes"}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	serveYardmaster(t, s, ctx, "", nil)
+	if err := s.Mail(ctx, "yardmaster", "from hal", "hal"); err == nil ||
+		err.Error() != "mail to yardmaster from hal: hal is on their own login only and has no env with yardmaster yet; once their env stands they may write" {
+		t.Errorf("mail from marked hal with no env = %v, want the own-login-only refusal", err)
+	}
+	serveYardmaster(t, s, ctx, "", map[string]string{"hal": "/tmp/hal.env"})
+	if err := s.Mail(ctx, "yardmaster", "from hal", "hal"); err != nil {
+		t.Errorf("mail from marked hal with env = %v, want ok", err)
 	}
 }
 

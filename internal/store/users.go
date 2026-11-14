@@ -55,10 +55,11 @@ type User struct {
 	Name string `json:"name"`
 	// Role is RoleOperator or RoleMember ("" reads as a member): see
 	// IsOperator.
-	Role      string    `json:"role,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	CreatedBy string    `json:"created_by"`
-	Cursor    uint64    `json:"cursor"` // mail acknowledged through this event seq
+	Role         string    `json:"role,omitempty"`
+	OwnLoginOnly bool      `json:"own_login_only,omitempty"` // marked: crew serves them only where for= allows them and their env with it stands.
+	CreatedAt    time.Time `json:"created_at"`
+	CreatedBy    string    `json:"created_by"`
+	Cursor       uint64    `json:"cursor"` // mail acknowledged through this event seq
 	// NotificationCursor is the same for the notifications: the two parts
 	// of the inbox are acknowledged apart.
 	NotificationCursor uint64 `json:"notification_cursor"`
@@ -900,15 +901,17 @@ func (rd *readers) letter(e Event) (Letter, error) {
 			return Letter{}, err
 		}
 		cursor = c.Cursor
-		// Mail to a crew member from a user with a conversation is read
-		// in that slice: its cursor says whether it was read, not the
-		// line's, which acks past it without seeing it. A conversation
-		// whose row the daemon has not made yet reads at the line cursor,
-		// as its slice does.
-		if toCrew && configServes(c.Config, e.Actor) {
-			if path, _ := c.Config[EnvForPrefix+e.Actor].(string); path != "" {
-				if cs, ok := c.Conversations[e.Actor]; ok {
-					cursor = cs.Cursor
+		// The line cursor applies until the daemon makes a conversation row; its slice cursor applies after.
+		if toCrew {
+			marked, err := markedUser(rd.tx, e.Actor)
+			if err != nil {
+				return Letter{}, err
+			}
+			if configServes(c.Config, e.Actor, marked) {
+				if path, _ := c.Config[EnvForPrefix+e.Actor].(string); path != "" {
+					if cs, ok := c.Conversations[e.Actor]; ok {
+						cursor = cs.Cursor
+					}
 				}
 			}
 		}
@@ -925,15 +928,11 @@ func (rd *readers) letter(e Event) (Letter, error) {
 	return Letter{Seq: e.Seq, At: e.At, From: e.Actor, To: to, Text: text, Read: e.Seq <= cursor, Reactions: reactions, Timer: timerOf(e), As: SpeaksAs(e), Via: Via(e), Files: EventFiles(e), Answered: answeredSeq(e)}, nil
 }
 
-// mayReadInbox asks whether actor may read or acknowledge (does) the inbox
-// of the user name (ActReadInbox): the user and an operator may. From a
-// session's or a crew member's pane the reader is the pane's (paneAuthor)
-// before the policy is asked, so a pane can never read another's inbox by
-// naming them; from anywhere else it is the caller's word, as every
-// actor-taking call is (a line against mistakes, not a wall). Left out,
-// the reader is the user: a client from before the call took an actor
-// reads its own inbox as it did. It returns that resolved reader so an
-// acknowledgement records who acted, including the pane's author.
+// mayReadInbox asks whether actor may read or acknowledge (does) the
+// user's inbox (ActReadInbox): the user and operator may. A pane's author
+// is resolved before policy; elsewhere actor is the caller's word. With
+// no actor, older clients read as the user. It returns the resolved reader
+// for acknowledgements, including a pane author's.
 func (s *Store) mayReadInbox(ctx context.Context, tx *bolt.Tx, name, actor, does string) (string, error) {
 	resolved, err := paneAuthor(tx, callerOf(ctx), actor)
 	if err != nil {

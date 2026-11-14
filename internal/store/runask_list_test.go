@@ -1785,6 +1785,26 @@ func TestTimerRmCardKeepsReasonAsData(t *testing.T) {
 	}
 }
 
+// A user added by hand, on a card or at a terminal, carries no mark: only
+// an invite without crew-talk marks one.
+func TestRunAskUserAddLeavesNoMark(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	seq := y.ask(t, listAsk("mckean", "user add eve"), "yardmaster")
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if u, err := y.GetUser(y.ctx, "eve"); err != nil || u.OwnLoginOnly {
+		t.Fatalf("the user added on a card = %+v, %v, want unmarked", u, err)
+	}
+	if _, err := y.AddUser(y.ctx, "mallory", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if u, err := y.GetUser(y.ctx, "mallory"); err != nil || u.OwnLoginOnly {
+		t.Fatalf("the user added at a terminal = %+v, %v, want unmarked", u, err)
+	}
+}
+
 // An approval of a new row's ask is held to the yard the card was written
 // from: what the command names is read anew, and when it is not what the
 // card says, the approval is refused and nothing runs.

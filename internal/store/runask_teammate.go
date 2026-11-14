@@ -19,14 +19,18 @@ import (
 )
 
 // userInviteUse is how a refusal names the invite a run ask takes.
-const userInviteUse = "yardr user invite <name> --email <address> [--role operator]"
+const userInviteUse = "yardr user invite <name> --email <address> [--role operator] [--crew-talk yes|no]"
 
-// parseUserInvite reads the words of user invite <name> --email
-// <address> [--role operator]. The address is one word, and member is
-// the role it leaves out: an explicit member stores as none given, so
-// two ways of typing one invite are one command.
+// parseUserInvite reads the words of user invite <name> --email <address>
+// [--role operator] [--crew-talk yes|no]. The address is one word, and
+// member is the role it leaves out: an explicit member stores as none
+// given, so two ways of typing one invite are one command. --crew-talk
+// asks whether the person may write to the crew on the operator's
+// subscription; absent reads as no for a member and yes for an operator,
+// and each default stores as none given. An explicit no with an operator
+// is refused: an operator is never marked.
 func parseUserInvite(rest []string) ([]string, error) {
-	args, values, err := runWords(userInviteUse, "user invite", "the operator's", rest, map[string]bool{"--email": true, "--role": true})
+	args, values, err := runWords(userInviteUse, "user invite", "the operator's", rest, map[string]bool{"--email": true, "--role": true, "--crew-talk": true})
 	if err != nil {
 		return nil, err
 	}
@@ -37,37 +41,62 @@ func parseUserInvite(rest []string) ([]string, error) {
 		return nil, fmt.Errorf("--run takes %s: one --email, not %d", userInviteUse, len(values["--email"]))
 	case len(values["--role"]) > 1:
 		return nil, fmt.Errorf("--run takes %s: --role once, not %d times", userInviteUse, len(values["--role"]))
+	case len(values["--crew-talk"]) > 1:
+		return nil, fmt.Errorf("--run takes %s: --crew-talk once, not %d times", userInviteUse, len(values["--crew-talk"]))
 	}
 	email := strings.ToLower(values["--email"][0])
 	if !strings.Contains(email, "@") || strings.ContainsAny(email, " \t\n\r") {
 		return nil, fmt.Errorf("--run takes %s: %q is no address (an address has an @)", userInviteUse, values["--email"][0])
 	}
 	out := []string{args[0], "--email", email}
+	role := RoleMember
 	if len(values["--role"]) == 1 {
 		switch values["--role"][0] {
 		case RoleOperator:
+			role = RoleOperator
 			out = append(out, "--role", RoleOperator)
 		case RoleMember:
 		default:
 			return nil, fmt.Errorf("--run takes %s: a role is %s or %s, not %q", userInviteUse, RoleMember, RoleOperator, values["--role"][0])
 		}
 	}
+	if len(values["--crew-talk"]) == 1 {
+		switch talk := values["--crew-talk"][0]; talk {
+		case "yes":
+			if role == RoleMember {
+				out = append(out, "--crew-talk", "yes")
+			}
+			// An operator's default, stored as none given.
+		case "no":
+			if role == RoleOperator {
+				return nil, fmt.Errorf("--run takes %s: --crew-talk no with --role operator is refused: an operator is never marked", userInviteUse)
+			}
+			// A member's default, stored as none given.
+		default:
+			return nil, fmt.Errorf("--run takes %s: --crew-talk is yes or no, not %q", userInviteUse, talk)
+		}
+	}
 	return out, nil
 }
 
-// userInviteOf is the name, the address and the role of a parsed invite,
-// the role a member's where the command names none.
-func userInviteOf(argv []string) (name, email, role string) {
+// userInviteOf is the name, the address, the role and the crew-talk of a
+// parsed invite: the role a member's where the command names none, and
+// crew-talk whether the person may write to the crew on the operator's
+// subscription, absent reading as no for a member and yes for an operator.
+func userInviteOf(argv []string) (name, email, role string, crewTalk bool) {
 	name, role = argv[2], RoleMember
+	var filed string
 	for i := 3; i+1 < len(argv); i += 2 {
 		switch argv[i] {
 		case "--email":
 			email = argv[i+1]
 		case "--role":
 			role = argv[i+1]
+		case "--crew-talk":
+			filed = argv[i+1]
 		}
 	}
-	return name, email, role
+	return name, email, role, role == RoleOperator || filed == "yes"
 }
 
 // settingValue is the value stored for key, "" where it is unset.
@@ -121,7 +150,7 @@ func mappedEmails(m map[string]string, user string) []string {
 // already maps to anyone (never re-pointed), and a yard with no edge to
 // report to.
 func (w *wtx) userInviteCard(argv []string, asking bool) (AskRun, error) {
-	name, email, role := userInviteOf(argv)
+	name, email, role, crewTalk := userInviteOf(argv)
 	if err := checkUserName(name); err != nil {
 		return AskRun{}, err
 	}
@@ -153,14 +182,19 @@ func (w *wtx) userInviteCard(argv []string, asking bool) (AskRun, error) {
 		fmt.Sprintf("reports the invite to the edge for the yard %s/%s (member add): until the report lands the card reads as not yet at the edge, and nobody is admitted meanwhile.", edge.Handle, edge.Name),
 		"they set a password from the mail the edge sends to this email, then sign in; nothing the operator holds admits them.",
 	}
-	served, err := w.inviteServedCrew(name)
-	if err != nil {
-		return AskRun{}, err
-	}
-	if len(served) == 0 {
-		does = append(does, fmt.Sprintf("%s can write to none of the crew.", name))
+	if !crewTalk {
+		does = append(does, fmt.Sprintf("%s can write to no crew member on the operator's subscription. They are marked own-login-only; each crew member serves them only where its for= allows them and their env with it stands.", name))
 	} else {
-		does = append(does, fmt.Sprintf("%s can write to %s. Their answers spend the operator's subscription until %s has a login of their own.", name, strings.Join(served, " and "), name))
+		served, err := w.inviteServedCrew(name)
+		if err != nil {
+			return AskRun{}, err
+		}
+		if len(served) == 0 {
+			does = append(does, fmt.Sprintf("%s can write to none of the crew.", name))
+		} else {
+			does = append(does, fmt.Sprintf("%s can write to %s. Their answers spend the operator's subscription until %s has a login of their own.", name, strings.Join(served, " and "), name))
+		}
+		does = append(does, "They are not marked own-login-only.")
 	}
 	spend, hasRoute, err := w.inviteBeadsSpend(name)
 	if err != nil {
@@ -193,11 +227,12 @@ func (w *wtx) userInviteCard(argv []string, asking bool) (AskRun, error) {
 // inviteServedCrew are the crew members serving name, sorted: bbolt
 // iterates keys in order. Serves is the same predicate the write gate
 // uses, so a for= that already names the invited person counts as
-// serving them.
+// serving them. Asked unmarked: the invited person has no record yet,
+// and only members carry the mark.
 func (w *wtx) inviteServedCrew(name string) ([]string, error) {
 	var out []string
 	err := each(w.Tx, bCrew, "", func(_ []byte, r *CrewMember) error {
-		if r.Serves(name) {
+		if r.Serves(name, false) {
 			out = append(out, r.Name)
 		}
 		return nil
@@ -252,7 +287,7 @@ func (w *wtx) inviteBeadsSpend(name string) (bool, bool, error) {
 // the edge it was carded against stands otherwise now. A name taken
 // since is refused by the card itself, before this is read.
 func (w *wtx) userInviteStale(seq uint64, was, now AskRun) error {
-	name, email, _ := userInviteOf(was.Argv)
+	name, email, _, _ := userInviteOf(was.Argv)
 	if was.Seen["web_jwt_users"] != now.Seen["web_jwt_users"] {
 		return fmt.Errorf("ask %d was written when %s did not map %s to %s: the mapping was changed since. %s", seq, WebJWTUsersSetting, email, name, nothingRan)
 	}
@@ -269,7 +304,7 @@ func runUserInvite(ctx context.Context, w *wtx, argv []string, actor string, by 
 	if err := w.may(ctx, actor, ActAddUser, Object{Kind: KindUser, Name: argv[2], Ask: Askable}); err != nil {
 		return "", err
 	}
-	_, _, role := userInviteOf(argv)
+	_, _, role, _ := userInviteOf(argv)
 	if role == RoleOperator {
 		if err := w.may(ctx, actor, ActChangeRole, Object{Kind: KindUser, Name: argv[2]}); err != nil {
 			return "", err
@@ -364,7 +399,7 @@ func teammateEmails(w *wtx, argv []string) []string {
 	}
 	switch argv[1] {
 	case "invite":
-		_, email, _ := userInviteOf(argv)
+		_, email, _, _ := userInviteOf(argv)
 		if email == "" {
 			return nil
 		}
@@ -380,11 +415,12 @@ func teammateEmails(w *wtx, argv []string) []string {
 }
 
 // inviteTeammate makes an approved invite's yard writes in one write:
-// the user with its role, then the invited address mapped to them. It
-// is the carrier's first steps, and a carrying out taken up again finds
-// each already standing and writes neither again: a user standing with
-// another role, or an address mapped to another user, refuses whole.
-func (w *wtx) inviteTeammate(ctx context.Context, name, email, role, actor string) error {
+// the user with its role and its mark, then the invited address mapped
+// to them. It is the carrier's first steps, and a carrying out taken up
+// again finds each already standing and writes none again: a user
+// standing with another role, or an address mapped to another user,
+// refuses whole.
+func (w *wtx) inviteTeammate(ctx context.Context, name, email, role string, crewTalk bool, actor string) error {
 	if w.Bucket(bUsers).Get([]byte(name)) == nil {
 		u, err := w.insertUser(ctx, name, actor, nil)
 		if err != nil {
@@ -392,6 +428,18 @@ func (w *wtx) inviteTeammate(ctx context.Context, name, email, role, actor strin
 		}
 		if role == RoleOperator && !u.IsOperator() {
 			if _, err := w.setUser(ctx, name, []string{UserRole}, map[string]string{UserRole: RoleOperator}, actor, nil); err != nil {
+				return err
+			}
+		}
+		// The card's permission answer, kept as the store's restriction:
+		// a member invited without crew-talk is marked own-login-only.
+		// No gate: the invite's approval authorizes the mark with the user.
+		if role == RoleMember && !crewTalk {
+			u.OwnLoginOnly = true
+			if err := put(w.Tx, bUsers, name, u); err != nil {
+				return err
+			}
+			if err := w.event("", "user_set", actor, map[string]any{"user": name, UserOwnLoginOnly: "yes"}); err != nil {
 				return err
 			}
 		}
@@ -422,8 +470,8 @@ func (w *wtx) inviteTeammate(ctx context.Context, name, email, role, actor strin
 
 // InviteTeammate is inviteTeammate as its own write, for the server that
 // carries an approved invite out.
-func (s *Store) InviteTeammate(ctx context.Context, name, email, role, actor string) error {
-	return s.write(func(w *wtx) error { return w.inviteTeammate(ctx, name, email, role, actor) })
+func (s *Store) InviteTeammate(ctx context.Context, name, email, role string, crewTalk bool, actor string) error {
+	return s.write(func(w *wtx) error { return w.inviteTeammate(ctx, name, email, role, crewTalk, actor) })
 }
 
 // removeTeammate makes an approved removal's yard writes in one write:
@@ -497,8 +545,10 @@ func (w *wtx) claimedTeammateCarry(bead string, ask uint64, boot string) (*Carry
 // was added since the approval and is never taken over. Taken up again
 // while its report is owed, it writes nothing and holds the user and the
 // mapping to what it made: where the operator removed either since, the
-// invite is undone at the yard and its report must not admit anyone.
-func (s *Store) CarryInvite(ctx context.Context, bead string, ask uint64, boot, name, email, role, actor string) error {
+// invite is undone at the yard and its report must not admit anyone. The
+// guard holds the role and the mapping, not the mark: the edge report
+// carries membership, not the mark.
+func (s *Store) CarryInvite(ctx context.Context, bead string, ask uint64, boot, name, email, role string, crewTalk bool, actor string) error {
 	return s.write(func(w *wtx) error {
 		rec, err := w.claimedTeammateCarry(bead, ask, boot)
 		if err != nil {
@@ -521,7 +571,7 @@ func (s *Store) CarryInvite(ctx context.Context, bead string, ask uint64, boot, 
 		if w.Bucket(bUsers).Get([]byte(name)) != nil {
 			return fmt.Errorf("%w: there is a user %s already, added since the invite was approved", ErrConflict, name)
 		}
-		if err := w.inviteTeammate(ctx, name, email, role, actor); err != nil {
+		if err := w.inviteTeammate(ctx, name, email, role, crewTalk, actor); err != nil {
 			return err
 		}
 		rec.TeammateWritten = true

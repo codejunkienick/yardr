@@ -185,6 +185,7 @@ func TestMailReplyRefusals(t *testing.T) {
 	if err != nil || len(mails) != 1 {
 		t.Fatalf("mail events after the refusals = %+v, %v", mails, err)
 	}
+	t.Run("crew access", func(t *testing.T) { mailReplyToCrewHonoursOwnLoginOnly(t, api, ctx) })
 }
 
 // Mail from another yard is not answered here: the refusal names the
@@ -248,6 +249,92 @@ func TestMailReplyRefusesUnlinkedMail(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("MailReply = %v, want %q", err, want)
 		}
+	}
+}
+
+// A reply to a crew member it does not serve is refused naming whom it
+// serves; one it serves from a marked member without env is refused in
+// the own-login-only words. for= is checked first: a marked member it
+// does not serve hears the serves words, not the mark's.
+func mailReplyToCrewHonoursOwnLoginOnly(t *testing.T, api store.API, ctx context.Context) {
+	t.Helper()
+	for _, r := range []store.CrewMember{
+		{Name: "open", Runner: "herdr"},
+		{Name: "shut", Runner: "herdr", Config: map[string]any{"for": "ada"}},
+	} {
+		if _, err := api.PutCrew(ctx, r, "ada"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Each row answers one mail from the crew member it replies to.
+	answer := func(crew string) uint64 {
+		t.Helper()
+		if err := api.Mail(ctx, "jo", "from "+crew, crew); err != nil {
+			t.Fatal(err)
+		}
+		box, err := api.UserInbox(ctx, "jo", 0, "jo")
+		if err != nil || len(box.Mail) == 0 {
+			t.Fatalf("jo's inbox = %+v, %v", box, err)
+		}
+		return box.Mail[len(box.Mail)-1].Seq
+	}
+	mark := func(yes bool) {
+		t.Helper()
+		v := "no"
+		if yes {
+			v = "yes"
+		}
+		if _, err := api.SetUser(ctx, "jo", map[string]string{store.UserOwnLoginOnly: v}, "ada"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mark(false)
+	if err := api.MailReply(ctx, "shut", "let me in", "jo", answer("shut")); err == nil ||
+		err.Error() != "mail to shut from jo: shut serves ada" {
+		t.Errorf("unmarked jo to shut = %v, want the serves words", err)
+	}
+	mark(true)
+	if err := api.MailReply(ctx, "shut", "let me in", "jo", answer("shut")); err == nil ||
+		err.Error() != "mail to shut from jo: shut serves ada" {
+		t.Errorf("marked jo to shut = %v, want the serves words first", err)
+	}
+	if err := api.MailReply(ctx, "open", "hello", "jo", answer("open")); err == nil ||
+		err.Error() != "mail to open from jo: jo is on their own login only and has no env with open yet; once their env stands they may write" {
+		t.Errorf("marked jo to open with no env = %v, want the own-login-only words", err)
+	}
+	mark(false)
+	if err := api.MailReply(ctx, "open", "hello", "jo", answer("open")); err != nil {
+		t.Errorf("unmarked jo to open = %v, want taken", err)
+	}
+	mark(true)
+	open, err := api.GetCrew(ctx, "open")
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := *open
+	if def.Config == nil {
+		def.Config = map[string]any{}
+	}
+	def.Config["env_for_jo"] = "/tmp/jo.env"
+	if _, err := api.PutCrew(ctx, def, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	if err := api.MailReply(ctx, "open", "hello", "jo", answer("open")); err != nil {
+		t.Errorf("marked jo to open with env = %v, want taken", err)
+	}
+	// The refusals sent nothing: open holds the two taken replies, and
+	// shut nothing.
+	got, err := api.Inbox(ctx, "open", 10)
+	if err != nil || got.Total != 2 {
+		t.Fatalf("open's inbox = %+v, %v, want the two taken replies", got, err)
+	}
+	for _, e := range got.Events {
+		if e.Actor != "jo" {
+			t.Fatalf("open's inbox holds %+v, want jo's replies alone", got.Events)
+		}
+	}
+	if shut, err := api.Inbox(ctx, "shut", 10); err != nil || shut.Total != 0 {
+		t.Fatalf("shut's inbox = %+v, %v, want nothing", shut, err)
 	}
 }
 

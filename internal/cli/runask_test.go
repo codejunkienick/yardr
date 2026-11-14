@@ -904,12 +904,12 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		store.PackApplyUse: {"pack apply telegram"},
 		"yardr hook add <name> --source <declared source> [--unknown unknown|allow|ignore] [--as <crew member>] [--map <type>:<stage>=<state>]": {"hook add linear --source linear"},
 		"yardr subscribe <user> yardr [--done] [--where <key>=<value>]":                                                                         {"subscribe jo yardr --where label=ui --done --where label=web"},
-		"yardr user set <user> tell=<parts>":                           {"user set jo tell=asks,notifications"},
-		"yardr user key <user> <source>":                               {"user key jo pushover"},
-		"yardr user add <name>":                                        {"user add eve"},
-		"yardr user rm <name>":                                         {"user rm ada"},
-		"yardr user invite <name> --email <address> [--role operator]": {"user invite eve --email eve@example.net"},
-		"yardr user uninvite <name>":                                   {"user uninvite eve"},
+		"yardr user set <user> tell=<parts>": {"user set jo tell=asks,notifications"},
+		"yardr user key <user> <source>":     {"user key jo pushover"},
+		"yardr user add <name>":              {"user add eve"},
+		"yardr user rm <name>":               {"user rm ada"},
+		"yardr user invite <name> --email <address> [--role operator] [--crew-talk yes|no]": {"user invite eve --email eve@example.net"},
+		"yardr user uninvite <name>": {"user uninvite eve"},
 		"yardr crew add <name> kind=<kind> model=<model> preset=<preset> dir=<dir>": {
 			"crew add porter kind=claude model=opus preset=auto",
 		},
@@ -1104,7 +1104,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				}
 				continue
 			}
-			if use == "yardr user invite <name> --email <address> [--role operator]" || use == "yardr user uninvite <name>" {
+			if use == "yardr user invite <name> --email <address> [--role operator] [--crew-talk yes|no]" || use == "yardr user uninvite <name>" {
 				ctx := context.Background()
 				// A teammate approval is carried out by the server after
 				// it, as a pack apply's is, and there is no CLI verb to
@@ -1112,7 +1112,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				// state to compare: the row is held to its card, which
 				// has no command help to match, and its recorded approval.
 				wantDescription := "Invite a teammate by email"
-				if use == "yardr user invite <name> --email <address> [--role operator]" {
+				if use == "yardr user invite <name> --email <address> [--role operator] [--crew-talk yes|no]" {
 					if err := approved.st.SetSetting(ctx, store.EdgeSetting, store.Edge{URL: "https://my.yardr.dev", Key: key, Handle: "jo", Name: "edgeyard"}.String(), "jo"); err != nil {
 						t.Fatal(err)
 					}

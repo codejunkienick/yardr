@@ -414,7 +414,7 @@ var runList = []runCommand{{
 	run:         runUserRm,
 }, {
 	words:       []string{"user", "invite"},
-	use:         "yardr user invite <name> --email <address> [--role operator]",
+	use:         "yardr user invite <name> --email <address> [--role operator] [--crew-talk yes|no]",
 	description: "Invite a teammate by email",
 	parse:       parseUserInvite,
 	// No check: there is no terminal verb, so the card is the only way

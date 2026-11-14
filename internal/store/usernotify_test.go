@@ -94,6 +94,7 @@ func TestUserSet(t *testing.T) {
 	if string(raw) != `[{"env_file":"/home/ada/.yardr/users/ada.env","notify":"pushover","user":"ada"},{"notify":"","user":"ada"}]` {
 		t.Fatalf("user_set events = %s", raw)
 	}
+	t.Run("own_login_only", func(t *testing.T) { userSetOwnLoginOnly(t, st, ctx) })
 }
 
 // Where a person is told is theirs to set, or the operator's: anyone else
@@ -207,6 +208,81 @@ func TestUserSetRefusedFromASessionsPane(t *testing.T) {
 	}
 	if u, _ := s.GetUser(ctx, "ada"); u.Notify != "" || u.EnvFile != "" {
 		t.Fatalf("a refused change was made: %+v", u)
+	}
+}
+
+// own_login_only marks a member: they write to a crew member on the
+// operator's subscription only once their own env with it stands. Only
+// the operator sets it, as a role; an operator is never marked, and
+// naming one clears the mark.
+func userSetOwnLoginOnly(t *testing.T, st store.API, ctx context.Context) {
+	t.Helper()
+	// Set and cleared, with the event saying so.
+	if u, err := st.SetUser(ctx, "ada", map[string]string{store.UserOwnLoginOnly: "yes"}, "jo"); err != nil || !u.OwnLoginOnly {
+		t.Fatalf("marking ada: %+v, %v", u, err)
+	}
+	if u, err := st.SetUser(ctx, "ada", map[string]string{store.UserOwnLoginOnly: "no"}, "jo"); err != nil || u.OwnLoginOnly {
+		t.Fatalf("clearing ada: %+v, %v", u, err)
+	}
+	if _, err := st.SetUser(ctx, "ada", map[string]string{store.UserOwnLoginOnly: "maybe"}, "jo"); err == nil ||
+		!strings.Contains(err.Error(), "yes marks them, no clears it") {
+		t.Fatalf("another value = %v", err)
+	}
+	// A marked member unmarks neither themselves nor another: the key is
+	// the operator's alone, as a role.
+	if _, err := st.SetUser(ctx, "ada", map[string]string{store.UserOwnLoginOnly: "yes"}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	for _, actor := range []string{"ada", "bob"} {
+		_, err := st.SetUser(ctx, "ada", map[string]string{store.UserOwnLoginOnly: "no"}, actor)
+		if err == nil || !strings.Contains(err.Error(), "only the operator (jo) may change a user's role; this is "+actor) {
+			t.Fatalf("unmarking ada as %s = %v, want the operator's refusal", actor, err)
+		}
+	}
+	if u, _ := st.GetUser(ctx, "ada"); !u.OwnLoginOnly {
+		t.Fatalf("a refused unmarking cleared ada: %+v", u)
+	}
+	// An operator is never marked, either value.
+	for _, v := range []string{"yes", "no"} {
+		if _, err := st.SetUser(ctx, "jo", map[string]string{store.UserOwnLoginOnly: v}, "jo"); err == nil ||
+			!strings.Contains(err.Error(), "set on members alone") {
+			t.Fatalf("setting the mark to %s on an operator = %v", v, err)
+		}
+	}
+	// role=operator clears the mark, and the event says so.
+	if u, err := st.SetUser(ctx, "ada", map[string]string{store.UserRole: store.RoleOperator}, "jo"); err != nil || u.OwnLoginOnly || !u.IsOperator() {
+		t.Fatalf("naming marked ada an operator: %+v, %v", u, err)
+	}
+	evs, err := st.EventsSince(ctx, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleared := false
+	for _, e := range evs {
+		if e.Kind == "user_set" && e.Data["user"] == "ada" && e.Data[store.UserRole] == store.RoleOperator && e.Data[store.UserOwnLoginOnly] == "no" {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Fatal("naming an operator cleared the mark without saying so in the user_set event")
+	}
+	// With yes in one call the call is refused whole as contradictory,
+	// and writes nothing.
+	if _, err := st.SetUser(ctx, "ada", map[string]string{store.UserRole: store.RoleOperator, store.UserOwnLoginOnly: "yes"}, "jo"); err == nil ||
+		!strings.Contains(err.Error(), "contradictory") {
+		t.Fatalf("marking while naming an operator = %v", err)
+	}
+	if u, _ := st.GetUser(ctx, "ada"); !u.IsOperator() || u.OwnLoginOnly {
+		t.Fatalf("the refused call wrote: %+v", u)
+	}
+	// Demoting and marking together is one change.
+	if u, err := st.SetUser(ctx, "ada", map[string]string{store.UserRole: store.RoleMember, store.UserOwnLoginOnly: "yes"}, "jo"); err != nil || !u.OwnLoginOnly || u.IsOperator() {
+		t.Fatalf("demoting and marking ada: %+v, %v", u, err)
+	}
+	// role=operator with no is let through: naming one clears the mark
+	// anyway.
+	if u, err := st.SetUser(ctx, "ada", map[string]string{store.UserRole: store.RoleOperator, store.UserOwnLoginOnly: "no"}, "jo"); err != nil || u.OwnLoginOnly || !u.IsOperator() {
+		t.Fatalf("naming ada an operator with no: %+v, %v", u, err)
 	}
 }
 

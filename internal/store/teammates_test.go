@@ -16,7 +16,7 @@ func TestTeammates(t *testing.T) {
 	// Sequential: the package's fake clock.
 	pinClockFixed(t, askNow)
 	y := teammateYard(t)
-	if err := y.InviteTeammate(y.ctx, "eve", "eve@example.net", RoleMember, "mckean"); err != nil {
+	if err := y.InviteTeammate(y.ctx, "eve", "eve@example.net", RoleMember, false, "mckean"); err != nil {
 		t.Fatal(err)
 	}
 	phone, err := y.AddDevice(y.ctx, "eve", "phone", "mckean")
@@ -69,7 +69,7 @@ func TestTeammates(t *testing.T) {
 func TestUninviteTeammate(t *testing.T) {
 	t.Parallel()
 	y := teammateYard(t)
-	if err := y.InviteTeammate(y.ctx, "eve", "eve@example.net", RoleMember, "mckean"); err != nil {
+	if err := y.InviteTeammate(y.ctx, "eve", "eve@example.net", RoleMember, false, "mckean"); err != nil {
 		t.Fatal(err)
 	}
 	filed, err := y.UninviteTeammate(y.ctx, "eve", "mckean")

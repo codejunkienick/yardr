@@ -41,7 +41,8 @@ type crewOutcome struct {
 // sessions to keep, then the sessions it no longer keeps, to stop.
 func (d *Dispatcher) crewJobs(ctx context.Context, rs []store.CrewMember, paused bool) []crewKeep {
 	// The line session runs where the operator is served; a conversation
-	// session for each served user with its env set.
+	// session for each served user with its env set. The operator is never
+	// marked, so the line asks unmarked.
 	operator := d.operatorName(ctx)
 	var jobs []crewKeep
 	for _, r := range rs {
@@ -52,7 +53,7 @@ func (d *Dispatcher) crewJobs(ctx context.Context, rs []store.CrewMember, paused
 			continue
 		}
 		var sessions []memberSession
-		if r.Serves(operator) {
+		if r.Serves(operator, false) {
 			sessions = append(sessions, newMemberSession(r, ""))
 		}
 		for _, user := range r.ConversationUsers() {
@@ -67,7 +68,7 @@ func (d *Dispatcher) crewJobs(ctx context.Context, rs []store.CrewMember, paused
 		// Sessions the crew member no longer keeps stop: the line's where the
 		// operator is not served, and a conversation the config no longer
 		// declares. Its row lingers, unread by every slice.
-		if !r.Serves(operator) && (r.Live() || len(r.Handle) > 0) {
+		if !r.Serves(operator, false) && (r.Live() || len(r.Handle) > 0) {
 			s := newMemberSession(r, "")
 			jobs = append(jobs, crewKeep{session: s, runner: runner, stop: "the crew member no longer serves the operator"})
 		}

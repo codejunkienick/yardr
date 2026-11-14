@@ -85,7 +85,7 @@ func TestUserSetAndSourceCheckUser(t *testing.T) {
 		t.Fatalf("an env_file without the name: %v", err)
 	}
 	said += err.Error()
-	if _, err = run(t, ada.userCmd(), "set", "ada", "push=mail"); err == nil || !strings.Contains(err.Error(), "want notify=<source>, env_file=<file>, tell=<notifications,mail,asks> or role=operator|member, each once") {
+	if _, err = run(t, ada.userCmd(), "set", "ada", "push=mail"); err == nil || !strings.Contains(err.Error(), "want notify=<source>, env_file=<file>, tell=<notifications,mail,asks>, role=operator|member or own_login_only=yes|no, each once") {
 		t.Fatalf("a setting a user does not have: %v", err)
 	}
 	if u, _ := st.GetUser(ctx, "ada"); u.Notify != "" || u.EnvFile != "" {
@@ -149,6 +149,19 @@ func TestUserSetAndSourceCheckUser(t *testing.T) {
 	if out, err = run(t, ada.userCmd(), "set", "ada", "tell="); err != nil || !strings.Contains(out, "user ada: told outside the yard: through pushover (PUSHOVER_USER is set in "+env+")") {
 		t.Fatalf("set tell= : %q %v", out, err)
 	}
+	// The mark is the operator's to set, and show names it.
+	if out, err = run(t, jo.userCmd(), "set", "ada", "own_login_only=yes"); err != nil || !strings.Contains(out, "user ada: own_login_only=yes") {
+		t.Fatalf("set own_login_only: %q %v", out, err)
+	}
+	said += out
+	if out, err = run(t, ada.userCmd(), "show", "ada"); err != nil || !strings.Contains(out, "marked own-login-only: each crew member serves them only where for= allows them and their env with it stands") {
+		t.Fatalf("show of a marked user: %q %v", out, err)
+	}
+	said += out
+	if out, err = run(t, jo.userCmd(), "set", "ada", "own_login_only=no"); err != nil || !strings.Contains(out, "user ada: own_login_only=no") {
+		t.Fatalf("clearing own_login_only: %q %v", out, err)
+	}
+	said += out
 	// The operator may ask for the test, another user may not.
 	if out, err = run(t, jo.sourceCmd(), "check", "pushover", "--user", "ada"); err != nil || strings.Contains(out, "next:") || len(got) != 2 {
 		t.Fatalf("the operator's check --user: %q %v (%d calls)", out, err, len(got))

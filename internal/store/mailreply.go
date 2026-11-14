@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+
+	bolt "go.etcd.io/bbolt"
 )
 
 // MailReply answers the mail answered: one mail to its sender, carrying the
@@ -85,12 +88,23 @@ func (s *Store) sendMail(w *wtx, to, text, actor string, sess *Session, refs []B
 		var r CrewMember
 		if ok, err := get(w.Tx, bCrew, to, &r); err != nil {
 			return err
-		} else if ok && w.Bucket(bUsers).Get([]byte(actor)) != nil && !r.Serves(actor) {
+		} else if ok && w.Bucket(bUsers).Get([]byte(actor)) != nil {
 			// Mail from a user it does not serve is refused at write,
 			// naming whom it serves; anything else (the yard, another
 			// crew member, a bead's agent) still lands, for the line
 			// slice, or waits in the log where no line session runs.
-			return fmt.Errorf("mail to %s from %s: %s serves %s", to, actor, to, strings.Join(r.Served(), ", "))
+			if !r.Serves(actor, false) {
+				return fmt.Errorf("mail to %s from %s: %s serves %s", to, actor, to, strings.Join(r.Served(), ", "))
+			}
+			// A marked member it serves writes only once their own env
+			// with it stands; until then the refusal says when they may.
+			u, err := getUser(w.Tx, actor)
+			if err != nil {
+				return err
+			}
+			if !r.Serves(actor, u.OwnLoginOnly) {
+				return fmt.Errorf("mail to %s from %s: %s is on their own login only and has no env with %s yet; once their env stands they may write", to, actor, actor, to)
+			}
 		}
 	case w.Bucket(bUsers).Get([]byte(to)) != nil:
 		data["to_user"] = true
@@ -98,6 +112,20 @@ func (s *Store) sendMail(w *wtx, to, text, actor string, sess *Session, refs []B
 		return fmt.Errorf("crew member %s: %w (nor is there a user of that name)", to, ErrNotFound)
 	}
 	return w.event("", "mail", actor, data)
+}
+
+// markedUser reports whether name is a member marked own-login-only: a
+// name with no user record reads as unmarked, since only members carry
+// the mark.
+func markedUser(tx *bolt.Tx, name string) (bool, error) {
+	u, err := getUser(tx, name)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return u.OwnLoginOnly, nil
 }
 
 // answeredSeq is the seq of the mail the mail event e answers, 0 for mail

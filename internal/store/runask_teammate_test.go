@@ -47,7 +47,7 @@ func TestInviteCardAndApprovalDefersToCarrier(t *testing.T) {
 	}
 	joined := strings.Join(got.Does, " ")
 	for _, want := range []string{"adds the user eve with the role operator", "maps eve@example.net to eve in web_jwt_users", "reports the invite to the edge for the yard mckean/edgeyard (member add)", "can approve and administer this yard",
-		"eve can write to yardmaster", "Their answers spend the operator's subscription until eve has a login of their own",
+		"eve can write to yardmaster", "Their answers spend the operator's subscription until eve has a login of their own", "They are not marked own-login-only",
 		"eve's beads wait, since no route takes them",
 		"eve gets no web view: the edge refuses a member", "they come in by a paired device"} {
 		if !strings.Contains(joined, want) {
@@ -138,7 +138,7 @@ func TestInviteCardAndApprovalDefersToCarrier(t *testing.T) {
 	if _, err := y4.AddRoute(y4.ctx, Route{Stage: "new", Group: "builders", Originator: &everyone}, "mckean"); err != nil {
 		t.Fatal(err)
 	}
-	seq4 := y4.ask(t, teammateAsk("user invite eve --email eve@example.net"), "yardmaster")
+	seq4 := y4.ask(t, teammateAsk("user invite eve --email eve@example.net --crew-talk yes"), "yardmaster")
 	joined4 := strings.Join(y4.asked(t, seq4).Ask.Run.Does, " ")
 	for _, want := range []string{"eve can write to mayor and yardmaster", "eve's beads build on the operator's accounts on the routes that take them"} {
 		if !strings.Contains(joined4, want) {
@@ -153,13 +153,16 @@ func TestInviteCardAndApprovalDefersToCarrier(t *testing.T) {
 	// card says they can write to none, with no subscription sentence.
 	y5 := teammateYard(t)
 	y5.crew(t, map[string]any{"for": "ada"})
-	seq5 := y5.ask(t, teammateAsk("user invite eve --email eve@example.net"), "yardmaster")
+	seq5 := y5.ask(t, teammateAsk("user invite eve --email eve@example.net --crew-talk yes"), "yardmaster")
 	joined5 := strings.Join(y5.asked(t, seq5).Ask.Run.Does, " ")
 	if !strings.Contains(joined5, "eve can write to none of the crew") {
 		t.Errorf("the invite card lacks the no-crew line:\n%s", joined5)
 	}
 	if strings.Contains(joined5, "spend the operator's subscription") {
 		t.Errorf("the invite card spends the subscription with no crew serving eve:\n%s", joined5)
+	}
+	if !strings.Contains(joined5, "They are not marked own-login-only") {
+		t.Errorf("the invite card lacks the unmarked line:\n%s", joined5)
 	}
 
 	// A matching manual route takes the bead without spending the
@@ -181,6 +184,7 @@ func TestInviteCardAndApprovalDefersToCarrier(t *testing.T) {
 	if strings.Contains(joined6, "eve's beads wait, since no route takes them") {
 		t.Errorf("the invite card says no route takes eve's beads beside a matching manual route:\n%s", joined6)
 	}
+	t.Run("crew-talk", func(t *testing.T) { inviteCrewTalkCards(t) })
 }
 
 // The invite card refuses, before any write, a taken user or crew name,
@@ -196,6 +200,9 @@ func TestInviteCardRefusals(t *testing.T) {
 		{"user invite yardmaster --email new@example.net", "that is a crew member's name"},
 		{"user invite eve --email ada@example.net", "is mapped to ada in web_jwt_users already"},
 		{"user invite eve --email ADA@example.net", "is mapped to ada in web_jwt_users already"},
+		{"user invite eve --email new@example.net --role operator --crew-talk no", "an operator is never marked"},
+		{"user invite eve --email new@example.net --crew-talk maybe", "--crew-talk is yes or no"},
+		{"user invite eve --email new@example.net --crew-talk yes --crew-talk no", "--crew-talk once"},
 	} {
 		if _, err := y.AddAsk(y.ctx, y.bead, teammateAsk(c.command), "yardmaster"); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s = %v, want %q", c.command, err, c.want)
@@ -212,12 +219,70 @@ func TestInviteCardRefusals(t *testing.T) {
 	}
 }
 
+// inviteCrewTalkCards checks the card's member permission choice, and the
+// stored form of each default.
+func inviteCrewTalkCards(t *testing.T) {
+	t.Helper()
+	y := teammateYard(t)
+	filed := func(command string) *AskRun {
+		t.Helper()
+		return y.asked(t, y.ask(t, teammateAsk(command), "yardmaster")).Ask.Run
+	}
+	// Absent reads as no for a member: they write to no crew member on
+	// the operator's subscription, and are marked own-login-only.
+	got := filed("user invite eve --email eve@example.net")
+	if !slices.Equal(got.Argv, []string{"user", "invite", "eve", "--email", "eve@example.net"}) {
+		t.Fatalf("a member invite stores %+v", got.Argv)
+	}
+	joined := strings.Join(got.Does, " ")
+	for _, want := range []string{"eve can write to no crew member on the operator's subscription",
+		"They are marked own-login-only", "each crew member serves them only where its for= allows them and their env with it stands"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the no card lacks %q:\n%s", want, joined)
+		}
+	}
+	for _, nope := range []string{"can write to yardmaster", "They are not marked"} {
+		if strings.Contains(joined, nope) {
+			t.Errorf("the no card says %q:\n%s", nope, joined)
+		}
+	}
+	// An explicit no stores as absent, and an operator's yes with it: one
+	// stored form per meaning.
+	if again := filed("user invite mallory --email mallory@example.net --crew-talk no"); !slices.Equal(again.Argv,
+		[]string{"user", "invite", "mallory", "--email", "mallory@example.net"}) {
+		t.Fatalf("an explicit no stores %+v", again.Argv)
+	} else if lacks := strings.Join(again.Does, " "); !strings.Contains(lacks, "mallory can write to no crew member on the operator's subscription") {
+		t.Errorf("an explicit no cards otherwise than an absent flag:\n%s", lacks)
+	}
+	if op := filed("user invite mallory --email mallory@example.net --role operator --crew-talk yes"); !slices.Equal(op.Argv,
+		[]string{"user", "invite", "mallory", "--email", "mallory@example.net", "--role", "operator"}) {
+		t.Fatalf("an operator's yes stores %+v", op.Argv)
+	}
+	// A filed yes on a member stores, and the card keeps the serving line
+	// with the unmarked one beside it.
+	yes := filed("user invite peggy --email peggy@example.net --crew-talk yes")
+	if !slices.Equal(yes.Argv, []string{"user", "invite", "peggy", "--email", "peggy@example.net", "--crew-talk", "yes"}) {
+		t.Fatalf("a filed yes stores %+v", yes.Argv)
+	}
+	joinedYes := strings.Join(yes.Does, " ")
+	for _, want := range []string{"peggy can write to yardmaster",
+		"Their answers spend the operator's subscription until peggy has a login of their own",
+		"They are not marked own-login-only"} {
+		if !strings.Contains(joinedYes, want) {
+			t.Errorf("the yes card lacks %q:\n%s", want, joinedYes)
+		}
+	}
+	if strings.Contains(joinedYes, "marked own-login-only, and") {
+		t.Errorf("the yes card marks them:\n%s", joinedYes)
+	}
+}
+
 // The carrier's invite write makes the user with its role and the
 // mapping in one go, and taken up again it writes neither twice.
 func TestInviteTeammateWriteIsIdempotent(t *testing.T) {
 	t.Parallel()
 	y := teammateYard(t)
-	if err := y.InviteTeammate(y.ctx, "eve", "eve@example.net", RoleOperator, "mckean"); err != nil {
+	if err := y.InviteTeammate(y.ctx, "eve", "eve@example.net", RoleOperator, true, "mckean"); err != nil {
 		t.Fatal(err)
 	}
 	u, err := y.GetUser(y.ctx, "eve")
@@ -227,24 +292,47 @@ func TestInviteTeammateWriteIsIdempotent(t *testing.T) {
 	if all, _ := y.Settings(y.ctx); all[WebJWTUsersSetting] != "eve@example.net=eve" {
 		t.Fatalf("the mapping = %q", all[WebJWTUsersSetting])
 	}
+	// A member invited without crew-talk is marked own-login-only, and
+	// with it is not; the mark lands with the user, in one write.
+	if err := y.InviteTeammate(y.ctx, "mallory", "mallory@example.net", RoleMember, false, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if u, err := y.GetUser(y.ctx, "mallory"); err != nil || !u.OwnLoginOnly {
+		t.Fatalf("the member invited without crew-talk = %+v, %v, want marked", u, err)
+	}
+	if err := y.InviteTeammate(y.ctx, "peggy", "peggy@example.net", RoleMember, true, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if u, err := y.GetUser(y.ctx, "peggy"); err != nil || u.OwnLoginOnly {
+		t.Fatalf("the member invited with crew-talk = %+v, %v, want unmarked", u, err)
+	}
 	if events, err := y.Events(y.ctx, "", 100); err != nil {
 		t.Fatal(err)
 	} else {
-		roleRecorded := false
+		roleRecorded, markRecorded := false, false
 		for _, event := range events {
 			if event.Kind == "user_set" && event.Data["user"] == "eve" && event.Data[UserRole] == RoleOperator {
 				roleRecorded = true
+			}
+			if event.Kind == "user_set" && event.Data["user"] == "mallory" && event.Data[UserOwnLoginOnly] == "yes" {
+				markRecorded = true
 			}
 		}
 		if !roleRecorded {
 			t.Fatal("the operator role was written without a user_set event")
 		}
+		if !markRecorded {
+			t.Fatal("the mark was written without a user_set event")
+		}
 	}
-	if err := y.InviteTeammate(y.ctx, "eve", "eve@example.net", RoleOperator, "mckean"); err != nil {
+	if err := y.InviteTeammate(y.ctx, "eve", "eve@example.net", RoleOperator, true, "mckean"); err != nil {
 		t.Fatalf("a taken-up invite writes again: %v", err)
 	}
+	if err := y.InviteTeammate(y.ctx, "mallory", "mallory@example.net", RoleMember, false, "mckean"); err != nil {
+		t.Fatalf("a taken-up marked invite writes again: %v", err)
+	}
 	// An address mapped to another user is never re-pointed.
-	if err := y.InviteTeammate(y.ctx, "ada", "eve@example.net", RoleMember, "mckean"); err == nil ||
+	if err := y.InviteTeammate(y.ctx, "ada", "eve@example.net", RoleMember, false, "mckean"); err == nil ||
 		!strings.Contains(err.Error(), "never re-points it") {
 		t.Fatalf("re-pointing an address = %v", err)
 	}
@@ -257,7 +345,7 @@ func TestInviteTeammateWriteIsIdempotent(t *testing.T) {
 		}
 		return CorePolicy.May(ctx, tx, actor, act, obj)
 	}))
-	if err := y2.InviteTeammate(y2.ctx, "eve", "eve@example.net", RoleOperator, "mckean"); !errors.Is(err, denied) {
+	if err := y2.InviteTeammate(y2.ctx, "eve", "eve@example.net", RoleOperator, true, "mckean"); !errors.Is(err, denied) {
 		t.Fatalf("carrying an operator invite under a policy that refuses role changes = %v", err)
 	}
 	if _, err := y2.GetUser(y2.ctx, "eve"); err == nil {
@@ -275,7 +363,7 @@ func TestInviteTeammateWriteIsIdempotent(t *testing.T) {
 func TestUninviteCardAndRemovalWrite(t *testing.T) {
 	t.Parallel()
 	y := teammateYard(t)
-	if err := y.InviteTeammate(y.ctx, "eve", "eve@example.net", RoleMember, "mckean"); err != nil {
+	if err := y.InviteTeammate(y.ctx, "eve", "eve@example.net", RoleMember, false, "mckean"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := y.AddDevice(y.ctx, "eve", "phone", "mckean"); err != nil {

@@ -177,6 +177,8 @@ everything either way.`,
 					fmt.Fprint(w, "  the yard's operator, whom an ask with no --to goes to")
 				case v.Operator:
 					fmt.Fprint(w, "  an operator")
+				case v.OwnLoginOnly:
+					fmt.Fprint(w, "  marked own-login-only: each crew member serves them only where for= allows them and their env with it stands")
 				}
 				fmt.Fprintf(w, "\n  added %s by %s\n", v.CreatedAt.Local().Format("2006-01-02 15:04"), v.CreatedBy)
 				switch {
@@ -253,7 +255,7 @@ command erases them yet, and the command says where they are.`,
 		},
 	}
 	set := &cobra.Command{
-		Use:   "set <name> [notify=<source>] [env_file=<file>] [tell=<parts>] [role=operator|member]",
+		Use:   "set <name> [notify=<source>] [env_file=<file>] [tell=<parts>] [role=operator|member] [own_login_only=yes|no]",
 		Short: "Set where, how and what a source tells a user, or their role",
 		Long: `notify is the source that tells the user outside the yard: a declared source
 whose file has a notify key (yardr source list shows which), or a source
@@ -285,7 +287,8 @@ the yard at the shell; a member is a party of the yard and no more. Only an
 operator sets a role, at a shell or on a run ask's card (strong, trust), and the yard refuses to make
 a member of the user the operator setting names (whom an ask with no --to
 goes to) or of its last operator. Naming a user in the operator setting
-makes them an operator.
+makes them an operator. own_login_only is yes or no, for a member alone: a marked member writes to no
+crew member on the operator's subscription until its for= allows them and their env with it stands; only an operator sets it, and naming them an operator clears it.
 
 What is told, of the parts tell names: mail to the user (their own too, and
 a timer they set), the notifications of their subscriptions and the asks
@@ -317,8 +320,8 @@ the source. notify= drops what was still to be told.`,
 			set := map[string]string{}
 			for _, arg := range args[1:] {
 				key, value, ok := strings.Cut(arg, "=")
-				if _, twice := set[key]; !ok || twice || (key != store.UserNotify && key != store.UserEnvFile && key != store.UserTell && key != store.UserRole) {
-					return fmt.Errorf("%q: want %s=<source>, %s=<file>, %s=<%s> or %s=%s|%s, each once", arg, store.UserNotify, store.UserEnvFile, store.UserTell, strings.Join(store.TellParts, ","), store.UserRole, store.RoleOperator, store.RoleMember)
+				if _, twice := set[key]; !ok || twice || (key != store.UserNotify && key != store.UserEnvFile && key != store.UserTell && key != store.UserRole && key != store.UserOwnLoginOnly) {
+					return fmt.Errorf("%q: want %s=<source>, %s=<file>, %s=<%s>, %s=%s|%s or %s=yes|no, each once", arg, store.UserNotify, store.UserEnvFile, store.UserTell, strings.Join(store.TellParts, ","), store.UserRole, store.RoleOperator, store.RoleMember, store.UserOwnLoginOnly)
 				}
 				if key == store.UserEnvFile && value != "" {
 					if value, err = store.ExpandPath(value); err != nil {
@@ -356,6 +359,9 @@ the source. notify= drops what was still to be told.`,
 					if len(set) == 1 {
 						return
 					}
+				} else if mark, ok := set[store.UserOwnLoginOnly]; ok && len(set) == 1 {
+					fmt.Fprintf(w, "user %s: own_login_only=%s\n", saved.Name, mark)
+					return
 				}
 				fmt.Fprintf(w, "user %s: told outside the yard: %s\n", saved.Name, or(state, "nowhere"))
 				if saved.Notify != "" && saved.EnvFile != "" {
@@ -528,9 +534,8 @@ type userView struct {
 	Devices []store.Device `json:"devices,omitempty"`
 }
 
-// userViews reads the user name, or all of them for "", as actor reads
-// them: another user's unread mail is hidden from anyone but an operator,
-// since only its user reads it.
+// userViews reads the user name, or all of them for "", as actor reads them: another user's
+// unread mail is hidden from anyone but an operator, since only its user reads it.
 func userViews(ctx context.Context, st store.API, name, actor string) ([]userView, error) {
 	var users []store.User
 	if name == "" {
@@ -573,10 +578,9 @@ func userViews(ctx context.Context, st store.API, name, actor string) ([]userVie
 	return out, nil
 }
 
-// printPeerParties lists whom the linked yards expose to this one, under
-// the users: the address mail to each goes to, whether they are a person
-// or a crew member there, whether mail reaches them, and the line their
-// yard gives of what they do. Nothing for none.
+// printPeerParties lists whom the linked yards expose to this one, under the users: the address
+// mail to each goes to, whether they are a person or a crew member there, whether mail reaches
+// them, and the line their yard gives of what they do. Nothing for none.
 func printPeerParties(w io.Writer, parties []store.PeerParty) {
 	if len(parties) == 0 {
 		return
@@ -605,10 +609,9 @@ func takesMail(e store.PeerParty) string {
 	return "yes"
 }
 
-// mayMailUser is the one rule about who writes to a user: not an agent
-// working a bead. What it has to say to a person belongs on its bead,
-// where the next stage and the person both read it. It is a rule of this
-// command, not of the user's record, and is lifted here if that changes.
+// mayMailUser is the one rule about who writes to a user: not an agent working a bead. What it has
+// to say to a person belongs on its bead, where the next stage and the person both read it. It is a
+// rule of this command, not of the user's record, and is lifted here if that changes.
 func (a *app) mayMailUser(user string) error {
 	bead := a.identity().bead
 	if bead == "" {
@@ -630,12 +633,11 @@ func (a *app) actingUser(ctx context.Context, st store.API) (*store.User, error)
 	return u, err
 }
 
-// unknownLogin is the line for an actor nobody named: neither --actor nor
-// $YARDR_ACTOR, so the login name, which is neither a user nor a crew
-// member. A command that acts as one (inbox, mail, reply, chat) refuses
-// with it: who the actor is and where it came from, the yard's users, and
-// both ways to act as one. nil when the actor was named or is known, or
-// the yard has no users to name; then each command says its own, as before.
+// unknownLogin is the line for an actor nobody named: neither --actor nor $YARDR_ACTOR, so the
+// login name, which is neither a user nor a crew member. A command that acts as one (inbox, mail,
+// reply, chat) refuses with it: who the actor is and where it came from, the yard's users, and both
+// ways to act as one. nil when the actor was named or is known, or the yard has no users to name;
+// then each command says its own, as before.
 func (a *app) unknownLogin(ctx context.Context, st store.API) error {
 	if a.actor != "" || a.yardrenv("ACTOR") != "" || a.identity().actor != "" {
 		return nil
@@ -864,9 +866,8 @@ func notifications(n int) string {
 	return fmt.Sprintf("%d notifications", n)
 }
 
-// conversation is yardr mail --with: the mail between who acts and the
-// other party, oldest first. For a user that is also the mail of the names
-// trusted as them; --with <name>@<peer> is that address alone.
+// conversation is yardr mail --with: the mail between who acts and the other party, oldest first.
+// For a user that is also the mail of the names trusted as them; --with <name>@<peer> is that address alone.
 func (a *app) conversation(w io.Writer, ctx context.Context, st store.API, with string, after uint64) error {
 	// The other has to be a party of the yard, or a crew member of a yard it
 	// is linked with, or a typo reads as a conversation nobody has had yet.
@@ -969,9 +970,8 @@ func (m *mailState) line(yardr string) docLine {
 	return docLine{tagNote, "mail", fmt.Sprintf("%s for %s: %s inbox reads them, --ack <seq> marks them read", m.unread(), m.User, yardr)}
 }
 
-// partyNotes are what yardr doctor notes about the yard's names: a
-// crew member that has the operator's name, and members of groups that are
-// neither a user nor a crew member.
+// partyNotes are what yardr doctor notes about the yard's names: a crew member that has the
+// operator's name, and members of groups that are neither a user nor a crew member.
 func partyNotes(ctx context.Context, st store.API, crew []store.CrewMember, groups []store.Group, yardr string) ([]string, error) {
 	all, err := st.Settings(ctx)
 	if err != nil {
