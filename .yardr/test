@@ -2078,7 +2078,7 @@ internal/cli/crew.go 2212 the crew, inbox, mail and memory commands
 internal/cli/doctor.go 1243 the doctor examinations and its report
 internal/cli/init.go 1600 yard init, onboarding and settings
 internal/cli/ops.go 1699 the server, daemon, depot, group, route and session commands
-internal/cli/pack.go 2089 pack loading, import planning and its question rounds
+internal/cli/pack.go 2005 pack loading, import planning and its question rounds
 internal/cli/peers.go 1564 the peer identity, intake and ping commands
 internal/cli/routereport.go 1513 the route report and its rendering
 internal/cli/sourcecmd.go 2092 the source command and its builtin checks

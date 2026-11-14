@@ -81,14 +81,29 @@ func (f *packFlags) registerShape(c *cobra.Command) {
 	c.Flags().BoolVar(&f.opts.DepotRoles, "depot-roles", false, "leave a group or crew member its depot's own .yardr/roles/<name>.md where the depot has one, instead of setting the pack's role (default: as at the last import, else the pack's)")
 }
 
+// answerFlags are the flags that answer what an import's plan asks: pack
+// apply's and pack check's, registered once here.
+type answerFlags struct {
+	binds   []string
+	members []string
+	opens   []string
+	calls   []string
+}
+
+// register registers the flags that answer what a plan asks, with pack
+// apply's value shapes.
+func (f *answerFlags) register(c *cobra.Command) {
+	c.Flags().StringArrayVar(&f.binds, "bind", nil, "<group>=<kind>[:<model>][,<preset>]: the agent, model and permission preset of a group the yard lacks (one the pack says binds_as another takes that one's unless named here); crew:<name>=… for a crew member (repeatable)")
+	c.Flags().StringArrayVar(&f.members, "members", nil, "<group>=a,b: the members of a people group the yard lacks; empty for anyone (repeatable)")
+	c.Flags().StringArrayVar(&f.opens, "open-threads", nil, "<pack's crew member>=linear,github: let the crew member that takes it open threads in these of the sources the pack asks for, and in no other; =none for no (repeatable)")
+	c.Flags().StringArrayVar(&f.calls, "calls", nil, "<group>=<source>:read,<call>: let the group's sessions make these of the calls the pack asks for of a declared source, and no other; crew:<pack's crew member>=… for a crew member; <source>:none for no (repeatable)")
+}
+
 // importFlags are what an import takes: pack apply's flags, and depot
 // init's with --pack.
 type importFlags struct {
 	packFlags
-	binds      []string
-	members    []string
-	opens      []string
-	calls      []string
+	answerFlags
 	sourceEnv  []string
 	sourceBase []string
 	notify     []string
@@ -118,10 +133,7 @@ func (d *digestFlag) Type() string { return "digest" }
 
 // registerAnswers registers the flags that answer what an import asks.
 func (f *importFlags) registerAnswers(c *cobra.Command) {
-	c.Flags().StringArrayVar(&f.binds, "bind", nil, "<group>=<kind>[:<model>][,<preset>]: the agent, model and permission preset of a group the yard lacks (one the pack says binds_as another takes that one's unless named here); crew:<name>=… for a crew member (repeatable)")
-	c.Flags().StringArrayVar(&f.members, "members", nil, "<group>=a,b: the members of a people group the yard lacks; empty for anyone (repeatable)")
-	c.Flags().StringArrayVar(&f.opens, "open-threads", nil, "<pack's crew member>=linear,github: let the crew member that takes it open threads in these of the sources the pack asks for, and in no other; =none for no (repeatable)")
-	c.Flags().StringArrayVar(&f.calls, "calls", nil, "<group>=<source>:read,<call>: let the group's sessions make these of the calls the pack asks for of a declared source, and no other; crew:<pack's crew member>=… for a crew member; <source>:none for no (repeatable)")
+	f.answerFlags.register(c)
 	c.Flags().StringArrayVar(&f.sourceEnv, "source-env", nil, "<source>=<file>: set the file the source's credential is read from, as yardr source set <source> env_file=<file> does, for a source the pack declares (repeatable)")
 	c.Flags().StringArrayVar(&f.sourceBase, "source-base", nil, "<source>=<name>: call the declaration's region base <name> for a source the pack declares, as yardr source set <source> base=<name> does (repeatable; default: as at the last import)")
 	c.Flags().StringArrayVar(&f.notify, "notify", nil, "<user>=<source>[,<envfile>]: tell the user through the source, as yardr user set <user> notify=<source> env_file=<envfile> does, for a source the pack declares that can tell a user (repeatable)")
@@ -394,103 +406,7 @@ was imported from, else of a pack yardr carries in the binary (` + strings.Join(
 tried as a directory: write ./starter for a directory of that name.
 `
 
-	var cf packFlags
-	check := &cobra.Command{
-		Use:   "check <pack> [--depot <depot>]",
-		Short: "Read a pack and show what importing it into a depot would change",
-		Long: `Reads the pack (pack.yaml, roles/, scripts/), checks it, and prints
-what importing it into the depot would do to this yard, object by object:
-create, change (field: old -> new), unchanged, not in the pack (the yard
-has it, the pack does not, and an import leaves it alone), or no longer in
-the pack (an earlier import brought it, the pack has dropped it since, and
-pack apply --prune removes it). Then what an import would ask, which flow
-would govern the depot, what each source a crew member subscribes to still
-lacks, and which sources the pack asks that a crew member may open threads in
-(open_threads): an import asks the operator, and only about a source the
-yard has a hook and a credential for. For each crew member the pack asks to
-have exposed to the yard's peers (expose_to_peers), the plan shows which
-peers it is exposed to, which an import asks the operator about, and which
-an earlier import was told no for. For each source the pack carries a
-stage map for (sources.<source>: as, hears), the plan shows the map, the
-yard's crew member it would be acted on as, whether the yard has a hook of
-that source and whether that crew member may set a status there (set_state),
-with the command for whatever is missing. For each source the pack declares
-(sources.<name>: declaration), the plan shows where its calls go, the calls,
-what a declaration the yard has under that name would change to, and what
-the yard must still be told: the file its credential is read from, and for a
-source that can tell a user, which user names it (an apply answers both with
---source-env and --notify); and, where the pack's file
-replaces the yard's and adds or changes a read call, who gets that call
-through a grant of read they hold. For each group and crew member the pack
-asks calls of a declared source for (calls), the plan shows which it has,
-which an import asks the operator about, which an earlier import was told
-no for, and which lack something, with the command. Nothing is written.
-
-The pack's role is set on every agent group and crew member it names, also
-where the depot has its own .yardr/roles/<name>.md: the plan names that file
-as shadowed. --depot-roles keeps the depot's own role instead.
-
---group <pack's group>=<yard's group> has a group the yard has take a group
-of the pack, instead of a <depot>-<group> of the depot's own: the plan says
-"takes", the pack's routes lead to it, and nothing of it is changed. Where
-its role or limit is not the pack's, the plan says so in a line.
-
-A script group's env (groups.<group>.env) is the options of its script, set
-before the script in the cmd of a group the import creates; the plan says
-which ("cmd sets YARDR_LAND=squash before the script"). A group the yard has
-keeps its own cmd, also when the pack's env has changed since the group was
-made, and the plan says in a line what of the pack's env that cmd lacks.
-
-A role or stage file is installed with {{operator}} filled with the yard's
-operator and {{<crew member>}} with the yard's crew member that takes that
-crew member of the pack; any other {{...}} in one makes the pack invalid.
-
-A pack of kind source (kind: source) is imported into the yard itself, and
-into no depot: check takes it without --depot, and refuses --depot for it.
-It declares a source yardr has no Go for, with the commands for it; the
-plan names each command, its file and the file's sha256. The yard runs
-them all but the git credential helper, which a depot's git runs. What a
-stage means in such a source is a pack for a depot's to say
-(sources.<name>: hears): until the yard has the source, an import of that
-pack skips the lines and says so, and the next apply sets them. A pack with
-no flows, groups or crew (sources lines alone) is checked without --depot
-too: the plan says what the lines would set on the yard's hooks, and each
-line waits for the depot, whose flow it is held to once one is named.
-
-It exits 1 on a pack that is not valid, naming every mistake by file, line
-and key, and on a plan an import would refuse (open beads in a stage the
-pack's flow lacks). A pack given as a directory is read and checked before
-the yard is asked anything, so its mistakes are named on a home with no yard
-too; a valid one stops there for the yard its plan is made against. After the plan
-come the pack's setup notes (pack.yaml's setup), when it has any: its author's words
-about what a setup takes, marked as the pack's, not checked by yardr. --json prints the plan as data. See docs/packs.md.
-` + naming,
-		Example: `  yardr pack check starter --depot yardr
-  yardr pack check ~/packs/starter --depot yardr --crew yardmaster=boss
-  yardr pack check contributors --depot signalbox --group builders=yardr-builders
-  yardr pack check linear`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(c *cobra.Command, args []string) error {
-			// The first-run check, which pack check is let through
-			// (noOnboarding), once a directory pack has been read.
-			st, _, p, err := a.openPack(c.OutOrStdout(), c.ErrOrStderr(), c.Context(), args[0], &cf, func() error { return a.onboard(c) }, true)
-			if err != nil {
-				return err
-			}
-			plan, err := pack.Build(c.Context(), st, p, cf.opts)
-			if err != nil {
-				return err
-			}
-			if err := a.out(c.OutOrStdout(), plan, func(w io.Writer) { printPlan(w, plan, nil, nil, nil, nil, true) }); err != nil {
-				return err
-			}
-			if len(plan.Refused) > 0 {
-				return errCheckFailed
-			}
-			return nil
-		},
-	}
-	cf.register(check, "would be")
+	check := a.packCheckCmd(naming)
 
 	var af importFlags
 	apply := &cobra.Command{
@@ -655,7 +571,7 @@ after pack check. The import is recorded (yardr pack list). See docs/packs.md.
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error { return a.packApplyRun(c, args[0], &af) },
 	}
-	af.register(apply, "is")
+	af.packFlags.register(apply, "is")
 	af.registerAnswers(apply)
 	apply.Flags().BoolVar(&af.prune, "prune", false, "remove what an earlier import of this pack brought and the pack has dropped since")
 

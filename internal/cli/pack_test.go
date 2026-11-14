@@ -149,6 +149,87 @@ func TestPackCheckPrintsThePlan(t *testing.T) {
 	if out, err = run(t, a.packCmd(), "check", quiet, "--depot", "web"); err != nil || strings.Contains(out, `"frame"`) {
 		t.Errorf("the json plan of a pack without a frame names one: %v\n%s", err, out)
 	}
+
+	// The flags that answer a plan fill it in: an answered line shows
+	// its value, and what an import would ask shrinks to what is still
+	// open. The digest and the counts are the answered import's, and
+	// nothing is written.
+	a.json = false
+	answered, err := run(t, a.packCmd(), "check", "../../packs/starter", "--depot", "web", "--crew", "yardmaster=boss",
+		"--bind", "builders=claude", "--members", "backlog=ada")
+	if err != nil {
+		t.Fatalf("an answered check: %v\n%s", err, answered)
+	}
+	for _, want := range []string{
+		"  create           web-builders\n                     agent: claude\n",
+		"  create           backlog\n                     members: ada\n",
+		"  group.web-reviewers.kind: which agent runs group web-reviewers",
+		"  group.decisions.members: who is in group decisions",
+		"digest sha256:" + plan.Digest + "\n",
+		"40 to create, 0 to change, 0 unchanged, 0 not in the pack\n",
+	} {
+		if !strings.Contains(answered, want) {
+			t.Errorf("the answered plan lacks %q:\n%s", want, answered)
+		}
+	}
+	for _, gone := range []string{
+		"asks: group.web-builders.kind",
+		"asks: group.backlog.members",
+		"  group.web-builders.kind: ",
+		"  group.backlog.members: ",
+	} {
+		if strings.Contains(answered, gone) {
+			t.Errorf("the answered plan still asks %q:\n%s", gone, answered)
+		}
+	}
+
+	// A group that binds as another and is bound here gets its own
+	// questions, as any new group does; unbound it takes the other's.
+	if !strings.Contains(text, "agent, model and arguments as group web-reviewers") {
+		t.Errorf("the unanswered plan binds security-reviewers to nothing:\n%s", text)
+	}
+	bound, err := run(t, a.packCmd(), "check", "../../packs/starter", "--depot", "web", "--crew", "yardmaster=boss",
+		"--bind", "security-reviewers=claude")
+	if err != nil {
+		t.Fatalf("a check binding a binds_as group: %v\n%s", err, bound)
+	}
+	if !strings.Contains(bound, "  create           web-security-reviewers\n                     agent: claude\n") || strings.Contains(bound, "as group web-reviewers") {
+		t.Errorf("the bound plan does not ask about security-reviewers itself:\n%s", bound)
+	}
+
+	// A value pack apply would refuse is refused the same way: the
+	// same words, and nothing is written.
+	for _, flag := range []string{"coders=claude", "builders"} {
+		_, checkErr := run(t, a.packCmd(), "check", "../../packs/starter", "--depot", "web", "--bind", flag)
+		_, applyErr := run(t, a.packCmd(), "apply", "../../packs/starter", "--depot", "web", "--bind", flag)
+		if checkErr == nil || applyErr == nil || checkErr.Error() != applyErr.Error() {
+			t.Errorf("--bind %s: check %v, apply %v, want the same refusal", flag, checkErr, applyErr)
+		}
+	}
+	if _, err := run(t, a.packCmd(), "check", "../../packs/starter", "--depot", "web", "--members", "builders"); err == nil || !strings.Contains(err.Error(), "--members \"builders\": want <group>=a,b") {
+		t.Errorf("a malformed --members: %v", err)
+	}
+	if groups, _ := a.st.Groups(ctx); len(groups) != 0 {
+		t.Errorf("a check wrote groups: %v", groups)
+	}
+	if recs, _ := a.st.Packs(ctx); len(recs) != 0 {
+		t.Errorf("a check recorded imports: %v", recs)
+	}
+
+	// --json shows the same answered plan: the bound group's own
+	// question is in it.
+	a.json = true
+	out, err = run(t, a.packCmd(), "check", "../../packs/starter", "--depot", "web", "--crew", "yardmaster=boss",
+		"--bind", "security-reviewers=claude", "--members", "backlog=ada")
+	var answeredJSON struct {
+		Plan    pack.Plan    `json:"plan"`
+		Answers pack.Answers `json:"answers"`
+	}
+	if err != nil || json.Unmarshal([]byte(out), &answeredJSON) != nil || answeredJSON.Plan.Pack != "starter" || answeredJSON.Plan.Digest != plan.Digest ||
+		answeredJSON.Answers["group.web-security-reviewers.kind"] != "claude" || answeredJSON.Answers["group.backlog.members"] != "ada" ||
+		!slices.ContainsFunc(answeredJSON.Plan.Questions, func(q pack.Question) bool { return q.ID == "group.web-security-reviewers.kind" }) {
+		t.Errorf("the answered json plan: %v\n%s", err, out)
+	}
 }
 
 // A frame-only pack applies with no --depot, as the yard's frame: the

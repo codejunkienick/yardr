@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -220,6 +221,28 @@ func TestPackApplyAsksTheOperatorAboutCalls(t *testing.T) {
 	if mayCall(t, a) != "" {
 		t.Fatal("pack check granted something")
 	}
+	// With the flag, check prints the plan with the answer filled in
+	// and asks only for what is still open: it grants nothing and asks
+	// nothing itself, in a terminal too.
+	out, err = run(t, a.packCmd(), append([]string{"check", dir, "--depot", "web", "--calls", "builders=crm:read"}, deskFlags[:2]...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "  grants    read: --calls says so\n") ||
+		strings.Contains(out, "let group web-builders call read") ||
+		!strings.Contains(out, "  the operator: let group web-support call note (update) of the source crm (--calls support=crm:note, or :none)? [no]\n") ||
+		mayCall(t, a) != "" || len(asked) != 0 {
+		t.Errorf("the answered check: asked %q, grants %q:\n%s", asked, mayCall(t, a), out)
+	}
+	a.json = true
+	jsonOut, jsonErr := run(t, a.packCmd(), append([]string{"check", dir, "--depot", "web", "--calls", "builders=crm:read"}, deskFlags[:2]...)...)
+	a.json = false
+	var checked struct {
+		Calls callAnswers `json:"calls"`
+	}
+	if jsonErr != nil || json.Unmarshal([]byte(jsonOut), &checked) != nil || !checked.Calls.Answers["group web-builders"]["crm:read"] {
+		t.Errorf("the answered json check: %v\n%s", jsonErr, jsonOut)
+	}
 
 	head, _ := a.st.Head(ctx)
 	if out, err = run(t, a.packCmd(), args...); err != nil {
@@ -353,9 +376,16 @@ func TestPackApplyCallsFlag(t *testing.T) {
 			if _, err := run(t, a.packCmd(), append(args, "--calls", flag)...); err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("--calls %s: %v, want %q", flag, err, want)
 			}
+			// check refuses the flag the same way and prints no plan.
+			if _, err := run(t, a.packCmd(), "check", dir, "--depot", "web", "--calls", flag); err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("check --calls %s: %v, want %q", flag, err, want)
+			}
 		}
 		if _, err := run(t, a.packCmd(), append(args, "--calls", "builders=crm:read", "--calls", "builders=crm:none")...); err == nil || !strings.Contains(err.Error(), "answered twice") {
 			t.Errorf("twice: %v", err)
+		}
+		if _, err := run(t, a.packCmd(), "check", dir, "--depot", "web", "--calls", "builders=crm:read", "--calls", "builders=crm:none"); err == nil || !strings.Contains(err.Error(), "answered twice") {
+			t.Errorf("check twice: %v", err)
 		}
 		if mayCall(t, a) != "" {
 			t.Fatalf("a refused command granted %q", mayCall(t, a))

@@ -302,6 +302,26 @@ func TestPackApplyAsksTheOperatorAboutOpeningThreads(t *testing.T) {
 	if bossMayOpen(t, a) != "" {
 		t.Fatal("pack check granted something")
 	}
+	// With the flag, check prints the plan with the answer filled in
+	// and asks only for what is still open: it grants nothing and asks
+	// nothing itself, in a terminal too.
+	out, err = run(t, a.packCmd(), "check", dir, "--depot", "web", "--crew", "yardmaster=boss", "--open-threads", "yardmaster=linear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "  grants    linear: --open-threads says so\n") ||
+		strings.Contains(out, "let boss open threads in linear") || bossMayOpen(t, a) != "" || len(*asked) != 0 {
+		t.Errorf("the answered check: asked %q, may open %q:\n%s", *asked, bossMayOpen(t, a), out)
+	}
+	a.json = true
+	jsonOut, jsonErr := run(t, a.packCmd(), "check", dir, "--depot", "web", "--crew", "yardmaster=boss", "--open-threads", "yardmaster=linear")
+	a.json = false
+	var checked struct {
+		OpenThreads openAnswers `json:"open_threads"`
+	}
+	if jsonErr != nil || json.Unmarshal([]byte(jsonOut), &checked) != nil || !checked.OpenThreads.Answers["boss"]["linear"] {
+		t.Errorf("the answered json check: %v\n%s", jsonErr, jsonOut)
+	}
 
 	head, _ := a.st.Head(ctx)
 	if out, err = run(t, a.packCmd(), args...); err != nil {
@@ -500,15 +520,25 @@ func TestPackApplyOpenThreadsFlag(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("--open-threads %s: %v, want %q", flag, err, want)
 			}
+			// check refuses the flag the same way and prints no plan.
+			if _, err := run(t, a.packCmd(), "check", dir, "--depot", "web", "--open-threads", flag); err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("check --open-threads %s: %v, want %q", flag, err, want)
+			}
 		}
 		if _, err := run(t, a.packCmd(), append(args, "--open-threads", "yardmaster=linear", "--open-threads", "yardmaster=none")...); err == nil || !strings.Contains(err.Error(), "answered twice") {
 			t.Errorf("the flag twice for one crew member: %v", err)
+		}
+		if _, err := run(t, a.packCmd(), "check", dir, "--depot", "web", "--open-threads", "yardmaster=linear", "--open-threads", "yardmaster=none"); err == nil || !strings.Contains(err.Error(), "answered twice") {
+			t.Errorf("check with the flag twice for one crew member: %v", err)
 		}
 		// A pack that asks for nothing takes no answer.
 		plain := openPack(t, "")
 		_, err := run(t, a.packCmd(), append([]string{"apply", plain, "--depot", "web", "--yes", "--open-threads", "yardmaster=linear"}, starterFlags...)...)
 		if err == nil || !strings.Contains(err.Error(), "the pack asks for no source its crew member yardmaster may open threads in") {
 			t.Errorf("a pack without the key: %v", err)
+		}
+		if _, err := run(t, a.packCmd(), "check", plain, "--depot", "web", "--open-threads", "yardmaster=linear"); err == nil || !strings.Contains(err.Error(), "the pack asks for no source its crew member yardmaster may open threads in") {
+			t.Errorf("check on a pack without the key: %v", err)
 		}
 		if groups, _ := a.st.Groups(ctx); len(groups) != 0 || bossMayOpen(t, a) != "" {
 			t.Fatalf("a refused flag changed the yard: %v, may open %q", groups, bossMayOpen(t, a))

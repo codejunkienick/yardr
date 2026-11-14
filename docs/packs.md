@@ -491,7 +491,9 @@ yard has imported and the ones yardr embeds.
 
 ```sh
 yardr pack check <pack> [--depot <depot>] [--crew <pack's>=<yard's>]… [--group <pack's>=<yard's>]…
-    [--flow <flow>] [--depot-roles] [--auth <name>] [--json]
+    [--flow <flow>] [--bind <group>=<kind>[:<model>][,<preset>]]… [--members <group>=a,b]…
+    [--open-threads <pack's>=<source>,…]… [--calls <group>=<source>:<call>,…]…
+    [--depot-roles] [--auth <name>] [--json]
 ```
 
 Its first line names the pack, where it was read from, the kind it declares
@@ -539,6 +541,17 @@ come the pack's setup notes (`setup`), when it has any: its author's words
 about what a setup takes, marked as the pack's, not checked by yardr. `--json` prints the
 same plan as data ([below](#the-plan-as-data)). It exits 1 on an invalid
 pack and on a plan an import would refuse.
+
+The flags that answer what an import asks may be given here too, and the
+plan is printed with their answers filled in: `--bind`, `--members`,
+`--open-threads` and `--calls`, as `pack apply` takes them
+([below](#yardr-pack-apply)). An answered line shows its value, and "an
+import would ask" lists only what is still open, so what a plan still asks
+can be read before applying or asking. Nothing is asked in a terminal, and
+nothing is written or granted: a value `pack apply` would refuse is refused
+here the same way. The flags that set state as an import runs (`--yes`,
+`--sha256`, `--prune`, `--source-env`, `--source-base`, `--notify`) are not
+taken here; the digest above the programs line is what `--sha256` pins.
 
 A pack given as a directory is read and checked before the yard is asked
 anything, so its mistakes are named, with exit 1, on a home that has no yard
@@ -2108,8 +2121,11 @@ it has it.
 
 ## The plan as data
 
-`pack check --json` prints the plan an import executes (`pack apply --json`
-prints `{"plan": …, "answers": …, "open_threads": …, "calls": …, "expose": …, "maps_refused": …, "sources_refused": …, "result": …, "sets": …}`, the
+`pack check --json` prints the plan an import executes. With any of its four
+answering flags, it prints `{"plan": …, "answers": …, "open_threads": …,
+"calls": …}`: the plan and answers in the same fields as `pack apply --json`.
+With none, it still prints the plan alone. `pack apply --json` prints
+`{"plan": …, "answers": …, "open_threads": …, "calls": …, "expose": …, "maps_refused": …, "sources_refused": …, "result": …, "sets": …}`, the
 answers by question id, an `args` answer being the arguments the new agent
 got, space-separated; `open_threads` has `answers`, crew member -> source ->
 yes or no as given by flag or form, and `notes`, what was not granted and
