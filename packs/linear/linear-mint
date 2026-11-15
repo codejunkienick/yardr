@@ -1,0 +1,101 @@
+#!/bin/sh
+# Mints a Linear access token from the OAuth application's client id and
+# secret: the mint command the linear pack's declaration brings
+# (credential.mint_command), whose credential names LINEAR_CLIENT_ID and
+# LINEAR_CLIENT_SECRET under credential.mint. Applying the pack copies it
+# under <home>/sources/<source>/; the core runs it with {inputs, scope}
+# on stdin and reads {token, expires_at} on stdout.
+#
+# LINEAR_CLIENT_ID is the application's public identifier, no secret.
+# LINEAR_CLIENT_SECRET is the secret. The two are exchanged at Linear's
+# token endpoint for an app-actor token (the client_credentials grant),
+# which acts as the application itself, with access to the workspace's
+# public teams. No new copy of the secret is stored: it is held in this
+# process's memory alone, sent in the exchange's body, and never printed,
+# neither on stdout nor on stderr, nor written anywhere.
+#
+# Needs curl on PATH. LINEAR_TOKEN_ENDPOINT may name a loopback HTTP
+# endpoint for a test's stand-in. The scope on stdin is the call's;
+# Linear replaces the app's credentials when the scope set varies, so
+# every mint sends one fixed set instead, and the scope it is passed is
+# read and ignored. The set is what the pack's calls do: reply posts a
+# comment, open and state create and update issues, the rest reads.
+# The token is kept a day at most, whatever Linear's longer life, so a
+# rotated secret is picked up without core changes.
+set -eu
+
+fail() { echo "linear-mint: $*" >&2; exit 1; }
+
+command -v curl >/dev/null 2>&1 || fail "needs curl on PATH"
+
+input=$(cat)
+[ -n "$input" ] || fail "reads {inputs, scope} on stdin, and got nothing"
+
+# first <text> <key> is the value of the first "key": "value" in text, ""
+# when there is none. Values with an escaped quote in them are not read:
+# an id, a scope, a secret and Linear's answers have none.
+first() {
+  printf '%s' "$1" | grep -o "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" |
+    head -n 1 | sed 's/^[^:]*:[[:space:]]*"//;s/"$//'
+}
+
+# num <text> <key> is the number of the first "key": <number> in text, ""
+# when there is none.
+num() {
+  printf '%s' "$1" | grep -o "\"$2\"[[:space:]]*:[[:space:]]*[0-9][0-9]*" |
+    head -n 1 | sed -n 's/[^0-9]*\([0-9][0-9]*\)/\1/p'
+}
+
+# urlencode <text> is text with every byte as %XX. Linear's secret
+# alphabet is undocumented, so the inputs are encoded rather than sent
+# as they are. The body goes over the pipe, not in an argument and not
+# in a file.
+urlencode() {
+  printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n' | sed 's/\(..\)/%\1/g'
+}
+
+client_id=$(first "$input" LINEAR_CLIENT_ID)
+client_secret=$(first "$input" LINEAR_CLIENT_SECRET)
+[ -n "$client_id" ] || fail "its inputs name no LINEAR_CLIENT_ID"
+[ -n "$client_secret" ] || fail "its inputs name no LINEAR_CLIENT_SECRET"
+printf '%s' "$input" | grep -q '"scope"' || fail "reads {inputs, scope} on stdin, and got no scope"
+endpoint=${LINEAR_TOKEN_ENDPOINT:-https://api.linear.app/oauth/token}
+if [ "$endpoint" != "https://api.linear.app/oauth/token" ]; then
+  # The override is for the test stand-in only. Keep the client secret
+  # from being sent to an endpoint supplied by the process environment.
+  case $endpoint in
+    http://127.0.0.1:*)
+      port=${endpoint#http://127.0.0.1:}
+      case $port in ''|*[!0-9]*) fail "LINEAR_TOKEN_ENDPOINT is only allowed for a loopback test endpoint" ;; esac
+      ;;
+    *) fail "LINEAR_TOKEN_ENDPOINT is only allowed for a loopback test endpoint" ;;
+  esac
+fi
+
+# The one scope set every mint sends: read for the reads (read, posted,
+# opened, the viewer check), issues:create for open and state (which
+# creates and updates), comments:create for reply. Linear replaces the
+# app's credentials when the set varies, so it never does.
+scope=read,issues:create,comments:create
+out=$(printf 'grant_type=client_credentials&scope=%s&client_id=%s&client_secret=%s' \
+  "$scope" "$(urlencode "$client_id")" "$(urlencode "$client_secret")" |
+  curl -s --max-time 10 -w '\n%{http_code}' -d @- "$endpoint") ||
+  fail "could not reach $endpoint (curl exit $?)"
+code=$(printf '%s' "$out" | tail -n 1)
+body=$(printf '%s' "$out" | sed '$d')
+# The response body is untrusted and could echo the client secret.
+# Report only the status code on failure.
+[ "$code" = "200" ] || fail "minting a token was answered $code"
+token=$(first "$body" access_token)
+expires_in=$(num "$body" expires_in)
+[ -n "$token" ] && [ -n "$expires_in" ] || fail "minting a token came back with no token"
+# The answer is JSON the core reads: a token outside what Linear sends
+# is refused rather than printed through it.
+case $token in *[!A-Za-z0-9._-]*) fail "the token Linear answered is no token" ;; esac
+# A day at most, whatever the grant's longer life.
+if [ "$expires_in" -gt 86400 ]; then expires_in=86400; fi
+now=$(date +%s)
+exp=$(date -u -r "$((now + expires_in))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null ||
+  date -u -d "@$((now + expires_in))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) ||
+  fail "cannot write the time (date reads neither -r nor -d here)"
+printf '{"token":"%s","expires_at":"%s"}' "$token" "$exp"

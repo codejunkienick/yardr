@@ -17,7 +17,9 @@ about: Linear issues and comments. Hears its webhooks and speaks in its threads.
 
 # The name of the variable, never the value. A command gets it in its
 # environment under this name, and gets no other variable of the yard.
-# hook.normalize is handed no credential at all.
+# hook.normalize is handed no credential at all. Where the env sets the
+# mint's two names, the core runs the source's mint_command and hands what
+# it mints under LINEAR_API_KEY instead; one of them alone is refused.
 #
 # The header is how a declared call, one of the calls below, sends it.
 # Without one those calls go out with no credential at all. Linear takes
@@ -28,9 +30,24 @@ about: Linear issues and comments. Hears its webhooks and speaks in its threads.
 # too. A declared call therefore wants an OAuth token. linear/thread builds
 # its own header, a lin_api_ key bare and anything else as Bearer, and
 # takes either.
+#
+# A credential that expires is minted, not kept: LINEAR_CLIENT_ID names
+# the application (a public identifier, no secret), and linear-mint, the
+# file beside this one, turns it with LINEAR_CLIENT_SECRET into an
+# app-actor token at Linear's token endpoint: run with {inputs, scope} on
+# stdin for a {token, expires_at}. The pack brings it
+# (credential.mint_command), so applying the pack sets the mint with no
+# command typed; the card shows its sha256, and a mint_command the
+# operator sets on linear wins over it. The token is handed to each call
+# under LINEAR_API_KEY, and kept in memory alone.
 credential:
   env: LINEAR_API_KEY
   header: "Authorization: Bearer {credential}"
+  mint:
+    - name: LINEAR_CLIENT_ID
+      secret: false               # a public identifier, asked in the clear
+    - LINEAR_CLIENT_SECRET
+  mint_command: [linear-mint]       # the file beside this one; the source's own mint_command wins
 
 # ---- what it sends us ----------------------------------------------------
 

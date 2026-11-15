@@ -310,9 +310,11 @@ type Stater interface {
 ```
 
 - `Credential` reads the caller's credential for the source from the
-  environment of the calling process, under the variable its file names:
-  `LINEAR_API_KEY`; for GitHub a GitHub App's `GITHUB_APP_ID` and
-  `GITHUB_APP_PRIVATE_KEY_FILE`, else `GITHUB_TOKEN`. Where the mint's
+  environment of the calling process, under the variables its file names:
+  for Linear a Linear OAuth app's `LINEAR_CLIENT_ID` and
+  `LINEAR_CLIENT_SECRET`, else `LINEAR_API_KEY`; for GitHub a GitHub
+  App's `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY_FILE`, else
+  `GITHUB_TOKEN`. Where the mint's
   names are set the call runs with a token the operator's mint command
   made from them; one of them alone is refused
   ([below](#a-declared-source)).

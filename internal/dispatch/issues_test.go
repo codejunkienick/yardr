@@ -630,7 +630,7 @@ func TestIssueMoveUsesTheCrewCredential(t *testing.T) {
 	y.to(t, "yard-a", "new")
 	want(t, "requests", y.asked.Load(), int64(0))
 	ms := y.pending(t)
-	if len(ms) != 1 || ms[0].Attempts != 1 || !strings.Contains(ms[0].Error, "does not set LINEAR_API_KEY") {
+	if len(ms) != 1 || ms[0].Attempts != 1 || !strings.Contains(ms[0].Error, "does not set LINEAR_CLIENT_ID and LINEAR_CLIENT_SECRET, or LINEAR_API_KEY") {
 		t.Fatalf("moves %+v", ms)
 	}
 	// A credential the source does not take is the source failing.
@@ -793,7 +793,7 @@ func TestIssueMoveUsesTheCrewEnvCommand(t *testing.T) {
 	yardmaster(map[string]any{"env_command": cmd})
 	y.now = y.now.Add(time.Minute)
 	y.pass(t)
-	if ms = y.pending(t); len(ms) != 1 || !strings.Contains(ms[0].Error, "crew member yardmaster's env_command "+cmd+" does not set LINEAR_API_KEY") {
+	if ms = y.pending(t); len(ms) != 1 || !strings.Contains(ms[0].Error, "crew member yardmaster's env_command "+cmd+" does not set LINEAR_CLIENT_ID and LINEAR_CLIENT_SECRET, or LINEAR_API_KEY") {
 		t.Fatalf("moves %+v", ms)
 	}
 	// It answers again: the move is made.

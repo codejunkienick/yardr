@@ -1962,8 +1962,24 @@ func TestLinearPack(t *testing.T) {
 	for _, c := range p.Declared[0].Declaration.Commands() {
 		keys = append(keys, c.Key)
 	}
-	if want := []string{"thread.reply", "thread.posted", "thread.read", "thread.open", "thread.opened", "thread.state", "hook.normalize"}; !slices.Equal(keys, want) {
+	if want := []string{"credential.mint_command", "thread.reply", "thread.posted", "thread.read", "thread.open", "thread.opened", "thread.state", "hook.normalize"}; !slices.Equal(keys, want) {
 		t.Fatalf("commands = %v, want %v", keys, want)
+	}
+	// Its credential mints an app-actor token from the OAuth
+	// application's id and secret, and still takes a static token: the
+	// id is a public identifier, the secret a secret.
+	c := p.Declared[0].Declaration.Credential
+	if c.Env != "LINEAR_API_KEY" || c.Header != "Authorization: Bearer {credential}" {
+		t.Fatalf("credential = %+v", c)
+	}
+	if !slices.Equal(c.Mint, []string{"LINEAR_CLIENT_ID", "LINEAR_CLIENT_SECRET"}) {
+		t.Errorf("mint = %v, want the application's id and secret", c.Mint)
+	}
+	if !slices.Equal(c.NotSecret, []string{"LINEAR_CLIENT_ID"}) {
+		t.Errorf("not_secret = %v, want the application's id", c.NotSecret)
+	}
+	if !slices.Equal(c.MintCommand, []string{"linear-mint"}) {
+		t.Errorf("mint_command = %v, want [linear-mint]", c.MintCommand)
 	}
 	// Its setup notes: where the webhook is made, the hook and its
 	// secret, the crew member's key and identity, the grants, how to
