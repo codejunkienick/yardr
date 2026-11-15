@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -30,7 +31,41 @@ type watched struct {
 	srv       *httptest.Server
 	byRequest bool
 	portWait  chan struct{}
-	bindGate  bool
+	gate      *os.File // the test's end of the app's bind gate (newBindGate), nil where it has none
+}
+
+// bindGateName is the FIFO in its directory that a gated app waits on.
+const bindGateName = "bind.gate"
+
+// gateWait is the shell's wait for the release of a bind gate: one line from the
+// gate's FIFO.
+const gateWait = "read -r _ <" + bindGateName
+
+// gatedApp is the command of an app that answers as loopbackApp's does, once its
+// test has released it (releaseBindGate): until then it listens on nothing.
+func gatedApp(port int) string { return gateWait + "; exec " + loopbackApp(port) }
+
+// newBindGate makes the gate's FIFO in dir and returns the test's end of it, held
+// open for reading and writing until the test ends. A release is a line written
+// to it (releaseBindGate), not the open and close of a writer. On macOS a reader
+// that already waits on a FIFO can miss a writer that opens and closes it, and
+// then waits for ever in its read: an app released that way is let through only
+// when the two come in the right order (yardr-eseg). A line stays in the FIFO for
+// as long as the test holds it, whichever comes first, and a FIFO opened for
+// reading and writing opens at once on macOS and Linux alike, so a release waits
+// for no reader either.
+func newBindGate(t *testing.T, dir string) *os.File {
+	t.Helper()
+	path := filepath.Join(dir, bindGateName)
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gate, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { gate.Close() })
+	return gate
 }
 
 // newWatched is the yard of one case: command is the app's, given the port the
@@ -40,10 +75,7 @@ func newWatched(t *testing.T, byRequest bool, command func(port int) string, bac
 	t.Helper()
 	w := &watched{yard: newYard(t), app: "demo", dir: t.TempDir(), port: freePort(t), byRequest: byRequest}
 	if bindGate {
-		if err := syscall.Mkfifo(filepath.Join(w.dir, "bind.gate"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		w.bindGate = true
+		w.gate = newBindGate(t, w.dir)
 	}
 	if watchPortWait {
 		w.portWait = make(chan struct{}, 1)
@@ -193,16 +225,13 @@ func (w *watched) waitForPortWait(t *testing.T, answer <-chan previewAnswer) {
 	}
 }
 
+// releaseBindGate lets the app held at its gate go on to bind.
 func (w *watched) releaseBindGate(t *testing.T) {
 	t.Helper()
-	if !w.bindGate {
+	if w.gate == nil {
 		t.Fatal("no bind gate")
 	}
-	f, err := os.OpenFile(filepath.Join(w.dir, "bind.gate"), os.O_WRONLY, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
+	if _, err := w.gate.WriteString("go\n"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -317,7 +346,7 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 			// The request arrives while the process runs but its app is held at a
 			// FIFO until the test knows the request has found the unbound port.
 			name:          "an app that binds after the request comes is waited for",
-			command:       func(port int) string { return "cat bind.gate >/dev/null; exec " + loopbackApp(port) },
+			command:       gatedApp,
 			watchPortWait: true, bindGate: true,
 			check: func(t *testing.T, w *watched) {
 				answer := w.getAsync()
@@ -369,7 +398,7 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 			// same answer by hand while the request waits; this one lets the
 			// supervisor give it.
 			name:     "an app that never binds is failed while the request waits for it",
-			command:  func(port int) string { return "cat bind.gate >/dev/null; exec " + loopbackApp(port) },
+			command:  gatedApp,
 			bindWait: 5 * time.Second, bindGate: true,
 			check: func(t *testing.T, w *watched) {
 				answer := w.getAsync()
@@ -405,6 +434,47 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// A release of a bind gate waits for no app and is kept for the one that comes
+// later; one made as the app waits lets it through too. The release that was the
+// open and close of a writer did neither: it waited for a reader to open the FIFO,
+// and a reader that waited already could miss it (yardr-eseg). The app here is
+// gatedApp's own wait, with a mark before it and nothing started after it.
+func TestBindGateReleaseIsKeptAndWaitsForNoApp(t *testing.T) {
+	dir := t.TempDir()
+	w := &watched{gate: newBindGate(t, dir)}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	// The app says that it has started before it comes to the gate.
+	app := func() *exec.Cmd {
+		cmd := exec.CommandContext(ctx, "sh", "-c", ": >started; "+gateWait)
+		cmd.Dir = dir
+		return cmd
+	}
+	// The release comes first, with no app to read it, and the app that comes
+	// after is let through at once.
+	w.releaseBindGate(t)
+	if err := app().Run(); err != nil {
+		t.Fatalf("the app that came after the release: %v, want it let through", err)
+	}
+	// The release comes once the app has started, as it comes to the gate or
+	// waits there.
+	if err := os.Remove(filepath.Join(dir, "started")); err != nil {
+		t.Fatal(err)
+	}
+	waiting := app()
+	if err := waiting.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the app to start", func() bool {
+		_, err := os.Stat(filepath.Join(dir, "started"))
+		return err == nil
+	})
+	w.releaseBindGate(t)
+	if err := waiting.Wait(); err != nil {
+		t.Fatalf("the app waiting at the gate: %v, want it let through", err)
 	}
 }
 
