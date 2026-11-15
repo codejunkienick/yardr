@@ -95,6 +95,14 @@ func dyingClient(t *testing.T, st *store.Store, method string) store.API {
 	return rpc.NewClient(sock)
 }
 
+// crmReach is what a giving of the source crm's credential prints after its
+// own lines: what the value reaches and what it does not, as the card said
+// before it, without the line that said where it lands, which the giving's own
+// line says with the file itself.
+const crmReach = "read by: declared calls (yardr call crm ...) and the source's check, from the file at each call\n" +
+	"not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew\n" +
+	"mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set\n"
+
 // bead ask --secret stores the ask with where its answer goes and prints
 // the line of the design's section 3.2; --env narrows it; prime shows the
 // yard's line and how to answer. bead answer --secret reads NAME=value
@@ -135,6 +143,9 @@ func TestBeadAskAndAnswerASecret(t *testing.T) {
 		"ask 1 · open", "The API key for the CRM",
 		"a secret: CRM_TOKEN, for the source crm (https://crm.example.com)",
 		"it goes to a file only the yard's server reads; no agent is shown it",
+		"lands in: the source's env_file, or sources/crm.env in the yard's home when it has none",
+		"read by: declared calls (yardr call crm ...) and the source's check, from the file at each call",
+		"not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew",
 		"answer with: yardr bead answer " + id + " 1 --secret",
 	} {
 		if !strings.Contains(out, want) {
@@ -204,14 +215,14 @@ func TestBeadAskAndAnswerASecret(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "mckean gave CRM_TOKEN · it is set in " + file + " · env_file " + file + " does not set CRM_UPDATE_TOKEN\n"; out != want {
+	if want := "mckean gave CRM_TOKEN · it is set in " + file + " · env_file " + file + " does not set CRM_UPDATE_TOKEN\n" + crmReach; out != want {
 		t.Fatalf("answer printed %q\nwant           %q", out, want)
 	}
 	if b, _ := os.ReadFile(file); string(b) != "CRM_TOKEN=s3cret-read\n" {
 		t.Fatalf("the file holds %q", b)
 	}
 	out, err = answerFrom(t, me, "CRM_UPDATE_TOKEN=s3cret-write\n", id, "3", "--secret")
-	if want := "mckean gave CRM_UPDATE_TOKEN · it is set in " + file + "\n"; err != nil || out != want {
+	if want := "mckean gave CRM_UPDATE_TOKEN · it is set in " + file + "\n" + crmReach; err != nil || out != want {
 		t.Fatalf("answer printed %q, %v\nwant           %q", out, err, want)
 	}
 	out, err = run(t, me.primeCmd(), "--bead", id)
@@ -291,7 +302,10 @@ func TestBeadAskSecretMintedSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "mckean gave GOOGLE_ACCOUNT · it is set in " + file + " · no mint_command is set: yardr source set google-mail mint_command=<program> [args...]\n"; out != want {
+	if want := "mckean gave GOOGLE_ACCOUNT · it is set in " + file + " · no mint_command is set: yardr source set google-mail mint_command=<program> [args...]\n" +
+		"read by: declared calls (yardr call google-mail ...) and the source's check, from the file at each call\n" +
+		"not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew\n" +
+		"mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set\n"; out != want {
 		t.Fatalf("answer printed %q\nwant           %q", out, want)
 	}
 	if b, _ := os.ReadFile(file); string(b) != "GOOGLE_ACCOUNT=op@gmail.example.com\n" {

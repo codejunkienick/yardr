@@ -200,6 +200,11 @@ func TestSecretCardNamesTheKeyAndTheCommand(t *testing.T) {
 	v := withAsks(t, st, "chief", 120, 40)
 	v.shows("a secret: CRM_TOKEN, for the source crm (https://crm.example.com)",
 		"it goes to a file only the yard's server reads; no agent is shown it",
+		// The card's lines wrap at the pane: each is found by its first row.
+		"lands in: the source's env_file, or sources/crm.env in the yard's home",
+		"read by: declared calls (yardr call crm ...) and the source's check",
+		"not reached: thread commands (yardr reply, thread open, thread state)",
+		"mint: where the source mints, these names are its inputs",
 		fmt.Sprintf("  ctrl+o types it here · or in a terminal: yardr bead answer %s %d --secret", bead, seq))
 	v.hides("answer with:")
 	if n := len(strings.Split(v.screen(), "\n")); n != 40 {

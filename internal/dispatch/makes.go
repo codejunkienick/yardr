@@ -158,10 +158,7 @@ func (d *Dispatcher) makesFrom(ctx context.Context, hook string) (uint64, error)
 // is not known. decl is the yard's declared source of the event's source,
 // nil for a builtin one.
 func (d *Dispatcher) closedSince(ctx context.Context, ev ruleEvent, decl *source.Declaration) bool {
-	for _, url := range []string{ev.threadURL, hooks.ThreadAlias(ev.source, decl, ev.threadURL)} {
-		if url == "" {
-			continue
-		}
+	for _, url := range threadURLs(ev, decl) {
 		links, err := d.Store.IssueLinks(ctx, url)
 		if err != nil {
 			d.Log.Warn("hook event: reading the thread's links", "thread", url, "err", err)
@@ -235,7 +232,7 @@ func (d *Dispatcher) make(ctx context.Context, ev ruleEvent, pass *hookPass, dec
 			// not put to the originator's checks.
 			nb = madeStandaloneBead(ev, line, depot)
 		} else {
-			nb = madeBead(ev, line, depot)
+			nb = madeBead(ev, line, depot, decl)
 			forUser, fallback := d.hookOriginator(ctx, ev, line, depot)
 			nb.For = forUser
 			for k, v := range fallback {
@@ -360,14 +357,18 @@ func (d *Dispatcher) hookOriginator(ctx context.Context, ev ruleEvent, line *sto
 
 // madeBead is the bead line makes of ev in depot: the thread's title, the
 // event's text and where to read it, a tracks link to the thread, and the
-// event marked seen on it, so that it says nothing to the bead it made.
+// event marked seen on it, so that it says nothing to the bead it made. The
+// link holds the thread's URL in its source's fixed form (fixedThread, with
+// decl, the yard's declared source of ev's, nil for a builtin one), as a link
+// made by hand does, so a delivery finds the bead whatever title slug its URL
+// carries, and a rename of the issue cuts it off from nothing.
 //
 // It is filed at the priority any bead is made at where none is asked for
 // (yardr bead create's), set here because the zero value is P0, which a
 // depot's P0 reserve route takes ahead of any label and any load condition:
 // every delivery of a hook would jump the line. A line has no priority of
 // its own to say.
-func madeBead(ev ruleEvent, line *store.Make, depot string) store.NewBead {
+func madeBead(ev ruleEvent, line *store.Make, depot string, decl *source.Declaration) store.NewBead {
 	str := func(v any) string { s, _ := v.(string); return s }
 	thread, _ := ev.data["thread"].(map[string]any)
 	body := strings.TrimSpace(str(ev.data["text"]))
@@ -386,7 +387,7 @@ func madeBead(ev ruleEvent, line *store.Make, depot string) store.NewBead {
 		Type: line.Type, Stage: line.Stage, Depot: depot,
 		Priority:  store.DefaultPriority,
 		Metadata:  meta,
-		Links:     []store.NewLink{{Kind: store.LinkTracks, Source: ev.source, URL: ev.threadURL, Thread: str(thread["id"])}},
+		Links:     []store.NewLink{{Kind: store.LinkTracks, Source: ev.source, URL: fixedThread(ev, decl), Thread: str(thread["id"])}},
 		Untracked: true,
 	}
 }

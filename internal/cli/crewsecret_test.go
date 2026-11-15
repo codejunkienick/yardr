@@ -98,6 +98,9 @@ func TestBeadAskAndAnswerACrewMembersCredential(t *testing.T) {
 	for _, want := range []string{
 		"a secret: CRM_TOKEN, for crew member yardmaster in the source crm (https://crm.example.com); the env_file line is the one written, and it takes effect when yardmaster next starts (rotation or yardr crew restart yardmaster)",
 		"it goes to a file only the yard's server reads; no agent is shown it",
+		"lands in: crew member yardmaster's env_file, or crew/yardmaster.env in the yard's home when it has none",
+		"read by: yardmaster's thread commands (yardr reply, thread open, thread state)",
+		"not reached: declared calls (yardr call crm ...), which read the source's own file; other crew members' files; a session already running",
 		"answer with: yardr bead answer " + id + " 1 --secret",
 	} {
 		if !strings.Contains(out, want) {
@@ -120,7 +123,12 @@ func TestBeadAskAndAnswerACrewMembersCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "mckean gave CRM_TOKEN · it is set in " + file + "\nnext: it takes effect when yardmaster next starts (rotation or yardr crew restart yardmaster)\n"; out != want {
+	// The giving says where the value went, when it takes effect, and what it
+	// reaches: the lines the card said, after the one that said where it lands.
+	if want := "mckean gave CRM_TOKEN · it is set in " + file + "\nnext: it takes effect when yardmaster next starts (rotation or yardr crew restart yardmaster)\n" +
+		"read by: yardmaster's thread commands (yardr reply, thread open, thread state)\n" +
+		"not reached: declared calls (yardr call crm ...), which read the source's own file; other crew members' files; a session already running\n" +
+		"mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set\n"; out != want {
 		t.Fatalf("answer printed %q\nwant           %q", out, want)
 	}
 	if b, _ := os.ReadFile(file); string(b) != "CRM_TOKEN="+value+"\n" {

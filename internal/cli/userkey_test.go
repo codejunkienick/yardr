@@ -239,7 +239,9 @@ func TestBeadAskAndAnswerAUsersAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "ada gave PUSHOVER_USER · it is set in " + file + "\nnext: yardr user set ada notify=pushover tells ada through it\n"; out != want {
+	if want := "ada gave PUSHOVER_USER · it is set in " + file + "\nnext: yardr user set ada notify=pushover tells ada through it\n" +
+		"read by: the yard, at each message it sends ada through the source pushover\n" +
+		"not reached: calls and thread commands: it is an address, not a credential\n"; out != want {
 		t.Fatalf("answer printed %q\nwant           %q", out, want)
 	}
 	if b, _ := os.ReadFile(file); string(b) != "PUSHOVER_USER="+address+"\n" {

@@ -49,6 +49,9 @@
   {{- end}}
   {{- with .Secret}}
   <p>{{.Line}}</p>
+  {{- range .Reach}}
+  <p class="entry-note">{{.}}</p>
+  {{- end}}
   {{- /* The page has no gate to put in front of a weighty card, so it
          offers no giving: the card is given where the line names. */}}
   {{- if $.Weight}}

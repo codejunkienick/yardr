@@ -132,7 +132,8 @@ type Reason struct {
 	// an answer names. Asker is who asked, Since when, To who must
 	// answer. Options are the ask's options in order, none for an ask
 	// that wants words, a secret or a command's approval. SecretLine is
-	// what a secret ask asks for, in the yard's words, "" otherwise;
+	// what a secret ask asks for, in the yard's words, "" otherwise, and
+	// SecretReach what its value reaches, in the yard's short lines;
 	// RunCommand the command a run ask proposes, whole, "" otherwise,
 	// with the yard's sentences for what it does, the command that takes
 	// it back and who may run it; SetupPack the pack a setup ask
@@ -144,6 +145,7 @@ type Reason struct {
 	To          string            `json:"-"`
 	Options     []store.AskOption `json:"-"`
 	SecretLine  string            `json:"-"`
+	SecretReach []string          `json:"-"`
 	RunCommand  string            `json:"-"`
 	RunDoes     []string          `json:"-"`
 	RunBack     string            `json:"-"`
@@ -656,7 +658,7 @@ func askReason(r store.ResolvedAsk) Reason {
 		out.RunAsk = r.Ask.Run.Ask
 	case r.Ask.Secret != nil:
 		// The yard's line, never the asker's words: what is asked for.
-		out.SecretLine = r.Ask.Secret.Line()
+		out.SecretLine, out.SecretReach = r.Ask.Secret.Line(), r.Ask.Secret.Reach()
 	case r.Ask.Setup != nil:
 		out.SetupPack = r.Ask.Setup.Pack
 		out.SetupDoes = r.Ask.Setup.Does

@@ -369,7 +369,11 @@ func TestPackAPI1MakesAndSays(t *testing.T) {
 		}
 	}
 	d := &dispatch.Dispatcher{Store: st, Runners: map[string]dispatch.Runner{"fake": contractRunner{}}}
-	const thread = "https://acme.example.com/acme/issue/ACME-1"
+	// The thread as the delivery spells it, and as the bead that tracks it
+	// holds it: the source's one fixed form of the issue (its link folds the
+	// key to lower case), which a link stores and a delivery is matched by.
+	const delivered = "https://acme.example.com/acme/issue/ACME-1"
+	const thread = "https://acme.example.com/acme/issue/acme-1"
 
 	deliver(`{"action":"opened"}`)
 	if err := d.Reconcile(ctx); err != nil {
@@ -381,6 +385,9 @@ func TestPackAPI1MakesAndSays(t *testing.T) {
 	}
 	if len(links) != 1 || links[0].Kind != store.LinkTracks {
 		t.Fatalf("links to %s: %+v, want the one tracks link", thread, links)
+	}
+	if links[0].URL != thread {
+		t.Fatalf("the made bead tracks %s, want the issue's fixed form %s, not the delivery's %s", links[0].URL, thread, delivered)
 	}
 	made, err := st.GetBead(ctx, links[0].Bead)
 	if err != nil {

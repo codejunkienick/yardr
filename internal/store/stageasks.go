@@ -319,6 +319,9 @@ func questionQuote(notes []Note, actor string) []string {
 // a notification) decides about a known thing: the question gains the bead's
 // id and title, and the context starts with the bead and its branch and,
 // where the bead carries a finish note, the note's first line (finishLine).
+// A bead of a dir depot has no branch (the depot has no base, and its beads
+// no worktree), so for it, dir, the header names none: the depot's kind is
+// the stored fact, and base is only derived from it.
 // On a question entry, questionBy is the entry event's actor, and the header
 // quotes that session's question note (questionQuote) instead of the finish
 // line, whose handover is no account of the question asked; with no note to
@@ -328,11 +331,15 @@ func questionQuote(notes []Note, actor string) []string {
 // filled in. It is a copy, since the template is the stage file's and every
 // member's card is built from it, and the header is frozen into each card as
 // it is put, whatever the bead and its notes become.
-func (t *AskTemplate) framed(row *beadRow, notes []Note, questionBy string) *AskTemplate {
+func (t *AskTemplate) framed(row *beadRow, notes []Note, questionBy string, dir bool) *AskTemplate {
 	card := *t
 	title := OneLine(row.Title)
 	card.Question = fmt.Sprintf("%s — %s: %s", t.Question, row.ID, title)
-	card.Context = []string{fmt.Sprintf("Bead: %s — %s (branch %s)", row.ID, title, Branch(row.ID))}
+	head := fmt.Sprintf("Bead: %s — %s", row.ID, title)
+	if !dir {
+		head += fmt.Sprintf(" (branch %s)", Branch(row.ID))
+	}
+	card.Context = []string{head}
 	var quote []string
 	if questionBy != "" {
 		quote = questionQuote(notes, questionBy)
@@ -420,7 +427,16 @@ func (w *wtx) putStageAsks(row *beadRow, stage string, entry uint64, f *Flow, tm
 			questionBy = entryEvent.Actor
 		}
 	}
-	card := tmpl.framed(row, notes, questionBy)
+	// The depot's kind decides whether the header names a branch (framed).
+	// A bead with no depot, or one the store no longer has, reads as a git
+	// depot's, as its header always did.
+	var depot Depot
+	if row.Depot != nil {
+		if _, err := get(w.Tx, bDepots, *row.Depot, &depot); err != nil {
+			return err
+		}
+	}
+	card := tmpl.framed(row, notes, questionBy, depot.IsDir())
 	got := 0
 	for _, member := range g.Members {
 		if strings.Contains(member, "@") {

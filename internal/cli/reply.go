@@ -317,7 +317,7 @@ event with the comment's id is logged. Prints the URL of the reply.`,
 					// source may hold the comment the key made.
 					found, err := r.Posted(ctx, env, rp.Key, cred)
 					if err != nil {
-						return fmt.Errorf("looking for an earlier attempt's reply to event %d in %s: %w", seq, env.Source, err)
+						return fmt.Errorf("looking for an earlier attempt's reply to event %d in %s: %w", seq, env.Source, threadRefused(ctx, st, env.Source, name, cred, err))
 					}
 					if found != nil {
 						m, already = *found, true
@@ -332,7 +332,7 @@ event with the comment's id is logged. Prints the URL of the reply.`,
 						m, err = r.Reply(ctx, env, to, body, rp.Key, cred)
 					}
 					if err != nil {
-						return fmt.Errorf("reply to event %d in %s: %w", seq, env.Source, err)
+						return fmt.Errorf("reply to event %d in %s: %w", seq, env.Source, threadRefused(ctx, st, env.Source, name, cred, err))
 					}
 				}
 				rec := store.Reply{Source: env.Source, Thread: env.Thread.ID, Title: env.Thread.Title, ThreadURL: env.Thread.URL,

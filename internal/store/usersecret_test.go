@@ -88,6 +88,7 @@ func TestUserAskIsStoredWithTheMintOrStaticNames(t *testing.T) {
 	if strings.Contains(lines, "words wanted") || strings.Contains(lines, "evil") {
 		t.Errorf("the card:\n%s", lines)
 	}
+	wantReachInCard(t, lines, rs[0].Ask.Secret)
 	// In the user's own queue, as footplate reads it.
 	q, err := y.UserAsks(y.ctx, "ada", "ada")
 	if err != nil {

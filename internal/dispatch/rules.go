@@ -325,23 +325,16 @@ func (d *Dispatcher) own(ctx context.Context, ev ruleEvent, pass *hookPass) bool
 // event's source, nil for a builtin one.
 func (d *Dispatcher) about(ctx context.Context, ev ruleEvent, decl *source.Declaration) (bead *store.Bead, pr prBinding, tracked bool) {
 	if ev.threadURL != "" {
-		links, err := d.Store.IssueLinks(ctx, ev.threadURL)
-		if err != nil {
-			d.Log.Warn("hook event: reading the thread's links", "thread", ev.threadURL, "err", err)
-			return nil, pr, false
-		}
-		// A source with pull requests gives one both an issue URL and a
-		// pull URL. A bead may have been linked with either form, while
-		// the payload uses the form for the event type. Try the
-		// equivalent URL too.
-		if !hasTrackingLink(links, ev.source) {
-			if alias := hooks.ThreadAlias(ev.source, decl, ev.threadURL); alias != "" {
-				other, err := d.Store.IssueLinks(ctx, alias)
-				if err != nil {
-					d.Log.Warn("hook event: reading the thread's links", "thread", alias, "err", err)
-					return nil, pr, false
-				}
-				links = append(links, other...)
+		var links []store.Link
+		for _, url := range threadURLs(ev, decl) {
+			more, err := d.Store.IssueLinks(ctx, url)
+			if err != nil {
+				d.Log.Warn("hook event: reading the thread's links", "thread", url, "err", err)
+				return nil, pr, false
+			}
+			links = append(links, more...)
+			if hasTrackingLink(links, ev.source) {
+				break
 			}
 		}
 		for _, l := range links {
@@ -376,6 +369,36 @@ func (d *Dispatcher) about(ctx context.Context, ev ruleEvent, decl *source.Decla
 		return nil, pr, false
 	}
 	return train, boundPR(train, ev.source, decl), false
+}
+
+// fixedThread is the URL of ev's thread in its source's fixed form, the one
+// spelling a link stores and matches by (hooks.IssueIn, with the source's
+// declaration): a title slug in a delivery's URL, which a rename changes, is
+// no part of it, so one issue is one link whoever names it. A URL the source
+// reads no fixed form from, and a source with no link shape, keep the URL as
+// the delivery gave it, which is how it was always looked up.
+func fixedThread(ev ruleEvent, decl *source.Declaration) string {
+	if fixed, err := hooks.IssueIn(ev.source, ev.threadURL, decl); err == nil {
+		return fixed
+	}
+	return ev.threadURL
+}
+
+// threadURLs are the URLs a bead that tracks ev's thread may be found by, in
+// the order they are tried: the fixed form, which a link stores; the URL as
+// the delivery gave it where that differs, for a bead made before links were
+// stored fixed, whose link holds it as it was; and, for a source with pull
+// requests, the equivalent URL of the other shape, since a bead may have
+// been linked with either form while the payload uses the form for the
+// event type. None is listed twice, and none is empty.
+func threadURLs(ev ruleEvent, decl *source.Declaration) []string {
+	var out []string
+	for _, url := range []string{fixedThread(ev, decl), ev.threadURL, hooks.ThreadAlias(ev.source, decl, ev.threadURL)} {
+		if url != "" && !slices.Contains(out, url) {
+			out = append(out, url)
+		}
+	}
+	return out
 }
 
 func hasTrackingLink(links []store.Link, source string) bool {

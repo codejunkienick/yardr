@@ -126,7 +126,7 @@ of the thread.`,
 					// source may hold the thread the key made.
 					found, err := o.Opened(ctx, in, rp.Key, cred, rp.At)
 					if err != nil {
-						return fmt.Errorf("looking for an earlier attempt's thread in %s %s: %w", source, in, err)
+						return fmt.Errorf("looking for an earlier attempt's thread in %s %s: %w", source, in, threadRefused(ctx, st, source, name, cred, err))
 					}
 					if found != nil {
 						t, already = *found, true
@@ -135,7 +135,7 @@ of the thread.`,
 				if !already {
 					t, err = o.Open(ctx, in, title, body, rp.Key, assignee, cred)
 					if err != nil {
-						return fmt.Errorf("open a thread in %s %s: %w", source, in, err)
+						return fmt.Errorf("open a thread in %s %s: %w", source, in, threadRefused(ctx, st, source, name, cred, err))
 					}
 				}
 				rec := store.Reply{Source: source, In: in, Thread: t.ID, Title: or(t.Title, title), ThreadURL: t.URL,

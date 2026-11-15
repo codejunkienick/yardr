@@ -817,6 +817,10 @@ func TestBeadSecretWeightyCard(t *testing.T) {
 		`<h3 class="label">asks for mckean</h3>`,
 		`<p class="weighty">WEIGHTY · credential: gives a credential or an address to the yard: CRM_TOKEN, for the source crm (https://crm.example.com)</p>`,
 		`a secret: CRM_TOKEN, for the source crm (https://crm.example.com)`,
+		// What the value reaches, in the lines the terminal's card has.
+		`lands in: the source&#39;s env_file, or sources/crm.env in the yard&#39;s home when it has none`,
+		`read by: declared calls (yardr call crm ...) and the source&#39;s check, from the file at each call`,
+		`not reached: thread commands (yardr reply, thread open, thread state), which read the speaker&#39;s own file; a crew member&#39;s is given with --for-crew`,
 		`This card is weighty and this window has no gate. Approve it in footplate, or in a terminal on the yard's machine:`,
 		`Give it with <code>yardr bead answer ` + b.ID + ` ` + strconv.FormatUint(seq, 10) + ` --secret</code>`,
 		`<button type="submit" name="action" value="later">Later</button>`,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"html"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -825,6 +826,17 @@ func TestHomeNeedsASecretAsk(t *testing.T) {
 	s := answerSection(t, f.get("/").body)
 	if !strings.Contains(s, "a secret: CRM_TOKEN, for the source crm (https://crm.example.com)") || strings.Contains(s, "words wanted") {
 		t.Errorf("the secret ask's row: %s", s)
+	}
+	// What the value reaches stands on the card, in the lines the terminal's
+	// card has.
+	for _, want := range []string{
+		"lands in: the source's env_file, or sources/crm.env in the yard's home when it has none",
+		"read by: declared calls (yardr call crm ...) and the source's check, from the file at each call",
+		"not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew",
+	} {
+		if !strings.Contains(html.UnescapeString(s), want) {
+			t.Errorf("the secret ask's row lacks %q: %s", want, s)
+		}
 	}
 }
 

@@ -191,6 +191,25 @@ func TestCall(t *testing.T) {
 		t.Fatalf("a call answered 403 with errors named = %v", err)
 	}
 
+	// A credential the service refuses (401) says which it was and the file it
+	// was read from before what the service said: any other status, a 404
+	// here, keeps the words it has.
+	stale := envFile(t, "CRM_TOKEN=tok-stale-not-to-be-seen\n", 0o600)
+	if _, err = run(t, jo.sourceCmd(), "set", "crm", "env_file="+stale); err != nil {
+		t.Fatal(err)
+	}
+	const refusedWords = "source crm, call customer: crm refused the credential (401): CRM_TOKEN, as set in the source's env_file %s, sent as Authorization: Bearer <credential>; " +
+		"to fix: give it again (yardr source key crm, or yardr bead ask <bead> - --secret crm asks the operator for it), or check the application that issued it: the service answered 401"
+	if _, err = run(t, jo.callCmd(), "crm", "customer", "id=4711"); err == nil || err.Error() != fmt.Sprintf(refusedWords, stale) {
+		t.Fatalf("a call refused its stale key = %v, want %q", err, fmt.Sprintf(refusedWords, stale))
+	}
+	if _, err = run(t, jo.sourceCmd(), "set", "crm", "env_file="+envFile(t, "CRM_TOKEN="+token+"\n", 0o600)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = run(t, jo.callCmd(), "crm", "gone"); err == nil || err.Error() != "source crm, call gone: the service answered 404" {
+		t.Fatalf("a call answered 404 beside it = %v", err)
+	}
+
 	if out, err = run(t, clerk.sourceCmd(), "revoke", "crm", "read", "--crew", "clerk"); err != nil || !strings.Contains(out, "crew member clerk may call crm: nothing") {
 		t.Fatalf("revoke = %q, %v", out, err)
 	}
@@ -242,6 +261,8 @@ func testCallRun(t *testing.T) {
 cat > run-stdin.json
 case "$(cat run-stdin.json)" in
 *GONE*) echo "no folder GONE" >&2; exit 1;;
+*DENY*) echo "curl: (22) The requested URL returned error: 401" >&2; exit 22;;
+*FORBID*) echo "curl: (22) The requested URL returned error: 403" >&2; exit 22;;
 *LIST*) printf '[1]'; exit 0;;
 *BIG*) head -c 70000 /dev/zero | tr '\0' ' '; printf '{}'; exit 0;;
 *SLOW*) : > run-slow-started; exec sleep 300;;
@@ -277,7 +298,8 @@ printf '{"messages":[{"id":1,"from":"ada"}],"private":"not selected"}'
 		}
 	}
 	scripttest.Relink(t, filepath.Join(home, "sources", "mail"))
-	if _, err := run(t, jo.sourceCmd(), "set", "mail", "env_file="+envFile(t, "MAIL_PASSWORD="+password+"\n", 0o600)); err != nil {
+	mailEnv := envFile(t, "MAIL_PASSWORD="+password+"\n", 0o600)
+	if _, err := run(t, jo.sourceCmd(), "set", "mail", "env_file="+mailEnv); err != nil {
 		t.Fatal(err)
 	}
 	// Check says of the command, as of every one a file names, whether its
@@ -317,6 +339,20 @@ printf '{"messages":[{"id":1,"from":"ada"}],"private":"not selected"}'
 				t.Fatalf("call %v = %v, want it to say %q", tc.args, err, tc.want)
 			}
 		})
+	}
+
+	// A command that calls the service itself and is refused (401) says which
+	// credential and which file, before the command's own words, which stay
+	// whole; one refused another way (a 403) says what it always did. The
+	// command builds its own header, so none is named.
+	_, err = run(t, jo.callCmd(), "mail", "search", "folder=DENY")
+	if want := "mail refused the credential (401): MAIL_PASSWORD, as set in the source's env_file " + mailEnv + "; to fix: give it again (yardr source key mail, or yardr bead ask <bead> - --secret mail asks the operator for it), " +
+		"or check the application that issued it: source mail, call search: curl: (22) The requested URL returned error: 401"; err == nil || strings.TrimSpace(err.Error()) != want || strings.Contains(err.Error(), password) {
+		t.Fatalf("a command refused its credential = %v, want %q", err, want)
+	}
+	_, err = run(t, jo.callCmd(), "mail", "search", "folder=FORBID")
+	if err == nil || strings.TrimSpace(err.Error()) != "source mail, call search: curl: (22) The requested URL returned error: 403" {
+		t.Fatalf("a command answered 403 = %v", err)
 	}
 
 	// Grants are the ones every call has.

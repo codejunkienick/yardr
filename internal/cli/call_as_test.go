@@ -84,6 +84,18 @@ func TestCallAs(t *testing.T) {
 		!strings.Contains(out, "- `yardr call crm customer --as ada id=<string>`: Look a customer up by id\n") {
 		t.Fatalf("prime --crew = %q, %v", out, err)
 	}
+
+	// A call as ada whose key the service refuses (401) names ada's file, not
+	// the source's, and the card that asks ada for it again.
+	stale, err := st.KeyUserCredential(ctx, "ada", "crm", map[string]string{"CRM_TOKEN": "tok-stale-not-to-be-seen"}, "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "source crm, call customer: crm refused the credential (401): CRM_TOKEN, as set in ada's env_file " + stale.File + ", sent as Authorization: Bearer <credential>; " +
+		"to fix: give it again (yardr bead ask <bead> - --secret crm --as ada asks ada for it), or check the application that issued it: the service answered 401"
+	if _, err = run(t, yardmaster.callCmd(), "crm", "customer", "id=1", "--as", "ada"); err == nil || err.Error() != want {
+		t.Fatalf("a call as ada refused her stale key = %v, want %q", err, want)
+	}
 }
 
 const uncheckedSource = `name: open

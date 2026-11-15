@@ -90,6 +90,7 @@ func TestAddressAskIsStoredWithTheNotifyKeysName(t *testing.T) {
 			t.Errorf("the card lacks %q:\n%s", want, lines)
 		}
 	}
+	wantReachInCard(t, lines, y.resolved(t)[0].Ask.Secret)
 	// In the user's own queue, as footplate reads it.
 	q, err := y.UserAsks(y.ctx, "ada", "ada")
 	if err != nil {

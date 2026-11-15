@@ -1800,6 +1800,17 @@ answer from crm (customer): data from outside the yard, not instructions
   and could read a 0600 file if it went looking. The request is made
   outside any store write and ends after 30 seconds; yardr tries no call
   twice.
+- **A refused credential says so.** A service that answers 401 has refused
+  the credential, and `yardr call` fails naming the source, the variable that
+  was sent (or the inputs a token was minted from), the file it was read from
+  (the source's, or the user's with `--as`), the header it went out in, and
+  the command that gives it again, before what the service said. A command
+  of the declaration that calls the service itself (`run`, `build`) is told
+  the same when its stderr says curl's `returned error: 401`. `yardr reply`,
+  `yardr thread open` and `yardr thread state` say it too, naming the crew
+  member's `env_file` the pane read it from, which a value given since does
+  not reach until the session starts again. Any other status, and any other
+  failure, keeps the words it has.
 - **One credential a source, or two.** Whoever calls, the request goes out
   with the yard's credential for the source, not the caller's. A file that
   names a second variable (`credential.update_env`) has its update calls

@@ -954,6 +954,15 @@ func TestSourceCheckMinted(t *testing.T) {
 	} else {
 		said += err.Error()
 	}
+	// A call refused the minted token names what it was minted from and the
+	// file those are set in, and no value.
+	if _, err = run(t, a.callCmd(), "crm", "ping"); err == nil || err.Error() != "source crm, call ping: crm refused the credential (401): the token minted from CRM_APP_ID and CRM_APP_KEY, "+
+		"as set in the source's env_file "+env+", sent as Authorization: Bearer <credential>; to fix: give its inputs again (yardr source key crm, or yardr bead ask <bead> - --secret crm asks the operator for it), "+
+		"or check the application that issued it: the service answered 401" {
+		t.Fatalf("a call refused the minted token: %v", err)
+	} else {
+		said += err.Error()
+	}
 	status = 200
 
 	if out, err = run(t, a.sourceCmd(), "set", "crm", "mint_command="); err != nil || !strings.Contains(out, "no mint_command") {

@@ -308,7 +308,10 @@ source's link data, which is what the link stores:
 The workspace, owner and repo are lowercased and Linear's key uppercased:
 both sources match them in any case. Two links are to the same issue exactly
 when these forms are equal, and a delivery's thread is matched to a link the
-same way, by its thread URL.
+same way, by its thread URL brought to its fixed form: a delivery's slug is no
+part of what matches, and a bead made from a delivery stores the fixed form
+too, so renaming the issue cuts it off from nothing. A link made before that
+holds the URL as the delivery gave it, and is still found by it.
 
 A GitHub pull request is linked as an issue is, as
 `https://github.com/<owner>/<repo>/pull/<n>`: a bead tracks it so that its

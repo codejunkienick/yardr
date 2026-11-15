@@ -300,6 +300,7 @@ var allowSerial = map[string]string{
 	"TestStopWaits":                                           "stub:signalStop",
 	"TestStoreSendsTheRunsSession":                            "assign:connect",
 	"TestTheNextRunWaitsForAYardmasterThatWasNotUp":           "holdDaemon,resumeYard,startsYardmaster,stubPane",
+	"TestThreadCommandRefusedKey":                             "t.Setenv",
 	"TestThreadCommandsDeclaredSourceBase":                    "t.Setenv",
 	"TestThreadOpen":                                          "openYard",
 	"TestThreadOpenAssign":                                    "t.Setenv",

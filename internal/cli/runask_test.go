@@ -1822,6 +1822,11 @@ func TestBeadAskHookSetup(t *testing.T) {
 	if !strings.HasPrefix(out, "jo gave LINEAR_SIGNING_SECRET · it is set in ") || strings.Contains(out, secret) {
 		t.Fatalf("the giving printed %q", out)
 	}
+	// It says what the value reaches: the yard checks each delivery with it,
+	// and no env_file, call or thread command reads it.
+	if want := "\nread by: the yard, to check each delivery to POST /hooks/linear\nnot reached: any env_file, call or thread command\n"; !strings.HasSuffix(out, want) {
+		t.Fatalf("the giving printed %q, want it to end with %q", out, want)
+	}
 	out, err = y.as(t, "jo", "answer", b.ID, "2", "--approve")
 	if err != nil {
 		t.Fatal(err)

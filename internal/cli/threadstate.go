@@ -196,7 +196,7 @@ as none of what it does there does: that takes its identity in the source
 			}
 			res, err := s.SetState(ctx, thread, state, cred)
 			if err != nil {
-				return fmt.Errorf("set %s thread %s to %s: %w", source, printable(thread), state, err)
+				return fmt.Errorf("set %s thread %s to %s: %w", source, printable(thread), state, threadRefused(ctx, st, source, name, cred, err))
 			}
 			ts := store.ThreadState{Source: source, Thread: thread, Title: or(res.Thread.Title, p.Title), URL: or(res.Thread.URL, p.URL),
 				State: state, Status: res.Status, Instead: res.Instead}

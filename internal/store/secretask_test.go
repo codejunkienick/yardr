@@ -111,6 +111,7 @@ func TestSecretAskIsStoredWithTheDeclarationsNames(t *testing.T) {
 	if strings.Contains(lines, "words wanted") || strings.Contains(lines, "evil") {
 		t.Errorf("the card:\n%s", lines)
 	}
+	wantReachInCard(t, lines, rs[0].Ask.Secret)
 	src, err := y.GetSource(y.ctx, "crm")
 	if err != nil {
 		t.Fatal(err)

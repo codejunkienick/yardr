@@ -323,13 +323,24 @@ ask 2650 · open · to mckean · asked by yardmaster · 1m ago
   Create one at https://artificialanalysis.ai/account/api (free plan, read only).
   a secret: ARTIFICIALANALYSIS_API_KEY, for the source artificialanalysis (https://artificialanalysis.ai)
   it goes to a file only the yard's server reads; no agent is shown it
+  lands in: the source's env_file, or sources/artificialanalysis.env in the yard's home when it has none
+  read by: declared calls (yardr call artificialanalysis ...) and the source's check, from the file at each call
+  not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew
+  mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set
   ctrl+o types it here · or in a terminal: yardr bead answer yardr-k3vd 2650 --secret
 ```
 
 The line `a secret: …` is the yard's, from the source's declaration: the
 variable, the source, and where the source's calls go. Whatever the
 question and its context say, what you type becomes that variable of that
-source and nothing else. Answer it here with `ctrl+o`
+source and nothing else. The lines under it are the yard's too, and say what
+the value reaches: the file it lands in, the reads that use it, and what does
+not read it. Here, a thread command (`yardr reply`) takes its speaker's own
+credential from the crew member's file, so a key given for the source does
+not answer a reply; the same card for a crew member's credential
+(`--for-crew`), a user's own (`--as`) or a user's address (`--for-user`)
+names its own file and readers. The answer prints the same lines after the
+file it set. Answer it here with `ctrl+o`
 ([below](#typing-a-secret)), or in a terminal on the yard's machine (from
 another machine, `ssh -t <host> yardr bead answer <id> <ask> --secret`, or
 in a window that is paired to this yard as a device of the operator,
@@ -341,6 +352,9 @@ $ yardr bead answer yardr-k3vd 2650 --secret
 ask 2650 is weighty (credential): type 2650 to give it, anything else stops: 2650
 ARTIFICIALANALYSIS_API_KEY for the source artificialanalysis (nothing is shown as you type):
 mckean gave ARTIFICIALANALYSIS_API_KEY · it is set in ~/.yardr/sources/artificialanalysis.env
+read by: declared calls (yardr call artificialanalysis ...) and the source's check, from the file at each call
+not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew
+mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set
 ```
 
 A secret ask is weighty, so the command first prints the card's weight and

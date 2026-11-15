@@ -357,7 +357,7 @@ func TestStageCardInTheQueue(t *testing.T) {
 			return err
 		}
 		stage = row.Stage
-		card := tmpl.framed(row, notes, "").stageAsk("mckean", row.Stage, entry)
+		card := tmpl.framed(row, notes, "", false).stageAsk("mckean", row.Stage, entry)
 		n, err := w.storeStageAsk(row, card)
 		if err != nil {
 			return err
@@ -482,8 +482,14 @@ func TestStageCardQuestionQuote(t *testing.T) {
 			[]Note{note("builder", handover), note("reviewer", question)}, "",
 			with("Done. No new commits this session.")},
 	} {
-		if got := tmpl.framed(row, c.notes, c.by).Context; !slices.Equal(got, c.want) {
+		if got := tmpl.framed(row, c.notes, c.by, false).Context; !slices.Equal(got, c.want) {
 			t.Errorf("%s: context = %q, want %q", c.name, got, c.want)
+		}
+		// A dir depot's bead has no branch: the same card with the header's
+		// bracket left out, and nothing else of it changed.
+		dir := append([]string{strings.TrimSuffix(c.want[0], " (branch yard/yd-test)")}, c.want[1:]...)
+		if got := tmpl.framed(row, c.notes, c.by, true).Context; !slices.Equal(got, dir) || dir[0] != "Bead: yd-test — the work" {
+			t.Errorf("%s, dir depot: context = %q, want %q", c.name, got, dir)
 		}
 	}
 }

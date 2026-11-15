@@ -3,7 +3,7 @@
   "link": {
     "kind": "tracks",
     "source": "acme",
-    "url": "https://acme.example.com/acme/issue/ACME-1"
+    "url": "https://acme.example.com/acme/issue/acme-1"
   },
   "title": "An issue"
 }

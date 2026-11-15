@@ -329,7 +329,7 @@ it from running twice.
 | seam | | |
 |---|---|---|
 | the words of a `where` in `makes` and `says`: `event` for the event's own type, `action`, and the keys that the source's declaration lists under `hook.keys`. `says` also takes `stage` and `type`, the bead's | stable | the keys of a source are its pack's to keep. A pack whose lines read another pack's keys depends on that pack |
-| the bead a `makes` line makes: its title is the thread's title, else the thread's URL. Its body is the event's text, a blank line and the event's URL, else the thread's. It has a `tracks` link to the thread | stable | a script reads its event from this bead. A field of the event that the bead does not carry is out of its reach, and carrying one raises the number |
+| the bead a `makes` line makes: its title is the thread's title, else the thread's URL. Its body is the event's text, a blank line and the event's URL, else the thread's. It has a `tracks` link to the thread, by the thread's URL in the source's fixed form ([links.md](links.md#one-form-per-issue)), not as the event spelled it | stable | a script reads its event from this bead. A field of the event that the bead does not carry is out of its reach, and carrying one raises the number |
 | one bead for a thread: `makes` makes none while an open bead tracks the thread, decided in the same write, and an event with no thread makes nothing | stable | |
 | `says`: the outcome a matching line reports on the bead that tracks the event's thread, which its flow routes on | stable | |
 | `crew.<name>.hears.stages` and `hears.done`: a bead entering a stage, a bead becoming done | stable | the hearer is a crew member, who is an agent |

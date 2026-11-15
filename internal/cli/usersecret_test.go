@@ -122,6 +122,9 @@ func TestBeadAskAndAnswerAUsersCredential(t *testing.T) {
 	for _, want := range []string{
 		"a secret: GOOGLE_ACCOUNT, ada's own credential for the source google-mail (https://gmail.googleapis.com), read as ada when a call is made --as ada",
 		"it goes to a file only the yard's server reads; no agent is shown it",
+		"lands in: ada's env_file, or users/ada.env in the yard's home when it has none",
+		"read by: calls made as ada (yardr call google-mail ... --as ada) and yardr source check google-mail --as ada, from the file at each call",
+		"not reached: calls made without --as, thread commands, other users' files",
 		"answer with: yardr bead answer " + id + " 3 --secret",
 	} {
 		if !strings.Contains(out, want) {
@@ -144,7 +147,10 @@ func TestBeadAskAndAnswerAUsersCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "ada gave GOOGLE_ACCOUNT · it is set in " + file + "\nnext: yardr source check google-mail --as ada\n"; out != want {
+	if want := "ada gave GOOGLE_ACCOUNT · it is set in " + file + "\nnext: yardr source check google-mail --as ada\n" +
+		"read by: calls made as ada (yardr call google-mail ... --as ada) and yardr source check google-mail --as ada, from the file at each call\n" +
+		"not reached: calls made without --as, thread commands, other users' files\n" +
+		"mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set\n"; out != want {
 		t.Fatalf("answer printed %q\nwant           %q", out, want)
 	}
 	if b, _ := os.ReadFile(file); string(b) != "GOOGLE_ACCOUNT="+value+"\n" {

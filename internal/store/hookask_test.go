@@ -243,6 +243,8 @@ func TestHookAskSetup(t *testing.T) {
 	}
 	if lines := strings.Join(secretAsk.Lines(), "\n"); !strings.Contains(lines, "a secret: the signing secret for the hook linear (POST /hooks/linear), for the source linear (https://api.linear.app)") {
 		t.Fatalf("the secret card:\n%s", lines)
+	} else {
+		wantReachInCard(t, lines, secretAsk.Ask.Secret)
 	}
 	runAsk := y.asked(t, runSeq)
 	if runAsk.Ask.Run == nil || !slices.Equal(runAsk.Ask.Run.Argv, []string{"hook", "add", "linear", "--source", "linear"}) {

@@ -89,6 +89,7 @@ func TestCrewAskIsStoredWithTheDeclarationsNames(t *testing.T) {
 	if strings.Contains(lines, "words wanted") || strings.Contains(lines, "evil") {
 		t.Errorf("the card:\n%s", lines)
 	}
+	wantReachInCard(t, lines, rs[0].Ask.Secret)
 	// In the operator's own queue, as footplate reads it.
 	q, err := y.UserAsks(y.ctx, "mckean", "mckean")
 	if err != nil {

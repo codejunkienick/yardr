@@ -679,8 +679,9 @@ the yard puts has a fixed bead header of its own before the template's text,
 written when the card is put and frozen into it, so that a person answering
 away from the bead (on paper, on the hosted screen, from a notification) knows
 what the card is about. The question gains ` — <id>: <title>`. The context
-starts with `Bead: <id> — <title> (branch yard/<id>)`; then, where the bead
-carries a finish note, that note's first line as its writer wrote it (cut at
+starts with `Bead: <id> — <title> (branch yard/<id>)`, or with `Bead: <id> —
+<title>` alone for a bead of a dir depot, which has no branch; then, where the
+bead carries a finish note, that note's first line as its writer wrote it (cut at
 600 characters); then the template's lines, word for word. A finish note is a
 plain note with a line of its own `test: <command> @ <commit>: pass, ...`, and
 the one shown is the latest by the author of the bead's first, the builder's,

@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/store"
 )
 
@@ -71,6 +72,12 @@ anything is sent. One caller makes ` + fmt.Sprint(store.SourceCallLimit) + ` cal
 updates at most, unless the source's calls_per_hour and updates_per_hour say
 otherwise; the one after is refused. yardr tries no call twice. A redirect
 is not followed and an answer over its bound is refused, not cut.
+
+A service that answers 401 has refused the credential, and the call fails
+saying which: the source, the variable that was sent (or the inputs a token
+was minted from), the file it was read from, how the call carried it, and
+the command that gives it again, before what the service said. Any other
+status keeps the words it has.
 
 --note also writes the answer as a note on the bead of the session that
 calls, under the line above, for whoever works the bead next. The answer is
@@ -140,13 +147,28 @@ update marked (update).`,
 			res, err := st.CallSource(c.Context(), store.SourceCall{Source: args[0], Call: args[1], Params: params, As: callAs,
 				Session: a.identity().session, Actor: a.who(), Note: note})
 			if err != nil {
+				// A command that makes the request itself (run, build) fails
+				// with its stderr, which says a 401 in curl's words.
+				if source.Refused401(err.Error()) {
+					if words := callRefused(c.Context(), st, args[0], args[1], callAs, false); words != "" {
+						return fmt.Errorf("%s: %w", words, err)
+					}
+				}
 				return err
 			}
 			if res.Status < 200 || res.Status > 299 {
+				said := fmt.Sprintf("the service answered %d", res.Status)
 				if len(res.Answer) > 0 {
-					return fmt.Errorf("source %s, call %s: the service answered %d: %s: %s", res.Source, res.Call, res.Status, res.Marking, res.Answer)
+					said += fmt.Sprintf(": %s: %s", res.Marking, res.Answer)
 				}
-				return fmt.Errorf("source %s, call %s: the service answered %d", res.Source, res.Call, res.Status)
+				// A refused credential says which it was and where it was
+				// read from, before what the service said.
+				if res.Status == 401 {
+					if words := callRefused(c.Context(), st, res.Source, res.Call, callAs, true); words != "" {
+						said = words + ": " + said
+					}
+				}
+				return fmt.Errorf("source %s, call %s: %s", res.Source, res.Call, said)
 			}
 			// The call was made, and its answer is printed whatever became
 			// of the note: an update is not made again to get one.

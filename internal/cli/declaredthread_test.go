@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -761,4 +762,99 @@ func TestThreadOpenAssign(t *testing.T) {
 	if _, err := run(t, a.crewCmd(), "identity", "jo", "--source", "acme", "--id", "x"); err == nil {
 		t.Fatal("yardr crew identity set a user's")
 	}
+}
+
+// A thread command whose service refuses the credential (401) fails with the
+// source, what was sent, the crew member's file it was read from and the line
+// that sets it right, before the command's own failure, which is kept whole;
+// a command that fails any other way, a 403 here or no word of the service's,
+// fails with the words it always had.
+func TestThreadCommandRefusedKey(t *testing.T) {
+	a, st, seq, _ := declaredThreadYard(t)
+	ctx := context.Background()
+	t.Setenv("ACME_TOKEN", "tok-stale-not-to-be-seen")
+	a.env["YARDR_CREW"] = "yardmaster"
+	// A command that fails as curl does under --fail: its line on stderr, and
+	// its status 22.
+	curl := func(code int) string {
+		return fmt.Sprintf("#!/bin/sh\ncat >/dev/null\necho 'curl: (22) The requested URL returned error: %d' >&2\nexit 22\n", code)
+	}
+	cmd := func(name string) string { return filepath.Join(a.cfg.Home, "sources", "acme", name) }
+	file := envFile(t, "ACME_TOKEN=tok-stale-not-to-be-seen\n", 0o600)
+	crew := func(set ...string) {
+		t.Helper()
+		args := []string{"add", "yardmaster", "--replace", "--dir", t.TempDir(), "--set", "open_threads=acme", "--set", "set_state=acme"}
+		for _, kv := range set {
+			args = append(args, "--set", kv)
+		}
+		if _, err := run(t, a.crewCmd(), args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	failed := func(command, code string) string {
+		return command + " of source acme: exit status 22; its stderr ended: curl: (22) The requested URL returned error: " + code
+	}
+	const fix = "to fix: give it again (yardr bead ask <bead> - --secret acme --for-crew yardmaster), which a session already running sees when it next starts (yardr crew restart yardmaster), or check the application that issued it: "
+	same := func(name string, err error, want string) {
+		t.Helper()
+		if err == nil || strings.TrimSpace(err.Error()) != want {
+			t.Errorf("%s:\n got %v\nwant %q", name, err, want)
+		}
+	}
+
+	// A reply, by the crew member's env_file.
+	crew("env_file=" + file)
+	scripttest.Write(t, cmd("reply"), curl(401))
+	_, err := run(t, a.replyCmd(), seq, "answer")
+	same("reply by an env_file", err, "reply to event "+seq+" in acme: acme refused the credential (401): ACME_TOKEN, as read from crew member yardmaster's env_file "+file+
+		" when its session started; "+fix+failed("thread.reply", "401"))
+	// Any other status keeps the words it has: only the command's own.
+	scripttest.Write(t, cmd("reply"), curl(403))
+	_, err = run(t, a.replyCmd(), seq, "answer")
+	same("a 403", err, "reply to event "+seq+" in acme: "+failed("thread.reply", "403"))
+	scripttest.Write(t, cmd("reply"), "#!/bin/sh\ncat >/dev/null\nexit 1\n")
+	_, err = run(t, a.replyCmd(), seq, "answer")
+	same("a plain failure", err, "reply to event "+seq+" in acme: thread.reply of source acme: exit status 1")
+
+	// By a crew member whose file is no file: an env_command, and neither.
+	scripttest.Write(t, cmd("reply"), curl(401))
+	crew("env_command=" + os.Args[0])
+	_, err = run(t, a.replyCmd(), seq, "answer")
+	same("reply by an env_command", err, "reply to event "+seq+" in acme: acme refused the credential (401): ACME_TOKEN, as crew member yardmaster's env_command printed it when its session started; "+
+		fix+failed("thread.reply", "401"))
+	crew()
+	_, err = run(t, a.replyCmd(), seq, "answer")
+	same("reply by the environment", err, "reply to event "+seq+" in acme: acme refused the credential (401): ACME_TOKEN, as set in the environment of the process that ran the command (crew member yardmaster has no env_file or env_command); "+
+		fix+failed("thread.reply", "401"))
+
+	// Open and state say it the same way.
+	crew("env_file=" + file)
+	scripttest.Write(t, cmd("open"), curl(401))
+	_, err = run(t, a.threadOpenCmd(), "acme", "Made", "--in", "ENG", "--body", "words")
+	same("open", err, "open a thread in acme ENG: acme refused the credential (401): ACME_TOKEN, as read from crew member yardmaster's env_file "+file+" when its session started; "+fix+failed("thread.open", "401"))
+	scripttest.Write(t, cmd("state"), curl(401))
+	// A crew member sets the status of a thread it takes part in.
+	if _, err := run(t, a.threadCmd(), "follow", "yardmaster", "--source", "acme", "issue-1"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = run(t, a.threadStateCmd(), seq, "started")
+	same("state", err, "set acme thread issue-1 to started: acme refused the credential (401): ACME_TOKEN, as read from crew member yardmaster's env_file "+file+" when its session started; "+fix+failed("thread.state", "401"))
+
+	// A minted credential names the inputs it was minted from, and the file
+	// the pane read them from.
+	if _, err := st.PutSource(ctx, "acme.yaml", acmeMintedCLI, "me"); err != nil {
+		t.Fatal(err)
+	}
+	mint := filepath.Join(t.TempDir(), "mint")
+	scripttest.Write(t, mint, "#!/bin/sh\ncat >/dev/null\nprintf '{\"token\":\"tok-minted-not-to-be-seen\",\"expires_at\":\"2030-01-01T00:00:00Z\"}'\n")
+	if _, err := st.SetSource(ctx, "acme", store.SourceMintCommand, mint, "me"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ACME_APP_ID", "app-1")
+	t.Setenv("ACME_APP_KEY", "keys/app.pem")
+	scripttest.Write(t, cmd("reply"), curl(401))
+	_, err = run(t, a.replyCmd(), seq, "answer")
+	same("a minted token", err, "reply to event "+seq+" in acme: acme refused the credential (401): the token minted from ACME_APP_ID and ACME_APP_KEY, as read from crew member yardmaster's env_file "+file+
+		" when its session started; to fix: give its inputs again (yardr bead ask <bead> - --secret acme --for-crew yardmaster), which a session already running sees when it next starts (yardr crew restart yardmaster), "+
+		"or check the application that issued it: "+failed("thread.reply", "401"))
 }

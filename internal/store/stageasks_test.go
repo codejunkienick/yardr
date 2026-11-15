@@ -178,6 +178,36 @@ func TestStageAskEntry(t *testing.T) {
 			}
 		}
 	}
+
+	// A bead of a dir depot has no branch to name: its card's header is the
+	// bead alone, and the template's lines follow it word for word as on a
+	// git depot's (the dir depot reads the same flow from its directory).
+	docs := t.TempDir()
+	writeFiles(t, docs, map[string]string{
+		".yardr/flows/default.flow":      stageAskFlow,
+		".yardr/flows/default/review.md": stageAskChoice,
+	})
+	if err := s.PutDepot(ctx, store.Depot{Name: "docs", Path: docs, Kind: store.DepotDir}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.CreateBead(ctx, store.NewBead{Title: "x", Depot: "docs", Stage: "new"}, "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, err = s.Advance(ctx, d.ID, "review", store.Expect{}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	cards := stageAsks(t, s, d.ID)
+	if len(cards) != 2 {
+		t.Fatalf("dir depot asks = %d, want one per member", len(cards))
+	}
+	want := stageAskContext(d.ID, "x")
+	want[0] = "Bead: " + d.ID + " — x"
+	for i, r := range cards {
+		if !slices.Equal(r.Ask.Context, want) {
+			t.Fatalf("dir depot ask %d: context %q, want %q", i, r.Ask.Context, want)
+		}
+	}
 }
 
 // The card says what changed: the first line of the bead's finish note, as

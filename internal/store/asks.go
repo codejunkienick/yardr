@@ -1509,12 +1509,8 @@ func (r ResolvedAsk) lines(mark func(string) string) []string {
 		out = append(out, "  "+strings.ReplaceAll(NoteLetters(r.Ask.DepotPush.TakenBack()), "\n", "\n  "))
 	case r.Ask.Secret != nil:
 		out = append(out, "  "+r.Ask.Secret.Line())
-		if r.Ask.Secret.Harness != "" {
-			out = append(out, "  the value is kept out of notes, events and logs; each such session receives it in its environment")
-		} else if r.Ask.Secret.Login != "" {
-			out = append(out, "  it goes to the waiting login only; it is kept nowhere, and no agent is shown it")
-		} else {
-			out = append(out, "  it goes to a file only the yard's server reads; no agent is shown it")
+		for _, line := range r.Ask.Secret.cardLines() {
+			out = append(out, "  "+line)
 		}
 	case len(r.Ask.Options) == 0:
 		out = append(out, "  words wanted: answer with words")

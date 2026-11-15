@@ -122,7 +122,14 @@ token is never asked for. --env narrows the ask to any names the
 declaration has. The asker names no path and invents no name. --context
 says where the person gets the value. The card's line "a
 secret: <names>, for the source <source> (<where its calls go>)" is the
-yard's, from the declaration, whatever the question says.
+yard's, from the declaration, whatever the question says. Under it the card
+says what the value reaches, and the answer says it again: it lands in the
+source's env_file (sources/<source>.env in the yard's home when none is
+set), declared calls and the source's check read it from there at each call,
+and a thread command (yardr reply, thread open, thread state) does not: it
+reads its speaker's own file, a crew member's, which --for-crew gives. Where
+the source mints, these names are the mint's inputs, and a static token
+beside them is left as it is and not used while they are set.
 
 A secret ask takes no --option, --recommend or --about. It is refused, and
 nothing is stored, for a source the yard does not have (the operator adds
@@ -141,8 +148,10 @@ is --for-user beside --secret because the source still names the variable
 and where the value is sent, and the user only whose file it is kept in.
 Giving it does not say the user is told through the source: the card and
 the answer name the command that does (yardr user set <user>
-notify=<source>). It takes no --env, and is refused for a source with no
-notify key and for a user the yard does not have.
+notify=<source>). They say too that the yard reads the file at each message
+it sends the user, and that no call or thread command does. It takes no
+--env, and is refused for a source with no notify key and for a user the yard
+does not have.
 
 --secret <source> --for-crew <crew member> asks for that crew member's own
 credential in the source, which a reply answers with: what --secret takes
@@ -152,9 +161,12 @@ The value typed goes into the crew member's env_file, or
 with none set into ~/.yardr/crew/<name>.env, which is then set as yardr
 crew set sets it. The crew member's running session does not see the new
 value: it takes effect when it next starts (rotation or yardr crew restart
-<name>), as the card and the answer say. It is --for-crew beside --secret
-because the source still names the variables, and the crew member only
-whose file they are kept in. It is asked of the operator only, and is
+<name>), as the card and the answer say. They say too what the value
+reaches: that crew member's thread commands (yardr reply, thread open,
+thread state). Declared calls read the source's own file; other crew
+members' files are untouched. It is --for-crew
+beside --secret because the source still names the variables, and the crew
+member only whose file they are kept in. It is asked of the operator only, and is
 refused for a crew member the yard has not and for a source with no
 credential. A crew member with an env_command as well keeps both: the
 env_file line is the one written, and for a name both set the command's
@@ -173,7 +185,10 @@ then defaults, or of the operator for them, and of nobody else. It is
 refused for a source with no credential and for a user the yard does not
 have. It is not --for-user: that asks for the user's own address in a
 source that tells people, and this for the credential a call made as them
-reads; a source may have both to ask for.
+reads; a source may have both to ask for. The card and the answer say what
+the value reaches: calls made as the user (yardr call --as, yardr source
+check --as), and not a call made without --as, a thread command or another
+user's file.
 
 --secret-login <login> asks for the input of the harness login that waits
 under that reference: the login its leader's input need names. The value
@@ -196,8 +211,10 @@ of the hook <hook> of the declared source <source>: the value the service signs
 its webhooks with, pasted from where the service shows it.
 The yard's server writes it to the file it owns for the hook,
 <home>/hooks/<hook>.secret (mode 0600), which the hook then names; the
-value is in no note, event, mail, brief or pane, as for --secret. It is asked of the operator, takes no --env, no --for-user, no --for-crew and
-no --as, and is refused for a source the yard does not declare, one whose
+value is in no note, event, mail, brief or pane, as for --secret, and the
+card says it is read to check each delivery of the hook and by no call or
+thread command. It is asked of the operator, takes no --env, no --for-user,
+no --for-crew and no --as, and is refused for a source the yard does not declare, one whose
 declaration has no hook key, and a hook the yard has already. The hook itself
 is a second ask on the same bead (--run hook add <hook> --source <source>, or
 R: on stdin), asked after this one: the operator gives the secret first, then approves the
@@ -870,6 +887,7 @@ func (a *app) giveSecret(c *cobra.Command, st store.API, id string, seq uint64) 
 		}
 		return a.out(c.OutOrStdout(), keyed, func(w io.Writer) {
 			fmt.Fprintf(w, "%s gave %s · it is set in %s\n", a.who(), strings.Join(keyed.Given, " and "), keyed.File)
+			printReach(w, secret)
 		})
 	}
 	if secret.Login != "" {
@@ -930,7 +948,17 @@ func (a *app) giveSecret(c *cobra.Command, st store.API, id string, seq uint64) 
 		if keyed.Next != "" {
 			fmt.Fprintln(w, "next: "+keyed.Next)
 		}
+		printReach(w, secret)
 	})
+}
+
+// printReach says after a giving what the value reaches and what it does not,
+// in the lines the card said before it (store.AskSecret.ReachGiven): a value
+// is given for a reason, and the file it is set in is not all it does.
+func printReach(w io.Writer, secret *store.AskSecret) {
+	for _, line := range secret.ReachGiven() {
+		fmt.Fprintln(w, line)
+	}
 }
 
 // approveSetup is yardr bead answer <id> <ask> <n> --secret on a setup
