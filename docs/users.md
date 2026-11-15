@@ -1295,9 +1295,10 @@ command runs once for one ask; an approval is taken only from a request
 that reached the listener from the yard's own machine, where TLS ends, or
 down the link from the edge ([edge.md](edge.md#footplate-through-the-link);
 a secret is taken besides from the yard's router, and down the link when the
-yard is hosted or the secret is a harness login's code, or the code of a
-member's own sign-in from their sealed device, a setup approval that
-types the account being such a secret,
+yard is hosted, when the call came sealed from the operator's own device, or
+when the secret is a harness login's code, or the code of a member's own
+sign-in from their sealed device, a setup approval that types the account
+being such a secret,
 [api.md](api.md#tls-is-yours-and-the-clients-rule));
 and each approval through a device is marked `via
 <device>` on the answer and on the change's own event, which names the
@@ -1329,11 +1330,33 @@ the link as from the yard's own machine. The edge reads the code with the
 device's token. The code is used once, within minutes, and the yard hands it
 to the waiting login in its memory and keeps it nowhere. On a yard the
 operator runs and has connected to the edge it is the only secret that
-crosses from the operator's device: an API key, a source's credential, the
-account a setup approval types, a hook's signing secret and another user's
-login code are refused down the link and answered at the yard's own machine.
-A setup approved by taking a candidate or keeping the account types nothing,
-and crosses. `yardr user device rm` ends a device's reach at its next request.
+crosses from the operator's device in a plain call: an API key, a source's
+credential, a hook's signing secret and another user's login code are refused
+there in words that name a sealed device and the yard's own machine, and
+the account a setup approval types is refused in any call and answered at the
+yard's own machine. A setup approved by taking a candidate or keeping the
+account types nothing, and crosses. `yardr user device rm` ends a device's
+reach at its next request.
+
+**The operator's sealed device gives every secret.** On a yard the operator
+runs and has connected to the edge, a paired device of the operator gives any
+secret ask down the link when the call came sealed, as it does on a hosted
+yard: an API key, a source's credential with every name its card asks for at
+once (an application's id and its secret), a hook's signing secret, a user's
+own address or credential, and a login's code. The edge carries the call as
+ciphertext and reads nothing of the value, so a phone with no terminal behind
+it can set a source up. A device paired with the QR's key calls sealed, and so
+does one [sealed in place](#sealed-in-place), which is the weaker of the two: it
+registered its key in the clear with its token, so an edge active at that one
+call could sit in the middle of every call after it, and the yard cannot tell.
+What a phone so held, or a stolen one, can do is supply and never read: with an
+ask pending it can overwrite the credential asked for, point an address-like
+secret (a webhook's URL is the sharp case) at one of its own, or swap the
+application a minted credential is made from. `yardr user device pair` says so
+when it pairs the operator's own device, and `yardr user device list` says so
+under a device of the operator that is sealed in place, where pairing it again
+with the QR lifts it. `yardr user device rm` ends a device's reach at its next
+request.
 
 **A member's own sign-in code crosses the edge from a sealed device.** A member
 whose only way into the yard is a device paired through the edge finishes their
@@ -1343,13 +1366,13 @@ down the link, on a hosted yard and on one the operator runs, when the call came
 sealed. A device paired with the QR's key calls sealed, and so does one
 [sealed in place](#sealed-in-place); the edge carries the call as ciphertext and
 reads nothing of the code. A call that came plain is refused, and pairing the
-device again with the QR makes its calls sealed. The operator's device
-does not give it for them on a yard connected to the edge, where only the
-operator's own login's code crosses. It is the one secret a member's device
-gives down the link: every other, a credential or an address of their own among
-them, is refused in one sentence, whether the call came plain or sealed. The
-code is used once, within ten minutes, and the yard hands it to the waiting
-login, the member's own, in its memory and keeps it nowhere.
+device again with the QR makes its calls sealed. The operator's sealed device
+gives it for them, as it gives any secret (above), and their plain call does
+not. It is the one secret a member's device gives down the link: every other, a
+credential or an address of their own among them, is refused in one sentence,
+whether the call came plain or sealed. The code is used once, within ten
+minutes, and the yard hands it to the waiting login, the member's own, in its
+memory and keeps it nowhere.
 
 **On a hosted yard every secret crosses the edge.** A hosted yard is one the
 service made and runs, and its `hosted` setting is `true`
@@ -1358,9 +1381,9 @@ and the machine the yard lives on, and the operator has no shell on that
 machine to answer at, so a paired device of the operator gives any secret ask
 down the link: an API key, a source's credential, the account a setup
 approval types, a hook's signing secret, a user's own address or credential,
-and the login's code. The edge reads the
-value with the device's token, as it reads every call; the yard writes it to
-its file, as it does for a giving at the yard's own machine. A device of a
+and the login's code, in a call that came plain or sealed. The edge reads the
+value with the device's token, as it reads every plain call; the yard writes it
+to its file, as it does for a giving at the yard's own machine. A device of a
 user who is not the operator gives nothing down the link, hosted or not, but
 the code of their own sign-in on a sealed call (above), and a call that the edge
 says came in plain HTTP is refused as ever.
@@ -1512,6 +1535,7 @@ Pairing is open for 10 minutes, until 14:32:10, for the device phone of mckean. 
 
 The code is good once: a device that scans the QR code is answered inside a sealed channel, and whoever carries the connection reads neither the code nor the device token. 5 wrong codes end the pairing, and so does: yardr user device pair --end
 It then calls as mckean until: yardr user device rm mckean phone
+This is your own device: sealed, it may give the yard any secret a setup asks for — protect the phone as you would this machine.
 ```
 
 - **The code** is one of a pairing of yards: eight characters, good for 10
@@ -1544,6 +1568,14 @@ It then calls as mckean until: yardr user device rm mckean phone
   What `device add` refuses is refused when the pairing is opened: a user
   the yard has not, a second device of the name. If either becomes true
   while the pairing is open, the code is used and nothing is added.
+- **What it says of the device** depends on whose it is. For a user who is not
+  the operator, that the device reads every bead in the yard, with its notes,
+  and the mail of that user alone. For the operator's own, in a pairing whose
+  QR code holds the yard's channel key, the last line of the sample above: a
+  device sealed by that key may give the yard any secret a setup asks for, down
+  the link from the edge as at the yard's own machine (under
+  [Devices](#devices)), so the phone is protected as the machine is. A plain
+  pairing, with no key, says nothing of the kind.
 - **`--json`** prints `{"pairing", "user", "device", "code", "address",
   "yard", "channel_key", "channel_signature", "expires", "qr"}`, where
   `qr` is what the QR code holds, `yard` this yard's handle and name at
@@ -1798,7 +1830,11 @@ no key of its own in the yard's keeping: what it is given is a bearer token, whi
 reads the connection reads on every call after this one. So such a device rests
 on the connection, for the code as for the token: `https` off the yard's
 machine ([api.md](api.md#over-the-network)). The command says so when the
-address is plain `http` and not this machine's. Five tries at a code of 40
+address is plain `http` and not this machine's. Pairing the operator's own
+device with the QR's key it also says what that device may do once sealed: give
+the yard any secret a setup asks for, down the link from the edge as at the
+yard's own machine (under [Devices](#devices)), so the phone is protected as the
+machine is. Five tries at a code of 40
 bits are what someone who can reach the listener without the code has; they
 can end a pairing with them, and no more.
 
@@ -1833,7 +1869,10 @@ sam   tablet  10-28 18:03  11-04 22:15 from the edge, sealed (in place)
 
 The label lasts for as long as the device keeps the key it registered.
 Re-pairing it by QR lifts it (`yardr user device rm`, then `yardr user
-device pair --qr`); re-pairing is never required.
+device pair --qr`); re-pairing is never required. For a device of the operator
+the label weighs more on a yard connected to the edge, which takes every secret
+from it (under [Devices](#devices)): the list says so in a line under the table while
+one is sealed in place, and the line goes when it is paired again.
 
 The registration is refused, leaving the record as it was, for a device that
 pins a key already, whether a pairing or an earlier registration pinned it:

@@ -459,9 +459,10 @@ func EventFor(viewer string, operator bool, e Event) (Event, bool) {
 //
 // Whether the yard is hosted is told because nothing else tells a device,
 // and it changes what the device may offer: down the edge link GiveSecret is
-// taken from an operator's device for every secret on a hosted yard, and for
-// a harness login's code alone on any other; on either, a member may give the
-// code of their own sign-in only from a sealed device.
+// taken from an operator's device for every secret on a hosted yard, and on
+// any other for every secret from a sealed call and a harness login's code
+// alone from a plain one; on either, a member may give the code of their own
+// sign-in only from a sealed device.
 var deviceSettings = []string{
 	OperatorSetting,
 	BlobMaxSetting,

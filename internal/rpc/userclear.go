@@ -59,16 +59,19 @@ const linkRemoteAddr = "edge:0"
 // operator: the hosting service runs the edge and the machine the yard lives
 // on, so a refusal would guard nothing it does not hold, and would leave a
 // person with no shell on that machine unable to give a key at all (hosted).
-// On a yard connected to the edge from the person's own machine one giving
-// crosses from the operator's device, the code a harness's sign-in page shows
-// (loginCode), which is used once, within minutes, and kept nowhere: the
-// refusal of every other names that reason, answers on the yard's own machine
-// as the fix, and, for a call that came plain, says the edge saw what this
-// one carried, so the key is remade; a sealed call's refusal carries no such
-// sentence, since what it sent crossed the edge as ciphertext. A setup
-// approval that types the account is such a giving and is refused the same
-// way; one that takes a candidate or keeps the account holds
-// no secret and crosses.
+// On a yard connected to the edge from the person's own machine a giving
+// crosses from the operator's device when the call came sealed, whatever it
+// gives, since the edge carried it as ciphertext (crossesConnected); a call
+// that came plain crosses for one giving alone, the code a harness's sign-in
+// page shows (loginCode), which is used once, within minutes, and kept nowhere.
+// The refusal of every other plain giving names the two fixes, a sealed device
+// and the yard's own machine, and says the edge saw what this one carried, so
+// the key is remade. A setup approval that types the account is such a giving
+// and is refused sealed or plain, since sealing does not make it cross: its
+// refusal answers on the yard's own machine as the fix, and says the edge saw
+// what was typed for a plain call alone, as a sealed call's has no such
+// sentence, what it sent having crossed the edge as ciphertext. One that takes
+// a candidate or keeps the account holds no secret and crosses.
 // An approval crosses on either: a paired device of the operator is the
 // operator (design yardr-xpf8), pairing is the grant and `yardr user device
 // rm` is the revoke, and the command an approval runs is fixed on the ask. A
@@ -133,13 +136,24 @@ func inTheClear(r *http.Request, name, router string, crosses, member bool) stri
 		}
 		if member {
 			// The member has no shell on the yard's machine, so no ssh is
-			// offered, and the operator's device gives only where the yard is
-			// hosted. The sentence is one either way; only the tail
-			// differs, since a sealed call crossed as ciphertext.
+			// offered, and the operator's device gives from a sealed call, or
+			// from any call where the yard is hosted. The sentence is one
+			// either way; only the tail differs, since a sealed call crossed
+			// as ciphertext.
 			return "a secret from a member's device does not cross the edge, except the code of their own sign-in from a sealed device (pairing the device with the QR makes it one); " +
-				"the operator gives any other on the yard's machine, or from their own paired device where the yard is hosted." + tail
+				"the operator gives any other on the yard's machine, from their own sealed device, or from any paired device of theirs where the yard is hosted." + tail
 		}
-		return "a secret never crosses the edge: this request came down the link from the edge. " +
+		if name == "GiveSecret" {
+			// The operator's sealed giving crossed above (crossesConnected),
+			// so this one came plain: a sealed device is a way to give it
+			// beside the yard's machine.
+			return "a secret does not cross the edge in a call that is not sealed: this request came down the link from the edge. " +
+				"Give it from a sealed device (pairing the device with the QR makes it one), or answer on the yard's machine (ssh -t <host> yardr bead answer <bead> <ask> " + flag + ")." + tail
+		}
+		// An approval that types the account is refused sealed or plain:
+		// sealing the device is no way to give it, so the machine is the one
+		// fix named.
+		return "an account typed into an approval never crosses the edge: this request came down the link from the edge. " +
 			"Answer on the yard's machine (ssh -t <host> yardr bead answer <bead> <ask> " + flag + ")." + tail
 	}
 	if ip := net.ParseIP(remote(r)); ip == nil || !ip.IsLoopback() {

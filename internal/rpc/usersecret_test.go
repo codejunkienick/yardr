@@ -829,18 +829,20 @@ calls:
   viewer: { kind: read, request: { method: GET, path: /viewer } }
 `
 
-// Down the link from the edge a secret is refused with the link's own
-// reason, whatever the ask: the edge saw what this one carried, and the fix
-// is to answer on the yard's own machine. The one giving taken there from the
-// operator's device is the daemon's ask for a harness login's code
-// (TestUserGivesALoginInput), and from a member's the code of their own
-// sign-in on a sealed call (TestMemberGivesTheirOwnLoginCodeDownTheLink), so
-// the yard reads which ask a call names before it refuses, and says nothing
-// of what it found. A member's device is refused every other in the one
-// sentence of memberRefusal. Nothing is given, and a code the edge says came
-// in plain HTTP is refused as an approval is. This is the yard that is not hosted,
-// which is every yard until its hosted setting says otherwise
-// (TestUserGiveSecretIsNotTakenOverTheLink/hosted).
+// Down the link from the edge a secret that came plain is refused with the
+// link's own reason, whatever the ask: the edge saw what this one carried, and
+// the fixes are a sealed device and the yard's own machine. The one giving
+// taken there plain from the operator's device is the daemon's ask for a
+// harness login's code (TestUserGivesALoginInput), and from a member's the code
+// of their own sign-in on a sealed call
+// (TestMemberGivesTheirOwnLoginCodeDownTheLink), so the yard reads which ask a
+// call names before it refuses, and says nothing of what it found. The
+// operator's sealed call is taken for every ask
+// (TestMemberGiveSecretDownTheLinkIsOnlyTheirOwnLoginCode). A member's device
+// is refused every other in the one sentence of memberRefusal. Nothing is
+// given, and a code the edge says came in plain HTTP is refused as an approval
+// is. This is the yard that is not hosted, which is every yard until its hosted
+// setting says otherwise (TestUserGiveSecretIsNotTakenOverTheLink/hosted).
 func TestUserGiveSecretIsNotTakenOverTheLink(t *testing.T) {
 	const value = "s3cret-0f-the-yard"
 	ctx := context.Background()
@@ -894,19 +896,19 @@ func TestUserGiveSecretIsNotTakenOverTheLink(t *testing.T) {
 		{"a non-boolean weight on a login ask", y.jo, changeLoginBody(func(body map[string]any) { body["weighed"] = value })},
 		{"an unweighed login ask", y.jo, changeLoginBody(func(body map[string]any) { body["weighed"] = false })},
 	}
+	// The plain call's sentence names the two fixes, a sealed device and the
+	// yard's own machine, and says the edge saw what was sent with it.
+	const plainRefusal = "a secret does not cross the edge in a call that is not sealed: this request came down the link from the edge. " +
+		"Give it from a sealed device (pairing the device with the QR makes it one), or answer on the yard's machine (ssh -t <host> yardr bead answer <bead> <ask> --secret)." +
+		" The edge saw what was sent with it: if it was a real key, make a new one at the service."
 	for _, c := range refused {
 		t.Run(c.name, func(t *testing.T) {
 			w := y.give(edgelink.RemoteAddr, c.token, strings.NewReader(c.body))
-			for _, want := range []string{
-				"a secret never crosses the edge",
-				"this request came down the link from the edge",
-				"Answer on the yard's machine",
-				"The edge saw what was sent with it",
-				"make a new one at the service",
-			} {
-				if !strings.Contains(w.Body.String(), want) {
-					t.Errorf("answered %s, want it to say %q", w.Body, want)
-				}
+			var got struct {
+				Error *wireError `json:"error"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || got.Error == nil || got.Error.Message != plainRefusal {
+				t.Errorf("answered %s (%v), want the refusal %q", w.Body, err, plainRefusal)
 			}
 			for _, not := range []string{"in plain HTTP from another machine", "the yard's listener", "Put the proxy or tunnel", value} {
 				if strings.Contains(w.Body.String(), not) {
@@ -947,7 +949,7 @@ func TestUserGiveSecretIsNotTakenOverTheLink(t *testing.T) {
 				t.Errorf("answered %s, want it to say %q", w.Body, want)
 			}
 		}
-		if strings.Contains(w.Body.String(), "a secret never crosses the edge") {
+		if strings.Contains(w.Body.String(), "a secret does not cross the edge") {
 			t.Errorf("answered %s, want the plain-HTTP refusal and not the link's", w.Body)
 		}
 	})
@@ -1085,7 +1087,7 @@ func testUserGiveSecretIsTakenDownTheLinkOfAHostedYard(t *testing.T) {
 				t.Errorf("answered %s, want it to say %q", w.Body, want)
 			}
 		}
-		if strings.Contains(w.Body.String(), "a secret never crosses the edge") || strings.Contains(w.Body.String(), value) {
+		if strings.Contains(w.Body.String(), "a secret does not cross the edge") || strings.Contains(w.Body.String(), value) {
 			t.Errorf("answered %s, want the plain-HTTP refusal and not the link's, without the value", w.Body)
 		}
 		y.untouched(t, "a request said plain")
@@ -1096,7 +1098,7 @@ func testUserGiveSecretIsTakenDownTheLinkOfAHostedYard(t *testing.T) {
 			t.Fatal(err)
 		}
 		w := y.give(edgelink.RemoteAddr, y.jo, strings.NewReader(y.args(map[string]string{"CRM_TOKEN": value})))
-		if !strings.Contains(w.Body.String(), "a secret never crosses the edge") {
+		if !strings.Contains(w.Body.String(), "a secret does not cross the edge in a call that is not sealed") {
 			t.Errorf("answered %s, want the link's refusal", w.Body)
 		}
 		y.untouched(t, "hosted set to false")

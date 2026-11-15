@@ -1114,7 +1114,12 @@ on, undetected, until the device is re-paired by QR. An edge that only
 logged the call cannot. So the device list says `sealed (in place)` of such
 a device, against `sealed (paired)` for one that pinned its key at a pairing
 (`channel_pinned` in `yardr user device list --json` is `in_place` or
-`paired`). Re-pairing by QR lifts the label; it is never required.
+`paired`). Re-pairing by QR lifts the label; it is never required. A yard
+connected to the edge takes every secret from a device of the operator whose
+call came sealed, one sealed in place included, so the label is what the
+operator weighs before such a device gives the yard its secrets ([TLS is
+yours](#tls-is-yours-and-the-clients-rule)); the device list says so under the
+operator's devices sealed in place.
 
 Refused, with the record unchanged, each as a call's error:
 
@@ -1258,9 +1263,10 @@ to this itself, as far as it can see.
 that reached the listener from the yard's own machine, where the proxy or
 tunnel that ends TLS stands (or a client on that machine) — the two
 approvals, `SessionScreen` and the teammates calls also down the link from
-the edge, and `GiveSecret` there for every secret on a hosted yard and for
-the code of a harness login alone on any other, and on either from a member's
-own device the code of their own sign-in when the call came sealed,
+the edge, and `GiveSecret` there for every secret on a hosted yard and, on any
+other, for every secret when the call came sealed from the operator's device and
+for the code of a harness login alone when it came plain, and on either from a
+member's own device the code of their own sign-in when the call came sealed,
 `ApproveSetup` with the account typed being a secret there too
 ([edge.md](edge.md#footplate-through-the-link)) — and never from one whose
 proxy says it came in plain (`X-Forwarded-Proto: http`; the header is read
@@ -1292,23 +1298,44 @@ method the yard does not have, to a device of the operator too, so the
 rule above has no request of theirs to hold.
 
 Down the link from the edge `GiveSecret` is taken from a device of the
-operator, and which asks it is taken for depends on the yard. A hosted yard,
-whose `hosted` setting is `true` (the provisioner writes it when it makes the
-yard, [configuration.md](configuration.md#settings)), takes it for every
-secret ask: the service runs the edge and the machine the yard lives on, and
-the person has no shell there to answer at. Any other yard takes it for one
-ask: the daemon's ask for the code a harness login waits for
+operator, and which asks it is taken for depends on the yard and on whether the
+call came sealed. A hosted yard, whose `hosted` setting is `true` (the
+provisioner writes it when it makes the yard,
+[configuration.md](configuration.md#settings)), takes it for every secret ask,
+sealed or plain: the service runs the edge and the machine the yard lives on,
+and the person has no shell there to answer at. Any other yard takes it for
+every secret ask when the call came sealed, inside the channel of a device that
+pinned a key at a pairing or in place ([a channel key registered in
+place](#a-channel-key-registered-in-place); the envelope is [the end-to-end
+design](design/2026-11-05-yardr-device-e2e.md), section 3.2), which the edge
+carries and cannot open: a source's credential, an API key, a hook's signing
+secret, an address, a login code that is a user's own (`secret.as`), and every
+name an ask wants at once. The body is not read to tell, beyond what serving the
+call reads, as on a hosted yard, and the store decides who may give what with the
+device's user as the actor. A device sealed in place registered its key in the
+clear with its token, so an edge active at that one call could sit in the middle
+of every call after it, and the yard cannot tell; it is taken as sealed all the
+same, and pairing the device again with the QR lifts that. What a device so held,
+or a stolen one, can do is supply and never read: with an ask pending it can
+overwrite the credential asked for, point an address-like secret at one of its
+own (a webhook's URL is the sharp case) or swap the application a minted
+credential is made from.
+
+A call that came plain is taken on any other yard for one ask: the daemon's ask
+for the code a harness login waits for
 ([crew.md](crew.md#the-yard-leads-a-harnesss-login)). It is a secret ask with
 `secret.login` set and `secret.env` of `["INPUT"]`, and with `secret.source`
 empty and none of `secret.hook`, `secret.harness`, `secret.user`,
 `secret.crew` and `secret.as` beside it. The code is used once, within
 minutes, and the yard hands it to the waiting login in its memory and keeps
-it nowhere. To know which ask a call names, such a yard reads its body, so a
-giving down its link has its body read before it is refused, and nothing of
-what is found is said back. Every other secret down its link from the
-operator's device, an API key and a login code that is a user's own
+it nowhere. To know which ask a call names, such a yard reads the body of a
+plain giving, so it has its body read before it is refused, and nothing of
+what is found is said back. Every other secret in a plain call down its link
+from the operator's device, an API key and a login code that is a user's own
 (`secret.as`) among them, is refused with the code `error`, in words that say
-a secret never crosses the edge and send the person to the yard's own machine.
+the secret does not cross the edge in a call that is not sealed, and name the
+two fixes: a sealed device, which pairing the device with the QR makes, and the
+yard's own machine.
 
 On either yard a device of a user who is not the operator is taken `GiveSecret`
 down the link for one ask: that user's own login input, the code their own
@@ -1326,7 +1353,9 @@ user's own, in its memory and keeps it nowhere. A call with it that came plain
 is refused, and so is every other secret of such a device, sealed or not, with
 the code `error` and one sentence, the same on a hosted yard and on any other:
 a secret from a member's device does not cross the edge but for the code of
-their own sign-in from a sealed device, and the operator gives the rest. A
+their own sign-in from a sealed device, and the operator gives the rest, on the
+yard's machine, from their own sealed device, or from any paired device of theirs
+where the yard is hosted. A
 giving that is taken is held to the approvals' rule there: when the edge says
 the device reached it in plain HTTP, it is refused as they are.
 
@@ -1334,13 +1363,15 @@ the device reached it in plain HTTP, it is refused as they are.
 held to the same rule down the link. A hosted yard takes it whole. Any other
 yard takes it without `values`, a candidate taken (`account`) or the account
 kept (neither), which hold no secret, and refuses it with `values` in the
-words of every other secret there, which send the person to the yard's own
-machine (`yardr bead answer <bead> <ask> <n> --secret`). It reads the body to
+words that send the person to the yard's own machine
+(`yardr bead answer <bead> <ask> <n> --secret`), sealed or plain: sealing the
+device does not make a typed account cross. It reads the body to
 tell, as it does for a giving, and a body it cannot read as the arguments of
 the call is refused so too. A client does not offer to type a setup's account
 down the link of a yard that is not hosted: it says "answer it at the yard".
 The refusal comes after the request has crossed, so it cannot keep the edge
-from having read what was sent; its words say so, as they do for a giving.
+from having read what was sent; its words say so for a call that came plain, as
+they do for a giving.
 
 A hosted yard takes `GiveSecret`, `SourceGrants`, `SessionScreen`,
 `Teammates`, `UninviteTeammate` and `TelemetryShow` from one peer besides
@@ -1411,7 +1442,7 @@ POST /call/Settings
 
 The operator's words are what every session of an agent reads when it starts (`yardr prime`), so the socket tells them to whoever calls, and every other setting with them. Over the network a device is told these keys alone: the words and `hosted` to a device of an operator and to no other, and to none in a yard with no operator. A `setting_changed` in a device's stream has its `value` only for a key the device is told; for any other it has the `key` and no `value`.
 
-`hosted` is how a client down the link from the edge learns which yard it has reached: a hosted yard takes `GiveSecret` there from the operator's device for every secret, and any other yard for a harness login's code alone; either takes a member's own sign-in code from their sealed device ([TLS is yours](#tls-is-yours-and-the-clients-rule)).
+`hosted` is how a client down the link from the edge learns which yard it has reached: a hosted yard takes `GiveSecret` there from the operator's device for every secret, and any other yard for every secret when the call came sealed and for a harness login's code alone when it came plain; either takes a member's own sign-in code from their sealed device ([TLS is yours](#tls-is-yours-and-the-clients-rule)).
 
 ### `Users`
 

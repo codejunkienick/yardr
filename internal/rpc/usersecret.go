@@ -35,10 +35,12 @@ func (u *UserServer) ownSecret(ctx context.Context, c *Caller, body []byte) bool
 // loginCode reports whether body is a GiveSecret call from an operator's
 // device that names the daemon's ask for a harness login's input and carries
 // only that ask's values. It is the one secret taken down the link from the
-// edge from an operator's device on a yard that is not hosted (inTheClear),
-// because it is used once, within minutes, and the login it is handed to keeps
-// it in memory and nowhere else. A user's own login code (As) is not it: that
-// is a member's, taken from a sealed device alone (memberLoginCode).
+// edge from an operator's device on a yard that is not hosted when the call
+// came plain (inTheClear), because it is used once, within minutes, and the
+// login it is handed to keeps it in memory and nowhere else; a call that came
+// sealed is taken for every secret (crossesConnected). A user's own login code
+// (As) is not it: that is a member's, taken from a sealed device alone
+// (memberLoginCode).
 func (u *UserServer) loginCode(ctx context.Context, body []byte, user string) bool {
 	return u.loginInput(ctx, body, user, store.AskSecret.OperatorLoginInput)
 }
@@ -125,14 +127,41 @@ func (u *UserServer) loginInput(ctx context.Context, body []byte, user string, i
 
 // crossesConnected reports whether the operator's call name, with the
 // arguments body from the device of user, is one that a yard connected to the
-// edge and not hosted takes down the link: a GiveSecret for the code of a
-// harness login (loginCode), and an ApproveSetup without typed account values
-// (typesAccount returns false), which settles by a candidate taken or the
-// account kept.
-// Hosted yards take both whole and do not ask (call).
+// edge and not hosted takes down the link: a GiveSecret that came sealed, for
+// any secret, or that came plain, for the code of a harness login (loginCode),
+// and an ApproveSetup without typed account values (typesAccount returns
+// false), which settles by a candidate taken or the account kept, sealed or
+// not. Hosted yards take both whole and do not ask (call). The device is the
+// operator's already, for call asks this of nobody else's (operatorCall); and
+// the store still decides who may give what, with the user of the device as the
+// actor.
+//
+// A call came sealed when the channel session is on its context, which
+// serveInner alone puts there, after e2eCall re-read the device's record, so
+// nothing a client sends says it (e2eSessionKey). The edge carried such a call
+// as ciphertext and read nothing of the value, so the yard takes it as a hosted
+// yard does, and a person with only a phone gives the yard's secrets from it.
+// The body is not read: whatever the call asks, it is the operator's own device
+// that asks.
+//
+// Sealed is a device paired with the QR, and one sealed in place
+// (store.PinnedInPlace) as well, as memberLoginCode takes it: the yard has no
+// other word for the second. A device sealed in place registered its key in the
+// clear with its token (registerChannelKey), so an edge active at that one call
+// could sit in the middle of every call after it, and the yard cannot tell.
+// The code that precedent reasoned for is used once; the secrets here last, so
+// the cost of a phone so held, or stolen, is stated: it supplies, and never
+// reads. With an ask pending it can overwrite the credential asked for,
+// redirect an address-like secret to one of its own (a webhook's URL is the
+// sharp case) or swap the application a mint turns its inputs into. Pairing the
+// device with the QR says so to the operator, and so does the device list for a
+// device sealed in place.
 func (u *UserServer) crossesConnected(ctx context.Context, name string, body []byte, user string) bool {
 	switch name {
 	case "GiveSecret":
+		if _, sealed := ctx.Value(e2eSessionKey{}).(*e2eSession); sealed {
+			return true
+		}
 		return u.loginCode(ctx, body, user)
 	case "ApproveSetup":
 		return !typesAccount(body)

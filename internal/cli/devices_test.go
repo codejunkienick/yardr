@@ -143,6 +143,33 @@ func TestDeviceCommands(t *testing.T) {
 		}
 	}
 
+	// A device of the operator that is sealed in place is told what that lets
+	// it do, in a footer under the table, for a device registered before the
+	// yard said so. Ada's tablet above is a member's and jo's watch was sealed
+	// by a pairing, and the list had none. It follows the state, so the device
+	// removed ends it, and neither the JSON nor another user's list carries it.
+	const footer = "A device of the operator that is sealed in place may give the yard any secret a setup asks for: protect the phone as you would this machine. " +
+		"It registered its key in a call an edge could have sat in the middle of, and pairing it again with the QR lifts that (yardr user device rm, then yardr user device pair --qr).\n"
+	if list := mustAs(t, st, "jo", "user", "device", "list"); strings.Contains(list, "may give the yard") {
+		t.Fatalf("a member's device sealed in place, and the operator's sealed by a pairing, earn a footer:\n%s", list)
+	}
+	slate := deviceToken.FindString(mustAs(t, st, "jo", "user", "device", "add", "jo", "slate"))
+	if _, err := own.PinChannelKeyInPlace(ctx, slate, key(3)); err != nil {
+		t.Fatal(err)
+	}
+	if list := mustAs(t, st, "jo", "user", "device", "list"); !strings.HasSuffix(list, "\n"+footer) || strings.Count(list, "may give the yard") != 1 {
+		t.Fatalf("list, with the operator's device sealed in place, lacks the footer once, last:\n%s", list)
+	}
+	for _, args := range [][]string{{"user", "device", "list", "ada"}, {"user", "device", "list", "--json"}} {
+		if out := mustAs(t, st, "jo", args...); strings.Contains(out, "may give the yard") {
+			t.Fatalf("yardr %s carries the footer:\n%s", strings.Join(args, " "), out)
+		}
+	}
+	mustAs(t, st, "jo", "user", "device", "rm", "jo", "slate")
+	if list := mustAs(t, st, "jo", "user", "device", "list"); strings.Contains(list, "may give the yard") {
+		t.Fatalf("list, after the device was removed, keeps the footer:\n%s", list)
+	}
+
 	refusedAs(t, st, "ada", "only jo or the operator (jo) may remove a device of jo; this is ada", "user", "device", "rm", "jo", "phone")
 	refusedAs(t, st, "yardmaster", "may remove a device of ada; this is yardmaster", "user", "device", "rm", "ada", "laptop")
 	if out := mustAs(t, st, "ada", "user", "device", "rm", "ada", "laptop"); out != "device laptop of ada removed: its token is refused from now on, and the streams it held are closed\n" {

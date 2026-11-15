@@ -888,11 +888,11 @@ func (u *UserServer) call(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Down the link the operator's GiveSecret is taken for every ask on a
-	// hosted yard, and on any other for one ask alone, which only its body
-	// names (loginCode): its check waits for the body, as a user's own does.
-	// So does an ApproveSetup's, which carries a secret when it types the
-	// account (typesAccount). Every other operator call is judged before its
-	// body is read.
+	// hosted yard, and on any other when the call came sealed, else for one
+	// ask alone, which only its body names (loginCode): the checks wait for
+	// the body, as a user's own does. So does an ApproveSetup's, which
+	// carries a secret when it types the account (typesAccount). Every other
+	// operator call is judged before its body is read.
 	overLink := operators && (name == "GiveSecret" || name == "ApproveSetup") && r.RemoteAddr == linkRemoteAddr
 	if operators && !overLink {
 		if why := inTheClear(r, name, u.routerAddr(r.Context()), false, false); why != "" {

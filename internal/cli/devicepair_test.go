@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -78,10 +79,13 @@ func TestDevicePairCommand(t *testing.T) {
 	if until == nil {
 		t.Fatalf("device pair does not say how long the code holds:\n%s", out)
 	}
+	// The operator's own device, which a scan of the QR code seals, is told what
+	// a sealed device of theirs may give the yard.
+	const ownDevice = "This is your own device: sealed, it may give the yard any secret a setup asks for — protect the phone as you would this machine.\n"
 	wantText(t, out,
 		"The code is good once: a device that scans the QR code is answered inside a sealed channel, and whoever carries the connection reads neither the code nor the device token. 5 wrong codes end the pairing, and so does: ",
 		" user device pair --end\n",
-		"It then calls as jo until: ", " user device rm jo phone\n")
+		"It then calls as jo until: ", " user device rm jo phone\n"+ownDevice)
 	if strings.Contains(out, "yardr-dev-") || strings.Contains(out, "█") || strings.Contains(out, "is not the operator") || strings.Contains(out, "plain http") {
 		t.Fatalf("device pair, without --qr, for the operator, on this machine:\n%s", out)
 	}
@@ -141,6 +145,25 @@ func TestDevicePairCommand(t *testing.T) {
 	wantText(t, out, "  address  http://10.0.0.5:8790\n",
 		"ada is not an operator, and the device reads every bead in the yard, with its notes, and the mail of ada alone.\n",
 		"http://10.0.0.5:8790 is plain http: a code typed there crosses readable, and the token after it; a device that scans the QR code is answered sealed even so.")
+	// A member's sealed device gives no secret of the yard's, so it is told nothing of that.
+	if strings.Contains(out, "your own device") {
+		t.Fatalf("a member's pairing says the device is the operator's own:\n%s", out)
+	}
+	mustAs(t, st, "jo", "user", "device", "pair", "--end")
+	// A pairing that carries no channel key (the yard could not make one) opens
+	// a plain device, which gives no secret down the link from the edge: the
+	// warning of what a sealed one may do is not said of it.
+	if err := os.Remove(cfg.ChannelKey()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(cfg.ChannelKey(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out = mustAs(t, st, "jo", "user", "device", "pair", "jo", "slate")
+	wantText(t, out, "The code is good once: the device is answered with its token", "It then calls as jo until: ")
+	if strings.Contains(out, "your own device") || strings.Contains(out, "  channel  ") {
+		t.Fatalf("a plain pairing for the operator:\n%s", out)
+	}
 	mustAs(t, st, "jo", "user", "device", "pair", "--end")
 
 	refusedAs(t, st, "ada", "only the operator (jo) may add a device; this is ada", "user", "device", "pair", "ada", "watch")

@@ -194,21 +194,44 @@ machine — pairing is the grant, and `yardr user device rm` is the revoke.
 Each approval and its answer reads as any call does: whole, with the
 token, on a plain call; ciphertext, with no token, over a sealed channel.
 A setup approval that types the account is the exception on a connected yard,
-since what is typed is a secret (below). Two secrets cross with them on every
-yard, each the code a harness's sign-in page shows
+since what is typed is a secret (below). The secrets that cross with them are
+the ones a device gives with `GiveSecret`, and which cross depends on whose
+device gives and on whether its call came sealed: inside the channel of a
+device paired with the QR, or [sealed in place](users.md#sealed-in-place). A
+sealed call crosses as ciphertext and no token crosses with it, so the edge
+reads nothing of what it carries; a plain call it reads whole, with the
+device's token, as it reads every plain call.
+
+The operator's sealed device gives any secret the yard asks for, on a connected
+yard as on a hosted one: a source's credential, a model credential such as an
+API key, a hook's signing secret, a person's address, and every name an ask
+wants at once, an application's id and its secret among them. A phone with no
+terminal behind it can set a source up and sign the assistant in, and what it
+gives crosses as ciphertext. A device sealed in place is held to less than one
+paired with the QR, and the yard takes it as sealed all the same: it registered
+its key in the clear with its token, so an edge active at that one call could
+sit in the middle of every call after it, and the yard cannot tell. Pairing the
+device again with the QR lifts that, and is never required. What a phone held so,
+or stolen, can do is supply, and never read: with an ask pending it can
+overwrite the credential asked for, point an address-like secret at one of its
+own (a webhook's URL is the sharp case) or swap the application a minted
+credential is made from. `yardr user device pair` says what a sealed device of
+the operator may give when it pairs one, and `yardr user device list` says it
+under a device of the operator that is sealed in place.
+
+The code a harness's sign-in page shows crosses on every yard whether or not
+the call came sealed
 ([crew.md](crew.md#the-yard-leads-a-harnesss-login)). The operator's, when the
 yard leads the harness's login for the operator: a paired device of the
 operator gives it with `GiveSecret`, so a phone with no terminal behind it
 can sign the assistant in. On a plain call the edge reads the code with the
-device's token, as it reads every plain call; over a sealed channel the
-code crosses as ciphertext and no token crosses with it. A member's own, when
-the yard leads a login for them ([users.md](users.md#the-record)): the
-member gives it from their own device, which may be the only way into the
-yard they have, and it is taken only when the call came sealed, from a device
-paired with the QR or [sealed in place](users.md#sealed-in-place), so the edge
-carries it as ciphertext and reads nothing of it. The same call from a plain
-device is refused, and pairing it again with the QR makes its calls sealed. Each code is
-used once, within minutes, and the yard
+device's token; over a sealed channel the code crosses as ciphertext and no
+token crosses with it. A member's own, when the yard leads a login for them
+([users.md](users.md#the-record)): the member gives it from their own device,
+which may be the only way into the yard they have, and it is taken only when
+the call came sealed, so the edge carries it as ciphertext and reads nothing of
+it. The same call from a plain device is refused, and pairing it again with the
+QR makes its calls sealed. Each code is used once, within minutes, and the yard
 hands it to the waiting login in its memory and keeps it nowhere.
 A session's screen crosses with the approvals: `SessionScreen` is taken from
 a paired device of the operator down the link, as from the yard's own
@@ -220,19 +243,21 @@ Teammates cross with them too: `Teammates` and `UninviteTeammate` are taken
 from a paired device of the operator down the link, as from the yard's own
 machine, so the operator's paired device reads the yard's teammates and
 files a removal through the edge.
-On a connected yard no other secret crosses: model credentials such as an
-API key, and hook signing secrets, are answered at the yard's own machine, as
-on a LAN without TLS, and `GiveSecret` is refused down the link for every
-other ask. So is `ApproveSetup` with the account typed (`values`), which is
-answered at the yard's own machine too (`yardr bead answer <bead> <ask> <n>
---secret`); a setup approved by taking a candidate or keeping the account types
-nothing and crosses with the other approvals. On a hosted yard every secret
-crosses, from a paired device of the operator: the service runs the edge and
-the machine the yard lives on, and the operator has no shell there to answer
-at (the yard's `hosted` setting,
-[configuration.md](configuration.md#settings)). A device of a user who is not
-the operator gives no secret down the link on either, but the code of their own
-sign-in on a sealed call (above). The grant list,
+On a connected yard a plain call gives no other secret: model credentials such
+as an API key, and hook signing secrets, are answered from a sealed device
+(above) or at the yard's own machine, as on a LAN without TLS, and `GiveSecret`
+is refused down the link in a plain call for every other ask, in words that name
+both. `ApproveSetup` with the account typed (`values`) is refused sealed or
+plain, since sealing the device does not make it cross: it is answered at the
+yard's own machine (`yardr bead answer <bead> <ask> <n> --secret`); a setup
+approved by taking a candidate or keeping the account types nothing and crosses
+with the other approvals. On a hosted yard every secret crosses, sealed or
+plain, from a paired device of the operator: the service runs the edge and the
+machine the yard lives on, and the operator has no shell there to answer at (the
+yard's `hosted` setting, [configuration.md](configuration.md#settings)). A
+device of a user who is not the operator gives no secret down the link on
+either, but the code of their own sign-in on a sealed call (above). The grant
+list,
 `SourceGrants`, carries no credential but is never read through the edge, on
 either. A device call cannot read or change the telemetry switch through the
 yard link: `TelemetryShow` and `TelemetrySet` are refused there. A hosted
@@ -249,7 +274,7 @@ checks the gateway's JWT and acts as the mapped yard user.
 | how the edge reaches it | TCP to its container or droplet | the link the yard opened |
 | footplate | Kratos session plus device token, pairing by code | the same, through the link |
 | web view | `https://my.yardr.dev/?yard=<name>`, signed in as the account that owns the yard | the same, through the socket the view keeps to the edge ([below](#the-web-view-of-a-connected-yard)) |
-| secrets given from a device | every secret, from the operator's devices, the account a setup types among them; a member's own sign-in code, from their sealed device | the code of a harness login, from the operator's devices; a member's own sign-in code, from their sealed device |
+| secrets given from a device | every secret, from the operator's devices, the account a setup types among them; a member's own sign-in code, from their sealed device | every secret, from the operator's sealed devices, and the code of a harness login from any of their devices; the account a setup types is answered at the yard's machine; a member's own sign-in code, from their sealed device |
 | who runs it, upgrades, backs up | the service | the person |
 | invite list | yes, for the trial | no: any verified account connects its own yard, and gets no hosted yard |
 

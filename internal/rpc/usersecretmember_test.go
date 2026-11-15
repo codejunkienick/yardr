@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -24,14 +25,14 @@ import (
 // refusal (memberRefusalSealed) drops that sentence, since it crossed as
 // ciphertext.
 const memberRefusal = "a secret from a member's device does not cross the edge, except the code of their own sign-in from a sealed device (pairing the device with the QR makes it one); " +
-	"the operator gives any other on the yard's machine, or from their own paired device where the yard is hosted." +
+	"the operator gives any other on the yard's machine, from their own sealed device, or from any paired device of theirs where the yard is hosted." +
 	" The edge saw what was sent with it: if it was a real key, make a new one at the service."
 
 // memberRefusalSealed is memberRefusal for a call that came sealed: the one
 // sentence without the tail, since the edge read nothing of what crossed as
 // ciphertext.
 const memberRefusalSealed = "a secret from a member's device does not cross the edge, except the code of their own sign-in from a sealed device (pairing the device with the QR makes it one); " +
-	"the operator gives any other on the yard's machine, or from their own paired device where the yard is hosted."
+	"the operator gives any other on the yard's machine, from their own sealed device, or from any paired device of theirs where the yard is hosted."
 
 // memberYard is a yard whose member sam has a login of their own waiting for
 // the code its sign-in page shows: the group that carries sam's login, the ask
@@ -332,22 +333,113 @@ func TestMemberGiveSecretDownTheLinkIsOnlyTheirOwnLoginCode(t *testing.T) {
 			y.takes(t, sam, "sam via phone via edge")
 		})
 	}
-	// The operator's sealed device is no member's: on a yard that is not hosted
-	// a member's login code from it is refused with the operator's way to give
-	// it, and the exception is not its own. The refusal is the operator's
-	// sentence without the tail, since the call crossed as ciphertext; the
-	// same call plain keeps it (TestUserGiveSecretIsNotTakenOverTheLink).
+	// The operator's sealed device takes every secret here; the member cases
+	// above still pin their own login code as the only secret they may give.
 	t.Run("the operator's sealed device, on a connected yard", func(t *testing.T) {
-		y := newMemberYard(t, false)
-		given, refused := y.sealedGive(t, newE2EDevice(t, y.pairYard, "jo", "laptop"), giveArgs(t, y.login, map[string]string{"INPUT": memberCode}))
-		const want = "a secret never crosses the edge: this request came down the link from the edge. " +
-			"Answer on the yard's machine (ssh -t <host> yardr bead answer <bead> <ask> --secret)."
-		if given != nil || refused != want {
-			t.Errorf("answered %+v, refused %q, want the operator's sealed refusal %q", given, refused, want)
-		}
-		y.nothingGiven(t, "the operator's sealed device")
+		t.Run("a member's login code", func(t *testing.T) {
+			y := newMemberYard(t, false)
+			y.takes(t, newE2EDevice(t, y.pairYard, "jo", "laptop"), "jo via laptop via edge")
+		})
+		t.Run("every other ask", func(t *testing.T) {
+			const value = "s3cret-0f-the-operator"
+			ctx := context.Background()
+			y := newMemberYard(t, false)
+			for file, decl := range map[string]string{"tracker.yaml": trackerDecl, "linear.yaml": hookDecl} {
+				if _, err := y.st.PutSource(ctx, file, decl, "jo"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			laptop := newE2EDevice(t, y.pairYard, "jo", "laptop")
+			rows := []struct {
+				name   string
+				sec    *store.AskSecret
+				values map[string]string
+				names  []string // what the answer says was given
+				file   []string // what the file it names holds
+			}{
+				{"a source's credential", &store.AskSecret{Source: "crm"}, map[string]string{"CRM_TOKEN": value},
+					[]string{"CRM_TOKEN"}, []string{"CRM_TOKEN=" + value}},
+				{"the two names of a minted credential", &store.AskSecret{Source: "tracker"},
+					map[string]string{"TRACKER_CLIENT_ID": "app-1d", "TRACKER_CLIENT_SECRET": value},
+					[]string{"TRACKER_CLIENT_ID", "TRACKER_CLIENT_SECRET"}, []string{"TRACKER_CLIENT_ID=app-1d", "TRACKER_CLIENT_SECRET=" + value}},
+				{"a harness's API key", &store.AskSecret{Harness: "claude", Crew: "yardmaster"}, map[string]string{"ANTHROPIC_API_KEY": value},
+					[]string{"ANTHROPIC_API_KEY"}, []string{"ANTHROPIC_API_KEY=" + value}},
+				{"a hook's signing secret", &store.AskSecret{Source: "linear", Hook: "linear"}, map[string]string{"LINEAR_SIGNING_SECRET": value},
+					[]string{"LINEAR_SIGNING_SECRET"}, []string{value}},
+				{"a user's address", &store.AskSecret{Source: "push", User: "sam"}, map[string]string{"PUSH_USER": value},
+					[]string{"PUSH_USER"}, []string{"PUSH_USER=" + value}},
+			}
+			for _, c := range rows {
+				given, refused := y.sealedGive(t, laptop, giveArgs(t, y.ask(t, "jo", c.sec), c.values))
+				if refused != "" || given == nil || !slices.Equal(given.Given, c.names) {
+					t.Errorf("%s: the sealed giving is answered %+v, refused %q, want %v given", c.name, given, refused, c.names)
+					continue
+				}
+				written, err := os.ReadFile(given.File)
+				if err != nil {
+					t.Errorf("%s: the file it names: %v", c.name, err)
+					continue
+				}
+				for _, want := range c.file {
+					if !strings.Contains(string(written), want) {
+						t.Errorf("%s: %s holds %q, want it to hold %q", c.name, given.File, written, want)
+					}
+				}
+			}
+			// A device sealed in place gives as one paired with the QR does.
+			tablet := y.inPlaceDevice(t, "jo", "tablet")
+			if given, refused := y.sealedGive(t, tablet, giveArgs(t, y.ask(t, "jo", &store.AskSecret{Source: "crm"}), map[string]string{"CRM_TOKEN": value})); refused != "" || given == nil {
+				t.Errorf("sealed in place: the sealed giving is answered %+v, refused %q", given, refused)
+			}
+			// Each giving is on the bead as the device's, and none holds the value.
+			var want []string
+			for range len(rows) {
+				want = append(want, "jo via laptop via edge")
+			}
+			want = append(want, "jo via tablet via edge")
+			if got := y.answeredBy(t); !slices.Equal(got, want) {
+				t.Errorf("the bead is answered by %q, want %q", got, want)
+			}
+			notes, err := y.st.Notes(ctx, "yd-crm")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, n := range notes {
+				if strings.Contains(n.Text, value) {
+					t.Errorf("note %d holds the value: %q", n.Seq, n.Text)
+				}
+			}
+			// The account a setup types is no giving, and sealing does not make it
+			// one: it is refused with the machine as its one fix, and no tail, since
+			// the call crossed as ciphertext.
+			const typed = "an account typed into an approval never crosses the edge: this request came down the link from the edge. " +
+				"Answer on the yard's machine (ssh -t <host> yardr bead answer <bead> <ask> <n> --secret)."
+			plain := bindFor("", false)
+			_, _, status, _, answer := laptop.call(t, http.MethodPost, "/user/call/ApproveSetup", nil,
+				[]byte(`{"bead":"yd-crm","ask":1,"option":1,"values":{"CRM_TOKEN":"`+value+`"},"weighed":true}`), plain, plain)
+			if given, refused := giveReply(t, answer); status != http.StatusOK || given != nil || refused != typed {
+				t.Errorf("a setup's typed account, sealed, is answered %d %s, want it refused as %q", status, answer, typed)
+			}
+		})
 	})
 }
+
+// trackerDecl is a source whose credential is minted from two inputs, an
+// application's id and its secret, so the card that asks for them asks for two
+// names at once.
+const trackerDecl = `name: tracker
+base: https://tracker.example.com/api
+credential:
+  env: TRACKER_TOKEN
+  header: "Authorization: Bearer {credential}"
+  mint:
+    - name: TRACKER_CLIENT_ID
+      secret: false
+    - TRACKER_CLIENT_SECRET
+  mint_command: [tracker-mint]
+calls:
+  ping: { kind: read, request: { method: GET, path: /me } }
+`
 
 // noSuchMethodMessage is the message of a call the yard does not have.
 var noSuchMethodMessage = noSuchMethod("GiveSecret").Error.Message

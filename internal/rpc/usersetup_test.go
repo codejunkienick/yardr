@@ -2055,11 +2055,12 @@ func TestUserOtherCallsTellNoFileOrCommandToADeviceThatIsNotTheOperators(t *test
 // card, is approved the same way. The approval is recorded and left for the
 // server to carry out, and the answer's event says it came by the edge and
 // claims no witness. The account a setup types is a secret, and on a yard
-// that is not hosted none crosses the edge
-// (TestUserGiveSecretIsNotTakenOverTheLink): an approval that types it is
-// refused in the link's words, whatever else its body holds, and the ask
-// stays open; one that types none, a candidate taken or the account kept,
-// holds no secret and crosses. A hosted yard takes the typed account too.
+// that is not hosted it does not cross the edge in an approval, whether the
+// call came sealed or plain (TestUserGiveSecretIsNotTakenOverTheLink,
+// TestMemberGiveSecretDownTheLinkIsOnlyTheirOwnLoginCode): an approval that
+// types it is refused in the link's words, whatever else its body holds, and
+// the ask stays open; one that types none, a candidate taken or the account
+// kept, holds no secret and crosses. A hosted yard takes the typed account too.
 func TestUserApprovesASetupAskOverTheLink(t *testing.T) {
 	ctx := context.Background()
 	y, _ := setupYard(t)
@@ -2140,7 +2141,7 @@ func TestUserApprovesASetupAskOverTheLink(t *testing.T) {
 		y, _ := setupYard(t)
 		plain := plainAsk(t, y)
 		typed := fmt.Sprintf(`{"bead":"yd-crm","ask":%d,"option":1,"values":{"PLAIN_TOKEN":%q},"weighed":true}`, plain, candidateAddress)
-		const never = "a secret never crosses the edge: this request came down the link from the edge. " +
+		const never = "an account typed into an approval never crosses the edge: this request came down the link from the edge. " +
 			"Answer on the yard's machine (ssh -t <host> yardr bead answer <bead> <ask> <n> --secret)." +
 			" The edge saw what was sent with it: if it was a real key, make a new one at the service."
 		for _, c := range []struct{ name, body string }{

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -109,6 +110,10 @@ printed with the token, to hand both over together.`,
 					rows = append(rows, []string{d.User, d.Name, d.CreatedAt.Local().Format(mailTime), lastUsed(d) + sealed(d)})
 				}
 				table(w, "USER\tDEVICE\tADDED\tLAST USED", rows)
+				if inPlaceOperatorDevice(c.Context(), st, devices) {
+					fmt.Fprintln(w, "A device of the operator that is sealed in place may give the yard any secret a setup asks for: protect the phone as you would this machine. "+
+						"It registered its key in a call an edge could have sat in the middle of, and pairing it again with the QR lifts that (yardr user device rm, then yardr user device pair --qr).")
+				}
 			})
 		},
 	}
@@ -153,6 +158,32 @@ func sealed(d store.Device) string {
 		return ", " + s
 	}
 	return ""
+}
+
+// inPlaceOperatorDevice reports whether any of devices is one of an operator
+// that is sealed in place (store.Device.Sealed). The yard takes every secret
+// from the operator's sealed device, down the link from the edge, and a device
+// sealed in place registered its key in the clear with its token, before the
+// yard said what that lets it do, so the list tells the operator of it. A device
+// sealed by a pairing was told when it paired, a member's device gives the yard
+// no secret of its own, and a device that pins no key calls plain: none of them
+// is one. Pairing a device again by QR ends the note for it.
+func inPlaceOperatorDevice(ctx context.Context, st store.API, devices []store.Device) bool {
+	operators := map[string]bool{}
+	for _, d := range devices {
+		if d.ChannelKey == "" || d.ChannelPinned != store.PinnedInPlace {
+			continue
+		}
+		op, read := operators[d.User]
+		if !read {
+			op = isOperator(ctx, st, d.User)
+			operators[d.User] = op
+		}
+		if op {
+			return true
+		}
+	}
+	return false
 }
 
 // unusedDevice is yardr doctor's note on a device nothing has called with

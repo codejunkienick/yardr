@@ -296,7 +296,7 @@ func TestEdgeLinkServesTheListenersHandlersWithNoAddress(t *testing.T) {
 	if a := overLink(t, l, "/user/call/GetUser", bearer(token), `{}`); a.Status != http.StatusOK || !strings.Contains(string(a.Body), `"name":"jo"`) {
 		t.Errorf("GetUser over the link answered %d %s", a.Status, a.Body)
 	}
-	if a := overLink(t, l, "/user/call/GiveSecret", bearer(token), `{}`); !strings.Contains(string(a.Body), "a secret never crosses the edge") {
+	if a := overLink(t, l, "/user/call/GiveSecret", bearer(token), `{}`); !strings.Contains(string(a.Body), "a secret does not cross the edge in a call that is not sealed") {
 		t.Errorf("GiveSecret without an ask over the link answered %d %s, want it refused", a.Status, a.Body)
 	}
 	// A peer's request meets the peers' receiver's own check, as on the
