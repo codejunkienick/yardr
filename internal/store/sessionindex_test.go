@@ -89,9 +89,9 @@ func sessionIDs(ss []store.Session) []string {
 }
 
 // The pane and pending indexes answer as a walk of every session does,
-// after every tenth successful write of a few hundred random ones, the
-// first success of each kind, the two reopens below and the last write,
-// so every kind is compared at least once: claims, starts and handles
+// after every successful write of a few hundred random ones, the first
+// success of each kind, the two reopens below and the last write, so every
+// kind is compared at least once: claims, starts and handles
 // with a pid, a shell's, both, one pid for both or none, with a start time
 // or without, with a worktree, a dir or nothing on disk, pids used again by
 // later sessions and by a session's next handle, ends of every kind
@@ -102,9 +102,29 @@ func sessionIDs(ss []store.Session) []string {
 // process and its parent, so a pane is found alive as well.
 //
 // It runs beside the package's other parallel tests: the store is its own
-// file, and the time is the comparisons, not a wait.
+// file, and the time is the comparisons, not a wait. Each comparison walks
+// every session the store keeps, so the time of a walk grows with the square
+// of its length, and one walk of six hundred steps was the longest test of
+// the package, the one its run ended waiting for. It runs as the same six
+// hundred steps in two walks of three hundred, in parallel, each of a seed
+// and a store of its own. Each meets every kind well inside its three
+// hundred, which it checks; the seeds are fixed, so that holds on any
+// machine, and a change that moves a kind out of reach fails the part that
+// lost it.
 func TestSessionIndexesMatchAWalkAfterEveryWrite(t *testing.T) {
 	t.Parallel()
+	for _, seed := range []int64{1, 4} {
+		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
+			t.Parallel()
+			walkSessionIndexes(t, seed, 300)
+		})
+	}
+}
+
+// walkSessionIndexes drives steps random writes from seed over a store of
+// its own, comparing the indexes with a walk after each success, and opens
+// the store without them a third and two thirds of the way.
+func walkSessionIndexes(t *testing.T, seed int64, steps int) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "yard.db")
 	must := func(err error) {
@@ -118,7 +138,6 @@ func TestSessionIndexesMatchAWalkAfterEveryWrite(t *testing.T) {
 	defer func() { _ = s.Close(ctx) }()
 	must(s.PutGroup(ctx, store.Group{Name: "g", Runner: "fake", Limit: 1000}, "me"))
 
-	const seed = 1
 	rng := rand.New(rand.NewSource(seed))
 	// Pids no process has, each named by many sessions, and two that run.
 	pids := []int{os.Getpid(), os.Getppid(), 4000001, 4000002, 4000003, 4000004}
@@ -286,8 +305,8 @@ func TestSessionIndexesMatchAWalkAfterEveryWrite(t *testing.T) {
 	same("setup")
 	ok := map[string]int{}
 	var seen struct{ pane, shared, unstopped, workspace, uncounted, pruned int }
-	for step := 0; step < 600; step++ {
-		if step == 200 || step == 400 {
+	for step := 0; step < steps; step++ {
+		if step == steps/3 || step == 2*steps/3 {
 			must(s.DropPaneAndPendingIndexes())
 			must(s.DropSessionOrderIndexes())
 			must(s.Close(ctx))
@@ -334,14 +353,14 @@ func TestSessionIndexesMatchAWalkAfterEveryWrite(t *testing.T) {
 	same("the last write")
 	for _, op := range ops {
 		if ok[op.name] == 0 {
-			t.Errorf("seed %d: %s never succeeded, so the test did not drive it", seed, op.name)
+			t.Errorf("seed %d: %s never succeeded in %d steps, so the test did not drive it: give the walk more steps or another seed", seed, op.name, steps)
 		}
 	}
 	all, err := s.Sessions(ctx, true)
 	must(err)
 	seen.pruned = len(sessions) - len(all)
 	if seen.pane == 0 && peer.HaveStat() || seen.shared == 0 || seen.unstopped == 0 || seen.workspace == 0 || seen.uncounted == 0 || seen.pruned == 0 || len(all) == 0 {
-		t.Fatalf("seed %d: the steps that found a running pane, a pid two sessions name, an unstopped session, a closed bead's workspace, a count due: %+v, and %d sessions are left; the test wants each", seed, seen, len(all))
+		t.Fatalf("seed %d: the steps that found a running pane, a pid two sessions name, an unstopped session, a closed bead's workspace, a count due: %+v, and %d sessions are left; the test wants each in %d steps: give the walk more steps or another seed", seed, seen, len(all), steps)
 	}
 }
 

@@ -559,6 +559,7 @@ func TestMoveSourceRecordsMovesPeerIdentities(t *testing.T) {
 // linked yard already holds there. Otherwise the store would make the
 // sender ambiguous after both setters had kept that id one-to-one.
 func TestMoveSourceRecordsRefusesPeerIdentityClashes(t *testing.T) {
+	t.Parallel()
 	for _, other := range []string{"user", "peer"} {
 		other := other
 		t.Run(other, func(t *testing.T) {

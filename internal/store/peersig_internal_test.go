@@ -18,6 +18,7 @@ import (
 // this package builds: the published key, base and signature, none of
 // them yardr's.
 func TestPeerSigRFC9421Vector(t *testing.T) {
+	t.Parallel()
 	pub, err := ParsePublic("JrQLj5P_89iXES9-vFgrIy29clF9CC_oPPsw3c5D0bs")
 	if err != nil {
 		t.Fatal(err)
@@ -49,6 +50,7 @@ func TestPeerSigRFC9421Vector(t *testing.T) {
 // SignPeerRequest) verifies, and the profile's refusals hold: another
 // receiver, a tampered body digest, a replayed answer for a new nonce.
 func TestPeerProfileAgainstHandBuiltBase(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		scheme, authority, want string
 	}{

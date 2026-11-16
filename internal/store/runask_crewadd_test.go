@@ -168,6 +168,8 @@ func TestRunAskCrewAddDeniedCreatesNothing(t *testing.T) {
 
 // The carried bytes are what runs, not a file read again at approval.
 func TestRunAskCrewAddUsesCarriedBytes(t *testing.T) {
+	// Sequential: HarnessPresets, the table of every harness's presets, which it
+	// changes to stale a card.
 	y, _ := runYard(t)
 	role := crewAddRoleText()
 	seq := y.ask(t, crewAddAsk(role, "crew", "add", "porter", "kind=claude", "preset=auto", "dir="+y.Store.home), "yardmaster")

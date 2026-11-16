@@ -14,6 +14,7 @@ import (
 // delegatedPackTTL alone: past it, a write under the record is refused
 // as any write of the yardmaster's is, and the record still finishes.
 func TestDelegatedPackRecordExpires(t *testing.T) {
+	// Sequential: delegatedPackTTL, which every delegated pack write reads.
 	s, err := Open(filepath.Join(t.TempDir(), "yard.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -104,6 +105,7 @@ func TestDelegatedPackRecordExpires(t *testing.T) {
 // added to PackImport later is held until the reading says it, and this
 // test says which sample to forge it with.
 func TestPackImportHeldHoldsEveryField(t *testing.T) {
+	t.Parallel()
 	rec := &Delegation{ID: 7, Import: &PackImport{Pack: "starter", Depot: "shed", Source: "embedded in yardr test"}}
 	imp := PackImport{Pack: "starter", Depot: "shed", Source: "embedded in yardr test", Objects: []PackObject{{Kind: "group", Name: "builders"}}, At: time.Now(), By: "yardmaster"}
 	if err := packImportHeld(rec, imp); err != nil {
@@ -143,6 +145,7 @@ func TestPackImportHeldHoldsEveryField(t *testing.T) {
 // under the same identity is the one the record is held to, an empty table
 // is none, and no object of the reading is no object to hold it to.
 func TestPackObjectHeldHoldsEveryField(t *testing.T) {
+	t.Parallel()
 	group := PackObject{Kind: "group", Name: "builders", Binds: "reviewers"}
 	rec := &Delegation{ID: 7, Import: &PackImport{Objects: []PackObject{group}}}
 	if err := packObjectHeld(rec, "starter", group); err != nil {

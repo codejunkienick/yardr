@@ -262,6 +262,7 @@ func TestGeneralApprovalCarriesOnce(t *testing.T) {
 // Before its deadline a general approval is held to the fresh card;
 // past it nothing runs and the ask stays open.
 func TestGeneralExpiry(t *testing.T) {
+	// Sequential: the package's fake clock.
 	y := generalYard(t)
 	pinClock(t, &y.now)
 	seq := y.ask(t, generalAsk("bead", "create", "Soon"), "yardmaster")

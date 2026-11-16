@@ -493,6 +493,7 @@ func TestRunAskGroupAddRefusals(t *testing.T) {
 // read runs in the store's write, and a same-user rewrite past the bound
 // may be of any size.
 func TestHomeFileDigestHashesOnlyTheBoundedRead(t *testing.T) {
+	t.Parallel()
 	y := newAskYard(t)
 	path := yardPromptFile(t, y, "porter", "You are the porter.\n")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

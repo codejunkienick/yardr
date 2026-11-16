@@ -38,6 +38,7 @@ func devicePairAsk(command, to string) Ask {
 // the safe sentence: the named device then pairs with the answered
 // code, and no stored answer, note or event holds it.
 func TestRunAskDevicePair(t *testing.T) {
+	// Sequential: runtime.GOMAXPROCS and crypto/rand.Reader, which every test reads.
 	y := devicePairYard(t)
 	channelCalls := 0
 	y.SetPairChannelKey(func() string {
@@ -88,6 +89,7 @@ func TestRunAskDevicePair(t *testing.T) {
 	}))
 	oldProcs := runtime.GOMAXPROCS(1)
 	defer runtime.GOMAXPROCS(oldProcs)
+	oldBatchSize, oldBatchDelay := y.db.MaxBatchSize, y.db.MaxBatchDelay
 	y.db.MaxBatchSize, y.db.MaxBatchDelay = 2, 10*time.Second
 	reader := bytes.NewReader(make([]byte, 64))
 	oldReader := rand.Reader
@@ -115,6 +117,10 @@ func TestRunAskDevicePair(t *testing.T) {
 	}
 	result := <-approved
 	rand.Reader = oldReader
+	// The window held the approval's batch open for the failing call. Every
+	// write after it is alone in its batch, and a window of ten seconds made
+	// each of those wait the ten out: twenty seconds of the test's run.
+	y.db.MaxBatchSize, y.db.MaxBatchDelay = oldBatchSize, oldBatchDelay
 	done, err := result.got, result.err
 	if err != nil {
 		t.Fatal(err)
