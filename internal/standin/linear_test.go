@@ -8,8 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A client's tests of what it does with Linear's file storage stand on this
@@ -163,6 +165,89 @@ func TestLinearFileUpload(t *testing.T) {
 		"linear put shed (2).png 403", "linear put shed (2).png 400", "linear put shed (2).png 403", "linear put shed (2).png 403",
 		"linear put shed (2).png 403", "linear put shed (2).png 403", "linear put shed (2).png 400",
 		"linear put shed (2).png 307", "linear put shed (2).png 200", "linear upload shed (2).png image/png 4",
+	}
+	if got := s.Calls(); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("calls = %q, want %q", got, want)
+	}
+}
+
+// commentCreate takes the caller's id as the comment's own, so the same key
+// twice posts once: the second call is answered with the comment the first
+// left. A client that lost the first answer retries with its key instead
+// of posting again.
+func TestLinearCommentCreateIdempotent(t *testing.T) {
+	fixed := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	s := &Server{LinearKey: "tok", Now: func() time.Time { return fixed }}
+	s.Add(Issue{Source: "linear", ID: "uuid-1", Key: "YRD-1", Title: "Web view", Status: "Todo"})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	post := func(issue, id, body string) map[string]any {
+		t.Helper()
+		query := `mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id url } } }`
+		raw, _ := json.Marshal(map[string]any{"query": query,
+			"variables": map[string]any{"input": map[string]any{"id": id, "issueId": issue, "body": body}}})
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/graphql", bytes.NewReader(raw))
+		req.Header.Set("Authorization", "Bearer tok")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var got struct {
+			Data   map[string]map[string]any `json:"data"`
+			Errors []any                     `json:"errors"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Errors) != 0 {
+			t.Fatalf("commentCreate: errors %v", got.Errors)
+		}
+		return got.Data["commentCreate"]
+	}
+
+	const key = "9d4c3b2a-1f0e-4d5c-8b7a-6f5e4d3c2b1a"
+	first := post("YRD-1", key, "answer")
+	if first["success"] != true || first["comment"].(map[string]any)["id"] != key {
+		t.Fatalf("first post = %v", first)
+	}
+	second := post("YRD-1", key, "answer")
+	if !reflect.DeepEqual(second, first) {
+		t.Fatalf("second post = %v, want the first call's answer %v", second, first)
+	}
+	if cs := s.LinearComments("YRD-1"); len(cs) != 1 || cs[0].ID != key || cs[0].Body != "answer" {
+		t.Fatalf("comments = %+v, want the one post", cs)
+	}
+	// A retry that changed its words still writes nothing: the key names
+	// the comment, not the attempt.
+	if again := post("YRD-1", key, "other words"); !reflect.DeepEqual(again, first) {
+		t.Fatalf("a retry with other words = %v, want %v", again, first)
+	}
+	if cs := s.LinearComments("YRD-1"); len(cs) != 1 || cs[0].Body != "answer" {
+		t.Fatalf("comments = %+v, want the first post's words", cs)
+	}
+	// An id is unique across issues too: a reused key answers with the
+	// first comment's URL instead of claiming it was posted on another.
+	s.Add(Issue{Source: "linear", ID: "uuid-2", Key: "YRD-2", Title: "Other issue", Status: "Todo"})
+	if again := post("YRD-2", key, "another issue"); !reflect.DeepEqual(again, first) {
+		t.Fatalf("a retry on another issue = %v, want the first post's answer %v", again, first)
+	}
+	if cs := s.LinearComments("YRD-2"); len(cs) != 0 {
+		t.Fatalf("comments on the other issue = %+v, want no post", cs)
+	}
+	// Another key is another comment.
+	post("YRD-1", "7b2a9d4c-3f1e-4a5c-9d8b-6f5e4d3c2b1a", "second")
+	if cs := s.LinearComments("YRD-1"); len(cs) != 2 {
+		t.Fatalf("comments = %+v, want two posts", cs)
+	}
+
+	want := []string{
+		"linear comment YRD-1",
+		"linear comment YRD-1 " + key,
+		"linear comment YRD-1 " + key,
+		"linear comment YRD-2 " + key,
+		"linear comment YRD-1",
 	}
 	if got := s.Calls(); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("calls = %q, want %q", got, want)

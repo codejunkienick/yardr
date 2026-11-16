@@ -149,10 +149,55 @@ link:
 # ---- (today) what an agent may ask of it, through `yardr call` ------------
 # Unchanged, and separate from the above: declared HTTPS requests, granted
 # one by one. A command is never something an agent calls.
+#
+# comment and read-comments are what an exec group is granted: comment posts
+# one top-level comment with the key as its own id, as thread.reply does,
+# and read-comments reads one issue's newest comments for the claim stage's
+# copy of a change request's words. Neither selects nor names errors: a
+# select would drop the top-level errors GraphQL rides beside data on HTTP
+# 200, which the scripts need beside success, and a non-2xx stays
+# status-only, the mint rule. The key is validated as a UUID and refused
+# otherwise; Linear takes it as the comment's id in UUID v4 format (the
+# scripts derive a v4-shaped one), and the same key twice posts once. The
+# issue is the identifier form from the bead's tracks link (YRD-12), which
+# both commentCreate.issueId and issue(id:) take besides a UUID. The body
+# is a markdown String Linear caps nowhere the docs say, so the call's own
+# 65536 characters refuse an over-long body, never cut one. The read's
+# first:50 is the newest page (Linear lists first: newest-first) with
+# hasNextPage saying whether older ones follow; totalCount stands on no
+# connection but the search payloads, so it is not asked for. Its 262144
+# bytes above the 64KB default follow the google-docs reads.
 
 base: https://api.linear.app
 calls:
   viewer:
     kind: read
     request: { method: POST, path: /graphql, body: { query: "{ viewer { id name } }" } }
+  comment:
+    kind: update
+    about: Post one top-level comment on an issue, with the key as its own id
+    params:
+      issue: { type: string, pattern: "^[A-Z][A-Z0-9]*-[0-9]+$", max: 64, log: true }
+      body: { type: string, max: 65536 }
+      key: { type: string, pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", max: 36 }
+    request:
+      method: POST
+      path: /graphql
+      body: {
+        query: "mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id url } } }",
+        variables: { input: { id: "{key}", issueId: "{issue}", body: "{body}" } },
+      }
+  read-comments:
+    kind: read
+    about: Read one issue's newest comments, one page of 50
+    params:
+      issue: { type: string, pattern: "^[A-Z][A-Z0-9]*-[0-9]+$", max: 64, log: true }
+    request:
+      method: POST
+      path: /graphql
+      body: {
+        query: "query($id: String!) { issue(id: $id) { comments(first: 50) { nodes { id body createdAt url user { id name } botActor { id name } parent { id } } pageInfo { hasNextPage } } } }",
+        variables: { id: "{issue}" },
+      }
+    answer: { max: 262144 }
 check: viewer

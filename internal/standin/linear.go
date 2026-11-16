@@ -119,6 +119,21 @@ func (s *Server) LinearUploads() []LinearUpload {
 	return slices.Clone(s.files.uploads)
 }
 
+// linearTake files c on the issue i, or, where a comment with c's id
+// already stands, files nothing: Linear takes the caller's id as the
+// comment's own, so a retry with the same key posts once, and the second
+// call is answered with the comment the first left. The caller holds s.mu.
+func (s *Server) linearTake(i *Issue, c LinearComment) (*Issue, LinearComment) {
+	if oldIssue, dup := s.findComment(c.ID); dup != nil {
+		s.calls = append(s.calls, "linear comment "+i.Key+" "+c.ID)
+		return oldIssue, *dup
+	}
+	i.LinearComments = append(i.LinearComments, c)
+	s.calls = append(s.calls, "linear comment "+i.Key)
+	s.save()
+	return i, c
+}
+
 // RefuseLinearUpload makes the PUT of the file called filename answer
 // status, with a body that gives the address and the headers back as a
 // storage host's error page does, until it is told 0. A status in the 300s

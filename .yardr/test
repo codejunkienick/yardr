@@ -2091,7 +2091,7 @@ internal/pack/export.go 1047 pack export and its object shapes
 internal/pack/pack.go 1777 pack reading, checking and its shapes
 internal/rpc/user.go 1061 the user server and callers (pairing is userpair.go, envelopes usere2e.go)
 internal/source/declaration.go 1225 source declarations, credentials and calls
-internal/standin/standin.go 1509 the fake Linear, GitHub and edge APIs
+internal/standin/standin.go 1508 the fake Linear, GitHub and edge APIs
 internal/store/asks.go 1737 ask and answer parsing and storage
 internal/store/beads.go 2563 bead CRUD, queries and dispatch reads
 internal/store/crew.go 1461 crew records and their events

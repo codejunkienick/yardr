@@ -529,8 +529,9 @@ func (s *Server) now() time.Time {
 // Calls lists what was asked of the stand-in, in order: "linear read
 // YRD-1", "linear set YRD-1 In Progress", "linear comments YRD-1" for the
 // issue's comments, "linear comment YRD-1" for one taken on it, "linear
-// comment YRD-1 c9" for one looked up by id, "linear open YRD-3" for an
-// issue taken, "linear teams" for the teams listed and "linear teams ENG"
+// comment YRD-1 c9" for one looked up by id or asked for twice,
+// "linear open YRD-3" for an issue taken, "linear teams" for the teams
+// listed and "linear teams ENG"
 // for one looked up, "github read acme/webapp#7",
 // "github set acme/webapp#7 closed", "github label acme/webapp#7
 // in-review", "github comment acme/webapp#7 by
@@ -872,11 +873,9 @@ func (s *Server) linear(w http.ResponseWriter, r *http.Request) {
 		}
 		body, _ := in["body"].(string)
 		c := LinearComment{ID: id, Body: body, Parent: parent, At: s.now(), By: "Standin", ByID: "u-standin"}
-		i.LinearComments = append(i.LinearComments, c)
-		s.calls = append(s.calls, "linear comment "+i.Key)
-		s.save()
+		takenIssue, takenComment := s.linearTake(i, c)
 		data = map[string]any{"commentCreate": map[string]any{"success": true,
-			"comment": map[string]any{"id": id, "url": issueURL(i) + "#comment-" + id}}}
+			"comment": map[string]any{"id": takenComment.ID, "url": issueURL(takenIssue) + "#comment-" + takenComment.ID}}}
 	case strings.Contains(req.Query, "issueCreate"):
 		in, _ := req.Variables["input"].(map[string]any)
 		teamID, _ := in["teamId"].(string)
