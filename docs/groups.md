@@ -699,13 +699,21 @@ prints them as `builders@Weekly<80,5h<90 else spare-builders`.
   the route had something to say: a group passed over, a window held for
   its reset, limits that were not known, or another group before. A bead
   that waits for a condition shows what it waits for and when the first of
-  those windows resets, from its `quota_wait` event. `--json` has the same
-  as `routing`.
+  those windows resets, from its `quota_wait` event. A bead held for an
+  answer that has not come yet (above) says so from its `limits_wait`
+  event: the groups passed over so far, then why the limits were not
+  known, and no reset, since the answer is on its way. Of the `claimed`,
+  `quota_wait` and `limits_wait` events of the bead's stay in its stage
+  the newest is the one said, so a claim ends a wait's line, a wait after
+  an older one replaces it, and a bead that is closed waits for nothing.
+  `--json` has the same as `routing`, with the event it was said in as
+  `kind` and the event's `reason`.
 
   ```text
     routed to spare-builders by route qp3f…: builders passed over (Claude's Weekly window is 83% used, the route asks under 80)
     routed to builders by route 8x2k…: Weekly 90% but resets in 20h
     waits since 14:02 for a group of route qp3f… whose condition holds: builders passed over (Claude's Weekly window is 83% used, the route asks under 80); the first of those windows resets Sat 17 Oct 09:00 (in 3d 2h)
+    waits since 14:02 for the limits answer: builders passed over (Claude's Weekly window is 83% used, the route asks under 80); the limits of spare-builders were not known: no fresh answer yet: the limits command is being asked in the background
   ```
 - **Conditions that cannot work are said, and none is refused.**
   Groups that burn one provider on one login read the same windows, so a

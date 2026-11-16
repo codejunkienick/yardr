@@ -20,14 +20,20 @@ import (
 // command for a route.
 
 // beadRouting is what the dispatcher last said of the bead in its stage:
-// the claim that gave it to its group, or the wait for a group whose
-// condition holds.
+// the claim that gave it to its group, the wait for a group whose
+// condition holds, or the wait for the answer its route's choice lacked.
 type beadRouting struct {
+	// Kind is the event it was said in: claimed, quota_wait or limits_wait.
+	Kind string `json:"kind,omitempty"`
 	// Group took the bead; "" while it waits.
 	Group string `json:"group,omitempty"`
 	Route string `json:"route,omitempty"`
 	// Passed are the groups the route passed over, each with why.
 	Passed []store.PassedGroup `json:"passed,omitempty"`
+	// Reason is, of a wait, why it waits in the event's own words: of a
+	// limits_wait, why the limits of the group the choice found were not
+	// known.
+	Reason string `json:"reason,omitempty"`
 	// Held says which windows of Group's condition were past their number
 	// and held all the same, for a reset soon.
 	Held []string `json:"held,omitempty"`
@@ -47,10 +53,12 @@ type beadRouting struct {
 // session's own events (prompts, notes) come after it.
 const routingEvents = 500
 
-// routingOf reads the newest claimed or quota_wait event of the bead's
-// stay in its stage; nil when the log has none, or when it no longer
-// describes the bead: a claim whose group has let the bead go, a wait of a
-// bead that has since been claimed or closed.
+// routingOf reads the newest claimed, quota_wait or limits_wait event of
+// the bead's stay in its stage; nil when the log has none, or when it no
+// longer describes the bead: a claim whose group has let the bead go, a
+// wait of a bead that has since been claimed or closed. Being the newest is
+// what makes it the one said: a claim replaces a wait before it, and a wait
+// replaces an earlier wait.
 func routingOf(ctx context.Context, st store.API, b *store.Bead) (*beadRouting, error) {
 	evs, err := st.Events(ctx, b.ID, routingEvents)
 	if err != nil {
@@ -63,7 +71,7 @@ func routingOf(ctx context.Context, st store.API, b *store.Bead) (*beadRouting, 
 			// The bead came into its stage here: what is older is of an
 			// earlier stay.
 			return nil, nil
-		case e.Kind != "claimed" && e.Kind != "quota_wait", e.Data["stage"] != b.Stage:
+		case e.Kind != "claimed" && e.Kind != "quota_wait" && e.Kind != "limits_wait", e.Data["stage"] != b.Stage:
 			continue
 		}
 		raw, err := json.Marshal(e.Data)
@@ -74,10 +82,14 @@ func routingOf(ctx context.Context, st store.API, b *store.Bead) (*beadRouting, 
 		if err := json.Unmarshal(raw, &r); err != nil {
 			return nil, err
 		}
+		// After the data, which has a kind of its own on a claimed event:
+		// the agent's.
+		r.Kind = e.Kind
 		if e.Kind == "claimed" && (b.Group == nil || *b.Group != r.Group) {
 			return nil, nil
 		}
-		if e.Kind == "quota_wait" && (b.Group != nil || b.Status != "open") {
+		// Either wait is over once a group has the bead, or it is closed.
+		if e.Kind != "claimed" && (b.Group != nil || b.Status != "open") {
 			return nil, nil
 		}
 		return &r, nil
@@ -97,6 +109,15 @@ func (r *beadRouting) line(now time.Time) string {
 		parts = append(parts, why)
 	}
 	if r.Group == "" {
+		// A bead held for an answer waits for no window to reset, so its
+		// line has no resets clause.
+		if r.Kind == "limits_wait" {
+			if r.Reason != "" {
+				parts = append(parts, r.Reason)
+			}
+			return fmt.Sprintf("waits since %s for the limits answer: %s",
+				limits.Clock(r.At, now), strings.Join(parts, "; "))
+		}
 		if r.ResetsAt != nil {
 			parts = append(parts, "the first of those windows "+resetText(r.ResetsAt, now))
 		}
@@ -259,8 +280,10 @@ func (y *waitView) waitFor(b *store.Bead, routed *beadRouting) *groupWait {
 		Route: r.ID, Match: routeMatch(*r)}
 	// A quota the stored wait says holds it, from the stored event, never
 	// by asking the provider: only where it is of this route, in this
-	// stage as routingOf already holds.
-	if routed != nil && routed.Group == "" && routed.Route == r.ID {
+	// stage as routingOf already holds. Only a quota_wait says one: the
+	// groups a limits_wait passed over do not keep the bead waiting, the
+	// answer does.
+	if routed != nil && routed.Kind == "quota_wait" && routed.Route == r.ID {
 		if why := (store.RouteChoice{Passed: routed.Passed}).Why(); why != "" {
 			w.Quota = why
 		}

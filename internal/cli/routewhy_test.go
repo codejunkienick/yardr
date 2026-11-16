@@ -197,6 +197,168 @@ func TestBeadShowSaysWhatAWaitingBeadWaitsFor(t *testing.T) {
 	}
 }
 
+// A bead the dispatcher holds for the limits answer its route's choice
+// lacked says so in the line a quota wait is said in, from its limits_wait
+// event: the groups passed over so far, when there were any, and why the
+// limits were not known. The newest of the bead's claimed, quota_wait and
+// limits_wait events is the one said: a quota_wait before the hold does not
+// show through it, one after it replaces it, and a claim, a close or
+// another stay in the stage ends it.
+func TestBeadShowSaysABeadWaitsForALimitsAnswer(t *testing.T) {
+	t.Parallel()
+	a, st, ran := quotaCLI(t)
+	ctx := context.Background()
+	r, err := st.AddRoute(ctx, store.Route{Stage: "new", Group: "a", When: "Weekly<80", Else: []store.RouteGroup{{Name: "b"}}}, "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown := "the limits of b were not known: no fresh answer yet: the limits command is being asked in the background"
+	passed := []store.PassedGroup{{Group: "a", Reason: weeklyReason}}
+	js := &app{st: st, actor: "me", json: true}
+
+	newBead := func(title string) string {
+		t.Helper()
+		b, err := st.CreateBead(ctx, store.NewBead{Title: title}, "me")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b.ID
+	}
+	// The two waits as the dispatcher logs them: the hold has no passed key
+	// when no group was passed over.
+	quotaWait := func(id string) {
+		t.Helper()
+		if err := st.LogDispatch(ctx, id, "quota_wait", "yardr", map[string]any{
+			"stage": "new", "route": r.ID, "reason": "a passed over (" + weeklyReason + ")", "passed": passed,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	limitsWait := func(id string, over []store.PassedGroup) {
+		t.Helper()
+		data := map[string]any{"stage": "new", "route": r.ID, "reason": unknown,
+			"hint": "the bead waits for the limits command's answer and is routed by it when it lands"}
+		if len(over) > 0 {
+			data["passed"] = over
+		}
+		if err := st.LogDispatch(ctx, id, "limits_wait", "yardr", data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// waitLine is the line bead show says of a wait, "" when it says none.
+	waitLine := func(id string) string {
+		t.Helper()
+		out, err := run(t, a.beadCmd(), "show", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range strings.Split(out, "\n") {
+			if strings.HasPrefix(l, "  waits since ") {
+				return l
+			}
+		}
+		return ""
+	}
+	// wantHold fails unless line is the wait for a limits answer, saying why.
+	wantHold := func(line, why string) {
+		t.Helper()
+		since, reason, ok := strings.Cut(line, " for the limits answer: ")
+		if !ok || !strings.HasPrefix(since, "  waits since ") || reason != why {
+			t.Fatalf("bead show says %q, want waits since <time> for the limits answer: %s", line, why)
+		}
+	}
+	routingJSON := func(id string) map[string]any {
+		t.Helper()
+		out, err := run(t, js.beadCmd(), "show", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var shown struct{ Routing map[string]any }
+		if err := json.Unmarshal([]byte(out), &shown); err != nil {
+			t.Fatalf("bead show --json: %v\n%s", err, out)
+		}
+		return shown.Routing
+	}
+
+	// With no group passed over, the line is the reason alone, and a
+	// quota_wait before the hold is not said while the hold is the newest.
+	x := newBead("x")
+	quotaWait(x)
+	if line := waitLine(x); !strings.Contains(line, " for a group of route "+r.ID+" whose condition holds: ") {
+		t.Fatalf("bead show of a bead with a quota_wait says %q", line)
+	}
+	limitsWait(x, nil)
+	wantHold(waitLine(x), unknown)
+	evs, err := st.Events(ctx, x, routingEvents)
+	if err != nil || len(evs) == 0 || evs[len(evs)-1].Kind != "limits_wait" {
+		t.Fatalf("events of %s = %+v, %v; want the limits_wait last", x, evs, err)
+	}
+	held := routingJSON(x)
+	at, _ := held["at"].(string)
+	when, atErr := time.Parse(time.RFC3339Nano, at)
+	if held["kind"] != "limits_wait" || held["reason"] != unknown || held["route"] != r.ID ||
+		held["group"] != nil || held["passed"] != nil || atErr != nil || !when.Equal(evs[len(evs)-1].At) {
+		t.Fatalf("bead show --json routing of a held bead = %v, want the limits_wait of route %s at %v",
+			held, r.ID, evs[len(evs)-1].At)
+	}
+
+	// With groups passed over, they come first, as a quota wait says them;
+	// a quota_wait after the hold replaces it.
+	y := newBead("y")
+	quotaWait(y)
+	limitsWait(y, passed)
+	wantHold(waitLine(y), "a passed over ("+weeklyReason+"); "+unknown)
+	heldY := routingJSON(y)
+	if over, _ := heldY["passed"].([]any); heldY["kind"] != "limits_wait" || len(over) != 1 {
+		t.Fatalf("bead show --json routing of a held bead that passed a group over = %v", heldY)
+	}
+	quotaWait(y)
+	if line := waitLine(y); strings.Contains(line, "limits answer") ||
+		!strings.Contains(line, " for a group of route "+r.ID+" whose condition holds: a passed over (") {
+		t.Fatalf("bead show of a bead whose quota_wait came after the hold says %q", line)
+	}
+	if got := routingJSON(y); got["kind"] != "quota_wait" {
+		t.Fatalf("bead show --json routing after a quota_wait = %v, want its kind", got)
+	}
+
+	// A claim ends the wait, and the kind says the event, not the agent a
+	// claimed event names under the same key.
+	if _, err := st.Claim(ctx, x, "a", "new", "yardr", store.Routed{Route: r.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if line := waitLine(x); line != "" {
+		t.Fatalf("bead show of a claimed bead says %q", line)
+	}
+	if got := routingJSON(x); got["kind"] != "claimed" || got["group"] != "a" {
+		t.Fatalf("bead show --json routing of a claimed bead = %v, want kind claimed of group a", got)
+	}
+
+	// A closed bead waits for nothing, nor does one that came back to the
+	// stage after the hold.
+	z := newBead("z")
+	limitsWait(z, nil)
+	wantHold(waitLine(z), unknown)
+	if _, err := st.CloseBead(ctx, z, "done", store.Expect{}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	if line := waitLine(z); line != "" {
+		t.Fatalf("bead show of a closed bead says %q", line)
+	}
+	w := newBead("w")
+	limitsWait(w, nil)
+	for _, stage := range []string{"review", "new"} {
+		if _, err := st.Advance(ctx, w, stage, store.Expect{}, "me"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if line := waitLine(w); line != "" {
+		t.Fatalf("bead show of a bead back in its stage says %q of the stay before", line)
+	}
+	if ran() {
+		t.Error("bead show ran the limits command")
+	}
+}
+
 // route add warns of a further group with no condition that burns the
 // provider of a conditioned group before it, and adds the route.
 func TestRouteAddWarnsOfAFurtherGroupOnTheSameProvider(t *testing.T) {

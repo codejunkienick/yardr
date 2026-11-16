@@ -380,6 +380,23 @@ func TestReadyWaitingShowsTheStoredQuotaInTheSameLine(t *testing.T) {
 	if out, err := run(t, a.beadCmd(), "show", bead.ID); err != nil || !strings.Contains(out, "\n  "+want+"\n") {
 		t.Fatalf("bead show misses the group line %q: %v\n%s", want, err, out)
 	}
+
+	// A hold for a limits answer after it is the newer word, and it says no
+	// quota holds the bead: the groups it passed over are not shown as one.
+	if err := st.LogDispatch(ctx, bead.ID, "limits_wait", "yardr", map[string]any{
+		"stage": "new", "route": r.ID, "reason": "the limits of g were not known: no fresh answer yet",
+		"passed": []store.PassedGroup{{Group: "g", Reason: weeklyReason}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	held := "waits for g (1 of 1) by route " + r.ID
+	out, err = run(t, a.readyCmd(), "--waiting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wantOut := bead.ID + "  new  " + held + "\n"; out != wantOut {
+		t.Fatalf("ready --waiting of a bead held for a limits answer = %q, want %q", out, wantOut)
+	}
 	if ran() {
 		t.Error("ready --waiting ran the limits command")
 	}
