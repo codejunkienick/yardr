@@ -241,6 +241,29 @@ to keep one shape. That adds a second or two to the package's run, and no bead
 brings it under. `TestFdTestsRunInTheSerialPhase` fails if either test calls
 `t.Parallel` again.
 
+To read a package's R1 time as the landing does, run its race test binary
+(`go test -race -c`) alone as R2's launchd job: one stream, `-count=1`, no
+cap, the load average noted before and after. A pane runs under the session's
+`GOMAXPROCS` and `-p` cap and gives the shape only: internal/store's base read
+105 s in one, capped and on a loaded machine, and 61 s as the job (yardr-tg2p).
+Pipe the run through `go tool test2json -t` and split the wall in three: the
+serial phase, which ends where the first top-level test that paused continues,
+the parallel phase, and the tail after 95% of the tests are done. More
+processors shorten only the parallel phase, and a long tail is a few long
+tests that started last, not volume. Two traps cost seconds and are no
+`time.Sleep`, so R2's scan cannot see them: a test that sets `MaxBatchDelay`
+to hold a batch open and never restores it, so every later write waits it out,
+and a check after every write that walks all the state, which grows with the
+square of the steps (split it into parallel parts over stores of their own, as
+`TestSessionIndexesMatchAWalkAfterEveryWrite` was). Before a serial test goes
+parallel, read its body and its helpers for a write to process-wide state, and
+keep a `// Sequential:` reason beside each that stays serial, as internal/store
+does; then run the whole package under `-race` more than once, since
+`-count=30` of the touched tests alone missed a race with a test outside them.
+launchd starts the job again in the same second it exits, appending to the
+same log: read it to the first run's last line, and remove the job before the
+next measurement.
+
 R4. The depot test gate runs `go test -race` in its landing run
 (`YARDR_LANDING=1`, the assembly's, on exactly what lands; for a pull request
 from outside, pr-ci's run of its head, which no landing follows) and in the

@@ -8,7 +8,10 @@ shellcheck's files are `.yardr/test`, `install.sh` and every `contrib` and
 `conformance` script with a shell shebang, as CI's scan job has them, and a
 machine without it fails the run with the line that says how to install it.
 staticcheck is CI's pinned version, run with `go run` (the first run fetches
-it into the module cache), and any finding fails the run. It runs the tests
+it into the module cache), and any finding fails the run. A one-off Go tool
+runs pinned the same way, as `go run <tool>@<version>`, say
+`go run golang.org/x/tools/cmd/goimports@v0.51.0`: an unpinned `go run` of it
+demands a go.mod edit and is refused. The command runs the tests
 without -race, whatever you changed: the race
 detector runs at landing only (docs/testing.md R4), and the first line says
 so. A run whose step covers the whole suite still queues on the race lock,

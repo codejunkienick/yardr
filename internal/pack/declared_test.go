@@ -13,6 +13,7 @@ import (
 
 	"yardr.dev/yardr/internal/pack"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/storetest"
 )
 
 // pushover is the declaration docs/pushover.md gives, which the cases
@@ -568,8 +569,88 @@ func TestADeclarationThatOnlyReadsDifferentlyIsSaidSo(t *testing.T) {
 	}
 	plan := build(t, st, load(t, writePack(t, declaredFiles(smallDeclared, pushover))), o)
 	got := find(t, plan, "source", "pushover")
-	if got.Action != pack.Change || len(got.Changes) != 1 || got.Changes[0].Field != "declaration" {
-		t.Fatalf("source = %s %+v", got.Action, got.Changes)
+	want := []pack.Diff{{Field: "declaration", Old: "another text", New: "the pack's, which declares the same calls"}}
+	if got.Action != pack.Change || !slices.Equal(got.Changes, want) {
+		t.Fatalf("source = %s %+v, want %+v", got.Action, got.Changes, want)
+	}
+}
+
+// A pack that changes a key the yard hears or speaks through is said to
+// change it, with the whole key before and after as one value: a thread that
+// now takes files, a hook that verifies another way. "Declares the same
+// calls" would hide both, and stays for a text that differs in nothing the
+// plan compares. The yard has the pack's declaration, applied once, and each
+// row is the pack's file after one edit of it. These keys are for a pack of
+// kind source, so it is one.
+func TestAChangedHearThreadLinkOrHookKeyIsShown(t *testing.T) {
+	st := storetest.New(t)
+	o := pack.Options{Home: t.TempDir()}
+	files := sourcePackFiles()
+	files["acme.yaml"] = hearDecl
+	dir := writePack(t, files)
+	if _, err := pack.Apply(ctx, st, build(t, st, load(t, dir), o), pack.ApplyOptions{Actor: "jo"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The keys of hearDecl as the plan shows them: compact JSON, in the order
+	// of the key's fields, the fields it leaves out left out.
+	const (
+		hear       = `{"field":"team","address":{"env":"ACME_TEAM"}}`
+		link       = `{"host":"acme.test","issue":"^/issue/([0-9]+)","fixed":"https://acme.test/issue/{1}","thread":"{1}"}`
+		thread     = `{"reply":["acme/thread","reply"],"posted":["acme/thread","posted"],"read":["acme/thread","read"],"open":["acme/thread","open"],"opened":["acme/thread","opened"],"state":["acme/thread","state"],"place":"team","states":["started","review","done"]}`
+		hook       = `{"verify":{"scheme":"hmac-sha256","signed":"body","signature":{"header":"Acme-Signature","encoding":"hex"},"delivery":{"header":"Acme-Delivery"}},"bodies":"unique","normalize":["acme/normalize"],"keys":["team"]}`
+		threadText = "thread:\n  reply: [acme/thread, reply]\n  posted: [acme/thread, posted]\n  read: [acme/thread, read]\n  place: team\n  open: [acme/thread, open]\n  opened: [acme/thread, opened]\n  state: [acme/thread, state]\n  states: [started, review, done]\n"
+	)
+	if strings.Count(hearDecl, threadText) != 1 {
+		t.Fatal("threadText is not once in hearDecl")
+	}
+	withoutThread := strings.Replace(hearDecl, threadText, "", 1)
+	another := pack.Diff{Field: "declaration", Old: "another text", New: "the pack's, which declares the same calls"}
+	cases := []struct {
+		name     string
+		base     string
+		old, new string // the replacement in base
+		want     pack.Diff
+	}{
+		{name: "thread takes files", old: "  states: [started, review, done]\n", new: "  states: [started, review, done]\n  files: true\n",
+			want: pack.Diff{Field: "thread", Old: thread, New: strings.TrimSuffix(thread, "}") + `,"files":true}`}},
+		{name: "hook verifies with another hash", old: "    scheme: hmac-sha256\n", new: "    scheme: hmac-sha256\n    algorithm: sha1\n",
+			want: pack.Diff{Field: "hook", Old: hook, New: strings.Replace(hook, `"delivery"`, `"algorithm":"sha1","delivery"`, 1)}},
+		{name: "link reads another path", old: "issue: '^/issue/([0-9]+)'", new: "issue: '^/issues/([0-9]+)'",
+			want: pack.Diff{Field: "link", Old: link, New: strings.Replace(link, `"^/issue/`, `"^/issues/`, 1)}},
+		{name: "hear narrowed to the operator", old: "  address: { env: ACME_TEAM }\n", new: "  address: { env: ACME_TEAM }\n  from: operator\n",
+			want: pack.Diff{Field: "hear", Old: hear, New: strings.TrimSuffix(hear, "}") + `,"from":"operator"}`}},
+		{name: "hear dropped", old: "hear:\n  field: team\n  address: { env: ACME_TEAM }\n", new: "",
+			want: pack.Diff{Field: "hear", Old: hear, New: ""}},
+		{name: "only a comment", old: "name: acme\n", new: "# said again\nname: acme\n", want: another},
+		{name: "only the about", old: "about: Acme issues.\n", new: "about: Acme's issues.\n", want: another},
+		{name: "only the order of a key's fields", old: "{ header: Acme-Signature, encoding: hex }", new: "{ encoding: hex, header: Acme-Signature }", want: another},
+		{name: "empty thread reads as absent", base: withoutThread, old: "hear:\n", new: "thread: {}\nhear:\n", want: another},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			base := hearDecl
+			if c.base != "" {
+				base = c.base
+				if _, err := st.PutSource(ctx, "acme.yaml", base, "jo"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Remove(filepath.Join(dir, "acme/thread")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if strings.Count(base, c.old) != 1 {
+				t.Fatalf("%q is not once in the declaration", c.old)
+			}
+			text := strings.Replace(base, c.old, c.new, 1)
+			if err := os.WriteFile(filepath.Join(dir, "acme.yaml"), []byte(text), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			got := find(t, build(t, st, load(t, dir), o), "source", "acme")
+			if got.Action != pack.Change || !slices.Equal(got.Changes, []pack.Diff{c.want}) {
+				t.Fatalf("source = %s %+v, want one change %+v", got.Action, got.Changes, c.want)
+			}
+		})
 	}
 }
 

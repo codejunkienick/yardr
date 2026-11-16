@@ -986,11 +986,17 @@ declared source pushover, from sources/pushover.yaml
   {"eu":"https://eu.example.com/v1"}`: compact JSON, sorted keys, `(none)`
   for no regions), a `base_template` that is new, gone or different (the
   address a host the operator types would fill), the credential's name (and the one of its updates,
-  `update_env`) or header, the `idempotency` header, each call that is new,
-  gone or different
+  `update_env`) or header, the `idempotency` header, a `hear`, `thread`,
+  `link` or `hook` key (which a pack of kind `source` may bring) that is new,
+  gone or different, whole, as compact JSON before and after (`hear:
+  {"field":"team","address":{"env":"CRM_TEAM"}} ->
+  {"field":"team","address":{"env":"CRM_TEAM"},"from":"operator"}`), each call
+  that is new, gone or different
   (`call message: (update) POST /messages.json -> (update) POST /messages`).
   Read them: a source is where a credential of the yard is sent, and a new
-  `base`, or a region's new address, sends it somewhere else.
+  `base`, or a region's new address, sends it somewhere else; a `thread` that
+  now takes files lets a reply carry a crew member's local files out, and a
+  `hook` that verifies another way changes which deliveries the yard believes.
 - **A pack carries no secret and names no file of the yard.** Where a call
   of the source is granted, the source's credential is still to be set
   after the import, and no user is told through it until one names it;

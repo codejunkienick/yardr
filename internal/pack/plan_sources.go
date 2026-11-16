@@ -471,9 +471,10 @@ func (b *planner) sourceAfter(name string) (decl *source.Declaration, envFile, m
 }
 
 // declarationDiff is what the declaration now changes of the one the yard
-// has, was: where calls go, what they send the credential in, and each call.
-// was is nil for one this build does not read. Empty when the two declare
-// the same: the caller says what that means.
+// has, was: where calls go, what they send the credential in, each call, and
+// the keys the yard hears and speaks through (hear, thread, link and hook),
+// each whole. was is nil for one this build does not read. Empty when the two
+// declare the same of all that: the caller says what that means.
 func declarationDiff(was, now *source.Declaration) []Diff {
 	var out []Diff
 	if was == nil {
@@ -510,6 +511,7 @@ func declarationDiff(was, now *source.Declaration) []Diff {
 	line := func(c *source.Call) string { return "(" + c.Kind + ") " + c.Line() }
 	for _, f := range []struct{ field, old, new string }{
 		{"base", was.Address(), now.Address()}, {"bases", bases(was), bases(now)}, {"base_template", was.BaseTemplate, now.BaseTemplate}, {"credential", credential(was), credential(now)}, {"check", was.Check, now.Check}, {"idempotency", was.Idempotency, now.Idempotency}, {"notify", notify(was), notify(now)},
+		{"hear", keyValue(was.Hear), keyValue(now.Hear)}, {"thread", keyValue(was.Thread), keyValue(now.Thread)}, {"link", keyValue(was.Link), keyValue(now.Link)}, {"hook", keyValue(was.Hook), keyValue(now.Hook)},
 	} {
 		if f.old != f.new {
 			out = append(out, Diff{f.field, f.old, f.new})
@@ -533,6 +535,22 @@ func declarationDiff(was, now *source.Declaration) []Diff {
 		}
 	}
 	return out
+}
+
+// keyValue is a key of a declaration as the one value a line shows: compact
+// JSON, as the setup card's declarationKey writes it, whole, so that a line
+// says what the pack changes of the key (a thread that now takes files, a
+// hook that verifies another way) and not only that it changed. None or an
+// empty key reads as no value.
+func keyValue[K any](key *K) string {
+	if key == nil {
+		return ""
+	}
+	text, _ := json.Marshal(key) // a key of a declaration always marshals
+	if string(text) == "{}" {
+		return ""
+	}
+	return string(text)
 }
 
 // asRead is a call as two readings of it compare: by what the file says,
