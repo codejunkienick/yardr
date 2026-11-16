@@ -164,7 +164,9 @@ func TestReplying(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		decl := strings.Replace(src.Text, "thread:\n", "thread:\n  files: true\n  formats: [markdown, plain]\n", 1)
+		// The pack takes files itself (thread.files), as these replies carry
+		// some; only the explicit modes are added to it.
+		decl := strings.Replace(src.Text, "thread:\n", "thread:\n  formats: [markdown, plain]\n", 1)
 		if _, err := s.PutSource(ctx, "linear.yaml", decl, "me"); err != nil {
 			t.Fatal(err)
 		}

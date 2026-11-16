@@ -1128,7 +1128,7 @@ git does, once a depot's git is pointed at the copy.
 
 ```yaml
 thread:
-  reply:  [linear/thread, reply]      # in  {thread, parent, body, key}      out {id, url}
+  reply:  [linear/thread, reply]      # in  {thread, parent, body, key, files?} out {id, url}
   posted: [linear/thread, posted]     # in  {thread, key}                    out {id, url} or {}
   read:   [linear/thread, read]       # in  {thread}                         out {messages: [...]}
   file:   [telegram/thread, get]      # in  {ref, dir, max_bytes}            out {path, bytes}
@@ -1138,6 +1138,7 @@ thread:
   opened: [linear/thread, opened]     # in  {in, key, since?}                 out {id, title, url} or {}
   state:  [linear/thread, state]      # in  {thread, state, forward?}        out {status, moved, was?}
   states: [started, review, done]     # the words thread.state takes
+  files: true                         # replies take files: reply's in gains files: [paths]
 link:                                 # the source's issues as a bead's link
   host: linear.app
   issue: '^/([^/]+)/issue/([A-Z][A-Z0-9]*-[0-9]+)'
@@ -1193,7 +1194,10 @@ git:                                  # what git uses to reach the source's repo
   the flag is refused `--file`: a command that ignores unknown keys
   would send the words and drop the files. Files are part of the
   answer, so the same words with other files are another reply, with a
-  key of their own.
+  key of their own. What the command does with them is the source's:
+  Telegram's sends each as a photo or a document, Linear's uploads each
+  to Linear's storage and posts one comment that holds them all (step
+  10 of the walkthrough, below).
 - **`thread.reply` takes an explicit format where the file lists it.**
   `thread.formats: [markdown, plain]` permits `yardr reply <seq> --format
   markdown <text>` and adds `"format":"markdown"` to the command's input,
@@ -2340,6 +2344,22 @@ pane; the operator runs `yardr reply` with `--crew yardmaster` and the
 credential in the command's environment. From anyone else:
 `reply --crew yardmaster: only yardmaster's own session or the operator (jo) may speak as yardmaster; this is mckean`.
 The stand-in does not know comments, so the post itself was not made there.
+
+A reply carries files too: `yardr reply 16 --file shot.png --file report.pdf -`
+uploads each to Linear's storage, then posts one comment: the words first, then
+a PNG or JPEG as an image and any other file as a link under its name (the type
+is what the file's bytes say, not its name's ending). A file is at most 8 MiB, or
+the yard's `blob_max_bytes` where that is lower, and every file is checked
+before any is uploaded. A file over the limit, or an upload Linear refuses,
+fails the whole reply with no comment, and the error says the HTTP status and
+nothing more, since Linear's answer holds a signed address that is a secret.
+Running the reply again after a failure posts it once: the same words and files
+are the same key, so a comment that was posted whose answer was lost is found
+and nothing is uploaded again; a comment that never was posted is posted by the
+retry, which uploads every file again, and what the failed attempt uploaded
+stays in the workspace, referenced by nothing. The command needs `file`, beside
+`curl` and `jq`, where the crew member runs `yardr reply`, and the 30 seconds a
+thread command has are for every upload and the comment together.
 
 The link is the issue's fixed form, without the title the delivery's URL
 had. A bead created into a mapped stage moves the issue at once, and each

@@ -1981,6 +1981,10 @@ func TestLinearPack(t *testing.T) {
 	if !slices.Equal(c.MintCommand, []string{"linear-mint"}) {
 		t.Errorf("mint_command = %v, want [linear-mint]", c.MintCommand)
 	}
+	// Its replies take files, which the thread command uploads to Linear.
+	if th := p.Declared[0].Declaration.Thread; th == nil || !th.Files {
+		t.Errorf("thread = %+v, want replies to take files", th)
+	}
 	// Its setup notes: where the webhook is made, the hook and its
 	// secret, the crew member's key and identity, the grants, how to
 	// test. From the test of 11 Oct: the identity wants the id and the

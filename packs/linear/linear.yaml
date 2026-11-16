@@ -4,8 +4,8 @@
 # verified body into the envelope; what the yard does in a Linear thread,
 # by one command per thing; and Linear's issue URLs as a bead's link.
 # internal/hooks holds it to golden files: the envelopes for the bodies
-# its tests have, and what the stand-in receives for reply, posted,
-# read, open and state.
+# its tests have, and what the stand-in receives for reply (with files
+# too), posted, read, open and state.
 #
 # The name is linear: the pack is what yardr knows of Linear.
 #
@@ -100,9 +100,31 @@ hear:
 # for open), and state moves to what the word means: exactly, or never
 # backwards with forward (a stage map's move). The shapes are in
 # docs/integrations.md.
+#
+# files says replies take files. Each is uploaded to Linear's storage, by
+# fileUpload (the file's type, its own name and its size; Linear answers a
+# signed address and the headers its PUT must carry) and then that PUT, and
+# one comment is posted: the words first, then each file, a PNG or JPEG as
+# an image and any other as a link under its name. A picture is what the
+# bytes say it is (file(1) reads the type, never the name's ending), so a
+# GIF or an SVG is a link. A file is at most the yard's blob_max_bytes and
+# 8 MiB, whichever is lower, and every file is checked before any is
+# uploaded, so one over the limit uploads nothing. That file, or an upload
+# Linear refuses, fails the whole reply with no comment, and the error says
+# the HTTP status and nothing more: Linear's answer holds the signed
+# address, a secret as the token is, and neither goes in an argument, an
+# output or a log. The PUT carries the file's type, the Cache-Control that
+# Linear's upload guide sets and the headers Linear names, never the token,
+# and follows no redirect. The yard's 30 seconds for a command are
+# for every upload and the comment together. A retry is the core's: the
+# same words and files are the same key, and the core asks posted for the
+# key before it asks reply. A comment posted whose answer was lost is found,
+# and nothing is uploaded or posted again; a comment never posted is posted
+# once by the retry, which uploads every file again, and what the first
+# attempt uploaded stays in the workspace, referenced by nothing.
 
 thread:
-  reply:  [linear/thread, reply]      # in  {thread, parent, body, key}      out {id, url}
+  reply:  [linear/thread, reply]      # in  {thread, parent, body, key, files?} out {id, url}
   posted: [linear/thread, posted]     # in  {thread, key}                    out {id, url} or {}
   read:   [linear/thread, read]       # in  {thread}                         out {messages: [...]}
   place:  team                        # what open's in names
@@ -111,6 +133,7 @@ thread:
   opened: [linear/thread, opened]     # in  {in, key}                        out {id, title, url} or {}
   state:  [linear/thread, state]      # in  {thread, state, forward?}        out {status, moved, was?}
   states: [started, review, done]     # the words it has a status for
+  files: true                         # replies take files: reply's in gains files: [paths]
 
 # ---- its issues as a bead's link ------------------------------------------
 # The host its issue URLs are on, what reads an issue from a URL's path,

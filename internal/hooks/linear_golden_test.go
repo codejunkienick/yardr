@@ -362,33 +362,52 @@ func TestLinearPackAuthHeader(t *testing.T) {
 
 // The API key is sent as an Authorization header, and an argument of a
 // running command can be read by every process on the machine: curl is
-// handed the header on its stdin, never as an argument. The stand-in curl
-// here records its arguments and runs the real one.
+// handed the header on its stdin, never as an argument. So are the secrets
+// of a reply's files: the signed address each is uploaded to and the values
+// of the headers Linear names for it go to curl, and to the jq that makes
+// the config from Linear's answer, by their stdin alone. The stand-in curl
+// and jq here record their arguments and run the real ones.
 func TestLinearPackThreadKeepsTheTokenOutOfArguments(t *testing.T) {
 	curl, err := exec.LookPath("curl")
 	if err != nil {
 		t.Skip("curl is not installed, and the pack's thread command calls Linear with it")
+	}
+	jq, err := exec.LookPath("jq")
+	if err != nil {
+		t.Skip("jq is not installed, and the pack's thread command is written in it")
+	}
+	if _, err := exec.LookPath("file"); err != nil {
+		t.Skip("file is not installed, and the pack's thread command reads a reply file's type with it")
 	}
 	g := newLinearGolden(t)
 	const cred = "lin_api_MARKER-z00w-token"
 	g.s.LinearKey = cred
 	bin := t.TempDir()
 	args := filepath.Join(bin, "args")
-	shim := "#!/bin/sh\nprintf '%s\\n' \"$@\" >>'" + args + "'\nexec '" + curl + "' \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(bin, "curl"), []byte(shim), 0o755); err != nil {
-		t.Fatal(err)
+	for name, real := range map[string]string{"curl": curl, "jq": jq} {
+		shim := "#!/bin/sh\nprintf '%s\\n' \"$@\" >>'" + args + "'\nexec '" + real + "' \"$@\"\n"
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(shim), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if _, err := g.dec.Thread(context.Background(), goldenIssue(), cred); err != nil {
+		t.Fatal(err)
+	}
+	files := []string{linearFile(t, "shot.png", linearPNG(t)), linearFile(t, "notes.pdf", linearPDF)}
+	if _, err := g.dec.ReplyFiles(context.Background(), goldenIssue(), "", "with files", "key-files", files, cred); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(args)
 	if err != nil {
 		t.Fatalf("the stand-in curl was not run: %v", err)
 	}
-	if strings.Contains(string(got), "MARKER-z00w-token") {
-		t.Error("the API key was an argument of curl")
+	// The files went, each with the address and the headers it was given, so
+	// what is held out of the arguments was used.
+	if ups := g.s.LinearUploads(); len(ups) != 2 || !ups[0].Sent || !ups[1].Sent {
+		t.Fatalf("uploads = %+v, want both files sent", ups)
 	}
+	noSecrets(t, "an argument of curl or jq", string(got), linearSecrets(g, cred))
 }
 
 // linearGoldenBodies are the Linear webhook bodies the adapter's tests

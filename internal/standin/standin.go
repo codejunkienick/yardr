@@ -7,8 +7,9 @@
 // them: Linear's GraphQL issue(id:), which takes an issue's id or its
 // identifier (YRD-12), a team's workflow states with their types,
 // issueUpdate(input: {stateId}), issueCreate and commentCreate with the
-// id the caller chose, comment(id:), an issue's comments, and the teams
-// listed or one looked up by key or name; GitHub's GET and PATCH
+// id the caller chose, comment(id:), an issue's comments, the teams
+// listed or one looked up by key or name, and fileUpload with the signed
+// address it answers (PUT /uploads/{id}: see linear.go); GitHub's GET and PATCH
 // /repos/{owner}/{repo}/issues/{number} with state and state_reason, an
 // issue's comments (GET and POST .../comments), its labels (in the issue
 // as GET gives it, and POST .../labels to add some), a pull request's head
@@ -56,47 +57,6 @@ import (
 	"sync"
 	"time"
 )
-
-// LinearState is a workflow state of the stand-in's one Linear team.
-type LinearState struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name"`
-	Type     string  `json:"type"`
-	Position float64 `json:"position"`
-}
-
-// LinearStates are the statuses a new Linear team has, with In Review added
-// as most teams do.
-var LinearStates = []LinearState{
-	{"s-backlog", "Backlog", "backlog", 0},
-	{"s-todo", "Todo", "unstarted", 1},
-	{"s-progress", "In Progress", "started", 2},
-	{"s-review", "In Review", "started", 3},
-	{"s-done", "Done", "completed", 4},
-	{"s-canceled", "Canceled", "canceled", 5},
-	{"s-duplicate", "Duplicate", "canceled", 6},
-}
-
-// LinearTeam is the stand-in's one Linear team: what teams lists, and what
-// an issue is opened in.
-var LinearTeam = struct {
-	ID   string `json:"id"`
-	Key  string `json:"key"`
-	Name string `json:"name"`
-}{ID: "t-yrd", Key: "YRD", Name: "Yardr"}
-
-// LinearComment is a comment on a Linear issue. Parent is the id of the
-// comment it answers, "" for a top-level one. By names who made it, or,
-// for Bot, the app it was made as.
-type LinearComment struct {
-	ID     string    `json:"id"`
-	Body   string    `json:"body"`
-	Parent string    `json:"parent,omitempty"`
-	At     time.Time `json:"at"`
-	By     string    `json:"by,omitempty"`
-	ByID   string    `json:"byID,omitempty"`
-	Bot    bool      `json:"bot,omitempty"`
-}
 
 // Issue is an issue of either service. A Linear issue is named by ID or by
 // Key (YRD-12) and is in the status Status names; a GitHub issue is named
@@ -315,6 +275,7 @@ type Server struct {
 	notesFor int           // requests for a note, written or not
 	hold     bool          // the next note is written and its answer held
 	holdNote chan struct{} // closed when that note is written and held
+	files    linearFiles   // what fileUpload was asked for, and how it answers (linear.go)
 }
 
 // CustomerNote is a note the customer system took at POST
@@ -774,6 +735,7 @@ func (s *Server) Handler() http.Handler {
 		fmt.Fprintln(w, "the next note is written, and its answer held until the caller gives up")
 	})
 	mux.HandleFunc("/graphql", s.linear)
+	mux.HandleFunc("/uploads/", s.linearPut)
 	mux.HandleFunc("/repos/", s.github)
 	mux.HandleFunc("/app/installations/", s.appToken)
 	mux.HandleFunc("/issues", func(w http.ResponseWriter, r *http.Request) {
@@ -984,8 +946,15 @@ func (s *Server) linear(w http.ResponseWriter, r *http.Request) {
 		}
 		s.calls = append(s.calls, "linear read "+i.Key)
 		data = map[string]any{"issue": issueNode(i)}
+	case strings.Contains(req.Query, "fileUpload"):
+		slot, msg := s.linearSlot(r, req.Variables)
+		if msg != "" {
+			gqlError(msg)
+			return
+		}
+		data = slot
 	default:
-		gqlError("the stand-in knows issue(id:), issueUpdate, issueCreate, comment(id:), commentCreate, comments and teams only")
+		gqlError("the stand-in knows issue(id:), issueUpdate, issueCreate, comment(id:), commentCreate, comments, teams and fileUpload only")
 		return
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": data})

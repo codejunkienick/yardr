@@ -118,6 +118,13 @@ means in Linear is a flow pack's to say, not this file's.
    yardr thread state <thread id> started
    ```
    `yardr thread list <name>` shows the thread's id.
+   An answer can carry files: `yardr reply <seq> --file shot.png -` (the
+   words on stdin) uploads each file to Linear and posts one comment, a PNG
+   or JPEG as an image and any other file as a link under its name, at most
+   8 MiB or the yard's blob limit if lower. A file over that, or an upload
+   Linear refuses, fails the reply with nothing posted. The crew member's
+   machine needs `file` for it, which macOS and most Linux systems have,
+   beside `curl` and `jq`.
    To open an issue assigned to a person, give the yard's user their
    Linear user id once, then name them:
    ```sh

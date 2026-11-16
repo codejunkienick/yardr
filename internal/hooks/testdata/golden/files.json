@@ -1,0 +1,515 @@
+[
+  {
+    "name": "reply-files",
+    "calls": [
+      "linear upload shot.png image/png 68",
+      "linear put shot.png 200",
+      "linear upload notes.pdf application/pdf 77",
+      "linear put notes.pdf 200",
+      "linear upload photo.jpg image/jpeg 22",
+      "linear put photo.jpg 200",
+      "linear comment YRD-1"
+    ],
+    "result": {
+      "comments": [
+        {
+          "id": "9d4c3b2a-1f0e-4d5c-8b7a-6f5e4d3c2b01",
+          "body": "the shed\n\n![shot.png](https://uploads.linear.app/standin/u-1/shot.png)\n\n[notes.pdf](https://uploads.linear.app/standin/u-2/notes.pdf)\n\n![photo.jpg](https://uploads.linear.app/standin/u-3/photo.jpg)",
+          "at": "2026-10-11T12:00:00Z",
+          "by": "Standin",
+          "byID": "u-standin"
+        }
+      ],
+      "message": {
+        "id": "9d4c3b2a-1f0e-4d5c-8b7a-6f5e4d3c2b01",
+        "author": {},
+        "at": "0001-01-01T00:00:00Z",
+        "body": "the shed",
+        "url": "https://linear.app/acme/issue/YRD-1/web-view#comment-9d4c3b2a-1f0e-4d5c-8b7a-6f5e4d3c2b01"
+      },
+      "uploads": [
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "shot.png",
+          "id": "u-1",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "application/pdf",
+          "filename": "notes.pdf",
+          "id": "u-2",
+          "sent": true,
+          "sha256": "68d3dbe223d4659eb030429ecc280a437eb6e9b042a59797cbbd9e16f56c1d56",
+          "size": 77
+        },
+        {
+          "bearer": false,
+          "contentType": "image/jpeg",
+          "filename": "photo.jpg",
+          "id": "u-3",
+          "sent": true,
+          "sha256": "d20f6ffd523b78a86cd2f916fa34af5d1918d75f7b142237c752ad6b254213ab",
+          "size": 22
+        }
+      ]
+    }
+  },
+  {
+    "name": "reply-names",
+    "calls": [
+      "linear upload shot (2).png image/png 68",
+      "linear put shot (2).png 200",
+      "linear upload really-a-picture.txt image/png 68",
+      "linear put really-a-picture.txt 200",
+      "linear upload not-a-picture.png text/plain 12",
+      "linear put not-a-picture.png 200",
+      "linear upload odd ](x) [y]_*`.md text/plain 17",
+      "linear put odd ](x) [y]_*`.md 200",
+      "linear comment YRD-1"
+    ],
+    "result": {
+      "comments": [
+        {
+          "id": "9d4c3b2a-1f0e-4d5c-8b7a-6f5e4d3c2b02",
+          "body": "names\n\n![shot (2).png](https://uploads.linear.app/standin/u-4/shot%20%282%29.png)\n\n![really-a-picture.txt](https://uploads.linear.app/standin/u-5/really-a-picture.txt)\n\n[not-a-picture.png](https://uploads.linear.app/standin/u-6/not-a-picture.png)\n\n[odd \\](x) \\[y\\]\\_\\*\\`.md](https://uploads.linear.app/standin/u-7/odd%20%5D%28x%29%20%5By%5D_*%60.md)",
+          "at": "2026-10-11T12:00:00Z",
+          "by": "Standin",
+          "byID": "u-standin"
+        }
+      ],
+      "uploads": [
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "shot (2).png",
+          "id": "u-4",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "really-a-picture.txt",
+          "id": "u-5",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "text/plain",
+          "filename": "not-a-picture.png",
+          "id": "u-6",
+          "sent": true,
+          "sha256": "7e7c22e739587dff41c64bd42309ff5146dcd2d30b7fd712ca9c7c65d8d94c42",
+          "size": 12
+        },
+        {
+          "bearer": false,
+          "contentType": "text/plain",
+          "filename": "odd ](x) [y]_*`.md",
+          "id": "u-7",
+          "sent": true,
+          "sha256": "23c36e7a551cf5cf6f79f68267fa8ab765bbd848aa06b2cff131f798d1496370",
+          "size": 17
+        }
+      ]
+    }
+  },
+  {
+    "name": "refused",
+    "calls": [
+      "linear upload a.png image/png 68",
+      "linear put a.png 200",
+      "linear upload b.pdf application/pdf 77",
+      "linear put b.pdf 403"
+    ],
+    "result": {
+      "comments": 2,
+      "error": "thread.reply of source linear: exit status 1; its stderr ended: the upload of file 2 of 2 was refused (HTTP 403)",
+      "uploads": [
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "shot.png",
+          "id": "u-1",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "application/pdf",
+          "filename": "notes.pdf",
+          "id": "u-2",
+          "sent": true,
+          "sha256": "68d3dbe223d4659eb030429ecc280a437eb6e9b042a59797cbbd9e16f56c1d56",
+          "size": 77
+        },
+        {
+          "bearer": false,
+          "contentType": "image/jpeg",
+          "filename": "photo.jpg",
+          "id": "u-3",
+          "sent": true,
+          "sha256": "d20f6ffd523b78a86cd2f916fa34af5d1918d75f7b142237c752ad6b254213ab",
+          "size": 22
+        },
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "shot (2).png",
+          "id": "u-4",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "really-a-picture.txt",
+          "id": "u-5",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "text/plain",
+          "filename": "not-a-picture.png",
+          "id": "u-6",
+          "sent": true,
+          "sha256": "7e7c22e739587dff41c64bd42309ff5146dcd2d30b7fd712ca9c7c65d8d94c42",
+          "size": 12
+        },
+        {
+          "bearer": false,
+          "contentType": "text/plain",
+          "filename": "odd ](x) [y]_*`.md",
+          "id": "u-7",
+          "sent": true,
+          "sha256": "23c36e7a551cf5cf6f79f68267fa8ab765bbd848aa06b2cff131f798d1496370",
+          "size": 17
+        },
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "a.png",
+          "id": "u-8",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "application/pdf",
+          "filename": "b.pdf",
+          "id": "u-9",
+          "sent": false,
+          "sha256": "",
+          "size": 77
+        }
+      ]
+    }
+  },
+  {
+    "name": "posted-none",
+    "calls": [],
+    "result": "none"
+  },
+  {
+    "name": "retry",
+    "calls": [
+      "linear upload a.png image/png 68",
+      "linear put a.png 200",
+      "linear upload b.pdf application/pdf 77",
+      "linear put b.pdf 200",
+      "linear comment YRD-1",
+      "linear comment YRD-1 9d4c3b2a-1f0e-4d5c-8b7a-6f5e4d3c2b03"
+    ],
+    "result": {
+      "comments": [
+        {
+          "id": "9d4c3b2a-1f0e-4d5c-8b7a-6f5e4d3c2b03",
+          "body": "two files\n\n![a.png](https://uploads.linear.app/standin/u-10/a.png)\n\n[b.pdf](https://uploads.linear.app/standin/u-11/b.pdf)",
+          "at": "2026-10-11T12:00:00Z",
+          "by": "Standin",
+          "byID": "u-standin"
+        }
+      ],
+      "uploads": [
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "a.png",
+          "id": "u-8",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "application/pdf",
+          "filename": "b.pdf",
+          "id": "u-9",
+          "sent": false,
+          "sha256": "",
+          "size": 77
+        },
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "a.png",
+          "id": "u-10",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "application/pdf",
+          "filename": "b.pdf",
+          "id": "u-11",
+          "sent": true,
+          "sha256": "68d3dbe223d4659eb030429ecc280a437eb6e9b042a59797cbbd9e16f56c1d56",
+          "size": 77
+        }
+      ]
+    }
+  },
+  {
+    "name": "over-limit",
+    "calls": [],
+    "result": {
+      "comments": 3,
+      "error": "thread.reply of source linear: exit status 1; its stderr ended: file 2 of 2 is 8388609 bytes, over the limit of 8388608",
+      "uploads": [
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "shot.png",
+          "id": "u-1",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "application/pdf",
+          "filename": "notes.pdf",
+          "id": "u-2",
+          "sent": true,
+          "sha256": "68d3dbe223d4659eb030429ecc280a437eb6e9b042a59797cbbd9e16f56c1d56",
+          "size": 77
+        },
+        {
+          "bearer": false,
+          "contentType": "image/jpeg",
+          "filename": "photo.jpg",
+          "id": "u-3",
+          "sent": true,
+          "sha256": "d20f6ffd523b78a86cd2f916fa34af5d1918d75f7b142237c752ad6b254213ab",
+          "size": 22
+        },
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "shot (2).png",
+          "id": "u-4",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "really-a-picture.txt",
+          "id": "u-5",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "text/plain",
+          "filename": "not-a-picture.png",
+          "id": "u-6",
+          "sent": true,
+          "sha256": "7e7c22e739587dff41c64bd42309ff5146dcd2d30b7fd712ca9c7c65d8d94c42",
+          "size": 12
+        },
+        {
+          "bearer": false,
+          "contentType": "text/plain",
+          "filename": "odd ](x) [y]_*`.md",
+          "id": "u-7",
+          "sent": true,
+          "sha256": "23c36e7a551cf5cf6f79f68267fa8ab765bbd848aa06b2cff131f798d1496370",
+          "size": 17
+        },
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "a.png",
+          "id": "u-8",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "application/pdf",
+          "filename": "b.pdf",
+          "id": "u-9",
+          "sent": false,
+          "sha256": "",
+          "size": 77
+        },
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "a.png",
+          "id": "u-10",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "application/pdf",
+          "filename": "b.pdf",
+          "id": "u-11",
+          "sent": true,
+          "sha256": "68d3dbe223d4659eb030429ecc280a437eb6e9b042a59797cbbd9e16f56c1d56",
+          "size": 77
+        }
+      ]
+    }
+  },
+  {
+    "name": "redirect",
+    "calls": [
+      "linear upload c.png image/png 68",
+      "linear put c.png 307"
+    ],
+    "result": {
+      "comments": 3,
+      "error": "thread.reply of source linear: exit status 1; its stderr ended: the upload of file 1 of 1 was refused (HTTP 307)",
+      "uploads": [
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "shot.png",
+          "id": "u-1",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "application/pdf",
+          "filename": "notes.pdf",
+          "id": "u-2",
+          "sent": true,
+          "sha256": "68d3dbe223d4659eb030429ecc280a437eb6e9b042a59797cbbd9e16f56c1d56",
+          "size": 77
+        },
+        {
+          "bearer": false,
+          "contentType": "image/jpeg",
+          "filename": "photo.jpg",
+          "id": "u-3",
+          "sent": true,
+          "sha256": "d20f6ffd523b78a86cd2f916fa34af5d1918d75f7b142237c752ad6b254213ab",
+          "size": 22
+        },
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "shot (2).png",
+          "id": "u-4",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "really-a-picture.txt",
+          "id": "u-5",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "text/plain",
+          "filename": "not-a-picture.png",
+          "id": "u-6",
+          "sent": true,
+          "sha256": "7e7c22e739587dff41c64bd42309ff5146dcd2d30b7fd712ca9c7c65d8d94c42",
+          "size": 12
+        },
+        {
+          "bearer": false,
+          "contentType": "text/plain",
+          "filename": "odd ](x) [y]_*`.md",
+          "id": "u-7",
+          "sent": true,
+          "sha256": "23c36e7a551cf5cf6f79f68267fa8ab765bbd848aa06b2cff131f798d1496370",
+          "size": 17
+        },
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "a.png",
+          "id": "u-8",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "application/pdf",
+          "filename": "b.pdf",
+          "id": "u-9",
+          "sent": false,
+          "sha256": "",
+          "size": 77
+        },
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "a.png",
+          "id": "u-10",
+          "sent": true,
+          "sha256": "ed00e37cd705f27f22d0d144919e5ce239bfda4a20458eed434990bbc84bb0a6",
+          "size": 68
+        },
+        {
+          "bearer": false,
+          "contentType": "application/pdf",
+          "filename": "b.pdf",
+          "id": "u-11",
+          "sent": true,
+          "sha256": "68d3dbe223d4659eb030429ecc280a437eb6e9b042a59797cbbd9e16f56c1d56",
+          "size": 77
+        },
+        {
+          "bearer": false,
+          "contentType": "image/png",
+          "filename": "c.png",
+          "id": "u-12",
+          "sent": false,
+          "sha256": "",
+          "size": 68
+        }
+      ]
+    }
+  }
+]
