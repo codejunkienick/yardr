@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -36,17 +37,48 @@ func TestPassWithNothingStoppedAsksLimitsOnlyForTheStarts(t *testing.T) {
 	must(t, s.PutGroup(ctx, store.Group{Name: "g", Runner: "fake", Limit: 2, Config: map[string]any{"kind": "kimi"}}, "me"))
 	_, err = s.AddRoute(ctx, store.Route{Stage: "new", Group: "g"}, "me")
 	must(t, err)
+	var beads []string
 	for _, title := range []string{"x", "y"} {
-		_, err := s.CreateBead(ctx, store.NewBead{Title: title}, "me")
+		b, err := s.CreateBead(ctx, store.NewBead{Title: title}, "me")
 		must(t, err)
+		beads = append(beads, b.ID)
 	}
-	must(t, d.Reconcile(ctx)) // both beads are held for the cold key's answer
+	// A pass reads the key's answer for one bead after another. The first
+	// read is the first the key has had, so it finds none and that bead is
+	// held for the answer. The command answers on a goroutine of its own, and
+	// the second bead's read, later in the same pass, finds the answer if it
+	// has landed by then and starts on it: the pass does not wait for the
+	// answer, and a store reached over a socket on one cpu lets it land. So
+	// what holds on every schedule is that one bead at least is held, and
+	// that each bead is either held for the answer or started on it, never
+	// both and never neither: a count of the two cannot say so, since a bead
+	// that is both and one that is neither add up to two.
+	must(t, d.Reconcile(ctx))
 	dispatch.WaitLimitsIdle(d)
-	if n := len(r.starts()); n != 0 {
-		t.Fatalf("starts = %d before the answer, want none", n)
+	var held []string
+	for _, id := range beads {
+		n := len(eventKinds(t, s, id, "limits_wait"))
+		if n > 1 {
+			t.Fatalf("limits_wait events of %s = %d, want at most one however many passes hold it", id, n)
+		}
+		if n == 1 {
+			held = append(held, id)
+		}
 	}
-	must(t, d.Reconcile(ctx)) // both start
-	must(t, d.Reconcile(ctx)) // seen working
+	started := r.starts()
+	if len(held) == 0 {
+		t.Fatalf("no bead was held for the answer (starts = %v), want the first bead's read of a key never asked to find none and hold it", started)
+	}
+	for _, id := range beads {
+		if wasHeld, wasStarted := slices.Contains(held, id), slices.Contains(started, id); wasHeld == wasStarted {
+			t.Fatalf("%s: held = %v, started = %v, want it held for the answer or started on it, not both and not neither", id, wasHeld, wasStarted)
+		}
+	}
+	// The answer is in: the beads still held start by it, one a pass for a
+	// group (starts.go), so a pair held takes both passes and a single bead
+	// held takes one.
+	must(t, d.Reconcile(ctx))
+	must(t, d.Reconcile(ctx))
 	if n := len(r.starts()); n != 2 {
 		t.Fatalf("starts = %d, want 2", n)
 	}
