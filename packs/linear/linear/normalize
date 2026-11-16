@@ -25,9 +25,23 @@ def fields($i):
       label:   [$i.labels[]?.name] }
     | map_values(map(select(. != null and . != ""))) | with_entries(select(.value | length > 0)) )
   | if length == 0 then null else . end;
+def changed_keys($u):
+  ($u | if type == "object" then . else {} end) | [keys[] | select(. != "updatedAt")] | sort;
 def changed($u):
-  ( ($u | if type == "object" then . else {} end) | [keys[] | select(. != "updatedAt")] | sort | join(", ") ) as $ks
+  (changed_keys($u) | join(", ")) as $ks
   | if $ks == "" then "" else ("changed " + $ks | trunc) end;
+# issue_fields are fields() for the issue with what a hook line matches
+# an assignment and a state move on: who the issue is handed to, what an
+# update changed, and the type of the state it is in after the event.
+# Each is there only when the body carries it, as fields() holds.
+def issue_fields($body; $issue):
+  (((fields($issue) // {})
+    + { delegate: [first_of($issue.delegateId, $issue.delegate.id)],
+        assignee: [first_of($issue.assigneeId, $issue.assignee.id)],
+        changed: changed_keys($body.updatedFrom),
+        state: [first_of($issue.state.type)] })
+   | map_values(map(select(. != null and . != ""))) | with_entries(select(.value | length > 0)))
+  | if length == 0 then null else . end;
 
 .body as $p | ($p.data // {}) as $d
 | { source: "linear", type: (($p.type // "") | ascii_downcase), action: ($p.action // ""), url: ($p.url // ""),
@@ -48,7 +62,7 @@ def changed($u):
       assignee: first_of($d.assigneeId, $d.assignee.id),
       delegate: first_of($d.delegateId, $d.delegate.id),
       text: ( if $p.action == "update" then changed($p.updatedFrom) else (($d.description // "") | trunc) end ),
-      entity: ($d.id // ""), mentions: mentions($d.description; null), fields: fields($d) }
+      entity: ($d.id // ""), mentions: mentions($d.description; null), fields: issue_fields($p; $d) }
   else . + { thread: { id: ($d.id // ""), title: ($d.title // ""), url: ($p.url // "") }, mentions: [] }
   end
 # sender is who did it, the id the envelope names as actor: the hear key

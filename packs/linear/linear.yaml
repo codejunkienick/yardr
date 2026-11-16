@@ -71,8 +71,11 @@ hook:
   # The keys its events' fields may carry: a subscription's --where may
   # name them beside type, action, team, project, repo and label. sender
   # is the Linear user id of who did it, the field the hear key below
-  # matches.
-  keys: [team, project, label, sender]
+  # matches. delegate and assignee are the Linear user ids the issue is
+  # handed to, changed the fields an update changed, and state the type
+  # of the state the issue is in after the event, so a hook line can
+  # match an assignment and a move to Done.
+  keys: [team, project, label, sender, delegate, assignee, changed, state]
 
 # ---- who is heard ---------------------------------------------------------
 # A delivery is kept with its speaker named where the sender is a user of

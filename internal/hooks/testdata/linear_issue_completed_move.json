@@ -1,0 +1,29 @@
+{
+  "action": "update",
+  "actor": {"id": "aacdca22-6266-4c0a-ab3c-8fa70a26765c", "type": "user", "name": "Jane Doe"},
+  "createdAt": "2026-10-02T09:00:00.000Z",
+  "data": {
+    "id": "539068e2-ae88-4d09-bd75-22eb4a59612f",
+    "title": "Webhook receiver drops retries",
+    "description": "Retries from the sender arrive after the window.",
+    "identifier": "ENG-42",
+    "url": "https://linear.app/company/issue/ENG-42/webhook-receiver-drops-retries",
+    "teamId": "72b2a2dc-6f4f-4423-9d34-24b5bd10634a",
+    "stateId": "7b2a9d4c-3f1e-4a5c-9d8b-1a2b3c4d5e6f",
+    "assigneeId": "aacdca22-6266-4c0a-ab3c-8fa70a26765c",
+    "completedAt": "2026-10-02T09:00:00.000Z",
+    "state": {"id": "7b2a9d4c-3f1e-4a5c-9d8b-1a2b3c4d5e6f", "name": "Done", "color": "#22a06b", "type": "completed"},
+    "team": {"id": "72b2a2dc-6f4f-4423-9d34-24b5bd10634a", "key": "ENG", "name": "Engineering"}
+  },
+  "updatedFrom": {
+    "updatedAt": "2026-10-02T08:30:00.000Z",
+    "completedAt": null,
+    "sortOrder": 1024,
+    "stateId": "6a8f4d2e-3c1b-4e0a-8d7f-1b2c3d4e5f60"
+  },
+  "type": "Issue",
+  "url": "https://linear.app/company/issue/ENG-42/webhook-receiver-drops-retries",
+  "organizationId": "dc844923-f9a4-40a3-825c-dea7747e57d6",
+  "webhookTimestamp": 1791018000000,
+  "webhookId": "000042e3-d123-4980-b49f-8e140eef9329"
+}

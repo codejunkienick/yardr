@@ -118,7 +118,7 @@ type Adapter interface {
 | `delivery` | the service's id of the delivery |
 | `message`, `parent` | the id of the comment the delivery is, and of the comment it answers, so a reply lands in the same conversation |
 | `entity` | the id of what the text belongs to when the service sends that text again with every change (an issue's description, an edited comment): the store counts only the mentions the entity did not have before, and the event carries them as `new_mentions` |
-| `fields` | what the source says about where the delivery belongs, each a list of values: `team` (key and name), `project`, `label`, `sender` in Linear, with `speaker` derived by the yard for a delivery it heard by identity; `repo`, `label`, `number`, `state`, `conclusion`, `head_branch` and more in GitHub. Any source's normalize may set `outsider` to `yes` on a delivery whose text was written by someone who is none of the source's own people: the yard then marks its inbox line as information, not instructions, and leaves its text out of the notes it writes |
+| `fields` | what the source says about where the delivery belongs, each a list of values: `team` (key and name), `project`, `label`, `sender` in Linear, with `delegate`, `assignee`, `changed` and `state` on its issues, and `speaker` derived by the yard for a delivery it heard by identity; `repo`, `label`, `number`, `state`, `conclusion`, `head_branch` and more in GitHub. Any source's normalize may set `outsider` to `yes` on a delivery whose text was written by someone who is none of the source's own people: the yard then marks its inbox line as information, not instructions, and leaves its text out of the notes it writes |
 
 `fields` are there for subscriptions: `--where team=YRD` matches a delivery
 whose `team` field has the value `YRD`. `--where type=…` and `action=…` read
@@ -1332,7 +1332,7 @@ hook:
     timestamp: { body: webhookTimestamp, unit: ms, window: 1m }
   bodies: unique
   normalize: [linear/normalize]
-  keys: [team, project, label, sender]
+  keys: [team, project, label, sender, delegate, assignee, changed, state]
 ```
 
 - **Verify** stays data, checked by the core. With `hmac-sha256` it is the
@@ -2239,10 +2239,14 @@ The second is "a new issue of team YRD reaches the yardmaster", whoever it
 mentions. The where keys of a hook source are `type`, `action`, `team`,
 `project`, `repo`, `label`; GitHub has more
 ([subscriptions.md](subscriptions.md#github)). Linear's deliveries carry
-`team` (key and name), `project`, `label` and `sender`, and a kept one
-carries `speaker`: the yard user an identity maps the sender to, or
-`outside` for one none maps. `--where speaker=<user>` hears one person's
-deliveries. A key that is none of the source's is refused.
+`team` (key and name), `project`, `label` and `sender`; issue events also
+carry `delegate` (the Linear user id it is delegated to), `assignee` (the
+Linear user id assigned to it), `changed` (the fields an update changed)
+and `state` (the type of the state after the event); a kept one carries
+`speaker`:
+the yard user an identity maps the sender to, or `outside` for one none
+maps. `--where speaker=<user>` hears one person's deliveries. A key
+that is none of the source's is refused.
 
 ### 8. The stage map
 

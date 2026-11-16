@@ -19,6 +19,7 @@ import (
 	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/standin"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/storetest"
 )
 
 // The pack held to what Linear{} proved: the envelopes its normalize
@@ -397,6 +398,7 @@ var linearGoldenBodies = []string{
 	"linear_comment_bodydata.json",
 	"linear_comment_create.json",
 	"linear_comment_plain_mention.json",
+	"linear_issue_completed_move.json",
 	"linear_issue_create.json",
 	"linear_issue_delegate_set.json",
 	"linear_issue_delegated.json",
@@ -446,6 +448,94 @@ func TestLinearPackNormalize(t *testing.T) {
 			if !found {
 				t.Errorf("%s: field %q is in neither hook.keys nor store.WhereKeys", name, k)
 			}
+		}
+	}
+}
+
+// A hook on the shipped linear source matches an assignment to Yardmaster
+// and a move to Done: both makes lines and the approved says line are
+// accepted, and each matches only what it names. An edit that moves no
+// status, even of an issue that stands in Done, matches nothing.
+func TestLinearPackHookLines(t *testing.T) {
+	ad := linearGoldenNormalize(t)
+	ctx := context.Background()
+	st := storetest.New(t)
+	text, err := os.ReadFile(filepath.Join("..", "..", "packs", "linear", "linear.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutSource(ctx, "linear.yaml", string(text), "me"); err != nil {
+		t.Fatal(err)
+	}
+	const delegate = "4d3a2b1c-0000-4000-8000-00000000mayr"
+	var h store.Hook
+	h.Name, h.Source, h.SecretFile = "linear", "linear", "/nonexistent/s"
+	for _, l := range []string{
+		"event=issue action=create team=ENG delegate=" + delegate + " -> report:claim@reports",
+		"event=issue action=update team=ENG changed=delegateId delegate=" + delegate + " -> report:claim@reports",
+	} {
+		m, err := store.ParseMake(l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.Makes = append(h.Makes, m)
+	}
+	s, err := store.ParseSay("event=issue action=update type=report stage=review changed=stateId state=completed -> approved: the Linear issue was moved to Done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Says = []store.Say{s}
+	if _, err := st.PutHook(ctx, h, "me"); err != nil {
+		t.Fatalf("the assignment and approval lines on the shipped keys: %v", err)
+	}
+	hp, err := st.GetHook(ctx, "linear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h = *hp
+	data := func(name string) map[string]any {
+		t.Helper()
+		e, err := ad.Normalize(http.Header{"Linear-Delivery": {"d-1"}}, fixture(t, name))
+		if err != nil {
+			t.Fatalf("%s: normalize: %v", name, err)
+		}
+		return map[string]any{"type": e.Type, "action": e.Action, "fields": e.Fields}
+	}
+	for _, c := range []struct {
+		name string
+		body string
+		want int // the makes line, -1 for none
+	}{
+		{"created with a delegate", "linear_issue_delegated.json", 0},
+		{"assigned later", "linear_issue_delegate_set.json", 1},
+		{"created with none", "linear_issue_create.json", -1},
+		{"another update", "linear_issue_update.json", -1},
+		{"a move to Done", "linear_issue_completed_move.json", -1},
+	} {
+		m := h.Made(data(c.body))
+		switch {
+		case c.want == -1 && m != nil:
+			t.Errorf("%s makes %s, want nothing", c.name, m)
+		case c.want >= 0 && (m == nil || m.String() != h.Makes[c.want].String()):
+			t.Errorf("%s makes %v, want line %d", c.name, m, c.want)
+		}
+	}
+	fields := func(fs map[string][]string) map[string]any {
+		return map[string]any{"type": "issue", "action": "update", "fields": fs}
+	}
+	for _, c := range []struct {
+		name string
+		data map[string]any
+		want bool
+	}{
+		{"a move to Done", data("linear_issue_completed_move.json"), true},
+		{"an update that carries no state", data("linear_issue_update.json"), false},
+		{"an assignment", data("linear_issue_delegate_set.json"), false},
+		{"an edit of an issue that stands in Done", fields(map[string][]string{"changed": {"title"}, "state": {"completed"}}), false},
+		{"a move back to a started status", fields(map[string][]string{"changed": {"sortOrder", "stateId"}, "state": {"started"}}), false},
+	} {
+		if got := h.Said(c.data, "review", "report") != nil; got != c.want {
+			t.Errorf("%s: approved matched = %v, want %v", c.name, got, c.want)
 		}
 	}
 }
