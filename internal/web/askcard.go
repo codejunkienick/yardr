@@ -218,7 +218,7 @@ func (p BeadPage) Card(a store.BeadAsk) AskCard {
 	out.Says = a.Run != nil || a.Setup != nil
 	out.Approve = (a.Run != nil || a.Setup != nil) && approvable(a.Weight, true, p.site.Gate)
 	if a.Secret != nil {
-		out.Secret = &cardSecret{Line: a.Secret.Line, Env: a.Secret.Env, Reach: a.Secret.Reach()}
+		out.Secret = &cardSecret{Line: a.Secret.Line, Env: a.Secret.Env, Reach: a.Secret.Reach}
 	}
 	if a.Run != nil {
 		out.Run = &cardRun{Command: a.Run.Command, Does: a.Run.Does, Back: a.Run.Back, BackBy: a.Run.BackBy, Ask: a.Run.Ask}

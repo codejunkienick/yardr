@@ -111,8 +111,7 @@ printed with the token, to hand both over together.`,
 				}
 				table(w, "USER\tDEVICE\tADDED\tLAST USED", rows)
 				if inPlaceOperatorDevice(c.Context(), st, devices) {
-					fmt.Fprintln(w, "A device of the operator that is sealed in place may give the yard any secret a setup asks for: protect the phone as you would this machine. "+
-						"It registered its key in a call an edge could have sat in the middle of, and pairing it again with the QR lifts that (yardr user device rm, then yardr user device pair --qr).")
+					fmt.Fprintln(w, inPlaceFooter())
 				}
 			})
 		},
@@ -158,6 +157,15 @@ func sealed(d store.Device) string {
 		return ", " + s
 	}
 	return ""
+}
+
+// inPlaceFooter is the note under a device list that holds a device of the
+// operator sealed in place: what that lets the device do, and that pairing
+// it again with the QR lifts it. yardr status carries it under its devices
+// part too.
+func inPlaceFooter() string {
+	return "A device of the operator that is sealed in place may give the yard any secret a setup asks for: protect the phone as you would this machine. " +
+		"It registered its key in a call an edge could have sat in the middle of, and pairing it again with the QR lifts that (yardr user device rm, then yardr user device pair --qr)."
 }
 
 // inPlaceOperatorDevice reports whether any of devices is one of an operator

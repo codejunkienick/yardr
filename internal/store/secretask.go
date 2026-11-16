@@ -153,7 +153,8 @@ func (s AskSecret) Line() string {
 // credential or harness key it is (absent for any other secret), the user
 // whose own credential it is (absent for any other secret), the waiting
 // login it goes to (absent for any other secret), the harness kind whose
-// API key it is (absent for any other secret), and the card's line whole.
+// API key it is (absent for any other secret), the card's line whole, and
+// what the value reaches (absent for a harness key and a waiting login).
 type SecretAsked struct {
 	Source string   `json:"source"`
 	Env    []string `json:"env"`
@@ -161,13 +162,12 @@ type SecretAsked struct {
 	Crew   string   `json:"crew,omitempty"`
 	As     string   `json:"as,omitempty"`
 	Login  string   `json:"login,omitempty"`
-	// Hook is the hook whose signing secret is asked for; absent on any
-	// other secret.
+	// Hook is the hook whose signing secret is asked for; absent on any other secret.
 	Hook string `json:"hook,omitempty"`
-	// Harness is the kind whose API key is asked for; absent on any
-	// other secret.
-	Harness string `json:"harness,omitempty"`
-	Line    string `json:"line"`
+	// Harness is the kind whose API key is asked for; absent on any other secret.
+	Harness string   `json:"harness,omitempty"`
+	Reach   []string `json:"reach,omitempty"`
+	Line    string   `json:"line"`
 }
 
 // asked is the secret of the ask a as a client shows it, nil for an ask
@@ -176,7 +176,7 @@ func (a Ask) asked() *SecretAsked {
 	if a.Secret == nil {
 		return nil
 	}
-	return &SecretAsked{Source: a.Secret.Source, Env: a.Secret.Env, User: a.Secret.User, Crew: a.Secret.Crew, As: a.Secret.As, Login: a.Secret.Login, Hook: a.Secret.Hook, Harness: a.Secret.Harness, Line: a.Secret.Line()}
+	return &SecretAsked{Source: a.Secret.Source, Env: a.Secret.Env, User: a.Secret.User, Crew: a.Secret.Crew, As: a.Secret.As, Login: a.Secret.Login, Hook: a.Secret.Hook, Harness: a.Secret.Harness, Reach: a.Secret.Reach(), Line: a.Secret.Line()}
 }
 
 // concealed is the ask's concealment as a client shows it: false where the

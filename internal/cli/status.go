@@ -58,7 +58,11 @@ type statusReport struct {
 	// Devices are the users' devices: who may call the yard from outside
 	// it. Absent with none.
 	Devices []store.Device `json:"devices,omitempty"`
-	Work    *workCounts    `json:"work,omitempty"`
+	// inPlaceDevice is whether a listed device of the operator is sealed
+	// in place: the devices part then carries the footer's warning, as
+	// yardr user device list does. Read with the devices, never sent.
+	inPlaceDevice bool
+	Work          *workCounts `json:"work,omitempty"`
 	// Backups are the dated copies of the store the daemon keeps. The
 	// settings are read from the server when it runs, or from the store
 	// file read-only when it does not.
@@ -377,6 +381,7 @@ func (a *app) status(ctx context.Context, cfg *config.Config) (*statusReport, er
 	if rep.Devices, err = st.Devices(ctx, ""); err != nil {
 		return nil, err
 	}
+	rep.inPlaceDevice = inPlaceOperatorDevice(ctx, st, rep.Devices)
 	sessions, err := st.Sessions(ctx, false)
 	if err != nil {
 		return nil, err
@@ -596,7 +601,11 @@ func (r *statusReport) parts() []statusPart {
 		for _, d := range r.Devices {
 			rows = append(rows, []string{d.User, d.Name, "last used " + lastUsed(d) + sealed(d)})
 		}
-		parts = append(parts, statusPart{"devices", columns(rows)})
+		lines := columns(rows)
+		if r.inPlaceDevice {
+			lines = append(lines, inPlaceFooter())
+		}
+		parts = append(parts, statusPart{"devices", lines})
 	}
 
 	if r.Backups != nil {

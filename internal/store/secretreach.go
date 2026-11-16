@@ -86,9 +86,3 @@ func (s AskSecret) cardLines() []string {
 	}
 	return append([]string{"it goes to a file only the yard's server reads; no agent is shown it"}, s.Reach()...)
 }
-
-// Reach is the reach of the secret as a client shows it (AskSecret.Reach),
-// for a client that renders an ask from what it is sent.
-func (a SecretAsked) Reach() []string {
-	return AskSecret{Source: a.Source, Hook: a.Hook, Login: a.Login, Harness: a.Harness, User: a.User, Crew: a.Crew, As: a.As}.Reach()
-}

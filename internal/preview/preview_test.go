@@ -126,12 +126,67 @@ func (y *yard) cards() string {
 		if host := loopbackHost(p.Port); host != "" && !y.sup.Running(p.App) {
 			fmt.Fprintf(&b, "    port %d answers on %s, and the supervisor holds no process for the preview\n", p.Port, host)
 		}
+		for _, l := range y.groupLines(p.App) {
+			fmt.Fprintf(&b, "    %s\n", l)
+		}
 		lines, _ := LogTail(y.sup.logPath(p.App), 20)
 		for _, l := range lines {
 			fmt.Fprintf(&b, "    %s\n", l)
 		}
 	}
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// groupLines names the processes the supervisor holds for the preview app,
+// one line per member of its process group, pid and command: a stuck
+// process is named beside the row instead of hiding behind it. For the
+// failure dump alone: it informs, never asserts.
+func (y *yard) groupLines(app string) []string {
+	y.sup.mu.Lock()
+	pr := y.sup.running[app]
+	y.sup.mu.Unlock()
+	if pr == nil || pr.pgid <= 0 {
+		return nil
+	}
+	members, err := psGroup(pr.pgid)
+	if err != nil {
+		return []string{"the held process group is not listed: " + err.Error()}
+	}
+	var out []string
+	for _, m := range members {
+		out = append(out, fmt.Sprintf("%d %s", m.pid, m.command))
+	}
+	return out
+}
+
+// psProc is one process as the dump names it: its pid and its command.
+type psProc struct {
+	pid     int
+	command string
+}
+
+// psGroup lists the members of the process group pgid, pid and command,
+// in pid order, through ps. Linux and macOS spell the columns the same.
+func psGroup(pgid int) ([]psProc, error) {
+	out, err := exec.Command("ps", "-e", "-o", "pid=", "-o", "pgid=", "-o", "command=").Output()
+	if err != nil {
+		return nil, err
+	}
+	var members []psProc
+	for line := range strings.Lines(strings.TrimSpace(string(out))) {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		pid, errPid := strconv.Atoi(fields[0])
+		gid, errGid := strconv.Atoi(fields[1])
+		if errPid != nil || errGid != nil || gid != pgid {
+			continue
+		}
+		members = append(members, psProc{pid: pid, command: strings.Join(fields[2:], " ")})
+	}
+	slices.SortFunc(members, func(a, b psProc) int { return a.pid - b.pid })
+	return members, nil
 }
 
 // startWait is how long a preview may take to answer once it runs. The

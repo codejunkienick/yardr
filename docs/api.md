@@ -2206,6 +2206,7 @@ POST /call/UserAsks
         "secret": {
           "source": "crm",
           "env": ["CRM_UPDATE_TOKEN"],
+          "reach": ["lands in: the source's env_file, or sources/crm.env in the yard's home when it has none", "read by: declared calls (yardr call crm ...) and the source's check, from the file at each call", "not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: CRM_UPDATE_TOKEN, for the source crm (https://crm.example.com)"
         },
         "weight": [
@@ -2227,6 +2228,7 @@ POST /call/UserAsks
         "secret": {
           "source": "crm",
           "env": ["CRM_TOKEN"],
+          "reach": ["lands in: the source's env_file, or sources/crm.env in the yard's home when it has none", "read by: declared calls (yardr call crm ...) and the source's check, from the file at each call", "not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: CRM_TOKEN, for the source crm (https://crm.example.com)"
         },
         "weight": [
@@ -2259,6 +2261,7 @@ POST /call/UserAsks
           "source": "phone",
           "env": ["PHONE_USER"],
           "user": "jo",
+          "reach": ["lands in: jo's env_file, or users/jo.env in the yard's home when it has none", "read by: the yard, at each message it sends jo through the source phone", "not reached: calls and thread commands: it is an address, not a credential"],
           "line": "a secret: PHONE_USER, jo's own address in the source phone (https://phone.example.com); jo is told through phone once it is given and yardr user set jo notify=phone is run"
         },
         "weight": [
@@ -2342,6 +2345,7 @@ POST /call/UserAsks
           "source": "crm",
           "env": ["CRM_UPDATE_TOKEN"],
           "crew": "yardmaster",
+          "reach": ["lands in: crew member yardmaster's env_file, or crew/yardmaster.env in the yard's home when it has none", "read by: yardmaster's thread commands (yardr reply, thread open, thread state)", "not reached: declared calls (yardr call crm ...), which read the source's own file; other crew members' files; a session already running", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: CRM_UPDATE_TOKEN, for crew member yardmaster in the source crm (https://crm.example.com); the env_file line is the one written, and it takes effect when yardmaster next starts (rotation or yardr crew restart yardmaster)"
         },
         "weight": [
@@ -2364,6 +2368,7 @@ POST /call/UserAsks
           "source": "crm",
           "env": ["CRM_TOKEN"],
           "as": "jo",
+          "reach": ["lands in: jo's env_file, or users/jo.env in the yard's home when it has none", "read by: calls made as jo (yardr call crm ... --as jo) and yardr source check crm --as jo, from the file at each call", "not reached: calls made without --as, thread commands, other users' files", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: CRM_TOKEN, jo's own credential for the source crm (https://crm.example.com), read as jo when a call is made --as jo"
         },
         "weight": [
@@ -2389,6 +2394,7 @@ POST /call/UserAsks
         "secret": {
           "source": "gog",
           "env": ["GOG_ACCOUNT"],
+          "reach": ["lands in: the source's env_file, or sources/gog.env in the yard's home when it has none", "read by: declared calls (yardr call gog ...) and the source's check, from the file at each call", "not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: GOG_ACCOUNT, for the source gog (https://gog.example.com)"
         },
         "concealed": false,
@@ -3129,6 +3135,7 @@ POST /call/UserAsks
         "secret": {
           "source": "gog",
           "env": ["GOG_ACCOUNT"],
+          "reach": ["lands in: the source's env_file, or sources/gog.env in the yard's home when it has none", "read by: declared calls (yardr call gog ...) and the source's check, from the file at each call", "not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: GOG_ACCOUNT, for the source gog (https://gog.example.com)"
         },
         "concealed": false,
@@ -3154,6 +3161,7 @@ POST /call/UserAsks
           "source": "crm",
           "env": ["CRM_UPDATE_TOKEN"],
           "as": "jo",
+          "reach": ["lands in: jo's env_file, or users/jo.env in the yard's home when it has none", "read by: calls made as jo (yardr call crm ... --as jo) and yardr source check crm --as jo, from the file at each call", "not reached: calls made without --as, thread commands, other users' files", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: CRM_UPDATE_TOKEN, jo's own credential for the source crm (https://crm.example.com), read as jo when a call is made --as jo"
         },
         "given": ["CRM_UPDATE_TOKEN"],
@@ -3182,6 +3190,7 @@ POST /call/UserAsks
           "source": "crm",
           "env": ["CRM_TOKEN"],
           "crew": "yardmaster",
+          "reach": ["lands in: crew member yardmaster's env_file, or crew/yardmaster.env in the yard's home when it has none", "read by: yardmaster's thread commands (yardr reply, thread open, thread state)", "not reached: declared calls (yardr call crm ...), which read the source's own file; other crew members' files; a session already running", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: CRM_TOKEN, for crew member yardmaster in the source crm (https://crm.example.com); the env_file line is the one written, and it takes effect when yardmaster next starts (rotation or yardr crew restart yardmaster)"
         },
         "given": ["CRM_TOKEN"],
@@ -3279,6 +3288,7 @@ POST /call/UserAsks
           "source": "pager",
           "env": ["PAGER_USER"],
           "user": "jo",
+          "reach": ["lands in: jo's env_file, or users/jo.env in the yard's home when it has none", "read by: the yard, at each message it sends jo through the source pager", "not reached: calls and thread commands: it is an address, not a credential"],
           "line": "a secret: PAGER_USER, jo's own address in the source pager (https://pager.example.com); jo is told through pager once it is given and yardr user set jo notify=pager is run"
         },
         "given": ["PAGER_USER"],
@@ -3315,6 +3325,7 @@ POST /call/UserAsks
         "secret": {
           "source": "books",
           "env": ["BOOKS_TOKEN"],
+          "reach": ["lands in: the source's env_file, or sources/books.env in the yard's home when it has none", "read by: declared calls (yardr call books ...) and the source's check, from the file at each call", "not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: BOOKS_TOKEN, for the source books (https://books.example.com)"
         },
         "given": ["BOOKS_TOKEN"],
@@ -3390,6 +3401,7 @@ POST /call/UserAsks
 | `open[].secret.login` | string, may be absent | the waiting login the value goes to; with `as`, the login is that user's own; absent on any other secret ask |
 | `open[].secret.harness` | string, may be absent | the harness kind whose API key is asked for; absent on any other secret ask |
 | `open[].secret.line` | string | what the card says is asked for, in the yard's words |
+| `open[].secret.reach` | array of string, may be absent | what the value reaches once it is given, in short lines under the line: where it lands, which reads use it, and which do not; absent on a harness-key ask and a waiting login's input, whose line already says where the value goes |
 | `open[].concealed` | bool, may be absent | whether a secret ask's value is drawn hidden: false where the source marks every asked name as no secret; absent (concealed) on any other ask |
 | `open[].run` | object, may be absent | the command a run ask proposes, as `Bead` says it; absent on any other ask |
 | `open[].run.argv` | array of string | the command in words, without the leading `yardr`. On a run ask that sets a setting, adds a source, or applies a pack with a depot or mappings named, a device of the current operator is told them, whoever the ask was put to. Any other device is told `[]`, even the device of a user the ask was put to while they were the operator, and so is every device of a yard with no operator. The socket tells the whole card |
@@ -3447,6 +3459,7 @@ POST /call/UserAsks
 | `decided[].secret.login` | string, may be absent | the waiting login the value goes to; with `as`, the login is that user's own; absent on any other secret ask |
 | `decided[].secret.harness` | string, may be absent | the harness kind whose API key is asked for; absent on any other secret ask |
 | `decided[].secret.line` | string | what the card says is asked for, in the yard's words |
+| `decided[].secret.reach` | array of string, may be absent | what the value reaches once it is given, in short lines under the line: where it lands, which reads use it, and which do not; absent on a harness-key ask and a waiting login's input, whose line already says where the value goes |
 | `decided[].concealed` | bool, may be absent | whether a secret ask's value is drawn hidden: false where the source marks every asked name as no secret; absent (concealed) on any other ask |
 | `decided[].run` | object, may be absent | the command a run ask proposes, as `Bead` says it; absent on any other ask |
 | `decided[].run.argv` | array of string | the command in words, without the leading `yardr`. On a run ask that sets a setting, adds a source, or applies a pack with a depot or mappings named, a device of the current operator is told them, whoever the ask was put to. Any other device is told `[]`, even the device of a user the ask was put to while they were the operator, and so is every device of a yard with no operator. The socket tells the whole card |
@@ -3927,6 +3940,7 @@ POST /call/Bead
         "secret": {
           "source": "books",
           "env": ["BOOKS_TOKEN"],
+          "reach": ["lands in: the source's env_file, or sources/books.env in the yard's home when it has none", "read by: declared calls (yardr call books ...) and the source's check, from the file at each call", "not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: BOOKS_TOKEN, for the source books (https://books.example.com)"
         },
         "given": ["BOOKS_TOKEN"],
@@ -3950,6 +3964,7 @@ POST /call/Bead
         "secret": {
           "source": "crm",
           "env": ["CRM_UPDATE_TOKEN"],
+          "reach": ["lands in: the source's env_file, or sources/crm.env in the yard's home when it has none", "read by: declared calls (yardr call crm ...) and the source's check, from the file at each call", "not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: CRM_UPDATE_TOKEN, for the source crm (https://crm.example.com)"
         },
         "weight": [
@@ -3972,6 +3987,7 @@ POST /call/Bead
         "secret": {
           "source": "crm",
           "env": ["CRM_TOKEN"],
+          "reach": ["lands in: the source's env_file, or sources/crm.env in the yard's home when it has none", "read by: declared calls (yardr call crm ...) and the source's check, from the file at each call", "not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: CRM_TOKEN, for the source crm (https://crm.example.com)"
         },
         "weight": [
@@ -4017,6 +4033,7 @@ POST /call/Bead
           "source": "pager",
           "env": ["PAGER_USER"],
           "user": "jo",
+          "reach": ["lands in: jo's env_file, or users/jo.env in the yard's home when it has none", "read by: the yard, at each message it sends jo through the source pager", "not reached: calls and thread commands: it is an address, not a credential"],
           "line": "a secret: PAGER_USER, jo's own address in the source pager (https://pager.example.com); jo is told through pager once it is given and yardr user set jo notify=pager is run"
         },
         "given": ["PAGER_USER"],
@@ -4041,6 +4058,7 @@ POST /call/Bead
           "source": "phone",
           "env": ["PHONE_USER"],
           "user": "jo",
+          "reach": ["lands in: jo's env_file, or users/jo.env in the yard's home when it has none", "read by: the yard, at each message it sends jo through the source phone", "not reached: calls and thread commands: it is an address, not a credential"],
           "line": "a secret: PHONE_USER, jo's own address in the source phone (https://phone.example.com); jo is told through phone once it is given and yardr user set jo notify=phone is run"
         },
         "weight": [
@@ -4201,6 +4219,7 @@ POST /call/Bead
           "source": "crm",
           "env": ["CRM_TOKEN"],
           "crew": "yardmaster",
+          "reach": ["lands in: crew member yardmaster's env_file, or crew/yardmaster.env in the yard's home when it has none", "read by: yardmaster's thread commands (yardr reply, thread open, thread state)", "not reached: declared calls (yardr call crm ...), which read the source's own file; other crew members' files; a session already running", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: CRM_TOKEN, for crew member yardmaster in the source crm (https://crm.example.com); the env_file line is the one written, and it takes effect when yardmaster next starts (rotation or yardr crew restart yardmaster)"
         },
         "given": ["CRM_TOKEN"],
@@ -4225,6 +4244,7 @@ POST /call/Bead
           "source": "crm",
           "env": ["CRM_UPDATE_TOKEN"],
           "crew": "yardmaster",
+          "reach": ["lands in: crew member yardmaster's env_file, or crew/yardmaster.env in the yard's home when it has none", "read by: yardmaster's thread commands (yardr reply, thread open, thread state)", "not reached: declared calls (yardr call crm ...), which read the source's own file; other crew members' files; a session already running", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: CRM_UPDATE_TOKEN, for crew member yardmaster in the source crm (https://crm.example.com); the env_file line is the one written, and it takes effect when yardmaster next starts (rotation or yardr crew restart yardmaster)"
         },
         "weight": [
@@ -4248,6 +4268,7 @@ POST /call/Bead
           "source": "crm",
           "env": ["CRM_UPDATE_TOKEN"],
           "as": "jo",
+          "reach": ["lands in: jo's env_file, or users/jo.env in the yard's home when it has none", "read by: calls made as jo (yardr call crm ... --as jo) and yardr source check crm --as jo, from the file at each call", "not reached: calls made without --as, thread commands, other users' files", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: CRM_UPDATE_TOKEN, jo's own credential for the source crm (https://crm.example.com), read as jo when a call is made --as jo"
         },
         "given": ["CRM_UPDATE_TOKEN"],
@@ -4276,6 +4297,7 @@ POST /call/Bead
           "source": "crm",
           "env": ["CRM_TOKEN"],
           "as": "jo",
+          "reach": ["lands in: jo's env_file, or users/jo.env in the yard's home when it has none", "read by: calls made as jo (yardr call crm ... --as jo) and yardr source check crm --as jo, from the file at each call", "not reached: calls made without --as, thread commands, other users' files", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: CRM_TOKEN, jo's own credential for the source crm (https://crm.example.com), read as jo when a call is made --as jo"
         },
         "weight": [
@@ -4302,6 +4324,7 @@ POST /call/Bead
         "secret": {
           "source": "gog",
           "env": ["GOG_ACCOUNT"],
+          "reach": ["lands in: the source's env_file, or sources/gog.env in the yard's home when it has none", "read by: declared calls (yardr call gog ...) and the source's check, from the file at each call", "not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: GOG_ACCOUNT, for the source gog (https://gog.example.com)"
         },
         "concealed": false,
@@ -4325,6 +4348,7 @@ POST /call/Bead
         "secret": {
           "source": "gog",
           "env": ["GOG_ACCOUNT"],
+          "reach": ["lands in: the source's env_file, or sources/gog.env in the yard's home when it has none", "read by: declared calls (yardr call gog ...) and the source's check, from the file at each call", "not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
           "line": "a secret: GOG_ACCOUNT, for the source gog (https://gog.example.com)"
         },
         "concealed": false,
@@ -5209,6 +5233,7 @@ POST /call/Bead
 | `asks[].secret.login` | string, may be absent | the waiting login the value goes to (`yardr bead ask --secret-login <login>`): the reference the login's leader printed in its input need, handed the value and kept nowhere; with `as`, the login is that user's own and theirs to give. Absent on any other secret ask. A client needs nothing new for it: the field, the call and `line` are the same |
 | `asks[].secret.harness` | string, may be absent | the harness kind whose API key is asked for; absent on any other secret ask |
 | `asks[].secret.line` | string | what the card says is asked for, in the yard's words and never the asker's: the names, the source, and where the source's calls go; with `user`, whose address it is and the command that tells them through the source; with `crew`, whose credential it is, that the env_file line is the one written, and when it takes effect; with `as`, whose credential it is and that a call made as them reads it; with `login`, the waiting login the value goes to, and whose it is where `as` names a user; with `harness`, whose API key it is and when it takes effect. Show it as it is |
+| `asks[].secret.reach` | array of string, may be absent | what the value reaches once it is given, in short lines under the line: where it lands, which reads use it, and which do not. Absent on a harness-key ask and a waiting login's input, whose line already says where the value goes |
 | `asks[].concealed` | bool, may be absent | whether a secret ask's value is drawn hidden: false where the source marks every asked name as no secret, which is shown with a field that echoes; absent (concealed) on any other ask |
 | `asks[].given` | array of string, may be absent | the names a secret ask was given values for, or the account names a setup ask was approved with, which reads "gave `<names>`"; absent on any other ask and until it is given |
 | `asks[].depot_push` | object, may be absent | the yard's depot-push card for turning one depot's push to its HTTPS origin on or off. Absent on any other ask, and on a device that is not the current operator's; the socket tells the whole card. It has no options and takes no words: `AnswerAsk` refuses a pick and words on it, and it is approved with [`ApproveAsk`](#for-the-operator-alone), by the operator, at the yard or from a device of the operator. Approval carries the change out after the call; it never runs `git push` |

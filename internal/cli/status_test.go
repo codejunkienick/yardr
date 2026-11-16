@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -28,11 +30,19 @@ import (
 // and an app on it per call.
 func statusYard(t *testing.T, rev string) (string, store.API, func() *app) {
 	t.Helper()
+	home, st, _, a := statusYardOwned(t, rev)
+	return home, st, a
+}
+
+// statusYardOwned is statusYard with the owning store too, for a test that
+// needs a server-only operation while status reads through its API.
+func statusYardOwned(t *testing.T, rev string) (string, store.API, *store.Store, func() *app) {
+	t.Helper()
 	home := newHomeDir(t)
 	// Status runs doctor's examination for its fault count, versions and
 	// all; the versions answer at once, as ever.
 	answeredTools(t, "git", "herdr", "claude")
-	st := storetest.New(t)
+	st, own := storetest.NewOwned(t)
 	testYard(t, st, home)
 	a := func() *app {
 		a := appOn(st)
@@ -47,7 +57,7 @@ func statusYard(t *testing.T, rev string) (string, store.API, func() *app) {
 		return server.Info{PID: 4711, Revision: rev, Since: time.Date(2026, 10, 5, 9, 12, 0, 0, time.Local)}, true
 	})
 	stub(t, &machineAddr, func() string { return "192.168.7.7" })
-	return home, st, a
+	return home, st, own, a
 }
 
 // statusJSON runs yardr status --json.
@@ -284,7 +294,7 @@ func TestStatusWebViewBuild(t *testing.T) {
 // with its state and agent, a view on loopback and one open to the network,
 // the hooks with where they are posted to, the peers, and the work counted.
 func TestStatusRunningYard(t *testing.T) {
-	home, st, a := statusYard(t, "abcdef123456")
+	home, st, own, a := statusYardOwned(t, "abcdef123456")
 	ctx := context.Background()
 	holdDaemon(t, home)
 	if err := st.CrewStarted(ctx, "yardmaster", yardmasterHandle()); err != nil {
@@ -322,12 +332,6 @@ func TestStatusRunningYard(t *testing.T) {
 		}
 	}
 
-	for _, name := range []string{"phone", "laptop"} {
-		if _, err := st.AddDevice(ctx, "Jo", name, "Jo"); err != nil {
-			t.Fatal(err)
-		}
-	}
-
 	depot := dirDepot(t, st)
 	if err := st.PutGroup(ctx, store.Group{Name: "web/assembly", Runner: "exec", Config: map[string]any{"cmd": "true"}, Limit: 1}, "Jo"); err != nil {
 		t.Fatal(err)
@@ -343,11 +347,48 @@ func TestStatusRunningYard(t *testing.T) {
 	if _, err := st.SetHold(ctx, claimed[6], true, store.Expect{}, "me"); err != nil {
 		t.Fatal(err)
 	}
-
-	out, err := run(t, a().rootCmd(), "status")
-	if err != nil {
-		t.Fatalf("err = %v\n%s", err, out)
+	status := func(args ...string) string {
+		t.Helper()
+		out, err := run(t, a().rootCmd(), append([]string{"status"}, args...)...)
+		if err != nil {
+			t.Fatalf("status %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return out
 	}
+	if out := status(); strings.Contains(out, "may give the yard") {
+		t.Fatalf("status, with no devices, carries the footer:\n%s", out)
+	}
+	if _, err := st.AddUser(ctx, "ada", "Jo"); err != nil {
+		t.Fatal(err)
+	}
+	key := func(b byte) string { return base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{b}, 32)) }
+	tablet, err := st.AddDevice(ctx, "ada", "tablet", "Jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := own.PinChannelKeyInPlace(ctx, tablet.Token, key(1)); err != nil {
+		t.Fatal(err)
+	}
+	if out := status(); strings.Contains(out, "may give the yard") {
+		t.Fatalf("status, with a member's device sealed in place, carries the footer:\n%s", out)
+	}
+	pairing, err := st.DevicePairOpen(ctx, "Jo", "watch", "Jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := own.DevicePairRedeemSealed(ctx, pairing.Code, key(2)); err != nil {
+		t.Fatal(err)
+	}
+	if out := status(); strings.Contains(out, "may give the yard") {
+		t.Fatalf("status, with the operator's device sealed by a pairing, carries the footer:\n%s", out)
+	}
+	for _, name := range []string{"phone", "laptop"} {
+		if _, err := st.AddDevice(ctx, "Jo", name, "Jo"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out := status()
 	me := strconv.Itoa(os.Getpid())
 	wantText(t, out,
 		"daemon     running (pid "+me+")\n",
@@ -361,9 +402,14 @@ func TestStatusRunningYard(t *testing.T) {
 		"           tickets  linear  http://127.0.0.1:9100/hooks/tickets\n",
 		"peers      laptop  it calls this yard\n",
 		"           north   https://north.example\n",
-		"devices    Jo  laptop  last used never\n",
-		"           Jo  phone   last used never\n",
+		"devices    Jo   laptop  last used never\n",
+		"           Jo   phone   last used never\n",
+		"           Jo   watch   last used never, sealed (paired)\n",
+		"           ada  tablet  last used never, sealed (in place)\n",
 		"work       3 sessions running (web/assembly 1, web/builders 2); 3 beads wait for a person (backlog 2, decisions 1); 1 held\n")
+	if strings.Contains(out, "may give the yard") {
+		t.Errorf("status, with no operator device sealed in place, carries the footer:\n%s", out)
+	}
 	if strings.Contains(out, "doctor") {
 		t.Errorf("doctor is named on a yard it reports no fault on:\n%s", out)
 	}
@@ -387,19 +433,24 @@ func TestStatusRunningYard(t *testing.T) {
 		!maps.Equal(w.Waiting, map[string]int{"backlog": 2, "decisions": 1}) {
 		t.Fatalf("work: %+v, peers: %+v", w, rep.Peers)
 	}
-	// Status lists devices too. Its keyed rows carry the same lasting label
-	// as user device list and user show; keyless rows stay as they were.
-	rep.Devices = []store.Device{
-		{User: "Jo", Name: "phone", ChannelKey: "key", ChannelPinned: store.PinnedInPlace},
-		{User: "Jo", Name: "tablet", ChannelKey: "key", ChannelPinned: store.PinnedPaired},
-		{User: "Jo", Name: "laptop"},
+	slate, err := st.AddDevice(ctx, "Jo", "slate", "Jo")
+	if err != nil {
+		t.Fatal(err)
 	}
-	var deviceStatus strings.Builder
-	rep.print(&deviceStatus)
-	wantText(t, deviceStatus.String(),
-		"devices    Jo  phone   last used never, sealed (in place)\n",
-		"           Jo  tablet  last used never, sealed (paired)\n",
-		"           Jo  laptop  last used never\n")
+	if _, err := own.PinChannelKeyInPlace(ctx, slate.Token, key(3)); err != nil {
+		t.Fatal(err)
+	}
+	out = status()
+	wantText(t, out,
+		"           Jo   slate   last used never, sealed (in place)\n",
+		"           "+inPlaceFooter()+"\n")
+	jsonOut, err := run(t, a().rootCmd(), "status", "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v\n%s", err, jsonOut)
+	}
+	if strings.Contains(jsonOut, "may give the yard") {
+		t.Fatalf("status --json carries the footer:\n%s", jsonOut)
+	}
 }
 
 // While a daemon_lost event stands with no start after it, status lists

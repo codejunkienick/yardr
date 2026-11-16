@@ -52,9 +52,10 @@ func TestSecretReach(t *testing.T) {
 		if strings.Join(got, "\n") != strings.Join(c.want, "\n") {
 			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
 		}
-		// What a client is sent of the ask has what its reach is made of.
-		if asked := (Ask{Secret: &c.s}).asked(); strings.Join(asked.Reach(), "\n") != strings.Join(c.want, "\n") {
-			t.Errorf("%s as a client shows it: %q, want %q", c.name, asked.Reach(), c.want)
+		// What a client is sent of the ask carries the reach: present on a
+		// secret ask, absent on a harness key and a waiting login's input.
+		if asked := (Ask{Secret: &c.s}).asked(); strings.Join(asked.Reach, "\n") != strings.Join(c.want, "\n") {
+			t.Errorf("%s as a client shows it: %q, want %q", c.name, asked.Reach, c.want)
 		}
 	}
 }
