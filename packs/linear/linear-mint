@@ -12,14 +12,26 @@
 # which acts as the application itself, with access to the workspace's
 # public teams. No new copy of the secret is stored: it is held in this
 # process's memory alone, sent in the exchange's body, and never printed,
-# neither on stdout nor on stderr, nor written anywhere.
+# neither on stdout nor on stderr, and written nowhere. The one file the
+# script writes is grants.log beside itself, which says what Linear
+# answered each mint (record, below) and holds neither the token nor the
+# secret.
 #
 # Needs curl on PATH. LINEAR_TOKEN_ENDPOINT may name a loopback HTTP
-# endpoint for a test's stand-in. The scope on stdin is the call's;
-# Linear replaces the app's credentials when the scope set varies, so
-# every mint sends one fixed set instead, and the scope it is passed is
-# read and ignored. The set is what the pack's calls do: reply posts a
-# comment, open and state create and update issues, the rest reads.
+# endpoint for a test's stand-in. The scope on stdin is the call's, and
+# is read and ignored: every mint sends one fixed set instead. Linear
+# replaces the app's credentials in two cases (its OAuth docs, at
+# linear.app/developers/oauth-2-0-authentication, under "When
+# credentials become invalid"): a request for a different scope set, and
+# a client-credentials request over an authorization-code installation.
+# So the set never varies, and there is no second one to fall back on
+# when Linear refuses this one: a fallback chosen by whether a request
+# happened to time out, or be answered 429 or 5xx, would swap the app's
+# credentials back and forth between the processes that mint, each swap
+# revoking the other's token. A refusal fails the mint, loudly. The set
+# is what the pack's calls do (reply posts a comment, open and state
+# create and update issues, the rest reads) and the two agent scopes
+# that keep the app's user offered in the mention and assignee menus.
 # The token is kept a day at most, whatever Linear's longer life, so a
 # rotated secret is picked up without core changes.
 set -eu
@@ -54,6 +66,67 @@ urlencode() {
   printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n' | sed 's/\(..\)/%\1/g'
 }
 
+# raw <text> <key> is the first "key": value in text as written, a string
+# with its quotes or an array with its brackets, "" where the value is
+# neither. first reads a string alone, and Linear may answer a scope list
+# as a string (spaced or comma-separated) or as an array.
+raw() {
+  printf '%s' "$1" | tr -d '\n' |
+    grep -oE "\"$2\"[[:space:]]*:[[:space:]]*(\[[^]]*\]|\"[^\"]*\")" |
+    head -n 1 | sed 's/^[^:]*:[[:space:]]*//'
+}
+
+# contains <text> <value> succeeds when a nonempty value occurs literally
+# in text. A scope echo can itself equal a secret or token, even when every
+# character is allowed in a scope list.
+contains() {
+  [ -n "$2" ] || return 1
+  case "$1" in *"$2"*) return 0 ;; esac
+  return 1
+}
+
+# record <status> <body> appends one line to grants.log beside this script
+# for an answer of Linear's: the time (UTC), the status, whether the body
+# holds an error key, and for a 200 the scope Linear says it granted and
+# whether that names each agent scope. That tells a grant with the agent
+# scopes from one without, with no token or secret on a screen. The body
+# is untrusted, so of it only the scope field is ever written, and only
+# when every character is one a scope list is written in and it contains
+# neither the secret nor the token; any other value is counted ("scope:
+# unparseable (N chars)", the field's quotes or brackets included) and
+# not shown. A name is matched whole between the delimiters a list may use
+# (space, comma, quote, bracket), so a longer
+# name never passes for a shorter one. The server and the daemon both
+# mint, so the file is appended to and a line is one printf; it is 0600
+# from its first line, by the umask it is created under and no chmod
+# after. A record that cannot be written is left unwritten: it is a
+# diagnostic, and a failing mint stops every call the yard makes to Linear.
+record() {
+  line="$(date -u +%Y-%m-%dT%H:%M:%SZ) status $1"
+  if printf '%s' "$2" | grep -q '"error"[[:space:]]*:'; then
+    line="$line, error field present"
+  else
+    line="$line, error field absent"
+  fi
+  if [ "$1" = 200 ]; then
+    field=$(raw "$2" scope)
+    if [ -z "$field" ]; then
+      line="$line, scope: absent"
+    elif printf '%s' "$field" | LC_ALL=C grep -q '[^][A-Za-z0-9 ,:_."-]'; then
+      line="$line, scope: unparseable (${#field} chars)"
+    elif contains "$field" "$client_secret" ||
+      contains "$field" "$(first "$2" access_token)"; then
+      line="$line, scope: unparseable (${#field} chars)"
+    else
+      names=" $(printf '%s' "$field" | sed 's/[],"[]/ /g') "
+      case $names in *" app:mentionable "*) mentionable=yes ;; *) mentionable=no ;; esac
+      case $names in *" app:assignable "*) assignable=yes ;; *) assignable=no ;; esac
+      line="$line, app:mentionable $mentionable, app:assignable $assignable, scope: $field"
+    fi
+  fi
+  ( umask 077; printf '%s\n' "$line" >> "$(dirname "$0")/grants.log" ) 2>/dev/null || true
+}
+
 client_id=$(first "$input" LINEAR_CLIENT_ID)
 client_secret=$(first "$input" LINEAR_CLIENT_SECRET)
 [ -n "$client_id" ] || fail "its inputs name no LINEAR_CLIENT_ID"
@@ -74,18 +147,27 @@ fi
 
 # The one scope set every mint sends: read for the reads (read, posted,
 # opened, the viewer check), issues:create for open and state (which
-# creates and updates), comments:create for reply. Linear replaces the
-# app's credentials when the set varies, so it never does.
-scope=read,issues:create,comments:create
+# creates and updates), comments:create for reply, and app:mentionable and
+# app:assignable, which Linear's agent docs put on the app's install so
+# that its user can be mentioned and assigned. Linear replaces the app's
+# credentials when the set varies, so it never does.
+scope=read,issues:create,comments:create,app:mentionable,app:assignable
 out=$(printf 'grant_type=client_credentials&scope=%s&client_id=%s&client_secret=%s' \
   "$scope" "$(urlencode "$client_id")" "$(urlencode "$client_secret")" |
   curl -s --max-time 10 -w '\n%{http_code}' -d @- "$endpoint") ||
   fail "could not reach $endpoint (curl exit $?)"
 code=$(printf '%s' "$out" | tail -n 1)
 body=$(printf '%s' "$out" | sed '$d')
+record "$code" "$body"
 # The response body is untrusted and could echo the client secret.
-# Report only the status code on failure.
-[ "$code" = "200" ] || fail "minting a token was answered $code"
+# Report only the status code on failure. A 401 is told apart: Linear
+# did not accept the id and secret, which is no refusal of the scope set,
+# so the credentials are what to fix.
+case $code in
+  200) ;;
+  401) fail "credentials refused: minting a token was answered 401" ;;
+  *) fail "minting a token was answered $code" ;;
+esac
 token=$(first "$body" access_token)
 expires_in=$(num "$body" expires_in)
 [ -n "$token" ] && [ -n "$expires_in" ] || fail "minting a token came back with no token"

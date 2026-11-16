@@ -79,6 +79,9 @@ means in Linear is a flow pack's to say, not this file's.
    ```
    The token is that of a Linear OAuth application made for the crew
    member, so it acts as the application's own user and not as a person.
+   Making the application, installing it and giving the yard its client id
+   and secret, which the yard mints this token from, are under The OAuth
+   application, below.
    Linear takes an OAuth token as `Authorization: Bearer <token>`, and the
    pack sends it that way. A personal key makes the crew member speak as
    that person. Linear's docs (https://linear.app/developers/graphql) show
@@ -144,3 +147,73 @@ means in Linear is a flow pack's to say, not this file's.
        --map task:new=started --map task:review=review --map task:merged=done
    # moves tracked linear issues as <name>: task:new=started …
    ```
+
+## The OAuth application
+
+The crew member's Linear user is an OAuth application's own user, and the
+yard mints its token from the application's client id and secret. Make the
+application once, in the Linear workspace, before step 3. If the workspace
+has one already, check its toggle and its install against the items below
+instead of making another.
+
+- **Create it.** Linear's new-application page is
+  https://linear.app/settings/api/applications/new. The name and icon are
+  how the crew member appears in the mention and filter menus, so give it
+  the ones people should see. Linear asks for a redirect URL. The install
+  below names it, and Linear sends the browser back there with an
+  authorization `code` in the address. The yard never uses that code.
+- **Switch client credentials on.** The toggle is on the application's page,
+  while you create it or after. The yard's mint is that grant, and Linear's
+  docs say it must be on first ("You must first toggle on client credentials
+  tokens for your OAuth2 app").
+- **Install it as the application, with all five scopes.** Only a workspace
+  admin can, because Linear says "admin permissions are required to complete
+  the installation". The admin opens Linear's authorize address with
+  `actor=app`, which makes the token act as the application and not as a
+  person, and with the five scopes:
+  ```
+  https://linear.app/oauth/authorize?response_type=code&client_id=<client id>&redirect_uri=<redirect url>&state=<any random value>&actor=app&scope=read,issues:create,comments:create,app:mentionable,app:assignable
+  ```
+  The first three are what the pack's calls need. The last two are Linear's
+  agent scopes (https://linear.app/developers/agents). `app:mentionable`
+  lets people mention the application in issues and documents, and
+  `app:assignable` lets them assign it issues as the delegate.
+- **Keep one scope set.** The install, the yard's mint and anything else that
+  gets credentials for this application use the same five scopes. The mint
+  asks for exactly those whatever a call passes it. Linear's docs give the
+  reason. Requesting different scopes replaces the application's credentials
+  in the workspace. Processes that share an application must use one scope
+  set, or they invalidate each other's tokens
+  (https://linear.app/developers/oauth-actor-authorization, "Changing an
+  installation's scopes"). A client-credentials request replaces an
+  authorization-code installation
+  (https://linear.app/developers/oauth-2-0-authentication, "When credentials
+  become invalid"). So the yard's first mint, with the same five scopes,
+  takes the application's credentials over from the install. A request with
+  any other set would revoke them. A new install carries the same five.
+- **Give the yard the id and the secret.** Both are on the application's page
+  in Linear. They go under their own names, `LINEAR_CLIENT_ID` and
+  `LINEAR_CLIENT_SECRET`, in the two places step 3 gives a token. One is the
+  crew member's env file, which serves replies, opened issues and status
+  moves. The other is the source's own env file, which serves `yardr call
+  linear` and `yardr source check linear`. With both names set, the yard
+  mints a token from them and ignores a `LINEAR_API_KEY` beside them. It
+  refuses one of the two without the other. Ask for them on a card, so the
+  yard's server writes them and neither is a command's word or in a note:
+  ```sh
+  yardr bead ask <bead> - --secret linear --for-crew <name> <<'ASK'
+  The Linear application's client id and secret
+  Both are on the application's page in Linear.
+  ASK
+  ```
+  The same ask without `--for-crew` gives the source's own file. At a
+  terminal, `yardr source key linear LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET`
+  asks for each and shows nothing as it is typed. The crew member's session
+  sees the new values after a restart. Rotating the secret in Linear revokes
+  the application's client-credentials tokens, so give the new secret the
+  same way.
+- **Check it in Linear.** `yardr source check linear` mints a token and asks
+  Linear whom it acts as. A pass says the token works. It does not say the
+  application is offered in the menus. In a comment on any issue, type `@`
+  and the application's name, then assign an issue to the application. Both
+  should offer it, and the issue should show it as the delegate.
