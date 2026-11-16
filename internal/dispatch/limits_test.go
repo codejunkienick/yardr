@@ -40,13 +40,17 @@ func TestPassWithNothingStoppedAsksLimitsOnlyForTheStarts(t *testing.T) {
 		_, err := s.CreateBead(ctx, store.NewBead{Title: title}, "me")
 		must(t, err)
 	}
+	must(t, d.Reconcile(ctx)) // both beads are held for the cold key's answer
+	dispatch.WaitLimitsIdle(d)
+	if n := len(r.starts()); n != 0 {
+		t.Fatalf("starts = %d before the answer, want none", n)
+	}
 	must(t, d.Reconcile(ctx)) // both start
 	must(t, d.Reconcile(ctx)) // seen working
-	dispatch.WaitLimitsIdle(d)
 	if n := len(r.starts()); n != 2 {
 		t.Fatalf("starts = %d, want 2", n)
 	}
-	// The two starts are one run: what the provider said is kept for the
+	// The two beads are one run: what the provider said is kept for the
 	// five minutes the quota reads it.
 	if b, err := os.ReadFile(asked); err != nil || string(b) != "kimi\n" {
 		t.Fatalf("after the starts the limits command was run for %q (%v), want once", b, err)

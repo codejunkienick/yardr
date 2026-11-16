@@ -193,7 +193,7 @@ var DispatchKinds = []string{
 	"edge_link_up", "edge_link_down",
 	"backup_failed", "install_failed", "rolled_back", "base_diverged",
 	"workspace_kept", "workspace_removed", DiskKept,
-	"gave_up", "backoff", "capped", "quota_wait", "group_wait", "unrouted", "no_runner", "bad_depot", "bad_flow", "stranded",
+	"gave_up", "backoff", "capped", "quota_wait", "group_wait", "limits_wait", "unrouted", "no_runner", "bad_depot", "bad_flow", "stranded",
 	"crew_blocked", "crew_start_tail", "nudge_held", "login_led", "human_notified", "waited",
 	"train_branched", "bad_train", "wagon_without_train", "hook_rule", "make_refused",
 	HookQuiet, QuietStarted, QuietPassed, QuietFailed, QuietUnjudged,

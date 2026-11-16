@@ -663,8 +663,24 @@ prints them as `builders@Weekly<80,5h<90 else spare-builders`.
   the provider now says is open starts the bead at the pass that answer
   wakes. Past ten minutes nothing is held for a window the provider gave
   no reset for, one whose reset has passed, or a percentage below 100 (a
-  threshold leaves its room for those, below); a provider that has not
-  answered since the daemon started holds from the first pass, as above.
+  threshold leaves its room for those, below).
+- **A bead waits for an answer that has not come yet.** The daemon keeps a
+  provider's answer for five minutes and asks again in the background.
+  After a stretch with no bead to route, or just after the daemon started,
+  the first bead finds no answer. The command has not failed. Its answer is
+  on the way, and a window past its threshold would go unseen until it
+  lands, so the group the route meant to spare would get that bead. The
+  bead waits instead, with one `limits_wait` event, once per stage and
+  route until it starts, as `quota_wait` is. The event has the `route`, the
+  groups `passed` over so far, the `reason` the limits are not known and a
+  `hint`. The pass does not wait with the bead. It goes on to the next one,
+  and when the answer lands it wakes the daemon, and the next pass routes
+  the bead by it. A command that fails, or runs past its 30 seconds, has
+  answered too, and the bead takes the group with a `claimed` event that
+  says the limits were not known (above). What the provider last said
+  within ten minutes (above) still answers a comparison, and a bead it
+  answers is routed at once. A provider no source answers for has no
+  answer coming, so no bead waits for it.
 - **The `claimed` event** of a bead the dispatcher started names the
   `route` by its id and, when groups were passed over, `passed`: each with
   its `reason`, such as `Claude's Weekly window is 83% used, the route asks

@@ -51,6 +51,18 @@ const routeLimitsMemory = 5 * time.Minute
 // used up, the bead waits, and says so in one quota_wait event until it
 // starts.
 //
+// A group chosen only because its limits were not known (the choice's
+// Unknown), by a read that found no fresh answer and wants its key
+// refreshed, does not take the bead: the bead is held, with one limits_wait
+// event. Otherwise the first bead after a quiet stretch goes to the group the
+// route meant to spare. The hold never waits. The pass is serial, so a wait
+// here would stall every bead behind this one; the bead is tried again by
+// the next pass, which the answer's landing wakes (runLimitRefresh), and a
+// command that hangs ends as a remembered failure within its time limit. A
+// remembered failure, a provider no source answers for and the other
+// conditions that cannot be evaluated are answers as they stand: the group
+// takes the bead and the claimed event says the limits were not known.
+//
 // def is the yard's default_kind setting, for a group that names no kind.
 func (d *Dispatcher) chooseGroup(ctx context.Context, b store.Bead, r *store.Route, groups map[string]store.Group, active map[string]int, def string) (c store.RouteChoice, ok bool) {
 	if !r.Gated(groups, def) {
@@ -90,11 +102,18 @@ func (d *Dispatcher) chooseGroup(ctx context.Context, b store.Bead, r *store.Rou
 	// comparison's duration, as it decides every other wait of the pass.
 	// Each group is judged for the model the bead would start with in it,
 	// so a per-model window used up holds the group that would stop on it.
+	// cold is whether any read of the choice found no fresh answer.
+	cold := false
 	c = choice.ChooseAt(d.now(), func(group, source string) store.Quota {
+		var q store.Quota
+		var none bool
 		if source != "" {
-			return d.sourceQuota(ctx, source)
+			q, none = d.sourceQuota(ctx, source)
+		} else {
+			q, none = d.routeQuota(ctx, groups[group], def)
 		}
-		return d.routeQuota(ctx, groups[group], def)
+		cold = cold || none
+		return q
 	}, func(group string) string {
 		return modelFor(groups[group], b)
 	})
@@ -108,6 +127,10 @@ func (d *Dispatcher) chooseGroup(ctx context.Context, b store.Bead, r *store.Rou
 		c.Passed = append(passed, c.Passed...)
 	}
 	if c.Group != "" {
+		if c.Unknown != "" && cold {
+			d.reportLimitsWait(ctx, b, r, c)
+			return c, false
+		}
 		return c, true
 	}
 	if ctx.Err() != nil {
@@ -127,6 +150,25 @@ func (d *Dispatcher) chooseGroup(ctx context.Context, b store.Bead, r *store.Rou
 	d.Log.Warn("quota_wait", "bead", b.ID, "route", r.ID, "reason", c.Why())
 	_ = d.Store.LogDispatch(ctx, b.ID, "quota_wait", actor, data)
 	return c, false
+}
+
+// reportLimitsWait logs one limits_wait event for a bead held for an answer
+// its route's choice lacked (chooseGroup): the groups passed over so far and
+// why the limits of the one chosen were not known. Once per stage and route
+// until the bead starts, as quota_wait is, however many passes it is held
+// for. A stopping daemon says nothing: it did not hear the provider out.
+func (d *Dispatcher) reportLimitsWait(ctx context.Context, b store.Bead, r *store.Route, c store.RouteChoice) {
+	if ctx.Err() != nil || d.noted(b.ID, "limits_wait", b.Stage+"|"+r.ID) {
+		return
+	}
+	d.Log.Warn("limits_wait", "bead", b.ID, "route", r.ID, "reason", c.Unknown)
+	data := map[string]any{"stage": b.Stage, "route": r.ID, "reason": c.Unknown,
+		"hint": "the bead waits for the limits command's answer and is routed by it when it lands; " +
+			"a command that fails or runs out of time has answered too, and the claimed event then says the limits were not known (yardr limits; yardr route list)"}
+	if len(c.Passed) > 0 {
+		data["passed"] = c.Passed
+	}
+	_ = d.Store.LogDispatch(ctx, b.ID, "limits_wait", actor, data)
 }
 
 // waitedGroup is a group that cannot start a bead now, with why in words.
@@ -229,9 +271,15 @@ func (d *Dispatcher) reportGroupWait(ctx context.Context, b store.Bead, r *store
 // condition that names only sources, finds nothing, as for a provider that
 // reports no window. Nothing is run for it, and the default kind's provider
 // is not read in its place.
-func (d *Dispatcher) routeQuota(ctx context.Context, g store.Group, def string) store.Quota {
+//
+// cold says the read found no fresh answer and wants its key refreshed
+// (limitNone), which chooseGroup holds a bead for instead of choosing by it.
+// A failure the cache remembers, a provider nothing answers for and an
+// env_file that cannot be read are not cold. Nothing is coming that would
+// change them, so they stand as answers.
+func (d *Dispatcher) routeQuota(ctx context.Context, g store.Group, def string) (q store.Quota, cold bool) {
 	if !g.StartsAgents(def) {
-		return store.Quota{}
+		return store.Quota{}, false
 	}
 	kind := g.Kind(def)
 	if kind == "" {
@@ -240,25 +288,25 @@ func (d *Dispatcher) routeQuota(ctx context.Context, g store.Group, def string) 
 	provider, _ := g.Config["provider"].(string)
 	env, err := groupEnv(g)
 	if err != nil {
-		return store.Quota{Unknown: err.Error()}
+		return store.Quota{Unknown: err.Error()}, false
 	}
 	rd := d.cachedLimits(ctx, kind, provider, routeLimitsMemory, env)
 	if rd.report == nil {
-		return d.unknownQuota(rd)
+		return d.unknownQuota(rd), rd.state == limitNone
 	}
-	return quotaOf(rd.report)
+	return quotaOf(rd.report), false
 }
 
 // sourceQuota is what the source named source says of itself, as a route's
 // condition reads it: the comparisons that name a source read these windows
 // whatever the group's provider is, so a group with no kind is gated the
-// same way.
-func (d *Dispatcher) sourceQuota(ctx context.Context, source string) store.Quota {
+// same way. cold is as routeQuota's.
+func (d *Dispatcher) sourceQuota(ctx context.Context, source string) (q store.Quota, cold bool) {
 	rd := d.cachedSource(ctx, source, routeLimitsMemory)
 	if rd.report == nil {
-		return d.unknownQuota(rd)
+		return d.unknownQuota(rd), rd.state == limitNone
 	}
-	return quotaOf(rd.report)
+	return quotaOf(rd.report), false
 }
 
 // unknownQuotaMemory is how long a route goes by what a provider last said
@@ -280,7 +328,9 @@ const unknownQuotaMemory = 10 * time.Minute
 // (usedUpAhead): a session started into one stops on the limit at once, so
 // they go on failing the comparisons they answer however old the report is,
 // until a fresh one replaces them. A key never answered, and a provider that
-// failed before it ever answered, have none.
+// failed before it ever answered, have none. Where the read found no fresh
+// answer, chooseGroup holds the bead instead of taking that choice
+// (routeQuota's cold).
 func (d *Dispatcher) unknownQuota(rd limitRead) store.Quota {
 	q := store.Quota{Unknown: rd.unknown()}
 	if rd.last != nil {

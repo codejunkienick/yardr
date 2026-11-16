@@ -742,8 +742,12 @@ they have no answer, and `source check` fails for them.
   said for five minutes, a failed run included. So that is at most twelve
   runs an hour for a provider read under one group's env, or for a source,
   however many beads are ready, none while no ready
-  bead meets such a route, and a pass that asks holds for at most the
-  command's 30 seconds.
+  bead meets such a route. The command runs beside the passes and no pass
+  waits on it. A bead that finds no answer yet waits for it, with a
+  `limits_wait` event, for at most the command's 30 seconds (a command that
+  fails or runs out has answered too), and the answer wakes the daemon to
+  route the bead
+  ([groups.md](groups.md#a-route-with-further-groups-and-quota-conditions)).
   The seventh is the server, **for the web view at /limits**
   ([web.md](web.md#the-lists)): a GET asks for each provider in use
   whose answer is older than a minute, and reads in between share the

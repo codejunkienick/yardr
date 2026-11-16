@@ -164,6 +164,10 @@ func TestGroupStartsNoFurtherSessionWithAModelThatWaitsForItsReset(t *testing.T)
 	// the wait is on the session's handle.
 	p.say(kimiOpen)
 	*now = resets.Add(time.Second)
+	// What the start of the other model goes by is stale by now: the bead is
+	// held for a fresh answer (chooseGroup), which lands before the next pass.
+	must(t, d.Reconcile(ctx))
+	dispatch.WaitLimitsIdle(d)
 	must(t, d.Reconcile(ctx))
 	d2 := &dispatch.Dispatcher{Store: s, Runners: map[string]dispatch.Runner{"fake": r}, Backoff: time.Hour}
 	dispatch.SetClock(d2, func() time.Time { return *now })
@@ -426,9 +430,17 @@ func TestReleasedWaitingSessionLeavesTheUsedUpWindowGatingUntilItsReset(t *testi
 	}
 
 	// The reset has come, and the cache is stale again: nothing says the
-	// window is used up any more.
+	// window is used up any more, and nothing fresh says it is open. The
+	// beads wait for the answer instead of starting with nothing to go by.
+	// The failure that lands is the answer, and a session starts.
 	p.hold()
 	*now = resets.Add(time.Second)
+	must(t, d.Reconcile(ctx))
+	if got := r.starts(); len(got) != 1 {
+		t.Fatalf("starts = %v, want none while the answer is asked for", got)
+	}
+	p.unhold()
+	dispatch.WaitLimitsIdle(d)
 	must(t, d.Reconcile(ctx))
 	if got := r.starts(); len(got) != 2 {
 		t.Fatalf("starts = %v, want one more session once the reset has come", got)
@@ -650,7 +662,10 @@ func oneSlotHeldYard(t *testing.T) (store.API, *paneRunner, *dispatch.Dispatcher
 		Config: map[string]any{"kind": "codex", "stall": "off"}}, kimiUsed, codexOpen)
 	p.sayFor("moonshot", kimiOpen)
 	*now = now.Add(6 * time.Minute)
+	// Both answers are stale with the clock: a bead is routed by a fresh
+	// one, and holds for a stale one (chooseGroup), so each is asked again.
 	primeGroupLimits(t, s, d, "a")
+	primeGroupLimits(t, s, d, "b")
 	one := 1
 	_, err := s.SetGroup(context.Background(), "a", store.GroupEdit{Limit: &one}, "me")
 	must(t, err)

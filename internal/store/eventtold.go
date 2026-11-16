@@ -124,6 +124,7 @@ var eventDataTold = map[string][]string{
 	"stranded":            {"stage", "flow", "source"},
 	"quota_wait":          {"stage", "route", "resets_at"},
 	"group_wait":          {"stage", "route"},
+	"limits_wait":         {"stage", "route"},
 	"waited":              {"group", "since", "stage", "waited"},
 	"hook_rule":           {"action", "bead", "depot", "event", "hook", "linked_author", "originator_rule", "outcome", "route", "seq", "stage", "train", "worker"},
 	"make_refused":        {"action", "bead", "depot", "event", "hook", "seq", "stage"},
