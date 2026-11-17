@@ -7412,7 +7412,7 @@ POST /call/Teammates
 | `[].invited_at` | time | when they were invited |
 | `[].devices` | array | their devices, by name; empty while none is paired |
 | `[].devices[].name` | string | the device's name |
-| `[].devices[].last_used` | time, may be absent | when its token was last resolved; absent on a device never used |
+| `[].devices[].last_used` | time, may be absent | when it last made a call, sealed or plain; absent on a device never used |
 
 A mapped address with no user record stands in no row.
 

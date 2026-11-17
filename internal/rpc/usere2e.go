@@ -373,7 +373,8 @@ func (u *UserServer) e2eHandshake(w http.ResponseWriter, r *http.Request, first 
 // e2eDevice re-reads the device record session names, as it stands
 // now: the call is refused when the record is gone or pins another
 // key. One store read a call is the price, and it is the read a plain
-// call already pays to resolve its token.
+// call already pays to resolve its token; the stamp of the call's use
+// after it opens (stampE2EDevice) is the write it pays beside it.
 func (u *UserServer) e2eDevice(r *http.Request, s *e2eSession) bool {
 	return u.e2eDeviceCtx(r.Context(), s)
 }
@@ -441,6 +442,7 @@ func (u *UserServer) e2eCall(w http.ResponseWriter, r *http.Request, run []byte)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
+	u.stampE2EDevice(r, session)
 	head, innerBody, err := splitE2EHead(plain)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -476,6 +478,27 @@ func (u *UserServer) e2eCall(w http.ResponseWriter, r *http.Request, run []byte)
 		if !writer.wrote {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		}
+	}
+}
+
+// stampE2EDevice records an opened call as its device's last use, as the
+// resolving of a plain call's token does (store.ResolveDevice) and a call
+// sealed on the channel, which carries no token, would otherwise never: a
+// phone that calls daily would read as last used when it was paired, and
+// yardr doctor would invite its removal. It follows the call's opening and
+// not its admission: the session tag that admits a call is in the clear of
+// every record, so whoever carries the calls can address one to a session
+// it cannot open, and only the opening shows that the call is the
+// device's. Stamped at admission, a carrier could keep a device in use, and
+// doctor quiet about it, with bytes that open to nothing. The stamp is a
+// record for the operator and no part of who the caller is, so a store that
+// cannot write it is logged and the call goes on; and a device removed or
+// replaced since the admission is left alone (store.StampDeviceUse checks
+// the opened channel key), as the call that was admitted before the removal
+// commits may finish.
+func (u *UserServer) stampE2EDevice(r *http.Request, s *e2eSession) {
+	if err := u.st.StampDeviceUse(r.Context(), s.user, s.device, s.channelKey, remote(r)); err != nil {
+		u.log.Warn("an enveloped call's device could not be stamped as used", "err", err)
 	}
 }
 

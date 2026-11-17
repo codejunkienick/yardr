@@ -143,15 +143,25 @@ func bindFor(marker string, present bool) *yardkey.FirstBinding {
 // the inner call is served as its user, the outer head shows only the
 // envelope's own status and headers, and no inner word crosses in the
 // clear of the outer body. A body that needs several records, in and
-// back, crosses whole.
+// back, crosses whole. The call carries no token, so nothing resolves one,
+// and the yard records its use all the same: what yardr user show and
+// doctor read of a device that calls sealed.
 func TestE2EWholeCallSealedEndToEnd(t *testing.T) {
 	y := newPairYard(t)
 	d := newE2EDevice(t, y, "sam", "phone")
 	plain := bindFor("", false)
+	if used, _ := lastUse(t, y, "sam", "phone"); used != nil {
+		t.Fatalf("a device that has only handshaken was last used at %s", used)
+	}
 
 	outer, outerHeader, status, _, body := d.call(t, http.MethodGet, "/user/me", nil, nil, plain, plain)
 	if outer != http.StatusOK || status != http.StatusOK {
 		t.Fatalf("GET /user/me outer %d, inner %d (%s)", outer, status, body)
+	}
+	// From the link's address, as a plain call down the link is kept.
+	used, from := lastUse(t, y, "sam", "phone")
+	if used == nil || from != "edge" {
+		t.Fatalf("the last use after a sealed call = %v from %q, want it set, from edge", used, from)
 	}
 	if strings.TrimSpace(string(body)) != `{"user":"sam","said_by":"phone","yard":"south","yardmaster":"yardmaster"}` {
 		t.Errorf("the inner answer = %s", body)
@@ -189,6 +199,10 @@ func TestE2EWholeCallSealedEndToEnd(t *testing.T) {
 	}
 	if innerHeader.Get("Content-Type") != "image/png" || outerHeader.Get("Content-Type") == "image/png" {
 		t.Errorf("inner type %q, outer type %q: the inner head travels only sealed", innerHeader.Get("Content-Type"), outerHeader.Get("Content-Type"))
+	}
+	// Three calls within the minute wrote the use once.
+	if again, _ := lastUse(t, y, "sam", "phone"); again == nil || !again.Equal(*used) {
+		t.Errorf("calls within the minute moved the last use from %s to %v", used, again)
 	}
 	t.Run("pairing approval", func(t *testing.T) {
 		e2ePairingApprovalSealed(t, y, d)
@@ -301,7 +315,10 @@ func TestE2EInnerStatusStaysSealed(t *testing.T) {
 
 // A first record whose stream marker was rewritten between the device
 // and the yard — dropped, as here — fails its opening and its call,
-// and the honest call after it on the same session still opens.
+// and the honest call after it on the same session still opens. A call
+// that fails to open is no use of the device: its session tag is in the
+// clear of every record, so it names the device and proves nothing of it,
+// and only the honest call stamps the device's last use.
 func TestE2EMarkerRewrittenFailsTheCall(t *testing.T) {
 	y := newPairYard(t)
 	d := newE2EDevice(t, y, "sam", "phone")
@@ -310,10 +327,16 @@ func TestE2EMarkerRewrittenFailsTheCall(t *testing.T) {
 	if outer != http.StatusBadRequest {
 		t.Fatalf("a call whose marker was dropped on the way = %d, want 400", outer)
 	}
+	if used, _ := lastUse(t, y, "sam", "phone"); used != nil {
+		t.Fatalf("a call that failed to open stamped the device's last use at %s", used)
+	}
 	plain := bindFor("", false)
 	outer, _, status, _, _ := d.call(t, http.MethodGet, "/user/me", nil, nil, plain, plain)
 	if outer != http.StatusOK || status != http.StatusOK {
 		t.Fatalf("the honest call after it = outer %d, inner %d", outer, status)
+	}
+	if used, _ := lastUse(t, y, "sam", "phone"); used == nil {
+		t.Fatal("the honest call after it did not stamp the device's last use")
 	}
 }
 
@@ -1023,6 +1046,23 @@ func sessionEntry(t *testing.T, y *pairYard, d *e2eDevice) *e2eSession {
 	return s
 }
 
+// lastUse is the last use of the device name of user as the device list reads
+// it, nil for never, with the address that call came from.
+func lastUse(t *testing.T, y *pairYard, user, name string) (*time.Time, string) {
+	t.Helper()
+	list, err := y.st.Devices(context.Background(), user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range list {
+		if d.Name == name {
+			return d.LastUsed, d.LastFrom
+		}
+	}
+	t.Fatalf("%s has no device %s: %+v", user, name, list)
+	return nil, ""
+}
+
 // A call replayed whole down the link, and one whose first record's
 // sequence was rewritten, are each refused and mark nothing: the
 // honest call, and the honest record, still open after them.
@@ -1153,7 +1193,8 @@ func TestE2ESessionsReplacedCappedAndExpired(t *testing.T) {
 // Removal purges the device's sessions and refuses what comes next —
 // a call on the old session, a live stream's next record, a fresh
 // handshake — leaving a second device untouched. A whole call
-// admitted before the removal commits finishes; a streamed record
+// admitted before the removal commits finishes, and the stamp of its use
+// that comes after it leaves the device removed; a streamed record
 // after it is no new admission's to seal.
 func TestE2ERemovalPurgesSessionsAndAdmittedFinishes(t *testing.T) {
 	t.Run("startup reconciliation catches an earlier removal", func(t *testing.T) {
@@ -1247,6 +1288,19 @@ func TestE2ERemovalPurgesSessionsAndAdmittedFinishes(t *testing.T) {
 		t.Errorf("the second device's sessions after the removal = %d, want its one untouched", n)
 	}
 
+	// A call admitted before the removal reaches its stamp after it, and the
+	// device stays removed: a stamp that wrote its record back would bring
+	// back the channel key the device pinned.
+	stamped := httptest.NewRequest(http.MethodPost, E2EPath, nil)
+	stamped.RemoteAddr = linkRemoteAddr
+	y.u.stampE2EDevice(stamped, session)
+	if list, err := y.st.Devices(ctx, "sam"); err != nil || len(list) != 0 {
+		t.Errorf("sam's devices after the stamp of a call admitted before the removal = %+v, %v, want none", list, err)
+	}
+	if got, err := y.st.DeviceByChannelKey(ctx, yardkey.ChannelPublic(d.key)); err != nil || got != nil {
+		t.Errorf("the removed device's channel key after that stamp names %+v, %v", got, err)
+	}
+
 	// The streamed next record and final are refused; the stream the
 	// device held ends with no event the removal preceded and no final.
 	streamed.Flush()
@@ -1298,6 +1352,14 @@ func TestE2ERemovalPurgesSessionsAndAdmittedFinishes(t *testing.T) {
 	}
 	if outer, _, status, _, _ := other.call(t, http.MethodGet, "/user/me", nil, nil, plain, plain); outer != http.StatusOK || status != http.StatusOK {
 		t.Errorf("the second device's call = outer %d, inner %d", outer, status)
+	}
+
+	// If the name is reused before that admitted call reaches its stamp, the
+	// old session must not mark the replacement as used.
+	replacement := newE2EDevice(t, y, "sam", "phone")
+	y.u.stampE2EDevice(stamped, session)
+	if list, err := y.st.Devices(ctx, "sam"); err != nil || len(list) != 1 || list[0].LastUsed != nil || list[0].ChannelKey != yardkey.ChannelPublic(replacement.key) {
+		t.Errorf("sam's replacement after the old session's stamp = %+v, %v", list, err)
 	}
 }
 

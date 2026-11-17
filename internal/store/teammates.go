@@ -18,9 +18,9 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// TeammateDevice is one device of a teammate's row: its name and when its
-// token was last resolved, nil for never. Where it was resolved from is no
-// device's business, so LastFrom is not told.
+// TeammateDevice is one device of a teammate's row: its name and when it
+// last made a call, sealed or plain, nil for never. Where the call came from
+// is no device's business, so LastFrom is not told.
 type TeammateDevice struct {
 	Name     string     `json:"name"`
 	LastUsed *time.Time `json:"last_used,omitempty"`

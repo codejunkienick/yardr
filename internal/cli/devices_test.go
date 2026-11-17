@@ -104,7 +104,8 @@ func TestDeviceCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := own.DevicePairRedeemSealed(ctx, pairing.Code, key(2)); err != nil {
+	watch, err := own.DevicePairRedeemSealed(ctx, pairing.Code, key(2))
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -134,6 +135,17 @@ func TestDeviceCommands(t *testing.T) {
 		t.Fatalf("user show (used about %s):\n%s", used, show)
 	}
 	wantText(t, mustAs(t, st, "jo", "user", "show", "ada"), "  device: laptop, added ", ", last used never\n", "  device: tablet, added ", ", last used never, sealed (in place)\n")
+	// A call sealed on a device's channel carries no token, and the server
+	// stamps the device's use when the call opens (StampDeviceUse): the list
+	// and user show then read it as they read a device that calls plain, and
+	// not as the "never" of one that has only paired.
+	if err := own.StampDeviceUse(ctx, "jo", "watch", watch.ChannelKey, "edge"); err != nil {
+		t.Fatal(err)
+	}
+	if show := mustAs(t, st, "jo", "user", "show", "jo"); !regexp.MustCompile(`(?m)^  device: watch, added \d\d-\d\d \d\d:\d\d, last used \d\d-\d\d \d\d:\d\d from edge, sealed \(paired\)$`).MatchString(show) {
+		t.Fatalf("user show of a sealed device that has called:\n%s", show)
+	}
+	wantText(t, mustAs(t, st, "jo", "user", "device", "list"), "  watch   ", " from edge, sealed (paired)\n", "  tablet  ", "  never, sealed (in place)\n")
 	for _, args := range [][]string{
 		{"user", "device", "list"}, {"user", "device", "list", "--json"}, {"user", "show", "jo"}, {"user", "show", "ada", "--json"},
 		{"user", "list", "--json"}, {"events", "--json"},
@@ -209,7 +221,9 @@ type agedDevices struct {
 func (a agedDevices) Devices(context.Context, string) ([]store.Device, error) { return a.devices, nil }
 
 // yardr doctor notes a device that has not been used for 30 days, and one
-// that never was 30 days after it was added; it says nothing of one in use.
+// that never was 30 days after it was added; it says nothing of one in use,
+// and a device that calls sealed on its channel is one: its use is stamped
+// when a call opens (store.StampDeviceUse), and read as a plain call's is.
 func TestDoctorNotesAnUnusedDevice(t *testing.T) {
 	t.Parallel()
 	st := userYard(t)
@@ -221,6 +235,7 @@ func TestDoctorNotesAnUnusedDevice(t *testing.T) {
 		{User: "jo", Name: "laptop", CreatedAt: added, LastUsed: &recent, LastFrom: "100.64.0.7"},
 		{User: "jo", Name: "watch", CreatedAt: added},
 		{User: "jo", Name: "new", CreatedAt: now},
+		{User: "jo", Name: "tablet", CreatedAt: added, LastUsed: &now, LastFrom: "edge", ChannelKey: "key", ChannelPinned: store.PinnedPaired},
 	}}
 	out, _ := as(t, aged, "jo", "doctor")
 	wantText(t, out,
@@ -228,7 +243,7 @@ func TestDoctorNotesAnUnusedDevice(t *testing.T) {
 			"If it is no longer in use: ",
 		" user device rm jo phone\n",
 		"device watch of jo has not been used for 30 days (never used, added "+added.Local().Format(mailTime)+"), and its token still calls as jo.")
-	for _, name := range []string{"laptop", "new"} {
+	for _, name := range []string{"laptop", "new", "tablet"} {
 		if strings.Contains(out, "device "+name) {
 			t.Errorf("doctor notes the device %s, which is in use or new:\n%s", name, out)
 		}

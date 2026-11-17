@@ -71,9 +71,12 @@ type Device struct {
 	// pinned; a record with a key and none, kept before the field was,
 	// is read as PinnedPaired (withPinned).
 	ChannelPinned string `json:"channel_pinned,omitempty"`
-	// LastUsed is when its token was last resolved, nil for never, and
-	// LastFrom the address that call came from, as whoever resolved it
-	// gave it.
+	// LastUsed is when the device last made a call, sealed or plain, nil for
+	// never, and LastFrom the address that call came from, as whoever
+	// served it gave it. A plain call carried the device's token, and
+	// resolving it is what records the use (ResolveDevice); a call sealed on
+	// the device's channel carries none, and the server records it once the
+	// call has opened (StampDeviceUse).
 	LastUsed *time.Time `json:"last_used,omitempty"`
 	LastFrom string     `json:"last_from,omitempty"`
 }
@@ -546,6 +549,69 @@ func (s *Store) ResolveDevice(ctx context.Context, token, from string) (*Device,
 		return nil, err
 	}
 	return &d.Device, nil
+}
+
+// StampDeviceUse records a call of the device name of user as the device's
+// last use, for the call ResolveDevice never sees: one sealed on the
+// device's channel, which carries no token to resolve. Without it a device
+// that calls daily over the channel reads as last used when it was paired,
+// and yardr doctor invites removing it. channelKey is the key that opened
+// the call: a call admitted before removal must not stamp a new device that
+// reuses the name. from is the address the call came from, as the caller
+// knows it; with the time it is kept as the last use, by the rules
+// ResolveDevice keeps it by: written at most once in deviceUseEvery while
+// the address stays the same, and not at all while the yard is writing, when
+// the device's next call finds the last use still due.
+//
+// A device that is not there is left not there, with no error, and never made:
+// the call may have been admitted before the device's removal committed, and
+// a stamp that wrote the record back would bring back a device whose token
+// is refused, with the channel key it pinned (stampDeviceIn reads it again for
+// that). A removed and re-added device is left alone when its channel key is
+// different. Like ResolveDevice it is the server's to ask, for a call it was
+// sent, and no method of the API.
+func (s *Store) StampDeviceUse(ctx context.Context, user, name, channelKey, from string) error {
+	from = truncateFrom(from)
+	key := join(user, name)
+	d := new(deviceRecord)
+	var found bool
+	if err := s.read(func(tx *bolt.Tx) (err error) {
+		found, err = get(tx, bDevices, key, d)
+		return err
+	}); err != nil || !found {
+		return err
+	}
+	if d.ChannelKey != channelKey {
+		return nil
+	}
+	at := now()
+	if d.LastUsed != nil && d.LastFrom == from && at.Sub(*d.LastUsed) < deviceUseEvery {
+		return nil
+	}
+	// The stamp is a record for the operator and no part of who the caller
+	// is, so a yard that is writing leaves it to the next call, as
+	// ResolveDevice does: this write would queue behind the one in flight
+	// for the store's one writer (yardr-wpgc).
+	if s.writing.Load() > 0 {
+		return nil
+	}
+	return s.write(func(w *wtx) error { return stampDeviceIn(w.Tx, key, channelKey, from, at) })
+}
+
+// stampDeviceIn is the write of a device's last use. It reads the record
+// again, in the write: the device may have been removed or replaced since
+// the look that found it due, and a record that is gone or pins another key
+// is left alone.
+func stampDeviceIn(tx *bolt.Tx, key, channelKey, from string, at time.Time) error {
+	d := new(deviceRecord)
+	if ok, err := get(tx, bDevices, key, d); err != nil || !ok {
+		return err
+	}
+	if d.ChannelKey != channelKey {
+		return nil
+	}
+	d.LastUsed, d.LastFrom = &at, from
+	return put(tx, bDevices, key, d)
 }
 
 // truncateFrom bounds an address that is kept: it is text from outside.

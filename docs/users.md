@@ -998,10 +998,12 @@ user's name has, and one of a kind among that user's devices: a second
 device list <user>` lists one user's.
 
 **A token does not end by itself.** It is refused once its device is
-removed, or its user (`yardr user rm`). `LAST USED` is when a call last
-carried it and the address that call came from, written at most once a
-minute while the address stays the same; behind a proxy that is the proxy's
-address. `yardr doctor` notes a device that has not been used for 30 days,
+removed, or its user (`yardr user rm`). `LAST USED` is when the device last
+made a call and the address that call came from: a call that carried its
+token, or one sealed on its channel, which carries none. It is written at
+most once a minute while the address stays the same; behind a proxy that is
+the proxy's address, and down the link from the edge it is `edge`.
+`yardr doctor` notes a device that has not been used for 30 days,
 or was never used 30 days after it was added, with the command that removes
 it ([doctor.md](doctor.md)); nothing is removed for you.
 
@@ -1485,8 +1487,9 @@ with `user` and `device`; a pairing's are [below](#enrolled-by-a-code).
 
 From Go the commands are `store.API`'s `AddDevice`, `Devices`,
 `RemoveDevice`, `DevicePairOpen` and `DevicePairClose`. Resolving a token to its device and user is the server's
-own (`(*store.Store).ResolveDevice`) and is no call on the socket; the
-handler of the listener is `rpc.UserServer`.
+own (`(*store.Store).ResolveDevice`), and so is recording the use of a call
+sealed on a device's channel (`(*store.Store).StampDeviceUse`): neither is a
+call on the socket. The handler of the listener is `rpc.UserServer`.
 
 ### Footplate on another machine
 
@@ -1867,8 +1870,8 @@ that only logged the call cannot. So the device list keeps the difference:
 ```text
 $ yardr user device list
 USER  DEVICE  ADDED        LAST USED
-sam   phone   11-05 09:12  11-05 09:40 from the edge, sealed (paired)
-sam   tablet  10-28 18:03  11-04 22:15 from the edge, sealed (in place)
+sam   phone   11-05 09:12  11-05 09:40 from edge, sealed (paired)
+sam   tablet  10-28 18:03  11-04 22:15 from edge, sealed (in place)
 ```
 
 The label lasts for as long as the device keeps the key it registered.
