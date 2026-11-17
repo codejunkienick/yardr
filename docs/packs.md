@@ -2150,7 +2150,11 @@ digest is the one `yardr pack check` prints. Both take the depot and the
 mappings and no other flag, and both refuse a plan that still asks after the
 mappings, whole and with nothing written. No card or other road answers a
 plan's questions for a delegated apply; a pack whose plan asks stays the
-operator's, in a terminal, until its questions are settled in the pack. The
+operator's, in a terminal, until its questions are settled in the pack. Nor
+does it take: a flow, stage file or role the yard changed stays as the yard
+has it, as under any apply that takes nothing, and `--take` is refused for any
+name, with nothing written and no record. Setting the pack's version over the
+yard's change is the operator's, in a terminal or on a pack apply card. The
 card's bounds do not bind this road: a pack past 40 lines or 1 MiB applies,
 up to what the run's record can hold. Before the first object the yard
 writes that record, with the digest, the plan's objects by name, each updated

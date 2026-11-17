@@ -43,8 +43,11 @@ func (a *app) packApplyRun(c *cobra.Command, name string, f *importFlags) error 
 // shaping or answering the import past its mappings: the run takes
 // --depot and the mappings (--flow, --crew, --group, --bind, --members,
 // --open-threads, --calls) alone, and for a pack of the packs repository
-// the pin (--sha256) beside them.
-var delegatedPackFlags = []string{"auth", "depot-roles", "pack-roles", "source-env", "source-base", "notify", "yes", "sha256", "prune"}
+// the pin (--sha256) beside them. --take is one, as --yes is: it overwrites
+// what the yard changed, which is the operator's to do, and this road never
+// handed it to pack.Apply, so it was dropped unsaid. pack.Apply refuses a
+// take of a delegated run as well, whoever calls it.
+var delegatedPackFlags = []string{"auth", "depot-roles", "pack-roles", "source-env", "source-base", "notify", "yes", "take", "sha256", "prune"}
 
 // refuseFlags refuses a delegated pack apply that carries a flag of
 // delegatedPackFlags other than allow, naming the command the run takes.

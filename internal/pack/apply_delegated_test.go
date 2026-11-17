@@ -603,13 +603,14 @@ func TestDelegatedRepositoryApplyRestoresThePriorDigest(t *testing.T) {
 	}
 }
 
-// A kept object an apply is told to take is written as the change it is, so
-// the delegated record holds what stood of it as it holds that of any change:
-// the yard's copy of a role, whole, with the diff to the pack's. A flow it
-// takes is no store write the record names (a delegated record admits the
-// objects the import creates or changes, and the plan says kept), so that
-// write is refused, naming the record, rather than made unheld.
-func TestDelegatedApplyOfATakenObjectHoldsWhatStood(t *testing.T) {
+// A delegated apply takes nothing. A take, a flow's as much as a file's, is
+// refused whole before the record and the first object, one sentence for each
+// name saying where the take is made, so that nothing is written, no record
+// starts and no mail goes out, and the yard's flow and role stand as they
+// were. The store's own refusal of a flow write its record does not name is
+// not what stops it: that one came after the objects before it. The same
+// takes by the operator, with no delegation, are carried out.
+func TestDelegatedApplyRefusesATake(t *testing.T) {
 	st, o, dctx, setPlan := delegatedPackYard(t)
 	withLinearAs(t, st)
 	dir := copyStarter(t)
@@ -634,34 +635,50 @@ func TestDelegatedApplyOfATakenObjectHoldsWhatStood(t *testing.T) {
 	setPlan(plan)
 	stood := storedDigest(t, st, "starter.default")
 
-	// The flow: refused at its write, with nothing of it written.
-	_, err := pack.Apply(dctx, st, plan, pack.ApplyOptions{Answers: answered(t, plan, answers), Actor: "yardmaster", Take: []string{"flow/starter.default"}})
-	if err == nil || !strings.Contains(err.Error(), "names no such flow to write") {
-		t.Fatalf("a delegated take of a flow = %v, want the write refused", err)
-	}
-	if got := storedDigest(t, st, "starter.default"); got != stood {
-		t.Fatalf("the refused take changed the flow: %s, was %s", got, stood)
-	}
-
-	// The role: written as the pack has it, and the record holds the copy
-	// that stood.
-	plan = build(t, st, p, o)
-	setPlan(plan)
-	res, err := pack.Apply(dctx, st, plan, pack.ApplyOptions{Answers: answered(t, plan, answers), Actor: "yardmaster", Take: []string{"file/roles/builder.md"}})
-	if err != nil || res.Changed != 1 || len(res.Kept) != 1 {
-		t.Fatalf("a delegated take of a role = %+v, %v, want it changed and the flow still kept", res, err)
-	}
-	if data, err := os.ReadFile(installed); err != nil || string(data) == byHand {
-		t.Fatalf("the role after the take = %q, %v, want the pack's", data, err)
-	}
-	var role *store.DelegatedPackObject
-	body := delegatedBody(t, st, latestDelegated(t, st))
-	for i := range body.Objects {
-		if body.Objects[i].Kind == "file" && body.Objects[i].Name == "roles/builder.md" {
-			role = &body.Objects[i]
+	const flow, role = "flow/starter.default", "file/roles/builder.md"
+	for _, take := range [][]string{{flow}, {role}, {flow, role}} {
+		before := head(t, st)
+		res, err := pack.Apply(dctx, st, plan, pack.ApplyOptions{Answers: answered(t, plan, answers), Actor: "yardmaster", Take: take})
+		if res != nil || err == nil || !strings.HasPrefix(err.Error(), "nothing was changed: ") {
+			t.Fatalf("a delegated take of %v = %+v, %v, want it refused, nothing changed", take, res, err)
+		}
+		// A sentence for each name, joined as the plan's own refusals of a take
+		// are, each saying a delegated apply takes nothing and where it is made.
+		sentences := strings.Split(strings.TrimPrefix(err.Error(), "nothing was changed: "), "; ")
+		if len(sentences) != len(take) {
+			t.Fatalf("a delegated take of %v = %v, want a sentence for each name", take, err)
+		}
+		for i, name := range take {
+			if !strings.HasPrefix(sentences[i], "--take "+name+": a delegated apply takes nothing") || !strings.Contains(sentences[i], "the operator's, at a terminal or on a pack apply card") {
+				t.Errorf("the sentence for %s = %q, want it to say a delegated apply takes nothing, and where the operator takes", name, sentences[i])
+			}
+		}
+		// Before the record and the first object: no record, no event, and what
+		// the yard has of the flow and the role stands.
+		if _, err := st.Delegation(ctx, 1, "jo"); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("a refused take of %v left a delegated record: %v", take, err)
+		}
+		if got := kinds(t, st, before); len(got) != 0 {
+			t.Errorf("a refused take of %v logged %v", take, got)
+		}
+		if got := storedDigest(t, st, "starter.default"); got != stood {
+			t.Fatalf("a refused take of %v changed the flow: %s, was %s", take, got, stood)
+		}
+		if data, err := os.ReadFile(installed); err != nil || string(data) != byHand {
+			t.Fatalf("a refused take of %v changed the role: %q, %v", take, data, err)
 		}
 	}
-	if role == nil || role.Action != pack.Kept || !role.Had || role.Before != byHand || !strings.Contains(role.Diff, "-"+strings.TrimSuffix(byHand, "\n")) {
-		t.Fatalf("the record's role = %+v, want what stood whole and its diff", role)
+
+	// The operator's own apply of the same plan, with no delegation, takes
+	// both: it is the delegation that refuses, not the take.
+	res, err := pack.Apply(ctx, st, plan, pack.ApplyOptions{Answers: answered(t, plan, answers), Actor: "jo", Take: []string{flow, role}})
+	if err != nil || res.Changed != 2 || len(res.Kept) != 0 {
+		t.Fatalf("the operator's take of both = %+v, %v, want both changed and nothing kept", res, err)
+	}
+	if got := storedDigest(t, st, "starter.default"); got == stood {
+		t.Error("the operator's take left the yard's flow")
+	}
+	if data, err := os.ReadFile(installed); err != nil || string(data) == byHand {
+		t.Errorf("the role after the operator's take = %q, %v, want the pack's", data, err)
 	}
 }

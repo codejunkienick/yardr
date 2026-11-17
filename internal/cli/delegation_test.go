@@ -301,6 +301,7 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 	}
 	for words, want := range map[string]string{
 		"pack apply telegram --yes":                               "no other flag, not --yes",
+		"pack apply telegram --take flow/telegram.default":        "no other flag, not --take",
 		"pack apply nosuchpack":                                   "embeds no pack of that name",
 		"pack apply " + t.TempDir():                               "applies a pack yardr embeds",
 		"pack apply telegram --sha256 " + strings.Repeat("a", 64): "no other flag, not --sha256",
@@ -428,6 +429,7 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 		"pack apply " + strings.Replace(from, "yardr-packs", "other", 1) + " --sha256 " + pin: "is not in the packs repository",
 		"pack apply " + from + " --sha256 " + strings.Repeat("a", 64):                         "is not the one pinned",
 		"pack apply " + from + " --sha256 " + pin + " --yes":                                  "no other flag, not --yes",
+		"pack apply " + from + " --sha256 " + pin + " --take flow/pushover.default":           "no other flag, not --take",
 		"pack apply " + from + " --sha256 " + pin + " --auth packs":                           "no other flag, not --auth",
 		"pack apply " + origin + "pushover/roles/ --sha256 " + pin:                            "want one pack's name",
 		// A plan that still asks refuses whole, as an embedded one does.

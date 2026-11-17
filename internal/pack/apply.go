@@ -39,7 +39,9 @@ type ApplyOptions struct {
 	// flow/starter.default, file/roles/builder.md. Overwrite does not take a
 	// flow, a stage file or a role: it only lifts the stop of a script or the
 	// frame. A name that is no kept object of the plan refuses the import
-	// before anything is written, a declared source's among them.
+	// before anything is written, a declared source's among them, and so
+	// does any name at all in a delegated apply, which takes nothing
+	// (beginDelegated): a take is the operator's.
 	Take []string
 	// OpenThreads are the operator's answers to what the plan asks under
 	// OpenThreads: the yard's crew member -> source -> yes or no. A yes lets

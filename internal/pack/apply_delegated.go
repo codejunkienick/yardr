@@ -8,7 +8,8 @@ package pack
 // object's diff and the complete before-state read from what stands; it
 // is rewritten "done" or "failed" at the end, a failure naming the
 // objects written before it. A record that would pass the blob cap
-// refuses before anything writes (store.StartDelegatedPack). The
+// refuses before anything writes (store.StartDelegatedPack), and so does a
+// take (ApplyOptions.Take), which a delegated run never makes. The
 // partial import stays either way, and applying again finishes it. A
 // pack of the packs repository (Plan.Dir a URL) is the same run, with the
 // URL beside its digest and, in the record, the digest that stood before.
@@ -39,11 +40,25 @@ type delegatedRun struct {
 
 // beginDelegated starts the record of a delegated apply, after check has
 // passed and before anything writes: a plan check refuses, a plan that
-// asks included, leaves no record, as an ordinary apply leaves none. It
-// answers nil where the call carries no delegated run.
+// asks included, leaves no record, as an ordinary apply leaves none, and so
+// does a take. It answers nil where the call carries no delegated run.
 func (p *Plan) beginDelegated(ctx context.Context, st store.API, o ApplyOptions, ck *checked) (*delegatedRun, error) {
 	if _, ok := store.DelegationOf(ctx); !ok {
 		return nil, nil
+	}
+	// A take sets the pack's version over what the yard changed, which is the
+	// operator's to decide, at a terminal or on a card, and a delegated run
+	// takes nothing. It is refused whatever the kind, and not by what the store
+	// happens to refuse: a flow's write is, but only after the objects before
+	// it were written, and a kind-by-kind allowance would let the next kind
+	// through. Refused here, before the record and the first object, it leaves
+	// no partial import for applying again to finish.
+	if len(o.Take) > 0 {
+		refused := make([]string, len(o.Take))
+		for i, name := range o.Take {
+			refused[i] = fmt.Sprintf("--take %s: a delegated apply takes nothing, since setting the pack's version over the yard's change is the operator's, at a terminal or on a pack apply card", name)
+		}
+		return nil, fmt.Errorf("nothing was changed: %s", strings.Join(refused, "; "))
 	}
 	objects, err := p.delegatedObjects(ctx, st, o, ck)
 	if err != nil {
@@ -141,9 +156,7 @@ func (p *Plan) delegatedObjects(ctx context.Context, st store.API, o ApplyOption
 	for i := range p.Objects {
 		obj := &p.Objects[i]
 		rec := store.DelegatedPackObject{Kind: obj.Kind, Name: obj.Name, Action: obj.Action}
-		// A kept object the import is told to take is written as the change it
-		// is, so the record holds what stood of it as it does of any change.
-		if (obj.Action == Create || obj.Action == Change || o.takes(*obj)) && !obj.refused(o) {
+		if (obj.Action == Create || obj.Action == Change) && !obj.refused(o) {
 			diff, before, had, err := p.delegatedBefore(ctx, st, obj, ck)
 			if err != nil {
 				return nil, err
