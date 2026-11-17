@@ -52,8 +52,8 @@ import (
 //
 //   - only the calls of Calls, by name: every other method of the store, and
 //     the array form yardr's own builds use, is answered as not there. The
-//     calls more are nine of OperatorCalls, GiveSecret, ApproveAsk,
-//     ApproveSetup, SourceGrants, SessionScreen, Teammates,
+//     calls more are ten of OperatorCalls, GiveSecret, ApproveAsk,
+//     ApproveSetup, SourceGrants, SessionScreen, Line, Teammates,
 //     UninviteTeammate, TelemetryShow and TelemetrySet, for a device of
 //     an operator, and not there for anyone else (operatorCall), but
 //     GiveSecret for a device of a user whose own address or credential

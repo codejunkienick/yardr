@@ -236,6 +236,7 @@ var Access = map[string]Class{
 	"Uncounted":           Read,
 	"FailureCount":        Read,
 	"SessionScreen":       Operator, // a screen can show what an agent printed, a secret among it
+	"Line":                Operator, // a cmd and a prompt are the operator's to read
 
 	// The log and the store.
 	"Events":        Read,

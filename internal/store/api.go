@@ -149,6 +149,7 @@ type API interface {
 	Uncounted(ctx context.Context) ([]Session, error)
 	FailureCount(ctx context.Context, bead, stage string) (int, error)
 	SessionScreen(ctx context.Context, session string) (*SessionScreen, error)
+	Line(ctx context.Context, depot string) (*Line, error)
 
 	Events(ctx context.Context, bead string, limit int) ([]Event, error)
 	EventsOfKind(ctx context.Context, kind string, limit int) ([]Event, error)

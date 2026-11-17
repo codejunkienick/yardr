@@ -25,15 +25,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash"
-	"io"
 	"maps"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"unicode/utf8"
 )
 
@@ -334,13 +330,7 @@ func (w *wtx) heldPrompt(name, subject, path, text string, say promptWords) (str
 // homeDirs is the yard's home as named and as its symlinks resolve it, in the
 // words of a refusal that names subject.
 func (w *wtx) homeDirs(subject string) (home, real string, err error) {
-	if home, err = filepath.Abs(w.home); err != nil {
-		return "", "", fmt.Errorf("%s: resolve the yard's home: %w", subject, err)
-	}
-	if real, err = filepath.EvalSymlinks(home); err != nil {
-		return "", "", fmt.Errorf("%s: resolve the yard's home: %w", subject, err)
-	}
-	return home, real, nil
+	return homeDirsAt(w.home, subject)
 }
 
 // homeFile is the regular file at path that stands under the yard's home
@@ -354,53 +344,10 @@ func (w *wtx) homeDirs(subject string) (home, real string, err error) {
 // the disk is asked about it, so the refusal tells nothing of what stands
 // elsewhere.
 func (w *wtx) homeFile(subject, path string, limit int, digest bool) (real string, data, sum []byte, err error) {
-	home, homeReal, err := w.homeDirs(subject)
-	if err != nil {
-		return "", nil, nil, err
-	}
-	under := func(p string) bool {
-		return strings.HasPrefix(p, filepath.Clean(home)+string(filepath.Separator)) || strings.HasPrefix(p, filepath.Clean(homeReal)+string(filepath.Separator))
-	}
-	if !under(filepath.Clean(path)) {
-		return "", nil, nil, fmt.Errorf("%s: prompt file %s is outside the yard's home: a card carries a prompt that stands under it", subject, filepath.Clean(path))
-	}
-	real, err = filepath.EvalSymlinks(filepath.Clean(path))
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("%s: prompt file %s: %s", subject, path, OneLine(err.Error()))
-	}
-	if !strings.HasPrefix(real, filepath.Clean(homeReal)+string(filepath.Separator)) {
-		return "", nil, nil, fmt.Errorf("%s: prompt file %s resolves to %s, outside the yard's home: a card carries a prompt that stands under it", subject, path, real)
-	}
 	// Opened without blocking and judged by the open file, so a file that
-	// became a pipe since it was named cannot hold the write.
-	f, err := os.OpenFile(real, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("%s: prompt file %s: %s", subject, real, OneLine(err.Error()))
-	}
-	defer f.Close()
-	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
-		return "", nil, nil, fmt.Errorf("%s: prompt file %s is not a regular file", subject, real)
-	}
-	var reader io.Reader = f
-	var hasher hash.Hash
-	if digest && (yardPromptName.MatchString(path) || yardPromptName.MatchString(real)) {
-		h := sha256.New()
-		reader, hasher = io.TeeReader(f, h), h
-	}
-	data, err = io.ReadAll(io.LimitReader(reader, int64(limit)+1))
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("%s: prompt file %s: %s", subject, real, OneLine(err.Error()))
-	}
-	if hasher != nil {
-		// The hash is of the bounded read alone, even when the file runs
-		// past it: every prompt the yard writes fits the bound, so a
-		// digest-named file longer than that no longer holds the text its
-		// name says, and its prefix hash says so. Hashing the rest would
-		// stall the store's single writer on a same-user rewrite of any
-		// size, drawn into a card's read.
-		return real, data, hasher.Sum(nil), nil
-	}
-	return real, data, nil, nil
+	// became a pipe since it was named cannot hold the write, and the hash
+	// is of the bounded read alone (homeFileAt, promptlook.go).
+	return homeFileAt(w.home, subject, path, limit, digest)
 }
 
 // checkGroupAdd is adding a group as the asker: what defines what the

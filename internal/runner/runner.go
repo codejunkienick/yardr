@@ -484,7 +484,9 @@ func unavailable(err error) string {
 // Any other relative path is looked up in the depot's working tree, then in
 // the home.
 func readPrompt(p string, depot *store.Depot, home string) ([]byte, error) {
-	text, _, err := lookPrompt(p, depot, home)
+	// The lookup is the store's (store.LookupPrompt), shared with the
+	// Line read so a brief and the read cannot disagree.
+	text, _, _, err := store.LookupPrompt(context.Background(), p, depot, home)
 	return text, err
 }
 
@@ -505,108 +507,24 @@ func readDepotRules(depot *store.Depot) (text []byte, ok bool, err error) {
 	return text, true, nil
 }
 
-// Where a prompt is found (PromptSource.Kind).
+// Where a prompt is found (PromptSource.Kind): the store's words, kept
+// here for the callers that name them (depot sources, pack export).
 const (
-	PromptDepot = "depot" // a file of the depot
-	PromptHome  = "home"  // a file under the yard's home, found by name
-	PromptFile  = "file"  // an absolute path, read as it is
+	PromptDepot = store.PromptDepot // a file of the depot
+	PromptHome  = store.PromptHome  // a file under the yard's home, found by name
+	PromptFile  = store.PromptFile  // an absolute path, read as it is
 )
 
-// PromptSource says where readPrompt finds a prompt.
-type PromptSource struct {
-	Kind string
-	// Path is relative to the depot's root for a file of the depot, else
-	// absolute.
-	Path string
-	// Commit is the base commit a depot's file was read at; empty for one
-	// read from the depot's working tree or a dir depot's directory.
-	Commit string
-}
+// PromptSource says where readPrompt finds a prompt: the store's, whose
+// LookupPrompt a brief and the Line read share.
+type PromptSource = store.PromptSource
 
 // LocatePrompt says where the prompt p of a group working a bead of depot is
 // read from, by the lookup a brief makes: `yardr depot sources` shows it. An
 // error means a brief could not be written either.
 func LocatePrompt(p string, depot *store.Depot, home string) (PromptSource, error) {
-	_, src, err := lookPrompt(p, depot, home)
+	_, src, _, err := store.LookupPrompt(context.Background(), p, depot, home)
 	return src, err
-}
-
-func lookPrompt(p string, depot *store.Depot, home string) ([]byte, PromptSource, error) {
-	if filepath.IsAbs(p) {
-		text, err := os.ReadFile(p)
-		return text, PromptSource{Kind: PromptFile, Path: p}, err
-	}
-	name, isRole := roleName(p)
-	if !isRole {
-		return findPlain(p, depot, home)
-	}
-	var tried []string
-	if depot != nil && depot.Path != "" {
-		rel := filepath.Join(".yardr", "roles", name)
-		text, where, sha, err := depotfile.ReadDepotFile(depot, rel)
-		if err == nil {
-			return text, PromptSource{Kind: PromptDepot, Path: rel, Commit: sha}, nil
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return nil, PromptSource{}, err
-		}
-		tried = append(tried, where)
-	}
-	if home != "" {
-		path := filepath.Join(config.At(home).Roles(), name)
-		text, err := os.ReadFile(path)
-		if err == nil || !errors.Is(err, fs.ErrNotExist) {
-			return text, PromptSource{Kind: PromptHome, Path: path}, err
-		}
-		tried = append(tried, path)
-	}
-	if len(tried) == 0 {
-		text, err := os.ReadFile(p)
-		return text, PromptSource{Kind: PromptFile, Path: p}, err
-	}
-	return nil, PromptSource{}, fmt.Errorf("%s not found (looked in %s)", p, strings.Join(tried, ", "))
-}
-
-// roleName is the file name of a role prompt: roles/<name>.md or <name>.md.
-func roleName(p string) (string, bool) {
-	p = filepath.Clean(p)
-	dir, file := filepath.Split(p)
-	if filepath.Ext(file) != ".md" || (dir != "" && dir != "roles"+string(filepath.Separator)) {
-		return "", false
-	}
-	return file, true
-}
-
-// findPlain reads a relative prompt that is not a role from the depot's
-// working tree, else the home.
-func findPlain(p string, depot *store.Depot, home string) ([]byte, PromptSource, error) {
-	var tried []string
-	for _, dir := range []string{depotPath(depot), home} {
-		if dir == "" {
-			continue
-		}
-		path := filepath.Join(dir, p)
-		text, err := os.ReadFile(path)
-		if err == nil || !errors.Is(err, fs.ErrNotExist) {
-			src := PromptSource{Kind: PromptHome, Path: path}
-			if dir != home {
-				src = PromptSource{Kind: PromptDepot, Path: p}
-			}
-			return text, src, err
-		}
-		tried = append(tried, path)
-	}
-	if len(tried) == 0 {
-		text, err := os.ReadFile(p)
-		return text, PromptSource{Kind: PromptFile, Path: p}, err
-	}
-	return nil, PromptSource{}, fmt.Errorf("%s not found (looked in %s)", p, strings.Join(tried, ", "))
-}
-
-func depotPath(depot *store.Depot) string {
-	if depot == nil {
-		return ""
-	}
-	return depot.Path
 }
 
 // writeNext lists the stages the bead's flow allows from stage, each with

@@ -1017,6 +1017,86 @@ var apiOperatorCalls = []apiCall{
 		},
 	},
 	{
+		method: "Line",
+		says:   "Reads one depot's line: every flow that governs the depot, the depot's own first and then one per type, with its stages in the flow's order, who serves each stage, its stage file and the prompts of its groups and of the crew, whole. It changes nothing. The representative route of a stage is the route a probe bead of the depot, of the flow's type (the default type where the flow has none) at the default priority with no labels reading as the operator's would take, answered whole; every other effective route of the stage stands behind it with its id, scope, filters and first group, so a stage whose labelled, urgent or another user's beads take a different rule shows that rule. A rule's scope is `this depot's own` where it names the depot and `yard-wide` where it names none: a yard-wide rule serves every depot with no own route of its match key. Each filter is named and shown as unset where it is unset: an empty `type` takes any type, empty `labels` no label, an empty `priority` any priority, and an empty `originator` the operator's beads alone. A prompt a card cannot carry says why, by the card's own rules, and one that cannot be read names the paths tried and fails nothing else; no env file path stands anywhere in the answer. It is the operator's to read: on the socket the operator's alone, and on the listener there for a device of the operator and for no other caller. A `cmd` and a prompt are the operator's to read alone, so the listener takes it only over https or from the yard's own machine, like the other calls of this list, and down the link from the edge from a paired device of the operator, as an approval ([edge.md](edge.md#footplate-through-the-link)). A depot the yard has not is `not-found`.",
+		args: []field{
+			{"depot", "string", "the depot whose line is read"},
+		},
+		requests: []string{`{"depot":"yard"}`, `{"depot":"notes"}`, `{"depot":"linegit"}`},
+		fields: []field{
+			{"depot", "string", "the depot"},
+			{"kind", "string", "the depot's kind: `git` or `dir`"},
+			{"flows", "array", "the flows governing the depot, its own first, then one per type"},
+			{"flows[].name", "string", "the flow's name"},
+			{"flows[].type", "string", "the bead type the flow governs; `\"\"` for the depot's own"},
+			{"flows[].source", "string", "`repo@<commit>` for a git depot's repository flow, `repo (directory)` for a dir depot's directory flow, `pack <name>` for a pack-managed store flow, `store` for any other store flow"},
+			{"flows[].directory", "string?", "the directory a dir depot's directory flow was read from; absent on any other flow"},
+			{"flows[].stages", "array", "the stages in the flow's order"},
+			{"flows[].stages[].stage", "string", "the stage"},
+			{"flows[].stages[].next", "array of string", "the stages a bead in it may move to, in the flow's order; empty where the flow allows none"},
+			{"flows[].stages[].outcomes", "array?", "how work in the stage can end, as the flow offers it; absent where it offers none"},
+			{"flows[].stages[].outcomes[].name", "string", "the outcome's name"},
+			{"flows[].stages[].outcomes[].to", "string", "the stage it sends the bead to"},
+			{"flows[].stages[].outcomes[].max", "number?", "how many rounds back to `to` this outcome allows; absent where there is no limit"},
+			{"flows[].stages[].outcomes[].then", "string?", "the stage it sends the bead to once `max` rounds are used; absent where there is no limit"},
+			{"flows[].stages[].terminal", "bool", "whether entering the stage closes the bead"},
+			{"flows[].stages[].route", "object?", "the stage's representative route, whole; absent where no route serves the stage, which `warnings` then says"},
+			{"flows[].stages[].route.id", "string", "the route's id"},
+			{"flows[].stages[].route.scope", "string", "`this depot's own` or `yard-wide`"},
+			{"flows[].stages[].route.filters.type", "string", "the bead type it takes; `\"\"` takes any"},
+			{"flows[].stages[].route.filters.labels", "array of string", "every label a bead must have; empty takes none in particular"},
+			{"flows[].stages[].route.filters.priority", "string", "`P0-P1`, `P0`, or `\"\"` for any priority"},
+			{"flows[].stages[].route.filters.originator", "string", "the user whose beads it takes; `\"\"` takes the operator's alone, `any` every originator's"},
+			{"flows[].stages[].route.chain", "array", "the route's groups in order, each with its quota condition where it carries one (`when`, absent where it always holds)"},
+			{"flows[].stages[].route.chain[].name", "string", "the group"},
+			{"flows[].stages[].route.chain[].when", "string?", "the quota condition for this group in the chain; absent where it always holds"},
+			{"flows[].stages[].route.chain[].runner", "string", "`herdr`, `exec`, `manual` or `peer`"},
+			{"flows[].stages[].route.chain[].cmd", "string?", "an exec group's command, whole; absent on any other runner"},
+			{"flows[].stages[].route.chain[].kind", "string?", "a herdr group's kind, as its sessions start; absent on any other runner and where neither the group nor the yard names one"},
+			{"flows[].stages[].route.chain[].model", "string?", "a herdr group's model; absent where it names none"},
+			{"flows[].stages[].route.chain[].yard", "string?", "the linked yard for a peer group; absent on any other runner"},
+			{"flows[].stages[].route.chain[].members", "array of string?", "a manual group's members; absent on any other runner, and where none are listed anyone may move a bead on"},
+			{"flows[].stages[].route.chain[].prompt", "object?", "a herdr group's prompt where its config names one; absent otherwise"},
+			{"flows[].stages[].route.chain[].prompt.path", "string", "the prompt file as the config names it"},
+			{"flows[].stages[].route.chain[].prompt.source", "string?", "`depot`, `home`, `pack <name>` for a pack's installed copy, or `file` for a file as it stands; absent where the prompt was not found"},
+			{"flows[].stages[].route.chain[].prompt.found", "string?", "where the text was found: relative to the depot's root for a file of the depot, else absolute; absent where none was"},
+			{"flows[].stages[].route.chain[].prompt.commit", "string?", "the depot base commit the prompt was read at; absent where it was read from elsewhere or a directory"},
+			{"flows[].stages[].route.chain[].prompt.text", "string", "the prompt whole; `\"\"` where it cannot be read, which `tried` and `error` then say"},
+			{"flows[].stages[].route.chain[].prompt.digest", "string?", "the digest a yard-written prompt file is named by, in hex; absent where the file is none the yard wrote so"},
+			{"flows[].stages[].route.chain[].prompt.carriable", "bool", "whether a card can carry the prompt whole"},
+			{"flows[].stages[].route.chain[].prompt.why", "string?", "why a card cannot carry it, by the card's own rules; absent where it can"},
+			{"flows[].stages[].route.chain[].prompt.tried", "array of string?", "the paths the lookup tried, in order; an unreadable prompt names every path whose read failed; absent where none were tried"},
+			{"flows[].stages[].route.chain[].prompt.error", "string?", "why the lookup could not read the prompt; absent where it could"},
+			{"flows[].stages[].route.limit", "number?", "the first group's seat limit, `0` pausing the group; absent where the first group is not in the yard's groups"},
+			{"flows[].stages[].other_routes", "array", "every other effective route serving the stage, each with its `id`, `scope` and `filters` as the representative's, and its `group`, the chain's first group"},
+			{"flows[].stages[].other_routes[].id", "string", "the route's id"},
+			{"flows[].stages[].other_routes[].scope", "string", "`this depot's own` or `yard-wide`"},
+			{"flows[].stages[].other_routes[].filters", "object", "the route's filters, with each unset one shown"},
+			{"flows[].stages[].other_routes[].filters.type", "string", "the bead type it takes; `\"\"` takes any"},
+			{"flows[].stages[].other_routes[].filters.labels", "array of string", "every label a bead must have; empty takes none in particular"},
+			{"flows[].stages[].other_routes[].filters.priority", "string", "`P0-P1`, `P0`, or `\"\"` for any priority"},
+			{"flows[].stages[].other_routes[].filters.originator", "string", "the user whose beads it takes; `\"\"` takes the operator's alone, `any` every originator's"},
+			{"flows[].stages[].other_routes[].group", "string", "the chain's first group"},
+			{"flows[].stages[].open", "number", "the open beads in the stage that this flow governs, counted once and split by no rule"},
+			{"flows[].stages[].warnings", "array?", "why beads in the stage wait, as `flow show` prints them; absent where nothing waits so"},
+			{"flows[].stages[].stage_file", "object?", "the stage's file where it has one; absent where it has none"},
+			{"flows[].stages[].stage_file.path", "string", "the file, as `flow show` names it"},
+			{"flows[].stages[].stage_file.text", "string", "the file whole"},
+			{"crew", "array", "the crew members, each with its prompt where its config names one (as a stage's prompt says it); a member with none carries its name alone"},
+			{"crew[].name", "string", "the crew member"},
+			{"crew[].prompt", "object?", "the crew member's prompt where its config names one; absent otherwise"},
+			{"crew[].prompt.path", "string", "the prompt file as the config names it"},
+			{"crew[].prompt.source", "string?", "`depot`, `home`, `pack <name>` for a pack's installed copy, or `file` for a file as it stands; absent where the prompt was not found"},
+			{"crew[].prompt.found", "string?", "where the text was found: relative to the depot's root for a file of the depot, else absolute; absent where none was"},
+			{"crew[].prompt.text", "string", "the prompt whole; `\"\"` where it cannot be read, which `tried` and `error` then say"},
+			{"crew[].prompt.digest", "string?", "the digest a yard-written prompt file is named by, in hex; absent where the file is none the yard wrote so"},
+			{"crew[].prompt.carriable", "bool", "whether a card can carry the prompt whole"},
+			{"crew[].prompt.why", "string?", "why a card cannot carry it, by the card's own rules; absent where it can"},
+			{"crew[].prompt.tried", "array of string?", "the prompt path the crew read; present where that file could not be read"},
+			{"crew[].prompt.error", "string?", "why the lookup could not read the prompt; absent where it could"},
+		},
+	},
+	{
 		method:   "Teammates",
 		says:     "The yard's teammates: one row per address of the standing `web_jwt_users` mapping, each with its yard user name, role, email, who invited them and when, and their devices with last use. A row with devices is paired; a row without is waiting. Whether anyone signed in over the edge's web door is not told: nothing at the yard records it. It is the operator's to read: on the socket it is an operator-class call, refused from a bead agent's or crew member's pane, and on the listener it is there for a device of the operator and for no other caller, since the mapping is theirs. It changes nothing, but the operator's device token goes with the request, so the listener takes it only over https or from the yard's own machine, like the other calls of this list, and down the link from the edge from a paired device of the operator, as an approval ([edge.md](edge.md#footplate-through-the-link)).",
 		requests: []string{`{}`},
@@ -1371,11 +1451,18 @@ var apiErrors = []struct{ method, request, says string }{
 // exposes clerk, a notification for jo and a letter jo has not read. It
 // returns the socket the yard is served on.
 func apiYard(t *testing.T) string {
+	sock, _ := apiYardStore(t)
+	return sock
+}
+
+// apiYardStore returns the store too, so runAPI can add Line-only fixtures
+// after its earlier examples have read the yard.
+func apiYardStore(t *testing.T) (string, *store.Store) {
 	t.Helper()
 	st, _ := apiStore(t)
 	sock := socket(t)
 	serve(t, sock, Handler(st, nil).ServeHTTP)
-	return sock
+	return sock, st
 }
 
 // apiDevice is the device jo has in the yard of the doc.
@@ -2095,7 +2182,118 @@ calls:
 	apiGuarded["AnswerAskExpected"] = guarded("Welcome the newcomer on Monday?")
 	apiGuarded["DeferAskExpected"] = guarded("A lunch for the newcomer?")
 	apiGuarded["DeclineAskExpected"] = guarded("A desk by the window?")
+	// A dir depot with a directory flow, for the Line read beside the
+	// store-flow depot above: its stage file and role stand in the
+	// directory, and limbo has no route, so its warning shows. Last, for
+	// the seqs above.
+	notes := filepath.Join(t.TempDir(), "notes")
+	must(os.MkdirAll(filepath.Join(notes, ".yardr", "flows", "default"), 0o755))
+	must(os.MkdirAll(filepath.Join(notes, ".yardr", "roles"), 0o755))
+	must(os.WriteFile(filepath.Join(notes, ".yardr", "flows", "default.flow"), []byte("inbox -> done | limbo | attic\nlimbo -> done\nattic -> done\ndone terminal\n"), 0o644))
+	must(os.WriteFile(filepath.Join(notes, ".yardr", "flows", "default", "inbox.md"), []byte("Take it in.\n"), 0o644))
+	must(os.WriteFile(filepath.Join(notes, ".yardr", "roles", "worker.md"), []byte("Work the inbox.\n"), 0o644))
+	must(st.PutDepot(ctx, store.Depot{Name: "notes", Path: notes, Kind: store.DepotDir}, "jo"))
+	must(st.PutGroup(ctx, store.Group{Name: "workers", Runner: "herdr", Config: map[string]any{"kind": "claude", "prompt": "roles/worker.md"}, Limit: 2}, "jo"))
+	_, err = st.AddRoute(ctx, store.Route{Stage: "inbox", Group: "workers"}, "jo")
+	must(err)
+	// A yard-written prompt beside it, for the digest the Line read
+	// answers: limbo's keepers carry it, and attic keeps no route.
+	keeperSum := sha256.Sum256([]byte("Keep the inbox.\n"))
+	keeper := filepath.Join(home, "roles", "keepers."+hex.EncodeToString(keeperSum[:])+".md")
+	must(os.MkdirAll(filepath.Dir(keeper), 0o755))
+	must(os.WriteFile(keeper, []byte("Keep the inbox.\n"), 0o400))
+	must(st.PutGroup(ctx, store.Group{Name: "keepers", Runner: "herdr", Config: map[string]any{"kind": "claude", "prompt": keeper}, Limit: 1}, "jo"))
+	_, err = st.AddRoute(ctx, store.Route{Stage: "limbo", Group: "keepers"}, "jo")
+	must(err)
 	return st, d.Token
+}
+
+// apiLineFixtures adds richer records only when the Line call is made, so
+// the other API examples keep their own depots, routes and sequence numbers.
+func apiLineFixtures(t *testing.T, st *store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	groups, err := st.Groups(ctx)
+	must(err)
+	var keeper string
+	for _, g := range groups {
+		if g.Name == "keepers" {
+			keeper, _ = g.Config["prompt"].(string)
+			break
+		}
+	}
+	if keeper == "" {
+		t.Fatal("Line fixture has no yard-written prompt")
+	}
+	home := filepath.Dir(filepath.Dir(keeper))
+	linegit := filepath.Join(t.TempDir(), "linegit")
+	linegitFiles := map[string]string{
+		".yardr/flows/default.flow":     "draft -> review on done | draft on changes max 2 then parked | ask on question\nreview -> done\nask -> done\nparked terminal\ndone terminal\n",
+		".yardr/flows/default/draft.md": "Prepare the draft.\n",
+		".yardr/roles/builder.md":       "Build from the repository.\n",
+	}
+	for name, content := range linegitFiles {
+		path := filepath.Join(linegit, filepath.FromSlash(name))
+		must(os.MkdirAll(filepath.Dir(path), 0o755))
+		must(os.WriteFile(path, []byte(content), 0o644))
+	}
+	// A missing role directory under home makes the failed fallback stable
+	// across hosts, without relying on a permission error.
+	must(os.MkdirAll(filepath.Join(home, "roles", "missing.md"), 0o755))
+	if out, err := exec.Command("git", "-C", linegit, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init linegit: %v\n%s", err, out)
+	}
+	for _, args := range [][]string{
+		{"config", "user.name", "API fixture"},
+		{"config", "user.email", "api-fixture@example.net"},
+		{"symbolic-ref", "HEAD", "refs/heads/main"},
+		{"add", "-A"},
+		{"commit", "-q", "-m", "API fixture"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", linegit}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE=2000-01-01T00:00:00Z", "GIT_COMMITTER_DATE=2000-01-01T00:00:00Z")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s linegit: %v\n%s", args[0], err, out)
+		}
+	}
+	must(st.PutDepot(ctx, store.Depot{Name: "linegit", Path: linegit, Kind: store.DepotGit, Base: "main"}, "jo"))
+	_, err = st.AllowPeer(ctx, "north", store.PeerAllow{Send: []string{store.PeerMail, store.PeerBead}, Receive: []string{store.PeerMail, store.PeerAsk}, Expose: []string{"jo"}}, "jo")
+	must(err)
+	must(st.PutGroup(ctx, store.Group{Name: "line-builder", Runner: "herdr", Limit: 2,
+		Config: map[string]any{"kind": "claude", "prompt": "roles/builder.md"}}, "jo"))
+	must(st.PutGroup(ctx, store.Group{Name: "line-missing", Runner: "herdr", Limit: 1,
+		Config: map[string]any{"kind": "claude", "prompt": "roles/missing.md"}}, "jo"))
+	must(st.PutGroup(ctx, store.Group{Name: "line-script", Runner: "exec", Limit: 1,
+		Config: map[string]any{"cmd": "scripts/fallback --fast"}}, "jo"))
+	must(st.PutGroup(ctx, store.Group{Name: "line-peer", Runner: store.PeerRunner, Limit: 1,
+		Config: map[string]any{store.GroupPeer: "north"}}, "jo"))
+	lineDepot := "linegit"
+	_, err = st.AddRoute(ctx, store.Route{Stage: "draft", Depot: &lineDepot, Group: "line-builder", When: "Weekly<80",
+		Else: []store.RouteGroup{{Name: "line-missing", When: "5h<90"}}}, "jo")
+	must(err)
+	task := "task"
+	eyes := "eyes"
+	priority := 1
+	originator := store.OriginatorAny
+	_, err = st.AddRoute(ctx, store.Route{Stage: "draft", Depot: &lineDepot, Type: &task, Label: &eyes,
+		BeadPriority: &priority, Originator: &originator, Group: "line-builder"}, "jo")
+	must(err)
+	_, err = st.AddRoute(ctx, store.Route{Stage: "review", Depot: &lineDepot, Group: "line-script", When: "machine.load<80"}, "jo")
+	must(err)
+	_, err = st.AddRoute(ctx, store.Route{Stage: "ask", Depot: &lineDepot, Group: "line-peer"}, "jo")
+	must(err)
+	_, err = st.AddRoute(ctx, store.Route{Stage: "parked", Depot: &lineDepot, Group: "line-missing"}, "jo")
+	must(err)
+	_, err = st.PutCrew(ctx, store.CrewMember{Name: "prompt-reader", Runner: "herdr", Config: map[string]any{"kind": "claude", "prompt": keeper}}, "jo")
+	must(err)
+	_, err = st.PutCrew(ctx, store.CrewMember{Name: "prompt-missing", Runner: "herdr", Config: map[string]any{"kind": "claude", "prompt": filepath.Join(home, "roles", "crew-missing.md")}}, "jo")
+	must(err)
 }
 
 // apiHookSource is the declaration of a source of the doc's yard whose
@@ -2298,12 +2496,17 @@ func runAPI(t *testing.T, network bool) *apiRun {
 		st, token = apiStore(t)
 		hc = overNetwork(t, st, token)
 	} else {
-		hc = overSocket(apiYard(t))
+		var sock string
+		sock, st = apiYardStore(t)
+		hc = overSocket(sock)
 	}
 	run := &apiRun{requests: map[string][]string{}, replies: map[string][]any{}, more: map[string][]any{}}
 	calls := append(slices.Clone(apiCalls), apiOperatorCalls...)
 	for _, c := range calls {
 		for i, body := range c.requests {
+			if c.method == "Line" && i == 0 {
+				apiLineFixtures(t, st)
+			}
 			if c.method == "DevicePairCloseSelf" {
 				// The pairing it ends is opened by approving its own ask
 				// here, unrecorded: the recorded approvals run after
@@ -2458,13 +2661,13 @@ func TestCallsAreTheDocs(t *testing.T) {
 	t.Run("Calls", func(t *testing.T) { callsAreTheDocs(t, "Calls", Calls, apiCalls) })
 	t.Run("OperatorCalls", func(t *testing.T) { callsAreTheDocs(t, "OperatorCalls", OperatorCalls, apiOperatorCalls) })
 	// What the listener serves every device is Calls, as it was before
-	// there was a second list, and a device of the operator nine of the
-	// twelve calls of OperatorCalls besides; the socket's own three it
+	// there was a second list, and a device of the operator ten of the
+	// thirteen calls of OperatorCalls besides; the socket's own three it
 	// answers as no method at all, and the socket answers so the one call
 	// of Calls a device's token alone makes (listenerOnly): a call is
 	// added to either on purpose, here too.
-	if len(Calls) != 33 || len(OperatorCalls) != 12 || len(listenerOnly) != 1 {
-		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 33, 12 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
+	if len(Calls) != 33 || len(OperatorCalls) != 13 || len(listenerOnly) != 1 {
+		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 33, 13 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
 	}
 	for name := range listenerOnly {
 		if _, ok := Calls[name]; !ok {
@@ -2670,6 +2873,7 @@ func TestCallByName(t *testing.T) {
 		{"Sessions", `{"all":true}`, `{"error":{"code":"error","message":"arguments: Sessions takes them as a JSON array: only the calls docs/api.md names take them by name"}}`},
 		{"Sessions", `[true]`, `{"result":`},
 		{"SessionScreen", `{"session":"yardmaster"}`, `"screen":"\u001b[1mYardr yardmaster\u001b[0m\n❯ "`},
+		{"Line", `{"depot":"yard"}`, `"source":"store"`},
 		// An argument a later build added is one a client of before leaves
 		// out, by position as by name: weighed is then false, which a
 		// routine card takes, and a weighty one refuses with its words.
@@ -2894,6 +3098,44 @@ var exampleUUIDs = []string{
 
 var batchUUID = regexp.MustCompile(`"uuid": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"`)
 
+// exampleRouteIDs stand for a Line reply's route ids in the doc, in
+// order: AddRoute mints each id, so the page would differ on every run
+// without them. A reply with more leaves its further ids standing, so
+// the doc test fails on them instead of printing a minted one.
+var exampleRouteIDs = []string{"r-line-1", "r-line-2", "r-line-3", "r-line-4", "r-line-5", "r-line-6", "r-line-7", "r-line-8"}
+
+var lineRouteID = regexp.MustCompile(`"id": "[a-z0-9]+"`)
+var lineRepoSource = regexp.MustCompile(`"source": "repo@[0-9a-f]+"`)
+var lineRepoCommit = regexp.MustCompile(`"commit": "[0-9a-f]{40}"`)
+var lineHomeRolePath = regexp.MustCompile(`(/[^/" ]+)+/roles/([^/" ]+)`)
+
+var (
+	// A Line reply names two paths of the test's own making: the dir
+	// depot's directory and the yard-written prompt under its home.
+	lineDirectory = regexp.MustCompile(`"directory": "[^"]*/notes"`)
+)
+
+// scrubLinePaths stands the example paths for those two in one rendered
+// Line reply, as scrubRouteIDs stands its route ids.
+func scrubLinePaths(s string) string {
+	s = lineDirectory.ReplaceAllString(s, `"directory": "/home/jo/notes"`)
+	s = lineHomeRolePath.ReplaceAllString(s, exampleHome+"/roles/$2")
+	s = lineRepoSource.ReplaceAllString(s, `"source": "repo@abcdef0"`)
+	return lineRepoCommit.ReplaceAllString(s, `"commit": "0123456789abcdef0123456789abcdef01234567"`)
+}
+
+func scrubRouteIDs(s string) string {
+	i := 0
+	return lineRouteID.ReplaceAllStringFunc(s, func(match string) string {
+		if i >= len(exampleRouteIDs) {
+			return match
+		}
+		out := `"id": "` + exampleRouteIDs[i] + `"`
+		i++
+		return out
+	})
+}
+
 // scrubUUIDs stands exampleUUIDs for the batch uuids of one rendered
 // reply, in order. A longer batch leaves its further uuids standing, so
 // the doc test fails on them instead of printing the day's uuids.
@@ -2943,6 +3185,9 @@ func callsDoc(run *apiRun, calls []apiCall) []string {
 			shown = pairingUntil.ReplaceAllString(shown, "good until 09:30:00")
 			shown = beadRevision.ReplaceAllString(shown, `"revision": "`+exampleRevision+`"`)
 			shown = scrubUUIDs(shown)
+			if c.method == "Line" {
+				shown = scrubLinePaths(scrubRouteIDs(shown))
+			}
 			out = append(out, fenced("", "POST /call/"+c.method, body, "", shown)...)
 		}
 		if len(c.fields) > 0 {

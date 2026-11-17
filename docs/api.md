@@ -299,7 +299,7 @@ Mail was queued for one of a linked yard: the conversation with `<data.to>@<data
 
 ```json
 {
-  "seq": 193,
+  "seq": 198,
   "kind": "mail",
   "actor": "jo",
   "data": {
@@ -327,7 +327,7 @@ A user or a crew member acknowledged its mail. Every letter to `data.reader` wit
 
 ```json
 {
-  "seq": 195,
+  "seq": 200,
   "kind": "mail_read",
   "data": {
     "reader": "jo",
@@ -471,7 +471,7 @@ A user acknowledged their notifications, in this client or another.
 
 ```json
 {
-  "seq": 196,
+  "seq": 201,
   "kind": "notifications_read",
   "data": {
     "reader": "jo",
@@ -1255,14 +1255,14 @@ address that is `http://` unless its host is loopback** (`127.0.0.1`, `::1`,
 reads (mode 0600) or in the system's key store, never in a settings file.
 
 A secret, an approval, the grant list, the teammates list, a removal
-filing, a session's screen and the telemetry switch are what the yard holds
+filing, a session's screen, a depot's line and the telemetry switch are what the yard holds
 to this itself, as far as it can see.
 [`GiveSecret`, `ApproveAsk`, `ApproveSetup`, `SourceGrants`, `Teammates`,
-`UninviteTeammate`, `SessionScreen`, `TelemetryShow` and
+`UninviteTeammate`, `SessionScreen`, `Line`, `TelemetryShow` and
 `TelemetrySet`](#for-the-operator-alone) are taken only from a request
 that reached the listener from the yard's own machine, where the proxy or
 tunnel that ends TLS stands (or a client on that machine) — the two
-approvals, `SessionScreen` and the teammates calls also down the link from
+approvals, `SessionScreen`, `Line` and the teammates calls also down the link from
 the edge, and `GiveSecret` there for every secret on a hosted yard and, on any
 other, for every secret when the call came sealed from the operator's device and
 for the code of a harness login alone when it came plain, and on either from a
@@ -1283,7 +1283,9 @@ operator's run from wherever it was read. The grant list holds none either
 and approves nothing; it is held to the rule because the operator's device
 token goes with the request. A session's screen can show what an agent
 printed, a secret among it, so `SessionScreen` is held to the rule for what
-the screen carries, and crosses the link as an approval does. The teammates
+the screen carries, and crosses the link as an approval does. A depot's line
+carries a group's `cmd` and its prompts whole, so `Line` is held to the rule
+for what the line carries, and crosses the link as an approval does. The teammates
 list and a removal filing hold none either and approve nothing; they are held
 to the rule for the same reason, and cross the link as an approval does. The
 telemetry preview and switch follow the grant list's rule: neither crosses
@@ -1403,7 +1405,7 @@ POST /call/Head
 {}
 
 {
-  "result": 190
+  "result": 195
 }
 ```
 
@@ -1916,7 +1918,7 @@ POST /call/Conversation
       "as": "jo"
     },
     {
-      "seq": 191,
+      "seq": 196,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -1924,7 +1926,7 @@ POST /call/Conversation
       "read": false
     },
     {
-      "seq": 192,
+      "seq": 197,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -1950,7 +1952,7 @@ POST /call/Conversation
 {
   "result": [
     {
-      "seq": 191,
+      "seq": 196,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -1958,7 +1960,7 @@ POST /call/Conversation
       "read": false
     },
     {
-      "seq": 192,
+      "seq": 197,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -1985,7 +1987,7 @@ POST /call/Conversation
 {
   "result": [
     {
-      "seq": 193,
+      "seq": 198,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "clerk@north",
@@ -5434,6 +5436,58 @@ POST /call/Flows
         "error": ".yardr/flows/default.flow: flow line 1: want 'stage -\u003e next on outcome | other' or 'stage terminal', got \"this is no flow\""
       },
       {
+        "name": "notes",
+        "kind": "dir",
+        "travelling": 0,
+        "flows": [
+          {
+            "name": "default",
+            "type": "",
+            "source": "repo (directory)",
+            "stages": [
+              {
+                "stage": "inbox",
+                "group": "workers",
+                "human": false,
+                "lamp": "none",
+                "terminal": false,
+                "limit": 2,
+                "taken": 0,
+                "beads": []
+              },
+              {
+                "stage": "done",
+                "group": "",
+                "human": false,
+                "lamp": "none",
+                "terminal": true,
+                "beads": []
+              },
+              {
+                "stage": "limbo",
+                "group": "keepers",
+                "human": false,
+                "lamp": "none",
+                "terminal": false,
+                "limit": 1,
+                "taken": 0,
+                "beads": []
+              },
+              {
+                "stage": "attic",
+                "group": "",
+                "human": false,
+                "lamp": "none",
+                "terminal": false,
+                "beads": []
+              }
+            ],
+            "landings": []
+          }
+        ],
+        "elsewhere": []
+      },
+      {
         "name": "yard",
         "kind": "git",
         "travelling": 3,
@@ -5590,6 +5644,58 @@ POST /call/Flows
           }
         ],
         "error": ".yardr/flows/default.flow: flow line 1: want 'stage -\u003e next on outcome | other' or 'stage terminal', got \"this is no flow\""
+      },
+      {
+        "name": "notes",
+        "kind": "dir",
+        "travelling": 0,
+        "flows": [
+          {
+            "name": "default",
+            "type": "",
+            "source": "repo (directory)",
+            "stages": [
+              {
+                "stage": "inbox",
+                "group": "workers",
+                "human": false,
+                "lamp": "none",
+                "terminal": false,
+                "limit": 2,
+                "taken": 0,
+                "beads": []
+              },
+              {
+                "stage": "done",
+                "group": "",
+                "human": false,
+                "lamp": "none",
+                "terminal": true,
+                "beads": []
+              },
+              {
+                "stage": "limbo",
+                "group": "keepers",
+                "human": false,
+                "lamp": "none",
+                "terminal": false,
+                "limit": 1,
+                "taken": 0,
+                "beads": []
+              },
+              {
+                "stage": "attic",
+                "group": "",
+                "human": false,
+                "lamp": "none",
+                "terminal": false,
+                "beads": []
+              }
+            ],
+            "landings": []
+          }
+        ],
+        "elsewhere": []
       },
       {
         "name": "yard",
@@ -6668,6 +6774,593 @@ POST /call/SessionScreen
 | field of the result | type | |
 |---|---|---|
 | `screen` | string | the pane's visible screen, with the terminal's ANSI styling |
+
+### `Line`
+
+Reads one depot's line: every flow that governs the depot, the depot's own first and then one per type, with its stages in the flow's order, who serves each stage, its stage file and the prompts of its groups and of the crew, whole. It changes nothing. The representative route of a stage is the route a probe bead of the depot, of the flow's type (the default type where the flow has none) at the default priority with no labels reading as the operator's would take, answered whole; every other effective route of the stage stands behind it with its id, scope, filters and first group, so a stage whose labelled, urgent or another user's beads take a different rule shows that rule. A rule's scope is `this depot's own` where it names the depot and `yard-wide` where it names none: a yard-wide rule serves every depot with no own route of its match key. Each filter is named and shown as unset where it is unset: an empty `type` takes any type, empty `labels` no label, an empty `priority` any priority, and an empty `originator` the operator's beads alone. A prompt a card cannot carry says why, by the card's own rules, and one that cannot be read names the paths tried and fails nothing else; no env file path stands anywhere in the answer. It is the operator's to read: on the socket the operator's alone, and on the listener there for a device of the operator and for no other caller. A `cmd` and a prompt are the operator's to read alone, so the listener takes it only over https or from the yard's own machine, like the other calls of this list, and down the link from the edge from a paired device of the operator, as an approval ([edge.md](edge.md#footplate-through-the-link)). A depot the yard has not is `not-found`.
+
+| argument | type | |
+|---|---|---|
+| `depot` | string | the depot whose line is read |
+
+```
+POST /call/Line
+{"depot":"yard"}
+
+{
+  "result": {
+    "depot": "yard",
+    "kind": "git",
+    "flows": [
+      {
+        "name": "default",
+        "type": "",
+        "source": "store",
+        "stages": [
+          {
+            "stage": "new",
+            "next": ["shipped"],
+            "outcomes": [
+              {
+                "name": "done",
+                "to": "shipped"
+              }
+            ],
+            "terminal": false,
+            "route": {
+              "id": "r-line-1",
+              "scope": "yard-wide",
+              "filters": {
+                "type": "",
+                "labels": [],
+                "priority": "",
+                "originator": ""
+              },
+              "chain": [
+                {
+                  "name": "builders",
+                  "runner": "herdr",
+                  "kind": "claude",
+                  "model": "opus"
+                }
+              ],
+              "limit": 5
+            },
+            "other_routes": [],
+            "open": 2
+          },
+          {
+            "stage": "shipped",
+            "next": ["merged"],
+            "outcomes": [
+              {
+                "name": "done",
+                "to": "merged"
+              }
+            ],
+            "terminal": false,
+            "route": {
+              "id": "r-line-2",
+              "scope": "yard-wide",
+              "filters": {
+                "type": "",
+                "labels": [],
+                "priority": "",
+                "originator": "any"
+              },
+              "chain": [
+                {
+                  "name": "elders",
+                  "runner": "manual",
+                  "members": ["jo"]
+                }
+              ],
+              "limit": 5
+            },
+            "other_routes": [],
+            "open": 0
+          },
+          {
+            "stage": "merged",
+            "next": [],
+            "terminal": true,
+            "other_routes": [],
+            "open": 0
+          }
+        ]
+      }
+    ],
+    "crew": [
+      {
+        "name": "prompt-missing",
+        "prompt": {
+          "path": "/home/jo/.yardr/roles/crew-missing.md",
+          "text": "",
+          "carriable": false,
+          "why": "it does not stand as a regular file under the yard's home",
+          "tried": ["/home/jo/.yardr/roles/crew-missing.md"],
+          "error": "open /home/jo/.yardr/roles/crew-missing.md: no such file or directory"
+        }
+      },
+      {
+        "name": "prompt-reader",
+        "prompt": {
+          "path": "/home/jo/.yardr/roles/keepers.c34328a2b18796ffa525e37ab5a91bb12a4c43108f583a5fce0e2a4a92f83be1.md",
+          "source": "file",
+          "found": "/home/jo/.yardr/roles/keepers.c34328a2b18796ffa525e37ab5a91bb12a4c43108f583a5fce0e2a4a92f83be1.md",
+          "text": "Keep the inbox.\n",
+          "digest": "c34328a2b18796ffa525e37ab5a91bb12a4c43108f583a5fce0e2a4a92f83be1",
+          "carriable": true
+        }
+      },
+      {
+        "name": "signalman"
+      },
+      {
+        "name": "yardmaster"
+      }
+    ]
+  }
+}
+```
+
+```
+POST /call/Line
+{"depot":"notes"}
+
+{
+  "result": {
+    "depot": "notes",
+    "kind": "dir",
+    "flows": [
+      {
+        "name": "default",
+        "type": "",
+        "source": "repo (directory)",
+        "directory": "/home/jo/notes",
+        "stages": [
+          {
+            "stage": "inbox",
+            "next": ["done", "limbo", "attic"],
+            "terminal": false,
+            "route": {
+              "id": "r-line-1",
+              "scope": "yard-wide",
+              "filters": {
+                "type": "",
+                "labels": [],
+                "priority": "",
+                "originator": ""
+              },
+              "chain": [
+                {
+                  "name": "workers",
+                  "runner": "herdr",
+                  "kind": "claude",
+                  "prompt": {
+                    "path": "roles/worker.md",
+                    "source": "depot",
+                    "found": ".yardr/roles/worker.md",
+                    "text": "Work the inbox.\n",
+                    "carriable": false,
+                    "why": "it is a relative path, read against each depot"
+                  }
+                }
+              ],
+              "limit": 2
+            },
+            "other_routes": [],
+            "open": 0,
+            "stage_file": {
+              "path": ".yardr/flows/default/inbox.md",
+              "text": "Take it in.\n"
+            }
+          },
+          {
+            "stage": "done",
+            "next": [],
+            "terminal": true,
+            "other_routes": [],
+            "open": 0
+          },
+          {
+            "stage": "limbo",
+            "next": ["done"],
+            "outcomes": [
+              {
+                "name": "done",
+                "to": "done"
+              }
+            ],
+            "terminal": false,
+            "route": {
+              "id": "r-line-2",
+              "scope": "yard-wide",
+              "filters": {
+                "type": "",
+                "labels": [],
+                "priority": "",
+                "originator": ""
+              },
+              "chain": [
+                {
+                  "name": "keepers",
+                  "runner": "herdr",
+                  "kind": "claude",
+                  "prompt": {
+                    "path": "/home/jo/.yardr/roles/keepers.c34328a2b18796ffa525e37ab5a91bb12a4c43108f583a5fce0e2a4a92f83be1.md",
+                    "source": "file",
+                    "found": "/home/jo/.yardr/roles/keepers.c34328a2b18796ffa525e37ab5a91bb12a4c43108f583a5fce0e2a4a92f83be1.md",
+                    "text": "Keep the inbox.\n",
+                    "digest": "c34328a2b18796ffa525e37ab5a91bb12a4c43108f583a5fce0e2a4a92f83be1",
+                    "carriable": true,
+                    "tried": ["/home/jo/.yardr/roles/keepers.c34328a2b18796ffa525e37ab5a91bb12a4c43108f583a5fce0e2a4a92f83be1.md"]
+                  }
+                }
+              ],
+              "limit": 1
+            },
+            "other_routes": [],
+            "open": 0
+          },
+          {
+            "stage": "attic",
+            "next": ["done"],
+            "outcomes": [
+              {
+                "name": "done",
+                "to": "done"
+              }
+            ],
+            "terminal": false,
+            "other_routes": [],
+            "open": 0,
+            "warnings": ["stage attic has no route: beads there wait for a human"]
+          }
+        ]
+      }
+    ],
+    "crew": [
+      {
+        "name": "prompt-missing",
+        "prompt": {
+          "path": "/home/jo/.yardr/roles/crew-missing.md",
+          "text": "",
+          "carriable": false,
+          "why": "it does not stand as a regular file under the yard's home",
+          "tried": ["/home/jo/.yardr/roles/crew-missing.md"],
+          "error": "open /home/jo/.yardr/roles/crew-missing.md: no such file or directory"
+        }
+      },
+      {
+        "name": "prompt-reader",
+        "prompt": {
+          "path": "/home/jo/.yardr/roles/keepers.c34328a2b18796ffa525e37ab5a91bb12a4c43108f583a5fce0e2a4a92f83be1.md",
+          "source": "file",
+          "found": "/home/jo/.yardr/roles/keepers.c34328a2b18796ffa525e37ab5a91bb12a4c43108f583a5fce0e2a4a92f83be1.md",
+          "text": "Keep the inbox.\n",
+          "digest": "c34328a2b18796ffa525e37ab5a91bb12a4c43108f583a5fce0e2a4a92f83be1",
+          "carriable": true
+        }
+      },
+      {
+        "name": "signalman"
+      },
+      {
+        "name": "yardmaster"
+      }
+    ]
+  }
+}
+```
+
+```
+POST /call/Line
+{"depot":"linegit"}
+
+{
+  "result": {
+    "depot": "linegit",
+    "kind": "git",
+    "flows": [
+      {
+        "name": "default",
+        "type": "",
+        "source": "repo@abcdef0",
+        "stages": [
+          {
+            "stage": "draft",
+            "next": ["review", "draft", "parked", "ask"],
+            "outcomes": [
+              {
+                "name": "done",
+                "to": "review"
+              },
+              {
+                "name": "changes",
+                "to": "draft",
+                "max": 2,
+                "then": "parked"
+              },
+              {
+                "name": "question",
+                "to": "ask"
+              }
+            ],
+            "terminal": false,
+            "route": {
+              "id": "r-line-1",
+              "scope": "this depot's own",
+              "filters": {
+                "type": "",
+                "labels": [],
+                "priority": "",
+                "originator": ""
+              },
+              "chain": [
+                {
+                  "name": "line-builder",
+                  "when": "Weekly\u003c80",
+                  "runner": "herdr",
+                  "kind": "claude",
+                  "prompt": {
+                    "path": "roles/builder.md",
+                    "source": "depot",
+                    "found": ".yardr/roles/builder.md",
+                    "commit": "0123456789abcdef0123456789abcdef01234567",
+                    "text": "Build from the repository.\n",
+                    "carriable": false,
+                    "why": "it is a relative path, read against each depot"
+                  }
+                },
+                {
+                  "name": "line-missing",
+                  "when": "5h\u003c90",
+                  "runner": "herdr",
+                  "kind": "claude",
+                  "prompt": {
+                    "path": "roles/missing.md",
+                    "text": "",
+                    "carriable": false,
+                    "why": "it is a relative path, read against each depot",
+                    "tried": ["main:.yardr/roles/missing.md", "/home/jo/.yardr/roles/missing.md"],
+                    "error": "read /home/jo/.yardr/roles/missing.md: is a directory"
+                  }
+                }
+              ],
+              "limit": 2
+            },
+            "other_routes": [
+              {
+                "id": "r-line-2",
+                "scope": "this depot's own",
+                "filters": {
+                  "type": "task",
+                  "labels": ["eyes"],
+                  "priority": "P0-P1",
+                  "originator": "any"
+                },
+                "group": "line-builder"
+              }
+            ],
+            "open": 0,
+            "stage_file": {
+              "path": ".yardr/flows/default/draft.md",
+              "text": "Prepare the draft.\n"
+            }
+          },
+          {
+            "stage": "review",
+            "next": ["done"],
+            "outcomes": [
+              {
+                "name": "done",
+                "to": "done"
+              }
+            ],
+            "terminal": false,
+            "route": {
+              "id": "r-line-3",
+              "scope": "this depot's own",
+              "filters": {
+                "type": "",
+                "labels": [],
+                "priority": "",
+                "originator": "any"
+              },
+              "chain": [
+                {
+                  "name": "line-script",
+                  "when": "machine.load\u003c80",
+                  "runner": "exec",
+                  "cmd": "scripts/fallback --fast"
+                }
+              ],
+              "limit": 1
+            },
+            "other_routes": [],
+            "open": 0
+          },
+          {
+            "stage": "parked",
+            "next": [],
+            "terminal": true,
+            "route": {
+              "id": "r-line-4",
+              "scope": "this depot's own",
+              "filters": {
+                "type": "",
+                "labels": [],
+                "priority": "",
+                "originator": ""
+              },
+              "chain": [
+                {
+                  "name": "line-missing",
+                  "runner": "herdr",
+                  "kind": "claude",
+                  "prompt": {
+                    "path": "roles/missing.md",
+                    "text": "",
+                    "carriable": false,
+                    "why": "it is a relative path, read against each depot",
+                    "tried": ["main:.yardr/roles/missing.md", "/home/jo/.yardr/roles/missing.md"],
+                    "error": "read /home/jo/.yardr/roles/missing.md: is a directory"
+                  }
+                }
+              ],
+              "limit": 1
+            },
+            "other_routes": [],
+            "open": 0
+          },
+          {
+            "stage": "ask",
+            "next": ["done"],
+            "outcomes": [
+              {
+                "name": "done",
+                "to": "done"
+              }
+            ],
+            "terminal": false,
+            "route": {
+              "id": "r-line-5",
+              "scope": "this depot's own",
+              "filters": {
+                "type": "",
+                "labels": [],
+                "priority": "",
+                "originator": "any"
+              },
+              "chain": [
+                {
+                  "name": "line-peer",
+                  "runner": "peer",
+                  "yard": "north"
+                }
+              ],
+              "limit": 1
+            },
+            "other_routes": [],
+            "open": 0
+          },
+          {
+            "stage": "done",
+            "next": [],
+            "terminal": true,
+            "other_routes": [],
+            "open": 0
+          }
+        ]
+      }
+    ],
+    "crew": [
+      {
+        "name": "prompt-missing",
+        "prompt": {
+          "path": "/home/jo/.yardr/roles/crew-missing.md",
+          "text": "",
+          "carriable": false,
+          "why": "it does not stand as a regular file under the yard's home",
+          "tried": ["/home/jo/.yardr/roles/crew-missing.md"],
+          "error": "open /home/jo/.yardr/roles/crew-missing.md: no such file or directory"
+        }
+      },
+      {
+        "name": "prompt-reader",
+        "prompt": {
+          "path": "/home/jo/.yardr/roles/keepers.c34328a2b18796ffa525e37ab5a91bb12a4c43108f583a5fce0e2a4a92f83be1.md",
+          "source": "file",
+          "found": "/home/jo/.yardr/roles/keepers.c34328a2b18796ffa525e37ab5a91bb12a4c43108f583a5fce0e2a4a92f83be1.md",
+          "text": "Keep the inbox.\n",
+          "digest": "c34328a2b18796ffa525e37ab5a91bb12a4c43108f583a5fce0e2a4a92f83be1",
+          "carriable": true
+        }
+      },
+      {
+        "name": "signalman"
+      },
+      {
+        "name": "yardmaster"
+      }
+    ]
+  }
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `depot` | string | the depot |
+| `kind` | string | the depot's kind: `git` or `dir` |
+| `flows` | array | the flows governing the depot, its own first, then one per type |
+| `flows[].name` | string | the flow's name |
+| `flows[].type` | string | the bead type the flow governs; `""` for the depot's own |
+| `flows[].source` | string | `repo@<commit>` for a git depot's repository flow, `repo (directory)` for a dir depot's directory flow, `pack <name>` for a pack-managed store flow, `store` for any other store flow |
+| `flows[].directory` | string, may be absent | the directory a dir depot's directory flow was read from; absent on any other flow |
+| `flows[].stages` | array | the stages in the flow's order |
+| `flows[].stages[].stage` | string | the stage |
+| `flows[].stages[].next` | array of string | the stages a bead in it may move to, in the flow's order; empty where the flow allows none |
+| `flows[].stages[].outcomes` | array, may be absent | how work in the stage can end, as the flow offers it; absent where it offers none |
+| `flows[].stages[].outcomes[].name` | string | the outcome's name |
+| `flows[].stages[].outcomes[].to` | string | the stage it sends the bead to |
+| `flows[].stages[].outcomes[].max` | number, may be absent | how many rounds back to `to` this outcome allows; absent where there is no limit |
+| `flows[].stages[].outcomes[].then` | string, may be absent | the stage it sends the bead to once `max` rounds are used; absent where there is no limit |
+| `flows[].stages[].terminal` | bool | whether entering the stage closes the bead |
+| `flows[].stages[].route` | object, may be absent | the stage's representative route, whole; absent where no route serves the stage, which `warnings` then says |
+| `flows[].stages[].route.id` | string | the route's id |
+| `flows[].stages[].route.scope` | string | `this depot's own` or `yard-wide` |
+| `flows[].stages[].route.filters.type` | string | the bead type it takes; `""` takes any |
+| `flows[].stages[].route.filters.labels` | array of string | every label a bead must have; empty takes none in particular |
+| `flows[].stages[].route.filters.priority` | string | `P0-P1`, `P0`, or `""` for any priority |
+| `flows[].stages[].route.filters.originator` | string | the user whose beads it takes; `""` takes the operator's alone, `any` every originator's |
+| `flows[].stages[].route.chain` | array | the route's groups in order, each with its quota condition where it carries one (`when`, absent where it always holds) |
+| `flows[].stages[].route.chain[].name` | string | the group |
+| `flows[].stages[].route.chain[].when` | string, may be absent | the quota condition for this group in the chain; absent where it always holds |
+| `flows[].stages[].route.chain[].runner` | string | `herdr`, `exec`, `manual` or `peer` |
+| `flows[].stages[].route.chain[].cmd` | string, may be absent | an exec group's command, whole; absent on any other runner |
+| `flows[].stages[].route.chain[].kind` | string, may be absent | a herdr group's kind, as its sessions start; absent on any other runner and where neither the group nor the yard names one |
+| `flows[].stages[].route.chain[].model` | string, may be absent | a herdr group's model; absent where it names none |
+| `flows[].stages[].route.chain[].yard` | string, may be absent | the linked yard for a peer group; absent on any other runner |
+| `flows[].stages[].route.chain[].members` | array of string, may be absent | a manual group's members; absent on any other runner, and where none are listed anyone may move a bead on |
+| `flows[].stages[].route.chain[].prompt` | object, may be absent | a herdr group's prompt where its config names one; absent otherwise |
+| `flows[].stages[].route.chain[].prompt.path` | string | the prompt file as the config names it |
+| `flows[].stages[].route.chain[].prompt.source` | string, may be absent | `depot`, `home`, `pack <name>` for a pack's installed copy, or `file` for a file as it stands; absent where the prompt was not found |
+| `flows[].stages[].route.chain[].prompt.found` | string, may be absent | where the text was found: relative to the depot's root for a file of the depot, else absolute; absent where none was |
+| `flows[].stages[].route.chain[].prompt.commit` | string, may be absent | the depot base commit the prompt was read at; absent where it was read from elsewhere or a directory |
+| `flows[].stages[].route.chain[].prompt.text` | string | the prompt whole; `""` where it cannot be read, which `tried` and `error` then say |
+| `flows[].stages[].route.chain[].prompt.digest` | string, may be absent | the digest a yard-written prompt file is named by, in hex; absent where the file is none the yard wrote so |
+| `flows[].stages[].route.chain[].prompt.carriable` | bool | whether a card can carry the prompt whole |
+| `flows[].stages[].route.chain[].prompt.why` | string, may be absent | why a card cannot carry it, by the card's own rules; absent where it can |
+| `flows[].stages[].route.chain[].prompt.tried` | array of string, may be absent | the paths the lookup tried, in order; an unreadable prompt names every path whose read failed; absent where none were tried |
+| `flows[].stages[].route.chain[].prompt.error` | string, may be absent | why the lookup could not read the prompt; absent where it could |
+| `flows[].stages[].route.limit` | number, may be absent | the first group's seat limit, `0` pausing the group; absent where the first group is not in the yard's groups |
+| `flows[].stages[].other_routes` | array | every other effective route serving the stage, each with its `id`, `scope` and `filters` as the representative's, and its `group`, the chain's first group |
+| `flows[].stages[].other_routes[].id` | string | the route's id |
+| `flows[].stages[].other_routes[].scope` | string | `this depot's own` or `yard-wide` |
+| `flows[].stages[].other_routes[].filters` | object | the route's filters, with each unset one shown |
+| `flows[].stages[].other_routes[].filters.type` | string | the bead type it takes; `""` takes any |
+| `flows[].stages[].other_routes[].filters.labels` | array of string | every label a bead must have; empty takes none in particular |
+| `flows[].stages[].other_routes[].filters.priority` | string | `P0-P1`, `P0`, or `""` for any priority |
+| `flows[].stages[].other_routes[].filters.originator` | string | the user whose beads it takes; `""` takes the operator's alone, `any` every originator's |
+| `flows[].stages[].other_routes[].group` | string | the chain's first group |
+| `flows[].stages[].open` | number | the open beads in the stage that this flow governs, counted once and split by no rule |
+| `flows[].stages[].warnings` | array, may be absent | why beads in the stage wait, as `flow show` prints them; absent where nothing waits so |
+| `flows[].stages[].stage_file` | object, may be absent | the stage's file where it has one; absent where it has none |
+| `flows[].stages[].stage_file.path` | string | the file, as `flow show` names it |
+| `flows[].stages[].stage_file.text` | string | the file whole |
+| `crew` | array | the crew members, each with its prompt where its config names one (as a stage's prompt says it); a member with none carries its name alone |
+| `crew[].name` | string | the crew member |
+| `crew[].prompt` | object, may be absent | the crew member's prompt where its config names one; absent otherwise |
+| `crew[].prompt.path` | string | the prompt file as the config names it |
+| `crew[].prompt.source` | string, may be absent | `depot`, `home`, `pack <name>` for a pack's installed copy, or `file` for a file as it stands; absent where the prompt was not found |
+| `crew[].prompt.found` | string, may be absent | where the text was found: relative to the depot's root for a file of the depot, else absolute; absent where none was |
+| `crew[].prompt.text` | string | the prompt whole; `""` where it cannot be read, which `tried` and `error` then say |
+| `crew[].prompt.digest` | string, may be absent | the digest a yard-written prompt file is named by, in hex; absent where the file is none the yard wrote so |
+| `crew[].prompt.carriable` | bool | whether a card can carry the prompt whole |
+| `crew[].prompt.why` | string, may be absent | why a card cannot carry it, by the card's own rules; absent where it can |
+| `crew[].prompt.tried` | array of string, may be absent | the prompt path the crew read; present where that file could not be read |
+| `crew[].prompt.error` | string, may be absent | why the lookup could not read the prompt; absent where it could |
 
 ### `Teammates`
 

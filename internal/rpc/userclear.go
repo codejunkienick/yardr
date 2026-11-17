@@ -91,6 +91,9 @@ func inTheClear(r *http.Request, name, router string, crosses, member bool) stri
 	if name == "SessionScreen" {
 		return sessionScreenInTheClear(r, router)
 	}
+	if name == "Line" {
+		return lineInTheClear(r, router)
+	}
 	if name == "Teammates" {
 		return teammatesInTheClear(r, router, "the teammates list", "Read it on the yard's machine.")
 	}
@@ -239,6 +242,40 @@ func sessionScreenInTheClear(r *http.Request, router string) string {
 		for _, p := range strings.Split(proto, ",") {
 			if !strings.EqualFold(strings.TrimSpace(p), "https") {
 				return "a session's screen is taken over https only, or from the yard's own machine: the proxy in front of the yard says this request came to it in plain HTTP. " +
+					"Give the device the yard's https:// address, or " + readHere + crossed
+			}
+		}
+	}
+	return ""
+}
+
+// lineInTheClear keeps a depot's line under the same transport rule as a
+// session's screen: a cmd and a prompt are the operator's to read, so the
+// line is read over https or from the yard's own machine, and down the
+// link from the edge from a paired device of the operator, as an approval
+// is. The rule is SessionScreen's; the words are the line's own.
+func lineInTheClear(r *http.Request, router string) string {
+	const crossed = " The device's token was sent with it and may have crossed a network in the clear: if it did, remove the device and add it again (yardr user device rm)."
+	const readHere = "Read it on the yard's machine."
+	if r.RemoteAddr == linkRemoteAddr {
+		// Only a device of the operator reaches here (operatorCall).
+		if forwardedPlain(r) {
+			return "a depot's line is taken over https only, or from the yard's own machine: the proxy in front of the yard says this request came to it in plain HTTP. " +
+				"Give the device the yard's https:// address, or " + readHere + crossed
+		}
+		return ""
+	}
+	if ip := net.ParseIP(remote(r)); ip == nil || !ip.IsLoopback() {
+		if fromRouter(r, router) {
+			return ""
+		}
+		return "a depot's line is taken over https only, or from the yard's own machine: this request reached the yard's listener in plain HTTP from another machine. " +
+			"Put the proxy or tunnel that ends TLS on the yard's machine, or " + readHere + crossed
+	}
+	for _, proto := range r.Header.Values("X-Forwarded-Proto") {
+		for _, p := range strings.Split(proto, ",") {
+			if !strings.EqualFold(strings.TrimSpace(p), "https") {
+				return "a depot's line is taken over https only, or from the yard's own machine: the proxy in front of the yard says this request came to it in plain HTTP. " +
 					"Give the device the yard's https:// address, or " + readHere + crossed
 			}
 		}

@@ -144,6 +144,12 @@ var listenerOnly = map[string]bool{
 // hangs. It changes nothing, but a screen can show what an agent printed,
 // a secret among it, so it is the operator's to read and no one else's.
 //
+// Line reads one depot's line: its governing flows with their stages,
+// who serves each stage, the stage files and the prompts, whole (design
+// yardr-y1cn 3.1). It changes nothing, but a cmd and a prompt are told to
+// a device of the operator alone, as a screen is, so it stands here
+// beside SessionScreen under the same transport rule.
+//
 // Teammates reads the yard's teammates: one row per address of the
 // standing web_jwt_users mapping, each with its yard user name, role,
 // email, who invited them and when, and their devices with last use. A
@@ -201,6 +207,7 @@ var OperatorCalls = map[string][]string{
 	"ApproveSetup":     {"bead", "ask", "option", "values", "account", "actor", "weighed", "host"},
 	"SourceGrants":     {"source"},
 	"SessionScreen":    {"session"},
+	"Line":             {"depot"},
 	"Teammates":        {},
 	"UninviteTeammate": {"user", "actor"},
 	"TelemetryShow":    {},

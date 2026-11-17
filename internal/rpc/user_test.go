@@ -205,8 +205,8 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 	if len(served) != len(Calls) || len(served) != 33 {
 		t.Errorf("%d calls are served and Calls has %d, want 33 of each: %v", len(served), len(Calls), served)
 	}
-	if !slices.Equal(operators, []string{"ApproveAsk", "ApproveSetup", "GiveSecret", "SessionScreen", "SourceGrants", "Teammates", "TelemetrySet", "TelemetryShow", "UninviteTeammate"}) || len(OperatorCalls) != 12 {
-		t.Errorf("a device of the operator is served %v besides, and OperatorCalls is %v: want ApproveAsk, ApproveSetup, GiveSecret, SessionScreen, SourceGrants, Teammates, TelemetrySet, TelemetryShow, UninviteTeammate and no other of its twelve", operators, OperatorCalls)
+	if !slices.Equal(operators, []string{"ApproveAsk", "ApproveSetup", "GiveSecret", "Line", "SessionScreen", "SourceGrants", "Teammates", "TelemetrySet", "TelemetryShow", "UninviteTeammate"}) || len(OperatorCalls) != 13 {
+		t.Errorf("a device of the operator is served %v besides, and OperatorCalls is %v: want ApproveAsk, ApproveSetup, GiveSecret, Line, SessionScreen, SourceGrants, Teammates, TelemetrySet, TelemetryShow, UninviteTeammate and no other of its thirteen", operators, OperatorCalls)
 	}
 	// The whole grant graph is the operator's to read: to sam's device the
 	// call is not there, as a method the yard does not have, whatever it
@@ -380,6 +380,77 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 	h.ServeHTTP(w, routed)
 	if !strings.Contains(w.Body.String(), `"screen":`) {
 		t.Errorf("SessionScreen through the TLS router is answered %s, want the screen", w.Body)
+	}
+	// Line is the operator's read of a depot's line, under the screen's
+	// transport rule with its own words: a cmd and a prompt cross only as
+	// the screen does.
+	if err := st.PutDepot(context.Background(), store.Depot{Name: "lineyard"}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	w = ask(h, http.MethodPost, "/user/call/Line", token, unread{t})
+	for _, want := range []string{
+		"a depot's line is taken over https only",
+		"in plain HTTP from another machine",
+		"The device's token was sent with it",
+		"yardr user device rm",
+	} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("Line from another machine is answered %s, want it to say %q", w.Body, want)
+		}
+	}
+	edge = httptest.NewRequest(http.MethodPost, "/user/call/Line", strings.NewReader(`{"depot":"lineyard"}`))
+	edge.RemoteAddr = linkRemoteAddr
+	edge.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, edge)
+	if !strings.Contains(w.Body.String(), `"depot":"lineyard"`) {
+		t.Errorf("Line over the edge is answered %s, want the line", w.Body)
+	}
+	none, _ = json.Marshal(noSuchMethod("Line"))
+	edge = httptest.NewRequest(http.MethodPost, "/user/call/Line", strings.NewReader(`{"depot":"lineyard"}`))
+	edge.RemoteAddr = linkRemoteAddr
+	edge.Header.Set("Authorization", "Bearer "+tablet.Token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, edge)
+	if got := strings.TrimSpace(w.Body.String()); got != string(none) {
+		t.Errorf("Line over the edge from sam's device is answered %s, want %s", got, none)
+	}
+	// Direct alike: sam's device calling the listener's own address is
+	// answered as for a method the yard does not have.
+	if got := call(t, h, tablet.Token, "Line", `{"depot":"lineyard"}`); got != string(none) {
+		t.Errorf("Line from sam's device direct is answered %s, want %s", got, none)
+	}
+	edge = httptest.NewRequest(http.MethodPost, "/user/call/Line", unread{t})
+	edge.RemoteAddr = linkRemoteAddr
+	edge.Header.Set("Authorization", "Bearer "+token)
+	edge.Header.Set("X-Forwarded-Proto", "http")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, edge)
+	for _, want := range []string{
+		"the proxy in front of the yard says this request came to it in plain HTTP",
+		"The device's token was sent with it",
+		"yardr user device rm",
+	} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("Line over the edge in plain HTTP is answered %s, want it to say %q", w.Body, want)
+		}
+	}
+	local = httptest.NewRequest(http.MethodPost, "/user/call/Line", strings.NewReader(`{"depot":"lineyard"}`))
+	local.RemoteAddr = "127.0.0.1:40000"
+	local.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, local)
+	if !strings.Contains(w.Body.String(), `"depot":"lineyard"`) {
+		t.Errorf("Line from the yard's machine is answered %s, want the line", w.Body)
+	}
+	routed = httptest.NewRequest(http.MethodPost, "/user/call/Line", strings.NewReader(`{"depot":"lineyard"}`))
+	routed.RemoteAddr = "192.0.2.15:40000"
+	routed.Header.Set("Authorization", "Bearer "+token)
+	routed.Header.Set("X-Forwarded-Proto", "https")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, routed)
+	if !strings.Contains(w.Body.String(), `"depot":"lineyard"`) {
+		t.Errorf("Line through the TLS router is answered %s, want the line", w.Body)
 	}
 	// TelemetryShow and TelemetrySet are the operator's two calls for
 	// the telemetry switch: to sam's device each is one of the methods

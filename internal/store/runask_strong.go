@@ -15,7 +15,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 )
 
 // strongApart says where what a card of the strong few does not carry is
@@ -140,23 +139,10 @@ func noPreset(subject, kind, label, which string) error {
 // no text a card shows as written. A card says so then, and the approval is
 // still held to the text it does show, which is the one that will run.
 func (w *wtx) promptBefore(path string) (text, why string, rewritten bool) {
-	if !strings.HasPrefix(path, "/") {
-		return "", "it is a relative path, read against each depot", false
-	}
-	real, data, sum, err := w.homeFile("", path, MaxRunCrewRole, true)
-	digestName := real
-	if yardPromptName.MatchString(path) {
-		digestName = path
-	}
-	switch {
-	case err != nil:
-		return "", "it does not stand as a regular file under the yard's home", false
-	case len(data) > MaxRunCrewRole:
-		return "", fmt.Sprintf("it is longer than the %d bytes a card shows", MaxRunCrewRole), promptDigestRewritten(digestName, sum)
-	case !utf8.Valid(data) || strings.IndexFunc(string(data), crewRoleHidden) >= 0 || strings.Contains(string(data), NoteFilesMark) || strings.Contains(string(data), WeightMark):
-		return "", "it is not text a card shows as written", promptDigestRewritten(digestName, sum)
-	}
-	return string(data), "", promptDigestRewritten(digestName, sum)
+	// The verdict is promptCarriage's (promptlook.go), shared with the
+	// Line read: homeFile is filesystem only, so the read path opens no
+	// bolt read to judge a prompt either.
+	return promptCarriage(w.home, path)
 }
 
 // textLines are the lines of a prompt's text as a card shows it.
