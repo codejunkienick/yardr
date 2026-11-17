@@ -112,12 +112,14 @@ func activeFrame(recs []store.PackImport, scope string) (store.PackImport, bool)
 
 // readInstalled reads the installed frame rec names, as it stands: a hand
 // edit is the operator's, so the bytes and their sum are of the file as
-// found, not of the bytes the import recorded. The record is written over
-// the socket by any Admin caller, a crew member's pane among them, and the
-// bytes go into pages others read, so the path is read only inside the
-// pack's own installed directory, through a root that refuses a .. or a
-// symlink leading out of it: a record naming another file (a key, the
-// yard's config) is refused, never read.
+// found, not of the bytes the import recorded. The record is written by
+// whoever the yard's policy lets apply the pack, the operator by the core's
+// rule, or by a delegated run held to the server's own reading of the pack
+// (store.RecordPack), never by a crew member's pane. It is read back here
+// all the same, and the bytes go into pages others read, so the path is
+// read only inside the pack's own installed directory, through a root that
+// refuses a .. or a symlink leading out of it: a record naming another file
+// (a key, the yard's config) is refused, never read.
 func readInstalled(home string, rec store.PackImport) (ResolvedFrame, error) {
 	dir := config.At(home).Pack(rec.Pack)
 	rel, err := filepath.Rel(dir, rec.Frame)

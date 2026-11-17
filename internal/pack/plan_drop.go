@@ -95,7 +95,7 @@ func Ident(o Object) (po store.PackObject, ok bool) {
 		}
 		return store.PackObject{Kind: o.Kind, Name: o.Name, Binds: binds}, true
 	case o.Kind == "flow":
-		return store.PackObject{Kind: o.Kind, Name: o.Name}, true
+		return flowRecord(o), true
 	case o.Kind == "pointer" && o.Pointer != nil:
 		return store.PackObject{Kind: o.Kind, Type: o.Pointer.Type, Flow: o.Pointer.Flow}, true
 	case o.Kind == "route" && o.Route != nil:
@@ -248,12 +248,21 @@ func (b *planner) gone(po store.PackObject) (*Object, error) {
 		}
 		return o, nil
 	case "flow":
-		if _, err := b.st.GetFlow(b.ctx, po.Name); errors.Is(err, store.ErrNotFound) {
+		f, err := b.st.GetFlow(b.ctx, po.Name)
+		if errors.Is(err, store.ErrNotFound) {
 			return nil, nil
 		} else if err != nil {
 			return nil, err
 		}
 		o := &Object{Kind: po.Kind, Name: po.Name}
+		// A flow the yard changed since an import wrote it is its own: a
+		// prune would remove the change with it, so the import stops, as it
+		// does for a file edited by hand, and takes its pointer and stage
+		// files with it. No record of it says nothing, as for a file.
+		if was := b.recordedSums("flow", po.Name); len(was) > 0 {
+			d, _ := f.Digest()
+			o.Edited = !slices.Contains(was, d)
+		}
 		ptrs, err := b.st.FlowPointers(b.ctx)
 		if err != nil {
 			return nil, err

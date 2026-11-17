@@ -40,7 +40,15 @@ func (b *planner) flows(flows []Flow) error {
 		if i >= 0 {
 			changes = flowDiff(have[i], sf)
 		}
-		b.add(Object{Kind: "flow", Name: sf.Name, Action: action(i >= 0, changes), Changes: changes, Flow: &sf})
+		o := Object{Kind: "flow", Name: sf.Name, Action: action(i >= 0, changes), Changes: changes, Flow: &sf}
+		// A flow the yard changed stays as it is, and what stays is what the
+		// beads that follow it are held to below, not the pack's version.
+		if len(changes) > 0 {
+			if keeps := b.keepFlow(have[i], sf); keeps != nil {
+				o.Action, o.Keeps, want[sf.Name] = Kept, keeps, have[i]
+			}
+		}
+		b.add(o)
 
 		ptr := store.FlowPointer{Depot: b.o.Depot, Type: f.Type, Flow: sf.Name}
 		changes = nil

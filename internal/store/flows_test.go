@@ -502,3 +502,61 @@ func TestAdvanceNote(t *testing.T) {
 		t.Fatalf("empty note stored: %+v", notes)
 	}
 }
+
+// A flow's digest is the same before and after the store normalizes it, so
+// what a pack import records of the flow it wrote is the digest of the flow
+// the store then holds: stages the walk adds and a transition named twice
+// change the raw flow and not the digest. It changes with an edge, and it
+// leaves the flow it is asked of as it was.
+func TestFlowDigestIsTheStoredFlowsAndChangesWithAnEdge(t *testing.T) {
+	t.Parallel()
+	s, ctx := flowDepot(t)
+	raw := func() store.Flow {
+		return store.Flow{
+			Name:   "pack.default",
+			Stages: []string{"new"}, // review and merged are reached by the walk
+			Transitions: map[string][]string{
+				"new":    {"review", "review", "new"},
+				"review": {"merged"},
+			},
+			Terminal: []string{"merged"},
+		}
+	}
+	f := raw()
+	before, err := f.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(f.Stages, []string{"new"}) || !slices.Equal(f.Transitions["new"], []string{"review", "review", "new"}) {
+		t.Fatalf("Digest changed the flow it was asked of: %+v", f)
+	}
+	saved, err := s.PutFlow(ctx, raw(), "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Equal(saved.Stages, f.Stages) {
+		t.Fatalf("the store did not normalize the flow (stages %v): the test no longer proves anything", saved.Stages)
+	}
+	if got, err := saved.Digest(); err != nil || got != before {
+		t.Fatalf("the stored flow digests %s (%v), the raw flow %s", got, err, before)
+	}
+	// Digesting what the store holds again changes nothing, and reading the
+	// flow back gives the same.
+	stored, err := s.GetFlow(ctx, "pack.default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := stored.Digest(); err != nil || got != before {
+		t.Fatalf("the flow read back digests %s (%v), want %s", got, err, before)
+	}
+	moved := raw()
+	moved.Transitions["review"] = []string{"merged", "new"}
+	if got, err := moved.Digest(); err != nil || got == before {
+		t.Fatalf("a flow with another edge digests %s (%v), as the first does", got, err)
+	}
+	// A flow the store would refuse has no digest.
+	bad := store.Flow{Name: "bad", Stages: []string{"not a stage"}}
+	if _, err := bad.Digest(); err == nil {
+		t.Fatal("a flow with a stage no flow may have digested")
+	}
+}

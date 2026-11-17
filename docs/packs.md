@@ -514,9 +514,10 @@ neither to the store nor under the home:
 | `not in the pack` | the yard has it, the pack does not, and no import of this pack brought it: an import leaves it alone |
 | `no longer in it` | an earlier import of this pack into the depot brought it and the pack has dropped it since: left alone unless the import is told to prune ([Pruning](#pruning)) |
 | `takes` | a group the yard has takes a group of the pack, as it is (`--group`): nothing of it would be changed, and it is not recorded as the pack's ([Groups](#how-a-pack-maps-to-the-yard)) |
+| `kept` | the yard changed this flow, stage file or role prompt since the last import (or, for a flow, nothing records what the last import wrote): the import leaves it as the yard has it, the line under it says which and why, and `--take <kind>/<name>` sets the pack's ([A pack is a starting point](#yardr-pack-apply)) |
 | `shadows …` under an object | a file of the depot that is not used while the object is as the pack sets it: the depot's own `.yardr/roles/builder.md`, under a group prompted from the pack's copy |
-| `kept: …` under an object | something the pack carries and the import leaves as the yard has it, with the reason: a prompt on an existing group that points elsewhere; a command on an existing script group that differs from the pack's; a depot role kept with `--depot-roles`; or the role, script or limit of a group that takes the pack's |
-| `edited by hand since the last import: …` under a file | the installed copy is neither what the last import installed nor what the pack has now: `pack apply` overwrites it only with `--yes` ([below](#yardr-pack-apply)) |
+| `kept: …` under an object | something the pack carries and the import leaves as the yard has it, with the reason: a flow, stage file or role the yard changed (`kept` above); a prompt on an existing group that points elsewhere; a command on an existing script group that differs from the pack's; a depot role kept with `--depot-roles`; or the role, script or limit of a group that takes the pack's |
+| `edited by hand since the last import: …` under a script or the page frame | the installed copy is neither what the last import installed nor what the pack has now: `pack apply` overwrites it only with `--yes` ([below](#yardr-pack-apply)). A flow the pack has dropped is stopped the same way, in the words `flow <name> was edited since the last import` |
 
 then what an import would ask, which flow would govern the depot afterwards,
 what each subscribed source has and lacks, which sources the yard has
@@ -589,7 +590,8 @@ is copied to `<home>/flows/<pack>.<flow>/<stage>.md`
 whatever the file is called in the pack. The plan lists each with the
 pack's other files, as `flows/default/review.md -> <where it goes>`; only
 the flows the import uses have theirs copied. They are filled, recorded,
-checked for hand edits and pruned as roles are. Every depot following the
+kept where the yard changed them ([A pack is a starting point](#yardr-pack-apply))
+and pruned as roles are. Every depot following the
 flow reads the same copies. A stage file in that directory the pack does
 not carry (one written by hand for a stage the pack names no file for)
 shows as `not in the pack`, by its path under the home
@@ -605,9 +607,9 @@ group's prompt already points at that copy. If an existing group of the same
 kind points elsewhere, the import keeps its prompt and says so under `kept`;
 this covers a group another pack made and one whose prompt was set by hand.
 The `--depot-roles` and `--pack-roles` choices below govern groups whose depot
-has its own role. Re-applying a pack still updates the installed role file, so
-a group already using that copy reads the updated role without changing its
-prompt path. The depot's own role file stays where it is and is read by
+has its own role. Re-applying a pack still updates the installed role file, unless the
+yard changed it since the last import (below), so a group already using that
+copy reads the updated role without changing its prompt path. The depot's own role file stays where it is and is read by
 nothing unless `--depot-roles` is chosen.
 
 When the pack's role is applied, the plan names the copied file under the
@@ -1094,6 +1096,7 @@ sources, which no hook receives and nobody answers in:
 
 ```sh
 yardr pack apply <pack> [--depot <depot>] [--yes] [--sha256 <digest>] [--prune]
+    [--take <kind>/<name>]…
     [--bind <group>=<kind>[:<model>][,<preset>]]… [--members <group>=a,b]…
     [--crew <pack's>=<yard's>]… [--group <pack's>=<yard's>]…
     [--open-threads <pack's>=<source>,…|none]…
@@ -1367,21 +1370,78 @@ whose setting the operator has since taken away by hand: the import never
 gives it back unasked. An import whose only news is an answer writes the
 record and logs `pack_applied`.
 
-**A copy edited by hand is not overwritten silently.** The record holds the
-content of each file as the import installed it, placeholders filled. A copy under
-`<home>/packs/<pack>/`, or a stage file under `<home>/flows/<pack>.<flow>/`,
-that is neither that nor what the pack has now was edited in the yard; the plan marks it, and the import stops before it writes
-anything, in a terminal too:
+**A pack is a starting point.** What the yard changes of a flow, a stage
+file or a role prompt stays changed. The record holds what the import wrote
+of each: a file's content as it was installed, placeholders filled, and a
+flow's digest, the sha256 of the flow in the form the store keeps it. A plan
+compares what the yard has with the pack's and with that. Where the yard's
+differs from the pack's and is not what an import wrote, the yard changed it:
+the plan lists it as `kept`, the import leaves it however the pack moved, and
+the result prints a `kept:` line for it:
 
 ```
-nothing was changed: /Users/me/.yardr/packs/starter/roles/builder.md was edited by hand since the last import, and the import would overwrite it: the edit belongs in the pack's source (/Users/me/yardr/packs/starter/roles/builder.md); --yes overwrites it
+flows
+  kept             starter.default
+    kept: the yard's flow, changed since the last import (the pack's has not changed since); --take flow/starter.default takes the pack's
+    stage decide: -> backlog | new | merged -> -> backlog | new
+...
+pack starter is applied to depot web: nothing written; the yard's own version of 1 object stands (kept: below)
+  kept: flow starter.default: the yard's flow, changed since the last import (the pack's has not changed since); --take flow/starter.default takes the pack's
+```
+
+The line says which of three it is. **Changed since the last import (the
+pack's has not changed since)**: the yard changed it, and the pack is as it
+was. **DIVERGED**: the yard changed it and the pack changed too, so the pack's
+fix would be dropped unseen where the yard's stands; the line says so, once:
+the record then takes the pack's version of what was kept, as it does of what
+was written, so the next plan, which reads the pack unmoved since, says the
+first. **No import recorded what it wrote**: a flow that differs, with a record
+from before the digest (or none: a flow of the pack's name the yard made by
+hand before the pack came). It cannot be told whose change that is, and the
+yard's version is the one that can be lost, so it is kept too. The first
+apply after an upgrade therefore also keeps a flow the pack moved while the
+yard never touched it; the line says so, it is visible, and `--take` sets the
+pack's.
+
+**`--take <kind>/<name>`**, repeatable, sets the pack's version of an object
+the plan keeps, named as the plan prints it: `flow/starter.default`,
+`file/roles/builder.md`, the kind and the name of its line. Everything else
+that object has is as without it. The names are checked before anything is
+written, and a name that is no kind and name, a declared source (which stays
+as the pack declares it, so nothing of it is kept), an object the plan does
+not have and one it has but does not keep refuses the whole import, each in
+its own words. `--yes` does not take: it overwrites a script or a frame, and
+no flow, stage file or role.
+
+A script is the yard's to run and the frame its pages' look, and a hand edit
+of either is a change to what the pack says, not to a starting point, so
+those keep the stop below. The commands of a declared source are copied again
+by every import, with no check for a hand edit, and the sources stay as the
+pack declares them. Routes and groups have their own keeps, shown under them.
+
+**A script edited by hand is not overwritten silently.** A script under
+`<home>/packs/<pack>/` (or the pack's page frame) that is neither what the
+last import installed nor what the pack has now was edited in the yard; the
+plan marks it, and the import stops before it writes anything, in a terminal
+too:
+
+```
+nothing was changed: /Users/me/.yardr/packs/starter/scripts/merge-local was edited by hand since the last import, and the import would overwrite it: the edit belongs in the pack's source (/Users/me/yardr/packs/starter/scripts/merge-local); --yes overwrites it
 ```
 
 Make the edit in the pack and apply again, or give `--yes` to drop it. The
-depots a pack is imported into share its copies, so a copy that is as the
-import into any of them left it counts as not edited. A record written
-before yardr kept the content says nothing, and such a copy is overwritten
-as before.
+depots a pack is imported into share its copies and its flows, so a copy or a
+flow that is as the import into any of them left it counts as not changed by
+the yard. A record written before yardr kept the content says nothing of a
+file, and such a copy is overwritten as before; for a flow it says nothing
+either, and that is the third kind of line above.
+
+A flow the pack has dropped that the yard changed since an import wrote it
+stops the import in the same way, with its pointer and its stage files, since
+a prune would remove the change with them (`flow <name> was edited since the
+last import, and the import would remove it`): `--yes` lets it go, and
+nothing is removed without `--prune` either way. A flow no record holds a
+digest for is not told from one the yard left, as a file is not.
 
 **All or nothing, as far as the store allows.** Before the first write the
 import checks that the plan is not refused, that every question has a usable
@@ -1489,6 +1549,10 @@ yard no pack was imported into.
   dropped stage file is named by that path under the home.
 - A flow's stage files stay while the flow does: with a flow that is held,
   and with one the store refused to remove.
+- A file edited by hand since the import that wrote it, and a flow the yard
+  changed since, stop the import before anything is written, with `--prune`
+  or without: `--yes` lets them go, and `--prune` is still what removes them
+  ([A pack is a starting point](#yardr-pack-apply)).
 - The stage file of a stage the flow lost is named after no stage of the
   flow any more, which `yardr flow show <depot>` warns of as a stray file in
   the yard's home ([flows.md](flows.md#stage-files-what-a-stage-is-for)) until
@@ -2027,11 +2091,14 @@ digest before anything is written. A pack that is a directory outside
 every depot's main checkout, a URL but the packs repository's pinned
 with `--sha256`, or an earlier import's record, any
 flag of `pack apply` but the depot and the mappings of a depot pack's
-first install and `--yes` over files edited by hand, and a plan that
+first install and `--yes` over scripts edited by hand, and a plan that
 asks, is refused to a terminal, where `yardr pack check <name>` shows
-the plan. With `--yes` the card shows each file the plan says was edited
+the plan. With `--yes` the card shows each script the plan says was edited
 by hand whole, with both hashes and the diff, and approval overwrites
-exactly those copies. The
+exactly those copies. What the plan keeps (a flow, stage file or role the
+yard changed) stays as the yard has it under any approval, the card lists it
+under what it keeps, and the result says `kept:` as a terminal does;
+`--take` is the terminal's. The
 yardmaster has a road of its own beside the card, for a pack that yardr
 embeds and for one that the packs repository serves.
 
@@ -2218,7 +2285,9 @@ its own, its `keeps` what the import leaves as the yard has it, its `env` the
 assignments a new script group's `cmd` starts with (from the pack's `env`; a
 group the yard has gets none, and `keeps` says what of it its `cmd` lacks),
 and its `shadows` the depot's files the pack's role stands in front of. A file has
-`edited: true` when its installed copy was edited by hand. `depot_roles` says
+`edited: true` when its installed copy was edited by hand, and a flow the
+pack dropped when the yard changed it; an object with `action: kept` is
+what the import leaves as the yard has it, and its `keeps` say why. `depot_roles` says
 whose roles the plan sets. A dropped
 object has `owned`, the record's entry for it, and `held` when not even a
 prune removes it. The question `pack.flow` belongs to no object: it is

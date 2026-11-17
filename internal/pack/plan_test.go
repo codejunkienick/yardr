@@ -931,6 +931,14 @@ func TestChangedFlowIsShownByStage(t *testing.T) {
 	if want := []pack.Diff{{Field: "stage decide", Old: "-> backlog | new", New: "-> backlog"}}; f.Action != pack.Change || !reflect.DeepEqual(f.Changes, want) {
 		t.Fatalf("flow = %s %v", f.Action, f.Changes)
 	}
+	// The yard has the flow as the import left it, so the pack moving alone
+	// is no change of the yard's to keep: the import brings it.
+	if len(f.Keeps) != 0 {
+		t.Fatalf("flow the pack moved alone keeps %q", f.Keeps)
+	}
+	if res := apply(t, st, plan, nil); res.Changed != 1 || len(res.Kept) != 0 {
+		t.Fatalf("applying the moved flow: %+v", res)
+	}
 
 	// The train's review, where the starter sets no limit: its changes go
 	// back to open, and with a limit go to decide after max rounds.

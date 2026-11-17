@@ -87,19 +87,28 @@ func (b *planner) file(rel string, op *FileOp) error {
 		return err
 	}
 	edited := false
+	var was []string
 	if exists {
 		if !bytes.Equal(have, text) {
 			changes = append(changes, Diff{"content", "sha256 " + sum(have)[:12], "sha256 " + op.SHA256[:12]})
 			// Not what the last import installed either: someone edited
 			// the copy, and the import would undo that.
-			was := b.installedSums(op.To)
+			was = b.installedSums(op.To)
 			edited = len(was) > 0 && !slices.Contains(was, sum(have))
 		}
 		if hi, err := os.Stat(op.To); err == nil && (hi.Mode().Perm()&0o111 != 0) != (op.Mode == "0755") {
 			changes = append(changes, Diff{"mode", fmt.Sprintf("%04o", hi.Mode().Perm()), op.Mode})
 		}
 	}
-	b.add(Object{Kind: "file", Name: rel, Action: action(exists, changes), Changes: changes, File: op, Edited: edited})
+	o := Object{Kind: "file", Name: rel, Action: action(exists, changes), Changes: changes, File: op, Edited: edited}
+	// A role or a stage file, the files an import fills, is a starting point:
+	// the yard's change to it stays, where a script or the frame, which the
+	// yard runs or serves as the pack has them, stops the import (Edited).
+	if edited && op.Fill {
+		o.Action, o.Edited = Kept, false
+		o.Keeps = []string{keptWords(shapeOf(sum(have), op.SHA256, was), "the yard's copy", o.TakeName())}
+	}
+	b.add(o)
 	return nil
 }
 
@@ -151,14 +160,20 @@ func (p *Plan) Removable(path string) bool {
 // installed file to, one per depot it was imported into: the depots share the
 // copy, so the last import into any of them may have written it. Empty when
 // no record says, as those older than the field do not.
-func (b *planner) installedSums(to string) []string {
+func (b *planner) installedSums(to string) []string { return b.recordedSums("file", to) }
+
+// recordedSums are what the imports of this pack recorded of the object of
+// kind and name (the file's content, the flow's digest), one per depot it was
+// imported into. A store flow is as shared as an installed file, so the flow
+// the yard has may be the one any of them wrote.
+func (b *planner) recordedSums(kind, name string) []string {
 	var out []string
 	for _, r := range b.all {
 		if r.Pack != b.p.Name {
 			continue
 		}
 		for _, po := range r.Objects {
-			if po.Kind == "file" && po.Name == to && po.SHA256 != "" {
+			if po.Kind == kind && po.Name == name && po.SHA256 != "" {
 				out = append(out, po.SHA256)
 			}
 		}
@@ -167,16 +182,22 @@ func (b *planner) installedSums(to string) []string {
 }
 
 // EditedFiles are the installed files the plan would overwrite though they
-// were edited by hand since the last import, each with why that is refused.
+// were edited by hand since the last import, and the flows it would remove
+// though the yard changed them since, each with why that is refused. A role or
+// a stage file the yard changed is kept, so it is not among them, as no flow
+// is that the pack still carries.
 func (p *Plan) EditedFiles() []string {
 	var out []string
 	for _, o := range p.Objects {
-		if o.Kind == "file" && o.Edited && o.File != nil {
+		switch {
+		case o.Kind == "file" && o.Edited && o.File != nil:
 			verb := "overwrite"
 			if o.Action == Dropped {
 				verb = "remove"
 			}
 			out = append(out, fmt.Sprintf("%s was edited by hand since the last import, and the import would %s it: the edit belongs in the pack's source (%s)", o.File.To, verb, o.File.From))
+		case o.Kind == "flow" && o.Edited:
+			out = append(out, fmt.Sprintf("flow %s was edited since the last import, and the import would remove it: the pack no longer has it, so no source of the pack holds the edit (yardr flow show %s prints it)", o.Name, o.Name))
 		}
 	}
 	return out

@@ -996,9 +996,10 @@ func TestCarryDepotPack(t *testing.T) {
 	t.Run("first install with mappings", carryFirstInstallWithMappings)
 	t.Run("files the pack does not carry", carryStrayFiles)
 	t.Run("a file the pack no longer carries", carryDroppedFile)
-	t.Run("a file edited by hand, overwritten with --yes", carryEditedWithYes)
+	t.Run("a script edited by hand, overwritten with --yes", carryEditedWithYes)
 	t.Run("a file edited again after approval", carryEditedAgain)
 	t.Run("a second file edited after approval", carryEditedSince)
+	t.Run("a role the yard changed, kept", carryKeptRole)
 
 	st2, home2, bead2, dir2 := depotYard(t)
 	writeMiniPack(t, dir2, "build v2\n", "yardmaster v2\n")
@@ -1098,14 +1099,25 @@ func carryDroppedFile(t *testing.T) {
 	}
 }
 
-// carryEditedWithYes checks the --yes case of TestCarryDepotPack: a role
+// writeMiniScript writes the mini pack's script as text: writeMiniPack
+// writes it an empty one.
+func writeMiniScript(t *testing.T, dir, text string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "scripts", "land"), []byte(text), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// carryEditedWithYes checks the --yes case of TestCarryDepotPack: a script
 // the pack changed and a hand edited meanwhile is shown whole on the card,
-// and the carrying out installs the pack's bytes over the hand edit.
+// and the carrying out installs the pack's bytes over the hand edit. (A role
+// the yard changed is kept, which --yes does not take: carryKeptRole.)
 func carryEditedWithYes(t *testing.T) {
 	st, home, bead, dir := depotYard(t)
 	writeMiniPack(t, dir, "build v2\n", "yardmaster v2\n")
-	builder := filepath.Join(home, "packs", "mini", "roles", "builder.md")
-	if err := os.WriteFile(builder, []byte("build by hand\n"), 0o644); err != nil {
+	writeMiniScript(t, dir, "#!/bin/sh\n# v2\n")
+	land := filepath.Join(home, "packs", "mini", "scripts", "land")
+	if err := os.WriteFile(land, []byte("#!/bin/sh\n# by hand\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	ask := packAskOf("mini")
@@ -1125,8 +1137,8 @@ func carryEditedWithYes(t *testing.T) {
 	if rec := carryState(t, st, bead, seq); rec.State != store.CarryDone {
 		t.Fatalf("the carrying record = %+v", rec)
 	}
-	for name, want := range map[string]string{"builder.md": "build v2\n", "yardmaster.md": "yardmaster v2\n"} {
-		data, err := os.ReadFile(filepath.Join(home, "packs", "mini", "roles", name))
+	for name, want := range map[string]string{"roles/builder.md": "build v2\n", "roles/yardmaster.md": "yardmaster v2\n", "scripts/land": "#!/bin/sh\n# v2\n"} {
+		data, err := os.ReadFile(filepath.Join(home, "packs", "mini", filepath.FromSlash(name)))
 		if err != nil || string(data) != want {
 			t.Fatalf("the installed %s = %q, %v", name, data, err)
 		}
@@ -1139,33 +1151,37 @@ func carryEditedWithYes(t *testing.T) {
 func carryEditedAgain(t *testing.T) {
 	st, home, bead, dir := depotYard(t)
 	writeMiniPack(t, dir, "build v2\n", "yardmaster v2\n")
-	builder := filepath.Join(home, "packs", "mini", "roles", "builder.md")
-	if err := os.WriteFile(builder, []byte("build by hand\n"), 0o644); err != nil {
+	writeMiniScript(t, dir, "#!/bin/sh\n# v2\n")
+	land := filepath.Join(home, "packs", "mini", "scripts", "land")
+	if err := os.WriteFile(land, []byte("#!/bin/sh\n# by hand\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	ask := packAskOf("mini")
 	ask.Run.Argv = []string{"pack apply mini --yes"}
 	seq := askApprove(t, st, bead, ask)
-	if err := os.WriteFile(builder, []byte("build by hand again\n"), 0o644); err != nil {
+	if err := os.WriteFile(land, []byte("#!/bin/sh\n# by hand again\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drainMini(t, st, home, dir)
-	if rec := carryState(t, st, bead, seq); rec.State != store.CarryFailed || !strings.Contains(rec.Result, "roles/builder.md") {
+	if rec := carryState(t, st, bead, seq); rec.State != store.CarryFailed || !strings.Contains(rec.Result, "scripts/land") {
 		t.Fatalf("an edited-again record = %+v", rec)
 	}
-	if data, err := os.ReadFile(builder); err != nil || string(data) != "build by hand again\n" {
+	if data, err := os.ReadFile(land); err != nil || string(data) != "#!/bin/sh\n# by hand again\n" {
 		t.Fatalf("the re-edited file was applied over: %q, %v", data, err)
 	}
 }
 
 // carryEditedSince checks the hold of TestCarryDepotPack's --yes case for
-// a second copy edited after the approval: the plan names what the card
-// did not show, so nothing is carried out and both hand edits stand.
+// a second copy edited after the approval: the card showed the role as a
+// change the import writes, and it is the yard's now, so nothing is carried
+// out and both hand edits stand.
 func carryEditedSince(t *testing.T) {
 	st, home, bead, dir := depotYard(t)
 	writeMiniPack(t, dir, "build v2\n", "yardmaster v2\n")
+	writeMiniScript(t, dir, "#!/bin/sh\n# v2\n")
+	land := filepath.Join(home, "packs", "mini", "scripts", "land")
 	roles := filepath.Join(home, "packs", "mini", "roles")
-	if err := os.WriteFile(filepath.Join(roles, "builder.md"), []byte("build by hand\n"), 0o644); err != nil {
+	if err := os.WriteFile(land, []byte("#!/bin/sh\n# by hand\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	ask := packAskOf("mini")
@@ -1175,14 +1191,61 @@ func carryEditedSince(t *testing.T) {
 		t.Fatal(err)
 	}
 	drainMini(t, st, home, dir)
-	if rec := carryState(t, st, bead, seq); rec.State != store.CarryFailed || !strings.Contains(rec.Result, "did not show") {
+	if rec := carryState(t, st, bead, seq); rec.State != store.CarryFailed || !strings.Contains(rec.Result, "roles/yardmaster.md") || !strings.Contains(rec.Result, "keeps or shadows differently than the card") {
 		t.Fatalf("an edited-since record = %+v", rec)
 	}
-	for name, want := range map[string]string{"builder.md": "build by hand\n", "yardmaster.md": "yardmaster by hand\n"} {
-		data, err := os.ReadFile(filepath.Join(roles, name))
+	for path, want := range map[string]string{land: "#!/bin/sh\n# by hand\n", filepath.Join(roles, "yardmaster.md"): "yardmaster by hand\n"} {
+		data, err := os.ReadFile(path)
 		if err != nil || string(data) != want {
-			t.Fatalf("the installed %s = %q, %v, want the hand edit standing", name, data, err)
+			t.Fatalf("the installed %s = %q, %v, want the hand edit standing", path, data, err)
 		}
+	}
+}
+
+// carryKeptRole checks the kept case of TestCarryDepotPack: a role the pack
+// changed and the yard changed since the last import is kept by a card's
+// approval: the carrying out writes what else the pack changed, leaves the
+// role as the yard has it and says so on the card, and a card with --yes
+// over what is kept alone is refused at the ask, since nothing was edited by
+// hand that it could overwrite.
+func carryKeptRole(t *testing.T) {
+	st, home, bead, dir := depotYard(t)
+	writeMiniPack(t, dir, "build v2\n", "yardmaster v2\n")
+	builder := filepath.Join(home, "packs", "mini", "roles", "builder.md")
+	if err := os.WriteFile(builder, []byte("build by hand\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seq := askApprove(t, st, bead, packAskOf("mini"))
+	drainMini(t, st, home, dir)
+	if rec := carryState(t, st, bead, seq); rec.State != store.CarryDone {
+		t.Fatalf("the carrying record = %+v", rec)
+	}
+	lines := resolvedLines(t, st, bead, seq)
+	if !strings.Contains(lines, "approved, ran: yardr pack apply mini") || !strings.Contains(lines, "1 changed") ||
+		!strings.Contains(lines, "kept: file roles/builder.md: the yard's copy, DIVERGED: changed since the last import, and the pack's has changed too") {
+		t.Fatalf("the carried-out card reads:\n%s", lines)
+	}
+	for name, want := range map[string]string{"builder.md": "build by hand\n", "yardmaster.md": "yardmaster v2\n"} {
+		data, err := os.ReadFile(filepath.Join(home, "packs", "mini", "roles", name))
+		if err != nil || string(data) != want {
+			t.Fatalf("the installed %s = %q, %v", name, data, err)
+		}
+	}
+	writeMiniPack(t, dir, "build v3\n", "yardmaster v2\n")
+	seq = askApprove(t, st, bead, packAskOf("mini"))
+	drainMini(t, st, home, dir)
+	if rec := carryState(t, st, bead, seq); rec.State != store.CarryDone {
+		t.Fatalf("the kept-only carrying record = %+v", rec)
+	}
+	lines = resolvedLines(t, st, bead, seq)
+	if !strings.Contains(lines, "pack mini is applied to depot yardr: nothing written; the yard's own version of 1 object stands (kept: below)") ||
+		!strings.Contains(lines, "kept: file roles/builder.md: the yard's copy, DIVERGED: changed since the last import, and the pack's has changed too") {
+		t.Fatalf("the kept-only carried-out card reads:\n%s", lines)
+	}
+	ask := packAskOf("mini")
+	ask.Run.Argv = []string{"pack apply mini --yes"}
+	if _, err := st.AddAsk(context.Background(), bead, ask, "yardmaster"); err == nil || !strings.Contains(err.Error(), "--yes overwrites a copy edited by hand, and its plan names none") {
+		t.Fatalf("--yes over a kept role = %v", err)
 	}
 }
 

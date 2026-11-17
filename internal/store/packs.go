@@ -111,7 +111,12 @@ type PackObject struct {
 	// SHA256 is a file's content as the import installed it: a copy that
 	// differs was edited by hand since. Records older than the field lack it.
 	// Of a declared source it is the declaration's text as the import added
-	// it: one added by hand since is the yard's.
+	// it: one added by hand since is the yard's. Of a flow it is the digest
+	// (Flow.Digest) of the pack's version, written or kept: a flow that
+	// differs from it and from the pack's was changed by the yard since, and
+	// one the record holds none for cannot be told from the pack's. Only
+	// RecordPack writes it, as it writes the rest of the record, so the
+	// operator's gate holds it.
 	SHA256 string `json:"sha256,omitempty"`
 	// A route's stage, type and group; a pointer's type and flow.
 	Stage string `json:"stage,omitempty"`

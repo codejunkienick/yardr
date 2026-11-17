@@ -761,13 +761,21 @@ func verifyDepotObjects(carded, after *store.AskPlan) error {
 		if !ok {
 			return fmt.Errorf("the object %s %s is gone after the import", obj.Kind, obj.Name)
 		}
-		if !sameStrings(rb.Keeps, obj.Keeps) || !sameStrings(rb.Shadows, obj.Shadows) {
+		// What an import leaves as the yard has it is worded by the record
+		// the import moves (a pack that moved under the yard's change reads
+		// DIVERGED until its version is recorded), so a kept object is held
+		// to not being written below, and not to its words.
+		if (obj.Action != "kept" && !sameStrings(rb.Keeps, obj.Keeps)) || !sameStrings(rb.Shadows, obj.Shadows) {
 			return fmt.Errorf("the object %s %s keeps or shadows differently after the import", obj.Kind, obj.Name)
 		}
 		switch obj.Action {
 		case "create", "change", "unchanged":
 			if rb.Action != "unchanged" {
 				return fmt.Errorf("the object %s %s reads %s after the import, not unchanged", obj.Kind, obj.Name, rb.Action)
+			}
+		case "kept":
+			if rb.Action != "kept" && rb.Action != "unchanged" {
+				return fmt.Errorf("the object %s %s was kept as the yard has it on the card and reads %s after the import", obj.Kind, obj.Name, rb.Action)
 			}
 		case "dropped":
 			if rb.Action != "dropped" {
@@ -821,8 +829,15 @@ func packResultLines(res *pack.Result, plan *pack.Plan, owedCredential bool) []s
 	var lines []string
 	if res.Wrote() {
 		lines = append(lines, fmt.Sprintf("applied pack %s to %s: %d created, %d changed, %d unchanged", res.Pack, inDepot(res.Depot), res.Created, res.Changed, res.Unchanged))
+	} else if len(res.Kept) > 0 {
+		lines = append(lines, fmt.Sprintf("pack %s is applied to %s: nothing written; the yard's own version of %s stands (kept: below)", res.Pack, inDepot(res.Depot), plural(len(res.Kept), "object")))
 	} else {
 		lines = append(lines, fmt.Sprintf("pack %s is already applied to %s: nothing changed", res.Pack, inDepot(res.Depot)))
+	}
+	// What the yard changed stays, and a card's approval takes none of it:
+	// the lines say which objects and why.
+	for _, k := range res.Kept {
+		lines = append(lines, "kept: "+k)
 	}
 	for _, d := range plan.Declared {
 		lines = append(lines, fmt.Sprintf("declared source %s: %s", d.Source, d.Action))

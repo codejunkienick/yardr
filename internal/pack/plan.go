@@ -33,6 +33,12 @@ const (
 	// (Options.Groups): the pack's routes lead to it, and an import changes
 	// nothing of it and does not record it as the pack's.
 	Takes = "takes"
+	// Kept is an object of the pack that the yard changed since the last
+	// import, or that no record can vouch for: an import leaves it as the
+	// yard has it, recorded under the pack's version so that the next plan
+	// tells what moved since, and sets the pack's only where it is told to
+	// take it by name (ApplyOptions.Take). Its Keeps say which and why.
+	Kept = "kept"
 )
 
 // Options say where a pack would be imported.
@@ -218,7 +224,9 @@ type Object struct {
 	// of the pack's env it does not carry.
 	Env []string `json:"env,omitempty"`
 	// Edited says an installed file was changed by hand since the last
-	// import and this one would overwrite it.
+	// import and this one would overwrite it, or a flow it would remove: it
+	// stops the import (EditedFiles) until told it may. A role or a stage
+	// file the yard changed is Kept, not Edited, and so is a flow.
 	Edited bool `json:"edited,omitempty"`
 	// Of a dropped object: Owned is the earlier import's record of it, and
 	// Held, when set, why not even a prune removes it.

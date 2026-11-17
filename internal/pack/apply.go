@@ -34,6 +34,13 @@ type ApplyOptions struct {
 	// Overwrite lets the import replace an installed file that was edited
 	// by hand since the last import; without it such a plan is refused.
 	Overwrite bool
+	// Take names the objects the import sets to the pack's though the yard
+	// changed them (Kept), each as the plan prints it (Object.TakeName):
+	// flow/starter.default, file/roles/builder.md. Overwrite does not take a
+	// flow, a stage file or a role: it only lifts the stop of a script or the
+	// frame. A name that is no kept object of the plan refuses the import
+	// before anything is written, a declared source's among them.
+	Take []string
 	// OpenThreads are the operator's answers to what the plan asks under
 	// OpenThreads: the yard's crew member -> source -> yes or no. A yes lets
 	// the crew member open threads in the source, a no is recorded so the next
@@ -87,84 +94,6 @@ type ApplyOptions struct {
 	ApprovedAsk  uint64
 }
 
-// Result is what applying a plan did.
-type Result struct {
-	Pack  string `json:"pack"`
-	Depot string `json:"depot"`
-	// Created, Changed and Unchanged count the plan's objects by what was
-	// done to them.
-	Created   int `json:"created"`
-	Changed   int `json:"changed"`
-	Unchanged int `json:"unchanged"`
-	// Pruned are the dropped objects removed, Left those still there: no
-	// prune was asked for, the object is held, or its removal failed (then
-	// PruneErrors says why).
-	Pruned      []string `json:"pruned"`
-	Left        []string `json:"left"`
-	PruneErrors []string `json:"prune_errors"`
-	// Restart are the running crew members whose role or subscriptions
-	// changed: the import does not restart them.
-	Restart []string `json:"restart"`
-	// Granted are the crew the import let open threads, each with the
-	// sources that are new to it.
-	Granted []Grant `json:"granted"`
-	// Calls are the calls of declared sources the import granted.
-	Calls []CallGrant `json:"calls"`
-	// Exposed are the crew the import exposed to peers, each with the
-	// peers.
-	Exposed []Exposed `json:"exposed"`
-	// Mapped are the stage maps the import set on a hook of the yard.
-	Mapped []MapOp `json:"mapped"`
-	// Declared are the sources the import added or replaced.
-	Declared []string `json:"declared"`
-	// Folds are what the import folded from each declared source's
-	// -declared name into the source itself, one per source that had
-	// anything under the old name.
-	Folds []Fold `json:"folds"`
-	// Recorded says the yard's record of the import was written; false when
-	// nothing changed.
-	Recorded bool `json:"recorded"`
-	// FrameMoved says the import moved its scope's frame choice to this
-	// pack (the plan's FrameUse), though it may have written no file: an
-	// unchanged re-apply of a displaced frame pack is pack_applied with
-	// Wrote false, and this is how the result says so.
-	FrameMoved bool `json:"frame_moved,omitempty"`
-}
-
-// Grant is a crew member and the sources an import let it open threads in.
-type Grant struct {
-	CrewMember string   `json:"crew"`
-	Sources    []string `json:"sources"`
-}
-
-// Exposed is a crew member and the peers an import exposed it to.
-type Exposed struct {
-	CrewMember string   `json:"crew"`
-	Peers      []string `json:"peers"`
-}
-
-// CallGrant is a group or a crew member and the calls of one source an
-// import granted it.
-type CallGrant struct {
-	store.Grantee
-	Source string   `json:"source"`
-	Calls  []string `json:"calls"`
-}
-
-// Fold is what one apply folded from a -declared name into the source
-// the pack brings: the links, and the records MoveSourceRecords moved.
-type Fold struct {
-	From  string `json:"from"`
-	To    string `json:"to"`
-	Links int    `json:"links"`
-	store.SourceMove
-}
-
-// Wrote reports whether the import changed anything in the yard.
-func (r *Result) Wrote() bool {
-	return r.Created+r.Changed+len(r.Pruned)+len(r.Granted)+len(r.Calls)+len(r.Exposed) > 0
-}
-
 // Missing are the plan's questions a has no answer to.
 func (p *Plan) Missing(a Answers) []Question {
 	var out []Question
@@ -198,7 +127,7 @@ func (p *Plan) Missing(a Answers) []Question {
 // not folded in leaves the import applied and recorded, and the error
 // names the source.
 func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (res *Result, err error) {
-	res = &Result{Pack: p.Pack, Depot: p.Depot, Pruned: []string{}, Left: []string{}, PruneErrors: []string{}, Restart: []string{}, Granted: []Grant{}, Calls: []CallGrant{}, Exposed: []Exposed{}, Mapped: []MapOp{}, Declared: []string{}, Folds: []Fold{}}
+	res = &Result{Pack: p.Pack, Depot: p.Depot, Pruned: []string{}, Left: []string{}, PruneErrors: []string{}, Restart: []string{}, Granted: []Grant{}, Calls: []CallGrant{}, Exposed: []Exposed{}, Mapped: []MapOp{}, Declared: []string{}, Folds: []Fold{}, Kept: []string{}}
 	ck, err := check(p, o)
 	if err != nil {
 		return nil, err
@@ -224,6 +153,16 @@ func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (res *Res
 			continue
 		case NotInPack, Dropped, Takes:
 			continue
+		case Kept:
+			// Left as the yard has it, and said so, unless told to take the
+			// pack's: it is then written as the change it is.
+			if !o.takes(*obj) {
+				res.Kept = append(res.Kept, obj.keptWords())
+				continue
+			}
+			taken := *obj
+			taken.Action = Change
+			obj = &taken
 		}
 		if obj.refused(o) {
 			continue
@@ -506,6 +445,7 @@ func check(p *Plan, o ApplyOptions) (*checked, error) {
 	if !o.Overwrite {
 		problems = append(problems, p.EditedFiles()...)
 	}
+	problems = append(problems, p.takeProblems(o.Take)...)
 	// An answer is to a question of the plan: a source the yard lacks, or
 	// one the pack does not name, is granted to nobody.
 	for _, name := range slices.Sorted(maps.Keys(o.OpenThreads)) {
@@ -536,6 +476,11 @@ func check(p *Plan, o ApplyOptions) (*checked, error) {
 	}
 	ck := &checked{files: map[string][]byte{}, commands: map[string]map[string][]byte{}}
 	for _, obj := range p.Objects {
+		if o.takes(obj) {
+			taken := obj
+			taken.Action = Change // a taken object is checked as the change it is
+			obj = taken
+		}
 		if v := o.Answers["crew."+obj.Name+".crew"]; obj.Kind == "crew" && v != "" && v != obj.Name {
 			problems = append(problems, fmt.Sprintf("the plan gives the pack's %s to crew member %s, not %s: make it again with that crew member", obj.CrewMember.Pack, obj.Name, v))
 		}
