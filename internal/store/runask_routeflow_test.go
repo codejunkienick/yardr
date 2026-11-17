@@ -1,6 +1,7 @@
 package store
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -437,7 +438,9 @@ func TestRunAskFlowSetCarriesTheWholeFlow(t *testing.T) {
 }
 
 // A flow set card that removes a stage with an open bead in it is
-// refused naming the bead, at the ask and again at approval.
+// refused naming the bead, at the ask and again at approval, and a flow
+// no order can be made of is refused at the ask. A flow a pack manages
+// gets the same refusals, at the ask.
 func TestRunAskFlowSetRefusesToStrandABeadTwice(t *testing.T) {
 	t.Parallel()
 	y := listYard(t)
@@ -475,16 +478,35 @@ func TestRunAskFlowSetRefusesToStrandABeadTwice(t *testing.T) {
 		t.Errorf("asking a stranding = %v, want it refused naming %s", err, bead.ID)
 	}
 	// An unorderable flow is refused in the terminal command's words.
-	if _, err := y.AddAsk(y.ctx, y.bead, flowSetAsk("code", "{\"stages\":[],\"transitions\":{\"a\":[\"b\"],\"c\":[\"d\"]}}"), "yardmaster"); err == nil ||
+	unorderable := "{\"stages\":[],\"transitions\":{\"a\":[\"b\"],\"c\":[\"d\"]}}"
+	if _, err := y.AddAsk(y.ctx, y.bead, flowSetAsk("code", unorderable), "yardmaster"); err == nil ||
 		!strings.Contains(err.Error(), "ambiguous") {
 		t.Errorf("an unorderable flow = %v", err)
 	}
+	// A flow a pack manages is held to both as well: no pack refusal comes
+	// before them, and they still refuse in their own words.
+	if _, err := y.RecordPack(y.ctx, PackImport{Pack: "starter", Depot: "web",
+		Objects: []PackObject{{Kind: "flow", Name: "code"}}}, true, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.AddAsk(y.ctx, y.bead, flowSetAsk("code", removing), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), bead.ID) || !strings.Contains(err.Error(), "lacks the stage of open beads") {
+		t.Errorf("asking a stranding of a pack's flow = %v, want it refused naming %s", err, bead.ID)
+	}
+	if _, err := y.AddAsk(y.ctx, y.bead, flowSetAsk("code", unorderable), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("an unorderable pack flow = %v", err)
+	}
 }
 
-// A flow set card refuses a flow a pack manages, naming yardr pack
-// apply, at the ask and again at approval: PutFlow accepts such a
-// write outside a delegated pack apply, so the refusal is the card's.
-func TestRunAskFlowSetRefusesAPackManagedFlowTwice(t *testing.T) {
+// A flow set card carries a flow a pack manages as it carries any store
+// flow, and says so: whose the flow is, what pack apply then does with the
+// yard's version, and the door to the pack's (--take). The approval saves
+// the flow and leaves the import record as the import wrote it, which is
+// what lets the next pack apply read the change as the yard's and keep it.
+// A card filed before the flow was a pack's is another card once it is, and
+// one whose flow a --take moved is stale; neither runs anything.
+func TestRunAskFlowSetCarriesAPackManagedFlow(t *testing.T) {
 	t.Parallel()
 	y := listYard(t)
 	if err := y.PutDepot(y.ctx, Depot{Name: "web"}, "mckean"); err != nil {
@@ -498,23 +520,77 @@ func TestRunAskFlowSetRefusesAPackManagedFlowTwice(t *testing.T) {
 	if _, err := y.PutFlow(y.ctx, *f, "mckean"); err != nil {
 		t.Fatal(err)
 	}
-	text := "work -> done\nin -> work\ndone terminal\n"
-	seq := y.ask(t, flowSetAsk("code", text), "yardmaster")
-	if _, err := y.RecordPack(y.ctx, PackImport{Pack: "starter", Depot: "web",
-		Objects: []PackObject{{Kind: "flow", Name: "code"}}}, true, "mckean"); err != nil {
+	text := `{"stages":["work","in","done"],"transitions":{"in":["work"],"work":["done"]},"terminal":["done"]}`
+	early := y.ask(t, flowSetAsk("code", text), "yardmaster")
+	// The import wrote the flow as it stands, so its record holds the digest.
+	digest, err := f.Digest()
+	if err != nil {
 		t.Fatal(err)
 	}
-	// Again at approval.
-	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil ||
-		!strings.Contains(err.Error(), "yardr pack apply") || !strings.Contains(err.Error(), nothingRan) {
-		t.Fatalf("approving a pack's flow = %v, want the pack refusal", err)
+	if _, err := y.RecordPack(y.ctx, PackImport{Pack: "starter", Depot: "web",
+		Objects: []PackObject{{Kind: "flow", Name: "code", SHA256: digest}}}, true, "mckean"); err != nil {
+		t.Fatal(err)
 	}
+	y.refusedStale(t, early, `the yard would say "The flow is the pack starter's`)
+
+	// Asked of the pack's flow, the card carries.
+	seq := y.ask(t, flowSetAsk("code", text), "yardmaster")
+	r := y.asked(t, seq)
+	strongHas(t, r.Ask.Run.Does,
+		"changes the flow code whole",
+		"The flow is the pack starter's, imported into depot web: this sets the yard's version of it, and changes nothing of the pack.",
+		"yardr pack apply then keeps the yard's version, whatever the pack moves, and sets the pack's again only where it is told to (--take flow/code).",
+		"Its stages stand in the order in, work, done now; on approval they stand work, in, done.")
+	for _, want := range []string{"yardr flow set code with the flow that stands", "yardr pack apply starter --depot web --take flow/code"} {
+		if !strings.Contains(r.Ask.Run.Back, want) {
+			t.Errorf("taken back by %q, want it to name %q", r.Ask.Run.Back, want)
+		}
+	}
+	before, err := y.Packs(y.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done.Result != "flow code: 3 stages" {
+		t.Errorf("approval printed %q", done.Result)
+	}
+	if got, _ := y.GetFlow(y.ctx, "code"); !slices.Equal(got.Stages, []string{"work", "in", "done"}) {
+		t.Errorf("the flow stands %v, want the card's order", got.Stages)
+	}
+	if after, err := y.Packs(y.ctx); err != nil || !reflect.DeepEqual(before, after) {
+		t.Errorf("the approval changed the import record: %+v, then %+v (%v)", before, after, err)
+	}
+
+	// Writing the pack's version after the ask moves the flow the card saw:
+	// the card is stale and the flow stays as the write left it.
+	seq = y.ask(t, flowSetAsk("code", "in -> done\ndone terminal\n"), "yardmaster")
+	if _, err := y.PutFlow(y.ctx, *f, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y.refusedStale(t, seq, "was written when the flow code was another: it was set since")
 	if got, _ := y.GetFlow(y.ctx, "code"); !slices.Equal(got.Stages, []string{"in", "work", "done"}) {
 		t.Errorf("a refused approval changed the flow: %v", got.Stages)
 	}
-	// And at the ask.
-	if _, err := y.AddAsk(y.ctx, y.bead, flowSetAsk("code", text), "yardmaster"); err == nil ||
-		!strings.Contains(err.Error(), "managed by the pack starter") || !strings.Contains(err.Error(), "yardr pack apply") {
-		t.Errorf("asking a pack's flow = %v, want the pack refusal", err)
+
+	// A flow a pack's record lists that the store lacks is added in the same
+	// words, with the same door to the pack's version.
+	if _, err := y.RecordPack(y.ctx, PackImport{Pack: "extra", Depot: "web",
+		Objects: []PackObject{{Kind: "flow", Name: "ghost"}}}, true, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, flowSetAsk("ghost", "in -> done\ndone terminal\n"), "yardmaster")
+	r = y.asked(t, seq)
+	strongHas(t, r.Ask.Run.Does, "adds the flow ghost", "The flow is the pack extra's, imported into depot web", "(--take flow/ghost)")
+	if !strings.Contains(r.Ask.Run.Back, "yardr flow rm ghost") || !strings.Contains(r.Ask.Run.Back, "yardr pack apply extra --depot web --take flow/ghost") {
+		t.Errorf("taken back by %q", r.Ask.Run.Back)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := y.GetFlow(y.ctx, "ghost"); err != nil || !slices.Equal(got.Stages, []string{"in", "done"}) {
+		t.Errorf("the flow the pack's record lists stands %v (%v), want the card's", got, err)
 	}
 }

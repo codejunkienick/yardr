@@ -6,10 +6,13 @@
 // card carries the whole flow as the line format writes it, its stage
 // order first, shows what stands and what would stand whole, and
 // takes the change back with the flow that stands, carried whole the
-// same way. It refuses a flow a pack manages, at the ask and again at
-// approval, and a removal that would strand a bead, naming the beads,
-// as the terminal command does. The yardmaster files these cards from
-// the operator's own mail only; mail from anyone else gets no filing.
+// same way. A flow a pack manages is carried like any other: the card
+// says whose it is and what yardr pack apply then does with the yard's
+// version (keeps it, and sets the pack's only for --take), and its
+// take-back names that door too. It refuses a removal that would strand
+// a bead, naming the beads, at the ask and again at approval, as the
+// terminal command does. The yardmaster files these cards from the
+// operator's own mail only; mail from anyone else gets no filing.
 //
 // The row is registered here, beside its functions, as the group set
 // row is (runask_groupset.go), and not in runList's literal: runask.go
@@ -67,8 +70,8 @@ type flowSetSpec struct {
 
 // flowPackManaged is the pack that manages the store flow name, by
 // the Packs join the Line read uses (flowPackName, over the imports
-// into each depot the flow stands in: a flow the card may not edit
-// stands in one of them), "" where none does.
+// into each depot the flow stands in: a flow the card words as a
+// pack's stands in one of them), "" where none does.
 func (w *wtx) flowPackManaged(name string) (pack, depot string, err error) {
 	err = each(w.Tx, bPacks, "", func(_ []byte, p *PackImport) error {
 		if pack == "" && slices.ContainsFunc(p.Objects, func(o PackObject) bool { return o.Kind == "flow" && o.Name == name }) {
@@ -80,24 +83,14 @@ func (w *wtx) flowPackManaged(name string) (pack, depot string, err error) {
 }
 
 // flowSetProposal holds a flow set ask to the yard as it stands: the
-// flow is no pack's, the text it carries parses and orders (the checks
-// the terminal command makes, in its words), and no open bead that
-// follows it sits in a stage the new version lacks, the beads named.
-// The pack refusal is the card's own, and load-bearing: PutFlow
-// accepts such a write outside a delegated pack apply
-// (packFlowWrite), so it is made here, when the ask is written and
-// again when it is approved.
+// text it carries parses and orders (the checks the terminal command
+// makes, in its words), and no open bead that follows the flow sits in
+// a stage the new version lacks, the beads named. A flow a pack manages
+// is held to no more than any other: pack apply keeps what the yard
+// changed of it (yardr-bvft), so the card no longer has a local edit
+// to refuse, and says whose the flow is instead (flowSetCard).
 func (w *wtx) flowSetProposal(run AskRun) (flowSetSpec, error) {
 	name := run.Argv[2]
-	if pack, depot, err := w.flowPackManaged(name); err != nil {
-		return flowSetSpec{}, err
-	} else if pack != "" {
-		where := "the yard"
-		if depot != "" {
-			where = "depot " + depot
-		}
-		return flowSetSpec{}, fmt.Errorf("flow %s is managed by the pack %s in %s: it is changed where the pack is kept and reaches this yard by yardr pack apply, so no flow set card carries it", name, pack, where)
-	}
 	if strings.TrimSpace(run.Flow) == "" {
 		return flowSetSpec{}, fmt.Errorf("flow set %s carries no flow: the flow goes beside --run, in --run-flow <file> (F: lines on stdin); --run takes the name alone", name)
 	}
@@ -182,8 +175,8 @@ func (w *wtx) flowCardStrays(want Flow) ([]string, error) {
 
 // checkFlowSet is changing a flow's stages as the asker: what names
 // what runs is the operator's, which a run ask may propose. The
-// proposal is held first, so a pack's flow, an unorderable one and a
-// stranding are refused in their own words whoever asks.
+// proposal is held first, so an unorderable flow and a stranding are
+// refused in their own words whoever asks.
 func checkFlowSet(ctx context.Context, w *wtx, run AskRun, actor string) error {
 	spec, err := w.flowSetProposal(run)
 	if err != nil {
@@ -205,7 +198,11 @@ func flowsEqual(a, b Flow) bool {
 // order first, what is added, removed and reordered, each stage's next
 // stages as they stand and as they would be, the flow that stands and
 // the one proposed whole, and what takes the change back. A flow that
-// stands in no store yet says so.
+// stands in no store yet says so, and so does a flow a pack manages,
+// with what pack apply then does with the yard's version and the door
+// to the pack's. Those words are the card's, so a flow that becomes a
+// pack's (or stops being) after the ask reads as another card at
+// approval (staleCard), and nothing runs.
 func (w *wtx) flowSetCard(run AskRun, asking bool) (AskRun, error) {
 	spec, err := w.flowSetProposal(run)
 	if err != nil {
@@ -242,6 +239,13 @@ func (w *wtx) flowSetCard(run AskRun, asking bool) (AskRun, error) {
 	if spec.have == nil {
 		back = "yardr flow rm " + want.Name + " in a terminal: no flow stood under the name"
 	}
+	if pack, depot, err := w.flowPackManaged(want.Name); err != nil {
+		return AskRun{}, err
+	} else if pack != "" {
+		lines, door := flowPackWords(want.Name, pack, depot)
+		does = slices.Insert(does, 1, lines...)
+		back += "; or, for the pack's own version of the flow instead, " + door + " in a terminal"
+	}
 	return AskRun{
 		Argv:   run.Argv,
 		Does:   does,
@@ -250,6 +254,28 @@ func (w *wtx) flowSetCard(run AskRun, asking bool) (AskRun, error) {
 		Seen:   map[string]string{"flow " + want.Name: seenFlow},
 		Flow:   run.Flow,
 	}, nil
+}
+
+// flowPackWords are the card's lines for a flow a pack manages, which
+// stand after its first line, and the terminal command that sets the
+// pack's version of it: pack apply of that pack, into the depot whose
+// import lists the flow, taking it by the name the plan prints. The
+// card changes the yard's version only, never the pack where it is
+// kept, and the lines say what pack apply then does with that change
+// (keeps it, as it keeps whatever the yard changed of a pack's flow),
+// so an approver reads it before approving.
+func flowPackWords(name, pack, depot string) (lines []string, door string) {
+	into := "the yard"
+	door = "yardr pack apply " + pack
+	if depot != "" {
+		into = "depot " + depot
+		door += " --depot " + depot
+	}
+	door += " --take flow/" + name
+	return []string{
+		fmt.Sprintf("The flow is the pack %s's, imported into %s: this sets the yard's version of it, and changes nothing of the pack.", pack, into),
+		fmt.Sprintf("yardr pack apply then keeps the yard's version, whatever the pack moves, and sets the pack's again only where it is told to (--take flow/%s).", name),
+	}, door
 }
 
 // flowDiffLines are the card's lines for what a flow change adds,
@@ -282,8 +308,9 @@ func flowDiffLines(have, want Flow) []string {
 }
 
 // flowSetStale says why the ask seq for flow set is approved no more:
-// the flow was set since. The pack refusal and the stranding are the
-// card's own again at approval (flowSetProposal), in their words.
+// the flow was set since, a pack's --take included, which moves the
+// flow the card saw. The stranding is the card's own again at approval
+// (flowSetProposal), in its words.
 func (w *wtx) flowSetStale(seq uint64, was, now AskRun) error {
 	name := was.Argv[2]
 	if key := "flow " + name; was.Seen[key] != now.Seen[key] {
@@ -302,9 +329,12 @@ func flowSetWeight(_ *wtx, run AskRun) ([]AskWeight, error) {
 
 // runFlowSet sets the flow as actor, through the store function the
 // terminal's flow set calls in its shape (PutFlow, inside this
-// write): the pack refusal and the stranding held once more, the flow
-// saved, and flow_set recorded, so what is saved is what the card
-// showed.
+// write): the stranding held once more, the flow saved, and flow_set
+// recorded, so what is saved is what the card showed. A pack's flow is
+// saved the same way and its import record is left as the import wrote
+// it, never rewritten to the yard's flow: the record's digest of the
+// pack's version is what the next pack apply holds the yard's flow
+// against, so the card's change reads there as the yard's and is kept.
 func runFlowSet(ctx context.Context, w *wtx, run AskRun, actor string, _ *approvedOn) (string, error) {
 	spec, err := w.flowSetProposal(run)
 	if err != nil {

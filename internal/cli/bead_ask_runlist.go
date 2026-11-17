@@ -295,8 +295,10 @@ const askRunList = `  peer add <name> <invite>
       first: the card shows what stands and what would stand whole, the
       stages added, removed and reordered, and the flow that stands as
       its take-back (weighty, code, a reorder alone included); a flow a
-      pack manages is refused, naming yardr pack apply, at the ask and
-      again at approval, and a removal naming the beads it would strand
-      is refused the same two times; the yardmaster files it from the
-      operator's own mail only
+      pack manages is carried the same way, its card saying that yardr
+      pack apply then keeps the yard's version and sets the pack's only
+      with --take flow/<name>, which its take-back names too; a removal
+      naming the beads it would strand is refused at the ask and again
+      at approval; the yardmaster files it from the operator's own mail
+      only
 `
