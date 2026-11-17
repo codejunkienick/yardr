@@ -232,6 +232,11 @@ type Object struct {
 	// Held, when set, why not even a prune removes it.
 	Owned *store.PackObject `json:"owned,omitempty"`
 	Held  string            `json:"held,omitempty"`
+	// Have is, of a kept flow, the digest the store keeps a flow by
+	// (store.Flow.Digest) of the yard's version, which an import that takes
+	// it overwrites: what a card pins a take of it to, since Changes name only
+	// the stages that differ. It is no part of the plan's JSON.
+	Have string `json:"-"`
 
 	File         *FileOp            `json:"file,omitempty"`
 	Group        *store.Group       `json:"group,omitempty"`

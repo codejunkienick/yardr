@@ -103,6 +103,17 @@ func TestFlowTheYardChangedIsKeptUntilTaken(t *testing.T) {
 	if want := (pack.Diff{Field: "stage triage", Old: "-> new", New: "no such stage"}); !slices.Contains(f.Changes, want) {
 		t.Fatalf("changes = %v, want %v among them", f.Changes, want)
 	}
+	// What a take overwrites is pinned by the digest of the yard's flow, which
+	// Changes (the stages that differ) cannot hold whole; a flow that is not
+	// kept has none.
+	if have := storedDigest(t, st, "starter.default"); f.Have != have || have == want {
+		t.Fatalf("a kept flow's Have = %q, the yard's flow is %q and the pack's %q", f.Have, have, want)
+	}
+	for _, o := range plan.Objects {
+		if o.Action != pack.Kept && o.Have != "" {
+			t.Fatalf("%s %s (%s) has a Have, %q", o.Kind, o.Name, o.Action, o.Have)
+		}
+	}
 	before := head(t, st)
 	for _, opts := range []pack.ApplyOptions{{Actor: "me"}, {Actor: "me", Overwrite: true}} {
 		res, err := pack.Apply(ctx, st, plan, pack.ApplyOptions{Answers: answered(t, plan, nil), Actor: opts.Actor, Overwrite: opts.Overwrite})

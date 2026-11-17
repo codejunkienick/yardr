@@ -30,6 +30,9 @@ type fakePack struct {
 	mappings   Mappings
 	digest     string
 	programs   []string
+	// targets are the objects the reading would write, as the server's
+	// carries them (PackReading.Targets).
+	targets map[string]string
 	// name is the pack's name where it is not wired: what a
 	// directory's pack.yaml names.
 	name string
@@ -59,7 +62,7 @@ func (f *fakePack) reading() *PackReading {
 	var srcs []AskSource
 	_ = srcs
 	r := &PackReading{Name: name, Kind: kind, Depot: f.depot, Mappings: f.mappings, Label: f.label, Build: f.build,
-		Plan: f.plan, Digest: f.digest, Programs: f.programs}
+		Plan: f.plan, Digest: f.digest, Programs: f.programs, Targets: f.targets}
 	if !f.noSources {
 		text := f.sourceText
 		if text == "" {
@@ -223,6 +226,12 @@ func TestPackApplyRefusals(t *testing.T) {
 		{"pack apply wired --yes", "propose the apply without it"},
 		{"pack apply wired --yes=x", "--yes takes no value"},
 		{"pack apply wired --yes --yes", "one --yes, not 2"},
+		{"pack apply wired --take flow", "--take flow is not <kind>/<name>"},
+		{"pack apply wired --take flow/", "--take flow/ is not <kind>/<name>"},
+		{"pack apply wired --take flow/a --take flow/a", "--take names flow/a twice"},
+		{"pack apply wired --take", "--take needs its value"},
+		{"pack apply wired --take flow/a", "a pack of kind source keeps none"},
+		{"pack apply wired --yes --take flow/a", "propose the apply without it"},
 		{"pack apply wired --auth=x", "pack apply with --auth"},
 		{"pack apply wired --sha256 abc", "pack apply with --sha256"},
 		{"pack apply wired --prune", "pack apply with --prune"},
@@ -252,6 +261,7 @@ func TestPackApplyRefusals(t *testing.T) {
 		t.Fatalf("the refused asks left %d notes, %v", len(notes), err)
 	}
 	packApplyYesRefusals(t)
+	packApplyTakeRefusals(t)
 }
 
 // An ask with --yes over a file edited by hand stores a card showing the
@@ -1304,6 +1314,8 @@ func TestPackApplyDepotCardAndStale(t *testing.T) {
 	}
 	packApplyYesShowsEditedWhole(t)
 	packApplyYesStale(t)
+	packApplyTakeShowsKeptWhole(t)
+	packApplyTakeStale(t)
 }
 
 // A depot ask is refused where the plan asks, where there is no single

@@ -46,6 +46,7 @@ func (b *planner) flows(flows []Flow) error {
 		if len(changes) > 0 {
 			if keeps := b.keepFlow(have[i], sf); keeps != nil {
 				o.Action, o.Keeps, want[sf.Name] = Kept, keeps, have[i]
+				o.Have, _ = have[i].Digest()
 			}
 		}
 		b.add(o)

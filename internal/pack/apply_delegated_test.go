@@ -602,3 +602,66 @@ func TestDelegatedRepositoryApplyRestoresThePriorDigest(t *testing.T) {
 		t.Errorf("third record = %+v, want the first digest over the second", body3)
 	}
 }
+
+// A kept object an apply is told to take is written as the change it is, so
+// the delegated record holds what stood of it as it holds that of any change:
+// the yard's copy of a role, whole, with the diff to the pack's. A flow it
+// takes is no store write the record names (a delegated record admits the
+// objects the import creates or changes, and the plan says kept), so that
+// write is refused, naming the record, rather than made unheld.
+func TestDelegatedApplyOfATakenObjectHoldsWhatStood(t *testing.T) {
+	st, o, dctx, setPlan := delegatedPackYard(t)
+	withLinearAs(t, st)
+	dir := copyStarter(t)
+	first := build(t, st, load(t, dir), o)
+	applyAs(t, st, first, answers, "jo")
+	installed := find(t, first, "file", "roles/builder.md").File.To
+	// The yard changes the role and the flow, and the pack moves neither.
+	const byHand = "the builder role, as the yard has it\n"
+	if err := os.WriteFile(installed, []byte(byHand), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	yardEdit(t, st, "starter.default", func(f *store.Flow) {
+		f.Transitions["backlog"] = append(f.Transitions["backlog"], "triage")
+		f.Transitions["triage"] = []string{"new"}
+	})
+	p := load(t, dir)
+	p.Dir = "embedded in yardr test"
+	plan := build(t, st, p, o)
+	if find(t, plan, "file", "roles/builder.md").Action != pack.Kept || find(t, plan, "flow", "starter.default").Action != pack.Kept {
+		t.Fatalf("the plan keeps %v, want the role and the flow", actions(plan, pack.Kept))
+	}
+	setPlan(plan)
+	stood := storedDigest(t, st, "starter.default")
+
+	// The flow: refused at its write, with nothing of it written.
+	_, err := pack.Apply(dctx, st, plan, pack.ApplyOptions{Answers: answered(t, plan, answers), Actor: "yardmaster", Take: []string{"flow/starter.default"}})
+	if err == nil || !strings.Contains(err.Error(), "names no such flow to write") {
+		t.Fatalf("a delegated take of a flow = %v, want the write refused", err)
+	}
+	if got := storedDigest(t, st, "starter.default"); got != stood {
+		t.Fatalf("the refused take changed the flow: %s, was %s", got, stood)
+	}
+
+	// The role: written as the pack has it, and the record holds the copy
+	// that stood.
+	plan = build(t, st, p, o)
+	setPlan(plan)
+	res, err := pack.Apply(dctx, st, plan, pack.ApplyOptions{Answers: answered(t, plan, answers), Actor: "yardmaster", Take: []string{"file/roles/builder.md"}})
+	if err != nil || res.Changed != 1 || len(res.Kept) != 1 {
+		t.Fatalf("a delegated take of a role = %+v, %v, want it changed and the flow still kept", res, err)
+	}
+	if data, err := os.ReadFile(installed); err != nil || string(data) == byHand {
+		t.Fatalf("the role after the take = %q, %v, want the pack's", data, err)
+	}
+	var role *store.DelegatedPackObject
+	body := delegatedBody(t, st, latestDelegated(t, st))
+	for i := range body.Objects {
+		if body.Objects[i].Kind == "file" && body.Objects[i].Name == "roles/builder.md" {
+			role = &body.Objects[i]
+		}
+	}
+	if role == nil || role.Action != pack.Kept || !role.Had || role.Before != byHand || !strings.Contains(role.Diff, "-"+strings.TrimSuffix(byHand, "\n")) {
+		t.Fatalf("the record's role = %+v, want what stood whole and its diff", role)
+	}
+}

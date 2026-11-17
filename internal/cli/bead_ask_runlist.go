@@ -75,7 +75,7 @@ const askRunList = `  peer add <name> <invite>
       no approval and is run directly
   call <source> <call> [param=value ...] [--as <user>]
       one call of a declared source, made when approved; a file is shown by its digest and a secret-file by its file alone
-  pack apply <name> [--yes] [--sha256 <digest>] [--depot <depot> [--flow <flow>] [--crew <pack>=<yard>] [--group <pack>=<yard>] [--bind <spec>] [--members <group>=<a,b>] [--open-threads <crew>=<sources>] [--calls <who>=<source>:<calls>]]
+  pack apply <name> [--yes] [--take <kind>/<name>] [--sha256 <digest>] [--depot <depot> [--flow <flow>] [--crew <pack>=<yard>] [--group <pack>=<yard>] [--bind <spec>] [--members <group>=<a,b>] [--open-threads <crew>=<sources>] [--calls <who>=<source>:<calls>]]
       a pack yardr embeds, a directory inside a depot's main
       checkout, or the packs repository's URL pinned with --sha256,
       read at the ask and pinned by its digest: of kind
@@ -90,10 +90,15 @@ const askRunList = `  peer add <name> <invite>
       summarized; the server carries it out; with --yes over files
       the plan says were edited by hand, which the card shows whole
       and approval overwrites, keeping no other copy, and a --yes
-      that overwrites nothing is refused; any other URL, an imported
-      pack, a directory outside every checkout, any other flag and a
-      plan that asks stay in a terminal; --setup installs a pack of
-      kind source, embedded or applied from a directory in a terminal
+      that overwrites nothing is refused; with --take over a flow,
+      stage file or role the plan keeps because the yard changed it
+      (named as the plan prints it, flow/starter.default), which the
+      card shows whole and approval sets to the pack's, keeping no
+      other copy, and a take the plan cannot carry out is refused;
+      any other URL, an imported pack, a directory outside every
+      checkout, any other flag and a plan that asks stay in a
+      terminal; --setup installs a pack of kind source, embedded or
+      applied from a directory in a terminal
   hook add <name> --source <declared source> [--unknown unknown|allow|ignore] [--as <crew member>] [--map <type>:<stage>=<state>]
       a new webhook endpoint POST /hooks/<name> for the declared
       source, or the hook that stands replaced whole, verified with

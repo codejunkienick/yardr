@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -518,9 +519,12 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 		}
 		stored[carried.Name] = state == store.CarryStored
 	}
-	// A depot pack's yard side is its objects, one at a time (3.7).
+	// A depot pack's yard side is its objects, one at a time (3.7). What the
+	// card takes is the card's own (run.Pack.Take), never read from the
+	// command's words again: each kept object it names is held as the change
+	// it then is.
 	if run.Pack.Plan != nil {
-		if err := holdDepotObjects(run.Pack.Plan, askPlanFrom(planFiles, plan, answers, open, calls)); err != nil {
+		if err := holdDepotObjects(run.Pack.Plan, askPlanFrom(planFiles, plan, answers, open, calls, run.Pack.Take), run.Pack.Take); err != nil {
 			return nil, nil, staleWords(fmt.Sprintf("ask %d: %s", rec.Ask, err), terminal)
 		}
 	}
@@ -540,10 +544,13 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 	}
 	// Overwrite is the card's --yes: the hold above pinned the edited
 	// set to the card's, and each file to its carded old hash, so exactly
-	// those copies are overwritten.
+	// those copies are overwritten. Take is the card's own: the hold above
+	// stales a take of an object that no longer reads kept (a second card
+	// took what the first has since taken), and Apply refuses such a name
+	// before it writes anything as well, so it fails loud and writes nothing.
 	res, err := pack.Apply(ctx, c.st, plan, pack.ApplyOptions{
 		Answers: answers, OpenThreads: open, Calls: calls, Actor: rec.Actor,
-		ApprovedBead: rec.Bead, ApprovedAsk: rec.Ask, Overwrite: run.Pack.Yes,
+		ApprovedBead: rec.Bead, ApprovedAsk: rec.Ask, Overwrite: run.Pack.Yes, Take: run.Pack.Take,
 	})
 	if err != nil {
 		return nil, nil, failWords(err.Error(), terminal)
@@ -568,7 +575,7 @@ func (c *carrier) carryPackApply(ctx context.Context, rec *store.Carry, run *sto
 		if err != nil {
 			return nil, nil, failWords(err.Error(), terminal)
 		}
-		if err := verifyDepotObjects(run.Pack.Plan, askPlanFrom(planFiles, after, answers, open, calls)); err != nil {
+		if err := verifyDepotObjects(run.Pack.Plan, askPlanFrom(planFiles, after, answers, open, calls, nil), run.Pack.Take); err != nil {
 			return nil, nil, failWords(err.Error(), terminal)
 		}
 		for _, obj := range after.Objects {
@@ -649,11 +656,6 @@ func sameSources(a, b []store.AskSource) bool {
 	return true
 }
 
-// holdDepotObjects holds a rebuilt depot plan to the carded one, an
-// object at a time (3.7): each carded create or change must rebuild
-// identical or unchanged — the planner reading unchanged is what
-// "already as the pack says" means — each carded unchanged must
-// rebuild unchanged, and each dropped must still read dropped.
 // holdEdited holds the rebuilt plan's edited files to the card's set: a
 // file edited since the ask, or one the card showed that stands unedited
 // now, carries out nothing. A card asked without --yes shows none, so any
@@ -680,7 +682,22 @@ func holdEdited(carded, rebuilt []string) error {
 	return nil
 }
 
-func holdDepotObjects(carded, rebuilt *store.AskPlan) error {
+// takenOnCard says whether the card sets the pack's version of obj: it is a
+// kept object that take, the card's own, names.
+func takenOnCard(take []string, obj store.AskPlanObject) bool {
+	return obj.Action == "kept" && slices.Contains(take, obj.Kind+"/"+obj.Name)
+}
+
+// holdDepotObjects holds a rebuilt depot plan to the carded one, an
+// object at a time (3.7): each carded create or change must rebuild
+// identical or unchanged — the planner reading unchanged is what
+// "already as the pack says" means — each carded unchanged must
+// rebuild unchanged, and each dropped must still read dropped. A kept
+// object the card takes (take) is held as the change it then is, as
+// pack.Apply checks one: a file's standing copy is held to the card's old
+// hash and the pack's text to the card's, and a flow, whose Changes name
+// only the stages that differ, to the digest of the flow the card showed.
+func holdDepotObjects(carded, rebuilt *store.AskPlan, take []string) error {
 	for _, lines := range [][]string{rebuilt.Missing, rebuilt.Asks, rebuilt.Refused, rebuilt.NonText} {
 		if len(lines) > 0 {
 			return fmt.Errorf("the plan now asks, refuses, or needs a hand-edited or non-text file: %s", strings.Join(lines, "; "))
@@ -707,11 +724,26 @@ func holdDepotObjects(carded, rebuilt *store.AskPlan) error {
 		if !sameStrings(rb.Keeps, obj.Keeps) || !sameStrings(rb.Shadows, obj.Shadows) {
 			return fmt.Errorf("the object %s %s keeps or shadows differently than the card", obj.Kind, obj.Name)
 		}
+		// A taken object stood kept on the card and rebuilds kept while the
+		// yard still has its own: both are the change a take makes of it. One
+		// that no longer reads kept has no keeps now, which the comparison
+		// above refuses as stale; Apply refuses a take of it too, before it
+		// writes anything, in its own words.
+		taken := takenOnCard(take, obj)
+		if taken {
+			obj.Action = "change"
+			if rb.Action == "kept" {
+				rb.Action = "change"
+			}
+		}
 		sameChange := rb.Action == obj.Action && rb.FileNewSHA == obj.FileNewSHA && rb.Text == obj.Text && sameChanges(rb.Changes, obj.Changes) && sameStrings(rb.Env, obj.Env)
 		// A changed file not yet installed stands at the card's old
 		// hash; at a third one a hand moved it outside the import.
 		if obj.Kind == "file" && rb.Action == obj.Action && (obj.Action == "create" || obj.Action == "change") && rb.FileOldSHA != obj.FileOldSHA {
 			return fmt.Errorf("the file %s stands at sha256 %s, neither the card's old %s nor its new %s", obj.Name, rb.FileOldSHA, obj.FileOldSHA, obj.FileNewSHA)
+		}
+		if taken && obj.Kind == "flow" && rb.Action == obj.Action && rb.FlowOldSHA != obj.FlowOldSHA {
+			return fmt.Errorf("the flow %s stands at digest %s, not the card's %s that taking it overwrites", obj.Name, rb.FlowOldSHA, obj.FlowOldSHA)
 		}
 		switch obj.Action {
 		case "create", "change":
@@ -747,8 +779,10 @@ func holdDepotObjects(carded, rebuilt *store.AskPlan) error {
 
 // verifyDepotObjects holds a depot plan made after the import to the
 // card: every carded object reads unchanged, and each dropped one
-// still dropped (no prune was asked for).
-func verifyDepotObjects(carded, after *store.AskPlan) error {
+// still dropped (no prune was asked for). A kept object left as the yard has
+// it stays kept, and one the card took is the pack's now, so it reads
+// unchanged.
+func verifyDepotObjects(carded, after *store.AskPlan, take []string) error {
 	byKey := map[string]store.AskPlanObject{}
 	for _, o := range after.Objects {
 		byKey[o.Kind+"\x00"+o.Name] = o
@@ -774,6 +808,9 @@ func verifyDepotObjects(carded, after *store.AskPlan) error {
 				return fmt.Errorf("the object %s %s reads %s after the import, not unchanged", obj.Kind, obj.Name, rb.Action)
 			}
 		case "kept":
+			if takenOnCard(take, obj) && rb.Action != "unchanged" {
+				return fmt.Errorf("the object %s %s was taken on the card and reads %s after the import, not unchanged", obj.Kind, obj.Name, rb.Action)
+			}
 			if rb.Action != "kept" && rb.Action != "unchanged" {
 				return fmt.Errorf("the object %s %s was kept as the yard has it on the card and reads %s after the import", obj.Kind, obj.Name, rb.Action)
 			}

@@ -2091,14 +2091,28 @@ digest before anything is written. A pack that is a directory outside
 every depot's main checkout, a URL but the packs repository's pinned
 with `--sha256`, or an earlier import's record, any
 flag of `pack apply` but the depot and the mappings of a depot pack's
-first install and `--yes` over scripts edited by hand, and a plan that
-asks, is refused to a terminal, where `yardr pack check <name>` shows
-the plan. With `--yes` the card shows each script the plan says was edited
-by hand whole, with both hashes and the diff, and approval overwrites
-exactly those copies. What the plan keeps (a flow, stage file or role the
-yard changed) stays as the yard has it under any approval, the card lists it
-under what it keeps, and the result says `kept:` as a terminal does;
-`--take` is the terminal's. The
+first install, `--yes` over scripts edited by hand and `--take` over what
+the plan keeps, and a plan that asks, is refused to a terminal, where
+`yardr pack check <name>` shows the plan. With `--yes` the card shows each
+script the plan says was edited by hand whole, with both hashes and the diff,
+and approval overwrites exactly those copies. What the plan keeps (a flow,
+stage file or role the yard changed) stays as the yard has it under any
+approval that takes nothing, the card lists it under what it keeps, and the
+result says `kept:` as a terminal does. With `--take <kind>/<name>`, named as
+the plan prints the object (`flow/starter.default`,
+`file/roles/builder.md`; repeatable, and bare or with a depot), the card sets
+the pack's version of that object instead: it shows each one whole, a file
+with both hashes and the diff and a flow with the stages that differ, says
+that approval keeps no other copy of the yard's change, and is never a
+summary. The approval is held to what the card showed: the copy of a file it
+overwrites, and the digest of the flow it sets, so a copy changed after the
+card is stale, and nothing runs. A name the plan cannot carry out (a declared
+source, an object the plan has not or does not keep), and a flow whose pack
+version lacks the stage of an open bead, which is named, are refused at the
+ask, in the terminal's words. `--yes` over scripts edited by hand and `--take`
+stand on one card. A take is strong (code), whatever it takes: a flow, a role
+and a stage file are what the yard runs and what its agents are briefed by.
+The
 yardmaster has a road of its own beside the card, for a pack that yardr
 embeds and for one that the packs repository serves.
 

@@ -876,7 +876,12 @@ nothing else. What is not the same:
   the diff and the hashes, and `line` is the zero-based index in `run.does`
   of that file's line, or `-1` for a file folded into the card's closing count. A
   client opens a file from `files` and never parses `does`. A whole card
-  has no `summary` and no `files`.
+  has no `summary` and no `files`. A card that takes (`run.pack.take`, the
+  flows, stage files and roles of the yard that the plan keeps and the card
+  sets to the pack's, each as the plan prints it, such as
+  `flow/starter.default`) is always whole: its `run.pack.plan` still says
+  `kept` of each, and carries a kept file's hashes, text and diff and a kept
+  flow's `flow_old_sha256`, the digest of the flow it overwrites.
 - **`Bead` and `UserAsks` tell a run ask as its asker typed it, to a device
   that is no operator's.** The `run` card has `argv`, `command` and
   `description`, and an approved ask's `ran` has `argv` and `failed`; a
@@ -888,7 +893,8 @@ nothing else. What is not the same:
   `run.back_by`, `run.carried` (the declarations and command files a source
   brings), `run.pack.plan` (the paths and the diffs of the files a pack
   writes), `run.pack.mappings` (the people, grants and sources that plan
-  was shaped by), and `run.pack.digest`, `run.pack.summary` and
+  was shaped by), `run.pack.take` (the flows and files of the yard the card
+  sets to the pack's), and `run.pack.digest`, `run.pack.summary` and
   `run.pack.files` (a summary card's shape, below) are absent. Where the
   typed words themselves carry a value or a
   path, they are the operator's alone: on a run ask that sets a setting, adds

@@ -22,10 +22,10 @@ import (
 const MaxRunPackCarried = 1 << 20
 
 // packDepotDoes is the card of a depot pack: the pack line with its
-// counts, one line to a created or changed object, one to a dropped
-// object left where it stands, the governs, and each declared source
-// as a kind-source card renders it.
-func (w *wtx) packDepotDoes(name string, reading *PackReading, carried []AskSource, decls map[string]*source.Declaration) ([]string, error) {
+// counts, one line to a created or changed object, or to a kept one the
+// card takes, one to a dropped object left where it stands, the governs,
+// and each declared source as a kind-source card renders it.
+func (w *wtx) packDepotDoes(name string, reading *PackReading, carried []AskSource, decls map[string]*source.Declaration, take []string) ([]string, error) {
 	plan := reading.Plan
 	counts := packActionCounts(plan)
 	does := []string{packDepotLine(name, reading, counts) + ". It asks nothing."}
@@ -33,15 +33,21 @@ func (w *wtx) packDepotDoes(name string, reading *PackReading, carried []AskSour
 		does = append(does, "the plan uses mapping "+flag+".")
 	}
 	for _, o := range plan.Objects {
+		// A kept object the card takes is shown as the change it makes, whole
+		// as a change is; the plan itself says kept, and the words under it
+		// why.
+		if packTaken(take, o) {
+			o.Action = "take"
+		}
 		switch o.Action {
-		case "create", "change":
+		case "create", "change", "take":
 			if o.Kind == "file" {
 				ins, del := Counts(o.Diff)
 				does = append(does, fmt.Sprintf("%s %s: %s, sha256 %s -> sha256 %s (%d insertions, %d deletions).",
 					o.Kind, o.Name, o.Action, or(o.FileOldSHA, "(none)"), or(o.FileNewSHA, "(none)"), ins, del))
-				continue
+			} else {
+				does = append(does, packObjectLine(o))
 			}
-			does = append(does, packObjectLine(o))
 		case "dropped":
 			does = append(does, fmt.Sprintf("%s %s: dropped by the pack, left where it stands.", o.Kind, o.Name))
 		}

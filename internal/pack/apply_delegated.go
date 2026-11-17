@@ -141,7 +141,9 @@ func (p *Plan) delegatedObjects(ctx context.Context, st store.API, o ApplyOption
 	for i := range p.Objects {
 		obj := &p.Objects[i]
 		rec := store.DelegatedPackObject{Kind: obj.Kind, Name: obj.Name, Action: obj.Action}
-		if (obj.Action == Create || obj.Action == Change) && !obj.refused(o) {
+		// A kept object the import is told to take is written as the change it
+		// is, so the record holds what stood of it as it does of any change.
+		if (obj.Action == Create || obj.Action == Change || o.takes(*obj)) && !obj.refused(o) {
 			diff, before, had, err := p.delegatedBefore(ctx, st, obj, ck)
 			if err != nil {
 				return nil, err

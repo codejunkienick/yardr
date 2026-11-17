@@ -2,8 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -182,7 +186,7 @@ func TestReadEmbeddedDepotPack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	other := askPlanOf(sub, plan, pack.Answers{}, nil, nil)
+	other := askPlanOf(sub, plan, pack.Answers{}, nil, nil, nil)
 	if len(other.Objects) != len(r.Plan.Objects) {
 		t.Fatalf("under another build's label the plan has %d objects, not %d", len(other.Objects), len(r.Plan.Objects))
 	}
@@ -310,6 +314,59 @@ func TestReadEmbeddedDepotPack(t *testing.T) {
 		t.Fatalf("a pack held by two depots, named to one = %+v, %v", again, err)
 	}
 	askPlanMarksEditedAndRuns(t)
+	askPlanCarriesTakenWhole(t)
+}
+
+// askPlanFrom carries a kept object whole only where the card's take names
+// it: a file with both hashes, its text and its diff, a flow with the digest
+// of the yard's, each still kept, and a taken file that is not text, as a
+// changed one, among the plan's non-text files. What is kept and not named,
+// and what the take names that is not kept, carries nothing of the kind.
+func askPlanCarriesTakenWhole(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	installed := func(name, text string) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	read := func(rel string) ([]byte, error) { return []byte("pack " + rel + "\n"), nil }
+	plan := &pack.Plan{Objects: []pack.Object{
+		{Kind: "file", Name: "roles/a.md", Action: pack.Kept, Keeps: []string{"the yard's copy"}, File: &pack.FileOp{To: installed("a.md", "by hand\n"), SHA256: "packsum"}},
+		{Kind: "file", Name: "roles/b.md", Action: pack.Kept, Keeps: []string{"the yard's copy"}, File: &pack.FileOp{To: installed("b.md", "by hand\n"), SHA256: "packsum"}},
+		{Kind: "file", Name: "roles/bin", Action: pack.Kept, Keeps: []string{"the yard's copy"}, File: &pack.FileOp{To: installed("bin", "\xff\xfe"), SHA256: "packsum"}},
+		{Kind: "file", Name: "roles/c.md", Action: pack.Unchanged, File: &pack.FileOp{To: installed("c.md", "pack roles/c.md\n"), SHA256: "packsum"}},
+		{Kind: "flow", Name: "starter.default", Action: pack.Kept, Keeps: []string{"the yard's flow"}, Have: "yardsum"},
+		{Kind: "flow", Name: "starter.train", Action: pack.Kept, Keeps: []string{"the yard's flow"}, Have: "othersum"},
+	}}
+	got := askPlanFrom(read, plan, pack.Answers{}, nil, nil, []string{"file/roles/a.md", "file/roles/bin", "file/roles/c.md", "flow/starter.default", "flow/starter.nothing"})
+	byName := map[string]store.AskPlanObject{}
+	for _, o := range got.Objects {
+		byName[o.Kind+"/"+o.Name] = o
+	}
+	sum := sha256.Sum256([]byte("by hand\n"))
+	if a := byName["file/roles/a.md"]; a.Action != "kept" || len(a.Keeps) != 1 || a.FileNewSHA != "packsum" || a.FileOldSHA != hex.EncodeToString(sum[:]) ||
+		a.Text != "pack roles/a.md\n" || !strings.Contains(a.Diff, "-by hand") || !strings.Contains(a.Diff, "+pack roles/a.md") {
+		t.Errorf("the taken file = %+v, want it kept and whole", a)
+	}
+	if b := byName["file/roles/b.md"]; b.Action != "kept" || b.FileNewSHA != "" || b.FileOldSHA != "" || b.Text != "" || b.Diff != "" {
+		t.Errorf("the kept file no take names = %+v, want nothing whole", b)
+	}
+	if c := byName["file/roles/c.md"]; c.FileNewSHA != "" || c.Text != "" {
+		t.Errorf("the unchanged file a take names = %+v, want nothing whole", c)
+	}
+	if !slices.Equal(got.NonText, []string{"roles/bin"}) {
+		t.Errorf("non-text = %q, want the taken file whose copy is not text", got.NonText)
+	}
+	if f := byName["flow/starter.default"]; f.Action != "kept" || f.FlowOldSHA != "yardsum" {
+		t.Errorf("the taken flow = %+v, want it kept with the yard's digest", f)
+	}
+	if f := byName["flow/starter.train"]; f.Action != "kept" || f.FlowOldSHA != "" {
+		t.Errorf("the kept flow no take names = %+v, want no digest", f)
+	}
 }
 
 // askPlanFrom marks each installed file for a --yes card: whether its copy
@@ -328,7 +385,7 @@ func askPlanMarksEditedAndRuns(t *testing.T) {
 			{Kind: "file", Name: "page.html", Action: pack.Change, File: &pack.FileOp{To: "nowhere/page.html", Mode: "0644"}},
 		},
 	}
-	got := askPlanFrom(read, plan, pack.Answers{}, nil, nil)
+	got := askPlanFrom(read, plan, pack.Answers{}, nil, nil, nil)
 	if len(got.Edited) != 1 || !strings.Contains(got.Edited[0], "nowhere/a.md") {
 		t.Fatalf("the plan's edited = %q, want the role's line", got.Edited)
 	}

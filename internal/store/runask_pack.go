@@ -68,12 +68,15 @@ type AskPlanObject struct {
 	// out is held to them.
 	Env []string `json:"env,omitempty"`
 	// Of a file: its hashes whole, old and new, and for a create or
-	// change its new text and the unified diff old against new, whole,
-	// for the tap and a terminal.
+	// change, or a kept file the card takes, its new text and the unified
+	// diff old against new, whole, for the tap and a terminal.
 	FileOldSHA string `json:"file_old_sha256,omitempty"`
 	FileNewSHA string `json:"file_new_sha256,omitempty"`
 	Text       string `json:"text,omitempty"`
 	Diff       string `json:"diff,omitempty"`
+	// Of a kept flow the card takes: the digest of the yard's flow, which
+	// Changes (the stages that differ) cannot hold whole.
+	FlowOldSHA string `json:"flow_old_sha256,omitempty"`
 }
 
 // AskChange is one change of a plan object, as printPlan prints it.
@@ -333,7 +336,7 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 	// approval is held to the plan the card showed. What a writer sends
 	// beside argv never reaches here, since an ask keeps argv and carried
 	// bytes alone (askedRun).
-	_, depot, mappings, yes, sha, err := packApplyWords(run.Argv[2:])
+	_, depot, mappings, yes, take, sha, err := packApplyWords(run.Argv[2:])
 	if err != nil {
 		return AskRun{}, err
 	}
@@ -349,7 +352,7 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 			return AskRun{}, fmt.Errorf("pack %s: depot %s: %w", name, depot, ErrNotFound)
 		}
 	}
-	reading, dirForm, err := w.packCardReading(context.Background(), name, depot, mappings, sha, asking)
+	reading, dirForm, err := w.packCardReading(WithPackTake(context.Background(), take), name, depot, mappings, sha, asking)
 	if err != nil {
 		return AskRun{}, err
 	}
@@ -427,7 +430,7 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 		digest = ""
 	}
 	card := AskRun{Argv: run.Argv, Seen: seenMap, Carried: carried,
-		Pack: &AskPack{Name: packName, Kind: reading.Kind, Depot: reading.Depot, Mappings: reading.Mappings, Label: reading.Label, Digest: digest}}
+		Pack: &AskPack{Name: packName, Kind: reading.Kind, Depot: reading.Depot, Mappings: reading.Mappings, Label: reading.Label, Digest: digest, Take: take}}
 	if reading.Kind == "source" {
 		if named {
 			if urlForm {
@@ -438,8 +441,8 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 			}
 			return AskRun{}, fmt.Errorf("pack %s: it is of kind source, so it goes into the yard and no depot, and a setup card installs it: yardr bead ask <bead> - --setup %s, with the question and context on stdin", name, name)
 		}
-		if yes {
-			return AskRun{}, packYesNothing(name)
+		if err := packSourceWords(name, yes, take); err != nil {
+			return AskRun{}, err
 		}
 		does, err := w.packSourceDoes(packName, reading, carried, decls)
 		if err != nil {
@@ -465,14 +468,14 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 				return AskRun{}, fmt.Errorf("pack %s: its plan asks or refuses, so no card can apply it: %s: it is the operator's to type in a terminal (yardr pack check %s --depot %s shows its plan there)", name, strings.Join(group, "; "), name, reading.Depot)
 			}
 		}
-		shown, err := packYesEdited(name, reading.Depot, reading.Plan, yes)
+		shown, err := w.packCardWhole(name, reading, yes, take)
 		if err != nil {
 			return AskRun{}, err
 		}
 		for _, o := range reading.Plan.Objects {
 			payload += len(o.Text) + len(o.Diff)
 		}
-		does, err := w.packDepotDoes(packName, reading, carried, decls)
+		does, err := w.packDepotDoes(packName, reading, carried, decls, take)
 		if err != nil {
 			return AskRun{}, err
 		}
@@ -491,10 +494,7 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 				return AskRun{}, err
 			}
 		}
-		if len(shown) > 0 {
-			does = packYesDoes(does, shown)
-		}
-		card.Does = does
+		card.Does = packTakeDoes(packYesDoes(does, shown), take)
 		card.Pack.Plan = reading.Plan
 		card.Pack.Yes = len(shown) > 0
 		card.Description = fmt.Sprintf("Import a pack into depot %s: set the yard to what the pack says", reading.Depot)
@@ -504,11 +504,11 @@ func (w *wtx) packApplyCard(run AskRun, asking bool) (AskRun, error) {
 	for i := range card.Does {
 		card.Does[i] = safeSourceCardLine(card.Does[i])
 	}
-	// A card that shows edited files whole is whole or refused: the
-	// summary shape would fold the diffs approval overwrites by. A
+	// A card that shows edited files or taken objects whole is whole or
+	// refused: a summary would fold the diffs approval overwrites by. A
 	// directory is whole or refused too: it has no summary shape.
 	summary := false
-	if !card.Pack.Yes && !dirForm {
+	if !card.Pack.Yes && len(take) == 0 && !dirForm {
 		summary, err = w.packSummary(&card, reading, carried, decls, named, payload)
 		if err != nil {
 			return AskRun{}, err

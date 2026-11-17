@@ -47,27 +47,30 @@ func (m Mappings) Bound() []string {
 }
 
 // PackApplyUse is how a refusal names the row.
-const PackApplyUse = "yardr pack apply <name> [--yes] [--sha256 <digest>] [--depot <depot> [--flow <flow>] [--crew <pack>=<yard>] [--group <pack>=<yard>] [--bind <spec>] [--members <group>=<a,b>] [--open-threads <crew>=<sources>] [--calls <who>=<source>:<calls>]]"
+const PackApplyUse = "yardr pack apply <name> [--yes] [--take <kind>/<name>] [--sha256 <digest>] [--depot <depot> [--flow <flow>] [--crew <pack>=<yard>] [--group <pack>=<yard>] [--bind <spec>] [--members <group>=<a,b>] [--open-threads <crew>=<sources>] [--calls <who>=<source>:<calls>]]"
 
 // packApplyFlags are the words a card carries: --yes over the files the
-// plan says were edited by hand, --sha256 pinning a directory to the
-// digest pack check printed, the depot, and the mappings a plan's
-// questions are answered by. Every other flag of the terminal's shapes
-// the import in a way a card holds no word for.
-var packApplyFlags = map[string]bool{"--yes": false, "--sha256": true, "--depot": true, "--flow": true, "--crew": true, "--group": true,
+// plan says were edited by hand, --take over the objects the plan keeps,
+// --sha256 pinning a directory to the digest pack check printed, the depot,
+// and the mappings a plan's questions are answered by. Every other flag of
+// the terminal's shapes the import in a way a card holds no word for.
+var packApplyFlags = map[string]bool{"--yes": false, "--take": true, "--sha256": true, "--depot": true, "--flow": true, "--crew": true, "--group": true,
 	"--bind": true, "--members": true, "--open-threads": true, "--calls": true}
 
 // parsePackApply reads the words of pack apply into the row's one stored
-// form: the name, --yes, --sha256, the depot, then the mappings in
-// packMappingFlags' order.
+// form: the name, --yes, each --take sorted, --sha256, the depot, then the
+// mappings in packMappingFlags' order.
 func parsePackApply(rest []string) ([]string, error) {
-	name, depot, m, yes, sha, err := packApplyWords(rest)
+	name, depot, m, yes, take, sha, err := packApplyWords(rest)
 	if err != nil {
 		return nil, err
 	}
 	out := []string{name}
 	if yes {
 		out = append(out, "--yes")
+	}
+	for _, name := range take {
+		out = append(out, "--take", name)
 	}
 	if sha != "" {
 		out = append(out, "--sha256", sha)
@@ -82,29 +85,30 @@ func parsePackApply(rest []string) ([]string, error) {
 	return out, nil
 }
 
-// packApplyWords reads the pack's name, the depot, the mappings, --yes
-// and --sha256 out of the words of pack apply. A mapping answers a plan
-// for a depot, so it needs --depot; with none the words are a bare name,
-// a re-apply. Each value stands on the card as it was typed, and draws no
-// line of its own there: parseRow has held the line to names, numbers and
-// flags. A URL is applied pinned, and --sha256 with any name but a
-// directory's or a URL's, which alone it pins, is refused.
-func packApplyWords(rest []string) (string, string, Mappings, bool, string, error) {
+// packApplyWords reads the pack's name, the depot, the mappings, --yes,
+// the --take names and --sha256 out of the words of pack apply. A mapping
+// answers a plan for a depot, so it needs --depot; with none the words are
+// a bare name, a re-apply, which may take (packTakeNames). Each value stands
+// on the card as it was typed, and draws no line of its own there: parseRow
+// has held the line to names, numbers and flags. A URL is applied pinned,
+// and --sha256 with any name but a directory's or a URL's, which alone it
+// pins, is refused.
+func packApplyWords(rest []string) (string, string, Mappings, bool, []string, string, error) {
 	var m Mappings
 	for _, word := range rest {
 		flag, _, _ := strings.Cut(word, "=")
 		// Membership, not the value: --yes is carried with false, since
 		// it takes none.
 		if _, ok := packApplyFlags[flag]; strings.HasPrefix(word, "-") && !ok {
-			return "", "", m, false, "", fmt.Errorf("--run takes %s, and pack apply with %s shapes the import, which a card answers none of: it is the operator's to type in a terminal (yardr pack check %s shows its plan there)", PackApplyUse, flag, "<name>")
+			return "", "", m, false, nil, "", fmt.Errorf("--run takes %s, and pack apply with %s shapes the import, which a card answers none of: it is the operator's to type in a terminal (yardr pack check %s shows its plan there)", PackApplyUse, flag, "<name>")
 		}
 	}
 	args, values, err := runWords(PackApplyUse, "pack apply", "the operator's", rest, packApplyFlags)
 	if err != nil {
-		return "", "", m, false, "", err
+		return "", "", m, false, nil, "", err
 	}
 	if len(args) != 1 {
-		return "", "", m, false, "", fmt.Errorf("--run takes %s: one pack's name, not %d words", PackApplyUse, len(args))
+		return "", "", m, false, nil, "", fmt.Errorf("--run takes %s: one pack's name, not %d words", PackApplyUse, len(args))
 	}
 	once := func(flag string) (string, error) {
 		if len(values[flag]) > 1 {
@@ -131,36 +135,40 @@ func packApplyWords(rest []string) (string, string, Mappings, bool, string, erro
 	}
 	depot, err := once("--depot")
 	if err != nil {
-		return "", "", m, false, "", err
+		return "", "", m, false, nil, "", err
 	}
 	sha, err := once("--sha256")
 	if err != nil {
-		return "", "", m, false, "", err
+		return "", "", m, false, nil, "", err
 	}
 	if IsPackURL(args[0]) {
 		if sha == "" {
-			return "", "", m, false, "", fmt.Errorf("pack %s: a pack at a URL is applied pinned: name its digest (--sha256, as yardr pack check %s prints it)", args[0], args[0])
+			return "", "", m, false, nil, "", fmt.Errorf("pack %s: a pack at a URL is applied pinned: name its digest (--sha256, as yardr pack check %s prints it)", args[0], args[0])
 		}
 	} else if sha != "" && !IsPackDir(args[0]) {
-		return "", "", m, false, "", fmt.Errorf("--run takes %s, and pack apply with --sha256 shapes the import, which a card answers none of: it is the operator's to type in a terminal (yardr pack check %s shows its plan there)", PackApplyUse, "<name>")
+		return "", "", m, false, nil, "", fmt.Errorf("--run takes %s, and pack apply with --sha256 shapes the import, which a card answers none of: it is the operator's to type in a terminal (yardr pack check %s shows its plan there)", PackApplyUse, "<name>")
 	}
 	if m.Flow, err = once("--flow"); err != nil {
-		return "", "", m, false, "", err
+		return "", "", m, false, nil, "", err
 	}
 	if m.Crew, err = takes("--crew"); err != nil {
-		return "", "", m, false, "", err
+		return "", "", m, false, nil, "", err
 	}
 	if m.Groups, err = takes("--group"); err != nil {
-		return "", "", m, false, "", err
+		return "", "", m, false, nil, "", err
 	}
 	m.Binds, m.Members, m.OpenThreads, m.Calls = values["--bind"], values["--members"], values["--open-threads"], values["--calls"]
 	if depot == "" && !m.IsZero() {
-		return "", "", m, false, "", fmt.Errorf("--run takes %s: a mapping answers the plan for a named depot, so it needs --depot", PackApplyUse)
+		return "", "", m, false, nil, "", fmt.Errorf("--run takes %s: a mapping answers the plan for a named depot, so it needs --depot", PackApplyUse)
 	}
 	if len(values["--yes"]) > 1 {
-		return "", "", m, false, "", fmt.Errorf("--run takes %s: one --yes, not %d", PackApplyUse, len(values["--yes"]))
+		return "", "", m, false, nil, "", fmt.Errorf("--run takes %s: one --yes, not %d", PackApplyUse, len(values["--yes"]))
 	}
-	return args[0], depot, m, len(values["--yes"]) == 1, sha, nil
+	take, err := packTakeNames(values["--take"])
+	if err != nil {
+		return "", "", m, false, nil, "", err
+	}
+	return args[0], depot, m, len(values["--yes"]) == 1, take, sha, nil
 }
 
 // packTargetKey starts each Seen key a named depot's card holds for what
@@ -353,6 +361,13 @@ type AskPack struct {
 	// the card shows whole: approval overwrites exactly those copies,
 	// held to the hashes the card showed.
 	Yes bool `json:"yes,omitempty"`
+	// Take names the kept objects the ask carried --take over, each as the
+	// plan prints it (flow/starter.default), sorted: the card shows each one
+	// whole and approval sets exactly those to the pack's, held to the hashes
+	// the card showed. Plan stays the plan that keeps them, so a carrying out
+	// rebuilds it and holds the take to it; the carrying out takes the names
+	// from here and never from the command's words.
+	Take []string `json:"take,omitempty"`
 }
 
 // AskPackFile ties a file of a summary card to its line, so a client
@@ -414,8 +429,10 @@ type PackReading struct {
 // own API, so a depot plan is built from the yard's records as the write
 // that stores the ask holds them. No depot and no mappings read a depot
 // pack against the depot that already holds it, as before mappings were
-// carried. An error refuses the ask, storing nothing, in the reader's
-// words.
+// carried. A card that takes gives the names it takes through the context
+// (PackTakeOf): the reader refuses a name its plan cannot carry out, and
+// carries each kept object a name takes whole. An error refuses the ask,
+// storing nothing, in the reader's words.
 type PackReader func(ctx context.Context, name string, depot string, mappings Mappings, yard API) (*PackReading, error)
 
 // SetPackReader tells the store how its owning process reads the packs

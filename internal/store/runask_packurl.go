@@ -51,7 +51,7 @@ func fetchPackURL(ctx context.Context, s *Store, argv []string) (PackReader, err
 	if len(argv) < 3 || !IsPackURL(argv[2]) {
 		return nil, nil
 	}
-	_, _, _, _, sha, err := packApplyWords(argv[2:])
+	_, _, _, _, _, sha, err := packApplyWords(argv[2:])
 	if err != nil {
 		return nil, err
 	}
