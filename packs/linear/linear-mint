@@ -12,10 +12,8 @@
 # which acts as the application itself, with access to the workspace's
 # public teams. No new copy of the secret is stored: it is held in this
 # process's memory alone, sent in the exchange's body, and never printed,
-# neither on stdout nor on stderr, and written nowhere. The one file the
-# script writes is grants.log beside itself, which says what Linear
-# answered each mint (record, below) and holds neither the token nor the
-# secret.
+# neither on stdout nor on stderr, and written nowhere. The script writes no
+# file.
 #
 # Needs curl on PATH. LINEAR_TOKEN_ENDPOINT may name a loopback HTTP
 # endpoint for a test's stand-in. The scope on stdin is the call's, and
@@ -66,67 +64,6 @@ urlencode() {
   printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n' | sed 's/\(..\)/%\1/g'
 }
 
-# raw <text> <key> is the first "key": value in text as written, a string
-# with its quotes or an array with its brackets, "" where the value is
-# neither. first reads a string alone, and Linear may answer a scope list
-# as a string (spaced or comma-separated) or as an array.
-raw() {
-  printf '%s' "$1" | tr -d '\n' |
-    grep -oE "\"$2\"[[:space:]]*:[[:space:]]*(\[[^]]*\]|\"[^\"]*\")" |
-    head -n 1 | sed 's/^[^:]*:[[:space:]]*//'
-}
-
-# contains <text> <value> succeeds when a nonempty value occurs literally
-# in text. A scope echo can itself equal a secret or token, even when every
-# character is allowed in a scope list.
-contains() {
-  [ -n "$2" ] || return 1
-  case "$1" in *"$2"*) return 0 ;; esac
-  return 1
-}
-
-# record <status> <body> appends one line to grants.log beside this script
-# for an answer of Linear's: the time (UTC), the status, whether the body
-# holds an error key, and for a 200 the scope Linear says it granted and
-# whether that names each agent scope. That tells a grant with the agent
-# scopes from one without, with no token or secret on a screen. The body
-# is untrusted, so of it only the scope field is ever written, and only
-# when every character is one a scope list is written in and it contains
-# neither the secret nor the token; any other value is counted ("scope:
-# unparseable (N chars)", the field's quotes or brackets included) and
-# not shown. A name is matched whole between the delimiters a list may use
-# (space, comma, quote, bracket), so a longer
-# name never passes for a shorter one. The server and the daemon both
-# mint, so the file is appended to and a line is one printf; it is 0600
-# from its first line, by the umask it is created under and no chmod
-# after. A record that cannot be written is left unwritten: it is a
-# diagnostic, and a failing mint stops every call the yard makes to Linear.
-record() {
-  line="$(date -u +%Y-%m-%dT%H:%M:%SZ) status $1"
-  if printf '%s' "$2" | grep -q '"error"[[:space:]]*:'; then
-    line="$line, error field present"
-  else
-    line="$line, error field absent"
-  fi
-  if [ "$1" = 200 ]; then
-    field=$(raw "$2" scope)
-    if [ -z "$field" ]; then
-      line="$line, scope: absent"
-    elif printf '%s' "$field" | LC_ALL=C grep -q '[^][A-Za-z0-9 ,:_."-]'; then
-      line="$line, scope: unparseable (${#field} chars)"
-    elif contains "$field" "$client_secret" ||
-      contains "$field" "$(first "$2" access_token)"; then
-      line="$line, scope: unparseable (${#field} chars)"
-    else
-      names=" $(printf '%s' "$field" | sed 's/[],"[]/ /g') "
-      case $names in *" app:mentionable "*) mentionable=yes ;; *) mentionable=no ;; esac
-      case $names in *" app:assignable "*) assignable=yes ;; *) assignable=no ;; esac
-      line="$line, app:mentionable $mentionable, app:assignable $assignable, scope: $field"
-    fi
-  fi
-  ( umask 077; printf '%s\n' "$line" >> "$(dirname "$0")/grants.log" ) 2>/dev/null || true
-}
-
 client_id=$(first "$input" LINEAR_CLIENT_ID)
 client_secret=$(first "$input" LINEAR_CLIENT_SECRET)
 [ -n "$client_id" ] || fail "its inputs name no LINEAR_CLIENT_ID"
@@ -158,7 +95,6 @@ out=$(printf 'grant_type=client_credentials&scope=%s&client_id=%s&client_secret=
   fail "could not reach $endpoint (curl exit $?)"
 code=$(printf '%s' "$out" | tail -n 1)
 body=$(printf '%s' "$out" | sed '$d')
-record "$code" "$body"
 # The response body is untrusted and could echo the client secret.
 # Report only the status code on failure. A 401 is told apart: Linear
 # did not accept the id and secret, which is no refusal of the scope set,

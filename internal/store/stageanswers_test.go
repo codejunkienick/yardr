@@ -236,11 +236,21 @@ func TestStageAnswerYouDecide(t *testing.T) {
 	if got = stageAsks(t, s, b.ID); got[0].State != store.AskAnswered || got[1].State != store.AskOpen {
 		t.Fatalf("states = %s, %s", got[0].State, got[1].State)
 	}
+	// A pick that moved nothing leaves the way to answer again, which the yard
+	// takes; the pick that moves the bead takes the way away, since a stage ask
+	// takes no pick after one that moved it.
+	way := fmt.Sprintf("answer with: yardr bead answer %s %d <n> [words]", b.ID, got[0].Note.Seq)
+	if lines := strings.Join(got[0].Lines(), "\n"); !strings.Contains(lines, "ada picked 3") || !strings.Contains(lines, way) {
+		t.Fatalf("after You decide the card reads:\n%s\nwant the pick and %q", lines, way)
+	}
 	if err := s.AddAnswer(ctx, b.ID, store.Answer{Ask: got[0].Note.Seq, Option: 1}, "ada"); err != nil {
 		t.Fatalf("re-pick: %v", err)
 	}
 	if cur, err = s.GetBead(ctx, b.ID); err != nil || cur.Stage != "approved" {
 		t.Fatalf("after the re-pick: %+v, %v", cur, err)
+	}
+	if lines := strings.Join(stageAsks(t, s, b.ID)[0].Lines(), "\n"); !strings.Contains(lines, "ada picked 1") || strings.Contains(lines, "answer with") {
+		t.Fatalf("after the pick that moved the bead the card reads:\n%s\nwant the pick and no way to answer again", lines)
 	}
 }
 

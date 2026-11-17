@@ -746,6 +746,18 @@ func stageMove(ask Ask, n int) string {
 	return ask.Move[n-1]
 }
 
+// movedBead says the ask is a stage ask answered by a pick that fired a move,
+// so the bead has gone where the pick sent it. A stage ask takes no pick after
+// one that moved it (stageAnswer refuses it), and Lines gives no way to answer
+// it, so that nothing shown invites the pick the yard refuses. A hand ask,
+// which a newer pick replaces, and a pick that moved nothing (the You decide of
+// a card put before the yard dropped it, which a newer pick may follow) are
+// not this.
+func (r ResolvedAsk) movedBead() bool {
+	return r.State == AskAnswered && r.Current != nil && r.Current.Answer.Option != 0 &&
+		r.Ask.Stage != "" && stageMove(r.Ask, r.Current.Answer.Option) != ""
+}
+
 // stagePick is the pick that carries a stage ask's move: the advance to a
 // stage that yardr bead advance makes, with the flow's refusal where it
 // refuses, or the outcome Done reports. A person answers it, so the
@@ -861,8 +873,7 @@ func (w *wtx) stageAnswer(ctx context.Context, row *beadRow, notes []Note, ans A
 	if row.Status == "closed" && (ans.Option != 0 || move != "") {
 		return "", RefusedAskAnswered, fmt.Errorf("ask %d: bead %s is closed: a closed bead moves no more", ans.Ask, row.ID)
 	}
-	if current.State == AskAnswered && current.Current != nil && current.Current.Answer.Option != 0 &&
-		stageMove(ask, current.Current.Answer.Option) != "" {
+	if current.movedBead() {
 		return "", RefusedAskAnswered, fmt.Errorf("ask %d already moved bead %s with %s: a stage ask takes no pick after one that moved it",
 			ans.Ask, row.ID, moveWords(stageMove(ask, current.Current.Answer.Option)))
 	}

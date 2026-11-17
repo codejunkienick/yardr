@@ -1619,7 +1619,7 @@ func (r ResolvedAsk) lines(mark func(string) string) []string {
 		out = append(out, "  "+takenBackLine(c))
 	}
 	switch {
-	case r.State == AskDeclined, r.State == AskTakenBack:
+	case r.State == AskDeclined, r.State == AskTakenBack, r.movedBead():
 	case r.State == AskAnswered && len(r.Ask.Options) == 0:
 	case r.Ask.Setup != nil && r.Ask.Setup.Given && len(r.Ask.Setup.Missing) == 0 && len(r.Ask.Setup.Candidates) > 0:
 		out = append(out, fmt.Sprintf("  answer with: yardr bead answer %s %d <n>, <n> --secret, or <n> --account <source>", r.Note.Bead, r.Note.Seq))

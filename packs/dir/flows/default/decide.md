@@ -13,8 +13,13 @@ the person answering moves it (`yardr review`, or
 When a bead arrives the yard puts a card for the decisions on it, offering
 these moves, and picking one moves the bead: the person's words with the pick
 stay on the bead for whoever works it next. A bead with an ask already open
-gets no card, and a card gives way to an ask put after it: that question is
-what the person answers, and the bead is moved by hand once it is.
+gets no card, unless that ask is the only one and a question of options:
+where it names a move for each option (`yardr bead ask --move`) and the stage
+offers each, it becomes the card, its options the choices and each firing its
+move; where it names none, or a move no longer offered, it is quoted on the
+stage's card of moves instead. Either way it is taken back, so it is answered
+once, on the card. A card gives way to an ask put after it, and any other ask
+is what the person answers: the bead is moved by hand once it is.
 
 A decision that is not about one piece of work is asked with
 `yardr bead ask --new - <<'ASK'`, the question, then each line of its

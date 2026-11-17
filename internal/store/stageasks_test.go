@@ -1334,8 +1334,11 @@ func TestStageAskMovesArrivals(t *testing.T) {
 	if got := stageAsks(t, y.api, b.ID); len(got) != 1 || got[0].State != store.AskAnswered || len(open()) != 0 {
 		t.Fatalf("after the pick: asks %+v, open %d; want the one, answered", got, len(open()))
 	}
-	if lines := strings.Join(stageAsks(t, y.api, b.ID)[0].Lines(), "\n"); !strings.Contains(lines, "ada picked 2 (draft): not there yet") {
-		t.Fatalf("the card reads:\n%s", lines)
+	// The pick moved the bead, so the card says no more of how to answer it: the
+	// yard takes no pick after one that moved it.
+	if lines := strings.Join(stageAsks(t, y.api, b.ID)[0].Lines(), "\n"); !strings.Contains(lines, "ada picked 2 (draft): not there yet") ||
+		strings.Contains(lines, "answer with") {
+		t.Fatalf("the card reads:\n%s\nwant the pick and no way to answer again", lines)
 	}
 
 	// Back in decide it is a second arrival, and a second card: the first
