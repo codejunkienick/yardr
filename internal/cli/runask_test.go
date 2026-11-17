@@ -928,23 +928,26 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr user identity <user> --source <source> [--id <id>] [--key <key>]": {
 			"user identity ada --source crm --id u1",
 		},
-		"yardr settings set <key> <value>":                            {"settings set max_sessions 20"},
-		"yardr peer rename <old> <new>":                               {"peer rename airy north"},
-		"yardr group rename <old> <new>":                              {"group rename builders workers"},
-		"yardr bead update <bead> --originator <user>":                {"bead update yardmaster-journal --originator ada"},
-		"yardr timer rm <id>":                                         {"timer rm t1"},
-		"yardr up":                                                    {"up"},
-		"yardr crew restart <name> [--for <user>]":                    {"crew restart yardmaster"},
-		"yardr depot test <depot>":                                    {"depot test web"},
-		"yardr depot base <depot> <base>":                             {"depot base web origin/other"},
-		"yardr call <source> <call> [param=value ...] [--as <user>]":  {"call crm note text=a test note"},
-		"yardr hook rm <name>":                                        {"hook rm linear"},
-		"yardr link move --from-source <source> --to-source <source>": {"link move --from-source linear --to-source lin-new"},
-		"yardr source move <from> <to>":                               {"source move crm linear"},
-		"yardr source rm <name>":                                      {"source rm crm"},
-		"yardr user device rm <user> <device>":                        {"user device rm ada phone"},
-		"yardr user device pair <user> <device> [--url <address>]":    {"user device pair ada tablet --url https://mac.example.net"},
-		"yardr user set <user> role=operator|member":                  {"user set ada role=operator"},
+		"yardr settings set <key> <value>":                                  {"settings set max_sessions 20"},
+		"yardr peer rename <old> <new>":                                     {"peer rename airy north"},
+		"yardr group rename <old> <new>":                                    {"group rename builders workers"},
+		"yardr bead update <bead> --originator <user>":                      {"bead update yardmaster-journal --originator ada"},
+		"yardr timer rm <id>":                                               {"timer rm t1"},
+		"yardr up":                                                          {"up"},
+		"yardr crew restart <name> [--for <user>]":                          {"crew restart yardmaster"},
+		"yardr depot test <depot>":                                          {"depot test web"},
+		"yardr depot base <depot> <base>":                                   {"depot base web origin/other"},
+		"yardr route set <id> --group <group>":                              {"route set r1 --group reviewers"},
+		"yardr route add --stage <stage> --group <group> [--depot <depot>]": {"route add --stage review --group reviewers --depot web"},
+		"yardr flow set <name>":                                             {"flow set code"},
+		"yardr call <source> <call> [param=value ...] [--as <user>]":        {"call crm note text=a test note"},
+		"yardr hook rm <name>":                                              {"hook rm linear"},
+		"yardr link move --from-source <source> --to-source <source>":       {"link move --from-source linear --to-source lin-new"},
+		"yardr source move <from> <to>":                                     {"source move crm linear"},
+		"yardr source rm <name>":                                            {"source rm crm"},
+		"yardr user device rm <user> <device>":                              {"user device rm ada phone"},
+		"yardr user device pair <user> <device> [--url <address>]":          {"user device pair ada tablet --url https://mac.example.net"},
+		"yardr user set <user> role=operator|member":                        {"user set ada role=operator"},
 	}
 	if len(asks) != len(store.RunCommands()) {
 		t.Errorf("this test has asks for %d commands, and the list has %d", len(asks), len(store.RunCommands()))
@@ -953,6 +956,11 @@ func TestRunListIsTheCLIs(t *testing.T) {
 	askHelp, _, err := help.Find([]string{"ask"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, want := range []string{"--run-flow", "F: a line of a flow set's flow", "route set <id> --group <group>", "route add --stage <stage> --group <group>", "flow set <name>"} {
+		if !strings.Contains(askHelp.Long, want) {
+			t.Errorf("yardr bead ask --help does not name %q", want)
+		}
 	}
 	for _, use := range store.RunCommands() {
 		commands, ok := asks[use]
@@ -1269,6 +1277,103 @@ func TestRunListIsTheCLIs(t *testing.T) {
 					}
 				} else if d.Base != "origin/other" || d.Test != "make test" || d.Path != "/srv/web" {
 					t.Fatalf("%s: the depot holds %+v", use, d)
+				}
+				continue
+			}
+			if use == "yardr route set <id> --group <group>" || use == "yardr route add --stage <stage> --group <group> [--depot <depot>]" || use == "yardr flow set <name>" {
+				ctx := context.Background()
+				// A route or flow card runs in its own write, and its
+				// command at a terminal takes flags and files the row
+				// carries beside it, so there is no typed state to
+				// compare: the row is held to its card, its recorded
+				// approval, and the rule or flow the approval left.
+				if err := approved.st.PutDepot(ctx, store.Depot{Name: "web", Path: "/srv/web", Base: "origin/main"}, "jo"); err != nil {
+					t.Fatal(err)
+				}
+				if err := approved.st.PutGroup(ctx, store.Group{Name: "reviewers", Runner: "herdr", Config: map[string]any{"kind": "codex"}}, "jo"); err != nil {
+					t.Fatal(err)
+				}
+				runAsk := &store.AskRun{Argv: []string{command}}
+				wantDescription, wantResult := "", ""
+				switch use {
+				case "yardr route set <id> --group <group>":
+					web := "web"
+					route, err := approved.st.AddRoute(ctx, store.Route{Stage: "new", Depot: &web, Group: "builders"}, "jo")
+					if err != nil {
+						t.Fatal(err)
+					}
+					runAsk.Argv = []string{"route set " + route.ID + " --group reviewers"}
+					wantDescription, wantResult = "Change where a route's beads go and keep the rest", "route "+route.ID+" saved"
+				case "yardr route add --stage <stage> --group <group> [--depot <depot>]":
+					if err := approved.st.PutGroup(ctx, store.Group{Name: "spares", Runner: "herdr", Config: map[string]any{"kind": "claude"}}, "jo"); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := approved.st.AddRoute(ctx, store.Route{Stage: "review", Group: "spares"}, "jo"); err != nil {
+						t.Fatal(err)
+					}
+					wantDescription, wantResult = "Send open, unblocked beads in a stage to a group", "setting the yard-wide rule"
+				case "yardr flow set <name>":
+					f, err := store.ParseFlow("in -> work\nwork -> done\ndone terminal\n")
+					if err != nil {
+						t.Fatal(err)
+					}
+					f.Name = "code"
+					if _, err := approved.st.PutFlow(ctx, *f, "jo"); err != nil {
+						t.Fatal(err)
+					}
+					runAsk.Flow = `{"stages":["work","in","done"],"transitions":{"in":["work"],"work":["done"]},"terminal":["done"]}`
+					wantDescription, wantResult = "Set (replace) a named flow; depots and types point at it with 'yardr depot flow'", "flow code: 3 stages"
+				}
+				seq, err := approved.st.AddAsk(ctx, ab.ID, store.Ask{Question: "Run it?", To: "jo", Context: []string{"why"},
+					Run: runAsk}, "yardmaster")
+				if err != nil {
+					t.Fatalf("%s: %v", use, err)
+				}
+				notes, err := approved.st.Notes(ctx, ab.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var description string
+				for _, asked := range store.ResolveAsks(notes, time.Now()) {
+					if asked.Note.Seq == seq && asked.Ask.Run != nil {
+						description = asked.Ask.Run.Description
+					}
+				}
+				if description != wantDescription {
+					t.Errorf("%s card description %q, want %q", use, description, wantDescription)
+				}
+				done, err := approved.st.ApproveAsk(ctx, ab.ID, seq, "jo", true, nil)
+				if err != nil || !strings.Contains(done.Result, wantResult) {
+					t.Fatalf("%s approval = %+v, %v; want it to say %q", use, done, err, wantResult)
+				}
+				switch use {
+				case "yardr route set <id> --group <group>":
+					rs, err := approved.st.Routes(ctx)
+					if err != nil || len(rs) != 1 || rs[0].Group != "reviewers" {
+						t.Fatalf("%s: the routes hold %+v, %v", use, rs, err)
+					}
+				case "yardr route add --stage <stage> --group <group> [--depot <depot>]":
+					rs, err := approved.st.Routes(ctx)
+					if err != nil || len(rs) != 2 {
+						t.Fatalf("%s: the routes hold %+v, %v", use, rs, err)
+					}
+					var own bool
+					for _, r := range rs {
+						if r.Depot != nil && *r.Depot == "web" && r.Stage == "review" && r.Group == "reviewers" {
+							own = true
+						}
+						if r.Depot == nil && r.Group != "spares" {
+							t.Errorf("%s: the yard-wide rule moved: %+v", use, r)
+						}
+					}
+					if !own {
+						t.Errorf("%s: no own rule in web among %+v", use, rs)
+					}
+				case "yardr flow set <name>":
+					f, err := approved.st.GetFlow(ctx, "code")
+					if err != nil || !slices.Equal(f.Stages, []string{"work", "in", "done"}) {
+						t.Fatalf("%s: the flow holds %+v, %v", use, f, err)
+					}
 				}
 				continue
 			}

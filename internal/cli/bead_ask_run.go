@@ -33,7 +33,7 @@ import (
 // forms together are refused. A pack apply of a relative directory is
 // sent absolute, against the directory the ask is typed in, since a
 // relative path means nothing to the yard's server.
-func askRunCarried(command string, words []string, test string, testSet bool, role string, roleSet bool, says, makes []string) (*store.AskRun, error) {
+func askRunCarried(command string, words []string, test string, testSet bool, role string, roleSet bool, says, makes []string, flow string, flowSet bool, flowLines []string) (*store.AskRun, error) {
 	if len(words) > 0 {
 		if command != "" {
 			return nil, fmt.Errorf("--run proposes a command of the list and --run-word gives a general card's words: one of the two")
@@ -92,7 +92,61 @@ func askRunCarried(command string, words []string, test string, testSet bool, ro
 			return nil, err
 		}
 	}
+	// Flow set carries its flow beside the command, from the file
+	// --run-flow names or from the F: lines in order: a flow line needs
+	// spaces and ->, none of which a --run word holds.
+	if flowSetCommand(command) {
+		if run.Flow, err = flowSetCarried(flow, flowSet, flowLines); err != nil {
+			return nil, err
+		}
+	}
 	return run, nil
+}
+
+// flowSetCommand reports whether command is the run ask flow set
+// <name>: those words, with or without the leading yardr. The store
+// parses it; this only says the ask may carry a flow beside it.
+func flowSetCommand(command string) bool {
+	words := strings.Fields(command)
+	if len(words) > 0 && words[0] == "yardr" {
+		words = words[1:]
+	}
+	return len(words) == 3 && words[0] == "flow" && words[1] == "set"
+}
+
+// flowSetCarried reads what a run ask of flow set <name> carries: the
+// F: lines joined in order, or the file --run-flow names, read once,
+// so the store holds the bytes the card shows. It answers "" for a
+// command that carries neither, which the store then refuses for
+// carrying no flow; the two forms together are refused.
+func flowSetCarried(flow string, flowSet bool, flowLines []string) (string, error) {
+	switch {
+	case len(flowLines) > 0 && flowSet:
+		return "", fmt.Errorf("the run ask flow set <name> carries its flow in --run-flow <file> or in F: lines: one of the two")
+	case len(flowLines) > 0:
+		return strings.Join(flowLines, "\n"), nil
+	case !flowSet:
+		return "", fmt.Errorf("the run ask flow set <name> carries its flow beside the ask, in --run-flow <file> (F: on stdin)")
+	}
+	data, err := readFlowFile(flow)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func readFlowFile(file string) ([]byte, error) {
+	if file == "" {
+		return nil, fmt.Errorf("--run-flow needs a flow file: the file whose text the flow set ask carries")
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %s", store.OneLine(file), store.OneLine(err.Error()))
+	}
+	if len(data) > store.MaxRunFlow {
+		return nil, fmt.Errorf("%s exceeds %d bytes: a run ask carries at most that, so set it with yardr flow set in a terminal", store.OneLine(file), store.MaxRunFlow)
+	}
+	return data, nil
 }
 
 // hookAddCommand reports whether command is the run ask hook add <name>

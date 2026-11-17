@@ -771,7 +771,7 @@ func TestRunAskListRefusals(t *testing.T) {
 		// and AddRoute check no one): the asker's own to run, so no card.
 		{"group add builders --runner exec --set cmd=make", "this adds, it never replaces"},
 		{"group add exchange --runner peer --set peer=airy", "a peer group hands its beads to another yard"},
-		{"route add --stage arrived --group exchange", "anything else is run directly, or typed by the operator in a terminal"},
+		{"route rm r-1", "anything else is run directly, or typed by the operator in a terminal"},
 		{"user key mckean crm", "source crm: its declaration has no notify key"},
 	} {
 		if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", c.command), "yardmaster"); err == nil || !strings.Contains(err.Error(), c.want) {

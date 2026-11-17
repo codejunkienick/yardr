@@ -272,4 +272,31 @@ const askRunList = `  peer add <name> <invite>
       bead branches of the depot start from the base; the card shows the
       depot, the base now and the proposed one, and approving sets exactly
       that; a directory depot has no base
+  route set <id> --group <group>
+      the one named rule of a depot sends its beads to the group: the card
+      names the rule's id, its scope, every filter it sets and its chain
+      with each group's condition, changes only the chain's first group,
+      and carries the filters and conditions unchanged (weighty, code);
+      a yard-wide rule is not changed where it stands on this card: set
+      it aside for one depot with route add --depot, or change it in a
+      terminal; the yardmaster files it from the operator's own mail only
+  route add --stage <stage> --group <group> [--depot <depot>]
+      a new rule where its scope has none, with the filters it names; with
+      --depot and a key a yard-wide rule takes, this depot's own set-aside
+      of that rule: its key and chain carried whole with only the first
+      group changed, filed only where no own rule for the key stands in
+      the depot, and stale where the yard-wide rule moved or one appeared
+      (weighty, code); its take-back is route rm of the own rule at a
+      terminal, named on the card; the yardmaster files it from the
+      operator's own mail only
+  flow set <name>
+      a store flow's stages, carried whole beside the command from the
+      file --run-flow names or as F: lines in order, its stage order
+      first: the card shows what stands and what would stand whole, the
+      stages added, removed and reordered, and the flow that stands as
+      its take-back (weighty, code, a reorder alone included); a flow a
+      pack manages is refused, naming yardr pack apply, at the ask and
+      again at approval, and a removal naming the beads it would strand
+      is refused the same two times; the yardmaster files it from the
+      operator's own mail only
 `

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -442,6 +443,43 @@ func TestUserApprovesARunAskOverTheLink(t *testing.T) {
 	if last := noted[len(noted)-1]; last.Actor != "jo" || store.Via(last) != "phone via edge" {
 		t.Errorf("the answer's event is %+v, want jo's via phone via edge", last)
 	}
+	t.Run("a route card moves its named rule", func(t *testing.T) {
+		y := &runYard{secretYard: newSecretYard(t)}
+		if err := y.st.PutDepot(ctx, store.Depot{Name: "web"}, "jo"); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"builders", "spares"} {
+			if err := y.st.PutGroup(ctx, store.Group{Name: name, Runner: "herdr", Config: map[string]any{"kind": "claude"}}, "jo"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		web := "web"
+		route, err := y.st.AddRoute(ctx, store.Route{Stage: "new", Depot: &web, Group: "builders"}, "jo")
+		if err != nil {
+			t.Fatal(err)
+		}
+		seq, err := y.st.AddAsk(ctx, "yd-crm", store.Ask{Question: "Move this route?", To: "jo", Context: []string{"The next claim should go to spares."},
+			Run: &store.AskRun{Argv: []string{"route set", route.ID, "--group", "spares"}}}, "yardmaster")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := fmt.Sprintf(`{"bead":"yd-crm","ask":%d,"weighed":true}`, seq)
+		w := y.approve(edgelink.RemoteAddr, y.jo, strings.NewReader(body))
+		if !strings.Contains(w.Body.String(), `"result"`) || strings.Contains(w.Body.String(), `"error"`) {
+			t.Fatalf("the paired device's approval is answered %s", w.Body)
+		}
+		routes, err := y.st.Routes(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.ContainsFunc(routes, func(r store.Route) bool { return r.ID == route.ID && r.Group == "spares" }) {
+			t.Errorf("the paired device's approval did not move route %s to spares: %+v", route.ID, routes)
+		}
+		events := eventsOfKind(t, y.st, "route_set")
+		if len(events) != 1 || events[0].Actor != "jo" || store.Via(events[0]) != "phone via edge" {
+			t.Errorf("route_set events are %+v, want one approval by jo via phone via edge", events)
+		}
+	})
 
 	t.Run("the edge says the device used plain HTTP", func(t *testing.T) {
 		y := newRunYard(t)

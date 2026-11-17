@@ -116,6 +116,9 @@ type AskRun struct {
 	// Test is the test command a depot test row carries beside argv, in
 	// the ask's --run-test. No other row keeps it.
 	Test string `json:"test,omitempty"`
+	// Flow is the whole flow a flow set row carries beside argv, in the
+	// ask's --run-flow, as the line format writes it. No other row keeps it.
+	Flow string `json:"flow,omitempty"`
 	// Role is the prompt text a crew add, group add, group set or crew set
 	// row carries beside argv (the ask's --run-role, or the file prompt=
 	// names), shown on the card in Does. The approval writes it to a file
@@ -629,7 +632,7 @@ func (w *wtx) askedRun(ctx context.Context, run AskRun, to, actor string) (*AskR
 	// The command in the yard's own form, with what the writer carried
 	// beside it: the carried bytes are the row's to keep or throw away,
 	// as Does and Seen are.
-	sent := AskRun{Argv: argv, Carried: run.Carried, Test: run.Test, Role: run.Role, HookTable: run.HookTable}
+	sent := AskRun{Argv: argv, Carried: run.Carried, Test: run.Test, Role: run.Role, HookTable: run.HookTable, Flow: run.Flow}
 	check := c.check
 	if c.checkRun != nil {
 		check = func(ctx context.Context, w *wtx, _ []string, actor string) error {

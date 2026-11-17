@@ -281,7 +281,7 @@ func init() {
 		ActMoveLinks, ActReplaceHook, ActChangeHookSource, ActChangeHookUnknown, ActRemoveHook,
 		ActPair, ActMapPeerIdentity, ActUnmapPeerIdentity, ActAddPeer, ActRemovePeer, ActExposeToPeer,
 		ActTrustPeerName, ActSendAsksToPeer, ActAllowPeerMessages, ActRaisePeerMail, ActChangePeerAddress,
-		ActRenamePeer, ActRoutePeerBeads, ActMoveSource, ActSetUpPackSources,
+		ActRenamePeer, ActRoutePeerBeads, ActMoveSource, ActSetUpPackSources, ActChangeRoute, ActChangeFlow,
 		ActBringUp,
 		ActAddUser, ActRemoveUser, ActChangeRole, ActMapIdentity, ActChangeSetting, ActPruneStore,
 		ActGiveHarnessKey, ActGiveCrewCredential, ActGiveHookSecret, ActAllowThreads, ActRemoveTimer,

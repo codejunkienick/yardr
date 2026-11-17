@@ -19,7 +19,8 @@ func (a *app) newBeadAskCmd() *cobra.Command {
 	var askNew bool
 	var askBead store.NewBead
 	var askSecret, askForUser, askForCrew, askAs, askRun, askRunTest, askRunRole, askSecretLogin, askSecretHook, askHookSource string
-	var askRunSays, askRunMakes, askRunWords []string
+	var askRunFlow string
+	var askRunSays, askRunMakes, askRunWords, askRunFlowLines []string
 	var askSetup string
 	var askDepotPush, askDepotPushOff string
 	var askCrew, askGroup []string
@@ -62,11 +63,12 @@ field continues on the next:
   T: its test command, once, with R: a depot test (--run-test)
   S: a says line of a hook add, in order, with R: a hook add (--run-says)
   M: a makes line of one, in order, with R: a hook add (--run-makes)
+  F: a line of a flow set's flow, in order, with R: a flow set (--run-flow-line)
 
 A line with no label among labeled ones, a label among unlabeled ones, an
 unknown label and a label with no words are refused, and nothing is asked.
 With - no text is a flag: --context, --option, --why, --run, --run-word,
---run-test, --run-says and --run-makes are refused beside it, and so is --new's -b -,
+--run-test, --run-says, --run-makes, --run-flow and --run-flow-line are refused beside it, and so is --new's -b -,
 which would read the same stdin. The flags that name no prose (--to,
 --recommend, --about, --setup,
 --crew and the rest) go beside it. The secret flags name a source, a user, a
@@ -252,7 +254,8 @@ its URL; line breaks are refused. A comma is accepted only in a list the
 command takes or in the peer-add invite (the parts of tell=, the kinds peer
 allow carries, the grants crew set gives). A depot's test command goes beside --run, in --run-test <command> or T: <command>, since it needs those
 characters, and a hook add's says and makes lines go beside it in --run-says <line> and --run-makes <line>
-(S: and M:), each repeatable in order, since a line needs spaces, -> and free-text notes. It checks the
+(S: and M:), each repeatable in order, since a line needs spaces, -> and free-text notes. A flow set's flow goes beside
+it from the file --run-flow <file> names, read once, or as F: lines in order, since a flow line needs the same. It checks the
 command against the yard as it stands, and refuses one the yard would
 refuse and one that would change nothing (a peer, source, group, crew
 member, user, setting, timer or bead the yard has not, a number out of
@@ -577,8 +580,14 @@ what the person asked does, and this is the asker's own.`,
 				return fmt.Errorf("--run proposes a command of the list and --run-word gives a general card's words: one of the two")
 			case c.Flags().Changed("run-word") && (c.Flags().Changed("secret") || c.Flags().Changed("secret-login") || c.Flags().Changed("secret-hook")):
 				return fmt.Errorf("--run-word gives a general card's words and a secret flag asks for a value: one of the two")
-			case c.Flags().Changed("run-word") && (c.Flags().Changed("run-test") || c.Flags().Changed("run-role") || c.Flags().Changed("run-says") || c.Flags().Changed("run-makes")):
-				return fmt.Errorf("--run-word gives a general card's words whole: --run-test, --run-role, --run-says and --run-makes go beside --run, not beside it")
+			case c.Flags().Changed("run-word") && (c.Flags().Changed("run-test") || c.Flags().Changed("run-role") || c.Flags().Changed("run-says") || c.Flags().Changed("run-makes") || c.Flags().Changed("run-flow") || c.Flags().Changed("run-flow-line")):
+				return fmt.Errorf("--run-word gives a general card's words whole: --run-test, --run-role, --run-says, --run-makes and --run-flow go beside --run, not beside it")
+			case c.Flags().Changed("run-flow") && c.Flags().Changed("run-flow-line"):
+				return fmt.Errorf("--run-flow reads a flow file and --run-flow-line gives its lines: one of the two")
+			case c.Flags().Changed("run-flow") && (!c.Flags().Changed("run") || !flowSetCommand(askRun)):
+				return fmt.Errorf("--run-flow is the flow the run ask flow set <name> proposes: it goes with that command")
+			case c.Flags().Changed("run-flow-line") && (!c.Flags().Changed("run") || !flowSetCommand(askRun)):
+				return fmt.Errorf("--run-flow-line is a line of the flow the run ask flow set <name> proposes: it goes with that command")
 			case c.Flags().Changed("run-test") && (!c.Flags().Changed("run") || !depotTestCommand(askRun)):
 				return fmt.Errorf("--run-test is the command the run ask depot test <depot> proposes: it goes with that command")
 			case c.Flags().Changed("run-role") && (!c.Flags().Changed("run") || !crewAddCommand(askRun)):
@@ -659,7 +668,7 @@ what the person asked does, and this is the asker's own.`,
 				q.DepotPush = &store.AskDepotPush{Depot: askDepotPushOff, Off: true}
 			}
 			if c.Flags().Changed("run") || c.Flags().Changed("run-word") {
-				if q.Run, err = askRunCarried(askRun, askRunWords, askRunTest, c.Flags().Changed("run-test"), askRunRole, c.Flags().Changed("run-role"), askRunSays, askRunMakes); err != nil {
+				if q.Run, err = askRunCarried(askRun, askRunWords, askRunTest, c.Flags().Changed("run-test"), askRunRole, c.Flags().Changed("run-role"), askRunSays, askRunMakes, askRunFlow, c.Flags().Changed("run-flow"), askRunFlowLines); err != nil {
 					return err
 				}
 			}
@@ -840,6 +849,8 @@ what the person asked does, and this is the asker's own.`,
 	ask.Flags().StringVar(&askRunRole, "run-role", "", "with --run crew add <name> ... (R:): the file whose role text the ask carries beside the command, shown whole on the card")
 	ask.Flags().StringArrayVar(&askRunSays, "run-says", nil, "with --run hook add <name> ... (R:): a says line the ask proposes (S:), repeatable in order, carried beside the command since a line needs spaces, -> and notes")
 	ask.Flags().StringArrayVar(&askRunMakes, "run-makes", nil, "with --run hook add <name> ... (R:): a makes line the ask proposes (M:), repeatable in order, carried beside the command since a line needs spaces and ->")
+	ask.Flags().StringVar(&askRunFlow, "run-flow", "", "with --run flow set <name> (R:): the file whose flow text the ask carries beside the command, shown whole on the card")
+	ask.Flags().StringArrayVar(&askRunFlowLines, "run-flow-line", nil, "with --run flow set <name> (R:): one line of the flow the ask carries (F: on stdin), repeatable in order, instead of --run-flow <file>")
 	ask.Flags().StringVar(&askSetup, "setup", "", "set up this pack of kind source (one yardr embeds, or one the operator applied from a directory and left as it was) as one decision: the apply, the account and the grants, with --crew/--group naming who the grants are for")
 	ask.Flags().StringVar(&askDepotPush, "depot-push", "", "turn this depot's push to its origin on as one decision for the operator to approve: YARDR_PUSH=origin in <depot>-assembly's cmd and the pack's helper in the depot's git config, carried out by the server")
 	ask.Flags().StringVar(&askDepotPushOff, "depot-push-off", "", "turn this depot's push off as one decision for the operator to approve: the exact reverse of --depot-push for the depot")

@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -32,6 +34,9 @@ func TestParseAskStdin(t *testing.T) {
 			askStdin{question: "Replace the hook?", context: []string{"why."}, run: "hook add linear --source linear",
 				says:  []string{"action=opened event=issues -> done", "action=closed event=issues -> changes"},
 				makes: []string{"action=opened event=issues -> task:new"}}},
+		{"flow lines in order", "Q: Set the flow?\nC: the line changes\nR: flow set code\nF: in -> work\nF: work -> done\nF: done terminal\n",
+			askStdin{question: "Set the flow?", context: []string{"the line changes"}, run: "flow set code",
+				flowLines: []string{"in -> work", "work -> done", "done terminal"}}},
 		{"general words in order", "Q: Run it?\nC: why.\nG: bead\nG: create\nG: hello there\n",
 			askStdin{question: "Run it?", context: []string{"why."}, general: []string{"bead", "create", "hello there"}}},
 	} {
@@ -39,6 +44,18 @@ func TestParseAskStdin(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s: parseAskStdin(%q) = %+v, %v, want %+v", tc.name, tc.in, got, err, tc.want)
 		}
+	}
+	flowAsk, err := parseAskStdin("Q: Set the flow?\nC: the line changes\nR: flow set code\nF: in -> work\nF: work -> done\nF: done terminal\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := askRunCarried(flowAsk.run, nil, "", false, "", false, nil, nil, "", false, flowAsk.flowLines)
+	if err != nil || run.Flow != "in -> work\nwork -> done\ndone terminal" {
+		t.Errorf("flow lines carried as %+v, %v, want their ordered lines", run, err)
+	}
+	if _, err := askRunCarried(flowAsk.run, nil, "", false, "", false, nil, nil, "code.flow", true, flowAsk.flowLines); err == nil ||
+		!strings.Contains(err.Error(), "one of the two") {
+		t.Errorf("a flow file and F: lines together = %v, want one of the two", err)
 	}
 
 	// A refusal names what is wrong and where; the ones about the form also
@@ -65,6 +82,7 @@ func TestParseAskStdin(t *testing.T) {
 		{"a test with no command", "Q: Go?\nC: why.\nT: go test ./...", "T: with no R: after it", false},
 		{"a says line with no command", "Q: Go?\nC: why.\nS: action=opened event=issues -> done\n", "S: with no R: after it", false},
 		{"a makes line with no command", "Q: Go?\nC: why.\nM: action=opened event=issues -> task:new\n", "M: with no R: after it", false},
+		{"a flow line with no command", "Q: Go?\nC: why.\nF: in -> work\n", "F: with no R: after it", false},
 		{"a command and its words", "Q: Go?\nR: up\nG: bead\n", "R: and G:", false},
 	} {
 		_, err := parseAskStdin(tc.in)
@@ -130,6 +148,40 @@ func testBeadAskStdin(t *testing.T) {
 		t.Fatalf("the unlabeled ask = %s", got[1].Text)
 	}
 
+	oldFlow, err := store.ParseFlow("in -> done\ndone terminal\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldFlow.Name = "code"
+	if _, err := st.PutFlow(ctx, *oldFlow, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr", Dir: "/yard"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ask("Q: Set the flow?\nC: the line changes\nR: flow set code\nF: in -> work\nF: work -> done\nF: done terminal\n", id, "-"); err != nil {
+		t.Fatalf("a flow set ask on stdin: %v", err)
+	}
+	got = notes()
+	flowAskRun, err := askedRun(ctx, st, id, got[len(got)-1].Seq)
+	if err != nil || flowAskRun.Flow != "in -> work\nwork -> done\ndone terminal" {
+		t.Fatalf("the flow set ask carries %+v, %v", flowAskRun, err)
+	}
+
+	flowPath := filepath.Join(t.TempDir(), "code.flow")
+	const flowText = "in -> work\nwork -> done\ndone terminal\n"
+	if err := os.WriteFile(flowPath, []byte(flowText), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ask("", id, "Set the flow from a file?", "--context", "the line changes", "--run", "flow set code", "--run-flow", flowPath); err != nil {
+		t.Fatalf("a flow set ask from a file: %v", err)
+	}
+	got = notes()
+	flowAskRun, err = askedRun(ctx, st, id, got[len(got)-1].Seq)
+	if err != nil || flowAskRun.Flow != flowText {
+		t.Fatalf("the flow set file ask carries %+v, %v", flowAskRun, err)
+	}
+
 	// Flags that name no prose go beside it, as ever.
 	if out, err := ask("Go?\nwhy.\n", id, "-", "--to", "ada"); err != nil || !strings.Contains(out, "to ada") {
 		t.Fatalf("an ask to ada on stdin: %v\n%s", err, out)
@@ -170,9 +222,6 @@ func testBeadAskStdin(t *testing.T) {
 	if err := st.SetSetting(ctx, store.GeneralCardsSetting, "true", "mckean"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr", Dir: "/yard"}, "mckean"); err != nil {
-		t.Fatal(err)
-	}
 	out, err = ask("Q: Make the group?\nC: no card carries its args.\nG: group\nG: set\nG: builders\nG: args=--do it\n", id, "-")
 	if err != nil {
 		t.Fatalf("a general ask on stdin: %v\n%s", err, out)
@@ -205,11 +254,11 @@ func testBeadAskStdin(t *testing.T) {
 // beside the --run family, and is named in the help with G:.
 func TestBeadAskRunWord(t *testing.T) {
 	t.Parallel()
-	got, err := askRunCarried("", []string{"group", "set", "builders", "args=--do it"}, "", false, "", false, nil, nil)
+	got, err := askRunCarried("", []string{"group", "set", "builders", "args=--do it"}, "", false, "", false, nil, nil, "", false, nil)
 	if err != nil || got.Argv != nil || len(got.General) != 4 || got.General[3] != "args=--do it" {
 		t.Errorf("askRunCarried words = %+v, %v, want them in order as General alone", got, err)
 	}
-	if _, err := askRunCarried("up", []string{"up"}, "", false, "", false, nil, nil); err == nil ||
+	if _, err := askRunCarried("up", []string{"up"}, "", false, "", false, nil, nil, "", false, nil); err == nil ||
 		!strings.Contains(err.Error(), "one of the two") {
 		t.Errorf("askRunCarried with both forms = %v, want one of the two", err)
 	}
