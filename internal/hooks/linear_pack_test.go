@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -69,8 +70,8 @@ func TestLinearPackDeclaredCallSendsTheCredential(t *testing.T) {
 // the key as its own id, the same key twice posting once, and refuses a
 // key that is no UUID, an issue that is no identifier and an over-long
 // body before anything is sent; read-comments carries the newest page's
-// query and takes a long answer whole, top-level errors beside data
-// included.
+// query, pages past it with an after cursor, and takes a long answer
+// whole, top-level errors beside data included.
 func TestLinearPackDeclaredCalls(t *testing.T) {
 	dir := filepath.Join("..", "..", "packs", "linear")
 	text, err := os.ReadFile(filepath.Join(dir, "linear.yaml"))
@@ -86,6 +87,19 @@ func TestLinearPackDeclaredCalls(t *testing.T) {
 	}
 	if c, ok := d.Call("read-comments"); !ok || c.Kind != source.Read {
 		t.Fatalf("read-comments = %+v, %v, want a read call", c, ok)
+	}
+	// The page past the first is read with an after cursor, in the
+	// recordings call's shape: an optional string, left out of the first
+	// page's variables.
+	rc, _ := d.Call("read-comments")
+	var after *source.Param
+	for i := range rc.Params {
+		if rc.Params[i].Name == "after" {
+			after = &rc.Params[i]
+		}
+	}
+	if after == nil || after.Type != "string" || after.Max != 512 || !after.Optional || len(after.Default) != 0 {
+		t.Fatalf("after = %+v, want an optional string of at most 512 with no default", after)
 	}
 
 	s := &standin.Server{LinearKey: "lin_api_test"}
@@ -177,8 +191,10 @@ func TestLinearPackDeclaredCalls(t *testing.T) {
 	}
 
 	// read-comments carries the newest page's query: first:50 with the
-	// user and botActor subtrees and hasNextPage, and no totalCount,
-	// which stands on no connection but the search payloads.
+	// user and botActor subtrees and hasNextPage beside endCursor, and no
+	// totalCount, which stands on no connection but the search payloads.
+	// Without after the call reads the first page, as before: its
+	// variables carry the issue alone, no cursor.
 	s.Add(standin.Issue{Source: "linear", ID: "uuid-2", Key: "YRD-2", Title: "Links", Status: "Backlog",
 		LinearComments: []standin.LinearComment{
 			{ID: "c1", Body: "look?", By: "Ann", ByID: "u-ann"},
@@ -189,13 +205,16 @@ func TestLinearPackDeclaredCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	sent = bodies[len(bodies)-1]
-	for _, want := range []string{"comments(first: 50)", "user { id name }", "botActor { id name }", "pageInfo { hasNextPage }", `"id":"YRD-2"`} {
+	for _, want := range []string{"comments(first: 50, after: $c)", "query($id: String!, $c: String)", "user { id name }", "botActor { id name }", "pageInfo { hasNextPage endCursor }", `"variables":{"id":"YRD-2"}`} {
 		if !strings.Contains(sent, want) {
 			t.Errorf("the read sent %s, which holds no %q", sent, want)
 		}
 	}
 	if strings.Contains(sent, "totalCount") {
 		t.Errorf("the read sent %s, which asks for totalCount", sent)
+	}
+	if strings.Contains(sent, `"c":`) {
+		t.Errorf("the first page sent %s, which names a cursor", sent)
 	}
 	// Nothing selected away: the whole answer arrives, both authors with it.
 	for _, want := range []string{"look?", "on it", "botActor", `"hasNextPage":false`} {
@@ -214,6 +233,68 @@ func TestLinearPackDeclaredCalls(t *testing.T) {
 	}
 	if len(res.Answer) <= 64<<10 {
 		t.Fatalf("the long read answered %d bytes, want past the 64KB default", len(res.Answer))
+	}
+
+	// A two-page read: the first page's endCursor goes back as after,
+	// and the second page follows it. The stand-in answers every issue
+	// at once, so a paging stub stands in for Linear here.
+	var paged []string
+	pager := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		paged = append(paged, string(raw))
+		var req struct {
+			Variables map[string]any `json:"variables"`
+		}
+		_ = json.Unmarshal(raw, &req)
+		w.Header().Set("Content-Type", "application/json")
+		if c, _ := req.Variables["c"].(string); c == "" {
+			_, _ = io.WriteString(w, `{"data":{"issue":{"comments":{"nodes":[{"id":"c1","body":"first words"}],"pageInfo":{"hasNextPage":true,"endCursor":"p2"}}}}}`)
+		} else {
+			_, _ = io.WriteString(w, `{"data":{"issue":{"comments":{"nodes":[{"id":"c2","body":"older words"}],"pageInfo":{"hasNextPage":false,"endCursor":""}}}}}`)
+		}
+	}))
+	defer pager.Close()
+	d.Base = pager.URL
+	first, err := call("read-comments", map[string]string{"issue": "YRD-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"hasNextPage":true`, `"endCursor":"p2"`, "first words"} {
+		if !strings.Contains(string(first.Answer), want) {
+			t.Errorf("the first page answered %s, which holds no %q", first.Answer, want)
+		}
+	}
+	if strings.Contains(paged[len(paged)-1], `"c":`) {
+		t.Errorf("the first page sent %s, which names a cursor", paged[len(paged)-1])
+	}
+	second, err := call("read-comments", map[string]string{"issue": "YRD-2", "after": "p2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent := paged[len(paged)-1]; !strings.Contains(sent, `"c":"p2"`) {
+		t.Errorf("the second page sent %s, which carries no cursor", sent)
+	}
+	for _, want := range []string{`"hasNextPage":false`, "older words"} {
+		if !strings.Contains(string(second.Answer), want) {
+			t.Errorf("the second page answered %s, which holds no %q", second.Answer, want)
+		}
+	}
+	// An over-long cursor is refused before anything is sent, as any
+	// over-long value is.
+	n = len(paged)
+	if _, err := call("read-comments", map[string]string{"issue": "YRD-2", "after": strings.Repeat("c", 513)}); err == nil {
+		t.Error("a cursor of 513 characters was sent")
+	} else {
+		var ce *source.CallError
+		switch {
+		case !errors.As(err, &ce) || ce.Reason != source.BadParam:
+			t.Errorf("a cursor of 513 characters = %v, want a bad_param refusal", err)
+		case !strings.Contains(err.Error(), "parameter after is 513 characters, and at most 512"):
+			t.Errorf("a cursor of 513 characters = %v, want it to name the bound", err)
+		}
+	}
+	if len(paged) != n {
+		t.Fatalf("a refused read sent %d requests", len(paged)-n)
 	}
 
 	// GraphQL errors ride HTTP 200 beside data, and arrive whole: no
