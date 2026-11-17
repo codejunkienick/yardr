@@ -85,7 +85,11 @@ type Ask struct {
 	// Move is the outcome per stored option, frozen at ask time so a later
 	// edit of the template cannot change what a standing ask does: the
 	// entry for YouDecide is empty, and an input ask's single entry is its
-	// move. Entry is the seq of the event that entered the bead into the
+	// move. On an ask a person or an agent asked, Move is the writer's
+	// instead: for each option it wrote, all or none, the stage or outcome
+	// that decide's card of moves labels. The ask moves nothing itself; the
+	// card that takes it over when the bead arrives fires them (askmoves.go).
+	// Entry is the seq of the event that entered the bead into the
 	// stage, the advanced event of the move that put it there, the created
 	// event for a bead created in the stage, or the reopened event for a
 	// bead reopened in it. A move entry is an outcome to report or, after
@@ -94,7 +98,7 @@ type Ask struct {
 	// remains an authorized answerer if the operator setting later changes.
 	// Moves marks the card that offers the stage's moves (a moves template,
 	// asktemplate.go): the yard gives it up for another ask put on the bead
-	// (withdrawMoves), which no other stage ask does. All five are the
+	// (withdrawMoves), which no other stage ask does. The other four are the
 	// yard's own values: newAsk clears whatever a caller sends.
 	Stage    string   `json:"stage,omitempty"`
 	Move     []string `json:"move,omitempty"`
@@ -236,6 +240,12 @@ func ParseAnswer(n Note) (Answer, error) {
 // run ask it stays in the yard: a To of <person>@<peer> is refused, and no
 // copy is sent to a name with reach.
 //
+// An ask with options may name, for each option or for none, where picking it
+// sends the bead (Move): a stage or an outcome the stage its question outcome
+// leads to offers, checked here against the bead's flow (checkAskMoves). The
+// ask moves nothing itself; when the bead arrives in that stage its card takes
+// the question over and fires them (askmoves.go). AskNew takes none.
+//
 // A To of <person>@<peer> asks a person of a linked yard: in the same
 // write that stores the ask, the yard queues one message of kind ask for
 // the peer (peerAsk), where it stands among the person's decisions. The
@@ -258,6 +268,9 @@ func ParseAnswer(n Note) (Answer, error) {
 func (s *Store) AddAsk(ctx context.Context, id string, ask Ask, actor string) (uint64, error) {
 	add, err := s.newAsk(ctx, ask, actor)
 	if err != nil {
+		return 0, err
+	}
+	if err := s.checkAskMoves(ctx, id, ask); err != nil {
 		return 0, err
 	}
 	var seq uint64
@@ -295,8 +308,9 @@ func foldQuestion(q string) string {
 func (s *Store) newAsk(ctx context.Context, ask Ask, actor string) (func(w *wtx, id string) (uint64, error), error) {
 	// The yard's own values for a stage ask, whatever the writer sent, as
 	// secret and run asks are stored with the yard's own values: a person
-	// asking by hand puts no stage ask.
-	ask.Stage, ask.Move, ask.Entry, ask.Fallback, ask.Moves = "", nil, 0, false, false
+	// asking by hand puts no stage ask. The moves are the writer's to name,
+	// and checked (askMovesShape, and checkAskMoves against the bead's flow).
+	ask.Stage, ask.Entry, ask.Fallback, ask.Moves = "", 0, false, false
 	ask.Weight, ask.Head = nil, nil
 	ask.Question = strings.TrimSpace(ask.Question)
 	if ask.Question == "" {
@@ -336,6 +350,9 @@ func (s *Store) newAsk(ctx context.Context, ask Ask, actor string) (func(w *wtx,
 		if strings.EqualFold(o.Label, YouDecide) {
 			return nil, fmt.Errorf("option %d: yardr adds %q itself, to every ask with options: leave it out", i+1, YouDecide)
 		}
+	}
+	if err := askMovesShape(&ask); err != nil {
+		return nil, err
 	}
 	// A setup ask's recommendation counts the pack's presets, which only
 	// the write reads; askedSetup checks it there.
@@ -643,6 +660,9 @@ func (s *Store) AskNew(ctx context.Context, nb NewBead, ask Ask, actor string) (
 	nb.Title = strings.TrimSpace(ask.Question)
 	if nb.Stage == "" && nb.Type == "" {
 		nb.Type = TypeQuestion
+	}
+	if len(ask.Move) > 0 {
+		return nil, fmt.Errorf("--move says where picking an option sends a bead that goes to decide with the question: --new makes the bead with the ask, and no agent works it")
 	}
 	add, err := s.newAsk(ctx, ask, actor)
 	if err != nil {
@@ -1322,41 +1342,6 @@ func beadNotes(tx *bolt.Tx, uuid string) ([]Note, error) {
 		return nil
 	})
 	return out, err
-}
-
-// carriedLines renders what an adding ask carries, whole in a terminal
-// under the yard's sentences, deeper than any of them, for checking the
-// reading against the file; on a phone it is one tap behind.
-func carriedLines(carried []AskSource) []string {
-	var out []string
-	for _, c := range carried {
-		out = append(out, "  the declaration of source "+OneLine(c.Name)+", whole as carried:")
-		for _, line := range strings.Split(strings.TrimRight(c.Text, "\n"), "\n") {
-			out = append(out, "      "+NoteLetters(line))
-		}
-		for _, f := range c.Files {
-			out = append(out, "  the command file "+OneLine(f.Program)+" (sha256 "+OneLine(f.SHA256)+"), whole as carried:")
-			for _, line := range strings.Split(strings.TrimRight(f.Text, "\n"), "\n") {
-				out = append(out, "      "+NoteLetters(line))
-			}
-		}
-		for _, df := range c.Old {
-			out = append(out, "  the change to command file "+OneLine(df.Program)+" (sha256 "+OneLine(or(df.OldSHA256, "(none)"))+" -> "+OneLine(or(df.NewSHA256, "(none)"))+"), whole as carried:")
-			for _, line := range strings.Split(strings.TrimRight(df.Diff, "\n"), "\n") {
-				out = append(out, "      "+NoteLetters(line))
-			}
-		}
-		for _, rem := range c.Removed {
-			if rem.Text == "" {
-				continue
-			}
-			out = append(out, "  the entry "+OneLine(rem.Path)+" the copy would remove (sha256 "+OneLine(rem.SHA256)+"), whole as carried:")
-			for _, line := range strings.Split(strings.TrimRight(rem.Text, "\n"), "\n") {
-				out = append(out, "      "+NoteLetters(line))
-			}
-		}
-	}
-	return out
 }
 
 // Lines renders the ask as numbered text: the question, its context, its

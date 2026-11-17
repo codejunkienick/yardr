@@ -161,10 +161,12 @@ func TestStageAskEntry(t *testing.T) {
 		t.Fatalf("entry %d, advanced %d", got[0].Ask.Entry, advanced)
 	}
 	// Caller-sent stage-ask metadata is cleared: asking by hand puts no
-	// stage ask and cannot claim fallback authorization.
+	// stage ask and cannot claim fallback authorization. The moves are the
+	// writer's own to name beside options (askmoves.go), so a list of them
+	// where there are no options is refused, not kept.
 	seq, err := s.AddAsk(ctx, b.ID, store.Ask{
 		Question: "Plain?", To: "ada", Context: []string{"why"},
-		Stage: "review", Move: []string{"done"}, Entry: 99, Fallback: true,
+		Stage: "review", Entry: 99, Fallback: true,
 	}, "me")
 	if err != nil {
 		t.Fatal(err)
@@ -177,6 +179,11 @@ func TestStageAskEntry(t *testing.T) {
 				t.Fatalf("caller-sent stage ask kept: %+v", a)
 			}
 		}
+	}
+	if _, err := s.AddAsk(ctx, b.ID, store.Ask{
+		Question: "Plain?", To: "ada", Context: []string{"why"}, Move: []string{"done"},
+	}, "me"); err == nil || !strings.Contains(err.Error(), "the ask has no --option") {
+		t.Fatalf("a move with no option to carry it: %v", err)
 	}
 
 	// A bead of a dir depot has no branch to name: its card's header is the
@@ -593,6 +600,10 @@ func TestStageAskOperatorFallback(t *testing.T) {
 	if len(got) != 1 || got[0].Ask.To != "jo" {
 		t.Fatalf("crew only: asks %+v", got)
 	}
+	t.Run("question card fallback", func(t *testing.T) {
+		t.Parallel()
+		askMovesTakeOverForTheOperator(t)
+	})
 }
 
 // A member naming another yard gets one ask addressed across, queued as the
@@ -703,6 +714,50 @@ func TestStageAskRemote(t *testing.T) {
 	got = stageAsks(t, api, b3.ID)
 	if len(got) != 1 || got[0].Ask.To != "jo" {
 		t.Fatalf("no-carry fallback: %+v", got)
+	}
+	// A moves card that takes over a hand question keeps the ask's about-bead
+	// handles and sends their titles and stages for the peer's decisions view.
+	if _, err := api.AllowPeer(ctx, "north", store.PeerAllow{Send: []string{"ask"}}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	commitFiles(t, dir, map[string]string{
+		".yardr/flows/default.flow":      askMovesFlow,
+		".yardr/flows/default/decide.md": stageMovesFile,
+	})
+	if err := api.PutGroup(ctx, store.Group{Name: "deciders", Runner: "manual", Members: []string{"mckean@north"}}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.AddRoute(ctx, store.Route{Stage: "decide", Group: "deciders"}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	other, err := api.CreateBead(ctx, store.NewBead{Title: "the other work", Depot: "web", Stage: "backlog"}, "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, err := api.CreateBead(ctx, store.NewBead{Title: "the work", Depot: "web", Stage: "new"}, "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.AddAsk(ctx, work.ID, store.Ask{
+		Question: "Which way?", To: "jo", Context: []string{"The decision concerns two beads."},
+		Options: []store.AskOption{{Label: "Keep moving", Consequence: "the work continues"}, {Label: "Return", Consequence: "the work goes back"}},
+		About:   []string{other.ID}, Move: []string{"new", "backlog"},
+	}, "builder"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.Done(ctx, work.ID, "question", "", store.Expect{}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	out, err = api.PeerOutbox(ctx, "north", 0)
+	if err != nil || len(out) != 2 || out[1].Kind != "ask" {
+		t.Fatalf("merged question outbox = %+v, %v", out, err)
+	}
+	if err := json.Unmarshal(out[1].Body, &sent); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent.Ask.About) != 1 || sent.Ask.About[0] != other.ID || len(sent.About) != 1 ||
+		sent.About[0].ID != other.ID || sent.About[0].Title != "the other work" || sent.About[0].Stage != "backlog" {
+		t.Fatalf("merged question about-beads = ask %q, metadata %+v; want the handle and its title and stage", sent.Ask.About, sent.About)
 	}
 }
 
@@ -1074,7 +1129,13 @@ type movesYard struct {
 // the members it lists, and the stages in files have the stage file given.
 func stageMovesYard(t *testing.T, files map[string]string, who map[string][]string) movesYard {
 	t.Helper()
-	repoFiles := map[string]string{".yardr/flows/default.flow": stageMovesFlow}
+	return stageMovesYardOf(t, stageMovesFlow, files, who)
+}
+
+// stageMovesYardOf is stageMovesYard on the flow given.
+func stageMovesYardOf(t *testing.T, flow string, files map[string]string, who map[string][]string) movesYard {
+	t.Helper()
+	repoFiles := map[string]string{".yardr/flows/default.flow": flow}
 	for stage, text := range files {
 		repoFiles[".yardr/flows/default/"+stage+".md"] = text
 	}
@@ -1292,11 +1353,11 @@ func TestStageAskMovesArrivals(t *testing.T) {
 	}
 }
 
-// The yard's card of moves is for a bead nobody has asked about: where a
-// hand ask stands, whether it is open or put aside, no card is put beside it,
-// and one that stands gives way to an ask put later, which no other stage
-// ask does. A withdrawn card is not put back when the ask is answered: the
-// move is the asker's, as it was.
+// The yard's card of moves is for a bead nobody has asked about, or whose one
+// question of options it takes over: where another hand ask stands, whether it
+// is open or put aside, no card is put beside it, and one that stands gives way
+// to an ask put later, which no other stage ask does. A withdrawn card is not
+// put back when the ask is answered: the move is the asker's, as it was.
 func TestStageAskMovesYieldToAHandAsk(t *testing.T) {
 	t.Parallel()
 	y := stageMovesYard(t, map[string]string{"decide": stageMovesFile}, map[string][]string{"decide": {"ada"}})
@@ -1321,26 +1382,28 @@ func TestStageAskMovesYieldToAHandAsk(t *testing.T) {
 		return b.ID
 	}
 
-	// An ask open when the bead arrives: no card, and none when it is answered.
+	// A question that wants words is what the person is asked: no card is put
+	// beside it when the bead arrives, and none when it is answered.
+	words := store.Ask{Question: "Why hidden?", To: "ada", Context: []string{"The reviewer could not tell."}}
 	id := newBead("asked first")
-	seq, err := y.api.AddAsk(y.ctx, id, ask, "jo")
+	seq, err := y.api.AddAsk(y.ctx, id, words, "jo")
 	if err != nil {
 		t.Fatal(err)
 	}
 	y.toDecide(t, id)
-	if got, want := states(id), []string{"Hidden or deleted?: open"}; !slices.Equal(got, want) {
+	if got, want := states(id), []string{"Why hidden?: open"}; !slices.Equal(got, want) {
 		t.Fatalf("an ask open on arrival: %q, want only %q", got, want)
 	}
-	if err := y.api.AddAnswer(y.ctx, id, store.Answer{Ask: seq, Option: 1}, "ada"); err != nil {
+	if err := y.api.AddAnswer(y.ctx, id, store.Answer{Ask: seq, Words: "the docs say hidden"}, "ada"); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := states(id), []string{"Hidden or deleted?: answered"}; !slices.Equal(got, want) {
+	if got, want := states(id), []string{"Why hidden?: answered"}; !slices.Equal(got, want) {
 		t.Fatalf("the ask answered: %q, want %q: the card is not put back", got, want)
 	}
 
 	// An ask put aside still stands, and returns: no card beside it either.
 	id = newBead("put aside")
-	seq, err = y.api.AddAsk(y.ctx, id, ask, "jo")
+	seq, err = y.api.AddAsk(y.ctx, id, words, "jo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1348,8 +1411,54 @@ func TestStageAskMovesYieldToAHandAsk(t *testing.T) {
 		t.Fatal(err)
 	}
 	y.toDecide(t, id)
-	if got, want := states(id), []string{"Hidden or deleted?: put aside"}; !slices.Equal(got, want) {
+	if got, want := states(id), []string{"Why hidden?: put aside"}; !slices.Equal(got, want) {
 		t.Fatalf("an ask put aside on arrival: %q, want only %q", got, want)
+	}
+
+	// Two questions stand: the card cannot say which it takes over, so neither
+	// is taken and both stand, as they always did.
+	id = newBead("asked twice")
+	for _, a := range []store.Ask{words, ask} {
+		if _, err := y.api.AddAsk(y.ctx, id, a, "jo"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	y.toDecide(t, id)
+	if got, want := states(id), []string{"Why hidden?: open", "Hidden or deleted?: open"}; !slices.Equal(got, want) {
+		t.Fatalf("two asks open on arrival: %q, want only %q", got, want)
+	}
+
+	// The one question of options that stands on arrival is taken over by the
+	// card of moves, which quotes it (askmoves.go) since it named no moves: the
+	// question is taken back naming the card, so the person is asked once and
+	// nothing stays answerable for whoever works the bead next.
+	id = newBead("asked options")
+	seq, err = y.api.AddAsk(y.ctx, id, ask, "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	y.toDecide(t, id)
+	taken := stageAsks(t, y.api, id)
+	if len(taken) != 2 || taken[0].State != store.AskTakenBack || taken[1].State != store.AskOpen || !taken[1].Ask.Moves {
+		t.Fatalf("a question of options on arrival: %+v, want it taken back and the card of moves open", taken)
+	}
+	if lines := strings.Join(taken[0].Lines(), "\n"); !strings.Contains(lines, fmt.Sprintf("taken back by yard: ask %d is the question now, with its options", taken[1].Note.Seq)) {
+		t.Fatalf("the question reads:\n%s", lines)
+	}
+	wantContext := []string{
+		"Bead: " + id + " — asked options (branch yard/" + id + ")",
+		"The question: Hidden or deleted?",
+		"The reviewer could not tell.",
+		"1. Hidden - the docs say hidden",
+		"2. Deleted - the docs say deleted",
+		"The bead waits for a person; the options are the moves of this stage.",
+	}
+	if got := taken[1].Ask.Context; !slices.Equal(got, wantContext) {
+		t.Fatalf("the card quotes\n%q\nwant\n%q", got, wantContext)
+	}
+	if err := y.api.AddAnswer(y.ctx, id, store.Answer{Ask: seq, Option: 1}, "ada"); err == nil ||
+		!strings.Contains(err.Error(), "is asked no more") {
+		t.Fatalf("a pick on the question the card took over: %v", err)
 	}
 
 	// An ask put after the card takes the card back, naming the ask.
@@ -1406,4 +1515,12 @@ func TestStageAskMovesYieldToAHandAsk(t *testing.T) {
 	if open != 2 {
 		t.Fatalf("review's choice cards open beside a hand ask = %d, want both members'", open)
 	}
+	t.Run("named moves", func(t *testing.T) {
+		t.Parallel()
+		askMovesTakeOverTheQuestion(t)
+	})
+	t.Run("file-time validation", func(t *testing.T) {
+		t.Parallel()
+		askMovesRefusals(t)
+	})
 }

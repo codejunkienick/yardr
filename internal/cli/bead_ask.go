@@ -14,7 +14,7 @@ import (
 
 func (a *app) newBeadAskCmd() *cobra.Command {
 	var askTo, askWhy string
-	var askContext, askOptions, askAbout []string
+	var askContext, askOptions, askMoves, askAbout []string
 	var askRecommend int
 	var askNew bool
 	var askBead store.NewBead
@@ -92,6 +92,17 @@ on every option, so the card is never empty; both are refused without.
 --to defaults to the yard's operator. --recommend names an option's
 number with --why saying why in a line; without them no option is
 marked.
+
+--move <name>, one for each --option in the order written or none, is for a
+question that goes to decide with its bead (yardr bead done <id> --outcome
+question): where picking that option sends the bead, a name decide's card of
+moves offers from the stage the bead is in (a mistyped one is refused here,
+with what is offered). At decide the question becomes the card: its options,
+each moving the bead as named, the recommended one marked, and the pick
+reaches whoever works the bead next as the option picked. With no --move the
+card of moves quotes the question and its options instead. Either way the
+question is taken back when the card is put. --move names no prose, so it
+goes beside - with the labeled lines.
 
 --to <person>@<peer> asks a person of a linked yard: the ask is stored on
 the bead as any ask, and queued for the peer's yard in the same write,
@@ -398,6 +409,12 @@ what the person asked does, and this is the asker's own.`,
   O: After Friday: keep the old source until the release is out
   W: the test passed; waiting only risks Friday's rush
   ASK
+  yardr bead ask yardr-n8ta - --move new --move backlog <<'ASK'
+  Q: Ship it, or drop it?
+  C: The export ignores the locale setting.
+  O: Ship it: the bead goes back to build as it is
+  O: Drop it: the bead goes back to backlog
+  ASK
   yardr bead ask yardr-n8ta - --to mckean@airy <<'ASK'
   Q: Move them now?
   C: The links file declares the new source.
@@ -638,7 +655,7 @@ what the person asked does, and this is the asker's own.`,
 			}
 			q := store.Ask{
 				Question: question, To: who, Context: askContext,
-				Options: options, Recommend: askRecommend, Why: askWhy, About: askAbout,
+				Options: options, Move: askMoves, Recommend: askRecommend, Why: askWhy, About: askAbout,
 			}
 			if c.Flags().Changed("secret") {
 				q.Secret = &store.AskSecret{Source: askSecret, Env: askEnv, User: askForUser, Crew: askForCrew, As: askAs}
@@ -833,6 +850,7 @@ what the person asked does, and this is the asker's own.`,
 	ask.Flags().StringVar(&askTo, "to", "", "who must answer (default the yard's operator)")
 	ask.Flags().StringArrayVar(&askContext, "context", nil, "what the question is about, a line (repeatable; write two to five, at least one; C: on stdin)")
 	ask.Flags().StringArrayVar(&askOptions, "option", nil, "an option as \"<label>: <consequence>\" (repeatable; none wants words; O: on stdin)")
+	ask.Flags().StringArrayVar(&askMoves, "move", nil, "where picking an option sends the bead at decide, one for each --option in the order written or none (repeatable)")
 	ask.Flags().IntVar(&askRecommend, "recommend", 0, "the recommended option's number, with --why")
 	ask.Flags().StringVar(&askWhy, "why", "", "why the recommended option, in a line (W: on stdin)")
 	ask.Flags().StringSliceVar(&askAbout, "about", nil, "the other beads the question is about")

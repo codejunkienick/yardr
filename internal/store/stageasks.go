@@ -191,7 +191,7 @@ func (t *AskTemplate) stageAsk(to, stage string, entry uint64) Ask {
 			move = append(move, o.fires())
 		}
 		return Ask{Question: t.Question, To: to, Context: context, Options: options,
-			Recommend: t.Recommend, Why: t.Why, Stage: stage, Move: move, Entry: entry,
+			Recommend: t.Recommend, Why: t.Why, About: t.about, Stage: stage, Move: move, Entry: entry,
 			Moves: t.Kind == AskMoves, Head: t.askHead()}
 	case AskCheck:
 		done := fmt.Sprintf("the bead leaves %s (outcome %s)", stage, t.Move)
@@ -350,6 +350,7 @@ func (t *AskTemplate) framed(row *beadRow, notes []Note, questionBy string, dir 
 		}
 	}
 	card.Context = append(card.Context, quote...)
+	card.Context = append(card.Context, t.quote...)
 	// A card that offers the yes to a head shows the head the bead tracks
 	// now, and freezes it with the card (stagehead.go).
 	if t.Accepts != "" {
@@ -374,7 +375,11 @@ func (t *AskTemplate) framed(row *beadRow, notes []Note, questionBy string, dir 
 // broken template puts no ask and logs one event naming the stage and the
 // error; a stage without a template, or one no manual group works, puts
 // nothing. A local user's ask follows their configured peer reach, as any
-// ask for a user of the yard does.
+// ask for a user of the yard does. A card of moves takes over the one
+// question of options that stands on the bead (handQuestion, absorb): the
+// question's own options are the card's where they named their moves, else
+// the stage's card quotes them, and the question is taken back once the cards
+// are put.
 func (w *wtx) putStageAsks(row *beadRow, stage string, entry uint64, f *Flow, tmpl *AskTemplate, broken error) error {
 	if broken != nil {
 		return w.event(row.UUID, badTemplateEvent, stageAskAuthor, map[string]any{
@@ -399,15 +404,17 @@ func (w *wtx) putStageAsks(row *beadRow, stage string, entry uint64, f *Flow, tm
 			return nil
 		}
 	}
-	// A card of moves is for a bead nobody has asked about. Where a hand
-	// ask stands, that question is what the person is asked, and the bead is
+	// A card of moves is for a bead nobody has asked about, or whose one
+	// question of options it takes over (askmoves.go). Where another hand ask
+	// stands, that question is what the person is asked, and the bead is
 	// moved by hand once it is answered: a card of moves beside it would put
 	// two on one bead for one decision. withdrawMoves keeps the same when
 	// the ask comes after the card.
-	if tmpl.Kind == AskMoves && handAskStands(notes) {
-		return nil
-	}
+	var question *ResolvedAsk
 	if tmpl.Kind == AskMoves {
+		if question = handQuestion(notes); question == nil && handAskStands(notes) {
+			return nil
+		}
 		back, err := askingStage(w.Tx, row.UUID, stage, f)
 		if err != nil {
 			return err
@@ -436,6 +443,15 @@ func (w *wtx) putStageAsks(row *beadRow, stage string, entry uint64, f *Flow, tm
 			return err
 		}
 	}
+	// A card that is the question's own says what the asker wrote and no
+	// more: the quote of a note and the finish line are of a bead nobody asked
+	// about.
+	if question != nil {
+		var own bool
+		if tmpl, own = absorb(tmpl, question.Ask); own {
+			notes, questionBy = nil, ""
+		}
+	}
 	card := tmpl.framed(row, notes, questionBy, depot.IsDir())
 	got := 0
 	for _, member := range g.Members {
@@ -460,16 +476,23 @@ func (w *wtx) putStageAsks(row *beadRow, stage string, entry uint64, f *Flow, tm
 		}
 		got++
 	}
-	if got > 0 {
+	if got == 0 {
+		operator, err := operatorIn(w.Tx)
+		if err != nil || operator == "" {
+			return err
+		}
+		ask := card.stageAsk(operator, stage, entry)
+		ask.Fallback = true
+		if err := w.putLocalStageAsk(row, ask); err != nil {
+			return err
+		}
+	}
+	// The question the cards took over is theirs now, and answerable once,
+	// there.
+	if question == nil {
 		return nil
 	}
-	operator, err := operatorIn(w.Tx)
-	if err != nil || operator == "" {
-		return err
-	}
-	ask := card.stageAsk(operator, stage, entry)
-	ask.Fallback = true
-	return w.putLocalStageAsk(row, ask)
+	return w.consumeQuestion(row, question.Note.Seq, stage, entry)
 }
 
 // putLocalStageAsk puts ask in the local user's queue and, as any ask for a
@@ -559,11 +582,20 @@ func (w *wtx) putRemoteAsk(row *beadRow, tmpl *AskTemplate, stage string, entry 
 func (w *wtx) queueStageAskPeer(row *beadRow, ask Ask, n *Note, p *Peer, name string) (*PeerOut, error) {
 	sent := ask
 	sent.To = name + "@" + p.Name
+	// A peer needs about-bead titles and stages to render the related beads.
+	about := make([]peerAskBead, 0, len(ask.About))
+	for _, handle := range ask.About {
+		other, err := w.loadBead(handle)
+		if err != nil {
+			return nil, fmt.Errorf("about: %w", err)
+		}
+		about = append(about, peerAskBead{ID: other.ID, Title: other.Title, Stage: other.Stage})
+	}
 	body, err := json.Marshal(peerAsk{
 		V: PeerAskVersion, To: name, From: stageAskAuthor,
 		Bead: row.ID, Title: row.Title, Topic: topicOf(row.Bead), Stage: row.Stage,
 		Labels: row.Labels, Body: cutNote(row.Body),
-		Seq: n.Seq, Since: n.At, Ask: sent,
+		Seq: n.Seq, Since: n.At, Ask: sent, About: about,
 	})
 	if err != nil {
 		return nil, err
@@ -630,19 +662,26 @@ func (w *wtx) takeBackStage(row *beadRow, reason string, match func(Ask) bool) e
 		if r.AskErr != nil || !match(r.Ask) || (r.State != AskOpen && r.State != AskAside) {
 			continue
 		}
-		ans := Answer{Ask: r.Note.Seq, Words: reason, TakeBack: true}
-		text, err := json.Marshal(ans)
-		if err != nil {
-			return err
-		}
-		if _, err = w.addNoted(row, NoteAnswer, string(text), stageAskAuthor); err != nil {
-			return err
-		}
-		if err := w.settleCopies(row, ans, nil, ""); err != nil {
+		if err := w.yardTakesBack(row, r.Note.Seq, reason); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// yardTakesBack ends the ask seq on the bead row as asked no more, in the
+// same write, authored yard with reason, and tells the other yards the ask
+// also stands in.
+func (w *wtx) yardTakesBack(row *beadRow, seq uint64, reason string) error {
+	ans := Answer{Ask: seq, Words: reason, TakeBack: true}
+	text, err := json.Marshal(ans)
+	if err != nil {
+		return err
+	}
+	if _, err = w.addNoted(row, NoteAnswer, string(text), stageAskAuthor); err != nil {
+		return err
+	}
+	return w.settleCopies(row, ans, nil, "")
 }
 
 // latestStayEntry is the seq of the event that entered the bead into its

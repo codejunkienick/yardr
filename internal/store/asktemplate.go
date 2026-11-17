@@ -84,6 +84,12 @@ type AskTemplate struct {
 	// by framed from the bead the card is for: a copy's own value, never the
 	// stage file's.
 	head string
+	// about and quote are the yard's own, set on a copy by absorb for a card
+	// that takes over a question (askmoves.go), never by the stage file: the
+	// beads the question is about, which the card carries, and the question
+	// and its options as lines, which framed puts in the context.
+	about []string
+	quote []string
 	// askLine is the ## Ask line, moveLine the move: line (0 for the
 	// default) and acceptsLine the accepts: line, all 1-based: where an
 	// error about them points.

@@ -725,17 +725,44 @@ web view), as the `summary:` line already is. A section that is present must
 parse fully; `yardr flow show` reports a broken one beside its file, as it
 warns of stray files.
 
-A `moves` card is for a bead nobody has asked about. Where an ask that
-someone put is open or put aside on the bead when it arrives, no card is put:
-that question is what the person is asked, and the bead is moved by hand once
-it is answered. A card that stands is taken back, in the write that puts an
-ask on the bead, authored `yard` with the number of the ask that is on the
-bead now. A card taken back is not put back when the ask is answered. No other
-kind of template gives way to an ask. Which stages get a card is the stage
-file's to say, as for any template, so a people stage without the section
-behaves as it did: `backlog` and the sidings, where beads wait by design, ask
-nothing. Depot yardr's own `decide` stages, in its default and train flows,
-and the design pack's carry one; the starter pack's does not.
+A `moves` card is for a bead nobody has asked about, or whose one question of
+options it takes over (below). Where another ask that someone put is open or
+put aside on the bead when it arrives, no card is put: that question is what
+the person is asked, and the bead is moved by hand once it is answered. A card
+that stands is taken back, in the write that puts an ask on the bead, authored
+`yard` with the number of the ask that is on the bead now. A card taken back is
+not put back when the ask is answered. No other kind of template gives way to
+an ask. Which stages get a card is the stage file's to say, as for any
+template, so a people stage without the section behaves as it did: `backlog`
+and the sidings, where beads wait by design, ask nothing. Depot yardr's own
+`decide` stages, in its default and train flows, and the design pack's carry
+one; the starter pack's does not.
+
+A bead's agent that sends its bead to decide with a question of options says,
+with `yardr bead ask --move <name>` beside each `--option`, where picking that
+option sends the bead: a stage or an outcome the card of moves offers from the
+stage the bead is in (the stage that asked is among them), for every option or
+for none. It is checked when the ask is filed, against the flow, and refused
+with what the stage offers. When the bead arrives in a stage with a `moves`
+card and that question is the only ask standing on it, open or put aside, the
+question becomes the card. Where every option named a move the stage still
+offers, the card is the question's own: its question, context, options with the
+recommendation marked and about-beads, each option firing its move, with no
+`You decide` and no move of the stage appended, one card for each person of the
+stage as every card is. Each option's consequence is the asker's words followed
+by the yard's own for the move, in parentheses, so that a label cannot hide
+where its pick sends the bead. The pick is recorded as the option picked, with
+the person's words beside it, and is what whoever works the bead next reads. Where
+it named none, or a move is no longer offered (the bead was moved there by
+hand, so the stage that asked is no way back; the card says which), the card is
+the stage's card of moves with the question, its context and its numbered
+options, the recommendation marked, quoted in its lines. Either way the
+question is taken back in the same write, authored `yard`, naming the card, so
+that nothing stays answerable on the bead; it is answered once, on the card. An
+ask that wants words, a secret, a command, a setup or a depot-push, and a bead
+with two asks standing, are not taken over and keep the rule above. The moves on
+an ask move nothing by themselves: the question answered anywhere else records
+the pick, as an ask always did, and `--new` takes none.
 
 Every entry into a manual stage with a template puts one ask per
 user-member of the stage's group, authored `yard`, in the move's write: a

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -88,6 +89,10 @@ func TestBeadAsk(t *testing.T) {
 		t.Fatalf("ask --json = %q (%v)", out, err)
 	}
 	t.Run("stdin", testBeadAskStdin)
+	t.Run("moves", func(t *testing.T) {
+		t.Parallel()
+		testBeadAskMove(t)
+	})
 }
 
 // bead ask refuses an ask with no context, an option with no consequence,
@@ -116,6 +121,77 @@ func TestBeadAskRefusals(t *testing.T) {
 	}
 	if notes, _ := st.Notes(context.Background(), id); len(notes) != 0 {
 		t.Fatalf("a refused ask left notes: %+v", notes)
+	}
+}
+
+// bead ask --move says, beside each --option, where picking it sends the bead
+// at decide: carried to the store in the order written, with the options on
+// the flags or the labeled lines on stdin (it names no prose, so it goes
+// beside -), and refused with what decide offers when a name is not one it
+// does, with a count that is neither all nor none, and with --new.
+func testBeadAskMove(t *testing.T) {
+	t.Helper()
+	st, ctx, _ := askYard(t)
+	flow, err := store.ParseFlow("new -> review on done | decide on question\nreview -> merged\ndecide -> new | backlog\nbacklog -> new\nmerged terminal\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow.Name = "asked"
+	if _, err := st.PutFlow(ctx, *flow, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := st.CreateBead(ctx, store.NewBead{Title: "pinned work", Metadata: map[string]any{"flow": "asked"}}, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &app{st: st, actor: "yardmaster"}
+	moves := func() [][]string {
+		t.Helper()
+		notes, err := st.Notes(ctx, b.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out [][]string
+		for _, n := range notes {
+			ask, err := store.ParseAsk(n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, ask.Move)
+		}
+		return out
+	}
+
+	c := a.beadCmd()
+	c.SetIn(strings.NewReader("Q: Ship it, or drop it?\nC: the locale is ignored.\nO: Ship it: goes on\nO: Drop it: goes away\n"))
+	if _, err := run(t, c, "ask", b.ID, "-", "--move", "new", "--move", "backlog"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, a.beadCmd(), "ask", b.ID, "Which?", "--context", "why.", "--option", "A: one", "--option", "B: two",
+		"--move", "backlog", "--move", "new"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := moves(), [][]string{{"new", "backlog"}, {"backlog", "new"}}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("the moves stored = %q, want %q", got, want)
+	}
+
+	two := []string{"ask", b.ID, "Which?", "--context", "why.", "--option", "A: one", "--option", "B: two"}
+	for _, c := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"a name decide does not offer", append(slices.Clone(two), "--move", "new", "--move", "siding"), `--move "siding" (option 2): stage decide offers new, backlog`},
+		{"one move of two", append(slices.Clone(two), "--move", "new"), "the ask has 2 options and 1 moves"},
+		{"a move with no option", []string{"ask", b.ID, "Which?", "--context", "why.", "--move", "new"}, "the ask has no --option"},
+		{"a move with --new", []string{"ask", "--new", "Which?", "--context", "why.", "--option", "A: one", "--move", "new"}, "--new makes the bead with the ask"},
+	} {
+		if _, err := run(t, a.beadCmd(), c.args...); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want %q", c.name, err, c.want)
+		}
+	}
+	if got := moves(); len(got) != 2 {
+		t.Fatalf("a refused ask left asks: %q", got)
 	}
 }
 

@@ -5,6 +5,8 @@
 // because every view renders an ask from its note alone.
 package store
 
+import "strings"
+
 // AskFile is one command file a run ask that adds a source carries: the
 // program as the declaration names it, its whole text, and the SHA-256 of
 // that text. The card renders the text's hash and the approval installs
@@ -70,4 +72,39 @@ type AskInventory struct {
 	Mode    string `json:"mode"`
 	Size    int64  `json:"size"`
 	Symlink bool   `json:"symlink,omitempty"`
+}
+
+// carriedLines renders what an adding ask carries, whole in a terminal
+// under the yard's sentences, deeper than any of them, for checking the
+// reading against the file; on a phone it is one tap behind.
+func carriedLines(carried []AskSource) []string {
+	var out []string
+	for _, c := range carried {
+		out = append(out, "  the declaration of source "+OneLine(c.Name)+", whole as carried:")
+		for _, line := range strings.Split(strings.TrimRight(c.Text, "\n"), "\n") {
+			out = append(out, "      "+NoteLetters(line))
+		}
+		for _, f := range c.Files {
+			out = append(out, "  the command file "+OneLine(f.Program)+" (sha256 "+OneLine(f.SHA256)+"), whole as carried:")
+			for _, line := range strings.Split(strings.TrimRight(f.Text, "\n"), "\n") {
+				out = append(out, "      "+NoteLetters(line))
+			}
+		}
+		for _, df := range c.Old {
+			out = append(out, "  the change to command file "+OneLine(df.Program)+" (sha256 "+OneLine(or(df.OldSHA256, "(none)"))+" -> "+OneLine(or(df.NewSHA256, "(none)"))+"), whole as carried:")
+			for _, line := range strings.Split(strings.TrimRight(df.Diff, "\n"), "\n") {
+				out = append(out, "      "+NoteLetters(line))
+			}
+		}
+		for _, rem := range c.Removed {
+			if rem.Text == "" {
+				continue
+			}
+			out = append(out, "  the entry "+OneLine(rem.Path)+" the copy would remove (sha256 "+OneLine(rem.SHA256)+"), whole as carried:")
+			for _, line := range strings.Split(strings.TrimRight(rem.Text, "\n"), "\n") {
+				out = append(out, "      "+NoteLetters(line))
+			}
+		}
+	}
+	return out
 }
