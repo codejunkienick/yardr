@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/spf13/pflag"
+
 	"yardr.dev/yardr/internal/pack"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
@@ -210,13 +212,100 @@ func TestDelegatedCommandWords(t *testing.T) {
 	}
 }
 
+// delegatedFlagRow says what a delegated pack apply does with one flag the
+// command registers: the road takes --depot and the mappings, which it hands
+// to the import, and refuses every other flag, naming it.
+type delegatedFlagRow struct {
+	name  string
+	words []string // the flag and a value for it
+	// taken is, for a flag the road takes, what the step that reads the flag
+	// says of this value, which that step refuses: its word comes back, and
+	// no refusal of the flag could say it. It is empty for a flag the road
+	// refuses.
+	taken string
+}
+
+// says is what a run that gives the flag alone is answered with.
+func (f delegatedFlagRow) says() string {
+	if f.taken != "" {
+		return f.taken
+	}
+	return "no other flag, not --" + f.name
+}
+
+// delegatedFlagRows classify every flag pack apply registers besides the
+// run's own (delegatedRunFlags), taken or refused. A flag pack apply gains
+// has no row until someone adds one: the test fails on it, and the road
+// refuses it meanwhile.
+var delegatedFlagRows = []delegatedFlagRow{
+	{"depot", []string{"--depot", "web"}, "is of kind source"},
+	{"flow", []string{"--flow", "main"}, "it has no flow (--flow main)"},
+	{"crew", []string{"--crew", "ada"}, `--crew "ada": want`},
+	{"group", []string{"--group", "ada"}, `--group "ada": want`},
+	{"bind", []string{"--bind", "ada"}, `--bind "ada": want`},
+	{"members", []string{"--members", "ada"}, `--members "ada": want`},
+	{"open-threads", []string{"--open-threads", "ada"}, `--open-threads "ada": want`},
+	{"calls", []string{"--calls", "ada"}, `--calls "ada": want`},
+	{"auth", []string{"--auth", "packs"}, ""},
+	{"depot-roles", []string{"--depot-roles"}, ""},
+	{"pack-roles", []string{"--pack-roles"}, ""},
+	{"source-env", []string{"--source-env", "telegram=telegram.env"}, ""},
+	{"source-base", []string{"--source-base", "telegram=eu"}, ""},
+	{"notify", []string{"--notify", "jo=telegram"}, ""},
+	{"yes", []string{"--yes"}, ""},
+	{"take", []string{"--take", "flow/telegram.default"}, ""},
+	{"sha256", []string{"--sha256", strings.Repeat("a", 64)}, ""},
+	{"prune", []string{"--prune"}, ""},
+}
+
 // A delegated pack apply from the CLI takes a pack yardr embeds with its
 // mappings alone: the yardmaster applies telegram for jo on her mail and
 // the record stands done; a directory, another flag, an unknown name and
 // a plan that asks each refuse, and a record left started reads as
-// unfinished.
+// unfinished. Every flag the command registers is taken or refused as
+// delegatedFlagRows say, on both roads, and one it gains is refused until
+// the road names it.
 func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 	t.Parallel()
+	// Every flag pack apply has, as the road meets it in c.Flags() with the
+	// root's persistent flags merged in, is a row or one of the run's own, and
+	// the rows and the road's lists name the same flags.
+	apply, _, err := (&app{}).rootCmd().Find([]string{"pack", "apply"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.ParseFlags(nil); err != nil {
+		t.Fatal(err)
+	}
+	runFlags := []string{"for", "mail", "home", "json", "actor"}
+	classes := map[string]string{}
+	for _, name := range runFlags {
+		classes[name] = "run"
+	}
+	var takenNames []string
+	for _, f := range delegatedFlagRows {
+		classes[f.name] = "refused"
+		if f.taken != "" {
+			classes[f.name] = "taken"
+			takenNames = append(takenNames, f.name)
+		}
+	}
+	apply.Flags().VisitAll(func(f *pflag.Flag) {
+		if classes[f.Name] == "" {
+			t.Errorf("pack apply has the flag --%s, which no row of delegatedFlagRows says a delegated run takes or refuses: add its row, and name it in delegatedPackFlags if the road takes it", f.Name)
+		}
+		delete(classes, f.Name)
+	})
+	for name := range classes {
+		t.Errorf("delegatedFlagRows or the run's flags name --%s, which pack apply no longer has", name)
+	}
+	if got, want := slices.Sorted(slices.Values(takenNames)), slices.Sorted(slices.Values(delegatedPackFlags)); !slices.Equal(got, want) {
+		t.Errorf("the rows say a delegated run takes %v, and delegatedPackFlags names %v", got, want)
+	}
+	if got, want := slices.Sorted(slices.Values(runFlags)), slices.Sorted(slices.Values(delegatedRunFlags)); !slices.Equal(got, want) {
+		t.Errorf("the run's own flags are %v, and delegatedRunFlags names %v", got, want)
+	}
+
 	// The delegated pack record id must cross the socket with each write,
 	// so exercise this command through the same RPC client the CLI uses.
 	// The store behind it stands with the reading of the packs yardr
@@ -299,16 +388,57 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 	if _, err := st.GetSource(ctx, "telegram"); err == nil {
 		t.Fatal("telegram was applied without a delegation")
 	}
-	for words, want := range map[string]string{
-		"pack apply telegram --yes":                               "no other flag, not --yes",
-		"pack apply telegram --take flow/telegram.default":        "no other flag, not --take",
-		"pack apply nosuchpack":                                   "embeds no pack of that name",
-		"pack apply " + t.TempDir():                               "applies a pack yardr embeds",
-		"pack apply telegram --sha256 " + strings.Repeat("a", 64): "no other flag, not --sha256",
-	} {
+	// Each flag of the command, given alone: the road reads one it takes, so
+	// the step that reads it answers, and names one it refuses. A long flag
+	// typed with one dash, as -take, is read as shorthands, which none has.
+	embedded := map[string]string{
+		"pack apply nosuchpack":                           "embeds no pack of that name",
+		"pack apply " + t.TempDir():                       "applies a pack yardr embeds",
+		"pack apply telegram -take flow/telegram.default": "unknown shorthand flag: 't' in -take",
+	}
+	for _, f := range delegatedFlagRows {
+		embedded["pack apply telegram "+strings.Join(f.words, " ")] = f.says()
+	}
+	for words, want := range embedded {
 		args := append(strings.Fields(words), "--for", "jo", "--mail", mail)
 		if out, err := as(t, st, "yardmaster", args...); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %q, %v; want %q", words, out, err, want)
+		}
+	}
+	// A refusal names what the road takes, from its list, so that what the
+	// yardmaster reads cannot fall behind it.
+	_, err = as(t, st, "yardmaster", "pack", "apply", "telegram", "--yes", "--for", "jo", "--mail", mail)
+	for _, name := range delegatedPackFlags {
+		if err == nil || !strings.Contains(err.Error(), "--"+name) {
+			t.Errorf("the refusal of --yes does not name --%s: %v", name, err)
+		}
+	}
+	// A flag pack apply gains later is refused until the road names it, in
+	// whichever spelling it is typed: the road reads the parsed flag, so the
+	// shorthand, the single-dash spelling, is the flag it stands for. The
+	// flags are added to the command as built, one root for each run, since
+	// a flag keeps what it was given.
+	for _, row := range []struct {
+		words []string
+		want  string
+	}{
+		{[]string{"--later", "x"}, "no other flag, not --later"},
+		{[]string{"--later=x"}, "no other flag, not --later"},
+		{[]string{"-s"}, "no other flag, not --sooner"},
+	} {
+		root := appOn(st).rootCmd()
+		gained, _, err := root.Find([]string{"pack", "apply"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		gained.Flags().String("later", "", "a flag pack apply gains")
+		gained.Flags().BoolP("sooner", "s", false, "another, with a shorthand")
+		args := append(append([]string{"pack", "apply", "telegram"}, row.words...), "--for", "jo", "--mail", mail, "--actor", "yardmaster")
+		if out, err := run(t, root, args...); err == nil || !strings.Contains(err.Error(), row.want) {
+			t.Errorf("a gained flag %v: %q, %v; want %q", row.words, out, err, row.want)
+		}
+		if _, err := st.GetSource(ctx, "telegram"); err == nil {
+			t.Fatalf("telegram was applied with a flag the road has no word on (%v)", row.words)
 		}
 	}
 	// The command applies a pack of the build it is, which the server's
@@ -424,17 +554,23 @@ func TestDelegatedPackApplyFromTheCLI(t *testing.T) {
 		a.packsOrigin = origin
 		return run(t, a.rootCmd(), append(args, "--for", "jo", "--mail", mail, "--actor", "yardmaster")...)
 	}
-	for words, want := range map[string]string{
+	repository := map[string]string{
 		"pack apply " + from: "applied pinned",
 		"pack apply " + strings.Replace(from, "yardr-packs", "other", 1) + " --sha256 " + pin: "is not in the packs repository",
 		"pack apply " + from + " --sha256 " + strings.Repeat("a", 64):                         "is not the one pinned",
-		"pack apply " + from + " --sha256 " + pin + " --yes":                                  "no other flag, not --yes",
-		"pack apply " + from + " --sha256 " + pin + " --take flow/pushover.default":           "no other flag, not --take",
-		"pack apply " + from + " --sha256 " + pin + " --auth packs":                           "no other flag, not --auth",
 		"pack apply " + origin + "pushover/roles/ --sha256 " + pin:                            "want one pack's name",
 		// A plan that still asks refuses whole, as an embedded one does.
 		"pack apply " + origin + "starter/ --sha256 sha256:" + starterPlan.Digest + " --depot web": "its plan asks",
-	} {
+	}
+	// Each flag of the command beside the pin, which this road takes and the
+	// rows above give: the pin is the one flag it takes more than an embedded
+	// pack's.
+	for _, f := range delegatedFlagRows {
+		if f.name != "sha256" {
+			repository["pack apply "+from+" --sha256 "+pin+" "+strings.Join(f.words, " ")] = f.says()
+		}
+	}
+	for words, want := range repository {
 		if out, err := asRepository(strings.Fields(words)...); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %q, %v; want %q", words, out, err, want)
 		}

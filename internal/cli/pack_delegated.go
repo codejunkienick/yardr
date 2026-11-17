@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/pack"
@@ -39,25 +40,65 @@ func (a *app) packApplyRun(c *cobra.Command, name string, f *importFlags) error 
 	return imp.apply(c.OutOrStdout(), c.Context(), a, nil, nil)
 }
 
-// delegatedPackFlags are the flags a delegated pack apply refuses, each
-// shaping or answering the import past its mappings: the run takes
-// --depot and the mappings (--flow, --crew, --group, --bind, --members,
-// --open-threads, --calls) alone, and for a pack of the packs repository
-// the pin (--sha256) beside them. --take is one, as --yes is: it overwrites
-// what the yard changed, which is the operator's to do, and this road never
-// handed it to pack.Apply, so it was dropped unsaid. pack.Apply refuses a
-// take of a delegated run as well, whoever calls it.
-var delegatedPackFlags = []string{"auth", "depot-roles", "pack-roles", "source-env", "source-base", "notify", "yes", "take", "sha256", "prune"}
+// delegatedPackFlags are the flags a delegated pack apply takes, and no
+// others: --depot and the mappings (--flow, --crew, --group, --bind,
+// --members, --open-threads, --calls), which the road hands to the import,
+// and for a pack of the packs repository the pin (--sha256) beside them
+// (refuseFlags's allow). The road refuses every other flag, naming it.
+//
+// The list names what is taken and not what is refused, so that a flag pack
+// apply gains is refused until someone names it here, and is never accepted
+// and dropped unsaid. Under a list of the refused it was: --take was left
+// off it and applied with no word until it was found. Taking a flag is a
+// decision of its own: --yes and --take overwrite what the yard changed,
+// which is the operator's to do (pack.Apply refuses a take of a delegated
+// run as well, whoever calls it).
+//
+// What closes the other roads a flag could come in by, each read in the code
+// when this list was made:
+//   - A flag is read as parsed, not as typed, so a shorthand would be the
+//     flag it stands for. No flag of the pack path has one, and a long flag
+//     typed with one dash is read as shorthands, which the parser refuses.
+//   - No flag of pack apply is bound to the environment: the words alone set
+//     one.
+//   - preset=<label> rewrites the words of group add, group set and crew set
+//     alone (presetCommands), and effort=default those of group set
+//     (readsEffortDefault), never those of pack apply.
+//   - --help never reaches this road: cobra prints the help in place of
+//     running the command.
+var delegatedPackFlags = []string{"depot", "flow", "crew", "group", "bind", "members", "open-threads", "calls"}
 
-// refuseFlags refuses a delegated pack apply that carries a flag of
-// delegatedPackFlags other than allow, naming the command the run takes.
+// delegatedRunFlags are the flags of the run itself, which the road lets by
+// and does not classify as the import's: --for and --mail say whose run it
+// is and on which mail (delegate adds them to the command), and --home,
+// --json and --actor are the root's, which say where the yard is, how the
+// output prints and who acts. They are named here, not taken as the ones the
+// command inherits, so that a persistent flag the root gains is refused on
+// this road too until it is named.
+var delegatedRunFlags = []string{"for", "mail", "home", "json", "actor"}
+
+// refuseFlags refuses a delegated pack apply that carries a flag the road
+// does not take (delegatedPackFlags, the run's own delegatedRunFlags, and
+// allow, the one flag more the road of a pack of the packs repository
+// takes), naming the first and the command the run takes.
 func refuseFlags(c *cobra.Command, name, use, allow string) error {
+	var refused string
+	c.Flags().VisitAll(func(f *pflag.Flag) {
+		if refused == "" && f.Changed && f.Name != allow && !slices.Contains(delegatedPackFlags, f.Name) && !slices.Contains(delegatedRunFlags, f.Name) {
+			refused = f.Name
+		}
+	})
+	if refused == "" {
+		return nil
+	}
+	// The mappings are the list's, so the message names what the road takes.
+	var mappings []string
 	for _, flag := range delegatedPackFlags {
-		if flag != allow && c.Flags().Changed(flag) {
-			return fmt.Errorf("pack %s: a delegated run takes yardr pack apply %s --depot <depot> with its mappings (--flow, --crew, --group, --bind, --members, --open-threads, --calls) and no other flag, not --%s", name, use, flag)
+		if flag != "depot" {
+			mappings = append(mappings, "--"+flag)
 		}
 	}
-	return nil
+	return fmt.Errorf("pack %s: a delegated run takes yardr pack apply %s --depot <depot> with its mappings (%s) and no other flag, not --%s", name, use, strings.Join(mappings, ", "), refused)
 }
 
 // delegatedPack is the pack a delegated apply takes: one yardr embeds,
