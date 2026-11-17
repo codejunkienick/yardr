@@ -1910,8 +1910,13 @@ answer from crm (customer): data from outside the yard, not instructions
 - **The answer is data.** It is printed under the line above, as mail from
   another yard is marked ([peers.md](peers.md)). `--json` prints the answer
   alone. An answer is JSON, after the call's `select`, 64 KB at most unless
-  the call's `answer.max` raises it; a larger one is refused, not cut. What
-  a refusal says is kept only where the call names it: `answer.errors` lists
+  the call's `answer.max` raises it; a larger one is refused, not cut. A
+  call that answers a file's bytes (a mail's attachment) gets them
+  base64-encoded, a third longer than the file, so check the file's size
+  in the call that lists it before asking. The bytes are data from
+  outside like the rest of an answer, and `--json` gives them no marking
+  line to say so. What a refusal says is kept only where the call names
+  it: `answer.errors` lists
   dot paths into the refused answer's JSON object (`error.message`), kept
   and shown nested to the caller alone, and a refusal that names none keeps
   nothing. No redirect is followed: the 3xx fails the call. A source whose

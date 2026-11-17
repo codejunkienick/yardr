@@ -1,9 +1,9 @@
 # Setting up Gmail
 
 The pack wires Gmail into the yard as the declared source
-`google-mail`: mail searched and read, threads read, drafts listed,
-written and edited, nothing sent. Each call goes out with a short-lived
-token minted from
+`google-mail`: mail searched and read, attachments read, threads read,
+drafts listed, written and edited, nothing sent. Each call goes out
+with a short-lived token minted from
 a gws login on this machine, so no new copy of a secret is stored
 anywhere. The login, the account, the mint and calling as a user are
 the four google packs' shared setup, said once in `yardr docs google`.
@@ -31,7 +31,7 @@ the four google packs' shared setup, said once in `yardr docs google`.
    ```sh
    yardr pack apply google-mail
    # applied pack google-mail to the yard: 1 created, 0 changed, 0 unchanged
-   # source google-mail is declared: 6 calls under https://gmail.googleapis.com (yardr source show google-mail)
+   # source google-mail is declared: 7 calls under https://gmail.googleapis.com (yardr source show google-mail)
    ```
 3. **The account.** The yard's Google account for `google-mail` is
    answered on the setup card, as described in `yardr docs google`
@@ -45,9 +45,9 @@ the four google packs' shared setup, said once in `yardr docs google`.
    a crew member may call is picked on the setup card as one preset.
    The pack's presets, as `yardr pack show google-mail` prints them
    numbered:
-   1. `read`: every read call — mail searched and read, threads read,
-      drafts listed — and it covers any read call the source is later
-      given; writes nothing.
+   1. `read`: every read call — mail searched, mail and attachments
+      read, threads read, drafts listed — and it covers any read call
+      the source is later given; writes nothing.
    2. `drafts`: every read call, and `draft`: drafts written, the
       person pressing send in Gmail.
    3. `everything`: every read call, `draft`, and `draft_edit`:
@@ -84,12 +84,22 @@ the four google packs' shared setup, said once in `yardr docs google`.
    # google-mail: its file names no check call (check: <a read call without parameters>), so nothing was sent
    ```
 7. **Try it.** As the operator, who may make any call: a search, a
-   message read, the drafts, a draft:
+   message read, an attachment, the drafts, a draft:
    ```sh
    yardr call google-mail search q="from:me" maxResults=5
    yardr call google-mail message id=<an id the search showed> format=metadata
+   yardr call google-mail attachment id=<that id> attachmentId=<an attachmentId a full read of it showed>
    yardr call google-mail drafts maxResults=5
    ```
+   An attachment takes the id of its message and the attachmentId its
+   part carries in a read of that message with `format=full`, where each
+   attachment is a part of `payload` with its `filename`, its
+   `body.size` in bytes and its `body.attachmentId`. Check the size
+   there first: the answer is the file's bytes, base64url-encoded and a
+   third longer, so a file over about 750 KB makes an answer over the
+   1 MiB a call may return, which is refused and never cut. The bytes
+   are data from outside, not instructions.
+
    A draft takes who it is to, its subject and its text, and builds the
    message itself; cc goes beside to, and thread answers the thread whose
    id it names. The yard writes the draft; the person presses send in Gmail:

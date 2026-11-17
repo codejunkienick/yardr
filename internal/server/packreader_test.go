@@ -447,7 +447,7 @@ func TestPackApplyGoogleCardsFit(t *testing.T) {
 		sources []string
 		lines   int
 	}{
-		{"google-mail", []string{"google-mail"}, 17},
+		{"google-mail", []string{"google-mail"}, 19},
 		{"google-drive", []string{"google-drive"}, 24},
 		{"google-docs", []string{"google-docs", "google-slides"}, 32},
 		{"google-calendar", []string{"google-calendar"}, 16},
