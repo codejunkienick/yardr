@@ -214,6 +214,12 @@ func (w *wtx) deliver(e *Event) error {
 			}
 		}
 	}
+	// A run ask gone stale tells its asker, as an answer does.
+	if e.Kind == "ask_stale" {
+		if err := w.deliverAskStale(e, row, out, told); err != nil {
+			return err
+		}
+	}
 	if len(out) > 0 {
 		e.Data["deliveries"] = out
 	}

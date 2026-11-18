@@ -292,6 +292,13 @@ func (w *wtx) putSource(d *source.Declaration, text, actor string, by *approvedO
 	if err := w.event("", "source_added", actor, data); err != nil {
 		return nil, err
 	}
+	var before *Source
+	if replaced {
+		before = &was
+	}
+	if err := w.tellSourceStale(d.Name, before, &src, actor); err != nil {
+		return nil, err
+	}
 	return &src, nil
 }
 
@@ -437,6 +444,7 @@ func (w *wtx) setSource(ctx context.Context, name, key, value string, perHour in
 	if err != nil {
 		return nil, err
 	}
+	before := *src
 	if key == SourceBase || key == SourceHost {
 		d, err := src.Declaration()
 		if err != nil {
@@ -488,7 +496,13 @@ func (w *wtx) setSource(ctx context.Context, name, key, value string, perHour in
 	if by != nil {
 		data["approved"] = by
 	}
-	return src, w.event("", "source_set", actor, data)
+	if err := w.event("", "source_set", actor, data); err != nil {
+		return nil, err
+	}
+	if err := w.tellSourceStale(name, &before, src, actor); err != nil {
+		return nil, err
+	}
+	return src, nil
 }
 
 // sourceSetCheck is the check SetSource makes inside the write. A run
@@ -861,6 +875,7 @@ func (w *wtx) keySource(ctx context.Context, home, name string, values map[strin
 	if err := checkURLCredential(d, name, values); err != nil {
 		return err
 	}
+	before := *src
 	file := src.EnvFile
 	setFile := file == ""
 	if setFile {
@@ -883,6 +898,9 @@ func (w *wtx) keySource(ctx context.Context, home, name string, values map[strin
 		if err := w.event("", "source_set", actor, map[string]any{"source": name, SourceEnvFile: file}); err != nil {
 			return err
 		}
+	}
+	if err := w.tellSourceStale(name, &before, src, actor); err != nil {
+		return err
 	}
 	k.src, k.names = src, names
 	resolved, renamed, err := WriteEnvFile(file, values)
@@ -916,7 +934,10 @@ func (w *wtx) deleteSource(ctx context.Context, name, actor string, by *approved
 	if err := w.may(ctx, actor, ActRemoveSource, Object{Kind: KindSource, Name: name}); err != nil {
 		return err
 	}
-	if w.Bucket(bSources).Get([]byte(name)) == nil {
+	var before Source
+	if ok, err := get(w.Tx, bSources, name, &before); err != nil {
+		return err
+	} else if !ok {
 		return fmt.Errorf("source %s: %w", name, ErrNotFound)
 	}
 	if err := w.Bucket(bSources).Delete([]byte(name)); err != nil {
@@ -929,5 +950,8 @@ func (w *wtx) deleteSource(ctx context.Context, name, actor string, by *approved
 	if by != nil {
 		data["approved"] = by
 	}
-	return w.event("", "source_removed", actor, data)
+	if err := w.event("", "source_removed", actor, data); err != nil {
+		return err
+	}
+	return w.tellSourceStale(name, &before, nil, actor)
 }
