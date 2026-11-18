@@ -24,7 +24,20 @@ type packFileWant struct {
 	kind, name, action string
 	oldSHA, newSHA     string
 	diff, text         string
+	// heading and shown are what the page draws for the name and for the
+	// text where the pack's writer put marks of direction or control
+	// characters in them: letters, the name on one line. Empty where the
+	// page draws the pack's own words.
+	heading, shown string
 }
+
+// trojanName and trojanText are words a pack's writer can write to make a
+// page draw them in another order: a mark that turns the direction of text
+// around, an isolate, an escape, a line separator and a line break.
+const (
+	trojanName = "roles/07\u202e\u2066.md\x1b[31m\u2028\nx.md"
+	trojanText = "evil\u202e\x1b[31m.txt\u2028\n"
+)
 
 // The source starter adds: a declaration and the one command file it names.
 const (
@@ -58,6 +71,10 @@ func starterReading() (*store.PackReading, []packFileWant) {
 		case 5:
 			w.text = "<b>bold</b> & \"quoted\" <script>alert(1)</script>\n" + text
 			w.newSHA = hexSum(w.text)
+		case 7:
+			w.name, w.heading = trojanName, "roles/07.md[31m x.md"
+			w.text = trojanText + text
+			w.newSHA, w.shown = hexSum(w.text), store.NoteLetters(w.text)
 		}
 		plan.Objects = append(plan.Objects, store.AskPlanObject{Kind: "file", Name: w.name, Action: w.action,
 			FileOldSHA: w.oldSHA, FileNewSHA: w.newSHA, Text: w.text, Diff: diff})
@@ -160,7 +177,8 @@ func TestPackFilePages(t *testing.T) {
 		t.Errorf("the card has %d links, want a line each for %d files and the first page", got, len(files)-folded)
 	}
 	for i, f := range files {
-		link := `<a class="opens" href="` + base + strconv.Itoa(i+1) + `">file ` + f.Name + `: `
+		// A file's line names it as letters, as its page does.
+		link := `<a class="opens" href="` + base + strconv.Itoa(i+1) + `">file ` + store.OneLine(f.Name) + `: `
 		if has := strings.Contains(card, link); has != (f.Line >= 0) {
 			t.Errorf("file %s (line %d): the card's link stands %v", f.Name, f.Line, has)
 		}
@@ -178,9 +196,10 @@ func TestPackFilePages(t *testing.T) {
 		}
 		body := r.body
 		blocks := preBlocks(body)
-		wantBlocks := []string{w.text}
+		text := or(w.shown, w.text)
+		wantBlocks := []string{text}
 		if w.diff != "" {
-			wantBlocks = []string{w.diff, w.text}
+			wantBlocks = []string{w.diff, text}
 		}
 		if len(blocks) != len(wantBlocks) {
 			t.Fatalf("file %d (%s): %d text blocks, want %d", n, w.name, len(blocks), len(wantBlocks))
@@ -199,7 +218,7 @@ func TestPackFilePages(t *testing.T) {
 			t.Errorf("file %d (%s): markup in the text is not written as text", n, w.name)
 		}
 		for _, want := range []string{
-			"<h2>" + html.EscapeString(w.name) + "</h2>",
+			"<h2>" + html.EscapeString(or(w.heading, w.name)) + "</h2>",
 			fmt.Sprintf("file %d of %d", n, len(wants)),
 			", digest sha256:" + strings.Repeat("d", 64) + "</dd>",
 			`<a class="bead" href="/beads/` + b.ID + `">`,
@@ -262,6 +281,24 @@ func TestPackFilePages(t *testing.T) {
 		page.Text != w.text || page.Bytes != len(w.text) || page.Insertions != 1 || page.Deletions != 1 ||
 		page.Digest != strings.Repeat("d", 64) || page.Prev != base+"3" || page.Next != base+"5" || page.Card != "/beads/"+b.ID {
 		t.Errorf("JSON of file 4 = %+v", page)
+	}
+
+	// A pack's writer can put marks of direction and control characters in
+	// a file's name, as in its text (yardr-f3x6). The heading is checked in
+	// the loop above; the JSON, the page's value, carries the name as
+	// letters on one line, and no such character stands anywhere on the
+	// page, so nothing the name draws can be reordered.
+	var trojan web.PackFilePage
+	r = jwtGet(t, y.ts, base+"8", web.DefaultJWTHeader, jo, "Accept", "application/json")
+	if err := json.Unmarshal([]byte(r.body), &trojan); err != nil || r.status != http.StatusOK ||
+		trojan.Name != wants[7].heading || trojan.Text != wants[7].shown {
+		t.Errorf("JSON of file 8 = %+v (%d, %v), want the name %q and the text as letters", trojan, r.status, err, wants[7].heading)
+	}
+	trojanPage := y.getNoFollow(base+"8", jo).body
+	for _, mark := range []rune{'‮', '⁦', '\x1b', ' '} {
+		if strings.ContainsRune(trojanPage, mark) {
+			t.Errorf("the page of file 8 carries %U", mark)
+		}
 	}
 
 	// Reading wrote nothing: no event, and no blob of the pack, of a file,

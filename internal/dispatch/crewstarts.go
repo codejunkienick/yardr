@@ -260,6 +260,7 @@ func (d *Dispatcher) applyCrewCompletion(ctx context.Context, comp crewCompletio
 	delete(d.dialogs, key)
 	delete(d.logins, key)
 	delete(d.nudged, key)
+	delete(d.nudgeAt, key)
 	delete(d.unsent, key)
 	delete(d.crewWorkHistory, key)
 	if comp.storeErr != nil {

@@ -136,6 +136,26 @@ func TestTextLeftInTheInputIsSaidOnceAndNeverTypedAfter(t *testing.T) {
 	if n, _ := kindCount(t, s, r.Journal, "nudge_held"); n != 2 {
 		t.Fatalf("nudge_held logged %d times after a second wait, want 2", n)
 	}
+
+	// What it was nudged about and left unread is nudged again after five
+	// minutes (yardr-rx51), and that is a nudge like any other: not typed
+	// after text in the input however long it is due, typed once it is gone.
+	f.input = ""
+	must(t, d.Reconcile(ctx))
+	if len(f.nudges) != 2 {
+		t.Fatalf("nudges after the second draft went = %q, want the second mail's", f.nudges)
+	}
+	f.input = "a late thought"
+	now = now.Add(6 * time.Minute)
+	must(t, d.Reconcile(ctx))
+	if len(f.nudges) != 2 || f.submits != 0 || f.input != "a late thought" {
+		t.Fatalf("with the third draft in the input: nudges %q, Enter %d, input %q; want nothing typed and the draft left", f.nudges, f.submits, f.input)
+	}
+	f.input = ""
+	must(t, d.Reconcile(ctx))
+	if len(f.nudges) != 3 {
+		t.Fatalf("nudges after the third draft went = %q, want the nudge said again", f.nudges)
+	}
 }
 
 // cacheMenuLine is the first line of Kimi Code's question to a session that
@@ -196,6 +216,26 @@ func TestADialogInPlaceOfTheInputIsToldOfAtOnceAndOnce(t *testing.T) {
 	must(t, d.Reconcile(ctx))
 	if n, _ := kindCount(t, s, r.Journal, "nudge_held"); n != 2 || len(f.nudges) != 1 {
 		t.Fatalf("at a second menu: nudge_held %d times in all, nudges %q; want two and one", n, f.nudges)
+	}
+
+	// A nudge said again (yardr-rx51) is typed into no menu either: when the
+	// menu opens after a nudge for what stands, five minutes on and the
+	// nudge due, it waits for the menu to be answered.
+	menu(false)
+	must(t, d.Reconcile(ctx))
+	if len(f.nudges) != 2 {
+		t.Fatalf("nudges after the second menu was answered = %q, want one more", f.nudges)
+	}
+	menu(true)
+	now = now.Add(6 * time.Minute)
+	must(t, d.Reconcile(ctx))
+	if len(f.nudges) != 2 || f.submits != 0 {
+		t.Fatalf("with a third menu open: nudges %q, Enter %d times; want nothing typed", f.nudges, f.submits)
+	}
+	menu(false)
+	must(t, d.Reconcile(ctx))
+	if len(f.nudges) != 3 {
+		t.Fatalf("nudges after the third menu was answered = %q, want the nudge said again", f.nudges)
 	}
 }
 

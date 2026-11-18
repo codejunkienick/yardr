@@ -90,11 +90,11 @@ func (a *app) crewCmd() *cobra.Command {
 	add := &cobra.Command{
 		Use:   "add [<name>]",
 		Short: "Create a crew member, or replace one's whole definition (no name: an interactive form)",
-		Long: `A crew member is an always-on agent session, such as a yardmaster. The daemon keeps
-it running in its directory, nudges it when its inbox has something new and it
-is idle, and rotates it: past --context-handoff percent of its context window
-it is asked to write a handoff when idle, and at --max-age it is asked again
-and its next session starts from that handoff (forced after --handoff-grace).
+		Long: `A crew member is an always-on agent session, such as a yardmaster. The daemon keeps it
+running in its directory, nudges it when its inbox has something new and it is idle (and
+every 5 minutes while unread), and rotates it: past --context-handoff percent of its
+context window it is asked to write a handoff when idle, and at --max-age it is asked
+again and its next session starts from that handoff (forced after --handoff-grace).
 
 Without --set kind, a herdr crew member gets the yard's default_kind.
 

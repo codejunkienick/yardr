@@ -805,9 +805,9 @@ func (d *Dispatcher) crewRunning(ctx context.Context, runner Runner, s *memberSe
 	} else if err == nil {
 		d.crewHarnessOver(ctx, s, true)
 	}
-	if err != nil || page.Total == 0 || page.Last <= s.st.Notified || d.crewNudgeHeld(s) {
-		// Nothing to type, or held for an error of its harness: text in the
-		// input holds nothing back, and a wait on it is over.
+	if err != nil || page.Total == 0 || !d.crewNudgeDue(s, page) || d.crewNudgeHeld(s) {
+		// Nothing to type yet, or held for an error of its harness: text in
+		// the input holds nothing back, and a wait on it is over.
 		delete(d.drafts, key)
 		return err
 	}
@@ -863,12 +863,7 @@ func (d *Dispatcher) crewRunning(ctx context.Context, runner Runner, s *memberSe
 	}
 	// The message is made on the pass that types it: one held back by text
 	// in the input (see inputHeld) counts the inbox anew when its turn comes.
-	typed, err := d.nudge(ctx, runner, s, msg)
-	if err != nil || !typed {
-		return err
-	}
-	d.crewHarnessLook(s)
-	return d.Store.MarkNotifiedFor(ctx, def.Name, s.user, page.Last)
+	return d.crewInboxNudge(ctx, runner, s, msg, page.Last)
 }
 
 func (d *Dispatcher) crewStatus(ctx context.Context, runner Runner, s *memberSession) (string, error) {
@@ -942,6 +937,7 @@ func (d *Dispatcher) nudge(ctx context.Context, runner Runner, s *memberSession,
 	}
 	now := d.now()
 	d.nudged[key] = ownNudge{text: text, at: now}
+	d.stampNudge(key, now)
 	if stalled {
 		// The runner waited for the agent to start on the nudge and saw
 		// nothing. If it is in the input, that is the text ownInput sends

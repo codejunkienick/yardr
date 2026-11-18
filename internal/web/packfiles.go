@@ -202,11 +202,15 @@ func (s *Server) packFilePage(ctx context.Context, id, askWord, nWord string) (*
 	}
 	d := &PackFilePage{
 		Bead: b.ID, Ask: seq, Pack: run.Pack.Name, Digest: run.Pack.Digest,
-		N: n, Of: len(texts), Kind: t.kind, Name: t.name, Action: t.action,
+		N: n, Of: len(texts), Kind: t.kind, Action: t.action,
 		OldSHA256: t.oldSHA, NewSHA256: t.newSHA, Bytes: len(t.text),
 		Insertions: insertions, Deletions: deletions,
 		// The terminal reads these texts as letters (store.NoteLetters),
-		// and so does the page, so the two readings show the same text.
+		// and so does the page, so the two readings show the same text. The
+		// name is the pack's writer's too, and stands on one line in the
+		// heading: html/template escapes it but leaves a mark of direction
+		// as it is, which would reorder what is drawn around it.
+		Name: store.OneLine(t.name),
 		Diff: store.NoteLetters(t.diff), Text: store.NoteLetters(t.text),
 		Card: "/beads/" + url.PathEscape(b.ID),
 	}

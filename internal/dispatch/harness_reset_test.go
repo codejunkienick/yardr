@@ -836,8 +836,13 @@ func TestCrewMemberAtItsUsageLimitIsPromptedWhenTheWindowHasReset(t *testing.T) 
 	}
 
 	// It works, reads its inbox and is idle again: one event in all, and
-	// the watch is off its handle.
+	// the watch is off its handle. It marks the inbox handled, as the prompt
+	// asks: mail left unread is nudged again after five minutes (yardr-rx51),
+	// and the prompt at the reset counts as the nudge that starts the five.
 	f.set(agent, "working")
+	mine, err := s.Inbox(ctx, "yardmaster", 0)
+	must(t, err)
+	must(t, s.AckInbox(ctx, "yardmaster", mine.Last))
 	*now = now.Add(3 * time.Minute)
 	must(t, d.Reconcile(ctx))
 	f.show(kimiIdle)
@@ -859,48 +864,60 @@ func TestCrewMemberAtItsUsageLimitIsPromptedWhenTheWindowHasReset(t *testing.T) 
 
 // Kimi's menu, for a crew member: the prompt does not show two minutes on,
 // which is told once. Until it shows or the agent works, no nudge is typed
-// into that pane: its Enter would choose the menu's first answer.
+// into that pane: its Enter would choose the menu's first answer. That holds
+// for mail that came after the prompt, and for mail the prompt told of and
+// that stands unread, which is nudged again once five minutes have gone
+// (yardr-rx51) and the prompt has shown.
 func TestCrewPromptBehindAHarnessQuestionHoldsItsNudges(t *testing.T) {
 	t.Parallel()
-	s, f, d, p, now, told := crewAtItsLimit(t, 42*time.Minute)
-	ctx := context.Background()
-	p.say(kimiOpen)
-	*now = noon().Add(43*time.Minute + time.Second)
-	primeLimits(t, d, "kimi", "", nil)
-	must(t, d.Reconcile(ctx))
-	if len(f.nudges) != 2 {
-		t.Fatalf("nudges = %q, want the prompt at the reset", f.nudges)
-	}
-	f.show(kimiMenu)
-	must(t, s.Mail(ctx, "yardmaster", "are you there?", "chris"))
-	*now = now.Add(time.Minute)
-	must(t, d.Reconcile(ctx))
-	if n := len(told()); n != 1 || len(f.nudges) != 2 {
-		t.Fatalf("a minute after the prompt: events = %d, nudges = %q; want nothing told or typed yet", n, f.nudges)
-	}
-	*now = now.Add(time.Minute + time.Second)
-	must(t, d.Reconcile(ctx))
-	must(t, d.Reconcile(ctx))
-	evs := told()
-	if len(evs) != 2 || evs[1].Data["prompt_shown"] != false || evs[1].Data["crew"] != "yardmaster" || evs[1].Data["tail"] != kimiMenu ||
-		!strings.Contains(evs[1].Data["hint"].(string), "yardr crew restart yardmaster") {
-		t.Fatalf("session_harness_error = %v, want a second, for the prompt that was not taken", evs)
-	}
-	*now = now.Add(30 * time.Minute)
-	must(t, d.Reconcile(ctx))
-	if n, asks := len(told()), p.asks(); n != 2 || len(f.nudges) != 2 || len(asks) != 2 {
-		t.Fatalf("events = %d, nudges = %q, asks = %d; want it told once, nothing typed behind the menu, nothing asked", n, f.nudges, len(asks))
-	}
+	for name, toldOf := range map[string]bool{"mail after the prompt": false, "mail the prompt told of": true} {
+		t.Run(name, func(t *testing.T) {
+			s, f, d, p, now, told := crewAtItsLimit(t, 42*time.Minute)
+			ctx := context.Background()
+			if toldOf {
+				must(t, s.Mail(ctx, "yardmaster", "are you there?", "chris"))
+			}
+			p.say(kimiOpen)
+			*now = noon().Add(43*time.Minute + time.Second)
+			primeLimits(t, d, "kimi", "", nil)
+			must(t, d.Reconcile(ctx))
+			if len(f.nudges) != 2 {
+				t.Fatalf("nudges = %q, want the prompt at the reset", f.nudges)
+			}
+			f.show(kimiMenu)
+			if !toldOf {
+				must(t, s.Mail(ctx, "yardmaster", "are you there?", "chris"))
+			}
+			*now = now.Add(time.Minute)
+			must(t, d.Reconcile(ctx))
+			if n := len(told()); n != 1 || len(f.nudges) != 2 {
+				t.Fatalf("a minute after the prompt: events = %d, nudges = %q; want nothing told or typed yet", n, f.nudges)
+			}
+			*now = now.Add(time.Minute + time.Second)
+			must(t, d.Reconcile(ctx))
+			must(t, d.Reconcile(ctx))
+			evs := told()
+			if len(evs) != 2 || evs[1].Data["prompt_shown"] != false || evs[1].Data["crew"] != "yardmaster" || evs[1].Data["tail"] != kimiMenu ||
+				!strings.Contains(evs[1].Data["hint"].(string), "yardr crew restart yardmaster") {
+				t.Fatalf("session_harness_error = %v, want a second, for the prompt that was not taken", evs)
+			}
+			*now = now.Add(30 * time.Minute)
+			must(t, d.Reconcile(ctx))
+			if n, asks := len(told()), p.asks(); n != 2 || len(f.nudges) != 2 || len(asks) != 2 {
+				t.Fatalf("events = %d, nudges = %q, asks = %d; want it told once, nothing typed behind the menu, nothing asked", n, f.nudges, len(asks))
+			}
 
-	// A person answers the menu: the prompt shows, and the mail is nudged.
-	f.mu.Lock()
-	f.shown = true
-	f.mu.Unlock()
-	f.show(kimiIdle)
-	must(t, d.Reconcile(ctx))
-	must(t, d.Reconcile(ctx))
-	if len(f.nudges) != 3 || !strings.Contains(f.nudges[2], "new in your inbox") {
-		t.Fatalf("nudges = %q, want the inbox's nudge once the prompt has shown", f.nudges)
+			// A person answers the menu: the prompt shows, and the mail is nudged.
+			f.mu.Lock()
+			f.shown = true
+			f.mu.Unlock()
+			f.show(kimiIdle)
+			must(t, d.Reconcile(ctx))
+			must(t, d.Reconcile(ctx))
+			if len(f.nudges) != 3 || !strings.Contains(f.nudges[2], "new in your inbox") {
+				t.Fatalf("nudges = %q, want the inbox's nudge once the prompt has shown", f.nudges)
+			}
+		})
 	}
 }
 

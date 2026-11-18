@@ -1808,7 +1808,9 @@ import writes come first, in the order the card lists them. Each source the
 pack adds follows, its declaration and then its command files. The page
 writes each text as the terminal reads it under the card, without control and
 direction characters, in a `<pre class="text file">` that keeps its lines and
-pans sideways inside its block on a narrow window.
+pans sideways inside its block on a narrow window. The file's name in the
+heading is read the same way, on one line, so a name written to turn the
+direction of the words around it is drawn as the letters it holds.
 
 The texts are the operator's configuration, so only the operator reads them.
 The page opens for a view that acts as an operator, on an ask that is open and

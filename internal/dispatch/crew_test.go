@@ -404,6 +404,8 @@ func TestCrewKeptAliveAndInboxNudgedWhenIdle(t *testing.T) {
 	t.Parallel()
 	s, f, d := crewSetup(t, store.CrewMember{On: []string{"gave_up"}})
 	ctx := context.Background()
+	now := time.Now()
+	dispatch.SetClock(d, func() time.Time { return now })
 	must(t, d.Reconcile(ctx))
 	must(t, d.Reconcile(ctx))
 	if f.n != 1 {
@@ -418,19 +420,56 @@ func TestCrewKeptAliveAndInboxNudgedWhenIdle(t *testing.T) {
 	if len(f.nudges) != 0 {
 		t.Fatalf("nudged a busy agent: %v", f.nudges)
 	}
-	// Idle: one nudge, not repeated for the same events.
+	// Idle: one nudge, not repeated for the same events at once.
 	f.set(agent, "idle")
+	nudgedAt := now
 	must(t, d.Reconcile(ctx))
 	must(t, d.Reconcile(ctx))
 	if len(f.nudges) != 1 {
 		t.Fatalf("nudges = %v", f.nudges)
 	}
-	// Something new: nudged again.
+	// Left unread with the agent idle, it is said again five minutes after
+	// the nudge and not before (yardr-rx51), word for word: the mark of what
+	// it was told of is where the first nudge left it, and the crew member's
+	// row is not written, which would wake the pass for nothing.
+	told, err := s.GetCrew(ctx, "yardmaster")
+	must(t, err)
+	now = now.Add(time.Minute)
+	must(t, d.Reconcile(ctx))
+	if len(f.nudges) != 1 {
+		t.Fatalf("a minute on: nudges = %v, want the one", f.nudges)
+	}
+	// Nothing is written for a standing unread, so the pass asks to be woken
+	// when its turn comes and does not wait for the next interval.
+	if next := dispatch.NextDue(d); next == nil || !next.Equal(nudgedAt.Add(5*time.Minute)) {
+		t.Fatalf("a minute on: the pass wakes at %v, want five minutes after the nudge, %v", next, nudgedAt.Add(5*time.Minute))
+	}
+	now = now.Add(5 * time.Minute)
+	must(t, d.Reconcile(ctx))
+	must(t, d.Reconcile(ctx))
+	if len(f.nudges) != 2 || f.nudges[1] != f.nudges[0] {
+		t.Fatalf("six minutes on: nudges = %q, want the same nudge again, once", f.nudges)
+	}
+	if again, err := s.GetCrew(ctx, "yardmaster"); err != nil || again.Notified != told.Notified || again.Revision != told.Revision {
+		t.Fatalf("the nudge said again moved the crew member: notified %d -> %d, revision %s -> %s (%v)",
+			told.Notified, again.Notified, told.Revision, again.Revision, err)
+	}
+	// Something new: nudged at once, the interval of the last nudge not waited for.
 	b, _ := s.CreateBead(ctx, store.NewBead{Title: "x"}, "me")
 	must(t, s.LogDispatch(ctx, b.ID, "gave_up", "yard", nil))
 	must(t, d.Reconcile(ctx))
-	if len(f.nudges) != 2 {
+	if len(f.nudges) != 3 {
 		t.Fatalf("nudges = %v", f.nudges)
+	}
+	// A daemon that replaced itself knows of no nudge of its own, which may
+	// have been lost in the gap: what stands unread is told on its first pass
+	// and then waits out the interval as any nudge does.
+	d = &dispatch.Dispatcher{Store: s, Runners: map[string]dispatch.Runner{"fake": f}, PromptSettle: -1, PromptWait: -1}
+	dispatch.SetClock(d, func() time.Time { return now })
+	must(t, d.Reconcile(ctx))
+	must(t, d.Reconcile(ctx))
+	if len(f.nudges) != 4 {
+		t.Fatalf("after a restart: nudges = %v, want one more on its first pass and no more", f.nudges)
 	}
 
 	// The session dies, long enough after its start to be no failed start:

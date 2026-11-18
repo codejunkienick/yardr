@@ -307,19 +307,19 @@ type Dispatcher struct {
 	lookDue    *time.Time
 	promptIdle map[string]time.Time
 	timing     *passTiming
-	// drafts is session (or "crew:<name>") -> the text found in its
-	// agent's input when yardr had something to type there. See inputHeld.
-	// dialogs is the same -> the dialog of its harness that was told of
-	// and has not been seen gone. See dialogAt.
-	// logins is the same -> the line of the login screen it sits at that
-	// was told of. See loginAt.
-	// nudged is the same -> the last nudge yardr typed and when, and unsent
-	// the same -> text of yardr's own found in its agent's input. See
-	// ownInput.
+	// drafts is session (or "crew:<name>") -> the text found in its agent's
+	// input when yardr had something to type there (inputHeld); dialogs the
+	// same -> the dialog of its harness that was told of and not seen gone
+	// (dialogAt); logins the same -> the line of the login screen it sits at
+	// that was told of (loginAt); nudged the same -> the last nudge yardr
+	// typed, until ownInput finds its input empty, and unsent text of yardr's
+	// own found there (ownInput); nudgeAt the same -> when a crew session was
+	// last typed a nudge, which only its next start forgets (crewNudgeDue).
 	drafts  map[string]*draft
 	dialogs map[string]string
 	logins  map[string]string
 	nudged  map[string]ownNudge
+	nudgeAt map[string]time.Time
 	unsent  map[string]*unsent
 
 	// limitsAsked is provider -> what it last said of its limits, kept for

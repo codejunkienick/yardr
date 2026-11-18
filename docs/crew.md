@@ -3,7 +3,9 @@
 The crew are the ones who are always in the yard. A crew member is an agent
 session that is not tied to a bead. The daemon keeps it running in its
 directory, nudges it when its inbox has something new and it is
-idle, and rotates it through handoffs instead of letting its context degrade.
+idle, nudges it again while what it was nudged about stands unread and it
+sits idle ([A nudge said again](#a-nudge-said-again)), and rotates it through
+handoffs instead of letting its context degrade.
 
 ```sh
 yardr crew add                     # interactive: agent, model, permissions, dir, inbox, rotation
@@ -476,6 +478,28 @@ short), or `missing` with the reason in their place; the daemon waits as long
 for Claude Code's own total as it does for a bead's session. A kind herdr names
 no id for (Muse today) reads `missing: no session id`. `yardr events --kind
 crew_usage` lists them; no report adds them up yet.
+
+## A nudge said again
+
+A nudge is typed once for the events it tells of, and marks them told. The
+agent marks them handled with `yardr inbox --ack <seq>`. A crew member that
+sits idle with them still unread is nudged again five minutes after the last
+nudge typed to its session: the same words, counting the inbox as it is then.
+It is nudged again every five minutes for as long as it sits idle and they
+stand. The five minutes run from each typing and carry over while the agent
+works, so an agent that answers a nudge and acks nothing is typed to once in
+five minutes, not at the end of each turn. Events the last nudge did not tell
+of are not waited for: they are nudged on the first idle pass, as before.
+
+A restarted daemon knows of no nudge to a session, since the last may have
+been lost in the gap, and a session that just started has had none. What
+stands unread is nudged on its first idle pass, and the five minutes run from
+that nudge. A nudge said again is held like any other: by text in the input,
+a dialog, the harness's login screen, a harness stopped on an error, and a
+prompt given at a usage limit's reset that is not known to be taken (see
+[Text in the input](#text-in-the-input)). Nothing is typed and nothing is
+marked, so it stays due until the pass that finds the hold gone. It writes
+nothing to the yard, since its events are marked told already.
 
 ## Text in the input
 

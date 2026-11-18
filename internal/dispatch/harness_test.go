@@ -821,6 +821,19 @@ func TestCrewMemberAtAFailedTurnIsNotNudged(t *testing.T) {
 	pass("the line again under the nudge", 2, 2)
 	must(t, s.Mail(ctx, "yardmaster", "last one", "chris"))
 	pass("more mail, the line again", 2, 2)
+
+	// What it was nudged about and left unread is nudged again after five
+	// minutes (yardr-rx51), and not while its harness stands stopped: the
+	// nudge said again would start the round that failed again as the first
+	// did. It is typed on the pass that finds the line gone.
+	f.show(piIdle)
+	pass("the line gone", 2, 3)
+	f.show(piRetryFailed)
+	pass("the line under that nudge", 3, 3)
+	now = now.Add(6 * time.Minute)
+	pass("six minutes on, the line standing", 3, 3)
+	f.show(piIdle)
+	pass("the line gone again", 3, 4)
 }
 
 // The pane is read at the start of a spell and after a nudge, not for as

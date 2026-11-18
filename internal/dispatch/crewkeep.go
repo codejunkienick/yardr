@@ -107,16 +107,19 @@ func (d *Dispatcher) keepCrewSession(ctx context.Context, job crewKeep) (out cre
 // crewMemory is what one session's keep kept in the dispatcher's
 // memory, as a crew outcome carries it from its worker to the apply:
 // reap's memory for the session, its runner status, whether its agent
-// has ever been seen working, and when its pane was last read in, each
-// entry's final word on the session's key, present or gone.
+// has ever been seen working, when its pane was last read in, and when it
+// was last nudged, each entry's final word on the session's key, present
+// or gone.
 type crewMemory struct {
 	reapMemory
-	status    string
-	hasStatus bool
-	worked    bool
-	hasWorked bool
-	idleSince time.Time
-	hasIdle   bool
+	status     string
+	hasStatus  bool
+	worked     bool
+	hasWorked  bool
+	idleSince  time.Time
+	hasIdle    bool
+	nudgeAt    time.Time
+	hasNudgeAt bool
 }
 
 // crewClone is a Dispatcher carrying only the per-session memory the
@@ -149,6 +152,7 @@ func (d *Dispatcher) crewClone(key, member string, queued *[]crewJob) *Dispatche
 		dialogs:         map[string]string{},
 		logins:          map[string]string{},
 		nudged:          map[string]ownNudge{},
+		nudgeAt:         map[string]time.Time{},
 		unsent:          map[string]*unsent{},
 		status:          map[string]string{},
 		crewWorkHistory: map[string]bool{},
@@ -172,6 +176,9 @@ func (d *Dispatcher) crewClone(key, member string, queued *[]crewJob) *Dispatche
 	}
 	if nudge, ok := d.nudged[key]; ok {
 		c.nudged[key] = nudge
+	}
+	if at, ok := d.nudgeAt[key]; ok {
+		c.nudgeAt[key] = at
 	}
 	if u := d.unsent[key]; u != nil {
 		cp := *u
@@ -198,6 +205,7 @@ func (c *Dispatcher) crewMemoryFor(key string) crewMemory {
 	m.status, m.hasStatus = c.status[key]
 	m.worked, m.hasWorked = c.crewWorkHistory[key]
 	m.idleSince, m.hasIdle = c.idleSince[key]
+	m.nudgeAt, m.hasNudgeAt = c.nudgeAt[key]
 	return m
 }
 
@@ -219,5 +227,10 @@ func (d *Dispatcher) applyCrewMemory(key string, m crewMemory) {
 		d.idleSince[key] = m.idleSince
 	} else {
 		delete(d.idleSince, key)
+	}
+	if m.hasNudgeAt {
+		d.stampNudge(key, m.nudgeAt)
+	} else {
+		delete(d.nudgeAt, key)
 	}
 }
