@@ -29,11 +29,14 @@ func (f *fakeYard) Settings(context.Context) (map[string]string, error) {
 func (f *fakeYard) Crew(context.Context) ([]store.CrewMember, error) {
 	return []store.CrewMember{{Name: "yardmaster"}}, nil
 }
-func (f *fakeYard) Depots(context.Context) ([]store.Depot, error) {
-	return []store.Depot{{Name: "yardr"}}, nil
-}
 func (f *fakeYard) CreateBead(_ context.Context, nb store.NewBead, _ string) (*store.Bead, error) {
 	return &store.Bead{ID: "yd-1", Title: nb.Title}, nil
+}
+func (f *fakeYard) FileBead(_ context.Context, title, _, _, _ string) (*store.Bead, error) {
+	return &store.Bead{ID: "yd-1", Title: title}, nil
+}
+func (f *fakeYard) AddNote(context.Context, string, string, string, ...store.BlobFile) error {
+	return nil
 }
 func (f *fakeYard) UpdateBead(_ context.Context, id string, _ store.BeadPatch, _ store.Expect, _ string) (*store.Bead, error) {
 	return &store.Bead{ID: id, Title: "Add grace", Status: "open"}, nil
@@ -365,6 +368,7 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 		mcp.ToolAnswer:           {"work": bead, "question": 1, "put_aside": true},
 		mcp.ToolAskTheYardmaster: {"message": "Are the links moved?"},
 		mcp.ToolReadMyMail:       {},
+		mcp.ToolAddNote:          {"work": bead, "note": "the old place stays until Friday"},
 		mcp.ToolReplyToMail:      {"mail": uint64(0), "message": "Thanks for the hello."},
 		mcp.ToolReword:           {"title": "Tidy all the links"},
 		mcp.ToolWithdraw:         {"reason": "the links tidied themselves"},

@@ -12,11 +12,9 @@
 // one, as it decides footplate's and chat's: this package is a window,
 // not a new permission.
 //
-// Six of the design's seven tools live here, and three the design does
-// not name: reword and withdraw, the person's own say over a request
-// they filed, and reply_to_mail, which answers one mail by its number.
-// The seventh, add_a_note, is not served yet: it lands with the bead
-// that carries the network filing promotions, and nothing here names it.
+// The design's seven tools live here, and three it does not name:
+// reword and withdraw, the person's own say over a request they filed,
+// and reply_to_mail, which answers one mail by its number.
 //
 // No secret passes through MCP, on any path: a question that asks for
 // one is refused by Service.Answer before any secret call could be
@@ -42,6 +40,7 @@ const (
 	ToolAnswer           = "answer"
 	ToolAskTheYardmaster = "ask_the_yardmaster"
 	ToolReadMyMail       = "read_my_mail"
+	ToolAddNote          = "add_a_note"
 	ToolReplyToMail      = "reply_to_mail"
 	ToolReword           = "reword"
 	ToolWithdraw         = "withdraw"
@@ -109,7 +108,7 @@ type ToolDef struct {
 	OutputSchema json.RawMessage
 }
 
-// Tools is the contract: the nine tools, in the order a client lists
+// Tools is the contract: the ten tools, in the order a client lists
 // them. Adding a tool is a contract change (a new ToolDef here, a
 // Service method, and the parity both adapters check), never an
 // adapter-local one.
@@ -265,6 +264,25 @@ func Tools() []ToolDef {
 				"messages": {"type": "array", "description": "the messages shown: seq (the message's number, for reply_to_mail), answered (the message number this answers, when it is a reply), from, at, text, and for a look-back read, whether it had already been read", "items": {"type": "object"}}`),
 		},
 		{
+			Name: ToolAddNote,
+			Description: "Write the person's words as a note on one piece of work they filed or may see. " +
+				"It leaves any question on it open: answering is the answer tool's. " +
+				"work is the work name from an earlier answer.",
+			InputSchema: schema(`{
+				"type": "object",
+				"properties": {
+					"work": {"type": "string", "description": "the work name from an earlier answer, of the piece the note goes on"},
+					"note": {"type": "string", "description": "the note, in the person's words"}
+				},
+				"required": ["work", "note"],
+				"additionalProperties": false
+			}`),
+			OutputSchema: output(`
+				"work": {"type": "string", "description": "the work name the note went on"},
+				"title": {"type": "string"},
+				"waiting_questions": {"type": "array", "description": "the numbers of the questions on it that wait for this person, left open", "items": {"type": "integer"}}`),
+		},
+		{
 			Name: ToolReplyToMail,
 			Description: "Answer one message of this person's mail by its number, from read_my_mail, with mail to whoever wrote it: the answer stands as a reply to it. " +
 				"The reply is sent and the call ends; any answer to it comes as mail, which read_my_mail reads. " +
@@ -349,8 +367,9 @@ func output(properties string) json.RawMessage {
 type Yard interface {
 	Settings(ctx context.Context) (map[string]string, error)
 	Crew(ctx context.Context) ([]store.CrewMember, error)
-	Depots(ctx context.Context) ([]store.Depot, error)
 	CreateBead(ctx context.Context, nb store.NewBead, actor string) (*store.Bead, error)
+	FileBead(ctx context.Context, title, body, project, actor string) (*store.Bead, error)
+	AddNote(ctx context.Context, id, text, actor string, files ...store.BlobFile) error
 	UpdateBead(ctx context.Context, id string, p store.BeadPatch, exp store.Expect, actor string) (*store.Bead, error)
 	CloseBead(ctx context.Context, id, reason string, exp store.Expect, actor string) (*store.Bead, error)
 	ListBeads(ctx context.Context, f store.BeadFilter) ([]store.Bead, error)

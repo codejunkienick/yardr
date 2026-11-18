@@ -361,13 +361,11 @@ func waitsLine(asks []uint64, closed bool) string {
 }
 
 // AskForSomething is ask_for_something: the person's request filed as
-// work for them, in their words. The project is the one thing the
-// person cannot name in the yard's word for it, so it is resolved
-// here, against the project's names, exactly as the design fixes:
-// the yard's one project where it has one, the one the project field
-// names where it has several, and a refusal listing the projects
-// where it is missing, names none or names several (design
-// yardr-ts4d 3.2).
+// work for them, in their words. The title and body are shaped here, and
+// the filing itself is the yard's own call for it, which resolves the
+// project, files a task with no stage named for the caller alone, and
+// refuses in the words that list the projects (design yardr-ts4d 3.2),
+// the same call a device makes over the network.
 func (s *Service) AskForSomething(ctx context.Context, request, project string) (*Result, error) {
 	if err := s.requireUser(); err != nil {
 		return nil, err
@@ -377,40 +375,6 @@ func (s *Service) AskForSomething(ctx context.Context, request, project string) 
 		return nil, fmt.Errorf("say what you would like done, in your words")
 	}
 	ctx = s.ctx(ctx)
-	depots, err := s.Yard.Depots(ctx)
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, len(depots))
-	for i, d := range depots {
-		names[i] = d.Name
-	}
-	refuse := func() (*Result, error) {
-		list := "none yet"
-		if len(names) > 0 {
-			list = strings.Join(names, ", ")
-		}
-		//lint:ignore ST1005 the words are a sentence for the person, the whole of the tool's result and never wrapped, and quoted in docs/design/2026-11-04-yardr-ts4d-mcp-connector.md
-		return nil, fmt.Errorf("I don't know which of your projects this belongs to. Your projects are: %s. Tell me which one you mean, and I'll file it there", list)
-	}
-	depot := ""
-	switch project = strings.TrimSpace(project); {
-	case len(depots) == 0:
-		return refuse()
-	case project == "" && len(depots) == 1:
-		depot = depots[0].Name
-	default:
-		var matches []string
-		for _, d := range depots {
-			if strings.EqualFold(d.Name, project) {
-				matches = append(matches, d.Name)
-			}
-		}
-		if len(matches) != 1 {
-			return refuse()
-		}
-		depot = matches[0]
-	}
 	// The first line is the title and the words after it are the body, so
 	// the title is not said twice.
 	title, body := request, ""
@@ -418,21 +382,13 @@ func (s *Service) AskForSomething(ctx context.Context, request, project string) 
 		title, body = strings.TrimSpace(request[:i]), strings.TrimSpace(request[i+1:])
 	}
 	title = cutTitle(title)
-	// The priority is the one any bead is made at where none is asked for
-	// (yardr bead create's): the zero value is P0, which a depot's P0
-	// reserve route takes ahead of any label and any load condition, so
-	// every request would jump the line. The tool takes no priority; a
-	// person who wants it sooner says so to the yardmaster.
-	bead, err := s.Yard.CreateBead(ctx, store.NewBead{
-		Title:    title,
-		Body:     body,
-		Type:     "task",
-		Priority: store.DefaultPriority,
-		Depot:    depot,
-		For:      s.User,
-	}, s.User)
+	bead, err := s.Yard.FileBead(ctx, title, body, project, s.User)
 	if err != nil {
 		return nil, err
+	}
+	depot := ""
+	if bead.Depot != nil {
+		depot = *bead.Depot
 	}
 	return &Result{
 		Text: fmt.Sprintf("Filed %q in %s. It is yours, and the people who do this work will see it. Ask what is happening to follow it.", bead.Title, depot),

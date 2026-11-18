@@ -10,8 +10,13 @@ import (
 // owning process; rpc.Client implements it for every other process.
 type API interface {
 	CreateBead(ctx context.Context, nb NewBead, actor string) (*Bead, error)
+	// FileBead and OwnBeads are a person's own work over the network
+	// (ownwork.go): filing for oneself alone, and the originator-scoped
+	// list. Both are in rpc's Calls.
+	FileBead(ctx context.Context, title, body, project, actor string) (*Bead, error)
 	GetBead(ctx context.Context, id string) (*Bead, error)
 	ListBeads(ctx context.Context, f BeadFilter) ([]Bead, error)
+	OwnBeads(ctx context.Context, user string, since time.Time, actor string) ([]OwnBead, error)
 	Ready(ctx context.Context) ([]Bead, error)
 	AllHoldingDeps(ctx context.Context) ([]Dep, error)
 	Dispatchable(ctx context.Context) ([]ReadyBead, error)

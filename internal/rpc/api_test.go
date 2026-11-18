@@ -855,6 +855,65 @@ var apiCalls = []apiCall{
 			{"expires", "time", "when the code would have run out"},
 		},
 	},
+	{
+		// OwnBeads stands before FileBead, so its examples list the
+		// yard's own beads and no minted handle stands in the doc: a
+		// handle is random on every run, and FileBead's replies below
+		// are stood for (filedDocBead).
+		method: "OwnBeads",
+		says:   "The user's own work alone: the open beads whose originator is them, whole, and the beads of theirs that finished inside the window `since` opens, with no read cursor and no last-view state kept anywhere. Each call is answered from the window it is given, so a longer look names an earlier time. It is the person's slice of the boards: what is under way, just filed, finished inside the window, and stuck, theirs alone.",
+		args: []field{
+			{"user", "string", "whose work: the user's name"},
+			{"since", "time", "how far back finished work is shown, as 2026-11-01T09:00:00Z; left out, the last 24 hours. Open work is listed whole whatever it says"},
+			{"actor", "string", "who reads: the user's name, or the operator's for any user's"},
+		},
+		requests: []string{`{"user":"jo","actor":"jo"}`, `{"user":"jo","since":"2999-01-01T00:00:00Z","actor":"jo"}`},
+		fields: []field{
+			{"[].id", "string", "the bead's handle"},
+			{"[].title", "string", "the bead's title"},
+			{"[].type", "string", "the bead's type"},
+			{"[].stage", "string", "the bead's stage"},
+			{"[].status", "string", "the bead's status: `open` or `closed`"},
+			{"[].depot", "string?", "the project the bead is worked in; absent on one with none"},
+			{"[].labels", "array of string", "the bead's labels"},
+			{"[].hold", "bool?", "`true` where the bead is on hold; absent otherwise"},
+			{"[].created_by", "string", "who filed it"},
+			{"[].created_at", "time", "when it was filed"},
+			{"[].updated_at", "time", "when it last changed"},
+			{"[].closed_at", "time?", "when it finished; absent on open work"},
+			{"[].close_reason", "string?", "why it was closed, as written; absent where none was given, and on open work"},
+		},
+		after: "The window bounds finished work alone: open work is listed whole, whatever `since` says, so a `since` past every close lists the open work alone, as the second example does. A bead without an originator reads as the operator's, as it does everywhere else; journals and memories are no work and are left out, as a listing leaves them.\n\n" +
+			"Over the network `user` and `actor` are the device's user: left out they are filled in, and one naming anyone else is refused with no call made; on the socket `actor` is the caller's word, as for [`UserAsks`](#userasks), and only the user reads their list, and an operator any user's. Either way what the reader may not see is left out, as if it were not there. Read it again on every event that carries a bead of theirs.",
+	},
+	{
+		method: "FileBead",
+		says:   "Files one piece of work for the caller alone, as a task with no stage named, so it starts where its depot's flow starts, exactly as a bead filed by any client does: there is no filing rule of its own. The project is matched against the yard's depot names: the yard's one depot where it has one and no project is given, the depot an equal name (in any case) picks, else the depot a partial name picks where it picks exactly one. Where the project is missing on a yard with several depots, names none, or names several, and where the yard has no depot at all, nothing is filed and the refusal lists the person's projects by name, so they can name one in the next call.",
+		args: []field{
+			{"title", "string", "the request's title: one line naming the thing wanted; it may not be empty or only white space"},
+			{"body", "string", "the request's details: what done looks like, and anything it is not; left out, none"},
+			{"project", "string", "which of the person's projects it belongs to, in their words; left out where they have one project"},
+			{"actor", "string", "who files: the user's name, whose work it becomes"},
+		},
+		requests: []string{`{"title":"Water the allotment","project":"yard","actor":"jo"}`,
+			`{"title":"Mend the noticeboard","body":"The latch sticks when it rains.","project":"yard","actor":"jo"}`},
+		fields: []field{
+			{"id", "string", "the filed bead's handle"},
+			{"title", "string", "the filed bead's title"},
+			{"body", "string?", "the filed bead's body; absent where none was given"},
+			{"type", "string", "`task`"},
+			{"stage", "string", "the stage it starts at: its depot flow's first"},
+			{"status", "string", "`open`"},
+			{"priority", "number", "the priority of a bead made without one"},
+			{"depot", "string", "the project it was filed in"},
+			{"labels", "array of string", "none: a filing carries no labels"},
+			{"originator", "string", "who it is for: who filed it"},
+			{"created_by", "string", "who filed it"},
+			{"created_at", "time", "when it was filed"},
+			{"updated_at", "time", "when it last changed"},
+		},
+		after: "The bead is filed for the actor through the same path every filing takes: from a bead agent's pane it is refused, since a pane files for its own bead's originator alone, and the members gate holds. Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else is refused with no call made and nothing filed; on the socket it is the caller's word, as for [`AddNote`](#addnote). The filing is then a `created` event in the stream: read [`OwnBeads`](#ownbeads) again on it.",
+	},
 }
 
 // apiDeviceChannelKey is the channel public key the doc's device
@@ -1444,6 +1503,7 @@ var apiErrors = []struct{ method, request, says string }{
 	{"Sing", `{}`, "A method it does not have:"},
 	{"AnswerAskExpected", `{"bead":"yd-links","ask":3,"turn":0,"option":2,"actor":"jo"}`, "A guarded write drawn from a read that is stale (here the ask `AnswerAsk` answered above):"},
 	{"AnswerAsk", `{"bead":"yd-links","ask":3,"turn":1,"option":2,"actor":"jo"}`, "A turn sent to the unguarded call, which has none:"},
+	{"FileBead", `{"title":"Water the allotment","project":"storage","actor":"jo"}`, "A project that names no depot (nothing is filed, and the refusal lists the person's projects):"},
 }
 
 // apiYard is a yard with all a chat client meets: the user jo, the crew
@@ -2666,8 +2726,8 @@ func TestCallsAreTheDocs(t *testing.T) {
 	// answers as no method at all, and the socket answers so the one call
 	// of Calls a device's token alone makes (listenerOnly): a call is
 	// added to either on purpose, here too.
-	if len(Calls) != 33 || len(OperatorCalls) != 13 || len(listenerOnly) != 1 {
-		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 33, 13 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
+	if len(Calls) != 35 || len(OperatorCalls) != 13 || len(listenerOnly) != 1 {
+		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 35, 13 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
 	}
 	for name := range listenerOnly {
 		if _, ok := Calls[name]; !ok {
@@ -3024,6 +3084,32 @@ var keyStart = regexp.MustCompile(`key [A-Za-z0-9_-]{8}…`)
 // doc: a handle is random on every run.
 const exampleBead = "yd-uninvite"
 
+// exampleFiledBeads stand for the minted handles of FileBead's replies in
+// the doc, in order: a handle is random on every run.
+var exampleFiledBeads = []string{"yd-allotment", "yd-noticeboard"}
+
+// filedDocBead is the reply as the doc shows it: the minted handle reads
+// as the fixed one.
+func filedDocBead(reply object, handle string) object {
+	out := make(object, len(reply))
+	for i, m := range reply {
+		if m.key == "result" {
+			if res, ok := m.val.(object); ok {
+				fixed := make(object, len(res))
+				for j, f := range res {
+					if f.key == "id" {
+						f.val = handle
+					}
+					fixed[j] = f
+				}
+				m.val = fixed
+			}
+		}
+		out[i] = m
+	}
+	return out
+}
+
 // uninviteDocBead is the reply as the doc shows it: the minted bead reads
 // as a fixed handle.
 func uninviteDocBead(reply object) object {
@@ -3167,6 +3253,9 @@ func callsDoc(run *apiRun, calls []apiCall) []string {
 			}
 			if c.method == "UninviteTeammate" {
 				reply = uninviteDocBead(reply)
+			}
+			if c.method == "FileBead" && i < len(exampleFiledBeads) {
+				reply = filedDocBead(reply, exampleFiledBeads[i])
 			}
 			if more := run.more[c.method][i]; more != nil {
 				reply = append(reply, member{"more", more})

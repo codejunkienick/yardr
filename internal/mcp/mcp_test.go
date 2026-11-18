@@ -265,6 +265,7 @@ func TestNoUserRefusesEveryTool(t *testing.T) {
 		},
 		func() error { _, err := s.AskTheYardmaster(y.ctx, "hi", true, nil); return err },
 		func() error { _, err := s.ReadMyMail(y.ctx, 0); return err },
+		func() error { _, err := s.AddNote(y.ctx, "x", "a note"); return err },
 		func() error { _, err := s.ReplyToMail(y.ctx, 1, "thanks"); return err },
 		func() error { _, err := s.Reword(y.ctx, "x", "a new title", ""); return err },
 		func() error { _, err := s.Withdraw(y.ctx, "x", "no longer wanted"); return err },
@@ -347,6 +348,15 @@ func TestAskForSomethingDepotResolution(t *testing.T) {
 	}
 	if res.Structured["project"] != "shop" {
 		t.Fatalf("filed as %+v, want the named project", res.Structured)
+	}
+	// A partial name files where it picks exactly one project, through
+	// the same call a device makes.
+	res, err = s.AskForSomething(y.ctx, "Sweep the shop", "sho")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Structured["project"] != "shop" {
+		t.Fatalf("filed as %+v, want the one project it picks", res.Structured)
 	}
 	bead, err := y.st.GetBead(y.ctx, res.Structured["work"].(string))
 	if err != nil {

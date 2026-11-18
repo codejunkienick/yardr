@@ -13,11 +13,18 @@ import (
 func (c *Client) CreateBead(ctx context.Context, nb store.NewBead, actor string) (*store.Bead, error) {
 	return callV[*store.Bead](c, ctx, "CreateBead", nb, actor)
 }
+
+func (c *Client) FileBead(ctx context.Context, title, body, project, actor string) (*store.Bead, error) {
+	return callV[*store.Bead](c, ctx, "FileBead", title, body, project, actor)
+}
 func (c *Client) GetBead(ctx context.Context, id string) (*store.Bead, error) {
 	return callV[*store.Bead](c, ctx, "GetBead", id)
 }
 func (c *Client) ListBeads(ctx context.Context, f store.BeadFilter) ([]store.Bead, error) {
 	return callV[[]store.Bead](c, ctx, "ListBeads", f)
+}
+func (c *Client) OwnBeads(ctx context.Context, user string, since time.Time, actor string) ([]store.OwnBead, error) {
+	return callV[[]store.OwnBead](c, ctx, "OwnBeads", user, since, actor)
 }
 func (c *Client) Ready(ctx context.Context) ([]store.Bead, error) {
 	return callV[[]store.Bead](c, ctx, "Ready")

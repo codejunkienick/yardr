@@ -19,7 +19,9 @@ const ClientHeader = "X-Yardr-Client"
 // together. They are what a chat client needs, yardr chat among them: its
 // view (chat.Store) and the command that opens it; what a client that
 // shows a person's decisions needs (UserAsks, Waiting for the beads parked
-// in their stages, Bead and the writes, MoveBead among them); and
+// in their stages, Bead and the writes, MoveBead among them); what a
+// person's own client needs to file their work and to list it (FileBead,
+// OwnBeads); and
 // what a client that shows a kept hook delivery's files needs (DeliveryFiles,
 // with the hook_files event to read it again on; the bytes are the blob
 // route's); and what a device paired before the channel needs to seal its
@@ -57,6 +59,8 @@ var Calls = map[string][]string{
 	"GetCrew":              {"name"},
 	"UserAsks":             {"name", "actor", "viewer"},
 	"Waiting":              {"name", "actor", "viewer"},
+	"FileBead":             {"title", "body", "project", "actor"},
+	"OwnBeads":             {"user", "since", "actor"},
 	"MoveBead":             {"bead", "outcome", "to", "note", "revision", "actor"},
 	"Bead":                 {"bead", "viewer"},
 	"Arrivals":             {"viewer"},

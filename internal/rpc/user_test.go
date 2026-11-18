@@ -202,8 +202,8 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 			t.Errorf("%s with an array of arguments is answered %s, want a refusal saying %q", name, byPlace, want)
 		}
 	}
-	if len(served) != len(Calls) || len(served) != 33 {
-		t.Errorf("%d calls are served and Calls has %d, want 33 of each: %v", len(served), len(Calls), served)
+	if len(served) != len(Calls) || len(served) != 35 {
+		t.Errorf("%d calls are served and Calls has %d, want 35 of each: %v", len(served), len(Calls), served)
 	}
 	if !slices.Equal(operators, []string{"ApproveAsk", "ApproveSetup", "GiveSecret", "Line", "SessionScreen", "SourceGrants", "Teammates", "TelemetrySet", "TelemetryShow", "UninviteTeammate"}) || len(OperatorCalls) != 13 {
 		t.Errorf("a device of the operator is served %v besides, and OperatorCalls is %v: want ApproveAsk, ApproveSetup, GiveSecret, Line, SessionScreen, SourceGrants, Teammates, TelemetrySet, TelemetryShow, UninviteTeammate and no other of its thirteen", operators, OperatorCalls)
@@ -711,6 +711,8 @@ func TestUserCallsAreMadeAsTheUser(t *testing.T) {
 		{"UserAsks", `{"name":"jo","actor":""}`, `"open":`},
 		{"GetUser", `{}`, `"name":"jo"`},
 		{"UserAsks", `{}`, `"open":`},
+		{"OwnBeads", `{}`, `"id":"yd-shed"`},
+		{"OwnBeads", `{"user":"jo","actor":""}`, `"id":"yd-shed"`},
 		// The queue parked for jo is jo's whatever the name says, and made
 		// as jo: a left-out name, actor and viewer are filled in.
 		{"Waiting", `{}`, `"bead":"yd-parked"`},
@@ -739,6 +741,9 @@ func TestUserCallsAreMadeAsTheUser(t *testing.T) {
 		{"UserNotifications", `{"name":"jo","actor":"sam"}`, `this device calls as jo: \"actor\" is jo or left out, not sam`},
 		{"AckUserNotifications", fmt.Sprintf(`{"through":%d,"actor":"sam"}`, head), `this device calls as jo: \"actor\" is jo or left out, not sam`},
 		{"UserAsks", `{"name":"jo","actor":"sam"}`, `this device calls as jo: \"actor\" is jo or left out, not sam`},
+		{"OwnBeads", `{"user":"sam"}`, `this device calls as jo: \"user\" is jo or left out, not sam`},
+		{"OwnBeads", `{"user":"jo","actor":"sam"}`, `this device calls as jo: \"actor\" is jo or left out, not sam`},
+		{"FileBead", `{"title":"Filed as sam","actor":"sam"}`, `this device calls as jo: \"actor\" is jo or left out, not sam`},
 		{"AckUserNotifications", fmt.Sprintf(`{"name":"sam","through":%d}`, head), `this device calls as jo`},
 		{"Mail", `{"to":"sam","text":"as the yardmaster","actor":"yardmaster"}`, `this device calls as jo: \"actor\" is jo or left out, not yardmaster`},
 		{"MailPeer", `{"to":"clerk","peer":"north","text":"hello","actor":"sam"}`, `this device calls as jo`},
@@ -806,6 +811,11 @@ func TestUserCallsAreMadeAsTheUser(t *testing.T) {
 	if got := call(t, h, token, "Flows", `{}`); strings.Contains(got, hidden.ID) {
 		t.Errorf("Flows shows a bead the device may not see: %s", got)
 	}
+	if got := call(t, h, token, "OwnBeads", `{}`); strings.Contains(got, hidden.ID) {
+		t.Errorf("OwnBeads shows a bead the device may not see: %s", got)
+	} else if !strings.Contains(got, `"id":"yd-shed"`) {
+		t.Errorf("OwnBeads leaves out the bead the device may see: %s", got)
+	}
 	if now, _ := st.Head(ctx); now != head {
 		t.Errorf("the refused calls wrote %d events", now-head)
 	}
@@ -854,9 +864,13 @@ func TestUserWritesCarryVia(t *testing.T) {
 	if err := st.Mail(ctx, "jo", "for jo", "yardmaster"); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.PutDepot(ctx, store.Depot{Name: "yard", Kind: store.DepotDir, Path: t.TempDir()}, "jo"); err != nil {
+		t.Fatal(err)
+	}
 	head, _ := st.Head(ctx)
 	call(t, h, token, "Mail", `{"to":"yardmaster","text":"land it","actor":"jo"}`)
 	call(t, h, token, "AddNote", `{"bead":"yd-shed","text":"looks right","actor":"jo"}`)
+	call(t, h, token, "FileBead", `{"title":"Filed by phone","actor":"jo"}`)
 	call(t, h, token, "AckUserInbox", fmt.Sprintf(`{"name":"jo","through":%d}`, head))
 	if err := st.Mail(ctx, "yardmaster", "from the terminal", "jo"); err != nil {
 		t.Fatal(err)
@@ -869,7 +883,7 @@ func TestUserWritesCarryVia(t *testing.T) {
 	for _, e := range evs {
 		got = append(got, e.Kind+" via "+store.Via(e))
 	}
-	if want := []string{"mail via phone", "noted via phone", "mail_read via phone", "mail via "}; !slices.Equal(got, want) {
+	if want := []string{"mail via phone", "noted via phone", "created via phone", "mail_read via phone", "mail via "}; !slices.Equal(got, want) {
 		t.Errorf("the events are %q, want %q", got, want)
 	}
 	if from := store.MailFrom(evs[0]); from != "jo (via phone)" {

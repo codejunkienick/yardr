@@ -194,6 +194,15 @@ POST /call/AnswerAsk
 {"error":{"code":"error","message":"argument \"turn\": AnswerAsk has none of that name (it takes bead, ask, option, words, actor, weighed)"}}
 ```
 
+A project that names no depot (nothing is filed, and the refusal lists the person's projects):
+
+```
+POST /call/FileBead
+{"title":"Water the allotment","project":"storage","actor":"jo"}
+
+{"error":{"code":"error","message":"I don't know which of your projects this belongs to. Your projects are: drafts, linegit, notes, yard. Tell me which one you mean, and I'll file it there"}}
+```
+
 <!-- /errors -->
 
 ## Builds
@@ -6163,6 +6172,374 @@ POST /call/DevicePairCloseSelf
 | `state` | string | `ended` |
 | `expires` | time | when the code would have run out |
 
+### `OwnBeads`
+
+The user's own work alone: the open beads whose originator is them, whole, and the beads of theirs that finished inside the window `since` opens, with no read cursor and no last-view state kept anywhere. Each call is answered from the window it is given, so a longer look names an earlier time. It is the person's slice of the boards: what is under way, just filed, finished inside the window, and stuck, theirs alone.
+
+| argument | type | |
+|---|---|---|
+| `user` | string | whose work: the user's name |
+| `since` | time | how far back finished work is shown, as 2026-11-01T09:00:00Z; left out, the last 24 hours. Open work is listed whole whatever it says |
+| `actor` | string | who reads: the user's name, or the operator's for any user's |
+
+```
+POST /call/OwnBeads
+{"user":"jo","actor":"jo"}
+
+{
+  "result": [
+    {
+      "id": "yd-shed",
+      "title": "Paint the shed",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "labels": [],
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-train",
+      "title": "Release train",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "depot": "yard",
+      "labels": [],
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-links",
+      "title": "Move the links",
+      "type": "task",
+      "stage": "review",
+      "status": "open",
+      "labels": ["topic:linear-out"],
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-greet",
+      "title": "The greeting",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "depot": "drafts",
+      "labels": [],
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-crm",
+      "title": "Read the CRM",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "labels": [],
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-sweep",
+      "title": "Sweep the platform",
+      "type": "task",
+      "stage": "new",
+      "status": "closed",
+      "labels": [],
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z",
+      "closed_at": "2026-10-08T09:30:00Z",
+      "close_reason": "done"
+    },
+    {
+      "id": "yd-hedge",
+      "title": "Trim the hedge",
+      "type": "task",
+      "stage": "abandoned",
+      "status": "closed",
+      "labels": [],
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z",
+      "closed_at": "2026-10-08T09:30:00Z",
+      "close_reason": "abandoned"
+    },
+    {
+      "id": "yd-gate",
+      "title": "Mend the gate",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "depot": "yard",
+      "labels": [],
+      "hold": true,
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-fence",
+      "title": "Paint the fence",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "depot": "yard",
+      "labels": [],
+      "hold": true,
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-siding",
+      "title": "Clear the siding",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "labels": [],
+      "hold": true,
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-points",
+      "title": "Oil the points",
+      "type": "task",
+      "stage": "merged",
+      "status": "closed",
+      "depot": "yard",
+      "labels": [],
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z",
+      "closed_at": "2026-10-08T09:30:00Z",
+      "close_reason": "merged"
+    },
+    {
+      "id": "yd-notes",
+      "title": "Publish the release notes",
+      "type": "task",
+      "stage": "published",
+      "status": "closed",
+      "depot": "yard",
+      "labels": [],
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z",
+      "closed_at": "2026-10-08T09:30:00Z",
+      "close_reason": "published"
+    }
+  ]
+}
+```
+
+```
+POST /call/OwnBeads
+{"user":"jo","since":"2999-01-01T00:00:00Z","actor":"jo"}
+
+{
+  "result": [
+    {
+      "id": "yd-shed",
+      "title": "Paint the shed",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "labels": [],
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-train",
+      "title": "Release train",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "depot": "yard",
+      "labels": [],
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-links",
+      "title": "Move the links",
+      "type": "task",
+      "stage": "review",
+      "status": "open",
+      "labels": ["topic:linear-out"],
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-greet",
+      "title": "The greeting",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "depot": "drafts",
+      "labels": [],
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-crm",
+      "title": "Read the CRM",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "labels": [],
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-gate",
+      "title": "Mend the gate",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "depot": "yard",
+      "labels": [],
+      "hold": true,
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-fence",
+      "title": "Paint the fence",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "depot": "yard",
+      "labels": [],
+      "hold": true,
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    },
+    {
+      "id": "yd-siding",
+      "title": "Clear the siding",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "labels": [],
+      "hold": true,
+      "created_by": "yardmaster",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z"
+    }
+  ]
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `[].id` | string | the bead's handle |
+| `[].title` | string | the bead's title |
+| `[].type` | string | the bead's type |
+| `[].stage` | string | the bead's stage |
+| `[].status` | string | the bead's status: `open` or `closed` |
+| `[].depot` | string, may be absent | the project the bead is worked in; absent on one with none |
+| `[].labels` | array of string | the bead's labels |
+| `[].hold` | bool, may be absent | `true` where the bead is on hold; absent otherwise |
+| `[].created_by` | string | who filed it |
+| `[].created_at` | time | when it was filed |
+| `[].updated_at` | time | when it last changed |
+| `[].closed_at` | time, may be absent | when it finished; absent on open work |
+| `[].close_reason` | string, may be absent | why it was closed, as written; absent where none was given, and on open work |
+
+The window bounds finished work alone: open work is listed whole, whatever `since` says, so a `since` past every close lists the open work alone, as the second example does. A bead without an originator reads as the operator's, as it does everywhere else; journals and memories are no work and are left out, as a listing leaves them.
+
+Over the network `user` and `actor` are the device's user: left out they are filled in, and one naming anyone else is refused with no call made; on the socket `actor` is the caller's word, as for [`UserAsks`](#userasks), and only the user reads their list, and an operator any user's. Either way what the reader may not see is left out, as if it were not there. Read it again on every event that carries a bead of theirs.
+
+### `FileBead`
+
+Files one piece of work for the caller alone, as a task with no stage named, so it starts where its depot's flow starts, exactly as a bead filed by any client does: there is no filing rule of its own. The project is matched against the yard's depot names: the yard's one depot where it has one and no project is given, the depot an equal name (in any case) picks, else the depot a partial name picks where it picks exactly one. Where the project is missing on a yard with several depots, names none, or names several, and where the yard has no depot at all, nothing is filed and the refusal lists the person's projects by name, so they can name one in the next call.
+
+| argument | type | |
+|---|---|---|
+| `title` | string | the request's title: one line naming the thing wanted; it may not be empty or only white space |
+| `body` | string | the request's details: what done looks like, and anything it is not; left out, none |
+| `project` | string | which of the person's projects it belongs to, in their words; left out where they have one project |
+| `actor` | string | who files: the user's name, whose work it becomes |
+
+```
+POST /call/FileBead
+{"title":"Water the allotment","project":"yard","actor":"jo"}
+
+{
+  "result": {
+    "id": "yd-allotment",
+    "title": "Water the allotment",
+    "type": "task",
+    "stage": "new",
+    "status": "open",
+    "priority": 2,
+    "depot": "yard",
+    "labels": [],
+    "created_at": "2026-10-08T09:30:00Z",
+    "updated_at": "2026-10-08T09:30:00Z",
+    "created_by": "jo",
+    "originator": "jo"
+  }
+}
+```
+
+```
+POST /call/FileBead
+{"title":"Mend the noticeboard","body":"The latch sticks when it rains.","project":"yard","actor":"jo"}
+
+{
+  "result": {
+    "id": "yd-noticeboard",
+    "title": "Mend the noticeboard",
+    "body": "The latch sticks when it rains.",
+    "type": "task",
+    "stage": "new",
+    "status": "open",
+    "priority": 2,
+    "depot": "yard",
+    "labels": [],
+    "created_at": "2026-10-08T09:30:00Z",
+    "updated_at": "2026-10-08T09:30:00Z",
+    "created_by": "jo",
+    "originator": "jo"
+  }
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `id` | string | the filed bead's handle |
+| `title` | string | the filed bead's title |
+| `body` | string, may be absent | the filed bead's body; absent where none was given |
+| `type` | string | `task` |
+| `stage` | string | the stage it starts at: its depot flow's first |
+| `status` | string | `open` |
+| `priority` | number | the priority of a bead made without one |
+| `depot` | string | the project it was filed in |
+| `labels` | array of string | none: a filing carries no labels |
+| `originator` | string | who it is for: who filed it |
+| `created_by` | string | who filed it |
+| `created_at` | time | when it was filed |
+| `updated_at` | time | when it last changed |
+
+The bead is filed for the actor through the same path every filing takes: from a bead agent's pane it is refused, since a pane files for its own bead's originator alone, and the members gate holds. Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else is refused with no call made and nothing filed; on the socket it is the caller's word, as for [`AddNote`](#addnote). The filing is then a `created` event in the stream: read [`OwnBeads`](#ownbeads) again on it.
+
 <!-- /calls -->
 
 ## For the operator alone
@@ -6833,7 +7210,7 @@ POST /call/Line
               "limit": 5
             },
             "other_routes": [],
-            "open": 2
+            "open": 4
           },
           {
             "stage": "shipped",

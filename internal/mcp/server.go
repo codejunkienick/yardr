@@ -209,6 +209,8 @@ func (s *Server) dispatch(ctx context.Context, req *sdkmcp.CallToolRequest, svc 
 			return nil, err
 		}
 		return svc.ReadMyMail(ctx, recent)
+	case ToolAddNote:
+		return svc.AddNote(ctx, stringArg(args, "work"), stringArg(args, "note"))
 	case ToolReplyToMail:
 		mail, err := mailArg(args)
 		if err != nil {
