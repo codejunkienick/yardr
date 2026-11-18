@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	bolt "go.etcd.io/bbolt"
 	"yardr.dev/yardr/internal/peer"
 )
 
@@ -94,6 +95,7 @@ func wrongDigits3(tr Transcript) string {
 func TestPairingCardConfirms(t *testing.T) {
 	// Sequential: the package's fake clock and Stretch (via newPairHost).
 	h := newCardHost(t)
+	tellOutside(t, h.Store, h.ctx)
 	opened, code := h.openCard(t)
 	if got := opened.Expires.Sub(h.at); got != CardTTL || CardTTL != time.Hour {
 		t.Fatalf("a card pairing is good for %s", got)
@@ -200,6 +202,7 @@ func TestPairingCardConfirms(t *testing.T) {
 			t.Errorf("the code or the typed digits are written: %q", w)
 		}
 	}
+	assertNoPairAlarm(t, h.Store, h.ctx)
 }
 
 func toText(v any) string {
@@ -405,6 +408,7 @@ func wrongFirst(tr Transcript) string {
 func TestPairCallConfirms(t *testing.T) {
 	// Sequential: the package's fake clock and Stretch (via newPairHost).
 	y := newCallYards(t)
+	tellOutside(t, y.join.Store, y.ctx)
 	var told []bool
 	y.join.SetPairCallSender(y.worded(t, &told))
 	tr, reg := y.register(t)
@@ -537,7 +541,7 @@ func TestPairCallConfirms(t *testing.T) {
 	if jc == nil {
 		t.Fatal("the registered call is gone")
 	}
-	if err := y.join.finishJoin(y.ctx, jc, out, nil, true); err != nil {
+	if err := y.join.finishJoin(y.ctx, jc, out, nil, true, false); err != nil {
 		t.Fatalf("the confirmed reply at expiry = %v", err)
 	}
 	if ps, _ := y.join.Peers(y.ctx); len(ps) != 1 || ps[0].Name != "north" {
@@ -549,6 +553,7 @@ func TestPairCallConfirms(t *testing.T) {
 	if b, _ := y.join.GetBead(y.ctx, bead); b.Status != "closed" {
 		t.Fatalf("the confirmed card's carrier is %s", b.Status)
 	}
+	assertNoPairAlarm(t, y.join.Store, y.ctx)
 }
 
 // Five wrong tries end the call with wrong_check, tell the host no and save
@@ -557,6 +562,7 @@ func TestPairCallConfirms(t *testing.T) {
 func TestPairCallWrongDigitsEndIt(t *testing.T) {
 	// Sequential: the package's fake clock and Stretch (via newPairHost).
 	y := newCallYards(t)
+	tellOutside(t, y.join.Store, y.ctx)
 	var told []bool
 	y.join.SetPairCallSender(y.worded(t, &told))
 	tr, _ := y.register(t)
@@ -593,8 +599,11 @@ func TestPairCallWrongDigitsEndIt(t *testing.T) {
 	if len(evs) != 1 || evs[0].Data["reason"] != WrongCheck || evs[0].Data["role"] != "joiner" {
 		t.Fatalf("refusals = %+v", evs)
 	}
+	assertPairAlarm(t, y.join.Store, y.ctx, evs[0], "pairing with north ended after 5 wrong tries at the digits: nothing was saved on this yard. If the other yard shows a link from this pairing, its operator can remove this yard there (yardr peer rm <name>) and pair again.")
 
-	// A decline tells the host no too, with nothing saved.
+	// A decline tells the host no too, with nothing saved. Past the
+	// cooldown the wrong digits put on the name.
+	y.at = y.at.Add(pairCooldown + time.Minute)
 	tr, _ = y.register(t)
 	bead, seq, _ = y.card(t)
 	if err := y.join.DeclineAsk(y.ctx, bead, seq, "I did not ask for this", "jo"); err != nil {
@@ -616,6 +625,7 @@ func TestPairCallWrongDigitsEndIt(t *testing.T) {
 	if len(evs) != 2 || evs[1].Data["reason"] != Declined {
 		t.Fatalf("refusals = %+v", evs)
 	}
+	assertPairAlarm(t, y.join.Store, y.ctx, evs[1], "pairing with north ended (declined): nothing was saved on this yard. If the other yard shows a link from this pairing, its operator can remove this yard there (yardr peer rm <name>) and pair again.")
 }
 
 // The operator ends a held call, which tells the host no and takes the card
@@ -652,8 +662,10 @@ func TestPairCallClose(t *testing.T) {
 	}
 
 	// With no server the call still ends locally, but a verified answer is
-	// refused rather than half carried: the card stays open.
+	// refused rather than half carried: the card stays open. Past the
+	// cooldown the close put on the name.
 	y.join.SetPairCallSender(nil)
+	y.at = y.at.Add(pairCooldown + time.Minute)
 	tr, _ = y.register(t)
 	bead, seq, _ = y.card(t)
 	if err := y.join.AnswerAsk(y.ctx, bead, seq, 0, first(tr), "jo", false); err == nil || !strings.Contains(err.Error(), "carries a card's answer") {
@@ -675,11 +687,13 @@ func TestPairCallClose(t *testing.T) {
 		t.Fatalf("refusals = %+v", evs)
 	}
 
-	// With two calls held, no address names which.
+	// With two calls held, no address names which. Past the cooldown the
+	// close put on the name.
 	y.join.SetPairCallSender(y.worded(t, &told))
 	if err := y.host.PairClose(y.ctx, "", "jo"); err != nil {
 		t.Fatal(err)
 	}
+	y.at = y.at.Add(pairCooldown + time.Minute)
 	_, firstReg := y.register(t)
 	if err := y.host.PairClose(y.ctx, "", "jo"); err != nil {
 		t.Fatal(err)
@@ -702,6 +716,7 @@ func TestPairCallClose(t *testing.T) {
 func TestPairCallLapses(t *testing.T) {
 	// Sequential: the package's fake clock and Stretch (via newPairHost).
 	y := newCallYards(t)
+	tellOutside(t, y.join.Store, y.ctx)
 	var told []bool
 	y.join.SetPairCallSender(y.worded(t, &told))
 	tr, reg := y.register(t)
@@ -722,10 +737,13 @@ func TestPairCallLapses(t *testing.T) {
 	}
 	if evs := y.join.refusals(t); len(evs) != 1 || evs[0].Data["reason"] != TimedOut {
 		t.Fatalf("refusals = %+v", evs)
+	} else {
+		assertPairAlarm(t, y.join.Store, y.ctx, evs[0], "pairing with north lapsed: nothing was saved on this yard. If the other yard shows a link from this pairing, its operator can remove this yard there (yardr peer rm <name>) and pair again.")
 	}
 
-	// A restart: the card stands in the store, the call is gone.
-	y.at = y.at.Add(time.Minute)
+	// A restart: the card stands in the store, the call is gone. Past the
+	// cooldown the lapse put on the name.
+	y.at = y.at.Add(pairCooldown + time.Minute)
 	tr, reg = y.register(t)
 	bead, seq, _ = y.card(t)
 	y.join.pair.mu.Lock()
@@ -747,15 +765,25 @@ func TestPairCallLapses(t *testing.T) {
 		t.Fatalf("open asks = %+v: want the new card alone", q.Open)
 	}
 	y.at = y.at.Add(CardTTL)
-	_, _ = y.register(t)
+	opened, err := y.host.PairOpen(y.ctx, PairOffer{Name: "north", Key: y.host.key, URL: "http://10.0.0.5:8790"}, "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _ := CleanCode(opened.Code)
+	_, offer := y.call(t, code)
+	if _, err := y.join.PairCallRegister(y.ctx, offer, "jo"); err == nil || !strings.Contains(err.Error(), "cooldown") {
+		t.Fatalf("a call that discovers the expired attempt = %v: want the cooldown", err)
+	}
 	if len(told) != 2 || told[1] {
 		t.Fatalf("the host was told %v", told)
 	}
 	if evs := y.join.refusals(t); len(evs) != 2 || evs[1].Data["reason"] != TimedOut {
 		t.Fatalf("refusals = %+v", evs)
+	} else {
+		assertPairAlarm(t, y.join.Store, y.ctx, evs[1], "pairing with north lapsed: nothing was saved on this yard. If the other yard shows a link from this pairing, its operator can remove this yard there (yardr peer rm <name>) and pair again.")
 	}
-	if q, _ := y.join.UserAsks(y.ctx, "jo", "jo", "jo"); len(q.Open) != 1 {
-		t.Fatalf("open asks = %+v: want the new card alone", q.Open)
+	if q, _ := y.join.UserAsks(y.ctx, "jo", "jo", "jo"); len(q.Open) != 0 {
+		t.Fatalf("open asks = %+v: the expired card should be taken back before the retry is refused", q.Open)
 	}
 }
 
@@ -830,6 +858,7 @@ func TestPairCallIsAnsweredByThePerson(t *testing.T) {
 func TestPairCallVerifiedAfterHostEnded(t *testing.T) {
 	// Sequential: the package's fake clock and Stretch (via newPairHost).
 	y := newCallYards(t)
+	tellOutside(t, y.join.Store, y.ctx)
 	var told []bool
 	y.join.SetPairCallSender(y.worded(t, &told))
 
@@ -854,8 +883,11 @@ func TestPairCallVerifiedAfterHostEnded(t *testing.T) {
 	if evs := y.join.refusals(t); len(evs) != 1 || evs[0].Data["reason"] != PeerDeclined {
 		t.Fatalf("refusals = %+v", evs)
 	}
+	assertNoPairAlarm(t, y.join.Store, y.ctx)
 
-	// The host's minutes to confirm run out first.
+	// The host's minutes to confirm run out first. Past the cooldown the
+	// decline put on the name.
+	y.at = y.at.Add(pairCooldown + time.Minute)
 	tr, _ = y.register(t)
 	bead, seq, _ = y.card(t)
 	y.at = y.at.Add(ConfirmTTL + time.Minute)
@@ -868,10 +900,13 @@ func TestPairCallVerifiedAfterHostEnded(t *testing.T) {
 	}
 	if evs := y.join.refusals(t); len(evs) != 2 || evs[1].Data["reason"] != TimedOut {
 		t.Fatalf("refusals = %+v", evs)
+	} else {
+		assertPairAlarm(t, y.join.Store, y.ctx, evs[1], "pairing with north lapsed: nothing was saved on this yard. If the other yard shows a link from this pairing, its operator can remove this yard there (yardr peer rm <name>) and pair again.")
 	}
 
 	// The host answers nothing at all: this yard saves nothing, and is told
-	// to look there.
+	// to look there. Past the cooldown the timeout put on the name.
+	y.at = y.at.Add(pairCooldown + time.Minute)
 	tr, _ = y.register(t)
 	bead, seq, _ = y.card(t)
 	y.join.SetPairCallSender(func(context.Context, string, Transcript, bool) (*PairingOutcome, error) {
@@ -890,30 +925,35 @@ func TestPairCallVerifiedAfterHostEnded(t *testing.T) {
 	if evs := y.join.refusals(t); len(evs) != 2 {
 		t.Fatalf("refusals = %+v: want none logged for an answer that never arrived", evs)
 	}
+	if len(alarmed(t, y.join.Store, y.ctx)) != 1 {
+		t.Fatalf("jo's notifications = %+v: want no alarm without a host outcome", alarmed(t, y.join.Store, y.ctx))
+	}
 
 	// The host never answers at all: the wait runs out with the call, tells
 	// the host no and saves nothing.
-	y.join.SetPairCallSender(y.worded(t, &told))
-	if err := y.host.PairClose(y.ctx, "", "jo"); err != nil {
-		t.Fatal(err)
-	}
+	never := newCallYards(t)
+	tellOutside(t, never.join.Store, never.ctx)
+	var neverTold []bool
+	never.join.SetPairCallSender(never.worded(t, &neverTold))
 	// Truncated as newCallYards is: the clock stays at the precision
 	// the store keeps.
-	y.at = time.Now().Truncate(time.Microsecond).Add(-CardTTL + 2*time.Second)
-	tr, _ = y.register(t)
-	bead, seq, _ = y.card(t)
-	err = y.join.AnswerAsk(y.ctx, bead, seq, 0, first(tr), "jo", false)
+	never.at = time.Now().Truncate(time.Microsecond).Add(-CardTTL + 2*time.Second)
+	tr, _ = never.register(t)
+	bead, seq, _ = never.card(t)
+	err = never.join.AnswerAsk(never.ctx, bead, seq, 0, first(tr), "jo", false)
 	if err == nil || !strings.Contains(err.Error(), "did not confirm within 60 minutes of the call") {
 		t.Fatalf("the digits with a host that never answers = %v", err)
 	}
-	if len(told) != 4 || !told[2] || told[3] {
-		t.Fatalf("the host was told %v: want the yes and the no after it", told)
+	if len(neverTold) != 2 || !neverTold[0] || neverTold[1] {
+		t.Fatalf("the host was told %v: want the yes and the no after it", neverTold)
 	}
-	if ps, _ := y.join.Peers(y.ctx); len(ps) != 0 {
+	if ps, _ := never.join.Peers(never.ctx); len(ps) != 0 {
 		t.Fatalf("peers = %+v", ps)
 	}
-	if evs := y.join.refusals(t); len(evs) != 3 || evs[2].Data["reason"] != TimedOut {
+	if evs := never.join.refusals(t); len(evs) != 1 || evs[0].Data["reason"] != TimedOut {
 		t.Fatalf("refusals = %+v", evs)
+	} else {
+		assertPairAlarm(t, never.join.Store, never.ctx, evs[0], "pairing with north lapsed: nothing was saved on this yard. If the other yard shows a link from this pairing, its operator can remove this yard there (yardr peer rm <name>) and pair again.")
 	}
 }
 
@@ -1059,6 +1099,7 @@ func TestPairCallWaitsForTheHost(t *testing.T) {
 func TestPairingCardWrongDigitsEndIt(t *testing.T) {
 	// Sequential: the package's fake clock and Stretch (via newPairHost).
 	h := newCardHost(t)
+	tellOutside(t, h.Store, h.ctx)
 	opened, code := h.openCard(t)
 	tr, err := h.call(code, "laptop", newPublicKey(t))
 	if err != nil {
@@ -1098,6 +1139,7 @@ func TestPairingCardWrongDigitsEndIt(t *testing.T) {
 	if len(evs) != 1 || evs[0].Data["reason"] != WrongCheck || evs[0].Data["wrong_checks"] != float64(MaxCheckTries) || evs[0].Data["card"] != true {
 		t.Fatalf("refusals = %+v", evs)
 	}
+	assertPairAlarm(t, h.Store, h.ctx, evs[0], "pairing with laptop ended after 5 wrong tries at the digits: nothing was saved on this yard. If the other yard shows a link from this pairing, its operator can remove this yard there (yardr peer rm <name>) and pair again.")
 }
 
 // A decline on the card ends the pairing declined, with the carrier closed
@@ -1105,6 +1147,7 @@ func TestPairingCardWrongDigitsEndIt(t *testing.T) {
 func TestPairingCardDecline(t *testing.T) {
 	// Sequential: the package's fake clock and Stretch (via newPairHost).
 	h := newCardHost(t)
+	tellOutside(t, h.Store, h.ctx)
 	opened, code := h.openCard(t)
 	tr, err := h.call(code, "laptop", newPublicKey(t))
 	if err != nil {
@@ -1126,8 +1169,15 @@ func TestPairingCardDecline(t *testing.T) {
 	if ps, _ := h.Peers(h.ctx); len(ps) != 0 {
 		t.Fatalf("peers = %+v", ps)
 	}
+	if evs := h.refusals(t); len(evs) != 1 || evs[0].Data["reason"] != Declined {
+		t.Fatalf("refusals = %+v", evs)
+	} else {
+		assertPairAlarm(t, h.Store, h.ctx, evs[0], "pairing with laptop ended (declined): nothing was saved on this yard. If the other yard shows a link from this pairing, its operator can remove this yard there (yardr peer rm <name>) and pair again.")
+	}
 
 	// A no said in a terminal ends it the same way, and takes the card back.
+	// Past the cooldown the decline put on the name.
+	h.at = h.at.Add(pairCooldown + time.Minute)
 	_, code = h.openCard(t)
 	tr, err = h.call(code, "laptop", newPublicKey(t))
 	if err != nil {
@@ -1143,6 +1193,11 @@ func TestPairingCardDecline(t *testing.T) {
 	if b, _ := h.GetBead(h.ctx, bead); b.Status != "closed" {
 		t.Errorf("the carrier is %s", b.Status)
 	}
+	if evs := h.refusals(t); len(evs) != 2 || evs[1].Data["reason"] != Declined {
+		t.Fatalf("refusals = %+v", evs)
+	} else {
+		assertPairAlarm(t, h.Store, h.ctx, evs[1], "pairing with laptop ended (declined): nothing was saved on this yard. If the other yard shows a link from this pairing, its operator can remove this yard there (yardr peer rm <name>) and pair again.")
+	}
 }
 
 // An answer after the hour is refused naming the lapse and the command that
@@ -1151,6 +1206,7 @@ func TestPairingCardDecline(t *testing.T) {
 func TestPairingCardLapses(t *testing.T) {
 	// Sequential: the package's fake clock and Stretch (via newPairHost).
 	h := newCardHost(t)
+	tellOutside(t, h.Store, h.ctx)
 	opened, code := h.openCard(t)
 	tr, err := h.call(code, "laptop", newPublicKey(t))
 	if err != nil {
@@ -1168,9 +1224,15 @@ func TestPairingCardLapses(t *testing.T) {
 	if q, _ := h.UserAsks(h.ctx, "jo", "jo", "jo"); len(q.Open) != 0 {
 		t.Errorf("the card still waits after the lapse: %+v", q.Open)
 	}
+	if evs := h.refusals(t); len(evs) != 1 || evs[0].Data["reason"] != TimedOut {
+		t.Fatalf("refusals = %+v", evs)
+	} else {
+		assertPairAlarm(t, h.Store, h.ctx, evs[0], "pairing with laptop lapsed: nothing was saved on this yard. If the other yard shows a link from this pairing, its operator can remove this yard there (yardr peer rm <name>) and pair again.")
+	}
 
-	// A restart: the card stands in the store, the pairing is gone.
-	h.at = h.at.Add(time.Minute)
+	// A restart: the card stands in the store, the pairing is gone. Past
+	// the cooldown the lapse put on the name.
+	h.at = h.at.Add(pairCooldown + time.Minute)
 	_, code = h.openCard(t)
 	tr, err = h.call(code, "laptop", newPublicKey(t))
 	if err != nil {
@@ -1184,6 +1246,272 @@ func TestPairingCardLapses(t *testing.T) {
 	}
 	if b, _ := h.GetBead(h.ctx, bead); b.Status != "closed" {
 		t.Errorf("the carrier of a pairing that is gone is %s", b.Status)
+	}
+}
+
+// A card pairing that ends cools its name down: another card open naming
+// the same yard within pairCooldown is refused naming the cooldown, and
+// kept on the record beside the attempt and its end, while another yard
+// opens at once; past the cooldown it opens again. A confirmed pairing
+// cools nothing.
+func TestPairingCardCoolsDown(t *testing.T) {
+	// Sequential: the package's fake clock and Stretch (via newPairHost).
+	h := newCardHost(t)
+	opened, code := h.openCard(t)
+	if _, err := h.call(code, "laptop", newPublicKey(t)); err != nil {
+		t.Fatal(err)
+	}
+	bead, seq, _ := h.card(t)
+	if err := h.DeclineAsk(h.ctx, bead, seq, "I did not ask for this", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	var rec *pairAttempt
+	if err := h.read(func(tx *bolt.Tx) error {
+		var err error
+		rec, err = lastPairEnd(tx, "laptop")
+		return err
+	}); err != nil || rec == nil || rec.Reason != Declined || rec.Role != "host" || rec.Pairing != opened.ID || !rec.At.Equal(h.at) {
+		t.Fatalf("the record = %+v, %v", rec, err)
+	}
+
+	// A re-open on the name is refused naming the cooldown and when to
+	// try again, and kept on the record beside the attempt and its end.
+	lifts := h.at.Add(pairCooldown)
+	offer := PairOffer{Name: "north", Key: h.key, URL: "http://10.0.0.5:8790", As: "laptop", Card: true}
+	if _, err := h.PairOpen(h.ctx, offer, "jo"); err == nil || !strings.Contains(err.Error(), "cooldown") ||
+		!strings.Contains(err.Error(), "try again after "+lifts.Local().Format("15:04")) {
+		t.Fatalf("a re-open inside the cooldown = %v", err)
+	}
+	h.at = rec.At.Add(-time.Minute)
+	if _, err := h.PairOpen(h.ctx, offer, "jo"); err == nil || !strings.Contains(err.Error(), "cooldown") {
+		t.Fatalf("a clock moved behind the attempt = %v: want the cooldown to hold", err)
+	}
+	h.at = rec.At
+	evs, _ := h.Events(h.ctx, "", 100)
+	var attempt, end, cooled *Event
+	for i, e := range evs {
+		switch e.Kind {
+		case "peer_pair_opened":
+			attempt = &evs[i]
+		case "peer_pair_refused":
+			end = &evs[i]
+		case "peer_pair_cooldown":
+			cooled = &evs[i]
+		}
+	}
+	if attempt == nil || end == nil || cooled == nil {
+		t.Fatalf("the record holds %+v: want the attempt, its end and the cooldown's refusal", evs)
+	}
+	if cooled.Data["role"] != "host" || cooled.Data["peer"] != "laptop" {
+		t.Fatalf("the cooldown's event = %+v", cooled)
+	}
+	retry, err := time.Parse(time.RFC3339Nano, cooled.Data["retry_after"].(string))
+	if err != nil || !retry.Equal(lifts) {
+		t.Fatalf("the cooldown lifts %v, %v: want %s", cooled.Data["retry_after"], err, lifts)
+	}
+
+	// Another yard opens at once, and its close cools its own name.
+	offer.As = "desktop"
+	if _, err := h.PairOpen(h.ctx, offer, "jo"); err != nil {
+		t.Fatalf("another yard inside the cooldown = %v", err)
+	}
+	if p, err := h.GetPairing(h.ctx, ""); err != nil || p.State != PairOpened {
+		t.Fatalf("the pairing = %+v, %v", p, err)
+	}
+	if err := h.PairClose(h.ctx, "", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.PairOpen(h.ctx, offer, "jo"); err == nil || !strings.Contains(err.Error(), "cooldown") {
+		t.Fatalf("a re-open after the close = %v: want the cooldown, which a close starts too", err)
+	}
+
+	// Past the cooldown the name opens again, and a pairing that confirms
+	// cools nothing: once the peer is removed it opens at once.
+	h.at = h.at.Add(pairCooldown + time.Minute)
+	opened, code = h.openCard(t)
+	tr, err := h.call(code, "laptop", newPublicKey(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bead, seq, _ = h.card(t)
+	if out, err := h.PairConfirmed(h.ctx, tr.Session(), true); err != nil || out.State != Waiting {
+		t.Fatalf("the caller's yes = %+v, %v", out, err)
+	}
+	if err := h.AnswerAsk(h.ctx, bead, seq, 0, typed(tr), "jo", false); err != nil {
+		t.Fatalf("the right digits = %v", err)
+	}
+	if p, _ := h.GetPairing(h.ctx, opened.ID); p.State != PairDone {
+		t.Fatalf("the pairing = %+v", p)
+	}
+	if ps, _ := h.Peers(h.ctx); len(ps) != 1 || ps[0].Name != "laptop" {
+		t.Fatalf("peers = %+v", ps)
+	}
+	if err := h.DeletePeer(h.ctx, "laptop", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	offer.As = "laptop"
+	if _, err := h.PairOpen(h.ctx, offer, "jo"); err != nil {
+		t.Fatalf("a re-open after a confirmed pairing = %v: want no cooldown", err)
+	}
+	if err := h.PairClose(h.ctx, "", "jo"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Opening after a card lapsed first ends and records that attempt, then
+	// refuses the same name during its cooldown.
+	lapsed := newCardHost(t)
+	lapsed.openCard(t)
+	lapsed.at = lapsed.at.Add(CardTTL)
+	if _, err := lapsed.PairOpen(lapsed.ctx, PairOffer{Name: "north", Key: lapsed.key, URL: "http://10.0.0.5:8790", As: "laptop", Card: true}, "jo"); err == nil || !strings.Contains(err.Error(), "cooldown") {
+		t.Fatalf("a re-open that discovers a lapsed card = %v: want the cooldown", err)
+	}
+	if err := lapsed.read(func(tx *bolt.Tx) error {
+		var err error
+		rec, err = lastPairEnd(tx, "laptop")
+		return err
+	}); err != nil || rec == nil || rec.Reason != TimedOut {
+		t.Fatalf("the lapsed attempt = %+v, %v: want it recorded before the re-open", rec, err)
+	}
+}
+
+// A call that ends cools its name down the same way: another call naming
+// the same yard within pairCooldown is refused naming the cooldown, and
+// past it the call goes through. The cooldown is the peer pair's, not the
+// side's: a hosted opening for the name waits too.
+func TestPairCallCoolsDown(t *testing.T) {
+	// Sequential: the package's fake clock and Stretch (via newPairHost).
+	y := newCallYards(t)
+	var told []bool
+	y.join.SetPairCallSender(y.worded(t, &told))
+	_, reg := y.register(t)
+	bead, seq, _ := y.card(t)
+	if err := y.join.DeclineAsk(y.ctx, bead, seq, "I did not ask for this", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	var rec *pairAttempt
+	if err := y.join.read(func(tx *bolt.Tx) error {
+		var err error
+		rec, err = lastPairEnd(tx, "north")
+		return err
+	}); err != nil || rec == nil || rec.Reason != Declined || rec.Role != "joiner" || rec.Pairing != reg.ID {
+		t.Fatalf("the record = %+v, %v", rec, err)
+	}
+
+	// Another call on the name is refused naming the cooldown, and kept on
+	// the record as the joiner's.
+	opened, err := y.host.PairOpen(y.ctx, PairOffer{Name: "north", Key: y.host.key, URL: "http://10.0.0.5:8790"}, "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _ := CleanCode(opened.Code)
+	_, offer := y.call(t, code)
+	if _, err := y.join.PairCallRegister(y.ctx, offer, "jo"); err == nil || !strings.Contains(err.Error(), "cooldown") ||
+		!strings.Contains(err.Error(), "try again after") {
+		t.Fatalf("another call inside the cooldown = %v", err)
+	}
+	evs, _ := y.join.Events(y.ctx, "", 100)
+	var cooled *Event
+	for i, e := range evs {
+		if e.Kind == "peer_pair_cooldown" {
+			cooled = &evs[i]
+		}
+	}
+	if cooled == nil || cooled.Data["role"] != "joiner" || cooled.Data["peer"] != "north" || cooled.Data["retry_after"] == "" {
+		t.Fatalf("the cooldown's event = %+v", cooled)
+	}
+	// A hosted opening for the name waits too: the cooldown is the peer
+	// pair's.
+	offered := PairOffer{Name: "laptop", Key: y.join.key, URL: "http://10.0.0.5:8790", As: "north", Card: true}
+	if _, err := y.join.PairOpen(y.ctx, offered, "jo"); err == nil || !strings.Contains(err.Error(), "cooldown") {
+		t.Fatalf("a hosted opening inside the call's cooldown = %v", err)
+	}
+
+	// Past the cooldown the call goes through, and the host answers it.
+	y.at = y.at.Add(pairCooldown + time.Minute)
+	if err := y.host.PairClose(y.ctx, "", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	tr, reg := y.register(t)
+	bead, seq, _ = y.card(t)
+	if _, err := y.host.PairAnswer(y.ctx, "", true, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.join.AnswerAsk(y.ctx, bead, seq, 0, first(tr), "jo", false); err != nil {
+		t.Fatalf("the right digits past the cooldown = %v", err)
+	}
+	if ps, _ := y.join.Peers(y.ctx); len(ps) != 1 || ps[0].Name != "north" {
+		t.Fatalf("peers = %+v", ps)
+	}
+	_ = reg
+}
+
+// alarmed is jo's notifications, oldest first.
+func alarmed(t *testing.T, s *Store, ctx context.Context) []Notification {
+	t.Helper()
+	page, err := s.UserNotifications(ctx, "jo", 0, "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return page.Notifications
+}
+
+// tellOutside names a source that tells jo outside the yard, written
+// directly: the alarm's write is what is tested, not the source.
+func tellOutside(t *testing.T, s *Store, ctx context.Context) {
+	t.Helper()
+	err := s.write(func(w *wtx) error {
+		u, err := getUser(w.Tx, "jo")
+		if err != nil {
+			return err
+		}
+		u.Notify = "pushover"
+		return put(w.Tx, bUsers, "jo", u)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// alarmPush is whether jo has a notification push queued for seq: the alarm
+// told outside the yard.
+func alarmPush(t *testing.T, s *Store, ctx context.Context, seq uint64) bool {
+	t.Helper()
+	pushes, err := s.Pushes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pushes {
+		if p.User == "jo" && p.Part == PushNotification && p.Seq == seq {
+			return true
+		}
+	}
+	return false
+}
+
+func assertPairAlarm(t *testing.T, s *Store, ctx context.Context, event Event, want string) {
+	t.Helper()
+	if Notified(event, "jo") != ReasonPairEnded {
+		t.Fatalf("event %d notified %+v: want jo told %s", event.Seq, event.Data["notified"], ReasonPairEnded)
+	}
+	for _, n := range alarmed(t, s, ctx) {
+		if n.Seq != event.Seq {
+			continue
+		}
+		if n.Kind != "peer_pair_refused" || n.Reason != ReasonPairEnded || n.Text != want {
+			t.Fatalf("the alarm = %+v, want %q", n, want)
+		}
+		if !alarmPush(t, s, ctx, event.Seq) {
+			t.Fatalf("no push queued for the alarm on event %d", event.Seq)
+		}
+		return
+	}
+	t.Fatalf("no notification for event %d", event.Seq)
+}
+
+func assertNoPairAlarm(t *testing.T, s *Store, ctx context.Context) {
+	t.Helper()
+	if got := alarmed(t, s, ctx); len(got) != 0 {
+		t.Fatalf("notifications = %+v: want no pairing alarm", got)
 	}
 }
 

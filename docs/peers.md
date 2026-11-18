@@ -15,6 +15,8 @@ yardr peer pair                                # in a terminal: a form that asks
 yardr peer pair --url http://10.0.0.5:8790     # on the yard that can be reached: shows a code
 yardr peer pair http://10.0.0.5:8790 K7QM-2XPD # on the other: links the two, and pings
 yardr peer pair --url http://10.0.0.5:8790 --expose yardmaster # also let it write to yardmaster here
+yardr peer pair --card --name laptop                 # for a card instead: returns at once, the operator types digits
+yardr peer pair http://10.0.0.5:8790 K7QM-2XPD --card  # the other yard calls for a card too
 
 yardr peer key                                 # this yard's public key, made on first use
 yardr peer invite --url http://10.0.0.5:8790   # by hand: one line for the other operator
@@ -151,10 +153,132 @@ allows those names on the new link, and otherwise exposes nobody.
 
 ### Pairing
 
-The commands the form runs on. Nothing is copied: one operator reads eight
-characters to the other, and both compare six digits. In a terminal give
-`--url` (or any flag) on the yard that opens the pairing, since bare it is
-the form.
+Two yards pair where their operators are: the yardmaster opens the
+pairing, the code is passed by the person it was opened for or their chat,
+and each operator types the half of the check the other reads out, on a
+card. That is [pairing from footplate](#pairing-from-footplate-a-card);
+`yardr peer pair` in a terminal, where both operators compare six digits at
+once, is the developer's fallback
+([below](#pairing-from-a-terminal)), and the commands the form runs on.
+The code is good for one pairing and proves nothing by itself: the check
+carries the proof.
+
+#### Pairing from footplate: a card
+
+The yardmaster opens the pairing, and each yard's operator confirms it
+where they are, on a card in footplate. On the yard that can be reached,
+the operator or the yardmaster runs:
+
+```sh
+# on north, which can be reached
+yardr peer pair --card --name laptop
+Pairing is open for 60 minutes, until 15:12:10, for one yard, laptop. Read the code to the other operator, who runs:
+
+  yardr peer pair http://10.0.0.5:8790 K7QM-2XPD
+
+This command ends here, and the pairing stays open in the server. When that yard calls, …
+```
+
+The command returns at once and leaves the pairing in the server, which keeps
+it for an hour: the session that opened it may be restarted or handed over
+meanwhile. The other yard calls for a card too (`yardr peer pair <address>
+<code> --card`), and its operator reads out the three on their own card; or
+it calls as in a terminal (`yardr peer pair <address> <code>`), and its
+operator reads out what its command shows. This yard files a
+card for its operator in footplate, the web view, `yardr chat` and on their
+devices, as it files any question: a question on a bead of its own, which
+nothing routes and the yard closes when the pairing ends.
+
+- **The card says who and what before it asks.** It names the yard that
+  called (what it calls itself, and its key), the name this yard expected
+  and saves it under (`--name`, which `--card` needs), who opened the
+  pairing and on whose word, and when it lapses. Decline a pairing you did not
+  ask for: the digits show that the two yards agree with each other, and not
+  that the yard on the other end is the one you expected.
+- **The check is split.** The card shows the first three digits of the check
+  and asks for the last three. The other operator reads you the last three
+  from their card or their command, and you read them the first. Typed and shown stay
+  apart, so copying your own screen cannot pass, and an answer of six digits,
+  or of the three on the card, is refused as the wrong shape and not counted.
+  The card is weighty, strong: its approval widens who this yard listens to.
+- **Calling for a card mirrors it.** On the yard that was given the code, the
+  operator or the yardmaster runs `yardr peer pair <address> <code> --card`:
+  it calls with the code, files this yard's card at once and returns, and its
+  exit closes nothing. The card shows the last three digits of the check and
+  asks for the first three, which the other operator reads out: each operator
+  reads out the three on their own card and types the three the other reads.
+  Five wrong tries, a decline, or the hour from the call ending, and nothing
+  is saved on either yard, and the other yard is told; another try takes
+  another code from its operator, after the cooldown. The digits are typed
+  while the other yard's
+  pairing still stands: a yard that shows the check in a terminal waits five
+  minutes from the call, and a verified answer after its host ended saves
+  nothing and says so.
+- **Wrong digits are counted per pairing, and the fifth ends it** with the
+  reason `wrong_check`: nothing is saved on either yard, the card is taken back
+  and its bead closed, and the other yard is told. A decline ends it too (`declined`).
+  Right digits confirm this yard; the pairing is done when the other yard's
+  operator has confirmed as well, and each yard then saves the other as a
+  terminal's pairing saves it: ping both ways and nothing else, and the
+  link proves itself the first time it is used.
+- **What a try is worth.** Three digits are a thousandth: someone in the
+  middle of both yards who also read the code passes this yard's check one time
+  in a thousand, where a terminal's six pass one in a million. What bounds that
+  is that a pairing takes five tries, that the card says who opened it and on
+  whose word, that every opening of the yardmaster's needs a word of its own,
+  that an ended attempt cools its name down, and that a one-sided end reaches
+  the operator directly (below). The two-phase show/type swap, in which each
+  side verifies six digits it never saw, stays the revisit if 10^-6 is wanted
+  back. The yard that calls in a terminal still compares all six.
+- **An ended attempt cools its name down.** A card open or call naming the
+  same yard within 10 minutes of an ended pairing attempt for it is refused
+  naming the cooldown and when to try again; a lapsed card re-opens after
+  it. Every attempt and end is on the record: the opening and the end as
+  their events, and the cooldown's refusal as `peer_pair_cooldown`.
+- **A one-sided end reaches the operator directly.** A card pairing that
+  ends declined, lapsed or on wrong digits tells the operator at once, with
+  the peer it named: "If the other yard shows a link from this pairing, its
+  operator can remove this yard there (`yardr peer rm <name>`) and pair
+  again." `<name>` is the name they gave this yard there. A confirmed pairing
+  tells nothing: both sides saved.
+- **An hour, from the opening.** It covers the wait for the call and the wait
+  for both operators; a server that stops takes the pairing with it, and so
+  does the hour. An answer after that is refused naming the lapse and the
+  command that opens another (`yardr peer pair --card --name laptop`), and the
+  card is taken back. The card says both. The yard that calls in a terminal
+  waits five minutes for this yard's operator after its own yes, and ends the
+  pairing then, so the digits are typed within them.
+- **The code is printed once**, to the command that opens the pairing, and goes
+  to the other operator by whoever it was opened for. It is in no card, note,
+  answer, event or log. It is good for one pairing, and the check is what the
+  link rests on.
+- **Who opens it.** The operator, as for any pairing, and the yardmaster: from
+  its line session (a conversation with one person is refused), with `--for
+  <user> --mail <seq>` on a user's local mail to it, any user of the yard and
+  not the operator alone, while `yardmaster_delegation` is on
+  ([users.md](users.md#the-yardmaster-for-the-operator)). The mail must be one
+  the yardmaster has not opened a pairing on, at most an hour old: a pairing
+  that failed or lapsed is opened again on a new word after the cooldown, not retried. The opening
+  is recorded and mailed to the user as any delegated run is, and the card names
+  it. Never another agent, mail from another yard, a timer, a thread or an
+  issue, or a call through a peer's reach. `yardr peer pair --end`, which ends
+  it, stays the operator's. A call for a card (`yardr peer pair <address>
+  <code> --card`) is the same gate: the operator, or the yardmaster on a
+  user's fresh word.
+- **Who answers.** The operator the card is put to, in a terminal, on a
+  paired device, in footplate paired with this yard directly or in the web view.
+  Not a crew member's pane or a bead agent's, whatever name it gives, and
+  not a call that came through a peer's link: the yard knows which from the door
+  the call came through, and refuses it before it reads a digit, so an agent
+  cannot burn the pairing's tries either. A pairing opened for a card is
+  confirmed by its digits and by nothing else.
+
+#### Pairing from a terminal
+
+The developer's fallback, and the commands the form runs on. Nothing is
+copied: one operator reads eight characters to the other, and both compare
+six digits. In a terminal give `--url` (or any flag) on the yard that opens
+the pairing, since bare it is the form.
 
 ```sh
 # on north, which can be reached
@@ -241,100 +365,7 @@ the same and the command says that the ping is owed.
   "check", "ping" or "ping_error"}`.
 - **Only the operator** pairs, as only the operator adds a peer. A pairing
   the operator confirms on a card is also opened by the yardmaster, on a
-  user's mail ([below](#pairing-from-footplate-a-card)).
-
-#### Pairing from footplate: a card
-
-A yard whose people have no terminal opens the pairing without one, and its
-operator confirms it where they are. On the yard that can be reached, the
-operator or the yardmaster runs:
-
-```sh
-# on north, which can be reached
-yardr peer pair --card --name laptop
-Pairing is open for 60 minutes, until 15:12:10, for one yard, laptop. Read the code to the other operator, who runs:
-
-  yardr peer pair http://10.0.0.5:8790 K7QM-2XPD
-
-This command ends here, and the pairing stays open in the server. When that yard calls, …
-```
-
-The command returns at once and leaves the pairing in the server, which keeps
-it for an hour: the session that opened it may be restarted or handed over
-meanwhile. The other yard calls as in a terminal (`yardr peer pair <address>
-<code>`), and its operator reads out what its command shows. This yard files a
-card for its operator in footplate, the web view, `yardr chat` and on their
-devices, as it files any question: a question on a bead of its own, which
-nothing routes and the yard closes when the pairing ends.
-
-- **The card says who and what before it asks.** It names the yard that
-  called (what it calls itself, and its key), the name this yard expected
-  and saves it under (`--name`, which `--card` needs), who opened the
-  pairing and on whose word, and when it lapses. Decline a pairing you did not
-  ask for: the digits show that the two yards agree with each other, and not
-  that the yard on the other end is the one you expected.
-- **The check is split.** The card shows the first three digits of the check
-  and asks for the last three. The other operator's command shows all six: they
-  read you the last three, and you read them the first. Typed and shown stay
-  apart, so copying your own screen cannot pass, and an answer of six digits,
-  or of the three on the card, is refused as the wrong shape and not counted.
-  The card is weighty, strong: its approval widens who this yard listens to.
-- **Calling for a card mirrors it.** On the yard that was given the code, the
-  operator or the yardmaster runs `yardr peer pair <address> <code> --card`:
-  it calls with the code, files this yard's card at once and returns, and its
-  exit closes nothing. The card shows the last three digits of the check and
-  asks for the first three, which the other operator reads out: each operator
-  reads out the three on their own card and types the three the other reads.
-  Five wrong tries, a decline, or the hour from the call ending, and nothing
-  is saved on either yard, and the other yard is told; another try takes
-  another code from its operator. The digits are typed while the other yard's
-  pairing still stands: a yard that shows the check in a terminal waits five
-  minutes from the call, and a verified answer after its host ended saves
-  nothing and says so.
-- **Wrong digits are counted per pairing, and the fifth ends it** with the
-  reason `wrong_check`: nothing is saved on either yard, the card is taken back
-  and its bead closed, and the other yard is told. A decline ends it too (`declined`).
-  Right digits confirm this yard; the pairing is done when the other yard's
-  operator has confirmed as well, and each yard then saves the other as a
-  terminal's pairing saves it: ping both ways and nothing else, and the
-  link proves itself the first time it is used.
-- **What a try is worth.** Three digits are a thousandth: someone in the
-  middle of both yards who also read the code passes this yard's check one time
-  in a thousand, where a terminal's six pass one in a million. What bounds that
-  is that a pairing takes five tries, that the card says who opened it and on
-  whose word, and that every opening of the yardmaster's needs a word of its
-  own. The yard that calls in a terminal still compares all six.
-- **An hour, from the opening.** It covers the wait for the call and the wait
-  for both operators; a server that stops takes the pairing with it, and so
-  does the hour. An answer after that is refused naming the lapse and the
-  command that opens another (`yardr peer pair --card --name laptop`), and the
-  card is taken back. The card says both. The yard that calls in a terminal
-  waits five minutes for this yard's operator after its own yes, and ends the
-  pairing then, so the digits are typed within them.
-- **The code is printed once**, to the command that opens the pairing, and goes
-  to the other operator by whoever it was opened for. It is in no card, note,
-  answer, event or log. It is good for one pairing, and the check is what the
-  link rests on.
-- **Who opens it.** The operator, as for any pairing, and the yardmaster: from
-  its line session (a conversation with one person is refused), with `--for
-  <user> --mail <seq>` on a user's local mail to it, any user of the yard and
-  not the operator alone, while `yardmaster_delegation` is on
-  ([users.md](users.md#the-yardmaster-for-the-operator)). The mail must be one
-  the yardmaster has not opened a pairing on, at most an hour old: a pairing
-  that failed or lapsed is opened again on a new word, not retried. The opening
-  is recorded and mailed to the user as any delegated run is, and the card names
-  it. Never another agent, mail from another yard, a timer, a thread or an
-  issue, or a call through a peer's reach. `yardr peer pair --end`, which ends
-  it, stays the operator's. A call for a card (`yardr peer pair <address>
-  <code> --card`) is the same gate: the operator, or the yardmaster on a
-  user's fresh word.
-- **Who answers.** The operator the card is put to, in a terminal, on a
-  paired device, in footplate paired with this yard directly or in the web view.
-  Not a crew member's pane or a bead agent's, whatever name it gives, and
-  not a call that came through a peer's link: the yard knows which from the door
-  the call came through, and refuses it before it reads a digit, so an agent
-  cannot burn the pairing's tries either. A pairing opened for a card is
-  confirmed by its digits and by nothing else.
+  user's mail ([above](#pairing-from-footplate-a-card)).
 
 #### What pairing rests on
 
@@ -659,9 +690,9 @@ peer from approving a change to the link it came through.
 `peer allow` with `--expose`, `--trust` or `--reach`, alone or beside a
 kind, rides a card ([chat.md](chat.md#questions-for-you)): the card names
 each whole, now and proposed. Taking an id back (`peer identity --rm`)
-is still typed in a terminal, refused as a card. A pairing is typed in a
-terminal as well, or opened
-without one: the yardmaster opens it for a card, on a user's mail, and the
+is still typed in a terminal, refused as a card. A pairing is opened
+without a terminal as well as in one: the yardmaster opens it for a card,
+on a user's mail, and the
 operator confirms it by typing digits ([pairing from
 footplate](#pairing-from-footplate-a-card)); a pairing is never a run ask. A
 command that only
@@ -3365,6 +3396,7 @@ with is 401, as any request that is no peer's.
 | `peer_pair_opened` | `peer pair` opened a pairing on this yard | `pairing`, its id; `expires`; `url`; `role` `host`; `card` (`true`) for one opened for a card, and, when the yardmaster opened it on a user's word, `for`, the user, and `mail`, the seq of their mail it cites |
 | `peer_paired` | a pairing ended with a link: with it `peer_added` and `peer_allowed`, in the same write | `peer`, `key`, `url`, `calls`, `role` (`host`: this yard was called; `joiner`: it called), `pairing` on the host |
 | `peer_pair_refused` | a pairing ended without one | `reason`: `wrong_code` (on the host after five, with `wrong_codes`; on the yard that called for each), `wrong_check` (five wrong digits typed on a card, with `wrong_checks`; on the yard that called, when its host says so), `declined` (this yard's operator), `peer_declined` (the other's), `timed_out`, `closed` (`--end`, Ctrl+C), `already_peer`, `bad_name`, `own_key`; `role`; `pairing` on the host; `peer`, `calls` and `key` once the other yard is known |
+| `peer_pair_cooldown` | a card open or call refused within 10 minutes of an ended attempt for the yard it names | `role` (`host` or `joiner`), `peer`, `retry_after`, when the cooldown lifts |
 | `peer_removed` | `peer rm` | `peer`, `messages_dropped`, `identities` (each `source`, `id`, `crew`) that went with it, `crew` that could mail it and no longer can, `beads` it sent that now say their link is removed, `beads_away` of this yard's that were there and ended as `undelivered`, `asks` it asked that were dropped (each person they were for gets one mail from `yard` listing theirs); `approved`, the `bead` and `ask` of the run ask the operator approved, when it was removed that way |
 | `peer_renamed` | `peer rename` | `from`, `to`; `peer`, the new name; `messages` that waited and moved with it; `crew` whose `peers` setting followed, `groups` whose `peer` setting did, `subscriptions`: who holds a subscription whose `peer=` or `speaker=` filter did; `approved`, the `bead` and `ask` of the run ask the operator approved, when it was renamed that way |
 | `peer_url_set` | `peer set --url` | `peer`; `url` as it is now, absent for a peer that is no longer called; `was`, the URL it had, absent when it had none; `approved`, the `bead` and `ask` of the run ask the operator approved, when it was set that way |

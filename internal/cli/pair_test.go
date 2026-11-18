@@ -531,14 +531,15 @@ func testPeerPairHostCard(t *testing.T) {
 	}
 
 	// With --json the command prints the one document a script reads the
-	// code from, and returns, as without.
+	// code from, and returns, as without. For another yard: the pairing
+	// that ended cools its name down.
 	north.a.json = true
 	var doc struct {
 		Pairing, Code, Address, Command string
 		Card                            bool
 		Expires                         time.Time
 	}
-	if err := json.Unmarshal([]byte(north.must(t, "pair", "--card", "--name", "laptop")), &doc); err != nil || !doc.Card || doc.Pairing == "" ||
+	if err := json.Unmarshal([]byte(north.must(t, "pair", "--card", "--name", "laptop2")), &doc); err != nil || !doc.Card || doc.Pairing == "" ||
 		!pairCode.MatchString(doc.Code) || doc.Address != north.srv.URL || !strings.HasSuffix(doc.Command, doc.Code) || time.Until(doc.Expires) < store.CardTTL-time.Minute {
 		t.Fatalf("the document = %+v, %v", doc, err)
 	}
@@ -743,10 +744,11 @@ func testPeerPairJoinCard(t *testing.T) {
 		t.Fatalf("north's refusals = %+v", evs)
 	}
 
-	// A decline ends a fourth the same way.
+	// A decline ends a fourth the same way, saved under another name: the
+	// call that ended cools its name down.
 	printed, done = hostPair(t, north)
 	addr, code = codeOf(t, printed, done)
-	laptop.must(t, "pair", addr, code, "--card")
+	laptop.must(t, "pair", addr, code, "--card", "--name", "north2")
 	bead, seq = waitCard(t, laptop)
 	_ = checkOf(t, printed)
 	if err := laptop.st.DeclineAsk(ctx, bead, seq, "I did not ask for this", "jo"); err != nil {
@@ -784,9 +786,9 @@ func testPeerPairJoinCard(t *testing.T) {
 	}
 	laptop.a.actor = "yardmaster"
 	laptop.a.env = testEnv(t, laptop.home, "YARDR_CREW=yardmaster")
-	out = north.must(t, "pair", "--card", "--name", "laptop")
+	out = north.must(t, "pair", "--card", "--name", "laptop2")
 	m = pairCommand.FindStringSubmatch(out)
-	out, err = laptop.delegated(t, "peer", "pair", m[1], m[2], "--card", "--for", "jo", "--mail", strconv.FormatUint(mail, 10))
+	out, err = laptop.delegated(t, "peer", "pair", m[1], m[2], "--card", "--name", "north3", "--for", "jo", "--mail", strconv.FormatUint(mail, 10))
 	if err != nil {
 		t.Fatalf("the yardmaster's call: %v\n%s", err, out)
 	}
@@ -836,7 +838,7 @@ func testPeerPairJoinCard(t *testing.T) {
 	// With --json the command prints the one document a script reads the
 	// call from, and returns, as without; the operator ends the call.
 	laptop.a.json = true
-	out = north.must(t, "pair", "--card", "--name", "laptop")
+	out = north.must(t, "pair", "--card", "--name", "laptop3")
 	m = pairCommand.FindStringSubmatch(out)
 	var doc struct {
 		Call, Address, Peer string
@@ -845,8 +847,8 @@ func testPeerPairJoinCard(t *testing.T) {
 		Ask                 uint64
 		Expires             time.Time
 	}
-	if err := json.Unmarshal([]byte(laptop.must(t, "pair", m[1], m[2], "--card")), &doc); err != nil || !doc.Card || doc.Call == "" ||
-		doc.Address != m[1] || doc.Peer != "north" || doc.Bead == "" || doc.Ask == 0 || time.Until(doc.Expires) < store.CardTTL-time.Minute {
+	if err := json.Unmarshal([]byte(laptop.must(t, "pair", m[1], m[2], "--card", "--name", "north4")), &doc); err != nil || !doc.Card || doc.Call == "" ||
+		doc.Address != m[1] || doc.Peer != "north4" || doc.Bead == "" || doc.Ask == 0 || time.Until(doc.Expires) < store.CardTTL-time.Minute {
 		t.Fatalf("the document = %+v, %v", doc, err)
 	}
 	laptop.a.json = false
@@ -861,7 +863,7 @@ func testPeerPairJoinCard(t *testing.T) {
 	}
 
 	// A wrong code files no call, and a yard calls none of itself.
-	out = north.must(t, "pair", "--card", "--name", "laptop")
+	out = north.must(t, "pair", "--card", "--name", "laptop4")
 	m = pairCommand.FindStringSubmatch(out)
 	if _, err := laptop.peer(t, "pair", m[1], "ZZZZZZZZ", "--card"); err == nil || !strings.Contains(err.Error(), "that is not the code") {
 		t.Fatalf("a call with a wrong code = %v", err)
@@ -870,7 +872,7 @@ func testPeerPairJoinCard(t *testing.T) {
 		t.Fatalf("a wrong code filed a card: %+v, %v", q, err)
 	}
 	said(t, laptop.a.cfg, hooks.Listener{Addr: strings.TrimPrefix(laptop.srv.URL, "http://"), From: hooks.FromSetting})
-	out = laptop.must(t, "pair", "--card", "--name", "north")
+	out = laptop.must(t, "pair", "--card", "--name", "north5")
 	m = pairCommand.FindStringSubmatch(out)
 	if _, err := laptop.peer(t, "pair", laptop.srv.URL, m[2], "--card"); err == nil || !strings.Contains(err.Error(), "this yard's own key") {
 		t.Fatalf("a call to the yard itself = %v", err)

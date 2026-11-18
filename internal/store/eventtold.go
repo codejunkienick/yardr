@@ -227,6 +227,7 @@ var eventDataTold = map[string][]string{
 	"peer_paired":           {"key", "pairing", "peer", "role"},
 	"peer_pair_opened":      {"expires", "pairing", "role"},
 	"peer_pair_refused":     {"key", "pairing", "peer", "reason", "role", "wrong_codes"},
+	"peer_pair_cooldown":    {"peer", "role", "retry_after"},
 	"peer_identity_set":     {"approved", "crew", "id", "peer", "source", "was"},
 	"peer_identity_removed": {"crew", "id", "peer", "source"},
 	"peer_intake":           {"approved", "default", "depot", "flow", "limit", "none", "peer"},

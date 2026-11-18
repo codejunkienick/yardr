@@ -135,13 +135,19 @@ func (p *hostPairing) event(extra map[string]any) map[string]any {
 	return data
 }
 
-// endPairing ends the pairing without a link, for reason, and logs it.
+// endPairing ends the pairing without a link, for reason, and logs it. A
+// card pairing's end is the card's to log (endCard): the refused event, the
+// attempt on the record and the alarm where one is owed, then the card
+// cleared. A terminal's is logged here, as it was.
 func (s *Store) endPairing(ctx context.Context, p *hostPairing, reason, detail, actor string) {
 	p.State, p.Reason, p.Detail = PairEnded, reason, detail
 	p.forget()
+	if p.card != nil {
+		s.endCard(ctx, p, reason, actor)
+		return
+	}
 	// The pairing has ended whether or not the event is written.
 	_ = s.LogEvent(ctx, "", "peer_pair_refused", actor, p.event(map[string]any{"reason": reason}))
-	s.endCard(p, reason)
 }
 
 // pairing is the yard's pairing as it is now, with s.pair.mu held: one
@@ -313,8 +319,15 @@ func (s *Store) PairOpen(ctx context.Context, o PairOffer, actor string) (*Pairi
 	}
 	s.pair.mu.Lock()
 	defer s.pair.mu.Unlock()
-	if p := s.pairing(ctx); p != nil && (p.State == PairOpened || p.State == PairCalled) {
-		return nil, fmt.Errorf("a pairing is open already, until %s: a yard has one at a time (yardr peer pair --end ends it)", p.Expires.Local().Format("15:04:05"))
+	current := s.pairing(ctx)
+	if current != nil && (current.State == PairOpened || current.State == PairCalled) {
+		return nil, fmt.Errorf("a pairing is open already, until %s: a yard has one at a time (yardr peer pair --end ends it)", current.Expires.Local().Format("15:04:05"))
+	}
+	if o.Card {
+		// Check after pairing has recorded an expired attempt.
+		if err := s.cardCooldown(ctx, o.As, "host", actor); err != nil {
+			return nil, err
+		}
 	}
 	code := NewCode()
 	clean, err := CleanCode(code)

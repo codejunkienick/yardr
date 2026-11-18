@@ -30,6 +30,13 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// schemaVersion 37 has a card pairing keep its last ended attempt per
+// expected peer (bPairAttempts, migratePairingAttempts): a card open or call
+// naming one whose attempt ended within pairCooldown is refused. Nothing is
+// carried over from an older store, whose pairings lived in the server's
+// memory. A build before it never runs without the cooldown: checkSchema
+// refuses a store newer than the build knows before any migration or bucket
+// write.
 // schemaVersion 36 has a source remember the host its credential was given for
 // (Source.KeyedHost): a call is held while its declaration sends the credential
 // to another host, and migrateSourceKeyedHost pairs each source that already
@@ -224,7 +231,7 @@ import (
 // Bump this whenever a build starts writing something every write must
 // keep up (an index, a field a read relies on): the stamp is what stops an
 // older build from appending to the store without it.
-const schemaVersion = 36
+const schemaVersion = 37
 
 var kSchema = []byte("schema")
 
@@ -383,6 +390,7 @@ func openMigrations(home string, moved, depotsMoved bool) []migration {
 		{version: 34, run: atVersion(migrateNotificationsHeld)},
 		{version: 35, run: atVersion(migrateRoutePriority)},
 		{version: 36, run: atVersion(migrateSourceKeyedHost)},
+		{version: 37, run: atVersion(migratePairingAttempts)},
 	}
 }
 

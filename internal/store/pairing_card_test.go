@@ -124,9 +124,30 @@ func TestPairingCardIsOpenedOnAFreshWord(t *testing.T) {
 	if _, err := api.PairOpen(wordOf(line, "jo", y.mail), cardOffer(t), "yardmaster"); err == nil || !strings.Contains(err.Error(), "opened a pairing already") {
 		t.Fatalf("the same mail again = %v", err)
 	}
-	// A new word from a user who is not the operator opens one: the card
-	// will still be put to the operator, whose digits confirm it.
-	second, err := api.PairOpen(wordOf(line, "ada", adaMail), cardOffer(t), "yardmaster")
+	// A new word for the same yard is refused naming the cooldown: the
+	// pairing that ended cools its name down.
+	if _, err := api.PairOpen(wordOf(line, "ada", adaMail), cardOffer(t), "yardmaster"); err == nil || !strings.Contains(err.Error(), "cooldown") {
+		t.Fatalf("a new word inside the cooldown = %v", err)
+	}
+	evs, err = api.Events(ctx, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cooled *store.Event
+	for i, e := range evs {
+		if e.Kind == "peer_pair_cooldown" {
+			cooled = &evs[i]
+		}
+	}
+	if cooled == nil || cooled.Data["role"] != "host" || cooled.Data["peer"] != "laptop" || cooled.Actor != "yardmaster" {
+		t.Fatalf("the cooldown's event = %+v", cooled)
+	}
+	// A new word from a user who is not the operator opens one, for
+	// another yard: the card will still be put to the operator, whose
+	// digits confirm it.
+	secondOffer := cardOffer(t)
+	secondOffer.As = "laptop2"
+	second, err := api.PairOpen(wordOf(line, "ada", adaMail), secondOffer, "yardmaster")
 	if err != nil {
 		t.Fatalf("the yardmaster's opening on ada's mail: %v", err)
 	}
@@ -136,7 +157,9 @@ func TestPairingCardIsOpenedOnAFreshWord(t *testing.T) {
 
 	// The operator opens without one, through the owner's store: over the
 	// socket the call would read as the yardmaster's pane's.
-	third, err := y.own.PairOpen(ctx, cardOffer(t), "jo")
+	thirdOffer := cardOffer(t)
+	thirdOffer.As = "laptop3"
+	third, err := y.own.PairOpen(ctx, thirdOffer, "jo")
 	if err != nil {
 		t.Fatalf("the operator's opening: %v", err)
 	}
@@ -399,8 +422,16 @@ func TestPairCallIsRegisteredOnAFreshWord(t *testing.T) {
 	if _, err := api.PairOpen(wordOf(line, "jo", y.mail), cardOffer(t), "yardmaster"); err == nil || !strings.Contains(err.Error(), "opened a pairing already") {
 		t.Fatalf("an opening on the mail a call spent = %v", err)
 	}
-	// A new word from a user who is not the operator registers one.
-	second, err := api.PairCallRegister(callOf(line, "ada", adaMail), callOffer(t), "yardmaster")
+	// A new word for the same yard is refused naming the cooldown: the
+	// call that ended cools its name down.
+	if _, err := api.PairCallRegister(callOf(line, "ada", adaMail), callOffer(t), "yardmaster"); err == nil || !strings.Contains(err.Error(), "cooldown") {
+		t.Fatalf("a new word inside the cooldown = %v", err)
+	}
+	// A new word from a user who is not the operator registers one, for
+	// another yard.
+	secondOffer := callOffer(t)
+	secondOffer.Peer = "south2"
+	second, err := api.PairCallRegister(callOf(line, "ada", adaMail), secondOffer, "yardmaster")
 	if err != nil {
 		t.Fatalf("the yardmaster's call on ada's mail: %v", err)
 	}
@@ -410,7 +441,9 @@ func TestPairCallIsRegisteredOnAFreshWord(t *testing.T) {
 
 	// The operator registers without one, through the owner's store: over
 	// the socket the call would read as the yardmaster's pane's.
-	third, err := y.own.PairCallRegister(ctx, callOffer(t), "jo")
+	thirdOffer := callOffer(t)
+	thirdOffer.Peer = "south3"
+	third, err := y.own.PairCallRegister(ctx, thirdOffer, "jo")
 	if err != nil {
 		t.Fatalf("the operator's call: %v", err)
 	}

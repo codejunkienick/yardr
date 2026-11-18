@@ -230,10 +230,15 @@ func (s *Store) retireCard(bead string, seq uint64, why string) {
 	})
 }
 
-// endCard clears the card of a pairing that ended, saying why in words that
-// name what to do next. Nothing is done for one whose card was never filed.
-func (s *Store) endCard(p *hostPairing, reason string) {
-	if p.card == nil || p.card.ask == 0 {
+// endCard logs the end of a pairing opened for a card, and clears its card,
+// saying why in words that name what to do next. The refused event, the
+// attempt on the record and the alarm where one is owed are one write
+// (endHostCard); the card's clearing is another, as before. Nothing is
+// cleared for one whose card was never filed, but its end is still logged,
+// recorded and told: its opener is otherwise told nothing.
+func (s *Store) endCard(ctx context.Context, p *hostPairing, reason, actor string) {
+	s.endHostCard(ctx, p, reason, actor)
+	if p.card.ask == 0 {
 		return
 	}
 	why := fmt.Sprintf("the pairing ended (%s): nothing was saved on either yard", reason)
@@ -370,16 +375,23 @@ func (s *Store) PairCallRegister(ctx context.Context, o PairCallOffer, actor str
 		return nil, err
 	}
 	s.pair.mu.Lock()
-	// Lapsed calls are claimed under the lock and ended past it: the host
-	// is told, and nothing of a call crosses the lock held.
+	// Lapsed calls are recorded under the lock and told to the host after it.
 	var swept []*pairCall
 	defer func() {
 		s.pair.mu.Unlock()
 		for _, old := range swept {
-			s.endJoinCall(ctx, old, TimedOut, "yard")
+			s.finishJoinCall(ctx, old, TimedOut)
 		}
 	}()
 	swept = s.sweepCallsLocked()
+	for _, old := range swept {
+		s.endJoinCallWrite(ctx, old, TimedOut, "yard")
+	}
+	// Check after expired calls have been recorded, under the same lock
+	// that keeps another call from ending between the check and the open.
+	if err := s.cardCooldown(ctx, o.Peer, "joiner", actor); err != nil {
+		return nil, err
+	}
 	jc := &pairCall{
 		PairCall:   PairCall{ID: pairCallPrefix + newPeerMessageID(), State: PairCalled, Expires: now().Add(CardTTL), Peer: o.Peer, Calls: host.Name},
 		url:        url,
@@ -457,13 +469,14 @@ func (s *Store) PairCallClose(ctx context.Context, id, actor string) error {
 		return errors.New("an answer to this call's card is being carried to the other yard: the call ends with the pairing")
 	}
 	delete(s.pair.calls, jc.ID)
+	s.endJoinCallWrite(ctx, jc, Closed, actor)
 	s.pair.mu.Unlock()
-	s.endJoinCall(ctx, jc, Closed, actor)
+	s.finishJoinCall(ctx, jc, Closed)
 	return nil
 }
 
 // sweepCallsLocked drops the calls whose hour has run out, claimed for the
-// caller to end outside the lock. A call whose answer is being carried is
+// caller to record under the lock and tell outside it. A carried answer is
 // the answer's to end, not the sweep's.
 func (s *Store) sweepCallsLocked() []*pairCall {
 	var out []*pairCall
@@ -476,17 +489,11 @@ func (s *Store) sweepCallsLocked() []*pairCall {
 	return out
 }
 
-// endJoinCall ends the call without a link, for reason: the host is told
-// no, this yard logs why, and the card is taken back. It runs outside the
-// pairing lock, on a call claimed under it.
+// endJoinCall records an end before telling the host no, so the alarm is not
+// delayed by that call.
 func (s *Store) endJoinCall(ctx context.Context, jc *pairCall, reason, actor string) {
-	if send := s.pairCallSender; send != nil {
-		told, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
-		_, _ = send(told, jc.url, jc.transcript, false)
-	}
-	_ = s.PairRefused(ctx, reason, jc.Calls, actor)
-	s.retireCard(jc.Bead, jc.Ask, joinEndWords(jc, reason))
+	s.endJoinCallWrite(ctx, jc, reason, actor)
+	s.finishJoinCall(ctx, jc, reason)
 }
 
 // joinEndWords says why a call ended without a link, in words that name
@@ -789,8 +796,9 @@ func (c *cardAnswer) settle(ctx context.Context, err error) error {
 func (c *cardAnswer) settleJoin(ctx context.Context, err error) error {
 	s := c.s
 	if c.lapsed != nil {
+		s.endJoinCallWrite(ctx, c.lapsed, TimedOut, c.actor)
 		s.pair.mu.Unlock()
-		s.endJoinCall(ctx, c.lapsed, TimedOut, c.actor)
+		s.finishJoinCall(ctx, c.lapsed, TimedOut)
 		if err == nil && c.outcome == cardDeclined {
 			// The decline stands as the operator's word; the call had lapsed.
 			return nil
@@ -809,12 +817,13 @@ func (c *cardAnswer) settleJoin(ctx context.Context, err error) error {
 		left := MaxCheckTries - c.jc.tries
 		if fifth {
 			delete(s.pair.calls, c.jc.ID)
+			s.endJoinCallWrite(ctx, c.jc, WrongCheck, c.actor)
 		}
 		s.pair.mu.Unlock()
 		if !fifth {
 			return fmt.Errorf("%w: %d tries are left before the pairing ends", wrong, left)
 		}
-		s.endJoinCall(ctx, c.jc, WrongCheck, c.actor)
+		s.finishJoinCall(ctx, c.jc, WrongCheck)
 		return fmt.Errorf("%w: %d wrong tries ended the pairing, and nothing was saved on either yard. Ask the other operator for a new code and call again", wrong, MaxCheckTries)
 	case errors.Is(err, errCardGone):
 		s.pair.mu.Unlock()
@@ -848,6 +857,7 @@ func (c *cardAnswer) settleJoin(ctx context.Context, err error) error {
 		jc, live := s.pair.calls[c.jc.ID]
 		if live && jc.State == PairCalled {
 			delete(s.pair.calls, jc.ID)
+			s.endJoinCallWrite(ctx, jc, Declined, c.actor)
 		} else {
 			live = false
 		}
@@ -856,7 +866,7 @@ func (c *cardAnswer) settleJoin(ctx context.Context, err error) error {
 			s.retireCard(c.bead, c.seq, "declined: nothing was saved on either yard")
 			return nil
 		}
-		s.endJoinCall(ctx, c.jc, Declined, c.actor)
+		s.finishJoinCall(ctx, c.jc, Declined)
 		return nil
 	}
 	s.pair.mu.Unlock()
@@ -881,22 +891,37 @@ func (c *cardAnswer) confirmJoin(ctx context.Context, jc *pairCall) error {
 		s.pair.mu.Unlock()
 		return errors.New("the pairing was ended while the answer was carried: nothing was saved on this yard")
 	}
+	ended := false
+	if !(err == nil && out != nil && out.State == Confirmed) {
+		switch {
+		case expired:
+			s.endJoinCallWrite(ctx, jc, TimedOut, jc.actor)
+			ended = true
+		case err == nil && out != nil:
+			s.endJoinCallWrite(ctx, jc, joinEndReason(out.Reason), jc.actor)
+			ended = true
+		}
+	}
 	delete(s.pair.calls, jc.ID)
 	s.pair.mu.Unlock()
-	return s.finishJoin(ctx, jc, out, err, expired)
+	return s.finishJoin(ctx, jc, out, err, expired, ended)
 }
 
 // finishJoin saves what a carried answer's outcome says: the peer on yes
 // from both sides, as a terminal's pairing saves it, and nothing on
 // anything else.
-func (s *Store) finishJoin(ctx context.Context, jc *pairCall, out *PairingOutcome, err error, expired bool) error {
+func (s *Store) finishJoin(ctx context.Context, jc *pairCall, out *PairingOutcome, err error, expired, ended bool) error {
 	switch {
 	case err == nil && out != nil && out.State == Confirmed:
 		// A confirmed response means the host saved this yard. Its signed
 		// reply can arrive as the local deadline fires, and must still be
 		// saved here.
 	case expired:
-		s.endJoinCall(ctx, jc, TimedOut, jc.actor)
+		if ended {
+			s.finishJoinCall(ctx, jc, TimedOut)
+		} else {
+			s.endJoinCall(ctx, jc, TimedOut, jc.actor)
+		}
 		return fmt.Errorf("%s's operator did not confirm within %s of the call: nothing was saved on either yard", jc.Peer, minutes(CardTTL))
 	case err != nil:
 		// The other yard may have saved this one: its answer did not arrive.
@@ -908,7 +933,7 @@ func (s *Store) finishJoin(ctx context.Context, jc *pairCall, out *PairingOutcom
 		s.retireCard(jc.Bead, jc.Ask, words)
 		return errors.New(words)
 	default:
-		return s.joinSaidNo(ctx, jc, out.Reason)
+		return s.joinSaidNo(ctx, jc, out.Reason, ended)
 	}
 	peer := Peer{Name: jc.Peer, Key: jc.transcript.Host.Key, Enc: jc.transcript.Host.Enc, URL: jc.url, Calls: jc.Calls}
 	if _, err := s.pairPeer(peer, jc.actor, map[string]any{"role": "joiner", "pairing": jc.ID}); err != nil {
@@ -939,23 +964,25 @@ func clipReason(s string) string {
 
 // joinSaidNo ends a call the host ended without a link, and logs it here.
 // The reason is that yard's: its "declined" is its own operator's.
-func (s *Store) joinSaidNo(ctx context.Context, jc *pairCall, reason string) error {
-	mine, text := PeerDeclined, fmt.Sprintf("%s ended the pairing (%s)", jc.Peer, clipReason(reason))
+func (s *Store) joinSaidNo(ctx context.Context, jc *pairCall, reason string, ended bool) error {
+	mine, text := joinEndReason(reason), fmt.Sprintf("%s ended the pairing (%s)", jc.Peer, clipReason(reason))
 	switch reason {
 	case Declined:
 		text = fmt.Sprintf("%s's operator declined", jc.Peer)
 	case PeerDeclined:
-		mine, text = Declined, "declined"
+		text = "declined"
 	case WrongCheck:
-		mine, text = WrongCheck, fmt.Sprintf("%s's operator typed the wrong digits %d times, and the pairing ended: the check was not compared with yours, or something between the two yards changed it", jc.Peer, MaxCheckTries)
+		text = fmt.Sprintf("%s's operator typed the wrong digits %d times, and the pairing ended: the check was not compared with yours, or something between the two yards changed it", jc.Peer, MaxCheckTries)
 	case TimedOut:
-		mine, text = TimedOut, "the two operators did not both confirm in time"
+		text = "the two operators did not both confirm in time"
 	case Closed:
-		mine, text = Closed, fmt.Sprintf("%s's operator ended the pairing", jc.Peer)
+		text = fmt.Sprintf("%s's operator ended the pairing", jc.Peer)
 	case AlreadyPeer:
-		mine, text = AlreadyPeer, fmt.Sprintf("%s could not save this yard: its name or its key became a peer's there meanwhile", jc.Peer)
+		text = fmt.Sprintf("%s could not save this yard: its name or its key became a peer's there meanwhile", jc.Peer)
 	}
-	_ = s.PairRefused(ctx, mine, jc.Calls, jc.actor)
+	if !ended {
+		s.endJoinCallWrite(ctx, jc, mine, jc.actor)
+	}
 	s.retireCard(jc.Bead, jc.Ask, text+": nothing was saved on either yard")
 	return errors.New(text + ": nothing was saved on either yard")
 }
