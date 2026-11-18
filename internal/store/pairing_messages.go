@@ -55,6 +55,18 @@ const (
 // MaxTries is how many wrong codes an open pairing takes before it ends.
 const MaxTries = 5
 
+// CardTTL is how long a pairing opened for a card is good for, from when it
+// is opened: the wait for the other yard's call and the two operators' wait
+// to confirm it together. It is longer than TTL and ConfirmTTL because the
+// operator the card asks may not be at their screen when the call comes. It
+// ends with the server that holds it, as any pairing does.
+const CardTTL = time.Hour
+
+// MaxCheckTries is how many wrong check digits a card pairing takes on its
+// card before it ends: the digits are three, so each try is a thousandth,
+// and the fifth ends it.
+const MaxCheckTries = 5
+
 // alphabet is what a code is written in: digits and capitals without I, L,
 // O and U, so that none reads or sounds like another.
 const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -317,6 +329,7 @@ type PairingOutcome struct {
 // them.
 const (
 	WrongCode    = "wrong_code"    // MaxTries wrong codes; also the answer to one
+	WrongCheck   = "wrong_check"   // MaxCheckTries wrong digits typed on the card
 	Declined     = "declined"      // this yard's operator said no to the check
 	PeerDeclined = "peer_declined" // the other yard's did
 	TimedOut     = "timed_out"     // the code, or the time to confirm, ran out

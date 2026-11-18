@@ -149,6 +149,10 @@ type Ask struct {
 	// Head is the head a pull request's card shows and the outcome whose
 	// pick accepts it (stagehead.go): put with the card, and the yard's own.
 	Head *AskHead `json:"head,omitempty"`
+	// Pair makes the ask a pairing card (pairing_card.go): the id of the host
+	// pairing whose check its typed words answer. The yard's own, filed with
+	// the card when the other yard calls: newAsk clears whatever a caller sends.
+	Pair string `json:"pair,omitempty"`
 }
 
 // Answer is the JSON of a note of kind answer: what one person did with
@@ -311,7 +315,7 @@ func (s *Store) newAsk(ctx context.Context, ask Ask, actor string) (func(w *wtx,
 	// asking by hand puts no stage ask. The moves are the writer's to name,
 	// and checked (askMovesShape, and checkAskMoves against the bead's flow).
 	ask.Stage, ask.Entry, ask.Fallback, ask.Moves = "", 0, false, false
-	ask.Weight, ask.Head = nil, nil
+	ask.Weight, ask.Head, ask.Pair = nil, nil, ""
 	ask.Question = strings.TrimSpace(ask.Question)
 	if ask.Question == "" {
 		return nil, fmt.Errorf("an ask needs a question")
@@ -762,8 +766,17 @@ func (s *Store) AddAnswerExpected(ctx context.Context, id string, ans Answer, ac
 
 // addAnswer is AddAnswer's write, refused whole when expect no longer holds
 // (guard). weighed is the caller's word that its person saw the weight
-// of a mapping card whose pick writes an identity (weighedRefusal).
+// of a mapping card whose pick writes an identity (weighedRefusal). An answer
+// to a pairing card holds the pairing's lock around the write, the lock that
+// comes before the ask's and the store's, and settles the pairing after it.
 func (s *Store) addAnswer(ctx context.Context, id string, ans Answer, actor string, expect answerExpect, weighed bool) error {
+	card := s.holdCard(ctx, id, ans.Ask)
+	return card.settle(ctx, s.recordAnswer(ctx, id, ans, actor, expect, weighed, card))
+}
+
+// recordAnswer is addAnswer's write, with the hold on the pairing a card's
+// answer confirms (nil for any other ask).
+func (s *Store) recordAnswer(ctx context.Context, id string, ans Answer, actor string, expect answerExpect, weighed bool, card *cardAnswer) error {
 	unlock := s.askLocks.lock(askLockKey(id, ans.Ask))
 	defer unlock()
 	if err := answerShape(id, &ans); err != nil {
@@ -812,11 +825,17 @@ func (s *Store) addAnswer(ctx context.Context, id string, ans Answer, actor stri
 		if _, err := answerable(row.ID, notes, ans, now(), actor, mayAnswer); err != nil {
 			return err
 		}
+		stored := ans
+		if card != nil {
+			if stored, err = card.admit(ctx, w, ans, actor); err != nil {
+				return err
+			}
+		}
 		move, _, err := w.stageAnswer(ctx, row, notes, ans, actor, repo, home)
 		if err != nil {
 			return err
 		}
-		text, err := json.Marshal(ans)
+		text, err := json.Marshal(stored)
 		if err != nil {
 			return err
 		}
@@ -879,64 +898,6 @@ func (s *Store) addAnswer(ctx context.Context, id string, ans Answer, actor stri
 		}
 		return w.settleCopies(row, ans, nil, "")
 	})
-}
-
-// seatLeftRefusal refuses an answer to the yard's login card on a crew
-// journal after its seat left the login screen: the answer made after the
-// leave, before the next pass takes the card back, would lead a login
-// nothing waits on. Dispatch learns of the leave at the next pass, which
-// is the window itself, so only the answer path sees the answer in time,
-// at write time here.
-//
-// The card is an ask the yard authored on a journal bead, and the answer
-// a pick or words: declining the dead card ends it, and putting it aside
-// leaves it to the sweep. The seat is any session of the crew member the
-// journal is of — the line session and every conversation, as seatsAtLogin
-// counts them — live and marked at the screen; a session seated while the
-// card's own left still takes the answer, since no ask names its seat.
-// Ordinary answers pay one string comparison; the notes and the crew are
-// read only on the rare daemon-ask path. With the refusal it answers
-// RefusedAskSeatLeft, as answerable answers its own; the local caller
-// keeps the words alone.
-func (s *Store) seatLeftRefusal(ctx context.Context, id string, ans Answer) (string, error) {
-	if !strings.HasSuffix(id, "-journal") || ans.Decline || ans.Later {
-		return "", nil
-	}
-	notes, err := s.Notes(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	yard := false
-	for _, n := range notes {
-		if n.Seq == ans.Ask && n.Kind == NoteAsk && n.Author == "yard" {
-			yard = true
-			break
-		}
-	}
-	if !yard {
-		return "", nil
-	}
-	crew, err := s.Crew(ctx)
-	if err != nil {
-		return "", err
-	}
-	for _, r := range crew {
-		if r.Journal != id {
-			continue
-		}
-		if screen, _ := r.CrewSession.login(); screen {
-			return "", nil
-		}
-		for _, cs := range r.Conversations {
-			if screen, _ := cs.login(); screen {
-				return "", nil
-			}
-		}
-		break
-	}
-	// The journal remains after its crew member is deleted. Its login card
-	// still waits on a seat that no longer exists, so refuse it as well.
-	return RefusedAskSeatLeft, fmt.Errorf("ask %d waits on a seat that left its login screen: the yard takes the card back", ans.Ask)
 }
 
 // answerShape refuses an answer that is not exactly one of a pick, words

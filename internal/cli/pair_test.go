@@ -11,11 +11,14 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"yardr.dev/yardr/internal/hooks"
 	"yardr.dev/yardr/internal/store"
@@ -31,6 +34,18 @@ func pairYards(t *testing.T) (north, laptop *cliYard) {
 	north, laptop = newCLIYard(t, "north"), newCLIYard(t, "laptop")
 	said(t, north.a.cfg, hooks.Listener{Addr: strings.TrimPrefix(north.srv.URL, "http://"), From: hooks.FromSetting})
 	return north, laptop
+}
+
+// delegated runs args as yardr's commands the yardmaster may run for a user
+// (--for, --mail) are given them, under a root of their own: the real root
+// names an actor, which the yard's own stays here.
+func (y *cliYard) delegated(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	root := &cobra.Command{Use: "yardr"}
+	root.SetContext(store.WithCaller(context.Background(), os.Getpid()))
+	root.AddCommand(y.a.peerCmd())
+	y.a.delegate(root)
+	return run(t, root, args...)
 }
 
 var pairCommand = regexp.MustCompile(`yardr peer pair (http://\S+) ([0-9A-Z]{4}-[0-9A-Z]{4})`)
@@ -323,7 +338,196 @@ func TestPeerPairWithoutATerminal(t *testing.T) {
 	if _, err := north.peer(t, "pair", north.srv.URL); err == nil || !strings.Contains(err.Error(), "the address and the code") {
 		t.Errorf("peer pair <address> without a code = %v", err)
 	}
+
+	// A pairing for a card is the operator's too, and the yardmaster's only
+	// on a word (--for and --mail), which a terminal's pairing never takes.
+	north.a.actor = "yardmaster"
+	north.a.env = testEnv(t, north.home, "YARDR_CREW=yardmaster")
+	if _, err := north.peer(t, "pair", "--card", "--name", "laptop"); err == nil || !strings.Contains(err.Error(), "only the operator (jo) may open a pairing for a card; this is yardmaster") {
+		t.Errorf("a crew member's pairing for a card = %v", err)
+	}
+	if _, err := north.delegated(t, "peer", "pair", "--yes", "--for", "jo", "--mail", "1"); err == nil || !strings.Contains(err.Error(), "--for runs a pairing the operator confirms on a card: add --card") {
+		t.Errorf("--for without --card = %v", err)
+	}
+	north.a.actor = "jo"
+	for _, bad := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"pair", "--card"}, "--card needs --name"},
+		{[]string{"pair", "--card", "--name", "laptop", "--yes"}, "--yes has no part in a pairing opened with --card"},
+		{[]string{"pair", "--card", "--name", "laptop", "--expose", "yardmaster"}, "--expose has no part"},
+		{[]string{"pair", "--card", "--name", "laptop", north.srv.URL, "K7QM-2XPD"}, "takes no address and no code"},
+	} {
+		if _, err := north.peer(t, bad.args...); err == nil || !strings.Contains(err.Error(), bad.want) {
+			t.Errorf("peer %v = %v, want %q", bad.args, err, bad.want)
+		}
+	}
+	if _, err := north.st.GetPairing(context.Background(), ""); err == nil {
+		t.Fatal("a pairing was opened")
+	}
 }
+
+// waitCard waits for the card the pairing filed on y, and answers where it
+// is, as its operator's footplate reads it.
+func waitCard(t *testing.T, y *cliYard) (bead string, seq uint64) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(2 * time.Millisecond) {
+		if q, err := y.st.UserAsks(context.Background(), "jo", "jo", "jo"); err == nil && len(q.Open) == 1 {
+			return q.Open[0].Bead, q.Open[0].Ask
+		}
+	}
+	t.Fatal("no card was filed")
+	return "", 0
+}
+
+// yardr peer pair --card opens a pairing for an hour, prints the code once
+// and returns, leaving the pairing in the server; the other yard's call with
+// the code files a card, and the digits typed on it, which the other
+// operator read out from its check, save the link on both yards, ping both
+// ways and nothing else. Five wrong tries end the pairing for both, with
+// nothing saved.
+func TestPeerPairCard(t *testing.T) {
+	north, laptop := pairYards(t)
+	requireNonInteractive(t)
+	ctx := context.Background()
+	call := func(addr, code string) (*output, chan error) {
+		var called output
+		done := make(chan error, 1)
+		go func() {
+			c := laptop.a.peerCmd()
+			c.SetArgs([]string{"pair", addr, code, "--yes", "--timeout", "50ms"})
+			c.SetOut(&called)
+			c.SetErr(io.Discard)
+			c.SilenceUsage, c.SilenceErrors = true, true
+			done <- c.Execute()
+		}()
+		return &called, done
+	}
+	// checkOf waits for the check the calling yard shows its operator, whose
+	// last three digits it reads out.
+	checkOf := func(called *output) string {
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(2 * time.Millisecond) {
+			if m := checkLine.FindStringSubmatch(called.String()); m != nil {
+				return m[1]
+			}
+		}
+		t.Fatalf("the calling yard showed no check:\n%s", called.String())
+		return ""
+	}
+
+	// The yardmaster opens it, on the operator's mail to it.
+	if _, err := north.st.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr"}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := north.own.CrewStarted(ctx, "yardmaster", map[string]any{"shell_pid": os.Getpid()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := north.st.SetSetting(ctx, store.DelegationSetting, "true", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := north.st.Mail(ctx, "yardmaster", "please pair us with laptop", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	mail, err := north.st.Head(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	north.a.actor = "yardmaster"
+	north.a.env = testEnv(t, north.home, "YARDR_CREW=yardmaster")
+	out, err := north.delegated(t, "peer", "pair", "--card", "--name", "laptop", "--for", "jo", "--mail", strconv.FormatUint(mail, 10))
+	if err != nil {
+		t.Fatalf("the yardmaster's opening: %v\n%s", err, out)
+	}
+	north.a.actor = "jo"
+	wantText(t, out, "Pairing is open for 60 minutes, until ", "for one yard, laptop", "yardr peer pair "+north.srv.URL+" ", "This command ends here", "kept nowhere")
+	if evs := eventsOf(t, north, "peer_pair_opened"); len(evs) != 1 || evs[0].Actor != "yardmaster" || evs[0].Data["for"] != "jo" || evs[0].Data["mail"] != float64(mail) {
+		t.Fatalf("the opening's events = %+v", evs)
+	}
+	m := pairCommand.FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("the command printed no code:\n%s", out)
+	}
+	// The command returned and the pairing did not end with it.
+	if p, err := north.st.GetPairing(ctx, ""); err != nil || p.State != store.PairOpened || time.Until(p.Expires) < store.CardTTL-time.Minute {
+		t.Fatalf("the pairing after the command = %+v, %v", p, err)
+	}
+	if _, err := north.peer(t, "pair", "--card", "--name", "again"); err == nil || !strings.Contains(err.Error(), "a pairing is open already") {
+		t.Fatalf("a second pairing = %v", err)
+	}
+
+	called, done := call(m[1], m[2])
+	bead, seq := waitCard(t, north)
+	check := checkOf(called)
+	if err := north.st.AnswerAsk(ctx, bead, seq, 0, check[:3], "jo", false); err == nil {
+		t.Fatalf("the digits on the card were taken: %v", err)
+	}
+	if err := north.st.AnswerAsk(ctx, bead, seq, 0, check[4:], "jo", false); err != nil {
+		t.Fatalf("the digits the other operator read out = %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("the calling yard: %v\n%s", err, called.String())
+	}
+	onNorth, onLaptop := peersOf(t, north), peersOf(t, laptop)
+	if len(onNorth) != 1 || onNorth[0].Name != "laptop" || strings.Join(append(onNorth[0].Send, onNorth[0].Receive...), ",") != "ping,ping" ||
+		len(onLaptop) != 1 || onLaptop[0].Name != "north" || strings.Join(append(onLaptop[0].Send, onLaptop[0].Receive...), ",") != "ping,ping" {
+		t.Fatalf("north's peers = %+v, laptop's = %+v", onNorth, onLaptop)
+	}
+	for _, y := range []*cliYard{north, laptop} {
+		evs, _ := y.st.Events(ctx, "", 200)
+		notes, _ := y.st.Notes(ctx, bead)
+		b, _ := json.Marshal([]any{evs, notes})
+		if bytes.Contains(b, []byte(m[2])) || bytes.Contains(b, []byte(strings.ReplaceAll(m[2], "-", ""))) {
+			t.Errorf("the code is in a note or an event: %s", b)
+		}
+	}
+
+	// Five wrong tries end a second pairing, and the calling yard says why:
+	// nothing is saved on either yard.
+	north.must(t, "rm", "laptop")
+	laptop.must(t, "rm", "north")
+	out = north.must(t, "pair", "--card", "--name", "laptop")
+	m = pairCommand.FindStringSubmatch(out)
+	called, done = call(m[1], m[2])
+	bead, seq = waitCard(t, north)
+	wrong := "000"
+	if check = checkOf(called); check[4:] == wrong {
+		wrong = "111"
+	}
+	for try := 1; try <= store.MaxCheckTries; try++ {
+		if err := north.st.AnswerAsk(ctx, bead, seq, 0, wrong, "jo", false); err == nil || !strings.Contains(err.Error(), "digits") {
+			t.Fatalf("wrong digits, try %d = %v", try, err)
+		}
+	}
+	if err := <-done; err == nil || !strings.Contains(err.Error(), "typed the wrong digits 5 times") {
+		t.Fatalf("the calling yard after five wrong tries = %v\n%s", err, called.String())
+	}
+	if len(peersOf(t, north)) != 0 || len(peersOf(t, laptop)) != 0 {
+		t.Fatalf("a pairing that ended on wrong digits saved a peer: north %+v, laptop %+v", peersOf(t, north), peersOf(t, laptop))
+	}
+	if evs := eventsOf(t, north, "peer_pair_refused"); len(evs) != 1 || evs[0].Data["reason"] != store.WrongCheck {
+		t.Fatalf("north's refusals = %+v", evs)
+	}
+	if evs := eventsOf(t, laptop, "peer_pair_refused"); len(evs) != 1 || evs[0].Data["reason"] != store.WrongCheck {
+		t.Fatalf("laptop's refusals = %+v", evs)
+	}
+
+	// With --json the command prints the one document a script reads the
+	// code from, and returns, as without.
+	north.a.json = true
+	var doc struct {
+		Pairing, Code, Address, Command string
+		Card                            bool
+		Expires                         time.Time
+	}
+	if err := json.Unmarshal([]byte(north.must(t, "pair", "--card", "--name", "laptop")), &doc); err != nil || !doc.Card || doc.Pairing == "" ||
+		!pairCode.MatchString(doc.Code) || doc.Address != north.srv.URL || !strings.HasSuffix(doc.Command, doc.Code) || time.Until(doc.Expires) < store.CardTTL-time.Minute {
+		t.Fatalf("the document = %+v, %v", doc, err)
+	}
+	north.a.json = false
+}
+
+var pairCode = regexp.MustCompile(`^[0-9A-Z]{4}-[0-9A-Z]{4}$`)
 
 // Either operator saying no to the check ends the pairing with nothing
 // saved on either yard, and both commands say so.

@@ -447,7 +447,7 @@ var Access = map[string]Class{
 	"CheckPeer":          Read,
 	"PairPeer":           Operator,
 	"PairRefused":        Admin,
-	"PairOpen":           Operator,
+	"PairOpen":           Admin, // but a terminal's pairing is the operator's alone, and a card's the yardmaster's on a user's fresh word (store.ActPairCard)
 	"GetPairing":         Read,
 	"PairAnswer":         Operator,
 	"PairName":           Operator,

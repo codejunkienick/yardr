@@ -38,6 +38,11 @@ type PairOffer struct {
 	Enc  string `json:"enc,omitempty"`
 	URL  string `json:"url"`
 	As   string `json:"as,omitempty"`
+	// Card opens the pairing for a card (pairing_card.go): its operator
+	// confirms it by typing digits on a card in footplate, and not in the
+	// command that opened it, which returns at once. It is good for CardTTL,
+	// and As, the name the yard expects, is not optional.
+	Card bool `json:"card,omitempty"`
 }
 
 // Pairing is the host's pairing as its operator sees it. It never holds the
@@ -89,6 +94,8 @@ type hostPairing struct {
 	nonce  string
 	// session names the pairing to the other yard once it has called.
 	session string
+	// card is set on a pairing opened for a card.
+	card *pairCard
 }
 
 // pairings holds the yard's pairing. Its lock is taken before any of the
@@ -110,6 +117,12 @@ func (p *hostPairing) event(extra map[string]any) map[string]any {
 	if p.Tries > 0 {
 		data["wrong_codes"] = p.Tries
 	}
+	if p.card != nil {
+		data["card"] = true
+		if p.card.tries > 0 {
+			data["wrong_checks"] = p.card.tries
+		}
+	}
 	for k, v := range extra {
 		data[k] = v
 	}
@@ -122,6 +135,7 @@ func (s *Store) endPairing(ctx context.Context, p *hostPairing, reason, detail, 
 	p.forget()
 	// The pairing has ended whether or not the event is written.
 	_ = s.LogEvent(ctx, "", "peer_pair_refused", actor, p.event(map[string]any{"reason": reason}))
+	s.endCard(p, reason)
 }
 
 // pairing is the yard's pairing as it is now, with s.pair.mu held: one
@@ -243,7 +257,7 @@ func (s *Store) pairPeer(p Peer, actor string, data map[string]any) (*Peer, erro
 }
 
 // pairRefusals are the reasons the calling side of a pairing may log.
-var pairRefusals = []string{WrongCode, Declined, PeerDeclined, TimedOut,
+var pairRefusals = []string{WrongCode, WrongCheck, Declined, PeerDeclined, TimedOut,
 	Closed, AlreadyPeer, BadName, Own}
 
 // PairRefused logs that a pairing this yard called another for ended
@@ -267,13 +281,20 @@ func (s *Store) PairRefused(ctx context.Context, reason, peer, actor string) err
 // PairOpen opens a pairing and returns its code, good for TTL and
 // for one pairing. A yard has one open at a time.
 func (s *Store) PairOpen(ctx context.Context, o PairOffer, actor string) (*PairingCode, error) {
-	if err := s.mayRead(ctx, actor, ActPair, Object{Kind: KindPeer}); err != nil {
+	act, ttl := ActPair, TTL
+	if o.Card {
+		act, ttl = ActPairCard, CardTTL
+	}
+	if err := s.mayRead(ctx, actor, act, Object{Kind: KindPeer}); err != nil {
 		return nil, err
 	}
 	if err := (Party{Nonce: NewNonce(), Name: o.Name, Key: o.Key, Enc: o.Enc, URL: o.URL}).Valid(); err != nil {
 		return nil, err
 	} else if o.URL == "" {
 		return nil, errors.New("pairing: the yard that shows the code is the one that is called, and has given no URL")
+	}
+	if o.Card && o.As == "" {
+		return nil, errors.New("a pairing for a card names the yard it expects, which the card says before it asks for anything: --name <the name to save it under>")
 	}
 	if o.As != "" {
 		// Said now, not when the other yard has called.
@@ -294,9 +315,14 @@ func (s *Store) PairOpen(ctx context.Context, o PairOffer, actor string) (*Pairi
 	if err != nil {
 		return nil, err
 	}
-	p := &hostPairing{Pairing: Pairing{ID: newPeerMessageID(), State: PairOpened, Expires: now().Add(TTL)},
+	p := &hostPairing{Pairing: Pairing{ID: newPeerMessageID(), State: PairOpened, Expires: now().Add(ttl)},
 		offer: o, actor: actor, code: clean}
-	if err := s.LogEvent(ctx, "", "peer_pair_opened", actor, p.event(map[string]any{"expires": p.Expires, "url": o.URL})); err != nil {
+	if o.Card {
+		p.card = &pairCard{}
+		if err := s.cardOpened(ctx, p, o.URL, actor); err != nil {
+			return nil, err
+		}
+	} else if err := s.LogEvent(ctx, "", "peer_pair_opened", actor, p.event(map[string]any{"expires": p.Expires, "url": o.URL})); err != nil {
 		return nil, err
 	}
 	s.pair.cur = p
@@ -323,6 +349,11 @@ func (s *Store) GetPairing(ctx context.Context, id string) (*Pairing, error) {
 		return nil, err
 	}
 	out := p.Pairing
+	if p.card != nil {
+		// What a card asks the digits of is read by whoever may read this,
+		// an agent's pane among them: the check is for the two operators.
+		out.Check = ""
+	}
 	return &out, nil
 }
 
@@ -344,11 +375,10 @@ func (s *Store) PairAnswer(ctx context.Context, id string, yes bool, actor strin
 		return nil, errors.New("the other yard has not called yet: there is no check to answer")
 	case p.State == PairCalled && !yes:
 		s.endPairing(ctx, p, Declined, "", actor)
+	case p.State == PairCalled && p.card != nil:
+		return nil, fmt.Errorf("this pairing is confirmed on its card, by typing the digits the other operator reads out: bead %s, ask %d", p.card.bead, p.card.ask)
 	case p.State == PairCalled:
-		p.Confirmed, p.actor = true, actor
-		if p.PeerConfirmed {
-			s.finishPairing(ctx, p)
-		}
+		s.confirmHost(ctx, p, actor)
 	}
 	out := p.Pairing
 	return &out, nil
@@ -373,6 +403,9 @@ func (s *Store) PairName(ctx context.Context, id, name, actor string) (*Pairing,
 	}
 	if p.State != PairCalled || p.Confirmed {
 		return nil, errors.New("the other yard's name is given once it has called and before the check is confirmed")
+	}
+	if p.card != nil {
+		return nil, errors.New("a pairing for a card saves the other yard under the name it was opened with: its card names it")
 	}
 	if err := s.CheckPeer(ctx, Peer{Name: name, Key: p.Key}); err != nil {
 		return nil, err
@@ -409,6 +442,9 @@ func (s *Store) finishPairing(ctx context.Context, p *hostPairing) {
 		return
 	}
 	p.State = PairDone
+	if p.card != nil && p.card.ask != 0 {
+		s.retireCard(p.card.bead, p.card.ask, "paired: "+p.Peer+" is saved as a peer on both yards")
+	}
 }
 
 // refusedCall is the answer to a call the pairing cannot take as it is.
@@ -512,6 +548,15 @@ func (s *Store) PairReveal(ctx context.Context, r Reveal) (session string, err e
 	}
 	if err := s.CheckPeer(ctx, Peer{Name: p.Peer, Key: p.Key}); err != nil {
 		return refuse(AlreadyPeer, err.Error())
+	}
+	if p.card != nil {
+		// The card's hour runs from the opening, the operator it asks having
+		// no screen in front of them to be asked at the moment of the call.
+		p.State = PairCalled
+		if err := s.fileCard(ctx, p); err != nil {
+			return refuse(Closed, "the card could not be filed: "+err.Error())
+		}
+		return p.session, nil
 	}
 	p.State, p.Expires = PairCalled, now().Add(ConfirmTTL)
 	return p.session, nil

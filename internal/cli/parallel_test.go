@@ -229,6 +229,7 @@ var allowSerial = map[string]string{
 	"TestPairFormYardThatCannotBeCalled":                    "setInteractive,stub:restartServer,stubAsk",
 	"TestPeerPair":                                          "pairYards",
 	"TestPeerPairAPeerAlready":                              "assign:askCheck,pairYards,setInteractive",
+	"TestPeerPairCard":                                      "pairYards",
 	"TestPeerPairCallFails":                                 "pairYards,setInteractive",
 	"TestPeerPairCallNotAnswered":                           "pairYards,setInteractive,stub:pairHTTP",
 	"TestPeerPairDeclined":                                  "assign:askCheck,pairYards,setInteractive",

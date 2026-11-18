@@ -232,8 +232,8 @@ func (w *wtx) freshRefusal(seq uint64, stored []AskWeight, actor string) error {
 }
 
 // weighAsk weighs the card the ask a holds, as the yard wrote it: a secret,
-// a run, a setup, a depot-push or a mapping ask by its own rules, and
-// any other ask as routine.
+// a run, a setup, a depot-push, a mapping or a pairing ask by its own rules,
+// and any other ask as routine.
 func (w *wtx) weighAsk(a Ask) ([]AskWeight, error) {
 	switch {
 	case a.Secret != nil:
@@ -252,6 +252,8 @@ func (w *wtx) weighAsk(a Ask) ([]AskWeight, error) {
 		return w.setupWeight(*a.Setup)
 	case a.Identity != nil:
 		return mappingWeight(*a.Identity), nil
+	case a.Pair != "":
+		return pairWeight(), nil
 	}
 	return nil, nil
 }

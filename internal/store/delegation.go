@@ -39,7 +39,7 @@ const DelegationSetting = "yardmaster_delegation"
 // beside the others.
 var yardmasterDelegation = Setting{Key: DelegationSetting, Help: "whether the yardmaster may run an operator's defining commands for them on that operator's own mail to it, " +
 	"each recorded (yardr delegation show) and mailed to the operator in the write that runs it (true), or not (false): group add and group set of kind, model, dir, worktrees and preset args, " +
-	"crew set of the same for a member other than the yardmaster, depot test and depot base, user set notify=, and hook add in its safe shape. " +
+	"crew set of the same for a member other than the yardmaster, depot test and depot base, user set notify=, hook add in its safe shape, and peer pair --card (on the mail of any user of the yard, a fresh one each time). " +
 	"Unset, it reads as hosted does: on for a hosted yard, off for one you run yourself. An operator turns it off or on with a run ask " +
 	"(yardr bead ask <bead> - with R: settings set yardmaster_delegation false on stdin), or on the hosted web's Config page; the yardmaster never changes it",
 	Check: func(v string) error {
@@ -133,6 +133,15 @@ const maxDelegatedCommand = 16 << 10
 // of the yardmaster's, in today's words. A delegation that fails any part
 // refuses the run whole.
 func delegatedIn(ctx context.Context, tx *bolt.Tx, actor string) (*DelegatedCall, error) {
+	return delegatedFor(ctx, tx, actor, false)
+}
+
+// delegatedFor is delegatedIn, with anyUser letting the user the run is for
+// be any user of the yard and not an operator alone: the pairing card's
+// (pairing_card_policy.go), where the operator that confirms is a different
+// person from the one whose word opens it. Every other part of the leg
+// stands as it is.
+func delegatedFor(ctx context.Context, tx *bolt.Tx, actor string, anyUser bool) (*DelegatedCall, error) {
 	d, ok := DelegationOf(ctx)
 	if !ok {
 		return nil, nil
@@ -151,7 +160,10 @@ func delegatedIn(ctx context.Context, tx *bolt.Tx, actor string) (*DelegatedCall
 	if resolved != ym || tx.Bucket(bCrew).Get([]byte(ym)) == nil {
 		return nil, fmt.Errorf("a delegated run (--for) is the yardmaster's (%s) alone; this is %s", ym, or(resolved, "nobody"))
 	}
-	if u, err := getUser(tx, d.For); err != nil || !u.IsOperator() {
+	if u, err := getUser(tx, d.For); err != nil || (!anyUser && !u.IsOperator()) {
+		if anyUser {
+			return nil, fmt.Errorf("a delegated run is for a user of this yard, and %s is none", or(d.For, "nobody"))
+		}
 		return nil, fmt.Errorf("a delegated run is for an operator, and %s holds no operator role here", or(d.For, "nobody"))
 	}
 	if len(d.Command) > maxDelegatedCommand {

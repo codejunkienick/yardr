@@ -24,7 +24,7 @@ import (
 
 // delegable are the commands the yardmaster may run for an operator,
 // by their path under yardr (design yardr-m90n 3.2).
-var delegable = [][]string{{"group", "add"}, {"group", "set"}, {"crew", "set"}, {"depot", "test"}, {"depot", "base"}, {"user", "set"}, {"hook", "add"}, {"pack", "apply"}}
+var delegable = [][]string{{"group", "add"}, {"group", "set"}, {"crew", "set"}, {"depot", "test"}, {"depot", "base"}, {"user", "set"}, {"hook", "add"}, {"pack", "apply"}, {"peer", "pair"}}
 
 // presetUse is how the help of a command that reads preset=<label> tells
 // of it. The commands say the same words, with the command's own way to

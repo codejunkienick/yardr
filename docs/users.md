@@ -343,6 +343,7 @@ page has the rest.
 | `depot test <depot> <command>` and `depot base <depot> <base>` | A test command of one line, at most 4096 bytes, as the depot test card shows one whole. Clearing a test command, and a depot's path and kind, are not here |
 | `user set <user> notify=<source>` | That key alone: `env_file` or `role` in the same command refuses the whole run |
 | `hook add <name> --source <source> [--unknown <word>]` | A new hook in the card's safe shape: the secret file the yard owns for it, with its signing secret still given on the hook's own secret card. `--says`, `--makes`, `--map`, `--as` or a secret file of its own refuse the run, and so does the name of a hook that stands |
+| `peer pair --card --name <name>` | A pairing the operator confirms on a card, opened from the yardmaster's line session on the mail of any user of the yard, not the operator's alone: at most an hour old, and no mail that opened a pairing before. The code it prints goes to the other operator and is kept nowhere; the operator confirms by typing digits ([peers.md](peers.md#pairing-from-footplate-a-card)). A pairing in a terminal, `--end` and `--expose` are not here |
 | `pack apply` | A pack yardr embeds, by name, or a pack of the packs repository, by its URL and `--sha256` ([below](#packs-run-for-the-operator)), with `--depot` and its mappings and no other flag, past the pack card's bounds. A plan that still asks after the mappings is refused whole, and no answer path is built for it |
 
 A prompt, a group's `cmd`, a preset that skips permission prompts and every
