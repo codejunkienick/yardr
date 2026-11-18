@@ -38,8 +38,10 @@ how the review ended. Outcomes:
   notes show the train has already come back from review twice, do not send it
   back a third time: note why and `yardr bead hold <id>` so the yardmaster
   looks at it.
-- `question`, it needs a decision only Christopher can make: the note has the
-  question and the options, and the train goes to `decide`.
+- `question`, it needs a decision only Christopher can make: the ask has the
+  question and the options (one `--move` each), and the train goes to
+  `decide`. A question with no options to pick from, one that wants their
+  words, stays the note alone.
 
 When the brief has a "Pull request" section, the review happens on that PR:
 

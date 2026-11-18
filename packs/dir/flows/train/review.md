@@ -17,5 +17,7 @@ review ended. Outcomes:
   the test result, and any remaining risk. The train is closed.
 - `changes`: the train goes back to `open`; the fix is then a new child the
   yardmaster files, so make the finding concrete enough to be a bead.
-- `question`, it needs a decision only {{operator}} can make: the note has
-  the question and the options, and the train goes to `decide`.
+- `question`, it needs a decision only {{operator}} can make: the ask has
+  the question and the options (one `--move` each), and the train goes to
+  `decide`. A question with no options to pick from, one that wants their
+  words, stays the note alone.

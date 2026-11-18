@@ -179,6 +179,9 @@ func (s *Server) beadPage(ctx context.Context, id, hostport string) (*BeadPage, 
 		return nil, err
 	}
 	d.Bead = b
+	// The body section draws the bead's words as they stand, as the
+	// notes log draws its notes': read them as letters too.
+	d.Bead.Body = store.NoteLetters(d.Bead.Body)
 	// The live sessions: the manual groups' claims among them say which
 	// bead is not being worked. The bead's own, ended ones too, are read
 	// by themselves below, so the page costs nothing for the sessions of
@@ -268,6 +271,19 @@ func (s *Server) beadPage(ctx context.Context, id, hostport string) (*BeadPage, 
 	}
 	slices.SortStableFunc(notes, func(a, b store.Note) int { return cmp.Compare(a.Seq, b.Seq) })
 	d.Notes = append(d.Notes, notes...)
+	// The terminal reads a note's words as letters (store.NoteLetters),
+	// and so does the page, so the two readings show the same text: the
+	// notes log draws each note's Text as it stands, an ask note's JSON
+	// with the pack plan's file names among them, and html/template
+	// escapes it but leaves a mark of direction as it is, which would
+	// reorder what is drawn around it. The board carries the same notes
+	// and the image alt text the same words, so the one place covers all
+	// three surfaces. Stored bytes stay the record: nothing is written
+	// back, and the ask the page carries as a card keeps its own bytes
+	// (yardr-0wp5).
+	for i := range d.Notes {
+		d.Notes[i].Text = store.NoteLetters(d.Notes[i].Text)
+	}
 	// Whose word a note by a name of another yard is, as mail is
 	// marked; with no grants when the trusts cannot be read, so every
 	// name of another yard carries the foreign line.

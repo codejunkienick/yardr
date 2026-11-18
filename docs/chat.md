@@ -489,8 +489,11 @@ updates only `<depot>-assembly`'s `cmd` and that depot's local Git config; it
 never runs `git push`. The card carries an `outside` weight and says how to
 file its reverse.
 
-Anything else that is the operator's is still typed by you: a hook's
-replacement and its `--map` and `--as`, a source's `env_file` and
+A hook's replacement rides the `hook add` card with `--as`, `--map`,
+`--says` and `--makes` (the [`hook add` row](#questions-for-you) above);
+only a hook with a secret file of its own, or a table past 8192 bytes,
+stays typed. Anything else that is the operator's is still typed by you:
+a source's `env_file` and
 `mint_command`, taking a
 peer's identity back (`peer identity --rm`), a user's `env_file`,
 `group add` that replaces a group or names `env_file=` or `log=`, `group set`

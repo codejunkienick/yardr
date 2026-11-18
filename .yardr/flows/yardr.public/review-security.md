@@ -100,8 +100,9 @@ Outcomes:
   and `yardr bead hold <id>` so the yardmaster looks at it.
 - `question`, what it opens is a choice only Christopher can make (a new
   listener, a check loosened on purpose, a new caller of something that was
-  the operator's): the note has the question and the options, and the bead
-  goes to `decide`. Nothing is posted.
+  the operator's): the ask has the question and the options (one `--move`
+  each), and the bead goes to `decide`. A question with no options to pick
+  from, one that wants their words, stays the note alone. Nothing is posted.
 
 A branch that came from another yard (`yardr bead show` says `branch
 yard/<bead> came from <peer>`) was tested in `review`, by this yard: go by

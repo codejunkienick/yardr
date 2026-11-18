@@ -127,7 +127,7 @@ func TestPairingCardConfirms(t *testing.T) {
 			t.Errorf("the card does not say %q:\n%s", line, text)
 		}
 	}
-	if strings.Contains(text, want) || strings.Contains(text, code) {
+	if hasDigits(text, want) || strings.Contains(text, code) {
 		t.Errorf("the card shows what it asks for or the code:\n%s", text)
 	}
 	if !StrongWeight(ask.Weight) {
@@ -196,7 +196,7 @@ func TestPairingCardConfirms(t *testing.T) {
 		}
 	}
 	for _, w := range written {
-		if strings.Contains(w, code) || strings.Contains(w, strings.ReplaceAll(code, "-", "")) || strings.Contains(w, want) {
+		if strings.Contains(w, code) || strings.Contains(w, strings.ReplaceAll(code, "-", "")) || hasDigits(w, want) {
 			t.Errorf("the code or the typed digits are written: %q", w)
 		}
 	}
@@ -207,6 +207,65 @@ func toText(v any) string {
 		return s
 	}
 	return ""
+}
+
+// hasDigits reports whether want stands in s as a value rather than as a
+// substring: with a non-digit or the string's edge on both sides, outside
+// a longer digit run. The check's typed half is three random digits, which
+// coincide with fixed digits of the yard's own words (the recorded
+// collision: the fixed "url=http://10.0.0.5:8790" line); a recording glued
+// to letters still counts, since no fixed test value has that shape. The
+// code and its dashless form stay plain substrings: long and random, they
+// coincide with nothing in practice.
+func hasDigits(s, want string) bool {
+	for at := 0; at+len(want) <= len(s); {
+		i := strings.Index(s[at:], want)
+		if i < 0 {
+			return false
+		}
+		i += at
+		edge := func(j int) bool {
+			return j < 0 || j >= len(s) || s[j] < '0' || s[j] > '9'
+		}
+		if edge(i-1) && edge(i+len(want)) {
+			return true
+		}
+		at = i + 1
+	}
+	return false
+}
+
+// The digit-boundary check the leak scan trusts (yardr-cex8): the fixed
+// URL's digits are no recording of the typed half, while the half spaced,
+// bare, glued to letters or against punctuation is. The URL holds two of
+// the wants as substrings, so this table fails under the substring check
+// it replaces and passes under the boundary one.
+func TestHasDigits(t *testing.T) {
+	// Sequential, like the file's tests.
+	url := "url=http://10.0.0.5:8790"
+	for _, c := range []struct {
+		s, want string
+		leak    bool
+	}{
+		{url, "879", false},
+		{url, "790", false},
+		{url, "900", false},
+		{"confirmed 879", "879", true},
+		{"879", "879", true},
+		{"digits:879.", "879", true},
+		{"ab879cd", "879", true},
+		{"8790", "879", false},
+		{"1879", "879", false},
+	} {
+		if got := hasDigits(c.s, c.want); got != c.leak {
+			t.Errorf("hasDigits(%q, %q) = %v, want %v", c.s, c.want, got, c.leak)
+		}
+	}
+	for _, want := range []string{"879", "790"} {
+		if !strings.Contains(url, want) {
+			t.Errorf("the fixture URL holds no %q: the table proves nothing against substrings", want)
+		}
+	}
 }
 
 // callYards are two yards that pair with a card on the calling side: host

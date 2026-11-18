@@ -656,9 +656,11 @@ reach cannot approve its own link: `ApproveAsk` is refused for a `bead@peer`,
 and an answer from a peer link cannot approve a run ask. The refusal keeps a
 peer from approving a change to the link it came through.
 
-Still typed in a terminal and refused as a card: `--expose`,
-`--trust` and `--reach` (alone or beside a kind), and taking an id back
-(`peer identity --rm`). A pairing is typed in a terminal as well, or opened
+`peer allow` with `--expose`, `--trust` or `--reach`, alone or beside a
+kind, rides a card ([chat.md](chat.md#questions-for-you)): the card names
+each whole, now and proposed. Taking an id back (`peer identity --rm`)
+is still typed in a terminal, refused as a card. A pairing is typed in a
+terminal as well, or opened
 without one: the yardmaster opens it for a card, on a user's mail, and the
 operator confirms it by typing digits ([pairing from
 footplate](#pairing-from-footplate-a-card)); a pairing is never a run ask. A
@@ -1347,8 +1349,9 @@ mail: takes 100 mails and asks an hour, and 800 files
   one that wants the link to carry a kind proposes that apart from
   the limit: the kinds and the limit are two asks. A kind of any sort is
   askable, each way ([who may do what](#who-may-do-what)); `peer allow`
-  with `--trust`, `--reach` or `--expose`, alone or beside either, is
-  refused as the operator's alone. So is a pairing in a terminal: who speaks
+  with `--trust`, `--reach` or `--expose`, alone or beside either, rides
+  a card too ([chat.md](chat.md#questions-for-you)). A pairing in a terminal
+  is still the operator's alone: who speaks
   and answers as a person of this yard is the operator's to type there, or to
   confirm on a card the yardmaster opened it for
   ([pairing from footplate](#pairing-from-footplate-a-card)).

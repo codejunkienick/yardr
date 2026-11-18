@@ -142,8 +142,14 @@ func TestPackFilePages(t *testing.T) {
 		must(t, err)
 		return seq
 	}
-	b := y.bead("install starter")
+	// The bead's own words carry the trojan name too: its body, set where
+	// the bead is made so no update diff stands in the history, and a
+	// plain note beside the ask note's JSON.
+	body := "the plan names " + trojanName
+	b, err := y.st.CreateBead(ctx, store.NewBead{Title: "install starter", Stage: "new", Depot: "home", Body: body}, "yardmaster")
+	must(t, err)
 	seq := askPack(b.ID, "jo", "starter")
+	must(t, y.st.AddNote(ctx, b.ID, "note names "+trojanName, "yardmaster"))
 	jo, sam := y.token("jo@example.net"), y.token("sam@example.net")
 	base := "/beads/" + b.ID + "/asks/" + strconv.FormatUint(seq, 10) + "/files/"
 
@@ -315,8 +321,8 @@ func TestPackFilePages(t *testing.T) {
 	weightLine := regexp.MustCompile(`<p class="weighty">(.*?)</p>`)
 	for _, surface := range approveSurfaces {
 		body := y.surfaceBody(surface.path(b.ID), jo)
-		// The notes below the card are the bead's log, which draws each note
-		// as it is kept, an ask's among them: a surface of its own.
+		// The notes below the card are the bead's log, an ask's among
+		// them, read as letters: a surface of its own, checked below.
 		if at := strings.Index(body, `id="notes"`); at >= 0 {
 			body = body[:at]
 		}
@@ -345,6 +351,70 @@ func TestPackFilePages(t *testing.T) {
 	}
 	if blocks := preBlocks(card); len(blocks) != 1 || blocks[0] != run.Command || !strings.Contains(run.Command, "pack apply starter --depot home") || strings.Contains(run.Command, "roles/") {
 		t.Errorf("the card's command block is %q, want the argv command alone: %q", blocks, run.Command)
+	}
+
+	// The notes log draws each note's words as letters, as the terminal
+	// does, an ask note's JSON among them (yardr-we6y): the trojan name
+	// stands lettered in the notes region, and no mark of direction or
+	// control character stands there. The ask note's weight line reads as
+	// its file page's heading does; a plain note's words keep their line
+	// break. The history below still quotes each note raw (yardr-fj37),
+	// so the region ends where the sessions begin.
+	beadHTML := y.surfaceBody("/beads/"+b.ID, jo)
+	notesAt, sessionsAt := strings.Index(beadHTML, `id="notes"`), strings.Index(beadHTML, `id="sessions"`)
+	if notesAt < 0 || sessionsAt < 0 || sessionsAt < notesAt {
+		t.Fatalf("the bead's page has no notes log with sessions after it")
+	}
+	notes := beadHTML[notesAt:sessionsAt]
+	for _, want := range []string{"file " + wants[7].heading, "note names roles/07.md[31m\nx.md"} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("the notes log does not read the trojan name lettered: no %q", want)
+		}
+	}
+	if hasBidi(notes) {
+		t.Errorf("the notes log carries a mark of direction")
+	}
+	for _, mark := range []rune{'\x1b', '\u2028'} {
+		if strings.ContainsRune(notes, mark) {
+			t.Errorf("the notes log carries %U", mark)
+		}
+	}
+
+	// The body section reads the bead's words as letters too: the same
+	// name, lettered, with its line break, and no mark of direction.
+	bodyAt := strings.Index(beadHTML, `<h3 class="label">body</h3>`)
+	if bodyAt < 0 {
+		t.Fatalf("the bead's page has no body section")
+	}
+	section := beadHTML[bodyAt : bodyAt+strings.Index(beadHTML[bodyAt:], `</section>`)]
+	if want := "the plan names roles/07.md[31m\nx.md"; !strings.Contains(section, want) {
+		t.Errorf("the body section does not read the trojan name lettered: no %q", want)
+	}
+	if hasBidi(section) {
+		t.Errorf("the body section carries a mark of direction")
+	}
+
+	// Stored bytes stay the record: the notes and the body still hold
+	// the trojan name as it was written.
+	kept, err := y.st.Notes(ctx, b.ID)
+	must(t, err)
+	var askText, plainText string
+	for _, n := range kept {
+		switch {
+		case n.Seq == seq:
+			askText = n.Text
+		case n.Kind == "note":
+			plainText = n.Text
+		}
+	}
+	if !strings.Contains(askText, "roles/07\u202e") {
+		t.Errorf("the stored ask note no longer holds the name's marks")
+	}
+	if !strings.Contains(plainText, trojanName) {
+		t.Errorf("the stored plain note no longer holds what was written")
+	}
+	if got, err := y.st.GetBead(ctx, b.ID); err != nil || got.Body != body {
+		t.Errorf("the stored body is %q, want %q", got.Body, body)
 	}
 
 	// The page's JSON form is the stored card, which the approval weighs again

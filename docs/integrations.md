@@ -598,8 +598,9 @@ source reads nothing until it is:
    file whole, as they will be added; the operator approves it in footplate,
    or in a terminal on the yard's machine with `yardr bead answer <bead>
    <ask> --approve`. A source
-   named aiquokka that the yard already has is replaced by the operator in a
-   terminal, never by a card. The file lists five kinds, and `yardr source
+   named aiquokka that the yard already has is replaced by the `source add`
+   card, which shows each changed key whole, old and new
+   ([chat.md](chat.md#questions-for-you)). The file lists five kinds, and `yardr source
    check aiquokka` fails for one whose CLI is not logged in on this machine,
    which only means that kind is not read. To read fewer, delete their lines
    under `kinds` in a copy of the file (the command file goes beside it) and
@@ -1663,8 +1664,10 @@ that yard's, as its mail is.
 One id names one speaker. The store refuses a user and a crew member of a
 linked yard the same id in a source, whichever comes second, and hearing
 treats an id it finds on both as nobody's. Mapping an id removes it from the
-source's ignore list, as mapping a user does. Only the operator sets or
-removes one, in a terminal. No run ask can propose it.
+source's ignore list, as mapping a user does. Setting one rides a card,
+proposed with a run ask as above
+([peers.md](peers.md#a-sender-who-is-a-crew-member-of-the-other-yard)); only
+removing one (`peer identity --rm`) stays the operator's in a terminal.
 
 `fields[field]` must hold the address a user's env file sets under
 `address.env`, read as telling reads it; setting the address is the
@@ -2151,9 +2154,11 @@ the source's signing secret from that file, and approving it
 (`yardr bead answer <id> <ask> --approve`) makes the hook, which takes
 deliveries only with the secret standing in its file. The asks are refused
 for a source the yard does not declare, one whose declaration has no hook
-key, and a hook the yard has already; `--map` and `--as` stay in a
-terminal, as a replacement does. The steps by hand above stay the way to
-make or replace one in a terminal.
+key, and a hook the yard has already; a replacement rides the `hook add`
+card with `--as` and `--map` ([chat.md](chat.md#questions-for-you)) —
+only a secret file of its own, or a table past 8192 bytes, stays in a
+terminal. The steps by hand above stay the way to make one in a terminal,
+and to replace one with a fresh secret.
 
 Where the declaration names a register call with scheme `secret`
 (Telegram), there is no secret ask: the one `R: hook add <name> --source

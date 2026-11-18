@@ -19,5 +19,7 @@ ended. Outcomes:
   back to `new`. If the notes show the bead has already come back from review
   twice, do not send it back a third time: note why and `yardr bead hold <id>`
   so the yardmaster looks at it.
-- `question`, it needs a decision only {{operator}} can make: the note has
-  the question and the options, and the bead goes to `decide`.
+- `question`, it needs a decision only {{operator}} can make: the ask has
+  the question and the options (one `--move` each), and the bead goes to
+  `decide`. A question with no options to pick from, one that wants their
+  words, stays the note alone.

@@ -59,8 +59,9 @@ how the review ended. Outcomes:
   yardmaster looks at it.
 - `question`, what it opens is a choice only Christopher can make (a new
   listener, a check loosened on purpose, a new caller of something that was
-  the operator's): the note has the question and the options, and the train
-  goes to `decide`.
+  the operator's): the ask has the question and the options (one `--move`
+  each), and the train goes to `decide`. A question with no options to pick
+  from, one that wants their words, stays the note alone.
 
 When the brief has a "Pull request" section, the review happens on that PR,
 as in `review`:

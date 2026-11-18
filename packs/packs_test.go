@@ -315,6 +315,56 @@ func TestBuilderRolesPutAQuestionWithOptionsAsAnAsk(t *testing.T) {
 	}
 }
 
+// A reviewer's question with options reaches the person votable, as a
+// builder's does: the question note's quote is cut, so options in prose
+// cannot be picked, and a question with options goes first as an ask with
+// a move for each option, which decide's moves card absorbs (yardr-y8bs).
+// Every move is one the `decide` stage offers: a reviewer's own stage is
+// none of them, so the builder's "your own" clause stands in no reviewer
+// role. The review stage files say the same, or the brief contradicts
+// itself: the ask has the question and the options, and an open question
+// stays the note alone. The words are compared with the lines folded, so
+// rewrapping breaks nothing.
+func TestReviewerRolesPutAQuestionWithOptionsAsAnAsk(t *testing.T) {
+	files := packFiles(t)
+	for _, name := range []string{"starter/roles/reviewer.md", "contributors/roles/reviewer.md", "design/roles/reviewer.md", "dir/roles/reviewer.md", "website/roles/reviewer.md"} {
+		body := strings.Join(strings.Fields(files[name]), " ")
+		for _, want := range []string{
+			"That quote is the first lines of the note, cut, so options written into the note cannot be picked.",
+			"A question with options to pick from goes first as an ask: `yardr bead ask <id> - --move <where> --move <where> <<'ASK'`, then `Q:` the question, `C:` a line of context (two to five), `O: <label>: <what picking it does>` for each option, and `ASK` on a line of its own.",
+			"Give one `--move` for each `O:`, in the order written, naming the stage picking that option sends the bead to: one the `decide` stage offers.",
+			"A name it does not offer is refused, with those it does, and nothing is asked.",
+			"`--recommend <n>` beside the `-`, with a `W:` line of why, marks the one you suggest.",
+			"Then end with `question` as above: the card the person gets is your ask, its options the picks.",
+			"A question with no options to pick from, one that wants their words, stays the note alone.",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s lacks %q", name, want)
+			}
+		}
+		if strings.Contains(body, "--option") {
+			t.Errorf("%s names --option, which yardr refuses beside `-`: the options are `O:` lines", name)
+		}
+		if strings.Contains(body, "your own for an option that only chooses an approach") {
+			t.Errorf("%s carries the builder's clause for its own stage, which decide offers no reviewer", name)
+		}
+	}
+	for _, name := range []string{"starter/flows/default/review.md", "starter/flows/default/review-security.md", "dir/flows/default/review.md", "dir/flows/train/review.md", "website/flows/default/review.md", "website/flows/default/review-security.md"} {
+		body := strings.Join(strings.Fields(files[name]), " ")
+		for _, want := range []string{
+			"the ask has the question and the options (one `--move` each)",
+			"A question with no options to pick from, one that wants their words, stays the note alone.",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s lacks %q", name, want)
+			}
+		}
+		if strings.Contains(body, "the note has the question and the options") {
+			t.Errorf("%s still sends a reviewer's options as outcome prose", name)
+		}
+	}
+}
+
 // Every builder role has its handover state the change's size in four
 // buckets (yardr-smtb), so the growth of the codebase is visible per bead
 // where a person and a reviewer read it: product Go, tests, docs, and the

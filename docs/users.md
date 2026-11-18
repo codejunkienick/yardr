@@ -369,7 +369,7 @@ operator has no terminal, each row names the door they have instead.
 
 | stays the operator's | the door instead |
 |---|---|
-| A secret value, `env_file` and `env_command`, a source's key and mint command, where a credential is read from | The secret asks: the person types the value on their device or in the hosted web, and the yard writes it to its file where no agent reads it |
+| A secret value, `env_file` and `env_command`, a source's key and mint command, where a credential is read from | The secret asks: the person gives the value on their device, and the yard writes it to its file where no agent reads it. The web draws no field for a secret ask: every secret ask is weighty, and a weighty card has no gate in that window ([web.md](web.md#one-bead)) |
 | A user's role, adding or removing a user, inviting a teammate, a device, a link's trust | The cards as they stand (`user set … role=`, `user add`, `user rm`, `user invite`, `user device rm`, `peer add` and the other link cards), the strong ones under a fresh sign-in in the hosted web. The operator pairs their own first device through the hosted web |
 | Removing a source or a hook, moving a source's records or its links, a source's `base` | The `source rm`, `source move`, `link move` and `hook rm` cards; a base alone by `yardr bead ask --setup … --source-base`. A source's `host` has no door for an agent: the operator types it, in a terminal or on the setup card |
 | A hook add with a secret file of its own, changing a hook's secret file | A terminal on a yard you run yourself, the host on a hosted one |

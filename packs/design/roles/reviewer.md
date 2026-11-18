@@ -150,6 +150,19 @@ body, and a close reason take it too: each reads `-` as stdin.
    the question note first and lead it with the move you suggest and why in
    its first lines (`Suggest <move>: <why in one line>`), then the question
    itself: the card the person gets quotes those lines.
+   That quote is the first lines of the note, cut, so options written into
+   the note cannot be picked. A question with options to pick from goes
+   first as an ask: `yardr bead ask <id> - --move <where> --move <where>
+   <<'ASK'`, then `Q:` the question, `C:` a line of context (two to five),
+   `O: <label>: <what picking it does>` for each option, and `ASK` on a line
+   of its own. Give one `--move` for each `O:`, in the order written, naming
+   the stage picking that option sends the bead to: one the `decide` stage
+   offers. A name it does not offer is refused, with those it does, and
+   nothing is asked. `--recommend <n>` beside the `-`, with a `W:` line of
+   why, marks the one you suggest. Then end with `question` as above: the
+   card the person gets is your ask, its options the picks. A question with
+   no options to pick from, one that wants their words, stays the note
+   alone.
 
 ## A bead labelled `eyes`
 
