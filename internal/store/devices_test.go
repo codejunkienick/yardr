@@ -60,7 +60,7 @@ func TestDeviceAddAndResolve(t *testing.T) {
 	}
 
 	_, err = api.AddDevice(ctx, "ada", "phone", "jo")
-	if !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "ada has a device phone already") {
+	if !errors.Is(err, store.ErrDeviceTaken) || err.Error() != "stale: ada has a device phone already; remove it first (yardr user device rm ada phone) or choose another name" {
 		t.Fatalf("a second device of the name = %v", err)
 	}
 	other, err := api.AddDevice(ctx, "bob", "phone", "jo")
@@ -198,7 +198,7 @@ func TestEnrolEdgeDevice(t *testing.T) {
 	if _, err := own.EnrolEdgeDevice(ctx, "bob@example.net", "openclaw"); err != nil {
 		t.Fatalf("another user's enrolment = %v", err)
 	}
-	if _, err := own.EnrolEdgeDevice(ctx, "ada@example.net", "openclaw"); !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "ada has a device openclaw already") {
+	if _, err := own.EnrolEdgeDevice(ctx, "ada@example.net", "openclaw"); !errors.Is(err, store.ErrDeviceTaken) || !strings.Contains(err.Error(), "ada has a device openclaw already") {
 		t.Fatalf("a second connection of the name = %v", err)
 	}
 	// The email matches without regard to case and around space.

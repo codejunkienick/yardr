@@ -66,6 +66,11 @@ var (
 	// ErrConflict means the record changed since the caller read it (see
 	// Expect); it errs as "stale".
 	ErrConflict = errors.New("stale")
+	// ErrDeviceTaken means the user has a device of the name already. It
+	// errs as "stale" too: the taken-device refusal wrapped ErrConflict
+	// before it, and its message stays byte-identical so a caller
+	// matching its words still matches.
+	ErrDeviceTaken = errors.New("stale")
 	// ErrLocked means another process owns the store file.
 	ErrLocked = errors.New("store is in use by another process")
 	// ErrNoAnswer means a call to the yard's server ended without its

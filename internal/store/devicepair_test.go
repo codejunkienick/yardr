@@ -42,7 +42,7 @@ func TestDevicePairOpenIsTheOperators(t *testing.T) {
 	if _, err := api.AddDevice(ctx, "ada", "laptop", "jo"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := api.DevicePairOpen(ctx, "ada", "laptop", "jo"); !errors.Is(err, store.ErrConflict) {
+	if _, err := api.DevicePairOpen(ctx, "ada", "laptop", "jo"); !errors.Is(err, store.ErrDeviceTaken) {
 		t.Errorf("a pairing for a device ada has = %v", err)
 	}
 
@@ -619,7 +619,7 @@ func TestDevicePairOpenSelfRefusals(t *testing.T) {
 	if _, err := api.AddDevice(ctx, "ada", "laptop", "jo"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := api.DevicePairOpenSelf(ctx, "ada", "laptop"); !errors.Is(err, store.ErrConflict) {
+	if _, err := api.DevicePairOpenSelf(ctx, "ada", "laptop"); !errors.Is(err, store.ErrDeviceTaken) {
 		t.Errorf("a pairing for a device ada has = %v", err)
 	}
 	if own.DevicePairOpened(ctx) {

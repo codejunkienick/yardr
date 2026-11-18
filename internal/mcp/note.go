@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // AddNote is add_a_note: the person's words as a note on one piece of
@@ -27,6 +28,13 @@ func (s *Service) AddNote(ctx context.Context, work, note string) (*Result, erro
 		return nil, errors.New(sayWhich)
 	case note == "":
 		return nil, fmt.Errorf("say the note, in your words")
+	}
+	// No work id holds whitespace (a handle, UUID or prefix), so what
+	// holds any is a title in the id's place, not a piece that is not
+	// theirs: the distinction is purely syntactic and tells nothing of
+	// what exists.
+	if strings.IndexFunc(work, unicode.IsSpace) >= 0 {
+		return nil, refusal("that is no work id: say the id of the piece, from what_is_happening")
 	}
 	ctx = s.ctx(ctx)
 	view, err := s.Yard.Bead(ctx, work, s.User)

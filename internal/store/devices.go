@@ -270,7 +270,7 @@ func deviceFree(tx *bolt.Tx, user, name string) error {
 		return err
 	}
 	if tx.Bucket(bDevices).Get([]byte(join(user, name))) != nil {
-		return fmt.Errorf("%w: %s has a device %s already; remove it first (yardr user device rm %s %s) or choose another name", ErrConflict, user, name, user, name)
+		return fmt.Errorf("%w: %s has a device %s already; remove it first (yardr user device rm %s %s) or choose another name", ErrDeviceTaken, user, name, user, name)
 	}
 	return nil
 }

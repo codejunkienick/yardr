@@ -91,4 +91,10 @@ func TestAddNote(t *testing.T) {
 			t.Fatalf("AddNote(%q) = %v", miss, err)
 		}
 	}
+	// A title in place of the id is refused as no id, naming where the
+	// id is read: it is not told the piece is not theirs.
+	if _, err := s.AddNote(y.ctx, "Paint the shed", "the gate first"); err == nil ||
+		err.Error() != "that is no work id: say the id of the piece, from what_is_happening" {
+		t.Fatalf("AddNote(a title) = %v", err)
+	}
 }

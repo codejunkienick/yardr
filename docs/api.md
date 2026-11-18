@@ -131,6 +131,7 @@ the build of yardr that serves, and `X-Yardr-Pid`, its process.
 |---|---|
 | `not-found` | the yard has no such user, crew member, peer |
 | `conflict` | a guarded write was drawn from a read that is stale: [`AnswerAskExpected`](#answeraskexpected), [`DeferAskExpected`](#deferaskexpected) and [`DeclineAskExpected`](#declineaskexpected) wrote nothing; read again |
+| `device-taken` | the user has a device of the name already: [`DevicePairOpen`](#devicepairopen) opened nothing, and the edge's enrolment enrolled nothing; remove it first or choose another name |
 | `taken`, `at-limit`, `ambiguous` | none of the calls below answers these today |
 | `replacing` | the server is about to start a newer build of itself, and did not run the call: see [Builds](#builds) |
 | `error` | anything else: an argument that cannot be read, a call the yard refuses |

@@ -157,7 +157,7 @@ func TestEdgeEnrolsAConnection(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &answered); err != nil || answered.Result != nil || answered.Error == nil {
 			t.Fatalf("%s answered %d %s (%v)", what, w.Code, w.Body, err)
 		}
-		if answered.Error.Code != "conflict" || !strings.Contains(answered.Error.Message, "sam has a device openclaw already") {
+		if answered.Error.Code != "device-taken" || !strings.Contains(answered.Error.Message, "sam has a device openclaw already") {
 			t.Errorf("%s answered %+v", what, answered.Error)
 		}
 	}

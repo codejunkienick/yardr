@@ -79,3 +79,17 @@ the note has the range-diff summary and the test result, and the outcome is
 `done-safe` when the resolution touches nothing on the list above, `done`
 when it touches any of it. Not sound, and not fixed forward: `changes` with a
 concrete finding, or `question`.
+
+A bead whose builder's latest note, written since the bead last came back to
+`new`, starts with `rebase re-review:` was approved before and then rebased
+by its builder after an assembly conflict. Only the conflict resolution is
+reviewed. What was approved does not rest on the builder's word, since
+`done-safe` skips security. Find the approved tip in the earlier review's own
+notes (the last test line a passing review or security note carries) and
+check that the builder's note names the same one. With no such tip, or two
+that differ, this is a full review. Make the range-diff of the approved tip
+against the rebased tip yourself (`git range-diff <base> <approved tip> HEAD`);
+anything else in it makes this a full review too. Sound: the outcome is
+`done-safe` when the resolution touches nothing on the list above, `done`
+when it touches any of it. Not sound, and not fixed forward: `changes` with a
+concrete finding, or `question`.

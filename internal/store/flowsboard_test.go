@@ -14,6 +14,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"yardr.dev/yardr/internal/eta"
+	"yardr.dev/yardr/internal/peer"
 	"yardr.dev/yardr/internal/store"
 )
 
@@ -595,6 +596,21 @@ func TestFlowsLamps(t *testing.T) {
 		if !open[id] {
 			t.Errorf("flows asked after %q, which is no open bead", id)
 		}
+	}
+	// A caller the open asks are refused to is refused the board in the
+	// board's words, not the inbox sentence: here a crew member's pane
+	// naming the operator, as socket Flows reads it.
+	if _, err := y.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr"}, "op"); err != nil {
+		t.Fatal(err)
+	}
+	crewPane := map[string]any{"shell_pid": os.Getpid()}
+	if st, err := peer.Describe(os.Getpid()); err == nil {
+		crewPane["shell_start"] = st.Start
+	}
+	must(y.CrewStarted(ctx, "yardmaster", crewPane))
+	pane := store.WithCaller(ctx, os.Getpid())
+	if _, err := y.Flows(pane); err == nil || err.Error() != "the flows board could not be read; why is an operator's to read" {
+		t.Fatalf("Flows from a crew pane naming the operator = %v", err)
 	}
 }
 

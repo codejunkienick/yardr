@@ -21,3 +21,11 @@ Outcomes:
 
 The edge back to `backlog` has no outcome: the yardmaster takes a bead back with
 `yardr bead advance <id> --to backlog` when it has to be reshaped.
+
+When the assembly sends an approved bead back because its rebase onto the
+base conflicted, rebase the branch, resolve the conflict and nothing else,
+and leave one note on the bead that begins exactly `rebase re-review:`. The
+note names the approved tip (the branch's tip before the rebase) and the
+rebased tip, and ends with the test line on the rebased tip. The reviewer
+reviews the resolution alone, from its own range-diff of the two tips, and
+anything else in that range-diff is a full review.

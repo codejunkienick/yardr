@@ -278,6 +278,12 @@ func (s *Store) UserAsks(ctx context.Context, name, actor string, viewer ...stri
 	return q, nil
 }
 
+// flowsBoardHeld is what a caller refused the open asks is told: the
+// flows board could not be read, and why is an operator's to read. The
+// asks are the board's lamp dots, so the refusal names the board, not
+// the inbox sentence the mail path answers.
+const flowsBoardHeld = "the flows board could not be read; why is an operator's to read"
+
 // OpenAskBeads answers which of the beads ids carry an open ask to the
 // user name, in the order ids gives them: the lamp dots of the flows
 // view, which reads only the open beads it draws. It is UserAsks' open
@@ -286,14 +292,17 @@ func (s *Store) UserAsks(ctx context.Context, name, actor string, viewer ...stri
 // asks answered, put aside, declined or taken back, stands nowhere. Only
 // the user reads it, and an operator any user's (mayReadInbox); actor is
 // who reads, and left out is the user. A name that is no user of the
-// yard is refused, as UserAsks refuses it.
+// yard is refused, as UserAsks refuses it; who may not read them is
+// refused in the board's words (flowsBoardHeld), not the inbox sentence.
 func (s *Store) OpenAskBeads(ctx context.Context, name, actor string, ids []string) ([]string, error) {
 	if err := s.read(func(tx *bolt.Tx) error {
 		if _, err := getUser(tx, name); err != nil {
 			return err
 		}
-		_, err := s.mayReadInbox(ctx, tx, name, actor, "read")
-		return err
+		if _, err := s.mayReadInbox(ctx, tx, name, actor, "read"); err != nil {
+			return errors.New(flowsBoardHeld)
+		}
+		return nil
 	}); err != nil {
 		return nil, err
 	}

@@ -223,6 +223,8 @@ func (c *Client) callOnce(ctx context.Context, method string, out any, body []by
 			return store.ErrTaken
 		case "at-limit":
 			return wrapped{r.Error.Message, store.ErrAtLimit}
+		case "device-taken":
+			return wrapped{r.Error.Message, store.ErrDeviceTaken}
 		case "conflict":
 			return wrapped{r.Error.Message, store.ErrConflict}
 		case "ambiguous":
