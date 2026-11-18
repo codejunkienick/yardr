@@ -23,7 +23,7 @@ const contextStartedAt = "context_started_at"
 
 // contextCacheCap bounds each of Herdr's context maps, the transcript pins
 // and the last readings, by least-recently-touched eviction. A live session
-// is asked on every idle pass, so it keeps its entries, and a session that
+// is asked on every pass, so it keeps its entries, and a session that
 // is gone stops holding its once newer sessions arrive. 200 covers the
 // yard's live sessions (tens) with headroom: a known-id pin measures a few
 // hundred bytes and a last reading a few hundred more, so 200 of each is
@@ -39,7 +39,7 @@ const contextCacheCap = 200
 // the file says no use yet (no reply, or none with numbers). The file is
 // found as the model source's is (see Model).
 //
-// The daemon asks on every idle pass, so both halves are remembered across
+// The daemon asks on every pass, so both halves are remembered across
 // calls: the transcript is pinned while its file stands and, for a worktree
 // match, nothing the match judged has moved into a match (see
 // pinnedContext), and a transcript whose size and time are as at the last

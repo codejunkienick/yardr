@@ -163,50 +163,41 @@ func TestContextWithoutASourceNeverNudges(t *testing.T) {
 // only once its input is clear, not while a person is writing.
 func TestContextReadWhenWorkingAskedWhenIdleAndTyped(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		kind, model string
-		window      int
-	}{
-		{"muse", "muse-wonder-1.0", 1007997},
-		{"claude", "opus", 200000},
-		{"codex", "gpt-6.1-sol", 475000},
-	} {
-		t.Run(tc.kind, func(t *testing.T) {
-			t.Parallel()
-			s, f, d := crewSetup(t, store.CrewMember{Config: map[string]any{"kind": tc.kind, "model": tc.model}})
-			ctx := context.Background()
-			f.ctxOK, f.ctxUsed, f.ctxWindow = true, (tc.window*50+99)/100, tc.window
-			must(t, d.Reconcile(ctx)) // start
-			agent := agentOf(t, s)
-			f.set(agent, "working")
-			must(t, d.Reconcile(ctx))
-			r, err := s.GetCrew(ctx, "yardmaster")
-			must(t, err)
-			if f.ctxCalls != 1 || r.ContextAt == nil || r.ContextPct != 50 || r.ContextWindow != tc.window {
-				t.Fatalf("working reading: %+v; calls %d", r.CrewSession, f.ctxCalls)
-			}
-			if r.StartedAt == nil || !f.ctxStartedAt.Equal(*r.StartedAt) {
-				t.Fatalf("context start = %v, want %v", f.ctxStartedAt, r.StartedAt)
-			}
-			f.ctxUsed = (tc.window*95 + 99) / 100
-			must(t, d.Reconcile(ctx)) // working above the threshold: record, never ask
-			r, err = s.GetCrew(ctx, "yardmaster")
-			must(t, err)
-			if f.ctxCalls != 2 || r.ContextPct != 95 || r.ContextAskedAt != nil || len(f.nudges) != 0 || f.n != 1 || f.stops != 0 {
-				t.Fatalf("working above threshold: %+v; calls %d, nudges %v, starts %d, stops %d", r.CrewSession, f.ctxCalls, f.nudges, f.n, f.stops)
-			}
-			f.set(agent, "idle")
-			f.input = "half a thought" // the nudge is held, and nothing recorded as asked
-			must(t, d.Reconcile(ctx))
-			if r, _ := s.GetCrew(ctx, "yardmaster"); r.ContextAskedAt != nil || r.ContextPct != 95 || len(f.nudges) != 0 {
-				t.Fatalf("held nudge: %+v; nudges %v", r.CrewSession, f.nudges)
-			}
-			f.input = ""
-			must(t, d.Reconcile(ctx))
-			if r, _ := s.GetCrew(ctx, "yardmaster"); len(f.nudges) != 1 || r.ContextAskedAt == nil {
-				t.Fatalf("nudges %v, asked at %v", f.nudges, r.ContextAskedAt)
-			}
-		})
+	// One window covers it: crewContext takes no branch on the kind, and
+	// the fake reader returns the use and window it was given.
+	const window = 1007997
+	s, f, d := crewSetup(t, store.CrewMember{Config: map[string]any{"kind": "muse", "model": "muse-wonder-1.0"}})
+	ctx := context.Background()
+	f.ctxOK, f.ctxUsed, f.ctxWindow = true, (window*50+99)/100, window
+	must(t, d.Reconcile(ctx)) // start
+	agent := agentOf(t, s)
+	f.set(agent, "working")
+	must(t, d.Reconcile(ctx))
+	r, err := s.GetCrew(ctx, "yardmaster")
+	must(t, err)
+	if f.ctxCalls != 1 || r.ContextAt == nil || r.ContextPct != 50 || r.ContextWindow != window {
+		t.Fatalf("working reading: %+v; calls %d", r.CrewSession, f.ctxCalls)
+	}
+	if r.StartedAt == nil || !f.ctxStartedAt.Equal(*r.StartedAt) {
+		t.Fatalf("context start = %v, want %v", f.ctxStartedAt, r.StartedAt)
+	}
+	f.ctxUsed = (window*95 + 99) / 100
+	must(t, d.Reconcile(ctx)) // working above the threshold: record, never ask
+	r, err = s.GetCrew(ctx, "yardmaster")
+	must(t, err)
+	if f.ctxCalls != 2 || r.ContextPct != 95 || r.ContextAskedAt != nil || len(f.nudges) != 0 || f.n != 1 || f.stops != 0 {
+		t.Fatalf("working above threshold: %+v; calls %d, nudges %v, starts %d, stops %d", r.CrewSession, f.ctxCalls, f.nudges, f.n, f.stops)
+	}
+	f.set(agent, "idle")
+	f.input = "half a thought" // the nudge is held, and nothing recorded as asked
+	must(t, d.Reconcile(ctx))
+	if r, _ := s.GetCrew(ctx, "yardmaster"); r.ContextAskedAt != nil || r.ContextPct != 95 || len(f.nudges) != 0 {
+		t.Fatalf("held nudge: %+v; nudges %v", r.CrewSession, f.nudges)
+	}
+	f.input = ""
+	must(t, d.Reconcile(ctx))
+	if r, _ := s.GetCrew(ctx, "yardmaster"); len(f.nudges) != 1 || r.ContextAskedAt == nil {
+		t.Fatalf("nudges %v, asked at %v", f.nudges, r.ContextAskedAt)
 	}
 }
 
