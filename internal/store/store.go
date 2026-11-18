@@ -174,6 +174,11 @@ type Store struct {
 	// carries (SetPairChannelKey, runask_devicepair.go); nil where no
 	// server owns the store.
 	pairChannelKey PairChannelKey
+	// pairCallSender carries the joiner's word on a card pairing's check
+	// to the yard it called (SetPairCallSender, pairing_card.go); nil
+	// where no server owns the store, and a verified answer on such a
+	// store is refused rather than half carried.
+	pairCallSender PairCallSender
 	// packReader reads an embedded pack for a pack apply run ask, from
 	// the binary of the process that owns the store (SetPackReader,
 	// runask_pack.go); nil where no server owns the store.

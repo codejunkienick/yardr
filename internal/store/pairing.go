@@ -103,6 +103,12 @@ type hostPairing struct {
 type pairings struct {
 	mu  sync.Mutex
 	cur *hostPairing
+	// calls are the pairings this yard called another yard for and holds
+	// for a card (pairing_card.go), by id. Unlike the one the yard hosts,
+	// which the code routes to, a yard may hold more than one call: each
+	// names its own host. Nothing of one crosses the lock held: a call is
+	// claimed under it and told outside it.
+	calls map[string]*pairCall
 }
 
 // forget drops everything of the code.

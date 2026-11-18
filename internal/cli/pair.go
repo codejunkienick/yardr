@@ -30,9 +30,10 @@ import (
 type pairOpts struct {
 	name, url string
 	yes, end  bool
-	// card opens the pairing for a card in footplate (pairCard): the command
-	// returns once it is open, and this yard's operator confirms it by typing
-	// digits where the card is put to them.
+	// card opens the pairing for a card in footplate (pairHostCard), or
+	// calls the other yard for one (pairJoinCard): the command returns at
+	// once, and this yard's operator confirms it by typing digits where the
+	// card is put to them.
 	card    bool
 	expose  []string
 	timeout time.Duration
@@ -86,6 +87,13 @@ says which yard is expected and what it is saved under. The yardmaster opens it
 for an operator or another user of the yard with --for <user> --mail <seq>, on
 that user's mail to it, a new one for each opening.
 
+The other side mirrors it: yardr peer pair <address> <code> --card calls
+with the code, holds the call for a card and returns. The card shows the
+last three digits of the check and asks for the first three, which the
+other operator reads out; each operator reads out the three on their own
+card. The digits are typed while the other yard's pairing still stands: a
+yard that shows the check in a terminal waits five minutes from the call.
+
 The link carries ping both ways and nothing else, and shows the other yard
 nobody of this one. In a terminal the form asks whom this yard lets it write
 to; in a pane or script, pass --expose <crew member or user> (repeatable).
@@ -103,7 +111,8 @@ prints two documents, the code at once and the result at the end.`,
 		Example: `  yardr peer pair --url http://10.0.0.5:8790     # north, which can be reached
   yardr peer pair http://10.0.0.5:8790 K7QM-2XPD # laptop, with the code north shows
   yardr peer pair --end                          # end the pairing this yard has open
-  yardr peer pair --card --name laptop           # open it for a card: the operator confirms in footplate`,
+  yardr peer pair --card --name laptop           # open it for a card: the operator confirms in footplate
+  yardr peer pair http://10.0.0.5:8790 K7QM-2XPD --card # call it for a card instead`,
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) != 0 && len(args) != 2 {
 				return errors.New("give nothing, to open a pairing here, or the address and the code of the yard that opened one")
@@ -125,6 +134,14 @@ prints two documents, the code at once and the result at the end.`,
 				act = store.ActPairCard
 				if err := cardFlags(c, args, opt); err != nil {
 					return err
+				}
+				if len(args) == 2 && delegatedRun(c) {
+					// The cited command is recorded and mailed to the user:
+					// the code is none of it.
+					if d, ok := store.DelegationOf(ctx); ok {
+						d.Command = commandWords(c, []string{args[0], "<code>"})
+						ctx = store.WithDelegation(ctx, d)
+					}
 				}
 			} else if delegatedRun(c) {
 				return errors.New("--for runs a pairing the operator confirms on a card: add --card --name <the name to save the other yard under>")
@@ -153,7 +170,10 @@ prints two documents, the code at once and the result at the end.`,
 				return a.out(c.OutOrStdout(), map[string]string{"pairing": "ended"}, func(w io.Writer) { fmt.Fprintln(w, "the pairing is ended: its code is good for nothing") })
 			}
 			if opt.card {
-				return a.pairCard(c.OutOrStdout(), c.ErrOrStderr(), ctx, cfg, st, opt)
+				if len(args) == 0 {
+					return a.pairHostCard(c.OutOrStdout(), c.ErrOrStderr(), ctx, cfg, st, opt)
+				}
+				return a.pairJoinCard(c.OutOrStdout(), ctx, cfg, st, args[0], args[1], opt)
 			}
 			if len(args) == 0 && !pairFlagged(c) && !a.json && interactive() && !a.agentSession() {
 				return a.pairForm(c.OutOrStdout(), c.ErrOrStderr(), ctx, cfg, st)
@@ -180,16 +200,22 @@ prints two documents, the code at once and the result at the end.`,
 	cmd.Flags().StringSliceVar(&opt.expose, "expose", nil, "crew member or user of this yard the other may see and write to (repeatable)")
 	cmd.Flags().BoolVar(&opt.end, "end", false, "end the pairing this yard has open")
 	cmd.Flags().DurationVar(&opt.timeout, "timeout", 30*time.Second, "how long to wait for the pong that proves the link")
-	cmd.Flags().BoolVar(&opt.card, "card", false, "open it for a card in footplate: the command returns at once, and this yard's operator confirms by typing the last three digits of the check (needs --name)")
+	cmd.Flags().BoolVar(&opt.card, "card", false, "open it, or call the other yard, for a card in footplate: the command returns at once, and this yard's operator confirms by typing the check's digits (an opening needs --name)")
 	return cmd
 }
 
-// cardFlags refuses what has no meaning beside --card: an address and a code
-// (the other yard's side), and the flags of a command that waits for the check,
-// the ping and the end of a pairing it holds open.
+// cardFlags refuses what has no meaning beside --card: for a pairing opened
+// on this yard, an address and a code, and the flags of a command that waits;
+// for a call to the other yard, the flags of a command that waits and of the
+// yard that opens.
 func cardFlags(c *cobra.Command, args []string, opt pairOpts) error {
 	if len(args) != 0 {
-		return errors.New("--card opens the pairing on this yard, and takes no address and no code: the other yard's operator calls with the code it prints")
+		for _, f := range []string{"yes", "expose", "timeout", "end", "url"} {
+			if c.Flags().Changed(f) {
+				return fmt.Errorf("--%s has no part in a call made with --card: the command returns at once, and its operator confirms on the card", f)
+			}
+		}
+		return nil
 	}
 	for _, f := range []string{"yes", "expose", "timeout", "end"} {
 		if c.Flags().Changed(f) {
@@ -407,12 +433,12 @@ func (a *app) pairHost(w, warn io.Writer, ctx context.Context, cfg *config.Confi
 	return a.pairDone(w, warn, ctx, cfg, st, paired{Role: "host", Peer: peer, Check: p.Check}, opt)
 }
 
-// pairCard opens a pairing for a card on this yard, shows its code once and
-// returns. It does not wait, and its exit does not end the pairing: the
+// pairHostCard opens a pairing for a card on this yard, shows its code once
+// and returns. It does not wait, and its exit does not end the pairing: the
 // yard's server keeps it for an hour, files the card when the other yard
 // calls and finishes the pairing when its operator has typed the digits, so
 // that a session that opened it may be restarted or handed off meanwhile.
-func (a *app) pairCard(w, warn io.Writer, ctx context.Context, cfg *config.Config, st store.API, opt pairOpts) error {
+func (a *app) pairHostCard(w, warn io.Writer, ctx context.Context, cfg *config.Config, st store.API, opt pairOpts) error {
 	yardr := yardrAt(cfg.Home)
 	if listening, text := receiver(ctx, cfg, st); !listening {
 		return fmt.Errorf("this yard has no listener, so the other yard cannot call it: %s\n"+
@@ -453,6 +479,73 @@ func (a *app) pairCard(w, warn io.Writer, ctx context.Context, cfg *config.Confi
 	}
 	fmt.Fprintf(w, "This command ends here, and the pairing stays open in the server. When that yard calls, a card in footplate asks this yard's operator for the last three digits of the check, which the other operator reads out; the first three are on the card, for them.\n"+
 		"The code is shown once and kept nowhere: pass it to the person this was opened for, and to nobody else. %s peer pair --end ends the pairing, which is the operator's.\n", yardr)
+	return nil
+}
+
+// pairJoinCard calls the yard at address with the code its operator read
+// out, holds the call for a card and returns. It does not wait, and its
+// exit closes nothing: the yard's server keeps the call for an hour and
+// finishes the pairing when its operator has typed the digits, so that a
+// session that called may be restarted or handed off meanwhile.
+func (a *app) pairJoinCard(w io.Writer, ctx context.Context, cfg *config.Config, st store.API, address, code string, opt pairOpts) error {
+	addr, err := pairAddress(address)
+	if err != nil {
+		return err
+	}
+	clean, err := store.CleanCode(code)
+	if err != nil {
+		return err
+	}
+	inv, err := invite(ctx, cfg, st, "")
+	if err != nil {
+		return err
+	}
+	key, err := store.Load(cfg.PeerKey())
+	if err != nil {
+		return err
+	}
+	who := a.who()
+	if opt.name != "" {
+		// Said now, not after the other operator has been kept waiting. The
+		// key is this yard's own, which is no peer's: only the name is asked.
+		if err := st.CheckPeer(ctx, store.Peer{Name: opt.name, Key: inv.Key}); err != nil {
+			return err
+		}
+	}
+	encPriv, _, _, err := yardkey.EnsureEnc(cfg.PeerEncKey())
+	if err != nil {
+		return err
+	}
+	caller := &yards.Caller{Key: key, Enc: encPriv, HTTP: pairHTTP}
+	accept, peerp := a.pairAccept(ctx, st, inv, addr, opt.name, false, "")
+	called, err := caller.PairCall(ctx, addr, clean, inv.Name, accept)
+	if errors.Is(err, errNotAdded) {
+		return errors.New(strings.TrimPrefix(err.Error(), errNotAdded.Error()+": ") + nothingSaved)
+	} else if err != nil {
+		return notCalled{a.callFailed(ctx, cfg, st, addr, err)}
+	}
+	peer, host := *peerp, called.Host
+	reg, err := st.PairCallRegister(ctx, store.PairCallOffer{URL: addr, Peer: peer.Name, Transcript: called.Transcript}, who)
+	if err != nil {
+		// The host waits on this yard's word: it is told no, and this yard
+		// logs why, as a terminal does that ends its call.
+		told, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_, _ = caller.PairAnswer(told, called, false)
+		_ = st.PairRefused(ctx, store.Closed, host.Name, who)
+		return fmt.Errorf("calling %s: %w%s", peer.Name, err, nothingSaved)
+	}
+	if a.json {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(map[string]any{"call": reg.ID, "address": addr, "peer": reg.Peer, "expires": reg.Expires, "card": true, "bead": reg.Bead, "ask": reg.Ask})
+	}
+	fmt.Fprintf(w, "%s answered at %s (it calls itself %s). Its key: %s\n", peer.Name, addr, host.Name, host.Key)
+	if host.URL != addr {
+		fmt.Fprintf(w, "it gives its address as %s; this yard keeps the one it answered at\n", host.URL)
+	}
+	fmt.Fprintf(w, "This command ends here, and the call stays open in the server for %s, until %s. A card in footplate asks this yard's operator for the first three digits of the check, which the other operator reads out; the last three are on the card, for them.\n",
+		short(store.CardTTL), reg.Expires.Local().Format("15:04:05"))
 	return nil
 }
 
@@ -551,6 +644,40 @@ func pairAddress(s string) (string, error) {
 // stretches the code before it answers, so a call takes a moment.
 var pairHTTP = &http.Client{Timeout: 30 * time.Second}
 
+// errNotAdded ends a call to a yard that cannot be a peer here, before this
+// yard has revealed itself.
+var errNotAdded = errors.New("not added")
+
+// pairAccept asks whether the yard that answered a call can be a peer here,
+// before this yard has revealed itself: the other operator is then asked
+// nothing, and the code is still good for a call with --name. It answers
+// the accept and where it puts what answered. A yard that cannot be one is
+// logged here, and ends the call as errNotAdded's.
+func (a *app) pairAccept(ctx context.Context, st store.API, inv store.Invite, addr, name string, form bool, yardr string) (func(host store.Party) error, *store.Peer) {
+	var peer store.Peer
+	who := a.who()
+	accept := func(host store.Party) error {
+		peer = store.Peer{Name: or(name, host.Name), Key: host.Key, Enc: host.Enc, URL: addr, Calls: host.Name}
+		if host.Key == inv.Key {
+			_ = st.PairRefused(ctx, store.Own, host.Name, who)
+			return fmt.Errorf("%w: the yard that answered has this yard's own key, and a yard is not paired with itself", errNotAdded)
+		}
+		if err := st.CheckPeer(ctx, peer); err != nil {
+			_ = st.PairRefused(ctx, store.AlreadyPeer, host.Name, who)
+			if form {
+				return fmt.Errorf("%w: %w. `%s peer list` shows this yard's peers; the code is still good for `%s peer pair <address> <code> --name <another name>`",
+					errNotAdded, err, yardr, yardr)
+			}
+			if name == "" {
+				return fmt.Errorf("%w: %w (--name saves the other yard under a name of your choosing; the code is still good)", errNotAdded, err)
+			}
+			return fmt.Errorf("%w: %w", errNotAdded, err)
+		}
+		return nil
+	}
+	return accept, &peer
+}
+
 // pairJoin calls the yard at address with the code its operator read out.
 func (a *app) pairJoin(w, warn io.Writer, ctx context.Context, cfg *config.Config, st store.API, address, code string, opt pairOpts) error {
 	addr, err := pairAddress(address)
@@ -582,36 +709,14 @@ func (a *app) pairJoin(w, warn io.Writer, ctx context.Context, cfg *config.Confi
 		return err
 	}
 	caller := &yards.Caller{Key: key, Enc: encPriv, HTTP: pairHTTP}
-	// Whether the yard that answers can be a peer here is asked before this
-	// yard has revealed itself: the other operator is then asked nothing,
-	// and the code is still good for a call with --name.
-	var peer store.Peer
-	errNotAdded := errors.New("not added")
-	called, err := caller.PairCall(ctx, addr, clean, inv.Name, func(host store.Party) error {
-		peer = store.Peer{Name: or(opt.name, host.Name), Key: host.Key, Enc: host.Enc, URL: addr, Calls: host.Name}
-		if host.Key == inv.Key {
-			_ = st.PairRefused(ctx, store.Own, host.Name, who)
-			return fmt.Errorf("%w: the yard that answered has this yard's own key, and a yard is not paired with itself", errNotAdded)
-		}
-		if err := st.CheckPeer(ctx, peer); err != nil {
-			_ = st.PairRefused(ctx, store.AlreadyPeer, host.Name, who)
-			if opt.form != nil {
-				return fmt.Errorf("%w: %w. `%s peer list` shows this yard's peers; the code is still good for `%s peer pair <address> <code> --name <another name>`",
-					errNotAdded, err, yardrAt(cfg.Home), yardrAt(cfg.Home))
-			}
-			if opt.name == "" {
-				return fmt.Errorf("%w: %w (--name saves the other yard under a name of your choosing; the code is still good)", errNotAdded, err)
-			}
-			return fmt.Errorf("%w: %w", errNotAdded, err)
-		}
-		return nil
-	})
+	accept, peerp := a.pairAccept(ctx, st, inv, addr, opt.name, opt.form != nil, yardrAt(cfg.Home))
+	called, err := caller.PairCall(ctx, addr, clean, inv.Name, accept)
 	if errors.Is(err, errNotAdded) {
 		return errors.New(strings.TrimPrefix(err.Error(), errNotAdded.Error()+": ") + nothingSaved)
 	} else if err != nil {
 		return notCalled{a.callFailed(ctx, cfg, st, addr, err)}
 	}
-	host := called.Host
+	peer, host := *peerp, called.Host
 	// refuse ends the pairing from this side: the other yard is told, so
 	// its operator is not left to wait, and this yard logs why.
 	refuse := func(reason string) {

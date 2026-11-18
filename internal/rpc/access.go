@@ -454,6 +454,8 @@ var Access = map[string]Class{
 	"PairAnswer":         Operator,
 	"PairName":           Operator,
 	"PairClose":          Operator,
+	"PairCallRegister":   Admin, // but a call's card is the operator's, and the yardmaster's on a user's fresh word (store.ActPairCard)
+	"PairCallClose":      Operator,
 
 	// Packs.
 	"RecordPack": Admin,

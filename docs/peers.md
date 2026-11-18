@@ -279,6 +279,18 @@ nothing routes and the yard closes when the pairing ends.
   apart, so copying your own screen cannot pass, and an answer of six digits,
   or of the three on the card, is refused as the wrong shape and not counted.
   The card is weighty, strong: its approval widens who this yard listens to.
+- **Calling for a card mirrors it.** On the yard that was given the code, the
+  operator or the yardmaster runs `yardr peer pair <address> <code> --card`:
+  it calls with the code, files this yard's card at once and returns, and its
+  exit closes nothing. The card shows the last three digits of the check and
+  asks for the first three, which the other operator reads out: each operator
+  reads out the three on their own card and types the three the other reads.
+  Five wrong tries, a decline, or the hour from the call ending, and nothing
+  is saved on either yard, and the other yard is told; another try takes
+  another code from its operator. The digits are typed while the other yard's
+  pairing still stands: a yard that shows the check in a terminal waits five
+  minutes from the call, and a verified answer after its host ended saves
+  nothing and says so.
 - **Wrong digits are counted per pairing, and the fifth ends it** with the
   reason `wrong_check`: nothing is saved on either yard, the card is taken back
   and its bead closed, and the other yard is told. A decline ends it too (`declined`).
@@ -313,7 +325,9 @@ nothing routes and the yard closes when the pairing ends.
   is recorded and mailed to the user as any delegated run is, and the card names
   it. Never another agent, mail from another yard, a timer, a thread or an
   issue, or a call through a peer's reach. `yardr peer pair --end`, which ends
-  it, stays the operator's.
+  it, stays the operator's. A call for a card (`yardr peer pair <address>
+  <code> --card`) is the same gate: the operator, or the yardmaster on a
+  user's fresh word.
 - **Who answers.** The operator the card is put to, in a terminal, on a
   paired device, in footplate paired with this yard directly or in the web view.
   Not a crew member's pane or a bead agent's, whatever name it gives, and

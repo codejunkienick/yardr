@@ -158,6 +158,9 @@ func (r *runner) serve(ctx context.Context) (string, bool, error) {
 	// Make the yard's channel key before a run-ask approval opens a pairing,
 	// so its QR can be sealed on a first device too (pairaddress.go).
 	st.SetPairChannelKey(pairChannelKeyFor(c))
+	// How a card's answer reaches the yard its call reached: yes, waited
+	// on, or no (pairjoin.go).
+	st.SetPairCallSender(pairJoinSendFor(c))
 	st.SetPresetReader(presetReaderFor())
 	// How a hosted-Google source call mints: in-process through the edge,
 	// never by running the mint command its setting names.

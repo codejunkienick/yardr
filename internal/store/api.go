@@ -337,6 +337,8 @@ type API interface {
 	PairAnswer(ctx context.Context, id string, yes bool, actor string) (*Pairing, error)
 	PairName(ctx context.Context, id, name, actor string) (*Pairing, error)
 	PairClose(ctx context.Context, id, actor string) error
+	PairCallRegister(ctx context.Context, o PairCallOffer, actor string) (*PairCall, error)
+	PairCallClose(ctx context.Context, id, actor string) error
 
 	ProposePreview(ctx context.Context, np NewPreview, actor string) (*Preview, error)
 	Previews(ctx context.Context) ([]Preview, error)

@@ -914,6 +914,12 @@ func (c *Client) PairName(ctx context.Context, id, name, actor string) (*store.P
 func (c *Client) PairClose(ctx context.Context, id, actor string) error {
 	return c.call(ctx, "PairClose", nil, id, actor)
 }
+func (c *Client) PairCallRegister(ctx context.Context, o store.PairCallOffer, actor string) (*store.PairCall, error) {
+	return callV[*store.PairCall](c, ctx, "PairCallRegister", o, actor)
+}
+func (c *Client) PairCallClose(ctx context.Context, id, actor string) error {
+	return c.call(ctx, "PairCallClose", nil, id, actor)
+}
 
 func (c *Client) ProposePreview(ctx context.Context, np store.NewPreview, actor string) (*store.Preview, error) {
 	return callV[*store.Preview](c, ctx, "ProposePreview", np, actor)

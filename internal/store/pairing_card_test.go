@@ -321,3 +321,113 @@ func TestPairingCardIsNotAnsweredFromABeadsPane(t *testing.T) {
 		t.Fatalf("the operator's digits = %v", err)
 	}
 }
+
+// callOffer is the offer a yard registers a call with, to save the yard
+// that answered as south.
+func callOffer(t *testing.T) store.PairCallOffer {
+	t.Helper()
+	me := store.Party{Nonce: store.NewNonce(), Name: "laptop", Key: peerKey(t)}
+	host := store.Party{Nonce: store.NewNonce(), Name: "south", Key: peerKey(t), URL: "http://10.0.0.5:8790"}
+	return store.PairCallOffer{URL: "http://10.0.0.5:8790", Peer: "south", Transcript: store.Transcript{Commit: store.Commit(me), Joiner: me, Host: host}}
+}
+
+// callOf is ctx carrying a delegated call for user on mail, cited as the
+// call typed it: the address it called, and no code.
+func callOf(ctx context.Context, user string, mail uint64) context.Context {
+	return store.WithDelegation(ctx, store.DelegatedCall{For: user, Mail: mail, Command: "yardr peer pair http://10.0.0.5:8790 <code> --card"})
+}
+
+// The yardmaster calls for a card on the cited local mail of a user of the
+// yard, and the call is recorded and told as any delegated run is. The mail
+// is a fresh word across both sides: one that opened a pairing opens no
+// call either. The operator needs no word.
+func TestPairCallIsRegisteredOnAFreshWord(t *testing.T) {
+	// Sequential: the clock is the package's, which a stale word moves.
+	y := newDelegationYard(t)
+	ctx := y.ctx
+	// The later words first: yardmasterLine registers this process as the
+	// yardmaster's pane, and over the socket every later call reads as the
+	// yardmaster's, so mail sent after it is not its sender's.
+	adaMail := y.mailFrom(t, "ada", "yardmaster")
+	stale := y.mailFrom(t, "jo", "yardmaster")
+	line := yardmasterLine(t, y)
+	api := y.api
+
+	// Without a word the yardmaster is refused in the words of any pairing's.
+	if _, err := api.PairCallRegister(ctx, callOffer(t), "yardmaster"); err == nil || !strings.Contains(err.Error(), "only the operator (jo) may open a pairing for a card; this is yardmaster") {
+		t.Fatalf("an uncited call by the yardmaster = %v", err)
+	}
+
+	// On the operator's word: registered, for CardTTL, recorded and told.
+	reg, err := api.PairCallRegister(callOf(line, "jo", y.mail), callOffer(t), "yardmaster")
+	if err != nil {
+		t.Fatalf("the yardmaster's call on jo's mail: %v", err)
+	}
+	if time.Until(reg.Expires) < store.CardTTL-time.Minute || reg.Bead == "" || reg.Ask == 0 {
+		t.Fatalf("the call = %+v", reg)
+	}
+	rec := cardRecord(t, y)
+	if rec.For != "jo" || rec.Yardmaster != "yardmaster" || rec.Mail != y.mail || rec.Of != "a pairing for a card" ||
+		rec.Command != "yardr peer pair http://10.0.0.5:8790 <code> --card" {
+		t.Errorf("record = %+v: want the call as cited, and no code", rec)
+	}
+	evs, err := api.Events(ctx, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var told bool
+	for _, e := range evs {
+		if e.Kind == "peer_pair_opened" && (e.Data["role"] != "joiner" || e.Data["for"] != "jo" || e.Data["mail"] != float64(y.mail) || e.Data["card"] != true || e.Actor != "yardmaster") {
+			t.Errorf("peer_pair_opened = %+v", e)
+		}
+		if e.Kind == "mail" && e.Actor == "yard" && store.MailReceiver(e) == "jo" {
+			told = strings.Contains(e.Data["text"].(string), "a pairing for a card")
+		}
+	}
+	if !told {
+		t.Error("jo was not told what ran")
+	}
+
+	// The same word registers no second call, and opens no pairing either:
+	// a word is spent across both sides.
+	if err := y.own.PairCallClose(ctx, reg.ID, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.PairCallRegister(callOf(line, "jo", y.mail), callOffer(t), "yardmaster"); err == nil || !strings.Contains(err.Error(), "opened a pairing already") {
+		t.Fatalf("the same mail again = %v", err)
+	}
+	if _, err := api.PairOpen(wordOf(line, "jo", y.mail), cardOffer(t), "yardmaster"); err == nil || !strings.Contains(err.Error(), "opened a pairing already") {
+		t.Fatalf("an opening on the mail a call spent = %v", err)
+	}
+	// A new word from a user who is not the operator registers one.
+	second, err := api.PairCallRegister(callOf(line, "ada", adaMail), callOffer(t), "yardmaster")
+	if err != nil {
+		t.Fatalf("the yardmaster's call on ada's mail: %v", err)
+	}
+	if err := y.own.PairCallClose(ctx, second.ID, "jo"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The operator registers without one, through the owner's store: over
+	// the socket the call would read as the yardmaster's pane's.
+	third, err := y.own.PairCallRegister(ctx, callOffer(t), "jo")
+	if err != nil {
+		t.Fatalf("the operator's call: %v", err)
+	}
+	if err := y.own.PairCallClose(ctx, third.ID, "jo"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A word that has gone stale is not a word: an hour is the longest.
+	t.Cleanup(func() { store.SetClockForTest(time.Now) })
+	store.SetClockForTest(func() time.Time { return time.Now().Add(store.CardTTL + time.Minute) })
+	if _, err := api.PairCallRegister(callOf(line, "jo", stale), callOffer(t), "yardmaster"); err == nil || !strings.Contains(err.Error(), "fresh word") || !strings.Contains(err.Error(), "old") {
+		t.Fatalf("a stale mail = %v", err)
+	}
+	store.SetClockForTest(func() time.Time { return time.Now().Add(store.CardTTL - time.Minute) })
+	if reg, err := api.PairCallRegister(callOf(line, "jo", stale), callOffer(t), "yardmaster"); err != nil {
+		t.Fatalf("a mail a minute short of the hour = %v", err)
+	} else if err := y.own.PairCallClose(ctx, reg.ID, "jo"); err != nil {
+		t.Fatal(err)
+	}
+}
