@@ -207,6 +207,53 @@ func (s *Store) AddDevice(ctx context.Context, user, name, actor string) (*NewDe
 	return out, nil
 }
 
+// EnrolEdgeDevice enrols the device of the yard user the edge's signed-in
+// account email maps to through web_jwt_users, and answers it with its
+// token, 32 random bytes that are in no later answer: the store keeps
+// their SHA-256. The email is matched as the web view matches a token's
+// (ParseWebJWTUsers, without regard to case); one that maps to nobody is
+// refused, and a second device of the name for the same user is refused
+// as AddDevice refuses it. Like DevicePairOpenSelf it takes no may gate:
+// whoever enrols a device decides who may speak as a person, and here
+// that word is the edge's, which the listener serves only signed with
+// the edge's pinned key (internal/rpc, edgeSigned). It is the server's
+// to ask, for a request it was sent, and no method of the API: the
+// socket answers it as no method at all, and a device is answered so
+// too, since it is in neither Calls nor OperatorCalls.
+func (s *Store) EnrolEdgeDevice(ctx context.Context, email, device string) (*NewDevice, error) {
+	if err := checkDeviceName(device); err != nil {
+		return nil, err
+	}
+	email = strings.ToLower(strings.TrimSpace(email))
+	all, err := s.Settings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var users map[string]string
+	if mapping := all[WebJWTUsersSetting]; mapping != "" {
+		users, err = ParseWebJWTUsers(mapping)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", WebJWTUsersSetting, err)
+		}
+	}
+	user := users[email]
+	if user == "" {
+		return nil, fmt.Errorf("email %s maps to no user of the yard (%s)", email, WebJWTUsersSetting)
+	}
+	// Made before the write, which may run twice (write).
+	out, err := newDevice()
+	if err != nil {
+		return nil, err
+	}
+	err = s.write(func(w *wtx) error {
+		return putDevice(w, out, user, device, user, "", nil)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // newDevice is a device that has its token and nothing else yet.
 func newDevice() (*NewDevice, error) {
 	raw := make([]byte, 32)

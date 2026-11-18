@@ -165,6 +165,116 @@ func TestDeviceTokenIsNotStored(t *testing.T) {
 	}
 }
 
+// The edge enrols a connection for its signed-in account's email, mapped
+// to a yard user through web_jwt_users without regard to case, and is
+// answered once with the token, which the store holds only as a hash. A
+// second connection of the name for the same user is refused as a
+// duplicate device is, and another user's may have that name. An email
+// that maps to nobody, and a mapping that names no user there, enrol
+// nothing.
+func TestEnrolEdgeDevice(t *testing.T) {
+	t.Parallel()
+	api, own := deviceYard(t)
+	ctx := context.Background()
+	if err := api.SetSetting(ctx, store.WebJWTUsersSetting, "ada@example.net=ada, bob@example.net=bob, ghost@example.net=ghost", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	d, err := own.EnrolEdgeDevice(ctx, "ada@example.net", "openclaw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.User != "ada" || d.Name != "openclaw" || d.CreatedBy != "ada" {
+		t.Fatalf("the device = %+v", d.Device)
+	}
+	if secret, ok := strings.CutPrefix(d.Token, store.DeviceTokenPrefix); !ok || len(secret) != 43 {
+		t.Fatalf("the token %q: want %s and 43 characters", d.Token, store.DeviceTokenPrefix)
+	}
+	if got, err := own.ResolveDevice(ctx, d.Token, "100.64.0.7"); err != nil || got == nil || got.User != "ada" || got.Name != "openclaw" {
+		t.Fatalf("ResolveDevice = %+v, %v", got, err)
+	}
+	// Another user enrols beside it, and may have a connection of the
+	// same name; the same user's second of the name is refused as a
+	// duplicate device is today.
+	if _, err := own.EnrolEdgeDevice(ctx, "bob@example.net", "openclaw"); err != nil {
+		t.Fatalf("another user's enrolment = %v", err)
+	}
+	if _, err := own.EnrolEdgeDevice(ctx, "ada@example.net", "openclaw"); !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "ada has a device openclaw already") {
+		t.Fatalf("a second connection of the name = %v", err)
+	}
+	// The email matches without regard to case and around space.
+	if _, err := own.EnrolEdgeDevice(ctx, "  ADA@EXAMPLE.NET ", "claw2"); err != nil {
+		t.Fatalf("an email in another case = %v", err)
+	}
+	for _, email := range []string{"carol@example.net", "", "ada"} {
+		if _, err := own.EnrolEdgeDevice(ctx, email, "claw3"); err == nil || !strings.Contains(err.Error(), "maps to no user of the yard (web_jwt_users)") {
+			t.Errorf("EnrolEdgeDevice(%q) = %v", email, err)
+		}
+	}
+	if _, err := own.EnrolEdgeDevice(ctx, "ghost@example.net", "phone"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("an email mapped to no user there = %v", err)
+	}
+	if _, err := own.EnrolEdgeDevice(ctx, "ada@example.net", "my claw"); err == nil || !strings.Contains(err.Error(), "use letters, digits") {
+		t.Errorf("a connection name with a space = %v", err)
+	}
+	if list, _ := api.Devices(ctx, "ada"); len(list) != 2 || list[0].Name != "claw2" || list[1].Name != "openclaw" {
+		t.Fatalf("ada's devices = %+v", list)
+	}
+	// The enrolment is the user's own act, and the store's file has the
+	// token's hash and nowhere the token.
+	evs, err := api.EventsSince(ctx, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actor string
+	for _, e := range evs {
+		if e.Kind == "device_added" && e.Data["user"] == "ada" && e.Data["device"] == "openclaw" {
+			actor = e.Actor
+		}
+	}
+	if actor != "ada" {
+		t.Errorf("the enrolment's actor = %q, want ada", actor)
+	}
+}
+
+// An edge-enrolled token is held only as its hash in the store's file.
+func TestEnrolEdgeDeviceHoldsNoToken(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "yard.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := st.SetSetting(ctx, store.OperatorSetting, "jo", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddUser(ctx, "ada", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSetting(ctx, store.WebJWTUsersSetting, "ada@example.net=ada", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	d, err := st.EnrolEdgeDevice(ctx, "ada@example.net", "openclaw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(d.Token))
+	if !bytes.Contains(raw, []byte(hex.EncodeToString(sum[:]))) {
+		t.Fatal("the store does not have the token's SHA-256")
+	}
+	secret := strings.TrimPrefix(d.Token, store.DeviceTokenPrefix)
+	if bytes.Contains(raw, []byte(secret)) {
+		t.Fatal("the store has the token")
+	}
+}
+
 // Adding a device is the operator's: anyone else is refused by name, the
 // user whose device it would be too, and an agent by its pane whatever name
 // the command gives. Whoever adds one decides who may speak as a person.

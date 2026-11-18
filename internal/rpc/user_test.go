@@ -586,7 +586,7 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"Sing", "Subscribe", "Close"} {
+	for _, name := range []string{"Sing", "Subscribe", "Close", EdgeEnrolMethod} {
 		none, _ := json.Marshal(noSuchMethod(name))
 		if got := call(t, h, token, name, `{}`); got != string(none) {
 			t.Errorf("%s is answered %s, want %s", name, got, none)

@@ -605,17 +605,9 @@ func (u *UserServer) device(ctx context.Context, credential, from string) (*Call
 func (u *UserServer) Handler() http.Handler {
 	mux := u.routes()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// An enveloped call down the link is opened by its channel, not
-		// by a token, and only from the link's address (usere2e.go).
-		if r.Method == http.MethodPost && r.URL.Path == E2EPath && r.RemoteAddr == linkRemoteAddr {
-			u.e2e(w, r)
-			return
-		}
-		// A device that has no token yet comes for one with a pairing's
-		// code. Asked first: the device a pairing is opened for may be the
-		// yard's first. With no pairing open the path is as any other here.
-		if r.Method == http.MethodPost && r.URL.Path == PairPath && u.st.DevicePairOpened(r.Context()) {
-			u.pair(w, r)
+		// Paths that take no credential are answered before anything
+		// else (uncredentialed, useredge.go).
+		if u.uncredentialed(w, r) {
 			return
 		}
 		// There only when someone can use it: a yard that never gave a
