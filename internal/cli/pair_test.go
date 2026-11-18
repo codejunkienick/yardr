@@ -420,9 +420,8 @@ func TestPeerPairCard(t *testing.T) {
 	if _, err := north.st.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr"}, "jo"); err != nil {
 		t.Fatal(err)
 	}
-	if err := north.own.CrewStarted(ctx, "yardmaster", map[string]any{"shell_pid": os.Getpid()}); err != nil {
-		t.Fatal(err)
-	}
+	// jo's own first: once CrewStarted registers this process as the
+	// yardmaster's pane, every socket call reads as the yardmaster's.
 	if err := north.st.SetSetting(ctx, store.DelegationSetting, "true", "jo"); err != nil {
 		t.Fatal(err)
 	}
@@ -433,11 +432,19 @@ func TestPeerPairCard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := north.own.CrewStarted(ctx, "yardmaster", map[string]any{"shell_pid": os.Getpid()}); err != nil {
+		t.Fatal(err)
+	}
 	north.a.actor = "yardmaster"
 	north.a.env = testEnv(t, north.home, "YARDR_CREW=yardmaster")
 	out, err := north.delegated(t, "peer", "pair", "--card", "--name", "laptop", "--for", "jo", "--mail", strconv.FormatUint(mail, 10))
 	if err != nil {
 		t.Fatalf("the yardmaster's opening: %v\n%s", err, out)
+	}
+	// The line ends with the opening: the rest is the operator's own over
+	// the socket, which would read as the yardmaster's while the pane stands.
+	if err := north.own.CrewStopped(ctx, "yardmaster", "the opening is made"); err != nil {
+		t.Fatal(err)
 	}
 	north.a.actor = "jo"
 	wantText(t, out, "Pairing is open for 60 minutes, until ", "for one yard, laptop", "yardr peer pair "+north.srv.URL+" ", "This command ends here", "kept nowhere")
