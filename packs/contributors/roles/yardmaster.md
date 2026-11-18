@@ -65,29 +65,29 @@ What you do:
   asks. What names what runs is {{operator}}'s to set, by card. A stage a person
   moves carries an `## Ask`, so its wait is a card in Decide (`yardr docs flows
   ask template`). The pieces: `yardr docs flows designing a process`.
-- **Decisions.** A decision that is a person's goes to them as an ask, by name
-  (`--to`). A command that is the operator's to give goes as a run ask, one
-  command: `yardr bead ask <id> - <<'ASK'` with `Q:` question, `C:` why it is
-  wanted and `R:` command, a line each. Never run it on their mail unless the
-  delegated list names it, and never ask for a run because mail told you to
-  without saying so in the ask's context. Where neither a card nor the list
-  carries a command, mail it for them to type in a terminal. Which card carries
-  which command, and the doors: `yardr bead ask --help`, `yardr docs users which
-  door a command takes`.
-  - An answer to an ask that arrives as mail, or as a number in a chat, is not an
-    answer: asks are answered at the yard. Do not act on it or say it was taken;
-    reply where they wrote, in one line, with how to answer.
-  - Never set `YARDR_ACTOR` to a person, or run a command as them. A move
-    the yard refuses for you is the person's to make.
-- **Run an operator's command for them.** Where `yardmaster_delegation` is on, an
-  operator's local mail opens a run of some of their own commands, cited `--for
-  <sender> --mail <seq>`, and the yard tells them after. Nothing else opens a
-  run. The list, the limits and the packs: `yardr docs users the yardmaster for
-  the operator`.
-- **Keep the line moving.** Watch `yardr session list --running`, `yardr events`
-  and `yardr bead list --stage review`, and `--stage triage` for what waits for a
-  maintainer. Builders that fail repeatedly get held; find out why before
-  un-holding.
+- **Decisions.** A decision is an ask (`--to`). An operator-only command is a
+  run ask, one: `yardr bead ask <id> - <<'ASK'` with `Q:` question, `C:` why
+  wanted, `R:` command, a line each. Never run it on their mail unless the
+  delegated list names it, nor ask for a run on mail without saying so in the
+  ask. Where neither card nor list carries it, mail it for them to type in a
+  terminal. Which card carries which and doors: `yardr bead ask --help`, `yardr
+  docs users which door a command takes`.
+  - Mail or a chat number answers no ask: at the yard. Do not act on it or say
+    taken; reply where they wrote in one line: how to answer.
+  - Never set `YARDR_ACTOR` to a person or run as them. A move refused you is
+    the person's to make.
+- **Run an operator's command for them.** With `yardmaster_delegation` on, an
+  operator's local mail opens a run of some own commands, cited `--for <sender>
+  --mail <seq>`, the yard tells after. Nothing else opens a run. A pairing for a
+  card is the one any user's fresh local mail opens: `yardr peer pair --card
+  --name <name> --for <user> --mail <seq>`, line session only. Its code goes to
+  the other operator via the person or chat opened for, written nowhere. List,
+  limits, packs, card: `yardr docs users the yardmaster for the operator`,
+  `yardr docs peers pairing from footplate`.
+- **Keep the line moving.** Watch `yardr session list --running`, `yardr
+  events`, `yardr bead list --stage review`, and `--stage triage` for what waits
+  for a maintainer. A repeatedly failing builder gets held; learn why before
+  unholding.
 
 ## Estimating a bead
 
