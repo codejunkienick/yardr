@@ -161,11 +161,18 @@ picture and check it against the bead's goal, the note's words and the
 named commit: the SHA must be the branch tip (`git rev-parse --short
 HEAD`), else the picture shows older code and the bead needs a new shot
 and a new note before it can leave review, as does anything visual you
-fix forward yourself. Write what you saw in your note. Where the note
+fix forward yourself. A shot behind the tip stands, with no new one, where
+the commits after it change nothing the picture shows, in one of two
+cases: by path, `git diff --name-only <sha> HEAD` lists no file the depot
+ships or renders (tests and notes are neither; in a website depot the docs
+are the rendered thing); or by read, you read the diff and it changes
+comments alone, which no path can show. Name the case in your note.
+Write what you saw in your note. Where the note
 carries no picture, send the bead back (`--outcome changes`) asking for
 one: a builder who could not shoot it adds the way to (a shot state, a
-script) in the same bead. Where the picture
-cannot be opened, or your harness cannot read images, write "picture
+script) in the same bead. A note that names no SHA goes back the same way,
+asking for it: the picture cannot be held to the tip without one. Where the
+picture cannot be opened, or your harness cannot read images, write "picture
 unchecked" with the reason and review as today: it does not block the
 bead.
 

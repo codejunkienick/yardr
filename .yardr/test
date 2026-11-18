@@ -2344,6 +2344,30 @@ nomarkers() {
     exit 1
   fi
 }
+# nohostnames fails the run when a tracked file names a machine's own host
+# name. The root package's TestNoFileNamesAMachineHost reads every tracked file,
+# and a file whose row in the table below is - (AGENTS.md, .gitignore, .github/)
+# or names no root package (NOTICE, .yardr/roles/) does not select it, so a host
+# name planted in one was met only by the next change that selects the root
+# package, or by the quiet run (yardr-wrfn). Every run judges the whole tree,
+# whatever was selected, as nomarkers does, so the step runs that one test: the
+# words are digests in main_test.go, the one place that holds them, and none is
+# copied here. It runs go directly and not through again: a scan of a second or
+# so must not queue on the race lock behind landings, nor add a package to the
+# run's counts, and the scan is deterministic, so a second run would say
+# nothing. A failure prints the test's output, which names the file and the line
+# and never the word.
+nohostnames() {
+  t0=$(date +%s)
+  rc=0
+  out=$(go test -count=1 -run '^TestNoFileNamesAMachineHost$' . 2>&1) || rc=$?
+  took "$t0" "host name scan"
+  if [ "$rc" -ne 0 ]; then
+    printf '%s\n' "$out" | sed 's/^/test: /'
+    echo "test: a tracked file names a machine's own host name, or the scan could not run: write a placeholder in its place (yardr-wrfn)"
+    exit 1
+  fi
+}
 formatted() {
   t0=$(date +%s)
   out=$(gofmt -l .)
@@ -2495,6 +2519,7 @@ whole() {
   sleepbudget
   filesizebudget
   nomarkers
+  nohostnames
   # The slowest of the whole-tree checks, so after the ones that fail in
   # seconds.
   staticchecked
@@ -2731,7 +2756,9 @@ since="since $base ($said), from $(git rev-parse --short "$from")"
 # changed file that is not .go, not embedded and in no row tests every
 # package, so a missing row costs time, not a fault found late; a row that
 # leaves a reader out is what lets one through. A - row is a promise that no
-# test reads the path: check before adding one.
+# test reads the path: check before adding one. The host name scan, which reads
+# every tracked file, is no such reader: it runs as a step of every run
+# (nohostnames), so a - row stays true for it.
 # Packages that import packs, in code or in tests, are already
 # selected through its embeds when an embedded pack file changes;
 # rows additionally cover readers that do not import it, and files
@@ -2842,6 +2869,7 @@ built() {
   sleepbudget
   filesizebudget
   nomarkers
+  nohostnames
   staticchecked
 }
 # No renames, here and in the two diffs below: a move is the deletion of the

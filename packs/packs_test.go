@@ -282,6 +282,39 @@ func TestBuilderRolesNameWhereTheHarnessRefusesRm(t *testing.T) {
 	}
 }
 
+// A builder's question with options reaches the person votable. The card a
+// question note makes quotes the note's first lines, cut, so options written
+// into it cannot be picked (a builder followed that path exactly, and the
+// person had to answer in words). A question with options goes first as an
+// ask with a move for each option, which the stage that takes the question
+// puts as its own card (yardr-7ak8); the mechanism is the store's, and the
+// five builder roles name it: the command in the form it accepts, the
+// options as labelled lines beside `-`, where --option is refused, and what
+// stays the note alone. The words are compared with the lines folded, so
+// rewrapping breaks nothing.
+func TestBuilderRolesPutAQuestionWithOptionsAsAnAsk(t *testing.T) {
+	files := packFiles(t)
+	for _, name := range []string{"starter/roles/builder.md", "contributors/roles/builder.md", "design/roles/builder.md", "dir/roles/builder.md", "website/roles/builder.md"} {
+		body := strings.Join(strings.Fields(files[name]), " ")
+		for _, want := range []string{
+			"That quote is the first lines of the note, cut, so options written into the note cannot be picked.",
+			"A question with options to pick from goes first as an ask: `yardr bead ask <id> - --move <where> --move <where> <<'ASK'`, then `Q:` the question, `C:` a line of context (two to five), `O: <label>: <what picking it does>` for each option, and `ASK` on a line of its own.",
+			"Give one `--move` for each `O:`, in the order written, naming the stage picking that option sends the bead to: one the `decide` stage offers, your own for an option that only chooses an approach.",
+			"A name it does not offer is refused, with those it does, and nothing is asked.",
+			"`--recommend <n>` beside the `-`, with a `W:` line of why, marks the one you suggest.",
+			"Then end with `question` as above: the card the person gets is your ask, its options the picks.",
+			"A question with no options to pick from, one that wants their words, stays the note alone.",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s lacks %q", name, want)
+			}
+		}
+		if strings.Contains(body, "--option") {
+			t.Errorf("%s names --option, which yardr refuses beside `-`: the options are `O:` lines", name)
+		}
+	}
+}
+
 // Every builder role has its handover state the change's size in four
 // buckets (yardr-smtb), so the growth of the codebase is visible per bead
 // where a person and a reviewer read it: product Go, tests, docs, and the
@@ -1192,14 +1225,38 @@ func TestEyesLabel(t *testing.T) {
 		}
 	}
 	// Only a git depot binds the picture to a commit: the directory
-	// depot's reviewer has no branch tip to check the named SHA against.
-	for _, name := range []string{"starter/roles/reviewer.md", "contributors/roles/reviewer.md", "design/roles/reviewer.md"} {
+	// depot's reviewer has no branch tip to check the named SHA against. A
+	// note that names no SHA goes back like one with no picture, and a shot
+	// behind the tip stands, with no new one, in two cases the reviewer names:
+	// by path, where the commits after it touch no file the depot ships or
+	// renders, and by read, where the diff changes comments alone, which no
+	// path shows (yardr-dryx). The sentences are compared with the lines
+	// folded, so rewrapping breaks nothing.
+	for _, name := range []string{"starter/roles/reviewer.md", "contributors/roles/reviewer.md", "design/roles/reviewer.md", "website/roles/reviewer.md"} {
 		if !strings.Contains(files[name], "the SHA must be the branch tip") {
 			t.Errorf("%s does not bind the picture to the branch tip", name)
+		}
+		folded := strings.Join(strings.Fields(files[name]), " ")
+		for _, want := range []string{
+			"A note that names no SHA goes back the same way, asking for it",
+			"A shot behind the tip stands, with no new one, where the commits after it change nothing the picture shows, in one of two cases:",
+			"by path, `git diff --name-only <sha> HEAD` lists no file the depot ships or renders",
+			"in a website depot the docs are the rendered thing",
+			"by read, you read the diff and it changes comments alone, which no path can show",
+			"Name the case in your note.",
+		} {
+			if !strings.Contains(folded, want) {
+				t.Errorf("%s lacks %q", name, want)
+			}
 		}
 	}
 	if strings.Contains(files["dir/roles/reviewer.md"], "branch tip") {
 		t.Error("dir/roles/reviewer.md binds the picture to a branch tip it has none of")
+	}
+	for _, foreign := range []string{"names no SHA", "A shot behind the tip"} {
+		if strings.Contains(files["dir/roles/reviewer.md"], foreign) {
+			t.Errorf("dir/roles/reviewer.md says %q, of a commit it has none of", foreign)
+		}
 	}
 }
 

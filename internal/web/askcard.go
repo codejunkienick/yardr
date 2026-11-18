@@ -28,8 +28,8 @@ type AskCard struct {
 	// Topic is the bead's topic without its prefix, "" where it has none:
 	// the head then reads Everything else, as footplate's does.
 	Topic string
-	// Weight is the card's weight, each class with the yard's line, absent
-	// on a routine card.
+	// Weight is the card's weight, each class with the yard's line as
+	// letters (lettered), absent on a routine card.
 	Weight []store.AskWeight
 	// Question is the question; Age how long it waits, asked beside it.
 	Question string
@@ -170,6 +170,26 @@ func approvable(weight []store.AskWeight, onBead, gate bool) bool {
 	return gate && store.StrongWeight(weight)
 }
 
+// lettered is a card's weight as the page draws it: each line as letters on
+// one line (store.OneLine), as a terminal is shown it (AskWeight.Marked). A
+// line quotes what the card's own writer chose, a pack's file name among it,
+// and html/template escapes such a line but leaves a mark of direction as it
+// is, so the name would still reorder the text drawn around it. The class is
+// the yard's own and stays: the strong check and the approval read it and
+// nothing else. The stored lines are untouched, since the approval weighs the
+// card again and compares them (weightStale); the page's JSON form carries
+// them as stored too, and so do the event stream and bead show --json.
+func lettered(weight []store.AskWeight) []store.AskWeight {
+	if weight == nil {
+		return nil
+	}
+	out := make([]store.AskWeight, len(weight))
+	for i, w := range weight {
+		out[i] = store.AskWeight{Class: w.Class, Line: store.OneLine(w.Line)}
+	}
+	return out
+}
+
 // cardSite reads where the request's cards stand: the yard's name and chip
 // shade, whether the window holds the gate, and the crew and users for the
 // Ask about this link. The link stands only where the view acts, so a view
@@ -206,7 +226,7 @@ func (p BeadPage) Card(a store.BeadAsk) AskCard {
 	out := AskCard{
 		Bead: p.Bead.ID, Ask: a.Ask, OnBead: true,
 		Yard: p.site.Yard, Shade: p.site.Shade,
-		Weight: a.Weight, Question: a.Question, Age: age(time.Since(a.Since)),
+		Weight: lettered(a.Weight), Question: a.Question, Age: age(time.Since(a.Since)),
 		Asker: a.Asker, Talk: p.site.talkTo(p.As, a.Asker),
 		Context: a.Context, Options: a.Options, Recommend: a.Recommend, Why: a.Why,
 		Mapping: a.Identity != nil, About: a.About, Held: p.HeldPayloads[a.Ask], User: a.To,
@@ -249,7 +269,7 @@ func (w Waiting) Card(r Reason) AskCard {
 	out := AskCard{
 		Bead: w.Bead, Ask: r.Ask,
 		Yard: w.site.Yard, Shade: w.site.Shade, Topic: w.Topic,
-		Weight: r.Weight, Question: r.Text, Age: age(time.Since(r.Since)),
+		Weight: lettered(r.Weight), Question: r.Text, Age: age(time.Since(r.Since)),
 		Asker: r.Asker, Talk: w.site.talkTo(w.As, r.Asker),
 		Context: r.Context, Options: r.Options, Recommend: r.Recommend, Why: r.RecommendWhy,
 		Mapping: r.Identity != nil, User: r.To,

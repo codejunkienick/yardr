@@ -10,9 +10,11 @@ import (
 	"html"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/web"
@@ -299,6 +301,75 @@ func TestPackFilePages(t *testing.T) {
 		if strings.ContainsRune(trojanPage, mark) {
 			t.Errorf("the page of file 8 carries %U", mark)
 		}
+	}
+
+	// The card's weight line quotes the name too (the first install makes
+	// the files), and the card reads it as letters on one line, as the file's
+	// heading does, on each surface the card stands on: the bead's page, and
+	// the rows of Home and the line (yardr-0wp5). Nothing of the name stands
+	// there as a mark of direction, and no line of the card is reordered by it.
+	// The command block holds the argv alone, which no file name reaches.
+	hasBidi := func(s string) bool {
+		return strings.ContainsFunc(s, func(r rune) bool { return unicode.Is(unicode.Bidi_Control, r) })
+	}
+	weightLine := regexp.MustCompile(`<p class="weighty">(.*?)</p>`)
+	for _, surface := range approveSurfaces {
+		body := y.surfaceBody(surface.path(b.ID), jo)
+		// The notes below the card are the bead's log, which draws each note
+		// as it is kept, an ask's among them: a surface of its own.
+		if at := strings.Index(body, `id="notes"`); at >= 0 {
+			body = body[:at]
+		}
+		var code []string
+		for _, m := range weightLine.FindAllStringSubmatch(body, -1) {
+			if line := html.UnescapeString(m[1]); strings.HasPrefix(line, store.WeightMark+store.WeightCode+": ") {
+				code = append(code, line)
+			}
+		}
+		if len(code) == 0 {
+			t.Errorf("%s: no code weight line, want the one the first install carries", surface.name)
+		}
+		for _, line := range code {
+			if !strings.Contains(line, "file "+wants[7].heading) || hasBidi(line) {
+				t.Errorf("%s: the weight line is %q, want the name as letters (%q) and no mark of direction", surface.name, line, wants[7].heading)
+			}
+		}
+		for _, mark := range []rune{'\x1b', '\u2028'} {
+			if strings.ContainsRune(body, mark) {
+				t.Errorf("%s carries %U", surface.name, mark)
+			}
+		}
+		if hasBidi(body) {
+			t.Errorf("%s carries a mark of direction", surface.name)
+		}
+	}
+	if blocks := preBlocks(card); len(blocks) != 1 || blocks[0] != run.Command || !strings.Contains(run.Command, "pack apply starter --depot home") || strings.Contains(run.Command, "roles/") {
+		t.Errorf("the card's command block is %q, want the argv command alone: %q", blocks, run.Command)
+	}
+
+	// The page's JSON form is the stored card, which the approval weighs again
+	// and compares: the weight line keeps the name's marks as the store wrote
+	// it, and it is the store's own, line for line.
+	var cardPage web.BeadPage
+	r = jwtGet(t, y.ts, "/beads/"+b.ID, web.DefaultJWTHeader, jo, "Accept", "application/json")
+	if err := json.Unmarshal([]byte(r.body), &cardPage); err != nil || r.status != http.StatusOK {
+		t.Fatalf("JSON of the bead page: %d %v: %.200s", r.status, err, r.body)
+	}
+	var pageWeight []store.AskWeight
+	for _, a := range cardPage.Asks {
+		if a.Ask == seq {
+			pageWeight = a.Weight
+		}
+	}
+	stored, err := y.st.Bead(ctx, b.ID, "jo")
+	must(t, err)
+	for _, a := range stored.Asks {
+		if a.Ask == seq && !slices.Equal(a.Weight, pageWeight) {
+			t.Errorf("the page's JSON weighs the card as %+v, the store as %+v", pageWeight, a.Weight)
+		}
+	}
+	if len(pageWeight) != 1 || pageWeight[0].Class != store.WeightCode || !strings.Contains(pageWeight[0].Line, "file roles/07\u202e\u2066.md[31m x.md") {
+		t.Errorf("the page's JSON weight is %+v, want one code line that keeps the name's marks", pageWeight)
 	}
 
 	// Reading wrote nothing: no event, and no blob of the pack, of a file,
