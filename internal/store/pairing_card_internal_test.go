@@ -281,9 +281,13 @@ type callYards struct {
 func newCallYards(t *testing.T) *callYards {
 	t.Helper()
 	y := &callYards{host: newPairHost(t), join: newPairHost(t), ctx: context.Background()}
-	// At real now: the carried answer waits on a context deadline, and
-	// contexts keep real time while the package's clock is fake.
-	y.at = time.Now()
+	// At real now, at the microsecond the store keeps: the carried
+	// answer waits on a context deadline, and contexts keep real time
+	// while the package's clock is fake. now() truncates its clock to
+	// microseconds, and a Linux clock carries nanoseconds the Mac's
+	// does not give, so a y.at with nanoseconds falls short of a
+	// call's hour by them (yardr-t5v4).
+	y.at = time.Now().Truncate(time.Microsecond)
 	clock = func() time.Time { return y.at }
 	for _, name := range []string{"jo", "ada"} {
 		if _, err := y.join.AddUser(y.ctx, name, "jo"); err != nil {
@@ -893,7 +897,9 @@ func TestPairCallVerifiedAfterHostEnded(t *testing.T) {
 	if err := y.host.PairClose(y.ctx, "", "jo"); err != nil {
 		t.Fatal(err)
 	}
-	y.at = time.Now().Add(-CardTTL + 2*time.Second)
+	// Truncated as newCallYards is: the clock stays at the precision
+	// the store keeps.
+	y.at = time.Now().Truncate(time.Microsecond).Add(-CardTTL + 2*time.Second)
 	tr, _ = y.register(t)
 	bead, seq, _ = y.card(t)
 	err = y.join.AnswerAsk(y.ctx, bead, seq, 0, first(tr), "jo", false)
