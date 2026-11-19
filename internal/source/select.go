@@ -2,6 +2,7 @@ package source
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -12,7 +13,9 @@ import (
 // only an exact top-level key, so a name such as "tags[]", one containing
 // "*" or "..", or "errors.404" still has to load. An empty entry is already
 // refused by str, which is the one shape that never loaded. A name the
-// object walk cannot follow stays that exact key.
+// object walk cannot follow stays that exact key, and SelectWarnings says
+// so wherever a declaration is shown, since a typo for a path would
+// otherwise select nothing and say nothing.
 func (r *reader) selects(n *yaml.Node, key string) []string {
 	return r.strs(n, key)
 }
@@ -48,14 +51,34 @@ func selectedField(obj map[string]json.RawMessage, path string) (json.RawMessage
 // not index arrays or expand wildcards. A numeric segment is an object key,
 // as in errors.404.
 func objectPath(path string) bool {
-	parts := strings.Split(path, ".")
-	if len(parts) < 2 {
-		return false
-	}
-	for _, part := range parts {
+	return strings.Contains(path, ".") && plainFields(path)
+}
+
+// plainFields reports whether every dot-separated part of name is a field
+// the walk can follow, which means it is not blank and holds no star or
+// bracket. A name with no dot is one part, so it is plain unless it holds a
+// star or a bracket, which a person may mean as a wildcard or an index.
+func plainFields(name string) bool {
+	for _, part := range strings.Split(name, ".") {
 		if strings.TrimSpace(part) == "" || strings.ContainsAny(part, "[]*") {
 			return false
 		}
 	}
 	return true
+}
+
+// SelectWarnings says, of each name in the call's answer.select that no path
+// walks, what becomes of it. A name with a blank part, a star or a bracket is
+// read as that exact key. It still loads, as every stored declaration must,
+// so a typo for a path would select nothing in silence if nothing said so.
+// Callers say it where a declaration is shown. The name is quoted, since the
+// file it comes from may not be the operator's.
+func (c Call) SelectWarnings() []string {
+	var out []string
+	for _, name := range c.Answer.Select {
+		if !plainFields(name) {
+			out = append(out, fmt.Sprintf("answer.select %q of call %s is read as that exact key and not walked as a path, since a path has no empty segment, star or bracket. It keeps nothing unless the answer has a key spelled exactly that way", name, c.Name))
+		}
+	}
+	return out
 }

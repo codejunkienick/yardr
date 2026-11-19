@@ -105,22 +105,37 @@ func TestPackCheckSourcePackNeedsNoDepot(t *testing.T) {
 			}
 		}()
 		// A name that used to be only an exact key still loads, including
-		// brackets, a star, ".." and a numeric segment. An empty entry is
-		// the one shape that never loaded.
-		for _, path := range []string{
-			"number", "head.ref", "base.repo.html_url", "@odata.nextLink",
-			"tags[]", "errors.404", "rates.2024", "a..b", "star*",
-			".head", "head.", "head..ref", "head[0].ref", "head.0.ref", "head.*", "head[].ref",
+		// brackets, a star, ".." and a numeric segment, and the check does
+		// not fail on it. One no path walks is warned of under its source,
+		// since it is read as that exact key and a typo for a path would
+		// select nothing in silence; a name a path walks, "@odata.nextLink"
+		// and "errors.404" among them, is not. An empty entry is the one
+		// shape that never loaded.
+		for _, tc := range []struct {
+			path  string
+			warns bool
+		}{
+			{"number", false}, {"head.ref", false}, {"base.repo.html_url", false}, {"@odata.nextLink", false},
+			{"errors.404", false}, {"rates.2024", false}, {"head.0.ref", false},
+			{"tags[]", true}, {"a..b", true}, {"star*", true},
+			{".head", true}, {"head.", true}, {"head..ref", true}, {"head[0].ref", true}, {"head.*", true}, {"head[].ref", true},
 		} {
-			t.Run(path, func(t *testing.T) {
-				raw, _ := json.Marshal([]string{path})
+			t.Run(tc.path, func(t *testing.T) {
+				raw, _ := json.Marshal([]string{tc.path})
 				decl := strings.Replace(kindDecl, "path: /me } }", "path: /me }, answer: { select: "+string(raw)+" } }", 1)
 				if err := os.WriteFile(filepath.Join(dir, "acme.yaml"), []byte(decl), 0o644); err != nil {
 					t.Fatal(err)
 				}
 				out, err := run(t, a.packCmd(), "check", dir)
 				if err != nil {
-					t.Fatalf("select %q loads: %v\n%s", path, err, out)
+					t.Fatalf("select %q loads: %v\n%s", tc.path, err, out)
+				}
+				warning := "\n  warning: answer.select \"" + tc.path + "\" of call ping is read as that exact key and not walked as a path, since a path has no empty segment, star or bracket. It keeps nothing unless the answer has a key spelled exactly that way\n"
+				if got := strings.Contains(out, warning); got != tc.warns {
+					t.Errorf("select %q: warned = %v, want %v:\n%s", tc.path, got, tc.warns, out)
+				}
+				if got := strings.Contains(out, "warning:"); got != tc.warns {
+					t.Errorf("select %q: the plan has a warning = %v, want %v:\n%s", tc.path, got, tc.warns, out)
 				}
 			})
 		}

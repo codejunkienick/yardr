@@ -585,7 +585,7 @@ program they run is not carried: it is the operator's to install.`,
 					return fmt.Errorf("source %s saved, but its commands' files were not copied: %w", d.Name, err)
 				}
 			}
-			changes := append(file.notes(), callChanges(before, d)...)
+			changes := append(file.notes(d), callChanges(before, d)...)
 			grants, err := st.SourceGrants(c.Context(), d.Name)
 			if err != nil {
 				return err
@@ -1905,14 +1905,14 @@ func checkCommands(d *source.Declaration, home string) (cmds []commandCheck, ok 
 	return cmds, ok
 }
 
-// checkField renders one selected field for its line: a string as it is, with
-// nothing a terminal would act on, null as null, and anything else as its JSON.
+// checkField renders one selected field for its line: a string as it is, null as null,
+// anything else as its JSON, all through printable, since JSON leaves a C1 or bidi rune literal.
 func checkField(raw json.RawMessage) string {
 	var s *string
 	if json.Unmarshal(raw, &s) == nil && s != nil {
 		return printable(*s)
 	}
-	return string(raw)
+	return printable(string(raw))
 }
 
 // paramLine is a parameter in a line of yardr source show.

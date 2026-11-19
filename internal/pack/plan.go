@@ -431,6 +431,10 @@ type DeclaredPlan struct {
 	// words (store.StillGranted). A plan shows it, since nobody is
 	// asked about it.
 	StillGranted []string `json:"still_granted,omitempty"`
+	// Warnings say, a sentence each, what the declaration holds that does
+	// not do what it looks like (Call.SelectWarnings). The import goes
+	// through, since a name that loaded before must still load.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // MapPlan is what an import does about the stage map a pack carries for

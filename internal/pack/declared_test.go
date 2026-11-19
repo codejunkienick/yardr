@@ -343,6 +343,26 @@ func TestApplyAddsADeclaredSource(t *testing.T) {
 	if c, ch := actions(plan, pack.Create), actions(plan, pack.Change); len(c)+len(ch) != 0 {
 		t.Fatalf("a second import would create %v and change %v", c, ch)
 	}
+	if d := declared(t, plan, "pushover"); len(d.Warnings) != 0 {
+		t.Fatalf("a declaration with no select is warned of: %q", d.Warnings)
+	}
+
+	// A select name no path walks is warned of in the plan, and the import
+	// goes through all the same: the name loads as the exact key it spells.
+	typo := strings.Replace(pushover, "    request:\n", "    answer: { select: [id, \"head.*\"] }\n    request:\n", 1)
+	if typo == pushover {
+		t.Fatal("the test adds no select")
+	}
+	st, o = yard(t)
+	plan = build(t, st, load(t, writePack(t, declaredFiles(smallDeclared, typo))), o)
+	want := []string{`answer.select "head.*" of call message is read as that exact key and not walked as a path, since a path has no empty segment, star or bracket. It keeps nothing unless the answer has a key spelled exactly that way`}
+	if d := declared(t, plan, "pushover"); !slices.Equal(d.Warnings, want) {
+		t.Fatalf("warnings = %q, want %q", d.Warnings, want)
+	}
+	apply(t, st, plan, nil)
+	if src, err := st.GetSource(ctx, "pushover"); err != nil || src.Text != typo {
+		t.Fatalf("the import did not keep the declaration as written: %+v, %v", src, err)
+	}
 }
 
 // A source no call of which is granted, whose key a crew member holds,

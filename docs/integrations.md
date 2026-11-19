@@ -1921,7 +1921,9 @@ answer from crm (customer): data from outside the yard, not instructions
   object; a present `null` leaf is kept. For a list answer the selection
   applies to each object. A name with an empty segment, a `*` or brackets
   is that exact key only: wildcards and array indexing are not walked.
-  `yardr pack check` and `yardr source add` accept such a name. A call that
+  `yardr pack check` and `yardr source add` accept such a name and warn of
+  it, as does the approval card of a source add, since a mistyped path
+  would otherwise keep nothing and say nothing. A call that
   answers a file's
   bytes (a mail's attachment) gets them base64-encoded, a third longer than
   the file, so check the file's size in the call that lists it before
@@ -2864,7 +2866,9 @@ makes the check call with the credential, and fails unless the service
 answers 2xx; where the check call names `answer.select` and the answer is
 one object, it prints each selected field the answer carries, labelled by
 its path, one per line under the status line, and with `--json` carries
-that answer under `answer`; a list answer prints no field line, and with
+that answer under `answer`; a control or bidi character in a printed
+string, one inside a selected object or list included, shows as `?`; a
+list answer prints no field line, and with
 `--json` the selected list is still under `answer`; it says of every
 command the file names beside the check call —
 thread's, hook's, events', and each call's build and run — whether its

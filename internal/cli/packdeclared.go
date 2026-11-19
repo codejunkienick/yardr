@@ -12,8 +12,9 @@ import (
 // printPlanDeclared prints, for each source the pack declares, where its
 // calls go and what an import would do about it: added, replaced with
 // what the replacement widens or still grants to somebody already, or
-// already had. refused says, by source, why a declared source the plan
-// would add is left out by this run.
+// already had; and a warning for what its declaration holds that is read
+// otherwise than it looks. refused says, by source, why a declared source
+// the plan would add is left out by this run.
 func printPlanDeclared(w io.Writer, p *pack.Plan, refused map[string]string) {
 	for _, d := range p.Declared {
 		fmt.Fprintf(w, "\ndeclared source %s, from %s\n", d.Source, d.File)
@@ -34,6 +35,9 @@ func printPlanDeclared(w io.Writer, p *pack.Plan, refused map[string]string) {
 			fmt.Fprintln(w, "  would replace the declaration the yard has under that name, which keeps its env_file (what changes is under declared sources, above)")
 		default:
 			fmt.Fprintln(w, "  the yard has it")
+		}
+		for _, l := range d.Warnings {
+			fmt.Fprintf(w, "  warning: %s\n", l)
 		}
 		if r := d.Reaches; r != nil {
 			who := make([]string, len(r.Who))

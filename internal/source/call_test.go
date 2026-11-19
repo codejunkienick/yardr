@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -741,6 +742,10 @@ calls:
 			if want := `{"@odata.count":2,"@odata.nextLink":"https://graph.example.com/next"}`; string(res.Answer) != want {
 				t.Fatalf("odata select = %s, want %s", res.Answer, want)
 			}
+			// A dotted key a path walks is no typo, so it is not warned of.
+			if call, _ := odata.Call("customer"); len(call.SelectWarnings()) != 0 {
+				t.Fatalf("a dotted key a path walks is warned of: %q", call.SelectWarnings())
+			}
 		})
 		t.Run("bound after nested selection", func(t *testing.T) {
 			body = `{"head":{"ref":"` + strings.Repeat("x", AnswerMax) + `"}}`
@@ -760,6 +765,27 @@ calls:
 			}
 			if want := `{"a..b":true,"errors.404":"missing","head.*":"star","head..ref":"lit","head[0].ref":"idx","rates.2024":3,"star*":"s","tags[]":["a","b"]}`; string(res.Answer) != want {
 				t.Fatalf("literal keys = %s, want %s", res.Answer, want)
+			}
+			// Each name no path walks is said to be read as that exact key, in
+			// the declaration's order, and no other is: errors.404 and
+			// rates.2024 are paths, whose exact key merely wins.
+			call, _ := literal.Call("customer")
+			warned := call.SelectWarnings()
+			names := []string{"tags[]", "a..b", "star*", "head..ref", "head.*", "head[0].ref"}
+			if len(warned) != len(names) {
+				t.Fatalf("warned of %d names, want %d: %q", len(warned), len(names), warned)
+			}
+			for i, name := range names {
+				if want := `answer.select "` + name + `" of call customer is read as that exact key and not walked as a path, since a path has no empty segment, star or bracket. It keeps nothing unless the answer has a key spelled exactly that way`; warned[i] != want {
+					t.Errorf("warning %d = %q, want %q", i, warned[i], want)
+				}
+			}
+			// The name is quoted, so one from a file that is not the operator's
+			// cannot move a terminal: U+202E as its UTF-8 bytes, and an escape.
+			const rlo, esc = "\xe2\x80\xae", "\x1b"
+			hostile := Call{Name: "x", Answer: Answer{Select: []string{"a*" + rlo + esc + "[2J"}}}.SelectWarnings()
+			if len(hostile) != 1 || strings.ContainsAny(hostile[0], rlo+esc) || !strings.Contains(hostile[0], strconv.Quote("a*"+rlo+esc+"[2J")) {
+				t.Fatalf("a hostile name is said as %q", hostile)
 			}
 		})
 		// Without the exact key, a numeric segment is the object key of
