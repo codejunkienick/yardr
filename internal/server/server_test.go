@@ -1059,30 +1059,32 @@ func TestStartGivesTheServerItsOwnEnvAndDir(t *testing.T) {
 	}
 }
 
-// Start waits ten seconds for the server it started, or as long as the bound
-// a test names in YARDR_TEST_START_WAIT: the CLI a test runs reads it from the
-// test's environment, where a Go variable cannot reach it, and a machine under
-// load does not always leave a server ten seconds to start in (yardr-5jd7). A
-// bound that is missing, malformed or not positive is the ten seconds.
+// Start and Connect use the bound a test names in YARDR_TEST_START_WAIT; the
+// CLI a test runs reads it from the test's environment, where a Go variable
+// cannot reach it. Each caller keeps its own default when the bound is missing,
+// malformed or not positive.
 func TestStartWait(t *testing.T) {
 	// Serial: sets the process's environment.
 	for _, tc := range []struct {
 		name, value string
+		fallback    time.Duration
 		want        time.Duration
 	}{
-		{"missing", "", 10 * time.Second},
-		{"seconds", "90s", 90 * time.Second},
-		{"minutes", "2m", 2 * time.Minute},
-		{"under a second", "1500ms", 1500 * time.Millisecond},
-		{"not a duration", "soon", 10 * time.Second},
-		{"a number with no unit", "90", 10 * time.Second},
-		{"zero", "0s", 10 * time.Second},
-		{"negative", "-5s", 10 * time.Second},
+		{"missing", "", startWaitDefault, startWaitDefault},
+		{"missing keeps the retry bound", "", rpc.ReplaceRetry, rpc.ReplaceRetry},
+		{"seconds override the retry bound", "90s", rpc.ReplaceRetry, 90 * time.Second},
+		{"minutes", "2m", startWaitDefault, 2 * time.Minute},
+		{"under a second", "1500ms", startWaitDefault, 1500 * time.Millisecond},
+		{"not a duration", "soon", startWaitDefault, startWaitDefault},
+		{"not a duration keeps the retry bound", "soon", rpc.ReplaceRetry, rpc.ReplaceRetry},
+		{"a number with no unit", "90", startWaitDefault, startWaitDefault},
+		{"zero", "0s", startWaitDefault, startWaitDefault},
+		{"negative", "-5s", startWaitDefault, startWaitDefault},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("YARDR_TEST_START_WAIT", tc.value)
-			if got := startWait(); got != tc.want {
-				t.Errorf("startWait() = %v with YARDR_TEST_START_WAIT=%q, want %v", got, tc.value, tc.want)
+			if got := startWait(tc.fallback); got != tc.want {
+				t.Errorf("startWait(%v) = %v with YARDR_TEST_START_WAIT=%q, want %v", tc.fallback, got, tc.value, tc.want)
 			}
 		})
 	}
@@ -1114,6 +1116,43 @@ func TestStartWaitEndsStartAtTheBoundGiven(t *testing.T) {
 	}
 	if want := "did not answer within 0.3s; see " + c.LogFile(); !strings.Contains(err.Error(), want) {
 		t.Errorf("Start: %q, want it to say %q", err, want)
+	}
+}
+
+// A live server that stays silent past the outwait fails the connect,
+// rather than starting a second server onto it that cannot take the
+// store. The stand-in is a live pid with a silent socket: this test
+// process, named by the pidfile with nothing answering, as a server
+// wedged past answering. The outwait is stubbed to 300ms, as the
+// neighbour stubs Start's wait.
+func TestConnectFailsWhenALiveServerStaysSilent(t *testing.T) {
+	c := home(t)
+	if err := writePID(c); err != nil {
+		t.Fatal(err)
+	}
+	old := executable
+	executable = func() (string, error) {
+		t.Error("Connect went on to start a server")
+		return "", errors.New("no server in this test")
+	}
+	t.Cleanup(func() { executable = old })
+	t.Setenv("YARDR_TEST_START_WAIT", "300ms")
+
+	began := time.Now()
+	_, err := Connect(context.Background(), c)
+	if err == nil {
+		t.Fatal("Connect: no error from a live server that never answers")
+	}
+	// Only the direction a loaded machine cannot falsify: Connect does
+	// not give up before the bound.
+	if took := time.Since(began); took < 300*time.Millisecond {
+		t.Errorf("Connect gave up after %v, want at least the 300ms it was given", took)
+	}
+	if want := "did not answer within 0.3s; see " + c.LogFile(); !strings.Contains(err.Error(), want) {
+		t.Errorf("Connect: %q, want it to say %q", err, want)
+	}
+	if b, _ := os.ReadFile(c.PIDFile()); strings.TrimSpace(string(b)) != strconv.Itoa(os.Getpid()) {
+		t.Errorf("pidfile names %q, want the stand-in %d: Connect started a server", b, os.Getpid())
 	}
 }
 

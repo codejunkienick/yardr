@@ -587,12 +587,19 @@ func Connect(ctx context.Context, c *config.Config) (*rpc.Client, error) {
 	}
 	// A live pid without an answer is a server between builds (it execs in
 	// place): wait for it, as long as a call keeps retrying, rather than
-	// race a second one for the store.
-	for deadline := time.Now().Add(client.Retry); alive(c) && time.Now().Before(deadline); {
+	// race a second one for the store. Past the outwait a still-live pid
+	// is a server that will not answer (wedged, or a replace the load
+	// holds past the wait): fail, rather than start a second server onto
+	// it that cannot take the store.
+	wait := startWait(client.Retry)
+	for deadline := time.Now().Add(wait); alive(c) && time.Now().Before(deadline); {
 		time.Sleep(50 * time.Millisecond)
 		if ping(ctx, client) {
 			return client, nil
 		}
+	}
+	if alive(c) {
+		return nil, fmt.Errorf("yardr server did not answer within %gs; see %s", wait.Seconds(), c.LogFile())
 	}
 	if err := Start(ctx, c); err != nil {
 		return nil, err
@@ -691,16 +698,15 @@ var executable = os.Executable
 // answer.
 const startWaitDefault = 10 * time.Second
 
-// startWait is how long Start waits for the server it started to answer: ten
-// seconds, or the bound the test process named in config.TestStartWaitEnv. A
-// test that runs the CLI cannot reach the bound from Go, and a machine under
-// load does not always leave a server ten seconds to start in. A bound that
-// is missing, malformed or not positive is the ten seconds: a zero wait would
-// give up before the first ping.
-func startWait() time.Duration {
+// startWait is how long Connect waits for a live server or Start waits for the
+// server it started. A test's bound applies to either wait; when it is missing,
+// malformed or not positive, each caller keeps its own default. A test that
+// runs the CLI cannot reach the bound from Go, and a loaded machine may need
+// more than Start's ten-second default to bring the server up.
+func startWait(fallback time.Duration) time.Duration {
 	wait, err := time.ParseDuration(config.Getenv(config.TestStartWaitEnv))
 	if err != nil || wait <= 0 {
-		return startWaitDefault
+		return fallback
 	}
 	return wait
 }
@@ -727,7 +733,7 @@ func Start(ctx context.Context, c *config.Config) error {
 		return err
 	}
 	client := rpc.NewClient(c.Socket())
-	wait := startWait()
+	wait := startWait(startWaitDefault)
 	deadline := time.Now().Add(wait)
 	for time.Now().Before(deadline) {
 		if ping(ctx, client) {
