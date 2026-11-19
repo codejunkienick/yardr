@@ -197,9 +197,15 @@ func TestPairingCardConfirms(t *testing.T) {
 			written = append(written, k+"="+toText(v))
 		}
 	}
+	dashless := strings.ReplaceAll(code, "-", "")
 	for _, w := range written {
-		if strings.Contains(w, code) || strings.Contains(w, strings.ReplaceAll(code, "-", "")) || hasDigits(w, want) {
-			t.Errorf("the code or the typed digits are written: %q", w)
+		switch {
+		case strings.Contains(w, code):
+			t.Errorf("the code is written (code arm, code %q, want %s): %q", code, want, w)
+		case strings.Contains(w, dashless):
+			t.Errorf("the code is written (dashless arm, code %q, want %s): %q", code, want, w)
+		case hasDigits(w, want):
+			t.Errorf("the typed digits are written (digits arm, code %q, want %s): %q", code, want, w)
 		}
 	}
 	assertNoPairAlarm(t, h.Store, h.ctx)
@@ -213,13 +219,15 @@ func toText(v any) string {
 }
 
 // hasDigits reports whether want stands in s as a value rather than as a
-// substring: with a non-digit or the string's edge on both sides, outside
-// a longer digit run. The check's typed half is three random digits, which
-// coincide with fixed digits of the yard's own words (the recorded
-// collision: the fixed "url=http://10.0.0.5:8790" line); a recording glued
-// to letters still counts, since no fixed test value has that shape. The
-// code and its dashless form stay plain substrings: long and random, they
-// coincide with nothing in practice.
+// substring: with a non-digit that is no hex letter, or the string's edge,
+// on both sides, outside a longer digit run. The check's typed half is
+// three random digits, which coincide with fixed digits of the yard's own
+// words (the recorded collision: the fixed "url=http://10.0.0.5:8790"
+// line); a run glued to hex letters is a pairing id or session, both
+// random hex, not a recording (the recorded collision: three of an id's
+// hex digits). Glued to any other letter still counts. The code and its
+// dashless form stay plain substrings: long and random, they coincide with
+// nothing in practice.
 func hasDigits(s, want string) bool {
 	for at := 0; at+len(want) <= len(s); {
 		i := strings.Index(s[at:], want)
@@ -228,7 +236,10 @@ func hasDigits(s, want string) bool {
 		}
 		i += at
 		edge := func(j int) bool {
-			return j < 0 || j >= len(s) || s[j] < '0' || s[j] > '9'
+			if j < 0 || j >= len(s) {
+				return true
+			}
+			return (s[j] < '0' || s[j] > '9') && !isHexLetter(s[j])
 		}
 		if edge(i-1) && edge(i+len(want)) {
 			return true
@@ -238,11 +249,19 @@ func hasDigits(s, want string) bool {
 	return false
 }
 
-// The digit-boundary check the leak scan trusts (yardr-cex8): the fixed
-// URL's digits are no recording of the typed half, while the half spaced,
-// bare, glued to letters or against punctuation is. The URL holds two of
-// the wants as substrings, so this table fails under the substring check
-// it replaces and passes under the boundary one.
+// isHexLetter reports whether c is a hexadecimal letter, either case.
+func isHexLetter(c byte) bool {
+	return c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+}
+
+// The digit-boundary check the leak scan trusts (yardr-cex8, yardr-xnhk):
+// the fixed URL's digits are no recording of the typed half, while the
+// half spaced, bare, glued to non-hex letters or against punctuation is. A
+// run glued to hex letters is a pairing id or session, both random hex,
+// not a recording: the forced collision below is three of an id's hex
+// digits at hex glue. The URL holds two of the wants as substrings, so
+// this table fails under the substring check it replaces and passes under
+// the boundary one.
 func TestHasDigits(t *testing.T) {
 	// Sequential, like the file's tests.
 	url := "url=http://10.0.0.5:8790"
@@ -256,7 +275,12 @@ func TestHasDigits(t *testing.T) {
 		{"confirmed 879", "879", true},
 		{"879", "879", true},
 		{"digits:879.", "879", true},
-		{"ab879cd", "879", true},
+		{"xy879wz", "879", true},
+		{"ab879cd", "879", false},
+		{"pairing=ae41d879c0b2e3f4a5b6c7d8e9f0a1b2", "879", false},
+		{`{"question":"Pair this yard with laptop?","pair":"ae41d879c0b2e3f4a5b6c7d8e9f0a1b2"}`, "879", false},
+		{"pairing=0123456789abcdef0123456789abc879", "879", false},
+		{"pairing=AE41D879C0B2E3F4A5B6C7D8E9F0A1B2", "879", false},
 		{"8790", "879", false},
 		{"1879", "879", false},
 	} {
