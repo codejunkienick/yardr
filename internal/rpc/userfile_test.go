@@ -97,6 +97,75 @@ func TestUserDeviceFilesItsPersonsWork(t *testing.T) {
 	}
 }
 
+// A device withdraws and rewords a request its user filed, served as
+// its user with the actor left out, under the same rules as the MCP
+// tools. Another's request and a name that matches nothing are refused
+// alike, in the blind words with the code error, never not-found.
+func TestUserDeviceWithdrawsAndRewordsItsPersonsFiling(t *testing.T) {
+	st, u, token := userYard(t)
+	ctx := context.Background()
+	h := u.Handler()
+	if err := st.PutDepot(ctx, store.Depot{Name: "yard", Kind: store.DepotDir, Path: t.TempDir()}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	filed := fileResult(t, call(t, h, token, "FileBead", `{"title":"Paint the fence"}`))
+	// The actor left out is the device's user: jo's request is reworded,
+	// and the answer says the words changed.
+	got := call(t, h, token, "RewordBead", `{"bead":"`+filed.ID+`","title":"Paint the fence green"}`)
+	if !strings.Contains(got, `"title":"Paint the fence green"`) || !strings.Contains(got, `"changed":true`) {
+		t.Fatalf("RewordBead = %s", got)
+	}
+	// And withdrawn, closed with the reason given.
+	got = call(t, h, token, "WithdrawBead", `{"bead":"`+filed.ID+`","reason":"the fence is gone"}`)
+	if !strings.Contains(got, `"status":"closed"`) || !strings.Contains(got, `"close_reason":"the fence is gone"`) {
+		t.Fatalf("WithdrawBead = %s", got)
+	}
+	if b, err := st.GetBead(ctx, filed.ID); err != nil || b.Status != "closed" {
+		t.Fatalf("the withdrawn request is %+v, %v", b, err)
+	}
+	// Another's and a name that matches nothing are refused alike, in
+	// the blind words with the code error.
+	sams, err := st.CreateBead(ctx, store.NewBead{Title: "Sam's errand", For: "sam"}, "sam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := refusal(t, call(t, h, token, "RewordBead", `{"bead":"yardr-nosuch","title":"A new title"}`))
+	if !strings.HasPrefix(missing, "error\nI can't find that among the requests you filed") {
+		t.Fatalf("a name that matches nothing was answered %q", missing)
+	}
+	for _, c := range []struct{ method, body string }{
+		{"RewordBead", `{"bead":"` + sams.ID + `","title":"A new title"}`},
+		{"WithdrawBead", `{"bead":"` + sams.ID + `","reason":"no longer wanted"}`},
+		{"WithdrawBead", `{"bead":"yardr-nosuch","reason":"no longer wanted"}`},
+	} {
+		if got := refusal(t, call(t, h, token, c.method, c.body)); got != missing {
+			t.Errorf("%s %s = %q, want the words for a name that matches nothing: %q", c.method, c.body, got, missing)
+		}
+	}
+	if b, err := st.GetBead(ctx, sams.ID); err != nil || b.Status != "open" || b.Title != "Sam's errand" {
+		t.Errorf("sam's request after the refusals is %+v, %v", b, err)
+	}
+}
+
+// refusal is the code and the message of a refused reply, failing the
+// test on one that was answered.
+func refusal(t *testing.T, reply string) string {
+	t.Helper()
+	var r struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(reply), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Error.Code == "" {
+		t.Fatalf("refused nothing: %s", reply)
+	}
+	return r.Error.Code + "\n" + r.Error.Message
+}
+
 // fileResult is the filed bead of a FileBead reply, failing the test on
 // a refusal.
 func fileResult(t *testing.T, reply string) store.Bead {

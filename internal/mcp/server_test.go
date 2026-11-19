@@ -3,6 +3,7 @@ package mcp_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"slices"
 	"strings"
@@ -38,11 +39,11 @@ func (f *fakeYard) FileBead(_ context.Context, title, _, _, _ string) (*store.Be
 func (f *fakeYard) AddNote(context.Context, string, string, string, ...store.BlobFile) error {
 	return nil
 }
-func (f *fakeYard) UpdateBead(_ context.Context, id string, _ store.BeadPatch, _ store.Expect, _ string) (*store.Bead, error) {
-	return &store.Bead{ID: id, Title: "Add grace", Status: "open"}, nil
+func (f *fakeYard) WithdrawBead(context.Context, string, string, string) (*store.WithdrawnBead, error) {
+	return nil, errors.New("fakeYard withdraws nothing")
 }
-func (f *fakeYard) CloseBead(_ context.Context, id, _ string, _ store.Expect, _ string) (*store.Bead, error) {
-	return &store.Bead{ID: id, Title: "Add grace", Status: "closed"}, nil
+func (f *fakeYard) RewordBead(context.Context, string, string, string, string) (*store.RewordedBead, error) {
+	return nil, errors.New("fakeYard rewords nothing")
 }
 func (f *fakeYard) ListBeads(context.Context, store.BeadFilter) ([]store.Bead, error) {
 	return nil, nil

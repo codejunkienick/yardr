@@ -14,6 +14,12 @@ type API interface {
 	// (ownwork.go): filing for oneself alone, and the originator-scoped
 	// list. Both are in rpc's Calls.
 	FileBead(ctx context.Context, title, body, project, actor string) (*Bead, error)
+	// WithdrawBead and RewordBead are the same person's say over what
+	// they filed (ownwork.go): withdrawing and rewording their own
+	// filing alone, under one rules check with the write. Both are in
+	// rpc's Calls.
+	WithdrawBead(ctx context.Context, bead, reason, actor string) (*WithdrawnBead, error)
+	RewordBead(ctx context.Context, bead, title, body, actor string) (*RewordedBead, error)
 	GetBead(ctx context.Context, id string) (*Bead, error)
 	ListBeads(ctx context.Context, f BeadFilter) ([]Bead, error)
 	OwnBeads(ctx context.Context, user string, since time.Time, actor string) ([]OwnBead, error)

@@ -204,6 +204,15 @@ POST /call/FileBead
 {"error":{"code":"error","message":"I don't know which of your projects this belongs to. Your projects are: drafts, linegit, notes, yard. Tell me which one you mean, and I'll file it there"}}
 ```
 
+A request the caller did not file (nothing is changed, and the refusal says nothing of whether such work exists):
+
+```
+POST /call/RewordBead
+{"bead":"yd-shed","title":"A new title","actor":"jo"}
+
+{"error":{"code":"error","message":"I can't find that among the requests you filed, so nothing was changed. This only works on a request you filed yourself; for anyone else's, write to the yardmaster"}}
+```
+
 <!-- /errors -->
 
 ## Builds
@@ -6540,6 +6549,201 @@ POST /call/FileBead
 | `updated_at` | time | when it last changed |
 
 The bead is filed for the actor through the same path every filing takes: from a bead agent's pane it is refused, since a pane files for its own bead's originator alone, and the members gate holds. Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else is refused with no call made and nothing filed; on the socket it is the caller's word, as for [`AddNote`](#addnote). The filing is then a `created` event in the stream: read [`OwnBeads`](#ownbeads) again on it.
+
+### `RewordBead`
+
+Replaces the title, the body or both of a request the caller filed themselves with the words given, and nothing else about it changes. A blank title or body is one not given, so a client that sends `""` for what it leaves out cannot wipe a body; both blank, and a title of more than one line, are refused, and a long title is cut as filing cuts it. It reaches a request the caller filed and no other, told as [`WithdrawBead`](#withdrawbead) tells one it does not reach, and it is refused while any session holds the request: a builder at work would be judged against words it never read.
+
+| argument | type | |
+|---|---|---|
+| `bead` | string | the request: the work name of an earlier answer |
+| `title` | string | the new title; left out or blank, the title stands. A title of more than one line is refused, and a long one is cut as filing cuts it |
+| `body` | string | the new details; left out or blank, the details stand |
+| `actor` | string | who rewords: the user's name, whose filing it is |
+
+```
+POST /call/RewordBead
+{"bead":"yd-bench","title":"Mend the bench","actor":"jo"}
+
+{
+  "result": {
+    "bead": {
+      "id": "yd-bench",
+      "title": "Mend the bench",
+      "body": "The slats are loose.",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "priority": 2,
+      "depot": "yard",
+      "labels": [],
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z",
+      "created_by": "jo",
+      "originator": "jo"
+    },
+    "changed": true
+  }
+}
+```
+
+```
+POST /call/RewordBead
+{"bead":"yd-bench","body":"The slats are loose.","actor":"jo"}
+
+{
+  "result": {
+    "bead": {
+      "id": "yd-bench",
+      "title": "Mend the bench",
+      "body": "The slats are loose.",
+      "type": "task",
+      "stage": "new",
+      "status": "open",
+      "priority": 2,
+      "depot": "yard",
+      "labels": [],
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z",
+      "created_by": "jo",
+      "originator": "jo"
+    }
+  }
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `bead` | object | the bead after the write |
+| `bead.id` | string | the reworded work's handle |
+| `bead.title` | string | the bead's title after the write |
+| `bead.body` | string | the bead's body after the write |
+| `bead.type` | string | `task` |
+| `bead.stage` | string | the bead's stage: a reword moves no stage |
+| `bead.status` | string | `open` |
+| `bead.priority` | number | the bead's priority |
+| `bead.depot` | string | the project it was filed in |
+| `bead.labels` | array of string | the bead's labels |
+| `bead.originator` | string | who it is for: who filed it |
+| `bead.created_by` | string | who filed it |
+| `bead.created_at` | time | when it was filed |
+| `bead.updated_at` | time | when it last changed |
+| `changed` | bool, may be absent | whether the write changed the title or the body; absent where it changed neither, and then nothing was written and no event was logged |
+
+Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else is refused with no call made and nothing changed; on the socket it is the caller's word, as for [`AddNote`](#addnote). A reword that changed the words is then an `updated` event in the stream: read [`Bead`](#bead) again on it. A reword the bead already says answers the bead with no `changed`: the second request above is one.
+
+### `WithdrawBead`
+
+Closes a request the caller filed themselves, with their reason as the close reason, as `yardr bead close` would close it: the same close, the same history, ending the session it closes under. It is allowed in any open stage, under a live session too; a request that is landing is the exception, refused in words that send the person to the yardmaster. A request the caller did not file, a name that matches nothing and a prefix that matches several are refused in one blind sentence, and a request finished or withdrawn already is refused too, so a second close cannot write over the reason it was closed with.
+
+| argument | type | |
+|---|---|---|
+| `bead` | string | the request: the work name of an earlier answer |
+| `reason` | string | why it is withdrawn, in the person's words; it may not be empty or only white space |
+| `actor` | string | who withdraws: the user's name, whose filing it is |
+
+```
+POST /call/WithdrawBead
+{"bead":"yd-plaque","reason":"the figures are in already","actor":"jo"}
+
+{
+  "result": {
+    "bead": {
+      "id": "yd-plaque",
+      "title": "Polish the plaque",
+      "body": "The old figures, framed.",
+      "type": "task",
+      "stage": "new",
+      "status": "closed",
+      "priority": 2,
+      "depot": "yard",
+      "labels": [],
+      "close_reason": "the figures are in already",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z",
+      "closed_at": "2026-10-08T09:30:00Z",
+      "created_by": "jo",
+      "originator": "jo"
+    }
+  }
+}
+```
+
+```
+POST /call/WithdrawBead
+{"bead":"yd-lantern","reason":"not needed any more","actor":"jo"}
+
+{
+  "result": {
+    "bead": {
+      "id": "yd-lantern",
+      "title": "Light the lantern",
+      "type": "task",
+      "stage": "new",
+      "status": "closed",
+      "priority": 2,
+      "depot": "yard",
+      "labels": [],
+      "close_reason": "not needed any more",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z",
+      "closed_at": "2026-10-08T09:30:00Z",
+      "created_by": "jo",
+      "originator": "jo"
+    },
+    "stopped": true
+  }
+}
+```
+
+```
+POST /call/WithdrawBead
+{"bead":"yd-bench","reason":"the bench is mended","actor":"jo"}
+
+{
+  "result": {
+    "bead": {
+      "id": "yd-bench",
+      "title": "Mend the bench",
+      "body": "The slats are loose.",
+      "type": "task",
+      "stage": "new",
+      "status": "closed",
+      "priority": 2,
+      "depot": "yard",
+      "labels": [],
+      "close_reason": "the bench is mended",
+      "created_at": "2026-10-08T09:30:00Z",
+      "updated_at": "2026-10-08T09:30:00Z",
+      "closed_at": "2026-10-08T09:30:00Z",
+      "created_by": "jo",
+      "originator": "jo"
+    }
+  }
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `bead` | object | the closed bead |
+| `bead.id` | string | the withdrawn work's handle |
+| `bead.title` | string | the withdrawn work's title |
+| `bead.body` | string, may be absent | the withdrawn work's body; absent where it had none |
+| `bead.type` | string | `task` |
+| `bead.stage` | string | the open stage it was withdrawn from |
+| `bead.status` | string | `closed` |
+| `bead.priority` | number | the bead's priority |
+| `bead.depot` | string | the project it was filed in |
+| `bead.labels` | array of string | the bead's labels |
+| `bead.originator` | string | who it is for: who filed it |
+| `bead.created_by` | string | who filed it |
+| `bead.created_at` | time | when it was filed |
+| `bead.updated_at` | time | when it last changed |
+| `bead.closed_at` | time | when it was withdrawn |
+| `bead.close_reason` | string | why: the reason given |
+| `stopped` | bool, may be absent | whether the close stopped a session that held the request; absent where none held it |
+
+Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else is refused with no call made and nothing closed; on the socket it is the caller's word, as for [`AddNote`](#addnote). The close is then a `closed` event in the stream: read [`Bead`](#bead) again on it.
 
 <!-- /calls -->
 

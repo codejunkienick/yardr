@@ -17,6 +17,13 @@ func (c *Client) CreateBead(ctx context.Context, nb store.NewBead, actor string)
 func (c *Client) FileBead(ctx context.Context, title, body, project, actor string) (*store.Bead, error) {
 	return callV[*store.Bead](c, ctx, "FileBead", title, body, project, actor)
 }
+
+func (c *Client) WithdrawBead(ctx context.Context, bead, reason, actor string) (*store.WithdrawnBead, error) {
+	return callV[*store.WithdrawnBead](c, ctx, "WithdrawBead", bead, reason, actor)
+}
+func (c *Client) RewordBead(ctx context.Context, bead, title, body, actor string) (*store.RewordedBead, error) {
+	return callV[*store.RewordedBead](c, ctx, "RewordBead", bead, title, body, actor)
+}
 func (c *Client) GetBead(ctx context.Context, id string) (*store.Bead, error) {
 	return callV[*store.Bead](c, ctx, "GetBead", id)
 }

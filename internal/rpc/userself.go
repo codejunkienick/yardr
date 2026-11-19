@@ -20,6 +20,8 @@ var selfArg = map[string][]string{
 	"Waiting":              {"name", "actor", "viewer"},
 	"FileBead":             {"actor"},
 	"OwnBeads":             {"user", "actor"},
+	"WithdrawBead":         {"actor"},
+	"RewordBead":           {"actor"},
 	"MoveBead":             {"actor"},
 	"Bead":                 {"viewer"},
 	"Arrivals":             {"viewer"},

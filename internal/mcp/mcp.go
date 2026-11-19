@@ -370,8 +370,8 @@ type Yard interface {
 	CreateBead(ctx context.Context, nb store.NewBead, actor string) (*store.Bead, error)
 	FileBead(ctx context.Context, title, body, project, actor string) (*store.Bead, error)
 	AddNote(ctx context.Context, id, text, actor string, files ...store.BlobFile) error
-	UpdateBead(ctx context.Context, id string, p store.BeadPatch, exp store.Expect, actor string) (*store.Bead, error)
-	CloseBead(ctx context.Context, id, reason string, exp store.Expect, actor string) (*store.Bead, error)
+	WithdrawBead(ctx context.Context, bead, reason, actor string) (*store.WithdrawnBead, error)
+	RewordBead(ctx context.Context, bead, title, body, actor string) (*store.RewordedBead, error)
 	ListBeads(ctx context.Context, f store.BeadFilter) ([]store.Bead, error)
 	GetBead(ctx context.Context, id string) (*store.Bead, error)
 	Bead(ctx context.Context, id string, viewer ...string) (*store.BeadView, error)
@@ -392,6 +392,11 @@ type Yard interface {
 
 // A store.API satisfies Yard as it stands.
 var _ Yard = (store.API)(nil)
+
+// refusal is a refusal in the person's words: a sentence, whole, that is
+// the tool's result as it stands and is never wrapped, as NoUserMessage
+// is, so it starts with a capital where an error string would not.
+func refusal(format string, a ...any) error { return fmt.Errorf(format, a...) }
 
 // Service is the tools over one connection: the yard, the user every
 // call is made as ("" where the connection's actor resolved to no user

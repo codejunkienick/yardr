@@ -381,7 +381,7 @@ func (s *Service) AskForSomething(ctx context.Context, request, project string) 
 	if i := strings.Index(request, "\n"); i >= 0 {
 		title, body = strings.TrimSpace(request[:i]), strings.TrimSpace(request[i+1:])
 	}
-	title = cutTitle(title)
+	title = store.CutTitle(title)
 	bead, err := s.Yard.FileBead(ctx, title, body, project, s.User)
 	if err != nil {
 		return nil, err
@@ -400,26 +400,13 @@ func (s *Service) AskForSomething(ctx context.Context, request, project string) 
 	}, nil
 }
 
-// maxTitle is how many characters a title the tools write keeps.
-const maxTitle = 160
-
-// cutTitle is title cut short to maxTitle characters, with an ellipsis
-// where it was cut: a title is a line a person reads in a list, in
-// filing and in rewording alike.
-func cutTitle(title string) string {
-	if r := []rune(title); len(r) > maxTitle {
-		return strings.TrimSpace(string(r[:maxTitle])) + "…"
-	}
-	return title
-}
-
-// oneLine is s cut to its first line and, as a title is, to maxTitle
-// characters, with an ellipsis where anything was left out: a close reason
-// in the account's list is a line a person reads, and the piece's own view
-// has the whole.
+// oneLine is s cut to its first line and, as a title is, to the runes the
+// yard keeps of one, with an ellipsis where anything was left out: a
+// close reason in the account's list is a line a person reads, and the
+// piece's own view has the whole.
 func oneLine(s string) string {
 	first, _, more := strings.Cut(strings.TrimSpace(s), "\n")
-	line := cutTitle(strings.TrimSpace(first))
+	line := store.CutTitle(strings.TrimSpace(first))
 	if more && !strings.HasSuffix(line, "…") {
 		line += "…"
 	}

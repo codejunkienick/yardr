@@ -109,6 +109,8 @@ var Access = map[string]Class{
 	// Beads.
 	"CreateBead":     Agent, // but a pin of its flow or a stage past its first (store.CreateBead)
 	"FileBead":       Agent, // but from a bead's agent's pane, which files for its own bead's originator alone (store.FileBead)
+	"WithdrawBead":   Agent, // but its filer's own filing alone (store.WithdrawBead)
+	"RewordBead":     Agent, // but its filer's own filing alone (store.RewordBead)
 	"GetBead":        Read,
 	"ListBeads":      Read,
 	"OwnBeads":       Read,

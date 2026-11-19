@@ -2,10 +2,12 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	bolt "go.etcd.io/bbolt"
 
@@ -320,5 +322,468 @@ func TestOwnBeadsLeavesOutWhatTheReaderMayNotSee(t *testing.T) {
 	}
 	if len(own) != 1 || own[0].ID != seen.ID {
 		t.Fatalf("own = %+v, want the seen work alone", own)
+	}
+}
+
+// ownFile files ada's request to withdraw or reword, at the stage given.
+func ownFile(t *testing.T, api store.API, ctx context.Context, title, stage string) string {
+	t.Helper()
+	b, err := api.CreateBead(ctx, store.NewBead{Title: title, Depot: "yardr", Stage: stage, For: "ada"}, "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b.ID
+}
+
+// ownHeld claims bead for group, as the dispatcher's claim does.
+func ownHeld(t *testing.T, api store.API, ctx context.Context, bead, group string) {
+	t.Helper()
+	b, err := api.GetBead(ctx, bead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := api.PutGroup(ctx, store.Group{Name: group, Runner: "herdr", Limit: 5}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.Claim(ctx, bead, group, b.Stage, "yard"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ownBlind holds a call to the rule both own-work writes share: work that
+// is not a request the person filed (another person's, the crew's filing
+// for them, a name that matches nothing, a prefix that matches several)
+// is refused in one set of words, which say nothing of whether such work
+// exists, wrap no sentinel, and leave the work as it was.
+func ownBlind(t *testing.T, api store.API, ctx context.Context, try func(work string) error) {
+	t.Helper()
+	for _, id := range []string{"bobs-abcd1", "bobs-abcd2"} {
+		if _, err := api.CreateBead(ctx, store.NewBead{ID: id, Title: "Bob's " + id, Type: "task", Depot: "yardr", For: "bob"}, "bob"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bobs, err := api.FileBead(ctx, "Bob's request", "", "", "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	crews, err := api.CreateBead(ctx, store.NewBead{Title: "Filed for ada by the crew", Depot: "yardr", For: "ada"}, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	others := map[string]string{
+		"another person's":           bobs.ID,
+		"filed by the crew for them": crews.ID,
+		"a prefix matching several":  "bobs-abcd",
+	}
+	nothing := try("yardr-nosuch")
+	if nothing == nil || !strings.Contains(nothing.Error(), "I can't find that among the requests you filed") {
+		t.Fatalf("a name that matches nothing was answered %v", nothing)
+	}
+	for name, work := range others {
+		var before string
+		if b, err := api.GetBead(ctx, work); err == nil {
+			before = b.Revision
+		}
+		err := try(work)
+		if err == nil || err.Error() != nothing.Error() {
+			t.Errorf("work %s: %v, want the words for a name that matches nothing: %v", name, err, nothing)
+		}
+		for _, sentinel := range []error{store.ErrNotFound, store.ErrAmbiguous, store.ErrConflict} {
+			if errors.Is(err, sentinel) {
+				t.Errorf("work %s wraps %v: %v", name, sentinel, err)
+			}
+		}
+		if before != "" {
+			if after, err := api.GetBead(ctx, work); err != nil || after.Revision != before {
+				t.Errorf("work %s was changed: %+v, %v", name, after, err)
+			}
+		}
+	}
+}
+
+// Withdrawing is closing a request the person filed, with their reason as
+// the close reason: the same close CloseBead makes, refused while the
+// request is landing.
+func TestWithdrawBead(t *testing.T) {
+	api, owned, ctx := ownSetup(t)
+	ownDepot(t, api, ctx, "yardr")
+	// An open request of the person's own is closed, with their reason as
+	// it stands, trimmed, as the close reason, in the work and in its
+	// history, by them. No session held it, so none was stopped.
+	const reason = "the figures are in already"
+	own := ownFile(t, api, ctx, "Write the report", "new")
+	withdrawn, err := api.WithdrawBead(ctx, own, "  "+reason+"\n", "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withdrawn.Bead.ID != own || withdrawn.Bead.Status != "closed" || withdrawn.Stopped {
+		t.Fatalf("withdrawn %+v, want %s closed with no session stopped", withdrawn.Bead, own)
+	}
+	if withdrawn.Bead.CloseReason == nil || *withdrawn.Bead.CloseReason != reason {
+		t.Fatalf("close reason %+v, want %q", withdrawn.Bead.CloseReason, reason)
+	}
+	evs, err := api.Events(ctx, own, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var closedBy string
+	for _, e := range evs {
+		if e.Kind == "closed" && e.Data["reason"] == reason {
+			closedBy = e.Actor
+		}
+	}
+	if closedBy != "ada" {
+		t.Errorf("the history has the close by %q, want ada", closedBy)
+	}
+	// A request closed already is refused, and the reason it was closed
+	// with stands, which a second close would write over.
+	if _, err := api.WithdrawBead(ctx, own, "a second thought", "ada"); err == nil ||
+		err.Error() != "That one is finished or withdrawn already, so there is nothing to change" {
+		t.Fatalf("withdrawing a closed request = %v", err)
+	}
+	if again, err := api.GetBead(ctx, own); err != nil || again.CloseReason == nil || *again.CloseReason != reason {
+		t.Fatalf("the close reason after a second withdrawal is %+v, %v", again, err)
+	}
+	// Another's request and a name that matches nothing are refused alike.
+	ownBlind(t, api, ctx, func(work string) error {
+		_, err := api.WithdrawBead(ctx, work, "no longer wanted", "ada")
+		return err
+	})
+	// Without the work or the reason nothing is closed, in the adapters'
+	// words: the yard is the authority behind their early refusal.
+	open := ownFile(t, api, ctx, "Still wanted", "new")
+	for _, c := range []struct{ work, reason, want string }{
+		{open, "  ", "say why you are withdrawing it, in your words"},
+		{" ", "no longer wanted", "say which piece of work: its work name, from an earlier answer"},
+	} {
+		if _, err := api.WithdrawBead(ctx, c.work, c.reason, "ada"); err == nil || err.Error() != c.want {
+			t.Errorf("WithdrawBead(%q, %q) = %v, want %q", c.work, c.reason, err, c.want)
+		}
+	}
+	if got, err := api.GetBead(ctx, open); err != nil || got.Status != "open" {
+		t.Fatalf("a withdrawal without its reason closed the request: %+v, %v", got, err)
+	}
+	// While it is landing it is refused: it waits in the stage the
+	// assembly lands from, or the depot's assembly holds it. Nothing
+	// changes, and the assembly's session goes on.
+	for _, c := range []struct{ name, stage, group string }{
+		{"waiting to be landed", "approved", ""},
+		{"held by the assembly", "new", "yardr-assembly"},
+	} {
+		work := ownFile(t, api, ctx, "Landing, "+c.name, c.stage)
+		if c.group != "" {
+			ownHeld(t, api, ctx, work, c.group)
+		}
+		before, err := api.GetBead(ctx, work)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = api.WithdrawBead(ctx, work, "changed my mind", "ada")
+		if err == nil || !strings.Contains(err.Error(), "It is landing") || !strings.Contains(err.Error(), "Write to the yardmaster") {
+			t.Errorf("withdrawing a request %s = %v", c.name, err)
+			continue
+		}
+		if after, err := api.GetBead(ctx, work); err != nil || after.Revision != before.Revision || after.Status != "open" {
+			t.Errorf("a request %s was changed: %+v, %v", c.name, after, err)
+		}
+		if c.group != "" {
+			sess, err := api.GetBead(ctx, work)
+			if err != nil || sess.Session == nil {
+				t.Fatalf("a request %s lost its session: %+v, %v", c.name, sess, err)
+			}
+			if live, err := api.GetSession(ctx, *sess.Session); err != nil || live.EndedAt != nil {
+				t.Errorf("the assembly's session after the refusal: %+v, %v", live, err)
+			}
+		}
+	}
+	// Under a builder's session it goes through: the close ends the
+	// session as any close does, and the answer says so.
+	building := ownFile(t, api, ctx, "Under a builder", "new")
+	ownHeld(t, api, ctx, building, "yardr-builders")
+	held, err := api.GetBead(ctx, building)
+	if err != nil || held.Session == nil {
+		t.Fatal("the builder holds nothing")
+	}
+	withdrawn, err = api.WithdrawBead(ctx, building, "not needed any more", "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !withdrawn.Stopped {
+		t.Errorf("the withdrawal under a session stopped nothing: %+v", withdrawn)
+	}
+	if got, err := api.GetBead(ctx, building); err != nil || got.Status != "closed" || got.Session != nil {
+		t.Errorf("the request withdrawn under a session is %+v, %v", got, err)
+	}
+	if ended, err := api.GetSession(ctx, *held.Session); err != nil || ended.State != "done" || ended.EndedAt == nil {
+		t.Errorf("the session after the withdrawal: %+v, %v; want it ended", ended, err)
+	}
+	// The rules are checked in the write they guard: one the assembly
+	// claimed since the caller read is refused as landing, not closed
+	// from under the assembly, and no revision crosses the call to carry
+	// the standing.
+	raced := ownFile(t, api, ctx, "Raced by the assembly", "new")
+	read, err := api.GetBead(ctx, raced)
+	if err != nil || read.Session != nil {
+		t.Fatal("the raced request is held already")
+	}
+	ownHeld(t, api, ctx, raced, "yardr-assembly")
+	if _, err := api.WithdrawBead(ctx, raced, "changed my mind", "ada"); err == nil || !strings.Contains(err.Error(), "It is landing") {
+		t.Errorf("withdrawing a request claimed under the call = %v", err)
+	}
+	if got, err := api.GetBead(ctx, raced); err != nil || got.Status != "open" || got.Session == nil {
+		t.Errorf("the request after the refused withdrawal is %+v, %v", got, err)
+	}
+	// Through a device the close is marked as the device's user's: what
+	// came that way says so in the history. The mark is the door's
+	// statement on the call's context, which the socket client does not
+	// carry, so the call is the owner's.
+	away := ownFile(t, api, ctx, "Withdrawn away from the yard", "new")
+	if _, err := owned.WithdrawBead(store.WithVia(ctx, "ada", "phone"), away, "done from the train", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	evs, err = api.Events(ctx, away, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var via string
+	for _, e := range evs {
+		if e.Kind == "closed" {
+			via = store.Via(e)
+		}
+	}
+	if via != "phone" {
+		t.Errorf("the close through the device is via %q, want phone", via)
+	}
+	// From a bead agent's pane the call reaches what the agent filed
+	// itself and no other: the pane's author is who the filer check judges.
+	if err := api.PutGroup(ctx, store.Group{Name: "g", Runner: "fake"}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	pane, err := api.CreateBead(ctx, store.NewBead{Title: "the pane's bead", For: "bob"}, "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := api.Claim(ctx, pane.ID, "g", "new", "yard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const panePID = 1 << 30
+	if err := api.MarkRunning(ctx, sess.ID, map[string]any{"agent": "pane-new", "shell_pid": panePID}); err != nil {
+		t.Fatal(err)
+	}
+	paneCtx := store.WithCaller(ctx, panePID)
+	followup, err := owned.CreateBead(paneCtx, store.NewBead{Title: "the agent's follow-up"}, "pane-new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owned.WithdrawBead(paneCtx, followup.ID, "overtaken", "pane-new"); err != nil {
+		t.Errorf("withdrawing the pane's own filing: %v", err)
+	}
+	if _, err := owned.WithdrawBead(paneCtx, open, "not mine", "pane-new"); err == nil ||
+		!strings.Contains(err.Error(), "I can't find that among the requests you filed") {
+		t.Errorf("withdrawing ada's request from the pane = %v", err)
+	}
+}
+
+// Rewording replaces the title, the body or both of a request the person
+// filed, and nothing else about it changes. It is refused while a session
+// holds the request.
+func TestRewordBead(t *testing.T) {
+	api, owned, ctx := ownSetup(t)
+	ownDepot(t, api, ctx, "yardr")
+	// The title and the body are replaced with the words given, trimmed,
+	// and nothing else about the request changes. It starts with what a
+	// reword must leave alone set to something the filing did not set: a
+	// priority, labels and metadata, as the yardmaster sets them.
+	own := ownFile(t, api, ctx, "Write the report", "new")
+	priority := 1
+	if _, err := api.UpdateBead(ctx, own, store.BeadPatch{
+		Priority: &priority, AddLabels: []string{"parked", "size:small"}, Metadata: map[string]any{"origin": "chat"},
+	}, store.Expect{}, "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := api.GetBead(ctx, own)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reworded, err := api.RewordBead(ctx, own, " Write the annual report ", "What done looks like: a page and a chart.\n\nNot a slide deck.\n", "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reworded.Changed || reworded.Bead.ID != own {
+		t.Fatalf("reworded %+v, want %s changed", reworded, own)
+	}
+	after, err := api.GetBead(ctx, own)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Title != "Write the annual report" || after.Body != "What done looks like: a page and a chart.\n\nNot a slide deck." {
+		t.Fatalf("after the reword: %+v", after)
+	}
+	if after.Priority != 1 || len(after.Labels) != 2 || after.Metadata["origin"] != "chat" || after.Stage != before.Stage {
+		t.Fatalf("after the reword the rest changed: %+v", after)
+	}
+	// The event is the update's own: what each was before it is kept
+	// under was, and a body changed is carried as true, never the body.
+	evs, err := api.Events(ctx, own, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var updated *store.Event
+	for i := range evs {
+		if evs[i].Kind == "updated" {
+			updated = &evs[i]
+		}
+	}
+	if updated == nil {
+		t.Fatal("the reword logged no updated event")
+	}
+	was, _ := updated.Data["was"].(map[string]any)
+	if updated.Data["title"] != "Write the annual report" || updated.Data["body"] != true ||
+		was["title"] != before.Title || was["body"] != before.Body || updated.Actor != "ada" {
+		t.Fatalf("the updated event is %+v", updated)
+	}
+	// A title alone leaves the details as they are, and the details alone
+	// leave the title.
+	if _, err := api.RewordBead(ctx, own, "Write the yearly report", "", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := api.GetBead(ctx, own); err != nil || got.Title != "Write the yearly report" || got.Body != after.Body {
+		t.Fatalf("after the title alone: %+v, %v", got, err)
+	}
+	if _, err := api.RewordBead(ctx, own, "", "Just a page.", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := api.GetBead(ctx, own); err != nil || got.Title != "Write the yearly report" || got.Body != "Just a page." {
+		t.Fatalf("after the details alone: %+v, %v", got, err)
+	}
+	// The words it already has change nothing and log nothing.
+	logged := func() int {
+		t.Helper()
+		evs, err := api.Events(ctx, own, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(evs)
+	}
+	events := logged()
+	reworded, err = api.RewordBead(ctx, own, "Write the yearly report", "Just a page.", "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reworded.Changed {
+		t.Errorf("rewording to the words it has changed it: %+v", reworded)
+	}
+	if got := logged(); got != events {
+		t.Errorf("a reword that changed nothing logged %d events (were %d)", got, events)
+	}
+	// Both blank, and a title of more than one line, are refused in the
+	// adapters' words: the yard is the authority behind their early
+	// refusal. A blank title or body alone is one not given, and a long
+	// title is cut as filing cuts it, to 160 runes with an ellipsis.
+	for _, c := range []struct{ title, body, want string }{
+		{"", "", "say the new title, the new details, or both, in your words"},
+		{"  ", "\n", "say the new title, the new details, or both, in your words"},
+		{"One line\nand another", "", "title: say it as one line, and put the rest in the details"},
+	} {
+		if _, err := api.RewordBead(ctx, own, c.title, c.body, "ada"); err == nil || err.Error() != c.want {
+			t.Errorf("RewordBead(%q, %q) = %v, want %q", c.title, c.body, err, c.want)
+		}
+	}
+	if _, err := api.RewordBead(ctx, " ", "A title", "", "ada"); err == nil ||
+		err.Error() != "say which piece of work: its work name, from an earlier answer" {
+		t.Errorf("rewording no work = %v", err)
+	}
+	long := strings.Repeat("word ", 40) + "end"
+	reworded, err = api.RewordBead(ctx, own, long, "", "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := store.CutTitle(long); reworded.Bead.Title != want {
+		t.Fatalf("a long title was kept as %q, want the yard's cut %q", reworded.Bead.Title, want)
+	}
+	if got := reworded.Bead.Title; !strings.HasSuffix(got, "…") || utf8.RuneCountInString(got) > 161 || !strings.HasPrefix(long, strings.TrimSuffix(got, "…")) {
+		t.Fatalf("a long title was kept as %q, want 160 runes with an ellipsis", got)
+	}
+	// Another's request and a name that matches nothing are refused alike.
+	ownBlind(t, api, ctx, func(work string) error {
+		_, err := api.RewordBead(ctx, work, "A new title", "", "ada")
+		return err
+	})
+	// A request finished or withdrawn already is refused, and is left as
+	// it was.
+	gone := ownFile(t, api, ctx, "Withdrawn before long", "new")
+	if _, err := api.WithdrawBead(ctx, gone, "no longer wanted", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.RewordBead(ctx, gone, "Back again", "", "ada"); err == nil ||
+		err.Error() != "That one is finished or withdrawn already, so there is nothing to change" {
+		t.Fatalf("rewording a closed request = %v", err)
+	}
+	if got, err := api.GetBead(ctx, gone); err != nil || got.Title != "Withdrawn before long" {
+		t.Fatalf("a closed request was reworded: %+v, %v", got, err)
+	}
+	// Once a session holds it, the words are not changed under it.
+	building := ownFile(t, api, ctx, "Under a builder", "new")
+	ownHeld(t, api, ctx, building, "yardr-builders")
+	held, err := api.GetBead(ctx, building)
+	if err != nil || held.Session == nil {
+		t.Fatal("the builder holds nothing")
+	}
+	_, err = api.RewordBead(ctx, building, "A new title", "", "ada")
+	if err == nil || !strings.Contains(err.Error(), "Someone is working on it right now") ||
+		!strings.Contains(err.Error(), "Write to the yardmaster") {
+		t.Fatalf("rewording a request a session holds = %v", err)
+	}
+	if got, err := api.GetBead(ctx, building); err != nil || got.Revision != held.Revision || got.Title != "Under a builder" {
+		t.Fatalf("the request a session holds after the refusal is %+v, %v", got, err)
+	}
+	// The rules are checked in the write they guard: one a session
+	// claimed since the caller read is refused in those words, not
+	// reworded under the builder that has just begun, and no revision
+	// crosses the call to carry the standing. A claim that lands after
+	// the write instead lands on the new words: the write and the claim
+	// each stand.
+	raced := ownFile(t, api, ctx, "Raced by a builder", "new")
+	read, err := api.GetBead(ctx, raced)
+	if err != nil || read.Session != nil {
+		t.Fatal("the raced request is held already")
+	}
+	ownHeld(t, api, ctx, raced, "yardr-builders")
+	if _, err := api.RewordBead(ctx, raced, "Changed under the builder", "", "ada"); err == nil ||
+		!strings.Contains(err.Error(), "Someone is working on it right now") {
+		t.Errorf("rewording a request claimed under the call = %v", err)
+	}
+	if got, err := api.GetBead(ctx, raced); err != nil || got.Title != "Raced by a builder" {
+		t.Errorf("the request after the refused reword is %+v, %v", got, err)
+	}
+	first := ownFile(t, api, ctx, "Reworded, then claimed", "new")
+	if _, err := api.RewordBead(ctx, first, "The new words", "", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	ownHeld(t, api, ctx, first, "yardr-builders")
+	if got, err := api.GetBead(ctx, first); err != nil || got.Title != "The new words" || got.Session == nil {
+		t.Errorf("the request reworded before the claim is %+v, %v", got, err)
+	}
+	// Through a device the write is marked as the device's user's: what
+	// came that way says so in the history. The mark is the door's
+	// statement on the call's context, which the socket client does not
+	// carry, so the call is the owner's.
+	away := ownFile(t, api, ctx, "Reworded away from the yard", "new")
+	if _, err := owned.RewordBead(store.WithVia(ctx, "ada", "phone"), away, "Reworded from the train", "", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	evs, err = api.Events(ctx, away, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var via string
+	for _, e := range evs {
+		if e.Kind == "updated" {
+			via = store.Via(e)
+		}
+	}
+	if via != "phone" {
+		t.Errorf("the reword through the device is via %q, want phone", via)
 	}
 }

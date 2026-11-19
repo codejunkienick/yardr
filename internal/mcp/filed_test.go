@@ -66,21 +66,29 @@ func (y *yard) get(t *testing.T, bead string) *store.Bead {
 	return b
 }
 
-// afterReadYard runs hook once, right after the service reads a piece of
-// work: a write that someone else makes between the service's read and its
-// own write.
-type afterReadYard struct {
+// beforeWriteYard runs hook once, right before the service's write: a
+// write that someone else makes after the person's last read of the piece
+// and before the service's own write reaches the store.
+type beforeWriteYard struct {
 	mcp.Yard
 	hook func()
 }
 
-func (y *afterReadYard) GetBead(ctx context.Context, id string) (*store.Bead, error) {
-	b, err := y.Yard.GetBead(ctx, id)
+func (y *beforeWriteYard) once() {
 	if hook := y.hook; hook != nil {
 		y.hook = nil
 		hook()
 	}
-	return b, err
+}
+
+func (y *beforeWriteYard) WithdrawBead(ctx context.Context, bead, reason, actor string) (*store.WithdrawnBead, error) {
+	y.once()
+	return y.Yard.WithdrawBead(ctx, bead, reason, actor)
+}
+
+func (y *beforeWriteYard) RewordBead(ctx context.Context, bead, title, body, actor string) (*store.RewordedBead, error) {
+	y.once()
+	return y.Yard.RewordBead(ctx, bead, title, body, actor)
 }
 
 // shown is a piece of work as a failure message reads it.
@@ -196,6 +204,19 @@ func TestWithdraw(t *testing.T) {
 		t.Errorf("a withdrawal without its reason closed the request: %s", shown(got))
 	}
 
+	// The yard is the authority behind the adapter's early refusals: it
+	// refuses the same calls in the same words.
+	for _, c := range []struct{ work, reason string }{
+		{" ", "no longer wanted"},
+		{open, "  "},
+	} {
+		_, adapterErr := s.Withdraw(y.ctx, c.work, c.reason)
+		_, storeErr := y.st.WithdrawBead(y.ctx, c.work, c.reason, "ada")
+		if adapterErr == nil || storeErr == nil || adapterErr.Error() != storeErr.Error() {
+			t.Errorf("Withdraw(%q, %q): adapter %v, store %v, want the same words", c.work, c.reason, adapterErr, storeErr)
+		}
+	}
+
 	// While it is landing it is refused, in words that say so and send the
 	// person to the yardmaster: it waits in the stage the assembly lands
 	// from, or the depot's assembly holds it. Nothing changes, and the
@@ -248,18 +269,18 @@ func TestWithdraw(t *testing.T) {
 		}
 	}
 
-	// The close carries the standing the request was read at: one the
-	// assembly claimed between the read and the close is refused as stale,
-	// not closed from under the assembly.
+	// The rules are checked in the write they guard: one the assembly
+	// claimed since the person read it is refused as landing, not closed
+	// from under the assembly.
 	raced := y.filed(t, s, "Raced by the assembly")
-	racing := &mcp.Service{Yard: &afterReadYard{Yard: y.st, hook: func() { y.held(t, raced, "yardr-assembly") }}, User: "ada", Now: time.Now}
-	if _, err := racing.Withdraw(y.ctx, raced, "changed my mind"); err == nil || !strings.Contains(err.Error(), "It changed while I was doing that") {
+	racing := &mcp.Service{Yard: &beforeWriteYard{Yard: y.st, hook: func() { y.held(t, raced, "yardr-assembly") }}, User: "ada", Now: time.Now}
+	if _, err := racing.Withdraw(y.ctx, raced, "changed my mind"); err == nil || !strings.Contains(err.Error(), "It is landing") {
 		t.Errorf("withdrawing a request that changed under the call = %v", err)
 	} else {
 		plain(t, err.Error())
 	}
 	if got := y.get(t, raced); got.Status != "open" || got.Session == nil {
-		t.Errorf("the request after the stale withdrawal is %s", shown(got))
+		t.Errorf("the request after the refused withdrawal is %s", shown(got))
 	}
 }
 
@@ -357,6 +378,21 @@ func TestReword(t *testing.T) {
 		t.Errorf("a refused reword wrote to the history")
 	}
 
+	// The yard is the authority behind the adapter's early refusals: it
+	// refuses the same calls in the same words.
+	for _, c := range []struct{ work, title, body string }{
+		{" ", "A title", ""},
+		{own, "", ""},
+		{own, "  ", "\n"},
+		{own, "One line\nand another", ""},
+	} {
+		_, adapterErr := s.Reword(y.ctx, c.work, c.title, c.body)
+		_, storeErr := y.st.RewordBead(y.ctx, c.work, c.title, c.body, "ada")
+		if adapterErr == nil || storeErr == nil || adapterErr.Error() != storeErr.Error() {
+			t.Errorf("Reword(%q, %q, %q): adapter %v, store %v, want the same words", c.work, c.title, c.body, adapterErr, storeErr)
+		}
+	}
+
 	// A long title is cut as filing cuts it.
 	long := strings.Repeat("word ", 40) + "end"
 	if _, err := s.Reword(y.ctx, own, long, ""); err != nil {
@@ -391,18 +427,18 @@ func TestReword(t *testing.T) {
 		t.Errorf("the request a session holds after the refusal is %s", shown(got))
 	}
 
-	// The write carries the standing the request was read at: one a session
-	// claimed between the read and the write is refused as stale, not
+	// The rules are checked in the write they guard: one a session
+	// claimed since the person read it is refused in those words, not
 	// reworded under the builder that has just begun.
 	raced := y.filed(t, s, "Raced by a builder")
-	racing := &mcp.Service{Yard: &afterReadYard{Yard: y.st, hook: func() { y.held(t, raced, "yardr-builders") }}, User: "ada", Now: time.Now}
-	if _, err := racing.Reword(y.ctx, raced, "Changed under the builder", ""); err == nil || !strings.Contains(err.Error(), "It changed while I was doing that") {
+	racing := &mcp.Service{Yard: &beforeWriteYard{Yard: y.st, hook: func() { y.held(t, raced, "yardr-builders") }}, User: "ada", Now: time.Now}
+	if _, err := racing.Reword(y.ctx, raced, "Changed under the builder", ""); err == nil || !strings.Contains(err.Error(), "Someone is working on it right now") {
 		t.Errorf("rewording a request that changed under the call = %v", err)
 	} else {
 		plain(t, err.Error())
 	}
 	if got := y.get(t, raced); got.Title != "Raced by a builder" {
-		t.Errorf("the request after the stale reword is %s", shown(got))
+		t.Errorf("the request after the refused reword is %s", shown(got))
 	}
 
 	// A request withdrawn or finished is not reworded, and another's is

@@ -914,6 +914,68 @@ var apiCalls = []apiCall{
 		},
 		after: "The bead is filed for the actor through the same path every filing takes: from a bead agent's pane it is refused, since a pane files for its own bead's originator alone, and the members gate holds. Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else is refused with no call made and nothing filed; on the socket it is the caller's word, as for [`AddNote`](#addnote). The filing is then a `created` event in the stream: read [`OwnBeads`](#ownbeads) again on it.",
 	},
+	{
+		method: "RewordBead",
+		says:   "Replaces the title, the body or both of a request the caller filed themselves with the words given, and nothing else about it changes. A blank title or body is one not given, so a client that sends `\"\"` for what it leaves out cannot wipe a body; both blank, and a title of more than one line, are refused, and a long title is cut as filing cuts it. It reaches a request the caller filed and no other, told as [`WithdrawBead`](#withdrawbead) tells one it does not reach, and it is refused while any session holds the request: a builder at work would be judged against words it never read.",
+		args: []field{
+			{"bead", "string", "the request: the work name of an earlier answer"},
+			{"title", "string", "the new title; left out or blank, the title stands. A title of more than one line is refused, and a long one is cut as filing cuts it"},
+			{"body", "string", "the new details; left out or blank, the details stand"},
+			{"actor", "string", "who rewords: the user's name, whose filing it is"},
+		},
+		requests: []string{`{"bead":"yd-bench","title":"Mend the bench","actor":"jo"}`,
+			`{"bead":"yd-bench","body":"The slats are loose.","actor":"jo"}`},
+		fields: []field{
+			{"bead", "object", "the bead after the write"},
+			{"bead.id", "string", "the reworded work's handle"},
+			{"bead.title", "string", "the bead's title after the write"},
+			{"bead.body", "string", "the bead's body after the write"},
+			{"bead.type", "string", "`task`"},
+			{"bead.stage", "string", "the bead's stage: a reword moves no stage"},
+			{"bead.status", "string", "`open`"},
+			{"bead.priority", "number", "the bead's priority"},
+			{"bead.depot", "string", "the project it was filed in"},
+			{"bead.labels", "array of string", "the bead's labels"},
+			{"bead.originator", "string", "who it is for: who filed it"},
+			{"bead.created_by", "string", "who filed it"},
+			{"bead.created_at", "time", "when it was filed"},
+			{"bead.updated_at", "time", "when it last changed"},
+			{"changed", "bool?", "whether the write changed the title or the body; absent where it changed neither, and then nothing was written and no event was logged"},
+		},
+		after: "Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else is refused with no call made and nothing changed; on the socket it is the caller's word, as for [`AddNote`](#addnote). A reword that changed the words is then an `updated` event in the stream: read [`Bead`](#bead) again on it. A reword the bead already says answers the bead with no `changed`: the second request above is one.",
+	},
+	{
+		method: "WithdrawBead",
+		says:   "Closes a request the caller filed themselves, with their reason as the close reason, as `yardr bead close` would close it: the same close, the same history, ending the session it closes under. It is allowed in any open stage, under a live session too; a request that is landing is the exception, refused in words that send the person to the yardmaster. A request the caller did not file, a name that matches nothing and a prefix that matches several are refused in one blind sentence, and a request finished or withdrawn already is refused too, so a second close cannot write over the reason it was closed with.",
+		args: []field{
+			{"bead", "string", "the request: the work name of an earlier answer"},
+			{"reason", "string", "why it is withdrawn, in the person's words; it may not be empty or only white space"},
+			{"actor", "string", "who withdraws: the user's name, whose filing it is"},
+		},
+		requests: []string{`{"bead":"yd-plaque","reason":"the figures are in already","actor":"jo"}`,
+			`{"bead":"yd-lantern","reason":"not needed any more","actor":"jo"}`,
+			`{"bead":"yd-bench","reason":"the bench is mended","actor":"jo"}`},
+		fields: []field{
+			{"bead", "object", "the closed bead"},
+			{"bead.id", "string", "the withdrawn work's handle"},
+			{"bead.title", "string", "the withdrawn work's title"},
+			{"bead.body", "string?", "the withdrawn work's body; absent where it had none"},
+			{"bead.type", "string", "`task`"},
+			{"bead.stage", "string", "the open stage it was withdrawn from"},
+			{"bead.status", "string", "`closed`"},
+			{"bead.priority", "number", "the bead's priority"},
+			{"bead.depot", "string", "the project it was filed in"},
+			{"bead.labels", "array of string", "the bead's labels"},
+			{"bead.originator", "string", "who it is for: who filed it"},
+			{"bead.created_by", "string", "who filed it"},
+			{"bead.created_at", "time", "when it was filed"},
+			{"bead.updated_at", "time", "when it last changed"},
+			{"bead.closed_at", "time", "when it was withdrawn"},
+			{"bead.close_reason", "string", "why: the reason given"},
+			{"stopped", "bool?", "whether the close stopped a session that held the request; absent where none held it"},
+		},
+		after: "Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else is refused with no call made and nothing closed; on the socket it is the caller's word, as for [`AddNote`](#addnote). The close is then a `closed` event in the stream: read [`Bead`](#bead) again on it.",
+	},
 }
 
 // apiDeviceChannelKey is the channel public key the doc's device
@@ -1504,6 +1566,7 @@ var apiErrors = []struct{ method, request, says string }{
 	{"AnswerAskExpected", `{"bead":"yd-links","ask":3,"turn":0,"option":2,"actor":"jo"}`, "A guarded write drawn from a read that is stale (here the ask `AnswerAsk` answered above):"},
 	{"AnswerAsk", `{"bead":"yd-links","ask":3,"turn":1,"option":2,"actor":"jo"}`, "A turn sent to the unguarded call, which has none:"},
 	{"FileBead", `{"title":"Water the allotment","project":"storage","actor":"jo"}`, "A project that names no depot (nothing is filed, and the refusal lists the person's projects):"},
+	{"RewordBead", `{"bead":"yd-shed","title":"A new title","actor":"jo"}`, "A request the caller did not file (nothing is changed, and the refusal says nothing of whether such work exists):"},
 }
 
 // apiYard is a yard with all a chat client meets: the user jo, the crew
@@ -2270,6 +2333,36 @@ calls:
 
 // apiLineFixtures adds richer records only when the Line call is made, so
 // the other API examples keep their own depots, routes and sequence numbers.
+// apiOwnWorkFixtures files jo's requests for the RewordBead and
+// WithdrawBead examples: one to reword twice and then withdraw, and two
+// to withdraw, one of them held by a session. They are filed here, after
+// the earlier examples have read the yard, so the listings above show the
+// yard's own beads, and all three are closed again by the last example,
+// so the counts below stand as they did.
+func apiOwnWorkFixtures(t *testing.T, st *store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	file := func(id, title, body string) {
+		_, err := st.CreateBead(ctx, store.NewBead{ID: id, Title: title, Body: body,
+			Type: "task", Depot: "yard", Priority: store.DefaultPriority, For: "jo"}, "jo")
+		must(err)
+	}
+	file("yd-plaque", "Polish the plaque", "The old figures, framed.")
+	file("yd-lantern", "Light the lantern", "")
+	file("yd-bench", "Fix the bench", "The slats are loose.")
+	must(st.PutGroup(ctx, store.Group{Name: "joiners", Runner: "herdr", Limit: 5}, "jo"))
+	held, err := st.GetBead(ctx, "yd-lantern")
+	must(err)
+	_, err = st.Claim(ctx, held.ID, "joiners", held.Stage, "yard")
+	must(err)
+}
+
 func apiLineFixtures(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()
@@ -2567,6 +2660,9 @@ func runAPI(t *testing.T, network bool) *apiRun {
 			if c.method == "Line" && i == 0 {
 				apiLineFixtures(t, st)
 			}
+			if c.method == "RewordBead" && i == 0 {
+				apiOwnWorkFixtures(t, st)
+			}
 			if c.method == "DevicePairCloseSelf" {
 				// The pairing it ends is opened by approving its own ask
 				// here, unrecorded: the recorded approvals run after
@@ -2726,8 +2822,8 @@ func TestCallsAreTheDocs(t *testing.T) {
 	// answers as no method at all, and the socket answers so the one call
 	// of Calls a device's token alone makes (listenerOnly): a call is
 	// added to either on purpose, here too.
-	if len(Calls) != 35 || len(OperatorCalls) != 13 || len(listenerOnly) != 1 {
-		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 35, 13 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
+	if len(Calls) != 37 || len(OperatorCalls) != 13 || len(listenerOnly) != 1 {
+		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 37, 13 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
 	}
 	for name := range listenerOnly {
 		if _, ok := Calls[name]; !ok {

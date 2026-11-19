@@ -202,8 +202,8 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 			t.Errorf("%s with an array of arguments is answered %s, want a refusal saying %q", name, byPlace, want)
 		}
 	}
-	if len(served) != len(Calls) || len(served) != 35 {
-		t.Errorf("%d calls are served and Calls has %d, want 35 of each: %v", len(served), len(Calls), served)
+	if len(served) != len(Calls) || len(served) != 37 {
+		t.Errorf("%d calls are served and Calls has %d, want 37 of each: %v", len(served), len(Calls), served)
 	}
 	if !slices.Equal(operators, []string{"ApproveAsk", "ApproveSetup", "GiveSecret", "Line", "SessionScreen", "SourceGrants", "Teammates", "TelemetrySet", "TelemetryShow", "UninviteTeammate"}) || len(OperatorCalls) != 13 {
 		t.Errorf("a device of the operator is served %v besides, and OperatorCalls is %v: want ApproveAsk, ApproveSetup, GiveSecret, Line, SessionScreen, SourceGrants, Teammates, TelemetrySet, TelemetryShow, UninviteTeammate and no other of its thirteen", operators, OperatorCalls)
@@ -744,6 +744,9 @@ func TestUserCallsAreMadeAsTheUser(t *testing.T) {
 		{"OwnBeads", `{"user":"sam"}`, `this device calls as jo: \"user\" is jo or left out, not sam`},
 		{"OwnBeads", `{"user":"jo","actor":"sam"}`, `this device calls as jo: \"actor\" is jo or left out, not sam`},
 		{"FileBead", `{"title":"Filed as sam","actor":"sam"}`, `this device calls as jo: \"actor\" is jo or left out, not sam`},
+		{"WithdrawBead", `{"bead":"yd-shed","reason":"gone","actor":"sam"}`, `this device calls as jo: \"actor\" is jo or left out, not sam`},
+		{"RewordBead", `{"bead":"yd-shed","title":"Shed","actor":"sam"}`, `this device calls as jo: \"actor\" is jo or left out, not sam`},
+		{"RewordBead", `{"bead":"yd-shed","title":"Shed"}`, `I can't find that among the requests you filed`},
 		{"AckUserNotifications", fmt.Sprintf(`{"name":"sam","through":%d}`, head), `this device calls as jo`},
 		{"Mail", `{"to":"sam","text":"as the yardmaster","actor":"yardmaster"}`, `this device calls as jo: \"actor\" is jo or left out, not yardmaster`},
 		{"MailPeer", `{"to":"clerk","peer":"north","text":"hello","actor":"sam"}`, `this device calls as jo`},
