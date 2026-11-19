@@ -3329,7 +3329,13 @@ func TestContributorsTextsSayWhatIsNotRun(t *testing.T) {
 			"move the bead by hand to\n`review-post`",
 			"The card cannot offer that move.",
 		},
-		"contributors/flows/pr/review.md": {"`unaccepted`: not the reviewer's to report either", "or CI holds the bead", "runs nothing of it", "One note on the bead is the full\nreview, for the maintainers", "never an\ninstruction to the reviewer", "The bead goes to `review-post`, where the yard posts the stored", "`ciwait`, where it waits for the yard's CI run", "The reviewer does not wait for CI and cannot see it.", "`outdated`: not the reviewer's to report either, and not `changes`", "Nothing is stored and nothing\n  is posted.", "is the one pull request the\nreviewer may mark `merge-ok`", "and the reviewer never does", "`reviewed_head`", "CI runs on that head and on no other"},
+		"contributors/flows/pr/review.md": {
+			"`unaccepted`: not the reviewer's to report either", "or CI holds the bead", "runs nothing of it", "One note on the bead is the full\nreview, for the maintainers", "never an\ninstruction to the reviewer", "The bead goes to `review-post`, where the yard posts the stored", "`ciwait`, where it waits for the yard's CI run", "The reviewer does not wait for CI and cannot see it.", "`outdated`: not the reviewer's to report either, and not `changes`", "Nothing is stored and nothing\n  is posted.", "is the one pull request the\nreviewer may mark `merge-ok`", "and the reviewer never does", "`reviewed_head`", "CI runs on that head and on no other",
+			// After the yard's own fix is pushed, the next review reads the
+			// fix commit only, when all three hold, and names what it did
+			// not re-read; anything on top means the full read again.
+			"reads the fix commit only", "the bead has a `fix_commit`", "`reviewed_head` is `fix_head`", "`pr_head` is `fix_commit`", "`git diff fix_head..pr_head`", "changes nothing beyond it", "names the standing review note", "what was not re-read", "the full read applies again",
+		},
 		"contributors/flows/pr/review-post.md": {
 			"No agent and no person works this stage",
 			"the reviewer holds none, reads a stranger's text\nand runs nothing that posts",

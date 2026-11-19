@@ -65,6 +65,19 @@ request as a comment (`review-post`, the next stage). Outcomes:
 - `dropped`: likewise, for a pull request closed unmerged. The bead goes to
   `closed`.
 
+After the yard pushes its own fix onto the pull request (the `push`
+stage), the next review reads the fix commit only, when all three hold:
+the bead has a `fix_commit`; the last stored review read exactly what
+the fix builds on (`reviewed_head` is `fix_head`); and nothing stands
+on top of the fix (`pr_head` is `fix_commit`). The reviewer then reads
+`git diff fix_head..pr_head` and nothing else of the pull request: it
+checks the fix closes what the fix round claims and
+changes nothing beyond it, records `reviewed_head` as on any round
+(the head it read), and names the standing review note and the head
+that note read, under what was not re-read. Where the contributor
+pushed on top of the fix, or there is no `fix_commit` yet, or the last
+review read some other head, the full read applies again.
+
 A bump of Go modules from a dependency bot is the one pull request the
 reviewer may mark `merge-ok` (`yardr bead update <id> --add-label merge-ok`),
 when it reports `done`: the title opens `build(deps)` and the diff changes
