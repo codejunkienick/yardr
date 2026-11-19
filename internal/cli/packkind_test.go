@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -93,6 +94,63 @@ func TestPackCheckSourcePackNeedsNoDepot(t *testing.T) {
 	if strings.Contains(out, "its roles and scripts would be copied") {
 		t.Errorf("a pack with no roles installs none:\n%s", out)
 	}
+	t.Run("select paths", func(t *testing.T) {
+		orig, err := os.ReadFile(filepath.Join(dir, "acme.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := os.WriteFile(filepath.Join(dir, "acme.yaml"), orig, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}()
+		// A name that used to be only an exact key still loads, including
+		// brackets, a star, ".." and a numeric segment, and the check does
+		// not fail on it. One no path walks is warned of under its source,
+		// since it is read as that exact key and a typo for a path would
+		// select nothing in silence; a name a path walks, "@odata.nextLink"
+		// and "errors.404" among them, is not. An empty entry is the one
+		// shape that never loaded.
+		for _, tc := range []struct {
+			path  string
+			warns bool
+		}{
+			{"number", false}, {"head.ref", false}, {"base.repo.html_url", false}, {"@odata.nextLink", false},
+			{"errors.404", false}, {"rates.2024", false}, {"head.0.ref", false},
+			{"tags[]", true}, {"a..b", true}, {"star*", true},
+			{".head", true}, {"head.", true}, {"head..ref", true}, {"head[0].ref", true}, {"head.*", true}, {"head[].ref", true},
+		} {
+			t.Run(tc.path, func(t *testing.T) {
+				raw, _ := json.Marshal([]string{tc.path})
+				decl := strings.Replace(kindDecl, "path: /me } }", "path: /me }, answer: { select: "+string(raw)+" } }", 1)
+				if err := os.WriteFile(filepath.Join(dir, "acme.yaml"), []byte(decl), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				out, err := run(t, a.packCmd(), "check", dir)
+				if err != nil {
+					t.Fatalf("select %q loads: %v\n%s", tc.path, err, out)
+				}
+				warning := "\n  warning: answer.select \"" + tc.path + "\" of call ping is read as that exact key and not walked as a path, since a path has no empty segment, star or bracket. It keeps nothing unless the answer has a key spelled exactly that way\n"
+				if got := strings.Contains(out, warning); got != tc.warns {
+					t.Errorf("select %q: warned = %v, want %v:\n%s", tc.path, got, tc.warns, out)
+				}
+				if got := strings.Contains(out, "warning:"); got != tc.warns {
+					t.Errorf("select %q: the plan has a warning = %v, want %v:\n%s", tc.path, got, tc.warns, out)
+				}
+			})
+		}
+		t.Run("empty", func(t *testing.T) {
+			raw, _ := json.Marshal([]string{""})
+			decl := strings.Replace(kindDecl, "path: /me } }", "path: /me }, answer: { select: "+string(raw)+" } }", 1)
+			if err := os.WriteFile(filepath.Join(dir, "acme.yaml"), []byte(decl), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			out, err := run(t, a.packCmd(), "check", dir)
+			if err == nil || exitCode(err) != 1 || !strings.Contains(err.Error(), "calls.ping.answer.select:") {
+				t.Fatalf("empty select: %v\n%s", err, out)
+			}
+		})
+	})
 
 	// A call a command answers (run) brings its program as any command does:
 	// the plan names it with its hash, and the file is one of those that run.

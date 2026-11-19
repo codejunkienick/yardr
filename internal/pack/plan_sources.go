@@ -110,6 +110,7 @@ func (b *planner) declared() error {
 		dp := DeclaredPlan{Source: d.Name, File: d.File, Base: decl.Address(), Calls: []string{}, Needs: []Need{}}
 		for _, c := range decl.Calls {
 			dp.Calls = append(dp.Calls, c.Name+" ("+c.Kind+")")
+			dp.Warnings = append(dp.Warnings, c.SelectWarnings()...)
 		}
 		commands, err := b.sourceCommands(d)
 		if err != nil {

@@ -531,9 +531,10 @@ func bodyCredentialCalls(d *source.Declaration) []string {
 	return calls
 }
 
-// callSaysWhole is one call in two sentences: its method and path whole
+// callSaysWhole is one call in two lines: its method and path whole
 // with its parameters and query, then its body whole as the yard would
-// send it and what of its answer is kept.
+// send it and what of its answer is kept, with a warning for each select
+// name that is no path.
 func callSaysWhole(d *source.Declaration, c *source.Call) []string {
 	takes := "It takes no parameter"
 	if len(c.Params) > 0 {
@@ -577,12 +578,17 @@ func callSaysWhole(d *source.Declaration, c *source.Call) []string {
 		for i, name := range c.Answer.Select {
 			selects[i] = displaySourceValue(name)
 		}
-		second += fmt.Sprintf(". Its answer keeps %s", strings.Join(selects, ", "))
+		second += fmt.Sprintf(". Its answer keeps %s as flat keys (exact top-level keys win over traversal)", strings.Join(selects, ", "))
 	} else {
 		second += ". Its answer is returned as it comes"
 	}
-	second += fmt.Sprintf(", at most %d bytes", c.Answer.Max)
-	return []string{first, second + "."}
+	second += fmt.Sprintf(", at most %d bytes.", c.Answer.Max)
+	// A name no path walks is warned of on the call's own line and not on a
+	// line of its own, since a card is bounded in lines (MaxRunSourceCardLines).
+	for _, w := range c.SelectWarnings() {
+		second += " Warning: " + w + "."
+	}
+	return []string{first, second}
 }
 
 // paramSays is one parameter with its type, whether it must be given, and

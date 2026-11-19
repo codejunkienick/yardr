@@ -39,12 +39,21 @@ func readAddFile(arg string) (addFile, error) {
 
 // notes are what the add says beside the source it saved: that the file
 // given stands where the name of a source yardr carries was meant, and was
-// added instead, so a file that happens to be there is not taken for it.
-func (f addFile) notes() []string {
-	if !f.shadows {
-		return nil
+// added instead, so a file that happens to be there is not taken for it; and
+// a warning for each select name no path walks, which the source keeps as
+// the exact key it spells, since a typo for a path would select nothing in
+// silence.
+func (f addFile) notes(d *source.Declaration) []string {
+	var out []string
+	if f.shadows {
+		out = append(out, fmt.Sprintf("the file %s stands here, so it was added, not the source yardr carries under that name", f.path))
 	}
-	return []string{fmt.Sprintf("the file %s stands here, so it was added, not the source yardr carries under that name", f.path)}
+	for _, c := range d.Calls {
+		for _, w := range c.SelectWarnings() {
+			out = append(out, "warning: "+w)
+		}
+	}
+	return out
 }
 
 // knownFor is the source yardr carries under arg, when no file stands

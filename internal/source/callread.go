@@ -54,7 +54,7 @@ func (r *reader) call(e entry, credential, inPath, address bool) Call {
 			for _, a := range r.entries(f.v, f.path, "select", "errors", "max") {
 				switch a.key {
 				case "select":
-					c.Answer.Select = r.strs(a.v, a.path)
+					c.Answer.Select = r.selects(a.v, a.path)
 				case "errors":
 					c.Answer.Errors = r.strs(a.v, a.path)
 				case "max":

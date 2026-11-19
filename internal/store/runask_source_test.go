@@ -206,7 +206,7 @@ func TestSourceAddCardNamesBuiltAndRunCalls(t *testing.T) {
 		"command file docs/build-write:",
 		"sha256 " + hex.EncodeToString(sum[:]),
 		"call find (read): runs docs/find search. It takes query (string, required, at most 200).",
-		"call find is answered by that command, run with the credential at each call and free to make requests of its own with it, since the yard sends none. Its answer keeps hits, at most 65536 bytes.",
+		"call find is answered by that command, run with the credential at each call and free to make requests of its own with it, since the yard sends none. Its answer keeps hits as flat keys (exact top-level keys win over traversal), at most 65536 bytes.",
 		"(call.find.run, handed the credential)",
 		"command file docs/find:",
 		"sha256 " + hex.EncodeToString(found[:]),
@@ -221,6 +221,31 @@ func TestSourceAddCardNamesBuiltAndRunCalls(t *testing.T) {
 	// No request is sent, so no query or body is said of it either.
 	if strings.Contains(joined, "call find sends no body") || strings.Contains(joined, "query (string, required, at most 200), and sends") {
 		t.Errorf("the run call reads as sending a request:\n%s", joined)
+	}
+
+	// A select name no path walks is warned of at the end of the call's own
+	// line, which is still the second of its two, so the card keeps its
+	// bound; a name a path walks is not.
+	oddDecl := strings.Replace(builtDecl, "select: [hits]", `select: [hits, head.ref, "meta.*"]`, 1)
+	odd, err := source.Parse("docs.yaml", []byte(oddDecl))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := source.Parse("docs.yaml", []byte(builtDecl))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oddLines := sourceDoes(odd, AskSource{Name: odd.Name, Text: oddDecl})
+	if plainLines := sourceDoes(plain, AskSource{Name: plain.Name, Text: builtDecl}); len(oddLines) != len(plainLines) {
+		t.Errorf("the warning made the card %d lines, from %d", len(oddLines), len(plainLines))
+	}
+	const warning = ` Warning: answer.select "meta.*" of call find is read as that exact key and not walked as a path, since a path has no empty segment, star or bracket. It keeps nothing unless the answer has a key spelled exactly that way.`
+	i := slices.IndexFunc(oddLines, func(l string) bool { return strings.HasPrefix(l, "call find is answered by that command") })
+	if i < 0 || !strings.HasSuffix(oddLines[i], "Its answer keeps hits, head.ref, meta.* as flat keys (exact top-level keys win over traversal), at most 65536 bytes."+warning) {
+		t.Errorf("the run call's line does not end with the warning:\n%s", strings.Join(oddLines, "\n"))
+	}
+	if n := strings.Count(strings.Join(oddLines, "\n"), "Warning:"); n != 1 {
+		t.Errorf("the card warns %d times, want once:\n%s", n, strings.Join(oddLines, "\n"))
 	}
 }
 
@@ -482,12 +507,20 @@ func TestSourceAddTerminalCardTreatsTextAsData(t *testing.T) {
 	t.Parallel()
 	y, _ := runYard(t)
 	text := strings.Replace(phoneDecl, `path: /me`, `path: /me, query: { format: "\u001b[2J" }`, 1)
+	// The select name no path walks is the file's text too, and the card
+	// says it in a warning: quoted, so the bidi mark and the escape in it
+	// are said and not done.
+	rlo := string(rune(0x202e))
+	text = strings.Replace(text, `[2J" } } }`, `[2J" } }, answer: { select: ["a*`+rlo+`\x1b[2J"] } }`, 1)
 	text = strings.ReplaceAll(text, "\n", "\r\n")
 	text += "# file text: ◆ forged\r\n"
 	seq := y.ask(t, sourceAddAsk(carriedOf(t, text, nil)), "yardmaster")
 	lines := strings.Join(y.asked(t, seq).Lines(), "\n")
 	if strings.ContainsAny(lines, "\x1b\r\u202e") {
 		t.Fatalf("untrusted source text reached the terminal as a control:\n%q", lines)
+	}
+	if want := fmt.Sprintf("answer.select %q of call ping is read as that exact key and not walked as a path", "a*"+rlo+"\x1b[2J"); !strings.Contains(lines, want) {
+		t.Fatalf("the card does not say the select name no path walks, quoted (%s):\n%s", want, lines)
 	}
 	// The mark in untrusted text cannot start a line of its own: every
 	// carried line passes the files-mark guard. Mid-line it is data and
@@ -542,6 +575,7 @@ func TestSourceAddRefusals(t *testing.T) {
 		want    string
 	}{
 		{"does not parse", []AskSource{{Name: "x", Text: "not a declaration"}}, "want a mapping"},
+		{"an empty select", []AskSource{{Name: "phone", Text: strings.Replace(phoneDecl, "path: /me } }", `path: /me }, answer: { select: [""] } }`, 1)}}, "calls.ping.answer.select"},
 		{"another name carried", func() []AskSource { c := carriedOf(t, phoneDecl, nil); c[0].Name = "other"; return c }(), "its declaration names phone"},
 		{"an absolute program", carriedOf(t, strings.Replace(wiredDecl, "[wired/limits,", "[/bin/limits,", 1), wiredFiles), "it is the operator's alone"},
 		// The yard has crm: these are refused as they are for a free name,
@@ -707,6 +741,12 @@ func TestSourceAddApproveStale(t *testing.T) {
 	}{
 		{"replaced since", func(t *testing.T, y *askYard, _ string) {
 			if _, err := y.PutSource(y.ctx, "wired.yaml", wiredDecl+"# another\n", "mckean"); err != nil {
+				t.Fatal(err)
+			}
+		}, "was written from another declaration of the source wired: it was replaced since"},
+		{"select changed since", func(t *testing.T, y *askYard, _ string) {
+			text := strings.Replace(wiredDecl, "path: /me } }", "path: /me }, answer: { select: [head.ref] } }", 1)
+			if _, err := y.PutSource(y.ctx, "wired.yaml", text, "mckean"); err != nil {
 				t.Fatal(err)
 			}
 		}, "was written from another declaration of the source wired: it was replaced since"},

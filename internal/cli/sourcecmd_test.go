@@ -129,18 +129,31 @@ hear:
 		}
 	}
 	// A call that names the error paths a refusal keeps says so beside
-	// its answers line.
+	// its answers line. Its select holds a path and a name no path walks,
+	// "head.*": the add saves the source and warns of that one, in its text
+	// and in the changes --json carries, and not of the path.
 	errDecl := "name: err\nbase: https://err.example.com\ncalls:\n" +
-		"  get: { kind: read, request: { method: GET, path: /v1/get }, answer: { select: [id, name], errors: [error.message, error.status] } }\n"
+		"  get: { kind: read, request: { method: GET, path: /v1/get }, answer: { select: [id, name, head.ref, \"head.*\"], errors: [error.message, error.status] } }\n"
 	errFile := filepath.Join(t.TempDir(), "err.yaml")
 	if err := os.WriteFile(errFile, []byte(errDecl), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run(t, a.sourceCmd(), "add", errFile); err != nil {
-		t.Fatal(err)
+	const warned = `answer.select "head.*" of call get is read as that exact key and not walked as a path, since a path has no empty segment, star or bracket. It keeps nothing unless the answer has a key spelled exactly that way`
+	if out, err = run(t, a.sourceCmd(), "add", errFile); err != nil ||
+		!strings.Contains(out, "\n  warning: "+warned+"\n") || strings.Count(out, "warning:") != 1 {
+		t.Fatalf("add of a select no path walks = %q, %v", out, err)
+	}
+	a.json = true
+	out, err = run(t, a.sourceCmd(), "add", errFile)
+	a.json = false
+	var added struct {
+		Changes []string `json:"changes"`
+	}
+	if err != nil || json.Unmarshal([]byte(out), &added) != nil || !strings.Contains(strings.Join(added.Changes, "\n"), "warning: "+warned) {
+		t.Fatalf("add --json of a select no path walks = %q, %v", out, err)
 	}
 	if out, err = run(t, a.sourceCmd(), "show", "err"); err != nil ||
-		!strings.Contains(out, "    answers id, name\n") || !strings.Contains(out, "    refusals keep error.message, error.status\n") {
+		!strings.Contains(out, "    answers id, name, head.ref, head.*\n") || !strings.Contains(out, "    refusals keep error.message, error.status\n") {
 		t.Fatalf("show of a call with errors = %q, %v", out, err)
 	}
 	if _, err := run(t, a.sourceCmd(), "rm", "err"); err != nil {
@@ -703,10 +716,10 @@ calls:
   ping:
     kind: read
     request: { method: GET, path: /me }
-    answer: { select: [name, count, flag, obj, list, missing] }
+    answer: { select: [name, count, flag, obj, list, missing, head.ref, base.repo.html_url, head.missing] }
 `
 
-// source check shows the check call's selected top-level fields, one per
+// source check shows the check call's selected fields, one per
 // line under the status line: a string as it is, a number or a boolean
 // as its JSON, an object or a list as compact JSON. With --json the same
 // selected object is carried under answer. A selected field the answer
@@ -718,7 +731,7 @@ func TestSourceCheckSelectedAnswer(t *testing.T) {
 	const token = "tok-9c41-not-to-be-seen"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"name":"ada","count":3,"flag":true,"obj":{"a":1},"list":[1,"x"],"extra":"dropped"}`)
+		io.WriteString(w, `{"name":"ada","count":3,"flag":true,"obj":{"a":1},"list":[1,"x"],"extra":"dropped","head":{"ref":"main","sha":"abc"},"base":{"repo":{"html_url":"https://repo.example.com","private":true}}}`)
 	}))
 	defer srv.Close()
 	st := storetest.New(t)
@@ -746,12 +759,14 @@ func TestSourceCheckSelectedAnswer(t *testing.T) {
 		"crm: flag: true\n",
 		"crm: obj: {\"a\":1}\n",
 		"crm: list: [1,\"x\"]\n",
+		"crm: head.ref: main\n",
+		"crm: base.repo.html_url: https://repo.example.com\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("source check lacks %q:\n%s", want, out)
 		}
 	}
-	for _, not := range []string{token, "missing", "extra", "dropped"} {
+	for _, not := range []string{token, "missing", "extra", "dropped", "sha", "private"} {
 		if strings.Contains(out, not) {
 			t.Errorf("source check shows %q:\n%s", not, out)
 		}
@@ -770,11 +785,135 @@ func TestSourceCheckSelectedAnswer(t *testing.T) {
 		t.Fatalf("source check --json is no JSON: %v\n%s", err, out)
 	}
 	raw, _ := json.Marshal(got.Answer)
-	if string(raw) != `{"count":3,"flag":true,"list":[1,"x"],"name":"ada","obj":{"a":1}}` {
+	if string(raw) != `{"base.repo.html_url":"https://repo.example.com","count":3,"flag":true,"head.ref":"main","list":[1,"x"],"name":"ada","obj":{"a":1}}` {
 		t.Errorf("answer = %s", raw)
 	}
 	if strings.Contains(out, token) {
 		t.Errorf("source check --json shows the credential:\n%s", out)
+	}
+}
+
+// A selected string is printed with nothing a terminal would act on, one
+// inside a selected object or list as much as a top-level one, a null stays
+// null rather than blank, and --json keeps the answer's numbers as they
+// arrived, including one a float would round.
+func TestSourceCheckSelectedFieldRendering(t *testing.T) {
+	t.Parallel()
+	const big = "9007199254740993"
+	// JSON need only escape U+0000 to U+001F, so a literal U+009B (CSI) and
+	// U+202E are valid inside a nested string or key and would reach the
+	// terminal as they are. They are real runes here, where the top-level
+	// name's are JSON escapes that the field's own decoding turns into runes.
+	const csi, rlo = "\u009b", "\u202e"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"name":"a\u001b[2Jb\nc\u202e","gone":null,"n":`+big+`,"huge":1e999,`+
+			`"obj":{"s":"a`+csi+`b`+rlo+`c"},"list":["`+csi+`",{"k`+rlo+`":1}]}`)
+	}))
+	defer srv.Close()
+	st := storetest.New(t)
+	a := &app{st: st, actor: "jo"}
+	file := filepath.Join(t.TempDir(), "crm.yaml")
+	text := strings.Replace(checkedSource, "BASE", srv.URL, 1)
+	text = strings.Replace(text, "path: /me } }", `path: /me }, answer: { select: [name, gone, "n", huge, obj, list] } }`, 1)
+	if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, a.sourceCmd(), "add", file); err != nil {
+		t.Fatal(err)
+	}
+	env := envFile(t, "CRM_TOKEN=tok\n", 0o600)
+	if _, err := run(t, a.sourceCmd(), "set", "crm", "env_file="+env); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, a.sourceCmd(), "check", "crm")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"crm: name: a?[2Jb?c?\n", "crm: gone: null\n", "crm: n: " + big + "\n", "crm: huge: 1e999\n",
+		"crm: obj: {\"s\":\"a?b?c\"}\n", "crm: list: [\"?\",{\"k?\":1}]\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("source check lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.ContainsAny(out, "\x1b"+csi+rlo) {
+		t.Fatalf("a selected string reached the terminal as a control:\n%q", out)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 8 {
+		t.Fatalf("source check prints %d lines:\n%s", len(lines), out)
+	}
+
+	a.json = true
+	out, err = run(t, a.sourceCmd(), "check", "crm")
+	a.json = false
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, big) || !strings.Contains(out, "1e999") || !strings.Contains(out, "null") {
+		t.Fatalf("source check --json lost the answer:\n%s", out)
+	}
+	if strings.Contains(out, "9007199254740992") {
+		t.Fatalf("source check --json rounded the integer:\n%s", out)
+	}
+}
+
+// A list answer is selected per element and carried under answer with
+// --json, and prints no field line: those lines are for one object.
+func TestSourceCheckListAnswerPrintsNoFieldLines(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `[{"head":{"ref":"main"},"extra":1},{"head":{"ref":"dev"}}]`)
+	}))
+	defer srv.Close()
+	st := storetest.New(t)
+	a := &app{st: st, actor: "jo"}
+	file := filepath.Join(t.TempDir(), "crm.yaml")
+	text := strings.Replace(checkedSource, "BASE", srv.URL, 1)
+	text = strings.Replace(text, "path: /me } }", `path: /me }, answer: { select: [head.ref] } }`, 1)
+	if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, a.sourceCmd(), "add", file); err != nil {
+		t.Fatal(err)
+	}
+	env := envFile(t, "CRM_TOKEN=tok\n", 0o600)
+	if _, err := run(t, a.sourceCmd(), "set", "crm", "env_file="+env); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, a.sourceCmd(), "check", "crm")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Contains(out, "head.ref") {
+		t.Fatalf("a list answer prints a field line:\n%s", out)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "crm: credential: ") ||
+		!strings.HasPrefix(lines[1], "crm: check call ping (GET /me): 200 in ") {
+		t.Errorf("source check prints %d lines:\n%s", len(lines), out)
+	}
+
+	a.json = true
+	out, err = run(t, a.sourceCmd(), "check", "crm")
+	a.json = false
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	var got struct {
+		Answer []map[string]any `json:"answer"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("source check --json is no JSON: %v\n%s", err, out)
+	}
+	raw, _ := json.Marshal(got.Answer)
+	if string(raw) != `[{"head.ref":"main"},{"head.ref":"dev"}]` {
+		t.Fatalf("answer = %s", raw)
 	}
 }
 

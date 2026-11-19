@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -677,6 +678,130 @@ func TestDoAnswers(t *testing.T) {
 	if res, err := Do(context.Background(), d, "ping", nil, token, noSecrets); err != nil || !res.OK() || res.Answer != nil {
 		t.Fatalf("a 204 = %+v, %v", res, err)
 	}
+	t.Run("nested select", func(t *testing.T) {
+		status, body = 200, `{"number":7,"head":{"ref":"main","sha":"abc"},"base":{"repo":{"html_url":"https://repo.example.com","private":true}},"extra":1}`
+		nested := declared(t, `name: nested
+base: https://nested.example.com
+calls:
+  ping:
+    kind: read
+    request: { method: GET, path: /me }
+    answer: { select: [number, head.ref, base.repo.html_url] }
+`, "https://nested.example.com", s.URL)
+		res, err := Do(context.Background(), nested, "ping", nil, token, noSecrets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := `{"base.repo.html_url":"https://repo.example.com","head.ref":"main","number":7}`; string(res.Answer) != want {
+			t.Fatalf("nested select = %s, want %s", res.Answer, want)
+		}
+		for _, tc := range []struct {
+			name, body, want string
+		}{
+			{"missing", `{"head":{},"base":{"repo":{}}}`, `{}`},
+			{"null parent", `{"head":null,"base":null}`, `{}`},
+			{"scalar parent", `{"head":true,"base":"text"}`, `{}`},
+			{"array parent", `{"head":[{"ref":"main"}],"base":[]}`, `{}`},
+			{"leaf values", `{"number":9007199254740993,"head":{"ref":null},"base":{"repo":{"html_url":false}}}`, `{"base.repo.html_url":false,"head.ref":null,"number":9007199254740993}`},
+			{"literal dotted key", `{"head.ref":"literal","head":{"ref":"nested"},"base.repo.html_url":"literal"}`, `{"base.repo.html_url":"literal","head.ref":"literal"}`},
+			{"literal dotted key only", `{"head.ref":"literal"}`, `{"head.ref":"literal"}`},
+			{"list", `[{"number":7,"head":{"ref":"main","sha":"abc"}}, {"base":{"repo":{"html_url":"url"}}}, {}]`, `[{"head.ref":"main","number":7},{"base.repo.html_url":"url"},{}]`},
+			{"empty list", `[]`, `[]`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				body = tc.body
+				res, err := Do(context.Background(), nested, "ping", nil, token, noSecrets)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(res.Answer) != tc.want {
+					t.Fatalf("answer = %s, want %s", res.Answer, tc.want)
+				}
+			})
+		}
+		for _, paths := range []string{"head, head.ref, head.sha", "head.sha, head.ref, head"} {
+			t.Run(paths, func(t *testing.T) {
+				body = `{"head":{"ref":"main","sha":"abc","other":1}}`
+				whole := declared(t, strings.Replace(crm, "[id, name, plan, owner, open_tickets]", "["+paths+"]", 1), "https://crm.example.com/api/v2", s.URL)
+				res, err := Do(context.Background(), whole, "customer", map[string]string{"id": "1"}, token, noSecrets)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if want := `{"head":{"ref":"main","sha":"abc","other":1},"head.ref":"main","head.sha":"abc"}`; string(res.Answer) != want {
+					t.Fatalf("overlapping paths = %s, want %s", res.Answer, want)
+				}
+			})
+		}
+		t.Run("odata dotted top-level keys", func(t *testing.T) {
+			body = `{"@odata.context":"https://graph.example.com/$metadata","@odata.nextLink":"https://graph.example.com/next","@odata.count":2,"value":[1,2]}`
+			odata := declared(t, strings.Replace(crm, "[id, name, plan, owner, open_tickets]", `["@odata.nextLink", "@odata.count", "@odata.type"]`, 1), "https://crm.example.com/api/v2", s.URL)
+			res, err := Do(context.Background(), odata, "customer", map[string]string{"id": "1"}, token, noSecrets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := `{"@odata.count":2,"@odata.nextLink":"https://graph.example.com/next"}`; string(res.Answer) != want {
+				t.Fatalf("odata select = %s, want %s", res.Answer, want)
+			}
+			// A dotted key a path walks is no typo, so it is not warned of.
+			if call, _ := odata.Call("customer"); len(call.SelectWarnings()) != 0 {
+				t.Fatalf("a dotted key a path walks is warned of: %q", call.SelectWarnings())
+			}
+		})
+		t.Run("bound after nested selection", func(t *testing.T) {
+			body = `{"head":{"ref":"` + strings.Repeat("x", AnswerMax) + `"}}`
+			if _, err := Do(context.Background(), nested, "ping", nil, token, noSecrets); reason(err) != TooLarge {
+				t.Fatalf("oversized selected field: %v", err)
+			}
+		})
+		// A name that loaded as an exact key before dotted paths still
+		// loads, and that key wins over a nested object of the same
+		// spelling: brackets, a numeric segment, "..", a star.
+		t.Run("stored literal keys", func(t *testing.T) {
+			body = `{"tags[]":["a","b"],"errors.404":"missing","errors":{"404":"nested"},"rates.2024":3,"a..b":true,"star*":"s","head..ref":"lit","head.*":"star","head[0].ref":"idx"}`
+			literal := declared(t, strings.Replace(crm, "[id, name, plan, owner, open_tickets]", `["tags[]", "errors.404", "rates.2024", "a..b", "star*", "head..ref", "head.*", "head[0].ref"]`, 1), "https://crm.example.com/api/v2", s.URL)
+			res, err := Do(context.Background(), literal, "customer", map[string]string{"id": "1"}, token, noSecrets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := `{"a..b":true,"errors.404":"missing","head.*":"star","head..ref":"lit","head[0].ref":"idx","rates.2024":3,"star*":"s","tags[]":["a","b"]}`; string(res.Answer) != want {
+				t.Fatalf("literal keys = %s, want %s", res.Answer, want)
+			}
+			// Each name no path walks is said to be read as that exact key, in
+			// the declaration's order, and no other is: errors.404 and
+			// rates.2024 are paths, whose exact key merely wins.
+			call, _ := literal.Call("customer")
+			warned := call.SelectWarnings()
+			names := []string{"tags[]", "a..b", "star*", "head..ref", "head.*", "head[0].ref"}
+			if len(warned) != len(names) {
+				t.Fatalf("warned of %d names, want %d: %q", len(warned), len(names), warned)
+			}
+			for i, name := range names {
+				if want := `answer.select "` + name + `" of call customer is read as that exact key and not walked as a path, since a path has no empty segment, star or bracket. It keeps nothing unless the answer has a key spelled exactly that way`; warned[i] != want {
+					t.Errorf("warning %d = %q, want %q", i, warned[i], want)
+				}
+			}
+			// The name is quoted, so one from a file that is not the operator's
+			// cannot move a terminal: U+202E as its UTF-8 bytes, and an escape.
+			const rlo, esc = "\xe2\x80\xae", "\x1b"
+			hostile := Call{Name: "x", Answer: Answer{Select: []string{"a*" + rlo + esc + "[2J"}}}.SelectWarnings()
+			if len(hostile) != 1 || strings.ContainsAny(hostile[0], rlo+esc) || !strings.Contains(hostile[0], strconv.Quote("a*"+rlo+esc+"[2J")) {
+				t.Fatalf("a hostile name is said as %q", hostile)
+			}
+		})
+		// Without the exact key, a numeric segment is the object key of
+		// that name. A blank segment, a star or a bracket is not walked.
+		t.Run("numeric object keys", func(t *testing.T) {
+			body = `{"tags":["no"],"head":{"ref":"main","*":"star","0":{"ref":"n"}},"head[0]":{"ref":"bracket"},"errors":{"404":"nested"},"rates":{"2024":9}}`
+			paths := declared(t, strings.Replace(crm, "[id, name, plan, owner, open_tickets]", `["tags[]", "head..ref", "head.*", "head[0].ref", "errors.404", "rates.2024"]`, 1), "https://crm.example.com/api/v2", s.URL)
+			res, err := Do(context.Background(), paths, "customer", map[string]string{"id": "1"}, token, noSecrets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := `{"errors.404":"nested","rates.2024":9}`; string(res.Answer) != want {
+				t.Fatalf("answer = %s, want %s", res.Answer, want)
+			}
+		})
+	})
 
 	// With errors named, a refusal keeps those paths rebuilt nested, and
 	// nothing else: select stays for successes. A body that is no object,

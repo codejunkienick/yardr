@@ -161,8 +161,8 @@ replaced by the value, escaped by where it stands; a file stands alone as
 a value of the body. The body is sent as JSON, or as a multipart upload
 when it names a file parameter, and a value that is exactly {param} is
 sent as the parameter's type; one whose optional parameter was not given
-is left out. The answer is JSON: select keeps the named top-level keys of a success and
-errors the named dot paths of a refusal, at most 64 KB (answer.max raises that, to 1 MiB at most).
+is left out. The answer is JSON: select keeps top-level keys or object paths of a success as flat keys
+(exact keys win over traversal), and errors the named dot paths of a refusal, at most 64 KB (answer.max raises that, to 1 MiB at most).
 
 The file holds no secret. {credential} stands for the value of the variable
 credential.env names, read at each call from the file the operator gives it
@@ -585,7 +585,7 @@ program they run is not carried: it is the operator's to install.`,
 					return fmt.Errorf("source %s saved, but its commands' files were not copied: %w", d.Name, err)
 				}
 			}
-			changes := append(file.notes(), callChanges(before, d)...)
+			changes := append(file.notes(d), callChanges(before, d)...)
 			grants, err := st.SourceGrants(c.Context(), d.Name)
 			if err != nil {
 				return err
@@ -1497,10 +1497,10 @@ may revoke.`,
 declaration names as check: a read call without parameters, sent as a request
 or, where it names run, answered by its command. Prints the status the service
 answered with, and fails on anything but a success. Where the check call names
-answer.select, a successful check also prints each selected top-level field
-the answer carries, one per line under the status line (and carries the same
-object under answer with --json); a field the answer does not carry prints no
-line. A source whose file names no check call is sent nothing: its credential
+answer.select, a successful check of an object answer prints each selected
+field it carries, one per line under the status line (and carries that answer
+under answer with --json). A missing field prints no line; a list answer prints
+none. A source whose file names no check call is sent nothing: its credential
 is looked at and that is all. Where the file names a mint (credential.mint),
 the token is minted first, with the source's mint_command, and the line says
 what it was minted from and how long it is good.
@@ -1637,15 +1637,15 @@ process for it. Nothing of the request is written anywhere.`,
 					return fmt.Errorf("source %s: the check call %s (%s)%s was answered %d%s", d.Name, d.Check, call.Line(), saidAs, res.Status, source.StatusHint(res.Status, d))
 				}
 				// The check call's selection is what setup may read: a successful check
-				// shows the selected top-level fields the answer carries, one per line,
-				// and carries the same answer under answer with --json. A field the answer
-				// does not carry prints no line; status alone decides success or failure,
+				// shows an object answer's selected fields, one per line (a list prints
+				// none), and carries the selected answer under answer with --json. A field
+				// it does not carry prints no line; status alone decides success or failure,
 				// and no other call's answer is ever shown.
 				var selected []string
 				if len(call.Answer.Select) > 0 && len(res.Answer) > 0 {
-					var anyJSON any
-					if json.Unmarshal(res.Answer, &anyJSON) == nil {
-						out["answer"] = anyJSON
+					// Raw, so a big integer or an out-of-range number is not a float.
+					if json.Valid(res.Answer) {
+						out["answer"] = json.RawMessage(res.Answer)
 					}
 					var obj map[string]json.RawMessage
 					if json.Unmarshal(res.Answer, &obj) == nil {
@@ -1905,14 +1905,14 @@ func checkCommands(d *source.Declaration, home string) (cmds []commandCheck, ok 
 	return cmds, ok
 }
 
-// checkField renders one selected field of a check call's answer for its line:
-// a string as it is, a number or boolean as its JSON, an object or list as compact JSON.
+// checkField renders one selected field for its line: a string as it is, null as null,
+// anything else as its JSON, all through printable, since JSON leaves a C1 or bidi rune literal.
 func checkField(raw json.RawMessage) string {
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s
+	var s *string
+	if json.Unmarshal(raw, &s) == nil && s != nil {
+		return printable(*s)
 	}
-	return string(raw)
+	return printable(string(raw))
 }
 
 // paramLine is a parameter in a line of yardr source show.

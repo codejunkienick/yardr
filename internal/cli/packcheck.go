@@ -77,7 +77,9 @@ the yard must still be told: the file its credential is read from, and for a
 source that can tell a user, which user names it (an apply answers both with
 --source-env and --notify); and, where the pack's file
 replaces the yard's and adds or changes a read call, who gets that call
-through a grant of read they hold. For each group and crew member the pack
+through a grant of read they hold; and a warning for each answer.select name
+that no path walks, one with an empty segment, a star or a bracket, which is
+read as that exact key and may be a typo. For each group and crew member the pack
 asks calls of a declared source for (calls), the plan shows which it has,
 which an import asks the operator about, which an earlier import was told
 no for, and which lack something, with the command. Nothing is written.
