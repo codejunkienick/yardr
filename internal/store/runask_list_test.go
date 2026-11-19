@@ -1357,6 +1357,7 @@ func TestSettingRunAskClassesAreExplicit(t *testing.T) {
 		MaxSessionsSetting:       Askable,
 		HerdrSessionSetting:      Alone,
 		NameSetting:              Askable,
+		YardDescriptionSetting:   Askable,
 		UpgradeFromSetting:       Alone,
 		UpgradeRestoreSetting:    Alone,
 		CodesignIdentitySetting:  Alone,
@@ -1426,6 +1427,32 @@ func TestRunAskSettingSetCard(t *testing.T) {
 		t.Fatalf("setting_changed events = %d, %v", len(evs), err)
 	}
 	y.approved(t, evs[len(evs)-1], seq)
+	// The yard's description rides a card too: asked, approved, stored.
+	seq = y.ask(t, listAsk("mckean", "settings set yard_description South-yard."), "yardmaster")
+	run = y.asked(t, seq).Ask.Run
+	if want := "setting yard_description becomes South-yard. (now: unset)."; run.Does[0] != want {
+		t.Fatalf("the card says %q, want %q", run.Does[0], want)
+	}
+	done, err = y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done.Result != "yard_description = South-yard." {
+		t.Fatalf("the approval ran %q", done.Result)
+	}
+	settings, err = y.Settings(y.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings[YardDescriptionSetting] != "South-yard." {
+		t.Fatalf("yard_description = %q", settings[YardDescriptionSetting])
+	}
+	// A value over the setting's length is refused on the card, as the
+	// setting refuses it.
+	if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", "settings set yard_description "+strings.Repeat("s", 501)), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "at most 500") {
+		t.Fatalf("asking for 501 characters = %v, want it refused as too long", err)
+	}
 	// A trailing slash registers without it (hookPublicURL), and the
 	// card shows the URL as it is registered.
 	seq = y.ask(t, listAsk("mckean", "settings set hook_public_url https://yard.example/hooks/"), "yardmaster")

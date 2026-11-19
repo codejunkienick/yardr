@@ -1096,7 +1096,8 @@ config names and the handles of its sessions (any other device reads the
 records without them, so these calls give a lost token of another user no
 file or command of a user or a crew member); and
 `Settings`, which answers a device the promised keys
-alone: `operator`, `blob_max_bytes` and `files_max`, and to a device of
+alone: `operator`, the yard's description `yard_description`,
+`blob_max_bytes` and `files_max`, and to a device of
 an operator alone the operator's own words to their agents,
 `operator_style` and `operator_note`, and whether the yard is hosted,
 `hosted`. No other setting is told to a device

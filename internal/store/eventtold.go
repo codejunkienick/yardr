@@ -452,8 +452,9 @@ func EventFor(viewer string, operator bool, e Event) (Event, bool) {
 }
 
 // deviceSettings are the settings a device is told: the operator, the caps
-// on a file, the operator's own words to the agents, and whether the yard is
-// hosted, the last two to a device of the operator alone (DeviceTold).
+// on a file, the yard's description, the operator's own words to the
+// agents, and whether the yard is hosted, the last two to a device of the
+// operator alone (DeviceTold).
 // What docs/api.md promises, and nothing else: no edge, no hook URL, no JWT
 // audience, no backup directory. Settings answers these alone, and a
 // setting_changed carries its value for these alone, so a lost device token
@@ -473,6 +474,7 @@ var deviceSettings = []string{
 	StyleSetting,
 	NoteSetting,
 	HostedSetting,
+	YardDescriptionSetting,
 }
 
 // DeviceTold reports whether the value of the setting key is told outside

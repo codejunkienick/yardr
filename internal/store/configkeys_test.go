@@ -347,7 +347,7 @@ func TestStoreChecksSettings(t *testing.T) {
 	// Sequential: process environment.
 	s, ctx := storetest.New(t), context.Background()
 	for want, kv := range map[string][2]string{
-		`no setting "hook_adr"; there is: backup_dir, backup_every, backup_keep, bdp_addr, blob_max_bytes, codesign_identity, default_kind, default_pack, disk_keep_gb, edge, files_max, general_cards, hearer, herdr_session, hook_addr, hook_public_url, hosted, max_sessions, name, operator, operator_note, operator_style, peer_file_max_bytes, permissions_preset, preview_idle, provider_terms, quiet_landings, router_addr, telemetry, timer_limit, timer_min_every, upgrade_from, upgrade_restore, web_addr, web_as, web_jwt_audience, web_jwt_header, web_jwt_issuer, web_jwt_jwks, web_jwt_privileged_session_max_age, web_jwt_users, web_pages_addr, web_pages_host, yardmaster`: {"hook_adr", "4"},
+		`no setting "hook_adr"; there is: backup_dir, backup_every, backup_keep, bdp_addr, blob_max_bytes, codesign_identity, default_kind, default_pack, disk_keep_gb, edge, files_max, general_cards, hearer, herdr_session, hook_addr, hook_public_url, hosted, max_sessions, name, operator, operator_note, operator_style, peer_file_max_bytes, permissions_preset, preview_idle, provider_terms, quiet_landings, router_addr, telemetry, timer_limit, timer_min_every, upgrade_from, upgrade_restore, web_addr, web_as, web_jwt_audience, web_jwt_header, web_jwt_issuer, web_jwt_jwks, web_jwt_privileged_session_max_age, web_jwt_users, web_pages_addr, web_pages_host, yard_description, yardmaster`: {"hook_adr", "4"},
 		`default_kind "nope": herdr starts`:                                                                                 {"default_kind", "nope"},
 		`operator_style "loud": there is guide, show, work, report`:                                                         {"operator_style", "loud"},
 		`hook address "8790": want host:port`:                                                                               {"hook_addr", "8790"},
@@ -388,7 +388,9 @@ func TestStoreChecksSettings(t *testing.T) {
 		`files_max is answered by the yard and not set`:                                                                     {"files_max", "32"},
 		`default_pack "packs/x": a directory is given as an absolute path`:                                                  {"default_pack", "packs/x"},
 		`permissions_preset "frobnicate": no harness has a permission preset`:                                               {"permissions_preset", "frobnicate"},
-		`yard name "a b"`: {"name", "a b"},
+		`yard name "a b"`:                                  {"name", "a b"},
+		`yard_description: one line`:                       {"yard_description", "the south yard\nand its team"},
+		`yard_description has 501 characters: at most 500`: {"yard_description", strings.Repeat("s", 501)},
 	} {
 		if err := s.SetSetting(ctx, kv[0], kv[1], "me"); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("SetSetting(%s, %s) = %v, want %s", kv[0], kv[1], err, want)
@@ -399,7 +401,8 @@ func TestStoreChecksSettings(t *testing.T) {
 	}
 	for k, v := range map[string]string{"default_kind": "codex", "permissions_preset": "bypass", "operator_style": "report", "hook_addr": "127.0.0.1:8790", "router_addr": "172.18.0.2", "hosted": "true",
 		"timer_limit": "9", "timer_min_every": "30m", "default_pack": "research", "name": "north", "yardmaster": "boss", "operator_note": "reads Go",
-		"web_as": "jo", "web_jwt_issuer": "https://team.cloudflareaccess.com", "web_jwt_audience": "aud-tag",
+		"yard_description": "The south yard. Ask the yardmaster for anything.",
+		"web_as":           "jo", "web_jwt_issuer": "https://team.cloudflareaccess.com", "web_jwt_audience": "aud-tag",
 		"web_jwt_jwks": "https://team.cloudflareaccess.com/cdn-cgi/access/certs", "web_jwt_header": "Authorization",
 		"web_jwt_users": "mckean@example.net=mckean, Jo@Example.NET=jo", "web_jwt_privileged_session_max_age": "15m", "max_sessions": "0",
 		store.CodesignIdentitySetting: "Developer ID Application: Ada (TEAM000001)"} {
@@ -410,6 +413,14 @@ func TestStoreChecksSettings(t *testing.T) {
 	// The router's address takes either form of IP.
 	if err := s.SetSetting(ctx, "router_addr", "fd00::2", "me"); err != nil {
 		t.Errorf("SetSetting(router_addr, fd00::2) = %v", err)
+	}
+	// The yard's description takes 500 characters, counted as
+	// characters and not bytes.
+	if err := s.SetSetting(ctx, "yard_description", strings.Repeat("s", 500), "me"); err != nil {
+		t.Errorf("SetSetting(yard_description, 500 chars) = %v", err)
+	}
+	if err := s.SetSetting(ctx, "yard_description", strings.Repeat("é", 500), "me"); err != nil {
+		t.Errorf("SetSetting(yard_description, 500 multibyte chars) = %v", err)
 	}
 	// The keys' URL over http serves a test issuer on loopback.
 	if err := s.SetSetting(ctx, "web_jwt_jwks", "http://127.0.0.1:9/certs", "me"); err != nil {

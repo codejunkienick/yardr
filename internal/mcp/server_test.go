@@ -283,6 +283,9 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 	if hello == nil {
 		t.Fatal("the session carries no introduction from the server")
 	}
+	if hello.Instructions != mcp.Instructions {
+		t.Errorf("with the setting empty the introduction is %q, want the fixed %q", hello.Instructions, mcp.Instructions)
+	}
 	for where, text := range map[string]string{
 		"the introduction":     hello.Instructions,
 		mcp.ToolWhatWaitsForMe: described[mcp.ToolWhatWaitsForMe],
@@ -293,6 +296,32 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 				t.Errorf("%s lacks %q:\n%s", where, want, text)
 			}
 		}
+	}
+	if err := y.st.SetSetting(y.ctx, store.YardDescriptionSetting, "The south yard.", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	broken := readErrorYard{Yard: y.st, settingsErr: errors.New("settings unavailable")}
+	for _, tc := range []struct {
+		name string
+		yard mcp.Yard
+		want string
+	}{
+		{"set", y.st, mcp.Instructions + "\n\nAbout this yard: The south yard."},
+		{"settings unavailable", broken, mcp.Instructions},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "stand-in", Version: "1"}, nil)
+			next := *svc
+			next.Yard = tc.yard
+			nextSession := connect(t, &next, client)
+			nextHello := nextSession.InitializeResult()
+			if nextHello == nil {
+				t.Fatal("the session carries no introduction from the server")
+			}
+			if nextHello.Instructions != tc.want {
+				t.Errorf("the introduction is %q, want %q", nextHello.Instructions, tc.want)
+			}
+		})
 	}
 	res, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{
 		Name: mcp.ToolWhatWaitsForMe, Arguments: map[string]any{},

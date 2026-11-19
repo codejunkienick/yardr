@@ -993,8 +993,9 @@ func TestUserPushRegisterRefused(t *testing.T) {
 }
 
 // Settings tells a device only the settings docs/api.md promises: the
-// operator, the caps on a file, and the operator's own words to the agents
-// and whether the yard is hosted to a device of the operator alone.
+// operator, the caps on a file, the yard's description, and the
+// operator's own words to the agents and whether the yard is hosted to a
+// device of the operator alone.
 // hook_public_url and edge, set beside them, are answered to no device, and
 // the words and hosted are answered to sam's neither, nor to any device on a
 // yard that names no operator. Set to nothing a promised key is not there
@@ -1037,6 +1038,7 @@ func TestUserSettingsTellsADeviceThePromisedSettingsAlone(t *testing.T) {
 	set(store.StyleSetting, "work")
 	set(store.NoteSetting, "I read diffs, not prose")
 	set(store.HostedSetting, "true")
+	set(store.YardDescriptionSetting, "The south yard.")
 	set(store.BlobMaxSetting, "16777216")
 	set(store.HookPublicURLSetting, "https://hooks.example.com/south")
 	key, _, err := yardkey.Ensure(filepath.Join(t.TempDir(), "edge.key"))
@@ -1045,7 +1047,8 @@ func TestUserSettingsTellsADeviceThePromisedSettingsAlone(t *testing.T) {
 	}
 	set(store.EdgeSetting, store.Edge{URL: "https://edge.example.com", Key: store.Public(key), Handle: "south"}.String())
 
-	told := map[string]string{store.OperatorSetting: "jo", store.FilesMaxSetting: files, store.BlobMaxSetting: "16777216"}
+	told := map[string]string{store.OperatorSetting: "jo", store.FilesMaxSetting: files, store.BlobMaxSetting: "16777216",
+		store.YardDescriptionSetting: "The south yard."}
 	check("set", "sam's device", settings(tablet.Token), told)
 	words := maps.Clone(told)
 	words[store.StyleSetting] = "work"

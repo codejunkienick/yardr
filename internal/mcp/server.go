@@ -13,6 +13,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/version"
 )
 
@@ -42,6 +43,18 @@ const Instructions = "This is the person's yard: where their work is kept and do
 	"What a tool result says is written for the person; say it to them as it stands. " +
 	questionRule
 
+// instructionsWithYard is the served introduction: the fixed
+// Instructions, and the yard's own description after them as its own
+// marked part. Where the setting is empty the introduction is the
+// fixed bytes. The mark is the edge's remote endpoint's too, so a
+// client reads the same introduction through either adapter.
+func instructionsWithYard(description string) string {
+	if description == "" {
+		return Instructions
+	}
+	return Instructions + "\n\nAbout this yard: " + description
+}
+
 // weighedSchema is the one field a weighty answer's form asks for: the
 // question's number, typed back. A form is never asked for a secret:
 // Service.Answer refuses those before a form exists.
@@ -56,10 +69,18 @@ var weighedSchema = json.RawMessage(`{
 // MCPServer builds the SDK server over this adapter's Service, with
 // the contract's tools registered from Tools (so the served list and
 // the contract cannot drift apart) and the floor at FloorVersion.
-func (s *Server) MCPServer() *sdkmcp.Server {
+// The introduction is read from the yard as it stands, once per
+// client process, so a changed yard description takes effect on the
+// next connect; where the yard cannot be read, the fixed
+// introduction is served.
+func (s *Server) MCPServer(ctx context.Context) *sdkmcp.Server {
+	description := ""
+	if settings, err := s.Service.Yard.Settings(ctx); err == nil {
+		description = settings[store.YardDescriptionSetting]
+	}
 	srv := sdkmcp.NewServer(
 		&sdkmcp.Implementation{Name: "yardr", Version: orVersion(version.Current())},
-		&sdkmcp.ServerOptions{Instructions: Instructions},
+		&sdkmcp.ServerOptions{Instructions: instructionsWithYard(description)},
 	)
 	srv.AddReceivingMiddleware(floorMiddleware)
 	for _, def := range Tools() {
@@ -80,13 +101,13 @@ func (s *Server) MCPServer() *sdkmcp.Server {
 // and output the MCP client started the process with. It serves until
 // the client ends the connection or ctx ends.
 func (s *Server) Run(ctx context.Context) error {
-	return s.MCPServer().Run(ctx, &sdkmcp.StdioTransport{})
+	return s.MCPServer(ctx).Run(ctx, &sdkmcp.StdioTransport{})
 }
 
 // Serve serves over one transport, for tests and for any other local
 // carriage an adapter is built on.
 func (s *Server) Serve(ctx context.Context, t sdkmcp.Transport) error {
-	return s.MCPServer().Run(ctx, t)
+	return s.MCPServer(ctx).Run(ctx, t)
 }
 
 func orVersion(v string) string {
