@@ -542,7 +542,7 @@ func TestSourceAddRefusals(t *testing.T) {
 		want    string
 	}{
 		{"does not parse", []AskSource{{Name: "x", Text: "not a declaration"}}, "want a mapping"},
-		{"unsupported select", []AskSource{{Name: "phone", Text: strings.Replace(phoneDecl, "path: /me } }", "path: /me }, answer: { select: [head..ref] } }", 1)}}, "calls.ping.answer.select"},
+		{"an empty select", []AskSource{{Name: "phone", Text: strings.Replace(phoneDecl, "path: /me } }", `path: /me }, answer: { select: [""] } }`, 1)}}, "calls.ping.answer.select"},
 		{"another name carried", func() []AskSource { c := carriedOf(t, phoneDecl, nil); c[0].Name = "other"; return c }(), "its declaration names phone"},
 		{"an absolute program", carriedOf(t, strings.Replace(wiredDecl, "[wired/limits,", "[/bin/limits,", 1), wiredFiles), "it is the operator's alone"},
 		// The yard has crm: these are refused as they are for a free name,

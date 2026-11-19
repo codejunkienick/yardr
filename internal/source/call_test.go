@@ -748,6 +748,33 @@ calls:
 				t.Fatalf("oversized selected field: %v", err)
 			}
 		})
+		// A name that loaded as an exact key before dotted paths still
+		// loads, and that key wins over a nested object of the same
+		// spelling: brackets, a numeric segment, "..", a star.
+		t.Run("stored literal keys", func(t *testing.T) {
+			body = `{"tags[]":["a","b"],"errors.404":"missing","errors":{"404":"nested"},"rates.2024":3,"a..b":true,"star*":"s","head..ref":"lit","head.*":"star","head[0].ref":"idx"}`
+			literal := declared(t, strings.Replace(crm, "[id, name, plan, owner, open_tickets]", `["tags[]", "errors.404", "rates.2024", "a..b", "star*", "head..ref", "head.*", "head[0].ref"]`, 1), "https://crm.example.com/api/v2", s.URL)
+			res, err := Do(context.Background(), literal, "customer", map[string]string{"id": "1"}, token, noSecrets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := `{"a..b":true,"errors.404":"missing","head.*":"star","head..ref":"lit","head[0].ref":"idx","rates.2024":3,"star*":"s","tags[]":["a","b"]}`; string(res.Answer) != want {
+				t.Fatalf("literal keys = %s, want %s", res.Answer, want)
+			}
+		})
+		// Without the exact key, a numeric segment is the object key of
+		// that name. A blank segment, a star or a bracket is not walked.
+		t.Run("numeric object keys", func(t *testing.T) {
+			body = `{"tags":["no"],"head":{"ref":"main","*":"star","0":{"ref":"n"}},"head[0]":{"ref":"bracket"},"errors":{"404":"nested"},"rates":{"2024":9}}`
+			paths := declared(t, strings.Replace(crm, "[id, name, plan, owner, open_tickets]", `["tags[]", "head..ref", "head.*", "head[0].ref", "errors.404", "rates.2024"]`, 1), "https://crm.example.com/api/v2", s.URL)
+			res, err := Do(context.Background(), paths, "customer", map[string]string{"id": "1"}, token, noSecrets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := `{"errors.404":"nested","rates.2024":9}`; string(res.Answer) != want {
+				t.Fatalf("answer = %s, want %s", res.Answer, want)
+			}
+		})
 	})
 
 	// With errors named, a refusal keeps those paths rebuilt nested, and

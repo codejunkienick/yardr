@@ -780,6 +780,62 @@ func TestSourceCheckSelectedAnswer(t *testing.T) {
 	}
 }
 
+// A list answer is selected per element and carried under answer with
+// --json, and prints no field line: those lines are for one object.
+func TestSourceCheckListAnswerPrintsNoFieldLines(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `[{"head":{"ref":"main"},"extra":1},{"head":{"ref":"dev"}}]`)
+	}))
+	defer srv.Close()
+	st := storetest.New(t)
+	a := &app{st: st, actor: "jo"}
+	file := filepath.Join(t.TempDir(), "crm.yaml")
+	text := strings.Replace(checkedSource, "BASE", srv.URL, 1)
+	text = strings.Replace(text, "path: /me } }", `path: /me }, answer: { select: [head.ref] } }`, 1)
+	if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, a.sourceCmd(), "add", file); err != nil {
+		t.Fatal(err)
+	}
+	env := envFile(t, "CRM_TOKEN=tok\n", 0o600)
+	if _, err := run(t, a.sourceCmd(), "set", "crm", "env_file="+env); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, a.sourceCmd(), "check", "crm")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Contains(out, "head.ref") {
+		t.Fatalf("a list answer prints a field line:\n%s", out)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "crm: credential: ") ||
+		!strings.HasPrefix(lines[1], "crm: check call ping (GET /me): 200 in ") {
+		t.Errorf("source check prints %d lines:\n%s", len(lines), out)
+	}
+
+	a.json = true
+	out, err = run(t, a.sourceCmd(), "check", "crm")
+	a.json = false
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	var got struct {
+		Answer []map[string]any `json:"answer"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("source check --json is no JSON: %v\n%s", err, out)
+	}
+	raw, _ := json.Marshal(got.Answer)
+	if string(raw) != `[{"head.ref":"main"},{"head.ref":"dev"}]` {
+		t.Fatalf("answer = %s", raw)
+	}
+}
+
 // A check call with no answer.select prints exactly what it prints
 // without one: the credential and the status lines, and no answer under
 // either output.

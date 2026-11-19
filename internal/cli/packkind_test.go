@@ -104,7 +104,14 @@ func TestPackCheckSourcePackNeedsNoDepot(t *testing.T) {
 				t.Fatal(err)
 			}
 		}()
-		for _, path := range []string{"number", "head.ref", "base.repo.html_url", "@odata.nextLink", "", ".head", "head.", "head..ref", "head[0].ref", "head.0.ref", "head.*", "head[].ref"} {
+		// A name that used to be only an exact key still loads, including
+		// brackets, a star, ".." and a numeric segment. An empty entry is
+		// the one shape that never loaded.
+		for _, path := range []string{
+			"number", "head.ref", "base.repo.html_url", "@odata.nextLink",
+			"tags[]", "errors.404", "rates.2024", "a..b", "star*",
+			".head", "head.", "head..ref", "head[0].ref", "head.0.ref", "head.*", "head[].ref",
+		} {
 			t.Run(path, func(t *testing.T) {
 				raw, _ := json.Marshal([]string{path})
 				decl := strings.Replace(kindDecl, "path: /me } }", "path: /me }, answer: { select: "+string(raw)+" } }", 1)
@@ -112,15 +119,22 @@ func TestPackCheckSourcePackNeedsNoDepot(t *testing.T) {
 					t.Fatal(err)
 				}
 				out, err := run(t, a.packCmd(), "check", dir)
-				if path == "number" || path == "head.ref" || path == "base.repo.html_url" || path == "@odata.nextLink" {
-					if err != nil {
-						t.Fatalf("valid select: %v\n%s", err, out)
-					}
-				} else if err == nil || exitCode(err) != 1 || !strings.Contains(err.Error(), "calls.ping.answer.select:") {
-					t.Fatalf("unsupported select: %v\n%s", err, out)
+				if err != nil {
+					t.Fatalf("select %q loads: %v\n%s", path, err, out)
 				}
 			})
 		}
+		t.Run("empty", func(t *testing.T) {
+			raw, _ := json.Marshal([]string{""})
+			decl := strings.Replace(kindDecl, "path: /me } }", "path: /me }, answer: { select: "+string(raw)+" } }", 1)
+			if err := os.WriteFile(filepath.Join(dir, "acme.yaml"), []byte(decl), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			out, err := run(t, a.packCmd(), "check", dir)
+			if err == nil || exitCode(err) != 1 || !strings.Contains(err.Error(), "calls.ping.answer.select:") {
+				t.Fatalf("empty select: %v\n%s", err, out)
+			}
+		})
 	})
 
 	// A call a command answers (run) brings its program as any command does:

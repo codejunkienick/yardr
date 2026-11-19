@@ -1497,10 +1497,10 @@ may revoke.`,
 declaration names as check: a read call without parameters, sent as a request
 or, where it names run, answered by its command. Prints the status the service
 answered with, and fails on anything but a success. Where the check call names
-answer.select, a successful check also prints each selected field
-the answer carries, one per line under the status line (and carries the same
-object under answer with --json); a field the answer does not carry prints no
-line. A source whose file names no check call is sent nothing: its credential
+answer.select, a successful check of an object answer prints each selected
+field it carries, one per line under the status line (and carries that answer
+under answer with --json). A missing field prints no line; a list answer prints
+none. A source whose file names no check call is sent nothing: its credential
 is looked at and that is all. Where the file names a mint (credential.mint),
 the token is minted first, with the source's mint_command, and the line says
 what it was minted from and how long it is good.
@@ -1637,9 +1637,9 @@ process for it. Nothing of the request is written anywhere.`,
 					return fmt.Errorf("source %s: the check call %s (%s)%s was answered %d%s", d.Name, d.Check, call.Line(), saidAs, res.Status, source.StatusHint(res.Status, d))
 				}
 				// The check call's selection is what setup may read: a successful check
-				// shows the selected fields carried in the answer, one per line,
-				// and carries the same selected answer under answer with --json. A field the answer
-				// does not carry prints no line; status alone decides success or failure,
+				// shows an object answer's selected fields, one per line (a list prints
+				// none), and carries the selected answer under answer with --json. A field
+				// it does not carry prints no line; status alone decides success or failure,
 				// and no other call's answer is ever shown.
 				var selected []string
 				if len(call.Answer.Select) > 0 && len(res.Answer) > 0 {
