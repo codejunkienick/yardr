@@ -354,6 +354,22 @@ func TestCrewMailReadReceiptStaysInConversation(t *testing.T) {
 	if letters := v.m.convo["chief"]; len(letters) != 1 || letters[0].Read {
 		t.Errorf("Ada's message after Bob's ack = %+v, want unread", letters)
 	}
+
+	// A session's single read marks exactly its letter in this view, and
+	// another session's marks nothing. No store call logs a session's
+	// single read, so the receipts are handed on as events.
+	must(t, st.Mail(ctx, "chief", "ada's second message", me))
+	v.stream()
+	letters := v.m.convo["chief"]
+	first, second := letters[0].Seq, letters[1].Seq
+	v.send(EventMsg(store.Event{Kind: "mail_read", Actor: "chief", Data: map[string]any{"reader": "chief", "session": "bob", "seq": first}}))
+	if letters := v.m.convo["chief"]; letters[0].Read {
+		t.Errorf("Ada's message after Bob's single read = %+v, want unread", letters)
+	}
+	v.send(EventMsg(store.Event{Kind: "mail_read", Actor: "chief", Data: map[string]any{"reader": "chief", "session": me, "seq": second}}))
+	if letters := v.m.convo["chief"]; len(letters) != 2 || letters[0].Read || !letters[1].Read {
+		t.Errorf("after Ada's single read = %+v, want only the second read", letters)
+	}
 }
 
 // Mail acknowledged elsewhere (yardr inbox --ack <seq> in another terminal) is
@@ -373,6 +389,29 @@ func TestUnreadElsewhere(t *testing.T) {
 	must(t, st.AckUserInbox(ctx, me, head(t, st), me))
 	v.stream()
 	v.hides("(1)", "unread from grace")
+
+	// One letter read elsewhere is exactly it read: the older unread stays,
+	// and neither cursor moves, since a single read takes no older mail
+	// with it.
+	must(t, st.Mail(ctx, me, "first", "recorder"))
+	first := head(t, st)
+	must(t, st.Mail(ctx, me, "second", "recorder"))
+	second := head(t, st)
+	must(t, st.AckUserMail(ctx, me, second, me))
+	cursor, asked := v.m.cursor, v.m.asked
+	v.stream()
+	if _, ok := v.m.unread[first]; !ok {
+		t.Errorf("after the single read: mail %d is read, want unread", first)
+	}
+	if _, ok := v.m.unread[second]; ok {
+		t.Errorf("after the single read: mail %d is unread, want read", second)
+	}
+	if v.m.cursor != cursor || v.m.asked != asked {
+		t.Errorf("after the single read: cursor %d asked %d, want %d %d", v.m.cursor, v.m.asked, cursor, asked)
+	}
+	if got := v.m.Unread("recorder"); got != 1 {
+		t.Errorf("after the single read: recorder unread %d, want 1", got)
+	}
 }
 
 // Under what the user sent, the view says where it stands, for every
