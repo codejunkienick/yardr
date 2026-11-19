@@ -2895,8 +2895,8 @@ func TestCallsAreTheDocs(t *testing.T) {
 	// answers as no method at all, and the socket answers so the one call
 	// of Calls a device's token alone makes (listenerOnly): a call is
 	// added to either on purpose, here too.
-	if len(Calls) != 40 || len(OperatorCalls) != 13 || len(listenerOnly) != 1 {
-		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 40, 13 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
+	if len(Calls) != wantCalls || len(OperatorCalls) != wantOperatorCalls || len(listenerOnly) != wantListenerOnly {
+		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want %d, %d and %d", len(Calls), len(OperatorCalls), len(listenerOnly), wantCalls, wantOperatorCalls, wantListenerOnly)
 	}
 	for name := range listenerOnly {
 		if _, ok := Calls[name]; !ok {

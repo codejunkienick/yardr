@@ -432,8 +432,8 @@ func TestPairCallConfirms(t *testing.T) {
 			t.Errorf("the card does not say %q:\n%s", line, text)
 		}
 	}
-	if strings.Contains(text, want) {
-		t.Errorf("the card shows what it asks for:\n%s", text)
+	if hasDigits(text, want) {
+		t.Errorf("the card shows what it asks for (%s):\n%s", want, text)
 	}
 	if !StrongWeight(ask.Weight) {
 		t.Errorf("the card's weight = %+v, want strong", ask.Weight)
@@ -508,8 +508,8 @@ func TestPairCallConfirms(t *testing.T) {
 		}
 	}
 	for _, w := range written {
-		if strings.Contains(w, want) || strings.Contains(w, tr.Commit) || strings.Contains(w, tr.Joiner.Nonce) || strings.Contains(w, tr.Host.Nonce) {
-			t.Errorf("the typed digits or the transcript are written: %q", w)
+		if hasDigits(w, want) || strings.Contains(w, tr.Commit) || strings.Contains(w, tr.Joiner.Nonce) || strings.Contains(w, tr.Host.Nonce) {
+			t.Errorf("the typed digits %s or the transcript are written: %q", want, w)
 		}
 	}
 

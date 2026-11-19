@@ -3969,6 +3969,13 @@ func TestYardTestKilledGatePrintsNoPass(t *testing.T) {
 				}
 				select {
 				case <-done:
+					// The run can end between the stat above and this
+					// look: the INT fake writes the marker, signals the
+					// gate shell and exits at once. Stat once more and
+					// fail only when the step truly never started.
+					if _, err := os.Stat(marker); err == nil {
+						return true
+					}
 					t.Fatalf("the run exited before its test step, output:\n%s%s", stdout.String(), stderr.String())
 				default:
 				}
