@@ -23,14 +23,16 @@ const contextStartedAt = "context_started_at"
 
 // contextCacheCap bounds each of Herdr's context maps, the transcript pins
 // and the last readings, by least-recently-touched eviction. A live session
-// is asked on every idle pass, so it keeps its entries, and a session that
-// is gone stops holding its once newer sessions arrive. 200 covers the
-// yard's live sessions (tens) with headroom: a known-id pin measures a few
-// hundred bytes and a last reading a few hundred more, so 200 of each is
-// tens of KB a map. A worktree pin on a yard-sized session dir measures
+// is asked on each pass that reaches its context read, so it keeps its
+// entries, and a session that is gone stops holding its once newer sessions
+// arrive. 200 covers the yard's live sessions (tens) with headroom: a
+// known-id pin measures a few hundred bytes and a last reading a few hundred
+// more, so 200 of each is tens of KB a map. A worktree pin on a yard-sized
+// session dir measures
 // about 1 MB (one state per other candidate and per directory above them),
 // and only sessions herdr names no id for hold one; the cap bounds how
-// many such pins dead sessions keep, not what one remembers.
+// many such pins dead sessions keep, not what one remembers. What herdr
+// named for a session (contextNamed) is held to the same cap, oldest first.
 const contextCacheCap = 200
 
 // Context is the context the session's agent holds, in tokens: the last
@@ -39,14 +41,15 @@ const contextCacheCap = 200
 // the file says no use yet (no reply, or none with numbers). The file is
 // found as the model source's is (see Model).
 //
-// The daemon asks on every idle pass, so both halves are remembered across
-// calls: the transcript is pinned while its file stands and, for a worktree
-// match, nothing the match judged has moved into a match (see
-// pinnedContext), and a transcript whose size and time are as at the last
-// read is not opened again. A grown file is read from where the last read
-// ended.
+// The daemon asks on each pass that reaches its context read, so both
+// halves are remembered across calls: the transcript is pinned while its
+// file stands and, for a worktree match, nothing the match judged has moved
+// into a match (see pinnedContext), and a transcript whose size and time
+// are as at the last read is not opened again. A grown file is read from
+// where the last read ended. Which session the agent is, herdr is asked once
+// in a while and not on each of those passes (contextKind).
 func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt time.Time) (used, window int, ok bool, err error) {
-	kind, id, err := h.sessionKind(ctx, handle)
+	kind, id, err := h.contextKind(ctx, handle, startedAt)
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -117,6 +120,69 @@ func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt ti
 		h.pinContext(key, p, judge)
 	}
 	return h.cachedContext(path, *kind.Context)
+}
+
+// contextNamedFor is how long what herdr named as a session's id stands
+// before herdr is asked again. It is the pace of a working session's read
+// (the dispatcher's contextWhileWorking), so each of those reads follows an
+// agent that has switched sessions, and an idle session, whose passes read
+// every time, does not ask herdr on each of them. The id the dispatcher
+// records on the handle is no stand-in for the answer: it is recorded once
+// and never refreshed, and the count of a session that ended is found by it.
+const contextNamedFor = 30 * time.Second
+
+// contextNaming is what herdr named for one session when it was asked: the
+// kind of its agent and the id of its session ("" where herdr names none, as
+// for a pane the worktree match finds), and when.
+type contextNaming struct {
+	kind store.Harness
+	id   string
+	at   time.Time
+}
+
+// contextKind is the harness kind and session id Context reads by: what
+// herdr names for the agent of handle, as Model asks it, except that the
+// answer stands for contextNamedFor. An agent that has switched sessions is
+// followed by the next ask, and the passes between read the file the last
+// ask named. A session is told apart by its agent's name and its start, so
+// one that started again under the same name asks at once. An answer that
+// names no agent is not kept: the agent is not there yet, or is gone.
+func (h *Herdr) contextKind(ctx context.Context, handle map[string]any, startedAt time.Time) (store.Harness, string, error) {
+	name, _ := handle["agent"].(string)
+	key := name + "\x00" + strconv.FormatInt(startedAt.UnixNano(), 10)
+	h.contextMu.Lock()
+	named, ok := h.contextNamed[key]
+	h.contextMu.Unlock()
+	if ok && time.Since(named.at) < contextNamedFor {
+		return named.kind, named.id, nil
+	}
+	kind, id, err := h.sessionKind(ctx, handle)
+	if err != nil || kind.Kind == "" {
+		return kind, id, err
+	}
+	h.rememberContextNaming(key, contextNaming{kind: kind, id: id, at: time.Now()})
+	return kind, id, nil
+}
+
+// rememberContextNaming keeps what herdr named for the session of key. The
+// oldest answer goes first past the cap: a live session is asked again within
+// a minute, so what is oldest is a session that is gone.
+func (h *Herdr) rememberContextNaming(key string, named contextNaming) {
+	h.contextMu.Lock()
+	defer h.contextMu.Unlock()
+	if h.contextNamed == nil {
+		h.contextNamed = map[string]contextNaming{}
+	}
+	h.contextNamed[key] = named
+	for len(h.contextNamed) > contextCacheCap {
+		oldest, at := "", time.Time{}
+		for k, n := range h.contextNamed {
+			if oldest == "" || n.at.Before(at) {
+				oldest, at = k, n.at
+			}
+		}
+		delete(h.contextNamed, oldest)
+	}
 }
 
 // contextMatchKey identifies one session's transcript match: the kind the

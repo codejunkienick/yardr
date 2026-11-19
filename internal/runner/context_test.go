@@ -1028,6 +1028,26 @@ esac`)
 		if n, m := len(l.contextLast), len(l.contextLastUsed); n != m {
 			t.Errorf("last readings = %d with %d orderings, want the same", n, m)
 		}
+		// What herdr named for each session: the answers carry their own time,
+		// and the oldest go first.
+		a := &Herdr{}
+		akey := func(i int) string { return fmt.Sprintf("agent-%d", i) }
+		for i := range contextCacheCap + extra {
+			a.rememberContextNaming(akey(i), contextNaming{id: "c1", at: time.Unix(1_700_000_000+int64(i), 0)})
+		}
+		if n := len(a.contextNamed); n != contextCacheCap {
+			t.Fatalf("answers after %d inserts = %d, want %d", contextCacheCap+extra, n, contextCacheCap)
+		}
+		for i := range extra {
+			if _, ok := a.contextNamed[akey(i)]; ok {
+				t.Errorf("oldest answer %d survived", i)
+			}
+		}
+		for i := extra; i < contextCacheCap+extra; i++ {
+			if _, ok := a.contextNamed[akey(i)]; !ok {
+				t.Errorf("answer %d was evicted before an older one", i)
+			}
+		}
 	})
 }
 
@@ -1090,9 +1110,10 @@ func benchContext(b *testing.B, h *Herdr, handle map[string]any, startedAt time.
 // BenchmarkHerdrContextCached is the daemon's per-pass cost of one crew
 // session's context reading on a crew-sized transcript: a session dir with
 // fifty other sessions' files and a 20 MB transcript of its own. The first
-// call matches and reads it; every timed call is a later pass. Each call also
-// starts the stand-in herdr that names the agent, which dominates its time:
-// allocs/op shows what the reading itself costs.
+// call asks the stand-in herdr that names the agent, then matches and reads
+// it; every timed call is a later pass, inside the time what herdr named
+// stands for (contextNamedFor), so none starts it and allocs/op and the time
+// are what the reading itself costs. A call past that time starts it once.
 func BenchmarkHerdrContextCached(b *testing.B) {
 	home, startedAt := museTranscripts(b, 50, 1)
 	h := &Herdr{AgentHomes: map[string]string{"muse": home}, Bin: fakeHerdrBin(b, `echo '{"id":"x","result":{"type":"agent_info","agent":{"agent":"muse","agent_status":"idle"}}}'`)}
@@ -1180,4 +1201,109 @@ func BenchmarkHerdrContextKnownID(b *testing.B) {
 	}
 	h := &Herdr{AgentHomes: map[string]string{"claude": home}, Bin: fakeHerdrBin(b, `echo '{"id":"x","result":{"type":"agent_info","agent":{"agent":"claude","agent_session":{"kind":"id","value":"c1"},"agent_status":"idle"}}}'`)}
 	benchContext(b, h, map[string]any{"agent": "crew"}, time.Time{}, 110)
+}
+
+// herdr is asked which session the agent is once, and what it named stands
+// for contextNamedFor: the reads between ask nothing. Past it herdr is asked
+// again, so an agent that switched sessions is followed, whatever id the
+// handle recorded when herdr first named one. A session that started again
+// asks at once, and an answer that names no agent is not kept.
+func TestContextAsksHerdrWhichSessionOncePerWhile(t *testing.T) {
+	ctx := context.Background()
+	claude := t.TempDir()
+	reply := func(id string, cacheRead int) {
+		path := filepath.Join(claude, "projects", "-tmp-w", id+".jsonl")
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		body := fmt.Sprintf(`{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_read_input_tokens":%d,"output_tokens":3}}}`+"\n", cacheRead)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reply("c1", 200) // 202 in use
+	reply("c2", 400) // 402 in use
+	// The stand-in names the session its file says, "down" being no server,
+	// and counts its asks.
+	bin := fakeHerdrBin(t, `echo ask >> "$0.asks"
+case "$3" in gone) echo '{"error":{"code":"agent_not_found","message":"agent target gone not found"},"id":"x"}' >&2; exit 1 ;; esac
+case "$(cat "$0.named")" in
+  down) echo '{"error":{"code":"server_not_running","message":"no herdr server"},"id":"x"}' >&2; exit 1 ;;
+esac
+echo '{"id":"x","result":{"type":"agent_info","agent":{"agent":"claude","agent_session":{"kind":"id","value":"'"$(cat "$0.named")"'"},"agent_status":"idle"}}}'`)
+	name := func(id string) {
+		t.Helper()
+		if err := os.WriteFile(bin+".named", []byte(id), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	asks := func() int {
+		b, _ := os.ReadFile(bin + ".asks")
+		return strings.Count(string(b), "ask")
+	}
+	// asked is the count the stand-in has reached when each wantAsks is made.
+	asked := 0
+	wantAsks := func(more int, why string) {
+		t.Helper()
+		asked += more
+		if got := asks(); got != asked {
+			t.Fatalf("herdr asked %d times, want %d: %s", got, asked, why)
+		}
+	}
+	h := &Herdr{AgentHomes: map[string]string{"claude": claude}, Bin: bin}
+	// age makes what herdr named stand for as long as it may: the next read
+	// is past the bound, with no wait for it.
+	age := func() {
+		h.contextMu.Lock()
+		defer h.contextMu.Unlock()
+		for key, n := range h.contextNamed {
+			n.at = n.at.Add(-contextNamedFor)
+			h.contextNamed[key] = n
+		}
+	}
+	started := time.Unix(1_700_000_000, 0)
+	// The handle of a live crew session: the id recorded when herdr first
+	// named one, which is never refreshed.
+	handle := map[string]any{"agent": "crew", "kind": "claude", store.HandleAgentSession: "c1"}
+	read := func(at time.Time, want int) {
+		t.Helper()
+		used, _, ok, err := h.Context(ctx, handle, at)
+		if err != nil || !ok || used != want {
+			t.Fatalf("context = %d, %v, %v; want %d, true, nil", used, ok, err, want)
+		}
+	}
+
+	name("c1")
+	read(started, 202)
+	read(started, 202)
+	wantAsks(1, "two reads in a row ask once")
+	name("c2") // the agent switched sessions
+	read(started, 202)
+	wantAsks(0, "inside the bound the answer stands")
+	age()
+	read(started, 402)
+	wantAsks(1, "past the bound herdr is asked, and the new session is read")
+	read(started, 402)
+	wantAsks(0, "the new answer stands in its turn")
+
+	name("down")
+	age()
+	if _, _, _, err := h.Context(ctx, handle, started); err == nil {
+		t.Fatal("past the bound with herdr down, its failure is the read's")
+	}
+	wantAsks(1, "past the bound herdr is asked, and fails")
+	name("c2")
+	read(started, 402)
+	wantAsks(1, "a failed ask kept nothing, so the next read asks again")
+
+	read(started.Add(time.Hour), 402)
+	wantAsks(1, "a session that started again asks at once")
+
+	gone := map[string]any{"agent": "gone", "kind": "claude"}
+	for range 2 {
+		if _, _, ok, err := h.Context(ctx, gone, started); ok || err != nil {
+			t.Fatalf("context of an agent herdr does not know = %v, %v; want no reading, no error", ok, err)
+		}
+	}
+	wantAsks(2, "an answer that names no agent is asked for again")
 }

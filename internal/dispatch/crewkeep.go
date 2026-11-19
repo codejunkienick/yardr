@@ -112,14 +112,18 @@ func (d *Dispatcher) keepCrewSession(ctx context.Context, job crewKeep) (out cre
 // or gone.
 type crewMemory struct {
 	reapMemory
-	status     string
-	hasStatus  bool
-	worked     bool
-	hasWorked  bool
-	idleSince  time.Time
-	hasIdle    bool
-	nudgeAt    time.Time
-	hasNudgeAt bool
+	status        string
+	hasStatus     bool
+	worked        bool
+	hasWorked     bool
+	idleSince     time.Time
+	hasIdle       bool
+	nudgeAt       time.Time
+	hasNudgeAt    bool
+	contextErr    string
+	hasContextErr bool
+	contextAt     string
+	hasContextAt  bool
 }
 
 // crewClone is a Dispatcher carrying only the per-session memory the
@@ -187,6 +191,12 @@ func (d *Dispatcher) crewClone(key, member string, queued *[]crewJob) *Dispatche
 	if status, ok := d.status[key]; ok {
 		c.status[key] = status
 	}
+	if msg, ok := d.status[contextFailKey(key)]; ok {
+		c.status[contextFailKey(key)] = msg
+	}
+	if at, ok := d.status[contextAtKey(key)]; ok {
+		c.status[contextAtKey(key)] = at
+	}
 	if worked, ok := d.crewWorkHistory[key]; ok {
 		c.crewWorkHistory[key] = worked
 	}
@@ -203,6 +213,8 @@ func (d *Dispatcher) crewClone(key, member string, queued *[]crewJob) *Dispatche
 func (c *Dispatcher) crewMemoryFor(key string) crewMemory {
 	m := crewMemory{reapMemory: c.reapMemoryFor(key)}
 	m.status, m.hasStatus = c.status[key]
+	m.contextErr, m.hasContextErr = c.status[contextFailKey(key)]
+	m.contextAt, m.hasContextAt = c.status[contextAtKey(key)]
 	m.worked, m.hasWorked = c.crewWorkHistory[key]
 	m.idleSince, m.hasIdle = c.idleSince[key]
 	m.nudgeAt, m.hasNudgeAt = c.nudgeAt[key]
@@ -217,6 +229,19 @@ func (d *Dispatcher) applyCrewMemory(key string, m crewMemory) {
 		d.status[key] = m.status
 	} else {
 		delete(d.status, key)
+	}
+	if d.status == nil {
+		d.status = map[string]string{}
+	}
+	if m.hasContextErr {
+		d.status[contextFailKey(key)] = m.contextErr
+	} else {
+		delete(d.status, contextFailKey(key))
+	}
+	if m.hasContextAt {
+		d.status[contextAtKey(key)] = m.contextAt
+	} else {
+		delete(d.status, contextAtKey(key))
 	}
 	if m.hasWorked {
 		d.crewWorkHistory[key] = m.worked

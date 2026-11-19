@@ -179,7 +179,7 @@ type CrewSession struct {
 	// ContextAskedAt is when the session was last asked for a handoff
 	// for its context use, which is asked once per session and never
 	// forced. ContextPct of ContextWindow at ContextAt is the last
-	// reading, taken on an idle pass.
+	// reading, on a working cadence and on every idle pass.
 	ContextAskedAt *time.Time `json:"context_asked_at,omitempty"`
 	ContextPct     int        `json:"context_pct,omitempty"`
 	ContextWindow  int        `json:"context_window,omitempty"`
