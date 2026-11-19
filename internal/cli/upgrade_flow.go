@@ -75,6 +75,7 @@ func (a *app) upgradeRun(w, warn io.Writer, ctx context.Context, cfg *config.Con
 	// the old binary whole and the store untouched.
 	var depot *store.Depot
 	var release *fetchedRelease
+	var wantTip string
 	if from != "" {
 		d, err := st.GetDepot(ctx, from)
 		if err != nil {
@@ -87,6 +88,14 @@ func (a *app) upgradeRun(w, warn io.Writer, ctx context.Context, cfg *config.Con
 		if _, err := lookPath("go"); err != nil {
 			return fmt.Errorf("go is not on PATH: the install builds from the checkout, so it needs the toolchain (%v)", err)
 		}
+		// Before the lock, the backups or any write: the install builds the
+		// landed commit, or says why it cannot, and never the commit the
+		// checkout merely stands on.
+		tip, err := upgradePreflightDepot(ctx, depot)
+		if err != nil {
+			return err
+		}
+		wantTip = tip
 	} else {
 		// A release over the yard's binary is the operator's to start, as
 		// the depot it replaces is: it migrates every covered store one
@@ -237,7 +246,7 @@ func (a *app) upgradeRun(w, warn io.Writer, ctx context.Context, cfg *config.Con
 		if release != nil {
 			return "", upgradeInstallRelease(target, release.binary)
 		}
-		return upgradeInstall(ctx, depot.Path, target)
+		return upgradeInstallPinned(ctx, depot.Path, target, wantTip)
 	}
 	if out, err := install(); err != nil {
 		removeGates()

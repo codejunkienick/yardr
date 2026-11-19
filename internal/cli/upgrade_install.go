@@ -17,6 +17,7 @@ import (
 	"yardr.dev/yardr/internal/peer"
 	"yardr.dev/yardr/internal/server"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/version"
 )
 
 // The upgrade install's tunables, as the design has them.
@@ -83,6 +84,22 @@ var upgradeRunInstalled = func(ctx context.Context, bin, home string, args ...st
 // upgradeNotifySend tells a user through their source; tests replace it.
 var upgradeNotifySend = notify.Send
 
+// upgradeReadBuild reads the build of the binary at a path; tests replace it.
+var upgradeReadBuild = version.OfFile
+
+// upgradeCurrentBuild is the build this process runs; tests replace it.
+var upgradeCurrentBuild = version.CurrentBuild
+
+// upgradeTestBuildEnv names the revision a black-box fixture's fake build
+// stands for: its fake go copies the test binary's own bytes, stamped with
+// the yardr checkout's commit and never the stand-in depot's tip, and no
+// build it can run stamps those bytes with the tip (go stamps from VCS,
+// which no flag sets). The pin and the newness guard read this name instead
+// of the bytes' own stamp; the install line still names the stamp. It is set
+// in those fixtures alone (contrib/assembly): set it by hand and the install
+// trusts the name, not the bytes.
+const upgradeTestBuildEnv = "YARDR_TEST_UPGRADE_BUILD"
+
 // upgradeInstallTarget is where the upgrade writes the build: the binary this
 // yard runs from, symlinks resolved. The server and the daemon watch that path
 // for a newer build, so bytes written anywhere else would verify nothing, and
@@ -102,7 +119,17 @@ func upgradeInstallTarget() (string, error) {
 // sees one complete new file and never a build still being linked. The temp is
 // removed on every path out: a failed build leaves target as it was and
 // nothing beside it. The build's output comes back for the failure to quote.
+// A build that is not newer than the running one is refused, so a downgrade
+// never lands untold; a told one installs by hand.
 func upgradeInstall(ctx context.Context, dir, target string) (string, error) {
+	return upgradeInstallPinned(ctx, dir, target, "")
+}
+
+// upgradeInstallPinned builds like upgradeInstall, and where wantTip names the
+// preflight's tip the build must be of it: anything else means the base moved
+// during the upgrade, and is refused before the rename with the old binary
+// whole.
+func upgradeInstallPinned(ctx context.Context, dir, target, wantTip string) (string, error) {
 	fi, err := os.Stat(target)
 	if err != nil {
 		return "", err
@@ -123,7 +150,99 @@ func upgradeInstall(ctx context.Context, dir, target string) (string, error) {
 	if err := os.Chmod(tmp.Name(), fi.Mode()); err != nil {
 		return "", err
 	}
+	built, err := upgradeReadBuild(tmp.Name())
+	if err != nil {
+		return "", fmt.Errorf("the new build cannot be read: %w", err)
+	}
+	if asserted := strings.TrimSpace(os.Getenv(upgradeTestBuildEnv)); asserted != "" {
+		// The fixture names what its fake bytes stand for; they are ordered
+		// by the tmp file's time below, as an unstamped build is.
+		built.Revision, built.Time = asserted, time.Time{}
+	}
+	if wantTip != "" {
+		if rev := strings.TrimSuffix(built.Revision, "-modified"); rev == "" || !strings.HasPrefix(wantTip, rev) {
+			return "", fmt.Errorf("the base moved during the upgrade: the build is of %s, not the tip %s; run yardr upgrade again", version.Show(built.Revision), shortSHA(wantTip))
+		}
+	}
+	// A build without a stamp is ordered by its file's time, as the watch
+	// orders it (version.Binary): the running build's by the installed
+	// file's, the new one's by the temp's.
+	running := upgradeCurrentBuild()
+	if running.Time.IsZero() {
+		running.Time = fi.ModTime()
+	}
+	if built.Time.IsZero() {
+		if tfi, err := os.Stat(tmp.Name()); err == nil {
+			built.Time = tfi.ModTime()
+		}
+	}
+	if reason := version.Newer(running, built); reason != "" {
+		return "", fmt.Errorf("the build of %s is not installed: %s; install it by hand if that is what you want", version.Show(built.Revision), reason)
+	}
 	return "", os.Rename(tmp.Name(), target)
+}
+
+// upgradePreflightDepot checks the depot's checkout stands where an install
+// builds the landed commit from: on the depot's base branch, at its tip, with
+// a clean worktree. It returns the tip the build is pinned to. A dir depot,
+// or one with no base, has no landed tip, so there is nothing to pin and it
+// returns "". It reads only: the run fetches nothing, since merge-local just
+// moved the tip, and tells the operator to fetch, put the checkout back on
+// the base and run yardr upgrade again.
+func upgradePreflightDepot(ctx context.Context, depot *store.Depot) (string, error) {
+	if depot.IsDir() || depot.Base == "" {
+		return "", nil
+	}
+	path, base := depot.Path, depot.Base
+	again := fmt.Sprintf("fetch, put the checkout of %s back on %s and run yardr upgrade again", depot.Name, base)
+	if _, err := git(ctx, path, "rev-parse", "--show-toplevel"); err != nil {
+		return "", fmt.Errorf("the checkout of %s at %s is not a git checkout; %s", depot.Name, path, again)
+	}
+	head, err := git(ctx, path, "rev-parse", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("the checkout of %s at %s has no commit checked out; %s", depot.Name, path, again)
+	}
+	branch, err := git(ctx, path, "symbolic-ref", "-q", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("the checkout of %s is detached at %s, not on %s; %s", depot.Name, shortSHA(head), base, again)
+	}
+	if short := strings.TrimPrefix(branch, "refs/heads/"); short != base && short != baseBranch(base) {
+		return "", fmt.Errorf("the checkout of %s is on %s, not on %s; %s", depot.Name, short, base, again)
+	}
+	tip, err := git(ctx, path, "rev-parse", "--verify", "--quiet", "--end-of-options", base)
+	if err != nil {
+		return "", fmt.Errorf("the base %s of depot %s has no commit in its checkout at %s; %s", base, depot.Name, path, again)
+	}
+	if head != tip {
+		return "", fmt.Errorf("the checkout of %s is at %s, not the tip of %s at %s; %s", depot.Name, shortSHA(head), base, shortSHA(tip), again)
+	}
+	status, err := git(ctx, path, "status", "--porcelain")
+	if err != nil {
+		return "", fmt.Errorf("the checkout of %s at %s cannot be checked for changes: %v; %s", depot.Name, path, err, again)
+	}
+	if status != "" {
+		return "", fmt.Errorf("the checkout of %s has uncommitted changes; set them aside, then %s", depot.Name, again)
+	}
+	return tip, nil
+}
+
+// baseBranch is the local branch a base stands on: the base itself, or the
+// branch after the remote's slash, since a checkout can never stand on a
+// remote (origin/main is main checked out).
+func baseBranch(base string) string {
+	if _, branch, ok := strings.Cut(base, "/"); ok {
+		return branch
+	}
+	return base
+}
+
+// shortSHA is the sha as a refusal names it: 12 characters, as a build's
+// revision has it, or whole where shorter.
+func shortSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }
 
 // upgradeCoveredYards are the yards the install covers: its own home,

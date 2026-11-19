@@ -192,7 +192,7 @@ func TestMergeLocalInstallsOnTheNamedDepot(t *testing.T) {
 		t.Fatal(err)
 	}
 	y.commit(y.wt, "contrib/assembly/merge-local", landed)
-	y.commit(y.wt, "contrib/assembly/pr-train", landed)
+	tip := y.commit(y.wt, "contrib/assembly/pr-train", landed)
 	scripts := filepath.Join(y.home, "scripts")
 	if err := os.MkdirAll(scripts, 0o755); err != nil {
 		t.Fatal(err)
@@ -219,7 +219,13 @@ func TestMergeLocalInstallsOnTheNamedDepot(t *testing.T) {
 	}
 	bin := t.TempDir()
 	y.bin = yardrCopy(t, bin)
-	y.opts = "PATH=" + shellQuote(filepath.Dir(fakeGo(t))) + ":$PATH"
+	// The fake go copies the test binary's own bytes, stamped with the yardr
+	// checkout's commit and never this depot's tip, so the install is told
+	// what the bytes stand for: the landing fast-forwards main to the last
+	// commit above, which names it. merge-local runs yardr upgrade with its
+	// own environment, so the name reaches the installed binary; a wrong one
+	// fails the install at the pin, never silently.
+	y.opts = "PATH=" + shellQuote(filepath.Dir(fakeGo(t))) + ":$PATH YARDR_TEST_UPGRADE_BUILD=" + tip
 
 	y.assembly()
 

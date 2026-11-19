@@ -13,6 +13,7 @@ import (
 
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/version"
 )
 
 // scriptSource is the path in the checkout of the source named name.
@@ -515,6 +516,15 @@ func newUpgradeScene(t *testing.T) *upgradeScene {
 	sc := &upgradeScene{a: mk(), home: home, st: st, self: self, target: target, scripts: filepath.Join(home, "scripts", "merge-local")}
 	sc.previous = sc.scripts + ".previous"
 	stub(t, &upgradeGoBuild, sc.build)
+	// The scene's build is newer than what runs, so the install's guard
+	// passes unless a test names other builds.
+	now := time.Now()
+	stub(t, &upgradeCurrentBuild, func() version.Build {
+		return version.Build{Revision: "bbbbbbbbbbbb", Time: now}
+	})
+	stub(t, &upgradeReadBuild, func(string) (version.Build, error) {
+		return version.Build{Revision: "cccccccccccc", Time: now.Add(time.Hour)}, nil
+	})
 	if err := os.MkdirAll(filepath.Dir(sc.scripts), 0o755); err != nil {
 		t.Fatal(err)
 	}

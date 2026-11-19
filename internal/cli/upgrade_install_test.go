@@ -20,6 +20,7 @@ import (
 	"yardr.dev/yardr/internal/notify"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
+	"yardr.dev/yardr/internal/version"
 )
 
 // realTempDir is a temp dir by the path the OS resolves it to: on macOS the
@@ -80,6 +81,15 @@ func TestUpgradeInstallTarget(t *testing.T) {
 // whole with nothing beside it.
 func TestUpgradeInstall(t *testing.T) {
 	ctx := context.Background()
+	// What the stand-in builds stand for is newer than what runs, so the
+	// install's guard passes; the guard itself is pinned through the run.
+	now := time.Now()
+	stub(t, &upgradeCurrentBuild, func() version.Build {
+		return version.Build{Revision: "bbbbbbbbbbbb", Time: now}
+	})
+	stub(t, &upgradeReadBuild, func(string) (version.Build, error) {
+		return version.Build{Revision: "cccccccccccc", Time: now.Add(time.Hour)}, nil
+	})
 	// The stand-in build's output is not executable, as the temp file it is
 	// asked to write is not: the install gives it the mode of the file it
 	// replaces.
@@ -457,6 +467,282 @@ func TestUpgradeRunInstall(t *testing.T) {
 			}
 		}
 	})
+
+	// A checkout detached from its base is refused before any build, naming
+	// the depot, the sha it stands on and the base, with what puts it back.
+	t.Run("a checkout detached from its base", func(t *testing.T) {
+		sc, dir, _ := gitScene(t, map[string]string{"merge-local": scriptNew}, "main")
+		head := gitIn(t, dir, "rev-parse", "HEAD")
+		gitIn(t, dir, "checkout", "-q", "--detach", "HEAD")
+		builds := countBuilds(t, sc)
+		before := mustStat(t, sc.target)
+
+		out, err := sc.upgrade(t)
+
+		want := "the checkout of yardr is detached at " + head[:12] + ", not on main"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("upgrade = %v, want %q\n%s", err, want, out)
+		}
+		for _, words := range []string{"fetch", "put the checkout of yardr back on main", "run yardr upgrade again"} {
+			if !strings.Contains(err.Error(), words) {
+				t.Fatalf("upgrade = %v, want %q named\n%s", err, words, out)
+			}
+		}
+		if *builds != 0 {
+			t.Fatalf("the detached checkout was built %d times, want no build", *builds)
+		}
+		// The refusal comes before the lock, the backups and any write.
+		if !os.SameFile(before, mustStat(t, sc.target)) {
+			t.Fatalf("the binary was replaced")
+		}
+		if _, err := os.Stat(filepath.Join(filepath.Dir(sc.target), "yardr.prev")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("a previous binary was kept by a run that refused first: %v", err)
+		}
+		if _, err := os.Stat(config.At(sc.home).BeforeInstallBackup()); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("a pre-install backup was taken by a run that refused first: %v", err)
+		}
+	})
+
+	// A checkout on another branch is refused the same way, naming the
+	// branch it stands on.
+	t.Run("a checkout on another branch", func(t *testing.T) {
+		sc, dir, _ := gitScene(t, map[string]string{"merge-local": scriptNew}, "main")
+		gitIn(t, dir, "checkout", "-q", "-b", "side")
+		builds := countBuilds(t, sc)
+
+		out, err := sc.upgrade(t)
+
+		want := "the checkout of yardr is on side, not on main"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("upgrade = %v, want %q\n%s", err, want, out)
+		}
+		if *builds != 0 {
+			t.Fatalf("the checkout on side was built %d times, want no build", *builds)
+		}
+	})
+
+	// A checkout behind its base's tip is refused, naming both commits: here
+	// the base is the remote's, advanced past the local branch.
+	t.Run("a checkout behind its base", func(t *testing.T) {
+		sc, dir, tip := gitScene(t, map[string]string{"merge-local": scriptNew}, "origin/main")
+		gitIn(t, dir, "commit", "-q", "--allow-empty", "-m", "landed after the checkout")
+		ahead := gitIn(t, dir, "rev-parse", "HEAD")
+		gitIn(t, dir, "update-ref", "refs/remotes/origin/main", ahead)
+		gitIn(t, dir, "update-ref", "refs/heads/main", tip)
+		gitIn(t, dir, "checkout", "-q", "main")
+		builds := countBuilds(t, sc)
+
+		out, err := sc.upgrade(t)
+
+		want := "the checkout of yardr is at " + tip[:12] + ", not the tip of origin/main at " + ahead[:12]
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("upgrade = %v, want %q\n%s", err, want, out)
+		}
+		if *builds != 0 {
+			t.Fatalf("the stale checkout was built %d times, want no build", *builds)
+		}
+	})
+
+	// A checkout with uncommitted changes is refused before any build.
+	t.Run("a checkout with uncommitted changes", func(t *testing.T) {
+		sc, dir, _ := gitScene(t, map[string]string{"merge-local": scriptNew}, "main")
+		script := filepath.Join(dir, filepath.FromSlash(scriptSource(t, "merge-local")))
+		if err := os.WriteFile(script, []byte(scriptOld), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		builds := countBuilds(t, sc)
+
+		out, err := sc.upgrade(t)
+
+		want := "the checkout of yardr has uncommitted changes"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("upgrade = %v, want %q\n%s", err, want, out)
+		}
+		if *builds != 0 {
+			t.Fatalf("the dirty checkout was built %d times, want no build", *builds)
+		}
+	})
+
+	// A build of anything but the preflight's tip means the base moved
+	// during the upgrade: it is refused with the old binary whole.
+	t.Run("a build of another commit than the tip", func(t *testing.T) {
+		sc, _, tip := gitScene(t, map[string]string{"merge-local": scriptNew}, "main")
+		now := time.Now()
+		stub(t, &upgradeCurrentBuild, func() version.Build {
+			return version.Build{Revision: "bbbbbbbbbbbb", Time: now}
+		})
+		stub(t, &upgradeReadBuild, func(string) (version.Build, error) {
+			return version.Build{Revision: "ffffffffffff", Time: now.Add(time.Hour)}, nil
+		})
+		before := mustStat(t, sc.target)
+
+		out, err := sc.upgrade(t)
+
+		want := "the base moved during the upgrade: the build is of ffffffffffff, not the tip " + tip[:12]
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("upgrade = %v, want %q\n%s", err, want, out)
+		}
+		if !os.SameFile(before, mustStat(t, sc.target)) {
+			t.Fatalf("the build of another commit was installed")
+		}
+		noTemp(t, sc.target)
+	})
+
+	// A build older than the running one is refused with the old binary
+	// whole, and so is a build of the running revision itself.
+	t.Run("a build no newer than the running one", func(t *testing.T) {
+		for _, name := range []string{"older", "same revision"} {
+			t.Run(name, func(t *testing.T) {
+				sc, _, tip := gitScene(t, map[string]string{"merge-local": scriptNew}, "main")
+				now := time.Now()
+				// The pin passes on the tip in both: the refusal is the
+				// guard's alone.
+				running := version.Build{Revision: "bbbbbbbbbbbb", Time: now}
+				built := version.Build{Revision: tip[:12], Time: now.Add(-time.Hour)}
+				want := "not after the running build's"
+				if name == "same revision" {
+					running.Revision = tip[:12]
+					built.Time = now.Add(time.Hour)
+					want = "same revision " + tip[:12] + " as the running build"
+				}
+				stub(t, &upgradeCurrentBuild, func() version.Build { return running })
+				stub(t, &upgradeReadBuild, func(string) (version.Build, error) { return built, nil })
+				before := mustStat(t, sc.target)
+
+				out, err := sc.upgrade(t)
+
+				if err == nil || !strings.Contains(err.Error(), want) ||
+					!strings.Contains(err.Error(), "install it by hand") {
+					t.Fatalf("upgrade = %v, want %q and the hand install named\n%s", err, want, out)
+				}
+				if !os.SameFile(before, mustStat(t, sc.target)) {
+					t.Fatalf("the build no newer than the running one was installed")
+				}
+				noTemp(t, sc.target)
+			})
+		}
+	})
+
+	// A build the fixture names: a black-box fixture's fake go leaves the
+	// tmp binary stamped with the yardr checkout's commit, never the
+	// stand-in depot's tip, so the pin and the guard read the named
+	// revision instead, ordered by the tmp file's time. The name is a
+	// contract with the fixture (contrib/assembly), which sets it in the
+	// installed binary's environment.
+	t.Run("a build the fixture names", func(t *testing.T) {
+		if upgradeTestBuildEnv != "YARDR_TEST_UPGRADE_BUILD" {
+			t.Fatalf("the seam is %s, want the name the fixture sets", upgradeTestBuildEnv)
+		}
+		sc, _, tip := gitScene(t, map[string]string{"merge-local": scriptNew}, "main")
+		now := time.Now()
+		stub(t, &upgradeCurrentBuild, func() version.Build {
+			return version.Build{Revision: "bbbbbbbbbbbb", Time: now}
+		})
+		stub(t, &upgradeReadBuild, func(string) (version.Build, error) {
+			return version.Build{Revision: "dddddddddddd", Time: now.Add(-time.Hour)}, nil
+		})
+		t.Setenv(upgradeTestBuildEnv, tip)
+		before := mustStat(t, sc.target)
+
+		out, err := sc.upgrade(t)
+
+		if err != nil {
+			t.Fatalf("upgrade: %v\n%s", err, out)
+		}
+		if os.SameFile(before, mustStat(t, sc.target)) {
+			t.Fatalf("the named build was not installed")
+		}
+		noTemp(t, sc.target)
+	})
+
+	// The named revision does not skip reading the build: a tmp binary
+	// that cannot be read is refused with the seam set too.
+	t.Run("a named build that cannot be read", func(t *testing.T) {
+		sc, _, tip := gitScene(t, map[string]string{"merge-local": scriptNew}, "main")
+		stub(t, &upgradeReadBuild, func(string) (version.Build, error) {
+			return version.Build{}, errors.New("no build info")
+		})
+		t.Setenv(upgradeTestBuildEnv, tip)
+
+		out, err := sc.upgrade(t)
+
+		if err == nil || !strings.Contains(err.Error(), "the new build cannot be read") {
+			t.Fatalf("upgrade = %v, want the unreadable build refused\n%s", err, out)
+		}
+	})
+
+	// The happy path installs the tip, and the install line names its sha.
+	t.Run("a checkout on its base installs the tip", func(t *testing.T) {
+		sc, _, tip := gitScene(t, map[string]string{"merge-local": scriptNew}, "main")
+		now := time.Now()
+		stub(t, &upgradeCurrentBuild, func() version.Build {
+			return version.Build{Revision: "bbbbbbbbbbbb", Time: now}
+		})
+		stub(t, &upgradeReadBuild, func(string) (version.Build, error) {
+			return version.Build{Revision: tip[:12], Time: now.Add(time.Hour)}, nil
+		})
+		before := mustStat(t, sc.target)
+
+		out, err := sc.upgrade(t)
+
+		if err != nil {
+			t.Fatalf("upgrade: %v\n%s", err, out)
+		}
+		// The install line names the installed revision, which the pin made
+		// the tip: the bytes below prove which file stands there.
+		if want := fmt.Sprintf("%-9s  %s at ", "install", sc.target); !strings.Contains(out, want) {
+			t.Fatalf("the output lacks %q:\n%s", want, out)
+		}
+		if os.SameFile(before, mustStat(t, sc.target)) {
+			t.Fatalf("the binary was not replaced")
+		}
+		noTemp(t, sc.target)
+	})
+}
+
+// gitDepotCheckout is a real git checkout on main with bodies committed as
+// the depot's scripts, in the layout scriptsCheckout writes. It returns the
+// checkout and its tip.
+func gitDepotCheckout(t *testing.T, bodies map[string]string) (dir, tip string) {
+	t.Helper()
+	dir = t.TempDir()
+	gitIn(t, dir, "init", "-q", "-b", "main")
+	for name, body := range bodies {
+		path := filepath.Join(dir, filepath.FromSlash(scriptSource(t, name)))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "scripts")
+	return dir, gitIn(t, dir, "rev-parse", "HEAD")
+}
+
+// gitScene is newUpgradeScene with the depot's checkout a real git checkout
+// whose base is base, so the preflight pins a tip. It returns the scene, the
+// checkout and the tip of main.
+func gitScene(t *testing.T, bodies map[string]string, base string) (*upgradeScene, string, string) {
+	t.Helper()
+	sc := newUpgradeScene(t)
+	dir, tip := gitDepotCheckout(t, bodies)
+	if err := sc.st.PutDepot(context.Background(), store.Depot{Name: "yardr", Path: dir, Base: base}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	return sc, dir, tip
+}
+
+// countBuilds wraps the scene's go build and returns how often it ran.
+func countBuilds(t *testing.T, sc *upgradeScene) *int {
+	t.Helper()
+	calls := 0
+	stub(t, &upgradeGoBuild, func(ctx context.Context, dir, file string) (string, error) {
+		calls++
+		return sc.build(ctx, dir, file)
+	})
+	return &calls
 }
 
 // refusedAtLock runs the scene's upgrade, which must end at the lock, and

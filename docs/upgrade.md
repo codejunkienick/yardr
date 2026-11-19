@@ -29,6 +29,14 @@ yard runs the new build. The `install` line names the binary the build
 went to ([where it writes](#where-it-writes)). The `scripts` line is
 [its own section](#the-scripts).
 
+The depot road builds the landed commit: the checkout has to stand on
+the depot's base branch, at its tip, with no uncommitted changes.
+Anything else — a detached checkout, another branch, a tip it has not
+pulled, uncommitted changes — fails the run before the lock, saying
+what to put back; so does a build that is not newer than the running
+one, so a downgrade never lands untold (install an older build by
+hand).
+
 ## Where it writes
 
 The build goes to the binary the upgrade itself runs from, symlinks
