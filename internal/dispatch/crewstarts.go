@@ -254,6 +254,7 @@ func (d *Dispatcher) applyCrewCompletion(ctx context.Context, comp crewCompletio
 	d.Log.Info("crew session started", "crew", name, "session", s.label())
 	key := s.key()
 	delete(d.status, key)
+	d.forgetContextNote(key)
 	delete(d.promptIdle, key)
 	delete(d.idleSince, key)
 	delete(d.drafts, key)

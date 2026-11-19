@@ -423,12 +423,12 @@ A crew session rotates through handoffs, never by being killed: it is asked
 to write one, and its next session starts from it. The asking is by context
 use first, by the clock as a failsafe.
 
-On a pass where the session is idle, yardr reads what its agent holds from
-the agent's own session file: Claude Code's last assistant line's usage,
-Muse's last `model_completed` input, Codex's last `token_count` call's
-input (not its running total), or pi's last assistant message's usage (its
-`input`, `cacheRead` and `cacheWrite`, without the `output` that pi's own
-footer adds). Muse and Codex input already includes its cache. Codex's
+yardr reads what its agent holds from the agent's own session file while
+the session works, and again on each idle pass: Claude Code's last assistant
+line's usage, Muse's last `model_completed` input, Codex's last `token_count`
+call's input (not its running total), or pi's last assistant message's
+usage (its `input`, `cacheRead` and `cacheWrite`, without the `output` that
+pi's own footer adds). Muse and Codex input already includes its cache. Codex's
 window is read from the same call's `model_context_window`; without it, no
 reading is recorded. The window is declared by the harness where known
 (1,007,997 tokens for Muse); otherwise it is 200k tokens, or 1M where the
@@ -440,9 +440,11 @@ smaller one brings it sooner. A session with no reading yet (pi writes its
 file at its first reply), or no unique file matching its worktree, waits for
 a later pass.
 At `--context-handoff` percent (60 unless set, 0
-for never) it nudges once: "Your context is N% of the window. Write your
+for never), and only while the session is idle with nothing in its input, it
+nudges once: "Your context is N% of the window. Write your
 handoff when this conversation allows …". The nudge is asked once per
-session and never forced: no grace, no restart. `yardr crew show` prints
+session and never forced: no grace, no restart. A working session records
+its use and is not asked. `yardr crew show` prints
 the last reading (`context 63% of 200k at 22:41`), and the nudge writes a
 `crew_context_asked` event on the journal. A harness whose file names no
 context source has no context rotation: the failsafe alone.

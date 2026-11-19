@@ -774,23 +774,18 @@ func (d *Dispatcher) crewRunning(ctx context.Context, runner Runner, s *memberSe
 			}
 			return d.Store.MarkRotationAskedFor(ctx, def.Name, s.user)
 		case s.st.RotationAskedAt != nil && time.Since(*s.st.RotationAskedAt) > grace:
+			// Record the reading, then restart. No context handoff: the
+			// rotation already asked, and the restart stays ahead of one.
+			d.recordContextOnRestart(ctx, runner, s, status)
 			return d.Store.RequestRestartFor(ctx, def.Name, s.user, "rotation (no handoff within grace)", "", "yard")
 		}
 	}
-	if asked, err := d.crewContext(ctx, runner, s, idle); asked || err != nil {
-		return err
-	}
 	if !idle {
-		delete(d.drafts, key) // what was in its input was sent
-		delete(d.dialogs, key)
-		if status == "working" {
-			// Working: past any login screen seen before. A login
-			// screen may read as blocked, so that status keeps the mark.
-			d.markCrewLogin(ctx, s, "")
-		}
-		d.crewHarnessDialogOver(ctx, s)
-		d.crewHarnessOver(ctx, s, false)
+		d.crewWorkingPass(ctx, runner, s, status)
 		return nil
+	}
+	if asked, err := d.crewContext(ctx, runner, s, true); asked || err != nil {
+		return err
 	}
 	page, err := d.Store.InboxFor(ctx, def.Name, s.user, 5)
 	// Idle with something unread is where a harness stopped on an error
@@ -976,6 +971,7 @@ func (d *Dispatcher) stopCrew(ctx context.Context, runner Runner, s *memberSessi
 		}
 	}
 	d.Log.Info("crew session stopped", "crew", s.member.Name, "session", s.label(), "reason", reason)
+	d.forgetContextNote(s.key())
 	return d.Store.CrewStoppedFor(ctx, s.member.Name, s.user, reason)
 }
 

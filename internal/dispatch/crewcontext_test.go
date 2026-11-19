@@ -1,11 +1,16 @@
 package dispatch_test
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
+	"maps"
 	"strings"
 	"testing"
 	"time"
 
+	"yardr.dev/yardr/internal/dispatch"
 	"yardr.dev/yardr/internal/store"
 )
 
@@ -168,6 +173,8 @@ func TestContextReadWhenWorkingAskedWhenIdleAndTyped(t *testing.T) {
 	const window = 1007997
 	s, f, d := crewSetup(t, store.CrewMember{Config: map[string]any{"kind": "muse", "model": "muse-wonder-1.0"}})
 	ctx := context.Background()
+	now := time.Now()
+	dispatch.SetClock(d, func() time.Time { return now })
 	f.ctxOK, f.ctxUsed, f.ctxWindow = true, (window*50+99)/100, window
 	must(t, d.Reconcile(ctx)) // start
 	agent := agentOf(t, s)
@@ -181,7 +188,15 @@ func TestContextReadWhenWorkingAskedWhenIdleAndTyped(t *testing.T) {
 	if r.StartedAt == nil || !f.ctxStartedAt.Equal(*r.StartedAt) {
 		t.Fatalf("context start = %v, want %v", f.ctxStartedAt, r.StartedAt)
 	}
+	readAt := *r.ContextAt
 	f.ctxUsed = (window*95 + 99) / 100
+	must(t, d.Reconcile(ctx)) // still inside the working cadence: not read, not written
+	r, err = s.GetCrew(ctx, "yardmaster")
+	must(t, err)
+	if f.ctxCalls != 1 || r.ContextPct != 50 || r.ContextAt == nil || !r.ContextAt.Equal(readAt) || r.ContextAskedAt != nil || len(f.nudges) != 0 {
+		t.Fatalf("reading inside the cadence: %+v; calls %d, nudges %v", r.CrewSession, f.ctxCalls, f.nudges)
+	}
+	now = now.Add(dispatch.ContextWhileWorking())
 	must(t, d.Reconcile(ctx)) // working above the threshold: record, never ask
 	r, err = s.GetCrew(ctx, "yardmaster")
 	must(t, err)
@@ -190,14 +205,115 @@ func TestContextReadWhenWorkingAskedWhenIdleAndTyped(t *testing.T) {
 	}
 	f.set(agent, "idle")
 	f.input = "half a thought" // the nudge is held, and nothing recorded as asked
-	must(t, d.Reconcile(ctx))
+	must(t, d.Reconcile(ctx))  // idle reads even inside the working cadence
+	if f.ctxCalls != 3 {
+		t.Fatalf("idle reads = %d, want one more than the working reads", f.ctxCalls)
+	}
 	if r, _ := s.GetCrew(ctx, "yardmaster"); r.ContextAskedAt != nil || r.ContextPct != 95 || len(f.nudges) != 0 {
 		t.Fatalf("held nudge: %+v; nudges %v", r.CrewSession, f.nudges)
 	}
 	f.input = ""
 	must(t, d.Reconcile(ctx))
-	if r, _ := s.GetCrew(ctx, "yardmaster"); len(f.nudges) != 1 || r.ContextAskedAt == nil {
-		t.Fatalf("nudges %v, asked at %v", f.nudges, r.ContextAskedAt)
+	if r, _ := s.GetCrew(ctx, "yardmaster"); len(f.nudges) != 1 || r.ContextAskedAt == nil || f.ctxCalls != 4 {
+		t.Fatalf("nudges %v, asked at %v, calls %d", f.nudges, r.ContextAskedAt, f.ctxCalls)
+	}
+}
+
+// A context read that fails on a working pass still clears the idle spell's
+// marks, and the failure is said once rather than on every wake.
+func TestContextFailureStillClearsWorkingState(t *testing.T) {
+	t.Parallel()
+	s, f, d := crewSetup(t, store.CrewMember{})
+	ctx := context.Background()
+	var log bytes.Buffer
+	d.Log = slog.New(slog.NewTextHandler(&log, nil))
+	now := time.Now()
+	dispatch.SetClock(d, func() time.Time { return now })
+	f.ctxOK, f.ctxUsed = true, 100000 // 50%: under the threshold, so the idle pass reaches the inbox
+	must(t, d.Reconcile(ctx))
+	agent := agentOf(t, s)
+	f.dialog, f.line, f.input = "auto_mode_setup", "Enable auto mode?", "half a thought"
+	must(t, s.Mail(ctx, "yardmaster", "deploy freeze", "chris"))
+	must(t, d.Reconcile(ctx))
+	r, err := s.GetCrew(ctx, "yardmaster")
+	must(t, err)
+	if n, _ := kindCount(t, s, r.Journal, "nudge_held"); n != 1 {
+		t.Fatalf("nudge_held events = %d, want the dialog said once", n)
+	}
+	h := maps.Clone(r.Handle)
+	h[dispatch.HarnessDialogKey] = "kimi"
+	h[dispatch.HarnessLoginKey] = "Select login method:"
+	must(t, s.SetCrewHandleFor(ctx, "yardmaster", "", h))
+
+	f.set(agent, "working")
+	f.ctxErr = errors.New("context unreadable")
+	calls := f.ctxCalls
+	for range 3 {
+		must(t, d.Reconcile(ctx))
+	}
+	r, err = s.GetCrew(ctx, "yardmaster")
+	must(t, err)
+	if _, ok := r.Handle[dispatch.HarnessDialogKey]; ok {
+		t.Fatalf("dialog mark = %v; a failed read left the idle spell's mark", r.Handle[dispatch.HarnessDialogKey])
+	}
+	if _, ok := r.Handle[dispatch.HarnessLoginKey]; ok {
+		t.Fatalf("login mark = %v; a failed read left it", r.Handle[dispatch.HarnessLoginKey])
+	}
+	if !r.Live() || f.ctxCalls != calls+1 || strings.Count(log.String(), `msg="crew context"`) != 1 || strings.Count(log.String(), "level=ERROR") != 0 {
+		t.Fatalf("live %v, calls %d (was %d), log %s", r.Live(), f.ctxCalls, calls, log.String())
+	}
+	now = now.Add(dispatch.ContextWhileWorking())
+	must(t, d.Reconcile(ctx)) // due again, same error: tried, not said again
+	if f.ctxCalls != calls+2 || strings.Count(log.String(), `msg="crew context"`) != 1 {
+		t.Fatalf("calls %d, log %s", f.ctxCalls, log.String())
+	}
+
+	f.ctxErr = nil
+	f.set(agent, "idle")
+	must(t, d.Reconcile(ctx)) // the dialog memory was cleared, so the spell is told again
+	if n, _ := kindCount(t, s, r.Journal, "nudge_held"); n != 2 {
+		t.Fatalf("nudge_held events = %d, want the dialog said again after the working pass", n)
+	}
+}
+
+// The pass that restarts a session for its age still records the reading,
+// and does not ask for a context handoff. A failed read does not hold the
+// restart.
+func TestContextRecordedOnRotationRestart(t *testing.T) {
+	t.Parallel()
+	s, f, d := crewSetup(t, store.CrewMember{MaxAge: "1ms", HandoffGrace: "1ms"})
+	ctx := context.Background()
+	f.ctxOK, f.ctxUsed = true, 100000 // 50% on the passes before the restart
+	must(t, d.Reconcile(ctx))
+	agent := agentOf(t, s)
+	time.Sleep(5 * time.Millisecond)
+	must(t, d.Reconcile(ctx)) // past max age, idle: asked for its age, not its use
+	f.set(agent, "working")
+	f.ctxUsed = 190000
+	calls := f.ctxCalls
+	time.Sleep(5 * time.Millisecond)
+	must(t, d.Reconcile(ctx)) // past the grace, still working: record, then restart
+	r, err := s.GetCrew(ctx, "yardmaster")
+	must(t, err)
+	if r.ContextPct != 95 || r.ContextAskedAt != nil || r.RestartRequested != "rotation (no handoff within grace)" || f.ctxCalls != calls+1 {
+		t.Fatalf("restart reading: %+v; calls %d (was %d)", r.CrewSession, f.ctxCalls, calls)
+	}
+	if len(f.nudges) != 1 || !strings.Contains(f.nudges[0], "due for rotation") {
+		t.Fatalf("nudges %v, want only the rotation ask", f.nudges)
+	}
+
+	s, f, d = crewSetup(t, store.CrewMember{MaxAge: "1ms", HandoffGrace: "1ms"})
+	f.ctxOK, f.ctxUsed = true, 100000
+	must(t, d.Reconcile(ctx))
+	time.Sleep(5 * time.Millisecond)
+	must(t, d.Reconcile(ctx))
+	f.ctxErr = errors.New("context unreadable")
+	time.Sleep(5 * time.Millisecond)
+	must(t, d.Reconcile(ctx))
+	r, err = s.GetCrew(ctx, "yardmaster")
+	must(t, err)
+	if r.RestartRequested != "rotation (no handoff within grace)" || r.ContextAskedAt != nil {
+		t.Fatalf("restart after a failed read: %+v", r.CrewSession)
 	}
 }
 

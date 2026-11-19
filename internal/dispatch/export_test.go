@@ -16,6 +16,10 @@ import (
 // test also moves is the test's to guard.
 func SetClock(d *Dispatcher, clock func() time.Time) { d.clock.Store(&clock) }
 
+// ContextWhileWorking is how long a working crew session waits between
+// context reads. A test advances its clock by this to make the next read due.
+func ContextWhileWorking() time.Duration { return contextWhileWorking }
+
 // RememberSourceAnswer keeps what the source named source said at at as
 // this daemon's memory of it, as if cachedSource had asked it then. A test
 // stands in with it for an answer no script can print: one that says how

@@ -1181,3 +1181,28 @@ func BenchmarkHerdrContextKnownID(b *testing.B) {
 	h := &Herdr{AgentHomes: map[string]string{"claude": home}, Bin: fakeHerdrBin(b, `echo '{"id":"x","result":{"type":"agent_info","agent":{"agent":"claude","agent_session":{"kind":"id","value":"c1"},"agent_status":"idle"}}}'`)}
 	benchContext(b, h, map[string]any{"agent": "crew"}, time.Time{}, 110)
 }
+
+// A handle that already carries the kind and the session id is read from
+// that file. herdr is not asked which session the agent is.
+func TestContextRecordedSessionSkipsHerdr(t *testing.T) {
+	ctx := context.Background()
+	claude := t.TempDir()
+	path := filepath.Join(claude, "projects", "-tmp-w", "c1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_read_input_tokens":200,"output_tokens":3}}}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	down := fakeHerdrBin(t, `echo '{"error":{"code":"server_not_running","message":"no herdr server"},"id":"x"}' >&2; exit 1`)
+	h := &Herdr{AgentHomes: map[string]string{"claude": claude}, Bin: down}
+	handle := map[string]any{"agent": "down", "kind": "claude", store.HandleAgentSession: "c1"}
+	used, window, ok, err := h.Context(ctx, handle, time.Time{})
+	if err != nil || !ok || used != 202 || window != 0 {
+		t.Fatalf("context from the recorded id = %d, %d, %v, %v; want 202, 0, true, nil", used, window, ok, err)
+	}
+	if _, _, _, err := h.Context(ctx, map[string]any{"agent": "down"}, time.Time{}); err == nil {
+		t.Fatal("without a recorded id, herdr is asked and its failure is the read's")
+	}
+}

@@ -23,11 +23,12 @@ const contextStartedAt = "context_started_at"
 
 // contextCacheCap bounds each of Herdr's context maps, the transcript pins
 // and the last readings, by least-recently-touched eviction. A live session
-// is asked on every pass, so it keeps its entries, and a session that
-// is gone stops holding its once newer sessions arrive. 200 covers the
-// yard's live sessions (tens) with headroom: a known-id pin measures a few
-// hundred bytes and a last reading a few hundred more, so 200 of each is
-// tens of KB a map. A worktree pin on a yard-sized session dir measures
+// is asked on each pass that reaches its context read, so it keeps its
+// entries, and a session that is gone stops holding its once newer sessions
+// arrive. 200 covers the yard's live sessions (tens) with headroom: a
+// known-id pin measures a few hundred bytes and a last reading a few hundred
+// more, so 200 of each is tens of KB a map. A worktree pin on a yard-sized
+// session dir measures
 // about 1 MB (one state per other candidate and per directory above them),
 // and only sessions herdr names no id for hold one; the cap bounds how
 // many such pins dead sessions keep, not what one remembers.
@@ -39,14 +40,16 @@ const contextCacheCap = 200
 // the file says no use yet (no reply, or none with numbers). The file is
 // found as the model source's is (see Model).
 //
-// The daemon asks on every pass, so both halves are remembered across
-// calls: the transcript is pinned while its file stands and, for a worktree
-// match, nothing the match judged has moved into a match (see
-// pinnedContext), and a transcript whose size and time are as at the last
-// read is not opened again. A grown file is read from where the last read
-// ended.
+// The daemon asks on each pass that reaches its context read, so both
+// halves are remembered across calls: the transcript is pinned while its
+// file stands and, for a worktree match, nothing the match judged has moved
+// into a match (see pinnedContext), and a transcript whose size and time
+// are as at the last read is not opened again. A grown file is read from
+// where the last read ended. A handle that already carries the kind and a
+// plain session id is read by that id, without asking herdr which session
+// the agent is (contextKind).
 func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt time.Time) (used, window int, ok bool, err error) {
-	kind, id, err := h.sessionKind(ctx, handle)
+	kind, id, err := h.contextKind(ctx, handle)
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -117,6 +120,20 @@ func (h *Herdr) Context(ctx context.Context, handle map[string]any, startedAt ti
 		h.pinContext(key, p, judge)
 	}
 	return h.cachedContext(path, *kind.Context)
+}
+
+// contextKind is the harness kind and session id Context reads by. When the
+// handle already carries the kind and a plain session id, that id is the one
+// the dispatcher recorded and the count will be read by, so herdr is not
+// asked again. A handle with no id yet is asked, as Model is.
+func (h *Herdr) contextKind(ctx context.Context, handle map[string]any) (store.Harness, string, error) {
+	if name, _ := handle[harnessKind].(string); name != "" {
+		if raw, _ := handle[store.HandleAgentSession].(string); plainSessionID(raw) {
+			kind, _ := agents.Lookup(name)
+			return kind, raw, nil
+		}
+	}
+	return h.sessionKind(ctx, handle)
 }
 
 // contextMatchKey identifies one session's transcript match: the kind the
