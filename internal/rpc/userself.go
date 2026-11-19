@@ -14,6 +14,8 @@ var selfArg = map[string][]string{
 	"GetUser":              {"name"},
 	"UserInbox":            {"name", "actor"},
 	"AckUserInbox":         {"name", "actor"},
+	"MailExchange":         {"user", "actor"},
+	"AckUserMail":          {"user", "actor"},
 	"UserNotifications":    {"name", "actor"},
 	"AckUserNotifications": {"name", "actor"},
 	"UserAsks":             {"name", "actor", "viewer"},

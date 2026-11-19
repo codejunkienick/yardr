@@ -222,6 +222,15 @@ POST /call/ReplyMail
 {"error":{"code":"error","message":"I can't find message 999999 among your mail; read_my_mail lists the numbers"}}
 ```
 
+A number that is no mail of theirs (nothing is read, and missing, another's and what is not mail are refused alike):
+
+```
+POST /call/MailExchange
+{"user":"jo","seq":999999,"actor":"jo"}
+
+{"error":{"code":"error","message":"I can't find message 999999 among your mail; read_my_mail lists the numbers"}}
+```
+
 <!-- /errors -->
 
 ## Builds
@@ -351,7 +360,7 @@ Mail was queued for one of a linked yard: the conversation with `<data.to>@<data
 
 ### Mail was read: `mail_read`
 
-A user or a crew member acknowledged its mail. Every letter to `data.reader` with a seq up to `data.through` is read: your user's own, when another client acknowledged them, and the letters your user sent a crew member.
+A user or a crew member acknowledged its mail: either everything through `data.through`, or the one letter `data.seq`. Every letter to `data.reader` with a seq up to `data.through` is read: your user's own, when another client acknowledged them, and the letters your user sent a crew member; a `seq` marks that letter alone.
 
 ```json
 {
@@ -359,7 +368,7 @@ A user or a crew member acknowledged its mail. Every letter to `data.reader` wit
   "kind": "mail_read",
   "data": {
     "reader": "jo",
-    "through": 52
+    "seq": 52
   }
 }
 ```
@@ -369,7 +378,8 @@ A user or a crew member acknowledged its mail. Every letter to `data.reader` wit
 | `seq` | number | the event's seq |
 | `kind` | string | `mail_read` |
 | `data.reader` | string | who read |
-| `data.through` | number | through which seq |
+| `data.through` | number, may be absent | through which seq; absent on an acknowledgement of one letter |
+| `data.seq` | number, may be absent | the one letter read; absent on an acknowledgement through |
 
 ### A reaction on mail: `reaction`
 
@@ -499,7 +509,7 @@ A user acknowledged their notifications, in this client or another.
 
 ```json
 {
-  "seq": 201,
+  "seq": 202,
   "kind": "notifications_read",
   "data": {
     "reader": "jo",
@@ -2077,6 +2087,23 @@ POST /call/Conversation
 A letter of a trusted name says how it went, and is otherwise a letter like any other. What the user wrote under the name has the address as its `from`, and `as` when the link trusted the name as it came: the letter from `josephine@north` above, which jo wrote to the yardmaster from there. Its `read` is its receiver's, as ever. What was written to the name has the address as its `to`, and a `delivery` in place of a reading. Neither is in the user's inbox in this yard: [`UserInbox`](#userinbox) counts and lists none of it, no `mail` event of it is to the user, and [`AckUserInbox`](#ackuserinbox) through its seq marks none of it. So a client counts unread from the inbox and the events, as before, and never from `read` of a conversation.
 
 The letters go by what the link said of the name when the mail was logged: a grant taken back later keeps them in the user's conversation, and what the name writes afterwards, or is written, is the name's alone (`b` as `<name>@<peer>`). Mail from before the grant is in it too, without `as`. Mail of a yard that is linked no more is in neither.
+
+### `AckUserMail`
+
+Marks the user's single mail read: the named letter alone, where [`AckUserInbox`](#ackuserinbox) through it would take older unread with it. It answers nothing; when the letter was newly marked it is a `mail_read` event in the stream, naming the letter in `seq`. Only the user acknowledges their inbox, and an operator any user's.
+
+| argument | type | |
+|---|---|---|
+| `user` | string | the user |
+| `seq` | number | the seq of the letter read |
+| `actor` | string | who acknowledges: the user's name, or an operator's; left out, the user |
+
+```
+POST /call/AckUserMail
+{"user":"jo","seq":52,"actor":"jo"}
+
+{}
+```
 
 ### `AckUserInbox`
 
@@ -6785,6 +6812,81 @@ POST /call/ReplyMail
 | `reply_to` | number | the number answered |
 
 Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else is refused with no call made and nothing sent; on the socket it is the caller's word, as for [`AddNote`](#addnote). The reply is then a `mail` event in the stream: read [`Conversation`](#conversation) again on it.
+
+### `MailExchange`
+
+One letter of the user's mail with the exchange it belongs to, oldest first: the letters it answers and the answers it drew, both directions, the user's own sent replies among them. A number that is no mail of theirs — missing, what is not mail, and another's — is refused in one blind sentence that tells nothing of what the number is, as [`ReplyMail`](#replymail) refuses it. Only the user reads their exchange, and an operator any user's.
+
+| argument | type | |
+|---|---|---|
+| `user` | string | the user, whose mail it is |
+| `seq` | number | the letter's number, as `UserInbox` lists it |
+| `actor` | string | who reads: the user's name, or an operator's; left out, the user |
+
+```
+POST /call/MailExchange
+{"user":"jo","seq":14,"actor":"jo"}
+
+{
+  "result": {
+    "letters": [
+      {
+        "seq": 14,
+        "at": "2026-10-08T09:30:00Z",
+        "from": "yardmaster",
+        "to": "jo",
+        "text": "The shed is painted. Shall I land it?",
+        "read": true,
+        "reactions": [
+          {
+            "from": "jo",
+            "emoji": "🎉"
+          }
+        ],
+        "files": [
+          {
+            "hash": "497790947d4666760ce38f3c00e852c71fdb66cae849bae8e9ede352719e1581",
+            "type": "image/png",
+            "bytes": 70,
+            "name": "shed.png"
+          }
+        ]
+      },
+      {
+        "seq": 232,
+        "at": "2026-10-08T09:30:00Z",
+        "from": "jo",
+        "to": "yardmaster",
+        "text": "Land it.",
+        "read": false,
+        "answered": 14
+      }
+    ],
+    "truncated": false
+  }
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `letters[].seq` | number | the seq of the mail's event: what an acknowledgement goes through, and what `after` is compared with |
+| `letters[].at` | time | when it was sent |
+| `letters[].from` | string | the sender: a crew member, a user, or `<name>@<peer>` |
+| `letters[].to` | string | the receiver, as `from` |
+| `letters[].text` | string | the mail |
+| `letters[].read` | bool | whether its receiver acknowledged it |
+| `letters[].reactions` | array, may be absent | the parties' emoji on the mail, by who put them, as [`React`](#react) put them; absent on mail without any |
+| `letters[].reactions[].from` | string | who put it: the sender or the receiver |
+| `letters[].reactions[].emoji` | string | which of 👍 👎 ❤️ 🎉 👀 ✅ it is |
+| `letters[].files` | array, may be absent | the files the mail carries, each an image, a page or a file, in the order it was sent with them; absent on mail without any |
+| `letters[].files[].hash` | string | the file's name: the SHA-256 of its bytes, in hex. `GET /blobs/<hash>` answers the bytes |
+| `letters[].files[].type` | string | what the bytes say: `image/png` or `image/jpeg` for an image, `text/html; charset=utf-8` for a page |
+| `letters[].files[].name` | string, may be absent | the file's base name as the sender gave it; absent on a paste and on a letter from before names |
+| `letters[].files[].bytes` | number | how many bytes it is |
+| `letters[].answered` | number, may be absent | the number of the letter this answers; absent on one that answers none |
+| `truncated` | bool | `true` when an ancestor was pruned from the log, so earlier mail of the thread is no longer in the yard |
+
+Over the network `user` and `actor` are the device's user: left out they are filled in, and one naming anyone else is refused with no call made; on the socket `actor` is the caller's word, as for [`UserInbox`](#userinbox). A letter from a name a linked yard trusts as the user, or one written through a device, carries `as` and `via` as a letter of [`Conversation`](#conversation) does.
 
 <!-- /calls -->
 

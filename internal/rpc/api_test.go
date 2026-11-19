@@ -74,6 +74,19 @@ func letter(prefix string) []field {
 	return out
 }
 
+// exchangeLetter is a letter of an exchange: a letter as Conversation
+// reads one but for the trusted name and the device, which the doc's one
+// exchange holds none of; the after-words say they ride where they are.
+func exchangeLetter(prefix string) []field {
+	var out []field
+	for _, f := range sentLetter(prefix) {
+		if f.path != prefix+"as" && f.path != prefix+"via" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // sentLetter is a letter where the user's own are read too (Conversation):
 // one of those may have come through a device.
 func sentLetter(prefix string) []field {
@@ -426,6 +439,18 @@ var apiCalls = []apiCall{
 		after: "`more`, beside `result` in the reply and not in it, is `true` when `limit` left out mail older than the oldest letter answered (and newer than `after`, when that is given). It is absent otherwise: on the oldest page, and on every call without `limit`.\n\n" +
 			"A letter of a trusted name says how it went, and is otherwise a letter like any other. What the user wrote under the name has the address as its `from`, and `as` when the link trusted the name as it came: the letter from `josephine@north` above, which jo wrote to the yardmaster from there. Its `read` is its receiver's, as ever. What was written to the name has the address as its `to`, and a `delivery` in place of a reading. Neither is in the user's inbox in this yard: [`UserInbox`](#userinbox) counts and lists none of it, no `mail` event of it is to the user, and [`AckUserInbox`](#ackuserinbox) through its seq marks none of it. So a client counts unread from the inbox and the events, as before, and never from `read` of a conversation.\n\n" +
 			"The letters go by what the link said of the name when the mail was logged: a grant taken back later keeps them in the user's conversation, and what the name writes afterwards, or is written, is the name's alone (`b` as `<name>@<peer>`). Mail from before the grant is in it too, without `as`. Mail of a yard that is linked no more is in neither.",
+	},
+	{
+		// Before AckUserInbox, so the letter it names is still unread and
+		// the acknowledgement is an event of its own.
+		method: "AckUserMail",
+		says:   "Marks the user's single mail read: the named letter alone, where [`AckUserInbox`](#ackuserinbox) through it would take older unread with it. It answers nothing; when the letter was newly marked it is a `mail_read` event in the stream, naming the letter in `seq`. Only the user acknowledges their inbox, and an operator any user's.",
+		args: []field{
+			{"user", "string", "the user"},
+			{"seq", "number", "the seq of the letter read"},
+			{"actor", "string", "who acknowledges: the user's name, or an operator's; left out, the user"},
+		},
+		requests: []string{`{"user":"jo","seq":%d,"actor":"jo"}`},
 	},
 	{
 		method: "AckUserInbox",
@@ -994,6 +1019,23 @@ var apiCalls = []apiCall{
 		},
 		after: "Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else is refused with no call made and nothing sent; on the socket it is the caller's word, as for [`AddNote`](#addnote). The reply is then a `mail` event in the stream: read [`Conversation`](#conversation) again on it.",
 	},
+	{
+		// After ReplyMail, so the reply it sends is in the exchange the
+		// example reads back. A read, so nothing after it moves.
+		method: "MailExchange",
+		says:   "One letter of the user's mail with the exchange it belongs to, oldest first: the letters it answers and the answers it drew, both directions, the user's own sent replies among them. A number that is no mail of theirs — missing, what is not mail, and another's — is refused in one blind sentence that tells nothing of what the number is, as [`ReplyMail`](#replymail) refuses it. Only the user reads their exchange, and an operator any user's.",
+		args: []field{
+			{"user", "string", "the user, whose mail it is"},
+			{"seq", "number", "the letter's number, as `UserInbox` lists it"},
+			{"actor", "string", "who reads: the user's name, or an operator's; left out, the user"},
+		},
+		requests: []string{`{"user":"jo","seq":%d,"actor":"jo"}`},
+		fields: append(exchangeLetter("letters[]."),
+			field{"letters[].answered", "number?", "the number of the letter this answers; absent on one that answers none"},
+			field{"truncated", "bool", "`true` when an ancestor was pruned from the log, so earlier mail of the thread is no longer in the yard"},
+		),
+		after: "Over the network `user` and `actor` are the device's user: left out they are filled in, and one naming anyone else is refused with no call made; on the socket `actor` is the caller's word, as for [`UserInbox`](#userinbox). A letter from a name a linked yard trusts as the user, or one written through a device, carries `as` and `via` as a letter of [`Conversation`](#conversation) does.",
+	},
 }
 
 // apiDeviceChannelKey is the channel public key the doc's device
@@ -1416,13 +1458,14 @@ var apiEvents = []apiEvent{
 	},
 	{
 		title: "Mail was read: `mail_read`",
-		says:  "A user or a crew member acknowledged its mail. Every letter to `data.reader` with a seq up to `data.through` is read: your user's own, when another client acknowledged them, and the letters your user sent a crew member.",
+		says:  "A user or a crew member acknowledged its mail: either everything through `data.through`, or the one letter `data.seq`. Every letter to `data.reader` with a seq up to `data.through` is read: your user's own, when another client acknowledged them, and the letters your user sent a crew member; a `seq` marks that letter alone.",
 		is:    kindOf("mail_read"),
 		fields: []field{
 			{"seq", "number", "the event's seq"},
 			{"kind", "string", "`mail_read`"},
 			{"data.reader", "string", "who read"},
-			{"data.through", "number", "through which seq"},
+			{"data.through", "number?", "through which seq; absent on an acknowledgement of one letter"},
+			{"data.seq", "number?", "the one letter read; absent on an acknowledgement through"},
 		},
 	},
 	{
@@ -1586,6 +1629,7 @@ var apiErrors = []struct{ method, request, says string }{
 	{"FileBead", `{"title":"Water the allotment","project":"storage","actor":"jo"}`, "A project that names no depot (nothing is filed, and the refusal lists the person's projects):"},
 	{"RewordBead", `{"bead":"yd-shed","title":"A new title","actor":"jo"}`, "A request the caller did not file (nothing is changed, and the refusal says nothing of whether such work exists):"},
 	{"ReplyMail", `{"mail":999999,"message":"Friday.","actor":"jo"}`, "A number that is no mail of theirs (nothing is sent, and missing, another's and what is not mail are refused alike):"},
+	{"MailExchange", `{"user":"jo","seq":999999,"actor":"jo"}`, "A number that is no mail of theirs (nothing is read, and missing, another's and what is not mail are refused alike):"},
 }
 
 // apiYard is a yard with all a chat client meets: the user jo, the crew
@@ -2718,13 +2762,13 @@ func runAPI(t *testing.T, network bool) *apiRun {
 				body = fmt.Sprintf(body, seq)
 			} else if c.method == "DeliveryFiles" {
 				body = fmt.Sprintf(body, apiDelivery)
-			} else if c.method == "React" || c.method == "ReplyMail" {
+			} else if c.method == "React" || c.method == "ReplyMail" || c.method == "MailExchange" {
 				// The first mail of the inbox read above.
 				seqs, _ := at(run.replies["UserInbox"][0], "mail[].seq")
 				body = fmt.Sprintf(body, mustInt(t, seqs[0]))
 			} else if strings.Contains(body, "%d") {
 				// An acknowledgement goes through the newest of what was read.
-				from := map[string]string{"AckUserInbox": "UserInbox", "AckUserNotifications": "UserNotifications"}[c.method]
+				from := map[string]string{"AckUserInbox": "UserInbox", "AckUserMail": "UserInbox", "AckUserNotifications": "UserNotifications"}[c.method]
 				last, _ := at(run.replies[from][0], "last")
 				body = fmt.Sprintf(body, mustInt(t, last[0]))
 			}
@@ -2851,8 +2895,8 @@ func TestCallsAreTheDocs(t *testing.T) {
 	// answers as no method at all, and the socket answers so the one call
 	// of Calls a device's token alone makes (listenerOnly): a call is
 	// added to either on purpose, here too.
-	if len(Calls) != 38 || len(OperatorCalls) != 13 || len(listenerOnly) != 1 {
-		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 38, 13 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
+	if len(Calls) != 40 || len(OperatorCalls) != 13 || len(listenerOnly) != 1 {
+		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 40, 13 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
 	}
 	for name := range listenerOnly {
 		if _, ok := Calls[name]; !ok {

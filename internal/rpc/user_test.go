@@ -202,8 +202,8 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 			t.Errorf("%s with an array of arguments is answered %s, want a refusal saying %q", name, byPlace, want)
 		}
 	}
-	if len(served) != len(Calls) || len(served) != 38 {
-		t.Errorf("%d calls are served and Calls has %d, want 38 of each: %v", len(served), len(Calls), served)
+	if len(served) != len(Calls) || len(served) != 40 {
+		t.Errorf("%d calls are served and Calls has %d, want 40 of each: %v", len(served), len(Calls), served)
 	}
 	if !slices.Equal(operators, []string{"ApproveAsk", "ApproveSetup", "GiveSecret", "Line", "SessionScreen", "SourceGrants", "Teammates", "TelemetrySet", "TelemetryShow", "UninviteTeammate"}) || len(OperatorCalls) != 13 {
 		t.Errorf("a device of the operator is served %v besides, and OperatorCalls is %v: want ApproveAsk, ApproveSetup, GiveSecret, Line, SessionScreen, SourceGrants, Teammates, TelemetrySet, TelemetryShow, UninviteTeammate and no other of its thirteen", operators, OperatorCalls)
@@ -749,6 +749,10 @@ func TestUserCallsAreMadeAsTheUser(t *testing.T) {
 		{"RewordBead", `{"bead":"yd-shed","title":"Shed"}`, `I can't find that among the requests you filed`},
 		{"ReplyMail", `{"mail":999999,"message":"Friday.","actor":"sam"}`, `this device calls as jo: \"actor\" is jo or left out, not sam`},
 		{"ReplyMail", `{"mail":999999,"message":"Friday."}`, `I can't find message 999999 among your mail`},
+		{"MailExchange", `{"user":"sam","seq":1}`, `this device calls as jo: \"user\" is jo or left out, not sam`},
+		{"MailExchange", `{"seq":999999}`, `I can't find message 999999 among your mail`},
+		{"AckUserMail", fmt.Sprintf(`{"user":"sam","seq":%d}`, head), `this device calls as jo: \"user\" is jo or left out, not sam`},
+		{"AckUserMail", fmt.Sprintf(`{"seq":%d}`, head), `{}`},
 		{"AckUserNotifications", fmt.Sprintf(`{"name":"sam","through":%d}`, head), `this device calls as jo`},
 		{"Mail", `{"to":"sam","text":"as the yardmaster","actor":"yardmaster"}`, `this device calls as jo: \"actor\" is jo or left out, not yardmaster`},
 		{"MailPeer", `{"to":"clerk","peer":"north","text":"hello","actor":"sam"}`, `this device calls as jo`},

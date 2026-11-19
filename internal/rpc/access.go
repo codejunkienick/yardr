@@ -340,6 +340,8 @@ var Access = map[string]Class{
 	"DevicePairCodeSelf":   Operator,
 	"UserInbox":            Read,
 	"AckUserInbox":         Admin,
+	"MailExchange":         Read,
+	"AckUserMail":          Admin,
 	"UserNotifications":    Read,
 	"AckUserNotifications": Admin,
 	"Conversation":         Read,

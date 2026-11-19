@@ -625,6 +625,14 @@ func (c *Client) UserInbox(ctx context.Context, name string, limit int, actor st
 func (c *Client) AckUserInbox(ctx context.Context, name string, through uint64, actor string) error {
 	return c.call(ctx, "AckUserInbox", nil, name, through, actor)
 }
+
+func (c *Client) MailExchange(ctx context.Context, user string, seq uint64, actor string) (*store.Exchange, error) {
+	return callV[*store.Exchange](c, ctx, "MailExchange", user, seq, actor)
+}
+
+func (c *Client) AckUserMail(ctx context.Context, user string, seq uint64, actor string) error {
+	return c.call(ctx, "AckUserMail", nil, user, seq, actor)
+}
 func (c *Client) UserNotifications(ctx context.Context, name string, limit int, actor string) (*store.NotificationPage, error) {
 	return callV[*store.NotificationPage](c, ctx, "UserNotifications", name, limit, actor)
 }

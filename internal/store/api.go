@@ -246,6 +246,14 @@ type API interface {
 	DevicePairCodeSelf(ctx context.Context, user string) (*DevicePairingCode, error)
 	UserInbox(ctx context.Context, name string, limit int, actor string) (*Mailbox, error)
 	AckUserInbox(ctx context.Context, name string, through uint64, actor string) error
+	// MailExchange is the user's letter seq with its exchange
+	// (userexchange.go): the anchor with every letter of its
+	// answered-chain, oldest first. It is in rpc's Calls, as UserInbox
+	// is.
+	MailExchange(ctx context.Context, user string, seq uint64, actor string) (*Exchange, error)
+	// AckUserMail marks the user's single mail seq read, and nothing
+	// else (userexchange.go). It is in rpc's Calls, as AckUserInbox is.
+	AckUserMail(ctx context.Context, user string, seq uint64, actor string) error
 	UserNotifications(ctx context.Context, name string, limit int, actor string) (*NotificationPage, error)
 	AckUserNotifications(ctx context.Context, name string, through uint64, actor string) error
 	Conversation(ctx context.Context, a, b string, after uint64, limit int, before uint64) ([]Letter, bool, error)

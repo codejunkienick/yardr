@@ -252,11 +252,13 @@ func Tools() []ToolDef {
 			Description: "Read everything in this person's inbox they have not read yet, from everyone who wrote to them, and mark just what was shown as read. " +
 				"What a later call returns is what arrived since. " +
 				"Pass recent, a number, to look back at that many recent messages instead, read or not; a look-back marks nothing read. " +
+				"Pass mail, a number, to read that one message with the exchange it belongs to, oldest first, marking the named message alone read. " +
 				"Each message carries its number; reply_to_mail answers one by its number.",
 			InputSchema: schema(`{
 				"type": "object",
 				"properties": {
-					"recent": {"type": "integer", "minimum": 1, "description": "how many recent messages to show, read or not, marking nothing read"}
+					"recent": {"type": "integer", "minimum": 1, "description": "how many recent messages to show, read or not, marking nothing read"},
+					"mail": {"type": "integer", "minimum": 1, "description": "the message's number, from an earlier answer, to read it with its exchange, marking it alone read"}
 				},
 				"additionalProperties": false
 			}`),
@@ -388,6 +390,8 @@ type Yard interface {
 	Head(ctx context.Context) (uint64, error)
 	UserInbox(ctx context.Context, name string, limit int, actor string) (*store.Mailbox, error)
 	AckUserInbox(ctx context.Context, name string, through uint64, actor string) error
+	MailExchange(ctx context.Context, user string, seq uint64, actor string) (*store.Exchange, error)
+	AckUserMail(ctx context.Context, user string, seq uint64, actor string) error
 }
 
 // A store.API satisfies Yard as it stands.

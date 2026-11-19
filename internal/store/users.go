@@ -60,6 +60,11 @@ type User struct {
 	CreatedAt    time.Time `json:"created_at"`
 	CreatedBy    string    `json:"created_by"`
 	Cursor       uint64    `json:"cursor"` // mail acknowledged through this event seq
+	// MailRead are the seqs of mail marked read singly (AckUserMail),
+	// beside what the cursor read through: a letter is read when the
+	// cursor passed it or its seq is here. An acknowledgement through
+	// drops what it passed.
+	MailRead []uint64 `json:"mail_read,omitempty"`
 	// NotificationCursor is the same for the notifications: the two parts
 	// of the inbox are acknowledged apart.
 	NotificationCursor uint64 `json:"notification_cursor"`
@@ -755,6 +760,7 @@ func mailKeys(tx *bolt.Tx, name string, after uint64) []string {
 type readers struct {
 	tx            *bolt.Tx
 	cursors       map[string]uint64
+	singles       map[string][]uint64
 	reactions     map[uint64][]Reaction
 	reactionsDone bool
 }
@@ -844,6 +850,7 @@ func (rd *readers) letter(e Event) (Letter, error) {
 		// CrewMember and User both keep it as "cursor".
 		var c struct {
 			Cursor        uint64         `json:"cursor"`
+			MailRead      []uint64       `json:"mail_read"`
 			Config        map[string]any `json:"config"`
 			Conversations map[string]struct {
 				Cursor uint64 `json:"cursor"`
@@ -871,13 +878,18 @@ func (rd *readers) letter(e Event) (Letter, error) {
 			rd.cursors = map[string]uint64{}
 		}
 		rd.cursors[key] = cursor
+		if rd.singles == nil {
+			rd.singles = map[string][]uint64{}
+		}
+		rd.singles[key] = c.MailRead
 	}
 	text, _ := e.Data["text"].(string)
 	reactions, err := rd.reactionsFor(e.Seq)
 	if err != nil {
 		return Letter{}, err
 	}
-	return Letter{Seq: e.Seq, At: e.At, From: e.Actor, To: to, Text: text, Read: e.Seq <= cursor, Reactions: reactions, Timer: timerOf(e), As: SpeaksAs(e), Via: Via(e), Files: EventFiles(e), Answered: answeredSeq(e)}, nil
+	read := e.Seq <= cursor || slices.Contains(rd.singles[key], e.Seq)
+	return Letter{Seq: e.Seq, At: e.At, From: e.Actor, To: to, Text: text, Read: read, Reactions: reactions, Timer: timerOf(e), As: SpeaksAs(e), Via: Via(e), Files: EventFiles(e), Answered: answeredSeq(e)}, nil
 }
 
 // mayReadInbox asks whether actor may read or acknowledge (does) the
@@ -973,36 +985,12 @@ func (s *Store) AckUserInbox(ctx context.Context, name string, through uint64, a
 		}
 		was := u.Cursor
 		u.Cursor = max(u.Cursor, through)
+		u.MailRead = slices.DeleteFunc(u.MailRead, func(seq uint64) bool { return seq <= u.Cursor })
 		if err := put(w.Tx, bUsers, name, u); err != nil {
 			return err
 		}
 		return w.mailRead(name, by, was, u.Cursor)
 	})
-}
-
-// mailRead logs that by acknowledged name's inbox from after was through
-// seq, when mail is in between: the event mail_read names the inbox in
-// reader and the person who acknowledged it as its actor. It is what tells
-// a view that follows the stream that mail it shows as sent has been read;
-// an acknowledgement that passes no mail is not an event.
-func (w *wtx) mailRead(name, by string, was, through uint64) error {
-	read := false
-	for _, k := range mailKeys(w.Tx, name, was) {
-		if binary.BigEndian.Uint64([]byte(k)) > through {
-			break
-		}
-		var e Event
-		if ok, err := get(w.Tx, bEvents, k, &e); err != nil {
-			return err
-		} else if ok && MailReceiver(e) == name {
-			read = true
-			break
-		}
-	}
-	if !read {
-		return nil
-	}
-	return w.event("", "mail_read", by, map[string]any{"reader": name, "through": through})
 }
 
 // crewMailRead is mailRead for one crew session's slice. A positional ack

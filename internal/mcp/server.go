@@ -208,7 +208,11 @@ func (s *Server) dispatch(ctx context.Context, req *sdkmcp.CallToolRequest, svc 
 		if err != nil {
 			return nil, err
 		}
-		return svc.ReadMyMail(ctx, recent)
+		mail, err := mailOptArg(args)
+		if err != nil {
+			return nil, err
+		}
+		return svc.ReadMyMail(ctx, mail, recent)
 	case ToolAddNote:
 		return svc.AddNote(ctx, stringArg(args, "work"), stringArg(args, "note"))
 	case ToolReplyToMail:
@@ -454,6 +458,19 @@ func recentArg(args map[string]any) (int, error) {
 		return refuse()
 	}
 	return int(n), nil
+}
+
+// mailOptArg reads read_my_mail's message number: absent or null is no
+// letter in particular, as recentArg takes them, so a client that sends
+// null for what it leaves unset still reads its mail; a number is that
+// letter with its exchange. Anything else is refused as reply_to_mail's
+// number is.
+func mailOptArg(args map[string]any) (uint64, error) {
+	value, ok := args["mail"]
+	if !ok || value == nil {
+		return 0, nil
+	}
+	return mailArg(args)
 }
 
 // mailArg reads reply_to_mail's message number: the number read_my_mail

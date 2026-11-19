@@ -97,6 +97,10 @@ func (f *fakeYard) UserInbox(context.Context, string, int, string) (*store.Mailb
 	return &store.Mailbox{Mail: []store.Letter{}, From: []string{}}, nil
 }
 func (f *fakeYard) AckUserInbox(context.Context, string, uint64, string) error { return nil }
+func (f *fakeYard) MailExchange(context.Context, string, uint64, string) (*store.Exchange, error) {
+	return &store.Exchange{Letters: []store.Letter{}}, nil
+}
+func (f *fakeYard) AckUserMail(context.Context, string, uint64, string) error { return nil }
 
 func (f *fakeYard) approvals() []bool {
 	f.mu.Lock()
@@ -219,8 +223,9 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 				t.Errorf("%s's description does not say what filed_by_me leaves out:\n%s", tool.Name, tool.Description)
 			}
 		}
-		// read_my_mail's recent is an optional count, and its description
-		// says what passing it does.
+		// read_my_mail's recent is an optional count and its mail an
+		// optional number, and its description says what passing each
+		// does.
 		if tool.Name == mcp.ToolReadMyMail {
 			input, _ := json.Marshal(tool.InputSchema)
 			var in struct {
@@ -232,8 +237,14 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 			if err := json.Unmarshal(input, &in); err != nil || in.Properties["recent"].Type != "integer" || slices.Contains(in.Required, "recent") {
 				t.Errorf("%s's input schema = %s, want recent an optional integer", tool.Name, input)
 			}
+			if err := json.Unmarshal(input, &in); err != nil || in.Properties["mail"].Type != "integer" || slices.Contains(in.Required, "mail") {
+				t.Errorf("%s's input schema = %s, want mail an optional integer", tool.Name, input)
+			}
 			if !strings.Contains(tool.Description, "Pass recent, a number, to look back") || !strings.Contains(tool.Description, "marks nothing read") {
 				t.Errorf("%s's description does not say what passing recent does:\n%s", tool.Name, tool.Description)
+			}
+			if !strings.Contains(tool.Description, "Pass mail, a number, to read that one message with the exchange it belongs to") || !strings.Contains(tool.Description, "marking the named message alone read") {
+				t.Errorf("%s's description does not say what passing mail does:\n%s", tool.Name, tool.Description)
 			}
 		}
 		// reply_to_mail's mail is a required number and its message
@@ -443,6 +454,43 @@ func TestModernClientListsAndCallsTheContract(t *testing.T) {
 		t.Errorf("a recent of 0 over the wire = %+v:\n%s", res.IsError, text)
 	}
 	structuredText(t, res, text)
+
+	// Its one-letter mode reads the named letter with its exchange, and
+	// mail with recent together, or a number of nothing, is refused in
+	// plain words, not in the schema's.
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{
+		Name: mcp.ToolReadMyMail, Arguments: map[string]any{"mail": helloSeq(t, y)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text = toolText(t, res)
+	plain(t, text)
+	if res.IsError || !strings.Contains(text, "with its exchange:") || !strings.Contains(text, "unread hello") {
+		t.Errorf("the one-letter read over the wire:\n%s", text)
+	}
+	structuredText(t, res, text)
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"both", map[string]any{"mail": helloSeq(t, y), "recent": 1}, "pass mail or recent, not both"},
+		{"number of nothing", map[string]any{"mail": 0}, "mail: say the message's number, from read_my_mail"},
+	} {
+		res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{
+			Name: mcp.ToolReadMyMail, Arguments: tc.args,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		text = toolText(t, res)
+		plain(t, text)
+		if !res.IsError || !strings.Contains(text, tc.want) {
+			t.Errorf("%s over the wire = %+v:\n%s", tc.name, res.IsError, text)
+		}
+		structuredText(t, res, text)
+	}
 }
 
 // structuredText holds a result's structured part to its words: text,
@@ -936,7 +984,7 @@ func TestOutsideTextKeepsItsMark(t *testing.T) {
 	if err := y.st.Mail(y.ctx, "ada", "the figures are ready", "yardmaster"); err != nil {
 		t.Fatal(err)
 	}
-	res, err := svc(y, "").ReadMyMail(y.ctx, 0)
+	res, err := svc(y, "").ReadMyMail(y.ctx, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1022,7 +1070,7 @@ func (p *peerMailYard) UserInbox(context.Context, string, int, string) (*store.M
 
 func TestPeerMailKeepsItsMark(t *testing.T) {
 	svc := &mcp.Service{Yard: &peerMailYard{fakeYard: &fakeYard{}}, User: "ada"}
-	res, err := svc.ReadMyMail(context.Background(), 0)
+	res, err := svc.ReadMyMail(context.Background(), 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

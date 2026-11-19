@@ -404,3 +404,76 @@ func TestUserDeviceRepliesToItsPersonsMail(t *testing.T) {
 		}
 	}
 }
+
+// A device reads one message of its user's mail with its exchange, served
+// as its user with the user left out: the anchor with its ancestors and
+// replies, oldest first, each with its text and the number it answers.
+// Another's letter is refused in the blind words with the code error,
+// never not-found, and the device acks the named letter alone: older
+// unread stays unread.
+func TestUserDeviceReadsItsPersonsExchange(t *testing.T) {
+	st, u, jo, _ := mailYard(t)
+	ctx := context.Background()
+	h := u.Handler()
+	if err := st.Mail(ctx, "jo", "when is the freeze over?", "sam"); err != nil {
+		t.Fatal(err)
+	}
+	box, err := st.UserInbox(ctx, "jo", 0, "jo")
+	if err != nil || len(box.Mail) != 1 {
+		t.Fatalf("jo's inbox = %+v, %v", box, err)
+	}
+	first := box.Mail[0].Seq
+	if _, err := st.ReplyMail(ctx, first, "Friday.", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	sams, err := st.UserInbox(ctx, "sam", 0, "sam")
+	if err != nil || len(sams.Mail) != 1 {
+		t.Fatalf("sam's inbox = %+v, %v", sams, err)
+	}
+	second := sams.Mail[0].Seq
+	got := call(t, h, jo, "MailExchange", fmt.Sprintf(`{"seq":%d}`, first))
+	for _, want := range []string{
+		`"text":"when is the freeze over?"`,
+		`"text":"Friday."`,
+		fmt.Sprintf(`"seq":%d`, first),
+		fmt.Sprintf(`"seq":%d`, second),
+		fmt.Sprintf(`"answered":%d`, first),
+		`"truncated":false`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("MailExchange = %s, want %s", got, want)
+		}
+	}
+	if asked, answered := strings.Index(got, "when is the freeze over?"), strings.Index(got, "Friday."); asked < 0 || answered < 0 || asked > answered {
+		t.Fatalf("MailExchange is not oldest first: %s", got)
+	}
+	if err := st.Mail(ctx, "yardmaster", "crew business", "sam"); err != nil {
+		t.Fatal(err)
+	}
+	head, err := st.Head(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []uint64{999999, head} {
+		body := fmt.Sprintf(`{"seq":%d}`, n)
+		want := fmt.Sprintf("error\nI can't find message %d among your mail; read_my_mail lists the numbers", n)
+		if got := refusal(t, call(t, h, jo, "MailExchange", body)); got != want {
+			t.Errorf("MailExchange %s = %q, want the blind words: %q", body, got, want)
+		}
+	}
+	if err := st.Mail(ctx, "jo", "second note", "sam"); err != nil {
+		t.Fatal(err)
+	}
+	if got := call(t, h, jo, "AckUserMail", fmt.Sprintf(`{"seq":%d}`, first)); got != "{}" {
+		t.Fatalf("AckUserMail = %s, want nothing", got)
+	}
+	box, err = st.UserInbox(ctx, "jo", 0, "jo")
+	if err != nil || len(box.Mail) != 2 {
+		t.Fatalf("jo's inbox = %+v, %v", box, err)
+	}
+	for _, l := range box.Mail {
+		if l.Read == (l.Seq != first) {
+			t.Fatalf("jo's inbox after the single ack = %+v", box.Mail)
+		}
+	}
+}

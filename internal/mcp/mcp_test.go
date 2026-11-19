@@ -264,7 +264,7 @@ func TestNoUserRefusesEveryTool(t *testing.T) {
 			return err
 		},
 		func() error { _, err := s.AskTheYardmaster(y.ctx, "hi", true, nil); return err },
-		func() error { _, err := s.ReadMyMail(y.ctx, 0); return err },
+		func() error { _, err := s.ReadMyMail(y.ctx, 0, 0); return err },
 		func() error { _, err := s.AddNote(y.ctx, "x", "a note"); return err },
 		func() error { _, err := s.ReplyToMail(y.ctx, 1, "thanks"); return err },
 		func() error { _, err := s.Reword(y.ctx, "x", "a new title", ""); return err },
@@ -1308,7 +1308,7 @@ func TestReadMyMailAcksThroughWhatItShowed(t *testing.T) {
 		t.Fatalf("ada's inbox = %+v, %v", box, err)
 	}
 	first, second := box.Mail[0].Seq, box.Mail[1].Seq
-	res, err := s.ReadMyMail(y.ctx, 0)
+	res, err := s.ReadMyMail(y.ctx, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1334,7 +1334,7 @@ func TestReadMyMailAcksThroughWhatItShowed(t *testing.T) {
 	if n, err := s.UnreadCount(y.ctx); err != nil || n != 0 {
 		t.Fatalf("unread after reading = %d, %v", n, err)
 	}
-	res, err = s.ReadMyMail(y.ctx, 0)
+	res, err = s.ReadMyMail(y.ctx, 0, 0)
 	if err != nil || !strings.Contains(res.Text, "no unread mail") {
 		t.Fatalf("the second read: %v\n%s", err, res.Text)
 	}
@@ -1345,7 +1345,7 @@ func TestReadMyMailAcksThroughWhatItShowed(t *testing.T) {
 	if n, _ := s.UnreadCount(y.ctx); n != 1 {
 		t.Fatalf("unread = %d, want the new one", n)
 	}
-	res, err = s.ReadMyMail(y.ctx, 0)
+	res, err = s.ReadMyMail(y.ctx, 0, 0)
 	if err != nil || !strings.Contains(res.Text, "third note") || strings.Contains(res.Text, "first note") {
 		t.Fatalf("the third read: %v\n%s", err, res.Text)
 	}
@@ -1361,7 +1361,7 @@ func TestReadMyMailRecentLooksBackWithoutAcking(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A plain call reads the first two, so the look-back spans both states.
-	if _, err := s.ReadMyMail(y.ctx, 0); err != nil {
+	if _, err := s.ReadMyMail(y.ctx, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := y.st.Mail(y.ctx, "ada", "third note", "yardmaster"); err != nil {
@@ -1380,7 +1380,7 @@ func TestReadMyMailRecentLooksBackWithoutAcking(t *testing.T) {
 			secondSeq = l.Seq
 		}
 	}
-	res, err := s.ReadMyMail(y.ctx, 2)
+	res, err := s.ReadMyMail(y.ctx, 0, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1427,15 +1427,158 @@ func TestReadMyMailRecentLooksBackWithoutAcking(t *testing.T) {
 	if n, err := s.UnreadCount(y.ctx); err != nil || n != 1 {
 		t.Fatalf("unread after the look-back = %d, %v", n, err)
 	}
-	res, err = s.ReadMyMail(y.ctx, 0)
+	res, err = s.ReadMyMail(y.ctx, 0, 0)
 	if err != nil || !strings.Contains(res.Text, "third note") || strings.Contains(res.Text, "second note") {
 		t.Fatalf("the plain call after the look-back: %v\n%s", err, res.Text)
 	}
 	// A non-positive count is refused in plain words.
-	if _, err := s.ReadMyMail(y.ctx, -1); err == nil {
+	if _, err := s.ReadMyMail(y.ctx, 0, -1); err == nil {
 		t.Fatal("a negative recent was served")
 	} else {
 		plain(t, err.Error())
+	}
+}
+
+// Reading one letter by its number answers it with its exchange, oldest
+// first: ancestors, own sent replies and replies, each with its text and
+// the number it answered. The named letter alone is marked read; what is
+// no mail of theirs is refused in the blind sentence and marks nothing,
+// and mail with recent together is refused.
+func TestReadMyMailWithMailReadsTheExchange(t *testing.T) {
+	y := newYard(t)
+	s := svc(y, "")
+	if err := y.st.Mail(y.ctx, "ada", "when is the freeze over?", "bob"); err != nil {
+		t.Fatal(err)
+	}
+	box, err := y.st.UserInbox(y.ctx, "ada", 0, "ada")
+	if err != nil || len(box.Mail) != 1 {
+		t.Fatalf("ada's inbox = %+v, %v", box, err)
+	}
+	first := box.Mail[0].Seq
+	if _, err := y.st.ReplyMail(y.ctx, first, "Friday.", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	box, err = y.st.UserInbox(y.ctx, "bob", 0, "bob")
+	if err != nil || len(box.Mail) != 1 {
+		t.Fatalf("bob's inbox = %+v, %v", box, err)
+	}
+	second := box.Mail[0].Seq
+	if _, err := y.st.ReplyMail(y.ctx, second, "land it, then.", "bob"); err != nil {
+		t.Fatal(err)
+	}
+	box, err = y.st.UserInbox(y.ctx, "ada", 0, "ada")
+	if err != nil || len(box.Mail) != 2 {
+		t.Fatalf("ada's inbox = %+v, %v", box, err)
+	}
+	third := box.Mail[1].Seq
+	res, err := s.ReadMyMail(y.ctx, first, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain(t, res.Text)
+	if !strings.Contains(res.Text, fmt.Sprintf("Mail %d with its exchange:", first)) {
+		t.Fatalf("the one-letter header:\n%s", res.Text)
+	}
+	asked := strings.Index(res.Text, "when is the freeze over?")
+	answered := strings.Index(res.Text, "Friday.")
+	landed := strings.Index(res.Text, "land it, then.")
+	if asked < 0 || answered < 0 || landed < 0 || !(asked < answered && answered < landed) {
+		t.Fatalf("the exchange is not oldest first:\n%s", res.Text)
+	}
+	for _, want := range []string{
+		fmt.Sprintf("Mail %d from bob", first),
+		fmt.Sprintf("Mail %d from ada re %d", second, first),
+		fmt.Sprintf("Mail %d from bob re %d", third, second),
+	} {
+		if !strings.Contains(res.Text, want) {
+			t.Errorf("the exchange lacks %q:\n%s", want, res.Text)
+		}
+	}
+	messages, _ := res.Structured["messages"].([]map[string]any)
+	if len(messages) != 3 || messages[0]["seq"] != first ||
+		messages[1]["seq"] != second || messages[2]["seq"] != third {
+		t.Fatalf("the structured exchange = %+v", res.Structured)
+	}
+	if _, has := messages[0]["answered"]; has {
+		t.Fatalf("the first letter carries a link: %+v", messages[0])
+	}
+	if messages[1]["answered"] != first || messages[2]["answered"] != second {
+		t.Fatalf("the structured links = %+v", res.Structured)
+	}
+	// The named letter alone is marked: the older unread stays unread.
+	if n, err := s.UnreadCount(y.ctx); err != nil || n != 1 {
+		t.Fatalf("unread after the one-letter read = %d, %v", n, err)
+	}
+	box, err = y.st.UserInbox(y.ctx, "ada", 0, "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range box.Mail {
+		if l.Read == (l.Seq != first) {
+			t.Fatalf("the inbox after the one-letter read = %+v", box.Mail)
+		}
+	}
+	// A sent anchor reads the same exchange.
+	sent, err := s.ReadMyMail(y.ctx, second, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sent.Text, "when is the freeze over?") || !strings.Contains(sent.Text, "land it, then.") {
+		t.Fatalf("the sent anchor's exchange:\n%s", sent.Text)
+	}
+	// What is no mail of theirs is refused blind and marks nothing.
+	if _, err := s.ReadMyMail(y.ctx, 999999, 0); err == nil ||
+		err.Error() != "I can't find message 999999 among your mail; read_my_mail lists the numbers" {
+		t.Fatalf("an unknown number = %v", err)
+	} else {
+		plain(t, err.Error())
+	}
+	if n, _ := s.UnreadCount(y.ctx); n != 1 {
+		t.Fatalf("unread after the refusal = %d, want the one left", n)
+	}
+	if _, err := s.ReadMyMail(y.ctx, first, 2); err == nil {
+		t.Fatal("mail with recent together was served")
+	} else {
+		plain(t, err.Error())
+	}
+}
+
+// truncatedYard serves one letter with a pruned exchange, which no store
+// call here can make: pruning is the store's own tests'.
+type truncatedYard struct {
+	mcp.Yard
+	letter store.Letter
+	acked  uint64
+}
+
+func (y *truncatedYard) MailExchange(ctx context.Context, user string, seq uint64, actor string) (*store.Exchange, error) {
+	return &store.Exchange{Letters: []store.Letter{y.letter}, Truncated: true}, nil
+}
+
+func (y *truncatedYard) AckUserMail(ctx context.Context, user string, seq uint64, actor string) error {
+	y.acked = seq
+	return nil
+}
+
+// A chain broken on a pruned letter says so before its oldest letter.
+func TestReadMyMailWithMailSaysWhenPruned(t *testing.T) {
+	y := newYard(t)
+	fake := &truncatedYard{Yard: y.st, letter: store.Letter{
+		Seq: 7, At: time.Now(), From: "bob", To: "ada", Text: "Friday.", Answered: 3,
+	}}
+	s := &mcp.Service{Yard: fake, User: "ada", Now: time.Now}
+	res, err := s.ReadMyMail(y.ctx, 7, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain(t, res.Text)
+	gap := strings.Index(res.Text, "(earlier mail in this thread is no longer in the yard)")
+	friday := strings.Index(res.Text, "Friday.")
+	if gap < 0 || friday < 0 || gap > friday {
+		t.Fatalf("the pruned exchange:\n%s", res.Text)
+	}
+	if fake.acked != 7 {
+		t.Fatalf("acked = %d, want the named letter", fake.acked)
 	}
 }
 
@@ -1471,7 +1614,7 @@ func TestReplyToMailAnswersByNumber(t *testing.T) {
 		t.Fatalf("bob's inbox = %+v, %v", bob, err)
 	}
 	bobService := &mcp.Service{Yard: y.st, User: "bob", Now: time.Now}
-	read, err := bobService.ReadMyMail(y.ctx, 0)
+	read, err := bobService.ReadMyMail(y.ctx, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1836,7 +1979,7 @@ func TestConnectionMarkOnWrites(t *testing.T) {
 	if err := y.st.Mail(y.ctx, "ada", "one letter", "yardmaster"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReadMyMail(y.ctx, 0); err != nil {
+	if _, err := s.ReadMyMail(y.ctx, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	evs, err := y.st.EventsSince(y.ctx, before, 20)

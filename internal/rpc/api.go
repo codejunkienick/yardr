@@ -21,8 +21,9 @@ const ClientHeader = "X-Yardr-Client"
 // shows a person's decisions needs (UserAsks, Waiting for the beads parked
 // in their stages, Bead and the writes, MoveBead among them); what a
 // person's own client needs to file their work, to list it, to answer
-// their mail, and to withdraw or reword what they filed (FileBead,
-// OwnBeads, ReplyMail, WithdrawBead, RewordBead); and
+// their mail and to read one letter with its exchange, and to withdraw
+// or reword what they filed (FileBead, OwnBeads, ReplyMail,
+// MailExchange, AckUserMail, WithdrawBead, RewordBead); and
 // what a client that shows a kept hook delivery's files needs (DeliveryFiles,
 // with the hook_files event to read it again on; the bytes are the blob
 // route's); and what a device paired before the channel needs to seal its
@@ -48,6 +49,8 @@ var Calls = map[string][]string{
 	"GetUser":              {"name"},
 	"UserInbox":            {"name", "limit", "actor"},
 	"AckUserInbox":         {"name", "through", "actor"},
+	"MailExchange":         {"user", "seq", "actor"},
+	"AckUserMail":          {"user", "seq", "actor"},
 	"UserNotifications":    {"name", "limit", "actor"},
 	"AckUserNotifications": {"name", "through", "actor"},
 	"Conversation":         {"a", "b", "after", "limit", "before"},

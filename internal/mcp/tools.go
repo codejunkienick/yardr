@@ -756,15 +756,23 @@ func (s *Service) yardmaster(ctx context.Context) (string, error) {
 // keeps no cursor of its own: a later call returns what arrived since.
 // With recent set, it looks back instead: that many recent messages,
 // read or not, each saying whether it was already read, and the cursor
-// left alone, so a later plain call still shows the unread.
-func (s *Service) ReadMyMail(ctx context.Context, recent int) (*Result, error) {
+// left alone, so a later plain call still shows the unread. With mail
+// set, it reads that one letter with its exchange instead, marking the
+// named letter alone.
+func (s *Service) ReadMyMail(ctx context.Context, mail uint64, recent int) (*Result, error) {
 	if err := s.requireUser(); err != nil {
 		return nil, err
 	}
 	if recent < 0 {
 		return nil, fmt.Errorf("recent: say how many recent messages to show, a number of 1 or more")
 	}
+	if mail > 0 && recent > 0 {
+		return nil, fmt.Errorf("pass mail or recent, not both: one letter with its exchange, or that many recent messages")
+	}
 	ctx = s.ctx(ctx)
+	if mail > 0 {
+		return s.mailExchange(ctx, mail)
+	}
 	if recent > 0 {
 		return s.recentMail(ctx, recent)
 	}
@@ -828,6 +836,39 @@ func (s *Service) recentMail(ctx context.Context, recent int) (*Result, error) {
 	messages := make([]map[string]any, 0, len(box.Mail))
 	for _, l := range box.Mail {
 		messages = append(messages, renderLetter(&b, l, now, true))
+	}
+	return &Result{
+		Text:       b.String(),
+		Structured: map[string]any{"messages": messages},
+	}, nil
+}
+
+// mailExchange is read_my_mail's one-letter mode: the named letter with
+// the exchange it belongs to, oldest first, each rendered as the unread
+// inbox renders it. The named letter is the read and is marked alone;
+// the rest is context, as a look-back marks nothing. A chain broken on
+// a pruned letter says so before its oldest letter.
+func (s *Service) mailExchange(ctx context.Context, mail uint64) (*Result, error) {
+	ex, err := s.Yard.MailExchange(ctx, s.User, mail, s.User)
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	var b strings.Builder
+	fmt.Fprintf(&b, "Mail %d with its exchange:", mail)
+	if ex.Truncated {
+		fmt.Fprintf(&b, "\n\n(earlier mail in this thread is no longer in the yard)")
+	}
+	messages := make([]map[string]any, 0, len(ex.Letters))
+	for _, l := range ex.Letters {
+		messages = append(messages, renderLetter(&b, l, now, false))
+	}
+	// The named letter alone: an acknowledgement through it would take
+	// older unread with it. It is the reading's own bookkeeping, made
+	// under no connection name, as the unread inbox's is.
+	ackCtx := store.WithConnection(ctx, "")
+	if err := s.Yard.AckUserMail(ackCtx, s.User, mail, s.User); err != nil {
+		return nil, err
 	}
 	return &Result{
 		Text:       b.String(),
