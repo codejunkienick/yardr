@@ -220,7 +220,8 @@ func TestContextReadWhenWorkingAskedWhenIdleAndTyped(t *testing.T) {
 }
 
 // A context read that fails on a working pass still clears the idle spell's
-// marks, and the failure is said once rather than on every wake.
+// marks, and the failure is said once rather than on every wake, and again
+// when a read that succeeded has ended it.
 func TestContextFailureStillClearsWorkingState(t *testing.T) {
 	t.Parallel()
 	s, f, d := crewSetup(t, store.CrewMember{})
@@ -274,24 +275,43 @@ func TestContextFailureStillClearsWorkingState(t *testing.T) {
 	if n, _ := kindCount(t, s, r.Journal, "nudge_held"); n != 2 {
 		t.Fatalf("nudge_held events = %d, want the dialog said again after the working pass", n)
 	}
+
+	// The idle read that answered ended the failure said before it: the same
+	// failure on a later working read is a new one and is said again.
+	f.ctxErr = errors.New("context unreadable")
+	f.set(agent, "working")
+	now = now.Add(dispatch.ContextWhileWorking())
+	must(t, d.Reconcile(ctx))
+	if got := strings.Count(log.String(), `msg="crew context"`); got != 2 {
+		t.Fatalf("failures said = %d, want the one after an idle read that succeeded said again; log %s", got, log.String())
+	}
 }
 
 // The pass that restarts a session for its age still records the reading,
 // and does not ask for a context handoff. A failed read does not hold the
-// restart.
+// restart. The ages are read off the dispatcher's clock, which the test
+// advances, so nothing waits.
 func TestContextRecordedOnRotationRestart(t *testing.T) {
 	t.Parallel()
-	s, f, d := crewSetup(t, store.CrewMember{MaxAge: "1ms", HandoffGrace: "1ms"})
 	ctx := context.Background()
+	// clock gives d a clock the test moves: each advance is a minute, far past
+	// the 1ms max age and the 1ms grace the members are set with.
+	clock := func(d *dispatch.Dispatcher) (advance func()) {
+		now := time.Now()
+		dispatch.SetClock(d, func() time.Time { return now })
+		return func() { now = now.Add(time.Minute) }
+	}
+	s, f, d := crewSetup(t, store.CrewMember{MaxAge: "1ms", HandoffGrace: "1ms"})
+	advance := clock(d)
 	f.ctxOK, f.ctxUsed = true, 100000 // 50% on the passes before the restart
 	must(t, d.Reconcile(ctx))
 	agent := agentOf(t, s)
-	time.Sleep(5 * time.Millisecond)
+	advance()
 	must(t, d.Reconcile(ctx)) // past max age, idle: asked for its age, not its use
 	f.set(agent, "working")
 	f.ctxUsed = 190000
 	calls := f.ctxCalls
-	time.Sleep(5 * time.Millisecond)
+	advance()
 	must(t, d.Reconcile(ctx)) // past the grace, still working: record, then restart
 	r, err := s.GetCrew(ctx, "yardmaster")
 	must(t, err)
@@ -303,12 +323,13 @@ func TestContextRecordedOnRotationRestart(t *testing.T) {
 	}
 
 	s, f, d = crewSetup(t, store.CrewMember{MaxAge: "1ms", HandoffGrace: "1ms"})
+	advance = clock(d)
 	f.ctxOK, f.ctxUsed = true, 100000
 	must(t, d.Reconcile(ctx))
-	time.Sleep(5 * time.Millisecond)
+	advance()
 	must(t, d.Reconcile(ctx))
 	f.ctxErr = errors.New("context unreadable")
-	time.Sleep(5 * time.Millisecond)
+	advance()
 	must(t, d.Reconcile(ctx))
 	r, err = s.GetCrew(ctx, "yardmaster")
 	must(t, err)

@@ -72,13 +72,17 @@ type Herdr struct {
 	// bounded by least-recently-touched eviction (see contextCacheCap):
 	// contextMatchUsed and contextLastUsed order each map's entries by the
 	// clock every use advances, so a session that is gone stops holding
-	// its pin and reading once newer sessions arrive.
+	// its pin and reading once newer sessions arrive. contextNamed keeps,
+	// per session, what herdr last named as its agent's session, so herdr is
+	// asked once in a while and not on every read (see contextKind); it is
+	// bounded by the same cap, its oldest answer first.
 	contextMu        sync.Mutex
 	contextMatch     map[string]*contextPin
 	contextLast      map[string]contextRead
 	contextClock     uint64
 	contextMatchUsed map[string]uint64
 	contextLastUsed  map[string]uint64
+	contextNamed     map[string]contextNaming
 	Bin              string
 	WorktreeRoot     string
 	YardHome         string // passed to crew members, so their yard commands reach this yard

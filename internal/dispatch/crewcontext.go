@@ -61,8 +61,14 @@ func (d *Dispatcher) crewContext(ctx context.Context, runner Runner, s *memberSe
 		startedAt = *s.st.StartedAt
 	}
 	used, window, ok, err := r.Context(ctx, s.st.Handle, startedAt)
-	if err != nil || !ok {
+	if err != nil {
 		return false, err
+	}
+	// A read that answered ends the failure said before it, on whichever pass
+	// it was made: the same words after it are a new failure, said again.
+	d.noteContextErr(s, nil)
+	if !ok {
+		return false, nil
 	}
 	model, _ := def.Config["model"].(string)
 	if window == 0 {
@@ -129,8 +135,9 @@ func (d *Dispatcher) stampContextRead(s *memberSession) {
 }
 
 // noteContextErr says a context read failed, once per session until the
-// error changes or a later read succeeds. The keep itself does not fail:
-// the pass still clears the working state, and the next due read tries again.
+// error changes or a later read succeeds (crewContext ends the note then,
+// with a nil error). The keep itself does not fail: the pass still clears the
+// working state, and the next due read tries again.
 func (d *Dispatcher) noteContextErr(s *memberSession, err error) {
 	key := contextFailKey(s.key())
 	if err == nil {
@@ -155,7 +162,9 @@ func (d *Dispatcher) crewWorkingPass(ctx context.Context, runner Runner, s *memb
 	if d.contextDue(s) {
 		_, err := d.crewContext(ctx, runner, s, false)
 		d.stampContextRead(s)
-		d.noteContextErr(s, err)
+		if err != nil {
+			d.noteContextErr(s, err)
+		}
 	}
 	d.crewWorkingOver(ctx, s, status)
 }

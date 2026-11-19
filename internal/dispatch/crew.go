@@ -763,7 +763,7 @@ func (d *Dispatcher) crewRunning(ctx context.Context, runner Runner, s *memberSe
 	if d.ownInput(ctx, runner, key, def.Journal, s.who(map[string]any{}), s.st.Handle, status) {
 		return nil // Enter went into its pane: nothing else does on this pass
 	}
-	if maxAge := durationOr(def.MaxAge, 0); maxAge > 0 && s.st.StartedAt != nil && time.Since(*s.st.StartedAt) > maxAge {
+	if maxAge := durationOr(def.MaxAge, 0); maxAge > 0 && s.st.StartedAt != nil && d.now().Sub(*s.st.StartedAt) > maxAge {
 		switch {
 		case s.st.RotationAskedAt == nil && idle:
 			typed, err := d.nudge(ctx, runner, s, fmt.Sprintf(
@@ -773,7 +773,7 @@ func (d *Dispatcher) crewRunning(ctx context.Context, runner Runner, s *memberSe
 				return err // not asked yet: the grace runs from the asking
 			}
 			return d.Store.MarkRotationAskedFor(ctx, def.Name, s.user)
-		case s.st.RotationAskedAt != nil && time.Since(*s.st.RotationAskedAt) > grace:
+		case s.st.RotationAskedAt != nil && d.now().Sub(*s.st.RotationAskedAt) > grace:
 			// Record the reading, then restart. No context handoff: the
 			// rotation already asked, and the restart stays ahead of one.
 			d.recordContextOnRestart(ctx, runner, s, status)
