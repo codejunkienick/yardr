@@ -2494,6 +2494,8 @@ func TestTelegramPack(t *testing.T) {
 // declaration names the bot user and only the bot scopes, and no event
 // subscriptions and no Request URL, so it validates as the app is
 // created; the two bot events are subscribed in the setup's step 6.
+// The manifest turns the bot's messages tab on, so one-to-one direct
+// messages reach it.
 func TestSlackPack(t *testing.T) {
 	sub, err := fs.Sub(packs.FS, "slack")
 	if err != nil {
@@ -2544,7 +2546,9 @@ func TestSlackPack(t *testing.T) {
 	// anywhere in the document, so the app is created from it before its
 	// hook address exists. mpim:history is among the scopes as a reading
 	// scope; that nothing is heard by it is the setup's step 6 below,
-	// which never subscribes message.mpim.
+	// which never subscribes message.mpim. The messages tab is on, and
+	// writable: a one-to-one direct message is heard as message.im only
+	// when people can write in the bot's messages tab.
 	manifest, err := fs.ReadFile(packs.FS, "slack/app-manifest.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -2570,6 +2574,14 @@ func TestSlackPack(t *testing.T) {
 	bot, ok := at("features", "bot_user", "display_name")
 	if !ok || bot == "" {
 		t.Errorf("the manifest names no bot user under features: %v", doc["features"])
+	}
+	enabled, ok := at("features", "app_home", "messages_tab_enabled")
+	if !ok || enabled != true {
+		t.Errorf("the manifest's messages tab = %v, want on, so one-to-one direct messages reach the bot", enabled)
+	}
+	readOnly, ok := at("features", "app_home", "messages_tab_read_only_enabled")
+	if !ok || readOnly != false {
+		t.Errorf("the manifest's messages tab read-only = %v, want writable, so people can write in the tab", readOnly)
 	}
 	if major, ok := at("_metadata", "major_version"); !ok || major != 1 {
 		t.Errorf("the manifest's major version = %v, want 1", major)
@@ -2696,6 +2708,24 @@ func TestSlackPack(t *testing.T) {
 	} {
 		if strings.Contains(p.SetupText, not) {
 			t.Errorf("setup notes keep a terminal way beside the cards: %q", not)
+		}
+	}
+	// Step 1 is where the app is made from the manifest: it says the
+	// manifest turns the messages tab on, and names the hand fix for an
+	// app made before, with the symptom Slack shows without it.
+	one, two := strings.Index(p.SetupText, "\n1. "), strings.Index(p.SetupText, "\n2. ")
+	if one < 0 || two < 0 || two <= one {
+		t.Fatalf("the setup has no steps 1 and 2 to cut step 1 between")
+	}
+	step1 := p.SetupText[one:two]
+	for _, want := range []string{
+		"turns the bot's App Home messages tab on",
+		"sending\n   messages to this app has been turned off",
+		"Messages Tab on",
+		"Allow users to send Slash commands and messages from the\n   messages tab",
+	} {
+		if !strings.Contains(step1, want) {
+			t.Errorf("the setup's step 1 lacks %q", want)
 		}
 	}
 	// Step 6 is the place the two bot events are subscribed: its list

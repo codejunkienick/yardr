@@ -33,7 +33,14 @@ yard if it differs.
    manifest that names events without a Request URL does not validate,
    so the events cannot stand in the document the app is created from
    while its hook address is not yet known; they are added in step 6,
-   once the hook stands and Slack can verify its address. Install the
+   once the hook stands and Slack can verify its address. The manifest
+   turns the bot's App Home messages tab on, so the app can be sent
+   one-to-one direct messages; without it Slack answers "sending
+   messages to this app has been turned off" and the `message.im` event
+   step 6 subscribes never fires. An app made from the manifest before
+   that fix needs the hand fix: App Home, Show Tabs, Messages Tab on,
+   and "Allow users to send Slash commands and messages from the
+   messages tab" ticked. Install the
    app to the workspace. Two values Slack shows are copied from there
    into cards below: the signing secret (Basic Information) and, after
    install, the bot token `xoxb-…` (OAuth & Permissions). Making the app
