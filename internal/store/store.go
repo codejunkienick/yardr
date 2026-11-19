@@ -151,6 +151,11 @@ type Store struct {
 	// open is the open beads as the last read of them decoded them
 	// (openBeads).
 	open openSnap
+	// asksCache and waitsCache keep the last UserAsks and Waiting answer
+	// per viewer, each standing while the head it was computed at stands
+	// (headcache.go).
+	asksCache  headCache[viewerKey, *AskQueue]
+	waitsCache headCache[viewerKey, []WaitingBead]
 	// pair is the pairing this yard has open with another (pairing.go):
 	// in memory only, so a code is never in the file.
 	pair pairings

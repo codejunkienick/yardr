@@ -205,6 +205,11 @@ func (s *Store) WriterAsks(ctx context.Context, writer string, viewer ...string)
 // declined here is among the decided from then on, by what this yard knows
 // of it (foreignAsk), placed by when they did. A name that is no user of
 // the yard is refused, as UserInbox refuses it.
+//
+// The gate above runs on every call; only the queue below it is reused,
+// per viewer at the head it was computed at (headCache), since a device
+// following a busy yard asks for it on every noted event and each fresh
+// computation decodes every note of every bead.
 func (s *Store) UserAsks(ctx context.Context, name, actor string, viewer ...string) (*AskQueue, error) {
 	if err := s.read(func(tx *bolt.Tx) error {
 		if _, err := getUser(tx, name); err != nil {
@@ -215,14 +220,31 @@ func (s *Store) UserAsks(ctx context.Context, name, actor string, viewer ...stri
 	}); err != nil {
 		return nil, err
 	}
+	key := viewerKey{name: name, actor: actor, viewer: firstViewer(viewer)}
+	compute := func() (*AskQueue, time.Time, error) { return s.userAsks(ctx, name, key.viewer) }
+	head, err := s.Head(ctx)
+	if err != nil {
+		// The head names the state a kept answer stands at; a store
+		// that cannot say it is computed from, not failed.
+		q, _, err := compute()
+		return q, err
+	}
+	return s.asksCache.do(ctx, key, head, now(), compute, cloneAskQueue)
+}
+
+// userAsks computes the queue UserAsks serves, for viewer, and says when
+// it next changes with no write at all: the earliest return of a
+// put-aside ask among the decided (zero where none stands aside), which
+// bounds how long the computed queue is the answer.
+func (s *Store) userAsks(ctx context.Context, name, viewer string) (*AskQueue, time.Time, error) {
 	// An ask remains open until answered, declined or returned. Closing its
 	// bead does not answer it, so include closed beads in this queue too.
 	// So does a bead that is no work: the yard asks how to log a harness in
 	// on the crew member's journal. One listing that keeps them, not one
 	// more per type, since this is read on every noted event.
-	beads, err := s.ListBeads(ctx, BeadFilter{All: true, Knowledge: true, Viewer: firstViewer(viewer)})
+	beads, err := s.ListBeads(ctx, BeadFilter{All: true, Knowledge: true, Viewer: viewer})
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	now := now()
 	q := &AskQueue{Open: []OpenAsk{}, Decided: []DecidedAsk{}}
@@ -230,7 +252,7 @@ func (s *Store) UserAsks(ctx context.Context, name, actor string, viewer ...stri
 	for _, b := range beads {
 		notes, err := s.Notes(ctx, b.ID)
 		if err != nil {
-			return nil, err
+			return nil, time.Time{}, err
 		}
 		topic := topicOf(b)
 		for _, r := range ResolveAsks(notes, now) {
@@ -259,7 +281,7 @@ func (s *Store) UserAsks(ctx context.Context, name, actor string, viewer ...stri
 	slices.SortStableFunc(q.Open, func(a, b OpenAsk) int { return cmp.Compare(a.Ask, b.Ask) })
 	foreign, foreignDecided, err := s.foreignAsks(name, now)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	q.Open = mergeOpen(q.Open, foreign)
 	// Newest decision first: the answer's note seq orders the decisions
@@ -275,7 +297,15 @@ func (s *Store) UserAsks(ctx context.Context, name, actor string, viewer ...stri
 		q.Decided = append(q.Decided, (*from)[0].d)
 		*from = (*from)[1:]
 	}
-	return q, nil
+	// The queue next changes with no write when a put-aside ask comes
+	// back: the earliest return the decided rows carry.
+	var until time.Time
+	for _, d := range q.Decided {
+		if d.ReturnAt != nil && (until.IsZero() || d.ReturnAt.Before(until)) {
+			until = *d.ReturnAt
+		}
+	}
+	return q, until, nil
 }
 
 // flowsBoardHeld is what a caller refused the open asks is told: the

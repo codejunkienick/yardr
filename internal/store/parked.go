@@ -72,16 +72,44 @@ type repoRead struct {
 // and an operator any user's (mayReadInbox); actor is who reads, and left
 // out is the user.
 func (s *Store) Waiting(ctx context.Context, name, actor string, viewer ...string) ([]WaitingBead, error) {
+	// The gate runs on every call, as UserAsks' does; only the rows
+	// below it are reused, per viewer at the head they were computed at
+	// (headCache), since a following device asks for them on every bead
+	// event beside the asks and the boards.
+	if err := s.read(func(tx *bolt.Tx) error {
+		if _, err := getUser(tx, name); err != nil {
+			return err
+		}
+		_, err := s.mayReadInbox(ctx, tx, name, actor, "read")
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	key := viewerKey{name: name, actor: actor, viewer: firstViewer(viewer)}
+	compute := func() ([]WaitingBead, time.Time, error) { return s.waiting(ctx, name, actor, key.viewer) }
+	head, err := s.Head(ctx)
+	if err != nil {
+		rows, _, err := compute()
+		return rows, err
+	}
+	return s.waitsCache.do(ctx, key, head, now(), compute, cloneWaiting)
+}
+
+// waiting computes the rows Waiting serves, for viewer, and says when
+// they next change with no write at all: the earliest return of a
+// put-aside ask to the person on a bead the pass read (zero where none
+// stands aside), which bounds how long the rows are the answer.
+func (s *Store) waiting(ctx context.Context, name, actor, viewer string) ([]WaitingBead, time.Time, error) {
 	repos := map[string]repoRead{}
 	for {
-		rows, missing, err := s.parked(ctx, name, actor, firstViewer(viewer), repos)
+		rows, missing, until, err := s.parked(ctx, name, actor, viewer, repos)
 		if err != nil || len(missing) == 0 {
-			return rows, err
+			return rows, until, err
 		}
 		for _, depot := range missing {
 			rf, err := s.RepoFlows(ctx, depot)
 			if ctx.Err() != nil {
-				return nil, ctx.Err()
+				return nil, time.Time{}, ctx.Err()
 			}
 			repos[depot] = repoRead{rf, err}
 		}
@@ -91,12 +119,14 @@ func (s *Store) Waiting(ctx context.Context, name, actor string, viewer ...strin
 // parked is one pass of Waiting over the repositories it has read so far.
 // missing names the depots whose repository the flows of some bead depend on
 // and that the pass lacked: the rows are then not final, and the caller reads
-// those repositories and passes again.
-func (s *Store) parked(ctx context.Context, name, actor, viewer string, repos map[string]repoRead) ([]WaitingBead, []string, error) {
+// those repositories and passes again. until is the earliest return of a
+// put-aside ask the pass read, as waiting reports it.
+func (s *Store) parked(ctx context.Context, name, actor, viewer string, repos map[string]repoRead) ([]WaitingBead, []string, time.Time, error) {
 	var rows []WaitingBead
 	var missing []string
+	var until time.Time
 	err := s.read(func(tx *bolt.Tx) error {
-		rows, missing = []WaitingBead{}, nil
+		rows, missing, until = []WaitingBead{}, nil, time.Time{}
 		if _, err := getUser(tx, name); err != nil {
 			return err
 		}
@@ -159,7 +189,10 @@ func (s *Store) parked(ctx context.Context, name, actor, viewer string, repos ma
 			if err != nil {
 				return err
 			}
-			asked, tookPart := asksOf(notes, name, at)
+			asked, tookPart, back := asksOf(notes, name, at)
+			if !back.IsZero() && (until.IsZero() || back.Before(until)) {
+				until = back
+			}
 			if asked || PartIn(g, name, tookPart) {
 				continue
 			}
@@ -192,12 +225,13 @@ func (s *Store) parked(ctx context.Context, name, actor, viewer string, repos ma
 		})
 		return nil
 	})
-	return rows, missing, err
+	return rows, missing, until, err
 }
 
 // asksOf says, from a bead's notes, whether an ask to the person stands open
-// on it and whether they took part in one (partStates).
-func asksOf(notes []Note, name string, at time.Time) (open, tookPart bool) {
+// on it, whether they took part in one (partStates), and when the earliest
+// put-aside ask to them comes back (zero where none stands aside).
+func asksOf(notes []Note, name string, at time.Time) (open, tookPart bool, back time.Time) {
 	for _, r := range ResolveAsks(notes, at) {
 		if r.AskErr != nil || r.Ask.To != name {
 			continue
@@ -207,8 +241,11 @@ func asksOf(notes []Note, name string, at time.Time) (open, tookPart bool) {
 		} else if r.State.tookPart() {
 			tookPart = true
 		}
+		if r.State == AskAside && (back.IsZero() || r.ReturnAt.Before(back)) {
+			back = r.ReturnAt
+		}
 	}
-	return open, tookPart
+	return open, tookPart, back
 }
 
 // partStates are the states in which an ask stands for a part the person it

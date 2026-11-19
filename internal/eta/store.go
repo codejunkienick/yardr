@@ -196,17 +196,8 @@ func estimateQueue(ctx context.Context, st store.API) (Queue, string, error) {
 	return q, settings[store.OperatorSetting], nil
 }
 
-// ArrivalsViaStore answers the board at now: the rows beside the platforms
-// in the order the beads travel, so a reader groups the rows by the served
-// list without knowing the flows. The rows are the open beads still
-// travelling — everything but the backlog — up to ArrivalLimit, in
-// arrival order, with the expected arrival as the yard's printed range
-// and the remark. It is what footplate draws: the yard computes once so
-// the readers draw without computing (design footplate-8v5t, section 3).
-// The board holds what viewer may see, "" for the yard itself.
-// The order and the remark are the board's, ported in the eta package
-// from signalbox src/board.ts.
-func ArrivalsViaStore(ctx context.Context, st store.API, viewer string, now time.Time) (*ArrivalBoard, error) {
+// arrivalsViaStore computes the board ArrivalsViaStore serves.
+func arrivalsViaStore(ctx context.Context, st store.API, viewer string, now time.Time) (*ArrivalBoard, error) {
 	beads, err := st.ListBeads(ctx, store.BeadFilter{Viewer: viewer})
 	if err != nil {
 		return nil, err
@@ -500,15 +491,8 @@ func mergeStageOrder(base, next []string) []string {
 	return out
 }
 
-// FlowsViaStore answers the flows view at now: the depots each with its
-// flows, each flow its stages in travel order, each stage its beads, each
-// flow its landings of the trailing 24 hours, the per-depot Elsewhere rows,
-// the unassigned rows, and the travelling totals. Its stages, beads and
-// lamps are /flows and the panel as served; its unassigned rows are the open
-// beads outside the backlog with no depot. An omitted viewer is the yard
-// itself; a viewer's board holds only the beads they may see, landings
-// among them.
-func FlowsViaStore(ctx context.Context, st store.API, viewer string, now time.Time) (*store.FlowsBoard, error) {
+// flowsViaStore computes the board FlowsViaStore serves.
+func flowsViaStore(ctx context.Context, st store.API, viewer string, now time.Time) (*store.FlowsBoard, error) {
 	depots, err := st.Depots(ctx)
 	if err != nil {
 		return nil, err
