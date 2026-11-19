@@ -13,8 +13,21 @@ import (
 // has in Go has it by this interface. internal/notify sends through either
 // and is the one place that knows there are two.
 
-// Notifier is what an Adapter whose source can tell a person adds. No
-// adapter has it yet.
+// Item is one thing a message is about, as numbers beside its words:
+// what kind it is and the numbers that find it, so a routine need not
+// parse a sentence. A mail is its event seq; an ask its bead and ask
+// seq; a notification its event seq, its bead where it has one, the
+// kind of what happened and the source it came through.
+type Item struct {
+	Kind   string `json:"kind"`
+	Seq    uint64 `json:"seq,omitempty"`
+	Bead   string `json:"bead,omitempty"`
+	Ask    uint64 `json:"ask,omitempty"`
+	Note   string `json:"note,omitempty"`
+	Source string `json:"source,omitempty"`
+}
+
+// Notifier is what an Adapter whose source can tell a person adds.
 type Notifier interface {
 	// NotifyEnv are the names a user's env_file sets for the source to
 	// reach them: where the person is, and a credential of their own
@@ -22,9 +35,10 @@ type Notifier interface {
 	NotifyEnv() []string
 	// Notify tells the person env is of, with env the values of
 	// NotifyEnv as their file sets them: title, text and link, "" for one
-	// there is none of. It returns the status the source answered with;
-	// an error is a call that was not answered, and names no value of env.
-	Notify(ctx context.Context, env map[string]string, title, text, link string) (status int, err error)
+	// there is none of, with items what the message is about. It returns
+	// the status the source answered with; an error is a call that was
+	// not answered, and names no value of env.
+	Notify(ctx context.Context, env map[string]string, title, text, link string, items []Item) (status int, err error)
 }
 
 // Imager is what a Notifier whose source takes a picture with the
@@ -34,11 +48,12 @@ type Imager interface {
 	// NotifyImage tells the person env is of, with env the values of
 	// NotifyEnv as their file sets them: title, text and link, "" for
 	// one there is none of, with the picture at the local path image,
-	// read by the call. It returns the status the source answered with;
-	// an error is a call that was not answered, and names no value of
-	// env. A picture that fails, by an error or by a status that is no
-	// success, is told again without it: the words are not lost with it.
-	NotifyImage(ctx context.Context, env map[string]string, title, text, link, image string) (status int, err error)
+	// read by the call, and items what the message is about. It returns
+	// the status the source answered with; an error is a call that was
+	// not answered, and names no value of env. A picture that fails, by
+	// an error or by a status that is no success, is told again without
+	// it: the words are not lost with it.
+	NotifyImage(ctx context.Context, env map[string]string, title, text, link, image string, items []Item) (status int, err error)
 }
 
 // NotifierFor is the source's Notifier, if it can tell a person.

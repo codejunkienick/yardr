@@ -11,12 +11,13 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// The settings of a user: the source that tells them outside the yard of
-// what lands in their inbox, the file their own address in it is read
+// The settings of a user: the sources that tell them outside the yard of
+// what lands in their inbox, the file their own address in them is read
 // from, which parts they are told of, their role (RoleOperator or
 // RoleMember), and whether a member is on their own login only.
 const (
 	UserNotify       = "notify"
+	UserWebhook      = "webhook"
 	UserEnvFile      = "env_file"
 	UserTell         = "tell"
 	UserRole         = "role"
@@ -43,7 +44,7 @@ func (u *User) Tells(part string) bool {
 // whether the source is set up, which is read from a file. "" for a user
 // who is told nowhere and has nothing set for it.
 func (u *User) Told() string {
-	if u.Notify == "" {
+	if u.Notify == "" && u.Webhook == "" {
 		var set []string
 		if u.EnvFile != "" {
 			set = append(set, UserEnvFile+" "+u.EnvFile)
@@ -56,10 +57,17 @@ func (u *User) Told() string {
 		}
 		return "nowhere (" + strings.Join(set, " and ") + " is set, and no notify)"
 	}
-	if len(u.Tell) > 0 {
-		return "through " + u.Notify + ", of " + strings.Join(u.Tell, ", ") + " only"
+	through := u.Notify
+	switch {
+	case u.Notify != "" && u.Webhook != "":
+		through = u.Notify + " and " + u.Webhook
+	case u.Notify == "":
+		through = u.Webhook
 	}
-	return "through " + u.Notify
+	if len(u.Tell) > 0 {
+		return "through " + through + ", of " + strings.Join(u.Tell, ", ") + " only"
+	}
+	return "through " + through
 }
 
 // toldOf are the parts the user is told of outside the yard, in the order
@@ -121,25 +129,26 @@ func notifySources(tx *bolt.Tx) ([]string, error) {
 }
 
 // SetUser sets settings of the user name: UserNotify to the source that
-// tells them ("" for none), UserEnvFile to the path of the file their
-// address in it is read from ("" for none), UserTell to the parts they are
-// told of, a list of TellParts with commas between ("" for all of them),
-// UserRole to RoleOperator or RoleMember, which an operator alone sets,
-// and UserOwnLoginOnly to yes or no, a member's mark an operator alone
-// sets. A source that cannot tell a user is refused with the ones that
-// can, and a part that is none with the three. The path is kept as given:
-// whoever calls resolves it, since the server may run in another
+// tells them ("" for none), UserWebhook to the second source that tells
+// them beside it ("" for none), UserEnvFile to the path of the file their
+// address in them is read from ("" for none), UserTell to the parts they
+// are told of, a list of TellParts with commas between ("" for all of
+// them), UserRole to RoleOperator or RoleMember, which an operator alone
+// sets, and UserOwnLoginOnly to yes or no, a member's mark an operator
+// alone sets. A source that cannot tell a user is refused with the ones
+// that can, and a part that is none with the three. The path is kept as
+// given: whoever calls resolves it, since the server may run in another
 // directory, and reads the file, which the store never does.
 func (s *Store) SetUser(ctx context.Context, name string, set map[string]string, actor string) (*User, error) {
 	keys := make([]string, 0, len(set))
 	for k := range set {
-		if k != UserNotify && k != UserEnvFile && k != UserTell && k != UserRole && k != UserOwnLoginOnly {
-			return nil, fmt.Errorf("user %s: %s is no setting of a user (it has: %s, %s, %s, %s, %s)", name, k, UserNotify, UserEnvFile, UserTell, UserRole, UserOwnLoginOnly)
+		if k != UserNotify && k != UserWebhook && k != UserEnvFile && k != UserTell && k != UserRole && k != UserOwnLoginOnly {
+			return nil, fmt.Errorf("user %s: %s is no setting of a user (it has: %s, %s, %s, %s, %s, %s)", name, k, UserNotify, UserWebhook, UserEnvFile, UserTell, UserRole, UserOwnLoginOnly)
 		}
 		keys = append(keys, k)
 	}
 	if len(keys) == 0 {
-		return nil, fmt.Errorf("user %s: nothing to set (%s=<source>, %s=<file>, %s=<parts>, %s=%s|%s, %s=yes|no)", name, UserNotify, UserEnvFile, UserTell, UserRole, RoleOperator, RoleMember, UserOwnLoginOnly)
+		return nil, fmt.Errorf("user %s: nothing to set (%s=<source>, %s=<source>, %s=<file>, %s=<parts>, %s=%s|%s, %s=yes|no)", name, UserNotify, UserWebhook, UserEnvFile, UserTell, UserRole, RoleOperator, RoleMember, UserOwnLoginOnly)
 	}
 	sort.Strings(keys)
 	var u *User
@@ -189,6 +198,21 @@ func (w *wtx) setUser(ctx context.Context, name string, keys []string, set map[s
 			return nil, err
 		}
 	}
+	// toldNowhere is whether this call leaves the user told nowhere: what
+	// waited to be told is then not kept for a source named later.
+	toldNowhere := false
+	{
+		notify, webhook := u.Notify, u.Webhook
+		if v, ok := set[UserNotify]; ok {
+			notify = v
+		}
+		if v, ok := set[UserWebhook]; ok {
+			webhook = v
+		}
+		_, setsNotify := set[UserNotify]
+		_, setsWebhook := set[UserWebhook]
+		toldNowhere = (setsNotify || setsWebhook) && notify == "" && webhook == ""
+	}
 	data := map[string]any{"user": name}
 	for _, k := range keys {
 		v := set[k]
@@ -198,9 +222,17 @@ func (w *wtx) setUser(ctx context.Context, name string, keys []string, set map[s
 				return nil, fmt.Errorf("user %s: %w", name, err)
 			}
 			u.Notify = v
-			if v == "" {
-				// Told nowhere: what waited to be told is not kept for
-				// a source named later.
+			if toldNowhere {
+				if err := dropPushes(w.Tx, name); err != nil {
+					return nil, err
+				}
+			}
+		case UserWebhook:
+			if err := checkWebhook(v); err != nil {
+				return nil, fmt.Errorf("user %s: %w", name, err)
+			}
+			u.Webhook = v
+			if toldNowhere {
 				if err := dropPushes(w.Tx, name); err != nil {
 					return nil, err
 				}
@@ -296,6 +328,45 @@ func checkNotify(tx *bolt.Tx, name string) error {
 		return fmt.Errorf("the file of the source %s is not read by this yardr (yardr source show %s). %s", name, name, have)
 	}
 	return fmt.Errorf("the source %s has no notify key, so its file names no call that tells a person. %s", name, have)
+}
+
+// checkWebhook refuses a second telling source yardr has no adapter for:
+// the webhook beside the phone is a source in Go that can tell a person
+// (the registered Notifying list), never a declared one, whose call has
+// no place for what a routine is sent. No name is hardcoded here.
+func checkWebhook(name string) error {
+	if name == "" {
+		return nil
+	}
+	can := notifyAdapters()
+	if slices.Contains(can, name) {
+		return nil
+	}
+	have := "No source yardr has in Go can yet"
+	if len(can) > 0 {
+		have = "A user can be told beside their phone through: " + strings.Join(can, ", ")
+	}
+	return fmt.Errorf("%s is no source a user can be told beside their phone through. %s", name, have)
+}
+
+// WebhookTried records how a send through the user's Webhook ended, as
+// PushTried keeps Notify's in LastPush: the routine beside the phone is
+// best-effort, so the record is the whole of it — no push is kept, ended
+// or retried for it, and no event is logged, as a told message logs none.
+// It never holds the URL, a credential, or anything of what was sent.
+func (s *Store) WebhookTried(ctx context.Context, name string, res PushResult) error {
+	if !slices.Contains([]string{"", PushRetry, PushNotSetUp, PushRefused, PushGaveUp, PushExpired}, res.Reason) {
+		return fmt.Errorf("webhook to %s: %q is no way a send ends", name, res.Reason)
+	}
+	res.At = res.At.UTC()
+	return s.write(func(w *wtx) error {
+		u, err := getUser(w.Tx, name)
+		if err != nil {
+			return err
+		}
+		u.LastWebhook = &res
+		return put(w.Tx, bUsers, name, u)
+	})
 }
 
 // userEnvFile is where the yard keeps what a source needs of the user name

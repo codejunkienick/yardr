@@ -533,6 +533,10 @@ func TestDelegatedRefusals(t *testing.T) {
 			_, err := y.api.SetUser(ctx, "jo", map[string]string{store.UserNotify: "pushover", store.UserEnvFile: "/x.env"}, "yardmaster")
 			return err
 		}, "where jo is told"},
+		"webhook": {func() error {
+			_, err := y.api.SetUser(ctx, "jo", map[string]string{store.UserWebhook: "routine"}, "yardmaster")
+			return err
+		}, "where jo is told"},
 		"clearing a test command": {func() error {
 			d, _ := y.api.GetDepot(y.ctx, "shed")
 			d.Test = ""

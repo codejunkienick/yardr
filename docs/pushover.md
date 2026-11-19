@@ -6,8 +6,10 @@ a notification of a subscription) buzzes that person's phone through
 apply pushover` and two commands that each take one key set it up whole.
 No key is written to a file by hand.
 
-yardr has no Go for Pushover. The whole integration is the declaration the
-pack brings, with its `notify` key; [below](#by-hand) it is written out,
+yardr has no Go for Pushover. The whole Pushover integration is the declaration the
+pack brings, with its `notify` key; the one telling yardr has in Go is a
+person's routine beside their phone (`yardr pack apply routine`), which
+POSTs the same message to their own URL; [below](#by-hand) it is written out,
 as the example for another service that takes one HTTPS request with a
 JSON body.
 

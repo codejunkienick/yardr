@@ -388,7 +388,8 @@ them in a row of their own.
 
 **Told outside the yard.** A user who names a source (`yardr user set
 <name> notify=<source> env_file=<file>`) is sent what lands in their inbox
-through it, to a phone: every notification of their subscriptions, and
+through it, to a phone, and beside it to their routine where
+`webhook=<source>` names one: every notification of their subscriptions, and
 their mail. So `yardr subscribe mckean yardr --where stage=decide` is "my
 phone buzzes when a bead needs me", and with `yardr user set mckean
 tell=notifications` it buzzes for nothing else: no mail, no asks. There is

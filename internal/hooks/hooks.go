@@ -151,7 +151,8 @@ func DedupeKeys(name, src string, ad Adapter, body []byte, delivery string) []st
 
 // Adapters by source name.
 var Adapters = map[string]Adapter{
-	"token": Token{},
+	"routine": Routine{},
+	"token":   Token{},
 }
 
 // Sources lists the source names, sorted.

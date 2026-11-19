@@ -1136,7 +1136,7 @@ func parseUserTell(rest []string) ([]string, error) {
 		return nil, err
 	}
 	for _, arg := range args {
-		if key, _, ok := strings.Cut(arg, "="); ok && (key == UserNotify || key == UserEnvFile) {
+		if key, _, ok := strings.Cut(arg, "="); ok && (key == UserNotify || key == UserWebhook || key == UserEnvFile) {
 			return nil, fmt.Errorf("--run takes %s, and user set with %s= is typed by the operator, or by the user themselves, in a terminal: it decides where a person's inbox goes, and with which credential", use, key)
 		}
 	}

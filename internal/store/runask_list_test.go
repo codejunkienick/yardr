@@ -719,6 +719,7 @@ func TestRunAskListRefusals(t *testing.T) {
 		{"subscribe eve yardr --done", "and eve is none"},
 		{"subscribe mckean yardr --where label=ui,web", "',' is none of their characters"},
 		{"user set mckean notify=ntfy", "user set with notify= is typed by the operator, or by the user themselves, in a terminal: it decides where a person's inbox goes, and with which credential"},
+		{"user set mckean webhook=routine", "user set with webhook= is typed by the operator, or by the user themselves, in a terminal: it decides where a person's inbox goes, and with which credential"},
 		{"user set mckean notify=", "user set with notify= is typed by the operator"},
 		{"user set mckean env_file=/tmp/mckean.env", "user set with env_file= is typed by the operator"},
 		{"user set mckean env_file=", "user set with env_file= is typed by the operator"},

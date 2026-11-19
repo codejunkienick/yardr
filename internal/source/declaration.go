@@ -42,25 +42,19 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// BuiltIn are the names a declaration may not take: the sources yardr has in Go (hooks.Adapters), but for one whose pack
-// has taken the name while its Go adapter is still compiled in, its own name for itself (store.SourceYardr), and its
-// name for the yards it is linked with (store.SourcePeer). The pack's source then wins every lookup when the yard has
-// it. A test in hooks holds this list against the adapters.
+// BuiltIn are the names a declaration may not take: the sources yardr has in Go (hooks.Adapters), but for one whose pack has taken the name while its Go adapter is still compiled in, its own name for itself (store.SourceYardr), and its name for the yards it is linked with (store.SourcePeer); the pack's source then wins every lookup when the yard has it, and a test in hooks holds this list against the adapters.
 var BuiltIn = []string{"peer", "token", "yardr"}
 
 // MaxDeclaration bounds a declaration file: it is a list of requests, read whole at every use.
 const MaxDeclaration = 256 << 10
 
-// The kinds of a call. An update changes something in the service; a read does not, whatever its method (a search by
-// POST, GraphQL).
+// The kinds of a call: an update changes something in the service; a read does not, whatever its method (a search by POST, GraphQL).
 const (
 	Read   = "read"
 	Update = "update"
 )
 
-// CredentialMark is where the credential's value goes: in the credential's
-// header, or as a whole leaf of a body. Never in a path or a query, which end
-// up in the logs of every proxy and server on the way.
+// CredentialMark is where the credential's value goes: in the credential's header, or as a whole leaf of a body; never in a path or a query, which end up in the logs of every proxy and server on the way.
 const CredentialMark = "{credential}"
 
 // Declaration is a source as its file declares it.
@@ -674,6 +668,11 @@ func (r *reader) declaration(d *Declaration, root *yaml.Node) {
 		if hear != nil {
 			d.Hear = r.hear(d, *hear, alone)
 		}
+		return
+	}
+	// A credential that is the address, and nothing else, is a giving alone (the routine's URL, read by an adapter): no call to make, and every key of a call beside it falls through to the refusal below.
+	if calls == nil && d.Credential != nil && d.Credential.URL && d.Limits == nil && d.Hook == nil && d.Thread == nil && d.Link == nil && d.Identity == nil && d.Events == nil && hear == nil && git == nil && base == nil && bases == nil && baseTemplate == nil && check == nil && idempotency == nil && notify == nil {
+		d.Base, d.Bases, d.BaseTemplate = "", nil, ""
 		return
 	}
 	// A credential that is the address is every call's address, so it

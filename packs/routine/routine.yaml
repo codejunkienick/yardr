@@ -1,0 +1,17 @@
+# Routine as a declared source: the giving half of a person's routine.
+# It declares no call and no notify key: telling is the routine adapter
+# yardr has in Go, which POSTs {title, text, items} to the URL this
+# credential holds, once per batch beside the phone. The file names the
+# variable of that URL so the URL is given as a user's own credential
+# (--as), kept in their env file and read at each send, and refused at
+# giving where it is no address, as every URL credential is. The URL
+# itself, whose path is its secret, stands in no file here and reaches
+# no error, event or command.
+name: routine
+about: A person's routine, told beside their phone at its own URL.
+
+# The name of the variable, never the value: the URL each message goes
+# to, in the file of the person told.
+credential:
+  env: ROUTINE_URL
+  url: true

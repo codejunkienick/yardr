@@ -225,11 +225,8 @@ func (f foreignAsk) resolved(id, asker string, at time.Time) ResolvedAsk {
 // row is the foreign ask as a row of the person's queue: on bead@peer,
 // asked by name@peer, by the name this yard has for the link p today.
 func (f foreignAsk) row(p *Peer) OpenAsk {
-	return OpenAsk{
-		Bead: f.Bead + "@" + p.Name, BeadTitle: f.Title, Topic: f.Topic,
-		Ask: f.Seq, Question: f.Ask.Question,
-		Asker: f.From + "@" + p.Name, Since: f.Since,
-	}
+	return OpenAsk{Bead: f.Bead + "@" + p.Name, BeadTitle: f.Title, Topic: f.Topic, Ask: f.Seq, Question: f.Ask.Question,
+		Asker: f.From + "@" + p.Name, Since: f.Since, Secret: f.Ask.asked(), Concealed: f.Ask.concealed()}
 }
 
 // notes are the foreign ask and its answers as the notes of a bead would

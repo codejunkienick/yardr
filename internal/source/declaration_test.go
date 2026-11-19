@@ -310,6 +310,16 @@ func TestParseCredentialURL(t *testing.T) {
 	if got := d.Address(); got != "the URL in WEBHOOK_URL" {
 		t.Fatalf("address = %q", got)
 	}
+	// A URL credential alone is the routine pack's giving shape: its Go
+	// adapter reads the URL, and there are no calls or unrelated keys.
+	const routine = "name: routine\ncredential: { env: ROUTINE_URL, url: true }\n"
+	alone, err := Parse("routine.yaml", []byte(routine))
+	if err != nil || alone.Credential == nil || !alone.Credential.URL || alone.Base != "" || len(alone.Calls) != 0 {
+		t.Fatalf("URL credential alone = %+v, %v", alone, err)
+	}
+	if _, err := Parse("routine.yaml", []byte(routine+"identity: { fold: lower }\n")); err == nil || !strings.Contains(err.Error(), "calls: missing") {
+		t.Fatalf("URL credential with identity was accepted: %v", err)
+	}
 	for _, name := range []string{"send", "ping", "tagged"} {
 		c, ok := d.Call(name)
 		if !ok || c.Request.Path != "/" || c.Request.Line() != "POST /" {

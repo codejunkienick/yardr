@@ -773,10 +773,11 @@ up from nothing).
 ```sh
 yardr user key ada pushover                 # ada's own address in it, typed unseen: ~/.yardr/users/ada.env
 yardr user set ada notify=pushover
+yardr user set ada webhook=routine          # and their routine beside it, once the routine pack is applied
 yardr source check pushover --user ada      # one real test message
-yardr user show ada                         # notify, the env file, the parts, and how the last message ended
+yardr user show ada                         # notify, webhook, the env file, the parts, and how the last messages ended
 yardr user set ada tell=notifications       # of the notifications only; tell= is all three parts again
-yardr user set ada notify=                  # nowhere; what was still to be told is dropped
+yardr user set ada notify= webhook=         # nowhere; what was still to be told is dropped
 ```
 
 `yardr user list` shows where each user is told, and of which parts when
@@ -936,6 +937,19 @@ many of the inbox it covered. The address, the token, the title and the
 text are in no event and no log, and nothing of a request is. A message
 that was taken leaves no event.
 
+**Beside the phone: a routine.** `webhook` names a second telling of
+the same message, to a URL of the person's own (the `routine` pack sets
+it up end to end, n8n included): each batch goes there once as
+`{title, text, items}`, the phone's words with what the batch is about as
+numbers beside them, first and best-effort — not set up or not answered
+never holds the phone back, retries it or spends its hour, and a missed
+wake is covered by the next batch. The URL is given as the person's own
+credential in the source (`yardr source key routine --as <name>`, or its
+card), into the same `env_file`; a member's must be a public `https://`
+name, an operator's may be on this machine. No picture goes. Either
+telling stands alone: `webhook` without `notify` queues and wakes all
+the same, of the same `tell` parts.
+
 **How it stands.** `yardr user show <name>` has `last told: <when> through
 <source>, taken (status 200, 2 of the inbox in one message)`, or `failed
 (…); next try <time>` while the daemon still tries, or `not sent: <reason>
@@ -944,7 +958,7 @@ that was taken leaves no event.
 push_failed`; a user cannot subscribe to it, so a failed message never
 queues another.
 
-None of the numbers above is a setting, and there is one source per user.
+None of the numbers above is a setting. The phone's source and the routine beside it are two tellings at most, of the same parts.
 
 ## Devices
 

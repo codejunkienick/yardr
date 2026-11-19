@@ -36,8 +36,8 @@ A command acts as a user when its actor (--actor, $YARDR_ACTOR, else the
 login name) is the user's name. yardr does not check who is at the keyboard.
 
 A user is told outside the yard through the source they name with
-yardr user set <name> notify=<source>, and of the parts they name with
-tell=<parts>.
+yardr user set <name> notify=<source>, beside it at their routine with
+webhook=<source>, and of the parts they name with tell=<parts>.
 
 Who a user is in a source, so a thread opened there can be assigned to
 them: yardr user identity.
@@ -139,8 +139,10 @@ leaves the login folder.`,
 notify=<source>), "last told" is how the last message through that source
 ended: when, whether the source took it, and how many items of the inbox it
 was for. One that failed is tried again by the daemon for up to six hours;
-one given up is a push_failed event (yardr events). The inbox has
-everything either way.`,
+one given up is a push_failed event (yardr events). A second telling
+(webhook=<source>, beside the phone) has its own "last told at routine":
+best-effort, never retried, and its failure changes nothing of the phone's.
+The inbox has everything either way.`,
 		RunE: func(c *cobra.Command, args []string) error {
 			st, err := a.store(c.Context())
 			if err != nil {
@@ -209,6 +211,9 @@ everything either way.`,
 				if last := lastPush(&v.User); last != "" {
 					fmt.Fprintf(w, "  last told: %s\n", last)
 				}
+				if last := lastWebhook(&v.User); last != "" {
+					fmt.Fprintf(w, "  last told at routine: %s\n", last)
+				}
 				for _, d := range v.Devices {
 					fmt.Fprintf(w, "  device: %s, added %s, last used %s\n", d.Name, d.CreatedAt.Local().Format(mailTime), lastUsed(d)+sealed(d))
 				}
@@ -255,12 +260,19 @@ command erases them yet, and the command says where they are.`,
 		},
 	}
 	set := &cobra.Command{
-		Use:   "set <name> [notify=<source>] [env_file=<file>] [tell=<parts>] [role=operator|member] [own_login_only=yes|no]",
+		Use:   "set <name> [notify=<source>] [webhook=<source>] [env_file=<file>] [tell=<parts>] [role=operator|member] [own_login_only=yes|no]",
 		Short: "Set where, how and what a source tells a user, or their role",
 		Long: `notify is the source that tells the user outside the yard: a declared source
 whose file has a notify key (yardr source list shows which), or a source
 yardr has built in that can. One that cannot is refused, with the ones that
 can. notify= with nothing after it is nowhere.
+
+webhook is the second telling, beside notify: a source yardr has built
+in that can (routine), which POSTs each message to the URL in the same
+env_file. A declared source is refused for it, with the ones that can.
+webhook= with nothing after it ends the second telling alone. The URL is
+given as the user's own credential in that source (yardr source key
+<source> --as <name>, or its card), never here.
 
 env_file is a file of KEY=VALUE lines that sets what the source needs of
 this person: for a declared source the variable its notify key names
@@ -296,13 +308,17 @@ for them, by the daemon, once each is 20
 seconds old and still unread. What was acknowledged by then (yardr chat
 showing it, yardr inbox --ack <seq>) is not told. All that is due goes as one
 message: who it is from or which bead, what happened, and the start of the
-text; several are counted and named. At most 20 messages an hour; what is
-over waits and goes as one. A send that fails is tried again for up to 8
-tries and 6 hours, then given up as a push_failed event; yardr user show
-has how the last one ended. The inbox is filled first and never waits for
-the source. notify= drops what was still to be told.`,
+text; several are counted and named. The same message goes to the
+routine beside it, once, best-effort, with what it is about as numbers
+beside the words; a secret ask goes by its number alone. At most 20
+messages an hour on the phone; what is over waits and goes as one. A send
+that fails is tried again for up to 8 tries and 6 hours, then given up
+as a push_failed event; yardr user show has how the last one ended on
+each telling. The inbox is filled first and never waits for a source.
+notify= and webhook= together nowhere drop what was still to be told.`,
 		Example: `  yardr user key mckean phone          # asks for PHONE_USER, your id at the service, unseen
   yardr user set mckean notify=phone
+  yardr user set mckean webhook=routine      # and their routine, at the URL given --as them
   yardr source check phone --user mckean
   yardr user set mckean notify=phone env_file=~/.yardr/users/mckean.env   # a file you keep yourself
   yardr user set mckean tell=notifications   # no mail and no asks on the phone
@@ -320,8 +336,8 @@ the source. notify= drops what was still to be told.`,
 			set := map[string]string{}
 			for _, arg := range args[1:] {
 				key, value, ok := strings.Cut(arg, "=")
-				if _, twice := set[key]; !ok || twice || (key != store.UserNotify && key != store.UserEnvFile && key != store.UserTell && key != store.UserRole && key != store.UserOwnLoginOnly) {
-					return fmt.Errorf("%q: want %s=<source>, %s=<file>, %s=<%s>, %s=%s|%s or %s=yes|no, each once", arg, store.UserNotify, store.UserEnvFile, store.UserTell, strings.Join(store.TellParts, ","), store.UserRole, store.RoleOperator, store.RoleMember, store.UserOwnLoginOnly)
+				if _, twice := set[key]; !ok || twice || (key != store.UserNotify && key != store.UserWebhook && key != store.UserEnvFile && key != store.UserTell && key != store.UserRole && key != store.UserOwnLoginOnly) {
+					return fmt.Errorf("%q: want %s=<source>, %s=<source>, %s=<file>, %s=<%s>, %s=%s|%s or %s=yes|no, each once", arg, store.UserNotify, store.UserWebhook, store.UserEnvFile, store.UserTell, strings.Join(store.TellParts, ","), store.UserRole, store.RoleOperator, store.RoleMember, store.UserOwnLoginOnly)
 				}
 				if key == store.UserEnvFile && value != "" {
 					if value, err = store.ExpandPath(value); err != nil {
@@ -337,15 +353,26 @@ the source. notify= drops what was still to be told.`,
 					u.EnvFile = value
 				case store.UserNotify:
 					u.Notify = value
+				case store.UserWebhook:
+					u.Webhook = value
 				}
 				set[key] = value
 			}
-			// With both there, the file is held to what the source reads of
-			// it. A source that cannot tell anyone is the store's to refuse,
-			// which names the ones that can.
-			if _, err := notify.Names(c.Context(), st, u.Notify); err == nil && u.EnvFile != "" {
-				if _, err := notify.Ready(c.Context(), st, u); err != nil {
-					return err
+			// With both there, the file is held to what each source reads
+			// of it. A source that cannot tell anyone is the store's to
+			// refuse, which names the ones that can.
+			if u.Notify != "" {
+				if _, err := notify.Names(c.Context(), st, u.Notify); err == nil && u.EnvFile != "" {
+					if _, err := notify.Ready(c.Context(), st, u); err != nil {
+						return err
+					}
+				}
+			}
+			if u.Webhook != "" {
+				if _, err := notify.Names(c.Context(), st, u.Webhook); err == nil && u.EnvFile != "" {
+					if _, err := notify.ReadyThrough(c.Context(), st, u.Webhook, u); err != nil {
+						return err
+					}
 				}
 			}
 			saved, err := st.SetUser(c.Context(), args[0], set, a.who())
@@ -448,14 +475,25 @@ again, and it ends as one giving that worked.`,
 // and never prints a value.
 func told(ctx context.Context, st store.API, u *store.User) string {
 	said := u.Told()
-	if u.Notify == "" {
+	if u.Notify == "" && u.Webhook == "" {
 		return said
 	}
-	state, err := notify.Ready(ctx, st, u)
-	if err != nil {
-		return said + ", which is not set up: " + err.Error()
+	var states []string
+	if u.Notify != "" {
+		state, err := notify.Ready(ctx, st, u)
+		if err != nil {
+			return said + ", which is not set up: " + err.Error()
+		}
+		states = append(states, state)
 	}
-	return said + " (" + state + ")"
+	if u.Webhook != "" {
+		state, err := notify.ReadyThrough(ctx, st, u.Webhook, u)
+		if err != nil {
+			return said + ", which is not set up: " + err.Error()
+		}
+		states = append(states, state)
+	}
+	return said + " (" + strings.Join(states, "; ") + ")"
 }
 
 // userCredentials are the sources that hold a credential of the user, by
@@ -484,8 +522,12 @@ func userCredentials(ctx context.Context, st store.API, u *store.User) ([]string
 // ended, "" for a user none was sent to: when, through which source, and
 // whether the source took it. It is what the user's record keeps
 // (store.PushResult), which has nothing of the message.
-func lastPush(u *store.User) string {
-	l := u.LastPush
+func lastPush(u *store.User) string { return lastTold(u.LastPush) }
+
+// lastWebhook is lastPush for the routine beside the phone.
+func lastWebhook(u *store.User) string { return lastTold(u.LastWebhook) }
+
+func lastTold(l *store.PushResult) string {
 	if l == nil {
 		return ""
 	}
@@ -673,199 +715,6 @@ func (a *app) unknownLogin(ctx context.Context, st store.API) error {
 		me, from, strings.Join(names, ", "), names[0], names[0])
 }
 
-// userBox is a user's inbox as yardr inbox prints it: its two parts, the
-// mail (a person or a crew member talking) and the notifications (the yard
-// reporting). A part that was not asked for is absent. The mail is at the
-// top level, where it was when the inbox had one part.
-type userBox struct {
-	*store.Mailbox
-	Notifications *store.NotificationPage `json:"notifications,omitempty"`
-}
-
-// userInbox is yardr inbox run as a user: of each part asked for, the
-// unread and the latest read, under the part's name and unread count. With
-// ack what is through the seq is marked read, in the parts shown only:
-// each part has a cursor of its own.
-func (a *app) userInbox(w io.Writer, ctx context.Context, st store.API, name string, limit int, ack bool, through uint64, mail, notes bool) error {
-	var box userBox
-	var err error
-	if mail {
-		if box.Mailbox, err = st.UserInbox(ctx, name, limit, a.who()); err != nil {
-			return err
-		}
-	}
-	if notes {
-		if box.Notifications, err = st.UserNotifications(ctx, name, limit, a.who()); err != nil {
-			return err
-		}
-	}
-	if ack && through == 0 {
-		// Bare --ack: refuse, naming the newest seq the parts shown
-		// hold and the command to ack through it.
-		var newest uint64
-		if mail {
-			newest = max(newest, box.Last)
-		}
-		if notes {
-			newest = max(newest, box.Notifications.Last)
-		}
-		scope := "yardr inbox"
-		if mail && !notes {
-			scope += " --mail"
-		}
-		if notes && !mail {
-			scope += " --notifications"
-		}
-		return ackRefused(scope, newest)
-	}
-	// Both are read before either is acknowledged: an ack is logged, and
-	// what is shown is the inbox as it was found.
-	rest, acked, newer := map[string]int{}, map[string]int{}, map[string]int{}
-	if mail {
-		// The unread come first, oldest first.
-		shown := 0
-		for _, l := range box.Mail {
-			if !l.Read {
-				shown++
-			}
-		}
-		rest["mail"] = box.Unread - shown
-		if ack && box.Unread > 0 {
-			// Past the newest unread the seq cannot go: a future
-			// seq must not pre-acknowledge mail not yet written.
-			if t := min(through, box.Last); t > 0 {
-				if err := st.AckUserInbox(ctx, name, t, a.who()); err != nil {
-					return err
-				}
-			}
-			after, err := st.UserInbox(ctx, name, 1, a.who())
-			if err != nil {
-				return err
-			}
-			newer["mail"] = after.Unread
-			acked["mail"] = box.Unread - newer["mail"]
-		}
-	}
-	if notes {
-		// Oldest first, so the unread are last and the newest of them ends
-		// the page unless the limit cut it.
-		ns := box.Notifications.Notifications
-		shown := 0
-		for _, n := range ns {
-			if !n.Read {
-				shown++
-			}
-		}
-		rest["notifications"] = box.Notifications.Unread - shown
-		if ack && box.Notifications.Unread > 0 {
-			if t := min(through, box.Notifications.Last); t > 0 {
-				if err := st.AckUserNotifications(ctx, name, t, a.who()); err != nil {
-					return err
-				}
-			}
-			after, err := st.UserNotifications(ctx, name, 1, a.who())
-			if err != nil {
-				return err
-			}
-			newer["notifications"] = after.Unread
-			acked["notifications"] = box.Notifications.Unread - newer["notifications"]
-		}
-	}
-	return a.out(w, box, func(w io.Writer) {
-		if mail {
-			fmt.Fprintln(w, partHead("Mail", len(box.Mail), box.Unread))
-			for _, l := range box.Mail {
-				state := ""
-				if l.Read {
-					state = " (read)"
-				}
-				from := l.From
-				if l.As != "" {
-					from += " (as " + l.As + ")"
-				}
-				from = store.ViaMark(from, l.Via)
-				// The sender and the text are writers' words, shown without
-				// the mark, and the files stand under them on a marked line
-				// of their own, so no mail's words forge its files line.
-				fmt.Fprintf(w, "%6d %s  mail from %s%s: %s\n", l.Seq, l.At.Local().Format(mailTime), store.Letters(store.ReMark(from, l.Answered)), state, store.Letters(l.Text))
-				if line := store.NoteFilesLine(a.mailHome(), l.Files); line != "" {
-					fmt.Fprintf(w, "    %s\n", line)
-				}
-				printReactions(w, l)
-			}
-			partFoot(w, rest["mail"], acked["mail"], ack, newer["mail"])
-		}
-		if mail && notes {
-			fmt.Fprintln(w)
-		}
-		if notes {
-			p := box.Notifications
-			fmt.Fprintln(w, partHead("Notifications", len(p.Notifications), p.Unread))
-			for _, n := range unreadFirst(p.Notifications) {
-				state := ""
-				if n.Read {
-					state = "(read) "
-				}
-				fmt.Fprintf(w, "%6d %s  %s%s\n", n.Seq, n.At.Local().Format(mailTime), state, n.Text)
-			}
-			partFoot(w, rest["notifications"], acked["notifications"], ack, newer["notifications"])
-		}
-	})
-}
-
-// unreadFirst is a page of notifications in the order the mail above it
-// is listed in: the unread, oldest first, then the read, the latest first.
-// The store gives a page oldest first throughout, which put the unread
-// under the read in one part and over them in the other.
-func unreadFirst(page []store.Notification) []store.Notification {
-	rows := make([]store.Notification, 0, len(page))
-	for _, n := range page {
-		if !n.Read {
-			rows = append(rows, n)
-		}
-	}
-	for i := len(page) - 1; i >= 0; i-- {
-		if page[i].Read {
-			rows = append(rows, page[i])
-		}
-	}
-	return rows
-}
-
-// partHead is the line over a part of a user's inbox: its name and how
-// much of it is unread.
-func partHead(part string, shown, unread int) string {
-	switch {
-	case shown == 0:
-		return part + ": none"
-	case unread == 0:
-		return part + ": nothing unread; the latest read:"
-	}
-	return fmt.Sprintf("%s: %d unread", part, unread)
-}
-
-// partFoot says, under a part, what of its unread was not shown, what an
-// ack marked read, and what newer than the ack's seq stays unread.
-func partFoot(w io.Writer, rest, ackedCount int, ack bool, newer int) {
-	if rest > 0 {
-		fmt.Fprintf(w, "… %d more unread\n", rest)
-	}
-	if ack {
-		fmt.Fprintf(w, "acknowledged %d\n", ackedCount)
-		if newer > 0 {
-			fmt.Fprint(w, newerUnreadLine(newer))
-		}
-	}
-}
-
-// notifications is "1 notification" or "N notifications".
-func notifications(n int) string {
-	if n == 1 {
-		return "1 notification"
-	}
-	return fmt.Sprintf("%d notifications", n)
-}
-
 // conversation is yardr mail --with: the mail between who acts and the other party, oldest first.
 // For a user that is also the mail of the names trusted as them; --with <name>@<peer> is that address alone.
 func (a *app) conversation(w io.Writer, ctx context.Context, st store.API, with string, after uint64) error {
@@ -994,6 +843,10 @@ func partyNotes(ctx context.Context, st store.API, crew []store.CrewMember, grou
 		if u.Notify != "" && u.LastPush != nil && !u.LastPush.OK() {
 			notes = append(notes, fmt.Sprintf("user %s was not told outside the yard: %s. Their inbox has it all the same; "+
 				"%s source check %s --user %s sends one test message", u.Name, lastPush(&u), yardr, u.Notify, u.Name))
+		}
+		if u.Webhook != "" && u.LastWebhook != nil && !u.LastWebhook.OK() {
+			notes = append(notes, fmt.Sprintf("user %s was not told at their routine: %s. Their inbox has it all the same, and the phone was told as it was; "+
+				"%s user show %s has the routine's last telling", u.Name, lastWebhook(&u), yardr, u.Name))
 		}
 	}
 	for _, d := range devices {

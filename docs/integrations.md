@@ -461,7 +461,11 @@ has it when its file has a `notify` key, which says which of its calls
 tells a person and which of the call's parameters take the four values the
 yard has for it: where the person is reached, a title, a text and a link.
 `token` cannot tell, so no user names it, and the refusal lists the sources
-that can.
+that can. Beside the phone a user names one source yardr has in Go with
+`webhook=<source>`: routine, which POSTs the same message to their own URL
+as `{title, text, items}` — the words with what the batch is about as
+numbers beside them — once per batch and best-effort. Its pack declares
+the URL credential alone, with no call for the yard to make.
 
 Everything that decides whether and when a person is told ends at those
 four values; sending them is one declared call. What is told, when, and
@@ -3006,11 +3010,14 @@ a design.
      Mandrill's HMAC-SHA1 do;
    - a timestamp carried inside the signature header, as Stripe's and
      Calendly's `t=…,v1=…`.
-4. **A user is told through a declared source only, and only by one HTTPS
-   request.** No compiled adapter tells a user, and nothing that is not a
-   JSON request does (a desktop notification, SMTP). What is told is fixed:
-   no setting for the parts of the inbox, the amount of text, the grace,
-   the bound or quiet hours, no link, one source per user
+4. **A user is told through a declared source, by one HTTPS request, and
+   beside it through the one compiled adapter.** That adapter is routine:
+   the same message POSTed once per batch to the person's own URL, words
+   with what the batch is about as numbers beside them, best-effort and
+   never retried. Nothing that is not a JSON request tells a user (a
+   desktop notification, SMTP). What is told is fixed: no setting for the
+   parts of the inbox, the amount of text, the grace, the bound or quiet
+   hours, no link, one phone source and one routine per user
    ([above](#what-is-not-there)).
 5. **No command says what a source can do.** The capability table above is
    read from the code. A user learns that `token` cannot be answered in

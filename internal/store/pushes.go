@@ -145,10 +145,11 @@ func (w *wtx) queueAskPush(name, uuid string, seq uint64, key string) error {
 }
 
 // queue writes p when a source tells its user outside the yard, and of
-// that part (User.Tells).
+// that part (User.Tells): through Notify, through Webhook beside it, or
+// through either, the one queue both channels are sent from.
 func (w *wtx) queue(p Push) error {
 	var u User
-	if ok, err := get(w.Tx, bUsers, p.User, &u); err != nil || !ok || u.Notify == "" || !u.Tells(p.Part) {
+	if ok, err := get(w.Tx, bUsers, p.User, &u); err != nil || !ok || (u.Notify == "" && u.Webhook == "") || !u.Tells(p.Part) {
 		return err
 	}
 	p.At = now()
@@ -187,7 +188,7 @@ func (p *Push) openAsk(tx *bolt.Tx, at time.Time) (*OpenAsk, error) {
 			return &OpenAsk{
 				Bead: b.ID, BeadTitle: b.Title, Topic: topicOf(b.Bead),
 				Ask: r.Note.Seq, Question: r.Ask.Question, Turn: r.Turn(),
-				Asker: r.Note.Author, Since: r.Note.At,
+				Asker: r.Note.Author, Since: r.Note.At, Secret: r.Ask.asked(), Concealed: r.Ask.concealed(),
 			}, nil
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"yardr.dev/yardr/internal/hooks"
 	"yardr.dev/yardr/internal/notify"
 	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/store"
@@ -133,6 +134,23 @@ func (d *Dispatcher) tell(ctx context.Context, user string, ps []store.Push) {
 			return
 		}
 	}
+	msg := pushMessage(due)
+	msg.Items = pushItems(due)
+	// The routine beside the phone first, best-effort: its outcome is
+	// recorded on the user (LastWebhook) and never holds the words back,
+	// retries them or spends their hour. One POST for the whole batch.
+	if u.Webhook != "" {
+		d.tellRoutine(ctx, u, msg, len(due))
+	}
+	if u.Notify == "" {
+		// Told at the routine alone (or nowhere, which queue never
+		// makes): the try above is the telling, and what was due does
+		// not wait for a phone that is not named.
+		if err := d.Store.DropPushes(ctx, user, seqs(due)); err != nil {
+			d.Log.Warn("push: dropping what was told at the routine", "user", user, "err", err)
+		}
+		return
+	}
 	if until, ok := d.pushWait[u.Notify]; ok && now.Before(until) {
 		d.pushAt(until)
 		return
@@ -149,7 +167,6 @@ func (d *Dispatcher) tell(ctx context.Context, user string, ps []store.Push) {
 		d.pushAt(u.Pushed[len(u.Pushed)-store.PushesPerHour].Add(time.Hour))
 		return
 	}
-	msg := pushMessage(due)
 	msg.Image = pushImage(ctx, d.Store, d.Home, due)
 	if sent == store.PushesPerHour-1 {
 		msg.Text = fmt.Sprintf("The %dth message this hour, and the last: what comes next waits in yardr inbox.\n", store.PushesPerHour) + msg.Text
@@ -188,6 +205,70 @@ func (d *Dispatcher) tell(ctx context.Context, user string, ps []store.Push) {
 	default:
 		d.pushFailed(ctx, u, due, res.Status, fmt.Sprintf("%s answered %d", u.Notify, res.Status))
 	}
+}
+
+// tellRoutine tells the user m at their routine (User.Webhook), once for
+// the batch, and records how it ended as their LastWebhook. It is
+// best-effort beside the phone: not set up (no URL, a URL the guard
+// refuses) is skipped without a word, as a missed wake is covered by the
+// next batch; a routine that does not answer, or answers no success, is
+// logged and recorded, and the words proceed all the same — a down
+// routine never retries the phone for it. No picture goes: a routine
+// takes none.
+func (d *Dispatcher) tellRoutine(ctx context.Context, u *store.User, m notify.Message, count int) {
+	m.Image = ""
+	cctx, cancel := context.WithTimeout(ctx, d.PushTimeout)
+	res, err := notify.Through(cctx, d.Store, d.Home, u.Webhook, u, m)
+	cancel()
+	record := func(r store.PushResult) {
+		r.At, r.Source, r.Count = d.now(), u.Webhook, count
+		if last := u.LastWebhook; last != nil && last.Source == r.Source && last.Reason == r.Reason && last.Status == r.Status && last.Error == r.Error {
+			return // said when it was first met, as a phone's is
+		}
+		if err := d.Store.WebhookTried(ctx, u.Name, r); err != nil {
+			d.Log.Warn("push: recording the routine's answer", "user", u.Name, "err", err)
+		}
+	}
+	var notSetUp *notify.NotSetUp
+	switch {
+	case errors.As(err, &notSetUp):
+		record(store.PushResult{Reason: store.PushNotSetUp, Error: err.Error()})
+	case err != nil:
+		d.Log.Warn("user not told at their routine", "user", u.Name, "source", u.Webhook, "err", err)
+		record(store.PushResult{Reason: store.PushGaveUp, Error: err.Error()})
+	case res.OK():
+		record(store.PushResult{Status: res.Status})
+	case finalStatus(res.Status):
+		record(store.PushResult{Reason: store.PushRefused, Status: res.Status, Error: fmt.Sprintf("%s answered %d", u.Webhook, res.Status)})
+	default:
+		d.Log.Warn("user not told at their routine", "user", u.Name, "source", u.Webhook, "status", res.Status)
+		record(store.PushResult{Reason: store.PushGaveUp, Status: res.Status, Error: fmt.Sprintf("%s answered %d", u.Webhook, res.Status)})
+	}
+}
+
+// pushItems are what a message about ps is about, as numbers beside its
+// words, in the order the words name them: a mail by its seq, an ask by
+// its bead and ask seq, a notification by its seq, its bead where it has
+// one, what happened and the source it came through.
+func pushItems(ps []store.Push) []hooks.Item {
+	items := make([]hooks.Item, 0, len(ps))
+	for _, p := range ps {
+		switch {
+		case p.Ask != nil:
+			items = append(items, hooks.Item{Kind: store.PushAsk, Bead: p.Ask.Bead, Ask: p.Ask.Ask})
+		case p.Mail != nil:
+			items = append(items, hooks.Item{Kind: store.PushMail, Seq: p.Seq})
+		case p.Note != nil:
+			items = append(items, hooks.Item{Kind: store.PushNotification, Seq: p.Seq, Bead: p.Note.Bead, Note: p.Note.Kind, Source: p.Note.Source})
+		case p.Part == store.PushAsk:
+			items = append(items, hooks.Item{Kind: store.PushAsk, Bead: p.AskBead, Ask: p.AskSeq})
+		case p.Part == store.PushNotification:
+			items = append(items, hooks.Item{Kind: store.PushNotification, Seq: p.Seq})
+		default:
+			items = append(items, hooks.Item{Kind: store.PushMail, Seq: p.Seq})
+		}
+	}
+	return items
 }
 
 // finalStatus reports whether a source's answer says that the same message
@@ -397,6 +478,11 @@ func pushLine(p store.Push) (title, text string) {
 			text = "(with files)"
 		}
 		return title, text
+	case p.Ask != nil && p.Ask.Secret != nil:
+		// A secret ask is told by its number alone, on the phone and at
+		// the routine alike: that a question waits, never what it asks
+		// or who asks it.
+		return "A question waits", fmt.Sprintf("Question %d waits for you.", p.Ask.Ask)
 	case p.Ask != nil:
 		return p.Ask.Asker + " asks", clipRunes(p.Ask.Question, pushMailStart)
 	case p.Note != nil && p.Note.Bead != "":

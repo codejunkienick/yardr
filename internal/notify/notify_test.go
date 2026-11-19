@@ -449,16 +449,17 @@ func TestReady(t *testing.T) {
 	}
 }
 
-// teller is an adapter that can tell a person, as none yardr has can yet.
+// teller is an adapter that can tell a person.
 type teller struct {
 	hooks.Adapter
 	env               map[string]string
 	title, text, link string
+	items             []hooks.Item
 }
 
 func (*teller) NotifyEnv() []string { return []string{"TELL_ID", "TELL_KEY"} }
-func (a *teller) Notify(_ context.Context, env map[string]string, title, text, link string) (int, error) {
-	a.env, a.title, a.text, a.link = env, title, text, link
+func (a *teller) Notify(_ context.Context, env map[string]string, title, text, link string, items []hooks.Item) (int, error) {
+	a.env, a.title, a.text, a.link, a.items = env, title, text, link, items
 	return 202, nil
 }
 
@@ -471,7 +472,7 @@ type imager struct {
 	onImage func()
 }
 
-func (a *imager) NotifyImage(ctx context.Context, env map[string]string, title, text, link, image string) (int, error) {
+func (a *imager) NotifyImage(ctx context.Context, env map[string]string, title, text, link, image string, items []hooks.Item) (int, error) {
 	a.image = image
 	if a.onImage != nil {
 		a.onImage()
@@ -479,7 +480,7 @@ func (a *imager) NotifyImage(ctx context.Context, env map[string]string, title, 
 	if a.fail != nil {
 		return 0, a.fail
 	}
-	return a.teller.Notify(ctx, env, title, text, link)
+	return a.teller.Notify(ctx, env, title, text, link, items)
 }
 
 // A source yardr has in Go tells a person through the same Send: who calls
@@ -493,8 +494,8 @@ func TestSendThroughAnAdapter(t *testing.T) {
 	if _, err := st.AddUser(ctx, "ada", "ada"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := hooks.NotifierFor("linear"); ok || len(hooks.Notifying()) != 1 || hooks.Notifying()[0] != "tell" {
-		t.Fatalf("Notifying = %v: no adapter of yardr's own tells a person yet", hooks.Notifying())
+	if _, ok := hooks.NotifierFor("linear"); ok || fmt.Sprint(hooks.Notifying()) != "[routine tell]" {
+		t.Fatalf("Notifying = %v: want the routine adapter and this test's", hooks.Notifying())
 	}
 	env := envFile(t, "TELL_ID=ada-there\nTELL_KEY=k-1\nOTHER=x\n", 0o600)
 	if _, err := st.SetUser(ctx, "ada", map[string]string{store.UserNotify: "tell", store.UserEnvFile: env}, "ada"); err != nil {

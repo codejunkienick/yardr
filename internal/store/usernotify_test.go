@@ -307,3 +307,52 @@ func TestUserSetTakesAnAdapterThatNotifies(t *testing.T) {
 		t.Fatalf("an adapter that does not: %v", err)
 	}
 }
+
+// The second telling takes a source yardr has in Go that can tell a
+// person, and no declared one; the two are named together, and how the
+// routine's last send ended is kept apart from the phone's.
+func TestUserSetWebhook(t *testing.T) {
+	// Sequential: stubs the notifyAdapters list, which every SetUser reads.
+	store.NotifyAdapters(func() []string { return []string{"routine"} })
+	t.Cleanup(func() { store.NotifyAdapters(func() []string { return nil }) })
+	st := storetest.New(t)
+	ctx := context.Background()
+	if err := st.SetSetting(ctx, store.OperatorSetting, "jo", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddUser(ctx, "ada", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutSource(ctx, "pushover.yaml", sourceFile, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	u, err := st.SetUser(ctx, "ada", map[string]string{store.UserWebhook: "routine"}, "ada")
+	if err != nil || u.Webhook != "routine" || u.Told() != "through routine" {
+		t.Fatalf("webhook alone: %+v, %v", u, err)
+	}
+	if _, err := st.SetUser(ctx, "ada", map[string]string{store.UserWebhook: "pushover"}, "ada"); err == nil ||
+		!strings.Contains(err.Error(), "beside their phone") || !strings.Contains(err.Error(), "routine") {
+		t.Fatalf("a declared source as webhook: %v", err)
+	}
+	if _, err := st.SetUser(ctx, "ada", map[string]string{store.UserWebhook: "nowhere"}, "ada"); err == nil {
+		t.Fatal("a source nobody has as webhook")
+	}
+	u, err = st.SetUser(ctx, "ada", map[string]string{store.UserNotify: "pushover"}, "ada")
+	if err != nil || u.Told() != "through pushover and routine" {
+		t.Fatalf("both tellings: %+v, %v", u, err)
+	}
+	if err := st.WebhookTried(ctx, "ada", store.PushResult{Source: "routine", Status: 200, Count: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.WebhookTried(ctx, "ada", store.PushResult{Reason: "lost"}); err == nil {
+		t.Fatal("a reason no send ends with")
+	}
+	u, _ = st.GetUser(ctx, "ada")
+	if u.LastWebhook == nil || u.LastWebhook.Status != 200 || u.LastWebhook.Count != 2 || u.LastPush != nil {
+		t.Fatalf("the record: %+v", u)
+	}
+	// Together nowhere drops what waited, as notify= alone did.
+	if u, err = st.SetUser(ctx, "ada", map[string]string{store.UserNotify: "", store.UserWebhook: ""}, "ada"); err != nil || u.Told() != "" {
+		t.Fatalf("nowhere: %+v, %v", u, err)
+	}
+}

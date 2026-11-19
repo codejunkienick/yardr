@@ -411,6 +411,7 @@ var Access = map[string]Class{
 	"Pushes":            Read,
 	"DropPushes":        Admin,
 	"PushTried":         Admin,
+	"WebhookTried":      Admin,
 	"IssueMoves":        Read,
 	"IssueMoveAllowed":  Read,
 	"IssueMoveFailed":   Admin,

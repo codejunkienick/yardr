@@ -153,6 +153,7 @@ with `yardr bead note --page`, and `yardr page show` prints that frame
 | `slack` | mentions and direct messages in a Slack workspace, answered in their threads, in the yard | none: `kind: source` | of none: `yardr pack apply slack` |
 | `posthog` | PostHog itself, in the yard: HogQL queries, error tracking issues, session recordings and Replay Vision observations read, a new error issue heard | none: `kind: source` | of none: `yardr pack apply posthog` |
 | `webhook` | any service that POSTs to a URL or takes one (Zapier, Make, n8n), in the yard: its POSTs heard, a JSON object sent to its URL | none: `kind: source` | of none: `yardr pack apply webhook` |
+| `routine` | a person's routine told beside their phone, in the yard: the URL it is told at, given as their own credential | none: `kind: source` | of none: `yardr pack apply routine` |
 | `cloudflare` | Cloudflare itself, in the yard: accounts, zones, Workers scripts and Email Routing rules and addresses read; Workers uploaded, secrets put and rules made or edited, each on its own card | none: `kind: source` | of none: `yardr pack apply cloudflare` |
 | `pageframe` | the page frame yardr carries: one HTML file with the design system's colours and type, a title block, tiles, tables, charts and tabs | none: a frame and nothing else | of none: it brings no flow, group or source |
 

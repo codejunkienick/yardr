@@ -77,3 +77,23 @@ func wantReachInCard(t *testing.T, lines string, s *AskSecret) {
 		t.Errorf("the card says where the value lands %d times, want once:\n%s", strings.Count(lines, "lands in:"), lines)
 	}
 }
+
+// A user's own credential in a source that tells in Go reaches the
+// telling, not a call made as them. Sequential for the stub below.
+func TestSecretReachRoutine(t *testing.T) {
+	notifyAdapters = func() []string { return []string{"routine"} }
+	t.Cleanup(func() { notifyAdapters = func() []string { return nil } })
+	s := AskSecret{Source: "routine", As: "ada"}
+	want := []string{
+		"lands in: ada's env_file, or users/ada.env in the yard's home when it has none",
+		"read by: the yard, at each message it sends ada through the source routine, from the file at each send",
+		"not reached: calls made without --as, thread commands, other users' files",
+	}
+	if got := s.Reach(); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("Reach:\n got %q\nwant %q", got, want)
+	}
+	if line := s.Line(); !strings.Contains(line, "read by the yard at each message it sends ada through routine") ||
+		strings.Contains(line, "calls made as") {
+		t.Fatalf("Line = %q", line)
+	}
+}

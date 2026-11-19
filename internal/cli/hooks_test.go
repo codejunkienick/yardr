@@ -36,7 +36,7 @@ func TestHookAddGitHub(t *testing.T) {
 		t.Fatalf("stored hook %+v %v", h, err)
 	}
 	_, err = run(t, a.hookCmd(), "add", "x", "--source", "gitlab", "--secret-file", f)
-	if err == nil || !strings.Contains(err.Error(), "one of token, or a declared source with a hook key") {
+	if err == nil || !strings.Contains(err.Error(), "one of routine, token, or a declared source with a hook key") {
 		t.Fatalf("unknown source err = %v", err)
 	}
 	for _, c := range a.hookCmd().Commands() {

@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -29,10 +31,14 @@ import (
 
 // Message is what is told. Link is "" where there is nothing a person
 // could open, and Image the local path of the picture it carries, "" for
-// a message without one. A message carries one picture at most.
+// a message without one. A message carries one picture at most. Items
+// are what the message is about, as numbers beside its words, which a
+// source in Go carries to a person's routine; a declared source's call
+// has no place for them and sends the words alone.
 type Message struct {
 	Title, Text, Link string
 	Image             string
+	Items             []hooks.Item
 }
 
 // Sent is a send the source answered.
@@ -110,7 +116,7 @@ const fallbackTimeout = 10 * time.Second
 // before a user is given it. home is the yard's home, which a relative
 // notify image command runs from.
 func Through(ctx context.Context, st Store, home, name string, u *store.User, m Message) (*Sent, error) {
-	p, err := providerOf(ctx, st, name)
+	p, err := providerOf(ctx, st, name, u)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +162,7 @@ func Through(ctx context.Context, st Store, home, name string, u *store.User, m 
 // Names are the names a user's env file sets to be told through the source
 // name.
 func Names(ctx context.Context, st Store, name string) ([]string, error) {
-	p, err := providerOf(ctx, st, name)
+	p, err := providerOf(ctx, st, name, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -170,18 +176,25 @@ func Ready(ctx context.Context, st Store, u *store.User) (state string, err erro
 	if u.Notify == "" {
 		return "", notSetUp("user %s names no source that tells them: yardr user set %s %s=<source>", u.Name, u.Name, store.UserNotify)
 	}
-	p, err := providerOf(ctx, st, u.Notify)
+	return ReadyThrough(ctx, st, u.Notify, u)
+}
+
+// ReadyThrough is Ready for the source name, whichever of the user's
+// tell settings names it: whether u could be told through name, without
+// sending anything.
+func ReadyThrough(ctx context.Context, st Store, name string, u *store.User) (state string, err error) {
+	p, err := providerOf(ctx, st, name, u)
 	if err != nil {
 		return "", err
 	}
-	_, state, err = userEnv(u, u.Notify, p.names())
+	_, state, err = userEnv(u, name, p.names())
 	return state, err
 }
 
-func providerOf(ctx context.Context, st Store, name string) (provider, error) {
+func providerOf(ctx context.Context, st Store, name string, u *store.User) (provider, error) {
 	// An adapter first: a declared source cannot have the name of one.
 	if n, ok := hooks.NotifierFor(name); ok {
-		return compiled{n}, nil
+		return compiled{n: n, operator: u != nil && u.IsOperator()}, nil
 	}
 	src, err := st.GetSource(ctx, name)
 	if err != nil {
@@ -256,6 +269,8 @@ func (p declared) send(ctx context.Context, home string, env map[string]string, 
 		return p.sendImage(ctx, home, env, m, cred)
 	}
 	n := p.d.Notify
+	// The call has no place for m.Items and takes the words alone, byte
+	// for byte as before items: a phone push is unchanged by them.
 	res, err := source.Do(ctx, p.d, n.Call, p.d.TellParams(env[n.AddressEnv], m.Title, m.Text, m.Link), cred, store.ReadSecretFile)
 	if err != nil {
 		return 0, err
@@ -294,7 +309,13 @@ func (p declared) sendImage(ctx context.Context, home string, env map[string]str
 }
 
 // compiled tells through a source yardr has in Go.
-type compiled struct{ n hooks.Notifier }
+type compiled struct {
+	n hooks.Notifier
+	// operator is whether the person told holds the operator role: their
+	// routine URL is held to what an operator may give, a member's to a
+	// public name (checkRoutineURL).
+	operator bool
+}
 
 func (p compiled) names() []string { return p.n.NotifyEnv() }
 
@@ -304,10 +325,65 @@ func (p compiled) pictured() bool {
 }
 
 func (p compiled) send(ctx context.Context, _ string, env map[string]string, m Message) (int, error) {
-	if m.Image != "" {
-		if im, ok := p.n.(hooks.Imager); ok {
-			return im.NotifyImage(ctx, env, m.Title, m.Text, m.Link, m.Image)
+	// The one guard of a compiled tell, so the adapters stay dumb: the
+	// URL a routine is told at is held here, before any of it is sent to.
+	if url, ok := env["ROUTINE_URL"]; ok {
+		if err := checkRoutineURL(url, p.operator); err != nil {
+			return 0, err
 		}
 	}
-	return p.n.Notify(ctx, env, m.Title, m.Text, m.Link)
+	if m.Image != "" {
+		if im, ok := p.n.(hooks.Imager); ok {
+			return im.NotifyImage(ctx, env, m.Title, m.Text, m.Link, m.Image, m.Items)
+		}
+	}
+	return p.n.Notify(ctx, env, m.Title, m.Text, m.Link, m.Items)
+}
+
+// checkRoutineURL holds the URL a routine is told at to what who gave it
+// may make the yard call. An operator's is held as every address is
+// (checkAddress, through AddressWords): https anywhere, plain http to
+// this machine for a stand-in or a routine of their own here. A member's
+// is held to a public name over https alone: no address of a machine (a
+// literal, private or not), no name without a dot, no loopback, so what
+// a member gives cannot aim the yard at this machine or inside its
+// network. Neither refusal names the URL. No name is resolved here, so
+// a name that resolves inside is a follow-up, not this guard's to catch.
+func checkRoutineURL(raw string, operator bool) error {
+	if operator {
+		if words := source.AddressWords(raw); words != "" {
+			return notSetUp("the value of ROUTINE_URL %s", words)
+		}
+		return nil
+	}
+	u, err := url.Parse(raw)
+	// The resolver takes forms of this machine no DNS answers for, and
+	// the checks below must see past them: a trailing dot (localhost.),
+	// a .localhost name, and a short or hex literal (127.1, 0x7f.1),
+	// whose last label begins with no letter where a public name's does.
+	host := ""
+	if err == nil {
+		host = strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	}
+	last := host[strings.LastIndex(host, ".")+1:]
+	switch {
+	case err != nil || u.Host == "" || u.Opaque != "":
+		return notSetUp("the value of ROUTINE_URL is no address: want https://host/path")
+	case u.User != nil:
+		return notSetUp("the value of ROUTINE_URL has a user or password in it")
+	case u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(raw, "?#"):
+		return notSetUp("the value of ROUTINE_URL has a query or a fragment")
+	case u.Scheme != "https":
+		return notSetUp("the value of ROUTINE_URL is not https://: a member's routine is told over https")
+	case net.ParseIP(host) != nil || last == "" || last[0] < 'a' || last[0] > 'z':
+		return notSetUp("the value of ROUTINE_URL is an address of a machine, not a name: a member's routine is a public name")
+	case source.LoopbackHost(host) || strings.HasSuffix(host, ".localhost"):
+		return notSetUp("the value of ROUTINE_URL is this machine: a member's routine is a public name")
+	case !strings.Contains(host, "."):
+		return notSetUp("the value of ROUTINE_URL names no public host: want a name with a dot in it")
+	}
+	if words := source.AddressWords(raw); words != "" {
+		return notSetUp("the value of ROUTINE_URL %s", words)
+	}
+	return nil
 }

@@ -49,11 +49,11 @@ func TestMissingSourceNamesItsPack(t *testing.T) {
 		{"hook add", func() error {
 			_, err := run(t, a.hookCmd(), "add", "lin", "--source", "linear", "--secret-file", secret)
 			return err
-		}, `--source "linear": one of token, or a declared source with a hook key` + hint},
+		}, `--source "linear": one of routine, token, or a declared source with a hook key` + hint},
 		{"subscribe", func() error {
 			_, err := run(t, a.subscribeCmd(), "yardmaster", "linear")
 			return err
-		}, `--source "linear": one of token, or a declared source with a hook key` + hint},
+		}, `--source "linear": one of routine, token, or a declared source with a hook key` + hint},
 		{"thread open", func() error {
 			_, err := run(t, a.threadOpenCmd(), "linear", "--in", "ENG", "T")
 			return err

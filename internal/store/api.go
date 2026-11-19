@@ -299,6 +299,7 @@ type API interface {
 	Pushes(ctx context.Context) ([]Push, error)
 	DropPushes(ctx context.Context, name string, seqs []uint64) error
 	PushTried(ctx context.Context, name string, seqs []uint64, res PushResult) error
+	WebhookTried(ctx context.Context, name string, res PushResult) error
 	IssueMoves(ctx context.Context) ([]IssueMove, error)
 	IssueMoveAllowed(ctx context.Context, id string) (string, error)
 	IssueMoveFailed(ctx context.Context, id, reason string, retryAt time.Time) error

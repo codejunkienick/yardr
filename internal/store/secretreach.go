@@ -1,6 +1,14 @@
 package store
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
+
+// notifierSource reports whether name is a source yardr has in Go that
+// can tell a person: what a user's webhook is held to (checkWebhook),
+// read here for what a secret given for one reaches.
+func notifierSource(name string) bool { return slices.Contains(notifyAdapters(), name) }
 
 // A secret ask's card says what it asks for (Line). Reach says what the value
 // reaches once it is given, and what it does not: the file it lands in, the
@@ -47,6 +55,15 @@ func (s AskSecret) Reach() []string {
 			fmt.Sprintf("read by: %s's thread commands (yardr reply, thread open, thread state)", s.Crew),
 			fmt.Sprintf("not reached: declared calls (yardr call %s ...), which read the source's own file; other crew members' files; a session already running", s.Source),
 			mintReach,
+		}
+	case s.As != "" && notifierSource(s.Source):
+		// A source in Go that tells a person reads the value as the URL
+		// it tells them at, not as a credential of a call made as them:
+		// the notifier's line stands in the calls-made-as line's place.
+		return []string{
+			fmt.Sprintf("lands in: %s's env_file, or users/%s.env in the yard's home when it has none", s.As, s.As),
+			fmt.Sprintf("read by: the yard, at each message it sends %s through the source %s, from the file at each send", s.As, s.Source),
+			"not reached: calls made without --as, thread commands, other users' files",
 		}
 	case s.As != "":
 		return []string{

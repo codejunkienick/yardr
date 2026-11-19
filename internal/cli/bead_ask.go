@@ -200,8 +200,8 @@ have. It is not --for-user: that asks for the user's own address in a
 source that tells people, and this for the credential a call made as them
 reads; a source may have both to ask for. The card and the answer say what
 the value reaches: calls made as the user (yardr call --as, yardr source
-check --as), and not a call made without --as, a thread command or another
-user's file.
+check --as), or each message the yard sends that user through a source in
+Go that tells them; never a call without --as, a thread or another file.
 
 --secret-login <login> asks for the input of the harness login that waits
 under that reference: the login its leader's input need names. The value

@@ -27,12 +27,15 @@ import (
 // one per thing a person turns on; Cloudflare's as one declaration whose
 // every call the yard makes itself, with no command beside it), one pack per service that tells a user
 // outside the yard, a declaration with the notify key that sends and no
-// commands, and webhook, one declaration for every service that POSTs to
-// a URL or takes one (Zapier, Make, n8n), whose credential is that URL.
+// commands, webhook, one declaration for every service that POSTs to
+// a URL or takes one (Zapier, Make, n8n), whose credential is that URL,
+// and routine, the giving half of the routine told beside a phone: a
+// declaration of its URL credential alone, whose telling is the adapter
+// yardr has in Go.
 // pageframe is of no kind, for no depot's flow and no integration: the page
 // frame yardr brings, one HTML file and nothing beside it.
 //
-//go:embed starter dir contributors design ci-red linear github google-mail google-drive google-docs google-calendar cloudflare pushover telegram slack posthog webhook website pageframe
+//go:embed starter dir contributors design ci-red linear github google-mail google-drive google-docs google-calendar cloudflare pushover telegram slack posthog webhook routine website pageframe
 var FS embed.FS
 
 // Starter and Dir are the embedded packs by the kind of depot each is

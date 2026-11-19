@@ -85,7 +85,7 @@ func TestUserSetAndSourceCheckUser(t *testing.T) {
 		t.Fatalf("an env_file without the name: %v", err)
 	}
 	said += err.Error()
-	if _, err = run(t, ada.userCmd(), "set", "ada", "push=mail"); err == nil || !strings.Contains(err.Error(), "want notify=<source>, env_file=<file>, tell=<notifications,mail,asks>, role=operator|member or own_login_only=yes|no, each once") {
+	if _, err = run(t, ada.userCmd(), "set", "ada", "push=mail"); err == nil || !strings.Contains(err.Error(), "want notify=<source>, webhook=<source>, env_file=<file>, tell=<notifications,mail,asks>, role=operator|member or own_login_only=yes|no, each once") {
 		t.Fatalf("a setting a user does not have: %v", err)
 	}
 	if u, _ := st.GetUser(ctx, "ada"); u.Notify != "" || u.EnvFile != "" {

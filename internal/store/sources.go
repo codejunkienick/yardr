@@ -699,6 +699,14 @@ func (k *sourceKey) keyed(home string) *SourceKeyed {
 			out.As = u.Name
 			out.State = fmt.Sprintf("%s is set in %s", strings.Join(k.names, " and "), k.file)
 			out.Next = fmt.Sprintf("yardr source check %s --as %s", k.src.Name, u.Name)
+			if notifierSource(k.src.Name) {
+				// The value is the address the yard tells the user at,
+				// not a credential a check made as them reads.
+				out.Next = fmt.Sprintf("yardr user set %s %s=%s tells %s beside their phone through it", u.Name, UserWebhook, k.src.Name, u.Name)
+				if u.Webhook == k.src.Name {
+					out.Next = fmt.Sprintf("the yard sends %s's messages through %s from the file at each send", u.Name, k.src.Name)
+				}
+			}
 			return out
 		}
 		out.User = u.Name

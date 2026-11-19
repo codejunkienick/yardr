@@ -54,7 +54,10 @@ func TestAdapterFieldsAreWhereKeys(t *testing.T) {
 		header func(file string) http.Header
 		keys   []string // what the store lets the source filter on, for the note
 	}{
-		"token": {"testdata/token_*.json", func(string) http.Header { return nil }, store.WhereKeys},
+		// routine takes no deliveries and normalizes none: it is an
+		// adapter so that telling finds it, with no fields to hold.
+		"routine": {"", nil, nil},
+		"token":   {"testdata/token_*.json", func(string) http.Header { return nil }, store.WhereKeys},
 	}
 	st, _ := storetest.NewOwned(t)
 	ctx := context.Background()
@@ -65,6 +68,9 @@ func TestAdapterFieldsAreWhereKeys(t *testing.T) {
 		src, ok := sources[source]
 		if !ok {
 			t.Errorf("%s adapter has no fixture entry", source)
+			continue
+		}
+		if src.glob == "" {
 			continue
 		}
 		checkFields(t, st, ctx, source, src.glob, src.header, hooks.Adapters[source], src.keys)

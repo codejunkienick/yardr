@@ -135,6 +135,10 @@ func (s AskSecret) Line() string {
 		return fmt.Sprintf("a secret: %s, for crew member %s in the source %s (%s); the env_file line is the one written, and it takes effect when %s next starts (rotation or yardr crew restart %s)",
 			s.Names(), s.Crew, s.Source, s.Host, s.Crew, s.Crew)
 	}
+	if s.As != "" && notifierSource(s.Source) {
+		return fmt.Sprintf("a secret: %s, %s's own address in the source %s (%s), read by the yard at each message it sends %s through %s",
+			s.Names(), s.As, s.Source, s.Host, s.As, s.Source)
+	}
 	if s.As != "" {
 		return fmt.Sprintf("a secret: %s, %s's own credential for the source %s (%s), read as %s when a call is made --as %s",
 			s.Names(), s.As, s.Source, s.Host, s.As, s.As)

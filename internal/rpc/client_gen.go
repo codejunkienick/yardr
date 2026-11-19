@@ -791,6 +791,9 @@ func (c *Client) DropPushes(ctx context.Context, name string, seqs []uint64) err
 func (c *Client) PushTried(ctx context.Context, name string, seqs []uint64, res store.PushResult) error {
 	return c.call(ctx, "PushTried", nil, name, seqs, res)
 }
+func (c *Client) WebhookTried(ctx context.Context, name string, res store.PushResult) error {
+	return c.call(ctx, "WebhookTried", nil, name, res)
+}
 func (c *Client) IssueMoves(ctx context.Context) ([]store.IssueMove, error) {
 	return callV[[]store.IssueMove](c, ctx, "IssueMoves")
 }

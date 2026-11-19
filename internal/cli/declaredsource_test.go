@@ -72,7 +72,7 @@ func TestHookAddDeclaredSource(t *testing.T) {
 		t.Fatalf("mapped declared source err = %v", err)
 	}
 	_, err = run(t, a.hookCmd(), "add", "x", "--source", "acme2", "--secret-file", f)
-	if err == nil || !strings.Contains(err.Error(), "one of token, or a declared source with a hook key") {
+	if err == nil || !strings.Contains(err.Error(), "one of routine, token, or a declared source with a hook key") {
 		t.Fatalf("unknown source err = %v", err)
 	}
 }

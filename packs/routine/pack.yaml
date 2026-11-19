@@ -1,0 +1,18 @@
+# A person's routine as a pack of kind source: the giving half of the
+# routine the yard tells beside their phone, imported into the yard and
+# into no depot. The telling itself is yardr's in Go (the routine
+# adapter, which POSTs each message to the URL in the person's file);
+# this pack declares the one credential that URL is given as, so it is
+# asked for and kept as any user's own credential is.
+#
+#   yardr pack apply routine
+#
+# The source is named routine, as the adapter is: the pack's source
+# wins the name for giving, and telling reads the adapter.
+name: routine
+kind: source
+setup: SETUP.md
+
+sources:
+  routine:
+    declaration: routine.yaml

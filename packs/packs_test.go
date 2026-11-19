@@ -56,8 +56,8 @@ func TestEmbeddedPacksAreValid(t *testing.T) {
 	}
 	// No consts name the notify packs: no Go outside a test names
 	// either service, so here they are words.
-	if !slices.Equal(names, []string{packs.CiRed, packs.Cloudflare, packs.Contributors, packs.Design, packs.Dir, packs.GitHub, "google-calendar", "google-docs", "google-drive", "google-mail", packs.Linear, packs.PageFrame, "posthog", "pushover", "slack", packs.Starter, "telegram", "webhook", packs.Website}) {
-		t.Errorf("embedded packs = %v, want ci-red, cloudflare, contributors, design, dir, github, google-calendar, google-docs, google-drive, google-mail, linear, pageframe, posthog, pushover, slack, starter, telegram, webhook and website", names)
+	if !slices.Equal(names, []string{packs.CiRed, packs.Cloudflare, packs.Contributors, packs.Design, packs.Dir, packs.GitHub, "google-calendar", "google-docs", "google-drive", "google-mail", packs.Linear, packs.PageFrame, "posthog", "pushover", "routine", "slack", packs.Starter, "telegram", "webhook", packs.Website}) {
+		t.Errorf("embedded packs = %v, want ci-red, cloudflare, contributors, design, dir, github, google-calendar, google-docs, google-drive, google-mail, linear, pageframe, posthog, pushover, routine, slack, starter, telegram, webhook and website", names)
 	}
 }
 
