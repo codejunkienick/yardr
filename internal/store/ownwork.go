@@ -121,14 +121,19 @@ func resolveProject(depots []Depot, project string) (string, error) {
 // themselves, and the closed fields say when finished work finished and,
 // where it was closed with one, why.
 type OwnBead struct {
-	ID          string     `json:"id"`
-	Title       string     `json:"title"`
-	Type        string     `json:"type"`
-	Stage       string     `json:"stage"`
-	Status      string     `json:"status"`
-	Depot       *string    `json:"depot,omitempty"`
-	Labels      []string   `json:"labels"`
-	Hold        bool       `json:"hold,omitempty"`
+	ID     string   `json:"id"`
+	Title  string   `json:"title"`
+	Type   string   `json:"type"`
+	Stage  string   `json:"stage"`
+	Status string   `json:"status"`
+	Depot  *string  `json:"depot,omitempty"`
+	Labels []string `json:"labels"`
+	Hold   bool     `json:"hold,omitempty"`
+	// BlockedBy is the first open bead holding it, "" where none holds
+	// it: the oldest holding edge's blocker, as the arrivals board
+	// reads it. A holder the reader may not see reads as no holder, as
+	// a row the reader may not see is left out of the list.
+	BlockedBy   string     `json:"blocked_by,omitempty"`
 	CreatedBy   *string    `json:"created_by,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
@@ -369,7 +374,10 @@ func (s *Store) RewordBead(ctx context.Context, bead, title, body, actor string)
 // finished inside it, from since until now. A since left out is the last
 // 24 hours. Only the user reads it, and an operator any user's
 // (mayReadInbox); what the reader may not see is left out, as if it were
-// not there. Journals and memories are no work and are left out, as a
+// not there. Each row names the first open bead holding it, absent where
+// none holds it; a holder the reader may not see is left out with the
+// row reading unblocked, as a row the reader may not see is left out of
+// the list. Journals and memories are no work and are left out, as a
 // listing leaves them. It keeps no cursor and no record of when the
 // person last looked: each call is answered from the window it is given.
 func (s *Store) OwnBeads(ctx context.Context, user string, since time.Time, actor string) ([]OwnBead, error) {
@@ -407,12 +415,45 @@ func (s *Store) OwnBeads(ctx context.Context, user string, since time.Time, acto
 		if b.Status == "closed" && (b.ClosedAt == nil || b.ClosedAt.Before(since) || b.ClosedAt.After(present)) {
 			continue
 		}
-		out = append(out, OwnBead{
+		row := OwnBead{
 			ID: b.ID, Title: b.Title, Type: b.Type, Stage: b.Stage, Status: b.Status,
 			Depot: b.Depot, Labels: b.Labels, Hold: b.Hold, CreatedBy: b.CreatedBy,
 			CreatedAt: b.CreatedAt, UpdatedAt: b.UpdatedAt,
 			ClosedAt: b.ClosedAt, CloseReason: b.CloseReason,
-		})
+		}
+		blocked, err := s.ownBlockedBy(ctx, b.ID, actor)
+		if err != nil {
+			return nil, err
+		}
+		row.BlockedBy = blocked
+		out = append(out, row)
 	}
 	return out, nil
+}
+
+// ownBlockedBy is the first open bead holding bead now, "" where none
+// holds it: the oldest holding edge's blocker, as the arrivals board
+// reads it. A holder the viewer may not see reads as no holder: this is
+// the first network exposure of dep edges, so a hidden block reads
+// unblocked rather than teaching the reader another bead's id.
+func (s *Store) ownBlockedBy(ctx context.Context, bead, viewer string) (string, error) {
+	holding, err := s.HoldingDeps(ctx, bead)
+	if err != nil {
+		return "", err
+	}
+	if len(holding) == 0 {
+		return "", nil
+	}
+	holder := holding[0].From
+	var sees bool
+	if err := s.read(func(tx *bolt.Tx) error {
+		sees = s.may(ctx, tx, viewer, ActSee, Object{Kind: KindBead, Name: holder}) == nil
+		return nil
+	}); err != nil {
+		return "", err
+	}
+	if !sees {
+		return "", nil
+	}
+	return holder, nil
 }

@@ -874,6 +874,7 @@ var apiCalls = []apiCall{
 			{"[].type", "string", "the bead's type"},
 			{"[].stage", "string", "the bead's stage"},
 			{"[].status", "string", "the bead's status: `open` or `closed`"},
+			{"[].blocked_by", "string?", "the first open bead holding it, by handle; absent where none holds it, and where the holder is one the reader may not see"},
 			{"[].depot", "string?", "the project the bead is worked in; absent on one with none"},
 			{"[].labels", "array of string", "the bead's labels"},
 			{"[].hold", "bool?", "`true` where the bead is on hold; absent otherwise"},
@@ -884,7 +885,7 @@ var apiCalls = []apiCall{
 			{"[].close_reason", "string?", "why it was closed, as written; absent where none was given, and on open work"},
 		},
 		after: "The window bounds finished work alone: open work is listed whole, whatever `since` says, so a `since` past every close lists the open work alone, as the second example does. A bead without an originator reads as the operator's, as it does everywhere else; journals and memories are no work and are left out, as a listing leaves them.\n\n" +
-			"Over the network `user` and `actor` are the device's user: left out they are filled in, and one naming anyone else is refused with no call made; on the socket `actor` is the caller's word, as for [`UserAsks`](#userasks), and only the user reads their list, and an operator any user's. Either way what the reader may not see is left out, as if it were not there. Read it again on every event that carries a bead of theirs.",
+			"Over the network `user` and `actor` are the device's user: left out they are filled in, and one naming anyone else is refused with no call made; on the socket `actor` is the caller's word, as for [`UserAsks`](#userasks), and only the user reads their list, and an operator any user's. Either way what the reader may not see is left out, as if it were not there. Each row names the first open bead holding it in `blocked_by`, absent where none holds it; a holder the reader may not see is left out with the row reading unblocked. Read it again on every event that carries a bead of theirs.",
 	},
 	{
 		method: "FileBead",
@@ -975,6 +976,23 @@ var apiCalls = []apiCall{
 			{"stopped", "bool?", "whether the close stopped a session that held the request; absent where none held it"},
 		},
 		after: "Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else is refused with no call made and nothing closed; on the socket it is the caller's word, as for [`AddNote`](#addnote). The close is then a `closed` event in the stream: read [`Bead`](#bead) again on it.",
+	},
+	{
+		// ReplyMail stands last, so the mail it sends lands after every
+		// listing has read the yard: the earlier examples are untouched.
+		method: "ReplyMail",
+		says:   "Answers one message of the caller's own mail, by its number, as mail to whoever wrote it, so the answer stands as a reply to it. The recipient is read from the letter itself: a number that is no mail of theirs — missing, what is not mail, and another's — is refused in one blind sentence that tells nothing of what the number is. Mail from another yard, from a session doing their work, and from a yard no longer linked are refused as `yardr reply` refuses them.",
+		args: []field{
+			{"mail", "number", "the message's number, as `UserInbox` lists it"},
+			{"message", "string", "the answer, in the person's words; it may not be empty or only white space"},
+			{"actor", "string", "who answers: the user's name, whose mail it is"},
+		},
+		requests: []string{`{"mail":%d,"message":"Land it.","actor":"jo"}`},
+		fields: []field{
+			{"to", "string", "who the reply went to: whoever wrote the letter"},
+			{"reply_to", "number", "the number answered"},
+		},
+		after: "Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else is refused with no call made and nothing sent; on the socket it is the caller's word, as for [`AddNote`](#addnote). The reply is then a `mail` event in the stream: read [`Conversation`](#conversation) again on it.",
 	},
 }
 
@@ -1567,6 +1585,7 @@ var apiErrors = []struct{ method, request, says string }{
 	{"AnswerAsk", `{"bead":"yd-links","ask":3,"turn":1,"option":2,"actor":"jo"}`, "A turn sent to the unguarded call, which has none:"},
 	{"FileBead", `{"title":"Water the allotment","project":"storage","actor":"jo"}`, "A project that names no depot (nothing is filed, and the refusal lists the person's projects):"},
 	{"RewordBead", `{"bead":"yd-shed","title":"A new title","actor":"jo"}`, "A request the caller did not file (nothing is changed, and the refusal says nothing of whether such work exists):"},
+	{"ReplyMail", `{"mail":999999,"message":"Friday.","actor":"jo"}`, "A number that is no mail of theirs (nothing is sent, and missing, another's and what is not mail are refused alike):"},
 }
 
 // apiYard is a yard with all a chat client meets: the user jo, the crew
@@ -2333,12 +2352,19 @@ calls:
 
 // apiLineFixtures adds richer records only when the Line call is made, so
 // the other API examples keep their own depots, routes and sequence numbers.
-// apiOwnWorkFixtures files jo's requests for the RewordBead and
-// WithdrawBead examples: one to reword twice and then withdraw, and two
-// to withdraw, one of them held by a session. They are filed here, after
-// the earlier examples have read the yard, so the listings above show the
-// yard's own beads, and all three are closed again by the last example,
-// so the counts below stand as they did.
+// apiBlockedByFixture holds one listed bead under another, after the
+// earlier examples have read the yard, so OwnBeads shows a blocked row
+// and the listings above show the yard's own beads unblocked.
+func apiBlockedByFixture(t *testing.T, st *store.Store) {
+	t.Helper()
+	if err := st.AddDep(context.Background(), "yd-train", "yd-shed", store.DepBlocks, "", "", "jo"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// apiOwnWorkFixtures files jo's requests for the RewordBead and WithdrawBead
+// examples after the earlier examples have read the yard, so the listing
+// counts stand before the last example withdraws all three requests.
 func apiOwnWorkFixtures(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()
@@ -2660,6 +2686,9 @@ func runAPI(t *testing.T, network bool) *apiRun {
 			if c.method == "Line" && i == 0 {
 				apiLineFixtures(t, st)
 			}
+			if c.method == "OwnBeads" && i == 0 {
+				apiBlockedByFixture(t, st)
+			}
 			if c.method == "RewordBead" && i == 0 {
 				apiOwnWorkFixtures(t, st)
 			}
@@ -2689,7 +2718,7 @@ func runAPI(t *testing.T, network bool) *apiRun {
 				body = fmt.Sprintf(body, seq)
 			} else if c.method == "DeliveryFiles" {
 				body = fmt.Sprintf(body, apiDelivery)
-			} else if c.method == "React" {
+			} else if c.method == "React" || c.method == "ReplyMail" {
 				// The first mail of the inbox read above.
 				seqs, _ := at(run.replies["UserInbox"][0], "mail[].seq")
 				body = fmt.Sprintf(body, mustInt(t, seqs[0]))
@@ -2822,8 +2851,8 @@ func TestCallsAreTheDocs(t *testing.T) {
 	// answers as no method at all, and the socket answers so the one call
 	// of Calls a device's token alone makes (listenerOnly): a call is
 	// added to either on purpose, here too.
-	if len(Calls) != 37 || len(OperatorCalls) != 13 || len(listenerOnly) != 1 {
-		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 37, 13 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
+	if len(Calls) != 38 || len(OperatorCalls) != 13 || len(listenerOnly) != 1 {
+		t.Errorf("Calls has %d calls, OperatorCalls %d and listenerOnly %d, want 38, 13 and 1", len(Calls), len(OperatorCalls), len(listenerOnly))
 	}
 	for name := range listenerOnly {
 		if _, ok := Calls[name]; !ok {

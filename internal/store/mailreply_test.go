@@ -252,6 +252,145 @@ func TestMailReplyRefusesUnlinkedMail(t *testing.T) {
 	}
 }
 
+// A reply to one's own mail goes to whoever wrote it and carries the
+// answered number: the answer names both, the sender's inbox reads the
+// reply back as the letter's link, and nothing else is sent.
+func TestReplyMailAnswersOwnMail(t *testing.T) {
+	t.Parallel()
+	api, _ := replyYard(t)
+	ctx := context.Background()
+	message := "  Friday. \n"
+	if err := api.Mail(ctx, "ada", "when is the freeze over?", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	seq := replySeq(t, api)
+	replied, err := api.ReplyMail(ctx, seq, message, "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replied.To != "jo" || replied.ReplyTo != seq {
+		t.Fatalf("the answer is %+v, want to jo replying to %d", replied, seq)
+	}
+	jo, err := api.UserInbox(ctx, "jo", 0, "jo")
+	if err != nil || len(jo.Mail) != 1 || jo.Mail[0].From != "ada" ||
+		jo.Mail[0].Text != message || jo.Mail[0].Answered != seq {
+		t.Fatalf("jo's inbox = %+v, %v", jo, err)
+	}
+}
+
+// A number that is no mail of theirs is refused in one blind sentence:
+// missing, what is not mail, and another's read alike, telling nothing
+// of what the number is, and none of them is a not-found. A number of no
+// message, and nothing to say, are refused as the tool refuses them, and
+// the refusals send nothing.
+func TestReplyMailRefusesBlindAlike(t *testing.T) {
+	t.Parallel()
+	api, _ := replyYard(t)
+	ctx := context.Background()
+	if err := api.Mail(ctx, "ada", "when is the freeze over?", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := api.Mail(ctx, "jo", "the shed is painted", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	seq := replySeq(t, api)
+	box, err := api.UserInbox(ctx, "jo", 0, "jo")
+	if err != nil || len(box.Mail) != 1 {
+		t.Fatalf("jo's inbox = %+v, %v", box, err)
+	}
+	joseq := box.Mail[0].Seq
+	evs, err := api.Events(ctx, "", 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var built uint64
+	for _, e := range evs {
+		if e.Kind != "mail" {
+			built = e.Seq
+			break
+		}
+	}
+	if built == 0 {
+		t.Fatal("the log holds no event that is not mail")
+	}
+	for _, n := range []uint64{999999, built, joseq} {
+		_, err := api.ReplyMail(ctx, n, "Friday.", "ada")
+		want := fmt.Sprintf("I can't find message %d among your mail; read_my_mail lists the numbers", n)
+		if err == nil || err.Error() != want {
+			t.Fatalf("ReplyMail(%d) = %v, want %q", n, err, want)
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("ReplyMail(%d) = %v, want no not-found", n, err)
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		mail    uint64
+		message string
+		want    string
+	}{
+		{"no number", 0, "Friday.", "say which message: its number, from read_my_mail"},
+		{"nothing to say", seq, "  ", "say what you would like to answer, in your words"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := api.ReplyMail(ctx, tc.mail, tc.message, "ada")
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("ReplyMail = %v, want %q", err, tc.want)
+			}
+		})
+	}
+	mails, err := api.EventsOfKind(ctx, "mail", 10)
+	if err != nil || len(mails) != 2 {
+		t.Fatalf("mail events after the refusals = %d, want the two letters", len(mails))
+	}
+}
+
+// Mail in the caller's inbox keeps the specific words: mail from another
+// yard, from a session doing their work, and from a yard no longer linked
+// are refused as yardr reply refuses them.
+func TestReplyMailKeepsInboxSpecifics(t *testing.T) {
+	t.Parallel()
+	api, own := replyYard(t)
+	ctx := context.Background()
+	key := linkNorth(t, api)
+	takePeerMail(t, own, key, "m1", "ada", "clerk", "is the ledger closed?")
+	sessionMailToUser(t, api, own, "ada", "may I narrow it to the shed?")
+	box, err := api.UserInbox(ctx, "ada", 0, "ada")
+	if err != nil || len(box.Mail) != 2 {
+		t.Fatalf("ada's inbox = %+v, %v", box, err)
+	}
+	for _, tc := range []struct {
+		name string
+		mail uint64
+		want []string
+	}{
+		{"peer mail", box.Mail[0].Seq, []string{"another yard", "clerk@north", "terminal", "yardr mail clerk@north", "yardr reply"}},
+		{"session mail", box.Mail[1].Seq, []string{"a note on that work", "footplate", "yardmaster"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := api.ReplyMail(ctx, tc.mail, "Friday.", "ada")
+			for _, want := range tc.want {
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("ReplyMail = %v, want %q", err, want)
+				}
+			}
+		})
+	}
+	if err := api.DeletePeer(ctx, "north", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = api.ReplyMail(ctx, box.Mail[0].Seq, "Friday.", "ada")
+	for _, want := range []string{"no longer linked", "was north", "no address would reach its sender"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("ReplyMail = %v, want %q", err, want)
+		}
+	}
+	mails, merr := api.EventsOfKind(ctx, "mail", 10)
+	if merr != nil || len(mails) != 2 {
+		t.Fatalf("mail events after the refusals = %d, want the two letters", len(mails))
+	}
+}
+
 // A reply to a crew member it does not serve is refused naming whom it
 // serves; one it serves from a marked member without env is refused in
 // the own-login-only words. for= is checked first: a marked member it

@@ -89,8 +89,8 @@ func (f *fakeYard) ApproveAsk(_ context.Context, _ string, _ uint64, _ string, w
 func (f *fakeYard) Mail(context.Context, string, string, string, ...store.BlobFile) error {
 	return nil
 }
-func (f *fakeYard) MailReply(context.Context, string, string, string, uint64) error {
-	return nil
+func (f *fakeYard) ReplyMail(_ context.Context, mail uint64, _ string, _ string) (*store.RepliedMail, error) {
+	return &store.RepliedMail{To: "bob", ReplyTo: mail}, nil
 }
 func (f *fakeYard) Head(context.Context) (uint64, error) { return 0, nil }
 func (f *fakeYard) UserInbox(context.Context, string, int, string) (*store.Mailbox, error) {

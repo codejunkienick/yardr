@@ -344,3 +344,63 @@ func TestUserDeviceEventDropsABeadThePolicyHides(t *testing.T) {
 		t.Error("sam is not sent a bead-less event with yd-shed refused, want it kept")
 	}
 }
+
+// A device answers one message of its user's mail, served as its user
+// with the actor left out: the reply goes to whoever wrote it and is
+// linked to the letter, and the answer names both. A number that is no
+// mail of theirs — missing, what is not mail, and another's — is refused
+// alike, in the blind words with the code error, never not-found.
+func TestUserDeviceRepliesToItsPersonsMail(t *testing.T) {
+	st, u, jo, _ := mailYard(t)
+	ctx := context.Background()
+	h := u.Handler()
+	if err := st.Mail(ctx, "jo", "when is the freeze over?", "sam"); err != nil {
+		t.Fatal(err)
+	}
+	box, err := st.UserInbox(ctx, "jo", 0, "jo")
+	if err != nil || len(box.Mail) != 1 {
+		t.Fatalf("jo's inbox = %+v, %v", box, err)
+	}
+	seq := box.Mail[0].Seq
+	got := call(t, h, jo, "ReplyMail", fmt.Sprintf(`{"mail":%d,"message":"Friday."}`, seq))
+	if !strings.Contains(got, `"to":"sam"`) || !strings.Contains(got, fmt.Sprintf(`"reply_to":%d`, seq)) {
+		t.Fatalf("ReplyMail = %s", got)
+	}
+	sams, err := st.UserInbox(ctx, "sam", 0, "sam")
+	if err != nil || len(sams.Mail) != 1 || sams.Mail[0].From != "jo" ||
+		sams.Mail[0].Text != "Friday." || sams.Mail[0].Answered != seq {
+		t.Fatalf("sam's inbox = %+v, %v", sams, err)
+	}
+	if err := st.Mail(ctx, "sam", "the shed is painted", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	sams, err = st.UserInbox(ctx, "sam", 0, "sam")
+	if err != nil || len(sams.Mail) != 2 {
+		t.Fatalf("sam's inbox = %+v, %v", sams, err)
+	}
+	evs, err := st.Events(ctx, "", 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var built uint64
+	for _, e := range evs {
+		if e.Kind != "mail" {
+			built = e.Seq
+			break
+		}
+	}
+	if built == 0 {
+		t.Fatal("the log holds no event that is not mail")
+	}
+	missing := refusal(t, call(t, h, jo, "ReplyMail", `{"mail":999999,"message":"Friday."}`))
+	if want := "error\nI can't find message 999999 among your mail; read_my_mail lists the numbers"; missing != want {
+		t.Fatalf("a number that matches nothing was answered %q, want %q", missing, want)
+	}
+	for _, n := range []uint64{built, sams.Mail[1].Seq} {
+		body := fmt.Sprintf(`{"mail":%d,"message":"Friday."}`, n)
+		want := fmt.Sprintf("error\nI can't find message %d among your mail; read_my_mail lists the numbers", n)
+		if got := refusal(t, call(t, h, jo, "ReplyMail", body)); got != want {
+			t.Errorf("ReplyMail %s = %q, want the blind words: %q", body, got, want)
+		}
+	}
+}

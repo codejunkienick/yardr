@@ -63,6 +63,60 @@ func (s *Store) MailReply(ctx context.Context, to, text, actor string, answered 
 	})
 }
 
+// RepliedMail is what ReplyMail answers: who the reply went to, and the
+// number it answers.
+type RepliedMail struct {
+	To      string `json:"to"`
+	ReplyTo uint64 `json:"reply_to"`
+}
+
+// ReplyMail answers one message of the caller's own mail, by its number,
+// as mail to whoever wrote it, so the answer stands as a reply to it: the
+// linked-self rules in one place for every adapter, as WithdrawBead and
+// RewordBead hold their rules. The recipient is read from the letter
+// itself, never taken from the caller.
+//
+// A number that is no mail of theirs — missing, what is not mail, and
+// another's — is refused in one blind sentence, told alike so the call is
+// no way to learn what the number is; the letter is read directly by its
+// number, not by scanning the inbox. Mail in the caller's inbox is
+// answered through MailReply, whose specific words it keeps: no leak,
+// they already see it. MailReply itself is never served over the wire:
+// its write is safe, but its errors tell the log's shape.
+func (s *Store) ReplyMail(ctx context.Context, mail uint64, message, actor string) (*RepliedMail, error) {
+	switch {
+	case mail == 0:
+		return nil, fmt.Errorf("say which message: its number, from read_my_mail")
+	case strings.TrimSpace(message) == "":
+		return nil, fmt.Errorf("say what you would like to answer, in your words")
+	}
+	var to string
+	if err := s.read(func(tx *bolt.Tx) error {
+		resolved, err := paneAuthor(tx, callerOf(ctx), actor)
+		if err != nil {
+			return err
+		}
+		actor = resolved
+		var e Event
+		if ok, err := get(tx, bEvents, seqKey(mail), &e); err != nil {
+			return err
+		} else if !ok || e.Kind != "mail" || MailReceiver(e) != actor {
+			return ownRefusal("I can't find message %d among your mail; read_my_mail lists the numbers", mail)
+		}
+		to = e.Actor
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	// The letter was read outside the write MailReply makes: a logged
+	// event never changes kind or receiver, so nothing lands between the
+	// check and the write that the write would judge differently.
+	if err := s.MailReply(ctx, to, message, actor, mail); err != nil {
+		return nil, err
+	}
+	return &RepliedMail{To: to, ReplyTo: mail}, nil
+}
+
 // sendMail writes one mail to the inbox of a crew member or of a user, as
 // Mail sends it, carrying answered where it answers mail, 0 for a new
 // message. actor is resolved (paneAuthorSession) and sess its session, if

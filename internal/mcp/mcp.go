@@ -384,7 +384,7 @@ type Yard interface {
 	DeclineAsk(ctx context.Context, id string, ask uint64, words, actor string) error
 	ApproveAsk(ctx context.Context, id string, ask uint64, actor string, weighed bool, values map[string]string) (*store.AskApproved, error)
 	Mail(ctx context.Context, to, text, actor string, files ...store.BlobFile) error
-	MailReply(ctx context.Context, to, text, actor string, answered uint64) error
+	ReplyMail(ctx context.Context, mail uint64, message, actor string) (*store.RepliedMail, error)
 	Head(ctx context.Context) (uint64, error)
 	UserInbox(ctx context.Context, name string, limit int, actor string) (*store.Mailbox, error)
 	AckUserInbox(ctx context.Context, name string, through uint64, actor string) error

@@ -29,6 +29,7 @@ var selfArg = map[string][]string{
 	"Mail":                 {"actor"},
 	"MailPeer":             {"actor"},
 	"React":                {"actor"},
+	"ReplyMail":            {"actor"},
 	"AnswerAsk":            {"actor"},
 	"DeferAsk":             {"actor"},
 	"DeclineAsk":           {"actor"},

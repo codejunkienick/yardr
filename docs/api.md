@@ -213,6 +213,15 @@ POST /call/RewordBead
 {"error":{"code":"error","message":"I can't find that among the requests you filed, so nothing was changed. This only works on a request you filed yourself; for anyone else's, write to the yardmaster"}}
 ```
 
+A number that is no mail of theirs (nothing is sent, and missing, another's and what is not mail are refused alike):
+
+```
+POST /call/ReplyMail
+{"mail":999999,"message":"Friday.","actor":"jo"}
+
+{"error":{"code":"error","message":"I can't find message 999999 among your mail; read_my_mail lists the numbers"}}
+```
+
 <!-- /errors -->
 
 ## Builds
@@ -6205,6 +6214,7 @@ POST /call/OwnBeads
       "stage": "new",
       "status": "open",
       "labels": [],
+      "blocked_by": "yd-train",
       "created_by": "yardmaster",
       "created_at": "2026-10-08T09:30:00Z",
       "updated_at": "2026-10-08T09:30:00Z"
@@ -6364,6 +6374,7 @@ POST /call/OwnBeads
       "stage": "new",
       "status": "open",
       "labels": [],
+      "blocked_by": "yd-train",
       "created_by": "yardmaster",
       "created_at": "2026-10-08T09:30:00Z",
       "updated_at": "2026-10-08T09:30:00Z"
@@ -6463,6 +6474,7 @@ POST /call/OwnBeads
 | `[].type` | string | the bead's type |
 | `[].stage` | string | the bead's stage |
 | `[].status` | string | the bead's status: `open` or `closed` |
+| `[].blocked_by` | string, may be absent | the first open bead holding it, by handle; absent where none holds it, and where the holder is one the reader may not see |
 | `[].depot` | string, may be absent | the project the bead is worked in; absent on one with none |
 | `[].labels` | array of string | the bead's labels |
 | `[].hold` | bool, may be absent | `true` where the bead is on hold; absent otherwise |
@@ -6474,7 +6486,7 @@ POST /call/OwnBeads
 
 The window bounds finished work alone: open work is listed whole, whatever `since` says, so a `since` past every close lists the open work alone, as the second example does. A bead without an originator reads as the operator's, as it does everywhere else; journals and memories are no work and are left out, as a listing leaves them.
 
-Over the network `user` and `actor` are the device's user: left out they are filled in, and one naming anyone else is refused with no call made; on the socket `actor` is the caller's word, as for [`UserAsks`](#userasks), and only the user reads their list, and an operator any user's. Either way what the reader may not see is left out, as if it were not there. Read it again on every event that carries a bead of theirs.
+Over the network `user` and `actor` are the device's user: left out they are filled in, and one naming anyone else is refused with no call made; on the socket `actor` is the caller's word, as for [`UserAsks`](#userasks), and only the user reads their list, and an operator any user's. Either way what the reader may not see is left out, as if it were not there. Each row names the first open bead holding it in `blocked_by`, absent where none holds it; a holder the reader may not see is left out with the row reading unblocked. Read it again on every event that carries a bead of theirs.
 
 ### `FileBead`
 
@@ -6744,6 +6756,35 @@ POST /call/WithdrawBead
 | `stopped` | bool, may be absent | whether the close stopped a session that held the request; absent where none held it |
 
 Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else is refused with no call made and nothing closed; on the socket it is the caller's word, as for [`AddNote`](#addnote). The close is then a `closed` event in the stream: read [`Bead`](#bead) again on it.
+
+### `ReplyMail`
+
+Answers one message of the caller's own mail, by its number, as mail to whoever wrote it, so the answer stands as a reply to it. The recipient is read from the letter itself: a number that is no mail of theirs — missing, what is not mail, and another's — is refused in one blind sentence that tells nothing of what the number is. Mail from another yard, from a session doing their work, and from a yard no longer linked are refused as `yardr reply` refuses them.
+
+| argument | type | |
+|---|---|---|
+| `mail` | number | the message's number, as `UserInbox` lists it |
+| `message` | string | the answer, in the person's words; it may not be empty or only white space |
+| `actor` | string | who answers: the user's name, whose mail it is |
+
+```
+POST /call/ReplyMail
+{"mail":14,"message":"Land it.","actor":"jo"}
+
+{
+  "result": {
+    "to": "yardmaster",
+    "reply_to": 14
+  }
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `to` | string | who the reply went to: whoever wrote the letter |
+| `reply_to` | number | the number answered |
+
+Over the network `actor` is the device's user: left out it is filled in, and one naming anyone else is refused with no call made and nothing sent; on the socket it is the caller's word, as for [`AddNote`](#addnote). The reply is then a `mail` event in the stream: read [`Conversation`](#conversation) again on it.
 
 <!-- /calls -->
 

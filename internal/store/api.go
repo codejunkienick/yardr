@@ -217,6 +217,11 @@ type API interface {
 	Journal(ctx context.Context, name, kind, text, actor string) (bool, error)
 	Mail(ctx context.Context, to, text, actor string, files ...BlobFile) error
 	MailReply(ctx context.Context, to, text, actor string, answered uint64) error
+	// ReplyMail is the caller's answer to one message of their own mail
+	// (mailreply.go): the linked-self rules in one place for every
+	// adapter, wrapping MailReply. It is in rpc's Calls; MailReply
+	// itself is not, since its errors tell the log's shape.
+	ReplyMail(ctx context.Context, mail uint64, message, actor string) (*RepliedMail, error)
 	React(ctx context.Context, seq uint64, emoji, actor string) error
 	PutBlob(ctx context.Context, data []byte) (*BlobRef, error)
 	Inbox(ctx context.Context, name string, limit int) (*InboxPage, error)

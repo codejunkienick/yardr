@@ -889,9 +889,11 @@ func renderLetter(b *strings.Builder, l store.Letter, now time.Time, marked bool
 // person's mail, by its number from read_my_mail, sent as mail to whoever
 // wrote it, so the answer stands as a reply to it. It is send-only: the
 // reply is sent and the call ends, and any answer to it comes as mail,
-// which read_my_mail reads. What yardr reply answers past mail of this
-// yard -- mail from another yard, mail from a session doing the person's
-// work -- is refused in the store's words, as that command refuses it.
+// which read_my_mail reads. The rules are the store's (ReplyMail), which
+// reads the recipient from the letter itself; what yardr reply answers
+// past mail of this yard -- mail from another yard, mail from a session
+// doing the person's work -- is refused in the store's words, as that
+// command refuses it.
 func (s *Service) ReplyToMail(ctx context.Context, mail uint64, message string) (*Result, error) {
 	if err := s.requireUser(); err != nil {
 		return nil, err
@@ -903,28 +905,13 @@ func (s *Service) ReplyToMail(ctx context.Context, mail uint64, message string) 
 		return nil, fmt.Errorf("say what you would like to answer, in your words")
 	}
 	ctx = s.ctx(ctx)
-	box, err := s.Yard.UserInbox(ctx, s.User, 0, s.User)
+	replied, err := s.Yard.ReplyMail(ctx, mail, message, s.User)
 	if err != nil {
 		return nil, err
 	}
-	var from string
-	found := false
-	for _, l := range box.Mail {
-		if l.Seq == mail {
-			from, found = l.From, true
-			break
-		}
-	}
-	if !found {
-		//lint:ignore ST1005 the words are a sentence for the person, the whole of the tool's result and never wrapped, like NoUserMessage
-		return nil, fmt.Errorf("I can't find message %d among your mail; read_my_mail lists the numbers", mail)
-	}
-	if err := s.Yard.MailReply(ctx, from, message, s.User, mail); err != nil {
-		return nil, err
-	}
 	return &Result{
-		Text:       fmt.Sprintf("Sent to %s as a reply to message %d.", from, mail),
-		Structured: map[string]any{"to": from, "reply_to": mail},
+		Text:       fmt.Sprintf("Sent to %s as a reply to message %d.", replied.To, replied.ReplyTo),
+		Structured: map[string]any{"to": replied.To, "reply_to": replied.ReplyTo},
 	}, nil
 }
 

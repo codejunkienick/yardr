@@ -308,6 +308,7 @@ var Access = map[string]Class{
 	// Mail, users and their devices.
 	"Mail":             Agent,
 	"MailReply":        Agent,
+	"ReplyMail":        Agent, // but its receiver's own mail alone (store.ReplyMail)
 	"React":            Agent,
 	"PutBlob":          Agent,
 	"Inbox":            Read,

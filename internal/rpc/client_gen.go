@@ -549,6 +549,10 @@ func (c *Client) Mail(ctx context.Context, to, text, actor string, files ...stor
 func (c *Client) MailReply(ctx context.Context, to, text, actor string, answered uint64) error {
 	return c.call(ctx, "MailReply", nil, to, text, actor, answered)
 }
+
+func (c *Client) ReplyMail(ctx context.Context, mail uint64, message, actor string) (*store.RepliedMail, error) {
+	return callV[*store.RepliedMail](c, ctx, "ReplyMail", mail, message, actor)
+}
 func (c *Client) React(ctx context.Context, seq uint64, emoji, actor string) error {
 	return c.call(ctx, "React", nil, seq, emoji, actor)
 }

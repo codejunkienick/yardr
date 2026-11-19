@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -206,6 +207,19 @@ func TestOwnBeads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	first, err := api.CreateBead(ctx, store.NewBead{Title: "First hold", For: "bob"}, "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := api.CreateBead(ctx, store.NewBead{Title: "Second hold", For: "bob"}, "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, from := range []string{first.ID, second.ID} {
+		if err := api.AddDep(ctx, from, adaOpen.ID, store.DepBlocks, "", "", "ada"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := api.CreateBead(ctx, store.NewBead{Title: "Bob's open work", For: "bob"}, "bob"); err != nil {
 		t.Fatal(err)
 	}
@@ -253,6 +267,16 @@ func TestOwnBeads(t *testing.T) {
 	if own[1].Labels == nil || len(own[1].Labels) != 1 || own[1].Labels[0] != "kind:fix" {
 		t.Fatalf("finished row labels = %+v", own[1].Labels)
 	}
+	if own[0].BlockedBy != first.ID || own[1].BlockedBy != "" {
+		t.Fatalf("blocked_by is %q for open work and %q for unblocked finished work, want %q and none", own[0].BlockedBy, own[1].BlockedBy, first.ID)
+	}
+	bare, err := json.Marshal(own[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(bare), `"blocked_by"`) {
+		t.Fatalf("unblocked work is not bare: %s", bare)
+	}
 	// An earlier since widens the finished work; a later one narrows it
 	// to nothing, while the open work stands whatever the window.
 	if got := ids(mine(time.Now().Add(-time.Hour))); len(got) != 2 {
@@ -266,12 +290,22 @@ func TestOwnBeads(t *testing.T) {
 	if len(again) != len(own) || again[0].ID != own[0].ID || again[1].ID != own[1].ID {
 		t.Fatalf("a second call = %v, want %v again", ids(again), ids(own))
 	}
+	if _, err := api.CloseBead(ctx, first.ID, "done", store.Expect{}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	if afterClose := mine(time.Time{}); len(afterClose) != 2 || afterClose[0].BlockedBy != second.ID {
+		t.Fatalf("blocked_by after closing the oldest holder = %+v, want %q", afterClose, second.ID)
+	}
 	// Bob's list is his own work alone.
 	bobs, err := api.OwnBeads(ctx, "bob", time.Time{}, "bob")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bobs) != 1 || bobs[0].Title != "Bob's open work" {
+	titles := map[string]bool{}
+	for _, b := range bobs {
+		titles[b.Title] = true
+	}
+	if len(bobs) != 3 || !titles["Bob's open work"] || !titles["First hold"] || !titles["Second hold"] {
 		t.Fatalf("bob's = %+v", bobs)
 	}
 }
@@ -310,8 +344,15 @@ func TestOwnBeadsLeavesOutWhatTheReaderMayNotSee(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	holder, err := api.CreateBead(ctx, store.NewBead{Title: "Hidden holder", For: "bob"}, "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := api.AddDep(ctx, holder.ID, seen.ID, store.DepBlocks, "", "", "ada"); err != nil {
+		t.Fatal(err)
+	}
 	owned.SetPolicy(policyFunc(func(_ context.Context, _ *bolt.Tx, actor string, act store.Action, obj store.Object) error {
-		if act == store.ActSee && obj.Kind == store.KindBead && obj.Name == hidden.ID {
+		if act == store.ActSee && obj.Kind == store.KindBead && (obj.Name == hidden.ID || obj.Name == holder.ID) {
 			return fmt.Errorf("hidden from %s", actor)
 		}
 		return nil
@@ -322,6 +363,9 @@ func TestOwnBeadsLeavesOutWhatTheReaderMayNotSee(t *testing.T) {
 	}
 	if len(own) != 1 || own[0].ID != seen.ID {
 		t.Fatalf("own = %+v, want the seen work alone", own)
+	}
+	if own[0].BlockedBy != "" {
+		t.Fatalf("seen work is blocked by %q, want none where the holder is unseen", own[0].BlockedBy)
 	}
 }
 
