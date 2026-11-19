@@ -780,6 +780,64 @@ func TestSourceCheckSelectedAnswer(t *testing.T) {
 	}
 }
 
+// A selected string is printed with nothing a terminal would act on, a
+// null stays null rather than blank, and --json keeps the answer's
+// numbers as they arrived, including one a float would round.
+func TestSourceCheckSelectedFieldRendering(t *testing.T) {
+	t.Parallel()
+	const big = "9007199254740993"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"name":"a\u001b[2Jb\nc\u202e","gone":null,"n":`+big+`,"huge":1e999}`)
+	}))
+	defer srv.Close()
+	st := storetest.New(t)
+	a := &app{st: st, actor: "jo"}
+	file := filepath.Join(t.TempDir(), "crm.yaml")
+	text := strings.Replace(checkedSource, "BASE", srv.URL, 1)
+	text = strings.Replace(text, "path: /me } }", `path: /me }, answer: { select: [name, gone, "n", huge] } }`, 1)
+	if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, a.sourceCmd(), "add", file); err != nil {
+		t.Fatal(err)
+	}
+	env := envFile(t, "CRM_TOKEN=tok\n", 0o600)
+	if _, err := run(t, a.sourceCmd(), "set", "crm", "env_file="+env); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, a.sourceCmd(), "check", "crm")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, want := range []string{"crm: name: a?[2Jb?c?\n", "crm: gone: null\n", "crm: n: " + big + "\n", "crm: huge: 1e999\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("source check lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.ContainsAny(out, "\x1b\u202e") {
+		t.Fatalf("a selected string reached the terminal as a control:\n%q", out)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 6 {
+		t.Fatalf("source check prints %d lines:\n%s", len(lines), out)
+	}
+
+	a.json = true
+	out, err = run(t, a.sourceCmd(), "check", "crm")
+	a.json = false
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, big) || !strings.Contains(out, "1e999") || !strings.Contains(out, "null") {
+		t.Fatalf("source check --json lost the answer:\n%s", out)
+	}
+	if strings.Contains(out, "9007199254740992") {
+		t.Fatalf("source check --json rounded the integer:\n%s", out)
+	}
+}
+
 // A list answer is selected per element and carried under answer with
 // --json, and prints no field line: those lines are for one object.
 func TestSourceCheckListAnswerPrintsNoFieldLines(t *testing.T) {

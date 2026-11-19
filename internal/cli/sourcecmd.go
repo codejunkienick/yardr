@@ -1643,9 +1643,9 @@ process for it. Nothing of the request is written anywhere.`,
 				// and no other call's answer is ever shown.
 				var selected []string
 				if len(call.Answer.Select) > 0 && len(res.Answer) > 0 {
-					var anyJSON any
-					if json.Unmarshal(res.Answer, &anyJSON) == nil {
-						out["answer"] = anyJSON
+					// Raw, so a big integer or an out-of-range number is not a float.
+					if json.Valid(res.Answer) {
+						out["answer"] = json.RawMessage(res.Answer)
 					}
 					var obj map[string]json.RawMessage
 					if json.Unmarshal(res.Answer, &obj) == nil {
@@ -1905,12 +1905,12 @@ func checkCommands(d *source.Declaration, home string) (cmds []commandCheck, ok 
 	return cmds, ok
 }
 
-// checkField renders one selected field of a check call's answer for its line:
-// a string as it is, a number or boolean as its JSON, an object or list as compact JSON.
+// checkField renders one selected field for its line: a string as it is, with
+// nothing a terminal would act on, null as null, and anything else as its JSON.
 func checkField(raw json.RawMessage) string {
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s
+	var s *string
+	if json.Unmarshal(raw, &s) == nil && s != nil {
+		return printable(*s)
 	}
 	return string(raw)
 }
