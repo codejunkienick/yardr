@@ -218,13 +218,17 @@ login:
 # error: function_call_arguments.done name mismatch ...`). Every
 # `model failed:` line is one: no rate limit or capacity of Muse's is
 # known to print under it, so there is no narrower reason to keep first.
-# It is no capacity yardr retries, as a 529 is, but a turn that failed,
-# as claude's API Error: 500 is: other.
+# A turn that failed is other, as claude's API Error: 500 is, but one the
+# provider never opened (a builder's, 19 Nov 2026, yardr-mge2: `model
+# failed: network connection could not be opened within 15 seconds ...`)
+# is tried again before it is told of, as a dropped connection is.
 errors:
   - reason: rate_limited
     pattern: '^Usage limit reached$'
   - reason: rate_limited
     pattern: '^This turn stopped because your usage limit was reached\.$'
+  - reason: network
+    pattern: '^model failed: network connection could not be opened'
   - reason: other
     pattern: '^model failed:'
 

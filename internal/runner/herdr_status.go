@@ -108,10 +108,9 @@ func (h *Herdr) stopped(ctx context.Context, handle map[string]any, kind string,
 	if k, _ := handle["kind"].(string); k != "" {
 		kind = k
 	}
-	// A kind with no known error lines is never stopped, so its pane is
-	// not read at all: every working agent passes here on every status
-	// poll, and for those kinds the poll costs a lookup, not a capture.
-	if hn, _ := agents.Lookup(kind); len(hn.Errors) == 0 {
+	// An unknown kind with no harness file is not captured on every status
+	// poll; known kinds share at least the provider-agnostic network patterns.
+	if _, ok := agents.Lookup(kind); !ok {
 		delete(h.stops, pane)
 		return false
 	}

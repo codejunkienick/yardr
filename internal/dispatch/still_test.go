@@ -16,7 +16,7 @@ import (
 // knows: herdr kept calling it working, so no check that reads an idle
 // agent's pane ever ran, and nobody heard (yardr-q7ek). A harness at work
 // redraws its screen; this one stands.
-const museUnknownError = "◆ stream error: connection reset by peer (request id:\n" +
+const museUnknownError = "◆ response parse error: unexpected token (request id:\n" +
 	" 9a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d)\n" +
 	"── Voice input (alt(option)+v to start) ──…\n" +
 	"❯ \n" +

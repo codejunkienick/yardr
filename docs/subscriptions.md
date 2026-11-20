@@ -440,14 +440,16 @@ names the file to update (`harnesses/<kind>.yaml`)
 ([groups.md](groups.md#herdr-setup)).
 
 `session_harness_error`: a session whose agent's harness stopped on an
-error of its own and sits idle. Its `reason` is `at_capacity`,
+error of its own and sits idle. Its `reason` is `at_capacity`, `network`,
 `not_logged_in`, `rate_limited` or `other`, `line` is the error as the
 harness printed it and `tail` the end of the pane
 ([groups.md](groups.md#a-harness-that-stopped-on-an-error)). A session
 that hit `at_capacity` on its first prompt is given the prompt again by the
 daemon first (`session_harness_retry`, one per try, in nobody's default
 `--on`); its `session_harness_error` comes when the tries are used up and
-says how many there were (`tries`). One that hit a usage limit
+says how many there were (`tries`). One stopped on `network` is given a
+short resume prompt again first, mid-work or not, within the same budget.
+One that hit a usage limit
 (`rate_limited`) is told of at once, with `wakes_at` when the daemon will
 prompt it at the window's reset; that prompt is a `session_harness_retry`
 too, and a prompt the harness did not take is a second

@@ -216,7 +216,9 @@ errors:
     pattern: '^(exceeded retry limit, last status: 401|unexpected status 401)'
   - reason: other
     pattern: '^Quota exceeded'
-  - reason: other
+  # Codex's dropped stream (yardr-dzka, 20 Nov 2026): the same transient
+  # failure as a dropped connection of claude's, so it is tried again first.
+  - reason: network
     pattern: '^(stream error: )?stream disconnected before completion'
   - reason: other
     pattern: '^(exceeded retry limit|unexpected status \d)'

@@ -882,7 +882,8 @@ own later (the model at capacity, a usage limit, a login that ran out)
 raises `session_harness_error` on the first pass that finds it idle, with
 the reason and the end of its pane (a model at capacity in answer to the
 first prompt is given the prompt again first, 3 times 5 minutes apart, and
-raised when that did not help)
+raised when that did not help; a dropped network connection, at any point, is
+told to go on the same way and is raised when that did not help)
 ([groups.md](groups.md#a-harness-that-stopped-on-an-error)). An agent whose
 move the yard refused raises `move_refused`, with the command and why
 ([above](#2-new-a-builder-implements-it)). A session that

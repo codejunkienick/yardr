@@ -17,7 +17,9 @@ var docTables = map[string]func() []string{
 // code is s as a code span in a table's cell.
 func code(s string) string { return "`" + strings.ReplaceAll(s, "|", `\|`) + "`" }
 
-// errorsTable is every error line of every kind, in the order it is tried.
+// errorsTable is every error line of every kind, followed by the shared
+// network lines tried for every kind after its own non-other lines and before
+// its other lines.
 func errorsTable() []string {
 	rows := []string{"| kind | reason | a line that matches |", "|---|---|---|"}
 	for _, h := range Harnesses {
@@ -25,7 +27,10 @@ func errorsTable() []string {
 			rows = append(rows, fmt.Sprintf("| %s | %s | %s |", code(h.Kind), code(e.Reason), code(e.Pattern)))
 		}
 	}
-	return append(rows, "| any other | | none known: nothing is reported, and `session_idle` with its `tail` is what there is |")
+	for _, e := range NetworkErrors {
+		rows = append(rows, fmt.Sprintf("| any error line (after own, before `other`) | %s | %s |", code(e.Reason), code(e.Pattern)))
+	}
+	return append(rows, "| any other | | none of its own; only the shared `network` lines above apply, and anything else is reported as `session_idle` with its `tail` |")
 }
 
 // marksTable is the marks of every kind whose pane is read by its own. The
