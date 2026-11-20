@@ -300,14 +300,13 @@ type QueryValue struct {
 
 // Answer is what of the service's answer a call returns.
 type Answer struct {
-	// Select keeps top-level keys or dotted object paths as flat keys, of
-	// each element for a list (exact keys win); else the answer stays whole.
+	// Select keeps top-level keys or dotted object paths as flat keys, of each element for a list (exact keys win); else the answer stays whole.
 	Select []string `json:"select,omitempty"`
-	// Errors keeps these dot paths of a refused answer's JSON object,
-	// rebuilt nested; without it a refusal keeps nothing of what was said.
+	// Errors keeps these dot paths of a refused answer's JSON object, rebuilt nested; without it a refusal keeps nothing of what was said.
 	Errors []string `json:"errors,omitempty"`
-	// Max is the most a call returns, in bytes after Select: AnswerMax
-	// unless the file raises it, AnswerLimit at most.
+	// File says the answer is a file's bytes, not JSON: a read request call only, downloaded beside Do under the caller's own bound, never Max.
+	File bool `json:"file,omitempty"`
+	// Max is the most a call returns, in bytes after Select: AnswerMax unless the file raises it, AnswerLimit at most.
 	Max int `json:"max"`
 }
 

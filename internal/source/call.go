@@ -23,9 +23,10 @@ import (
 	"unicode/utf8"
 )
 
-// Timeout bounds one call, from the connection to the last byte of the
-// answer. A variable so a test need not wait it out.
+// Timeout bounds one call, from the connection to the last byte of the answer (a variable so a test need not wait it out); DownloadTimeout bounds a file answer's download (DoFile in download.go), which Timeout alone would cut on a slow link.
 var Timeout = 30 * time.Second
+
+const DownloadTimeout = 5 * time.Minute
 
 const (
 	// AnswerMax is the most a call returns unless its declaration raises

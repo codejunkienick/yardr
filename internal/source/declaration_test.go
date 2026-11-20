@@ -138,6 +138,86 @@ func TestParseCRM(t *testing.T) {
 	}
 }
 
+// A file answer is the answer's bytes, not JSON: a read request call may
+// name it (with errors for a refusal, and with build beside its request as
+// any request call may), and it is refused with select, with run and on an
+// update, each at the file key with its line.
+func TestParseFileAnswer(t *testing.T) {
+	const plain = `name: files
+base: https://files.example.com
+credential: { env: FILES_TOKEN, header: "Authorization: Bearer {credential}" }
+calls:
+  content:
+    kind: read
+    params: { id: { type: string } }
+    request: { method: GET, path: "/files/{id}/content" }
+    answer: { file: true, errors: [error.message] }
+`
+	d, err := Parse("files.yaml", []byte(plain))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := d.Call("content"); !c.Answer.File || c.Kind != Read || len(c.Answer.Select) != 0 ||
+		strings.Join(c.Answer.Errors, ",") != "error.message" || c.Answer.Max != AnswerMax || len(c.Build) != 0 || len(c.Run) != 0 {
+		t.Fatalf("file call = %+v", c)
+	}
+	// The flag survives the JSON a declaration is kept in, as select does.
+	raw, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept Declaration
+	if err := json.Unmarshal(raw, &kept); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := kept.Call("content"); !c.Answer.File {
+		t.Fatalf("file did not survive storage JSON: %+v", c.Answer)
+	}
+	built := strings.Replace(plain, "request: { method: GET, path: \"/files/{id}/content\" }",
+		"request: { method: GET, path: \"/files/{id}/content\" }\n    build: [files/build]", 1)
+	d, err = Parse("files.yaml", []byte(built))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := d.Call("content"); !c.Answer.File || strings.Join(c.Build, " ") != "files/build" || c.Request.Body != nil {
+		t.Fatalf("file call with build = %+v", c)
+	}
+	for _, tc := range []struct {
+		name, text, key, want string
+	}{
+		{"with select", strings.Replace(plain, "answer: { file: true, errors: [error.message] }", "answer: { file: true, select: [id] }", 1),
+			"calls.content.answer.file", "a file call has no select"},
+		{"with run", `name: files
+base: https://files.example.com
+calls:
+  content:
+    kind: read
+    run: [files/get]
+    answer: { file: true }
+`, "calls.content.answer.file", "never run"},
+		{"on an update", strings.Replace(plain, "kind: read", "kind: update", 1),
+			"calls.content.answer.file", "a file call is a read"},
+		{"body beside build", strings.Replace(built, `path: "/files/{id}/content" }`, `path: "/files/{id}/content", body: { text: value } }`, 1),
+			"calls.content.build", "a call names request.body or build, never both"},
+		{"not a boolean", strings.Replace(plain, "file: true", "file: yes", 1),
+			"calls.content.answer.file", "want true or false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := Parse("files.yaml", []byte(tc.text))
+			var errs Errors
+			if !errors.As(err, &errs) || d != nil {
+				t.Fatalf("Parse = %+v, %v; want it refused", d, err)
+			}
+			for _, e := range errs {
+				if e.Key == tc.key && strings.Contains(e.Msg, tc.want) && e.Line > 0 && e.File == "files.yaml" {
+					return
+				}
+			}
+			t.Fatalf("no error at %s with %q in:\n%v", tc.key, tc.want, err)
+		})
+	}
+}
+
 // A default is a typed value sent when its parameter is left out, and makes
 // the parameter optional to callers.
 func TestParseParameterDefaults(t *testing.T) {
@@ -630,7 +710,7 @@ func TestParseRefuses(t *testing.T) {
 		{"a key it does not know", crm + "retries: 3\n",
 			"retries", "unknown key"},
 		{"an answer key it does not know", with("answer: { select: [id, name, plan, owner, open_tickets] }", "answer: { select: [id], retry: 3 }"),
-			"calls.customer.answer.retry", "unknown key (known here: select, errors, max)"},
+			"calls.customer.answer.retry", "unknown key (known here: select, errors, max, file)"},
 		{"a check that is an update", with("check: ping ", "check: note "),
 			"check", "note is an update"},
 		{"a check that needs a parameter", with("check: ping ", "check: customer "),

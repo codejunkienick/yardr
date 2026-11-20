@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"io"
 	"mime"
@@ -50,6 +51,8 @@ type standin struct {
 type sent struct {
 	Method, URI, Auth, ContentType string
 	Body                           []byte
+	Length                         int64
+	Header                         http.Header
 }
 
 func newStandin(t *testing.T, answer http.HandlerFunc) *standin {
@@ -65,7 +68,7 @@ func newStandinOn(t *testing.T, l net.Listener, answer http.HandlerFunc) *standi
 	s.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		s.mu.Lock()
-		s.reqs = append(s.reqs, sent{r.Method, r.RequestURI, r.Header.Get("Authorization"), r.Header.Get("Content-Type"), body})
+		s.reqs = append(s.reqs, sent{r.Method, r.RequestURI, r.Header.Get("Authorization"), r.Header.Get("Content-Type"), body, r.ContentLength, r.Header.Clone()})
 		s.mu.Unlock()
 		answer(w, r)
 	}))
@@ -1302,4 +1305,648 @@ func TestCommandsAreHandedNoCredentialThatIsTheAddress(t *testing.T) {
 	if env := strings.Join(d.CommandEnv(token), "\n"); !strings.Contains(env, "CRM_TOKEN="+token) {
 		t.Errorf("a token is not handed to a command: %s", env)
 	}
+}
+
+// fileCall is a read file call over one id, with errors named so a
+// terminal refusal's keeping of them can be seen.
+const fileCall = `  content:
+    kind: read
+    params: { id: { type: string } }
+    request: { method: GET, path: "/files/{id}/content" }
+    answer: { file: true, errors: [error.message] }
+`
+
+func fileDecl(t *testing.T, at, call string) *Declaration {
+	t.Helper()
+	text := "name: files\nbase: https://files.example.com\ncredential: { env: FILES_TOKEN, header: \"Authorization: Bearer {credential}\" }\ncalls:\n" + call
+	return declared(t, text, "https://files.example.com", at)
+}
+
+func fileDest(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), "download.bin")
+}
+
+func assertFile(t *testing.T, dest, want string) {
+	t.Helper()
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("the file was not written: %v", err)
+	}
+	if string(got) != want {
+		t.Fatalf("the file holds %q, want %q", got, want)
+	}
+}
+
+func assertNoFile(t *testing.T, dest string) {
+	t.Helper()
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("a file is left at %s (stat err %v), want none", dest, err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(dest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".yardr-download-") {
+			t.Fatalf("a temporary download file is left beside %s: %s", dest, entry.Name())
+		}
+	}
+}
+
+// newTLSStandin is newStandin over HTTPS, with the stand-in's own
+// certificate trusted through the file Go reads for one, as a service's
+// would be through the yard's.
+func newTLSStandin(t *testing.T, answer http.HandlerFunc) *standin {
+	t.Helper()
+	s := &standin{}
+	s.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		s.mu.Lock()
+		s.reqs = append(s.reqs, sent{r.Method, r.RequestURI, r.Header.Get("Authorization"), r.Header.Get("Content-Type"), body, r.ContentLength, r.Header.Clone()})
+		s.mu.Unlock()
+		answer(w, r)
+	}))
+	s.StartTLS()
+	t.Cleanup(s.Close)
+	cert := filepath.Join(t.TempDir(), "cert.pem")
+	if err := os.WriteFile(cert, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSL_CERT_FILE", cert)
+	t.Setenv("NO_PROXY", "127.0.0.1,localhost")
+	t.Setenv("no_proxy", "127.0.0.1,localhost")
+	return s
+}
+
+// fakeLookup says what the named hosts resolve to for a hop check, and
+// leaves every other name to the resolver the machine has.
+func fakeLookup(t *testing.T, byHost map[string][]net.IP) {
+	t.Helper()
+	old := lookupIPs
+	lookupIPs = func(ctx context.Context, host string) ([]net.IP, error) {
+		if ips, ok := byHost[host]; ok {
+			return ips, nil
+		}
+		return net.DefaultResolver.LookupIP(ctx, "ip", host)
+	}
+	t.Cleanup(func() { lookupIPs = old })
+}
+
+// A direct 200 is the file's bytes, with no JSON refusal of them, and the
+// credential went on that one request as Do sends it.
+func TestDoFileWritesADirectFile(t *testing.T) {
+	s := newStandin(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		io.WriteString(w, "the file's own bytes\x00are no JSON")
+	})
+	d := fileDecl(t, s.URL, fileCall)
+	dest := fileDest(t)
+	if err := os.WriteFile(dest, []byte("old file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := DoFile(context.Background(), d, "content", map[string]string{"id": "7"}, token, dest, 1<<20, noSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != 200 || !res.OK() || res.Bytes != len("the file's own bytes\x00are no JSON") || res.Answer != nil {
+		t.Fatalf("result = %+v", res)
+	}
+	assertFile(t, dest, "the file's own bytes\x00are no JSON")
+	st, err := os.Stat(dest)
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("the file's mode = %v, %v; want 0600", st, err)
+	}
+	got := s.got()
+	if len(got) != 1 || got[0].Auth != "Bearer "+token || got[0].URI != "/files/7/content" {
+		t.Fatalf("sent = %+v", got)
+	}
+	clean(t, err)
+}
+
+// The request, including TLS setup and sending its body, keeps Timeout; a
+// successful response then gets DownloadTimeout for its file bytes.
+func TestDoFileBoundsTheRequestBeforeItsDownload(t *testing.T) {
+	was := Timeout
+	Timeout = 100 * time.Millisecond
+	t.Cleanup(func() { Timeout = was })
+	t.Setenv("NO_PROXY", "127.0.0.1,localhost")
+	t.Setenv("no_proxy", "127.0.0.1,localhost")
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	accepted := make(chan struct{})
+	go func() {
+		conn, err := l.Accept()
+		if err == nil {
+			close(accepted)
+			io.Copy(io.Discard, conn)
+			conn.Close()
+		}
+	}()
+	d := fileDecl(t, "https://files.example.com", fileCall)
+	d.Base = "https://" + l.Addr().String()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err = DoFile(ctx, d, "content", map[string]string{"id": "7"}, token, fileDest(t), 1<<20, noSecrets)
+	if reason(err) != TimedOut || !strings.Contains(err.Error(), "nothing within 100ms") {
+		t.Fatalf("an unanswered TLS request = %v, want the 100ms request bound", err)
+	}
+	select {
+	case <-accepted:
+	case <-time.After(time.Second):
+		t.Fatal("the request never reached the stand-in listener")
+	}
+	clean(t, err)
+}
+
+// A 302 as the first answer is an intermediate answer, followed by hand to
+// its bytes and never a success of its own: the hop is a fresh bodyless
+// GET with no credential and no entity header, across hosts, while a JSON
+// call to the same 302 still refuses every 3xx. 301, 303 and 308 from a
+// bodyless GET are followed the same way.
+func TestDoFileFollowsARedirect(t *testing.T) {
+	for _, status := range []int{302, 301, 303, 308} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			file := newStandin(t, func(w http.ResponseWriter, _ *http.Request) {
+				io.WriteString(w, "the redirected file")
+			})
+			first := newStandin(t, func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, file.URL+"/the-file", status)
+			})
+			d := fileDecl(t, first.URL, fileCall)
+			if status == 302 {
+				if _, err := Do(context.Background(), d, "content", map[string]string{"id": "7"}, token, noSecrets); reason(err) != Redirect {
+					t.Fatalf("a JSON call to the same 302 = %v, want a redirect refusal", err)
+				}
+				if got := file.got(); len(got) != 0 {
+					t.Fatalf("the JSON call followed the redirect: %+v", got)
+				}
+			}
+			dest := fileDest(t)
+			res, err := DoFile(context.Background(), d, "content", map[string]string{"id": "7"}, token, dest, 1<<20, noSecrets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !res.OK() || res.Bytes != len("the redirected file") {
+				t.Fatalf("result = %+v", res)
+			}
+			assertFile(t, dest, "the redirected file")
+			hop := file.got()
+			if len(hop) != 1 || hop[0].Method != "GET" || len(hop[0].Body) != 0 || hop[0].ContentType != "" ||
+				hop[0].Length != 0 || hop[0].Header.Get("Content-Length") != "" || hop[0].Auth != "" {
+				t.Fatalf("the hop was not a bodyless GET with no credential: %+v", hop)
+			}
+			if first.got()[0].Auth != "Bearer "+token {
+				t.Fatalf("the first request carries no credential: %+v", first.got())
+			}
+			clean(t, err)
+		})
+	}
+}
+
+// A 3xx that is no intermediate answer refuses the call as a redirect and
+// is never followed: 304 and 305 even with a Location, a 302 with no
+// usable one, a loop, and a sixth redirect.
+func TestDoFileRefusesARedirectItMayNotFollow(t *testing.T) {
+	file := newStandin(t, jsonAnswer(`{}`))
+	for _, tc := range []struct {
+		name   string
+		status int
+		loc    string // "" sends no Location at all
+	}{
+		{"304 with a location", 304, "/the-file"},
+		{"305 with a location", 305, "/the-file"},
+		{"302 with no location", 302, ""},
+		{"302 with an unusable location", 302, "https://exa mple.invalid/the-file"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first := newStandin(t, func(w http.ResponseWriter, _ *http.Request) {
+				if tc.loc != "" {
+					loc := tc.loc
+					if loc == "/the-file" {
+						loc = file.URL + loc
+					}
+					w.Header().Set("Location", loc)
+				}
+				w.WriteHeader(tc.status)
+			})
+			d := fileDecl(t, first.URL, fileCall)
+			dest := fileDest(t)
+			_, err := DoFile(context.Background(), d, "content", map[string]string{"id": "7"}, token, dest, 1<<20, noSecrets)
+			var ce *CallError
+			if !errors.As(err, &ce) || ce.Reason != Redirect || ce.Status != tc.status {
+				t.Fatalf("DoFile = %v, want a redirect refusal at %d", err, tc.status)
+			}
+			if strings.Contains(err.Error(), "/the-file") {
+				t.Fatalf("the error repeats a Location: %v", err)
+			}
+			assertNoFile(t, dest)
+			clean(t, err)
+		})
+	}
+	if got := file.got(); len(got) != 0 {
+		t.Fatalf("a refused redirect was followed: %+v", got)
+	}
+
+	t.Run("a loop", func(t *testing.T) {
+		var self *standin
+		self = newStandin(t, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, self.URL+"/files/7/content", http.StatusFound)
+		})
+		d := fileDecl(t, self.URL, fileCall)
+		dest := fileDest(t)
+		_, err := DoFile(context.Background(), d, "content", map[string]string{"id": "7"}, token, dest, 1<<20, noSecrets)
+		if reason(err) != Redirect || !strings.Contains(err.Error(), "at most five") {
+			t.Fatalf("a loop = %v, want a redirect refusal at five", err)
+		}
+		if got := self.got(); len(got) != 6 {
+			t.Fatalf("a loop was asked %d times, want the first request and five follows", len(got))
+		}
+		assertNoFile(t, dest)
+	})
+
+	t.Run("a sixth redirect", func(t *testing.T) {
+		last := newStandin(t, func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "too far") })
+		chain := []*standin{last}
+		for i := 0; i < 6; i++ {
+			next := chain[0]
+			chain = append([]*standin{newStandin(t, func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, next.URL+"/next", http.StatusFound)
+			})}, chain...)
+		}
+		d := fileDecl(t, chain[0].URL, fileCall)
+		dest := fileDest(t)
+		_, err := DoFile(context.Background(), d, "content", map[string]string{"id": "7"}, token, dest, 1<<20, noSecrets)
+		if reason(err) != Redirect {
+			t.Fatalf("six redirects = %v, want a redirect refusal", err)
+		}
+		for i, s := range chain[:6] {
+			if got := s.got(); len(got) != 1 {
+				t.Fatalf("hop %d was asked %d times, want once", i, len(got))
+			}
+		}
+		if got := last.got(); len(got) != 0 {
+			t.Fatalf("the sixth redirect was followed: %+v", got)
+		}
+		assertNoFile(t, dest)
+	})
+}
+
+// A credential that is part of the first URL cannot be inherited by a
+// relative Location: such a reference would send its secret path again.
+func TestDoFileDoesNotReuseCredentialsFromARelativeLocation(t *testing.T) {
+	t.Run("in the path", func(t *testing.T) {
+		first := newStandin(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Location", "next")
+			w.WriteHeader(http.StatusFound)
+		})
+		const declaration = `name: files
+base: https://files.example.com
+credential: { env: FILES_TOKEN, in_path: true }
+calls:
+  content:
+    kind: read
+    request: { method: GET, path: "/files/{credential}/content" }
+    answer: { file: true }
+`
+		d := declared(t, declaration, "https://files.example.com", first.URL)
+		dest := fileDest(t)
+		_, err := DoFile(context.Background(), d, "content", nil, token, dest, 1<<20, noSecrets)
+		if reason(err) != Redirect || !strings.Contains(err.Error(), "relative location") || strings.Contains(err.Error(), token) {
+			t.Fatalf("a relative redirect from an in-path credential = %v", err)
+		}
+		if got := first.got(); len(got) != 1 || got[0].URI != "/files/"+token+"/content" {
+			t.Fatalf("the credential was not confined to the first request: %+v", got)
+		}
+		assertNoFile(t, dest)
+		clean(t, err)
+	})
+
+	t.Run("as the address", func(t *testing.T) {
+		first := newStandin(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Location", "#same-address")
+			w.WriteHeader(http.StatusFound)
+		})
+		d, err := Parse("files.yaml", []byte(`name: files
+credential: { env: FILES_URL, url: true }
+calls:
+  content:
+    kind: read
+    request: { method: GET, path: / }
+    answer: { file: true }
+`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		credential := first.URL + "/one-time-address"
+		dest := fileDest(t)
+		_, err = DoFile(context.Background(), d, "content", nil, credential, dest, 1<<20, noSecrets)
+		if reason(err) != Redirect || !strings.Contains(err.Error(), "relative location") || strings.Contains(err.Error(), "one-time-address") {
+			t.Fatalf("a fragment redirect from an address credential = %v", err)
+		}
+		if got := first.got(); len(got) != 1 || got[0].URI != "/one-time-address" {
+			t.Fatalf("the credential address was repeated: %+v", got)
+		}
+		assertNoFile(t, dest)
+		clean(t, err)
+	})
+}
+
+// A hop may go only where the hop rules let it: no downgrade from HTTPS,
+// no user in the name, and no loopback, private or link-local address,
+// whether the Location names the address itself or a name that resolves
+// to one; a name resolving to a mixture of public and private refuses
+// whole. Every error names a host alone, never the Location.
+func TestDoFileRefusesAnUnsafeHop(t *testing.T) {
+	fakeLookup(t, map[string][]net.IP{
+		"private.example":  {net.ParseIP("10.0.0.2")},
+		"internal.example": {net.ParseIP("127.0.0.1")},
+		"mixed.example":    {net.ParseIP("8.8.8.8"), net.ParseIP("192.168.0.1")},
+	})
+	plain := newStandin(t, jsonAnswer(`{}`))
+	secure := newTLSStandin(t, jsonAnswer(`{}`))
+	var loc string
+	first := newTLSStandin(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", loc)
+		w.WriteHeader(302)
+	})
+	d := fileDecl(t, first.URL, fileCall)
+	for _, tc := range []struct{ name, loc, want string }{
+		{"a downgrade", plain.URL + "/the-file", "down from https to plain http"},
+		{"a loopback address", secure.URL + "/the-file", "not a public address"},
+		{"a private address", "https://10.0.0.5/the-file", "not a public address"},
+		{"a link-local address", "https://169.254.169.254/latest/meta", "not a public address"},
+		{"a name resolving privately", "https://private.example/the-file", "not a public address"},
+		{"a name resolving to loopback", "https://internal.example/the-file", "not a public address"},
+		{"a mixed resolution", "https://mixed.example/the-file", "not a public address"},
+		{"a name with a user", "https://user@8.8.8.8/the-file", "user or password"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			loc = tc.loc
+			dest := fileDest(t)
+			_, err := DoFile(context.Background(), d, "content", map[string]string{"id": "7"}, token, dest, 1<<20, noSecrets)
+			if reason(err) != Redirect || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("DoFile = %v, want a redirect refusal that says %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), tc.loc) || strings.Contains(err.Error(), "/the-file") || strings.Contains(err.Error(), "/latest") {
+				t.Fatalf("the error repeats the Location: %v", err)
+			}
+			assertNoFile(t, dest)
+			clean(t, err)
+		})
+	}
+	if got := plain.got(); len(got) != 0 {
+		t.Fatalf("a downgrade was followed: %+v", got)
+	}
+	if got := secure.got(); len(got) != 0 {
+		t.Fatalf("a loopback hop was dialled: %+v", got)
+	}
+}
+
+// The dial hook and the check before it hold the same line: a public
+// address passes, and every kind that is not one is refused at the
+// connection, where a name that rebinds would be met.
+func TestFileHopAddressChecks(t *testing.T) {
+	for _, addr := range []string{"8.8.8.8:443", "[2606:4700:4700::1111]:443"} {
+		if err := publicOnly("tcp", addr, nil); err != nil {
+			t.Errorf("publicOnly(%s) = %v, want it allowed", addr, err)
+		}
+	}
+	for _, addr := range []string{"127.0.0.1:443", "10.0.0.1:443", "192.168.1.1:443", "169.254.169.254:443",
+		"224.0.0.1:443", "0.0.0.0:443", "[::1]:443", "[fe80::1]:443", "[fd00::1]:443"} {
+		if err := publicOnly("tcp", addr, nil); err == nil {
+			t.Errorf("publicOnly(%s) allowed a hop that is no public address", addr)
+		}
+	}
+	fakeLookup(t, map[string][]net.IP{"public.example": {net.ParseIP("8.8.8.8")}})
+	from, _ := url.Parse("https://graph.example.com/content")
+	hop, _ := url.Parse("https://public.example/the-file")
+	if standin, why := checkHop(context.Background(), from, hop, false); standin || why != "" {
+		t.Fatalf("a public hop = %v, %q; want it followed directly", standin, why)
+	}
+	plainFrom, _ := url.Parse("http://127.0.0.1:1111/content")
+	loopHop, _ := url.Parse("http://127.0.0.2:2222/the-file")
+	if standin, why := checkHop(context.Background(), plainFrom, loopHop, true); !standin || why != "" {
+		t.Fatalf("a stand-in's loopback hop = %v, %q; want it followed as a stand-in hop", standin, why)
+	}
+	if !isPublicIP(net.ParseIP("8.8.8.8")) {
+		t.Fatal("a public address is not known from a private one")
+	}
+}
+
+// A terminal refusal keeps at most the call's answer.errors, as a JSON
+// call's does, and follows nothing it may also point at; with no errors
+// named it keeps nothing.
+func TestDoFileKeepsTheErrorsOfARefusal(t *testing.T) {
+	elsewhere := newStandin(t, jsonAnswer(`{}`))
+	body := `{"error":{"message":"no file for this id","detail":"` + token + `"},"other":1}`
+	first := newStandin(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", elsewhere.URL+"/the-file")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(403)
+		io.WriteString(w, body)
+	})
+	d := fileDecl(t, first.URL, fileCall+`  plain:
+    kind: read
+    params: { id: { type: string } }
+    request: { method: GET, path: "/files/{id}/content" }
+    answer: { file: true }
+`)
+	dest := fileDest(t)
+	res, err := DoFile(context.Background(), d, "content", map[string]string{"id": "7"}, token, dest, 1<<20, noSecrets)
+	if err != nil || res.Status != 403 || res.OK() || string(res.Answer) != `{"error":{"message":"no file for this id"}}` || res.Bytes != len(body) {
+		t.Fatalf("a 403 = %+v, %v", res, err)
+	}
+	if strings.Contains(string(res.Answer), token) {
+		t.Fatalf("the kept errors hold the credential: %s", res.Answer)
+	}
+	assertNoFile(t, dest)
+	if res, err := DoFile(context.Background(), d, "plain", map[string]string{"id": "7"}, token, dest, 1<<20, noSecrets); err != nil ||
+		res.Status != 403 || res.Answer != nil {
+		t.Fatalf("a 403 with no errors named = %+v, %v", res, err)
+	}
+	assertNoFile(t, dest)
+	if got := elsewhere.got(); len(got) != 0 {
+		t.Fatalf("a terminal refusal was followed: %+v", got)
+	}
+}
+
+// The caller's bound is counted on the stream and a broken body ends the
+// call: each leaves no file, and a body at the bound is the file.
+func TestDoFileBoundsTheStreamAndDropsABrokenBody(t *testing.T) {
+	t.Run("over the bound", func(t *testing.T) {
+		s := newStandin(t, func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "12345678901") })
+		d := fileDecl(t, s.URL, fileCall)
+		dest := fileDest(t)
+		_, err := DoFile(context.Background(), d, "content", map[string]string{"id": "7"}, token, dest, 10, noSecrets)
+		if reason(err) != TooLarge || !strings.Contains(err.Error(), "over 10 bytes") {
+			t.Fatalf("over the bound = %v, want too_large", err)
+		}
+		assertNoFile(t, dest)
+	})
+	t.Run("at the bound", func(t *testing.T) {
+		s := newStandin(t, func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "1234567890") })
+		d := fileDecl(t, s.URL, fileCall)
+		dest := fileDest(t)
+		res, err := DoFile(context.Background(), d, "content", map[string]string{"id": "7"}, token, dest, 10, noSecrets)
+		if err != nil || res.Bytes != 10 {
+			t.Fatalf("at the bound = %+v, %v", res, err)
+		}
+		assertFile(t, dest, "1234567890")
+	})
+	t.Run("a broken body", func(t *testing.T) {
+		s := newStandin(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Length", "100")
+			w.WriteHeader(200)
+			io.WriteString(w, "short")
+		})
+		d := fileDecl(t, s.URL, fileCall)
+		dest := fileDest(t)
+		_, err := DoFile(context.Background(), d, "content", map[string]string{"id": "7"}, token, dest, 1<<20, noSecrets)
+		if err == nil || reason(err) == TooLarge {
+			t.Fatalf("a broken body = %v, want a failure that is no bound", err)
+		}
+		assertNoFile(t, dest)
+		clean(t, err)
+	})
+}
+
+const builtFileCall = `  content:
+    kind: read
+    request: { method: POST, path: "/content" }
+    build: [files/build]
+    answer: { file: true }
+`
+
+// A body a build printed is sent on the first request as CallSource sends
+// it, and the file behind a direct 2xx is reached with it.
+func TestDoFileWithABuiltBody(t *testing.T) {
+	s := newStandin(t, func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "the built call's file") })
+	d := fileDecl(t, s.URL, builtFileCall)
+	// The body is BuildBody's, from the command the declaration names
+	// under a home of the test's, as the store builds it for a call.
+	home := t.TempDir()
+	program := filepath.Join(home, "sources", "files", "files", "build")
+	if err := os.MkdirAll(filepath.Dir(program), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(program, []byte("#!/bin/sh\ncat >/dev/null\nprintf '%s' '{\"built\":true}'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	built, err := BuildBody(context.Background(), d, "content", nil, token, home, noSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest := fileDest(t)
+	res, err := DoFileBody(context.Background(), d, "content", nil, token, built, dest, 1<<20, noSecrets)
+	if err != nil || !res.OK() {
+		t.Fatalf("a built call = %+v, %v", res, err)
+	}
+	assertFile(t, dest, "the built call's file")
+	got := s.got()
+	if len(got) != 1 || string(got[0].Body) != `{"built":true}` || got[0].ContentType != "application/json" {
+		t.Fatalf("the built body was not the first request's: %+v", got)
+	}
+}
+
+// No body goes past the first host: a redirect answered to a call whose
+// first request carried a body, built, templated with a secret-file's
+// secret or sent as a multipart file part, or to a POST with none, is a
+// terminal redirect at 302 and at 307 alike, with no second request made
+// and no byte of the body recorded at the host it pointed to.
+func TestDoFileBodiesGoOnlyToTheFirstHost(t *testing.T) {
+	const leafSecret = "leaf-secret-that-stays-home"
+	readLeaf := func(string) ([]byte, string, error) { return []byte(leafSecret), "leaf", nil }
+	upload := filepath.Join(t.TempDir(), "upload.txt")
+	if err := os.WriteFile(upload, []byte("upload-bytes-that-stay-home"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	calls := []struct {
+		name   string
+		call   string
+		marker string
+		make   func(t *testing.T, d *Declaration, dest string) error
+	}{
+		{"a built body", builtFileCall, `{"built":true}`, func(t *testing.T, d *Declaration, dest string) error {
+			_, err := DoFileBody(context.Background(), d, "content", nil, token, json.RawMessage(`{"built":true}`), dest, 1<<20, noSecrets)
+			return err
+		}},
+		{"a secret-file leaf", `  content:
+    kind: read
+    params: { secret: { type: secret-file, max: 100 } }
+    request: { method: POST, path: "/content", body: { secret: "{secret}", note: "fetch" } }
+    answer: { file: true }
+`, leafSecret, func(t *testing.T, d *Declaration, dest string) error {
+			_, err := DoFile(context.Background(), d, "content", map[string]string{"secret": "leaf"}, token, dest, 1<<20, readLeaf)
+			return err
+		}},
+		{"a multipart file part", `  content:
+    kind: read
+    params: { path: { type: file }, note: { type: string } }
+    request: { method: POST, path: "/content", body: { upload: "{path}", note: "{note}" } }
+    answer: { file: true }
+`, "upload-bytes-that-stay-home", func(t *testing.T, d *Declaration, dest string) error {
+			_, err := DoFile(context.Background(), d, "content", map[string]string{"path": upload, "note": "fetch"}, token, dest, 1<<20, noSecrets)
+			return err
+		}},
+	}
+	for _, tc := range calls {
+		for _, status := range []int{302, 307} {
+			t.Run(tc.name+" at "+strconv.Itoa(status), func(t *testing.T) {
+				second := newStandin(t, jsonAnswer(`{}`))
+				first := newStandin(t, func(w http.ResponseWriter, r *http.Request) {
+					http.Redirect(w, r, second.URL+"/the-file", status)
+				})
+				d := fileDecl(t, first.URL, tc.call)
+				dest := fileDest(t)
+				err := tc.make(t, d, dest)
+				var ce *CallError
+				if !errors.As(err, &ce) || ce.Reason != Redirect || ce.Status != status {
+					t.Fatalf("the call = %v, want a redirect refusal at %d", err, status)
+				}
+				if strings.Contains(err.Error(), tc.marker) {
+					t.Fatalf("the error holds a byte of the body: %v", err)
+				}
+				if got := second.got(); len(got) != 0 {
+					t.Fatalf("a second request was made, and its body could be recorded there: %+v", got)
+				}
+				got := first.got()
+				if len(got) != 1 || !strings.Contains(string(got[0].Body), tc.marker) {
+					t.Fatalf("the body did not reach the first host alone: %+v", got)
+				}
+				assertNoFile(t, dest)
+				clean(t, err)
+			})
+		}
+	}
+	t.Run("a POST with no body at 302", func(t *testing.T) {
+		second := newStandin(t, jsonAnswer(`{}`))
+		first := newStandin(t, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, second.URL+"/the-file", http.StatusFound)
+		})
+		d := fileDecl(t, first.URL, `  content:
+    kind: read
+    request: { method: POST, path: "/content" }
+    answer: { file: true }
+`)
+		dest := fileDest(t)
+		_, err := DoFile(context.Background(), d, "content", nil, token, dest, 1<<20, noSecrets)
+		if reason(err) != Redirect {
+			t.Fatalf("a POST answered 302 = %v, want a redirect refusal", err)
+		}
+		if got := first.got(); len(got) != 1 || got[0].Method != "POST" {
+			t.Fatalf("the first request = %+v", got)
+		}
+		if got := second.got(); len(got) != 0 {
+			t.Fatalf("a second request was made: %+v", got)
+		}
+		assertNoFile(t, dest)
+	})
 }

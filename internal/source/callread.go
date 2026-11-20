@@ -19,6 +19,7 @@ import (
 func (r *reader) call(e entry, credential, inPath, address bool) Call {
 	c := Call{Name: e.key, Answer: Answer{Max: AnswerMax}}
 	var request, build, run *entry
+	var fileE, selectE *entry
 	kind := false
 	for _, f := range r.entries(e.v, e.path, "kind", "about", "params", "request", "build", "run", "answer") {
 		switch f.key {
@@ -51,15 +52,23 @@ func (r *reader) call(e entry, credential, inPath, address bool) Call {
 			run = &f
 			c.Run = r.callCommand(f, "a run's")
 		case "answer":
-			for _, a := range r.entries(f.v, f.path, "select", "errors", "max") {
+			for _, a := range r.entries(f.v, f.path, "select", "errors", "max", "file") {
 				switch a.key {
 				case "select":
+					sel := a
+					selectE = &sel
 					c.Answer.Select = r.selects(a.v, a.path)
 				case "errors":
 					c.Answer.Errors = r.strs(a.v, a.path)
 				case "max":
 					if n, ok := r.count(a.v, a.path, AnswerLimit); ok {
 						c.Answer.Max = n
+					}
+				case "file":
+					fe := a
+					fileE = &fe
+					if v, ok := r.boolean(a.v, a.path); ok {
+						c.Answer.File = v
 					}
 				}
 			}
@@ -71,9 +80,22 @@ func (r *reader) call(e entry, credential, inPath, address bool) Call {
 	if !kind {
 		r.errf(e.v, join(e.path, "kind"), "missing: %s or %s", Read, Update)
 	}
+	// A file answer is held to what makes it one, beside what the call
+	// names for its answer: a read, by a request, with no JSON to select.
+	if c.Answer.File && fileE != nil {
+		if c.Kind == Update {
+			r.errf(fileE.v, fileE.path, "a file call is a read: an update changes something in the service, and a file it answered with would be a second effect under one grant")
+		}
+		if selectE != nil {
+			r.errf(fileE.v, fileE.path, "a file call has no select: there is no JSON to keep keys of, since its answer is a file's bytes")
+		}
+	}
 	// A command answers the call: there is no request to read, and what
 	// else the call names says how it would be sent.
 	if run != nil {
+		if c.Answer.File && fileE != nil {
+			r.errf(fileE.v, fileE.path, "a file call is answered by a request, never run: a command that answers a call prints one JSON object, and a file is no object")
+		}
 		switch {
 		case request != nil:
 			r.errf(request.v, request.path, "a call names request or run, never both: a request is sent to the base, and a call that names run is answered by a command and sends none")
