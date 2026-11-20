@@ -9,6 +9,9 @@
 # app-manifest.yaml is the Slack app as one document, for the operator to
 # paste where Slack creates an app from a manifest; it is no declaration
 # and yardr never reads it.
+# No stored checksum covers this pack: the digest `pack check` prints is
+# computed at apply time over pack.yaml and the files it names alone
+# (docs/packs.md, Pinning a pack), and app-manifest.yaml is none of them.
 name: slack
 kind: source
 setup: SETUP.md
