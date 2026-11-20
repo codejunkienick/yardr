@@ -142,9 +142,10 @@ func TestGuardedAnswerFailsClosedOnAnOlderYard(t *testing.T) {
 	y := newTurnYard(t, "Move the links now?")
 	seq := y.asks[0]
 
-	// The yard from before: the same server without the three calls.
+	// The yard from before: the same server without the guarded calls or
+	// UserOpenAsks.
 	older := newAPI(y.st, time.Second)
-	for _, name := range []string{"AnswerAskExpected", "DeferAskExpected", "DeclineAskExpected"} {
+	for _, name := range []string{"AnswerAskExpected", "DeferAskExpected", "DeclineAskExpected", "UserOpenAsks"} {
 		delete(older.methods, name)
 	}
 	oldSock := socket(t)
@@ -161,6 +162,10 @@ func TestGuardedAnswerFailsClosedOnAnOlderYard(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "no such method "+name) {
 			t.Errorf("%s on the older yard = %v, want no such method", name, err)
 		}
+	}
+	if _, err := old.UserOpenAsks(ctx, "jo", "jo"); err == nil ||
+		!strings.Contains(err.Error(), "no such method UserOpenAsks") {
+		t.Errorf("UserOpenAsks on the older yard = %v, want no such method", err)
 	}
 
 	sock := socket(t)

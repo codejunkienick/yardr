@@ -172,6 +172,7 @@ var Access = map[string]Class{
 	"AddAnswer":            Admin,
 	"AddAnswerExpected":    Admin,
 	"UserAsks":             Read,
+	"UserOpenAsks":         Read,
 	"OpenAskBeads":         Read,
 	"Waiting":              Read,
 	"MoveBead":             Admin,    // as AnswerAsk: a person or the crew, no bead's agent

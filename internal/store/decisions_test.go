@@ -250,6 +250,46 @@ func TestUserAsksQueue(t *testing.T) {
 		err.Error() != "only mckean or the operator (jo) may read mckean's inbox; this is ada" {
 		t.Errorf("another user's queue by a member = %v", err)
 	}
+
+	// UserOpenAsks is the open section alone: the same rows, without the
+	// decided history, under the same gate.
+	open, err := y.Store.UserOpenAsks(y.ctx, "mckean", "mckean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, err := y.Store.UserAsks(y.ctx, "mckean", "mckean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	openJSON, err := json.Marshal(open.Open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullJSON, err := json.Marshal(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOpen, err := json.Marshal(full.Open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(openJSON) != string(wantOpen) {
+		t.Fatalf("UserOpenAsks open = %s, want UserAsks' %s", openJSON, wantOpen)
+	}
+	if len(openJSON) >= len(fullJSON) {
+		t.Fatalf("UserOpenAsks open is %d bytes, UserAsks %d: want the drop of the decided history", len(openJSON), len(fullJSON))
+	}
+	for _, decided := range []string{"move them tonight", "not mine to take", "warmly", "the login ended"} {
+		if strings.Contains(string(openJSON), decided) {
+			t.Fatalf("UserOpenAsks open holds decided words %q: %s", decided, openJSON)
+		}
+	}
+	if _, err := y.Store.UserOpenAsks(y.ctx, "nobody", "nobody"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UserOpenAsks(nobody) = %v, want not found", err)
+	}
+	if _, err := y.Store.UserOpenAsks(y.ctx, "mckean", "ada"); err == nil {
+		t.Fatalf("UserOpenAsks(mckean) by ada = nil, want it refused")
+	}
 }
 
 // OpenAskBeads answers which of the given beads carry an open ask to the

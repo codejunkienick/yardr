@@ -11,6 +11,7 @@ func (u *UserServer) serveMethods() {
 	u.api.methods["Bead"] = method{"Bead", reflect.ValueOf(u.bead)}
 	u.api.methods["Arrivals"] = method{"Arrivals", reflect.ValueOf(u.arrivals)}
 	u.api.methods["UserAsks"] = method{"UserAsks", reflect.ValueOf(u.userAsks)}
+	u.api.methods["UserOpenAsks"] = method{"UserOpenAsks", reflect.ValueOf(u.userOpenAsks)}
 	u.api.methods["Users"] = method{"Users", reflect.ValueOf(u.users)}
 	u.api.methods["GetUser"] = method{"GetUser", reflect.ValueOf(u.getUser)}
 	u.api.methods["Crew"] = method{"Crew", reflect.ValueOf(u.crew)}

@@ -135,6 +135,13 @@ type AskQueue struct {
 	Decided []DecidedAsk `json:"decided"`
 }
 
+// OpenAskQueue is the open section of AskQueue alone: every open ask,
+// oldest first, shaped as UserAsks shapes it, for a client that needs no
+// decided history.
+type OpenAskQueue struct {
+	Open []OpenAsk `json:"open"`
+}
+
 // WriterAsk is one open ask as a row of its writer's list: the question in
 // plain words, who must answer, its state and how long it has stood, with
 // the bead it stands on. What the card shows beyond the row (context,
@@ -230,6 +237,17 @@ func (s *Store) UserAsks(ctx context.Context, name, actor string, viewer ...stri
 		return q, err
 	}
 	return s.asksCache.do(ctx, key, head, now(), compute, cloneAskQueue)
+}
+
+// UserOpenAsks reads the open section of the queue UserAsks serves, under
+// its gate and from its kept answer, so a client that needs no decided
+// history downloads none of it.
+func (s *Store) UserOpenAsks(ctx context.Context, name, actor string, viewer ...string) (*OpenAskQueue, error) {
+	q, err := s.UserAsks(ctx, name, actor, viewer...)
+	if err != nil {
+		return nil, err
+	}
+	return &OpenAskQueue{Open: q.Open}, nil
 }
 
 // userAsks computes the queue UserAsks serves, for viewer, and says when

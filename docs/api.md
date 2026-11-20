@@ -716,9 +716,9 @@ takes its name the same way, and asks `GetUser` for it: the answer
 `not-found` says that the name is no user of the yard, and then there is
 nothing to show. The operator adds one with `yardr user add <name>`.
 
-That name is the `name` of the inbox calls, of `UserAsks` and of `Waiting`,
-one side of `Conversation`, and the `actor` of `Mail`, `MailPeer` and the
-writes.
+That name is the `name` of the inbox calls, of `UserAsks`, of
+`UserOpenAsks` and of `Waiting`, one side of `Conversation`, and the
+`actor` of `Mail`, `MailPeer` and the writes.
 
 ## Starting
 
@@ -744,6 +744,8 @@ after the head, and `Bead` for each bead it shows. From then on it reads
 `UserAsks` again on every `noted` event, `Bead` again on every event whose
 `bead` is one shown, and `UserAsks` once more at each put-aside ask's
 `return_at`, which is the one return that arrives with no event. A client
+that needs the open questions alone reads `UserOpenAsks` instead: the same
+open rows, without the decided history. A client
 that shows the beads parked for the person too reads `Waiting` beside
 `UserAsks`, at the start and again on the events its entry names.
 
@@ -798,7 +800,7 @@ nothing else. What is not the same:
   apply, account and grants of a setup.
 - **Arguments by name only.** The array yardr's own builds send is refused.
 - **Every call is made as the device's user.** The `name` of `GetUser`, the
-  inbox calls, `UserAsks` and `Waiting`, and the `actor` of `Mail`, `MailPeer`,
+  inbox calls, `UserAsks`, `UserOpenAsks` and `Waiting`, and the `actor` of `Mail`, `MailPeer`,
   `AnswerAsk`, `DeferAsk`, `DeclineAsk`, their three guarded writes,
   `TakeBackAsk`, `AddNote`, `MoveBead`,
   `GiveSecret`, `ApproveAsk`, `ApproveSetup` and `TelemetrySet`, may be left out: the yard fills in the user. One that names anyone else is refused with the
@@ -921,7 +923,7 @@ nothing else. What is not the same:
   `flow/starter.default`) is always whole: its `run.pack.plan` still says
   `kept` of each, and carries a kept file's hashes, text and diff and a kept
   flow's `flow_old_sha256`, the digest of the flow it overwrites.
-- **`Bead` and `UserAsks` tell a run ask as its asker typed it, to a device
+- **`Bead`, `UserAsks` and `UserOpenAsks` tell a run ask as its asker typed it, to a device
   that is no operator's.** The `run` card has `argv`, `command` and
   `description`, and an approved ask's `ran` has `argv` and `failed`; a
   pending member report's `pending_reason` is told to the operator alone. The
@@ -944,7 +946,7 @@ nothing else. What is not the same:
   the command whole, so its `noted` event carries no `answer` to such a
   device, and its notification reads as the event without its sentence. A
   device of an operator is sent all of it, as the socket is.
-- **`Bead` and `UserAsks` send a depot-push card and its `ran` only to a
+- **`Bead`, `UserAsks` and `UserOpenAsks` send a depot-push card and its `ran` only to a
   device of the current operator.** A device of any other user, including a
   user who was the operator when the ask was filed, receives neither field;
   the socket tells the whole card. The `noted` event for its approval and the
@@ -3576,6 +3578,752 @@ POST /call/UserAsks
 | `decided[].return_at` | time, may be absent | when a put-aside ask comes back, here or in the yard that asked it; absent otherwise |
 
 Read it again on every `noted` event: a question asked, answered, put aside, declined or taken back, and the asker's next note, all arrive as `noted`. A put-aside ask also comes back on its own after 24 hours, with no event: its decided entry carries `return_at`, so read again then. An answer to a question another yard asked that did not land arrives as `noted` by `yard`: the question is open again, or decided with how it ended there, and the person has mail from `yard` that says which.
+
+### `UserOpenAsks`
+
+The open questions of [`UserAsks`](#userasks) alone: every open ask addressed to the person, oldest first, shaped as that call shapes it, without the decided history. A client that only needs what waits for the person reads this and downloads no decided bytes; one that shows what they dealt with reads `UserAsks`. Only the user reads their queue, and an operator reads any user's. A device's viewer is always its user. A yard from before this call answers it as a method it does not have (`no such method`), and the client reads `UserAsks` there instead.
+
+| argument | type | |
+|---|---|---|
+| `name` | string | the user |
+| `actor` | string | who reads: the user's name, or an operator's; left out, the user |
+| `viewer` | string | who reads the queue; a device's viewer is its user; left out, the yard itself |
+
+```
+POST /call/UserOpenAsks
+{"name":"jo","actor":"jo","viewer":"jo"}
+
+{
+  "result": {
+    "open": [
+      {
+        "bead": "yd-links",
+        "bead_title": "Move the links",
+        "topic": "topic:linear-out",
+        "ask": 3,
+        "question": "Move this yard's links to the declared source now?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
+      },
+      {
+        "bead": "yd-links",
+        "bead_title": "Move the links",
+        "topic": "topic:linear-out",
+        "ask": 4,
+        "question": "This design before that one?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
+      },
+      {
+        "bead": "yd-greet",
+        "bead_title": "The greeting",
+        "topic": "",
+        "ask": 5,
+        "question": "What should the tone of the greeting be?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
+      },
+      {
+        "bead": "yd-links",
+        "bead_title": "Move the links",
+        "topic": "topic:linear-out",
+        "ask": 12,
+        "question": "The web view cleanup: build?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 1
+      },
+      {
+        "bead": "yd-ledger@north",
+        "bead_title": "Close the ledger",
+        "topic": "topic:books",
+        "ask": 9,
+        "question": "Close the ledger tonight?",
+        "asker": "clerk@north",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 18,
+        "question": "The CRM's token for updates",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "secret": {
+          "source": "crm",
+          "env": ["CRM_UPDATE_TOKEN"],
+          "reach": ["lands in: the source's env_file, or sources/crm.env in the yard's home when it has none", "read by: declared calls (yardr call crm ...) and the source's check, from the file at each call", "not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
+          "line": "a secret: CRM_UPDATE_TOKEN, for the source crm (https://crm.example.com)"
+        },
+        "weight": [
+          {
+            "class": "credential",
+            "line": "gives a credential or an address to the yard: CRM_UPDATE_TOKEN, for the source crm (https://crm.example.com)"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 19,
+        "question": "The API key for the CRM",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "secret": {
+          "source": "crm",
+          "env": ["CRM_TOKEN"],
+          "reach": ["lands in: the source's env_file, or sources/crm.env in the yard's home when it has none", "read by: declared calls (yardr call crm ...) and the source's check, from the file at each call", "not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
+          "line": "a secret: CRM_TOKEN, for the source crm (https://crm.example.com)"
+        },
+        "weight": [
+          {
+            "class": "credential",
+            "line": "gives a credential or an address to the yard: CRM_TOKEN, for the source crm (https://crm.example.com)"
+          }
+        ]
+      },
+      {
+        "bead": "yd-greet",
+        "bead_title": "The greeting",
+        "topic": "",
+        "ask": 22,
+        "question": "Flowers for the newcomer?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 25,
+        "question": "Your id at the phone service",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "secret": {
+          "source": "phone",
+          "env": ["PHONE_USER"],
+          "user": "jo",
+          "reach": ["lands in: jo's env_file, or users/jo.env in the yard's home when it has none", "read by: the yard, at each message it sends jo through the source phone", "not reached: calls and thread commands: it is an address, not a credential"],
+          "line": "a secret: PHONE_USER, jo's own address in the source phone (https://phone.example.com); jo is told through phone once it is given and yardr user set jo notify=phone is run"
+        },
+        "weight": [
+          {
+            "class": "credential",
+            "line": "gives a credential or an address to the yard: PHONE_USER, jo's own address in the source phone (https://phone.example.com); jo is told through phone once it is given and yardr user set jo notify=phone is run"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 28,
+        "question": "Take more mail from north?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "run": {
+          "argv": ["peer", "allow", "north", "--mail-limit", "300"],
+          "command": "yardr peer allow north --mail-limit 300",
+          "does": ["the link with north (key 6lHks9_z…) takes 300 mails and asks an hour from it. It takes 100 now."],
+          "back": "yardr peer allow north --mail-limit 100"
+        },
+        "weight": [
+          {
+            "class": "trust",
+            "line": "widens who the yard listens to: the link with north takes 300 mails and asks an hour from it, 100 now"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 31,
+        "question": "May the CRM be called more often?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "run": {
+          "argv": ["source", "set", "crm", "calls_per_hour=240"],
+          "command": "yardr source set crm calls_per_hour=240",
+          "does": ["the source crm (https://crm.example.com) may be called 240 times an hour by each session or crew member that may call it. It may be called 120 times now."],
+          "back": "yardr source set crm calls_per_hour=120",
+          "back_by": "only the operator"
+        }
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 34,
+        "question": "The code the second sign-in showed",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "secret": {
+          "source": "",
+          "env": ["INPUT"],
+          "login": "claude-example2",
+          "line": "a secret: INPUT, for the waiting login claude-example2"
+        },
+        "weight": [
+          {
+            "class": "credential",
+            "line": "gives a credential or an address to the yard: INPUT, for the waiting login claude-example2"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 37,
+        "question": "The token it updates with",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "secret": {
+          "source": "crm",
+          "env": ["CRM_UPDATE_TOKEN"],
+          "crew": "yardmaster",
+          "reach": ["lands in: crew member yardmaster's env_file, or crew/yardmaster.env in the yard's home when it has none", "read by: yardmaster's thread commands (yardr reply, thread open, thread state)", "not reached: declared calls (yardr call crm ...), which read the source's own file; other crew members' files; a session already running", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
+          "line": "a secret: CRM_UPDATE_TOKEN, for crew member yardmaster in the source crm (https://crm.example.com); the env_file line is the one written, and it takes effect when yardmaster next starts (rotation or yardr crew restart yardmaster)"
+        },
+        "weight": [
+          {
+            "class": "credential",
+            "line": "gives a credential or an address to the yard: CRM_UPDATE_TOKEN, for crew member yardmaster in the source crm (https://crm.example.com); the env_file line is the one written, and it takes effect when yardmaster next starts (rotation or yardr crew restart yardmaster)"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 40,
+        "question": "Your CRM token",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "secret": {
+          "source": "crm",
+          "env": ["CRM_TOKEN"],
+          "as": "jo",
+          "reach": ["lands in: jo's env_file, or users/jo.env in the yard's home when it has none", "read by: calls made as jo (yardr call crm ... --as jo) and yardr source check crm --as jo, from the file at each call", "not reached: calls made without --as, thread commands, other users' files", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
+          "line": "a secret: CRM_TOKEN, jo's own credential for the source crm (https://crm.example.com), read as jo when a call is made --as jo"
+        },
+        "weight": [
+          {
+            "class": "credential",
+            "line": "gives a credential or an address to the yard: CRM_TOKEN, jo's own credential for the source crm (https://crm.example.com), read as jo when a call is made --as jo"
+          },
+          {
+            "class": "as-user",
+            "line": "lets calls or words count as a person's: a call of the source crm made --as jo reads it as jo's own"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 41,
+        "question": "The yard's account for gog",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "secret": {
+          "source": "gog",
+          "env": ["GOG_ACCOUNT"],
+          "reach": ["lands in: the source's env_file, or sources/gog.env in the yard's home when it has none", "read by: declared calls (yardr call gog ...) and the source's check, from the file at each call", "not reached: thread commands (yardr reply, thread open, thread state), which read the speaker's own file; a crew member's is given with --for-crew", "mint: where the source mints, these names are its inputs; a static token beside them is left as it is, and not used while they are set"],
+          "line": "a secret: GOG_ACCOUNT, for the source gog (https://gog.example.com)"
+        },
+        "concealed": false,
+        "weight": [
+          {
+            "class": "credential",
+            "line": "gives a credential or an address to the yard: GOG_ACCOUNT, for the source gog (https://gog.example.com)"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 44,
+        "question": "Set up the courier source?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "setup": {
+          "pack": "courier",
+          "label": "embedded in yardr doctest",
+          "account": ["COURIER_ACCOUNT"],
+          "account_file": "/home/jo/.yardr/sources/courier.env",
+          "candidates": [
+            {
+              "source": "courier-existing",
+              "file": "/home/jo/.yardr/sources/courier-existing.env",
+              "values": {
+                "COURIER_ACCOUNT": "jo@example.test"
+              }
+            }
+          ],
+          "does": ["pack courier (embedded in yardr doctest), of kind source, into the yard: it adds 1 source and copies 1 command file (1 command), and changes nothing else. It makes no hook and sets no credential's file.", "source courier: its calls go to https://eu.courier.example.com/api (base eu). Its credential is the variable COURIER_TOKEN (the name, never the value), minted from COURIER_ACCOUNT by the declaration's own mint command [courier-mint] (command file courier-mint, copied to \u003chome\u003e/sources/courier/courier-mint: sha256 275239824e00e61b0a220e61a41791c7e9b4bd726f8b0c27077a338f8131c9dc, mode 0700), run with the mint's inputs and the operator's local logins where the source's mint_command is unset: one the operator sets wins over it, sent in the header \"Authorization: Bearer {credential}\" on every call. It has no second credential for updates.", "call ping (read): GET /me. It takes no parameter, and sends no query.", "call ping sends no body. Its answer is returned as it comes, at most 65536 bytes.", "call put (update): POST /it. It takes no parameter, and sends no query.", "call put sends no body. Its answer is returned as it comes, at most 65536 bytes.", "it has no check call, no idempotency header, no way to tell a user, no way to hear deliveries, no limits command, no way to speak in threads, no bead link, no identity fold (its identity keys keep their case), no hook deliveries into the yard and no pull-request or CI events.", "it names no command but its mint command, said with its credential above.", "the host of source courier: its calls go to https://eu.courier.example.com/api. To send them to a server of your own instead, give its host with --host \u003chost\u003e (a name or an address with an optional port, yours to type): they then go to https://\u003chost\u003e/api, and the account below is given for that host.", "the account COURIER_ACCOUNT: already given for courier-existing (COURIER_ACCOUNT=jo@example.test, in /home/jo/.yardr/sources/courier-existing.env). Take it with --account courier-existing, or type another unseen (written to /home/jo/.yardr/sources/courier.env, named in the answer, never the value).", "grants to group builders and crew yardmaster — pick one:"],
+          "back": "yardr source rm courier; yardr source revoke courier \u003cwhat\u003e --group builders --crew yardmaster",
+          "back_by": "the operator",
+          "presets": [
+            {
+              "name": "read",
+              "grants": [
+                {
+                  "source": "courier",
+                  "calls": ["read"]
+                }
+              ]
+            },
+            {
+              "name": "all",
+              "grants": [
+                {
+                  "source": "courier",
+                  "calls": ["read", "put"]
+                }
+              ]
+            }
+          ],
+          "to": [
+            {
+              "group": "builders"
+            },
+            {
+              "crew": "yardmaster"
+            }
+          ],
+          "base": "eu",
+          "host_template": "https://{host}/api"
+        },
+        "weight": [
+          {
+            "class": "credential",
+            "line": "gives a credential or an address to the yard: the account COURIER_ACCOUNT of pack courier"
+          },
+          {
+            "class": "outside",
+            "line": "lets the yard change something outside it: the preset all lets group builders and crew yardmaster call put of courier (an update)"
+          },
+          {
+            "class": "code",
+            "line": "brings a program the yard will run: the command file courier-mint of courier (new)"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 45,
+        "question": "Set up the courier source for the night crew?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "setup": {
+          "pack": "courier",
+          "label": "embedded in yardr doctest",
+          "account": ["COURIER_ACCOUNT"],
+          "account_file": "/home/jo/.yardr/sources/courier.env",
+          "candidates": [
+            {
+              "source": "courier-existing",
+              "file": "/home/jo/.yardr/sources/courier-existing.env",
+              "values": {
+                "COURIER_ACCOUNT": "jo@example.test"
+              }
+            }
+          ],
+          "does": ["pack courier (embedded in yardr doctest), of kind source, into the yard: it adds 1 source and copies 1 command file (1 command), and changes nothing else. It makes no hook and sets no credential's file.", "source courier: its calls go to https://eu.courier.example.com/api (base eu). Its credential is the variable COURIER_TOKEN (the name, never the value), minted from COURIER_ACCOUNT by the declaration's own mint command [courier-mint] (command file courier-mint, copied to \u003chome\u003e/sources/courier/courier-mint: sha256 275239824e00e61b0a220e61a41791c7e9b4bd726f8b0c27077a338f8131c9dc, mode 0700), run with the mint's inputs and the operator's local logins where the source's mint_command is unset: one the operator sets wins over it, sent in the header \"Authorization: Bearer {credential}\" on every call. It has no second credential for updates.", "call ping (read): GET /me. It takes no parameter, and sends no query.", "call ping sends no body. Its answer is returned as it comes, at most 65536 bytes.", "call put (update): POST /it. It takes no parameter, and sends no query.", "call put sends no body. Its answer is returned as it comes, at most 65536 bytes.", "it has no check call, no idempotency header, no way to tell a user, no way to hear deliveries, no limits command, no way to speak in threads, no bead link, no identity fold (its identity keys keep their case), no hook deliveries into the yard and no pull-request or CI events.", "it names no command but its mint command, said with its credential above.", "the host of source courier: its calls go to https://eu.courier.example.com/api. To send them to a server of your own instead, give its host with --host \u003chost\u003e (a name or an address with an optional port, yours to type): they then go to https://\u003chost\u003e/api, and the account below is given for that host.", "the account COURIER_ACCOUNT: already given for courier-existing (COURIER_ACCOUNT=jo@example.test, in /home/jo/.yardr/sources/courier-existing.env). Take it with --account courier-existing, or type another unseen (written to /home/jo/.yardr/sources/courier.env, named in the answer, never the value).", "grants to crew yardmaster — pick one:"],
+          "back": "yardr source rm courier; yardr source revoke courier \u003cwhat\u003e --crew yardmaster",
+          "back_by": "the operator",
+          "presets": [
+            {
+              "name": "read",
+              "grants": [
+                {
+                  "source": "courier",
+                  "calls": ["read"]
+                }
+              ]
+            },
+            {
+              "name": "all",
+              "grants": [
+                {
+                  "source": "courier",
+                  "calls": ["read", "put"]
+                }
+              ]
+            }
+          ],
+          "to": [
+            {
+              "crew": "yardmaster"
+            }
+          ],
+          "base": "eu",
+          "host_template": "https://{host}/api"
+        },
+        "weight": [
+          {
+            "class": "credential",
+            "line": "gives a credential or an address to the yard: the account COURIER_ACCOUNT of pack courier"
+          },
+          {
+            "class": "outside",
+            "line": "lets the yard change something outside it: the preset all lets crew yardmaster call put of courier (an update)"
+          },
+          {
+            "class": "code",
+            "line": "brings a program the yard will run: the command file courier-mint of courier (new)"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 46,
+        "question": "Update the ledger source?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "setup": {
+          "pack": "ledger",
+          "label": "embedded in yardr doctest",
+          "account": ["LEDGER_TOKEN", "LEDGER_UPDATE_TOKEN"],
+          "account_file": "/home/jo/.yardr/sources/ledger.env",
+          "given": true,
+          "does": ["pack ledger (embedded in yardr doctest), of kind source, into the yard: it replaces 1 source and copies no command files, and changes nothing else. It makes no hook and sets no credential's file.", "source ledger: its calls go to https://ledger.example.com/v2. Its credential is the variable LEDGER_TOKEN (the name, never the value), with LEDGER_UPDATE_TOKEN for updates, sent in the header \"Authorization: Bearer {credential}\" on every call. It has no mint.", "it would replace the source ledger the yard has under that name.", "source ledger base: \"https://ledger.example.com/api\" -\u003e \"https://ledger.example.com/v2\".", "call ping (read): GET /me. It takes no parameter, and sends no query.", "call ping sends no body. Its answer is returned as it comes, at most 65536 bytes.", "call put (update): POST /it. It takes no parameter, and sends no query.", "call put sends no body. Its answer is returned as it comes, at most 65536 bytes.", "it has no check call, no idempotency header, no way to tell a user, no way to hear deliveries, no limits command, no way to speak in threads, no bead link, no identity fold (its identity keys keep their case), no hook deliveries into the yard and no pull-request or CI events.", "it names no command.", "the account LEDGER_TOKEN and LEDGER_UPDATE_TOKEN: given, in /home/jo/.yardr/sources/ledger.env. Type another unseen to change it, or approve keeping it with a bare preset pick (written to /home/jo/.yardr/sources/ledger.env, named in the answer, never the value).", "grants to group builders and crew yardmaster — pick one:"],
+          "back": "yardr source rm ledger; yardr source revoke ledger \u003cwhat\u003e --group builders --crew yardmaster",
+          "back_by": "the operator",
+          "presets": [
+            {
+              "name": "read",
+              "grants": [
+                {
+                  "source": "ledger",
+                  "calls": ["read"]
+                }
+              ]
+            },
+            {
+              "name": "all",
+              "grants": [
+                {
+                  "source": "ledger",
+                  "calls": ["read", "put"]
+                }
+              ]
+            }
+          ],
+          "to": [
+            {
+              "group": "builders"
+            },
+            {
+              "crew": "yardmaster"
+            }
+          ]
+        },
+        "weight": [
+          {
+            "class": "credential",
+            "line": "gives a credential or an address to the yard: the account LEDGER_TOKEN and LEDGER_UPDATE_TOKEN of pack ledger"
+          },
+          {
+            "class": "outside",
+            "line": "lets the yard change something outside it: the preset all lets group builders and crew yardmaster call put of ledger (an update)"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 47,
+        "question": "Update the parcel source?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "setup": {
+          "pack": "parcel",
+          "label": "embedded in yardr doctest",
+          "account": ["PARCEL_TOKEN", "PARCEL_UPDATE_TOKEN"],
+          "account_file": "/home/jo/.yardr/sources/parcel.env",
+          "missing": ["PARCEL_UPDATE_TOKEN"],
+          "does": ["pack parcel (embedded in yardr doctest), of kind source, into the yard: it replaces 1 source and copies no command files, and changes nothing else. It makes no hook and sets no credential's file.", "source parcel: its calls go to https://parcel.example.com/api. Its credential is the variable PARCEL_TOKEN (the name, never the value), with PARCEL_UPDATE_TOKEN for updates, sent in the header \"Authorization: Bearer {credential}\" on every call. It has no mint.", "it would replace the source parcel the yard has under that name.", "source parcel credential: {\"env\":\"PARCEL_TOKEN\",\"header\":\"Authorization: Bearer {credential}\"} -\u003e {\"env\":\"PARCEL_TOKEN\",\"header\":\"Authorization: Bearer {credential}\",\"update_env\":\"PARCEL_UPDATE_TOKEN\"}.", "source parcel calls: [{\"name\":\"ping\",\"kind\":\"read\",\"request\":{\"method\":\"GET\",\"path\":\"/me\"},\"answer\":{\"max\":65536}}] -\u003e [{\"name\":\"ping\",\"kind\":\"read\",\"request\":{\"method\":\"GET\",\"path\":\"/me\"},\"answer\":{\"max\":65536}},{\"name\":\"put\",\"kind\":\"update\",\"request\":{\"method\":\"POST\",\"path\":\"/it\"},\"answer\":{\"max\":65536}}].", "call ping (read): GET /me. It takes no parameter, and sends no query.", "call ping sends no body. Its answer is returned as it comes, at most 65536 bytes.", "call put (update): POST /it. It takes no parameter, and sends no query.", "call put sends no body. Its answer is returned as it comes, at most 65536 bytes.", "it has no check call, no idempotency header, no way to tell a user, no way to hear deliveries, no limits command, no way to speak in threads, no bead link, no identity fold (its identity keys keep their case), no hook deliveries into the yard and no pull-request or CI events.", "it names no command.", "the account PARCEL_TOKEN and PARCEL_UPDATE_TOKEN: given, in /home/jo/.yardr/sources/parcel.env, but missing PARCEL_UPDATE_TOKEN: type PARCEL_UPDATE_TOKEN unseen (written to /home/jo/.yardr/sources/parcel.env, named in the answer, never the value).", "grants to group builders and crew yardmaster — pick one:"],
+          "back": "yardr source rm parcel; yardr source revoke parcel \u003cwhat\u003e --group builders --crew yardmaster",
+          "back_by": "the operator",
+          "presets": [
+            {
+              "name": "read",
+              "grants": [
+                {
+                  "source": "parcel",
+                  "calls": ["read"]
+                }
+              ]
+            },
+            {
+              "name": "all",
+              "grants": [
+                {
+                  "source": "parcel",
+                  "calls": ["read", "put"]
+                }
+              ]
+            }
+          ],
+          "to": [
+            {
+              "group": "builders"
+            },
+            {
+              "crew": "yardmaster"
+            }
+          ]
+        },
+        "weight": [
+          {
+            "class": "credential",
+            "line": "gives a credential or an address to the yard: the account PARCEL_TOKEN and PARCEL_UPDATE_TOKEN of pack parcel"
+          },
+          {
+            "class": "outside",
+            "line": "lets the yard change something outside it: the preset all lets group builders and crew yardmaster call put of parcel (an update)"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 54,
+        "question": "The API key Claude Code will use",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "secret": {
+          "source": "",
+          "env": ["ANTHROPIC_API_KEY"],
+          "crew": "yardmaster",
+          "harness": "claude",
+          "line": "a secret: ANTHROPIC_API_KEY, the API key Claude Code runs with, asked for crew member yardmaster; it is read by every Claude Code session that burns the operator's login (the crew, groups without login_for, the operator's conversations), from its next start"
+        },
+        "weight": [
+          {
+            "class": "credential",
+            "line": "gives a credential or an address to the yard: ANTHROPIC_API_KEY, the API key Claude Code runs with, asked for crew member yardmaster; it is read by every Claude Code session that burns the operator's login (the crew, groups without login_for, the operator's conversations), from its next start"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 59,
+        "question": "Hook the bot's messages up?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "run": {
+          "argv": ["hook", "add", "bot", "--source", "bot"],
+          "command": "yardr hook add bot --source bot",
+          "does": ["it adds the hook bot: POST /hooks/bot takes deliveries from the source bot (https://bot.example.com).", "what it sends in: deliveries are verified by the header X-Test-Secret holding the hook's secret itself (scheme secret); it sends no delivery id; it sends no timestamp; bodies are unique; the command [bot/normalize] turns a verified body into the envelope, handed no credential; its events may carry the fields chat; the yard registers its webhook with setwebhook (POST /setWebhook), filling url with the public URL and secret_token with the hook's secret.", "the yard makes the signing secret for bot and keeps it in /home/jo/.yardr/hooks/bot.secret (mode 0600); the hook names that file, and the value is in no note, event, answer or card. No secret is typed.", "the approval gives project in the clear, which the yard sends to the register call with the URL and the secret.", "it will call POST /setWebhook at https://bot.example.com/api to register https://yard.example/hooks/bot."],
+          "back": "yardr hook rm bot",
+          "back_by": "only the operator"
+        },
+        "weight": [
+          {
+            "class": "trust",
+            "line": "widens who the yard listens to: POST /hooks/bot takes deliveries from outside the yard for the source bot"
+          }
+        ]
+      },
+      {
+        "bead": "yd-links",
+        "bead_title": "Move the links",
+        "topic": "topic:linear-out",
+        "ask": 60,
+        "question": "Turn push off for the yard depot?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "depot_push": {
+          "depot": "yard",
+          "off": true,
+          "does": ["turns push to github.com off for depot yard (origin https://github.com/ada/yard.git).", "takes YARDR_PUSH=origin out of yard-assembly's cmd; the rest of the cmd stands untouched, YARDR_LAND as it was.", "takes the pack's helper line for https://github.com out of depot yard's own git config with git -C yard config --unset credential.https://github.com.helper; no other depot's config changes.", "landings of the depot then land here and push nowhere."],
+          "back": "yardr bead ask yd-links - --depot-push yard, with the question and context on stdin",
+          "back_by": "only the operator"
+        },
+        "weight": [
+          {
+            "class": "outside",
+            "line": "lets the yard change something outside it: landings of depot yard push to its origin no more"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 65,
+        "question": "Pair jo's watch?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "run": {
+          "argv": ["user", "device", "pair", "jo", "watch", "--url", "https://mac.example.net"],
+          "command": "yardr user device pair jo watch --url https://mac.example.net",
+          "does": ["opens a pairing for the device watch of jo, reached at https://mac.example.net.", "jo has 1 device: phone (never used).", "Approval opens the pairing for that device alone: its code is good for ten minutes and for one device, and whoever has the code within those minutes is answered with that device's token.", "Nothing in the yard keeps the code after it is used or runs out.", "The new device then calls as jo until yardr user device rm jo watch, and jo will then have 2 devices."],
+          "back": "yardr user device pair --end ends it while it stands; once the code is used, yardr user device rm jo watch removes the device"
+        },
+        "weight": [
+          {
+            "class": "trust",
+            "line": "widens who the yard listens to: a new device watch of jo speaks as them: whoever holds its token calls as jo until the device is removed"
+          }
+        ]
+      },
+      {
+        "bead": "yd-crm",
+        "bead_title": "Read the CRM",
+        "topic": "",
+        "ask": 66,
+        "question": "Pair jo's second phone?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0,
+        "run": {
+          "argv": ["user", "device", "pair", "jo", "phone2", "--url", "https://mac.example.net"],
+          "command": "yardr user device pair jo phone2 --url https://mac.example.net",
+          "does": ["opens a pairing for the device phone2 of jo, reached at https://mac.example.net.", "jo has 1 device: phone (never used).", "Approval opens the pairing for that device alone: its code is good for ten minutes and for one device, and whoever has the code within those minutes is answered with that device's token.", "Nothing in the yard keeps the code after it is used or runs out.", "The new device then calls as jo until yardr user device rm jo phone2, and jo will then have 2 devices."],
+          "back": "yardr user device pair --end ends it while it stands; once the code is used, yardr user device rm jo phone2 removes the device"
+        },
+        "weight": [
+          {
+            "class": "trust",
+            "line": "widens who the yard listens to: a new device phone2 of jo speaks as them: whoever holds its token calls as jo until the device is removed"
+          }
+        ]
+      },
+      {
+        "bead": "yd-greet",
+        "bead_title": "The greeting",
+        "topic": "",
+        "ask": 69,
+        "question": "Welcome the newcomer on Monday?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
+      },
+      {
+        "bead": "yd-greet",
+        "bead_title": "The greeting",
+        "topic": "",
+        "ask": 70,
+        "question": "A lunch for the newcomer?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
+      },
+      {
+        "bead": "yd-greet",
+        "bead_title": "The greeting",
+        "topic": "",
+        "ask": 71,
+        "question": "A desk by the window?",
+        "asker": "yardmaster",
+        "since": "2026-10-08T09:30:00Z",
+        "turn": 0
+      }
+    ]
+  }
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `open[].bead` | string | the bead the question stands on: a handle, or `bead@peer` for a question another yard asked |
+| `open[].bead_title` | string | the bead's title |
+| `open[].topic` | string | the bead's topic: its first `topic:` label, `""` when it has none |
+| `open[].ask` | number | the ask's seq on its bead: what an answer names |
+| `open[].question` | string | the question in one line, as a person would ask it |
+| `open[].asker` | string | who asked: a name, or `name@peer` for a question another yard asked |
+| `open[].since` | time | when the ask was written: how long it waits (as sent, for a question another yard asked) |
+| `open[].turn` | number | how many answers the ask has taken: every pick, words answer, put-aside, decline and take-back written on it, `0` for none. It only grows, and is the same while nothing is written on the ask, so it is what a guarded write names: [`AnswerAskExpected`](#answeraskexpected), [`DeferAskExpected`](#deferaskexpected) and [`DeclineAskExpected`](#declineaskexpected). A put-aside ask that came back stays at the turn of its put-aside. `0` on a question another yard asked, which takes no guarded write |
+| `open[].weight` | array, may be absent | the card's weight as the yard weighed it when it wrote the card: one entry a class, each a way approving it widens what the yard does ([weighty cards](#weighty-cards)). Absent on a routine card |
+| `open[].weight[].class` | string | `credential`, `as-user`, `outside`, `code`, `trust` or `reads`. A later build may add a class: draw one a client does not know as weighty, with its line |
+| `open[].weight[].line` | string | the yard's line for the class with what this card does, as a terminal card prints it after `WEIGHTY · <class>: ` |
+| `open[].secret` | object, may be absent | what a secret ask asks for, as `Bead` says it; absent on any other ask |
+| `open[].secret.source` | string | the declared source the secret is the credential of; with `user`, `crew` or `as`, the source the address or credential is in; empty on a login or harness-key ask |
+| `open[].secret.env` | array of string | the names to ask the person a value for; with a harness-key ask, variables in that harness kind's `login_env` |
+| `open[].secret.user` | string, may be absent | the user whose own address in the source is asked for; absent on an ask for the source's credential |
+| `open[].secret.crew` | string, may be absent | the crew member whose own credential in the source is asked for, or on a harness-key ask the crew member at whose login screen it is asked (the key goes to the operator's key file of the kind, which every session on the operator's login reads); absent on any other secret ask |
+| `open[].secret.as` | string, may be absent | with `login`, the user whose login that is; otherwise the user whose own credential in the source is asked for; absent on any other secret ask |
+| `open[].secret.login` | string, may be absent | the waiting login the value goes to; with `as`, the login is that user's own; absent on any other secret ask |
+| `open[].secret.harness` | string, may be absent | the harness kind whose API key is asked for; absent on any other secret ask |
+| `open[].secret.line` | string | what the card says is asked for, in the yard's words |
+| `open[].secret.reach` | array of string, may be absent | what the value reaches once it is given, in short lines under the line: where it lands, which reads use it, and which do not; absent on a harness-key ask and a waiting login's input, whose line already says where the value goes |
+| `open[].concealed` | bool, may be absent | whether a secret ask's value is drawn hidden: false where the source marks every asked name as no secret; absent (concealed) on any other ask |
+| `open[].run` | object, may be absent | the command a run ask proposes, as `Bead` says it; absent on any other ask |
+| `open[].run.argv` | array of string | the command in words, without the leading `yardr`. On a run ask that sets a setting, adds a source, or applies a pack with a depot or mappings named, a device of the current operator is told them, whoever the ask was put to. Any other device is told `[]`, even the device of a user the ask was put to while they were the operator, and so is every device of a yard with no operator. The socket tells the whole card |
+| `open[].run.command` | string | the command whole, as it is typed in a terminal. Never shorten it. On a run ask that sets a setting, adds a source, or applies a pack with a depot or mappings named, a device of the current operator is told it, whoever the ask was put to. Any other device is told `""`, even the device of a user the ask was put to while they were the operator, and so is every device of a yard with no operator. The socket tells the whole card |
+| `open[].run.does` | array of string | what the command changes, in the yard's words |
+| `open[].run.back` | string | the command that takes the change back |
+| `open[].run.back_by` | string, may be absent | who may run it, as `Bead` says it; absent where that is anyone |
+| `open[].setup` | object, may be absent | the setup a setup ask proposes, as `Bead` says it; absent on any other ask |
+| `open[].setup.pack` | string | the pack to set up, of kind source: one yardr embeds, or one the operator applied from a directory and left as it was |
+| `open[].setup.base` | string, may be absent | the selected region base name; absent when calls go to the declaration's own base |
+| `open[].setup.host_template` | string, may be absent | the address a host of the operator's own fills, with `{host}` where it goes (`https://{host}/api/v1`): the card asks for that host above the account, and [`ApproveSetup`](#for-the-operator-alone) takes it as `host`. Absent where no source the pack carries declares a `base_template` |
+| `open[].setup.label` | string, may be absent | where the pack was read from, as the card shows it: the build it is embedded in, or the directory the operator applied it from and the commit it was at |
+| `open[].setup.account` | array of string | the names to type unseen beside the preset pick |
+| `open[].setup.account_file` | string, may be absent | the file the value goes to, on the yard's machine. A device of the current operator is told it, whoever the ask was put to. Any other device is told the card with the field absent, even the device of a user the ask was put to while they were the operator, and so is every device of a yard with no operator. The socket tells the whole card |
+| `open[].setup.given` | bool, may be absent | on an update, where the yard already holds the source the pack brings: `true` when its account file already holds every name of `setup.account`, so that a bare preset pick keeps it; absent on a first setup, where nothing stands yet, and where the file lacks a name (`setup.missing`) |
+| `open[].setup.missing` | array of string, may be absent | on an update, the names of `setup.account` the account file that stands does not set, where the pack newly needs them (every name where the file is not there): the answer types exactly these, or takes a candidate; absent on a first setup and where the file holds every name |
+| `open[].setup.candidates` | array, may be absent | yard sources whose account the card offers to reuse, as `Bead` tells them. A device of the current operator is told them, whoever the ask was put to. Any other device is told the card as one with none, even the device of a user the ask was put to while they were the operator, and so is every device of a yard with no operator. The socket tells the whole card |
+| `open[].setup.candidates[].source` | string | the source whose account the card offers |
+| `open[].setup.candidates[].file` | string | the file holding the shared account inputs; told to a device of the current operator alone |
+| `open[].setup.candidates[].values` | object | the shared account input names and values the file holds; told to a device of the current operator alone |
+| `open[].setup.does` | array of string | what approving changes and what is there now, in the yard's words. The account sentence, which names the file the value goes to and, where the card lists candidates, each by source, values and file, is told to a device of the current operator alone. Any other device is told the account sentence of a card with none and naming no file |
+| `open[].setup.back` | string | the commands that take the setup back |
+| `open[].setup.back_by` | string, may be absent | who may run them, as `Bead` says it; absent where that is anyone |
+| `open[].setup.presets` | array | the pack's presets with their grants, in the order the ask's options count them |
+| `open[].setup.presets[].name` | string | the preset's name, as the option's label shows it |
+| `open[].setup.presets[].grants` | array | what of each source the preset grants |
+| `open[].setup.presets[].grants[].source` | string | the source the pack declares |
+| `open[].setup.presets[].grants[].calls` | array of string | `read` for every read call, calls by name |
+| `open[].setup.to` | array | who the grants are for |
+| `open[].setup.to[].group` | string, may be absent | the group, and so each session it starts |
+| `open[].setup.to[].crew` | string, may be absent | the crew member |
+| `open[].depot_push` | object, may be absent | the yard's depot-push card; absent on any other ask, and on a device that is not the current operator's. The socket tells the whole card |
+| `open[].depot_push.depot` | string | the depot whose push is changed |
+| `open[].depot_push.off` | bool, may be absent | true when the card turns push off; absent when it turns push on |
+| `open[].depot_push.does` | array of string | what approving changes and what stands now, in the yard's words |
+| `open[].depot_push.back` | string | the filing that takes the change back |
+| `open[].depot_push.back_by` | string, may be absent | who may file `back`, in words that stand before `can take it back`; absent where that is anyone |
+
+Read it again on every `noted` event, as [`UserAsks`](#userasks): a question asked, answered, put aside, declined or taken back arrives as `noted`. A put-aside ask also comes back on its own after 24 hours with no event, open again: read again then, as for [`UserAsks`](#userasks).
 
 ### `Waiting`
 

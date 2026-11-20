@@ -194,6 +194,10 @@ func (c *Client) UserAsks(ctx context.Context, name, actor string, viewer ...str
 	return callV[*store.AskQueue](c, ctx, "UserAsks", name, actor, viewer)
 }
 
+func (c *Client) UserOpenAsks(ctx context.Context, name, actor string, viewer ...string) (*store.OpenAskQueue, error) {
+	return callV[*store.OpenAskQueue](c, ctx, "UserOpenAsks", name, actor, viewer)
+}
+
 func (c *Client) OpenAskBeads(ctx context.Context, name, actor string, ids []string) ([]string, error) {
 	return callV[[]string](c, ctx, "OpenAskBeads", name, actor, ids)
 }

@@ -18,8 +18,9 @@ const ClientHeader = "X-Yardr-Client"
 // docs/api.md is the contract, and the test of this file holds the two
 // together. They are what a chat client needs, yardr chat among them: its
 // view (chat.Store) and the command that opens it; what a client that
-// shows a person's decisions needs (UserAsks, Waiting for the beads parked
-// in their stages, Bead and the writes, MoveBead among them); what a
+// shows a person's decisions needs (UserAsks, UserOpenAsks for the open
+// rows alone, Waiting for the beads parked in their stages, Bead and the
+// writes, MoveBead among them); what a
 // person's own client needs to file their work, to list it, to answer
 // their mail and to read one letter with its exchange, and to withdraw
 // or reword what they filed (FileBead, OwnBeads, ReplyMail,
@@ -63,6 +64,7 @@ var Calls = map[string][]string{
 	"Crew":                 {},
 	"GetCrew":              {"name"},
 	"UserAsks":             {"name", "actor", "viewer"},
+	"UserOpenAsks":         {"name", "actor", "viewer"},
 	"Waiting":              {"name", "actor", "viewer"},
 	"FileBead":             {"title", "body", "project", "actor"},
 	"OwnBeads":             {"user", "since", "actor"},

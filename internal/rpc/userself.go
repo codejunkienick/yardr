@@ -19,6 +19,7 @@ var selfArg = map[string][]string{
 	"UserNotifications":    {"name", "actor"},
 	"AckUserNotifications": {"name", "actor"},
 	"UserAsks":             {"name", "actor", "viewer"},
+	"UserOpenAsks":         {"name", "actor", "viewer"},
 	"Waiting":              {"name", "actor", "viewer"},
 	"FileBead":             {"actor"},
 	"OwnBeads":             {"user", "actor"},

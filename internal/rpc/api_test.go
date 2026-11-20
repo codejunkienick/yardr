@@ -514,6 +514,14 @@ var apiCalls = []apiCall{
 		after: "Read it again on every `noted` event: a question asked, answered, put aside, declined or taken back, and the asker's next note, all arrive as `noted`. A put-aside ask also comes back on its own after 24 hours, with no event: its decided entry carries `return_at`, so read again then. An answer to a question another yard asked that did not land arrives as `noted` by `yard`: the question is open again, or decided with how it ended there, and the person has mail from `yard` that says which.",
 	},
 	{
+		method:   "UserOpenAsks",
+		says:     "The open questions of [`UserAsks`](#userasks) alone: every open ask addressed to the person, oldest first, shaped as that call shapes it, without the decided history. A client that only needs what waits for the person reads this and downloads no decided bytes; one that shows what they dealt with reads `UserAsks`. Only the user reads their queue, and an operator reads any user's. A device's viewer is always its user. A yard from before this call answers it as a method it does not have (`no such method`), and the client reads `UserAsks` there instead.",
+		args:     []field{{"name", "string", "the user"}, {"actor", "string", "who reads: the user's name, or an operator's; left out, the user"}, {"viewer", "string", "who reads the queue; a device's viewer is its user; left out, the yard itself"}},
+		requests: []string{`{"name":"jo","actor":"jo","viewer":"jo"}`},
+		fields:   queueCard("open[]."),
+		after:    "Read it again on every `noted` event, as [`UserAsks`](#userasks): a question asked, answered, put aside, declined or taken back arrives as `noted`. A put-aside ask also comes back on its own after 24 hours with no event, open again: read again then, as for [`UserAsks`](#userasks).",
+	},
+	{
 		method:   "Waiting",
 		says:     "The beads parked for the person, longest waiting first, each with the moves they may make of it: open beads in a stage a manual group works, the person one of its members where the group lists any, past the first stage of the flow that governs the bead, so that a backlog, where beads start, is never here. It is the part of `yardr review`'s queue that is the person's to move, with the same moves in the same words. Only the user reads their queue, and an operator any user's. A device's viewer is always its user.",
 		args:     []field{{"name", "string", "the user"}, {"actor", "string", "who reads: the user's name, or an operator's; left out, the user"}, {"viewer", "string", "who reads the queue: it holds no bead they may not see; a device's viewer is its user; left out, the yard itself"}},

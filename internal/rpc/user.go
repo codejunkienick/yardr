@@ -51,53 +51,45 @@ import (
 // it fit to stand on a port that may face the internet:
 //
 //   - only the calls of Calls, by name: every other method of the store, and
-//     the array form yardr's own builds use, is answered as not there. The
-//     calls more are ten of OperatorCalls, GiveSecret, ApproveAsk,
-//     ApproveSetup, SourceGrants, SessionScreen, Line, Teammates,
-//     UninviteTeammate, TelemetryShow and TelemetrySet, for a device of
-//     an operator, and not there for anyone else (operatorCall), but
-//     GiveSecret for a device of a user whose own address or credential
-//     in a source is asked for (ownSecret). The other three of
-//     OperatorCalls, DevicePairOpen, DevicePairState and DevicePairClose,
-//     are the socket's alone and are not there for any device, an
-//     operator's included: a device token never opens a pairing
-//     (socketOnly);
+//     the array form yardr's own builds use, is answered as not there. Ten of
+//     OperatorCalls are there besides, for a device of an operator and nobody
+//     else: GiveSecret, ApproveAsk, ApproveSetup, SourceGrants, SessionScreen,
+//     Line, Teammates, UninviteTeammate, TelemetryShow and TelemetrySet
+//     (operatorCall), and GiveSecret for a device of a user whose own address
+//     or credential is asked for (ownSecret). The other three, DevicePairOpen,
+//     DevicePairState and DevicePairClose, are the socket's alone, not there
+//     for any device: a device token never opens a pairing (socketOnly);
 //   - every call is made as the user the credential resolves to (asUser);
 //   - Settings answers the keys of the store's device settings and no
 //     other, and the stream carries the value of a setting_changed for
 //     those alone (store.DeviceTold), so a lost token gives away no
 //     address or secret that the yard keeps in another setting;
-//   - Bead and UserAsks tell the file of a setup card's typed account, the
-//     candidates of the card, the yard's other accounts by file and the values
+//   - Bead, UserAsks and UserOpenAsks tell the file of a setup card's typed
+//     account, its candidates, the yard's other accounts by file and the values
 //     they hold, and the file the account of an approved setup is set in, to a
 //     device of an operator alone (bead, userAsks), and the stream tells the
-//     file a source_set points a source
-//     at and the command that mints its token, the file a user_set points a
-//     user at, the files a user_removed says a removed user's login named,
-//     and the secret file a hook_blocked names, to one alone
-//     (deviceEvent), so a lost token of another user, or of one who was the
-//     operator, gives away no address or file of an account the yard keeps;
+//     files and the mint command its events name to one alone (deviceEvent),
+//     so a lost token of another user, or of one who was the operator, gives
+//     away no address or file of an account the yard keeps;
 //   - the stream is told by an allow-list: each kind of event has a row of the
 //     keys of its data a device that is no operator's is told, and every
 //     other key is held, as is every key of a kind that has no row
 //     (store.Event.WithoutHeld), so that a kind written later tells no data
-//     until its author lists it, and a lost token gives away no handle, path,
-//     command or error that names one from any event. Flows says that a
-//     depot's flows could not be read and not why (flows), Peers has no address
-//     and no error text (peers), DeliveryFiles says that a file was not taken
-//     and not why (deliveryFiles), GiveSecret says which names a device's own
-//     giving wrote and not the file, and refuses a value the file cannot hold
-//     without naming it (giveSecret), a run ask is told as its asker typed it
-//     but for the typed words that carry a value or a path, which are the
-//     operator's alone (withoutRunWords), a call that fails on the yard's
-//     own file says that it failed and not on which file (shapeUserErr),
-//     and the rows of the notifications are made by the store from what
-//     their person is told of the event (store.Event.WithoutHeld);
-//   - Users, GetUser, Crew and GetCrew tell the file a user's address is read
-//     from, and of a crew member the directory it runs in, the files and
-//     commands its config names and the handles of its sessions, to a device
-//     of an operator alone (users, crew), so that these calls give a lost
-//     token of another user no file or command of a user or a crew member;
+//     until its author lists it, and no handle, path, command or error naming
+//     one crosses on any event. Flows says that a depot's flows could not be
+//     read and not why (flows), Peers has no address and no error text (peers),
+//     DeliveryFiles says that a file was not taken and not why (deliveryFiles),
+//     GiveSecret says which names a device's own giving wrote and not the file,
+//     and refuses a value the file cannot hold without naming it (giveSecret),
+//     a run ask is told as its asker typed it but for the typed words that
+//     carry a value or a path, the operator's alone (withoutRunWords), a call
+//     that fails on the yard's own file says that it failed and not on which
+//     file (shapeUserErr), and notification rows are made from what their
+//     person is told of the event (store.Event.WithoutHeld);
+//   - Users, GetUser, Crew and GetCrew tell a user's address file, and of a
+//     crew member the directory, the config's files and commands and the
+//     session handles, to a device of an operator alone (users, crew), so a
+//     lost token of another user is told no file or command of either;
 //   - who is an operator is the user's role (store.RoleOperator), read at
 //     each call (isOperator), not the operator setting, which names only
 //     whom an ask with no --to goes to;
@@ -231,10 +223,9 @@ func NewUserServer(st *store.Store, yard func(context.Context) string, log *slog
 	return u
 }
 
-// isOperator reports whether user is an operator of the yard: a user whose
-// role is store.RoleOperator, read now, so that a change of role moves the
-// next call with it. Nobody (""), a name that is no user, and a store that
-// cannot be read are no operator.
+// isOperator reports whether user is an operator of the yard: one whose role
+// is store.RoleOperator, read now, so a change of role moves the next call
+// with it. Nobody (""), no user, and an unreadable store are no operator.
 func (u *UserServer) isOperator(ctx context.Context, user string) bool {
 	if user == "" {
 		return false
@@ -272,12 +263,12 @@ func (u *UserServer) settings(ctx context.Context) (map[string]string, error) {
 	return out, nil
 }
 
-// userAsks is UserAsks as a device is told it. The setup asks of the queue,
-// open and decided, read as Bead tells them (withoutAccount): a device of a
-// current operator is told the file of the card's typed account, the
-// candidates of the card and the file the account of an approved setup is set
-// in, and no other device is. The run asks of the queue read as Bead tells
-// them too (withoutRunWords).
+// userAsks is UserAsks as a device is told it, and userOpenAsks UserOpenAsks
+// as one is told it: the setup asks read as Bead tells them
+// (withoutAccount): a device of a current operator is told the file of the
+// card's typed account, the candidates of the card and the file the account
+// of an approved setup is set in, and no other device is. The run asks read
+// as Bead tells them too (withoutRunWords).
 //
 // The store puts a setup ask to an operator alone, and that holds only when
 // the ask is made. The user's role can change afterwards, and the user the
@@ -303,12 +294,7 @@ func (u *UserServer) userAsks(ctx context.Context, name string, _, _ string) (*s
 	if u.isOperator(ctx, userOf(ctx)) {
 		return q, nil
 	}
-	for i := range q.Open {
-		q.Open[i].Weight = withoutWeightWords(q.Open[i].Run, q.Open[i].Weight)
-		q.Open[i].Setup, _ = withoutAccount(q.Open[i].Setup, nil)
-		q.Open[i].Run, _ = withoutRunWords(q.Open[i].Run, nil)
-		q.Open[i].DepotPush, _ = withoutDepotPush(q.Open[i].DepotPush, nil)
-	}
+	shapeOpenAsks(q.Open)
 	for i := range q.Decided {
 		d := &q.Decided[i]
 		d.Weight = withoutWeightWords(d.Run, d.Weight)
@@ -320,6 +306,31 @@ func (u *UserServer) userAsks(ctx context.Context, name string, _, _ string) (*s
 		}
 	}
 	return q, nil
+}
+
+// userOpenAsks is the open section of userAsks' queue alone, shaped as that
+// shapes it, for a device that needs no decided history.
+func (u *UserServer) userOpenAsks(ctx context.Context, name string, _, _ string) (*store.OpenAskQueue, error) {
+	q, err := u.st.UserOpenAsks(ctx, name, userOf(ctx), userOf(ctx))
+	if err != nil {
+		return nil, err
+	}
+	if u.isOperator(ctx, userOf(ctx)) {
+		return q, nil
+	}
+	shapeOpenAsks(q.Open)
+	return q, nil
+}
+
+// shapeOpenAsks shapes open rows as a device that is no operator's is told
+// them (withoutAccount, withoutRunWords, withoutDepotPush).
+func shapeOpenAsks(open []store.OpenAsk) {
+	for i := range open {
+		open[i].Weight = withoutWeightWords(open[i].Run, open[i].Weight)
+		open[i].Setup, _ = withoutAccount(open[i].Setup, nil)
+		open[i].Run, _ = withoutRunWords(open[i].Run, nil)
+		open[i].DepotPush, _ = withoutDepotPush(open[i].DepotPush, nil)
+	}
 }
 
 // withholds reports whether the device that makes the call of ctx is told no
@@ -492,19 +503,16 @@ func (u *UserServer) deliveryFiles(ctx context.Context, seq uint64) ([]store.Blo
 // giveSecret is GiveSecret as a device is told it: what the giving did, but
 // for where it put the value, which only a device of an operator is told. The
 // call is there for a device of a user that is no operator's only to give that
-// user's own address, credential or login code (ownSecret), and the file is a
-// path on the yard's machine, of no use to the device: the file, the words
-// that say where the credential is set or what it still wants (both name it),
-// and the source's record, which holds the file the source reads its
-// credential from and the command it mints a token with. The names given, and
-// whose they are, stay. The giving is done when this is answered, so a role
-// that cannot be read holds these too (withholds), and does not fail a call
-// that wrote a value.
+// user's own address, credential or login code (ownSecret). Held are the file,
+// the words that say where the credential is set or what it still wants, and
+// the source's record with the file it reads and the command it mints with.
+// The names given, and whose they are, stay. The giving is done when this is
+// answered, so a role that cannot be read holds these too, and does not fail
+// a call that wrote a value.
 //
-// A value the file cannot hold (empty, with a line break, with white space at
-// an end) is refused here for such a device, before the store looks for its
-// file: the write's refusal of it names the file, and the device is the one
-// that sends the value.
+// A value the file cannot hold is refused here for such a device, before the
+// store looks for its file: the write's refusal names the file, and the device
+// is the one that sends the value.
 func (u *UserServer) giveSecret(ctx context.Context, id string, ask uint64, values map[string]string, actor string, weighed bool) (*store.SourceKeyed, error) {
 	held := u.withholds(ctx)
 	if held {
@@ -529,9 +537,8 @@ func (u *UserServer) giveSecret(ctx context.Context, id string, ask uint64, valu
 // withoutUserFile is the user as a device that is no operator's is told
 // them: without the file their address is read from, and without the words of
 // the last send's failure, which are those of reading that file and so name it
-// (notify.userEnv), the path with words around it being still the path. How the
-// send ended, in the reason and the status, stays. The record is copied, not
-// changed.
+// (notify.userEnv). How the send ended, in the reason and the status, stays.
+// The record is copied, not changed.
 func withoutUserFile(user store.User) store.User {
 	user.EnvFile = ""
 	if user.LastPush != nil {
@@ -543,26 +550,21 @@ func withoutUserFile(user store.User) store.User {
 }
 
 // deviceCrewConfig are the keys of a crew member's config a device is told:
-// names and flags, and nothing that is a file or a command. The others are the
-// operator's configuration: env_file, env_command and each env_for_<user> name
-// a file or a command, prompt a file, and args are what the agent is started
-// with, which can name files. The keys told are the ones listed, as
-// deviceSettings lists the settings, since a config is open: a yard may keep a
-// key from before keys were checked (store.ConfigKeys), and one added later is
-// told to no device until someone lists it here.
+// names and flags, and nothing that is a file or a command. The rest is the
+// operator's configuration: env_file, env_command, each env_for_<user>, prompt
+// and args. The keys told are the ones listed, as deviceSettings lists the
+// settings, since a config is open: an old or a later key is told to no device
+// until someone lists it here.
 var deviceCrewConfig = []string{"kind", "model", "provider", "trust", "greet",
 	store.CrewForKey, store.OpenThreads, store.SetState, store.MailPeers}
 
 // withoutCrewConfig is the crew member as a device that is no operator's
 // is told them: without the directory they run in, with the keys of
-// deviceCrewConfig alone in their config, and without the handles of their
-// sessions, the line session's and each conversation's. A handle is what the
-// runner keeps of a pane it started, and names the directory the pane started
-// in and the yardr the agent was told to run; the facts a client has use for
-// are read out of it (store.CrewSession.LoginScreen) and stay, with the rest of
-// the record: the runner, the events it hears, who it is in a source, what it
-// subscribes to, the model and the kind, and where its session is. The record
-// is copied, not changed.
+// deviceCrewConfig alone in their config, and without the session handles. A
+// handle names the directory the pane started in and the yardr the agent was
+// told to run; the facts a client has use for are read out of it
+// (store.CrewSession.LoginScreen) and stay, with the rest of the record. The
+// record is copied, not changed.
 func withoutCrewConfig(member store.CrewMember) store.CrewMember {
 	member.Dir = ""
 	if member.Config != nil {
@@ -585,9 +587,8 @@ func withoutCrewConfig(member store.CrewMember) store.CrewMember {
 	return member
 }
 
-// withoutHandles is the session without the handles the runner keeps for it:
-// the one of the session running, the one of the session being started and
-// those of the sessions that were left.
+// withoutHandles is the session without the handles the runner keeps: the
+// running, the starting and the left.
 func withoutHandles(s store.CrewSession) store.CrewSession {
 	s.Handle, s.Starting, s.Left = nil, nil, nil
 	return s
@@ -941,12 +942,11 @@ func (u *UserServer) call(w http.ResponseWriter, r *http.Request) {
 // userBlob serves a blob as the web view serves it to the caller: a note's
 // file and a kept hook delivery's to any device, and a mail's file to a
 // device of its sender or recipient (NoteBlob, DeliveryBlob, MailBlob). A
-// delivery reaches every device user already (deviceEvent), so its files
-// do too. Anything else is 404, as there: one the
-// yard never held, a name that is no hash, another user's mail file. One
-// exception, which the web view has no use for: a file the caller's own
-// user put within the hour that no mail or note names yet is served to
-// the caller's device (unclaimedPut).
+// delivery reaches every device user already (deviceEvent), so its files do
+// too. Anything else is 404, as there: one the yard never held, a name that
+// is no hash, another user's mail file. One exception, which the web view has
+// no use for: a file the caller's own user put within the hour that no mail
+// or note names yet is served to the caller's device (unclaimedPut).
 // A device puts before it sends, so its own upload would otherwise be
 // unreadable to it until its mail goes; another user's device is served
 // no upload of this user's, whatever hash it asks with.

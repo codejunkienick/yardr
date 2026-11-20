@@ -84,6 +84,9 @@ type API interface {
 	// cannot both answer from the same page.
 	AddAnswerExpected(ctx context.Context, id string, ans Answer, actor, revision string) error
 	UserAsks(ctx context.Context, name, actor string, viewer ...string) (*AskQueue, error)
+	// UserOpenAsks is UserAsks' open section alone, for a client that
+	// needs no decided history.
+	UserOpenAsks(ctx context.Context, name, actor string, viewer ...string) (*OpenAskQueue, error)
 	// OpenAskBeads is UserAsks' open section cut to the beads asked
 	// about, without the rows: which of them carry an open ask to the
 	// user. The flows view's lamps read it for the open beads drawn.

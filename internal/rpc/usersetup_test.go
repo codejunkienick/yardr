@@ -121,6 +121,18 @@ func (y *secretYard) queue(t *testing.T, token string) (store.AskQueue, string) 
 	return reply.Result, raw
 }
 
+// queueOpen asks the listener for the open asks of the user of the device
+// with the token, and answers them with the reply they came in.
+func (y *secretYard) queueOpen(t *testing.T, token string) (store.OpenAskQueue, string) {
+	t.Helper()
+	raw := call(t, y.h, token, "UserOpenAsks", `{}`)
+	var reply struct{ Result store.OpenAskQueue }
+	if err := json.Unmarshal([]byte(raw), &reply); err != nil {
+		t.Fatalf("UserOpenAsks answered %s: %v", raw, err)
+	}
+	return reply.Result, raw
+}
+
 // setups are the cards of the view's asks that set up a pack, by ask.
 func setups(v store.BeadView) map[uint64]*store.SetupAsked {
 	out := map[uint64]*store.SetupAsked{}
@@ -773,6 +785,15 @@ func TestUserAsksTellsTheSetupToTheOperatorAlone(t *testing.T) {
 			queued := func(who, token, user string, ct toldAsks, listed bool) {
 				t.Helper()
 				got, raw := y.queue(t, token)
+				// The open asks alone read as the queue's open section, shaped
+				// as that is shaped, with no decided history on the wire.
+				open, openRaw := y.queueOpen(t, token)
+				if !reflect.DeepEqual(open.Open, got.Open) {
+					t.Errorf("%s is told the open asks\n%+v\nwant the queue's\n%+v", who, open.Open, got.Open)
+				}
+				if strings.Contains(openRaw, `"decided"`) {
+					t.Errorf("%s is told decided history with the open asks:\n%s", who, openRaw)
+				}
 				var standing *store.OpenAsk
 				for i := range got.Open {
 					if got.Open[i].Ask == ct.open {
