@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -45,6 +46,100 @@ var Harnesses = func() []store.Harness {
 	}
 	return hs
 }()
+
+// NetworkErrors are provider-agnostic transport failure patterns shared across
+// every harness kind, tried only on error lines (see IsErrorLine) without an
+// explicit non-gateway HTTP status (see HasNonGatewayHTTPStatus) after each
+// kind's own non-other lines (auth, rate-limit, capacity, harness-specific
+// network) and before its generic other catch-all lines (see dispatch.HarnessError).
+//
+// Each entry's source:
+//  1. POSIX / Node.js libuv / getaddrinfo errno codes.
+//  2. Node.js _http_client / undici "socket hang up" message.
+//  3. Go standard library net / net/http timeout messages.
+//  4. POSIX strerror / Rust reqwest / Python httpx / observed pane phrases
+//     pairing a transport noun with a failure verb.
+//  5. POSIX EHOSTUNREACH strerror and HTTP/2/reqwest unexpected-close strings.
+//  6. SDK/harness connection and network failure phrases (Anthropic JS SDK
+//     APIConnectionError, Node fetch failed, Muse network-open failure).
+//  7. HTTP 502/504 gateway status phrases ("502 Bad Gateway",
+//     "504 Gateway Time-?out"), never bare 502/504 numbers or 503/529.
+var NetworkErrors = func() []store.ErrorLine {
+	lines := []store.ErrorLine{
+		{Reason: store.ReasonNetwork, Pattern: `\b(ECONNRESET|ECONNREFUSED|ETIMEDOUT|ECONNABORTED|EPIPE|ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH)\b`},
+		{Reason: store.ReasonNetwork, Pattern: `(?i)\bsocket hang up\b`},
+		{Reason: store.ReasonNetwork, Pattern: `(?i)\b(tls handshake timeout|i/o timeout)\b`},
+		{Reason: store.ReasonNetwork, Pattern: `(?i)\b(connection|network|stream|socket)\s+((was|is)\s+)?(reset|refused|dropped|lost|timed out|unreachable|disconnected)\b`},
+		{Reason: store.ReasonNetwork, Pattern: `(?i)\b(no route to host|connection closed (unexpectedly|before |by ))\b`},
+		{Reason: store.ReasonNetwork, Pattern: `(?i)\b((connection|network) (request )?(error|failed|could not be opened)|request timed out|fetch failed)\b`},
+		{Reason: store.ReasonNetwork, Pattern: `(?i)\b(502 Bad Gateway|504 Gateway Time-?out)\b`},
+	}
+	if err := store.CompileErrorLines(lines); err != nil {
+		panic("yardr's shared network error lines: " + err.Error())
+	}
+	return lines
+}()
+
+// errorLead matches the start of a harness error line after its TUI marks are
+// stripped, so shared network patterns never fire on ordinary agent prose.
+var errorLead = regexp.MustCompile(`(?i)^(API Error\b|(Error|TypeError|FetchError|NetworkError):|stream error:|request failed\b|fetch failed\b|model failed:|exceeded retry limit\b|unexpected status\b|connection error($|[:.!(—-]|\s+(occurred|while|during|when|to|from|in|with)\b))`)
+
+// IsErrorLine reports whether a pane line is an error line of kind: either
+// raw starts with kind's documented error-only glyph (Codex's ■), or said
+// (the line after stripping Marks.Error) starts with a known error lead.
+func IsErrorLine(kind, raw, said string) bool {
+	if kind == "codex" && strings.HasPrefix(raw, "■") {
+		return true
+	}
+	return errorLead.MatchString(said)
+}
+
+var (
+	// httpStatusKeyword matches an HTTP 4xx/5xx code introduced by "http" or "status".
+	httpStatusKeyword = regexp.MustCompile(`(?i)\b(?:http(?:[\s_-]*status(?:[\s_-]*code)?|/\d+(?:\.\d+)?)?|status(?:[\s_-]*code)?)\s*[:=]?\s*([45]\d\d)\b`)
+	// httpStatusPhrase matches a 4xx/5xx code paired with a standard or provider HTTP reason phrase.
+	httpStatusPhrase = regexp.MustCompile(`(?i)\b([45]\d\d)\s+(?:Bad\s+Request|Unauthorized|Payment\s+Required|Forbidden|Not\s+Found|Method\s+Not\s+Allowed|Not\s+Acceptable|Proxy\s+Authentication|Request\s+Timeout|Conflict|Gone|Length\s+Required|Precondition|Payload\s+Too\s+Large|Content\s+Too\s+Large|Request\s+Entity|URI\s+Too\s+Long|Unsupported\s+Media|Range\s+Not|Expectation\s+Failed|Misdirected|Unprocessable|Locked|Failed\s+Dependency|Too\s+Early|Upgrade\s+Required|Too\s+Many\s+Requests|Request\s+Header|Unavailable\s+For\s+Legal|Internal\s+(?:Server\s+)?Error|Not\s+Implemented|Service\s+Unavailable|HTTP\s+Version|Variant\s+Also|Insufficient\s+Storage|Loop\s+Detected|Not\s+Extended|Network\s+Authentication|Overloaded)\b`)
+	// httpStatusLead matches a 4xx/5xx code at the start of an error payload.
+	httpStatusLead = regexp.MustCompile(`(?i)(?:^|(?:error|failed|attempts|status)\s*:\s*|\]\s+)([45]\d\d)(?:$|[:,\s({[\]])`)
+)
+
+var nonStatusUnits = map[string]bool{
+	"ms": true, "s": true, "sec": true, "secs": true, "second": true, "seconds": true,
+	"minute": true, "minutes": true, "hour": true, "hours": true,
+	"byte": true, "bytes": true, "kb": true, "mb": true, "gb": true,
+	"line": true, "lines": true, "record": true, "records": true,
+	"item": true, "items": true, "file": true, "files": true,
+	"attempt": true, "attempts": true, "retry": true, "retries": true,
+	"token": true, "tokens": true,
+}
+
+// HasNonGatewayHTTPStatus reports whether an error line carries an explicit
+// 4xx/5xx HTTP status other than 502 or 504, so lines like 503/529/429 keep
+// their own status reason or `other` even when transport words follow.
+func HasNonGatewayHTTPStatus(said string) bool {
+	for _, re := range []*regexp.Regexp{httpStatusKeyword, httpStatusPhrase} {
+		for _, m := range re.FindAllStringSubmatch(said, -1) {
+			if m[1] != "502" && m[1] != "504" {
+				return true
+			}
+		}
+	}
+	for _, loc := range httpStatusLead.FindAllStringSubmatchIndex(said, -1) {
+		code := said[loc[2]:loc[3]]
+		if code == "502" || code == "504" {
+			continue
+		}
+		if rest := strings.TrimLeft(said[loc[3]:], " \t"); rest != "" {
+			word := strings.ToLower(strings.Fields(rest)[0])
+			word = strings.TrimRight(word, ".,;:!?)]}")
+			if nonStatusUnits[word] {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
 
 // byName is each of Harnesses by the names it is asked for by.
 var byName = index(Harnesses)

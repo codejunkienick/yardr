@@ -140,4 +140,12 @@ esac`)}
 	if len(h.stops) != 0 {
 		t.Fatalf("remembered of the pane: %v, want nothing", h.stops)
 	}
+
+	// A known kind with no per-kind errors (opencode) still catches a shared
+	// network stop when its pane stands still.
+	handle = map[string]any{"agent": "yardr-open-new", "pane": "w1:p4", "kind": "opencode"}
+	show("Error: read ECONNRESET\n", `{"result":{"agent":{"agent":"opencode","agent_status":"working"}}}`)
+	status("working", "opencode network error has just been printed")
+	later("w1:p4")
+	status("idle", "opencode network error has stood for stopStill")
 }

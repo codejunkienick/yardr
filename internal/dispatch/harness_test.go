@@ -402,7 +402,7 @@ func TestHarnessErrorLines(t *testing.T) {
 		{"codex", "■ exceeded retry limit, last status: 429 Too Many Requests", dispatch.ReasonRateLimited},
 		{"codex", "■ Your access token could not be refreshed. Please log out and sign in again.", dispatch.ReasonNotLoggedIn},
 		{"codex", "  Sign in with ChatGPT", dispatch.ReasonNotLoggedIn},
-		{"codex", "■ stream disconnected before completion: Incomplete response returned", dispatch.ReasonOther},
+		{"codex", "■ stream disconnected before completion: Incomplete response returned", dispatch.ReasonNetwork},
 		{"codex", "■ unexpected status 503 Service Unavailable", dispatch.ReasonOther},
 		{"codex", "• I added a test for the retry limit.", ""},
 		{"claude", "Not logged in · Run /login", dispatch.ReasonNotLoggedIn},
@@ -412,6 +412,9 @@ func TestHarnessErrorLines(t *testing.T) {
 		{"claude", "  ⎿  5-hour limit reached ∙ resets 3pm", dispatch.ReasonRateLimited},
 		{"claude", "⏺ API Error: 429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\"}}", dispatch.ReasonRateLimited},
 		{"claude", "⏺ API Error: Repeated 529 Overloaded errors", dispatch.ReasonAtCapacity},
+		{"claude", "● API Error: Connection dropped (ECONNRESET). A VPN, firewall, or security software can cause this. Check those", dispatch.ReasonNetwork},
+		{"claude", "● API Error: Connection lost mid-response. The response above may be incomplete.", dispatch.ReasonNetwork},
+		{"claude", "● API Error: Request blocked before it reached", dispatch.ReasonNetwork},
 		{"claude", "⏺ " + modelError, dispatch.ReasonOther},
 		{"claude", "  ⎿  Credit balance is too low", dispatch.ReasonOther},
 		{"claude", "⏺ API Error: 500 {\"type\":\"error\",\"error\":{\"type\":\"api_error\"}}", dispatch.ReasonOther},
@@ -420,6 +423,7 @@ func TestHarnessErrorLines(t *testing.T) {
 		{"muse", "◆ model failed: server_error: The model failed to generate a response. (request id: 688dfffa-1833-4175-96d6-ae6513c47149, response: resp_6ad2e591f2d29e424980460b)", dispatch.ReasonOther},
 		{"muse", "model failed: stream protocol error: function_call_arguments.done name mismatch for `fc_0192a3f4` (request id: 9a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d)", dispatch.ReasonOther},
 		{"muse", "◆ model failed: stream protocol error: function_call_arguments.done name mismatch for `fc_0192a3f4` (request id: 9a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d)", dispatch.ReasonOther},
+		{"muse", "◆ model failed: network connection could not be opened within 15 seconds (after 4 provider attempts)", dispatch.ReasonNetwork},
 		{"muse", "◆ Usage limit reached", dispatch.ReasonRateLimited},
 		{"muse", "│ This turn stopped because your usage limit was reached.", dispatch.ReasonRateLimited},
 		{"muse", "◆ The pane said 'Usage limit reached' earlier.", ""},
@@ -509,6 +513,169 @@ func TestHarnessErrorLines(t *testing.T) {
 		if reason, line, ok := dispatch.HarnessError("pi", pane); ok {
 			t.Errorf("pi, %s: taken for a stop: reason %q line %q", name, reason, line)
 		}
+	}
+}
+
+// Precision proof for the shared, provider-agnostic network error patterns:
+// positive error lines covering every shared entry across all harnesses
+// (including harnesses with no per-kind network lines and failures wrapped in
+// generic other catch-alls), precedence over 401/429/529/auth/quota/capacity
+// and non-gateway 5xx/numbers, and negative lines of ordinary agent prose and
+// unsent drafts that must not match.
+func TestSharedNetworkErrorPrecision(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, kind, line, want string
+	}{
+		// Positive: OS / Node / getaddrinfo errno codes on error lines across harnesses.
+		{"grok ECONNRESET", "grok", "Error: read ECONNRESET", dispatch.ReasonNetwork},
+		{"kiro ECONNREFUSED", "kiro", "Error: connect ECONNREFUSED 127.0.0.1:443", dispatch.ReasonNetwork},
+		{"opencode ETIMEDOUT", "opencode", "Error: connect ETIMEDOUT 10.0.0.1:443", dispatch.ReasonNetwork},
+		{"pi ECONNABORTED", "pi", " Error: Retry failed after 3 attempts: read ECONNABORTED", dispatch.ReasonNetwork},
+		{"opencode EPIPE", "opencode", "Error: write EPIPE", dispatch.ReasonNetwork},
+		{"kimi ENOTFOUND", "kimi", "   Error: getaddrinfo ENOTFOUND api.kimi.com", dispatch.ReasonNetwork},
+		{"claude EAI_AGAIN", "claude", "● API Error: getaddrinfo EAI_AGAIN api.anthropic.com", dispatch.ReasonNetwork},
+		{"codex ENETUNREACH", "codex", "■ stream error: connect ENETUNREACH", dispatch.ReasonNetwork},
+		{"muse EHOSTUNREACH", "muse", "◆ model failed: connect EHOSTUNREACH 192.0.2.1:443", dispatch.ReasonNetwork},
+
+		// Positive: Node socket hang up & Go net/http timeouts on error lines.
+		{"opencode socket hang up", "opencode", "Error: socket hang up", dispatch.ReasonNetwork},
+		{"claude socket hang up", "claude", "● API Error: socket hang up", dispatch.ReasonNetwork},
+		{"grok TLS handshake timeout", "grok", "Error: net/http: TLS handshake timeout", dispatch.ReasonNetwork},
+		{"kiro i/o timeout", "kiro", "Error: read tcp 10.0.0.2:51234->10.0.0.1:443: i/o timeout", dispatch.ReasonNetwork},
+
+		// Positive: keyword pairs (connection|network|stream|socket) + transport verbs on error lines.
+		{"muse stream connection reset", "muse", "◆ stream error: connection reset by peer", dispatch.ReasonNetwork},
+		{"opencode connection refused", "opencode", "Error: connection refused", dispatch.ReasonNetwork},
+		{"grok connection dropped", "grok", "Error: Connection dropped during response", dispatch.ReasonNetwork},
+		{"kiro connection lost", "kiro", "Error: Connection lost while streaming", dispatch.ReasonNetwork},
+		{"pi connection timed out", "pi", " Error: Retry failed after 3 attempts: connection timed out", dispatch.ReasonNetwork},
+		{"opencode network unreachable", "opencode", "Error: Network is unreachable", dispatch.ReasonNetwork},
+		{"kimi stream disconnected", "kimi", "   Error: stream disconnected unexpectedly", dispatch.ReasonNetwork},
+		{"codex socket disconnected", "codex", "■ socket disconnected before response", dispatch.ReasonNetwork},
+
+		// Positive: no route to host & unexpected connection close on error lines.
+		{"grok no route to host", "grok", "Error: No route to host", dispatch.ReasonNetwork},
+		{"kiro connection closed unexpectedly", "kiro", "error: connection closed unexpectedly", dispatch.ReasonNetwork},
+		{"codex connection closed before message", "codex", "■ stream error: connection closed before message completed", dispatch.ReasonNetwork},
+		{"claude connection closed by peer", "claude", "● API Error: connection closed by peer", dispatch.ReasonNetwork},
+
+		// Positive: SDK/harness connection & network errors on error lines.
+		{"claude API connection error", "claude", "● API Error: Connection error.", dispatch.ReasonNetwork},
+		{"claude API request timed out", "claude", "● API Error: Request timed out.", dispatch.ReasonNetwork},
+		{"opencode network error", "opencode", "Error: Network error", dispatch.ReasonNetwork},
+		{"grok fetch failed", "grok", "TypeError: fetch failed", dispatch.ReasonNetwork},
+		{"opencode network request failed", "opencode", "Error: network request failed", dispatch.ReasonNetwork},
+		{"opencode bare fetch failed", "opencode", "fetch failed", dispatch.ReasonNetwork},
+		{"grok request failed ECONNRESET", "grok", "request failed: read ECONNRESET", dispatch.ReasonNetwork},
+		{"claude subline connection error", "claude", "  ⎿  Connection error.", dispatch.ReasonNetwork},
+
+		// Positive: HTTP 502 / 504 gateway status phrases on error lines.
+		{"codex 502 Bad Gateway", "codex", "■ exceeded retry limit, last status: 502 Bad Gateway", dispatch.ReasonNetwork},
+		{"codex 504 status", "codex", "■ unexpected status 504 Gateway Timeout", dispatch.ReasonNetwork},
+		{"claude API 502 Bad Gateway", "claude", "● API Error: 502 Bad Gateway", dispatch.ReasonNetwork},
+		{"pi retry 504", "pi", " Error: Retry failed after 3 attempts: 504 Gateway Time-out", dispatch.ReasonNetwork},
+		{"opencode 502 Bad Gateway", "opencode", "Error: 502 Bad Gateway", dispatch.ReasonNetwork},
+
+		// No collisions: auth, quota, rate-limit, capacity, non-gateway 5xx and bare 502/504 keep their own reason.
+		{"claude 401 auth", "claude", "● API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\"}} · Please run /login", dispatch.ReasonNotLoggedIn},
+		{"claude 429 rate limit", "claude", "● API Error: 429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\"}}", dispatch.ReasonRateLimited},
+		{"claude 529 capacity", "claude", "● API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}", dispatch.ReasonAtCapacity},
+		{"claude 500 internal", "claude", "● API Error: 500 {\"type\":\"error\",\"error\":{\"type\":\"api_error\"}}", dispatch.ReasonOther},
+		{"claude bare 502 json", "claude", "● API Error: 502 {\"type\":\"error\",\"message\":\"bad gateway\"}", dispatch.ReasonOther},
+		{"codex 401 auth", "codex", "■ exceeded retry limit, last status: 401 Unauthorized", dispatch.ReasonNotLoggedIn},
+		{"codex 429 rate limit", "codex", "■ exceeded retry limit, last status: 429 Too Many Requests", dispatch.ReasonRateLimited},
+		{"codex 503 service unavailable", "codex", "■ unexpected status 503 Service Unavailable", dispatch.ReasonOther},
+		{"codex 503 with 502 ms", "codex", "■ unexpected status 503 Service Unavailable (request duration: 502 ms)", dispatch.ReasonOther},
+		{"codex 503 connection error", "codex", "■ unexpected status 503 Service Unavailable: connection error", dispatch.ReasonOther},
+		{"codex 503 upstream connect error", "codex", "■ unexpected status 503 Service Unavailable: upstream connect error; connection refused", dispatch.ReasonOther},
+		{"codex 529 overloaded connection error", "codex", "■ exceeded retry limit, last status: 529 Overloaded: connection error", dispatch.ReasonOther},
+		{"codex quota exceeded", "codex", "■ Quota exceeded", dispatch.ReasonOther},
+		{"kimi 403 quota", "kimi", "   Error: [provider.auth_error] 403 You've reached your", dispatch.ReasonRateLimited},
+		{"kimi 529 overloaded", "kimi", "   Error: [provider.overloaded] 529 The engine is", dispatch.ReasonAtCapacity},
+		{"pi 529 retry failed", "pi", " Error: Retry failed after 3 attempts: 529: {\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}", dispatch.ReasonOther},
+		{"pi 503 connection error", "pi", " Error: Retry failed after 3 attempts: 503 Service Unavailable: connection error", dispatch.ReasonOther},
+		{"opencode 429 connection reset", "opencode", "Error: 429 Too Many Requests: connection reset", ""},
+		{"grok 403 connection refused", "grok", "Error: HTTP/1.1 403 Forbidden: connection refused", ""},
+		{"opencode 500 connection error", "opencode", "Error: status 500: connection error", ""},
+		{"opencode syntax error line 502", "opencode", "Error: syntax error at line 502", ""},
+		{"opencode expected 504 got 503", "opencode", "Error: expected 504 records, got 503", ""},
+		{"opencode 503 service unavailable", "opencode", "Error: 503 Service Unavailable", ""},
+
+		// Negative: ordinary agent prose and non-error lines mentioning errno, transport pairs, or gateway phrases.
+		{"prose network connection", "claude", "● I checked the network connection and confirmed TLS works.", ""},
+		{"prose claude errno", "claude", "● Added a regression test for ECONNRESET handling.", ""},
+		{"prose claude gateway quote", "claude", "● Confirmed the proxy returns 502 Bad Gateway in the integration test.", ""},
+		{"prose claude connection error handling", "claude", "● Connection error handling was fixed.", ""},
+		{"prose network handler dropped", "codex", "• The network layer drops duplicate packets cleanly.", ""},
+		{"prose codex connection reset", "codex", "• Fixed the connection reset bug.", ""},
+		{"prose reset connection pool", "grok", "I reset the connection pool before running the suite.", ""},
+		{"prose kiro unmarked connection reset", "kiro", "The connection was reset before the operation began, but the test passed.", ""},
+		{"prose kiro bullet connection reset", "kiro", "• The connection was reset before the operation began, but the test passed.", ""},
+		{"prose connection closed cleanly", "kiro", "• The connection closed cleanly after the test finished.", ""},
+		{"prose stream parser disconnected", "opencode", "The stream parser disconnected the mock reader during teardown.", ""},
+		{"prose bare 502 Bad Gateway", "opencode", "502 Bad Gateway", ""},
+		{"prose socket buffer reset", "muse", "◆ The socket buffer was reset between frames.", ""},
+		{"prose network error handling", "claude", "● Added a regression test for network error retries.", ""},
+		{"prose issue 502", "codex", "• Fixed bug 502 in the proxy handler and 504 in the timeout check.", ""},
+		{"prose fetch failed in test", "pi", " Confirmed the fetch failed assertion passes when offline.", ""},
+		{"prose 529 reference", "claude", "● The session limit reached its end; see the API Error: 529 above.", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reason, line, ok := dispatch.HarnessError(tc.kind, "⏺ Reading the brief.\n"+tc.line+"\n\n❯ \n")
+			if reason != tc.want || ok != (tc.want != "") || (ok && line != strings.TrimSpace(tc.line)) {
+				t.Errorf("%s (%s): %q -> reason %q line %q ok %v, want %q", tc.name, tc.kind, tc.line, reason, line, ok, tc.want)
+			}
+		})
+	}
+	// An unsent draft in the input line never counts as a harness error, even
+	// when its text contains an errno code or error lead.
+	for _, tc := range []struct{ name, kind, tail string }{
+		{"claude draft errno", "claude", "❯ Please fix ECONNRESET handling"},
+		{"claude draft error lead", "claude", "❯ Error: read ECONNRESET"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if reason, line, ok := dispatch.HarnessError(tc.kind, tc.tail); ok || reason != "" || line != "" {
+				t.Errorf("%s: got reason=%q line=%q ok=%v, want none", tc.name, reason, line, ok)
+			}
+		})
+	}
+}
+
+// Dispatcher-level regression: ordinary agent prose or non-gateway diagnostics
+// mentioning transport words or 502/504 numbers must never schedule or emit a
+// network retry or send a resume prompt.
+func TestNoNetworkRetryForOrdinaryOutput(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, kind, tail string
+		wantErrorEvents  int
+	}{
+		{"codex prose", "codex", "• Fixed the connection reset bug.\n› ", 0},
+		{"claude prose", "claude", "● Added a regression test for ECONNRESET handling.\n❯ ", 0},
+		{"kiro prose", "kiro", "The connection was reset before the operation began, but the test passed.\n› ", 0},
+		{"opencode syntax error", "opencode", "Error: syntax error at line 502", 0},
+		{"codex 503 with 502 ms", "codex", "■ unexpected status 503 Service Unavailable (request duration: 502 ms)\n› ", 1},
+		{"codex 503 connection error", "codex", "■ unexpected status 503 Service Unavailable: connection error\n› ", 1},
+		{"codex 503 upstream connect error", "codex", "■ unexpected status 503 Service Unavailable: upstream connect error; connection refused\n› ", 1},
+		{"codex 529 overloaded connection error", "codex", "■ exceeded retry limit, last status: 529 Overloaded: connection error\n› ", 1},
+		{"pi 503 connection error", "pi", "Error: Retry failed after 3 attempts: 503 Service Unavailable: connection error\n❯ ", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, r, d, b, at := retrySetupKind(t, tc.kind, tc.tail)
+			t.Cleanup(func() { dispatch.WaitLimitsIdle(d) })
+			at(5*time.Minute + time.Second)
+			must(t, d.Reconcile(context.Background()))
+			retries := eventKinds(t, s, b.ID, "session_harness_retry")
+			errs := eventKinds(t, s, b.ID, "session_harness_error")
+			if len(r.nudges) != 0 || len(retries) != 0 || len(errs) != tc.wantErrorEvents {
+				t.Errorf("prompts=%q retries=%d errs=%d; want 0 prompts, 0 retries, %d error events",
+					r.nudges, len(retries), len(errs), tc.wantErrorEvents)
+			}
+			if tc.wantErrorEvents == 1 && len(errs) == 1 && errs[0].Data["reason"] != dispatch.ReasonOther {
+				t.Errorf("error reason = %v, want %q", errs[0].Data["reason"], dispatch.ReasonOther)
+			}
+		})
 	}
 }
 
@@ -836,6 +1003,79 @@ func TestCrewMemberAtAFailedTurnIsNotNudged(t *testing.T) {
 	pass("the line gone again", 3, 4)
 }
 
+// A crew member idle with unread mail stopped on a dropped network
+// connection, where the harness asks for the message to be sent again, is
+// tried again as a session is: the resume prompt, five minutes apart, up to
+// three times, then session_harness_error with tries.
+func TestCrewMemberAtNetworkErrorIsRetriedThenRaised(t *testing.T) {
+	t.Parallel()
+	const dropped = "● API Error: Connection dropped (ECONNRESET). A VPN, firewall, or security software can cause this. Check those\n" +
+		"────────────────────────────────────────\n❯ Resend your message to try again\n────────────────────────────────────────\n" +
+		"  ⏵⏵ auto mode on · ← 1 agent · ↓ to manage"
+	const resume = "yardr: your harness stopped on a dropped network connection. Go on where you stopped."
+	s, f, d := crewSetup(t, store.CrewMember{Config: map[string]any{"kind": "claude"}})
+	ctx := context.Background()
+	start := time.Now()
+	now := start
+	dispatch.SetClock(d, func() time.Time { return now })
+	must(t, d.Reconcile(ctx))
+	must(t, d.Reconcile(ctx))
+	agent := agentOf(t, s)
+	member := func() *store.CrewMember {
+		t.Helper()
+		r, err := s.GetCrew(ctx, "yardmaster")
+		must(t, err)
+		return r
+	}
+	told := func(kind string) []store.Event { t.Helper(); return eventKinds(t, s, member().Journal, kind) }
+	f.show(dropped)
+	must(t, s.Mail(ctx, "yardmaster", "review yardr-1my8", "chris"))
+	must(t, d.Reconcile(ctx))
+	if len(told("session_harness_error")) != 0 || len(told("session_harness_retry")) != 0 {
+		t.Fatalf("raised or tried on the first sight: error %d, retry %d",
+			len(told("session_harness_error")), len(told("session_harness_retry")))
+	}
+	if len(f.nudges) != 0 {
+		t.Fatalf("nudges = %q, want none while the network try waits", f.nudges)
+	}
+
+	for i, min := range []int{5, 10, 15} {
+		now = start.Add(time.Duration(min)*time.Minute + time.Second)
+		must(t, d.Reconcile(ctx))
+		must(t, d.Reconcile(ctx))
+		if want := i + 1; len(told("session_harness_retry")) != want {
+			t.Fatalf("after %dm: %d tries, want %d", min, len(told("session_harness_retry")), want)
+		}
+		if n := len(told("session_harness_error")); n != 0 {
+			t.Fatalf("after %dm: session_harness_error raised with a try still to make or to wait for", min)
+		}
+		if want := agent + ": " + resume; f.nudges[len(f.nudges)-1] != want {
+			t.Fatalf("nudges = %q, want the last to be the resume prompt", f.nudges)
+		}
+	}
+
+	now = start.Add(20*time.Minute + 3*time.Second)
+	must(t, d.Reconcile(ctx))
+	must(t, d.Reconcile(ctx))
+	evs := told("session_harness_error")
+	if len(evs) != 1 {
+		t.Fatalf("session_harness_error events = %d, want 1 once the tries are used up", len(evs))
+	}
+	data := evs[0].Data
+	if data["crew"] != "yardmaster" || data["kind"] != "claude" || data["reason"] != dispatch.ReasonNetwork ||
+		data["line"] != "● API Error: Connection dropped (ECONNRESET). A VPN, firewall, or security software can cause this. Check those" ||
+		data["tries"] != float64(dispatch.HarnessRetries) ||
+		!strings.Contains(data["hint"].(string), "prompted the agent again 3 times") {
+		t.Fatalf("session_harness_error data = %v", data)
+	}
+	if member().Handle[dispatch.HarnessErrorKey] != dispatch.ReasonNetwork {
+		t.Fatalf("handle = %v, want the reason kept on it", member().Handle)
+	}
+	if n := len(told("session_harness_retry")); n != dispatch.HarnessRetries {
+		t.Fatalf("session_harness_retry events = %d, want %d", n, dispatch.HarnessRetries)
+	}
+}
+
 // The pane is read at the start of a spell and after a nudge, not for as
 // long as a crew member leaves its inbox unread: an error drawn into it
 // under a nudge long after is still seen.
@@ -899,6 +1139,12 @@ func (n *retryRunner) InputText(context.Context, map[string]any) (string, bool, 
 // the test moves: at(by) puts the dispatcher by after the start.
 func retrySetup(t *testing.T, tail string) (s store.API, r *retryRunner, d *dispatch.Dispatcher, b store.Bead, at func(time.Duration)) {
 	t.Helper()
+	return retrySetupKind(t, "codex", tail)
+}
+
+// retrySetupKind is retrySetup for a session of kind.
+func retrySetupKind(t *testing.T, kind, tail string) (s store.API, r *retryRunner, d *dispatch.Dispatcher, b store.Bead, at func(time.Duration)) {
+	t.Helper()
 	s = storetest.New(t)
 	r = &retryRunner{agentRunner: &agentRunner{statusRunner: &statusRunner{fakeRunner: &fakeRunner{dead: map[string]bool{}},
 		status: "idle"}, tail: tail}}
@@ -906,7 +1152,7 @@ func retrySetup(t *testing.T, tail string) (s store.API, r *retryRunner, d *disp
 	var skew time.Duration
 	dispatch.SetClock(d, func() time.Time { return time.Now().Add(skew) })
 	ctx := context.Background()
-	must(t, s.PutGroup(ctx, store.Group{Name: "g", Runner: "fake", Config: map[string]any{"kind": "codex"}}, "me"))
+	must(t, s.PutGroup(ctx, store.Group{Name: "g", Runner: "fake", Config: map[string]any{"kind": kind}}, "me"))
 	_, err := s.AddRoute(ctx, store.Route{Stage: "new", Group: "g"}, "me")
 	must(t, err)
 	bead, err := s.CreateBead(ctx, store.NewBead{Title: "x"}, "me")
@@ -1020,10 +1266,73 @@ func TestAtCapacityIsRaisedWhenTheTriesAreUsedUp(t *testing.T) {
 	}
 }
 
-// Only at_capacity on a first prompt is retried. Another reason, a session
-// that has done something (it stopped mid-work, where the first prompt is
-// not what it needs), and one with text in its input are raised at once, as
-// they always were, and nothing is typed however long they sit.
+// A network error stops a session mid-work, where the first prompt is the
+// wrong thing to say and the harness asks for the message to be sent again.
+// The agent is given a short resume prompt instead, five minutes on, up to
+// three times in the session's life; when the error still stands after the
+// third try, session_harness_error is raised with tries.
+func TestNetworkErrorMidWorkIsRetriedThenRaised(t *testing.T) {
+	t.Parallel()
+	const dropped = "◆ model failed: network connection could not be opened within 15 seconds (after 4 provider attempts)\n❯ "
+	const resume = "yardr: your harness stopped on a dropped network connection. Go on where you stopped."
+	s, r, d, b, at := retrySetupKind(t, "muse", "◆ Finished the change.\n❯ ")
+	ctx := context.Background()
+	r.show("working", "◆ Reading the brief")
+	must(t, d.Reconcile(ctx))
+	r.mu.Lock()
+	r.worked = true
+	r.mu.Unlock()
+	r.show("idle", dropped)
+	must(t, d.Reconcile(ctx))
+	count := func(kind string) int { t.Helper(); return len(eventKinds(t, s, b.ID, kind)) }
+	if count("session_harness_error") != 0 || count("session_harness_retry") != 0 {
+		t.Fatalf("raised or tried on the first sight: error %d, retry %d", count("session_harness_error"), count("session_harness_retry"))
+	}
+
+	for i, min := range []int{5, 10, 15} {
+		at(time.Duration(min)*time.Minute + time.Second)
+		must(t, d.Reconcile(ctx))
+		must(t, d.Reconcile(ctx))
+		if want := i + 1; count("session_harness_retry") != want || len(r.nudges) != want {
+			t.Fatalf("after %dm: %d tries, typed %d times; want %d", min, count("session_harness_retry"), len(r.nudges), want)
+		}
+		if n := count("session_harness_error"); n != 0 {
+			t.Fatalf("after %dm: session_harness_error raised with a try still to make or to wait for", min)
+		}
+		if r.nudges[i] != resume {
+			t.Fatalf("typed %q, want the resume prompt", r.nudges[i])
+		}
+	}
+
+	at(20*time.Minute + 3*time.Second)
+	must(t, d.Reconcile(ctx))
+	must(t, d.Reconcile(ctx))
+	evs := eventKinds(t, s, b.ID, "session_harness_error")
+	if len(evs) != 1 {
+		t.Fatalf("session_harness_error events = %d, want 1 once the tries are used up", len(evs))
+	}
+	data := evs[0].Data
+	got, _ := s.GetBead(ctx, b.ID)
+	if data["reason"] != dispatch.ReasonNetwork || data["tries"] != float64(dispatch.HarnessRetries) ||
+		data["tail"] != dropped || data["session"] != *got.Session || data["kind"] != "muse" ||
+		data["line"] != "◆ model failed: network connection could not be opened within 15 seconds (after 4 provider attempts)" ||
+		!strings.Contains(data["hint"].(string), "prompted the agent again 3 times") {
+		t.Fatalf("session_harness_error data = %v", data)
+	}
+	tries := eventKinds(t, s, b.ID, "session_harness_retry")
+	if len(tries) != dispatch.HarnessRetries || len(r.nudges) != dispatch.HarnessRetries {
+		t.Fatalf("%d tries, typed %d times; want %d", len(tries), len(r.nudges), dispatch.HarnessRetries)
+	}
+	if tries[0].Data["reason"] != dispatch.ReasonNetwork || tries[0].Data["try"] != float64(1) {
+		t.Fatalf("session_harness_retry data = %v", tries[0].Data)
+	}
+}
+
+// Only at_capacity on a first prompt, and network, are retried. Another
+// reason, a session at capacity that has done something (it stopped
+// mid-work, where the first prompt is not what it needs), and one with text
+// in its input are raised at once, as they always were, and nothing is
+// typed however long they sit.
 func TestHarnessErrorThatIsNotPromptedAgain(t *testing.T) {
 	t.Parallel()
 	const limited = "■ You've hit your usage limit. Upgrade to Plus to continue using Codex.\n› Ask Codex to do anything"

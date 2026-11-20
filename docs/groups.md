@@ -1077,10 +1077,10 @@ at once and not at the `idle` limit:
 
 | field | |
 |---|---|
-| `reason` | `at_capacity` (the model or the API has no room: try later, or another model), `not_logged_in` (log in in its pane, or fix the group's `env_file`), `rate_limited` (a usage or rate limit; which window and when it resets: [below](#a-usage-limit-says-its-window-and-when-it-resets)), `other` (an error line that stops the harness and is none of these: a model it may not use, no credit, an API error) |
+| `reason` | `at_capacity` (the model or the API has no room: try later, or another model), `network` (a dropped or unopened connection the harness asks to send again: tried again first, [below](#a-dropped-network-connection-is-tried-again-first)), `not_logged_in` (log in in its pane, or fix the group's `env_file`), `rate_limited` (a usage or rate limit; which window and when it resets: [below](#a-usage-limit-says-its-window-and-when-it-resets)), `other` (an error line that stops the harness and is none of these: a model it may not use, no credit, an API error) |
 | `line` | the error line, as the harness printed it |
 | `tail` | the last 20 lines of the pane that say anything, as `session_stalled` carries them |
-| `tries` | only when the daemon has prompted the agent again itself before it raised this: how often, in the session's life (see below, for `at_capacity` and for `rate_limited`) |
+| `tries` | only when the daemon has prompted the agent again itself before it raised this: how often, in the session's life (see below, for `at_capacity`, `network` and for `rate_limited`) |
 | `limits`, `window`, `resets_at`, `limits_unknown` | only with `rate_limited`: what a source of the yard says of the kind's subscription ([below](#a-usage-limit-says-its-window-and-when-it-resets)) |
 | `wakes_at` | only with `rate_limited`, and only when the daemon waits for the window: when it asks again and prompts the agent ([below](#a-window-that-resets-within-six-hours-is-waited-for)) |
 | `model` | only with `wakes_at`, on a session's event: the model the session waits with (the bead's `--meta model`, else the group's; empty for the agent's own), with which its group starts no further session until then ([below](#a-window-that-resets-within-six-hours-is-waited-for)) |
@@ -1119,6 +1119,17 @@ count and the wait are on the session's handle (`harness_retries`,
 `harness_retry_at`), so a daemon that replaced itself goes on where the
 last one was. Both numbers are fixed; no key sets them.
 
+**A dropped network connection is tried again first.** A harness that stops
+on a dropped or unopened connection asks for the message to be sent again,
+mid-work or not. So for a session whose reason is `network`, and for a crew
+member idle with unread mail stopped on one, the daemon waits 5 minutes; if
+the error still ends the idle agent's pane it types a short resume prompt
+and waits 5 minutes more, up to 3 times in the session's life, counted with
+the `at_capacity` tries. Each try is a `session_harness_retry` event, in
+nobody's default `--on`. An agent that gets going ends it. When the error
+still stands 5 minutes after the third try, `session_harness_error` is
+raised as above, with `tries: 3`.
+
 A session that had done something when it hit `at_capacity` stopped
 mid-work, where its first prompt is the wrong thing to say, and one with
 text in its input has someone typing there: both are raised at once, with
@@ -1126,14 +1137,21 @@ no `tries`. So are `not_logged_in` and `other`, which asking again does not
 mend. `rate_limited` is raised at once too, and an agent whose window
 resets within six hours is prompted then
 ([below](#a-window-that-resets-within-six-hours-is-waited-for)). The 3
-prompts of a session's life are counted over both.
+prompts of a session's life are counted over `at_capacity`, `network` and
+the reset prompt.
 
 The lines known, each a regular expression matched against one line of the
 pane with the marks the harness's TUI draws before a message (`⏺ ⎿ ■ •`, the
-file's `marks.error`) taken off. A kind's lines are tried in this order, and
-the first that matches gives the reason, so a line that says two things (an
-API error that ends in `Please run /login`) is under the one that matters
-before the general one:
+file's `marks.error`) taken off. A kind's own lines are tried in this order,
+with the shared `network` lines tried for any error line (beginning, after
+those marks, with an error lead such as `API Error`, `Error:`, `stream error:`,
+`request failed`, `fetch failed`, `model failed:`, `exceeded retry limit`,
+`unexpected status`, `connection error`, or Codex's `■` error glyph, and
+carrying no explicit non-gateway 4xx/5xx HTTP status) after
+its own `not_logged_in`, `rate_limited`, `at_capacity` and `network` lines
+and before its `other` lines; the first that matches gives the reason, so a
+line that says two things (an API error that ends in `Please run /login`) is
+under the one that matters before the general one:
 
 <!-- harness errors: made from harnesses/<kind>.yaml (`errors`), not by hand; YARDR_UPDATE_GOLDEN=1 go test ./internal/agents -run TestGroupsDocTables writes it again -->
 | kind | reason | a line that matches |
@@ -1146,6 +1164,7 @@ before the general one:
 | `claude` | `rate_limited` | `^API Error.*(\b429\b\|rate_limit_error\|Rate limit)` |
 | `claude` | `at_capacity` | `^Repeated 529 Overloaded errors` |
 | `claude` | `at_capacity` | `^API Error.*(\b529\b\|overloaded_error\|Overloaded)` |
+| `claude` | `network` | `^API Error.*(Connection dropped\|ECONNRESET\|Connection lost mid-response\|Request blocked before it reached)` |
 | `claude` | `other` | `^There's an issue with the selected model` |
 | `claude` | `other` | `^Credit balance (is )?too low` |
 | `claude` | `other` | `^API Error` |
@@ -1157,7 +1176,7 @@ before the general one:
 | `codex` | `not_logged_in` | `Please (log out and )?sign in again\.` |
 | `codex` | `not_logged_in` | `^(exceeded retry limit, last status: 401\|unexpected status 401)` |
 | `codex` | `other` | `^Quota exceeded` |
-| `codex` | `other` | `^(stream error: )?stream disconnected before completion` |
+| `codex` | `network` | `^(stream error: )?stream disconnected before completion` |
 | `codex` | `other` | `^(exceeded retry limit\|unexpected status \d)` |
 | `kimi` | `rate_limited` | `^Error: \[provider\.auth_error\] 403 You.ve reached` |
 | `kimi` | `rate_limited` | `^Error: \[provider\.rate_limit\]` |
@@ -1166,8 +1185,16 @@ before the general one:
 | `pi` | `other` | `^Error: Retry failed after \d+ attempts` |
 | `muse` | `rate_limited` | `^Usage limit reached$` |
 | `muse` | `rate_limited` | `^This turn stopped because your usage limit was reached\.$` |
+| `muse` | `network` | `^model failed: network connection could not be opened` |
 | `muse` | `other` | `^model failed:` |
-| any other | | none known: nothing is reported, and `session_idle` with its `tail` is what there is |
+| any error line (after own, before `other`) | `network` | `\b(ECONNRESET\|ECONNREFUSED\|ETIMEDOUT\|ECONNABORTED\|EPIPE\|ENOTFOUND\|EAI_AGAIN\|ENETUNREACH\|EHOSTUNREACH)\b` |
+| any error line (after own, before `other`) | `network` | `(?i)\bsocket hang up\b` |
+| any error line (after own, before `other`) | `network` | `(?i)\b(tls handshake timeout\|i/o timeout)\b` |
+| any error line (after own, before `other`) | `network` | `(?i)\b(connection\|network\|stream\|socket)\s+((was\|is)\s+)?(reset\|refused\|dropped\|lost\|timed out\|unreachable\|disconnected)\b` |
+| any error line (after own, before `other`) | `network` | `(?i)\b(no route to host\|connection closed (unexpectedly\|before \|by ))\b` |
+| any error line (after own, before `other`) | `network` | `(?i)\b((connection\|network) (request )?(error\|failed\|could not be opened)\|request timed out\|fetch failed)\b` |
+| any error line (after own, before `other`) | `network` | `(?i)\b(502 Bad Gateway\|504 Gateway Time-?out)\b` |
+| any other | | none of its own; only the shared `network` lines above apply, and anything else is reported as `session_idle` with its `tail` |
 <!-- /harness errors -->
 
 Nearly every pattern begins with `^`: a line counts when it begins with the
@@ -1209,8 +1236,10 @@ looked at. The reason is kept on its handle (`harness_error`, in `yardr crew
 show --json`) and not told again while it stands, through the moments a
 nudge makes a stopped harness work: it is told again once a look has found
 the pane without an error, or the inbox was emptied. A crew member has no
-first prompt to be given again, so nothing is tried for `at_capacity`; at a
-usage limit it is prompted when the window has reset, as a session is
+first prompt to be given again, so nothing is tried for `at_capacity`, but
+a dropped network connection is tried again as a session's is
+([above](#a-dropped-network-connection-is-tried-again-first)); at a usage
+limit it is prompted when the window has reset, as a session is
 ([below](#a-window-that-resets-within-six-hours-is-waited-for)). While the
 reason stands no nudge for its inbox is typed, since it would start the
 round that failed again: the items stay unread, and the event is what tells

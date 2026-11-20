@@ -662,16 +662,18 @@ func (s ModelSource) ModelIn(line []byte) string {
 // Reasons an error line of a harness gives (dispatch's
 // session_harness_error). ReasonOther is an error line that is known to
 // stop the harness and is none of the others (a model it may not use, no
-// credit, an API error).
+// credit, an API error). ReasonNetwork is a dropped or unopened network
+// connection the harness asks to try again.
 const (
 	ReasonAtCapacity  = "at_capacity"
+	ReasonNetwork     = "network"
 	ReasonNotLoggedIn = "not_logged_in"
 	ReasonRateLimited = "rate_limited"
 	ReasonOther       = "other"
 )
 
 // Reasons are the reasons an error line may give.
-var Reasons = []string{ReasonAtCapacity, ReasonRateLimited, ReasonNotLoggedIn, ReasonOther}
+var Reasons = []string{ReasonAtCapacity, ReasonNetwork, ReasonRateLimited, ReasonNotLoggedIn, ReasonOther}
 
 // ErrorLine is one error line a harness is known to stop on: what it means,
 // and a regular expression the line matches with the harness's marks taken
@@ -865,16 +867,8 @@ func (h *Harness) Check() error {
 			return fmt.Errorf("offers: %d recommended, want exactly one", marked)
 		}
 	}
-	for i := range h.Errors {
-		e := &h.Errors[i]
-		if !slices.Contains(Reasons, e.Reason) {
-			return fmt.Errorf("errors: reason %q of %q is none of %s", e.Reason, e.Pattern, strings.Join(Reasons, ", "))
-		}
-		re, err := regexp.Compile(e.Pattern)
-		if err != nil || e.Pattern == "" {
-			return fmt.Errorf("errors: pattern %q: %v", e.Pattern, err)
-		}
-		e.re = re
+	if err := CompileErrorLines(h.Errors); err != nil {
+		return err
 	}
 	for i := range h.Dialogs {
 		d := &h.Dialogs[i]
@@ -934,6 +928,22 @@ func (h *Harness) Check() error {
 			return fmt.Errorf("background: pattern %q: %v", b.Pattern, err)
 		}
 		b.re = re
+	}
+	return nil
+}
+
+// CompileErrorLines validates and compiles each error line's reason and pattern.
+func CompileErrorLines(lines []ErrorLine) error {
+	for i := range lines {
+		e := &lines[i]
+		if !slices.Contains(Reasons, e.Reason) {
+			return fmt.Errorf("errors: reason %q of %q is none of %s", e.Reason, e.Pattern, strings.Join(Reasons, ", "))
+		}
+		re, err := regexp.Compile(e.Pattern)
+		if err != nil || e.Pattern == "" {
+			return fmt.Errorf("errors: pattern %q: %v", e.Pattern, err)
+		}
+		e.re = re
 	}
 	return nil
 }

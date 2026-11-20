@@ -58,6 +58,55 @@ func TestHarnessFiles(t *testing.T) {
 			t.Errorf("%s: provider %q, want %q", h.Kind, h.Provider, wantProvider[h.Kind])
 		}
 	}
+	if len(NetworkErrors) == 0 {
+		t.Fatal("NetworkErrors is empty")
+	}
+	for _, e := range NetworkErrors {
+		if e.Reason != store.ReasonNetwork {
+			t.Errorf("NetworkErrors pattern %q has reason %q, want %q", e.Pattern, e.Reason, store.ReasonNetwork)
+		}
+	}
+	for _, tc := range []struct {
+		kind, raw, said string
+		want            bool
+	}{
+		{"claude", "● API Error: getaddrinfo EAI_AGAIN", "API Error: getaddrinfo EAI_AGAIN", true},
+		{"claude", "● Added a regression test for ECONNRESET handling.", "Added a regression test for ECONNRESET handling.", false},
+		{"claude", "● Connection error handling was fixed.", "Connection error handling was fixed.", false},
+		{"claude", "  ⎿  Connection error.", "Connection error.", true},
+		{"codex", "■ socket disconnected before response", "socket disconnected before response", true},
+		{"codex", "• Fixed the connection reset bug.", "Fixed the connection reset bug.", false},
+		{"kiro", "The connection was reset before the operation began, but the test passed.", "The connection was reset before the operation began, but the test passed.", false},
+		{"kiro", "Error: connect ECONNREFUSED 127.0.0.1:443", "Error: connect ECONNREFUSED 127.0.0.1:443", true},
+		{"opencode", "Error: syntax error at line 502", "Error: syntax error at line 502", true},
+		{"opencode", "502 Bad Gateway", "502 Bad Gateway", false},
+	} {
+		if got := IsErrorLine(tc.kind, tc.raw, tc.said); got != tc.want {
+			t.Errorf("IsErrorLine(%q, %q, %q) = %v, want %v", tc.kind, tc.raw, tc.said, got, tc.want)
+		}
+	}
+	for _, tc := range []struct {
+		said string
+		want bool
+	}{
+		{"unexpected status 503 Service Unavailable: connection error", true},
+		{"unexpected status 503 Service Unavailable: upstream connect error; connection refused", true},
+		{"exceeded retry limit, last status: 529 Overloaded: connection error", true},
+		{"Error: Retry failed after 3 attempts: 503 Service Unavailable: connection error", true},
+		{"Error: Retry failed after 3 attempts: 503: connection error", true},
+		{"Error: 429 Too Many Requests: connection reset", true},
+		{"API Error: 500 {\"type\":\"error\",\"message\":\"connection error\"}", true},
+		{"Error: HTTP/1.1 403 Forbidden: connection refused", true},
+		{"exceeded retry limit, last status: 502 Bad Gateway", false},
+		{"unexpected status 504 Gateway Timeout", false},
+		{"Error: Retry failed after 3 attempts: 504 Gateway Time-out", false},
+		{"Error: connect ECONNREFUSED 127.0.0.1:443", false},
+		{"Error: 500 ms timeout: ETIMEDOUT", false},
+	} {
+		if got := HasNonGatewayHTTPStatus(tc.said); got != tc.want {
+			t.Errorf("HasNonGatewayHTTPStatus(%q) = %v, want %v", tc.said, got, tc.want)
+		}
+	}
 	for kind := range modelLists {
 		if _, ok := Lookup(kind); !ok {
 			t.Errorf("%s lists its models and has no file", kind)
