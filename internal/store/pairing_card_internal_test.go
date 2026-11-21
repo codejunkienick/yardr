@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -292,6 +294,51 @@ func TestHasDigits(t *testing.T) {
 		if !strings.Contains(url, want) {
 			t.Errorf("the fixture URL holds no %q: the table proves nothing against substrings", want)
 		}
+	}
+}
+
+// A check whose two halves coincide in its first hash would have a card
+// show what it asks for: the three it displays are the three it wants
+// typed, so copying one's own screen would pass and the leak scan of
+// TestPairingCardConfirms fires on the showing itself (yardr-1h41). The
+// halves of the check a card splits therefore never coincide. This
+// forces a transcript whose first hash does coincide (about one in a
+// thousand, searched for here by that hash alone), then holds its
+// check and its card to the split. No earlier test drives a colliding
+// check, so this is a new function rather than a case of one.
+func TestCardCheckHalvesDiffer(t *testing.T) {
+	joiner := Party{Nonce: NewNonce(), Name: "laptop", Key: newPublicKey(t)}
+	host := Party{Nonce: NewNonce(), Name: "north", Key: newPublicKey(t), URL: "http://10.0.0.5:8790"}
+	var tr Transcript
+	var raw string
+	for range 100_000 {
+		joiner.Nonce = NewNonce()
+		tr = Transcript{Commit: Commit(joiner), Joiner: joiner, Host: host}
+		n := binary.BigEndian.Uint64(sum(tr.fields("yardr-pair-check-1")...)) % 1_000_000
+		raw = fmt.Sprintf("%03d %03d", n/1000, n%1000)
+		if shown, want := CheckHalves(raw); shown == want {
+			break
+		}
+		raw = ""
+	}
+	if raw == "" {
+		t.Fatal("no transcript in 100000 tries has coinciding first-hash halves: the forced collision proves nothing")
+	}
+	shown, want := CheckHalves(tr.Check())
+	if shown == want {
+		t.Errorf("the check of a transcript whose first hash is %q is %q: its halves coincide", raw, tr.Check())
+	}
+	p := &hostPairing{
+		Pairing: Pairing{Calls: "laptop", Peer: "laptop", Key: joiner.Key, Check: tr.Check(), Expires: time.Date(2026, 10, 5, 13, 0, 0, 0, time.UTC)},
+		card:    &pairCard{to: "jo", word: "opened by jo"},
+	}
+	ask := p.cardAsk()
+	text := strings.Join(append([]string{ask.Question}, ask.Context...), "\n")
+	if !strings.Contains(text, shown) {
+		t.Errorf("the card does not show %q:\n%s", shown, text)
+	}
+	if hasDigits(text, want) {
+		t.Errorf("the card shows what it asks for (%q, from a first hash of %q):\n%s", want, raw, text)
 	}
 }
 

@@ -298,10 +298,20 @@ func (t Transcript) Session() string {
 
 // Check is the six digits both operators compare, as they are shown:
 // "482 913". Both yards compute it from the transcript, keys and nonces
-// included, so it is the same on both only when both saw the same.
+// included, so it is the same on both only when both saw the same. Its
+// two halves never coincide: a card shows one half and asks for the
+// other, and coinciding halves would show what it asks for, so copying
+// one's own screen would pass (yardr-1h41). The first hash is the
+// check whenever its halves differ, as they do for all but about one
+// transcript in a thousand; a coinciding one is hashed again under
+// the next tag until they differ, which both yards reach alike.
 func (t Transcript) Check() string {
-	n := binary.BigEndian.Uint64(sum(t.fields("yardr-pair-check-1")...)) % 1_000_000
-	return fmt.Sprintf("%03d %03d", n/1000, n%1000)
+	for i := 1; ; i++ {
+		n := binary.BigEndian.Uint64(sum(t.fields(fmt.Sprintf("yardr-pair-check-%d", i))...)) % 1_000_000
+		if n/1000 != n%1000 {
+			return fmt.Sprintf("%03d %03d", n/1000, n%1000)
+		}
+	}
 }
 
 // PairingAnswer is the joiner's word on the check, which crosses signed
