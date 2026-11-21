@@ -99,4 +99,14 @@ func TestSigningIn(t *testing.T) {
 			t.Errorf("%s: SigningIn = %v, want %v", c.name, got, c.want)
 		}
 	}
+	standing := sign("ada", "claude", time.Minute, "open")
+	standing.ID = "yardr-s1"
+	earlier := sign("ada", "claude", 5*time.Minute, "open")
+	earlier.ID = "yardr-s0"
+	if got, ok := SigningInBead([]Bead{standing, earlier}, "ada", "claude", now); !ok || got.ID != "yardr-s0" {
+		t.Errorf("SigningInBead = %+v, %v, want the earliest standing bead named", got, ok)
+	}
+	if _, ok := SigningInBead([]Bead{sign("ada", "claude", SignInWithin+time.Minute, "open")}, "ada", "claude", now); ok {
+		t.Error("SigningInBead names a sign-in left open past SignInWithin")
+	}
 }

@@ -25,6 +25,9 @@ import (
 // `yardr user login <name> --bead <id>` detached and completes at once:
 // a sign-in waits up to a quarter of an hour for the person's code, and
 // one carrying out runs at a time, so it never runs inside the carry.
+// A setup that fails is undone whole (what this run made, in reverse),
+// so the card may be filed again; and no second sign-in starts while
+// one stands open, at the card or here.
 
 func isUserLoginCarry(argv []string) bool { return store.IsUserLoginCarry(argv) }
 
@@ -51,16 +54,70 @@ func (c *carrier) carryUserLoginClaimed(ctx context.Context, rec *store.Carry, r
 	return true, nil
 }
 
-// userLoginFail words a user login carrying failure: what happened, and
-// how the setup is taken back or the card filed again.
-func userLoginFail(name, back, why string, made bool) string {
-	if made {
-		if back == "" {
-			back = "yardr user rm " + name
-		}
-		return why + fmt.Sprintf(" Take back what stands with %s (the login folder stays on disk), then file the card again.", back)
-	}
+// userLoginFail words a user login carrying failure where nothing of
+// a setup was made, or where a whole setup stands on purpose (a sign-in
+// that was not launched): what happened, and to ask again.
+func userLoginFail(why string) string {
 	return why + " Ask again if it is still wanted."
+}
+
+// userLoginMade is what one carrying out itself made of a first-time
+// setup, in the order it made it: the folder (its Mkdir succeeded), the
+// env file (its exclusive create succeeded), each mirrored group
+// (PutGroup succeeded) and each twin route (the id AddRoute returned).
+// A path or record that stood before is never on it, so undoing it
+// takes nothing of another's.
+type userLoginMade struct {
+	folder string
+	env    string
+	groups []string
+	routes []string
+}
+
+// undoUserLogin takes back what made holds, in reverse: the routes,
+// the groups, the env file, then the folder. The folder goes with
+// os.Remove, not RemoveAll: a folder made a moment ago is empty, and
+// one that is not is left standing and named. It answers what still
+// stands, each named as it stands (a route by its id, a group by its
+// name, a file by its path); an empty answer means nothing stands.
+func (c *carrier) undoUserLogin(ctx context.Context, made userLoginMade, actor string) []string {
+	var left []string
+	for i := len(made.routes) - 1; i >= 0; i-- {
+		if err := c.st.DeleteRoute(ctx, made.routes[i], actor); err != nil {
+			left = append(left, "route "+made.routes[i])
+		}
+	}
+	for i := len(made.groups) - 1; i >= 0; i-- {
+		if _, err := c.st.DeleteGroup(ctx, made.groups[i], actor); err != nil {
+			left = append(left, "group "+made.groups[i])
+		}
+	}
+	if made.env != "" {
+		if err := os.Remove(made.env); err != nil && !errors.Is(err, os.ErrNotExist) {
+			left = append(left, "the env file "+made.env)
+		}
+	}
+	if made.folder != "" {
+		if err := os.Remove(made.folder); err != nil && !errors.Is(err, os.ErrNotExist) {
+			left = append(left, "the login folder "+made.folder)
+		}
+	}
+	return left
+}
+
+// userLoginMadeFail words a setup failure after its undo: where the
+// undo emptied what the run made, nothing stands and the card may be
+// filed again, with no taking back named; where an undo step itself
+// failed, exactly what still stands is named, and only then is the
+// card's way back named for it.
+func userLoginMadeFail(name, back, why string, left []string) string {
+	if len(left) == 0 {
+		return why + " Nothing stands from it, so the card may be filed again."
+	}
+	if back == "" {
+		back = "yardr user rm " + name
+	}
+	return why + fmt.Sprintf(" What still stands: %s. Take back what stands with %s.", strings.Join(left, ", "), back)
 }
 
 func (c *carrier) carryUserLogin(ctx context.Context, rec *store.Carry, run *store.AskRun) (string, string) {
@@ -68,37 +125,37 @@ func (c *carrier) carryUserLogin(ctx context.Context, rec *store.Carry, run *sto
 	back := run.Back
 	u, err := c.st.GetUser(ctx, name)
 	if err != nil {
-		return "", userLoginFail(name, back, fmt.Sprintf("user %s does not stand: %v.", name, err), false)
+		return "", userLoginFail(fmt.Sprintf("user %s does not stand: %v.", name, err))
 	}
 	groups, err := c.st.Groups(ctx)
 	if err != nil {
-		return "", userLoginFail(name, back, fmt.Sprintf("the yard's groups are not read: %v.", err), false)
+		return "", userLoginFail(fmt.Sprintf("the yard's groups are not read: %v.", err))
 	}
 	routes, err := c.st.Routes(ctx)
 	if err != nil {
-		return "", userLoginFail(name, back, fmt.Sprintf("the yard's routes are not read: %v.", err), false)
+		return "", userLoginFail(fmt.Sprintf("the yard's routes are not read: %v.", err))
 	}
 	depots, err := c.st.Depots(ctx)
 	if err != nil {
-		return "", userLoginFail(name, back, fmt.Sprintf("the yard's depots are not read: %v.", err), false)
+		return "", userLoginFail(fmt.Sprintf("the yard's depots are not read: %v.", err))
 	}
 	users, err := c.st.Users(ctx)
 	if err != nil {
-		return "", userLoginFail(name, back, fmt.Sprintf("the yard's users are not read: %v.", err), false)
+		return "", userLoginFail(fmt.Sprintf("the yard's users are not read: %v.", err))
 	}
 	crew, err := c.st.Crew(ctx)
 	if err != nil {
-		return "", userLoginFail(name, back, fmt.Sprintf("the yard's crew is not read: %v.", err), false)
+		return "", userLoginFail(fmt.Sprintf("the yard's crew is not read: %v.", err))
 	}
 	settings, err := c.st.Settings(ctx)
 	if err != nil {
-		return "", userLoginFail(name, back, fmt.Sprintf("the yard's settings are not read: %v.", err), false)
+		return "", userLoginFail(fmt.Sprintf("the yard's settings are not read: %v.", err))
 	}
 	var mapping map[string]string
 	if raw := settings[store.WebJWTUsersSetting]; raw != "" {
 		mapping, err = store.ParseWebJWTUsers(raw)
 		if err != nil {
-			return "", userLoginFail(name, back, fmt.Sprintf("%s: %v.", store.WebJWTUsersSetting, err), false)
+			return "", userLoginFail(fmt.Sprintf("%s: %v.", store.WebJWTUsersSetting, err))
 		}
 	}
 	emails := store.MappedEmails(mapping, name)
@@ -116,7 +173,7 @@ func (c *carrier) carryUserLogin(ctx context.Context, rec *store.Carry, run *sto
 		}
 	}
 	if ym == nil {
-		return "", userLoginFail(name, back, fmt.Sprintf("the yardmaster talks with %s on their own login, and crew member %s: %v.", name, ymName, store.ErrNotFound), false)
+		return "", userLoginFail(fmt.Sprintf("the yardmaster talks with %s on their own login, and crew member %s: %v.", name, ymName, store.ErrNotFound))
 	}
 	login := store.LoginOf(name, groups, routes, crew)
 	setup := len(login.Groups) == 0
@@ -124,11 +181,11 @@ func (c *carrier) carryUserLogin(ctx context.Context, rec *store.Carry, run *sto
 	if setup {
 		plan, err = store.PlanUserLogin(c.home, name, "claude", groups, routes, depots, users, ymName, ym, exec.LookPath)
 		if err != nil {
-			return "", userLoginFail(name, back, fmt.Sprintf("ask %d: %s.", rec.Ask, err), false)
+			return "", userLoginFail(fmt.Sprintf("ask %d: %s.", rec.Ask, err))
 		}
 	} else {
 		if _, _, _, err := store.UserLoginEnv(name, groups); err != nil {
-			return "", userLoginFail(name, back, fmt.Sprintf("ask %d: %s.", rec.Ask, err), false)
+			return "", userLoginFail(fmt.Sprintf("ask %d: %s.", rec.Ask, err))
 		}
 	}
 	// Hold the carry to what the approved card pinned: a re-login card
@@ -137,43 +194,71 @@ func (c *carrier) carryUserLogin(ctx context.Context, rec *store.Carry, run *sto
 	// must fail closed before anything is written.
 	nowSeen := store.UserLoginSeen(name, u, ymName, ym, emails, login, plan)
 	if len(run.Seen) == 0 || !maps.Equal(nowSeen, run.Seen) {
-		return "", userLoginFail(name, back, fmt.Sprintf("ask %d: the yard changed since the card was approved, so nothing was written.", rec.Ask), false)
+		return "", userLoginFail(fmt.Sprintf("ask %d: the yard changed since the card was approved, so nothing was written.", rec.Ask))
+	}
+	// No second sign-in while one stands open: a sign-in opened since
+	// the card was approved fails this carry closed, before any write
+	// (this carry opens its own sign-in bead below, so it never reads
+	// that one as another's).
+	beads, err := c.st.ListBeads(ctx, store.BeadFilter{Type: store.TypeQuestion})
+	if err != nil {
+		return "", userLoginFail(fmt.Sprintf("the yard's beads are not read: %v.", err))
+	}
+	if bead, ok := store.SigningInBead(beads, name, "claude", c.now()); ok {
+		return "", store.SignInStands(name, bead) + ", so no second sign-in was started and nothing was written."
+	}
+	// made holds what this run itself makes of the setup, so a failure
+	// in the span below undoes exactly that and nothing that stood.
+	var made userLoginMade
+	failMade := func(why string) (string, string) {
+		return "", userLoginMadeFail(name, back, why, c.undoUserLogin(ctx, made, rec.Actor))
 	}
 	if setup {
 		if err := os.MkdirAll(filepath.Dir(plan.Folder), 0o700); err != nil {
-			return "", userLoginFail(name, back, fmt.Sprintf("the login folder of %s was not made: %v.", name, err), false)
+			return "", userLoginFail(fmt.Sprintf("the login folder of %s was not made: %v.", name, err))
 		}
 		if err := os.Mkdir(plan.Folder, 0o700); err != nil {
-			return "", userLoginFail(name, back, fmt.Sprintf("the login folder of %s was not made: %v.", name, err), false)
+			return "", userLoginFail(fmt.Sprintf("the login folder of %s was not made: %v.", name, err))
 		}
+		made.folder = plan.Folder
 		if err := os.MkdirAll(filepath.Dir(plan.Env), 0o700); err != nil {
-			return "", userLoginFail(name, back, fmt.Sprintf("the env file of %s was not made: %v.", name, err), true)
+			return failMade(fmt.Sprintf("the env file of %s was not made: %v.", name, err))
 		}
-		if err := writeLoginFile(plan.Env, []byte(plan.EnvLine()), 0o600); err != nil {
-			return "", userLoginFail(name, back, fmt.Sprintf("the env file of %s was not made: %v.", name, err), true)
+		created, err := writeLoginFile(plan.Env, []byte(plan.EnvLine()), 0o600)
+		if created {
+			made.env = plan.Env
+		}
+		if err != nil {
+			return failMade(fmt.Sprintf("the env file of %s was not made: %v.", name, err))
 		}
 		for _, source := range plan.Mirrors {
 			g := plan.UserLoginGroup(source)
 			if err := c.st.PutGroup(ctx, g, rec.Actor); err != nil {
-				return "", userLoginFail(name, back, fmt.Sprintf("group %s was not made: %v.", g.Name, err), true)
+				return failMade(fmt.Sprintf("group %s was not made: %v.", g.Name, err))
 			}
+			made.groups = append(made.groups, g.Name)
 		}
 		for _, r := range plan.Routes {
-			if _, err := c.st.AddRoute(ctx, r, rec.Actor); err != nil {
-				return "", userLoginFail(name, back, fmt.Sprintf("a route for %s's beads was not made: %v.", name, err), true)
+			madeRoute, err := c.st.AddRoute(ctx, r, rec.Actor)
+			if err != nil {
+				return failMade(fmt.Sprintf("a route for %s's beads was not made: %v.", name, err))
 			}
+			made.routes = append(made.routes, madeRoute.ID)
 		}
 	}
 	// The sign-in's bead is opened before the yardmaster is updated, as
 	// the CLI opens it before it serves the conversation.
 	bead, err := c.st.CreateBead(ctx, store.SignInBead(name, "claude"), rec.Actor)
 	if err != nil {
-		return "", userLoginFail(name, back, fmt.Sprintf("the sign-in bead of %s was not opened: %v.", name, err), setup)
+		if setup {
+			return failMade(fmt.Sprintf("the sign-in bead of %s was not opened: %v.", name, err))
+		}
+		return "", userLoginFail(fmt.Sprintf("the sign-in bead of %s was not opened: %v.", name, err))
 	}
 	if setup {
 		if err := c.serveUserLogin(ctx, plan, rec.Actor); err != nil {
 			c.closeSignInBead(ctx, bead.ID, name, rec.Actor)
-			return "", userLoginFail(name, back, fmt.Sprintf("the yardmaster's conversation with %s was not served: %v.", name, err), true)
+			return failMade(fmt.Sprintf("the yardmaster's conversation with %s was not served: %v.", name, err))
 		}
 	}
 	spawn := c.login
@@ -184,9 +269,9 @@ func (c *carrier) carryUserLogin(ctx context.Context, rec *store.Carry, run *sto
 	if err != nil {
 		c.closeSignInBead(ctx, bead.ID, name, rec.Actor)
 		if setup {
-			return "", userLoginFail(name, back, fmt.Sprintf("the login setup for %s stands, and the sign-in was not launched: %v.", name, err), false)
+			return "", userLoginFail(fmt.Sprintf("the login setup for %s stands, and the sign-in was not launched: %v.", name, err))
 		}
-		return "", userLoginFail(name, back, fmt.Sprintf("the sign-in of %s was not launched: %v.", name, err), false)
+		return "", userLoginFail(fmt.Sprintf("the sign-in of %s was not launched: %v.", name, err))
 	}
 	c.log.Info("carrying out a user login: the sign-in runs detached", "user", name, "bead", bead.ID, "pid", pid)
 	if setup {
@@ -226,17 +311,21 @@ func (c *carrier) closeSignInBead(ctx context.Context, bead, user, actor string)
 }
 
 // writeLoginFile writes data to a file that is not there: a login's env
-// file is never written over.
-func writeLoginFile(path string, data []byte, mode os.FileMode) error {
+// file is never written over. It reports whether it created the file,
+// so a failed write is undone only where this call made the file.
+func writeLoginFile(path string, data []byte, mode os.FileMode) (bool, error) {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if _, err := f.Write(data); err != nil {
 		f.Close()
-		return err
+		return true, err
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 // spawnUserLogin starts `yardr user login <name> --bead <bead>` for the

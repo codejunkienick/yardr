@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func userLoginAsk(command, to string) Ask {
@@ -192,6 +193,41 @@ func TestRunAskUserLoginRefusals(t *testing.T) {
 	}
 	if notes, err := y.Notes(y.ctx, y.bead); err != nil || len(notes) != 0 {
 		t.Fatalf("the refused asks left %d notes, %v", len(notes), err)
+	}
+	// A card while ada's sign-in stands open is refused, naming its
+	// bead and saying the card is not needed; one left open past
+	// SignInWithin blocks nothing.
+	if err := os.Remove(filepath.Join(y.home, "groups", "ada.env")); err != nil {
+		t.Fatal(err)
+	}
+	standing, err := y.CreateBead(y.ctx, SignInBead("ada", "claude"), "mckean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.AddAsk(y.ctx, y.bead, userLoginAsk("user login ada", "mckean"), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), standing.ID) ||
+		!strings.Contains(err.Error(), "ends by itself within the hour") ||
+		!strings.Contains(err.Error(), "this card is not needed: decline it") {
+		t.Errorf("a login while a sign-in stands = %v, want the refusal naming %s", err, standing.ID)
+	}
+	at := standing.CreatedAt.Add(2 * time.Hour)
+	pinClock(t, &at)
+	seq, err := y.AddAsk(y.ctx, y.bead, userLoginAsk("user login ada", "mckean"), "yardmaster")
+	if err != nil {
+		t.Errorf("a login past a stale sign-in = %v, want the card filed", err)
+	}
+	// A sign-in opened after the card was filed refuses approval too.
+	newer, err := y.CreateBead(y.ctx, SignInBead("ada", "claude"), "mckean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil ||
+		!strings.Contains(err.Error(), newer.ID) ||
+		!strings.Contains(err.Error(), "this card is not needed: decline it") {
+		t.Errorf("approving a login while a sign-in stands = %v, want the refusal naming %s", err, newer.ID)
+	}
+	if rec, err := y.CarryOf(y.ctx, y.bead, seq); err != nil || rec != nil {
+		t.Errorf("a refused approval left carry record %+v, %v", rec, err)
 	}
 }
 

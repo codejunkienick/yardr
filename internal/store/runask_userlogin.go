@@ -109,7 +109,22 @@ func MappedEmails(m map[string]string, user string) []string {
 
 // checkUserLogin is giving a user a login's own check as the asker: the
 // setup writes the yardmaster's conversation, which is the operator's.
+// A card is refused while a sign-in of the user's stands open: two
+// sign-ins on one login folder race, and the open one is the person's
+// to finish, so the card is not needed.
 func checkUserLogin(ctx context.Context, w *wtx, argv []string, actor string) error {
+	if name := userLoginOf(argv); name != "" {
+		var beads []Bead
+		if err := each(w.Tx, bBeads, "", func(_ []byte, r *beadRow) error {
+			beads = append(beads, r.Bead)
+			return nil
+		}); err != nil {
+			return err
+		}
+		if bead, ok := SigningInBead(beads, name, "claude", now()); ok {
+			return fmt.Errorf("%s, so this card is not needed: decline it and file another only after that sign-in has ended", SignInStands(name, bead))
+		}
+	}
 	var crew []CrewMember
 	if err := each(w.Tx, bCrew, "", func(_ []byte, c *CrewMember) error { crew = append(crew, *c); return nil }); err != nil {
 		return err

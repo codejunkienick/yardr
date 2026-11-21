@@ -122,10 +122,39 @@ const SignInWithin = time.Hour
 // kind at now: their own login is being made, by the person, and no one else
 // can log in a session that sits at its login screen on it.
 func SigningIn(beads []Bead, user, kind string, now time.Time) bool {
-	return slices.ContainsFunc(beads, func(b Bead) bool {
+	_, ok := SigningInBead(beads, user, kind, now)
+	return ok
+}
+
+// SigningInBead is the bead of user's open sign-in to the harness kind at
+// now, the earliest of them where several stand: SigningIn says whether
+// one stands, and a refusal names this bead. A bead left open past
+// SignInWithin by a command killed outright holds nothing back.
+func SigningInBead(beads []Bead, user, kind string, now time.Time) (Bead, bool) {
+	var found *Bead
+	for i := range beads {
+		b := &beads[i]
 		of, _ := b.Metadata[SignInMeta].(string)
-		return b.open() && b.Originator == user && of == kind && now.Sub(b.CreatedAt) < SignInWithin
-	})
+		if !b.open() || b.Originator != user || of != kind || now.Sub(b.CreatedAt) >= SignInWithin {
+			continue
+		}
+		if found == nil || b.CreatedAt.Before(found.CreatedAt) {
+			found = b
+		}
+	}
+	if found == nil {
+		return Bead{}, false
+	}
+	return *found, true
+}
+
+// SignInStands words the sign-in of user that already stands open on
+// bead: it ends by itself within SignInWithin, so a person whose sign-in
+// hung knows when another sign-in can be asked for. The card's check and
+// the server's carrier refuse a second sign-in in these words.
+func SignInStands(user string, bead Bead) string {
+	kind, _ := bead.Metadata[SignInMeta].(string)
+	return fmt.Sprintf("%s already has a sign-in to %s open on bead %s, and it ends by itself within the hour", user, kind, bead.ID)
 }
 
 // ClaudeFolderEnv is the variable that names the folder a Claude login
