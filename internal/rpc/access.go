@@ -124,7 +124,8 @@ var Access = map[string]Class{
 	"Advance":     Agent,
 	"AdvanceNote": Agent, // but along done-safe's edge on a security path (store.AdvanceNote)
 	"Done":        Agent,
-	"CloseBead":   Agent, // its own bead alone (store.CloseBead)
+	"CloseBead":   Agent,    // its own bead alone (store.CloseBead)
+	"RemoveBead":  Operator, // a memory removed for good is the operator's alone (store.RemoveBead)
 	"Reopen":      Admin,
 	"SetHold":     Agent, // but not to lift a hold (store.SetHold)
 	"Release":     Agent,

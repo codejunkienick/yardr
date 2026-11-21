@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"slices"
 	"strings"
@@ -236,6 +237,58 @@ func (a *app) newBeadReopenCmd(rev *string) *cobra.Command {
 		return st.Reopen(c.Context(), id, a.expect(*rev), a.who())
 	})
 	return reopen
+}
+
+// newBeadRmCmd is bead rm: removing a memory for good, the operator's
+// alone. It asks for the word yes typed, or --yes, before the store is
+// called at all: anything else (another word, no word, the end of stdin)
+// aborts with nothing written, since what it does cannot be undone and a
+// close, which keeps everything, is the recoverable word. The question is
+// asked on the error stream so --json's answer stays the removal alone.
+func (a *app) newBeadRmCmd() *cobra.Command {
+	var yes bool
+	rm := &cobra.Command{
+		Use:   "rm <id>",
+		Short: "Remove a memory bead for good (the operator's alone; typed yes or --yes)",
+		Long: `Removes a memory bead for good: its row, its handle and its notes go,
+and the text of its events is redacted where they stand (their rows,
+seqs and indexes stay, so the log's order stands). There is no undo and
+no tombstone: the id names nothing afterwards. The files a note carried
+are freed by the store's blob prune once nothing names them.
+
+Memories alone can be removed; any other bead is closed instead. It is
+the operator's alone. It is refused, naming what holds the bead, while a
+dep edge joins it either way, an open ask on another bead cites it, a
+session on it is live, or it is a child of a train: clear that first.
+
+Without --yes the word yes must be typed to confirm; anything else
+removes nothing.`,
+		Example: `  yardr bead rm mem-k3f9
+  yardr bead rm mem-k3f9 --yes --json   # what went: the row, its notes, the events redacted`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			if !yes {
+				fmt.Fprintf(c.ErrOrStderr(), "remove %s for good? this cannot be undone: type yes to remove it: ", args[0])
+				line, _ := bufio.NewReader(c.InOrStdin()).ReadString('\n')
+				if word := strings.TrimSpace(line); word != "yes" {
+					return fmt.Errorf("bead %s was not removed: %q is not \"yes\", and nothing was written; type yes, or give --yes, to remove a memory for good", args[0], word)
+				}
+			}
+			st, err := a.store(c.Context())
+			if err != nil {
+				return err
+			}
+			r, err := st.RemoveBead(c.Context(), args[0], a.who())
+			if err != nil {
+				return err
+			}
+			return a.out(c.OutOrStdout(), r, func(w io.Writer) {
+				fmt.Fprintf(w, "removed %s: its row and handle, %d notes, %d events redacted\n", r.Bead, r.Notes, r.EventsRedacted)
+			})
+		},
+	}
+	rm.Flags().BoolVar(&yes, "yes", false, "remove without typing yes to confirm")
+	return rm
 }
 
 func (a *app) newBeadHoldCmd(rev *string) *cobra.Command {

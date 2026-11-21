@@ -31,6 +31,9 @@ type API interface {
 	AdvanceNote(ctx context.Context, id, stage, note string, exp Expect, actor string) (*Bead, error)
 	Done(ctx context.Context, id, outcome, note string, exp Expect, actor string) (*Bead, error)
 	CloseBead(ctx context.Context, id, reason string, exp Expect, actor string) (*Bead, error)
+	// RemoveBead removes a memory for good (removebead.go): the operator's
+	// alone, refused while anything still names the bead.
+	RemoveBead(ctx context.Context, id, actor string) (*BeadRemoval, error)
 	Reopen(ctx context.Context, id string, exp Expect, actor string) (*Bead, error)
 	SetHold(ctx context.Context, id string, hold bool, exp Expect, actor string) (*Bead, error)
 	Release(ctx context.Context, id, reason string, exp Expect, actor string) (*Bead, error)

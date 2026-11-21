@@ -426,7 +426,7 @@ func (a *app) beadCmd() *cobra.Command {
 	unfold := a.newBeadUnfoldCmd()
 
 	revFlag(update, done, advance, closeCmd, reopen, hold, unhold, release)
-	cmd.AddCommand(create, show, history, list, update, note, ask, answer, done, advance, closeCmd, reopen, hold, unhold, release, fold, unfold)
+	cmd.AddCommand(create, show, history, list, update, note, ask, answer, done, advance, closeCmd, reopen, hold, unhold, release, fold, unfold, a.newBeadRmCmd())
 	cmd.AddCommand(a.watchCmds()...)
 	return cmd
 }

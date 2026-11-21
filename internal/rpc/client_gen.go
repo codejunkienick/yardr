@@ -57,6 +57,10 @@ func (c *Client) Done(ctx context.Context, id, outcome, note string, exp store.E
 func (c *Client) CloseBead(ctx context.Context, id, reason string, exp store.Expect, actor string) (*store.Bead, error) {
 	return callV[*store.Bead](c, ctx, "CloseBead", id, reason, exp, actor)
 }
+
+func (c *Client) RemoveBead(ctx context.Context, id, actor string) (*store.BeadRemoval, error) {
+	return callV[*store.BeadRemoval](c, ctx, "RemoveBead", id, actor)
+}
 func (c *Client) Reopen(ctx context.Context, id string, exp store.Expect, actor string) (*store.Bead, error) {
 	return callV[*store.Bead](c, ctx, "Reopen", id, exp, actor)
 }
