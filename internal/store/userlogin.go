@@ -473,9 +473,12 @@ func (w *wtx) dropLogin(user, actor string) (UserLogin, error) {
 		} else if !ok {
 			continue
 		}
+		before := cloneCrew(&c)
 		unserve(c.Config, user)
 		c.Revision = newRevision()
 		if err := put(w.Tx, bCrew, name, c); err != nil {
+			return l, err
+		} else if err := w.tellCrewStale(name, before, &c, actor); err != nil {
 			return l, err
 		}
 	}

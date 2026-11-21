@@ -166,11 +166,29 @@ func (w *wtx) renamePeer(ctx context.Context, name, to, actor string, by *approv
 			return nil, err
 		}
 	}
+	crewBefore, err := w.crewClones()
+	if err != nil {
+		return nil, err
+	}
 	had, err := renamePeerSettings(w.Tx, name, to)
 	if err != nil {
 		return nil, err
 	}
 	crew := had[MailPeers]
+	// The settings the rename rewrote name the peer in a member's config
+	// whole, which grant holds read: each such member tells here, at the
+	// rename that rewrote it (runask_stale.go).
+	for _, member := range crew {
+		var after CrewMember
+		if ok, err := get(w.Tx, bCrew, member, &after); err != nil {
+			return nil, err
+		} else if !ok {
+			continue
+		}
+		if err := w.tellCrewStale(member, crewBefore[member], &after, actor); err != nil {
+			return nil, err
+		}
+	}
 	if len(crew) > 0 {
 		data["crew"] = crew
 	}

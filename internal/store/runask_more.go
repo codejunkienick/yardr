@@ -16,6 +16,10 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	bolt "go.etcd.io/bbolt"
+
+	"yardr.dev/yardr/internal/source"
 )
 
 // parseUserAdd reads the words of user add <name>.
@@ -247,6 +251,28 @@ func identitySays(id, key string) string {
 	default:
 		return key
 	}
+}
+
+// foldIdentityKey is the key as the source's deliveries carry it: a source
+// the yard declares whose identity folds lower keeps one spelling however
+// it was typed. The CLI folds the key before the store by the same rule
+// (hooks.KeyFolderFor, which the store does not read); folding here too
+// keeps what a run ask approves as a terminal would store it. A source the
+// yard declares not, or whose declaration this yardr does not read, keeps
+// the key as given.
+func foldIdentityKey(tx *bolt.Tx, name, key string) string {
+	if key == "" {
+		return ""
+	}
+	src := new(Source)
+	if ok, err := get(tx, bSources, name, src); err != nil || !ok {
+		return key
+	}
+	d, err := src.Declaration()
+	if err != nil || d.Identity == nil || d.Identity.Fold != source.FoldLower {
+		return key
+	}
+	return strings.ToLower(key)
 }
 
 // crewIdentityCard is the card of crew identity: which crew member and

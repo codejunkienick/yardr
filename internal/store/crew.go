@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -493,7 +492,7 @@ func (w *wtx) putCrew(ctx context.Context, def CrewMember, actor string, by *app
 		}
 	}
 	// Held to ConfigKeys as a group's config is (putGroup).
-	kept := r.Config
+	kept, before := r.Config, crewBefore(ok, &r)
 	if r.Runner != def.Runner {
 		kept = nil
 	}
@@ -515,17 +514,8 @@ func (w *wtx) putCrew(ctx context.Context, def CrewMember, actor string, by *app
 	if r.Config == nil {
 		r.Config = map[string]any{}
 	}
-	for _, d := range []string{r.MaxAge, r.HandoffGrace} {
-		if d != "" {
-			if _, err := time.ParseDuration(d); err != nil {
-				return nil, fmt.Errorf("duration %q: %w", d, err)
-			}
-		}
-	}
-	if r.ContextHandoff != "" {
-		if n, err := strconv.Atoi(r.ContextHandoff); err != nil || n < 0 || n > 100 {
-			return nil, fmt.Errorf("context_handoff %q: want a percentage 0..100", r.ContextHandoff)
-		}
+	if err := checkCrewTiming(r); err != nil {
+		return nil, err
 	}
 	r.Revision = newRevision()
 	if err := put(w.Tx, bCrew, r.Name, r); err != nil {
@@ -536,6 +526,8 @@ func (w *wtx) putCrew(ctx context.Context, def CrewMember, actor string, by *app
 		data["approved"] = by
 	}
 	if err := w.event(r.Journal, "crew_defined", actor, data); err != nil {
+		return nil, err
+	} else if err := w.tellCrewStale(r.Name, before, &r, actor); err != nil {
 		return nil, err
 	}
 	return &r, nil
@@ -611,7 +603,7 @@ func (s *Store) GetCrew(ctx context.Context, name string) (*CrewMember, error) {
 // (operatorOrYardmaster), except that the yardmaster cannot remove
 // itself: only the operator removes the yardmaster.
 func (s *Store) DeleteCrew(ctx context.Context, name, rev, actor string) error {
-	return s.changeCrewAt(name, rev, func(w *wtx, r *CrewMember) error {
+	return s.changeCrewAt(name, rev, &actor, func(w *wtx, r *CrewMember) error {
 		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
 		if err != nil {
 			return err
@@ -637,13 +629,15 @@ func (s *Store) DeleteCrew(ctx context.Context, name, rev, actor string) error {
 // changeCrew applies fn to the stored crew member and saves it under a
 // fresh revision, unless deleted is set (fn removed it). The daemon's own
 // bookkeeping writes through it unchecked.
-func (s *Store) changeCrew(name string, fn func(*wtx, *CrewMember) error, deleted ...bool) error {
-	return s.changeCrewAt(name, "", fn, deleted...)
+func (s *Store) changeCrew(name, actor string, fn func(*wtx, *CrewMember) error, deleted ...bool) error {
+	return s.changeCrewAt(name, "", &actor, fn, deleted...)
 }
 
 // changeCrewAt is changeCrew refusing with ErrConflict unless the
-// crew member is at rev ("" expects nothing).
-func (s *Store) changeCrewAt(name, rev string, fn func(*wtx, *CrewMember) error, deleted ...bool) error {
+// crew member is at rev ("" expects nothing). What fn changes of the
+// member is told beside the save (runask_stale.go), from a clone taken
+// before fn runs, since fn mutates the member in place.
+func (s *Store) changeCrewAt(name, rev string, actor *string, fn func(*wtx, *CrewMember) error, deleted ...bool) error {
 	return s.write(func(w *wtx) error {
 		var r CrewMember
 		ok, err := get(w.Tx, bCrew, name, &r)
@@ -656,14 +650,18 @@ func (s *Store) changeCrewAt(name, rev string, fn func(*wtx, *CrewMember) error,
 		if err := checkCrewRev(name, r.Revision, rev); err != nil {
 			return err
 		}
+		before := cloneCrew(&r)
 		if err := fn(w, &r); err != nil {
 			return err
 		}
 		if len(deleted) > 0 && deleted[0] {
-			return nil
+			return w.tellCrewStale(name, before, nil, *actor)
 		}
 		r.Revision = newRevision()
-		return put(w.Tx, bCrew, name, r)
+		if err := put(w.Tx, bCrew, name, r); err != nil {
+			return err
+		}
+		return w.tellCrewStale(name, before, &r, *actor)
 	})
 }
 
@@ -689,7 +687,7 @@ func checkCrewRev(name, have, want string) error {
 // session's actor or that crew member, whatever actor says, and from
 // anywhere else as given (paneAuthor).
 func (s *Store) SetCrewEnabled(ctx context.Context, name string, enabled bool, rev, actor string) error {
-	return s.changeCrewAt(name, rev, func(w *wtx, r *CrewMember) error {
+	return s.changeCrewAt(name, rev, &actor, func(w *wtx, r *CrewMember) error {
 		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
 		if err != nil {
 			return err
@@ -838,7 +836,7 @@ func (s *Store) Journal(ctx context.Context, name, kind, text, actor string) (bo
 		}
 		return false, fmt.Errorf("%s entry is %d bytes, over the %d-byte limit: summarize it", kind, len(text), limit)
 	}
-	err := s.changeCrew(name, func(w *wtx, r *CrewMember) error {
+	err := s.changeCrew(name, actor, func(w *wtx, r *CrewMember) error {
 		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
 		if err != nil {
 			return err

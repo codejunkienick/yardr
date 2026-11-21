@@ -487,6 +487,7 @@ func (w *wtx) setCrewIdentity(ctx context.Context, name, source string, id Ident
 	if err := checkCrewIdentityOneToOne(w.Tx, name, source, id); err != nil {
 		return err
 	}
+	before := cloneCrew(&r)
 	kind, data, err := setIdentityIn(&r.Identities, name, source, id, "crew member", "crew")
 	if err != nil {
 		return err
@@ -498,29 +499,10 @@ func (w *wtx) setCrewIdentity(ctx context.Context, name, source string, id Ident
 	if err := put(w.Tx, bCrew, name, r); err != nil {
 		return err
 	}
-	return w.event(r.Journal, kind, actor, data)
-}
-
-// foldIdentityKey is the key as the source's deliveries carry it: a source
-// the yard declares whose identity folds lower keeps one spelling however
-// it was typed. The CLI folds the key before the store by the same rule
-// (hooks.KeyFolderFor, which the store does not read); folding here too
-// keeps what a run ask approves as a terminal would store it. A source the
-// yard declares not, or whose declaration this yardr does not read, keeps
-// the key as given.
-func foldIdentityKey(tx *bolt.Tx, name, key string) string {
-	if key == "" {
-		return ""
+	if err := w.event(r.Journal, kind, actor, data); err != nil {
+		return err
 	}
-	src := new(Source)
-	if ok, err := get(tx, bSources, name, src); err != nil || !ok {
-		return key
-	}
-	d, err := src.Declaration()
-	if err != nil || d.Identity == nil || d.Identity.Fold != source.FoldLower {
-		return key
-	}
-	return strings.ToLower(key)
+	return w.tellCrewStale(name, before, &r, actor)
 }
 
 // AddSubscription subscribes the crew member, or else the user, or else the

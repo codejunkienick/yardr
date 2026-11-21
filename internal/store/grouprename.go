@@ -645,8 +645,16 @@ func (p *groupRename) apply(w *wtx, actor string) error {
 			return err
 		}
 	}
+	// A crew member's subscriptions followed the name, which no crew
+	// fingerprint reads, so this tell stands to prove it and costs no scan.
 	for _, r := range p.crew {
+		var before CrewMember
+		if _, err := get(w.Tx, bCrew, r.Name, &before); err != nil {
+			return err
+		}
 		if err := put(w.Tx, bCrew, r.Name, r); err != nil {
+			return err
+		} else if err := w.tellCrewStale(r.Name, &before, &r, actor); err != nil {
 			return err
 		}
 	}

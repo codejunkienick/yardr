@@ -14,8 +14,8 @@
 // from the current bytes in the same transaction) gets none at creation.
 // No new durable state: the event row is the standard event write.
 //
-// The families beside sources (a group and a peer here; a crew member and a
-// user follow on the same machinery) tell the same way through tellXStale:
+// The families beside sources (a group, a peer and a crew member here; a
+// user follows on the same machinery) tell the same way through tellXStale:
 // a Seen key may be written by more than one fingerprint function, so the
 // tell compares the set of fingerprints a hold could carry before the write
 // with the set it could carry after it, and tells exactly the holds that
@@ -327,6 +327,114 @@ func (w *wtx) tellPeerStale(name string, before, after *Peer, actor string) erro
 		tellKey[Peer]{key: "peer " + name + " reaches", fns: []func(*Peer) string{func(p *Peer) string { return seen(p.Reach) }}},
 	)
 	return w.tellXStale("peer", name, before, after, actor, watched)
+}
+
+// cloneCrew is a copy of the member r that shares nothing a crew write
+// mutates: its config, its identities and its lists. A tell's before is
+// one, taken as the write found the member, so the after the write leaves
+// cannot move it under it.
+func cloneCrew(r *CrewMember) *CrewMember {
+	if r == nil {
+		return nil
+	}
+	out := *r
+	out.Config = maps.Clone(r.Config)
+	out.Identities = maps.Clone(r.Identities)
+	out.On, out.Subscriptions = slices.Clone(r.On), slices.Clone(r.Subscriptions)
+	return &out
+}
+
+// crewBefore is the member a crew write found, cloned, or nil where it
+// stood not: the write then adds it, and a hold written against its
+// absence is what the tell can reach.
+func crewBefore(ok bool, r *CrewMember) *CrewMember {
+	if !ok {
+		return nil
+	}
+	return cloneCrew(r)
+}
+
+// crewClones is every crew member as it stands, cloned by name: the
+// before a write that rewrites members it does not name one by one (a
+// source fold, a peer rename) tells from.
+func (w *wtx) crewClones() (map[string]*CrewMember, error) {
+	out := map[string]*CrewMember{}
+	err := each(w.Tx, bCrew, "", func(_ []byte, r *CrewMember) error {
+		out[r.Name] = cloneCrew(r)
+		return nil
+	})
+	return out, err
+}
+
+// crewSetSeen is what a crew set card keeps of a member: its runner and
+// the prompt, kind and flags it runs, with the model and the directory
+// only on a card that sets one of them (runask_crewset.go). The tell
+// computes all four of the card's combinations, as a hold carries the
+// one its own card wrote.
+func crewSetSeen(r *CrewMember, model, dir bool) string {
+	c := asStored(r.Config)
+	held := []any{r.Runner, c["prompt"], c["kind"], c["args"]}
+	if model {
+		held = append(held, c["model"])
+	}
+	if dir {
+		held = append(held, r.Dir)
+	}
+	return seen(held...)
+}
+
+// granteeCrewFingerprint is what a grant card and a setup card keep of a
+// crew member: its runner, its config whole and its directory, as
+// granteeSeen reads them back.
+func granteeCrewFingerprint(r *CrewMember) string {
+	return seen(r.Runner, r.Config, r.Dir)
+}
+
+// tellCrewStale tells the askers of the holds naming the crew member name
+// whose "crew <name>" Seen moved between before and after, the member as
+// the write found it and as it leaves it (nil for none: a member added,
+// removed or renamed away). The key is written by the crew set card's
+// four combinations, by the grant and setup cards' whole reading, and by
+// the identity card's reading of one source, so the tell carries them
+// all, the identity readings one per source either side holds, and tells
+// exactly the holds whose own reading of the member it moved. A write
+// that moves only what no reading names — a session's runtime, its
+// subscriptions, the prompt file a card holds by its digest — moves no
+// fingerprint here and costs no scan.
+func (w *wtx) tellCrewStale(name string, before, after *CrewMember, actor string) error {
+	watched := []tellKey[CrewMember]{{
+		key: "crew " + name,
+		fns: []func(*CrewMember) string{
+			func(r *CrewMember) string { return crewSetSeen(r, false, false) },
+			func(r *CrewMember) string { return crewSetSeen(r, true, false) },
+			func(r *CrewMember) string { return crewSetSeen(r, false, true) },
+			func(r *CrewMember) string { return crewSetSeen(r, true, true) },
+			func(r *CrewMember) string { return granteeCrewFingerprint(r) },
+		},
+	}}
+	sources := map[string]bool{}
+	for _, side := range []*CrewMember{before, after} {
+		if side == nil {
+			continue
+		}
+		for source := range side.Identities {
+			sources[source] = true
+		}
+	}
+	for _, source := range slices.Sorted(maps.Keys(sources)) {
+		watched[0].fns = append(watched[0].fns, func(r *CrewMember) string {
+			cur := r.Identities[source]
+			return seen(cur.ID, cur.Key)
+		})
+	}
+	if after == nil {
+		// Removing a member stales an open identity hold even for a source
+		// where the member held no identity yet (seen("", "")).
+		watched[0].fns = append(watched[0].fns, func(*CrewMember) string {
+			return seen("", "")
+		})
+	}
+	return w.tellXStale("crew", name, before, after, actor, watched)
 }
 
 // staleFP is the fingerprint a run ask holds for the source name under the

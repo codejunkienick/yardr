@@ -2092,7 +2092,7 @@ internal/source/declaration.go 1223 source declarations, credentials and calls
 internal/standin/standin.go 1508 the fake Linear, GitHub and edge APIs
 internal/store/asks.go 1683 ask and answer parsing and storage
 internal/store/beads.go 2563 bead CRUD, queries and dispatch reads
-internal/store/crew.go 1461 crew records and their events
+internal/store/crew.go 1459 crew records and their events
 internal/store/flows.go 1358 flow parsing and storage
 internal/store/graph.go 1311 the dependency graph and its queries
 internal/store/hooks.go 1091 webhook parsing and the say shapes
@@ -2106,7 +2106,7 @@ internal/store/runask_list.go 1223 ask cards, labels and preset reading
 internal/store/runask_setup.go 1533 the setup ask, its card, and the carrying record
 internal/store/settings.go 1014 yard settings and their checks
 internal/store/sourcecalls.go 1240 source grants and callables
-internal/store/subscriptions.go 1192 identities, subscriptions and where-clauses
+internal/store/subscriptions.go 1174 identities, subscriptions and where-clauses
 internal/store/users.go 1237 user records and operator words
 '
 # filesizebudget fails the run when a non-test Go file stands over its
@@ -2190,17 +2190,19 @@ filesizebudget() {
 # what it writes, or undecided with the bead that will decide it. A site is
 # named by its file, its function, its bucket and which write of that bucket
 # in that function it is, so that a line moving inside the function, or a
-# write of another bucket beside it, leaves the name standing. The group
-# writes are decided here; the crew and user writes stand undecided
-# behind yardr-w4q0, each naming the bead that flips it, and a group write
-# may not stand undecided. tellsitebudget below fails the run on a write in
+# write of another bucket beside it, leaves the name standing. The group,
+# peer and crew writes are decided here; the user writes stand undecided
+# behind yd-gjsd, each naming the bead that flips it, and a group, peer or
+# crew write may not stand undecided. tellsitebudget below fails the run on a write in
 # none of the states and on an undecided write naming the wrong bead, and
 # warns on a listed write that is gone, as the file size budget warns on a
 # row whose file is gone: the yardtest fixtures run this script on a tree
 # that holds no store writes at all, where a gone row can only warn. The
 # peer writes are decided here too (yd-87dr): each tells beside its own
 # put; source folds and user removals tell at their enclosing writes,
-# each named in its row.
+# each named in its row. The crew writes are decided here too (yd-gvbd):
+# each tells beside its own put; the source fold and a peer's rename and
+# removal tell at their enclosing writes, each named in its row.
 tellsites='
 internal/store/groupedit.go putGroup bGroups 1 hook putGroup tells beside its group_set
 internal/store/groupedit.go deleteGroup bGroups 1 hook deleteGroup tells with nothing after it
@@ -2234,23 +2236,23 @@ internal/store/peers.go PeerPostAnswered bPeers 1 top told at distrusted in peer
 internal/store/peers.go PeerPulled bPeers 1 top told at distrusted in peertrust.go where the trust its word dropped is told in the write that saves it
 internal/store/peerurl.go setPeerURL bPeers 1 hook setPeerURL tells beside its peer_url_set
 internal/store/peertrust.go untrust bPeers 1 top told at unexposeAndUntrust after user exposure and trust removals
-internal/store/crew.go putCrew bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/crew.go DeleteCrew bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/crew.go changeCrewAt bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/crewsession.go changeCrewSessionAt bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/grouprename.go apply bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/movesource.go moveCrewIdentitiesAndGrants bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/movesource.go moveSubscriptions bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/peerbeads.go changePeerSettings bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/peersource.go renamePeerFilters bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/runask_more.go runCrewRestart bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/subscriptions.go setCrewIdentity bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/subscriptions_write.go writeCrewSubs bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/threads.go AllowOpening bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/unfold.go addWatch bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/unfold.go dropWatch bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/userlogin.go dropLogin bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
-internal/store/yardrsource.go editWatches bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
+internal/store/crew.go putCrew bCrew 1 hook putCrew tells beside its crew_defined
+internal/store/crew.go DeleteCrew bCrew 1 top told at changeCrewAt in crew.go where the removal is saved
+internal/store/crew.go changeCrewAt bCrew 1 hook changeCrewAt tells beside its save
+internal/store/crewsession.go changeCrewSessionAt bCrew 1 skip writes a session runtime alone and no crew fingerprint reads it
+internal/store/grouprename.go apply bCrew 1 hook the rename tells beside its crew put
+internal/store/movesource.go moveCrewIdentitiesAndGrants bCrew 1 top told at moveSourceRecords in movesource.go where the fold tells every member it moved
+internal/store/movesource.go moveSubscriptions bCrew 1 skip writes subscriptions alone and no crew fingerprint reads subscriptions
+internal/store/peerbeads.go changePeerSettings bCrew 1 top told at renamePeer in peerrename.go and deletePeer in peerremove.go where the peer is renamed or removed
+internal/store/peersource.go renamePeerFilters bCrew 1 skip writes subscriptions alone and no crew fingerprint reads subscriptions
+internal/store/runask_more.go runCrewRestart bCrew 1 skip writes a restart request alone and no crew fingerprint reads it
+internal/store/subscriptions.go setCrewIdentity bCrew 1 hook setCrewIdentity tells beside its identity_set
+internal/store/subscriptions_write.go writeCrewSubs bCrew 1 skip writes subscriptions alone and no crew fingerprint reads subscriptions
+internal/store/threads.go AllowOpening bCrew 1 hook AllowOpening tells beside its open_threads_granted
+internal/store/unfold.go addWatch bCrew 1 skip writes subscriptions alone and no crew fingerprint reads subscriptions
+internal/store/unfold.go dropWatch bCrew 1 skip writes subscriptions alone and no crew fingerprint reads subscriptions
+internal/store/userlogin.go dropLogin bCrew 1 hook dropLogin tells beside its save
+internal/store/yardrsource.go editWatches bCrew 1 skip writes subscriptions alone and no crew fingerprint reads subscriptions
 internal/store/grouprename.go apply bUsers 1 undecided yd-gjsd undecided until that bead decides hook or skip with proof
 internal/store/movesource.go moveUserIdentities bUsers 1 undecided yd-gjsd undecided until that bead decides hook or skip with proof
 internal/store/movesource.go moveSubscriptions bUsers 1 undecided yd-gjsd undecided until that bead decides hook or skip with proof
@@ -2277,7 +2279,7 @@ internal/store/yardrsource.go editWatches bUsers 1 undecided yd-gjsd undecided u
 '
 # tellsitebudget fails the run when a production write of a peer, group, crew
 # member or user record stands in none of the states the list above knows,
-# when a group or peer write stands undecided, and when an undecided write names a
+# when a group, peer or crew write stands undecided, and when an undecided write names a
 # bead but the one that flips its bucket; a listed write that is gone only
 # warns, for the fixtures above. An
 # undecided write passes, with one line naming its bead and how many stand
@@ -2328,8 +2330,8 @@ tellsitebudget() {
       if ($5 != "hook" && $5 != "top" && $5 != "skip" && $5 != "undecided") {
         printf "test: tell site %s stands %s, in no state the tells know\n", where[key], $5
         bad++
-      } else if (($3 == "bGroups" || $3 == "bPeers") && $5 == "undecided") {
-        printf "test: tell site %s is a group or peer write and may not stand undecided: yardr-w4q0 and yd-87dr decided them\n", where[key]
+      } else if (($3 == "bGroups" || $3 == "bPeers" || $3 == "bCrew") && $5 == "undecided") {
+        printf "test: tell site %s is a group, peer or crew write and may not stand undecided: yardr-w4q0, yd-87dr and yd-gvbd decided them\n", where[key]
         bad++
       } else if ($5 == "undecided") {
         want = ($3 == "bPeers" ? "yd-87dr" : $3 == "bCrew" ? "yd-gvbd" : $3 == "bUsers" ? "yd-gjsd" : "")

@@ -61,12 +61,30 @@ func (w *wtx) deletePeer(ctx context.Context, name, actor string, by *approvedOn
 	}
 	// And no crew member may mail it: whoever is added under the name
 	// next is another yard, which the operator has not allowed anyone.
+	crewBefore, err := w.crewClones()
+	if err != nil {
+		return err
+	}
 	lost, err := dropPeerSettings(w.Tx, name)
 	if err != nil {
 		return err
 	}
 	if len(lost[MailPeers]) > 0 {
 		data["crew"] = lost[MailPeers]
+	}
+	// The settings the removal rewrote name the peer in a member's config
+	// whole, which grant holds read: each such member tells here, at the
+	// removal that rewrote it (runask_stale.go).
+	for _, member := range lost[MailPeers] {
+		var after CrewMember
+		if ok, err := get(w.Tx, bCrew, member, &after); err != nil {
+			return err
+		} else if !ok {
+			continue
+		}
+		if err := w.tellCrewStale(member, crewBefore[member], &after, actor); err != nil {
+			return err
+		}
 	}
 	// The beads it sent stay, and say whose they were; nothing is
 	// returned for them.

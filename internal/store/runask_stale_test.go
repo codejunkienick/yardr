@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -1063,5 +1064,475 @@ func TestPeerRenameTellsSendingGroupHolds(t *testing.T) {
 	}
 	if !grantTold || controlTold {
 		t.Fatalf("the peer rename told grant %v and control %v, want the grant alone", grantTold, controlTold)
+	}
+}
+
+// crewTells are the ask_stale events on y's bead, as peerTells reads them.
+func crewTells(t *testing.T, y *askYard) []Event {
+	t.Helper()
+	return peerTells(t, y)
+}
+
+// Changing a crew member tells the askers of the open and put-aside run
+// asks naming it, once each, in words naming the ask and the member;
+// changing an unrelated member tells nothing, and a second change while
+// the asks stand tells nothing more. Taken back and asked again, the
+// new ask is covered, and a fresh ask taken back before the change is
+// not.
+func TestCrewChangeTellsCrewAskerOfStaleRunAsk(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	open := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "yardmaster")
+	aside := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=accept-edits"), "yardmaster")
+	if page, err := y.Store.Inbox(y.ctx, "yardmaster", 0); err != nil || page.Total != 0 {
+		t.Fatalf("the asker's inbox after asking = %+v, %v, want empty", page, err)
+	}
+	y.answer(t, Answer{Ask: aside, Later: true}, "mckean")
+	// An unrelated member comes and changes without a tell.
+	if _, err := y.PutCrew(y.ctx, CrewMember{Name: "clerk", Runner: "herdr", Dir: "/yard", Config: map[string]any{"kind": "claude"}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.PutCrew(y.ctx, CrewMember{Name: "clerk", Runner: "herdr", Dir: "/yard", Config: map[string]any{"kind": "claude", "model": "opus"}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := crewTells(t, y); len(got) != 0 {
+		t.Fatalf("the bead holds %d tells after an unrelated change, want none", len(got))
+	}
+	// Changing the named member tells the open ask and the aside one.
+	y.crew(t, map[string]any{"kind": "claude", "args": []string{"--safe"}})
+	page, err := y.Store.Inbox(y.ctx, "yardmaster", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The inbox holds the aside answer beside the two tells.
+	if page.Total != 3 {
+		t.Fatalf("the asker's inbox = %+v, want the aside answer and two tells", page)
+	}
+	told := map[uint64]bool{}
+	for _, e := range crewTells(t, y) {
+		if got := Reason(e, "yardmaster"); got != ReasonAnswered {
+			t.Fatalf("the asker heard %q, want %q", got, ReasonAnswered)
+		}
+		if got := e.Data["kind"]; got != "crew" {
+			t.Errorf("the tell names kind %v, want crew", got)
+		}
+		if got := e.Data["name"]; got != "yardmaster" {
+			t.Errorf("the tell names name %v, want yardmaster", got)
+		}
+		if got := e.Data["seen"]; got != "crew yardmaster" {
+			t.Errorf("the tell names digest %v, want crew yardmaster", got)
+		}
+		if _, has := e.Data["source"]; has {
+			t.Errorf("the crew tell names a source: %v", e.Data)
+		}
+		seq := toldSeq(e)
+		told[seq] = true
+		line, _ := e.Data["answer"].(string)
+		for _, want := range []string{y.bead, fmt.Sprint(seq), "yardmaster", "crew yardmaster"} {
+			if !strings.Contains(line, want) {
+				t.Errorf("the line has no %q:\n%s", want, line)
+			}
+		}
+	}
+	if !told[open] || !told[aside] {
+		t.Fatalf("the tells name %v, want the open ask %d and the aside ask %d", told, open, aside)
+	}
+	// A second change while the asks stand tells nothing more.
+	y.crew(t, map[string]any{"kind": "claude", "args": []string{"--safer"}})
+	if got := crewTells(t, y); len(got) != 2 {
+		t.Fatalf("the bead holds %d tells after a second change, want the two", len(got))
+	}
+	// The open ask is indeed stale: its approval is refused, running nothing.
+	if _, err := y.ApproveAsk(y.ctx, y.bead, open, "mckean", true, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving the stale ask = %v, want a refusal that ran nothing", err)
+	}
+	// Taken back and asked again, the new ask is covered.
+	if err := y.TakeBackAsk(y.ctx, y.bead, open, "asking again", "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	again := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "yardmaster")
+	y.crew(t, map[string]any{"kind": "claude", "args": []string{"--safe"}})
+	if got := crewTells(t, y); len(got) != 3 || toldSeq(got[2]) != again {
+		t.Fatalf("the bead holds %v after the re-ask changed, want a third tell of ask %d", got, again)
+	}
+	// A fresh ask taken back before the next change is not told of it.
+	gone := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "yardmaster")
+	if err := y.TakeBackAsk(y.ctx, y.bead, gone, "no longer wanted", "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	y.crew(t, map[string]any{"kind": "claude", "args": []string{"--safer"}})
+	if got := crewTells(t, y); len(got) != 3 {
+		t.Fatalf("the bead holds %d tells after the taken-back ask's change, want the three", len(got))
+	}
+}
+
+// A user who asked about a crew member is told in its notifications, with
+// the same line; the crew member who did not ask hears nothing.
+func TestCrewChangeTellsUserAskerOfStaleRunAsk(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	seq := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "ada")
+	y.crew(t, map[string]any{"kind": "claude", "args": []string{"--safe"}})
+	var found bool
+	for _, e := range crewTells(t, y) {
+		if Notified(e, "ada") != ReasonAnswered {
+			continue
+		}
+		found = true
+		line, _ := e.Data["answer"].(string)
+		for _, want := range []string{y.bead, fmt.Sprint(seq), "yardmaster"} {
+			if !strings.Contains(line, want) {
+				t.Errorf("the line has no %q:\n%s", want, line)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("ada was not told")
+	}
+	page, err := y.Store.UserNotifications(y.ctx, "ada", 0, "ada")
+	if err != nil || page.Unread != 1 {
+		t.Fatalf("ada's notifications = %+v, %v, want one unread", page, err)
+	}
+	text := page.Notifications[0].Text
+	for _, want := range []string{y.bead, fmt.Sprint(seq), "yardmaster"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the notification has no %q:\n%s", want, text)
+		}
+	}
+	if page, err := y.Store.Inbox(y.ctx, "yardmaster", 0); err != nil || page.Total != 0 {
+		t.Fatalf("the yardmaster's inbox = %+v, %v, want empty", page, err)
+	}
+}
+
+// A crew write tells only the holds whose own reading of the member it
+// moved: an identity change tells an identity hold and leaves crew set
+// and grant holds standing; the crew set approval's own write then tells
+// the other crew set hold and not the ask it approves.
+func TestCrewWriteTellsOnlyTheHoldsWhoseReadingMoved(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	if err := y.SetIdentity(y.ctx, "yardmaster", "crm", Identity{ID: "u1"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	setHold := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "yardmaster")
+	grantHold := y.ask(t, listAsk("mckean", "source", "grant", "crm", "read", "--crew=yardmaster"), "yardmaster")
+	identityHold := y.ask(t, listAsk("mckean", "crew", "identity", "yardmaster", "--source", "crm", "--id", "u2"), "yardmaster")
+	second := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=accept-edits"), "yardmaster")
+	if err := y.SetIdentity(y.ctx, "yardmaster", "crm", Identity{ID: "u9"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var setTold, grantTold, identityTold, secondTold bool
+	for _, e := range crewTells(t, y) {
+		setTold = setTold || toldSeq(e) == setHold
+		grantTold = grantTold || toldSeq(e) == grantHold
+		identityTold = identityTold || toldSeq(e) == identityHold
+		secondTold = secondTold || toldSeq(e) == second
+		if toldSeq(e) == identityHold && e.Data["seen"] != "crew yardmaster" {
+			t.Errorf("the identity tell names %v, want crew yardmaster", e.Data["seen"])
+		}
+	}
+	if setTold || grantTold || !identityTold || secondTold {
+		t.Fatalf("the identity write told set %v, grant %v, identity %v and second %v, want the identity hold alone", setTold, grantTold, identityTold, secondTold)
+	}
+	// The standing grant hold still approves, and the standing crew set
+	// hold approves to the member its card shows.
+	if _, err := y.ApproveAsk(y.ctx, y.bead, grantHold, "mckean", false, nil); err != nil {
+		t.Fatalf("approving the standing grant hold: %v", err)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, setHold, "mckean", true, nil); err != nil {
+		t.Fatalf("approving the standing crew set hold: %v", err)
+	}
+	// The approval's own member write answers the crew set hold; it must
+	// not also tell the asker that the hold it just approved went stale,
+	// while the other crew set hold is told.
+	var selfTold bool
+	secondTold = false
+	for _, e := range crewTells(t, y) {
+		selfTold = selfTold || toldSeq(e) == setHold
+		secondTold = secondTold || toldSeq(e) == second
+	}
+	if selfTold || !secondTold {
+		t.Fatalf("the approval told itself %v and the other hold %v, want the other alone", selfTold, secondTold)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, second, "mckean", true, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving the told crew set hold = %v, want a refusal that ran nothing", err)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, identityHold, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving the told identity hold = %v, want a refusal that ran nothing", err)
+	}
+	// Changing model alone tells a crew set hold that sets model and leaves
+	// one setting preset alone standing (the card's four combinations).
+	presetOnly := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=accept-edits"), "yardmaster")
+	withModel := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "model=opus", "preset=accept-edits"), "yardmaster")
+	cur, err := y.GetCrew(y.ctx, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cur.Config["model"] = "sonnet"
+	if _, err := y.PutCrew(y.ctx, *cur, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var presetTold, modelTold bool
+	for _, e := range crewTells(t, y) {
+		presetTold = presetTold || toldSeq(e) == presetOnly
+		modelTold = modelTold || toldSeq(e) == withModel
+	}
+	if presetTold || !modelTold {
+		t.Fatalf("the model write told preset %v and model %v, want the model hold alone", presetTold, modelTold)
+	}
+}
+
+// Adding a crew member where none stood tells a hold written against its
+// absence, and removing a member tells a fresh hold of it.
+func TestCrewAbsentCreateAndDeleteTellAsker(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	pending := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "yardmaster")
+	// A hold against the new member's absence, as no card files one today:
+	// its Seen is rewritten to the absence the nil rule names, so the
+	// creation's tell has a hold to reach.
+	err := y.write(func(w *wtx) error {
+		row, err := w.loadBead(y.bead)
+		if err != nil {
+			return err
+		}
+		var n Note
+		if ok, err := get(w.Tx, bNotes, join(row.UUID, seqKey(pending)), &n); err != nil || !ok {
+			if err == nil {
+				err = fmt.Errorf("no note %d", pending)
+			}
+			return err
+		}
+		ask, err := ParseAsk(n)
+		if err != nil {
+			return err
+		}
+		ask.Run.Seen = map[string]string{"crew newhire": seen("no crew", "newhire")}
+		text, err := json.Marshal(ask)
+		if err != nil {
+			return err
+		}
+		n.Text = string(text)
+		return put(w.Tx, bNotes, join(row.UUID, seqKey(pending)), n)
+	})
+	if err != nil {
+		t.Fatalf("rewriting the absence hold: %v", err)
+	}
+	if _, err := y.PutCrew(y.ctx, CrewMember{Name: "newhire", Runner: "herdr", Dir: "/yard", Config: map[string]any{"kind": "claude"}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := crewTells(t, y); len(got) != 1 || toldSeq(got[0]) != pending || got[0].Data["name"] != "newhire" || got[0].Data["seen"] != "crew newhire" {
+		t.Fatalf("the absent-create tells = %v, want one of ask %d for newhire", got, pending)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, pending, "mckean", true, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving the told hold = %v, want a refusal that ran nothing", err)
+	}
+	// Removing the member tells both a fresh grant hold and an open identity
+	// hold for a source where the member held no identity yet. Done from a
+	// crew pane with a spoofed actor, the tell records the pane's resolved
+	// actor, matching crew_deleted.
+	fresh := y.ask(t, listAsk("mckean", "source", "grant", "crm", "read", "--crew=newhire"), "yardmaster")
+	noID := y.ask(t, listAsk("mckean", "crew", "identity", "newhire", "--source", "crm", "--id", "u1"), "ada")
+	if err := y.CrewStarted(y.ctx, "yardmaster", map[string]any{"shell_pid": os.Getpid()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.DeleteCrew(WithCaller(y.ctx, os.Getpid()), "newhire", "", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var freshTold, noIDTold int
+	for _, e := range crewTells(t, y) {
+		if e.Data["name"] != "newhire" {
+			continue
+		}
+		if toldSeq(e) == fresh {
+			freshTold++
+			if e.Actor != "yardmaster" {
+				t.Errorf("the removal tell actor = %q, want resolved pane actor yardmaster", e.Actor)
+			}
+		}
+		if toldSeq(e) == noID {
+			noIDTold++
+			if e.Actor != "yardmaster" {
+				t.Errorf("the no-identity removal tell actor = %q, want resolved pane actor yardmaster", e.Actor)
+			}
+			if Notified(e, "ada") != ReasonAnswered {
+				t.Errorf("ada was not notified of the no-identity removal tell: %v", e.Data)
+			}
+		}
+	}
+	if freshTold != 1 || noIDTold != 1 {
+		t.Fatalf("the removal told grant %d times and no-identity %d times, want once each", freshTold, noIDTold)
+	}
+}
+
+// Renaming or removing a peer tells the grant holds of the crew members
+// that may mail it, whose config whole names the peer, through the rename
+// or removal that rewrote them; a crew set hold, whose reading names none
+// of it, is not told.
+func TestPeerRenameTellsCrewGrantHold(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	y.crew(t, map[string]any{"kind": "claude", "args": []string{"--careful"}, "peers": "airy"})
+	grant := y.ask(t, listAsk("mckean", "source", "grant", "crm", "read", "--crew=yardmaster"), "yardmaster")
+	set := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "yardmaster")
+	if _, err := y.RenamePeer(y.ctx, "airy", "east", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var grantTold, setTold bool
+	for _, e := range crewTells(t, y) {
+		if e.Data["kind"] != "crew" {
+			continue
+		}
+		grantTold = grantTold || toldSeq(e) == grant
+		setTold = setTold || toldSeq(e) == set
+		if toldSeq(e) == grant && e.Data["seen"] != "crew yardmaster" {
+			t.Errorf("the rename's crew tell names %v, want crew yardmaster", e.Data["seen"])
+		}
+	}
+	if !grantTold || setTold {
+		t.Fatalf("the peer rename told grant %v and set %v, want the grant alone", grantTold, setTold)
+	}
+	// Removing the renamed peer drops it from the member's config and tells
+	// a fresh grant hold alone too.
+	grant2 := y.ask(t, listAsk("mckean", "source", "grant", "crm", "read", "--crew=yardmaster"), "yardmaster")
+	set2 := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=accept-edits"), "yardmaster")
+	if err := y.DeletePeer(y.ctx, "east", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var grant2Told, set2Told bool
+	for _, e := range crewTells(t, y) {
+		if e.Data["kind"] != "crew" {
+			continue
+		}
+		grant2Told = grant2Told || toldSeq(e) == grant2
+		set2Told = set2Told || toldSeq(e) == set2
+	}
+	if !grant2Told || set2Told {
+		t.Fatalf("the peer removal told grant %v and set %v, want the grant alone", grant2Told, set2Told)
+	}
+}
+
+// Moving a source's records tells a grant hold of a member whose grants
+// the fold rewrote, from the config whole it read. An identity the fold
+// moves stands under its new source with the fingerprint the hold
+// already carries, so no set crossing tells the identity hold, whose
+// approval the card's own re-reading still refuses; a crew set hold,
+// whose reading names neither, is not told.
+func TestSourceMoveTellsCrewGrantHold(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	if err := y.SetIdentity(y.ctx, "yardmaster", "crm", Identity{ID: "u1"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y.crew(t, map[string]any{"kind": "claude", "args": []string{"--careful"}, "open_threads": "crm"})
+	grantHold := y.ask(t, listAsk("mckean", "source", "grant", "crm", "read", "--crew=yardmaster"), "yardmaster")
+	identityHold := y.ask(t, listAsk("mckean", "crew", "identity", "yardmaster", "--source", "crm", "--id", "u2"), "yardmaster")
+	setHold := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "yardmaster")
+	if _, err := y.PutSource(y.ctx, "chat.yaml", strings.Replace(runCRM, "name: crm", "name: chat", 1), "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.MoveSourceRecords(y.ctx, "crm", "chat", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var grantTold, identityTold, setTold bool
+	for _, e := range crewTells(t, y) {
+		grantTold = grantTold || toldSeq(e) == grantHold
+		identityTold = identityTold || toldSeq(e) == identityHold
+		setTold = setTold || toldSeq(e) == setHold
+	}
+	if !grantTold || identityTold || setTold {
+		t.Fatalf("the record move told grant %v, identity %v and set %v, want the grant hold alone", grantTold, identityTold, setTold)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, grantHold, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving the told grant hold = %v, want a refusal that ran nothing", err)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, identityHold, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving the moved identity hold = %v, want a refusal that ran nothing", err)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, setHold, "mckean", true, nil); err != nil {
+		t.Fatalf("approving the standing crew set hold: %v", err)
+	}
+}
+
+// Session, subscription and group-rename writes never tell a crew hold:
+// a restart writes the session's runtime alone, enabling writes nothing
+// a reading names, subscriptions are read by no crew fingerprint, and a
+// group rename moves only a member's subscriptions. A restart hold is
+// never told either: its session keys are no crew tell's business.
+func TestSessionSubscriptionAndRenameWritesNeverTellCrewHold(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	setHold := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "yardmaster")
+	addAsk := listAsk("mckean", "crew", "add", "porter", "kind=claude", "preset=bypass")
+	addAsk.Run.Role = "You are the porter.\n"
+	addHold := y.ask(t, addAsk, "yardmaster")
+	restart := y.ask(t, listAsk("mckean", "crew", "restart", "yardmaster"), "ada")
+	restart2 := y.ask(t, listAsk("mckean", "crew", "restart", "yardmaster"), "ada")
+	if _, err := y.ApproveAsk(y.ctx, y.bead, restart, "mckean", false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.SetCrewEnabled(y.ctx, "yardmaster", false, "", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.SetCrewEnabled(y.ctx, "yardmaster", true, "", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	sub := Subscription{Source: SourceYardr, Scope: ScopeAll, Where: map[string]string{"group": "builders"}}
+	if err := y.AddSubscriptionKind(y.ctx, "yardmaster", "crew", sub, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.RenameGroup(y.ctx, "builders", "makers", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := crewTells(t, y); len(got) != 0 {
+		t.Fatalf("session, subscription or rename writes told the holds: %v", got)
+	}
+	// The crew hold still approves, and its own write tells neither the
+	// restart hold nor the crew add preset hold: those keys stand apart from
+	// a member's definition.
+	if _, err := y.ApproveAsk(y.ctx, y.bead, setHold, "mckean", true, nil); err != nil {
+		t.Fatalf("approving after the session and rename writes: %v", err)
+	}
+	for _, e := range crewTells(t, y) {
+		if toldSeq(e) == restart2 || toldSeq(e) == addHold {
+			t.Fatalf("a definition write told a non-member hold: %v", e.Data)
+		}
+	}
+	if got := crewTells(t, y); len(got) != 0 {
+		t.Fatalf("the crew set approval told a hold: %v", got)
+	}
+}
+
+// Allowing a member to open threads and taking a served user out of its
+// config each tell a grant hold of the member, whose reading is its
+// config whole.
+func TestAllowOpeningAndDropLoginTellCrewHold(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	grant := y.ask(t, listAsk("mckean", "source", "grant", "crm", "read", "--crew=yardmaster"), "yardmaster")
+	if _, err := y.AllowOpening(y.ctx, "yardmaster", []string{"crm"}, "", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := crewTells(t, y); len(got) != 1 || toldSeq(got[0]) != grant {
+		t.Fatalf("allowing opening told %v, want one tell of ask %d", got, grant)
+	}
+	// The member serves ada, and removing ada unserves her in the write
+	// that removes the user: a fresh grant hold is told of it.
+	def, err := y.GetCrew(y.ctx, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	def.Config["for"] = "ada"
+	def.Config["env_for_ada"] = "/yard/ada.env"
+	if _, err := y.PutCrew(y.ctx, *def, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	fresh := y.ask(t, listAsk("mckean", "source", "grant", "crm", "read", "--crew=yardmaster"), "yardmaster")
+	if err := y.DeleteUser(y.ctx, "ada", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	got := crewTells(t, y)
+	if len(got) != 2 || toldSeq(got[1]) != fresh {
+		t.Fatalf("the user removal's tells = %v, want a second tell of ask %d", got, fresh)
 	}
 }

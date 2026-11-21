@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,26 @@ import (
 // crew.go for one session; the sibling calls it with "". A user with no
 // conversation (unserved, or no env_for_ key) is refused: its mail falls
 // back to the line slice.
+
+// checkCrewTiming holds a member's session-lifetime settings to their
+// shapes, as putCrew saves them: the most a session may live and the
+// grace of its handoffs are durations, and the context handoff a
+// percentage.
+func checkCrewTiming(r CrewMember) error {
+	for _, d := range []string{r.MaxAge, r.HandoffGrace} {
+		if d != "" {
+			if _, err := time.ParseDuration(d); err != nil {
+				return fmt.Errorf("duration %q: %w", d, err)
+			}
+		}
+	}
+	if r.ContextHandoff != "" {
+		if n, err := strconv.Atoi(r.ContextHandoff); err != nil || n < 0 || n > 100 {
+			return fmt.Errorf("context_handoff %q: want a percentage 0..100", r.ContextHandoff)
+		}
+	}
+	return nil
+}
 
 // changeCrewSessionAt is changeCrewAt for one session: fn sees the member
 // and the session's runtime state, and what it changes is stored under a
