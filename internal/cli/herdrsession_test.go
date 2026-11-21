@@ -54,6 +54,8 @@ func TestDoctorNamesTheHerdrSession(t *testing.T) {
 	if _, err := run(t, a().rootCmd(), "init", "--harness", "claude"); err != nil {
 		t.Fatal(err)
 	}
+	// The gated runs act as the operator init named, not the OS user.
+	op := testOperator(t, st)
 	herdr := filepath.Join(tools, "herdr")
 	sock := func(name string) string { return filepath.Join(dir, "herdr", "sessions", name, "herdr.sock") }
 
@@ -65,7 +67,7 @@ func TestDoctorNamesTheHerdrSession(t *testing.T) {
 		"Start it: run herdr in a terminal",
 		"; session other, socket "+sock("other")+" (this shell's, since the yard's herdr_session setting is unset)")
 
-	if _, err := run(t, a().rootCmd(), "settings", "set", "herdr_session", "gc"); err != nil {
+	if _, err := run(t, a().rootCmd(), "settings", "set", "herdr_session", "gc", "--actor", op); err != nil {
 		t.Fatal(err)
 	}
 	out, _ = run(t, a().rootCmd(), "doctor")
@@ -80,7 +82,7 @@ func TestDoctorNamesTheHerdrSession(t *testing.T) {
 		}
 	}
 
-	if _, err := run(t, a().rootCmd(), "settings", "set", "herdr_session", "nope"); err != nil {
+	if _, err := run(t, a().rootCmd(), "settings", "set", "herdr_session", "nope", "--actor", op); err != nil {
 		t.Fatal(err)
 	}
 	out, err = run(t, a().rootCmd(), "doctor")
@@ -171,7 +173,10 @@ func TestDaemonServiceReachesTheHerdrSessionSet(t *testing.T) {
 	if _, err := run(t, a().rootCmd(), "init", "--harness", "claude"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run(t, a().rootCmd(), "settings", "set", "herdr_session", "gc"); err != nil {
+
+	// The gated runs act as the operator init named, not the OS user.
+	op := testOperator(t, st)
+	if _, err := run(t, a().rootCmd(), "settings", "set", "herdr_session", "gc", "--actor", op); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := run(t, a().rootCmd(), "daemon", "install"); err != nil {

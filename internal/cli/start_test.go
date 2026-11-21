@@ -124,11 +124,9 @@ func TestOnboardingStartsTheYard(t *testing.T) {
 	if len(*focused) != 0 || !slices.Equal(*chats, []string{"yardmaster, expecting yardmaster"}) {
 		t.Fatalf("focused %v, chats %v\n%s", *focused, *chats, out)
 	}
-	actor, aerr := config.ActorWith(os.Getenv)
-	if aerr != nil {
-		t.Fatal(aerr)
-	}
-	if r, err := st.GetCrew(context.Background(), "yardmaster"); err != nil || runner.Greets(*r) != "" || r.Config[runner.GreetKey] != actor {
+	// The yardmaster greets the operator the onboarding named, whoever
+	// the login is: the form takes who the run acts as.
+	if r, err := st.GetCrew(context.Background(), "yardmaster"); err != nil || runner.Greets(*r) != "" || r.Config[runner.GreetKey] != testOperator(t, st) {
 		t.Fatalf("the yardmaster, once started, greets %q again (config %v): %v", runner.Greets(*r), r.Config, err)
 	}
 }

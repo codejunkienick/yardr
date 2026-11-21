@@ -1337,7 +1337,10 @@ func TestPackApplyKeepsWhatTheYardChangedUntilTaken(t *testing.T) {
 	if _, err := a.st.PutFlow(ctx, *flow, "me"); err != nil {
 		t.Fatal(err)
 	}
-	out, err = run(t, a.rootCmd(), append([]string{"pack"}, append(slices.Clone(args), "--yes", "--json")...)...)
+	// Through the root the run takes --actor: the app's own actor is for
+	// its pack commands alone, and without the flag the run acts as the
+	// OS user instead of the operator the yard imported as.
+	out, err = run(t, a.rootCmd(), append([]string{"pack"}, append(slices.Clone(args), "--yes", "--json", "--actor", testOperator(t, a.st))...)...)
 	var data struct {
 		Result struct {
 			Kept []string `json:"kept"`

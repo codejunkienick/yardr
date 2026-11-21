@@ -103,7 +103,11 @@ func (b *blocked) asked() int {
 func TestInitStartOffersTheYardmastersPane(t *testing.T) {
 	b := blockedYardmaster(t, paneOpen)
 	b.logsIn = true
-	out, err := b.start()
+	// The run inits the yard itself, so the operator is pinned to the
+	// name the run acts as: left to default from $USER, the run would
+	// act as the OS user instead, who is no user of the yard.
+	op := testOperator(t, b.st)
+	out, err := b.start("--operator", op, "--actor", op)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -239,7 +243,10 @@ func TestInitStartInHerdrShowsThePane(t *testing.T) {
 	// run, and the process for openYardmaster, which reads it there.
 	yardEnv(t, b.st)["HERDR_ENV"] = "1"
 	t.Setenv("HERDR_ENV", "1")
-	out, err := b.start()
+	// The run inits the yard itself, so the operator is pinned to the
+	// name the run acts as, as above.
+	op := testOperator(t, b.st)
+	out, err := b.start("--operator", op, "--actor", op)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}

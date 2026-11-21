@@ -158,6 +158,8 @@ func TestStartAndInstallTakeThePagesFlags(t *testing.T) {
 	if _, err := run(t, a().rootCmd(), "init", "--harness", "claude"); err != nil {
 		t.Fatal(err)
 	}
+	// The gated runs act as the operator init named, not the OS user.
+	op := testOperator(t, st)
 	var started [][]string
 	stub(t, &spawn, func(_ []string, _ *config.Config, k *longRunning, args []string) (int, <-chan error, func() error, error) {
 		started = append(started, append(k.command(), args...))
@@ -232,10 +234,10 @@ func TestStartAndInstallTakeThePagesFlags(t *testing.T) {
 	// The yard's settings resolve in the serve a start starts: a start
 	// hands on no pages flag for them, but refuses what they resolve
 	// to when it is refused.
-	if _, err := run(t, a().rootCmd(), "settings", "set", "web_pages_addr", "127.0.0.1:9100"); err != nil {
+	if _, err := run(t, a().rootCmd(), "settings", "set", "web_pages_addr", "127.0.0.1:9100", "--actor", op); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run(t, a().rootCmd(), "settings", "set", "web_pages_host", "pages.example.net"); err != nil {
+	if _, err := run(t, a().rootCmd(), "settings", "set", "web_pages_host", "pages.example.net", "--actor", op); err != nil {
 		t.Fatal(err)
 	}
 	starts(nil, []string{"web", "serve", "--addr", "127.0.0.1:8791"})
@@ -276,6 +278,9 @@ func TestPagesSettingsAreCheckedAsTheFlags(t *testing.T) {
 	if _, err := run(t, a().rootCmd(), "init", "--harness", "claude"); err != nil {
 		t.Fatal(err)
 	}
+	// The gated runs act as the operator init named, so a refusal is
+	// the value's, not the actor's.
+	op := testOperator(t, st)
 	stubWeb(t)
 	for _, addr := range []string{"0.0.0.0:8789", ":8789", "192.168.1.5:8789", "example.net:8789", "8789"} {
 		flag := web.CheckAddr("--pages-addr", addr, false)
@@ -285,12 +290,12 @@ func TestPagesSettingsAreCheckedAsTheFlags(t *testing.T) {
 		if _, err := run(t, a().rootCmd(), "web", "start", "--pages-addr", addr); err == nil || !strings.Contains(err.Error(), flag.Error()) {
 			t.Fatalf("web start --pages-addr %s = %v", addr, err)
 		}
-		if _, err := run(t, a().rootCmd(), "settings", "set", "web_pages_addr", addr); err == nil || !strings.Contains(err.Error(), flag.Error()) {
+		if _, err := run(t, a().rootCmd(), "settings", "set", "web_pages_addr", addr, "--actor", op); err == nil || !strings.Contains(err.Error(), flag.Error()) {
 			t.Errorf("settings set web_pages_addr %s = %v, want the flag's: %v", addr, err, flag)
 		}
 	}
 	for _, addr := range []string{"127.0.0.1:9100", "[::1]:9100", "localhost:9100"} {
-		if _, err := run(t, a().rootCmd(), "settings", "set", "web_pages_addr", addr); err != nil {
+		if _, err := run(t, a().rootCmd(), "settings", "set", "web_pages_addr", addr, "--actor", op); err != nil {
 			t.Errorf("settings set web_pages_addr %s: %v", addr, err)
 		}
 	}
@@ -302,11 +307,11 @@ func TestPagesSettingsAreCheckedAsTheFlags(t *testing.T) {
 		if _, err := run(t, a().rootCmd(), "web", "start", "--pages-host", host); err == nil || !strings.Contains(err.Error(), flag.Error()) {
 			t.Fatalf("web start --pages-host %s = %v", host, err)
 		}
-		if _, err := run(t, a().rootCmd(), "settings", "set", "web_pages_host", host); err == nil || !strings.Contains(err.Error(), flag.Error()) {
+		if _, err := run(t, a().rootCmd(), "settings", "set", "web_pages_host", host, "--actor", op); err == nil || !strings.Contains(err.Error(), flag.Error()) {
 			t.Errorf("settings set web_pages_host %s = %v, want the flag's: %v", host, err, flag)
 		}
 	}
-	if _, err := run(t, a().rootCmd(), "settings", "set", "web_pages_host", "Pages.Example."); err != nil {
+	if _, err := run(t, a().rootCmd(), "settings", "set", "web_pages_host", "Pages.Example.", "--actor", op); err != nil {
 		t.Errorf("settings set web_pages_host Pages.Example.: %v", err)
 	}
 }

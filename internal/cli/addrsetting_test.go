@@ -38,6 +38,10 @@ func TestStartAndInstallTakeTheAddrSetting(t *testing.T) {
 	if _, err := run(t, a().rootCmd(), "init", "--harness", "claude"); err != nil {
 		t.Fatal(err)
 	}
+	// The gated runs act as the operator init named: a run without
+	// --actor acts as the OS user instead, which is another user where
+	// $USER names one (USER=runner over mckean).
+	op := testOperator(t, st)
 	var started [][]string
 	stub(t, &spawn, func(_ []string, _ *config.Config, k *longRunning, args []string) (int, <-chan error, func() error, error) {
 		started = append(started, append(k.command(), args...))
@@ -78,7 +82,7 @@ func TestStartAndInstallTakeTheAddrSetting(t *testing.T) {
 		starts(nil, c.def)
 		installs(nil, c.def)
 
-		out, err := run(t, a().rootCmd(), "settings", "set", c.key, c.set)
+		out, err := run(t, a().rootCmd(), "settings", "set", c.key, c.set, "--actor", op)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,7 +119,7 @@ func TestStartAndInstallTakeTheAddrSetting(t *testing.T) {
 		}
 		// With no service there is none to speak of, and unset is the
 		// default again.
-		out, err = run(t, a().rootCmd(), "settings", "set", c.key, "")
+		out, err = run(t, a().rootCmd(), "settings", "set", c.key, "", "--actor", op)
 		if err != nil || strings.Contains(out, "login service") {
 			t.Fatalf("%v\n%s", err, out)
 		}
@@ -137,6 +141,9 @@ func TestAddrSettingsAreCheckedAsTheFlag(t *testing.T) {
 	if _, err := run(t, a().rootCmd(), "init", "--harness", "claude"); err != nil {
 		t.Fatal(err)
 	}
+	// The gated runs act as the operator init named, so a refusal is
+	// the value's, not the actor's.
+	op := testOperator(t, st)
 	stubWeb(t)
 	for _, addr := range []string{"0.0.0.0:8791", ":8791", "192.168.1.5:8791", "example.net:8791", "8791"} {
 		flag := web.CheckAddr("--addr", addr, false)
@@ -146,12 +153,12 @@ func TestAddrSettingsAreCheckedAsTheFlag(t *testing.T) {
 		if _, err := run(t, a().rootCmd(), "web", "start", "--addr", addr); err == nil || !strings.Contains(err.Error(), flag.Error()) {
 			t.Fatalf("web start --addr %s = %v", addr, err)
 		}
-		if _, err := run(t, a().rootCmd(), "settings", "set", "web_addr", addr); err == nil || !strings.Contains(err.Error(), flag.Error()) {
+		if _, err := run(t, a().rootCmd(), "settings", "set", "web_addr", addr, "--actor", op); err == nil || !strings.Contains(err.Error(), flag.Error()) {
 			t.Errorf("settings set web_addr %s = %v, want the flag's: %v", addr, err, flag)
 		}
 	}
 	for _, addr := range []string{"127.0.0.1:9100", "[::1]:9100", "localhost:9100"} {
-		if _, err := run(t, a().rootCmd(), "settings", "set", "web_addr", addr); err != nil {
+		if _, err := run(t, a().rootCmd(), "settings", "set", "web_addr", addr, "--actor", op); err != nil {
 			t.Errorf("settings set web_addr %s: %v", addr, err)
 		}
 	}
@@ -167,12 +174,12 @@ func TestAddrSettingsAreCheckedAsTheFlag(t *testing.T) {
 		if flag == nil {
 			t.Fatalf("--addr %s is taken", addr)
 		}
-		if _, err := run(t, a().rootCmd(), "settings", "set", "bdp_addr", addr); err == nil || !strings.Contains(err.Error(), flag.Error()) {
+		if _, err := run(t, a().rootCmd(), "settings", "set", "bdp_addr", addr, "--actor", op); err == nil || !strings.Contains(err.Error(), flag.Error()) {
 			t.Errorf("settings set bdp_addr %s = %v, want the flag's: %v", addr, err, flag)
 		}
 	}
 	for _, addr := range []string{"127.0.0.1:9100", "[::1]:9100", "localhost:9100"} {
-		if _, err := run(t, a().rootCmd(), "settings", "set", "bdp_addr", addr); err != nil {
+		if _, err := run(t, a().rootCmd(), "settings", "set", "bdp_addr", addr, "--actor", op); err != nil {
 			t.Errorf("settings set bdp_addr %s: %v", addr, err)
 		}
 	}

@@ -705,7 +705,9 @@ func TestSetupOffersTheLink(t *testing.T) {
 	// that has a peer.
 	f := &former{t: t, answers: map[string]any{}}
 	stubAsk(t, f.ask)
-	a := &app{st: st}
+	// The link is offered to the operator, so the runs act as them.
+	op := testOperator(t, st)
+	a := &app{st: st, actor: op}
 	cfg := &config.Config{Home: home}
 	for i := 0; i < 2; i++ {
 		if err := a.offerLink(io.Discard, io.Discard, context.Background(), cfg); err != nil {
@@ -723,7 +725,7 @@ func TestSetupOffersTheLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.asked = nil
-	if err := (&app{st: st}).offerLink(io.Discard, io.Discard, context.Background(), cfg); err != nil || len(f.asked) != 0 {
+	if err := (&app{st: st, actor: op}).offerLink(io.Discard, io.Discard, context.Background(), cfg); err != nil || len(f.asked) != 0 {
 		t.Fatalf("a yard with a peer is asked %q, %v", f.asked, err)
 	}
 }

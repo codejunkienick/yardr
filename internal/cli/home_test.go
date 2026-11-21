@@ -428,9 +428,13 @@ func TestHookAddNamesTheEdgeWhereTheLinkServesAlone(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("s\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	a.cfg = cfg
-	a.actor = yardOperator(ctx, st)
-	out, err := run(t, a.hookCmd(), "add", "gh", "--source", "github", "--secret-file", secret)
+	// A new app for the hook run, as the operator: the init run above
+	// resolved this one's actor already, and the hook is the operator's
+	// to add.
+	b := appOn(st)
+	b.cfg = cfg
+	b.actor = testOperator(t, st)
+	out, err := run(t, b.hookCmd(), "add", "gh", "--source", "github", "--secret-file", secret)
 	if err != nil {
 		t.Fatal(err)
 	}
