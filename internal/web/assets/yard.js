@@ -20,6 +20,11 @@
 //
 // The talk page's letters are grouped by the reader's day and clock, which
 // the browser sets over the whole pane (groupLetters, below).
+//
+// The line's ask cards stand folded, and the line is read again at every
+// event of the yard, which would fold a card under the person reading it:
+// a card that was opened is opened again after each swap (reopenAsks, at
+// the end).
 document.addEventListener("keydown", function (event) {
   if (event.key !== "Enter" || event.shiftKey || event.altKey) return;
   // An Enter that confirms what an input method is composing is the
@@ -112,3 +117,25 @@ function groupLetters() {
 }
 groupLetters();
 document.addEventListener("htmx:afterSwap", groupLetters);
+
+// The line's ask cards that stand open, by the id their details carries
+// (ask-<bead>-<ask>). The toggle event does not bubble, so the document
+// hears it in the capture phase. A swap puts closed cards in place of the
+// line's; each one that was open is opened again, and one whose ask is
+// gone is forgotten.
+var openAsks = {};
+document.addEventListener("toggle", function (event) {
+  var card = event.target;
+  if (!(card instanceof HTMLDetailsElement) || !card.classList.contains("wait-ask") || !card.id) return;
+  if (card.open) openAsks[card.id] = true;
+  else delete openAsks[card.id];
+}, true);
+
+function reopenAsks() {
+  Object.keys(openAsks).forEach(function (id) {
+    var card = document.getElementById(id);
+    if (card) card.open = true;
+    else delete openAsks[id];
+  });
+}
+document.addEventListener("htmx:afterSwap", reopenAsks);

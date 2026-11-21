@@ -7,11 +7,19 @@
     <p class="wait-title">{{.Title}}</p>
     {{- range .Why}}
     {{- /* An ask stands whole in the ask partial, as on its bead's page,
-           with its answer row where the view acts: the card opens with
-           the question, so the row says it once. Any other reason keeps
-           its one line and its note. */}}
+           with its answer row where the view acts. Any other reason
+           keeps its one line and its note. */}}
+    {{- /* The card stands folded under its question, so a line of many
+           waits reads as a list: the row is the bead, its title and the
+           question with its age, and the card opens under it. The script
+           keeps an opened card open when the line is read again
+           (yard.js). */}}
     {{- if eq .Kind "ask"}}
-    {{template "ask" ($w.Card .)}}
+    {{- $c := $w.Card .}}
+    <details class="wait-ask" id="ask-{{$c.Bead}}-{{$c.Ask}}">
+      <summary><span class="fold-closed">{{if $c.Weight}}<span class="weighty">WEIGHTY</span> · {{end}}{{$c.Question}}<span class="asked">asked {{$c.Age}}</span></span><span class="fold-open">Fold</span></summary>
+    {{template "ask" $c}}
+    </details>
     {{- else}}
     <p class="why{{if .Alarm}} held{{end}}">{{.Text}}</p>
     {{- if .Recommend}}

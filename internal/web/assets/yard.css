@@ -665,6 +665,18 @@ code { font: inherit; color: var(--dim); overflow-wrap: anywhere; }
 .wait .wait-title { color: var(--dim); font-family: var(--sans); }
 .wait .why { font-family: var(--sans); font-size: var(--small); }
 .wait .entry-note { margin-top: 4px; }
+/* A wait's ask folds under its question: closed, the row is one line with
+   the age at the right, as the card's own question line has it; open, the
+   card says the question itself and the summary only folds it again. The
+   row is clipped away, as a repeated sender is (.letter .who), never
+   display: none, so the summary's name keeps the question and several
+   open cards are told apart by a screen reader. */
+.wait-ask > summary { cursor: pointer; margin-top: 2px; font-family: var(--sans); font-size: var(--small); }
+.wait-ask > summary .fold-closed { display: inline-flex; justify-content: space-between; align-items: baseline; gap: 10px; width: calc(100% - 1.5em); vertical-align: top; overflow-wrap: anywhere; }
+.wait-ask > summary .asked { flex: 0 0 auto; color: var(--faint); white-space: nowrap; }
+.wait-ask > summary .fold-open { display: none; color: var(--faint); }
+.wait-ask[open] > summary .fold-closed { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.wait-ask[open] > summary .fold-open { display: inline; }
 /* Parked beads wait by design: the same rows, quieter. */
 .parked { color: var(--dim); }
 .state { color: var(--dim); }

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -250,10 +251,32 @@ func TestLineAskContext(t *testing.T) {
 			t.Errorf("/line lacks %q", want)
 		}
 	}
-	// The card opens with the question, so the row says it once, and the
-	// page keeps no aside to say the card again.
-	if n := strings.Count(text, "Move the links now?"); n != 1 {
-		t.Errorf("/line says the question %d times, want once", n)
+	// The card stands folded under its question with its age: the row a
+	// line of many waits is read by. The summary's question gives way to
+	// the card's own once it is open, and the page keeps no aside to say
+	// the card again.
+	fold := regexp.MustCompile(`<details class="wait-ask" id="ask-` + regexp.QuoteMeta(b.ID) + `-\d+"><summary><span class="fold-closed">Move the links now\?<span class="asked">asked [^<]+</span></span><span class="fold-open">Fold</span></summary>`)
+	if !fold.MatchString(text) {
+		t.Errorf("/line lacks the folded ask row:\n%s", text)
+	}
+	if strings.Contains(text, "<details class=\"wait-ask\" open") {
+		t.Error("/line opens an ask card nobody opened")
+	}
+	if n := strings.Count(text, "Move the links now?"); n != 2 {
+		t.Errorf("/line says the question %d times, want twice: the row and its card", n)
+	}
+	// An open card's row is clipped away, never display: none, so the
+	// summary's accessible name keeps the question and several open cards
+	// are told apart by a screen reader; the visible word stays Fold.
+	for _, rule := range []string{
+		".wait-ask[open] > summary .fold-closed { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }",
+		".wait-ask > summary .fold-open { display: none; color: var(--faint); }",
+	} {
+		css, err := os.ReadFile("assets/yard.css")
+		must(t, err)
+		if !strings.Contains(string(css), rule) {
+			t.Errorf("yard.css lacks %q", rule)
+		}
 	}
 	for _, foreign := range []string{"Recommended:", "Recommends", "to approve:"} {
 		if strings.Contains(text, foreign) {
