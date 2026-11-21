@@ -1659,25 +1659,17 @@ func (a *app) primeCrew(w io.Writer, ctx context.Context, st store.API, name, us
 	if len(calls) > 0 {
 		v["calls"] = calls
 	}
-	// The packs imported into the yard or a depot that carry setup notes,
-	// each once: the prime names them by the command that prints them, so
-	// the one who helps with a setup reads them first. Not the text
-	// itself: it is the pack's, and the prime stays bounded.
-	var setup []string
-	if recs, err := st.Packs(ctx); err != nil {
+	// The packs' setup notes are named by the command that prints
+	// them, the yardmaster's sections printed after its role alone.
+	setup, sections, err := primePacks(ctx, st, a.mailHome(), name == "yardmaster")
+	if err != nil {
 		return err
-	} else {
-		seen := map[string]bool{}
-		for _, r := range recs {
-			if r.Setup && !seen[r.Pack] {
-				seen[r.Pack] = true
-				setup = append(setup, r.Pack)
-			}
-		}
-		slices.Sort(setup)
 	}
 	if len(setup) > 0 {
 		v["setup"] = setup
+	}
+	if len(sections) > 0 {
+		v["sections"] = sections
 	}
 	notes := ""
 	for _, packName := range setup {
@@ -1694,6 +1686,7 @@ func (a *app) primeCrew(w io.Writer, ctx context.Context, st store.API, name, us
 		if role != "" {
 			fmt.Fprintf(w, "## Your role\n\n%s\n\n", role)
 		}
+		printPrimeSections(w, sections)
 		// After the role, so it reads after the lines it supersedes; a
 		// member with no role is told as well.
 		if noTerm != "" {
