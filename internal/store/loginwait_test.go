@@ -348,6 +348,25 @@ func TestGiveLoginHandsToTheWaiter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Under a fresh sign-in the handing records it, as a source's does.
+	if err := y.SetSetting(y.ctx, WebJWTPrivilegedSessionMaxAgeSetting, "15m", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	freshSeq := y.ask(t, loginAsk("claude-fresh1"), "yardmaster")
+	freshWaited := waitFor(t, y, "claude-fresh1", "")
+	if err := y.LoginWaitReady(y.ctx, "claude-fresh1"); err != nil {
+		t.Fatalf("waiting for the login to register: %v", err)
+	}
+	if _, err := y.GiveSecret(WithFreshWitness(y.ctx, "mckean", time.Now()), y.bead, freshSeq, map[string]string{"INPUT": "fresh-code"}, "mckean", true); err != nil {
+		t.Fatalf("giving the login input under a fresh sign-in: %v", err)
+	}
+	if got := <-freshWaited; got != "fresh-code" {
+		t.Fatalf("the waiter was handed %q", got)
+	}
+	if ev := lastAnswer(t, y); Witness(ev) != WitnessFreshSignIn || Via(ev) != "" {
+		t.Fatalf("the fresh login handing is witnessed %q via %q, want a fresh sign-in with no device", Witness(ev), Via(ev))
+	}
 }
 
 // A giving with no login waiting is refused naming that: no wait was ever

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"yardr.dev/yardr/internal/store"
 )
@@ -243,14 +244,25 @@ func (s *Server) beadAnswer(w http.ResponseWriter, r *http.Request, b *store.Bea
 // secret, and a name with no value, are refused with the page redrawn, and
 // neither refusal repeats a value that was sent.
 //
-// The page has no gate to put in front of a weighty card (every secret ask
+// Where the window holds no gate (everywhere but the hosted web), the
+// page has no gate to put in front of a weighty card (every secret ask
 // is one), so it says nothing of its person's having weighed it: the yard
 // refuses the giving in its own words, which the page shows, and the card
-// is given in a terminal as its line names.
+// is given where its line names. Where the window holds the gate, the
+// giving rides the fresh sign-in a strong card takes: at once where the
+// session's last authentication is already a fresh one by this operator
+// inside the window, else after the gateway authenticates now, the typed
+// values held in a secret challenge (secretPendingTTL) and given on the
+// return (handleFresh), never echoed on any error.
 func (s *Server) beadGiveSecret(w http.ResponseWriter, r *http.Request, b *store.Bead, ask store.BeadAsk) {
 	ctx := r.Context()
 	if ask.Secret == nil {
 		s.beadAgain(w, r, b.ID, fmt.Sprintf("ask %d asks for no secret: pick an option, answer with words, put it aside with Later, or decline it", ask.Ask))
+		return
+	}
+	gate := s.holdsGate(ctx)
+	if gate && !s.isOperator(ctx) {
+		s.beadAgain(w, r, b.ID, "only the operator can give a secret in the hosted web")
 		return
 	}
 	values := make(map[string]string, len(ask.Secret.Env))
@@ -261,11 +273,31 @@ func (s *Server) beadGiveSecret(w http.ResponseWriter, r *http.Request, b *store
 			return
 		}
 	}
-	if _, err := s.st.GiveSecret(ctx, b.ID, ask.Ask, values, s.acting(ctx), false); err != nil {
-		s.beadAgain(w, r, b.ID, err.Error())
+	if !gate {
+		if _, err := s.st.GiveSecret(ctx, b.ID, ask.Ask, values, s.acting(ctx), false); err != nil {
+			s.beadAgain(w, r, b.ID, err.Error())
+			return
+		}
+		http.Redirect(w, r, "/beads/"+url.PathEscape(b.ID), http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/beads/"+url.PathEscape(b.ID), http.StatusSeeOther)
+	user := s.acting(ctx)
+	if auth, since, ok := s.strongAuth(ctx, user); ok && s.freshSession(ctx, since) {
+		_, err := s.st.GiveSecret(store.WithFreshWitness(ctx, user, auth), b.ID, ask.Ask, values, user, true)
+		for name := range values {
+			delete(values, name)
+		}
+		if err != nil {
+			s.beadAgain(w, r, b.ID, err.Error())
+			return
+		}
+		http.Redirect(w, r, "/beads/"+url.PathEscape(b.ID), http.StatusSeeOther)
+		return
+	}
+	state := freshState()
+	s.putFresh(state, freshChallenge{bead: b.ID, ask: ask.Ask, user: user, at: time.Now(), secret: true, values: values})
+	to := "/beads/" + url.PathEscape(b.ID) + "/fresh/" + strconv.FormatUint(ask.Ask, 10) + "/" + state
+	freshRedirect(w, r, to)
 }
 
 // beadAgain re-reads the bead page after a POST that wrote nothing, with

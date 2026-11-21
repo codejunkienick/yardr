@@ -8,7 +8,9 @@
        answer row. The gate reads as ever: a weighty card offers no control
        the yard would refuse for want of its person's word, except a strong
        card, which approves in every place the card stands once the window
-       holds the gate (Approve): a fresh sign-in comes first. */ -}}
+       holds the gate (Approve), and a secret card on its bead's page,
+       which gives there once the window holds the gate (Give): a fresh
+       sign-in comes first for both. */ -}}
 {{define "ask"}}
   {{- if .OnBead}}
   <p class="ask-line">{{.Bead}} · ask {{.Ask}}</p>
@@ -52,9 +54,11 @@
   {{- range .Reach}}
   <p class="entry-note">{{.}}</p>
   {{- end}}
-  {{- /* The page has no gate to put in front of a weighty card, so it
-         offers no giving: the card is given where the line names. */}}
-  {{- if $.Weight}}
+  {{- /* Where the window holds no gate for this card it offers no
+         giving: the card is given where the line names. Where Give
+         stands (the bead's page in a hosted window) the fields below
+         give it under a fresh sign-in, and this line hides. */}}
+  {{- if and $.Weight (not $.Give)}}
   <p>This card is weighty and this window has no gate. Approve it in footplate, or in a terminal on the yard's machine:</p>
   {{- end}}
   <p class="entry-note">Give it with <code>yardr bead answer {{$.Bead}} {{$.Ask}} --secret</code>.</p>
@@ -129,7 +133,7 @@
          page; elsewhere, and without scripts, it posts and loads the bead
          it lands on. */}}
   {{- if .Form}}
-  <form class="need-answer" method="post" action="{{.Action}}"{{if .OnBead}} hx-post="{{.Action}}" hx-target="#bead" hx-select="#bead > *" hx-swap="innerHTML ignoreTitle:true"{{end}}><input type="hidden" name="rev" value="{{.Rev}}">{{template "csrf"}}<input type="hidden" name="ask" value="{{.Ask}}">{{if .Picks}}{{range $i, $o := .Options}}<button type="submit" name="option" value="{{inc $i}}">{{if eq $.Recommend (inc $i)}}Answer: {{inc $i}} · {{$o.Label}}{{else}}{{$o.Label}}{{end}}</button>{{end}}{{end}}{{if .Approve}}{{with .Run}}{{range .Ask}}<input type="text" name="value-{{.}}" placeholder="{{.}}" aria-label="{{.}}">{{end}}<button type="submit" name="action" value="approve">{{if strong $.Weight}}Approve in {{$.Yard}}{{else}}Approve{{end}}</button>{{end}}{{end}}{{if .Words}}<input type="text" name="words" placeholder="Words with the answer, or why not" aria-label="Words">{{if .Options}}{{if not .Setup}}<button type="submit" name="action" value="send">Send</button>{{end}}{{else if .Answer}}<button type="submit" name="action" value="answer">Answer</button>{{end}}{{end}}{{if and .OnBead (not .Weight)}}{{with .Secret}}{{range .Env}}<input type="password" name="secret-{{.}}" placeholder="{{.}}" aria-label="{{.}}" autocomplete="off">{{end}}<button type="submit" name="action" value="give">Give</button>{{end}}{{end}}{{with .Talk}}<a class="ask-about" href="{{.}}">Ask about this</a>{{end}}<button type="submit" name="action" value="later">Later</button><button type="submit" name="action" value="decline" title="Say no to all options. The asker finds another way.">Decline</button></form>
+  <form class="need-answer" method="post" action="{{.Action}}"{{if .OnBead}} hx-post="{{.Action}}" hx-target="#bead" hx-select="#bead > *" hx-swap="innerHTML ignoreTitle:true"{{end}}><input type="hidden" name="rev" value="{{.Rev}}">{{template "csrf"}}<input type="hidden" name="ask" value="{{.Ask}}">{{if .Picks}}{{range $i, $o := .Options}}<button type="submit" name="option" value="{{inc $i}}">{{if eq $.Recommend (inc $i)}}Answer: {{inc $i}} · {{$o.Label}}{{else}}{{$o.Label}}{{end}}</button>{{end}}{{end}}{{if .Approve}}{{with .Run}}{{range .Ask}}<input type="text" name="value-{{.}}" placeholder="{{.}}" aria-label="{{.}}">{{end}}<button type="submit" name="action" value="approve">{{if strong $.Weight}}Approve in {{$.Yard}}{{else}}Approve{{end}}</button>{{end}}{{end}}{{if .Words}}<input type="text" name="words" placeholder="Words with the answer, or why not" aria-label="Words">{{if .Options}}{{if not .Setup}}<button type="submit" name="action" value="send">Send</button>{{end}}{{else if .Answer}}<button type="submit" name="action" value="answer">Answer</button>{{end}}{{end}}{{if .Give}}{{with .Secret}}{{range .Env}}<input type="password" name="secret-{{.}}" placeholder="{{.}}" aria-label="{{.}}" autocomplete="off">{{end}}<button type="submit" name="action" value="give">Give in {{$.Yard}}</button>{{end}}{{end}}{{with .Talk}}<a class="ask-about" href="{{.}}">Ask about this</a>{{end}}<button type="submit" name="action" value="later">Later</button><button type="submit" name="action" value="decline" title="Say no to all options. The asker finds another way.">Decline</button></form>
   {{- /* A setup card's approval: its preset pick with the account typed
          beside it, the candidate taken instead, or a bare pick where
          the card keeps the account that stands. As a run card's, it

@@ -466,8 +466,9 @@ type wtx struct {
 	witness string
 	// fresh is the call's fresh sign-in, and hasFresh whether it carries
 	// one: the web's statement on an approval (WithFreshWitness), read
-	// from the call's context as via is. Only a strong card's approval
-	// reads it (gateRefusal, witnessStrong).
+	// from the call's context as via is. A strong card's approval reads
+	// it (gateRefusal, witnessStrong), and so does a secret giving
+	// (freshGivenRefusal, addGiven).
 	fresh    FreshWitness
 	hasFresh bool
 	// repos are the repository flows, by depot, that a run ask's card needs

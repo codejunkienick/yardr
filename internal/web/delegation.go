@@ -93,14 +93,7 @@ func (s *Server) delegationOn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state := freshState()
-	s.freshMu.Lock()
-	for st, ch := range s.freshPending {
-		if time.Since(ch.at) > freshPendingTTL {
-			delete(s.freshPending, st)
-		}
-	}
-	s.freshPending[state] = freshChallenge{bead: delegationChallenge, user: user, at: time.Now()}
-	s.freshMu.Unlock()
+	s.putFresh(state, freshChallenge{bead: delegationChallenge, user: user, at: time.Now()})
 	reauth := "/edge/reauth?return_to=" + url.QueryEscape("/config/delegation/fresh/"+state)
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Redirect", reauth)

@@ -160,6 +160,35 @@ func (y *approveYard) approveForm(beadID string, seq uint64) url.Values {
 	}
 }
 
+func (y *approveYard) askSecret(beadID, to string) uint64 {
+	y.t.Helper()
+	seq, err := y.st.AddAsk(context.Background(), beadID, store.Ask{
+		Question: "The API key for the CRM", To: to, Context: []string{"the work needs it"},
+		Secret: &store.AskSecret{Source: "crm"}}, "yardmaster")
+	must(y.t, err)
+	return seq
+}
+
+// giveForm is the giving the bead page's form posts for a secret ask.
+func (y *approveYard) giveForm(beadID string, seq uint64, value string) url.Values {
+	return url.Values{
+		"rev":              {y.revision(beadID)},
+		"ask":              {strconv.FormatUint(seq, 10)},
+		"secret-CRM_TOKEN": {value},
+		"action":           {"give"},
+	}
+}
+
+// secretEnv points crm's credential at a file in a temp dir and answers
+// it, so a giving's file and its mode can be read back.
+func (y *approveYard) secretEnv() string {
+	y.t.Helper()
+	env := filepath.Join(y.t.TempDir(), "crm.env")
+	_, err := y.st.SetSource(context.Background(), "crm", store.SourceEnvFile, env, "jo")
+	must(y.t, err)
+	return env
+}
+
 // askedState is the ask's state as the bead's page reads it for user.
 func (y *approveYard) askedState(beadID string, seq uint64, user string) string {
 	y.t.Helper()
@@ -555,6 +584,220 @@ func TestWebSecondStrongCardSkipsSignIn(t *testing.T) {
 	}
 }
 
+// A secret ask on a hosted bead page draws its concealed fields and
+// gives under a fresh sign-in: submitting starts the gateway
+// re-authentication bound to the ask, the return gives with the fresh
+// witness and writes the credential file, and a second secret ask inside
+// the window gives at once. Off the bead's page, and off a hosted yard,
+// no field stands.
+func TestWebSecretGiveUnderAFreshSignIn(t *testing.T) {
+	t.Parallel()
+	y := newApproveYard(t, true)
+	ctx := context.Background()
+	must(t, y.st.SetSetting(ctx, store.NameSetting, "depot", "jo"))
+	y.putCRM(false)
+	env := y.secretEnv()
+	b := y.bead("the crm key")
+	seq := y.askSecret(b.ID, "jo")
+	tok := y.token("jo@example.net")
+
+	page := y.surfaceBody("/beads/"+b.ID, tok)
+	for _, want := range []string{
+		`<input type="password" name="secret-CRM_TOKEN" placeholder="CRM_TOKEN" aria-label="CRM_TOKEN" autocomplete="off">`,
+		`<button type="submit" name="action" value="give">Give in depot</button>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the hosted bead page lacks %q:\n%s", want, page)
+		}
+	}
+	if strings.Contains(page, noGateLine) {
+		t.Errorf("the hosted bead page shows the no-gate line beside its giving:\n%s", page)
+	}
+	for _, s := range approveSurfaces[1:] {
+		if body := y.surfaceBody(s.path(b.ID), tok); strings.Contains(body, `type="password"`) || strings.Contains(body, `value="give"`) {
+			t.Errorf("%s offers a secret giving:\n%s", s.name, body)
+		}
+	}
+	off := newApproveYard(t, false)
+	must(t, off.st.SetSetting(ctx, store.NameSetting, "depot", "jo"))
+	off.putCRM(false)
+	ob := off.bead("the crm key")
+	off.askSecret(ob.ID, "jo")
+	if body := off.surfaceBody("/beads/"+ob.ID, off.token("jo@example.net")); strings.Contains(body, `type="password"`) ||
+		strings.Contains(body, `value="give"`) || !strings.Contains(body, noGateLine) {
+		t.Errorf("a bead page off a hosted yard offers a secret giving, or lacks the no-gate line:\n%s", body)
+	}
+
+	const value = "the-crm-secret"
+	r := y.post("/beads/"+b.ID, tok, y.giveForm(b.ID, seq, value))
+	if r.status != http.StatusSeeOther {
+		t.Fatalf("POST the giving: %d: %s", r.status, r.body)
+	}
+	loc, err := url.Parse(r.header.Get("Location"))
+	if err != nil || loc.Path != "/edge/reauth" {
+		t.Fatalf("the giving goes to %q, want the gateway re-authentication", r.header.Get("Location"))
+	}
+	// The same post from htmx answers with HX-Redirect to the same step,
+	// with a state of its own; the return followed is that one's.
+	hx := y.post("/beads/"+b.ID, tok, y.giveForm(b.ID, seq, value), "HX-Request", "true")
+	if hx.status != http.StatusOK || hx.header.Get("Location") != "" {
+		t.Fatalf("POST the giving with htmx: %d %q: %s", hx.status, hx.header.Get("Location"), hx.body)
+	}
+	hxLoc, err := url.Parse(hx.header.Get("HX-Redirect"))
+	if err != nil || hxLoc.Path != "/edge/reauth" {
+		t.Fatalf("the htmx giving goes to %q, want the gateway re-authentication", hx.header.Get("HX-Redirect"))
+	}
+	back := hxLoc.Query().Get("return_to")
+	if want := "/beads/" + b.ID + "/fresh/" + strconv.FormatUint(seq, 10) + "/"; !strings.HasPrefix(back, want) || back == want {
+		t.Fatalf("the return state is %q, want one-use state bound to ask %d", back, seq)
+	}
+	if _, err := os.Stat(env); !os.IsNotExist(err) {
+		t.Fatalf("the challenge wrote the credential file: %v", err)
+	}
+	fresh := y.token("jo@example.net", authAt(time.Now().Add(5*time.Second)))
+	r = y.getNoFollow(back, fresh)
+	if r.status != http.StatusSeeOther || r.header.Get("Location") != "/beads/"+b.ID {
+		t.Fatalf("GET the return: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	if got := y.askedState(b.ID, seq, "jo"); got != "answered" {
+		t.Fatalf("the ask is %s after the return, want it answered", got)
+	}
+	if w := y.witness(); w != store.WitnessFreshSignIn {
+		t.Fatalf("the giving is witnessed %q, want a fresh sign-in", w)
+	}
+	data, err := os.ReadFile(env)
+	must(t, err)
+	if string(data) != "CRM_TOKEN="+value+"\n" {
+		t.Fatalf("the credential file holds %q", data)
+	}
+	if st, err := os.Stat(env); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("the credential file's mode = %v, %v", st.Mode(), err)
+	}
+	notes, err := y.st.Notes(ctx, b.ID)
+	must(t, err)
+	for _, n := range notes {
+		if strings.Contains(n.Text, value) {
+			t.Errorf("note %d holds the value: %q", n.Seq, n.Text)
+		}
+	}
+	if body := y.surfaceBody("/beads/"+b.ID, fresh); strings.Contains(body, value) {
+		t.Errorf("the bead page holds the value after the giving:\n%s", body)
+	}
+	answers := len(notes)
+	if r := y.getNoFollow(back, fresh); r.status != 200 || !strings.Contains(r.body, "used already") || strings.Contains(r.body, value) {
+		t.Fatalf("replaying the return: %d: %s", r.status, r.body)
+	}
+	if notes, err := y.st.Notes(ctx, b.ID); err != nil || len(notes) != answers {
+		t.Fatalf("the replay left %d notes, want %d (%v)", len(notes), answers, err)
+	}
+
+	// A second secret ask inside the fresh window gives at once, with no
+	// new sign-in.
+	second := y.bead("the crm key again")
+	seq2 := y.askSecret(second.ID, "jo")
+	const secondValue = "the-second-secret"
+	r = y.post("/beads/"+second.ID, fresh, y.giveForm(second.ID, seq2, secondValue))
+	if r.status != http.StatusSeeOther || r.header.Get("Location") != "/beads/"+second.ID {
+		t.Fatalf("POST the second giving: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	if got := y.askedState(second.ID, seq2, "jo"); got != "answered" {
+		t.Fatalf("the second ask is %s after its giving, want it answered", got)
+	}
+	if data, err := os.ReadFile(env); err != nil || string(data) != "CRM_TOKEN="+secondValue+"\n" {
+		t.Fatalf("the credential file holds %q after the second giving (%v)", data, err)
+	}
+	if w := y.witness(); w != store.WitnessFreshSignIn {
+		t.Fatalf("the second giving is witnessed %q, want a fresh sign-in", w)
+	}
+}
+
+// A secret giving's return fails closed: a stale or timeless sign-in, a
+// return as another user or for another ask, and a state that was never
+// minted each give nothing, echo no value, and leave the ask open. A
+// member's return is no operator's fresh session either.
+func TestWebSecretGiveReturnRefusals(t *testing.T) {
+	t.Parallel()
+	y := newApproveYard(t, true)
+	ctx := context.Background()
+	must(t, y.st.SetSetting(ctx, store.NameSetting, "depot", "jo"))
+	y.putCRM(false)
+	env := y.secretEnv()
+	b := y.bead("the crm key")
+	seq := y.askSecret(b.ID, "jo")
+	const value = "the-refused-secret"
+	r := y.post("/beads/"+b.ID, y.token("jo@example.net"), y.giveForm(b.ID, seq, value))
+	if r.status != http.StatusSeeOther {
+		t.Fatalf("POST the giving: %d: %s", r.status, r.body)
+	}
+	loc, err := url.Parse(r.header.Get("Location"))
+	if err != nil || loc.Path != "/edge/reauth" {
+		t.Fatalf("the giving goes to %q, want the gateway re-authentication", r.header.Get("Location"))
+	}
+	back := loc.Query().Get("return_to")
+	stale := y.token("jo@example.net", authAt(time.Now().Add(-time.Hour)))
+	for _, c := range []struct {
+		name  string
+		path  string
+		token string
+		want  string
+	}{
+		{"a stale sign-in", back, stale, "not fresh"},
+		{"no authentication time", back, y.token("jo@example.net"), "not fresh"},
+		{"another user", back, y.token("sam@example.net", authAt(time.Now().Add(5*time.Second))), "another card"},
+		{"another ask", strings.Replace(back, "/fresh/"+strconv.FormatUint(seq, 10)+"/", "/fresh/99/", 1), y.token("jo@example.net", authAt(time.Now().Add(5*time.Second))), "another card"},
+		{"a state never minted", "/beads/" + b.ID + "/fresh/" + strconv.FormatUint(seq, 10) + "/never-minted", y.token("jo@example.net", authAt(time.Now().Add(5*time.Second))), "used already"},
+	} {
+		if r := y.getNoFollow(c.path, c.token); r.status != 200 || !strings.Contains(r.body, c.want) || strings.Contains(r.body, value) {
+			t.Errorf("%s: GET the return: %d, want %q and no value:\n%s", c.name, r.status, c.want, r.body)
+		}
+	}
+	// A member's secret card has no hosted-web giving control, and a
+	// crafted post is refused before a challenge holds its value. The
+	// member's ask is for their own login's input, which they give from a
+	// paired device.
+	memberBead := y.bead("a member's login")
+	memberSeq, err := y.st.AddAsk(ctx, memberBead.ID, store.Ask{
+		Question: "The code the sign-in page showed", To: "sam", Context: []string{"the login waits"},
+		Secret: &store.AskSecret{Login: "claude-mem1", As: "sam"}}, "yardmaster")
+	must(t, err)
+	memberForm := url.Values{
+		"rev":          {y.revision(memberBead.ID)},
+		"ask":          {strconv.FormatUint(memberSeq, 10)},
+		"secret-INPUT": {value},
+		"action":       {"give"},
+	}
+	memberPage := y.surfaceBody("/beads/"+memberBead.ID, y.token("sam@example.net"))
+	if strings.Contains(memberPage, `type="password"`) || strings.Contains(memberPage, `value="give"`) {
+		t.Fatalf("a member's hosted page offers secret giving:\n%s", memberPage)
+	}
+	r = y.post("/beads/"+memberBead.ID, y.token("sam@example.net"), memberForm)
+	if r.status != http.StatusOK || !strings.Contains(r.body, "only the operator can give a secret") || strings.Contains(r.body, value) {
+		t.Fatalf("POST a member's giving: %d, want an operator-only refusal and no value: %s", r.status, r.body)
+	}
+	if _, err := os.Stat(env); !os.IsNotExist(err) {
+		t.Fatalf("a refused giving wrote the credential file: %v", err)
+	}
+	for bead, s := range map[string]uint64{b.ID: seq, memberBead.ID: memberSeq} {
+		user := "jo"
+		if bead == memberBead.ID {
+			user = "sam"
+		}
+		if got := y.askedState(bead, s, user); got != "open" {
+			t.Errorf("the ask on %s is %s after the refusals, want it open", bead, got)
+		}
+		notes, err := y.st.Notes(ctx, bead)
+		must(t, err)
+		for _, n := range notes {
+			if strings.Contains(n.Text, value) {
+				t.Errorf("note %d on %s holds the value: %q", n.Seq, bead, n.Text)
+			}
+		}
+	}
+	if w := y.witness(); w != "" {
+		t.Fatalf("a refused giving is witnessed %q, want none", w)
+	}
+}
+
 // A standing login never approves a strong card directly: a stale session
 // is challenged, and a return under a stale sign-in, with no
 // authentication time, or as another user refuses and leaves the card open.
@@ -684,9 +927,11 @@ func TestWebStrongCardStaysTerminalOffHosted(t *testing.T) {
 // reads "Approve in <yard>" on its bead's page, on Home and on the line,
 // and approving it from any of them starts the gateway re-authentication,
 // even for a session that signed in a moment ago; a weighty card with
-// neither class (credential, outside, as-user or reads alone) offers no
-// approval on any of them, keeps its line and its terminal command, and a
-// post at the handler is refused with the ask open and nothing run.
+// neither class (outside, as-user or reads alone) offers no approval on
+// any of them, keeps its line and its terminal command, and a post at the
+// handler is refused with the ask open and nothing run. A credential
+// card alone is a secret ask: it approves nowhere, but gives on its
+// bead's page under the same re-authentication (the give row).
 func TestWebCardApprovalPerClassOfWeight(t *testing.T) {
 	t.Parallel()
 	const freshDecl = "name: fresh\nbase: https://fresh.example.com/v1\ncredential: { env: FRESH_TOKEN, header: \"Authorization: Bearer {credential}\" }\nthread:\n  reply: [fresh/thread, reply]\ncalls:\n  ping: { kind: read, request: { method: GET, path: /me } }\n"
@@ -704,6 +949,9 @@ func TestWebCardApprovalPerClassOfWeight(t *testing.T) {
 		name    string
 		classes []string
 		strong  bool
+		// give is a secret ask's row: no approval anywhere, but a giving
+		// on its bead's page alone, through the same re-authentication.
+		give bool
 		// ask puts the card on the bead and returns its number, with the
 		// fields its approval posts beside the usual three.
 		ask func(y *approveYard, bead string) (uint64, url.Values)
@@ -740,7 +988,7 @@ func TestWebCardApprovalPerClassOfWeight(t *testing.T) {
 				servesSetupmail(y.own)
 				return y.askSetup(bead), url.Values{"option": {"2"}, "secret-SETUP_ACCOUNT": {"ops@example.com"}}
 			}},
-		{name: "credential", classes: []string{store.WeightCredential}, refusal: "weighty (credential)",
+		{name: "credential", classes: []string{store.WeightCredential}, give: true, complete: true,
 			ask: func(y *approveYard, bead string) (uint64, url.Values) {
 				y.putCRM(false)
 				return askAs(y, bead, store.Ask{Question: "The API key for the CRM", Secret: &store.AskSecret{Source: "crm"}}),
@@ -807,6 +1055,13 @@ func TestWebCardApprovalPerClassOfWeight(t *testing.T) {
 					}
 					continue
 				}
+				if c.give && s.name == "the bead's page" {
+					if !strings.Contains(body, `value="give"`) || !strings.Contains(body, `type="password"`) ||
+						strings.Contains(body, `value="approve"`) || strings.Contains(body, noGateLine) {
+						t.Errorf("%s: the secret card withholds its giving, approves, or says it has no gate:\n%s", s.name, body)
+					}
+					continue
+				}
 				if strings.Contains(body, `value="approve"`) || strings.Contains(body, `value="give"`) ||
 					strings.Contains(body, `type="password"`) || !strings.Contains(body, noGateLine) {
 					t.Errorf("%s: the weighty card offers a control, or lacks its line:\n%s", s.name, body)
@@ -817,7 +1072,7 @@ func TestWebCardApprovalPerClassOfWeight(t *testing.T) {
 				form[k] = v
 			}
 			r := y.post("/beads/"+b.ID, tok, form)
-			if !c.strong {
+			if !c.strong && !c.give {
 				if r.status != http.StatusOK || !strings.Contains(r.body, c.refusal) {
 					t.Fatalf("POST at the handler: %d: %s", r.status, r.body)
 				}

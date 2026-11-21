@@ -11,6 +11,11 @@ package web
 // consumed only for it, and the store takes the approval only with the
 // request's fresh witness. Anywhere but the hosted web a strong card
 // stays terminal-only.
+//
+// A secret card's giving on its bead's page rides the same sign-in: the
+// typed values wait in a secret challenge for its short bound, and the
+// return gives them with the same witness. StrongWeight is untouched:
+// a secret ask weighs credential, never trust or code.
 
 import (
 	"context"
@@ -31,9 +36,27 @@ import (
 // used in.
 const freshPendingTTL = time.Hour
 
-// freshChallenge is a strong card's sign-in waiting at the gateway: the
-// card it was raised for and who raised it, when, and the approval it
-// carries back (a setup's preset pick, account and host, a run's values).
+// secretPendingTTL bounds a challenge that carries typed secret values:
+// the gateway's fresh window, far shorter than an approval's hour, since
+// the values wait in this view's memory alone until the sign-in returns.
+// Past it the challenge and its values are dropped, on the next save,
+// lookup or spend, whether or not another challenge ever comes.
+const secretPendingTTL = 15 * time.Minute
+
+// challengeTTL is how long ch may wait at the gateway: a secret
+// challenge's short bound, any other's hour.
+func challengeTTL(ch freshChallenge) time.Duration {
+	if ch.secret {
+		return secretPendingTTL
+	}
+	return freshPendingTTL
+}
+
+// freshChallenge is a sign-in waiting at the gateway: the card it was
+// raised for and who raised it, when, and what it carries back (a strong
+// card's approval: a setup's preset pick, account and host, a run's
+// values; or, where secret is set, a secret ask's typed values, given on
+// the return instead of approved).
 type freshChallenge struct {
 	bead    string
 	ask     uint64
@@ -43,6 +66,7 @@ type freshChallenge struct {
 	values  map[string]string
 	account string
 	host    string
+	secret  bool
 }
 
 // freshAuth is what a consumed challenge returned: the authentication time
@@ -60,6 +84,49 @@ func freshState() string {
 	var b [32]byte
 	_, _ = rand.Read(b[:])
 	return base64.RawURLEncoding.EncodeToString(b[:])
+}
+
+// putFresh saves ch under state, first dropping every challenge past its
+// own bound (challengeTTL): a secret challenge's values go with it, so a
+// typed value waits no longer than its short bound even where no return
+// ever comes for it.
+func (s *Server) putFresh(state string, ch freshChallenge) {
+	s.freshMu.Lock()
+	defer s.freshMu.Unlock()
+	for st, old := range s.freshPending {
+		if time.Since(old.at) > challengeTTL(old) {
+			delete(s.freshPending, st)
+		}
+	}
+	s.freshPending[state] = ch
+}
+
+// lookupFresh is the challenge waiting under state, spent where it is
+// past its bound: an expired secret challenge's values are dropped with
+// it here, whether or not another challenge comes.
+func (s *Server) lookupFresh(state string) (freshChallenge, bool) {
+	s.freshMu.Lock()
+	defer s.freshMu.Unlock()
+	ch, ok := s.freshPending[state]
+	if ok && time.Since(ch.at) > challengeTTL(ch) {
+		delete(s.freshPending, state)
+		return freshChallenge{}, false
+	}
+	return ch, ok
+}
+
+// freshRedirect sends the browser to the gateway's re-authentication,
+// returning to returnTo: a 303, except for a request htmx made (the bead
+// page's forms), which is answered 200 with HX-Redirect so the browser
+// navigates whole, as approveStrong's step has always been.
+func freshRedirect(w http.ResponseWriter, r *http.Request, returnTo string) {
+	reauth := "/edge/reauth?return_to=" + url.QueryEscape(returnTo)
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Redirect", reauth)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	http.Redirect(w, r, reauth, http.StatusSeeOther)
 }
 
 // beadApprove approves the run or setup card ask, as the request's user. A
@@ -216,28 +283,15 @@ func (s *Server) approveStrong(w http.ResponseWriter, r *http.Request, b *store.
 		return
 	}
 	state := freshState()
-	s.freshMu.Lock()
-	for st, ch := range s.freshPending {
-		if time.Since(ch.at) > freshPendingTTL {
-			delete(s.freshPending, st)
-		}
-	}
-	s.freshPending[state] = freshChallenge{bead: b.ID, ask: ask.Ask, user: user, at: time.Now(),
-		option: option, values: values, account: account, host: host}
-	s.freshMu.Unlock()
+	s.putFresh(state, freshChallenge{bead: b.ID, ask: ask.Ask, user: user, at: time.Now(),
+		option: option, values: values, account: account, host: host})
 	to := "/beads/" + url.PathEscape(b.ID) + "/fresh/" + strconv.FormatUint(ask.Ask, 10) + "/" + state
-	reauth := "/edge/reauth?return_to=" + url.QueryEscape(to)
 	// htmx follows a 303 as an XHR, and the sign-in page it reaches has no
 	// #bead for the form's hx-select to take: the bead's contents are
 	// swapped for nothing, the card and its form vanish, and the person
 	// never gets to the sign-in. HX-Redirect makes htmx navigate to the URL
-	// as a whole page.
-	if r.Header.Get("HX-Request") == "true" {
-		w.Header().Set("HX-Redirect", reauth)
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	http.Redirect(w, r, reauth, http.StatusSeeOther)
+	// as a whole page (freshRedirect).
+	freshRedirect(w, r, to)
 }
 
 // strongAuth is the authentication time the operator's last consumed
@@ -272,9 +326,7 @@ func (s *Server) handleFresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state := r.PathValue("state")
-	s.freshMu.Lock()
-	ch, ok := s.freshPending[state]
-	s.freshMu.Unlock()
+	ch, ok := s.lookupFresh(state)
 	if !ok {
 		s.beadAgain(w, r, id, "that sign-in was used already, expired, or never started: approve the card again")
 		return
@@ -303,6 +355,10 @@ func (s *Server) handleFresh(w http.ResponseWriter, r *http.Request) {
 		s.beadAgain(w, r, id, fmt.Sprintf("ask %d on bead %s is answered already, or asked of another; read it again", ch.ask, id))
 		return
 	}
+	if ch.secret {
+		s.giveFreshSecret(w, r, state, ch, *ask, user)
+		return
+	}
 	if !s.freshFor(ctx, *ask, user, ch.at) {
 		s.beadAgain(w, r, id, "that sign-in is not fresh: the gateway authenticated before the card's challenge, or outside its window. Approve the card again")
 		return
@@ -325,6 +381,42 @@ func (s *Server) handleFresh(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/beads/"+url.PathEscape(id), http.StatusSeeOther)
 }
 
+// giveFreshSecret is handleFresh for a secret challenge: it gives the
+// values the challenge held, under the return's fresh sign-in, and lands
+// on the bead. It stands on the operator's fresh session alone (a member
+// gives no secret in the hosted web), spends the one-use state before it
+// gives, and clears the held values whatever the giving does. No error
+// it shows carries a value: the store's refusals name no value, and the
+// redrawn page's fields stand empty.
+func (s *Server) giveFreshSecret(w http.ResponseWriter, r *http.Request, state string, ch freshChallenge, ask store.BeadAsk, user string) {
+	ctx := r.Context()
+	id := ch.bead
+	if ask.Secret == nil {
+		s.beadAgain(w, r, id, fmt.Sprintf("ask %d asks for no secret: give the secret again", ch.ask))
+		return
+	}
+	if !s.freshSession(ctx, ch.at) {
+		s.beadAgain(w, r, id, "that sign-in is not fresh: the gateway authenticated before the card's challenge, or outside its window. Give the secret again")
+		return
+	}
+	auth := jwtIdentityOf(ctx).authTime
+	if !s.consumeFresh(state, ch, user, auth) {
+		s.beadAgain(w, r, id, "that sign-in was used already, expired, or never started: give the secret again")
+		return
+	}
+	values := ch.values
+	_, err := s.st.GiveSecret(store.WithFreshWitness(ctx, user, auth), id, ch.ask, values, user, true)
+	for name := range values {
+		delete(values, name)
+	}
+	ch.values = nil
+	if err != nil {
+		s.beadAgain(w, r, id, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/beads/"+url.PathEscape(id), http.StatusSeeOther)
+}
+
 // consumeFresh atomically spends the one-use return state and remembers the
 // authentication it returned. Two callbacks racing on the same state cannot
 // both carry that sign-in to an approval.
@@ -336,7 +428,7 @@ func (s *Server) consumeFresh(state string, challenge freshChallenge, user strin
 		current.user != challenge.user || current.user != user || !current.at.Equal(challenge.at) {
 		return false
 	}
-	if time.Since(current.at) > freshPendingTTL {
+	if time.Since(current.at) > challengeTTL(current) {
 		delete(s.freshPending, state)
 		return false
 	}

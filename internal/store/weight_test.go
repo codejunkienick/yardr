@@ -693,6 +693,69 @@ func TestWeightIsHeldAtGiving(t *testing.T) {
 	if text, err := os.ReadFile(file); err != nil || string(text) != "CRM_TOKEN=tok\n" {
 		t.Fatalf("the file holds %q (%v)", text, err)
 	}
+
+	// A giving that carries a fresh sign-in is judged by it as a strong
+	// card's approval is, though a secret ask is not strong: another
+	// user's, none, and one outside the gateway's window each refuse
+	// before anything is written, and a good one records the witness.
+	if err := y.SetSetting(y.ctx, WebJWTPrivilegedSessionMaxAgeSetting, "15m", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	freshSeq := y.ask(t, secretAsk("crm"), "yardmaster")
+	answersBefore := len(answerNotes(t, y))
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+		want string
+	}{
+		{"another user", WithFreshWitness(y.ctx, "ada", time.Now()),
+			"ask " + itoa(freshSeq) + " is weighty (credential): this giving's fresh sign-in was made as ada, not as mckean. Nothing was given, and the ask stays open"},
+		{"no authentication time", WithFreshWitness(y.ctx, "mckean", time.Time{}),
+			"ask " + itoa(freshSeq) + " is weighty (credential): this giving carries a fresh sign-in with no authentication time, and a secret is given in the hosted web only under one. Nothing was given, and the ask stays open"},
+		{"outside the window", WithFreshWitness(y.ctx, "mckean", time.Now().Add(-time.Hour)),
+			"ask " + itoa(freshSeq) + " is weighty (credential): this giving's fresh sign-in is outside the gateway's window, and a secret is given in the hosted web only under one inside it. Nothing was given, and the ask stays open"},
+	} {
+		if _, err := y.GiveSecret(c.ctx, y.bead, freshSeq, map[string]string{"CRM_TOKEN": "fresh-tok"}, "mckean", true); err == nil || err.Error() != c.want {
+			t.Fatalf("%s: giving a secret = %v, want %q", c.name, err, c.want)
+		} else if strings.Contains(err.Error(), "fresh-tok") {
+			t.Fatalf("%s: the refusal repeats the value: %v", c.name, err)
+		}
+	}
+	if text, err := os.ReadFile(file); err != nil || string(text) != "CRM_TOKEN=tok\n" {
+		t.Fatalf("a refused fresh giving left the file holding %q (%v)", text, err)
+	}
+	if got := len(answerNotes(t, y)); got != answersBefore {
+		t.Fatalf("a refused fresh giving left %d answers, want %d", got, answersBefore)
+	}
+	if r := y.asked(t, freshSeq); r.State != AskOpen {
+		t.Fatalf("the ask is %s after the refusals, want it open", r.State)
+	}
+	if _, err := y.GiveSecret(WithFreshWitness(y.ctx, "mckean", time.Now()), y.bead, freshSeq, map[string]string{"CRM_TOKEN": "fresh-tok"}, "mckean", true); err != nil {
+		t.Fatal(err)
+	}
+	if text, err := os.ReadFile(file); err != nil || string(text) != "CRM_TOKEN=fresh-tok\n" {
+		t.Fatalf("the file holds %q (%v)", text, err)
+	}
+	if ev := lastAnswer(t, y); Witness(ev) != WitnessFreshSignIn || Via(ev) != "" {
+		t.Fatalf("the fresh giving's event is witnessed %q via %q, want a fresh sign-in with no device", Witness(ev), Via(ev))
+	}
+	// Through a device the same witness is judged and claims none, and
+	// with no witness on the call a giving claims none either.
+	deviceSeq := y.ask(t, secretAsk("crm"), "yardmaster")
+	phone := WithFreshWitness(WithVia(y.ctx, "mckean", "phone"), "mckean", time.Now())
+	if _, err := y.GiveSecret(phone, y.bead, deviceSeq, map[string]string{"CRM_TOKEN": "device-tok"}, "mckean", true); err != nil {
+		t.Fatal(err)
+	}
+	if ev := lastAnswer(t, y); Via(ev) != "phone" || Witness(ev) != "" {
+		t.Fatalf("the device giving is via %q witnessed %q, want phone with no witness", Via(ev), Witness(ev))
+	}
+	plainSeq := y.ask(t, secretAsk("crm"), "yardmaster")
+	if _, err := y.GiveSecret(y.ctx, y.bead, plainSeq, map[string]string{"CRM_TOKEN": "plain-tok"}, "mckean", true); err != nil {
+		t.Fatal(err)
+	}
+	if ev := lastAnswer(t, y); Witness(ev) != "" || Via(ev) != "" {
+		t.Fatalf("the plain giving's event is witnessed %q via %q, want neither", Witness(ev), Via(ev))
+	}
 }
 
 // A mapping card is written weighty, and one from before cards were

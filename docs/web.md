@@ -426,7 +426,9 @@ for want of its person's word that the weight was seen (`weighed`,
 [api.md](api.md#weighty-cards)): a secret ask shows no field and no
 giving, a mapping ask shows its options as a list with no pick, and each
 names the terminal command instead, where the card is given or picked,
-with Later and Decline staying as ever. The needs rows and the line's
+with Later and Decline staying as ever. In a hosted window the bead's
+page is the exception for a secret ask: it gives there under a fresh
+sign-in ([One bead](#one-bead)). The needs rows and the line's
 waits follow the page: a weighty card shows its weight first there too,
 a mapping card names the pick's terminal command instead of offering its
 picks, and the words stay with Later and Decline. A strong card — trust
@@ -1745,10 +1747,11 @@ card that is routine approves below it, with fields where the card asks
 for values in the clear; a setup card approves with its preset pick and
 the account typed beside it, the candidate taken instead, or a bare pick
 where the card keeps the account that stands. A card that is weighty but
-not strong has no gate in this window: a secret ask shows no field and no
-giving, a mapping ask shows its options as a list with no pick, a run or
-setup card shows no approval, and each names the terminal command
-instead, where the card is given, picked or approved. Each answers under
+not strong has no gate in this window, with one exception below: a
+secret ask shows no field and no giving, a mapping ask shows its options
+as a list with no pick, a run or setup card shows no approval, and each
+names the terminal command instead, where the card is given, picked or
+approved. Each answers under
 itself, with its options as buttons where the card offers any, with Later
 and Decline; a run or setup card still names the terminal command beside
 its approval. Every card but a secret's has a words field beside them, in
@@ -1773,6 +1776,21 @@ machine, never on the page. A paired device of the operator approves one
 on any yard with no sign-in at all, as it approves any card
 ([users.md](users.md#devices)).
 
+On a hosted yard the operator can give a secret ask from its bead's page
+alone, though it weighs credential and is never strong: the page draws a
+concealed field for each name it asks for and a `Give in <yard>` button,
+typing first and signing in after. Giving starts the same
+re-authentication unless the fresh window already stands; the typed
+values wait in the yard's memory for that return alone, for at most
+fifteen minutes, and no error
+shows one back. The return gives the secret the sign-in witnessed, and
+its answer records the fresh sign-in. A second secret ask inside the
+window gives at once. The needs rows on Home, the waits on `/line`, and a
+member's hosted page draw no field for a secret ask. A member gives their
+own login code from a paired device. A self-hosted yard's page also draws
+no field: there the card names footplate and the terminal command, and
+either door still gives it.
+
 The card is the same wherever it stands, and a strong card approves the
 same way from the needs rows on Home and from the waits on `/line` as on
 its bead's page. The button reads `Approve in <yard>`, beside the fields
@@ -1785,8 +1803,10 @@ or the yard's reason when it refused. Where the view holds no gateway, or the
 yard is not hosted, a strong card shows no button anywhere and names the
 terminal command, as any weighty card does. A routine run or setup card
 approves on its bead's page alone, and a card that is weighty but neither
-trust nor code (a credential, a change outside the yard, a call as a
-user, or a widened read, taken alone) approves nowhere in the web.
+trust nor code (a change outside the yard, a call as a user, or a widened
+read, taken alone) approves nowhere in the web; a credential card taken
+alone gives only as a secret ask does, on its bead's page in a hosted
+window, under the fresh sign-in above.
 
 A depot pack too large for a whole card is written as a summary card
 ([packs.md](packs.md#an-integration-pack-kind-source)). Its sentences name the

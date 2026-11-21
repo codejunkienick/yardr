@@ -79,6 +79,12 @@ type AskCard struct {
 	// Approve is whether a run or setup card's approval controls stand: its
 	// button, with the fields the card asks for (approvable).
 	Approve bool
+	// Give is whether a secret card's giving controls stand: its concealed
+	// fields and Give button, on its bead's page alone where the operator's
+	// window holds the gate, under a fresh sign-in. A member gives their
+	// own login input from a paired device, so the hosted page offers no
+	// giving to a member.
+	Give bool
 }
 
 // cardSecret is what a secret ask asks for, in the yard's words, with the
@@ -237,6 +243,7 @@ func (p BeadPage) Card(a store.BeadAsk) AskCard {
 	out.Answer = out.Words && len(a.Options) == 0 && a.Run == nil
 	out.Says = a.Run != nil || a.Setup != nil
 	out.Approve = (a.Run != nil || a.Setup != nil) && approvable(a.Weight, true, p.site.Gate)
+	out.Give = a.Secret != nil && p.site.Gate && p.site.Operator
 	if a.Secret != nil {
 		out.Secret = &cardSecret{Line: a.Secret.Line, Env: a.Secret.Env, Reach: a.Secret.Reach}
 	}

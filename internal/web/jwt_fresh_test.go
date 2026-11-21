@@ -124,4 +124,43 @@ func TestFreshChallengeReturnStateIsOneUse(t *testing.T) {
 	if _, ok := s.freshPending["expired"]; ok {
 		t.Fatal("the expired return state remains pending")
 	}
+
+	// A secret challenge is spent by its own short bound, not the hour:
+	// past it the state and the values it held are gone, on a lookup as
+	// on a spend, whether or not another challenge comes.
+	held := map[string]string{"CRM_TOKEN": "held-value"}
+	secretExpired := freshChallenge{bead: "yardr-three", ask: 5, user: "jo", at: time.Now().Add(-secretPendingTTL - time.Second), secret: true, values: held}
+	s.freshPending["secret-expired"] = secretExpired
+	if _, ok := s.lookupFresh("secret-expired"); ok {
+		t.Fatal("a secret return state past its short bound was looked up")
+	}
+	if _, ok := s.freshPending["secret-expired"]; ok {
+		t.Fatal("the expired secret return state remains pending")
+	}
+	s.freshPending["secret-expired"] = secretExpired
+	if s.consumeFresh("secret-expired", secretExpired, "jo", auth) {
+		t.Fatal("a secret return state past its short bound was consumed")
+	}
+	if _, ok := s.freshPending["secret-expired"]; ok {
+		t.Fatal("the consumed-expired secret return state remains pending")
+	}
+	// Inside the bound a secret state still spends, as any other does.
+	secretLive := freshChallenge{bead: "yardr-three", ask: 5, user: "jo", at: time.Now(), secret: true, values: held}
+	s.freshPending["secret-live"] = secretLive
+	if !s.consumeFresh("secret-live", secretLive, "jo", auth) {
+		t.Fatal("a secret return state inside its bound was not consumed")
+	}
+	// A non-secret challenge at the same age as the expired secret one
+	// is still inside its hour.
+	old := freshChallenge{bead: "yardr-two", ask: 4, user: "jo", at: time.Now().Add(-secretPendingTTL - time.Second)}
+	s.freshPending["old"] = old
+	if !s.consumeFresh("old", old, "jo", auth) {
+		t.Fatal("a non-secret return state past the secret bound but inside its hour was not consumed")
+	}
+	// Saving a new challenge drops an expired secret one with its values.
+	s.freshPending["secret-stale"] = secretExpired
+	s.putFresh("new", freshChallenge{bead: "yardr-four", ask: 6, user: "jo", at: time.Now()})
+	if _, ok := s.freshPending["secret-stale"]; ok {
+		t.Fatal("saving a challenge left an expired secret state pending")
+	}
 }

@@ -86,6 +86,12 @@ import (
 // first (weighed). Without it the giving is refused before anything is
 // written (weighedRefusal): no file, no note, and the ask stays open. The
 // yard checks what the client says and no more.
+//
+// A giving that carries a fresh sign-in (WithFreshWitness, the hosted
+// web's) is judged by that sign-in as a strong card's approval is
+// (freshGivenRefusal), and its answer's event records the fresh sign-in
+// (addGiven) where it came through no device. A giving that carries none
+// behaves exactly as it always has, on a device or a terminal alike.
 func (s *Store) GiveSecret(ctx context.Context, id string, ask uint64, values map[string]string, actor string, weighed bool) (*SourceKeyed, error) {
 	var k sourceKey
 	var lg loginSent
@@ -156,6 +162,9 @@ func (w *wtx) giveSecret(ctx context.Context, s *Store, home, id string, ask uin
 	if err := weighedRefusal(ask, weight, weighed); err != nil {
 		return err
 	}
+	if err := w.freshGivenRefusal(ask, weight, actor); err != nil {
+		return err
+	}
 	if sec.Harness != "" {
 		return w.giveHarnessKey(ctx, home, row, ask, sec, values, actor, k)
 	}
@@ -190,7 +199,7 @@ func (w *wtx) giveSecret(ctx context.Context, s *Store, home, id string, ask uin
 	if err != nil {
 		return err
 	}
-	if _, err := w.addNoted(row, NoteAnswer, string(text), actor); err != nil {
+	if _, err := w.addGiven(row, string(text), actor); err != nil {
 		return err
 	}
 	if sec.Hook != "" {
@@ -403,7 +412,7 @@ func (w *wtx) giveHarnessKey(ctx context.Context, home string, row *beadRow, ask
 	if err != nil {
 		return err
 	}
-	if _, err := w.addNoted(row, NoteAnswer, string(text), actor); err != nil {
+	if _, err := w.addGiven(row, string(text), actor); err != nil {
 		return err
 	}
 	k.harness, k.login, k.names = &h, operator, names
@@ -455,7 +464,7 @@ func (w *wtx) giveLogin(s *Store, row *beadRow, ask uint64, sec *AskSecret, to s
 	if err != nil {
 		return err
 	}
-	_, err = w.addNoted(row, NoteAnswer, string(text), actor)
+	_, err = w.addGiven(row, string(text), actor)
 	return err
 }
 

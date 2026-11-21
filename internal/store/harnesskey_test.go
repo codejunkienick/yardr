@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func harnessKeyAsk(harness, crew, to string, env ...string) Ask {
@@ -200,6 +201,21 @@ func TestGiveSecretGivesAHarnessKey(t *testing.T) {
 				t.Errorf("%s hold a value", where)
 			}
 		}
+	}
+
+	// Under a fresh sign-in the giving records it, as a source's does.
+	if err := y.SetSetting(y.ctx, WebJWTPrivilegedSessionMaxAgeSetting, "15m", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	freshSeq := y.ask(t, harnessKeyAsk("claude", "yardmaster", "mckean"), "yardmaster")
+	if _, err := y.GiveSecret(WithFreshWitness(y.ctx, "mckean", time.Now()), y.bead, freshSeq, map[string]string{"ANTHROPIC_API_KEY": "fresh-key"}, "mckean", true); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(file); string(b) != "ANTHROPIC_API_KEY=fresh-key\n" {
+		t.Fatalf("the file holds %q after the fresh giving", b)
+	}
+	if ev := lastAnswer(t, y); Witness(ev) != WitnessFreshSignIn || Via(ev) != "" {
+		t.Fatalf("the fresh harness giving is witnessed %q via %q, want a fresh sign-in with no device", Witness(ev), Via(ev))
 	}
 }
 

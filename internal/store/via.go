@@ -140,11 +140,11 @@ func Via(e Event) string {
 // names the device (via) instead.
 const WitnessTerminal = "terminal"
 
-// WitnessFreshSignIn is how a strong card's approval in the hosted web is
-// witnessed: the gateway authenticated the operator inside its
-// privileged-session window, in a strong card's sign-in rather than a
-// standing login. One such sign-in may witness several strong cards inside
-// the window.
+// WitnessFreshSignIn is how a strong card's approval, and a secret
+// giving, in the hosted web is witnessed: the gateway authenticated the
+// operator inside its privileged-session window, in a fresh sign-in
+// rather than a standing login. One such sign-in may witness several
+// strong cards and secret givings inside the window.
 const WitnessFreshSignIn = "fresh sign-in"
 
 // FreshWitness is the door's statement that the call carries a fresh
@@ -205,6 +205,21 @@ func (w *wtx) addWitnessed(row *beadRow, text, actor string, stored []AskWeight)
 	n, err := w.addNoted(row, NoteAnswer, text, actor)
 	// Keep the witness on the answer event alone, even if this write grows
 	// another event after recording the answer.
+	w.witness = ""
+	return n, err
+}
+
+// addGiven records a secret giving's answer as addNoted does, witnessed
+// by a fresh sign-in where the giving carried one the gate took
+// (freshGivenRefusal) and came through no device: a device's giving
+// claims none, as its approval claims none (witnessStrong), and a giving
+// with no witness on its call claims none either. The witness is kept on
+// the answer's event alone, as addWitnessed keeps it.
+func (w *wtx) addGiven(row *beadRow, text, actor string) (*Note, error) {
+	if w.hasFresh && w.deviceViaOf(actor) == "" {
+		w.witness = WitnessFreshSignIn
+	}
+	n, err := w.addNoted(row, NoteAnswer, text, actor)
 	w.witness = ""
 	return n, err
 }
