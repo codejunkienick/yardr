@@ -666,7 +666,9 @@ from the bead, with the bead's id as a trailing reference, as GitHub's
 each with its own trailers removed, separated by a blank line>
 
 BREAKING CHANGE: <as a commit carried it>
-Refs: <issue url>
+Fixes #<n> (an issue of this repository the bead tracks)
+Refs #<n> (one of this repository it relates to)
+Refs: <any other linked issue's url>
 Yardr-Bead: <bead id>
 Yardr-Agent: <agent>
 ```
@@ -690,13 +692,18 @@ Yardr-Agent: <agent>
   blank line or the next footer, as the commit carried it. A builder or a
   reviewer writes one for a change that breaks a user's setup or a
   command's behaviour.
-- **`Refs:`**: one line for each issue outside the yard the bead is linked
-  to (`yardr link list`), the tracked one first, then each one it relates
-  to, as stored. Never a closing word (`Fixes`, `Closes`): the hooks move a
-  linked issue by the stage of the bead that tracks it ([links.md](links.md)),
-  and GitHub or Linear closing it on a push would act beside them. A bead of
-  another yard that this one is at, or came from, is no issue and has no
-  line.
+- **`Fixes #<n>` / `Refs #<n>` / `Refs:`**: one line for each issue outside
+  the yard the bead is linked to (`yardr link list`), the tracked ones
+  first, then each one it relates to. An issue of the depot's own GitHub
+  repository is named short — `Fixes #<n>` when the bead tracks it, `Refs
+  #<n>` when it relates to it — so the commit shows on the issue's page.
+  The closing word closes the issue again when the base reaches GitHub,
+  beside the hooks that already moved it at the landing
+  ([links.md](links.md)); harmless, by design. Every other linked issue —
+  another repository's, a pull request, another source's, or any when the
+  depot has no GitHub origin — keeps its URL as `Refs: <url>`, as stored.
+  A bead of another yard that this one is at, or came from, is no issue
+  and has no line.
 - **`Yardr-Agent:`**: one line for each distinct value on the branch's
   commits, in the order they were first seen.
 

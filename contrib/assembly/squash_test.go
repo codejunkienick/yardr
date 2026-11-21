@@ -241,6 +241,20 @@ const peerAndIssueLinks = `[
   }
 ]`
 
+// oneLink is a link list of a single link of kind to url from source, for
+// the cases of the short issue lines.
+func oneLink(bead, kind, source, url string) string {
+	return `[
+  {
+    "bead": "` + bead + `",
+    "kind": "` + kind + `",
+    "source": "` + source + `",
+    "url": "` + url + `",
+    "created_at": "2026-10-22T04:19:58Z"
+  }
+]`
+}
+
 const (
 	builderTrailer  = "Yardr-Agent: yardr-builders (claude opus)"
 	reviewerTrailer = "Yardr-Agent: yardr-reviewers (codex gpt-5)"
@@ -264,6 +278,7 @@ func TestSquashMessage(t *testing.T) {
 		id, title, typ string
 		labels         []string
 		links          string // the links the bead lists, when not its own
+		origin         string // the origin of the repo, when the case names one
 		commits        []commit
 		subject, body  string
 		yardr          func(*testing.T) string // a yardr that fails a read, in place of the real one
@@ -329,6 +344,56 @@ func TestSquashMessage(t *testing.T) {
 			subject: "chore: Links (r-9)",
 			body:    "x\n\nRefs: https://github.com/acme/widgets/issues/7?a=1&b=2\nRefs: https://linear.app/acme/issue/ACM-9\nYardr-Bead: r-9",
 		}, {
+			// An issue of the depot's own repository is named short: Fixes
+			// when the bead tracks it, Refs when it relates to it.
+			id: "r-14", title: "Fix the widget", typ: "task", origin: "https://github.com/acme/widgets.git",
+			links:   oneLink("r-14", "tracks", "github", "https://github.com/acme/widgets/issues/7"),
+			commits: []commit{{msg: "x\n", files: map[string]string{"x.txt": "x\n"}}},
+			subject: "chore: Fix the widget (r-14)",
+			body:    "x\n\nFixes #7\nYardr-Bead: r-14",
+		}, {
+			id: "r-15", title: "Note the widget", typ: "task", origin: "https://github.com/acme/widgets.git",
+			links:   oneLink("r-15", "relates", "github", "https://github.com/acme/widgets/issues/7"),
+			commits: []commit{{msg: "x\n", files: map[string]string{"x.txt": "x\n"}}},
+			subject: "chore: Note the widget (r-15)",
+			body:    "x\n\nRefs #7\nYardr-Bead: r-15",
+		}, {
+			// Every other linked issue keeps its URL: another repository's,
+			// a pull request, another source's.
+			id: "r-16", title: "Borrow from elsewhere", typ: "task", origin: "https://github.com/acme/widgets.git",
+			links:   oneLink("r-16", "tracks", "github", "https://github.com/other/repo/issues/9"),
+			commits: []commit{{msg: "x\n", files: map[string]string{"x.txt": "x\n"}}},
+			subject: "chore: Borrow from elsewhere (r-16)",
+			body:    "x\n\nRefs: https://github.com/other/repo/issues/9\nYardr-Bead: r-16",
+		}, {
+			id: "r-17", title: "Follow the pull", typ: "task", origin: "https://github.com/acme/widgets.git",
+			links:   oneLink("r-17", "tracks", "github", "https://github.com/acme/widgets/pull/7"),
+			commits: []commit{{msg: "x\n", files: map[string]string{"x.txt": "x\n"}}},
+			subject: "chore: Follow the pull (r-17)",
+			body:    "x\n\nRefs: https://github.com/acme/widgets/pull/7\nYardr-Bead: r-17",
+		}, {
+			id: "r-18", title: "Track the card", typ: "task", origin: "https://github.com/acme/widgets.git",
+			links:   oneLink("r-18", "tracks", "linear", "https://linear.app/acme/issue/ACM-9"),
+			commits: []commit{{msg: "x\n", files: map[string]string{"x.txt": "x\n"}}},
+			subject: "chore: Track the card (r-18)",
+			body:    "x\n\nRefs: https://linear.app/acme/issue/ACM-9\nYardr-Bead: r-18",
+		}, {
+			// With no origin the landing cannot name its repository, so even
+			// a fixed-form issue keeps its URL, and the landing still lands.
+			id: "r-19", title: "Land with no origin", typ: "task",
+			links:   oneLink("r-19", "tracks", "github", "https://github.com/acme/widgets/issues/7"),
+			commits: []commit{{msg: "x\n", files: map[string]string{"x.txt": "x\n"}}},
+			subject: "chore: Land with no origin (r-19)",
+			body:    "x\n\nRefs: https://github.com/acme/widgets/issues/7\nYardr-Bead: r-19",
+		}, {
+			// The origin in scp form, and not lowercased, names the same
+			// repository.
+			id: "r-20", title: "Fix from the scp clone", typ: "task", origin: "git@GitHub.com:Acme/Widgets.git",
+			links:   oneLink("r-20", "tracks", "github", "https://github.com/acme/widgets/issues/7"),
+			commits: []commit{{msg: "x\n", files: map[string]string{"x.txt": "x\n"}}},
+			subject: "chore: Fix from the scp clone (r-20)",
+			body:    "x\n\nFixes #7\nYardr-Bead: r-20",
+		}, {
 			// The two reads of yardr: its error is on stdout, exit 3 (--json).
 			id: "r-10", title: "Read the bead", typ: "task", yardr: unreadableBead,
 			err: []string{"reading r-10 failed: ", "bead r-gone: not found"},
@@ -365,6 +430,9 @@ func TestSquashMessage(t *testing.T) {
 					y.git(wt, "mv", k.mv[0], k.mv[1])
 				}
 				y.commitMsg(wt, k.msg, k.files)
+			}
+			if c.origin != "" {
+				y.git(y.repo, "remote", "add", "origin", c.origin)
 			}
 			bin := yardrBin
 			if c.links != "" {

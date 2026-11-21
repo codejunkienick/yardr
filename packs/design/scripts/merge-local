@@ -532,7 +532,9 @@ fi
 #   <each commit's message since <base>, oldest first, its trailers removed>
 #
 #   BREAKING CHANGE: <as a commit carried it, each>
-#   Refs: <each issue the bead tracks, then each it relates to>
+#   Fixes #<n> for an issue of this repository the bead tracks, Refs #<n>
+#   for one it relates to, one line each; Refs: <url> for every other
+#   linked issue (another repository's, a pull, another source's)
 #   Yardr-Bead: <bead id>
 #   Yardr-Agent: <each distinct one on the branch, first seen first>
 #
@@ -597,21 +599,65 @@ squash_message() {
   # at or came from is listed too (kind at, was at, from), and is no issue.
   # Its error is on stdout as well.
   sq_linkjson=$("$Y" link list "$sq_bead" --json) || { ERR="listing the links of $sq_bead failed: $(printf '%s' "$sq_linkjson" | head -c 500)"; return 1; }
-  sq_refs=$(printf '%s\n' "$sq_linkjson" | awk "$SQ_UNJSON"'
-    /^  [{]/ { kind = ""; url = "" }
+  # The depot's own repository, as owner/repo, read from its origin: an
+  # issue of it that the bead links to is named short (Fixes #n, Refs #n),
+  # so the commit shows on the issue's page, where a closing word on
+  # another repository's issue could not close. No origin, or one that
+  # names no GitHub repository, leaves every link a Refs: URL: the landing
+  # never fails on identity.
+  sq_origin=$(git -C "$REPO" remote get-url origin 2>/dev/null || true)
+  sq_own=$(printf '%s' "$sq_origin" | awk '
+    {
+      u = tolower($0)
+      sub(/\.git$/, "", u)
+      p = index(u, ":")
+      if (p > 0 && substr(u, p + 1, 1) != "/" && index(substr(u, 1, p - 1), "/") == 0) {
+        # scp form, [user@]github.com:owner/repo
+        host = substr(u, 1, p - 1); sub(/^.*@/, "", host)
+        u = host == "github.com" ? substr(u, p + 1) : ""
+      } else if (u ~ /^[^:][^:]*:\/\//) {
+        # URL form, scheme://[user@]github.com/owner/repo
+        sub(/^[^:][^:]*:\/\//, "", u); sub(/^[^\/@][^\/@]*@/, "", u)
+        if (u ~ /^github\.com\//) sub(/^github\.com\//, "", u); else u = ""
+      } else u = ""
+      if (u ~ /^[^\/][^\/]*\/[^\/][^\/]*$/) print u
+    }
+  ')
+  sq_refs=$(printf '%s\n' "$sq_linkjson" | awk -v own="$sq_own" "$SQ_UNJSON"'
+    function ournum(link,   rest, n, p) {
+      # The issue number when link is an issue of this repository in fixed
+      # form, "" otherwise: github only, and owner and repo as the origin
+      # named them. A pull request keeps its URL, as does anything of
+      # another repository or source.
+      if (source != "github" || own == "") return ""
+      if (substr(link, 1, 19) != "https://github.com/") return ""
+      rest = substr(link, 20)
+      n = split(rest, p, "/")
+      if (n != 4 || p[3] != "issues" || p[4] !~ /^[0-9][0-9]*$/) return ""
+      if (p[4] + 0 == 0 || tolower(p[1] "/" p[2]) != own) return ""
+      return p[4]
+    }
+    /^  [{]/ { kind = ""; source = ""; url = "" }
     match($0, /^    "[a-z_]+": "/) {
       key = substr($0, 6, RLENGTH - 9)
       val = substr($0, RLENGTH + 1); sub(/",?$/, "", val)
       if (key == "kind") kind = val
+      if (key == "source") source = val
       if (key == "url") url = unjson(val)
     }
     /^  [}]/ {
-      if (url != "" && kind == "tracks") tracked[++nt] = url
-      if (url != "" && kind == "relates") related[++nr] = url
+      if (url != "" && kind == "tracks") { tracked[++nt] = url; tracknum[nt] = ournum(url) }
+      if (url != "" && kind == "relates") { related[++nr] = url; relnum[nr] = ournum(url) }
     }
     END {
-      for (i = 1; i <= nt; i++) print "Refs: " tracked[i]
-      for (i = 1; i <= nr; i++) print "Refs: " related[i]
+      for (i = 1; i <= nt; i++) {
+        if (tracknum[i] != "") print "Fixes #" tracknum[i]
+        else print "Refs: " tracked[i]
+      }
+      for (i = 1; i <= nr; i++) {
+        if (relnum[i] != "") print "Refs #" relnum[i]
+        else print "Refs: " related[i]
+      }
     }
   ')
 
