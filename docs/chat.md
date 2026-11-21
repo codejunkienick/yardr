@@ -440,6 +440,7 @@ stdin, and you approve or decline it. The command is one of a fixed list:
 | `peer rm <name>` | a link removed with its intakes, identities and queued mail: the card names each with its count, and the beads it sent stay and say their link is removed while the other yard stands | only the operator, with `peer add <name> <invite>` from a fresh invite |
 | `peer set <name> --url <url>` | a peer called at a new address: the card names the peer and the address now and proposed, each whole; taking the address away (`--url ""`, never called) stays in a terminal | only the operator, with `peer set` carrying the address that stood, which the card names, or `--url ""` where it had none |
 | `source set <source> calls_per_hour=<n>`, `updates_per_hour=<n>` | how many calls of a source one caller makes in an hour, and how many of them are updates | only the operator: every setting of a source is yours |
+| `source set <source> base=<name>`, `host=<host>` (either empty for the declaration's own base) | where a source's calls go: the card shows the address now and the one proposed whole, and what happens to a standing credential (re-paired with a region base at once, or held back until it is given again). Weighty (`outside`) | only the operator, with the `base=` or `host=` that stood, which the card names |
 | `source grant <source> read\|<call>\|--preset <preset> --group <group>\|--crew <crew member> [--as <user>]` | a group's sessions or a crew member may make the source's read calls, or one call by its name; several `--group` and `--crew` are one command and one change; with `--preset <name>` the preset's calls of the pack that declares the source, named on the card with the pack; with `--as <user>` the call is made as that user, and that user alone approves it | anyone, with `yardr source revoke` by the same words, one call at a time |
 | `source add <file>` | a source the file declares, new or replacing the one of its name: the ask carries the declaration and each command file it names. A new source's card shows the whole declaration; a commands-free add runs at approval, one naming commands is carried out by the server after it. A replacement's card shows each changed key whole, old and new, each command file's diff, and who a standing grant of read now reaches; the source keeps its env_file, mint_command, region base, call limits and ignored senders, and every grant stands | only the operator: a new source with `yardr source rm <name>`; a replacement by asking the old declaration again as a card |
 | `source rm <name>` | a source removed with the grants of its calls and the counts and keys the yard kept for it; the files of its commands go too, removed by the server after the approval; the file its credential is read from stays. The card counts the subscriptions, followed threads and hooks that still name it, which stay | only the operator, with `source add <file>`: its grants, settings and counts are not brought back |
@@ -516,11 +517,14 @@ card's safe shape, and a pack that yardr embeds or the packs repository
 serves at a digest
 ([users.md](users.md#the-yardmaster-for-the-operator)). A crew member's own `source add` for a name the
 yard has is refused: a replacement is proposed as a card, or typed by you.
-A source's region `base` has a door of its own where the base is the only
-change: a setup ask names it (`yardr bead ask <id> - --setup <pack> --crew
-<name> --source-base <name>`, above), and the card shows the base it will
-call. Anything else of that setting is typed, and so is a
-`host`: only the operator types one, in a terminal or on the setup card.
+A source's destination has a card of its own (`source set <source>
+base=<name>`, `host=<host>`, or either with nothing after it for the
+declaration's own base again): the card shows the address now and the
+one proposed whole, and what happens to a standing credential. A base
+alone at setup is still named there (`yardr bead ask <id> - --setup
+<pack> --crew <name> --source-base <name>`, above), and a host at setup
+is typed by the operator on that card. `env_file` and `mint_command`
+stay typed: no card shows that file or that program.
 `hook_public_url` is the exception among the addresses: it binds nothing,
 only says where the yard is reached from outside, so a crew member may
 propose it and its card shows the whole URL each hook is registered at.

@@ -42,6 +42,9 @@ func TestGeneralAskRefusals(t *testing.T) {
 		want  string
 	}{
 		{[]string{"peer", "allow", "airy", "--mail-limit", "300"}, "the specific card is the only door"},
+		{[]string{"source", "set", "crm", "base="}, "the specific card is the only door"},
+		{[]string{"source", "set", "crm", "base=eu"}, "the specific card is the only door"},
+		{[]string{"source", "set", "crm", "host=crm.example.net"}, "the specific card is the only door"},
 		{[]string{"settings", "set", "hook_public_url", "https://yard.example/my", "hooks"}, "the specific card is the only door"},
 		{[]string{"group", "add", "g3", "--runner", "manual"}, "the specific card is the only door"},
 		{[]string{"bead", "answer", "yardr-x", "1"}, "never carried"},
@@ -131,7 +134,6 @@ func TestGeneralAskFiles(t *testing.T) {
 		{"group unset of its command", []string{"group", "set", "builders", "--unset", "cmd"}},
 		{"group runner exec", []string{"group", "set", "builders", "runner=exec"}},
 		{"crew env_command", []string{"crew", "add", "jo2", "--set", "env_command=make env"}},
-		{"a source base set empty", []string{"source", "set", "crm", "base="}},
 		{"an absolute file word", []string{"group", "set", "builders", "log=/tmp/x.log"}},
 		{"literal mail text", []string{"mail", "ada", "hello there"}},
 	} {

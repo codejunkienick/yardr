@@ -227,7 +227,7 @@ A service the operator may run on a server of their own declares the address
 that server answers at under base_template, with {host} once, straight after
 https://, and the path every call is under: yardr source set <name> host=<host>
 sends the calls to it, and to the base with none set. The host is a name or an
-address with an optional port and nothing else, typed by the operator alone,
+address with an optional port and nothing else, the operator's to approve,
 and the address it makes is held to what a base is.
 
   base: https://api.crm.example.com/v2
@@ -1125,8 +1125,8 @@ names a base_template: a name or an address with an optional port and
 nothing else (crm.example.net, 192.168.1.20:8443), which fills the template,
 so the calls go to https://<host>/ and the path the declaration gives. It is
 held to the checks of a base (https, no user, query or fragment), refused
-where the file names no template, and typed by the operator alone: an agent
-is refused it, on its pane and as a card. host and base replace each other,
+where the file names no template, and the operator's to approve: an agent
+is refused it on its pane, and proposes it on a card instead. host and base replace each other,
 and host= with nothing after it is the declaration's own base again. A
 credential given for another host is held back from this one, naming both,
 until it is given again (yardr source key): setting a host never carries a

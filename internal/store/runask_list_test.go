@@ -225,6 +225,316 @@ func TestRunAskSourceLimit(t *testing.T) {
 	}
 }
 
+// destCRM is crm with a region base and a template, for the
+// destination row: the yard's crm declares neither.
+const destCRM = "name: crm\nbase: https://crm.example.com/v1\nbases:\n  eu: https://eu.crm.example.com/v1\nbase_template: https://{host}/v1\ncredential: { env: CRM_TOKEN, header: \"Authorization: Bearer {credential}\" }\nidempotency: Idempotency-Key\ncalls:\n  find: { kind: read, request: { method: GET, path: /contacts } }\n  get:\n    kind: read\n    params: { id: { type: string, pattern: \"^[0-9]{1,12}$\" } }\n    request: { method: GET, path: \"/contacts/{id}\" }\n  note:\n    kind: update\n    params:\n      id: { type: string, pattern: \"^[0-9]{1,12}$\" }\n      text: { type: string, max: 2000 }\n    request: { method: POST, path: \"/contacts/{id}/notes\", body: { text: \"{text}\" } }\n"
+
+// destYard is listYard with crm declaring a region base and a
+// template, so a destination can move.
+func destYard(t *testing.T) *askYard {
+	t.Helper()
+	y := listYard(t)
+	if _, err := y.PutSource(y.ctx, "crm.yaml", destCRM, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	return y
+}
+
+// A source's destination is asked with the address now and the one
+// proposed whole, weighed outside, approved through SetSource, and
+// taken back by the operator alone. An empty value resets to the
+// declaration's own base.
+func TestRunAskSourceDest(t *testing.T) {
+	t.Parallel()
+	y := destYard(t)
+	seq := y.ask(t, listAsk("mckean", "source set crm base=eu"), "yardmaster")
+	run := *y.asked(t, seq).Ask.Run
+	if !slices.Equal(run.Argv, []string{"source", "set", "crm", "base=eu"}) ||
+		run.Description != sourceSetDescription ||
+		len(run.Does) != 1 || run.Does[0] != "the source crm: its calls go to https://crm.example.com/v1 now, and will go to https://eu.crm.example.com/v1 (base eu)." ||
+		run.Back != "yardr source set crm base=" || run.BackBy != "only the operator" || len(run.Seen) != 1 {
+		t.Fatalf("the ask stores %+v", run)
+	}
+	if got := y.weighs(t, run); !slices.Equal(got, []string{WeightOutside}) {
+		t.Fatalf("the card weighs %v, want [outside]", got)
+	}
+	done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done.Result != "source crm: calls go to https://eu.crm.example.com/v1 (base eu)" {
+		t.Fatalf("the approval printed %q", done.Result)
+	}
+	if src := y.source(t); src.Base != "eu" || src.Host != "" {
+		t.Fatalf("the source after the approval = %+v", src)
+	}
+	evs, _ := y.EventsOfKind(y.ctx, "source_set", 10)
+	if len(evs) != 1 || evs[0].Data[SourceBase] != "eu" {
+		t.Fatalf("source_set events = %+v", evs)
+	}
+	y.approved(t, evs[0], seq)
+
+	// A host, and the two empty resets.
+	y = destYard(t)
+	seq = y.ask(t, listAsk("mckean", "source set crm host=crm.example.net"), "yardmaster")
+	run = *y.asked(t, seq).Ask.Run
+	if run.Does[0] != "the source crm: its calls go to https://crm.example.com/v1 now, and will go to https://crm.example.net/v1 (host crm.example.net)." ||
+		run.Back != "yardr source set crm host=" {
+		t.Fatalf("the host ask stores %+v", run)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if src := y.source(t); src.Host != "crm.example.net" || src.Base != "" {
+		t.Fatalf("the source after the host approval = %+v", src)
+	}
+	seq = y.ask(t, listAsk("mckean", "source set crm host="), "yardmaster")
+	if run = *y.asked(t, seq).Ask.Run; run.Back != "yardr source set crm host=crm.example.net" {
+		t.Fatalf("the host reset stores %+v", run)
+	}
+	if done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil ||
+		done.Result != "source crm: calls go to https://crm.example.com/v1" {
+		t.Fatalf("the host reset = %+v, %v", done, err)
+	}
+	if _, err := y.SetSource(y.ctx, "crm", SourceBase, "eu", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, listAsk("mckean", "source set crm base="), "yardmaster")
+	if run = *y.asked(t, seq).Ask.Run; run.Back != "yardr source set crm base=eu" {
+		t.Fatalf("the base reset stores %+v", run)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if src := y.source(t); src.Base != "" || src.Host != "" {
+		t.Fatalf("the source after the base reset = %+v", src)
+	}
+
+	// An IPv6 host rides in brackets, quoted in Command and Back.
+	seq = y.ask(t, listAsk("mckean", "source set crm host=[2001:db8::1]:8443"), "yardmaster")
+	run = *y.asked(t, seq).Ask.Run
+	if run.Command() != "yardr source set crm 'host=[2001:db8::1]:8443'" {
+		t.Fatalf("the IPv6 host command = %q", run.Command())
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, listAsk("mckean", "source set crm host="), "yardmaster")
+	if run = *y.asked(t, seq).Ask.Run; run.Back != "yardr source set crm 'host=[2001:db8::1]:8443'" {
+		t.Fatalf("the IPv6 host reset back = %q", run.Back)
+	}
+}
+
+// A destination card says what happens to a standing credential: a
+// region base with no host standing re-pairs it at once, and a host,
+// or a base that takes the source off a typed host, holds it back
+// until it is given again. Approving does as the card says.
+func TestRunAskSourceDestCredential(t *testing.T) {
+	t.Parallel()
+	held := func(t *testing.T, y *askYard) string {
+		t.Helper()
+		src := y.source(t)
+		d, err := src.Declaration()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return src.CredentialHeld(d)
+	}
+	y := destYard(t)
+	if _, err := y.SetSource(y.ctx, "crm", SourceEnvFile, "/elsewhere/crm.env", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq := y.ask(t, listAsk("mckean", "source set crm base=eu"), "yardmaster")
+	run := *y.asked(t, seq).Ask.Run
+	if len(run.Does) != 2 || !strings.Contains(run.Does[1], "re-paired") || !strings.Contains(run.Does[1], "https://eu.crm.example.com") {
+		t.Fatalf("the re-pairing card says %q", run.Does)
+	}
+	if w := y.asked(t, seq).Ask.Weight; len(w) != 1 || w[0].Class != WeightOutside || !strings.Contains(w[0].Line, "re-paired") {
+		t.Fatalf("the re-pairing weight = %+v", w)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if why := held(t, y); why != "" {
+		t.Fatalf("the re-paired credential is held: %q", why)
+	}
+
+	y = destYard(t)
+	if _, err := y.SetSource(y.ctx, "crm", SourceEnvFile, "/elsewhere/crm.env", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, listAsk("mckean", "source set crm host=crm.example.net"), "yardmaster")
+	run = *y.asked(t, seq).Ask.Run
+	if len(run.Does) != 2 || !strings.Contains(run.Does[1], "held back") || !strings.Contains(run.Does[1], "--secret crm") {
+		t.Fatalf("the held-back card says %q", run.Does)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if why := held(t, y); why == "" {
+		t.Fatal("the credential sent to a typed host is not held")
+	}
+
+	y = destYard(t)
+	if _, err := y.SetSource(y.ctx, "crm", SourceHost, "crm.example.net", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.SetSource(y.ctx, "crm", SourceEnvFile, "/elsewhere/crm.env", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, listAsk("mckean", "source set crm base=eu"), "yardmaster")
+	run = *y.asked(t, seq).Ask.Run
+	if len(run.Does) != 2 || !strings.Contains(run.Does[1], "held back") {
+		t.Fatalf("the card off a typed host says %q", run.Does)
+	}
+	if run.Back != "yardr source set crm host=crm.example.net" {
+		t.Fatalf("the card off a typed host is taken back by %q", run.Back)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if why := held(t, y); why == "" {
+		t.Fatal("the credential taken off its host is not held")
+	}
+	// Moving off a typed host back to the host the credential was
+	// actually given for (never re-keyed at the typed host) sends it
+	// immediately, not held back; moving to a second typed host names
+	// KeyedHost, not the intermediate host.
+	y = destYard(t)
+	if _, err := y.SetSource(y.ctx, "crm", SourceEnvFile, "/elsewhere/crm.env", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.SetSource(y.ctx, "crm", SourceHost, "a.example.net", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, listAsk("mckean", "source set crm host=b.example.net"), "yardmaster")
+	run = *y.asked(t, seq).Ask.Run
+	if len(run.Does) != 2 || !strings.Contains(run.Does[1], "held back from https://b.example.net") ||
+		!strings.Contains(run.Does[1], "given for https://crm.example.com") || strings.Contains(run.Does[1], "a.example.net") {
+		t.Fatalf("the second-host card says %q", run.Does)
+	}
+	seq = y.ask(t, listAsk("mckean", "source set crm host="), "yardmaster")
+	run = *y.asked(t, seq).Ask.Run
+	if len(run.Does) != 2 || !strings.Contains(run.Does[1], "was given for https://crm.example.com") || strings.Contains(run.Does[1], "held back") {
+		t.Fatalf("the return-to-keyed-host card says %q", run.Does)
+	}
+	if w := y.asked(t, seq).Ask.Weight; len(w) != 1 || w[0].Class != WeightOutside || !strings.Contains(w[0].Line, "will be sent there") {
+		t.Fatalf("the return-to-keyed-host weight = %+v", w)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if why := held(t, y); why != "" {
+		t.Fatalf("the returned credential is held: %q", why)
+	}
+
+	// An unrecorded KeyedHost (legacy store record) says the yard has
+	// no record of the host it was given for.
+	y = destYard(t)
+	if _, err := y.SetSource(y.ctx, "crm", SourceEnvFile, "/elsewhere/crm.env", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.write(func(w *wtx) error {
+		var src Source
+		if ok, err := get(w.Tx, bSources, "crm", &src); err != nil || !ok {
+			t.Fatalf("get crm = %v, %v", ok, err)
+		}
+		src.KeyedHost = ""
+		return put(w.Tx, bSources, "crm", src)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, listAsk("mckean", "source set crm host=crm.example.net"), "yardmaster")
+	run = *y.asked(t, seq).Ask.Run
+	if len(run.Does) != 2 || !strings.Contains(run.Does[1], "no record of the host it was given for") {
+		t.Fatalf("the unrecorded-keyed-host card says %q", run.Does)
+	}
+
+	// No credential stands: the card says nothing of one.
+	y = destYard(t)
+	seq = y.ask(t, listAsk("mckean", "source set crm base=eu"), "yardmaster")
+	if run = *y.asked(t, seq).Ask.Run; len(run.Does) != 1 {
+		t.Fatalf("the card with no credential says %q", run.Does)
+	}
+}
+
+// What the destination row refuses when it is asked: a base or host
+// the declaration does not allow, and a move that would change
+// nothing. env_file and mint_command stay refused as the operator's
+// alone (TestRunAskListRefusals).
+func TestRunAskSourceDestRefusals(t *testing.T) {
+	t.Parallel()
+	y := destYard(t)
+	if _, err := y.SetSource(y.ctx, "crm", SourceBase, "eu", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ command, want string }{
+		{"source set crm base=xx", "has no such base"},
+		{"source set crm base=eu", "would change nothing"},
+		{"source set crm host=https://crm.example.net", "has no scheme"},
+		{"source set crm host=crm.example.net:99999", "port is a number from 1 to 65535"},
+		{"source set crm host=crm.example.net/path", "a host is a name or an address"},
+		{"source set crm base=eu host=crm.example.net", "one source and one setting, not 3 words"},
+		{"source set erp base=eu", "source erp: not found"},
+	} {
+		if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", c.command), "yardmaster"); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("--run %q = %v, want %q", c.command, err, c.want)
+		}
+	}
+	if notes, err := y.Notes(y.ctx, y.bead); err != nil || len(notes) != 0 {
+		t.Fatalf("the refused asks left %d notes, %v", len(notes), err)
+	}
+}
+
+// A destination approval is refused when the source moved meanwhile,
+// and a stored value the declaration no longer allows fails closed
+// when the card is read again.
+func TestRunAskSourceDestStale(t *testing.T) {
+	t.Parallel()
+	y := destYard(t)
+	seq := y.ask(t, listAsk("mckean", "source set crm base=eu"), "yardmaster")
+	if _, err := y.SetSource(y.ctx, "crm", SourceHost, "crm.example.net", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y.refusedStale(t, seq, "was written when the source crm used another host")
+	if src := y.source(t); src.Base != "" || src.Host != "crm.example.net" {
+		t.Fatalf("the refused approval changed the source: %+v", src)
+	}
+
+	y = destYard(t)
+	seq = y.ask(t, listAsk("mckean", "source set crm base=eu"), "yardmaster")
+	noBases := strings.Replace(destCRM, "bases:\n  eu: https://eu.crm.example.com/v1\n", "", 1)
+	if noBases == destCRM {
+		t.Fatal("the test removes no bases")
+	}
+	if _, err := y.PutSource(y.ctx, "crm.yaml", noBases, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y.refusedStale(t, seq, "names no bases")
+	if src := y.source(t); src.Base != "" {
+		t.Fatalf("the refused approval changed the source: %+v", src)
+	}
+
+	// Re-keying at a typed host changes KeyedHost without moving
+	// EnvFile or Host: an open reset card that promised the credential
+	// would be sent is now held back and fails stale.
+	y = destYard(t)
+	if _, err := y.KeySource(y.ctx, "crm", map[string]string{"CRM_TOKEN": "tok-1"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.SetSource(y.ctx, "crm", SourceHost, "crm.example.net", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, listAsk("mckean", "source set crm host="), "yardmaster")
+	if _, err := y.KeySource(y.ctx, "crm", map[string]string{"CRM_TOKEN": "tok-2"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y.refusedStale(t, seq, "held back from https://crm.example.com")
+	if src := y.source(t); src.Host != "crm.example.net" {
+		t.Fatalf("the refused approval changed the source: %+v", src)
+	}
+}
+
 // An approval of a source's limit is refused when the limit is not the one
 // the card says it is.
 func TestRunAskSourceLimitChanged(t *testing.T) {
@@ -671,10 +981,10 @@ func TestRunAskListRefusals(t *testing.T) {
 		{"source set crm env_file=", "source set with env_file= and nothing after it is " + terminal},
 		{"source set crm mint_command=/usr/local/bin/mint", alone},
 		{"source set crm mint_command=", "source set with mint_command= and nothing after it is " + terminal},
-		{"source set crm base=eu", alone},
-		{"source set crm base=", "source set with base= and nothing after it is " + terminal},
-		{"source set crm host=crm.example.net", alone},
-		{"source set crm host=", "source set with host= and nothing after it is " + terminal},
+		{"source set crm base=eu", "names no bases"},
+		{"source set crm base=", "would change nothing"},
+		{"source set crm host=crm.example.net", "names no base_template"},
+		{"source set crm host=", "would change nothing"},
 		{"source set crm calls_per_hour=", "source set with calls_per_hour= and nothing after it is " + terminal},
 		{"source set crm calls_per_hour=200 --actor mckean", "source set with --actor is " + terminal},
 		{"source set crm calls_per_hour=200 updates_per_hour=3", "one source and one setting, not 3 words"},

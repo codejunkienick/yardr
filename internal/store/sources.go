@@ -430,10 +430,12 @@ func sourceSetting(name, key, value string) (perHour int, err error) {
 // sourceSetting has checked. by is the ask the change was approved on, nil
 // for one typed at a terminal: the event then names it (ApproveAsk).
 // sourceSetAsk is whether setting key of a source may be proposed as a
-// run ask: the two limits may, and where a credential comes from, and
-// where it is sent, is the operator's alone.
+// run ask: the two limits and where its calls go (base, host) may, on a
+// card that shows the whole address each way; where a credential comes
+// from (env_file, mint_command) stays the operator's alone, since no
+// card can show that file or that program.
 func sourceSetAsk(key string) AskClass {
-	if key == SourceCallsPerHour || key == SourceUpdatesPerHour {
+	if key == SourceCallsPerHour || key == SourceUpdatesPerHour || key == SourceBase || key == SourceHost {
 		return Askable
 	}
 	return Alone
@@ -477,11 +479,11 @@ func (w *wtx) setSource(ctx context.Context, name, key, value string, perHour in
 	case SourceHost:
 		src.Host, src.Base = value, ""
 	}
-	// Where a credential comes from and where it is sent are the operator's
-	// alone (sourceSetAsk), so their own setting of the file, or of a base
-	// where no host stood, pairs the credential with where the calls go
-	// afterwards. A declaration this build cannot read pairs it with nothing:
-	// no call of it is made either.
+	// The setting runs as the operator (typed, or approved on a card), so
+	// their setting of the file, or of a base where no host stood, pairs
+	// the credential with where the calls go afterwards. A declaration
+	// this build cannot read pairs it with nothing: no call of it is
+	// made either.
 	if key == SourceEnvFile || (key == SourceBase && !typed) {
 		if d, err := src.Declaration(); err == nil {
 			src.pairCredential(d)

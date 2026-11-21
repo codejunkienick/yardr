@@ -287,7 +287,7 @@ var runList = []runCommand{{
 }, {
 	words:       []string{"source", "set"},
 	use:         "yardr source set <source> calls_per_hour=<n>|updates_per_hour=<n>",
-	description: "Change a source's credential, per-hour call limits or region base",
+	description: sourceSetDescription,
 	parse:       parseSourceLimit,
 	check:       checkSourceLimit,
 	card:        (*wtx).sourceLimitCard,

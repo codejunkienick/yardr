@@ -854,9 +854,11 @@ keeps `base`; a declaration that no longer has a template sends the calls to
 its own base again, and a host the checks refuse sends them nowhere.
 
 Which host the credential goes to is the operator's word alone, so the host
-is typed by them in a terminal or on the setup card ([below](#a-declared-source))
-and an agent has no way to say one: `yardr source set` is refused from an
-agent's pane, and a run ask cannot propose it. A credential is given for the
+is typed by them in a terminal, on the setup card
+([below](#a-declared-source)), or on the destination card (`source set
+<source> host=<host>`, which an agent may propose and only the operator
+approves): typed at a terminal, `yardr source set` is refused from an
+agent's pane. A credential is given for the
 host the calls go to, and setting a host never carries one to it: while the
 declaration or the setting sends to another host than the one the key was
 given for, the source's calls, `yardr source check` and whatever else would
@@ -1109,16 +1111,15 @@ every name typed with a host. The asker has no flag for it: `yardr bead ask
   removed on a card too (`source rm <name>`), and its records and its
   links move to another source on one (`source move`, `link move`). Every
   other command of a source stays the operator's to type in a terminal:
-  `source set env_file=`, `mint_command=`, `base=`
-  and `host=`, and `source key` (a key is asked for with a secret ask). A
-  source's region `base` alone is changed by a setup ask instead
-  (`yardr bead ask ... --setup <pack> --source-base <name>`), and its `host`
-  is typed on that card by the operator when it asks one: the asker has no
-  flag for it, since a host decides where the credential goes. Their words
-  are a file, a path, a program or the name
-  of where the credential is sent, and a command that is approved from a
-  card has only names the yard holds, numbers and flags: `source add` is
-  the one exception, and its file's bytes are on the card.
+  `source set env_file=` and `mint_command=`, and `source key` (a key is
+  asked for with a secret ask). A source's destination moves on its own
+  card instead (`source set <source> base=<name>`, `host=<host>`, or
+  either with nothing after it), which shows the whole address each way;
+  a base alone at setup is still named there (`yardr bead ask ...
+  --setup <pack> --source-base <name>`), and a host at setup is typed on
+  that card by the operator. `env_file` and `mint_command` stay typed,
+  since no card can show that file or that program: `source add` is the
+  one exception, and its file's bytes are on the card.
 - **Its name is none of `peer`, `token`, `yardr`**, the sources yardr
   has of its own. With a `hook` key it is a hook source: a hook receives
   it (`yardr hook add acme --source acme --secret-file …`), and

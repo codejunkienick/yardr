@@ -893,6 +893,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr peer rm <name>":                                              {"peer rm airy"},
 		"yardr peer set <name> --url <url>":                                 {"peer set airy --url https://airy.example.com"},
 		"yardr source set <source> calls_per_hour=<n>|updates_per_hour=<n>": {"source set crm updates_per_hour=3"},
+		"yardr source set <source> base=<name>|host=<host>":                 {"source set crm base=eu", "source set crm host=crm.example.net", "source set crm base=", "source set crm host="},
 		"yardr source grant <source> read|<call>|--preset <preset> --group <group>|--crew <crew member> [--as <user>]": {"source grant crm note --crew yardmaster --group builders"},
 		"yardr source add <file>": {"source add " + addedFile, "source add " + replacedFile},
 		"yardr source ignore <source> --rm <id>": {
@@ -997,6 +998,30 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				// card's nobody pick, as only that pick adds one.
 				for _, y := range []*cliYard{approved, typed} {
 					seedTalkIgnored(t, y)
+				}
+			}
+			if use == "yardr source set <source> base=<name>|host=<host>" {
+				// The yard's crm declares no region bases and no
+				// template, so both yards declare them first; an
+				// empty reset then starts from the value it clears.
+				dest := strings.Replace(runCRM, "base: https://crm.example.com/v1\n", "base: https://crm.example.com/v1\nbases:\n  eu: https://eu.crm.example.com/v1\nbase_template: https://{host}/v1\n", 1)
+				if dest == runCRM {
+					t.Fatal("the test declares no destination")
+				}
+				for _, y := range []*cliYard{approved, typed} {
+					if _, err := y.st.PutSource(context.Background(), "crm.yaml", dest, "jo"); err != nil {
+						t.Fatal(err)
+					}
+					switch command {
+					case "source set crm base=":
+						if _, err := y.st.SetSource(context.Background(), "crm", store.SourceBase, "eu", "jo"); err != nil {
+							t.Fatal(err)
+						}
+					case "source set crm host=":
+						if _, err := y.st.SetSource(context.Background(), "crm", store.SourceHost, "crm.example.net", "jo"); err != nil {
+							t.Fatal(err)
+						}
+					}
 				}
 			}
 			if command == "source add "+replacedFile {

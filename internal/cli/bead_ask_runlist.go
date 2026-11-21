@@ -38,6 +38,14 @@ const askRunList = `  peer add <name> <invite>
   source set <source> calls_per_hour=<n>|updates_per_hour=<n>
       one caller makes that many calls of the source in an hour, or that
       many updates among them; a lower number too, which is the operator's
+  source set <source> base=<name>|host=<host>
+      where the source's calls go: a region base the declaration names,
+      a host that fills its base_template for a server of your own, or
+      nothing after base= or host= for the declaration's own base again;
+      the card shows the address now and the one proposed whole, and
+      what happens to a standing credential (held back until it is
+      given again, or re-paired with a region base at once); only the
+      operator takes it back (weighty, outside)
   source grant <source> read|<call>|--preset <preset> --group <group>|--crew <crew member> [--as <user>]
       a group's sessions or a crew member may make the source's read
       calls, or one call by its name; both flags repeat, and it is one
