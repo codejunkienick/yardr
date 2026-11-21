@@ -291,7 +291,7 @@ func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (res *Res
 
 // ImportRecord is the yard's record of the import as Apply writes it, but
 // for the objects a prune removed, which Apply takes out: where the pack
-// came from, the flow, frame, setup, roles and name mappings the plan
+// came from, the flow, frame, setup, section, roles and name mappings the plan
 // settled, the answers the record keeps, and the objects that are the
 // pack's, each with what a later plan reads back of it (Ident). The
 // server's reading of a pack makes the same record from the same plan, so
@@ -299,7 +299,7 @@ func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (res *Res
 // its objects too, field by field (store.PackReading.Import) and the two
 // cannot drift.
 func (p *Plan) ImportRecord(o ApplyOptions) store.PackImport {
-	rec := store.PackImport{Pack: p.Pack, Depot: p.Depot, Source: p.Dir, Auth: p.Auth, Flow: p.Flow, Setup: p.SetupFile != "", DepotRoles: p.DepotRoles, Groups: p.Groups, Crew: p.Crew, SourceBase: o.SourceBase, ApprovedBead: o.ApprovedBead, ApprovedAsk: o.ApprovedAsk}
+	rec := store.PackImport{Pack: p.Pack, Depot: p.Depot, Source: p.Dir, Auth: p.Auth, Flow: p.Flow, Setup: p.SetupFile != "", Section: p.Section, DepotRoles: p.DepotRoles, Groups: p.Groups, Crew: p.Crew, SourceBase: o.SourceBase, ApprovedBead: o.ApprovedBead, ApprovedAsk: o.ApprovedAsk}
 	for _, obj := range p.Objects {
 		po, ok := Ident(obj)
 		if !ok || (po.Kind == "route" && po.Group == "") || obj.refused(o) {

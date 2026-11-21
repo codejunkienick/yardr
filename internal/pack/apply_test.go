@@ -140,6 +140,9 @@ func TestApplyToAnEmptyYardThenAgain(t *testing.T) {
 		t.Fatalf("records = %+v, %v", recs, err)
 	}
 	rec := recs[0]
+	if rec.Section != "" {
+		t.Fatalf("record section = %q, want none: the starter carries none", rec.Section)
+	}
 	abs, _ := filepath.Abs(starter)
 	if rec.Pack != "starter" || rec.Depot != "web" || rec.Source != abs || rec.By != "me" || rec.At.IsZero() || rec.Flow != "default" ||
 		rec.Groups["builders"] != "web-builders" || rec.Groups["backlog"] != "backlog" || !reflect.DeepEqual(rec.Crew, map[string]string{"yardmaster": "boss"}) {

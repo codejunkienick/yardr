@@ -182,9 +182,12 @@ type Plan struct {
 	// is that file of the pack. Both are "" for a pack without any. check
 	// prints them after the plan and apply after the result, marked as
 	// the pack's and not yardr's.
-	Setup     string   `json:"setup,omitempty"`
-	SetupFile string   `json:"setup_file,omitempty"`
-	Notes     []string `json:"notes"`
+	Setup     string `json:"setup,omitempty"`
+	SetupFile string `json:"setup_file,omitempty"`
+	// Section is the pack's yardmaster section file, as the pack names it;
+	// "" for a pack that carries none. The record of the import keeps it.
+	Section string   `json:"section,omitempty"`
+	Notes   []string `json:"notes"`
 	// Refused is why this plan must not be applied as it is; empty when it
 	// may be.
 	Refused []string `json:"refused"`

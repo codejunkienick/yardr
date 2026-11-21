@@ -12,6 +12,15 @@ import (
 	"yardr.dev/yardr/packs"
 )
 
+// maxSection bounds a crew member's yardmaster section, and
+// maxSectionFirstLine its first line: prime appends the section whole, and
+// past its budget prints the first line alone, so the whole stays short
+// enough to read there and the first line stands as its one-liner.
+const (
+	maxSection          = 2048
+	maxSectionFirstLine = 200
+)
+
 func (b *planner) crew() error {
 	have, err := b.st.Crew(b.ctx)
 	if err != nil {
@@ -22,7 +31,31 @@ func (b *planner) crew() error {
 		return err
 	}
 	var subs []Object
+	warned := false
 	for _, pr := range b.p.Crew {
+		if pr.Section != "" {
+			if pr.Name == "yardmaster" || b.plan.Section == "" {
+				b.plan.Section = pr.Section
+			}
+			text, err := b.p.read(pr.Section)
+			if err != nil {
+				return err
+			}
+			if len(text) > maxSection {
+				b.plan.Refused = append(b.plan.Refused, fmt.Sprintf("crew %s: section %s holds %d bytes: at most %d", pr.Name, pr.Section, len(text), maxSection))
+			}
+			first, _, _ := strings.Cut(string(text), "\n")
+			switch {
+			case strings.TrimSpace(first) == "":
+				b.plan.Refused = append(b.plan.Refused, fmt.Sprintf("crew %s: section %s: its first line is empty: the first line says when the section applies", pr.Name, pr.Section))
+			case len(first) > maxSectionFirstLine:
+				b.plan.Refused = append(b.plan.Refused, fmt.Sprintf("crew %s: section %s: its first line holds %d bytes: at most %d", pr.Name, pr.Section, len(first), maxSectionFirstLine))
+			}
+		}
+		if !warned && pr.Role != "" && (pr.Name == "yardmaster" || pr.Role == "roles/yardmaster.md") {
+			warned = true
+			b.plan.Notes = append(b.plan.Notes, "a pack's yardmaster role is going away; carry a section instead")
+		}
 		name, told := b.plan.Crew[pr.Name], b.told[pr.Name]
 		i := slices.IndexFunc(have, func(r store.CrewMember) bool { return r.Name == name })
 		exists := i >= 0

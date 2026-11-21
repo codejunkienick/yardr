@@ -351,6 +351,11 @@ func TestStarterIntoAnEmptyYard(t *testing.T) {
 	if len(plan.Refused) != 0 {
 		t.Fatalf("refused: %v", plan.Refused)
 	}
+	// The starter carries its yardmaster as a role and no section: the plan
+	// warns that the role is going away, and records no section.
+	if plan.Section != "" || !slices.Contains(plan.Notes, "a pack's yardmaster role is going away; carry a section instead") {
+		t.Fatalf("section %q, notes %v: want no section and the going-away warning", plan.Section, plan.Notes)
+	}
 
 	// What linear lacks in a yard that has nothing: the source itself.
 	// Once the yard has it, the hook and the rest are still to set up.
@@ -417,6 +422,93 @@ func TestStarterIntoAnEmptyYard(t *testing.T) {
 	said(hooks.Listener{Addr: "127.0.0.1:8790", From: hooks.FromSetting, Error: "address already in use"})
 	if n := listener(); n.Status != "missing" || !strings.Contains(n.Detail, "could not listen on 127.0.0.1:8790") {
 		t.Fatalf("a taken address: %+v", n)
+	}
+}
+
+// A yardmaster section is held at the plan, which no test drove before
+// this one: over 2048 bytes, or a first line empty or over 200 bytes,
+// refuses the import at check and at apply, and a sound one stands in the
+// record of the import while the yardmaster's role still sets its prompt.
+func TestYardmasterSectionIsRefusedAndRecorded(t *testing.T) {
+	withSection := func(t *testing.T, section string) string {
+		t.Helper()
+		yaml := strings.Replace(small, "    role: roles/yardmaster.md\n", "    role: roles/yardmaster.md\n    section: sections/yardmaster.md\n", 1)
+		if yaml == small {
+			t.Fatal("the small pack has no yardmaster role line to add a section under")
+		}
+		files := smallFiles(yaml)
+		files["sections/yardmaster.md"] = section
+		return writePack(t, files)
+	}
+	planOf := func(t *testing.T, section string) (*pack.Pack, *pack.Plan, store.API, pack.Options) {
+		t.Helper()
+		st, o := yard(t)
+		p := load(t, withSection(t, section))
+		return p, build(t, st, p, o), st, o
+	}
+
+	// A sound section: read from the pack, carried by the plan, and the
+	// pack's digest moves with its bytes.
+	p, plan, st, _ := planOf(t, "When the yard is quiet.\n\nMind the held beads.\n")
+	if len(p.Crew) != 1 || p.Crew[0].Section != "sections/yardmaster.md" {
+		t.Fatalf("crew = %+v, want the yardmaster's section read", p.Crew)
+	}
+	if plan.Section != "sections/yardmaster.md" || len(plan.Refused) != 0 {
+		t.Fatalf("plan section %q, refused %v", plan.Section, plan.Refused)
+	}
+	if !slices.Contains(plan.Notes, "a pack's yardmaster role is going away; carry a section instead") {
+		t.Fatalf("notes = %v, want the going-away warning beside the section", plan.Notes)
+	}
+	_, other, _, _ := planOf(t, "When the yard is quiet.\n\nWatch the held beads.\n")
+	if other.Digest == plan.Digest {
+		t.Fatal("the digest stands while the section's bytes move: check does not pin it")
+	}
+	// At its bounds exactly (2048 bytes, a first line of 200) it stands.
+	edge := strings.Repeat("x", 200) + "\n" + strings.Repeat("y", 2048-201)
+	if _, plan, _, _ := planOf(t, edge); len(plan.Refused) != 0 || plan.Section == "" {
+		t.Fatalf("at its bounds: refused %v, section %q", plan.Refused, plan.Section)
+	}
+	// Applying it records the section's path, and the role the same pack
+	// carries still sets the yardmaster's prompt, as it did before.
+	apply(t, st, plan, nil)
+	recs, err := st.Packs(ctx)
+	if err != nil || len(recs) != 1 || recs[0].Section != "sections/yardmaster.md" {
+		t.Fatalf("records = %+v, %v, want the section's path recorded", recs, err)
+	}
+	master, err := st.GetCrew(ctx, "yardmaster")
+	if err != nil || master.Config["prompt"] == "" || !strings.HasSuffix(fmt.Sprint(master.Config["prompt"]), filepath.Join("roles", "yardmaster.md")) {
+		t.Fatalf("yardmaster = %+v, %v: its role no longer sets its prompt", master, err)
+	}
+
+	// Each way a section is too much for prime refuses the plan, and
+	// applying such a plan changes nothing.
+	for _, c := range []struct{ name, section, want string }{
+		{"over 2048 bytes", "When it is quiet.\n" + strings.Repeat("x", 2048), "at most 2048"},
+		{"an empty first line", "\nMind the held beads.\n", "its first line is empty"},
+		{"a first line over 200 bytes", strings.Repeat("x", 201) + "\nMind the held beads.\n", "at most 200"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, plan, st, _ := planOf(t, c.section)
+			if !slices.ContainsFunc(plan.Refused, func(r string) bool { return strings.Contains(r, c.want) }) {
+				t.Fatalf("refused = %v, want one with %q", plan.Refused, c.want)
+			}
+			if _, err := pack.Apply(ctx, st, plan, pack.ApplyOptions{Answers: answered(t, plan, nil), Actor: "me"}); err == nil || !strings.Contains(err.Error(), "the import is refused") {
+				t.Fatalf("apply = %v, want the refusal", err)
+			}
+			if recs, err := st.Packs(ctx); err != nil || len(recs) != 0 {
+				t.Fatalf("records = %+v, %v after a refused apply", recs, err)
+			}
+		})
+	}
+
+	// A section file the pack does not declare is invisible to the plan:
+	// undeclared, it is neither held nor recorded.
+	st, o := yard(t)
+	files := smallFiles(small)
+	files["sections/yardmaster.md"] = strings.Repeat("x", 3000)
+	plan = build(t, st, load(t, writePack(t, files)), o)
+	if plan.Section != "" || len(plan.Refused) != 0 {
+		t.Fatalf("undeclared: section %q, refused %v, want neither", plan.Section, plan.Refused)
 	}
 }
 

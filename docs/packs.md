@@ -230,6 +230,7 @@ sources:
 | `groups.<group>.binds_as` | optional, for a group with `agent:`: another agent group of the pack, declared before this one, whose agent, model and permission arguments this group gets, so that the import asks nothing for it. The starter's `security-reviewers` bind as `reviewers`: the second review is run by the agent the first is, unless the import is given `--bind security-reviewers=<kind>[:<model>]`. A group the yard has already keeps what it has, as any does ([below](#yardr-pack-apply)) |
 | `groups.<group>.calls.<source>` | optional, for a group with `agent:` or `run:`: the calls of a declared source the group's sessions should be able to make with `yardr call`: `read` for every read call, and calls by name, which is the one way an update is asked for (`calls: { crm: [read, note] }`). The pack only asks: the import puts it to the yard's operator ([Calls of a declared source](#how-a-pack-maps-to-the-yard)) |
 | `crew.<name>.role` | the crew member's role file |
+| `crew.<name>.section` | optional: the yardmaster section file a crew member's prime appends (`sections/yardmaster.md` by convention): at most 2048 bytes, its first line at most 200 bytes saying when the section applies. An import is refused for a larger section or an empty or overlong first line, and the record of the import keeps the file's path |
 | `crew.<name>.hears.events` | event kinds from the yard itself |
 | `crew.<name>.hears.stages` | a bead entering one of these stages, which a flow of the pack must have |
 | `crew.<name>.hears.done` | `true`: a bead becoming done |

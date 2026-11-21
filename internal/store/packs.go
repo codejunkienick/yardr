@@ -59,6 +59,11 @@ type PackImport struct {
 	// what a setup takes (pack.yaml's setup): a crew member's prime names
 	// them by the command that prints them (yardr pack show <pack>).
 	Setup bool `json:"setup,omitempty"`
+	// Section is the pack's yardmaster section file, as the pack names it
+	// (crew's section:), "" for an import whose pack carries none. Prime
+	// appends it past its budget; a record written before the field reads
+	// back with it empty, which is the truth about that import.
+	Section string `json:"section,omitempty"`
 	// DepotRoles says the import was told to leave a group or crew member its
 	// depot's own role (--depot-roles); otherwise the pack's roles were set, the
 	// default. The next import repeats the choice unless told anew.

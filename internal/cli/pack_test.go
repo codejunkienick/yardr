@@ -442,6 +442,37 @@ func TestPackCheckRefusedPlanFails(t *testing.T) {
 		!strings.Contains(out, "40 to create") {
 		t.Fatalf("out:\n%s", out)
 	}
+	// The same check warns of the starter's yardmaster role, which still
+	// applies, and refuses a yardmaster section over its bounds.
+	if !strings.Contains(out, "a pack's yardmaster role is going away; carry a section instead") {
+		t.Fatalf("the check does not warn of the yardmaster role:\n%s", out)
+	}
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS("../../packs/starter")); err != nil {
+		t.Fatal(err)
+	}
+	yamlFile := filepath.Join(dir, "pack.yaml")
+	text, err := os.ReadFile(yamlFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	with := strings.Replace(string(text), "    role: roles/yardmaster.md\n", "    role: roles/yardmaster.md\n    section: sections/yardmaster.md\n", 1)
+	if with == string(text) {
+		t.Fatal("the starter's yardmaster has no role line to add a section under")
+	}
+	if err := os.WriteFile(yamlFile, []byte(with), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "sections"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sections", "yardmaster.md"), []byte("When it is quiet.\n"+strings.Repeat("x", 2048)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err = run(t, a.packCmd(), "check", dir, "--depot", "web")
+	if !errors.Is(err, errCheckFailed) || !strings.Contains(out, "an import would be refused") || !strings.Contains(out, "section sections/yardmaster.md holds") {
+		t.Fatalf("an oversized section: err = %v\nout:\n%s", err, out)
+	}
 }
 
 // starterFlags are the flags that answer everything the starter pack asks

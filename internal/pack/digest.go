@@ -47,12 +47,16 @@ func (p *Pack) read(rel string) ([]byte, error) { return p.reads.file(rel) }
 
 // named are the files the pack is made of, as slash paths in its directory,
 // sorted, each once: pack.yaml, and every file it names: the roles and
-// scripts of its groups and crew members, the stage files of all its flows,
-// its setup notes, its declarations and the programs of their commands. They
+// scripts of its groups and crew members and their sections, the stage
+// files of all its flows, its setup notes, its declarations and the
+// programs of their commands. They
 // are the pack's, not a plan's: a flow the depot does not follow has its
 // stage files here too.
 func (p *Pack) named() []string {
 	out := append([]string{File, p.Setup}, p.Files()...)
+	for _, m := range p.Crew {
+		out = append(out, m.Section)
+	}
 	for _, f := range p.Flows {
 		for _, s := range f.Stages {
 			out = append(out, s.File)

@@ -2086,7 +2086,7 @@ internal/cli/updown.go 1302 yard up and down with their handoffs
 internal/dispatch/dispatch.go 1501 the daemon routing pass and its runners
 internal/dispatch/harnesslogin.go 1094 harness login leading and onboarding marks
 internal/pack/export.go 1047 pack export and its object shapes
-internal/pack/pack.go 1777 pack reading, checking and its shapes
+internal/pack/pack.go 1776 pack reading, checking and its shapes
 internal/rpc/user.go 1053 the user server and callers (pairing is userpair.go, envelopes usere2e.go)
 internal/source/declaration.go 1223 source declarations, credentials and calls
 internal/standin/standin.go 1508 the fake Linear, GitHub and edge APIs
