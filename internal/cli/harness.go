@@ -256,7 +256,11 @@ func printHarness(w io.Writer, h store.Harness, has bool) {
 	}
 	fmt.Fprintln(w, "\nFlags")
 	fmt.Fprintf(w, "  unattended: %s\n", args(h.Flags.Unattended))
-	fmt.Fprintf(w, "  model flag: %s\n", or(h.Flags.Model, "--model (runner default)"))
+	if h.Flags.Model != "" {
+		fmt.Fprintf(w, "  model flag: %s\n", h.Flags.Model)
+	} else {
+		fmt.Fprintln(w, "  model flag: none: a group of this kind takes no model=")
+	}
 	if e := h.Flags.Effort; e != nil {
 		fmt.Fprintf(w, "  effort:     %s  (a group's effort=<level>; levels: %s)\n", strings.Join(e.Args, " "), strings.Join(e.Levels, ", "))
 		if len(e.Aliases) > 0 {
@@ -282,7 +286,11 @@ func printHarness(w io.Writer, h store.Harness, has bool) {
 	}
 	fmt.Fprintln(w, "\nModels it offers")
 	if len(h.Offers) == 0 {
-		fmt.Fprintln(w, "  none named: --model takes any id")
+		if h.Flags.Model == "" {
+			fmt.Fprintln(w, "  none: a group of this kind takes no model=")
+		} else {
+			fmt.Fprintln(w, "  none named: --model takes any id")
+		}
 	}
 	for _, o := range h.Offers {
 		line := "  " + o.Model

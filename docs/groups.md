@@ -924,7 +924,11 @@ wherever the bead is shown and tells no one: there is no event for it.
 
 A herdr group's `model` goes to its agent as `--model`; a bead's
 `--meta model=…` replaces it for that bead, in every herdr group that works
-it. Nothing but the agent's provider knows whether a model may be used: a
+it. A kind whose file names no model flag (opencode: its interactive
+command takes none in 2.x) refuses the key where the group is added or set,
+and a start with one set anyway fails with the remedy instead of timing
+out; opencode takes its model from its own configuration. Nothing but the
+agent's provider knows whether a model may be used: a
 name the agent lists may be refused for the account, and one it does not
 list may run. An agent given a model it may not use still starts; the
 refusal comes with its first request, in its pane, and it then sits idle.

@@ -204,6 +204,7 @@ func configProblems(of ConfigOf, name, runner string, cfg, old map[string]any) [
 	}
 	if runner == "herdr" && of == GroupConfig {
 		typed = append(typed, effortProblems(subject, cfg, old)...)
+		typed = append(typed, modelProblems(subject, cfg, old)...)
 	}
 	out := append(typed, unknown...)
 	if cmd, _ := cfg["cmd"].(string); runner == "exec" && of == GroupConfig && cmd == "" && len(typed) == 0 {

@@ -569,7 +569,16 @@ func TestDelegatedRefusals(t *testing.T) {
 			cases["group "+kind+" "+p.Label] = struct {
 				run  func() error
 				want string
-			}{func() error { return setGroup(map[string]any{"kind": kind, "args": args}) }, want}
+			}{func() error {
+				edit := store.GroupEdit{Set: map[string]any{"kind": kind, "args": args}}
+				if store.HarnessNoModelFlag[kind] {
+					// The group holds a model, which this kind takes no
+					// flag for; the leg carries the unset, as it does model.
+					edit.Unset = []string{"model"}
+				}
+				_, err := y.api.SetGroup(ctx, "builders", edit, "yardmaster")
+				return err
+			}, want}
 			cases["crew "+kind+" "+p.Label] = struct {
 				run  func() error
 				want string

@@ -5,7 +5,9 @@ label: opencode
 install: https://opencode.ai
 
 flags:
-  model: --model
+  # No model flag: the interactive command takes none in 2.x (2.3.2 prints
+  # its help and exits on --model, issue 41), so a group of this kind takes
+  # no model= and 1.x's flag goes unserved.
   version: [--version]
   one_shot: [run]
   permissions:

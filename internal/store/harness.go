@@ -154,6 +154,8 @@ func parseSGRColor(colour string) (string, error) {
 // taken from the agent's own --help, or run against the installed tool.
 type Flags struct {
 	// Model is the flag that selects a model when yardr starts an agent.
+	// "" when the kind takes none: its interactive command has no such
+	// flag, and a group of the kind refuses model=.
 	Model string `yaml:"model" json:"model,omitempty"`
 	// Effort is how the kind takes a reasoning effort, which a group names
 	// as effort=<level>; yardr adds it to the agent's arguments at start.

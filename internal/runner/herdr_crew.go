@@ -172,6 +172,11 @@ func (h *Herdr) StartCrew(ctx context.Context, r store.CrewMember, user string) 
 	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
 		return nil, fmt.Errorf("crew member directory %q does not exist", dir)
 	}
+	// Before anything is made: a model the kind takes no flag for starts
+	// nothing until it is unset (modelFlagRefused).
+	if err := modelFlagRefused("crew member "+r.Name, "the crew member's kind", r.Config, "", ""); err != nil {
+		return nil, err
+	}
 	secrets, err := h.crewSessionEnv(ctx, r, dir, user)
 	if err != nil {
 		return nil, err

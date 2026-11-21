@@ -300,9 +300,9 @@ func TestStartCrewSetsMemoryOff(t *testing.T) {
 	}
 }
 
-// A file others can read, or none at all, refuses the start before herdr is
-// asked for anything, as Blocked, and the error shows no value.
-func TestEnvFileRefusedBlocksStart(t *testing.T) {
+// An env file the session cannot read, or a model the kind has no flag for,
+// refuses the start before herdr is asked for anything, as Blocked.
+func TestStartRefusalsBlockBeforeHerdr(t *testing.T) {
 	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "nope.env")
 	for name, path := range map[string]string{"0644": envFileT(t, 0o644), "0640": envFileT(t, 0o640),
@@ -325,6 +325,49 @@ func TestEnvFileRefusedBlocksStart(t *testing.T) {
 		}
 		if strings.Contains(logs.String(), envSecret) {
 			t.Errorf("%s: logs show the value", name)
+		}
+	}
+
+	// A group's model, a bead's override, a dir depot's session and a crew
+	// member's model all fail fast with the remedy instead of timing out.
+	for _, c := range []struct {
+		name     string
+		cfg      map[string]any
+		metadata map[string]any
+		dirDepot bool
+		crew     bool
+		want     string
+	}{
+		{"the group's model", map[string]any{"kind": "opencode", "model": "opencode/big-pickle"}, nil, false, false,
+			"group g: model is for the kinds whose harness file names a model flag, and opencode is not"},
+		{"the bead's model", map[string]any{"kind": "opencode"}, map[string]any{"model": "opus"}, false, false,
+			"group g: bead yardr-13 carries model=opus, but opencode names no model flag"},
+		{"a dir depot's model", map[string]any{"kind": "opencode", "model": "opencode/big-pickle"}, nil, true, false,
+			"group g: model is for the kinds whose harness file names a model flag, and opencode is not"},
+		{"a crew member's model", map[string]any{"kind": "opencode", "model": "opencode/big-pickle"}, nil, false, true,
+			"crew member r: model is for the kinds whose harness file names a model flag, and opencode is not"},
+	} {
+		h, calls, _ := envHerdr(t, "")
+		var err error
+		if c.crew {
+			_, err = h.StartCrew(context.Background(), store.CrewMember{Name: "r", Dir: t.TempDir(), Config: c.cfg}, "")
+		} else {
+			depot := &store.Depot{Name: "yard", Path: t.TempDir(), Base: "main"}
+			if c.dirDepot {
+				depot.Kind = store.DepotDir
+			}
+			_, err = h.Start(context.Background(), dispatch.Job{
+				Bead:  store.Bead{ID: "yardr-13", Stage: "new", Metadata: c.metadata},
+				Group: store.Group{Name: "g", Config: c.cfg}, Depot: depot,
+			})
+		}
+		if err == nil || !dispatch.IsBlocked(err) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want Blocked naming %q", c.name, err, c.want)
+		} else if !strings.Contains(err.Error(), "Opencode takes its model from its own configuration") {
+			t.Errorf("%s: %v, want what opencode takes instead", c.name, err)
+		}
+		if got := readCalls(t, calls); got != "" {
+			t.Errorf("%s: herdr called despite the refusal:\n%s", c.name, got)
 		}
 	}
 }

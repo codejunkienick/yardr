@@ -28,8 +28,14 @@ func TestHarnessFiles(t *testing.T) {
 		if modelLists[h.Kind] == nil {
 			t.Errorf("%s has a file and no way to list its models (modelLists)", h.Kind)
 		}
-		if h.Flags.Model != "--model" {
-			t.Errorf("%s model flag %q, want --model", h.Kind, h.Flags.Model)
+		wantModel := "--model"
+		if h.Kind == "opencode" {
+			// opencode 2.x takes --model on run and mini only, not on the
+			// interactive command yardr starts, so its file names none.
+			wantModel = ""
+		}
+		if h.Flags.Model != wantModel {
+			t.Errorf("%s model flag %q, want %q", h.Kind, h.Flags.Model, wantModel)
 		}
 	}
 	if want := []string{"claude", "codex", "grok", "kimi", "opencode", "pi", "agy", "kiro", "muse"}; !slices.Equal(kinds, want) {

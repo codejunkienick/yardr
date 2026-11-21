@@ -193,6 +193,12 @@ func (h *Herdr) Start(ctx context.Context, job dispatch.Job) (map[string]any, er
 	if job.Depot == nil {
 		return nil, fmt.Errorf("herdr runner needs the bead to have a depot")
 	}
+	// Before anything is made: a model the kind takes no flag for starts
+	// nothing until it is unset (modelFlagRefused).
+	override, _ := job.Bead.Metadata["model"].(string)
+	if err := modelFlagRefused("group "+job.Group.Name, "the group's kind", job.Group.Config, override, job.Bead.ID); err != nil {
+		return nil, err
+	}
 	hookEnv, err := commitHookEnv(h.YardHome)
 	if err != nil {
 		return nil, err
