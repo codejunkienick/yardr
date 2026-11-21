@@ -43,6 +43,7 @@ func TestSecretReach(t *testing.T) {
 		{"a hook's signing secret", AskSecret{Source: "crm", Hook: "crm-events"}, []string{
 			"lands in: hooks/crm-events.secret in the yard's home, mode 0600",
 			"read by: the yard, to check each delivery to POST /hooks/crm-events",
+			"replaces: what the file holds; where the hook stands already, deliveries signed with the old secret are refused from then on",
 			"not reached: any env_file, call or thread command",
 		}},
 		{"a waiting login's input", AskSecret{Login: "claude-a1b2", Env: []string{"INPUT"}}, nil},

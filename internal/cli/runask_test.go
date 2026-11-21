@@ -1931,7 +1931,7 @@ func TestBeadAskHookSetup(t *testing.T) {
 	}
 	// It says what the value reaches: the yard checks each delivery with it,
 	// and no env_file, call or thread command reads it.
-	if want := "\nread by: the yard, to check each delivery to POST /hooks/linear\nnot reached: any env_file, call or thread command\n"; !strings.HasSuffix(out, want) {
+	if want := "\nread by: the yard, to check each delivery to POST /hooks/linear\nreplaces: what the file holds; where the hook stands already, deliveries signed with the old secret are refused from then on\nnot reached: any env_file, call or thread command\n"; !strings.HasSuffix(out, want) {
 		t.Fatalf("the giving printed %q, want it to end with %q", out, want)
 	}
 	out, err = y.as(t, "jo", "answer", b.ID, "2", "--approve")

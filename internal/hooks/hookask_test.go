@@ -136,4 +136,73 @@ calls:
 			t.Fatalf("note %d holds the secret", n.Seq)
 		}
 	}
+
+	// Rotation on the same receiver, with no restart: the secret file
+	// goes, a delivery is refused and the hook reads blocked, the
+	// standing hook is rotated by a fresh secret card, and the next
+	// delivery signed with the new secret is taken and unblocks it,
+	// while one signed with the old secret is refused.
+	if err := os.Remove(hook.SecretFile); err != nil {
+		t.Fatal(err)
+	}
+	if code := post("ask-blocked", ""); code != http.StatusServiceUnavailable {
+		t.Fatalf("a delivery with no secret file = %d, want 503", code)
+	}
+	hook, err = st.GetHook(ctx, "linear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(hook.Blocked, "no such file") {
+		t.Fatalf("the hook blocked for %q", hook.Blocked)
+	}
+	const rotated = "linear-rotated-signing-secret"
+	rotateSeq, err := st.AddAsk(ctx, b.ID, store.Ask{Question: "The new signing secret for Linear?", To: "me",
+		Context: []string{"the hook stands; this replaces the secret it verifies with"},
+		Secret:  &store.AskSecret{Source: "linear", Hook: "linear"}}, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GiveSecret(ctx, b.ID, rotateSeq, map[string]string{"LINEAR_SIGNING_SECRET": rotated}, "me", true); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(hook.SecretFile); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("the rotated file: %v, %v", st, err)
+	}
+	postKey := func(key, id string) int {
+		body := fmt.Sprintf(`{"webhookTimestamp":%d,"type":"Issue","action":"create","data":{"id":"uuid-1"}}`, time.Now().UnixMilli())
+		req, err := http.NewRequest(http.MethodPost, srv.URL+"/hooks/linear", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Linear-Signature", sign(key, []byte(body)))
+		req.Header.Set("Linear-Delivery", id)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := postKey(rotated, "rot-new"); code != http.StatusOK {
+		t.Fatalf("a delivery signed with the new secret = %d, want 200", code)
+	}
+	hook, err = st.GetHook(ctx, "linear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hook.Blocked != "" {
+		t.Fatalf("the hook reads blocked for %q after the new secret took a delivery", hook.Blocked)
+	}
+	if code := postKey(secret, "rot-old"); code != http.StatusUnauthorized {
+		t.Fatalf("a delivery signed with the old secret = %d, want 401", code)
+	}
+	notes, err = st.Notes(ctx, b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range notes {
+		if strings.Contains(n.Text, rotated) {
+			t.Fatalf("note %d holds the rotated secret", n.Seq)
+		}
+	}
 }

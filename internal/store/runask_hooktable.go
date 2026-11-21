@@ -530,9 +530,11 @@ func (w *wtx) hookTableCard(run AskRun, asking bool) (AskRun, error) {
 	} else if wasUnknown != "" {
 		does = append(does, fmt.Sprintf("it has no identity hearing now; its stored --unknown %s was inactive.", wasUnknown))
 	}
-	does = append(does,
-		fmt.Sprintf("the signing secret stays in %s (mode 0600), the file the hook stands with; the value is in no note, event or answer, and rotating it is the operator's in a terminal.", standing.SecretFile),
-	)
+	secretLine := fmt.Sprintf("the signing secret stays in %s (mode 0600), the file the hook stands with; the value is in no note, event or answer, and rotating it is the operator's in a terminal.", standing.SecretFile)
+	if standing.SecretFile == HookSecretFile(w.home, name) {
+		secretLine = fmt.Sprintf("the signing secret stays in %s (mode 0600), the file the hook stands with; the value is in no note, event or answer, and rotating it uses the hook's own secret card (--secret-hook %s --source %s).", standing.SecretFile, name, sourceName)
+	}
+	does = append(does, secretLine)
 	does = append(does, hookTableSection(&standing, proposed)...)
 	return hookTableSized(run, name, sourceName, does, hookTableBack(standing), "only the operator", seenMap, nil)
 }

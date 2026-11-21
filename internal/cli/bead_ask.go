@@ -227,11 +227,11 @@ The yard's server writes it to the file it owns for the hook,
 value is in no note, event, mail, brief or pane, as for --secret, and the
 card says it is read to check each delivery of the hook and by no call or
 thread command. It is asked of the operator, takes no --env, no --for-user,
-no --for-crew and no --as, and is refused for a source the yard does not declare, one whose
-declaration has no hook key, and a hook the yard has already. The hook itself
-is a second ask on the same bead (--run hook add <hook> --source <source>, or
-R: on stdin), asked after this one: the operator gives the secret first, then approves the
-hook, whose approval runs only with the secret standing in its file.
+no --for-crew and no --as, and is refused for a source the yard does not declare, one whose declaration has no hook key,
+a hook that serves another source, or a standing hook with a custom secret file. A standing hook that uses the yard's
+file is rotated by this ask: giving replaces what the file holds. For a new hook, this is the first ask; the hook itself
+is the second ask on the same bead (--run hook add <hook> --source <source>, or R: on stdin): the operator gives the
+secret first, then approves the hook, whose approval runs only with the secret standing in its file.
 
 --run <command>, or R: <command> on stdin, proposes one yardr command that is
 the operator's to give, for the operator to approve: a crew member that needs it asks this way instead
@@ -588,7 +588,7 @@ what the person asked does, and this is the asker's own.`,
 			case c.Flags().Changed("run") && c.Flags().Changed("secret-login"):
 				return fmt.Errorf("--run proposes a command and --secret-login asks for a value: one of the two")
 			case c.Flags().Changed("run") && c.Flags().Changed("secret-hook"):
-				return fmt.Errorf("--run proposes a command and --secret-hook asks for a value: one of the two; ask for the hook's secret and the hook as two asks, the secret first")
+				return fmt.Errorf("--run proposes a command and --secret-hook asks for a value: one of the two; for a new hook, use two asks with the secret first")
 			case c.Flags().Changed("setup") && c.Flags().Changed("run-word"):
 				return fmt.Errorf("--setup sets up a pack and --run-word gives a general card's words: one of the two")
 			case (c.Flags().Changed("depot-push") || c.Flags().Changed("depot-push-off")) && c.Flags().Changed("run-word"):

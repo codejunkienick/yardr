@@ -50,8 +50,9 @@ import (
 //
 // An ask for a hook's signing secret (AskSecret.Hook) is given the same
 // way into the hook's secret file the yard owns (giveHookSecret), by the
-// operator alone: the hook the ask names must still be the yard's to
-// add, and the hook add that names the file is a second ask.
+// operator alone: a hook that stands is rotated only where it still
+// serves the source and names that file. For a new hook, hook add is a
+// second ask; for a standing hook, this ask rotates the secret in place.
 //
 // An ask for a waiting login's input (AskSecret.Login) is handed to the
 // login that waits under its reference (LoginWait) and goes to no file: the
@@ -223,10 +224,20 @@ func (w *wtx) giveSecret(ctx context.Context, s *Store, home, id string, ask uin
 // rename last, so the store never says "gave" of a value the file does
 // not hold, and a commit that fails after the rename leaves the value
 // in the file with the ask open (KeyNotRecorded, through k). It refuses
-// a hook the yard has taken since the ask, as askedHookSecret refused
-// one it had then: the hook that stands names its own secret file.
+// a hook that has been added, moved to another source or repointed to a
+// custom file since the ask, as askedHookSecret refuses one that
+// stands so. It clears no Blocked: the receiver reads the file on every
+// delivery and clears it there.
 func (w *wtx) giveHookSecret(home string, sec *AskSecret, src *Source, values map[string]string, k *sourceKey) error {
-	if w.Bucket(bHooks).Get([]byte(sec.Hook)) != nil {
+	var standing Hook
+	had, err := get(w.Tx, bHooks, sec.Hook, &standing)
+	if err != nil {
+		return err
+	}
+	switch {
+	case had && standing.Source != sec.Source:
+		return fmt.Errorf("hook %s is in the yard already: it serves the source %s, not %s", sec.Hook, standing.Source, sec.Source)
+	case had && standing.SecretFile != HookSecretFile(home, sec.Hook):
 		return fmt.Errorf("hook %s is in the yard already: its signing secret is the file it names, changed in a terminal", sec.Hook)
 	}
 	d, err := src.Declaration()

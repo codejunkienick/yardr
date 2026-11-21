@@ -41,6 +41,7 @@ func (s AskSecret) Reach() []string {
 		return []string{
 			fmt.Sprintf("lands in: hooks/%s.secret in the yard's home, mode 0600", s.Hook),
 			fmt.Sprintf("read by: the yard, to check each delivery to POST /hooks/%s", s.Hook),
+			"replaces: what the file holds; where the hook stands already, deliveries signed with the old secret are refused from then on",
 			"not reached: any env_file, call or thread command",
 		}
 	case s.User != "":

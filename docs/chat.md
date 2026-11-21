@@ -410,11 +410,13 @@ value the service signs its webhooks with. Its line reads `a secret: the
 signing secret for the hook <hook> (POST /hooks/<hook>), for the source
 <source> (…)`, the yard's server writes it to `<home>/hooks/<hook>.secret`
 (mode 0600), which the hook then names, and it is refused for a source the
-yard does not declare, one whose declaration has no hook key, and a hook the
-yard has already. A hook is set up by two asks on one bead, this one first:
-give the secret here, then approve the hook's own run ask below. Before
+yard does not declare, one whose declaration has no hook key, a hook that
+serves another source, and a standing hook with a custom secret file. A new
+hook is set up by two asks on one bead, this one first: give the secret here,
+then approve the hook's own run ask below. Before
 approving the hook, giving again replaces the secret file; once the hook
-exists, changing its secret stays in a terminal. If the yard says the value is
+stands with the yard's file, a fresh secret ask rotates it the same way, and
+a file that breaks the rule (open to others, or a link) is refused, not repaired. If the yard says the value is
 written and could not be recorded, give it again. Words, a pick, and a
 decline's words are refused on such an ask and kept nowhere, so the value
 cannot land in a note by mistake: `--later` puts it aside as any ask, and
@@ -491,8 +493,8 @@ file its reverse.
 
 A hook's replacement rides the `hook add` card with `--as`, `--map`,
 `--says` and `--makes` (the [`hook add` row](#questions-for-you) above);
-only a hook with a secret file of its own, or a table past 8192 bytes,
-stays typed. Anything else that is the operator's is still typed by you:
+only changing a custom secret file, or a table past 8192 bytes, stays typed.
+Anything else that is the operator's is still typed by you:
 a source's `env_file` and
 `mint_command`, taking a
 peer's identity back (`peer identity --rm`), a user's `env_file`,

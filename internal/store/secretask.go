@@ -321,11 +321,13 @@ func hookSecretEnv(hook string) string {
 // of the source d declares, asked of to, and answers it as the ask
 // stores it: the hook, the source by its own name, the one name the
 // value is given under and the host. It refuses a hook name no hook
-// may take, a hook the yard has already (its replacement, secret
-// included, stays the operator's in a terminal), a source whose
-// declaration has no hook key, a user beside the hook, and anyone but
-// the operator as the one asked: giving is the operator's alone, as
-// adding the hook is.
+// may take, a source whose declaration has no hook key, a user beside
+// the hook, and anyone but the operator as the one asked: giving is
+// the operator's alone, as adding the hook is. A hook that stands is
+// asked for only where it serves this source from the file the yard
+// owns for it (HookSecretFile), which rotates its secret; a hook that
+// serves another source, naming it, or names a custom file keeps the
+// terminal refusal.
 func (w *wtx) askedHookSecret(d *source.Declaration, hook string, sec AskSecret, to string) (*AskSecret, error) {
 	switch {
 	case strings.TrimSpace(sec.User) != "":
@@ -341,7 +343,15 @@ func (w *wtx) askedHookSecret(d *source.Declaration, hook string, sec AskSecret,
 	case d.Hook.RegistersSecret():
 		return nil, fmt.Errorf("source %s registers its webhook itself (call %s): the yard makes the signing secret for hook %s, and no secret is typed: ask the hook alone (the run ask hook add %s --source %s)", d.Name, d.Hook.Register.Call, hook, hook, d.Name)
 	}
-	if w.Bucket(bHooks).Get([]byte(hook)) != nil {
+	var standing Hook
+	had, err := get(w.Tx, bHooks, hook, &standing)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case had && standing.Source != d.Name:
+		return nil, fmt.Errorf("hook %s is in the yard already: it serves the source %s, not %s", hook, standing.Source, d.Name)
+	case had && standing.SecretFile != HookSecretFile(w.home, hook):
 		return nil, fmt.Errorf("hook %s is in the yard already: replacing it, secret included, is the operator's to type in a terminal (yardr hook add %s --source %s --secret-file <file>)", hook, hook, d.Name)
 	}
 	ops, err := operatorsIn(w.Tx)

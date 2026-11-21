@@ -544,12 +544,46 @@ func TestHookAskRefusals(t *testing.T) {
 		t.Fatalf("a secret ask for a hook the yard has = %v", err)
 	}
 	replaced := y.ask(t, hookRunAsk("hook add linear --source linear"), "yardmaster")
-	if does := strings.Join(y.asked(t, replaced).Ask.Run.Does, "\n"); !strings.Contains(does, "it replaces the hook linear:") {
+	if does := strings.Join(y.asked(t, replaced).Ask.Run.Does, "\n"); !strings.Contains(does, "it replaces the hook linear:") ||
+		!strings.Contains(does, "rotating it is the operator's in a terminal.") {
 		t.Fatalf("a run ask for a hook the yard has says:\n%s", does)
 	}
 
+	// A hook that serves another source: the ask names that source.
 	y = hookYard(t)
+	if _, err := y.PutSource(y.ctx, "tracker.yaml", trackerDecl, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.PutHook(y.ctx, Hook{Name: "linear", Source: "tracker", SecretFile: HookSecretFile(y.home, "linear")}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.AddAsk(y.ctx, y.bead, hookSecretAsk("linear", "linear"), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "hook linear is in the yard already") ||
+		!strings.Contains(err.Error(), "it serves the source tracker") {
+		t.Fatalf("a secret ask for a hook serving another source = %v", err)
+	}
+
+	// A hook moved to another source since the ask: the giving names
+	// that source and writes nothing.
+	y = hookYard(t)
+	if _, err := y.PutSource(y.ctx, "tracker.yaml", trackerDecl, "mckean"); err != nil {
+		t.Fatal(err)
+	}
 	seq := y.ask(t, hookSecretAsk("linear", "linear"), "yardmaster")
+	if _, err := y.PutHook(y.ctx, Hook{Name: "linear", Source: "tracker", SecretFile: HookSecretFile(y.home, "linear")}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.GiveSecret(y.ctx, y.bead, seq,
+		map[string]string{"LINEAR_SIGNING_SECRET": hookSecretValue}, "mckean", true); err == nil ||
+		!strings.Contains(err.Error(), "it serves the source tracker") {
+		t.Fatalf("giving after the hook moved source = %v", err)
+	}
+	if _, err := os.Lstat(HookSecretFile(y.home, "linear")); !os.IsNotExist(err) {
+		t.Fatalf("the refused giving wrote the file: %v", err)
+	}
+
+	y = hookYard(t)
+	seq = y.ask(t, hookSecretAsk("linear", "linear"), "yardmaster")
 	if _, err := y.PutHook(y.ctx, Hook{Name: "linear", Source: "linear", SecretFile: filepath.Join(y.home, "elsewhere.secret")}, "mckean"); err != nil {
 		t.Fatal(err)
 	}
@@ -583,6 +617,94 @@ func TestHookAskRefusals(t *testing.T) {
 	}
 	if _, err := os.Lstat(HookSecretFile(y.home, "linear")); !os.IsNotExist(err) {
 		t.Fatalf("refused givings wrote the file: %v", err)
+	}
+}
+
+// A standing hook that serves the asked source from the yard-owned
+// file is rotated by its secret card: the ask is taken, the operator's
+// giving replaces the file at 0600, and the hook stands as it was. A
+// non-operator giving and a file that breaks the rule are refused, the
+// second without repairing the file.
+func TestHookSecretRotation(t *testing.T) {
+	t.Parallel()
+	const oldSecret = "old-hook-signing-secret"
+	y := hookYard(t)
+	file := HookSecretFile(y.home, "linear")
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte(oldSecret), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.PutHook(y.ctx, Hook{Name: "linear", Source: "linear", SecretFile: file}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq := y.ask(t, hookSecretAsk("linear", "linear"), "yardmaster")
+	if lines := strings.Join(y.asked(t, seq).Lines(), "\n"); !strings.Contains(lines,
+		"replaces: what the file holds; where the hook stands already, deliveries signed with the old secret are refused from then on") {
+		t.Fatalf("the rotation card:\n%s", lines)
+	}
+	replaced := y.ask(t, hookRunAsk("hook add linear --source linear"), "yardmaster")
+	if does := strings.Join(y.asked(t, replaced).Ask.Run.Does, "\n"); !strings.Contains(does,
+		"rotating it uses the hook's own secret card (--secret-hook linear --source linear).") {
+		t.Fatalf("the replacement card says:\n%s", does)
+	}
+	if _, err := y.GiveSecret(y.ctx, y.bead, seq,
+		map[string]string{"LINEAR_SIGNING_SECRET": hookSecretValue}, "yardmaster", true); err == nil ||
+		!strings.Contains(err.Error(), "only the operator (mckean) may give a hook's signing secret") {
+		t.Fatalf("a non-operator rotation = %v", err)
+	}
+	if raw, err := os.ReadFile(file); err != nil || string(raw) != oldSecret {
+		t.Fatalf("the refused rotation changed the file: %q, %v", raw, err)
+	}
+	keyed, err := y.GiveSecret(y.ctx, y.bead, seq,
+		map[string]string{"LINEAR_SIGNING_SECRET": hookSecretValue}, "mckean", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keyed.Hook != "linear" || keyed.File != file {
+		t.Fatalf("keyed = %+v", keyed)
+	}
+	st, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("the rotated file is mode %04o, want 0600", st.Mode().Perm())
+	}
+	if raw, err := os.ReadFile(file); err != nil || string(raw) != hookSecretValue {
+		t.Fatalf("the rotated file holds %q, %v", raw, err)
+	}
+	hook, err := y.GetHook(y.ctx, "linear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hook.Source != "linear" || hook.SecretFile != file {
+		t.Fatalf("the hook stands as %+v", hook)
+	}
+	notes, err := y.Notes(y.ctx, y.bead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range notes {
+		if strings.Contains(n.Text, hookSecretValue) || strings.Contains(n.Text, oldSecret) {
+			t.Fatalf("note %d holds a secret", n.Seq)
+		}
+	}
+	// A file that breaks the rule is refused, not repaired.
+	if err := os.Chmod(file, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.GiveSecret(y.ctx, y.bead, seq,
+		map[string]string{"LINEAR_SIGNING_SECRET": "third-hook-signing-secret"}, "mckean", true); err == nil ||
+		!strings.Contains(err.Error(), "is open to others") {
+		t.Fatalf("a rotation onto a loose file = %v", err)
+	}
+	if raw, err := os.ReadFile(file); err != nil || string(raw) != hookSecretValue {
+		t.Fatalf("the refused rotation changed the file: %q, %v", raw, err)
+	}
+	if st, err := os.Stat(file); err != nil || st.Mode().Perm() != 0o644 {
+		t.Fatalf("the refused rotation repaired the file: %v, %v", st, err)
 	}
 }
 

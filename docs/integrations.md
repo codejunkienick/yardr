@@ -2149,14 +2149,16 @@ yardr hook add linear --source linear --secret-file ~/.yardr/linear.secret --unk
 
 A file open to others is refused (`… is open to others (mode 0644); chmod
 600 it`). The file is read on every delivery, so rotating the secret is
-rewriting the file ([subscriptions.md](subscriptions.md#the-secret-file)).
+rewriting the file ([subscriptions.md](subscriptions.md#the-secret-file)):
+by hand here, or on the hook's own secret card below when it uses the
+yard-owned file.
 One hook serves every crew member. `--unknown allow` hears every
 workspace member's comment: a delivery from a sender no yard user maps is
 kept with the speaker `outside`, and one from an id a user's identity
 holds arrives named as them
 ([above](#identify)).
 
-A crew member sets the hook up without handling the secret, by two asks
+A crew member sets a new hook up without handling the secret, by two asks
 on one bead, the secret first. It asks for the signing secret
 (`yardr bead ask <id> - --secret-hook linear --source linear`, with the
 question and where the service shows the secret on stdin): the operator
@@ -2171,11 +2173,14 @@ the source's signing secret from that file, and approving it
 (`yardr bead answer <id> <ask> --approve`) makes the hook, which takes
 deliveries only with the secret standing in its file. The asks are refused
 for a source the yard does not declare, one whose declaration has no hook
-key, and a hook the yard has already; a replacement rides the `hook add`
+key, a hook that serves another source, and a standing hook with a custom
+secret file; a replacement rides the `hook add`
 card with `--as` and `--map` ([chat.md](chat.md#questions-for-you)) —
-only a secret file of its own, or a table past 8192 bytes, stays in a
-terminal. The steps by hand above stay the way to make one in a terminal,
-and to replace one with a fresh secret.
+only changing a custom secret file, or a table past 8192 bytes, stays in a
+terminal. A hook that stands with the yard's file is rotated by asking its
+secret card again; a file that breaks the rule (open to others, or a link)
+is refused, not repaired. The steps by hand above stay the way to make one in a terminal,
+and to change a custom secret file.
 
 Where the declaration names a register call with scheme `secret`
 (Telegram), there is no secret ask: the one `R: hook add <name> --source
