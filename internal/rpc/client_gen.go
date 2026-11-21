@@ -157,6 +157,12 @@ func (c *Client) Notes(ctx context.Context, id string) ([]store.Note, error) {
 func (c *Client) NoteBlob(ctx context.Context, hash string) (*store.BlobRef, error) {
 	return callV[*store.BlobRef](c, ctx, "NoteBlob", hash)
 }
+func (c *Client) NoteFileBlob(ctx context.Context, seq uint64, n int) (*store.BlobRef, error) {
+	return callV[*store.BlobRef](c, ctx, "NoteFileBlob", seq, n)
+}
+func (c *Client) ReplaceNotePage(ctx context.Context, bead string, seq uint64, n int, file store.BlobFile, actor string) (*store.BlobRef, error) {
+	return callV[*store.BlobRef](c, ctx, "ReplaceNotePage", bead, seq, n, file, actor)
+}
 func (c *Client) MailBlob(ctx context.Context, viewer, hash string) (*store.BlobRef, error) {
 	return callV[*store.BlobRef](c, ctx, "MailBlob", viewer, hash)
 }

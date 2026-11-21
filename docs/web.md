@@ -759,6 +759,7 @@ origin; the test allows those and only those ([One bead](#one-bead)).
 | `/beads/<id>/asks/<ask>/files/<n>` | one file of the full text behind a summary card, counted from 1: its hashes, its text whole, and links to the file before it, the file after it and the card. The operator the ask is put to reads it while the ask is open; anyone else gets a 404 ([One bead](#one-bead)) | `PackFilePage` |
 | `/blobs/<hash>` | a note's blob to anyone, and on a view that acts a mail's file to its sender or recipient: the bytes with their type; anything else is a 404 ([One bead](#one-bead)). An image and a page open inline, a file downloads (`Content-Disposition: attachment`) under the first name the lookup finds. On the sandbox origin a note's page runs under the scripted policy, a file downloads the same way | |
 | `/blobs/<hash>/<name>` | the same blob served under that name, when the name passes the rule; a name that fails it is a 404. One blob can carry different names on different letters, so the view's pages link with the name ([One bead](#one-bead)) | |
+| `/blobs/note/<seq>/<n>` | a note's file at its stable address: the note `<seq>`'s current bytes for its file `<n>`, counted from 1, so the address shows the page after a replace; a seq no note has or an `<n>` the note has no file at is a 404. A page opens inert as on the hash route, and on the sandbox origin under the scripted policy ([One bead](#one-bead)) | |
 | `/sessions` | the running sessions, the oldest first, with bead, stage, group, originator, login, runner, state and age (`yardr session list`), and under them the claims of manual groups, live | `Sessions` |
 | `/sessions?all=1` | the same page; its JSON lists the ended sessions too, every one (`yardr session list -a --all`) | `Sessions` |
 | `/crew` | each crew member: whether it runs, since when, and its unread inbox count when there is one, live. Journals and handoffs are not shown | `Crew` |
@@ -1828,7 +1829,9 @@ A note's files are what `yardr bead note --file` or `--page` attached to it
 (a page made with `--page` is dressed in a frame before it is a blob, so it
 is served as any page is). Each
 image shows below the note's words, with those words as its alt text; each
-page stands as a link, `page <hash8>`, opening the bytes top-level and
+page stands as a link, `page <hash8>` of its current bytes, at its stable
+address `/blobs/note/<seq>/<n>` (the note's seq and the file's number,
+counted from 1), opening the bytes top-level and
 inert; each file stands as a download link, `file <name>`, and downloads
 instead of opening. One the yard no longer holds is a line saying so,
 never a broken icon or link. The JSON names them as the notes have them.
@@ -1838,7 +1841,11 @@ note's words under it. A bead with no note page shows no board. Mail
 pages stand on no board: from here only a note's page opens.
 The bytes come from `/blobs/<hash>`, which serves a note's blob to
 anyone, and on a view that acts a mail's file to its sender or recipient;
-anything else answers as a missing blob. The rule is by kind, not by type:
+anything else answers as a missing blob. A page's bytes come from its
+stable address too: `/blobs/note/<seq>/<n>` serves the note's current
+bytes for that file, so after `yardr bead note --replace` the address a
+reader kept shows the new page, its `ETag` is the new hash, and the old
+hash answers as a missing blob once nothing names it. The rule is by kind, not by type:
 an SVG, a PDF and a text file all download, with
 `Content-Disposition: attachment; filename*=UTF-8''<encoded name>` and the
 type the bytes say. One blob can carry different names on different
@@ -1858,13 +1865,14 @@ page; what survives is the reader following a link out by clicking it.
 The yard's own pages keep their policy, and the no-other-host test still
 holds: a navigation is not a fetch.
 
-Each page carries run beside its static link, opening the same bytes on
-the sandbox origin: the view's second listener, on loopback beside the
-view ([The address](#the-address)), answering blob bytes only and no
-yard route. A reader on this machine goes straight to where the origin
-listens; a reader elsewhere goes by the name the view was reached by,
-on the origin's port, or by the origin's public name where `--pages-host`
-gives one ([Behind a proxy](#behind-a-proxy)).
+Each page carries run beside its static link, opening the same bytes
+at the same stable address on the sandbox origin: the view's second
+listener, on loopback beside the view ([The address](#the-address)),
+answering blob bytes only and no yard route. A reader on this machine
+goes straight to where the origin listens; a reader elsewhere goes
+by the name the view was reached by, on the origin's port, or by the
+origin's public name where `--pages-host` gives one
+([Behind a proxy](#behind-a-proxy)).
 
 A page run there runs its inline scripts under the walls that hold:
 no cookies, no reach into the yard (`connect-src 'none'` stops fetch,

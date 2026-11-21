@@ -271,6 +271,7 @@ func (u *UserServer) routes() *http.ServeMux {
 	mux.HandleFunc("POST /user/call/{method}", u.call)
 	mux.HandleFunc("GET /user/events", u.events)
 	mux.HandleFunc("GET /user/blobs/{hash}", u.userBlob)
+	mux.HandleFunc("GET /user/blobs/note/{seq}/{n}", u.userNoteBlob)
 	mux.HandleFunc("GET /user/me", func(w http.ResponseWriter, r *http.Request) {
 		c := callerOf(r)
 		writeJSON(w, struct {

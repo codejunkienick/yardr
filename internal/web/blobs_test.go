@@ -190,6 +190,50 @@ func TestBlobRoute(t *testing.T) {
 	}
 }
 
+// /blobs/note/<seq>/<n> serves a note's current bytes for that file:
+// after a replace the same address serves the new page with its ETag,
+// the old hash names nothing, and a bad number answers as a missing
+// blob. A page opens under the page policy, as on the hash route.
+func TestBlobNoteRoute(t *testing.T) {
+	t.Parallel()
+	f := blobFixture(t)
+	ctx := context.Background()
+	b, err := f.st.CreateBead(ctx, store.NewBead{Title: "a door"}, "me")
+	must(t, err)
+	page, err := f.st.PutBlob(ctx, pageHTML)
+	must(t, err)
+	note, err := f.st.AddNotedAs(ctx, b.ID, "the door, hung", "me", "", store.BlobFile{Hash: page.Hash})
+	must(t, err)
+	addr := "/blobs/note/" + itoa(note.Seq) + "/1"
+	r := f.get(addr)
+	if r.status != 200 || r.body != string(pageHTML) || r.header.Get("ETag") != `"`+page.Hash+`"` {
+		t.Fatalf("the stable page: status %d, %d bytes, ETag %q", r.status, len(r.body), r.header.Get("ETag"))
+	}
+	assertPagePolicy(t, r.header.Get("Content-Security-Policy"))
+	for _, bad := range []string{"/blobs/note/" + itoa(note.Seq) + "/2", "/blobs/note/" + itoa(note.Seq+1000) + "/1", "/blobs/note/nope/1", "/blobs/note/" + itoa(note.Seq) + "/x"} {
+		if r := f.get(bad); r.status != 404 {
+			t.Errorf("%s: status %d, want 404", bad, r.status)
+		}
+	}
+	fresh, err := f.st.PutBlob(ctx, pageFence)
+	must(t, err)
+	if _, err := f.st.ReplaceNotePage(ctx, b.ID, note.Seq, 1, store.BlobFile{Hash: fresh.Hash}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	r = f.get(addr)
+	if r.status != 200 || r.body != string(pageFence) || r.header.Get("ETag") != `"`+fresh.Hash+`"` {
+		t.Errorf("the stable page after a replace: status %d, %d bytes, ETag %q", r.status, len(r.body), r.header.Get("ETag"))
+	}
+	if r := f.get("/blobs/" + page.Hash); r.status != 404 {
+		t.Errorf("the old page by hash: status %d, want 404", r.status)
+	}
+	// The bead page links the stable address with the current hash.
+	body := f.get("/beads/" + b.ID).body
+	if want := `<a href="` + addr + `">page ` + fresh.Hash[:8] + `</a>`; !strings.Contains(body, want) {
+		t.Errorf("the bead page lacks %s", want)
+	}
+}
+
 // A file downloads, never inline: /blobs/<hash> answers it with
 // Content-Disposition: attachment and the sender's name encoded, by kind
 // and not by type — a PDF, an SVG and prose all download. An image and a
@@ -452,7 +496,7 @@ func TestBeadPageNotePages(t *testing.T) {
 	must(t, err)
 	ref, err := f.st.PutBlob(ctx, pageHTML)
 	must(t, err)
-	_, err = f.st.AddNotedAs(ctx, b.ID, "the door, hung", "me", "", store.BlobFile{Hash: ref.Hash})
+	note, err := f.st.AddNotedAs(ctx, b.ID, "the door, hung", "me", "", store.BlobFile{Hash: ref.Hash})
 	must(t, err)
 
 	var got web.BeadPage
@@ -469,7 +513,7 @@ func TestBeadPageNotePages(t *testing.T) {
 	if csp := r.header.Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'self'") || strings.Contains(csp, "sandbox") {
 		t.Errorf("the bead's own Content-Security-Policy %q, want the yard page's", csp)
 	}
-	if want := `<a href="/blobs/` + ref.Hash + `">page ` + ref.Hash[:8] + `</a>`; !strings.Contains(r.body, want) {
+	if want := `<a href="/blobs/note/` + itoa(note.Seq) + `/1">page ` + ref.Hash[:8] + `</a>`; !strings.Contains(r.body, want) {
 		t.Errorf("the page lacks %s", want)
 	}
 	if strings.Contains(r.body, "<img") {
@@ -481,7 +525,7 @@ func TestBeadPageNotePages(t *testing.T) {
 	if want := `page ` + ref.Hash[:8] + `: the yard no longer has it`; !strings.Contains(body, want) {
 		t.Errorf("the page lacks %q", want)
 	}
-	if strings.Contains(body, "/blobs/"+ref.Hash) {
+	if strings.Contains(body, "/blobs/note/") {
 		t.Error("the page links what the yard no longer holds")
 	}
 }
@@ -504,11 +548,11 @@ func TestBeadBoardLaysPagesInNoteOrder(t *testing.T) {
 	must(t, err)
 	shot, err := f.st.PutBlob(ctx, shotPNG)
 	must(t, err)
-	_, err = f.st.AddNotedAs(ctx, b.ID, `the door, first pass <b>bold</b>`, "me", "", store.BlobFile{Hash: first.Hash})
+	firstNote, err := f.st.AddNotedAs(ctx, b.ID, `the door, first pass <b>bold</b>`, "me", "", store.BlobFile{Hash: first.Hash})
 	must(t, err)
 	_, err = f.st.AddNotedAs(ctx, b.ID, "a photo of the door", "me", "", store.BlobFile{Hash: shot.Hash})
 	must(t, err)
-	_, err = f.st.AddNotedAs(ctx, b.ID, "the door, second pass", "me", "", store.BlobFile{Hash: second.Hash}, store.BlobFile{Hash: third.Hash})
+	thirdNote, err := f.st.AddNotedAs(ctx, b.ID, "the door, second pass", "me", "", store.BlobFile{Hash: second.Hash}, store.BlobFile{Hash: third.Hash})
 	must(t, err)
 
 	var got web.BeadPage
@@ -527,8 +571,8 @@ func TestBeadBoardLaysPagesInNoteOrder(t *testing.T) {
 		t.Fatalf("the board stands below the notes")
 	}
 	board := body[boardAt:notesAt]
-	at := func(hash string) int { return strings.Index(board, "/blobs/"+hash) }
-	firstAt, secondAt, thirdAt := at(first.Hash), at(second.Hash), at(third.Hash)
+	at := func(href string) int { return strings.Index(board, href) }
+	firstAt, secondAt, thirdAt := at("/blobs/note/"+itoa(firstNote.Seq)+"/1"), at("/blobs/note/"+itoa(thirdNote.Seq)+"/1"), at("/blobs/note/"+itoa(thirdNote.Seq)+"/2")
 	if firstAt < 0 || secondAt < 0 || thirdAt < 0 {
 		t.Fatalf("the board lacks a page: %d %d %d", firstAt, secondAt, thirdAt)
 	}
@@ -596,7 +640,7 @@ func TestBeadBoardHoldsNoMailPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	must(t, f.st.Mail(ctx, "sam", "the fence, drawn", "me", store.BlobFile{Hash: mailed.Hash}))
-	_, err = f.st.AddNotedAs(ctx, b.ID, "the door, hung", "me", "", store.BlobFile{Hash: noted.Hash})
+	note, err := f.st.AddNotedAs(ctx, b.ID, "the door, hung", "me", "", store.BlobFile{Hash: noted.Hash})
 	must(t, err)
 
 	body := f.get("/beads/" + b.ID).body
@@ -605,7 +649,7 @@ func TestBeadBoardHoldsNoMailPage(t *testing.T) {
 		t.Fatalf("the page shows no board: %s", body)
 	}
 	board := body[boardAt:]
-	if !strings.Contains(board, "/blobs/"+noted.Hash) {
+	if !strings.Contains(board, "/blobs/note/"+itoa(note.Seq)+"/1") {
 		t.Error("the board lacks the note's page")
 	}
 	if strings.Contains(board, mailed.Hash) {
@@ -640,7 +684,7 @@ func TestBeadBoardMissingPage(t *testing.T) {
 	if want := `page ` + ref.Hash[:8] + `: the yard no longer has it`; !strings.Contains(board, want) {
 		t.Errorf("the board lacks %q", want)
 	}
-	if strings.Contains(board, "/blobs/"+ref.Hash) {
+	if strings.Contains(board, "/blobs/note/") {
 		t.Error("the board links what the yard no longer holds")
 	}
 }

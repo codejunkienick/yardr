@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -169,4 +170,45 @@ func TestUserBlobReadHeldWhenTheFileCannotBeRead(t *testing.T) {
 			t.Errorf("the listener's log does not hold the full words:\n%s", log.String())
 		}
 	})
+}
+
+// /user/blobs/note/<seq>/<n> serves a note's file at its stable address
+// to any device: after a replace the same address serves the new bytes
+// with their ETag, and a bad number answers as a missing blob.
+func TestUserNoteBlob(t *testing.T) {
+	ctx := context.Background()
+	st, h, _, _, sam := blobYard(t)
+	b, err := st.CreateBead(ctx, store.NewBead{Title: "a door"}, "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := []byte("<!DOCTYPE html><html><body>a door</body></html>")
+	ref, err := st.PutBlob(ctx, page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := st.AddNotedAs(ctx, b.ID, "the door, hung", "jo", "", store.BlobFile{Hash: ref.Hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := "/user/blobs/note/" + strconv.FormatUint(note.Seq, 10) + "/1"
+	w := ask(h, http.MethodGet, addr, sam, nil)
+	if w.Code != http.StatusOK || w.Body.String() != string(page) || w.Header().Get("ETag") != `"`+ref.Hash+`"` {
+		t.Fatalf("the stable page: %d %q ETag %q", w.Code, w.Body.String(), w.Header().Get("ETag"))
+	}
+	if w := ask(h, http.MethodGet, "/user/blobs/note/"+strconv.FormatUint(note.Seq, 10)+"/2", sam, nil); w.Code != http.StatusNotFound {
+		t.Errorf("a bad number: %d, want 404", w.Code)
+	}
+	fresh := []byte("<!DOCTYPE html><html><body>a new door</body></html>")
+	freshRef, err := st.PutBlob(ctx, fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ReplaceNotePage(ctx, b.ID, note.Seq, 1, store.BlobFile{Hash: freshRef.Hash}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	w = ask(h, http.MethodGet, addr, sam, nil)
+	if w.Code != http.StatusOK || w.Body.String() != string(fresh) || w.Header().Get("ETag") != `"`+freshRef.Hash+`"` {
+		t.Errorf("the stable page after a replace: %d %q ETag %q", w.Code, w.Body.String(), w.Header().Get("ETag"))
+	}
 }

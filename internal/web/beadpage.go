@@ -115,6 +115,9 @@ type BeadPage struct {
 type BoardEntry struct {
 	File store.BlobRef `json:"file"`
 	Note store.Note    `json:"note"`
+	// N is the file's number on its note, from 1: the board links the
+	// page by its stable address (blobNoteURL), not by its hash.
+	N int `json:"-"`
 }
 
 // Self is the page's own path, which it asks for again at every event of
@@ -300,9 +303,9 @@ func (s *Server) beadPage(ctx context.Context, id, hostport string) (*BeadPage, 
 	// same note order, each with its note beside it; mail is read
 	// nowhere here, so mail pages stand on no board.
 	for _, n := range d.Notes {
-		for _, f := range n.Files {
+		for i, f := range n.Files {
 			if f.IsPage() {
-				d.Board = append(d.Board, BoardEntry{File: f, Note: n})
+				d.Board = append(d.Board, BoardEntry{File: f, Note: n, N: i + 1})
 			}
 			if _, err := s.st.NoteBlob(ctx, f.Hash); err != nil {
 				if !errors.Is(err, store.ErrNotFound) {

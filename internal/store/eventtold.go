@@ -64,6 +64,7 @@ var eventDataTold = map[string][]string{
 	"handoff":            {"note", "session"},
 	"note_told":          {"note", "session", "delivery"},
 	"note_untold":        {"note", "session"},
+	"note_replaced":      {"seq", "file"},
 	"bad_template":       {"stage"},
 	"ask_unreachable":    {"member", "stage"},
 	"ask_stale":          {"ask", "kind", "name", "source", "seen", "answer", "ask_session"},

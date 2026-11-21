@@ -942,8 +942,8 @@ func (u *UserServer) call(w http.ResponseWriter, r *http.Request) {
 // userBlob serves a blob as the web view serves it to the caller: a note's
 // file and a kept hook delivery's to any device, and a mail's file to a
 // device of its sender or recipient (NoteBlob, DeliveryBlob, MailBlob). A
-// delivery reaches every device user already (deviceEvent), so its files do
-// too. Anything else is 404, as there: one the yard never held, a name that
+// note's file at its stable address is userNoteBlob's, to any device too.
+// Anything else is 404, as there: one the yard never held, a name that
 // is no hash, another user's mail file. One exception, which the web view has
 // no use for: a file the caller's own user put within the hour that no mail
 // or note names yet is served to the caller's device (unclaimedPut).

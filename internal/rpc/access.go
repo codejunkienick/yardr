@@ -157,6 +157,8 @@ var Access = map[string]Class{
 	"MarkNoteUntold":    Admin,
 	"Notes":             Read,
 	"NoteBlob":          Read,
+	"NoteFileBlob":      Read,
+	"ReplaceNotePage":   Agent,
 	"MailBlob":          Read,
 	"Delegation":        Read,
 	"DelegationBlob":    Read,

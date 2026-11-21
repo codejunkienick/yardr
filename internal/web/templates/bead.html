@@ -125,7 +125,7 @@
       {{- if index $.Data.Missing .File.Hash}}
       <p class="faint">page {{slice .File.Hash 0 8}}: the yard no longer has it</p>
       {{- else}}
-      <p><a href="{{blobURL .File.Hash .File.Name}}">page {{slice .File.Hash 0 8}}</a></p>
+      <p><a href="{{blobNoteURL .Note.Seq .N}}">page {{slice .File.Hash 0 8}}</a></p>
       {{- end}}
       <pre class="text">{{.Note.Text}}</pre>
     </article>
@@ -139,18 +139,19 @@
       <header class="entry-head"><span class="label">{{markAuthor .Author $.Data.Marks}}{{if .Via}} (via {{.Via}}){{end}}{{if and .Kind (ne .Kind "note")}} · {{.Kind}}{{end}}</span><time class="label" datetime="{{.At.UTC.Format "2006-01-02T15:04:05Z"}}">{{clock .At}}</time></header>
       <pre class="text">{{.Text}}</pre>
       {{- $words := .Text}}
-      {{- range .Files}}
-      {{- $kind := .Kind}}
-      {{- if index $.Data.Missing .Hash}}
-      <p class="faint">{{$kind}} {{slice .Hash 0 8}}: the yard no longer has it</p>
+      {{- $seq := .Seq}}
+      {{- range $i, $f := .Files}}
+      {{- $kind := $f.Kind}}
+      {{- if index $.Data.Missing $f.Hash}}
+      <p class="faint">{{$kind}} {{slice $f.Hash 0 8}}: the yard no longer has it</p>
       {{- else if eq $kind "page"}}
-      <a href="{{blobURL .Hash .Name}}">page {{slice .Hash 0 8}}</a> <a href="{{$.Data.RunBase}}{{blobURL .Hash .Name}}">run</a>
+      <a href="{{blobNoteURL $seq (inc $i)}}">page {{slice $f.Hash 0 8}}</a> <a href="{{$.Data.RunBase}}{{blobNoteURL $seq (inc $i)}}">run</a>
       {{- else if eq $kind "image"}}
-      <img src="{{blobURL .Hash .Name}}" alt="{{$words}}">
-      {{- else if .Name}}
-      <a href="{{blobURL .Hash .Name}}">file {{.Name}}</a>
+      <img src="{{blobURL $f.Hash $f.Name}}" alt="{{$words}}">
+      {{- else if $f.Name}}
+      <a href="{{blobURL $f.Hash $f.Name}}">file {{$f.Name}}</a>
       {{- else}}
-      <a href="{{blobURL .Hash .Name}}">file {{slice .Hash 0 8}}</a>
+      <a href="{{blobURL $f.Hash $f.Name}}">file {{slice $f.Hash 0 8}}</a>
       {{- end}}
       {{- end}}
     </article>

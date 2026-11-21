@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -571,6 +572,57 @@ func (s *Server) handlePagesBlob(w http.ResponseWriter, r *http.Request) {
 	serveBlob(w, r, s.home, hash, ref)
 }
 
+// noteFile is the note file the stable address /blobs/note/<seq>/<n>
+// names, as NoteFileBlob serves it: a seq or number that does not parse
+// answers as a missing blob, as an n the note has no file at does.
+func (s *Server) noteFile(ctx context.Context, r *http.Request) (*store.BlobRef, error) {
+	seq, err := strconv.ParseUint(r.PathValue("seq"), 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("note %q: %w", r.PathValue("seq"), store.ErrNotFound)
+	}
+	n, err := strconv.Atoi(r.PathValue("n"))
+	if err != nil {
+		return nil, fmt.Errorf("note %d file %q: %w", seq, r.PathValue("n"), store.ErrNotFound)
+	}
+	return s.st.NoteFileBlob(ctx, seq, n)
+}
+
+// handleNoteBlob serves a note's file at its stable address: the
+// note's current bytes for that file number, so a link a person keeps
+// shows the page after a replace. A page opens under the page policy,
+// as on the hash route; the ETag is the current ref's, so a cache
+// re-reads after a replace (serveBlob).
+func (s *Server) handleNoteBlob(w http.ResponseWriter, r *http.Request) {
+	ref, err := s.noteFile(r.Context(), r)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if ref.IsPage() {
+		w.Header().Set("Content-Security-Policy", pagePolicy)
+	}
+	serveBlob(w, r, s.home, ref.Hash, ref)
+}
+
+// handlePagesNoteBlob serves a note's file at its stable address on
+// the sandbox origin, as handlePagesBlob serves the hash route: the
+// same bytes under the scripted policy PagesHandler set.
+func (s *Server) handlePagesNoteBlob(w http.ResponseWriter, r *http.Request) {
+	ref, err := s.noteFile(r.Context(), r)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "no such blob", http.StatusNotFound)
+			return
+		}
+		if r.Context().Err() == nil {
+			s.log.Error("pages: "+r.URL.Path, "err", err)
+		}
+		http.Error(w, "could not read the blob", http.StatusInternalServerError)
+		return
+	}
+	serveBlob(w, r, s.home, ref.Hash, ref)
+}
+
 // serveBlob serves a note's blob ref, held under hash: its bytes with
 // their type. An image and a page are served as ever, inline. A file is
 // served as a download, never inline, by kind and not by type: an SVG, a
@@ -622,6 +674,14 @@ func blobURL(hash, name string) string {
 		return "/blobs/" + hash
 	}
 	return "/blobs/" + hash + "/" + url.PathEscape(name)
+}
+
+// blobNoteURL is the stable path of a note's file number n: the note's
+// current bytes for that file, after a replace as before it. A page's
+// link text still names the current hash, so the address alone is
+// what a reader keeps.
+func blobNoteURL(seq uint64, n int) string {
+	return "/blobs/note/" + strconv.FormatUint(seq, 10) + "/" + strconv.Itoa(n)
 }
 
 // markAuthor is who a name reads as on the page, a note's author or a

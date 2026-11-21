@@ -312,6 +312,7 @@ func TestNoRowTellsWhatNamesAFileOrACommand(t *testing.T) {
 	exempt := map[string][]string{
 		"hook":          {"url", "files", "text", "message"},
 		"base_diverged": {"remote"}, // the commit the remote is at, not where it is
+		"note_replaced": {"file"},   // the file's number on its note, not where it is
 	}
 	whole := []string{}
 	for _, kind := range store.EventDataToldKinds() {

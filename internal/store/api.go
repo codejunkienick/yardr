@@ -65,6 +65,8 @@ type API interface {
 	MarkNoteUntold(ctx context.Context, id string, seq uint64, session, reason string) error
 	Notes(ctx context.Context, id string) ([]Note, error)
 	NoteBlob(ctx context.Context, hash string) (*BlobRef, error)
+	NoteFileBlob(ctx context.Context, seq uint64, n int) (*BlobRef, error)
+	ReplaceNotePage(ctx context.Context, bead string, seq uint64, n int, file BlobFile, actor string) (*BlobRef, error)
 	MailBlob(ctx context.Context, viewer, hash string) (*BlobRef, error)
 	// Delegation and DelegationBlob read a delegated run's record and the
 	// body it holds in a blob: an operator's alone, anyone else told it is

@@ -1103,6 +1103,155 @@ func TestNoteBlob(t *testing.T) {
 	}
 }
 
+// A page is replaced in place: the stable lookup (NoteFileBlob) serves
+// the new bytes, the old hash names nothing, the note keeps its words
+// and its other files, and one note_replaced event with the replacer's
+// name and time is the record, told to no session. A framed page and a
+// whole-file page both replace; the checks are an attach's.
+func TestReplaceNotePage(t *testing.T) {
+	t.Parallel()
+	api, _ := storetest.NewOwned(t)
+	ctx := context.Background()
+	b, err := api.CreateBead(ctx, store.NewBead{Title: "the shed"}, "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := api.CreateBead(ctx, store.NewBead{Title: "the fence"}, "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shot, err := api.PutBlob(ctx, pngBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := api.PutBlob(ctx, htmlBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := api.AddNotedAs(ctx, b.ID, "the shed, painted", "jo", "", store.BlobFile{Hash: shot.Hash}, store.BlobFile{Hash: page.Hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The stable lookup serves each file, and nothing past them.
+	if ref, err := api.NoteFileBlob(ctx, note.Seq, 2); err != nil || *ref != *page {
+		t.Errorf("NoteFileBlob(page) = %+v, %v, want %+v", ref, err, page)
+	}
+	for _, n := range []int{0, 3, -1} {
+		if _, err := api.NoteFileBlob(ctx, note.Seq, n); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("NoteFileBlob(n=%d) = %v, want not found", n, err)
+		}
+	}
+	if _, err := api.NoteFileBlob(ctx, note.Seq+1000, 1); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("NoteFileBlob(no note) = %v, want not found", err)
+	}
+	// A whole-file page replaces by the default: the note's only page.
+	fresh := []byte("<!DOCTYPE html><html><body>a new door</body></html>")
+	freshRef, err := api.PutBlob(ctx, fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := api.ReplaceNotePage(ctx, b.ID, note.Seq, 0, store.BlobFile{Hash: freshRef.Hash, Name: "door.html"}, "sam")
+	if err != nil || *got != (store.BlobRef{Hash: freshRef.Hash, Type: freshRef.Type, Bytes: freshRef.Bytes, Name: "door.html"}) {
+		t.Fatalf("ReplaceNotePage(file) = %+v, %v", got, err)
+	}
+	if ref, err := api.NoteFileBlob(ctx, note.Seq, 2); err != nil || ref.Hash != freshRef.Hash {
+		t.Errorf("the stable lookup after a replace = %+v, %v, want the new page", ref, err)
+	}
+	if _, err := api.NoteBlob(ctx, page.Hash); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("the old page still names a blob: %v", err)
+	}
+	notes, err := api.Notes(ctx, b.ID)
+	if err != nil || len(notes) != 1 || notes[0].Text != "the shed, painted" || len(notes[0].Files) != 2 ||
+		notes[0].Files[0].Hash != shot.Hash || notes[0].Files[1].Framed != nil || notes[0].Notify != "" {
+		t.Fatalf("the note after a replace = %+v, %v", notes, err)
+	}
+	evs, err := api.Events(ctx, b.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replaced []store.Event
+	for _, e := range evs {
+		if e.Kind == "note_replaced" {
+			replaced = append(replaced, e)
+		}
+	}
+	if len(replaced) != 1 || replaced[0].Actor != "sam" || replaced[0].At.IsZero() ||
+		replaced[0].Data["seq"] != float64(note.Seq) && replaced[0].Data["seq"] != note.Seq ||
+		replaced[0].Data["file"] != float64(2) && replaced[0].Data["file"] != 2 {
+		t.Fatalf("the replace's events = %+v", replaced)
+	}
+	if _, told := replaced[0].Data["deliveries"]; told {
+		t.Error("the replace was delivered to a session")
+	}
+	if _, told := replaced[0].Data["notified"]; told {
+		t.Error("the replace notified a user")
+	}
+	if _, has := replaced[0].Data["note"]; has {
+		t.Error("the replace carries a note key for mentions to read")
+	}
+	// A framed page replaces a whole-file one, keeping its new record.
+	frag, err := api.PutBlob(ctx, []byte("<p>the door, again</p>"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	framed := []byte("<!DOCTYPE html><html><body>the door, again</body></html>")
+	framedRef, err := api.PutBlob(ctx, framed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &store.FramedPage{Fragment: frag.Hash, Title: "The door", Pack: "pageframe", Frame: "frames/page.html", FrameSHA256: hashOf([]byte("frame"))}
+	got, err = api.ReplaceNotePage(ctx, b.ID, note.Seq, 2, store.BlobFile{Hash: framedRef.Hash, Framed: rec}, "sam")
+	if err != nil || got.Framed == nil || got.Framed.Title != "The door" || len(got.Framed.Versions) != 0 {
+		t.Fatalf("ReplaceNotePage(framed) = %+v, %v", got, err)
+	}
+	// Refusals, each leaving the note as it stands.
+	plain, err := api.PutBlob(ctx, textBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		bead string
+		seq  uint64
+		n    int
+		file store.BlobFile
+		want string
+	}{
+		{"another bead's seq", other.ID, note.Seq, 2, store.BlobFile{Hash: framedRef.Hash}, "has no note"},
+		{"a foreign bead", b.ID + "@south", note.Seq, 2, store.BlobFile{Hash: framedRef.Hash}, "peer south"},
+		{"no such file", b.ID, note.Seq, 9, store.BlobFile{Hash: framedRef.Hash}, "has no file 9"},
+		{"an image target", b.ID, note.Seq, 1, store.BlobFile{Hash: framedRef.Hash}, "is image, not a page"},
+		{"prose bytes", b.ID, note.Seq, 2, store.BlobFile{Hash: plain.Hash}, "not a page"},
+		{"an unheld blob", b.ID, note.Seq, 2, store.BlobFile{Hash: hashOf(gifBytes)}, "does not hold it"},
+	}
+	for _, c := range cases {
+		if _, err := api.ReplaceNotePage(ctx, c.bead, c.seq, c.n, c.file, "sam"); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: ReplaceNotePage = %v, want a refusal holding %q", c.name, err, c.want)
+		}
+	}
+	if ref, err := api.NoteFileBlob(ctx, note.Seq, 2); err != nil || ref.Hash != framedRef.Hash {
+		t.Errorf("what was refused was swapped in: %+v, %v", ref, err)
+	}
+	// The default refuses a note with no page and one with two.
+	photo, err := api.AddNotedAs(ctx, b.ID, "a photo", "jo", "", store.BlobFile{Hash: shot.Hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.ReplaceNotePage(ctx, b.ID, photo.Seq, 0, store.BlobFile{Hash: framedRef.Hash}, "sam"); err == nil || !strings.Contains(err.Error(), "has no page") {
+		t.Errorf("a note with no page: %v", err)
+	}
+	two, err := api.AddNotedAs(ctx, b.ID, "two pages", "jo", "", store.BlobFile{Hash: page.Hash}, store.BlobFile{Hash: framedRef.Hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.ReplaceNotePage(ctx, b.ID, two.Seq, 0, store.BlobFile{Hash: framedRef.Hash}, "sam"); err == nil || !strings.Contains(err.Error(), "say which file") {
+		t.Errorf("a note with two pages: %v", err)
+	}
+	if _, err := api.ReplaceNotePage(ctx, b.ID, two.Seq, 2, store.BlobFile{Hash: freshRef.Hash, Name: "door.html"}, "sam"); err != nil {
+		t.Errorf("the second of two pages by number: %v", err)
+	}
+}
+
 // MailBlob answers a blob a mail names to the mail's sender or recipient,
 // as the yard holds it, and nothing else: a note's image, one nothing
 // names, one the yard no longer holds, a viewer that is nobody, one to a

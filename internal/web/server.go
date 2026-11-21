@@ -146,7 +146,7 @@ var partial = []string{"shell", "aside", "entry", "card", "ask", "csrf"}
 func (s *Server) loadPages() (map[string]*template.Template, error) {
 	// The history template letters note text while the page's JSON keeps it as written.
 	funcs := template.FuncMap{
-		"asset": s.assetURL, "blobURL": blobURL, "clock": clock, "clockTime": clockTime,
+		"asset": s.assetURL, "blobNoteURL": blobNoteURL, "blobURL": blobURL, "clock": clock, "clockTime": clockTime,
 		"csrf": s.csrfValue, "inc": inc, "markAuthor": markAuthor,
 		"noteLetters": store.NoteLetters, "strong": store.StrongWeight,
 	}
@@ -204,6 +204,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /beads/{id}/fresh/{ask}/{state}", s.handleFresh)
 	s.mux.HandleFunc("GET /blobs/{hash}", s.handleBlob)
 	s.mux.HandleFunc("GET /blobs/{hash}/{name}", s.handleBlob)
+	s.mux.HandleFunc("GET /blobs/note/{seq}/{n}", s.handleNoteBlob)
 	// The configuration lists (lists.go, limits.go): each has a page under
 	// the Config entry, with /config as their hub.
 	s.mux.HandleFunc("GET /pairing", s.handlePairing)
@@ -248,6 +249,7 @@ func (s *Server) routes() {
 func (s *Server) pagesRoutes() {
 	s.pagesMux.HandleFunc("GET /blobs/{hash}", s.handlePagesBlob)
 	s.pagesMux.HandleFunc("GET /blobs/{hash}/{name}", s.handlePagesBlob)
+	s.pagesMux.HandleFunc("GET /blobs/note/{seq}/{n}", s.handlePagesNoteBlob)
 }
 
 // policy lets the browser load and reach this server only, so a page that

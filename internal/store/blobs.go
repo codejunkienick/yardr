@@ -539,6 +539,109 @@ func (s *Store) NoteBlob(ctx context.Context, hash string) (*BlobRef, error) {
 	return ref, nil
 }
 
+// NoteFileBlob is the blob a note's file number n names, as NoteBlob
+// serves a hash: the note is found by its store-wide seq and n counts
+// its files from 1, as the CLI numbers them, so one address
+// (/blobs/note/<seq>/<n>) keeps serving the note's current bytes after
+// a replace. ErrNotFound for a seq no note has, for an n the note has
+// no file at, and for one the yard no longer holds.
+func (s *Store) NoteFileBlob(ctx context.Context, seq uint64, n int) (*BlobRef, error) {
+	var hash, name string
+	found := false
+	if err := s.read(func(tx *bolt.Tx) error {
+		return each(tx, bNotes, "", func(_ []byte, note *Note) error {
+			if note.Seq == seq && n >= 1 && n <= len(note.Files) {
+				hash, name, found = note.Files[n-1].Hash, note.Files[n-1].Name, true
+			}
+			return nil
+		})
+	}); err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("note %d file %d: %w", seq, n, ErrNotFound)
+	}
+	ref, err := s.Blob(hash)
+	if err != nil {
+		return nil, err
+	}
+	ref.Name = name
+	return ref, nil
+}
+
+// ReplaceNotePage swaps the page at file n of the bead's note seq for
+// the new file, in place: the note keeps its words and its other
+// files, the old bytes are named by nothing once the swap stands and
+// go with Prune, and no version is kept. The checks are a note
+// attach's (AddNote): the bead resolves, a bead@peer is refused, and
+// the note is the bead's by (bead, seq) alone; there is no author
+// rule. The target and the new bytes must both be pages. The new ref
+// is built as an attach builds it (noteFiles: a --page's new framed
+// record, a --file's none), last-wins with no guard. n of 0 names the
+// note's only page, refusing a note with none or with more than one.
+// The swap writes one note_replaced event {"seq", "file"} as its
+// record; the note is told to no session and no mention is read from
+// it, since its data holds no "note" key (eventText).
+func (s *Store) ReplaceNotePage(ctx context.Context, bead string, seq uint64, n int, file BlobFile, actor string) (*BlobRef, error) {
+	if b, peer, foreign := strings.Cut(bead, "@"); foreign {
+		return nil, s.refuseForeignNote(b, peer)
+	}
+	refs, err := s.noteFiles([]BlobFile{file})
+	if err != nil {
+		return nil, err
+	}
+	if !refs[0].IsPage() {
+		return nil, fmt.Errorf("the replacement is a %s, not a page: only a page replaces a page", refs[0].Kind())
+	}
+	var out *BlobRef
+	err = s.writeVia(ctx, func(w *wtx) error {
+		row, err := w.loadBead(bead)
+		if err != nil {
+			return err
+		}
+		author, err := paneAuthor(w.Tx, callerOf(ctx), actor)
+		if err != nil {
+			return err
+		}
+		var note Note
+		ok, err := get(w.Tx, bNotes, join(row.UUID, seqKey(seq)), &note)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("bead %s has no note %d: %w", row.ID, seq, ErrNotFound)
+		}
+		at := n
+		if at == 0 {
+			pages := 0
+			for i, f := range note.Files {
+				if f.IsPage() {
+					pages, at = pages+1, i+1
+				}
+			}
+			switch {
+			case pages == 0:
+				return fmt.Errorf("note %d on %s has no page to replace", seq, row.ID)
+			case pages > 1:
+				return fmt.Errorf("note %d on %s has %d pages: say which file with --file-n", seq, row.ID, pages)
+			}
+		}
+		if at < 1 || at > len(note.Files) {
+			return fmt.Errorf("note %d on %s has no file %d: %w", seq, row.ID, n, ErrNotFound)
+		}
+		if target := note.Files[at-1]; !target.IsPage() {
+			return fmt.Errorf("file %d of note %d on %s is %s, not a page", at, seq, row.ID, target.Kind())
+		}
+		note.Files[at-1] = refs[0]
+		if err := put(w.Tx, bNotes, join(row.UUID, seqKey(seq)), note); err != nil {
+			return err
+		}
+		out = &refs[0]
+		return w.event(row.UUID, "note_replaced", author, map[string]any{"seq": seq, "file": at})
+	})
+	return out, err
+}
+
 // MailBlob is the blob hash as the web view serves it to viewer: one a
 // mail names where viewer is its sender or recipient, as the yard holds
 // it, with the name the first such mail gives it. ErrNotFound for one no

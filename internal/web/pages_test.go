@@ -151,7 +151,7 @@ func TestSandboxServesNoteBlobs(t *testing.T) {
 	t.Parallel()
 	f := newPagesFixture(t)
 	ctx := context.Background()
-	_, page, shot := f.notedPage(t)
+	bead, page, shot := f.notedPage(t)
 	mailed, err := f.st.PutBlob(ctx, shotJPEG)
 	must(t, err)
 	mailedPage, err := f.st.PutBlob(ctx, pageFence)
@@ -170,6 +170,19 @@ func TestSandboxServesNoteBlobs(t *testing.T) {
 		t.Errorf("the page's ETag %q, want the hash", etag)
 	}
 	assertScriptedPolicy(t, r.header.Get("Content-Security-Policy"))
+	// The same page at its stable address, under the same policy.
+	notes, err := f.st.Notes(ctx, bead)
+	if err != nil || len(notes) != 1 {
+		t.Fatalf("the notes = %+v, %v", notes, err)
+	}
+	if r := f.getPages("/blobs/note/" + itoa(notes[0].Seq) + "/2"); r.status != 200 || r.body != string(pageHTML) {
+		t.Errorf("the stable page on the sandbox: status %d, %d bytes", r.status, len(r.body))
+	} else {
+		assertScriptedPolicy(t, r.header.Get("Content-Security-Policy"))
+	}
+	if r := f.getPages("/blobs/note/" + itoa(notes[0].Seq) + "/9"); r.status != 404 || !strings.Contains(r.body, "no such blob") {
+		t.Errorf("a bad number on the sandbox: status %d, want a plain 404: %s", r.status, r.body)
+	}
 	// Connection-Allowlist is held by its presence alone: what it stops (a
 	// script's navigation away, a preconnect, most of WebRTC) shows only in
 	// Chromium 152 or later, so docs/web.md keeps the probe that shows it.
@@ -454,11 +467,16 @@ func TestBeadPageNoteRunLink(t *testing.T) {
 		}
 	}
 
+	notes, err := f.st.Notes(context.Background(), bead)
+	if err != nil || len(notes) != 1 {
+		t.Fatalf("the notes = %+v, %v", notes, err)
+	}
+	stable := "/blobs/note/" + itoa(notes[0].Seq) + "/2"
 	body := f.get("/beads/" + bead).body
-	if want := `<a href="/blobs/` + page.Hash + `">page ` + page.Hash[:8] + `</a>`; !strings.Contains(body, want) {
+	if want := `<a href="` + stable + `">page ` + page.Hash[:8] + `</a>`; !strings.Contains(body, want) {
 		t.Errorf("the page lacks its static link %s", want)
 	}
-	if want := `<a href="//127.0.0.1:8789/blobs/` + page.Hash + `">run</a>`; !strings.Contains(body, want) {
+	if want := `<a href="//127.0.0.1:8789` + stable + `">run</a>`; !strings.Contains(body, want) {
 		t.Errorf("the page lacks %s", want)
 	}
 }
@@ -470,7 +488,12 @@ func TestBeadPageNoteRunLink(t *testing.T) {
 func TestRunLinkBase(t *testing.T) {
 	t.Parallel()
 	f := newPagesFixture(t)
-	bead, page, _ := f.notedPage(t)
+	bead, _, _ := f.notedPage(t)
+	notes, err := f.st.Notes(context.Background(), bead)
+	if err != nil || len(notes) != 1 {
+		t.Fatalf("the notes = %+v, %v", notes, err)
+	}
+	stable := "/blobs/note/" + itoa(notes[0].Seq) + "/2"
 	f.srv.AllowHosts("yard.example.net")
 	run := func(host string) string {
 		t.Helper()
@@ -488,9 +511,9 @@ func TestRunLinkBase(t *testing.T) {
 		host string
 		want string
 	}{
-		{"127.0.0.1", "//127.0.0.1:8789/blobs/" + page.Hash},
-		{"localhost:1234", "//127.0.0.1:8789/blobs/" + page.Hash},
-		{"yard.example.net", "//yard.example.net:8789/blobs/" + page.Hash},
+		{"127.0.0.1", "//127.0.0.1:8789" + stable},
+		{"localhost:1234", "//127.0.0.1:8789" + stable},
+		{"yard.example.net", "//yard.example.net:8789" + stable},
 	} {
 		if got := run(c.host); got != c.want {
 			t.Errorf("Host %s: run %s, want %s", c.host, got, c.want)
@@ -502,27 +525,27 @@ func TestRunLinkBase(t *testing.T) {
 		want string
 	}{
 		// A reader here still goes straight to the origin.
-		{"127.0.0.1", "//127.0.0.1:8789/blobs/" + page.Hash},
+		{"127.0.0.1", "//127.0.0.1:8789" + stable},
 		// A reader there goes by the origin's public name, on the
 		// port the view was reached by.
-		{"yard.example.net", "//pages.example.net/blobs/" + page.Hash},
-		{"yard.example.net:8443", "//pages.example.net:8443/blobs/" + page.Hash},
+		{"yard.example.net", "//pages.example.net" + stable},
+		{"yard.example.net:8443", "//pages.example.net:8443" + stable},
 	} {
 		if got := run(c.host); got != c.want {
 			t.Errorf("Host %s: run %s, want %s", c.host, got, c.want)
 		}
 	}
 	f.srv.SetPagesAddr("127.0.0.1:9001")
-	if got := run("localhost"); got != "//127.0.0.1:9001/blobs/"+page.Hash {
+	if got := run("localhost"); got != "//127.0.0.1:9001"+stable {
 		t.Errorf("the origin on 127.0.0.1:9001: run %s", got)
 	}
-	if got := run("yard.example.net"); got != "//pages.example.net/blobs/"+page.Hash {
+	if got := run("yard.example.net"); got != "//pages.example.net"+stable {
 		t.Errorf("the origin on 127.0.0.1:9001, by name: run %s", got)
 	}
 	// The origin on every interface (--unsafe): a reader here reaches
 	// it on loopback.
 	f.srv.SetPagesAddr("0.0.0.0:9001")
-	if got := run("127.0.0.1"); got != "//127.0.0.1:9001/blobs/"+page.Hash {
+	if got := run("127.0.0.1"); got != "//127.0.0.1:9001"+stable {
 		t.Errorf("the origin on 0.0.0.0:9001: run %s", got)
 	}
 }
@@ -538,7 +561,7 @@ func TestRunLinkMissing(t *testing.T) {
 	if want := `page ` + page.Hash[:8] + `: the yard no longer has it`; !strings.Contains(body, want) {
 		t.Errorf("the page lacks %q", want)
 	}
-	if strings.Contains(body, ">run</a>") || strings.Contains(body, "/blobs/"+page.Hash) {
+	if strings.Contains(body, ">run</a>") || strings.Contains(body, "/blobs/note/") {
 		t.Error("the page links what the yard no longer holds")
 	}
 }

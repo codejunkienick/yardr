@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -338,6 +339,109 @@ func TestBeadNoteStdin(t *testing.T) {
 	}
 	if notes, err := st.Notes(ctx, b.ID); err != nil || len(notes) != 1 {
 		t.Errorf("what was refused was written: %+v, %v", notes, err)
+	}
+}
+
+// yardr bead note --replace swaps a note's page in place: a dressed
+// page and a whole-file page both go by it, with no text, and the
+// attach refusals (a foreign seq, an ambiguous or non-page file, prose
+// bytes, bytes over the limit) leave the note as it stands. The swap's
+// note_replaced event names who replaced it.
+func TestBeadNoteReplace(t *testing.T) {
+	t.Parallel()
+	a, _ := pageYard(t)
+	ctx := context.Background()
+	b, err := a.st.CreateBead(ctx, store.NewBead{Title: "the shed", Depot: "web"}, "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	frag1 := write("one.html", `<p class="lede">One.</p>`)
+	frag2 := write("two.html", `<p class="lede">Two.</p>`)
+	whole := write("whole.html", "<!DOCTYPE html><html><body>whole</body></html>")
+	if _, err := run(t, a.beadCmd(), "note", b.ID, "the shed, dressed", "--page", frag1, "--title", "One"); err != nil {
+		t.Fatal(err)
+	}
+	notes, err := a.st.Notes(ctx, b.ID)
+	if err != nil || len(notes) != 1 || len(notes[0].Files) != 1 {
+		t.Fatalf("the notes = %+v, %v", notes, err)
+	}
+	seq := strconv.FormatUint(notes[0].Seq, 10)
+	out, err := run(t, a.beadCmd(), "note", b.ID, "--replace", seq, "--page", frag2, "--title", "Two")
+	if err != nil || !strings.Contains(out, "note "+seq+" on "+b.ID+" replaced") {
+		t.Fatalf("bead note --replace --page = %q, %v", out, err)
+	}
+	notes, _ = a.st.Notes(ctx, b.ID)
+	if f := notes[0].Files[0]; f.Framed == nil || f.Framed.Title != "Two" || notes[0].Text != "the shed, dressed" {
+		t.Fatalf("the note after a dressed replace = %+v", notes[0])
+	}
+	evs, err := a.st.Events(ctx, b.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range evs {
+		if e.Kind == "note_replaced" && e.Actor == "me" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no note_replaced by me among %+v", evs)
+	}
+	// A whole-file page replaces the dressed one, clearing its record.
+	if _, err := run(t, a.beadCmd(), "note", b.ID, "--replace", seq, "--file", whole); err != nil {
+		t.Fatal(err)
+	}
+	notes, _ = a.st.Notes(ctx, b.ID)
+	kept := notes[0].Files[0].Hash
+	if f := notes[0].Files[0]; f.Framed != nil || f.Name != "whole.html" {
+		t.Fatalf("the note after a file replace = %+v", f)
+	}
+	// Refusals leave the note as it stands.
+	for _, c := range []struct {
+		want string
+		args []string
+	}{
+		{"takes the bead and no text", []string{"note", b.ID, "words", "--replace", seq, "--file", whole}},
+		{"takes one form", []string{"note", b.ID, "--replace", seq, "--ack", "1", "--file", whole}},
+		{"has no note 9999", []string{"note", b.ID, "--replace", "9999", "--file", whole}},
+		{"counts a note's files from 1", []string{"note", b.ID, "--replace", seq, "--file-n", "0", "--file", whole}},
+		{"not a page", []string{"note", b.ID, "--replace", seq, "--file", write("prose.html", "just some prose")}},
+		{"over the yard's limit", []string{"note", b.ID, "--replace", seq, "--file", write("big.html", "<!DOCTYPE html><html><body>big</body></html>"+strings.Repeat("x", 9<<20))}},
+		{"needs the new page", []string{"note", b.ID, "--replace", seq}},
+	} {
+		if out, err := run(t, a.beadCmd(), c.args...); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("bead %v = %q, %v, want a refusal holding %q", c.args, out, err, c.want)
+		}
+	}
+	if notes, _ := a.st.Notes(ctx, b.ID); notes[0].Files[0].Hash != kept {
+		t.Error("what was refused was swapped in")
+	}
+	// Without --file-n a note of two pages is ambiguous; by number it goes.
+	pageA := write("a.html", "<!DOCTYPE html><html><body>a</body></html>")
+	pageB := write("b.html", "<!DOCTYPE html><html><body>b</body></html>")
+	if _, err := run(t, a.beadCmd(), "note", b.ID, "two pages", "--file", pageA, "--file", pageB); err != nil {
+		t.Fatal(err)
+	}
+	notes, _ = a.st.Notes(ctx, b.ID)
+	twoSeq := strconv.FormatUint(notes[len(notes)-1].Seq, 10)
+	if out, err := run(t, a.beadCmd(), "note", b.ID, "--replace", twoSeq, "--file", whole); err == nil || !strings.Contains(err.Error(), "say which file") {
+		t.Errorf("a note of two pages with no --file-n = %q, %v", out, err)
+	}
+	if _, err := run(t, a.beadCmd(), "note", b.ID, "--replace", twoSeq, "--file-n", "2", "--file", whole); err != nil {
+		t.Fatal(err)
+	}
+	notes, _ = a.st.Notes(ctx, b.ID)
+	if last := notes[len(notes)-1]; last.Files[0].Hash == last.Files[1].Hash || last.Files[1].Name != "whole.html" {
+		t.Errorf("the second page by number = %+v", last.Files)
 	}
 }
 
