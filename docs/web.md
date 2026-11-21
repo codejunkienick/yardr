@@ -1746,12 +1746,13 @@ presets. A weighty card shows its weight first, one line a class. A run
 card that is routine approves below it, with fields where the card asks
 for values in the clear; a setup card approves with its preset pick and
 the account typed beside it, the candidate taken instead, or a bare pick
-where the card keeps the account that stands. A card that is weighty but
-not strong has no gate in this window, with one exception below: a
-secret ask shows no field and no giving, a mapping ask shows its options
-as a list with no pick, a run or setup card shows no approval, and each
-names the terminal command instead, where the card is given, picked or
-approved. Each answers under
+where the card keeps the account that stands. A weighty run or setup
+card approves below under a fresh sign-in where the window holds the
+gate, as the paragraphs after this say; where it holds none it shows no
+approval and names footplate and the terminal command instead, where the
+card is approved. A secret ask shows no field and no giving in this
+window, and a mapping ask shows its options as a list with no pick, each
+naming where the card is given or picked. Each answers under
 itself, with its options as buttons where the card offers any, with Later
 and Decline; a run or setup card still names the terminal command beside
 its approval. Every card but a secret's has a words field beside them, in
@@ -1764,17 +1765,26 @@ waits for the user in a stage a manual group works, the outcomes send it
 on as `yardr review` offers them, with a note. Each write carries the
 revision the page was drawn from ([Acting as a user](#acting-as-a-user)).
 
-On a hosted yard, a strong card — trust or code in its weight — approves
-on the page under a fresh sign-in ([Behind an auth
+On a hosted yard, every weighty run or setup card — any class in its
+weight, trust or code among them — approves on the page under a fresh
+sign-in ([Behind an auth
 gateway](#behind-an-auth-gateway)): approving starts the gateway
 re-authentication unless the session's last authentication was already a
-strong-card re-authentication by the operator inside the gateway's
+weighty-card re-authentication by this user inside the gateway's
 window, and the return approves the card it was raised for and no other.
-One fresh sign-in witnesses several strong cards inside the window. A
-self-hosted yard approves strong cards at a terminal on the yard's
-machine, never on the page. A paired device of the operator approves one
-on any yard with no sign-in at all, as it approves any card
-([users.md](users.md#devices)).
+One fresh sign-in witnesses every weighty card approved inside the
+window. A setup card's typed account waits in the yard's memory for
+that return alone, for at most fifteen minutes, as a secret ask's values
+do. For an operator every such card approves that way. A member
+approves only their own cards that way — their own first-device
+pairing, and the card for their own address in a source, which approves
+as their own pairing does — and any other weighty card on a member's
+page shows no button and names footplate, and a click on it is refused
+before any round trip, in words that say an operator's sign-in is what
+the page takes. A self-hosted yard approves weighty cards in footplate
+or at a terminal on the yard's machine, never on the page. A paired
+device of the operator approves one on any yard with no sign-in at all,
+as it approves any card ([users.md](users.md#devices)).
 
 On a hosted yard the operator can give a secret ask from its bead's page
 alone, though it weighs credential and is never strong: the page draws a
@@ -1791,21 +1801,24 @@ own login code from a paired device. A self-hosted yard's page also draws
 no field: there the card names footplate and the terminal command, and
 either door still gives it.
 
-The card is the same wherever it stands, and a strong card approves the
-same way from the needs rows on Home and from the waits on `/line` as on
-its bead's page. The button reads `Approve in <yard>`, beside the fields
+The card is the same wherever it stands, and a weighty run or setup
+card approves the same way from the needs rows on Home and from the
+waits on `/line` as on its bead's page, for an operator, and for a
+member only on their own pairing or their own address card, as above.
+The button reads `Approve in <yard>`, beside the fields
 the card asks for (the values in the clear of a run card; a setup's
 presets, the account typed unseen and the candidate), and posts to the
 bead's own handler, so the sign-in and the approval are the bead page's
 own. The person lands on the bead's page afterwards, as after any answer
 given from a row: it shows the card answered and what the approval did,
 or the yard's reason when it refused. Where the view holds no gateway, or the
-yard is not hosted, a strong card shows no button anywhere and names the
-terminal command, as any weighty card does. A routine run or setup card
-approves on its bead's page alone, and a card that is weighty but neither
-trust nor code (a change outside the yard, a call as a user, or a widened
-read, taken alone) approves nowhere in the web; a credential card taken
-alone gives only as a secret ask does, on its bead's page in a hosted
+yard is not hosted, a weighty card shows no button anywhere and names
+footplate and the terminal command, as any weighty card does. A routine run or setup card
+approves on its bead's page alone. A mapping card is still picked
+nowhere in the web: it shows its options as a list, and is picked in
+footplate or at a terminal. A credential card taken alone as a run or
+setup card approves under the fresh sign-in above; as a secret ask it
+gives only as a secret ask does, on its bead's page in a hosted
 window, under the fresh sign-in above.
 
 A depot pack too large for a whole card is written as a summary card

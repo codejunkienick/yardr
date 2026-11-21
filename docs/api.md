@@ -551,7 +551,7 @@ A note was added to the bead: a plain note, a question (an ask), or an answer (a
 | `at` | time | when |
 | `data.note` | number, may be absent | the note's seq; absent on a question another yard asked |
 | `data.ask` | number, may be absent | the ask's seq on its bead, for a question another yard asked; absent otherwise |
-| `data.witness` | string, may be absent | how a strong approval was witnessed: `fresh sign-in` in the hosted web, `terminal` on the socket; absent otherwise, and on an approval through a device, which names the device in `data.via` instead |
+| `data.witness` | string, may be absent | how a weighty approval was witnessed: `fresh sign-in` in the hosted web, `terminal` on the socket; absent otherwise, and on an approval through a device, which names the device in `data.via` instead |
 
 ### A bead was closed: `closed`
 
@@ -7819,13 +7819,14 @@ with `weighed`, and the answer's event records `via` and no `witness`.
 What a strong card brings (a program the yard runs, a link, a user or an
 endpoint the yard listens to) stands after the device is removed
 ([users.md](users.md#devices) says what that costs). The bead page asks
-more: on a hosted yard it approves a strong card under a fresh sign-in.
-Approving starts the gateway re-authentication unless the session's last
-authentication was a strong-card re-authentication by the operator inside
-the gateway's window, and the answer's event records `witness: fresh
-sign-in`. On the socket a strong card is approved as any weighty card is,
-and records `witness: terminal`. A self-hosted yard's bead page approves
-no strong card, and names the terminal command.
+more: on a hosted yard it approves every weighty run or setup card under
+a fresh sign-in. Approving starts the gateway re-authentication unless
+the session's last authentication was a weighty-card re-authentication
+by this user inside the gateway's window, and the answer's event records
+`witness: fresh sign-in`. On the socket a weighty card is approved as
+any weighty card is, and records `witness: terminal`. A self-hosted
+yard's bead page approves no weighty card, and names footplate and the
+terminal command.
 
 The word is the client's. The yard knows who calls by the operator's
 token or shell, and whoever holds either can send `weighed`, so the yard

@@ -1569,7 +1569,7 @@ var apiEvents = []apiEvent{
 			{"at", "time", "when"},
 			{"data.note", "number?", "the note's seq; absent on a question another yard asked"},
 			{"data.ask", "number?", "the ask's seq on its bead, for a question another yard asked; absent otherwise"},
-			{"data.witness", "string?", "how a strong approval was witnessed: `fresh sign-in` in the hosted web, `terminal` on the socket; absent otherwise, and on an approval through a device, which names the device in `data.via` instead"},
+			{"data.witness", "string?", "how a weighty approval was witnessed: `fresh sign-in` in the hosted web, `terminal` on the socket; absent otherwise, and on an approval through a device, which names the device in `data.via` instead"},
 		},
 	},
 	{

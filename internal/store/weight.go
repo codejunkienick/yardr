@@ -183,12 +183,32 @@ func StrongWords(ws []AskWeight) string {
 	return "strong (" + strings.Join(classes, ", ") + ")"
 }
 
+// Weighty reports whether the card's stored weight makes it a weighty
+// card: any class at all, since a routine card carries no weight. It is
+// StrongWeight's wider neighbour, not a widening of it: strong keeps
+// meaning trust or code alone. The web reads the same predicate before
+// it starts a weighty card's sign-in, never its own.
+func Weighty(weight []AskWeight) bool {
+	return len(weight) > 0
+}
+
+// WeightyWords names a weighty card's weight in a refusal: weighty with
+// the classes it carries. The web names it the same way before it starts
+// a weighty card's sign-in.
+func WeightyWords(ws []AskWeight) string {
+	classes := make([]string, len(ws))
+	for i, w := range ws {
+		classes[i] = w.Class
+	}
+	return "weighty (" + strings.Join(classes, ", ") + ")"
+}
+
 // gateRefusal is a run or setup approval's gate behind the stale check:
 // the weighed refusal first, the fresh witness's second (weighedRefusal,
 // freshRefusal). No door is refused for being the one it is: a paired
-// device of the operator approves a strong card as it approves any card,
+// device of the operator approves a weighty card as it approves any card,
 // and the card's own gate is that its person saw its weight. The
-// approvals of a strong card differ in how they are witnessed
+// approvals of a weighty card differ in how they are witnessed
 // (witnessStrong), not in whether they are taken.
 func (w *wtx) gateRefusal(seq uint64, weight, stored []AskWeight, actor string, weighed bool) error {
 	if err := weighedRefusal(seq, weight, weighed); err != nil {
@@ -227,24 +247,24 @@ func (w *wtx) freshFault(actor string) string {
 // freshRefusal says why the approval of the ask seq is refused when it
 // carries a fresh sign-in that does not witness it: nil for a routine
 // card, which asks for no witness, and for an approval that carries none,
-// which the socket witnesses as a terminal's (witnessStrong). A strong
+// which the socket witnesses as a terminal's (witnessStrong). A weighty
 // card approved in the hosted web carries the request's: one made as
 // another user, one with no authentication time, or one outside the
 // gateway's privileged-session window refuses, and the ask stays open.
-// Whether the sign-in answered a strong card's challenge is the web's to
+// Whether the sign-in answered a weighty card's challenge is the web's to
 // have checked before it stated the witness; the store takes the
 // statement and checks whom and when.
 func (w *wtx) freshRefusal(seq uint64, stored []AskWeight, actor string) error {
-	if !w.hasFresh || !StrongWeight(stored) {
+	if !w.hasFresh || !Weighty(stored) {
 		return nil
 	}
 	switch w.freshFault(actor) {
 	case "other":
-		return fmt.Errorf("ask %d is %s: this approval's fresh sign-in was made as %s, not as %s. Nothing ran, and the ask stays open", seq, StrongWords(stored), w.fresh.User, actor)
+		return fmt.Errorf("ask %d is %s: this approval's fresh sign-in was made as %s, not as %s. Nothing ran, and the ask stays open", seq, WeightyWords(stored), w.fresh.User, actor)
 	case "none":
-		return fmt.Errorf("ask %d is %s: this approval carries a fresh sign-in with no authentication time, and a strong card is approved in the hosted web only under one. Nothing ran, and the ask stays open", seq, StrongWords(stored))
+		return fmt.Errorf("ask %d is %s: this approval carries a fresh sign-in with no authentication time, and a weighty card is approved in the hosted web only under one. Nothing ran, and the ask stays open", seq, WeightyWords(stored))
 	case "window":
-		return fmt.Errorf("ask %d is %s: this approval's fresh sign-in is outside the gateway's window, and a strong card is approved in the hosted web only under one inside it. Nothing ran, and the ask stays open", seq, StrongWords(stored))
+		return fmt.Errorf("ask %d is %s: this approval's fresh sign-in is outside the gateway's window, and a weighty card is approved in the hosted web only under one inside it. Nothing ran, and the ask stays open", seq, WeightyWords(stored))
 	}
 	return nil
 }

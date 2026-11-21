@@ -116,3 +116,14 @@ func ProviderOf(runner string, cfg map[string]any, as []limits.Answerer) string 
 func (s *Server) SetEstimates(fn func(ctx context.Context, st store.API, ids []string, now time.Time) (map[string]*eta.Result, error)) {
 	s.estimates = fn
 }
+
+// AgeFreshPending moves every challenge waiting at the gateway back by d,
+// for tests of how long one waits.
+func (s *Server) AgeFreshPending(d time.Duration) {
+	s.freshMu.Lock()
+	defer s.freshMu.Unlock()
+	for st, ch := range s.freshPending {
+		ch.at = ch.at.Add(-d)
+		s.freshPending[st] = ch
+	}
+}

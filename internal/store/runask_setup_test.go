@@ -895,7 +895,7 @@ func TestSetupApprovalUnderAFreshSignIn(t *testing.T) {
 	}
 	values := map[string]string{"SETUP_ACCOUNT": "ops@example.com"}
 	stale := WithFreshWitness(y.ctx, "mckean", y.now.Add(-time.Hour))
-	want := "ask " + strconv.FormatUint(seq, 10) + " is strong (code): this approval's fresh sign-in is outside the gateway's window, and a strong card is approved in the hosted web only under one inside it. Nothing ran, and the ask stays open"
+	want := "ask " + strconv.FormatUint(seq, 10) + " is weighty (credential, outside, code): this approval's fresh sign-in is outside the gateway's window, and a weighty card is approved in the hosted web only under one inside it. Nothing ran, and the ask stays open"
 	if _, err := y.ApproveSetup(stale, y.bead, seq, 2, values, "", "mckean", true, ""); err == nil || err.Error() != want {
 		t.Fatalf("approving a strong setup under a stale sign-in = %v, want %q", err, want)
 	}

@@ -923,15 +923,15 @@ func TestWebStrongCardStaysTerminalOffHosted(t *testing.T) {
 }
 
 // A card's approval stands wherever the card does, class by class. A
-// strong card (trust or code in its weight, alone or beside other classes)
-// reads "Approve in <yard>" on its bead's page, on Home and on the line,
-// and approving it from any of them starts the gateway re-authentication,
-// even for a session that signed in a moment ago; a weighty card with
-// neither class (outside, as-user or reads alone) offers no approval on
-// any of them, keeps its line and its terminal command, and a post at the
-// handler is refused with the ask open and nothing run. A credential
-// card alone is a secret ask: it approves nowhere, but gives on its
-// bead's page under the same re-authentication (the give row).
+// weighty card (any class in its weight, alone or beside other classes —
+// trust, code, or a middle class: outside, as-user, reads or credential
+// on a run or setup card) reads "Approve in <yard>" on its bead's page, on
+// Home and on the line, for an operator, and approving it from any of them
+// starts the gateway re-authentication, even for a session that signed in
+// a moment ago; the return approves it under the fresh sign-in and the
+// answer is witnessed a fresh sign-in. A credential card alone is a secret
+// ask: it approves nowhere, but gives on its bead's page under the same
+// re-authentication (the give row).
 func TestWebCardApprovalPerClassOfWeight(t *testing.T) {
 	t.Parallel()
 	const freshDecl = "name: fresh\nbase: https://fresh.example.com/v1\ncredential: { env: FRESH_TOKEN, header: \"Authorization: Bearer {credential}\" }\nthread:\n  reply: [fresh/thread, reply]\ncalls:\n  ping: { kind: read, request: { method: GET, path: /me } }\n"
@@ -948,21 +948,19 @@ func TestWebCardApprovalPerClassOfWeight(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		classes []string
-		strong  bool
+		weighty bool
 		// give is a secret ask's row: no approval anywhere, but a giving
 		// on its bead's page alone, through the same re-authentication.
 		give bool
 		// ask puts the card on the bead and returns its number, with the
 		// fields its approval posts beside the usual three.
 		ask func(y *approveYard, bead string) (uint64, url.Values)
-		// refusal is what a withheld card's refused post says of its weight.
-		refusal string
 		// complete follows the sign-in's return and approves the card.
 		complete bool
 		// intact checks that nothing ran, before the return.
 		intact func(t *testing.T, y *approveYard)
 	}{
-		{name: "trust", classes: []string{store.WeightTrust}, strong: true, complete: true,
+		{name: "trust", classes: []string{store.WeightTrust}, weighty: true, complete: true,
 			ask: func(y *approveYard, bead string) (uint64, url.Values) {
 				return y.askRun(bead, "jo", "user", "add", "bob"), nil
 			},
@@ -971,19 +969,19 @@ func TestWebCardApprovalPerClassOfWeight(t *testing.T) {
 					t.Errorf("the challenge added the user: %v", err)
 				}
 			}},
-		{name: "code", classes: []string{store.WeightCode}, strong: true,
+		{name: "code", classes: []string{store.WeightCode}, weighty: true,
 			ask: func(y *approveYard, bead string) (uint64, url.Values) {
 				return askAs(y, bead, store.Ask{Question: "Add fresh?", Run: &store.AskRun{Argv: []string{"source add fresh.yaml"},
 					Carried: []store.AskSource{{Name: "fresh", Text: freshDecl,
 						Files: []store.AskFile{{Program: "fresh/thread", Text: freshThread, SHA256: hex.EncodeToString(threadSum[:])}}}}}}), nil
 			}},
-		{name: "code beside reads", classes: []string{store.WeightCode, store.WeightReads}, strong: true,
+		{name: "code beside reads", classes: []string{store.WeightCode, store.WeightReads}, weighty: true,
 			ask: func(y *approveYard, bead string) (uint64, url.Values) {
 				y.putCRM(true)
 				return askAs(y, bead, store.Ask{Question: "Replace crm?", Run: &store.AskRun{Argv: []string{"source add crm.yaml"},
 					Carried: []store.AskSource{{Name: "crm", Text: approveCRMList}}}}), nil
 			}},
-		{name: "credential, outside and code", classes: []string{store.WeightCredential, store.WeightOutside, store.WeightCode}, strong: true, complete: true,
+		{name: "credential, outside and code", classes: []string{store.WeightCredential, store.WeightOutside, store.WeightCode}, weighty: true, complete: true,
 			ask: func(y *approveYard, bead string) (uint64, url.Values) {
 				servesSetupmail(y.own)
 				return y.askSetup(bead), url.Values{"option": {"2"}, "secret-SETUP_ACCOUNT": {"ops@example.com"}}
@@ -994,7 +992,12 @@ func TestWebCardApprovalPerClassOfWeight(t *testing.T) {
 				return askAs(y, bead, store.Ask{Question: "The API key for the CRM", Secret: &store.AskSecret{Source: "crm"}}),
 					url.Values{"action": {"give"}, "secret-CRM_TOKEN": {"s3cret"}}
 			}},
-		{name: "outside", classes: []string{store.WeightOutside}, refusal: "weighty (outside)",
+		{name: "credential on a setup", classes: []string{store.WeightCredential}, weighty: true, complete: true,
+			ask: func(y *approveYard, bead string) (uint64, url.Values) {
+				servesLightSetupmail(y.own)
+				return y.askSetup(bead), url.Values{"option": {"1"}, "secret-SETUP_TOKEN": {"setup-token"}}
+			}},
+		{name: "outside", classes: []string{store.WeightOutside}, weighty: true, complete: true,
 			ask: func(y *approveYard, bead string) (uint64, url.Values) {
 				y.putCRM(false)
 				return y.askRun(bead, "jo", "source", "set", "crm", "updates_per_hour=6000"), nil
@@ -1006,12 +1009,12 @@ func TestWebCardApprovalPerClassOfWeight(t *testing.T) {
 					t.Errorf("the refused approval raised the update limit to %d", src.UpdatesPerHour)
 				}
 			}},
-		{name: "as-user", classes: []string{store.WeightAsUser}, refusal: "weighty (as-user)",
+		{name: "as-user", classes: []string{store.WeightAsUser}, weighty: true, complete: true,
 			ask: func(y *approveYard, bead string) (uint64, url.Values) {
 				y.putCRM(false)
 				return y.askRun(bead, "jo", "user", "identity", "sam", "--source", "crm", "--id", "7"), nil
 			}},
-		{name: "reads", classes: []string{store.WeightReads}, refusal: "weighty (reads)",
+		{name: "reads", classes: []string{store.WeightReads}, weighty: true, complete: true,
 			ask: func(y *approveYard, bead string) (uint64, url.Values) {
 				y.putCRM(true)
 				y.own.SetPackReader(func(ctx context.Context, name string, depot string, mappings store.Mappings, yard store.API) (*store.PackReading, error) {
@@ -1033,7 +1036,7 @@ func TestWebCardApprovalPerClassOfWeight(t *testing.T) {
 				t.Fatalf("the card weighs %v, want %v", got, c.classes)
 			}
 			// A session that signed in a moment ago: a standing login, which
-			// never approves a strong card.
+			// never approves a weighty card.
 			tok := y.token("jo@example.net", authAt(time.Now()))
 			rev := y.revision(b.ID)
 			for _, s := range approveSurfaces {
@@ -1049,9 +1052,9 @@ func TestWebCardApprovalPerClassOfWeight(t *testing.T) {
 						t.Errorf("%s: the card lacks %q:\n%s", s.name, want, body)
 					}
 				}
-				if c.strong {
+				if c.weighty {
 					if !strings.Contains(body, approveButton) || strings.Contains(body, noGateLine) {
-						t.Errorf("%s: the strong card is withheld, or says it has no gate:\n%s", s.name, body)
+						t.Errorf("%s: the weighty card is withheld, or says it has no gate:\n%s", s.name, body)
 					}
 					continue
 				}
@@ -1072,8 +1075,8 @@ func TestWebCardApprovalPerClassOfWeight(t *testing.T) {
 				form[k] = v
 			}
 			r := y.post("/beads/"+b.ID, tok, form)
-			if !c.strong && !c.give {
-				if r.status != http.StatusOK || !strings.Contains(r.body, c.refusal) {
+			if !c.weighty && !c.give {
+				if r.status != http.StatusOK || !strings.Contains(r.body, "weighty") {
 					t.Fatalf("POST at the handler: %d: %s", r.status, r.body)
 				}
 			} else {
@@ -1115,6 +1118,204 @@ func TestWebCardApprovalPerClassOfWeight(t *testing.T) {
 	}
 }
 
+// claimChimeDecl is a source that tells a user and hears them back, so a
+// dropped delivery offers a user key claim (store.ClaimAddress).
+const claimChimeDecl = `name: chime
+base: https://chime.example.com
+credential: { env: CHIME_TOKEN }
+calls:
+  message:
+    kind: update
+    params: { chat: { type: string }, text: { type: string } }
+    request: { method: POST, path: /send, body: { chat: "{chat}", text: "{text}" } }
+notify:
+  call: message
+  address: { param: chat, env: CHIME_CHAT }
+  text: text
+hook:
+  verify: { scheme: secret, signature: { header: Chime-Secret } }
+  bodies: unique
+  normalize: [normalize]
+  keys: [chat]
+hear:
+  field: chat
+  address: { env: CHIME_CHAT }
+  from: operator
+  subscribe: { type: message }
+`
+
+// userkeyClaim puts a user key claim card for user on its own bead and
+// returns the bead and the ask, as a dropped delivery offers one: the
+// claim names the yard's operator at claim time, so for a member the
+// operator setting names them for the claim and is then put back, and
+// their role is a member's again (SetUser), as it stood.
+func (y *approveYard) userkeyClaim(user, address string) (string, uint64) {
+	y.t.Helper()
+	ctx := context.Background()
+	if _, err := y.st.PutSource(ctx, "chime.yaml", claimChimeDecl, "jo"); err != nil {
+		y.t.Fatal(err)
+	}
+	if user != "jo" {
+		must(y.t, y.st.SetSetting(ctx, store.OperatorSetting, user, "jo"))
+	}
+	created, err := y.own.ClaimAddress(ctx, "chime", address, "is this you")
+	must(y.t, err)
+	if !created {
+		y.t.Fatalf("no claim was offered for %s", user)
+	}
+	if user != "jo" {
+		must(y.t, y.st.SetSetting(ctx, store.OperatorSetting, "jo", "jo"))
+		if _, err := y.st.SetUser(ctx, user, map[string]string{store.UserRole: store.RoleMember}, "jo"); err != nil {
+			y.t.Fatal(err)
+		}
+	}
+	q, err := y.st.UserAsks(ctx, user, user)
+	must(y.t, err)
+	for _, o := range q.Open {
+		if o.Run != nil && store.IsUserKeyRun(o.Run.Argv) {
+			return o.Bead, o.Ask
+		}
+	}
+	y.t.Fatalf("no user key claim waits for %s", user)
+	return "", 0
+}
+
+// A member approves their own user key card on the hosted web under a
+// fresh sign-in, as their own first-device pairing: the button stands on
+// the bead's page and on the rows, the click starts the re-authentication,
+// and the return approves it, witnessed a fresh sign-in. A stale or
+// another user's return, and a replayed one, approve nothing. Inside the
+// fresh window a second own card (their pairing) approves at once. A
+// weighty card that is not their own offers a member no button, keeps the
+// no-gate line, and a crafted click is refused before any round trip in
+// words that say an operator's sign-in is what the page takes; an
+// operator-raised user key card asked of the operator keeps the operator
+// rule, and a member's crafted click on it is refused as asked of another.
+func TestWebMemberOwnUserkeyCard(t *testing.T) {
+	t.Parallel()
+	y := newApproveYard(t, true)
+	ctx := context.Background()
+	must(t, y.st.SetSetting(ctx, store.NameSetting, "depot", "jo"))
+	beadID, seq := y.userkeyClaim("sam", "sam-chat-1")
+	sam := y.token("sam@example.net")
+
+	// The member's own card draws the approval wherever it stands.
+	for _, s := range approveSurfaces {
+		body := y.surfaceBody(s.path(beadID), sam)
+		if !strings.Contains(body, approveButton) || strings.Contains(body, noGateLine) {
+			t.Errorf("%s: a member's own user key card is withheld, or says it has no gate:\n%s", s.name, body)
+		}
+	}
+	// A stale return, a return as another user, and a state never minted
+	// each approve nothing.
+	r := y.post("/beads/"+beadID, sam, y.approveForm(beadID, seq))
+	if r.status != http.StatusSeeOther {
+		t.Fatalf("POST the approval: %d: %s", r.status, r.body)
+	}
+	loc, err := url.Parse(r.header.Get("Location"))
+	if err != nil || loc.Path != "/edge/reauth" {
+		t.Fatalf("the approval goes to %q, want the gateway re-authentication", r.header.Get("Location"))
+	}
+	back := loc.Query().Get("return_to")
+	for _, c := range []struct {
+		name, path, token, want string
+	}{
+		{"a stale sign-in", back, y.token("sam@example.net", authAt(time.Now().Add(-time.Hour))), "not fresh"},
+		{"another user", back, y.token("jo@example.net", authAt(time.Now().Add(5*time.Second))), "another card"},
+		{"a state never minted", "/beads/" + beadID + "/fresh/" + strconv.FormatUint(seq, 10) + "/never-minted", y.token("sam@example.net", authAt(time.Now().Add(5*time.Second))), "used already"},
+	} {
+		if r := y.getNoFollow(c.path, c.token); r.status != 200 || !strings.Contains(r.body, c.want) {
+			t.Errorf("%s: GET the return: %d: %s", c.name, r.status, r.body)
+		}
+	}
+	if got := y.askedState(beadID, seq, "sam"); got != "open" {
+		t.Fatalf("the ask is %s after the refusals, want it open", got)
+	}
+	freshSam := y.token("sam@example.net", authAt(time.Now().Add(5*time.Second)))
+	if r := y.getNoFollow(back, freshSam); r.status != http.StatusSeeOther || r.header.Get("Location") != "/beads/"+beadID {
+		t.Fatalf("GET the return: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	if got := y.askedState(beadID, seq, "sam"); got != "answered" {
+		t.Fatalf("the ask is %s after the return, want it answered", got)
+	}
+	if w := y.witness(); w != store.WitnessFreshSignIn {
+		t.Fatalf("the approval is witnessed %q, want a fresh sign-in", w)
+	}
+	if r := y.getNoFollow(back, freshSam); r.status != 200 || !strings.Contains(r.body, "used already") {
+		t.Fatalf("replaying the return: %d: %s", r.status, r.body)
+	}
+
+	// Inside the fresh window the member's own pairing approves at once,
+	// with no new sign-in.
+	pairBead := y.bead("pair the member's watch")
+	pairSeq := y.askRun(pairBead.ID, "sam", "user", "device", "pair", "sam", "watch", "--url", "https://mac.example.net")
+	if body := y.surfaceBody("/beads/"+pairBead.ID, sam); !strings.Contains(body, approveButton) {
+		t.Fatalf("a member's own pairing card is withheld:\n%s", body)
+	}
+	r = y.post("/beads/"+pairBead.ID, freshSam, y.approveForm(pairBead.ID, pairSeq))
+	if r.status != http.StatusOK || !strings.Contains(r.body, "code <code>") {
+		t.Fatalf("POST the pairing inside the window: %d: %s", r.status, r.body)
+	}
+	if got := y.askedState(pairBead.ID, pairSeq, "sam"); got != "answered" {
+		t.Fatalf("the pairing ask is %s, want it answered", got)
+	}
+
+	// A weighty card asked of the member that is not their own: no button
+	// anywhere, and a crafted click refuses before any round trip.
+	other := y.bead("the member's identity, asked of the member")
+	y.putCRM(false)
+	otherSeq := y.askRun(other.ID, "sam", "user", "identity", "sam", "--source", "crm", "--id", "7")
+	for _, s := range approveSurfaces {
+		body := y.surfaceBody(s.path(other.ID), sam)
+		if strings.Contains(body, `value="approve"`) || !strings.Contains(body, noGateLine) {
+			t.Errorf("%s: a member's non-own weighty card offers approval, or lacks its line:\n%s", s.name, body)
+		}
+	}
+	// The operator's view of the same surfaces is unchanged: no card drawn
+	// for the operator here, since the ask is the member's.
+	r = y.post("/beads/"+other.ID, sam, y.approveForm(other.ID, otherSeq))
+	if r.status != http.StatusOK || !strings.Contains(r.body, "sign-in is what this page takes") ||
+		!strings.Contains(r.body, "footplate") {
+		t.Fatalf("POST a non-own approval as a member: %d: %s", r.status, r.body)
+	}
+	if u, err := y.st.GetUser(ctx, "sam"); err != nil || u.IsIn("crm", "7") {
+		t.Fatalf("the refused approval wrote the member's identity: %+v, %v", u, err)
+	}
+	if got := y.askedState(other.ID, otherSeq, "sam"); got != "open" {
+		t.Fatalf("the ask is %s after the refusal, want it open", got)
+	}
+
+	// An operator-raised user key card asked of the operator keeps the
+	// operator rule: the operator approves it under a fresh sign-in, and
+	// the member's page draws no card for it at all.
+	opBead, opSeq := y.userkeyClaim("jo", "jo-chat-1")
+	jo := y.token("jo@example.net")
+	if body := y.surfaceBody("/beads/"+opBead, jo); !strings.Contains(body, approveButton) {
+		t.Fatalf("the operator's own user key card is withheld:\n%s", body)
+	}
+	// It is no member's own card: a member's crafted click on it is
+	// refused as a card asked of another, and the ask stays open.
+	if r := y.post("/beads/"+opBead, sam, y.approveForm(opBead, opSeq)); r.status != http.StatusOK ||
+		!strings.Contains(r.body, "asked of another") {
+		t.Fatalf("POST the operator's card as a member: %d: %s", r.status, r.body)
+	}
+	if got := y.askedState(opBead, opSeq, "jo"); got != "open" {
+		t.Fatalf("the operator's ask is %s after the member's click, want it open", got)
+	}
+	r = y.post("/beads/"+opBead, jo, y.approveForm(opBead, opSeq))
+	loc, err = url.Parse(r.header.Get("Location"))
+	if r.status != http.StatusSeeOther || err != nil || loc.Path != "/edge/reauth" {
+		t.Fatalf("POST the operator's approval: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	freshJo := y.token("jo@example.net", authAt(time.Now().Add(5*time.Second)))
+	if r := y.getNoFollow(loc.Query().Get("return_to"), freshJo); r.status != http.StatusSeeOther {
+		t.Fatalf("GET the operator's return: %d: %s", r.status, r.body)
+	}
+	if got := y.askedState(opBead, opSeq, "jo"); got != "answered" {
+		t.Fatalf("the operator's ask is %s after the return, want it answered", got)
+	}
+}
+
 // approveSetupDecl is the one minted source of the setup pack the tests'
 // reader serves, with a read call, an update call, and a mint command: a
 // first install is strong.
@@ -1153,6 +1354,24 @@ func servesSetupmailOf(own *store.Store, decl string) {
 			Presets: []store.AskPreset{
 				{Name: "read", Grants: []store.AskPresetGrant{{Source: "setupmail", Calls: []string{"search"}}}},
 				{Name: "drafts", Grants: []store.AskPresetGrant{{Source: "setupmail", Calls: []string{"search", "draft"}}}},
+			}}, nil
+	})
+}
+
+// servesLightSetupmail has the store read a setupmail with no command
+// file and a read-only preset, so its setup card weighs credential alone:
+// a middle setup card.
+func servesLightSetupmail(own *store.Store) {
+	const decl = "name: setupmail\nbase: https://setupmail.example.com/v1\ncredential: { env: SETUP_TOKEN, header: \"Authorization: Bearer {credential}\" }\ncalls:\n  search: { kind: read, request: { method: GET, path: /messages } }\n"
+	own.SetPackReader(func(ctx context.Context, name string, depot string, mappings store.Mappings, yard store.API) (*store.PackReading, error) {
+		if name != "setupmail" {
+			return nil, errors.New("no pack " + name)
+		}
+		return &store.PackReading{Name: "setupmail", Kind: pack.KindSource,
+			Label: "embedded in yardr test1", Build: "test1",
+			Sources: []store.AskSource{{Name: "setupmail", Text: decl}},
+			Presets: []store.AskPreset{
+				{Name: "read", Grants: []store.AskPresetGrant{{Source: "setupmail", Calls: []string{"search"}}}},
 			}}, nil
 	})
 }
@@ -1373,5 +1592,35 @@ func TestWebDeclinesARunOrSetupCard(t *testing.T) {
 				t.Fatalf("the ask: %+v, want it declined with the words", v.Asks)
 			}
 		})
+	}
+}
+
+// A setup card's typed account waits at the gateway no longer than a secret
+// ask's values do: every setup card is weighty, so each one approved in the
+// hosted web holds what was typed in this view's memory until the sign-in
+// returns, and a return past the short bound finds it gone and approves
+// nothing.
+func TestWebSetupChallengeHoldsItsAccountNoLongerThanASecret(t *testing.T) {
+	t.Parallel()
+	y := newApproveYard(t, true)
+	servesSetupmail(y.own)
+	b := y.bead("set up mail")
+	seq := y.askSetup(b.ID)
+	form := y.approveForm(b.ID, seq)
+	form.Set("option", "1")
+	form.Set("secret-SETUP_ACCOUNT", "ops@example.com")
+	r := y.post("/beads/"+b.ID, y.token("jo@example.net"), form)
+	loc, err := url.Parse(r.header.Get("Location"))
+	if r.status != http.StatusSeeOther || err != nil || loc.Path != "/edge/reauth" {
+		t.Fatalf("POST the approval: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	y.srv.AgeFreshPending(16 * time.Minute)
+	fresh := y.token("jo@example.net", authAt(time.Now().Add(5*time.Second)))
+	r = y.getNoFollow(loc.Query().Get("return_to"), fresh)
+	if r.status != http.StatusOK || !strings.Contains(r.body, "used already, expired, or never started") {
+		t.Fatalf("GET the return past the short bound: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	if got := y.askedState(b.ID, seq, "jo"); got != "open" {
+		t.Fatalf("the ask is %s after a return past the short bound, want it open", got)
 	}
 }

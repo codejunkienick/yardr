@@ -148,7 +148,7 @@ func (s *Server) loadPages() (map[string]*template.Template, error) {
 	funcs := template.FuncMap{
 		"asset": s.assetURL, "blobNoteURL": blobNoteURL, "blobURL": blobURL, "clock": clock, "clockTime": clockTime,
 		"csrf": s.csrfValue, "inc": inc, "markAuthor": markAuthor,
-		"noteLetters": store.NoteLetters, "strong": store.StrongWeight,
+		"noteLetters": store.NoteLetters, "strong": store.Weighty,
 	}
 	var parts []string
 	for _, name := range partial {

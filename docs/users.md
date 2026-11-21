@@ -1255,14 +1255,16 @@ device that the call says its person saw the card's weight (`weighed`,
 as a person does. So a stolen phone that is paired and unlocked can
 approve any card, one that installs a program or adds trust among them,
 and what the approval made stands after `yardr user device rm` has ended
-the device. The hosted web asks more of a strong card than a device does:
-it is approved there in a session the gateway authenticated for a strong
-card no more than fifteen minutes earlier, which the yard reads from the
+the device. The hosted web asks more of a weighty card than a device does:
+every weighty run or setup card is approved there in a session the gateway
+authenticated for a weighty card no more than fifteen minutes earlier,
+which the yard reads from the
 signed time the gateway gives and from no token of the yard's; one fresh
-sign-in witnesses every strong card approved inside those fifteen
-minutes. On any yard it is approved on the yard's socket, at a terminal on
-the yard's machine, as any card is; a self-hosted yard's web view names
-that terminal instead of approving it. An approval says how it was
+sign-in witnesses every weighty card approved inside those fifteen
+minutes. On any yard a weighty card is approved on the yard's socket, at
+a terminal on the yard's machine, as any card is; a self-hosted yard's
+web view names footplate and that terminal instead of approving it. An
+approval of a weighty card says how it was
 witnessed on its event (`witness: fresh sign-in` in the hosted web,
 `witness: terminal` on the socket), and an approval through a device says
 `via` and claims no witness. The bead and event stream show the approval
@@ -1270,8 +1272,10 @@ to clients that read or follow them; an outside notification depends on
 the operator's existing subscriptions and `notify` and `tell` settings,
 and successful delivery, so no alert to every paired device or outside
 address is promised. A card weighed neither trust nor code — a credential
-or an update taken alone, a routine card, and every narrowing, `peer rm`
-among them — is approved as it always was. A delegated run is no card, so
+or an update taken alone — is approved from a device as it always was,
+and in the hosted web under the same fresh sign-in, witnessed as a strong
+card's is; a routine card, and every narrowing, `peer rm`
+among them, is approved as it always was. A delegated run is no card, so
 it takes none of these gates: the operator's cited mail is its approval
 ([above](#what-it-runs)).
 

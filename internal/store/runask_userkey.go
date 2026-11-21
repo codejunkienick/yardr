@@ -32,11 +32,20 @@ func parseUserKey(rest []string) ([]string, error) {
 // userKeyOf is the user and the source of a parsed user key.
 func userKeyOf(argv []string) (user, src string) { return argv[2], argv[3] }
 
+// IsUserKeyRun reports whether argv, in the yard's stored form, is the
+// user key row's: a person's own address in a source, which a member
+// approves for themselves in the hosted web as their own pairing is
+// approved there (approve.go's userkeyOwn). It reads no record of the
+// yard, as IsDevicePairRun reads none.
+func IsUserKeyRun(argv []string) bool {
+	return len(argv) == 4 && argv[0] == "user" && argv[1] == "key"
+}
+
 // isUserKeyRun reports whether argv is a user key command in its stored
 // form. Only a claim card carries one: AddAsk refuses a user key it did
 // not offer, since only a dropped delivery may carry the address.
 func isUserKeyRun(argv []string) bool {
-	return len(argv) == 4 && argv[0] == "user" && argv[1] == "key"
+	return IsUserKeyRun(argv)
 }
 
 // checkUserKey is giving a user's own address as the asker: it is that

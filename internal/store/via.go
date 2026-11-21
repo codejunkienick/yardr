@@ -135,16 +135,16 @@ func Via(e Event) string {
 
 // WitnessTerminal is how an approval made on the yard's socket is
 // witnessed: at a terminal on the yard's machine, outside an agent's
-// pane. A strong card's approval records it on the answer's event (design
+// pane. A weighty card's approval records it on the answer's event (design
 // yardr-2nb1 5.1). An approval through a device records none: its event
 // names the device (via) instead.
 const WitnessTerminal = "terminal"
 
-// WitnessFreshSignIn is how a strong card's approval, and a secret
+// WitnessFreshSignIn is how a weighty card's approval, and a secret
 // giving, in the hosted web is witnessed: the gateway authenticated the
 // operator inside its privileged-session window, in a fresh sign-in
 // rather than a standing login. One such sign-in may witness several
-// strong cards and secret givings inside the window.
+// weighty cards and secret givings inside the window.
 const WitnessFreshSignIn = "fresh sign-in"
 
 // FreshWitness is the door's statement that the call carries a fresh
@@ -177,7 +177,7 @@ func FreshWitnessOf(ctx context.Context) (fw FreshWitness, ok bool) {
 	return fw, ok
 }
 
-// witnessStrong marks a strong card's approval as witnessed, for the
+// witnessStrong marks a weighty card's approval as witnessed, for the
 // answer's event: a fresh sign-in where the call carried one the gate
 // took, else a terminal, on a call that came through no device. An
 // approval through a device claims neither, whatever its call carries: its
@@ -189,7 +189,7 @@ func (w *wtx) witnessStrong(stored []AskWeight, actor string) {
 	// socket under one is witnessed as a terminal's is, since nothing
 	// stands between it and the yard's own machine (design yardr-ts4d
 	// 3.3). Only a device's approval claims neither witness.
-	if StrongWeight(stored) && w.deviceViaOf(actor) == "" {
+	if Weighty(stored) && w.deviceViaOf(actor) == "" {
 		w.witness = WitnessTerminal
 		if w.hasFresh {
 			w.witness = WitnessFreshSignIn
@@ -198,7 +198,7 @@ func (w *wtx) witnessStrong(stored []AskWeight, actor string) {
 }
 
 // addWitnessed records the approval's answer as addNoted does, witnessed
-// where a strong card was approved on the socket: a fresh sign-in for one
+// where a weighty card was approved on the socket: a fresh sign-in for one
 // the hosted web approved, else a terminal.
 func (w *wtx) addWitnessed(row *beadRow, text, actor string, stored []AskWeight) (*Note, error) {
 	w.witnessStrong(stored, actor)

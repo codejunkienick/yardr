@@ -170,6 +170,13 @@ type Reason struct {
 	// offers no pick on a weighty mapping card, as the bead's page does.
 	Weight   []store.AskWeight  `json:"-"`
 	Identity *store.AskIdentity `json:"-"`
+	// Own is whether the run card is the asked user's own card — their
+	// own device pairing or their own user key — set where the run's
+	// argv and the ask's To are at hand (askReason), never read from
+	// the command string the row carries. A member's row approves such
+	// a card as the bead's page does; any other weighty row of theirs
+	// keeps the no-gate line. HTML-only, as the weight is.
+	Own bool `json:"-"`
 }
 
 // Reasons are why the bead waits, in one line.
@@ -656,6 +663,11 @@ func askReason(r store.ResolvedAsk) Reason {
 		out.RunBack = r.Ask.Run.Back
 		out.RunBackBy = r.Ask.Run.BackBy
 		out.RunAsk = r.Ask.Run.Ask
+		// The asked user's own card, from the argv at hand: their own
+		// pairing (argv's user is the asked user) or their own user key.
+		argv := r.Ask.Run.Argv
+		out.Own = (store.IsDevicePairRun(argv) && argv[3] == r.Ask.To) ||
+			(store.IsUserKeyRun(argv) && argv[2] == r.Ask.To)
 	case r.Ask.Secret != nil:
 		// The yard's line, never the asker's words: what is asked for.
 		out.SecretLine, out.SecretReach = r.Ask.Secret.Line(), r.Ask.Secret.Reach()

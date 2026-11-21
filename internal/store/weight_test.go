@@ -551,13 +551,15 @@ func TestStrongCardApprovesThroughADevice(t *testing.T) {
 	}
 }
 
-// A strong card is approved under a fresh sign-in: the call carries the
+// A weighty card is approved under a fresh sign-in: the call carries the
 // door's statement of who the gateway authenticated and when, judged
 // against the gateway's own window, and the answer's event records the
 // fresh sign-in. One made as another user, with no authentication time,
 // or outside the window is refused, runs nothing, and leaves the ask open;
 // a routine card takes no witness either way. A device's approval claims
-// none, even one whose call carries a witness.
+// none, even one whose call carries a witness. A middle card — weighty
+// but neither trust nor code — is judged and witnessed the same way, on
+// the socket as at the hosted web's door.
 func TestStrongCardApprovesUnderAFreshSignIn(t *testing.T) {
 	// Sequential: the package's fake clock.
 	pinClockFixed(t, askNow)
@@ -568,7 +570,7 @@ func TestStrongCardApprovesUnderAFreshSignIn(t *testing.T) {
 	trust := y.ask(t, listAsk("mckean", "peer allow airy --mail-limit 300"), "yardmaster")
 
 	// With no window set, nothing is fresh.
-	wantWindow := "ask " + itoa(trust) + " is strong (trust): this approval's fresh sign-in is outside the gateway's window, and a strong card is approved in the hosted web only under one inside it. Nothing ran, and the ask stays open"
+	wantWindow := "ask " + itoa(trust) + " is weighty (trust): this approval's fresh sign-in is outside the gateway's window, and a weighty card is approved in the hosted web only under one inside it. Nothing ran, and the ask stays open"
 	if _, err := y.ApproveAsk(fresh("mckean", y.now), y.bead, trust, "mckean", true, nil); err == nil || err.Error() != wantWindow {
 		t.Fatalf("approving a strong card with no window set = %v, want %q", err, wantWindow)
 	}
@@ -597,7 +599,7 @@ func TestStrongCardApprovesUnderAFreshSignIn(t *testing.T) {
 	// Past it, and ahead of the clock past its skew, the approval is
 	// refused, runs nothing, and leaves the ask open.
 	stale := y.ask(t, listAsk("mckean", "peer allow airy --mail-limit 500"), "yardmaster")
-	wantStale := "ask " + itoa(stale) + " is strong (trust): this approval's fresh sign-in is outside the gateway's window, and a strong card is approved in the hosted web only under one inside it. Nothing ran, and the ask stays open"
+	wantStale := "ask " + itoa(stale) + " is weighty (trust): this approval's fresh sign-in is outside the gateway's window, and a weighty card is approved in the hosted web only under one inside it. Nothing ran, and the ask stays open"
 	for name, at := range map[string]time.Time{
 		"a minute past the window": y.now.Add(-16 * time.Minute),
 		"ahead of the clock":       y.now.Add(2 * time.Minute),
@@ -615,11 +617,11 @@ func TestStrongCardApprovesUnderAFreshSignIn(t *testing.T) {
 
 	// With no authentication time, and as another user, the same: refused,
 	// nothing run, the ask open.
-	wantNone := "ask " + itoa(stale) + " is strong (trust): this approval carries a fresh sign-in with no authentication time, and a strong card is approved in the hosted web only under one. Nothing ran, and the ask stays open"
+	wantNone := "ask " + itoa(stale) + " is weighty (trust): this approval carries a fresh sign-in with no authentication time, and a weighty card is approved in the hosted web only under one. Nothing ran, and the ask stays open"
 	if _, err := y.ApproveAsk(fresh("mckean", time.Time{}), y.bead, stale, "mckean", true, nil); err == nil || err.Error() != wantNone {
 		t.Fatalf("approving with no authentication time = %v, want %q", err, wantNone)
 	}
-	wantOther := "ask " + itoa(stale) + " is strong (trust): this approval's fresh sign-in was made as hal, not as mckean. Nothing ran, and the ask stays open"
+	wantOther := "ask " + itoa(stale) + " is weighty (trust): this approval's fresh sign-in was made as hal, not as mckean. Nothing ran, and the ask stays open"
 	if _, err := y.ApproveAsk(fresh("hal", y.now), y.bead, stale, "mckean", true, nil); err == nil || err.Error() != wantOther {
 		t.Fatalf("approving under another user's sign-in = %v, want %q", err, wantOther)
 	}
@@ -637,6 +639,57 @@ func TestStrongCardApprovesUnderAFreshSignIn(t *testing.T) {
 	}
 	if ev := lastAnswer(t, y); Via(ev) != "phone" || Witness(ev) != "" {
 		t.Fatalf("the device's approval is via %q witnessed %q, want phone with no witness", Via(ev), Witness(ev))
+	}
+
+	// A middle card (outside alone) is refused under a stale, timeless or
+	// another user's sign-in in weighty words, runs nothing, and then
+	// approves under a fresh one, witnessed as a strong card's is.
+	middle := y.ask(t, listAsk("mckean", "source grant crm note --crew yardmaster"), "yardmaster")
+	if got := weightClasses(y.asked(t, middle).Ask.Weight); !slices.Equal(got, []string{WeightOutside}) {
+		t.Fatalf("the middle card weighs %v, want outside alone", got)
+	}
+	wantMiddleStale := "ask " + itoa(middle) + " is weighty (outside): this approval's fresh sign-in is outside the gateway's window, and a weighty card is approved in the hosted web only under one inside it. Nothing ran, and the ask stays open"
+	if _, err := y.ApproveAsk(fresh("mckean", y.now.Add(-time.Hour)), y.bead, middle, "mckean", true, nil); err == nil || err.Error() != wantMiddleStale {
+		t.Fatalf("approving a middle card under a stale sign-in = %v, want %q", err, wantMiddleStale)
+	}
+	wantMiddleNone := "ask " + itoa(middle) + " is weighty (outside): this approval carries a fresh sign-in with no authentication time, and a weighty card is approved in the hosted web only under one. Nothing ran, and the ask stays open"
+	if _, err := y.ApproveAsk(fresh("mckean", time.Time{}), y.bead, middle, "mckean", true, nil); err == nil || err.Error() != wantMiddleNone {
+		t.Fatalf("approving a middle card with no authentication time = %v, want %q", err, wantMiddleNone)
+	}
+	wantMiddleOther := "ask " + itoa(middle) + " is weighty (outside): this approval's fresh sign-in was made as hal, not as mckean. Nothing ran, and the ask stays open"
+	if _, err := y.ApproveAsk(fresh("hal", y.now), y.bead, middle, "mckean", true, nil); err == nil || err.Error() != wantMiddleOther {
+		t.Fatalf("approving a middle card under another user's sign-in = %v, want %q", err, wantMiddleOther)
+	}
+	if got := y.grants(t); len(got) != 0 {
+		t.Fatalf("a refused middle approval granted %v", got)
+	}
+	if r := y.asked(t, middle); r.State != AskOpen {
+		t.Fatalf("the middle ask is %s after the refusals, want it open", r.State)
+	}
+	if _, err := y.ApproveAsk(fresh("mckean", y.now), y.bead, middle, "mckean", true, nil); err != nil {
+		t.Fatalf("approving a middle card under a fresh sign-in = %v", err)
+	}
+	if got := y.grants(t); len(got) != 1 {
+		t.Fatalf("the fresh middle approval granted %v", got)
+	}
+	if ev := lastAnswer(t, y); Witness(ev) != WitnessFreshSignIn || Via(ev) != "" {
+		t.Fatalf("the middle fresh approval's event is witnessed %q via %q, want a fresh sign-in with no device", Witness(ev), Via(ev))
+	}
+	// On the socket the same middle card records a terminal, and through
+	// a device it claims no witness.
+	socketMiddle := y.ask(t, listAsk("mckean", "source set crm updates_per_hour=20"), "yardmaster")
+	if _, err := y.ApproveAsk(y.ctx, y.bead, socketMiddle, "mckean", true, nil); err != nil {
+		t.Fatalf("approving a middle card on the socket = %v", err)
+	}
+	if ev := lastAnswer(t, y); Witness(ev) != WitnessTerminal || Via(ev) != "" {
+		t.Fatalf("the middle socket approval's event is witnessed %q via %q, want terminal with no device", Witness(ev), Via(ev))
+	}
+	deviceMiddle := y.ask(t, listAsk("mckean", "source set crm updates_per_hour=30"), "yardmaster")
+	if _, err := y.ApproveAsk(WithVia(y.ctx, "mckean", "phone"), y.bead, deviceMiddle, "mckean", true, nil); err != nil {
+		t.Fatalf("approving a middle card through a device = %v", err)
+	}
+	if ev := lastAnswer(t, y); Via(ev) != "phone" || Witness(ev) != "" {
+		t.Fatalf("the middle device approval is via %q witnessed %q, want phone with no witness", Via(ev), Witness(ev))
 	}
 
 	// A routine card takes no witness: it approves with one on the call as
