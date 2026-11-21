@@ -144,7 +144,12 @@ var partial = []string{"shell", "aside", "entry", "card", "ask", "csrf"}
 // loadPages parses every template of templates/ with the shell, one set per
 // page: each page defines "content", so two pages cannot share a set.
 func (s *Server) loadPages() (map[string]*template.Template, error) {
-	funcs := template.FuncMap{"asset": s.assetURL, "blobURL": blobURL, "clock": clock, "clockTime": clockTime, "csrf": s.csrfValue, "inc": inc, "markAuthor": markAuthor, "strong": store.StrongWeight}
+	// The history template letters note text while the page's JSON keeps it as written.
+	funcs := template.FuncMap{
+		"asset": s.assetURL, "blobURL": blobURL, "clock": clock, "clockTime": clockTime,
+		"csrf": s.csrfValue, "inc": inc, "markAuthor": markAuthor,
+		"noteLetters": store.NoteLetters, "strong": store.StrongWeight,
+	}
 	var parts []string
 	for _, name := range partial {
 		parts = append(parts, "templates/"+name+".html")

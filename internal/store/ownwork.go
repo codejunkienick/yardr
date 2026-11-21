@@ -371,7 +371,7 @@ func (s *Store) RewordBead(ctx context.Context, bead, title, body, actor string)
 // them, open or finished inside the window since opens. A bead without an
 // originator reads as the operator's, as it does everywhere else. Open
 // work is listed whole, whatever the window; finished work only where it
-// finished inside it, from since until now. A since left out is the last
+// finished or changed inside it, from since until now. A since left out is the last
 // 24 hours. Only the user reads it, and an operator any user's
 // (mayReadInbox); what the reader may not see is left out, as if it were
 // not there. Each row names the first open bead holding it, absent where
@@ -412,7 +412,12 @@ func (s *Store) OwnBeads(ctx context.Context, user string, since time.Time, acto
 		if originator != user {
 			continue
 		}
-		if b.Status == "closed" && (b.ClosedAt == nil || b.ClosedAt.Before(since) || b.ClosedAt.After(present)) {
+		// A closed piece reads where it finished inside the window, or
+		// where it changed inside it: a note on finished work brings it
+		// back onto the list.
+		closedIn := b.ClosedAt != nil && !b.ClosedAt.Before(since) && !b.ClosedAt.After(present)
+		updatedIn := !b.UpdatedAt.Before(since) && !b.UpdatedAt.After(present)
+		if b.Status == "closed" && !closedIn && !updatedIn {
 			continue
 		}
 		row := OwnBead{

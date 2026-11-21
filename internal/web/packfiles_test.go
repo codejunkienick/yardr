@@ -358,8 +358,8 @@ func TestPackFilePages(t *testing.T) {
 	// stands lettered in the notes region, and no mark of direction or
 	// control character stands there. The ask note's weight line reads as
 	// its file page's heading does; a plain note's words keep their line
-	// break. The history below still quotes each note raw (yardr-fj37),
-	// so the region ends where the sessions begin.
+	// break. The history below draws each note's words as letters too
+	// (yardr-fj37); the region still ends where the sessions begin.
 	beadHTML := y.surfaceBody("/beads/"+b.ID, jo)
 	notesAt, sessionsAt := strings.Index(beadHTML, `id="notes"`), strings.Index(beadHTML, `id="sessions"`)
 	if notesAt < 0 || sessionsAt < 0 || sessionsAt < notesAt {
@@ -378,6 +378,47 @@ func TestPackFilePages(t *testing.T) {
 		if strings.ContainsRune(notes, mark) {
 			t.Errorf("the notes log carries %U", mark)
 		}
+	}
+
+	// The history draws each noted note's words as letters too
+	// (yardr-fj37): the trojan name stands lettered in the history
+	// region, and no mark of direction or control character stands
+	// there. Asserted apart from the notes region above.
+	histAt := strings.Index(beadHTML, `id="history"`)
+	if histAt < 0 {
+		t.Fatalf("the bead's page has no history")
+	}
+	history := beadHTML[histAt : histAt+strings.Index(beadHTML[histAt:], `</section>`)]
+	if want := "note names roles/07.md[31m\nx.md"; !strings.Contains(history, want) {
+		t.Errorf("the history does not read the trojan name lettered: no %q", want)
+	}
+	if hasBidi(history) {
+		t.Errorf("the history carries a mark of direction")
+	}
+	for _, mark := range []rune{'\x1b', '\u2028'} {
+		if strings.ContainsRune(history, mark) {
+			t.Errorf("the history carries %U", mark)
+		}
+	}
+	// JSON keeps the history's original note text; the HTML template is
+	// the presentation that draws it as letters.
+	jsonPage := y.getNoFollow("/beads/"+b.ID, jo, "Accept", "application/json")
+	if jsonPage.status != http.StatusOK {
+		t.Fatalf("the bead page as JSON: status %d: %s", jsonPage.status, jsonPage.body)
+	}
+	var jsonBead web.BeadPage
+	if err := json.Unmarshal([]byte(jsonPage.body), &jsonBead); err != nil {
+		t.Fatalf("the bead page is not JSON: %v: %s", err, jsonPage.body)
+	}
+	gotRawHistory := false
+	for _, change := range jsonBead.History {
+		if change.Kind == "noted" && change.Note == "note names "+trojanName {
+			gotRawHistory = true
+			break
+		}
+	}
+	if !gotRawHistory {
+		t.Error("the page's JSON history does not keep the note's original bytes")
 	}
 
 	// The body section reads the bead's words as letters too: the same

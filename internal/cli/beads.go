@@ -602,7 +602,7 @@ kept the previous values says that the body changed, without a diff.`,
 				for _, ch := range h {
 					what := ch.Text
 					// One line an event: a note is cut short and may break lines.
-					if note := strings.Join(strings.Fields(ch.Note), " "); note != "" {
+					if note := strings.Join(strings.Fields(store.NoteLetters(ch.Note)), " "); note != "" {
 						what += ": " + note
 					}
 					actor := store.OneLine(store.MarkedAuthor(ch.Actor, as))

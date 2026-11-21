@@ -925,9 +925,9 @@ func (s *Store) finishJoin(ctx context.Context, jc *pairCall, out *PairingOutcom
 		return fmt.Errorf("%s's operator did not confirm within %s of the call: nothing was saved on either yard", jc.Peer, minutes(CardTTL))
 	case err != nil:
 		// The other yard may have saved this one: its answer did not arrive.
-		words := fmt.Sprintf("asking %s how the pairing stands failed: this yard saved nothing. If %s shows this yard as a peer, remove it there (yardr peer rm) and pair again", jc.Peer, jc.Peer)
+		words := fmt.Sprintf("asking %s how the pairing stands failed: this yard saved nothing. If %s shows this yard as a peer, remove it there (`yardr peer rm` with the name it shows for this yard) and pair again", jc.Peer, jc.Peer)
 		s.retireCard(jc.Bead, jc.Ask, words)
-		return fmt.Errorf("asking %s how the pairing stands: %w\nThis yard saved nothing. If %s shows this yard as a peer, remove it there (yardr peer rm) and pair again", jc.Peer, err, jc.Peer)
+		return fmt.Errorf("asking %s how the pairing stands: %w\nThis yard saved nothing. If %s shows this yard as a peer, remove it there (`yardr peer rm` with the name it shows for this yard) and pair again", jc.Peer, err, jc.Peer)
 	case out == nil:
 		words := fmt.Sprintf("asking %s how the pairing stands returned no outcome: this yard saved nothing", jc.Peer)
 		s.retireCard(jc.Bead, jc.Ask, words)
@@ -937,7 +937,7 @@ func (s *Store) finishJoin(ctx context.Context, jc *pairCall, out *PairingOutcom
 	}
 	peer := Peer{Name: jc.Peer, Key: jc.transcript.Host.Key, Enc: jc.transcript.Host.Enc, URL: jc.url, Calls: jc.Calls}
 	if _, err := s.pairPeer(peer, jc.actor, map[string]any{"role": "joiner", "pairing": jc.ID}); err != nil {
-		words := fmt.Sprintf("%s has saved this yard, and this yard could not save it: %s. Remove this yard there (yardr peer rm) and pair again", jc.Peer, err)
+		words := fmt.Sprintf("%s has saved this yard, and this yard could not save it: %s. Remove this yard there (`yardr peer rm` with the name it shows for this yard) and pair again", jc.Peer, err)
 		s.retireCard(jc.Bead, jc.Ask, words)
 		return errors.New(words)
 	}

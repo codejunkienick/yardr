@@ -204,7 +204,7 @@ func (r *reader) beadNotes(ctx context.Context, bead string) []store.Note {
 	return ns
 }
 
-// noteOf is the note a `noted` event added.
+// noteOf is the note a `noted` event added, as it was written.
 func (r *reader) noteOf(ctx context.Context, e store.Event) string {
 	seq, ok := number(e.Data["note"])
 	if !ok || e.Bead == nil {

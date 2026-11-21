@@ -85,6 +85,9 @@ func homeJSON(t *testing.T, f *fixture, target string) web.Home {
 func TestFeedWords(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
+	rawBead := bead(t, f.st, "a note with marks")
+	rawNote := "note names roles/07\u202e\u2066.md\x1b[31m\u2028\nx.md"
+	must(t, f.st.AddNote(context.Background(), rawBead.ID, rawNote, "passer"))
 	b := landing(t, f.st)
 	h := homeJSON(t, f, "/")
 	type line struct{ actor, text, note, tone string }
@@ -119,6 +122,19 @@ func TestFeedWords(t *testing.T) {
 	}
 	if h.Head != h.Events[0].Seq || h.Older != 0 || h.Before != 0 {
 		t.Errorf("head %d older %d before %d, want the newest seq %d and no older page", h.Head, h.Older, h.Before, h.Events[0].Seq)
+	}
+	foundRaw := false
+	for _, e := range h.Events {
+		if e.Bead == rawBead.ID && e.Kind == "noted" {
+			foundRaw = true
+			if e.Note != rawNote {
+				t.Errorf("the feed's note is %q, want the stored words %q", e.Note, rawNote)
+			}
+			break
+		}
+	}
+	if !foundRaw {
+		t.Error("the feed has no note for the bead with marks")
 	}
 	// The landing's commit is data of its own.
 	if h.Events[0].Commit != "70dabcd" {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -307,6 +308,37 @@ func TestOwnBeads(t *testing.T) {
 	}
 	if len(bobs) != 3 || !titles["Bob's open work"] || !titles["First hold"] || !titles["Second hold"] {
 		t.Fatalf("bob's = %+v", bobs)
+	}
+	// A piece finished long ago reads again where it changed inside the
+	// window; one untouched since stays out. The clock moves for these
+	// two alone, and the test is sequential, so no other test sees it.
+	past := time.Now().Add(-72 * time.Hour)
+	store.SetClockForTest(func() time.Time { return past })
+	t.Cleanup(func() { store.SetClockForTest(time.Now) })
+	old, err := api.CreateBead(ctx, store.NewBead{Title: "Ada's old finished work", For: "ada"}, "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.CloseBead(ctx, old.ID, "landed", store.Expect{}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := api.CreateBead(ctx, store.NewBead{Title: "Ada's stale finished work", For: "ada"}, "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.CloseBead(ctx, stale.ID, "landed", store.Expect{}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	store.SetClockForTest(time.Now)
+	if err := api.AddNote(ctx, old.ID, "a late note on finished work", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(mine(time.Now().Add(-time.Hour))); !slices.Contains(got, old.ID) || slices.Contains(got, stale.ID) {
+		t.Fatalf("since an hour ago = %v, want the changed old work and not the stale", got)
+	}
+	// An ancient since still answers everything, as before.
+	if got := ids(mine(time.Now().Add(-100 * 24 * time.Hour))); len(got) != 4 || !slices.Contains(got, stale.ID) {
+		t.Fatalf("since long ago = %v, want all four", got)
 	}
 }
 

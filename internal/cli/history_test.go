@@ -35,7 +35,8 @@ func TestBeadHistory(t *testing.T) {
 	if _, err := run(t, a.beadCmd(), "update", b.ID, "--title", "the door", "--body", "Hang it.\n- on two hinges\n", "-p", "1"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run(t, a.beadCmd(), "note", b.ID, "hung\ntoday"); err != nil {
+	rawNote := "note names roles/07\u202e\u2066.md\x1b[31m\u2028\nx.md"
+	if _, err := run(t, a.beadCmd(), "note", b.ID, rawNote); err != nil {
 		t.Fatal(err)
 	}
 	out, err := run(t, a.beadCmd(), "history", b.ID)
@@ -51,7 +52,7 @@ jo             updated: title "a door" → "the door" · priority 0 → 1 · bod
     @@ -1,1 +1,2 @@
      Hang it.
     +- on two hinges
-jo             noted: hung today
+jo             noted: note names roles/07.md[31m x.md
 `
 	if got := when.ReplaceAllString(out, ""); got != want {
 		t.Errorf("history:\n%s\nwant\n%s", got, want)
@@ -70,8 +71,15 @@ jo             noted: hung today
 		t.Fatalf("%v: %s", err, out)
 	}
 	if len(got) != 3 || got[1].Kind != "updated" || got[1].Actor != "jo" || got[1].Bead != b.ID ||
-		got[1].Diff != "--- was\n+++ is\n@@ -1,1 +1,2 @@\n Hang it.\n+- on two hinges\n" || got[2].Note != "hung\ntoday" {
+		got[1].Diff != "--- was\n+++ is\n@@ -1,1 +1,2 @@\n Hang it.\n+- on two hinges\n" || got[2].Note != rawNote {
 		t.Errorf("history --json: %+v", got)
+	}
+	notes, err := st.Notes(ctx, b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) == 0 || notes[len(notes)-1].Text != rawNote {
+		t.Errorf("stored history notes = %+v; want original words %q", notes, rawNote)
 	}
 	a.json = false
 	if _, err := run(t, a.beadCmd(), "history", "none-zzzz"); err == nil {
