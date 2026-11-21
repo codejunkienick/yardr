@@ -494,6 +494,10 @@ type wtx struct {
 	pairChannelKey string
 	pairPending    *devicePairing
 	pairShown      *AskPairing
+	// approving is the ask this write is approving as it runs its command,
+	// nil on every other write: a tell in the same write leaves it alone,
+	// since the write answers it rather than stales it (runask_stale.go).
+	approving *approvingAsk
 }
 
 // write runs fn in a batched write transaction, then nudges the pump to

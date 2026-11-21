@@ -1345,28 +1345,28 @@ func TestYardTestSelects(t *testing.T) {
 		{"a plain run of the docs and a conformance script runs without -race, marked for conformance/bdp's test", nil, []string{"docs/api.md", "docs/design/2026-10-12-a.md", "conformance/bdp/probe-core.sh"},
 			pre + "what changed" + sincePH + plainWhy,
 			[]string{"conformance vet ./...", "conformance build ./...", "conformance " + hostScanCall, "conformance " + staticCall, "conformance test m.test/m m.test/m/conformance/bdp m.test/m/internal/rpc"},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", hostScanStep, staticStep, "go test m.test/m m.test/m/conformance/bdp m.test/m/internal/rpc"}},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "tell sites", "redaction marker scan", hostScanStep, staticStep, "go test m.test/m m.test/m/conformance/bdp m.test/m/internal/rpc"}},
 		{"a landing of one design document runs without -race", []string{"YARDR_LANDING=1"}, []string{"docs/design/2026-10-12-a.md"},
 			landing + "nothing compiled changed" + sincePH + unraced,
 			[]string{"vet ./...", "build ./...", hostScanCall, staticCall, "test m.test/m"},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", hostScanStep, staticStep, "go test m.test/m"}},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "tell sites", "redaction marker scan", hostScanStep, staticStep, "go test m.test/m"}},
 		// A landing races compiled code; a plain run does not. The mark is the run's
 		// to give: one the caller had is dropped, or the script would run in every
 		// whole suite.
 		{"a plain run of a go file runs without -race, and drops a conformance mark the caller had", []string{"YARDR_CONFORMANCE=1"}, []string{"alone/p.go"},
 			pre + "what changed" + sincePH + plainWhy,
 			[]string{"vet ./...", "build ./...", hostScanCall, staticCall, "test m.test/m/alone"},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", hostScanStep, staticStep, "go test m.test/m/alone"}},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "tell sites", "redaction marker scan", hostScanStep, staticStep, "go test m.test/m/alone"}},
 		{"a plain run of a file no row knows tests every package without -race", []string{"YARDR_RACE_HELD=1"}, []string{"contrib/x.txt"},
 			pre + "what changed" + sincePH + plainWhy,
 			[]string{"vet ./...", "build ./...", hostScanCall, staticCall, "test ./..."},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", hostScanStep, staticStep, "go test ./..."}},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "tell sites", "redaction marker scan", hostScanStep, staticStep, "go test ./..."}},
 		// A whole suite is marked when a path under conformance/ is among what
 		// changed, and was not for the file no row knows above.
 		{"a plain run of go.mod and a conformance script tests every package without -race, marked for conformance/bdp's test", []string{"YARDR_RACE_HELD=1"}, []string{"go.mod", "conformance/bdp/probe-core.sh"},
 			pre + "what changed" + sincePH + plainWhy,
 			[]string{"conformance vet ./...", "conformance build ./...", "conformance " + hostScanCall, "conformance " + staticCall, "conformance test ./..."},
-			[]string{"gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", hostScanStep, staticStep, "go test ./..."}},
+			[]string{"gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "tell sites", "redaction marker scan", hostScanStep, staticStep, "go test ./..."}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -1420,10 +1420,10 @@ func TestYardTestSelects(t *testing.T) {
 	}{
 		{"a landing over internal/cli starts no socket leg", "internal/cli/p.go", "internal/cli/p.go changed", selectionSuffix, skipSocket,
 			[]string{"vet ./...", "linux vet ./...", hostScanCall, staticCall, "test -race " + selCLI},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", hostScanStep, staticStep, "go test -race " + selCLI}, nil},
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "tell sites", "redaction marker scan", hostScanStep, staticStep, "go test -race " + selCLI}, nil},
 		{"a landing over internal/rpc starts the socket leg", "internal/rpc/p.go", "internal/rpc/p.go changed", selectionSuffix, runSocketStore,
 			[]string{"vet ./...", "linux vet ./...", hostScanCall, staticCall, "test -race " + selRPC, "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", hostScanStep, staticStep, "go test -race " + selRPC,
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "tell sites", "redaction marker scan", hostScanStep, staticStep, "go test -race " + selRPC,
 				"env YARDR_TEST_RPC=1 go test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"}, nil},
 		// A loaded machine, on the row that starts the socket leg: the selection's
 		// race leg takes the cores the load leaves it (gatepar), and the suites
@@ -1431,12 +1431,12 @@ func TestYardTestSelects(t *testing.T) {
 		// (yardr-fvkm), so this row replaces one instead of adding one.
 		{"a landing over internal/web starts the socket leg, and on a loaded machine runs its race leg with -p=2", "internal/web/p.go", "internal/web/p.go changed", selectionSuffix, runSocketWeb,
 			[]string{"vet ./...", "linux vet ./...", hostScanCall, staticCall, "test -race -p=2 " + selWEB, "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", hostScanStep, staticStep, "go test -race -p=2 " + selWEB,
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "tell sites", "redaction marker scan", hostScanStep, staticStep, "go test -race -p=2 " + selWEB,
 				"env YARDR_TEST_RPC=1 go test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"},
 			[]string{"YARDR_TEST_LOADAVG=40", "YARDR_TEST_CORES=10"}},
 		{"a landing over an unknown file starts the socket leg", "contrib/x.txt", "contrib/x.txt, which is read by no known package, changed", wholeSuffix, runSocketAll,
 			[]string{"vet ./...", "linux vet ./...", hostScanCall, staticCall, "test -race ./...", "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"},
-			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", hostScanStep, staticStep, "go test -race ./...",
+			[]string{"go list -test ./...", "gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "tell sites", "redaction marker scan", hostScanStep, staticStep, "go test -race ./...",
 				"env YARDR_TEST_RPC=1 go test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"}, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -1973,7 +1973,7 @@ func TestYardTestRunsAgainWhenTheBuildCacheLostAFile(t *testing.T) {
 			}
 			for i, step := range steps {
 				if step == hostScanStep || step == staticStep || strings.HasPrefix(step, "go test ") {
-					steps = slices.Insert(steps, i, "sleep budgets", "file size budgets", "redaction marker scan")
+					steps = slices.Insert(steps, i, "sleep budgets", "file size budgets", "tell sites", "redaction marker scan")
 					break
 				}
 			}
@@ -2143,8 +2143,8 @@ func TestYardTestRerunsFailedPackagesOnce(t *testing.T) {
 	}
 	other := listHeader + listRow("m-1", "Something else")
 	staticStep, staticCall := ciStaticcheck(t)
-	plainSteps := []string{"gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "redaction marker scan", hostScanStep, staticStep, "go test ./..."}
-	landingSteps := []string{"gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "redaction marker scan", hostScanStep, staticStep, "go test -race -p=3 ./...",
+	plainSteps := []string{"gofmt -l .", "shellcheck", "go vet ./...", "go build ./...", "sleep budgets", "file size budgets", "tell sites", "redaction marker scan", hostScanStep, staticStep, "go test ./..."}
+	landingSteps := []string{"gofmt -l .", "shellcheck", "go vet ./...", "env GOOS=linux go vet ./...", "sleep budgets", "file size budgets", "tell sites", "redaction marker scan", hostScanStep, staticStep, "go test -race -p=3 ./...",
 		"env YARDR_TEST_RPC=1 go test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"}
 	landing := []string{"vet ./...", "linux vet ./...", hostScanCall, staticCall, "test -race -p=3 ./...", "test -race -p=3 " + pkg, "rpc test ./internal/store/ ./internal/dispatch/ ./internal/bdp/ ./internal/web/"}
 	plain := []string{"vet ./...", "build ./...", hostScanCall, staticCall, "test ./...", "test " + pkg}

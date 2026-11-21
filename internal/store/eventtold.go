@@ -66,7 +66,7 @@ var eventDataTold = map[string][]string{
 	"note_untold":        {"note", "session"},
 	"bad_template":       {"stage"},
 	"ask_unreachable":    {"member", "stage"},
-	"ask_stale":          {"ask", "source", "seen", "answer", "ask_session"},
+	"ask_stale":          {"ask", "kind", "name", "source", "seen", "answer", "ask_session"},
 	"move_refused":       {"agent", "group", "reason", "session", "session_bead", "stage"},
 
 	// Sessions: the claim of a bead, and what the daemon found out about the

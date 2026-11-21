@@ -964,6 +964,7 @@ func (w *wtx) approveAsk(ctx context.Context, id string, seq uint64, actor strin
 	if err := w.gateRefusal(seq, weight, r.Ask.Weight, actor, weighed); err != nil {
 		return nil, err
 	}
+	w.approving = &approvingAsk{bead: row.UUID, seq: seq} // its own run tells it nothing: this write answers it
 	var result string
 	if c.runRun != nil {
 		result, err = c.runRun(ctx, w, was, actor, &approvedOn{Bead: row.ID, Ask: seq})

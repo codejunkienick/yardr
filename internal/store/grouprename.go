@@ -561,15 +561,32 @@ func (p *groupRename) report() *GroupRenamed {
 	return out
 }
 
-// apply writes the plan, in the transaction that read it. Its order is what
-// keeps a name from holding two records: what a group of the new name left
-// behind goes before what is moved to it.
-func (p *groupRename) apply(w *wtx) error {
+// apply writes the plan, in the transaction that read it, as actor for the
+// tells its group writes carry. Its order is what keeps a name from holding
+// two records: what a group of the new name left behind goes before what is
+// moved to it.
+func (p *groupRename) apply(w *wtx, actor string) error {
+	var oldGroup Group
+	hadOld, err := get(w.Tx, bGroups, p.from, &oldGroup)
+	if err != nil {
+		return err
+	}
 	if err := w.Bucket(bGroups).Delete([]byte(p.from)); err != nil {
 		return err
 	}
 	if err := put(w.Tx, bGroups, p.to, p.group); err != nil {
 		return err
+	}
+	if hadOld {
+		// The old name is gone and the new one stands in its place: a hold of
+		// either is stale, the old one's however it read the group and the
+		// new one's only where it was written against its absence.
+		if err := w.tellGroupStale(p.from, &oldGroup, nil, actor); err != nil {
+			return err
+		}
+		if err := w.tellGroupStale(p.to, nil, &p.group, actor); err != nil {
+			return err
+		}
 	}
 	for _, r := range p.routes {
 		if err := put(w.Tx, bRoutes, r.ID, r); err != nil {
@@ -639,8 +656,21 @@ func (p *groupRename) apply(w *wtx) error {
 		}
 	}
 	for _, g := range p.groups {
+		var before Group
+		had, err := get(w.Tx, bGroups, g.Name, &before)
+		if err != nil {
+			return err
+		}
 		if err := put(w.Tx, bGroups, g.Name, g); err != nil {
 			return err
+		}
+		if had {
+			// What followed the name in this group is its subscriptions (and,
+			// for a script group, its members): neither is what a hold read
+			// of the group, so this tell stands to prove it and costs no scan.
+			if err := w.tellGroupStale(g.Name, &before, &g, actor); err != nil {
+				return err
+			}
 		}
 	}
 	for _, rec := range p.sent {
@@ -696,7 +726,7 @@ func (w *wtx) renameGroup(ctx context.Context, name, to, actor string, by *appro
 	if err != nil {
 		return nil, err
 	}
-	if err := p.apply(w); err != nil {
+	if err := p.apply(w, actor); err != nil {
 		return nil, err
 	}
 	out := p.report()

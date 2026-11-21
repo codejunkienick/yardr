@@ -1,6 +1,7 @@
-// Changing a group one setting at a time (SetGroup): what an edit names
-// changes, and the rest of the group is kept. PutGroup, which replaces a
-// group whole, is in routing.go; the settings either write holds to the
+// The writes of a group: PutGroup, which replaces a group whole, and
+// SetGroup, which changes what an edit names and keeps the rest. A write
+// that moves what a hold read of the group tells its asker beside its
+// group_set (runask_stale.go); the settings either write holds to the
 // operator are in define.go.
 package store
 
@@ -30,6 +31,213 @@ type GroupEdit struct {
 type GroupChange struct {
 	Was Group `json:"was"`
 	Is  Group `json:"is"`
+}
+
+// PutGroup adds or replaces a group, and logs group_set. The cmd, dir,
+// env_file, kind, args, prompt and worktrees settings, and a runner change
+// to or from exec, are the operator's alone (checkGroupDefine); the rest is
+// anyone's. From a pane the write is recorded as the pane's actor (paneAuthor).
+func (s *Store) PutGroup(ctx context.Context, g Group, actor string) error {
+	return s.write(func(w *wtx) error {
+		// Batch reruns this closure, so it writes a copy.
+		g := g
+		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
+		if err != nil {
+			return err
+		}
+		actor = resolved
+		return w.delegatedPutGroup(ctx, &g, actor)
+	})
+}
+
+// putGroup is PutGroup in a transaction: g is stored as it is given but for
+// its subscriptions, which are the stored group's. limitExplicit says the
+// caller named this limit: SetGroup with a limit in its edit, which 0
+// pauses through. A limit of 0 that is not named is no limit named: the
+// default of the group's runner (DefaultLimit), except a replace never
+// unpauses, so a paused group put back without a limit stays paused. A
+// negative limit is refused. Its config is held to ConfigKeys here, whoever
+// writes it (the CLI, the group form, a pack); a key the stored group has
+// already, with the same value, is kept unasked.
+func putGroup(ctx context.Context, w *wtx, g *Group, actor string, limitExplicit bool) error {
+	if g.Config == nil {
+		g.Config = map[string]any{}
+	}
+	if g.Limit < 0 {
+		return fmt.Errorf("group %s: a limit is 0 or more", g.Name)
+	}
+	g.Members = dedupeOrdered(g.Members)
+	if len(g.Members) > 0 && g.Runner != "manual" {
+		return fmt.Errorf("group %s: members are only for manual groups (this one is %s)", g.Name, g.Runner)
+	}
+	var old Group
+	replaced, err := get(w.Tx, bGroups, g.Name, &old)
+	if err != nil {
+		return err
+	}
+	if err := checkGroupDefine(ctx, w, old, *g, actor); err != nil {
+		return err
+	}
+	if g.Limit == 0 && !limitExplicit && (!replaced || old.Limit != 0) {
+		// 0 is no limit named: the default of the runner, for a group
+		// that is new and for a replaced one, as before. A paused group
+		// put back without a limit is the exception: the replace keeps
+		// the pause instead of unpausing it.
+		g.Limit = DefaultLimit(g.Runner)
+	}
+	if g.Name == RouteWait && !replaced {
+		return fmt.Errorf("group wait: wait ends a route (--else wait), so no group takes the name")
+	}
+	g.Subscriptions = old.Subscriptions
+	kept := old.Config
+	if old.Runner != g.Runner {
+		kept = nil
+	}
+	if ps := configProblems(GroupConfig, g.Name, g.Runner, g.Config, kept); len(ps) > 0 {
+		return ps[0]
+	}
+	if len(g.Subscriptions) > 0 && g.Runner != "manual" {
+		return fmt.Errorf("group %s has subscriptions, which only manual groups may: unsubscribe it first", g.Name)
+	}
+	if err := checkPeerGroup(w.Tx, g); err != nil {
+		return err
+	}
+	if err := checkLoginFor(w.Tx, g); err != nil {
+		return err
+	}
+	if g.Runner != "herdr" {
+		if err := checkQuotaRoutes(w.Tx, g); err != nil {
+			return err
+		}
+	}
+	if err := put(w.Tx, bGroups, g.Name, *g); err != nil {
+		return err
+	}
+	data := map[string]any{"name": g.Name, "runner": g.Runner, "limit": g.Limit}
+	if len(g.Members) > 0 {
+		data["members"] = g.Members
+	}
+	if err := w.event("", "group_set", actor, data); err != nil {
+		return err
+	}
+	// The tell rides beside the group_set, not through it: a put that moved
+	// what a hold read of the group tells its asker in the same write, as a
+	// source put does, and one that moved nothing it reads costs no scan.
+	var before *Group
+	if replaced {
+		before = &old
+	}
+	return w.tellGroupStale(g.Name, before, g, actor)
+}
+
+func (s *Store) GetGroup(ctx context.Context, name string) (*Group, error) {
+	g := new(Group)
+	err := s.read(func(tx *bolt.Tx) error {
+		ok, err := get(tx, bGroups, name, g)
+		if err == nil && !ok {
+			err = fmt.Errorf("group %s: %w", name, ErrNotFound)
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return g, nil
+}
+
+// DeleteGroup removes the group and the routes that send work to it, those
+// that name it after another group too: what is left of such a route would
+// say something its operator did not write. Its
+// live sessions end as released and their beads go back to routing in the
+// same transaction: a bead owned by a deleted group would otherwise sit in
+// its stage until released by hand, since no route can claim it. The
+// dispatcher's teardown stops the runner resources. It reports how many
+// beads it released. It logs one group_removed, which names the routes that
+// went with the group, as depot_removed does; a group that was not there
+// logs nothing. Removing a group is the operator's or the yardmaster's to
+// do (operatorOrYardmaster).
+func (s *Store) DeleteGroup(ctx context.Context, name, actor string) (int, error) {
+	released := 0
+	err := s.write(func(w *wtx) error {
+		resolved, err := paneAuthor(w.Tx, callerOf(ctx), actor)
+		if err != nil {
+			return err
+		}
+		actor = resolved
+		if err := w.packRemoveGroup(ctx, name, actor); err != nil {
+			return err
+		}
+		// Batch reruns this closure when another call in the batch fails, so
+		// the count starts over with each attempt.
+		_, released, err = w.deleteGroup(name, actor)
+		return err
+	})
+	return released, err
+}
+
+// deleteGroup is DeleteGroup inside the transaction, so that removing a user
+// takes the groups that carry their login in the write that removes them
+// (deleteUser). The caller has checked who may. It answers the ids of the
+// routes removed with the group and how many beads it released; a group that
+// is not there is nothing removed and logs nothing.
+func (w *wtx) deleteGroup(name, actor string) (routes []string, released int, err error) {
+	var before Group
+	if ok, err := get(w.Tx, bGroups, name, &before); err != nil {
+		return nil, 0, err
+	} else if !ok {
+		return nil, 0, nil
+	}
+	drop := []string{}
+	if err := each(w.Tx, bRoutes, "", func(k []byte, r *Route) error {
+		if r.Names(name) {
+			drop = append(drop, string(k))
+		}
+		return nil
+	}); err != nil {
+		return nil, 0, err
+	}
+	for _, k := range drop {
+		if err := w.Bucket(bRoutes).Delete([]byte(k)); err != nil {
+			return nil, 0, err
+		}
+	}
+	live, err := w.store.liveSessions(w.Tx, name)
+	if err != nil {
+		return nil, 0, err
+	}
+	reason := "group " + name + " deleted"
+	for _, sess := range live {
+		owned := false
+		if _, err := w.changeBead(sess.Bead, actor, func(w *wtx, b *beadRow) (string, map[string]any, error) {
+			if b.Session == nil || *b.Session != sess.ID {
+				return "", nil, nil
+			}
+			owned = true
+			return "released", map[string]any{"reason": reason}, w.endSession(b, "released")
+		}); err != nil {
+			return nil, 0, err
+		}
+		if owned {
+			released++
+			continue
+		}
+		// The bead moved on without this session; end it so it is not live.
+		t := now()
+		sess.State, sess.Error, sess.EndedAt = "released", &reason, &t
+		if err := putSession(w.Tx, &sess); err != nil {
+			return nil, 0, err
+		}
+	}
+	if err := w.Bucket(bGroups).Delete([]byte(name)); err != nil {
+		return nil, 0, err
+	}
+	if err := w.event("", "group_removed", actor, map[string]any{
+		"name": name, "routes": drop, "released": released}); err != nil {
+		return nil, 0, err
+	}
+	// The removal tells beside its group_removed, with nothing after it: a
+	// hold of the group is stale however it read the group (runask_stale.go).
+	return drop, released, w.tellGroupStale(name, &before, nil, actor)
 }
 
 // SetGroup changes what e names of the group name and keeps the rest, in

@@ -13,10 +13,18 @@
 // gets none more, and an ask born fresh by construction (its Seen written
 // from the current bytes in the same transaction) gets none at creation.
 // No new durable state: the event row is the standard event write.
+//
+// The families beside sources (a group here; a peer, a crew member and a
+// user follow on the same machinery) tell the same way through tellXStale:
+// a Seen key may be written by more than one fingerprint function, so the
+// tell compares the set of fingerprints a hold could carry before the write
+// with the set it could carry after it, and tells exactly the holds that
+// cross from one set out of the other.
 package store
 
 import (
 	"fmt"
+	"maps"
 )
 
 // tellSourceStale tells the askers of the open run asks naming the source
@@ -68,6 +76,9 @@ func (w *wtx) tellSourceStale(name string, before, after *Source, actor string) 
 			if r.State != AskOpen && r.State != AskAside {
 				continue
 			}
+			if w.approving != nil && uuid == w.approving.bead && r.Note.Seq == w.approving.seq {
+				continue
+			}
 			moved := ""
 			if fp, ok := r.Ask.Run.Seen[key]; ok && fp == beforeFP && fp != afterFP {
 				moved = key
@@ -85,6 +96,174 @@ func (w *wtx) tellSourceStale(name string, before, after *Source, actor string) 
 		}
 	}
 	return nil
+}
+
+// tellKey is one Seen key a family tell watches: the key a hold stores what
+// it saw of the thing under, and every fingerprint function that writes that
+// key. A key needs every one of them: a hold carries the fingerprint of the
+// card that wrote it, in whichever function's words, and a write moves the
+// key for that hold only when its own fingerprint crosses. The functions
+// read a standing thing alone; a thing that stands not is the nil set of
+// tellXStale, never a function's answer.
+type tellKey[T any] struct {
+	key string
+	fns []func(*T) string
+}
+
+// tellXStale tells the askers of the open and put-aside holds naming the
+// thing kind and name whose Seen moved between before and after, the thing
+// as the write found it and as it leaves it (nil for none: a thing added,
+// removed or renamed away). Actor is who made the change, for the event and
+// its sentence. Keys are the tellable keys of the thing, each with every
+// fingerprint function that writes it, so that a later family's wider list
+// (a crew member's four combinations under one key) slots in without a new
+// comparison.
+//
+// For each key the tell builds the before-set and the after-set of
+// fingerprints across all of the key's functions. A standing thing
+// contributes its functions' fingerprints; one that stands not contributes
+// the fixed set {"", seen("no <kind>", name)} with no read of the yard, which
+// is what a hold written against its absence can carry (nothing, or the
+// absence in words). Where the two sets are one for every key no hold can
+// have transitioned, so the scan is skipped: a subscription-only write and
+// a same-value put cost no scan. Otherwise every open bead's holds are
+// read, and each hold fresh before the write and stale after it — its
+// stored fingerprint for a key in the before-set but not the after-set —
+// gets one ask_stale event on its bead, naming the ask, the kind and name
+// and the key that moved. A hold born fresh (its fingerprint in the
+// after-set), one already stale (in neither set) and one that never named
+// the key get none. The event goes through w.event in the transaction, so
+// a batch that runs the write twice ends the same, and a hold that names
+// the thing under several keys still gets one event.
+func (w *wtx) tellXStale[T any](kind, name string, before, after *T, actor string, watched []tellKey[T]) error {
+	type keySets struct {
+		key           string
+		before, after map[string]bool
+	}
+	sets := make([]keySets, len(watched))
+	moved := false
+	for i, k := range watched {
+		fingerprints := func(thing *T) map[string]bool {
+			if thing == nil {
+				return map[string]bool{"": true, seen("no "+kind, name): true}
+			}
+			out := make(map[string]bool, len(k.fns))
+			for _, fn := range k.fns {
+				out[fn(thing)] = true
+			}
+			return out
+		}
+		sets[i] = keySets{key: k.key, before: fingerprints(before), after: fingerprints(after)}
+		if !maps.Equal(sets[i].before, sets[i].after) {
+			moved = true
+		}
+	}
+	if !moved {
+		return nil
+	}
+	for _, uuid := range keys(w.Tx, bBeadOpen, "") {
+		notes, err := beadNotes(w.Tx, uuid)
+		if err != nil {
+			return err
+		}
+		for _, r := range ResolveAsks(notes, now()) {
+			if r.AskErr != nil {
+				continue
+			}
+			if r.State != AskOpen && r.State != AskAside {
+				continue
+			}
+			if w.approving != nil && uuid == w.approving.bead && r.Note.Seq == w.approving.seq {
+				continue
+			}
+			held := heldSeen(r.Ask)
+			if held == nil {
+				continue
+			}
+			key := ""
+			for _, s := range sets {
+				if fp, ok := held[s.key]; ok && s.before[fp] && !s.after[fp] {
+					key = s.key
+					break
+				}
+			}
+			if key == "" {
+				continue
+			}
+			if err := w.event(uuid, "ask_stale", actor, map[string]any{
+				"ask": r.Note.Seq, "kind": kind, "name": name, "seen": key,
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// approvingAsk is the ask a write is approving as it runs its command: its
+// bead, by UUID, and its seq. A tell in that write leaves it alone — the
+// write answers it in the same transaction, so by the commit it is no open
+// hold gone stale, however its own command moved what it read.
+type approvingAsk struct {
+	bead string
+	seq  uint64
+}
+
+// heldSeen is what an ask holds of what it saw, whichever card carries it:
+// a run card's, a depot-push card's or a setup card's Seen, and nil for an
+// ask that holds none (a question in words), which no family tell can stale.
+func heldSeen(a Ask) map[string]string {
+	switch {
+	case a.Run != nil:
+		return a.Run.Seen
+	case a.DepotPush != nil:
+		return a.DepotPush.Seen
+	case a.Setup != nil:
+		return a.Setup.Seen
+	}
+	return nil
+}
+
+// depotPushGroupFingerprint is what a depot-push card keeps of a group: its
+// runner, its command with every push assignment taken out, and the rest of
+// its config whole (depotpush.go). It is computed on the config as stored,
+// as the card reads it back, so a put still in memory compares with it.
+func depotPushGroupFingerprint(g Group) string {
+	c := asStored(g.Config)
+	cmd, _ := c["cmd"].(string)
+	other := make(map[string]any, len(c))
+	for k, v := range c {
+		if k != "cmd" {
+			other[k] = v
+		}
+	}
+	return seen(g.Runner, cmdRest(cmd), other)
+}
+
+// granteeGroupFingerprint is what a grant card and a setup card keep of a
+// group: its runner and its config whole, as granteeSeen reads them back.
+func granteeGroupFingerprint(g Group) string {
+	return seen(g.Runner, asStored(g.Config))
+}
+
+// tellGroupStale tells the askers of the holds naming the group name whose
+// "group <name>" Seen moved between before and after, the group as the write
+// found it and as it leaves it (nil for none). The key is written by three
+// fingerprint functions — the group set card's strong few, the depot-push
+// card's and the grant cards' — and the tell carries all three, so a write
+// tells exactly the holds whose own reading of the group it moved: a change
+// of the push peer alone, which neither of the other two readings names in
+// full, still tells the holds that read the config whole and none whose
+// reading stands.
+func (w *wtx) tellGroupStale(name string, before, after *Group, actor string) error {
+	return w.tellXStale("group", name, before, after, actor, []tellKey[Group]{{
+		key: "group " + name,
+		fns: []func(*Group) string{
+			func(g *Group) string { return groupSetFingerprint(*g) },
+			func(g *Group) string { return depotPushGroupFingerprint(*g) },
+			func(g *Group) string { return granteeGroupFingerprint(*g) },
+		},
+	}})
 }
 
 // staleFP is the fingerprint a run ask holds for the source name under the
@@ -113,10 +292,12 @@ func (w *wtx) staleFP(name string, src *Source, target bool) (string, error) {
 // deliverAskStale delivers the ask_stale event e on row to its ask's asker,
 // as an answer is delivered (deliver): the sentence reads in words wherever
 // it lands, the asker hears it without subscribing when they are a crew
-// member or a user of this yard and are not the one who changed the source,
+// member or a user of this yard and are not the one who changed the thing,
 // and the asking session routes a crew asker's tell to its slice. An asker
 // with no inbox hears nothing: nobody stands to ask again. A corrupt ask
 // reference delivers to the subscriptions alone, as a corrupt answer does.
+// A source tell names its source; a family tell names its kind and name,
+// and the sentence names whichever the event carries.
 func (w *wtx) deliverAskStale(e *Event, row *beadRow, out, told map[string]any) error {
 	var seq uint64
 	switch n := e.Data["ask"].(type) {
@@ -133,9 +314,15 @@ func (w *wtx) deliverAskStale(e *Event, row *beadRow, out, told map[string]any) 
 	} else if !ok || n.Kind != NoteAsk {
 		return nil
 	}
-	source, _ := e.Data["source"].(string)
+	kind, _ := e.Data["kind"].(string)
+	name, _ := e.Data["name"].(string)
+	if kind == "" {
+		// A source tell, whose event names no kind: its kind is source.
+		kind = "source"
+		name, _ = e.Data["source"].(string)
+	}
 	moved, _ := e.Data["seen"].(string)
-	e.Data["answer"] = staleAskSentence(e.Actor, row.ID, seq, source, moved)
+	e.Data["answer"] = staleAskSentence(e.Actor, row.ID, seq, kind, name, moved)
 	if n.Session != "" {
 		e.Data["ask_session"] = n.Session
 	}
@@ -152,7 +339,8 @@ func (w *wtx) deliverAskStale(e *Event, row *beadRow, out, told map[string]any) 
 }
 
 // staleAskSentence is a stale ask as one line of an inbox: who changed the
-// source, which ask is stale, and to ask again.
-func staleAskSentence(actor, bead string, seq uint64, source, moved string) string {
-	return oneLine(fmt.Sprintf("%s changed the source %s: ask %d on %s is stale (%s moved). Ask again.", actor, source, seq, bead, moved))
+// thing of kind and name, which ask is stale, and to ask again. A source
+// reads through it with kind source, in the words its tells have always had.
+func staleAskSentence(actor, bead string, seq uint64, kind, name, moved string) string {
+	return oneLine(fmt.Sprintf("%s changed the %s %s: ask %d on %s is stale (%s moved). Ask again.", actor, kind, name, seq, bead, moved))
 }

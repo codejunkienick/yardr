@@ -196,10 +196,29 @@ func (w *wtx) renamePeer(ctx context.Context, name, to, actor string, by *approv
 	}
 	// A group that sends its beads there names it, and is given the new
 	// name: the beads that are away say whose they are by its key.
+	beforeGroups, err := peerGroupsOf(w.Tx, name)
+	if err != nil {
+		return nil, err
+	}
 	if groups, err := renamePeerGroups(w.Tx, name, to); err != nil {
 		return nil, err
 	} else if len(groups) > 0 {
 		data["groups"] = groups
+	}
+	// The peer a group sends to is part of its config whole, so the rename
+	// moves what depot-push and grant holds read of each such group and no
+	// group set hold, whose reading names none of it: each group tells here,
+	// at the rename that rewrote it, beside its peer_renamed.
+	for _, bg := range beforeGroups {
+		var after Group
+		if ok, err := get(w.Tx, bGroups, bg.Name, &after); err != nil {
+			return nil, err
+		} else if !ok {
+			continue
+		}
+		if err := w.tellGroupStale(bg.Name, &bg, &after, actor); err != nil {
+			return nil, err
+		}
 	}
 	if by != nil {
 		data["approved"] = by
