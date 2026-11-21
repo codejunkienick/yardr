@@ -473,15 +473,42 @@ func TestRuntimeStartFailureLeavesNextBeadToALaterPass(t *testing.T) {
 // later pass drains the completion.
 func TestWorkerFailureClassesEndSessionsAsThePassDid(t *testing.T) {
 	t.Parallel()
+	const timeout = "timeout: timed out waiting for agent startup"
+	longUsage := "Usage: opencode " + strings.Repeat("--very-long-flag <value> ", 20)
 	for _, tc := range []struct {
-		name  string
-		err   error
-		state string
+		name        string
+		err         error
+		state       string
+		tail        string
+		tailErr     error
+		want        []string
+		absent      []string
+		exactReason string
+		capped      bool
 	}{
-		{"bead blocked", dispatch.BeadBlocked(errors.New("its pull request is gone")), "aborted"},
-		{"runtime", dispatch.Runtime(errors.New("herdr is down")), "aborted"},
-		{"blocked group", dispatch.Blocked(errors.New("env_file is open to others")), "aborted"},
-		{"plain", errors.New("the brief cannot be written"), "failed"},
+		{name: "bead blocked", err: dispatch.BeadBlocked(errors.New("its pull request is gone")), state: "aborted"},
+		{name: "runtime", err: dispatch.Runtime(errors.New("herdr is down")), state: "aborted"},
+		{name: "blocked group", err: dispatch.Blocked(errors.New("env_file is open to others")), state: "aborted"},
+		{name: "plain", err: errors.New("the brief cannot be written"), state: "failed"},
+		{name: "usage in pane", err: errors.New(timeout), state: "failed",
+			tail: "shell noise while starting\nAPI_KEY=sk-live-secret\n" +
+				"Usage: opencode [OPTIONS] [COMMAND]\nopencode <command> [options]\n" +
+				"Options:\n  --model <model>  the model to run\n  --token sk-live-secret\n",
+			want:   []string{"Usage: opencode [OPTIONS] [COMMAND]", "opencode <command> [options]", "Options:", "--model <model>"},
+			absent: []string{"sk-live-secret", "shell noise", "--token"}},
+		{name: "literal values in usage and flag rows are left out", err: errors.New(timeout), state: "failed",
+			tail: "Usage: opencode --token sk-live-secret\nOptions:\n" +
+				"  --token sk-live-secret\n  --model <model>  the model to run\n",
+			want:   []string{"Usage:", "Options:", "--model <model>"},
+			absent: []string{"sk-live-secret", "--token"}},
+		{name: "no usage in pane reads exactly as today", err: errors.New(timeout), state: "failed",
+			tail: "agent starting\nAPI_KEY=sk-live-secret\nstill thinking\n", exactReason: timeout,
+			absent: []string{"sk-live-secret"}},
+		{name: "unreadable pane reads exactly as today", err: errors.New(timeout), state: "failed",
+			tailErr: errors.New("the pane is gone"), exactReason: timeout},
+		{name: "long help is capped short", err: errors.New(timeout), state: "failed",
+			tail: longUsage + "\nOptions:\n  --a <a>\n  --b <b>\n  --c <c>\n  --d <d>\n",
+			want: []string{"Usage: opencode"}, absent: []string{"--d <d>"}, capped: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -489,7 +516,11 @@ func TestWorkerFailureClassesEndSessionsAsThePassDid(t *testing.T) {
 			r := newGateRunner("g")
 			r.err = tc.err
 			close(r.release) // the gated start fails at once
-			d := &dispatch.Dispatcher{Store: s, Runners: map[string]dispatch.Runner{"fake": r},
+			var runner dispatch.Runner = r
+			if tc.tail != "" || tc.tailErr != nil {
+				runner = &usageRunner{fakeRunner: r.fakeRunner, tail: tc.tail, tailErr: tc.tailErr, err: tc.err}
+			}
+			d := &dispatch.Dispatcher{Store: s, Runners: map[string]dispatch.Runner{"fake": runner},
 				Backoff: time.Nanosecond, RuntimeBackoff: time.Hour, MaxAttempts: 3}
 			ctx := context.Background()
 			must(t, s.PutGroup(ctx, store.Group{Name: "g", Runner: "fake", Limit: 2}, "me"))
@@ -514,8 +545,45 @@ func TestWorkerFailureClassesEndSessionsAsThePassDid(t *testing.T) {
 				t.Fatal("no session was claimed for the bead")
 			}
 			dispatch.WaitStartsIdle(d)
-			if got, _ := s.GetSession(ctx, claimed.ID); got.State != tc.state {
+			got, err := s.GetSession(ctx, claimed.ID)
+			must(t, err)
+			if got.State != tc.state {
 				t.Fatalf("session = %s, want %s", got.State, tc.state)
+			}
+			if tc.exactReason != "" && (got.Error == nil || *got.Error != tc.exactReason) {
+				t.Fatalf("reason = %v, want exactly %q", got.Error, tc.exactReason)
+			}
+			if len(tc.want) > 0 || len(tc.absent) > 0 || tc.capped {
+				if got.Error == nil {
+					t.Fatal("failed start has no reason")
+				}
+				for _, want := range tc.want {
+					if !strings.Contains(*got.Error, want) {
+						t.Errorf("reason = %q, want it to name %q", *got.Error, want)
+					}
+				}
+				for _, absent := range tc.absent {
+					if strings.Contains(*got.Error, absent) {
+						t.Errorf("reason = %q, want none of the pane's %q in it", *got.Error, absent)
+					}
+				}
+				if !strings.HasPrefix(*got.Error, timeout) {
+					t.Errorf("reason = %q, want it to keep the start's own words %q first", *got.Error, timeout)
+				}
+				if tc.capped {
+					if n := len([]rune(*got.Error)); n > len([]rune(timeout))+len(" (pane: )")+240 {
+						t.Errorf("reason is %d runes, want the excerpt held to its cap: %q", n, *got.Error)
+					}
+					if !strings.Contains(*got.Error, "…") {
+						t.Errorf("reason = %q, want a cut marked in it", *got.Error)
+					}
+				}
+			}
+			if got.State == "failed" {
+				evs := eventKinds(t, s, b.ID, "session_failed")
+				if len(evs) != 1 || got.Error == nil || evs[0].Data["reason"] != *got.Error {
+					t.Fatalf("session_failed = %v, want one event with the session's reason %v", evs, got.Error)
+				}
 			}
 			switch tc.name {
 			case "bead blocked":
@@ -529,17 +597,38 @@ func TestWorkerFailureClassesEndSessionsAsThePassDid(t *testing.T) {
 				if n, _ := s.FailureCount(ctx, b.ID, "new"); n != 0 {
 					t.Fatalf("blocked start counted %d failures", n)
 				}
-			case "plain":
-				if n, _ := s.FailureCount(ctx, b.ID, "new"); n != 1 {
-					t.Fatalf("plain failure counted %d, want 1", n)
-				}
 			default:
-				if n, _ := s.FailureCount(ctx, b.ID, "new"); n != 0 {
-					t.Fatalf("runtime failure counted %d against the bead", n)
+				want := 0
+				if tc.state == "failed" {
+					want = 1
+				}
+				if n, _ := s.FailureCount(ctx, b.ID, "new"); n != want {
+					t.Fatalf("failure count = %d, want %d", n, want)
 				}
 			}
 		})
 	}
+}
+
+// usageRunner is a fakeRunner whose starts fail with err from a pane
+// that shows tail (or cannot be read, with tailErr): the stand-in pane a
+// harness that printed its help at its start leaves behind.
+type usageRunner struct {
+	*fakeRunner
+	tail    string
+	tailErr error
+	err     error
+}
+
+func (r *usageRunner) Start(_ context.Context, j dispatch.Job) (map[string]any, error) {
+	return map[string]any{"session": j.Session.ID, "pane": "p1"}, r.err
+}
+
+func (r *usageRunner) Tail(_ context.Context, handle map[string]any, _ int) (string, error) {
+	if pane, _ := handle["pane"].(string); pane == "" {
+		return "", errors.New("handle has no pane")
+	}
+	return r.tail, r.tailErr
 }
 
 // A starting session its worker still owns is counted live at any age;
@@ -589,6 +678,10 @@ func TestStartingSessionsOwnedAndUnowned(t *testing.T) {
 
 	// Unowned: claimed by a dispatcher that is gone before it started.
 	s2, f2, d2 := setup(t)
+	// Its startup pane survives the old dispatcher, so reap can name the
+	// same usage that a worker's failed Start would have named.
+	d2.Runners["fake"] = &usageRunner{fakeRunner: f2,
+		tail: "Usage: opencode [OPTIONS] [COMMAND]\n"}
 	must(t, s2.PutGroup(ctx, store.Group{Name: "g", Runner: "fake", Limit: 2}, "me"))
 	_, err = s2.AddRoute(ctx, store.Route{Stage: "new", Group: "g"}, "me")
 	must(t, err)
@@ -596,12 +689,21 @@ func TestStartingSessionsOwnedAndUnowned(t *testing.T) {
 	must(t, err)
 	sess, err := s2.Claim(ctx, b2.ID, "g", "new", "yard")
 	must(t, err)
+	// No pane: the old failure reason stays exactly as it was.
 	must(t, s2.SetHandle(ctx, sess.ID, map[string]any{"session": sess.ID}))
+	b3, err := s2.CreateBead(ctx, store.NewBead{Title: "orphaned with usage"}, "me")
+	must(t, err)
+	withPane, err := s2.Claim(ctx, b3.ID, "g", "new", "yard")
+	must(t, err)
+	must(t, s2.SetHandle(ctx, withPane.ID, map[string]any{"session": withPane.ID, "pane": "p1"}))
 	// Young, it is counted live; past five minutes, it is interrupted.
 	dispatch.SetClock(d2, func() time.Time { return time.Now().Add(4 * time.Minute) })
 	must(t, d2.Reconcile(ctx))
 	if got, _ := s2.GetSession(ctx, sess.ID); got.State != "starting" {
 		t.Fatalf("young unowned session = %s, want starting", got.State)
+	}
+	if got, _ := s2.GetSession(ctx, withPane.ID); got.State != "starting" {
+		t.Fatalf("young unowned session with pane = %s, want starting", got.State)
 	}
 	dispatch.SetClock(d2, func() time.Time { return time.Now().Add(6 * time.Minute) })
 	must(t, d2.Reconcile(ctx))
@@ -609,15 +711,19 @@ func TestStartingSessionsOwnedAndUnowned(t *testing.T) {
 	if got.State != "failed" || got.Error == nil || *got.Error != "start interrupted" {
 		t.Fatalf("unowned session past five minutes = %+v, want failed start interrupted", got)
 	}
+	got, _ = s2.GetSession(ctx, withPane.ID)
+	if got.State != "failed" || got.Error == nil ||
+		!strings.Contains(*got.Error, "start interrupted (pane: Usage: opencode") {
+		t.Fatalf("unowned session past five minutes = %+v, want failed start interrupted naming its usage", got)
+	}
 	f2.mu.Lock()
 	stopped := append([]string(nil), f2.stopped...)
 	f2.mu.Unlock()
-	found := false
+	found := map[string]bool{}
 	for _, id := range stopped {
-		found = found || id == sess.ID
+		found[id] = true
 	}
-	if !found {
-		t.Fatalf("interrupted session's handle not stopped: %v", stopped)
+	if !found[sess.ID] || !found[withPane.ID] {
+		t.Fatalf("interrupted sessions' handles not stopped: %v", stopped)
 	}
-	_ = f2
 }

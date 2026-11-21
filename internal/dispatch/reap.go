@@ -261,7 +261,10 @@ func (d *Dispatcher) reap(ctx context.Context, groups map[string]store.Group) (m
 			if d.startIsOwned(s.ID) {
 				live(s)
 			} else if d.now().Sub(s.StartedAt) > 5*time.Minute {
-				d.end(ctx, s, "failed", "start interrupted")
+				// As a failed start names its pane's help in its reason
+				// (startusage.go): an interrupted one whose harness
+				// printed its help before the daemon went is named too.
+				d.end(ctx, s, "failed", d.startFailureReason(ctx, r, s.Handle, "start interrupted"))
 			} else {
 				live(s)
 			}

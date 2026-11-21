@@ -237,8 +237,12 @@ func (d *Dispatcher) runStart(ctx context.Context, sj startJob) startCompletion 
 		}
 	default:
 		comp.outcome = startFailed
-		d.Log.Info("session ended", "session", sess.ID, "bead", job.Bead.ID, "state", "failed", "reason", err.Error())
-		if endErr := d.Store.EndSession(ctx, sess.ID, "failed", err.Error()); endErr != nil {
+		// The failure a start dies with may be named in its pane: a
+		// harness that printed its help there is told of in the reason
+		// itself, before teardown closes the pane (startusage.go).
+		reason := d.startFailureReason(ctx, sj.runner, handle, err.Error())
+		d.Log.Info("session ended", "session", sess.ID, "bead", job.Bead.ID, "state", "failed", "reason", reason)
+		if endErr := d.Store.EndSession(ctx, sess.ID, "failed", reason); endErr != nil {
 			d.Log.Error("end session", "session", sess.ID, "err", endErr)
 		}
 		// Keep what Start created so teardown can clean it up.
