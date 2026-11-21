@@ -113,8 +113,8 @@ type AskRun struct {
 	// Ask are the names the approval gives values for in the clear, one
 	// field on the card each, kept as Carried is. No other row keeps it.
 	Ask []string `json:"ask,omitempty"`
-	// Test is the test command a depot test row carries beside argv, in
-	// the ask's --run-test. No other row keeps it.
+	// Test is the test command a depot test or depot add row carries
+	// beside argv, in the ask's --run-test. No other row keeps it.
 	Test string `json:"test,omitempty"`
 	// Flow is the whole flow a flow set row carries beside argv, in the
 	// ask's --run-flow, as the line format writes it. No other row keeps it.

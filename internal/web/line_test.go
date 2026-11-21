@@ -128,7 +128,7 @@ func TestWaitsHeld(t *testing.T) {
 func roundLoop(t *testing.T, f *fixture, max int, members ...string) (b *store.Bead, report func(outcome string)) {
 	t.Helper()
 	ctx := context.Background()
-	must(t, f.st.PutDepot(ctx, store.Depot{Name: "loop", Base: "origin/main"}, "me"))
+	must(t, f.st.PutDepot(ctx, store.Depot{Name: "loop", Base: "origin/main"}, f.depotActor(ctx)))
 	flow, err := store.ParseFlow(fmt.Sprintf("new -> review on done\nreview -> merged on done | new on changes max %d then decide | decide on question\ndecide -> new\nmerged terminal\n", max))
 	must(t, err)
 	flow.Name = "loop"

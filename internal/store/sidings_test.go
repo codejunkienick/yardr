@@ -71,7 +71,7 @@ func newSidingYard(t *testing.T, fold int, after string) *sidingYard {
 	// Setting the operator makes the user, so mckean needs no AddUser.
 	must(s.SetSetting(ctx, OperatorSetting, "mckean", "mckean"))
 	for _, d := range []Depot{{Name: "web", Base: "main"}, {Name: "api", Base: "main"}, {Name: "odd", Base: "main"}} {
-		must(s.PutDepot(ctx, d, "me"))
+		must(s.PutDepot(ctx, d, "mckean"))
 	}
 	for name, text := range map[string]string{"siding.f": sidingFlow, "sidingbug.f": sidingBug, "sidingnone.f": sidingNone} {
 		f, err := ParseFlow(text)
@@ -535,7 +535,7 @@ func TestSidingSkipsAnUnreadableRepository(t *testing.T) {
 	if err := os.WriteFile(p, []byte(sidingFlow), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := y.PutDepot(ctx, Depot{Name: "repo", Kind: DepotDir, Path: good}, "me"); err != nil {
+	if err := y.PutDepot(ctx, Depot{Name: "repo", Kind: DepotDir, Path: good}, "mckean"); err != nil {
 		t.Fatal(err)
 	}
 	a, b := y.bead("first", "repo", "siding"), y.bead("second", "repo", "siding")

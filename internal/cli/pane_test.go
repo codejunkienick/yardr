@@ -310,9 +310,13 @@ func TestOnboardingOffersTheYardmastersPane(t *testing.T) {
 // yardr setup's "Talk to the yardmaster" finds the same yardmaster the same
 // way: the pane, and the chat once it is up.
 func TestSetupTalkToTheYardmasterOffersItsPane(t *testing.T) {
-	f := &former{answers: map[string]any{"name": "web"}, goes: []string{goYardmaster}, panes: []string{paneOpen, paneOpen}}
-	home, st, _ := setupYard(t, f)
+	f := &former{answers: map[string]any{"name": "web", "title": "first work", "goal": "it works"}, goes: []string{goYardmaster}, panes: []string{paneOpen, paneOpen}}
+	home, st, repo := setupYard(t, f)
 	depotlessWork(t, st)
+	if err := st.PutDepot(context.Background(), store.Depot{Name: "web", Path: repo, Base: "main"}, "Jo"); err != nil {
+		t.Fatal(err)
+	}
+	mustAs(t, st, "Jo", "pack", "apply", "starter", "--depot", "web")
 	mustAs(t, st, "Jo", "user", "add", "me")
 	chats := stubChat(t)
 	// No herdr pane: the run's map carries none, and the process blank

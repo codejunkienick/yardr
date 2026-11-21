@@ -1,8 +1,9 @@
 // Depots are the projects the yard works: their directories, their kinds,
 // the base their beads start from, and the command that tests them. Adding
-// one without a test command is anyone's; naming a test command on a new
-// depot, and changing what one holds, is the operator's, and a run
-// ask may propose a held depot's test command or its base (runask_depot.go).
+// one is the operator's, and a run ask may propose it by cloning a
+// repository (runask_depotadd.go); changing what one holds is the
+// operator's too, and a run ask may propose a held depot's test command
+// or its base (runask_depot.go).
 package store
 
 import (
@@ -48,13 +49,14 @@ func (r *Depot) IsDir() bool { return r.Kind == DepotDir }
 
 // PutDepot adds or replaces a depot, and logs depot_updated with what it now
 // holds: what tests a depot must not change unseen. A depot given no kind is
-// a git depot. Changing an existing depot's path or kind is the operator's
-// alone; its test command or base is the operator's, and a run ask may
-// propose it. Naming a test command on a depot the yard has not is the
-// operator's alone; adding one without a test command, and re-adding one
-// with all four unchanged, are anyone's. From a session's or a crew member's pane the write is
-// recorded as that session's actor or that crew member, whatever actor says;
-// from anywhere else, as given (paneAuthor).
+// a git depot. Adding a depot the yard has not is the operator's, and a run
+// ask may propose it; it is never delegated, since a depot names code the
+// yard fetches and runs. Changing an existing depot's path or kind is the
+// operator's alone; its test command or base is the operator's, and a run
+// ask may propose it. Re-adding one with all four unchanged is anyone's.
+// From a session's or a crew member's pane the write is recorded as that
+// session's actor or that crew member, whatever actor says; from anywhere
+// else, as given (paneAuthor).
 func (s *Store) PutDepot(ctx context.Context, r Depot, actor string) error {
 	if err := checkName("depot name", r.Name); err != nil {
 		return err
@@ -104,8 +106,9 @@ func (s *Store) PutDepot(ctx context.Context, r Depot, actor string) error {
 // approval: by is then the ask it was approved on, which the event
 // carries. Changing the test command or the base is the operator's, and
 // a run ask may propose it; the path and the kind are the operator's
-// alone, as is a test command named on a depot the yard has not: no card
-// names a depot that is not there, so that test command is typed.
+// alone. Adding a depot is the operator's and a run ask may propose it
+// (ActAddDepot), which covers a test command named with it: the depot
+// add card shows that command whole.
 func (w *wtx) putDepot(ctx context.Context, r Depot, actor string, by *approvedOn) error {
 	var was Depot
 	had, err := get(w.Tx, bDepots, r.Name, &was)
@@ -134,8 +137,8 @@ func (w *wtx) putDepot(ctx context.Context, r Depot, actor string, by *approvedO
 			}
 		}
 	}
-	if !had && r.Test != "" {
-		if err := w.may(ctx, actor, ActChangeDepotTest, Object{Kind: KindDepot, Name: r.Name, Ask: Alone}); err != nil {
+	if !had {
+		if err := w.may(ctx, actor, ActAddDepot, Object{Kind: KindDepot, Name: r.Name, Ask: Askable}); err != nil {
 			return err
 		}
 	}

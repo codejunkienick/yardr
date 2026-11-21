@@ -25,8 +25,8 @@ import (
 func stocked(t *testing.T, f *fixture) (run, w1, w2, train, six *store.Bead) {
 	t.Helper()
 	ctx := context.Background()
-	must(t, f.st.PutDepot(ctx, store.Depot{Name: "shop", Base: "origin/main"}, "me"))
-	must(t, f.st.PutDepot(ctx, store.Depot{Name: "loose", Base: "origin/main"}, "me"))
+	must(t, f.st.PutDepot(ctx, store.Depot{Name: "shop", Base: "origin/main"}, f.depotActor(ctx)))
+	must(t, f.st.PutDepot(ctx, store.Depot{Name: "loose", Base: "origin/main"}, f.depotActor(ctx)))
 	flow := func(name, typ, text string) {
 		t.Helper()
 		fl, err := store.ParseFlow(text)
@@ -286,8 +286,8 @@ func TestFlowsWithoutPanel(t *testing.T) {
 func kindsYard(t *testing.T, f *fixture) (held, gave, stall, block, dep, back, holder *store.Bead) {
 	t.Helper()
 	ctx := context.Background()
-	must(t, f.st.PutDepot(ctx, store.Depot{Name: "shop", Base: "origin/main"}, "me"))
-	must(t, f.st.PutDepot(ctx, store.Depot{Name: "loose", Base: "origin/main"}, "me"))
+	must(t, f.st.PutDepot(ctx, store.Depot{Name: "shop", Base: "origin/main"}, f.depotActor(ctx)))
+	must(t, f.st.PutDepot(ctx, store.Depot{Name: "loose", Base: "origin/main"}, f.depotActor(ctx)))
 	fl, err := store.ParseFlow("backlog -> new | decide\n" +
 		"new -> review on done | decide on question | backlog\n" +
 		"review -> approved on done | new on changes | decide on question\n" +

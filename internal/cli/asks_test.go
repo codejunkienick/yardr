@@ -499,7 +499,7 @@ func TestBeadAskNew(t *testing.T) {
 
 	// A depot's decide stage, for whoever wants the question there; --json
 	// for a script.
-	if err := st.PutDepot(ctx, store.Depot{Name: "web", Kind: store.DepotDir, Path: t.TempDir()}, "me"); err != nil {
+	if err := st.PutDepot(ctx, store.Depot{Name: "web", Kind: store.DepotDir, Path: t.TempDir()}, "mckean"); err != nil {
 		t.Fatal(err)
 	}
 	j := &app{st: st, actor: "yardmaster", json: true}

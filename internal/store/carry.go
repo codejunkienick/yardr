@@ -135,11 +135,12 @@ func carryKey(bead string, ask uint64) string { return join(bead, seqKey(ask)) }
 
 // needsCarry says whether approving the run ask was records it to be
 // carried out: a pack apply always, an up, which starts the yard's own
-// processes after the write, a source add whose declaration names
-// command files the approval's write cannot write or that replaces a
-// source whose command copies stand (they are made anew), a source rm
-// whose command copies are to go, and a teammate invite or removal, whose
-// edge report cannot be one store write.
+// processes after the write, a depot add, whose clone is no store write,
+// a source add whose declaration names command files the approval's
+// write cannot write or that replaces a source whose command copies
+// stand (they are made anew), a source rm whose command copies are to
+// go, and a teammate invite or removal, whose edge report cannot be one
+// store write.
 func needsCarry(was AskRun) bool {
 	if was.General != nil {
 		return true
@@ -148,6 +149,9 @@ func needsCarry(was AskRun) bool {
 		return true
 	}
 	if len(was.Argv) == 1 && was.Argv[0] == "up" {
+		return true
+	}
+	if IsDepotAddCarry(was.Argv) {
 		return true
 	}
 	if len(was.Argv) >= 2 && was.Argv[0] == "user" && (was.Argv[1] == "invite" || was.Argv[1] == "uninvite") {
@@ -226,6 +230,9 @@ func carryHandledHere(rec *Carry) bool {
 		return true
 	}
 	if len(rec.Argv) == 1 && rec.Argv[0] == "up" {
+		return true
+	}
+	if IsDepotAddCarry(rec.Argv) {
 		return true
 	}
 	if len(rec.Argv) < 2 {

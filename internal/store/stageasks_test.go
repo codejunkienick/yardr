@@ -194,7 +194,7 @@ func TestStageAskEntry(t *testing.T) {
 		".yardr/flows/default.flow":      stageAskFlow,
 		".yardr/flows/default/review.md": stageAskChoice,
 	})
-	if err := s.PutDepot(ctx, store.Depot{Name: "docs", Path: docs, Kind: store.DepotDir}, "me"); err != nil {
+	if err := s.PutDepot(ctx, store.Depot{Name: "docs", Path: docs, Kind: store.DepotDir}, "jo"); err != nil {
 		t.Fatal(err)
 	}
 	d, err := s.CreateBead(ctx, store.NewBead{Title: "x", Depot: "docs", Stage: "new"}, "me")

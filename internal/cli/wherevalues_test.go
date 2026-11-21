@@ -21,7 +21,7 @@ func TestSubscribeSeveralValuesForOneKey(t *testing.T) {
 	mustAs(t, st, "jo", "crew", "add", "clerk", "--set", "kind=claude", "--on", "held")
 	beads := map[string]string{}
 	for _, depot := range []string{"web", "api"} {
-		if err := st.PutDepot(ctx, store.Depot{Name: depot, Base: "main"}, "me"); err != nil {
+		if err := st.PutDepot(ctx, store.Depot{Name: depot, Base: "main"}, "jo"); err != nil {
 			t.Fatal(err)
 		}
 		b, err := st.CreateBead(ctx, store.NewBead{Title: "work", Depot: depot}, "me")
@@ -118,7 +118,7 @@ func TestSubscribeWhereValueIsWhole(t *testing.T) {
 	if got := r.Subscriptions[0].String(); strings.Contains(got, "\n") || !strings.Contains(got, `label=line1\nline2`) {
 		t.Errorf("subscription string = %q, want one row with the line break escaped", got)
 	}
-	if err := st.PutDepot(ctx, store.Depot{Name: "web", Base: "main"}, "me"); err != nil {
+	if err := st.PutDepot(ctx, store.Depot{Name: "web", Base: "main"}, "jo"); err != nil {
 		t.Fatal(err)
 	}
 	var ids []string

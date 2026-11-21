@@ -167,9 +167,16 @@ func TestOnboardingWithASilentYardmasterOpensNoChat(t *testing.T) {
 // None opens; it says who the chat is for and how to get there, and the
 // hand-over is the pane, as before.
 func TestHandOverAsSomeoneWhoIsNoUser(t *testing.T) {
-	f := &former{answers: map[string]any{"name": "web"}, goes: []string{goYardmaster}}
-	home, st, _ := setupYard(t, f)
+	f := &former{answers: map[string]any{"name": "web", "title": "first work", "goal": "it works"}, goes: []string{goYardmaster}}
+	home, st, repo := setupYard(t, f)
 	depotlessWork(t, st)
+	// The depot and its pack stand already, as the operator set them
+	// up: a setup that acts as eve writes neither, since adding a depot
+	// and the import's groups are the operator's.
+	if err := st.PutDepot(context.Background(), store.Depot{Name: "web", Path: repo, Base: "main"}, "Jo"); err != nil {
+		t.Fatal(err)
+	}
+	mustAs(t, st, "Jo", "pack", "apply", "starter", "--depot", "web")
 	focused := stubFocus(t)
 	chats := stubChat(t)
 	if err := st.CrewStarted(context.Background(), "yardmaster", yardmasterHandle()); err != nil {
@@ -186,9 +193,13 @@ func TestHandOverAsSomeoneWhoIsNoUser(t *testing.T) {
 
 // The view's own failure ends the hand-over with it, and claims no chat.
 func TestHandOverReportsAViewThatFails(t *testing.T) {
-	f := &former{answers: map[string]any{"name": "web"}, goes: []string{goYardmaster}}
-	_, st, _ := setupYard(t, f)
+	f := &former{answers: map[string]any{"name": "web", "title": "first work", "goal": "it works"}, goes: []string{goYardmaster}}
+	_, st, repo := setupYard(t, f)
 	depotlessWork(t, st)
+	if err := st.PutDepot(context.Background(), store.Depot{Name: "web", Path: repo, Base: "main"}, "Jo"); err != nil {
+		t.Fatal(err)
+	}
+	mustAs(t, st, "Jo", "pack", "apply", "starter", "--depot", "web")
 	mustAs(t, st, "Jo", "user", "add", "me")
 	if err := st.CrewStarted(context.Background(), "yardmaster", yardmasterHandle()); err != nil {
 		t.Fatal(err)

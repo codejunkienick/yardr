@@ -120,7 +120,7 @@ func downYard(t *testing.T, status map[string]string, beads ...string) (home str
 	if err := st.CrewStarted(ctx, "yardmaster", map[string]any{"agent": "yardmaster", "tab": "w1:t1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.PutDepot(ctx, store.Depot{Name: "repo"}, "me"); err != nil {
+	if err := st.PutDepot(ctx, store.Depot{Name: "repo"}, "Jo"); err != nil {
 		t.Fatal(err)
 	}
 	settings, err := st.Settings(ctx)

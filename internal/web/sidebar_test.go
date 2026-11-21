@@ -116,7 +116,7 @@ func TestSidebarCounts(t *testing.T) {
 
 	t.Run("quiet depots fold", func(t *testing.T) {
 		f := sidebarYard(t)
-		must(t, f.st.PutDepot(ctx, store.Depot{Name: "empty", Base: "origin/main"}, "me"))
+		must(t, f.st.PutDepot(ctx, store.Depot{Name: "empty", Base: "origin/main"}, f.depotActor(ctx)))
 		s := sidebarSection(t, squash(f.get("/").body))
 		if !strings.Contains(s, "Quiet depots · 1") {
 			t.Errorf("the sidebar folds no quiet depot: %s", s)

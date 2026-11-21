@@ -535,7 +535,7 @@ func TestUpgradeFromFlag(t *testing.T) {
 		t.Fatalf("unknown depot: err = %v\n%s", err, out)
 	}
 	gone := filepath.Join(t.TempDir(), "gone")
-	if err := st.PutDepot(ctx, store.Depot{Name: "yardr", Path: gone}, "me"); err != nil {
+	if err := st.PutDepot(ctx, store.Depot{Name: "yardr", Path: gone}, "probeuser"); err != nil {
 		t.Fatal(err)
 	}
 	out, err = run(t, a().rootCmd(), "--actor", "probeuser", "upgrade", "--from", "yardr")

@@ -940,8 +940,9 @@ func declareSlackSource(ctx context.Context, api store.API) error {
 
 // Changing an existing depot's path is the operator's alone; its test
 // command or base is the operator's, and a run ask may propose it.
-// Adding a depot without a test command, and re-adding one with its
-// values unchanged, are anyone's, recorded as the pane's actor from a pane.
+// Adding a depot is the operator's and a run ask may propose it, with or
+// without a test command; re-adding one with its values unchanged is
+// anyone's, recorded as the pane's actor from a pane.
 func TestPutDepotPathTestBaseChangesAreTheOperators(t *testing.T) {
 	t.Parallel()
 	depotYard := func(t *testing.T) (store.API, *store.Store, context.Context) {
@@ -991,29 +992,38 @@ func TestPutDepotPathTestBaseChangesAreTheOperators(t *testing.T) {
 	if d, _ := api.GetDepot(ctx, "yard"); d.Path != "/srv/yard" || d.Test != "" || d.Base != "origin/main" {
 		t.Fatalf("a refused change changed: %+v", d)
 	}
-	// Adding a depot stays anyone's, as does re-adding one with path,
-	// test command and base unchanged. A fresh yard: no pane is on
-	// record, so the actor stands as named.
-	api, _, ctx = depotYard(t)
-	if err := api.PutDepot(ctx, store.Depot{Name: "web", Path: "/srv/web", Base: "origin/main"}, "yardmaster"); err != nil {
-		t.Fatalf("adding a depot as yardmaster: %v", err)
+	// Adding a depot is the operator's, and a run ask may propose it;
+	// re-adding one with path, test command and base unchanged stays
+	// anyone's. A fresh yard: no pane is on record, so the actor stands
+	// as named.
+	api, own, ctx = depotYard(t)
+	if err := api.PutDepot(ctx, store.Depot{Name: "web", Path: "/srv/web", Base: "origin/main"}, "yardmaster"); err == nil ||
+		err.Error() != "only the operator (jo) may add a depot; this is yardmaster" {
+		t.Fatalf("adding a depot as yardmaster = %v", err)
+	}
+	if err := own.PutDepot(ctx, store.Depot{Name: "web", Path: "/srv/web", Base: "origin/main"}, "yardmaster"); err == nil {
+		t.Fatalf("adding a depot as yardmaster through own = nil")
+	} else if ask, ok := store.IsOperatorOnly(err); !ok || ask != store.Askable {
+		t.Fatalf("adding a depot as yardmaster = %v (mark %v, %v), want an operator-only refusal marked askable", err, ask, ok)
+	}
+	if err := api.PutDepot(ctx, store.Depot{Name: "web", Path: "/srv/web", Base: "origin/main"}, "jo"); err != nil {
+		t.Fatalf("adding a depot as the operator: %v", err)
 	}
 	if err := api.PutDepot(ctx, store.Depot{Name: "yard", Path: "/srv/yard", Base: "origin/main"}, "yardmaster"); err != nil {
 		t.Fatalf("re-adding a depot unchanged as yardmaster: %v", err)
 	}
-	// Naming a test command on a depot the yard has not is the
-	// operator's alone: no card names a depot that is not there. The
-	// operator names one, and a depot without one stays anyone's to add.
+	// A test command named with a new depot rides the same add: the
+	// operator's, askable, never the alone test gate of a held depot.
 	api, own, ctx = depotYard(t)
 	withTest := store.Depot{Name: "fresh", Path: "/srv/fresh", Base: "origin/main", Test: "make test"}
 	if err := api.PutDepot(ctx, withTest, "yardmaster"); err == nil ||
-		err.Error() != "only the operator (jo) may change a depot's test command; this is yardmaster" {
+		err.Error() != "only the operator (jo) may add a depot; this is yardmaster" {
 		t.Fatalf("adding a depot with a test command as yardmaster = %v", err)
 	}
 	if err := own.PutDepot(ctx, withTest, "yardmaster"); err == nil {
 		t.Fatalf("adding a depot with a test command as yardmaster through own = nil")
-	} else if ask, ok := store.IsOperatorOnly(err); !ok || ask != store.Alone {
-		t.Fatalf("adding a depot with a test command as yardmaster = %v (mark %v, %v), want an operator-only refusal marked alone", err, ask, ok)
+	} else if ask, ok := store.IsOperatorOnly(err); !ok || ask != store.Askable {
+		t.Fatalf("adding a depot with a test command as yardmaster = %v (mark %v, %v), want an operator-only refusal marked askable", err, ask, ok)
 	}
 	if _, err := api.GetDepot(ctx, "fresh"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("a refused depot was stored: %v", err)
@@ -1426,7 +1436,7 @@ func TestGroupAndCrewDefineAreTheOperators(t *testing.T) {
 		t.Fatalf("changing runner from exec as the operator was refused: %v", err)
 	}
 	newDepot := store.Depot{Name: "fresh", Path: "/srv/fresh", Base: "origin/main", Test: "make test"}
-	paneRefused("add a depot with a test command", "change a depot's test command", func() error {
+	paneRefused("add a depot with a test command", "add a depot", func() error {
 		return api.PutDepot(pane, newDepot, "jo")
 	})
 	// The operator's own add goes through own: over the socket every

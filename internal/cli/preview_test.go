@@ -39,7 +39,7 @@ func TestPreviewProposeListStopForget(t *testing.T) {
 		}
 	}
 	head, _ := exec.Command("git", "-C", depot, "rev-parse", "HEAD").Output()
-	if err := st.PutDepot(ctx, store.Depot{Name: "demo", Path: depot, Kind: store.DepotGit, Base: "main"}, "me"); err != nil {
+	if err := st.PutDepot(ctx, store.Depot{Name: "demo", Path: depot, Kind: store.DepotGit, Base: "main"}, "ada"); err != nil {
 		t.Fatal(err)
 	}
 	a := &app{st: st, actor: "me"}

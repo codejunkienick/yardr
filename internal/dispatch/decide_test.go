@@ -117,7 +117,7 @@ func TestDecideOffersItsMoves(t *testing.T) {
 				_, err := s.AddUser(ctx, u, "jo")
 				must(t, err)
 			}
-			must(t, s.PutDepot(ctx, store.Depot{Name: "web", Path: t.TempDir()}, "me"))
+			must(t, s.PutDepot(ctx, store.Depot{Name: "web", Path: t.TempDir()}, "jo"))
 			_, err := s.PutFlow(ctx, *flow, "me")
 			must(t, err)
 			must(t, s.SetFlowPointer(ctx, "web", "", flow.Name, "me"))

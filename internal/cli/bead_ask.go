@@ -60,7 +60,7 @@ field continues on the next:
   W: why the recommended one, once (--recommend names it)
   R: the command a run ask proposes, once (--run)
   G: one verbatim word of a general run ask's command, in order (--run-word)
-  T: its test command, once, with R: a depot test (--run-test)
+  T: its test command, once, with R: a depot test or depot add (--run-test)
   S: a says line of a hook add, in order, with R: a hook add (--run-says)
   M: a makes line of one, in order, with R: a hook add (--run-makes)
   F: a line of a flow set's flow, in order, with R: a flow set (--run-flow-line)
@@ -263,7 +263,7 @@ else: it never interprets quotes or shell punctuation. A peer-add invite
 stays one word and the yardkey invite reader validates all of it, including
 its URL; line breaks are refused. A comma is accepted only in a list the
 command takes or in the peer-add invite (the parts of tell=, the kinds peer
-allow carries, the grants crew set gives). A depot's test command goes beside --run, in --run-test <command> or T: <command>, since it needs those
+allow carries, the grants crew set gives). A depot's test command, and a depot add's where it names one, go beside --run, in --run-test <command> or T: <command>, since they need those
 characters, and a hook add's says and makes lines go beside it in --run-says <line> and --run-makes <line>
 (S: and M:), each repeatable in order, since a line needs spaces, -> and free-text notes. A flow set's flow goes beside
 it from the file --run-flow <file> names, read once, or as F: lines in order, since a flow line needs the same. It checks the
@@ -605,8 +605,8 @@ what the person asked does, and this is the asker's own.`,
 				return fmt.Errorf("--run-flow is the flow the run ask flow set <name> proposes: it goes with that command")
 			case c.Flags().Changed("run-flow-line") && (!c.Flags().Changed("run") || !flowSetCommand(askRun)):
 				return fmt.Errorf("--run-flow-line is a line of the flow the run ask flow set <name> proposes: it goes with that command")
-			case c.Flags().Changed("run-test") && (!c.Flags().Changed("run") || !depotTestCommand(askRun)):
-				return fmt.Errorf("--run-test is the command the run ask depot test <depot> proposes: it goes with that command")
+			case c.Flags().Changed("run-test") && (!c.Flags().Changed("run") || !depotTestCommand(askRun) && !depotAddCommand(askRun)):
+				return fmt.Errorf("--run-test is the command the run ask depot test <depot> or depot add proposes: it goes with that command")
 			case c.Flags().Changed("run-role") && (!c.Flags().Changed("run") || !crewAddCommand(askRun)):
 				return fmt.Errorf("--run-role is the role file the run ask crew add <name> ... carries: it goes with that command")
 			case c.Flags().Changed("run-says") && (!c.Flags().Changed("run") || !hookAddCommand(askRun)):
@@ -863,7 +863,7 @@ what the person asked does, and this is the asker's own.`,
 	ask.Flags().StringVar(&askAs, "as", "", "with --secret: ask for this user's own credential in the source (the names a call made as them reads), kept in the user's env_file; with --secret-login: the login is this user's own, and theirs to give")
 	ask.Flags().StringVar(&askRun, "run", "", "propose this yardr command for the operator to approve, as it is typed: one the yard runs from a card (yardr bead ask --help; R: on stdin)")
 	ask.Flags().StringArrayVar(&askRunWords, "run-word", nil, "with a general run ask: one verbatim word of the command, in order, no line split and no quoting parsed (repeatable; G: on stdin): the yardmaster proposes any command no card fits, while general_cards stands true")
-	ask.Flags().StringVar(&askRunTest, "run-test", "", "with --run depot test <depot> (R:): the test command the ask proposes (T:), carried beside the command since --run quotes nothing")
+	ask.Flags().StringVar(&askRunTest, "run-test", "", "with --run depot test <depot> or depot add (R:): the test command the ask proposes (T:), carried beside the command since --run quotes nothing")
 	ask.Flags().StringVar(&askRunRole, "run-role", "", "with --run crew add <name> ... (R:): the file whose role text the ask carries beside the command, shown whole on the card")
 	ask.Flags().StringArrayVar(&askRunSays, "run-says", nil, "with --run hook add <name> ... (R:): a says line the ask proposes (S:), repeatable in order, carried beside the command since a line needs spaces, -> and notes")
 	ask.Flags().StringArrayVar(&askRunMakes, "run-makes", nil, "with --run hook add <name> ... (R:): a makes line the ask proposes (M:), repeatable in order, carried beside the command since a line needs spaces and ->")

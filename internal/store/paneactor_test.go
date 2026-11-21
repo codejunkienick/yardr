@@ -1041,10 +1041,12 @@ func TestPeerNoteAndReadFromACrewPaneUseTheCrewActor(t *testing.T) {
 	})
 }
 
-// The setup-path writes stay anyone's, and from a session's or a crew
-// member's pane are recorded as the pane's actor, whatever --actor says:
-// a crew member setting up the yard is not refused, and cannot pass its
-// writes as the operator by naming them. The record of an import is not
+// The setup-path writes stay anyone's (a depot re-put with what stands
+// among them; adding one is the operator's, and a pane's add is refused
+// as its actor's), and from a session's or a crew member's pane are
+// recorded as the pane's actor, whatever --actor says: a crew member
+// setting up the yard is not refused, and cannot pass its writes as the
+// operator by naming them. The record of an import is not
 // among them (RecordPack): a later apply by name reads the pack from the
 // source it names, so a pane's own, as the operator or as itself, is refused
 // and the operator's record stands.
@@ -1092,15 +1094,19 @@ func TestSetupWritesFromAPaneAreThatPanesActor(t *testing.T) {
 				t.Fatalf("%s event actor = %q, want the pane's actor yardmaster", kind, a)
 			}
 		}
-		if err := api.PutDepot(pane, store.Depot{Name: "yard", Base: "origin/main"}, "jo"); err != nil {
-			t.Fatalf("PutDepot from the pane as the operator: %v", err)
+		if err := api.PutDepot(pane, store.Depot{Name: "yard", Base: "origin/main"}, "jo"); err == nil ||
+			err.Error() != "only the operator (jo) may add a depot; this is yardmaster" {
+			t.Fatalf("adding a depot from the pane as the operator = %v, want the operator's refusal naming yardmaster", err)
+		}
+		if err := api.PutDepot(pane, store.Depot{Name: "shed", Base: "origin/main"}, "jo"); err != nil {
+			t.Fatalf("re-putting a depot from the pane as the operator: %v", err)
 		}
 		as("depot_updated")
 		if _, err := api.PutFlow(pane, *f, "jo"); err != nil {
 			t.Fatalf("PutFlow from the pane as the operator: %v", err)
 		}
 		as("flow_set")
-		if err := api.SetFlowPointer(pane, "yard", "", "f1", "jo"); err != nil {
+		if err := api.SetFlowPointer(pane, "shed", "", "f1", "jo"); err != nil {
 			t.Fatalf("SetFlowPointer from the pane as the operator: %v", err)
 		}
 		as("flow_pointer_set")
@@ -1146,8 +1152,12 @@ func TestSetupWritesFromAPaneAreThatPanesActor(t *testing.T) {
 		if a := lastKindActor(t, s, ctx, "group_set"); a != actor {
 			t.Fatalf("group_set event actor = %q, want the pane's actor %q", a, actor)
 		}
-		if err := s.PutDepot(pane, store.Depot{Name: "web", Base: "origin/main"}, "op"); err != nil {
-			t.Fatalf("PutDepot from the pane as the operator: %v", err)
+		if err := s.PutDepot(pane, store.Depot{Name: "web", Base: "origin/main"}, "op"); err == nil ||
+			err.Error() != "only the operator (op) may add a depot; this is "+actor {
+			t.Fatalf("adding a depot from a bead's pane as the operator = %v, want the operator's refusal naming %s", err, actor)
+		}
+		if err := s.PutDepot(pane, store.Depot{Name: "yard", Base: "origin/main"}, "op"); err != nil {
+			t.Fatalf("re-putting a depot from the pane as the operator: %v", err)
 		}
 		if a := lastKindActor(t, s, ctx, "depot_updated"); a != actor {
 			t.Fatalf("depot_updated event actor = %q, want %q", a, actor)

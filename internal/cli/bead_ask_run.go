@@ -60,6 +60,11 @@ func askRunCarried(command string, words []string, test string, testSet bool, ro
 		}
 		run.Test = test
 	}
+	// Depot add carries its test command from --run-test too, where it
+	// names one: the depot is added with none where it names none.
+	if depotAddCommand(command) && testSet {
+		run.Test = test
+	}
 	// Crew add carries its role text from --run-role, or from the file
 	// prompt= names: read once here, beside the ask, so the store holds the
 	// bytes the card shows and a file changed after the ask changes nothing.
@@ -365,6 +370,17 @@ func readCrewRoleFile(file string) ([]byte, error) {
 		return nil, fmt.Errorf("the role in %s is not valid UTF-8 text: a card carries text only", store.OneLine(file))
 	}
 	return data, nil
+}
+
+// depotAddCommand reports whether command is the run ask depot add
+// <name> ...: those words, with or without the leading yardr. The store
+// parses it; this only says the ask may carry a test command beside it.
+func depotAddCommand(command string) bool {
+	words := strings.Fields(command)
+	if len(words) > 0 && words[0] == "yardr" {
+		words = words[1:]
+	}
+	return len(words) >= 3 && words[0] == "depot" && words[1] == "add"
 }
 
 // depotTestCommand reports whether command is the run ask depot test

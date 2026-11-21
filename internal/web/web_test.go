@@ -71,6 +71,27 @@ func newFixture(t *testing.T) *fixture {
 	return &fixture{t: t, client: testClient(t), st: st, own: own, ts: ts, home: home}
 }
 
+// depotActor is who a fixture's depot setup runs as: the yard's operator
+// where it has one (a role holder, else the operator setting's name),
+// else the fixture's usual me. Adding a depot is the operator's, so a
+// setup that names me on an operated yard is refused as a crew member's
+// add would be.
+func (f *fixture) depotActor(ctx context.Context) string {
+	if users, err := f.st.Users(ctx); err == nil {
+		for _, u := range users {
+			if u.IsOperator() {
+				return u.Name
+			}
+		}
+	}
+	if settings, err := f.st.Settings(ctx); err == nil {
+		if op := settings[store.OperatorSetting]; op != "" {
+			return op
+		}
+	}
+	return "me"
+}
+
 // testClient is a test's own HTTP client, with its own transport instead
 // of the shared one, so no other test's CloseIdleConnections breaks its
 // requests. Every fixture literal carries one; do calls it only through
@@ -183,7 +204,7 @@ func (f *fixture) populate() {
 		}
 	}
 	for _, depot := range []string{"line", "loose"} {
-		must(f.st.PutDepot(ctx, store.Depot{Name: depot, Base: "origin/main"}, "me"))
+		must(f.st.PutDepot(ctx, store.Depot{Name: depot, Base: "origin/main"}, f.depotActor(ctx)))
 	}
 	flow := func(name, typ, text string) {
 		f.t.Helper()
@@ -771,7 +792,7 @@ func TestRailPages(t *testing.T) {
 	f.signIn(srv, token)
 	ctx := context.Background()
 	must(t, f.st.SetSetting(ctx, store.OperatorSetting, "ada", "ada"))
-	must(t, f.st.PutDepot(ctx, store.Depot{Name: "line", Base: "origin/main"}, "me"))
+	must(t, f.st.PutDepot(ctx, store.Depot{Name: "line", Base: "origin/main"}, "ada"))
 	run, err := f.st.CreateBead(ctx, store.NewBead{Title: "at work", Stage: "new", Depot: "line"}, "me")
 	must(t, err)
 	tiles := regexp.MustCompile(`<a class="tile[^"]*" href="([^"]+)"`)

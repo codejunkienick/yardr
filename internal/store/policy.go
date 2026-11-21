@@ -39,6 +39,7 @@ const (
 	ActChangeGroup        Action = "change a group"             // Object.Does names the key
 	ActAddDevice          Action = "add a device"
 	ActEndDevicePairing   Action = "end a device's pairing"
+	ActAddDepot           Action = "add a depot"
 	ActChangeDepotPath    Action = "change a depot's path"
 	ActChangeDepotTest    Action = "change a depot's test command"
 	ActChangeDepotBase    Action = "change a depot's base"
@@ -216,9 +217,8 @@ type Object struct {
 // does is the words a refusal names the deed in.
 func (o Object) does(act Action) string { return or(o.Does, string(act)) }
 
-// CorePolicy is today's rules: an operator (a user whose role is
-// RoleOperator) does what defines the yard, a user what is their own, and
-// an agent's pane none of either, each as coreRules says.
+// CorePolicy is today's rules: an operator does what defines the yard, a user
+// what is their own, and an agent's pane none of either, each as coreRules says.
 var CorePolicy Policy = corePolicy{}
 
 type corePolicy struct{}
@@ -277,7 +277,7 @@ var coreRules = map[Action]rule{}
 func init() {
 	for _, act := range []Action{
 		ActChangeOriginator, ActGrantCrew, ActEndDevicePairing,
-		ActChangeDepotPath, ActChangeDepotKind, ActRemoveDepot,
+		ActAddDepot, ActChangeDepotPath, ActChangeDepotKind, ActRemoveDepot,
 		ActMoveLinks, ActReplaceHook, ActChangeHookSource, ActChangeHookUnknown, ActRemoveHook,
 		ActPair, ActMapPeerIdentity, ActUnmapPeerIdentity, ActAddPeer, ActRemovePeer, ActExposeToPeer,
 		ActTrustPeerName, ActSendAsksToPeer, ActAllowPeerMessages, ActRaisePeerMail, ActChangePeerAddress,

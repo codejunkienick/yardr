@@ -242,7 +242,7 @@ func TestUninstallStopsTheYardAndRemovesItsServices(t *testing.T) {
 			depot := store.Depot{Name: "web", Path: t.TempDir(), Base: "main", Kind: store.DepotGit}
 			wtDir := filepath.Join(config.At(home).Worktrees(), depot.Name)
 			copyWorktreeTemplate(t, uninstallTemplateDir, depot.Path, wtDir, "web-1", "web-2")
-			if err := st.PutDepot(ctx, depot, "me"); err != nil {
+			if err := st.PutDepot(ctx, depot, "Jo"); err != nil {
 				t.Fatal(err)
 			}
 			dirty := resolve(filepath.Join(wtDir, "web-1"))
@@ -537,7 +537,7 @@ func purgeYard(t *testing.T) (home, name string, depot store.Depot, panes *paneR
 	// As yardr depot add --clone leaves one: in the home.
 	depot = store.Depot{Name: "cloned", Path: filepath.Join(resolve(home), "depots", "cloned"), Base: "main", Kind: store.DepotGit}
 	copyWorktreeTemplate(t, purgeTemplateDir, depot.Path, filepath.Join(config.At(home).Worktrees(), depot.Name), "cloned-1", "cloned-2")
-	if err := st.PutDepot(context.Background(), depot, "me"); err != nil {
+	if err := st.PutDepot(context.Background(), depot, "Jo"); err != nil {
 		t.Fatal(err)
 	}
 	settings, err := st.Settings(context.Background())
@@ -701,7 +701,7 @@ func TestPurgeRefusesAHomeThatIsMoreThanAYard(t *testing.T) {
 		t.Fatalf("a home around the user's: %v\n%s", err, out)
 	}
 	stub(t, &userHomeDir, func() (string, error) { return "/Users/jo", nil })
-	if err := st.PutDepot(context.Background(), store.Depot{Name: "around", Path: filepath.Dir(home), Kind: store.DepotDir}, "me"); err != nil {
+	if err := st.PutDepot(context.Background(), store.Depot{Name: "around", Path: filepath.Dir(home), Kind: store.DepotDir}, "Jo"); err != nil {
 		t.Fatal(err)
 	}
 	out, err = run(t, a(false).rootCmd(), "uninstall", "--purge="+name, "--yes", "--handoff-wait", "0")

@@ -328,7 +328,7 @@ func TestInitTakesTheYardmasterFromTheDefaultPack(t *testing.T) {
 	// seeded it, whatever the pack names its yardmaster.
 	repo := t.TempDir()
 	gitIn(t, repo, "init", "-q", "-b", "main")
-	if err := st.PutDepot(ctx, store.Depot{Name: "web", Path: repo, Base: "main"}, "me"); err != nil {
+	if err := st.PutDepot(ctx, store.Depot{Name: "web", Path: repo, Base: "main"}, "Jo"); err != nil {
 		t.Fatal(err)
 	}
 	requireNonInteractive(t)

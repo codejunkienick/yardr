@@ -341,7 +341,7 @@ func TestDepotSidebarCurrent(t *testing.T) {
 	if s := sidebarSection(t, squash(f.get("/").body)); strings.Contains(s, "aria-current") {
 		t.Errorf("the sidebar marks a depot current off its page: %s", s)
 	}
-	must(t, f.st.PutDepot(ctx, store.Depot{Name: "empty", Base: "origin/main"}, "me"))
+	must(t, f.st.PutDepot(ctx, store.Depot{Name: "empty", Base: "origin/main"}, f.depotActor(ctx)))
 	s = sidebarSection(t, squash(f.get("/depots/empty").body))
 	if !strings.Contains(s, `<details class="side-quiet" open>`) {
 		t.Errorf("the quiet-depot group is closed on its current page: %s", s)
@@ -428,13 +428,13 @@ func TestDepotTag(t *testing.T) {
 		".yardr/flows/default.flow": "backlog -> new\nnew -> merged\nmerged terminal\n",
 	})
 	f := depotYard(t)
-	must(t, f.st.PutDepot(ctx, store.Depot{Name: "site", Path: dir, Base: "main"}, "me"))
+	must(t, f.st.PutDepot(ctx, store.Depot{Name: "site", Path: dir, Base: "main"}, f.depotActor(ctx)))
 	_, err := f.st.CreateBead(ctx, store.NewBead{Title: "one", Stage: "backlog", Depot: "site"}, "me")
 	must(t, err)
 	plain := t.TempDir()
 	must(t, os.MkdirAll(filepath.Join(plain, ".yardr", "flows"), 0o755))
 	must(t, os.WriteFile(filepath.Join(plain, ".yardr", "flows", "default.flow"), []byte("backlog -> merged\nmerged terminal\n"), 0o644))
-	must(t, f.st.PutDepot(ctx, store.Depot{Name: "plain", Kind: store.DepotDir, Path: plain}, "me"))
+	must(t, f.st.PutDepot(ctx, store.Depot{Name: "plain", Kind: store.DepotDir, Path: plain}, f.depotActor(ctx)))
 	_, err = f.st.CreateBead(ctx, store.NewBead{Title: "two", Stage: "backlog", Depot: "plain"}, "me")
 	must(t, err)
 

@@ -54,7 +54,7 @@ func TestSubscribeMatrixShowsTheClassAsOneRow(t *testing.T) {
 
 	// With a depot beside it the class is one depot's: a row of its own,
 	// which does not stand for hearing the kinds yard-wide.
-	if err := st.PutDepot(ctx, store.Depot{Name: "web", Base: "main"}, "me"); err != nil {
+	if err := st.PutDepot(ctx, store.Depot{Name: "web", Base: "main"}, "jo"); err != nil {
 		t.Fatal(err)
 	}
 	mustAs(t, st, "jo", "subscribe", "clerk", "yardr", "--where", "depot=web", "--where", "kind=attention")

@@ -278,6 +278,16 @@ const askRunList = `  peer add <name> <invite>
       bead branches of the depot start from the base; the card shows the
       depot, the base now and the proposed one, and approving sets exactly
       that; a directory depot has no base
+  depot add <name> --clone <url> [--kind git] [--base <branch>]
+      a first git depot, cloned into the yard's depots directory when
+      approved and carried out by the server: the card shows the name,
+      the kind, the fetch whole, the base and the test command the
+      --run-test beside it carries whole or none (none is added now and
+      named later on a depot test card), and what credential the clone
+      answers with; a fetch on a push source's host answers with that
+      source's token through its helper, and one with no token standing
+      is refused; a directory depot, a re-clone and a removal stay in a
+      terminal (weighty, outside, and code where a test rides)
   route set <id> --group <group>
       the one named rule of a depot sends its beads to the group: the card
       names the rule's id, its scope, every filter it sets and its chain

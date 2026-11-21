@@ -29,9 +29,11 @@ func RunCommands() []string {
 // it, a value or a path: settings set, whose value is a setting's (the
 // operator's own words to the agents, the address hooks are registered at, or
 // what Settings withholds from a device), source add, whose file is a
-// path on the yard's machine, group add and group set, whose command,
-// directories and prompt file are the operator's machine too, crew set
-// where it names a prompt file or a directory, and pack apply with any word past the
+// path on the yard's machine, depot add, whose fetch may name a private
+// repository or a path on the yard's machine, group add and
+// group set, whose command, directories and prompt file are the
+// operator's machine too, crew set where it names a prompt file or a
+// directory, and pack apply with any word past the
 // pack's name, whose mappings are the operator's configuration as the
 // card's are (Mappings), or of a directory, whose path is the yard's
 // machine's too. Bead and UserAsks tell those words to a device of
@@ -41,6 +43,7 @@ func RunCommands() []string {
 func RunArgvHeld(argv []string) bool {
 	return len(argv) >= 2 && (slices.Equal(argv[:2], []string{"settings", "set"}) ||
 		slices.Equal(argv[:2], []string{"source", "add"}) ||
+		slices.Equal(argv[:2], []string{"depot", "add"}) ||
 		slices.Equal(argv[:2], []string{"group", "add"}) ||
 		slices.Equal(argv[:2], []string{"group", "set"}) ||
 		slices.Equal(argv[:2], []string{"crew", "set"}) && slices.ContainsFunc(argv[2:], func(word string) bool { return strings.HasPrefix(word, "prompt=") || strings.HasPrefix(word, "dir=") })) ||

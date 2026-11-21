@@ -86,7 +86,11 @@ func (y *arrivalsTest) create(t testing.TB, title, stage string) *store.Bead {
 func (y *arrivalsTest) flowDepot(t testing.TB, depot, flow string, stages ...string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := y.PutDepot(ctx, store.Depot{Name: depot, Path: t.TempDir(), Kind: store.DepotDir}, "me"); err != nil {
+	actor := "me"
+	if settings, err := y.Settings(ctx); err == nil && settings[store.OperatorSetting] != "" {
+		actor = settings[store.OperatorSetting]
+	}
+	if err := y.PutDepot(ctx, store.Depot{Name: depot, Path: t.TempDir(), Kind: store.DepotDir}, actor); err != nil {
 		t.Fatal(err)
 	}
 	var rules []string

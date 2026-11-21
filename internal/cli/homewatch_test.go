@@ -188,7 +188,7 @@ func daemonUp(t *testing.T) *daemonTrial {
 	if err := local.CrewStarted(ctx, "yardmaster", map[string]any{"agent": "yardmaster", "tab": "w1:t1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := local.PutDepot(ctx, store.Depot{Name: "repo"}, "me"); err != nil {
+	if err := local.PutDepot(ctx, store.Depot{Name: "repo"}, "Jo"); err != nil {
 		t.Fatal(err)
 	}
 	if err := local.PutGroup(ctx, store.Group{Name: "builders", Runner: "herdr", Limit: 9, Config: map[string]any{"kind": "claude"}}, "Jo"); err != nil {
