@@ -7,7 +7,7 @@
 # flow (yardr.train.flow) has no limit.
 backlog -> shape | siding | new | decide
 shape -> siding on small | new on done | decide on question | backlog
-siding -> ready | backlog
+siding -> new | ready | backlog
 ready -> new | backlog
 new -> review on done | decide on question | backlog
 review -> review-security on done | approved on done-safe | new on changes max 3 then decide | decide on question

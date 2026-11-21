@@ -42,8 +42,9 @@ heavier one, a duplicate, or one needing a decision only a person can make
 goes to `decide` on `question`, with the question asked on the bead first.
 
 Small beads wait in `siding` for company, and leave folded into one carrier
-([Folding beads](#folding-beads)), which waits in `ready` for a person to
-send it to `new`. A bead in `siding` or `ready` that needs reshaping goes
+([Folding beads](#folding-beads)), which goes to `new` by itself; `ready`
+stays for a bead a person sends to `new` by hand. A bead in `siding` or
+`ready` that needs reshaping goes
 back to `backlog`, by hand.
 
 ### Cycles of blockers

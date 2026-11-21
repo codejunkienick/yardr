@@ -1000,10 +1000,10 @@ stage of the flow:
 ```
 STAGE    GROUP    MEMBERS         OPEN  FILE  NEXT
 backlog  backlog  ada,yardmaster  6     yes   siding | new | decide
-siding   siding   ada,yardmaster  3     yes   ready | backlog
+siding   siding   ada,yardmaster  3     yes   new | ready | backlog
 ready    ready    ada,yardmaster  0     yes   new | backlog
 ...
-siding: folds at 4 beads, or 8h after the latest arrives; at most 6 points; the carrier goes to ready
+siding: folds at 4 beads, or 8h after the latest arrives; at most 6 points; the carrier goes to new
         now 3 waiting, 4 points, 1 stuck; folds at 4 or at 09:40
 ```
 
@@ -1134,8 +1134,8 @@ and `size:small` goes to `siding` on `small`, to wait for company and leave
 folded with it; any other `difficulty:1` bead goes to `new` on `done`; a
 heavier one, a duplicate, or one needing a decision only a person can make
 goes to `decide` on `question`, with the question asked on the bead first.
-Beads in `siding` leave folded into one carrier, which waits in `ready` for
-a person to send it to `new`.
+Beads in `siding` leave folded into one carrier, which goes to `new` by
+itself; `ready` stays for a bead a person sends to `new` by hand.
 
 The assembly lands an approved bead and advances it to `merged`, which
 closes it; a red run of the tests sends it back to `new`. The flow has no `merge`
