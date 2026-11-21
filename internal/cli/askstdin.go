@@ -10,18 +10,19 @@ import (
 
 // askLabels is what a refusal of an ask's stdin says the labels are, so that
 // whoever read none of the help is told what to write.
-const askLabels = "Q: the question, C: a line of context, O: an option as <label>: <consequence>, W: why the recommended option, R: the command a run ask proposes, G: a word of a general run ask's command, T: its depot test command, S: a says line of a hook add, M: a makes line of one, F: a line of a flow set's flow"
+const askLabels = "Q: the question, C: a line of context, O: an option as <label>: <consequence>, W: why the recommended option, R: the command a run ask proposes, G: a word of a general run ask's command, T: its depot test command, S: a says line of a hook add, M: a makes line of one, F: a line of a flow set's flow, E: a chain line of a route set"
 
 // askStdin is the ask that stdin carried: the texts bead ask otherwise takes
 // as a quoted argument and as the flags --context, --option, --why, --run,
-// --run-word, --run-test, --run-says and --run-makes, written once where the
-// shell expands nothing.
+// --run-word, --run-test, --run-says, --run-makes and --run-chain-line,
+// written once where the shell expands nothing.
 type askStdin struct {
 	question          string
 	context, options  []string
 	why, run, runTest string
 	says, makes       []string
 	flowLines         []string
+	chainLines        []string
 	general           []string
 }
 
@@ -39,7 +40,8 @@ type askLine struct {
 // recommended option, at most once; R: the command a run ask proposes, at most
 // once; G: a word of a general run ask's command, repeatable in order and
 // never with R:; T: its depot test command, at most once and only with R:; S: a says
-// line of a hook add, and M: a makes line of one, each repeatable in
+// line of a hook add, M: a makes line of one, F: a line of a flow set's flow
+// and E: a chain line of a route set, each repeatable in
 // order and only with R:. Any other first line is the question, and each
 // line after it a line of context, as
 // bead create takes the first line of its stdin for the title and the rest for
@@ -75,11 +77,11 @@ func parseAskStdin(text string) (askStdin, error) {
 		switch {
 		case !labeled:
 			return askStdin{}, fmt.Errorf("stdin line %d has no label: the first line has one, so every line is a field, and a field is one line (%s)", l.n, askLabels)
-		case !strings.Contains("QCOWRTSMGF", string(label)):
+		case !strings.Contains("QCOWRTSMGFE", string(label)):
 			return askStdin{}, fmt.Errorf("stdin line %d has the label %c:, which is none of them (%s)", l.n, label, askLabels)
 		case value == "":
 			return askStdin{}, fmt.Errorf("stdin line %d is %c: with no words after it (%s)", l.n, label, askLabels)
-		case label != 'C' && label != 'O' && label != 'S' && label != 'M' && label != 'G' && label != 'F' && seen[label] != 0:
+		case label != 'C' && label != 'O' && label != 'S' && label != 'M' && label != 'G' && label != 'F' && label != 'E' && seen[label] != 0:
 			return askStdin{}, fmt.Errorf("stdin has the label %c: on lines %d and %d, and it is given once", label, seen[label], l.n)
 		}
 		seen[label] = l.n
@@ -102,6 +104,8 @@ func parseAskStdin(text string) (askStdin, error) {
 			got.makes = append(got.makes, value)
 		case 'F':
 			got.flowLines = append(got.flowLines, value)
+		case 'E':
+			got.chainLines = append(got.chainLines, value)
 		case 'G':
 			got.general = append(got.general, value)
 		}
@@ -119,6 +123,8 @@ func parseAskStdin(text string) (askStdin, error) {
 		return askStdin{}, fmt.Errorf("stdin has M: with no R: after it, and a makes line goes beside the hook add command it is for")
 	case len(got.flowLines) > 0 && got.run == "":
 		return askStdin{}, fmt.Errorf("stdin has F: with no R: after it, and a flow line goes beside the flow set command it is for")
+	case len(got.chainLines) > 0 && got.run == "":
+		return askStdin{}, fmt.Errorf("stdin has E: with no R: after it, and a chain line goes beside the route set command it is for")
 	}
 	return got, nil
 }
@@ -151,7 +157,7 @@ func askFromStdin(c *cobra.Command, args []string) error {
 	if len(args) == 0 || args[len(args)-1] != "-" || c.Flags().Changed("take-back") {
 		return nil
 	}
-	for _, name := range []string{"context", "option", "why", "run", "run-word", "run-test", "run-says", "run-makes", "run-flow", "run-flow-line"} {
+	for _, name := range []string{"context", "option", "why", "run", "run-word", "run-test", "run-says", "run-makes", "run-flow", "run-flow-line", "run-chain-line"} {
 		if c.Flags().Changed(name) {
 			return fmt.Errorf("with -, put every text on stdin: --%s is given beside it (%s)", name, askLabels)
 		}
@@ -174,7 +180,7 @@ func askFromStdin(c *cobra.Command, args []string) error {
 	}{
 		{"context", got.context}, {"option", got.options}, {"why", []string{got.why}},
 		{"run", []string{got.run}}, {"run-word", got.general}, {"run-test", []string{got.runTest}},
-		{"run-says", got.says}, {"run-makes", got.makes}, {"run-flow-line", got.flowLines},
+		{"run-says", got.says}, {"run-makes", got.makes}, {"run-flow-line", got.flowLines}, {"run-chain-line", got.chainLines},
 	} {
 		for _, text := range set.texts {
 			if text == "" {

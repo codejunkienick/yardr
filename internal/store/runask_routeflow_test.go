@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"reflect"
 	"slices"
 	"strings"
@@ -42,8 +43,8 @@ func routesByID(t *testing.T, y *askYard) map[string]Route {
 // A route set card moves the one named rule of a depot to the named
 // group from the next claim, its filters and conditions unchanged,
 // and leaves a second rule of the stage serving its beads. It is
-// weighty code, stale by its rule alone, and a yard-wide rule is no
-// card's to change where it stands.
+// weighty code, stale by its rule alone. A yard-wide rule is changed
+// where it stands on its own card (TestRunAskRouteSetYardWide).
 func TestRunAskRouteSetMovesOneNamedRule(t *testing.T) {
 	t.Parallel()
 	y := routeYard(t)
@@ -102,15 +103,13 @@ func TestRunAskRouteSetMovesOneNamedRule(t *testing.T) {
 		!strings.Contains(err.Error(), "needs no approval: run it yourself") {
 		t.Errorf("the operator's ask = %v", err)
 	}
-	// A yard-wide rule is refused, naming the doors that stand.
+	// A yard-wide rule files where it stands now; its card and its
+	// served-depot stale check are TestRunAskRouteSetYardWide's.
 	wide, err := y.AddRoute(y.ctx, Route{Stage: "review", Group: "reviewers"}, "mckean")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", "route", "set", wide.ID, "--group", "spares"), "yardmaster"); err == nil ||
-		!strings.Contains(err.Error(), "is yard-wide") || !strings.Contains(err.Error(), "route add --depot <depot>") {
-		t.Errorf("a yard-wide rule's card = %v", err)
-	}
+	y.ask(t, listAsk("mckean", "route", "set", wide.ID, "--group", "spares"), "yardmaster")
 }
 
 // A route set card is stale by its rule alone: the stage's other rule
@@ -148,6 +147,239 @@ func TestRunAskRouteSetIsStaleByItsRuleAlone(t *testing.T) {
 	y.refusedStale(t, seq, "was written when route "+plain.ID+" was another: it was set since")
 	if got := routesByID(t, y); got[plain.ID].Group != "reviewers" {
 		t.Errorf("a refused approval changed the rule: %+v", got[plain.ID])
+	}
+}
+
+// chainRouteAsk is a route set ask carrying chain lines beside its
+// command, as --run-chain-line and E: lines file one.
+func chainRouteAsk(to, id, group string, chain []string) Ask {
+	ask := listAsk(to, "route", "set", id, "--group", group)
+	ask.Run.Chain = chain
+	return ask
+}
+
+// A route set card that carries the whole chain shows the chain that
+// stands and the chain that would stand whole, takes the standing
+// chain back as a terminal command, and on approval saves the carried
+// chain with its route_set event in routeEvent's shape.
+func TestRunAskRouteSetCarriesTheWholeChain(t *testing.T) {
+	t.Parallel()
+	y := routeYard(t)
+	web := "web"
+	plain, err := y.AddRoute(y.ctx, Route{Stage: "new", Depot: &web, Group: "reviewers", When: "Weekly<80", Else: []RouteGroup{{Name: "spares"}}}, "mckean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq := y.ask(t, chainRouteAsk("mckean", plain.ID, "spares", []string{"spares@Weekly<90", "locals"}), "yardmaster")
+	r := y.asked(t, seq)
+	if !slices.Equal(r.Ask.Run.Chain, []string{"spares@Weekly<90", "locals"}) {
+		t.Errorf("stored chain = %q, want the lines in order", r.Ask.Run.Chain)
+	}
+	strongHas(t, r.Ask.Run.Does,
+		"Its chain is reviewers@Weekly<80 else spares now",
+		"On approval its chain is spares@Weekly<90 else locals",
+		"every filter stands as it is.")
+	if len(r.Ask.Weight) != 1 || r.Ask.Weight[0].Class != WeightCode ||
+		!strings.Contains(r.Ask.Weight[0].Line, "spares@Weekly<90 else locals") {
+		t.Errorf("weight = %+v, want one code line naming the chain", r.Ask.Weight)
+	}
+	if want := "yardr route set " + plain.ID + " --group 'reviewers@Weekly<80' --else spares"; r.Ask.Run.Back != want {
+		t.Errorf("taken back by %q, want %q", r.Ask.Run.Back, want)
+	}
+	done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(done.Result, "route "+plain.ID+" saved") ||
+		!strings.Contains(done.Result, "reviewers@Weekly<80 else spares -> spares@Weekly<90 else locals") {
+		t.Errorf("approval printed %q, want the chains it moved between", done.Result)
+	}
+	if got := routesByID(t, y)[plain.ID]; got.Group != "spares" || got.When != "Weekly<90" || got.GroupList() != "spares@Weekly<90 else locals" {
+		t.Errorf("the named rule = %+v, want the carried chain whole", got)
+	}
+	evs, err := y.EventsOfKind(y.ctx, "route_set", 10)
+	if err != nil || len(evs) != 1 {
+		t.Fatalf("route_set events = %+v, %v, want one", evs, err)
+	}
+	was, _ := evs[0].Data["was"].(map[string]any)
+	is, _ := evs[0].Data["is"].(map[string]any)
+	groupsOf := func(m map[string]any) []RouteGroup {
+		t.Helper()
+		b, err := json.Marshal(m["groups"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var groups []RouteGroup
+		if err := json.Unmarshal(b, &groups); err != nil {
+			t.Fatal(err)
+		}
+		return groups
+	}
+	if was["group"] != "reviewers" || is["group"] != "spares" ||
+		!slices.Equal(groupsOf(was), []RouteGroup{{Name: "reviewers", When: "Weekly<80"}, {Name: "spares"}}) ||
+		!slices.Equal(groupsOf(is), []RouteGroup{{Name: "spares", When: "Weekly<90"}, {Name: "locals"}}) {
+		t.Errorf("route_set = %+v, want was and is in routeEvent's shape with their chains", evs[0].Data)
+	}
+	// Fewer chain lines drop the tail, even while --group stays the same.
+	seq = y.ask(t, chainRouteAsk("mckean", plain.ID, "spares", []string{" spares@Weekly<90 "}), "yardmaster")
+	r = y.asked(t, seq)
+	if !slices.Equal(r.Ask.Run.Chain, []string{"spares@Weekly<90"}) {
+		t.Errorf("canonical stored chain = %q, want trimmed single line", r.Ask.Run.Chain)
+	}
+	if want := "yardr route set " + plain.ID + " --group 'spares@Weekly<90' --else locals"; r.Ask.Run.Back != want {
+		t.Errorf("drop-tail taken back by %q, want %q", r.Ask.Run.Back, want)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := routesByID(t, y)[plain.ID]; got.GroupList() != "spares@Weekly<90" || len(got.Else) != 0 {
+		t.Errorf("after dropping tail, rule = %+v, want spares@Weekly<90 alone", got)
+	}
+}
+
+// A carried chain is refused where its first line disagrees with
+// --group, where a line names no group, and where it changes nothing;
+// a chain that names the depot template, standing or carried, is
+// refused naming the terminal. Without lines the old form stands, on
+// the tests above.
+func TestRunAskRouteSetChainRefusals(t *testing.T) {
+	t.Parallel()
+	y := routeYard(t)
+	web := "web"
+	plain, err := y.AddRoute(y.ctx, Route{Stage: "new", Depot: &web, Group: "reviewers", When: "Weekly<80", Else: []RouteGroup{{Name: "spares"}}}, "mckean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		ask  Ask
+		want string
+	}{
+		{"the first line disagrees with --group", chainRouteAsk("mckean", plain.ID, "spares", []string{"locals"}), "the command and the lines disagree"},
+		{"a line names no group", chainRouteAsk("mckean", plain.ID, "spares", []string{"spares", "@Weekly<90"}), "names no group"},
+		{"the chain stands already", chainRouteAsk("mckean", plain.ID, "reviewers", []string{"reviewers@Weekly<80", "spares"}), "sends its beads to reviewers@Weekly<80 else spares already"},
+	} {
+		if _, err := y.AddAsk(y.ctx, y.bead, tc.ask, "yardmaster"); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s = %v, want %q", tc.name, err, tc.want)
+		}
+	}
+	for _, name := range []string{"web-spares", "api-spares"} {
+		if err := y.PutGroup(y.ctx, Group{Name: name, Runner: "herdr", Config: map[string]any{"kind": "claude"}}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wide, err := y.AddRoute(y.ctx, Route{Stage: "review", Group: "reviewers", Else: []RouteGroup{{Name: "{depot}-spares"}}}, "mckean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", "route", "set", wide.ID, "--group", "spares"), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "names the {depot} template") || !strings.Contains(err.Error(), "in a terminal with yardr route set") {
+		t.Errorf("a standing templated chain = %v, want it refused naming the terminal", err)
+	}
+	other, err := y.AddRoute(y.ctx, Route{Stage: "other", Group: "reviewers"}, "mckean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.AddAsk(y.ctx, y.bead, chainRouteAsk("mckean", other.ID, "spares", []string{"spares", "{depot}-spares"}), "yardmaster"); err == nil ||
+		!strings.Contains(err.Error(), "names the {depot} template") {
+		t.Errorf("a carried templated chain = %v, want it refused naming the template", err)
+	}
+}
+
+// A route set card changes a yard-wide rule where it stands: it names
+// the rule's scope and every depot it serves, counts the open beads of
+// the served depots with the depotless ones beside them, and is stale
+// where the served set changed since the ask.
+func TestRunAskRouteSetYardWide(t *testing.T) {
+	t.Parallel()
+	y := routeYard(t)
+	wide, err := y.AddRoute(y.ctx, Route{Stage: "review", Group: "reviewers"}, "mckean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, nb := range []NewBead{
+		{Title: "in web", Depot: "web", Stage: "review"},
+		{Title: "in api", Depot: "api", Stage: "review"},
+		{Title: "no depot", Stage: "review"},
+	} {
+		if _, err := y.CreateBead(y.ctx, nb, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seq := y.ask(t, chainRouteAsk("mckean", wide.ID, "spares", []string{"spares@Weekly<90", "locals"}), "yardmaster")
+	r := y.asked(t, seq)
+	strongHas(t, r.Ask.Run.Does,
+		"Route "+wide.ID+" is yard-wide, for the stage review",
+		"It serves the depots api and web, which state no own rule for its beads.",
+		"Its chain is reviewers now",
+		"On approval its chain is spares@Weekly<90 else locals",
+		"2 open beads stand in the stage review in the depots it serves, and 1 more with no depot")
+	if want := "yardr route set " + wide.ID + " --group reviewers --else ''"; r.Ask.Run.Back != want {
+		t.Errorf("taken back by %q, want %q", r.Ask.Run.Back, want)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := routesByID(t, y)[wide.ID]; got.Depot != nil || got.GroupList() != "spares@Weekly<90 else locals" {
+		t.Errorf("the yard-wide rule = %+v, want the carried chain where it stands", got)
+	}
+
+	mk := func(t *testing.T) (*askYard, *Route) {
+		t.Helper()
+		y := routeYard(t)
+		wide, err := y.AddRoute(y.ctx, Route{Stage: "review", Group: "reviewers"}, "mckean")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return y, wide
+	}
+	web := "web"
+	// An own rule for the key appears in a served depot.
+	y2, wide2 := mk(t)
+	seq = y2.ask(t, listAsk("mckean", "route", "set", wide2.ID, "--group", "spares"), "yardmaster")
+	if _, err := y2.AddRoute(y2.ctx, Route{Stage: "review", Depot: &web, Group: "spares"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y2.refusedStale(t, seq, "served another set of depots")
+	// An own rule for the key is removed, so the depot is served again;
+	// while it stands, only api is served and beads in web are not counted.
+	y3, wide3 := mk(t)
+	own, err := y3.AddRoute(y3.ctx, Route{Stage: "review", Depot: &web, Group: "spares"}, "mckean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, nb := range []NewBead{
+		{Title: "in web (unserved)", Depot: "web", Stage: "review"},
+		{Title: "in api (served)", Depot: "api", Stage: "review"},
+	} {
+		if _, err := y3.CreateBead(y3.ctx, nb, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seq = y3.ask(t, listAsk("mckean", "route", "set", wide3.ID, "--group", "spares"), "yardmaster")
+	strongHas(t, y3.asked(t, seq).Ask.Run.Does,
+		"It serves depot api, which states no own rule for its beads.",
+		"1 open beads stand in the stage review in the depots it serves, and 0 more with no depot")
+	if err := y3.DeleteRoute(y3.ctx, own.ID, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y3.refusedStale(t, seq, "served another set of depots")
+	// A depot is added, and so served.
+	y4, wide4 := mk(t)
+	seq = y4.ask(t, listAsk("mckean", "route", "set", wide4.ID, "--group", "spares"), "yardmaster")
+	if err := y4.PutDepot(y4.ctx, Depot{Name: "extra"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y4.refusedStale(t, seq, "served another set of depots")
+	// A depot is removed, and so no longer served.
+	y5, wide5 := mk(t)
+	seq = y5.ask(t, listAsk("mckean", "route", "set", wide5.ID, "--group", "spares"), "yardmaster")
+	if _, err := y5.DeleteDepot(y5.ctx, "api", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y5.refusedStale(t, seq, "served another set of depots")
+	if got := routesByID(t, y5)[wide5.ID]; got.Group != "reviewers" {
+		t.Errorf("a refused approval changed the yard-wide rule: %+v", got)
 	}
 }
 

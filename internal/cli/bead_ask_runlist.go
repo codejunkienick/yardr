@@ -300,13 +300,16 @@ const askRunList = `  peer add <name> <invite>
       is refused; a directory depot, a re-clone and a removal stay in a
       terminal (weighty, outside, and code where a test rides)
   route set <id> --group <group>
-      the one named rule of a depot sends its beads to the group: the card
-      names the rule's id, its scope, every filter it sets and its chain
-      with each group's condition, changes only the chain's first group,
-      and carries the filters and conditions unchanged (weighty, code);
-      a yard-wide rule is not changed where it stands on this card: set
-      it aside for one depot with route add --depot, or change it in a
-      terminal; the yardmaster files it from the operator's own mail only
+      the one named rule sends its beads along the chain the ask carries:
+      the card names the rule's id, its scope (this depot's own, or
+      yard-wide, naming every depot it serves), every filter it sets and
+      its chain whole as it stands and as it would stand, each group with
+      its condition; the whole chain rides beside the command in
+      --run-chain-line lines (E: on stdin), the first naming --group's
+      group, and without them only the first group changes, with every
+      filter and condition unchanged (weighty, code); a templated chain
+      stays in a terminal; the yardmaster files it from the operator's
+      own mail only
   route add --stage <stage> --group <group> [--depot <depot>]
       a new rule where its scope has none, with the filters it names; with
       --depot and a key a yard-wide rule takes, this depot's own set-aside

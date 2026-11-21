@@ -959,7 +959,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--run-flow", "F: a line of a flow set's flow", "route set <id> --group <group>", "route add --stage <stage> --group <group>", "flow set <name>"} {
+	for _, want := range []string{"--run-flow", "F: a line of a flow set's flow", "--run-chain-line", "E: a chain line of a route set", "naming every depot it serves", "route set <id> --group <group>", "route add --stage <stage> --group <group>", "flow set <name>"} {
 		if !strings.Contains(askHelp.Long, want) {
 			t.Errorf("yardr bead ask --help does not name %q", want)
 		}

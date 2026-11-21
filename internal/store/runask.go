@@ -119,14 +119,15 @@ type AskRun struct {
 	// Flow is the whole flow a flow set row carries beside argv, in the
 	// ask's --run-flow, as the line format writes it. No other row keeps it.
 	Flow string `json:"flow,omitempty"`
+	// Chain is a route set row's whole chain beside argv (runask_route.go).
+	Chain []string `json:"chain,omitempty"`
 	// Role is the prompt text a crew add, group add, group set or crew set
 	// row carries beside argv (the ask's --run-role, or the file prompt=
 	// names), shown on the card in Does. The approval writes it to a file
 	// the yard names by its digest (runask_promptfile.go). No other row
 	// keeps it.
 	Role string `json:"role,omitempty"`
-	// HookTable is the says and makes lines a hook add row carries
-	// beside argv, in the order given: a line needs spaces, -> and
+	// HookTable is the says and makes lines a hook add row carries beside argv, in the order given: a line needs spaces, -> and
 	// free-text notes, none of which a --run word holds, so they go
 	// beside it as a depot test's command does (--run-says and
 	// --run-makes, S: and M: on stdin). The card shows them whole
@@ -635,7 +636,7 @@ func (w *wtx) askedRun(ctx context.Context, run AskRun, to, actor string) (*AskR
 	// The command in the yard's own form, with what the writer carried
 	// beside it: the carried bytes are the row's to keep or throw away,
 	// as Does and Seen are.
-	sent := AskRun{Argv: argv, Carried: run.Carried, Test: run.Test, Role: run.Role, HookTable: run.HookTable, Flow: run.Flow}
+	sent := AskRun{Argv: argv, Carried: run.Carried, Test: run.Test, Role: run.Role, HookTable: run.HookTable, Flow: run.Flow, Chain: run.Chain}
 	check := c.check
 	if c.checkRun != nil {
 		check = func(ctx context.Context, w *wtx, _ []string, actor string) error {

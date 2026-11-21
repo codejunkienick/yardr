@@ -1,14 +1,16 @@
 // The route rows of the run list (runList): what serves a stage, changed
 // on a card and set only on the operator's approval (design yardr-y1cn
 // 3.3, as decided on ask 26833: every such card is weighty code, a
-// reorder-only one included). route set moves one named rule of a depot,
-// never a stage in the abstract, and never a yard-wide rule where it
-// stands; route add files a new rule where a stage has none, and, with
-// --depot naming a yard-wide rule's key, that depot's own set-aside of
-// it. A card shows the rule whole as it stands and as it would stand,
-// and is stale by the rule it names alone. The yardmaster files these
-// cards from the operator's own mail only; mail from anyone else gets
-// no filing.
+// reorder-only one included). route set moves one named rule where it
+// stands, a depot's own or a yard-wide one, never a stage in the
+// abstract, and carries the rule's whole chain beside the command where
+// chain lines ride (AskRun.Chain); route add files a new rule where a
+// stage has none, and, with --depot naming a yard-wide rule's key, that
+// depot's own set-aside of it. A card shows the rule whole as it stands
+// and as it would stand, and is stale by the rule it names alone — a
+// yard-wide card by the depots it serves too. The yardmaster files
+// these cards from the operator's own mail only; mail from anyone else
+// gets no filing.
 //
 // The rows are registered here, beside their functions, as the group
 // set row is (runask_groupset.go), and not in runList's literal:
@@ -39,11 +41,11 @@ func init() {
 			use:         routeSetUse,
 			description: "Change where a route's beads go and keep the rest",
 			parse:       parseRouteSet,
-			check:       checkRouteSet,
-			card:        (*wtx).routeSetCard,
+			checkRun:    checkRouteSet,
+			cardRun:     (*wtx).routeSetCard,
 			stale:       (*wtx).routeSetStale,
 			weigh:       routeSetWeight,
-			run:         runRouteSet,
+			runRun:      runRouteSet,
 		},
 		runCommand{
 			words:       []string{"route", "add"},
@@ -59,8 +61,8 @@ func init() {
 }
 
 // parseRouteSet reads the words of route set <id> --group <group>. The
-// group is a name alone: the condition the route's first group carries
-// is the route's, and stands as the card has it.
+// group is a name alone: the chain whole rides beside argv in the ask's
+// Chain, where it rides at all, and --else stays the terminal's.
 func parseRouteSet(rest []string) ([]string, error) {
 	args, values, err := runWords(routeSetUse, "route set", "the operator's", rest, map[string]bool{"--group": true})
 	if err != nil {
@@ -74,7 +76,7 @@ func parseRouteSet(rest []string) ([]string, error) {
 	}
 	group := values["--group"][0]
 	if strings.Contains(group, "@") {
-		return nil, fmt.Errorf("--run takes %s: %q names a condition with its group, and this card carries the route's conditions unchanged: name the group alone", routeSetUse, group)
+		return nil, fmt.Errorf("--run takes %s: %q names a condition with its group: name the group alone in --run, and carry the chain with its conditions in --run-chain-line (E: on stdin)", routeSetUse, group)
 	}
 	return []string{args[0], "--group", group}, nil
 }
@@ -231,29 +233,67 @@ func (w *wtx) routeGroupSays(name string) string {
 func routeSeen(r Route) string { return seen(r) }
 
 // routeSetSpec is a route set proposal as the yard holds it: the rule
-// as it stands and as the approval would leave it, its first group
-// changed and every filter and condition carried unchanged.
+// as it stands and as the approval would leave it, its chain changed
+// whole where the ask carries one and every filter carried unchanged.
 type routeSetSpec struct {
 	have, want Route
 }
 
+// chainGroups are the groups a carried chain names, in order: one group
+// as route add spells it, read with ParseRouteGroup.
+func chainGroups(chain []string) []RouteGroup {
+	groups := make([]RouteGroup, len(chain))
+	for i, line := range chain {
+		groups[i] = ParseRouteGroup(line)
+	}
+	return groups
+}
+
+// chainList is a carried chain in GroupList's form.
+func chainList(chain []string) string {
+	parts := make([]string, len(chain))
+	for i, g := range chainGroups(chain) {
+		parts[i] = g.String()
+	}
+	return strings.Join(parts, " else ")
+}
+
 // routeSetProposal holds a route set ask to the yard as it stands: the
-// rule is there and is this depot's own, the group it would serve is
-// there, and the chain that results is one the store would save
-// (checkRouteGroups, as SetRoute holds it).
-func (w *wtx) routeSetProposal(argv []string) (routeSetSpec, error) {
-	id, group := routeSetOf(argv)
+// rule is there, where it stands — a depot's own or yard-wide — the
+// chain the ask carries is one the store would save (checkRouteGroups,
+// as SetRoute holds it), and no chain in it names the depot template,
+// which a card does not resolve for each depot it serves. Without
+// carried lines the first group alone changes, as the card always did.
+func (w *wtx) routeSetProposal(run AskRun) (routeSetSpec, error) {
+	id, group := routeSetOf(run.Argv)
 	spec := routeSetSpec{}
 	if ok, err := get(w.Tx, bRoutes, id, &spec.have); err != nil {
 		return routeSetSpec{}, err
 	} else if !ok {
 		return routeSetSpec{}, fmt.Errorf("route %s: %w", id, ErrNotFound)
 	}
-	if spec.have.Depot == nil {
-		return routeSetSpec{}, fmt.Errorf("route %s is yard-wide: it serves every depot that states no own route for its beads, and a card does not change it where it stands; file route add --depot <depot> to set it aside for one depot, or change it in a terminal with yardr route set %s", id, id)
-	}
 	spec.want = spec.have
-	spec.want.Group = group
+	if len(run.Chain) == 0 {
+		spec.want.Group = group
+	} else {
+		chain := chainGroups(run.Chain)
+		for i, g := range chain {
+			if g.Name == "" {
+				return routeSetSpec{}, fmt.Errorf("route %s: chain line %d names no group: want <group>[@<condition>]", id, i+1)
+			}
+		}
+		if chain[0].Name != group {
+			return routeSetSpec{}, fmt.Errorf("route %s: --group names %s and the first chain line names %s: the command and the lines disagree", id, group, chain[0].Name)
+		}
+		spec.want.Group, spec.want.When = chain[0].Name, chain[0].When
+		spec.want.Else = slices.Clone(chain[1:])
+		if len(spec.want.Else) == 0 {
+			spec.want.Else = nil
+		}
+	}
+	if spec.have.Templated() || spec.want.Templated() {
+		return routeSetSpec{}, fmt.Errorf("route %s names the %s template in its chain, which a card does not resolve for each depot it serves: change it in a terminal with yardr route set %s", id, DepotTemplate, id)
+	}
 	if _, err := checkRouteGroups(w.Tx, spec.want); err != nil {
 		return routeSetSpec{}, err
 	}
@@ -262,51 +302,145 @@ func (w *wtx) routeSetProposal(argv []string) (routeSetSpec, error) {
 
 // checkRouteSet is changing what serves a stage as the asker: what
 // names what runs is the operator's, which a run ask may propose.
-func checkRouteSet(ctx context.Context, w *wtx, argv []string, actor string) error {
-	spec, err := w.routeSetProposal(argv)
+func checkRouteSet(ctx context.Context, w *wtx, run AskRun, actor string) error {
+	spec, err := w.routeSetProposal(run)
 	if err != nil {
 		return err
 	}
-	if spec.want.Group == spec.have.Group {
-		return fmt.Errorf("route %s sends its beads to %s already, so the command would change nothing", spec.have.ID, spec.have.Group)
+	if slices.Equal(spec.have.Groups(), spec.want.Groups()) {
+		if len(run.Chain) == 0 {
+			return fmt.Errorf("route %s sends its beads to %s already, so the command would change nothing", spec.have.ID, spec.have.Group)
+		}
+		return fmt.Errorf("route %s sends its beads to %s already, so the command would change nothing", spec.have.ID, spec.have.GroupList())
 	}
 	return w.may(ctx, actor, ActChangeRoute, Object{Kind: KindRoute, Name: spec.have.ID, Ask: Askable})
 }
 
+// servedDepots are the depots the yard-wide rule have serves: those
+// with no own rule for its key (EffectiveRoutesByKey), in name order.
+func (w *wtx) servedDepots(have Route, operator string) ([]string, error) {
+	var routes []Route
+	if err := each(w.Tx, bRoutes, "", func(_ []byte, r *Route) error {
+		routes = append(routes, *r)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	served := []string{}
+	err := each(w.Tx, bDepots, "", func(_ []byte, d *Depot) error {
+		for _, r := range EffectiveRoutesByKey(routes, viewRoute, &d.Name, operator) {
+			if r.ID == have.ID {
+				served = append(served, d.Name)
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	slices.Sort(served)
+	return served, nil
+}
+
+// routeSetBack is the command that takes a route set back: the rule's
+// chain as it stands, as a terminal takes it, each group quoted as
+// shellQuote quotes it (a terminal quotes, a card doesn't). Where the
+// approval adds further groups to a single-group rule, --else ” drops
+// them back off, since route set without --else leaves further groups
+// standing.
+func routeSetBack(have, want Route) string {
+	parts := []string{"yardr", "route", "set", have.ID}
+	for i, g := range have.Groups() {
+		flag := "--else"
+		if i == 0 {
+			flag = "--group"
+		}
+		parts = append(parts, flag, shellQuote(g.String()))
+	}
+	if len(have.Else) == 0 && len(want.Else) > 0 {
+		parts = append(parts, "--else", "''")
+	}
+	return strings.Join(parts, " ")
+}
+
 // routeSetCard is the card of route set <id> --group <group>: the rule
-// named by its id and its scope, its filters and its chain whole as
-// they stand and as they would stand, and what takes the change back.
-func (w *wtx) routeSetCard(argv []string, asking bool) (AskRun, error) {
-	spec, err := w.routeSetProposal(argv)
+// named by its id and its scope — a yard-wide rule naming every depot
+// it serves — its filters and its chain whole as they stand and as
+// they would stand, and what takes the change back.
+func (w *wtx) routeSetCard(run AskRun, asking bool) (AskRun, error) {
+	spec, err := w.routeSetProposal(run)
 	if err != nil {
 		return AskRun{}, err
 	}
 	have, want := spec.have, spec.want
-	if asking && want.Group == have.Group {
-		return AskRun{}, fmt.Errorf("route %s sends its beads to %s already, so the command would change nothing", have.ID, have.Group)
+	if asking && slices.Equal(have.Groups(), want.Groups()) {
+		if len(run.Chain) == 0 {
+			return AskRun{}, fmt.Errorf("route %s sends its beads to %s already, so the command would change nothing", have.ID, have.Group)
+		}
+		return AskRun{}, fmt.Errorf("route %s sends its beads to %s already, so the command would change nothing", have.ID, have.GroupList())
 	}
 	operator, err := operatorIn(w.Tx)
 	if err != nil {
 		return AskRun{}, err
 	}
-	open, err := w.openInStage(*have.Depot, have.Stage)
-	if err != nil {
-		return AskRun{}, err
-	}
 	does := []string{
 		fmt.Sprintf("changes what serves the stage %s for the beads route %s takes, and nothing else of it.", have.Stage, have.ID),
-		fmt.Sprintf("Route %s is this depot's own rule in depot %s, for the stage %s.", have.ID, *have.Depot, have.Stage),
-		"It takes " + routeFiltersSays(have, operator) + ".",
-		fmt.Sprintf("Its chain is %s now: %s serves its beads first.", have.GroupList(), w.routeGroupSays(have.Worker())),
-		fmt.Sprintf("On approval its chain is %s: %s serves its beads first, and every filter and every condition stands as it is.", want.GroupList(), w.routeGroupSays(want.Worker())),
-		fmt.Sprintf("%d open beads stand in the stage %s in depot %s; a bead claimed through the route keeps its group until its session ends, and the next claim takes the new chain.", open, have.Stage, *have.Depot),
+	}
+	seenMap := map[string]string{"route " + have.ID: routeSeen(have)}
+	var openLine string
+	if have.Depot != nil {
+		does = append(does, fmt.Sprintf("Route %s is this depot's own rule in depot %s, for the stage %s.", have.ID, *have.Depot, have.Stage))
+		open, err := w.openInStage(*have.Depot, have.Stage)
+		if err != nil {
+			return AskRun{}, err
+		}
+		openLine = fmt.Sprintf("%d open beads stand in the stage %s in depot %s; a bead claimed through the route keeps its group until its session ends, and the next claim takes the new chain.", open, have.Stage, *have.Depot)
+	} else {
+		served, err := w.servedDepots(have, operator)
+		if err != nil {
+			return AskRun{}, err
+		}
+		does = append(does, fmt.Sprintf("Route %s is yard-wide, for the stage %s: it serves every depot that states no own route for its beads, and beads with no depot.", have.ID, have.Stage))
+		switch len(served) {
+		case 0:
+			does = append(does, "No depot takes it now: every depot states its own rule for its beads, so only beads with no depot take it.")
+		case 1:
+			does = append(does, fmt.Sprintf("It serves depot %s, which states no own rule for its beads.", served[0]))
+		default:
+			does = append(does, fmt.Sprintf("It serves the depots %s, which state no own rule for its beads.", andList(served)))
+		}
+		seenMap["route served "+have.ID] = seen(served)
+		servedOpen, depotless, err := w.openInStageServed(have.Stage, served)
+		if err != nil {
+			return AskRun{}, err
+		}
+		openLine = fmt.Sprintf("%d open beads stand in the stage %s in the depots it serves, and %d more with no depot, which take the yard-wide rules alone; a bead claimed through the route keeps its group until its session ends, and the next claim takes the new chain.", servedOpen, have.Stage, depotless)
+	}
+	does = append(does,
+		"It takes "+routeFiltersSays(have, operator)+".",
+		fmt.Sprintf("Its chain is %s now: %s serves its beads first.", have.GroupList(), w.routeGroupSays(have.Worker())))
+	if len(run.Chain) == 0 {
+		does = append(does, fmt.Sprintf("On approval its chain is %s: %s serves its beads first, and every filter and every condition stands as it is.", want.GroupList(), w.routeGroupSays(want.Worker())))
+	} else {
+		does = append(does, fmt.Sprintf("On approval its chain is %s: %s serves its beads first, and every filter stands as it is.", want.GroupList(), w.routeGroupSays(want.Worker())))
+	}
+	does = append(does, openLine)
+	var chain []string
+	if len(run.Chain) > 0 {
+		gs := want.Groups()
+		chain = make([]string, len(gs))
+		for i, g := range gs {
+			chain[i] = g.String()
+		}
 	}
 	return AskRun{
-		Argv:   argv,
+		Argv:   run.Argv,
+		Chain:  chain,
 		Does:   does,
-		Back:   runCommandLine([]string{"route", "set", have.ID, "--group", have.Groups()[0].String()}),
+		Back:   routeSetBack(have, want),
 		BackBy: "only the operator",
-		Seen:   map[string]string{"route " + have.ID: routeSeen(have)},
+		Seen:   seenMap,
 	}, nil
 }
 
@@ -322,10 +456,34 @@ func (w *wtx) openInStage(depot, stage string) (int, error) {
 	return n, err
 }
 
+// openInStageServed counts the open beads in a stage of the depots a
+// yard-wide rule serves, and those with no depot beside them: depotless
+// beads take the yard-wide rules alone.
+func (w *wtx) openInStageServed(stage string, served []string) (inServed, depotless int, err error) {
+	set := map[string]bool{}
+	for _, depot := range served {
+		set[depot] = true
+	}
+	err = each(w.Tx, bBeads, "", func(_ []byte, r *beadRow) error {
+		if r.Status == "closed" || r.Stage != stage {
+			return nil
+		}
+		switch {
+		case r.Depot == nil:
+			depotless++
+		case set[*r.Depot]:
+			inServed++
+		}
+		return nil
+	})
+	return inServed, depotless, err
+}
+
 // routeSetStale says why the ask seq for route set is approved no
-// more: the rule it names was set since. Nothing else makes it stale:
-// a change of any other rule of the stage, and of the beads standing
-// in it, is not this card's.
+// more: the rule it names was set since, or, for a yard-wide rule, the
+// depots it serves changed since. Nothing else makes it stale: a
+// change of any other rule of the stage, and of the beads standing in
+// it, is not this card's.
 func (w *wtx) routeSetStale(seq uint64, was, now AskRun) error {
 	id, _ := routeSetOf(was.Argv)
 	if key := "route " + id; was.Seen[key] != now.Seen[key] {
@@ -336,6 +494,9 @@ func (w *wtx) routeSetStale(seq uint64, was, now AskRun) error {
 		})
 		return fmt.Errorf("ask %d was written when route %s was another: it was set since%s. %s", seq, id, since(e), nothingRan)
 	}
+	if key := "route served " + id; was.Seen[key] != now.Seen[key] {
+		return fmt.Errorf("ask %d was written when route %s served another set of depots: a depot has gained or lost its own route for its beads, or a depot was added or removed since. %s", seq, id, nothingRan)
+	}
 	return nil
 }
 
@@ -343,14 +504,17 @@ func (w *wtx) routeSetStale(seq uint64, was, now AskRun) error {
 // next on every bead the rule takes, so it is code, always.
 func routeSetWeight(_ *wtx, run AskRun) ([]AskWeight, error) {
 	id, group := routeSetOf(run.Argv)
+	if len(run.Chain) > 0 {
+		return []AskWeight{weighs(WeightCode, fmt.Sprintf("what serves a stage: route %s sends its beads along %s from the next claim, as the card shows", id, chainList(run.Chain)))}, nil
+	}
 	return []AskWeight{weighs(WeightCode, fmt.Sprintf("what serves a stage: route %s sends its beads to the group %s from the next claim, as the card shows", id, group))}, nil
 }
 
-// runRouteSet sets the rule's first group as actor, in the approval's
-// write, in the shape SetRoute writes (its was and is event), so what
-// is saved is what the card showed.
-func runRouteSet(ctx context.Context, w *wtx, argv []string, actor string, _ *approvedOn) (string, error) {
-	spec, err := w.routeSetProposal(argv)
+// runRouteSet saves the rule as the card showed it, as actor, in the
+// approval's write, in the shape SetRoute writes (its was and is
+// event), so what is saved is what the card showed.
+func runRouteSet(ctx context.Context, w *wtx, run AskRun, actor string, _ *approvedOn) (string, error) {
+	spec, err := w.routeSetProposal(run)
 	if err != nil {
 		return "", err
 	}
@@ -359,6 +523,9 @@ func runRouteSet(ctx context.Context, w *wtx, argv []string, actor string, _ *ap
 	}
 	if err := w.event("", "route_set", actor, map[string]any{"was": routeEvent(spec.have), "is": routeEvent(spec.want)}); err != nil {
 		return "", err
+	}
+	if len(run.Chain) > 0 {
+		return fmt.Sprintf("route %s saved\n  chain: %s -> %s", spec.want.ID, spec.have.GroupList(), spec.want.GroupList()), nil
 	}
 	return fmt.Sprintf("route %s saved\n  --group: %s -> %s", spec.want.ID, spec.have.Groups()[0], spec.want.Groups()[0]), nil
 }
