@@ -771,13 +771,13 @@ func (a *app) pairJoin(w, warn io.Writer, ctx context.Context, cfg *config.Confi
 		return fmt.Errorf("%s's operator did not confirm within %s%s", peer.Name, short(store.ConfirmTTL), nothingSaved)
 	case err != nil:
 		// The other yard may have saved this one: its answer did not arrive.
-		return fmt.Errorf("asking %s how the pairing stands: %w\nThis yard saved nothing. If %s shows this yard as a peer, remove it there (yardr peer rm) and pair again", peer.Name, err, peer.Name)
+		return fmt.Errorf("asking %s how the pairing stands: %w\nThis yard saved nothing. If %s shows this yard as a peer, remove it there (`yardr peer rm` with the name it shows for this yard) and pair again", peer.Name, err, peer.Name)
 	case out.State != store.Confirmed:
 		return a.hostSaidNo(ctx, st, peer.Name, host.Name, out.Reason)
 	}
 	saved, err := st.PairPeer(ctx, peer, who)
 	if err != nil {
-		return fmt.Errorf("%s has saved this yard, and this yard could not save it: %w\nRemove this yard there (yardr peer rm) and pair again", peer.Name, err)
+		return fmt.Errorf("%s has saved this yard, and this yard could not save it: %w\nRemove this yard there (`yardr peer rm` with the name it shows for this yard) and pair again", peer.Name, err)
 	}
 	return a.pairDone(w, warn, ctx, cfg, st, paired{Role: "joiner", Peer: saved, Check: called.Check()}, opt)
 }

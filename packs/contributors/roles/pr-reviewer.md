@@ -202,9 +202,13 @@ make the temporary file of a here-document refuses a form and not the step.
    such text and where, by file and line; the words themselves are for your
    note). It names no customer, lead, price or any other context that only
    the yard has: if the repository's code, tests and docs do not say it, leave
-   it out. Fit, maintenance cost, the weighing of licences, and what a
-   maintainer asked on the card with your answers to it, are the maintainers'
-   to say and go in your note alone; a finding the author can act on is in the
+   it out. It never narrates its own making: no "Read and not read" section
+   or other coverage narration, no sentence about fetching, the sandbox or
+   the tools, no remark about the bead's short copy of the pull request's
+   text. All of that is for your note (step 5), which keeps every word of it.
+   Fit, maintenance cost, the weighing of licences, and what a maintainer
+   asked on the card with your answers to it, are the maintainers' to say and
+   never leave your note either; a finding the author can act on is in the
    review whichever of those it comes from (a vendored file that carries no
    licence is one, with its file).
 

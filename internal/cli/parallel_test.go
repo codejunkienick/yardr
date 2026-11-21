@@ -236,6 +236,7 @@ var allowSerial = map[string]string{
 	"TestPeerPairExposesFromFlag":                           "pairYards",
 	"TestPeerPairJSON":                                      "assign:pairCommand,pairYards",
 	"TestPeerPairNeedsAListener":                            "pairYards",
+	"TestPeerPairRecoveryNamesTheShownName":                 "assign:askCheck,pairYards,setInteractive,stub:pairHTTP",
 	"TestPeerPairWarnsOfALoopbackListener":                  "assign:pairCommand,pairYards",
 	"TestPeerPairWithoutATerminal":                          "pairYards,setInteractive",
 	"TestPreflightOffersToInstallHerdr":                     "offerEnv",

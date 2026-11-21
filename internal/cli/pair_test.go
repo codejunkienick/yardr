@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"yardr.dev/yardr/internal/hooks"
+	"yardr.dev/yardr/internal/pairing"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/yards"
 )
@@ -1006,6 +1008,99 @@ func TestPeerPairAPeerAlready(t *testing.T) {
 		t.Fatalf("pair --name laptop = %v", err)
 	}
 }
+
+// A pairing that ends one-sided names the removal there with the name that
+// yard shows for this one. The host saves the joiner under its own --name
+// choice, which this yard never learns, so the recovery says `yardr peer
+// rm` with the name it shows, never bare: where the host's answer never
+// arrives, and where the host has saved this yard and this yard cannot save
+// it back.
+func TestPeerPairRecoveryNamesTheShownName(t *testing.T) {
+	const rule = "`yardr peer rm` with the name it shows for this yard"
+
+	t.Run("the host never answers", func(t *testing.T) {
+		north, laptop := pairYards(t)
+		setInteractive(t, true)
+		errs := bothStderr(t)
+		// The call crosses, and every question after it fails: the host's
+		// answer never arrives.
+		stub(t, &pairHTTP, &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path == pairing.PathConfirm {
+				return nil, errors.New("no yard there")
+			}
+			return http.DefaultTransport.RoundTrip(req)
+		})})
+		out, hostErr, callErr := pairBoth(t, north, laptop, errs, []string{"--yes"}, withCode("--yes"), func() {
+			// The caller is already gone; end the host's wait as
+			// yardr peer pair --end ends it.
+			if err := north.st.PairClose(context.Background(), "", "jo"); err != nil {
+				t.Error(err)
+			}
+		})
+		if callErr == nil || !strings.Contains(callErr.Error(), "asking north how the pairing stands") ||
+			!strings.Contains(callErr.Error(), "This yard saved nothing") ||
+			!strings.Contains(callErr.Error(), rule) {
+			t.Fatalf("the caller = %v\n%s", callErr, out)
+		}
+		if strings.Contains(callErr.Error(), "(yardr peer rm)") {
+			t.Errorf("the recovery names a bare command:\n%v", callErr)
+		}
+		if hostErr == nil || !strings.HasSuffix(hostErr.Error(), nothingSaved) {
+			t.Errorf("the host = %v\n%s", hostErr, out)
+		}
+		if len(peersOf(t, north))+len(peersOf(t, laptop)) != 0 {
+			t.Fatalf("a peer was saved: %+v %+v", peersOf(t, north), peersOf(t, laptop))
+		}
+	})
+
+	t.Run("this yard cannot save the host back", func(t *testing.T) {
+		north, laptop := pairYards(t)
+		setInteractive(t, true)
+		errs := bothStderr(t)
+		ctx := context.Background()
+		other := newCLIYard(t, "other")
+		other.a.env = testEnv(t, other.home)
+		inv, err := invite(ctx, other.a.cfg, other.st, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		old := askCheck
+		askCheck = func(peer, calls, check string) (bool, error) {
+			if peer == "north" {
+				// Another yard takes the name after the call was
+				// accepted: the host saves this yard, and this yard
+				// cannot save it back.
+				if _, err := laptop.st.AddPeer(ctx, store.Peer{Name: "north", Key: inv.Key}, "jo"); err != nil {
+					t.Error(err)
+				}
+			}
+			return true, nil
+		}
+		t.Cleanup(func() { askCheck = old })
+		out, hostErr, callErr := pairBoth(t, north, laptop, errs, []string{"--timeout", "50ms"}, withCode())
+		if callErr == nil || !strings.Contains(callErr.Error(), "has saved this yard, and this yard could not save it") ||
+			!strings.Contains(callErr.Error(), rule) {
+			t.Fatalf("the caller = %v\n%s", callErr, out)
+		}
+		if strings.Contains(callErr.Error(), "(yardr peer rm)") {
+			t.Errorf("the recovery names a bare command:\n%v", callErr)
+		}
+		if hostErr != nil {
+			t.Fatalf("the host = %v\n%s", hostErr, out)
+		}
+		if ps := peersOf(t, north); len(ps) != 1 || ps[0].Name != "laptop" {
+			t.Errorf("north's peers = %+v, want the saved laptop", ps)
+		}
+		if ps := peersOf(t, laptop); len(ps) != 1 || ps[0].Key != inv.Key {
+			t.Errorf("laptop's peers = %+v, want only the yard that took the name", ps)
+		}
+	})
+}
+
+// roundTripperFunc is an http.RoundTripper from a function.
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 // What the yard that calls is told when there is no pairing for it: a
 // wrong code, no pairing open, no yard at the address (one of the two has

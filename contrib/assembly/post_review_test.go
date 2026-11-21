@@ -355,9 +355,10 @@ func TestPostReviewPosts(t *testing.T) {
 
 // What the reviewer can put right goes back to the reviewer's stage with the
 // reason in the note, and nothing is posted that GitHub was not asked for: no
-// review stored, one that is no object or has a field wrong, an outcome the
-// stage does not take, no head recorded, a pull request that has moved since
-// the head was read, and a review that GitHub refuses as written. The stored
+// review stored, one that is no object or has a field wrong, a body that
+// narrates what was read, an outcome the stage does not take, no head
+// recorded, a pull request that has moved since the head was read, and a
+// review that GitHub refuses as written. The stored
 // review stays on the bead for the reviewer to correct. The reviewer of a pull
 // request from outside is sent back the same way, and is never told to push: the
 // pull request is its author's, and it reads the head the pull request has now.
@@ -379,6 +380,15 @@ func TestPostReviewSendsBackWhatTheReviewerCanPutRight(t *testing.T) {
 		{what: "an outcome the security review does not take", stage: "review-security-post", meta: map[string]any{"review": map[string]any{"outcome": "done-safe", "body": "x"}},
 			note: "says done-safe, which review-security-post does not take (it takes done or changes)"},
 		{what: "no text", meta: map[string]any{"review": map[string]any{"outcome": "done"}}, note: "body is the review text"},
+		{what: "a body that narrates what was read", meta: map[string]any{"review": map[string]any{"outcome": "done",
+			"body": "It pushes the branch and opens the pull request.\n\nRead and not read: I read the diff, and the sandbox refused the fetch."}},
+			note: "not the review. Store the review again (yardr bead update r-back --meta review=<JSON>), then report the outcome it names."},
+		{what: "a body that narrates what was read under a markdown head", meta: map[string]any{"review": map[string]any{"outcome": "changes",
+			"body": "The lease is the remote's tip.\n\n## Read and Not Read\nI read the diff."}}, note: "narrates what was read"},
+		{what: "a body that narrates what was read under a bold head", meta: map[string]any{"review": map[string]any{"outcome": "done",
+			"body": "It pushes the branch.\n\n**Read and not read:** I read the diff."}}, note: "narrates what was read"},
+		{what: "a fork's body that narrates what was read", fork: true, meta: map[string]any{"review": map[string]any{"outcome": "done",
+			"body": "It fixes the typo.\n\nRead and not read: the full pull request page was unavailable here; the bead copy was truncated."}}, note: "narrates what was read"},
 		{what: "a comment outside the repository", meta: map[string]any{"review": map[string]any{"outcome": "done", "body": "x",
 			"comments": []any{map[string]any{"path": "../x", "line": 1, "body": "y"}}}}, note: "each comment is {path, line, body}"},
 		{what: "no head recorded", meta: map[string]any{"reviewed_head": nil}, note: "has no reviewed_head"},

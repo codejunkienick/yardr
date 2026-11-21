@@ -96,10 +96,11 @@
 # The outcomes at the posting stages are done, done-safe and changes, the
 # review's own, and failed. failed (back to the reviewer, with the reason in the
 # note) is for what the reviewer can put right: no review stored, one that is no
-# JSON object or has a field wrong, an outcome the stage does not take, no head
-# recorded, a pull request that has moved since the head was read, a review that
-# GitHub refuses as written (a comment on a line that is not in the diff). The
-# flow allows one such retry, then sends the bead to decide. Everything else
+# JSON object or has a field wrong, a body that narrates what was read, an
+# outcome the stage does not take, no head recorded, a pull request that has
+# moved since the head was read, a review that GitHub refuses as written (a
+# comment on a line that is not in the diff). The flow allows one such retry,
+# then sends the bead to decide. Everything else
 # holds the bead with a note and reports nothing, for the yard to put right, then
 # unhold: no gh or jq, no tracked pull request, one that is not the bead's own or
 # is not open, no App inputs, a mint that fails, and any other answer GitHub
@@ -253,6 +254,13 @@ review=$(jq -c '
   else {outcome, body, comments: [(.comments // [])[] | {path, line, side: "RIGHT", body}]}
   end' "$work/stored" 2>"$errf") ||
   report failed "the review stored on $BEAD is not postable: $(sed -n 's/^jq: error (at [^)]*): //p' "$errf" | head -n 1). $fix"
+# The posted text describes the change and the code only: a body that narrates
+# what was read goes back to the reviewer, whole, to be written without it.
+# The head is the shape that narration takes, and a findings body has no such
+# head, so it is refused, never stripped.
+if printf '%s' "$review" | jq -r .body | grep -Eqi '^[[:space:]#*_]*read and not read([^[:alpha:]]|$)'; then
+  report failed "the review stored on $BEAD narrates what was read (a \"Read and not read\" section), and the posted text describes the change and the code only: what was read and not read goes in the bead's note, not the review. $fix"
+fi
 outcome=$(printf '%s' "$review" | jq -r .outcome)
 # done-safe sends the bead to the yard's tests alone, with merge-ok, and a pull
 # request from outside has no such way: its flow would refuse the report after
