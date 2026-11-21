@@ -13,7 +13,7 @@ theirs that calls the yard from outside it, let in by a token.
 yardr user list                          # the users, each one's role, unread mail, where each is told; then whom the linked yards expose
 yardr user add ada                       # an operator adds a user
 yardr user add ada --login claude        # or adds them whole, on a login of their own (below)
-yardr user login ada                     # their sign-in again, if it did not finish
+yardr user login ada                     # a login of their own for a user who stands already, or their sign-in again
 yardr user set ada role=operator         # an operator makes ada one too: ada approves and administers
 yardr user show ada
 yardr user rm ada                        # the mail stays in the log; what carries their own login goes, the login folder stays
@@ -228,6 +228,21 @@ that did not finish, or whose call did not answer, ends with how, and `yardr
 user login <name>` opens it again. [groups.md](groups.md#a-person-with-a-login-of-their-own)
 has what each step is by hand, and what the group is a copy of.
 
+A person who stands already as a user — every teammate `user invite`
+made on a hosted yard — gets the same whole making from `yardr user
+login <name>` itself: where no group carries their login yet it runs the
+setup above first (the folder, the env file, the copies, the twin
+routes and the conversation), and where one does it only opens the
+sign-in again. An operator without a shell gives one by answering a run
+card for `yardr user login <name>`: a first login is weighed code and
+as-user, a sign-in again as-user alone, and the approval is carried out
+by the yard's server, which makes the setup, opens the sign-in's bead
+and launches the sign-in detached as its own command, so approving
+never waits for the person's code. Removing the user (`user uninvite`
+where the mapping names them, else `user rm`) takes back the groups,
+the routes and the crew entries, and leaves the login folder and the
+env file on disk, as `user rm` says.
+
 `yardr user rm <name>` takes it back in the same write that removes the user:
 the group whose `login_for` is the user with its routes, every route for their
 beads, and the user from the yardmaster's `for=` and `env_for_<name>`. It
@@ -370,7 +385,7 @@ operator has no terminal, each row names the door they have instead.
 | stays the operator's | the door instead |
 |---|---|
 | A secret value, `env_file` and `env_command`, a source's key and mint command, where a credential is read from | The secret asks: the person gives the value on their device, and the yard writes it to its file where no agent reads it. In the hosted web the bead's page draws a concealed field for a secret ask and gives it under a fresh sign-in; every other web window draws no field, since every secret ask is weighty and a weighty card has no gate there ([web.md](web.md#one-bead)) |
-| A user's role, adding or removing a user, inviting a teammate, a device, a link's trust | The cards as they stand (`user set … role=`, `user add`, `user rm`, `user invite`, `user device rm`, `peer add` and the other link cards), the strong ones under a fresh sign-in in the hosted web. The operator pairs their own first device through the hosted web |
+| A user's role, adding or removing a user, inviting a teammate, a device, a link's trust | The cards as they stand (`user set … role=`, `user add`, `user rm`, `user invite`, `user login`, `user device rm`, `peer add` and the other link cards), the strong ones under a fresh sign-in in the hosted web. The operator pairs their own first device through the hosted web |
 | Removing a source or a hook, moving a source's records or its links, a source's `base` | The `source rm`, `source move`, `link move` and `hook rm` cards; a base alone by `yardr bead ask --setup … --source-base`. A source's `host` has no door for an agent: the operator types it, in a terminal or on the setup card |
 | A hook add with a custom secret file, changing a hook's secret file | A terminal on a yard you run yourself, the host on a hosted one. Rotating the secret itself, where the file is the yard's own for the hook, is the hook's own secret card; a file that breaks the rule (open to others, or a link) is refused there, not repaired |
 | A depot's path and kind, removing a depot, clearing a test command, the yard-wide `permissions_preset` | The same: the provisioner makes the depots of a hosted yard |
@@ -1223,6 +1238,7 @@ covered below under Strong cards. Row by row:
 | `user device rm <user> <device>`: a user's device removed | That device's token is refused from now on, and the streams it held are closed. What the device did stands. A holder can have a lost device of another user cut off, and can have the operator's own other devices removed, leaving the holder's, until an operator pairs one again; the yard's terminal and the hosted web sign-in are untouched. The card says how many devices the user keeps. Only the operator pairs a device again |
 | `user device pair <user> <device>`: a pairing opened for one device of the user | A second device of that user is paired once its code is used, and calls as that user from then on. Removing the holder's device leaves the new one standing, and removing the new one leaves the holder's: the holder keeps a way in until both are removed, which the card names by listing the devices the user then has. Only the operator or that user pairs another, and either removes one |
 | `user uninvite <name>`: a teammate removed | That teammate is no more at the edge or here: the removal is reported first, then the user, their devices and the mapping go. The member's own account and any yard of their own stand |
+| `user login <name>`: a user given a login of their own, or their sign-in opened again | Where no group carried their login, the login folder and its env file, a copy of every herdr group an operator route serves, a twin route for each of their beads and the yardmaster's conversation on their login stand, and their sign-in is opened; where one did, only the sign-in is opened again. The sign-in runs detached, so what it makes (a login in the person's folder, on their own seat) stands as their sign-in leaves it. The card is strong (`code`) and `as-user` for a first login, `as-user` for a sign-in again. Only the operator takes it back, by removing the user, which leaves the folder and the env file |
 | `crew set <name> open_threads=<sources>`, `set_state=<sources>` or `peers=<peers>`: a crew member's grants widened | A crew member the holder directs by mail may do more outside the yard: open threads in a source, set the state of threads, or mail a linked yard's crew. Its runner, directory and the rest of its definition stay as they are |
 | `group add <name> --runner <runner> …` or `crew add <name> kind=<kind> …`: a new group or crew member | The group or member the holder names stands, with the command of an `exec` group, the prompt, the agent kind and the permission preset as the card showed them whole. The card is weighty (`code`) and says where a preset skips permissions. A group does nothing until a route sends it work, which the yardmaster shapes on the operator's mail, so the holder can have that done too. It stands after the device is removed. The operator or the yardmaster takes a group or a crew member away with `group rm` or `crew rm`; only the operator removes the yardmaster's own entry |
 | `group set <name> prompt=<file>`, `cmd=<command>` or `preset=<preset>`; `crew set <name> prompt=<file>` or `preset=<preset>`, with `kind`, `model` and `dir` for the yardmaster's own entry: what a group or a member runs changed | What every later session of the group or member runs is the holder's: its prompt, the command of an `exec` group, a permission preset that skips permission prompts and, for the yardmaster's own entry, its kind, model, directory and any preset. The card is weighty (`code`) and shows each whole, now and after. The next session starts with it, and it stands after the device is removed. Only the operator puts the old values back |

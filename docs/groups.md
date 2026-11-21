@@ -376,6 +376,14 @@ to. `yardr user rm ada` takes the groups, every route for ada's beads and
 `ada` from `for=` and `env_for_ada`, in the same write; the folder and the
 env file stay, and it says where they are.
 
+`yardr user login ada` makes the same whole for a user who stands
+already — an invited teammate, say — where no group carries their login
+yet, and only opens the sign-in again where one does. By card (`yardr
+bead ask … --run 'user login ada'`) the approval is carried out by the
+yard's server: it makes the steps above, opens the sign-in's bead before
+it serves the conversation, and launches the sign-in detached, so the
+approval never waits for ada's code.
+
 A route with no `--depot` is a yard default: it serves every depot that
 does not state its own route for the same beads. Which beads a route
 takes, beside its depot, is its match key: its stage, its type, its set

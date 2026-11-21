@@ -187,6 +187,12 @@ calls:
 		{name: "user rm", run: AskRun{Argv: []string{"user rm ada"}}},
 		{name: "user invite", run: AskRun{Argv: []string{"user invite eve --email eve@example.net"}}, want: []string{WeightTrust}},
 		{name: "user uninvite", run: AskRun{Argv: []string{"user uninvite ada"}}},
+		{name: "user login first", run: AskRun{Argv: []string{"user login ada"}}, want: []string{WeightCode, WeightAsUser}},
+		{name: "user login again", prep: func() {
+			if err := y.PutGroup(y.ctx, Group{Name: "ada-builders", Runner: "herdr", Config: map[string]any{"kind": "claude", "login_for": "ada", "env_file": "/ada.env"}}, "mckean"); err != nil {
+				t.Fatal(err)
+			}
+		}, run: AskRun{Argv: []string{"user login ada"}}, want: []string{WeightAsUser}},
 		{name: "crew add", run: AskRun{Argv: []string{"crew add porter kind=claude model=opus preset=auto"}, Role: "You are the porter.\n"}, want: []string{WeightCode}},
 		{name: "group add", run: AskRun{Argv: []string{"group add post --runner exec --set cmd=/srv/bin/post"}}, want: []string{WeightCode}},
 		{name: "group set of a command", run: AskRun{Argv: []string{"group set builders cmd=/srv/bin/post"}}, want: []string{WeightCode}},
@@ -254,7 +260,7 @@ calls:
 	}
 
 	// Every other row is routine whatever it is asked.
-	weighty := []string{"peer add", "peer set", "peer allow", "source set", "source grant", "source add", "pack apply", "hook add", "user key", "user add", "user invite", "crew add", "group add", "group set", "crew set", "user identity", "depot test", "depot add", "call", "settings set", "hook rm", "user set role", "source move", "user device pair", "route set", "route add", "flow set"}
+	weighty := []string{"peer add", "peer set", "peer allow", "source set", "source grant", "source add", "pack apply", "hook add", "user key", "user add", "user invite", "user login", "crew add", "group add", "group set", "crew set", "user identity", "depot test", "depot add", "call", "settings set", "hook rm", "user set role", "source move", "user device pair", "route set", "route add", "flow set"}
 	for _, c := range runList {
 		// The two forms of user set are two rows of one command's words.
 		name := strings.Join(c.words, " ")

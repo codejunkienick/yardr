@@ -161,6 +161,17 @@ const askRunList = `  peer add <name> <invite>
       a teammate goes: the removal is reported to the edge first, then
       the user, their devices and the mapping go; a plain user, whom no
       mapping names, is removed with user rm instead
+  user login <name>
+      a user is given a login of their own, or their sign-in is opened
+      again: where no group carries their login the card makes the whole
+      first-time setup (the login folder, the env file, a copy of every
+      herdr group an operator route serves, a twin route for each of
+      their beads and the yardmaster's conversation on their login), and
+      where one does it shows the env file and only opens the sign-in
+      again; the approval is carried out by the server after it, which
+      opens the sign-in's bead and launches the sign-in detached, so
+      approving never waits for the person's code (strong, code, and
+      as-user for a first login; as-user for a sign-in again)
   user device rm <user> <device>
       the device is removed: its token is refused from now on, the streams
       it held are closed and what was queued to tell it is dropped; what it

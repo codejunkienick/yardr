@@ -157,6 +157,9 @@ func needsCarry(was AskRun) bool {
 	if len(was.Argv) >= 2 && was.Argv[0] == "user" && (was.Argv[1] == "invite" || was.Argv[1] == "uninvite") {
 		return true
 	}
+	if IsUserLoginCarry(was.Argv) {
+		return true
+	}
 	if len(was.Argv) == 3 && was.Argv[0] == "source" && was.Argv[1] == "rm" {
 		return was.Seen["source "+was.Argv[2]+" files"] != ""
 	}
@@ -244,6 +247,9 @@ func carryHandledHere(rec *Carry) bool {
 		return len(rec.Argv) == 2
 	}
 	if len(rec.Argv) >= 3 && rec.Argv[0] == "user" && (rec.Argv[1] == "invite" || rec.Argv[1] == "uninvite") {
+		return true
+	}
+	if IsUserLoginCarry(rec.Argv) {
 		return true
 	}
 	if len(rec.Argv) < 3 {

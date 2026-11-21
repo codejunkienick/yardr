@@ -910,6 +910,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr user rm <name>":               {"user rm ada"},
 		"yardr user invite <name> --email <address> [--role operator] [--crew-talk yes|no]": {"user invite eve --email eve@example.net"},
 		"yardr user uninvite <name>": {"user uninvite eve"},
+		"yardr user login <name>":    {"user login ada"},
 		"yardr crew add <name> kind=<kind> model=<model> preset=<preset> dir=<dir>": {
 			"crew add porter kind=claude model=opus preset=auto",
 		},
@@ -1153,6 +1154,42 @@ func TestRunListIsTheCLIs(t *testing.T) {
 				}
 				if description != wantDescription {
 					t.Errorf("%s card description %q, want %q", use, description, wantDescription)
+				}
+				done, err := approved.st.ApproveAsk(ctx, ab.ID, seq, "jo", true, nil)
+				if err != nil || done.Result != "approved, to be carried out" {
+					t.Fatalf("%s approval = %+v, %v", use, done, err)
+				}
+				continue
+			}
+			if use == "yardr user login <name>" {
+				ctx := context.Background()
+				// A user login approval is carried out by the server
+				// after it (the setup, then the sign-in detached), so
+				// there is no typed state to compare: the row is held
+				// to its card and its recorded approval. The card here
+				// opens ada's sign-in again: her login group stands on
+				// both yards before the ask.
+				env := filepath.Join(approved.home, "groups", "ada.env")
+				if err := approved.st.PutGroup(ctx, store.Group{Name: "ada-builders", Runner: "herdr", Config: map[string]any{"kind": "claude", "login_for": "ada", "env_file": env}}, "jo"); err != nil {
+					t.Fatal(err)
+				}
+				seq, err := approved.st.AddAsk(ctx, ab.ID, store.Ask{Question: "Run it?", To: "jo", Context: []string{"why"},
+					Run: &store.AskRun{Argv: []string{command}}}, "yardmaster")
+				if err != nil {
+					t.Fatalf("%s: %v", use, err)
+				}
+				notes, err := approved.st.Notes(ctx, ab.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var description string
+				for _, asked := range store.ResolveAsks(notes, time.Now()) {
+					if asked.Note.Seq == seq && asked.Ask.Run != nil {
+						description = asked.Ask.Run.Description
+					}
+				}
+				if want := "Give a user a login of their own, or open their sign-in again"; description != want {
+					t.Errorf("%s card description %q, want the command help's %q", use, description, want)
 				}
 				done, err := approved.st.ApproveAsk(ctx, ab.ID, seq, "jo", true, nil)
 				if err != nil || done.Result != "approved, to be carried out" {

@@ -83,6 +83,10 @@ type carrier struct {
 	// and a test gives the one from its stand-in's origin.
 	loadURL func(url, digest string) (*pack.Pack, error)
 	up      func(home string) (int, error)
+	// login launches a user's sign-in detached for the home, as the
+	// approver, adopting the bead the carrying out opened; the watcher
+	// uses spawnUserLogin, and a test its own.
+	login func(home, actor, name, bead string) (int, error)
 	// edgeHTTP makes the carrier's member reports; nil is the client
 	// with the system's roots, and a test gives the one that trusts its
 	// stand-in edge.
@@ -105,7 +109,7 @@ func (c *carrier) now() time.Time {
 // every event of the yard (an approval writes one) and on a slow tick,
 // until ctx ends. One goroutine, so one carrying out at a time.
 func runCarryWatcher(ctx context.Context, st *store.Store, home, boot string, log *slog.Logger) {
-	c := &carrier{st: st, home: home, boot: boot, log: log, load: embeddedPack, up: bringUp}
+	c := &carrier{st: st, home: home, boot: boot, log: log, load: embeddedPack, up: bringUp, login: spawnUserLogin}
 	if n, err := st.ResumeCarry(ctx, boot); err != nil {
 		log.Warn("carrying out: taking up unfinished applies", "err", err)
 	} else if n > 0 {
@@ -208,6 +212,9 @@ func (c *carrier) carryNext(ctx context.Context) (bool, error) {
 	}
 	if isTeammateCarry(run.Argv) {
 		return c.carryTeammateClaimed(ctx, rec, run)
+	}
+	if isUserLoginCarry(run.Argv) {
+		return c.carryUserLoginClaimed(ctx, rec, run)
 	}
 	if isSourceRmCarry(run.Argv) {
 		return c.carryClaimed(ctx, rec, "an approved source removal", run.Command(), func() (string, string) {

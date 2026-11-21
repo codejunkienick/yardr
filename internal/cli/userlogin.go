@@ -7,13 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
-	"slices"
-	"strings"
 	"syscall"
 	"time"
 
@@ -38,69 +34,16 @@ import (
 // onto the login, and the routes that take them are twinned for the
 // person's beads.
 
-// loginUserName is a user's name as a folder takes it: one path element.
-var loginUserName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
-
-// loginFolderEnvs are the harnesses --login leads, each with the variable
-// that names the folder its login lands in. Only claude is wired: the others
-// either have no login a program leads or are logged in on their own screen.
-var loginFolderEnvs = map[string]string{"claude": claudeFolderEnv}
-
-// userLoginPlan is what user add --login will make, worked out from the yard
-// as it stands before anything is written, so that a refusal leaves no
-// person half made.
-type userLoginPlan struct {
-	user, harness string
-	// mirrors are the herdr groups the person gets a copy of, each named
-	// <user>-<group>, in source-group name order.
-	mirrors []store.Group
-	// folder is where their login lands, and env the file that names it,
-	// both under the home.
-	folder, env string
-	// routes are the routes to add: a twin of each route of the operator's
-	// that sends work to a mirrored group first, for the person's beads.
-	routes []store.Route
-	// crew is the crew member that talks with them, and serving the names it
-	// serves with them added, "" where it serves everyone already.
-	crew    string
-	serving string
-}
-
-// planUserLogin works out what user add --login makes for user, and refuses
-// what cannot be made, writing nothing.
-func (a *app) planUserLogin(ctx context.Context, st store.API, user, harness string) (*userLoginPlan, error) {
-	if !agents.IsKind(harness) {
-		return nil, fmt.Errorf("--login %s is no harness kind; herdr starts: %s", harness, strings.Join(agents.Kinds(), ", "))
-	}
-	if _, ok := loginFolderEnvs[harness]; !ok {
-		return nil, fmt.Errorf("--login %s: only claude is wired (its login folder is one a program names with CLAUDE_CONFIG_DIR, and its sign-in one yardr leads)", harness)
-	}
-	// The folder and the env file are named by the user, and a user's name may
-	// hold path separators: the yard chooses no path for one that does.
-	if !loginUserName.MatchString(user) {
-		return nil, fmt.Errorf("user %q: the login folder is named by the user, so --login takes letters, digits, '.', '_' and '-', starting with a letter or digit", user)
-	}
+// planUserLogin gathers what the shared planner (store.PlanUserLogin)
+// reads from the yard as it stands, so the CLI and the user login card
+// plan the same setup.
+func (a *app) planUserLogin(ctx context.Context, st store.API, user, harness string) (*store.UserLoginPlan, error) {
 	cfg, err := a.config()
 	if err != nil {
 		return nil, err
 	}
-	p := &userLoginPlan{user: user, harness: harness,
-		folder: filepath.Join(cfg.Home, "logins", user), env: filepath.Join(cfg.Home, "groups", user+".env")}
-	// A removed user's folder stays on disk, with their login and their
-	// transcripts, and a name is reusable: the first's login must not be the
-	// second's. Moving it away is the operator's to say.
-	for _, path := range []string{p.folder, p.env} {
-		if _, err := os.Lstat(path); err == nil {
-			return nil, fmt.Errorf("%s exists, and a login that is there already is not taken over for a user added now (a removed user's stays on disk): move it away, then add %s again", path, user)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return nil, err
-		}
-	}
 	groups, err := st.Groups(ctx)
 	if err != nil {
-		return nil, err
-	}
-	if err := userLoginEnvAvailable(ctx, st, cfg.Home, p.env, groups); err != nil {
 		return nil, err
 	}
 	routes, err := st.Routes(ctx)
@@ -111,161 +54,16 @@ func (a *app) planUserLogin(ctx context.Context, st store.API, user, harness str
 	if err != nil {
 		return nil, err
 	}
-	byName := make(map[string]store.Group, len(groups))
-	for _, g := range groups {
-		byName[g.Name] = g
+	users, err := st.Users(ctx)
+	if err != nil {
+		return nil, err
 	}
-	seen := map[string]bool{}
-	for _, r := range routes {
-		// The operator's routes to a herdr group: one with an originator is
-		// already for someone, and a twin of it would be for no one; one to
-		// a group that starts no agents takes every originator's beads
-		// already, so it gains no twin either. A depot template resolves to
-		// one exact group per depot, and each group gets a depot-scoped twin.
-		if r.Originator != nil {
-			continue
-		}
-		candidates := []store.Route{r}
-		if store.IsTemplatedGroup(r.Worker()) {
-			candidates = nil
-			for _, depot := range depots {
-				resolved := r.ResolveForDepot(depot.Name)
-				g, ok := byName[resolved.Worker()]
-				if !ok || g.Runner != "herdr" {
-					continue
-				}
-				depotName := depot.Name
-				resolved.Depot = &depotName
-				candidates = append(candidates, resolved)
-			}
-		}
-		for _, candidate := range candidates {
-			g, ok := byName[candidate.Worker()]
-			if !ok || g.Runner != "herdr" {
-				continue
-			}
-			if !seen[g.Name] {
-				seen[g.Name] = true
-				p.mirrors = append(p.mirrors, g)
-			}
-			twin := candidate
-			twin.ID, twin.Group, twin.When, twin.Else, twin.Originator = "", user+"-"+g.Name, "", nil, &user
-			twin.Note = user + "'s own login (yardr user add --login)"
-			p.routes = append(p.routes, twin)
-		}
-	}
-	if len(p.mirrors) == 0 {
-		return nil, fmt.Errorf("no route of the operator's sends work to a herdr group, so there is no stage to route %s's beads to: routes to scripts and people take every originator's beads already, and gain no twin; route a herdr group first (yardr route add)", user)
-	}
-	slices.SortFunc(p.mirrors, func(a, b store.Group) int { return strings.Compare(a.Name, b.Name) })
-	for _, g := range p.mirrors {
-		name := user + "-" + g.Name
-		if _, exists := byName[name]; exists {
-			return nil, fmt.Errorf("group %s exists: a person's groups are made new, so that no login of another's is run under their name", name)
-		}
-	}
-	p.crew = yardmasterOf(ctx, st)
-	ym, err := st.GetCrew(ctx, p.crew)
+	crewName := yardmasterOf(ctx, st)
+	ym, err := st.GetCrew(ctx, crewName)
 	if err != nil {
 		return nil, fmt.Errorf("the yardmaster talks with %s on their own login, and %w", user, err)
 	}
-	// Serving everyone already serves them; a list gains the name.
-	if served := ym.Served(); len(served) > 0 {
-		p.serving = strings.Join(append(served, user), ",")
-	}
-	// Found before anything is made: a person made and no sign-in to lead is
-	// the half-made person this plan is for.
-	if _, err := lookPath(store.Executable(harness)); err != nil {
-		return nil, fmt.Errorf("%s is not on PATH, so there is no sign-in to lead: %s", store.Executable(harness), agents.InstallHint(harness))
-	}
-	return p, nil
-}
-
-// userLoginEnvAvailable refuses to create the login's env file where a
-// group or another user's credential already names that path. The file
-// need not exist yet for its path to be in use: creating it would change
-// what that group or user reads.
-func userLoginEnvAvailable(ctx context.Context, st store.API, home, path string, groups []store.Group) error {
-	want, err := loginPathIdentity(path)
-	if err != nil {
-		return fmt.Errorf("login env file %s: %w", path, err)
-	}
-	for _, g := range groups {
-		file, _ := g.Config["env_file"].(string)
-		if file == "" {
-			continue
-		}
-		have, err := loginPathIdentity(file)
-		if err != nil {
-			return fmt.Errorf("group %s env_file %s: %w", g.Name, file, err)
-		}
-		if have == want {
-			return fmt.Errorf("login env file %s is already named by group %s; move that group's env_file first", path, g.Name)
-		}
-	}
-	users, err := st.Users(ctx)
-	if err != nil {
-		return err
-	}
-	for _, u := range users {
-		file := u.EnvFile
-		if file == "" && !strings.ContainsAny(u.Name, `/\\`) {
-			file = filepath.Join(home, "users", u.Name+".env")
-		}
-		if file == "" {
-			continue
-		}
-		have, err := loginPathIdentity(file)
-		if err != nil {
-			return fmt.Errorf("user %s env_file %s: %w", u.Name, file, err)
-		}
-		if have == want {
-			return fmt.Errorf("login env file %s is already named by user %s; move that user's env_file first", path, u.Name)
-		}
-	}
-	return nil
-}
-
-// loginPathIdentity resolves existing symlinks in the path and its parents,
-// while still naming the not-yet-created env file by its resolved parent.
-func loginPathIdentity(path string) (string, error) {
-	p, err := store.ExpandPath(path)
-	if err != nil {
-		return "", err
-	}
-	p = filepath.Clean(p)
-	var missing []string
-	for current := p; ; current = filepath.Dir(current) {
-		resolved, err := filepath.EvalSymlinks(current)
-		if err == nil {
-			for i := len(missing) - 1; i >= 0; i-- {
-				resolved = filepath.Join(resolved, missing[i])
-			}
-			return filepath.Clean(resolved), nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return "", err
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return p, nil
-		}
-		missing = append(missing, filepath.Base(current))
-	}
-}
-
-// userLoginGroup is the group a person's login runs under for source, one of
-// the mirrored groups: a copy of it (its prompt, arguments, model and the rest)
-// with kind claude, the person's login and their env file. Its limit is 1,
-// as a new agent group's is: twelve people at the limit of a shared builders
-// would overrun the machine, and the operator raises one with group set.
-func (p *userLoginPlan) userLoginGroup(source store.Group) store.Group {
-	cfg := maps.Clone(source.Config)
-	if cfg == nil {
-		cfg = map[string]any{}
-	}
-	cfg["kind"], cfg["login_for"], cfg["env_file"] = p.harness, p.user, p.env
-	return store.Group{Name: p.user + "-" + source.Name, Runner: "herdr", Config: cfg, Limit: 1}
+	return store.PlanUserLogin(cfg.Home, user, harness, groups, routes, depots, users, crewName, ym, lookPath)
 }
 
 // userLoginOf is what carries user's own login in the yard, read from its
@@ -322,7 +120,6 @@ func (a *app) addUserLogin(c *cobra.Command, st store.API, user, harness string)
 		return err
 	}
 	w := c.OutOrStdout()
-	made := &userLoginMade{User: user}
 	say := func(format string, args ...any) {
 		if !a.json {
 			fmt.Fprintf(w, format+"\n", args...)
@@ -338,61 +135,10 @@ func (a *app) addUserLogin(c *cobra.Command, st store.API, user, harness string)
 	}
 	say("user %s added", user)
 
-	if err := os.MkdirAll(filepath.Dir(p.folder), 0o700); err != nil {
-		return failed("login folder", err)
-	}
-	if err := os.Mkdir(p.folder, 0o700); err != nil {
-		return failed("login folder", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(p.env), 0o700); err != nil {
-		return failed("env file", err)
-	}
-	if err := writeNewFile(p.env, []byte(loginFolderEnvs[harness]+"="+p.folder+"\n"), 0o600); err != nil {
-		return failed("env file", err)
-	}
-	made.Folder, made.Env = p.folder, p.env
-	say("  login folder %s (0700), env file %s (0600)", p.folder, p.env)
-
-	var first string
-	for _, source := range p.mirrors {
-		g := p.userLoginGroup(source)
-		if err := st.PutGroup(ctx, g, a.who()); err != nil {
-			return failed("group "+g.Name, err)
-		}
-		if first == "" {
-			first = g.Name
-		}
-		made.Groups = append(made.Groups, g.Name)
-		say("  group %s (a copy of %s: kind %s, login_for %s, limit %d)", g.Name, source.Name, harness, user, g.Limit)
-	}
-
-	for _, r := range p.routes {
-		saved, err := st.AddRoute(ctx, r, a.who())
-		if err != nil {
-			return failed("route", err)
-		}
-		made.Routes = append(made.Routes, saved.ID)
-		scope := ""
-		if saved.Depot != nil {
-			scope = " in " + *saved.Depot
-		}
-		say("  route %s: %s%s, for %s's beads -> %s", saved.ID, saved.Stage, scope, user, saved.Group)
-	}
-
-	// The sign-in's bead is made before the conversation is served, since the
-	// daemon starts that session as soon as it is, on a login folder that holds
-	// no login yet, and reads this bead open to offer the operator no login
-	// card for it while the person signs in (store.SigningIn).
-	bead, err := a.openSignIn(ctx, st, user, harness)
+	made, first, bead, err := a.buildUserLogin(c, st, p, "", say, failed)
 	if err != nil {
-		return failed("the sign-in", err)
+		return err
 	}
-	if err := a.serveUser(ctx, st, p); err != nil {
-		a.closeSignIn(ctx, st, bead, user)
-		return failed("the yardmaster's conversation", err)
-	}
-	made.Crew = p.crew
-	say("  %s serves %s (%s%s)", p.crew, user, store.EnvForPrefix, user)
 
 	// They read the page and give the code in a device or where a source
 	// tells them, and a new user has neither: say so while the sign-in waits,
@@ -410,23 +156,99 @@ func (a *app) addUserLogin(c *cobra.Command, st store.API, user, harness string)
 	return err
 }
 
+// buildUserLogin makes what giving the user of plan p a login takes,
+// after the user stands: the folder and the env file, the mirrored
+// groups, the twin routes, the sign-in's bead (bead, or a fresh one where
+// it names none) and the yardmaster's conversation, in that order. It
+// answers what it made, the first mirrored group and the sign-in's bead.
+// failed words a step's failure as the caller has it.
+func (a *app) buildUserLogin(c *cobra.Command, st store.API, p *store.UserLoginPlan, bead string, say func(string, ...any), failed func(string, error) error) (*userLoginMade, string, string, error) {
+	ctx := c.Context()
+	user, harness := p.User, p.Harness
+	made := &userLoginMade{User: user}
+	if err := os.MkdirAll(filepath.Dir(p.Folder), 0o700); err != nil {
+		return nil, "", "", failed("login folder", err)
+	}
+	if err := os.Mkdir(p.Folder, 0o700); err != nil {
+		return nil, "", "", failed("login folder", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(p.Env), 0o700); err != nil {
+		return nil, "", "", failed("env file", err)
+	}
+	if err := writeNewFile(p.Env, []byte(p.EnvLine()), 0o600); err != nil {
+		return nil, "", "", failed("env file", err)
+	}
+	made.Folder, made.Env = p.Folder, p.Env
+	say("  login folder %s (0700), env file %s (0600)", p.Folder, p.Env)
+
+	var first string
+	for _, source := range p.Mirrors {
+		g := p.UserLoginGroup(source)
+		if err := st.PutGroup(ctx, g, a.who()); err != nil {
+			return nil, "", "", failed("group "+g.Name, err)
+		}
+		if first == "" {
+			first = g.Name
+		}
+		made.Groups = append(made.Groups, g.Name)
+		say("  group %s (a copy of %s: kind %s, login_for %s, limit %d)", g.Name, source.Name, harness, user, g.Limit)
+	}
+
+	for _, r := range p.Routes {
+		saved, err := st.AddRoute(ctx, r, a.who())
+		if err != nil {
+			return nil, "", "", failed("route", err)
+		}
+		made.Routes = append(made.Routes, saved.ID)
+		scope := ""
+		if saved.Depot != nil {
+			scope = " in " + *saved.Depot
+		}
+		say("  route %s: %s%s, for %s's beads -> %s", saved.ID, saved.Stage, scope, user, saved.Group)
+	}
+
+	// The sign-in's bead is made before the conversation is served, since
+	// the daemon starts that session as soon as it is, on a login folder
+	// that holds no login yet, and reads this bead open to offer the
+	// operator no login card for it while the person signs in
+	// (store.SigningIn).
+	openedHere := false
+	if bead == "" {
+		var err error
+		bead, err = a.openSignIn(ctx, st, user, harness)
+		if err != nil {
+			return nil, "", "", failed("the sign-in", err)
+		}
+		openedHere = true
+	}
+	if err := a.serveUser(ctx, st, p); err != nil {
+		if openedHere {
+			a.closeSignIn(ctx, st, bead, user)
+		}
+		return nil, "", "", failed("the yardmaster's conversation", err)
+	}
+	made.Crew = p.Crew
+	say("  %s serves %s (%s%s)", p.Crew, user, store.EnvForPrefix, user)
+	return made, first, bead, nil
+}
+
 // serveUser sets the yardmaster's env_for_<user>, and the user in its for=
 // where that names some: the line session keeps the yard, and this one is
 // the conversation with the person, on their login.
-func (a *app) serveUser(ctx context.Context, st store.API, p *userLoginPlan) error {
-	sets := map[string]any{store.EnvForPrefix + p.user: p.env}
-	if p.serving != "" {
-		sets[store.CrewForKey] = p.serving
+func (a *app) serveUser(ctx context.Context, st store.API, p *store.UserLoginPlan) error {
+	sets := map[string]any{store.EnvForPrefix + p.User: p.Env}
+	if p.Serving != "" {
+		sets[store.CrewForKey] = p.Serving
 	}
 	// The daemon re-mints a running crew member's revision between the read
 	// and the write now and then: read again and apply the same change.
 	for try := 0; ; try++ {
-		have, err := st.GetCrew(ctx, p.crew)
+		have, err := st.GetCrew(ctx, p.Crew)
 		if err != nil {
 			return err
 		}
 		def := *have
-		if def.Config, err = store.MergeConfig(p.crew, have.Config, sets, nil); err != nil {
+		if def.Config, err = store.MergeConfig(p.Crew, have.Config, sets, nil); err != nil {
 			return err
 		}
 		if _, err = st.PutCrew(ctx, def, a.who()); err == nil {
@@ -452,18 +274,16 @@ func writeNewFile(path string, data []byte, mode os.FileMode) error {
 	return f.Close()
 }
 
-// signInQuestion is the question of the ask for the person's code, and the
-// title of the bead the ask stands on.
-const signInQuestion = "The code the sign-in page showed"
+// signInQuestion is the question of the ask for the person's code, and
+// the title of the bead the ask stands on (store.SignInQuestion).
+const signInQuestion = store.SignInQuestion
 
 // openSignIn makes the bead user's sign-in stands on, which the code it asks
 // for goes on and which stays open for as long as the sign-in does
 // (store.SignInMeta). signIn closes it, whatever its end; a caller that
 // fails before it gets there closes it itself.
 func (a *app) openSignIn(ctx context.Context, st store.API, user, harness string) (string, error) {
-	b, err := st.CreateBead(ctx, store.NewBead{For: user, Title: signInQuestion, Type: store.TypeQuestion,
-		Body:     "The sign-in of " + user + " to Claude waits for the code its page shows.",
-		Metadata: map[string]any{store.SignInMeta: harness}}, a.who())
+	b, err := st.CreateBead(ctx, store.SignInBead(user, harness), a.who())
 	if err != nil {
 		return "", err
 	}
@@ -684,64 +504,101 @@ func signInMail(user, page string) string {
 		user, page, signInQuestion, loginInputTimeout)
 }
 
-// userLoginCmd is yardr user login <name>: the sign-in of user add --login
-// opened again, for a person whose group carries their login.
+// userLoginCmd is yardr user login <name>: a user's first login made
+// whole, or the sign-in of one whose group carries their login opened
+// again.
 func (a *app) userLoginCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "login <name>", Short: "Open a user's sign-in again: the page mailed to them, the code asked of them", Args: cobra.ExactArgs(1),
-		Long: `Leads the sign-in of a user whose login a group carries (the groups whose
-login_for is the user, which yardr user add --login made), as that command
-does at its end: the harness's own login runs into the groups' folder, the
-page to sign in on is mailed to the user, and the code it shows is asked of
-them, a secret that goes to the waiting login and is kept nowhere. It waits
-for the login to end, within the login's own timeouts (docs/doctor.md),
-proves it with one short call on the user's seat, starts their conversation
-again on it where it sits at the login screen, and says how it went. Use it
-when the sign-in did not finish, or to move a person's seat: the folder it
-signs in to is the one the groups' env_file names.`,
+	var beadFlag string
+	cmd := &cobra.Command{
+		Use: "login <name>", Short: "Give a user a login of their own, or open their sign-in again", Args: cobra.ExactArgs(1),
+		Long: `Gives the user a login of their own where no group carries one yet, as
+yardr user add --login does after the user: the login folder and the env
+file that names it, a copy of every herdr group an operator route sends
+work to, a twin of each such route for their beads, and the yardmaster's
+conversation with them on that login. A user who has one (the groups
+whose login_for is the user) is only signed in again. Either way the
+sign-in is led as user add --login leads it at its end: the harness's own
+login runs into the groups' folder, the page to sign in on is mailed to
+the user, and the code it shows is asked of them, a secret that goes to
+the waiting login and is kept nowhere. It waits for the login to end,
+within the login's own timeouts (docs/doctor.md), proves it with one
+short call on the user's seat, starts their conversation again on it
+where it sits at the login screen, and says how it went. Use it when a
+teammate invited by user invite is to build on a seat of their own, when
+the sign-in did not finish, or to move a person's seat: the folder it
+signs in to is the one the groups' env_file names. With --bead <id> the
+sign-in stands on that bead instead of a new one: the user login
+carrier opens it and launches this command detached with it, and it
+must stand open, for this user, as a claude sign-in.`,
 		RunE: func(c *cobra.Command, args []string) error {
-			st, err := a.store(c.Context())
+			ctx := c.Context()
+			name := args[0]
+			st, err := a.store(ctx)
 			if err != nil {
 				return err
 			}
-			if _, err := st.GetUser(c.Context(), args[0]); err != nil {
+			if _, err := st.GetUser(ctx, name); err != nil {
 				return err
 			}
-			groups, err := st.Groups(c.Context())
+			// A carrier-opened sign-in bead is adopted, never doubled: it
+			// must stand open, for this user, as a claude sign-in. Once
+			// adopted, any failure before signIn takes over closes it so it
+			// never stands open with no sign-in running.
+			bead := beadFlag
+			adopted := false
+			handedOff := false
+			if bead != "" {
+				b, err := st.GetBead(ctx, bead)
+				if err != nil {
+					return err
+				}
+				kind, _ := b.Metadata[store.SignInMeta].(string)
+				if b.Status != "open" || b.Originator != name || kind != "claude" {
+					return fmt.Errorf("bead %s is no open sign-in of %s to claude (it stands %s, for %s, as %q): the sign-in it was opened for is not this one", bead, name, b.Status, b.Originator, kind)
+				}
+				adopted = true
+				defer func() {
+					if adopted && !handedOff {
+						a.closeSignIn(ctx, st, beadFlag, name)
+					}
+				}()
+			}
+			groups, err := st.Groups(ctx)
 			if err != nil {
 				return err
 			}
-			var theirs []store.Group
-			for _, g := range groups {
-				if g.LoginFor() == args[0] {
-					theirs = append(theirs, g)
+			first, _, _, err := store.UserLoginEnv(name, groups)
+			if err != nil {
+				return err
+			}
+			if first == "" {
+				// First time: the same setup user add --login runs, for a
+				// user who stands already (an invited teammate, say).
+				p, err := a.planUserLogin(ctx, st, name, "claude")
+				if err != nil {
+					return err
+				}
+				w := c.OutOrStdout()
+				say := func(format string, args ...any) {
+					if !a.json {
+						fmt.Fprintf(w, format+"\n", args...)
+					}
+				}
+				failed := func(step string, err error) error {
+					return fmt.Errorf("%s: %w; user %s stands as far as it went, and yardr user rm %s takes back what the yard holds of it (the folder stays on disk)", step, err, name, name)
+				}
+				_, first, bead, err = a.buildUserLogin(c, st, p, bead, say, failed)
+				if err != nil {
+					return err
+				}
+			} else if bead == "" {
+				bead, err = a.openSignIn(ctx, st, name, "claude")
+				if err != nil {
+					return err
 				}
 			}
-			if len(theirs) == 0 {
-				return fmt.Errorf("no group carries %s's login (a group whose login_for is %s): yardr user add %s --login claude makes one", args[0], args[0], args[0])
-			}
-			slices.SortFunc(theirs, func(a, b store.Group) int { return strings.Compare(a.Name, b.Name) })
-			// The copies user add --login made name the one env file, so the
-			// sign-in lands in the person's folder under the first of them;
-			// groups naming different files are distinct logins, and which
-			// to lead is not this command's to pick.
-			files := map[string]bool{}
-			for _, g := range theirs {
-				file, _ := g.Config["env_file"].(string)
-				files[file] = true
-			}
-			if len(files) != 1 {
-				var names []string
-				for _, g := range theirs {
-					names = append(names, g.Name)
-				}
-				return fmt.Errorf("several groups carry %s's login with different env files (%s), and a person signs in once: yardr harness login claude --group <group> leads one of them", args[0], strings.Join(names, ", "))
-			}
-			bead, err := a.openSignIn(c.Context(), st, args[0], "claude")
-			if err != nil {
-				return err
-			}
-			in, err := a.signIn(c, st, args[0], theirs[0].Name, bead)
+			handedOff = true
+			in, err := a.signIn(c, st, name, first, bead)
 			if a.json {
 				if oerr := a.out(c.OutOrStdout(), in, nil); oerr != nil {
 					return oerr
@@ -750,4 +607,6 @@ signs in to is the one the groups' env_file names.`,
 			return err
 		},
 	}
+	cmd.Flags().StringVar(&beadFlag, "bead", "", "stand the sign-in on this bead (the user login carrier's), instead of a new one")
+	return cmd
 }

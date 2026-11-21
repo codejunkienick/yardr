@@ -388,6 +388,7 @@ var allowSerial = map[string]string{
 	"TestUserAddWithALogin":                                   "fakeTools,stub:tryHarnessCall",
 	"TestUserAddWithALoginNobodyFinishes":                     "fakeTools,stub:loginInputTimeout,stub:tryHarnessCall",
 	"TestUserAddWithALoginThatAnswersNothing":                 "fakeTools,stub:tryHarnessCall",
+	"TestUserLoginSetsUpExistingUser":                         "fakeTools,stub:tryHarnessCall",
 	"TestUserListAndMailToThoseALinkedYardExposes":            "assign:interactive,assign:runChat",
 	"TestVersionFlagPrintsWhatVersionDoes":                    "noHome",
 	"TestWaitEndsOnAFailedStart":                              "assign:spawnDaemon,stubLookPath",

@@ -584,6 +584,117 @@ func TestUserAddWithALoginThatAnswersNothing(t *testing.T) {
 	}
 }
 
+// yardr user login <name> makes a standing user's first login whole, as
+// user add --login does after the user: an invited teammate is reached
+// without uninviting them. A bead the carrier opened for the sign-in is
+// adopted, never doubled, and one that is not theirs is refused.
+func TestUserLoginSetsUpExistingUser(t *testing.T) {
+	st := userYard(t)
+	ctx := context.Background()
+	home := yardEnv(t, st)["YARDR_HOME"]
+	fakeTools(t, map[string]string{"claude": loginStandIn})
+	stub(t, &tryHarnessCall, realTry)
+	mustAs(t, st, "jo", "group", "add", "builders", "--runner", "herdr", "--set", "kind=claude")
+	mustAs(t, st, "jo", "route", "add", "--stage", "new", "--group", "builders")
+	mustAs(t, st, "jo", "user", "add", "ada")
+
+	// A user the yard has not is refused before anything is planned.
+	if out, err := as(t, st, "jo", "user", "login", "ghost"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("user login ghost = %v, want the refusal\n%s", err, out)
+	}
+
+	out, err := signedIn(t, st, "ada", "user", "login", "ada")
+	if err != nil {
+		t.Fatalf("user login ada: %v\n%s", err, out)
+	}
+	folder, env := filepath.Join(home, "logins", "ada"), filepath.Join(home, "groups", "ada.env")
+	for _, want := range []string{
+		"  login folder " + folder + " (0700), env file " + env + " (0600)\n",
+		"  group ada-builders (a copy of builders: kind claude, login_for ada, limit 1)\n",
+		"  yardmaster serves ada (env_for_ada)\n",
+		"  ada is signed in, and one call to Claude Code answered (the login is in " + env + ")\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the output lacks %q:\n%s", want, out)
+		}
+	}
+	if fi, err := os.Stat(folder); err != nil || fi.Mode().Perm() != 0o700 {
+		t.Errorf("the login folder: %v, %v", fi, err)
+	}
+	if b, _ := os.ReadFile(env); string(b) != "CLAUDE_CONFIG_DIR="+folder+"\n" {
+		t.Errorf("the env file holds %q", b)
+	}
+	if got, want := strings.Join(routesFor(t, st, "ada"), "; "), "new any -> ada-builders"; got != want {
+		t.Errorf("ada's routes: %s, want %s", got, want)
+	}
+
+	// A carrier-opened bead is adopted: the sign-in stands on it, and no
+	// second bead is made for it.
+	signIns := func() int {
+		beads, err := st.ListBeads(ctx, store.BeadFilter{All: true, Type: store.TypeQuestion})
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, b := range beads {
+			if b.Metadata[store.SignInMeta] == "claude" {
+				n++
+			}
+		}
+		return n
+	}
+	opened, err := st.CreateBead(ctx, store.SignInBead("ada", "claude"), "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := signIns()
+	if out, err := signedIn(t, st, "ada", "user", "login", "ada", "--bead", opened.ID); err != nil {
+		t.Fatalf("user login ada --bead %s: %v\n%s", opened.ID, err, out)
+	}
+	if got := signIns(); got != before {
+		t.Errorf("%d sign-in beads after an adopted sign-in, want %d: the bead was doubled", got, before)
+	}
+	if b, err := st.GetBead(ctx, opened.ID); err != nil || b.Status == "open" {
+		t.Errorf("the adopted bead after its sign-in: %+v, %v", b, err)
+	}
+	// The bead it stood on is closed now, and another user's is no
+	// sign-in of ada's: both are refused as hers.
+	if _, err := st.AddUser(ctx, "bob", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	bobs, err := st.CreateBead(ctx, store.SignInBead("bob", "claude"), "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bead := range []string{opened.ID, bobs.ID} {
+		if out, err := as(t, st, "jo", "user", "login", "ada", "--bead", bead); err == nil ||
+			!strings.Contains(err.Error(), "is no open sign-in of ada to claude") {
+			t.Errorf("user login ada --bead %s = %v, want the refusal\n%s", bead, err, out)
+		}
+	}
+	// A user already in yardmaster's for= list is not duplicated by first-time login.
+	mustAs(t, st, "jo", "crew", "set", "yardmaster", "for=jo,bob")
+	if out, err := signedIn(t, st, "bob", "user", "login", "bob"); err != nil {
+		t.Fatalf("user login bob: %v\n%s", err, out)
+	}
+	if ym, err := st.GetCrew(ctx, "yardmaster"); err != nil || strings.Join(ym.Served(), ",") != "bob,jo" {
+		t.Errorf("yardmaster served after bob login: %v, %v", ym.Served(), err)
+	}
+	// A login_for group with no env_file is refused cleanly, and an adopted bead is closed.
+	mustAs(t, st, "jo", "user", "add", "cy")
+	mustAs(t, st, "jo", "group", "add", "cy-empty", "--runner", "herdr", "--set", "kind=claude", "--set", "login_for=cy")
+	cyBead, err := st.CreateBead(ctx, store.SignInBead("cy", "claude"), "jo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := as(t, st, "jo", "user", "login", "cy", "--bead", cyBead.ID); err == nil || !strings.Contains(err.Error(), "no env_file") {
+		t.Errorf("user login cy with empty env_file = %v, want refusal\n%s", err, out)
+	}
+	if b, err := st.GetBead(ctx, cyBead.ID); err != nil || b.Status == "open" {
+		t.Errorf("adopted bead after refusal stayed open: %+v, %v", b, err)
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
