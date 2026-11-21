@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"reflect"
@@ -109,6 +110,17 @@ func yardEnv(t *testing.T, st store.API) map[string]string {
 	env := environMap(os.Environ())
 	rememberEnv(t, st, env)
 	return env
+}
+
+// testOperator is the yard's operator setting, or "me" when none is
+// stored: init names the OS user, so a test that ran it adds a depot as
+// this, whoever the machine's user is.
+func testOperator(t *testing.T, st store.API) string {
+	t.Helper()
+	if settings, err := st.Settings(context.Background()); err == nil && settings[store.OperatorSetting] != "" {
+		return settings[store.OperatorSetting]
+	}
+	return "me"
 }
 
 // appOn is a new app on st, in the environment of its runs (see yardEnv): a

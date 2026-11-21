@@ -439,7 +439,7 @@ func TestDaemonInstallUninstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	stub(t, &userHomeDir, func() (string, error) { return "/Users/jo", nil })
-	if err := st.PutDepot(context.Background(), store.Depot{Name: "notes", Path: "/Users/jo/Documents/notes"}, "mckean"); err != nil {
+	if err := st.PutDepot(context.Background(), store.Depot{Name: "notes", Path: "/Users/jo/Documents/notes"}, testOperator(t, st)); err != nil {
 		t.Fatal(err)
 	}
 	other := filepath.Join(dir, "com.example.other.plist")

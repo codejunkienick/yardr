@@ -431,7 +431,7 @@ func TestBareYardrLeavesOtherYardsAlone(t *testing.T) {
 		prep func(t *testing.T, st store.API, home string)
 	}{
 		{"a depot", func(t *testing.T, st store.API, _ string) {
-			if err := st.PutDepot(context.Background(), store.Depot{Name: "web", Path: shortDir(t, "yg"), Kind: store.DepotDir}, "mckean"); err != nil {
+			if err := st.PutDepot(context.Background(), store.Depot{Name: "web", Path: shortDir(t, "yg"), Kind: store.DepotDir}, testOperator(t, st)); err != nil {
 				t.Fatal(err)
 			}
 		}},
