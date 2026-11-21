@@ -90,6 +90,7 @@ before it starts the yardmaster
 | codex | `codex exec --skip-git-repo-check <prompt>` |
 | grok | `grok -p <prompt>` |
 | kimi | `kimi -p <prompt>` |
+| kiro | `kiro-cli chat --no-interactive <prompt>` |
 | opencode | `opencode run <prompt>` |
 | pi | `pi -p <prompt>` |
 | muse | `muse exec <prompt>` |
@@ -508,7 +509,7 @@ update`, Claude Code's own updates in the background, `codex update`.
 | Codex 0.162.1 | the archive the README names for a Mac, whose one member is moved to `~/.local/bin/codex` | on 2026-10-13: <https://github.com/openai/codex/blob/main/README.md>; the checksums are the digests of <https://releases.openai.com/codex/channels/latest>. The binaries are signed by Developer ID Application: OpenAI OpCo, LLC (2DC432GLL2). It is the README's binary alone, without what OpenAI's installer puts beside it |
 
 git has no `fetch`: on a Mac it is always `xcode-select --install`, Apple's
-own dialog. agy, muse, opencode, grok, kimi, pi and every kind with no harness
+own dialog. agy, muse, opencode, grok, kimi, kiro, pi and every kind with no harness
 file have none either, because no way of theirs was verified: an item with no
 `fetch` is a program installed by hand, and its `get` says where. On Linux
 no item has a `fetch` or an `any_of`, whatever the program: there is no one
