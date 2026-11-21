@@ -1542,7 +1542,11 @@ func TestBeadsReadsTheYardOnce(t *testing.T) {
 		return aside
 	}
 	home := column(f.get("/").body)
-	whole := column(f.get("/line").body)
+	// The line keeps the waits in its centre and no aside beside them.
+	whole := f.get("/line").body
+	if strings.Contains(whole, "<aside") {
+		t.Errorf("/line keeps an aside beside the centre that says the same: %s", whole)
+	}
 	st.reset()
 	r := f.get("/beads")
 	got := st.reset()
@@ -1558,7 +1562,7 @@ func TestBeadsReadsTheYardOnce(t *testing.T) {
 		t.Errorf("/beads counts no waiting bead in its header: %s", beads)
 	}
 	if strings.Contains(beads, "<aside") {
-		t.Errorf("/beads keeps the aside home and the line alone keep: %s", beads)
+		t.Errorf("/beads keeps the aside home alone keeps: %s", beads)
 	}
 	text := squash(whole)
 	for _, want := range []string{
@@ -1568,7 +1572,7 @@ func TestBeadsReadsTheYardOnce(t *testing.T) {
 		`<dt>open</dt><dd>5</dd>`,
 	} {
 		if !strings.Contains(text, want) {
-			t.Errorf("the line's aside lacks %s: %s", want, text)
+			t.Errorf("the line lacks %s: %s", want, text)
 		}
 	}
 	// Home's is the line alone: the numbers stay, and the waits are gone

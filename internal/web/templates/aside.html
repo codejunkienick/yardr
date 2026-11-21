@@ -6,13 +6,14 @@
     <header><a class="bead" href="/beads/{{.Bead}}">{{.Bead}}</a><span class="label">{{.Stage}}</span></header>
     <p class="wait-title">{{.Title}}</p>
     {{- range .Why}}
-    <p class="why{{if .Alarm}} held{{end}}">{{.Text}}</p>
     {{- /* An ask stands whole in the ask partial, as on its bead's page,
-           with its answer row where the view acts. Any other reason keeps
+           with its answer row where the view acts: the card opens with
+           the question, so the row says it once. Any other reason keeps
            its one line and its note. */}}
     {{- if eq .Kind "ask"}}
     {{template "ask" ($w.Card .)}}
     {{- else}}
+    <p class="why{{if .Alarm}} held{{end}}">{{.Text}}</p>
     {{- if .Recommend}}
     <p class="entry-note">{{.Recommend}}</p>
     {{- end}}

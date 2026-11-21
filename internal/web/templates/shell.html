@@ -97,9 +97,11 @@
     <header class="page-head"><h1>{{.Title}}</h1>{{if .Needs}}<a class="needs-count" href="/">{{if eq .Needs 1}}1 waits for you{{else}}{{.Needs}} wait for you{{end}}</a>{{end}}</header>
     {{template "content" .}}
   </main>
-  {{- /* The aside stands beside home and the line alone; every other
-         page counts what waits in its header instead. */}}
-  {{- if and (not .Wide) .Aside (or (eq .Menu "home") (eq .Menu "line"))}}
+  {{- /* The aside stands beside home alone, and in the line's home mode,
+         which home's aside re-reads. The line's own page holds the waits
+         and the line in its centre, so an aside beside it would say every
+         card twice. Every other page counts what waits in its header. */}}
+  {{- if and (not .Wide) .Aside (or (eq .Menu "home") (and (eq .Menu "line") .Aside.Home))}}
   <aside class="right" aria-label="The line" hx-get="/line{{if .Aside.Home}}?home=1{{end}}" hx-trigger="sse:message" hx-select="aside.right > *" hx-swap="innerHTML ignoreTitle:true">
     {{template "aside" .Aside}}
   </aside>

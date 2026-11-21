@@ -325,7 +325,7 @@ func TestEveryFormCarriesTheCSRFValue(t *testing.T) {
 		{"/talk?with=yardmaster", 1}, // the send form
 		{"/beads/" + b.ID, 2},        // the ask's answer, and the move
 		{"/", 1},                     // the needs row's answer
-		{"/line", 2},                 // the ask under its reason, and in the aside
+		{"/line", 1},                 // the ask's answer, once: the line keeps no aside
 	} {
 		r := f.get(c.page)
 		fields := csrfField.FindAllStringSubmatch(r.body, -1)

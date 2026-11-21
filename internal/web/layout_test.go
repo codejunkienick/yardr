@@ -22,7 +22,7 @@ func TestPagesFillTheWindow(t *testing.T) {
 	f, _ := talkFixture(t, "ada")
 	must(t, f.st.SetSetting(context.Background(), store.OperatorSetting, "ada", "ada"))
 	run, _, _, _, _ := stocked(t, f)
-	for _, path := range []string{"/", "/line"} {
+	for _, path := range []string{"/"} {
 		r := f.get(path)
 		if r.status != 200 {
 			t.Errorf("%s: status %d", path, r.status)
@@ -38,7 +38,7 @@ func TestPagesFillTheWindow(t *testing.T) {
 			t.Errorf("%s: keeps no aside", path)
 		}
 	}
-	for _, path := range []string{"/beads", "/sessions", "/crew", "/flows", "/beads/" + run.ID,
+	for _, path := range []string{"/line", "/beads", "/sessions", "/crew", "/flows", "/beads/" + run.ID,
 		"/config", "/depots", "/groups", "/routes", "/peers", "/deps", "/limits"} {
 		r := f.get(path)
 		if r.status != 200 {
@@ -52,7 +52,7 @@ func TestPagesFillTheWindow(t *testing.T) {
 			t.Errorf("%s: wide", path)
 		}
 		if strings.Contains(r.body, "<aside") {
-			t.Errorf("%s: keeps the aside home and the line alone keep", path)
+			t.Errorf("%s: keeps the aside home alone keeps", path)
 		}
 	}
 	css, err := os.ReadFile("assets/yard.css")

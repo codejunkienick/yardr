@@ -238,7 +238,6 @@ func TestLineAskContext(t *testing.T) {
 	text := squash(f.get("/line").body)
 	for _, want := range []string{
 		`<a class="bead" href="/beads/` + b.ID + `">` + b.ID + `</a>`,
-		`<p class="why">Move the links now?</p>`,
 		`depot · bead ` + b.ID + ` · Everything else</a></p>`,
 		`<div class="ask-question"><p>Move the links now?</p><span class="asked">asked `,
 		`<p class="ask-asker">asked by yardmaster</p>`,
@@ -250,6 +249,11 @@ func TestLineAskContext(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("/line lacks %q", want)
 		}
+	}
+	// The card opens with the question, so the row says it once, and the
+	// page keeps no aside to say the card again.
+	if n := strings.Count(text, "Move the links now?"); n != 1 {
+		t.Errorf("/line says the question %d times, want once", n)
 	}
 	for _, foreign := range []string{"Recommended:", "Recommends", "to approve:"} {
 		if strings.Contains(text, foreign) {
@@ -746,7 +750,7 @@ func TestHomeNeedsRunAskForgedQuestion(t *testing.T) {
 		t.Error("the home ask row repeats the command shown in its detail")
 	}
 	text := squash(f.get("/line").body)
-	if !strings.Contains(text, `<p class="why">`+want+`</p>`) {
+	if !strings.Contains(text, `<div class="ask-question"><p>`+want+`</p>`) {
 		t.Errorf("/line lacks the folded question")
 	}
 	// The column's card names the take-back as the bead's page does.
@@ -872,7 +876,7 @@ func TestWebQuestionWithoutWeightMark(t *testing.T) {
 	if strings.Contains(text, "WEIGHTY") {
 		t.Errorf("/line forges a weight line:\n%s", text)
 	}
-	if !strings.Contains(text, `<p class="why">outside: nothing changes</p>`) {
+	if !strings.Contains(text, `<div class="ask-question"><p>outside: nothing changes</p>`) {
 		t.Errorf("/line lacks the stripped question:\n%s", text)
 	}
 }
