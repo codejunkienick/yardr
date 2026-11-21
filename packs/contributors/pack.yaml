@@ -141,8 +141,13 @@ groups:
   builders:     { agent: roles/builder.md,     limit: 3 }
   reviewers:    { agent: roles/reviewer.md,    limit: 2 }
   # The role says read, never run. What keeps it to that is the sandbox of
-  # its agent, which the import asks for with the agent (README.md).
-  pr-reviewers: { agent: roles/pr-reviewer.md, limit: 1 }
+  # its agent, which the import asks for with the agent (README.md). Its
+  # calls are the github source's three pull request reads, which the
+  # github pack's pr-review preset also names: the bead carries only
+  # the first 500 runes of a pull request's description, so the reviewer
+  # pulls the whole text, its reviews and its inline comments at review
+  # time. The pack only asks: the import puts the grant to the operator.
+  pr-reviewers: { agent: roles/pr-reviewer.md, limit: 1, calls: { github: [pr_body, pr_reviews, pr_comments] } }
   assembly:     { run: scripts/merge-local,    limit: 1 }
   # The yard's CI of a pull request (docs/line.md, "The yard as the CI of a
   # pull request"). It works as the yard's GitHub App, whose id and key file the

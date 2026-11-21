@@ -18,3 +18,12 @@ setup: SETUP.md
 sources:
   github:
     declaration: github.yaml
+
+# Suggested grants: named sets of the source's calls, printed numbered
+# by pack show. Suggesting grants nothing: the operator grants them,
+# and terminal pack apply ignores them.
+presets:
+  pr-review:
+    about: Read a pull request whole for its reviewer, its reviews and its inline comments; change nothing
+    grants:
+      github: [pr_body, pr_reviews, pr_comments]

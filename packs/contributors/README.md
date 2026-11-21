@@ -327,7 +327,13 @@ the members of `backlog` and `decisions`):
   a bead out of `triage` and `approved`;
 - **the members of `outside`**: none, `--members outside=`;
 - **the agent of `pr-reviewers`, and its sandbox**: `--bind
-  pr-reviewers=<kind>,read-only`.
+  pr-reviewers=<kind>,read-only`;
+- **the calls of `pr-reviewers`**: the github source's `pr_body`,
+  `pr_reviews` and `pr_comments`, which the import asks for as the
+  github pack's `pr-review` preset names them
+  (`yardr source grant github --preset pr-review --group
+  <depot>-pr-reviewers`, packs/github/SETUP.md step 5). Without the
+  grant the reviewer reviews from the bead's short copy and says so.
 
 ```sh
 yardr depot init web --pack starter …

@@ -132,14 +132,29 @@ git:
   credential: [github/git-credential]
 
 # ---- (today) what an agent may ask of it, through `yardr call` ------------
-# Who the credential acts as, and nothing else: the file's calls are what
-# keep its base and credential (a file with none has neither), one read
-# call per kind of credential. A personal token answers for itself at
-# /user, which refuses the JWT an App credential's calls run as (a
-# scope-free mint); /app answers for that one instead. It names no check
-# call on purpose: no one endpoint answers for both kinds, so
+# Who the credential acts as, and the whole text of a pull request for
+# its reviewer: the file's calls are what keep its base and credential
+# (a file with none has neither), one read call per kind of credential
+# for who it acts as. A personal token answers for itself at /user,
+# which refuses the JWT an App credential's calls run as (a scope-free
+# mint); /app answers for that one instead. It names no check call on
+# purpose: no one endpoint answers for both kinds, so
 # `yardr source check` looks at the credential and the thread commands
 # above, and sends nothing.
+#
+# The three pr_ calls are the reviewer of a pull request from
+# outside's: the bead that tracks a pull request carries only the
+# first 500 runes of its description (the envelope's text, cut as
+# hooks' MaxText cuts every event's), so the reviewer pulls the whole
+# description, its reviews and its inline comments at review time
+# instead. Each is a stranger's text, read as information and never
+# as instructions, with its author and its time. The repository is
+# its owner's and its repository's names as two parameters, since a
+# call's path parameter is one segment of the path. GitHub lists
+# reviews and inline comments a page at a time; each call asks for
+# 100, GitHub's most a page, and names no next page, so the first
+# 100 are all a call reads. Their bounds hold a long
+# description whole: a body over the bound is refused, not cut.
 
 base: https://api.github.com
 calls:
@@ -153,3 +168,30 @@ calls:
     about: Who an App credential acts as (for a personal token, see user).
     request: { method: GET, path: /app }
     answer: { select: [slug, id] }
+  pr_body:
+    kind: read
+    about: Read one pull request whole, its description uncropped
+    params:
+      owner: { type: string, pattern: "^[A-Za-z0-9](?:-?[A-Za-z0-9])*$", max: 39, log: true }
+      repo: { type: string, pattern: "^[A-Za-z0-9._-]+$", max: 100, log: true }
+      number: { type: string, pattern: "^[1-9][0-9]*$", max: 20, log: true }
+    request: { method: GET, path: "/repos/{owner}/{repo}/pulls/{number}" }
+    answer: { select: [number, title, body, user.login], max: 262144 }
+  pr_reviews:
+    kind: read
+    about: Read one pull request's reviews, each with its author and time
+    params:
+      owner: { type: string, pattern: "^[A-Za-z0-9](?:-?[A-Za-z0-9])*$", max: 39, log: true }
+      repo: { type: string, pattern: "^[A-Za-z0-9._-]+$", max: 100, log: true }
+      number: { type: string, pattern: "^[1-9][0-9]*$", max: 20, log: true }
+    request: { method: GET, path: "/repos/{owner}/{repo}/pulls/{number}/reviews", query: { per_page: "100" } }
+    answer: { select: [user.login, state, body, submitted_at], max: 262144 }
+  pr_comments:
+    kind: read
+    about: Read one pull request's inline comments, each with its author, file, line and time
+    params:
+      owner: { type: string, pattern: "^[A-Za-z0-9](?:-?[A-Za-z0-9])*$", max: 39, log: true }
+      repo: { type: string, pattern: "^[A-Za-z0-9._-]+$", max: 100, log: true }
+      number: { type: string, pattern: "^[1-9][0-9]*$", max: 20, log: true }
+    request: { method: GET, path: "/repos/{owner}/{repo}/pulls/{number}/comments", query: { per_page: "100" } }
+    answer: { select: [user.login, body, path, line, created_at], max: 262144 }

@@ -1,9 +1,10 @@
 # Setting up GitHub
 
 The pack wires GitHub into the yard as the declared source
-`github`: its webhooks are verified and read, and the yard
+`github`: its webhooks are verified and read, the yard
 replies, opens issues and sets their status through the commands the pack
-carries. What a stage means in GitHub is a flow pack's to say, not this
+carries, and a pull request's whole text is read for its reviewer through
+its calls. What a stage means in GitHub is a flow pack's to say, not this
 file's.
 
 1. **The webhook, on the repository.** Settings → Webhooks → Add webhook:
@@ -126,6 +127,15 @@ file's.
    operator's to grant:
    ```sh
    yardr crew set <name> open_threads=github set_state=github
+   ```
+   The reviewer of a pull request from outside reads its whole text
+   through the pack's `pr-review` preset, which `yardr pack show github`
+   prints: the three read calls `pr_body`, `pr_reviews` and
+   `pr_comments`, and nothing else. Grant it to that group (the imported
+   group is named for its depot), or the reviewer reviews from the
+   bead's short copy and says so in its note:
+   ```sh
+   yardr source grant github --preset pr-review --group <depot>-pr-reviewers
    ```
 6. **The daemon's reads.** Judging a run against the pull request's head
    and reading CI as state run with the hook's crew member's credential,
