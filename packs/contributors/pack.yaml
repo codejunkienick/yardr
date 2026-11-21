@@ -229,11 +229,15 @@ sources:
     # about a pull request from one about a train, whichever pack came first.
     says:
       - { where: "event=issues action=labeled label=accepted type=issue", outcome: accepted }
-      # A close ends the bead in any stage that holds an open one. The
-      # stages are named so that the yard's own close when a bead is
-      # merged (hears issue, below) finds the bead already terminal and
-      # is refused quietly, as a close for a bead past deciding is.
-      - { where: "event=issues action=closed stage=triage stage=backlog stage=new stage=review stage=approved stage=decide type=issue", outcome: dropped }
+      # A close ends the bead in any stage that holds an open one,
+      # except approved, which is the assembly's to close. A close for
+      # a bead waiting there — the yard's own, from the landing's
+      # "Fixes #n", or a person's — matches no line here, and an event
+      # the table has no line for moves and logs nothing, so it can
+      # never cut an assembly between its push and its advance to
+      # merged, where the assembly closes the bead itself. A manual
+      # drop from approved stays possible through the flow's own edge.
+      - { where: "event=issues action=closed stage=triage stage=backlog stage=new stage=review stage=decide type=issue", outcome: dropped }
       # The yes is a person's: sender is a kind, as in makes, so the label put
       # by a bot (a workflow that sorts or sizes pull requests) is no
       # maintainer's. The yard records the head the event named as the bead's

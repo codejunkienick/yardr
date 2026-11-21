@@ -1877,14 +1877,19 @@ yardr knows the verbs alone:
   after a push. A bead the yard holds is moved by no event, so one held in
   `ciwait` because its pull request was found over is advanced by hand.
 - **A close ends an issue's bead.** `dropped` is the source's word for a
-  closed issue, said by a line that names the six stages holding an open
-  bead, and `triage`, `backlog`, `new`, `review`, `approved` and `decide`
+  closed issue, said by a line that names five of the stages holding an
+  open bead, and `triage`, `backlog`, `new`, `review` and `decide`
   each lead it to `closed`: the close is the decision, made by someone who
   may close that repository's issues, and a builder might otherwise keep
   working a bead for one that is over. A `question` sends the bead to
   `decide` to wait for a member of `decisions`, and a close meanwhile ends
   it there, without the answer. Whatever worked the bead stops with it.
-  The yard's own close when a bead is merged finds the bead already
+  `approved` is the assembly's to close, so the line names no approved:
+  a close while the bead waits there matches no line, moves and logs
+  nothing, and can never cut an assembly between its push and its
+  advance to `merged`, where the assembly closes the bead itself; a
+  person's close in that wait is lost with no event or note. The yard's
+  own close when a bead is merged finds the bead already
   terminal and is refused quietly.
 - **The import asks for the maintainers** (`--members maintainers=…`),
   who move a bead out of `triage` and `approved`, **and for the agent of

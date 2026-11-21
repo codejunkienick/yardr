@@ -71,12 +71,13 @@ func issueEvent(number int, login, kind string) func(map[string]any) {
 
 // An issue closed on GitHub ends its bead wherever the bead waits past
 // triage, which had the edge first: in the backlog, under build, under
-// review, waiting to land and in decide, where a question leaves it for a
-// person. The close is the decision, made by someone who may close that
-// repository's issues. Where the bead is worked its session ends with it:
-// the builder's, the reviewer's and the assembly's are stopped. The yard's
-// own close when a bead is merged finds the bead already terminal and is
-// refused quietly.
+// review and in decide, where a question leaves it for a person. The
+// close is the decision, made by someone who may close that
+// repository's issues. Where the bead is worked its session ends with
+// it: the builder's and the reviewer's are stopped. Approved is the
+// assembly's to close, so a close while the bead waits there matches
+// no line and is silent, as is the yard's own close when a bead is
+// merged, which finds the bead already terminal.
 func TestContributorsClosedIssueEndsItsBead(t *testing.T) {
 	t.Parallel()
 	r := newContributorsIssueYard(t)
@@ -159,7 +160,7 @@ func TestContributorsClosedIssueEndsItsBead(t *testing.T) {
 		return sessions
 	}
 
-	for _, stage := range []string{"backlog", "new", "review", "approved", "decide"} {
+	for _, stage := range []string{"backlog", "new", "review", "decide"} {
 		b := arrive(stage)
 		worked := workedIn(b.ID, stage)
 		if _, people := peopleGroup[stage]; people != (len(worked) == 0) {
@@ -181,6 +182,19 @@ func TestContributorsClosedIssueEndsItsBead(t *testing.T) {
 				t.Errorf("%s: session %s of the old stay still runs: stopped %v", stage, s, r.stoppedSessions())
 			}
 		}
+	}
+
+	// Approved is the assembly's to close: a close while the bead waits
+	// there matches no line, so it moves and logs nothing.
+	waiting := arrive("approved")
+	beforeApproved := r.rules(t, waiting.ID)
+	r.deliverJSON(t, "issues", "issues_closed", issueEvent(number, "mckean", "User"))
+	r.pass(t)
+	if got := r.bead(t, waiting.ID); got.Stage != "approved" || got.Status != "open" {
+		t.Errorf("a close at approved left %s in %s (%s), want approved open", waiting.ID, got.Stage, got.Status)
+	}
+	if after := r.rules(t, waiting.ID); !slices.Equal(after, beforeApproved) {
+		t.Errorf("hook_rule events %q after a close at approved, want %q", after, beforeApproved)
 	}
 
 	// The yard's own close when a bead is merged: the closed event finds
