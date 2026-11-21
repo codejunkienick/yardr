@@ -1080,7 +1080,7 @@ flow default (repo@2c2a589)
 STAGE            GROUP            MEMBERS            NEXT
 backlog          backlog          mckean,yardmaster  shape | siding | new | decide
 shape            shapers          -                  siding on small | new on done | decide on question | backlog
-siding           siding           mckean,yardmaster  ready | backlog
+siding           siding           mckean,yardmaster  new | ready | backlog
 new              yardr-builders   -                  review on done | decide on question | backlog
 decide           decisions        mckean,yardmaster  backlog | new
 ready            ready            mckean,yardmaster  new | backlog
@@ -1099,7 +1099,7 @@ no store pointer overrides it. It governs every bead that is not a train
 # default.flow
 backlog -> shape | siding | new | decide
 shape -> siding on small | new on done | decide on question | backlog
-siding -> ready | backlog
+siding -> new | ready | backlog
 ready -> new | backlog
 new -> review on done | decide on question | backlog
 review -> review-security on done | approved on done-safe | new on changes max 3 then decide | decide on question
@@ -1118,7 +1118,7 @@ do.
 | backlog | `backlog` | manual (Christopher and the yardmaster, who picks which beads go to `shape`) |
 | shape | `shapers` | herdr, Muse, limit 2, `prompt=roles/shaper.md` |
 | siding | `siding` | manual (Christopher and the yardmaster; `fold=4`, `fold_after=8h`, `fold_max=6`: the yard folds the waiting beads into one carrier by itself) |
-| ready | `ready` | manual (Christopher and the yardmaster, who sends each carrier to `new`) |
+| ready | `ready` | manual (Christopher and the yardmaster; for a bead a person sends to `new` by hand — carriers no longer wait here) |
 | new | `yardr-builders` | herdr, Claude Code, limit 5, `prompt=roles/builder.md` |
 | review | `yardr-reviewers` | herdr, Codex, limit 3, `prompt=roles/reviewer.md` |
 | review-security | `yardr-security` | herdr, `prompt=roles/review-security.md`: the second review, for security alone ([line.md](line.md#then-once-more-for-security-alone)) |

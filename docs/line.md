@@ -7,7 +7,7 @@ line takes the same work through a pull request on GitHub:
 [the public line](#the-public-line).
 
 ```
-small, specified: backlog ──pick──▶ siding ──folded──▶ ready ──release by hand──▶ new
+small, specified: backlog ──pick──▶ siding ──folded──▶ new
 small, shaped:                    shape ──small──▶ siding
 backlog ──pick──▶ shape ──shaper──▶ new ──builder──▶ review ──▶ review-security ──▶ approved ──assembly──▶ merged on main
    ▲                       ▲                 │              │                 │
@@ -1751,7 +1751,7 @@ retitling one bead and closing the others:
 
 ```sh
 $ yardr bead fold yardr-ab12 yardr-cd34 yardr-ef56
-yardr-k9p2 folded from yardr-ab12, yardr-cd34, yardr-ef56 (3 points, size:medium difficulty:1), in ready
+yardr-k9p2 folded from yardr-ab12, yardr-cd34, yardr-ef56 (3 points, size:medium difficulty:1), in new
 ```
 
 The new bead is the **carrier** and each bead it was made of a **member**.
