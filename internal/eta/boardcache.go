@@ -1,6 +1,7 @@
 package eta
 
 import (
+	"cmp"
 	"context"
 	"slices"
 	"sync"
@@ -45,6 +46,12 @@ type boardCache[V any] struct {
 	kept   map[boardKey]V
 	flying map[boardKey]*boardFlight[V]
 }
+
+// maxKeptBoards bounds the boards a boardCache keeps across keys: on
+// keeping past the cap the stalest heads are dropped (evict). 32 bounds
+// the worst case near 128 MB of board-size answers while real yards keep
+// a handful of viewers.
+const maxKeptBoards = 32
 
 // boardFlight is one computation in flight for a key: the callers
 // asking for it wait on done and share its board.
@@ -107,6 +114,7 @@ func (c *boardCache[V]) do(ctx context.Context, key boardKey,
 			}
 		}
 		c.kept[key] = val
+		c.evict()
 	}
 	delete(c.flying, key)
 	f.val, f.err = val, err
@@ -117,6 +125,23 @@ func (c *boardCache[V]) do(ctx context.Context, key boardKey,
 		return zero, err
 	}
 	return clone(val), nil
+}
+
+// evict drops kept boards with the smallest head, then minute, until the
+// cache fits the cap, so however many distinct viewers ask, the server
+// holds a bounded number of boards. The key already orders the entries,
+// so no list of use is kept. Called with c.mu held.
+func (c *boardCache[V]) evict() {
+	for len(c.kept) > maxKeptBoards {
+		var oldest boardKey
+		first := true
+		for k := range c.kept {
+			if first || cmp.Or(cmp.Compare(k.head, oldest.head), k.minute.Compare(oldest.minute)) < 0 {
+				oldest, first = k, false
+			}
+		}
+		delete(c.kept, oldest)
+	}
 }
 
 // ArrivalsViaStore answers the board at now: the rows beside the platforms

@@ -337,22 +337,33 @@ func runCrewIdentity(ctx context.Context, w *wtx, argv []string, actor string, b
 	return fmt.Sprintf("crew member %s is %s in %s", name, identitySays(id, foldIdentityKey(w.Tx, source, key)), source), nil
 }
 
-// parseSettingSet reads the words of settings set <key> <value>. What is
-// no setting refuses the command as setting itself refuses it. One word
-// is refused apart: unsetting one takes an empty value, which no split
-// line holds.
+// parseSettingSet reads the words of settings set <key> <value>: the value
+// is the words past the key joined with single spaces, so a yard's
+// description rides a card unquoted. What is no setting refuses the
+// command as setting itself refuses it. One word is refused apart:
+// unsetting one takes an empty value, which no split line holds.
 func parseSettingSet(rest []string) ([]string, error) {
 	const use = "yardr settings set <key> <value>"
 	if len(rest) == 1 {
 		return nil, fmt.Errorf("--run takes %s: one key and one value; unsetting one takes an empty value, and is typed in a terminal", use)
 	}
-	if len(rest) != 2 {
+	if len(rest) < 2 {
 		return nil, fmt.Errorf("--run takes %s: one key and one value, not %d words", use, len(rest))
 	}
 	if _, ok := SettingOf(rest[0]); !ok {
 		return nil, fmt.Errorf("no setting %q; there is: %s", rest[0], strings.Join(SettingKeys(), ", "))
 	}
-	return []string{rest[0], rest[1]}, nil
+	// A value word in a flag's or an assignment's shape is not taken:
+	// nothing re-reads the line, so the card would show a flag where
+	// the operator reads words.
+	for _, word := range rest[1:] {
+		for _, mark := range []string{"--", "="} {
+			if strings.HasPrefix(word, mark) {
+				return nil, fmt.Errorf("--run takes %s: a value word that begins with %q is not taken; type the command in a terminal", use, mark)
+			}
+		}
+	}
+	return []string{rest[0], strings.Join(rest[1:], " ")}, nil
 }
 
 // checkSettingSet is setting a setting's own check as the asker.

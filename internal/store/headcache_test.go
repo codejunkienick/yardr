@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -127,6 +128,114 @@ func TestUserAsksAsideReturnsWhileHeadStands(t *testing.T) {
 	}
 	if len(back.Open) != 1 || len(back.Decided) != 0 {
 		t.Errorf("queue after the return = %+v, want the ask open again", back)
+	}
+}
+
+// Past the cap of kept answers the stalest heads are dropped, however
+// many distinct keys computed: the cache holds 32, a dropped key asked
+// again is computed whole, and a kept key is still reused.
+func TestHeadCacheEvictsStalestHeadPastCap(t *testing.T) {
+	t.Parallel()
+	var c headCache[int, string]
+	ctx := context.Background()
+	now := time.Now()
+	computed := map[int]int{}
+	clone := func(s string) string { return s }
+	for key := 0; key < 40; key++ {
+		compute := func() (string, time.Time, error) {
+			computed[key]++
+			return fmt.Sprintf("answer %d", key), time.Time{}, nil
+		}
+		if _, err := c.do(ctx, key, uint64(100+key), now, compute, clone); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.mu.Lock()
+	kept, missing := len(c.kept), 0
+	for key := 0; key < 40; key++ {
+		_, ok := c.kept[key]
+		if key < 8 && ok {
+			t.Errorf("key %d at head %d is kept, want the eight stalest dropped", key, 100+key)
+		}
+		if key >= 8 && !ok {
+			missing++
+		}
+	}
+	c.mu.Unlock()
+	if kept != 32 || missing != 0 {
+		t.Fatalf("the cache keeps %d answers with %d of keys 8..39 missing, want 32 kept whole", kept, missing)
+	}
+	// A kept key is reused without computing; the stalest dropped key
+	// asked again is computed whole (and, its head still the stalest, is
+	// dropped again for the keeping).
+	if _, err := c.do(ctx, 39, 139, now, func() (string, time.Time, error) {
+		computed[39]++
+		return "recomputed", time.Time{}, nil
+	}, clone); err != nil {
+		t.Fatal(err)
+	}
+	if computed[39] != 1 {
+		t.Errorf("key 39 computed %d times, want 1 (reused)", computed[39])
+	}
+	got, err := c.do(ctx, 0, 100, now, func() (string, time.Time, error) {
+		computed[0]++
+		return "answer 0", time.Time{}, nil
+	}, clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if computed[0] != 2 || got != "answer 0" {
+		t.Errorf("key 0 asked again computed %d times with %q, want 2 and the whole answer", computed[0], got)
+	}
+}
+
+// Thirty-three distinct viewers ask for one queue at one head: the cache
+// keeps 32, so one viewer asked again is computed whole and the rest are
+// reused. The queue's cache is the store's own, so no other test's keys
+// share it.
+func TestUserAsksKeepsThirtyTwoViewers(t *testing.T) {
+	t.Parallel()
+	y := decisionYard(t)
+	y.ask(t, linksAsk(), "yardmaster")
+	viewers := make([]string, 33)
+	for i := range viewers {
+		viewers[i] = fmt.Sprintf("viewer-%d", i)
+		if _, err := y.Store.UserAsks(y.ctx, "mckean", "mckean", viewers[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	y.Store.asksCache.mu.Lock()
+	kept := len(y.Store.asksCache.kept)
+	var dropped, keptOne string
+	for _, v := range viewers {
+		if _, ok := y.Store.asksCache.kept[viewerKey{name: "mckean", actor: "mckean", viewer: v}]; ok {
+			keptOne = v
+		} else {
+			dropped = v
+		}
+	}
+	y.Store.asksCache.mu.Unlock()
+	if kept != 32 || dropped == "" || keptOne == "" {
+		t.Fatalf("the cache keeps %d queues, dropped %q, want 32 and one dropped viewer", kept, dropped)
+	}
+	// A kept viewer first, which reuses without keeping, then the dropped
+	// one, which is computed whole.
+	decoded := y.beadReads.Load()
+	if _, err := y.Store.UserAsks(y.ctx, "mckean", "mckean", keptOne); err != nil {
+		t.Fatal(err)
+	}
+	if got := y.beadReads.Load(); got != decoded {
+		t.Errorf("the kept viewer decoded %d beads, want none (reused)", got-decoded)
+	}
+	queue, err := y.Store.UserAsks(y.ctx, "mckean", "mckean", dropped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := y.beadReads.Load() - decoded; got != 1 {
+		t.Errorf("the dropped viewer decoded %d beads, want 1 (computed whole)", got)
+	}
+	if len(queue.Open) != 1 {
+		t.Errorf("the dropped viewer's queue = %+v, want the ask open", queue)
 	}
 }
 

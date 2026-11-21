@@ -133,6 +133,9 @@ type api struct {
 	// the yard's own file failing from a device that is no operator's;
 	// the socket answers every error whole.
 	shapeErr func(ctx context.Context, name string, err error) error
+	// meter counts the served device calls by method and device
+	// (callmeter.go); the socket's carry no caller and are not counted.
+	meter *callMeter
 }
 
 func newAPI(st *store.Store, writeTimeout time.Duration) *api {
@@ -172,7 +175,17 @@ func newAPI(st *store.Store, writeTimeout time.Duration) *api {
 			}
 			return eta.FlowsViaStore(ctx, st, v, time.Now())
 		})}
-	return &api{st: st, methods: methods, writeTimeout: writeTimeout}
+	a := &api{st: st, methods: methods, writeTimeout: writeTimeout}
+	// The meter logs through the store's logger, which both servers set
+	// for the store they serve; where the store has none it counts and
+	// never logs.
+	a.meter = newCallMeter(func() *slog.Logger {
+		if st == nil {
+			return nil
+		}
+		return st.Logger()
+	})
+	return a
 }
 
 // call makes the call name with the arguments body, an array of them or an
@@ -187,6 +200,11 @@ func (a *api) call(w http.ResponseWriter, r *http.Request, name string, body jso
 	if err != nil {
 		writeJSON(w, reply{Error: toWire(err)})
 		return
+	}
+	// A call a device made is counted by method and device; the
+	// socket's requests carry no caller and are not counted.
+	if c := callerOf(r); c != nil && a.meter != nil {
+		a.meter.count(name, c.SaidBy, r.RemoteAddr == linkRemoteAddr)
 	}
 	result, more, err := invoke(ctx, m, body)
 	if err != nil {

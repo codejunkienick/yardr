@@ -1848,7 +1848,7 @@ func TestContributorsPack(t *testing.T) {
 	for _, want := range []string{
 		"action=labeled event=issues label=accepted type=issue -> accepted",
 		"action=labeled event=pull_request label=accepted sender=user type=pr -> accepted",
-		"action=synchronize event=pull_request label=accepted stage=ciwait stage=contributor stage=review stage=review-post type=pr -> unaccepted: new commits since a maintainer accepted the PR",
+		"action=synchronize event=pull_request label=accepted stage=approved stage=ciwait stage=contributor stage=review stage=review-post type=pr -> unaccepted: new commits since a maintainer accepted the PR",
 		"action=synchronize event=pull_request stage=contributor type=pr -> pushed: new commits on the PR",
 		"action=synchronize event=pull_request sender=bot stage=ciwait stage=review stage=review-post type=pr -> pushed: a bot pushed to the PR",
 		"action=synchronize event=pull_request stage=review type=pr -> outdated: the PR changed under review",
@@ -1909,8 +1909,8 @@ func TestContributorsPack(t *testing.T) {
 	// exception is a pull request a maintainer accepted, which bears the label
 	// accepted among its labels: any push to it, a bot's too, is a head nobody
 	// accepted, and takes the bead back to triage from the read, the posting,
-	// the wait and the contributor, ahead of every line above; approved is a
-	// person's.
+	// the wait, the contributor and approved, ahead of every line above; a
+	// push to one nobody accepted still says nothing in approved.
 	for _, c := range []struct{ sender, labels, stage, outcome, to string }{
 		{"bot", "", "review", "pushed", "review"},
 		{"bot", "", "review-post", "pushed", "review"},
@@ -1931,8 +1931,8 @@ func TestContributorsPack(t *testing.T) {
 		{"bot", "accepted", "ciwait", "unaccepted", "triage"},
 		{"bot", "accepted", "contributor", "unaccepted", "triage"},
 		{"user", "bug,accepted", "review", "unaccepted", "triage"},
-		{"bot", "accepted", "approved", "", ""},
-		{"user", "accepted", "approved", "", ""},
+		{"bot", "accepted", "approved", "unaccepted", "triage"},
+		{"user", "accepted", "approved", "unaccepted", "triage"},
 		// A push while the bead waits in triage, whoever pushed and whatever
 		// the pull request bears, makes the stay again: the card there is of
 		// the head it was put for, so a new head is a new card.

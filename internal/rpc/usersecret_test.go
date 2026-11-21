@@ -39,7 +39,7 @@ type secretYard struct {
 
 const secretDecl = "name: crm\nbase: https://crm.example.com/api\ncredential: { env: CRM_TOKEN }\ncalls:\n  ping: { kind: read, request: { method: GET, path: /me } }\n"
 
-func newSecretYard(t *testing.T) *secretYard {
+func newSecretYard(t testing.TB) *secretYard {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()

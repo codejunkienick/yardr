@@ -30,6 +30,12 @@ type headCache[K comparable, V any] struct {
 	flying map[K]*headFlight[V]
 }
 
+// maxKeptHeadAnswers bounds the answers a headCache keeps across keys:
+// on keeping past the cap the stalest heads are dropped (evict). 32
+// bounds the worst case near 128 MB of UserAsks-size answers while real
+// yards keep a handful of viewers.
+const maxKeptHeadAnswers = 32
+
 // headEntry is one key's last answer: the head it was computed at, the
 // instant it stops being the answer with no write (zero for none), and
 // the answer as computed, never handed out directly.
@@ -112,6 +118,7 @@ func (c *headCache[K, V]) do(ctx context.Context, key K, head uint64, now time.T
 			if e, ok := c.kept[key]; !ok || e.head <= head {
 				c.kept[key] = headEntry[V]{head: head, until: until, val: val}
 			}
+			c.evict()
 		}
 		delete(c.flying, key)
 		f.val, f.err = val, err
@@ -122,6 +129,24 @@ func (c *headCache[K, V]) do(ctx context.Context, key K, head uint64, now time.T
 			return zero, err
 		}
 		return clone(val), nil
+	}
+}
+
+// evict drops kept answers with the smallest head until the cache fits
+// the cap, so however many distinct keys compute, the server holds a
+// bounded number of answers. The head already orders the entries, so no
+// list of use is kept. Called with c.mu held.
+func (c *headCache[K, V]) evict() {
+	for len(c.kept) > maxKeptHeadAnswers {
+		var oldest K
+		var oldestHead uint64
+		first := true
+		for k, e := range c.kept {
+			if first || e.head < oldestHead {
+				oldest, oldestHead, first = k, e.head, false
+			}
+		}
+		delete(c.kept, oldest)
 	}
 }
 

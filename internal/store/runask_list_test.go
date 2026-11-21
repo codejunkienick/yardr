@@ -1453,6 +1453,42 @@ func TestRunAskSettingSetCard(t *testing.T) {
 		!strings.Contains(err.Error(), "at most 500") {
 		t.Fatalf("asking for 501 characters = %v, want it refused as too long", err)
 	}
+	// A description of several words rides a card unquoted, with a comma
+	// and punctuation: filed, carded whole, approved, and read back whole.
+	const multi = "This yard builds south, ships north (nights); ada's café rota."
+	seq = y.ask(t, listAsk("mckean", "settings set yard_description "+multi), "yardmaster")
+	run = y.asked(t, seq).Ask.Run
+	if want := "setting yard_description becomes " + multi + " (now: South-yard.)."; run.Does[0] != want {
+		t.Fatalf("the card says %q, want %q", run.Does[0], want)
+	}
+	done, err = y.ApproveAsk(y.ctx, y.bead, seq, "mckean", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done.Result != "yard_description = "+multi {
+		t.Fatalf("the approval ran %q", done.Result)
+	}
+	settings, err = y.Settings(y.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings[YardDescriptionSetting] != multi {
+		t.Fatalf("yard_description = %q", settings[YardDescriptionSetting])
+	}
+	// A control character, a newline, a word in a flag's or an
+	// assignment's shape, and the punctuation the value alphabet leaves
+	// out are still refused in a value.
+	for _, c := range []struct{ name, command, want string }{
+		{"a control character", "settings set yard_description ok\x07bad", "none of their characters, and nothing is quoted"},
+		{"a newline", "settings set yard_description ok\nbad", "none of their characters, and nothing is quoted"},
+		{"a word beginning with --", "settings set yard_description ok --flag", `a value word that begins with "--" is not taken`},
+		{"a word beginning with =", "settings set yard_description =ls", `a value word that begins with "=" is not taken`},
+		{"an exclamation", "settings set yard_description hello!", "none of their characters, and nothing is quoted"},
+	} {
+		if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", c.command), "yardmaster"); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s = %v, want it refused as %q", c.name, err, c.want)
+		}
+	}
 	// A trailing slash registers without it (hookPublicURL), and the
 	// card shows the URL as it is registered.
 	seq = y.ask(t, listAsk("mckean", "settings set hook_public_url https://yard.example/hooks/"), "yardmaster")

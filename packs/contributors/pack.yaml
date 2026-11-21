@@ -124,7 +124,7 @@ flows:
       # Back to ciwait by hand when the head moved after its run: the yard
       # merges only a head its CI passed on. A maintainer may also return an
       # approved bead to contributor before picking a fix of its reviewed head.
-      approved:    { group: maintainers,  file: flows/pr/approved.md, outcomes: { merged: merged, dropped: closed }, manual: [merged, closed, ciwait, contributor] }
+      approved:    { group: maintainers,  file: flows/pr/approved.md, outcomes: { unaccepted: triage, merged: merged, dropped: closed }, manual: [merged, closed, ciwait, contributor] }
       # A reviewer's question waits here for a person, and the pull request can
       # be merged or closed on GitHub meanwhile: the bead ends with it, or it
       # would wait for an answer about a pull request that is over.
@@ -254,7 +254,7 @@ sources:
       # label; the dispatcher also uses the bead's triage history when the
       # label was removed. This line comes before the trusted authors' and
       # bots' lines: the first line an event matches counts.
-      - { where: "event=pull_request action=synchronize label=accepted stage=review stage=review-post stage=ciwait stage=contributor type=pr", outcome: unaccepted, note: "new commits since a maintainer accepted the PR" }
+      - { where: "event=pull_request action=synchronize label=accepted stage=review stage=review-post stage=ciwait stage=contributor stage=approved type=pr", outcome: unaccepted, note: "new commits since a maintainer accepted the PR" }
       # New commits while the bead waits in triage, whoever pushed, make the
       # stay again: the card there names the head it was put for, and the yes
       # it gives is of that head (see the stage file). Nothing of the new head is

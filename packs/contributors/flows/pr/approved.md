@@ -32,6 +32,15 @@ moves while it is made. A
 fork is merged with a merge commit and its branch is left alone, being its
 author's; a branch of the repository's own is rebased on and deleted.
 
+A push takes the yes back for a pull request that waited in `triage`:
+the bead goes back there with a fresh card of the new head, for a fresh
+accept, review and CI run. The merge gate above still holds a moved
+head: the yes on the bead names the head it was given for (`merge_head`),
+so a head that moved since is held, not merged, and the fresh yes
+overwrites it on re-approval. A pull request that never waited in
+`triage` hears nothing of a push here: a bot's bump rebases its branch
+all the time, and the yard merges it at the head it has when it looks.
+
 A pull request without the label waits here for a maintainer, who merges
 it on GitHub or says yes as above. When the yard holds the bead instead of
 merging (CI that has not passed on the head, a head that moved, a yes that
@@ -71,6 +80,11 @@ merge by the yard is one of those. Nothing here pushes to a pull request:
 the yard's only push onto one is a fix round's (`fix`, `push`), which
 returns for a fresh accept before it comes here:
 
+- `unaccepted`: new commits arrived on a pull request that waited in `triage`
+  while the bead waited here, and the source says so. The bead goes back to
+  `triage` with a card of the new head, for a fresh accept: the yes was of
+  another commit. A pull request that never waited in `triage` hears nothing
+  of a push here.
 - `merged`: the pull request is merged. The bead goes to `merged`.
 - `dropped`: it is closed unmerged. The bead goes to `closed`.
 

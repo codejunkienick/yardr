@@ -283,6 +283,10 @@ type Store struct {
 // calls are in flight.
 func (s *Store) SetLogger(log *slog.Logger) { s.log.Store(log) }
 
+// Logger is the logger SetLogger set, nil where none was. The served-call
+// meter reads it when a finished minute has counts to log.
+func (s *Store) Logger() *slog.Logger { return s.log.Load() }
+
 // NoSyncEnv is the variable that, set to 1, opens the store without
 // syncing each commit, and each growth of the file, to the disk: the full
 // key, since the store cannot import config for the YARDR_ prefix, and

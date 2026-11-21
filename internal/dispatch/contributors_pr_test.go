@@ -418,6 +418,21 @@ func TestContributorsBotBumpFlowsFromOpenedToTheMerge(t *testing.T) {
 	if got := r.startedFor(b.ID); !slices.Equal(got, []string{"pr-ci", "pr-merges"}) {
 		t.Fatalf("%s given to %v, want pr-ci in ciwait and pr-merges in approved with merge-ok", b.ID, got)
 	}
+
+	// The bot's rebase while it waits in approved moves the head and
+	// says nothing: the bead never waited in triage, so no yes is taken
+	// back and no card is put.
+	before := r.lastNote(t, b.ID)
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize",
+		prEvent(17, "dependabot[bot]", "Bot"), atHead(movedSHA), pushedBy("dependabot[bot]", "Bot"))
+	r.pass(t)
+	if got := r.bead(t, b.ID); got.Stage != "approved" || got.Metadata["pr_head"] != movedSHA {
+		t.Fatalf("%s in %s with pr_head %v after the bot's push in approved, want approved with %s",
+			b.ID, got.Stage, got.Metadata["pr_head"], movedSHA)
+	}
+	if note := r.lastNote(t, b.ID); note != before {
+		t.Errorf("the bot's push in approved left a note: %q", note)
+	}
 }
 
 // What is not a bot's bump of Go modules waits at approved for a person: a
@@ -964,7 +979,8 @@ func TestContributorsPushInFixAndPushMovesTheHeadOnly(t *testing.T) {
 // bead out of triage and records the head the event named as accepted_head,
 // where one put by a bot, or another label, moves nothing. New commits on a
 // pull request that bears the label, whoever pushed and wherever the bead
-// waits (read, posted, run, or with the contributor), take the bead back to triage
+// waits (read, posted, run, with the contributor, or approved), take the
+// bead back to triage
 // with the accepted head as it was, where pr_head follows the last event; a
 // person's label says yes again, to the head it then has. A pull request no
 // maintainer accepted keeps the lines for its author's pushes.
@@ -1025,6 +1041,9 @@ func TestContributorsAcceptanceIsOfACommit(t *testing.T) {
 			r.reviewerSays(t, b.ID, false)
 		case "contributor":
 			r.reviewerAsksChanges(t, b.ID)
+		case "approved":
+			r.reviewerSays(t, b.ID, false)
+			r.ciSays(t, b.ID, true)
 		}
 	}
 
@@ -1032,7 +1051,7 @@ func TestContributorsAcceptanceIsOfACommit(t *testing.T) {
 	// person and from a bot: back to triage, nothing recorded anew.
 	var last *store.Bead
 	var lastN int
-	for _, stage := range []string{"review", "review-post", "ciwait", "contributor"} {
+	for _, stage := range []string{"review", "review-post", "ciwait", "contributor", "approved"} {
 		for _, who := range []struct{ login, kind string }{{"someone", "User"}, {"an-app[bot]", "Bot"}} {
 			b, n := accept()
 			settle(b, stage)
@@ -1061,7 +1080,7 @@ func TestContributorsAcceptanceIsOfACommit(t *testing.T) {
 
 	// The label may be removed before a later push. The bead's triage history
 	// still sends the changed head back for a person's acceptance.
-	for _, stage := range []string{"review", "review-post", "ciwait", "contributor"} {
+	for _, stage := range []string{"review", "review-post", "ciwait", "contributor", "approved"} {
 		b, n := accept()
 		settle(b, stage)
 		r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(n, bearing(), atHead(movedSHA))...)
@@ -1212,6 +1231,22 @@ func TestContributorsTriageCardIsOfTheHead(t *testing.T) {
 	if got := r.stageOf(t, b.ID); got != "review" || accepted(b.ID) != lastSHA {
 		t.Fatalf("after the pick of the new card %s is in %s with accepted_head %v, want review with %s", b.ID, got, accepted(b.ID), lastSHA)
 	}
+
+	// Read, posted and passed, the bead waits in approved — and new
+	// commits take the yes back there too, with a card of the new head.
+	const approvedSHA = "7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+	r.reviewerSays(t, b.ID, false)
+	r.ciSays(t, b.ID, true)
+	if got := r.stageOf(t, b.ID); got != "approved" {
+		t.Fatalf("%s in %s after the yard's CI passed, want approved", b.ID, got)
+	}
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, atHead(approvedSHA))...)
+	r.pass(t)
+	if got := r.bead(t, b.ID); got.Stage != "triage" || accepted(b.ID) != lastSHA || got.Metadata["pr_head"] != approvedSHA {
+		t.Fatalf("after the push in approved %s is in %s with accepted_head %v and pr_head %v, want triage with %s and %s",
+			b.ID, got.Stage, accepted(b.ID), got.Metadata["pr_head"], lastSHA, approvedSHA)
+	}
+	theCard(b.ID, approvedSHA)
 
 	// The label is the other way to the same yes: it records the head its event
 	// named, and takes the card back with the move.

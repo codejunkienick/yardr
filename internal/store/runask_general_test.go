@@ -42,6 +42,7 @@ func TestGeneralAskRefusals(t *testing.T) {
 		want  string
 	}{
 		{[]string{"peer", "allow", "airy", "--mail-limit", "300"}, "the specific card is the only door"},
+		{[]string{"settings", "set", "hook_public_url", "https://yard.example/my", "hooks"}, "the specific card is the only door"},
 		{[]string{"group", "add", "g3", "--runner", "manual"}, "the specific card is the only door"},
 		{[]string{"bead", "answer", "yardr-x", "1"}, "never carried"},
 		{[]string{"bead", "answer"}, "never carried"},
@@ -121,7 +122,6 @@ func TestGeneralAskFiles(t *testing.T) {
 		name  string
 		words []string
 	}{
-		{"an Askable key with a spaced value", []string{"settings", "set", "hook_public_url", "https://yard.example/my", "hooks"}},
 		{"an Askable key with a ? value", []string{"settings", "set", "hook_public_url", "https://yard.example/hooks?x=1"}},
 		{"an Askable key set empty in one word", []string{"settings", "set", "hook_public_url="}},
 		{"a bead title with a ?", []string{"bead", "create", "Fix", "the", "?", "bug"}},

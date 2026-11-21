@@ -80,7 +80,7 @@ func ask(h http.Handler, method, path, credential string, body io.Reader) *httpt
 }
 
 // call makes the call as the device and answers the reply's body.
-func call(t *testing.T, h http.Handler, token, method, body string) string {
+func call(t testing.TB, h http.Handler, token, method, body string) string {
 	t.Helper()
 	w := ask(h, http.MethodPost, "/user/call/"+method, token, strings.NewReader(body))
 	if w.Code != http.StatusOK {

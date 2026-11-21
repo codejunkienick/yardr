@@ -504,6 +504,9 @@ var runList = []runCommand{{
 	stale:       (*wtx).settingSetStale,
 	weigh:       settingSetWeight,
 	run:         runSettingSet,
+	// A value of several words is joined with single spaces (runs of
+	// spaces collapse to one); the comma holds for description lists.
+	commas: true,
 }, {
 	words:       []string{"peer", "rename"},
 	use:         "yardr peer rename <old> <new>",

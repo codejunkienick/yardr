@@ -209,10 +209,13 @@ func TestRunAskRefusals(t *testing.T) {
 // A bracket is a character any word of the list may have: a GitHub App's bot
 // logs in as <slug>[bot], a model carries its window (opus[1m]) and an IPv6
 // host is in brackets. No shell reads a word, and nothing else comes in with
-// it: a quote, a dollar, a backtick and a parenthesis are still no character
-// of a word, and a space still ends it. The line a card shows for it is the
-// one a terminal takes, so a word with a bracket is in single quotes (zsh
-// refuses it bare) and every other word is as it was.
+// it: a dollar and a backtick are still no character of a word, and a space
+// still ends one, except in a settings value past its key, whose words may
+// hold description punctuation and join with spaces (isSettingValueChar,
+// parseSettingSet). The line a card shows for it is the one a terminal
+// takes, so a word with a bracket, a space, a semicolon, a parenthesis or a
+// quote is in single quotes (zsh refuses a bracket bare, and the shell
+// would split or run the rest) and every other word is as it was.
 func TestRunAskTakesBrackets(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ typed, want string }{
@@ -221,6 +224,11 @@ func TestRunAskTakesBrackets(t *testing.T) {
 		{"crew add porter kind=claude model=opus[1m] preset=auto", "yardr crew add porter kind=claude 'model=opus[1m]' preset=auto"},
 		{"peer set airy --url http://[::1]:8790", "yardr peer set airy --url 'http://[::1]:8790'"},
 		{"peer allow airy --mail-limit 300", "yardr peer allow airy --mail-limit 300"},
+		// A settings value rides joined and may hold a semicolon: the
+		// card's line quotes it whole, so a terminal takes it as one
+		// word and runs nothing past the semicolon.
+		{"settings set yard_description This yard builds X; ships Y.", "yardr settings set yard_description 'This yard builds X; ships Y.'"},
+		{`settings set operator_note ada's rota (nights)`, `yardr settings set operator_note 'ada'\''s rota (nights)'`},
 	} {
 		if _, argv, err := parseRun([]string{c.typed}); err != nil {
 			t.Errorf("--run %q = %v, want it read", c.typed, err)

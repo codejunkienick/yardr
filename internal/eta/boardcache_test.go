@@ -2,6 +2,7 @@ package eta_test
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -106,6 +107,51 @@ func TestArrivalsBoardSharedWhileHeadStands(t *testing.T) {
 	}
 	if got := y.listings.Load(); got != 1 {
 		t.Errorf("concurrent reads listed beads %d times, want 1 (one shared computation)", got)
+	}
+}
+
+// boardEvictRun numbers this test's runs in the binary: each run fills
+// minutes later than the last one's, so a repeated run (-count=2) evicts
+// the earlier run's boards first, and all of them before boardNow, so the
+// parallel board tests' keeps evict these leftovers and never their own.
+var boardEvictRun atomic.Int64
+
+// Thirty-three distinct viewers ask for the arrivals board at one head in
+// successive minutes: the cache keeps 32, the stalest minute's board is
+// dropped, and asking it again computes it whole. Sequential: the boards'
+// cache is shared across the package's tests, and the parallel ones run
+// after the sequential ones, on these leftovers.
+func TestArrivalsBoardEvictsStalestPastCap(t *testing.T) {
+	y, ctx := boardYard(t)
+	base := boardNow.Add(time.Duration(-100000+100*boardEvictRun.Add(1)) * time.Minute)
+	at := func(i int) time.Time { return base.Add(time.Duration(i) * time.Minute) }
+	for i := 0; i < 33; i++ {
+		if _, err := eta.ArrivalsViaStore(ctx, y, fmt.Sprintf("viewer-%d", i), at(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := y.listings.Load(); got != 33 {
+		t.Fatalf("filling 33 viewers listed beads %d times, want 33", got)
+	}
+	// The 32 kept viewers reuse without listing; the stalest minute's
+	// viewer asked again is computed whole.
+	for i := 1; i < 33; i++ {
+		if _, err := eta.ArrivalsViaStore(ctx, y, fmt.Sprintf("viewer-%d", i), at(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := y.listings.Load(); got != 33 {
+		t.Errorf("re-asking the 32 kept viewers listed beads %d times, want 33 (reused)", got)
+	}
+	board, err := eta.ArrivalsViaStore(ctx, y, "viewer-0", at(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := y.listings.Load(); got != 34 {
+		t.Errorf("the dropped viewer listed beads %d times, want 34 (computed whole)", got)
+	}
+	if len(board.Rows) != 1 {
+		t.Errorf("the dropped viewer's board = %+v, want the yard's row", board)
 	}
 }
 

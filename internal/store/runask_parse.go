@@ -88,6 +88,22 @@ func parseRun(sent []string) (*runCommand, []string, error) {
 	return c, argv, err
 }
 
+// isSettingValueChar reports whether char may stand in a settings set
+// value word: at is the word's index past a leading yardr, which must be
+// past the row's words and the key. The key stays strict. What the loop
+// holds everywhere holds here (the colon among the punctuation, the comma
+// where the row opts in with commas); new here are the description marks
+// and non-ASCII letters. Refused by omission, as everywhere: the double
+// quote, the backtick, the dollar, and the rest of the punctuation. A
+// value word in a flag's or an assignment's shape is the row's own reader
+// to refuse (parseSettingSet).
+func isSettingValueChar(row *runCommand, at int, char rune) bool {
+	if row == nil || !slices.Equal(row.words, []string{"settings", "set"}) || at <= len(row.words) {
+		return false
+	}
+	return strings.ContainsRune(";()'", char) || unicode.IsLetter(char) && char > unicode.MaxASCII
+}
+
 // parseRow is parseRun for a row of the list, and errNotRow for anything
 // else: a command the asker may run themselves, one that is the
 // operator's alone, or none the yard runs from a card. askedRun tells
@@ -148,6 +164,11 @@ func parseRow(sent []string) (*runCommand, []string, error) {
 		case row != nil && slices.Equal(row.words, []string{"peer", "add"}) && word-wordOffset == len(row.words)+1:
 			// The invite is one word; ParseInvite checks it after the
 			// command has been split, including its URL's punctuation.
+		case isSettingValueChar(row, word-wordOffset, char):
+			// A settings value is the operator's own words (a yard's
+			// description, a note): past the key the row's reader takes
+			// description punctuation and non-ASCII letters, checked
+			// after the split as the invite is.
 		default:
 			return nil, nil, runNoneChar(char)
 		}
@@ -187,13 +208,16 @@ func runCommandLineWithShellWord(argv []string, word string) string {
 // when the line is pasted, which is what a card's command and take-back
 // lines are for. A word that holds a bracket is single-quoted: zsh reads a
 // bare one as a pattern and refuses the whole line ("no matches found").
-// Single quotes inside the word are escaped so the shell passes the key
-// unchanged. Every other word stays bare, so a line without brackets reads
-// as it always has.
+// So is a word that holds a space, a semicolon, a parenthesis or a quote:
+// a settings value rides a card unquoted and may hold them, and pasted bare
+// the shell would split the line or run what follows the semicolon.
+// Single quotes inside the word are escaped so the shell passes it
+// unchanged. Every other word stays bare, so a line without them reads as
+// it always has.
 func typedWords(argv []string) []string {
 	words := slices.Clone(argv)
 	for i, word := range words {
-		if strings.ContainsAny(word, "[]") {
+		if strings.ContainsAny(word, "[];()' ") {
 			words[i] = "'" + strings.ReplaceAll(word, "'", "'\\''") + "'"
 		}
 	}
