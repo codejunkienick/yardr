@@ -32,13 +32,14 @@ func TestHarnessFiles(t *testing.T) {
 			t.Errorf("%s model flag %q, want --model", h.Kind, h.Flags.Model)
 		}
 	}
-	if want := []string{"claude", "codex", "grok", "kimi", "opencode", "pi", "kiro", "muse"}; !slices.Equal(kinds, want) {
+	if want := []string{"claude", "codex", "grok", "kimi", "opencode", "pi", "agy", "kiro", "muse"}; !slices.Equal(kinds, want) {
 		t.Errorf("kinds with a file: %v, want %v", kinds, want)
 	}
 	// How each kind takes an effort, as its file says it: Claude Code and Muse
 	// by a flag, Codex as the setting its -c sets. A kind with no entry takes
 	// none, and a group of it refuses the key.
 	wantEffort := map[string]string{
+		"agy":    "--effort {level} (low medium high xhigh max)",
 		"claude": "--effort {level} (low medium high xhigh max)",
 		"codex":  "-c model_reasoning_effort={level} (low medium high xhigh max ultra)",
 		"muse":   "--reasoning-effort {level} (none minimal low medium high xhigh max ultra)",
@@ -52,7 +53,7 @@ func TestHarnessFiles(t *testing.T) {
 			t.Errorf("%s: effort %q, want %q", h.Kind, got, wantEffort[h.Kind])
 		}
 	}
-	wantProvider := map[string]string{"claude": "Anthropic", "codex": "OpenAI", "grok": "xAI", "kimi": "Moonshot", "kiro": "AWS", "muse": "Meta"}
+	wantProvider := map[string]string{"agy": "Google", "claude": "Anthropic", "codex": "OpenAI", "grok": "xAI", "kimi": "Moonshot", "kiro": "AWS", "muse": "Meta"}
 	for _, h := range Harnesses {
 		if h.Provider != wantProvider[h.Kind] {
 			t.Errorf("%s: provider %q, want %q", h.Kind, h.Provider, wantProvider[h.Kind])
@@ -172,15 +173,15 @@ func TestLoadOrderAndAliases(t *testing.T) {
 }
 
 // The trust dialogs yardr answers itself: Claude Code's folder-trust
-// question, Kimi's, Codex's and Muse's, each the text that marks it, the
-// answers that accept it and the mark of its selected answer, as the
-// harness prints them (yardr-bgnn, yardr-mdz4, yardr-q7rd). Kimi names two
-// answers: 2.2.0 renamed 'Trust this folder' to 'Trust and continue'
+// question, Kimi's, Codex's, Muse's and agy's, each the text that marks
+// it, the answers that accept it and the mark of its selected answer, as
+// the harness prints them (yardr-bgnn, yardr-mdz4, yardr-q7rd). Kimi names
+// two answers: 2.2.0 renamed 'Trust this folder' to 'Trust and continue'
 // (yardr-k9ew). No other kind names one.
 func TestTrust(t *testing.T) {
 	for _, h := range Harnesses {
-		if (h.Trust != nil) != (h.Kind == "claude" || h.Kind == "kimi" || h.Kind == "codex" || h.Kind == "muse") {
-			t.Errorf("%s: trust %+v; only claude's, kimi's, codex's and muse's files name one", h.Kind, h.Trust)
+		if (h.Trust != nil) != (h.Kind == "claude" || h.Kind == "kimi" || h.Kind == "codex" || h.Kind == "muse" || h.Kind == "agy") {
+			t.Errorf("%s: trust %+v; only claude's, kimi's, codex's, muse's and agy's files name one", h.Kind, h.Trust)
 		}
 	}
 	claude, _ := Lookup("claude")
@@ -198,6 +199,10 @@ func TestTrust(t *testing.T) {
 	muse, _ := Lookup("muse")
 	if muse.Trust == nil || muse.Trust.Dialog != "Do you trust this workspace?" || !slices.Equal(muse.Trust.Answers, []string{"1  Trust and continue"}) || muse.Trust.Cursor != "⟩" {
 		t.Errorf("muse: trust %+v", muse.Trust)
+	}
+	agy, _ := Lookup("agy")
+	if agy.Trust == nil || agy.Trust.Dialog != "Do you trust the contents of this project?" || !slices.Equal(agy.Trust.Answers, []string{"Yes, I trust this folder"}) || agy.Trust.Cursor != ">" {
+		t.Errorf("agy: trust %+v", agy.Trust)
 	}
 }
 

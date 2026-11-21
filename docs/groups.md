@@ -936,8 +936,8 @@ there, not when the model is set: no command asks an agent about a model.
 of its kind: `yardr group set reviewers effort=max`. The kind's file says how a
 level reaches the agent and which levels there are (`yardr harness show <kind>`
 prints both), and the runner adds the words after the group's own `args` and
-its `model`: Claude Code is given `--effort <level>`, Muse `--reasoning-effort
-<level>` and Codex `-c model_reasoning_effort=<level>`. A kind whose file names
+its `model`: Claude Code and Antigravity are given `--effort <level>`, Muse
+`--reasoning-effort <level>` and Codex `-c model_reasoning_effort=<level>`. A kind whose file names
 none (Grok, Kimi, Kiro, opencode and pi) refuses the key, and a level the kind
 lacks is refused with the ones it has, as it is where the group is added or a
 pack imports it; nothing is written. Codex checks no level itself, its model
@@ -1851,12 +1851,12 @@ built into the binary and read once when yardr starts:
 |---|---|---|
 | `version` | the shape of the file, 1 today; a file of another shape is refused | the loader, `yardr doctor` |
 | `label` | the harness's name as people write it | the forms, `yardr harness show`, `yardr doctor --json` |
-| `provider` | who makes the harness, as people write it. Claude Code, Codex, Kimi, Grok, Muse and Kiro name one each; a kind whose README names no maker names none | `yardr harness show`, `yardr doctor --json`, for a program that shows them |
+| `provider` | who makes the harness, as people write it. Claude Code, Codex, Kimi, Grok, Muse, Kiro and Antigravity name one each; a kind whose README names no maker names none | `yardr harness show`, `yardr doctor --json`, for a program that shows them |
 | `aliases` | other names the kind is asked for by; no file has one today | the loader |
 | `install` | where to get the harness; printed, never run | `yardr doctor`, the onboarding |
 | `fetch` | how the harness gets onto a Mac that has no package manager and nobody at a terminal: one file of one version at its maker's address, with its sha256 ([doctor.md](doctor.md#a-program-fetched-on-a-mac)). Printed, never fetched by yardr. Claude Code and Codex have one; a kind with none is installed by hand | `yardr doctor --json`, `yardr harness show --json`, for a program that fetches |
 | `trust` | the folder-trust dialog yardr answers: `dialog` (the text that marks it), `answers` (those that accept it, one string or a list, one entry per harness version that renamed it; the old `answer` reads as one), `cursor` (the mark of its selected answer), and optional `env` (`KEY=VALUE` entries that let the harness skip the dialog). The runner sets the values only when trust is automatic; with `trust=false` it clears them, and a group's `env_file` cannot override them. A kind with no `trust` is left for a person | the herdr runner, at start |
-| `marks` | `input`, `message`, `edge`: what its pane is read by ([herdr setup](#herdr-setup)); `placeholder`: the input's hint when it holds nothing, which reads empty, for a harness that draws one in no faint style ([Kiro](#kiro)'s is gray); `error`: the marks taken off a line before it is read for an error | the herdr runner; the daemon |
+| `marks` | `input`, `message`, `edge`: what its pane is read by ([herdr setup](#herdr-setup)); `placeholder`: the input's hint when it holds nothing, which reads empty, for a harness that draws one in no faint style ([Kiro](#kiro)'s and [Antigravity](#antigravity)'s are gray); `error`: the marks taken off a line before it is read for an error | the herdr runner; the daemon |
 | `flags` | `model` (selects the model), `effort` (how the kind takes a reasoning effort, a group's `effort=<level>`: `args`, the words added to the agent's arguments with `{level}` in one of them (`--effort {level}`, or `-c`, `model_reasoning_effort={level}` where the harness takes a setting), `levels` it takes, weakest first (never `default`, which a group's `effort=default` reads as the harness's own effort and no file may list as a level), and `aliases`, other flags of the harness that set the same effort, which a group's `args` are held to as to the flag itself; Claude Code, Codex and Muse have one, a kind with none refuses the key), `unattended` (what `yardr init` gives the yardmaster and the forms preselect), `version` (prints its version and exits), `version_contains` (what that output must contain for the program to be this harness, since any executable can be called `claude`: plain text, looked for anywhere in everything the flag printed. A program that exits 0 from the flag without it is [another program](doctor.md#a-program-that-answers-as-another), not found by doctor, not chosen by the onboarding and not called by `--try`. Claude Code's is `Claude Code` and Codex's `codex-cli`, each read from the real program; a kind with none takes any program that answers), `one_shot` (answers one prompt and exits: `yardr doctor --try`), `always` (added first to every agent of the kind, before the group's own: [Codex](#codex)'s `--no-daemon` and its update check off, [Kiro](#kiro)'s `chat` subcommand), `permissions` (named flag sets, each with `label`, `args`, `description`). `{socket}` in an argument, a preset's or a group's own `args`, is the path of the yard's socket, put in by the runner when the agent starts: for a kind whose sandbox denies unix sockets and can be told of one to let through (the `read only` presets). `{workdir}` is the directory the session works in (a bead's worktree, a crew member's directory), put in the same way: for a sandbox that is told what to deny by an absolute path (Claude Code's `read only`). `{tmpdir}` is a private temporary directory the runner makes for the session when an argument names it, beside the worktrees and for the yard's user alone, and removes when the session ends; `TMPDIR` and `TMPPREFIX` (zsh's) name it in the session's environment: for a sandbox that writes nowhere else and must still let a shell make the file of a here-document (Codex's `read only`) | `yardr init`, `group add`, `pack apply`, `doctor`; the herdr runner |
 | `offers` | the models to pick from: each a `model` id the kind's `--model` flag takes, a `label` a person reads, and what it is `recommended` for (`yardmaster` on the one frontier model a yardmaster should run on). A suggestion, not a check: `init --model` takes any id, whether the file names it or not. Claude Code, Codex, Kimi, Muse and Kiro name one each; a kind with none suggests no model | `yardr harness show`, `yardr doctor --json`, for a program that offers them |
 | `model` | where the model an agent reports is read ([Models](#models)): `home` and `home_env` (the harness's own directory), `glob` (the session file, `{session}` being the id herdr reports, or the segment of the file's path that stands there where herdr names a session by that path, as pi's file name), `type` and `field` (which line, and where in it; `type_field` names the key that holds the type when it is not `type`), and `workspace` (how the file of a session herdr reports no id for is found instead: `type` and `field` name the line that holds the worktree, `at` the line's own time as `usage` reads it; Muse has one) | the daemon |
@@ -2132,9 +2132,40 @@ model is then missing, and no event says so. Kiro's sessions live in a
 database yardr does not read, so no `model_reported` is recorded for it;
 check the footer's model instead.
 
+### Antigravity
+
+Antigravity draws its input as a bare line begun with
+`>`, between two rules, an empty one showing the mode's hint in gray:
+
+```text
+────────────────────────────────────────
+> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)
+────────────────────────────────────────
+? for shortcuts                      auto · Gemini 4 Neon · medium
+```
+
+The gray is no faint style, so the hint would read as text someone
+left: auto's words are `placeholder` in `harnesses/agy.yaml`, and an
+input that shows them reads empty. The words are the mode's
+(`--mode accept-edits|auto|plan`), and only auto's, the default a session
+starts in, are named: in another mode an empty input reads as held text
+until the hint's colour can be named instead. A message it took stays
+above with the same `>`, and its own answers carry no mark. It asks the
+folder-trust question in every new worktree, which yardr answers, and
+keeps the folders per folder (see [herdr setup](#herdr-setup)).
+
+Unattended it runs as started: its modes are session behaviour, not a
+permission level, so no flag stands for them, and the default auto mode
+already auto-approves edits and safe commands. Everything without asking
+is `--dangerously-skip-permissions`, the file's `always approve` preset.
+Its sessions live in a database yardr does not read
+(`~/.gemini/antigravity-cli/conversations/*.db`), so no `model_reported`
+is recorded for it; the models to pick from are read live from
+`agy models` instead.
+
 ### herdr setup
 
-- **Folder trust.** Claude Code, Codex and Kimi ask whether they may trust
+- **Folder trust.** Claude Code, Codex, Kimi and Antigravity ask whether they may trust
   a folder the first time they are started in it, and none has a flag or
   setting that skips the question in an interactive session. yardr answers
   the dialog the kind's file names (`trust` in harnesses/<kind>.yaml): when
@@ -2143,8 +2174,10 @@ check the footer's model instead.
   a folder a depot (or a crew member's directory) is what says you trust it. The
   session's `started` event carries `trust_accepted: true` when this
   happened. Claude Code and Codex record the answer against the repository,
-  so a bead session meets it once per depot's worktree; Kimi records it per
-  folder, so it comes up in every new worktree. Claude Code keeps no trust
+  so a bead session meets it once per depot's worktree; Kimi and
+  Antigravity record it per folder, so it comes up in every new worktree.
+  Antigravity keeps the folders in `trustedWorkspaces` in
+  `~/.gemini/antigravity-cli/settings.json`. Claude Code keeps no trust
   for the home directory, so a crew session there meets the dialog at every
   start, and the yard answers it each time. Set `--set trust=false`
   on a group (or crew member) to answer it yourself: the session then waits
@@ -2231,6 +2264,7 @@ check the footer's model instead.
   | `codex` | `›` | `›` |
   | `grok` | `❯` after `│`, the edge of the box its input is drawn in; the edges are no part of the text | `❯` |
   | `kimi` | `>` after `│`, the edge of the box its input is drawn in; the edges are no part of the text | `✨` |
+  | `agy` | `>` | `>` |
   | `kiro` | `›` | no mark: the prompt anywhere above the input |
   | `muse` | `❯` | `❯` |
   | any other, or none | `❯` or `›` | no mark known: the prompt anywhere above the input, and anywhere at all in a pane with neither mark, as before |
@@ -2239,7 +2273,7 @@ check the footer's model instead.
   The input is what the pane holds from its last line that begins with the
   input mark. A harness that is still starting has drawn no input yet, and
   the pane's terminal echoes keys that come then. So in the pane of a
-  `claude`, `codex`, `kimi`, `grok`, `muse` or `kiro` session only that kind's marks
+  `claude`, `codex`, `kimi`, `grok`, `muse`, `kiro` or `agy` session only that kind's marks
   tell: without its input mark the text proves nothing, and the look ends
   as `no input`, the prompt pending; and above the input the prompt shows
   only where it begins a line with the message mark, as a message the agent
@@ -2280,7 +2314,7 @@ check the footer's model instead.
   typed) and a nudge whose Enter was lost. A nudge herdr saw stall does not
   wait for that pass: it gets its Enter on the one that typed it (see
   "Text in the input" in [crew.md](crew.md)). Only a `claude`, `codex`,
-  `kimi`, `muse` or `kiro` pane is read for it: in any other, and in the pane of a session whose handle
+  `kimi`, `muse`, `kiro` or `agy` pane is read for it: in any other, and in the pane of a session whose handle
   has no `kind`, yardr cannot tell the input and sends no key. A crew
   member's first prompt is known from `first_prompt` on its handle, so one
   started before yardr wrote that is covered from its next start.
@@ -2289,7 +2323,7 @@ check the footer's model instead.
   itself before it starts (`brew upgrade --cask codex` on a Mac, its
   installer's upgrade elsewhere), a slow start. Keys
   typed then go to whatever runs there. So for a `claude`, `codex`, `kimi`,
-  `muse` or `kiro` session, a pane that shows no line beginning with the kind's input mark is
+  `muse`, `kiro` or `agy` session, a pane that shows no line beginning with the kind's input mark is
   typed no first prompt, by `yardr` at the start (`prompt_look` is `no
   screen, not typed`) or by the daemon later: the prompt stays pending, no
   delivery is counted and none is lost, and one `session_harness_starting`

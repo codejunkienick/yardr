@@ -155,6 +155,16 @@ func TestHarnessListAndShow(t *testing.T) {
 		"no source known: nothing is recorded and nothing compared",
 		"none known: nothing is reported, and session_idle with its tail is what there is",
 		"claude-opus-5.5 (Opus 5.5), recommended for a yardmaster", "auto (Auto)", "claude-sonnet-4.5 (Sonnet 4.5)")
+	wantText(t, ask(0, "harness", "show", "agy"), "agy  Antigravity, by Google  (harnesses/agy.yaml, version 1)",
+		"trust: yardr answers its folder-trust dialog", "input begins with:    >", "a message it took:    >",
+		"an empty input shows: Auto mode: edits & safe commands auto-approved (shift+tab to cycle)",
+		"before an error line: any of └┃", "unattended: none known", "model flag: --model",
+		"effort:     --effort {level}  (a group's effort=<level>; levels: low, medium, high, xhigh, max)",
+		"one shot:   -p <prompt>",
+		`permission "always approve": --dangerously-skip-permissions`,
+		"none named: --model takes any id",
+		"no source known: nothing is recorded and nothing compared",
+		"none known: nothing is reported, and session_idle with its tail is what there is")
 	wantText(t, ask(0, "harness", "show", "claude"), "claude  Claude Code, by Anthropic  (harnesses/claude.yaml, version 1)")
 	wantText(t, ask(0, "harness", "show", "pi"), "effort:     none: a group of this kind takes no effort=", "Models it offers", "none named: --model takes any id",
 		"pi  pi  (harnesses/pi.yaml, version 1)", `other   ^Error: Retry failed after \d+ attempts`)

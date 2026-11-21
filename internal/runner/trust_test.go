@@ -180,6 +180,31 @@ Use Up/Down or 1/2, then Enter. Esc quits.
 `
 }
 
+// agyTrustDialog is agy 1.5.14's folder-trust dialog as a pty read it in
+// a scratch directory (21 Nov 2026), the cursor on the answer `on`. The
+// dialog opens with its cursor on the accepting answer.
+func agyTrustDialog(on string) string {
+	agy, _ := agents.Lookup("agy")
+	mark := func(answer string) string {
+		if answer == on {
+			return "> " + answer
+		}
+		return "  " + answer
+	}
+	return `Accessing workspace:
+
+/private/tmp/agy-scratch1
+
+Do you trust the contents of this project?
+
+Antigravity CLI requires permission to read, edit, and execute files here.
+` + mark(agy.Trust.Answers[0]) + `
+` + mark("No, exit") + `
+
+  ↑/↓ Navigate · enter Confirm
+`
+}
+
 // apiKeyDialog is Claude Code 2.1.288's use-this-API-key dialog as herdr's
 // `pane read --source visible` prints it, the cursor on the answer `on`
 // ("Yes" or "No (recommended)"). Read live under a pty, 20 Oct 2026, with
@@ -340,6 +365,7 @@ func TestStartAgentAcceptsFolderTrust(t *testing.T) {
 	kimi, _ := agents.Lookup("kimi")
 	codex, _ := agents.Lookup("codex")
 	muse, _ := agents.Lookup("muse")
+	agy, _ := agents.Lookup("agy")
 	for _, c := range []struct {
 		name     string
 		entry    store.Trust
@@ -356,6 +382,7 @@ func TestStartAgentAcceptsFolderTrust(t *testing.T) {
 		{"codex, cursor on the answer", *codex.Trust, codexTrustDialog, "2. Quit", codex.Trust.Answers[0], codex.Trust.Answers[0], false},
 		{"codex, cursor off the answer", *codex.Trust, codexTrustDialog, "2. Quit", codex.Trust.Answers[0], "2. Quit", true},
 		{"muse, cursor on the answer", *muse.Trust, museTrustDialog, "2  Quit", muse.Trust.Answers[0], muse.Trust.Answers[0], false},
+		{"agy, cursor on the answer", *agy.Trust, agyTrustDialog, "No, exit", agy.Trust.Answers[0], agy.Trust.Answers[0], false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -585,6 +612,7 @@ func TestStartAgentLeavesOtherQuestions(t *testing.T) {
 	kimi, _ := agents.Lookup("kimi")
 	codex, _ := agents.Lookup("codex")
 	muse, _ := agents.Lookup("muse")
+	agy, _ := agents.Lookup("agy")
 	stuck := strings.ReplaceAll(trustDialog("No, exit"), "❯ No, exit", "> No, exit")
 	cases := []struct {
 		name, screen string
@@ -607,6 +635,8 @@ func TestStartAgentLeavesOtherQuestions(t *testing.T) {
 		{"codex's answer at the end of a decorated line", "Trust this folder?\n› Please choose 1. Trust and continue\n", codex.Trust, ""},
 		{"muse's answer without its question", "⟩ 1  Trust and continue\n", muse.Trust, ""},
 		{"muse's question without its answer", "Do you trust this workspace?\n", muse.Trust, ""},
+		{"agy's answer without its question", "> Yes, I trust this folder\n", agy.Trust, ""},
+		{"agy's question without its answer", "Do you trust the contents of this project?\n", agy.Trust, ""},
 		{"cursor never reaches the answer", stuck, claude.Trust, "down"},
 	}
 	for _, c := range cases {
@@ -812,10 +842,12 @@ func TestAcceptTrustAnswersLateDialog(t *testing.T) {
 	claude, _ := agents.Lookup("claude")
 	codex, _ := agents.Lookup("codex")
 	muse, _ := agents.Lookup("muse")
+	agy, _ := agents.Lookup("agy")
 	yes := trustDialog(claude.Trust.Answers[0])
 	narrowYes := narrowTrustDialog(claude.Trust.Answers[0])
 	codexYes := codexTrustDialog(codex.Trust.Answers[0])
 	museYes := museTrustDialog(muse.Trust.Answers[0])
+	agyYes := agyTrustDialog(agy.Trust.Answers[0])
 	cases := []struct {
 		name   string
 		screen string
@@ -829,6 +861,7 @@ func TestAcceptTrustAnswersLateDialog(t *testing.T) {
 		{"the dialog, kind unset", yes, map[string]any{"pane": "w1:p1"}, nil, true, true},
 		{"codex's dialog, drawn late", codexYes, map[string]any{"pane": "w1:p1"}, map[string]any{"kind": "codex"}, true, true},
 		{"muse's dialog, drawn late", museYes, map[string]any{"pane": "w1:p1"}, map[string]any{"kind": "muse"}, true, true},
+		{"agy's dialog, drawn late", agyYes, map[string]any{"pane": "w1:p1"}, map[string]any{"kind": "agy"}, true, true},
 		{"not drawn yet", "", map[string]any{"pane": "w1:p1"}, map[string]any{"kind": "claude"}, false, false},
 		{"another question", " Do you want to allow this?\n ❯ Yes\n", map[string]any{"pane": "w1:p1"}, map[string]any{"kind": "claude"}, false, false},
 		{"trust=false", yes, map[string]any{"pane": "w1:p1"}, map[string]any{"kind": "claude", "trust": false}, false, false},
@@ -845,6 +878,9 @@ func TestAcceptTrustAnswersLateDialog(t *testing.T) {
 		}
 		if kind, _ := c.cfg["kind"].(string); kind == "muse" {
 			no, yesScreen = museTrustDialog("2  Quit"), museYes
+		}
+		if kind, _ := c.cfg["kind"].(string); kind == "agy" {
+			no, yesScreen = agyTrustDialog("No, exit"), agyYes
 		}
 		h, calls := trustHerdr(t, no, yesScreen, c.screen, "idle")
 		if got := h.AcceptTrust(context.Background(), c.handle, c.cfg); got != c.want {

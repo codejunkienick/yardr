@@ -23,6 +23,7 @@ func Executable(kind string) string {
 // table to them, so a file that renames a label fails until this follows.
 // Read-only: the catalogue is the writer.
 var HarnessLabels = map[string]string{
+	"agy":      "Antigravity",
 	"claude":   "Claude Code",
 	"codex":    "Codex",
 	"grok":     "Grok",
@@ -65,6 +66,9 @@ var PresetNames = []string{
 // (design yardr-m90n 3.5), which a test here holds to the flags, so a
 // preset added without the mark fails until it has it. Read-only.
 var HarnessPresets = map[string][]Permission{
+	"agy": {
+		{Label: "always approve", Args: []string{"--dangerously-skip-permissions"}, Note: "auto-approves all tool permission requests without prompting", Strong: true},
+	},
 	"claude": {
 		{Label: "auto", Args: []string{"--permission-mode", "auto"}, Note: "Claude judges each action; asks only about risky ones"},
 		{Label: "accept edits", Args: []string{"--permission-mode", "acceptEdits"}, Note: "file edits allowed; shell commands still ask"},

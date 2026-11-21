@@ -1,0 +1,78 @@
+# Antigravity. Every flag is from `agy --help` (1.5.14).
+version: 1
+label: Antigravity
+provider: Google
+
+# agy asks whether a folder is trusted the first time it is started in
+# it: yardr answers it (internal/runner/trust.go). The dialog is its
+# question, the answer the one that accepts it, as agy 1.5.14 prints
+# them, read 2026-11-21 under a pty in a scratch directory:
+#
+#   Accessing workspace:
+#
+#   /private/tmp/agy-scratch1
+#
+#   Do you trust the contents of this project?
+#
+#   Antigravity CLI requires permission to read, edit, and execute files here.
+#
+#   > Yes, I trust this folder
+#     No, exit
+#
+#     ↑/↓ Navigate · enter Confirm
+#
+# The dialog opens with its cursor on the accepting answer. Answering it
+# leaves agy's own trust record for agy to write: the directory in
+# trustedWorkspaces in ~/.gemini/antigravity-cli/settings.json, one entry
+# per folder, and no hand adds one there. `agy --help` names no flag or
+# setting that skips the question.
+trust:
+  dialog: "Do you trust the contents of this project?"
+  answers: ["Yes, I trust this folder"]
+  cursor: ">"
+
+# agy's input is a bare line begun with >, between two rules (read live,
+# agy 1.5.14, 21 Nov 2026):
+#
+#   ────────────────────────────────────────
+#   > Auto mode: edits & safe commands auto-approved (shift+tab to cycle)
+#   ────────────────────────────────────────
+#   ? for shortcuts                      auto · Gemini 4 Neon · medium
+#
+# An empty input shows the mode's hint in gray (SGR 90, not faint), so
+# without the `placeholder` field it would read as text someone left.
+# The hint's words depend on the mode (--mode
+# accept-edits|auto|plan); only auto's are named, the default a session
+# starts in, so in another mode an empty input reads as text someone left
+# until the hint's colour can be named instead
+# (placeholder_sgr reads 38;2 and 38;5, and SGR 90 is neither). A message
+# it took stays above with the same mark. Before its own messages agy
+# draws ┃ (a notice, with "esc to dismiss") or └ (a tip); its answers
+# carry no mark, and an unknown command is one plain line. The rest taken
+# off an error line is what any TUI may draw.
+marks:
+  input: ">"
+  message: ">"
+  placeholder: "Auto mode: edits & safe commands auto-approved (shift+tab to cycle)"
+  error: "└┃⏺⎿●■•▌│✗✘⚠!"
+
+flags:
+  model: --model
+  # `agy --help` (1.5.14, 21 Nov 2026): "--effort  Reasoning effort for
+  # the current session (low|medium|high|xhigh|max)". A group's effort=
+  # becomes these words after its own arguments.
+  effort:
+    args: [--effort, "{level}"]
+    levels: [low, medium, high, xhigh, max]
+  # No unattended: agy's modes (--mode accept-edits|auto|plan) are session
+  # behaviour, not a permission level, so none stands for it. The default
+  # auto mode already auto-approves edits and safe commands; everything
+  # without asking is the preset below.
+  version: [--version]
+  # `agy -p "<prompt>"` answers one prompt and exits: run 21 Nov 2026,
+  # `agy -p "reply with exactly this word: ok"` printed `ok`, status 0.
+  one_shot: [-p]
+  permissions:
+    - label: always approve
+      args: [--dangerously-skip-permissions]
+      description: auto-approves all tool permission requests without prompting

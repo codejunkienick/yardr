@@ -93,6 +93,7 @@ before it starts the yardmaster
 | opencode | `opencode run <prompt>` |
 | pi | `pi -p <prompt>` |
 | muse | `muse exec <prompt>` |
+| agy | `agy -p <prompt>` |
 
 Any other kind is reported as not tried. `--try` makes this call even when
 the separate version check fails or hangs, so it can show what the call
@@ -174,12 +175,12 @@ own after the FAULT, so it is easy to copy. yardr never runs it.
 | `FAULT <program> not on PATH: <what it is needed for>. Get it: <where>` | missing. For git and herdr the same words the onboarding uses before its first page, which prints herdr's command on a line of its own where it does not [install herdr](#the-onboarding-installs-herdr) first. For a harness, `<where>` is its install command where yardr knows one (claude, codex, kiro, opencode), else a pointer to the agent's own documentation |
 | `    curl -fsSL https://herdr.dev/install.sh \| sh` | herdr is missing: the installer command from its FAULT, printed on its own line so it can be copied |
 | ``FAULT <program> not on PATH: <what it is needed for>. Found at <path> by your login shell, which this shell's PATH does not have: add <dir> to PATH here, or for the daemon's service run `yardr daemon install` from a login shell`` | missing here and installed: your login shell finds it. A shell without a terminal (ssh with a command, a service) reads no profile, so it lacks what `~/.profile` adds, `~/.local/bin` for one. The daemon's service gets the PATH of the shell that installs it ([configuration.md](configuration.md#login-services)) |
-| `FAULT a harness not on PATH: …` | a home with no yard, and no agent herdr starts is installed: a program that [answers as another](#a-program-that-answers-as-another) does not count as one. When the login shell finds claude, codex, grok, kimi, kiro, opencode, pi or muse, the line above is printed for each it finds instead |
+| `FAULT a harness not on PATH: …` | a home with no yard, and no agent herdr starts is installed: a program that [answers as another](#a-program-that-answers-as-another) does not count as one. When the login shell finds claude, codex, grok, kimi, kiro, opencode, pi, muse or agy, the line above is printed for each it finds instead |
 | `ok <harness> <path>, the harness of <who>: answers its version flag (<its first line>)` | found, and it runs |
 | `FAULT <harness> <path>, the harness of <who>: on PATH, but its version flag fails: <error and its first line>` | found, and it does not run |
 | `FAULT <harness> <path>, the harness of <who>: on PATH, but it is not <label>: its version flag printed "<its first line>", which does not say "<text>". herdr starts the first <program> on PATH, which is this one, so a <label> installed behind it never runs: take this one off PATH, or put <label>'s directory before <its directory>. Get it: <where>` | found, and it runs and answers, and it is another program: any executable can be called claude. [Below](#a-program-that-answers-as-another). It is not found as far as the yard goes |
 | `FAULT <harness> <path>, the harness of <who>: on PATH, but it did not answer its version flag within 20s` | found, and it hangs. On macOS the line goes on: `On macOS that can be a quarantined binary waiting on a Gatekeeper dialog nobody sees: run <harness> once in a terminal and answer it` |
-| `ok <harness> <path>, the harness of <who>: not checked, yardr knows no version flag for <kind>` | found, and not run: the flag is known for claude, codex, grok, kimi, kiro, opencode, pi and muse |
+| `ok <harness> <path>, the harness of <who>: not checked, yardr knows no version flag for <kind>` | found, and not run: the flag is known for claude, codex, grok, kimi, kiro, opencode, pi, muse and agy |
 | `note <harness> …` | the three failing lines above (it fails, it hangs, it is not the harness), for a harness nothing runs on yet (a home with no yard) |
 | `…; harness file v<n>` or `…; no harness file (yardr harness list)` | the end of every line of a harness that was found: the version of the file yardr reads the kind from (`yardr harness show <kind>`, [groups.md](groups.md#what-yardr-knows-of-a-kind)), or that it has none and knows no marks, error lines or flags of the kind |
 | `note harness on PATH is not "works": no harness was asked for an answer. yardr doctor --try makes one real call to each (it costs a model call per harness)` | without `--try`, when a harness was found. Not printed on a yard whose server is not running, where `--try` is refused |
@@ -507,7 +508,7 @@ update`, Claude Code's own updates in the background, `codex update`.
 | Codex 0.162.1 | the archive the README names for a Mac, whose one member is moved to `~/.local/bin/codex` | on 2026-10-13: <https://github.com/openai/codex/blob/main/README.md>; the checksums are the digests of <https://releases.openai.com/codex/channels/latest>. The binaries are signed by Developer ID Application: OpenAI OpCo, LLC (2DC432GLL2). It is the README's binary alone, without what OpenAI's installer puts beside it |
 
 git has no `fetch`: on a Mac it is always `xcode-select --install`, Apple's
-own dialog. muse, opencode, grok, kimi, pi and every kind with no harness
+own dialog. agy, muse, opencode, grok, kimi, pi and every kind with no harness
 file have none either, because no way of theirs was verified: an item with no
 `fetch` is a program installed by hand, and its `get` says where. On Linux
 no item has a `fetch` or an `any_of`, whatever the program: there is no one

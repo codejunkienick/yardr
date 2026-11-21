@@ -154,7 +154,7 @@ func TestGroupSetRefuses(t *testing.T) {
 	for want, args := range map[string][]string{
 		`effort "turbo" is no level codex takes (it takes: low, medium, high, xhigh, max, ultra)`:          {"agents", "effort=turbo"},
 		`its args already pass "model_reasoning_effort=low", which effort sets: remove it from args first`: {"agents", "effort=max"},
-		"effort is for the kinds that take one (claude, codex, muse), and pi is not":                       {"plain", "effort=max"},
+		"effort is for the kinds that take one (agy, claude, codex, muse), and pi is not":                  {"plain", "effort=max"},
 		`group tick: unknown config key "effort"`:                                                          {"tick", "effort=max"},
 		`group agents: herdr runner needs config.effort as a string, got the JSON number 5`:                {"agents", "effort=5"},
 	} {

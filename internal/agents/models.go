@@ -24,6 +24,31 @@ func run(ctx context.Context, name string, args ...string) (string, error) {
 	return string(out), err
 }
 
+// agy lists its models one id-and-name tab row per line, after a status
+// line, as 1.5.14 prints them (read live, 21 Nov 2026).
+func agyModels(ctx context.Context) ([]string, error) {
+	out, err := run(ctx, "agy", "models")
+	if err != nil && out == "" {
+		return nil, err
+	}
+	return ParseAgyModels(out), nil
+}
+
+// ParseAgyModels reads the id of each of `agy models`' tab rows: the
+// first field of every line that has one, past its "Fetching available
+// models..." line.
+func ParseAgyModels(out string) []string {
+	var models []string
+	for _, line := range strings.Split(out, "\n") {
+		id, _, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if !ok || id == "" || strings.Contains(id, " ") {
+			continue
+		}
+		models = append(models, id)
+	}
+	return uniq(models)
+}
+
 // claude names its model aliases in the --model help: e.g. 'fable', 'opus'.
 func claudeModels(ctx context.Context) ([]string, error) {
 	out, err := run(ctx, "claude", "--help")

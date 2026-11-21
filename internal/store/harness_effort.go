@@ -134,6 +134,7 @@ func (e *Effort) check() error {
 // the catalogue, so a file that changes a flag or a level fails until this
 // follows. A kind that is not here takes none. Read-only.
 var HarnessEfforts = map[string]Effort{
+	"agy":    {Args: []string{"--effort", LevelArg}, Levels: []string{"low", "medium", "high", "xhigh", "max"}},
 	"claude": {Args: []string{"--effort", LevelArg}, Levels: []string{"low", "medium", "high", "xhigh", "max"}},
 	"codex":  {Args: []string{"-c", "model_reasoning_effort=" + LevelArg}, Levels: []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
 	"muse": {Args: []string{"--reasoning-effort", LevelArg}, Aliases: []string{"--effort"},

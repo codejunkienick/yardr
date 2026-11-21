@@ -577,7 +577,7 @@ func TestRunAskStrongSetRefusals(t *testing.T) {
 		{"group set reviewers effort=5", "effort=5 reads as JSON"},
 		{"group set reviewers effort=max effort=low", "effort is set twice"},
 		{"group set builders effort=max", `unknown config key "effort": nothing reads it. A group of the exec runner takes:`},
-		{"group set plain effort=max", "effort is for the kinds that take one (claude, codex, muse), and pi is not"},
+		{"group set plain effort=max", "effort is for the kinds that take one (agy, claude, codex, muse), and pi is not"},
 		{"group set heavy effort=max", `its args already pass "model_reasoning_effort=high", which effort sets: remove it from args first`},
 		// The word default returns the effort to the harness's own, so the
 		// group must set one to return, beside another change too.

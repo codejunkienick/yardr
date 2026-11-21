@@ -24,6 +24,7 @@ const DefaultKind = "claude"
 // modelLists say how each kind lists the models of the installed agent,
 // which is code, not something a file can say (see models.go).
 var modelLists = map[string]func(ctx context.Context) ([]string, error){
+	"agy":      agyModels,
 	"claude":   claudeModels,
 	"codex":    codexModels,
 	"grok":     grokModels,

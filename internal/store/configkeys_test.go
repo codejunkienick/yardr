@@ -73,15 +73,15 @@ func TestStoreRefusesAConfigKeyNothingReads(t *testing.T) {
 		// An effort is read where an agent is started, so by a herdr group alone,
 		// and it is a level of the group's kind (claude where it names none),
 		// for a kind that takes one, which the group's args do not pass already.
-		`group g: unknown config key "effort": nothing reads it. A group of the exec runner takes:`:                                  put("exec", map[string]any{"cmd": "true", "effort": "max"}),
-		`group g: unknown config key "effort": nothing reads it. A group of the manual runner takes:`:                                put("manual", map[string]any{"effort": "max"}),
-		`group g: herdr runner needs config.effort as a string, got the JSON number 5; write --set 'effort="5"'`:                     put("herdr", map[string]any{"kind": "claude", "effort": 5}),
-		`group g: effort "turbo" is no level claude takes (it takes: low, medium, high, xhigh, max)`:                                 put("herdr", map[string]any{"kind": "claude", "effort": "turbo"}),
-		`group g: effort "ultra" is no level claude takes`:                                                                           put("herdr", map[string]any{"effort": "ultra"}),
-		`group g: effort is for the kinds that take one (claude, codex, muse), and pi is not: its harness file names no flag for it`: put("herdr", map[string]any{"kind": "pi", "effort": "low"}),
-		`group g: its args already pass "--effort", which effort sets: remove it from args first`:                                    put("herdr", map[string]any{"kind": "claude", "effort": "max", "args": []string{"--effort", "high"}}),
-		`group g: its args already pass "model_reasoning_effort=\"high\"", which effort sets`:                                        put("herdr", map[string]any{"kind": "codex", "effort": "max", "args": []string{"-c", `model_reasoning_effort="high"`}}),
-		`group g: its args already pass "--effort=low", which effort sets`:                                                           put("herdr", map[string]any{"kind": "muse", "effort": "high", "args": []string{"--yolo", "--effort=low"}}),
+		`group g: unknown config key "effort": nothing reads it. A group of the exec runner takes:`:                                       put("exec", map[string]any{"cmd": "true", "effort": "max"}),
+		`group g: unknown config key "effort": nothing reads it. A group of the manual runner takes:`:                                     put("manual", map[string]any{"effort": "max"}),
+		`group g: herdr runner needs config.effort as a string, got the JSON number 5; write --set 'effort="5"'`:                          put("herdr", map[string]any{"kind": "claude", "effort": 5}),
+		`group g: effort "turbo" is no level claude takes (it takes: low, medium, high, xhigh, max)`:                                      put("herdr", map[string]any{"kind": "claude", "effort": "turbo"}),
+		`group g: effort "ultra" is no level claude takes`:                                                                                put("herdr", map[string]any{"effort": "ultra"}),
+		`group g: effort is for the kinds that take one (agy, claude, codex, muse), and pi is not: its harness file names no flag for it`: put("herdr", map[string]any{"kind": "pi", "effort": "low"}),
+		`group g: its args already pass "--effort", which effort sets: remove it from args first`:                                         put("herdr", map[string]any{"kind": "claude", "effort": "max", "args": []string{"--effort", "high"}}),
+		`group g: its args already pass "model_reasoning_effort=\"high\"", which effort sets`:                                             put("herdr", map[string]any{"kind": "codex", "effort": "max", "args": []string{"-c", `model_reasoning_effort="high"`}}),
+		`group g: its args already pass "--effort=low", which effort sets`:                                                                put("herdr", map[string]any{"kind": "muse", "effort": "high", "args": []string{"--yolo", "--effort=low"}}),
 	} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("PutGroup = %v, want %s", err, want)
@@ -228,10 +228,10 @@ func TestStoreTakesProviderAndEffortOnHerdr(t *testing.T) {
 		t.Fatal(err)
 	}
 	for want, m := range map[string]map[string]any{
-		`effort "turbo" is no level codex takes`:                                     map[string]any{"effort": "turbo"},
-		`effort "ultra" is no level claude takes`:                                    map[string]any{"kind": "claude"},
-		"effort is for the kinds that take one (claude, codex, muse), and pi is not": map[string]any{"kind": "pi"},
-		`its args already pass "model_reasoning_effort=low", which effort sets`:      map[string]any{"args": []string{"-c", "model_reasoning_effort=low"}},
+		`effort "turbo" is no level codex takes`:                                          map[string]any{"effort": "turbo"},
+		`effort "ultra" is no level claude takes`:                                         map[string]any{"kind": "claude"},
+		"effort is for the kinds that take one (agy, claude, codex, muse), and pi is not": map[string]any{"kind": "pi"},
+		`its args already pass "model_reasoning_effort=low", which effort sets`:           map[string]any{"args": []string{"-c", "model_reasoning_effort=low"}},
 	} {
 		if _, err := setEffort(m); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("SetGroup %v = %v, want %q", m, err, want)

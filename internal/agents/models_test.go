@@ -22,6 +22,16 @@ func TestParseClaudeHelp(t *testing.T) {
 	}
 }
 
+func TestParseAgyModels(t *testing.T) {
+	out := "Fetching available models...\ngemini-4-neon-high\tGemini 4 Neon (High)\ngemini-4-neon-xhigh\tGemini 4 Neon (XHigh)\ngemini-4-neon-high\tGemini 4 Neon (High)\n"
+	if got := ParseAgyModels(out); !slices.Equal(got, []string{"gemini-4-neon-high", "gemini-4-neon-xhigh"}) {
+		t.Fatalf("got %v", got)
+	}
+	if got := ParseAgyModels("Fetching available models...\n"); got != nil {
+		t.Fatalf("of no models: %v", got)
+	}
+}
+
 func TestParseGrokModels(t *testing.T) {
 	out := "You are not authenticated.\n\nDefault model: grok-4.7\n\nAvailable models:\n  * grok-4.7 (default)\n    grok-4.7-mini\n"
 	if got := ParseGrokModels(out); !slices.Equal(got, []string{"grok-4.7", "grok-4.7-mini"}) {

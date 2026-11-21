@@ -44,6 +44,11 @@ import (
 // empty one showing the placeholder in gray (not faint) with ↵ after it
 // and the copy hint under it, a message it took above as a plain indented
 // paragraph, and the line it works behind begun with › too.
+//
+// agy 1.5.14's is a pty read of 21 Nov 2026, narrowed: the input a bare
+// line begun with > between two rules, an empty one showing the mode's
+// hint in gray (SGR 90, not faint), a message it took above with the same
+// mark, and the footer naming the mode, the model and the effort.
 const (
 	rule         = "\x1b[0m\x1b[38;5;7m────────────────\x1b[0m\r\n"
 	claudeFooter = "  \x1b[0m\x1b[38;5;11m⏵⏵ auto mode on\x1b[0m\x1b[38;5;7m (shift+tab to cycle)\x1b[0m\r\n"
@@ -119,6 +124,13 @@ const (
 	kiroDraft   = kiroSep + kiroStatus + "\r\n" + "›  half a thought\r\n"
 	kiroTaken   = "  earlier message, sent\r\n\r\n• An answer.\r\n\r\n▸ Credits: 0.24 • Time: 3s\r\n\r\n"
 	kiroWorking = "›  Kiro is working · 10s · Type to steer · Ctrl+S to queue\r\n"
+
+	agyRule   = "────────────────────────────────────────\r\n"
+	agyFooter = "? for shortcuts                      auto · Gemini 4 Neon · medium\r\n"
+	agyHint   = "Auto mode: edits & safe commands auto-approved (shift+tab to cycle)"
+	agyEmpty  = agyRule + "\x1b[94m>\x1b[0m \x1b[90m" + agyHint + "\x1b[0m\r\n" + agyRule + agyFooter
+	agyDraft  = agyRule + "> half a thought\r\n" + agyRule + agyFooter
+	agyTaken  = "> reply with exactly: ok\r\n\r\n  ok\r\n\r\n"
 )
 
 var (
@@ -227,6 +239,17 @@ func TestInputText(t *testing.T) {
 		// The busy line also begins with ›, but the later input stays the
 		// empty placeholder while Kiro works.
 		"kiro, mid-turn with empty input": {"kiro", kiroWorking + kiroEmpty, "", true},
+		// agy's input is a bare line begun with > between two rules; an
+		// empty one shows the mode's hint in gray, no faint style, which
+		// reads empty, and a message it took above carries the same mark.
+		"agy empty":                              {"agy", agyEmpty, "", true},
+		"agy draft":                              {"agy", agyDraft, "half a thought", true},
+		"agy, sent message above an empty input": {"agy", agyTaken + agyEmpty, "", true},
+		"agy, sent message above a draft":        {"agy", agyTaken + agyDraft, "half a thought", true},
+		// The hint's words are the mode's, and only auto's are named: in
+		// plan mode (read live, `agy --mode plan`) the empty input reads
+		// as held text until the hint's colour can be named instead.
+		"agy, plan mode hint reads held": {"agy", agyRule + "\x1b[94m>\x1b[0m \x1b[90mPlan mode: research & plan only (shift+tab to cycle)\x1b[0m\r\n" + agyRule + agyFooter, "Plan mode: research & plan only (shift+tab to cycle)", true},
 		// Grok's input is in a box too, its bottom with words in it; the
 		// echo of a message it took begins with the same mark, no edge
 		// before it, and is never read as the input.
