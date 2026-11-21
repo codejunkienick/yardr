@@ -98,6 +98,14 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("GIT_CONFIG_GLOBAL", gitConfigFile)
+	// Tests here match what git prints (its "fatal:", its "not a git
+	// repository"), and git says both in the developer's language where it
+	// has a catalogue for it: under a German locale the two read
+	// "Schwerwiegend:" and "kein Git-Repository", and the tests that look for
+	// the words fail on a correct yardr. The messages as they are written,
+	// then, for this process and what it starts. LC_ALL wins over LANG and
+	// every other LC_ variable, and in the C locale LANGUAGE is not read.
+	os.Setenv("LC_ALL", "C")
 	// Many tests run git, and on macOS each run is two execs, the system's shim
 	// and the git it runs: the real git first on PATH, for these tests and the
 	// programs they start (testload.PreferRealGit).
