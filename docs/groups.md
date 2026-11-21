@@ -2167,8 +2167,10 @@ is recorded for it; the models to pick from are read live from
 
 - **Folder trust.** Claude Code, Codex, Kimi and Antigravity ask whether they may trust
   a folder the first time they are started in it, and none has a flag or
-  setting that skips the question in an interactive session. yardr answers
-  the dialog the kind's file names (`trust` in harnesses/<kind>.yaml): when
+  setting that skips the question in an interactive session. Muse asks about
+  workspace trust and yardr answers the dialog, but `--trust-workspace`
+  skips it for the run without writing trust. Each dialog is named in the
+  kind's file (`trust` in harnesses/<kind>.yaml): when
   the agent stops at it, yardr moves the cursor onto the accepting answer
   and sends the first prompt as soon as the agent is ready. Making
   a folder a depot (or a crew member's directory) is what says you trust it. The
