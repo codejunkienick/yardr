@@ -750,6 +750,31 @@ calls:
 				t.Fatalf("a dotted key a path walks is warned of: %q", call.SelectWarnings())
 			}
 		})
+		t.Run("digit-segment select", func(t *testing.T) {
+			digits := declared(t, strings.Replace(crm, "[id, name, plan, owner, open_tickets]", `["items.0"]`, 1), "https://crm.example.com/api/v2", s.URL)
+			for _, tc := range []struct {
+				name, body, want string
+			}{
+				{"exact key wins", `{"items.0":"ready"}`, `{"items.0":"ready"}`},
+				{"traversal into a list yields nothing", `{"items":["a"]}`, `{}`},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					body = tc.body
+					res, err := Do(context.Background(), digits, "customer", map[string]string{"id": "1"}, token, noSecrets)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if string(res.Answer) != tc.want {
+						t.Fatalf("answer = %s, want %s", res.Answer, tc.want)
+					}
+				})
+			}
+			// A digit segment is an object key, so the name is a path
+			// and is not warned of.
+			if call, _ := digits.Call("customer"); len(call.SelectWarnings()) != 0 {
+				t.Fatalf("a digit-segment select is warned of: %q", call.SelectWarnings())
+			}
+		})
 		t.Run("bound after nested selection", func(t *testing.T) {
 			body = `{"head":{"ref":"` + strings.Repeat("x", AnswerMax) + `"}}`
 			if _, err := Do(context.Background(), nested, "ping", nil, token, noSecrets); reason(err) != TooLarge {

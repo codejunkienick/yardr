@@ -1651,7 +1651,7 @@ process for it. Nothing of the request is written anywhere.`,
 					if json.Unmarshal(res.Answer, &obj) == nil {
 						for _, name := range call.Answer.Select {
 							if raw, ok := obj[name]; ok {
-								selected = append(selected, name+": "+checkField(raw))
+								selected = append(selected, printable(name)+": "+checkField(raw))
 							}
 						}
 					}

@@ -716,7 +716,7 @@ calls:
   ping:
     kind: read
     request: { method: GET, path: /me }
-    answer: { select: [name, count, flag, obj, list, missing, head.ref, base.repo.html_url, head.missing] }
+    answer: { select: [name, count, flag, obj, list, missing, head.ref, base.repo.html_url, head.missing, "a\x1b[2Jb"] }
 `
 
 // source check shows the check call's selected fields, one per
@@ -725,13 +725,14 @@ calls:
 // selected object is carried under answer. A selected field the answer
 // does not carry prints no line, the check still succeeding on its
 // status, and a check call with no selection prints exactly what it
-// prints without one. The credential is in neither output.
+// prints without one. A select name holding an escape prints with `?`
+// for it. The credential is in neither output.
 func TestSourceCheckSelectedAnswer(t *testing.T) {
 	t.Parallel()
 	const token = "tok-9c41-not-to-be-seen"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"name":"ada","count":3,"flag":true,"obj":{"a":1},"list":[1,"x"],"extra":"dropped","head":{"ref":"main","sha":"abc"},"base":{"repo":{"html_url":"https://repo.example.com","private":true}}}`)
+		io.WriteString(w, `{"name":"ada","count":3,"flag":true,"obj":{"a":1},"list":[1,"x"],"extra":"dropped","head":{"ref":"main","sha":"abc"},"base":{"repo":{"html_url":"https://repo.example.com","private":true}},"a\u001b[2Jb":"v"}`)
 	}))
 	defer srv.Close()
 	st := storetest.New(t)
@@ -761,12 +762,13 @@ func TestSourceCheckSelectedAnswer(t *testing.T) {
 		"crm: list: [1,\"x\"]\n",
 		"crm: head.ref: main\n",
 		"crm: base.repo.html_url: https://repo.example.com\n",
+		"crm: a?[2Jb: v\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("source check lacks %q:\n%s", want, out)
 		}
 	}
-	for _, not := range []string{token, "missing", "extra", "dropped", "sha", "private"} {
+	for _, not := range []string{token, "missing", "extra", "dropped", "sha", "private", "\x1b"} {
 		if strings.Contains(out, not) {
 			t.Errorf("source check shows %q:\n%s", not, out)
 		}
@@ -785,7 +787,7 @@ func TestSourceCheckSelectedAnswer(t *testing.T) {
 		t.Fatalf("source check --json is no JSON: %v\n%s", err, out)
 	}
 	raw, _ := json.Marshal(got.Answer)
-	if string(raw) != `{"base.repo.html_url":"https://repo.example.com","count":3,"flag":true,"head.ref":"main","list":[1,"x"],"name":"ada","obj":{"a":1}}` {
+	if string(raw) != `{"a\u001b[2Jb":"v","base.repo.html_url":"https://repo.example.com","count":3,"flag":true,"head.ref":"main","list":[1,"x"],"name":"ada","obj":{"a":1}}` {
 		t.Errorf("answer = %s", raw)
 	}
 	if strings.Contains(out, token) {
