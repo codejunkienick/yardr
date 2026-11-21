@@ -592,7 +592,9 @@ func (h *Herdr) trainBranch(ctx context.Context, job dispatch.Job) error {
 // base or branch, gets the directory it works in (YARDR_DEPOT,
 // YARDR_DEPOT_PATH). Every agent gets what the yard's commit-msg hook names
 // its commits with (YARDR_KIND, YARDR_MODEL) and the core.hooksPath that
-// points its git at the hook. hookEnv is that last part, ensured by Start
+// points its git at the hook. A kind that takes its model in the
+// environment gets that entry beside them (modelEnv), rendered with the
+// session's model. hookEnv is that last part, ensured by Start
 // before the runner creates a worktree, so an installation error starts no
 // work.
 func (h *Herdr) agentEnvWithHook(job dispatch.Job, name string, hookEnv []string) []string {
@@ -601,6 +603,8 @@ func (h *Herdr) agentEnvWithHook(job dispatch.Job, name string, hookEnv []string
 	// already names: what the yard's commit-msg hook writes into
 	// Yardr-Agent (see commitHook).
 	env = slices.Concat(env, config.Env("KIND", agents.Kind(job.Group.Config)), config.Env("MODEL", sessionModel(job)))
+	override, _ := job.Bead.Metadata["model"].(string)
+	env = append(env, modelEnv(job.Group.Config, override)...)
 	if depot := job.Depot; depot != nil && depot.IsDir() {
 		env = slices.Concat(env, config.Env("DEPOT", depot.Name), config.Env("DEPOT_PATH", depot.Path))
 	} else if base := BaseOf(job); base != "" {
@@ -745,11 +749,15 @@ func (h *Herdr) workspaceAt(ctx context.Context, ws, path string) bool {
 // AgentArgs are the agent's own arguments: what its kind's file says every
 // agent runs with (Codex's --no-daemon, Kiro's chat subcommand), the
 // group's args, then the kind's model flag from the bead's
-// metadata.model, else the group's config.model. A model already in args is
-// replaced, so a bead can override a group default. The words of the kind's
-// effort from the group's config.effort come last (withEffort). SocketArg in an
-// argument is the socket of the yard at home, WorkdirArg the directory the
-// session works in, TmpdirArg the session's temporary directory tmpdir.
+// metadata.model, else the group's config.model. A kind whose file names
+// no model flag gets no flag word: its model goes in its pane's
+// environment instead (modelEnv), and a --model in the group's args is
+// dropped with the flag it replaces, as for a kind with a flag. A model
+// already in args is replaced, so a bead can override a group default.
+// The words of the kind's effort from the group's config.effort come
+// last (withEffort). SocketArg in an argument is the socket of the yard
+// at home, WorkdirArg the directory the session works in, TmpdirArg the
+// session's temporary directory tmpdir.
 func AgentArgs(job dispatch.Job, home, workdir, tmpdir string) []string {
 	model, _ := job.Bead.Metadata["model"].(string)
 	return agentArgs(job.Group.Config, model, home, workdir, tmpdir)
@@ -778,7 +786,7 @@ func agentArgs(cfg map[string]any, override, home, workdir, tmpdir string) []str
 	// What the kind's harness file says every agent of it runs with
 	// (flags.always), and why: first, so a subcommand (Kiro's chat) comes
 	// before the group's flags.
-	kind, _ := agents.Lookup(kindName)
+	kind, hasFile := agents.Lookup(kindName)
 	var first []string
 	for _, a := range kind.Flags.Always {
 		if !slices.Contains(args, a) {
@@ -831,12 +839,19 @@ func agentArgs(cfg map[string]any, override, home, workdir, tmpdir string) []str
 	out := make([]string, 0, len(args)+2)
 	for i := 0; i < len(args); i++ {
 		switch {
-		case args[i] == modelFlag && i+1 < len(args):
-			i++ // drop the group's model flag and value
+		case args[i] == modelFlag:
+			if i+1 < len(args) {
+				i++ // drop the group's model flag and value
+			}
 		case strings.HasPrefix(args[i], modelFlag+"="):
 		default:
 			out = append(out, args[i])
 		}
+	}
+	if hasFile && kind.Flags.Model == "" {
+		// Its file names no flag for the model to go to: it goes in the
+		// pane's environment (modelEnv), or the start was refused.
+		return withEffort(out, cfg, kind)
 	}
 	return withEffort(append(out, modelFlag, model), cfg, kind)
 }

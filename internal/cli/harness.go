@@ -97,6 +97,7 @@ func harnessKnown(h store.Harness) []string {
 	add(len(h.Onboarding) > 0, "onboarding screens answered")
 	add(len(h.Flags.Unattended) > 0, "unattended flags")
 	add(h.Flags.Model != "", "model flag")
+	add(h.Flags.ModelEnv != nil, "model environment")
 	add(h.Flags.Effort != nil, "effort flag")
 	add(len(h.Flags.Always) > 0, "flags always passed")
 	add(len(h.Flags.Permissions) > 0, "permission presets")
@@ -258,6 +259,8 @@ func printHarness(w io.Writer, h store.Harness, has bool) {
 	fmt.Fprintf(w, "  unattended: %s\n", args(h.Flags.Unattended))
 	if h.Flags.Model != "" {
 		fmt.Fprintf(w, "  model flag: %s\n", h.Flags.Model)
+	} else if me := h.Flags.ModelEnv; me != nil {
+		fmt.Fprintf(w, "  model flag: none; model environment: %s=%s (a group's model= is put there)\n", me.Var, me.Value)
 	} else {
 		fmt.Fprintln(w, "  model flag: none: a group of this kind takes no model=")
 	}
@@ -286,9 +289,12 @@ func printHarness(w io.Writer, h store.Harness, has bool) {
 	}
 	fmt.Fprintln(w, "\nModels it offers")
 	if len(h.Offers) == 0 {
-		if h.Flags.Model == "" {
+		switch {
+		case h.Flags.Model == "" && h.Flags.ModelEnv == nil:
 			fmt.Fprintln(w, "  none: a group of this kind takes no model=")
-		} else {
+		case h.Flags.ModelEnv != nil:
+			fmt.Fprintf(w, "  none named: %s takes any id\n", h.Flags.ModelEnv.Var)
+		default:
 			fmt.Fprintln(w, "  none named: --model takes any id")
 		}
 	}

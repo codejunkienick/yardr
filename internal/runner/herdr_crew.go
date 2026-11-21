@@ -192,6 +192,10 @@ func (h *Herdr) StartCrew(ctx context.Context, r store.CrewMember, user string) 
 	// it in its place (withEnvFile).
 	kind := agents.Kind(r.Config)
 	env := slices.Concat(config.Env("CREW", r.Name), config.Env("ACTOR", r.Name), config.BlankServerSettings())
+	// As for a bead's agent, a kind that takes its model in the
+	// environment gets that entry here, rendered with the crew member's
+	// model (modelEnv); env_file cannot set it in its place (withEnvFile).
+	env = append(env, modelEnv(r.Config, "")...)
 	// As for a bead's agent, a harness can skip its folder-trust dialog
 	// with an environment entry (Kimi 2.2.0). Blank it when trust is
 	// disabled, so an inherited value or env_file cannot bypass the choice.

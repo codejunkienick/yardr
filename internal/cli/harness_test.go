@@ -34,7 +34,7 @@ func TestHarnessListAndShow(t *testing.T) {
 		"muse      Muse Code    v1    pane marks, error lines, login screen, background work, reported model, context use, token count, trust dialog, unattended flags,",
 		"kimi      Kimi         v1    pane marks, error lines, dialogs told of, hints, trust dialog, trust environment, unattended flags,",
 		"pi        pi           v1    error lines, reported model, context use, model flag, version flag, one-shot call\n",
-		"opencode  opencode     v1    permission presets, version flag, one-shot call, where to get it",
+		"opencode  opencode     v1    model environment, permission presets, version flag, one-shot call, where to get it",
 		"No file, so started as herdr starts it and nothing more known: gemini, cursor,")
 	var listed struct {
 		Harnesses []store.Harness `json:"harnesses"`
@@ -170,8 +170,8 @@ func TestHarnessListAndShow(t *testing.T) {
 	wantText(t, ask(0, "harness", "show", "pi"), "effort:     none: a group of this kind takes no effort=", "Models it offers", "none named: --model takes any id",
 		"pi  pi  (harnesses/pi.yaml, version 1)", `other   ^Error: Retry failed after \d+ attempts`)
 	wantText(t, ask(0, "harness", "show", "opencode"), "opencode  opencode  (harnesses/opencode.yaml, version 1)",
-		"model flag: none: a group of this kind takes no model=", "effort:     none: a group of this kind takes no effort=",
-		"Models it offers", "none: a group of this kind takes no model=")
+		`model flag: none; model environment: OPENCODE_CONFIG_CONTENT={"model":"{model}"} (a group's model= is put there)`, "effort:     none: a group of this kind takes no effort=",
+		"Models it offers", "none named: OPENCODE_CONFIG_CONTENT takes any id")
 	shown = store.Harness{}
 	if err := json.Unmarshal([]byte(ask(0, "harness", "show", "pi", "--json")), &shown); err != nil || shown.Provider != "" {
 		t.Fatalf("show pi --json: %v, provider %q", err, shown.Provider)

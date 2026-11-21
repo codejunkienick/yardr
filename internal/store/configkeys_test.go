@@ -82,9 +82,6 @@ func TestStoreRefusesAConfigKeyNothingReads(t *testing.T) {
 		`group g: its args already pass "--effort", which effort sets: remove it from args first`:                                         put("herdr", map[string]any{"kind": "claude", "effort": "max", "args": []string{"--effort", "high"}}),
 		`group g: its args already pass "model_reasoning_effort=\"high\"", which effort sets`:                                             put("herdr", map[string]any{"kind": "codex", "effort": "max", "args": []string{"-c", `model_reasoning_effort="high"`}}),
 		`group g: its args already pass "--effort=low", which effort sets`:                                                                put("herdr", map[string]any{"kind": "muse", "effort": "high", "args": []string{"--yolo", "--effort=low"}}),
-		// A model reaches the agent as its kind's model flag, so a kind
-		// whose file names none refuses the key.
-		`group g: model is for the kinds whose harness file names a model flag, and opencode is not: its file names none. Unset model, or set the group's kind to one that takes it. Opencode takes its model from its own configuration`: put("herdr", map[string]any{"kind": "opencode", "model": "opencode/big-pickle"}),
 	} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("PutGroup = %v, want %s", err, want)
@@ -264,10 +261,14 @@ func TestStoreTakesProviderAndEffortOnHerdr(t *testing.T) {
 	}
 
 	// A group's model is held to its kind when it is set and when the kind
-	// changes after it, and a refusal writes nothing. Unsetting returns the
-	// group to its harness's own.
+	// changes after it. A kind that takes a model in its environment
+	// (opencode) takes it as a flag kind does, at write and at set alike;
+	// unsetting returns the group to its harness's own.
 	if err := s.PutGroup(ctx, store.Group{Name: "model", Runner: "herdr", Config: map[string]any{"kind": "claude"}}, "me"); err != nil {
 		t.Fatal(err)
+	}
+	if err := s.PutGroup(ctx, store.Group{Name: "ocmodel", Runner: "herdr", Config: map[string]any{"kind": "opencode", "model": "opencode/big-pickle"}}, "me"); err != nil {
+		t.Fatalf("PutGroup opencode model = %v", err)
 	}
 	setModel := func(m map[string]any, unset ...string) (*store.GroupChange, error) {
 		return s.SetGroup(ctx, "model", store.GroupEdit{Set: m, Unset: unset}, "me")
@@ -275,29 +276,20 @@ func TestStoreTakesProviderAndEffortOnHerdr(t *testing.T) {
 	if ch, err := setModel(map[string]any{"model": "opus"}); err != nil || ch.Is.Config["model"] != "opus" || ch.Is.Config["kind"] != "claude" {
 		t.Fatalf("SetGroup model = %+v, %v", ch, err)
 	}
-	stands, err = s.GetGroup(ctx, "model")
-	if err != nil {
-		t.Fatal(err)
+	// The kind change to an environment kind goes through with the model
+	// standing, and a model set on it goes through too.
+	if ch, err := setModel(map[string]any{"kind": "opencode"}); err != nil || ch.Is.Config["kind"] != "opencode" || ch.Is.Config["model"] != "opus" {
+		t.Fatalf("SetGroup kind to opencode with a model = %+v, %v", ch, err)
 	}
-	for want, m := range map[string]map[string]any{
-		"model is for the kinds whose harness file names a model flag, and opencode is not": map[string]any{"kind": "opencode"},
-	} {
-		if _, err := setModel(m); err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("SetGroup %v = %v, want %q", m, err, want)
-		}
+	if ch, err := setModel(map[string]any{"model": "opencode/big-pickle"}); err != nil || ch.Is.Config["model"] != "opencode/big-pickle" {
+		t.Fatalf("SetGroup model on opencode = %+v, %v", ch, err)
 	}
-	if now, err := s.GetGroup(ctx, "model"); err != nil || !reflect.DeepEqual(now, stands) {
-		t.Fatalf("a refused change wrote the group: %+v, %v, was %+v", now, err, stands)
-	}
-	// The kind change goes through with the model unset, and a model set
-	// on the flagless kind is refused.
-	if ch, err := setModel(map[string]any{"kind": "opencode"}, "model"); err != nil || ch.Is.Config["kind"] != "opencode" {
+	// Unsetting returns the group to its harness's own, whichever kind
+	// holds it.
+	if ch, err := setModel(map[string]any{"kind": "claude"}, "model"); err != nil || ch.Is.Config["kind"] != "claude" {
 		t.Fatalf("SetGroup kind and unset model = %+v, %v", ch, err)
 	} else if _, kept := ch.Is.Config["model"]; kept {
 		t.Fatalf("model unset and kept: %+v", ch.Is.Config)
-	}
-	if _, err := setModel(map[string]any{"model": "gpt"}); err == nil || !strings.Contains(err.Error(), "and opencode is not") {
-		t.Errorf("SetGroup model on opencode = %v", err)
 	}
 }
 

@@ -6,8 +6,15 @@ install: https://opencode.ai
 
 flags:
   # No model flag: the interactive command takes none in 2.x (2.3.2 prints
-  # its help and exits on --model, issue 41), so a group of this kind takes
-  # no model= and 1.x's flag goes unserved.
+  # its help and exits on --model, issue 41), and 1.x's flag goes unserved.
+  # The model goes in the environment instead: OPENCODE_CONFIG_CONTENT
+  # carries a whole config as JSON and is its highest-priority config, so
+  # {"model":"<id>"} there selects the model with no flag beside it. No
+  # --standalone is named: that flag is in no 1.x help, and the config
+  # content needs none to take effect.
+  model_env:
+    var: OPENCODE_CONFIG_CONTENT
+    value: '{"model":"{model}"}'
   version: [--version]
   one_shot: [run]
   permissions:

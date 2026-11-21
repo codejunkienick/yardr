@@ -37,6 +37,15 @@ func TestHarnessFiles(t *testing.T) {
 		if h.Flags.Model != wantModel {
 			t.Errorf("%s model flag %q, want %q", h.Kind, h.Flags.Model, wantModel)
 		}
+		// opencode takes its model in its environment instead; no other
+		// kind names one today.
+		if h.Kind == "opencode" {
+			if e := h.Flags.ModelEnv; e == nil || e.Var != "OPENCODE_CONFIG_CONTENT" || e.Value != `{"model":"{model}"}` {
+				t.Errorf("opencode model environment %+v, want OPENCODE_CONFIG_CONTENT={\"model\":\"{model}\"}", e)
+			}
+		} else if h.Flags.ModelEnv != nil {
+			t.Errorf("%s names a model environment %+v, want none", h.Kind, h.Flags.ModelEnv)
+		}
 	}
 	if want := []string{"claude", "codex", "grok", "kimi", "opencode", "pi", "agy", "kiro", "muse"}; !slices.Equal(kinds, want) {
 		t.Errorf("kinds with a file: %v, want %v", kinds, want)
@@ -698,6 +707,12 @@ func TestLoadRefuses(t *testing.T) {
 		"model, no field":                     {"claude.yaml", "version: 1\nlabel: x\nmodel: {home: .x, glob: '{session}.jsonl'}\n", "home and field are needed"},
 		"a nameless preset":                   {"claude.yaml", "version: 1\nlabel: x\nflags: {permissions: [{args: [--yes]}]}\n", "without label or args"},
 		"model flag is not a flag":            {"claude.yaml", "version: 1\nlabel: x\nflags: {model: model}\n", "is not a flag"},
+		"model_env, no var":                   {"claude.yaml", "version: 1\nlabel: x\nflags: {model_env: {value: '{model}'}}\n", "flags.model_env.var: the variable that carries the model is needed"},
+		"model_env, a var that is no name":    {"claude.yaml", "version: 1\nlabel: x\nflags: {model_env: {var: '1BAD', value: '{model}'}}\n", `flags.model_env.var: "1BAD" is no name of a variable`},
+		"model_env, no model in the value":    {"claude.yaml", "version: 1\nlabel: x\nflags: {model_env: {var: X_MODEL, value: 'x'}}\n", "flags.model_env.value: {model} is in the value, once"},
+		"model_env, the model twice":          {"claude.yaml", "version: 1\nlabel: x\nflags: {model_env: {var: X_MODEL, value: '{model} {model}'}}\n", "flags.model_env.value: {model} is in the value, once"},
+		"model_env with a model flag":         {"claude.yaml", "version: 1\nlabel: x\nflags: {model: --model, model_env: {var: X_MODEL, value: '{model}'}}\n", "flags.model_env: a kind takes its model by its flag or by its environment, not both"},
+		"model_env, a field not known":        {"claude.yaml", "version: 1\nlabel: x\nflags: {model_env: {var: X_MODEL, value: '{model}', env: X}}\n", "field env not found"},
 		"effort, no flag first":               {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: ['{level}', --effort], levels: [low]}}\n", "flags.effort.args: the first word is the flag"},
 		"effort, no words":                    {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {levels: [low]}}\n", "flags.effort.args: the first word is the flag"},
 		"effort, no level in the words":       {"claude.yaml", "version: 1\nlabel: x\nflags: {effort: {args: [--effort, max], levels: [low]}}\n", "flags.effort.args: {level} is in one word, once"},

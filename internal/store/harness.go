@@ -154,9 +154,15 @@ func parseSGRColor(colour string) (string, error) {
 // taken from the agent's own --help, or run against the installed tool.
 type Flags struct {
 	// Model is the flag that selects a model when yardr starts an agent.
-	// "" when the kind takes none: its interactive command has no such
-	// flag, and a group of the kind refuses model=.
+	// "" when the kind takes none by flag: its interactive command has no
+	// such flag, and a group of the kind takes a model only as ModelEnv
+	// names, or refuses model= where it names neither.
 	Model string `yaml:"model" json:"model,omitempty"`
+	// ModelEnv is how the kind takes a model in its pane's environment
+	// when it has no model flag, which a group names as model=<id>; yardr
+	// renders its value with the id and sets the variable at start. nil
+	// for a kind that takes a model by flag, or none at all.
+	ModelEnv *ModelEnv `yaml:"model_env" json:"model_env,omitempty"`
 	// Effort is how the kind takes a reasoning effort, which a group names
 	// as effort=<level>; yardr adds it to the agent's arguments at start.
 	// nil for a kind that takes none.
@@ -784,6 +790,12 @@ func (h *Harness) Check() error {
 	}
 	if h.Flags.Model != "" && !strings.HasPrefix(h.Flags.Model, "-") {
 		return fmt.Errorf("flags.model: %q is not a flag", h.Flags.Model)
+	}
+	if err := h.Flags.ModelEnv.check(); err != nil {
+		return err
+	}
+	if h.Flags.Model != "" && h.Flags.ModelEnv != nil {
+		return fmt.Errorf("flags.model_env: a kind takes its model by its flag or by its environment, not both")
 	}
 	if err := h.Flags.Effort.check(); err != nil {
 		return err

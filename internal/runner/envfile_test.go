@@ -300,8 +300,8 @@ func TestStartCrewSetsMemoryOff(t *testing.T) {
 	}
 }
 
-// An env file the session cannot read, or a model the kind has no flag for,
-// refuses the start before herdr is asked for anything, as Blocked.
+// An env file the session cannot read refuses the start before herdr is
+// asked for anything, as Blocked.
 func TestStartRefusalsBlockBeforeHerdr(t *testing.T) {
 	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "nope.env")
@@ -327,48 +327,91 @@ func TestStartRefusalsBlockBeforeHerdr(t *testing.T) {
 			t.Errorf("%s: logs show the value", name)
 		}
 	}
+}
 
-	// A group's model, a bead's override, a dir depot's session and a crew
-	// member's model all fail fast with the remedy instead of timing out.
-	for _, c := range []struct {
-		name     string
-		cfg      map[string]any
-		metadata map[string]any
-		dirDepot bool
-		crew     bool
-		want     string
-	}{
-		{"the group's model", map[string]any{"kind": "opencode", "model": "opencode/big-pickle"}, nil, false, false,
-			"group g: model is for the kinds whose harness file names a model flag, and opencode is not"},
-		{"the bead's model", map[string]any{"kind": "opencode"}, map[string]any{"model": "opus"}, false, false,
-			"group g: bead yardr-13 carries model=opus, but opencode names no model flag"},
-		{"a dir depot's model", map[string]any{"kind": "opencode", "model": "opencode/big-pickle"}, nil, true, false,
-			"group g: model is for the kinds whose harness file names a model flag, and opencode is not"},
-		{"a crew member's model", map[string]any{"kind": "opencode", "model": "opencode/big-pickle"}, nil, false, true,
-			"crew member r: model is for the kinds whose harness file names a model flag, and opencode is not"},
-	} {
+// opencode 2.x takes no --model on its interactive command, so a group of
+// that kind carries its model in the pane's OPENCODE_CONFIG_CONTENT, a
+// whole config as JSON, and its agent starts with no --model word. No
+// model sets no entry, as no flag is passed then either.
+func TestHerdrStartSetsModelEnv(t *testing.T) {
+	t.Parallel()
+	start := func(t *testing.T, cfg map[string]any, metadata map[string]any) (map[string]string, string) {
+		t.Helper()
+		wt := seedEmptyRepo(t)
+		h, calls, _ := envHerdr(t, wt)
+		h.YardHome = t.TempDir()
+		job := dispatch.Job{
+			Bead:    store.Bead{ID: "yard-13", Stage: "build", Metadata: metadata},
+			Group:   store.Group{Name: "g", Config: cfg},
+			Depot:   &store.Depot{Name: "yard", Path: t.TempDir(), Base: "main"},
+			Session: store.Session{ID: "s1"},
+		}
+		if _, err := h.Start(context.Background(), job); err != nil {
+			t.Fatal(err)
+		}
+		raw := readCalls(t, calls)
+		return envOf(apiCall(t, raw, "tab.create")), cliCalls(raw)
+	}
+	env, cli := start(t, map[string]any{"kind": "opencode", "model": "opencode/big-pickle"}, nil)
+	if env["OPENCODE_CONFIG_CONTENT"] != `{"model":"opencode/big-pickle"}` {
+		t.Errorf("opencode tab.create lacks its model entry: %v", env)
+	}
+	if strings.Contains(cli, "--model") {
+		t.Errorf("opencode's agent was started with a model flag:\n%s", cli)
+	}
+	if env, _ = start(t, map[string]any{"kind": "opencode", "model": "opencode/big-pickle"}, map[string]any{"model": "other/model"}); env["OPENCODE_CONFIG_CONTENT"] != `{"model":"other/model"}` {
+		t.Errorf("the bead's model did not win in the entry: %v", env)
+	}
+	env, _ = start(t, map[string]any{"kind": "opencode"}, nil)
+	if _, ok := env["OPENCODE_CONFIG_CONTENT"]; ok {
+		t.Errorf("no model set an entry: %v", env)
+	}
+	env, cli = start(t, map[string]any{"kind": "claude", "model": "opus"}, nil)
+	if _, ok := env["OPENCODE_CONFIG_CONTENT"]; ok {
+		t.Errorf("claude tab.create carries opencode's entry: %v", env)
+	}
+	if !strings.Contains(cli, "--model opus") {
+		t.Errorf("claude's agent was not started with its model flag:\n%s", cli)
+	}
+	// A dir depot's session takes the same entry through startDir.
+	wt := seedEmptyRepo(t)
+	h, calls, _ := envHerdr(t, wt)
+	h.YardHome = t.TempDir()
+	dir := t.TempDir()
+	if _, err := h.Start(context.Background(), dispatch.Job{
+		Bead:    store.Bead{ID: "yard-13", Stage: "build"},
+		Group:   store.Group{Name: "g", Config: map[string]any{"kind": "opencode", "model": "opencode/big-pickle"}},
+		Depot:   &store.Depot{Name: "yard", Path: dir, Base: "main", Kind: store.DepotDir},
+		Session: store.Session{ID: "s1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if env := envOf(apiCall(t, readCalls(t, calls), "tab.create")); env["OPENCODE_CONFIG_CONTENT"] != `{"model":"opencode/big-pickle"}` {
+		t.Errorf("dir depot tab.create lacks its model entry: %v", env)
+	}
+}
+
+func TestStartCrewSetsModelEnv(t *testing.T) {
+	t.Parallel()
+	start := func(t *testing.T, cfg map[string]any) map[string]string {
+		t.Helper()
 		h, calls, _ := envHerdr(t, "")
-		var err error
-		if c.crew {
-			_, err = h.StartCrew(context.Background(), store.CrewMember{Name: "r", Dir: t.TempDir(), Config: c.cfg}, "")
-		} else {
-			depot := &store.Depot{Name: "yard", Path: t.TempDir(), Base: "main"}
-			if c.dirDepot {
-				depot.Kind = store.DepotDir
-			}
-			_, err = h.Start(context.Background(), dispatch.Job{
-				Bead:  store.Bead{ID: "yardr-13", Stage: "new", Metadata: c.metadata},
-				Group: store.Group{Name: "g", Config: c.cfg}, Depot: depot,
-			})
+		r := store.CrewMember{Name: "r", Dir: t.TempDir(), Config: cfg}
+		if _, err := h.StartCrew(context.Background(), r, ""); err != nil {
+			t.Fatal(err)
 		}
-		if err == nil || !dispatch.IsBlocked(err) || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s: %v, want Blocked naming %q", c.name, err, c.want)
-		} else if !strings.Contains(err.Error(), "Opencode takes its model from its own configuration") {
-			t.Errorf("%s: %v, want what opencode takes instead", c.name, err)
-		}
-		if got := readCalls(t, calls); got != "" {
-			t.Errorf("%s: herdr called despite the refusal:\n%s", c.name, got)
-		}
+		return envOf(apiCall(t, readCalls(t, calls), "workspace.create"))
+	}
+	if env := start(t, map[string]any{"kind": "opencode", "model": "opencode/big-pickle"}); env["OPENCODE_CONFIG_CONTENT"] != `{"model":"opencode/big-pickle"}` {
+		t.Errorf("opencode workspace.create lacks its model entry: %v", env)
+	}
+	env := start(t, map[string]any{"kind": "opencode"})
+	if _, ok := env["OPENCODE_CONFIG_CONTENT"]; ok {
+		t.Errorf("no model set an entry: %v", env)
+	}
+	env = start(t, map[string]any{"kind": "claude", "model": "opus"})
+	if _, ok := env["OPENCODE_CONFIG_CONTENT"]; ok {
+		t.Errorf("claude workspace.create carries opencode's entry: %v", env)
 	}
 }
 
