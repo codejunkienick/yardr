@@ -1272,7 +1272,7 @@ func TestGroupAndCrewDefineAreTheOperators(t *testing.T) {
 		_, err := api.SetGroup(ctx, "builders", store.GroupEdit{Set: map[string]any{"env_file": "/tmp/builders.env"}}, "jo")
 		return err
 	}())
-	// A group's kind, args, prompt and worktrees name what a session
+	// A group's kind, args, prompt, worktrees and model name what a session
 	// starts with and where its worktree is made, each changed on its own.
 	refused("change kind on group builders", setGroup("builders", store.GroupEdit{Set: map[string]any{"kind": "codex"}}), "change kind on group builders")
 	must(func() error {
@@ -1292,6 +1292,11 @@ func TestGroupAndCrewDefineAreTheOperators(t *testing.T) {
 	refused("change worktrees on group builders", setGroup("builders", store.GroupEdit{Set: map[string]any{"worktrees": "/tmp/wt"}}), "change worktrees on group builders")
 	must(func() error {
 		_, err := api.SetGroup(ctx, "builders", store.GroupEdit{Set: map[string]any{"worktrees": "/tmp/wt"}}, "jo")
+		return err
+	}())
+	refused("change model on group builders", setGroup("builders", store.GroupEdit{Set: map[string]any{"model": "sonnet"}}), "change model on group builders")
+	must(func() error {
+		_, err := api.SetGroup(ctx, "builders", store.GroupEdit{Set: map[string]any{"model": "sonnet"}}, "jo")
 		return err
 	}())
 	// A new exec group, and a runner change to exec, name what runs too.
@@ -1337,11 +1342,8 @@ func TestGroupAndCrewDefineAreTheOperators(t *testing.T) {
 		r.Dir = "/tmp/clerk"
 	}), "change dir on crew member clerk")
 	must(crewWith(func(r *store.CrewMember) { r.Dir = "/tmp/clerk" })(api, "jo"))
-	// Everything else stays the crew's: another setting of a group, a
-	// group's log, a crew member's model, and a re-put that changes nothing.
-	if _, err := api.SetGroup(ctx, "builders", store.GroupEdit{Set: map[string]any{"model": "sonnet"}}, "clerk"); err != nil {
-		t.Fatalf("change model on group builders as clerk: %v", err)
-	}
+	// Everything else stays the crew's: a group's log, a crew member's
+	// model, and a re-put that changes nothing.
 	if _, err := api.SetGroup(ctx, "tick", store.GroupEdit{Set: map[string]any{"log": "/tmp/tick.log"}}, "clerk"); err != nil {
 		t.Fatalf("change log on group tick as clerk: %v", err)
 	}
@@ -1407,6 +1409,10 @@ func TestGroupAndCrewDefineAreTheOperators(t *testing.T) {
 		_, err := api.SetGroup(pane, "builders", store.GroupEdit{Set: map[string]any{"worktrees": "/tmp/pane-wt"}}, "jo")
 		return err
 	})
+	paneRefused("change model on group builders", "change model on group builders", func() error {
+		_, err := api.SetGroup(pane, "builders", store.GroupEdit{Set: map[string]any{"model": "opus"}}, "jo")
+		return err
+	})
 	paneRefused("change runner to exec", "change runner on group approvals", func() error {
 		return api.PutGroup(pane, store.Group{Name: "approvals", Runner: "exec"}, "jo")
 	})
@@ -1461,12 +1467,6 @@ func TestGroupAndCrewDefineAreTheOperators(t *testing.T) {
 		_, err = api.PutCrew(pane, *r, "jo")
 		return err
 	})
-	if _, err := api.SetGroup(pane, "builders", store.GroupEdit{Set: map[string]any{"model": "opus"}}, "jo"); err != nil {
-		t.Fatalf("change model on group builders from clerk's pane as the operator: %v", err)
-	}
-	if g, _ := api.GetGroup(ctx, "builders"); g.Config["model"] != "opus" {
-		t.Fatalf("model from the pane = %+v", g)
-	}
 	if _, err := api.SetGroup(pane, "tick", store.GroupEdit{Set: map[string]any{"log": "/tmp/pane-tick.log"}}, "jo"); err != nil {
 		t.Fatalf("change log on group tick from clerk's pane as the operator: %v", err)
 	}

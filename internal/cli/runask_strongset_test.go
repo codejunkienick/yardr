@@ -192,4 +192,28 @@ func TestBeadAskRunSetsThePromptAndPreset(t *testing.T) {
 		!strings.Contains(err.Error(), "group cooks: it sets no effort, so effort=default") {
 		t.Errorf("effort=default with no effort standing = %v", err)
 	}
+	// A model is the name the kind starts its agents with, shown now and
+	// as it will be: the yardmaster proposes it, the operator approves it,
+	// and the group's sessions start with it. The yardmaster cannot set it
+	// itself.
+	out, err = y.as(t, "yardmaster", "ask", b.ID, "Another model?", "--context", "the cooks want sonnet", "--run", "group set cooks model=sonnet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Sscanf(out, "ask %d on", &seq); err != nil || !strings.Contains(out, "to approve, yardr group set cooks model=sonnet\n") {
+		t.Fatalf("bead ask --run group set model printed %q, %v", out, err)
+	}
+	if shown, err = run(t, y.a.primeCmd(), "--bead", b.ID); err != nil || !strings.Contains(shown, "It sets no model now, so each session starts with its harness's own default.") ||
+		!strings.Contains(shown, "Each session will start with model sonnet.") {
+		t.Errorf("prime lacks the model card: %v\n%s", err, shown)
+	}
+	if _, err := y.st.SetGroup(ctx, "cooks", store.GroupEdit{Set: map[string]any{"model": "sonnet"}}, "yardmaster"); err == nil || !strings.Contains(err.Error(), "only the operator") {
+		t.Errorf("the yardmaster set the model itself: %v", err)
+	}
+	if out, err = y.as(t, "jo", "answer", b.ID, fmt.Sprint(seq), "--approve"); err != nil || !strings.Contains(out, "group cooks saved") || !strings.Contains(out, "model: (not set) -> sonnet") {
+		t.Fatalf("the approval of the model printed %q, %v", out, err)
+	}
+	if g, err := y.st.GetGroup(ctx, "cooks"); err != nil || g.Config["model"] != "sonnet" || g.Config["prompt"] != yardFile {
+		t.Fatalf("the group holds %+v, %v", g, err)
+	}
 }

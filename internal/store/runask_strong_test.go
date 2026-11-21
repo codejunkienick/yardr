@@ -297,9 +297,9 @@ func TestRunAskGroupSetSaysWhatItCannotShow(t *testing.T) {
 		"Its prompt is the file "+current+", which each session reads when it starts.", rewrittenSaid, "A linked prompt.")
 }
 
-// A group set card shows a command or effort now and the one it will run
-// with, and approving sets exactly it. A value it already holds is no card.
-func TestRunAskGroupSetCardsACommandAndEffort(t *testing.T) {
+// A group set card shows a command, effort or model now and the one it will
+// run with, and approving sets exactly it. A value it already holds is no card.
+func TestRunAskGroupSetCardsACommandEffortAndModel(t *testing.T) {
 	t.Parallel()
 	y := listYard(t)
 	seq := y.ask(t, listAsk("mckean", "group", "set", "builders", "cmd=./deploy.sh"), "yardmaster")
@@ -455,6 +455,51 @@ func TestRunAskGroupSetCardsACommandAndEffort(t *testing.T) {
 	if r = y.asked(t, seq); len(r.Ask.Weight) != 1 || strings.Contains(r.Ask.Weight[0].Line, "effort") {
 		t.Errorf("weight = %+v", r.Ask.Weight)
 	}
+
+	// A model is the operator's too, proposed on a card that shows the
+	// model now and the one each session will start with, and approving
+	// sets exactly it. Unlike an effort it changes what runs, so the card
+	// is weighty code.
+	seq = y.ask(t, listAsk("mckean", "group", "set", "reviewers", "model=sonnet"), "yardmaster")
+	r = y.asked(t, seq)
+	strongHas(t, r.Ask.Run.Does, "changes the group reviewers on the herdr runner",
+		"It sets no model now, so each session starts with its harness's own default.",
+		"Each session will start with model sonnet.")
+	if len(r.Ask.Weight) != 1 || r.Ask.Weight[0].Class != WeightCode || !strings.Contains(r.Ask.Weight[0].Line, "its model of the group reviewers") {
+		t.Errorf("weight = %+v, want one code line naming its model", r.Ask.Weight)
+	}
+	if r.Ask.Run.Back != "yardr group set reviewers --unset model" || r.Ask.Run.BackBy != "only the operator" {
+		t.Errorf("taken back by %q (%s), want the model unset", r.Ask.Run.Back, r.Ask.Run.BackBy)
+	}
+	// Run directly, the yardmaster's is refused, with a word for any model.
+	if _, err := y.SetGroup(y.ctx, "reviewers", GroupEdit{Set: map[string]any{"model": "sonnet"}}, "yardmaster"); err == nil || !strings.Contains(err.Error(), "only the operator") {
+		t.Errorf("the yardmaster set the model directly: %v", err)
+	}
+	if done, err = y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if want := "group reviewers saved\n  model: (not set) -> sonnet"; done.Result != want {
+		t.Errorf("approval printed %q, want %q", done.Result, want)
+	}
+	if g, _ := y.GetGroup(y.ctx, "reviewers"); g.Config["model"] != "sonnet" || g.Config["kind"] != "codex" || g.Config["prompt"] != "roles/reviewer.md" {
+		t.Errorf("group = %+v, want the model set and the rest kept", g)
+	}
+	// Another model shows the one that stands, and is taken back to it.
+	seq = y.ask(t, listAsk("mckean", "group", "set", "reviewers", "model=opus"), "yardmaster")
+	r = y.asked(t, seq)
+	strongHas(t, r.Ask.Run.Does, "Each session starts with model sonnet now.",
+		"Each session will start with model opus.")
+	if r.Ask.Run.Back != "yardr group set reviewers model=sonnet" {
+		t.Errorf("taken back by %q", r.Ask.Run.Back)
+	}
+	// Set since, it is stale; one it holds already changes nothing.
+	if _, err := y.SetGroup(y.ctx, "reviewers", GroupEdit{Set: map[string]any{"model": "haiku"}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y.refusedStale(t, seq, "was written when the group reviewers was another: it was set since")
+	if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", "group", "set", "reviewers", "model=haiku"), "yardmaster"); err == nil || !strings.Contains(err.Error(), "is set so already, so the command would change nothing") {
+		t.Errorf("a model it holds already = %v", err)
+	}
 }
 
 // An approval is held to the card: the group set since, the file the card
@@ -557,7 +602,7 @@ func TestRunAskStrongSetRefusals(t *testing.T) {
 		}
 	}
 	for _, c := range []struct{ command, want string }{
-		{"group set reviewers preset=bypass dir=/tmp", "--run takes " + groupSetUse + ": dir is no part of this card, which carries prompt, cmd, preset, effort and nothing else"},
+		{"group set reviewers preset=bypass dir=/tmp", "--run takes " + groupSetUse + ": dir is no part of this card, which carries prompt, cmd, preset, effort, model and nothing else"},
 		{"group set reviewers preset=bypass kind=claude", "kind is no part of this card"},
 		{"group set reviewers preset=bypass --limit 3", "group set with --limit is no part of this card"},
 		{"group set reviewers preset=bypass --unset idle", "group set with --unset is no part of this card"},
@@ -586,6 +631,12 @@ func TestRunAskStrongSetRefusals(t *testing.T) {
 		{"group set builders effort=default", "group builders: it sets no effort, so effort=default"},
 		{"group set heavy effort=default", "group heavy: it sets no effort, so effort=default"},
 		{"group set reviewers effort=default effort=default", "effort is set twice"},
+		// A model is no flag, on a runner that reads it.
+		{"group set reviewers model=--yolo", `"--yolo" is no model name`},
+		{"group set reviewers model=", "model needs its value"},
+		{"group set reviewers model=5", "model=5 reads as JSON"},
+		{"group set reviewers model=opus model=sonnet", "model is set twice"},
+		{"group set builders model=opus", `unknown config key "model": nothing reads it. A group of the exec runner takes:`},
 		{"group set builders preset=bypass", "args"},
 		{"group set reviewers prompt=/etc/hosts", "the ask carries no prompt text"},
 		{"crew set clerk preset=bypass kind=claude", "kind is on this card for the yardmaster's own entry alone, which the delegated leg never carries: " + strongApart},

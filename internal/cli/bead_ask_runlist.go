@@ -222,7 +222,7 @@ const askRunList = `  peer add <name> <invite>
       wrote is not one to name; no other setting rides in with it, and
       another member's kind, model and directory are the yardmaster's to
       run for the operator on their mail
-  group set <name> prompt=<file> | cmd=<command> | preset=<preset> | effort=<level>
+  group set <name> prompt=<file> | cmd=<command> | preset=<preset> | effort=<level> | model=<model>
       the same for a group, and for an exec group's command (one word:
       the line is split at spaces); approving a prompt writes its carried
       text to a read-only file of the yard's own, roles/<name>.<digest>.md,
@@ -232,10 +232,11 @@ const askRunList = `  peer add <name> <invite>
       lists them), which the card shows as the flags each session is given,
       or the word default, which returns the group to its harness's own
       effort, as a card takes no --unset: the card shows that no flag is
-      given, and a group that sets no effort refuses it; a kind, a
-      directory and the rest of a group are not this card's: the
-      yardmaster sets those the operator has delegated on their mail, and
-      the rest are typed in a terminal
+      given, and a group that sets no effort refuses it; a model is the
+      name the group's kind starts its agents with, shown now and as it
+      will be; a kind, a directory and the rest of a group are not this
+      card's: the yardmaster sets those the operator has delegated on
+      their mail, and the rest are typed in a terminal
   group rename <old> <new>
       the group is called by its new name and everything that names it
       follows, in one write: its routes, the beads it owns and their live

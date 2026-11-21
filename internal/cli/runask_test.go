@@ -840,7 +840,7 @@ func TestBeadAskRunPeerSet(t *testing.T) {
 // groupSetUse and crewSetUse the rows of the strong few.
 const (
 	groupAddUse = "yardr group add <name> --runner <runner> [--limit <n>] [--set k=v ...]"
-	groupSetUse = "yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset> | effort=<level>"
+	groupSetUse = "yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset> | effort=<level> | model=<model>"
 	crewSetUse  = "yardr crew set <name> prompt=<file> | preset=<preset> | kind=<kind> | model=<model> | dir=<dir>"
 )
 
@@ -920,7 +920,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr crew set <name> open_threads=<sources> | set_state=<sources> | peers=<peers>": {
 			"crew set yardmaster peers=airy",
 		},
-		groupSetUse: {"group set builders cmd=./deploy.sh", "group set builders effort=max", "group set builders effort=default"},
+		groupSetUse: {"group set builders cmd=./deploy.sh", "group set builders effort=max", "group set builders effort=default", "group set builders model=opus"},
 		crewSetUse:  {"crew set yardmaster preset=bypass", "crew set yardmaster kind=claude model=opus preset=auto"},
 		"yardr crew identity <name> --source <source> [--id <id>] [--key <key>]": {
 			"crew identity yardmaster --source crm --id u1 --key boss",
@@ -1019,10 +1019,12 @@ func TestRunListIsTheCLIs(t *testing.T) {
 			if config, ok := map[string]map[string]any{
 				"group set builders effort=max":     {"kind": "codex"},
 				"group set builders effort=default": {"kind": "codex", "effort": "max"},
+				"group set builders model=opus":     {"kind": "codex"},
 			}[command]; ok {
-				// An effort is a herdr group's: the yard's builders are an
-				// exec group, which reads none. The word default returns one
-				// the group sets, so it stands in both yards.
+				// An effort and a model are a herdr group's: the yard's
+				// builders are an exec group, which reads neither. The word
+				// default returns one the group sets, so it stands in both
+				// yards.
 				for _, y := range []*cliYard{approved, typed} {
 					if err := y.st.PutGroup(context.Background(), store.Group{Name: "builders", Runner: "herdr", Config: config}, "jo"); err != nil {
 						t.Fatal(err)

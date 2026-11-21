@@ -1,10 +1,13 @@
 // The group set row of the run list (runList): a group's prompt, an exec
-// group's command, a permission preset that never asks or its reasoning
-// effort, changed on a card and set only on the operator's approval (design
-// yardr-m90n 3.5). What a later session of the group runs is what the change
-// sets, so none of it is told after it runs: the delegated leg refuses all
-// four. The card shows each whole, what stands now and what will, and is
-// weighed code, but for an effort alone, which brings no program. The words
+// group's command, a permission preset that never asks, its reasoning
+// effort or its model, changed on a card and set only on the operator's
+// approval (design yardr-m90n 3.5). What a later session of the group runs
+// is what the change sets, so the prompt, command, preset and effort are
+// never told after they run: the delegated leg refuses all four. A model
+// it carries (groupDelegates), told after it runs as any delegated change
+// is; the card is the door that asks first. The card shows each whole,
+// what stands now and what will, and is weighed code, but for an effort
+// alone, which brings no program. The words
 // ride as the terminal's own, so the card's command pastes into a terminal,
 // except the preset, which a terminal reads into the kind's flags and the
 // card names by its label (runask_strong.go), and the word effort=default,
@@ -36,11 +39,11 @@ import (
 )
 
 // groupSetUse is how a refusal names the group set row.
-const groupSetUse = "yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset> | effort=<level>"
+const groupSetUse = "yardr group set <name> prompt=<file> | cmd=<command> | preset=<preset> | effort=<level> | model=<model>"
 
 // groupSetKeys are the settings the row carries, in the order its stored
 // form writes them.
-var groupSetKeys = []string{"prompt", "cmd", "preset", "effort"}
+var groupSetKeys = []string{"prompt", "cmd", "preset", "effort", "model"}
 
 func init() {
 	runList = append(runList, runCommand{
@@ -96,9 +99,10 @@ func (s groupSetSpec) changed() map[string]any {
 
 // groupSetProposal holds a group set ask to the yard as it stands: the group
 // is there, a prompt is a file under the yard's home that holds the text the
-// ask carries, a preset is one of its kind's that never asks, the word
-// default for an effort names a group that sets one, and the config that
-// results is one the store would save (configProblems, as putGroup holds it),
+// ask carries, a preset is one of its kind's that never asks, a model is no
+// flag, the word default for an effort names a group that sets one, and the
+// config that results is one the store would save (configProblems, as
+// putGroup holds it),
 // so a command on a runner that reads none of it is refused here in the
 // store's words.
 func (w *wtx) groupSetProposal(run AskRun) (groupSetSpec, error) {
@@ -135,6 +139,12 @@ func (w *wtx) groupSetProposal(run AskRun) (groupSetSpec, error) {
 		// Whether it is a level of the group's kind is the config's to
 		// say, below, in the store's own words.
 		spec.set["effort"] = level
+	}
+	if model, ok := sets["model"]; ok {
+		if err := checkCardModel(subject, model); err != nil {
+			return groupSetSpec{}, err
+		}
+		spec.set["model"] = model
 	}
 	if label, ok := sets["preset"]; ok {
 		kind, err := w.kindOf(spec.have.Config)
@@ -193,7 +203,7 @@ func checkGroupSet(ctx context.Context, w *wtx, run AskRun, actor string) error 
 // the runner and the settings the card says something of.
 func groupSetFingerprint(g Group) string {
 	c := asStored(g.Config)
-	return seen(g.Runner, c["prompt"], c["cmd"], c["kind"], c["args"], c["effort"])
+	return seen(g.Runner, c["prompt"], c["cmd"], c["kind"], c["args"], c["effort"], c["model"])
 }
 
 // groupSetCard is the card of group set <name>: the group, then for each
@@ -229,6 +239,9 @@ func (w *wtx) groupSetCard(run AskRun, _ bool) (AskRun, error) {
 		does = append(does, effortLines(spec.have.Config, level)...)
 	} else if slices.Contains(spec.unset, "effort") {
 		does = append(does, effortUnsetLines(spec.have.Config)...)
+	}
+	if model, ok := spec.set["model"].(string); ok {
+		does = append(does, modelLines(spec.have.Config, model)...)
 	}
 	if _, ok := sets["preset"]; ok {
 		does = append(does, presetLines(spec.kind, spec.kind, spec.have.Config["args"], spec.preset)...)
@@ -268,6 +281,18 @@ func effortNow(old map[string]any) string {
 	return "It sets no effort now, so each session starts at its harness's own."
 }
 
+// modelLines are the card's lines for a model set where the config old
+// holds the group's now: what each session starts with now and what it
+// will, the name going to its agent as its model flag. A group that sets
+// none starts each session at its harness's own default.
+func modelLines(old map[string]any, model string) []string {
+	now := "It sets no model now, so each session starts with its harness's own default."
+	if was, ok := old["model"].(string); ok {
+		now = fmt.Sprintf("Each session starts with model %s now.", was)
+	}
+	return []string{now, fmt.Sprintf("Each session will start with model %s.", model)}
+}
+
 // groupSetStale says why the ask seq for group set is approved no more: the
 // group was set since, or the yard would not write its card as it stands now.
 func (w *wtx) groupSetStale(seq uint64, was, now AskRun) error {
@@ -280,9 +305,9 @@ func (w *wtx) groupSetStale(seq uint64, was, now AskRun) error {
 }
 
 // groupSetWeight weighs a group set card: its sessions run a program the
-// card shows, the group's prompt, command or the flags that never ask. A card
-// of an effort alone changes how hard they think and no program, so it is
-// routine.
+// card shows, the group's prompt, command, model or the flags that never
+// ask. A card of an effort alone changes how hard they think and no
+// program, so it is routine.
 func groupSetWeight(_ *wtx, run AskRun) ([]AskWeight, error) {
 	name, sets := strongSetOf(run.Argv)
 	if len(strongChanged(sets)) == 0 {
@@ -311,7 +336,7 @@ func runGroupSet(ctx context.Context, w *wtx, run AskRun, actor string, _ *appro
 		}
 	}
 	lines := []string{fmt.Sprintf("group %s saved", spec.name)}
-	for _, key := range []string{"args", "cmd", "effort", "prompt"} {
+	for _, key := range []string{"args", "cmd", "effort", "model", "prompt"} {
 		was, had := ch.Was.Config[key]
 		is, has := ch.Is.Config[key]
 		if a, b := grantSettingText(was, had), grantSettingText(is, has); had != has || a != b {

@@ -125,13 +125,15 @@ The yard records the run for the operator and mails it to them. Free `args`,
 `env_file`, a `prompt`, a `cmd` and a change of runner to or from `exec` are
 never part of it. Every other setting is changed as above.
 
-A group's `cmd`, its `prompt` and the permission preset of its kind that
+A group's `cmd`, its `prompt`, its `model` and the permission preset of its kind that
 never asks (`yardr harness show <kind>` lists the presets; free `args` are
 never proposed) are what every later session of the group runs, so they have
 a card of their own: `yardr bead ask <id> -` with an `R: group set <name>
-prompt=<file> cmd=<command> preset=<preset>` line on stdin proposes any of
-the three on a weighty (`code`) card that shows each as it stands and as it would be, whole,
-and approving sets exactly that. `cmd` is one word, as above; `prompt` is
+prompt=<file> cmd=<command> model=<model> preset=<preset>` line on stdin proposes any of
+the four on a weighty (`code`) card that shows each as it stands and as it would be, whole,
+and approving sets exactly that. `cmd` is one word, as above; `model` is the
+name the kind passes to its agents' model flag, refused only where it reads
+as a flag itself; `prompt` is
 the absolute path of a file under the yard's home, whose text `yardr bead ask`
 carries beside the command, and the approval is refused if that file holds
 other text by then and, as for a new group, writes that text to a read-only
