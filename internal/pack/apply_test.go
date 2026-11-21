@@ -1211,7 +1211,7 @@ func TestPackWithoutStageFilesBringsNone(t *testing.T) {
 			files = append(files, obj.Name)
 		}
 	}
-	if want := []string{"roles/builder.md", "roles/yardmaster.md", "scripts/land"}; !slices.Equal(files, want) {
+	if want := []string{"roles/builder.md", "scripts/land"}; !slices.Equal(files, want) {
 		t.Fatalf("files = %v, want %v", files, want)
 	}
 	apply(t, st, plan, nil)

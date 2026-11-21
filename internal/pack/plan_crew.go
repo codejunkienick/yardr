@@ -35,7 +35,6 @@ func (b *planner) crew() error {
 		return err
 	}
 	var subs []Object
-	warned := false
 	for _, pr := range b.p.Crew {
 		if pr.Section != "" {
 			if pr.Name == "yardmaster" || b.plan.Section == "" {
@@ -56,9 +55,8 @@ func (b *planner) crew() error {
 				b.plan.Refused = append(b.plan.Refused, fmt.Sprintf("crew %s: section %s: its first line holds %d bytes: at most %d", pr.Name, pr.Section, len(first), maxSectionFirstLine))
 			}
 		}
-		if !warned && pr.Name == "yardmaster" && pr.Role != "" {
-			warned = true
-			b.plan.Notes = append(b.plan.Notes, "a pack's yardmaster role is ignored for the yardmaster prompt")
+		if pr.Name == "yardmaster" && pr.Role != "" {
+			b.plan.Refused = append(b.plan.Refused, fmt.Sprintf("%s is no longer read: packs no longer set the yardmaster prompt — move these words to a section (pack.yaml crew section:, at most %d bytes, first line saying when it applies)", pr.Role, maxSection))
 		}
 		name, told := b.plan.Crew[pr.Name], b.told[pr.Name]
 		i := slices.IndexFunc(have, func(r store.CrewMember) bool { return r.Name == name })
@@ -75,7 +73,7 @@ func (b *planner) crew() error {
 		var changes []Diff
 		if pr.Name == "yardmaster" {
 			// The yardmaster's prompt is the yard's own file, which no pack
-			// sets: a pack's role for it is ignored above. The one move an
+			// sets: a pack's role for it is refused above. The one move an
 			// import makes is off a pack's role: a yardmaster still prompted
 			// from under <home>/packs/ is repointed at the local file,
 			// seeded from the role it reads now when there is none, so the

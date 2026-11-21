@@ -71,7 +71,7 @@ func TestDirectoryPackApplyEndToEnd(t *testing.T) {
 	st.SetDirectoryPackReader(directoryReaderFor(home))
 	checkout := t.TempDir()
 	dir := filepath.Join(checkout, "packs", "mini")
-	writeMiniPack(t, dir, "build v1\n", "yardmaster v1\n")
+	writeMiniPack(t, dir, "build v1\n", "review v1\n")
 	if err := st.PutDepot(ctx, store.Depot{Name: "packs", Path: checkout}, "mckean"); err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestDirectoryPackApplyEndToEnd(t *testing.T) {
 	if _, err := pack.Apply(ctx, st, plan, pack.ApplyOptions{Answers: answers, Actor: "mckean"}); err != nil {
 		t.Fatal(err)
 	}
-	writeMiniPack(t, dir, "build v2\n", "yardmaster v2\n")
+	writeMiniPack(t, dir, "build v2\n", "review v2\n")
 	ask := packAskOf(dir)
 	seq, err := st.AddAsk(ctx, bead, ask, "yardmaster")
 	if err != nil {
@@ -133,7 +133,7 @@ func TestDirectoryPackApplyEndToEnd(t *testing.T) {
 	if rec := carryState(t, st, bead, seq); rec.State != store.CarryDone {
 		t.Fatalf("the record = %+v", rec)
 	}
-	for name, want := range map[string]string{"builder.md": "build v2\n", "yardmaster.md": "yardmaster v2\n"} {
+	for name, want := range map[string]string{"builder.md": "build v2\n", "reviewer.md": "review v2\n"} {
 		data, err := os.ReadFile(filepath.Join(home, "packs", "mini", "roles", name))
 		if err != nil || string(data) != want {
 			t.Fatalf("the installed %s = %q, %v", name, data, err)

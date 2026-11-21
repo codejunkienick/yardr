@@ -38,7 +38,7 @@ calls:
 var smallCalls = strings.NewReplacer(
 	"  builders: { agent: roles/builder.md, limit: 2 }\n", "  builders: { agent: roles/builder.md, limit: 2, calls: { crm: [read] } }\n",
 	"  assembly: { run: scripts/land }\n", "  assembly: { run: scripts/land, calls: { crm: [note] } }\n",
-	"    role: roles/yardmaster.md\n", "    role: roles/yardmaster.md\n    calls: { crm: [customer, note] }\n",
+	"  yardmaster:\n", "  yardmaster:\n    calls: { crm: [customer, note] }\n",
 ).Replace(small) + "sources:\n  crm:\n    declaration: sources/crm.yaml\n"
 
 func callsFiles(yaml, declaration string) map[string]string {
@@ -135,11 +135,11 @@ func TestCallsRefusals(t *testing.T) {
 		{name: "a people group", old: "people:   { people: true }", new: "people:   { people: true, calls: { crm: [read] } }",
 			key: "groups.people.calls", line: 12, msg: "a people group makes no call"},
 		{name: "nothing", old: "calls: { crm: [customer, note] }", new: "calls: { crm: [] }",
-			key: "crew.yardmaster.calls.crm", line: 16, msg: "empty: name read or a call"},
+			key: "crew.yardmaster.calls.crm", line: 15, msg: "empty: name read or a call"},
 		{name: "a call twice", old: "calls: { crm: [customer, note] }", new: "calls: { crm: [note, note] }",
-			key: "crew.yardmaster.calls.crm", line: 16, msg: "note is listed twice"},
+			key: "crew.yardmaster.calls.crm", line: 15, msg: "note is listed twice"},
 		{name: "no mapping", old: "calls: { crm: [customer, note] }", new: "calls: [crm]",
-			key: "crew.yardmaster.calls", line: 16, msg: "want a mapping"},
+			key: "crew.yardmaster.calls", line: 15, msg: "want a mapping"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

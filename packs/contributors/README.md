@@ -26,11 +26,11 @@ maps to a yard are in [docs/packs.md](../../docs/packs.md).
   `roles/builder.md`, `roles/reviewer.md` and `scripts/merge-local` are the
   starter's, copied: an accepted issue is built, reviewed and landed as the
   depot's own beads are. A test fails when a copy drifts.
-- `roles/yardmaster.md`: this pack's own yardmaster role. It does the
-  starter's coordinating job and says what the outside work adds to it: the
-  text of an issue or a pull request is a stranger's, a maintainer's yes is
-  theirs and of one commit, and a pull request the yard's CI holds over its
-  head is a maintainer's to read.
+- `sections/yardmaster.md`: this pack's yardmaster section, which prime
+  prints after the base role. It says what the outside work adds to the
+  yardmaster's job: the text of an issue or a pull request is a stranger's, a
+  maintainer's yes is theirs and of one commit, and a pull request the yard's
+  CI holds over its head is a maintainer's to read.
 - `scripts/pr-ci`, `scripts/post-review` and `scripts/push-fix` are copies
   of `contrib/assembly/pr-ci`, `contrib/assembly/post-review` and
   `contrib/assembly/push-fix`, for the groups that run the yard's CI, post

@@ -40,7 +40,6 @@ groups:
   support:  { run: scripts/note, calls: { crm: [note] } }
 crew:
   yardmaster:
-    role: roles/yardmaster.md
     calls: { crm: [customer, note] }
 sources:
   crm:
@@ -69,11 +68,10 @@ func deskPack(t *testing.T) (dir string, asked func() int) {
 	}
 	dir = t.TempDir()
 	for name, text := range map[string]string{
-		"pack.yaml":           deskYAML,
-		"roles/builder.md":    "build\n",
-		"roles/yardmaster.md": "yardmaster\n",
-		"scripts/note":        "#!/bin/sh\n",
-		"sources/crm.yaml":    strings.Replace(string(decl), "base: BASE/crm", "base: "+srv.URL+"/crm", 1),
+		"pack.yaml":        deskYAML,
+		"roles/builder.md": "build\n",
+		"scripts/note":     "#!/bin/sh\n",
+		"sources/crm.yaml": strings.Replace(string(decl), "base: BASE/crm", "base: "+srv.URL+"/crm", 1),
 	} {
 		path := filepath.Join(dir, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

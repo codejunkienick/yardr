@@ -132,8 +132,9 @@ yards only. `yardr pack show starter` prints the base as yardr carries it
 now, which is how an operator sees that it has moved and takes it by hand
 if they want it. A yard still prompted from a pack's role under
 `~/.yardr/packs/` is moved to the local file, seeded from the role it reads
-now, by the next `yardr pack apply` that names the yardmaster; a pack's
-`roles/yardmaster.md` sets no prompt any more.
+now, by the next `yardr pack apply` that names the yardmaster. No pack
+sets the yardmaster's prompt: a pack whose yardmaster declares a `role:`
+is refused for it, with the section its words move to named.
 
 ## Session limits and outages
 

@@ -355,10 +355,10 @@ func TestPackShowPrintsYardmasterSection(t *testing.T) {
 			"      merged: { end: true }\n" +
 			"groups:\n  builders: { agent: roles/builder.md, limit: 2 }\n  assembly: { run: scripts/land }\n  people:   { people: true }\n" +
 			"crew:\n  builder:\n    role: roles/builder.md\n    section: sections/builder.md\n" +
-			"  yardmaster:\n    role: roles/yardmaster.md\n    section: sections/yardmaster.md\n",
-		"SETUP.md":               setupNotes,
-		"roles/builder.md":       "build\n",
-		"roles/yardmaster.md":    "yardmaster\n",
+			"  yardmaster:\n    section: sections/yardmaster.md\n",
+		"SETUP.md":         setupNotes,
+		"roles/builder.md": "build\n",
+
 		"scripts/land":           "#!/bin/sh\n",
 		"sections/builder.md":    "When building.\n\nBuilder body.\n",
 		"sections/yardmaster.md": section,

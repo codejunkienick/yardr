@@ -443,10 +443,11 @@ func TestPackCheckRefusedPlanFails(t *testing.T) {
 		t.Fatalf("out:\n%s", out)
 	}
 	// The starter carries no yardmaster role, so its check says nothing of
-	// one. A copy that carries a role is told it is ignored for the
-	// yardmaster prompt, and an oversized section refuses it.
-	if strings.Contains(out, "a pack's yardmaster role is ignored for the yardmaster prompt") {
-		t.Fatalf("the starter's check warns of a role it does not carry:\n%s", out)
+	// one. A copy that carries a role is refused for it, in the words that
+	// name the section the words move to, and an oversized section refuses
+	// it too.
+	if strings.Contains(out, "roles/yardmaster.md is no longer read") {
+		t.Fatalf("the starter's check refuses a role it does not carry:\n%s", out)
 	}
 	dir := t.TempDir()
 	if err := os.CopyFS(dir, os.DirFS("../../packs/starter")); err != nil {
@@ -475,8 +476,8 @@ func TestPackCheckRefusedPlanFails(t *testing.T) {
 	}
 	out, err = run(t, a.packCmd(), "check", dir, "--depot", "web")
 	if !errors.Is(err, errCheckFailed) || !strings.Contains(out, "an import would be refused") || !strings.Contains(out, "section sections/yardmaster.md holds") ||
-		!strings.Contains(out, "a pack's yardmaster role is ignored for the yardmaster prompt") {
-		t.Fatalf("an oversized section: err = %v\nout:\n%s", err, out)
+		!strings.Contains(out, "roles/yardmaster.md is no longer read: packs no longer set the yardmaster prompt — move these words to a section (pack.yaml crew section:, at most 2048 bytes, first line saying when it applies)") {
+		t.Fatalf("a yardmaster role and an oversized section: err = %v\nout:\n%s", err, out)
 	}
 }
 

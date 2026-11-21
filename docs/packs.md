@@ -192,7 +192,7 @@ groups:
 
 crew:
   yardmaster:
-    role: roles/yardmaster.md
+    section: sections/yardmaster.md
     hears:
       events: [attention]
       stages: [decide]
@@ -229,7 +229,7 @@ sources:
 | `groups.<group>.env` | optional, for a group with `run:` alone: the options of its script, a map of variable names to strings (`env: { YARDR_LAND: squash }`: the starter's assembly lands a bead by squash from it). The import writes them before the script in the `cmd` of a group it **creates**, names sorted and values quoted as the script's path is (`YARDR_LAND=squash /…/merge-local`); a group the yard has keeps its own `cmd` whatever `env` says, since after the group is made its assignments are the operator's ([Groups](#how-a-pack-maps-to-the-yard)). A name is what the shell takes for a variable's (letters, digits and `_`, no digit first), a value a string of printable characters on one line, not empty (quote a number, `"1"`, and the words YAML reads as booleans). An empty map says nothing; beside `agent:` or `people:` the key is an error. `pack check` shows the assignments a new group's `cmd` starts with, `pack show` prints a pack's `env`, and `pack export` writes none ([below](#yardr-pack-export)) |
 | `groups.<group>.binds_as` | optional, for a group with `agent:`: another agent group of the pack, declared before this one, whose agent, model and permission arguments this group gets, so that the import asks nothing for it. The starter's `security-reviewers` bind as `reviewers`: the second review is run by the agent the first is, unless the import is given `--bind security-reviewers=<kind>[:<model>]`. A group the yard has already keeps what it has, as any does ([below](#yardr-pack-apply)) |
 | `groups.<group>.calls.<source>` | optional, for a group with `agent:` or `run:`: the calls of a declared source the group's sessions should be able to make with `yardr call`: `read` for every read call, and calls by name, which is the one way an update is asked for (`calls: { crm: [read, note] }`). The pack only asks: the import puts it to the yard's operator ([Calls of a declared source](#how-a-pack-maps-to-the-yard)) |
-| `crew.<name>.role` | the crew member's role file. For the crew member named `yardmaster` it sets no prompt: the yardmaster's prompt is the yard's own file, and the plan says the role is ignored for it |
+| `crew.<name>.role` | the crew member's role file. For the crew member named `yardmaster` a role is refused instead: the yardmaster's prompt is the yard's own file, no pack sets it, and the plan refuses the import naming the declared file and the section its words move to |
 | `crew.<name>.section` | optional: the yardmaster section file a crew member's prime appends (`sections/yardmaster.md` by convention): at most 2048 bytes, its first line at most 200 bytes saying when the section applies. An import is refused for a larger section or an empty or overlong first line, and the record of the import keeps the file's path |
 | `crew.<name>.hears.events` | event kinds from the yard itself |
 | `crew.<name>.hears.stages` | a bead entering one of these stages, which a flow of the pack must have |
@@ -1044,7 +1044,7 @@ groups:
   support:  { run: scripts/note, calls: { crm: [note] } }
 crew:
   yardmaster:
-    role: roles/yardmaster.md
+    section: sections/yardmaster.md
     calls: { crm: [customer, note] }
 sources:
   crm:
@@ -1725,9 +1725,9 @@ notes
   the yardmaster's local role ~/.yardr/roles/yardmaster.md is seeded from starter's role
 ```
 
-A pack's `roles/yardmaster.md` is ignored for the yardmaster prompt, and
-the plan says so; what a pack asks of its yardmaster travels in its
-`section:` instead ([pack.yaml](#packyaml)). A running crew
+A pack whose yardmaster declares a `role:` is refused, and the plan
+names the declared file and the section its words move to; what a pack
+asks of its yardmaster travels in its `section:` ([pack.yaml](#packyaml)). A running crew
 member keeps its session when its role or what it hears changes; the output
 names the restart.
 

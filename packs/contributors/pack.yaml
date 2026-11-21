@@ -179,7 +179,7 @@ groups:
 
 crew:
   yardmaster:
-    role: roles/yardmaster.md
+    section: sections/yardmaster.md
     hears:
       events: [attention]
       stages: [triage, decide]
