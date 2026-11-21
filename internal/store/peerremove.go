@@ -34,6 +34,7 @@ func (w *wtx) deletePeer(ctx context.Context, name, actor string, by *approvedOn
 	if err != nil {
 		return err
 	}
+	before := clonePeer(p)
 	if err := w.Bucket(bPeers).Delete([]byte(name)); err != nil {
 		return err
 	}
@@ -111,5 +112,10 @@ func (w *wtx) deletePeer(ctx context.Context, name, actor string, by *approvedOn
 	if by != nil {
 		data["approved"] = by
 	}
-	return w.event("", "peer_removed", actor, data)
+	if err := w.event("", "peer_removed", actor, data); err != nil {
+		return err
+	}
+	// The removal tells beside its peer_removed, with nothing after it:
+	// a hold of the link is stale however it read it (runask_stale.go).
+	return w.tellPeerStale(name, before, nil, actor)
 }

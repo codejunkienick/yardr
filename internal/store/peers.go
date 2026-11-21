@@ -606,20 +606,6 @@ func (w *wtx) checkAllowPeer(ctx context.Context, name string, check peerAllowPe
 	return p, nil
 }
 
-// changeList is the list have with add put in and drop taken out, sorted,
-// each once: what a link carries or exposes after a peer allow, which the
-// write stores and a run ask's card names beside what it holds now.
-func changeList(have, add, drop []string) []string {
-	out := []string{}
-	for _, k := range append(slices.Clone(have), add...) {
-		if !slices.Contains(drop, k) && !slices.Contains(out, k) {
-			out = append(out, k)
-		}
-	}
-	slices.Sort(out)
-	return out
-}
-
 // allowPeer is AllowPeer inside the transaction, so that an approved run ask makes the change in the write that records its approval (ApproveAsk): by is then the ask it was approved on, which the event carries.
 func (w *wtx) allowPeer(ctx context.Context, name string, ch PeerAllow, actor string, by *approvedOn) (p *Peer, err error) {
 	if err := w.packPeerWrite(ctx, name, ch, actor); err != nil {
@@ -639,7 +625,7 @@ func (w *wtx) allowPeer(ctx context.Context, name string, ch PeerAllow, actor st
 	if err != nil {
 		return nil, err
 	}
-	change := changeList
+	before, change := clonePeer(p), changeList
 	if ch.MailLimit > 0 && ch.MailLimit != p.MailsAnHour() {
 		// The default is kept as no setting, so it is the default's
 		// still should that change.
@@ -669,6 +655,8 @@ func (w *wtx) allowPeer(ctx context.Context, name string, ch PeerAllow, actor st
 		return nil, fmt.Errorf("peer %s: a link exposes at most %d names, and this would make it %d", name, MaxPeerExpose, len(p.Expose))
 	}
 	if err := put(w.Tx, bPeers, name, p); err != nil {
+		return nil, err
+	} else if err := w.tellPeerStale(name, before, p, actor); err != nil {
 		return nil, err
 	}
 	data := map[string]any{"peer": name, "send": p.Send, "receive": p.Receive}

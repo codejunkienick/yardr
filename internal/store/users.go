@@ -714,10 +714,7 @@ func (w *wtx) deleteUser(ctx context.Context, name, actor string, by *approvedOn
 	if err := dropDevices(w, name, data); err != nil {
 		return err
 	}
-	if err := unexpose(w.Tx, name, data); err != nil {
-		return err
-	}
-	if err := untrust(w.Tx, name, data); err != nil {
+	if err := unexposeAndUntrust(w, name, actor, data); err != nil {
 		return err
 	}
 	if by != nil {

@@ -627,7 +627,7 @@ func (s *Store) DeleteCrew(ctx context.Context, name, rev, actor string) error {
 			return err
 		}
 		data := map[string]any{"crew": name}
-		if err := unexpose(w.Tx, name, data); err != nil {
+		if err := unexpose(w, name, actor, data, nil); err != nil {
 			return err
 		}
 		return w.event(r.Journal, "crew_deleted", actor, data)

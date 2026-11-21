@@ -558,6 +558,470 @@ func TestDepotPushHoldToldOnGroupChange(t *testing.T) {
 	}
 }
 
+// peerTells are the ask_stale events on y's bead, oldest first.
+func peerTells(t *testing.T, y *askYard) []Event {
+	t.Helper()
+	evs, err := y.Store.Events(y.ctx, y.bead, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []Event
+	for _, e := range evs {
+		if e.Kind == "ask_stale" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// toldSeq is the ask a tell names, as it reads back (a number, in either
+// stored form).
+func toldSeq(e Event) uint64 {
+	switch n := e.Data["ask"].(type) {
+	case float64:
+		return uint64(n)
+	case uint64:
+		return n
+	}
+	return 0
+}
+
+// Changing a peer tells the askers of the open and put-aside run asks
+// naming it, once each, in words naming the ask and the peer; changing an
+// unrelated peer tells nothing, and a second change while the asks stand
+// tells nothing more. Taken back and asked again, the new ask is covered,
+// and a fresh ask taken back before the change is not.
+func TestPeerChangeTellsCrewAskerOfStaleRunAsk(t *testing.T) {
+	t.Parallel()
+	y := peerRuleYard(t)
+	open := y.ask(t, listAsk("mckean", "peer", "allow", "airy", "--receive", "bead"), "yardmaster")
+	aside := y.ask(t, listAsk("mckean", "peer", "allow", "airy", "--send", "mail"), "yardmaster")
+	if page, err := y.Store.Inbox(y.ctx, "yardmaster", 0); err != nil || page.Total != 0 {
+		t.Fatalf("the asker's inbox after asking = %+v, %v, want empty", page, err)
+	}
+	y.answer(t, Answer{Ask: aside, Later: true}, "mckean")
+	// An unrelated peer changes without a tell.
+	if _, err := y.AllowPeer(y.ctx, "north", PeerAllow{Send: []string{PeerBead}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := peerTells(t, y); len(got) != 0 {
+		t.Fatalf("the bead holds %d tells after an unrelated change, want none", len(got))
+	}
+	// Changing the named peer tells the open ask and the aside one.
+	if _, err := y.AllowPeer(y.ctx, "airy", PeerAllow{Send: []string{PeerBead}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	page, err := y.Store.Inbox(y.ctx, "yardmaster", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The inbox holds the aside answer beside the two tells.
+	if page.Total != 3 {
+		t.Fatalf("the asker's inbox = %+v, want the aside answer and two tells", page)
+	}
+	told := map[uint64]bool{}
+	for _, e := range peerTells(t, y) {
+		if got := Reason(e, "yardmaster"); got != ReasonAnswered {
+			t.Fatalf("the asker heard %q, want %q", got, ReasonAnswered)
+		}
+		if got := e.Data["kind"]; got != "peer" {
+			t.Errorf("the tell names kind %v, want peer", got)
+		}
+		if got := e.Data["name"]; got != "airy" {
+			t.Errorf("the tell names name %v, want airy", got)
+		}
+		if got := e.Data["seen"]; got != "peer airy carries" {
+			t.Errorf("the tell names digest %v, want peer airy carries", got)
+		}
+		if _, has := e.Data["source"]; has {
+			t.Errorf("the peer tell names a source: %v", e.Data)
+		}
+		seq := toldSeq(e)
+		told[seq] = true
+		line, _ := e.Data["answer"].(string)
+		for _, want := range []string{y.bead, fmt.Sprint(seq), "airy", "peer airy"} {
+			if !strings.Contains(line, want) {
+				t.Errorf("the line has no %q:\n%s", want, line)
+			}
+		}
+	}
+	if !told[open] || !told[aside] {
+		t.Fatalf("the tells name %v, want the open ask %d and the aside ask %d", told, open, aside)
+	}
+	// A second change while the asks stand tells nothing more.
+	if _, err := y.AllowPeer(y.ctx, "airy", PeerAllow{Send: []string{PeerMail}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := peerTells(t, y); len(got) != 2 {
+		t.Fatalf("the bead holds %d tells after a second change, want the two", len(got))
+	}
+	// The open ask is indeed stale: its approval is refused, running nothing.
+	if _, err := y.ApproveAsk(y.ctx, y.bead, open, "mckean", true, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving the stale ask = %v, want a refusal that ran nothing", err)
+	}
+	// Taken back and asked again, the new ask is covered.
+	if err := y.TakeBackAsk(y.ctx, y.bead, open, "asking again", "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	again := y.ask(t, listAsk("mckean", "peer", "allow", "airy", "--receive", "bead"), "yardmaster")
+	if _, err := y.AllowPeer(y.ctx, "airy", PeerAllow{Receive: []string{PeerMail}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := peerTells(t, y); len(got) != 3 || toldSeq(got[2]) != again {
+		t.Fatalf("the bead holds %v after the re-ask changed, want a third tell of ask %d", got, again)
+	}
+	// A fresh ask taken back before the next change is not told of it.
+	gone := y.ask(t, listAsk("mckean", "peer", "allow", "airy", "--receive", "ask"), "yardmaster")
+	if err := y.TakeBackAsk(y.ctx, y.bead, gone, "no longer wanted", "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.AllowPeer(y.ctx, "airy", PeerAllow{Receive: []string{PeerBead}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := peerTells(t, y); len(got) != 3 {
+		t.Fatalf("the bead holds %d tells after the taken-back ask's change, want the three", len(got))
+	}
+}
+
+// A user who asked about a peer is told in its notifications, with the
+// same line; the crew member who did not ask hears nothing.
+func TestPeerChangeTellsUserAskerOfStaleRunAsk(t *testing.T) {
+	t.Parallel()
+	y := peerRuleYard(t)
+	seq := y.ask(t, listAsk("mckean", "peer", "allow", "airy", "--receive", "bead"), "ada")
+	if _, err := y.AllowPeer(y.ctx, "airy", PeerAllow{Send: []string{PeerBead}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, e := range peerTells(t, y) {
+		if Notified(e, "ada") != ReasonAnswered {
+			continue
+		}
+		found = true
+		line, _ := e.Data["answer"].(string)
+		for _, want := range []string{y.bead, fmt.Sprint(seq), "airy"} {
+			if !strings.Contains(line, want) {
+				t.Errorf("the line has no %q:\n%s", want, line)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("ada was not told")
+	}
+	page, err := y.Store.UserNotifications(y.ctx, "ada", 0, "ada")
+	if err != nil || page.Unread != 1 {
+		t.Fatalf("ada's notifications = %+v, %v, want one unread", page, err)
+	}
+	text := page.Notifications[0].Text
+	for _, want := range []string{y.bead, fmt.Sprint(seq), "airy"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the notification has no %q:\n%s", want, text)
+		}
+	}
+	if page, err := y.Store.Inbox(y.ctx, "yardmaster", 0); err != nil || page.Total != 0 {
+		t.Fatalf("the yardmaster's inbox = %+v, %v, want empty", page, err)
+	}
+}
+
+// Adding a peer where none stood tells a hold written against its
+// absence (a peer add ask), and its approval is then refused; renaming
+// tells a hold of the old name and a hold of the new name written against
+// its absence, and removing the renamed peer tells a fresh hold of it.
+func TestPeerAbsentCreateRenameAndDeleteTellAsker(t *testing.T) {
+	t.Parallel()
+	y, _ := runYard(t)
+	southKey := Public(newKey(t))
+	pending := y.ask(t, runAsk("peer add south "+Invite{Name: "south-yard", Key: southKey}.String()), "yardmaster")
+	if _, err := y.AddPeer(y.ctx, Peer{Name: "south", Key: southKey, Calls: "south-yard"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := peerTells(t, y); len(got) != 1 || toldSeq(got[0]) != pending || got[0].Data["name"] != "south" || got[0].Data["seen"] != "peer south" {
+		t.Fatalf("the absent-create tells = %v, want one of ask %d for south", got, pending)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, pending, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving the told add = %v, want a refusal that ran nothing", err)
+	}
+	pairedKey := Public(newKey(t))
+	paired := y.ask(t, runAsk("peer add paired "+Invite{Name: "paired-yard", Key: pairedKey}.String()), "yardmaster")
+	if _, err := y.PairPeer(y.ctx, Peer{Name: "paired", Key: pairedKey, Calls: "paired-yard"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var pairTold bool
+	for _, e := range peerTells(t, y) {
+		if toldSeq(e) == paired && e.Data["name"] == "paired" && e.Data["seen"] == "peer paired" {
+			pairTold = true
+		}
+	}
+	if !pairTold {
+		t.Fatalf("pairing did not tell the absent-name hold %d", paired)
+	}
+	// Renaming airy tells its hold and an absence hold of the new name.
+	oldSeq := y.ask(t, listAsk("mckean", "peer", "allow", "airy", "--receive", "bead"), "yardmaster")
+	control := y.ask(t, listAsk("mckean", "peer", "allow", "south", "--receive", "bead"), "yardmaster")
+	eastKey := Public(newKey(t))
+	absent := y.ask(t, runAsk("peer add east "+Invite{Name: "east-yard", Key: eastKey}.String()), "yardmaster")
+	if _, err := y.RenamePeer(y.ctx, "airy", "east", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	byAsk := map[uint64][]Event{}
+	for _, e := range peerTells(t, y) {
+		byAsk[toldSeq(e)] = append(byAsk[toldSeq(e)], e)
+	}
+	if got := byAsk[oldSeq]; len(got) != 1 || got[0].Data["name"] != "airy" {
+		t.Fatalf("the old name's tells = %v, want one for airy", got)
+	}
+	if got := byAsk[absent]; len(got) != 1 || got[0].Data["name"] != "east" {
+		t.Fatalf("the new name's tells = %v, want one for east", got)
+	}
+	if got := byAsk[control]; len(got) != 0 {
+		t.Fatalf("the control hold was told: %v", got)
+	}
+	// The control hold still approves: the rename staled nothing of it.
+	if _, err := y.ApproveAsk(y.ctx, y.bead, control, "mckean", true, nil); err != nil {
+		t.Fatalf("approving the control after the rename: %v", err)
+	}
+	// Removing the renamed peer tells a fresh hold of its new name.
+	fresh := y.ask(t, listAsk("mckean", "peer", "allow", "east", "--receive", "bead"), "yardmaster")
+	if err := y.DeletePeer(y.ctx, "east", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var deleted int
+	for _, e := range peerTells(t, y) {
+		if toldSeq(e) == fresh && e.Data["name"] == "east" {
+			deleted++
+		}
+	}
+	if deleted != 1 {
+		t.Fatalf("the removal told the fresh hold %d times, want once", deleted)
+	}
+}
+
+// A peer write tells only the holds whose own reading of the link it
+// moved: an address change tells a peer set hold and leaves a peer allow
+// hold standing, which then still approves; the approval's own write
+// tells the other hold and not the ask it approves.
+func TestPeerWriteTellsOnlyTheHoldsWhoseReadingMoved(t *testing.T) {
+	t.Parallel()
+	y := peerRuleYard(t)
+	setHold := y.ask(t, listAsk("mckean", "peer", "set", "airy", "--url", "https://peer.example.com"), "yardmaster")
+	allowHold := y.ask(t, listAsk("mckean", "peer", "allow", "airy", "--receive", "bead"), "yardmaster")
+	if _, err := y.SetPeerURL(y.ctx, "airy", "https://elsewhere.example.com", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var setTold, allowTold bool
+	for _, e := range peerTells(t, y) {
+		setTold = setTold || toldSeq(e) == setHold
+		allowTold = allowTold || toldSeq(e) == allowHold
+		if toldSeq(e) == setHold && e.Data["seen"] != "peer airy address" {
+			t.Errorf("the address tell names %v, want peer airy address", e.Data["seen"])
+		}
+	}
+	if !setTold || allowTold {
+		t.Fatalf("the address write told set %v and allow %v, want the set hold alone", setTold, allowTold)
+	}
+	// The standing allow hold still approves, and its own write tells
+	// the set hold nothing more while telling no one of itself: it is
+	// the approving ask, left out of its own write's tell.
+	second := y.ask(t, listAsk("mckean", "peer", "allow", "airy", "--send", "mail"), "yardmaster")
+	if _, err := y.ApproveAsk(y.ctx, y.bead, allowHold, "mckean", true, nil); err != nil {
+		t.Fatalf("approving the standing allow hold: %v", err)
+	}
+	var selfTold, secondTold bool
+	for _, e := range peerTells(t, y) {
+		selfTold = selfTold || toldSeq(e) == allowHold
+		secondTold = secondTold || toldSeq(e) == second
+	}
+	if selfTold || !secondTold {
+		t.Fatalf("the approval told itself %v and the other hold %v, want the other alone", selfTold, secondTold)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, setHold, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving the told set hold = %v, want a refusal that ran nothing", err)
+	}
+}
+
+// An identity change tells a hold that read that crew member in that
+// source and no intake hold; moving the source's records tells it too,
+// under its new source. Cursor writes never tell, while a roster change
+// that removes reach from a still-trusted crew member does.
+func TestPeerIdentityCursorAndRosterWritesTell(t *testing.T) {
+	t.Parallel()
+	y := intakeYard(t)
+	if _, err := y.SetPeerIdentity(y.ctx, "airy", PeerIdentity{Source: "talk", Crew: "mayor", ID: "U1"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	identityHold := y.ask(t, listAsk("mckean", "peer", "identity", "airy", "mayor", "--source", "talk", "--id", "U2"), "yardmaster")
+	intakeHold := y.ask(t, listAsk("mckean", "peer", "intake", "airy", "--depot", "web", "--flow", "incoming"), "yardmaster")
+	if _, err := y.SetPeerIdentity(y.ctx, "airy", PeerIdentity{Source: "talk", Crew: "mayor", ID: "U9"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var identityTold, intakeTold bool
+	for _, e := range peerTells(t, y) {
+		identityTold = identityTold || toldSeq(e) == identityHold
+		intakeTold = intakeTold || toldSeq(e) == intakeHold
+		if toldSeq(e) == identityHold && e.Data["seen"] != "peer airy mayor in talk" {
+			t.Errorf("the identity tell names %v, want peer airy mayor in talk", e.Data["seen"])
+		}
+	}
+	if !identityTold || intakeTold {
+		t.Fatalf("the identity write told identity %v and intake %v, want the identity hold alone", identityTold, intakeTold)
+	}
+	// Moving talk's records into chat moves the identity with them: a
+	// fresh hold that read mayor in talk is told by the fold.
+	movedHold := y.ask(t, listAsk("mckean", "peer", "identity", "airy", "mayor", "--source", "talk", "--id", "U10"), "yardmaster")
+	if _, err := y.PutSource(y.ctx, "chat.yaml", strings.Replace(talkFile, "name: talk", "name: chat", 1), "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.MoveSourceRecords(y.ctx, "talk", "chat", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var moved int
+	for _, e := range peerTells(t, y) {
+		if toldSeq(e) == movedHold && e.Data["seen"] == "peer airy mayor in talk" {
+			moved++
+		}
+	}
+	if moved != 1 {
+		t.Fatalf("the record move told the fresh identity hold %d times, want once naming peer airy mayor in talk", moved)
+	}
+	if _, err := y.SetPeerIntake(y.ctx, "airy", &PeerIntake{Depot: "web", Flow: "incoming", Limit: 3}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var intakeAdded int
+	for _, e := range peerTells(t, y) {
+		if toldSeq(e) == intakeHold && e.Data["seen"] == "peer airy intakes" {
+			intakeAdded++
+		}
+	}
+	if intakeAdded != 1 {
+		t.Fatalf("adding the intake told its absence hold %d times, want once", intakeAdded)
+	}
+	removeHold := y.ask(t, runAsk("peer intake airy --depot web --flow incoming --limit 5"), "yardmaster")
+	if _, err := y.RemovePeerIntake(y.ctx, "airy", "web", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var intakeRemoved int
+	for _, e := range peerTells(t, y) {
+		if toldSeq(e) == removeHold && e.Data["seen"] == "peer airy intakes" {
+			intakeRemoved++
+		}
+	}
+	if intakeRemoved != 1 {
+		t.Fatalf("removing the intake told its change hold %d times, want once", intakeRemoved)
+	}
+	removeIdentityHold := y.ask(t, runAsk("peer identity airy mayor --source chat --id U11"), "yardmaster")
+	if _, err := y.RemovePeerIdentity(y.ctx, "airy", "mayor", "chat", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var identityRemoved int
+	for _, e := range peerTells(t, y) {
+		if toldSeq(e) == removeIdentityHold && e.Data["seen"] == "peer airy mayor in chat" {
+			identityRemoved++
+		}
+	}
+	if identityRemoved != 1 {
+		t.Fatalf("removing the identity told its change hold %d times, want once", identityRemoved)
+	}
+	// Cursor writes never tell: a message taken from the peer and what
+	// it says of its build move no fingerprint a hold carries.
+	y2, key := runYard(t)
+	hold := y2.ask(t, listAsk("mckean", "peer", "allow", "airy", "--receive", "bead"), "yardmaster")
+	if _, err := y2.PeerReceive(y2.ctx, "airy", key, []PeerMessage{{ID: "m1", Kind: PeerPing, Body: json.RawMessage("{}")}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := y2.PeerHeard(y2.ctx, "airy", key, Says("v1")); err != nil {
+		t.Fatal(err)
+	}
+	if got := peerTells(t, y2); len(got) != 0 {
+		t.Fatalf("cursor writes told the hold: %v", got)
+	}
+	if _, err := y2.ApproveAsk(y2.ctx, y2.bead, hold, "mckean", true, nil); err != nil {
+		t.Fatalf("approving after the cursor writes: %v", err)
+	}
+	// The roster still has mckean, so trust stays; its role changing from
+	// user to crew removes reach and tells a hold that read the reach map.
+	says := Says("v1")
+	says.Roster = []PeerRosterEntry{
+		{Name: "ada", Kind: RosterUser, Role: "user", Mail: true},
+		{Name: "mckean", Kind: RosterUser, Role: "user", Mail: true},
+	}
+	if err := y2.PeerHeard(y2.ctx, "airy", key, says); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y2.AllowPeer(y2.ctx, "airy", PeerAllow{Trust: map[string]string{"ada": "ada", "mckean": "mckean"}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y2.AllowPeer(y2.ctx, "airy", PeerAllow{Reach: map[string]string{"mckean": "mckean"}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	reachHold := y2.ask(t, listAsk("mckean", "peer", "allow", "airy", "--reach", "ada@airy=ada"), "yardmaster")
+	changed := Says("v2")
+	changed.Roster = []PeerRosterEntry{
+		{Name: "ada", Kind: RosterUser, Role: "user", Mail: true},
+		{Name: "mckean", Kind: RosterCrew, Role: "agent", Mail: true},
+	}
+	if err := y2.PeerHeard(y2.ctx, "airy", key, changed); err != nil {
+		t.Fatal(err)
+	}
+	got := peerTells(t, y2)
+	if len(got) != 1 || toldSeq(got[0]) != reachHold || got[0].Data["seen"] != "peer airy reaches" {
+		t.Fatalf("the roster change's tells = %v, want one ask %d naming peer airy reaches", got, reachHold)
+	}
+	p := y2.peerOf(t, "airy")
+	if len(p.Trust) != 2 || len(p.Reach) != 0 {
+		t.Fatalf("the roster change left trust %v and reach %v, want trust intact and reach removed", p.Trust, p.Reach)
+	}
+}
+
+// Removing a trusted user tells trust holds, and removal of a user exposed
+// and trusted on the same link tells each affected ask once.
+func TestPeerUntrustOnUserRemovalTellsAsker(t *testing.T) {
+	t.Parallel()
+	y := peerRuleYard(t)
+	key := y.peerOf(t, "airy").Key
+	says := Says("v1")
+	says.Roster = []PeerRosterEntry{{Name: "mckean", Kind: RosterUser, Role: "user", Mail: true}}
+	if err := y.PeerHeard(y.ctx, "airy", key, says); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.AllowPeer(y.ctx, "airy", PeerAllow{Trust: map[string]string{"mckean": "ada"}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	hold := y.ask(t, listAsk("mckean", "peer", "allow", "airy", "--trust", "mckean@airy=mckean"), "yardmaster")
+	if err := y.DeleteUser(y.ctx, "ada", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	got := peerTells(t, y)
+	if len(got) != 1 || toldSeq(got[0]) != hold || got[0].Data["seen"] != "peer airy trusts" {
+		t.Fatalf("the user removal's tells = %v, want one of ask %d naming peer airy trusts", got, hold)
+	}
+	y2, _ := runYard(t)
+	key2 := y2.peerOf(t, "airy").Key
+	says2 := Says("v1")
+	says2.Roster = []PeerRosterEntry{{Name: "mckean", Kind: RosterUser, Role: "user", Mail: true}}
+	if err := y2.PeerHeard(y2.ctx, "airy", key2, says2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y2.AllowPeer(y2.ctx, "airy", PeerAllow{Expose: []string{"ada"}, Trust: map[string]string{"mckean": "ada"}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	trustHold := y2.ask(t, listAsk("mckean", "peer", "allow", "airy", "--trust", "mckean@airy=mckean"), "yardmaster")
+	exposeHold := y2.ask(t, listAsk("mckean", "peer", "allow", "airy", "--expose", "mckean"), "yardmaster")
+	if err := y2.DeleteUser(y2.ctx, "ada", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	got = peerTells(t, y2)
+	seen := map[uint64]string{}
+	for _, e := range got {
+		if _, duplicate := seen[toldSeq(e)]; duplicate {
+			t.Errorf("ask %d was told more than once: %v", toldSeq(e), e.Data)
+		}
+		seen[toldSeq(e)] = fmt.Sprint(e.Data["seen"])
+	}
+	if len(got) != 2 || seen[trustHold] != "peer airy exposes" || seen[exposeHold] != "peer airy exposes" {
+		t.Fatalf("the user removal's tells = %v, want one exposure tell for each ask", got)
+	}
+}
+
 // Renaming a peer tells the grant holds of the groups that send to it,
 // whose config whole names the peer, through the rename that rewrote them.
 func TestPeerRenameTellsSendingGroupHolds(t *testing.T) {

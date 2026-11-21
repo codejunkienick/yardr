@@ -79,9 +79,26 @@ func (w *wtx) moveSourceRecords(ctx context.Context, from, to, actor string) (*S
 	if err := w.may(ctx, actor, ActMoveSource, Object{Kind: KindSource, Name: from, To: to}); err != nil {
 		return nil, err
 	}
+	// The fold moves what links hold of the source (movePeerIdentities):
+	// its writes are told here, at the fold, from the links as they stood
+	// before it and as it leaves them (runask_stale.go).
+	before := map[string]*Peer{}
+	if err := each(w.Tx, bPeers, "", func(_ []byte, p *Peer) error {
+		before[p.Name] = clonePeer(p)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	m, err := foldRecords(w.Tx, from, to, false)
 	if err != nil {
 		return nil, err
+	}
+	if m.peerIdentities > 0 {
+		if err := each(w.Tx, bPeers, "", func(_ []byte, p *Peer) error {
+			return w.tellPeerStale(p.Name, before[p.Name], p, actor)
+		}); err != nil {
+			return nil, err
+		}
 	}
 	return &m.SourceMove, nil
 }

@@ -60,6 +60,11 @@ func (w *wtx) addPeer(ctx context.Context, p Peer, actor string, by *approvedOn)
 	if err := w.event("", "peer_added", actor, data); err != nil {
 		return nil, err
 	}
+	// A link stands where none did: a hold written against its absence
+	// (a peer add ask, which holds the name free) is stale in this write.
+	if err := w.tellPeerStale(p.Name, nil, &p, actor); err != nil {
+		return nil, err
+	}
 	return &p, nil
 }
 

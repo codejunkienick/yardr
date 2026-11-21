@@ -45,6 +45,7 @@ func (w *wtx) setPeerURL(ctx context.Context, name, url, actor string, by *appro
 	if err != nil {
 		return nil, err
 	}
+	before := clonePeer(p)
 	was := p.URL
 	p.URL = url
 	if err := p.cleanURL(); err != nil {
@@ -71,6 +72,11 @@ func (w *wtx) setPeerURL(ctx context.Context, name, url, actor string, by *appro
 		data["approved"] = by
 	}
 	if err := w.event("", "peer_url_set", actor, data); err != nil {
+		return nil, err
+	}
+	// The move tells beside its peer_url_set: a hold that read the link's
+	// address is stale in the same write (runask_stale.go).
+	if err := w.tellPeerStale(name, before, p, actor); err != nil {
 		return nil, err
 	}
 	if err := outboxOf(w.Tx, p); err != nil {

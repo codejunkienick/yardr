@@ -281,7 +281,36 @@ func (p *Peer) distrust() {
 // peer_trust_dropped and peer_reach_dropped: the operator gave them, and
 // is to see that they went. The grants of trust among them are kept as
 // what they were (spoke), through the last event logged before this.
+// The drop tells its holds too, in the write that saves p beside this:
+// what the peer said is the one peer write that moves trust and reach
+// without an operator's hand, so its before is the link with the dropped
+// grants put back (their users kept in Spoke), and the tell compares it
+// with the link as it stands.
 func (w *wtx) distrusted(p *Peer) error {
+	before := clonePeer(p)
+	for _, name := range p.untrusted {
+		as := ""
+		for i := len(p.Spoke) - 1; i >= 0; i-- {
+			if p.Spoke[i].Name == name {
+				as = p.Spoke[i].As
+				break
+			}
+		}
+		if as != "" {
+			if before.Trust == nil {
+				before.Trust = map[string]string{}
+			}
+			before.Trust[name] = as
+		}
+	}
+	for _, name := range p.unreached {
+		if as := before.Trust[name]; as != "" {
+			if before.Reach == nil {
+				before.Reach = map[string]string{}
+			}
+			before.Reach[name] = as
+		}
+	}
 	for i := range p.Spoke {
 		if p.Spoke[i].Until == 0 {
 			p.Spoke[i].Until = w.Bucket(bEvents).Sequence()
@@ -297,17 +326,22 @@ func (w *wtx) distrusted(p *Peer) error {
 			return err
 		}
 	}
-	return nil
+	if len(before.Trust) == len(p.Trust) && len(before.Reach) == len(p.Reach) {
+		return nil
+	}
+	return w.tellPeerStale(p.Name, before, p, "peer:"+p.Name)
 }
 
 // untrust takes the grants that name the user, who is removed, off every
 // link, those of reach with those of trust: whoever has the name next is
-// someone no peer speaks as, and whose asks go nowhere. data, the event of
-// the removal, names the addresses that were trusted as them, and those
-// their asks were sent to.
-func untrust(tx *bolt.Tx, user string, data map[string]any) error {
+// someone no peer speaks as, and whose asks go nowhere. beforePeers keeps
+// each link as it stood before this removal, so the caller can tell once
+// after exposure and trust have both been removed. data, the event of the
+// removal, names the addresses that were trusted as them, and those their
+// asks were sent to.
+func untrust(w *wtx, user string, data map[string]any, beforePeers map[string]*Peer) error {
 	var had []Peer
-	err := each(tx, bPeers, "", func(_ []byte, p *Peer) error {
+	err := each(w.Tx, bPeers, "", func(_ []byte, p *Peer) error {
 		for _, as := range p.Trust {
 			if as == user {
 				had = append(had, *p)
@@ -321,6 +355,9 @@ func untrust(tx *bolt.Tx, user string, data map[string]any) error {
 	}
 	var gone, unreached []string
 	for _, p := range had {
+		if _, exists := beforePeers[p.Name]; !exists {
+			beforePeers[p.Name] = clonePeer(&p)
+		}
 		for _, t := range p.Trusted() {
 			if t.As == user {
 				delete(p.Trust, t.Name)
@@ -333,13 +370,41 @@ func untrust(tx *bolt.Tx, user string, data map[string]any) error {
 		for _, name := range p.unreach() {
 			unreached = append(unreached, name+"@"+p.Name)
 		}
-		if err := put(tx, bPeers, p.Name, p); err != nil {
+		if err := put(w.Tx, bPeers, p.Name, p); err != nil {
 			return err
 		}
 	}
 	data["untrusted"] = gone
 	if len(unreached) > 0 {
 		data["unreached"] = unreached
+	}
+	return nil
+}
+
+// unexposeAndUntrust removes a user's two kinds of grants from each peer
+// before telling its holds: one user removal is one peer change, even when
+// it drops both exposure and trust, so each affected ask gets one tell.
+func unexposeAndUntrust(w *wtx, user, actor string, data map[string]any) error {
+	before := map[string]*Peer{}
+	if err := unexpose(w, user, actor, data, before); err != nil {
+		return err
+	}
+	if err := untrust(w, user, data, before); err != nil {
+		return err
+	}
+	names := make([]string, 0, len(before))
+	for name := range before {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		after, err := loadPeer(w.Tx, name)
+		if err != nil {
+			return err
+		}
+		if err := w.tellPeerStale(name, before[name], after, actor); err != nil {
+			return err
+		}
 	}
 	return nil
 }

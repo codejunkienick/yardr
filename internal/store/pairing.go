@@ -260,7 +260,12 @@ func (s *Store) pairPeer(p Peer, actor string, data map[string]any) (*Peer, erro
 		if err := w.event("", "peer_allowed", actor, map[string]any{"peer": p.Name, "send": p.Send, "receive": p.Receive}); err != nil {
 			return err
 		}
-		return w.event("", "peer_paired", actor, paired)
+		if err := w.event("", "peer_paired", actor, paired); err != nil {
+			return err
+		}
+		// A link stands where none did, as at peer add: a hold written
+		// against its absence is stale in this write (runask_stale.go).
+		return w.tellPeerStale(p.Name, nil, &p, actor)
 	})
 	if err != nil {
 		return nil, err

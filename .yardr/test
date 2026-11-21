@@ -2097,8 +2097,8 @@ internal/store/flows.go 1358 flow parsing and storage
 internal/store/graph.go 1311 the dependency graph and its queries
 internal/store/hooks.go 1091 webhook parsing and the say shapes
 internal/store/peerasks.go 1073 peer asks, their answers and ask copies
-internal/store/peerbeads.go 1736 peer bead intake and fetching
-internal/store/peers.go 1529 peer records and their allowances
+internal/store/peerbeads.go 1727 peer bead intake and fetching
+internal/store/peers.go 1517 peer records and their allowances
 internal/store/peersend.go 1261 sending beads to peers and settling them
 internal/store/policy.go 1178 the permission gates and their rules
 internal/store/routing.go 2858 groups, routes and their config merges
@@ -2107,7 +2107,7 @@ internal/store/runask_setup.go 1533 the setup ask, its card, and the carrying re
 internal/store/settings.go 1014 yard settings and their checks
 internal/store/sourcecalls.go 1240 source grants and callables
 internal/store/subscriptions.go 1192 identities, subscriptions and where-clauses
-internal/store/users.go 1240 user records and operator words
+internal/store/users.go 1237 user records and operator words
 '
 # filesizebudget fails the run when a non-test Go file stands over its
 # ceiling in the table above, or when one with no row stands over 1000
@@ -2191,13 +2191,16 @@ filesizebudget() {
 # named by its file, its function, its bucket and which write of that bucket
 # in that function it is, so that a line moving inside the function, or a
 # write of another bucket beside it, leaves the name standing. The group
-# writes are decided here; the peer, crew and user writes stand undecided
+# writes are decided here; the crew and user writes stand undecided
 # behind yardr-w4q0, each naming the bead that flips it, and a group write
 # may not stand undecided. tellsitebudget below fails the run on a write in
 # none of the states and on an undecided write naming the wrong bead, and
 # warns on a listed write that is gone, as the file size budget warns on a
 # row whose file is gone: the yardtest fixtures run this script on a tree
-# that holds no store writes at all, where a gone row can only warn.
+# that holds no store writes at all, where a gone row can only warn. The
+# peer writes are decided here too (yd-87dr): each tells beside its own
+# put; source folds and user removals tell at their enclosing writes,
+# each named in its row.
 tellsites='
 internal/store/groupedit.go putGroup bGroups 1 hook putGroup tells beside its group_set
 internal/store/groupedit.go deleteGroup bGroups 1 hook deleteGroup tells with nothing after it
@@ -2211,26 +2214,26 @@ internal/store/subscriptions_write.go writeGroupSubs bGroups 1 skip writes subsc
 internal/store/unfold.go addWatch bGroups 1 skip writes subscriptions alone and no group fingerprint reads subscriptions
 internal/store/unfold.go dropWatch bGroups 1 skip writes subscriptions alone and no group fingerprint reads subscriptions
 internal/store/yardrsource.go editWatches bGroups 1 skip writes subscriptions alone and no group fingerprint reads subscriptions
-internal/store/movesource.go movePeerIdentities bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/movesource.go movePeerIdentities bPeers 2 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/pairing.go pairPeer bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peeradd.go addPeer bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peerbeads.go setPeerIntake bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peerbeads.go RemovePeerIntake bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peeridentity.go setPeerIdentity bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peeridentity.go RemovePeerIdentity bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peerremove.go deletePeer bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peerrename.go renamePeer bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peerrename.go renamePeer bPeers 2 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peerrename.go migratePeerSince bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peerroster.go unexpose bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peers.go allowPeer bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peers.go PeerReceive bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peers.go PeerHeard bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peers.go PeerPostAnswered bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peers.go PeerPulled bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peertrust.go untrust bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
-internal/store/peerurl.go setPeerURL bPeers 1 undecided yd-87dr undecided until that bead decides hook or skip with proof
+internal/store/movesource.go movePeerIdentities bPeers 1 top told at moveSourceRecords in movesource.go where the fold tells every link it moved
+internal/store/movesource.go movePeerIdentities bPeers 2 top told at moveSourceRecords in movesource.go where the fold tells every link it moved
+internal/store/peerroster.go unexpose bPeers 1 hook unexpose tells beside its write for a crew removal and at unexposeAndUntrust after a user removal
+internal/store/pairing.go pairPeer bPeers 1 hook pairPeer tells from nothing beside its peer_paired
+internal/store/peeradd.go addPeer bPeers 1 hook addPeer tells from nothing beside its peer_added
+internal/store/peerbeads.go setPeerIntake bPeers 1 hook setPeerIntake tells beside its peer_intake
+internal/store/peerbeads.go RemovePeerIntake bPeers 1 hook RemovePeerIntake tells beside its peer_intake
+internal/store/peeridentity.go setPeerIdentity bPeers 1 hook setPeerIdentity tells beside its peer_identity_set
+internal/store/peeridentity.go RemovePeerIdentity bPeers 1 hook RemovePeerIdentity tells beside its peer_identity_removed
+internal/store/peerremove.go deletePeer bPeers 1 hook deletePeer tells with nothing after its peer_removed
+internal/store/peerrename.go renamePeer bPeers 1 hook the rename deletes the old name and tells it gone beside its peer_renamed
+internal/store/peerrename.go renamePeer bPeers 2 hook the rename puts the new name and tells it from nothing beside its peer_renamed
+internal/store/peerrename.go migratePeerSince bPeers 1 skip writes Since alone and no peer fingerprint reads Since
+internal/store/peers.go allowPeer bPeers 1 hook allowPeer tells beside its peer_allowed
+internal/store/peers.go PeerReceive bPeers 1 skip writes HeardAt and the hour counters alone and no peer fingerprint reads them
+internal/store/peers.go PeerHeard bPeers 1 top told at distrusted in peertrust.go where the trust its word dropped is told in the write that saves it
+internal/store/peers.go PeerPostAnswered bPeers 1 top told at distrusted in peertrust.go where the trust its word dropped is told in the write that saves it
+internal/store/peers.go PeerPulled bPeers 1 top told at distrusted in peertrust.go where the trust its word dropped is told in the write that saves it
+internal/store/peerurl.go setPeerURL bPeers 1 hook setPeerURL tells beside its peer_url_set
+internal/store/peertrust.go untrust bPeers 1 top told at unexposeAndUntrust after user exposure and trust removals
 internal/store/crew.go putCrew bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
 internal/store/crew.go DeleteCrew bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
 internal/store/crew.go changeCrewAt bCrew 1 undecided yd-gvbd undecided until that bead decides hook or skip with proof
@@ -2274,7 +2277,7 @@ internal/store/yardrsource.go editWatches bUsers 1 undecided yd-gjsd undecided u
 '
 # tellsitebudget fails the run when a production write of a peer, group, crew
 # member or user record stands in none of the states the list above knows,
-# when a group write stands undecided, and when an undecided write names a
+# when a group or peer write stands undecided, and when an undecided write names a
 # bead but the one that flips its bucket; a listed write that is gone only
 # warns, for the fixtures above. An
 # undecided write passes, with one line naming its bead and how many stand
@@ -2325,8 +2328,8 @@ tellsitebudget() {
       if ($5 != "hook" && $5 != "top" && $5 != "skip" && $5 != "undecided") {
         printf "test: tell site %s stands %s, in no state the tells know\n", where[key], $5
         bad++
-      } else if ($3 == "bGroups" && $5 == "undecided") {
-        printf "test: tell site %s is a group write and may not stand undecided: yardr-w4q0 decided the group writes\n", where[key]
+      } else if (($3 == "bGroups" || $3 == "bPeers") && $5 == "undecided") {
+        printf "test: tell site %s is a group or peer write and may not stand undecided: yardr-w4q0 and yd-87dr decided them\n", where[key]
         bad++
       } else if ($5 == "undecided") {
         want = ($3 == "bPeers" ? "yd-87dr" : $3 == "bCrew" ? "yd-gvbd" : $3 == "bUsers" ? "yd-gjsd" : "")

@@ -175,6 +175,18 @@ func cleanRole(s string) string {
 	return s
 }
 
+// cleanTitle makes a peer's title one line of text: it is printed in tables and
+// in lines of its own, where a line break would start a line of the
+// peer's making.
+func cleanTitle(s string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s))
+}
+
 // cleanRoster is what is kept of the roster a peer said, which is the
 // peer's text: up to MaxPeerExpose entries whose name is one mail can be
 // addressed to, each name once, of a kind there is, with a role of one
@@ -197,11 +209,13 @@ func cleanRoster(in []PeerRosterEntry) []PeerRosterEntry {
 
 // unexpose takes name, a crew member or user that is removed, off every
 // link that exposes it: whoever has the name next is someone the operator
-// has exposed to nobody. data, the event of the removal, names the peers
-// it was exposed to.
-func unexpose(tx *bolt.Tx, name string, data map[string]any) error {
+// has exposed to nobody. A caller removing a user passes beforePeers so
+// exposure and trust are told together after both have been cleared; a crew
+// removal tells each link beside its write. data, the event of the removal,
+// names the peers it was exposed to.
+func unexpose(w *wtx, name, actor string, data map[string]any, beforePeers map[string]*Peer) error {
 	var had []Peer
-	err := each(tx, bPeers, "", func(_ []byte, p *Peer) error {
+	err := each(w.Tx, bPeers, "", func(_ []byte, p *Peer) error {
 		if slices.Contains(p.Expose, name) {
 			had = append(had, *p)
 		}
@@ -212,11 +226,22 @@ func unexpose(tx *bolt.Tx, name string, data map[string]any) error {
 	}
 	var peers []string
 	for _, p := range had {
+		before := clonePeer(&p)
 		if p.Expose = slices.DeleteFunc(p.Expose, func(n string) bool { return n == name }); len(p.Expose) == 0 {
 			p.Expose = nil
 		}
-		if err := put(tx, bPeers, p.Name, p); err != nil {
+		if beforePeers != nil {
+			if _, exists := beforePeers[p.Name]; !exists {
+				beforePeers[p.Name] = before
+			}
+		}
+		if err := put(w.Tx, bPeers, p.Name, p); err != nil {
 			return err
+		}
+		if beforePeers == nil {
+			if err := w.tellPeerStale(p.Name, before, &p, actor); err != nil {
+				return err
+			}
 		}
 		peers = append(peers, p.Name)
 	}

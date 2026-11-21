@@ -14,7 +14,7 @@
 // from the current bytes in the same transaction) gets none at creation.
 // No new durable state: the event row is the standard event write.
 //
-// The families beside sources (a group here; a peer, a crew member and a
+// The families beside sources (a group and a peer here; a crew member and a
 // user follow on the same machinery) tell the same way through tellXStale:
 // a Seen key may be written by more than one fingerprint function, so the
 // tell compares the set of fingerprints a hold could carry before the write
@@ -25,6 +25,7 @@ package store
 import (
 	"fmt"
 	"maps"
+	"slices"
 )
 
 // tellSourceStale tells the askers of the open run asks naming the source
@@ -264,6 +265,68 @@ func (w *wtx) tellGroupStale(name string, before, after *Group, actor string) er
 			func(g *Group) string { return granteeGroupFingerprint(*g) },
 		},
 	}})
+}
+
+// clonePeer is a copy of the link p that shares nothing a peer write
+// mutates: the carries, expose, trust and reach lists and maps, and the
+// intakes and identities a write replaces in place. A tell's before is
+// one, taken as the write found the link, so the after the write leaves
+// cannot move it under it.
+func clonePeer(p *Peer) *Peer {
+	if p == nil {
+		return nil
+	}
+	out := *p
+	out.Send, out.Receive = slices.Clone(p.Send), slices.Clone(p.Receive)
+	out.Expose = slices.Clone(p.Expose)
+	out.Trust, out.Reach = maps.Clone(p.Trust), maps.Clone(p.Reach)
+	out.Intakes, out.Identities = slices.Clone(p.Intakes), slices.Clone(p.Identities)
+	return &out
+}
+
+// tellPeerStale tells the askers of the holds naming the peer name whose
+// Seen moved between before and after, the link as the write found it and
+// as it leaves it (nil for none: a link added, removed or renamed away).
+// The keys are every one a card holds of a link: its key whole, its
+// intakes, its identities and its address, what each of its crew members
+// is in a source, and what it carries, exposes, trusts and reaches. The
+// crew-in-source keys are built from the identities either side holds,
+// each with the one fingerprint function that writes it, so a write tells
+// exactly the holds whose own reading of the link it moved.
+func (w *wtx) tellPeerStale(name string, before, after *Peer, actor string) error {
+	watched := []tellKey[Peer]{
+		{key: "peer " + name, fns: []func(*Peer) string{func(p *Peer) string { return p.Key }}},
+		{key: "peer " + name + " intakes", fns: []func(*Peer) string{func(p *Peer) string { return seen(p.Intakes) }}},
+		{key: "peer " + name + " identities", fns: []func(*Peer) string{func(p *Peer) string { return seen(p.Identities) }}},
+		{key: "peer " + name + " address", fns: []func(*Peer) string{func(p *Peer) string { return seen(p.URL) }}},
+	}
+	paired := map[string]bool{}
+	for _, side := range []*Peer{before, after} {
+		if side == nil {
+			continue
+		}
+		for _, id := range side.Identities {
+			crew, source := id.Crew, id.Source
+			if paired[crew+"\x00"+source] {
+				continue
+			}
+			paired[crew+"\x00"+source] = true
+			watched = append(watched, tellKey[Peer]{
+				key: "peer " + name + " " + crew + " in " + source,
+				fns: []func(*Peer) string{func(p *Peer) string {
+					cur, had := peerIdentityHeld(p, crew, source)
+					return seen(cur.ID, had)
+				}},
+			})
+		}
+	}
+	watched = append(watched,
+		tellKey[Peer]{key: "peer " + name + " carries", fns: []func(*Peer) string{func(p *Peer) string { return seen(p.Send, p.Receive) }}},
+		tellKey[Peer]{key: "peer " + name + " exposes", fns: []func(*Peer) string{func(p *Peer) string { return seen(p.Expose) }}},
+		tellKey[Peer]{key: "peer " + name + " trusts", fns: []func(*Peer) string{func(p *Peer) string { return seen(p.Trust) }}},
+		tellKey[Peer]{key: "peer " + name + " reaches", fns: []func(*Peer) string{func(p *Peer) string { return seen(p.Reach) }}},
+	)
+	return w.tellXStale("peer", name, before, after, actor, watched)
 }
 
 // staleFP is the fingerprint a run ask holds for the source name under the

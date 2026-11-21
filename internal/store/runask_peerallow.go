@@ -261,6 +261,20 @@ func reachSay(reach map[string]string, peer string) string {
 	return strings.Join(out, ", ")
 }
 
+// changeList is the list have with add put in and drop taken out, sorted,
+// each once: what a link carries or exposes after a peer allow, which the
+// write stores and a run ask's card names beside what it holds now.
+func changeList(have, add, drop []string) []string {
+	out := []string{}
+	for _, k := range append(slices.Clone(have), add...) {
+		if !slices.Contains(drop, k) && !slices.Contains(out, k) {
+			out = append(out, k)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // peerAllowCard is the card of peer allow: the limit it sets, the kinds
 // it carries each way and stops, and who it exposes, whose mail it trusts
 // and whose asks it sends on, each with what the link holds after the

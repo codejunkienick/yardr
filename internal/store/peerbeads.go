@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	bolt "go.etcd.io/bbolt"
@@ -978,7 +977,7 @@ func (w *wtx) setPeerIntake(ctx context.Context, name string, in *PeerIntake, re
 	if p, err = loadPeer(w.Tx, name); err != nil {
 		return nil, err
 	}
-	data := map[string]any{"peer": name}
+	before, data := clonePeer(p), map[string]any{"peer": name}
 	if in == nil {
 		data["none"] = true
 		p.Intakes = nil
@@ -1014,6 +1013,8 @@ func (w *wtx) setPeerIntake(ctx context.Context, name string, in *PeerIntake, re
 	}
 	if err := put(w.Tx, bPeers, name, p); err != nil {
 		return nil, err
+	} else if err := w.tellPeerStale(name, before, p, actor); err != nil {
+		return nil, err
 	}
 	if by != nil {
 		data["approved"] = by
@@ -1035,12 +1036,14 @@ func (s *Store) RemovePeerIntake(ctx context.Context, name, depot, actor string)
 		if p, err = loadPeer(w.Tx, name); err != nil {
 			return err
 		}
-		at := slices.IndexFunc(p.Intakes, func(have PeerIntake) bool { return have.Depot == depot })
+		before, at := clonePeer(p), slices.IndexFunc(p.Intakes, func(have PeerIntake) bool { return have.Depot == depot })
 		if at < 0 {
 			return fmt.Errorf("peer %s has no intake for depot %s", name, depot)
 		}
 		p.Intakes = slices.Delete(p.Intakes, at, at+1)
 		if err := put(w.Tx, bPeers, name, p); err != nil {
+			return err
+		} else if err := w.tellPeerStale(name, before, p, actor); err != nil {
 			return err
 		}
 		if err := w.event("", "peer_intake", actor, map[string]any{"peer": name, "depot": depot, "none": true}); err != nil {
@@ -1236,18 +1239,6 @@ type arrival struct {
 	stage string
 	// git is what the bead's work starts from, nil for words only.
 	git *PeerGit
-}
-
-// cleanTitle makes a peer's title one line of text: it is printed in tables and
-// in lines of its own, where a line break would start a line of the
-// peer's making.
-func cleanTitle(s string) string {
-	return strings.TrimSpace(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, s))
 }
 
 // checkBead decides whether the bead m brings from p is taken: it returns

@@ -125,6 +125,7 @@ func (w *wtx) renamePeer(ctx context.Context, name, to, actor string, by *approv
 	if p, err = loadPeer(w.Tx, name); err != nil {
 		return nil, err
 	}
+	before := clonePeer(p)
 	if err := checkName("peer", to); err != nil {
 		return nil, err
 	}
@@ -232,6 +233,15 @@ func (w *wtx) renamePeer(ctx context.Context, name, to, actor string, by *approv
 	p.Was = append(p.Was, PeerWas{Name: name, Until: w.Bucket(bEvents).Sequence(), At: now()})
 	p.Name = to
 	if err := put(w.Tx, bPeers, to, p); err != nil {
+		return nil, err
+	}
+	// The old name is gone and the new one stands in its place: a hold of
+	// either is stale, the old one's however it read the link and the new
+	// one's only where it was written against its absence.
+	if err := w.tellPeerStale(name, before, nil, actor); err != nil {
+		return nil, err
+	}
+	if err := w.tellPeerStale(to, nil, p, actor); err != nil {
 		return nil, err
 	}
 	for _, r := range crew {

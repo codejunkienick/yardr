@@ -123,6 +123,7 @@ func (w *wtx) setPeerIdentity(ctx context.Context, name string, id PeerIdentity,
 	if err != nil {
 		return nil, err
 	}
+	before := clonePeer(p)
 	data := map[string]any{"peer": name, "crew": id.Crew, "source": id.Source, "id": id.ID}
 	at := slices.IndexFunc(p.Identities, func(have PeerIdentity) bool { return have.Source == id.Source && have.Crew == id.Crew })
 	if at < 0 {
@@ -141,6 +142,11 @@ func (w *wtx) setPeerIdentity(ctx context.Context, name string, id PeerIdentity,
 		data["approved"] = by
 	}
 	if err := w.event("", "peer_identity_set", actor, data); err != nil {
+		return nil, err
+	}
+	// The mapping tells beside its peer_identity_set: a hold that read
+	// the link's identities is stale in the same write (runask_stale.go).
+	if err := w.tellPeerStale(name, before, p, actor); err != nil {
 		return nil, err
 	}
 	if _, err := w.clearIgnored(id.Source, id.ID, actor, by); err != nil {
@@ -165,6 +171,7 @@ func (s *Store) RemovePeerIdentity(ctx context.Context, name, crew, source, acto
 		if p, err = loadPeer(w.Tx, name); err != nil {
 			return err
 		}
+		before := clonePeer(p)
 		at := slices.IndexFunc(p.Identities, func(have PeerIdentity) bool { return have.Source == source && have.Crew == crew })
 		if at < 0 {
 			return fmt.Errorf("peer %s has no %s identity for %s: %w", name, source, crew, ErrNotFound)
@@ -177,6 +184,11 @@ func (s *Store) RemovePeerIdentity(ctx context.Context, name, crew, source, acto
 			return err
 		}
 		if err := w.event("", "peer_identity_removed", actor, map[string]any{"peer": name, "crew": crew, "source": source, "id": gone.ID}); err != nil {
+			return err
+		}
+		// The removal tells beside its peer_identity_removed, as setting
+		// one tells beside its set (runask_stale.go).
+		if err := w.tellPeerStale(name, before, p, actor); err != nil {
 			return err
 		}
 		return outboxOf(w.Tx, p)
