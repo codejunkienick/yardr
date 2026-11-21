@@ -58,7 +58,7 @@ func TestInitKeepsAYardmasterOfAnotherName(t *testing.T) {
 		t.Fatalf("init again: %v\n%s", err, out)
 	}
 	for _, want := range []string{"yardmaster chief, as set before", "  yardmaster chief, already a crew member: kept as it was",
-		"  roles      " + dir + ", from an earlier yardr, is read as before", "init no longer writes or refreshes it"} {
+		"  roles      " + dir + ", from an earlier yardr, is read as before", "this init wrote nothing there"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the summary lacks %q:\n%s", want, out)
 		}

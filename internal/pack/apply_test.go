@@ -77,7 +77,7 @@ func TestApplyToAnEmptyYardThenAgain(t *testing.T) {
 	}
 	beforeApply := head(t, st)
 	res := apply(t, st, plan, answers)
-	if res.Created != 40 || res.Changed != 0 || res.Unchanged != 0 || !res.Recorded || !res.Wrote() {
+	if res.Created != 39 || res.Changed != 0 || res.Unchanged != 0 || !res.Recorded || !res.Wrote() {
 		t.Fatalf("first import = %+v", res)
 	}
 	groupEvents := 0
@@ -128,7 +128,7 @@ func TestApplyToAnEmptyYardThenAgain(t *testing.T) {
 		}
 	}
 	boss, err := st.GetCrew(ctx, "boss")
-	if err != nil || !slices.Equal(boss.On, []string{store.KindAttention}) || len(boss.Subscriptions) != 4 || boss.Config["kind"] != "claude" || boss.Dir == "" {
+	if err != nil || !slices.Equal(boss.On, []string{store.KindAttention}) || len(boss.Subscriptions) != 4 || boss.Config["kind"] != "claude" || boss.Dir == "" || boss.Config["prompt"] != nil {
 		t.Fatalf("boss = %+v, %v", boss, err)
 	}
 	if _, err := st.GetCrew(ctx, "yardmaster"); !errors.Is(err, store.ErrNotFound) {
@@ -153,7 +153,7 @@ func TestApplyToAnEmptyYardThenAgain(t *testing.T) {
 		t.Fatalf("commit = %q", rec.Commit)
 	}
 	// Everything but the crew member, which stays the yard's.
-	if len(rec.Objects) != 39 {
+	if len(rec.Objects) != 38 {
 		t.Fatalf("%d objects recorded: %+v", len(rec.Objects), rec.Objects)
 	}
 
@@ -161,11 +161,11 @@ func TestApplyToAnEmptyYardThenAgain(t *testing.T) {
 	before := head(t, st)
 	o.Crew = nil
 	plan = build(t, st, load(t, starter), o)
-	if len(plan.Questions) != 0 || len(actions(plan, pack.Unchanged)) != 40 {
+	if len(plan.Questions) != 0 || len(actions(plan, pack.Unchanged)) != 39 {
 		t.Fatalf("second plan: questions %v, unchanged %v", plan.Questions, actions(plan, pack.Unchanged))
 	}
 	res = apply(t, st, plan, nil)
-	if res.Wrote() || res.Recorded || res.Unchanged != 40 {
+	if res.Wrote() || res.Recorded || res.Unchanged != 39 {
 		t.Fatalf("second import = %+v", res)
 	}
 	if got := kinds(t, st, before); !slices.Equal(got, []string{"pack_unchanged"}) {
@@ -219,7 +219,6 @@ func TestApplyOverAYardSetUpByHand(t *testing.T) {
 	if !res.Wrote() {
 		t.Fatalf("result = %+v", res)
 	}
-	install := config.At(o.Home).Pack("starter")
 
 	g, err := st.GetGroup(ctx, "web-builders")
 	must(err)
@@ -251,8 +250,10 @@ func TestApplyOverAYardSetUpByHand(t *testing.T) {
 	}
 	boss, err := st.GetCrew(ctx, "boss")
 	must(err)
+	// Its prompt is the yard's own business: the pack sets none for the
+	// yardmaster, so the hand-set one stays.
 	if boss.Dir != "/home/boss" || boss.MaxAge != "6h" || boss.Config["kind"] != "codex" || boss.Config["env_file"] != "/boss.env" ||
-		boss.Identities["linear"].ID != "u1" || boss.Config["prompt"] != filepath.Join(install, "roles", "yardmaster.md") || !slices.Equal(boss.On, []string{store.KindAttention}) {
+		boss.Identities["linear"].ID != "u1" || boss.Config["prompt"] != "/old/yardmaster.md" || !slices.Equal(boss.On, []string{store.KindAttention}) {
 		t.Fatalf("boss = %+v", boss)
 	}
 	var subs []string
@@ -678,8 +679,8 @@ func TestApplyAgainFinishesAnImportThatFailedHalfway(t *testing.T) {
 	if len(routes) != 11 || len(groups) != 6 {
 		t.Fatalf("after applying again: %d routes, %d groups", len(routes), len(groups))
 	}
-	if got := actions(build(t, st, load(t, starter), o), pack.Unchanged); len(got) != 40 {
-		t.Fatalf("%d unchanged, want 38", len(got))
+	if got := actions(build(t, st, load(t, starter), o), pack.Unchanged); len(got) != 39 {
+		t.Fatalf("%d unchanged, want 39", len(got))
 	}
 }
 
@@ -748,10 +749,12 @@ func record(t *testing.T, st store.API) store.PackImport {
 	return recs[0]
 }
 
-// The pack's roles win by default, as its flow does: a group and a crew member
-// are pointed at the pack's copied role though the depot has its own
+// The pack's roles win by default, as its flow does: a group is pointed at
+// the pack's copied role though the depot has its own
 // .yardr/roles/<name>.md, the plan shows the change of prompt and names the
 // depot's file that stops being used, and a second import changes nothing.
+// The yardmaster is the exception: its prompt is the yard's own, so the
+// pack sets none for it and the depot's yardmaster role shadows nothing.
 func TestPacksRolesWinOverTheDepotsOwn(t *testing.T) {
 	st, o := yard(t)
 	depotWithRoles(t, st)
@@ -768,14 +771,14 @@ func TestPacksRolesWinOverTheDepotsOwn(t *testing.T) {
 		t.Fatalf("web-reviewers = %+v", r)
 	}
 	m := find(t, plan, "crew", "yardmaster")
-	want = []pack.Diff{{Field: "prompt", Old: "/home/roles/yardmaster.md", New: filepath.Join(install, "roles", "yardmaster.md")}}
-	if m.Action != pack.Change || !slices.Equal(m.Shadows, []string{".yardr/roles/yardmaster.md"}) || len(m.Keeps) != 0 || !reflect.DeepEqual(m.Changes[:1], want) {
+	if m.CrewMember.Prompt != "" || len(m.Shadows) != 0 || len(m.Keeps) != 0 ||
+		slices.ContainsFunc(m.Changes, func(d pack.Diff) bool { return d.Field == "prompt" }) {
 		t.Fatalf("yardmaster = %+v", m)
 	}
 	apply(t, st, plan, nil)
 	g, _ := st.GetGroup(ctx, "web-builders")
 	r, _ := st.GetCrew(ctx, "yardmaster")
-	if g.Config["prompt"] != filepath.Join(install, "roles", "builder.md") || r.Config["prompt"] != filepath.Join(install, "roles", "yardmaster.md") {
+	if g.Config["prompt"] != filepath.Join(install, "roles", "builder.md") || r.Config["prompt"] != "/home/roles/yardmaster.md" {
 		t.Fatalf("after the import: builders %v, yardmaster %v", g.Config["prompt"], r.Config["prompt"])
 	}
 	if rec := record(t, st); rec.DepotRoles {
@@ -819,8 +822,10 @@ func TestDepotRolesKeepsTheDepotsOwnAndIsRemembered(t *testing.T) {
 	if r := find(t, plan, "group", "web-reviewers"); len(r.Keeps) != 0 || r.Group.Config["prompt"] != filepath.Join(install, "roles", "reviewer.md") {
 		t.Fatalf("web-reviewers = %+v", r)
 	}
+	// The yardmaster's prompt is not the depot's or the pack's to set: it
+	// stays as the yard has it, with no keep to say so.
 	m := find(t, plan, "crew", "yardmaster")
-	if m.CrewMember.Prompt != "/home/roles/yardmaster.md" || len(m.Keeps) != 1 || len(m.Shadows) != 0 || slices.ContainsFunc(m.Changes, func(d pack.Diff) bool { return d.Field == "prompt" }) {
+	if m.CrewMember.Prompt != "" || len(m.Keeps) != 0 || len(m.Shadows) != 0 || slices.ContainsFunc(m.Changes, func(d pack.Diff) bool { return d.Field == "prompt" }) {
 		t.Fatalf("yardmaster = %+v", m)
 	}
 	// Installed all the same, for depots without their own.
@@ -855,7 +860,7 @@ func TestDepotRolesKeepsTheDepotsOwnAndIsRemembered(t *testing.T) {
 	if plan.DepotRoles || len(b.Keeps) != 0 || !reflect.DeepEqual(b.Changes, want) || !slices.Equal(b.Shadows, []string{".yardr/roles/builder.md"}) {
 		t.Fatalf("with PackRoles: %+v", b)
 	}
-	if m := find(t, plan, "crew", "yardmaster"); m.CrewMember.Prompt != filepath.Join(install, "roles", "yardmaster.md") {
+	if m := find(t, plan, "crew", "yardmaster"); m.CrewMember.Prompt != "" {
 		t.Fatalf("with PackRoles: yardmaster %+v", m.CrewMember)
 	}
 	apply(t, st, plan, nil)
@@ -1428,8 +1433,8 @@ func TestImportFillsThePlaceholders(t *testing.T) {
 	if f := find(t, moved, "file", "roles/builder.md"); f.Action != pack.Change || f.Edited {
 		t.Fatalf("builder.md under another crew member = %+v", f)
 	}
-	if f := find(t, moved, "file", "roles/yardmaster.md"); f.Action != pack.Unchanged {
-		t.Fatalf("yardmaster.md names no crew member, yet = %+v", f)
+	if f := find(t, moved, "file", "roles/review-security.md"); f.Action != pack.Unchanged {
+		t.Fatalf("review-security.md names no crew member, yet = %+v", f)
 	}
 	if len(moved.EditedFiles()) != 0 {
 		t.Fatalf("a changed mapping counts as a hand edit: %v", moved.EditedFiles())

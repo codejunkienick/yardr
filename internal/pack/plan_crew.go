@@ -1,7 +1,11 @@
 package pack
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -52,9 +56,9 @@ func (b *planner) crew() error {
 				b.plan.Refused = append(b.plan.Refused, fmt.Sprintf("crew %s: section %s: its first line holds %d bytes: at most %d", pr.Name, pr.Section, len(first), maxSectionFirstLine))
 			}
 		}
-		if !warned && pr.Role != "" && (pr.Name == "yardmaster" || pr.Role == "roles/yardmaster.md") {
+		if !warned && pr.Name == "yardmaster" && pr.Role != "" {
 			warned = true
-			b.plan.Notes = append(b.plan.Notes, "a pack's yardmaster role is going away; carry a section instead")
+			b.plan.Notes = append(b.plan.Notes, "a pack's yardmaster role is ignored for the yardmaster prompt")
 		}
 		name, told := b.plan.Crew[pr.Name], b.told[pr.Name]
 		i := slices.IndexFunc(have, func(r store.CrewMember) bool { return r.Name == name })
@@ -69,7 +73,29 @@ func (b *planner) crew() error {
 		}
 		o := Object{Kind: "crew", Name: name, CrewMember: op}
 		var changes []Diff
-		if pr.Role != "" {
+		if pr.Name == "yardmaster" {
+			// The yardmaster's prompt is the yard's own file, which no pack
+			// sets: a pack's role for it is ignored above. The one move an
+			// import makes is off a pack's role: a yardmaster still prompted
+			// from under <home>/packs/ is repointed at the local file,
+			// seeded from the role it reads now when there is none, so the
+			// yard keeps working exactly as it does today. A prompt already
+			// the yard's own, or anywhere else, is left as it is.
+			prompt, _ := old.Config["prompt"].(string)
+			if exists && packPrompt(b.o.Home, prompt) {
+				local := LocalYardmaster(b.o.Home)
+				op.Prompt = local
+				if _, err := os.Lstat(local); errors.Is(err, fs.ErrNotExist) {
+					op.SeedFrom = prompt
+					b.plan.Notes = append(b.plan.Notes, fmt.Sprintf("the yardmaster's local role %s is seeded from %s's role", local, promptPack(b.o.Home, prompt)))
+				} else if err != nil {
+					return err
+				} else {
+					b.plan.Notes = append(b.plan.Notes, fmt.Sprintf("the yardmaster's prompt moves to %s, which is already there and is kept as it is", local))
+				}
+				changes = append(changes, Diff{"prompt", prompt, op.Prompt})
+			}
+		} else if pr.Role != "" {
 			op.Prompt = b.installed(pr.Role)
 			prompt, _ := old.Config["prompt"].(string)
 			own, err := b.depotRole(pr.Role)
@@ -194,6 +220,31 @@ func (b *planner) crew() error {
 		b.add(o)
 	}
 	return nil
+}
+
+// packPrompt reports whether prompt, a crew member's prompt as the yard
+// has it, points at a pack's installed role: under <home>/packs/, where an
+// import put it and where a commit in no depot reaches it.
+func packPrompt(home, prompt string) bool {
+	if prompt == "" {
+		return false
+	}
+	rel, err := filepath.Rel(config.At(home).Packs(), prompt)
+	return err == nil && rel != "." && filepath.IsLocal(rel)
+}
+
+// promptPack names the pack whose installed role prompt points at, for the
+// plan's word on where the yardmaster's local role is seeded from: the one
+// path element under <home>/packs/, "a pack" for a path of no pack's shape.
+func promptPack(home, prompt string) string {
+	rel, err := filepath.Rel(config.At(home).Packs(), prompt)
+	if err != nil || !filepath.IsLocal(rel) {
+		return "a pack"
+	}
+	if name, _, ok := strings.Cut(filepath.ToSlash(rel), "/"); ok && name != "" {
+		return name
+	}
+	return "a pack"
 }
 
 func sameSet(a, b []string) bool {

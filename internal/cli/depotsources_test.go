@@ -141,7 +141,7 @@ func TestDepotSourcesAppliedPack(t *testing.T) {
 		"role web-builders pack starter ("+filepath.Join(packs, "builder.md")+") shadows .yardr/roles/builder.md",
 		"role web-reviewers pack starter ("+filepath.Join(packs, "reviewer.md")+") shadows .yardr/roles/reviewer.md",
 		"role web-security-reviewers pack starter ("+filepath.Join(packs, "review-security.md")+")",
-		"role boss pack starter ("+filepath.Join(packs, "yardmaster.md")+")",
+		"role boss none",
 		"rules web none",
 	)
 
@@ -161,8 +161,9 @@ func TestDepotSourcesAppliedPack(t *testing.T) {
 }
 
 // A mix: the pack's flow governs, and the depot keeps its own roles
-// (--depot-roles). The role's line says the pack has a copy; a crew member, the
-// yard's, is the pack's either way. Clearing the pointer gives the flow
+// (--depot-roles). The role's line says the pack has a copy; a crew member
+// is the yard's, and the starter sets no prompt for its yardmaster either
+// way. Clearing the pointer gives the flow
 // back to the repository, and the line says the pack's is still there.
 func TestDepotSourcesPackFlowDepotRoles(t *testing.T) {
 	t.Parallel()
@@ -193,7 +194,7 @@ func TestDepotSourcesPackFlowDepotRoles(t *testing.T) {
 		"role web-builders depot (.yardr/roles/builder.md@"+sha+") pack starter has a copy",
 		"role web-reviewers depot (.yardr/roles/reviewer.md@"+sha+") pack starter has a copy",
 		"role web-security-reviewers pack starter ("+filepath.Join(config.At(home).PackRoles("starter"), "review-security.md")+")",
-		"role boss pack starter ("+filepath.Join(config.At(home).PackRoles("starter"), "yardmaster.md")+")",
+		"role boss none",
 		"rules web none",
 	)
 

@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/store"
 )
@@ -147,6 +146,12 @@ func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (res *Res
 			err = ferr
 		}
 	}()
+	// Before any object: a yardmaster the plan moves to its local role is
+	// seeded from the pack role it reads now, exact bytes, before an
+	// installed file of this import could overwrite that role.
+	if err := p.seedYardmaster(); err != nil {
+		return nil, err
+	}
 	for i := range p.Objects {
 		obj := &p.Objects[i]
 		switch obj.Action {
@@ -287,6 +292,27 @@ func Apply(ctx context.Context, st store.API, p *Plan, o ApplyOptions) (res *Res
 		}
 	}
 	return res, nil
+}
+
+// seedYardmaster seeds the yard's own yardmaster role for each crew member
+// the plan moves to it (CrewOp.SeedFrom), from the pack role that member
+// reads now. A local file already there is kept, as SeedYardmaster keeps
+// it: seeding is if-absent, here and at init alike.
+func (p *Plan) seedYardmaster() error {
+	for _, obj := range p.Objects {
+		op := obj.CrewMember
+		if op == nil || op.SeedFrom == "" {
+			continue
+		}
+		text, err := os.ReadFile(op.SeedFrom)
+		if err != nil {
+			return fmt.Errorf("seeding the yardmaster's local role from %s: %w", op.SeedFrom, err)
+		}
+		if _, _, err := SeedYardmaster(p.Home, text); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ImportRecord is the yard's record of the import as Apply writes it, but
@@ -756,6 +782,25 @@ func argList(v string) []any {
 // install writes a pack's file under the home: to a temporary file beside
 // it, then renamed, so a prompt is never read half written.
 func install(op *FileOp, text []byte) error {
+	return installFile(op, text, false)
+}
+
+// installOnce puts a complete file at op.To only if that name is still
+// unused. Linking the temporary file makes the final step atomic without
+// replacing a prompt that appeared after the caller checked for it.
+func installOnce(op *FileOp, text []byte) (bool, error) {
+	err := installFile(op, text, true)
+	if errors.Is(err, fs.ErrExist) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// installFile prepares a complete file beside its destination, then either
+// renames it into place or links it there without replacing an existing
+// name. The latter keeps the same atomic visibility while seeding a local
+// role that must never overwrite an operator's file.
+func installFile(op *FileOp, text []byte, once bool) error {
 	mode := os.FileMode(0o644)
 	if op.Mode == "0755" {
 		mode = 0o755
@@ -778,52 +823,10 @@ func install(op *FileOp, text []byte) error {
 	if err := os.Chmod(tmp.Name(), mode); err != nil {
 		return err
 	}
+	if once {
+		return os.Link(tmp.Name(), op.To)
+	}
 	return os.Rename(tmp.Name(), op.To)
-}
-
-// InstallRole writes the role of the pack's crew member named member under
-// home, where an import installs it and with the names an import fills in:
-// operator, and takes for the member itself, the yard's crew member that
-// takes it. It is for a crew member the yard has before its first depot
-// (yardr init's yardmaster), which no import has reached yet: the first
-// import that maps member to takes finds the file as it would write it. A
-// file already there is kept unless replace says it is nobody's yet and may
-// be written again. The path is "" when the pack has no such crew member or
-// gives it no role, and wrote is false when the file already read so.
-//
-// The role is read as the pack first read it (read), not fetched again: a
-// pack held to a digest (CheckDigest) installs the bytes the digest named,
-// where a pack at a URL answers every GET afresh.
-func InstallRole(p *Pack, home, member, takes, operator string, replace bool) (path string, wrote bool, err error) {
-	i := slices.IndexFunc(p.Crew, func(r CrewMember) bool { return r.Name == member })
-	if i < 0 || p.Crew[i].Role == "" {
-		return "", false, nil
-	}
-	rel := p.Crew[i].Role
-	fill := map[string]string{}
-	for _, r := range p.Crew {
-		fill[r.Name] = r.Name
-	}
-	fill[member] = takes
-	// Last, as in a plan (planner.names).
-	fill[Operator] = operator
-	text, err := p.read(rel)
-	if err != nil {
-		return "", false, err
-	}
-	text = Fill(text, fill)
-	path = filepath.Join(config.At(home).Pack(p.Name), filepath.FromSlash(rel))
-	have, err := os.ReadFile(path)
-	switch {
-	case err == nil && (!replace || bytes.Equal(have, text)):
-		return path, false, nil
-	case err != nil && !errors.Is(err, fs.ErrNotExist):
-		return "", false, err
-	}
-	if err := install(&FileOp{To: path}, text); err != nil {
-		return "", false, err
-	}
-	return path, true, nil
 }
 
 // pruneOrder is the order dropped objects are removed in: a route before

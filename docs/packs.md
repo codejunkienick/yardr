@@ -229,7 +229,7 @@ sources:
 | `groups.<group>.env` | optional, for a group with `run:` alone: the options of its script, a map of variable names to strings (`env: { YARDR_LAND: squash }`: the starter's assembly lands a bead by squash from it). The import writes them before the script in the `cmd` of a group it **creates**, names sorted and values quoted as the script's path is (`YARDR_LAND=squash /…/merge-local`); a group the yard has keeps its own `cmd` whatever `env` says, since after the group is made its assignments are the operator's ([Groups](#how-a-pack-maps-to-the-yard)). A name is what the shell takes for a variable's (letters, digits and `_`, no digit first), a value a string of printable characters on one line, not empty (quote a number, `"1"`, and the words YAML reads as booleans). An empty map says nothing; beside `agent:` or `people:` the key is an error. `pack check` shows the assignments a new group's `cmd` starts with, `pack show` prints a pack's `env`, and `pack export` writes none ([below](#yardr-pack-export)) |
 | `groups.<group>.binds_as` | optional, for a group with `agent:`: another agent group of the pack, declared before this one, whose agent, model and permission arguments this group gets, so that the import asks nothing for it. The starter's `security-reviewers` bind as `reviewers`: the second review is run by the agent the first is, unless the import is given `--bind security-reviewers=<kind>[:<model>]`. A group the yard has already keeps what it has, as any does ([below](#yardr-pack-apply)) |
 | `groups.<group>.calls.<source>` | optional, for a group with `agent:` or `run:`: the calls of a declared source the group's sessions should be able to make with `yardr call`: `read` for every read call, and calls by name, which is the one way an update is asked for (`calls: { crm: [read, note] }`). The pack only asks: the import puts it to the yard's operator ([Calls of a declared source](#how-a-pack-maps-to-the-yard)) |
-| `crew.<name>.role` | the crew member's role file |
+| `crew.<name>.role` | the crew member's role file. For the crew member named `yardmaster` it sets no prompt: the yardmaster's prompt is the yard's own file, and the plan says the role is ignored for it |
 | `crew.<name>.section` | optional: the yardmaster section file a crew member's prime appends (`sections/yardmaster.md` by convention): at most 2048 bytes, its first line at most 200 bytes saying when the section applies. An import is refused for a larger section or an empty or overlong first line, and the record of the import keeps the file's path |
 | `crew.<name>.hears.events` | event kinds from the yard itself |
 | `crew.<name>.hears.stages` | a bead entering one of these stages, which a flow of the pack must have |
@@ -470,11 +470,11 @@ and for the pack read from a directory or from a URL. `yardr pack apply
 <pack> --sha256 <digest>`, and `yardr depot init --pack <pack> --sha256
 <digest>`, refuse a pack whose digest is another, naming both, before they
 ask anything or write anything. So does `yardr init --sha256 <digest>` for
-the yard's default pack, before it installs the yardmaster's role from it.
+the yard's default pack, before it writes anything.
 The digest may be in upper case and may keep the `sha256:` that `pack check`
 prints; anything else is a flag error. It is the digest of the bytes the
 plan was made from, which a pack keeps from the first read of each file, and
-so of the bytes the import installs, and of the role `yardr init` installs.
+so of the bytes the import installs.
 The pin holds for the one command: the record of an import does not keep it,
 and a later `pack apply <name>` takes none unless it is given one.
 
@@ -1690,12 +1690,13 @@ read when a depot is set up, and a depot stays on the pack it was set up
 from until `yardr pack apply` or `depot init` is run on it.
 
 `yardr init` reads the same setting for the one crew member a yard has
-before its first depot. It takes the role of the default pack's crew member
-called `yardmaster`, installs that file under `<home>/packs/<pack>/roles/`
-filled as an import fills it, and makes it the yardmaster's prompt; the
-first import of the pack finds the file as it would write it. A default pack
-with no crew member of that name gets the yard no yardmaster. Init reads no
-pack on a yard that has its yardmaster
+before its first depot: whether the default pack names a crew member
+called `yardmaster` at all. The yardmaster's prompt itself comes from no
+pack: init seeds `<home>/roles/yardmaster.md` from the base role yardr
+carries, with the operator's name filled in, and makes it the prompt,
+frozen as written. A default pack with no crew member of that name gets
+the yard no yardmaster. Init reads no pack on a yard that has its
+yardmaster
 ([configuration.md](configuration.md#creating-a-yard-the-onboarding-and-yardr-init)).
 
 ### Two packs in one yard
@@ -1707,22 +1708,28 @@ pack leaves the first untouched: its groups go on reading
 the first depot's groups for the second (`--group builders=web-builders`):
 they take the second pack's groups as they are, with the first pack's roles
 ([Groups](#how-a-pack-maps-to-the-yard)). A crew member is the yard's, and there is one
-yardmaster. When both packs have a crew member `yardmaster`, each import
-sets the yardmaster's prompt to its own pack's role, so the last import
-wins, and the plan shows it before anything is written:
+yardmaster, whose prompt no import sets: it is the yard's own file. The
+one move an import makes is off a pack's role — a yardmaster still
+prompted from under `<home>/packs/`, as a yard made before the local file
+is, is repointed at `<home>/roles/yardmaster.md`, seeded from the role it
+reads now, and the plan says which pack's role it was seeded from, before
+anything is written:
 
 ```
 $ yardr depot init notes --pack ~/packs/research
 …
 crew
   change           yardmaster
-                     prompt: /Users/jo/.yardr/packs/starter/roles/yardmaster.md -> /Users/jo/.yardr/packs/research/roles/yardmaster.md
+                     prompt: ~/.yardr/packs/starter/roles/yardmaster.md -> ~/.yardr/roles/yardmaster.md
+notes
+  the yardmaster's local role ~/.yardr/roles/yardmaster.md is seeded from starter's role
 ```
 
-To keep the yardmaster on the first pack's role, the second pack names no
-crew, or the import maps its member to another crew member of the yard
-(`--crew yardmaster=<other>`). A running crew member keeps its session when
-its role changes; the output names the restart.
+A pack's `roles/yardmaster.md` is ignored for the yardmaster prompt, and
+the plan says so; what a pack asks of its yardmaster travels in its
+`section:` instead ([pack.yaml](#packyaml)). A running crew
+member keeps its session when its role or what it hears changes; the output
+names the restart.
 
 ## The contributors pack
 

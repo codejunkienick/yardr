@@ -116,8 +116,11 @@ groups:
 #               import puts the question to the yard's operator, and only for
 #               a source the yard is set up for
 crew:
+  # No role: the yardmaster's prompt is the yard's own file
+  # (<home>/roles/yardmaster.md), seeded by yardr init from the base yardr
+  # carries, whose text this pack's yardmaster role was. A pack sets it no
+  # more; it only names who hears what, below.
   yardmaster:
-    role: roles/yardmaster.md
     hears:
       events: [attention]
       stages: [decide, clear]

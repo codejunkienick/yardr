@@ -188,7 +188,7 @@ func TestStarterPackLoads(t *testing.T) {
 			t.Errorf("group %s env = %v, want %v", g.Name, g.Env, want)
 		}
 	}
-	if want := []string{"roles/builder.md", "roles/review-security.md", "roles/reviewer.md", "roles/yardmaster.md", "scripts/merge-local"}; !reflect.DeepEqual(p.Files(), want) {
+	if want := []string{"roles/builder.md", "roles/review-security.md", "roles/reviewer.md", "scripts/merge-local"}; !reflect.DeepEqual(p.Files(), want) {
 		t.Fatalf("files = %v, want %v", p.Files(), want)
 	}
 	// Every stage a bead is worked in has its stage file.
@@ -202,7 +202,7 @@ func TestStarterPackLoads(t *testing.T) {
 		}
 	}
 	m := p.Crew[0]
-	if m.Name != "yardmaster" || m.Role != "roles/yardmaster.md" || !m.Done || !reflect.DeepEqual(m.Stages, []string{"decide", "clear"}) ||
+	if m.Name != "yardmaster" || m.Role != "" || !m.Done || !reflect.DeepEqual(m.Stages, []string{"decide", "clear"}) ||
 		!reflect.DeepEqual(m.Subscribe, []pack.Source{{Name: "linear", Scope: "involved"}}) || !reflect.DeepEqual(m.Events, []string{store.KindAttention}) {
 		t.Fatalf("yardmaster = %+v", m)
 	}
@@ -1036,7 +1036,10 @@ func overYardmasterCeiling(role []byte) error {
 // hard one (design yardr-2vy0 5.2): adding reference back to a role has to
 // argue for room, or a core grows back to the 31 KB the three were cut from.
 // Each role is read through packs.FS, as an import installs it, and held on its
-// own: the three texts are independent (3.3), so none is compared with another.
+// own: the texts are independent (3.3), so none is compared with another.
+// The base yardr carries (yardmaster_base.md, the starter's text moved into
+// the binary) is held to the same ceiling the same way: it is what a new
+// yard's yardmaster reads whole, so it is a core like any of them.
 // Only the total is held; the design's per-section budgets (3.1) guide a cut and
 // are not tested.
 func TestYardmasterRolesFitTheirCeiling(t *testing.T) {
@@ -1053,9 +1056,14 @@ func TestYardmasterRolesFitTheirCeiling(t *testing.T) {
 			t.Errorf("%s: overYardmasterCeiling = %v, fits want %v", c.name, err, c.fits)
 		}
 	}
+	// The base is yardr's own, not a pack's: it is held here, on its own.
+	if err := overYardmasterCeiling(pack.YardmasterBase()); err != nil {
+		t.Errorf("the yardmaster base is %v", err)
+	}
 	// A pack that ships the role joins by a row. One with none would escape
-	// the ceiling unseen, so the rows are the packs that ship it.
-	rows := []string{packs.Starter, packs.Website, packs.Contributors}
+	// the ceiling unseen, so the rows are the packs that ship it. The starter
+	// ships none: its text is the base above.
+	rows := []string{packs.Website, packs.Contributors}
 	var held []string
 	for _, name := range rows {
 		held = append(held, name+"/roles/yardmaster.md")

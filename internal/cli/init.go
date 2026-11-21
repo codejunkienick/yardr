@@ -508,21 +508,21 @@ type initResult struct {
 	// absent on a yard made without one.
 	Permissions string   `json:"permissions_preset,omitempty"`
 	Args        []string `json:"args"`
-	// Pack is the yard's default pack, which the yardmaster's role is taken
-	// from, and Roles where its roles are installed in the home; Prompt is
-	// the yardmaster's, "" when the pack gives its yardmaster no role. All
-	// three are absent when the yardmaster was there already: init reads no
-	// pack then.
+	// Pack is the yard's default pack, read for whether it names a crew
+	// member called yardmaster, and Roles the yard's own roles directory in
+	// the home; Prompt is the yardmaster's, "" when the pack names none.
+	// All three are absent when the yardmaster was there already: init
+	// reads no pack then.
 	Pack   string `json:"pack,omitempty"`
 	Roles  string `json:"roles,omitempty"`
 	Prompt string `json:"prompt,omitempty"`
-	// Written is the role prompt this init installed, when it did.
+	// Written is the role prompt this init seeded, when it did.
 	Written []string `json:"written"`
 	// NoYardmaster: the default pack has no crew member called yardmaster, so
 	// init added none.
 	NoYardmaster bool `json:"no_yardmaster,omitempty"`
-	// OldRoles is <home>/roles when the home has it, from an init before
-	// the default pack: read as before, and no longer written.
+	// OldRoles is <home>/roles when the home already has it, from a yard
+	// before this init: its files are read as before and left as they are.
 	OldRoles string `json:"old_roles,omitempty"`
 	Daemon   bool   `json:"daemon"` // a daemon runs on this home
 	// YardmasterKept: a crew member of the yardmaster's name was there already
@@ -541,16 +541,14 @@ type initResult struct {
 }
 
 // initYard creates the yard: the store, the operator and default_kind
-// settings and the yardmaster crew member, with its role from the yard's
-// default pack installed in the home (yardmasterRole). Inputs are checked
+// settings and the yardmaster crew member, with its role seeded into the
+// home as the yard's own file (yardmasterRole). Inputs are checked
 // before anything is created. An existing crew member of the yardmaster's
 // name is never replaced, and then no pack is read and no role written, so
-// init runs again on a yard without harm and changes no prompt in it: an
-// installed role is brought to a newer pack's by yardr pack apply, which
-// shows the change first. <home>/roles, which init wrote before there was
-// a default pack, is left as it is. The settings stored before stand in for
-// the flags not given (keepSettings): init again changes only what its
-// flags say.
+// init runs again on a yard without harm and changes no prompt in it: the
+// seeded file is the yard's own from then on, and no pack apply moves it.
+// The settings stored before stand in for the flags not given
+// (keepSettings): init again changes only what its flags say.
 //
 // A run that fails leaves what it wrote before (the order is the yardmaster's
 // role, operator, yardmaster and hearer, permissions_preset, the yardmaster crew member, default_kind),
@@ -617,7 +615,7 @@ func (a *app) initYard(ctx context.Context, cfg *config.Config, o initOptions) (
 		res.OldRoles = old
 	}
 	if !yardmasterKept {
-		if err := yardmasterRole(ctx, st, cfg.Home, o.Yardmaster, o.Pin, part != nil, res); err != nil {
+		if err := yardmasterRole(ctx, st, cfg.Home, o.Yardmaster, o.Pin, res); err != nil {
 			return nil, err
 		}
 	}
@@ -792,24 +790,17 @@ func yardPack(ctx context.Context, st store.API) (string, error) {
 	return or(all[defaultPackSetting], packs.Starter), nil
 }
 
-// yardmasterRole installs the role of the yardmaster init is about to add,
-// and notes it in res: the role the yard's default pack gives its crew
-// member called yardmaster, written where an import of the pack installs it
-// (pack.InstallRole), so the first depot set up from the pack finds it
-// there. The yardmaster exists before any depot, and an import needs one:
-// this is the one file of a pack that init installs. A default pack with
-// no such crew member gets the yard none (res.NoYardmaster).
-//
-// A file already there is kept as it is, since a crew member or an import
-// may have it: a yard that is set up has no prompt changed by init. unfinished
-// says the home is an init's that was cut short, and the file then that
-// run's, naming whoever it was told: it is written again.
-//
-// A default pack at a URL is read by no one in a script, so a pin ties the
-// role to the pack that was: the pack is held to its digest before anything
-// of it is installed, and the role installed is the bytes that digest named
-// (pack.InstallRole reads them as the pack first read them, not afresh).
-func yardmasterRole(ctx context.Context, st store.API, home, yardmaster string, pin digestFlag, unfinished bool, res *initResult) error {
+// yardmasterRole seeds the role of the yardmaster init is about to add, and
+// notes it in res: the yard's own file, <home>/roles/yardmaster.md, written
+// from the base yardr carries (pack.YardmasterBase) with the operator's name
+// filled in, and made that crew member's prompt. The default pack is read
+// only for whether it names a crew member called yardmaster at all: a pack
+// with none gets the yard none (res.NoYardmaster), and no pack's role is
+// installed any more. Seeding is if-absent: a file already there is the
+// operator's own and is kept as it is, so no yard has a prompt changed by
+// init. A pin (--sha256) still holds the pack read to its digest before
+// anything is written, as it did when the role came of the pack.
+func yardmasterRole(ctx context.Context, st store.API, home, yardmaster string, pin digestFlag, res *initResult) error {
 	arg, err := yardPack(ctx, st)
 	if err != nil {
 		return err
@@ -826,12 +817,13 @@ func yardmasterRole(ctx context.Context, st store.API, home, yardmaster string, 
 			return ofDefault(err)
 		}
 	}
-	res.Pack, res.Roles = p.Name, config.At(home).PackRoles(p.Name)
+	res.Pack, res.Roles = p.Name, config.At(home).Roles()
 	if !slices.ContainsFunc(p.Crew, func(r pack.CrewMember) bool { return r.Name == packYardmaster }) {
 		res.NoYardmaster = true
 		return nil
 	}
-	path, wrote, err := pack.InstallRole(p, home, packYardmaster, yardmaster, res.Operator, unfinished)
+	text := pack.Fill(pack.YardmasterBase(), map[string]string{pack.Operator: res.Operator, packYardmaster: yardmaster})
+	path, wrote, err := pack.SeedYardmaster(home, text)
 	if err != nil {
 		return err
 	}
@@ -965,15 +957,16 @@ func (r *initResult) printYard(w io.Writer) {
 		}
 	}
 	if r.Prompt != "" {
-		fmt.Fprintf(w, "  roles      %s (pack %s, the yard's default)\n"+
-			"             the yardmaster's prompt is %s there, naming %s. A depot's builders and\n"+
-			"             reviewers get theirs beside it when the depot is set up (%s depot init <depot>);\n"+
-			"             the pack is where a role is changed, and %s pack apply brings the change here.\n",
-			r.Roles, r.Pack, filepath.Base(r.Prompt), r.Operator, yardr, yardr)
+		fmt.Fprintf(w, "  roles      %s (the yard's own)\n"+
+			"             the yardmaster's prompt is %s there, naming %s, seeded from the base\n"+
+			"             yardr carries (%s pack show starter prints it) and frozen as written:\n"+
+			"             yours to edit, and no pack overwrites it. A depot's builders and reviewers\n"+
+			"             get their roles from the pack when the depot is set up (%s depot init <depot>).\n",
+			r.Roles, filepath.Base(r.Prompt), r.Operator, yardr, yardr)
 	}
-	if r.OldRoles != "" {
+	if r.OldRoles != "" && r.Prompt == "" {
 		fmt.Fprintf(w, "  roles      %s, from an earlier yardr, is read as before by a group whose prompt is\n"+
-			"             roles/<name>.md, and is yours: init no longer writes or refreshes it.\n", r.OldRoles)
+			"             roles/<name>.md, and is yours: this init wrote nothing there.\n", r.OldRoles)
 	}
 	fmt.Fprintln(w)
 	if !config.IsDefaultHome(r.Home) {
@@ -1142,7 +1135,7 @@ func (a *app) initCmd() *cobra.Command {
 	var o initOptions
 	cmd := &cobra.Command{
 		Use:   "init [--harness <kind>]",
-		Short: "Create the yard: default harness and the yardmaster, with its role from the default pack (what the onboarding does)",
+		Short: "Create the yard: default harness and the yardmaster, with its role seeded from the base yardr carries (what the onboarding does)",
 		Long: `Create the yard in --home (else YARDR_HOME, default ~/.yardr) without the onboarding form,
 for scripts and tests. It stores --harness as the yard's default_kind, and
 adds the yardmaster crew member on that harness with its unattended flags,
@@ -1163,24 +1156,29 @@ machine keeps the unattended flags, and init writes no harness consent
 for it — a bypass yard's agents still meet their harness's one-time
 accept screen once, in their first pane.
 
-The yardmaster's role is a pack's: the one the yard's default pack (the
-default_pack setting, else starter, which yardr carries) gives its crew
-member called yardmaster. Init installs that one file under
-<home>/packs/<pack>/roles/, naming --operator as the person the yardmaster
-brings decisions to, and makes it the yardmaster's prompt. A depot's builders
-and reviewers get their roles beside it when the depot is set up (yardr
-depot init). A default pack with no crew member called yardmaster gets the
-yard none. Init again on a yard that has its yardmaster reads no pack and
-writes no role: a role installed from a pack is changed in the pack and
-brought to the yard by yardr pack apply, which shows the change first. A
-script that sets the yard up from a default pack at a URL gives --sha256
-<digest>, as yardr pack check prints it for that pack, and init then refuses
-any other pack, naming both digests, before it writes anything.
+The yardmaster's role is the yard's own file: init seeds
+<home>/roles/yardmaster.md from the base role yardr carries (the starter
+pack's text, which yardr pack show starter prints), naming --operator as
+the person the yardmaster brings decisions to, and makes it the
+yardmaster's prompt. It is seeded once, only where there is none, and is
+never overwritten: a change to the base reaches new yards only, and no
+pack replaces the file — a yardmaster still prompted from a pack's role
+under <home>/packs/ is moved to it, seeded from that role, by the next
+pack apply that names the yardmaster. The yard's default pack (the
+default_pack setting, else starter) is read for whether it names a crew
+member called yardmaster: one with none gets the yard no yardmaster.
+Init again on a yard that has its yardmaster reads no pack and writes no
+role. A script that sets the yard up from a default pack at a URL gives
+--sha256 <digest>, as yardr pack check prints it for that pack, and init
+then refuses any other pack, naming both digests, before it writes
+anything. A depot's builders and reviewers get their roles from the pack
+when the depot is set up (yardr depot init).
 
-<home>/roles/, which init wrote before a yard had a default pack, is no
-longer written. A yard that has it keeps it: a group whose prompt is
-roles/<name>.md reads it as before (docs/configuration.md, "Role prompts"),
-and init leaves every file there as it is.
+<home>/roles/ also holds the role prompts init wrote before a yard had a
+default pack and those a group is pointed at by hand: a group whose
+prompt is roles/<name>.md reads them as before (docs/configuration.md,
+"Role prompts"), and init leaves every file there but a seeded
+yardmaster's as it is.
 
 Init does not start the daemon unless told to: --start starts one in the
 background (none is started when one runs on the home already), logging to

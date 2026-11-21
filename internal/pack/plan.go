@@ -293,10 +293,14 @@ type RouteOp struct {
 // CrewOp is what the pack sets on a crew member: its role and the event
 // kinds it hears. Everything else of the crew member is the yard's.
 type CrewOp struct {
-	Pack       string   `json:"pack"` // the pack's name for it
-	CrewMember string   `json:"crew"` // the yard's
-	Prompt     string   `json:"prompt,omitempty"`
-	On         []string `json:"on"`
+	Pack       string `json:"pack"` // the pack's name for it
+	CrewMember string `json:"crew"` // the yard's
+	Prompt     string `json:"prompt,omitempty"`
+	// SeedFrom is, for the yardmaster alone, the pack role file its prompt
+	// points at now, whose exact bytes seed the local role (Prompt) when an
+	// import moves the prompt there and there is no local file yet.
+	SeedFrom string   `json:"seed_from,omitempty"`
+	On       []string `json:"on"`
 	// Restart says the crew member is running and its role or what it hears
 	// would change: an import does not restart it.
 	Restart bool `json:"restart,omitempty"`

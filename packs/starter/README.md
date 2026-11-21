@@ -6,8 +6,10 @@ else in yardr: no code names one, and what a directory depot asks of a role
 is the [dir pack](../dir)'s to say. Its `scripts/merge-local` is a copy of
 `contrib/assembly/merge-local`; a test fails when the two drift. It is the
 default pack of a yard that names none: `yardr depot init
-<depot>` sets a git depot up from it, and `yardr init` takes the
-yardmaster's role from it. Where they say `{{operator}}` and `{{yardmaster}}`, an
+<depot>` sets a git depot up from it. It carries no yardmaster role: the
+yardmaster's prompt is the yard's own file, which `yardr init` seeds from
+the base yardr carries — this pack's former yardmaster text, now in the
+binary, which `yardr pack show starter` prints. Where they say `{{operator}}` and `{{yardmaster}}`, an
 import puts the yard's operator and the crew member that takes `yardmaster`. The
 format and how a pack maps to a yard are in [docs/packs.md](../../docs/packs.md).
 

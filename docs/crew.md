@@ -138,10 +138,10 @@ on the yardmaster, to the operator, because the onboarding ends in
 [`yardr chat`](chat.md#from-the-onboarding).
 
 A crew member has no depot, so its `prompt` is an absolute path (a relative one is
-read from its `--dir`): the yardmaster's is
-`~/.yardr/packs/<pack>/roles/yardmaster.md`, the role of the yard's default
-pack, which `yardr init` installs and points the yardmaster at; a depot's own
-`.yardr/roles/yardmaster.md` is another.
+read from its `--dir`): the yardmaster's is the yard's own
+`~/.yardr/roles/yardmaster.md`, which `yardr init` seeds from the base role
+yardr carries and points the yardmaster at, frozen as written; a depot's own
+`.yardr/roles/yardmaster.md` is another ([Role prompts](configuration.md#role-prompts)).
 
 In herdr a crew member's agent is `<yard>-<name>` (`yardr-yardmaster` for a yard
 in `~/.yardr`, `y1-yardmaster` for one in `/tmp/y1`) and its workspace is
@@ -272,8 +272,7 @@ beads, with `--for <them>` on every create so their work bills their
 subscription. It never runs the line: no triage of faults, no releasing
 or un-holding builders, no moving a bead past `new`, no landings. The
 yardmaster's role says the split for both sessions (Which session you
-are, in the starter pack's
-[yardmaster.md](../packs/starter/roles/yardmaster.md)).
+are, in the base `yardr pack show starter` prints).
 
 A person with no login of their own has no conversation session: they
 talk to the line session, whose slice holds their mail, and on the

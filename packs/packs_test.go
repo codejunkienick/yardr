@@ -80,6 +80,16 @@ func TestDocsPackTableNamesEveryEmbeddedPack(t *testing.T) {
 	}
 }
 
+// yardmasterText is a yardmaster text by its path in packs.FS: the two
+// shipped roles as they stand, and for the starter's path the base yardr
+// carries, which that pack's yardmaster role became.
+func yardmasterText(name string) ([]byte, error) {
+	if name == "starter/roles/yardmaster.md" {
+		return pack.YardmasterBase(), nil
+	}
+	return fs.ReadFile(packs.FS, name)
+}
+
 // packFiles are the roles and stage files of the embedded packs, by path in
 // packs.FS (starter/roles/builder.md), with their text.
 func packFiles(t *testing.T) map[string]string {
@@ -104,7 +114,8 @@ func packFiles(t *testing.T) map[string]string {
 func TestTemplatesAreGeneric(t *testing.T) {
 	specific := regexp.MustCompile(`(?i)christopher|mckean|\byard\b(?:[^/]|$)|go vet|go test|go install|\(Go\)|herdr|XDG_|YARDR_HOME|\bmain\b|unix.socket`)
 	files := packFiles(t)
-	// Eighteen roles (the starter's five, the dir pack's two, the
+	// Seventeen roles (the starter's four — its yardmaster text is the base
+	// in the binary now, held below — the dir pack's two, the
 	// contributors pack's four, the design pack's two, the website pack's
 	// five) and the stage files of the seven flows: an import installs them
 	// in any yard. The contributors pack's pr flow has three more than it
@@ -118,8 +129,8 @@ func TestTemplatesAreGeneric(t *testing.T) {
 			stages++
 		}
 	}
-	if roles != 18 || stages != 40 {
-		t.Fatalf("embedded: %d roles and %d stage files, want 18 and 40", roles, stages)
+	if roles != 17 || stages != 40 {
+		t.Fatalf("embedded: %d roles and %d stage files, want 17 and 40", roles, stages)
 	}
 	for name, body := range files {
 		for i, line := range strings.Split(body, "\n") {
@@ -135,6 +146,9 @@ func TestTemplatesAreGeneric(t *testing.T) {
 		}
 	}
 	const yardmaster = "starter/roles/yardmaster.md"
+	// The starter's yardmaster text is the base in the binary: held here to
+	// the same words as the role it was.
+	files[yardmaster] = string(pack.YardmasterBase())
 	// The yardmaster's role is read as one line in this test, so that
 	// rewrapping a paragraph breaks nothing.
 	flat := strings.Join(strings.Fields(files[yardmaster]), " ")
@@ -897,8 +911,17 @@ func TestWebsitePack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(p.Crew, starter.Crew) {
-		t.Errorf("crew = %+v, want the starter's %+v", p.Crew, starter.Crew)
+	// The starter names its yardmaster with no role (its text is the base
+	// in the binary); this pack still carries its own, and everything else
+	// of the crew member is the starter's.
+	wantCrew := starter.Crew
+	for i := range wantCrew {
+		if wantCrew[i].Name == "yardmaster" {
+			wantCrew[i].Role = "roles/yardmaster.md"
+		}
+	}
+	if !reflect.DeepEqual(p.Crew, wantCrew) {
+		t.Errorf("crew = %+v, want the starter's %+v", p.Crew, wantCrew)
 	}
 	if len(p.Sources) != 1 || p.Sources[0].Source != "linear" || p.Sources[0].As != "yardmaster" {
 		t.Fatalf("sources = %+v, want linear alone, as yardmaster", p.Sources)
@@ -1026,10 +1049,8 @@ func TestWebsitePack(t *testing.T) {
 // text, read and answered and not done for them. The bytes go to what the pack
 // adds, the role's Outside work.
 func TestStarterYardmasterSpeaksInThePersonsWords(t *testing.T) {
-	body, err := fs.ReadFile(packs.FS, "starter/roles/yardmaster.md")
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The starter's yardmaster text is the base yardr carries now.
+	body := pack.YardmasterBase()
 	for _, want := range []string{
 		"may not know the yard's words (bead, depot, flow, stage,\n  group, route)",
 		"say back in their\n  words what you will do",
@@ -1038,7 +1059,7 @@ func TestStarterYardmasterSpeaksInThePersonsWords(t *testing.T) {
 		"Run the command a need takes yourself wherever you can.",
 	} {
 		if !strings.Contains(string(body), want) {
-			t.Errorf("packs/starter/roles/yardmaster.md lacks %q", want)
+			t.Errorf("the yardmaster base lacks %q", want)
 		}
 	}
 	other, err := fs.ReadFile(packs.FS, "contributors/roles/yardmaster.md")
@@ -1072,7 +1093,7 @@ func hasFirstRunHeading(role string) bool {
 // steps in every prime once the setup is done.
 func TestYardmasterHowYouWork(t *testing.T) {
 	for _, name := range []string{"starter/roles/yardmaster.md", "contributors/roles/yardmaster.md", "website/roles/yardmaster.md"} {
-		body, err := fs.ReadFile(packs.FS, name)
+		body, err := yardmasterText(name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1149,7 +1170,7 @@ func TestYardmasterHowYouWork(t *testing.T) {
 // docs/users.md for the rest, in its own words (operatorsCommands).
 func TestYardmasterProposesOperatorsCommands(t *testing.T) {
 	for name, wants := range operatorsCommands {
-		body, err := fs.ReadFile(packs.FS, name)
+		body, err := yardmasterText(name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1237,6 +1258,8 @@ var operatorsCommands = map[string][]string{
 // reason and reviews as today, without blocking the bead.
 func TestEyesLabel(t *testing.T) {
 	files := packFiles(t)
+	// The starter's yardmaster text is the base in the binary now.
+	files["starter/roles/yardmaster.md"] = string(pack.YardmasterBase())
 	// The yardmaster roles are cut to a brief that names the label and points
 	// at the rubric, which docs/groups.md holds whole (design yardr-2vy0 3.2;
 	// internal/cli's TestShippedRolePointersResolve reads that section for the
@@ -1517,7 +1540,7 @@ func TestYardmasterTelegramChatIsOperatorsWord(t *testing.T) {
 			"`yardr docs crew what a line weighs`",
 		},
 	} {
-		body, err := fs.ReadFile(packs.FS, name)
+		body, err := yardmasterText(name)
 		if err != nil {
 			t.Fatal(err)
 		}

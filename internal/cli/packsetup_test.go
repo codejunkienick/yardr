@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"yardr.dev/yardr/internal/pack"
 	"yardr.dev/yardr/internal/store"
 )
 
@@ -154,9 +155,11 @@ func TestPackShowPrintsSetupNotes(t *testing.T) {
 		t.Fatalf("show of a pack without notes: %v\n%s", err, out)
 	}
 	// A pack of script options, with no notes, prints them under the
-	// notes' absence, in words and as data.
+	// notes' absence, in words and as data. Starter also prints the
+	// yardmaster base yardr carries, on a yard that never applied it: the
+	// text a new yard's own yardmaster file is seeded from.
 	out, err = run(t, a.packCmd(), "show", "starter")
-	if want := "pack starter carries no setup notes\n\nenv of the script groups of pack starter (set before the script in the cmd of a group an import creates; a group the yard has keeps its own cmd):\n  assembly: YARDR_LAND=squash\n"; err != nil || out != want {
+	if want := "pack starter carries no setup notes\n\nenv of the script groups of pack starter (set before the script in the cmd of a group an import creates; a group the yard has keeps its own cmd):\n  assembly: YARDR_LAND=squash\n\nthe yardmaster base, as yardr carries it now (a new yard's roles/yardmaster.md is seeded from it and frozen there):\n\n" + string(pack.YardmasterBase()); err != nil || out != want {
 		t.Fatalf("show starter: %v\n%s\nwant\n%s", err, out, want)
 	}
 	a.json = true
@@ -166,10 +169,12 @@ func TestPackShowPrintsSetupNotes(t *testing.T) {
 		t.Fatalf("show starter --json: %v\n%s", err, out)
 	}
 	var shown struct {
-		Pack string                       `json:"pack"`
-		Env  map[string]map[string]string `json:"env"`
+		Pack           string                       `json:"pack"`
+		Env            map[string]map[string]string `json:"env"`
+		YardmasterBase string                       `json:"yardmaster_base"`
 	}
-	if err := json.Unmarshal([]byte(out), &shown); err != nil || shown.Pack != "starter" || !reflect.DeepEqual(shown.Env, map[string]map[string]string{"assembly": {"YARDR_LAND": "squash"}}) {
+	if err := json.Unmarshal([]byte(out), &shown); err != nil || shown.Pack != "starter" || !reflect.DeepEqual(shown.Env, map[string]map[string]string{"assembly": {"YARDR_LAND": "squash"}}) ||
+		shown.YardmasterBase != string(pack.YardmasterBase()) {
 		t.Fatalf("show starter --json: %v\n%s", err, out)
 	}
 	out, err = run(t, a.packCmd(), "show", "linear")

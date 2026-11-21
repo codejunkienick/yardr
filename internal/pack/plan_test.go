@@ -1,6 +1,7 @@
 package pack_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -262,7 +263,7 @@ func TestStarterIntoAnEmptyYard(t *testing.T) {
 
 	install := config.At(o.Home).Pack("starter")
 	want := []string{
-		"file roles/builder.md", "file roles/review-security.md", "file roles/reviewer.md", "file roles/yardmaster.md", "file scripts/merge-local",
+		"file roles/builder.md", "file roles/review-security.md", "file roles/reviewer.md", "file scripts/merge-local",
 		"file flows/default/backlog.md", "file flows/default/new.md", "file flows/default/review.md", "file flows/default/review-security.md", "file flows/default/clear.md", "file flows/default/approved.md", "file flows/default/decide.md",
 		"file flows/train/in-pr.md", "file flows/train/merge.md",
 		"group web-builders", "group web-reviewers", "group web-security-reviewers", "group web-assembly", "group backlog", "group decisions",
@@ -341,8 +342,10 @@ func TestStarterIntoAnEmptyYard(t *testing.T) {
 	if got := find(t, plan, "flow", "starter.default").Flow.Stages; got[0] != "backlog" || got[7] != "merged" {
 		t.Fatalf("flow stages = %v", got)
 	}
+	// The starter names its yardmaster with no role: the pack sets no
+	// prompt for it, the yard's own file being init's to seed.
 	m := find(t, plan, "crew", "yardmaster").CrewMember
-	if m.Prompt != filepath.Join(install, "roles", "yardmaster.md") || !reflect.DeepEqual(m.On, []string{store.KindAttention}) {
+	if m.Prompt != "" || m.SeedFrom != "" || !reflect.DeepEqual(m.On, []string{store.KindAttention}) {
 		t.Fatalf("yardmaster = %+v", m)
 	}
 	if len(plan.Governs) != 2 || plan.Governs[0].Flow != "starter.default" || plan.Governs[0].Now != "none" || plan.Governs[0].Type != "" || plan.Governs[1].Flow != "starter.train" || plan.Governs[1].Now != "the depot's flow" || plan.Governs[1].Type != store.TypeTrain {
@@ -351,10 +354,10 @@ func TestStarterIntoAnEmptyYard(t *testing.T) {
 	if len(plan.Refused) != 0 {
 		t.Fatalf("refused: %v", plan.Refused)
 	}
-	// The starter carries its yardmaster as a role and no section: the plan
-	// warns that the role is going away, and records no section.
-	if plan.Section != "" || !slices.Contains(plan.Notes, "a pack's yardmaster role is going away; carry a section instead") {
-		t.Fatalf("section %q, notes %v: want no section and the going-away warning", plan.Section, plan.Notes)
+	// The starter carries its yardmaster with no role and no section: no
+	// prompt is set, nothing is warned of, and no section is recorded.
+	if plan.Section != "" || slices.Contains(plan.Notes, "a pack's yardmaster role is ignored for the yardmaster prompt") {
+		t.Fatalf("section %q, notes %v: want no section and no ignored-role note", plan.Section, plan.Notes)
 	}
 
 	// What linear lacks in a yard that has nothing: the source itself.
@@ -428,7 +431,7 @@ func TestStarterIntoAnEmptyYard(t *testing.T) {
 // A yardmaster section is held at the plan, which no test drove before
 // this one: over 2048 bytes, or a first line empty or over 200 bytes,
 // refuses the import at check and at apply, and a sound one stands in the
-// record of the import while the yardmaster's role still sets its prompt.
+// record of the import while a pack's yardmaster role sets no prompt.
 func TestYardmasterSectionIsRefusedAndRecorded(t *testing.T) {
 	withSection := func(t *testing.T, section string) string {
 		t.Helper()
@@ -456,8 +459,8 @@ func TestYardmasterSectionIsRefusedAndRecorded(t *testing.T) {
 	if plan.Section != "sections/yardmaster.md" || len(plan.Refused) != 0 {
 		t.Fatalf("plan section %q, refused %v", plan.Section, plan.Refused)
 	}
-	if !slices.Contains(plan.Notes, "a pack's yardmaster role is going away; carry a section instead") {
-		t.Fatalf("notes = %v, want the going-away warning beside the section", plan.Notes)
+	if !slices.Contains(plan.Notes, "a pack's yardmaster role is ignored for the yardmaster prompt") {
+		t.Fatalf("notes = %v, want the ignored-role note beside the section", plan.Notes)
 	}
 	_, other, _, _ := planOf(t, "When the yard is quiet.\n\nWatch the held beads.\n")
 	if other.Digest == plan.Digest {
@@ -469,15 +472,15 @@ func TestYardmasterSectionIsRefusedAndRecorded(t *testing.T) {
 		t.Fatalf("at its bounds: refused %v, section %q", plan.Refused, plan.Section)
 	}
 	// Applying it records the section's path, and the role the same pack
-	// carries still sets the yardmaster's prompt, as it did before.
+	// carries sets no prompt: the yardmaster's prompt is the yard's own.
 	apply(t, st, plan, nil)
 	recs, err := st.Packs(ctx)
 	if err != nil || len(recs) != 1 || recs[0].Section != "sections/yardmaster.md" {
 		t.Fatalf("records = %+v, %v, want the section's path recorded", recs, err)
 	}
 	master, err := st.GetCrew(ctx, "yardmaster")
-	if err != nil || master.Config["prompt"] == "" || !strings.HasSuffix(fmt.Sprint(master.Config["prompt"]), filepath.Join("roles", "yardmaster.md")) {
-		t.Fatalf("yardmaster = %+v, %v: its role no longer sets its prompt", master, err)
+	if err != nil || master.Config["prompt"] != nil {
+		t.Fatalf("yardmaster = %+v, %v: a pack's role set its prompt", master, err)
 	}
 
 	// Each way a section is too much for prime refuses the plan, and
@@ -512,6 +515,195 @@ func TestYardmasterSectionIsRefusedAndRecorded(t *testing.T) {
 	}
 }
 
+// A yardmaster still prompted from a pack's role keeps working on the next
+// import that names the yardmaster: the plan moves its prompt to the yard's
+// own file, seeded from the role it reads now, and says so. A local file
+// already there is kept untouched, a prompt already the yard's own or set
+// by hand is left, and a pack's role for the yardmaster sets nothing.
+func TestYardmasterPromptMigratesToTheLocalRole(t *testing.T) {
+	running := []byte("the role this yard runs\n")
+	loadSmall := func(t *testing.T) *pack.Pack { return load(t, writePack(t, smallFiles(small))) }
+	roleOf := func(t *testing.T, st store.API) string {
+		t.Helper()
+		r, err := st.GetCrew(ctx, "yardmaster")
+		if err != nil {
+			t.Fatal(err)
+		}
+		prompt, _ := r.Config["prompt"].(string)
+		return prompt
+	}
+
+	// On a pack's role, with no local file: seeded from the running role,
+	// exact bytes, though this import installs the pack's own text over
+	// that role, and the plan carries the seeded-from line.
+	st, o := yard(t)
+	role := filepath.Join(config.At(o.Home).PackRoles("small"), "yardmaster.md")
+	if err := os.MkdirAll(filepath.Dir(role), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(role, running, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr",
+		Config: map[string]any{"kind": "claude", "prompt": role}, On: []string{"held"}}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	local := pack.LocalYardmaster(o.Home)
+	plan := build(t, st, loadSmall(t), o)
+	m := find(t, plan, "crew", "yardmaster")
+	if m.Action != pack.Change || m.CrewMember.Prompt != local || m.CrewMember.SeedFrom != role ||
+		!reflect.DeepEqual(m.Changes, []pack.Diff{{Field: "prompt", Old: role, New: local}}) {
+		t.Fatalf("yardmaster = %+v", m)
+	}
+	if want := "the yardmaster's local role " + local + " is seeded from small's role"; !slices.Contains(plan.Notes, want) {
+		t.Fatalf("notes = %v, want %q", plan.Notes, want)
+	}
+	if !slices.Contains(plan.Notes, "a pack's yardmaster role is ignored for the yardmaster prompt") {
+		t.Fatalf("notes = %v, want the ignored-role note", plan.Notes)
+	}
+	apply(t, st, plan, nil)
+	if got := roleOf(t, st); got != local {
+		t.Fatalf("prompt after the import = %q, want %q", got, local)
+	}
+	if b, err := os.ReadFile(local); err != nil || !reflect.DeepEqual(b, running) {
+		t.Fatalf("the seeded local role = %q, %v, want the running role's exact bytes", b, err)
+	}
+	// Again: already local, nothing moves and nothing is seeded again.
+	if err := os.WriteFile(local, []byte("the operator's own\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan = build(t, st, loadSmall(t), o)
+	if m := find(t, plan, "crew", "yardmaster"); m.CrewMember.Prompt != "" || m.CrewMember.SeedFrom != "" ||
+		slices.ContainsFunc(m.Changes, func(d pack.Diff) bool { return d.Field == "prompt" }) {
+		t.Fatalf("already local: yardmaster = %+v", m)
+	}
+	apply(t, st, plan, nil)
+	if b, _ := os.ReadFile(local); string(b) != "the operator's own\n" || roleOf(t, st) != local {
+		t.Fatalf("the operator's local role was touched: %q, prompt %q", b, roleOf(t, st))
+	}
+	// Concurrent init or apply calls may seed the same missing path. One
+	// complete seed wins; no caller reports replacing the file another wrote.
+	home := t.TempDir()
+	const seeders = 16
+	payloads := make([][]byte, seeders)
+	for i := range payloads {
+		payloads[i] = bytes.Repeat([]byte{byte(i + 1)}, 1<<19)
+	}
+	start := make(chan struct{})
+	type seedResult struct {
+		path  string
+		wrote bool
+		err   error
+	}
+	results := make(chan seedResult, seeders)
+	for i := range seeders {
+		go func(i int) {
+			<-start
+			path, wrote, err := pack.SeedYardmaster(home, payloads[i])
+			results <- seedResult{path, wrote, err}
+		}(i)
+	}
+	close(start)
+	writes := 0
+	for range seeders {
+		result := <-results
+		if result.err != nil || result.path != pack.LocalYardmaster(home) {
+			t.Fatalf("concurrent seed = %+v", result)
+		}
+		if result.wrote {
+			writes++
+		}
+	}
+	if writes != 1 {
+		t.Fatalf("concurrent seeds wrote %d times, want one", writes)
+	}
+	got, err := os.ReadFile(pack.LocalYardmaster(home))
+	if err != nil || !slices.ContainsFunc(payloads, func(want []byte) bool { return bytes.Equal(got, want) }) {
+		t.Fatalf("concurrent seed = %d bytes, %v; want one complete seed", len(got), err)
+	}
+	// A role created after a migration plan is made is kept when Apply seeds:
+	// the plan's earlier absence check does not grant it permission to replace.
+	st, o = yard(t)
+	role = filepath.Join(config.At(o.Home).PackRoles("small"), "yardmaster.md")
+	if err := os.MkdirAll(filepath.Dir(role), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(role, running, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr",
+		Config: map[string]any{"kind": "claude", "prompt": role}, On: []string{"held"}}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	local = pack.LocalYardmaster(o.Home)
+	plan = build(t, st, loadSmall(t), o)
+	if m := find(t, plan, "crew", "yardmaster"); m.CrewMember.SeedFrom != role {
+		t.Fatalf("a migration plan made without a local file = %+v", m)
+	}
+	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(local, []byte("created after the plan\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	apply(t, st, plan, nil)
+	if b, _ := os.ReadFile(local); string(b) != "created after the plan\n" || roleOf(t, st) != local {
+		t.Fatalf("the post-plan local role was touched: %q, prompt %q", b, roleOf(t, st))
+	}
+
+	// On a pack's role, with a local file already there: kept untouched,
+	// and the prompt moves to it.
+	st, o = yard(t)
+	role = filepath.Join(config.At(o.Home).PackRoles("small"), "yardmaster.md")
+	if err := os.MkdirAll(filepath.Dir(role), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(role, running, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	local = pack.LocalYardmaster(o.Home)
+	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(local, []byte("already the yard's own\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr",
+		Config: map[string]any{"kind": "claude", "prompt": role}, On: []string{"held"}}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	plan = build(t, st, loadSmall(t), o)
+	m = find(t, plan, "crew", "yardmaster")
+	if m.CrewMember.Prompt != local || m.CrewMember.SeedFrom != "" {
+		t.Fatalf("with a local file: yardmaster = %+v", m)
+	}
+	if want := "the yardmaster's prompt moves to " + local + ", which is already there and is kept as it is"; !slices.Contains(plan.Notes, want) {
+		t.Fatalf("notes = %v, want %q", plan.Notes, want)
+	}
+	apply(t, st, plan, nil)
+	if b, _ := os.ReadFile(local); string(b) != "already the yard's own\n" || roleOf(t, st) != local {
+		t.Fatalf("the existing local role was touched: %q, prompt %q", b, roleOf(t, st))
+	}
+
+	// A prompt set by hand, away from any pack: the pack's role is ignored
+	// and the prompt stays.
+	custom := filepath.Join(t.TempDir(), "mine.md")
+	st, o = yard(t)
+	if _, err := st.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "herdr",
+		Config: map[string]any{"kind": "claude", "prompt": custom}, On: []string{"held"}}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	plan = build(t, st, loadSmall(t), o)
+	if m := find(t, plan, "crew", "yardmaster"); m.CrewMember.Prompt != "" ||
+		slices.ContainsFunc(m.Changes, func(d pack.Diff) bool { return d.Field == "prompt" }) {
+		t.Fatalf("a hand-set prompt: yardmaster = %+v", m)
+	}
+	apply(t, st, plan, nil)
+	if got := roleOf(t, st); got != custom {
+		t.Fatalf("prompt after the import = %q, want the hand-set %q", got, custom)
+	}
+}
+
 var answers = map[string]string{
 	"group.web-builders.kind": "claude", "group.web-builders.model": "opus",
 	"group.web-reviewers.kind": "codex", "group.web-reviewers.model": "luna",
@@ -530,7 +722,7 @@ func TestSecondImportChangesNothing(t *testing.T) {
 	if c, ch, n := actions(plan, pack.Create), actions(plan, pack.Change), actions(plan, pack.NotInPack); len(c)+len(ch)+len(n) != 0 {
 		t.Fatalf("a second import would create %v, change %v, and finds %v not in the pack", c, ch, n)
 	}
-	if len(plan.Objects) != 40 || len(plan.Questions) != 0 {
+	if len(plan.Objects) != 39 || len(plan.Questions) != 0 {
 		t.Fatalf("%d objects, questions %v", len(plan.Objects), plan.Questions)
 	}
 	if g := plan.Governs; len(g) != 2 || g[0].Now != "starter.default (store)" || g[1].Now != "starter.train (store, type train)" {
@@ -602,7 +794,7 @@ func TestSecondImportChangesNothing(t *testing.T) {
 	// And applying those two brings the yard level again.
 	apply(t, st, plan, nil)
 	plan = build(t, st, load(t, dir), o)
-	if got := actions(plan, pack.Unchanged); len(got) != 40 {
+	if got := actions(plan, pack.Unchanged); len(got) != 39 {
 		t.Fatalf("after applying the change: %d unchanged of %d", len(got), len(plan.Objects))
 	}
 }
@@ -653,7 +845,7 @@ func TestYardSetUpByHand(t *testing.T) {
 			t.Errorf("%s %s is planned as new", o.Kind, o.Name)
 		}
 	}
-	if got, want := actions(plan, pack.Change), []string{"crew boss", "subscription boss linear involved"}; !reflect.DeepEqual(got, want) {
+	if got, want := actions(plan, pack.Change), []string{"subscription boss linear involved"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("change = %v\nwant %v", got, want)
 	}
 	// The hand-made typed copies for stages both flows share are left
@@ -696,8 +888,8 @@ func TestYardSetUpByHand(t *testing.T) {
 		t.Fatalf("route new = %+v %+v", rt, rt.Route)
 	}
 	res := find(t, plan, "crew", "boss")
-	if len(res.Changes) != 1 || res.Changes[0].Field != "prompt" || res.CrewMember.Pack != "yardmaster" || len(res.Asks) != 0 {
-		t.Fatalf("boss = %+v (it hears the class as the pack has it: no change)", res)
+	if len(res.Changes) != 0 || res.CrewMember.Pack != "yardmaster" || len(res.Asks) != 0 {
+		t.Fatalf("boss = %+v (it hears the class as the pack has it, and its prompt is the yard's own: no change)", res)
 	}
 	sub := find(t, plan, "subscription", "boss linear involved")
 	if want := []pack.Diff{{Field: "scope", Old: "all", New: "involved"}}; !reflect.DeepEqual(sub.Changes, want) || sub.Subscription.Remove == nil {

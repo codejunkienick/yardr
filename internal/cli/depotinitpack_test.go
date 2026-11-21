@@ -75,7 +75,7 @@ func TestDepotInitPack(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	const guess = "go vet ./... && go test ./..."
-	for _, want := range []string{"pack starter (", "  create           web-builders\n", "\napplied pack starter to depot web: 40 created, 0 changed, 0 unchanged\n",
+	for _, want := range []string{"pack starter (", "  create           web-builders\n", "\napplied pack starter to depot web: 39 created, 0 changed, 0 unchanged\n",
 		"\ntest: depot web is tested with " + guess + " (a guess from " + repo + ": check it with yardr depot show web)\n",
 		"To change it:\n  yardr depot add web " + repo + " --base main --test '<command>'\n"} {
 		if !strings.Contains(out, want) {
@@ -126,7 +126,7 @@ func TestDepotInitPack(t *testing.T) {
 		"role web-builders pack starter ("+filepath.Join(roles, "builder.md")+")",
 		"role web-reviewers pack starter ("+filepath.Join(roles, "reviewer.md")+")",
 		"role web-security-reviewers pack starter ("+filepath.Join(roles, "review-security.md")+")",
-		"role boss pack starter ("+filepath.Join(roles, "yardmaster.md")+")",
+		"role boss none",
 		"rules web none",
 	)
 
@@ -151,7 +151,7 @@ func TestDepotInitPack(t *testing.T) {
 		Result struct{ Unchanged int }
 		Test   testResult
 	}
-	if err != nil || json.Unmarshal([]byte(out), &got) != nil || got.Result.Unchanged != 40 ||
+	if err != nil || json.Unmarshal([]byte(out), &got) != nil || got.Result.Unchanged != 39 ||
 		got.Test != (testResult{Depot: "web", Kind: store.DepotGit, Path: repo, Base: "main", Test: "make test"}) {
 		t.Fatalf("json: %v, %+v\n%s", err, got, out)
 	}
@@ -175,8 +175,9 @@ func TestDepotInitPackWritesNothingUnasked(t *testing.T) {
 			t.Errorf("%s: the depot has a test command: %+v, %v", when, d, err)
 		}
 	}
-	shadows := []string{"  create           web-builders\n                     shadows .yardr/roles/builder.md\n",
-		"  create           boss\n                     shadows .yardr/roles/yardmaster.md\n"}
+	// The yardmaster shadows nothing: its prompt is the yard's own file, so
+	// the depot's yardmaster role is not the pack's to set over it.
+	shadows := []string{"  create           web-builders\n                     shadows .yardr/roles/builder.md\n"}
 	args := append([]string{"init", "web", "--pack", "starter"}, starterFlags...)
 
 	setInteractive(t, false)

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"yardr.dev/yardr/docs"
+	"yardr.dev/yardr/internal/pack"
 	"yardr.dev/yardr/packs"
 )
 
@@ -134,8 +135,9 @@ func TestDocsShowPrintsOneSection(t *testing.T) {
 // no heading holds any more sends the yardmaster to an error at the moment
 // it needs the page, so every pointer in a shipped role resolves: the page
 // is one the binary carries and the words, where there are any, match a
-// section's heading. For pointers in the three cut yardmaster roles whose
-// reference moved out of the role (design yardr-2vy0 3.2, 3.5), the section
+// section's heading. For pointers in the cut yardmaster texts whose
+// reference moved out of the role (design yardr-2vy0 3.2, 3.5) — the two
+// shipped roles and the base the starter's text became — the section
 // also holds what stood only in the role, so a heading over text that never
 // landed fails.
 func TestShippedRolePointersResolve(t *testing.T) {
@@ -146,8 +148,8 @@ func TestShippedRolePointersResolve(t *testing.T) {
 	}
 	// What each moved pointer's section holds, as words of the section read
 	// as one line (a wrapped paragraph breaks nothing), and the words it must
-	// not hold. Each pack's yardmaster role is cut to its core, so each is held
-	// to the list. The starter's must carry every pointer in it; the website's
+	// not hold. Each yardmaster text is cut to its core, so each is held
+	// to the list. The starter's (the base) must carry every pointer in it; the website's
 	// carries the ones its own brief needs (it has no train flow, so no
 	// wagons), and the contributors' the ones its own, in its own words, with
 	// one of its own: its pack's page, where nothing was moved.
@@ -356,11 +358,19 @@ func TestShippedRolePointersResolve(t *testing.T) {
 	// single spaces first, so a pointer the role wraps across lines is read.
 	pointer := regexp.MustCompile("`yardr docs ([A-Za-z]+)((?: [^`\"]+)?)`")
 	var found int
+	// The starter's yardmaster text is the base yardr carries now, not a
+	// file in the pack: it is read here under the starter's name, as the
+	// role it was.
+	texts := map[string][]byte{starter: pack.YardmasterBase()}
 	for _, path := range roles {
 		text, err := fs.ReadFile(packs.FS, path)
 		if err != nil {
 			t.Fatal(err)
 		}
+		texts[path] = text
+	}
+	for _, path := range append(roles, starter) {
+		text := texts[path]
 		for _, m := range pointer.FindAllStringSubmatch(strings.Join(strings.Fields(string(text)), " "), -1) {
 			found++
 			page, words := m[1], strings.TrimSpace(m[2])

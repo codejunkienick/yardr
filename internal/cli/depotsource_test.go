@@ -113,11 +113,23 @@ func TestDepotSourceRoleOfAGroup(t *testing.T) {
 
 // A crew member reads a path as it is, so its depot's role is the file in the
 // depot's checkout: refused while there is none, then listed as the depot's.
+// The starter carries no yardmaster role, so there is no pack's copy to
+// switch back to: that is refused, and the crew member keeps the depot's.
 func TestDepotSourceRoleOfACrew(t *testing.T) {
 	t.Parallel()
 	a, home, _ := packedYard(t)
-	depot, err := a.st.GetDepot(context.Background(), "web")
+	ctx := context.Background()
+	depot, err := a.st.GetDepot(ctx, "web")
 	if err != nil {
+		t.Fatal(err)
+	}
+	// As init left it in a yard of its own: the yard's own file.
+	boss, err := a.st.GetCrew(ctx, "boss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	boss.Config["prompt"] = filepath.Join(config.At(home).Roles(), "yardmaster.md")
+	if _, err := a.st.PutCrew(ctx, *boss, "me"); err != nil {
 		t.Fatal(err)
 	}
 	refused(t, a, []string{"web", "role", "boss", "depot"}, "depot web has no .yardr/roles/yardmaster.md in its checkout")
@@ -127,20 +139,14 @@ func TestDepotSourceRoleOfACrew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "role boss depot (.yardr/roles/yardmaster.md) pack starter has a copy"
-	if got := sourceLines(t, out); got[0] != want || !strings.Contains(out, "unless given --depot-roles") {
+	want := "role boss depot (.yardr/roles/yardmaster.md)"
+	if got := sourceLines(t, out); got[0] != want {
 		t.Errorf("to the depot's:\n%s", out)
 	}
 	if got := sourcesLine(t, a, "role boss"); got != want {
 		t.Errorf("depot sources after: %s", got)
 	}
-	if out, err = run(t, a.depotSourceCmd(), "web", "role", "boss", "pack"); err != nil {
-		t.Fatal(err)
-	}
-	want = "role boss pack starter (" + filepath.Join(config.At(home).PackRoles("starter"), "yardmaster.md") + ")"
-	if got := sourcesLine(t, a, "role boss"); !strings.HasPrefix(got, want) || !strings.HasPrefix(sourceLines(t, out)[0], want) {
-		t.Errorf("back to the pack's: %s\n%s", got, out)
-	}
+	refused(t, a, []string{"web", "role", "boss", "pack"}, "installed a role yardmaster.md")
 }
 
 // Under an import given --depot-roles, a group switched to the pack's role is

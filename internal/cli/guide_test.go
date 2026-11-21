@@ -3,7 +3,9 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -517,13 +519,14 @@ func TestSetupCancelled(t *testing.T) {
 		}
 		if tc.step == stepDepotFiles {
 			wantText(t, out, "cancelled; nothing was changed")
-			// The yardmaster's role is init's, there before the import.
-			var files []string
-			for p := range snapshot(t, config.At(home).Packs()) {
-				files = append(files, strings.TrimPrefix(p, home+"/"))
+			// The yardmaster's role is init's, seeded in the yard's own
+			// roles before the import: the cancelled import installed
+			// nothing of the pack's.
+			if _, err := os.Stat(config.At(home).Packs()); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("a cancelled import installed the pack's files: %v", err)
 			}
-			if !slices.Equal(files, []string{"packs/starter/roles/yardmaster.md"}) {
-				t.Errorf("a cancelled import installed the pack's files: %v", files)
+			if _, err := os.Stat(filepath.Join(config.At(home).Roles(), "yardmaster.md")); err != nil {
+				t.Errorf("the yardmaster's seeded role is not there: %v", err)
 			}
 		}
 		// The page again, finished, then stop.

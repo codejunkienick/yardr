@@ -58,16 +58,23 @@ func startsYardmaster(t *testing.T, st store.API, name string, handle map[string
 }
 
 // wholeYard fails unless the home holds the yard a clean init makes: the
-// three settings, the yardmaster on the harness, and its role from the
-// default pack, naming the operator and the yardmaster, as its prompt.
+// three settings, the yardmaster on the harness, and its role seeded into
+// the yard's own roles as its prompt, naming the operator the seeding run
+// was told (seededWith, the operator of whoever seeded it first: a file
+// seeded by a failed run is kept, not rewritten for a later operator).
 func wholeYard(t *testing.T, st store.API, home, harness, operator, yardmaster string) {
+	t.Helper()
+	wholeYardSeeded(t, st, home, harness, operator, yardmaster, operator)
+}
+
+func wholeYardSeeded(t *testing.T, st store.API, home, harness, operator, yardmaster, seededWith string) {
 	t.Helper()
 	ctx := context.Background()
 	got, _ := st.Settings(ctx)
 	if got["default_kind"] != harness || got["operator"] != operator || got["yardmaster"] != yardmaster {
 		t.Errorf("settings = %v", got)
 	}
-	dir := config.At(home).PackRoles("starter")
+	dir := config.At(home).Roles()
 	rs, _ := st.Crew(ctx)
 	if len(rs) != 1 || rs[0].Name != yardmaster || rs[0].Config["kind"] != harness || rs[0].Config["prompt"] != filepath.Join(dir, "yardmaster.md") {
 		t.Errorf("crew members = %+v", rs)
@@ -75,14 +82,14 @@ func wholeYard(t *testing.T, st store.API, home, harness, operator, yardmaster s
 	have, err := os.ReadFile(filepath.Join(dir, "yardmaster.md"))
 	if err != nil {
 		t.Errorf("yardmaster.md: %v", err)
-	} else if !bytes.Equal(have, packRole(t, "starter", "roles/yardmaster.md", operator, yardmaster)) {
-		t.Errorf("yardmaster.md does not name %s and %s", operator, yardmaster)
+	} else if !bytes.Equal(have, baseRole(seededWith, yardmaster)) {
+		t.Errorf("yardmaster.md does not name %s and %s", seededWith, yardmaster)
 	}
 	if left, _ := filepath.Glob(filepath.Join(dir, ".*")); len(left) > 0 {
 		t.Errorf("temporary files left: %v", left)
 	}
-	if _, err := os.Stat(filepath.Join(home, "roles")); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("init made %s: %v", filepath.Join(home, "roles"), err)
+	if _, err := os.Stat(filepath.Join(home, "packs")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("init installed a pack in %s: %v", filepath.Join(home, "packs"), err)
 	}
 }
 
@@ -102,16 +109,16 @@ func TestInitFinishesAfterAFailedRun(t *testing.T) {
 		operator     string
 		found, added []string
 	}{
-		// The role the failed run wrote names Jo and is nobody's prompt yet:
-		// the next run, told Kim, writes it again.
+		// The role the failed run seeded names Jo and is nobody's prompt
+		// yet: the next run, told Kim, keeps it as seeded.
 		{name: "after the role, told another operator", on: "setting operator", again: []string{"init", "--harness", "codex", "--operator", "Kim", "--yardmaster", "boss"}, operator: "Kim",
-			found: []string{"the role prompt packs/starter/roles/yardmaster.md in"},
-			added: []string{"the role prompt yardmaster.md", "the operator and yardmaster settings", "the crew member boss", "the default_kind setting"}},
+			found: []string{"the role prompt roles/yardmaster.md in"},
+			added: []string{"the operator and yardmaster settings", "the crew member boss", "the default_kind setting"}},
 		{name: "after the role", on: "setting operator", again: first, operator: "Jo",
-			found: []string{"the role prompt packs/starter/roles/yardmaster.md in"},
+			found: []string{"the role prompt roles/yardmaster.md in"},
 			added: []string{"the operator and yardmaster settings", "the crew member boss", "the default_kind setting"}},
 		{name: "after the operator setting", on: "setting yardmaster", again: []string{"init", "--harness", "codex", "--yardmaster", "boss"}, operator: "Jo",
-			found: []string{"the role prompt packs/starter/roles/yardmaster.md in", "the setting operator Jo"},
+			found: []string{"the role prompt roles/yardmaster.md in", "the setting operator Jo"},
 			added: []string{"the operator and yardmaster settings", "the crew member boss"}},
 		{name: "after the settings", on: "crew", again: []string{"init", "--harness", "codex"}, operator: "Jo",
 			found: []string{"the settings operator Jo and yardmaster boss"},
@@ -153,7 +160,9 @@ func TestInitFinishesAfterAFailedRun(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v: %v\n%s", tc.again, err, out)
 			}
-			wholeYard(t, st, home, "codex", tc.operator, "boss")
+			// The file was seeded by the first run, which was told Jo,
+			// whoever the second run names as operator.
+			wholeYardSeeded(t, st, home, "codex", tc.operator, "boss", "Jo")
 			if !strings.Contains(out, "yard in "+home+" finished: part of it was there") {
 				t.Errorf("the second run does not say it finished a yard:\n%s", out)
 			}
@@ -175,7 +184,7 @@ func TestInitFinishesAfterAFailedRun(t *testing.T) {
 			if err != nil || !strings.Contains(out, "set up again") || strings.Contains(out, "  found ") {
 				t.Fatalf("third run: %v\n%s", err, out)
 			}
-			wholeYard(t, st, home, "codex", tc.operator, "boss")
+			wholeYardSeeded(t, st, home, "codex", tc.operator, "boss", "Jo")
 		})
 	}
 }
@@ -229,7 +238,7 @@ func TestOnboardingAfterAFailedRun(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wholeYard(t, st, home, "claude", "Jo", "boss")
-	for _, s := range []string{"An earlier setup of this home did not reach its end. It left the role prompt packs/starter/roles/yardmaster.md",
+	for _, s := range []string{"An earlier setup of this home did not reach its end. It left the role prompt roles/yardmaster.md",
 		"the settings operator Jo and yardmaster boss", "finished: part of it was there", "  added      the crew member boss",
 		"boss is running, in herdr"} {
 		if !strings.Contains(out, s) {

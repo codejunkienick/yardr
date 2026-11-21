@@ -25,7 +25,6 @@ import (
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
 	"yardr.dev/yardr/internal/telemetry"
-	"yardr.dev/yardr/packs"
 )
 
 // shortDir is a temp directory a yard's socket path fits in: a unix socket
@@ -54,16 +53,11 @@ func newHomeDir(t *testing.T) string {
 	return filepath.Join(shortDir(t, "yh"), "y")
 }
 
-// packRole is the role file rel of the pack yardr embeds as name, as an
-// import installs it: naming operator, and yardmaster as the crew member
-// that takes the pack's.
-func packRole(t *testing.T, name, rel, operator, yardmaster string) []byte {
-	t.Helper()
-	tmpl, err := packs.FS.ReadFile(name + "/" + rel)
-	if err != nil {
-		t.Fatalf("pack %s: %v", name, err)
-	}
-	return pack.Fill(tmpl, map[string]string{pack.Operator: operator, "yardmaster": yardmaster})
+// baseRole is the yardmaster base yardr carries, as init seeds it into a
+// yard's own roles/yardmaster.md: naming operator, and yardmaster as the
+// crew member that takes the pack's.
+func baseRole(operator, yardmaster string) []byte {
+	return pack.Fill(pack.YardmasterBase(), map[string]string{pack.Operator: operator, "yardmaster": yardmaster})
 }
 
 func TestInitHarnessClaude(t *testing.T) {
@@ -78,12 +72,12 @@ func TestInitHarnessClaude(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The yardmaster's role alone, from the default pack and where an
-	// import of it installs its roles, naming the operator. No <home>/roles.
-	prompt := filepath.Join(config.At(home).PackRoles("starter"), "yardmaster.md")
+	// The yardmaster's role alone, the yard's own file seeded from the base
+	// yardr carries, naming the operator. Nothing of any pack is installed.
+	prompt := filepath.Join(config.At(home).Roles(), "yardmaster.md")
 	got, err := os.ReadFile(prompt)
-	if err != nil || !bytes.Equal(got, packRole(t, "starter", "roles/yardmaster.md", "Jo", "yardmaster")) {
-		t.Fatalf("yardmaster.md installed: %v\n%s", err, got)
+	if err != nil || !bytes.Equal(got, baseRole("Jo", "yardmaster")) {
+		t.Fatalf("yardmaster.md seeded: %v\n%s", err, got)
 	}
 	if bytes.Contains(got, []byte("{{")) || !bytes.Contains(got, []byte("bring to Jo")) {
 		t.Errorf("yardmaster.md keeps a placeholder, or does not name Jo:\n%s", got)
@@ -93,7 +87,7 @@ func TestInitHarnessClaude(t *testing.T) {
 		files = append(files, strings.TrimPrefix(p, home+"/"))
 	}
 	slices.Sort(files)
-	if !slices.Equal(files, []string{"binary", "packs/starter/roles/yardmaster.md"}) {
+	if !slices.Equal(files, []string{"binary", "roles/yardmaster.md"}) {
 		t.Fatalf("init wrote into the home: %v; want the yardmaster's role and the record of the yardr binary alone", files)
 	}
 	// The record names the yardr that ran init, here the test binary.
@@ -129,7 +123,7 @@ func TestInitHarnessClaude(t *testing.T) {
 		t.Fatalf("settings = %v", got)
 	}
 	// The yardmaster takes it from here; the commands are in init --help.
-	for _, s := range []string{"harness    claude", "naming Jo", "roles      " + filepath.Dir(prompt) + " (pack starter, the yard's default)", hereAt(home, "yardr daemon"), "\n  " + hereAt(home, "yardr chat") + "\n  " + hereAt(home, "yardr setup") + "\n"} {
+	for _, s := range []string{"harness    claude", "naming Jo", "roles      " + filepath.Dir(prompt) + " (the yard's own)", "frozen as written", hereAt(home, "yardr daemon"), "\n  " + hereAt(home, "yardr chat") + "\n  " + hereAt(home, "yardr setup") + "\n"} {
 		if !strings.Contains(out, s) {
 			t.Errorf("summary lacks %q:\n%s", s, out)
 		}
@@ -485,7 +479,7 @@ func TestInitOperatorDefaultsToUser(t *testing.T) {
 	if _, err := run(t, testApp(t, storetest.New(t), home, "USER=kim").rootCmd(), "init", "--harness", "claude"); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(filepath.Join(config.At(home).PackRoles("starter"), "yardmaster.md")); !bytes.Contains(b, []byte("bring to kim")) {
+	if b, _ := os.ReadFile(filepath.Join(config.At(home).Roles(), "yardmaster.md")); !bytes.Contains(b, []byte("bring to kim")) {
 		t.Fatalf("yardmaster.md does not name $USER:\n%s", b)
 	}
 }
@@ -679,7 +673,7 @@ func TestInitWithoutLoginName(t *testing.T) {
 	if err != nil || len(users) != 1 || users[0].Name != "operator" {
 		t.Fatalf("users = %+v, %v", users, err)
 	}
-	if b, _ := os.ReadFile(filepath.Join(config.At(home).PackRoles("starter"), "yardmaster.md")); !bytes.Contains(b, []byte("bring to operator")) {
+	if b, _ := os.ReadFile(filepath.Join(config.At(home).Roles(), "yardmaster.md")); !bytes.Contains(b, []byte("bring to operator")) {
 		t.Fatalf("yardmaster.md does not name the operator:\n%s", b)
 	}
 	if got := yardOperator(ctx, st); got != "operator" {
