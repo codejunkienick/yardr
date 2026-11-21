@@ -215,9 +215,31 @@ func cloneHost(raw string) string {
 	return u.Hostname()
 }
 
+// isSSHFetch says whether raw fetches over SSH: an ssh URL, or a
+// scp-like host:path with no scheme, a colon with no slash before it.
+// That is the same ambiguity git itself has for foo:bar, stated not
+// solved: a path with a colon in its first segment reads as SSH too.
+func isSSHFetch(raw string) bool {
+	s := strings.TrimSpace(raw)
+	if strings.Contains(s, "://") {
+		u, err := url.Parse(s)
+		return err == nil && strings.EqualFold(u.Scheme, "ssh")
+	}
+	colon := strings.IndexByte(s, ':')
+	if colon < 0 {
+		return false
+	}
+	slash := strings.IndexByte(s, '/')
+	return slash < 0 || slash > colon
+}
+
 // isLocalFetch says whether raw fetches from this machine: a file URL
-// or a path with no scheme.
+// or a path with no scheme. A scp-like host:path has no scheme but is
+// no local fetch: it goes over SSH.
 func isLocalFetch(raw string) bool {
+	if isSSHFetch(raw) {
+		return false
+	}
 	if !strings.Contains(raw, "://") {
 		return true
 	}
@@ -334,6 +356,8 @@ func (w *wtx) depotAddCard(run AskRun, asking bool) (AskRun, error) {
 	switch {
 	case found:
 		does = append(does, fmt.Sprintf("the clone answers with the credential of the source %s for https://%s: the carrying out wires the pack's helper into the depot's own git config alone, and no token stands in the card, the config or a log.", ps.Name, ps.Host))
+	case isSSHFetch(cloneURL):
+		does = append(does, "the clone goes over SSH as the yard's user with that user's own keys, and no source gives it a credential.")
 	case isLocalFetch(cloneURL):
 		does = append(does, "the clone is from this machine, and needs no credential.")
 	default:

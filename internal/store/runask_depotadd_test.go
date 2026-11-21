@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -118,6 +119,59 @@ func TestRunAskDepotAdd(t *testing.T) {
 	}
 	if got.Ask.Run.Test != "sh .yardr/test" {
 		t.Errorf("the ask carries the test %q", got.Ask.Run.Test)
+	}
+	// These rows keep each card's credential sentence aligned with its fetch.
+	if _, err := y.PutSource(y.ctx, "github.yaml", depotPushDecl, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(y.home, "sources"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(y.home, "sources", "github.env"), []byte("GITHUB_TOKEN=stand-in-token-7f3a\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ssh := "the clone goes over SSH as the yard's user with that user's own keys, and no source gives it a credential."
+	local := "the clone is from this machine, and needs no credential."
+	for i, c := range []struct {
+		fetch, display, does string // does is the card's credential sentence whole
+		isSSH, isLocal       bool   // the helpers' answers for the fetch
+		refuse               string // a refusal, when the ask is refused
+	}{
+		{fetch: "git@github.com:ada/web.git", display: "git@github.com:ada/web.git", does: ssh, isSSH: true},
+		{fetch: "github.com:ada/web.git", display: "github.com:ada/web.git", does: ssh, isSSH: true},
+		{fetch: "ssh://git.example.net/ada/web.git", display: "ssh://git.example.net/ada/web.git", does: ssh, isSSH: true},
+		{fetch: "foo:bar", display: "foo:bar", does: ssh, isSSH: true},
+		{fetch: "https://github.com/ada/web.git", display: "https://github.com/ada/web.git",
+			does: "the clone answers with the credential of the source github for https://github.com: the carrying out wires the pack's helper into the depot's own git config alone, and no token stands in the card, the config or a log."},
+		{fetch: "https://example.com/ada/web.git", display: "https://example.com/ada/web.git",
+			refuse: "no source gives git a credential for example.com"},
+		{fetch: "file:///repos/web.git", display: "file:///repos/web.git", does: local, isLocal: true},
+		{fetch: "/srv/repos/web.git", display: "/srv/repos/web.git", does: local, isLocal: true},
+		{fetch: "git://git.example.net/ada/web.git", display: "git://git.example.net/ada/web.git",
+			does: "no source gives git a credential for git://git.example.net/ada/web.git, so the clone goes with none: a repository that asks for one fails, and the card is filed again."},
+	} {
+		if got := isSSHFetch(c.fetch); got != c.isSSH {
+			t.Errorf("%s: isSSHFetch = %v, want %v", c.fetch, got, c.isSSH)
+		}
+		if got := isLocalFetch(c.fetch); got != c.isLocal {
+			t.Errorf("%s: isLocalFetch = %v, want %v", c.fetch, got, c.isLocal)
+		}
+		if got := cloneDisplay(c.fetch); got != c.display {
+			t.Errorf("%s: cloneDisplay = %q, want %q", c.fetch, got, c.display)
+		}
+		name := fmt.Sprintf("web%d", i)
+		ask := depotAddAsk("depot add "+name+" --clone "+c.fetch, "mckean", "")
+		if c.refuse != "" {
+			if _, err := y.AddAsk(y.ctx, y.bead, ask, "yardmaster"); err == nil || !strings.Contains(err.Error(), c.refuse) {
+				t.Errorf("%s = %v, want a refusal that says %q", c.fetch, err, c.refuse)
+			}
+			continue
+		}
+		seq := y.ask(t, ask, "yardmaster")
+		run := y.asked(t, seq).Ask.Run
+		if len(run.Does) != 3 || run.Does[2] != c.does {
+			t.Errorf("%s: the card's credential sentence is %q, want %q", c.fetch, run.Does, c.does)
+		}
 	}
 }
 
