@@ -195,6 +195,7 @@ func pasted(s string) tea.Msg {
 // The card of a secret ask ends in the key that types the value here and
 // the command that does in a terminal.
 func TestSecretCardNamesTheKeyAndTheCommand(t *testing.T) {
+	t.Parallel()
 	st, bead := secretYard(t)
 	seq := secretAsk(t, st, bead, "crm")
 	v := withAsks(t, st, "chief", 120, 40)
@@ -216,6 +217,7 @@ func TestSecretCardNamesTheKeyAndTheCommand(t *testing.T) {
 // secret ask: one with a question of another kind, another party's, and
 // the yard's row. No field opens: what is typed next is the line's.
 func TestNothingToGive(t *testing.T) {
+	t.Parallel()
 	st, bead := secretYard(t)
 	secretAsk(t, st, bead, "crm")
 	askBead(t, st, "recorder")
@@ -260,6 +262,7 @@ func TestNothingToGive(t *testing.T) {
 // value to the yard, which writes it to the source's file, and the view
 // shows the yard's line.
 func TestTypedSecretIsInNoFrame(t *testing.T) {
+	t.Parallel()
 	st, bead := shortYard(t)
 	ctx := context.Background()
 	seq := secretAsk(t, st, bead, "crm")
@@ -358,6 +361,7 @@ func TestTypedSecretIsInNoFrame(t *testing.T) {
 // before cards were weighed) goes straight to the value with no word, for
 // the yard to refuse as stale.
 func TestSecretGateIsTheNumberTypedBack(t *testing.T) {
+	t.Parallel()
 	st, bead := secretYard(t)
 	seq := secretAsk(t, st, bead, "crm")
 	g := &gives{API: st, fail: func(map[string]string) error { return errors.New("stopped here") }}
@@ -412,6 +416,7 @@ func TestSecretGateIsTheNumberTypedBack(t *testing.T) {
 // An ask for two names asks for one after the other and sends them
 // together; an empty one is not sent.
 func TestSecretOfTwoNames(t *testing.T) {
+	t.Parallel()
 	st, bead := secretYard(t)
 	seq := secretAsk(t, st, bead, "pair")
 	v := withAsks(t, st, "chief", 120, 40)
@@ -441,6 +446,7 @@ func TestSecretOfTwoNames(t *testing.T) {
 // shows the characters, not dots. Giving still writes the file and says the
 // names, never the value.
 func TestUnconcealedSecretIsTypedInTheClear(t *testing.T) {
+	t.Parallel()
 	st, bead := secretYard(t)
 	const gogFile = `name: gog
 base: https://gog.example.com
@@ -481,6 +487,7 @@ calls:
 // A refusal of the yard is shown in its words and without the value, and
 // the field is closed.
 func TestSecretRefusedIsShownWithoutTheValue(t *testing.T) {
+	t.Parallel()
 	st, bead := secretYard(t)
 	ctx := context.Background()
 	seq := secretAsk(t, st, bead, "crm")
@@ -524,6 +531,7 @@ func TestSecretRefusedIsShownWithoutTheValue(t *testing.T) {
 // that is written and not recorded is said in the yard's words, whole, in
 // a terminal narrower than they are.
 func TestSecretWithoutAnAnswer(t *testing.T) {
+	t.Parallel()
 	st, bead := secretYard(t)
 	seq := secretAsk(t, st, bead, "crm")
 	g := &gives{API: st, fail: func(map[string]string) error {
@@ -577,6 +585,7 @@ notify: { call: message, address: { param: user, env: PUSH_USER }, text: text }
 // the person's, and the yard's line afterwards names the command that
 // tells them through the source, not the check of a source's credential.
 func TestOwnAddressIsTypedInTheField(t *testing.T) {
+	t.Parallel()
 	st, bead := shortYard(t)
 	ctx := context.Background()
 	if _, err := st.PutSource(ctx, "push.yaml", pushFile, me); err != nil {
@@ -619,6 +628,7 @@ func TestOwnAddressIsTypedInTheField(t *testing.T) {
 // A login input is typed in the field with the waiting login named before
 // it, as a source's credential names its source.
 func TestSecretFieldNamesTheWaitingLogin(t *testing.T) {
+	t.Parallel()
 	s := &secretField{login: "claude-a1b2c3d4", env: []string{"INPUT"}, values: map[string]string{}}
 	if got := s.label(); got != "INPUT for the waiting login claude-a1b2c3d4  " {
 		t.Fatalf("label = %q", got)
@@ -628,6 +638,7 @@ func TestSecretFieldNamesTheWaitingLogin(t *testing.T) {
 // A Google sign-in is typed in the field with its account named before
 // it, as a waiting login names its login: the ask has no source to name.
 func TestSecretFieldNamesTheGoogleAccount(t *testing.T) {
+	t.Parallel()
 	s := &secretField{google: "ada@example.com", env: []string{"GOOGLE_CREDENTIALS"}, values: map[string]string{}}
 	if got := s.label(); got != "GOOGLE_CREDENTIALS for the Google account ada@example.com  " {
 		t.Fatalf("label = %q", got)

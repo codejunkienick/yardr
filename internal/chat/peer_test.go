@@ -77,6 +77,7 @@ func northMail(t *testing.T, own *store.Store, key, id, from, text string) {
 // the wide view and the folded one, and tab reaches them. A row says who
 // that is there, and what keeps the mail or its answer from arriving.
 func TestLinkedRows(t *testing.T) {
+	t.Parallel()
 	st, own, key := linkedYard(t)
 	v := open(t, st, "", 120, 24)
 	if got := v.m.Linked(); !slices.Equal(got, []string{"mckean@north", "yardmaster@north"}) {
@@ -144,6 +145,7 @@ func TestLinkedRows(t *testing.T) {
 // on its row until that is opened, and its text reaches the terminal as
 // letters only.
 func TestWriteToALinkedYard(t *testing.T) {
+	t.Parallel()
 	st, own, key := linkedYard(t)
 	ctx := context.Background()
 	allow(t, st, store.PeerAllow{Send: []string{"mail"}, Receive: []string{"mail"}, Expose: []string{me}})
@@ -240,6 +242,7 @@ func TestWriteToALinkedYard(t *testing.T) {
 // once it is taken back, the name has its row as any other of the linked
 // yard.
 func TestTrustedNameIsTheUsersConversation(t *testing.T) {
+	t.Parallel()
 	st, own, key := linkedYard(t)
 	ctx := context.Background()
 	_, err := st.AddUser(ctx, "mckean", "jo")
@@ -393,6 +396,7 @@ func carry(t *testing.T, from *store.Store, to, key string, into *store.Store, a
 // which before anything is typed. Mail the link does not carry is refused
 // in the store's words and written nowhere.
 func TestAnswerReachesWhoWroteLast(t *testing.T) {
+	t.Parallel()
 	st, own, key := linkedYard(t)
 	north, yardKey := northYard(t)
 	ctx := context.Background()
@@ -502,6 +506,7 @@ func TestAnswerReachesWhoWroteLast(t *testing.T) {
 // enter sends nothing and keeps the line, instead of writing to the user in
 // this yard what is an answer to the other.
 func TestNoAnswerBeforeTheConversationIsRead(t *testing.T) {
+	t.Parallel()
 	st, own, key := linkedYard(t)
 	ctx := context.Background()
 	_, err := st.AddUser(ctx, "mckean", "jo")
@@ -540,6 +545,7 @@ func TestNoAnswerBeforeTheConversationIsRead(t *testing.T) {
 // unread for the viewer, and what is typed in the row goes to the crew
 // member.
 func TestViewersTrustedNameIsInTheCrewMembersRow(t *testing.T) {
+	t.Parallel()
 	st, own, key := linkedYard(t)
 	ctx := context.Background()
 	said(t, own, key, true, me, "yardmaster")

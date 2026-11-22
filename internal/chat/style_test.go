@@ -2,6 +2,10 @@ package chat
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,7 +17,10 @@ import (
 
 // profile renders as a terminal of profile p on a dark or light background
 // does, for the rest of the test. A test's own output is no terminal, so
-// without it nothing is styled.
+// without it nothing is styled. It sets lipgloss's default renderer, which
+// every test in the package renders through, so a test that calls it is not
+// parallel: the runner finishes the sequential tests, each restoring the
+// renderer as it ends, before it resumes the first parallel one.
 func profile(t *testing.T, p termenv.Profile, dark bool) {
 	t.Helper()
 	was, wasDark := lipgloss.ColorProfile(), lipgloss.HasDarkBackground()
@@ -25,11 +32,54 @@ func profile(t *testing.T, p termenv.Profile, dark bool) {
 	lipgloss.SetHasDarkBackground(dark)
 }
 
+// A test that calls profile sets the renderer every other test renders
+// through, so it is not parallel and says why in a Sequential: comment: one
+// that went parallel would colour its neighbours' views, and only now and
+// then.
+func TestProfileTestsAreSequential(t *testing.T) {
+	t.Parallel()
+	files, err := filepath.Glob("*_test.go")
+	must(t, err)
+	fset := token.NewFileSet()
+	for _, name := range files {
+		f, err := parser.ParseFile(fset, name, nil, parser.ParseComments)
+		must(t, err)
+		for _, d := range f.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || !strings.HasPrefix(fn.Name.Name, "Test") {
+				continue
+			}
+			var calls, parallel, says bool
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if c, ok := n.(*ast.CallExpr); ok {
+					switch fun := c.Fun.(type) {
+					case *ast.Ident:
+						calls = calls || fun.Name == "profile"
+					case *ast.SelectorExpr:
+						parallel = parallel || fun.Sel.Name == "Parallel"
+					}
+				}
+				return true
+			})
+			for _, g := range f.Comments {
+				says = says || g.Pos() > fn.Body.Pos() && g.End() < fn.Body.End() && strings.HasPrefix(g.Text(), "Sequential:")
+			}
+			if calls && parallel {
+				t.Errorf("%s: %s calls profile and t.Parallel, and profile sets the renderer every test uses", name, fn.Name.Name)
+			}
+			if calls && !says {
+				t.Errorf("%s: %s calls profile and has no // Sequential: comment saying why it is not parallel", name, fn.Name.Name)
+			}
+		}
+	}
+}
+
 // Without colour (NO_COLOR, a terminal that has none: lipgloss renders
 // both as the Ascii profile) the view has no escape codes, and its text is
 // the coloured view's: colour adds nothing a reader of the text misses,
 // and moves nothing.
 func TestWithoutColour(t *testing.T) {
+	// Sequential: profile sets lipgloss's process-wide colour profile and background.
 	st := yard(t)
 	ctx := context.Background()
 	must(t, st.Mail(ctx, me, "landed", "recorder"))
@@ -66,6 +116,7 @@ func TestWithoutColour(t *testing.T) {
 
 // The keys' line reads as it did before its keys and words had styles.
 func TestKeysLine(t *testing.T) {
+	// Sequential: profile sets lipgloss's process-wide colour profile and background.
 	const want = "enter send  ^j new line  tab next member  pgup/pgdn scroll  ^g pane  ^c quit"
 	if Keys != want {
 		t.Fatalf("the keys' line is %q", Keys)
@@ -80,6 +131,7 @@ func TestKeysLine(t *testing.T) {
 // background: the states that need someone from those that do not, the
 // user's name from a crew member's, and the three ways a sent mail stands.
 func TestColoursTellApart(t *testing.T) {
+	// Sequential: profile sets lipgloss's process-wide colour profile and background.
 	blocked := yard(t)
 	must(t, blocked.CrewStatus(context.Background(), "chief", "blocked"))
 	rs, err := blocked.Crew(context.Background())

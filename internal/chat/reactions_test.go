@@ -8,6 +8,7 @@ import (
 // The parties' reactions stand under the mail, one a line, as the store
 // answers them and as the stream hands them.
 func TestReactionsShow(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	ctx := context.Background()
 	must(t, st.Mail(ctx, me, "the shed is painted", "chief"))

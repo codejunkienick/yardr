@@ -60,6 +60,7 @@ func (v *view) row(name string) string {
 // Selecting it shows the notifications, newest last, each with its bead's
 // id on a line of its own, and acknowledges them and not the mail.
 func TestYardRow(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	ctx := context.Background()
 	told(t, st)
@@ -154,6 +155,7 @@ func TestYardRow(t *testing.T) {
 }
 
 func TestYardRowDoesNotCollideWithCrewName(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	ctx := context.Background()
 	if _, err := st.PutCrew(ctx, store.CrewMember{Name: YardRow, Runner: "herdr", Config: map[string]any{"kind": "claude"}}, "jo"); err != nil {
@@ -169,6 +171,7 @@ func TestYardRowDoesNotCollideWithCrewName(t *testing.T) {
 // The yard's row has no line to type in and the keys that do something
 // there: what is typed goes nowhere, to no crew member and into no draft.
 func TestYardRowTakesNoAnswer(t *testing.T) {
+	t.Parallel()
 	for _, w := range []int{80, 140} {
 		st := yard(t)
 		told(t, st)
@@ -216,6 +219,7 @@ func TestYardRowTakesNoAnswer(t *testing.T) {
 // Without notifications the row says what would be here; a yard without
 // crew members has the row all the same, and tab reaches it.
 func TestYardRowEmpty(t *testing.T) {
+	t.Parallel()
 	v := open(t, yard(t), "chief", 120, 24)
 	if got := v.row(YardRow); got != "  yard" {
 		t.Fatalf("the yard's row without notifications is %q", got)
@@ -241,6 +245,7 @@ func TestYardRowEmpty(t *testing.T) {
 // in view first; one about no bead names its source, and what a source
 // wrote reaches the terminal as text only.
 func TestYardRowLines(t *testing.T) {
+	t.Parallel()
 	v := open(t, yard(t), "chief", 80, 16)
 	var notes []store.Notification
 	for i := range 30 {
@@ -286,6 +291,7 @@ func (noAck) AckUserNotifications(context.Context, string, uint64, string) error
 // Notifications that could not be marked read are said to be, and count
 // as unread again.
 func TestYardRowAckFails(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	told(t, st)
 	landed(t, st, "work")
@@ -300,6 +306,7 @@ func TestYardRowAckFails(t *testing.T) {
 // The yard's row reads the same with and without colour, and has colour
 // where a terminal has it.
 func TestYardRowWithoutColour(t *testing.T) {
+	// Sequential: profile sets lipgloss's process-wide colour profile and background.
 	st := yard(t)
 	told(t, st)
 	landed(t, st, "work")

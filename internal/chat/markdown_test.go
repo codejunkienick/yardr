@@ -27,6 +27,7 @@ func drawn(t *testing.T, text string, w int, want ...string) {
 // Each form as it is drawn in a terminal with colour, with the styles as
 // lipgloss renders them.
 func TestMarkdownForms(t *testing.T) {
+	// Sequential: profile sets lipgloss's process-wide colour profile and background.
 	profile(t, termenv.TrueColor, true)
 	c := func(s string) string { return look.code.Render(s) }
 	b := func(s string) string { return lipgloss.NewStyle().Bold(true).Render(s) }
@@ -114,6 +115,7 @@ var samples = []string{
 // A text with none of the forms is drawn exactly as it was before: the
 // lines wrap gives, at every width, with colour and without.
 func TestMarkdownLeavesTextAlone(t *testing.T) {
+	// Sequential: profile sets lipgloss's process-wide colour profile and background.
 	for _, p := range []termenv.Profile{termenv.TrueColor, termenv.Ascii} {
 		profile(t, p, true)
 		for _, text := range append(samples, strings.Join(samples, "\n")) {
@@ -129,6 +131,7 @@ func TestMarkdownLeavesTextAlone(t *testing.T) {
 // A line of code longer than the pane is broken where the row ends, the
 // rest marked: no word of it moves as a word of prose would.
 func TestMarkdownLongCode(t *testing.T) {
+	// Sequential: profile sets lipgloss's process-wide colour profile and background.
 	profile(t, termenv.TrueColor, true)
 	c := func(s string) string { return look.code.Render(s) }
 	more := look.faint.Render(codeMore)
@@ -153,6 +156,7 @@ const sample = "# Plan\n" +
 // line stay as written; a code block is told apart by its indentation, and
 // a list hangs as it does with colour.
 func TestMarkdownWithoutColour(t *testing.T) {
+	// Sequential: profile sets lipgloss's process-wide colour profile and background.
 	profile(t, termenv.Ascii, true)
 	drawn(t, sample, 34,
 		"  # Plan",
@@ -171,6 +175,7 @@ func TestMarkdownWithoutColour(t *testing.T) {
 // is the same whatever the terminal's colours: only the marks that colour
 // stands for are gone.
 func TestMarkdownWidths(t *testing.T) {
+	// Sequential: profile sets lipgloss's process-wide colour profile and background.
 	text := sample + "\n" + strings.Join(samples, "\n")
 	for w := 10; w <= 120; w++ {
 		profile(t, termenv.TrueColor, true)
@@ -201,6 +206,7 @@ func TestMarkdownWidths(t *testing.T) {
 // The view draws a crew member's mail so, in the wide view and the folded
 // one, and what is beside a styled row keeps its own look.
 func TestMarkdownInTheView(t *testing.T) {
+	// Sequential: profile sets lipgloss's process-wide colour profile and background.
 	st := yard(t)
 	must(t, st.Mail(context.Background(), me, sample, "chief"))
 	for _, w := range []int{60, 140} {
@@ -226,6 +232,7 @@ func TestMarkdownInTheView(t *testing.T) {
 // sequence in it, in a code block as anywhere, does not reach the
 // terminal, and a link is the characters it is.
 func TestMarkdownOfALinkedYard(t *testing.T) {
+	// Sequential: profile sets lipgloss's process-wide colour profile and background.
 	st, own, key := linkedYard(t)
 	allow(t, st, store.PeerAllow{Send: []string{"mail"}, Receive: []string{"mail"}, Expose: []string{me}})
 	v := open(t, st, "yardmaster@north", 120, 30)

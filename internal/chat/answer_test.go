@@ -98,6 +98,7 @@ func runAsk(t *testing.T, st store.API, bead string) uint64 {
 // AnswerAsk with the ask, the pick, the words, the user, and no word of
 // weight. The same through a store that records: the card reads answered.
 func TestAnswerAPick(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	id, seq := askBead(t, st, "chief")
 	r := &replies{API: st}
@@ -177,6 +178,7 @@ func TestAnswerAPick(t *testing.T) {
 // whatever they look like: "1" is a word here, since the field was opened
 // for words.
 func TestAnswerWithWords(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	id, seq := wordsAsk(t, st)
 	r := &replies{API: st}
@@ -205,6 +207,7 @@ func TestAnswerWithWords(t *testing.T) {
 // nothing, and the yard is not called. The number typed back is the word that
 // its person saw the weight (weighed).
 func TestAnswerARunAsk(t *testing.T) {
+	t.Parallel()
 	st, bead := secretYard(t)
 	seq := runAsk(t, st, bead)
 	r := &replies{API: st}
@@ -304,6 +307,7 @@ func answerPairingAsk(t *testing.T) {
 // cards print. A number that is none of them keeps the field, esc answers
 // nothing and calls nothing, and the ask chosen is the one answered.
 func TestAnswerWhichAsk(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	_, seq1 := askBead(t, st, "chief")
 	second, seq2 := askBead(t, st, "chief")
@@ -356,6 +360,7 @@ func TestAnswerWhichAsk(t *testing.T) {
 // field was open, and whatever else a store says. The view adds no check of
 // its own to them.
 func TestAnswerRefusedIsShown(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	ctx := context.Background()
 	id, seq := askBead(t, st, "chief")
@@ -397,6 +402,7 @@ func TestAnswerRefusedIsShown(t *testing.T) {
 // be answered, so it is answered; what the field leaves to others says where
 // they answer it.
 func TestNothingToAnswer(t *testing.T) {
+	t.Parallel()
 	st, bead := secretYard(t)
 	askBead(t, st, "recorder")
 	v := withAsks(t, st, "chief", 120, 40)
@@ -468,6 +474,7 @@ func TestNothingToAnswer(t *testing.T) {
 // the field is the line's no more than the view's: no binding of the textarea
 // holds it, and none of the view's other keys is it.
 func TestNumberInTheLineIsMail(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	ctx := context.Background()
 	askBead(t, st, "chief")
@@ -512,6 +519,7 @@ func TestNumberInTheLineIsMail(t *testing.T) {
 // client that is not yardr, or says is an operator's alone: AnswerAsk is a
 // call for any client, ApproveAsk the operator's.
 func TestAnswerStoreIsTheDocumentedAPI(t *testing.T) {
+	t.Parallel()
 	st := reflect.TypeOf((*AnswerStore)(nil)).Elem()
 	for i := range st.NumMethod() {
 		if name := st.Method(i).Name; rpc.Calls[name] == nil && rpc.OperatorCalls[name] == nil {

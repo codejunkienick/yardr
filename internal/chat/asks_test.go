@@ -55,6 +55,7 @@ func askBead(t *testing.T, st store.API, author string) (string, uint64) {
 // the key that answers it here before the terminal's command, and the
 // yard's own line where the view was given no way to answer.
 func TestConversationShowsAsks(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	ctx := context.Background()
 	id, seq := askBead(t, st, "chief")
@@ -85,6 +86,7 @@ func TestConversationShowsAsks(t *testing.T) {
 // An answer, a put-aside and a decline arrive with the stream and read as
 // they do in prime; an ask to someone else never shows.
 func TestConversationFollowsAsks(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	ctx := context.Background()
 	id, seq := askBead(t, st, "chief")
@@ -122,6 +124,7 @@ func TestConversationFollowsAsks(t *testing.T) {
 // A question answered from another yard reads marked as mail is: "(as
 // <user>)" where the name is trusted, the foreign line otherwise.
 func TestConversationMarksForeignAnswers(t *testing.T) {
+	t.Parallel()
 	st, _, _ := linkedYard(t)
 	ctx := context.Background()
 	if _, err := st.AddUser(ctx, "mckean", "jo"); err != nil {
@@ -165,6 +168,7 @@ func TestConversationMarksForeignAnswers(t *testing.T) {
 // conversation either: its later lines stand further in than any line the
 // yard prints, as in prime.
 func TestConversationShowsForgedQuestionDeeper(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	ctx := context.Background()
 	b, err := st.CreateBead(ctx, store.NewBead{Title: "the links"}, "yardmaster")
@@ -199,6 +203,7 @@ func TestConversationShowsForgedQuestionDeeper(t *testing.T) {
 // A card's long line continues under its own indent where it wraps, never
 // at the pane's left edge: the yard's block reads as one block.
 func TestConversationWrapsCardLinesUnderTheirIndent(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	ctx := context.Background()
 	b, err := st.CreateBead(ctx, store.NewBead{Title: "the links"}, "yardmaster")
@@ -241,6 +246,7 @@ func TestConversationWrapsCardLinesUnderTheirIndent(t *testing.T) {
 // at the yard's column on the row after: a card line's continuation stands
 // deeper than any line the yard prints, wherever the pane breaks it.
 func TestConversationCardContinuationStandsDeeperThanTheYard(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	ctx := context.Background()
 	b, err := st.CreateBead(ctx, store.NewBead{Title: "the links"}, "yardmaster")
@@ -279,6 +285,7 @@ func TestConversationCardContinuationStandsDeeperThanTheYard(t *testing.T) {
 // weight the yard gave the card and never words that look like it: a
 // routine card whose question begins with the mark is drawn as any question.
 func TestConversationDrawsWeightyCardsInAlarm(t *testing.T) {
+	// Sequential: profile sets lipgloss's process-wide colour profile and background.
 	st, bead := secretYard(t)
 	ctx := context.Background()
 	options := []store.AskOption{
@@ -382,6 +389,7 @@ func TestConversationDrawsWeightyCardsInAlarm(t *testing.T) {
 // AsksFor reads the user's asks on the yard's open beads, oldest first;
 // a closed bead's asks are done with.
 func TestAsksFor(t *testing.T) {
+	t.Parallel()
 	st := yard(t)
 	ctx := context.Background()
 	open, _ := askBead(t, st, "chief")
