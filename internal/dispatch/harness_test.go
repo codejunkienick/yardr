@@ -448,10 +448,32 @@ func TestHarnessErrorLines(t *testing.T) {
 		{"kimi", " 5-hour usage limit. Your quota will reset when the current", ""},
 		{"claude", "   Error: [provider.auth_error] 403 You've reached your", ""},
 		{"claude", "❯ Why did it say Not logged in?", ""},
+		{"agy", "⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 2h15m47s.", dispatch.ReasonRateLimited},
+		{"agy", "⚠ Individual quota reached.", dispatch.ReasonRateLimited},
+		{"agy", "⚠ Something went wrong. Please try again.", ""},
+		{"agy", "Error ID: abc123", ""},
+		{"agy", "⚠ The Individual quota reached its end yesterday.", ""},
+		{"agy", "> Individual quota reached is what it said.", ""},
 	} {
 		reason, line, ok := dispatch.HarnessError(tc.kind, "⏺ Reading the brief.\n"+tc.line+"\n\n❯ \n")
 		if reason != tc.want || ok != (tc.want != "") || (ok && line != strings.TrimSpace(tc.line)) {
 			t.Errorf("%s: %q: reason %q line %q, want %q", tc.kind, tc.line, reason, line, tc.want)
+		}
+	}
+	// The pane of event 235073, whole: agy stopped on its individual
+	// quota, herdr still calling it working, the typed nudges above the
+	// quota line and an Error ID line between it and the empty input.
+	// The scan from the bottom reaches the quota line before any message
+	// the agent took, so it matches; and the countdown ticks on every
+	// redraw, so a redrawn tail, its seconds moved on, matches as well.
+	if reason, line, ok := dispatch.HarnessError("agy", agyQuotaTail); reason != dispatch.ReasonRateLimited || !ok ||
+		line != agyQuotaLine {
+		t.Errorf("agy's quota pane: reason %q line %q found %t, want rate_limited with the quota line", reason, line, ok)
+	}
+	if ticked := strings.Replace(agyQuotaTail, "2h15m47s", "2h15m12s", 1); ticked != agyQuotaTail {
+		if reason, line, ok := dispatch.HarnessError("agy", ticked); reason != dispatch.ReasonRateLimited || !ok ||
+			!strings.HasPrefix(line, "⚠ Individual quota reached.") {
+			t.Errorf("agy's quota pane redrawn: reason %q line %q found %t, want rate_limited with the quota line", reason, line, ok)
 		}
 	}
 	const museStop = "◆ Usage limit reached\n│ This turn stopped because your usage limit was reached."
@@ -511,6 +533,22 @@ func TestHarnessErrorLines(t *testing.T) {
 		}
 	}
 }
+
+// agyQuotaLine is the line agy stopped on in event 235073 (21 Nov 2026):
+// an individual quota with its reset in its own words. agy has no limits
+// source, so the reset is read from this line (lineReset in harness.go).
+const agyQuotaLine = "⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 2h15m47s."
+
+// agyQuotaTail is that pane's end, whole: the nudges typed while it stood
+// above the quota line, an Error ID line between the quota line and the
+// empty input, and the status line under it.
+const agyQuotaTail = "> yardr: your bead is still in new: write your note and hand on, or say what blocks you.\n" +
+	agyQuotaLine + "\n" +
+	"Error ID: abc123\n" +
+	"────────────────────────────────────────\n" +
+	"> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)\n" +
+	"────────────────────────────────────────\n" +
+	"? for shortcuts                      auto · Gemini 4 Neon · medium"
 
 // The pane of the crew member brakeman (kimi, 60 columns) as herdr read it
 // on 6 Oct 2026: its harness had stopped on its usage limit half an hour

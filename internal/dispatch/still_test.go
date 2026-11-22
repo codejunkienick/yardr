@@ -3,6 +3,7 @@ package dispatch_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,6 +60,64 @@ func TestStillWorkingPaneCountsAsIdle(t *testing.T) {
 	must(t, d.Reconcile(ctx))
 	if n := len(eventKinds(t, s, b.ID, "session_idle")); n != 1 {
 		t.Fatalf("session_idle events = %d, want 1 once the pane moves", n)
+	}
+}
+
+// The session of event 235073 stood on agy's quota line while herdr
+// called it working: the pane stood still, so the still path counts it
+// idle, raises session_harness_error with the line's reset, keeps the
+// wait and model hold past the idle limit even if the countdown redraws,
+// and prompts at the wake.
+func TestAgyQuotaIsReportedWhileHerdrSaysWorking(t *testing.T) {
+	t.Parallel()
+	r := &retryRunner{agentRunner: &agentRunner{statusRunner: &statusRunner{
+		fakeRunner: &fakeRunner{dead: map[string]bool{}}, status: "working"}, worked: true}}
+	s, d, b, _, now := resetYardOf(t, r, map[string]any{
+		"kind": "agy", "still": "30ms", "idle": "30ms", "stall": "off", "model": "k3",
+	})
+	ctx := context.Background()
+	r.show("working", agyQuotaTail)
+	must(t, d.Reconcile(ctx)) // the pane stands, short of the still limit
+	if n := len(eventKinds(t, s, b.ID, "session_harness_error")); n != 0 {
+		t.Fatalf("session_harness_error before the still limit: %d", n)
+	}
+	*now = now.Add(31 * time.Millisecond)
+	must(t, d.Reconcile(ctx)) // still past the limit: the idle spell starts
+	resets := now.Add(2*time.Hour + 15*time.Minute + 47*time.Second)
+	wakes := resets.Add(time.Minute)
+	evs := eventKinds(t, s, b.ID, "session_harness_error")
+	if len(evs) != 1 || evs[0].Data["reason"] != dispatch.ReasonRateLimited || evs[0].Data["kind"] != "agy" ||
+		evs[0].Data["model"] != "k3" || evs[0].Data["line"] != agyQuotaLine || evs[0].Data["window"] != "Individual" ||
+		evs[0].Data["resets_at"] != resets.UTC().Format(time.RFC3339) || evs[0].Data["wakes_at"] != wakes.UTC().Format(time.RFC3339) {
+		t.Fatalf("session_harness_error = %v, want one, rate_limited, with agy's quota line and reset", evs)
+	}
+	if until, window, model, ok := dispatch.ResetWait(handleOfBead(t, s, b)); !ok || !until.Equal(wakes) || window != "Individual" || model != "k3" {
+		t.Fatalf("wait = %v %q %q %v, want until %v for Individual/k3", until, window, model, ok, wakes)
+	}
+
+	// Past the idle limit while herdr still calls it working: no
+	// session_idle, no nudge, no second error.
+	*now = now.Add(40 * time.Minute)
+	must(t, d.Reconcile(ctx))
+	if len(r.nudges) != 0 || len(eventKinds(t, s, b.ID, "session_idle")) != 0 || len(eventKinds(t, s, b.ID, "session_harness_error")) != 1 {
+		t.Fatalf("in the wait: typed %q, session_idle %d, harness errors %d; want silence",
+			r.nudges, len(eventKinds(t, s, b.ID, "session_idle")), len(eventKinds(t, s, b.ID, "session_harness_error")))
+	}
+
+	// A redrawn countdown while herdr still calls it working keeps the
+	// wait and model hold; once the redrawn pane stands past the wake,
+	// the agent is prompted.
+	ticked := strings.Replace(agyQuotaTail, "2h15m47s", "1h35m47s", 1)
+	r.show("working", ticked)
+	must(t, d.Reconcile(ctx))
+	if _, _, _, ok := dispatch.ResetWait(handleOfBead(t, s, b)); !ok {
+		t.Fatalf("wait cleared on countdown redraw: %v", handleOfBead(t, s, b))
+	}
+	*now = wakes.Add(time.Second)
+	must(t, d.Reconcile(ctx))
+	const agyResetLine = "yardr: the usage limit your harness stopped on (agy, Individual window) has reset. Go on where you stopped."
+	if len(r.nudges) != 1 || r.nudges[0] != agyResetLine {
+		t.Fatalf("typed %q at the wake, want %q once", r.nudges, agyResetLine)
 	}
 }
 

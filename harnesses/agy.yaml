@@ -56,6 +56,17 @@ marks:
   placeholder: "Auto mode: edits & safe commands auto-approved (shift+tab to cycle)"
   error: "└┃⏺⎿●■•▌│✗✘⚠!"
 
+# The one stop seen (21 Nov 2026, a pane herdr kept calling working):
+# "⚠ Individual quota reached. Please upgrade your subscription to
+# increase your limits. Resets in 2h15m47s." The ⚠ is one of
+# marks.error, taken off before a pattern is tried, and the words after
+# "Resets in" are the reset the daemon reads where no limits source
+# names one (internal/dispatch/harness.go: lineReset). No other agy
+# error line has been seen, so no other is listed.
+errors:
+  - reason: rate_limited
+    pattern: '^Individual quota reached'
+
 flags:
   model: --model
   # `agy --help` (1.5.14, 21 Nov 2026): "--effort  Reasoning effort for

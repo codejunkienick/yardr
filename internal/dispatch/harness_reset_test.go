@@ -197,6 +197,120 @@ func TestSessionAtItsUsageLimitIsPromptedWhenTheWindowHasReset(t *testing.T) {
 	}
 }
 
+// The 21 Nov case (event 235073): an agy session stops on its individual
+// quota, and no source of the yard answers for agy, so no window or reset
+// is known from a provider. The line itself names the reset, and it is
+// read from there: the yardmaster is told at once, with when yardr looks
+// again; the passes of the wait type nothing, count no idle spell and
+// ask nothing; at the wake the agent is prompted as one whose source
+// spoke.
+func TestAgySessionAtItsQuotaWaitsForTheResetInItsLine(t *testing.T) {
+	t.Parallel()
+	s, r, d, b, p, now := holdYard(t, "agy")
+	ctx := context.Background()
+	r.showBead(t, s, b, "idle", agyQuotaTail)
+	must(t, d.Reconcile(ctx))
+
+	evs := eventKinds(t, s, b.ID, "session_harness_error")
+	if len(evs) != 1 {
+		t.Fatalf("session_harness_error events = %d, want 1 at the stop", len(evs))
+	}
+	resets := now.Add(2*time.Hour + 15*time.Minute + 47*time.Second)
+	wakes := resets.Add(time.Minute)
+	data := evs[0].Data
+	hint, _ := data["hint"].(string)
+	if data["reason"] != dispatch.ReasonRateLimited || data["kind"] != "agy" || data["model"] != "k3" ||
+		data["line"] != agyQuotaLine || data["window"] != "Individual" ||
+		data["resets_at"] != resets.UTC().Format(time.RFC3339) || data["wakes_at"] != wakes.UTC().Format(time.RFC3339) ||
+		data["limits_unknown"] == nil ||
+		!strings.Contains(hint, "yardr asks again at ") ||
+		!strings.Contains(hint, "the group starts no further session with this model until then; ") {
+		t.Fatalf("data = %v, want rate_limited for agy with the line's reset, its wake and its model", data)
+	}
+	until, window, model, ok := dispatch.ResetWait(handleOfBead(t, s, b))
+	if !ok || !until.Equal(wakes) || window != "Individual" || model != "k3" {
+		t.Fatalf("the handle's wait = %v %q %q %v, want until %v for the line's window with k3", until, window, model, ok, wakes)
+	}
+
+	// A note written in the wait is not told either: its agent cannot
+	// read it.
+	_, err := s.AddNotedAs(ctx, b.ID, "read the review", "yardmaster", "")
+	must(t, err)
+
+	// The wait: nothing typed, nothing asked, no idle spell counted past the
+	// default 30m idle limit, by this daemon or its next.
+	*now = now.Add(40 * time.Minute)
+	must(t, d.Reconcile(ctx))
+	d2 := &dispatch.Dispatcher{Store: s, Runners: map[string]dispatch.Runner{"fake": r}, Backoff: time.Hour}
+	dispatch.SetClock(d2, func() time.Time { return *now })
+	must(t, d2.Reconcile(ctx))
+	if len(r.nudges) != 0 || len(p.asks()) != 0 ||
+		len(eventKinds(t, s, b.ID, "session_harness_error")) != 1 ||
+		len(eventKinds(t, s, b.ID, "session_idle")) != 0 {
+		t.Fatalf("in the wait: typed %q, asked %v, harness errors and idles told again; want the one event and silence",
+			r.nudges, p.asks())
+	}
+	if notes, err := s.Notes(ctx, b.ID); err != nil || len(notes) != 1 || notes[0].Told {
+		t.Fatalf("notes = %v, err = %v; want the note written in the wait queued, not told", notes, err)
+	}
+
+	// The wake: the agent, stopped mid-work, is told the limit has
+	// reset, once, and the wait is over.
+	*now = wakes.Add(time.Second)
+	must(t, d2.Reconcile(ctx))
+	const agyResetLine = "yardr: the usage limit your harness stopped on (agy, Individual window) has reset. Go on where you stopped."
+	if len(r.nudges) != 1 || r.nudges[0] != agyResetLine {
+		t.Fatalf("typed %q at the wake, want the reset line for an agent stopped mid-work, once", r.nudges)
+	}
+	if tries := eventKinds(t, s, b.ID, "session_harness_retry"); len(tries) != 1 ||
+		tries[0].Data["window"] != "Individual" || tries[0].Data["prompted"] != agyResetLine {
+		t.Fatalf("session_harness_retry events = %v, want one with the line's window", tries)
+	}
+	if _, _, _, waits := dispatch.ResetWait(handleOfBead(t, s, b)); waits {
+		t.Fatalf("the wait is still on the handle after the prompt: %v", handleOfBead(t, s, b))
+	}
+}
+
+// A quota line that names no reset, one whose reset no duration can be
+// read from, and one further off than yardr waits for: no wake is
+// planned, and the stop holds its model untimed, as a stop whose source
+// named no reset did before the line was read.
+func TestAgyQuotaWithNoReadableResetInItsLineHoldsUntimed(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, line string }{
+		{"no reset named", "⚠ Individual quota reached. Please upgrade your subscription to increase your limits."},
+		{"no duration read", "⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in a while."},
+		{"negative duration", "⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in -5m."},
+		{"reset past the wait", "⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 7h30m0s."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, r, d, b, _, now := holdYard(t, "agy")
+			ctx := context.Background()
+			r.showBead(t, s, b, "idle", strings.Replace(agyQuotaTail, agyQuotaLine, tc.line, 1))
+			must(t, d.Reconcile(ctx))
+			evs := eventKinds(t, s, b.ID, "session_harness_error")
+			if len(evs) != 1 {
+				t.Fatalf("session_harness_error events = %d, want 1 at the stop", len(evs))
+			}
+			data := evs[0].Data
+			hint, _ := data["hint"].(string)
+			if data["reason"] != dispatch.ReasonRateLimited || data["model"] != "k3" || data["wakes_at"] != nil ||
+				!strings.Contains(hint, "the group starts no further session with this model until this session ends or gets going; ") {
+				t.Fatalf("data = %v, want rate_limited with its model held and no wake", data)
+			}
+			h := handleOfBead(t, s, b)
+			if _, _, _, waits := dispatch.ResetWait(h); waits || h["harness_reset_model"] != "k3" {
+				t.Fatalf("handle = %v, want no reset wait and the model held untimed", h)
+			}
+			*now = now.Add(20 * time.Minute)
+			must(t, d.Reconcile(ctx))
+			if len(r.nudges) != 0 || len(eventKinds(t, s, b.ID, "session_idle")) != 0 {
+				t.Fatalf("in the hold: typed %q, session_idle told; want nothing typed and no idle told", r.nudges)
+			}
+		})
+	}
+}
+
 // A session of a group with the provider setting is asked as the provider
 // at the wake too: the window open, it is prompted.
 func TestProviderSessionIsAskedAsTheProviderAtTheWake(t *testing.T) {
@@ -298,6 +412,46 @@ func TestUsageLimitThatResetsLaterThanYardrWaitsFor(t *testing.T) {
 			}
 		})
 	}
+	// A reset a limits source gave is never replaced or shortened by a
+	// duration on the matched line, whether within the wait cap or past it.
+	const kimiWithLineReset = "Error: [provider.rate_limit] 429 Too many requests. Resets in 5m.\n> "
+	t.Run("source reset beats a line reset", func(t *testing.T) {
+		ctx := context.Background()
+		for _, tc := range []struct {
+			name    string
+			resetIn time.Duration
+			label   string
+			wantW   bool
+		}{
+			{"within cap", 42 * time.Minute, "5h", true},
+			{"past cap", 80 * time.Hour, "Weekly", false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				s, r, d, b, p, now := resetYard(t, nil)
+				resets := now.Add(tc.resetIn)
+				p.say(`{"provider":"Kimi","windows":[{"label":"` + tc.label + `","used_percent":100,"resets_at":"` + resets.Format(time.RFC3339) + `"}]}`)
+				primeLimits(t, d, "kimi", "", nil)
+				r.show("idle", kimiWithLineReset)
+				must(t, d.Reconcile(ctx))
+				evs := eventKinds(t, s, b.ID, "session_harness_error")
+				if len(evs) != 1 {
+					t.Fatalf("session_harness_error events = %d, want 1", len(evs))
+				}
+				data := evs[0].Data
+				if data["window"] != tc.label || data["resets_at"] != resets.UTC().Format(time.RFC3339) {
+					t.Fatalf("data = %v, want source window %q and reset %s, not the line's 5m", data, tc.label, resets.UTC().Format(time.RFC3339))
+				}
+				if tc.wantW {
+					wantWake := resets.Add(time.Minute).UTC().Format(time.RFC3339)
+					if data["wakes_at"] != wantWake {
+						t.Fatalf("wakes_at = %v, want source's %s", data["wakes_at"], wantWake)
+					}
+				} else if data["wakes_at"] != nil || handleOfBead(t, s, b)["harness_reset_at"] != nil {
+					t.Fatalf("weekly source reset got a wake from the line: data=%v handle=%v", data, handleOfBead(t, s, b))
+				}
+			})
+		}
+	})
 }
 
 // At the wake the window is still used up, and the provider gives a later

@@ -1181,6 +1181,7 @@ before the general one:
 | `kimi` | `at_capacity` | `^Error: \[provider\.overloaded\]` |
 | `kimi` | `not_logged_in` | `^Error: \[(auth\.(login_required\|token_missing\|token_unauthorized)\|provider\.auth_error)\]` |
 | `pi` | `other` | `^Error: Retry failed after \d+ attempts` |
+| `agy` | `rate_limited` | `^Individual quota reached` |
 | `muse` | `rate_limited` | `^Usage limit reached$` |
 | `muse` | `rate_limited` | `^This turn stopped because your usage limit was reached\.$` |
 | `muse` | `other` | `^model failed:` |
@@ -1291,7 +1292,7 @@ table — and the event carries the answer:
 | `limits` | the report: `source`, `provider`, `asked_at`, `plan` when given, and `windows`, each with its `label` and what the provider said of `used_percent`, `target_percent`, `resets_at`, `used` and `limit` (as `yardr limits --json` prints it) |
 | `window` | the label of the window the agent waits for: of those used up (`used_percent` at 100, or `used` at `limit`) the one that resets last. A window that counts for a single model (`model` in the answer, like Claude's `Weekly Fable`) is passed over for any other that is used up, since the yard does not know the agent's model and an agent that stopped on the 5h window should not be told it waits for a weekly window of another model's, days off; it is the window only when no other is used up. Absent when none is used up |
 | `resets_at` | when that window resets, RFC 3339 in UTC. Absent when the provider gave no time |
-| `limits_unknown` | in place of the three: why nothing is known, in a line. No source of the yard answers for the kind (or names the `provider` setting, where one is set), or its command gave no answer (its exit status or the timeout with the end of its stderr, or what of its output is no report) |
+| `limits_unknown` | in place of the three: why nothing is known, in a line. No source of the yard answers for the kind (or names the `provider` setting, where one is set), or its command gave no answer (its exit status or the timeout with the end of its stderr, or what of its output is no report). Where the error line itself names a reset as a duration (`Resets in 2h15m47s`), `window` and `resets_at` stand beside it, read from the line, without `limits` |
 
 The `hint` begins with it in words, the time as the daemon's clock reads it,
 and names the harness's kind even where the daemon asked for a `provider`
@@ -1306,6 +1307,14 @@ window of kimi's subscription is used up, says aiquokka: …`): the limit the
 harness hit is then one the provider does not report, another account's, one
 model's or a short rate limit, and the yardmaster reads the pane as before.
 With `limits_unknown` the hint explains the stop without a window or reset.
+
+A line may name its own reset where no source gives one: agy has no
+limits source, and its quota line carries `Resets in 2h15m47s`, which the
+daemon reads as a duration from the line that matched. The event then
+carries that reset's `window` and `resets_at` and is waited for as a
+source's would be; a reset a source did give is never replaced or
+shortened by the line's. A line whose reset cannot be read as a
+duration, or that names none, keeps the untimed hold below.
 
 When the source names no used-up window or gives no reset time, the
 observed usage stop still holds the session's model in its group. The
@@ -1364,9 +1373,9 @@ hours away, the daemon comes back for it:
 | how often | 3 prompts in a session's life, counted together with the tries for `at_capacity`. An agent that has had them is told of as above, with `tries` and no `wakes_at` |
 
 Not waited for, and left to the yardmaster as before: a reset more than 6
-hours away (a weekly window), a window whose reset the source does not say,
-a limit of which no source knows, an agent with text in its input at the
-wake, and a runner that cannot type into a pane.
+hours away (a weekly window), a window whose reset neither the source nor
+the line says, a limit whose line names no readable reset, an agent with
+text in its input at the wake, and a runner that cannot type into a pane.
 
 **Two minutes after the prompt the daemon looks once at what it did.** A
 prompt typed is not a prompt taken:

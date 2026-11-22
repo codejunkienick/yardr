@@ -165,7 +165,7 @@ func TestHarnessListAndShow(t *testing.T) {
 		`permission "always approve": --dangerously-skip-permissions`,
 		"none named: --model takes any id",
 		"no source known: nothing is recorded and nothing compared",
-		"none known: nothing is reported, and session_idle with its tail is what there is")
+		"rate_limited  ^Individual quota reached")
 	wantText(t, ask(0, "harness", "show", "claude"), "claude  Claude Code, by Anthropic  (harnesses/claude.yaml, version 1)")
 	wantText(t, ask(0, "harness", "show", "pi"), "effort:     none: a group of this kind takes no effort=", "Models it offers", "none named: --model takes any id",
 		"pi  pi  (harnesses/pi.yaml, version 1)", `other   ^Error: Retry failed after \d+ attempts`)

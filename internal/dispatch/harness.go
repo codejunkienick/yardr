@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"yardr.dev/yardr/internal/agents"
+	"yardr.dev/yardr/internal/limits"
 	"yardr.dev/yardr/internal/store"
 )
 
@@ -274,6 +275,54 @@ func (d *Dispatcher) harnessLooks(s *store.Session, idleFor time.Duration) bool 
 	return idleFor <= harnessLook && s.Handle[HarnessErrorKey] == nil
 }
 
+// lineReset reads the reset a rate_limited line itself names, where it
+// names one as a Go duration ("Resets in 2h15m47s", the trailing stop of
+// the sentence trimmed): a window labelled for the line that carried it,
+// resetting that long after now. A harness whose subscription no source
+// of the yard answers for (agy has none, and none is wanted) can still
+// say when its window opens, in its own words, and a stop that waits for
+// it is prompted as one whose source spoke. The words are the harness's,
+// so no kind is named here: any rate_limited line that carries such a
+// reset rides the same path. Nothing here keys on the line's text being
+// the same twice — agy's countdown ticks on every redraw — since the
+// line matched on this pass is the only one read.
+func lineReset(line string, now time.Time) (*limits.Window, bool) {
+	_, after, found := strings.Cut(line, "Resets in ")
+	if !found {
+		return nil, false
+	}
+	fields := strings.Fields(after)
+	if len(fields) == 0 {
+		return nil, false
+	}
+	dur, err := time.ParseDuration(strings.TrimSuffix(fields[0], "."))
+	if err != nil || dur < 0 {
+		return nil, false
+	}
+	at := now.Add(dur)
+	return &limits.Window{Label: "Individual", ResetsAt: &at}, true
+}
+
+// resetWakeFor is resetWake for a stop whose source named w, with the
+// reset the matched line names where the source named none: w's own
+// reset, where it gave one, is the provider's word and is never replaced
+// or shortened by the line's. A line that carries no readable reset
+// leaves the wait as it was, untimed. The window and reset the line gave
+// are the event's as a source's are (data window, resets_at).
+func (d *Dispatcher) resetWakeFor(r Runner, handle map[string]any, w *limits.Window, line string, data map[string]any) (wake map[string]any, said string) {
+	wake, said = d.resetWake(r, handle, w, data)
+	if wake != nil || (w != nil && w.ResetsAt != nil) {
+		return wake, said
+	}
+	lw, ok := lineReset(line, d.now())
+	if !ok {
+		return wake, said
+	}
+	data["window"] = lw.Label
+	data["resets_at"] = lw.ResetsAt.UTC().Format(time.RFC3339)
+	return d.resetWake(r, handle, lw, data)
+}
+
 // harnessError raises session_harness_error for the idle session s when
 // tail, the end of its pane, shows a known error of its harness, once per
 // idle spell. One that is at_capacity is first left to harnessRetry, and
@@ -313,7 +362,7 @@ func (d *Dispatcher) harnessError(ctx context.Context, r Runner, s *store.Sessio
 	if reason == ReasonRateLimited {
 		said, w := d.sessionLimits(ctx, g, kind, provider, data)
 		var wakes string
-		wake, wakes = d.resetWake(r, s.Handle, w, data)
+		wake, wakes = d.resetWakeFor(r, s.Handle, w, line, data)
 		if wake != nil || w == nil || w.ResetsAt == nil {
 			// An unreported reset does not make the stopped model available.
 			if wake == nil {
@@ -574,7 +623,7 @@ func (d *Dispatcher) crewHarnessError(ctx context.Context, runner Runner, s *mem
 			// judges it, so no group's env is joined.
 			said, w := d.harnessLimits(ctx, kind, provider, nil, data)
 			var wakes string
-			wake, wakes = d.resetWake(runner, s.st.Handle, w, data)
+			wake, wakes = d.resetWakeFor(runner, s.st.Handle, w, line, data)
 			data["hint"] = said + wakes + data["hint"].(string)
 			if tries := handleInt(s.st.Handle[harnessRetries]); tries > 0 {
 				data["tries"] = tries

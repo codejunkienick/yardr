@@ -39,6 +39,18 @@ const museStopped = "◆ model failed: server_error: The model failed to generat
 	"───…\n" +
 	"    muse-spark-1.3 · max · /private/tmp/lyr0/work · Auto-review"
 
+// The pane of an agy builder on 21 Nov 2026, stopped on its individual
+// quota while herdr kept calling it working (event 235073): the typed
+// nudges above the quota line, an Error ID line between it and the
+// empty input.
+const agyStopped = "> yardr: your bead is still in new: write your note and hand on, or say what blocks you.\n" +
+	"⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 2h15m47s.\n" +
+	"Error ID: abc123\n" +
+	"────────────────────────────────────────\n" +
+	"> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)\n" +
+	"────────────────────────────────────────\n" +
+	"? for shortcuts                      auto · Gemini 4 Neon · medium"
+
 // herdr has a Kimi agent's status from Kimi's hooks alone, and a turn that
 // ends on an error tells it nothing: the Kimi builder above was "working"
 // to herdr until a person prompted it, so no check that reads an idle
@@ -129,6 +141,19 @@ esac`)}
 		later("w1:p3")
 	}
 	status("working", "muse's historical error has stood for stopStill")
+
+	// The agy builder herdr kept calling working: its quota line ends
+	// the pane, and once it has stood, the agent is idle, for the
+	// dispatcher to raise session_harness_error over.
+	const agy = `{"result":{"agent":{"agent":"agy","agent_status":"working"}}}`
+	handle = map[string]any{"agent": "yardr-agy9-new", "pane": "w1:p4", "kind": "agy"}
+	show(agyStopped, agy)
+	status("working", "agy's quota has just been printed")
+	later("w1:p4")
+	status("idle", "agy's quota has stood for stopStill")
+	// It gets going: the pane moves and the stop is forgotten.
+	show("• Working on the review.\n", agy)
+	status("working", "agy is going again")
 
 	// A pane with no error at its end is never remembered.
 	handle = map[string]any{"agent": "yardr-embp-new", "pane": "w1:p2", "kind": "kimi"}
