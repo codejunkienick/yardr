@@ -82,6 +82,88 @@ func TestGoogleYardSignInByCard(t *testing.T) {
 	}
 }
 
+// Where the yard's one Google source words the sign-in, a paste card
+// for its account speaks those words above its field, a person's form
+// included; an unrelated source's sign-in neither leaks onto nor hides
+// it, and where no Google source or several differing ones stand, the
+// card reads as it did.
+func TestGooglePasteCardSpeaksThePacksSignIn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	y, _ := runYard(t)
+	plain := y.asked(t, y.ask(t, googleAsk("yard@example.com", "mckean"), "yardmaster"))
+	if sec := plain.Ask.Secret; sec == nil || len(sec.LoginLines()) != 0 {
+		t.Fatalf("a paste with no pack behind it shows a sign-in: %+v", sec)
+	}
+	const otherFile = `name: acme
+base: https://acme.example.com
+credential:
+  env: ACME_TOKEN
+  header: "Authorization: Bearer {credential}"
+  mint: [ACME_ACCOUNT]
+  login:
+    run: [acme auth login, acme auth export]
+    paste: paste the export into the acme card
+calls:
+  ping: { kind: read, request: { method: GET, path: /me } }
+`
+	if _, err := y.PutSource(y.ctx, "acme.yaml", otherFile, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	withOther := y.asked(t, y.ask(t, googleAsk("yard@example.com", "mckean"), "yardmaster"))
+	if sec := withOther.Ask.Secret; sec == nil || len(sec.LoginLines()) != 0 {
+		t.Fatalf("a non-Google source's sign-in leaked onto a Google paste card: %+v", sec)
+	}
+	const mailFile = `name: google-mail
+base: https://gmail.googleapis.com
+credential:
+  env: GOOGLE_TOKEN
+  header: "Authorization: Bearer {credential}"
+  mint: [GOOGLE_ACCOUNT]
+  login:
+    run: [gws auth login -s gmail, gws auth export --unmasked]
+    paste: paste the whole output of gws auth export --unmasked into the Google sign-in card for this account
+calls:
+  search: { kind: read, request: { method: GET, path: /messages } }
+`
+	if _, err := y.PutSource(y.ctx, "google-mail.yaml", mailFile, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	got := y.asked(t, y.ask(t, googleAsk("yard@example.com", "mckean"), "yardmaster"))
+	lines := strings.Join(got.Lines(), "\n")
+	for _, want := range []string{
+		"the pack's sign-in, shown only and never run by the yard: run gws auth login -s gmail; then gws auth export --unmasked",
+		"the pack's sign-in: paste the whole output of gws auth export --unmasked into the Google sign-in card for this account",
+	} {
+		if !strings.Contains(lines, want) {
+			t.Errorf("the paste card lacks %q:\n%s", want, lines)
+		}
+	}
+	person := y.asked(t, y.ask(t, googlePersonAsk("ada@example.com"), "yardmaster"))
+	if sec := person.Ask.Secret; sec == nil || len(sec.LoginLines()) != 2 || !sec.GoogleSignInOf("ada") {
+		t.Errorf("a person's paste card = %+v", sec)
+	}
+	const driveFile = `name: google-drive
+base: https://www.googleapis.com
+credential:
+  env: GOOGLE_TOKEN
+  header: "Authorization: Bearer {credential}"
+  mint: [GOOGLE_ACCOUNT]
+  login:
+    run: [gws auth login -s drive, gws auth export --unmasked]
+    paste: paste the whole output of gws auth export --unmasked into the Google sign-in card for this account
+calls:
+  files: { kind: read, request: { method: GET, path: /drive/v3/files } }
+`
+	if _, err := y.PutSource(y.ctx, "google-drive.yaml", driveFile, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	both := y.asked(t, y.ask(t, googleAsk("yard@example.com", "mckean"), "yardmaster"))
+	if sec := both.Ask.Secret; sec == nil || len(sec.LoginLines()) != 0 {
+		t.Errorf("two differing Google packs still picked a sign-in: %+v", sec)
+	}
+}
+
 // A person's Google sign-in is asked of them alone and given by them
 // alone: the operator can neither be asked for it nor give it.
 func TestGooglePersonSignInByCard(t *testing.T) {

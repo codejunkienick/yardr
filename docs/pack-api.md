@@ -373,6 +373,18 @@ it. Both are read for every pack, as every key of a declaration is
 ([A declaration added by hand](#a-declaration-added-by-hand)): a
 declaration carries no API number of its own.
 
+A credential may name its pack's sign-in under `login`: `run`, the
+shell lines a person runs on their own machine to make the login, in
+order, and `paste`, the one line that says what to paste into which
+card. The setup card shows them at its account step and a secret card
+for the same credential shows them above its field, marked as the
+pack's and as shown only: the yard never runs them, and the value
+still travels the secret path alone, so no new transport comes with
+them. A credential without `login` shows neither card any differently.
+It is read for every pack the same way, as every key of a declaration
+is, and refused beside `credential.url: true`, whose credential is
+its address and signs nobody in.
+
 ## What each number added
 
 The last heading here is the highest API this yardr reads.

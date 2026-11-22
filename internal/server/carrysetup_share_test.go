@@ -99,6 +99,55 @@ func TestCarrySetupPickPointsEnvFile(t *testing.T) {
 	}
 }
 
+// The embedded google-mail pack's own setup card leads with its
+// sign-in at the account step: the login and export for Gmail, and
+// what to paste into which card, as its declaration words them.
+func TestCarrySetupGoogleMailShowsItsSignIn(t *testing.T) {
+	ctx := context.Background()
+	st, _, bead := carryYard(t)
+	to := store.Grantee{Crew: "yardmaster"}
+	seq, err := st.AddAsk(ctx, bead, setupAskOf("google-mail", to), "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes, err := st.Notes(ctx, bead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var setup *store.AskSetup
+	for _, r := range store.ResolveAsks(notes, time.Now()) {
+		if r.Note.Seq == seq {
+			setup = r.Ask.Setup
+		}
+	}
+	if setup == nil {
+		t.Fatalf("ask %d sets up no pack", seq)
+	}
+	joined := strings.Join(setup.Does, "\n")
+	for _, want := range []string{
+		"the pack's sign-in, shown only and never run by the yard: run gws auth login -s gmail; then gws auth export --unmasked",
+		"paste the whole output of gws auth export --unmasked into the Google sign-in card for this account",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("google-mail's setup card lacks %q:\n%s", want, joined)
+		}
+	}
+	accountAt := setupLineIndex(setup.Does, "the account GOOGLE_ACCOUNT")
+	signAt := setupLineIndex(setup.Does, "the pack's sign-in")
+	if accountAt < 0 || signAt != accountAt+1 {
+		t.Errorf("the sign-in stands at %d, the account at %d, want it right after the account:\n%s", signAt, accountAt, joined)
+	}
+}
+
+func setupLineIndex(lines []string, prefix string) int {
+	for i, line := range lines {
+		if strings.HasPrefix(line, prefix) {
+			return i
+		}
+	}
+	return -1
+}
+
 // The first setup of google-docs writes one typed value to its first
 // source's default and points both sources at it, the file named on the
 // card.

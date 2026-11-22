@@ -865,6 +865,35 @@ func TestHomeNeedsASecretAsk(t *testing.T) {
 			t.Errorf("the secret ask's row lacks %q: %s", want, s)
 		}
 	}
+	if strings.Contains(html.UnescapeString(s), "pack's sign-in") {
+		t.Errorf("a secret ask without login shows a sign-in: %s", s)
+	}
+	// A credential with login steps renders them above Reach on both Home
+	// (Waiting.Card) and the bead page (BeadPage.Card).
+	f2, _ := talkFixture(t, "mckean")
+	ctx := context.Background()
+	must(t, f2.st.PutDepot(ctx, store.Depot{Name: "home", Base: "origin/main"}, "me"))
+	must(t, f2.st.SetSetting(ctx, "operator", "mckean", "me"))
+	must(t, func() error {
+		_, err := f2.st.PutSource(ctx, "gog.yaml",
+			"name: gog\nbase: https://gog.example.com\ncredential:\n  env: GOG_TOKEN\n  mint: [GOG_ACCOUNT]\n  login:\n    run: [gog auth login, gog auth export]\n    paste: paste the export into the sign-in card for this account\ncalls:\n  ping: { kind: read, request: { method: GET, path: /me } }\n", "mckean")
+		return err
+	}())
+	b2 := askBead(t, f2, "the gog account", "new")
+	askOn(t, f2, b2.ID, store.Ask{Question: "Your gog account", To: "mckean",
+		Context: []string{"Sign in first."}, Secret: &store.AskSecret{Source: "gog"}})
+	for _, page := range []struct{ name, body string }{
+		{"home", html.UnescapeString(answerSection(t, f2.get("/").body))},
+		{"bead", html.UnescapeString(f2.get("/beads/" + b2.ID).body)},
+	} {
+		runWant := "the pack's sign-in, shown only and never run by the yard: run gog auth login; then gog auth export"
+		pasteWant := "the pack's sign-in: paste the export into the sign-in card for this account"
+		reachWant := "lands in: the source's env_file, or sources/gog.env in the yard's home when it has none"
+		runAt, pasteAt, reachAt := strings.Index(page.body, runWant), strings.Index(page.body, pasteWant), strings.Index(page.body, reachWant)
+		if runAt < 0 || pasteAt < 0 || reachAt < 0 || !(runAt < pasteAt && pasteAt < reachAt) {
+			t.Errorf("%s page lacks the pack's sign-in above Reach (run=%d paste=%d reach=%d):\n%s", page.name, runAt, pasteAt, reachAt, page.body)
+		}
+	}
 }
 
 // A question beginning with the yard's mark reads as the asker's words

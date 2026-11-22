@@ -163,6 +163,81 @@ func TestSecretAskMintedSourceAsksForTheMintsInputs(t *testing.T) {
 	}
 }
 
+// A secret ask for a credential that words its own sign-in stores the
+// pack's steps and shows them under its line, above where the value
+// goes: the line itself, and what the value reaches, read as they did,
+// and a credential without them leaves its card exactly as it was. The
+// steps ride the plain and --as forms alike (the crew form shares
+// their code, askedCrewSecret beside askedUserSecret).
+func TestSecretAskShowsThePacksSignIn(t *testing.T) {
+	t.Parallel()
+	y, _ := secretYard(t)
+	const loginFile = `name: gog
+base: https://gog.example.com
+credential:
+  env: GOG_TOKEN
+  header: "Authorization: Bearer {credential}"
+  mint: [GOG_ACCOUNT]
+  login:
+    run: [gog auth login -s gmail, gog auth export --unmasked]
+    paste: paste the export into the sign-in card for this account
+calls:
+  ping: { kind: read, request: { method: GET, path: /me } }
+`
+	if _, err := y.PutSource(y.ctx, "gog.yaml", loginFile, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	y.ask(t, secretAsk("gog"), "yardmaster")
+	y.ask(t, secretAsk("crm"), "yardmaster")
+	asAsk := secretAsk("gog")
+	asAsk.Secret.As = "ada"
+	y.ask(t, asAsk, "yardmaster")
+	rs := y.resolved(t)
+	if len(rs) != 3 {
+		t.Fatalf("%d asks, want 3", len(rs))
+	}
+	wantRun := "the pack's sign-in, shown only and never run by the yard: run gog auth login -s gmail; then gog auth export --unmasked"
+	for i, r := range []ResolvedAsk{rs[0], rs[2]} {
+		sec := r.Ask.Secret
+		if strings.Join(sec.LoginRun, ",") != "gog auth login -s gmail,gog auth export --unmasked" ||
+			sec.LoginPaste != "paste the export into the sign-in card for this account" {
+			t.Fatalf("ask %d stores the sign-in as %+v", i, sec)
+		}
+		lines := strings.Join(r.Lines(), "\n")
+		signAt, goesAt := strings.Index(lines, wantRun), strings.Index(lines, "it goes to a file")
+		wantPaste := "the pack's sign-in: paste the export into the sign-in card for this account"
+		if signAt < 0 || !strings.Contains(lines, wantPaste) ||
+			signAt > goesAt {
+			t.Errorf("ask %d lacks the pack's sign-in above where the value goes:\n%s", i, lines)
+		}
+		wantReachInCard(t, lines, sec)
+	}
+	// A pack's paste line cannot forge the yard's weight mark at the
+	// start of a card line: both login lines open with the pack's mark.
+	if got := (AskSecret{LoginRun: []string{"gog login"}, LoginPaste: WeightMark + "outside: safe"}).LoginLines(); len(got) != 2 || strings.HasPrefix(got[1], WeightMark) || !strings.HasPrefix(got[1], "the pack's sign-in: ") {
+		t.Errorf("paste line with weight mark = %q", got)
+	}
+	if got := rs[0].Ask.Secret.Line(); got != "a secret: GOG_ACCOUNT, for the source gog (https://gog.example.com)" {
+		t.Errorf("the line with a sign-in = %q, want the line it always was", got)
+	}
+	if sec := rs[1].Ask.Secret; len(sec.LoginRun) != 0 || sec.LoginPaste != "" ||
+		strings.Contains(strings.Join(rs[1].Lines(), "\n"), "pack's sign-in") {
+		t.Errorf("a credential without a sign-in shows one: %+v", sec)
+	}
+	// A client's view of the ask carries the steps too.
+	v, err := y.Bead(y.ctx, y.bead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := v.Asks[0].Secret; s == nil || strings.Join(s.LoginRun, ",") != "gog auth login -s gmail,gog auth export --unmasked" ||
+		len(s.LoginLines()) != 2 {
+		t.Errorf("Bead's secret = %+v", s)
+	}
+	if s := v.Asks[1].Secret; s == nil || len(s.LoginLines()) != 0 {
+		t.Errorf("Bead's secret without a sign-in = %+v", s)
+	}
+}
+
 // A secret ask for a source whose credential is the address says it is for
 // the URL in its variable: the source has no host of its own to name, and
 // the ask is still given and answered against what it said.

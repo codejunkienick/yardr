@@ -51,6 +51,16 @@ credential:
   # over it. Drop it where the operator sets the mint command instead,
   # or with mint above where the token does not expire.
   mint_command: [acme/mint]
+  # Drop login where signing in needs no words of the pack's: it is the
+  # pack's sign-in for this credential, the shell lines a person runs on
+  # their own machine to make the login, in order, and the one line that
+  # says what to paste into which card. The setup card shows them at its
+  # account step and a secret card for this credential shows them above
+  # its field, marked as the pack's and as shown only: the yard never
+  # runs them, and the value still travels the secret path alone.
+  # login:
+  #   run: [acme auth login, acme auth export]
+  #   paste: paste the whole export into the sign-in card for this account
 
 # ---- what it sends us ----------------------------------------------------
 # Drop the whole key where the service sends nothing in: without it the

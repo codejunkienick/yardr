@@ -677,9 +677,11 @@ func TestOwnLoginInputIsTheWholeAsk(t *testing.T) {
 
 // The ask for a member's own Google sign-in is taken for no other: the
 // predicate compares the ask with the form the yard stores for it, but
-// for the scopes the asker narrowed, so a field that AskSecret gains
-// later is refused until this test is taught it, and not taken because
-// nothing looked at the field.
+// for the scopes the asker narrowed and the sign-in steps the yard
+// copied from the pack's declaration (shown only, and no part of where
+// the value goes), so a field that AskSecret gains later is refused
+// until this test is taught it, and not taken because nothing looked
+// at the field.
 func TestGoogleSignInOfIsTheWholeAsk(t *testing.T) {
 	valid := store.AskSecret{Env: []string{"GOOGLE_CREDENTIALS"}, Google: "sam@example.com", As: "sam", Scopes: []string{"gmail", "drive"}}
 	if !valid.GoogleSignInOf("sam") {
@@ -688,7 +690,7 @@ func TestGoogleSignInOfIsTheWholeAsk(t *testing.T) {
 	typ := reflect.TypeOf(valid)
 	for i := range typ.NumField() {
 		name := typ.Field(i).Name
-		if name == "Env" || name == "Google" || name == "As" || name == "Scopes" {
+		if name == "Env" || name == "Google" || name == "As" || name == "Scopes" || name == "LoginRun" || name == "LoginPaste" {
 			continue
 		}
 		bad := valid

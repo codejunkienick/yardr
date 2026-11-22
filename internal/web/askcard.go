@@ -96,6 +96,10 @@ type AskCard struct {
 type cardSecret struct {
 	Line string
 	Env  []string
+	// Login are the pack's sign-in steps for the credential, in the
+	// yard's lines (store.AskSecret.LoginLines): the card says them
+	// above its field, before anyone gives it.
+	Login []string
 	// Reach is what the value reaches, in the yard's short lines
 	// (store.AskSecret.Reach): the card says it before anyone gives it.
 	Reach []string
@@ -251,7 +255,7 @@ func (p BeadPage) Card(a store.BeadAsk) AskCard {
 	out.Give = a.Secret != nil && p.site.Gate && p.site.Operator &&
 		!(a.Secret.Google != "" && a.Secret.As != "")
 	if a.Secret != nil {
-		out.Secret = &cardSecret{Line: a.Secret.Line, Env: a.Secret.Env, Reach: a.Secret.Reach}
+		out.Secret = &cardSecret{Line: a.Secret.Line, Env: a.Secret.Env, Login: a.Secret.LoginLines(), Reach: a.Secret.Reach}
 	}
 	if a.Run != nil {
 		out.Run = &cardRun{Command: a.Run.Command, Does: a.Run.Does, Back: a.Run.Back, BackBy: a.Run.BackBy, Ask: a.Run.Ask}
@@ -294,7 +298,7 @@ func (w Waiting) Card(r Reason) AskCard {
 	out.Says = r.RunCommand != "" || r.SetupPack != ""
 	out.Approve = (r.RunCommand != "" || r.SetupPack != "") && approvable(r.Weight, false, w.site.Gate, w.site.Operator, r.Own && r.To == w.As)
 	if r.SecretLine != "" {
-		out.Secret = &cardSecret{Line: r.SecretLine, Reach: r.SecretReach}
+		out.Secret = &cardSecret{Line: r.SecretLine, Login: r.SecretLogin, Reach: r.SecretReach}
 	}
 	if r.RunCommand != "" {
 		out.Run = &cardRun{Command: r.RunCommand, Does: r.RunDoes, Back: r.RunBack, BackBy: r.RunBackBy, Ask: r.RunAsk}

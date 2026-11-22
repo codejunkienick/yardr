@@ -145,6 +145,7 @@ type Reason struct {
 	To          string            `json:"-"`
 	Options     []store.AskOption `json:"-"`
 	SecretLine  string            `json:"-"`
+	SecretLogin []string          `json:"-"`
 	SecretReach []string          `json:"-"`
 	RunCommand  string            `json:"-"`
 	RunDoes     []string          `json:"-"`
@@ -670,7 +671,7 @@ func askReason(r store.ResolvedAsk) Reason {
 			(store.IsUserKeyRun(argv) && argv[2] == r.Ask.To)
 	case r.Ask.Secret != nil:
 		// The yard's line, never the asker's words: what is asked for.
-		out.SecretLine, out.SecretReach = r.Ask.Secret.Line(), r.Ask.Secret.Reach()
+		out.SecretLine, out.SecretLogin, out.SecretReach = r.Ask.Secret.Line(), r.Ask.Secret.LoginLines(), r.Ask.Secret.Reach()
 	case r.Ask.Setup != nil:
 		out.SetupPack = r.Ask.Setup.Pack
 		out.SetupDoes = r.Ask.Setup.Does

@@ -160,6 +160,21 @@ type Credential struct {
 	// then names no base and a call has no path of its own; no error,
 	// event or command it is handed to repeats any of the address.
 	URL bool `json:"url,omitempty"`
+	// Login are the pack's own sign-in steps for this credential, nil
+	// where the file names none: the shell lines that make the login, in
+	// order, and what to paste where. A card shows them as the pack's
+	// words and never runs them; the value itself still travels the
+	// secret path, so they carry no secret and name no value.
+	Login *CredentialLogin `json:"login,omitempty"`
+}
+
+// CredentialLogin is a credential's sign-in as its pack words it: the
+// shell lines a person runs on their own machine to make the login, in
+// order, and the one line that says what to paste into which card. The
+// yard shows both and runs neither.
+type CredentialLogin struct {
+	Run   []string `json:"run"`
+	Paste string   `json:"paste"`
 }
 
 // Minted reports whether the credential may be minted (nil-safe): the file names the variables a mint takes.

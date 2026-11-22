@@ -85,6 +85,9 @@ credential:
       secret: false               # an address, asked in the clear
       bound: true                 # one holder: the yard or one user, never both
   mint_command: [google-mint]       # the file beside this one; the source's own mint_command wins
+  login:
+    run: ["gws auth login -s docs,slides", "gws auth export --unmasked"]
+    paste: paste the whole output of gws auth export --unmasked into the Google sign-in card for this account, and give no other card the export
 calls:
   doc:
     kind: read

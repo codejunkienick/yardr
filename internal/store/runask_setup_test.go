@@ -279,6 +279,50 @@ func TestSetupCardShowsDeclarationMintAccountAndPresets(t *testing.T) {
 			t.Errorf("the terminal card lacks %q:\n%s", want, lines)
 		}
 	}
+	// A credential that words its own sign-in shows the pack's steps at
+	// the account step, after the account line and before the grants,
+	// and every other line of the card reads exactly as the same pack
+	// without them.
+	plainDoes := append([]string{}, setup.Does...)
+	y2, _ := runYard(t)
+	loginPack := setupMailPack()
+	loginPack.sources[0].text = strings.Replace(setupDecl, "  mint_command: [setup-mint]\n",
+		"  mint_command: [setup-mint]\n  login:\n    run: [setup-mint login, setup-mint export]\n    paste: paste the export into the sign-in card for this account\n", 1)
+	y2.setSetupPack(loginPack)
+	got2 := y2.asked(t, y2.ask(t, setupAsk(), "yardmaster"))
+	does2 := got2.Ask.Setup.Does
+	var kept []string
+	accountAt, grantsAt := -1, -1
+	for i, line := range does2 {
+		switch {
+		case strings.HasPrefix(line, "the account "):
+			accountAt = i
+			kept = append(kept, line)
+		case strings.HasPrefix(line, "grants to "):
+			grantsAt = i
+			kept = append(kept, line)
+		case strings.Contains(line, "pack's sign-in") || strings.Contains(line, "sign-in card for this account"):
+		default:
+			kept = append(kept, line)
+		}
+	}
+	joined2 := strings.Join(does2, "\n")
+	for _, want := range []string{
+		"the pack's sign-in, shown only and never run by the yard: run setup-mint login; then setup-mint export",
+		"paste the export into the sign-in card for this account",
+	} {
+		if !strings.Contains(joined2, want) {
+			t.Errorf("the setup card lacks the pack's sign-in %q:\n%s", want, joined2)
+		}
+	}
+	if accountAt < 0 || grantsAt < 0 || len(does2) != len(plainDoes)+2 ||
+		does2[accountAt+1] == "" || !strings.Contains(does2[accountAt+1], "pack's sign-in") || grantsAt != accountAt+3 {
+		t.Errorf("the sign-in stands at account %d, grants %d, of %d lines, want right after the account:\n%s", accountAt, grantsAt, len(does2), joined2)
+	}
+	if keptNorm, plainNorm := strings.ReplaceAll(strings.Join(kept, "\n"), y2.home, "<home>"),
+		strings.ReplaceAll(strings.Join(plainDoes, "\n"), y.home, "<home>"); keptNorm != plainNorm {
+		t.Errorf("a credential without login reads differently:\nwithout:\n%s\nwith, steps out:\n%s", plainNorm, keptNorm)
+	}
 	setupAskSourceBase(t)
 	setupAskHost(t)
 }

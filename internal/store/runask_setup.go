@@ -947,7 +947,7 @@ func (w *wtx) setupDoes(pack string, reading *PackReading, carried []AskSource, 
 		return nil, err
 	}
 	does = append(does, hostDoes...)
-	does = append(does, setupAccountLine(account, file, given, missing, candidates))
+	does = append(does, setupAccountDoes(decls, carried, account, file, given, missing, candidates)...)
 	does = append(does, fmt.Sprintf("grants to %s — pick one:", granteesWord(to)))
 	for i := range does {
 		does[i] = safeSourceCardLine(does[i])

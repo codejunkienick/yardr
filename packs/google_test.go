@@ -156,6 +156,18 @@ func TestGoogleDeclarations(t *testing.T) {
 			!reflect.DeepEqual(d.Credential.Mint, []string{"GOOGLE_ACCOUNT"}) {
 			t.Errorf("%s: credential = %+v", file, d.Credential)
 		}
+		loginRun := map[string][]string{
+			"google-mail.yaml":     {"gws auth login -s gmail", "gws auth export --unmasked"},
+			"google-drive.yaml":    {"gws auth login -s drive", "gws auth export --unmasked"},
+			"google-docs.yaml":     {"gws auth login -s docs,slides", "gws auth export --unmasked"},
+			"google-slides.yaml":   {"gws auth login -s docs,slides", "gws auth export --unmasked"},
+			"google-calendar.yaml": {"gws auth login -s calendar", "gws auth export --unmasked"},
+		}
+		if d.Credential == nil || d.Credential.Login == nil || !reflect.DeepEqual(d.Credential.Login.Run, loginRun[file]) ||
+			!strings.Contains(d.Credential.Login.Paste, "gws auth export --unmasked") ||
+			!strings.Contains(d.Credential.Login.Paste, "Google sign-in card") {
+			t.Errorf("%s: login = %+v, want the pack's login and export for its services", file, d.Credential.Login)
+		}
 		if d.Idempotency != "" {
 			t.Errorf("%s: idempotency %q: no call below takes a key", file, d.Idempotency)
 		}

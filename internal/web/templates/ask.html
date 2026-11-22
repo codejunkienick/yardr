@@ -52,6 +52,9 @@
   {{- end}}
   {{- with .Secret}}
   <p>{{.Line}}</p>
+  {{- range .Login}}
+  <p class="entry-note">{{.}}</p>
+  {{- end}}
   {{- range .Reach}}
   <p class="entry-note">{{.}}</p>
   {{- end}}

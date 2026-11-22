@@ -387,7 +387,7 @@ func (r *reader) hook(e entry) *Hook {
 // the hook card asks the operator for, and how a retry tells what
 // stands already. That the calls are there and are an update and a
 // read, and that the parameters are their own, is checked with the
-// calls read (hookRegisterCheck in declaration.go), since hook may
+// calls read (hookRegisterCheck in declaration_parse.go), since hook may
 // stand before calls in the file.
 func (r *reader) hookRegister(e entry) *HookRegister {
 	reg := &HookRegister{}

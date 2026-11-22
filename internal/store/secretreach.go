@@ -105,7 +105,8 @@ func (s AskSecret) ReachGiven() []string {
 }
 
 // cardLines are the lines a card of the secret ask s carries under Line,
-// without the margin: where its value goes, in the words that suit what it
+// without the margin: the pack's sign-in steps where its credential
+// declares them, where its value goes, in the words that suit what it
 // is, and for a value kept in a file its Reach.
 func (s AskSecret) cardLines() []string {
 	switch {
@@ -114,5 +115,7 @@ func (s AskSecret) cardLines() []string {
 	case s.Login != "":
 		return []string{"it goes to the waiting login only; it is kept nowhere, and no agent is shown it"}
 	}
-	return append([]string{"it goes to a file only the yard's server reads; no agent is shown it"}, s.Reach()...)
+	lines := s.LoginLines()
+	lines = append(lines, "it goes to a file only the yard's server reads; no agent is shown it")
+	return append(lines, s.Reach()...)
 }

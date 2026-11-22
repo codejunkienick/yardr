@@ -102,6 +102,14 @@ type AskSecret struct {
 	// any other secret. It is kept on the ask because the views render an
 	// ask from its note alone, as Host is.
 	Concealed *bool `json:"concealed,omitempty"`
+	// LoginRun and LoginPaste are the sign-in steps the source's
+	// credential declares (credential.login), copied at the ask so the
+	// card speaks the pack's exact commands above its field: the shell
+	// lines in order, and what to paste where. They are shown only and
+	// never run, and are absent where the credential declares none, so
+	// such a card reads exactly as it did.
+	LoginRun   []string `json:"login_run,omitempty"`
+	LoginPaste string   `json:"login_paste,omitempty"`
 }
 
 // Names are the variables asked for, in words.
@@ -188,8 +196,12 @@ type SecretAsked struct {
 	// Google is the Google account whose sign-in is asked for; absent on any other secret.
 	Google string   `json:"google,omitempty"`
 	Scopes []string `json:"scopes,omitempty"`
-	Reach  []string `json:"reach,omitempty"`
-	Line   string   `json:"line"`
+	// LoginRun and LoginPaste are the credential's sign-in steps, as
+	// AskSecret's: absent where it declares none.
+	LoginRun   []string `json:"login_run,omitempty"`
+	LoginPaste string   `json:"login_paste,omitempty"`
+	Reach      []string `json:"reach,omitempty"`
+	Line       string   `json:"line"`
 }
 
 // asked is the secret of the ask a as a client shows it, nil for an ask
@@ -198,7 +210,7 @@ func (a Ask) asked() *SecretAsked {
 	if a.Secret == nil {
 		return nil
 	}
-	return &SecretAsked{Source: a.Secret.Source, Env: a.Secret.Env, User: a.Secret.User, Crew: a.Secret.Crew, As: a.Secret.As, Login: a.Secret.Login, Hook: a.Secret.Hook, Harness: a.Secret.Harness, Google: a.Secret.Google, Scopes: a.Secret.Scopes, Reach: a.Secret.Reach(), Line: a.Secret.Line()}
+	return &SecretAsked{Source: a.Secret.Source, Env: a.Secret.Env, User: a.Secret.User, Crew: a.Secret.Crew, As: a.Secret.As, Login: a.Secret.Login, Hook: a.Secret.Hook, Harness: a.Secret.Harness, Google: a.Secret.Google, Scopes: a.Secret.Scopes, LoginRun: a.Secret.LoginRun, LoginPaste: a.Secret.LoginPaste, Reach: a.Secret.Reach(), Line: a.Secret.Line()}
 }
 
 // concealed is the ask's concealment as a client shows it: false where the
@@ -329,7 +341,7 @@ func (w *wtx) askedSecret(sec AskSecret, to string) (*AskSecret, error) {
 	case !ops.is(to):
 		return nil, fmt.Errorf("a secret is %s to give (%s): setting a source's credential is theirs alone, so %s cannot be asked for one", ops.article(), ops, to)
 	}
-	return &AskSecret{Source: d.Name, Env: env, Host: sourceHost(d), Concealed: concealedAsk(d, env)}, nil
+	return withLogin(&AskSecret{Source: d.Name, Env: env, Host: sourceHost(d), Concealed: concealedAsk(d, env)}, d), nil
 }
 
 // hookSecretEnv is the one name a hook's signing secret is given under:
@@ -454,11 +466,13 @@ func (w *wtx) askedLogin(sec AskSecret, to string) (*AskSecret, error) {
 // user and nothing else: the form askedGoogle stores for a person's own
 // account, the account and the one name the export is given under with
 // As the user, and no other destination of AskSecret beside it. The
-// scopes are the asker's narrowing, so any of googleServices stands;
-// the whole of the rest is compared, as OperatorLoginInput compares
-// its form, so a field AskSecret gains later makes an ask not this one
-// until this says it is. It is the form the listener takes from a
-// member's own device down the link (rpc.UserServer.memberGoogle).
+// scopes are the asker's narrowing, so any of googleServices stands,
+// and the sign-in steps are the yard's copies of the pack's, so any of
+// them stands too; the whole of the rest is compared, as
+// OperatorLoginInput compares its form, so a field AskSecret gains
+// later makes an ask not this one until this says it is. It is the
+// form the listener takes from a member's own device down the link
+// (rpc.UserServer.memberGoogle).
 func (s AskSecret) GoogleSignInOf(user string) bool {
 	if user == "" || s.Google == "" || len(s.Scopes) == 0 {
 		return false
@@ -468,7 +482,7 @@ func (s AskSecret) GoogleSignInOf(user string) bool {
 			return false
 		}
 	}
-	return reflect.DeepEqual(s, AskSecret{Env: []string{googleCredentialsEnv}, Google: s.Google, As: user, Scopes: s.Scopes})
+	return reflect.DeepEqual(s, AskSecret{Env: []string{googleCredentialsEnv}, Google: s.Google, As: user, Scopes: s.Scopes, LoginRun: s.LoginRun, LoginPaste: s.LoginPaste})
 }
 
 // OperatorLoginInput reports whether the ask is for the input of the
@@ -612,7 +626,7 @@ func (w *wtx) askedCrewSecret(d *source.Declaration, crew string, env []string, 
 	case !ops.is(to):
 		return nil, fmt.Errorf("a secret is %s to give (%s): giving a crew member's credential is theirs alone, so %s cannot be asked for one", ops.article(), ops, to)
 	}
-	return &AskSecret{Source: d.Name, Env: names, Host: sourceHost(d), Crew: crew, Concealed: concealedAsk(d, names)}, nil
+	return withLogin(&AskSecret{Source: d.Name, Env: names, Host: sourceHost(d), Crew: crew, Concealed: concealedAsk(d, names)}, d), nil
 }
 
 // askedUserSecret checks an ask for the user's own credential in the
@@ -652,7 +666,7 @@ func (w *wtx) askedUserSecret(d *source.Declaration, user string, env []string, 
 		}
 		return nil, fmt.Errorf("%s: a call made as them reads it, so %s cannot be asked for it", whose, to)
 	}
-	return &AskSecret{Source: d.Name, Env: names, Host: sourceHost(d), As: user, Concealed: concealedAsk(d, names)}, nil
+	return withLogin(&AskSecret{Source: d.Name, Env: names, Host: sourceHost(d), As: user, Concealed: concealedAsk(d, names)}, d), nil
 }
 
 // askedGoogle checks an ask for the pasted sign-in of the Google
@@ -711,7 +725,7 @@ func (w *wtx) askedGoogle(sec AskSecret, to string) (*AskSecret, error) {
 		case !ops.is(to):
 			return nil, fmt.Errorf("a secret is %s to give (%s): giving the yard's Google sign-in is theirs alone, so %s cannot be asked for one", ops.article(), ops, to)
 		}
-		return &AskSecret{Google: account, Env: []string{googleCredentialsEnv}, Scopes: scopes}, nil
+		return withLoginSteps(&AskSecret{Google: account, Env: []string{googleCredentialsEnv}, Scopes: scopes}, w.googleLogin()), nil
 	}
 	if _, err := getUser(w.Tx, as); err != nil {
 		return nil, fmt.Errorf("a Google sign-in is asked for a user of the yard (yardr user list): %w", err)
@@ -719,5 +733,5 @@ func (w *wtx) askedGoogle(sec AskSecret, to string) (*AskSecret, error) {
 	if to != as {
 		return nil, fmt.Errorf("%s's Google sign-in for %s is theirs to give alone, the operator included: its paste holds their refresh token, so %s cannot be asked for it", as, account, to)
 	}
-	return &AskSecret{Google: account, As: as, Env: []string{googleCredentialsEnv}, Scopes: scopes}, nil
+	return withLoginSteps(&AskSecret{Google: account, As: as, Env: []string{googleCredentialsEnv}, Scopes: scopes}, w.googleLogin()), nil
 }

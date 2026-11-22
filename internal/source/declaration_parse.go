@@ -621,8 +621,8 @@ func hasDots(path string) bool {
 
 func (r *reader) credential(e entry) *Credential {
 	c, has := &Credential{}, false
-	var update, mint, mintCommand, header, inPath *entry
-	for _, f := range r.entries(e.v, e.path, "env", "update_env", "header", "mint", "mint_command", "in_path", "url") {
+	var update, mint, mintCommand, header, inPath, login *entry
+	for _, f := range r.entries(e.v, e.path, "env", "update_env", "header", "mint", "mint_command", "in_path", "url", "login") {
 		switch f.key {
 		case "env":
 			has = true
@@ -662,6 +662,9 @@ func (r *reader) credential(e entry) *Credential {
 			if v, ok := r.boolean(f.v, f.path); ok {
 				c.URL = v
 			}
+		case "login":
+			login = &f
+			c.Login = r.credentialLogin(f)
 		case "header":
 			header = &f
 			s, ok := r.str(f.v, f.path)
@@ -691,7 +694,7 @@ func (r *reader) credential(e entry) *Credential {
 		for _, no := range []struct {
 			e    *entry
 			what string
-		}{{header, "sent in a header"}, {inPath, "put in a path"}, {mint, "minted"}, {update, "given a second variable for updates"}} {
+		}{{header, "sent in a header"}, {inPath, "put in a path"}, {mint, "minted"}, {update, "given a second variable for updates"}, {login, "given sign-in steps"}} {
 			if no.e != nil && (no.e != inPath || c.InPath) {
 				r.errf(no.e.k, no.e.path, "the credential is the address every call goes to (url: true), and is not %s", no.what)
 			}
@@ -719,6 +722,65 @@ func (r *reader) credential(e entry) *Credential {
 		c.MintCommand = nil
 	}
 	return c
+}
+
+// credentialLogin reads a credential's sign-in steps: the shell lines
+// that make the login, in order, and the one line that says what to
+// paste where. Each is the pack's words for a person to run and read on
+// their own machine, so each stands on one line, and the yard shows
+// them and never runs them: a line with a break in it could forge
+// another line of the card that shows it.
+func (r *reader) credentialLogin(e entry) *CredentialLogin {
+	login := &CredentialLogin{}
+	var run, paste *entry
+	for _, f := range r.entries(e.v, e.path, "run", "paste") {
+		switch f.key {
+		case "run":
+			run = &f
+			if f.v.Kind != yaml.SequenceNode || len(f.v.Content) == 0 {
+				r.errf(f.v, f.path, "want a list of one or more shell lines, in order, got %s", describe(f.v))
+				continue
+			}
+			for _, c := range f.v.Content {
+				s, ok := r.str(c, f.path)
+				if !ok {
+					continue
+				}
+				if strings.TrimSpace(s) == "" || !oneLine(s) {
+					r.errf(c, f.path, "a sign-in line is one non-blank line: it is shown on a card, never run by the yard")
+					continue
+				}
+				login.Run = append(login.Run, s)
+			}
+		case "paste":
+			paste = &f
+			if s, ok := r.str(f.v, f.path); ok {
+				if strings.TrimSpace(s) == "" || !oneLine(s) {
+					r.errf(f.v, f.path, "what to paste is one non-blank line: it is shown on a card")
+				} else {
+					login.Paste = s
+				}
+			}
+		}
+	}
+	if e.v.Kind == yaml.MappingNode {
+		if run == nil {
+			r.errf(e.v, join(e.path, "run"), "missing: the shell lines that make the login, in order")
+		}
+		if paste == nil {
+			r.errf(e.v, join(e.path, "paste"), "missing: what to paste where, in one line")
+		}
+	}
+	if len(login.Run) == 0 || login.Paste == "" {
+		return nil
+	}
+	return login
+}
+
+// oneLine reports whether s stands on one line: no break, tab or other
+// control in it, as a header is held to (credential's header above).
+func oneLine(s string) bool {
+	return !strings.ContainsFunc(s, func(c rune) bool { return c < ' ' || c == 0x7f })
 }
 
 // mintNames reads the names of the variables that together select a minted

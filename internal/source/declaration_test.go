@@ -1249,6 +1249,59 @@ func TestParseCredentialMintSecretFalse(t *testing.T) {
 	}
 }
 
+// A credential may word its own sign-in: the shell lines that make the
+// login, in order, and what to paste where. What is refused is a key
+// the map does not know, either half missing, no line at all, a line
+// that is not one line, and steps beside a credential that is its
+// address. A file without them keeps a nil Login.
+func TestParseCredentialLogin(t *testing.T) {
+	withLogin := strings.Replace(crm, `  header: "Authorization: Bearer {credential}"`,
+		"  header: \"Authorization: Bearer {credential}\"\n  login:\n    run: [crm auth login, crm auth export]\n    paste: paste the export into the sign-in card for this account", 1)
+	d, err := Parse("crm.yaml", []byte(withLogin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Credential.Login == nil || strings.Join(d.Credential.Login.Run, ",") != "crm auth login,crm auth export" ||
+		d.Credential.Login.Paste != "paste the export into the sign-in card for this account" {
+		t.Fatalf("login = %+v", d.Credential.Login)
+	}
+	raw, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var again Declaration
+	if err := json.Unmarshal(raw, &again); err != nil || again.Credential.Login == nil ||
+		again.Credential.Login.Paste != d.Credential.Login.Paste {
+		t.Fatalf("round trip = %+v, %v", again.Credential, err)
+	}
+	plain, err := Parse("crm.yaml", []byte(crm))
+	if err != nil || plain.Credential.Login != nil {
+		t.Fatalf("a file without login = %+v, %v", plain.Credential, err)
+	}
+	for name, tc := range map[string]struct{ text, want string }{
+		"unknown login key":                   {strings.Replace(withLogin, "    paste:", "    past:", 1), "credential.login.past: unknown key (known here: run, paste)"},
+		"unknown credential key beside login": {strings.Replace(withLogin, "  login:", "  logn:", 1), "credential.logn: unknown key"},
+		"no run":                              {strings.Replace(withLogin, "    run: [crm auth login, crm auth export]\n", "", 1), "credential.login.run: missing: the shell lines"},
+		"no paste":                            {strings.Replace(withLogin, "    paste: paste the export into the sign-in card for this account\n", "", 1), "credential.login.paste: missing: what to paste where"},
+		"empty run":                           {strings.Replace(withLogin, "run: [crm auth login, crm auth export]", "run: []", 1), "credential.login.run: want a list of one or more"},
+		"run no list":                         {strings.Replace(withLogin, "run: [crm auth login, crm auth export]", "run: crm auth login", 1), "credential.login.run: want a list of one or more"},
+		"paste two lines": {strings.Replace(withLogin, "paste the export into the sign-in card for this account",
+			`"paste the export\ninto the card"`, 1), "credential.login.paste: what to paste is one non-blank line"},
+		"run line two lines": {strings.Replace(withLogin, "crm auth login", `"crm auth\nlogin"`, 1), "credential.login.run: a sign-in line is one non-blank line"},
+		"blank paste":        {strings.Replace(withLogin, "paste the export into the sign-in card for this account", `"   "`, 1), "credential.login.paste: what to paste is one non-blank line"},
+		"blank run line":     {strings.Replace(withLogin, "crm auth login", `"   "`, 1), "credential.login.run: a sign-in line is one non-blank line"},
+	} {
+		_, err := Parse("f", []byte(tc.text))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
+		}
+	}
+	urlLogin := "name: hook\ncredential:\n  env: HOOK_URL\n  url: true\n  login: { run: [hook login], paste: paste it }\ncalls:\n  send: { kind: update, request: { method: POST } }\n"
+	if _, err := Parse("f", []byte(urlLogin)); err == nil || !strings.Contains(err.Error(), "is not given sign-in steps") {
+		t.Errorf("login beside url: err = %v", err)
+	}
+}
+
 // linearish is the declaration of the sketch (yardr-embp), with the name a
 // built-in source holds replaced: a command per thing the yard does in a
 // thread, the word its place is called, the states it has a status for, and
