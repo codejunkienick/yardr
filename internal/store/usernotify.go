@@ -170,6 +170,7 @@ func (w *wtx) setUser(ctx context.Context, name string, keys []string, set map[s
 	if err != nil {
 		return nil, err
 	}
+	before := cloneUser(u)
 	// The role says who may change the yard and approve what it runs, and
 	// the mark whether a member writes on the operator's subscription, so
 	// both are an operator's to give, never the user's own, and are typed
@@ -302,7 +303,12 @@ func (w *wtx) setUser(ctx context.Context, name string, keys []string, set map[s
 	}
 	// The names and the path, as a source's settings are logged: what
 	// the file holds is never read here.
-	return u, w.event("", "user_set", actor, data)
+	if err := w.event("", "user_set", actor, data); err != nil {
+		return nil, err
+	} else if err := w.tellUserStale(name, before, u, actor); err != nil {
+		return nil, err
+	}
+	return u, nil
 }
 
 // checkNotify refuses a source no user can be told through.
@@ -496,7 +502,7 @@ func (w *wtx) keyUser(ctx context.Context, home, name, srcName string, values ma
 		}
 		names = []string{env}
 	}
-	file := u.EnvFile
+	before, file := cloneUser(u), u.EnvFile
 	if file == "" {
 		// The server chooses the path: nothing a caller sends is one.
 		if file, err = userEnvFile(home, name); err != nil {
@@ -507,6 +513,8 @@ func (w *wtx) keyUser(ctx context.Context, home, name, srcName string, values ma
 			return err
 		}
 		if err := w.event("", "user_set", actor, map[string]any{"user": name, UserEnvFile: file}); err != nil {
+			return err
+		} else if err := w.tellUserStale(name, before, u, actor); err != nil {
 			return err
 		}
 	}

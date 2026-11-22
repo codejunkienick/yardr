@@ -658,8 +658,16 @@ func (p *groupRename) apply(w *wtx, actor string) error {
 			return err
 		}
 	}
+	// A user's subscriptions followed the name, which no user
+	// fingerprint reads, so this tell stands to prove it and costs no scan.
 	for _, u := range p.users {
+		var before User
+		if _, err := get(w.Tx, bUsers, u.Name, &before); err != nil {
+			return err
+		}
 		if err := put(w.Tx, bUsers, u.Name, u); err != nil {
+			return err
+		} else if err := w.tellUserStale(u.Name, &before, &u, actor); err != nil {
 			return err
 		}
 	}

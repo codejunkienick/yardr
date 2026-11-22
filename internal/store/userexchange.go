@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/binary"
@@ -126,6 +127,34 @@ func (s *Store) MailExchange(ctx context.Context, user string, seq uint64, actor
 		return nil, err
 	}
 	return ex, nil
+}
+
+// toUser reports whether a mail event is for a user, not a crew member.
+func toUser(e Event) bool { u, _ := e.Data["to_user"].(bool); return e.Kind == "mail" && u }
+
+// MailReceiver is whose inbox a mail event of this yard is in, crew member or
+// user: "" for mail that left for a peer's crew member, and for what is no
+// mail. The listener reads it too, to send a device its own mail alone.
+func MailReceiver(e Event) string {
+	if e.Kind != "mail" {
+		return ""
+	}
+	if _, left := e.Data["to_peer"]; left {
+		return ""
+	}
+	to, _ := e.Data["to"].(string)
+	return to
+}
+
+// mailKeys are the event keys after seq in name's inbox index, in order.
+func mailKeys(tx *bolt.Tx, name string, after uint64) []string {
+	var out []string
+	c := tx.Bucket(bInbox).Cursor()
+	p := []byte(name + "\x00")
+	for k, _ := c.Seek([]byte(join(name, seqKey(after+1)))); k != nil && bytes.HasPrefix(k, p); k, _ = c.Next() {
+		out = append(out, string(k[len(p):]))
+	}
+	return out
 }
 
 // AckUserMail marks the user's single mail seq read, and nothing else: the

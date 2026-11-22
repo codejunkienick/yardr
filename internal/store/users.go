@@ -313,7 +313,12 @@ func (w *wtx) addUser(name, actor string, by *approvedOn) (*User, error) {
 	if by != nil {
 		data["approved"] = by
 	}
-	return u, w.event("", "user_added", actor, data)
+	if err := w.event("", "user_added", actor, data); err != nil {
+		return nil, err
+	} else if err := w.tellUserStale(name, nil, u, actor); err != nil {
+		return nil, err
+	}
+	return u, nil
 }
 
 // ensureOperator gives the operator setting's name a user when there is
@@ -337,16 +342,24 @@ func (w *wtx) ensureOperator(actor string) error {
 			return err
 		}
 		// The setting_changed event that names them is the record.
+		before := cloneUser(u)
 		u.Role = RoleOperator
-		return put(w.Tx, bUsers, operator, u)
+		if err := put(w.Tx, bUsers, operator, u); err != nil {
+			return err
+		}
+		return w.tellUserStale(operator, before, u, actor)
 	}
 	u, err := w.addUser(operator, actor, nil)
 	if err != nil {
 		return err
 	}
+	before := cloneUser(u)
 	u.Role = RoleOperator
 	u.Subscriptions = append(u.Subscriptions, upgradeFailureSub())
-	return put(w.Tx, bUsers, operator, u)
+	if err := put(w.Tx, bUsers, operator, u); err != nil {
+		return err
+	}
+	return w.tellUserStale(operator, before, u, actor)
 }
 
 // keepsOperator refuses taking the operator role from u, by removing them
@@ -692,7 +705,11 @@ func (w *wtx) deleteUser(ctx context.Context, name, actor string, by *approvedOn
 			return err
 		}
 	}
+	// The removal tells beside its Delete, with nothing of the user
+	// left: a hold of the user is stale however it read them.
 	if err := w.Bucket(bUsers).Delete([]byte(name)); err != nil {
+		return err
+	} else if err := w.tellUserStale(name, u, nil, actor); err != nil {
 		return err
 	}
 	if err := dropNotifications(w.Tx, name); err != nil {
@@ -721,34 +738,6 @@ func (w *wtx) deleteUser(ctx context.Context, name, actor string, by *approvedOn
 		data["approved"] = by
 	}
 	return w.event("", "user_removed", actor, data)
-}
-
-// toUser reports whether a mail event is for a user, not a crew member.
-func toUser(e Event) bool { u, _ := e.Data["to_user"].(bool); return e.Kind == "mail" && u }
-
-// MailReceiver is whose inbox a mail event of this yard is in, crew member or
-// user: "" for mail that left for a peer's crew member, and for what is no
-// mail. The listener reads it too, to send a device its own mail alone.
-func MailReceiver(e Event) string {
-	if e.Kind != "mail" {
-		return ""
-	}
-	if _, left := e.Data["to_peer"]; left {
-		return ""
-	}
-	to, _ := e.Data["to"].(string)
-	return to
-}
-
-// mailKeys are the event keys after seq in name's inbox index, in order.
-func mailKeys(tx *bolt.Tx, name string, after uint64) []string {
-	var out []string
-	c := tx.Bucket(bInbox).Cursor()
-	p := []byte(name + "\x00")
-	for k, _ := c.Seek([]byte(join(name, seqKey(after+1)))); k != nil && bytes.HasPrefix(k, p); k, _ = c.Next() {
-		out = append(out, string(k[len(p):]))
-	}
-	return out
 }
 
 // readers answers whether a mail's receiver acknowledged it, reading each

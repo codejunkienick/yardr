@@ -14,8 +14,8 @@
 // from the current bytes in the same transaction) gets none at creation.
 // No new durable state: the event row is the standard event write.
 //
-// The families beside sources (a group, a peer and a crew member here; a
-// user follows on the same machinery) tell the same way through tellXStale:
+// The families beside sources (a group, a peer, a crew member and a user
+// here) tell the same way through tellXStale:
 // a Seen key may be written by more than one fingerprint function, so the
 // tell compares the set of fingerprints a hold could carry before the write
 // with the set it could carry after it, and tells exactly the holds that
@@ -435,6 +435,152 @@ func (w *wtx) tellCrewStale(name string, before, after *CrewMember, actor string
 		})
 	}
 	return w.tellXStale("crew", name, before, after, actor, watched)
+}
+
+// cloneUser is a copy of the user u that shares nothing a user write
+// mutates: its identities, subscriptions, tell parts and read marks. A
+// tell's before is one, taken as the write found the user, so the after
+// the write leaves cannot move it under it.
+func cloneUser(u *User) *User {
+	if u == nil {
+		return nil
+	}
+	out := *u
+	out.Identities = maps.Clone(u.Identities)
+	out.Subscriptions, out.Tell = slices.Clone(u.Subscriptions), slices.Clone(u.Tell)
+	out.MailRead, out.Pushed = slices.Clone(u.MailRead), slices.Clone(u.Pushed)
+	return &out
+}
+
+// userClones is every user as they stand, cloned by name: the before a
+// write that rewrites users it does not name one by one (a source fold)
+// tells from.
+func (w *wtx) userClones() (map[string]*User, error) {
+	out := map[string]*User{}
+	err := each(w.Tx, bUsers, "", func(_ []byte, u *User) error {
+		out[u.Name] = cloneUser(u)
+		return nil
+	})
+	return out, err
+}
+
+// operatorsAmong is who holds the operator role among users, sorted,
+// with operatorsIn's setting fallback: the setting's name where nobody
+// holds the role.
+func operatorsAmong(users []User, setting string) operators {
+	out := operators(Operators(users))
+	if len(out) == 0 && setting != "" {
+		return operators{setting}
+	}
+	return out
+}
+
+// tellUserStale tells the askers of the holds naming the user name whose
+// Seen moved between before and after, the user as the write found it
+// and as it leaves it (nil for none: a user added or removed). The
+// "user <name>" key is written by every card that reads the user — what
+// they are told through, the file that holds their address, their
+// creation and who they are in a source — so the tell carries them all,
+// the identity readings one per source either side holds under that one
+// key: a fold that moves an identity to its new source keeps its
+// fingerprint in the after-set and tells nothing, as a crew fold does.
+// The role key and the operators key stand apart: a role change tells
+// both, the operators fingerprint closing over the two operator sets,
+// since no fingerprint function of one user can read the yard. After is
+// operatorsIn as the transaction stands at the tell; before replays the
+// before clone over the user list the tell reads, with the operator
+// setting read once for both sides. A settings write that moves the
+// fallback with no user holding the role has no user write to tell
+// from, and is left untold on purpose: approval refuses on re-read. A
+// write that moves only what no reading names — a cursor, a
+// subscription, a filter or watch, a mail-read mark, LastWebhook or
+// LastPush, the own-login-only mark — moves no fingerprint here and
+// costs no scan.
+func (w *wtx) tellUserStale(name string, before, after *User, actor string) error {
+	watched := []tellKey[User]{
+		{key: "user " + name, fns: []func(*User) string{
+			func(u *User) string { return seen(u.EnvFile, u.CreatedAt) },
+			func(u *User) string { return seen(u.CreatedAt, u.CreatedBy) },
+			func(u *User) string { return seen(u.Notify, u.EnvFile, u.Tell) },
+			func(u *User) string { return seen(u.EnvFile, u.Notify, u.CreatedAt) },
+			func(u *User) string { return seen(u.Name, u.EnvFile, u.CreatedAt) },
+		}},
+		{key: "user " + name + " role", fns: []func(*User) string{
+			func(u *User) string { return seen(u.RoleOf(), u.CreatedAt) },
+		}},
+	}
+	// Only a change in whether name holds the operator role can move the
+	// operators set. Skipping the key when the sets are equal also keeps a
+	// member's removal (after == nil) from falling into tellXStale's nil
+	// set and falsely telling open operators holds; every role-changing
+	// write passes a non-nil before (birth creates a member first).
+	if (before != nil && before.IsOperator()) != (after != nil && after.IsOperator()) {
+		setting, err := operatorIn(w.Tx)
+		if err != nil {
+			return err
+		}
+		var users []User
+		if err := each(w.Tx, bUsers, "", func(_ []byte, u *User) error {
+			users = append(users, *u)
+			return nil
+		}); err != nil {
+			return err
+		}
+		afterOps := operatorsAmong(users, setting)
+		replay, replaced := slices.Clone(users), false
+		for i := range replay {
+			if replay[i].Name != name {
+				continue
+			}
+			replaced = true
+			if before == nil {
+				replay = slices.Delete(replay, i, i+1)
+			} else {
+				replay[i] = *before
+			}
+			break
+		}
+		if !replaced && before != nil {
+			replay = append(replay, *before)
+		}
+		beforeOps := operatorsAmong(replay, setting)
+		if !slices.Equal(beforeOps, afterOps) {
+			watched = append(watched, tellKey[User]{
+				key: "operators",
+				fns: []func(*User) string{
+					func(u *User) string {
+						if u == before {
+							return seen(beforeOps)
+						}
+						return seen(afterOps)
+					},
+				},
+			})
+		}
+	}
+	sources := map[string]bool{}
+	for _, side := range []*User{before, after} {
+		if side == nil {
+			continue
+		}
+		for source := range side.Identities {
+			sources[source] = true
+		}
+	}
+	for _, source := range slices.Sorted(maps.Keys(sources)) {
+		watched[0].fns = append(watched[0].fns, func(u *User) string {
+			cur := u.Identities[source]
+			return seen(cur.ID, cur.Key)
+		})
+	}
+	if after == nil {
+		// Removing a user stales an open identity hold even for a source
+		// where the user held no identity yet (seen("", "")).
+		watched[0].fns = append(watched[0].fns, func(*User) string {
+			return seen("", "")
+		})
+	}
+	return w.tellXStale("user", name, before, after, actor, watched)
 }
 
 // staleFP is the fingerprint a run ask holds for the source name under the

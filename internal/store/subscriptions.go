@@ -9,8 +9,6 @@ import (
 	"strings"
 
 	bolt "go.etcd.io/bbolt"
-
-	"yardr.dev/yardr/internal/source"
 )
 
 // Identity is who a crew member is in a source, so a delivery can tell when it
@@ -112,32 +110,6 @@ func whereKeys(source string) []string {
 		return append(slices.Clone(WhereKeys), extra...)
 	}
 	return WhereKeys
-}
-
-// hearSubscribeKeys holds a declaration's hear.subscribe to the filters a
-// subscription to the source may take: a claim approval subscribes the
-// yard's hearer with them beside the claimed address, and a key no
-// subscription takes would fail every claim. The keys are whereKeysTx's
-// without the store: the source's own hook keys beside the hook
-// sources' and its adapter's.
-func hearSubscribeKeys(d *source.Declaration) error {
-	if d.Hear == nil || len(d.Hear.Subscribe) == 0 {
-		return nil
-	}
-	keys := whereKeys(d.Name)
-	if d.Hook != nil {
-		for _, k := range d.Hook.Keys {
-			if !slices.Contains(keys, k) {
-				keys = append(keys, k)
-			}
-		}
-	}
-	for _, k := range slices.Sorted(maps.Keys(d.Hear.Subscribe)) {
-		if !slices.Contains(keys, k) {
-			return fmt.Errorf("hear.subscribe names %q, and a subscription to %s filters on %s", k, d.Name, strings.Join(keys, ", "))
-		}
-	}
-	return nil
 }
 
 // whereKeysTx are the keys a subscription to source may filter on: whereKeys,
@@ -298,6 +270,7 @@ func (w *wtx) setUserIdentity(ctx context.Context, name, source string, id Ident
 	if err := checkUserIdentityOneToOne(w.Tx, name, source, id); err != nil {
 		return nil, err
 	}
+	before := cloneUser(u)
 	kind, data, err := setIdentityIn(&u.Identities, name, source, id, "user", "user")
 	if err != nil {
 		return nil, err
@@ -309,6 +282,8 @@ func (w *wtx) setUserIdentity(ctx context.Context, name, source string, id Ident
 		return nil, err
 	}
 	if err := w.event("", kind, actor, data); err != nil {
+		return nil, err
+	} else if err := w.tellUserStale(name, before, u, actor); err != nil {
 		return nil, err
 	}
 	if id.zero() {

@@ -1536,3 +1536,665 @@ func TestAllowOpeningAndDropLoginTellCrewHold(t *testing.T) {
 		t.Fatalf("the user removal's tells = %v, want a second tell of ask %d", got, fresh)
 	}
 }
+
+// userTells are the ask_stale events on y's bead, as peerTells reads them.
+func userTells(t *testing.T, y *askYard) []Event {
+	t.Helper()
+	return peerTells(t, y)
+}
+
+// rewriteSeen replaces the Seen a run hold seq carries, as the absence
+// holds of the crew tests are written: no card files the fingerprint a
+// test needs to reach, so the hold is written with it directly.
+func rewriteSeen(t *testing.T, y *askYard, seq uint64, seenMap map[string]string) {
+	t.Helper()
+	err := y.write(func(w *wtx) error {
+		row, err := w.loadBead(y.bead)
+		if err != nil {
+			return err
+		}
+		var n Note
+		if ok, err := get(w.Tx, bNotes, join(row.UUID, seqKey(seq)), &n); err != nil || !ok {
+			if err == nil {
+				err = fmt.Errorf("no note %d", seq)
+			}
+			return err
+		}
+		ask, err := ParseAsk(n)
+		if err != nil {
+			return err
+		}
+		ask.Run.Seen = seenMap
+		text, err := json.Marshal(ask)
+		if err != nil {
+			return err
+		}
+		n.Text = string(text)
+		return put(w.Tx, bNotes, join(row.UUID, seqKey(seq)), n)
+	})
+	if err != nil {
+		t.Fatalf("rewriting the hold's Seen: %v", err)
+	}
+}
+
+// Changing a user tells the askers of the open and put-aside run asks
+// naming it, once each, in words naming the ask and the user; changing
+// an unrelated user tells nothing, and a second change while the asks
+// stand tells nothing more. Taken back and asked again, the new ask is
+// covered, and a fresh ask taken back before the change is not.
+func TestUserChangeTellsCrewAskerOfStaleRunAsk(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	open := y.ask(t, listAsk("mckean", "user", "set", "ada", "tell=mail"), "yardmaster")
+	aside := y.ask(t, listAsk("mckean", "user", "set", "ada", "tell=asks"), "yardmaster")
+	if page, err := y.Store.Inbox(y.ctx, "yardmaster", 0); err != nil || page.Total != 0 {
+		t.Fatalf("the asker's inbox after asking = %+v, %v, want empty", page, err)
+	}
+	y.answer(t, Answer{Ask: aside, Later: true}, "mckean")
+	// An unrelated user comes and changes without a tell.
+	if _, err := y.AddUser(y.ctx, "eve", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.SetUser(y.ctx, "eve", map[string]string{UserTell: "mail"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := userTells(t, y); len(got) != 0 {
+		t.Fatalf("the bead holds %d tells after an unrelated change, want none", len(got))
+	}
+	// Changing the named user tells the open ask and the aside one.
+	if _, err := y.SetUser(y.ctx, "ada", map[string]string{UserTell: "notifications"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	page, err := y.Store.Inbox(y.ctx, "yardmaster", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The inbox holds the aside answer beside the two tells.
+	if page.Total != 3 {
+		t.Fatalf("the asker's inbox = %+v, want the aside answer and two tells", page)
+	}
+	told := map[uint64]bool{}
+	for _, e := range userTells(t, y) {
+		if got := Reason(e, "yardmaster"); got != ReasonAnswered {
+			t.Fatalf("the asker heard %q, want %q", got, ReasonAnswered)
+		}
+		if got := e.Data["kind"]; got != "user" {
+			t.Errorf("the tell names kind %v, want user", got)
+		}
+		if got := e.Data["name"]; got != "ada" {
+			t.Errorf("the tell names name %v, want ada", got)
+		}
+		if got := e.Data["seen"]; got != "user ada" {
+			t.Errorf("the tell names digest %v, want user ada", got)
+		}
+		if _, has := e.Data["source"]; has {
+			t.Errorf("the user tell names a source: %v", e.Data)
+		}
+		seq := toldSeq(e)
+		told[seq] = true
+		line, _ := e.Data["answer"].(string)
+		for _, want := range []string{y.bead, fmt.Sprint(seq), "ada", "user ada"} {
+			if !strings.Contains(line, want) {
+				t.Errorf("the line has no %q:\n%s", want, line)
+			}
+		}
+	}
+	if !told[open] || !told[aside] {
+		t.Fatalf("the tells name %v, want the open ask %d and the aside ask %d", told, open, aside)
+	}
+	// A second change while the asks stand tells nothing more.
+	if _, err := y.SetUser(y.ctx, "ada", map[string]string{UserTell: "mail"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := userTells(t, y); len(got) != 2 {
+		t.Fatalf("the bead holds %d tells after a second change, want the two", len(got))
+	}
+	// The open ask is indeed stale: its approval is refused, running nothing.
+	if _, err := y.ApproveAsk(y.ctx, y.bead, open, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving the stale ask = %v, want a refusal that ran nothing", err)
+	}
+	// Taken back and asked again, the new ask is covered.
+	if err := y.TakeBackAsk(y.ctx, y.bead, open, "asking again", "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	again := y.ask(t, listAsk("mckean", "user", "set", "ada", "tell=asks"), "yardmaster")
+	if _, err := y.SetUser(y.ctx, "ada", map[string]string{UserTell: "notifications"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := userTells(t, y); len(got) != 3 || toldSeq(got[2]) != again {
+		t.Fatalf("the bead holds %v after the re-ask changed, want a third tell of ask %d", got, again)
+	}
+	// A fresh ask taken back before the next change is not told of it.
+	gone := y.ask(t, listAsk("mckean", "user", "set", "ada", "tell=mail"), "yardmaster")
+	if err := y.TakeBackAsk(y.ctx, y.bead, gone, "no longer wanted", "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.SetUser(y.ctx, "ada", map[string]string{UserTell: "asks"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := userTells(t, y); len(got) != 3 {
+		t.Fatalf("the bead holds %d tells after the taken-back ask's change, want the three", len(got))
+	}
+}
+
+// A user who asked about a user is told in its notifications, with the
+// same line; the crew member who did not ask hears nothing.
+func TestUserChangeTellsUserAskerOfStaleRunAsk(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	seq := y.ask(t, listAsk("mckean", "user", "set", "mckean", "tell=mail"), "ada")
+	if _, err := y.SetUser(y.ctx, "mckean", map[string]string{UserTell: "notifications"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, e := range userTells(t, y) {
+		if Notified(e, "ada") != ReasonAnswered {
+			continue
+		}
+		found = true
+		line, _ := e.Data["answer"].(string)
+		for _, want := range []string{y.bead, fmt.Sprint(seq), "mckean"} {
+			if !strings.Contains(line, want) {
+				t.Errorf("the line has no %q:\n%s", want, line)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("ada was not told")
+	}
+	page, err := y.Store.UserNotifications(y.ctx, "ada", 0, "ada")
+	if err != nil || page.Unread != 1 {
+		t.Fatalf("ada's notifications = %+v, %v, want one unread", page, err)
+	}
+	text := page.Notifications[0].Text
+	for _, want := range []string{y.bead, fmt.Sprint(seq), "mckean"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the notification has no %q:\n%s", want, text)
+		}
+	}
+	if page, err := y.Store.Inbox(y.ctx, "yardmaster", 0); err != nil || page.Total != 0 {
+		t.Fatalf("the yardmaster's inbox = %+v, %v, want empty", page, err)
+	}
+}
+
+// A user write tells only the holds whose own reading of the user it
+// moved: an identity change tells a mapping hold and leaves tell and
+// grant-as holds standing; setting the env file tells the grant-as hold
+// and a fresh tell hold, whose approval the standing tell hold's own
+// write does not tell of itself.
+func TestUserWriteTellsOnlyTheHoldsWhoseReadingMoved(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	if err := y.SetIdentity(y.ctx, "ada", "crm", Identity{ID: "u1"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	mapping := y.ask(t, listAsk("mckean", "user", "identity", "ada", "--source", "crm", "--id", "u2"), "yardmaster")
+	tell := y.ask(t, listAsk("mckean", "user", "set", "ada", "tell=mail"), "yardmaster")
+	grant := y.ask(t, listAsk("ada", "source", "grant", "crm", "read", "--crew", "yardmaster", "--as", "ada"), "yardmaster")
+	if err := y.SetIdentity(y.ctx, "ada", "crm", Identity{ID: "u9"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var mappingTold, tellTold, grantTold bool
+	for _, e := range userTells(t, y) {
+		mappingTold = mappingTold || toldSeq(e) == mapping
+		tellTold = tellTold || toldSeq(e) == tell
+		grantTold = grantTold || toldSeq(e) == grant
+		if toldSeq(e) == mapping && e.Data["seen"] != "user ada" {
+			t.Errorf("the identity tell names %v, want user ada", e.Data["seen"])
+		}
+	}
+	if !mappingTold || tellTold || grantTold {
+		t.Fatalf("the identity write told mapping %v, tell %v and grant %v, want the mapping hold alone", mappingTold, tellTold, grantTold)
+	}
+	// The standing tell hold still approves, and its own write tells
+	// neither itself nor the grant hold.
+	if _, err := y.ApproveAsk(y.ctx, y.bead, tell, "mckean", false, nil); err != nil {
+		t.Fatalf("approving the standing tell hold: %v", err)
+	}
+	for _, e := range userTells(t, y) {
+		if toldSeq(e) == tell || toldSeq(e) == grant {
+			t.Fatalf("the tell approval told a hold it should not: %v", e.Data)
+		}
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, mapping, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving the told mapping hold = %v, want a refusal that ran nothing", err)
+	}
+	// Setting the env file moves what a grant made as the user reads of
+	// them, and what a fresh tell hold reads: both are told.
+	freshTell := y.ask(t, listAsk("mckean", "user", "set", "ada", "tell=asks"), "yardmaster")
+	if _, err := y.SetUser(y.ctx, "ada", map[string]string{UserEnvFile: "/yard/ada.env"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var grantTold2, freshTold bool
+	for _, e := range userTells(t, y) {
+		grantTold2 = grantTold2 || toldSeq(e) == grant
+		freshTold = freshTold || toldSeq(e) == freshTell
+	}
+	if !grantTold2 || !freshTold {
+		t.Fatalf("the env file write told grant %v and fresh tell %v, want both", grantTold2, freshTold)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, grant, "ada", true, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving the told grant hold = %v, want a refusal that ran nothing", err)
+	}
+}
+
+// Giving a user their own address in a source sets their env file where
+// they had none, and that write tells a hold that read the user; giving
+// again, where the file stands already and no user record is written,
+// tells nothing more.
+func TestUserKeyTellsHoldWhereItSetsTheEnvFile(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	if _, err := y.PutSource(y.ctx, "pushover.yaml", pushFile, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	hold := y.ask(t, listAsk("mckean", "user", "set", "ada", "tell=mail"), "yardmaster")
+	if _, err := y.KeyUser(y.ctx, "ada", "pushover", map[string]string{"PUSHOVER_USER": "u-ada"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := userTells(t, y); len(got) != 1 || toldSeq(got[0]) != hold || got[0].Data["name"] != "ada" || got[0].Data["seen"] != "user ada" {
+		t.Fatalf("the giving's tells = %v, want one of ask %d for ada", got, hold)
+	}
+	if u, err := y.GetUser(y.ctx, "ada"); err != nil || u.EnvFile == "" {
+		t.Fatalf("ada after the giving = %+v, %v, want the env file set", u, err)
+	}
+	if _, err := y.KeyUser(y.ctx, "ada", "pushover", map[string]string{"PUSHOVER_USER": "u-ada-2"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := userTells(t, y); len(got) != 1 {
+		t.Fatalf("the second giving told %v, want the one tell", got)
+	}
+}
+
+// Adding a user where none stood tells a hold written against its
+// absence, and removing a user tells a fresh hold of it, an identity
+// hold for a source where the user held no identity yet among them.
+func TestUserAbsentCreateAndDeleteTellAsker(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	pending := y.ask(t, listAsk("mckean", "user", "set", "ada", "tell=mail"), "yardmaster")
+	rewriteSeen(t, y, pending, map[string]string{"user newhire": seen("no user", "newhire")})
+	if _, err := y.AddUser(y.ctx, "newhire", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := userTells(t, y); len(got) != 1 || toldSeq(got[0]) != pending || got[0].Data["name"] != "newhire" || got[0].Data["seen"] != "user newhire" || got[0].Data["kind"] != "user" {
+		t.Fatalf("the absent-create tells = %v, want one of ask %d for newhire", got, pending)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, pending, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving the told hold = %v, want a refusal that ran nothing", err)
+	}
+	// Inviting a teammate goes through addUser and tells an absent-create
+	// hold once; its own-login-only put tells nothing more.
+	invited := y.ask(t, listAsk("mckean", "user", "set", "ada", "tell=mail"), "yardmaster")
+	rewriteSeen(t, y, invited, map[string]string{"user guest": seen("no user", "guest")})
+	if err := y.InviteTeammate(y.ctx, "guest", "guest@example.com", RoleMember, false, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := userTells(t, y); len(got) != 2 || toldSeq(got[1]) != invited || got[1].Data["name"] != "guest" || got[1].Data["seen"] != "user guest" {
+		t.Fatalf("the invite absent-create tells = %v, want one tell of ask %d for guest", got, invited)
+	}
+	// Removing the user tells a tell hold, an identity hold for a source
+	// where they held no identity yet, and a grant made as them.
+	mapping := y.ask(t, listAsk("mckean", "user", "identity", "newhire", "--source", "crm", "--id", "u1"), "yardmaster")
+	tell := y.ask(t, listAsk("mckean", "user", "set", "newhire", "tell=mail"), "yardmaster")
+	grant := y.ask(t, listAsk("newhire", "source", "grant", "crm", "read", "--crew", "yardmaster", "--as", "newhire"), "yardmaster")
+	if err := y.DeleteUser(y.ctx, "newhire", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	counts := map[uint64]int{}
+	for _, e := range userTells(t, y) {
+		if e.Data["name"] == "newhire" {
+			counts[toldSeq(e)]++
+		}
+	}
+	if counts[mapping] != 1 || counts[tell] != 1 || counts[grant] != 1 {
+		t.Fatalf("the removal's tells by ask = %v, want one each of mapping %d, tell %d and grant %d", counts, mapping, tell, grant)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, mapping, "mckean", false, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving the removed user's mapping hold = %v, want a refusal that ran nothing", err)
+	}
+}
+
+// A role change tells role holds and operators holds: giving a user the
+// role tells a demotion hold of another operator through the operators
+// it joins, and naming a standing member or a new name as the operator
+// setting's user tells it too. Where nobody holds the role, the
+// operators a hold carries are the setting's name alone.
+func TestUserRoleAndOperatorsTellAsker(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	if _, err := y.AddUser(y.ctx, "bob", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.SetUser(y.ctx, "ada", map[string]string{UserRole: RoleOperator}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	demote := y.ask(t, userRoleAsk("user set ada role=member", "mckean"), "yardmaster")
+	promote := y.ask(t, userRoleAsk("user set bob role=operator", "mckean"), "yardmaster")
+	if _, err := y.SetUser(y.ctx, "bob", map[string]string{UserRole: RoleOperator}, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	var demoteTold, promoteTold bool
+	for _, e := range userTells(t, y) {
+		if toldSeq(e) == demote {
+			demoteTold = true
+			if e.Data["seen"] != "operators" || e.Data["name"] != "bob" || e.Data["kind"] != "user" {
+				t.Errorf("the operators tell names %v, want operators of bob", e.Data)
+			}
+		}
+		if toldSeq(e) == promote {
+			promoteTold = true
+			if e.Data["seen"] != "user bob role" {
+				t.Errorf("the role tell names %v, want user bob role", e.Data["seen"])
+			}
+		}
+	}
+	if !demoteTold || !promoteTold {
+		t.Fatalf("the role write told demote %v and promote %v, want both", demoteTold, promoteTold)
+	}
+	y.refusedStale(t, demote, "the yard had other operators")
+	y.refusedStale(t, promote, "the role of bob was another")
+	// Naming a standing member as the operator setting's user gives them
+	// the role in that write, and tells a fresh operators hold.
+	if _, err := y.AddUser(y.ctx, "carol", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	demote2 := y.ask(t, userRoleAsk("user set ada role=member", "mckean"), "yardmaster")
+	if err := y.SetSetting(y.ctx, OperatorSetting, "carol", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	var settingTold bool
+	for _, e := range userTells(t, y) {
+		if toldSeq(e) == demote2 && e.Data["seen"] == "operators" && e.Data["name"] == "carol" {
+			settingTold = true
+		}
+	}
+	if !settingTold {
+		t.Fatalf("naming carol as the setting's user told %v, want a tell of ask %d naming carol", userTells(t, y), demote2)
+	}
+	if u, err := y.GetUser(y.ctx, "carol"); err != nil || !u.IsOperator() {
+		t.Fatalf("carol after the setting = %+v, %v, want an operator", u, err)
+	}
+	// Naming a new name makes the user and gives them the role in the
+	// same write, and that tells a fresh operators hold too.
+	demote3 := y.ask(t, userRoleAsk("user set ada role=member", "mckean"), "yardmaster")
+	if err := y.SetSetting(y.ctx, OperatorSetting, "eve", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	var bornTold bool
+	for _, e := range userTells(t, y) {
+		if toldSeq(e) == demote3 && e.Data["seen"] == "operators" && e.Data["name"] == "eve" {
+			bornTold = true
+		}
+	}
+	if !bornTold {
+		t.Fatalf("naming eve as the setting's user told %v, want a tell of ask %d naming eve", userTells(t, y), demote3)
+	}
+	if u, err := y.GetUser(y.ctx, "eve"); err != nil || !u.IsOperator() {
+		t.Fatalf("eve after the setting = %+v, %v, want a born operator", u, err)
+	}
+	// Removing a member leaves an open operators hold untouched, while
+	// removing an operator tells both an open operators hold and a role
+	// hold for that operator.
+	if _, err := y.AddUser(y.ctx, "frank", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	demote4 := y.ask(t, userRoleAsk("user set ada role=member", "mckean"), "yardmaster")
+	if err := y.DeleteUser(y.ctx, "frank", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range userTells(t, y) {
+		if toldSeq(e) == demote4 {
+			t.Fatalf("removing a member told the operators hold: %v", e.Data)
+		}
+	}
+	demoteBob := y.ask(t, userRoleAsk("user set bob role=member", "mckean"), "yardmaster")
+	if err := y.DeleteUser(y.ctx, "bob", "ada"); err != nil {
+		t.Fatal(err)
+	}
+	var demote4Told, demoteBobTold bool
+	for _, e := range userTells(t, y) {
+		if toldSeq(e) == demote4 && e.Data["seen"] == "operators" && e.Data["name"] == "bob" {
+			demote4Told = true
+		}
+		if toldSeq(e) == demoteBob && e.Data["name"] == "bob" {
+			demoteBobTold = true
+		}
+	}
+	if !demote4Told || !demoteBobTold {
+		t.Fatalf("removing operator bob told demote4 %v and demoteBob %v, want both", demote4Told, demoteBobTold)
+	}
+	y.refusedStale(t, demote4, "the yard had other operators")
+	// The fallback: in a yard where nobody holds the role, a hold that
+	// carries the setting's name as its operators is told by the first
+	// role anyone is given, and one that carries the given role's
+	// operators is not; giving the role to the setting's own name moves
+	// their role key without falsely telling an operators hold.
+	clearRoles := func(y *askYard) {
+		t.Helper()
+		if err := y.write(func(w *wtx) error {
+			var all []User
+			if err := each(w.Tx, bUsers, "", func(_ []byte, u *User) error {
+				all = append(all, *u)
+				return nil
+			}); err != nil {
+				return err
+			}
+			for i := range all {
+				all[i].Role = ""
+				if err := put(w.Tx, bUsers, all[i].Name, &all[i]); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	y2 := listYard(t)
+	clearRoles(y2)
+	hold := y2.ask(t, listAsk("mckean", "user", "set", "ada", "tell=mail"), "yardmaster")
+	control := y2.ask(t, listAsk("mckean", "user", "set", "ada", "tell=asks"), "yardmaster")
+	holdSeen := y2.asked(t, hold).Ask.Run.Seen["user ada"]
+	controlSeen := y2.asked(t, control).Ask.Run.Seen["user ada"]
+	rewriteSeen(t, y2, hold, map[string]string{"user ada": holdSeen, "operators": seen(operators{"mckean"})})
+	rewriteSeen(t, y2, control, map[string]string{"user ada": controlSeen, "operators": seen(operators{"ada"})})
+	if _, err := y2.SetUser(y2.ctx, "ada", map[string]string{UserRole: RoleOperator}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var fallbackTold, controlTold bool
+	for _, e := range userTells(t, y2) {
+		if toldSeq(e) == hold {
+			fallbackTold = true
+			if e.Data["seen"] != "operators" {
+				t.Errorf("the fallback tell names %v, want operators", e.Data["seen"])
+			}
+		}
+		controlTold = controlTold || toldSeq(e) == control
+	}
+	if !fallbackTold || controlTold {
+		t.Fatalf("the first role told fallback %v and control %v, want the fallback hold alone", fallbackTold, controlTold)
+	}
+	y3 := listYard(t)
+	clearRoles(y3)
+	sameOps := y3.ask(t, listAsk("mckean", "user", "set", "ada", "tell=mail"), "yardmaster")
+	sameRole := y3.ask(t, userRoleAsk("user set mckean role=operator", "mckean"), "yardmaster")
+	sameOpsSeen := y3.asked(t, sameOps).Ask.Run.Seen["user ada"]
+	rewriteSeen(t, y3, sameOps, map[string]string{"user ada": sameOpsSeen, "operators": seen(operators{"mckean"})})
+	if _, err := y3.SetUser(y3.ctx, "mckean", map[string]string{UserRole: RoleOperator}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	var sameOpsTold, sameRoleTold bool
+	for _, e := range userTells(t, y3) {
+		sameOpsTold = sameOpsTold || toldSeq(e) == sameOps
+		if toldSeq(e) == sameRole && e.Data["seen"] == "user mckean role" {
+			sameRoleTold = true
+		}
+	}
+	if sameOpsTold || !sameRoleTold {
+		t.Fatalf("promoting the fallback setting user told operators %v and role %v, want role alone", sameOpsTold, sameRoleTold)
+	}
+}
+
+// Moving a source's records moves a user's identity to its new source,
+// where its fingerprint stays in the after-set: the moved mapping hold
+// is told nothing and is refused on re-read, as a crew member's is, and
+// a tell hold stands; an identity held the same under both sources is
+// the same, and a first identity in one source tells a hold that read
+// the user in another early, whose card the re-read still stands.
+func TestUserIdentityFoldTellsMovedAndUnchangedHolds(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	if _, err := y.PutSource(y.ctx, "chat.yaml", strings.Replace(runCRM, "name: crm", "name: chat", 1), "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.SetIdentity(y.ctx, "ada", "crm", Identity{ID: "u1"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	mapping := y.ask(t, listAsk("mckean", "user", "identity", "ada", "--source", "crm", "--id", "u2"), "yardmaster")
+	tell := y.ask(t, listAsk("mckean", "user", "set", "ada", "tell=mail"), "yardmaster")
+	if _, err := y.MoveSourceRecords(y.ctx, "crm", "chat", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := userTells(t, y); len(got) != 0 {
+		t.Fatalf("the fold told %v, want none: the moved identity stands under chat", got)
+	}
+	y.refusedStale(t, mapping, "held another identity in crm")
+	if _, err := y.ApproveAsk(y.ctx, y.bead, tell, "mckean", false, nil); err != nil {
+		t.Fatalf("approving the standing tell hold after the fold: %v", err)
+	}
+	// The same identity under both sources: the fold keeps it under the
+	// new one, its fingerprint stays in the after-set, and no tell
+	// fires; the approval is still refused, since crm holds it no more.
+	y2 := listYard(t)
+	if _, err := y2.PutSource(y2.ctx, "chat.yaml", strings.Replace(runCRM, "name: crm", "name: chat", 1), "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []string{"crm", "chat"} {
+		if err := y2.SetIdentity(y2.ctx, "ada", source, Identity{ID: "u1"}, "mckean"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unchanged := y2.ask(t, listAsk("mckean", "user", "identity", "ada", "--source", "crm", "--id", "u2"), "yardmaster")
+	if _, err := y2.MoveSourceRecords(y2.ctx, "crm", "chat", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := userTells(t, y2); len(got) != 0 {
+		t.Fatalf("the unchanged fold told %v, want none", got)
+	}
+	y2.refusedStale(t, unchanged, "held another identity in crm")
+	// A first identity in crm tells a hold that read the user in chat,
+	// where they held none: the fingerprint a no-identity hold carries
+	// is source-blind. The hold's own card reads as it did, so its
+	// approval still runs.
+	y3 := listYard(t)
+	if _, err := y3.PutSource(y3.ctx, "chat.yaml", strings.Replace(runCRM, "name: crm", "name: chat", 1), "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y3.AddUser(y3.ctx, "eve", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	early := y3.ask(t, listAsk("mckean", "user", "identity", "eve", "--source", "chat", "--id", "u1"), "yardmaster")
+	if err := y3.SetIdentity(y3.ctx, "eve", "crm", Identity{ID: "u9"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := userTells(t, y3); len(got) != 1 || toldSeq(got[0]) != early || got[0].Data["seen"] != "user eve" {
+		t.Fatalf("the first identity's tells = %v, want one early tell of ask %d", got, early)
+	}
+	if _, err := y3.ApproveAsk(y3.ctx, y3.bead, early, "mckean", true, nil); err != nil {
+		t.Fatalf("approving the early-told hold, whose card stands: %v", err)
+	}
+	if u, err := y3.GetUser(y3.ctx, "eve"); err != nil || u.Identities["chat"].ID != "u1" {
+		t.Fatalf("eve after the approval = %+v, %v, want the chat identity u1", u, err)
+	}
+}
+
+// Cursor, subscription, filter, watch, mail-read, LastWebhook,
+// LastPush and own-login-only writes never tell a user hold: none of
+// what they write is read by a fingerprint a hold carries, and the hold
+// still approves afterwards.
+func TestUserSilentWritesNeverTellHold(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	hold := y.ask(t, listAsk("mckean", "user", "set", "ada", "tell=mail"), "yardmaster")
+	if err := y.Mail(y.ctx, "ada", "a letter for ada", "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	box, err := y.UserInbox(y.ctx, "ada", 0, "ada")
+	if err != nil || len(box.Mail) != 1 {
+		t.Fatalf("ada's inbox = %+v, %v, want the letter", box, err)
+	}
+	silent := []struct {
+		name string
+		run  func() error
+	}{
+		{"the inbox cursor", func() error { return y.AckUserInbox(y.ctx, "ada", box.Mail[0].Seq, "ada") }},
+		{"a single mail-read", func() error { return y.AckUserMail(y.ctx, "ada", box.Mail[0].Seq, "ada") }},
+		{"the notification cursor", func() error { return y.AckUserNotifications(y.ctx, "ada", box.Mail[0].Seq+1000, "ada") }},
+		{"the webhook record", func() error {
+			return y.WebhookTried(y.ctx, "ada", PushResult{Reason: PushRefused})
+		}},
+		{"the push receipts", func() error { return y.DropPushes(y.ctx, "ada", []uint64{999}) }},
+		{"a subscription", func() error {
+			return y.AddSubscriptionKind(y.ctx, "ada", "user", Subscription{Source: SourceYardr, Scope: ScopeAll}, "ada")
+		}},
+		{"the own-login-only mark", func() error {
+			_, err := y.SetUser(y.ctx, "ada", map[string]string{UserOwnLoginOnly: "yes"}, "mckean")
+			return err
+		}},
+		{"an invited teammate's mark", func() error {
+			return y.InviteTeammate(y.ctx, "eve", "eve@example.com", RoleMember, false, "mckean")
+		}},
+		{"a peer filter", func() error {
+			if err := y.AddSubscriptionKind(y.ctx, "ada", "user", Subscription{Source: SourcePeer, Scope: ScopeAll, Where: map[string]string{"peer": "airy"}}, "ada"); err != nil {
+				return err
+			}
+			return y.write(func(w *wtx) error {
+				_, err := renamePeerFilters(w.Tx, "airy", "east")
+				return err
+			})
+		}},
+		{"a watch", func() error {
+			sub := Subscription{Source: "crm", Scope: ScopeAll}
+			if err := y.write(func(w *wtx) error { return addWatch(w.Tx, "user", "ada", sub) }); err != nil {
+				return err
+			}
+			return y.write(func(w *wtx) error { return dropWatch(w.Tx, "user", "ada", sub) })
+		}},
+	}
+	for _, s := range silent {
+		if err := s.run(); err != nil {
+			t.Fatalf("%s: %v", s.name, err)
+		}
+		if got := userTells(t, y); len(got) != 0 {
+			t.Fatalf("%s told the hold: %v", s.name, got)
+		}
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, hold, "mckean", false, nil); err != nil {
+		t.Fatalf("approving after the silent writes: %v", err)
+	}
+}
+
+// A group rename moves a user's subscriptions to the new name, which
+// no user fingerprint reads: the rename's user tell stands to prove it
+// and tells no hold of the user, which still approves afterwards.
+func TestGroupRenameUsersLoopNeverTellsUserHold(t *testing.T) {
+	t.Parallel()
+	y := listYard(t)
+	if err := y.AddSubscriptionKind(y.ctx, "ada", "user", Subscription{Source: SourceYardr, Scope: ScopeAll, Where: map[string]string{"group": "builders"}}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	hold := y.ask(t, listAsk("mckean", "user", "set", "ada", "tell=mail"), "yardmaster")
+	if _, err := y.RenameGroup(y.ctx, "builders", "makers", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if got := userTells(t, y); len(got) != 0 {
+		t.Fatalf("the rename's user loop told the hold: %v", got)
+	}
+	if u, err := y.GetUser(y.ctx, "ada"); err != nil || len(u.Subscriptions) != 1 || u.Subscriptions[0].Where["group"] != "makers" {
+		t.Fatalf("ada after the rename = %+v, %v, want the subscription under makers", u, err)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, hold, "mckean", false, nil); err != nil {
+		t.Fatalf("approving after the rename: %v", err)
+	}
+}

@@ -93,6 +93,10 @@ func (w *wtx) moveSourceRecords(ctx context.Context, from, to, actor string) (*S
 	if err != nil {
 		return nil, err
 	}
+	userBefore, err := w.userClones()
+	if err != nil {
+		return nil, err
+	}
 	m, err := foldRecords(w.Tx, from, to, false)
 	if err != nil {
 		return nil, err
@@ -109,6 +113,15 @@ func (w *wtx) moveSourceRecords(ctx context.Context, from, to, actor string) (*S
 	if m.crewIdentities > 0 || m.Grants > 0 {
 		if err := each(w.Tx, bCrew, "", func(_ []byte, r *CrewMember) error {
 			return w.tellCrewStale(r.Name, crewBefore[r.Name], r, actor)
+		}); err != nil {
+			return nil, err
+		}
+	}
+	// The fold moves users' identities the same way, and they are told
+	// here from the users as they stood before it.
+	if m.userIdentities > 0 {
+		if err := each(w.Tx, bUsers, "", func(_ []byte, u *User) error {
+			return w.tellUserStale(u.Name, userBefore[u.Name], u, actor)
 		}); err != nil {
 			return nil, err
 		}
