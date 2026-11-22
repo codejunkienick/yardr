@@ -97,6 +97,40 @@ func TestMergeLocalWagonRedTests(t *testing.T) {
 	}
 }
 
+// A wagon with no commit past its train's branch has nothing of its own
+// for its quick run to certify, and the train's landing tests the whole
+// train later: it lands with the suite skipped, on empty alone, with no
+// fetch to vouch for the train's branch.
+func TestMergeLocalEmptyWagonSkipsItsRun(t *testing.T) {
+	y := newTrainYard(t, "true")
+	ran := y.landings("exit 1", "exit 1")
+	y.yardr("bead", "update", "r-1", "--type", "wagon")
+	wt := filepath.Join(y.home, "worktrees", "r", "r-1")
+	y.git(wt, "reset", "-q", "--hard", "yard/r-e")
+	train := y.git(y.repo, "rev-parse", "yard/r-e")
+	short := y.git(y.repo, "rev-parse", "--short", "yard/r-e")
+
+	y.exec("merge-local", "assembly", "r-1")
+
+	if b := y.beadOf("r-1"); b.Stage != "merged" || b.Status != "closed" {
+		t.Fatalf("empty wagon %s/%s, want merged and closed:\n%s", b.Stage, b.Status, y.notesOf("r-1"))
+	}
+	if got := ranAs(t, ran); got != "" {
+		t.Fatalf("the test command ran as %q for an empty wagon, want it never to run", got)
+	}
+	if got := y.git(y.repo, "rev-parse", "yard/r-e"); got != train {
+		t.Fatalf("the train's branch moved to %s, want it left at %s", got, train)
+	}
+	for _, want := range []string{"suite skipped: no commits over yard/r-e at " + short, "train r-e's"} {
+		if !strings.Contains(y.notesOf("r-1"), want) {
+			t.Fatalf("note lacks %q:\n%s", want, y.notesOf("r-1"))
+		}
+	}
+	if !strings.Contains(y.log, "suite skipped") {
+		t.Fatalf("the log does not say the suite was skipped:\n%s", y.log)
+	}
+}
+
 // A wagon with no train lands on the depot's base, where no run for a train
 // would follow: it is a landing. (yardr moves no such wagon out of the stage
 // its flow starts in, and the dispatcher starts no script for one; this

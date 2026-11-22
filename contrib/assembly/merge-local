@@ -51,6 +51,13 @@
 # run ended by a signal is run once more, and held if a
 # signal ends it again. A depot with no test command lands untested, and the
 # note says so. It never forces and never pushes anything but a fast-forward.
+# A branch with no commit past the base whose fetch left the base up to date
+# with YARDR_PUSH runs no tests either, and the note says the suite was
+# skipped: there is nothing of its own to certify, and a red base is found
+# by the next non-empty landing, since this one moves no ref. A wagon with
+# no commit past its train's branch skips its run the same way, without the
+# fetch condition, since the train's landing tests the whole train. The
+# push, the install, the net lines and the merge still run.
 #
 # With YARDR_LAND=squash the branch is made one commit after the rebase and
 # before the tests, so that the commit tested is the commit landed. Its
@@ -281,6 +288,13 @@ fi
 # the push below carries them. But a base that diverged from the remote's
 # branch fails the landing: joining the two is a person's, never merged or
 # forced here.
+# FETCH_UPTODATE holds the base's commit sha only where the fetch found the
+# base already at the remote's tip: the one case where an empty branch
+# certifies nothing new, so its suite may be skipped below. A base the fetch
+# moved, a failed fetch, a missing remote branch, a base ahead of the remote
+# and no remote at all all leave it empty, and those landings test exactly as
+# before.
+FETCH_UPTODATE=
 if [ -n "$PUSH" ]; then
   fetcherr=$(GIT_TERMINAL_PROMPT=0 git -C "$REPO" fetch --prune --quiet "$PUSH" 2>&1) && ok=1 || ok=
   if [ -z "$ok" ]; then
@@ -291,6 +305,7 @@ if [ -n "$PUSH" ]; then
     if [ -z "$target" ]; then
       echo "== $PUSH has no branch $BASE: landing on the base as it is"
     elif [ "$target" = "$tip" ]; then
+      FETCH_UPTODATE=$tip
       echo "== $BASE is up to date with $PUSH"
     elif git -C "$REPO" merge-base --is-ancestor "$BASE" "$target"; then
       echo "== bringing $BASE up to $PUSH/$BASE at $(git -C "$REPO" rev-parse --short "$target")"
@@ -1095,9 +1110,36 @@ attach_log() {
 secs=0
 tested=$(git -C "$REPO" rev-parse "refs/heads/$BR") || hold "cannot read $BR"
 at=$(git -C "$REPO" rev-parse --short "$tested")
+# A branch with no commit past the base has nothing of its own to certify:
+# lowerrows above already left it alone, and the tests below would run the
+# base alone. Deciding on the captured $tested commit — and for a non-wagon
+# landing requiring both $tested and $BASE to still equal the exact
+# $FETCH_UPTODATE tip matched at fetch time — guarantees that a concurrent
+# move of $BR or $BASE cannot slip an untested commit past the suite (the
+# moved-check below catches any commit pushed to $BR after $tested is
+# recorded). A wagon on its train skips its quick run on empty alone, since
+# the train's landing tests the whole train later. Every other empty landing
+# tests as before. Push, install, the net lines and the merge itself still
+# run on the skip path below.
+SKIPSUITE=
+if [ "$(git -C "$REPO" rev-list --count "refs/heads/$BASE..$tested")" = 0 ]; then
+  if [ -n "$ONTRAIN" ]; then
+    SKIPSUITE=1
+  elif [ -n "$FETCH_UPTODATE" ] && [ "$tested" = "$FETCH_UPTODATE" ] &&
+      [ "$(git -C "$REPO" rev-parse "refs/heads/$BASE")" = "$FETCH_UPTODATE" ]; then
+    SKIPSUITE=1
+  fi
+fi
 if [ -z "$TEST" ]; then
   WHAT=
   echo "== depot $DEPOT has no test command: landing $BEAD untested"
+elif [ -n "$SKIPSUITE" ]; then
+  WHAT=
+  if [ -n "$ONTRAIN" ]; then
+    echo "== $BEAD has no commits over $BASE at $at, suite skipped: the train's landing tests the whole train"
+  else
+    echo "== $BEAD has no commits over $BASE at $at (fetch: up to date), suite skipped"
+  fi
 else
   if [ "$(git -C "$REPO" cat-file -t "refs/heads/$BASE:$TEST" 2>/dev/null)" = blob ]; then
     WHAT="the base's copy of $TEST"
@@ -1200,6 +1242,10 @@ grow=$(git -C "$REPO" diff --numstat "$before..$tested" | awk '$1 != "-" { net =
 msg="merged $sha ($grow)"
 if [ -z "$TEST" ]; then
   msg="$msg, untested: no test command on the depot"
+elif [ -n "$SKIPSUITE" ] && [ -n "$ONTRAIN" ]; then
+  msg="$msg on $BASE, suite skipped: no commits over $BASE at $sha; the landing run and the review are train $TRAIN's"
+elif [ -n "$SKIPSUITE" ]; then
+  msg="$msg, no commits over base $sha (fetch: up to date), suite skipped"
 elif [ -z "$LANDING" ]; then
   msg="$msg on $BASE, tested with $WHAT without YARDR_LANDING in $secs s; the landing run and the review are train $TRAIN's"
 else
@@ -1274,7 +1320,7 @@ if [ -n "$LANDING" ]; then
     fi
   fi
 fi
-if [ -n "$TEST" ] && [ -n "$LANDING" ]; then
+if [ -n "$TEST" ] && [ -n "$LANDING" ] && [ -z "$SKIPSUITE" ]; then
   msg="$msg$push_failed in $secs s"
 elif [ -n "$push_failed" ]; then
   msg="$msg$push_failed"

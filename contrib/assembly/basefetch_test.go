@@ -175,6 +175,156 @@ func TestMergeLocalFailedFetchLandsOnBaseAsIs(t *testing.T) {
 	}
 }
 
+// An empty branch over a base the fetch left up to date has nothing of
+// its own to certify: the suite never runs, and the landing still merges
+// with the skip note, pushes and installs as any other landing does.
+func TestMergeLocalEmptyBranchUpToDateSkipsSuite(t *testing.T) {
+	y, remote := pushYard(t)
+	ran := filepath.Join(y.home, "ran")
+	y.tests("echo ran >>" + ran)
+	y.upgradeFrom("r")
+	upgraded := filepath.Join(y.home, "upgraded")
+	y.bin = writeScript(t, t.TempDir(), "yardr", `#!/bin/sh
+if [ "$1" = "upgrade" ] && [ "$2" = "--help" ]; then
+  printf '%s\n' 'Usage:' '  yardr upgrade [flags]'
+  exit 0
+fi
+if [ "$1" = "upgrade" ]; then
+  echo upgraded >>`+upgraded+`
+  printf '%s\n' 'install    /usr/local/bin/yardr at deadbeefcd12' 'health     ok in 1 s'
+  exit 0
+fi
+exec `+shellQuote(yardrBin)+` "$@"
+`)
+	base := y.git(y.repo, "rev-parse", "main")
+	short := y.git(y.repo, "rev-parse", "--short", "main")
+
+	y.assembly()
+
+	if b := y.bead(); b.Stage != "merged" || b.Status != "closed" {
+		t.Fatalf("bead %s/%s, want merged and closed:\n%s", b.Stage, b.Status, y.notes())
+	}
+	if _, err := os.Stat(ran); !os.IsNotExist(err) {
+		t.Fatalf("the test command ran on an empty branch over an up-to-date base (stat ran: %v)", err)
+	}
+	wantNote := "no commits over base " + short + " (fetch: up to date), suite skipped; install ok in "
+	if !strings.Contains(y.notes(), wantNote) {
+		t.Fatalf("note lacks %q:\n%s", wantNote, y.notes())
+	}
+	if _, err := os.Stat(upgraded); err != nil {
+		t.Fatalf("the install did not run on the skip path: %v", err)
+	}
+	for _, want := range []string{"is up to date with origin", "suite skipped", "pushed main to origin"} {
+		if !strings.Contains(y.log, want) {
+			t.Fatalf("the log lacks %q:\n%s", want, y.log)
+		}
+	}
+	if got := y.git(y.repo, "rev-parse", "main"); got != base {
+		t.Fatalf("main moved to %s, want it left at %s", got, base)
+	}
+	if got := y.git(remote, "rev-parse", "main"); got != base {
+		t.Fatalf("origin main %s, want %s", got, base)
+	}
+}
+
+// Every empty landing whose fetch did not confirm the base was already up
+// to date tests exactly as before: a base brought up by the fetch, a base
+// ahead of the remote, a missing remote branch, a failed fetch, or no
+// remote at all.
+func TestMergeLocalEmptyBranchWithoutUpToDateFetchStillTests(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		setup func(t *testing.T) (*yard, string)
+	}{
+		{
+			name: "moved_base",
+			setup: func(t *testing.T) (*yard, string) {
+				y, remote := pushYard(t)
+				pushed := pushRemote(t, y, remote, "m.txt", "laptop\n")
+				return y, pushed
+			},
+		},
+		{
+			name: "base_ahead",
+			setup: func(t *testing.T) (*yard, string) {
+				y, _ := pushYard(t)
+				y.commit(y.repo, "c.txt", "landed but not pushed\n")
+				return y, y.git(y.repo, "rev-parse", "main")
+			},
+		},
+		{
+			name: "no_remote_branch",
+			setup: func(t *testing.T) (*yard, string) {
+				y, remote := pushYard(t)
+				y.git(remote, "update-ref", "-d", "refs/heads/main")
+				return y, y.git(y.repo, "rev-parse", "main")
+			},
+		},
+		{
+			name: "failed_fetch",
+			setup: func(t *testing.T) (*yard, string) {
+				y := newYard(t)
+				y.push = "missing-remote"
+				return y, y.git(y.repo, "rev-parse", "main")
+			},
+		},
+		{
+			name: "no_push",
+			setup: func(t *testing.T) (*yard, string) {
+				y := newYard(t)
+				return y, y.git(y.repo, "rev-parse", "main")
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			y, wantMain := tc.setup(t)
+			ran := filepath.Join(y.home, "ran")
+			y.tests("echo ran >>" + ran)
+
+			y.assembly()
+
+			if b := y.bead(); b.Stage != "merged" || b.Status != "closed" {
+				t.Fatalf("bead %s/%s, want merged and closed:\n%s", b.Stage, b.Status, y.notes())
+			}
+			if n := runs(t, ran); n != 1 {
+				t.Fatalf("the test command ran %d times on an empty branch (%s), want 1", n, tc.name)
+			}
+			if strings.Contains(y.notes(), "suite skipped") {
+				t.Fatalf("the note says the suite was skipped (%s):\n%s", tc.name, y.notes())
+			}
+			if !strings.Contains(y.notes(), "tested with the command") {
+				t.Fatalf("the note does not say the base was tested (%s):\n%s", tc.name, y.notes())
+			}
+			if got := y.git(y.repo, "rev-parse", "main"); got != wantMain {
+				t.Fatalf("main %s, want %s", got, wantMain)
+			}
+		})
+	}
+}
+
+// The skip is for empty branches alone: a bead's own commit over an
+// up-to-date base is tested as before.
+func TestMergeLocalNonEmptyBranchUpToDateStillTests(t *testing.T) {
+	y, _ := pushYard(t)
+	ran := filepath.Join(y.home, "ran")
+	y.tests("echo ran >>" + ran)
+	y.commit(y.wt, "b.txt", "bead\n")
+
+	y.assembly()
+
+	if b := y.bead(); b.Stage != "merged" || b.Status != "closed" {
+		t.Fatalf("bead %s/%s, want merged and closed:\n%s", b.Stage, b.Status, y.notes())
+	}
+	if n := runs(t, ran); n != 1 {
+		t.Fatalf("the test command ran %d times on a non-empty branch, want 1", n)
+	}
+	if strings.Contains(y.notes(), "suite skipped") {
+		t.Fatalf("the note says the suite was skipped on a non-empty branch:\n%s", y.notes())
+	}
+}
+
 // A deleted remote branch must not be mistaken for its stale
 // remote-tracking ref: landing starts from the local base as it is.
 func TestMergeLocalDeletedRemoteBranchLandsOnBaseAsIs(t *testing.T) {
