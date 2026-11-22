@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
 )
@@ -187,5 +188,102 @@ func TestSourceCheckAs(t *testing.T) {
 		!strings.Contains(out, "open: credential: CRM_TOKEN is set in "+keyed.File+"\n") ||
 		!strings.Contains(out, "open: its file names no check call (check: <a read call without parameters>), so nothing was sent as ada\n") {
 		t.Fatalf("a check with no check call = %q, %v", out, err)
+	}
+}
+
+const boundCheckedSource = `name: gog
+base: BASE
+credential:
+  env: GOG_TOKEN
+  header: "Authorization: Bearer {credential}"
+  mint:
+    - name: GOG_ACCOUNT
+      secret: false
+      bound: true
+check: ping
+calls:
+  ping: { kind: read, request: { method: GET, path: /me } }
+`
+
+// yardr source check --as holds a bound input to one holder: ada's own
+// account checks, the yard's account in her file (set by hand, past
+// every giving) is refused before anything is sent, and the yard's own
+// check mints as it always has. No existing check test drives a bound
+// declaration, so this one stands beside TestSourceCheckAs.
+func TestSourceCheckAsBound(t *testing.T) {
+	t.Parallel()
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.URL.Path != "/me" || r.Header.Get("Authorization") != "Bearer tok-bound-minted" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		fmt.Fprint(w, `{"id":"app"}`)
+	}))
+	defer srv.Close()
+	st := storetest.New(t)
+	ctx := context.Background()
+	if err := st.SetSetting(ctx, store.OperatorSetting, "jo", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []string{"ada", "bia", "cyn", "peer/dan"} {
+		if _, err := st.AddUser(ctx, u, "jo"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	jo := &app{st: st, actor: "jo", cfg: &config.Config{Home: t.TempDir()}}
+	file := filepath.Join(t.TempDir(), "gog.yaml")
+	if err := os.WriteFile(file, []byte(strings.Replace(boundCheckedSource, "BASE", srv.URL, 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, jo.sourceCmd(), "add", file); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, "mint")
+	body := "#!/bin/sh\ncat >/dev/null\nprintf '{\"token\":\"tok-bound-minted\",\"expires_at\":\"2999-01-01T00:00:00Z\"}'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, jo.sourceCmd(), "set", "gog", "mint_command="+script); err != nil {
+		t.Fatal(err)
+	}
+	const yardAddr, adaAddr, biaAddr = "yard@example.com", "ada@example.com", "bia@example.com"
+	if _, err := st.KeySource(ctx, "gog", map[string]string{"GOG_ACCOUNT": yardAddr}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	adaKeyed, err := st.KeyUserCredential(ctx, "ada", "gog", map[string]string{"GOG_ACCOUNT": adaAddr}, "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.KeyUserCredential(ctx, "bia", "gog", map[string]string{"GOG_ACCOUNT": biaAddr}, "bia"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, jo.sourceCmd(), "check", "gog", "--as", "ada")
+	if err != nil || !strings.Contains(out, "gog: check call ping (GET /me) as ada: 200 in ") || hits != 1 {
+		t.Fatalf("check --as ada on her own account = %q, %v, after %d hits", out, err, hits)
+	}
+	// By hand: ada (which sorts before bia) now names bia's account.
+	if _, _, err := store.WriteEnvFile(adaKeyed.File, map[string]string{"GOG_ACCOUNT": biaAddr}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = run(t, jo.sourceCmd(), "check", "gog", "--as", "ada"); err == nil ||
+		!strings.Contains(err.Error(), "GOG_ACCOUNT in "+adaKeyed.File+" names bia's account, not ada's") ||
+		strings.Contains(err.Error(), biaAddr) || hits != 1 {
+		t.Fatalf("check --as ada on bia's account = %v, after %d hits", err, hits)
+	}
+	// By hand: her file now names the yard's account.
+	if _, _, err := store.WriteEnvFile(adaKeyed.File, map[string]string{"GOG_ACCOUNT": yardAddr}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = run(t, jo.sourceCmd(), "check", "gog", "--as", "ada"); err == nil ||
+		!strings.Contains(err.Error(), "GOG_ACCOUNT in "+adaKeyed.File+" names the yard's account, not ada's") ||
+		!strings.Contains(err.Error(), "a bound input belongs to one holder") || strings.Contains(err.Error(), yardAddr) || hits != 1 {
+		t.Fatalf("check --as ada on the yard's account = %v, after %d hits", err, hits)
+	}
+	if out, err = run(t, jo.sourceCmd(), "check", "gog"); err != nil ||
+		!strings.Contains(out, "gog: check call ping (GET /me): 200 in ") || hits != 2 {
+		t.Fatalf("the yard's own check = %q, %v, after %d hits", out, err, hits)
 	}
 }

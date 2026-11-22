@@ -1002,7 +1002,15 @@ every name typed with a host. The asker has no flag for it: `yardr bead ask
   only names marked this way is shown in the clear by `yardr chat` and by
   clients that honor its `concealed` field. Mixed and secret asks
   remain hidden. This changes how the value is drawn, not where it is
-  written or kept. The file may bring the command itself,
+  written or kept. Mark an input that names its holder's account with
+  `bound: true` beside it (`{ name: GOOGLE_ACCOUNT, secret: false,
+  bound: true }`): its value then belongs to one holder, the yard in the
+  source's own file or one user in theirs, and the yard refuses it for
+  any other holder when it is given (`yardr source key`, an answered
+  secret ask) and when a call made as a user reads it, a file edited by
+  hand included; the refusal names the holder and the giving that frees
+  it, and never the value. A call of the yard's own is not refused: it
+  reads the yard's holder's value as it always has. The file may bring the command itself,
   `credential.mint_command: [<file>]`, a program beside the file that the
   yard copies under `<home>/sources/<name>/` and hashes as it does every
   command's: a card that adds or changes it shows its sha256, and a pack

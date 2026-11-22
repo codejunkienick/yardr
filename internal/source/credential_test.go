@@ -162,6 +162,73 @@ func TestReadUserCredential(t *testing.T) {
 	if value, state, err := bare.ReadUserCredential(ctx, "ada", "", nil, Read, testReadEnv); err != nil || value != "" || state != "none: the file names no credential" {
 		t.Fatalf("no credential: %q %q %v", value, state, err)
 	}
+
+	// Held to the bound inputs, a value another holder holds refuses
+	// before anything mints from it; ada's own and nobody's mint. The
+	// refusal names whose it is and the giving that frees it, never the
+	// value.
+	bd, err := Parse("crm.yaml", []byte(strings.Replace(minted, "mint: [CRM_APP_ID, CRM_APP_KEY]",
+		"mint:\n    - CRM_APP_ID\n    - { name: CRM_APP_KEY, secret: false, bound: true }", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bdir := t.TempDir()
+	bscript := mintScript(t, bdir, "2030-01-01T00:00:00Z")
+	bfile := credFile(t, "CRM_APP_ID=app-1\nCRM_APP_KEY=keys/app.pem\n")
+	holder := func(held Holder) BoundHolder {
+		return func(name, value string, except Holder) (Holder, error) {
+			if name != "CRM_APP_KEY" || value != "keys/app.pem" {
+				t.Errorf("asked for %s, never the value in words", name)
+			}
+			if held == except {
+				return Holder{}, nil
+			}
+			return held, nil
+		}
+	}
+	if _, _, err := bd.ReadUserCredentialBound(ctx, "ada", bfile, []string{bscript}, Read, testReadEnv, holder(Holder{Yard: true})); err == nil ||
+		!strings.Contains(err.Error(), "CRM_APP_KEY in "+bfile+" names the yard's account, not ada's") ||
+		!strings.Contains(err.Error(), "a bound input belongs to one holder; ada gives a different CRM_APP_KEY with yardr source key crm --as ada") ||
+		strings.Contains(err.Error(), "keys/app.pem") {
+		t.Fatalf("the yard's value as ada = %v", err)
+	}
+	// A user literally named "yard" does not collide with the yard itself.
+	if _, _, err := bd.ReadUserCredentialBound(ctx, "yard", bfile, []string{bscript}, Read, testReadEnv, holder(Holder{Yard: true})); err == nil ||
+		!strings.Contains(err.Error(), "names the yard's account, not yard's") {
+		t.Fatalf("the yard's value as user named yard = %v", err)
+	}
+	if _, _, err := bd.ReadUserCredentialBound(ctx, "ada", bfile, []string{bscript}, Read, testReadEnv, holder(Holder{User: "yard"})); err == nil ||
+		!strings.Contains(err.Error(), "names yard's account, not ada's") {
+		t.Fatalf("user yard's value as ada = %v", err)
+	}
+	if _, _, err := bd.ReadUserCredentialBound(ctx, "ada", bfile, []string{bscript}, Read, testReadEnv, holder(Holder{User: "bia"})); err == nil ||
+		!strings.Contains(err.Error(), "names bia's account, not ada's") || strings.Contains(err.Error(), "keys/app.pem") {
+		t.Fatalf("bia's value as ada = %v", err)
+	}
+	if n := mintRuns(t, bdir); n != 0 {
+		t.Fatalf("a refused bound value minted %d times", n)
+	}
+	for _, held := range []Holder{{}, {User: "ada"}} {
+		if value, _, err := bd.ReadUserCredentialBound(ctx, "ada", bfile, []string{bscript}, Read, testReadEnv, holder(held)); err != nil || value != "tok-for-run-1" {
+			t.Fatalf("held by %+v: %q %v", held, value, err)
+		}
+	}
+	// A holder that cannot answer fails closed, and the unchecked read
+	// and a static value read as they always have.
+	broken := func(string, string, Holder) (Holder, error) {
+		return Holder{}, errors.New("the holders cannot be read")
+	}
+	if _, _, err := bd.ReadUserCredentialBound(ctx, "ada", bfile, []string{bscript}, Read, testReadEnv, broken); err == nil ||
+		!strings.Contains(err.Error(), "the holders cannot be read") {
+		t.Fatalf("an unreadable holder = %v", err)
+	}
+	if value, _, err := bd.ReadUserCredential(ctx, "ada", bfile, []string{bscript}, Read, testReadEnv); err != nil || value != "tok-for-run-1" {
+		t.Fatalf("unchecked: %q %v", value, err)
+	}
+	oneBound := credFile(t, "CRM_TOKEN=tok-static\n")
+	if value, _, err := bd.ReadUserCredentialBound(ctx, "ada", oneBound, []string{bscript}, Read, testReadEnv, holder(Holder{Yard: true})); err != nil || value != "tok-static" {
+		t.Fatalf("static beside a bound mint: %q %v", value, err)
+	}
 }
 
 // CredentialState says in words where the names are set, the mint's and the

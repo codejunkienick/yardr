@@ -48,6 +48,7 @@ credential:
   mint:
     - name: GOOGLE_ACCOUNT
       secret: false               # an address, asked in the clear
+      bound: true                 # one holder: the yard or one user, never both
   mint_command: [google-mint]       # the file beside this one; the source's own mint_command wins
 check: files
 calls:

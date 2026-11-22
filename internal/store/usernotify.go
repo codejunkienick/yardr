@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	bolt "go.etcd.io/bbolt"
+
+	"yardr.dev/yardr/internal/source"
 )
 
 // The settings of a user: the sources that tell them outside the yard of
@@ -501,6 +503,11 @@ func (w *wtx) keyUser(ctx context.Context, home, name, srcName string, values ma
 			return fmt.Errorf("user %s: the source %s reads %s of a user's file: that name is given, and no other", name, srcName, env)
 		}
 		names = []string{env}
+	}
+	// A bound value another holder has is refused here, before the
+	// file moves: one holder per bound value (bound.go).
+	if err := w.checkBoundValues(src, d, source.Holder{User: name}, values); err != nil {
+		return err
 	}
 	before, file := cloneUser(u), u.EnvFile
 	if file == "" {

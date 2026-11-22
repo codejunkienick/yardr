@@ -1185,7 +1185,7 @@ func (s *Store) CallSource(ctx context.Context, req SourceCall) (*SourceAnswer, 
 	} else if req.As == "" {
 		cred, _, err = d.ReadCredential(ctx, src.EnvFile, src.mintIn(s.home), call.Kind, ReadEnvFileEntries)
 	} else {
-		cred, _, err = d.ReadUserCredential(ctx, req.As, asFile, src.mintIn(s.home), call.Kind, ReadEnvFileEntries)
+		cred, _, err = d.ReadUserCredentialBound(ctx, req.As, asFile, src.mintIn(s.home), call.Kind, ReadEnvFileEntries, s.boundLookup(src))
 	}
 	if err != nil {
 		err = fmt.Errorf("source %s, call %s: %w", d.Name, call.Name, err)

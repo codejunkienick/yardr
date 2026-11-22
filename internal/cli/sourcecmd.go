@@ -1572,7 +1572,7 @@ process for it. Nothing of the request is written anywhere.`,
 				}
 				stateOf = func() (string, error) { return d.UserCredentialState(u.Name, u.EnvFile, store.ReadEnvFileEntries) }
 				readOf = func(ctx context.Context) (string, string, error) {
-					return d.ReadUserCredential(ctx, u.Name, u.EnvFile, src.Mint, source.Read, store.ReadEnvFileEntries)
+					return d.ReadUserCredentialBound(ctx, u.Name, u.EnvFile, src.Mint, source.Read, store.ReadEnvFileEntries, a.boundHolderFor(ctx, st, src))
 				}
 				saidAs = " as " + u.Name
 			}

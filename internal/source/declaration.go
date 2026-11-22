@@ -124,24 +124,20 @@ type Declaration struct {
 
 // Credential is where a source's credential comes from and where it goes.
 type Credential struct {
-	// Env is the name of the variable that holds it, in the env file the
-	// operator sets for the source. The name, never the value.
+	// Env is the name of the variable that holds it (never the value).
 	Env string `json:"env"`
 	// Header is the header it is sent in, "Name: text {credential}", for a
 	// service that takes it there. One that takes it in the body names it
 	// as a leaf of the call's body instead.
 	Header string `json:"header,omitempty"`
 	// UpdateEnv is the name of the variable an update call is sent with,
-	// in the same file, so that the read calls can run on a credential
-	// that may only read. Empty for a source with one credential, which
-	// its updates are sent with too.
+	// in the same file, so reads can run on a read-only credential.
+	// Empty for a source with one credential, used for updates too.
 	UpdateEnv string `json:"update_env,omitempty"`
 	// Mint are the names of the variables that together select a minted
 	// credential: when the acting env sets every one, the core runs the
-	// source's mint_command with their values and hands what it mints to
-	// the call under Env. Names only, never values and never the command,
-	// so a pack may bring them as it brings Env. Empty for a source whose
-	// credential is used as it is set.
+	// source's mint_command and hands what it mints to the call under Env.
+	// Names only, never values. Empty where the credential is used as set.
 	Mint []string `json:"mint,omitempty"`
 	// NotSecret are the mint's inputs that are no secret (an account's
 	// address, not a key): a secret ask narrowed to these alone is asked
@@ -149,12 +145,14 @@ type Credential struct {
 	// secret false beside it; every other variable of the credential is a
 	// secret, and a static token always is.
 	NotSecret []string `json:"not_secret,omitempty"`
+	// Bound are the mint's inputs that belong to one holder (an account's
+	// address, held by one user or the yard), marked with bound true
+	// beside the name. Who holds one is the store's to answer.
+	Bound []string `json:"bound,omitempty"`
 	// MintCommand is the command the declaration brings to mint with: a
-	// program that is a file beside the declaration's, which the yard
-	// copies and hashes as it does every command's, and its arguments.
-	// It is used where the source's own mint_command setting is unset:
-	// the operator's setting wins. Empty for a declaration that brings
-	// none, whose mint is the operator's alone to set.
+	// program beside the declaration's, which the yard copies and hashes,
+	// and its arguments. Used where the source's mint_command setting is
+	// unset (the operator's wins); empty where the declaration brings none.
 	MintCommand []string `json:"mint_command,omitempty"`
 	// InPath says the service takes the credential in the request path,
 	// so a call's path may name {credential}. It is said out loud because
@@ -163,10 +161,8 @@ type Credential struct {
 	InPath bool `json:"in_path,omitempty"`
 	// URL says the credential is the address every call goes to: a
 	// webhook URL whose path is its secret (Zapier, Make, n8n). The file
-	// then names no base and a call has no path of its own. The file
-	// cannot show the address, so a call holds the value to what a base
-	// is, and no error, event or command it is handed to repeats any of
-	// it.
+	// then names no base and a call has no path of its own; no error,
+	// event or command it is handed to repeats any of the address.
 	URL bool `json:"url,omitempty"`
 }
 
@@ -644,11 +640,9 @@ func (r *reader) declaration(d *Declaration, root *yaml.Node) {
 	if calls == nil && (d.Limits != nil || (d.Hook != nil && d.Hook.Register == nil)) {
 		// A source that is its limits command and/or what it sends in,
 		// and nothing else: there is no request, so nothing a request
-		// needs has a meaning. Hearing is not one of those: it keeps
-		// the deliveries by who speaks, which needs no call, so the
-		// hear key is read, and hearing by address refused there with
-		// its own reason, since it names a notify address the file has
-		// none of.
+		// needs has a meaning. Hearing is not one of those (it keeps
+		// deliveries by who speaks, needing no call), so the hear key
+		// is read and hearing by address refused there with its reason.
 		alone := "limits alone"
 		if d.Hook != nil && d.Limits != nil {
 			alone = "hook and limits alone"
@@ -1074,7 +1068,7 @@ func (r *reader) credential(e entry) *Credential {
 			}
 		case "mint":
 			mint = &f
-			c.Mint, c.NotSecret = r.mintNames(f)
+			c.Mint, c.NotSecret, c.Bound = r.mintNames(f)
 		case "mint_command":
 			mintCommand = &f
 			c.MintCommand = r.command(f, "argument")
@@ -1120,8 +1114,7 @@ func (r *reader) credential(e entry) *Credential {
 		r.errf(e.v, join(e.path, "env"), "missing: the name of the variable the credential is in")
 	}
 	// A credential that is the address goes where the call goes and
-	// nowhere else: it has no header or path to be put in, no token to be
-	// minted from other variables, and one variable serves every call.
+	// nowhere else: no header, path, mint or second variable beside it.
 	if c.URL {
 		for _, no := range []struct {
 			e    *entry
@@ -1158,20 +1151,20 @@ func (r *reader) credential(e entry) *Credential {
 
 // mintNames reads the names of the variables that together select a minted
 // credential: a list of one or more, each a name of a variable, never a
-// value, or a name with secret false beside it where the input is no secret
-// (an account's address, asked in the clear). env stays required beside
-// them: it is the variable the minted token is handed under. It answers the
-// names and, among them, the ones marked as no secret.
-func (r *reader) mintNames(e entry) (mint, notSecret []string) {
+// value, or a name with secret false (no secret) or bound true (one holder)
+// beside it. env stays required beside them: it is the variable the minted
+// token is handed under. It answers the names, the no-secret ones, and the
+// bound ones.
+func (r *reader) mintNames(e entry) (mint, notSecret, bound []string) {
 	if e.v.Kind == yaml.SequenceNode && len(e.v.Content) == 0 {
 		r.errf(e.v, e.path, "missing: the names of the variables that together select a minted credential")
-		return nil, nil
+		return nil, nil, nil
 	}
 	if e.v.Kind != yaml.SequenceNode {
 		r.errf(e.v, e.path, "want a list ([a, b]), got %s", describe(e.v))
-		return nil, nil
+		return nil, nil, nil
 	}
-	add := func(n *yaml.Node, name string, secret bool) {
+	add := func(n *yaml.Node, name string, secret, isBound bool) {
 		if !paramName.MatchString(name) {
 			r.errf(n, e.path, "%q is no name of a variable: these are the names the mint's inputs are under in the source's env file, never the values", name)
 			return
@@ -1184,13 +1177,16 @@ func (r *reader) mintNames(e entry) (mint, notSecret []string) {
 		if !secret {
 			notSecret = append(notSecret, name)
 		}
+		if isBound {
+			bound = append(bound, name)
+		}
 	}
 	for _, c := range e.v.Content {
 		if c.Kind == yaml.MappingNode {
 			var name string
 			var hasName bool
-			secret := true
-			for _, f := range r.entries(c, e.path, "name", "secret") {
+			secret, isBound := true, false
+			for _, f := range r.entries(c, e.path, "name", "secret", "bound") {
 				switch f.key {
 				case "name":
 					hasName = true
@@ -1201,6 +1197,10 @@ func (r *reader) mintNames(e entry) (mint, notSecret []string) {
 					if v, ok := r.boolean(f.v, f.path); ok {
 						secret = v
 					}
+				case "bound":
+					if v, ok := r.boolean(f.v, f.path); ok {
+						isBound = v
+					}
 				}
 			}
 			if !hasName {
@@ -1210,14 +1210,14 @@ func (r *reader) mintNames(e entry) (mint, notSecret []string) {
 			if name == "" {
 				continue
 			}
-			add(c, name, secret)
+			add(c, name, secret, isBound)
 			continue
 		}
 		s, ok := r.str(c, e.path)
 		if !ok {
 			continue
 		}
-		add(c, s, true)
+		add(c, s, true, false)
 	}
-	return mint, notSecret
+	return mint, notSecret, bound
 }

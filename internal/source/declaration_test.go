@@ -1198,7 +1198,11 @@ func TestParseCredentialMintSecretFalse(t *testing.T) {
 		},
 		"unknown key": {
 			strings.Replace(minted, "mint: [CRM_APP_ID, CRM_APP_KEY]", "mint: [{ name: CRM_APP_KEY, secret: false, extra: 1 }]", 1),
-			"unknown key (known here: name, secret)",
+			"unknown key (known here: name, secret, bound)",
+		},
+		"bound no boolean": {
+			strings.Replace(minted, "mint: [CRM_APP_ID, CRM_APP_KEY]", "mint: [{ name: CRM_APP_KEY, bound: sometimes }]", 1),
+			"want true or false",
 		},
 		"a name twice across forms": {
 			strings.Replace(minted, "mint: [CRM_APP_ID, CRM_APP_KEY]", "mint: [CRM_APP_ID, { name: CRM_APP_ID, secret: false }]", 1),
@@ -1213,6 +1217,35 @@ func TestParseCredentialMintSecretFalse(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
 		}
+	}
+	// Bound beside secret: the input belongs to one holder. The flow and
+	// block forms read the same, and bound false binds nothing.
+	boundFlow := strings.Replace(minted, "mint: [CRM_APP_ID, CRM_APP_KEY]",
+		"mint:\n    - CRM_APP_ID\n    - { name: CRM_APP_KEY, secret: false, bound: true }", 1)
+	fd, err := Parse("crm.yaml", []byte(boundFlow))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(fd.Credential.Bound, ",") != "CRM_APP_KEY" || strings.Join(fd.Credential.NotSecret, ",") != "CRM_APP_KEY" {
+		t.Fatalf("bound flow form reads as %+v", fd.Credential)
+	}
+	boundBlock := strings.Replace(minted, "mint: [CRM_APP_ID, CRM_APP_KEY]",
+		"mint:\n    - CRM_APP_ID\n    - name: CRM_APP_KEY\n      secret: false\n      bound: true", 1)
+	kd, err := Parse("crm.yaml", []byte(boundBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(kd.Credential.Bound, ",") != "CRM_APP_KEY" {
+		t.Fatalf("bound block form reads as %+v", kd.Credential)
+	}
+	unbound := strings.Replace(minted, "mint: [CRM_APP_ID, CRM_APP_KEY]",
+		"mint: [{ name: CRM_APP_KEY, secret: false, bound: false }]", 1)
+	ud, err := Parse("crm.yaml", []byte(unbound))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ud.Credential.Bound) != 0 || len(d.Credential.Bound) != 0 {
+		t.Fatalf("bound false or absent binds: %+v, %+v", ud.Credential, d.Credential)
 	}
 }
 

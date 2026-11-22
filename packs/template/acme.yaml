@@ -35,6 +35,14 @@ credential:
   # env sets every mint name the token is minted; one of them alone is
   # refused; otherwise the variable above is used as it is set.
   mint: [ACME_APP_ID, ACME_APP_KEY_FILE]
+  # An input that names its holder's account belongs to that one holder:
+  # write it as a mapping with bound beside secret, and the yard refuses
+  # that value for any other holder, when it is given and when a call
+  # made as a user reads it:
+  # mint:
+  #   - name: ACME_ACCOUNT
+  #     secret: false
+  #     bound: true
   # The command that turns the mint names' values into a token: run with
   # {inputs, scope} on stdin, answering {token, expires_at}. A
   # declaration may bring it, a program beside this one that

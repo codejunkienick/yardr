@@ -27,8 +27,9 @@ the yard holds for each source. A person's own account answers the
 calls made as them, `yardr call google-mail search --as ada …`, made
 with the credential in their user file. The steps below set the
 yard's account up first, then one person's, ada's; the operator's own
-is a second person of the same shape, kept apart from the yard's
-even where it is the same address.
+is a second person of the same shape, with an address of its own: an
+address belongs to one holder, so the yard's address is never also a
+person's (step 3).
 
 Everything a crew member asks for — a user added, a pack's whole
 setup, a grant plain or `as` — is a card, answered in
@@ -161,6 +162,14 @@ once per person.
 
 ## Step 3. The account
 
+`GOOGLE_ACCOUNT` is bound: each address belongs to one holder, the
+yard or one person, and no other holder may be given it or call with
+it. A giving that names an address another holder has is refused,
+naming the holder and the giving that frees it, and a call made as a
+person whose file names another holder's address is refused the same
+way, a file edited by hand included. Give each holder an address of
+their own.
+
 The yard's own first: one card per pack, each naming
 `GOOGLE_ACCOUNT`, the address step 1 showed. A crew member asks,
 and the operator answers where the field shows dots. The first
@@ -264,18 +273,20 @@ yardr source key google-mail --as ada
 # ada gave GOOGLE_ACCOUNT · it is set in ~/.yardr/users/ada.env · yardr source check google-mail --as ada
 ```
 
-The operator called as is kept apart: once he is a user (step 0),
-the same card with `--as mckean` gives his account a second time
-into `~/.yardr/users/mckean.env`, with its own login under step
-1's directory, though it is the same address as the yard's — one
-setup for the yard's calls, one for calls as him, since either may
-change alone.
+The operator called as needs an address of his own: once he is a
+user (step 0), the same card with `--as mckean` gives his second
+address into `~/.yardr/users/mckean.env`, with its own login under
+step 1's directory for that address. The yard's address cannot be
+given again as his — it is the yard's already, and the giving is
+refused — so calls as him take a second Google account, or are not
+set up at all: with only the yard's address, drop the `--as` card
+and make the plain calls.
 
 ```sh
 yardr bead ask <bead> - --secret google-mail --as mckean <<'ASK'
 Your Google account, to be called as
-The address step 1 showed: the address alone, no token.
-Kept apart from the yard's own: one setup for its calls, one for calls as you.
+Your second address, not the yard's: the address alone, no token.
+Kept apart from the yard's own: one address for its calls, one for calls as you.
 ASK
 ```
 

@@ -363,6 +363,16 @@ presets. Nothing is granted until the operator grants it, at an ask or with
 | a process of its own that keeps running | not offered | |
 | state of its own | not offered | a pack keeps what it must remember on beads, with `bead update --meta`, notes and links |
 
+A mint input written as a mapping (`- name: <variable>`) takes `secret`
+and `bound` beside the name. `secret: false` marks a value that is no
+secret, such as an account address, and is drawn in the clear.
+`bound: true` binds the value to one holder — the yard in the source's
+own file, or one user in theirs — and the yard refuses that value for
+any other holder, when it is given and when a call made as a user reads
+it. Both are read for every pack, as every key of a declaration is
+([A declaration added by hand](#a-declaration-added-by-hand)): a
+declaration carries no API number of its own.
+
 ## What each number added
 
 The last heading here is the highest API this yardr reads.

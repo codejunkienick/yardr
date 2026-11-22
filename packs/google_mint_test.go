@@ -714,5 +714,8 @@ func TestGoogleMintCopiesAgree(t *testing.T) {
 		if got := d.Credential.MintCommand; len(got) != 1 || got[0] != "google-mint" {
 			t.Errorf("%s: credential.mint_command = %q, want [google-mint]", file, got)
 		}
+		if got := d.Credential.Bound; len(got) != 1 || got[0] != "GOOGLE_ACCOUNT" {
+			t.Errorf("%s: credential.bound = %q, want [GOOGLE_ACCOUNT]: the account belongs to one holder", file, got)
+		}
 	}
 }

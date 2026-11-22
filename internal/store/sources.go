@@ -912,6 +912,10 @@ func (w *wtx) keySource(ctx context.Context, home, name string, values map[strin
 	if err := checkURLCredential(d, name, values); err != nil {
 		return err
 	}
+	// A bound value a user holds is refused for the yard (bound.go).
+	if err := w.checkBoundValues(src, d, source.Holder{Yard: true}, values); err != nil {
+		return err
+	}
 	before := *src
 	file := src.EnvFile
 	setFile := file == ""
