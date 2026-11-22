@@ -44,6 +44,18 @@ func (s AskSecret) Reach() []string {
 			"replaces: what the file holds; where the hook stands already, deliveries signed with the old secret are refused from then on",
 			"not reached: any env_file, call or thread command",
 		}
+	case s.Google != "" && s.As != "":
+		return []string{
+			fmt.Sprintf("lands in: .config/gws-accounts/%s/credentials.json in the yard machine's home, mode 0600", s.Google),
+			fmt.Sprintf("read by: google-mint, minting a token for calls made as %s (yardr call ... --as %s)", s.As, s.As),
+			"not reached: calls made without --as, other users' accounts, any env_file",
+		}
+	case s.Google != "":
+		return []string{
+			"lands in: .config/gws/credentials.json in the yard machine's home, mode 0600",
+			"read by: google-mint, minting a token for the yard's Google calls",
+			"not reached: calls made as a user, which read that account's own file; any env_file",
+		}
 	case s.User != "":
 		return []string{
 			fmt.Sprintf("lands in: %s's env_file, or users/%s.env in the yard's home when it has none", s.User, s.User),

@@ -86,7 +86,8 @@ type AskCard struct {
 	// fields and Give button, on its bead's page alone where the operator's
 	// window holds the gate, under a fresh sign-in. A member gives their
 	// own login input from a paired device, so the hosted page offers no
-	// giving to a member.
+	// giving to a member. A person's own Google sign-in is theirs alone
+	// likewise, so no page offers its giving to anyone.
 	Give bool
 }
 
@@ -247,7 +248,8 @@ func (p BeadPage) Card(a store.BeadAsk) AskCard {
 	out.Answer = out.Words && len(a.Options) == 0 && a.Run == nil
 	out.Says = a.Run != nil || a.Setup != nil
 	out.Approve = (a.Run != nil || a.Setup != nil) && approvable(a.Weight, true, p.site.Gate, p.site.Operator, ownCard(a, p.As))
-	out.Give = a.Secret != nil && p.site.Gate && p.site.Operator
+	out.Give = a.Secret != nil && p.site.Gate && p.site.Operator &&
+		!(a.Secret.Google != "" && a.Secret.As != "")
 	if a.Secret != nil {
 		out.Secret = &cardSecret{Line: a.Secret.Line, Env: a.Secret.Env, Reach: a.Secret.Reach}
 	}

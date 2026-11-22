@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -33,6 +34,26 @@ const memberRefusal = "a secret from a member's device does not cross the edge, 
 // ciphertext.
 const memberRefusalSealed = "a secret from a member's device does not cross the edge, except the code of their own sign-in from a sealed device (pairing the device with the QR makes it one); " +
 	"the operator gives any other on the yard's machine, from their own sealed device, or from any paired device of theirs where the yard is hosted."
+
+// memberGoogleRefusal is what a member's device is told of their own
+// Google sign-in given down the link from a device that is no QR-paired
+// one: it names the QR-paired device and the terminal command, and never
+// the operator, who is refused that giving. A plain call is told the
+// edge saw what was sent with it; a sealed one's (memberGoogleRefusalSealed)
+// drops that sentence, since it crossed as ciphertext.
+const memberGoogleRefusal = "your Google sign-in does not cross the edge from this device: it crosses only from a device paired with the QR (pairing the device with the QR makes it one), " +
+	"or in a terminal (yardr bead answer <bead> <ask> --secret); it is yours alone to give, and the operator does not give it." +
+	" The edge saw what was sent with it: if it was a real key, make a new one at the service."
+
+const memberGoogleRefusalSealed = "your Google sign-in does not cross the edge from this device: it crosses only from a device paired with the QR (pairing the device with the QR makes it one), " +
+	"or in a terminal (yardr bead answer <bead> <ask> --secret); it is yours alone to give, and the operator does not give it."
+
+// The stand-in export sam pastes from their own machine, and the refresh
+// token inside it: what a giving must never print.
+const (
+	samGoogleExport  = "{\n  \"client_id\": \"123-fake.apps.googleusercontent.com\",\n  \"client_secret\": \"GOCSPX-fake-sam-secret\",\n  \"refresh_token\": \"1//fake-sam-refresh\",\n  \"type\": \"authorized_user\"\n}"
+	samGoogleRefresh = "1//fake-sam-refresh"
+)
 
 // memberYard is a yard whose member sam has a login of their own waiting for
 // the code its sign-in page shows: the group that carries sam's login, the ask
@@ -245,6 +266,160 @@ func (y *memberYard) takes(t *testing.T, d *e2eDevice, via string) {
 	}
 	if got := y.answeredBy(t); !slices.Equal(got, []string{via}) {
 		t.Errorf("the giving is answered on the bead by %q, want %q", got, via)
+	}
+}
+
+// samGoogleAsk puts the ask for sam's own Google sign-in on the bead and
+// answers its number.
+func (y *memberYard) samGoogleAsk(t *testing.T) uint64 {
+	t.Helper()
+	return y.ask(t, "sam", &store.AskSecret{Google: "sam@example.com", As: "sam"})
+}
+
+// samGoogleFile is where sam's pasted sign-in lands under home.
+func samGoogleFile(home string) string {
+	return filepath.Join(home, ".config", "gws-accounts", "sam@example.com", "credentials.json")
+}
+
+// googleLands checks a giving of sam's sign-in wrote its credentials
+// file under home at 0600, stripped to one line, was answered on the
+// bead by via, and holds in no note.
+func (y *memberYard) googleLands(t *testing.T, home, via string) {
+	t.Helper()
+	file := samGoogleFile(home)
+	st, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("the credentials file is mode %04o, want 0600", st.Mode().Perm())
+	}
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "\n") || !strings.Contains(string(raw), samGoogleRefresh) {
+		t.Fatalf("the credentials file holds %q", raw)
+	}
+	if got := y.answeredBy(t); !slices.Equal(got, []string{via}) {
+		t.Errorf("the giving is answered on the bead by %q, want %q", got, via)
+	}
+	notes, err := y.st.Notes(context.Background(), "yd-crm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range notes {
+		if strings.Contains(n.Text, samGoogleRefresh) || strings.Contains(n.Text, "GOCSPX-fake-sam-secret") {
+			t.Errorf("note %d holds the pasted value: %q", n.Seq, n.Text)
+		}
+	}
+}
+
+// noGoogleFile fails the test when a refused giving wrote sam's
+// credentials file or answered the bead.
+func (y *memberYard) noGoogleFile(t *testing.T, home, after string) {
+	t.Helper()
+	if _, err := os.Stat(samGoogleFile(home)); !os.IsNotExist(err) {
+		t.Errorf("%s: sam's credentials file stands: %v", after, err)
+	}
+	if got := y.answeredBy(t); len(got) != 0 {
+		t.Errorf("%s: the bead is answered %q", after, got)
+	}
+}
+
+// A member's device gives their own Google sign-in down the link from
+// the edge when the call came sealed from a device paired with the QR,
+// on a yard that is not hosted and on a hosted one alike: the pasted
+// export lands as their credentials file. A device sealed in place is
+// refused, since the export is a refresh token that is written to disk
+// and lasts where the login code is used once and kept in memory; a
+// call that came plain is refused too, each in the Google sentence,
+// and neither spends the ask. Another member's ask and the yard's own
+// are not there for a member's device, and the operator standing in is
+// refused by the store, whose giving this is sam's alone.
+func TestMemberGivesTheirOwnGoogleSignInDownTheLink(t *testing.T) {
+	for _, hosted := range []bool{false, true} {
+		name := "connected yard"
+		if hosted {
+			name = "hosted yard"
+		}
+		t.Run(name, func(t *testing.T) {
+			values := map[string]string{"GOOGLE_CREDENTIALS": samGoogleExport}
+			t.Run("sealed, paired with the QR", func(t *testing.T) {
+				home := t.TempDir()
+				t.Setenv("HOME", home)
+				y := newMemberYard(t, hosted)
+				ask := y.samGoogleAsk(t)
+				given, refused := y.sealedGive(t, newE2EDevice(t, y.pairYard, "sam", "phone"), giveArgs(t, ask, values))
+				if refused != "" || given == nil || given.Google != "sam@example.com" || given.As != "sam" || !slices.Equal(given.Given, []string{"GOOGLE_CREDENTIALS"}) {
+					t.Fatalf("the sealed giving is answered %+v, refused %q, want sam's Google sign-in given", given, refused)
+				}
+				y.googleLands(t, home, "sam via phone via edge")
+			})
+			t.Run("sealed in place", func(t *testing.T) {
+				home := t.TempDir()
+				t.Setenv("HOME", home)
+				y := newMemberYard(t, hosted)
+				ask := y.samGoogleAsk(t)
+				given, refused := y.sealedGive(t, y.inPlaceDevice(t, "sam", "tablet"), giveArgs(t, ask, values))
+				if given != nil || refused != memberGoogleRefusalSealed {
+					t.Fatalf("the in-place giving is answered %+v, refused %q, want it refused as %q", given, refused, memberGoogleRefusalSealed)
+				}
+				y.noGoogleFile(t, home, "a device sealed in place")
+				// Nothing was spent: the QR-paired device gives it.
+				given, refused = y.sealedGive(t, newE2EDevice(t, y.pairYard, "sam", "phone"), giveArgs(t, ask, values))
+				if refused != "" || given == nil {
+					t.Fatalf("the QR-paired giving after it is answered %+v, refused %q", given, refused)
+				}
+				y.googleLands(t, home, "sam via phone via edge")
+			})
+			t.Run("plain", func(t *testing.T) {
+				home := t.TempDir()
+				t.Setenv("HOME", home)
+				y := newMemberYard(t, hosted)
+				ask := y.samGoogleAsk(t)
+				token := y.plainDevice(t, "sam", "slate")
+				given, refused := y.plainGive(t, token, giveArgs(t, ask, values))
+				if given != nil || refused != memberGoogleRefusal {
+					t.Fatalf("sam's plain giving is answered %+v, refused %q, want it refused as %q", given, refused, memberGoogleRefusal)
+				}
+				y.noGoogleFile(t, home, "a plain call")
+				given, refused = y.sealedGive(t, newE2EDevice(t, y.pairYard, "sam", "phone"), giveArgs(t, ask, values))
+				if refused != "" || given == nil {
+					t.Fatalf("the sealed giving after it is answered %+v, refused %q", given, refused)
+				}
+				y.googleLands(t, home, "sam via phone via edge")
+			})
+			t.Run("another member's ask is not there", func(t *testing.T) {
+				t.Setenv("HOME", t.TempDir())
+				y := newMemberYard(t, hosted)
+				ask := y.samGoogleAsk(t)
+				given, refused := y.sealedGive(t, newE2EDevice(t, y.pairYard, "kim", "phone"), giveArgs(t, ask, values))
+				if given != nil || refused != noSuchMethodMessage {
+					t.Fatalf("kim's giving of sam's ask is answered %+v, refused %q, want it not there", given, refused)
+				}
+			})
+			t.Run("the yard's own ask is not there", func(t *testing.T) {
+				t.Setenv("HOME", t.TempDir())
+				y := newMemberYard(t, hosted)
+				ask := y.ask(t, "jo", &store.AskSecret{Google: "yard@example.com"})
+				given, refused := y.sealedGive(t, newE2EDevice(t, y.pairYard, "sam", "phone"), giveArgs(t, ask, values))
+				if given != nil || refused != noSuchMethodMessage {
+					t.Fatalf("sam's giving of the yard's ask is answered %+v, refused %q, want it not there", given, refused)
+				}
+			})
+			t.Run("the operator standing in is refused", func(t *testing.T) {
+				home := t.TempDir()
+				t.Setenv("HOME", home)
+				y := newMemberYard(t, hosted)
+				ask := y.samGoogleAsk(t)
+				given, refused := y.sealedGive(t, newE2EDevice(t, y.pairYard, "jo", "laptop"), giveArgs(t, ask, values))
+				if given != nil || !strings.Contains(refused, "only sam may") {
+					t.Fatalf("the operator's giving of sam's ask is answered %+v, refused %q, want sam's alone", given, refused)
+				}
+				y.noGoogleFile(t, home, "the operator standing in")
+			})
+		})
 	}
 }
 
@@ -493,6 +668,64 @@ func TestOwnLoginInputIsTheWholeAsk(t *testing.T) {
 	} {
 		if ownLoginInput(c.ask, c.user) {
 			t.Errorf("%s: %+v is taken for %q's login input", c.name, c.ask, c.user)
+		}
+	}
+	if valid.As != "sam" {
+		t.Error("the predicate changed the ask it was given")
+	}
+}
+
+// The ask for a member's own Google sign-in is taken for no other: the
+// predicate compares the ask with the form the yard stores for it, but
+// for the scopes the asker narrowed, so a field that AskSecret gains
+// later is refused until this test is taught it, and not taken because
+// nothing looked at the field.
+func TestGoogleSignInOfIsTheWholeAsk(t *testing.T) {
+	valid := store.AskSecret{Env: []string{"GOOGLE_CREDENTIALS"}, Google: "sam@example.com", As: "sam", Scopes: []string{"gmail", "drive"}}
+	if !valid.GoogleSignInOf("sam") {
+		t.Fatal("the form the yard stores for sam's Google sign-in is not taken for it")
+	}
+	typ := reflect.TypeOf(valid)
+	for i := range typ.NumField() {
+		name := typ.Field(i).Name
+		if name == "Env" || name == "Google" || name == "As" || name == "Scopes" {
+			continue
+		}
+		bad := valid
+		field := reflect.ValueOf(&bad).Elem().Field(i)
+		switch field.Kind() {
+		case reflect.String:
+			field.SetString("x")
+		case reflect.Bool:
+			field.SetBool(true)
+		case reflect.Slice:
+			field.Set(reflect.Append(reflect.MakeSlice(field.Type(), 0, 1), reflect.Zero(field.Type().Elem())))
+		case reflect.Pointer:
+			field.Set(reflect.New(field.Type().Elem()))
+		default:
+			t.Fatalf("AskSecret.%s is a %s: teach this test to set one", name, field.Kind())
+		}
+		if bad.GoogleSignInOf("sam") {
+			t.Errorf("an ask with %s set is taken for sam's Google sign-in", name)
+		}
+	}
+	for _, c := range []struct {
+		name string
+		ask  store.AskSecret
+		user string
+	}{
+		{"another user's sign-in", valid, "kim"},
+		{"no user", valid, ""},
+		{"the yard's form, with no one's own", store.AskSecret{Env: []string{"GOOGLE_CREDENTIALS"}, Google: "sam@example.com", Scopes: []string{"gmail"}}, "sam"},
+		{"no account", store.AskSecret{Env: []string{"GOOGLE_CREDENTIALS"}, As: "sam", Scopes: []string{"gmail"}}, "sam"},
+		{"another name", store.AskSecret{Env: []string{"OTHER"}, Google: "sam@example.com", As: "sam", Scopes: []string{"gmail"}}, "sam"},
+		{"two names", store.AskSecret{Env: []string{"GOOGLE_CREDENTIALS", "OTHER"}, Google: "sam@example.com", As: "sam", Scopes: []string{"gmail"}}, "sam"},
+		{"no name", store.AskSecret{Google: "sam@example.com", As: "sam", Scopes: []string{"gmail"}}, "sam"},
+		{"no scopes", store.AskSecret{Env: []string{"GOOGLE_CREDENTIALS"}, Google: "sam@example.com", As: "sam"}, "sam"},
+		{"a service gws has none of", store.AskSecret{Env: []string{"GOOGLE_CREDENTIALS"}, Google: "sam@example.com", As: "sam", Scopes: []string{"bogus"}}, "sam"},
+	} {
+		if c.ask.GoogleSignInOf(c.user) {
+			t.Errorf("%s: %+v is taken for %q's Google sign-in", c.name, c.ask, c.user)
 		}
 	}
 	if valid.As != "sam" {

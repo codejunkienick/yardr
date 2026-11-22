@@ -28,6 +28,7 @@ var allowSerial = map[string]string{
 	"TestBareYardrFinishesAYardWithoutDefaultKind":          "resumeYard,startsYardmaster,stubPane",
 	"TestBareYardrLeavesOtherYardsAlone":                    "holdDaemon,resumeYard,setInteractive,startsYardmaster",
 	"TestBareYardrStartsAYardThatDidNotStart":               "resumeYard,startsYardmaster,stubPane",
+	"TestBeadAskAndAnswerAGoogleSignIn":                     "t.Setenv",
 	"TestBeadAskDepotPush":                                  "depotPushCLIYard",
 	"TestBeadListWithClosedIsCut":                           "stub:listLimit",
 	"TestChatCommand":                                       "chatYard",

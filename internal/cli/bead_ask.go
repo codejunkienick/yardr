@@ -18,7 +18,7 @@ func (a *app) newBeadAskCmd() *cobra.Command {
 	var askRecommend int
 	var askNew bool
 	var askBead store.NewBead
-	var askSecret, askForUser, askForCrew, askAs, askRun, askRunTest, askRunRole, askSecretLogin, askSecretHook, askHookSource string
+	var askSecret, askForUser, askForCrew, askAs, askRun, askRunTest, askRunRole, askSecretLogin, askSecretHook, askHookSource, askSecretGoogle string
 	var askRunFlow string
 	var askRunSays, askRunMakes, askRunWords, askRunFlowLines, askRunChainLines []string
 	var askSetup string
@@ -229,6 +229,22 @@ a hook that serves another source, or a standing hook with a custom secret file.
 file is rotated by this ask: giving replaces what the file holds. For a new hook, this is the first ask; the hook itself
 is the second ask on the same bead (--run hook add <hook> --source <source>, or R: on stdin): the operator gives the
 secret first, then approves the hook, whose approval runs only with the secret standing in its file.
+
+--secret-google <account> asks for the sign-in of the Google account
+<account>: the output of gws auth export --unmasked, pasted unseen from
+the machine that signed in with gws auth login -s
+gmail,drive,docs,slides,calendar, since gws's browser sign-in waits on
+that machine and cannot be led from a hosted yard. The yard's server
+writes it to the account's credentials file (the yard's own at
+~/.config/gws/credentials.json, a person's at
+~/.config/gws-accounts/<account>/credentials.json, mode 0600), which
+google-mint reads for the yard's Google calls; the value is in no note,
+event, mail, brief or pane, as for --secret, and anything but that
+export's authorized_user JSON is refused. It is asked of the operator
+for the yard's own account. With --as <user> the account is that
+user's own: it is asked of them alone, and they alone give it, the
+operator included among everyone refused, since the paste holds their
+refresh token. It takes no --env, no --for-user and no --for-crew.
 
 --run <command>, or R: <command> on stdin, proposes one yardr command that is
 the operator's to give, for the operator to approve: a crew member that needs it asks this way instead
@@ -441,6 +457,14 @@ what the person asked does, and this is the asker's own.`,
   The signing secret for it
   It is shown once where the webhook is made in the service.
   ASK
+  yardr bead ask yardr-k3vd - --secret-google ada@example.com <<'ASK'
+  The yard's Google sign-in
+  Sign in with gws auth login on your machine, then paste gws auth export --unmasked.
+  ASK
+  yardr bead ask yardr-k3vd - --secret-google ada@example.com --as ada <<'ASK'
+  Your Google sign-in
+  Sign in with gws auth login on your machine, then paste gws auth export --unmasked.
+  ASK
   yardr bead ask yardr-k3vd - <<'ASK'
   Q: Set up the webhook?
   C: The signing secret is asked for on the ask above; give it first.
@@ -501,7 +525,7 @@ what the person asked does, and this is the asker's own.`,
 			if err := askFromStdin(c, args); err != nil {
 				return err
 			}
-			if len(askEnv) > 0 && askSecret == "" && !c.Flags().Changed("secret-login") && !c.Flags().Changed("secret-hook") {
+			if len(askEnv) > 0 && askSecret == "" && !c.Flags().Changed("secret-login") && !c.Flags().Changed("secret-hook") && !c.Flags().Changed("secret-google") {
 				return fmt.Errorf("--env narrows a secret ask: it goes with --secret <source>")
 			}
 			switch {
@@ -536,6 +560,14 @@ what the person asked does, and this is the asker's own.`,
 				return fmt.Errorf("--for-user says whose own address in a source is asked for: it goes with --secret <source>, not --setup")
 			case c.Flags().Changed("setup") && askForCrew != "":
 				return fmt.Errorf("--for-crew says whose own credential in a source is asked for: it goes with --secret <source>, not --setup")
+			case c.Flags().Changed("secret-google") && len(askEnv) > 0:
+				return fmt.Errorf("--secret-google takes no --env: the export is one value")
+			case c.Flags().Changed("secret-google") && askForUser != "":
+				return fmt.Errorf("--secret-google takes no --for-user: a person's own is asked with --as <user>")
+			case c.Flags().Changed("secret-google") && askForCrew != "":
+				return fmt.Errorf("--secret-google takes no --for-crew: a sign-in is the operator's or the person's own")
+			case c.Flags().Changed("secret-google") && (c.Flags().Changed("secret") || c.Flags().Changed("secret-login") || c.Flags().Changed("secret-hook") || c.Flags().Changed("setup") || c.Flags().Changed("depot-push") || c.Flags().Changed("depot-push-off") || c.Flags().Changed("run") || c.Flags().Changed("run-word")):
+				return fmt.Errorf("--secret-google asks for a Google sign-in and the other flag asks for or proposes another thing: one of the two")
 			case !c.Flags().Changed("setup") && (c.Flags().Changed("crew") || c.Flags().Changed("group")):
 				return fmt.Errorf("--crew and --group name who a setup's grants are for: they go with --setup <pack>")
 			case !c.Flags().Changed("setup") && c.Flags().Changed("source-base"):
@@ -546,8 +578,8 @@ what the person asked does, and this is the asker's own.`,
 				return fmt.Errorf("--for-user takes no --env: the source's notify key names the one variable that is a user's address")
 			case askForCrew != "" && askSecret == "" && !c.Flags().Changed("secret-login"):
 				return fmt.Errorf("--for-crew says whose own credential in a source is asked for: it goes with --secret <source>")
-			case askAs != "" && askSecret == "" && !c.Flags().Changed("secret-login"):
-				return fmt.Errorf("--as says whose own credential in a source is asked for: it goes with --secret <source>, or whose login a waiting login is: --secret-login <login>")
+			case askAs != "" && askSecret == "" && !c.Flags().Changed("secret-login") && !c.Flags().Changed("secret-google"):
+				return fmt.Errorf("--as says whose own credential in a source is asked for: it goes with --secret <source>, or whose login a waiting login is: --secret-login <login>, or whose Google sign-in it is: --secret-google <account>")
 			case askForUser != "" && askForCrew != "":
 				return fmt.Errorf("--for-user asks for a user's own address and --for-crew for a crew member's credential: one of the two")
 			case askForUser != "" && askAs != "":
@@ -665,6 +697,9 @@ what the person asked does, and this is the asker's own.`,
 			if c.Flags().Changed("secret-hook") {
 				q.Secret = &store.AskSecret{Source: askHookSource, Hook: askSecretHook}
 			}
+			if c.Flags().Changed("secret-google") {
+				q.Secret = &store.AskSecret{Google: askSecretGoogle, As: askAs}
+			}
 			if c.Flags().Changed("setup") {
 				// As named, in the order typed: the yard stores them once
 				// each, the groups before the crew members.
@@ -776,6 +811,14 @@ what the person asked does, and this is the asker's own.`,
 					if askNew {
 						on = fmt.Sprintf("%s created; ask %d on it", b.ID, seq)
 					}
+					if secret.Google != "" {
+						if secret.As != "" {
+							fmt.Fprintf(w, "%s for %s: a secret, the sign-in for %s's Google account %s\n", on, who, secret.As, secret.Google)
+							return
+						}
+						fmt.Fprintf(w, "%s for %s: a secret, the sign-in for the yard's Google account %s\n", on, who, secret.Google)
+						return
+					}
 					if secret.Hook != "" {
 						fmt.Fprintf(w, "%s for %s: a secret, the signing secret for the hook %s (POST /hooks/%s)\n", on, who, secret.Hook, secret.Hook)
 						return
@@ -856,6 +899,7 @@ what the person asked does, and this is the asker's own.`,
 	ask.Flags().StringVar(&askSecret, "secret", "", "ask for the credential of this declared source: answered with a value typed unseen, never with words")
 	ask.Flags().StringVar(&askSecretHook, "secret-hook", "", "with --source: ask for the signing secret of this hook of a declared source: answered with a value typed unseen, kept in the hook's secret file")
 	ask.Flags().StringVar(&askHookSource, "source", "", "with --secret-hook: the declared source the hook serves")
+	ask.Flags().StringVar(&askSecretGoogle, "secret-google", "", "ask for the sign-in of this Google account (its address): the output of gws auth export --unmasked, typed unseen, kept in the account's credentials file; with --as <user>, that user's own, asked of them alone")
 	ask.Flags().StringVar(&askSecretLogin, "secret-login", "", "ask for the input of the harness login waiting under this reference (its leader's input need names it): handed to the login, kept nowhere; with --as, the login is that user's own")
 	ask.Flags().StringVar(&askForUser, "for-user", "", "with --secret: ask for this user's own address in the source (the variable its notify key names), kept in the user's env_file")
 	ask.Flags().StringVar(&askForCrew, "for-crew", "", "with --secret: ask for this crew member's own credential in the source (the variables its credential names), kept in the crew member's env_file")
@@ -884,110 +928,6 @@ what the person asked does, and this is the asker's own.`,
 	ask.Flags().StringVarP(&askBead.Stage, "stage", "s", "", "with --new: place the bead in this stage as a task, routed as bead create's is (decide, for a depot's); default a question nothing routes")
 	ask.Flags().StringSliceVarP(&askBead.Labels, "label", "l", nil, "with --new: the bead's labels")
 	return ask
-}
-
-// giveSecret is yardr bead answer --secret: past the gate of a weighty card
-// (weighed.go), it reads the value of each name the ask asks for as yardr
-// source key reads one, unseen from a terminal or as NAME=value lines from
-// anything else, and gives them to the yard. What
-// it prints is who gave which names and where the credential is set, never
-// a value. A login input is read the same way, with no source to read it
-// against, and handed to the waiting login.
-func (a *app) giveSecret(c *cobra.Command, st store.API, id string, seq uint64) error {
-	secret, err := askedSecret(c.Context(), st, id, seq)
-	if err != nil {
-		return err
-	}
-	// Every secret ask is weighty: its gate comes before a value is typed,
-	// so a person sees what the card weighs first, and a command with no
-	// terminal declines before it reads any.
-	weighed, err := a.gate(c, st, id, seq, "give", "--secret")
-	if err != nil {
-		return err
-	}
-	if secret.Hook != "" {
-		values, err := readHookKeys(secret, c.InOrStdin(), typedUnseen(c.InOrStdin(), c.ErrOrStderr()))
-		if err != nil {
-			return err
-		}
-		keyed, err := st.GiveSecret(c.Context(), id, seq, values, a.who(), weighed)
-		if err != nil {
-			return secretErr(err)
-		}
-		return a.out(c.OutOrStdout(), keyed, func(w io.Writer) {
-			fmt.Fprintf(w, "%s gave %s · it is set in %s\n", a.who(), strings.Join(keyed.Given, " and "), keyed.File)
-			printReach(w, secret)
-		})
-	}
-	if secret.Login != "" {
-		values, err := readLoginKeys(secret, c.InOrStdin(), typedUnseen(c.InOrStdin(), c.ErrOrStderr()))
-		if err != nil {
-			return err
-		}
-		keyed, err := st.GiveSecret(c.Context(), id, seq, values, a.who(), weighed)
-		if err != nil {
-			return secretErr(err)
-		}
-		return a.out(c.OutOrStdout(), keyed, func(w io.Writer) {
-			fmt.Fprintf(w, "%s gave %s · it went to the waiting login %s, and is kept nowhere\n", a.who(), strings.Join(keyed.Given, " and "), keyed.Login)
-		})
-	}
-	if secret.Harness != "" {
-		values, err := readHarnessKeys(secret, c.InOrStdin(), typedUnseen(c.InOrStdin(), c.ErrOrStderr()))
-		if err != nil {
-			return err
-		}
-		keyed, err := st.GiveSecret(c.Context(), id, seq, values, a.who(), weighed)
-		if err != nil {
-			return secretErr(err)
-		}
-		return a.out(c.OutOrStdout(), keyed, func(w io.Writer) {
-			line := fmt.Sprintf("%s gave %s · it is set in %s", a.who(), strings.Join(keyed.Given, " and "), keyed.File)
-			if keyed.Missing != "" {
-				line += " · " + keyed.Missing
-			}
-			fmt.Fprintln(w, line)
-			if keyed.Next != "" {
-				fmt.Fprintln(w, "next: "+keyed.Next)
-			}
-		})
-	}
-	src, err := st.GetSource(c.Context(), secret.Source)
-	if err != nil {
-		return err
-	}
-	d, err := src.Declaration()
-	if err != nil {
-		return err
-	}
-	values, err := readKeys(d, secret.Env, c.InOrStdin(), typedUnseen(c.InOrStdin(), c.ErrOrStderr()), "")
-	if err != nil {
-		return err
-	}
-	keyed, err := st.GiveSecret(c.Context(), id, seq, values, a.who(), weighed)
-	if err != nil {
-		return secretErr(err)
-	}
-	return a.out(c.OutOrStdout(), keyed, func(w io.Writer) {
-		line := fmt.Sprintf("%s gave %s · it is set in %s", a.who(), strings.Join(keyed.Given, " and "), keyed.File)
-		if keyed.Missing != "" {
-			line += " · " + keyed.Missing
-		}
-		fmt.Fprintln(w, line)
-		if keyed.Next != "" {
-			fmt.Fprintln(w, "next: "+keyed.Next)
-		}
-		printReach(w, secret)
-	})
-}
-
-// printReach says after a giving what the value reaches and what it does not,
-// in the lines the card said before it (store.AskSecret.ReachGiven): a value
-// is given for a reason, and the file it is set in is not all it does.
-func printReach(w io.Writer, secret *store.AskSecret) {
-	for _, line := range secret.ReachGiven() {
-		fmt.Fprintln(w, line)
-	}
 }
 
 // approveSetup is yardr bead answer <id> <ask> <n> --secret on a setup

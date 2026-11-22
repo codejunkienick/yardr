@@ -17,7 +17,10 @@
 // the operator's for them, as their address is.
 // A waiting login's input (AskSecret.Login) is handed to it and kept
 // nowhere; a harness API key (AskSecret.Harness) is kept in the operator's
-// key file for its kind and read by sessions on that login.
+// key file for its kind and read by sessions on that login. A Google
+// account's pasted export (AskSecret.Google) is kept as that account's
+// credentials file for google-mint: the yard's own is the operator's to
+// give, a person's own (AskSecret.As) that person's alone.
 package store
 
 import (
@@ -61,6 +64,15 @@ type AskSecret struct {
 	// file names it. Set instead of a source, with Crew: the crew member
 	// whose login screen the key is asked for, not the only reader of it.
 	Harness string `json:"harness,omitempty"`
+	// Google is the Google account whose pasted gws export is asked
+	// for, set instead of a source: Env is the one name the export is
+	// given under (googleCredentialsEnv), Scopes the gws services the
+	// login is made with, and the value goes to the account's
+	// credentials file (GoogleCredentialsFile). With As, the account
+	// is that user's own and theirs alone to give; without it, the
+	// yard's own, the operator's to give.
+	Google string   `json:"google,omitempty"`
+	Scopes []string `json:"scopes,omitempty"`
 	// Host is where the source's calls go, the scheme and host of its base:
 	// what the card says beside the source's name. It is kept on the ask
 	// because the views render an ask from its note alone; GiveSecret
@@ -109,6 +121,14 @@ func (s AskSecret) Names() string { return strings.Join(s.Env, " and ") }
 // says the reach the person consents to: every session of the kind that
 // burns the operator's login reads it.
 func (s AskSecret) Line() string {
+	if s.Google != "" {
+		if s.As != "" {
+			return fmt.Sprintf("a secret: the sign-in for %s's Google account %s, pasted from gws auth export --unmasked on the machine that signed in (gws auth login -s %s); it is read by the yard's Google calls made as %s",
+				s.As, s.Google, strings.Join(s.Scopes, ","), s.As)
+		}
+		return fmt.Sprintf("a secret: the sign-in for the yard's Google account %s, pasted from gws auth export --unmasked on the machine that signed in (gws auth login -s %s); it is read by the yard's Google calls",
+			s.Google, strings.Join(s.Scopes, ","))
+	}
 	if s.Hook != "" {
 		return fmt.Sprintf("a secret: the signing secret for the hook %s (POST /hooks/%s), for the source %s (%s)", s.Hook, s.Hook, s.Source, s.Host)
 	}
@@ -164,9 +184,12 @@ type SecretAsked struct {
 	// Hook is the hook whose signing secret is asked for; absent on any other secret.
 	Hook string `json:"hook,omitempty"`
 	// Harness is the kind whose API key is asked for; absent on any other secret.
-	Harness string   `json:"harness,omitempty"`
-	Reach   []string `json:"reach,omitempty"`
-	Line    string   `json:"line"`
+	Harness string `json:"harness,omitempty"`
+	// Google is the Google account whose sign-in is asked for; absent on any other secret.
+	Google string   `json:"google,omitempty"`
+	Scopes []string `json:"scopes,omitempty"`
+	Reach  []string `json:"reach,omitempty"`
+	Line   string   `json:"line"`
 }
 
 // asked is the secret of the ask a as a client shows it, nil for an ask
@@ -175,7 +198,7 @@ func (a Ask) asked() *SecretAsked {
 	if a.Secret == nil {
 		return nil
 	}
-	return &SecretAsked{Source: a.Secret.Source, Env: a.Secret.Env, User: a.Secret.User, Crew: a.Secret.Crew, As: a.Secret.As, Login: a.Secret.Login, Hook: a.Secret.Hook, Harness: a.Secret.Harness, Reach: a.Secret.Reach(), Line: a.Secret.Line()}
+	return &SecretAsked{Source: a.Secret.Source, Env: a.Secret.Env, User: a.Secret.User, Crew: a.Secret.Crew, As: a.Secret.As, Login: a.Secret.Login, Hook: a.Secret.Hook, Harness: a.Secret.Harness, Google: a.Secret.Google, Scopes: a.Secret.Scopes, Reach: a.Secret.Reach(), Line: a.Secret.Line()}
 }
 
 // concealed is the ask's concealment as a client shows it: false where the
@@ -229,6 +252,9 @@ func concealedAsk(d *source.Declaration, names []string) *bool {
 // (askedLogin), and with a Harness that crew member's harness API key
 // (askedHarnessKey).
 func (w *wtx) askedSecret(sec AskSecret, to string) (*AskSecret, error) {
+	if sec.Google != "" {
+		return w.askedGoogle(sec, to)
+	}
 	if strings.TrimSpace(sec.Login) != "" {
 		return w.askedLogin(sec, to)
 	}
@@ -424,6 +450,27 @@ func (w *wtx) askedLogin(sec AskSecret, to string) (*AskSecret, error) {
 	return &AskSecret{Env: []string{loginInputName}, Login: login, As: as}, nil
 }
 
+// GoogleSignInOf reports whether the ask is for the Google sign-in of
+// user and nothing else: the form askedGoogle stores for a person's own
+// account, the account and the one name the export is given under with
+// As the user, and no other destination of AskSecret beside it. The
+// scopes are the asker's narrowing, so any of googleServices stands;
+// the whole of the rest is compared, as OperatorLoginInput compares
+// its form, so a field AskSecret gains later makes an ask not this one
+// until this says it is. It is the form the listener takes from a
+// member's own device down the link (rpc.UserServer.memberGoogle).
+func (s AskSecret) GoogleSignInOf(user string) bool {
+	if user == "" || s.Google == "" || len(s.Scopes) == 0 {
+		return false
+	}
+	for _, sc := range s.Scopes {
+		if !slices.Contains(googleServices, sc) {
+			return false
+		}
+	}
+	return reflect.DeepEqual(s, AskSecret{Env: []string{googleCredentialsEnv}, Google: s.Google, As: user, Scopes: s.Scopes})
+}
+
 // OperatorLoginInput reports whether the ask is for the input of the
 // operator's own waiting login and nothing else: the form askedLogin stores
 // for a Login with no As, and the one the daemon asks for the code a
@@ -606,4 +653,71 @@ func (w *wtx) askedUserSecret(d *source.Declaration, user string, env []string, 
 		return nil, fmt.Errorf("%s: a call made as them reads it, so %s cannot be asked for it", whose, to)
 	}
 	return &AskSecret{Source: d.Name, Env: names, Host: sourceHost(d), As: user, Concealed: concealedAsk(d, names)}, nil
+}
+
+// askedGoogle checks an ask for the pasted sign-in of the Google
+// account sec names, asked of to, and answers it as the ask stores
+// it: the account, the one name the export is given under, and the
+// scopes the login is made with (the whole set when the asker named
+// none). It refuses a source, hook, login, harness, user or crew
+// member beside it, an account that is no address or no single name
+// for its directory, a service gws has none of, and anyone but its
+// giver as the one asked: the yard's own account is the operator's to
+// give, and a person's own (sec.As) is that person's alone, the
+// operator included among everyone refused, since the paste holds
+// their refresh token.
+func (w *wtx) askedGoogle(sec AskSecret, to string) (*AskSecret, error) {
+	account := strings.TrimSpace(sec.Google)
+	as := strings.TrimSpace(sec.As)
+	switch {
+	case strings.TrimSpace(sec.Source) != "":
+		return nil, fmt.Errorf("a secret ask names a Google account or a source, not both: --secret-google %s or --secret <source>", account)
+	case strings.TrimSpace(sec.Hook) != "":
+		return nil, fmt.Errorf("a Google sign-in is no hook's signing secret: it takes no hook")
+	case strings.TrimSpace(sec.Login) != "":
+		return nil, fmt.Errorf("a Google sign-in is no waiting login's input: it takes no --secret-login")
+	case strings.TrimSpace(sec.Harness) != "":
+		return nil, fmt.Errorf("a Google sign-in is no harness API key: it takes no harness")
+	case strings.TrimSpace(sec.User) != "":
+		return nil, fmt.Errorf("a Google sign-in is the account's own, not %s's address: it takes no --for-user", strings.TrimSpace(sec.User))
+	case strings.TrimSpace(sec.Crew) != "":
+		return nil, fmt.Errorf("a Google sign-in is no crew member's credential: it takes no --for-crew")
+	case account == "" || account == "." || account == ".." || !strings.Contains(account, "@") ||
+		strings.ContainsAny(account, `/\`) || strings.ContainsFunc(account, func(r rune) bool { return r <= ' ' || r == 0x7f }):
+		return nil, fmt.Errorf("google account %q: name the account's address, one name with no path separator (its credentials file is ~/.config/gws-accounts/<account>/credentials.json)", sec.Google)
+	}
+	for _, n := range sec.Env {
+		if n != googleCredentialsEnv {
+			return nil, fmt.Errorf("a Google export is given as %s, and %s is no name of it", googleCredentialsEnv, n)
+		}
+	}
+	scopes := sec.Scopes
+	if len(scopes) == 0 {
+		scopes = slices.Clone(googleServices)
+	}
+	for _, sc := range scopes {
+		if !slices.Contains(googleServices, sc) {
+			return nil, fmt.Errorf("gws has no service %s: a Google login is made with %s", sc, strings.Join(googleServices, ", "))
+		}
+	}
+	ops, err := operatorsIn(w.Tx)
+	if err != nil {
+		return nil, err
+	}
+	if as == "" {
+		switch {
+		case ops.none():
+			return nil, fmt.Errorf("a secret is the operator's to give, and this yard has none: yardr settings set operator <name>")
+		case !ops.is(to):
+			return nil, fmt.Errorf("a secret is %s to give (%s): giving the yard's Google sign-in is theirs alone, so %s cannot be asked for one", ops.article(), ops, to)
+		}
+		return &AskSecret{Google: account, Env: []string{googleCredentialsEnv}, Scopes: scopes}, nil
+	}
+	if _, err := getUser(w.Tx, as); err != nil {
+		return nil, fmt.Errorf("a Google sign-in is asked for a user of the yard (yardr user list): %w", err)
+	}
+	if to != as {
+		return nil, fmt.Errorf("%s's Google sign-in for %s is theirs to give alone, the operator included: its paste holds their refresh token, so %s cannot be asked for it", as, account, to)
+	}
+	return &AskSecret{Google: account, As: as, Env: []string{googleCredentialsEnv}, Scopes: scopes}, nil
 }

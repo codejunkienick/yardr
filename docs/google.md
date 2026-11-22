@@ -35,10 +35,11 @@ Everything a crew member asks for — a user added, a pack's whole
 setup, a grant plain or `as` — is a card, answered in
 footplate or in `yardr chat` (`ctrl+o`). Setting a pack up is one
 card per pack: the apply, the account and the grants together
-(`bead ask --setup`), the address typed once, then picked. What
-stays in the terminal is what cannot be a card: a login in a
-browser (step 1), and the operator trying what they set up (steps
-6 and 7). The mint (step 4) comes with the pack.
+(`bead ask --setup`), the address typed once, then picked. The
+sign-in itself (step 1) happens on the machine that signs in, whose
+browser it opens, and reaches the yard pasted through a card; what
+stays in the yard's terminal is the operator trying what they set
+up (steps 6 and 7). The mint (step 4) comes with the pack.
 
 ## Step 0. The person is a user
 
@@ -68,7 +69,9 @@ to be called as (step 3).
 ## Step 1. The gws login
 
 The four packs are optional: a yard without Google needs none of
-this. What follows starts from a machine with no gws.
+this. What follows starts from a machine with no gws: the machine
+that signs in, which is your own unless the yard runs on it too.
+The yard's machine needs gws on PATH as well, for the mint.
 
 Install gws first, from its install page
 ([github.com/googleworkspace/cli](https://github.com/googleworkspace/cli)):
@@ -86,8 +89,8 @@ command -v gws
 gws --version
 ```
 
-Then configure the GCP project and OAuth client once for this machine's
-default gws config. `gws auth setup` needs the gcloud CLI installed and
+Then configure the GCP project and OAuth client once, on the machine
+that signs in, for its default gws config. `gws auth setup` needs the gcloud CLI installed and
 logged in with `gcloud auth login` (Application Default Credentials from
 `gcloud auth application-default login` do not authenticate gcloud's own
 commands). It uses gcloud's current project by default; pass
@@ -102,63 +105,81 @@ Drive, Docs, Slides and Calendar APIs the four packs call, configuring
 the OAuth consent screen and client, and writes the client to
 `~/.config/gws/client_secret.json`.
 
-A second person's login, in `~/.config/gws-accounts/<account>`,
-needs its own client too: gws reads the client from the directory in
-force, and a login there without one is refused. Run setup for that
-directory as well, with its variable, before the login below. This is a
-separate config, so it needs setup even though the default config has
-already been set up:
+A second person signs in on their own machine the same way, in its
+default config; no second setup is run for them.
+
+The sign-in opens a browser on the machine that runs it and waits
+there, so a hosted yard cannot lead it: the person signs in on a
+machine of their own, exports the sign-in there, and pastes the
+export into a card. The yard's calls mint from what the card gives.
+On the machine that signs in:
 
 ```sh
-GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$HOME/.config/gws-accounts/ada@example.com" gws auth setup
-```
-
-If you skip setup for the second directory, gws refuses the login and
-names that directory's missing `client_secret.json`.
-
-A hosted yard will offer a Connect Google button in the browser instead.
-
-The login lives in `~/.config/gws`, and the account it is logged in
-as is what the yard's calls mint from:
-
-```sh
+gws auth login -s gmail,drive,docs,slides,calendar
 gws auth status
+gws auth export --unmasked
 ```
 
-Its `user` is the account's address, which the setup sets as
-`GOOGLE_ACCOUNT`. Its `scopes` must hold the scopes the packs call
-with — `https://www.googleapis.com/auth/gmail.modify` for mail,
-`https://www.googleapis.com/auth/drive` for drive,
+`gws auth status`'s `user` is the account's address, which step 3
+sets as `GOOGLE_ACCOUNT`. Its `scopes` must hold the scopes the
+packs call with — `https://www.googleapis.com/auth/gmail.modify`
+for mail, `https://www.googleapis.com/auth/drive` for drive,
 `https://www.googleapis.com/auth/documents` and
 `https://www.googleapis.com/auth/presentations` for docs, and
 `https://www.googleapis.com/auth/calendar` for calendar — else the
 calls come back 403. When a pack is added, log in again with every
-service the yard wants, so nothing set up is lost:
+service the yard wants, so nothing set up is lost. A yard with one
+pack logs in with that pack's services alone (the table above);
+adding a pack later means logging in again with the services
+added, and giving the new export as below. Google's token narrows
+by this grant, not by call, so the login's scopes are the yard's
+whole Google access.
+
+Give the sign-in to the yard by card: one card for the yard's own
+account, answered by the operator, and one for a person's own,
+answered by that person alone — the export holds their refresh
+token, so nobody else pastes it, the operator included. Whoever
+sets Google up asks; a crew member may ask for either, as it asks
+for hook secrets:
 
 ```sh
-gws auth login -s gmail,drive,docs,slides,calendar
+yardr bead ask <bead> - --secret-google <the account gws auth status showed> <<'ASK'
+The yard's Google sign-in
+Sign in with gws auth login on your machine, then paste gws auth export --unmasked.
+ASK
+yardr bead ask <bead> - --secret-google <ada's account> --as ada <<'ASK'
+Your Google sign-in
+Sign in with gws auth login on your machine, then paste gws auth export --unmasked.
+ASK
 ```
 
-A yard with one pack logs in with that pack's services alone (the
-table above); adding a pack later means logging in again with the
-services added. Google's token narrows by this grant, not by call,
-so the login's scopes are the yard's whole Google access.
+Which door gives which: the yard's own account is the operator's
+to give — on a hosted yard, from the card's page in the hosted web
+(where the field shows dots, typing first and signing in fresh
+after), from a paired device, or in a terminal (`yardr bead answer
+<bead> <ask> --secret`). A person's own account is that person's
+alone to give, and the web page gives it for nobody: ada gives hers
+from a paired device or in a terminal with the same command, never
+on the web page and never through the operator. Down the edge link
+her device carries it only where it was paired with the QR: a
+device sealed in place does not carry it there, since the export
+is a refresh token that is written to disk and lasts, where her
+sign-in code is used once and kept in memory. Either way, paste
+the whole output of `gws auth export --unmasked` where the field
+shows dots. The yard checks it is that export and writes it, mode
+0600, to the account's credentials file: the yard's own at
+`~/.config/gws/credentials.json`, a person's at
+`~/.config/gws-accounts/<account>/credentials.json`, each in the
+home of the user the yard's server runs as. Anything else is
+refused, naming the export to paste. So is a sign-in for an
+address another holder already has as its `GOOGLE_ACCOUNT` (step 3):
+that address's file is theirs, and only they give it. The export is
+in no note, event or answer the yard keeps.
 
-A second person's login stands beside it, in that account's own
-directory, `~/.config/gws-accounts/<account>`, made with the same
-login for that directory alone:
-
-```sh
-GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$HOME/.config/gws-accounts/ada@example.com" gws auth login -s gmail,drive,docs,slides,calendar
-```
-
-Replace `ada@example.com` with ada's Google account address, then
-sign in as ada in the browser, with the services the yard's packs
-need as the yard's login has them. That variable is set for this
-login command alone, as the mint later sets it for the gws it
-starts; it is written into no env file and declared in no source. A
-browser login cannot be a card, so this step stays in the terminal,
-once per person.
+On a yard you run yourself, a login typed in its terminal works
+exactly as before instead: log in there as above, with no card.
+The mint reads the pasted credentials file where one stands for
+the account, and the login where none does (step 4).
 
 ## Step 3. The account
 
@@ -315,10 +336,17 @@ It needs `gws` and `curl` on PATH (`GWS_BIN` names another gws).
 There is no per-user mint: one command mints every account,
 choosing the login by the account it is given — the default login
 where it is for that account, else that account's own login in
-`~/.config/gws-accounts/<account>`. It refuses an account with no
-login of its own, naming the login command that makes it, and a
-login for another account; it never prints the refresh token or
-client secret, nor writes them anywhere. No new copy of a secret is
+`~/.config/gws-accounts/<account>`. Where a sign-in was given by
+card (step 1), the account's credentials file stands in those same
+places: the gws the mint starts for that account is given it
+through `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` for `gws auth
+status`, and where status confirms the account the mint reads the
+file itself for the exchange — `gws auth export --unmasked` never
+reads that file, so a login of another account beside it is never
+minted. Where none stands, the login is read exactly as before. It refuses an account
+with neither, naming the login command that makes it, and a login
+for another account; it never prints the refresh token or client
+secret, nor writes them anywhere. No new copy of a secret is
 stored: the token is handed to each call under `GOOGLE_TOKEN` and
 kept in memory alone.
 
@@ -351,9 +379,10 @@ credential: the yardmaster reading ada's mail, not the operator's.
 It takes three things, beside the pack and its grants:
 
 1. The person is a user of the yard (step 0), and their Google
-   account has a gws login of its own (step 1), with the scopes the
-   calls need. The mint reads that login for their calls and the
-   machine's for the yard's.
+   account is signed in (step 1), with the scopes the calls need:
+   pasted by card from their own machine, or a login of its own on
+   the yard's machine. The mint reads that sign-in for their calls
+   and the yard's own for the yard's.
 2. Their account's address goes into their env file, not the
    source's: one `--as` card, however many sources (step 3).
 3. The grant as them is theirs alone to give, on a card addressed

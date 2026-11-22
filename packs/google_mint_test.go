@@ -46,14 +46,28 @@ const (
 // one it reads one login from GOOGLE_WORKSPACE_CLI_CONFIG_DIR where that
 // variable is set: the login is the fake-login and fake-refresh files in
 // that directory, and a directory without them answers no login. Where
-// GWS_OBSERVE names a file, each command appends the config directory it
-// was started with, so a test sees which login each gws run read.
+// GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE names a file, status reads the
+// pasted export it holds, as the real gws's does: it answers the account
+// its refresh token belongs to. Export never reads that file, as the
+// real gws's never does: it decrypts the login's own store alone, the
+// fake-refresh file of the login's config directory (the default one
+// under HOME), and with none there it exits 2 as the real one does,
+// however a pasted file stands beside it. Where
+// GWS_OBSERVE names a file, each command appends the config directory
+// and the credentials file it was started with, so a test sees which
+// login each gws run read.
 const fakeGWS = `#!/bin/sh
 echo "Using keyring backend: keyring" >&2
-if [ -n "${GWS_OBSERVE:-}" ]; then echo "$1 $2 config_dir=${GOOGLE_WORKSPACE_CLI_CONFIG_DIR:-<unset>}" >> "$GWS_OBSERVE"; fi
+if [ -n "${GWS_OBSERVE:-}" ]; then echo "$1 $2 config_dir=${GOOGLE_WORKSPACE_CLI_CONFIG_DIR:-<unset>} cred_file=${GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE:-<unset>}" >> "$GWS_OBSERVE"; fi
 dir=${GOOGLE_WORKSPACE_CLI_CONFIG_DIR:-}
+cred=${GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE:-}
 if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
   if [ "${GWS_STATUS_EXIT:-0}" != "0" ]; then echo "Error: fake status failed" >&2; exit 1; fi
+  if [ -n "$cred" ]; then
+    if grep -q "` + adaRefresh + `" "$cred"; then echo "{\"user\":\"` + adaAccount + `\"}"; exit 0; fi
+    if grep -q "` + fakeRefresh + `" "$cred"; then echo "{\"user\":\"${GWS_USER:-op@example.com}\"}"; exit 0; fi
+    echo "Error: fake has no login in $cred" >&2; exit 1
+  fi
   if [ -n "$dir" ]; then
     if [ -f "$dir/fake-login" ]; then echo "{\"user\":\"$(cat "$dir/fake-login")\"}"; exit 0; fi
     echo "Error: fake has no login in $dir" >&2; exit 1
@@ -68,10 +82,9 @@ fi
 if [ "$1" = "auth" ] && [ "$2" = "export" ]; then
   if [ "$3" != "--unmasked" ]; then echo "Error: fake export wants --unmasked" >&2; exit 2; fi
   if [ "${GWS_EXPORT_EXIT:-0}" != "0" ]; then echo "Error: fake not logged in" >&2; exit 1; fi
-  if [ -n "$dir" ]; then
-    if [ -f "$dir/fake-refresh" ]; then echo "{\"client_id\":\"` + fakeClientID + `\",\"client_secret\":\"` + fakeClientSecret + `\",\"refresh_token\":\"$(cat "$dir/fake-refresh")\",\"type\":\"authorized_user\"}"; exit 0; fi
-    echo "Error: fake has no login in $dir" >&2; exit 1
-  fi
+  enc=${dir:-${HOME:-}/.config/gws}
+  if [ -f "$enc/fake-refresh" ]; then echo "{\"client_id\":\"` + fakeClientID + `\",\"client_secret\":\"` + fakeClientSecret + `\",\"refresh_token\":\"$(cat "$enc/fake-refresh")\",\"type\":\"authorized_user\"}"; exit 0; fi
+  if [ -n "$dir" ]; then echo "No encrypted credentials found. Run 'gws auth login' first." >&2; exit 2; fi
   case "${GWS_EXPORT:-good}" in
     no-refresh) echo '{"client_id":"fake-client-id","client_secret":"fake-client-secret","type":"authorized_user"}' ;;
     bad-json) echo '{' ;;
@@ -219,6 +232,27 @@ func writeLogin(t *testing.T, home, account, user, refresh string) string {
 	return dir
 }
 
+// writeCredentials plants a pasted sign-in under home, as a Google
+// secret giving writes it: the yard's own (account "") in the gws
+// default config, a person's in that account's own directory, holding
+// the authorized_user export with refresh as its refresh token.
+func writeCredentials(t *testing.T, home, account, refresh string) string {
+	t.Helper()
+	dir := filepath.Join(home, ".config", "gws")
+	if account != "" {
+		dir = filepath.Join(home, ".config", "gws-accounts", account)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "credentials.json")
+	body := `{"client_id":"` + fakeClientID + `","client_secret":"` + fakeClientSecret + `","refresh_token":"` + refresh + `","type":"authorized_user"}`
+	if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
 // filesUnder lists every file under dir, relative, so a test holds that
 // the script wrote none beside what the test planted: no refresh
 // credential reaches a file.
@@ -348,11 +382,11 @@ func TestGoogleMintTwoAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantObserve := "auth status config_dir=<unset>\n" +
-		"auth export config_dir=<unset>\n" +
-		"auth status config_dir=<unset>\n" +
-		"auth status config_dir=" + adaDir + "\n" +
-		"auth export config_dir=" + adaDir + "\n"
+	wantObserve := "auth status config_dir=<unset> cred_file=<unset>\n" +
+		"auth export config_dir=<unset> cred_file=<unset>\n" +
+		"auth status config_dir=<unset> cred_file=<unset>\n" +
+		"auth status config_dir=" + adaDir + " cred_file=<unset>\n" +
+		"auth export config_dir=" + adaDir + " cred_file=<unset>\n"
 	if string(seen) != wantObserve {
 		t.Fatalf("gws runs:\n%s\nwant:\n%s", seen, wantObserve)
 	}
@@ -362,6 +396,112 @@ func TestGoogleMintTwoAccounts(t *testing.T) {
 	}
 	if got := filesUnder(t, home); strings.Join(got, "\n") != strings.Join(wantFiles, "\n") {
 		t.Fatalf("files under home = %q, want %q", got, wantFiles)
+	}
+}
+
+// A pasted sign-in mints without any gws login: the yard's own file
+// and a person's own file each name their account's credentials to
+// the status gws the mint starts for that account, and once status
+// confirms the account the mint reads the file itself — no export
+// run stands in the observe lines, since the real gws's export
+// never reads the file. The exchange carries the refresh token the
+// file holds. With no file anywhere the observe lines above pin
+// the fallback: no credentials file is named and the login is read
+// exactly as before.
+func TestGoogleMintPastedSignIn(t *testing.T) {
+	endpoint := &fakeToken{t: t}
+	srv := httptest.NewServer(http.HandlerFunc(endpoint.handler))
+	defer srv.Close()
+	home := t.TempDir()
+	yardCred := writeCredentials(t, home, "", fakeRefresh)
+	adaCred := writeCredentials(t, home, adaAccount, adaRefresh)
+	adaDir := filepath.Join(home, ".config", "gws-accounts", adaAccount)
+	observe := filepath.Join(t.TempDir(), "observe")
+	for _, tc := range []struct{ account, refresh string }{
+		{"op@example.com", fakeRefresh},
+		{adaAccount, adaRefresh},
+	} {
+		stdout, stderr, err := mintHome(t, home, stdinFor(tc.account, ""), srv.URL, "GWS_OBSERVE="+observe)
+		if err != nil {
+			t.Fatalf("mint %s: %v\n%s", tc.account, err, stderr)
+		}
+		var o struct {
+			Token string `json:"token"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &o); err != nil || o.Token != tokenFor(tc.refresh) {
+			t.Fatalf("mint %s: answer = %q: %v", tc.account, stdout, err)
+		}
+		for _, secret := range []string{fakeClientSecret, fakeRefresh, adaRefresh} {
+			if strings.Contains(stdout+stderr, secret) {
+				t.Errorf("mint %s: the output holds %q", tc.account, secret)
+			}
+		}
+	}
+	seen, err := os.ReadFile(observe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantObserve := "auth status config_dir=<unset> cred_file=" + yardCred + "\n" +
+		"auth status config_dir=<unset> cred_file=" + yardCred + "\n" +
+		"auth status config_dir=" + adaDir + " cred_file=" + adaCred + "\n"
+	if string(seen) != wantObserve {
+		t.Fatalf("gws runs:\n%s\nwant:\n%s", seen, wantObserve)
+	}
+}
+
+// A pasted sign-in beside an encrypted login of another account mints
+// the pasted account still: the encrypted store (the fake's
+// fake-refresh) holds a third account's refresh token in the same
+// directory, which the real gws's export would decrypt and the mint
+// must never reach — it reads the pasted file itself, for the yard's
+// own account and for a person's alike, and no gws export runs.
+func TestGoogleMintPastedSignInBesideAnotherAccountsLogin(t *testing.T) {
+	endpoint := &fakeToken{t: t}
+	srv := httptest.NewServer(http.HandlerFunc(endpoint.handler))
+	defer srv.Close()
+	home := t.TempDir()
+	writeCredentials(t, home, "", fakeRefresh)
+	writeCredentials(t, home, adaAccount, adaRefresh)
+	const otherRefresh = "1//fake-other-refresh-token-value-bbbb"
+	encDir := filepath.Join(home, ".config", "gws")
+	if err := os.WriteFile(filepath.Join(encDir, "fake-refresh"), []byte(otherRefresh), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeLogin(t, home, adaAccount, adaAccount, otherRefresh)
+	observe := filepath.Join(t.TempDir(), "observe")
+	for _, tc := range []struct{ account, refresh string }{
+		{"op@example.com", fakeRefresh},
+		{adaAccount, adaRefresh},
+	} {
+		stdout, stderr, err := mintHome(t, home, stdinFor(tc.account, ""), srv.URL, "GWS_OBSERVE="+observe)
+		if err != nil {
+			t.Fatalf("mint %s: %v\n%s", tc.account, err, stderr)
+		}
+		var o struct {
+			Token string `json:"token"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &o); err != nil || o.Token != tokenFor(tc.refresh) {
+			t.Fatalf("mint %s: answer = %q: %v", tc.account, stdout, err)
+		}
+		if strings.Contains(stdout+stderr, otherRefresh) {
+			t.Errorf("mint %s: the output holds the other account's refresh token", tc.account)
+		}
+	}
+	forms := endpoint.sent()
+	if len(forms) != 2 {
+		t.Fatalf("exchanges: %d, want 2", len(forms))
+	}
+	for i, want := range []string{fakeRefresh, adaRefresh} {
+		if got := forms[i].Get("refresh_token"); got != want {
+			t.Fatalf("exchange %d refresh_token = %q, want the pasted %q", i, got, want)
+		}
+	}
+	seen, err := os.ReadFile(observe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(seen), "auth export") {
+		t.Fatalf("gws runs hold an export beside a pasted file:\n%s", seen)
 	}
 }
 
@@ -476,7 +616,7 @@ func TestGoogleMintHostileAccount(t *testing.T) {
 		if rerr != nil {
 			t.Fatal(rerr)
 		}
-		if want := "auth status config_dir=<unset>\n"; string(seen) != want {
+		if want := "auth status config_dir=<unset> cred_file=<unset>\n"; string(seen) != want {
 			t.Errorf("mint %s: gws runs:\n%s\nwant:\n%s", account, seen, want)
 		}
 		if len(endpoint.sent()) != 0 {

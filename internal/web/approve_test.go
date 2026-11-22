@@ -179,6 +179,35 @@ func (y *approveYard) giveForm(beadID string, seq uint64, value string) url.Valu
 	}
 }
 
+// askGoogle asks for the sign-in of the Google account account, of the
+// yard's own where as is "" and of the user as where it names one.
+func (y *approveYard) askGoogle(beadID, to, account, as string) uint64 {
+	y.t.Helper()
+	seq, err := y.st.AddAsk(context.Background(), beadID, store.Ask{
+		Question: "The Google sign-in", To: to, Context: []string{"sign in on your machine, then paste the export"},
+		Secret: &store.AskSecret{Google: account, As: as}}, "yardmaster")
+	must(y.t, err)
+	return seq
+}
+
+// giveGoogleForm is the giving the bead page's form posts for a Google
+// sign-in ask: the pasted export under its one name.
+func (y *approveYard) giveGoogleForm(beadID string, seq uint64, value string) url.Values {
+	return url.Values{
+		"rev":                       {y.revision(beadID)},
+		"ask":                       {strconv.FormatUint(seq, 10)},
+		"secret-GOOGLE_CREDENTIALS": {value},
+		"action":                    {"give"},
+	}
+}
+
+// googleWebExport is the stand-in export an operator pastes from their
+// own machine, and its refresh token what no page or note may show.
+const (
+	googleWebExport  = "{\n  \"client_id\": \"123-fake.apps.googleusercontent.com\",\n  \"client_secret\": \"GOCSPX-fake-secret\",\n  \"refresh_token\": \"1//fake-refresh\",\n  \"type\": \"authorized_user\"\n}"
+	googleWebRefresh = "1//fake-refresh"
+)
+
 // secretEnv points crm's credential at a file in a temp dir and answers
 // it, so a giving's file and its mode can be read back.
 func (y *approveYard) secretEnv() string {
@@ -792,6 +821,203 @@ func TestWebSecretGiveReturnRefusals(t *testing.T) {
 				t.Errorf("note %d on %s holds the value: %q", n.Seq, bead, n.Text)
 			}
 		}
+	}
+	if w := y.witness(); w != "" {
+		t.Fatalf("a refused giving is witnessed %q, want none", w)
+	}
+}
+
+// The yard's own Google sign-in gives on its bead's page through the
+// same fresh sign-in as any secret: the operator pastes a stand-in
+// export, a stale or foreign return and a replay give nothing and show
+// no value back, the fresh return writes the account's credentials
+// file at 0600, and a malformed paste inside the window refuses naming
+// the export and writes nothing new. Serial for its HOME seam: the
+// credentials file stands under the home the test names.
+func TestWebGoogleYardSignInUnderAFreshSignIn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	y := newApproveYard(t, true)
+	ctx := context.Background()
+	must(t, y.st.SetSetting(ctx, store.NameSetting, "depot", "jo"))
+	b := y.bead("the yard's google sign-in")
+	seq := y.askGoogle(b.ID, "jo", "yard@example.com", "")
+	tok := y.token("jo@example.net")
+	file := filepath.Join(home, ".config", "gws", "credentials.json")
+
+	page := y.surfaceBody("/beads/"+b.ID, tok)
+	for _, want := range []string{
+		`<input type="password" name="secret-GOOGLE_CREDENTIALS" placeholder="GOOGLE_CREDENTIALS" aria-label="GOOGLE_CREDENTIALS" autocomplete="off">`,
+		`<button type="submit" name="action" value="give">Give in depot</button>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the hosted bead page lacks %q:\n%s", want, page)
+		}
+	}
+	if strings.Contains(page, noGateLine) {
+		t.Errorf("the hosted bead page shows the no-gate line beside its giving:\n%s", page)
+	}
+
+	r := y.post("/beads/"+b.ID, tok, y.giveGoogleForm(b.ID, seq, googleWebExport))
+	if r.status != http.StatusSeeOther {
+		t.Fatalf("POST the giving: %d: %s", r.status, r.body)
+	}
+	loc, err := url.Parse(r.header.Get("Location"))
+	if err != nil || loc.Path != "/edge/reauth" {
+		t.Fatalf("the giving goes to %q, want the gateway re-authentication", r.header.Get("Location"))
+	}
+	back := loc.Query().Get("return_to")
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatalf("the challenge wrote the credentials file: %v", err)
+	}
+	stale := y.token("jo@example.net", authAt(time.Now().Add(-time.Hour)))
+	for _, c := range []struct {
+		name  string
+		path  string
+		token string
+		want  string
+	}{
+		{"a stale sign-in", back, stale, "not fresh"},
+		{"another user", back, y.token("sam@example.net", authAt(time.Now().Add(5*time.Second))), "another card"},
+	} {
+		if r := y.getNoFollow(c.path, c.token); r.status != 200 || !strings.Contains(r.body, c.want) || strings.Contains(r.body, googleWebRefresh) {
+			t.Errorf("%s: GET the return: %d, want %q and no value:\n%s", c.name, r.status, c.want, r.body)
+		}
+	}
+	if got := y.askedState(b.ID, seq, "jo"); got != "open" {
+		t.Fatalf("the ask is %s after the refused returns, want it open", got)
+	}
+
+	fresh := y.token("jo@example.net", authAt(time.Now().Add(5*time.Second)))
+	r = y.getNoFollow(back, fresh)
+	if r.status != http.StatusSeeOther || r.header.Get("Location") != "/beads/"+b.ID {
+		t.Fatalf("GET the return: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	if got := y.askedState(b.ID, seq, "jo"); got != "answered" {
+		t.Fatalf("the ask is %s after the return, want it answered", got)
+	}
+	if w := y.witness(); w != store.WitnessFreshSignIn {
+		t.Fatalf("the giving is witnessed %q, want a fresh sign-in", w)
+	}
+	data, err := os.ReadFile(file)
+	must(t, err)
+	if strings.Contains(string(data), "\n") || !strings.Contains(string(data), googleWebRefresh) {
+		t.Fatalf("the credentials file holds %q", data)
+	}
+	if st, err := os.Stat(file); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("the credentials file's mode = %v, %v", st.Mode(), err)
+	}
+	notes, err := y.st.Notes(ctx, b.ID)
+	must(t, err)
+	for _, n := range notes {
+		if strings.Contains(n.Text, googleWebRefresh) {
+			t.Errorf("note %d holds the value: %q", n.Seq, n.Text)
+		}
+	}
+	if body := y.surfaceBody("/beads/"+b.ID, fresh); strings.Contains(body, googleWebRefresh) {
+		t.Errorf("the bead page holds the value after the giving:\n%s", body)
+	}
+	answers := len(notes)
+	if r := y.getNoFollow(back, fresh); r.status != 200 || !strings.Contains(r.body, "used already") || strings.Contains(r.body, googleWebRefresh) {
+		t.Fatalf("replaying the return: %d: %s", r.status, r.body)
+	}
+	if notes, err := y.st.Notes(ctx, b.ID); err != nil || len(notes) != answers {
+		t.Fatalf("the replay left %d notes, want %d (%v)", len(notes), answers, err)
+	}
+
+	// A malformed paste inside the fresh window gives at once and
+	// refuses at once: it names the export, shows no value back, and
+	// the file the good giving wrote stands.
+	second := y.bead("the yard's google sign-in again")
+	seq2 := y.askGoogle(second.ID, "jo", "yard@example.com", "")
+	const badRefresh = "the-malformed-refresh"
+	bad := "{\n  \"client_id\": \"x\",\n  \"client_secret\": \"y\",\n  \"refresh_token\": \"" + badRefresh + "\",\n  \"type\": \"service_account\"\n}"
+	r = y.post("/beads/"+second.ID, fresh, y.giveGoogleForm(second.ID, seq2, bad))
+	if r.status != http.StatusOK || !strings.Contains(r.body, "gws auth export --unmasked") || strings.Contains(r.body, badRefresh) {
+		t.Fatalf("POST a malformed paste: %d, want the export named and no value: %s", r.status, r.body)
+	}
+	if got := y.askedState(second.ID, seq2, "jo"); got != "open" {
+		t.Fatalf("the second ask is %s after a malformed paste, want it open", got)
+	}
+	if data2, err := os.ReadFile(file); err != nil || string(data2) != string(data) {
+		t.Fatalf("a malformed paste changed the credentials file: %q (%v)", data2, err)
+	}
+}
+
+// A Google sign-in's typed values wait at the gateway no longer than
+// any secret's: past the fifteen minutes the challenge and its values
+// are gone, and the return gives nothing. Serial for its HOME seam.
+func TestWebGoogleSignInWaitsNoLongerThanASecret(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	y := newApproveYard(t, true)
+	ctx := context.Background()
+	must(t, y.st.SetSetting(ctx, store.NameSetting, "depot", "jo"))
+	b := y.bead("the yard's google sign-in")
+	seq := y.askGoogle(b.ID, "jo", "yard@example.com", "")
+	r := y.post("/beads/"+b.ID, y.token("jo@example.net"), y.giveGoogleForm(b.ID, seq, googleWebExport))
+	loc, err := url.Parse(r.header.Get("Location"))
+	if r.status != http.StatusSeeOther || err != nil || loc.Path != "/edge/reauth" {
+		t.Fatalf("POST the giving: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	y.srv.AgeFreshPending(16 * time.Minute)
+	fresh := y.token("jo@example.net", authAt(time.Now().Add(5*time.Second)))
+	r = y.getNoFollow(loc.Query().Get("return_to"), fresh)
+	if r.status != http.StatusOK || !strings.Contains(r.body, "used already, expired, or never started") || strings.Contains(r.body, googleWebRefresh) {
+		t.Fatalf("GET the return past the short bound: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	if got := y.askedState(b.ID, seq, "jo"); got != "open" {
+		t.Fatalf("the ask is %s after a return past the short bound, want it open", got)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "gws", "credentials.json")); !os.IsNotExist(err) {
+		t.Fatalf("an expired giving wrote the credentials file: %v", err)
+	}
+}
+
+// A person's own Google sign-in is given on the web by nobody: the
+// member's page and the operator's page alike draw no field for it,
+// the card names the terminal command, and a crafted post from either
+// is refused before any value is held, with no file written. Serial
+// for its HOME seam.
+func TestWebGooglePersonSignInIsNotGivenOnTheWeb(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	y := newApproveYard(t, true)
+	ctx := context.Background()
+	must(t, y.st.SetSetting(ctx, store.NameSetting, "depot", "jo"))
+	b := y.bead("sam's google sign-in")
+	seq := y.askGoogle(b.ID, "sam", "sam@example.com", "sam")
+	// The member's page is the card's own: it draws no field, and it
+	// names the terminal giving. The operator's page holds no card
+	// asked of sam at all.
+	memberPage := y.surfaceBody("/beads/"+b.ID, y.token("sam@example.net"))
+	if strings.Contains(memberPage, `type="password"`) || strings.Contains(memberPage, `value="give"`) {
+		t.Errorf("the member's page offers a Google giving:\n%s", memberPage)
+	}
+	if !strings.Contains(memberPage, "yardr bead answer "+b.ID+" "+strconv.FormatUint(seq, 10)+" --secret") {
+		t.Errorf("the member's page names no terminal giving:\n%s", memberPage)
+	}
+	if body := y.surfaceBody("/beads/"+b.ID, y.token("jo@example.net")); strings.Contains(body, `type="password"`) || strings.Contains(body, `value="give"`) {
+		t.Errorf("the operator's page offers a Google giving:\n%s", body)
+	}
+	for _, c := range []struct {
+		name  string
+		token string
+		want  string
+	}{
+		{"the operator", y.token("jo@example.net"), "asked of another"},
+		{"the member", y.token("sam@example.net"), "only sam may give it"},
+	} {
+		r := y.post("/beads/"+b.ID, c.token, y.giveGoogleForm(b.ID, seq, googleWebExport))
+		if r.status != http.StatusOK || !strings.Contains(r.body, c.want) || strings.Contains(r.body, googleWebRefresh) {
+			t.Errorf("POST by %s: %d, want %q and no value: %s", c.name, r.status, c.want, r.body)
+		}
+	}
+	if got := y.askedState(b.ID, seq, "sam"); got != "open" {
+		t.Fatalf("the ask is %s after the refused posts, want it open", got)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "gws-accounts", "sam@example.com", "credentials.json")); !os.IsNotExist(err) {
+		t.Fatalf("a refused web giving wrote the credentials file: %v", err)
 	}
 	if w := y.witness(); w != "" {
 		t.Fatalf("a refused giving is witnessed %q, want none", w)

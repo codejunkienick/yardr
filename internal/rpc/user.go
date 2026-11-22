@@ -512,10 +512,10 @@ func (u *UserServer) deliveryFiles(ctx context.Context, seq uint64) ([]store.Blo
 //
 // A value the file cannot hold is refused here for such a device, before the
 // store looks for its file: the write's refusal names the file, and the device
-// is the one that sends the value.
+// is the one that sends the value. A Google paste is none (isGoogleAsk).
 func (u *UserServer) giveSecret(ctx context.Context, id string, ask uint64, values map[string]string, actor string, weighed bool) (*store.SourceKeyed, error) {
 	held := u.withholds(ctx)
-	if held {
+	if held && !u.isGoogleAsk(ctx, id, ask) {
 		for _, name := range slices.Sorted(maps.Keys(values)) {
 			if why := store.EnvValueProblem(name, values[name]); why != "" {
 				return nil, errors.New(why)
@@ -888,7 +888,7 @@ func (u *UserServer) call(w http.ResponseWriter, r *http.Request) {
 	// operator call is judged before its body is read.
 	overLink := operators && (name == "GiveSecret" || name == "ApproveSetup") && r.RemoteAddr == linkRemoteAddr
 	if operators && !overLink {
-		if why := inTheClear(r, name, u.routerAddr(r.Context()), false, false); why != "" {
+		if why := inTheClear(r, name, u.routerAddr(r.Context()), false, false, false); why != "" {
 			writeJSON(w, reply{Error: toWire(errors.New(why))})
 			return
 		}
@@ -917,10 +917,10 @@ func (u *UserServer) call(w http.ResponseWriter, r *http.Request) {
 	}
 	if own || overLink {
 		// A member's own secret crosses the link, hosted or not, only as the code of their
-		// own sign-in from a sealed device (memberLoginCode); their pairing approval, as an approval.
+		// own sign-in (memberLoginCode) or their Google sign-in (memberGoogle); an approval, as one.
 		crosses := overLink && (u.hosted(r.Context()) || u.crossesConnected(r.Context(), name, body, c.User)) ||
-			own && name == "GiveSecret" && u.memberLoginCode(r.Context(), body, c.User)
-		if why := inTheClear(r, name, u.routerAddr(r.Context()), crosses, own); why != "" {
+			own && name == "GiveSecret" && (u.memberLoginCode(r.Context(), body, c.User) || u.memberGoogle(r.Context(), body, c.User))
+		if why := inTheClear(r, name, u.routerAddr(r.Context()), crosses, own, own && name == "GiveSecret" && memberGoogleAsk(u.namedSecret(r.Context(), body), c.User)); why != "" {
 			writeJSON(w, reply{Error: toWire(errors.New(why))})
 			return
 		}

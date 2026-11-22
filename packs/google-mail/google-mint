@@ -10,8 +10,19 @@
 # default login in ~/.config/gws where it is for that account, else
 # that account's own login in ~/.config/gws-accounts/<account>,
 # chosen by this script with
-# GOOGLE_WORKSPACE_CLI_CONFIG_DIR for the gws it starts alone. gws auth
-# status tells whose login one is, and gws auth export --unmasked prints
+# GOOGLE_WORKSPACE_CLI_CONFIG_DIR for the gws it starts alone. A
+# sign-in pasted through a card stands as a credentials file in the
+# same places (the yard's own at ~/.config/gws/credentials.json, a
+# person's at ~/.config/gws-accounts/<account>/credentials.json):
+# where the account's file stands, the gws started for that account
+# is given it through GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE for
+# gws auth status, which reads the export it holds and tells whose
+# login it is; where status confirms the account, this script reads
+# the file itself for the three values, since gws auth export
+# --unmasked never reads that file — it decrypts the login's own
+# store alone, which beside a pasted file may be another account's.
+# Where none stands, gws reads its login exactly as before: status
+# tells whose login one is, and export --unmasked prints
 # the client id, client secret and refresh token, which are exchanged at
 # the token endpoint for an access token. No new copy of a secret is
 # stored: the three are held in this process's memory alone, sent in the
@@ -102,19 +113,40 @@ if [ "$endpoint" != "https://oauth2.googleapis.com/token" ]; then
   esac
 fi
 
+# A pasted sign-in for the default login stands as its credentials
+# file: where it stands, every gws started for the default login is
+# given it; where none stands, gws is started exactly as before.
+cred_file=
+if [ -n "${HOME:-}" ] && [ -f "$HOME/.config/gws/credentials.json" ]; then
+  cred_file=$HOME/.config/gws/credentials.json
+fi
+gws_default() {
+  if [ -n "$cred_file" ]; then
+    GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=$cred_file "$GWS" "$@"
+  else
+    "$GWS" "$@"
+  fi
+}
+
 # Whose login gws holds: the exchange below mints for whoever that is,
 # so another account than the inputs name is refused, not minted. The
 # default login is tried first, exactly as before; only where it answers
 # another account is that account's own login tried, in the directory the
 # pack declares beside gws's own.
-status_out=$("$GWS" auth status 2>&1) || fail "gws auth status failed (exit $?): $(printf '%s' "$status_out" | head -c 500)"
+status_out=$(gws_default auth status 2>&1) || fail "gws auth status failed (exit $?): $(printf '%s' "$status_out" | head -c 500)"
 user=$(first "$status_out" user)
 [ -n "$user" ] || fail "gws auth status answered with no user"
 if [ "$user" = "$account" ]; then
-  # The refresh credentials, decrypted by gws: masked without
+  # The refresh credentials: where a sign-in was pasted, status just
+  # confirmed it is this account's, so the file itself is read (see
+  # the head). Else they are decrypted by gws: masked without
   # --unmasked, so that flag is the point. What fails is said in one
   # line: the three values reach neither stdout nor stderr from here on.
-  export_out=$("$GWS" auth export --unmasked 2>&1) || fail "gws auth export failed (exit $?)"
+  if [ -n "$cred_file" ]; then
+    export_out=$(cat "$cred_file") || fail "the pasted credentials file $cred_file could not be read"
+  else
+    export_out=$(gws_default auth export --unmasked 2>&1) || fail "gws auth export failed (exit $?)"
+  fi
 else
   # The account names a directory below, so one that is no single name
   # is refused before it names one.
@@ -124,14 +156,33 @@ else
   [ -n "${HOME:-}" ] || fail "HOME is not set: cannot find the login for GOOGLE_ACCOUNT=$account"
   acct_dir=$HOME/.config/gws-accounts/$account
   login_cmd="GOOGLE_WORKSPACE_CLI_CONFIG_DIR=$(shell_quote "$acct_dir") gws auth login -s gmail,drive,docs,slides,calendar"
+  # A pasted sign-in for this account stands as the credentials file
+  # in its directory: where it stands, every gws started for the
+  # account is given it beside its config directory for status, and
+  # the file itself is read below once status confirms the account.
+  acct_cred=
+  if [ -f "$acct_dir/credentials.json" ]; then
+    acct_cred=$acct_dir/credentials.json
+  fi
+  gws_acct() {
+    if [ -n "$acct_cred" ]; then
+      GOOGLE_WORKSPACE_CLI_CONFIG_DIR=$acct_dir GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=$acct_cred "$GWS" "$@"
+    else
+      GOOGLE_WORKSPACE_CLI_CONFIG_DIR=$acct_dir "$GWS" "$@"
+    fi
+  }
   # gws just answered above, so what fails here is the login in that
   # directory, not gws: the refusal names the login that makes it, and
   # not what gws said.
-  status_out=$(GOOGLE_WORKSPACE_CLI_CONFIG_DIR=$acct_dir "$GWS" auth status 2>&1) || fail "no gws login for GOOGLE_ACCOUNT=$account in $acct_dir ($login_cmd makes it)"
+  status_out=$(gws_acct auth status 2>&1) || fail "no gws login for GOOGLE_ACCOUNT=$account in $acct_dir ($login_cmd makes it)"
   user=$(first "$status_out" user)
   [ -n "$user" ] || fail "no gws login for GOOGLE_ACCOUNT=$account in $acct_dir ($login_cmd makes it)"
   [ "$user" = "$account" ] || fail "the gws login in $acct_dir is for $user, not GOOGLE_ACCOUNT=$account ($login_cmd makes it)"
-  export_out=$(GOOGLE_WORKSPACE_CLI_CONFIG_DIR=$acct_dir "$GWS" auth export --unmasked 2>&1) || fail "gws auth export for GOOGLE_ACCOUNT=$account in $acct_dir failed (exit $?)"
+  if [ -n "$acct_cred" ]; then
+    export_out=$(cat "$acct_cred") || fail "the pasted credentials file $acct_cred for GOOGLE_ACCOUNT=$account could not be read"
+  else
+    export_out=$(gws_acct auth export --unmasked 2>&1) || fail "gws auth export for GOOGLE_ACCOUNT=$account in $acct_dir failed (exit $?)"
+  fi
 fi
 # (What it said is not repeated: on this line the refresh credentials
 # themselves would be the leak.)

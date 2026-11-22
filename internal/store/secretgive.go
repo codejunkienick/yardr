@@ -54,6 +54,12 @@ import (
 // serves the source and names that file. For a new hook, hook add is a
 // second ask; for a standing hook, this ask rotates the secret in place.
 //
+// An ask for a Google account's sign-in (AskSecret.Google) is given the
+// same way into that account's credentials file (giveGoogle), by the
+// operator for the yard's own account and by the person alone for
+// their own: the pasted export is checked as an authorized_user JSON
+// and written 0600, and no refusal or answer repeats it.
+//
 // An ask for a waiting login's input (AskSecret.Login) is handed to the
 // login that waits under its reference (LoginWait) and goes to no file: the
 // answer note holds the names and never the value, as any giving does, and
@@ -133,7 +139,9 @@ func (w *wtx) giveSecret(ctx context.Context, s *Store, home, id string, ask uin
 	sec := asked.Secret
 	// Before the note is put: an agent's giving writes nothing, not even
 	// what the transaction would take back.
-	if sec.Harness != "" {
+	if sec.Google != "" {
+		err = w.may(ctx, actor, ActGiveGoogleCredentials, Object{Kind: KindUser, Name: sec.Google, To: sec.As})
+	} else if sec.Harness != "" {
 		err = w.may(ctx, actor, ActGiveHarnessKey, Object{Kind: KindHarness, Name: sec.Harness, To: sec.Crew})
 	} else if sec.User != "" {
 		err = w.may(ctx, actor, ActTell, Object{Kind: KindUser, Name: sec.User})
@@ -165,6 +173,9 @@ func (w *wtx) giveSecret(ctx context.Context, s *Store, home, id string, ask uin
 	}
 	if err := w.freshGivenRefusal(ask, weight, actor); err != nil {
 		return err
+	}
+	if sec.Google != "" {
+		return w.giveGoogle(row, ask, sec, values, actor, k)
 	}
 	if sec.Harness != "" {
 		return w.giveHarnessKey(ctx, home, row, ask, sec, values, actor, k)

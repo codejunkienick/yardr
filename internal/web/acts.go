@@ -299,10 +299,21 @@ func (s *Server) beadAnswerMapping(w http.ResponseWriter, r *http.Request, b *st
 // inside the window, else after the gateway authenticates now, the typed
 // values held in a secret challenge (secretPendingTTL) and given on the
 // return (handleFresh), never echoed on any error.
+//
+// A person's own Google sign-in (Secret.Google with Secret.As) is
+// that person's alone to give, so this page
+// gives it for nobody — not the operator, whose giving the store refuses
+// in any case — and a post for it is refused before its value is read
+// into a challenge. Its giver gives it from a paired device or a
+// terminal, as a member gives their own login input.
 func (s *Server) beadGiveSecret(w http.ResponseWriter, r *http.Request, b *store.Bead, ask store.BeadAsk) {
 	ctx := r.Context()
 	if ask.Secret == nil {
 		s.beadAgain(w, r, b.ID, fmt.Sprintf("ask %d asks for no secret: pick an option, answer with words, put it aside with Later, or decline it", ask.Ask))
+		return
+	}
+	if ask.Secret.Google != "" && ask.Secret.As != "" {
+		s.beadAgain(w, r, b.ID, fmt.Sprintf("ask %d is the sign-in for %s's own Google account %s: only %s may give it, from a paired device or in a terminal on the yard's machine (yardr bead answer %s %d --secret), never from this page", ask.Ask, ask.Secret.As, ask.Secret.Google, ask.Secret.As, b.ID, ask.Ask))
 		return
 	}
 	gate := s.holdsGate(ctx)

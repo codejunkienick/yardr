@@ -16,14 +16,16 @@ import (
 // ownSecret reports whether body, the arguments of GiveSecret from the
 // device c of a user who is not the operator, names a secret ask for that
 // user's own address in a source (store.AskSecret.User), for their own
-// credential in one (store.AskSecret.As) or for the input of their own
-// login (As beside a Login: the code their sign-in page shows). Those
-// givings are the user's own to make, on the socket (the store's mayTell)
-// and so here: each writes a file of theirs or hands their code to their
-// own waiting login, and sets no credential of the yard. For every other ask, and
-// for arguments that name none, the call stays what it is to anyone but
-// the operator: not there. Who may give is still the store's to decide,
-// with the user of the device's token as the actor (asUser).
+// credential in one (store.AskSecret.As), for the input of their own
+// login (As beside a Login: the code their sign-in page shows) or for
+// their own Google sign-in (As beside a Google: the pasted export of
+// their account). Those givings are the user's own to make, on the
+// socket (the store's mayTell) and so here: each writes a file of
+// theirs or hands their code to their own waiting login, and sets no
+// credential of the yard. For every other ask, and for arguments that
+// name none, the call stays what it is to anyone but the operator: not
+// there. Who may give is still the store's to decide, with the user of
+// the device's token as the actor (asUser).
 func (u *UserServer) ownSecret(ctx context.Context, c *Caller, body []byte) bool {
 	if c.User == "" {
 		return false
@@ -72,6 +74,56 @@ func (u *UserServer) memberLoginCode(ctx context.Context, body []byte, user stri
 	return u.loginInput(ctx, body, user, func(sec store.AskSecret) bool { return ownLoginInput(sec, user) })
 }
 
+// memberGoogle reports whether body is a GiveSecret call from the device
+// of the member user that gives their own Google sign-in (the ask
+// askedGoogle stores for a Google with an As), and the call came sealed
+// from a device paired with the QR: the channel session is on the
+// context, which serveInner alone puts there, so nothing a client sends
+// says it (e2eSessionKey), and the device's record, re-read as e2eDevice
+// re-reads it, pins its key at a pairing and not in place
+// (store.PinnedInPlace). It stands beside memberLoginCode and in its
+// shape: a gate of the ask's form, compared against the ask as stored
+// (store.AskSecret.GoogleSignInOf), for the user the ask is for and
+// nobody else, and the body carries only that ask's values (loginInput).
+//
+// A device sealed in place does not carry this one, where it carries
+// the login code: the code is used once, within ten minutes, kept in
+// the yard's memory and nowhere else, while the export is a refresh
+// token that is written to disk and lasts — a channel the edge may
+// have held at its first call, its key having been registered in the
+// clear with its token, must not be the one a lasting credential first
+// crosses on. Pairing the device with the QR lifts that, as it lifts
+// the label the device list shows.
+func (u *UserServer) memberGoogle(ctx context.Context, body []byte, user string) bool {
+	session, sealed := ctx.Value(e2eSessionKey{}).(*e2eSession)
+	if !sealed || !u.qrPaired(ctx, session) {
+		return false
+	}
+	return u.loginInput(ctx, body, user, func(sec store.AskSecret) bool { return sec.GoogleSignInOf(user) })
+}
+
+// qrPaired reports whether the device session names pins its channel
+// key at a pairing and not in place: its record, re-read as e2eDevice
+// re-reads it, under the key the session holds. A record with a key
+// and no word of how it was pinned reads as paired (store.Devices), so
+// checking PinnedPaired fails closed against both in-place and any
+// later non-QR pin.
+func (u *UserServer) qrPaired(ctx context.Context, s *e2eSession) bool {
+	if s == nil || s.user == "" || s.device == "" || s.channelKey == "" {
+		return false
+	}
+	devices, err := u.st.Devices(ctx, s.user)
+	if err != nil {
+		return false
+	}
+	for _, d := range devices {
+		if d.Name == s.device {
+			return d.ChannelKey == s.channelKey && d.ChannelPinned == store.PinnedPaired
+		}
+	}
+	return false
+}
+
 // ownLoginInput reports whether sec is the ask for the input of the login led
 // for user: the operator's form of it (OperatorLoginInput, the whole of the
 // struct compared) with As the user, which is the form askedLogin stores for a
@@ -85,10 +137,10 @@ func ownLoginInput(sec store.AskSecret, user string) bool {
 }
 
 // loginInput reports whether body is a GiveSecret call from the device of
-// user that names an ask for a harness login's input in the form is takes
-// (the operator's, or a member's own), and carries only that ask's values.
-// Other argument shapes must be refused before the edge reads them, even if a
-// client later rejects them.
+// user that names an ask in the form is takes (the operator's login input,
+// a member's own, or a member's own Google sign-in), and carries only that
+// ask's values. Other argument shapes must be refused before the edge
+// reads them, even if a client later rejects them.
 func (u *UserServer) loginInput(ctx context.Context, body []byte, user string, is func(store.AskSecret) bool) bool {
 	if _, err := named("GiveSecret", body); err != nil {
 		return false
@@ -255,6 +307,13 @@ func (u *UserServer) namedSecret(ctx context.Context, body []byte) *store.AskSec
 	if json.Unmarshal(named["ask"], &ask) != nil {
 		return nil
 	}
+	return u.secretAt(ctx, id, ask)
+}
+
+// secretAt is the secret the ask ask on the bead id asks for, as namedSecret
+// reads it from a body's arguments: nil where the bead has no such ask or
+// the ask asks for none.
+func (u *UserServer) secretAt(ctx context.Context, id string, ask uint64) *store.AskSecret {
 	notes, err := u.st.Notes(ctx, id)
 	if err != nil {
 		return nil
@@ -263,11 +322,25 @@ func (u *UserServer) namedSecret(ctx context.Context, body []byte) *store.AskSec
 		if n.Seq != ask || n.Kind != store.NoteAsk {
 			continue
 		}
-		ask, err := store.ParseAsk(n)
+		parsed, err := store.ParseAsk(n)
 		if err != nil {
 			return nil
 		}
-		return ask.Secret
+		return parsed.Secret
 	}
 	return nil
+}
+
+// memberGoogleAsk reports whether sec is the ask for the Google sign-in
+// of user, the member userclear's refusal names the QR-paired door for.
+func memberGoogleAsk(sec *store.AskSecret, user string) bool {
+	return sec != nil && user != "" && sec.Google != "" && sec.As == user
+}
+
+// isGoogleAsk reports whether the ask ask on the bead id asks for a Google
+// account's sign-in: its pasted export may hold bare line breaks, which a
+// giving must not refuse as a value no env file can hold (giveSecret).
+func (u *UserServer) isGoogleAsk(ctx context.Context, id string, ask uint64) bool {
+	sec := u.secretAt(ctx, id, ask)
+	return sec != nil && sec.Google != ""
 }

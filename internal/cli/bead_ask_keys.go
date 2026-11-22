@@ -103,6 +103,48 @@ func readHookKeys(secret *store.AskSecret, in io.Reader, typed func(prompt strin
 	return values, nil
 }
 
+// readGoogleKeys reads the value a Google-sign-in ask asks for, as
+// readHookKeys reads a hook's: unseen from a terminal, or as a
+// NAME=value line from anything else. The ask names the one name. No
+// error holds the value.
+func readGoogleKeys(secret *store.AskSecret, in io.Reader, typed func(prompt string) (string, error)) (map[string]string, error) {
+	values := map[string]string{}
+	if typed == nil {
+		env, err := store.ParseEnv(in, "standard input")
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range env {
+			k, v, _ := strings.Cut(e, "=")
+			if !slices.Contains(secret.Env, k) {
+				return nil, fmt.Errorf("the Google account %s: standard input sets a name that was not asked for (%s)", secret.Google, strings.Join(secret.Env, ", "))
+			}
+			values[k] = v
+		}
+		for _, n := range secret.Env {
+			if _, ok := values[n]; !ok {
+				return nil, fmt.Errorf("the Google account %s: standard input has no line %s=<value>", secret.Google, n)
+			}
+		}
+		if len(values) == 0 {
+			return nil, fmt.Errorf("the Google account %s: standard input has no NAME=value line, and nothing is written", secret.Google)
+		}
+		return values, nil
+	}
+	for _, n := range secret.Env {
+		v, err := typed(fmt.Sprintf("%s for the Google account %s (nothing is shown as you type; paste the output of gws auth export --unmasked as one line): ", n, secret.Google))
+		if err != nil {
+			return nil, fmt.Errorf("the Google account %s: reading %s: %w", secret.Google, n, err)
+		}
+		if v = strings.TrimSpace(v); v != "" {
+			values[n] = v
+		} else {
+			return nil, fmt.Errorf("the Google account %s: nothing was typed for %s, and nothing is written", secret.Google, n)
+		}
+	}
+	return values, nil
+}
+
 // readHarnessKeys reads the values a harness-key secret ask asks for, as
 // readHookKeys reads a hook's: unseen from a terminal, or as NAME=value
 // lines from anything else. There is no declaration to read them against:

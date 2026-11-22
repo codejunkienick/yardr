@@ -233,6 +233,13 @@ the call came sealed, so the edge carries it as ciphertext and reads nothing of
 it. The same call from a plain device is refused, and pairing it again with the
 QR makes its calls sealed. Each code is used once, within minutes, and the yard
 hands it to the waiting login in its memory and keeps it nowhere.
+A member's own Google sign-in (the export of `gws auth export --unmasked`,
+[google.md](google.md#step-1-the-gws-login)) crosses the same way only from a
+device paired with the QR: a device sealed in place, which carries the code
+above, does not carry it, since the export is a refresh token that is written
+to disk and lasts where the code is used once and kept in memory, and pairing
+the device again with the QR lifts that. A plain call for it is refused in
+words that name the QR-paired device and the terminal command.
 A session's screen crosses with the approvals: `SessionScreen` is taken from
 a paired device of the operator down the link, as from the yard's own
 machine. On a plain call the edge reads the screen with the device's
@@ -256,7 +263,8 @@ plain, from a paired device of the operator: the service runs the edge and the
 machine the yard lives on, and the operator has no shell there to answer at (the
 yard's `hosted` setting, [configuration.md](configuration.md#settings)). A
 device of a user who is not the operator gives no secret down the link on
-either, but the code of their own sign-in on a sealed call (above). The grant
+either, but the code of their own sign-in on a sealed call, and their own
+Google sign-in on a sealed call from a device paired with the QR (above). The grant
 list,
 `SourceGrants`, carries no credential but is never read through the edge, on
 either. A device call cannot read or change the telemetry switch through the
@@ -274,7 +282,7 @@ checks the gateway's JWT and acts as the mapped yard user.
 | how the edge reaches it | TCP to its container or droplet | the link the yard opened |
 | footplate | Kratos session plus device token, pairing by code | the same, through the link |
 | web view | `https://my.yardr.dev/?yard=<name>`, signed in as the account that owns the yard | the same, through the socket the view keeps to the edge ([below](#the-web-view-of-a-connected-yard)) |
-| secrets given from a device | every secret, from the operator's devices, the account a setup types among them; a member's own sign-in code, from their sealed device | every secret, from the operator's sealed devices, and the code of a harness login from any of their devices; the account a setup types is answered at the yard's machine; a member's own sign-in code, from their sealed device |
+| secrets given from a device | every secret, from the operator's devices, the account a setup types among them; a member's own sign-in code, from their sealed device; a member's own Google sign-in, from their device paired with the QR | every secret, from the operator's sealed devices, and the code of a harness login from any of their devices; the account a setup types is answered at the yard's machine; a member's own sign-in code, from their sealed device; a member's own Google sign-in, from their device paired with the QR |
 | who runs it, upgrades, backs up | the service | the person |
 | invite list | yes, for the trial | no: any verified account connects its own yard, and gets no hosted yard |
 

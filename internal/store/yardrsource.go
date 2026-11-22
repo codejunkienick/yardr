@@ -413,6 +413,10 @@ func answerSentence(actor, bead, asker string, askSeq uint64, ask Ask, ans Answe
 		return oneLine(fmt.Sprintf("%s gave %s, the API key %s runs with on the operator's login, asked for crew member %s (ask %d on %s)", actor, strings.Join(ans.Given, " and "), label, ask.Secret.Crew, askSeq, bead))
 	case len(ans.Given) > 0 && ask.Secret != nil && ask.Secret.Crew != "":
 		return oneLine(fmt.Sprintf("%s gave %s for crew member %s in the source %s (ask %d on %s)", actor, strings.Join(ans.Given, " and "), ask.Secret.Crew, ask.Secret.Source, askSeq, bead))
+	case len(ans.Given) > 0 && ask.Secret != nil && ask.Secret.Google != "" && ask.Secret.As != "":
+		return oneLine(fmt.Sprintf("%s gave %s, the sign-in for %s's Google account %s (ask %d on %s)", actor, strings.Join(ans.Given, " and "), ask.Secret.As, ask.Secret.Google, askSeq, bead))
+	case len(ans.Given) > 0 && ask.Secret != nil && ask.Secret.Google != "":
+		return oneLine(fmt.Sprintf("%s gave %s, the sign-in for the yard's Google account %s (ask %d on %s)", actor, strings.Join(ans.Given, " and "), ask.Secret.Google, askSeq, bead))
 	case len(ans.Given) > 0 && ask.Secret != nil && ask.Secret.As != "":
 		return oneLine(fmt.Sprintf("%s gave %s for the source %s, as %s (ask %d on %s)", actor, strings.Join(ans.Given, " and "), ask.Secret.Source, ask.Secret.As, askSeq, bead))
 	case len(ans.Given) > 0 && ask.Secret != nil && ask.Secret.Login != "":

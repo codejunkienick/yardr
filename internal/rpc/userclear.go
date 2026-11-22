@@ -51,11 +51,16 @@ const linkRemoteAddr = "edge:0"
 // crosses is its word that this giving, or this setup approval with the
 // account typed, is one the yard takes down the link, and it passes false
 // for every call it judges before the body is read. member is whether the
-// caller is a user who is not the operator. A member's giving crosses for the
-// code of their own sign-in from a sealed device alone (memberLoginCode); every
-// other is refused in one sentence, the same on a hosted yard and on any other,
-// except that a sealed call's refusal drops the sentence saying the edge saw
-// what was sent, which crossed as ciphertext. On a hosted yard every secret crosses, for a device of the
+// caller is a user who is not the operator, and google whether the call
+// names that member's own Google sign-in. A member's giving crosses for
+// the code of their own sign-in from a sealed device (memberLoginCode),
+// or for their own Google sign-in from a device paired with the QR
+// (memberGoogle); every other is refused in one sentence, the same on a
+// hosted yard and on any other, except that a sealed call's refusal
+// drops the sentence saying the edge saw what was sent, which crossed
+// as ciphertext. A Google giving refused here is refused in its own
+// sentence: it names the QR-paired device and the terminal command,
+// and never the operator, who is refused that giving. On a hosted yard every secret crosses, for a device of the
 // operator: the hosting service runs the edge and the machine the yard lives
 // on, so a refusal would guard nothing it does not hold, and would leave a
 // person with no shell on that machine unable to give a key at all (hosted).
@@ -84,7 +89,7 @@ const linkRemoteAddr = "edge:0"
 // (call). If the edge says the device reached it over plain HTTP, the
 // approval, the secret, the screen, the list and the filing are still
 // refused.
-func inTheClear(r *http.Request, name, router string, crosses, member bool) string {
+func inTheClear(r *http.Request, name, router string, crosses, member, google bool) string {
 	if name == "SourceGrants" {
 		return sourceGrantsInTheClear(r, router)
 	}
@@ -120,7 +125,8 @@ func inTheClear(r *http.Request, name, router string, crosses, member bool) stri
 			// A device of the operator reaches here (operatorCall), and a
 			// member's only for their own pairing approval (ownPairApproval)
 			// and, as call says crosses, the code of their own sign-in from
-			// a sealed device (memberLoginCode).
+			// a sealed device (memberLoginCode) or their own Google
+			// sign-in from a device paired with the QR (memberGoogle).
 			if forwardedPlain(r) {
 				return what + " is taken over https only, or from the yard's own machine: the proxy in front of the yard says this request came to it in plain HTTP. " +
 					"Give the device the yard's https:// address." + crossed
@@ -138,6 +144,13 @@ func inTheClear(r *http.Request, name, router string, crosses, member bool) stri
 			tail = ""
 		}
 		if member {
+			if google {
+				// The operator is refused this giving, so none is named
+				// as its giver: the doors named are the member's own, a
+				// device paired with the QR and a terminal of theirs.
+				return "your Google sign-in does not cross the edge from this device: it crosses only from a device paired with the QR (pairing the device with the QR makes it one), " +
+					"or in a terminal (yardr bead answer <bead> <ask> --secret); it is yours alone to give, and the operator does not give it." + tail
+			}
 			// The member has no shell on the yard's machine, so no ssh is
 			// offered, and the operator's device gives from a sealed call, or
 			// from any call where the yard is hosted. The sentence is one

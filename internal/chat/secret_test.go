@@ -624,3 +624,12 @@ func TestSecretFieldNamesTheWaitingLogin(t *testing.T) {
 		t.Fatalf("label = %q", got)
 	}
 }
+
+// A Google sign-in is typed in the field with its account named before
+// it, as a waiting login names its login: the ask has no source to name.
+func TestSecretFieldNamesTheGoogleAccount(t *testing.T) {
+	s := &secretField{google: "ada@example.com", env: []string{"GOOGLE_CREDENTIALS"}, values: map[string]string{}}
+	if got := s.label(); got != "GOOGLE_CREDENTIALS for the Google account ada@example.com  " {
+		t.Fatalf("label = %q", got)
+	}
+}

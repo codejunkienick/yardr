@@ -385,6 +385,7 @@ operator has no terminal, each row names the door they have instead.
 | stays the operator's | the door instead |
 |---|---|
 | A secret value, `env_file` and `env_command`, a source's key and mint command, where a credential is read from | The secret asks: the person gives the value on their device, and the yard writes it to its file where no agent reads it. In the hosted web the bead's page draws a concealed field for a secret ask and gives it under a fresh sign-in; every other web window draws no field, since every secret ask is weighty and a weighty card has no gate there ([web.md](web.md#one-bead)) |
+| A Google account's sign-in (the export of `gws auth login` on the machine that signed in) | The Google secret asks (`--secret-google`), pasted unseen; the yard writes the account's credentials file where google-mint reads it ([google.md](google.md#step-1-the-gws-login)). The yard's own account is the operator's to give: on the hosted yard's bead page under a fresh sign-in, from a paired device, or in a terminal. A person's own account is that person's alone: from their paired device or in a terminal, never on the web page and never by the operator; down the edge link their device carries it only where it was paired with the QR, a device sealed in place never |
 | A user's role, adding or removing a user, inviting a teammate, a device, a link's trust | The cards as they stand (`user set … role=`, `user add`, `user rm`, `user invite`, `user login`, `user device rm`, `peer add` and the other link cards), the strong ones under a fresh sign-in in the hosted web. The operator pairs their own first device through the hosted web |
 | Removing a source or a hook, moving a source's records or its links | The `source rm`, `source move`, `link move` and `hook rm` cards. A source's `base` and `host` move on the `source set … base=`/`host=` card (or, at setup, by `--source-base` and the host the operator types there) |
 | A hook add with a custom secret file, changing a hook's secret file | A terminal on a yard you run yourself, the host on a hosted one. Rotating the secret itself, where the file is the yard's own for the hook, is the hook's own secret card; a file that breaks the rule (open to others, or a link) is refused there, not repaired |
@@ -1342,7 +1343,8 @@ down the link from the edge ([edge.md](edge.md#footplate-through-the-link);
 a secret is taken besides from the yard's router, and down the link when the
 yard is hosted, when the call came sealed from the operator's own device, or
 when the secret is a harness login's code, or the code of a member's own
-sign-in from their sealed device, a setup approval that types the account
+sign-in from their sealed device, or a member's own Google sign-in from
+their device paired with the QR, a setup approval that types the account
 being such a secret,
 [api.md](api.md#tls-is-yours-and-the-clients-rule));
 and each approval through a device is marked `via
@@ -1413,11 +1415,30 @@ sealed. A device paired with the QR's key calls sealed, and so does one
 reads nothing of the code. A call that came plain is refused, and pairing the
 device again with the QR makes its calls sealed. The operator's sealed device
 gives it for them, as it gives any secret (above), and their plain call does
-not. It is the one secret a member's device gives down the link: every other, a
-credential or an address of their own among them, is refused in one sentence,
-whether the call came plain or sealed. The code is used once, within ten
-minutes, and the yard hands it to the waiting login, the member's own, in its
-memory and keeps it nowhere.
+not. Beside their own Google sign-in (below) it is the one secret a member's
+device gives down the link: every other, a credential or an address of their
+own among them, is refused in one sentence, whether the call came plain or
+sealed. The code is used once, within ten minutes, and the yard hands it to
+the waiting login, the member's own, in its memory and keeps it nowhere.
+
+**A member's own Google sign-in crosses the edge from a device paired with
+the QR.** A member whose only way into the yard is a device paired through
+the edge signs their own Google account in there
+([google.md](google.md#step-1-the-gws-login)): the export of
+`gws auth export --unmasked` on the machine that signed in, given with
+`GiveSecret` from their own device, is taken down the link, on a hosted yard
+and on one the operator runs, when the call came sealed from a device
+paired with the QR. A device [sealed in place](#sealed-in-place) does not
+carry it, though it carries the sign-in code above: the export is a refresh
+token that the yard writes to disk and that lasts, where the code is used
+once, within ten minutes, and kept in memory, and a channel the edge may
+have held at its first call must not be the one a lasting credential first
+crosses on. Pairing the device again with the QR lifts that. A call that
+came plain is refused in words that name the QR-paired device and the
+terminal command (`yardr bead answer <bead> <ask> --secret`), and never
+the operator: the giving is the member's alone, and the operator is refused
+it. What is given is written, mode 0600, to the account's credentials file
+where google-mint reads it, and is in no note the yard keeps.
 
 **On a hosted yard every secret crosses the edge.** A hosted yard is one the
 service made and runs, and its `hosted` setting is `true`
@@ -1430,7 +1451,8 @@ and the login's code, in a call that came plain or sealed. The edge reads the
 value with the device's token, as it reads every plain call; the yard writes it
 to its file, as it does for a giving at the yard's own machine. A device of a
 user who is not the operator gives nothing down the link, hosted or not, but
-the code of their own sign-in on a sealed call (above), and a call that the edge
+the code of their own sign-in on a sealed call and their own Google sign-in
+from a device paired with the QR (above), and a call that the edge
 says came in plain HTTP is refused as ever.
 `yardr user device rm` ends a device's reach at its next request.
 

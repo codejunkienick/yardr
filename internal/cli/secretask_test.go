@@ -551,3 +551,85 @@ func TestBeadAnswerAHarnessKey(t *testing.T) {
 		t.Fatalf("prime after the giving, %v:\n%s", err, out)
 	}
 }
+
+// bead ask --secret-google stores the yard's Google sign-in ask, and
+// bead answer --secret writes the pasted export to the yard's own
+// credentials file, printing who gave it and where, never the value.
+// With --as the ask is that user's own: the operator neither asks it
+// of themselves nor gives it.
+func TestBeadAskAndAnswerAGoogleSignIn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	st, id, _ := secretYard(t)
+	ctx := context.Background()
+	if _, err := st.AddUser(ctx, "ada", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	yard := &app{st: st, actor: "yardmaster"}
+	me := &app{st: st, actor: "mckean"}
+	ada := &app{st: st, actor: "ada"}
+
+	out, err := run(t, yard.beadCmd(), "ask", id, "The yard's Google sign-in", "--secret-google", "yard@example.com",
+		"--context", "Sign in with gws auth login on your machine, then paste gws auth export --unmasked.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "ask 1 on " + id + " for mckean: a secret, the sign-in for the yard's Google account yard@example.com\n"; out != want {
+		t.Fatalf("ask printed %q\nwant        %q", out, want)
+	}
+	const export = `{"client_id":"123-fake","client_secret":"GOCSPX-fake","refresh_token":"1//fake-refresh","type":"authorized_user"}`
+	file := filepath.Join(home, ".config", "gws", "credentials.json")
+	out, err = answerFrom(t, me, "GOOGLE_CREDENTIALS="+export+"\n", id, "1", "--secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "mckean gave GOOGLE_CREDENTIALS · it is set in " + file + "\n" +
+		"read by: google-mint, minting a token for the yard's Google calls\n" +
+		"not reached: calls made as a user, which read that account's own file; any env_file\n"
+	if out != want {
+		t.Fatalf("answer printed %q\nwant           %q", out, want)
+	}
+	if strings.Contains(out, "fake-refresh") {
+		t.Fatalf("the answer holds the pasted value:\n%s", out)
+	}
+	if b, err := os.ReadFile(file); err != nil || string(b) != export {
+		t.Fatalf("the credentials file holds %q, %v", b, err)
+	}
+
+	out, err = run(t, yard.beadCmd(), "ask", id, "Your Google sign-in", "--secret-google", "ada@example.com", "--as", "ada",
+		"--context", "Sign in with gws auth login on your machine, then paste gws auth export --unmasked.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "ask 3 on " + id + " for ada: a secret, the sign-in for ada's Google account ada@example.com\n"; out != want {
+		t.Fatalf("ask printed %q\nwant        %q", out, want)
+	}
+	if out, err := answerFrom(t, me, "GOOGLE_CREDENTIALS="+export+"\n", id, "3", "--secret"); err == nil ||
+		!strings.Contains(err.Error(), "only ada may") || strings.Contains(out+err.Error(), "fake-refresh") {
+		t.Fatalf("the operator giving ada's sign-in: %q, err = %v", out, err)
+	}
+	adaFile := filepath.Join(home, ".config", "gws-accounts", "ada@example.com", "credentials.json")
+	out, err = answerFrom(t, ada, "GOOGLE_CREDENTIALS="+export+"\n", id, "3", "--secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "ada gave GOOGLE_CREDENTIALS · it is set in " + adaFile + "\n"; !strings.HasPrefix(out, want) {
+		t.Fatalf("answer printed %q\nwant prefix   %q", out, want)
+	}
+
+	for name, c := range map[string]struct {
+		args []string
+		want string
+	}{
+		"env":       {[]string{"--secret-google", "yard@example.com", "--env", "X"}, "--secret-google takes no --env"},
+		"for user":  {[]string{"--secret-google", "ada@example.com", "--for-user", "ada"}, "--secret-google takes no --for-user"},
+		"for crew":  {[]string{"--secret-google", "ada@example.com", "--for-crew", "yardmaster"}, "--secret-google takes no --for-crew"},
+		"two kinds": {[]string{"--secret-google", "yard@example.com", "--secret", "crm"}, "one of the two"},
+		"no at":     {[]string{"--secret-google", "yard"}, "name the account's address"},
+	} {
+		args := append([]string{"ask", id, "The Google sign-in", "--context", "where to get it."}, c.args...)
+		if _, err := run(t, yard.beadCmd(), args...); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want %q", name, err, c.want)
+		}
+	}
+}

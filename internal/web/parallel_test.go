@@ -22,6 +22,9 @@ var allowSerial = map[string]string{
 	"TestHealthDaemonBuild": "assign:describeServer",
 	"TestHealthDegraded":    "assign:describeServer",
 	"TestLimitsTimeout":     "assign:limits.Timeout",
+	"TestWebGooglePersonSignInIsNotGivenOnTheWeb": "t.Setenv",
+	"TestWebGoogleSignInWaitsNoLongerThanASecret": "t.Setenv",
+	"TestWebGoogleYardSignInUnderAFreshSignIn":    "t.Setenv",
 }
 
 // parFacts is what a function does that decides parallelism: the
