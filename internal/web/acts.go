@@ -159,7 +159,8 @@ func (s *Server) beadMove(w http.ResponseWriter, r *http.Request, b *store.Bead,
 }
 
 // beadAnswer answers the form's ask through AnswerAsk, DeferAsk,
-// DeclineAsk or GiveSecret, or approves its run or setup card, as the
+// DeclineAsk or GiveSecret, approves its run or setup card, or picks
+// its mapping card under a fresh sign-in (beadAnswerMapping), as the
 // request's user. The ask must be open to them: one answered already, or
 // asked of another, is refused.
 func (s *Server) beadAnswer(w http.ResponseWriter, r *http.Request, b *store.Bead, rev string) {
@@ -229,11 +230,55 @@ func (s *Server) beadAnswer(w http.ResponseWriter, r *http.Request, b *store.Bea
 			return
 		}
 	}
+	if answer.Option != 0 && asks[i].Identity != nil && store.Weighty(asks[i].Weight) && s.holdsGate(ctx) {
+		s.beadAnswerMapping(w, r, b, asks[i], answer, rev)
+		return
+	}
 	if err := s.st.AddAnswerExpected(ctx, b.ID, answer, s.acting(ctx), rev); err != nil {
 		s.beadAgain(w, r, b.ID, err.Error())
 		return
 	}
 	http.Redirect(w, r, "/beads/"+url.PathEscape(b.ID), http.StatusSeeOther)
+}
+
+// beadAnswerMapping picks the mapping ask ask's option answer names, as
+// the request's user, under a fresh sign-in: every numbered pick on a
+// weighty mapping card takes it, whether or not the option writes an
+// identity, so the page has one rule; Later and Decline take none. Where
+// the session's last authentication is already a fresh one by this
+// operator inside the window the pick lands at once, with the weighed
+// word and the fresh witness; else the pick waits in a fresh challenge
+// (freshPendingTTL, holding no typed secret value) and lands on the
+// return (pickFreshMapping), never echoed. A non-operator's click is
+// refused here, before any sign-in round trip, in the words a weighty
+// card that is not the clicker's own is refused in. Where the window
+// holds no gate the caller keeps the plain path, whose yard refuses a
+// writing pick without its word as it always has.
+func (s *Server) beadAnswerMapping(w http.ResponseWriter, r *http.Request, b *store.Bead, ask store.BeadAsk, answer store.Answer, rev string) {
+	ctx := r.Context()
+	user := s.acting(ctx)
+	if !s.isOperator(ctx) {
+		s.beadAgain(w, r, b.ID, fmt.Sprintf("ask %d is %s: an operator's sign-in is what this page takes for a weighty card that is not your own. Approve it in footplate, or at a terminal on the yard's machine: yardr bead answer %s %d <n>",
+			ask.Ask, store.WeightyWords(ask.Weight), b.ID, ask.Ask))
+		return
+	}
+	held := 0
+	if ask.Identity != nil {
+		held = ask.Identity.Held
+	}
+	if auth, since, ok := s.strongAuth(ctx, user); ok && s.freshFor(ctx, ask, user, since) {
+		if err := s.st.AnswerAskExpected(store.WithFreshWitness(ctx, user, auth), b.ID, ask.Ask, ask.Turn, answer.Option, answer.Words, user, true, held); err != nil {
+			s.beadAgain(w, r, b.ID, err.Error())
+			return
+		}
+		http.Redirect(w, r, "/beads/"+url.PathEscape(b.ID), http.StatusSeeOther)
+		return
+	}
+	state := freshState()
+	s.putFresh(state, freshChallenge{bead: b.ID, ask: ask.Ask, user: user, at: time.Now(),
+		option: answer.Option, mapping: true, words: answer.Words, rev: rev, turn: ask.Turn, held: held})
+	to := "/beads/" + url.PathEscape(b.ID) + "/fresh/" + strconv.FormatUint(ask.Ask, 10) + "/" + state
+	freshRedirect(w, r, to)
 }
 
 // beadGiveSecret gives the secret ask asks for through GiveSecret, as the

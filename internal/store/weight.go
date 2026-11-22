@@ -290,6 +290,28 @@ func (w *wtx) freshGivenRefusal(seq uint64, weight []AskWeight, actor string) er
 	return nil
 }
 
+// freshMappingRefusal is freshRefusal for a mapping pick (recordAnswer,
+// through addAnswerNote): a mapping card is weighty (as-user) but not
+// strong, so StrongWeight never reaches it, yet a pick that carries a
+// fresh sign-in is judged by the same whom-and-when check, in the card's
+// weight words. Nil where the pick carries no witness, as before: the
+// weighed word alone then judges it, and a device or terminal pick is
+// unchanged.
+func (w *wtx) freshMappingRefusal(seq uint64, stored []AskWeight, actor string) error {
+	if !w.hasFresh || !Weighty(stored) {
+		return nil
+	}
+	switch w.freshFault(actor) {
+	case "other":
+		return fmt.Errorf("ask %d is %s: this pick's fresh sign-in was made as %s, not as %s. Nothing was written, and the ask stays open", seq, WeightyWords(stored), w.fresh.User, actor)
+	case "none":
+		return fmt.Errorf("ask %d is %s: this pick carries a fresh sign-in with no authentication time, and a mapping card is picked in the hosted web only under one. Nothing was written, and the ask stays open", seq, WeightyWords(stored))
+	case "window":
+		return fmt.Errorf("ask %d is %s: this pick's fresh sign-in is outside the gateway's window, and a mapping card is picked in the hosted web only under one inside it. Nothing was written, and the ask stays open", seq, WeightyWords(stored))
+	}
+	return nil
+}
+
 // weighAsk weighs the card the ask a holds, as the yard wrote it: a secret,
 // a run, a setup, a depot-push, a mapping or a pairing ask by its own rules,
 // and any other ask as routine.

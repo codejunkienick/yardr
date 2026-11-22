@@ -57,7 +57,9 @@ func challengeTTL(ch freshChallenge) time.Duration {
 // raised for and who raised it, when, and what it carries back (a weighty
 // card's approval: a setup's preset pick, account and host, a run's
 // values; or, where secret is set, a secret ask's typed values, given on
-// the return instead of approved).
+// the return instead of approved; or, where mapping is set, a mapping
+// card's pick, its option and words with the revision its form was drawn
+// from, picked on the return instead of either).
 type freshChallenge struct {
 	bead    string
 	ask     uint64
@@ -73,6 +75,17 @@ type freshChallenge struct {
 	// one approved in the hosted web waits here with what was typed, and
 	// waits no longer than a secret ask's values do.
 	typed bool
+	// mapping is whether the challenge carries a mapping card's pick:
+	// option its number, words the pick's words (someone new's name),
+	// rev the bead revision its form was drawn from. It holds no typed
+	// secret value, so it waits freshPendingTTL as an approval does.
+	mapping bool
+	words   string
+	rev     string
+	// turn and held are the mapping ask's turn and held count as its
+	// form read them, which its guarded pick names on the return.
+	turn int
+	held int
 }
 
 // freshAuth is what a consumed challenge returned: the authentication time
@@ -386,6 +399,10 @@ func (s *Server) handleFresh(w http.ResponseWriter, r *http.Request) {
 		s.giveFreshSecret(w, r, state, ch, *ask, user)
 		return
 	}
+	if ch.mapping {
+		s.pickFreshMapping(w, r, state, ch, *ask, user)
+		return
+	}
 	if !s.freshFor(ctx, *ask, user, ch.at) {
 		s.beadAgain(w, r, id, "that sign-in is not fresh: the gateway authenticated before the card's challenge, or outside its window. Approve the card again")
 		return
@@ -438,6 +455,49 @@ func (s *Server) giveFreshSecret(w http.ResponseWriter, r *http.Request, state s
 	}
 	ch.values = nil
 	if err != nil {
+		s.beadAgain(w, r, id, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/beads/"+url.PathEscape(id), http.StatusSeeOther)
+}
+
+// pickFreshMapping is handleFresh for a mapping challenge: it picks the
+// option the challenge held, under the return's fresh sign-in, and lands
+// on the bead. It stands on the operator's fresh session alone (freshFor,
+// which a mapping card takes as an operator's), spends the one-use state
+// before it picks, and keeps the revision the pick's form was drawn from:
+// a bead that moved while its operator signed in is read again instead
+// of picked. The pick says its person saw the weight (weighed) only here,
+// where the handler has just taken the fresh sign-in, and carries the
+// fresh witness the store judges and records on the answer. No error it
+// shows carries the pick's words: they ride the challenge alone, and the
+// store's refusals name no more of them than a terminal pick's do.
+func (s *Server) pickFreshMapping(w http.ResponseWriter, r *http.Request, state string, ch freshChallenge, ask store.BeadAsk, user string) {
+	ctx := r.Context()
+	id := ch.bead
+	if ask.Identity == nil {
+		s.beadAgain(w, r, id, fmt.Sprintf("ask %d maps nobody: pick it again", ch.ask))
+		return
+	}
+	if !s.freshFor(ctx, ask, user, ch.at) {
+		s.beadAgain(w, r, id, "that sign-in is not fresh: the gateway authenticated before the card's challenge, or outside its window. Pick it again")
+		return
+	}
+	auth := jwtIdentityOf(ctx).authTime
+	if !s.consumeFresh(state, ch, user, auth) {
+		s.beadAgain(w, r, id, "that sign-in was used already, expired, or never started: pick it again")
+		return
+	}
+	b, err := s.st.GetBead(ctx, id)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if ch.rev == "" || ch.rev != b.Revision {
+		s.beadAgain(w, r, id, fmt.Sprintf("bead %s is at revision %s, not %s; read it again", b.ID, b.Revision, revOrNone(ch.rev)))
+		return
+	}
+	if err := s.st.AnswerAskExpected(store.WithFreshWitness(ctx, user, auth), id, ch.ask, ch.turn, ch.option, ch.words, user, true, ch.held); err != nil {
 		s.beadAgain(w, r, id, err.Error())
 		return
 	}

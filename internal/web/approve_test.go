@@ -798,6 +798,331 @@ func TestWebSecretGiveReturnRefusals(t *testing.T) {
 	}
 }
 
+// mappingCard offers a mapping card for sender in talk on y's yard and
+// answers its bead and ask, as the operator's queue holds them. putTalk
+// declares the identity-hearing source first.
+func (y *approveYard) putTalk() {
+	y.t.Helper()
+	_, err := y.st.PutSource(context.Background(), "talk.yaml", mappingActSource, "jo")
+	must(y.t, err)
+}
+
+func (y *approveYard) mappingCard(sender string) (string, uint64) {
+	y.t.Helper()
+	ctx := context.Background()
+	created, err := y.own.ClaimIdentity(ctx, "talk", sender, "C1", "hi")
+	if err != nil || !created {
+		y.t.Fatalf("ClaimIdentity for %s = %v, %v", sender, created, err)
+	}
+	for _, user := range []string{"jo", "sam"} {
+		q, err := y.st.UserAsks(ctx, user, user)
+		must(y.t, err)
+		for _, o := range q.Open {
+			if o.Identity != nil && o.Identity.Sender == sender {
+				return o.Bead, o.Ask
+			}
+		}
+	}
+	y.t.Fatalf("no queue holds a card for %s", sender)
+	return "", 0
+}
+
+// pickOf is the number of the option label on the mapping ask seq.
+func (y *approveYard) pickOf(beadID string, seq uint64, label string) int {
+	y.t.Helper()
+	v, err := y.st.Bead(context.Background(), beadID)
+	must(y.t, err)
+	for _, a := range v.Asks {
+		if a.Ask == seq {
+			for i, o := range a.Options {
+				if o.Label == label {
+					return i + 1
+				}
+			}
+		}
+	}
+	y.t.Fatalf("ask %d on %s offers no %q", seq, beadID, label)
+	return 0
+}
+
+// pickForm is the pick the bead page's form posts for a mapping ask,
+// with words where the pick takes them (someone new's name).
+func (y *approveYard) pickForm(beadID string, seq uint64, option int, words string) url.Values {
+	v := url.Values{
+		"rev":    {y.revision(beadID)},
+		"ask":    {strconv.FormatUint(seq, 10)},
+		"option": {strconv.Itoa(option)},
+	}
+	if words != "" {
+		v.Set("words", words)
+	}
+	return v
+}
+
+// A mapping card in a hosted window offers its picks to an operator, on
+// its bead's page and on the needs rows and waits alike: picking starts
+// the gateway re-authentication bound to the card, the return picks
+// under the fresh sign-in and records it, and a second mapping card
+// inside the window picks at once. Every numbered pick takes the
+// sign-in, one that writes no identity included.
+func TestWebMappingPickUnderAFreshSignIn(t *testing.T) {
+	t.Parallel()
+	y := newApproveYard(t, true)
+	ctx := context.Background()
+	must(t, y.st.SetSetting(ctx, store.NameSetting, "depot", "jo"))
+	y.putTalk()
+	bID, seq := y.mappingCard("U777")
+	pick := y.pickOf(bID, seq, "sam")
+	tok := y.token("jo@example.net")
+
+	for _, s := range approveSurfaces {
+		body := y.surfaceBody(s.path(bID), tok)
+		if !strings.Contains(body, `name="option"`) {
+			t.Errorf("%s offers no mapping pick to the operator:\n%s", s.name, body)
+		}
+		if strings.Contains(body, noGateLine) {
+			t.Errorf("%s shows the no-gate line beside its picks:\n%s", s.name, body)
+		}
+	}
+	// Off a hosted yard, even in JWT mode, no mapping pick stands anywhere
+	// and the no-gate line stays.
+	off := newApproveYard(t, false)
+	must(t, off.st.SetSetting(ctx, store.NameSetting, "depot", "jo"))
+	off.putTalk()
+	offID, _ := off.mappingCard("U777")
+	for _, s := range approveSurfaces {
+		body := off.surfaceBody(s.path(offID), off.token("jo@example.net"))
+		if strings.Contains(body, `name="option"`) || !strings.Contains(body, noGateLine) {
+			t.Errorf("%s off a hosted yard offers a mapping pick, or lacks the no-gate line:\n%s", s.name, body)
+		}
+	}
+	r := y.post("/beads/"+bID, tok, y.pickForm(bID, seq, pick, ""))
+	if r.status != http.StatusSeeOther {
+		t.Fatalf("POST the pick: %d: %s", r.status, r.body)
+	}
+	loc, err := url.Parse(r.header.Get("Location"))
+	if err != nil || loc.Path != "/edge/reauth" {
+		t.Fatalf("the pick goes to %q, want the gateway re-authentication", r.header.Get("Location"))
+	}
+	back := loc.Query().Get("return_to")
+	if want := "/beads/" + bID + "/fresh/" + strconv.FormatUint(seq, 10) + "/"; !strings.HasPrefix(back, want) || back == want {
+		t.Fatalf("the return state is %q, want one-use state bound to ask %d", back, seq)
+	}
+	if u, err := y.st.GetUser(ctx, "sam"); err != nil || u.IsIn("talk", "U777") {
+		t.Fatalf("the challenge mapped the sender: %+v, %v", u, err)
+	}
+	// The same post from htmx answers with HX-Redirect to the same step,
+	// with a state of its own; the return followed is that one's.
+	hx := y.post("/beads/"+bID, tok, y.pickForm(bID, seq, pick, ""), "HX-Request", "true")
+	if hx.status != http.StatusOK || hx.header.Get("Location") != "" {
+		t.Fatalf("POST the pick with htmx: %d %q: %s", hx.status, hx.header.Get("Location"), hx.body)
+	}
+	hxLoc, err := url.Parse(hx.header.Get("HX-Redirect"))
+	if err != nil || hxLoc.Path != "/edge/reauth" {
+		t.Fatalf("the htmx pick goes to %q, want the gateway re-authentication", hx.header.Get("HX-Redirect"))
+	}
+	hxBack := hxLoc.Query().Get("return_to")
+	if want := "/beads/" + bID + "/fresh/" + strconv.FormatUint(seq, 10) + "/"; !strings.HasPrefix(hxBack, want) || hxBack == want || hxBack == back {
+		t.Fatalf("the htmx return state is %q, want a state of its own bound to ask %d", hxBack, seq)
+	}
+	fresh := y.token("jo@example.net", authAt(time.Now().Add(5*time.Second)))
+	r = y.getNoFollow(hxBack, fresh)
+	if r.status != http.StatusSeeOther || r.header.Get("Location") != "/beads/"+bID {
+		t.Fatalf("GET the return: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	if u, err := y.st.GetUser(ctx, "sam"); err != nil || !u.IsIn("talk", "U777") {
+		t.Fatalf("the return mapped nobody: %+v, %v", u, err)
+	}
+	if got := y.askedState(bID, seq, "jo"); got != "answered" {
+		t.Fatalf("the ask is %s after the return, want it answered", got)
+	}
+	if w := y.witness(); w != store.WitnessFreshSignIn {
+		t.Fatalf("the pick is witnessed %q, want a fresh sign-in", w)
+	}
+	notes, err := y.st.Notes(ctx, bID)
+	must(t, err)
+	if r := y.getNoFollow(hxBack, fresh); r.status != 200 || !strings.Contains(r.body, "used already") {
+		t.Fatalf("replaying the return: %d: %s", r.status, r.body)
+	}
+	if after, err := y.st.Notes(ctx, bID); err != nil || len(after) != len(notes) {
+		t.Fatalf("the replay left %d notes, want %d (%v)", len(after), len(notes), err)
+	}
+
+	// A second mapping card inside the fresh window picks at once, with
+	// no new sign-in: a let-in pick, which writes no identity, takes the
+	// same one rule.
+	b2, seq2 := y.mappingCard("U888")
+	r = y.post("/beads/"+b2, fresh, y.pickForm(b2, seq2, y.pickOf(b2, seq2, store.MappingLetIn), ""))
+	if r.status != http.StatusSeeOther || r.header.Get("Location") != "/beads/"+b2 {
+		t.Fatalf("POST the second pick: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	if got := y.askedState(b2, seq2, "jo"); got != "answered" {
+		t.Fatalf("the second ask is %s after its pick, want it answered", got)
+	}
+	if w := y.witness(); w != store.WitnessFreshSignIn {
+		t.Fatalf("the second pick is witnessed %q, want a fresh sign-in", w)
+	}
+
+	// Someone new's name rides the challenge and the return picks them:
+	// the name stands in no redirect, and the new user is mapped.
+	b3, seq3 := y.mappingCard("U999")
+	r = y.post("/beads/"+b3, tok, y.pickForm(b3, seq3, y.pickOf(b3, seq3, store.MappingSomeoneNew), "hal"))
+	if r.status != http.StatusSeeOther {
+		t.Fatalf("POST someone new: %d: %s", r.status, r.body)
+	}
+	loc, err = url.Parse(r.header.Get("Location"))
+	if err != nil || strings.Contains(r.header.Get("Location"), "hal") {
+		t.Fatalf("someone new goes to %q, want the re-authentication without the name", r.header.Get("Location"))
+	}
+	if _, err := y.st.GetUser(ctx, "hal"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the challenge added the user: %v", err)
+	}
+	r = y.getNoFollow(loc.Query().Get("return_to"), y.token("jo@example.net", authAt(time.Now().Add(5*time.Second))))
+	if r.status != http.StatusSeeOther || r.header.Get("Location") != "/beads/"+b3 {
+		t.Fatalf("GET someone new's return: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	if u, err := y.st.GetUser(ctx, "hal"); err != nil || !u.IsIn("talk", "U999") {
+		t.Fatalf("someone new was not mapped: %+v, %v", u, err)
+	}
+
+	// Later and Decline on a hosted mapping card take no fresh sign-in.
+	b4, seq4 := y.mappingCard("U1000")
+	r = y.post("/beads/"+b4, tok, url.Values{
+		"rev": {y.revision(b4)}, "ask": {strconv.FormatUint(seq4, 10)}, "action": {"later"},
+	})
+	if r.status != http.StatusSeeOther || r.header.Get("Location") != "/beads/"+b4 {
+		t.Fatalf("POST later on a hosted mapping card: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	if got := y.askedState(b4, seq4, "jo"); got != "put aside" {
+		t.Fatalf("the ask is %s after later, want put aside", got)
+	}
+	b5, seq5 := y.mappingCard("U1001")
+	r = y.post("/beads/"+b5, tok, url.Values{
+		"rev": {y.revision(b5)}, "ask": {strconv.FormatUint(seq5, 10)}, "action": {"decline"}, "words": {"not now"},
+	})
+	if r.status != http.StatusSeeOther || r.header.Get("Location") != "/beads/"+b5 {
+		t.Fatalf("POST decline on a hosted mapping card: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	if got := y.askedState(b5, seq5, "jo"); got != "declined" {
+		t.Fatalf("the ask is %s after decline, want declined", got)
+	}
+}
+
+// A mapping pick's return fails closed: a stale or timeless sign-in, a
+// return as another user or for another ask, a state that was never
+// minted or has expired, and a bead that moved while its operator
+// signed in each pick nothing and leave the card open. A member's
+// hosted page offers no mapping pick, and a crafted click is refused
+// before any round trip.
+func TestWebMappingPickReturnRefusals(t *testing.T) {
+	t.Parallel()
+	y := newApproveYard(t, true)
+	ctx := context.Background()
+	must(t, y.st.SetSetting(ctx, store.NameSetting, "depot", "jo"))
+	y.putTalk()
+	bID, seq := y.mappingCard("U777")
+	pick := y.pickOf(bID, seq, "sam")
+	r := y.post("/beads/"+bID, y.token("jo@example.net"), y.pickForm(bID, seq, pick, ""))
+	if r.status != http.StatusSeeOther {
+		t.Fatalf("POST the pick: %d: %s", r.status, r.body)
+	}
+	loc, err := url.Parse(r.header.Get("Location"))
+	if err != nil || loc.Path != "/edge/reauth" {
+		t.Fatalf("the pick goes to %q, want the gateway re-authentication", r.header.Get("Location"))
+	}
+	back := loc.Query().Get("return_to")
+	stale := y.token("jo@example.net", authAt(time.Now().Add(-time.Hour)))
+	for _, c := range []struct {
+		name  string
+		path  string
+		token string
+		want  string
+	}{
+		{"a stale sign-in", back, stale, "not fresh"},
+		{"no authentication time", back, y.token("jo@example.net"), "not fresh"},
+		{"another user", back, y.token("sam@example.net", authAt(time.Now().Add(5*time.Second))), "another card"},
+		{"another ask", strings.Replace(back, "/fresh/"+strconv.FormatUint(seq, 10)+"/", "/fresh/99/", 1), y.token("jo@example.net", authAt(time.Now().Add(5*time.Second))), "another card"},
+		{"a state never minted", "/beads/" + bID + "/fresh/" + strconv.FormatUint(seq, 10) + "/never-minted", y.token("jo@example.net", authAt(time.Now().Add(5*time.Second))), "used already"},
+	} {
+		if r := y.getNoFollow(c.path, c.token); r.status != 200 || !strings.Contains(r.body, c.want) {
+			t.Errorf("%s: GET the return: %d, want %q:\n%s", c.name, r.status, c.want, r.body)
+		}
+	}
+	// A challenge past its hour is spent: the return is as one never
+	// minted.
+	r = y.post("/beads/"+bID, y.token("jo@example.net"), y.pickForm(bID, seq, pick, ""))
+	loc, err = url.Parse(r.header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	y.srv.AgeFreshPending(2 * time.Hour)
+	if r := y.getNoFollow(loc.Query().Get("return_to"), y.token("jo@example.net", authAt(time.Now().Add(5*time.Second)))); r.status != 200 ||
+		!strings.Contains(r.body, "used already") {
+		t.Errorf("an expired challenge: GET the return: %d:\n%s", r.status, r.body)
+	}
+	// A bead that moved while its operator signed in is read again
+	// instead of picked, at the revision its form was drawn from.
+	r = y.post("/beads/"+bID, y.token("jo@example.net"), y.pickForm(bID, seq, pick, ""))
+	loc, err = url.Parse(r.header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := y.st.AddNote(ctx, bID, "while you were signing in", "yardmaster"); err != nil {
+		t.Fatal(err)
+	}
+	if r := y.getNoFollow(loc.Query().Get("return_to"), y.token("jo@example.net", authAt(time.Now().Add(5*time.Second)))); r.status != 200 ||
+		!strings.Contains(r.body, "read it again") {
+		t.Errorf("a moved bead: GET the return: %d:\n%s", r.status, r.body)
+	}
+	// A new delivery held on the card while its operator signed in changes
+	// the held count without bumping the bead revision; AnswerAskExpected
+	// catches it and leaves the card open.
+	r = y.post("/beads/"+bID, y.token("jo@example.net"), y.pickForm(bID, seq, pick, ""))
+	loc, err = url.Parse(r.header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.own.HoldIdentity(ctx, "talk", "talk", "U777", "C1", map[string]any{"text": "arrived during reauth"}, []byte("arrived during reauth"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if r := y.getNoFollow(loc.Query().Get("return_to"), y.token("jo@example.net", authAt(time.Now().Add(5*time.Second)))); r.status != 200 ||
+		!strings.Contains(r.body, "held or released since") {
+		t.Errorf("a delivery held during reauth: GET the return: %d:\n%s", r.status, r.body)
+	}
+	if u, err := y.st.GetUser(ctx, "sam"); err != nil || u.IsIn("talk", "U777") {
+		t.Fatalf("a refused pick mapped the sender: %+v, %v", u, err)
+	}
+	if got := y.askedState(bID, seq, "jo"); got != "open" {
+		t.Fatalf("the ask is %s after the refusals, want it open", got)
+	}
+	if w := y.witness(); w != "" {
+		t.Fatalf("a refused pick is witnessed %q, want none", w)
+	}
+
+	// A member's mapping card (asked of them while they were the
+	// operator) offers no pick in a hosted window, and a crafted click
+	// is refused as an operator's card is, before any round trip.
+	must(t, y.st.SetSetting(ctx, store.OperatorSetting, "sam", "jo"))
+	mID, mSeq := y.mappingCard("U111")
+	must(t, y.st.SetSetting(ctx, store.OperatorSetting, "jo", "jo"))
+	// Naming sam the operator gave them its role with the setting; a
+	// member is what the page reads, so give it back.
+	if _, err := y.st.SetUser(ctx, "sam", map[string]string{store.UserRole: store.RoleMember}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	sam := y.token("sam@example.net")
+	if body := y.surfaceBody("/beads/"+mID, sam); strings.Contains(body, `name="option"`) || !strings.Contains(body, noGateLine) {
+		t.Errorf("a member's hosted page offers a mapping pick, or lacks its line:\n%s", body)
+	}
+	r = y.post("/beads/"+mID, sam, y.pickForm(mID, mSeq, y.pickOf(mID, mSeq, "jo"), ""))
+	if r.status != http.StatusOK || !strings.Contains(r.body, "sign-in is what this page takes") || !strings.Contains(r.body, "footplate") {
+		t.Fatalf("POST a member's pick: %d, want an operator-only refusal:\n%s", r.status, r.body)
+	}
+	if got := y.askedState(mID, mSeq, "sam"); got != "open" {
+		t.Fatalf("the member's ask is %s after the refusal, want it open", got)
+	}
+}
+
 // A standing login never approves a strong card directly: a stale session
 // is challenged, and a return under a stale sign-in, with no
 // authentication time, or as another user refuses and leaves the card open.

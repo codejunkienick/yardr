@@ -839,7 +839,7 @@ func (s *Store) recordAnswer(ctx context.Context, id string, ans Answer, actor s
 		if err != nil {
 			return err
 		}
-		note, err := w.addNoted(row, NoteAnswer, string(text), actor)
+		note, err := w.addAnswerNote(ctx, row, string(text), ans, actor, notes)
 		if err != nil {
 			return err
 		}
@@ -856,7 +856,7 @@ func (s *Store) recordAnswer(ctx context.Context, id string, ans Answer, actor s
 		// ends the card by closing its bead. It runs after the answer is recorded, for two
 		// reasons: the write that settles the sender closes the cards for
 		// it, and this card's ask must be answered by then, not taken back;
-		// and addNoted wrote row, which a close made before it would lose
+		// and the answer wrote row, which a close made before it would lose
 		// to. A refusal (stale, or not the operator's to give) rolls the
 		// answer back with the write and leaves the card open. A declined
 		// claim ends its card beside it the same way (answerClaim).

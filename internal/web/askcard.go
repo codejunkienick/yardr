@@ -64,7 +64,10 @@ type AskCard struct {
 	User string
 	// Form is whether the answer form stands: the view acts. Rev is the
 	// bead's revision the form carries; Action where it posts. Picks is
-	// whether the option buttons stand, Words the words field, Answer the
+	// whether the option buttons stand: on a weighty mapping card they
+	// stand only where the window holds the gate, for an operator, whose
+	// pick then rides the fresh sign-in (beadAnswer); everywhere else the
+	// card keeps its footplate line. Words the words field, Answer the
 	// words-alone button. The words field stands on every card but a
 	// secret's, a run or setup card's included: the yard refuses a decline
 	// without its reason, so the reason needs a field wherever Decline
@@ -238,7 +241,7 @@ func (p BeadPage) Card(a store.BeadAsk) AskCard {
 		Context: a.Context, Options: a.Options, Recommend: a.Recommend, Why: a.Why,
 		Mapping: a.Identity != nil, About: a.About, Held: p.HeldPayloads[a.Ask], User: a.To,
 		Form: true, Rev: p.Bead.Revision, Action: p.Self(),
-		Picks: a.Setup == nil && (len(a.Weight) == 0 || a.Identity == nil),
+		Picks: a.Setup == nil && (len(a.Weight) == 0 || a.Identity == nil || (p.site.Gate && p.site.Operator)),
 		Words: a.Secret == nil,
 	}
 	out.Answer = out.Words && len(a.Options) == 0 && a.Run == nil
@@ -282,7 +285,7 @@ func (w Waiting) Card(r Reason) AskCard {
 		Context: r.Context, Options: r.Options, Recommend: r.Recommend, Why: r.RecommendWhy,
 		Mapping: r.Identity != nil, User: r.To,
 		Form: w.As != "", Rev: w.Revision, Action: "/beads/" + url.PathEscape(w.Bead),
-		Picks: r.SetupPack == "" && (len(r.Weight) == 0 || r.Identity == nil),
+		Picks: r.SetupPack == "" && (len(r.Weight) == 0 || r.Identity == nil || (w.site.Gate && w.site.Operator)),
 		Words: r.SecretLine == "",
 	}
 	out.Answer = out.Words && len(r.Options) == 0 && r.RunCommand == ""

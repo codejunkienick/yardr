@@ -876,6 +876,100 @@ func TestWeightIsHeldAtAMappingPick(t *testing.T) {
 	if u, err := y.GetUser(y.ctx, "ada"); err != nil || !u.IsIn("talk", "U1") {
 		t.Fatalf("the pick with the word left ada's identities %+v (%v)", u.Identities, err)
 	}
+	// On the socket the pick is witnessed a terminal's, as a weighty
+	// approval's is.
+	witnessOn := func(bead string) Event {
+		t.Helper()
+		notes, err := y.Notes(y.ctx, bead)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var seq uint64
+		for _, n := range notes {
+			if n.Kind != NoteAnswer {
+				continue
+			}
+			if a, err := ParseAnswer(n); err == nil && a.Option != 0 && !a.TakeBack {
+				seq = n.Seq
+			}
+		}
+		evs, err := y.Events(y.ctx, bead, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := len(evs) - 1; i >= 0; i-- {
+			switch n := evs[i].Data["note"].(type) {
+			case uint64:
+				if n == seq {
+					return evs[i]
+				}
+			case float64:
+				if uint64(n) == seq {
+					return evs[i]
+				}
+			}
+		}
+		t.Fatalf("no answer event on %s", bead)
+		return Event{}
+	}
+	if ev := witnessOn(card.Bead); Witness(ev) != WitnessTerminal || Via(ev) != "" {
+		t.Fatalf("the socket pick's event is witnessed %q via %q, want terminal with no device", Witness(ev), Via(ev))
+	}
+
+	// A pick that carries a fresh sign-in is judged by it as a secret
+	// giving is, though a mapping card is not strong: another user's,
+	// none, and one outside the gateway's window each refuse before
+	// anything is written, and a good one records the witness. A pick
+	// that carries none behaves as the socket's always has.
+	if err := y.SetSetting(y.ctx, WebJWTPrivilegedSessionMaxAgeSetting, "15m", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	freshCard := claimCard(t, y, "U3")
+	freshPick := pickFor(t, y, freshCard.Bead, "ada")
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+		want string
+	}{
+		{"another user", WithFreshWitness(y.ctx, "ada", time.Now()),
+			"ask " + itoa(freshCard.Ask) + " is weighty (as-user): this pick's fresh sign-in was made as ada, not as mckean. Nothing was written, and the ask stays open"},
+		{"no authentication time", WithFreshWitness(y.ctx, "mckean", time.Time{}),
+			"ask " + itoa(freshCard.Ask) + " is weighty (as-user): this pick carries a fresh sign-in with no authentication time, and a mapping card is picked in the hosted web only under one. Nothing was written, and the ask stays open"},
+		{"outside the window", WithFreshWitness(y.ctx, "mckean", time.Now().Add(-time.Hour)),
+			"ask " + itoa(freshCard.Ask) + " is weighty (as-user): this pick's fresh sign-in is outside the gateway's window, and a mapping card is picked in the hosted web only under one inside it. Nothing was written, and the ask stays open"},
+	} {
+		if err := y.AnswerAsk(c.ctx, freshCard.Bead, freshCard.Ask, freshPick, "", "mckean", true); err == nil || err.Error() != c.want {
+			t.Fatalf("%s: picking a mapping card = %v, want %q", c.name, err, c.want)
+		}
+	}
+	// An unauthorized actor carrying a bad fresh witness on an unguarded
+	// pick is turned away by the policy first, never told about the witness.
+	if err := y.AnswerAsk(WithFreshWitness(y.ctx, "ada", time.Time{}), freshCard.Bead, freshCard.Ask, freshPick, "", "ada", true); err == nil ||
+		!strings.Contains(err.Error(), "mckean, the operator") || strings.Contains(err.Error(), "fresh sign-in") {
+		t.Fatalf("unauthorized pick with bad witness = %v, want policy refusal", err)
+	}
+	if u, err := y.GetUser(y.ctx, "ada"); err != nil || u.IsIn("talk", "U3") {
+		t.Fatalf("a refused fresh pick wrote ada's identity %+v (%v)", u.Identities, err)
+	}
+	wantCardOpen(t, y, freshCard.Bead)
+	if err := y.AnswerAsk(WithFreshWitness(y.ctx, "mckean", time.Now()), freshCard.Bead, freshCard.Ask, freshPick, "", "mckean", true); err != nil {
+		t.Fatalf("picking under a fresh sign-in = %v", err)
+	}
+	if u, err := y.GetUser(y.ctx, "ada"); err != nil || !u.IsIn("talk", "U3") {
+		t.Fatalf("the fresh pick left ada's identities %+v (%v)", u.Identities, err)
+	}
+	if ev := witnessOn(freshCard.Bead); Witness(ev) != WitnessFreshSignIn || Via(ev) != "" {
+		t.Fatalf("the fresh pick's event is witnessed %q via %q, want a fresh sign-in with no device", Witness(ev), Via(ev))
+	}
+	// Through a device the same witness is judged and claims none.
+	deviceCard := claimCard(t, y, "U4")
+	phone := WithFreshWitness(WithVia(y.ctx, "mckean", "phone"), "mckean", time.Now())
+	if err := y.AnswerAsk(phone, deviceCard.Bead, deviceCard.Ask, pickFor(t, y, deviceCard.Bead, "ada"), "", "mckean", true); err != nil {
+		t.Fatalf("picking through a device with a witness = %v", err)
+	}
+	if ev := witnessOn(deviceCard.Bead); Via(ev) != "phone" || Witness(ev) != "" {
+		t.Fatalf("the device pick is via %q witnessed %q, want phone with no witness", Via(ev), Witness(ev))
+	}
 }
 
 func sha256Hex(text string) string {

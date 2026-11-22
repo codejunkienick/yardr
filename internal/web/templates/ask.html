@@ -8,9 +8,10 @@
        answer row. The gate reads as ever: a weighty card offers no control
        the yard would refuse for want of its person's word, except a weighty
        card, which approves in every place the card stands once the window
-       holds the gate (Approve), and a secret card on its bead's page,
-       which gives there once the window holds the gate (Give): a fresh
-       sign-in comes first for both. */ -}}
+       holds the gate (Approve), a secret card on its bead's page,
+       which gives there once the window holds the gate (Give), and a
+       mapping card, whose picks stand for an operator once the window
+       holds the gate (Picks): a fresh sign-in comes first for each. */ -}}
 {{define "ask"}}
   {{- if .OnBead}}
   <p class="ask-line">{{.Bead}} · ask {{.Ask}}</p>
@@ -109,10 +110,12 @@
   {{- end}}
   {{- /* A weighty mapping card's picks write a user's identity, which
          the yard refuses without its person's word that the weight was
-         seen, and the page has no gate to ask for it: the form below
-         keeps the words with Later and Decline alone, and the pick is
-         made where the line names, with the option's number. */}}
-  {{- if and .Weight .Mapping}}
+         seen: where this window holds no gate for an operator's pick
+         the form below keeps the words with Later and Decline alone,
+         and the pick is made where the line names, with the option's
+         number. Where Picks stands (a hosted window, an operator) the
+         buttons below pick under a fresh sign-in, and this line hides. */}}
+  {{- if and .Weight .Mapping (not .Picks)}}
   <p>This card is weighty and this window has no gate. Approve it in footplate, or in a terminal on the yard's machine:</p>
   <p class="entry-note">Approve it with <code>yardr bead answer {{.Bead}} {{.Ask}} &lt;n&gt;</code>.</p>
   {{- end}}

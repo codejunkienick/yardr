@@ -224,6 +224,40 @@ func (w *wtx) addGiven(row *beadRow, text, actor string) (*Note, error) {
 	return n, err
 }
 
+// addAnswerNote records an answer as addNoted does, witnessed where the
+// answer is a mapping card's pick: the pick is a weighty approval, so its
+// answer's event carries the witness as an approval's does
+// (addWitnessed), after the policy (mayAnswerMapping) and any fresh
+// sign-in the call carries (freshMappingRefusal) are judged. Checking the
+// policy first matches giveSecret and guard: an unauthorized caller on an
+// unguarded AnswerAsk is turned away before the witness is judged. The
+// witness is set before the answer is recorded, since answerMapping runs
+// after it and the mark lives on the answer's event alone; a refusal here
+// writes nothing, and the write that answers rolls back whole, as a
+// refusal inside answerMapping does. Any other answer, and a mapping
+// card's Later, decline or words, records as it always has.
+func (w *wtx) addAnswerNote(ctx context.Context, row *beadRow, text string, ans Answer, actor string, notes []Note) (*Note, error) {
+	if ans.Option != 0 {
+		for _, n := range notes {
+			if n.Seq != ans.Ask || n.Kind != NoteAsk {
+				continue
+			}
+			ask, err := ParseAsk(n)
+			if err != nil || ask.Identity == nil {
+				break
+			}
+			if err := w.mayAnswerMapping(ctx, row, ask, ans, actor); err != nil {
+				return nil, err
+			}
+			if err := w.freshMappingRefusal(ans.Ask, ask.Weight, actor); err != nil {
+				return nil, err
+			}
+			return w.addWitnessed(row, text, actor, ask.Weight)
+		}
+	}
+	return w.addNoted(row, NoteAnswer, text, actor)
+}
+
 // ViaMark is who with the device a write came through behind it,
 // "mckean (via phone)", and who alone for a write that came through none.
 func ViaMark(who, device string) string {

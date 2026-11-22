@@ -428,10 +428,12 @@ giving, a mapping ask shows its options as a list with no pick, and each
 names the terminal command instead, where the card is given or picked,
 with Later and Decline staying as ever. In a hosted window the bead's
 page is the exception for a secret ask: it gives there under a fresh
+sign-in, and for a mapping ask: an operator picks there under a fresh
 sign-in ([One bead](#one-bead)). The needs rows and the line's
 waits follow the page: a weighty card shows its weight first there too,
-a mapping card names the pick's terminal command instead of offering its
-picks, and the words stay with Later and Decline. A strong card — trust
+a mapping card offers its picks to an operator in a hosted window as
+its bead's page does and names the pick's terminal command instead
+everywhere else, and the words stay with Later and Decline. A strong card — trust
 or code in its weight — is the exception on a hosted yard: the needs rows
 and the line's waits approve it as its bead's page does ([One
 bead](#one-bead)). A giving or a writing pick posted straight at the
@@ -876,8 +878,9 @@ Home as JSON:
   small. A recommendation appears once in the labelled
   detail below the row, a weighty card's weight first. On a view that acts
   the oldest ask answers under the row, with its options as buttons
-  ([Acting as a user](#acting-as-a-user)), but a weighty mapping card
-  names the pick's terminal command instead of offering its picks;
+  ([Acting as a user](#acting-as-a-user)); a weighty mapping card offers
+  its picks there to an operator in a hosted window, as on its bead's
+  page, and names the pick's terminal command instead everywhere else;
   otherwise the row only links to the bead. On a phone an asked row gives the
   question the row's first line whole, ending in an ellipsis, and the
   bead id, optional topic and age stand under it, so the question
@@ -1751,7 +1754,8 @@ card approves below under a fresh sign-in where the window holds the
 gate, as the paragraphs after this say; where it holds none it shows no
 approval and names footplate and the terminal command instead, where the
 card is approved. A secret ask shows no field and no giving in this
-window, and a mapping ask shows its options as a list with no pick, each
+window, and a mapping ask shows its options as a list with no pick
+where the window holds no gate for an operator's pick, each
 naming where the card is given or picked. Each answers under
 itself, with its options as buttons where the card offers any, with Later
 and Decline; a run or setup card still names the terminal command beside
@@ -1801,6 +1805,22 @@ own login code from a paired device. A self-hosted yard's page also draws
 no field: there the card names footplate and the terminal command, and
 either door still gives it.
 
+On a hosted yard the operator can pick a mapping ask from its bead's
+page and from the needs rows and the waits on `/line`, though it weighs
+as-user and is never strong: the card draws its options as buttons, and
+every numbered pick — one that writes a user's identity and one that
+writes none alike — starts the same re-authentication unless the fresh
+window already stands, the pick held in the yard's memory for that
+return alone, for at most an hour, with the revision its form was drawn
+from. The return picks what the sign-in witnessed, and its answer
+records the fresh sign-in as an approval's does. A second mapping card
+inside the window picks at once. Later and Decline take no sign-in. A
+member's hosted page draws no pick for a mapping card, and a click on
+one is refused before any round trip, in words that say an operator's
+sign-in is what the page takes. A self-hosted yard's page also draws no
+pick: there the card names footplate and the terminal command, and
+either door still picks it.
+
 The card is the same wherever it stands, and a weighty run or setup
 card approves the same way from the needs rows on Home and from the
 waits on `/line` as on its bead's page, for an operator, and for a
@@ -1814,9 +1834,12 @@ given from a row: it shows the card answered and what the approval did,
 or the yard's reason when it refused. Where the view holds no gateway, or the
 yard is not hosted, a weighty card shows no button anywhere and names
 footplate and the terminal command, as any weighty card does. A routine run or setup card
-approves on its bead's page alone. A mapping card is still picked
-nowhere in the web: it shows its options as a list, and is picked in
-footplate or at a terminal. A credential card taken alone as a run or
+approves on its bead's page alone. A mapping card is picked in the web
+only in a hosted window, by an operator under a fresh sign-in, on its
+bead's page and from the needs rows and the waits on `/line` as a
+weighty run or setup card is approved there; everywhere else it shows
+its options as a list, and is picked in footplate or at a terminal.
+A credential card taken alone as a run or
 setup card approves under the fresh sign-in above; as a secret ask it
 gives only as a secret ask does, on its bead's page in a hosted
 window, under the fresh sign-in above.
