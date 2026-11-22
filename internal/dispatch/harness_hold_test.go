@@ -467,9 +467,10 @@ const codexOpen = `{"provider":"Codex","windows":[{"label":"5h","used_percent":9
 // group b: a runs kimi sessions with the model k3, and the bead returned is
 // started on a and seen working. first is the route's first group with its
 // condition, if any. The provider is declared once the session runs, as
-// holdYard's is, answering moonshot with moonshot's report and, where the
-// yard burns a second provider, openai with openai's; both groups' route
-// reads are primed, and the session is stopped on its usage limit, waiting
+// holdYard's is (before the start, where the first group is conditioned),
+// answering moonshot with moonshot's report and, where the yard burns a
+// second provider, openai with openai's; both groups' route reads are
+// primed, and the session is stopped on its usage limit, waiting
 // for the 5h window with k3. resets is when that window resets.
 func elseYard(t *testing.T, first string, b store.Group, moonshot func(time.Time) string, openai string) (s store.API, r *paneRunner, d *dispatch.Dispatcher, p *standIn, b1 store.Bead, now *time.Time, resets time.Time) {
 	t.Helper()
@@ -486,9 +487,25 @@ func elseYard(t *testing.T, first string, b store.Group, moonshot func(time.Time
 		Config: map[string]any{"kind": "kimi", "stall": "off", "model": "k3"}}, "me"))
 	must(t, s.PutGroup(ctx, b, "me"))
 	g := store.ParseRouteGroup(first)
+	// A conditioned first group is judged by its provider from the first
+	// claim, and a source that is not there fails it now, so its yard
+	// declares the provider before the start, as quotaYard's does. A
+	// group with no condition takes its first bead as it always did.
+	if g.When != "" {
+		p = newStandIn(t, s)
+		resets = at.Add(42 * time.Minute)
+		p.sayFor("moonshot", moonshot(resets))
+		if openai != "" {
+			p.sayFor("openai", openai)
+		}
+	}
 	_, err := s.AddRoute(ctx, store.Route{Stage: "new", Group: g.Name, When: g.When,
 		Else: []store.RouteGroup{{Name: "b"}}}, "me")
 	must(t, err)
+	if g.When != "" {
+		primeGroupLimits(t, s, d, "a")
+		primeGroupLimits(t, s, d, "b")
+	}
 	bead, err := s.CreateBead(ctx, store.NewBead{Title: "x"}, "me")
 	must(t, err)
 	must(t, d.Reconcile(ctx)) // start
@@ -499,11 +516,13 @@ func elseYard(t *testing.T, first string, b store.Group, moonshot func(time.Time
 	if group, _ := claimedBy(t, s, bead.ID); group != "a" {
 		t.Fatalf("claimed by %q, want a", group)
 	}
-	p = newStandIn(t, s)
-	resets = at.Add(42 * time.Minute)
-	p.sayFor("moonshot", moonshot(resets))
-	if openai != "" {
-		p.sayFor("openai", openai)
+	if p == nil {
+		p = newStandIn(t, s)
+		resets = at.Add(42 * time.Minute)
+		p.sayFor("moonshot", moonshot(resets))
+		if openai != "" {
+			p.sayFor("openai", openai)
+		}
 	}
 	primeLimits(t, d, "kimi", "", nil)
 	primeGroupLimits(t, s, d, "a")

@@ -49,7 +49,11 @@ const routeLimitsMemory = 5 * time.Minute
 // model) asks nothing, and says so in one group_wait event until it starts.
 // When no group's condition holds, or a window of each group's provider is
 // used up, the bead waits, and says so in one quota_wait event until it
-// starts.
+// starts. A comparison that cannot be shown (a failed or unanswered
+// source, a window without its number or its target) fails its group the
+// same way, so the quota_wait names the unknown source; an answered
+// report with no such window holds instead, as a provider that knows of
+// no such limit, and says nothing.
 //
 // A group chosen only because its limits were not known (the choice's
 // Unknown), by a read that found no fresh answer and wants its key
@@ -59,9 +63,10 @@ const routeLimitsMemory = 5 * time.Minute
 // here would stall every bead behind this one; the bead is tried again by
 // the next pass, which the answer's landing wakes (runLimitRefresh), and a
 // command that hangs ends as a remembered failure within its time limit. A
-// remembered failure, a provider no source answers for and the other
-// conditions that cannot be evaluated are answers as they stand: the group
-// takes the bead and the claimed event says the limits were not known.
+// remembered failure is an answer as it stands, and judge fails a named
+// comparison by it: the route falls to its next group, or the bead waits
+// in quota_wait above. A group with no condition is judged as it was: it
+// takes the bead, its claim saying the limits were not known.
 //
 // def is the yard's default_kind setting, for a group that names no kind.
 func (d *Dispatcher) chooseGroup(ctx context.Context, b store.Bead, r *store.Route, groups map[string]store.Group, active map[string]int, def string) (c store.RouteChoice, ok bool) {
@@ -164,7 +169,7 @@ func (d *Dispatcher) reportLimitsWait(ctx context.Context, b store.Bead, r *stor
 	d.Log.Warn("limits_wait", "bead", b.ID, "route", r.ID, "reason", c.Unknown)
 	data := map[string]any{"stage": b.Stage, "route": r.ID, "reason": c.Unknown,
 		"hint": "the bead waits for the limits command's answer and is routed by it when it lands; " +
-			"a command that fails or runs out of time has answered too, and the claimed event then says the limits were not known (yardr limits; yardr route list)"}
+			"a command that fails has answered too: a named condition it cannot show fails, to the route's next group or a quota_wait (yardr limits; yardr route list)"}
 	if len(c.Passed) > 0 {
 		data["passed"] = c.Passed
 	}
@@ -318,21 +323,21 @@ func (d *Dispatcher) sourceQuota(ctx context.Context, source string) (q store.Qu
 const unknownQuotaMemory = 10 * time.Minute
 
 // unknownQuota is what a read with no fresh report tells a route: no fresh
-// answer (its refresh already running), a provider that gave none, or
-// nothing that answers. Choose fails open on it, as it always has, but for
-// what the provider last said: a report younger than unknownQuotaMemory is
-// kept whole as LastKnown, so a load last seen past the threshold, or a
-// window last seen past its target, still fails the comparison, with the
-// reason saying it is the last known. Past the bound only the windows the
-// provider last said were used up until a reset still ahead are kept
-// (usedUpAhead): a session started into one stops on the limit at once, so
-// they go on failing the comparisons they answer however old the report is,
-// until a fresh one replaces them. A key never answered, and a provider that
-// failed before it ever answered, have none. Where the read found no fresh
-// answer, chooseGroup holds the bead instead of taking that choice
-// (routeQuota's cold).
+// answer (its refresh already running, Quota.Pending), a provider that gave
+// none, or nothing that answers. What the provider last said still answers:
+// a report younger than unknownQuotaMemory is kept whole as LastKnown, so a
+// load last seen past the threshold, or a window last seen past its target,
+// still fails the comparison, with the reason saying it is the last known.
+// Past the bound only the windows the provider last said were used up until
+// a reset still ahead are kept (usedUpAhead): a session started into one
+// stops on the limit at once, so they go on failing the comparisons they
+// answer however old the report is, until a fresh one replaces them. A key
+// never answered, and a provider that failed before it ever answered, have
+// none. A comparison LastKnown does not answer fails by Unknown, unless the
+// answer is still on its way (Pending) or the group has no condition, where
+// chooseGroup holds the bead or takes it as it always did.
 func (d *Dispatcher) unknownQuota(rd limitRead) store.Quota {
-	q := store.Quota{Unknown: rd.unknown()}
+	q := store.Quota{Unknown: rd.unknown(), Pending: rd.state == limitNone}
 	if rd.last != nil {
 		now := d.now()
 		if now.Sub(rd.last.AskedAt) < unknownQuotaMemory {

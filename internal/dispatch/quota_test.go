@@ -917,9 +917,8 @@ func paced(week, five float64, weekTarget string) string {
 
 // A route may pass a group over when its window is burned past the share
 // of it that has passed: with used 38 and target 17 the bead goes to the
-// further group, with used 20 to the first. A window with no target reads
-// as a condition that cannot be evaluated: the group takes the bead and
-// the claimed event says the limits were not known.
+// further group, with used 20 to the first. A window with no target cannot
+// be shown under it: the group is passed over for it, as for a number.
 func TestRouteComparesThePaceWithTheTarget(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -959,11 +958,21 @@ func TestRouteComparesThePaceWithTheTarget(t *testing.T) {
 	primeGroupLimits(t, s, d, "a")
 	b = newBead(t, s, "untargeted")
 	must(t, d.Reconcile(ctx))
+	// a cannot be shown under a target it does not say, so the bead falls
+	// to b, whose own answer is still on its way on this pass.
+	dispatch.WaitLimitsIdle(d)
+	must(t, d.Reconcile(ctx))
 	group, data = claimedBy(t, s, b.ID)
-	unknown, _ := data["limits_unknown"].(string)
-	if group != "a" || data["passed"] != nil ||
-		unknown != "the limits of a were not known: Kimi's report does not say the target of the Weekly window" {
-		t.Fatalf("with no target: claimed by %q with %v, want a with the limits not known", group, data)
+	if group != "b" || data["limits_unknown"] != nil {
+		t.Fatalf("with no target: claimed by %q with %v, want b past a, which says no target", group, data)
+	}
+	passed, _ = data["passed"].([]any)
+	if len(passed) != 1 {
+		t.Fatalf("passed = %v, want the one group", data["passed"])
+	}
+	if one, _ := passed[0].(map[string]any); one["group"] != "a" ||
+		one["reason"] != "Kimi's report does not say the target of the Weekly window" {
+		t.Fatalf("passed = %v, want a passed over for its missing target", one)
 	}
 
 	// With no further group the bead waits, and the quota_wait event says
@@ -1059,28 +1068,40 @@ func TestConditionWithoutALabelReadsEveryWindow(t *testing.T) {
 	}
 }
 
-// A condition that cannot be evaluated holds, and so does the one a group
-// with none is judged by, and the claimed event says the limits were not
-// known: a limits command that fails takes the gate away and stops nothing.
-func TestConditionThatCannotBeEvaluatedHolds(t *testing.T) {
+// A named condition that cannot be shown fails: a failed or unanswered
+// source and a window without its number fall to the route's next group,
+// while an answered report with no such window holds as known-unlimited
+// and says nothing. A group with no condition is judged as it was: it
+// takes the bead, its claim saying the limits were not known.
+func TestConditionThatCannotBeShownFails(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	for name, tc := range map[string]struct {
 		first  string
 		break_ func(*testing.T, store.API, *standIn)
-		want   string
+		// group takes the bead; passed says why a was passed over (""
+		// for none); unknown is in the claim's limits_unknown (""
+		// for none said).
+		group, passed, unknown string
 	}{
-		"the command failed": {"a@Weekly<80", func(_ *testing.T, _ store.API, p *standIn) { p.fail() }, "not logged in"},
-		"no such window":     {"a@Monthly<80", func(_ *testing.T, _ store.API, p *standIn) { p.say(weekly(99, 99)) }, "Kimi's report has no window labelled Monthly"},
-		"no windows":         {"a@<80", func(*testing.T, store.API, *standIn) {}, "Kimi's report has no windows"},
+		"the command failed": {"a@Weekly<80", func(_ *testing.T, _ store.API, p *standIn) { p.fail() },
+			"b", "not logged in", "not logged in"},
+		"no such window": {"a@Monthly<80", func(_ *testing.T, _ store.API, p *standIn) { p.say(weekly(99, 99)) },
+			"a", "", ""},
+		"no windows": {"a@<80", func(*testing.T, store.API, *standIn) {},
+			"a", "", ""},
 		"no source": {"a@Weekly<80", func(t *testing.T, s store.API, _ *standIn) {
 			must(t, s.PutGroup(ctx, store.Group{Name: "a", Runner: "herdr", Limit: 5, Config: map[string]any{"kind": "claude"}}, "me"))
-		}, "no source of this yard says the limits of claude"},
+		}, "b", "no source of this yard says the limits of claude", ""},
+		"no percentage": {"a@Weekly<80", func(_ *testing.T, _ store.API, p *standIn) {
+			p.sayFor("moonshot", `{"provider":"Kimi","windows":[{"label":"Weekly"}]}`)
+		}, "b", "Kimi's report does not say how far the Weekly window is used", ""},
 		// A group with no condition is judged by every window.
-		"no condition and the command failed": {"a", func(_ *testing.T, _ store.API, p *standIn) { p.fail() }, "not logged in"},
+		"no condition and the command failed": {"a", func(_ *testing.T, _ store.API, p *standIn) { p.fail() },
+			"a", "", "not logged in"},
 		"no condition and no source": {"a", func(t *testing.T, s store.API, _ *standIn) {
 			must(t, s.PutGroup(ctx, store.Group{Name: "a", Runner: "herdr", Limit: 5, Config: map[string]any{"kind": "claude"}}, "me"))
-		}, "no source of this yard says the limits of claude"},
+		}, "a", "", "no source of this yard says the limits of claude"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, _, d, p, _, _ := quotaYard(t, tc.first, "b")
@@ -1088,13 +1109,65 @@ func TestConditionThatCannotBeEvaluatedHolds(t *testing.T) {
 			primeGroupLimits(t, s, d, "a")
 			b := newBead(t, s, "x")
 			must(t, d.Reconcile(ctx))
+			// A bead that falls to b waits one pass for b's own answer.
+			dispatch.WaitLimitsIdle(d)
+			must(t, d.Reconcile(ctx))
 			group, data := claimedBy(t, s, b.ID)
-			unknown, _ := data["limits_unknown"].(string)
-			if group != "a" || data["passed"] != nil || !strings.HasPrefix(unknown, "the limits of a were not known: ") || !strings.Contains(unknown, tc.want) {
-				t.Fatalf("claimed by %q with %v, want a with limits_unknown saying %q", group, data, tc.want)
+			if group != tc.group {
+				t.Fatalf("claimed by %q with %v, want %s", group, data, tc.group)
+			}
+			if tc.passed == "" {
+				if data["passed"] != nil {
+					t.Fatalf("claimed with %v, want nobody passed over", data)
+				}
+			} else {
+				passed, _ := data["passed"].([]any)
+				if len(passed) != 1 {
+					t.Fatalf("passed = %v, want the one group", data["passed"])
+				}
+				if one, _ := passed[0].(map[string]any); one["group"] != "a" ||
+					!strings.Contains(fmt.Sprint(one["reason"]), tc.passed) {
+					t.Fatalf("passed = %v, want a passed over saying %q", one, tc.passed)
+				}
+			}
+			if unknown, _ := data["limits_unknown"].(string); tc.unknown == "" {
+				if data["limits_unknown"] != nil {
+					t.Fatalf("claimed with %v, want nothing said of limits", data)
+				}
+			} else if !strings.Contains(unknown, tc.unknown) {
+				t.Fatalf("claimed with %v, want limits_unknown saying %q", data, tc.unknown)
 			}
 		})
 	}
+	t.Run("with no further group the bead waits in quota_wait until the answer lands", func(t *testing.T) {
+		s, _, d, p, r, now := quotaYard(t, "a@Weekly<80")
+		p.fail()
+		primeGroupLimits(t, s, d, "a")
+		b := newBead(t, s, "x")
+		must(t, d.Reconcile(ctx))
+		if group, _ := claimedBy(t, s, b.ID); group != "" {
+			t.Fatalf("claimed by %q, want nobody: a's limits command failed", group)
+		}
+		evs := eventKinds(t, s, b.ID, "quota_wait")
+		if len(evs) != 1 {
+			t.Fatalf("quota_wait events = %v, want one", evs)
+		}
+		if reason, _ := evs[0].Data["reason"].(string); evs[0].Data["route"] != r.ID ||
+			!strings.Contains(reason, "a passed over") || !strings.Contains(reason, "not logged in") {
+			t.Fatalf("quota_wait = %v, want a passed over naming its failed source", evs[0].Data)
+		}
+		// The next background refresh replaces the failure with no hand
+		// clearing the wait: the bead starts by it.
+		must(t, os.Remove(filepath.Join(p.dir, "fail")))
+		p.say(weekly(20, 10))
+		*now = now.Add(6 * time.Minute)
+		must(t, d.Reconcile(ctx))
+		dispatch.WaitLimitsIdle(d)
+		must(t, d.Reconcile(ctx))
+		if group, data := claimedBy(t, s, b.ID); group != "a" || data["limits_unknown"] != nil {
+			t.Fatalf("claimed by %q with %v once the answer landed, want a", group, data)
+		}
+	})
 }
 
 // The limits command runs at most once in five minutes for a provider,
@@ -1136,8 +1209,17 @@ func TestLimitsAreAskedOnceInFiveMinutesAndOnlyForAGatedRoute(t *testing.T) {
 		*now = now.Add(time.Minute)
 	}
 	dispatch.WaitLimitsIdle(d)
-	if asks := p.asks(); len(asks) != 2 {
-		t.Fatalf("the limits command ran %d times, want 2: a failure is remembered as an answer is", len(asks))
+	// a's provider ran once more for the failure, remembered as an answer
+	// is. (The beads it fails fall to b, whose provider a pass may ask
+	// for the first time; that run is b's, not a's.)
+	moonshot := 0
+	for _, ask := range p.asks() {
+		if ask == "moonshot" {
+			moonshot++
+		}
+	}
+	if moonshot != 2 {
+		t.Fatalf("the limits command ran for %v, want moonshot twice: a failure is remembered as an answer is", p.asks())
 	}
 
 	// A route with no condition is read as well, for the provider of the
@@ -1546,6 +1628,40 @@ func TestRouteWithASourceConditionHoldsAndReleasesDispatch(t *testing.T) {
 					t.Fatalf("quota_wait = %v: the machine's windows never reset", evs[0].Data)
 				}
 			})
+		}
+	})
+	// A source follows the provider's arms: a failed machine answer fails
+	// its comparison (the bead waits in quota_wait), an answered one with
+	// no windows holds as known-unlimited.
+	t.Run("a failed machine answer fails, a windowless one holds", func(t *testing.T) {
+		s, _, d, _, r, _ := quotaYard(t, "a@machine.load<80", "wait")
+		say, _ := machineStandIn(t, s)
+		say("not a report")
+		dispatch.PrimeSourceLimits(d, ctx, "machine")
+		b := newBead(t, s, "x")
+		must(t, d.Reconcile(ctx))
+		if group, _ := claimedBy(t, s, b.ID); group != "" {
+			t.Fatalf("claimed by %q, want nobody: the machine source gave no report", group)
+		}
+		evs := eventKinds(t, s, b.ID, "quota_wait")
+		if len(evs) != 1 {
+			t.Fatalf("quota_wait events = %v, want one", evs)
+		}
+		if reason, _ := evs[0].Data["reason"].(string); evs[0].Data["route"] != r.ID ||
+			!strings.Contains(reason, "a passed over") {
+			t.Fatalf("quota_wait = %v, want a passed over for its machine source", evs[0].Data)
+		}
+
+		s, _, d, _, _, _ = quotaYard(t, "a@machine.load<80", "wait")
+		say, _ = machineStandIn(t, s)
+		say(`{"provider":"machine","windows":[]}`)
+		dispatch.PrimeSourceLimits(d, ctx, "machine")
+		b = newBead(t, s, "y")
+		must(t, d.Reconcile(ctx))
+		dispatch.WaitLimitsIdle(d)
+		must(t, d.Reconcile(ctx))
+		if group, data := claimedBy(t, s, b.ID); group != "a" || data["limits_unknown"] != nil || data["passed"] != nil {
+			t.Fatalf("claimed by %q with %v, want a: the machine reports no window", group, data)
 		}
 	})
 }

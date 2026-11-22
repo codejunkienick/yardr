@@ -475,12 +475,14 @@ type Quota struct {
 	Unknown string
 	// LastKnown, beside Unknown, are the windows the provider last said:
 	// the whole of a young report, or else only the windows used up
-	// that reset after the moment of the choice. They are read as the
-	// same windows fresh would be, a comparison's duration included:
-	// they fail the comparisons they answer, or are held for their
-	// reset, the reason or the note saying they were last known, and
-	// every other comparison is as unknown as Unknown says.
+	// that reset after the moment of the choice, read as fresh ones
+	// would be: they answer as fresh ones do, and a comparison they
+	// do not answer is unknown as Unknown says (judge).
 	LastKnown []QuotaWindow
+	// Pending says the answer is on its way (no fresh answer yet, its
+	// refresh running): a comparison it cannot answer holds for it in
+	// the caller, where a remembered failure fails it at once (judge).
+	Pending bool
 }
 
 // QuotaWindow is one window of a usage limit as a condition reads it.
@@ -503,11 +505,10 @@ type RouteChoice struct {
 	Group string `json:"group,omitempty"`
 	// Passed are the groups before it whose condition failed, in order.
 	Passed []PassedGroup `json:"passed,omitempty"`
-	// Unknown says, of Group, what of its condition could not be evaluated
-	// and why: such a condition holds, so a limits command that fails takes
-	// the gate away and stops nothing. A group with no condition has the
-	// one Choose gives it, and is said of in the same words, but for a
-	// provider that reports no window: it knows of no limit.
+	// Unknown says, of Group, what could not be shown and why, where the
+	// group still takes the bead: a group with no condition, or one whose
+	// answer is still on its way (Quota.Pending). A comparison that was
+	// answered and cannot be shown fails instead (Passed).
 	Unknown string `json:"limits_unknown,omitempty"`
 	// Held says, of Group, which windows were past the number its condition
 	// asks for and held all the same, because they reset within the duration
@@ -627,23 +628,28 @@ func (r Route) ChooseAt(now time.Time, quota func(group, source string) Quota, m
 	return c
 }
 
-// judge compares the windows with limits: the comparisons that failed, in
-// words, those that could not be made, the windows that were past their
-// number and held because they reset within the comparison's duration
-// (held, in words), and the earliest reset among the windows that failed.
-// now is what a reset is measured from. Each comparison reads the quota of
-// the source it names, "" being the group's provider; a source nothing is
-// known of is said once, however many comparisons name it. model is the
-// model the bead would start with in the group judged, "" where none is
-// known: the comparison no route wrote reads a per-model window against it.
+// judge compares the windows with limits: the comparisons that failed,
+// those that could not be shown and hold all the same, the windows held
+// for their reset, and the earliest reset among the windows that failed.
+// now is what a reset is measured from; a source nothing is known of is
+// said once. model is the bead's model in the group, "" where none is.
 func judge(now time.Time, limits []QuotaLimit, quota func(source string) Quota, model string) (failed, unknown, held []string, resets *time.Time) {
 	said := map[string]bool{}
+	// cannotShown files a comparison that cannot be shown: a failure,
+	// or unknown where the group holds all the same (no condition, or
+	// an answer still on its way, Quota.Pending).
+	cannotShown := func(l QuotaLimit, q Quota, note string) {
+		if l.Implicit || q.Pending {
+			unknown = append(unknown, note)
+		} else {
+			failed = append(failed, note)
+		}
+	}
 	for _, l := range limits {
 		q := quota(l.Source)
 		// With nothing known, the windows last known (Quota.LastKnown) are
-		// all there is to read. They are read as a fresh window is, so
-		// they fail the comparisons they answer or are held for their reset,
-		// and a comparison they do not answer is unknown.
+		// all there is to read, as a fresh window is: they answer as one
+		// does, and a comparison they do not answer cannot be shown.
 		windows, lastKnown := q.Windows, q.Unknown != ""
 		if lastKnown {
 			windows = q.LastKnown
@@ -657,28 +663,24 @@ func judge(now time.Time, limits []QuotaLimit, quota func(source string) Quota, 
 			if l.Label != "" && w.Label != l.Label {
 				continue
 			}
-			// The comparison no route wrote reads the windows every model of
-			// the provider draws from, and the one the bead would start with
-			// in this group draws from alone: a session started into either
-			// stops on the limit at once. A window for another model, or for
-			// one model where none is known, would hold the group for a limit
-			// it never reaches, so it is left out, as every per-model window
-			// was before the choice knew the model. A condition that names
+			// The comparison no route wrote reads the windows every model
+			// draws from, and the bead's own model's alone: a session
+			// started into either stops on the limit at once. A window for
+			// another model, or for one where none is known, is left out,
+			// as before the choice knew the model. A condition that names
 			// the window, or every window, asked for it.
 			if l.Implicit && w.Model != "" && w.Model != model {
 				continue
 			}
 			seen = true
 			if w.UsedPercent == nil {
-				unknown = append(unknown, fmt.Sprintf("%s report does not say how far the %s window is used", whose, w.Label))
+				cannotShown(l, q, fmt.Sprintf("%s report does not say how far the %s window is used", whose, w.Label))
 				continue
 			}
 			under, want := l.Under, percent(l.Under)
 			if l.Target {
-				// No second rule: a window with no target reads as the
-				// comparisons above that cannot be made.
 				if w.TargetPercent == nil {
-					unknown = append(unknown, fmt.Sprintf("%s report does not say the target of the %s window", whose, w.Label))
+					cannotShown(l, q, fmt.Sprintf("%s report does not say the target of the %s window", whose, w.Label))
 					continue
 				}
 				under = *w.TargetPercent + l.Margin
@@ -715,13 +717,11 @@ func judge(now time.Time, limits []QuotaLimit, quota func(source string) Quota, 
 		case lastKnown:
 			if !said[l.Source] {
 				said[l.Source] = true
-				unknown = append(unknown, q.Unknown)
+				cannotShown(l, q, q.Unknown)
 			}
-		case l.Implicit:
-		case l.Label == "":
-			unknown = append(unknown, whose+" report has no windows")
 		default:
-			unknown = append(unknown, fmt.Sprintf("%s report has no window labelled %s", whose, l.Label))
+			// An answered report with no such window knows of no such
+			// limit: the comparison holds, with nothing to say of it.
 		}
 	}
 	return failed, unknown, held, resets

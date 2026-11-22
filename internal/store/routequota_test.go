@@ -475,7 +475,7 @@ func TestRouteChoose(t *testing.T) {
 		"no condition, a report with no windows": {route("a"), map[string]store.Quota{"a": {Provider: "Muse"}},
 			store.RouteChoice{Group: "a"}, "a"},
 		"a condition on every window, a report with no windows": {route("a@<80"), map[string]store.Quota{"a": {Provider: "Muse"}},
-			store.RouteChoice{Group: "a", Unknown: "the limits of a were not known: Muse's report has no windows"}, "a"},
+			store.RouteChoice{Group: "a"}, "a"},
 		"no conditions, the first used up": {route("a", "b"), map[string]store.Quota{"a": twoWindows(10, 100), "b": twoWindows(10, 10)},
 			store.RouteChoice{Group: "b", Passed: []store.PassedGroup{
 				{Group: "a", Reason: "Claude's 5h window is 100% used, the route asks under 100", ResetsAt: &early}}}, "a b"},
@@ -519,14 +519,25 @@ func TestRouteChoose(t *testing.T) {
 			store.RouteChoice{Group: "b", Passed: []store.PassedGroup{
 				{Group: "a", Reason: "Claude's Weekly Fable window is 100% used, the route asks under 90"}}}, "a"},
 		"limits not known": {route("a@Weekly<80", "b"), map[string]store.Quota{"a": {Unknown: "no source of this yard answers for provider muse"}},
-			store.RouteChoice{Group: "a", Unknown: "the limits of a were not known: no source of this yard answers for provider muse"}, "a"},
+			store.RouteChoice{Group: "b", Passed: []store.PassedGroup{
+				{Group: "a", Reason: "no source of this yard answers for provider muse"}}}, "a"},
 		"a window the report lacks": {route("a@Monthly<80,5h<90", "b"), map[string]store.Quota{"a": claude(99, 10)},
-			store.RouteChoice{Group: "a", Unknown: "the limits of a were not known: Claude's report has no window labelled Monthly"}, "a"},
+			store.RouteChoice{Group: "a"}, "a"},
 		"a window that failed is known": {route("a@Monthly<80,5h<90", "b"), map[string]store.Quota{"a": claude(1, 90)},
 			store.RouteChoice{Group: "b", Passed: []store.PassedGroup{
 				{Group: "a", Reason: "Claude's 5h window is 90% used, the route asks under 90", ResetsAt: &early}}}, "a"},
+		// An answered report with no such window is known-unlimited: the
+		// condition holds with nothing said, target form included.
+		"a target on a window the report lacks": {route("a@Weekly<target", "b"), map[string]store.Quota{"a": {Provider: "Muse"}},
+			store.RouteChoice{Group: "a"}, "a"},
+		// An answer still on its way holds as unknown did, for the caller
+		// to wait on; only a remembered answer fails the comparison.
+		"limits on their way hold": {route("a@Weekly<80", "b"),
+			map[string]store.Quota{"a": {Unknown: "no fresh answer yet", Pending: true}},
+			store.RouteChoice{Group: "a", Unknown: "the limits of a were not known: no fresh answer yet"}, "a"},
 		"a window without a percentage": {route("a@Weekly<80"), map[string]store.Quota{"a": {Windows: []store.QuotaWindow{{Label: "Weekly"}}}},
-			store.RouteChoice{Group: "a", Unknown: "the limits of a were not known: its provider's report does not say how far the Weekly window is used"}, "a"},
+			store.RouteChoice{Passed: []store.PassedGroup{
+				{Group: "a", Reason: "its provider's report does not say how far the Weekly window is used"}}}, "a"},
 		"under target plus the margin": {route("a@Weekly<target+10", "b"), map[string]store.Quota{"a": paced(20, 10, 17, 50)},
 			store.RouteChoice{Group: "a"}, "a"},
 		"past target plus the margin": {route("a@Weekly<target+10", "b"), map[string]store.Quota{"a": paced(38, 10, 17, 50)},
@@ -544,7 +555,8 @@ func TestRouteChoose(t *testing.T) {
 			store.RouteChoice{Group: "b", Passed: []store.PassedGroup{
 				{Group: "a", Reason: "Claude's 5h window is 95% used, the route asks under 90", ResetsAt: &early}}}, "a"},
 		"a window with no target": {route("a@Weekly<target+10", "b"), map[string]store.Quota{"a": claude(99, 10)},
-			store.RouteChoice{Group: "a", Unknown: "the limits of a were not known: Claude's report does not say the target of the Weekly window"}, "a"},
+			store.RouteChoice{Group: "b", Passed: []store.PassedGroup{
+				{Group: "a", Reason: "Claude's report does not say the target of the Weekly window"}}}, "a"},
 		"a source's window under its threshold": {route("a@machine.load<80", "b"), map[string]store.Quota{"machine": machine(70)},
 			store.RouteChoice{Group: "a"}, "a@machine"},
 		"a source's window past it": {route("a@machine.load<80", "b"), map[string]store.Quota{"machine": machine(93)},
@@ -557,9 +569,19 @@ func TestRouteChoose(t *testing.T) {
 			map[string]store.Quota{"machine": machine(70), "a": claude(90, 10)},
 			store.RouteChoice{Group: "b", Passed: []store.PassedGroup{
 				{Group: "a", Reason: "Claude's Weekly window is 90% used, the route asks under 80", ResetsAt: &late}}}, "a@machine a"},
-		"a source nothing is known of holds": {route("a@machine.load<80", "b"),
+		"a source nothing is known of fails": {route("a@machine.load<80", "b"),
 			map[string]store.Quota{"machine": {Unknown: "no source named machine says limits of itself"}},
-			store.RouteChoice{Group: "a", Unknown: "the limits of a were not known: no source named machine says limits of itself"}, "a@machine"},
+			store.RouteChoice{Group: "b", Passed: []store.PassedGroup{
+				{Group: "a", Reason: "no source named machine says limits of itself"}}}, "a@machine"},
+		// A source follows the same arms as a provider: a failed answer
+		// fails its comparison, an answered windowless one holds.
+		"a source that failed": {route("a@machine.load<80", "b"),
+			map[string]store.Quota{"machine": {Unknown: "the machine command failed"}},
+			store.RouteChoice{Group: "b", Passed: []store.PassedGroup{
+				{Group: "a", Reason: "the machine command failed"}}}, "a@machine"},
+		"a source with no windows": {route("a@machine.load<80", "b"),
+			map[string]store.Quota{"machine": {Provider: "machine"}},
+			store.RouteChoice{Group: "a"}, "a@machine"},
 		// A condition on sources alone does not take the provider's windows
 		// away: the group is judged by "<100" on them too, as a group with no
 		// condition is, and the provider is asked after the sources.
@@ -657,9 +679,8 @@ func TestRouteChoose(t *testing.T) {
 		"held beside a comparison that failed": {route("a@Weekly<80/1d,5h<50", "b"), map[string]store.Quota{"a": resetting(90, 60, 20*time.Hour)},
 			store.RouteChoice{Group: "b", Passed: []store.PassedGroup{
 				{Group: "a", Reason: "Claude's 5h window is 60% used, the route asks under 50", ResetsAt: &early}}}, "a"},
-		"held beside a comparison that could not be made": {route("a@Weekly<80/1d,Monthly<80", "b"), map[string]store.Quota{"a": resetting(90, 10, 20*time.Hour)},
-			store.RouteChoice{Group: "a", Held: []string{"Weekly 90% but resets in 20h"},
-				Unknown: "the limits of a were not known: Claude's report has no window labelled Monthly"}, "a"},
+		"held beside a window the report lacks": {route("a@Weekly<80/1d,Monthly<80", "b"), map[string]store.Quota{"a": resetting(90, 10, 20*time.Hour)},
+			store.RouteChoice{Group: "a", Held: []string{"Weekly 90% but resets in 20h"}}, "a"},
 		// A group with no condition is judged by "<100" alone: its window used
 		// up resets soon, and that holds nothing.
 		"no condition, used up and about to reset": {route("a"), map[string]store.Quota{"a": resetting(100, 10, time.Hour)},
@@ -673,9 +694,10 @@ func TestRouteChoose(t *testing.T) {
 		"a condition on the window, last known used up": {route("a@Weekly<80", "b"), map[string]store.Quota{"a": lastKnown(usedUp)},
 			store.RouteChoice{Group: "b", Passed: []store.PassedGroup{{Group: "a", Reason: reason("80"), ResetsAt: &late}}}, "a"},
 		"a condition on another window, last known used up": {route("a@5h<50", "b"), map[string]store.Quota{"a": lastKnown(usedUp)},
-			store.RouteChoice{Group: "a", Unknown: "the limits of a were not known: no fresh answer yet"}, "a"},
+			store.RouteChoice{Group: "b", Passed: []store.PassedGroup{
+				{Group: "a", Reason: "no fresh answer yet"}}}, "a"},
 		"two conditions, one answered by what was last known": {route("a@Weekly<80,5h<50", "b"), map[string]store.Quota{"a": lastKnown(usedUp)},
-			store.RouteChoice{Group: "b", Passed: []store.PassedGroup{{Group: "a", Reason: reason("80"), ResetsAt: &late}}}, "a"},
+			store.RouteChoice{Group: "b", Passed: []store.PassedGroup{{Group: "a", Reason: reason("80") + "; no fresh answer yet", ResetsAt: &late}}}, "a"},
 		// A duration is read as for a fresh window: the group takes the bead
 		// within it, the note saying the window was last known, and is passed
 		// over beyond it.

@@ -726,8 +726,8 @@ func limitsPart(ctx context.Context, cfg *config.Config, st store.API, uses []li
 		return part, err
 	}
 	groups, unmapped := groupUses(as, uses)
-	// A route's condition on a group no source answers for gates nothing,
-	// with a source or without one.
+	// A route's condition on a group no source answers for fails whatever
+	// is used, with a source or without one.
 	routes, err := st.Routes(ctx)
 	if err != nil {
 		return part, err

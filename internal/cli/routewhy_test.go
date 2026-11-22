@@ -506,8 +506,8 @@ func TestDoctorNotesARouteWhoseConditionNoSourceAnswersFor(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"route " + r.ID + " (stage review) puts the condition Weekly<80,5h<90 on group g, and no source answers for its kind grok: the condition holds whatever is used (limits.kinds)",
-		"route " + r.ID + " (stage review) puts the condition <70 on group z, and no source answers for its provider zai: the condition holds whatever is used (limits.kinds)",
+		"route " + r.ID + " (stage review) puts the condition Weekly<80,5h<90 on group g, and no source answers for its kind grok: the condition fails whatever is used (limits.kinds)",
+		"route " + r.ID + " (stage review) puts the condition <70 on group z, and no source answers for its provider zai: the condition fails whatever is used (limits.kinds)",
 	}
 	part, err = limitsPart(ctx, cfg, st, nil, false)
 	if err != nil || !part.Configured || strings.Join(part.Notes, "\n") != strings.Join(want, "\n") {
@@ -529,7 +529,7 @@ func TestDoctorNotesARouteWhoseConditionNoSourceAnswersFor(t *testing.T) {
 	}
 	part, err = limitsPart(ctx, cfg, bare, nil, false)
 	if err != nil || !part.Configured || len(part.Notes) != 1 ||
-		part.Notes[0] != "route "+lone.ID+" (stage new) puts the condition Weekly<80 on group a, and no source answers for its kind claude: the condition holds whatever is used (limits.kinds)" {
+		part.Notes[0] != "route "+lone.ID+" (stage new) puts the condition Weekly<80 on group a, and no source answers for its kind claude: the condition fails whatever is used (limits.kinds)" {
 		t.Fatalf("with no source: %+v %v", part, err)
 	}
 }
@@ -551,8 +551,8 @@ func TestDoctorNotesARouteWhoseConditionNamesNoSuchSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"route " + r.ID + " (stage new) puts the condition ghost.load<80 on group a, and no source named ghost says limits of itself: the comparison holds whatever is used (a limits key with no kinds)",
-		"route " + r.ID + " (stage new) puts the condition ghost.load<80,ghost.swap<80 on group b, and no source named ghost says limits of itself: the comparison holds whatever is used (a limits key with no kinds)",
+		"route " + r.ID + " (stage new) puts the condition ghost.load<80 on group a, and no source named ghost says limits of itself: the comparison fails whatever is used (a limits key with no kinds)",
+		"route " + r.ID + " (stage new) puts the condition ghost.load<80,ghost.swap<80 on group b, and no source named ghost says limits of itself: the comparison fails whatever is used (a limits key with no kinds)",
 	}
 	if strings.Join(part.Notes, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("notes = %q; want %q", part.Notes, want)
@@ -614,7 +614,7 @@ func TestRouteWarningsTakeAGroupWithoutAKindForTheYardsDefaultKind(t *testing.T)
 	}
 	id, _ := add("--stage", "land", "--group", "n@Weekly<80")
 	part, err := limitsPart(ctx, cfg, st, nil, false)
-	want := "route " + id + " (stage land) puts the condition Weekly<80 on group n, and no source answers for its kind grok: the condition holds whatever is used (limits.kinds)"
+	want := "route " + id + " (stage land) puts the condition Weekly<80 on group n, and no source answers for its kind grok: the condition fails whatever is used (limits.kinds)"
 	if err != nil || len(part.Notes) != 1 || part.Notes[0] != want {
 		t.Fatalf("notes = %q, %v; want %q", part.Notes, err, want)
 	}

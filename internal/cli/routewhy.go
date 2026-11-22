@@ -430,9 +430,9 @@ func takesOperator(r store.Route, operator string) bool {
 }
 
 // routeNotes are doctor's notes on routes with a comparison that can never
-// be evaluated: it is on a provider no source answers for, or it names a
-// source that says no limits of itself, so it holds whatever is used and
-// gates nothing.
+// be shown: it is on a provider no source answers for, or it names a
+// source that says no limits of itself, so it fails whatever is used and
+// the group takes nothing until a source answers.
 func routeNotes(as []limits.Answerer, routes []store.Route, groups []store.Group, def string) []string {
 	byName := map[string]store.Group{}
 	for _, g := range groups {
@@ -471,12 +471,12 @@ func routeNotes(as []limits.Answerer, routes []store.Route, groups []store.Group
 					if name != "" {
 						whose = "its provider " + name
 					}
-					holds := "the condition holds whatever is used"
+					fails := "the condition fails whatever is used"
 					if sourced {
-						holds = "the comparison on the provider's windows holds whatever is used"
+						fails = "the comparison on the provider's windows fails whatever is used"
 					}
 					out = append(out, fmt.Sprintf("route %s (stage %s) puts the condition %s on group %s, and no source answers for %s: %s (limits.kinds)",
-						r.ID, r.Stage, rg.When, rg.Name, whose, holds))
+						r.ID, r.Stage, rg.When, rg.Name, whose, fails))
 				}
 			}
 			seen := map[string]bool{}
@@ -486,7 +486,7 @@ func routeNotes(as []limits.Answerer, routes []store.Route, groups []store.Group
 				}
 				seen[l.Source] = true
 				out = append(out, fmt.Sprintf("route %s (stage %s) puts the condition %s on group %s, and no source named %s says limits of itself: "+
-					"the comparison holds whatever is used (a limits key with no kinds)", r.ID, r.Stage, rg.When, rg.Name, l.Source))
+					"the comparison fails whatever is used (a limits key with no kinds)", r.ID, r.Stage, rg.When, rg.Name, l.Source))
 			}
 		}
 	}

@@ -557,9 +557,8 @@ prints them as `builders@Weekly<80,5h<90 else spare-builders`.
   share is under the target plus the margin, and the two forms mix
   (`Weekly<target+10,5h<90`). yardr never works the target out itself:
   the source is the one that knows the window. A window whose report
-  gives no target cannot be compared with one, and reads as any
-  comparison that cannot be made does (below): the condition holds and
-  the `claimed` event says the limits were not known.
+  gives no target cannot be shown under it, and fails as any comparison
+  that cannot be shown does (below): the group is passed over for it.
 - **A window close to its reset stops gating.** Any comparison may end
   in `/<duration>`: `Weekly<80/1d` holds while the window is under 80%
   used or resets within a day, so a group does not stand idle on quota
@@ -603,8 +602,9 @@ prints them as `builders@Weekly<80,5h<90 else spare-builders`.
   out). A provider that reports
   no window knows of no limit: none is used up, and the claim says nothing
   of it. Where no source answers for the group's provider, or its command
-  fails, nothing is known and the group takes the bead, as for any
-  condition that cannot be evaluated (below).
+  fails, nothing is known and the group still takes the bead, its claim
+  saying the limits were not known — unlike a condition the route wrote,
+  which fails then (below).
 - **A per-model window holds no group with no condition.** The limits source
   may say that a window counts for a single model (`model` in its answer,
   which `yardr limits` prints beside the window: Claude's `Weekly Fable` is
@@ -646,17 +646,21 @@ prints them as `builders@Weekly<80,5h<90 else spare-builders`.
   its runtime down, or held back for the bead's model), `reason` (the same
   on one line) and `hint`. A group at limit 0 says paused instead of
   counting.
-- **A condition that cannot be evaluated holds.** No source answers for
-  the group's provider, its command failed, the report has no window of
-  that label, gives it no percentage or, for a condition on the target,
-  no target, and for a comparison on a source no source of the name that
-  answers for itself: the group takes the bead, and the `claimed` event says
-  so in `limits_unknown`. That holds for the condition a group with none is
-  judged by too, and for the `<100` a condition on sources alone is judged
-  by besides, so in a yard with no source for a group's provider each of
-  its claims says the limits were not known; a report with no window is no
-  such case there. A limits command that breaks takes the gate away; it
-  does not stop the yard. Two things it does not take away: what the
+- **A condition that cannot be shown fails, and one with no such window
+  holds.** No source answers for the group's provider, its command failed,
+  the report gives the window no percentage or, for a condition on the
+  target, no target, and for a comparison on a source no source of the name
+  that answers for itself: what was asked for cannot be shown under its
+  number, so the group is passed over for it — to the route's next group,
+  or, with none, the bead waits in `quota_wait` naming the unknown source,
+  until the next answer lands and wakes a pass that routes it by it. An
+  answered report with no window of that label is no such case: the
+  provider knows of no such limit, the condition holds as if it were
+  unlimited, and the claim says nothing of it. The condition a group with
+  none is judged by, and the `<100` one on sources alone is judged by
+  besides, still take the bead when nothing is known, the claim saying the
+  limits were not known, so a group no source answers for keeps working.
+  Two things a failure does not take away: what the
   provider last said within the last ten minutes goes on failing the
   comparisons it answers, with the reason marked as last known, so one
   stale read does not open every gate on a pass; and a window the
@@ -686,11 +690,13 @@ prints them as `builders@Weekly<80,5h<90 else spare-builders`.
   `hint`. The pass does not wait with the bead. It goes on to the next one,
   and when the answer lands it wakes the daemon, and the next pass routes
   the bead by it. A command that fails, or runs past its 30 seconds, has
-  answered too, and the bead takes the group with a `claimed` event that
-  says the limits were not known (above). What the provider last said
+  answered too: a named condition it cannot show fails by it (above), and
+  a group with no condition takes the bead with a `claimed` event that
+  says the limits were not known. What the provider last said
   within ten minutes (above) still answers a comparison, and a bead it
   answers is routed at once. A provider no source answers for has no
-  answer coming, so no bead waits for it.
+  answer coming, so no bead waits for it: a named condition on it fails
+  at once, and a group with none takes its beads as above.
 - **The `claimed` event** of a bead the dispatcher started names the
   `route` by its id and, when groups were passed over, `passed`: each with
   its `reason`, such as `Claude's Weekly window is 83% used, the route asks
@@ -733,7 +739,7 @@ prints them as `builders@Weekly<80,5h<90 else spare-builders`.
   the route.
   Two groups on different logins read each their own, so a personal group
   failing over to the operator's warns of nothing. A condition
-  on a group no limits source answers for holds whatever is used, as a
+  on a group no limits source answers for fails whatever is used, as a
   comparison that names a source with no limits of its own does: `yardr
   doctor` notes each such route under `limits`.
 - **The choice is made at the claim**, once: a session keeps its group

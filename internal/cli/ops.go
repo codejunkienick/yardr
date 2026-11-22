@@ -988,11 +988,11 @@ provider is used up (as <100 would; a window the source says counts for one
 model alone counts only where it is the model the bead would start with in
 that group: yardr limits marks it), and --else wait ends the route, so the
 bead waits. While no group's does, the bead waits (a quota_wait event says
-for what). A condition that cannot be evaluated (no limits source answers
-for the group's provider, its command failed, it reports no such window, it
-gives the window no percentage or, for a condition on the target, no
-target, and for a comparison on a source no source of the name that answers
-for itself) holds, and the claimed event says the limits were not known.
+for what). A condition that cannot be shown (no limits source answers for
+the group's provider, its command failed, the window is given no percentage
+or, for a condition on the target, no target, and for a comparison on a
+source no source of the name that answers for itself) fails, to the next
+group or the wait above; a report with no such window knows of no limit.
 
 Two groups of a route that burn one provider on one login read the same
 windows, so a further group with no condition that burns the provider of a

@@ -107,8 +107,9 @@ func limitsEnvScope(env []string) string {
 }
 
 // limitState is which of the cache's answers a read found, which its
-// readers must not confuse: a route fails open on the last two alike
-// (but for what was last known, limitRead.last), a reset prompts
+// readers must not confuse: a route holds for the middle one and fails
+// a named comparison on the last (but for what was last known,
+// limitRead.last, and for a group with no condition), a reset prompts
 // on them and defers only on the middle one, and a stop writes
 // limits_unknown for each.
 type limitState int
