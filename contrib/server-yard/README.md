@@ -292,6 +292,17 @@ the script runs `YARDR_TEST_START_WAIT`, a long wait for the server that
 does not always leave; the yard's environment hands that on to the script as
 well, and the server does not get it.
 
+The suite builds `yardr` and the herdr stand-in once per run, not once per test
+(`fixture_test.go`): each goes into a directory of its own in `/tmp`, which
+`TestMain` takes away at the end (a killed binary leaves it, as it leaves the
+yards'), and each yard's `bin` holds a hard link to it, the same file at the
+path the script finds it by. A link, not a copy, since on macOS the first run
+of a new executable file waits behind the machine's other first runs, and a
+copy is one: the build runs each binary once and every yard's link is that
+file. Where a link cannot be made, a yard gets a copy and runs it once. The
+files are read-only, since the yards share them, and a run that builds either
+package more than once fails.
+
 `fake/` holds what the script is run against, with `HOME`,
 `XDG_CONFIG_HOME` and `YARDR_HOME` in a temp dir and nothing else of the
 caller's environment:

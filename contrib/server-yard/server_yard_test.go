@@ -2,9 +2,10 @@
 // yard up as the server steps of docs/install.md say, that herdr's unit
 // carries the proxy and CA variables of the script's environment, that a
 // second run changes nothing, and that where a step cannot be taken the
-// script stops with the way on. Each test builds yardr from the tree and
-// runs the script with stand-ins for herdr (fake/, a socket and a CLI that
-// answer what a setup asks), the harness, systemctl, loginctl and, on
+// script stops with the way on. The suite builds yardr from the tree and the
+// stand-in herdr (fake/, a socket and a CLI that answer what a setup asks)
+// once between its tests (fixture_test.go), and each test runs the script with
+// them and stand-ins for the harness, systemctl, loginctl and, on
 // macOS, launchctl, with HOME, XDG_CONFIG_HOME and YARDR_HOME in a temp
 // dir. The systemctl and launchctl stand-ins model the manager starting a
 // unit: herdr's server and the daemon really start (the daemon late, or
@@ -45,6 +46,14 @@ import (
 func TestMain(m *testing.M) {
 	storetest.NameTestBinary()
 	code := m.Run()
+	// Each binary is built once, by the template that lends it to the yards.
+	if again := checkBuilds(); len(again) > 0 {
+		fmt.Fprintf(os.Stderr, "FAIL: the suite built more than once: %s (fixture_test.go builds each binary once, and every test is lent it)\n", strings.Join(again, ", "))
+		if code == 0 {
+			code = 1
+		}
+	}
+	removeTemplates()
 	scripttest.Remove()
 	os.Exit(code)
 }
@@ -65,9 +74,13 @@ type yard struct {
 	env      []string
 }
 
-// goBuild builds the package pkg of the repository at root into out.
+// goBuild builds the package pkg of the repository at root into out. Only the
+// templates call it (fixture_test.go), and each package once: it counts.
 func goBuild(t *testing.T, root, out, pkg string) {
 	t.Helper()
+	builds.mu.Lock()
+	builds.n[pkg]++
+	builds.mu.Unlock()
 	cmd := exec.Command("go", "build", "-o", out, pkg)
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -84,14 +97,12 @@ func warm(path string, env []string, args ...string) {
 	_ = cmd.Run()
 }
 
-// build makes D: yardr from the tree, the fake herdr, the shell stand-ins,
-// and the directories the script writes to.
+// build makes D: yardr from the tree and the fake herdr, which the templates
+// lend (fixture_test.go), the shell stand-ins, and the directories the script
+// writes to.
 func build(t *testing.T) *yard {
 	t.Helper()
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := repoRoot(t)
 	d, err := os.MkdirTemp("/tmp", "sy.")
 	if err != nil {
 		t.Fatal(err)
@@ -107,8 +118,8 @@ func build(t *testing.T) *yard {
 			t.Fatal(err)
 		}
 	}
-	goBuild(t, root, filepath.Join(y.bin, "yardr"), "yardr.dev/yardr")
-	goBuild(t, root, filepath.Join(y.bin, "herdr"), "yardr.dev/yardr/contrib/server-yard/fake")
+	yardrTpl.lend(t, filepath.Join(y.bin, "yardr"))
+	herdrTpl.lend(t, filepath.Join(y.bin, "herdr"))
 	b, err := os.ReadFile(filepath.Join(root, "contrib/server-yard/fake", "claude"))
 	if err != nil {
 		t.Fatal(err)
@@ -136,13 +147,11 @@ exec "$SY_REAL_YARDR" "$@"
 		t.Fatal(err)
 	}
 	// Everything above is a file the script runs under its waits: run each
-	// once here, where no fuse times it (the managers ran in Install). The
-	// stand-ins get only what their run needs: herdr with no state answers
-	// nothing and logs nothing, and claude with no argument prints its
-	// version.
+	// once here, where no fuse times it (the managers ran in Install). Not
+	// yardr and herdr, which are linked: they are the files the templates ran
+	// when they built them (fixture_test.go). The stand-ins get only what
+	// their run needs: claude with no argument prints its version.
 	real := filepath.Join(y.bin, "yardr")
-	warm(real, []string{"HOME=" + y.home}, "version")
-	warm(filepath.Join(y.bin, "herdr"), []string{})
 	warm(filepath.Join(y.bin, "claude"), []string{"HERDR_FAKE_STATE=" + filepath.Join(y.state, "herdr")})
 	warm(filepath.Join(shim, "yardr"), []string{"HOME=" + y.home, "SY_REAL_YARDR=" + real}, "version")
 	// The test's own environment stays out: a YARDR_HOME or a
@@ -1044,21 +1053,16 @@ func owner(t *testing.T) (named string, end func()) {
 // owner lives is what TestServerYardSetsUpAYard needs of it throughout.)
 func TestFakeHerdrStopsWithItsOwner(t *testing.T) {
 	t.Parallel()
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
 	// Short, since a unix socket path has a length limit.
 	dir, err := os.MkdirTemp("/tmp", "sy.")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	herdr := filepath.Join(dir, "herdr")
-	goBuild(t, root, herdr, "yardr.dev/yardr/contrib/server-yard/fake")
-	// Run it once before the serve the fuse below times: with no state it
-	// answers nothing and logs nothing.
-	warm(herdr, []string{})
+	// The template's own file, run where it is: this test only runs it, and
+	// the template ran it once when it built it, before the serve the fuse
+	// below times.
+	herdr := herdrTpl.borrow(t)
 	named, end := owner(t)
 	sock := filepath.Join(dir, "herdr.sock")
 	cmd := exec.Command(herdr, "server")
