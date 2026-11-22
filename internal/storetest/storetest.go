@@ -62,16 +62,9 @@ func New(t testing.TB) store.API {
 	return api
 }
 
-// NewRPC returns a fresh store API through a real unix socket regardless of
-// the test process's environment.
-func NewRPC(t testing.TB) store.API {
-	t.Helper()
-	api, _ := newInWithRPC(t, t.TempDir(), true)
-	return api
-}
-
-// NewRPCOwned is NewRPC that also returns the store behind the API, for
-// what only the owning process may register on it (a pack reading).
+// NewRPCOwned returns a fresh store API through a real unix socket
+// regardless of the test process's environment, and the store behind the
+// API, for what only the owning process may register on it (a pack reading).
 func NewRPCOwned(t testing.TB) (store.API, *store.Store) {
 	t.Helper()
 	return newInWithRPC(t, t.TempDir(), true)

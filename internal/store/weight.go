@@ -170,19 +170,6 @@ func StrongWeight(weight []AskWeight) bool {
 	})
 }
 
-// StrongWords names a strong card's weight in a refusal: strong with the
-// trust and code classes it carries. The web names it the same way before
-// it starts a strong card's sign-in.
-func StrongWords(ws []AskWeight) string {
-	var classes []string
-	for _, w := range ws {
-		if w.Class == WeightTrust || w.Class == WeightCode {
-			classes = append(classes, w.Class)
-		}
-	}
-	return "strong (" + strings.Join(classes, ", ") + ")"
-}
-
 // Weighty reports whether the card's stored weight makes it a weighty
 // card: any class at all, since a routine card carries no weight. It is
 // StrongWeight's wider neighbour, not a widening of it: strong keeps

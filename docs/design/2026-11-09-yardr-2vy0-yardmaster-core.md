@@ -132,7 +132,7 @@ as long as the heading keeps its words:
   the kind names and the two defaults (`fix` for a bug, `chore` otherwise)
   but not what each kind means. "Routing by estimate and quota" also
   points back at the role ("by the rubric in [the yardmaster's
-  role](../packs/starter/roles/yardmaster.md)"), so the cut must replace
+  role](../../internal/pack/yardmaster_base.md)"), so the cut must replace
   that backlink or the rubric's one readable home sends the reader to a
   file that no longer holds it. The `eyes` rule stands beside the rubric
   in the role (a bead whose change shows takes the label; its builder
@@ -564,7 +564,7 @@ roles that already carry yardr-mar0's Decisions cut.
    builder attaches a screenshot and its reviewer opens it) move into
    that same section beside them; and the section's backlink ("by the
    rubric in [the yardmaster's
-   role](../packs/starter/roles/yardmaster.md)") is replaced so it no
+   role](../../internal/pack/yardmaster_base.md)") is replaced so it no
    longer sends a reader to the cut role. `docs/line.md`'s **type**
    bullet, which already lists the kind names and defaults, is left as
    it is. Where to look: section 3.2's rows; `docs/groups.md`

@@ -41,12 +41,6 @@ func DoFile(ctx context.Context, d *Declaration, name string, params map[string]
 	return doFile(ctx, d, name, params, credential, nil, nil, dest, maxBytes, readSecret)
 }
 
-// DoFileWithInputs is DoFile with file-backed inputs already read by the
-// caller, as DoKeyedWithInputs is to DoKeyed. readSecret is Do's.
-func DoFileWithInputs(ctx context.Context, d *Declaration, name string, params map[string]string, credential string, inputs map[string][]byte, dest string, maxBytes int64, readSecret func(path string) (secret []byte, resolved string, err error)) (*Result, error) {
-	return doFile(ctx, d, name, params, credential, nil, inputs, dest, maxBytes, readSecret)
-}
-
 // DoFileBody is DoFile with the request's body already built, rather than
 // filled from the call's template, as DoKeyedBody is to DoKeyed: the body
 // a build command printed is sent unchanged on the first request, and nil
