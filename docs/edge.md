@@ -447,7 +447,11 @@ way it is not lost. On reconnect the edge sends the queue oldest first; the
 yard serves each and sends `ack` once it is recorded or refused, and only
 then does the edge delete it. A live frame that ran out of time is the same
 queued entry: if the yard's answer arrives later, it counts as that entry's
-ack.
+ack. An answer that recorded nothing and may succeed when sent again — the
+yard's 5xx, from its store or a blocked secret file — is no ack on either
+path: for a queued entry the yard sends no ack, and for a live delivery it
+sends no answer at all, so the entry stays queued and is sent again on the
+next connect.
 
 **What bounds the queue.** Anyone on the internet can post to a hook URL, and
 the edge cannot tell a real delivery from junk, since only the yard holds the

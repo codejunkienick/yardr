@@ -412,6 +412,191 @@ func TestQueuedLinkWithBarrierFreesAHeldHandlerWhenItsTestEnds(t *testing.T) {
 	})
 }
 
+// withholdSecret removes the acme hook's secret file, so the receiver
+// refuses its deliveries as blocked (503) and records nothing, and returns
+// the file's path so the test can put it back.
+func withholdSecret(t *testing.T, y *queuedYard) string {
+	t.Helper()
+	h, err := y.st.GetHook(context.Background(), "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(h.SecretFile); err != nil {
+		t.Fatal(err)
+	}
+	return h.SecretFile
+}
+
+func restoreSecret(t *testing.T, file string) {
+	t.Helper()
+	if err := os.WriteFile(file, []byte(queuedSecret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// waitUntracked waits until answer for id has returned (after any write it
+// chose to send). A follow-up frame on the same link then orders behind
+// whatever id wrote on the wire.
+func waitUntracked(t *testing.T, l *Link, id string) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(2 * time.Millisecond) {
+		l.liveMu.Lock()
+		_, live := l.live[id]
+		l.liveMu.Unlock()
+		if !live {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("answer for %q did not finish", id)
+		}
+	}
+}
+
+// A queued delivery the yard can only refuse retryably (here its secret
+// file is gone, so the receiver answers 503 blocked and records nothing)
+// is not acked: the edge keeps the entry and sends it again, and the
+// resend, once the yard can take it, is recorded and acked. Acking the
+// 503 would delete the entry unrecorded, as the lost pull_request
+// deliveries were lost.
+func TestLinkDoesNotAckAQueuedDeliveryItCanOnlyRetry(t *testing.T) {
+	t.Parallel()
+	y := queuedLink(t)
+	first := y.next(t)
+	file := withholdSecret(t, y)
+	body := queuedBody(y.now)
+	h := y.acmeHeaders(body, "q-retry")
+	f := queued(t, first, "/hooks/acme", h, body, y.now)
+	send(t, first, f)
+	y.recorded(t, 0)
+	waitUntracked(t, y.link, f.ID)
+	// Send an ackable queued probe on the same link so any frame f wrote
+	// ahead of it is guaranteed read by the edge before we check first.Acks.
+	probe := queued(t, first, "/hooks/unknown", http.Header{}, []byte(`{}`), y.now)
+	send(t, first, probe)
+	if id := acked(t, first); id != probe.ID {
+		t.Fatalf("the retryable delivery was acked ahead of the probe: got %q, want %q", id, probe.ID)
+	}
+	y.recorded(t, 0)
+	for _, id := range first.Acks() {
+		if id == f.ID {
+			t.Fatalf("the retryable answer was acked: %v; the edge deletes the entry unrecorded", first.Acks())
+		}
+	}
+	// The edge keeps the entry when the link goes, as it keeps one whose
+	// ack was lost (TestLinkRecordsARedeliveryAfterALostAckOnce).
+	first.Close()
+	select {
+	case <-first.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the edge did not observe the closed link")
+	}
+	restoreSecret(t, file)
+	second := y.next(t)
+	g := queued(t, second, "/hooks/acme", h, body, y.now)
+	g.ID = f.ID
+	g.Sig = second.Sign(nil, g)
+	send(t, second, g)
+	if id := acked(t, second); id != f.ID {
+		t.Fatalf("acked %q, want %q", id, f.ID)
+	}
+	if evs := y.hookEvents(t); len(evs) != 1 {
+		t.Fatalf("want 1 recorded delivery, have %d: %+v", len(evs), evs)
+	}
+}
+
+// A live delivery the yard can only refuse retryably is answered with
+// nothing — no response, no end — so the edge's late-answer ack never
+// fires and the entry stays queued; sent again as a queued delivery on
+// reconnect once the yard can take it, it is recorded and acked. A live
+// 4xx refusal and a non-hook 5xx are still answered as before.
+func TestLinkHoldsALiveDeliveryItCanOnlyRetry(t *testing.T) {
+	t.Parallel()
+	y := queuedLink(t)
+	first := y.next(t)
+	file := withholdSecret(t, y)
+	body := queuedBody(y.now)
+	h := y.acmeHeaders(body, "q-live-retry")
+	f := first.Frame(http.MethodPost, "/hooks/acme", h, body, false)
+	send(t, first, f)
+	y.recorded(t, 0)
+	waitUntracked(t, y.link, f.ID)
+	// A refused live delivery (404) is still answered directly, and its
+	// response orders behind anything f might have sent on first.
+	probe := first.Frame(http.MethodPost, "/hooks/unknown", http.Header{}, []byte(`{}`), false)
+	if a := deliver(t, first, probe); a.Status != http.StatusNotFound {
+		t.Fatalf("refused live probe answered %+v, want 404", a)
+	}
+	y.recorded(t, 0)
+	for _, a := range first.Answers() {
+		if a.ID == f.ID {
+			t.Fatalf("a retryable live delivery was answered: %+v", a)
+		}
+	}
+	for _, id := range first.Ends() {
+		if id == f.ID {
+			t.Fatalf("a retryable live delivery was ended: %v", first.Ends())
+		}
+	}
+	first.Close()
+	select {
+	case <-first.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the edge did not observe the closed link")
+	}
+	restoreSecret(t, file)
+	second := y.next(t)
+	g := queued(t, second, "/hooks/acme", h, body, y.now)
+	g.ID = f.ID
+	g.Sig = second.Sign(nil, g)
+	send(t, second, g)
+	if id := acked(t, second); id != f.ID {
+		t.Fatalf("acked %q, want %q", id, f.ID)
+	}
+	if evs := y.hookEvents(t); len(evs) != 1 {
+		t.Fatalf("want 1 recorded delivery, have %d: %+v", len(evs), evs)
+	}
+
+	// Non-hook 5xx is still answered directly, while a hook handler that
+	// writes no status (e.g. an aborted handler) is held like a 5xx.
+	t.Run("non-hook 5xx answered and empty hook status held", func(t *testing.T) {
+		t.Parallel()
+		done := make(chan struct{}, 2)
+		ly := linkTo(t, func(l *Link) {
+			l.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer func() { done <- struct{}{} }()
+				if r.URL.Path == "/user/fail" {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				// /hooks/empty writes nothing (status 0).
+			})
+		}, nil)
+		l := ly.next(t)
+		empty := l.Frame(http.MethodPost, "/hooks/empty", nil, nil, false)
+		send(t, l, empty)
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("empty hook handler did not finish")
+		}
+		waitUntracked(t, ly.link, empty.ID)
+		nonHook := l.Frame(http.MethodGet, "/user/fail", nil, nil, false)
+		if a := deliver(t, l, nonHook); a.Status != http.StatusServiceUnavailable {
+			t.Fatalf("non-hook 503 answered %+v, want 503", a)
+		}
+		for _, a := range l.Answers() {
+			if a.ID == empty.ID {
+				t.Fatalf("empty-status hook was answered: %+v", a)
+			}
+		}
+		for _, id := range l.Ends() {
+			if id == empty.ID {
+				t.Fatalf("empty-status hook was ended: %v", l.Ends())
+			}
+		}
+	})
+}
+
 // A live delivery is answered with a response for its sender, and no ack:
 // acks are for queued deliveries, which the edge deletes on them.
 func TestLinkAnswersALiveDeliveryWithAResponseAndNoAck(t *testing.T) {
