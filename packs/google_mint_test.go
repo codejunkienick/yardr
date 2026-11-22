@@ -833,6 +833,10 @@ func TestGoogleMintCopiesAgree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantInstall, err := fs.ReadFile(packs.FS, "google-mail/install-gws")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, p := range []string{"google-drive", "google-docs", "google-calendar"} {
 		got, err := fs.ReadFile(packs.FS, p+"/google-mint")
 		if err != nil {
@@ -840,6 +844,13 @@ func TestGoogleMintCopiesAgree(t *testing.T) {
 		}
 		if !bytes.Equal(got, want) {
 			t.Errorf("%s/google-mint differs from google-mail's: the copies are one script", p)
+		}
+		gotInstall, err := fs.ReadFile(packs.FS, p+"/install-gws")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(gotInstall, wantInstall) {
+			t.Errorf("%s/install-gws differs from google-mail's: the copies are one script", p)
 		}
 	}
 	for _, file := range []string{"google-mail/google-mail.yaml", "google-drive/google-drive.yaml", "google-docs/google-docs.yaml", "google-docs/google-slides.yaml", "google-calendar/google-calendar.yaml"} {
@@ -856,6 +867,10 @@ func TestGoogleMintCopiesAgree(t *testing.T) {
 		}
 		if got := d.Credential.Bound; len(got) != 1 || got[0] != "GOOGLE_ACCOUNT" {
 			t.Errorf("%s: credential.bound = %q, want [GOOGLE_ACCOUNT]: the account belongs to one holder", file, got)
+		}
+		if len(d.Needs) != 1 || d.Needs[0].Program != "gws" || d.Needs[0].Env != "GWS_BIN" ||
+			len(d.Needs[0].Install) != 1 || d.Needs[0].Install[0] != "install-gws" {
+			t.Errorf("%s: needs = %+v, want gws (GWS_BIN, [install-gws])", file, d.Needs)
 		}
 	}
 }

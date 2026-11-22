@@ -82,7 +82,10 @@ brew install googleworkspace-cli
 ```
 
 (`npm install -g @googleworkspace/cli` fetches the same release.)
-Whatever way gws came by, it answers from PATH:
+Whatever way gws came by, it answers from PATH. A yard with a google
+pack applied names a missing gws itself, in `yardr doctor` and on the
+pack's setup card, and `yardr pack install <pack>` installs it, in a
+terminal or on a run card the operator approves:
 
 ```sh
 command -v gws

@@ -902,7 +902,8 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr source check <source> --user <user>": {
 			"source check pushover --user ada",
 		},
-		store.PackApplyUse: {"pack apply telegram"},
+		store.PackApplyUse:          {"pack apply telegram"},
+		"yardr pack install <pack>": {"pack install telegram"},
 		"yardr hook add <name> --source <declared source> [--unknown unknown|allow|ignore] [--as <crew member>] [--map <type>:<stage>=<state>]": {"hook add linear --source linear"},
 		"yardr subscribe <user> yardr [--done] [--where <key>=<value>]":                                                                         {"subscribe jo yardr --where label=ui --done --where label=web"},
 		"yardr user set <user> tell=<parts>": {"user set jo tell=asks,notifications"},
@@ -979,6 +980,15 @@ func TestRunListIsTheCLIs(t *testing.T) {
 			// here has: its approval is exercised against a stand-in
 			// in the store's tests (runask_call_test.go), and this
 			// test holds its row to the CLI's help, as user key's is.
+			continue
+		}
+		if use == "yardr pack install <pack>" {
+			// An install runs a program of the pack, which neither
+			// yard here may: the telegram pack declares no needs, so
+			// its ask is refused, and the row's approval is exercised
+			// with fixture programs in the store's tests
+			// (runask_packinstall_test.go). This test holds its row
+			// to the CLI's help, as the call row's is.
 			continue
 		}
 		if use == "yardr user key <user> <source>" {

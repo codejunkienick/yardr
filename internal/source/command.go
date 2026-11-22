@@ -128,7 +128,7 @@ const MintCommandKey = "credential.mint_command"
 // Commands are the commands the declaration names: the mint command it
 // brings, the limits command, thread's reply, posted, read, file, open,
 // opened and state, notify's image, hook.normalize, events' pr and ci,
-// the git credential helper, and each call's build and run, in that order. The
+// the git credential helper, each need's install, and each call's build and run, in that order. The
 // mint command is one of them so that it is carried as every command file
 // is: copied under <home>/sources/<name>/, hashed on the plan and the
 // card, and shown again when a later pack changes it. The git helper is
@@ -175,6 +175,11 @@ func (d *Declaration) Commands() []Command {
 	}
 	if d.Git != nil && len(d.Git.Credential) > 0 {
 		out = append(out, Command{Key: "git.credential", Argv: d.Git.Credential})
+	}
+	for _, n := range d.Needs {
+		if len(n.Install) > 0 {
+			out = append(out, Command{Key: "needs." + n.Program, Argv: n.Install})
+		}
 	}
 	for _, c := range d.Calls {
 		out = append(out, c.Commands()...)

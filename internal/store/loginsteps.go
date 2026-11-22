@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 
@@ -76,16 +77,60 @@ func packLogin(decls map[string]*source.Declaration, carried []AskSource) *sourc
 	return nil
 }
 
+// missingNeedLines are a setup card's lines for the programs the
+// pack's declarations need that this machine lacks, each naming the
+// command that installs them: the pack's need, in the yard's words,
+// held to one terminal-safe line as the sign-in lines are. A program
+// the machine has, and a pack that names none, give no line, so the
+// card reads exactly as it did.
+func missingNeedLines(decls map[string]*source.Declaration, carried []AskSource, pack string) []string {
+	var lines []string
+	seenProg := map[string]bool{}
+	for i := range carried {
+		d := decls[carried[i].Name]
+		if d == nil {
+			continue
+		}
+		for _, n := range d.MissingNeeds() {
+			if seenProg[n.Program] {
+				continue
+			}
+			seenProg[n.Program] = true
+			lines = append(lines, safeSourceCardLine(fmt.Sprintf("the pack needs %s, which is not on this machine: yardr pack install %s installs it", n.Program, pack)))
+		}
+	}
+	return lines
+}
+
+// setupDoesForStale is a setup card's Does lines for stale comparison:
+// the build label stripped as pack cards strip it, and the advisory
+// missing-need lines left out so installing a program the setup card
+// itself named as missing does not invalidate the open setup card.
+// Changes to the pack's needs declaration itself are still held by
+// the pack's bytes fingerprint in Seen.
+func setupDoesForStale(does []string, label, build string) []string {
+	stripped := doesWithoutBuild(does, label, build)
+	out := make([]string, 0, len(stripped))
+	for _, line := range stripped {
+		if strings.HasPrefix(line, "the pack needs ") && strings.HasSuffix(line, " installs it") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
 // setupAccountDoes is the setup card's account step: the account line,
-// then the pack's sign-in steps where its credential declares them. A
+// then the pack's sign-in steps where its credential declares them,
+// then the programs the pack needs that this machine lacks. A
 // credential without them gives the account line alone, so the card
 // reads exactly as it did.
-func setupAccountDoes(decls map[string]*source.Declaration, carried []AskSource, account []string, file string, given bool, missing []string, candidates []AskCandidate) []string {
+func setupAccountDoes(decls map[string]*source.Declaration, carried []AskSource, account []string, file string, given bool, missing []string, candidates []AskCandidate, pack string) []string {
 	lines := []string{setupAccountLine(account, file, given, missing, candidates)}
 	if login := packLogin(decls, carried); login != nil {
 		lines = append(lines, loginStepLines(login.Run, login.Paste)...)
 	}
-	return lines
+	return append(lines, missingNeedLines(decls, carried, pack)...)
 }
 
 // googleLogin is the one sign-in the yard's Google sources declare for

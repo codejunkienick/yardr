@@ -242,6 +242,21 @@ calls:
       link:  { type: string, max: 512, optional: true }
     request: { method: POST, path: /messages, body: { to: "{user}", title: "{title}", text: "{text}", link: "{link}" } }
 
+# ---- what its commands need on the machine --------------------------------
+# Drop the whole key where the service's commands need nothing beyond
+# what the yard itself runs: each program a command runs, the variable
+# that may name another path to it (checked first), and the install
+# that gets it, an argv run without a shell. A relative install
+# program is a file beside this one, carried and shown whole as every
+# command file is; an absolute one stays in a terminal. The yard
+# reports what is missing (doctor, the setup card) and installs only
+# as yardr pack install runs it, in a terminal or on a card the
+# operator approves. One install file branches on uname itself.
+# needs:
+#   - program: acme-cli
+#     env: ACME_CLI_BIN
+#     install: [acme/install-cli]
+
 # ---- telling a person through it ------------------------------------------
 # Drop the whole key where the service tells no person: without it no user
 # names the source. Which update call tells, and which of its parameters

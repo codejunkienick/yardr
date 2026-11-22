@@ -947,7 +947,7 @@ func (w *wtx) setupDoes(pack string, reading *PackReading, carried []AskSource, 
 		return nil, err
 	}
 	does = append(does, hostDoes...)
-	does = append(does, setupAccountDoes(decls, carried, account, file, given, missing, candidates)...)
+	does = append(does, setupAccountDoes(decls, carried, account, file, given, missing, candidates, pack)...)
 	does = append(does, fmt.Sprintf("grants to %s — pick one:", granteesWord(to)))
 	for i := range does {
 		does[i] = safeSourceCardLine(does[i])
@@ -1351,8 +1351,8 @@ func (w *wtx) setupStale(seq uint64, was, now AskSetup) error {
 	}
 	// The first sentence names the label, build and all: when the cards
 	// read alike without it, the build moved alone and the approval runs.
-	wasDoes := doesWithoutBuild(was.Does, was.Seen[labelKey], was.Seen[buildKey])
-	nowDoes := doesWithoutBuild(now.Does, now.Seen[labelKey], now.Seen[buildKey])
+	wasDoes := setupDoesForStale(was.Does, was.Seen[labelKey], was.Seen[buildKey])
+	nowDoes := setupDoesForStale(now.Does, now.Seen[labelKey], now.Seen[buildKey])
 	if slices.Equal(wasDoes, nowDoes) && was.Back == now.Back && was.BackBy == now.BackBy {
 		return nil
 	}

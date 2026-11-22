@@ -138,6 +138,35 @@ func TestParseCRM(t *testing.T) {
 	}
 }
 
+func TestParseNeeds(t *testing.T) {
+	d, err := Parse("crm.yaml", []byte(crm+"needs:\n  - { program: gws, env: GWS_BIN, install: [install-gws] }\n  - { program: acme-cli, install: [/opt/acme/install, --quiet] }\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Needs) != 2 || d.Needs[0].Program != "gws" || d.Needs[0].Env != "GWS_BIN" ||
+		strings.Join(d.Needs[0].Install, " ") != "install-gws" ||
+		d.Needs[1].Program != "acme-cli" || d.Needs[1].Env != "" ||
+		strings.Join(d.Needs[1].Install, " ") != "/opt/acme/install --quiet" {
+		t.Fatalf("needs = %+v", d.Needs)
+	}
+	// Each install is one of the declaration's commands, so a relative
+	// one is carried as every command file is.
+	var keys []string
+	for _, c := range d.Commands() {
+		keys = append(keys, c.Key)
+	}
+	if !slices.Contains(keys, "needs.gws") || !slices.Contains(keys, "needs.acme-cli") {
+		t.Fatalf("commands = %v, want both needs installs among them", keys)
+	}
+	plain, err := Parse("crm.yaml", []byte(crm))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plain.Needs) != 0 || len(plain.MissingNeeds()) != 0 {
+		t.Fatalf("a declaration with no needs reads needs: %+v", plain.Needs)
+	}
+}
+
 // A file answer is the answer's bytes, not JSON: a read request call may
 // name it (with errors for a refusal, and with build beside its request as
 // any request call may), and it is refused with select, with run and on an
@@ -746,6 +775,24 @@ func TestParseRefuses(t *testing.T) {
 		{"a template and no base", with("base: https://crm.example.com/api/v2\n", "base_template: https://{host}/api/v2\n"),
 			"base", "missing: the address every call's path is under"},
 		{"no calls", "name: x\nbase: https://x.example.com\n", "calls", "missing"},
+		{"a need with no program", crm + "needs:\n  - { env: GWS_BIN, install: [install-gws] }\n",
+			"needs.0.program", "missing: the program the source needs"},
+		{"a need with no install", crm + "needs:\n  - { program: gws }\n",
+			"needs.0.install", "missing: the install that gets the program"},
+		{"a need whose env is no variable name", crm + "needs:\n  - { program: gws, env: \"not a name\", install: [install-gws] }\n",
+			"needs.0.env", "is no name of a variable"},
+		{"a need named twice", crm + "needs:\n  - { program: gws, install: [install-gws] }\n  - { program: gws, install: [other] }\n",
+			"needs.1", "program gws is named twice"},
+		{"needs that is no list", crm + "needs: gws\n",
+			"needs", "want a list of the programs"},
+		{"a need with an empty install", crm + "needs:\n  - { program: gws, install: [] }\n",
+			"needs.0.install", "an empty list"},
+		{"a need whose program has spaces", crm + "needs:\n  - { program: \"my tool\", install: [install-gws] }\n",
+			"needs.0.program", "one word, on one line"},
+		{"a need whose program is a path", crm + "needs:\n  - { program: /usr/bin/gws, install: [install-gws] }\n",
+			"needs.0.program", "name the program on PATH"},
+		{"an empty needs list", crm + "needs: []\n",
+			"needs", "no program"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, err := Parse("crm.yaml", []byte(tc.text))

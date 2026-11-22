@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -145,7 +146,7 @@ func (r *reader) count(n *yaml.Node, key string, most int) (int, bool) {
 func (r *reader) declaration(d *Declaration, root *yaml.Node) {
 	var calls, check, notify, hear, base, bases, baseTemplate, credential, idempotency, hook, git *entry
 	named := false
-	for _, e := range r.entries(root, "", "name", "about", "base", "bases", "base_template", "credential", "check", "idempotency", "calls", "notify", "hear", "limits", "thread", "link", "hook", "identity", "events", "git") {
+	for _, e := range r.entries(root, "", "name", "about", "base", "bases", "base_template", "credential", "check", "idempotency", "calls", "notify", "hear", "limits", "thread", "link", "hook", "identity", "events", "git", "needs") {
 		switch e.key {
 		case "name":
 			named = true
@@ -201,6 +202,8 @@ func (r *reader) declaration(d *Declaration, root *yaml.Node) {
 		case "git":
 			git = &e
 			d.Git = r.git(e)
+		case "needs":
+			d.Needs = r.needs(e)
 		}
 	}
 	if root.Kind != yaml.MappingNode {
@@ -781,6 +784,76 @@ func (r *reader) credentialLogin(e entry) *CredentialLogin {
 // control in it, as a header is held to (credential's header above).
 func oneLine(s string) bool {
 	return !strings.ContainsFunc(s, func(c rune) bool { return c < ' ' || c == 0x7f })
+}
+
+// needs reads the programs a declaration needs on the machine: each
+// names the program, the variable that may name another path to it,
+// and the install that gets it, an argv as a mint command's is. A
+// program named twice, a variable that is no name, and an install
+// that is no command are refused here, as a mint's mistakes are, so
+// pack check refuses them before any yard is asked.
+func (r *reader) needs(e entry) []Need {
+	if e.v.Kind != yaml.SequenceNode {
+		r.errf(e.v, e.path, "want a list of the programs the source needs ([{program: gws, install: [install-gws]}]), got %s", describe(e.v))
+		return nil
+	}
+	if len(e.v.Content) == 0 {
+		r.errf(e.v, e.path, "no program: needs names the programs the source's commands need on this machine, or is left out")
+		return nil
+	}
+	var out []Need
+	seenProg := map[string]bool{}
+	for i, item := range e.v.Content {
+		path := fmt.Sprintf("%s.%d", e.path, i)
+		var program, env string
+		var install []string
+		hasProgram, hasInstall := false, false
+		for _, f := range r.entries(item, path, "program", "env", "install") {
+			switch f.key {
+			case "program":
+				hasProgram = true
+				if s, ok := r.str(f.v, f.path); ok {
+					switch {
+					case strings.TrimSpace(s) != s || !oneLine(s) || strings.ContainsFunc(s, unicode.IsSpace):
+						r.errf(f.v, f.path, "program %q is no program the yard looks for: one word, on one line", s)
+					case strings.ContainsAny(s, "/\\") || s == "." || s == "..":
+						r.errf(f.v, f.path, "program %q is no program the yard looks for: name the program on PATH, not a path", s)
+					default:
+						program = s
+					}
+				}
+			case "env":
+				if s, ok := r.str(f.v, f.path); ok {
+					if !paramName.MatchString(s) {
+						r.errf(f.v, f.path, "%q is no name of a variable: this is the name another path to the program is under, never the path", s)
+					} else {
+						env = s
+					}
+				}
+			case "install":
+				hasInstall = true
+				install = r.command(f, "argument")
+			}
+		}
+		if item.Kind == yaml.MappingNode {
+			if !hasProgram {
+				r.errf(item, join(path, "program"), "missing: the program the source needs on this machine")
+			}
+			if !hasInstall {
+				r.errf(item, join(path, "install"), "missing: the install that gets the program, a list ([program, arguments...]) run without a shell")
+			}
+		}
+		if program == "" || len(install) == 0 {
+			continue
+		}
+		if seenProg[program] {
+			r.errf(item, path, "program %s is named twice: one install gets it", program)
+			continue
+		}
+		seenProg[program] = true
+		out = append(out, Need{Program: program, Env: env, Install: install})
+	}
+	return out
 }
 
 // mintNames reads the names of the variables that together select a minted

@@ -1,0 +1,27 @@
+#!/bin/sh
+# Installs gws, the Google Workspace CLI the google packs' mint runs:
+# the install a declaration's needs names, shown whole on its card and
+# run only as yardr pack install runs it, in a terminal or on a card
+# the operator approves. One file branches on uname itself, as needs
+# has no per-platform keys. gws here already is success.
+set -eu
+
+fail() { echo "install-gws: $*" >&2; exit 1; }
+
+command -v gws >/dev/null 2>&1 && exit 0
+case $(uname -s) in
+Darwin)
+  if command -v brew >/dev/null 2>&1; then
+    brew install googleworkspace-cli
+  elif command -v npm >/dev/null 2>&1; then
+    npm install -g @googleworkspace/cli
+  else
+    fail "needs Homebrew or npm to install gws (or install a release binary from github.com/googleworkspace/cli)"
+  fi
+  ;;
+*)
+  command -v npm >/dev/null 2>&1 || fail "needs npm to install @googleworkspace/cli (or install a release binary from github.com/googleworkspace/cli)"
+  npm install -g @googleworkspace/cli
+  ;;
+esac
+command -v gws >/dev/null 2>&1 || fail "gws is still not on PATH after the install"

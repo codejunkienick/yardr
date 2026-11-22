@@ -608,7 +608,7 @@ after pack check. The import is recorded (yardr pack list). See docs/packs.md.
 		},
 	}
 
-	cmd.AddCommand(check, apply, a.packExportCmd(), a.packShowCmd(naming), list)
+	cmd.AddCommand(check, apply, a.packInstallCmd(), a.packExportCmd(), a.packShowCmd(naming), list)
 	return cmd
 }
 

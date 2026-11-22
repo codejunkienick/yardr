@@ -69,3 +69,7 @@ calls:
           - insertText: { objectId: "{slide}_title", text: "{title}" }
           - insertText: { objectId: "{slide}_body", text: "{body}" }
     answer: { select: [presentationId, replies] }
+
+# The mint runs gws on this machine; GWS_BIN may name another copy.
+needs:
+  - { program: gws, env: GWS_BIN, install: [install-gws] }

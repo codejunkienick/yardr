@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -10,6 +12,8 @@ import (
 	"yardr.dev/yardr/internal/pack"
 	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/version"
+	"yardr.dev/yardr/packs"
 )
 
 // sourceCallsRead is how many of the yard's last source_call events doctor
@@ -152,8 +156,69 @@ func sourcesPart(ctx context.Context, cfg *config.Config, st store.API, try bool
 				d.Name, yardr, d.Name, store.GrantRead))
 		}
 	}
+	part.Notes = append(part.Notes, missingProgramNotes(ctx, st, srcs, yardr)...)
 	part.Configured, part.Detail = true, strings.Join(names, ", ")
 	return part, nil
+}
+
+// missingProgramNotes are doctor's lines for the programs the yard's
+// declared sources name under needs that this machine lacks, one per
+// program and pack, each naming the command that installs them. A
+// source's pack is the import that brought it, read again from where
+// it was imported from; a source no pack brought names its program
+// alone, since no pack installs it. A program the machine has, by
+// the variable its declaration names or on PATH, says nothing.
+func missingProgramNotes(ctx context.Context, st store.API, srcs []store.Source, yardr string) []string {
+	recs, err := st.Packs(ctx)
+	if err != nil {
+		return nil
+	}
+	bySource := map[string]string{}
+	for _, rec := range recs {
+		var p *pack.Pack
+		switch {
+		case fromEmbedded(rec.Source):
+			sub, err := fs.Sub(packs.FS, rec.Pack)
+			if err != nil {
+				continue
+			}
+			p, err = pack.Load(sub, packs.Embedded+" in yardr "+version.Describe())
+			if err != nil {
+				continue
+			}
+		case filepath.IsAbs(rec.Source) && !pack.IsURL(rec.Source):
+			p, err = pack.LoadDir(rec.Source)
+			if err != nil {
+				continue
+			}
+		default:
+			continue
+		}
+		for _, d := range p.Declared {
+			bySource[d.Name] = rec.Pack
+		}
+	}
+	var notes []string
+	seenPack := map[string]bool{}
+	for _, src := range srcs {
+		d, err := src.Declaration()
+		if err != nil {
+			continue
+		}
+		for _, n := range d.MissingNeeds() {
+			if packName := bySource[d.Name]; packName != "" {
+				key := packName + "\x00" + n.Program
+				if seenPack[key] {
+					continue
+				}
+				seenPack[key] = true
+				notes = append(notes, fmt.Sprintf("pack %s: %s is not on this machine: %s pack install %s installs it", packName, n.Program, yardr, packName))
+			} else {
+				notes = append(notes, fmt.Sprintf("source %s: %s is not on this machine", d.Name, n.Program))
+			}
+		}
+	}
+	return notes
 }
 
 // aiquokkaOffer is the note that proposes aiquokka's source, as the one

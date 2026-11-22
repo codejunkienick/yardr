@@ -112,3 +112,7 @@ calls:
       query: { sendUpdates: "none", fields: "id,summary,start,end,htmlLink" }   # no mail about the change
       body: { summary: "{summary}", start: { dateTime: "{start}" }, end: { dateTime: "{end}" }, description: "{description}", location: "{location}" }   # a field left out leaves its key, so only what is given changes; a start or end left out leaves an empty start or end, which the patch reads as no change there
     answer: { select: [id, summary, start, end, htmlLink] }
+
+# The mint runs gws on this machine; GWS_BIN may name another copy.
+needs:
+  - { program: gws, env: GWS_BIN, install: [install-gws] }

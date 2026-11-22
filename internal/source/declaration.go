@@ -116,6 +116,26 @@ type Declaration struct {
 	// source whose repositories git reaches without the yard: the
 	// credential helper git runs, which the yard copies and never runs.
 	Git *Git `json:"git,omitempty"`
+	// Needs are the programs the source's commands need on the machine
+	// the yard runs on, in file order: each names the program, the
+	// variable that may name another copy of it, and the install that
+	// gets it. The yard reports what is missing and installs nothing
+	// by itself; yardr pack install runs an install, in a terminal or
+	// on a run card the operator approves.
+	Needs []Need `json:"needs,omitempty"`
+}
+
+// Need is one program a declaration needs on the machine: the program
+// a command of the source runs (gws for the Google sources), the
+// variable that may name another path to it, checked first, and the
+// install that gets it, an argv run without a shell like a mint
+// command. An install whose program is a file beside the declaration
+// is carried and shown whole, as every command file is; an absolute
+// one is the operator's own and stays in a terminal.
+type Need struct {
+	Program string   `json:"program"`
+	Env     string   `json:"env,omitempty"`
+	Install []string `json:"install"`
 }
 
 // Credential is where a source's credential comes from and where it goes.

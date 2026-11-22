@@ -241,3 +241,7 @@ calls:
       path: /v1/documents/{docId}:batchUpdate
     build: [google-docs/build-edit]
     answer: { select: [documentId, replies], errors: [error.message, error.status] }
+
+# The mint runs gws on this machine; GWS_BIN may name another copy.
+needs:
+  - { program: gws, env: GWS_BIN, install: [install-gws] }

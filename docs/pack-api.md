@@ -169,7 +169,7 @@ Not for a pack, whatever it happens to do today:
 | seam | | |
 |---|---|---|
 | every key of `pack.yaml` that the [table](packs.md#packyaml) lists, `api` among them, and what a pack is [refused for](packs.md#what-a-pack-is-refused-for) | stable | |
-| every key of a declaration that [`packs/template/acme.yaml`](../packs/template/acme.yaml) shows, and the keys under them that [integrations.md](integrations.md#a-declared-source) gives. A pack for a depot brings `name`, `about`, `base`, `bases`, `base_template`, `credential`, `check`, `idempotency`, `calls` and `notify`, and a pack of kind `source` also `hear`, `hook`, `thread`, `link`, `identity` and `events` | stable | `limits` is not one: a pack may not bring it. `git` is not one either: a pack of kind `source` may carry it (the github pack does), and this page does not promise it |
+| every key of a declaration that [`packs/template/acme.yaml`](../packs/template/acme.yaml) shows, and the keys under them that [integrations.md](integrations.md#a-declared-source) gives. A pack for a depot brings `name`, `about`, `base`, `bases`, `base_template`, `credential`, `check`, `idempotency`, `calls` and `notify`, and a pack of kind `source` also `hear`, `hook`, `thread`, `link`, `identity`, `events` and `needs` | stable | `limits` is not one: a pack may not bring it. `git` is not one either: a pack of kind `source` may carry it (the github pack does), and this page does not promise it |
 | the placeholders `{{operator}}` and `{{<crew member>}}` in a role or stage file | stable | any other `{{...}}` there is refused |
 | a role, script, stage file, setup file, frame or declaration is a path relative to the pack's directory, inside it, to a regular file. A command program is a file beside its declaration, inside the pack | stable | |
 | the frame (API 4): `frame: <file>` at the root of `pack.yaml`, one HTML file of at most 256 KiB with one `<title>` element in its head, one `<!--yardr:title-->` where the page's title block stands in its body and one `<!--yardr:content-->` where the page's content stands, each a comment of its own that a browser reads as a comment, and neither in the head, a `<script>`, a `<style>`, a `<template>`, a tag, nor where the title or the content could not stand | stable | what else is in the frame, its class names, its tokens and its script, is its author's: yardr holds the two markers and the `<title>`, nothing more. A pack of kind `source` carries no frame, and a frame's path is no other file's of the pack. The frame is copied as it stands, never filled in, and is no program |
@@ -227,6 +227,23 @@ pack. yardr runs one without a shell, for one job, and stops it after 30 s.
 | which directory it is | internal | |
 | a command's stderr | internal | the error of a command that fails ends with it |
 | a `thread.*` command that exits 3 | internal | it refuses for good what it was asked, so the yard does not try again: a stage map's move that gets it is skipped at once, as `failed`. After any other failure the move is tried again |
+
+A declaration's `needs` names the programs its commands need on the
+machine, each as `{program, env, install}`: the program, the variable
+that may name another path to it (checked first, as `GWS_BIN` names
+another gws), and the install that gets it, an argv run without a
+shell. A relative install program is a file beside the declaration,
+carried and hashed as every command file is; an absolute one is the
+operator's own and runs in a terminal alone. The yard installs
+nothing by itself: `yardr doctor` and a pack's setup card name what
+is missing with the command that installs it, and `yardr pack
+install <pack>` runs the installs, in a terminal directly or on a
+run card that shows each install file whole with its sha256 and runs
+exactly those bytes when the operator approves. An install runs with
+no credential, stdin closed and no pack directory as its working
+directory, for at most 15 minutes, and counts only where the program
+stands after; one file branches on `uname` itself, since `needs` has
+no per-platform keys.
 
 ## The commands a script runs
 

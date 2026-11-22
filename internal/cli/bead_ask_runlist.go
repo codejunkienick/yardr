@@ -107,6 +107,13 @@ const askRunList = `  peer add <name> <invite>
       checkout, any other flag and a plan that asks stay in a
       terminal; --setup installs a pack of kind source, embedded or
       applied from a directory in a terminal
+  pack install <pack>
+      the programs the pack's declarations name under needs that this
+      machine lacks, installed when approved: the card shows each
+      missing program, its pack, and its install file whole with its
+      sha256, and approving runs exactly those bytes (strong, code);
+      a program that is here stays silent, and an install that names
+      an absolute program stays in a terminal
   hook add <name> --source <declared source> [--unknown unknown|allow|ignore] [--as <crew member>] [--map <type>:<stage>=<state>]
       a new webhook endpoint POST /hooks/<name> for the declared
       source, or the hook that stands replaced whole, verified with

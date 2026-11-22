@@ -224,11 +224,8 @@ type runCommand struct {
 // runList are the commands a run ask may name: every operator-only,
 // file-free command that is one write of the store. Whether each is the
 // operator's, and whether a run ask may propose it, is the command's own
-// check (runCommand.check), which refuses with the same words and the
-// same mark the store function refuses with: the list never says whose
-// a command is twice. What is the operator's alone is refused past the
-// list (aloneList). A test holds each row to the command of internal/cli
-// it names.
+// check (runCommand.check): the list never says whose a command is twice.
+// What is the operator's alone is refused past the list (aloneList).
 var runList = []runCommand{{
 	words:       []string{"peer", "add"},
 	use:         "yardr peer add <name> <invite>",
@@ -767,10 +764,13 @@ func (s *Store) ApproveAsk(ctx context.Context, id string, ask uint64, actor str
 		defer s.askLocks.lock(hookLockKey(name))()
 		return s.approveHookRegister(ctx, id, ask, actor, weighed, values)
 	}
-	if s.sourceCheckTarget(id, ask) || s.sourceCallTarget(id, ask) {
+	if s.sourceCheckTarget(id, ask) || s.sourceCallTarget(id, ask) || s.packInstallTarget(id, ask) {
 		defer s.askLocks.lock(askLockKey(id, ask))()
 		if s.sourceCallTarget(id, ask) {
 			return s.approveSourceCall(ctx, id, ask, actor, weighed)
+		}
+		if s.packInstallTarget(id, ask) {
+			return s.approvePackInstall(ctx, id, ask, actor, weighed)
 		}
 		return s.approveSourceCheck(ctx, id, ask, actor, weighed)
 	}

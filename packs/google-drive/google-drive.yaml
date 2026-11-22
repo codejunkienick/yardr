@@ -161,3 +161,7 @@ calls:
       path: /drive/v3/files/{fileId}/comments/{commentId}/replies
       body: { content: "{content}", action: "{action}" }   # an action left out leaves the key, so the reply only answers
     answer: { select: [id, content, action] }   # the reply it made; action only when it resolved
+
+# The mint runs gws on this machine; GWS_BIN may name another copy.
+needs:
+  - { program: gws, env: GWS_BIN, install: [install-gws] }

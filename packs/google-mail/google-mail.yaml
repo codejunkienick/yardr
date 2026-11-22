@@ -150,3 +150,7 @@ calls:
       path: /gmail/v1/users/me/drafts/{id}
     build: [build-draft]
     answer: { select: [id, message] }
+
+# The mint runs gws on this machine; GWS_BIN may name another copy.
+needs:
+  - { program: gws, env: GWS_BIN, install: [install-gws] }
