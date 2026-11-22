@@ -133,13 +133,11 @@ func fence(line string) (in int, ch byte, n int, ok bool) {
 	return ansi.StringWidth(untab(line[:len(line)-len(t)])), ch, n, true
 }
 
-// closes reports whether line closes a block that n of ch opened.
 func closes(line string, ch byte, n int) bool {
 	t := strings.TrimSpace(line)
 	return len(t) >= n && count(t, ch) == len(t)
 }
 
-// count is how many of ch s begins with.
 func count(s string, ch byte) int {
 	n := 0
 	for n < len(s) && s[n] == ch {
@@ -341,7 +339,6 @@ func ends(rest string) bool {
 	return len(rest) == 1 || rest[1] < 0x80 && !isWord(rest[1])
 }
 
-// isWord reports whether c is a letter or a digit of ASCII.
 func isWord(c byte) bool {
 	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }

@@ -292,7 +292,6 @@ func (m *Model) give() tea.Cmd {
 	}
 }
 
-// without is text with every value of values taken out.
 func without(text string, values map[string]string) string {
 	for _, v := range values {
 		text = strings.ReplaceAll(text, v, hidden)

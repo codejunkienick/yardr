@@ -198,7 +198,6 @@ func inert(text string, n int) []string {
 	return out[max(len(out)-n, 0):]
 }
 
-// bodyWidth is the width the conversation has.
 func (m *Model) bodyWidth() int {
 	if m.narrow() {
 		return max(m.width, 10)
@@ -279,7 +278,6 @@ func (m *Model) lines(w int) []string {
 		if files := store.NoteFilesLine(m.opt.Home, l.Files); files != "" {
 			out = append(out, wrap(files, w, "  ", look.faint)...)
 		}
-		// The parties' reactions, one a line.
 		for _, r := range l.Reactions {
 			out = append(out, wrap(store.Letters(r.Emoji)+" "+store.Letters(r.From), w, "  ", look.faint)...)
 		}
@@ -355,7 +353,6 @@ func (m *Model) questions(w int) []string {
 	return out
 }
 
-// nextSent is the next mail after c[i] that the user sent.
 func (m *Model) nextSent(c []store.Letter, i int) *store.Letter {
 	for j := i + 1; j < len(c); j++ {
 		if c[j].From == m.opt.Me {
@@ -401,10 +398,8 @@ func cardWrap(text string, w int, lead string) []string {
 	return rows
 }
 
-// fit cuts s to w columns.
 func fit(s string, w int) string { return ansi.Truncate(s, max(w, 1), "…") }
 
-// pad fills s with spaces to w columns, cutting what is longer.
 func pad(s string, w int) string {
 	s = fit(s, w)
 	return s + strings.Repeat(" ", max(w-ansi.StringWidth(s), 0))
@@ -500,7 +495,6 @@ func (m *Model) folded(w int) string {
 	return fit(lead+line, w)
 }
 
-// rule is a line across w columns with text near its right end.
 func rule(w int, text string) string {
 	if text == "" || ansi.StringWidth(text)+6 > w {
 		return look.line.Render(strings.Repeat("─", w))

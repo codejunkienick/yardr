@@ -235,7 +235,6 @@ type waiting struct {
 	seen bool
 }
 
-// inputRows is the height of the line to type in.
 const inputRows = 3
 
 // Model is the view's state. It is a tea.Model.
@@ -357,7 +356,7 @@ func (m *Model) loadAsks() tea.Cmd {
 	}
 }
 
-// crew member is the crew member name, nil when the yard has none of it.
+// member is the crew member name, nil when the yard has none of it.
 func (m *Model) member(name string) *store.CrewMember {
 	for i := range m.crew {
 		if m.crew[i].Name == name {

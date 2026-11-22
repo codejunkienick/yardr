@@ -35,7 +35,6 @@ func (m *Model) watch() tea.Cmd {
 	return m.tail()
 }
 
-// tail reads the watched pane's last lines.
 func (m *Model) tail() tea.Cmd {
 	r := m.member(m.watched.name)
 	if r == nil || m.opt.Tail == nil {
@@ -50,7 +49,6 @@ func (m *Model) tail() tea.Cmd {
 	}
 }
 
-// event applies one event of the stream.
 func (m *Model) event(e store.Event) tea.Cmd {
 	if store.Notified(e, m.opt.Me) != "" {
 		// The event says that it became a notification for the user, and

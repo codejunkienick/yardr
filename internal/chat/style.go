@@ -47,10 +47,8 @@ type styles struct {
 	prompt, placeholder, cursor lipgloss.Style // the line to type in
 }
 
-// look is the view's styles.
 var look = themed(huh.ThemeCharm())
 
-// themed takes the view's styles from a theme of huh's.
 func themed(t *huh.Theme) styles {
 	// The colour alone: a style of the theme may carry text of its own
 	// (the error's " *", the selector's "> ") and margins.

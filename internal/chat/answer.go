@@ -55,7 +55,6 @@ type answerField struct {
 	in textinput.Model
 }
 
-// choose makes the ask i of among the one the field answers.
 func (f *answerField) choose(i int) { f.on = &f.among[i] }
 
 // approves says the ask answered is a run ask. Nothing is typed for it but
