@@ -180,14 +180,24 @@ func TestSnoozedSessionStillAges(t *testing.T) {
 
 // The count of snoozes in a row stands through idle passes and ends when
 // the agent is seen working: a harness at work redraws its screen, so its
-// pane changed, which is what breaks the run.
+// pane changed, which is what breaks the run. The snooze itself stands
+// until its time is up: seen idle again within it, the session counts no
+// idle spell and gets no nudge, and only once it ends does the idle count
+// start fresh.
 func TestSnoozeRunEndsWhenThePaneChanges(t *testing.T) {
 	t.Parallel()
-	s, r, d, b := harnessSetup(t, "muse", map[string]any{"idle": "1h", "stall": "off"})
+	s, r, d, b := harnessSetup(t, "muse", map[string]any{"idle": "1m", "stall": "off", "grace": "0"})
+	n := &tallyRunner{agentRunner: r}
+	d.Runners["fake"] = n
 	ctx := context.Background()
 	sess := liveSession(t, s, b.ID)
-	must(t, s.SetHandle(ctx, sess, map[string]any{"session": sess,
-		"snooze_until": time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339), "snooze_count": 3}))
+	now := time.Now()
+	dispatch.SetClock(d, func() time.Time { return now })
+	must(t, s.SetHandle(ctx, sess, map[string]any{"session": sess, "agent": "yard-x-new",
+		"snooze_until": now.Add(10 * time.Minute).UTC().Format(time.RFC3339), "snooze_count": 3}))
+	idles := func() int { t.Helper(); return len(eventKinds(t, s, b.ID, "session_idle")) }
+	nudges := func() int { t.Helper(); return len(eventKinds(t, s, b.ID, "session_idle_nudge")) }
+
 	r.show("idle", museGone)
 	must(t, d.Reconcile(ctx))
 	if c := snoozeCount(handleOfBead(t, s, b)); c != 3 {
@@ -195,8 +205,37 @@ func TestSnoozeRunEndsWhenThePaneChanges(t *testing.T) {
 	}
 	r.show("working", "◆ Working")
 	must(t, d.Reconcile(ctx))
-	if h := handleOfBead(t, s, b); h["snooze_until"] != nil || h["snooze_count"] != nil {
-		t.Fatalf("handle = %v after the agent worked, want the snooze and its count gone", h)
+	if h := handleOfBead(t, s, b); h["snooze_until"] == nil || h["snooze_count"] != nil {
+		t.Fatalf("handle = %v after the agent worked, want the snooze kept and its count gone", h)
+	}
+
+	// Idle again within the snooze: no idle spell and no nudge, however
+	// far past the idle limit the clock moves.
+	r.show("idle", museGone)
+	must(t, d.Reconcile(ctx))
+	now = now.Add(9 * time.Minute) // past the idle limit, inside the snooze
+	must(t, d.Reconcile(ctx))
+	if idles() != 0 || nudges() != 0 || len(n.told()) != 0 {
+		t.Fatalf("session_idle = %d, session_idle_nudge = %d, nudges typed = %d; want none while the snooze stands",
+			idles(), nudges(), len(n.told()))
+	}
+
+	// Once the snooze ends the idle count starts fresh from the next
+	// pass: the handover nudge goes there, and session_idle one limit
+	// after it.
+	now = now.Add(2 * time.Minute) // the snooze is over
+	must(t, d.Reconcile(ctx))
+	if h := handleOfBead(t, s, b); h["snooze_until"] != nil {
+		t.Fatalf("handle still carries snooze_until = %v after the snooze ended", h["snooze_until"])
+	}
+	must(t, d.Reconcile(ctx))
+	if got := n.told(); len(got) != 1 || !strings.Contains(got[0], "write your note and hand on") {
+		t.Fatalf("nudges = %q, want the handover nudge once the snooze is over", got)
+	}
+	now = now.Add(61 * time.Second)
+	must(t, d.Reconcile(ctx))
+	if idles() != 1 {
+		t.Fatalf("session_idle events = %d, want 1 one limit after the snooze ended", idles())
 	}
 }
 

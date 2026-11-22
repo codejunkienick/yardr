@@ -303,8 +303,9 @@ func (d *Dispatcher) limits(ctx context.Context, r Runner, s *store.Session, g s
 }
 
 // unsnooze ends the snooze of s, whose time is up: the key goes, and the
-// idle count starts fresh from the next pass. The count of consecutive
-// snoozes stays: only a pane that changed breaks the run (snoozeOver).
+// idle count starts fresh from the next pass. Only the clock ends a
+// snooze; the count of consecutive snoozes stays, and only a pane that
+// changed breaks the run (snoozeOver).
 func (d *Dispatcher) unsnooze(ctx context.Context, s *store.Session) {
 	h := maps.Clone(s.Handle)
 	if h == nil {
@@ -318,24 +319,24 @@ func (d *Dispatcher) unsnooze(ctx context.Context, s *store.Session) {
 	s.Handle = h
 }
 
-// snoozeOver ends the snooze of s, whose agent is working again: the wait
-// is over, and the count of consecutive snoozes starts again. A harness
-// at work redraws its screen, so a session seen working is one whose pane
-// changed, which is what breaks the run; a pane that stands while herdr
-// says working (stillIdle) keeps it, as do the statuses that say nothing
-// either way.
+// snoozeOver breaks the run of consecutive snoozes of s, whose agent is
+// working again, but the snooze itself stands until its time is up: while
+// snoozeUntil stands the session counts no idle spell, whatever herdr
+// says meanwhile. A harness at work redraws its screen, so a session seen
+// working is one whose pane changed, which is what breaks the run; a pane
+// that stands while herdr says working (stillIdle) keeps it, as do the
+// statuses that say nothing either way.
 func (d *Dispatcher) snoozeOver(ctx context.Context, s *store.Session) {
-	if s.Handle[snoozeUntil] == nil && s.Handle[snoozeCount] == nil {
+	if s.Handle[snoozeCount] == nil {
 		return
 	}
 	h := maps.Clone(s.Handle)
 	if h == nil {
 		h = map[string]any{}
 	}
-	delete(h, snoozeUntil)
 	delete(h, snoozeCount)
 	if err := d.Store.SetHandle(ctx, s.ID, h); err != nil {
-		d.Log.Warn("end a session's snooze", "session", s.ID, "err", err)
+		d.Log.Warn("break a session's run of snoozes", "session", s.ID, "err", err)
 		return
 	}
 	s.Handle = h
