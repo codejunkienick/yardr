@@ -87,9 +87,10 @@ func nextPush(t *testing.T, l *standin.EdgeLink) standin.EdgePush {
 // wait for an ack that the ask had already ended. nextPush's ten seconds
 // cover the first and not the second, and a wait that gives up while the
 // schedule still owes the frame fails a slow machine, not a lost retry.
-// The waits are consts a test cannot drive, so the fuse is built from both.
-// It reads the link's channel, as nextPush does, so the retry's frame is
-// taken and the next leg's nextPush does not find it.
+// The test drives the base to milliseconds, but the fuse is still built
+// from both, since the resend-after path owes its full wait. It reads the
+// link's channel, as nextPush does, so the retry's frame is taken and the
+// next leg's nextPush does not find it.
 func nextRetry(t *testing.T, l *standin.EdgeLink) standin.EdgePush {
 	t.Helper()
 	wait := store.FootRetryBase + store.FootResendAfter
@@ -254,6 +255,12 @@ func TestPushSenderKeepsIdsAcrossLinkDown(t *testing.T) {
 // The relay's answer ends the row: refused for good, it is dropped and
 // never sent again; asked for again, it is tried again with the same id.
 func TestPushSenderTakesTheRelaysAnswer(t *testing.T) {
+	// The retry's base wait, driven to milliseconds (TestFootSweepAndRetry
+	// pins the 5 s default); restored by Cleanup so pushYard's stopEdge
+	// stops the sender before the global is written back.
+	oldBase := store.FootRetryBase
+	store.FootRetryBase = 50 * time.Millisecond
+	t.Cleanup(func() { store.FootRetryBase = oldBase })
 	y := pushYard(t)
 	ctx := context.Background()
 	if _, err := y.st.AddUser(ctx, "hal", "jo"); err != nil {

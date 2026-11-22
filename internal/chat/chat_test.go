@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
@@ -28,6 +30,8 @@ type view struct {
 	last uint64 // the stream is handed on through this seq
 	// focused are the agents whose panes were asked to the front.
 	focused []string
+	// skippedCursor counts the cursor commands do did not run.
+	skippedCursor int
 }
 
 const me = "ada"
@@ -92,11 +96,30 @@ func (v *view) send(msg tea.Msg) {
 	v.do(cmd)
 }
 
+// cursorCmdPrefix is the runtime function-name prefix of the bubbles
+// input cursor's commands (cursor.(*Model).BlinkCmd): the cursor comes
+// from inside the input fields, and its commands arrive as its closures.
+const cursorCmdPrefix = "github.com/charmbracelet/bubbles/cursor."
+
+// isCursorCmd says whether cmd is the input cursor's, by its runtime
+// function name.
+func isCursorCmd(cmd tea.Cmd) bool {
+	fn := runtime.FuncForPC(reflect.ValueOf(cmd).Pointer())
+	return fn != nil && strings.HasPrefix(fn.Name(), cursorCmdPrefix)
+}
+
 // do runs a command of the model and gives it the answer. Only the
 // model's own messages come back in: the input's cursor blinks on a timer.
 func (v *view) do(cmd tea.Cmd) {
 	v.t.Helper()
 	if cmd == nil {
+		return
+	}
+	if isCursorCmd(cmd) {
+		// The blink blocks half a second on its timer for a message the
+		// switch below drops anyway, so it is not run. TestDoSkipsThe
+		// CursorBlink fails if bubbles renames the command.
+		v.skippedCursor++
 		return
 	}
 	switch msg := cmd().(type) {
@@ -196,6 +219,33 @@ func head(t *testing.T, st store.API) uint64 {
 	h, err := st.Head(context.Background())
 	must(t, err)
 	return h
+}
+
+// do does not run the input cursor's blink command: one typed key goes
+// through it skipping a cursor command instead of waiting out its timer.
+// The resolved name fails loud if bubbles renames the command, instead of
+// the suite silently waiting out its timer again.
+func TestDoSkipsTheCursorBlink(t *testing.T) {
+	t.Parallel()
+	m := cursor.New()
+	blink := m.BlinkCmd()
+	if blink == nil {
+		t.Fatal("the cursor's BlinkCmd is nil, want its blink command")
+	}
+	name := runtime.FuncForPC(reflect.ValueOf(blink).Pointer()).Name()
+	if !strings.HasPrefix(name, cursorCmdPrefix) {
+		t.Fatalf("the cursor's blink command is %s, want it under %s", name, cursorCmdPrefix)
+	}
+	if !isCursorCmd(blink) {
+		t.Fatalf("do does not recognize %s as the cursor's", name)
+	}
+
+	v := open(t, yard(t), "chief", 120, 24)
+	before := v.skippedCursor
+	v.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if v.skippedCursor == before {
+		t.Fatal("one typed key through do skipped no cursor command")
+	}
 }
 
 // The crew member named is selected, else the first; tab and shift+tab go

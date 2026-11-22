@@ -23,6 +23,7 @@ import (
 
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/peer"
+	"yardr.dev/yardr/internal/preview"
 	"yardr.dev/yardr/internal/previewtest"
 	"yardr.dev/yardr/internal/rpc"
 	"yardr.dev/yardr/internal/source"
@@ -693,6 +694,12 @@ func sendSlow(c *config.Config) {
 // A call still running when the shutdown grace runs out keeps the store until
 // it finishes (bounded by settle): the store is not closed under it.
 func TestStoreOutlivesCallsPastTheShutdownGrace(t *testing.T) {
+	// The stop's TERM grace, driven to milliseconds (TestTerminateGraceDefault
+	// pins the 2 s default); restored by Cleanup so every server started
+	// below stops before the global is written back.
+	oldGrace := preview.TerminateGrace
+	preview.TerminateGrace = 50 * time.Millisecond
+	t.Cleanup(func() { preview.TerminateGrace = oldGrace })
 	c := home(t)
 	started, release, answered := make(chan struct{}), make(chan struct{}), make(chan bool, 1)
 	done, stop := startStoppable(t, &runner{c: c, rev: "old", grace: 50 * time.Millisecond, settle: 5 * time.Second,
@@ -829,6 +836,12 @@ func TestClientOutwaitsTheDrain(t *testing.T) {
 // in flight past the shutdown grace) is answered by the new build, through
 // Connect, which waits for the live pid instead of starting a second server.
 func TestCallDuringReplaceLandsOnTheNewBuild(t *testing.T) {
+	// The stop's TERM grace, driven to milliseconds (TestTerminateGraceDefault
+	// pins the 2 s default); restored by Cleanup so every server started
+	// below stops before the global is written back.
+	oldGrace := preview.TerminateGrace
+	preview.TerminateGrace = 50 * time.Millisecond
+	t.Cleanup(func() { preview.TerminateGrace = oldGrace })
 	c := home(t)
 	ctx := context.Background()
 	st, err := store.Open(c.DBPath())

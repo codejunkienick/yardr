@@ -33,6 +33,14 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// The stop's TERM grace: a change fails here instead of silently slowing
+// the product or the server suite that drives it.
+func TestTerminateGraceDefault(t *testing.T) {
+	if TerminateGrace != 2*time.Second {
+		t.Fatalf("TerminateGrace = %v, want 2s", TerminateGrace)
+	}
+}
+
 // freePort picks a loopback port for a preview's app; previewtest.FreePort says
 // from where, and why.
 func freePort(t *testing.T) int {

@@ -119,8 +119,9 @@ func upgradeInstallTarget() (string, error) {
 // sees one complete new file and never a build still being linked. The temp is
 // removed on every path out: a failed build leaves target as it was and
 // nothing beside it. The build's output comes back for the failure to quote.
-// A build that is not newer than the running one is refused, so a downgrade
-// never lands untold; a told one installs by hand.
+// A build of the running revision is already current and succeeds without
+// replacing target; any other build that is not newer is refused, so a
+// downgrade never lands untold (a told one installs by hand).
 func upgradeInstall(ctx context.Context, dir, target string) (string, error) {
 	return upgradeInstallPinned(ctx, dir, target, "")
 }
@@ -177,9 +178,23 @@ func upgradeInstallPinned(ctx context.Context, dir, target, wantTip string) (str
 		}
 	}
 	if reason := version.Newer(running, built); reason != "" {
+		if sameBuildRevision(running.Revision, built.Revision) {
+			// The running build, built again: nothing to do, and the
+			// deferred remove takes the temp. Every other rejection
+			// stays an error.
+			return fmt.Sprintf("already current at %s", version.Show(built.Revision)), nil
+		}
 		return "", fmt.Errorf("the build of %s is not installed: %s; install it by hand if that is what you want", version.Show(built.Revision), reason)
 	}
 	return "", os.Rename(tmp.Name(), target)
+}
+
+// sameBuildRevision mirrors version.Newer's identity arm: a candidate of
+// the running build's own revision, dirty or not, is the running build,
+// not a newer one. Newer itself is shared and stays untouched.
+func sameBuildRevision(running, built string) bool {
+	base := func(rev string) string { return strings.TrimSuffix(rev, "-modified") }
+	return built != "" && base(built) == base(running)
 }
 
 // upgradePreflightDepot checks the depot's checkout stands where an install

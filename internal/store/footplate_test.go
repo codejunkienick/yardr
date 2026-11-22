@@ -520,6 +520,11 @@ func TestFootForeignQueue(t *testing.T) {
 func TestFootSweepAndRetry(t *testing.T) {
 	// Sequential: the package's fake clock.
 	pinClockFixed(t, footNow)
+	// The retry's base wait: a change fails here instead of silently
+	// slowing the product or the server suite that drives it.
+	if FootRetryBase != 5*time.Second {
+		t.Fatalf("FootRetryBase = %v, want 5s", FootRetryBase)
+	}
 	y := newFootYard(t)
 	pinClock(t, &y.now)
 	if err := y.Mail(y.ctx, "ada", "the tests are green", "yardmaster"); err != nil {

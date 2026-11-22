@@ -441,9 +441,11 @@ down the link and waits up to 2 seconds for the answer, which it passes back
 to the sender byte for byte. That keeps the yard's own answers working: a
 handshake answered from the verified body, a 401 for a bad signature, a 200
 for a dropped stranger. With the yard not connected, or no answer in time,
-the edge keeps the delivery and answers the sender `202` with the queued
-entry's id. GitHub does not redeliver on its own, so keeping it is the only
-way it is not lost. On reconnect the edge sends the queue oldest first; the
+the edge keeps the delivery and answers the sender `200` with the queued
+entry's id. The answer is `200` and not `202`: Linear takes nothing else
+as delivered, so the router keeps `200` for every kept delivery. GitHub
+does not redeliver on its own, so keeping it is the only way it is not
+lost. On reconnect the edge sends the queue oldest first; the
 yard serves each and sends `ack` once it is recorded or refused, and only
 then does the edge delete it. A live frame that ran out of time is the same
 queued entry: if the yard's answer arrives later, it counts as that entry's
@@ -451,11 +453,13 @@ ack. An answer that recorded nothing and may succeed when sent again — the
 yard's 5xx, from its store or a blocked secret file — is no ack on either
 path: for a queued entry the yard sends no ack, and for a live delivery it
 sends no answer at all, so the entry stays queued and is sent again on the
-next connect.
+next connect. From the edge's side the rule is the status: a late answer
+counts as the kept entry's ack only at 200-499, recorded or refused, and a
+5xx or missing status keeps the entry for the next connect.
 
 **What bounds the queue.** Anyone on the internet can post to a hook URL, and
 the edge cannot tell a real delivery from junk, since only the yard holds the
-secret. So every bound is checked before the `202`, and a request past one is
+secret. So every bound is checked before the `200`, and a request past one is
 refused, never kept:
 
 - **a body of at most 1 MiB**, the yard's own limit; a larger one is answered
@@ -504,7 +508,7 @@ with a fresh time.
 **Save a Slack URL with the yard connected.** Slack sends `url_verification`
 when the URL is saved in its app settings, and expects the challenge back in
 the answer. The edge never answers a handshake, since it cannot verify one,
-so one that arrives while the yard is away is queued and answered `202`, and
+so one that arrives while the yard is away is queued and answered `200`, and
 Slack shows the URL as not verified. Save the URL with the yard connected,
 which is when the hook is being set up anyway, and save it again if Slack
 refuses.

@@ -248,7 +248,8 @@ func (a *app) upgradeRun(w, warn io.Writer, ctx context.Context, cfg *config.Con
 		}
 		return upgradeInstallPinned(ctx, depot.Path, target, wantTip)
 	}
-	if out, err := install(); err != nil {
+	out, err := install()
+	if err != nil {
 		removeGates()
 		reason := err.Error()
 		if trimmed := strings.TrimSpace(out); trimmed != "" {
@@ -261,6 +262,15 @@ func (a *app) upgradeRun(w, warn io.Writer, ctx context.Context, cfg *config.Con
 			map[string]any{"revision": prevRev, "stage": "build", "reason": reason},
 			"yardr upgrade failed at build: "+reason)
 		return errors.New(reason)
+	}
+	if out != "" {
+		// The install had nothing to do (the running revision, built
+		// again): nothing was replaced, so take the gates down and
+		// return without signing, restarting views or waiting for a
+		// new pass from a daemon that was never replaced.
+		removeGates()
+		fmt.Fprintf(w, "%-9s  %s\n", "install", out)
+		return nil
 	}
 	// On darwin a yard that names a code-signing identity signs the
 	// installed binary with it, before anything starts or gates on the

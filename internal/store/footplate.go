@@ -37,11 +37,15 @@ const (
 	// this long is a lost frame or a dead link, and a retry keeps the
 	// same event id, which the relay deduplicates.
 	FootResendAfter = 30 * time.Second
-	// FootRetryBase and FootRetryMax bound the wait after a send the
-	// relay asks for again: doubling from the base to the max.
-	FootRetryBase = 5 * time.Second
-	FootRetryMax  = 5 * time.Minute
+	// FootRetryMax caps the wait after a send the relay asks for again:
+	// doubling from FootRetryBase to the max.
+	FootRetryMax = 5 * time.Minute
 )
+
+// FootRetryBase is the wait after a send the relay asks for again before
+// it is sent once more, doubling to FootRetryMax (a variable so a test
+// need not wait it out).
+var FootRetryBase = 5 * time.Second
 
 // FootItem is one intent or removal still to be reported to the relay over
 // the yard's link: for each paired device of the user the news is for. It

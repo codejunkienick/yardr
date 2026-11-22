@@ -64,6 +64,11 @@ const (
 	crashLimit  = 5
 )
 
+// TerminateGrace is how long a stop waits after TERM before KILL: kill's
+// fuse for the process's exit, and terminateGroup's waits after TERM and
+// after KILL (a variable so a test need not wait it out).
+var TerminateGrace = 2 * time.Second
+
 // Supervisor keeps a yard's approved previews running.
 type Supervisor struct {
 	Store Store
@@ -558,11 +563,11 @@ func terminateGroup(pgid int) {
 		return
 	}
 	_ = syscall.Kill(-pgid, syscall.SIGTERM)
-	if waitGroupGone(pgid, 2*time.Second) {
+	if waitGroupGone(pgid, TerminateGrace) {
 		return
 	}
 	_ = syscall.Kill(-pgid, syscall.SIGKILL)
-	waitGroupGone(pgid, 2*time.Second)
+	waitGroupGone(pgid, TerminateGrace)
 }
 
 func waitGroupGone(pgid int, wait time.Duration) bool {
@@ -845,7 +850,7 @@ func (s *Supervisor) kill(app string) {
 	}
 	select {
 	case <-pr.done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(TerminateGrace):
 		if pr.pgid > 0 {
 			_ = syscall.Kill(-pr.pgid, syscall.SIGKILL)
 		}

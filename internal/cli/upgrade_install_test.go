@@ -206,6 +206,66 @@ func TestUpgradeInstall(t *testing.T) {
 		}
 	})
 
+	// A build of the running revision, clean or dirty, is already
+	// current: success with nothing renamed and no temp left.
+	t.Run("a build of the running revision is already current", func(t *testing.T) {
+		for _, builtRev := range []string{"cccccccccccc", "cccccccccccc-modified"} {
+			dir := realTempDir(t)
+			target := binary(t, dir)
+			before := mustStat(t, target)
+			stub(t, &upgradeCurrentBuild, func() version.Build {
+				return version.Build{Revision: "cccccccccccc", Time: now}
+			})
+			stub(t, &upgradeReadBuild, func(string) (version.Build, error) {
+				return version.Build{Revision: builtRev, Time: now.Add(time.Hour)}, nil
+			})
+			stub(t, &upgradeGoBuild, builds)
+
+			out, err := upgradeInstall(ctx, "checkout", target)
+
+			if err != nil {
+				t.Fatalf("install of %s: %v", builtRev, err)
+			}
+			if want := "already current at " + builtRev; out != want {
+				t.Fatalf("output = %q, want %q", out, want)
+			}
+			if !os.SameFile(before, mustStat(t, target)) || read(t, target) != "old build" {
+				t.Fatalf("the old binary changed: %q", read(t, target))
+			}
+			if got := dirNames(dir); !slices.Equal(got, []string{"yardr"}) {
+				t.Fatalf("beside the binary: %v, want it alone", got)
+			}
+		}
+	})
+
+	// An older release version is still refused with the old binary whole
+	// and no temp left, even when its build time is later.
+	t.Run("an older version is refused", func(t *testing.T) {
+		dir := realTempDir(t)
+		target := binary(t, dir)
+		before := mustStat(t, target)
+		stub(t, &upgradeCurrentBuild, func() version.Build {
+			return version.Build{Revision: "v1.2.3", Time: now}
+		})
+		stub(t, &upgradeReadBuild, func(string) (version.Build, error) {
+			return version.Build{Revision: "v1.2.2", Time: now.Add(time.Hour)}, nil
+		})
+		stub(t, &upgradeGoBuild, builds)
+
+		_, err := upgradeInstall(ctx, "checkout", target)
+
+		if err == nil || !strings.Contains(err.Error(), "version v1.2.2 is not newer than the running v1.2.3") ||
+			!strings.Contains(err.Error(), "install it by hand") {
+			t.Fatalf("install = %v, want the older version refused with the hand install named", err)
+		}
+		if !os.SameFile(before, mustStat(t, target)) || read(t, target) != "old build" {
+			t.Fatalf("the old binary changed: %q", read(t, target))
+		}
+		if got := dirNames(dir); !slices.Equal(got, []string{"yardr"}) {
+			t.Fatalf("beside the binary: %v, want it alone", got)
+		}
+	})
+
 	// The real go, on a module of its own: a binary outside GOBIN and GOPATH
 	// is built over where it is, and neither is written to.
 	t.Run("go build over a binary outside GOBIN and GOPATH", func(t *testing.T) {
@@ -589,37 +649,73 @@ func TestUpgradeRunInstall(t *testing.T) {
 	})
 
 	// A build older than the running one is refused with the old binary
-	// whole, and so is a build of the running revision itself.
-	t.Run("a build no newer than the running one", func(t *testing.T) {
-		for _, name := range []string{"older", "same revision"} {
-			t.Run(name, func(t *testing.T) {
-				sc, _, tip := gitScene(t, map[string]string{"merge-local": scriptNew}, "main")
-				now := time.Now()
-				// The pin passes on the tip in both: the refusal is the
-				// guard's alone.
-				running := version.Build{Revision: "bbbbbbbbbbbb", Time: now}
-				built := version.Build{Revision: tip[:12], Time: now.Add(-time.Hour)}
-				want := "not after the running build's"
-				if name == "same revision" {
-					running.Revision = tip[:12]
-					built.Time = now.Add(time.Hour)
-					want = "same revision " + tip[:12] + " as the running build"
-				}
-				stub(t, &upgradeCurrentBuild, func() version.Build { return running })
-				stub(t, &upgradeReadBuild, func(string) (version.Build, error) { return built, nil })
-				before := mustStat(t, sc.target)
+	// whole.
+	t.Run("a build older than the running one", func(t *testing.T) {
+		sc, _, tip := gitScene(t, map[string]string{"merge-local": scriptNew}, "main")
+		now := time.Now()
+		// The pin passes on the tip: the refusal is the guard's alone.
+		running := version.Build{Revision: "bbbbbbbbbbbb", Time: now}
+		built := version.Build{Revision: tip[:12], Time: now.Add(-time.Hour)}
+		stub(t, &upgradeCurrentBuild, func() version.Build { return running })
+		stub(t, &upgradeReadBuild, func(string) (version.Build, error) { return built, nil })
+		before := mustStat(t, sc.target)
 
-				out, err := sc.upgrade(t)
+		out, err := sc.upgrade(t)
 
-				if err == nil || !strings.Contains(err.Error(), want) ||
-					!strings.Contains(err.Error(), "install it by hand") {
-					t.Fatalf("upgrade = %v, want %q and the hand install named\n%s", err, want, out)
-				}
-				if !os.SameFile(before, mustStat(t, sc.target)) {
-					t.Fatalf("the build no newer than the running one was installed")
-				}
-				noTemp(t, sc.target)
-			})
+		want := "not after the running build's"
+		if err == nil || !strings.Contains(err.Error(), want) ||
+			!strings.Contains(err.Error(), "install it by hand") {
+			t.Fatalf("upgrade = %v, want %q and the hand install named\n%s", err, want, out)
+		}
+		if !os.SameFile(before, mustStat(t, sc.target)) {
+			t.Fatalf("the build older than the running one was installed")
+		}
+		noTemp(t, sc.target)
+	})
+
+	// A build of the running revision itself succeeds with nothing to do:
+	// no rename, no temp or gate left, no signing, and no health poll
+	// waiting on a daemon that was never replaced.
+	t.Run("a build of the running revision is already current", func(t *testing.T) {
+		sc, _, tip := gitScene(t, map[string]string{"merge-local": scriptNew}, "main")
+		if err := sc.st.SetSetting(context.Background(), store.CodesignIdentitySetting, "Developer ID Application: Ada (TEAM000001)", "jo"); err != nil {
+			t.Fatal(err)
+		}
+		stub(t, &goos, "darwin")
+		stub(t, &upgradeCodesign, func(context.Context, string, string) (string, error) {
+			t.Error("upgradeCodesign called when the build was already current")
+			return "", nil
+		})
+		stub(t, &upgradeRunInstalled, func(_ context.Context, _, _ string, args ...string) (string, error) {
+			t.Errorf("upgradeRunInstalled called when the build was already current: %v", args)
+			return "", nil
+		})
+		now := time.Now()
+		// The pin passes on the tip, and the build is newer by time: the
+		// success is the identity's alone.
+		running := version.Build{Revision: tip[:12], Time: now}
+		built := version.Build{Revision: tip[:12], Time: now.Add(time.Hour)}
+		stub(t, &upgradeCurrentBuild, func() version.Build { return running })
+		stub(t, &upgradeReadBuild, func(string) (version.Build, error) { return built, nil })
+		before := mustStat(t, sc.target)
+
+		out, err := sc.upgrade(t)
+
+		if err != nil {
+			t.Fatalf("upgrade: %v\n%s", err, out)
+		}
+		if want := "already current at " + tip[:12]; !strings.Contains(out, want) {
+			t.Fatalf("the output lacks %q:\n%s", want, out)
+		}
+		if strings.Count(out, "\ninstall ") > 1 {
+			t.Fatalf("more than one install line in output:\n%s", out)
+		}
+		if !os.SameFile(before, mustStat(t, sc.target)) {
+			t.Fatalf("the running revision was installed over itself")
+		}
+		noTemp(t, sc.target)
+		if _, err := os.Stat(config.At(sc.home).UpgradeGate()); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("the gate file stands after an already-current run: %v", err)
 		}
 	})
 
