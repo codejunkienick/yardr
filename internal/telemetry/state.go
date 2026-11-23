@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -38,6 +39,15 @@ type State struct {
 	// LastAttemptDay.
 	LastAttemptDay string `json:"last_attempt_day,omitempty"`
 	LastDaySent    string `json:"last_day_sent,omitempty"`
+	// Commands counts runs of each command, by command name (the cobra
+	// command path without the leading "yardr "), since the last batch
+	// the project took. The CLI's pre-run counts every run it reaches,
+	// whether telemetry is on or off; the counts stay in this file until
+	// a batch carrying them is accepted (MarkSent drains what was sent),
+	// and On and Off both clear them, so activity from before consent,
+	// or from a period with the switch off, is never sent. Names only:
+	// nothing of a run's arguments is ever recorded here.
+	Commands map[string]int `json:"commands,omitempty"`
 }
 
 // LoadState reads the state file; a missing file is no state, not an
@@ -183,15 +193,73 @@ func MarkAttempt(path, id string, now time.Time) (bool, error) {
 	})
 }
 
-// MarkSent advances the source-day cursor through day, after a 2xx that
-// named nothing quota-limited. It never moves the cursor back.
-func MarkSent(path, id, through string) error {
+// MarkSent advances the source-day cursor through day and drains the
+// command counts the accepted batch carried, after a 2xx that named
+// nothing quota-limited. It never moves the cursor back. The drain
+// subtracts what was sent from the counts as they stand, so a run
+// counted while the request was out survives for the next batch; a
+// batch the project refused is never drained, and its counts go again
+// the next day.
+func MarkSent(path, id, through string, sent map[string]int) error {
 	_, err := update(path, id, func(s *State) bool {
-		if through <= s.LastDaySent {
-			return false
+		changed := false
+		if through > s.LastDaySent {
+			s.LastDaySent = through
+			changed = true
 		}
-		s.LastDaySent = through
-		return true
+		for name, n := range sent {
+			now, ok := s.Commands[name]
+			if !ok {
+				continue
+			}
+			if now <= n {
+				delete(s.Commands, name)
+			} else {
+				s.Commands[name] = now - n
+			}
+			changed = true
+		}
+		if len(s.Commands) == 0 {
+			s.Commands = nil
+		}
+		return changed
 	})
 	return err
+}
+
+// CommandName is the name a run of the command at commandPath (a cobra
+// CommandPath, "yardr bead advance") is counted under: the path without
+// its leading "yardr ", so a nested command keeps its whole remainder
+// and bare yardr counts as "yardr". It is the only derivation the
+// counting hook uses, and it reads nothing of the run but the path, so
+// no argument, flag value, id or path of the run can reach the counts.
+func CommandName(commandPath string) string {
+	return strings.TrimPrefix(commandPath, "yardr ")
+}
+
+// RecordCommand counts one run of the command at commandPath in the
+// state file at path, under the writers' lock, so concurrent yardr
+// processes each land their run. It records only when a state file
+// already stands: a yard that never turned telemetry on has none, and
+// counting must not make one (or its lock file) for it, any more than
+// an off before any on does. The caller treats every error as silent:
+// counting is best-effort and never fails the run it counts.
+func RecordCommand(path, commandPath string) error {
+	name := CommandName(commandPath)
+	if name == "" {
+		return nil
+	}
+	state, unlock, err := lockedState(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if state == nil {
+		return nil
+	}
+	if state.Commands == nil {
+		state.Commands = map[string]int{}
+	}
+	state.Commands[name]++
+	return state.Save(path)
 }

@@ -31,10 +31,10 @@ const IDSentence = "This id is pseudonymous, not anonymous: anyone you give it t
 // operator has the yard's data deleted.
 const DeletionSentence = "To have this yard's data deleted, send the project this install id."
 
-// Questions is the four questions the daily batch answers, with where it
+// Questions is the five questions the daily batch answers, with where it
 // goes, as the on and off help and the web control describe them: the
 // consent words every surface shares.
-const Questions = `When telemetry is on, the daemon sends one batch a day to ` + Endpoint + ` answering four questions: which yardr versions and OS are running; which harnesses and models do the work; where beads fail, as counts by kind; whether yards keep running after 1, 7 and 30 days.`
+const Questions = `When telemetry is on, the daemon sends one batch a day to ` + Endpoint + ` answering five questions: which yardr versions and OS are running; which harnesses and models do the work; where beads fail, as counts by kind; whether yards keep running after 1, 7 and 30 days; which commands are used, as counts by command name only.`
 
 // Profile is the id-only PostHog profile, as the on and off help and the
 // web control describe it.

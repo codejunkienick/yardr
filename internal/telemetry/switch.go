@@ -101,6 +101,9 @@ func On(ctx context.Context, st store.API, statePath, actor string, now time.Tim
 		state = &State{InstallID: id, Minted: dayOf(now)}
 	}
 	state.Grants = append(state.Grants, stampOf(now))
+	// Counts from before this consent are never sent, as no source day
+	// from before it is: consent starts the counts again too.
+	state.Commands = nil
 	if !was || state.EligibleFrom == "" {
 		state.EligibleFrom = nextDay(dayOf(now))
 	}
@@ -139,6 +142,9 @@ func Off(ctx context.Context, st store.API, statePath, actor string, now time.Ti
 	defer unlock()
 	if state != nil {
 		state.Withdrawals = append(state.Withdrawals, stampOf(now))
+		// Nothing counted is sent while off, and what accrued is not
+		// kept for a later on: turning off clears the counts unsent.
+		state.Commands = nil
 		if err := state.Save(statePath); err != nil {
 			return nil, err
 		}
@@ -249,6 +255,7 @@ func Prepare(ctx context.Context, st store.API, state *State, hosted bool, now t
 		Hosted:     hosted,
 		Tag:        version.Tag(),
 		GOOS:       runtime.GOOS,
+		Commands:   state.Commands,
 	}
 	if len(out.SourceDays) > 0 {
 		since, until := dayStart(out.SourceDays[0]), dayStart(in.SendingDay)

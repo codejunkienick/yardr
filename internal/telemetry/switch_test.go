@@ -85,12 +85,24 @@ func TestOffAndOnKeepsTheID(t *testing.T) {
 	if again.Changed || again.EligibleFrom != "2026-10-29" {
 		t.Fatalf("repeat on = %+v", again)
 	}
+	// Counts accrued by now are cleared by off, and any counted while
+	// off are cleared by the next on: before-consent activity, and
+	// activity from a period with the switch off, is never sent.
+	if err := RecordCommand(path, "yardr bead list"); err != nil {
+		t.Fatal(err)
+	}
 	off, err := Off(ctx, st, path, "me", time.Date(2026, 10, 30, 9, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !off.Changed || off.InstallID != first.InstallID {
 		t.Fatalf("off = %+v", off)
+	}
+	if state, err := LoadState(path); err != nil || state.Commands != nil {
+		t.Fatalf("off left commands %v, %v", state.Commands, err)
+	}
+	if err := RecordCommand(path, "yardr version"); err != nil {
+		t.Fatal(err)
 	}
 	preview, err := Show(ctx, st, path, time.Date(2026, 10, 30, 10, 0, 0, 0, time.UTC))
 	if err != nil {
@@ -112,6 +124,9 @@ func TestOffAndOnKeepsTheID(t *testing.T) {
 	}
 	if len(state.Grants) != 3 || len(state.Withdrawals) != 1 {
 		t.Errorf("grants = %v, withdrawals = %v", state.Grants, state.Withdrawals)
+	}
+	if state.Commands != nil {
+		t.Errorf("on left the counts counted while off: %v", state.Commands)
 	}
 }
 

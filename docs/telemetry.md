@@ -1,7 +1,7 @@
 # Telemetry
 
 yardr can send one daily batch of counts and fixed names to its PostHog
-project, answering the four questions below. It is off unless the
+project, answering the five questions below. It is off unless the
 operator turns it on, with one switch, and `yardr telemetry show` prints
 the exact next batch before anything is sent.
 
@@ -30,7 +30,7 @@ to No and writing the answer either way, so a completed onboarding never
 asks again. A non-interactive `yardr init --harness <kind>` never asks
 and leaves it off.
 
-## The four questions
+## The five questions
 
 Only what answers these is sent:
 
@@ -38,6 +38,8 @@ Only what answers these is sent:
 2. Which harnesses and models do the work.
 3. Where beads fail: `gave_up`, held, landing failures, as counts by kind.
 4. Do yards keep running: active after 1, 7 and 30 days.
+5. Which commands are used: runs of each command, as counts by command
+   name only.
 
 ## What each batch carries
 
@@ -108,10 +110,34 @@ stage names are checked, never sent. Not counted: a review's send-back,
 the quiet whole-suite run, a prompt that never arrived, and upgrade
 failures.
 
+`yardr_commands`, once per sending day, answers question 5:
+
+| property | value |
+|---|---|
+| `<command name>` | runs of that command since the last batch the project took |
+
+Each property is a command name — the command's path without the
+leading `yardr`, such as `bead advance` — and its value is how many
+times it ran. The counts are the state file's as the batch is built,
+timestamped at the sending snapshot, not by source day. Only command
+names are ever recorded: every run is counted under its command's name
+alone, and nothing of its arguments — no flag's value, bead id or
+path — is written down, so none of it can be sent.
+
+The counts accrue locally in `<home>/telemetry.json` as commands run,
+once a yard has such a file (turning telemetry on makes it): they
+accrue whether the switch is currently on or off, and nothing is sent
+while it is off. A yard that never turned telemetry on records none.
+An accepted batch drains the counts it carried; a batch the project
+refused keeps them for the next day. Turning telemetry on or off
+clears them, so runs from before consent, or from a period with the
+switch off, are never sent.
+
 Nothing else travels. No property ever carries a bead id or title, a
 depot, group, crew, user, peer or yard name, a stage or flow name, a
-path, a URL, a command, an error's words, a note's or prompt's text, an
-actor, a session id, the revision, or the yard's name.
+path, a URL, a command's arguments or flags' values, an error's words,
+a note's or prompt's text, an actor, a session id, the revision, or
+the yard's name.
 
 ## When a batch is sent
 

@@ -106,11 +106,17 @@ func (d *Dispatcher) telemetry(ctx context.Context) {
 		d.Log.Warn("telemetry: batch not accepted", "status", status, "class", class)
 		return
 	}
+	// The project took the batch: the cursor moves and the command
+	// counts it carried drain, even on a day with no source days (a
+	// same-day snapshot batch still carried them). A batch the project
+	// refused never reaches here, so its counts go again tomorrow.
+	through := state.LastDaySent
 	if n := len(next.SourceDays); n > 0 {
-		if err := telemetry.MarkSent(path, state.InstallID, next.SourceDays[n-1]); err != nil {
-			// The days go again tomorrow and deduplicate there.
-			fault("advancing the source-day cursor", err)
-		}
+		through = next.SourceDays[n-1]
+	}
+	if err := telemetry.MarkSent(path, state.InstallID, through, state.Commands); err != nil {
+		// The days and counts go again tomorrow and deduplicate there.
+		fault("recording the batch as sent", err)
 	}
 	d.Log.Info("telemetry: batch sent", "events", len(next.Request.Batch), "source_days", len(next.SourceDays))
 }

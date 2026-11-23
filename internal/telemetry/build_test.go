@@ -2,6 +2,8 @@ package telemetry
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -85,6 +87,7 @@ func fixtureInput() BuildInput {
 				"from": "approved", "to": "merged", "outcome": "done",
 			}, At: day(14)},
 		},
+		Commands: map[string]int{"bead advance": 2, "telemetry show": 1, "version": 3},
 		Crew: []store.CrewMember{
 			{Name: "yardmaster", Runner: "herdr", Kind: "claude", Model: "sonnet",
 				CrewSession: store.CrewSession{State: "running"},
@@ -128,14 +131,85 @@ func TestBuildHoldsTheNeverList(t *testing.T) {
 	}
 }
 
+// Nothing of a run but its command name is ever counted: command lines
+// carrying secrets, tokens, bead ids and absolute paths as arguments and
+// flag values go through the counting the hook does (the path alone is
+// handed over), and neither the state file nor the batch built from it
+// holds any of their words — only command-path keys and integer counts.
+func TestRecordedCommandsHoldNoRunArguments(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "telemetry.json")
+	state := &State{InstallID: "id", Minted: "2026-10-26", Grants: []string{"2026-10-26T09:30:00Z"}}
+	if err := state.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	nasty := []string{
+		"SENTINEL-secret-hunter2", "SENTINEL-token-ghp_example",
+		"SENTINEL-bead-id", "/srv/yard-secret/home",
+		"--password=SENTINEL-flag-value",
+	}
+	// These are the runs, as the hook sees them: CommandPath alone.
+	for _, pathOnly := range []string{"yardr bead advance", "yardr bead advance", "yardr bead show"} {
+		if err := RecordCommand(path, pathOnly); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range nasty {
+		if strings.Contains(string(raw), s) {
+			t.Errorf("the state file holds %q:\n%s", s, raw)
+		}
+	}
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := fixtureInput()
+	in.State, in.Commands = loaded, loaded.Commands
+	serial := batchJSON(t, Build(in))
+	for _, s := range nasty {
+		if strings.Contains(serial, s) {
+			t.Errorf("the batch holds %q:\n%s", s, serial)
+		}
+	}
+	for _, e := range Build(in) {
+		if e.Name != CommandsEvent {
+			continue
+		}
+		for key, value := range e.Properties {
+			if key == "$process_person_profile" || key == "$geoip_disable" {
+				continue
+			}
+			if key != "bead advance" && key != "bead show" {
+				t.Errorf("commands property %q is no command path", key)
+			}
+			if _, ok := value.(int); !ok {
+				t.Errorf("commands property %q = %v, not a count", key, value)
+			}
+		}
+	}
+	// Hosted yards carry the counts too: they are inside the yard.
+	in.Hosted = true
+	found := false
+	for _, e := range Build(in) {
+		found = found || e.Name == CommandsEvent
+	}
+	if !found {
+		t.Error("a hosted batch carries no commands event")
+	}
+}
+
 // The fixture builds the exact batch: one daily, the crew pairs, one
 // harness event per counted pair and one failure event per kind seen,
 // with the fixed dimensions the design names.
 func TestBuildFixtureBatch(t *testing.T) {
 	t.Parallel()
 	batch := Build(fixtureInput())
-	if len(batch) != 10 {
-		t.Fatalf("the batch holds %d events, want 10:\n%s", len(batch), batchJSON(t, batch))
+	if len(batch) != 11 {
+		t.Fatalf("the batch holds %d events, want 11:\n%s", len(batch), batchJSON(t, batch))
 	}
 	byName := map[string][]Event{}
 	for _, e := range batch {
@@ -165,6 +239,17 @@ func TestBuildFixtureBatch(t *testing.T) {
 	}
 	if daily[0].Timestamp != "2026-10-28T00:00:00Z" {
 		t.Errorf("daily timestamp = %s", daily[0].Timestamp)
+	}
+
+	commands := byName[CommandsEvent]
+	if len(commands) != 1 {
+		t.Fatalf("commands events = %d, want 1", len(commands))
+	}
+	if got := commands[0].Properties; got["bead advance"] != 2 || got["telemetry show"] != 1 || got["version"] != 3 || len(got) != 5 {
+		t.Errorf("commands properties = %v", got)
+	}
+	if commands[0].Timestamp != "2026-10-28T00:00:00Z" {
+		t.Errorf("commands timestamp = %s", commands[0].Timestamp)
 	}
 
 	crew := byName[CrewEvent]
@@ -247,7 +332,7 @@ func TestBuildIsStable(t *testing.T) {
 func TestBuildEmptyDays(t *testing.T) {
 	t.Parallel()
 	in := fixtureInput()
-	in.Claimed, in.Held, in.Advanced, in.GaveUp, in.Crew = nil, nil, nil, nil, nil
+	in.Claimed, in.Held, in.Advanced, in.GaveUp, in.Crew, in.Commands = nil, nil, nil, nil, nil, nil
 	in.SourceDays = []string{"2026-10-27"}
 	if batch := Build(in); len(batch) != 1 || batch[0].Name != DailyEvent {
 		t.Fatalf("self-run empty day = %v", batchJSON(t, batch))
@@ -320,7 +405,7 @@ func TestBuildSnapshotAtGrant(t *testing.T) {
 	in.State.Grants = []string{"2026-10-26T09:30:00Z", "2026-10-28T14:22:31Z"}
 	for _, e := range Build(in) {
 		switch e.Name {
-		case DailyEvent, CrewEvent:
+		case DailyEvent, CrewEvent, CommandsEvent:
 			if e.Timestamp != "2026-10-28T14:22:31Z" {
 				t.Errorf("%s timestamp = %s", e.Name, e.Timestamp)
 			}

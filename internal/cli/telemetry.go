@@ -187,7 +187,7 @@ func printInstallID(w io.Writer, id string) {
 // one the operator answered by hand. Non-interactive init never reaches
 // here, and leaves the switch off. An answer prints nothing, as the
 // form's other confirms do; the question carries what telemetry is, the
-// four questions, where batches go, the pseudonymous id and its id-only
+// five questions, where batches go, the pseudonymous id and its id-only
 // profile, that show previews the exact next batch, and that off prevents
 // new requests from starting. A form left with ctrl+c records nothing:
 // an aborted consent is not consent, and the onboarding goes on.

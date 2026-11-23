@@ -410,6 +410,57 @@ func TestTelemetryRefusedBatchWaitsForTomorrow(t *testing.T) {
 	}
 }
 
+// The batch carries the command counts accrued since the last accepted
+// batch and drains them: a refused batch keeps them for the next day,
+// and the day after an accepted one carries only what ran since.
+func TestTelemetrySendsAndDrainsCommandCounts(t *testing.T) {
+	t.Parallel()
+	y := newTelemetryYard(t)
+	day := time.Date(2026, 10, 28, 0, 0, 0, 0, time.UTC)
+	y.on(dayAt(day, 0, 10))
+	for _, p := range []string{"yardr bead list", "yardr bead list", "yardr version"} {
+		if err := telemetry.RecordCommand(y.state, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Refused: the counts stay for tomorrow.
+	y.posthog.answers(503, `{}`)
+	y.pass(dayAt(day, 0, 11))
+	if st := y.loadState(); len(st.Commands) != 2 {
+		t.Fatalf("a refused batch drained the counts: %v", st.Commands)
+	}
+
+	// Accepted the next day: the batch carries them, and they drain.
+	y.posthog.takes()
+	y.pass(dayAt(day, 1, 9))
+	batches := y.posthog.batches(t)
+	if len(batches) != 2 {
+		t.Fatalf("%d requests, want 2", len(batches))
+	}
+	sent := eventsNamed(batches[1], telemetry.CommandsEvent)
+	if len(sent) != 1 || sent[0].Properties["bead list"] != 2.0 || sent[0].Properties["version"] != 1.0 {
+		t.Fatalf("the accepted batch's commands = %+v", sent)
+	}
+	if st := y.loadState(); st.Commands != nil {
+		t.Fatalf("an accepted batch left the counts: %v", st.Commands)
+	}
+
+	// The day after carries only what ran since the accepted batch.
+	if err := telemetry.RecordCommand(y.state, "yardr version"); err != nil {
+		t.Fatal(err)
+	}
+	y.pass(dayAt(day, 2, 9))
+	batches = y.posthog.batches(t)
+	sent = eventsNamed(batches[2], telemetry.CommandsEvent)
+	if len(sent) != 1 || sent[0].Properties["version"] != 1.0 || len(sent[0].Properties) != 3 {
+		t.Fatalf("the next batch's commands = %+v", sent)
+	}
+	if st := y.loadState(); st.Commands != nil {
+		t.Fatalf("the next accepted batch left the counts: %v", st.Commands)
+	}
+}
+
 // A yard that was down, or whose batches were refused, catches up in one
 // batch: three eligible days are three source days, and ten are the
 // latest seven with the earlier range said once in the log.

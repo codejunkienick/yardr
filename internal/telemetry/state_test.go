@@ -134,7 +134,7 @@ func TestMarkAttemptAndMarkSent(t *testing.T) {
 	if err := fresh.Save(path); err != nil {
 		t.Fatal(err)
 	}
-	if err := MarkSent(path, "id", "2026-10-27"); err != nil {
+	if err := MarkSent(path, "id", "2026-10-27", nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := LoadState(path)
@@ -144,7 +144,7 @@ func TestMarkAttemptAndMarkSent(t *testing.T) {
 	if got.LastDaySent != "2026-10-27" || got.EligibleFrom != "2026-10-29" || len(got.Grants) != 2 || len(got.Withdrawals) != 1 || got.LastAttemptDay != "2026-10-28" {
 		t.Fatalf("after the cursor: %+v", got)
 	}
-	if err := MarkSent(path, "id", "2026-10-25"); err != nil {
+	if err := MarkSent(path, "id", "2026-10-25", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := LoadState(path); got.LastDaySent != "2026-10-27" {
@@ -163,11 +163,115 @@ func TestMarkLeavesNoStateWhereThereIsNone(t *testing.T) {
 	if ok, err := MarkAttempt(path, "id", now); ok || err != nil {
 		t.Fatalf("MarkAttempt without a file = %v, %v", ok, err)
 	}
-	if err := MarkSent(path, "id", "2026-10-27"); err != nil {
+	if err := MarkSent(path, "id", "2026-10-27", nil); err != nil {
 		t.Fatal(err)
 	}
 	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
 		t.Fatalf("the home holds %v, %v", entries, err)
+	}
+}
+
+// A command is counted under its path without the leading "yardr ":
+// nested commands keep their whole remainder, and bare yardr counts as
+// itself.
+func TestCommandName(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ path, want string }{
+		{"yardr", "yardr"},
+		{"yardr version", "version"},
+		{"yardr bead advance", "bead advance"},
+		{"yardr telemetry show", "telemetry show"},
+		{"yardr bead ask approve", "bead ask approve"},
+	} {
+		if got := CommandName(tc.path); got != tc.want {
+			t.Errorf("CommandName(%q) = %q, want %q", tc.path, got, tc.want)
+		}
+	}
+}
+
+// Runs recorded in the state file accumulate by name, under its lock, so
+// concurrent yardr processes each land theirs; a yard with no state file
+// gains neither a file nor a lock file from being counted.
+func TestRecordCommand(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "telemetry.json")
+	if err := RecordCommand(path, "yardr version"); err != nil {
+		t.Fatal(err)
+	}
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Fatalf("counting with no state file left %v, %v", entries, err)
+	}
+	if err := (&State{InstallID: "id"}).Save(path); err != nil {
+		t.Fatal(err)
+	}
+	const writers = 20
+	var wg sync.WaitGroup
+	for range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := RecordCommand(path, "yardr bead advance"); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if err := RecordCommand(path, "yardr bead advance"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordCommand(path, "yardr version"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Commands["bead advance"] != writers+1 || got.Commands["version"] != 1 || len(got.Commands) != 2 {
+		t.Fatalf("commands = %v", got.Commands)
+	}
+}
+
+// An accepted batch drains only what it carried: counts recorded while
+// its request was out survive for the next batch, and a batch that was
+// never accepted (no MarkSent) keeps its counts whole.
+func TestMarkSentDrainsWhatWasSent(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "telemetry.json")
+	state := &State{InstallID: "id", Commands: map[string]int{"bead list": 2, "version": 1}}
+	if err := state.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	// The request is out carrying bead list 2, version 1; meanwhile two
+	// more bead lists and a show are counted.
+	for _, p := range []string{"yardr bead list", "yardr bead list", "yardr telemetry show"} {
+		if err := RecordCommand(path, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := MarkSent(path, "id", "2026-10-27", map[string]int{"bead list": 2, "version": 1}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LastDaySent != "2026-10-27" {
+		t.Errorf("last_day_sent = %q", got.LastDaySent)
+	}
+	if len(got.Commands) != 2 || got.Commands["bead list"] != 2 || got.Commands["telemetry show"] != 1 {
+		t.Fatalf("commands after the drain = %v", got.Commands)
+	}
+	// A following batch drains the rest, with no source day of its own.
+	if err := MarkSent(path, "id", "", map[string]int{"bead list": 2, "telemetry show": 1}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Commands != nil || got.LastDaySent != "2026-10-27" {
+		t.Fatalf("after the second drain = %+v", got)
 	}
 }
 

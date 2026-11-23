@@ -11,10 +11,11 @@ import (
 
 // Event names in the batch.
 const (
-	DailyEvent   = "yardr_daily"
-	HarnessEvent = "yardr_harness_day"
-	CrewEvent    = "yardr_crew_day"
-	FailureEvent = "yardr_failure_day"
+	DailyEvent    = "yardr_daily"
+	HarnessEvent  = "yardr_harness_day"
+	CrewEvent     = "yardr_crew_day"
+	FailureEvent  = "yardr_failure_day"
+	CommandsEvent = "yardr_commands"
 )
 
 // Failure kinds of yardr_failure_day, in batch order: lenses, not a
@@ -58,6 +59,10 @@ type BuildInput struct {
 	Advanced   []store.Event
 	GaveUp     []store.Event
 	Crew       []store.CrewMember
+	// Commands is the state file's counts of command runs since the
+	// last accepted batch, by command name; the batch carries them as
+	// they stand when it is built.
+	Commands map[string]int
 }
 
 // Build makes the sending day's batch: the runtime snapshot for S and
@@ -79,6 +84,9 @@ func Build(in BuildInput) []Event {
 	var out []Event
 	if !in.Hosted {
 		out = append(out, b.daily())
+	}
+	if ev, ok := b.commands(); ok {
+		out = append(out, ev)
 	}
 	out = append(out, b.crew()...)
 	for _, day := range in.SourceDays {
@@ -145,6 +153,37 @@ func (b *builder) daily() Event {
 			"telemetry_age_days":      b.age(),
 		},
 	}
+}
+
+// commands is the yardr_commands snapshot: how many times each command
+// ran since the last batch the project took, each command name a
+// property and its count the value. Like the daily and crew snapshots
+// it is marked at the sending snapshot and is carried on hosted yards
+// too: which commands run is inside the yard, as the crew is. Counts
+// are since the last accepted batch, never per source day, and a name
+// with no runs in the period adds nothing. The names are the fixed
+// command paths the CLI counted; nothing of any run's arguments was
+// ever recorded, so nothing of them can be sent.
+func (b *builder) commands() (Event, bool) {
+	props := map[string]any{"$process_person_profile": true}
+	sent := false
+	for name, n := range b.in.Commands {
+		if n <= 0 {
+			continue
+		}
+		props[name] = n
+		sent = true
+	}
+	if !sent {
+		return Event{}, false
+	}
+	return Event{
+		Name:       CommandsEvent,
+		DistinctID: b.in.State.InstallID,
+		Timestamp:  b.snapshotAt(),
+		UUID:       DeriveUUID(b.in.State.InstallID, CommandsEvent, b.in.SendingDay),
+		Properties: props,
+	}, true
 }
 
 // versionTag is the closed shape a release tag is sent as: v<major>.

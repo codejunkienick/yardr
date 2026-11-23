@@ -2454,7 +2454,7 @@ head sequence is deliberately not among it.
 `/telemetry` is the yard's opt-in telemetry switch for a browser: off
 unless turned on, and turning on only on an explicit click. Every reader
 gets the consent words the switch is
-turned on under — the four questions the batch answers and where it
+turned on under — the five questions the batch answers and where it
 goes, the id-only profile, the pseudonymous sentence — while the
 switch itself, the install id and the next payload are the operator's
 alone: with the switch off the operator gets the words with the button
@@ -2475,7 +2475,7 @@ curl -s -H 'Accept: application/json' http://127.0.0.1:8791/telemetry
   "as": "jo",
   "operator": true,
   "telemetry": "on",
-  "questions": "When on, the daemon sends one batch a day to eu.i.posthog.com/batch/ answering four questions: …",
+  "questions": "When on, the daemon sends one batch a day to eu.i.posthog.com/batch/ answering five questions: …",
   "profile": "The batch carries the yard's random install id as PostHog's distinct_id, and …",
   "id_sentence": "This id is pseudonymous, not anonymous: …",
   "install_id": "3f6d1c2e-9a4b-4e7a-b5c1-2d8f0a6e4b90",

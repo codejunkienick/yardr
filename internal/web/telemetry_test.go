@@ -80,7 +80,7 @@ func TestTelemetryPage(t *testing.T) {
 		t.Fatalf("GET /telemetry: status %d", off.status)
 	}
 	for _, want := range []string{
-		"four questions",
+		"five questions",
 		"eu.i.posthog.com/batch/",
 		"id-only person profile",
 		"pseudonymous, not anonymous",
@@ -140,7 +140,7 @@ func TestTelemetryPage(t *testing.T) {
 	if got["profile"] != telemetry.Profile || got["id_sentence"] != telemetry.IDSentence || got["deletion"] != telemetry.DeletionSentence {
 		t.Errorf("the JSON consent words = %v, want the shared sentences", got)
 	}
-	if questions, _ := got["questions"].(string); !strings.Contains(questions, "four questions") || strings.Contains(questions, "https://") {
+	if questions, _ := got["questions"].(string); !strings.Contains(questions, "five questions") || strings.Contains(questions, "https://") {
 		t.Errorf("the JSON questions = %q, want the consent words with the endpoint's scheme off", questions)
 	}
 	id, _ := got["install_id"].(string)
@@ -176,7 +176,7 @@ func TestTelemetryPage(t *testing.T) {
 		if page.status != http.StatusOK {
 			t.Fatalf("GET /telemetry as %q: status %d", as, page.status)
 		}
-		for _, want := range []string{"four questions", "pseudonymous, not anonymous", "to see and set"} {
+		for _, want := range []string{"five questions", "pseudonymous, not anonymous", "to see and set"} {
 			if !strings.Contains(page.body, want) {
 				t.Errorf("the page as %q lacks %q:\n%s", as, want, page.body)
 			}

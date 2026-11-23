@@ -2,9 +2,11 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
+	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
 	"yardr.dev/yardr/internal/telemetry"
 )
@@ -90,6 +92,55 @@ func TestTelemetryOnOffShow(t *testing.T) {
 	}
 }
 
+// Every run that reaches the root's pre-run is counted under its
+// command name alone, even a run that then fails for want of a yard;
+// help and refused commands never reach it and are not counted, and no
+// argument of a counted run is recorded.
+func TestRunsAreCountedByCommandName(t *testing.T) {
+	t.Parallel()
+	home := newHomeDir(t)
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := store.TelemetryState(home)
+	if err := (&telemetry.State{InstallID: "id"}).Save(path); err != nil {
+		t.Fatal(err)
+	}
+	st := storetest.New(t)
+	a := testApp(t, st, home)
+	a.actor = "me"
+
+	executeOut(a, "version")
+	executeOut(appOn(st), "--version")
+	executeOut(appOn(st), "--help")
+	executeOut(appOn(st), "help", "version")
+	executeOut(appOn(st), "bead", "nots")
+	if _, code := executeOut(appOn(st), "bead", "advance", "SENTINEL-bead-id"); code == 0 {
+		t.Fatal("bead advance on a home with no yard succeeded")
+	}
+
+	state, err := telemetry.LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{"version": 1, "yardr": 1, "help": 1, "bead advance": 1}
+	if len(state.Commands) != len(want) {
+		t.Fatalf("commands = %v, want %v", state.Commands, want)
+	}
+	for name, n := range want {
+		if state.Commands[name] != n {
+			t.Errorf("commands[%q] = %d, want %d (all: %v)", name, state.Commands[name], n, state.Commands)
+		}
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "SENTINEL") {
+		t.Errorf("the state file holds a run's argument:\n%s", raw)
+	}
+}
+
 // --json prints the same change and preview the text renders.
 func TestTelemetryJSON(t *testing.T) {
 	t.Parallel()
@@ -139,7 +190,7 @@ func TestSettingsSetTelemetryRefused(t *testing.T) {
 	}
 }
 
-// The on and off help describe the four questions and the id-only
+// The on and off help describe the five questions and the id-only
 // PostHog profile used for deletion.
 func TestTelemetryHelpStatesTheQuestions(t *testing.T) {
 	t.Parallel()
@@ -148,8 +199,11 @@ func TestTelemetryHelpStatesTheQuestions(t *testing.T) {
 		if sub.Name() != "on" && sub.Name() != "off" {
 			continue
 		}
-		if !strings.Contains(sub.Long, "four questions") {
-			t.Errorf("%s help names no four questions", sub.Name())
+		if !strings.Contains(sub.Long, "five questions") {
+			t.Errorf("%s help names no five questions", sub.Name())
+		}
+		if !strings.Contains(sub.Long, "which commands are used") {
+			t.Errorf("%s help names no command counts", sub.Name())
 		}
 		if !strings.Contains(sub.Long, "id-only person profile") {
 			t.Errorf("%s help names no id-only profile", sub.Name())

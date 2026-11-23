@@ -24,7 +24,7 @@ type Telemetry struct {
 	Operator bool `json:"operator"`
 	// Switch is the switch as it stands, "on" or "off"; operators only.
 	Switch string `json:"telemetry,omitempty"`
-	// Questions, Profile and IDSentence are the consent words: the four
+	// Questions, Profile and IDSentence are the consent words: the five
 	// questions the batch answers and where it goes, the id-only
 	// profile, and the pseudonymous sentence.
 	Questions  string `json:"questions"`

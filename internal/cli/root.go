@@ -22,6 +22,7 @@ import (
 	"yardr.dev/yardr/internal/runner"
 	"yardr.dev/yardr/internal/server"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/telemetry"
 	"yardr.dev/yardr/internal/version"
 )
 
@@ -161,6 +162,11 @@ func (a *app) rootCmd() *cobra.Command {
 					return err
 				}
 			}
+			// Count this run for telemetry, before anything can fail
+			// it: every run that reaches here counts, on or offline,
+			// whether the switch is on or off (the counts stay local
+			// while off). Best-effort and silent by design.
+			a.recordCommand(c)
 			// Who acts, before anything hangs asking: with no actor
 			// named the OS is asked, and under Codex's sandbox that
 			// lookup hangs past signals, so the command fails here, with
@@ -237,6 +243,26 @@ func groupArgs(c *cobra.Command, args []string) error {
 		return pflag.ErrHelp
 	}
 	return cobra.NoArgs(c, args)
+}
+
+// recordCommand counts this run under its command name for the daily
+// telemetry batch (telemetry.RecordCommand): the command's path alone,
+// never its arguments, so nothing a run was given can be recorded. It
+// reads no store and starts nothing — the home is resolved read-only,
+// creating nothing, so a run on a home with no yard (version, help)
+// costs no dial and leaves nothing behind — and every failure is
+// silent: counting never fails or stains the run it counts. Cobra's
+// hidden completion-request commands are not counted: a shell asks for
+// them on keystrokes, not on command runs.
+func (a *app) recordCommand(c *cobra.Command) {
+	if c.Name() == cobra.ShellCompRequestCmd || c.Name() == cobra.ShellCompNoDescRequestCmd {
+		return
+	}
+	cfg, err := a.configReadOnly()
+	if err != nil {
+		return
+	}
+	_ = telemetry.RecordCommand(store.TelemetryState(cfg.Home), c.CommandPath())
 }
 
 // versionCmd prints which build this is. It touches neither the store nor

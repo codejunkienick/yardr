@@ -23,6 +23,10 @@ func TestDocMatchesTheBuilder(t *testing.T) {
 		HarnessEvent: {"hosted", "kind", "model", "sessions_claimed"},
 		CrewEvent:    {"hosted", "kind", "model", "running_crew_sessions"},
 		FailureEvent: {"count", "hosted", "kind"},
+		// The commands event's properties are the fixture's command
+		// names themselves; the doc names them by their one placeholder
+		// row instead (checked below).
+		CommandsEvent: {"bead advance", "telemetry show", "version"},
 	}
 	seen := map[string]map[string]bool{}
 	for _, e := range Build(fixtureInput()) {
@@ -65,6 +69,14 @@ func TestDocMatchesTheBuilder(t *testing.T) {
 			continue
 		}
 		slices.Sort(got)
+		if name == CommandsEvent {
+			// The names are open-ended: the doc's one row stands for
+			// every command name.
+			if !slices.Equal(got, []string{"<command name>"}) {
+				t.Errorf("the doc gives `%s` properties %q, want the command-name row", name, got)
+			}
+			continue
+		}
 		if !slices.Equal(got, props) {
 			t.Errorf("the doc gives `%s` properties %q, builder carries %q", name, got, props)
 		}
