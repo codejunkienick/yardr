@@ -31,9 +31,13 @@ func (d *Declaration) ReadCredential(ctx context.Context, envFile string, mint [
 // Holder is a party that holds a bound mint input's value: the yard
 // (Yard true) or a user (User non-empty). Keeping them as separate
 // fields ensures a user named "yard" never collides with the yard.
+// Source is the source whose yard file holds the value, set on a yard
+// hit alone: a user hit comes from the user's one file across sources,
+// so it names no source.
 type Holder struct {
-	Yard bool
-	User string
+	Yard   bool
+	User   string
+	Source string
 }
 
 // IsZero reports whether h names no holder.
@@ -106,6 +110,9 @@ func (d *Declaration) CheckBound(user string, sel *Selected, holder BoundHolder)
 		whose := held.User + "'s"
 		if held.Yard {
 			whose = "the yard's"
+			if held.Source != "" && held.Source != d.Name {
+				whose = "the yard's (on source " + held.Source + ")"
+			}
 		}
 		return fmt.Errorf("%s in %s names %s account, not %s's: a bound input belongs to one holder; %s gives a different %s with yardr source key %s --as %s", name, sel.File, whose, user, user, name, d.Name, user)
 	}

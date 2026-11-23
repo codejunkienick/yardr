@@ -58,7 +58,7 @@ func TestBoundGiveHoldsOneHolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	for value, want := range map[string]source.Holder{
-		yardAddr:             {Yard: true},
+		yardAddr:             {Yard: true, Source: "gog"},
 		adaAddr:              {},
 		"nobody@example.com": {},
 	} {
@@ -71,8 +71,71 @@ func TestBoundGiveHoldsOneHolder(t *testing.T) {
 	if held, err := y.BoundHolder(y.ctx, "gog", "GOG_ACCOUNT", yardAddr, source.Holder{Yard: true}); err != nil || !held.IsZero() {
 		t.Fatalf("BoundHolder(yard's, except yard) = %+v, %v", held, err)
 	}
+	// Cross-source: a second bound source sharing the input name. The
+	// yard holds yardAddr on gog alone, yet asking for gog2 reports the
+	// yard on gog, and giving it for gog2 refuses naming gog and pointing
+	// the freeing giving at gog.
+	gog2File := strings.Replace(boundFile, "name: gog", "name: gog2", 1)
+	if _, err := y.PutSource(y.ctx, "gog2.yaml", gog2File, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if held, err := y.BoundHolder(y.ctx, "gog2", "GOG_ACCOUNT", yardAddr, source.Holder{}); err != nil || held != (source.Holder{Yard: true, Source: "gog"}) {
+		t.Fatalf("BoundHolder(gog2, yard's on gog) = %+v, %v", held, err)
+	}
+	if _, err := y.KeyUserCredential(y.ctx, "ada", "gog2", map[string]string{"GOG_ACCOUNT": yardAddr}, "ada"); err == nil ||
+		!strings.Contains(err.Error(), "source gog2: GOG_ACCOUNT is held by the yard already (on source gog)") ||
+		!strings.Contains(err.Error(), "give a different GOG_ACCOUNT with yardr source key gog2 --as ada") ||
+		!strings.Contains(err.Error(), "or have the yard give a different GOG_ACCOUNT with yardr source key gog and give this again") ||
+		strings.Contains(err.Error(), yardAddr) {
+		t.Fatalf("the yard's address on gog given to ada for gog2 = %v", err)
+	}
+	if u, err := y.GetUser(y.ctx, "ada"); err != nil || u.EnvFile != "" {
+		t.Fatalf("a refused cross-source giving set ada's file: %+v, %v", u, err)
+	}
+	// On a card for the second source, as typed: the yard's address for bia.
+	crossAsk := userSecretAsk("bia", "bia")
+	crossAsk.Secret.Source = "gog2"
+	seq := y.ask(t, crossAsk, "yardmaster")
+	if _, err := y.GiveSecret(y.ctx, y.bead, seq, map[string]string{"GOG_ACCOUNT": yardAddr}, "bia", true); err == nil ||
+		!strings.Contains(err.Error(), "GOG_ACCOUNT is held by the yard already (on source gog)") ||
+		!strings.Contains(err.Error(), "yardr source key gog and give this again") {
+		t.Fatalf("the yard's address given to bia on a card for gog2 = %v", err)
+	}
+	// The yard re-giving its own value on the second source stands
+	// (except-self), leaving the value held on both sources; a lookup
+	// then reports the target source first.
+	gog2Keyed, err := y.KeySource(y.ctx, "gog2", map[string]string{"GOG_ACCOUNT": yardAddr}, "mckean")
+	if err != nil {
+		t.Fatalf("the yard's own again on gog2: %v", err)
+	}
+	if held, err := y.BoundHolder(y.ctx, "gog2", "GOG_ACCOUNT", yardAddr, source.Holder{}); err != nil || held != (source.Holder{Yard: true, Source: "gog2"}) {
+		t.Fatalf("BoundHolder(double-held, target gog2) = %+v, %v", held, err)
+	}
+	if held, err := y.BoundHolder(y.ctx, "gog", "GOG_ACCOUNT", yardAddr, source.Holder{}); err != nil || held != (source.Holder{Yard: true, Source: "gog"}) {
+		t.Fatalf("BoundHolder(double-held, target gog) = %+v, %v", held, err)
+	}
+	if held, err := y.BoundHolder(y.ctx, "gog2", "GOG_ACCOUNT", yardAddr, source.Holder{Yard: true}); err != nil || !held.IsZero() {
+		t.Fatalf("BoundHolder(double-held, except yard) = %+v, %v", held, err)
+	}
+	// An unreadable second yard file fails closed, even for a value
+	// nobody holds: it may hold the value unseen.
+	if err := os.Remove(gog2Keyed.File); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(gog2Keyed.File, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.BoundHolder(y.ctx, "gog", "GOG_ACCOUNT", "nobody@example.com", source.Holder{}); err == nil {
+		t.Fatalf("BoundHolder with an unreadable gog2 file = no error")
+	}
+	if err := os.Remove(gog2Keyed.File); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gog2Keyed.File, []byte("GOG_ACCOUNT="+yardAddr+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	// On a card, as typed: the yard's address for ada.
-	seq := y.ask(t, userSecretAsk("bia", "bia"), "yardmaster")
+	seq = y.ask(t, userSecretAsk("bia", "bia"), "yardmaster")
 	if _, err := y.GiveSecret(y.ctx, y.bead, seq, map[string]string{"GOG_ACCOUNT": yardAddr}, "bia", true); err == nil ||
 		!strings.Contains(err.Error(), "GOG_ACCOUNT is held by the yard already") ||
 		!strings.Contains(err.Error(), "a bound input belongs to one holder") ||
@@ -107,6 +170,20 @@ func TestBoundGiveHoldsOneHolder(t *testing.T) {
 		!strings.Contains(err.Error(), "GOG_ACCOUNT is held by ada already") ||
 		!strings.Contains(err.Error(), "give a different GOG_ACCOUNT with yardr source key gog,") {
 		t.Fatalf("ada's address given to the yard = %v", err)
+	}
+	// Cross-source, user-held: giving ada's address for gog2, to another
+	// user and to the yard alike, is refused as for gog (a user's file is
+	// already global, so its holding names no source).
+	if held, err := y.BoundHolder(y.ctx, "gog2", "GOG_ACCOUNT", adaAddr, source.Holder{}); err != nil || held != (source.Holder{User: "ada"}) {
+		t.Fatalf("BoundHolder(gog2, ada's) = %+v, %v", held, err)
+	}
+	if _, err := y.KeyUserCredential(y.ctx, "bia", "gog2", map[string]string{"GOG_ACCOUNT": adaAddr}, "bia"); err == nil ||
+		!strings.Contains(err.Error(), "source gog2: GOG_ACCOUNT is held by ada already") || strings.Contains(err.Error(), adaAddr) {
+		t.Fatalf("ada's address given to bia for gog2 = %v", err)
+	}
+	if _, err := y.KeySource(y.ctx, "gog2", map[string]string{"GOG_ACCOUNT": adaAddr}, "mckean"); err == nil ||
+		!strings.Contains(err.Error(), "GOG_ACCOUNT is held by ada already") {
+		t.Fatalf("ada's address given to the yard for gog2 = %v", err)
 	}
 	// Each holder gives its own again.
 	if _, err := y.KeyUserCredential(y.ctx, "ada", "gog", map[string]string{"GOG_ACCOUNT": adaAddr}, "ada"); err != nil {
@@ -248,6 +325,21 @@ func TestBoundCallHoldsOneHolder(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "names the yard's account, not ada's") || hits.Load() != 2 {
 		t.Fatalf("a call as ada on the yard's account = %v, after %d hits", err, hits.Load())
 	}
+	// Cross-source, the same hole on a second bound source: ada's file
+	// names the yard's account, which the yard holds on gog alone, and a
+	// call on gog2 refuses naming gog as the holding source.
+	gog2Bound := strings.Replace(boundGog(srv.URL), "name: gog", "name: gog2", 1)
+	if _, err := y.PutSource(y.ctx, "gog2.yaml", gog2Bound, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.SetSource(y.ctx, "gog2", SourceMintCommand, script, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = y.CallSource(y.ctx, SourceCall{Source: "gog2", Call: "ping", As: "ada", Actor: "mckean"})
+	if err == nil || !strings.Contains(err.Error(), "GOG_ACCOUNT in "+adaKeyed.File+" names the yard's (on source gog) account, not ada's") ||
+		!strings.Contains(err.Error(), "a bound input belongs to one holder") || strings.Contains(err.Error(), yardAddr) || hits.Load() != 2 {
+		t.Fatalf("a call as ada on gog2 on the yard's account on gog = %v, after %d hits", err, hits.Load())
+	}
 	// Alphabetically earlier user (ada) hand-edited to a later user's (bia's)
 	// account must still be refused: lookup skips self so it sees bia.
 	if _, _, err := WriteEnvFile(adaKeyed.File, map[string]string{"GOG_ACCOUNT": biaAddr}); err != nil {
@@ -279,5 +371,12 @@ func TestBoundCallHoldsOneHolder(t *testing.T) {
 	_, err = y.CallSource(y.ctx, SourceCall{Source: "gog", Call: "ping", As: "ada", Actor: "mckean"})
 	if err == nil || !strings.Contains(err.Error(), "names the yard's account, not ada's") || hostedCalls.Load() != 0 {
 		t.Fatalf("a hosted call as ada on the yard's account = %v, hostedCalls=%d", err, hostedCalls.Load())
+	}
+	if _, err := y.SetSource(y.ctx, "gog2", SourceMintCommand, "yardr edge mint-google https://edge.example.com gog2", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = y.CallSource(y.ctx, SourceCall{Source: "gog2", Call: "ping", As: "ada", Actor: "mckean"})
+	if err == nil || !strings.Contains(err.Error(), "names the yard's (on source gog) account, not ada's") || hostedCalls.Load() != 0 {
+		t.Fatalf("a hosted call as ada on gog2 on the yard's account on gog = %v, hostedCalls=%d", err, hostedCalls.Load())
 	}
 }

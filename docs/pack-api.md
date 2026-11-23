@@ -383,10 +383,10 @@ presets. Nothing is granted until the operator grants it, at an ask or with
 A mint input written as a mapping (`- name: <variable>`) takes `secret`
 and `bound` beside the name. `secret: false` marks a value that is no
 secret, such as an account address, and is drawn in the clear.
-`bound: true` binds the value to one holder — the yard in the source's
-own file, or one user in theirs — and the yard refuses that value for
-any other holder, when it is given and when a call made as a user reads
-it. Both are read for every pack, as every key of a declaration is
+`bound: true` binds the value to one holder across the whole yard —
+the yard in any source's own file, or one user in theirs — and the yard
+refuses that value for any other holder, when it is given and when a
+call made as a user reads it. Both are read for every pack, as every key of a declaration is
 ([A declaration added by hand](#a-declaration-added-by-hand)): a
 declaration carries no API number of its own.
 

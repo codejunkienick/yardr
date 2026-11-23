@@ -205,6 +205,18 @@ func TestReadUserCredential(t *testing.T) {
 		!strings.Contains(err.Error(), "names bia's account, not ada's") || strings.Contains(err.Error(), "keys/app.pem") {
 		t.Fatalf("bia's value as ada = %v", err)
 	}
+	// A yard holding on another source is named in the whose-clause, with
+	// no freeing giving pointed at that source; a holding on this source
+	// reads as it always has.
+	if _, _, err := bd.ReadUserCredentialBound(ctx, "ada", bfile, []string{bscript}, Read, testReadEnv, holder(Holder{Yard: true, Source: "gog"})); err == nil ||
+		!strings.Contains(err.Error(), "CRM_APP_KEY in "+bfile+" names the yard's (on source gog) account, not ada's") ||
+		strings.Contains(err.Error(), "yardr source key gog") || strings.Contains(err.Error(), "keys/app.pem") {
+		t.Fatalf("the yard's value on gog as ada = %v", err)
+	}
+	if _, _, err := bd.ReadUserCredentialBound(ctx, "ada", bfile, []string{bscript}, Read, testReadEnv, holder(Holder{Yard: true, Source: "crm"})); err == nil ||
+		!strings.Contains(err.Error(), "CRM_APP_KEY in "+bfile+" names the yard's account, not ada's") {
+		t.Fatalf("the yard's value on crm as ada = %v", err)
+	}
 	if n := mintRuns(t, bdir); n != 0 {
 		t.Fatalf("a refused bound value minted %d times", n)
 	}

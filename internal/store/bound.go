@@ -13,21 +13,24 @@ import (
 )
 
 // A bound input of a source (a mint input its declaration marks bound)
-// belongs to one holder: the yard, in the source's own env file, or one
-// user, in theirs. Giving refuses a bound value another holder has, and
-// a call made as a user refuses one its file names from another holder,
-// so a file edited by hand is caught as a given one is. The value itself
-// is never kept or shown: only who holds it is answered.
+// belongs to one holder across the whole yard: the yard, in any
+// source's env file, or one user, in theirs. Giving refuses a bound
+// value another holder has, and a call made as a user refuses one its
+// file names from another holder, so a file edited by hand is caught
+// as a given one is. The value itself is never kept or shown: only
+// who holds it is answered.
 
-// BoundHolder answers which holder other than except holds value of the
-// bound input input of the source sourceName: the yard, a user, or zero
-// where no other holder holds it. Pass a zero source.Holder{} for any
-// holder, or the acting holder to check whether anyone else holds it.
-// It reads the source's own env file and every user's, as they stand.
+// BoundHolder answers which holder other than except holds value of
+// the bound input input of the source sourceName: the yard, a user, or
+// zero where no other holder holds it. Pass a zero source.Holder{} for
+// any holder, or the acting holder to check whether anyone else holds
+// it. It reads every source's yard env file and every user's, as they
+// stand, so a value the yard holds on another source refuses a paste.
 // It is the helper a pasted sign-in asks before it writes (yardr-yt5k),
 // beside the givings and calls here.
 func (s *Store) BoundHolder(ctx context.Context, sourceName, input, value string, except source.Holder) (source.Holder, error) {
 	var src *Source
+	var sources []Source
 	var users []User
 	err := s.read(func(tx *bolt.Tx) error {
 		src = new(Source)
@@ -35,6 +38,12 @@ func (s *Store) BoundHolder(ctx context.Context, sourceName, input, value string
 			return err
 		} else if !ok {
 			return fmt.Errorf("source %s: %w", sourceName, ErrNotFound)
+		}
+		if err := each(tx, bSources, "", func(_ []byte, other *Source) error {
+			sources = append(sources, *other)
+			return nil
+		}); err != nil {
+			return err
 		}
 		return each(tx, bUsers, "", func(_ []byte, u *User) error {
 			users = append(users, *u)
@@ -44,11 +53,19 @@ func (s *Store) BoundHolder(ctx context.Context, sourceName, input, value string
 	if err != nil {
 		return source.Holder{}, err
 	}
-	return BoundHolderIn(s.home, src, users, input, value, except)
+	return BoundHolderIn(s.home, src, sources, users, input, value, except)
 }
 
-// boundHolder is BoundHolder inside a write, from its users as they stand.
+// boundHolder is BoundHolder inside a write, from its users and sources
+// as they stand.
 func (w *wtx) boundHolder(src *Source, input, value string, except source.Holder) (source.Holder, error) {
+	var sources []Source
+	if err := each(w.Tx, bSources, "", func(_ []byte, other *Source) error {
+		sources = append(sources, *other)
+		return nil
+	}); err != nil {
+		return source.Holder{}, err
+	}
 	var users []User
 	if err := each(w.Tx, bUsers, "", func(_ []byte, u *User) error {
 		users = append(users, *u)
@@ -56,15 +73,22 @@ func (w *wtx) boundHolder(src *Source, input, value string, except source.Holder
 	}); err != nil {
 		return source.Holder{}, err
 	}
-	return BoundHolderIn(w.home, src, users, input, value, except)
+	return BoundHolderIn(w.home, src, sources, users, input, value, except)
 }
 
 // boundLookup is a BoundHolder for the calls of src: which holder holds
 // each bound value a call as a user names, read as the files stand.
 func (s *Store) boundLookup(src *Source) source.BoundHolder {
 	return func(input, value string, except source.Holder) (source.Holder, error) {
+		var sources []Source
 		var users []User
 		err := s.read(func(tx *bolt.Tx) error {
+			if err := each(tx, bSources, "", func(_ []byte, other *Source) error {
+				sources = append(sources, *other)
+				return nil
+			}); err != nil {
+				return err
+			}
 			return each(tx, bUsers, "", func(_ []byte, u *User) error {
 				users = append(users, *u)
 				return nil
@@ -73,19 +97,22 @@ func (s *Store) boundLookup(src *Source) source.BoundHolder {
 		if err != nil {
 			return source.Holder{}, err
 		}
-		return BoundHolderIn(s.home, src, users, input, value, except)
+		return BoundHolderIn(s.home, src, sources, users, input, value, except)
 	}
 }
 
-// BoundHolderIn is who holds value of input of src among the yard (its
-// own file first) and users, in slice order, skipping except (zero skips
-// nobody). Skipping except matters when two holders share a value (by
-// hand or before binding): stopping at self first would miss a second
-// holder who sorts later. An empty value is held by nobody. A file that
-// is not there holds nothing; one that cannot be read fails, since it
-// may hold the value unseen. Both the store and yardr source check --as
-// call this one helper so their rules stay identical.
-func BoundHolderIn(home string, src *Source, users []User, input, value string, except source.Holder) (source.Holder, error) {
+// BoundHolderIn is who holds value of input among the yard and users,
+// skipping except (zero skips nobody). The yard is checked in every
+// source's own file, unfiltered: src's file first, then the rest in
+// sources order, so a value held twice reports the target first and a
+// same-source hit reads as it always has. Skipping except matters when
+// two holders share a value (by hand or before binding): stopping at
+// self first would miss a second holder who sorts later. An except for
+// the yard skips every yard file. An empty value is held by nobody. A
+// file that is not there holds nothing; one that cannot be read fails,
+// since it may hold the value unseen. Both the store and yardr source
+// check --as call this one helper so their rules stay identical.
+func BoundHolderIn(home string, src *Source, sources []Source, users []User, input, value string, except source.Holder) (source.Holder, error) {
 	want := strings.TrimSpace(value)
 	if want == "" {
 		return source.Holder{}, nil
@@ -96,7 +123,19 @@ func BoundHolderIn(home string, src *Source, users []User, input, value string, 
 			return source.Holder{}, err
 		}
 		if held {
-			return source.Holder{Yard: true}, nil
+			return source.Holder{Yard: true, Source: src.Name}, nil
+		}
+		for i := range sources {
+			if sources[i].Name == src.Name {
+				continue
+			}
+			held, err := envHolds(yardEnvFile(home, &sources[i]), input, want)
+			if err != nil {
+				return source.Holder{}, err
+			}
+			if held {
+				return source.Holder{Yard: true, Source: sources[i].Name}, nil
+			}
 		}
 	}
 	for i := range users {
@@ -165,15 +204,22 @@ func (w *wtx) checkBoundValues(src *Source, d *source.Declaration, self source.H
 
 // boundGiveRefusal says a bound value is held elsewhere and how it is
 // freed: the holder gives a different one, and this is given again. It
-// names the input and the holder, and never the value.
+// names the input and the holder, and never the value. A yard holding
+// on another source is named as such and its freeing giving is pointed
+// at that source; a holding on this source reads as it always has.
 func boundGiveRefusal(srcName, name string, held, self source.Holder) error {
 	holder, holderKey := held.User, fmt.Sprintf("yardr source key %s --as %s", srcName, held.User)
+	heldOn := ""
 	if held.Yard {
 		holder, holderKey = "the yard", "yardr source key "+srcName
+		if held.Source != "" && held.Source != srcName {
+			heldOn = " (on source " + held.Source + ")"
+			holderKey = "yardr source key " + held.Source
+		}
 	}
 	selfKey := fmt.Sprintf("yardr source key %s", srcName)
 	if !self.Yard {
 		selfKey = fmt.Sprintf("yardr source key %s --as %s", srcName, self.User)
 	}
-	return fmt.Errorf("source %s: %s is held by %s already: a bound input belongs to one holder; give a different %s with %s, or have %s give a different %s with %s and give this again", srcName, name, holder, name, selfKey, holder, name, holderKey)
+	return fmt.Errorf("source %s: %s is held by %s already%s: a bound input belongs to one holder; give a different %s with %s, or have %s give a different %s with %s and give this again", srcName, name, holder, heldOn, name, selfKey, holder, name, holderKey)
 }

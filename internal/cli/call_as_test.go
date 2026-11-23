@@ -282,6 +282,44 @@ func TestSourceCheckAsBound(t *testing.T) {
 		!strings.Contains(err.Error(), "a bound input belongs to one holder") || strings.Contains(err.Error(), yardAddr) || hits != 1 {
 		t.Fatalf("check --as ada on the yard's account = %v, after %d hits", err, hits)
 	}
+	// Cross-source: a second bound source the yard has not keyed. A check
+	// on it as ada refuses naming gog, where the yard holds the account.
+	gog2File := filepath.Join(t.TempDir(), "gog2.yaml")
+	if err := os.WriteFile(gog2File, []byte(strings.Replace(strings.Replace(boundCheckedSource, "BASE", srv.URL, 1), "name: gog", "name: gog2", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, jo.sourceCmd(), "add", gog2File); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, jo.sourceCmd(), "set", "gog2", "mint_command="+script); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = run(t, jo.sourceCmd(), "check", "gog2", "--as", "ada"); err == nil ||
+		!strings.Contains(err.Error(), "GOG_ACCOUNT in "+adaKeyed.File+" names the yard's (on source gog) account, not ada's") ||
+		strings.Contains(err.Error(), yardAddr) || hits != 1 {
+		t.Fatalf("check gog2 --as ada on the yard's account on gog = %v, after %d hits", err, hits)
+	}
+	// Any source's unkeyed yard file needs the home: gog is keyed, yet a
+	// value in gog2's default file under the home still refuses a check
+	// on gog, naming gog2.
+	const crossAddr = "cross@example.com"
+	if err := os.MkdirAll(filepath.Join(jo.cfg.Home, "sources"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jo.cfg.Home, "sources", "gog2.env"), []byte("GOG_ACCOUNT="+crossAddr+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.WriteEnvFile(adaKeyed.File, map[string]string{"GOG_ACCOUNT": crossAddr}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = run(t, jo.sourceCmd(), "check", "gog", "--as", "ada"); err == nil ||
+		!strings.Contains(err.Error(), "names the yard's (on source gog2) account, not ada's") ||
+		strings.Contains(err.Error(), crossAddr) || hits != 1 {
+		t.Fatalf("check gog --as ada on the yard's account on gog2 = %v, after %d hits", err, hits)
+	}
+	if _, _, err := store.WriteEnvFile(adaKeyed.File, map[string]string{"GOG_ACCOUNT": yardAddr}); err != nil {
+		t.Fatal(err)
+	}
 	if out, err = run(t, jo.sourceCmd(), "check", "gog"); err != nil ||
 		!strings.Contains(out, "gog: check call ping (GET /me): 200 in ") || hits != 2 {
 		t.Fatalf("the yard's own check = %q, %v, after %d hits", out, err, hits)

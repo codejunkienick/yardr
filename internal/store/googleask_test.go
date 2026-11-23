@@ -337,6 +337,11 @@ func TestGoogleSignInRefusesAnAccountHeldElsewhere(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	y := boundYard(t)
+	// A bound source sorting before gog declares the same input: its loop
+	// reaches the yard's holding on gog, and the refusal must name gog.
+	if _, err := y.PutSource(y.ctx, "aaa.yaml", strings.Replace(boundFile, "name: gog", "name: aaa", 1), "mckean"); err != nil {
+		t.Fatal(err)
+	}
 	const yardAddr, biaAddr = "yard@example.com", "bia@example.com"
 	if _, err := y.KeySource(y.ctx, "gog", map[string]string{"GOG_ACCOUNT": yardAddr}, "mckean"); err != nil {
 		t.Fatal(err)
@@ -373,6 +378,13 @@ func TestGoogleSignInRefusesAnAccountHeldElsewhere(t *testing.T) {
 			strings.Contains(err.Error(), googleRefresh) || strings.Contains(err.Error(), "GOCSPX-fake-secret") {
 			t.Errorf("%s = %v, want a refusal saying %q and no value", c.name, err, c.want)
 		}
+	}
+	// The holding source wins the message over the loop source (aaa
+	// declares the input and sorts first, gog holds the account).
+	if err := give(googlePersonAsk(yardAddr), "ada"); err == nil ||
+		!strings.Contains(err.Error(), "GOG_ACCOUNT of source gog") ||
+		strings.Contains(err.Error(), "of source aaa") {
+		t.Fatalf("ada's paste for the yard's account naming the loop source = %v", err)
 	}
 	if raw, err := os.ReadFile(biaFile); err != nil || string(raw) != "bia's own" {
 		t.Fatalf("bia's credentials file after the refusals: %q, %v", raw, err)

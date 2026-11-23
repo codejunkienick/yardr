@@ -1064,8 +1064,9 @@ for it, as for a host.
   remain hidden. This changes how the value is drawn, not where it is
   written or kept. Mark an input that names its holder's account with
   `bound: true` beside it (`{ name: GOOGLE_ACCOUNT, secret: false,
-  bound: true }`): its value then belongs to one holder, the yard in the
-  source's own file or one user in theirs, and the yard refuses it for
+  bound: true }`): its value then belongs to one holder across the
+  whole yard, the yard in any source's own file or one user in theirs,
+  and the yard refuses it for
   any other holder when it is given (`yardr source key`, an answered
   secret ask) and when a call made as a user reads it, a file edited by
   hand included; the refusal names the holder and the giving that frees

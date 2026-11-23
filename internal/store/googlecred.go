@@ -245,7 +245,11 @@ func (w *wtx) checkGoogleAccountHolder(account string, self source.Holder) error
 			if !held.Yard {
 				holder = held.User
 			}
-			return fmt.Errorf("google account %s is held by %s already (%s of source %s): a bound account belongs to one holder, so its sign-in is given by that holder alone", account, holder, input, src.Name)
+			holding := src.Name
+			if held.Yard && held.Source != "" {
+				holding = held.Source
+			}
+			return fmt.Errorf("google account %s is held by %s already (%s of source %s): a bound account belongs to one holder, so its sign-in is given by that holder alone", account, holder, input, holding)
 		}
 		return nil
 	})

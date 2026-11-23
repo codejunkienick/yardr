@@ -12,7 +12,8 @@ import (
 // input to: who besides except holds each bound value the user's file
 // names, delegating to store.BoundHolderIn so the CLI and store share
 // one implementation. The yard's home is read only when a non-skipped
-// holder has no env_file recorded and needs the default path.
+// holder has no env_file recorded and needs the default path: any
+// source's yard file without one needs it, as any user's does.
 func (a *app) boundHolderFor(ctx context.Context, st store.API, src *store.Source) source.BoundHolder {
 	return func(input, value string, except source.Holder) (source.Holder, error) {
 		if strings.TrimSpace(value) == "" {
@@ -22,7 +23,22 @@ func (a *app) boundHolderFor(ctx context.Context, st store.API, src *store.Sourc
 		if err != nil {
 			return source.Holder{}, err
 		}
-		needHome := !except.Yard && src.EnvFile == ""
+		sources, err := st.Sources(ctx)
+		if err != nil {
+			return source.Holder{}, err
+		}
+		needHome := false
+		if !except.Yard {
+			if src.EnvFile == "" {
+				needHome = true
+			}
+			for i := range sources {
+				if sources[i].EnvFile == "" {
+					needHome = true
+					break
+				}
+			}
+		}
 		if !needHome {
 			for i := range users {
 				if !except.Yard && except.User != "" && users[i].Name == except.User {
@@ -43,6 +59,6 @@ func (a *app) boundHolderFor(ctx context.Context, st store.API, src *store.Sourc
 			}
 			home = cfg.Home
 		}
-		return store.BoundHolderIn(home, src, users, input, value, except)
+		return store.BoundHolderIn(home, src, sources, users, input, value, except)
 	}
 }

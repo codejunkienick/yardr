@@ -186,10 +186,11 @@ the account, and the login where none does (step 4).
 
 ## Step 3. The account
 
-`GOOGLE_ACCOUNT` is bound: each address belongs to one holder, the
-yard or one person, and no other holder may be given it or call with
-it. A giving that names an address another holder has is refused,
-naming the holder and the giving that frees it, and a call made as a
+`GOOGLE_ACCOUNT` is bound: each address belongs to one holder across
+the whole yard, the yard (on any Google source) or one person, and no
+other holder may be given it or call with it. A giving that names an
+address another holder has is refused, naming the holder, the source
+that holds it and the giving that frees it, and a call made as a
 person whose file names another holder's address is refused the same
 way, a file edited by hand included. Give each holder an address of
 their own.
