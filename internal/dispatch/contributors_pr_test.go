@@ -1511,6 +1511,178 @@ func TestContributorsCIOKSendsItBackToCI(t *testing.T) {
 	}
 }
 
+// A head told by another pull_request event than synchronize, at a new
+// head, is judged as a push is: an accepted pull request returns to triage
+// for a fresh accept, and one waiting there stays with a card of the new
+// head. A tell of the head the bead already has moves nothing. This is the
+// synchronize fixture with its action rewritten to edited, as the delivery
+// that told the yard of a push whose synchronize never arrived did.
+func TestContributorsEditedHeadIsJudgedAsAPush(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	r := newContributorsYardIn(t, home)
+	ctx := context.Background()
+	file, err := fs.ReadFile(packs.FS, packs.Contributors+"/flows/pr/triage.md")
+	must(t, err)
+	stages := store.HomeStageDir(home, "contributors.pr")
+	must(t, os.MkdirAll(stages, 0o755))
+	must(t, os.WriteFile(filepath.Join(stages, "triage.md"), file, 0o644))
+	r.peopleStages(t)
+	must(t, r.api.SetSetting(ctx, store.OperatorSetting, "jo", "jo"))
+	_, err = r.api.AddUser(ctx, "mckean", "jo")
+	must(t, err)
+	edited := func(m map[string]any) { m["action"] = "edited" }
+	outsider := func(n int, edits ...func(map[string]any)) []func(map[string]any) {
+		return append([]func(map[string]any){prEvent(n, "someone", "User"), authorIs("NONE")}, edits...)
+	}
+	cards := func(id string) []store.ResolvedAsk {
+		t.Helper()
+		notes, err := r.api.Notes(ctx, id)
+		must(t, err)
+		var open []store.ResolvedAsk
+		for _, a := range store.ResolveAsks(notes, time.Now()) {
+			if a.State == store.AskOpen {
+				open = append(open, a)
+			}
+		}
+		return open
+	}
+	theCard := func(id, head string) {
+		t.Helper()
+		open := cards(id)
+		if len(open) != 1 || open[0].Ask.Head == nil || open[0].Ask.Head.Sha != head {
+			var shown []string
+			for _, c := range open {
+				if c.Ask.Head != nil {
+					shown = append(shown, c.Ask.Head.Sha)
+				}
+			}
+			t.Fatalf("%s has %d open cards, showing the heads %v, want one that accepts %s", id, len(open), shown, head)
+		}
+	}
+	noted := func(id, want string) bool {
+		t.Helper()
+		notes, err := r.api.Notes(ctx, id)
+		must(t, err)
+		for _, n := range notes {
+			if strings.Contains(n.Text, want) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Past triage: accepted at the first head, then an edited event tells
+	// the new head. The bead returns to triage with the new head recorded
+	// and the accepted head as it was.
+	number := 91
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number)...)
+	past := r.madeIn(t, number, "triage")
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number, labeledBy("accepted", "a-maintainer", "User"))...)
+	r.pass(t)
+	if got := r.bead(t, past.ID); got.Stage != "review" || got.Metadata["accepted_head"] != fixtureSHA || got.Metadata["pr_head"] != fixtureSHA {
+		t.Fatalf("%s in %s with accepted_head %v and pr_head %v after the label, want review with both %s", past.ID, got.Stage, got.Metadata["accepted_head"], got.Metadata["pr_head"], fixtureSHA)
+	}
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, edited, atHead(movedSHA))...)
+	r.pass(t)
+	if got := r.bead(t, past.ID); got.Stage != "triage" || got.Metadata["accepted_head"] != fixtureSHA || got.Metadata["pr_head"] != movedSHA {
+		t.Fatalf("after the edited head %s is in %s with accepted_head %v and pr_head %v, want triage with %s and %s",
+			past.ID, got.Stage, got.Metadata["accepted_head"], got.Metadata["pr_head"], fixtureSHA, movedSHA)
+	}
+	if !noted(past.ID, "new commits since a maintainer accepted the PR") {
+		t.Fatalf("%s has no note of the unaccepted move", past.ID)
+	}
+	if !noted(past.ID, "(github pull_request edited, by someone)") {
+		t.Fatalf("%s move note did not keep the original edited envelope", past.ID)
+	}
+	theCard(past.ID, movedSHA)
+
+	// pull_request_review (github's other head_from type) telling a new head
+	// on an accepted pull request also returns it to triage with a fresh card.
+	number++
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number)...)
+	reviewed := r.madeIn(t, number, "triage")
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number, labeledBy("accepted", "a-maintainer", "User"))...)
+	r.pass(t)
+	r.deliverJSON(t, "pull_request_review", "pull_request_review_commented", outsider(number, atHead(movedSHA))...)
+	r.pass(t)
+	if got := r.bead(t, reviewed.ID); got.Stage != "triage" || got.Metadata["accepted_head"] != fixtureSHA || got.Metadata["pr_head"] != movedSHA {
+		t.Fatalf("after a review at a new head %s is in %s with accepted_head %v and pr_head %v, want triage with %s and %s",
+			reviewed.ID, got.Stage, got.Metadata["accepted_head"], got.Metadata["pr_head"], fixtureSHA, movedSHA)
+	}
+	if !noted(reviewed.ID, "(github pull_request_review submitted, by someone)") {
+		t.Fatalf("%s move note did not keep the original pull_request_review envelope", reviewed.ID)
+	}
+	theCard(reviewed.ID, movedSHA)
+
+	// An explicit synchronize when pr_head was already recorded while held
+	// still returns the unheld bead to triage rather than stripping accepted.
+	number++
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number)...)
+	held := r.madeIn(t, number, "triage")
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number, labeledBy("accepted", "a-maintainer", "User"))...)
+	r.pass(t)
+	_, err = r.api.SetHold(ctx, held.ID, true, store.Expect{}, "me")
+	must(t, err)
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, edited, bearing("accepted"), atHead(movedSHA))...)
+	r.pass(t)
+	if got := r.bead(t, held.ID); got.Stage != "review" || got.Metadata["pr_head"] != movedSHA {
+		t.Fatalf("held %s in %s with pr_head %v, want review with %s", held.ID, got.Stage, got.Metadata["pr_head"], movedSHA)
+	}
+	_, err = r.api.SetHold(ctx, held.ID, false, store.Expect{}, "me")
+	must(t, err)
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, bearing("accepted"), atHead(movedSHA))...)
+	r.pass(t)
+	if got := r.bead(t, held.ID); got.Stage != "triage" || got.Metadata["accepted_head"] != fixtureSHA || got.Metadata["pr_head"] != movedSHA {
+		t.Fatalf("after unhold + synchronize %s is in %s with accepted_head %v and pr_head %v, want triage with %s and %s",
+			held.ID, got.Stage, got.Metadata["accepted_head"], got.Metadata["pr_head"], fixtureSHA, movedSHA)
+	}
+
+	// A hand-filed pr bead with no pr_head yet learns its head from an edited
+	// event without being misjudged as a push.
+	number++
+	handFiled, err := r.api.CreateBead(ctx, store.NewBead{
+		Title: "hand-filed PR", Type: "pr", Depot: "yard", Stage: "review",
+		Links: []store.NewLink{{Kind: store.LinkTracks, Source: "github", URL: fmt.Sprintf("https://github.com/acme/yardr/pull/%d", number)}},
+	}, "me")
+	must(t, err)
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, edited, atHead(fixtureSHA))...)
+	r.pass(t)
+	if got := r.bead(t, handFiled.ID); got.Stage != "review" || got.Metadata["pr_head"] != fixtureSHA {
+		t.Fatalf("hand-filed %s after first edited tell is in %s with pr_head %v, want review with %s",
+			handFiled.ID, got.Stage, got.Metadata["pr_head"], fixtureSHA)
+	}
+
+	// In triage: the edited event at a new head makes the stay again, with
+	// a fresh card of the new head.
+	number++
+	r.deliverJSON(t, "pull_request", "pull_request_opened", outsider(number)...)
+	waiting := r.madeIn(t, number, "triage")
+	theCard(waiting.ID, fixtureSHA)
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, edited, atHead(movedSHA))...)
+	r.pass(t)
+	if got := r.bead(t, waiting.ID); got.Stage != "triage" || got.Metadata["pr_head"] != movedSHA {
+		t.Fatalf("after the edited head in triage %s is in %s with pr_head %v, want triage with %s", waiting.ID, got.Stage, got.Metadata["pr_head"], movedSHA)
+	}
+	if !noted(waiting.ID, "new commits on the PR while it waited for a maintainer") {
+		t.Fatalf("%s has no note of the pushed move", waiting.ID)
+	}
+	theCard(waiting.ID, movedSHA)
+
+	// The same head again: an edited event carrying the recorded head
+	// matches no line and changes nothing.
+	before := r.lastNote(t, waiting.ID)
+	r.deliverJSON(t, "pull_request", "pull_request_synchronize", outsider(number, edited, atHead(movedSHA))...)
+	r.pass(t)
+	if got := r.bead(t, waiting.ID); got.Stage != "triage" || got.Metadata["pr_head"] != movedSHA {
+		t.Fatalf("after the same-head edited event %s is in %s with pr_head %v, want triage with %s", waiting.ID, got.Stage, got.Metadata["pr_head"], movedSHA)
+	}
+	if note := r.lastNote(t, waiting.ID); note != before {
+		t.Errorf("the same-head edited event left a note: %q, want %q", note, before)
+	}
+	theCard(waiting.ID, movedSHA)
+}
+
 // A ci-ok pick a push overtakes is void: the bead leaves contributor for
 // review before the hand move, and after the next review asks changes the
 // stale pick must not authorize the move back to ciwait. Only a fresh pick,

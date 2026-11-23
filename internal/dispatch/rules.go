@@ -165,14 +165,69 @@ func readRuleEvent(e store.Event, decl *source.Declaration) ruleEvent {
 	return ev
 }
 
+// isNewHead reports whether ev tells a head that differs from the bead's
+// recorded pr_head (falling back to accepted_head for a legacy bead with
+// no pr_head). Without a recorded head, a non-synchronize delivery is the
+// yard learning the head for the first time, not a push, while a tell of
+// the recorded head is no push at all.
+func isNewHead(bead *store.Bead, ev ruleEvent) bool {
+	if !ev.tellsHead || ev.sha == "" {
+		return false
+	}
+	cur, _ := bead.Metadata[metaPRHead].(string)
+	if cur == "" {
+		cur, _ = bead.Metadata[metaAcceptedHead].(string)
+	}
+	return cur != "" && !strings.EqualFold(cur, ev.sha)
+}
+
+// asSynchronize copies the envelope as a pull_request synchronize delivery,
+// the shape the pack's push lines are matched in: an event that tells a new
+// head is judged as the push it tells of, while the envelope logged as the
+// evidence and written in the move's note stays the one that arrived. A
+// pull_request_review delivery (another head_from type) is presented as
+// pull_request too so it matches the same push lines; another source's
+// head_from type keeps its own type.
+func asSynchronize(data map[string]any) map[string]any {
+	data = maps.Clone(data)
+	if data == nil {
+		data = map[string]any{}
+	}
+	data["action"] = "synchronize"
+	if typ, _ := data["type"].(string); typ == "pull_request_review" {
+		data["type"] = "pull_request"
+		switch fields := data["fields"].(type) {
+		case map[string]any:
+			cloned := maps.Clone(fields)
+			cloned["event"] = []string{"pull_request"}
+			data["fields"] = cloned
+		case map[string][]string:
+			cloned := maps.Clone(fields)
+			cloned["event"] = []string{"pull_request"}
+			data["fields"] = cloned
+		}
+	}
+	return data
+}
+
 // unacceptedPullRequestHead finds the pack's unaccepted line for a new head
 // on a pull request that waited in triage. The label is usually still on the
 // pull request, but the recorded acceptance must keep working if it was
 // removed. Newer beads keep triage history in rounds, and older ones in
 // visited; pull requests with neither keep their ordinary routes.
 func unacceptedPullRequestHead(h *store.Hook, bead *store.Bead, ev ruleEvent) *store.Say {
-	if bead.Type != "pr" || ev.typ != "pull_request" || ev.action != "synchronize" || !ev.tellsHead {
+	if bead.Type != "pr" || !ev.tellsHead {
 		return nil
+	}
+	// An explicit synchronize is always a push, even when pr_head was already
+	// recorded while the bead was held or in fix, or when head_sha is absent.
+	// Any other head-telling event is read as the push it tells of only when
+	// it names a new head and the table has no line for the event as delivered
+	// (a close or a maintainer's label keeps its own judgement).
+	if ev.action != "synchronize" {
+		if !isNewHead(bead, ev) || h.Said(ev.data, bead.Stage, bead.Type) != nil {
+			return nil
+		}
 	}
 	if _, triaged := bead.Rounds["triage"]; !triaged && !slices.Contains(bead.Visited, "triage") {
 		return nil
@@ -184,7 +239,7 @@ func unacceptedPullRequestHead(h *store.Hook, bead *store.Bead, ev ruleEvent) *s
 
 	// Match the declarative outcome the pack already gives a changed accepted
 	// head, without adding a label to the event that is logged as evidence.
-	data := maps.Clone(ev.data)
+	data := asSynchronize(ev.data)
 	fields, _ := data["fields"].(map[string]any)
 	fields = maps.Clone(fields)
 	if fields == nil {
@@ -434,12 +489,27 @@ func (d *Dispatcher) hookEvent(ctx context.Context, ev ruleEvent, pass *hookPass
 	if tracked && len(h.Says) == 0 && !ownAction {
 		return
 	}
+	// An event that tells a pull request's bead a new head, and that the
+	// table judges as nothing else, is judged as the push it tells of,
+	// however the source spelled its delivery: the synchronize line it would
+	// have matched is matched here, so a push whose synchronize delivery
+	// never arrives still sends the bead back for a fresh accept. An event
+	// the table already judges (a close, a maintainer's label) keeps that
+	// judgement, and the envelope itself is left as it arrived, for the
+	// log and the move's note.
+	newHead := bead.Type == "pr" && isNewHead(bead, ev)
+	presented := ev.data
 	line := h.Said(ev.data, bead.Stage, bead.Type)
+	asPush := bead.Type == "pr" && ev.tellsHead && ev.action == "synchronize"
+	if line == nil && newHead {
+		asPush = true
+		presented = asSynchronize(ev.data)
+		line = h.Said(presented, bead.Stage, bead.Type)
+	}
 	if unaccepted := unacceptedPullRequestHead(h, bead, ev); unaccepted != nil {
 		line = unaccepted
-	} else if bead.Type == "pr" && ev.typ == "pull_request" && ev.action == "synchronize" &&
-		line != nil && line.Outcome == outcomeUnaccepted {
-		line = h.Said(withoutAcceptedLabel(ev.data), bead.Stage, bead.Type)
+	} else if asPush && line != nil && line.Outcome == outcomeUnaccepted {
+		line = h.Said(withoutAcceptedLabel(presented), bead.Stage, bead.Type)
 	}
 	head := ev.tellsHead
 	// An event the table has no line for moves nothing and logs nothing.

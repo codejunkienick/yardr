@@ -38,6 +38,45 @@ func TestUnacceptedPullRequestHeadUsesLegacyVisited(t *testing.T) {
 	if line == nil || line.Outcome != outcomeUnaccepted {
 		t.Fatalf("line = %+v, want the unaccepted outcome for a legacy bead that visited triage", line)
 	}
+
+	// Any tell of a new head is judged as synchronize is, and a tell of
+	// the recorded head is no push at all.
+	edited := ruleEvent{
+		typ: "pull_request", action: "edited", sha: pushed, tellsHead: true,
+		data: map[string]any{
+			"type": "pull_request", "action": "edited",
+			"fields": map[string]any{"head_sha": []string{pushed}},
+		},
+	}
+	seen := &store.Bead{
+		Type: "pr", Stage: "review", Visited: []string{"triage", "review"},
+		Metadata: map[string]any{metaAcceptedHead: accepted, metaPRHead: accepted},
+	}
+	if line := unacceptedPullRequestHead(h, seen, edited); line == nil || line.Outcome != outcomeUnaccepted {
+		t.Fatalf("edited new head: line = %+v, want the unaccepted outcome", line)
+	}
+	seen.Metadata[metaPRHead] = pushed
+	if line := unacceptedPullRequestHead(h, seen, edited); line != nil {
+		t.Fatalf("edited recorded head: line = %+v, want none", line)
+	}
+	// An explicit synchronize still triggers when pr_head was already
+	// recorded (e.g. while held), as long as accepted_head differs.
+	if line := unacceptedPullRequestHead(h, seen, ev); line == nil || line.Outcome != outcomeUnaccepted {
+		t.Fatalf("synchronize at already-recorded unaccepted head: line = %+v, want the unaccepted outcome", line)
+	}
+	// pull_request_review is github's other head_from type and matches the
+	// same unaccepted line when it tells a new head.
+	review := ruleEvent{
+		typ: "pull_request_review", action: "submitted", sha: pushed, tellsHead: true,
+		data: map[string]any{
+			"type": "pull_request_review", "action": "submitted",
+			"fields": map[string]any{"event": []string{"pull_request_review"}, "head_sha": []string{pushed}},
+		},
+	}
+	seen.Metadata[metaPRHead] = accepted
+	if line := unacceptedPullRequestHead(h, seen, review); line == nil || line.Outcome != outcomeUnaccepted {
+		t.Fatalf("pull_request_review new head: line = %+v, want the unaccepted outcome", line)
+	}
 }
 
 // packDecl is the pack's declaration as it ships: its link shape is what
