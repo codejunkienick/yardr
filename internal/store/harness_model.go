@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -106,4 +107,50 @@ func modelProblems(subject string, cfg, old map[string]any) []error {
 	}
 	return []error{fmt.Errorf("%s: model is for the kinds whose harness file names a model flag or a model environment, and %s is not: its file names neither. Unset model, or set the group's kind to one that takes it",
 		subject, kind)}
+}
+
+// fallbackProblems holds a crew member's fallback_model to the kind it
+// runs: a fallback is started by the same harness as the session it
+// rescues, so a model of another kind would fail only at the failover,
+// in the night. A write that leaves fallback_model and kind as old holds
+// them is not judged, as modelProblems has it. Which kind a model
+// belongs to is read from the models each kind's file offers
+// (HarnessOffers): one offered by another kind and not by this one is
+// that kind's, and refused; one no kind offers, a full model id, cannot
+// be told another kind's from the table and is let through, as a crew
+// member's model is (configkeys_test).
+func fallbackProblems(subject string, cfg, old map[string]any) []error {
+	fallback, ok := cfg["fallback_model"].(string)
+	if !ok || fallback == "" {
+		return nil
+	}
+	if was, had := old["fallback_model"].(string); had && was == fallback && ModelKind(old) == ModelKind(cfg) {
+		return nil
+	}
+	kind := ModelKind(cfg)
+	if _, takesEnv := HarnessModelEnvs[kind]; !takesEnv && HarnessNoModelFlag[kind] {
+		return []error{fmt.Errorf("%s: fallback_model is for the kinds whose harness file names a model flag or a model environment, and %s is not: its file names neither. Unset fallback_model, or set the crew member's kind to one that takes a model",
+			subject, kind)}
+	}
+	if slices.Contains(HarnessOffers[kind], fallback) {
+		return nil
+	}
+	for _, other := range sortedKinds(HarnessOffers) {
+		if other != kind && slices.Contains(HarnessOffers[other], fallback) {
+			return []error{fmt.Errorf("%s: fallback_model %q is a %s model, not a %s one: a fallback starts under the crew member's own harness, so name a %s model as fallback_model, or set its kind to %s",
+				subject, fallback, other, kind, kind, other)}
+		}
+	}
+	return nil
+}
+
+// sortedKinds are the kinds of offers, by name, so a refusal names the
+// same kind wherever the map's order would differ.
+func sortedKinds(offers map[string][]string) []string {
+	out := make([]string, 0, len(offers))
+	for kind := range offers {
+		out = append(out, kind)
+	}
+	slices.Sort(out)
+	return out
 }

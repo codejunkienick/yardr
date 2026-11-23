@@ -384,7 +384,7 @@ func (d *Dispatcher) keepSession(ctx context.Context, runner Runner, starter Cre
 	// before it left and has what gone sessions left open closed (closeLeft).
 	// On a crew worker's clone the hand is recorded instead, and the pass
 	// hands it in member order after the join (queueCrewStart).
-	d.queueCrewStart(ctx, crewJob{session: *s, runner: runner, starter: starter})
+	d.queueCrewStart(ctx, d.crewFallbackJob(ctx, s, runner, starter))
 	return nil
 }
 
@@ -762,6 +762,9 @@ func (d *Dispatcher) crewRunning(ctx context.Context, runner Runner, s *memberSe
 	d.crewPromptTaken(ctx, runner, s, status)
 	if d.ownInput(ctx, runner, key, def.Journal, s.who(map[string]any{}), s.st.Handle, status) {
 		return nil // Enter went into its pane: nothing else does on this pass
+	}
+	if d.crewFallbackReturn(ctx, runner, s, status, grace) {
+		return nil
 	}
 	if maxAge := durationOr(def.MaxAge, 0); maxAge > 0 && s.st.StartedAt != nil && d.now().Sub(*s.st.StartedAt) > maxAge {
 		switch {

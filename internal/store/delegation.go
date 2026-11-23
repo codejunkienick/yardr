@@ -240,7 +240,7 @@ var groupDelegates = map[string]bool{"kind": true, "model": true, "dir": true, "
 
 // crewDelegates are the crew settings it carries, the directory beside
 // them, for a member other than the yardmaster (crewDelegate).
-var crewDelegates = map[string]bool{"kind": true, "model": true, "args": true, "dir": true}
+var crewDelegates = map[string]bool{"kind": true, "model": true, "fallback_model": true, "args": true, "dir": true}
 
 // crewDelegate says whether the delegated leg carries key of the crew
 // member name: never on the yardmaster's own entry, whose teller would be

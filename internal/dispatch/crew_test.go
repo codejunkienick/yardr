@@ -37,6 +37,7 @@ type crewRunner struct {
 	n               int
 	status          map[string]string // agent -> idle|working|"" (gone)
 	nudges          []string
+	models          []string // the model each StartCrew was handed, in start order
 	screen          string   // what the pane shows
 	trustKeys       []string // keys sent to answer the trust dialog
 	trustCalls      int      // passes that asked for the trust dialog to be answered
@@ -86,6 +87,13 @@ type crewRunner struct {
 
 	marks  []string          // kinds whose onboarding it was asked to mark done, in order
 	atMark func(kind string) // runs as the mark is asked for, with no lock held
+}
+
+// startModels are the models the starts were handed, in start order.
+func (f *crewRunner) startModels() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.models...)
 }
 
 // startCalls is how often StartCrew was called for the session, failed or
@@ -253,6 +261,8 @@ func (f *crewRunner) StartCrew(ctx context.Context, r store.CrewMember, user str
 		session += ":" + user
 	}
 	f.calls[session]++
+	model, _ := r.Config["model"].(string)
+	f.models = append(f.models, model)
 	held, entered, release := f.hold == r.Name, f.entered, f.release
 	if held {
 		// As herdr's agent list shows the agent of a start still under way:

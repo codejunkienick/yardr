@@ -487,8 +487,9 @@ func TestDelegatedRefusals(t *testing.T) {
 		"group kimi auto preset": {func() error {
 			return setGroup(map[string]any{"kind": "kimi", "args": []any{"--auto"}})
 		}, "preset auto skips the agent's permission prompts"},
-		"the yardmaster's own":       {func() error { return setCrew("yardmaster", map[string]any{"kind": "codex"}) }, "change kind on crew member yardmaster"},
-		"the yardmaster's own model": {func() error { return setCrew("yardmaster", map[string]any{"model": "opus"}) }, "change model on crew member yardmaster"},
+		"the yardmaster's own":                {func() error { return setCrew("yardmaster", map[string]any{"kind": "codex"}) }, "change kind on crew member yardmaster"},
+		"the yardmaster's own model":          {func() error { return setCrew("yardmaster", map[string]any{"model": "opus"}) }, "change model on crew member yardmaster"},
+		"the yardmaster's own fallback_model": {func() error { return setCrew("yardmaster", map[string]any{"fallback_model": "opus"}) }, "change fallback_model on crew member yardmaster"},
 		"the yardmaster's own dir": {func() error {
 			r, err := y.api.GetCrew(y.ctx, "yardmaster")
 			if err != nil {

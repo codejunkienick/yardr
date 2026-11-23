@@ -62,16 +62,16 @@ func (w *wtx) checkCrewDefine(ctx context.Context, before, want CrewMember, exis
 		}
 	}
 	b, a := asStored(before.Config), asStored(want.Config)
-	for _, key := range []string{"env_file", "env_command", "kind", "model", "args", "prompt"} {
+	for _, key := range []string{"env_file", "env_command", "kind", "model", "fallback_model", "args", "prompt"} {
 		was, had := b[key]
 		is, has := a[key]
 		if had == has && reflect.DeepEqual(was, is) {
 			continue
 		}
-		if key == "model" {
-			// A member may still change its own model through the ordinary
-			// path. A delegated change uses the policy leg, where the
-			// yardmaster's own entry is deliberately not carried.
+		if key == "model" || key == "fallback_model" {
+			// A member may still change its own model or fallback_model through
+			// the ordinary path. A delegated change uses the policy leg, where
+			// the yardmaster's own entry is deliberately not carried.
 			d, err := w.delegated(ctx, actor)
 			if err != nil {
 				return err

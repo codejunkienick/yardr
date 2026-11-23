@@ -97,6 +97,10 @@ const (
 	harnessResetModel  = "harness_reset_model"  // the model a session waits with, "" for its agent's own: its group starts no other with it meanwhile (holdBack)
 	harnessPrompted    = "harness_prompted"     // what yardr typed at the reset, until it is known whether the agent took it
 
+	// Of a crew member's model fallback (harness_fallback.go):
+	harnessFallbackModel    = "harness_fallback_model"     // the fallback model the session runs on while its own model's window is used up; "" never stored
+	harnessFallbackReturnAt = "harness_fallback_return_at" // when that window resets and the session restarts back on its own model (RFC 3339)
+
 	// Of a snooze the session's agent asked for (store.SnoozeSession,
 	// limits.go): the store names them, beside the record that carries
 	// the handle, since it writes them and the dispatcher only reads.
@@ -623,7 +627,11 @@ func (d *Dispatcher) crewHarnessError(ctx context.Context, runner Runner, s *mem
 			// judges it, so no group's env is joined.
 			said, w := d.harnessLimits(ctx, kind, provider, nil, data)
 			var wakes string
-			wake, wakes = d.resetWakeFor(runner, s.st.Handle, w, line, data)
+			if fwake, fsaid, handled := d.crewFallbackWake(ctx, s, w, data); handled {
+				wake, wakes = fwake, fsaid
+			} else {
+				wake, wakes = d.resetWakeFor(runner, s.st.Handle, w, line, data)
+			}
 			data["hint"] = said + wakes + data["hint"].(string)
 			if tries := handleInt(s.st.Handle[harnessRetries]); tries > 0 {
 				data["tries"] = tries

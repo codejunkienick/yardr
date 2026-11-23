@@ -41,6 +41,14 @@ type crewJob struct {
 	session memberSession
 	runner  Runner
 	starter CrewRunner
+	// fallbackModel is the fallback model this start runs on, where the
+	// session it replaces was on its fallback and its return time is
+	// still ahead (crewFallbackJob): session's member is a clone with
+	// it as its model, and fallbackReturnAt is stamped with it onto the
+	// new session's handle. Both empty for a start on the member's own
+	// model.
+	fallbackModel    string
+	fallbackReturnAt string
 }
 
 // crewCompletion is what a worker posts when one crew start is done:
@@ -175,6 +183,13 @@ func (d *Dispatcher) runCrewStart(ctx context.Context, cj crewJob) crewCompletio
 	if def.Runner == "herdr" {
 		// The pane is open from here, whatever the store says next.
 		d.noteHomeStarted(startedCrewHome(def.Name, s.user, def.Runner, handle))
+	}
+	if cj.fallbackModel != "" {
+		// Stamp the fallback keys onto the handle before CrewStartedFor so a
+		// daemon restart before applyCrewCompletion never strands the session
+		// on its fallback without a return record.
+		handle = withCrewFallback(handle, cj.fallbackModel, cj.fallbackReturnAt)
+		comp.handle = handle
 	}
 	comp.storeErr = d.Store.CrewStartedFor(ctx, def.Name, s.user, handle)
 	return comp

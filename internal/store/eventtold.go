@@ -92,7 +92,7 @@ var eventDataTold = map[string][]string{
 	"session_prompt_gave_up":   {"agent", "crew", "user", "deliveries", "session", "submits", "typed"},
 	"session_harness_starting": {"crew", "user", "session"},
 	"session_harness_dialog":   {"crew", "user", "group", "kind", "prompt_look", "session", "stage", "version"},
-	"session_harness_error":    {"crew", "user", "group", "kind", "model", "prompt_shown", "reason", "resets_at", "session", "stage", "tries", "wakes_at", "window"},
+	"session_harness_error":    {"crew", "user", "group", "kind", "model", "fallback_model", "prompt_shown", "reason", "resets_at", "session", "stage", "tries", "wakes_at", "window"},
 	"session_harness_retry":    {"crew", "user", "group", "kind", "of", "reason", "session", "stage", "try", "window"},
 	"workspace_kept":           {"session"},
 	"workspace_removed":        {"session"},

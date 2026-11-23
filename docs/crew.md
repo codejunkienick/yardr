@@ -577,6 +577,16 @@ at all.
   stays unread, and the nudge is typed on the first pass that finds the
   pane without the error. See "A crew member's harness" in
   [groups.md](groups.md).
+- A crew member may name a fallback model of its own kind beside its
+  model (`yardr crew set <name> fallback_model=<model>`; a model of
+  another kind is refused when it is set). When it stops on that
+  model's own usage window while the windows every model shares are
+  still open, the daemon restarts it on the fallback at once — from
+  its last handoff and its unread inbox, with no handoff waited for
+  from the stopped session — mails the operator, and restarts it back
+  on its own model when that window resets. With no fallback named it
+  waits for the reset as before, and the operator's one mail names the
+  setting that would have rescued it.
 - The one text the daemon sends is its own, alone in the input because its
   Enter was not taken: the last nudge (for two of the daemon's intervals after it was
   typed, a minute by default: the same words there later are taken as a

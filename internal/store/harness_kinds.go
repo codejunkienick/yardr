@@ -101,6 +101,21 @@ var HarnessPresets = map[string][]Permission{
 	"pi": {},
 }
 
+// HarnessOffers are the model ids each harness kind's file offers a
+// person to pick from (its offers), by kind. The store holds a crew
+// member's fallback_model to its own kind by them, so that it imports no
+// internal package; a test in agents pins this table to the catalogue, so
+// a file that offers a new model fails until this follows. A model no
+// kind offers (a full model id, say) is no kind's by this table, and a
+// fallback named by one cannot be told cross-kind from it. Read-only.
+var HarnessOffers = map[string][]string{
+	"claude": {"opus", "fable", "sonnet"},
+	"codex":  {"gpt-6-luna", "gpt-6-astra"},
+	"kimi":   {"kimi-code/k3", "kimi-code/k3-256k", "kimi-code/kimi-for-coding"},
+	"kiro":   {"claude-opus-5.5", "auto", "claude-sonnet-4.5"},
+	"muse":   {"muse-spark-1.3-contributor", "muse-wonder-1.0"},
+}
+
 // HarnessPreset is kind's permission preset called label, in either
 // spelling (PresetLabel or as the file writes it). None is no preset.
 func HarnessPreset(kind, label string) (Permission, bool) {

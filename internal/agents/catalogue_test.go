@@ -41,6 +41,20 @@ func TestStoreTablesMatchCatalogue(t *testing.T) {
 		}
 	}
 	for _, h := range Harnesses {
+		var offered []string
+		for _, o := range h.Offers {
+			offered = append(offered, o.Model)
+		}
+		if !slices.Equal(store.HarnessOffers[h.Kind], offered) {
+			t.Errorf("store.HarnessOffers[%q] = %v, the file offers %v", h.Kind, store.HarnessOffers[h.Kind], offered)
+		}
+	}
+	for kind := range store.HarnessOffers {
+		if _, ok := store.HarnessLabels[kind]; !ok {
+			t.Errorf("store.HarnessOffers names %q, which has no harness file", kind)
+		}
+	}
+	for _, h := range Harnesses {
 		got, takes := store.HarnessEfforts[h.Kind]
 		switch e := h.Flags.Effort; {
 		case e == nil && takes:

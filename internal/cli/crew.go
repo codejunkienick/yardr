@@ -208,7 +208,7 @@ for its links (yardr peer list).`,
 	f := add.Flags()
 	f.BoolVar(&replace, "replace", false, "the crew member exists: save this definition in its place without asking (settings left out are dropped)")
 	f.StringVar(&def.Runner, "runner", "herdr", "runner (herdr)")
-	f.StringArrayVar(&sets, "set", nil, "runner config key=value (repeatable): kind, model, args, prompt, env_file, env_command, for, open_threads, set_state, peers")
+	f.StringArrayVar(&sets, "set", nil, "runner config key=value (repeatable): kind, model, fallback_model, args, prompt, env_file, env_command, for, open_threads, set_state, peers")
 	f.StringVar(&def.Dir, "dir", "", "directory the crew member works in (default: the yard home)")
 	f.StringSliceVar(&def.On, "on", defaultOn, "event kinds delivered to its inbox (mail always is), or "+store.KindAttention+", the kinds that need someone; replaces the list, so name every kind wanted")
 	f.StringVar(&def.MaxAge, "max-age", "", "ask for a handoff after this long, e.g. 24h (default: never)")
@@ -543,7 +543,7 @@ func (a *app) crewSetCmd() *cobra.Command {
 		Short: "Change some settings of a crew member and keep the rest",
 		Long: `Changes the settings named and keeps the rest of the crew member's definition.
 key=value is a runner config key, as --set on yardr crew add takes it
-(kind, model, args, prompt, env_file, env_command, for, open_threads,
+(kind, model, fallback_model, args, prompt, env_file, env_command, for, open_threads,
 set_state, peers); --unset <key> removes one. --dir, --on, --max-age,
 --handoff-grace and --context-handoff change what the same flags of add set.
 
@@ -556,10 +556,10 @@ may allow a crew member a source or a peer it was not allowed before. Narrowing
 one, or removing it with --unset, is anyone's.
 
 A running crew member keeps its sessions. What it may do (open_threads,
-set_state, peers), whom it serves (for), --on, --max-age and --context-handoff
-hold from the next time they are looked at; what a session starts with (kind, model,
-args, prompt, its environment, --dir) is read when the next one starts:
-yardr crew restart <name>, or --for <user> for a conversation session.`,
+set_state, peers), whom it serves (for), fallback_model, --on, --max-age and
+--context-handoff hold from the next time they are looked at; what a session
+starts with (kind, model, args, prompt, its environment, --dir) is read when
+the next one starts: yardr crew restart <name>, or --for <user> for a conversation session.`,
 		Example: `  yardr crew set yardmaster set_state=linear
   yardr crew set yardmaster model=opus 'args=["--permission-mode","auto"]' --max-age 24h
   yardr crew set yardmaster --unset open_threads`,
@@ -650,7 +650,7 @@ yardr crew restart <name>, or --for <user> for a conversation session.`,
 				fmt.Fprintf(w, "crew member %s saved\n%s\n", name, changeLines(changes))
 				var atStart []string
 				for _, ch := range changes {
-					if !slices.Contains([]string{store.OpenThreads, store.SetState, store.MailPeers, "--on", "--max-age", "--handoff-grace", "--context-handoff"}, ch.Key) {
+					if !slices.Contains([]string{store.OpenThreads, store.SetState, store.MailPeers, "fallback_model", "--on", "--max-age", "--handoff-grace", "--context-handoff"}, ch.Key) {
 						atStart = append(atStart, ch.Key)
 					}
 				}

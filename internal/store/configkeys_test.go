@@ -82,6 +82,8 @@ func TestStoreRefusesAConfigKeyNothingReads(t *testing.T) {
 		`group g: its args already pass "--effort", which effort sets: remove it from args first`:                                         put("herdr", map[string]any{"kind": "claude", "effort": "max", "args": []string{"--effort", "high"}}),
 		`group g: its args already pass "model_reasoning_effort=\"high\"", which effort sets`:                                             put("herdr", map[string]any{"kind": "codex", "effort": "max", "args": []string{"-c", `model_reasoning_effort="high"`}}),
 		`group g: its args already pass "--effort=low", which effort sets`:                                                                put("herdr", map[string]any{"kind": "muse", "effort": "high", "args": []string{"--yolo", "--effort=low"}}),
+		// fallback_model is a crew member's alone: a group reads no fallback.
+		`group g: unknown config key "fallback_model": nothing reads it. A group of the herdr runner takes:`: put("herdr", map[string]any{"kind": "claude", "fallback_model": "opus"}),
 	} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("PutGroup = %v, want %s", err, want)
@@ -119,11 +121,16 @@ func TestStoreRefusesAConfigKeyNothingReads(t *testing.T) {
 		return err
 	}
 	for want, err := range map[string]error{
-		`crew member clerk: unknown config key "max_age": nothing reads it. A crew member of the herdr runner takes: args, env_command, env_file, for, greet, kind, model, open_threads, peers, prompt, provider, set_state, trust`: crew(map[string]any{"max_age": "6h"}),
-		`crew member clerk: herdr runner needs config.env_command as a string or a list, got the JSON boolean true; write --set 'env_command="true"'`:                                                                               crew(map[string]any{"env_command": true}),
-		`crew member clerk: herdr runner needs config.set_state as names separated by commas, or a list, got the JSON boolean true`:                                                                                                 crew(map[string]any{"set_state": true}),
+		`crew member clerk: unknown config key "max_age": nothing reads it. A crew member of the herdr runner takes: args, env_command, env_file, fallback_model, for, greet, kind, model, open_threads, peers, prompt, provider, set_state, trust`: crew(map[string]any{"max_age": "6h"}),
+		`crew member clerk: herdr runner needs config.env_command as a string or a list, got the JSON boolean true; write --set 'env_command="true"'`:                                                                                               crew(map[string]any{"env_command": true}),
+		`crew member clerk: herdr runner needs config.set_state as names separated by commas, or a list, got the JSON boolean true`:                                                                                                                 crew(map[string]any{"set_state": true}),
 		// A crew member's effort is not read yet: the key is a group's.
 		`crew member clerk: unknown config key "effort": nothing reads it. A crew member of the herdr runner takes:`: crew(map[string]any{"effort": "max"}),
+		// A fallback_model is a crew member's alone, and of its own kind:
+		// a model another kind offers would fail only at the failover.
+		`crew member clerk: fallback_model "gpt-6-luna" is a codex model, not a claude one`: crew(map[string]any{"kind": "claude", "fallback_model": "gpt-6-luna"}),
+		`crew member clerk: fallback_model "opus" is a claude model, not a kimi one`:        crew(map[string]any{"kind": "kimi", "fallback_model": "opus"}),
+		`crew member clerk: fallback_model "kimi-code/k3" is a kimi model, not a codex one`: crew(map[string]any{"kind": "codex", "fallback_model": "kimi-code/k3"}),
 	} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("PutCrew = %v, want %s", err, want)
@@ -143,6 +150,19 @@ func TestStoreRefusesAConfigKeyNothingReads(t *testing.T) {
 	if err := crew(map[string]any{"kind": "claude", "env_command": []string{"op", "inject"}, "greet": "jo",
 		"open_threads": "linear,github", "peers": []string{"north"}}); err != nil {
 		t.Errorf("PutCrew = %v", err)
+	}
+	// A fallback of the member's own kind is taken, an offered one and a
+	// full model id alike: the id no kind offers cannot be told another
+	// kind's, as a crew member's model cannot (below).
+	for _, cfg := range []map[string]any{
+		{"kind": "claude", "model": "fable", "fallback_model": "opus"},
+		{"kind": "claude", "model": "claude-fable-5-2", "fallback_model": "claude-opus-4-5"},
+		{"kind": "kimi", "model": "kimi-code/k3", "fallback_model": "kimi-code/kimi-for-coding"},
+		{"kind": "opencode", "model": "opencode/big-pickle", "fallback_model": "opencode/hy3-free"},
+	} {
+		if err := crew(cfg); err != nil {
+			t.Errorf("PutCrew(%v) = %v, want its fallback taken", cfg, err)
+		}
 	}
 	// A crew member's model is not held to its kind: a group's is, and the
 	// start refuses what the write lets stand.

@@ -80,6 +80,7 @@ var ConfigKeys = []ConfigKey{
 	{"nice", ConfigNice, []string{"exec", "herdr"}, GroupConfig, "the niceness a session and everything it starts run at, so that the daemon is served first when the machine is full; unset: the one it would start with"},
 	{"kind", ConfigString, []string{"herdr"}, "", "the agent kind herdr starts; default: the yard's default_kind"},
 	{"model", ConfigString, []string{"herdr"}, "", "the agent's model; default: the harness's own"},
+	{"fallback_model", ConfigString, []string{"herdr"}, CrewConfig, "the model of the same kind its sessions restart on when the model's own usage window is used up; unset: they wait for the reset"},
 	{"effort", ConfigString, []string{"herdr"}, GroupConfig, "the agent's reasoning effort, a level of its kind (yardr harness show <kind> lists them); default: the harness's own"},
 	{"provider", ConfigString, []string{"herdr"}, "", "the subscription the agent burns, named as a source's limits kinds name it; default: the kind's mapping"},
 	{"args", ConfigWords, []string{"herdr"}, "", "arguments the agent is started with"},
@@ -205,6 +206,9 @@ func configProblems(of ConfigOf, name, runner string, cfg, old map[string]any) [
 	if runner == "herdr" && of == GroupConfig {
 		typed = append(typed, effortProblems(subject, cfg, old)...)
 		typed = append(typed, modelProblems(subject, cfg, old)...)
+	}
+	if runner == "herdr" && of == CrewConfig {
+		typed = append(typed, fallbackProblems(subject, cfg, old)...)
 	}
 	out := append(typed, unknown...)
 	if cmd, _ := cfg["cmd"].(string); runner == "exec" && of == GroupConfig && cmd == "" && len(typed) == 0 {
