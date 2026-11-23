@@ -34,8 +34,12 @@ func StillGranted(was, now *source.Declaration, grants []SourceGrant) []string {
 			}
 		}
 		if len(who) > 0 {
+			kind := c.Kind
+			if c.Answer.File {
+				kind = "file"
+			}
 			out = append(out, fmt.Sprintf("the changed call %s (%s) is still granted by its name to %s (yardr source revoke %s %s takes it back)",
-				c.Name, c.Kind, strings.Join(who, ", "), now.Name, c.Name))
+				c.Name, kind, strings.Join(who, ", "), now.Name, c.Name))
 		}
 	}
 	return out

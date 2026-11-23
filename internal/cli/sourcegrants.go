@@ -104,6 +104,8 @@ func printGrants(w io.Writer, grants []store.SourceGrant, decls map[string]*sour
 			words := call
 			if d != nil && call == store.GrantRead {
 				words += " (" + countPhrase(readCalls(d), "call", "calls") + ")"
+			} else if d != nil && isFile(d, call) {
+				words += " (file)"
 			} else if d != nil && isUpdate(d, call) {
 				words += " (" + source.Update + ")"
 				updates++
@@ -141,12 +143,13 @@ func printGrants(w io.Writer, grants []store.SourceGrant, decls map[string]*sour
 	fmt.Fprintln(w, "take one back: yardr source revoke <source> <call> --crew|--group <holder> [--as <user>]")
 }
 
-// readCalls is how many read calls the declaration d has: what a grant of
-// read covers today.
+// readCalls is how many read calls the declaration d has that a grant
+// of read covers today: every read but a file call, which is granted by
+// its name alone.
 func readCalls(d *source.Declaration) int {
 	n := 0
 	for _, c := range d.Calls {
-		if c.Kind == source.Read {
+		if c.Kind == source.Read && !c.Answer.File {
 			n++
 		}
 	}
@@ -158,4 +161,11 @@ func readCalls(d *source.Declaration) int {
 func isUpdate(d *source.Declaration, name string) bool {
 	c, ok := d.Call(name)
 	return ok && c.Kind == source.Update
+}
+
+// isFile reports whether the declaration d has the call name as a call
+// that answers with a file.
+func isFile(d *source.Declaration, name string) bool {
+	c, ok := d.Call(name)
+	return ok && c.Answer.File
 }

@@ -813,7 +813,7 @@ credential in it whether their file sets that. The value is never printed.
 					fmt.Fprintln(w, "  check: the file names no call for it")
 				}
 				for _, call := range d.Calls {
-					line := fmt.Sprintf("  call %s  %s  %s", call.Name, call.Kind, call.Line())
+					line := fmt.Sprintf("  call %s  %s  %s", call.Name, callKindWord(call), call.Line())
 					if call.About != "" {
 						line += "  " + call.About
 					}
@@ -1949,9 +1949,9 @@ func callChanges(was, now *source.Declaration) []string {
 		old, had := was.Call(c.Name)
 		switch {
 		case !had:
-			out = append(out, fmt.Sprintf("new call %s (%s): %s", c.Name, c.Kind, c.Line()))
+			out = append(out, fmt.Sprintf("new call %s (%s): %s", c.Name, callKindWord(c), c.Line()))
 		case !sameCall(*old, c):
-			out = append(out, fmt.Sprintf("changed call %s (%s): %s, was (%s) %s", c.Name, c.Kind, c.Line(), old.Kind, old.Line()))
+			out = append(out, fmt.Sprintf("changed call %s (%s): %s, was (%s) %s", c.Name, callKindWord(c), c.Line(), callKindWord(*old), old.Line()))
 		}
 	}
 	for _, c := range was.Calls {
@@ -1968,11 +1968,11 @@ func callChanges(was, now *source.Declaration) []string {
 	return out
 }
 
-// grantWords returns what says a grant's words in a line, an update call
-// marked as one: "customer, note (update), read". It reads the sources
-// once, for every grant it is asked about.
+// grantWords returns what says a grant's words in a line, a call marked
+// as what it does: "customer, note (update), content (file), read". It
+// reads the sources once, for every grant it is asked about.
 func grantWords(ctx context.Context, st store.API) func(store.SourceGrant) string {
-	updates := map[string]bool{} // <source> <call>
+	marks := map[string]string{} // <source> <call> -> its mark, "" for a read
 	if srcs, err := st.Sources(ctx); err == nil {
 		for _, src := range srcs {
 			// One this build does not read has no call it could mark.
@@ -1981,7 +1981,7 @@ func grantWords(ctx context.Context, st store.API) func(store.SourceGrant) strin
 				continue
 			}
 			for _, c := range d.Calls {
-				updates[d.Name+" "+c.Name] = c.Kind == source.Update
+				marks[d.Name+" "+c.Name] = callKindWord(c)
 			}
 		}
 	}
@@ -1989,8 +1989,8 @@ func grantWords(ctx context.Context, st store.API) func(store.SourceGrant) strin
 		words := make([]string, len(g.Calls))
 		for i, w := range g.Calls {
 			words[i] = w
-			if updates[g.Source+" "+w] {
-				words[i] += " (" + source.Update + ")"
+			if mark := marks[g.Source+" "+w]; mark == "file" || mark == source.Update {
+				words[i] += " (" + mark + ")"
 			}
 		}
 		return strings.Join(words, ", ")

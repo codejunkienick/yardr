@@ -463,6 +463,19 @@ The field is removed before the normalize command receives the body and
 before the body is stored or hashed for deduplication. A pack whose
 declaration names it says `api: 7`.
 
+### API 8
+
+The `file` key under a call's `answer` (`answer: { file: true }`) on a
+read call that sends a request: its answer is a file's bytes, not JSON.
+The yard downloads it under its `blob_max_bytes` bound, keeps it as a
+blob, and `yardr call` writes it into the call's working directory. A
+file call is granted by its name alone, as an update is, and is marked
+`(file)` wherever a call is listed, beside `(update)`. `yardr call
+--json` of one prints `{"file":{"name","bytes"}}` (the name actually
+written, and how many bytes it holds), and `yardr call --note` notes the
+marking line and the file line, with no bytes. A pack whose declaration
+declares a file call says `api: 8`.
+
 ## Left out
 
 These are not in the API, and each can join it by a rise of the number if a

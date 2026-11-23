@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -174,9 +173,10 @@ func (g SourceGrant) Holder() string {
 }
 
 // Covers reports whether the grant lets its grantee make c, as the user
-// as ("" for a plain call): the grant's As must be the call's.
+// as ("" for a plain call): the grant's As must be the call's. A file call
+// is granted by its name alone, as an update is: read covers none of them.
 func (g SourceGrant) Covers(c *source.Call, as string) bool {
-	return g.As == as && (c.Kind == source.Read && slices.Contains(g.Calls, GrantRead) || slices.Contains(g.Calls, c.Name))
+	return g.As == as && (c.Kind == source.Read && !c.Answer.File && slices.Contains(g.Calls, GrantRead) || slices.Contains(g.Calls, c.Name))
 }
 
 // GrantSource lets to make what of the source src: GrantRead, or one call
@@ -279,14 +279,14 @@ func grantable(d *source.Declaration, what string) error {
 	return nil
 }
 
-// Words are the grant's calls as yardr source grant prints them, an update
-// call of the source d declares marked as one.
+// Words are the grant's calls as yardr source grant prints them, a call
+// of the source d declares marked as what it does (callMark).
 func (g SourceGrant) Words(d *source.Declaration) string {
 	words := make([]string, len(g.Calls))
 	for i, w := range g.Calls {
 		words[i] = w
-		if c, ok := d.Call(w); ok && c.Kind == source.Update {
-			words[i] += " (" + source.Update + ")"
+		if c, ok := d.Call(w); ok {
+			words[i] += callMark(c)
 		}
 	}
 	return strings.Join(words, ", ")
@@ -420,17 +420,17 @@ func grantsOf(tx *bolt.Tx, src string) ([]SourceGrant, error) {
 }
 
 // Widened is what a declaration that replaces was lets be reached through a
-// grant of GrantRead that was given before it: calls are the read calls now
-// has that are new or changed, and the holders of a GrantRead grant that
-// gain those calls. Both are empty when nobody gets a call that way, and
-// for a source that is new (was nil).
+// grant of GrantRead given before it: the read calls now new or changed
+// (a file call is granted by name alone, never through read), and the
+// holders of a GrantRead grant that gain those calls. Both are empty when
+// nobody gets a call that way, and for a source that is new (was nil).
 func Widened(was, now *source.Declaration, grants []SourceGrant) (calls []string, who []SourceGrant) {
 	if was == nil {
 		return nil, nil
 	}
 	for _, c := range now.Calls {
 		old, had := was.Call(c.Name)
-		if c.Kind != source.Read || had && SameCall(*old, c) {
+		if c.Kind != source.Read || c.Answer.File || had && SameCall(*old, c) {
 			continue
 		}
 		calls = append(calls, c.Name)
@@ -501,14 +501,6 @@ func sourceIn(tx *bolt.Tx, name string) (*Source, *source.Declaration, error) {
 	return src, d, nil
 }
 
-func callNames(d *source.Declaration) []string {
-	out := make([]string, len(d.Calls))
-	for i, c := range d.Calls {
-		out[i] = c.Name
-	}
-	return out
-}
-
 // SourceCall asks for one call of a declared source: yardr call.
 type SourceCall struct {
 	Source string            `json:"source"`
@@ -541,6 +533,8 @@ type SourceAnswer struct {
 	Answer json.RawMessage `json:"answer,omitempty"`
 	Bytes  int             `json:"bytes"`
 	Ms     int64           `json:"ms"`
+	// File is a file call's downloaded file, kept as a blob; nil for JSON.
+	File *SourceFile `json:"file,omitempty"`
 	// Marking is the line the answer is shown under (AnswerMarking).
 	Marking string `json:"marking"`
 	// Noted is the bead the answer was written on as a note, for a call
@@ -558,6 +552,8 @@ type Callable struct {
 	Kind   string         `json:"kind"`
 	About  string         `json:"about,omitempty"`
 	Params []source.Param `json:"params,omitempty"`
+	// File says the call writes a file in the caller's directory: (file).
+	File bool `json:"file,omitempty"`
 	// As is the user the call is made as, "" for a plain call.
 	As string `json:"as,omitempty"`
 }
@@ -838,7 +834,7 @@ func (c *sourceCaller) callables(tx *bolt.Tx) (*Callables, error) {
 			}
 			switch {
 			case refused == "":
-				out.Calls = append(out.Calls, Callable{Source: d.Name, Name: call.Name, Kind: call.Kind, About: call.About, Params: call.Params})
+				out.Calls = append(out.Calls, Callable{Source: d.Name, Name: call.Name, Kind: call.Kind, About: call.About, Params: call.Params, File: call.Answer.File})
 			case status == CallFromPeer || c.refused != "":
 				// Why it may call nothing at all, not that one call is
 				// not granted.
@@ -849,7 +845,7 @@ func (c *sourceCaller) callables(tx *bolt.Tx) (*Callables, error) {
 			// user, and the word must be typed, so a call lists each.
 			for _, g := range asGrants {
 				if g.Covers(call, g.As) {
-					out.Calls = append(out.Calls, Callable{Source: d.Name, Name: call.Name, Kind: call.Kind, About: call.About, Params: call.Params, As: g.As})
+					out.Calls = append(out.Calls, Callable{Source: d.Name, Name: call.Name, Kind: call.Kind, About: call.About, Params: call.Params, File: call.Answer.File, As: g.As})
 				}
 			}
 		}
@@ -997,19 +993,6 @@ func (w *wtx) keyed(at string) (*updateKey, error) {
 	return u, put(w.Tx, bSourceKeys, at, u)
 }
 
-// noteText is the answer as the note of a bead: under the line every
-// answer is shown under, indented as yardr call prints it.
-func noteText(a *SourceAnswer) string {
-	if len(a.Answer) == 0 {
-		return fmt.Sprintf("%s\n(%d, and nothing in the answer)", a.Marking, a.Status)
-	}
-	var pretty bytes.Buffer
-	if json.Indent(&pretty, a.Answer, "", "  ") != nil {
-		return a.Marking + "\n" + string(a.Answer)
-	}
-	return a.Marking + "\n" + pretty.String()
-}
-
 // sourceCalled writes the record of one call, made or refused: the
 // source_call event, on the caller's bead for a session. It keeps who
 // called and, where a call names one, who it was called as, what and how
@@ -1068,21 +1051,22 @@ func (w *wtx) sourceCalled(c *sourceCaller, d *source.Declaration, call *source.
 // before (keyed). The credential is read, any build command is run, and the
 // call is then made, all outside any store transaction and each bounded
 // by its own source.Timeout, so nothing of the store waits on a command or
-// service. A second write records how it ended. A call that is refused is
-// recorded too, and returned as an error. The answer of a call that asked for it (Note) is
-// then written on the caller's bead, in a write of its own: a note that
-// cannot be written leaves the call made and recorded.
+// service. A second write records how it ended. A refused call is recorded
+// too, and returned as an error. A noted answer (Note) is then written on
+// the caller's bead in a write of its own, leaving the call made.
 func (s *Store) CallSource(ctx context.Context, req SourceCall) (*SourceAnswer, error) {
 	var (
-		caller  *sourceCaller
-		src     *Source
-		d       *source.Declaration
-		call    *source.Call
-		refused string
-		note    string     // the bead the answer is noted on
-		asFile  string     // the file a call as a user reads, from their record
-		keyAt   string     // where the update's key is kept
-		key     *updateKey // nil for a call that is sent none
+		caller    *sourceCaller
+		src       *Source
+		d         *source.Declaration
+		call      *source.Call
+		refused   string
+		note      string     // the bead the answer is noted on
+		asFile    string     // the file a call as a user reads, from their record
+		keyAt     string     // where the update's key is kept
+		key       *updateKey // nil for a call that is sent none
+		fileLimit int64      // a file call's positive blob bound, 0 for no file call
+		fileData  []byte     // a file call's downloaded bytes, kept as a blob below
 	)
 	err := s.write(func(w *wtx) error {
 		refused, note, asFile, keyAt, key = "", "", "", "", nil // a batch may run this twice
@@ -1141,6 +1125,11 @@ func (s *Store) CallSource(ctx context.Context, req SourceCall) (*SourceAnswer, 
 				why, status = verr.Error(), source.BadParam
 			}
 		}
+		if why == "" && call.Answer.File {
+			if fileLimit, why = fileBound(w.Tx); why != "" {
+				status = CallFileBound
+			}
+		}
 		if why == "" {
 			over, until, err := w.count(caller.key(d.Name), src, call.Kind == source.Update)
 			if err != nil {
@@ -1189,6 +1178,8 @@ func (s *Store) CallSource(ctx context.Context, req SourceCall) (*SourceAnswer, 
 	}
 	if err != nil {
 		err = fmt.Errorf("source %s, call %s: %w", d.Name, call.Name, err)
+	} else if call.Answer.File {
+		res, fileData, err = s.fetchFileCall(ctx, d, call, req.Params, cred, req.inputs, fileLimit)
 	} else {
 		res, err = s.sourceCallRequest(ctx, d, call, req.Params, cred, sentWith, req.inputs)
 	}
@@ -1221,6 +1212,11 @@ func (s *Store) CallSource(ctx context.Context, req SourceCall) (*SourceAnswer, 
 	}
 	out := &SourceAnswer{Source: d.Name, Call: call.Name, Kind: call.Kind, Status: res.Status, Answer: res.Answer,
 		Bytes: res.Bytes, Ms: res.Took.Milliseconds(), Marking: AnswerMarking(d.Name, call.Name)}
+	if fileData != nil {
+		if out.File, err = s.keepFileAnswer(ctx, d.Name, call.Name, res, fileData); err != nil {
+			return nil, err
+		}
+	}
 	if note == "" || !res.OK() {
 		return out, nil
 	}

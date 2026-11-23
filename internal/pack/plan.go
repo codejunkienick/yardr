@@ -589,9 +589,11 @@ type Calls struct {
 	CrewMember string `json:"crew,omitempty"`
 	Source     string `json:"source"`
 	// Wants are what the pack names, in its order: store.GrantRead, and
-	// calls by name. Updates are those of them that are update calls.
+	// calls by name. Updates are those of them that are update calls, and
+	// Files those that answer with a file.
 	Wants   []string `json:"wants"`
 	Updates []string `json:"updates"`
+	Files   []string `json:"files,omitempty"`
 	// Has are those the grantee is granted already: no question.
 	Has []string `json:"has"`
 	// Lacks are those nothing is asked or granted for, and no answer
@@ -619,13 +621,16 @@ func (c Calls) Grantable(call string) bool {
 	return slices.Contains(c.Asks, call) || slices.Contains(c.Declined, call)
 }
 
-// Words are calls as a plan prints them, an update marked as one: "read,
-// note (update)".
+// Words are calls as a plan prints them, each marked as what it does:
+// "read, note (update), content (file)".
 func (c Calls) Words(calls []string) string {
 	words := make([]string, len(calls))
 	for i, w := range calls {
 		words[i] = w
-		if slices.Contains(c.Updates, w) {
+		switch {
+		case slices.Contains(c.Files, w):
+			words[i] += " (file)"
+		case slices.Contains(c.Updates, w):
 			words[i] += " (" + source.Update + ")"
 		}
 	}

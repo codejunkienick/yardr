@@ -1111,7 +1111,7 @@ func (w *wtx) setupPresetSourceSays(preset string, d *source.Declaration, calls 
 		if hasRead {
 			var reads []string
 			for _, c := range d.Calls {
-				if c.Kind == source.Read {
+				if c.Kind == source.Read && !c.Answer.File {
 					reads = append(reads, callSays(c))
 				}
 			}
@@ -1126,11 +1126,7 @@ func (w *wtx) setupPresetSourceSays(preset string, d *source.Declaration, calls 
 			if !ok {
 				continue // checked at asking; the approval renders what stands
 			}
-			if c.Kind == source.Update {
-				says = append(says, fmt.Sprintf("may make the call %s %s, which changes something there.", callSays(*c), of))
-			} else {
-				says = append(says, fmt.Sprintf("may make the call %s %s, which the declaration says reads there and changes nothing.", callSays(*c), of))
-			}
+			says = append(says, fmt.Sprintf("may make the call %s %s%s", callSays(*c), of, grantTail(c)))
 		}
 		return strings.Join(says, " "), nil
 	}
@@ -1150,7 +1146,7 @@ func (w *wtx) setupPresetSourceSays(preset string, d *source.Declaration, calls 
 	if hasRead {
 		var reads, added []string
 		for _, c := range d.Calls {
-			if c.Kind != source.Read {
+			if c.Kind != source.Read || c.Answer.File {
 				continue
 			}
 			word := callSays(c)
@@ -1198,12 +1194,7 @@ func (w *wtx) setupPresetSourceSays(preset string, d *source.Declaration, calls 
 		if !ok {
 			continue // checked at asking; the approval renders what stands
 		}
-		var line string
-		if c.Kind == source.Update {
-			line = fmt.Sprintf("may make the call %s %s, which changes something there.", callSays(*c), of)
-		} else {
-			line = fmt.Sprintf("may make the call %s %s, which the declaration says reads there and changes nothing.", callSays(*c), of)
-		}
+		line := fmt.Sprintf("may make the call %s %s%s", callSays(*c), of, grantTail(c))
 		line = strings.TrimSuffix(line, ".") + setupHeldMark(to, held, func(g SourceGrant) bool {
 			return g.Covers(c, "")
 		})
@@ -1214,7 +1205,7 @@ func (w *wtx) setupPresetSourceSays(preset string, d *source.Declaration, calls 
 					waiting = append(waiting, t)
 				}
 			}
-			if len(waiting) > 0 && c.Kind == source.Update {
+			if len(waiting) > 0 && (c.Kind == source.Update || c.Answer.File) {
 				if len(waiting) == len(to) {
 					line += fmt.Sprintf(", waiting on the preset %s", preset)
 				} else {

@@ -575,7 +575,7 @@ func grantCallMay(d *source.Declaration, of, what string) string {
 	if c, ok := d.Call(what); what == GrantRead {
 		var reads []string
 		for _, c := range d.Calls {
-			if c.Kind == source.Read {
+			if c.Kind == source.Read && !c.Answer.File {
 				reads = append(reads, callSays(c))
 			}
 		}
@@ -584,10 +584,8 @@ func grantCallMay(d *source.Declaration, of, what string) string {
 			today = "today the source has none"
 		}
 		return fmt.Sprintf("may make every read call %s: %s, and it covers any read call the operator later gives the source.", of, today)
-	} else if ok && c.Kind == source.Update {
-		return fmt.Sprintf("may make the call %s %s, which changes something there.", callSays(*c), of)
 	} else if ok {
-		return fmt.Sprintf("may make the call %s %s, which the declaration says reads there and changes nothing.", callSays(*c), of)
+		return fmt.Sprintf("may make the call %s %s%s", callSays(*c), of, grantTail(c))
 	}
 	return ""
 }

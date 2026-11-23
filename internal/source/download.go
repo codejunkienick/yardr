@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -39,6 +40,13 @@ var lookupIPs = func(ctx context.Context, host string) ([]net.IP, error) {
 // never stands with partial bytes. readSecret is Do's.
 func DoFile(ctx context.Context, d *Declaration, name string, params map[string]string, credential, dest string, maxBytes int64, readSecret func(path string) (secret []byte, resolved string, err error)) (*Result, error) {
 	return doFile(ctx, d, name, params, credential, nil, nil, dest, maxBytes, readSecret)
+}
+
+// DoFileWithInputs is DoFile with the values of file parameters already
+// read, as DoKeyedWithInputs is to DoKeyed: a run-ask card's captured
+// bytes are sent even where the file they name changed since.
+func DoFileWithInputs(ctx context.Context, d *Declaration, name string, params map[string]string, credential string, inputs map[string][]byte, dest string, maxBytes int64, readSecret func(path string) (secret []byte, resolved string, err error)) (*Result, error) {
+	return doFile(ctx, d, name, params, credential, nil, inputs, dest, maxBytes, readSecret)
 }
 
 // DoFileBody is DoFile with the request's body already built, rather than
@@ -199,6 +207,9 @@ func doFile(ctx context.Context, d *Declaration, name string, params map[string]
 				phase.stop()
 				return nil, fail(reason, resp.StatusCode, "the file from %s did not begin within %s: %s", here, Timeout, why)
 			}
+			// The name the final answer suggests, held to nothing here:
+			// the caller cuts and checks it (the store's CheckBlobName).
+			res.Filename = dispositionName(resp.Header.Get("Content-Disposition"))
 			f, err := os.CreateTemp(filepath.Dir(dest), ".yardr-download-*")
 			if err != nil {
 				resp.Body.Close()
@@ -533,4 +544,17 @@ func (p *filePhase) failure(err error, start time.Time, bound time.Duration) (st
 		return TimedOut, "nothing within " + bound.String()
 	}
 	return unsent(p.ctx, err), cause(p.ctx, err, start)
+}
+
+// dispositionName is the filename a Content-Disposition header names, ""
+// where it names none or does not parse: the name is the service's word
+// alone, cut and held to a file's name by whoever writes with it.
+func dispositionName(header string) string {
+	if header == "" {
+		return ""
+	}
+	if _, params, err := mime.ParseMediaType(header); err == nil {
+		return params["filename"]
+	}
+	return ""
 }

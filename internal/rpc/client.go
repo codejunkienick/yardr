@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
@@ -101,6 +102,31 @@ func (c *Client) Ping(ctx context.Context) error {
 	}
 	resp.Body.Close()
 	return nil
+}
+
+// BlobBytes fetches the bytes of the blob hash over the socket, with the
+// type the server set for them: GET /blobs/<hash> beside the generated
+// calls, which carry blob metadata and no bytes. Any answer but 200 (an
+// unknown or malformed hash among them) is an error saying no more than
+// its status, as Ping and Owner speak for the raw routes beside them.
+func (c *Client) BlobBytes(ctx context.Context, hash string) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://yard/blobs/"+hash, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("yardr server: %s", resp.Status)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	return data, resp.Header.Get("Content-Type"), nil
 }
 
 // Owner asks the owner which process it is and which build it runs, from

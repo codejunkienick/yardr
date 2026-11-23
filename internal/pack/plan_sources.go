@@ -109,7 +109,7 @@ func (b *planner) declared() error {
 		decl := d.Declaration
 		dp := DeclaredPlan{Source: d.Name, File: d.File, Base: decl.Address(), Calls: []string{}, Needs: []Need{}}
 		for _, c := range decl.Calls {
-			dp.Calls = append(dp.Calls, c.Name+" ("+c.Kind+")")
+			dp.Calls = append(dp.Calls, c.Name+" ("+callWord(c)+")")
 			dp.Warnings = append(dp.Warnings, c.SelectWarnings()...)
 		}
 		commands, err := b.sourceCommands(d)
@@ -423,6 +423,8 @@ func (b *planner) calls() error {
 				if decl != nil && !exists {
 					if call, exists = decl.Call(w); exists && call.Kind == source.Update {
 						c.Updates = append(c.Updates, w)
+					} else if exists && call.Answer.File {
+						c.Files = append(c.Files, w)
 					}
 				}
 				switch {
@@ -509,7 +511,7 @@ func declarationDiff(was, now *source.Declaration) []Diff {
 		text, _ := json.Marshal(d.Bases) // a map of strings always marshals
 		return string(text)
 	}
-	line := func(c *source.Call) string { return "(" + c.Kind + ") " + c.Line() }
+	line := func(c *source.Call) string { return "(" + callWord(*c) + ") " + c.Line() }
 	for _, f := range []struct{ field, old, new string }{
 		{"base", was.Address(), now.Address()}, {"bases", bases(was), bases(now)}, {"base_template", was.BaseTemplate, now.BaseTemplate}, {"path_template", was.PathTemplate, now.PathTemplate}, {"credential", credential(was), credential(now)}, {"check", was.Check, now.Check}, {"idempotency", was.Idempotency, now.Idempotency}, {"notify", notify(was), notify(now)},
 		{"hear", keyValue(was.Hear), keyValue(now.Hear)}, {"thread", keyValue(was.Thread), keyValue(now.Thread)}, {"link", keyValue(was.Link), keyValue(now.Link)}, {"hook", keyValue(was.Hook), keyValue(now.Hook)},
@@ -570,6 +572,16 @@ func inDepot(depot string) string {
 		return "the yard"
 	}
 	return "depot " + depot
+}
+
+// callWord is a call's kind as a plan names it: "file" for a call that
+// answers with a file, which its lists mark apart as they mark an
+// update, else its declared kind.
+func callWord(c source.Call) string {
+	if c.Answer.File {
+		return "file"
+	}
+	return c.Kind
 }
 
 // mapName is what a plan calls the stage map on hook, acted on as crew member.

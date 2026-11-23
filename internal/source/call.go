@@ -77,16 +77,16 @@ func (e *CallError) Error() string {
 // Result is what a call that was answered returns.
 type Result struct {
 	// Status is the service's. An answer that is no success (4xx, 5xx) is
-	// a Result too, keeping at most the call's answer.errors: the rest may
-	// repeat the request, which is not kept. A command's answer (RunCall)
-	// is 200: it is a success or it is no Result at all.
+	// a Result too, keeping at most the call's answer.errors; a command's
+	// answer (RunCall) is 200: a success or no Result at all.
 	Status int `json:"status"`
 	// Answer is the JSON of a success, after the call's select, or of a
 	// refusal, after its errors; empty where nothing was said or kept.
 	Answer json.RawMessage `json:"answer,omitempty"`
 	// Bytes is how much the service sent.
-	Bytes int           `json:"bytes"`
-	Took  time.Duration `json:"-"`
+	Bytes    int           `json:"bytes"`
+	Filename string        `json:"-"` // a file answer's name from its Content-Disposition, "" for none
+	Took     time.Duration `json:"-"`
 }
 
 // OK reports whether the service answered with a success.

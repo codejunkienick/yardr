@@ -556,3 +556,11 @@ func Witness(e Event) string {
 // HomeDir is the yard's home, for a test that names a file the yard owns
 // (HookSecretFile).
 func (s *Store) HomeDir() string { return s.home }
+
+// PutSettingRaw stores a setting's value with none of SetSetting's
+// checks, as a store written before a check held it stands: a test of
+// what a reader does with such a value (a file call and a blob bound of
+// 0) writes it so.
+func (s *Store) PutSettingRaw(key, value string) error {
+	return s.write(func(w *wtx) error { return put(w.Tx, bSettings, key, value) })
+}

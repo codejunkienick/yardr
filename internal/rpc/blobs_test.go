@@ -86,6 +86,28 @@ func TestBlobsOverTheSocket(t *testing.T) {
 	}
 }
 
+// BlobBytes over the socket returns a put blob's bytes and the type the
+// server set for them; an unknown hash and a malformed one are each an
+// error with no bytes.
+func TestBlobBytesOverTheSocket(t *testing.T) {
+	c := NewClient(apiYard(t))
+	ctx := t.Context()
+	jpeg := []byte("\xff\xd8\xff\xe0 the fence")
+	ref, err := c.PutBlob(ctx, jpeg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, typ, err := c.BlobBytes(ctx, ref.Hash)
+	if err != nil || typ != "image/jpeg" || !bytes.Equal(data, jpeg) {
+		t.Fatalf("BlobBytes(%s) = %q, %q, %v", ref.Hash, data, typ, err)
+	}
+	for _, hash := range []string{strings.Repeat("0", 64), "nope"} {
+		if data, _, err := c.BlobBytes(ctx, hash); err == nil || len(data) != 0 {
+			t.Errorf("BlobBytes(%q) = %d bytes, %v; want an error and none", hash, len(data), err)
+		}
+	}
+}
+
 // The client puts an image and sends mail that names it, and the mail
 // event the stream carries has the list.
 func TestClientMailWithFiles(t *testing.T) {

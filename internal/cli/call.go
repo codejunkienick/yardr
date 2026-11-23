@@ -91,8 +91,19 @@ session that made it: who, which call, how it ended, the names of the
 parameters, and the value of one the source's file marks log: true. Never
 the credential, the answer or the request.
 
+A call whose answer is a file (answer.file in the source's file) downloads
+the file instead: the server keeps its bytes as a blob under the yard's
+blob_max_bytes, and this command fetches them over the socket and writes
+them in its working directory under the name the yard chooses, never
+overwriting (a standing name gets a numbered neighbour), at mode 0600.
+At a terminal it prints the marking line, then file: ./<name> (<bytes>
+bytes); --json prints {"file":{"name","bytes"}} alone, with the name
+actually written; --note notes those two lines and no bytes. A fetch or
+write that fails after the call was made says the call was made and
+recorded and the file not written, and leaves no file.
+
 --list prints the calls you may make, each as the command that makes it, an
-update marked (update).`,
+update marked (update) and a file call marked (file).`,
 		Example: `  yardr call --list
   yardr call crm customer id=4711
   yardr call crm customer id=4711 --json | jq .plan   # the answer alone, so jq reads the customer's plan
@@ -176,6 +187,35 @@ update marked (update).`,
 			if res.NotNoted != "" {
 				notNoted = fmt.Errorf("source %s, call %s: the call was made and its answer is not noted: %s", res.Source, res.Call, res.NotNoted)
 			}
+			if res.File != nil {
+				// A file answer: fetch its blob and write it here, in
+				// this command's working directory, before anything is
+				// printed as its answer. A failure leaves no file and
+				// says the call stands recorded without one.
+				written, werr := writeFetchedFile(c.Context(), st, res)
+				if a.json {
+					if werr != nil {
+						return fileNotWritten(res, werr)
+					}
+					raw, err := json.Marshal(callFileJSON{File: callFileRef{Name: written, Bytes: res.File.Bytes}})
+					if err != nil {
+						return err
+					}
+					if _, err := fmt.Fprintln(c.OutOrStdout(), string(raw)); err != nil {
+						return err
+					}
+					return notNoted
+				}
+				fmt.Fprintln(c.OutOrStdout(), res.Marking)
+				if werr != nil {
+					return fileNotWritten(res, werr)
+				}
+				fmt.Fprintln(c.OutOrStdout(), store.FileAnswerLine(written, res.File.Bytes))
+				if res.Noted != "" {
+					fmt.Fprintf(c.OutOrStdout(), "noted on %s\n", res.Noted)
+				}
+				return notNoted
+			}
 			if a.json {
 				if len(res.Answer) > 0 {
 					if _, err := fmt.Fprintln(c.OutOrStdout(), string(res.Answer)); err != nil {
@@ -208,12 +248,12 @@ update marked (update).`,
 }
 
 // printCallables prints each call as the command that makes it, with what
-// the source's file says it is about, an update marked as one.
+// the source's file says it is about, an update or a file call marked.
 func printCallables(w io.Writer, indent string, calls []store.Callable) {
 	for _, c := range calls {
 		line := indent + c.Line()
-		if c.Update() {
-			line += "   (" + c.Kind + ")"
+		if mark := callableMark(c); mark != "" {
+			line += "   " + mark
 		}
 		if c.About != "" {
 			line += "   " + c.About

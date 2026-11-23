@@ -573,7 +573,9 @@ func callSaysWhole(d *source.Declaration, c *source.Call) []string {
 	} else {
 		second = fmt.Sprintf("call %s sends no body", c.Name)
 	}
-	if len(c.Answer.Select) > 0 {
+	if c.Answer.File {
+		second += ". Its answer is a file, downloaded and written into the caller's working directory under the yard's blob bound, granted by its name alone"
+	} else if len(c.Answer.Select) > 0 {
 		selects := make([]string, len(c.Answer.Select))
 		for i, name := range c.Answer.Select {
 			selects[i] = displaySourceValue(name)
@@ -582,7 +584,9 @@ func callSaysWhole(d *source.Declaration, c *source.Call) []string {
 	} else {
 		second += ". Its answer is returned as it comes"
 	}
-	second += fmt.Sprintf(", at most %d bytes.", c.Answer.Max)
+	if !c.Answer.File {
+		second += fmt.Sprintf(", at most %d bytes.", c.Answer.Max)
+	}
 	// A name no path walks is warned of on the call's own line and not on a
 	// line of its own, since a card is bounded in lines (MaxRunSourceCardLines).
 	for _, w := range c.SelectWarnings() {
