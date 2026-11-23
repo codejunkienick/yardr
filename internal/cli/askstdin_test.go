@@ -352,3 +352,27 @@ func TestBeadAskRunWord(t *testing.T) {
 		}
 	}
 }
+
+// The help of yardr bead ask says who may file a run ask: a crew member or a
+// user of the yard, which --actor names and does not make, and not one who
+// may run the command themselves. Without it a person learns each rule from
+// a refusal, after the ask is typed. The phrases pinned are the store's own
+// words for the two refusals and the flag's rule; the help is read as words,
+// so a reflowed paragraph passes, and the wording around them is free.
+func TestBeadAskHelpSaysWhoMayFileARunAsk(t *testing.T) {
+	t.Parallel()
+	help, _, err := (&app{}).beadCmd().Find([]string{"ask"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	words := strings.Join(strings.Fields(help.Long), " ")
+	for _, want := range []string{
+		"proposed by a crew member or a user of the yard",
+		"--actor only names who is asking",
+		"needs no approval: run it yourself",
+	} {
+		if !strings.Contains(words, want) {
+			t.Errorf("yardr bead ask --help does not say %q", want)
+		}
+	}
+}

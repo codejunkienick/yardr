@@ -37,6 +37,12 @@ beads it is about. The person answers by picking an option, puts the
 question aside, or declines it (yardr bead answer); the answer is the
 option, so it cannot be misread.
 
+A run ask (--run) is proposed by a crew member or a user of the yard.
+--actor only names who is asking: a name that is no crew member and no user
+of the yard is refused. An ask is refused too when its asker may run the
+command themselves, as the operator may, since a run ask proposes what its
+asker may not run. The refusal says "needs no approval: run it yourself".
+
 The question is the last argument, or - to read the ask from stdin, which is
 how to write one that quotes code or file names: inside a double-quoted
 argument the shell runs every backtick span and $( ) and puts what it prints
