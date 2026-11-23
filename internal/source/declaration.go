@@ -72,7 +72,15 @@ type Declaration struct {
 	// stays the default; a source set to a host sends its calls to the
 	// filled address instead (WithHost). Empty for a service that is only
 	// where Base says.
-	BaseTemplate string      `json:"base_template,omitempty"`
+	BaseTemplate string `json:"base_template,omitempty"`
+	// PathTemplate is the address a site the operator types fills, one path
+	// segment of it, for a service that scopes its calls by site:
+	// https://host/path/{site}/rest, without a trailing slash. Base stays
+	// the default; a source set to a site sends its calls to the filled
+	// address instead (WithSite), and its credential is keyed to the host
+	// and that segment together, so one site's credential is never sent to
+	// another's. Empty for a service that scopes nothing by site.
+	PathTemplate string      `json:"path_template,omitempty"`
 	Credential   *Credential `json:"credential,omitempty"`
 	// Check names the call `yardr source check` makes: a read call that
 	// needs no parameter, sent as a request or answered by its run command
@@ -123,6 +131,11 @@ type Declaration struct {
 	// by itself; yardr pack install runs an install, in a terminal or
 	// on a run card the operator approves.
 	Needs []Need `json:"needs,omitempty"`
+
+	// filledSite is the segment WithSite filled into Base, "" where none
+	// was: it is the site a credential of this copy is keyed to, and is
+	// never in the file, so it is no part of the declaration as read.
+	filledSite string
 }
 
 // Need is one program a declaration needs on the machine: the program

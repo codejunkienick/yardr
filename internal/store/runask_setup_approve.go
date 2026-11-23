@@ -47,15 +47,18 @@ import (
 // approval records nothing and changes nothing, and leaves the ask open.
 //
 // host is the host of a server of the operator's own that each source the
-// pack carries with a base_template is set to, in place of the base: asked
-// where a source declares one (AskSetup.HostTemplate), held to what a base is
-// in the checks' words, and tried by the typed account's check call, which
-// goes to it. The yard carries it out before the account is written, so the
-// key is given for the host the calls go to. An account that stands was given
-// for the host in use and is held back from the new one until it is typed
-// again: a bare pick that keeps it keeps it held, and a card that has part of
-// it standing takes every name typed with a host. It is the operator's alone,
-// on the card or in a terminal, and an asker has no word for it.
+// pack carries with a base_template is set to, in place of the base, and site
+// is the site each source it carries with a path_template is set to, beside
+// it: each asked where a source declares one (AskSetup.HostTemplate,
+// AskSetup.SiteTemplate), held to what a base is in the checks' words, and
+// tried by the typed account's check call, which goes to it. The yard carries
+// each out before the account is written, so the key is given for the host
+// (and site) the calls go to. An account that stands was given for the host
+// and site in use and is held back from a new one until it is typed again: a
+// bare pick that keeps it keeps it held, and a card that has part of it
+// standing takes every name typed with a host or a site. Each is the
+// operator's alone, on the card or in a terminal, and an asker has no word
+// for either.
 //
 // It is served on the yard's socket, and on the listener to a device of
 // the operator and to no other caller (rpc.OperatorCalls), as run
@@ -67,7 +70,7 @@ import (
 // (weighed), and without it the approval is refused, changes nothing and
 // leaves the ask open (weighedRefusal). The yard checks what the client
 // says and no more.
-func (s *Store) ApproveSetup(ctx context.Context, id string, ask uint64, option int, values map[string]string, account, actor string, weighed bool, host string) (*AskSetupApproved, error) {
+func (s *Store) ApproveSetup(ctx context.Context, id string, ask uint64, option int, values map[string]string, account, actor string, weighed bool, host, site string) (*AskSetupApproved, error) {
 	// A bead's handle never holds an "@" (validID).
 	if strings.Contains(id, "@") {
 		return nil, fmt.Errorf("ask %d on %s is a setup of another yard's operator: it is approved in the yard that asked, never over a link", ask, id)
@@ -80,7 +83,7 @@ func (s *Store) ApproveSetup(ctx context.Context, id string, ask uint64, option 
 	var job *setupCheck
 	if err := s.writeVia(ctx, func(w *wtx) (err error) {
 		var v *setupApproval
-		v, err = w.validateSetupApproval(ctx, id, ask, option, values, account, actor, weighed, host)
+		v, err = w.validateSetupApproval(ctx, id, ask, option, values, account, actor, weighed, host, site)
 		if err != nil {
 			return err
 		}
@@ -99,7 +102,7 @@ func (s *Store) ApproveSetup(ctx context.Context, id string, ask uint64, option 
 	defer s.setupSecrets.mu.Unlock()
 	var out *AskSetupApproved
 	err := s.writeVia(ctx, func(w *wtx) (err error) {
-		out, err = w.approveSetup(ctx, id, ask, option, values, account, actor, weighed, host)
+		out, err = w.approveSetup(ctx, id, ask, option, values, account, actor, weighed, host, site)
 		return err
 	})
 	if err != nil {
@@ -114,7 +117,7 @@ func (s *Store) ApproveSetup(ctx context.Context, id string, ask uint64, option 
 // setupApproval is a setup approval validated and ready to record: the
 // bead, who asked and the weight the card showed, the setup as asked, the
 // preset picked, the candidate taken or the kept account, the names the
-// typed values gave, the host given, and the actor the call came as.
+// typed values gave, the host and site given, and the actor the call came as.
 type setupApproval struct {
 	row     *beadRow
 	asker   string
@@ -126,6 +129,7 @@ type setupApproval struct {
 	keep    bool
 	given   []string
 	host    string
+	site    string
 	actor   string
 }
 
@@ -133,7 +137,7 @@ type setupApproval struct {
 // check an approval must pass, and what recording it needs. A batch may
 // run it twice for one call (write): it reads the yard's records anew
 // each time and ends the same.
-func (w *wtx) validateSetupApproval(ctx context.Context, id string, seq uint64, option int, values map[string]string, account, actor string, weighed bool, host string) (*setupApproval, error) {
+func (w *wtx) validateSetupApproval(ctx context.Context, id string, seq uint64, option int, values map[string]string, account, actor string, weighed bool, host, site string) (*setupApproval, error) {
 	who, err := paneAuthor(w.Tx, callerOf(ctx), actor)
 	if err != nil {
 		return nil, err
@@ -211,9 +215,9 @@ func (w *wtx) validateSetupApproval(ctx context.Context, id string, seq uint64, 
 			}
 			return nil, fmt.Errorf("ask %d lists no candidate %s: it lists %s, or type another %s", seq, account, strings.Join(names, ", "), strings.Join(was.Account, " and "))
 		}
-	} else if len(was.Missing) > 0 && (host == "" || len(was.Missing) == len(was.Account)) {
+	} else if len(was.Missing) > 0 && (host == "" && site == "" || len(was.Missing) == len(was.Account)) {
 		// A drift card with missing names wants those typed: the
-		// standing names stay where they are. A host moves the account as
+		// standing names stay where they are. A host or a site moves the account as
 		// a whole to another server, so with one where part of it stands
 		// every name is typed (the last branch): a name that stands is
 		// never paired with it unseen.
@@ -262,6 +266,9 @@ func (w *wtx) validateSetupApproval(ctx context.Context, id string, seq uint64, 
 	if err := checkSetupHost(seq, was, host); err != nil {
 		return nil, err
 	}
+	if err := checkSetupSite(seq, was, site); err != nil {
+		return nil, err
+	}
 	card, err := w.setupCard(was.Pack, was.To, was.Base)
 	if err != nil {
 		return nil, fmt.Errorf("ask %d: %w. %s", seq, err, nothingRan)
@@ -272,7 +279,7 @@ func (w *wtx) validateSetupApproval(ctx context.Context, id string, seq uint64, 
 			return nil, err
 		}
 	}
-	if err := w.setupHeldStale(seq, was, picked, host); err != nil {
+	if err := w.setupHeldStale(seq, was, picked, host, site); err != nil {
 		return nil, err
 	}
 	// Weighed again from the card as it stands: a card whose weight is
@@ -295,7 +302,7 @@ func (w *wtx) validateSetupApproval(ctx context.Context, id string, seq uint64, 
 		}
 	}
 	return &setupApproval{row: row, asker: r.Note.Author, weight: r.Ask.Weight, was: was,
-		seq: seq, picked: picked, account: account, keep: keep, given: given, host: host, actor: actor}, nil
+		seq: seq, picked: picked, account: account, keep: keep, given: given, host: host, site: site, actor: actor}, nil
 }
 
 // recordSetupApproval is the writing half of approveSetup: the carrying
@@ -304,11 +311,11 @@ func (w *wtx) validateSetupApproval(ctx context.Context, id string, seq uint64, 
 func (w *wtx) recordSetupApproval(v *setupApproval) (*AskSetupApproved, error) {
 	// An approval the yard carries out after this write leaves its
 	// carrying record in it, for the server to take up (carry.go).
-	if err := w.recordSetupCarry(v.row.ID, v.seq, v.was, v.account, v.keep, v.host, v.actor); err != nil {
+	if err := w.recordSetupCarry(v.row.ID, v.seq, v.was, v.account, v.keep, v.host, v.site, v.actor); err != nil {
 		return nil, err
 	}
 	ans := Answer{Ask: v.seq, Option: v.picked, Ran: &AskRan{Argv: []string{"setup", v.was.Pack}, Result: CarryPending}}
-	out := &AskSetupApproved{Bead: v.row.ID, Ask: v.seq, Asker: v.asker, Pack: v.was.Pack, Preset: v.was.Presets[v.picked-1].Name, Host: v.host, Result: CarryPending}
+	out := &AskSetupApproved{Bead: v.row.ID, Ask: v.seq, Asker: v.asker, Pack: v.was.Pack, Preset: v.was.Presets[v.picked-1].Name, Host: v.host, Site: v.site, Result: CarryPending}
 	switch {
 	case v.account != "":
 		ans.Account, out.Account = v.account, v.account
@@ -332,8 +339,8 @@ func (w *wtx) recordSetupApproval(v *setupApproval) (*AskSetupApproved, error) {
 // yard's records anew each time and ends the same. The values are handed
 // to the memory after the write commits, so a rolled-back run hands
 // nothing.
-func (w *wtx) approveSetup(ctx context.Context, id string, seq uint64, option int, values map[string]string, account, actor string, weighed bool, host string) (*AskSetupApproved, error) {
-	v, err := w.validateSetupApproval(ctx, id, seq, option, values, account, actor, weighed, host)
+func (w *wtx) approveSetup(ctx context.Context, id string, seq uint64, option int, values map[string]string, account, actor string, weighed bool, host, site string) (*AskSetupApproved, error) {
+	v, err := w.validateSetupApproval(ctx, id, seq, option, values, account, actor, weighed, host, site)
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +396,7 @@ func setupCheckOf(seq uint64, v *setupApproval, values map[string]string) (*setu
 	if cred == "" {
 		return nil, nil
 	}
-	return &setupCheck{d: d.WithBase(v.was.Base).WithHost(v.host), cred: cred, files: files}, nil
+	return &setupCheck{d: d.WithBase(v.was.Base).WithHost(v.host).WithSite(v.site), cred: cred, files: files}, nil
 }
 
 // setupCheckScratchPrefix names the scratch homes a setup approval's run

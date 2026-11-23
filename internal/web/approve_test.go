@@ -2030,6 +2030,7 @@ func TestWebApprovesAStrongSetupCard(t *testing.T) {
 		t.Fatalf("the setup approval is witnessed %q, want a fresh sign-in", w)
 	}
 	t.Run("host", testWebSetupCardAsksAHostAndCarriesItThroughTheSignIn)
+	t.Run("site", testWebSetupCardAsksASiteAndCarriesItThroughTheSignIn)
 }
 
 // A setup whose source declares a template asks the host above the account on
@@ -2069,6 +2070,46 @@ func testWebSetupCardAsksAHostAndCarriesItThroughTheSignIn(t *testing.T) {
 		t.Fatalf("the ask is %s after the return, want it answered", got)
 	}
 	if rec, err := y.own.CarryOf(context.Background(), b.ID, seq); err != nil || rec.Host != "192.168.1.20:8443" {
+		t.Fatalf("the carrying record = %+v, %v", rec, err)
+	}
+}
+
+// A setup whose source declares a path template asks the site above the
+// account on its form, as it asks a host, and the site posted with the
+// approval goes through the fresh sign-in and reaches the carrying record.
+func testWebSetupCardAsksASiteAndCarriesItThroughTheSignIn(t *testing.T) {
+	y := newApproveYard(t, true)
+	servesSetupmailOf(y.own, strings.Replace(approveSetupDecl, "base: https://setupmail.example.com/v1\n",
+		"base: https://setupmail.example.com/ex/example/v1\npath_template: https://setupmail.example.com/ex/{site}/v1\n", 1))
+	b := y.bead("set up mail for a site of our own")
+	seq := y.askSetup(b.ID)
+	tok := y.token("jo@example.net")
+	const siteField = `<input type="text" name="site" placeholder="Site of your own: https://setupmail.example.com/ex/{site}/v1" aria-label="Site" autocomplete="off" spellcheck="false">`
+	for _, s := range approveSurfaces {
+		body := y.surfaceBody(s.path(b.ID), tok)
+		at, account := strings.Index(body, siteField), strings.Index(body, `<input type="password" name="secret-SETUP_ACCOUNT"`)
+		if at < 0 || account < 0 || at > account {
+			t.Errorf("%s: the site field stands at %d and the account's at %d, want the site's above the account's:\n%s", s.name, at, account, body)
+		}
+	}
+	form := y.approveForm(b.ID, seq)
+	form.Set("option", "1")
+	form.Set("secret-SETUP_ACCOUNT", "ops@example.com")
+	form.Set("site", " cloud-1 ")
+	r := y.post("/beads/"+b.ID, tok, form)
+	loc, err := url.Parse(r.header.Get("Location"))
+	if r.status != http.StatusSeeOther || err != nil || loc.Path != "/edge/reauth" {
+		t.Fatalf("POST the approval: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	fresh := y.token("jo@example.net", authAt(time.Now().Add(5*time.Second)))
+	r = y.getNoFollow(loc.Query().Get("return_to"), fresh)
+	if r.status != http.StatusSeeOther || r.header.Get("Location") != "/beads/"+b.ID {
+		t.Fatalf("GET the return: %d %q: %s", r.status, r.header.Get("Location"), r.body)
+	}
+	if got := y.askedState(b.ID, seq, "jo"); got != "answered" {
+		t.Fatalf("the ask is %s after the return, want it answered", got)
+	}
+	if rec, err := y.own.CarryOf(context.Background(), b.ID, seq); err != nil || rec.Site != "cloud-1" {
 		t.Fatalf("the carrying record = %+v, %v", rec, err)
 	}
 }

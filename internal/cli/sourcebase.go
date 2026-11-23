@@ -68,3 +68,35 @@ func printHostGiven(w io.Writer, who, host string) {
 		fmt.Fprintf(w, "%s gave the host %s\n", who, host)
 	}
 }
+
+// siteLine says in a line for yardr source show what the file's path template
+// lets the operator do: the address a site they type would send the calls to,
+// and the site the source is set to where it is set one. "" for a file that
+// names no path template.
+func siteLine(d *source.Declaration, src *store.Source) string {
+	if d.PathTemplate == "" {
+		return ""
+	}
+	template := strings.Replace(d.PathTemplate, source.SiteMark, "<site>", 1)
+	if src.Site != "" {
+		return "site: " + src.Site + ", which fills " + template + " (yardr source set " + d.Name + " site= sends the calls to the declaration's own base again)"
+	}
+	return "site: none set; yardr source set " + d.Name + " site=<site> sends the calls to " + template + " for a site of your own"
+}
+
+// siteFlag is " --site <site>" for the command that approves a setup with a
+// site, as hostFlag is for a host.
+func siteFlag(site string) string {
+	if site == "" {
+		return ""
+	}
+	return " --site " + shellQuote(site)
+}
+
+// printSiteGiven says who gave the site an approval carried, and nothing
+// where it carried none.
+func printSiteGiven(w io.Writer, who, site string) {
+	if site != "" {
+		fmt.Fprintf(w, "%s gave the site %s\n", who, site)
+	}
+}

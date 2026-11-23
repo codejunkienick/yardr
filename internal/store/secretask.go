@@ -223,14 +223,22 @@ func (a Ask) concealed() *bool {
 	return a.Secret.Concealed
 }
 
-// sourceHost is where the calls of the source d declares go: the scheme and
-// host of its base, or the variable whose value is the address, which is
-// what the ask gives.
+// sourceHost is where the calls of the source d declares go, as a credential
+// is keyed to it: the scheme and host of its base, with the filled site
+// segment after them where d was filled with a site (WithSite, through
+// Resolved), as scheme://host/segment, so a credential given for one site is
+// never keyed to another on the same host; the bare scheme://host where no
+// site is set, as it was before sites were keyed, so an old bare key and a
+// new sited one mismatch either way. Or the variable whose value is the
+// address, which is what the ask gives.
 func sourceHost(d *source.Declaration) string {
 	if d.Credential != nil && d.Credential.URL {
 		return d.Address()
 	}
 	if host, ok := baseHost(d.Base); ok {
+		if site := d.FilledSite(); site != "" {
+			return host + "/" + site
+		}
 		return host
 	}
 	return d.Base

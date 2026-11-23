@@ -2082,7 +2082,7 @@ internal/cli/ops.go 1699 the server, daemon, depot, group, route and session com
 internal/cli/pack.go 1866 pack loading, import planning and its question rounds
 internal/cli/peers.go 1564 the peer identity, intake and ping commands
 internal/cli/routereport.go 1513 the route report and its rendering
-internal/cli/sourcecmd.go 2092 the source command and its builtin checks
+internal/cli/sourcecmd.go 2088 the source command and its builtin checks
 internal/cli/subscriptions.go 1148 the identity, subscribe and thread commands
 internal/cli/updown.go 1302 yard up and down with their handoffs
 internal/dispatch/dispatch.go 1501 the daemon routing pass and its runners
@@ -2104,7 +2104,7 @@ internal/store/peersend.go 1261 sending beads to peers and settling them
 internal/store/policy.go 1178 the permission gates and their rules
 internal/store/routing.go 2858 groups, routes and their config merges
 internal/store/runask_list.go 1223 ask cards, labels and preset reading
-internal/store/runask_setup.go 1533 the setup ask, its card, and the carrying record
+internal/store/runask_setup.go 1512 the setup ask, its card, and the carrying record
 internal/store/settings.go 1014 yard settings and their checks
 internal/store/sourcecalls.go 1240 source grants and callables
 internal/store/subscriptions.go 1149 identities, subscriptions and where-clauses

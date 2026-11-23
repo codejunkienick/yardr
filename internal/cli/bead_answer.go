@@ -12,7 +12,7 @@ import (
 )
 
 func (a *app) newBeadAnswerCmd() *cobra.Command {
-	var ansWords, ansDecline, ansAccount, ansHost string
+	var ansWords, ansDecline, ansAccount, ansHost, ansSite string
 
 	var ansLater, ansSecret, ansApprove bool
 	var ansValue []string
@@ -32,6 +32,7 @@ older one for display, and every pick stays as a note. Nothing is deleted.
   yardr bead answer <id> <ask> <n> --secret        pick a setup ask's preset with the account typed
   yardr bead answer <id> <ask> <n> --account <source>   pick a setup ask's preset, taking a listed account
   yardr bead answer <id> <ask> <n> --secret --host <host>   the same, for a server of your own at <host>
+  yardr bead answer <id> <ask> <n> --secret --site <site>   the same, for a site of your own at <site> (one path segment)
   yardr bead answer <id> <ask> <n>                 pick a drift card's preset, keeping the standing account
   yardr bead answer <id> <ask> --approve           approve the command a run ask proposes
   yardr bead answer <id> <ask> --approve --value <name>=<value>   approve it giving the values the card asks for
@@ -114,7 +115,13 @@ sets the host before it writes the account. The account that stands, kept with
 a bare <n>, was given for the host in use: the new host holds it back until it
 is typed again (yardr source key), and a card with part of it standing takes
 every name typed with a host. The host is the operator's to type, here or on
-the card, and an agent has no word for it.
+the card, and an agent has no word for it. --site <site> beside either, where
+the card asks one (its site line: a pack whose source declares a
+path_template), scopes the pack's calls to that site: one path segment and
+nothing else, held to what a base is. The account is given for that host and
+site together (its key is the host with the segment after it), and the yard
+sets the site before it writes the account, as it sets a host; a kept account
+was given for the site in use, so a new site holds it back until typed again.
 
 --approve answers a run ask (yardr bead ask --run): the yard runs the
 command the ask holds, exactly as its card shows it, as the operator, and
@@ -189,6 +196,9 @@ options go as mail to the asker instead (yardr mail <asker>@<peer>).`,
 			if ansHost != "" && !ansSecret && ansAccount == "" && !keepsAccount(c.Context(), st, id, askSeq, args, ansWords, ansLater, declined) {
 				return fmt.Errorf("--host goes with a setup ask's approval: yardr bead answer %s %d <n> --secret --host <host>, <n> --account <source> --host <host>, or a bare <n> --host <host> where the card's account stands", id, askSeq)
 			}
+			if ansSite != "" && !ansSecret && ansAccount == "" && !keepsAccount(c.Context(), st, id, askSeq, args, ansWords, ansLater, declined) {
+				return fmt.Errorf("--site goes with a setup ask's approval: yardr bead answer %s %d <n> --secret --site <site>, <n> --account <source> --site <site>, or a bare <n> --site <site> where the card's account stands", id, askSeq)
+			}
 			if ansAccount != "" {
 				if len(args) != 3 || ansWords != "" || ansLater || declined || len(ansValue) > 0 {
 					return fmt.Errorf("--account takes a candidate of a setup ask with its preset pick: yardr bead answer %s %d <n> --account <source>", id, askSeq)
@@ -197,14 +207,14 @@ options go as mail to the asker instead (yardr mail <asker>@<peer>).`,
 				if pickErr != nil || n < 1 {
 					return fmt.Errorf("--account takes a candidate of a setup ask with its preset pick: yardr bead answer %s %d <n> --account <source>", id, askSeq)
 				}
-				return a.approveSetupAccount(c, st, id, askSeq, n, ansAccount, ansHost)
+				return a.approveSetupAccount(c, st, id, askSeq, n, ansAccount, ansHost, ansSite)
 			}
 			if ansSecret {
 				if len(args) > 2 || ansWords != "" || ansLater || declined || len(ansValue) > 0 {
 					// A pick with --secret settles a setup ask alone.
 					if len(args) == 3 && ansWords == "" && !ansLater && !declined && len(ansValue) == 0 {
 						if n, pickErr := strconv.Atoi(args[2]); pickErr == nil && n >= 1 {
-							return a.approveSetup(c, st, id, askSeq, n, ansHost)
+							return a.approveSetup(c, st, id, askSeq, n, ansHost, ansSite)
 						}
 					}
 					return fmt.Errorf("--secret gives the secret and takes nothing else: the value is typed at a terminal")
@@ -214,6 +224,9 @@ options go as mail to the asker instead (yardr mail <asker>@<peer>).`,
 				}
 				if ansHost != "" {
 					return fmt.Errorf("--host goes with a setup ask's account, and ask %d asks for a secret, which has no host: yardr bead answer %s %d --secret", askSeq, id, askSeq)
+				}
+				if ansSite != "" {
+					return fmt.Errorf("--site goes with a setup ask's account, and ask %d asks for a secret, which has no site: yardr bead answer %s %d --secret", askSeq, id, askSeq)
 				}
 				return a.giveSecret(c, st, id, askSeq)
 			}
@@ -294,7 +307,7 @@ options go as mail to the asker instead (yardr mail <asker>@<peer>).`,
 				}
 				if len(args) == 3 && ans.Words == "" {
 					if setup, err := askedSetup(c.Context(), st, id, askSeq); err == nil && setup != nil && setup.Given && len(setup.Missing) == 0 {
-						return a.approveSetupKeep(c, st, id, askSeq, n, ansHost)
+						return a.approveSetupKeep(c, st, id, askSeq, n, ansHost, ansSite)
 					}
 				}
 			} else {
@@ -342,5 +355,6 @@ options go as mail to the asker instead (yardr mail <asker>@<peer>).`,
 	answer.Flags().BoolVar(&ansSecret, "secret", false, "give the secret a secret ask asks for: typed unseen at a terminal, after its card's gate")
 	answer.Flags().StringVar(&ansAccount, "account", "", "with a preset pick on a setup ask: take this listed candidate's account instead of typing one")
 	answer.Flags().StringVar(&ansHost, "host", "", "with a setup ask's account, or the bare pick that keeps it, where the card asks a host: the host of a server of your own that the pack's calls go to, in place of the address in use")
+	answer.Flags().StringVar(&ansSite, "site", "", "with a setup ask's account, or the bare pick that keeps it, where the card asks a site: the site (one path segment) that the pack's calls are scoped to, in place of the address in use")
 	return answer
 }

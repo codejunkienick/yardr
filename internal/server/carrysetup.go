@@ -48,9 +48,9 @@ func (c *carrier) askSetup(ctx context.Context, rec *store.Carry) (*store.AskSet
 }
 
 // carrySetup carries out the approved setup setup with the preset picked:
-// the apply, the base, the host, the account and the grants, each verified
-// back. A failure of any step stops the rest and is recorded on the ask
-// (FailCarry).
+// the apply, the base, the host, the site, the account and the grants, each
+// verified back. A failure of any step stops the rest and is recorded on the
+// ask (FailCarry).
 func (c *carrier) carrySetup(ctx context.Context, rec *store.Carry, setup *store.AskSetup, picked int) (string, string) {
 	lines, failure := c.carrySetupApply(ctx, rec, setup)
 	if failure != "" {
@@ -66,6 +66,11 @@ func (c *carrier) carrySetup(ctx context.Context, rec *store.Carry, setup *store
 		return "", failure
 	}
 	lines = append(lines, hosted...)
+	sited, failure := c.carrySetupSite(ctx, rec, setup)
+	if failure != "" {
+		return "", failure
+	}
+	lines = append(lines, sited...)
 	file, failure := c.carrySetupAccount(ctx, rec, setup, picked)
 	if failure != "" {
 		return "", failure
@@ -169,14 +174,50 @@ func (c *carrier) carrySetupHost(ctx context.Context, rec *store.Carry, setup *s
 	return lines, ""
 }
 
-// carrySetupHeld says, for each carried source the host step set, what holds
-// its credential back from that host: an account the approval kept, given for
-// the host in use, is not sent to the one the operator typed until it is given
-// again, and the line says how. None where the account step paired it with the
-// host (an account typed or taken) or the approval carried no host. A line a
-// source.
+// carrySetupSite is a setup's site step: each carried source whose
+// declaration names a path_template is set to the site the approval carried,
+// as the operator, before the account is written, so that the key is given
+// once, for the host and site the calls go to. A site replaces the base the
+// asker chose, as setting one does (yardr source set). Nothing is set where
+// the approval carried none. It answers what it set, a line a source.
+func (c *carrier) carrySetupSite(ctx context.Context, rec *store.Carry, setup *store.AskSetup) ([]string, string) {
+	if rec.Site == "" {
+		return nil, ""
+	}
+	var lines []string
+	for _, carried := range setup.Carried {
+		failed := func(err error) ([]string, string) {
+			return nil, failWords(fmt.Sprintf("pack %s is applied, but the site of source %s was not set: %v", setup.Pack, carried.Name, err),
+				"yardr source set "+carried.Name+" site="+rec.Site)
+		}
+		src, err := c.st.GetSource(ctx, carried.Name)
+		if err != nil {
+			return failed(err)
+		}
+		d, err := src.Declaration()
+		if err != nil {
+			return failed(err)
+		}
+		if d.PathTemplate == "" {
+			continue
+		}
+		saved, err := c.st.SetSource(ctx, carried.Name, store.SourceSite, rec.Site, rec.Actor)
+		if err != nil {
+			return failed(err)
+		}
+		lines = append(lines, fmt.Sprintf("source %s: calls go to %s", saved.Name, saved.CalledAt(d)))
+	}
+	return lines, ""
+}
+
+// carrySetupHeld says, for each carried source the host or site step set,
+// what holds its credential back from that host and site: an account the
+// approval kept, given for the host (and site) in use, is not sent to the one
+// the operator typed until it is given again, and the line says how. None
+// where the account step paired it with the host and site (an account typed
+// or taken) or the approval carried neither. A line a source.
 func (c *carrier) carrySetupHeld(ctx context.Context, rec *store.Carry, setup *store.AskSetup) []string {
-	if rec.Host == "" {
+	if rec.Host == "" && rec.Site == "" {
 		return nil
 	}
 	var lines []string
@@ -185,7 +226,7 @@ func (c *carrier) carrySetupHeld(ctx context.Context, rec *store.Carry, setup *s
 		if err != nil {
 			continue
 		}
-		if d, err := src.Declaration(); err == nil && d.BaseTemplate != "" {
+		if d, err := src.Declaration(); err == nil && (d.BaseTemplate != "" || d.PathTemplate != "") {
 			if held := src.CredentialHeld(d); held != "" {
 				lines = append(lines, fmt.Sprintf("source %s: %s", carried.Name, held))
 			}

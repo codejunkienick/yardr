@@ -961,7 +961,7 @@ declared source pushover, from sources/pushover.yaml
   refuses there makes the pack invalid, named by the declaration's file,
   line and key. The name in the file is the pack's key.
 - **A declaration in a pack for a depot has the keys `name`, `about`,
-  `base`, optional `bases` and `base_template`, `credential`, `check`,
+  `base`, optional `bases`, `base_template` and `path_template`, `credential`, `check`,
   `idempotency`, `calls` and `notify`, and no other.** A key a later yardr reads in a declaration
   is not thereby one a pack may bring: a pack for a depot brings no command
   the yard runs. A pack of kind `source` may also bring `hear`, `hook`,
@@ -987,7 +987,9 @@ declared source pushover, from sources/pushover.yaml
   bases that are new, gone or different (`bases: (none) ->
   {"eu":"https://eu.example.com/v1"}`: compact JSON, sorted keys, `(none)`
   for no regions), a `base_template` that is new, gone or different (the
-  address a host the operator types would fill), the credential's name (and the one of its updates,
+  address a host the operator types would fill), a `path_template` that is
+  new, gone or different (the address a site the operator types would fill
+  as one path segment), the credential's name (and the one of its updates,
   `update_env`) or header, the `idempotency` header, a `hear`, `thread`,
   `link` or `hook` key (which a pack of kind `source` may bring) that is new,
   gone or different, whole, as compact JSON before and after (`hear:

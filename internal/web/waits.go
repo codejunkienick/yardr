@@ -164,6 +164,7 @@ type Reason struct {
 	RunAsk       []string `json:"-"`
 	SetupAccount []string `json:"-"`
 	SetupHost    string   `json:"-"`
+	SetupSite    string   `json:"-"`
 	// Weight is the card's weight, each class with the yard's line, as
 	// the yard weighed it when it wrote the card, absent on a routine
 	// card; Identity is what a mapping ask maps, absent on any other
@@ -679,6 +680,7 @@ func askReason(r store.ResolvedAsk) Reason {
 		out.SetupBackBy = r.Ask.Setup.BackBy
 		out.SetupAccount = r.Ask.Setup.Account
 		out.SetupHost = r.Ask.Setup.HostTemplate
+		out.SetupSite = r.Ask.Setup.SiteTemplate
 	}
 	if r.Ask.Recommend >= 1 && r.Ask.Recommend <= len(r.Ask.Options) {
 		out.Recommend = r.Ask.Recommend

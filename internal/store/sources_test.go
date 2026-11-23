@@ -168,6 +168,7 @@ func TestDeclaredSourceBase(t *testing.T) {
 		t.Fatalf("base=eu without bases: %v", err)
 	}
 	t.Run("host", testDeclaredSourceHost)
+	t.Run("site", testDeclaredSourceSite)
 	evs, err := st.EventsSince(ctx, 0, 100)
 	if err != nil {
 		t.Fatal(err)
@@ -332,6 +333,170 @@ func testDeclaredSourceHost(t *testing.T) {
 		}
 	}
 	t.Fatalf("no source_set event carries host=192.168.1.20:8443: %+v", evs)
+}
+
+const sourceFileSited = `name: wiki
+base: https://wiki.example.com/ex/example/wiki
+bases:
+  eu: https://eu.wiki.example.com/ex/example/wiki
+path_template: https://wiki.example.com/ex/{site}/wiki
+credential: { env: WIKI_TOKEN }
+calls:
+  ping: { kind: read, request: { method: GET, path: /ping } }
+`
+
+// A source whose declaration names a path_template sends its calls to the
+// site the operator types, filled as one path segment, in place of its base:
+// a site the checks refuse is refused in their words and changes nothing, the
+// site, a host and a region base replace each other, and replacing the file
+// keeps the site as it keeps the base. The credential is keyed to the host
+// and the filled segment together (scheme://host/segment, the bare host with
+// no site), so a key given for one site is held from another on the same
+// host, and a bare key and a sited one mismatch in both directions, as a
+// sited key does under an older build that keys on the host alone: the safe
+// direction both ways. A site never carries a key; a base that takes the
+// source off a site holds it too, and a base set where no site or host stood
+// pairs it as it always did.
+func testDeclaredSourceSite(t *testing.T) {
+	_, st := storetest.NewOwned(t)
+	ctx := context.Background()
+	if err := st.SetSetting(ctx, store.OperatorSetting, "jo", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutSource(ctx, "single.yaml", sourceFileSingle, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetSource(ctx, "single", store.SourceSite, "cloud-1", "jo"); err == nil ||
+		!strings.Contains(err.Error(), "the declaration names no path_template") {
+		t.Fatalf("site=cloud-1 without a path template: %v", err)
+	}
+	src, err := st.PutSource(ctx, "wiki.yaml", sourceFileSited, "jo")
+	if err != nil || src.Site != "" {
+		t.Fatalf("site unset = %q, %v", src.Site, err)
+	}
+	d, err := src.Declaration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for site, want := range map[string]string{
+		"cloud-1/extra": "a site is one path segment",
+		"cloud-1?x=1":   "the address it makes has a query or a fragment",
+		"..":            "the address it makes has a '..', '//' or '\\' in its path",
+	} {
+		if _, err := st.SetSource(ctx, "wiki", store.SourceSite, site, "jo"); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("site=%s: %v, want %q", site, err, want)
+		}
+	}
+	if got, err := st.GetSource(ctx, "wiki"); err != nil || got.Site != "" {
+		t.Fatalf("a refused site was kept: %+v, %v", got, err)
+	}
+	paired := func(host, when string) {
+		t.Helper()
+		if got, err := st.GetSource(ctx, "wiki"); err != nil || got.KeyedHost != host {
+			t.Fatalf("%s: paired with %q, %v; want %q", when, got.KeyedHost, err, host)
+		}
+	}
+	held := func(from, to, when string) {
+		t.Helper()
+		got, err := st.GetSource(ctx, "wiki")
+		if err != nil {
+			t.Fatal(err)
+		}
+		why := got.CredentialHeld(d)
+		for _, want := range []string{"its credential was given for " + from, "the source's calls go to " + to + " now", "yardr source key wiki"} {
+			if !strings.Contains(why, want) {
+				t.Fatalf("%s: held = %q; want it to say %q", when, why, want)
+			}
+		}
+	}
+	free := func(when string) {
+		t.Helper()
+		if got, err := st.GetSource(ctx, "wiki"); err != nil || got.CredentialHeld(d) != "" {
+			t.Fatalf("%s: held = %q, %v", when, got.CredentialHeld(d), err)
+		}
+	}
+	key := func() {
+		t.Helper()
+		if _, err := st.KeySource(ctx, "wiki", map[string]string{"WIKI_TOKEN": "tok"}, "jo"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key()
+	paired("https://wiki.example.com", "the key given at the base, with no site: the bare host")
+
+	if src, err = st.SetSource(ctx, "wiki", store.SourceSite, "cloud-1", "jo"); err != nil || src.Site != "cloud-1" || src.Base != "" || src.Host != "" {
+		t.Fatalf("site=cloud-1: %+v, %v", src, err)
+	}
+	if got := src.Resolved(d).Base; got != "https://wiki.example.com/ex/cloud-1/wiki" {
+		t.Fatalf("calls go to %q", got)
+	}
+	if got := src.CalledAt(d); got != "https://wiki.example.com/ex/cloud-1/wiki (site cloud-1)" {
+		t.Fatalf("CalledAt = %q", got)
+	}
+	paired("https://wiki.example.com", "a site set: nothing carries the bare key to it")
+	held("https://wiki.example.com", "https://wiki.example.com/cloud-1", "a site set over a bare key (the old keying, held)")
+	key()
+	paired("https://wiki.example.com/cloud-1", "the key given again at the site")
+	free("the key given again at the site")
+
+	changed := strings.Replace(sourceFileSited, "path: /ping", "path: /status", 1)
+	if src, err = st.PutSource(ctx, "wiki.yaml", changed, "jo"); err != nil || src.Site != "cloud-1" {
+		t.Fatalf("replaced = %+v, %v", src, err)
+	}
+	free("the file replaced")
+
+	// Another site on the same host holds the key: no token crosses sites.
+	if src, err = st.SetSource(ctx, "wiki", store.SourceSite, "cloud-2", "jo"); err != nil || src.Site != "cloud-2" {
+		t.Fatalf("site=cloud-2: %+v, %v", src, err)
+	}
+	held("https://wiki.example.com/cloud-1", "https://wiki.example.com/cloud-2", "a second site on the same host")
+	paired("https://wiki.example.com/cloud-1", "a second site on the same host")
+
+	// Clearing the site holds the sited key from the bare address too: the
+	// rollback direction, a sited key under host-alone keying.
+	if src, err = st.SetSource(ctx, "wiki", store.SourceSite, "", "jo"); err != nil || src.Site != "" || src.Resolved(d) != d {
+		t.Fatalf("site cleared: %+v, %v", src, err)
+	}
+	held("https://wiki.example.com/cloud-1", "https://wiki.example.com", "the site cleared (a sited key at the bare host)")
+
+	// A base replaces the site, and holds the key it was not given for.
+	key()
+	paired("https://wiki.example.com", "the key given again at the base")
+	if _, err = st.SetSource(ctx, "wiki", store.SourceSite, "cloud-1", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	key()
+	if src, err = st.SetSource(ctx, "wiki", store.SourceBase, "eu", "jo"); err != nil || src.Site != "" || src.Base != "eu" {
+		t.Fatalf("base=eu off a site: %+v, %v", src, err)
+	}
+	if got := src.CalledAt(d); got != "https://eu.wiki.example.com/ex/example/wiki (base eu)" {
+		t.Fatalf("CalledAt = %q", got)
+	}
+	held("https://wiki.example.com/cloud-1", "https://eu.wiki.example.com", "a base that took the source off the site")
+	paired("https://wiki.example.com/cloud-1", "a base that took the source off the site")
+
+	// Where no site or host stood a base pairs the key, as it always did.
+	if _, err = st.SetSource(ctx, "wiki", store.SourceSite, "", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	key()
+	paired("https://wiki.example.com", "the key given at the base again")
+	if _, err = st.SetSource(ctx, "wiki", store.SourceBase, "eu", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	paired("https://eu.wiki.example.com", "a base set where no site stood")
+	free("a base set where no site stood")
+
+	evs, err := st.EventsSince(ctx, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range evs {
+		if e.Kind == "source_set" && e.Data["source"] == "wiki" && e.Data["site"] == "cloud-1" {
+			return
+		}
+	}
+	t.Fatalf("no source_set event carries site=cloud-1: %+v", evs)
 }
 
 // What the parser refuses is not kept, and the error names the file as the

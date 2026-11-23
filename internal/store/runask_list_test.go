@@ -163,7 +163,7 @@ func TestRunAskSourceLimit(t *testing.T) {
 	run := *y.asked(t, seq).Ask.Run
 	want := AskRun{
 		Argv:        []string{"source", "set", "crm", "calls_per_hour=200"},
-		Description: "Change a source's credential, per-hour call limits or region base",
+		Description: "Change a source's credential, per-hour call limits, region base, host or site",
 		Does:        []string{crmAt + " may be called 200 times an hour by each session or crew member that may call it. It may be called 60 times now."},
 		Back:        "yardr source set crm calls_per_hour=60",
 		BackBy:      "only the operator",
@@ -227,7 +227,7 @@ func TestRunAskSourceLimit(t *testing.T) {
 
 // destCRM is crm with a region base and a template, for the
 // destination row: the yard's crm declares neither.
-const destCRM = "name: crm\nbase: https://crm.example.com/v1\nbases:\n  eu: https://eu.crm.example.com/v1\nbase_template: https://{host}/v1\ncredential: { env: CRM_TOKEN, header: \"Authorization: Bearer {credential}\" }\nidempotency: Idempotency-Key\ncalls:\n  find: { kind: read, request: { method: GET, path: /contacts } }\n  get:\n    kind: read\n    params: { id: { type: string, pattern: \"^[0-9]{1,12}$\" } }\n    request: { method: GET, path: \"/contacts/{id}\" }\n  note:\n    kind: update\n    params:\n      id: { type: string, pattern: \"^[0-9]{1,12}$\" }\n      text: { type: string, max: 2000 }\n    request: { method: POST, path: \"/contacts/{id}/notes\", body: { text: \"{text}\" } }\n"
+const destCRM = "name: crm\nbase: https://crm.example.com/v1\nbases:\n  eu: https://eu.crm.example.com/v1\nbase_template: https://{host}/v1\npath_template: https://crm.example.com/ex/{site}/v1\ncredential: { env: CRM_TOKEN, header: \"Authorization: Bearer {credential}\" }\nidempotency: Idempotency-Key\ncalls:\n  find: { kind: read, request: { method: GET, path: /contacts } }\n  get:\n    kind: read\n    params: { id: { type: string, pattern: \"^[0-9]{1,12}$\" } }\n    request: { method: GET, path: \"/contacts/{id}\" }\n  note:\n    kind: update\n    params:\n      id: { type: string, pattern: \"^[0-9]{1,12}$\" }\n      text: { type: string, max: 2000 }\n    request: { method: POST, path: \"/contacts/{id}/notes\", body: { text: \"{text}\" } }\n"
 
 // destYard is listYard with crm declaring a region base and a
 // template, so a destination can move.
@@ -322,6 +322,43 @@ func TestRunAskSourceDest(t *testing.T) {
 	seq = y.ask(t, listAsk("mckean", "source set crm host="), "yardmaster")
 	if run = *y.asked(t, seq).Ask.Run; run.Back != "yardr source set crm 'host=[2001:db8::1]:8443'" {
 		t.Fatalf("the IPv6 host reset back = %q", run.Back)
+	}
+
+	// A site, and its empty reset, as a host's are.
+	y = destYard(t)
+	seq = y.ask(t, listAsk("mckean", "source set crm site=cloud-1"), "yardmaster")
+	run = *y.asked(t, seq).Ask.Run
+	if run.Does[0] != "the source crm: its calls go to https://crm.example.com/v1 now, and will go to https://crm.example.com/ex/cloud-1/v1 (site cloud-1)." ||
+		run.Back != "yardr source set crm site=" {
+		t.Fatalf("the site ask stores %+v", run)
+	}
+	done, err = y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil)
+	if err != nil || done.Result != "source crm: calls go to https://crm.example.com/ex/cloud-1/v1 (site cloud-1)" {
+		t.Fatalf("the site approval = %+v, %v", done, err)
+	}
+	if src := y.source(t); src.Site != "cloud-1" || src.Base != "" || src.Host != "" {
+		t.Fatalf("the source after the site approval = %+v", src)
+	}
+	evs, _ = y.EventsOfKind(y.ctx, "source_set", 10)
+	foundSite := false
+	for _, e := range evs {
+		if e.Data[SourceSite] == "cloud-1" {
+			foundSite = true
+		}
+	}
+	if !foundSite {
+		t.Fatalf("source_set events = %+v, want one with site=cloud-1", evs)
+	}
+	seq = y.ask(t, listAsk("mckean", "source set crm site="), "yardmaster")
+	if run = *y.asked(t, seq).Ask.Run; run.Back != "yardr source set crm site=cloud-1" {
+		t.Fatalf("the site reset stores %+v", run)
+	}
+	if done, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil ||
+		done.Result != "source crm: calls go to https://crm.example.com/v1" {
+		t.Fatalf("the site reset = %+v, %v", done, err)
+	}
+	if src := y.source(t); src.Site != "" || src.Base != "" || src.Host != "" {
+		t.Fatalf("the source after the site reset = %+v", src)
 	}
 }
 
@@ -456,12 +493,42 @@ func TestRunAskSourceDestCredential(t *testing.T) {
 	if run = *y.asked(t, seq).Ask.Run; len(run.Does) != 1 {
 		t.Fatalf("the card with no credential says %q", run.Does)
 	}
+
+	// A site holds a standing credential back naming the host and site it
+	// was given for and the one proposed, as a host does: the key is the
+	// host with the segment after it, so another site on the same host
+	// never takes it.
+	y = destYard(t)
+	if _, err := y.SetSource(y.ctx, "crm", SourceEnvFile, "/elsewhere/crm.env", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, listAsk("mckean", "source set crm site=cloud-1"), "yardmaster")
+	run = *y.asked(t, seq).Ask.Run
+	if len(run.Does) != 2 || !strings.Contains(run.Does[1], "held back from https://crm.example.com/cloud-1") ||
+		!strings.Contains(run.Does[1], "it was given for https://crm.example.com,") {
+		t.Fatalf("the held-back site card says %q", run.Does)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if why := held(t, y); why == "" || !strings.Contains(why, "https://crm.example.com/cloud-1") {
+		t.Fatalf("the credential sent to a typed site is held as %q", why)
+	}
+	// Taking the move back restores the site that stood, as for a host.
+	if _, err := y.SetSource(y.ctx, "crm", SourceSite, "cloud-1", "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	seq = y.ask(t, listAsk("mckean", "source set crm site=cloud-2"), "yardmaster")
+	if run = *y.asked(t, seq).Ask.Run; run.Back != "yardr source set crm site=cloud-1" {
+		t.Fatalf("the second-site card is taken back by %q", run.Back)
+	}
 }
 
-// What the destination row refuses when it is asked: a base or host
-// the declaration does not allow, and a move that would change
-// nothing. env_file and mint_command stay refused as the operator's
-// alone (TestRunAskListRefusals).
+// What the destination row refuses when it is asked: a base, host or site
+// the declaration does not allow, a pair of destination settings (base,
+// host and site are exclusive, one setting to a command), and a move that
+// would change nothing. env_file and mint_command stay refused as the
+// operator's alone (TestRunAskListRefusals).
 func TestRunAskSourceDestRefusals(t *testing.T) {
 	t.Parallel()
 	y := destYard(t)
@@ -474,7 +541,10 @@ func TestRunAskSourceDestRefusals(t *testing.T) {
 		{"source set crm host=https://crm.example.net", "has no scheme"},
 		{"source set crm host=crm.example.net:99999", "port is a number from 1 to 65535"},
 		{"source set crm host=crm.example.net/path", "a host is a name or an address"},
+		{"source set crm site=cloud-1/extra", "a site is one path segment"},
 		{"source set crm base=eu host=crm.example.net", "one source and one setting, not 3 words"},
+		{"source set crm base=eu site=cloud-1", "one source and one setting, not 3 words"},
+		{"source set crm host=crm.example.net site=cloud-1", "one source and one setting, not 3 words"},
 		{"source set erp base=eu", "source erp: not found"},
 	} {
 		if _, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", c.command), "yardmaster"); err == nil || !strings.Contains(err.Error(), c.want) {
@@ -2878,9 +2948,10 @@ func TestRunAskCrewRestartUsesItsStoreCheck(t *testing.T) {
 }
 
 // A card holds the host a source is set to with the rest of where its calls
-// go, so one written before the host was set reads as stale. A source with
-// none is held as it was before the host was a setting, so no card written
-// then is made stale by the setting's coming.
+// go, so one written before the host was set reads as stale, and a site the
+// same way, held as site=<site>. A source with none is held as it was before
+// the host was a setting, so no card written then is made stale by the
+// setting's coming.
 func testSourceFingerprintHoldsTheHost(t *testing.T) {
 	home := t.TempDir()
 	src := &Source{Name: "crm", Text: "text", EnvFile: "/keys/crm.env", MintCommand: "mint", Base: "eu"}
@@ -2900,5 +2971,18 @@ func testSourceFingerprintHoldsTheHost(t *testing.T) {
 	hosted.Host = "crm.example.org"
 	if other, err := sourceFingerprint(&hosted, home); err != nil || other == now || other == was {
 		t.Fatalf("another host holds %s, %v", other, err)
+	}
+	sited := *src
+	sited.Base, sited.Site = "", "cloud-1"
+	siteNow, err := sourceFingerprint(&sited, home)
+	if err != nil || siteNow == was {
+		t.Fatalf("a site set leaves the fingerprint at %s, %v", siteNow, err)
+	}
+	if want := seen(src.Text, src.EnvFile, src.MintCommand, "site=cloud-1"); siteNow != want {
+		t.Fatalf("a source with a site is held as %s, want site=cloud-1 as where() names it: %s", siteNow, want)
+	}
+	sited.Site = "cloud-2"
+	if other, err := sourceFingerprint(&sited, home); err != nil || other == siteNow || other == was {
+		t.Fatalf("another site holds %s, %v", other, err)
 	}
 }

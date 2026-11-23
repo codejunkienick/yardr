@@ -139,13 +139,13 @@ func (w *wtx) staleSource(seq uint64, name string, was, now AskRun) error {
 		return nil
 	}
 	added := lastEvent(w.Tx, "source_added", naming("source", name))
-	settings := []string{SourceEnvFile, SourceMintCommand, SourceBase, SourceHost}
+	settings := []string{SourceEnvFile, SourceMintCommand, SourceBase, SourceHost, SourceSite}
 	set := lastEvent(w.Tx, "source_set", func(e Event) bool {
 		return e.Data["source"] == name && slices.ContainsFunc(settings, func(k string) bool { _, ok := e.Data[k]; return ok })
 	})
 	switch {
 	case set != nil && (added == nil || set.Seq > added.Seq):
-		for _, k := range []string{SourceBase, SourceHost} {
+		for _, k := range []string{SourceBase, SourceHost, SourceSite} {
 			if _, ok := set.Data[k]; ok {
 				return fmt.Errorf("ask %d was written when the source %s used another %s: its %s was set since%s. %s", seq, name, k, k, since(set), nothingRan)
 			}

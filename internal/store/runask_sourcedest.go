@@ -22,12 +22,12 @@ import (
 
 // sourceDestUse is how a refusal names the source set a run ask takes
 // for a destination.
-const sourceDestUse = "yardr source set <source> base=<name>|host=<host>"
+const sourceDestUse = "yardr source set <source> base=<name>|host=<host>|site=<site>"
 
 // sourceSetDescription is the help line of source set that the card of
 // each of its forms keeps (internal/cli holds it to the command's
 // Short).
-const sourceSetDescription = "Change a source's credential, per-hour call limits or region base"
+const sourceSetDescription = "Change a source's credential, per-hour call limits, region base, host or site"
 
 func init() {
 	runList = append(runList, runCommand{
@@ -44,12 +44,13 @@ func init() {
 }
 
 // parseSourceDest reads the words of source set <source>
-// base=<name>|host=<host>: the source and the one destination
+// base=<name>|host=<host>|site=<site>: the source and the one destination
 // setting, with an empty value kept empty so it resets to the
-// declaration's own base. A command whose setting is no base or host
+// declaration's own base. A command whose setting is no base, host or site
 // is another row's, and answers errNotRow; one that mixes a
 // destination with any other word is refused whole, since one
-// command carries one setting.
+// command carries one setting, so a pair of destination settings (base
+// with host, base with site, host with site) is refused here whole too.
 func parseSourceDest(rest []string) ([]string, error) {
 	if !hasDestSetting(rest) {
 		return nil, errNotRow
@@ -62,18 +63,18 @@ func parseSourceDest(rest []string) ([]string, error) {
 		return nil, fmt.Errorf("--run takes %s: one source and one setting, not %d words", sourceDestUse, len(args))
 	}
 	key, value, ok := strings.Cut(args[1], "=")
-	if strings.Contains(args[0], "=") || !ok || key != SourceBase && key != SourceHost {
-		return nil, fmt.Errorf("--run takes %s: the source first, then %s=<name> or %s=<host>", sourceDestUse, SourceBase, SourceHost)
+	if strings.Contains(args[0], "=") || !ok || key != SourceBase && key != SourceHost && key != SourceSite {
+		return nil, fmt.Errorf("--run takes %s: the source first, then %s=<name>, %s=<host> or %s=<site>", sourceDestUse, SourceBase, SourceHost, SourceSite)
 	}
 	return []string{args[0], key + "=" + value}, nil
 }
 
-// hasDestSetting says whether any word of rest is a base= or
-// host= setting, in either position: parseSourceDest claims the
+// hasDestSetting says whether any word of rest is a base=, host= or
+// site= setting, in either position: parseSourceDest claims the
 // command on it before it reads the words whole.
 func hasDestSetting(rest []string) bool {
 	for _, word := range rest {
-		if key, _, ok := strings.Cut(word, "="); ok && (key == SourceBase || key == SourceHost) {
+		if key, _, ok := strings.Cut(word, "="); ok && (key == SourceBase || key == SourceHost || key == SourceSite) {
 			return true
 		}
 	}
@@ -97,17 +98,20 @@ func checkSourceDest(ctx context.Context, w *wtx, argv []string, actor string) e
 }
 
 // destAfter is the source src with the destination key=value applied
-// as setSource leaves it: a base and a host replace each other, an
+// as setSource leaves it: a base, a host and a site replace each other, an
 // empty value restores the declaration's own base, and setting a base
-// with no typed host standing re-pairs any standing credential with
+// with no typed host or site standing re-pairs any standing credential with
 // the destination host (paired is true when that re-pairing runs).
 func destAfter(src *Source, d *source.Declaration, key, value string) (after Source, paired bool) {
 	after = *src
-	typed := src.Host != ""
-	if key == SourceBase {
-		after.Base, after.Host = value, ""
-	} else {
-		after.Host, after.Base = value, ""
+	typed := src.Host != "" || src.Site != ""
+	switch key {
+	case SourceBase:
+		after.Base, after.Host, after.Site = value, "", ""
+	case SourceHost:
+		after.Host, after.Base, after.Site = value, "", ""
+	default:
+		after.Site, after.Base, after.Host = value, "", ""
 	}
 	if key == SourceBase && !typed {
 		after.pairCredential(d)
@@ -126,20 +130,22 @@ func standingCredential(src *Source, d *source.Declaration) bool {
 // destCredentialSentence describes what the move does to a standing
 // credential in the card's Does, matching setSource and
 // CredentialHeld: re-paired at once when setting a base with no typed
-// host standing moves the pairing, sent without being given again
-// when the credential was already given for the destination host
+// host or site standing moves the pairing, sent without being given again
+// when the credential was already given for the destination host (and
+// site, where one is set: the key names both, as scheme://host/segment)
 // (such as resetting back off a typed host that was never keyed), and
-// held back otherwise, naming the host it was actually given for
+// held back otherwise, naming the host and site it was actually given for
 // (KeyedHost). Empty when no credential stands or the destination
 // names no host.
 func destCredentialSentence(src *Source, after *Source, d *source.Declaration, paired bool) string {
 	if !standingCredential(src, d) {
 		return ""
 	}
-	afterHost, ok := baseHost(after.Resolved(d).Base)
-	if !ok {
+	resolved := after.Resolved(d)
+	if _, ok := baseHost(resolved.Base); !ok {
 		return ""
 	}
+	afterHost := sourceHost(resolved)
 	if after.CredentialHeld(d) != "" {
 		why := "the yard has no record of the host it was given for"
 		if src.KeyedHost != "" {
@@ -163,15 +169,15 @@ func calledOrNone(src *Source, d *source.Declaration) string {
 }
 
 // sourceDestCard is the card of source set <source>
-// base=<name>|host=<host>: where the source's calls go now and where
-// they will go, each whole as CalledAt names it, and what the move
+// base=<name>|host=<host>|site=<site>: where the source's calls go now and
+// where they will go, each whole as CalledAt names it, and what the move
 // does to a standing credential. The value is held to the
-// declaration's own checks (CheckBase, CheckHost) here and again at
-// approval, so a stored value the declaration no longer allows fails
+// declaration's own checks (CheckBase, CheckHost, CheckSite) here and again
+// at approval, so a stored value the declaration no longer allows fails
 // closed. Asking refuses a move that would change nothing. The
 // command that takes it back restores the setting that stood, which
-// a move across base and host must name across: setting the proposed
-// key back would clear the other to the default instead. The
+// a move across base, host and site must name across: setting the proposed
+// key back would clear the others to the default instead. The
 // approval is held to the source as it stands (Seen).
 func (w *wtx) sourceDestCard(argv []string, asking bool) (AskRun, error) {
 	name, key, value := sourceDestOf(argv)
@@ -179,16 +185,19 @@ func (w *wtx) sourceDestCard(argv []string, asking bool) (AskRun, error) {
 	if err != nil {
 		return AskRun{}, err
 	}
-	if key == SourceBase {
+	switch key {
+	case SourceBase:
 		err = d.CheckBase(value)
-	} else {
+	case SourceHost:
 		err = d.CheckHost(value)
+	default:
+		err = d.CheckSite(value)
 	}
 	if err != nil {
 		return AskRun{}, err
 	}
 	after, paired := destAfter(src, d, key, value)
-	if asking && after.Base == src.Base && after.Host == src.Host {
+	if asking && after.Base == src.Base && after.Host == src.Host && after.Site == src.Site {
 		return AskRun{}, fmt.Errorf("source %s: %s=%s is what it is already, so the command would change nothing", name, key, value)
 	}
 	fingerprint, err := w.sourceSeen(src)
@@ -201,9 +210,12 @@ func (w *wtx) sourceDestCard(argv []string, asking bool) (AskRun, error) {
 	}
 	// The setting that stood, empty where the source is at its
 	// declaration's own base: naming it takes the move back, across
-	// base and host included.
+	// base, host and site included (site= where a site stands, as where()
+	// names it first).
 	backKey, backValue := key, ""
 	switch {
+	case src.Site != "":
+		backKey, backValue = SourceSite, src.Site
 	case src.Host != "":
 		backKey, backValue = SourceHost, src.Host
 	case src.Base != "":
@@ -219,8 +231,8 @@ func (w *wtx) sourceDestCard(argv []string, asking bool) (AskRun, error) {
 }
 
 // sourceDestStale says why the ask seq for source set <source>
-// base=<name>|host=<host> is approved no more: the source is another
-// under its name, or the card would read otherwise now.
+// base=<name>|host=<host>|site=<site> is approved no more: the source is
+// another under its name, or the card would read otherwise now.
 func (w *wtx) sourceDestStale(seq uint64, was, now AskRun) error {
 	name, _, _ := sourceDestOf(was.Argv)
 	if err := w.staleSource(seq, name, was, now); err != nil {
@@ -242,7 +254,9 @@ func sourceDestWeight(w *wtx, run AskRun) ([]AskWeight, error) {
 	after, paired := destAfter(src, d, key, value)
 	particulars := fmt.Sprintf("the source %s calls will go to %s", name, calledOrNone(&after, d))
 	if standingCredential(src, d) {
-		if afterHost, ok := baseHost(after.Resolved(d).Base); ok && after.CredentialHeld(d) == "" {
+		resolved := after.Resolved(d)
+		if _, ok := baseHost(resolved.Base); ok && after.CredentialHeld(d) == "" {
+			afterHost := sourceHost(resolved)
 			if paired && src.KeyedHost != afterHost {
 				particulars += fmt.Sprintf(", and its standing credential is re-paired with %s", afterHost)
 			} else {

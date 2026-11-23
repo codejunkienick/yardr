@@ -511,7 +511,7 @@ func declarationDiff(was, now *source.Declaration) []Diff {
 	}
 	line := func(c *source.Call) string { return "(" + c.Kind + ") " + c.Line() }
 	for _, f := range []struct{ field, old, new string }{
-		{"base", was.Address(), now.Address()}, {"bases", bases(was), bases(now)}, {"base_template", was.BaseTemplate, now.BaseTemplate}, {"credential", credential(was), credential(now)}, {"check", was.Check, now.Check}, {"idempotency", was.Idempotency, now.Idempotency}, {"notify", notify(was), notify(now)},
+		{"base", was.Address(), now.Address()}, {"bases", bases(was), bases(now)}, {"base_template", was.BaseTemplate, now.BaseTemplate}, {"path_template", was.PathTemplate, now.PathTemplate}, {"credential", credential(was), credential(now)}, {"check", was.Check, now.Check}, {"idempotency", was.Idempotency, now.Idempotency}, {"notify", notify(was), notify(now)},
 		{"hear", keyValue(was.Hear), keyValue(now.Hear)}, {"thread", keyValue(was.Thread), keyValue(now.Thread)}, {"link", keyValue(was.Link), keyValue(now.Link)}, {"hook", keyValue(was.Hook), keyValue(now.Hook)},
 	} {
 		if f.old != f.new {

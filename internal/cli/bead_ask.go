@@ -342,7 +342,8 @@ for. --source-base
 <name> calls the pack's region base <name>, for a pack whose source
 declares bases; the card shows the base it will call. A source that declares
 a base_template makes the card ask the host of a server of the operator's own
-above the account, typed with the approval and never named here. --recommend
+above the account, and a path_template the site (one path segment) the calls
+are scoped to beside it, each typed with the approval and never named here. --recommend
 counts the card's preset options as yardr pack show prints them, with
 --why saying why, as on any option ask. The card shows the pack's
 declaration whole with its mint, the account to type unseen or the listed

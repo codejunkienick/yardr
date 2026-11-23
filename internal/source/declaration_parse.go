@@ -144,9 +144,9 @@ func (r *reader) count(n *yaml.Node, key string, most int) (int, bool) {
 }
 
 func (r *reader) declaration(d *Declaration, root *yaml.Node) {
-	var calls, check, notify, hear, base, bases, baseTemplate, credential, idempotency, hook, git *entry
+	var calls, check, notify, hear, base, bases, baseTemplate, pathTemplate, credential, idempotency, hook, git *entry
 	named := false
-	for _, e := range r.entries(root, "", "name", "about", "base", "bases", "base_template", "credential", "check", "idempotency", "calls", "notify", "hear", "limits", "thread", "link", "hook", "identity", "events", "git", "needs") {
+	for _, e := range r.entries(root, "", "name", "about", "base", "bases", "base_template", "path_template", "credential", "check", "idempotency", "calls", "notify", "hear", "limits", "thread", "link", "hook", "identity", "events", "git", "needs") {
 		switch e.key {
 		case "name":
 			named = true
@@ -173,6 +173,9 @@ func (r *reader) declaration(d *Declaration, root *yaml.Node) {
 		case "base_template":
 			baseTemplate = &e
 			d.BaseTemplate = r.baseTemplate(e)
+		case "path_template":
+			pathTemplate = &e
+			d.PathTemplate = r.pathTemplate(e)
 		case "credential":
 			credential = &e
 			d.Credential = r.credential(e)
@@ -224,7 +227,7 @@ func (r *reader) declaration(d *Declaration, root *yaml.Node) {
 		} else if d.Hook != nil {
 			alone = "hook alone"
 		}
-		for _, e := range []*entry{base, bases, baseTemplate, credential, check, idempotency, notify} {
+		for _, e := range []*entry{base, bases, baseTemplate, pathTemplate, credential, check, idempotency, notify} {
 			if e != nil {
 				r.errf(e.k, e.path, "is for the calls of a source, and this file declares none (it has %s)", alone)
 			}
@@ -232,15 +235,15 @@ func (r *reader) declaration(d *Declaration, root *yaml.Node) {
 		if git != nil {
 			r.errf(git.k, git.path, "carries the source's token to git, and this file declares no credential (it has %s)", alone)
 		}
-		d.Base, d.Bases, d.BaseTemplate, d.Credential = "", nil, "", nil
+		d.Base, d.Bases, d.BaseTemplate, d.PathTemplate, d.Credential = "", nil, "", "", nil
 		if hear != nil {
 			d.Hear = r.hear(d, *hear, alone)
 		}
 		return
 	}
 	// A credential that is the address, and nothing else, is a giving alone (the routine's URL, read by an adapter): no call to make, and every key of a call beside it falls through to the refusal below.
-	if calls == nil && d.Credential != nil && d.Credential.URL && d.Limits == nil && d.Hook == nil && d.Thread == nil && d.Link == nil && d.Identity == nil && d.Events == nil && hear == nil && git == nil && base == nil && bases == nil && baseTemplate == nil && check == nil && idempotency == nil && notify == nil {
-		d.Base, d.Bases, d.BaseTemplate = "", nil, ""
+	if calls == nil && d.Credential != nil && d.Credential.URL && d.Limits == nil && d.Hook == nil && d.Thread == nil && d.Link == nil && d.Identity == nil && d.Events == nil && hear == nil && git == nil && base == nil && bases == nil && baseTemplate == nil && pathTemplate == nil && check == nil && idempotency == nil && notify == nil {
+		d.Base, d.Bases, d.BaseTemplate, d.PathTemplate = "", nil, "", ""
 		return
 	}
 	// A credential that is the address is every call's address, so it
@@ -253,6 +256,8 @@ func (r *reader) declaration(d *Declaration, root *yaml.Node) {
 		r.errf(bases.k, bases.path, "the credential is the address every call goes to (credential.url: true), so the file names no bases beside it")
 	case baseTemplate != nil && address:
 		r.errf(baseTemplate.k, baseTemplate.path, "the credential is the address every call goes to (credential.url: true), so the file names no base_template beside it")
+	case pathTemplate != nil && address:
+		r.errf(pathTemplate.k, pathTemplate.path, "the credential is the address every call goes to (credential.url: true), so the file names no path_template beside it")
 	case base == nil && !address:
 		r.errf(root, "base", "missing: the address every call's path is under (https://…), or credential.url: true where the credential is the address itself")
 	}

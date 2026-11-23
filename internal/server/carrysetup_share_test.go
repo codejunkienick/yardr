@@ -21,7 +21,7 @@ func askSetupAccount(t *testing.T, st *store.Store, bead, pack string, option in
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.ApproveSetup(ctx, bead, seq, option, nil, account, "mckean", true, ""); err != nil {
+	if _, err := st.ApproveSetup(ctx, bead, seq, option, nil, account, "mckean", true, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	return seq
@@ -182,7 +182,7 @@ func TestCarrySetupGoogleMailShowsItsSignIn(t *testing.T) {
 			t.Errorf("google-mail's setup card names gws when gws is on PATH:\n%s", strings.Join(r.Ask.Setup.Does, "\n"))
 		}
 	}
-	if _, err := st.ApproveSetup(ctx, bead, seq, 1, map[string]string{"GOOGLE_ACCOUNT": "ops@example.com"}, "", "mckean", true, ""); err != nil {
+	if _, err := st.ApproveSetup(ctx, bead, seq, 1, map[string]string{"GOOGLE_ACCOUNT": "ops@example.com"}, "", "mckean", true, "", ""); err != nil {
 		t.Fatalf("approving the setup card after installing gws: %v", err)
 	}
 }
@@ -222,7 +222,7 @@ func TestCarrySetupGoogleDocsWritesOnceAndPointsBoth(t *testing.T) {
 		t.Fatalf("the card names %s, want %s", file, want)
 	}
 	if _, err := st.ApproveSetup(ctx, bead, seq, 1,
-		map[string]string{"GOOGLE_ACCOUNT": "ops@example.com"}, "", "mckean", true, ""); err != nil {
+		map[string]string{"GOOGLE_ACCOUNT": "ops@example.com"}, "", "mckean", true, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, st, home, "boot-one")

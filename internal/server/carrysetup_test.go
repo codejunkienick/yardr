@@ -29,7 +29,7 @@ func askSetupApprove(t *testing.T, st *store.Store, bead, pack string, option in
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.ApproveSetup(ctx, bead, seq, option, values, "", "mckean", true, ""); err != nil {
+	if _, err := st.ApproveSetup(ctx, bead, seq, option, values, "", "mckean", true, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	return seq
@@ -298,7 +298,7 @@ func TestCarrySetupWithAHostKeepsTheKeyForIt(t *testing.T) {
 		t.Fatalf("the card asks for the template %q", got.HostTemplate)
 	}
 	const host = "192.168.1.20:8443"
-	if _, err := st.ApproveSetup(ctx, bead, seq, 1, map[string]string{"DIRMAIL_ACCOUNT": "ops@example.com"}, "", "mckean", true, host); err != nil {
+	if _, err := st.ApproveSetup(ctx, bead, seq, 1, map[string]string{"DIRMAIL_ACCOUNT": "ops@example.com"}, "", "mckean", true, host, ""); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, st, home, "boot-one")
@@ -353,7 +353,7 @@ func TestCarrySetupWithAHostKeepsTheKeyForIt(t *testing.T) {
 	if got := setupOf(t, st, bead, seq2); !got.Given || got.HostTemplate == "" {
 		t.Fatalf("the update card is given %v and asks the template %q", got.Given, got.HostTemplate)
 	}
-	if _, err := st.ApproveSetup(ctx, bead, seq2, 1, nil, "", "mckean", true, other); err != nil {
+	if _, err := st.ApproveSetup(ctx, bead, seq2, 1, nil, "", "mckean", true, other, ""); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, st, home, "boot-two")
@@ -379,6 +379,103 @@ func TestCarrySetupWithAHostKeepsTheKeyForIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if src, err = st.GetSource(ctx, "dirmail"); err != nil || src.KeyedHost != "https://"+other || src.CredentialHeld(d) != "" {
+		t.Fatalf("after the key is given again: %+v, %v", src, err)
+	}
+}
+
+// A setup approved with a site is carried out with the site set before the
+// account is written, so the key is given once and for the host and site the
+// calls go to: the source is paired with https://host/<site> and holds
+// nothing back, and no other site on that host takes it. The pack applied
+// again keeps the site and the pairing.
+func TestCarrySetupWithASiteKeepsTheKeyForIt(t *testing.T) {
+	ctx := context.Background()
+	st, home, bead := appliedYard(t)
+	sited := strings.Replace(dirPackDecl, "base: https://dirmail.example.com/v1\n",
+		"base: https://dirmail.example.com/ex/example/v1\npath_template: https://dirmail.example.com/ex/{site}/v1\n", 1)
+	if sited == dirPackDecl {
+		t.Fatal("the test adds no path template")
+	}
+	dir := dirPackRepoWith(t, sited)
+	applyDir(t, st, home, dir)
+	to := store.Grantee{Crew: "yardmaster"}
+	seq, err := st.AddAsk(ctx, bead, setupAskOf("dirmail", to), "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := setupOf(t, st, bead, seq); got.SiteTemplate != "https://dirmail.example.com/ex/{site}/v1" {
+		t.Fatalf("the card asks for the site template %q", got.SiteTemplate)
+	}
+	if _, err := st.ApproveSetup(ctx, bead, seq, 1, map[string]string{"DIRMAIL_ACCOUNT": "ops@example.com"}, "", "mckean", true, "", "cloud-1"); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, st, home, "boot-one")
+	if rec := carryState(t, st, bead, seq); rec.State != store.CarryDone || rec.Site != "cloud-1" {
+		t.Fatalf("the record = %+v", rec)
+	}
+	standing := func(when string) {
+		t.Helper()
+		src, err := st.GetSource(ctx, "dirmail")
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, err := src.Declaration()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if src.Site != "cloud-1" || src.Base != "" || src.Host != "" || src.KeyedHost != "https://dirmail.example.com/cloud-1" || src.CredentialHeld(d) != "" {
+			t.Fatalf("%s: the source is set to site %q, its key is given for %q, and it is held: %q", when, src.Site, src.KeyedHost, src.CredentialHeld(d))
+		}
+		if got := src.Resolved(d).Base; got != "https://dirmail.example.com/ex/cloud-1/v1" {
+			t.Fatalf("%s: calls go to %q", when, got)
+		}
+	}
+	standing("after the setup")
+	lines := resolvedLines(t, st, bead, seq)
+	for _, want := range []string{"source dirmail: calls go to https://dirmail.example.com/ex/cloud-1/v1 (site cloud-1)", "the account DIRMAIL_ACCOUNT is set in"} {
+		if !strings.Contains(lines, want) {
+			t.Fatalf("the carried-out card has no %q:\n%s", want, lines)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dirmail.yaml"), []byte(strings.Replace(sited, "path: /messages", "path: /mail", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirGit(t, dir, "commit", "-q", "-am", "move the call")
+	applyDir(t, st, home, dir)
+	standing("after the pack applied again")
+
+	// A second card that keeps the standing account and gives another site
+	// holds the key back from it, naming the first site, until given again.
+	seq2, err := st.AddAsk(ctx, bead, setupAskOf("dirmail", to), "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := setupOf(t, st, bead, seq2); !got.Given || got.SiteTemplate == "" {
+		t.Fatalf("the update card is given %v and asks the site template %q", got.Given, got.SiteTemplate)
+	}
+	if _, err := st.ApproveSetup(ctx, bead, seq2, 1, nil, "", "mckean", true, "", "cloud-2"); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, st, home, "boot-two")
+	if rec := carryState(t, st, bead, seq2); rec.State != store.CarryDone {
+		t.Fatalf("the record = %+v", rec)
+	}
+	src, err := st.GetSource(ctx, "dirmail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := src.Declaration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	why := src.CredentialHeld(d)
+	if src.Site != "cloud-2" || src.KeyedHost != "https://dirmail.example.com/cloud-1" || !strings.Contains(why, "its credential was given for https://dirmail.example.com/cloud-1") || !strings.Contains(why, "the source's calls go to https://dirmail.example.com/cloud-2") {
+		t.Fatalf("after the site moved the source is set to %q, its key is given for %q, and it is held: %q", src.Site, src.KeyedHost, why)
+	}
+	if _, err := st.KeySource(ctx, "dirmail", map[string]string{"DIRMAIL_ACCOUNT": "ops@example.com"}, "mckean"); err != nil {
+		t.Fatal(err)
+	}
+	if src, err = st.GetSource(ctx, "dirmail"); err != nil || src.KeyedHost != "https://dirmail.example.com/cloud-2" || src.CredentialHeld(d) != "" {
 		t.Fatalf("after the key is given again: %+v, %v", src, err)
 	}
 }

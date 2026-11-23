@@ -893,7 +893,7 @@ func TestRunListIsTheCLIs(t *testing.T) {
 		"yardr peer rm <name>":                                              {"peer rm airy"},
 		"yardr peer set <name> --url <url>":                                 {"peer set airy --url https://airy.example.com"},
 		"yardr source set <source> calls_per_hour=<n>|updates_per_hour=<n>": {"source set crm updates_per_hour=3"},
-		"yardr source set <source> base=<name>|host=<host>":                 {"source set crm base=eu", "source set crm host=crm.example.net", "source set crm base=", "source set crm host="},
+		"yardr source set <source> base=<name>|host=<host>|site=<site>":     {"source set crm base=eu", "source set crm host=crm.example.net", "source set crm site=cloud-1", "source set crm base=", "source set crm host=", "source set crm site="},
 		"yardr source grant <source> read|<call>|--preset <preset> --group <group>|--crew <crew member> [--as <user>]": {"source grant crm note --crew yardmaster --group builders"},
 		"yardr source add <file>": {"source add " + addedFile, "source add " + replacedFile},
 		"yardr source ignore <source> --rm <id>": {
@@ -1010,11 +1010,11 @@ func TestRunListIsTheCLIs(t *testing.T) {
 					seedTalkIgnored(t, y)
 				}
 			}
-			if use == "yardr source set <source> base=<name>|host=<host>" {
+			if use == "yardr source set <source> base=<name>|host=<host>|site=<site>" {
 				// The yard's crm declares no region bases and no
 				// template, so both yards declare them first; an
 				// empty reset then starts from the value it clears.
-				dest := strings.Replace(runCRM, "base: https://crm.example.com/v1\n", "base: https://crm.example.com/v1\nbases:\n  eu: https://eu.crm.example.com/v1\nbase_template: https://{host}/v1\n", 1)
+				dest := strings.Replace(runCRM, "base: https://crm.example.com/v1\n", "base: https://crm.example.com/v1\nbases:\n  eu: https://eu.crm.example.com/v1\nbase_template: https://{host}/v1\npath_template: https://crm.example.com/ex/{site}/v1\n", 1)
 				if dest == runCRM {
 					t.Fatal("the test declares no destination")
 				}
@@ -1029,6 +1029,10 @@ func TestRunListIsTheCLIs(t *testing.T) {
 						}
 					case "source set crm host=":
 						if _, err := y.st.SetSource(context.Background(), "crm", store.SourceHost, "crm.example.net", "jo"); err != nil {
+							t.Fatal(err)
+						}
+					case "source set crm site=":
+						if _, err := y.st.SetSource(context.Background(), "crm", store.SourceSite, "cloud-1", "jo"); err != nil {
 							t.Fatal(err)
 						}
 					}

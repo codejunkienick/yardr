@@ -158,7 +158,7 @@ func TestSetupCardOfAnAppliedDirectoryIsCarriedOut(t *testing.T) {
 	if carried.Text != dirPackDecl || len(carried.Files) != 1 || carried.Files[0].Program != "dirmail-mint" || carried.Files[0].Text != dirPackMint {
 		t.Fatalf("the card carries %+v", carried)
 	}
-	if _, err := st.ApproveSetup(ctx, bead, seq, 1, map[string]string{"DIRMAIL_ACCOUNT": "ops@example.com"}, "", "mckean", true, ""); err != nil {
+	if _, err := st.ApproveSetup(ctx, bead, seq, 1, map[string]string{"DIRMAIL_ACCOUNT": "ops@example.com"}, "", "mckean", true, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, st, home, "boot-one")
@@ -324,7 +324,7 @@ func TestSetupOfAnAppliedDirectoryIsHeldToItsCommit(t *testing.T) {
 			t.Fatal(err)
 		}
 		dirGit(t, dir, "commit", "-q", "--allow-empty", "-m", "later")
-		_, err = st.ApproveSetup(ctx, bead, seq, 1, map[string]string{"DIRMAIL_ACCOUNT": "ops@example.com"}, "", "mckean", true, "")
+		_, err = st.ApproveSetup(ctx, bead, seq, 1, map[string]string{"DIRMAIL_ACCOUNT": "ops@example.com"}, "", "mckean", true, "", "")
 		if err == nil || !strings.Contains(err.Error(), "is at the commit") {
 			t.Fatalf("the approval = %v", err)
 		}

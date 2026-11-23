@@ -881,6 +881,66 @@ carried-out card says, and a card with only part of the account standing takes
 every name typed with a host. The asker has no flag for it: `yardr bead ask
 --setup` takes `--source-base` for a region and nothing for a host.
 
+A service that scopes its calls by site, under one host, declares the address
+that site fills beside `base`, which stays the default:
+
+```yaml
+base: https://api.example.com/ex/example/wiki
+path_template: https://api.example.com/ex/{site}/wiki
+```
+
+`path_template` is the address with `{site}` once, alone as one path segment
+and never as the host: the file decides the host and the rest of the path and
+the operator decides the one segment. It is held to the checks of a base with
+a stand-in site in the mark, and refused beside `credential.url`, in a file
+with no calls and without a `base` to be the default, as `base_template` is.
+The operator gives the site with `yardr source set <source> site=<site>`, on
+a setup card, or on the destination card:
+
+```sh
+yardr source set confluence site=cloud-1        # https://api.example.com/ex/cloud-1/wiki
+yardr source set confluence site=               # the declaration's own base again
+```
+
+A site is one path segment and nothing else: no slash, scheme, query or
+fragment, which the template says. The address it makes is held to the checks
+of a base again, and a site that fails them is refused in their words. A
+source set to a site sends its calls there, and the base and host settings
+are cleared, as setting either clears the others: the three replace each
+other. The setting survives `yardr pack apply` of the same pack, as `host`
+does; a declaration that no longer has a path template sends the calls to its
+own base again, and a site the checks refuse sends them nowhere.
+
+Which site the credential goes to is the operator's word alone, as the host
+is, and the credential is keyed to the two together: the yard remembers where
+a credential was given for as the host with the filled segment after it
+(`https://api.example.com/cloud-1`), and the bare host where no site is set.
+That key is the whole of the pairing, so two sites on one host never share a
+credential: while the declaration or the setting sends to another host or
+site than the one the key was given for, the source's calls, `yardr source
+check` and whatever else would send it there are held back naming both, until
+`yardr source key` gives it again for this one. A key given before sites were
+keyed (the bare host) is held back from a sited address the same way, and a
+sited key is held back the same way by an older build that keys on the host
+alone: neither direction ever carries a credential to a site it was not given
+for. Setting a site never carries a key to it, and a base or host setting that
+takes the source off a site holds the key back the same way.
+
+The setup card of a pack whose source declares a path template asks for the
+site above the account beside any host it asks for: its site line says where
+the calls go now and how to scope them to a site of your own. The operator
+types the site with the approval, in the site field above the account on the
+bead's page or as `--site <site>` beside `yardr bead answer <id> <ask> <n>
+--secret`, `<n> --account <source>` or a bare `<n>` that keeps an account that
+stands. Without it the setup would key the account to the declaration's own
+base and a later `site=` would hold it back, so the site is given with the
+account, not after it: the yard holds it to what a base is, tries the typed
+account's check call against it, and sets the source to it before it writes
+the account, so the key is given once, for that host and site. An account
+that stands was given for the site in use, so a site given with a bare pick
+that keeps it holds it back until it is typed again. The asker has no flag
+for it, as for a host.
+
 - **The file holds no secret.** It names the variable the credential is in;
   the value is read from the `env_file` at each call (mode 0600, as every
   env file). So the declaration is kept in the store, shown, and carried by
@@ -1121,11 +1181,11 @@ every name typed with a host. The asker has no flag for it: `yardr bead ask
   other command of a source stays the operator's to type in a terminal:
   `source set env_file=` and `mint_command=`, and `source key` (a key is
   asked for with a secret ask). A source's destination moves on its own
-  card instead (`source set <source> base=<name>`, `host=<host>`, or
-  either with nothing after it), which shows the whole address each way;
-  a base alone at setup is still named there (`yardr bead ask ...
-  --setup <pack> --source-base <name>`), and a host at setup is typed on
-  that card by the operator. `env_file` and `mint_command` stay typed,
+  card instead (`source set <source> base=<name>`, `host=<host>`,
+  `site=<site>`, or any with nothing after it), which shows the whole
+  address each way; a base alone at setup is still named there
+  (`yardr bead ask ... --setup <pack> --source-base <name>`), and a host
+  or a site at setup is typed on that card by the operator. `env_file` and `mint_command` stay typed,
   since no card can show that file or that program: `source add` is the
   one exception, and its file's bytes are on the card.
 - **Its name is none of `peer`, `token`, `yardr`**, the sources yardr

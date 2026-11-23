@@ -189,6 +189,7 @@ func setupAsked(prefix string) []field {
 		{prefix + "setup.pack", "string", "the pack to set up, of kind source: one yardr embeds, or one the operator applied from a directory and left as it was"},
 		{prefix + "setup.base", "string?", "the selected region base name; absent when calls go to the declaration's own base"},
 		{prefix + "setup.host_template", "string?", "the address a host of the operator's own fills, with `{host}` where it goes (`https://{host}/api/v1`): the card asks for that host above the account, and [`ApproveSetup`](#for-the-operator-alone) takes it as `host`. Absent where no source the pack carries declares a `base_template`"},
+		{prefix + "setup.site_template", "string?", "the address a site of the operator's own fills, with `{site}` as one path segment (`https://api.example.com/ex/{site}/wiki`): the card asks for that site above the account, and [`ApproveSetup`](#for-the-operator-alone) takes it as `site`. Absent where no source the pack carries declares a `path_template`"},
 		{prefix + "setup.label", "string?", "where the pack was read from, as the card shows it: the build it is embedded in, or the directory the operator applied it from and the commit it was at"},
 		{prefix + "setup.account", "array of string", "the names to type unseen beside the preset pick"},
 		{prefix + "setup.account_file", "string?", "the file the value goes to, on the yard's machine. A device of the current operator is told it, whoever the ask was put to. Any other device is told the card with the field absent, even the device of a user the ask was put to while they were the operator, and so is every device of a yard with no operator. The socket tells the whole card"},
@@ -663,6 +664,7 @@ var apiCalls = []apiCall{
 			{"asks[].setup.pack", "string", "the pack to set up, of kind source (one yardr embeds, or one the operator applied from a directory and left as it was), whose `yardr pack show <pack>` prints the presets numbered"},
 			{"asks[].setup.base", "string?", "the selected region base name; absent when calls go to the declarations' own bases"},
 			{"asks[].setup.host_template", "string?", "the address a host of the operator's own fills, with `{host}` where it goes (`https://{host}/api/v1`): the card asks for that host above the account, and [`ApproveSetup`](#for-the-operator-alone) takes it as `host`. Absent where no source the pack carries declares a `base_template`"},
+			{"asks[].setup.site_template", "string?", "the address a site of the operator's own fills, with `{site}` as one path segment (`https://api.example.com/ex/{site}/wiki`): the card asks for that site above the account, and [`ApproveSetup`](#for-the-operator-alone) takes it as `site`. Absent where no source the pack carries declares a `path_template`"},
 			{"asks[].setup.label", "string?", "where the pack was read from, as the card shows it: the build it is embedded in, or the directory the operator applied it from and the commit it was at"},
 			{"asks[].setup.account", "array of string", "the names the account is made of: the mint's inputs where the pack's credential is minted, else every credential name. A first setup types every one beside the preset pick; an update says by `given` and `missing` which of them the account file that stands holds. Where the card lists candidates, the answer names one of them instead"},
 			{"asks[].setup.account_file", "string?", "the file a typed value goes to, on the yard's machine; on an update, the account file that stands. Told to a device of the operator alone ([over the network](#over-the-network)): absent on any other device's card, and on every device's of a yard with no operator. The socket tells the whole card"},
@@ -1142,9 +1144,10 @@ var apiOperatorCalls = []apiCall{
 			{"actor", "string", "who approves: the operator's name"},
 			{"weighed", "bool", "`true` once the person has seen the card's weight and passed the client's gate; left out, `false`, and a weighty card, which every setup is, is refused"},
 			{"host", "string", "the host of a server of the operator's own, a name or an address with an optional port and nothing else, that every source of the pack declaring a `base_template` is set to, in place of its own address: asked where `setup.host_template` stands, typed by the operator on the card, and an asker has no word for it. It is held to what a base is, in the checks' words, and the typed account's check call goes to it; the yard sets it before it writes the account, so the key is given for that host. An account that stands (`setup.given`) was given for the host in use, so a host given with the request that keeps it holds it back until it is typed again, and with part of it standing (`setup.missing`) every name of `setup.account` is typed with a host. Left out for the address in use, and by a client from before it"},
+			{"site", "string", "the site of the operator's own, one path segment and nothing else, that every source of the pack declaring a `path_template` is set to, in place of its own address: asked where `setup.site_template` stands, typed by the operator on the card, and an asker has no word for it. It is held to what a base is, in the checks' words, and the typed account's check call goes to it; the yard sets it before it writes the account, so the key is given for that host and site together. An account that stands was given for the site in use, so a site given with the request that keeps it holds it back until it is typed again. Left out for the address in use, and by a client from before it"},
 		},
 		requests: []string{
-			`{"bead":"yd-crm","ask":%d,"option":1,"values":{"COURIER_ACCOUNT":"what-the-person-typed"},"actor":"jo","weighed":true}`,
+			`{"bead":"yd-crm","ask":%d,"option":1,"values":{"COURIER_ACCOUNT":"what-the-person-typed"},"site":"cloud-1","actor":"jo","weighed":true}`,
 			`{"bead":"yd-crm","ask":%d,"option":1,"account":"courier-existing","host":"courier.example.net","actor":"jo","weighed":true}`,
 			`{"bead":"yd-crm","ask":%d,"option":1,"actor":"jo","weighed":true}`,
 			`{"bead":"yd-crm","ask":%d,"option":1,"values":{"PARCEL_UPDATE_TOKEN":"what-the-person-typed"},"actor":"jo","weighed":true}`,
@@ -1159,12 +1162,13 @@ var apiOperatorCalls = []apiCall{
 			{"account", "string?", "the candidate taken: its `source` in `setup.candidates`; absent when the account was typed or kept"},
 			{"keep", "bool?", "`true` when the account that stands was kept with a bare preset pick; absent when it was typed or a candidate was taken"},
 			{"host", "string?", "the host the approval gave, which the server sets the pack's sources to before it writes the account; absent where none was given"},
+			{"site", "string?", "the site the approval gave, which the server sets the pack's sources to before it writes the account; absent where none was given"},
 			{"result", "string", "`approved, to be carried out`: the server carries the setup out after the call"},
 		},
 		after: "What the card holds decides the account. On a first setup, neither `setup.given` nor `setup.missing`, nothing stands yet: the request types every name of `setup.account` in `values`, or names a candidate in `account`. " +
 			"On an update the account file that stands is `setup.account_file`. When it holds every name (`setup.given`), the request sends neither `values` nor `account` to keep it, which the reply says as `keep`, or types every name of `setup.account` to change it, or names a candidate. " +
 			"When it lacks some (`setup.missing`), the request types exactly those names and the others stay where they are, or names a candidate. " +
-			"The reply has one of `given` (the names typed), `account` (the candidate taken) and `keep`. A `host` goes beside the first two on a first setup that asks one (`setup.host_template`), and the reply says it as `host`; the second example takes a candidate for a server of the operator's own.\n\n" +
+			"The reply has one of `given` (the names typed), `account` (the candidate taken) and `keep`. A `host` goes beside the first two on a first setup that asks one (`setup.host_template`), and the reply says it as `host`; a `site` goes the same way where `setup.site_template` stands, and the reply says it as `site`; the second example takes a candidate for a server of the operator's own.\n\n" +
 			"The approval and the answer are one write: the ask is approved, or neither. The carrying out follows after the call: while `ran.result` is `approved, to be carried out` the setup reads as being carried out, and as ran or failed once the server finishes it; read `Bead` again for it. When the call ends without a reply (the server went away), a client cannot know whether the approval landed: say \"the yard did not answer; read the card again\", never \"approved\", and read `Bead` again. An open ask is approved again; an approved one is left for the server, whose failure names the account asked again.",
 	},
 	{
@@ -2608,6 +2612,7 @@ func apiSetupSource(name string) string {
 	return "name: " + name + "\nbase: https://" + name + ".example.com/api\n" +
 		"bases:\n  us: https://" + name + ".example.com/api\n  eu: https://eu." + name + ".example.com/api\n" +
 		"base_template: https://{host}/api\n" +
+		"path_template: https://courier.example.com/ex/{site}/api\n" +
 		"credential:\n  env: COURIER_TOKEN\n  header: \"Authorization: Bearer {credential}\"\n" +
 		"  mint: [COURIER_ACCOUNT]\n  mint_command: [courier-mint]\n" +
 		"calls:\n  ping: { kind: read, request: { method: GET, path: /me } }\n" +

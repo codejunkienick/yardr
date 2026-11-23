@@ -215,6 +215,16 @@ bases:
 # to say, and a key given for another host is held back until it is
 # given again for this one.
 base_template: https://{host}
+# Drop path_template where the service scopes nothing by site. Where it
+# scopes its calls by site (a per-site address under one host), it is the
+# address that site fills, with {site} once as one path segment and never
+# as the host: `yardr source set acme site=cloud-1` then sends every call
+# to https://acme.example.com/ex/cloud-1/wiki, and the setup card asks for
+# the site above the key. base stays the default. Only the segment is the
+# operator's to say, and a key given for one site is keyed to the host and
+# that segment together, so it is held back from another site on the same
+# host until it is given again for this one.
+path_template: https://acme.example.com/ex/{site}/wiki
 check: ping
 idempotency: Idempotency-Key
 # Each call is a separately grantable request. Keep the calls the service

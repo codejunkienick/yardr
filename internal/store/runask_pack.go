@@ -740,7 +740,7 @@ func (w *wtx) packOneSourceDoes(carried AskSource, d *source.Declaration, settle
 	if !sourceMissing {
 		resolved := *src
 		if base != "" {
-			resolved.Base, resolved.Host = base, ""
+			resolved.Base, resolved.Host, resolved.Site = base, "", ""
 		}
 		display, base = resolved.Resolved(d), resolved.Base
 	}
@@ -792,7 +792,7 @@ func packDeclDiffLines(name string, was, now *source.Declaration) []string {
 		return []string{fmt.Sprintf("source %s: the yard's declaration is one this yardr does not read, and the pack's replaces it.", name)}
 	}
 	var out []string
-	for _, key := range []string{"base", "bases", "base_template", "credential", "check", "idempotency", "calls", "notify", "hear", "limits", "thread", "link", "identity", "hook", "events", "git"} {
+	for _, key := range []string{"base", "bases", "base_template", "path_template", "credential", "check", "idempotency", "calls", "notify", "hear", "limits", "thread", "link", "identity", "hook", "events", "git"} {
 		old, new := declarationKey(was, key), declarationKey(now, key)
 		if old != new {
 			out = append(out, safeSourceCardLine(fmt.Sprintf("source %s %s: %s -> %s.", name, key, or(old, "none"), or(new, "none"))))
@@ -814,11 +814,8 @@ func declarationKey(d *source.Declaration, key string) string {
 			return "" // an absent map and an empty one are alike: no regions, not "null"
 		}
 		v = d.Bases
-	case "base_template":
-		if d.BaseTemplate == "" {
-			return "" // no template reads as none, not as an empty string
-		}
-		v = d.BaseTemplate
+	case "base_template", "path_template":
+		v = map[string]string{"base_template": d.BaseTemplate, "path_template": d.PathTemplate}[key]
 	case "credential":
 		v = d.Credential
 	case "check":
@@ -855,7 +852,7 @@ func declarationKey(d *source.Declaration, key string) string {
 	default:
 		return ""
 	}
-	if v == nil {
+	if v == nil || v == "" { // no template reads as none, not as an empty string
 		return ""
 	}
 	raw, err := json.Marshal(v)

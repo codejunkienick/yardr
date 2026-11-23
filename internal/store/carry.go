@@ -106,6 +106,11 @@ type Carry struct {
 	// before the account is written, so that the key is given for the
 	// host the calls go to. "" for none.
 	Host string `json:"host,omitempty"`
+	// Site is the site a setup approval gave: the carrying out sets each
+	// source the pack carries whose declaration names a path template to
+	// it, before the account is written, so that the key is given for the
+	// host and site the calls go to. "" for none.
+	Site string `json:"site,omitempty"`
 	// TeammateEmails are the addresses a teammate invite or removal
 	// reports, held at approval: a removal's stand in the mapping the
 	// carrying out itself removes, so a report still owed after that

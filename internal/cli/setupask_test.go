@@ -134,6 +134,7 @@ func TestBeadAskSetupAndAnswer(t *testing.T) {
 	}
 	beadAskSetupSourceBase(t)
 	beadAnswerSetupHost(t)
+	beadAnswerSetupSite(t)
 }
 
 // beadAnswerSetupHost checks that --host goes with a setup ask's account and
@@ -202,6 +203,74 @@ func beadAnswerSetupHost(t *testing.T) {
 		t.Fatalf("answer printed %q, want %q", out, want)
 	}
 	if rec, err := y.own.CarryOf(context.Background(), b.ID, 1); err != nil || rec.Host != "192.168.1.20:8443" {
+		t.Fatalf("the carrying record = %+v, %v", rec, err)
+	}
+}
+
+// beadAnswerSetupSite checks that --site goes with a setup ask's account and
+// nothing else, that the gate names it where it says how to approve, that a
+// site the checks refuse is refused in their words with the ask left open, and
+// that an approval carries the site to the carrying record and says who gave
+// it, as --host does for a host.
+func beadAnswerSetupSite(t *testing.T) {
+	y, b := setupYardCLI(t)
+	decl := strings.Replace(cliSetupDecl, "base: https://clipphone.example.com\n",
+		"base: https://clipphone.example.com/ex/example\npath_template: https://clipphone.example.com/ex/{site}\n", 1)
+	if decl == cliSetupDecl {
+		t.Fatal("the test adds no path template")
+	}
+	reading := cliSetupReading()
+	reading.Sources[0].Text = decl
+	y.own.SetPackReader(func(ctx context.Context, name string, depot string, mappings store.Mappings, yard store.API) (*store.PackReading, error) {
+		if name != "clipphone" {
+			return nil, errFakeNoPackCLI(name)
+		}
+		return reading, nil
+	})
+	if _, err := y.as(t, "yardmaster", "ask", b.ID, "Set up clipphone for the yardmaster?",
+		"--setup", "clipphone", "--crew", "yardmaster",
+		"--context", "The yardmaster rings the person when a bead needs them."); err != nil {
+		t.Fatal(err)
+	}
+	notes, err := y.st.Notes(context.Background(), b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var setup *store.AskSetup
+	for _, r := range store.ResolveAsks(notes, time.Now()) {
+		if r.Note.Seq == 1 {
+			setup = r.Ask.Setup
+		}
+	}
+	if setup == nil || setup.SiteTemplate != "https://clipphone.example.com/ex/{site}" {
+		t.Fatalf("the stored setup = %+v", setup)
+	}
+	if out, err := y.as(t, "jo", "answer", b.ID, "1", "1", "--site", "cloud-1"); err == nil ||
+		!strings.Contains(err.Error(), "--site goes with a setup ask's approval") {
+		t.Errorf("--site with a bare pick of a card whose account does not stand was taken or refused otherwise: %v\n%s", err, out)
+	}
+	in := strings.NewReader("CLIPHONE_ACCOUNT=1555\n")
+	c := y.a.beadCmd()
+	c.SetIn(in)
+	if _, err := run(t, c, "answer", b.ID, "1", "1", "--secret", "--site", "cloud-1"); err == nil ||
+		!strings.HasSuffix(err.Error(), "yardr bead answer "+b.ID+" 1 1 --secret --site cloud-1") || in.Len() != len("CLIPHONE_ACCOUNT=1555\n") {
+		t.Fatalf("approving with a site and no terminal = %v (%d bytes of input left)", err, in.Len())
+	}
+	if out, err := answerFrom(t, y.a, "CLIPHONE_ACCOUNT=1555\n", b.ID, "1", "1", "--secret", "--site", "cloud-1/extra"); err == nil ||
+		!strings.Contains(err.Error(), "a site is one path segment") {
+		t.Fatalf("a site of two segments was taken or refused otherwise: %v\n%s", err, out)
+	}
+	if got := askState(context.Background(), y.st, b.ID, 1); got != "open" {
+		t.Fatalf("the setup ask is %q after the refused approvals, want it open", got)
+	}
+	out, err := answerFrom(t, y.a, "CLIPHONE_ACCOUNT=1555\n", b.ID, "1", "1", "--secret", "--site", "cloud-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "ask 1, asked by yardmaster: setup of pack clipphone, preset read to crew yardmaster\njo gave CLIPHONE_ACCOUNT\njo gave the site cloud-1\njo approved it: approved, to be carried out\n"; out != want {
+		t.Fatalf("answer printed %q, want %q", out, want)
+	}
+	if rec, err := y.own.CarryOf(context.Background(), b.ID, 1); err != nil || rec.Site != "cloud-1" {
 		t.Fatalf("the carrying record = %+v, %v", rec, err)
 	}
 }

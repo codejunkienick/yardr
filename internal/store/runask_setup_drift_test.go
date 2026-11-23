@@ -186,7 +186,7 @@ func TestSetupDriftPresetHeldNewCoveredWaiting(t *testing.T) {
 	}
 	// A drift card whose pack would change anything is approved even
 	// where the preset is held: the update itself still wants applying.
-	done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, "")
+	done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, "", "")
 	if err != nil {
 		t.Fatalf("an approval of a held preset on drift was refused: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestSetupDriftAccountGivenKeep(t *testing.T) {
 		t.Errorf("the terminal card lacks the bare pick answer:\n%s", lines)
 	}
 	// Kept with a bare pick: no values, no candidate.
-	done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, "")
+	done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestSetupDriftAccountGivenKeep(t *testing.T) {
 	// Typed another to change it.
 	seq = y.ask(t, setupAsk(), "yardmaster")
 	done, err = y.ApproveSetup(y.ctx, y.bead, seq, 1,
-		map[string]string{"SETUP_ACCOUNT": "new@example.com"}, "", "mckean", true, "")
+		map[string]string{"SETUP_ACCOUNT": "new@example.com"}, "", "mckean", true, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestSetupDriftAccountGivenKeep(t *testing.T) {
 	}
 	// A candidate's file to take.
 	seq = y.ask(t, setupAsk(), "yardmaster")
-	done, err = y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "setupcal", "mckean", true, "")
+	done, err = y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "setupcal", "mckean", true, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestSetupDriftAccountGivenKeep(t *testing.T) {
 	// A partial typing is refused: the whole account changes it, or the
 	// bare pick keeps it.
 	seq = y.ask(t, setupAsk(), "yardmaster")
-	if _, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, map[string]string{"SETUP_ACCOUNT": "x", "EXTRA": "y"}, "", "mckean", true, ""); err == nil ||
+	if _, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, map[string]string{"SETUP_ACCOUNT": "x", "EXTRA": "y"}, "", "mckean", true, "", ""); err == nil ||
 		!strings.Contains(err.Error(), "given a name it did not ask for") {
 		t.Errorf("an approval with a forged name was recorded or refused otherwise: %v", err)
 	}
@@ -292,12 +292,12 @@ func TestSetupDriftAccountMissing(t *testing.T) {
 		}
 	}
 	// Kept is refused: the missing name wants typing.
-	if _, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, ""); err == nil ||
+	if _, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, "", ""); err == nil ||
 		!strings.Contains(err.Error(), "missing account SETUP_PROJECT") {
 		t.Errorf("an approval keeping a missing account was recorded or refused otherwise: %v", err)
 	}
 	done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1,
-		map[string]string{"SETUP_PROJECT": "proj-1"}, "", "mckean", true, "")
+		map[string]string{"SETUP_PROJECT": "proj-1"}, "", "mckean", true, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +342,7 @@ func testSetupDriftCardAsksAHost(t *testing.T) {
 			!strings.Contains(joined, held) {
 			t.Fatalf("the drift card: given %v, template %q:\n%s", setup.Given, setup.HostTemplate, joined)
 		}
-		done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, "crm.example.net")
+		done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, "crm.example.net", "")
 		if err != nil || done.Host != "crm.example.net" || !done.Keep {
 			t.Fatalf("keeping the account with a host: %+v, %v", done, err)
 		}
@@ -375,7 +375,7 @@ func testSetupDriftCardAsksAHost(t *testing.T) {
 			"the missing name alone":     {"SETUP_PROJECT": "proj-1"},
 			"the name that stands alone": {"SETUP_ACCOUNT": "ops@example.com"},
 		} {
-			if _, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, values, "", "mckean", true, "crm.example.net"); err == nil ||
+			if _, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, values, "", "mckean", true, "crm.example.net", ""); err == nil ||
 				!strings.Contains(err.Error(), "asks for the account SETUP_ACCOUNT and SETUP_PROJECT") {
 				t.Errorf("%s with a host: %v, want every name asked for", name, err)
 			}
@@ -383,7 +383,7 @@ func testSetupDriftCardAsksAHost(t *testing.T) {
 		if r := y.asked(t, seq); r.State != AskOpen {
 			t.Fatalf("the refused approvals left the ask %v", r.State)
 		}
-		done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, map[string]string{"SETUP_ACCOUNT": "ops@example.com", "SETUP_PROJECT": "proj-1"}, "", "mckean", true, "crm.example.net")
+		done, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, map[string]string{"SETUP_ACCOUNT": "ops@example.com", "SETUP_PROJECT": "proj-1"}, "", "mckean", true, "crm.example.net", "")
 		if err != nil || done.Host != "crm.example.net" || len(done.Given) != 2 {
 			t.Fatalf("typing every name with a host: %+v, %v", done, err)
 		}
@@ -395,7 +395,7 @@ func testSetupDriftCardAsksAHost(t *testing.T) {
 		if setup := y.asked(t, seq).Ask.Setup; setup.HostTemplate != "" || strings.Contains(strings.Join(setup.Does, "\n"), "the host of source") {
 			t.Fatalf("a card of a pack with no template asks a host: %q", setup.HostTemplate)
 		}
-		if _, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, "crm.example.net"); err == nil ||
+		if _, err := y.ApproveSetup(y.ctx, y.bead, seq, 1, nil, "", "mckean", true, "crm.example.net", ""); err == nil ||
 			!strings.Contains(err.Error(), "takes no host") {
 			t.Fatalf("a host on a card that asks none: %v", err)
 		}

@@ -73,10 +73,13 @@ type AskSetup struct {
 	Base string `json:"base,omitempty"`
 	// HostTemplate is the address a host the operator types fills, with
 	// {host} where it goes: the card's source says where its calls go and
-	// the approval may carry a host (ApproveSetup). The yard's, never the
-	// writer's: "" where no carried source declares a template
-	// (setupHostTemplate).
+	// the approval may carry a host (ApproveSetup). SiteTemplate is the
+	// address a site the operator types fills, with {site} as one path
+	// segment, beside it, and the approval may carry a site the same way.
+	// The yard's, never the writer's: "" where no carried source declares
+	// the template (setupHostTemplate, setupSiteTemplate).
 	HostTemplate string `json:"host_template,omitempty"`
+	SiteTemplate string `json:"site_template,omitempty"`
 	// Account are the names to type unseen beside the preset pick: the
 	// mint's inputs where the pack's credential is minted, else every
 	// credential name. AccountFile is the file the value goes to. Where
@@ -110,34 +113,6 @@ type AskSetup struct {
 	BackBy string            `json:"back_by,omitempty"`
 }
 
-// TakenBack is the card's line for what takes the setup back, with who may
-// run it.
-func (s AskSetup) TakenBack() string { return or(s.BackBy, "anyone") + " can take it back: " + s.Back }
-
-// Grantees are who the setup's grants are for, in words.
-func (s AskSetup) Grantees() string { return granteesWord(s.To) }
-
-// granteesWord is who the grants are for, in words: each crew member and
-// each group by name.
-func granteesWord(to []Grantee) string {
-	words := make([]string, len(to))
-	for i, t := range to {
-		if t.Crew != "" {
-			words[i] = "crew " + t.Crew
-			continue
-		}
-		words[i] = "group " + t.Group
-	}
-	return andList(words)
-}
-
-// Summary is what approving the setup does, in one line: the apply, the
-// account and the grants.
-func (s AskSetup) Summary() string {
-	return fmt.Sprintf("yardr pack apply %s, the account %s, and the preset's grants to %s",
-		s.Pack, strings.Join(s.Account, " and "), s.Grantees())
-}
-
 // AskSetupApproved is what ApproveSetup did: the ask and who asked it, the
 // pack with the preset picked, the names given, the candidate taken or the
 // standing account kept, and what the approval recorded (CarryPending until
@@ -154,8 +129,10 @@ type AskSetupApproved struct {
 	Account string   `json:"account,omitempty"`
 	Keep    bool     `json:"keep,omitempty"`
 	// Host is the host the approval gave the sources the pack carries to
-	// fill their templates with, "" for none.
+	// fill their templates with, "" for none. Site is the site it gave to
+	// fill their path templates with, beside it.
 	Host   string `json:"host,omitempty"`
+	Site   string `json:"site,omitempty"`
 	Result string `json:"result"`
 }
 
@@ -202,8 +179,10 @@ type SetupAsked struct {
 	Base string `json:"base,omitempty"`
 	// HostTemplate is the address a host fills, with {host} where it goes,
 	// where the card asks for a host (AskSetup.HostTemplate): the client
-	// shows a field for it above the account.
+	// shows a field for it above the account. SiteTemplate is the address a
+	// site fills, with {site} as one path segment, beside it.
 	HostTemplate string `json:"host_template,omitempty"`
+	SiteTemplate string `json:"site_template,omitempty"`
 }
 
 // setup is the setup of the ask a as a client shows it, nil for an ask
@@ -216,7 +195,7 @@ func (a Ask) setup() *SetupAsked {
 		AccountFile: a.Setup.AccountFile, Given: a.Setup.Given, Missing: a.Setup.Missing,
 		Candidates: a.Setup.Candidates, Does: a.Setup.Does, Back: a.Setup.Back,
 		BackBy: a.Setup.BackBy, Carried: a.Setup.Carried, Presets: a.Setup.Presets, To: a.Setup.To,
-		Base: a.Setup.Base, HostTemplate: a.Setup.HostTemplate}
+		Base: a.Setup.Base, HostTemplate: a.Setup.HostTemplate, SiteTemplate: a.Setup.SiteTemplate}
 }
 
 // WithoutCandidates is the card as it reads where the yard's other accounts
@@ -565,7 +544,7 @@ func (w *wtx) setupCard(pack string, to []Grantee, base string) (*AskSetup, erro
 	card := &AskSetup{Pack: pack, Kind: reading.Kind, Label: reading.Label, To: to, Base: base,
 		Account: account, AccountFile: file, Given: given, Missing: missing,
 		Candidates: candidates, Carried: carried, Presets: presets,
-		Does: does, Seen: seenMap, Back: setupBack(carried, to), BackBy: "the operator", HostTemplate: setupHostTemplate(carried, decls)}
+		Does: does, Seen: seenMap, Back: setupBack(carried, to), BackBy: "the operator", HostTemplate: setupHostTemplate(carried, decls), SiteTemplate: setupSiteTemplate(carried, decls)}
 	if len(does)+len(presets) > MaxRunSourceCardLines {
 		return nil, fmt.Errorf("pack %s: its setup card would run to %d lines: a card is read whole, so set it up step by step instead (yardr pack check %s shows its plan there): a pack apply card, an account card per source, and a grant card per source and kind", pack, len(does)+len(presets), pack)
 	}
@@ -1395,9 +1374,9 @@ func setupCandidatesStale(seq uint64, was, now AskSetup) error {
 // landed since is run past, as the grant row runs it. A drift card whose
 // pack would change anything is never refused for it: the update itself
 // still wants applying, and the grants step runs past what is held. A host
-// given is a change too: it moves where the calls go.
-func (w *wtx) setupHeldStale(seq uint64, was AskSetup, picked int, host string) error {
-	if host != "" || ((was.Given || len(was.Missing) > 0) && setupDriftChanges(w, was)) {
+// or a site given is a change too: it moves where the calls go.
+func (w *wtx) setupHeldStale(seq uint64, was AskSetup, picked int, host, site string) error {
+	if host != "" || site != "" || ((was.Given || len(was.Missing) > 0) && setupDriftChanges(w, was)) {
 		return nil
 	}
 	p := was.Presets[picked-1]
@@ -1472,8 +1451,8 @@ func setupDriftChanges(w *wtx, was AskSetup) bool {
 // beside it (handSetupSecret), never stored, a picked candidate is named
 // on the record for the carrying out to point at, and a kept standing
 // account is marked so a stop loses nothing.
-func (w *wtx) recordSetupCarry(bead string, seq uint64, was AskSetup, account string, keep bool, host, actor string) error {
-	rec := Carry{Bead: bead, Ask: seq, Argv: []string{"setup", was.Pack}, State: CarryApproved, Actor: actor, Account: account, Keep: keep, Host: host}
+func (w *wtx) recordSetupCarry(bead string, seq uint64, was AskSetup, account string, keep bool, host, site, actor string) error {
+	rec := Carry{Bead: bead, Ask: seq, Argv: []string{"setup", was.Pack}, State: CarryApproved, Actor: actor, Account: account, Keep: keep, Host: host, Site: site}
 	for _, carried := range was.Carried {
 		snap := CarrySource{Name: carried.Name}
 		if src, _, err := sourceIn(w.Tx, carried.Name); err == nil {

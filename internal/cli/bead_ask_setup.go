@@ -17,7 +17,7 @@ import (
 	"yardr.dev/yardr/internal/store"
 )
 
-func (a *app) approveSetup(c *cobra.Command, st store.API, id string, seq uint64, n int, host string) error {
+func (a *app) approveSetup(c *cobra.Command, st store.API, id string, seq uint64, n int, host, site string) error {
 	notes, err := st.Notes(c.Context(), id)
 	if err != nil {
 		return err
@@ -62,7 +62,7 @@ func (a *app) approveSetup(c *cobra.Command, st store.API, id string, seq uint64
 	}
 	// A setup takes the account, so its card is weighty: the gate comes
 	// before a value is typed, as a secret's does.
-	weighed, err := a.gate(c, st, id, seq, "approve", fmt.Sprintf("%d --secret%s", n, hostFlag(host)))
+	weighed, err := a.gate(c, st, id, seq, "approve", fmt.Sprintf("%d --secret%s%s", n, hostFlag(host), siteFlag(site)))
 	if err != nil {
 		return err
 	}
@@ -70,7 +70,7 @@ func (a *app) approveSetup(c *cobra.Command, st store.API, id string, seq uint64
 	if err != nil {
 		return err
 	}
-	done, err := st.ApproveSetup(c.Context(), id, seq, n, values, "", a.who(), weighed, host)
+	done, err := st.ApproveSetup(c.Context(), id, seq, n, values, "", a.who(), weighed, host, site)
 	if err != nil {
 		return secretErr(err)
 	}
@@ -78,6 +78,7 @@ func (a *app) approveSetup(c *cobra.Command, st store.API, id string, seq uint64
 		fmt.Fprintf(w, "ask %d, asked by %s: setup of pack %s, preset %s to %s\n", done.Ask, done.Asker, done.Pack, done.Preset, setup.Grantees())
 		fmt.Fprintf(w, "%s gave %s\n", a.who(), strings.Join(done.Given, " and "))
 		printHostGiven(w, a.who(), done.Host)
+		printSiteGiven(w, a.who(), done.Site)
 		fmt.Fprintf(w, "%s approved it: %s\n", a.who(), done.Result)
 	})
 }
@@ -86,7 +87,7 @@ func (a *app) approveSetup(c *cobra.Command, st store.API, id string, seq uint64
 // <source> on a setup ask: it approves the setup with the preset pick,
 // taking the named candidate's account file instead of typing a value.
 // What it prints is the preset picked and who took which source.
-func (a *app) approveSetupAccount(c *cobra.Command, st store.API, id string, seq uint64, n int, account, host string) error {
+func (a *app) approveSetupAccount(c *cobra.Command, st store.API, id string, seq uint64, n int, account, host, site string) error {
 	notes, err := st.Notes(c.Context(), id)
 	if err != nil {
 		return err
@@ -109,11 +110,11 @@ func (a *app) approveSetupAccount(c *cobra.Command, st store.API, id string, seq
 	case setup == nil:
 		return fmt.Errorf("--account takes a candidate of a setup ask: yardr bead answer %s %d <n> --account <source>", id, seq)
 	}
-	weighed, err := a.gate(c, st, id, seq, "approve", fmt.Sprintf("%d --account %s%s", n, account, hostFlag(host)))
+	weighed, err := a.gate(c, st, id, seq, "approve", fmt.Sprintf("%d --account %s%s%s", n, account, hostFlag(host), siteFlag(site)))
 	if err != nil {
 		return err
 	}
-	done, err := st.ApproveSetup(c.Context(), id, seq, n, nil, account, a.who(), weighed, host)
+	done, err := st.ApproveSetup(c.Context(), id, seq, n, nil, account, a.who(), weighed, host, site)
 	if err != nil {
 		return secretErr(err)
 	}
@@ -121,6 +122,7 @@ func (a *app) approveSetupAccount(c *cobra.Command, st store.API, id string, seq
 		fmt.Fprintf(w, "ask %d, asked by %s: setup of pack %s, preset %s to %s\n", done.Ask, done.Asker, done.Pack, done.Preset, setup.Grantees())
 		fmt.Fprintf(w, "%s took %s\n", a.who(), done.Account)
 		printHostGiven(w, a.who(), done.Host)
+		printSiteGiven(w, a.who(), done.Site)
 		fmt.Fprintf(w, "%s approved it: %s\n", a.who(), done.Result)
 	})
 }
@@ -142,7 +144,7 @@ func keepsAccount(ctx context.Context, st store.API, id string, seq uint64, args
 // operator's own where one is given (--host), which holds the account back
 // from it until it is typed again. What it prints is the preset picked and
 // who kept it.
-func (a *app) approveSetupKeep(c *cobra.Command, st store.API, id string, seq uint64, n int, host string) error {
+func (a *app) approveSetupKeep(c *cobra.Command, st store.API, id string, seq uint64, n int, host, site string) error {
 	notes, err := st.Notes(c.Context(), id)
 	if err != nil {
 		return err
@@ -165,11 +167,11 @@ func (a *app) approveSetupKeep(c *cobra.Command, st store.API, id string, seq ui
 	case setup == nil:
 		return fmt.Errorf("ask %d sets up no pack", seq)
 	}
-	weighed, err := a.gate(c, st, id, seq, "approve", strconv.Itoa(n)+hostFlag(host))
+	weighed, err := a.gate(c, st, id, seq, "approve", strconv.Itoa(n)+hostFlag(host)+siteFlag(site))
 	if err != nil {
 		return err
 	}
-	done, err := st.ApproveSetup(c.Context(), id, seq, n, nil, "", a.who(), weighed, host)
+	done, err := st.ApproveSetup(c.Context(), id, seq, n, nil, "", a.who(), weighed, host, site)
 	if err != nil {
 		return secretErr(err)
 	}
@@ -177,6 +179,7 @@ func (a *app) approveSetupKeep(c *cobra.Command, st store.API, id string, seq ui
 		fmt.Fprintf(w, "ask %d, asked by %s: setup of pack %s, preset %s to %s\n", done.Ask, done.Asker, done.Pack, done.Preset, setup.Grantees())
 		fmt.Fprintf(w, "%s kept the standing account\n", a.who())
 		printHostGiven(w, a.who(), done.Host)
+		printSiteGiven(w, a.who(), done.Site)
 		fmt.Fprintf(w, "%s approved it: %s\n", a.who(), done.Result)
 	})
 }

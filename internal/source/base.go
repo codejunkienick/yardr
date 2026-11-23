@@ -11,18 +11,34 @@ import (
 )
 
 // What chooses where a source's calls go beside the base its file names: the
-// regions' bases a setting picks from (bases), and the address a host the
+// regions' bases a setting picks from (bases), the address a host the
 // operator types fills (base_template), for a service the operator may run on
-// a machine of their own. The file says every address a credential may go
-// to, but for the host of the second, which is the operator's word alone.
+// a machine of their own, and the address a site the operator types fills
+// (path_template), one path segment of a service that scopes its calls by
+// site. The file says every address a credential may go to, but for the host
+// of the second and the segment of the third, which are the operator's word alone.
 
 // HostMark is where the operator's host goes in a base_template, as
 // CredentialMark is where the credential's value goes in a request.
 const HostMark = "{host}"
 
+// SiteMark is where the operator's site goes in a path_template: one path
+// segment of the address, never the host.
+const SiteMark = "{site}"
+
 // standInHost is the host a template is held to the checks of an address with
 // when its file is read: a name no machine has.
 const standInHost = "host.example"
+
+// standInSite is the segment a path template is held to the checks of an
+// address with when its file is read: a segment no site has.
+const standInSite = "site"
+
+// bareSite is what a site is: one path segment, letters, digits and the
+// punctuation a segment carries, and nothing else. A slash, a query or a
+// fragment in it would make it more than one segment, which is the
+// declaration's to say, never the site's.
+var bareSite = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)
 
 // bareHost is what a host is: a name, an IPv4 address or an IPv6 one in
 // brackets, and a port after it where the machine has one. A scheme, a path, a
@@ -159,3 +175,92 @@ func (d *Declaration) WithHost(host string) *Declaration {
 	c.Base, _ = d.fillHost(host)
 	return &c
 }
+
+// pathTemplate reads the address a site fills, beside base: the host the file
+// names and a path with one segment the operator's site fills, as
+// https://api.example.com/ex/{site}/wiki. The mark stands once, alone as one
+// path segment and never as the host, so that what the operator types decides
+// which site the calls are scoped to and the file decides the rest, the host
+// and the other segments. With a stand-in site in it the template is held to
+// what a base is (checkAddress), as a base_template is with a stand-in host,
+// and CheckSite holds the address a typed site makes to the same again.
+func (r *reader) pathTemplate(e entry) string {
+	s, ok := r.str(e.v, e.path)
+	if !ok {
+		return ""
+	}
+	at := strings.Index(s, SiteMark)
+	switch {
+	case strings.Count(s, SiteMark) != 1:
+		r.errf(e.v, e.path, "want %s once, where one path segment goes: https://host/%s/path", SiteMark, SiteMark)
+	case strings.HasPrefix(s, "https://"+SiteMark):
+		r.errf(e.v, e.path, "%s is one path segment, not the host: the host is the file's to name (https://host/%s/path)", SiteMark, SiteMark)
+	case at <= 0 || s[at-1] != '/' || at+len(SiteMark) < len(s) && s[at+len(SiteMark)] != '/':
+		r.errf(e.v, e.path, "%s stands alone as one path segment, with a / on each side of it: https://host/%s/path", SiteMark, SiteMark)
+	default:
+		if _, fault := checkAddress(strings.Replace(s, SiteMark, standInSite, 1)); fault != addressOK {
+			r.errf(e.v, e.path, "the template with a site in it %s", fault.words())
+			return ""
+		}
+		return strings.TrimRight(s, "/")
+	}
+	return ""
+}
+
+// fillSite is the address the path template makes with site, and why there is
+// none. The address is held to what a base is first (checkAddress), as
+// fillHost holds a filled host template, so that a site that makes one the
+// checks refuse is refused in their words; what passes them and is still more
+// than one segment is refused after.
+func (d *Declaration) fillSite(site string) (string, error) {
+	filled := strings.Replace(d.PathTemplate, SiteMark, site, 1)
+	if _, fault := checkAddress(filled); fault != addressOK {
+		return "", errors.New("the address it makes " + fault.words())
+	}
+	if !bareSite.MatchString(site) || site == "." || site == ".." {
+		return "", errors.New("a site is one path segment (a name or an id, as cloud-1) and nothing else: the rest of the path is the declaration's")
+	}
+	return filled, nil
+}
+
+// CheckSite holds value to the declaration's path template: "" is the base
+// itself, and anything else is a site the template is filled with, held to
+// what a base is again with the site in it.
+func (d *Declaration) CheckSite(value string) error {
+	if value == "" {
+		return nil
+	}
+	if d.PathTemplate == "" {
+		return fmt.Errorf("source %s: site=%q: the declaration names no path_template, so there is nothing a site would fill", d.Name, value)
+	}
+	if _, err := d.fillSite(value); err != nil {
+		return fmt.Errorf("source %s: site=%q: %w", d.Name, value, err)
+	}
+	return nil
+}
+
+// WithSite is d with the path template filled with site in place of its base:
+// what a call of a source set to site is made against. It is chained last by
+// store.Source.Resolved, so a site wins over a base or a host a stale record
+// still names; the paths that set a setting keep the three exclusive, so in
+// practice only one stands. "" is d itself, and so is a declaration that has
+// no path template: the setting names nothing under a declaration that lost
+// it, and the call goes to the base, which a credential given for the site is
+// then held from (store.Source.CredentialHeld). A site that makes an address
+// the checks refuse, which CheckSite refused when it was set, leaves the
+// declaration no address at all, as WithHost leaves a refused host none.
+func (d *Declaration) WithSite(site string) *Declaration {
+	if site == "" || d.PathTemplate == "" {
+		return d
+	}
+	c := *d
+	c.Base, _ = d.fillSite(site)
+	c.filledSite = site
+	return &c
+}
+
+// FilledSite is the site segment WithSite filled into this declaration's
+// base, "" where none was filled: what a credential is keyed to beside the
+// host (store's sourceHost), never read from the declaration's own base, whose
+// default segment is an example the file names and no operator typed.
+func (d *Declaration) FilledSite() string { return d.filledSite }

@@ -55,7 +55,7 @@ func challengeTTL(ch freshChallenge) time.Duration {
 
 // freshChallenge is a sign-in waiting at the gateway: the card it was
 // raised for and who raised it, when, and what it carries back (a weighty
-// card's approval: a setup's preset pick, account and host, a run's
+// card's approval: a setup's preset pick, account, host and site, a run's
 // values; or, where secret is set, a secret ask's typed values, given on
 // the return instead of approved; or, where mapping is set, a mapping
 // card's pick, its option and words with the revision its form was drawn
@@ -69,6 +69,7 @@ type freshChallenge struct {
 	values  map[string]string
 	account string
 	host    string
+	site    string
 	secret  bool
 	// typed is whether values are a setup card's typed account secrets:
 	// every setup card is weighty (its account is a credential), so each
@@ -154,12 +155,12 @@ func freshRedirect(w http.ResponseWriter, r *http.Request, returnTo string) {
 func (s *Server) beadApprove(w http.ResponseWriter, r *http.Request, b *store.Bead, ask store.BeadAsk) {
 	ctx := r.Context()
 	user := s.acting(ctx)
-	option, values, account, host, ok := s.approveParams(w, r, b, ask)
+	option, values, account, host, site, ok := s.approveParams(w, r, b, ask)
 	if !ok {
 		return
 	}
 	if !store.Weighty(ask.Weight) {
-		done, err := s.approveNow(ctx, b.ID, ask, option, values, account, host, user, store.FreshWitness{}, false)
+		done, err := s.approveNow(ctx, b.ID, ask, option, values, account, host, site, user, store.FreshWitness{}, false)
 		if err != nil {
 			s.beadAgain(w, r, b.ID, err.Error())
 			return
@@ -171,7 +172,7 @@ func (s *Server) beadApprove(w http.ResponseWriter, r *http.Request, b *store.Be
 		http.Redirect(w, r, "/beads/"+url.PathEscape(b.ID), http.StatusSeeOther)
 		return
 	}
-	s.approveStrong(w, r, b, ask, option, values, account, host)
+	s.approveStrong(w, r, b, ask, option, values, account, host, site)
 }
 
 // pairingOwn reports whether ask is a device pair card asked of user
@@ -220,12 +221,14 @@ func (s *Server) freshFor(ctx context.Context, ask store.BeadAsk, user string, s
 // the characters a host is made of. Anything else the form held is left out of
 // a command a person will copy: the card says how a host is given, and the
 // command refuses what is no host.
-func approveAgain(ask store.BeadAsk, host string) string {
+func approveAgain(ask store.BeadAsk, host, site string) string {
 	switch {
 	case ask.Setup == nil:
 		return "--approve"
 	case host != "" && strings.Trim(host, hostWordChars) == "":
 		return "<n> --secret --host " + host
+	case site != "" && strings.Trim(site, hostWordChars) == "":
+		return "<n> --secret --site " + site
 	}
 	return "<n> --secret"
 }
@@ -240,13 +243,13 @@ const hostWordChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234
 // instead, and the host of a server of the operator's own where the card
 // asked one, a run's values where the card asks for any. An ask that is
 // neither is refused with the page redrawn.
-func (s *Server) approveParams(w http.ResponseWriter, r *http.Request, b *store.Bead, ask store.BeadAsk) (option int, values map[string]string, account, host string, ok bool) {
+func (s *Server) approveParams(w http.ResponseWriter, r *http.Request, b *store.Bead, ask store.BeadAsk) (option int, values map[string]string, account, host, site string, ok bool) {
 	switch {
 	case ask.Setup != nil:
 		n, err := strconv.Atoi(r.PostFormValue("option"))
 		if err != nil || n < 1 || n > len(ask.Options) {
 			s.beadAgain(w, r, b.ID, fmt.Sprintf("ask %d sets up %s: pick one of its %d presets", ask.Ask, ask.Setup.Pack, len(ask.Options)))
-			return 0, nil, "", "", false
+			return 0, nil, "", "", "", false
 		}
 		option = n
 		for _, name := range ask.Setup.Account {
@@ -258,7 +261,7 @@ func (s *Server) approveParams(w http.ResponseWriter, r *http.Request, b *store.
 			}
 		}
 		account = r.PostFormValue("account")
-		return option, values, account, strings.TrimSpace(r.PostFormValue("host")), true
+		return option, values, account, strings.TrimSpace(r.PostFormValue("host")), strings.TrimSpace(r.PostFormValue("site")), true
 	case ask.Run != nil:
 		for _, name := range ask.Run.Ask {
 			if values == nil {
@@ -266,10 +269,10 @@ func (s *Server) approveParams(w http.ResponseWriter, r *http.Request, b *store.
 			}
 			values[name] = r.PostFormValue("value-" + name)
 		}
-		return 0, values, "", "", true
+		return 0, values, "", "", "", true
 	default:
 		s.beadAgain(w, r, b.ID, fmt.Sprintf("ask %d is answered, not approved: pick an option, answer with words, put it aside with Later, or decline it", ask.Ask))
-		return 0, nil, "", "", false
+		return 0, nil, "", "", "", false
 	}
 }
 
@@ -285,11 +288,11 @@ func (s *Server) approveParams(w http.ResponseWriter, r *http.Request, b *store.
 // pairing or user key is refused here, after the gateless refusals and
 // before any sign-in round trip: an operator's sign-in is what the page
 // takes for a weighty card that is not the clicker's own.
-func (s *Server) approveStrong(w http.ResponseWriter, r *http.Request, b *store.Bead, ask store.BeadAsk, option int, values map[string]string, account, host string) {
+func (s *Server) approveStrong(w http.ResponseWriter, r *http.Request, b *store.Bead, ask store.BeadAsk, option int, values map[string]string, account, host, site string) {
 	ctx := r.Context()
 	user := s.acting(ctx)
 	terminal := fmt.Sprintf("ask %d is %s: a weighty card is not approved in this window. Approve it in footplate, or at a terminal on the yard's machine: yardr bead answer %s %d %s",
-		ask.Ask, store.WeightyWords(ask.Weight), b.ID, ask.Ask, approveAgain(ask, host))
+		ask.Ask, store.WeightyWords(ask.Weight), b.ID, ask.Ask, approveAgain(ask, host, site))
 	if s.jwt == nil {
 		s.beadAgain(w, r, b.ID, terminal)
 		return
@@ -305,12 +308,12 @@ func (s *Server) approveStrong(w http.ResponseWriter, r *http.Request, b *store.
 	}
 	if !s.isOperator(ctx) && !ownCard(ask, user) {
 		s.beadAgain(w, r, b.ID, fmt.Sprintf("ask %d is %s: an operator's sign-in is what this page takes for a weighty card that is not your own. Approve it in footplate, or at a terminal on the yard's machine: yardr bead answer %s %d %s",
-			ask.Ask, store.WeightyWords(ask.Weight), b.ID, ask.Ask, approveAgain(ask, host)))
+			ask.Ask, store.WeightyWords(ask.Weight), b.ID, ask.Ask, approveAgain(ask, host, site)))
 		return
 	}
 	if auth, since, ok := s.strongAuth(ctx, user); ok && s.freshFor(ctx, ask, user, since) {
 		fw := store.FreshWitness{User: user, AuthTime: auth}
-		done, err := s.approveNow(ctx, b.ID, ask, option, values, account, host, user, fw, true)
+		done, err := s.approveNow(ctx, b.ID, ask, option, values, account, host, site, user, fw, true)
 		if err != nil {
 			s.beadAgain(w, r, b.ID, err.Error())
 			return
@@ -324,7 +327,7 @@ func (s *Server) approveStrong(w http.ResponseWriter, r *http.Request, b *store.
 	}
 	state := freshState()
 	s.putFresh(state, freshChallenge{bead: b.ID, ask: ask.Ask, user: user, at: time.Now(),
-		option: option, values: values, account: account, host: host, typed: ask.Setup != nil && len(values) > 0})
+		option: option, values: values, account: account, host: host, site: site, typed: ask.Setup != nil && len(values) > 0})
 	to := "/beads/" + url.PathEscape(b.ID) + "/fresh/" + strconv.FormatUint(ask.Ask, 10) + "/" + state
 	// htmx follows a 303 as an XHR, and the sign-in page it reaches has no
 	// #bead for the form's hx-select to take: the bead's contents are
@@ -413,7 +416,7 @@ func (s *Server) handleFresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fw := store.FreshWitness{User: user, AuthTime: auth}
-	done, err := s.approveNow(ctx, id, *ask, ch.option, ch.values, ch.account, ch.host, user, fw, true)
+	done, err := s.approveNow(ctx, id, *ask, ch.option, ch.values, ch.account, ch.host, ch.site, user, fw, true)
 	if err != nil {
 		s.beadAgain(w, r, id, err.Error())
 		return
@@ -531,7 +534,7 @@ func (s *Server) consumeFresh(state string, challenge freshChallenge, user strin
 // carries a pairing, the caller answers with it in that response instead
 // of the redirect to the bead (pairingApproved). A setup approval's is
 // nil, as every other run approval's is beside its error.
-func (s *Server) approveNow(ctx context.Context, id string, ask store.BeadAsk, option int, values map[string]string, account, host, user string, fw store.FreshWitness, fresh bool) (*store.AskApproved, error) {
+func (s *Server) approveNow(ctx context.Context, id string, ask store.BeadAsk, option int, values map[string]string, account, host, site, user string, fw store.FreshWitness, fresh bool) (*store.AskApproved, error) {
 	if fresh {
 		ctx = store.WithFreshWitness(ctx, fw.User, fw.AuthTime)
 	}
@@ -539,6 +542,6 @@ func (s *Server) approveNow(ctx context.Context, id string, ask store.BeadAsk, o
 	if ask.Run != nil {
 		return s.st.ApproveAsk(ctx, id, ask.Ask, user, weighed, values)
 	}
-	_, err := s.st.ApproveSetup(ctx, id, ask.Ask, option, values, account, user, weighed, host)
+	_, err := s.st.ApproveSetup(ctx, id, ask.Ask, option, values, account, user, weighed, host, site)
 	return nil, err
 }

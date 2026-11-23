@@ -51,6 +51,18 @@ func setupHostTemplate(carried []AskSource, decls map[string]*source.Declaration
 	return ""
 }
 
+// setupSiteTemplate is the address a site the operator types fills, for a
+// client to show where the site goes: the path_template of the first carried
+// source that declares one, "" where none does and the card asks no site.
+func setupSiteTemplate(carried []AskSource, decls map[string]*source.Declaration) string {
+	for _, c := range carried {
+		if d := decls[c.Name]; d != nil && d.PathTemplate != "" {
+			return d.PathTemplate
+		}
+	}
+	return ""
+}
+
 // setupSourceAt is where a carried source's calls will go after the base the
 // asker chose is set, or under the source's settings where that base does not
 // replace them. A selected region base clears a standing host, as SetSource
@@ -69,21 +81,24 @@ func (w *wtx) setupSourceAt(name string, d *source.Declaration, base string) (*s
 	if base != "" {
 		if _, ok := d.BaseURL(base); ok {
 			chosen := *src
-			chosen.Base, chosen.Host = base, ""
+			chosen.Base, chosen.Host, chosen.Site = base, "", ""
 			src = &chosen
 		}
 	}
 	return src.Resolved(d), src, nil
 }
 
-// setupHostDoes are the card's sentences about the host, above the account's:
-// for each carried source that declares a template, where its calls go now and
-// how to send them to a server of the operator's own. Where the source stands
-// in the yard it is the address under the settings it keeps, a host set before
-// included, and where an account stands too the sentence says what a new host
-// does to it: that key was given for the host in use, so the host held it back
-// until it is typed again, as setting a host in a terminal does. None where no
-// carried source declares a template (setupHostTemplate).
+// setupHostDoes are the card's sentences about the host and the site, above
+// the account's: for each carried source that declares a template, where its
+// calls go now and how to send them to a server of the operator's own or scope
+// them to a site of theirs. Where the source stands in the yard it is the
+// address under the settings it keeps, a host or site set before included, and
+// where an account stands too the sentence says what a new host or site does
+// to it: that key was given for the host (and site, where one is set, named
+// together as scheme://host/segment) in use, so the new one held it back until
+// it is typed again, as setting a host or a site in a terminal does. None
+// where no carried source declares a template (setupHostTemplate,
+// setupSiteTemplate).
 func (w *wtx) setupHostDoes(carried []AskSource, decls map[string]*source.Declaration, base string, stands bool) ([]string, error) {
 	var out []string
 	for _, c := range carried {
@@ -106,7 +121,54 @@ func (w *wtx) setupHostDoes(carried []AskSource, decls map[string]*source.Declar
 		}
 		out = append(out, line)
 	}
+	for _, c := range carried {
+		d := decls[c.Name]
+		if d == nil || d.PathTemplate == "" {
+			continue
+		}
+		resolved, src, err := w.setupSourceAt(c.Name, d, base)
+		if err != nil {
+			return nil, err
+		}
+		addr := resolved.Address()
+		if src != nil {
+			addr = src.CalledAt(d)
+		}
+		line := fmt.Sprintf("the site of source %s: its calls go to %s. To scope them to a site of your own instead, give its site with --site <site> (one path segment, yours to type): they then go to %s, and the account below is given for that host and site.",
+			c.Name, addr, strings.Replace(d.PathTemplate, source.SiteMark, "<site>", 1))
+		if stands {
+			line += " The account that stands was given for the host and site in use, so a new site holds it back until you type it again."
+		}
+		out = append(out, line)
+	}
 	return out, nil
+}
+
+// checkSetupSite holds the site an approval carries to the card it answers:
+// none leaves each source's address as it stands, and a site is taken where
+// the card asked one (SiteTemplate), each carried source that declares a
+// path template then holding the address it makes to what a base is, in the
+// checks' words, as checkSetupHost holds a host.
+func checkSetupSite(seq uint64, was AskSetup, site string) error {
+	if site == "" {
+		return nil
+	}
+	if was.SiteTemplate == "" {
+		return fmt.Errorf("ask %d takes no site: a site is asked where a source's declaration names a path_template, and none of this pack's does", seq)
+	}
+	for _, c := range was.Carried {
+		d, err := source.Parse("pack source "+c.Name, []byte(c.Text))
+		if err != nil {
+			return fmt.Errorf("ask %d: %s", seq, OneLine(err.Error()))
+		}
+		if d.PathTemplate == "" {
+			continue
+		}
+		if err := d.CheckSite(site); err != nil {
+			return fmt.Errorf("ask %d: %s", seq, OneLine(err.Error()))
+		}
+	}
+	return nil
 }
 
 // checkSetupHost holds the host an approval carries to the card it answers:

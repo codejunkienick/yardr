@@ -253,6 +253,50 @@ hear:
 	if out, err = run(t, a.sourceCmd(), "set", "pushover", "host="); err != nil || !strings.Contains(out, "source pushover: calls go to https://api.pushover.net/1\n") {
 		t.Fatalf("clear host: %q %v", out, err)
 	}
+	// A declaration that names a path template lets the operator type the
+	// site its calls are scoped to: its calls go to the filled segment, the
+	// three settings replace each other, and one that no longer names a
+	// path template sends the calls to its base again.
+	sited := strings.Replace(string(decl), "base: https://api.pushover.net/1\n", "base: https://api.pushover.net/1\npath_template: https://api.pushover.net/ex/{site}/1\n", 1)
+	if sited == string(decl) {
+		t.Fatal("the test adds no path template")
+	}
+	siteFile := filepath.Join(t.TempDir(), "pushover.yaml")
+	if err := os.WriteFile(siteFile, []byte(sited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, a.sourceCmd(), "add", siteFile); err != nil {
+		t.Fatal(err)
+	}
+	if out, err = run(t, a.sourceCmd(), "show", "pushover"); err != nil ||
+		!strings.Contains(out, "site: none set; yardr source set pushover site=<site> sends the calls to https://api.pushover.net/ex/<site>/1 for a site of your own") {
+		t.Fatalf("show with a path template and no site: %q %v", out, err)
+	}
+	if out, err = run(t, a.sourceCmd(), "set", "pushover", "site=cloud-1/extra"); err == nil || !strings.Contains(err.Error(), "a site is one path segment") {
+		t.Fatalf("set site=cloud-1/extra: %q %v", out, err)
+	}
+	out, err = run(t, a.sourceCmd(), "set", "pushover", "site=cloud-1")
+	if err != nil || !strings.Contains(out, "source pushover: calls go to https://api.pushover.net/ex/cloud-1/1 (site cloud-1)") {
+		t.Fatalf("set site: %q %v", out, err)
+	}
+	out, err = run(t, a.sourceCmd(), "show", "pushover")
+	if err != nil || !strings.Contains(out, "pushover  https://api.pushover.net/ex/cloud-1/1 (site cloud-1)") ||
+		!strings.Contains(out, "site: cloud-1, which fills https://api.pushover.net/ex/<site>/1") {
+		t.Fatalf("show with a site: %q %v", out, err)
+	}
+	if out, err = run(t, a.sourceCmd(), "list"); err != nil || !strings.Contains(out, "https://api.pushover.net/ex/cloud-1/1 (site cloud-1)") {
+		t.Fatalf("list with a site: %q %v", out, err)
+	}
+	if _, err := st.PutSource(context.Background(), "pushover.yaml", string(decl), "jo"); err != nil {
+		t.Fatal(err)
+	}
+	out, err = run(t, a.sourceCmd(), "show", "pushover")
+	if err != nil || !strings.Contains(out, "pushover  https://api.pushover.net/1\n") || strings.Contains(out, "(site") {
+		t.Fatalf("show after the declaration drops its path template: %q %v", out, err)
+	}
+	if out, err = run(t, a.sourceCmd(), "set", "pushover", "site="); err != nil || !strings.Contains(out, "source pushover: calls go to https://api.pushover.net/1\n") {
+		t.Fatalf("clear site: %q %v", out, err)
+	}
 	out, err = run(t, a.sourceCmd(), "check", "pushover")
 	if err != nil || !strings.Contains(out, "names no check call") || !strings.Contains(out, "nothing was sent") || strings.Contains(out, "tok-of-the-yard") {
 		t.Fatalf("check of a source without a check call: %q %v", out, err)

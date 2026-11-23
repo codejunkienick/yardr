@@ -566,6 +566,7 @@ func TestParseBases(t *testing.T) {
 		t.Fatalf(`CheckBase("eu") without bases = %v`, err)
 	}
 	t.Run("base template", testBaseTemplate)
+	t.Run("path template", testPathTemplate)
 }
 
 // A service the operator may run on a machine of their own declares the
@@ -641,6 +642,78 @@ func testBaseTemplate(t *testing.T) {
 	// base the operator did not choose.
 	if _, err := Do(context.Background(), d.WithHost("user@crm.example.net"), "ping", nil, "tok", noSecrets); reason(err) != Refused || !strings.Contains(err.Error(), "its base is no address") {
 		t.Errorf("a call to a host the checks refuse: %v", err)
+	}
+}
+
+// A service that scopes its calls by site declares the address that site
+// fills beside its base, which stays the default: the site setting fills one
+// path segment of it, "" is the base itself, and a site is one segment and
+// nothing else. A site that makes an address a base may not be is refused in
+// the checks' words, and a site the checks refuse leaves a call no address,
+// never the base's. The filled segment is what the declaration remembers
+// (FilledSite), and the unfilled declaration remembers none, so a credential
+// is keyed to the segment only where an operator typed one.
+func testPathTemplate(t *testing.T) {
+	text := strings.Replace(crm, "base: https://crm.example.com/api/v2\n",
+		"base: https://crm.example.com/api/v2\npath_template: https://crm.example.com/ex/{site}/api/v2/\n", 1)
+	d, err := Parse("crm.yaml", []byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Base != "https://crm.example.com/api/v2" || d.PathTemplate != "https://crm.example.com/ex/{site}/api/v2" {
+		t.Fatalf("base = %q, template = %q", d.Base, d.PathTemplate)
+	}
+	if got := d.WithSite(""); got != d {
+		t.Fatalf(`WithSite("") copies the declaration`)
+	}
+	if d.FilledSite() != "" {
+		t.Fatalf("an unfilled declaration remembers the site %q", d.FilledSite())
+	}
+	at := d.WithSite("cloud-1")
+	if at == d || at.Base != "https://crm.example.com/ex/cloud-1/api/v2" || at.FilledSite() != "cloud-1" || d.Base != "https://crm.example.com/api/v2" || d.FilledSite() != "" {
+		t.Fatalf("WithSite(cloud-1) = %+v, and the declaration is %q", at, d.Base)
+	}
+	plain, err := Parse("crm.yaml", []byte(crm))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plain.WithSite("cloud-1"); got != plain {
+		t.Fatalf("WithSite of a declaration with no path template is not the declaration itself")
+	}
+	if err := plain.CheckSite("cloud-1"); err == nil || !strings.Contains(err.Error(), "names no path_template") {
+		t.Fatalf("CheckSite without a template = %v", err)
+	}
+	if err := d.CheckSite(""); err != nil {
+		t.Fatalf(`CheckSite("") = %v`, err)
+	}
+	for _, site := range []string{"cloud-1", "CLOUD_1.example~x", "10.0.0.5", "a"} {
+		if err := d.CheckSite(site); err != nil {
+			t.Errorf("CheckSite(%q) = %v", site, err)
+		}
+		if got, want := d.WithSite(site).Base, "https://crm.example.com/ex/"+site+"/api/v2"; got != want {
+			t.Errorf("WithSite(%q).Base = %q, want %q", site, got, want)
+		}
+	}
+	for site, want := range map[string]string{
+		"cloud-1/extra": "a site is one path segment",
+		"cloud-1?x=1":   "the address it makes has a query or a fragment",
+		"cloud-1#x":     "the address it makes has a query or a fragment",
+		"..":            "the address it makes has a '..', '//' or '\\' in its path",
+		".":             "the address it makes has a '..', '//' or '\\' in its path",
+		"cloud 1":       "a site is one path segment",
+		"%2f":           "the address it makes has a '..', '//' or '\\' in its path",
+		"a\\b":          "the address it makes has a '..', '//' or '\\' in its path",
+	} {
+		err := d.CheckSite(site)
+		if err == nil || !strings.Contains(err.Error(), want) || !strings.HasPrefix(err.Error(), fmt.Sprintf("source crm: site=%q: ", site)) {
+			t.Errorf("CheckSite(%q) = %v, want %q", site, err, want)
+		}
+		if got := d.WithSite(site).Base; got != "" {
+			t.Errorf("WithSite(%q).Base = %q: a site the checks refuse is no address to send to", site, got)
+		}
+	}
+	if _, err := Do(context.Background(), d.WithSite("a/b"), "ping", nil, "tok", noSecrets); reason(err) != Refused || !strings.Contains(err.Error(), "its base is no address") {
+		t.Errorf("a call to a site the checks refuse: %v", err)
 	}
 }
 
@@ -773,6 +846,28 @@ func TestParseRefuses(t *testing.T) {
 		{"a template that is no string", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\nbase_template: [https, host]\n"),
 			"base_template", "want a string"},
 		{"a template and no base", with("base: https://crm.example.com/api/v2\n", "base_template: https://{host}/api/v2\n"),
+			"base", "missing: the address every call's path is under"},
+		{"a host mark in a path", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\nbase_template: https://crm.example.com/{host}/api/v2\n"),
+			"base_template", "{host} stands right after https://, as the whole host"},
+		{"a path template with no mark", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\npath_template: https://crm.example.com/ex/cloud/api/v2\n"),
+			"path_template", "want {site} once, where one path segment goes"},
+		{"a path template with the mark twice", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\npath_template: https://crm.example.com/{site}/{site}/api/v2\n"),
+			"path_template", "want {site} once, where one path segment goes"},
+		{"a path template with the mark as the host", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\npath_template: https://{site}/api/v2\n"),
+			"path_template", "{site} is one path segment, not the host"},
+		{"a path template with the mark in a segment", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\npath_template: https://crm.example.com/ex-{site}/api/v2\n"),
+			"path_template", "{site} stands alone as one path segment"},
+		{"a path template with the mark in the host", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\npath_template: https://{site}.crm.example.com/api/v2\n"),
+			"path_template", "{site} is one path segment, not the host"},
+		{"a path template over plain http", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\npath_template: http://crm.example.com/ex/{site}/api/v2\n"),
+			"path_template", "the template with a site in it is plain http to a machine that is not this one"},
+		{"a path template with a query", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\npath_template: https://crm.example.com/ex/{site}/api/v2?x=1\n"),
+			"path_template", "the template with a site in it has a query or a fragment"},
+		{"a path template with dots in its path", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\npath_template: https://crm.example.com/{site}/../v2\n"),
+			"path_template", "the template with a site in it has a '..', '//' or '\\' in its path"},
+		{"a path template that is no string", with("base: https://crm.example.com/api/v2\n", "base: https://crm.example.com/api/v2\npath_template: [https, site]\n"),
+			"path_template", "want a string"},
+		{"a path template and no base", with("base: https://crm.example.com/api/v2\n", "path_template: https://crm.example.com/ex/{site}/api/v2\n"),
 			"base", "missing: the address every call's path is under"},
 		{"no calls", "name: x\nbase: https://x.example.com\n", "calls", "missing"},
 		{"a need with no program", crm + "needs:\n  - { env: GWS_BIN, install: [install-gws] }\n",
@@ -1061,6 +1156,7 @@ func TestParseLimitsRefusals(t *testing.T) {
 		"a base and no calls":             {"name: q\nbase: https://q.example.com\n" + limits(cmd + kinds)[len("name: q\n"):], "f:2: base: is for the calls of a source, and this file declares none"},
 		"region bases and no calls":       {"name: q\nbases:\n  eu: https://eu.q.example.com\n" + limits(cmd + kinds)[len("name: q\n"):], "f:2: bases: is for the calls of a source, and this file declares none"},
 		"a base_template and no calls":    {"name: q\nbase_template: https://{host}/v1\n" + limits(cmd + kinds)[len("name: q\n"):], "f:2: base_template: is for the calls of a source, and this file declares none"},
+		"a path_template and no calls":    {"name: q\npath_template: https://q.example.com/ex/{site}/v1\n" + limits(cmd + kinds)[len("name: q\n"):], "f:2: path_template: is for the calls of a source, and this file declares none"},
 		"a credential and no calls":       {"name: q\ncredential: { env: Q }\n" + limits(cmd + kinds)[len("name: q\n"):], "f:2: credential: is for the calls of a source"},
 		"neither calls nor limits":        {"name: q\n", "calls: missing: a source is the calls it declares, or its limits command"},
 		"calls, limits and no base":       {strings.Replace(pushover, "base: https://api.pushover.net/1\n", "", 1) + "limits:\n" + cmd + kinds, "base: missing: the address every call's path is under"},
