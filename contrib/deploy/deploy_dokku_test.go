@@ -61,6 +61,23 @@ const loadFactorEnv = "DEPLOY_TEST_LOAD_FACTOR"
 // second exec per call), the home is one with no yard in it, every server they
 // start stops with this binary, and one yardr is built for all of them.
 func TestMain(m *testing.M) {
+	// The suite's own parallelism, before the flags are parsed: a -parallel
+	// on the command line replaces it, and m.Run does not parse again, so a
+	// Set after Parse would throw the caller's limit away. Eight at once is
+	// the knee: four takes twice as long, ten no less (yardr-mzjv).
+	flag.Set("test.parallel", "8")
+	// go test -short omits this end-to-end suite: it builds the tree's
+	// binary and drives it. The landing, the quiet run and CI pass no
+	// -short, so they still run it (docs/testing.md, A short run). The
+	// return is before the build below, which is most of a short run's cost.
+	// A child started to read the load factor carries no -test.short, so it
+	// still reaches the branch that skips the build.
+	// testing.Short panics until the flags are parsed, and m.Run is what
+	// parses them, after that build.
+	flag.Parse()
+	if testing.Short() {
+		os.Exit(0)
+	}
 	noSync := os.Getenv(store.NoSyncEnv)
 	testLoad := config.Getenv(testload.Env)
 	for _, kv := range os.Environ() {
@@ -94,10 +111,6 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
-	// Each test has a yard, a repository and a server of its own, and most
-	// of its time is waiting for the processes it starts. Eight at once is
-	// the knee: four takes twice as long, ten no less (yardr-mzjv).
-	flag.Set("test.parallel", "8")
 	dir, err := os.MkdirTemp("", "yrbin")
 	if err != nil {
 		panic(err)

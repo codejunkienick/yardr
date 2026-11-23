@@ -17,6 +17,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -44,6 +45,15 @@ import (
 // killed or timed out runs no Cleanup, y.stop is only that, and the server
 // and the daemon of a yard would outlive it (storetest.NameTestBinary).
 func TestMain(m *testing.M) {
+	// go test -short omits this end-to-end suite: it builds the tree's
+	// binary and drives it. The landing, the quiet run and CI pass no
+	// -short, so they still run it (docs/testing.md, A short run).
+	// testing.Short panics until the flags are parsed, and m.Run is what
+	// parses them, after the work this return skips.
+	flag.Parse()
+	if testing.Short() {
+		os.Exit(0)
+	}
 	storetest.NameTestBinary()
 	code := m.Run()
 	// Each binary is built once, by the template that lends it to the yards.

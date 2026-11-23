@@ -58,6 +58,36 @@ var gitEnv = []string{"GIT_CONFIG_NOSYSTEM=1", "GIT_AUTHOR_NAME=t",
 const gitConfig = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n"
 
 func TestMain(m *testing.M) {
+	// The suite's own parallelism, before the flags are parsed: a -parallel
+	// on the command line replaces it, and m.Run does not parse again, so a
+	// Set after Parse would throw the caller's limit away. Each test has a
+	// yard, a repository and a server of its own, and most of its time is
+	// waiting for the processes it starts: ten per available processor keep
+	// every processor's waits overlapped, where one per processor left the
+	// suite over its budget with the slots idle in those waits (ten measured
+	// at the plateau: more bought nothing, the processors themselves being
+	// the limit then); six at least, so a small machine still overlaps the
+	// waits. GOMAXPROCS accounts for CPU quotas that NumCPU does not. The
+	// budget is judged on the run alone under the race lock, where this
+	// package has no company; in the full run its company is the leg's own
+	// other packages, not another whole suite, since one race leg holds the
+	// machine-wide lock at a time. A top-level test that only hosts parallel
+	// subtests (a table of cases, a yard each) says t.Parallel itself, and so
+	// does one added to this package. A test that does not is run to its end,
+	// subtests included, before the test runner resumes any test paused in
+	// t.Parallel: the package then spent half of a quiet run on a few
+	// processes, with every other test waiting (yardr-jfxj).
+	flag.Set("test.parallel", strconv.Itoa(max(6, 10*runtime.GOMAXPROCS(0))))
+	// go test -short omits this end-to-end suite: it builds the tree's
+	// binary and drives it. The landing, the quiet run and CI pass no
+	// -short, so they still run it (docs/testing.md, A short run). The
+	// return is before the build below, which is most of a short run's cost.
+	// testing.Short panics until the flags are parsed, and m.Run is what
+	// parses them, after that build.
+	flag.Parse()
+	if testing.Short() {
+		os.Exit(0)
+	}
 	// Nothing from a yardr (or git hook) running these tests may leak into
 	// the yardr, git and script they start, which inherit this environment.
 	// What stays is how the stores are opened (storetest set it): the
@@ -112,26 +142,6 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
-	// Each test has a yard, a repository and a server of its own, and most
-	// of its time is waiting for the processes it starts: ten per
-	// available processor keep every processor's waits overlapped, where
-	// one per processor left the suite over its budget with the slots
-	// idle in those waits (ten measured at the plateau: more bought
-	// nothing, the processors themselves being the limit then); six at
-	// least, so a small machine still overlaps the waits. GOMAXPROCS
-	// accounts for CPU quotas that NumCPU does not.
-	// The budget is judged on the run
-	// alone under the race lock, where this package has no company; in
-	// the full run its company is the leg's own other packages, not
-	// another whole suite, since one race leg holds the machine-wide
-	// lock at a time.
-	// A top-level test that only hosts parallel subtests (a table of cases, a
-	// yard each) says t.Parallel itself, and so does one added to this
-	// package. A test that does not is run to its end, subtests included,
-	// before the test runner resumes any test paused in t.Parallel: the
-	// package then spent half of a quiet run on a few processes, with every
-	// other test waiting (yardr-jfxj).
-	flag.Set("test.parallel", strconv.Itoa(max(6, 10*runtime.GOMAXPROCS(0))))
 	// A child this binary's tests start reuses the yardr its parent built:
 	// building it again costs a dozen seconds under load, for the same
 	// binary. The variable names no YARDR_ variable, which TestMain strips.

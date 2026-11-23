@@ -15,6 +15,8 @@ package isolatedyard
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -779,6 +781,9 @@ func TestDownLeavesProbesOutOfTheStandInCount(t *testing.T) {
 // yards start: D/e hands the name on (isolated-yard's build), so a run killed
 // before its cleanups leaves no server or daemon of a yard behind.
 func TestMain(m *testing.M) {
+	// The sleeper is this binary started again with no test flags, so the
+	// short-run return below must not come first: a sleeper would exit at
+	// once and the down test would see it already gone.
 	if os.Getenv("ISOLATED_TEST_SLEEPER") != "" {
 		// A sleeper stands for a process of another yard, which no down of
 		// this binary's yards stops. The binary that started it runs no
@@ -792,6 +797,15 @@ func TestMain(m *testing.M) {
 		}
 		time.Sleep(5 * time.Minute)
 		return
+	}
+	// go test -short omits this end-to-end suite: it builds the tree's
+	// binary and drives it. The landing, the quiet run and CI pass no
+	// -short, so they still run it (docs/testing.md, A short run).
+	// testing.Short panics until the flags are parsed, and m.Run is what
+	// parses them, after the work this return skips.
+	flag.Parse()
+	if testing.Short() {
+		os.Exit(0)
 	}
 	storetest.NameTestBinary()
 	code := m.Run()
@@ -890,7 +904,15 @@ func TestSleeperEndsWhenItsOwnerIsGone(t *testing.T) {
 // machine, the servers of the tests running beside it among them. A process
 // with its home in another yard, in a real one or in a directory that only
 // begins like this yard's outlives down.
+//
+// The wait for the foreign stand-in polls lsof. A machine without it makes
+// every look fail, and the wait cannot tell that from "not open yet", so the
+// fuse runs out before the failure. A loaded machine stretches the ten
+// seconds toward a minute. The test skips as soon as it sees lsof is missing.
 func TestDownLeavesTheProcessesOfOtherYards(t *testing.T) {
+	if _, err := exec.LookPath("lsof"); err != nil {
+		t.Skip("lsof is not installed, and the wait for the foreign stand-in polls it")
+	}
 	d := bare(t)
 	mine := []int{sleeper(t, d+"/y"), sleeper(t, d)}
 	others := []int{
@@ -917,13 +939,25 @@ func TestDownLeavesTheProcessesOfOtherYards(t *testing.T) {
 	}
 	t.Cleanup(func() { stdin.Close(); cmd.Process.Kill(); cmd.Wait() })
 	pid := cmd.Process.Pid
-	if !waitFor(10*time.Second, func() bool {
+	// A look that cannot start lsof, or that lsof finishes with a status other
+	// than 1, is not "not open yet": waiting the fuse out would report the
+	// same failure as a stand-in that never held the file. Exit status 1
+	// means lsof ran and nothing has the file open, and that look is retried
+	// (lsofPoll).
+	var blocked error
+	held := waitFor(10*time.Second, func() bool {
 		out, err := exec.Command("lsof", "-t", foreign).Output()
-		if err != nil {
-			return false
+		ok, block := lsofPoll(out, err, pid)
+		if block != nil {
+			blocked = block
+			return true
 		}
-		return slices.Contains(strings.Fields(string(out)), strconv.Itoa(pid))
-	}) {
+		return ok
+	})
+	if blocked != nil {
+		t.Fatalf("lsof: %v", blocked)
+	}
+	if !held {
 		t.Fatalf("the foreign stand-in (pid %d) never held its launcher open", pid)
 	}
 	others = append(others, pid)
@@ -954,6 +988,47 @@ func TestDownLeavesTheProcessesOfOtherYards(t *testing.T) {
 		if !testload.Running(pid) {
 			t.Errorf("down stopped pid %d, which is not of the yard", pid)
 		}
+	}
+}
+
+// lsofPoll is one look of the foreign stand-in's launcher. held is whether
+// out names pid. Exit status 1 is lsof's own "nothing has this file open",
+// which the wait retries. Any other status, and a command that cannot be
+// started, is returned as blocked so the wait ends at once.
+func lsofPoll(out []byte, err error, pid int) (held bool, blocked error) {
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, err
+	}
+	return slices.Contains(strings.Fields(string(out)), strconv.Itoa(pid)), nil
+}
+
+// Exit status 1 is the only lsof result the wait retries. A start failure
+// and any other status fail the look at once, so the fuse is not what
+// reports them.
+func TestLsofPollRetriesOnlyExitOne(t *testing.T) {
+	t.Parallel()
+	held, blocked := lsofPoll([]byte("9\n34\n"), nil, 34)
+	if !held || blocked != nil {
+		t.Fatalf("a listed pid: held %v, blocked %v", held, blocked)
+	}
+	if held, blocked = lsofPoll([]byte("9\n"), nil, 34); held || blocked != nil {
+		t.Fatalf("another pid: held %v, blocked %v", held, blocked)
+	}
+	exit1 := exec.Command("sh", "-c", "exit 1").Run()
+	if held, blocked = lsofPoll(nil, exit1, 1); held || blocked != nil {
+		t.Fatalf("exit 1: held %v, blocked %v, want another look", held, blocked)
+	}
+	exit2 := exec.Command("sh", "-c", "exit 2").Run()
+	if held, blocked = lsofPoll(nil, exit2, 1); held || blocked == nil {
+		t.Fatalf("exit 2: held %v, blocked %v, want the look to end", held, blocked)
+	}
+	missing := exec.Command("lsof-not-installed").Run()
+	if held, blocked = lsofPoll(nil, missing, 1); held || blocked == nil {
+		t.Fatalf("lsof cannot start: held %v, blocked %v, want the look to end", held, blocked)
 	}
 }
 

@@ -442,6 +442,32 @@ attached JSON, with the deltas per package, the new per-bead cost, and
 the same-sha rerun rate counted against R4. Every rule that missed is a
 filed follow-up or a closed wont-fix with the number.
 
+## A short run
+
+`go test -short ./...` is a fast local pass. It omits the end-to-end
+suites, which build the tree's binary and drive it, and `contrib/shot`,
+whose real Chrome and deadline tests are the long pole of a quiet full
+run. The seven packages are `contrib/shot`, `contrib/assembly`,
+`contrib/peer`, `contrib/deploy`, `contrib/server-yard`,
+`contrib/isolated-yard` and `contrib/release`. Each one's `TestMain`
+returns before any test when `-short` is set, and before the build the
+suite would otherwise do first. Subpackages of those directories, such as
+`contrib/isolated-yard/fake`, stay in the short run: the black-box suite
+the landing names is the parent package.
+
+The gate never passes `-short`. `sh .yardr/test` does not, with or without
+`YARDR_LANDING=1`, so a landing still runs the six black-box suites (R5)
+and a quiet run still runs the whole suite (R6). CI's plain jobs do not
+either: `go test ./...` and `YARDR_TEST_RPC=1 go test ./...` in
+`.github/workflows/ci.yml`, and the same two steps in `release.yml`. Those
+runs keep the coverage a short run leaves out. A person at a checkout uses
+`-short` for a fast pass; the gate and CI are the runs that cover these
+suites.
+
+Three release tests also skip on their own under `-short`, because they
+build yardr. The package's `TestMain` omits the whole suite first, which
+covers those and the rest.
+
 ## Running a package's tests on Linux
 
 CI's Linux legs are the first to see what only Linux does, and a gate on a

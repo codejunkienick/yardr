@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,16 @@ import (
 var yardrBin string
 
 func TestMain(m *testing.M) {
+	// go test -short omits this end-to-end suite: it builds the tree's
+	// binary and drives it. The landing, the quiet run and CI pass no
+	// -short, so they still run it (docs/testing.md, A short run). The
+	// return is before the build below, which is most of a short run's cost.
+	// testing.Short panics until the flags are parsed, and m.Run is what
+	// parses them, after that build.
+	flag.Parse()
+	if testing.Short() {
+		os.Exit(0)
+	}
 	// Nothing from a yardr (or git hook) running these tests may leak into
 	// the yardr, git and script they start, which inherit this environment.
 	noSync := os.Getenv(store.NoSyncEnv)

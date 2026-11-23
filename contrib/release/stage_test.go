@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -250,6 +251,16 @@ var gitEnv = []string{"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1",
 // unrelated to the git it runs, so what the pane or hook that runs the tests
 // sets for git goes first.
 func TestMain(m *testing.M) {
+	// go test -short omits this end-to-end suite: it builds the tree's
+	// binary and drives it. The landing, the quiet run and CI pass no
+	// -short, so they still run it (docs/testing.md, A short run). The
+	// build tests that skip on their own under -short are part of this.
+	// testing.Short panics until the flags are parsed, and m.Run is what
+	// parses them, after the work this return skips.
+	flag.Parse()
+	if testing.Short() {
+		os.Exit(0)
+	}
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
 		if strings.HasPrefix(name, "GIT_") {
