@@ -3072,7 +3072,6 @@ docs/api.md                    internal/rpc
 docs/pack-api.md               internal/cli
 docs/packs.md                  packs
 docs/install.md                contrib/release
-docs/flows/                    internal/cli
 docs/                          .
 .yardr/depot.md                -
 .yardr/roles/                  packs
