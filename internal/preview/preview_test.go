@@ -689,7 +689,10 @@ func TestFirstAnsweringDialsAtOnce(t *testing.T) {
 // the handshake has finished, and Go reports the expired deadline all the same,
 // so a look that read it as free would let a preview start onto a taken port.
 // Only a refusal and the errors of no route to the address read as free. Each
-// outcome is forced through the look's dial, so none is staged.
+// outcome is forced through the look's dial, so none is staged. The waiter's
+// probe (probeLoopback) reads the same dials the other way: only a connect
+// is bound, every proof of free is free, and anything else, a timeout first,
+// is unknown, so table rows name both readings.
 func TestLoopbackHostReadsOnlyRefusalAndNoRouteAsFree(t *testing.T) {
 	connect := func(errno syscall.Errno) error {
 		return &net.OpError{Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connect", Err: errno}}
@@ -700,15 +703,18 @@ func TestLoopbackHostReadsOnlyRefusalAndNoRouteAsFree(t *testing.T) {
 		v4, v6    error // nil connects
 		want      string
 		wantDials int
+		wantProbe string
+		wantState portState
 	}{
-		{"refused on both", connect(syscall.ECONNREFUSED), connect(syscall.ECONNREFUSED), "", 2},
-		{"no route on both", connect(syscall.ENETUNREACH), connect(syscall.EHOSTUNREACH), "", 2},
-		{"no such family", connect(syscall.EAFNOSUPPORT), connect(syscall.ECONNREFUSED), "", 2},
-		{"timeout on the first", timeout, connect(syscall.ECONNREFUSED), "127.0.0.1", 1},
-		{"timeout on the second", connect(syscall.ECONNREFUSED), timeout, "::1", 2},
-		{"another errno", connect(syscall.EACCES), connect(syscall.ECONNREFUSED), "127.0.0.1", 1},
-		{"an error with no errno", errors.New("boom"), connect(syscall.ECONNREFUSED), "127.0.0.1", 1},
-		{"connected", nil, connect(syscall.ECONNREFUSED), "127.0.0.1", 1},
+		{"refused on both", connect(syscall.ECONNREFUSED), connect(syscall.ECONNREFUSED), "", 2, "", portFree},
+		{"no route on both", connect(syscall.ENETUNREACH), connect(syscall.EHOSTUNREACH), "", 2, "", portFree},
+		{"no such family", connect(syscall.EAFNOSUPPORT), connect(syscall.ECONNREFUSED), "", 2, "", portFree},
+		{"timeout on the first", timeout, connect(syscall.ECONNREFUSED), "127.0.0.1", 1, "", portUnknown},
+		{"timeout on the second", connect(syscall.ECONNREFUSED), timeout, "::1", 2, "", portUnknown},
+		{"another errno", connect(syscall.EACCES), connect(syscall.ECONNREFUSED), "127.0.0.1", 1, "", portUnknown},
+		{"an error with no errno", errors.New("boom"), connect(syscall.ECONNREFUSED), "127.0.0.1", 1, "", portUnknown},
+		{"connected", nil, connect(syscall.ECONNREFUSED), "127.0.0.1", 1, "127.0.0.1", portBound},
+		{"timeout then connected on the second", timeout, nil, "127.0.0.1", 1, "::1", portBound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var dialed []string
@@ -733,6 +739,10 @@ func TestLoopbackHostReadsOnlyRefusalAndNoRouteAsFree(t *testing.T) {
 			wantDialed := []string{"127.0.0.1:43743", "[::1]:43743"}[:tc.wantDials]
 			if strings.Join(dialed, ",") != strings.Join(wantDialed, ",") {
 				t.Errorf("dialled %v, want %v", dialed, wantDialed)
+			}
+			dialed = nil
+			if host, state := probeLoopback(43743); host != tc.wantProbe || state != tc.wantState {
+				t.Errorf("probeLoopback = %q, %v, want %q, %v", host, state, tc.wantProbe, tc.wantState)
 			}
 		})
 	}
@@ -1338,17 +1348,17 @@ func TestOnDemandStartThroughEndpoint(t *testing.T) {
 		y := newYard(t) // no Run: the request alone starts it, and the passes are the test's
 		t.Cleanup(func() { y.sup.kill("demo") })
 		open, probed := make(chan struct{}), make(chan struct{}, 1)
-		y.sup.portProbe = func(port int) string {
+		y.sup.portProbe = func(port int) (string, portState) {
 			select {
 			case <-open:
-				return loopbackHost(port)
+				return probeLoopback(port)
 			default:
 			}
 			select {
 			case probed <- struct{}{}:
 			default:
 			}
-			return ""
+			return "", portFree
 		}
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("hello"), 0o600); err != nil {

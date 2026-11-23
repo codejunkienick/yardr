@@ -105,7 +105,7 @@ type Supervisor struct {
 	over     map[string]time.Time // app -> first moment over the memory cap
 	// portProbe is the readiness check waitPort uses; tests set it to observe
 	// a request before they release a held app.
-	portProbe func(int) string
+	portProbe func(int) (string, portState)
 	// life is the context Run was given, kept for the watchers of every
 	// start (see lifetime); nil until Run begins.
 	life         context.Context

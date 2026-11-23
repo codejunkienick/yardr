@@ -175,6 +175,44 @@ func answerFromRow(w http.ResponseWriter, r *http.Request, p *store.Preview) boo
 	return false
 }
 
+// portState is what one look at a preview's port proves for a waiter: the
+// port is bound and answers on the host returned with portBound, it is free
+// where every dial proves nothing listens, and it is unknown where a dial
+// proves neither (a timeout above all). Unknown is not bound: a waiter
+// keeps waiting on it, where loopbackHost reads the same dial as answered
+// for the spawn gate and watchBind, which must not start onto, or fail, a
+// port whose listener only stalled.
+type portState int
+
+const (
+	portFree portState = iota
+	portBound
+	portUnknown
+)
+
+// probeLoopback is waitPort's look at a port: it returns the loopback host
+// only where a dial connects. A timeout, or any failure that does not prove
+// the port free, is portUnknown and never the host, so a request is not
+// proxied into a dial that then refuses it; it polls again instead.
+func probeLoopback(port int) (string, portState) {
+	unknown := false
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		c, err := dialLoopback(net.JoinHostPort(host, strconv.Itoa(port)))
+		if err == nil {
+			c.Close()
+			return host, portBound
+		}
+		if dialProvesFree(err) {
+			continue
+		}
+		unknown = true
+	}
+	if unknown {
+		return "", portUnknown
+	}
+	return "", portFree
+}
+
 // waitPort waits until the preview's port answers, the start wait runs out,
 // or the supervisor gives the app up: no process runs for it, and its row no
 // longer says it is to (it was refused, never listened, crashed too often or
@@ -188,10 +226,10 @@ func (s *Supervisor) waitPort(ctx context.Context, app string, port int) string 
 	deadline := time.Now().Add(s.bindWait() + defaultStartWait)
 	probe := s.portProbe
 	if probe == nil {
-		probe = loopbackHost
+		probe = probeLoopback
 	}
 	for time.Now().Before(deadline) {
-		if host := probe(port); host != "" {
+		if host, state := probe(port); state == portBound {
 			return host
 		}
 		if !s.Running(app) {

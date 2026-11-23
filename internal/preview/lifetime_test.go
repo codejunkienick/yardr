@@ -71,7 +71,7 @@ func newBindGate(t *testing.T, dir string) *os.File {
 // newWatched is the yard of one case: command is the app's, given the port the
 // yard chose for it. A backoff of zero is the yard's own; a bind wait of zero
 // is the watched minute.
-func newWatched(t *testing.T, byRequest bool, command func(port int) string, backoff, bindWait time.Duration, watchPortWait, bindGate bool) *watched {
+func newWatched(t *testing.T, byRequest bool, command func(port int) string, backoff, bindWait time.Duration, watchPortWait, bindGate, waitTimeout bool) *watched {
 	t.Helper()
 	w := &watched{yard: newYard(t), app: "demo", dir: t.TempDir(), port: freePort(t), byRequest: byRequest}
 	if bindGate {
@@ -79,15 +79,26 @@ func newWatched(t *testing.T, byRequest bool, command func(port int) string, bac
 	}
 	if watchPortWait {
 		w.portWait = make(chan struct{}, 1)
-		w.sup.portProbe = func(port int) string {
-			host := loopbackHost(port)
-			if port == w.port && host == "" {
+		w.sup.portProbe = func(port int) (string, portState) {
+			host, state := probeLoopback(port)
+			if port == w.port && state != portBound {
 				select {
 				case w.portWait <- struct{}{}:
 				default:
 				}
 			}
-			return host
+			return host, state
+		}
+	}
+	if waitTimeout {
+		// The waiter's looks time out throughout, as a timeout through
+		// probeLoopback reports unknown; watchBind keeps its real dials, so
+		// its no-listen verdict still lands at the bind wait.
+		w.sup.portProbe = func(port int) (string, portState) {
+			if port == w.port {
+				return "", portUnknown
+			}
+			return probeLoopback(port)
 		}
 	}
 	if backoff > 0 {
@@ -279,6 +290,7 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 		bindWait      time.Duration // what a start may take to bind, in place of the watched minute
 		watchPortWait bool
 		bindGate      bool
+		waitTimeout   bool
 		check         func(t *testing.T, w *watched)
 	}{
 		{
@@ -416,6 +428,30 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 				})
 			},
 		},
+		{
+			// The same verdict as the case above, with the waiter's looks
+			// timing out throughout: a timeout is unknown to waitPort, so it
+			// keeps waiting for the verdict instead of proxying into a
+			// refused dial and answering 502 while the row still runs.
+			name:     "an app that never binds is failed while the request waits through dial timeouts",
+			command:  gatedApp,
+			bindWait: 5 * time.Second, bindGate: true, waitTimeout: true,
+			check: func(t *testing.T, w *watched) {
+				answer := w.getAsync()
+				got := takePreviewAnswer(t, answer)
+				if got.code != http.StatusServiceUnavailable || !strings.Contains(got.body, "preview demo is failed") {
+					t.Fatalf("the answer = %d %q, want the row's: 503 preview demo is failed", got.code, got.body)
+				}
+				if row := w.state(w.app); row.State != store.PreviewFailed || row.StateDetail != "no listen" || w.sup.Running(w.app) {
+					t.Fatalf("after the answer = %+v running %v, want failed with no listen and the app stopped", row, w.sup.Running(w.app))
+				}
+				waitFor(t, "the request to end", func() bool {
+					w.sup.mu.Lock()
+					defer w.sup.mu.Unlock()
+					return w.sup.inflight[w.app] == 0
+				})
+			},
+		},
 	}
 	for _, byRequest := range []bool{true, false} {
 		name := "started by Run"
@@ -428,7 +464,7 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
-					w := newWatched(t, byRequest, tc.command, tc.backoff, tc.bindWait, tc.watchPortWait, tc.bindGate)
+					w := newWatched(t, byRequest, tc.command, tc.backoff, tc.bindWait, tc.watchPortWait, tc.bindGate, tc.waitTimeout)
 					w.up(t, tc.listens)
 					tc.check(t, w)
 				})
