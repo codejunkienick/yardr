@@ -6,7 +6,7 @@
 // the member runs what the change sets, so none of it is told after it runs
 // (the delegated leg refuses all three): it is a card the operator approves
 // first, weighed code. The rows are in runask_groupset.go and
-// runask_crewset.go.
+// runask_crewplan.go.
 package store
 
 import (

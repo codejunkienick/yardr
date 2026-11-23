@@ -368,7 +368,7 @@ func (w *wtx) crewClones() (map[string]*CrewMember, error) {
 
 // crewSetSeen is what a crew set card keeps of a member: its runner and
 // the prompt, kind and flags it runs, with the model and the directory
-// only on a card that sets one of them (runask_crewset.go). The tell
+// only on a card that sets one of them (runask_crewplan.go). The tell
 // computes all four of the card's combinations, as a hold carries the
 // one its own card wrote.
 func crewSetSeen(r *CrewMember, model, dir bool) string {

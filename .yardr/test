@@ -2075,7 +2075,7 @@ sleepbudget() {
 # a ceiling that only falls cannot follow what a generator reads.
 filesizes='
 internal/cli/beads.go 1098 the bead show, list and history commands and their printing
-internal/cli/crew.go 2205 the crew, inbox, mail and memory commands
+internal/cli/crew.go 1950 the crew, inbox, mail and memory commands
 internal/cli/doctor.go 1243 the doctor examinations and its report
 internal/cli/init.go 1598 yard init, onboarding and settings
 internal/cli/ops.go 1699 the server, daemon, depot, group, route and session commands

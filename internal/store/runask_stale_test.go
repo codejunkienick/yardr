@@ -1142,15 +1142,14 @@ func TestCrewChangeTellsCrewAskerOfStaleRunAsk(t *testing.T) {
 	if got := crewTells(t, y); len(got) != 2 {
 		t.Fatalf("the bead holds %d tells after a second change, want the two", len(got))
 	}
-	// The open ask is indeed stale: its approval is refused, running nothing.
-	if _, err := y.ApproveAsk(y.ctx, y.bead, open, "mckean", true, nil); err == nil || !strings.Contains(err.Error(), "Nothing ran") {
+	// The open ask is indeed stale: its approval is refused, running
+	// nothing, and the yard takes it back and asks again (askedAgain).
+	_, err = y.ApproveAsk(y.ctx, y.bead, open, "mckean", true, nil)
+	if err == nil || !strings.Contains(err.Error(), "Nothing ran") {
 		t.Fatalf("approving the stale ask = %v, want a refusal that ran nothing", err)
 	}
-	// Taken back and asked again, the new ask is covered.
-	if err := y.TakeBackAsk(y.ctx, y.bead, open, "asking again", "yardmaster"); err != nil {
-		t.Fatal(err)
-	}
-	again := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "yardmaster")
+	// The ask the yard asked again is covered.
+	again := askedAgainSeq(t, err)
 	y.crew(t, map[string]any{"kind": "claude", "args": []string{"--safe"}})
 	if got := crewTells(t, y); len(got) != 3 || toldSeq(got[2]) != again {
 		t.Fatalf("the bead holds %v after the re-ask changed, want a third tell of ask %d", got, again)
@@ -1308,6 +1307,9 @@ func TestCrewAbsentCreateAndDeleteTellAsker(t *testing.T) {
 			return err
 		}
 		ask.Run.Seen = map[string]string{"crew newhire": seen("no crew", "newhire")}
+		// The crew set card is held to its plan, and Seen is the tell's
+		// alone: a hold with no plan is one its approval refuses.
+		ask.Run.Plan = nil
 		text, err := json.Marshal(ask)
 		if err != nil {
 			return err

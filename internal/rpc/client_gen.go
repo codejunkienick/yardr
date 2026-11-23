@@ -271,6 +271,10 @@ func (c *Client) ApproveSetup(ctx context.Context, id string, ask uint64, option
 	return callV[*store.AskSetupApproved](c, ctx, "ApproveSetup", id, ask, option, values, account, actor, weighed, host)
 }
 
+func (c *Client) PlanRun(ctx context.Context, run store.AskRun) (*store.AskRun, error) {
+	return callV[*store.AskRun](c, ctx, "PlanRun", run)
+}
+
 func (c *Client) PutDepot(ctx context.Context, r store.Depot, actor string) error {
 	return c.call(ctx, "PutDepot", nil, r, actor)
 }

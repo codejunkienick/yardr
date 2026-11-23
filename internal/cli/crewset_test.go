@@ -449,3 +449,36 @@ func TestCrewSetContextHandoff(t *testing.T) {
 		}
 	}
 }
+
+// crew set --dry-run writes nothing and prints the plan a card of the same
+// settings would carry, as the store draws it: each field before and after,
+// and the command that takes it back. What a card refuses it refuses, and
+// what no card carries has no plan.
+func TestCrewSetDryRunPrintsTheCardsPlan(t *testing.T) {
+	t.Parallel()
+	st, was := clerkYard(t)
+	out := mustAs(t, st, "jo", "crew", "set", "clerk", "preset=bypass", "--dry-run")
+	want := "crew member clerk, as a card of yardr crew set clerk preset=bypass would change it (nothing is written):\n" +
+		`  args: ["--permission-mode","auto"] -> ["--dangerously-skip-permissions"]` + "\n" +
+		`taken back with: yardr crew set clerk 'args=["--permission-mode","auto"]'` + "\n"
+	if out != want {
+		t.Fatalf("dry run = %q, want %q", out, want)
+	}
+	if got := member(t, st, "clerk"); got.Revision != was.Revision {
+		t.Fatalf("a dry run wrote: %+v", got)
+	}
+	if out := mustAs(t, st, "jo", "crew", "set", "clerk", "preset=bypass", "--dry-run", "--json"); !strings.Contains(out, `"of": "crew member clerk"`) || !strings.Contains(out, `"field": "args"`) {
+		t.Fatalf("dry run as JSON = %s", out)
+	}
+	for want, args := range map[string][]string{
+		"kind is on this card for the yardmaster's own entry alone": {"clerk", "kind=codex"},
+		"--max-age is none of it":                                   {"clerk", "preset=bypass", "--max-age", "2h"},
+		"has no plan":                                               {"clerk", "set_state=acme"},
+		"crew member nobody: not found":                             {"nobody", "preset=bypass"},
+	} {
+		refusedAs(t, st, "jo", want, append(append([]string{"crew", "set"}, args...), "--dry-run")...)
+	}
+	if got := member(t, st, "clerk"); got.Revision != was.Revision {
+		t.Fatalf("a refused dry run wrote: %+v", got)
+	}
+}

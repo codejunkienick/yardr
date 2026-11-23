@@ -122,6 +122,9 @@ type API interface {
 	LoginWaitReady(ctx context.Context, id string) error
 	ApproveAsk(ctx context.Context, id string, ask uint64, actor string, weighed bool, values map[string]string) (*AskApproved, error)
 	ApproveSetup(ctx context.Context, id string, ask uint64, option int, values map[string]string, account, actor string, weighed bool, host string) (*AskSetupApproved, error)
+	// PlanRun is the card a run ask of the command would carry, stored
+	// nowhere, for a terminal's dry run (runask_setfield.go).
+	PlanRun(ctx context.Context, run AskRun) (*AskRun, error)
 
 	PutDepot(ctx context.Context, r Depot, actor string) error
 	Depots(ctx context.Context) ([]Depot, error)

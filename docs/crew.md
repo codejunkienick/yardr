@@ -116,6 +116,14 @@ preset does. Another member's kind, model and directory are not on the card:
 the yardmaster changes those on the operator's mail, or the operator types
 them. A model alone needs no card, since any member may set its own.
 
+The card holds a plan: each field it changes, as the yard's records hold it
+when the card is written and as the approval would leave it. The approval
+plans again; where the member was set since and the plan reads otherwise,
+nothing runs, and the yard takes the card back and asks again with the plan
+as it reads now, once for each approval it refuses. `yardr crew set <name>
+preset=<preset> --dry-run` (with any of the settings the card carries)
+prints that plan and the command that takes it back, and writes nothing.
+
 The value of a key named like a secret (`token`, `secret`, `password`,
 `…_key`) is not printed. A running crew member keeps its session: what it may
 do (`open_threads`, `set_state`, `peers`), `--on`, `--max-age` and

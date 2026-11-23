@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -689,9 +690,15 @@ func TestRunAskCrewSetCardsTheYardmastersOwnEntry(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The yardmaster proposes a change of its own entry.
-	seq := y.ask(t, groupAddAsk(text, "crew", "set", "yardmaster", "prompt="+given, "preset=bypass"), "yardmaster")
+	// The yardmaster proposes a change of its own entry, with a plan of its
+	// own beside it, which the yard throws away: the plan is the yard's.
+	proposed := groupAddAsk(text, "crew", "set", "yardmaster", "prompt="+given, "preset=bypass")
+	proposed.Run.Plan = &RunPlan{Of: "crew member yardmaster", Changes: []PlanChange{{Field: "model", After: "opus"}}}
+	seq := y.ask(t, proposed, "yardmaster")
 	r := y.asked(t, seq)
+	if want := []PlanChange{{Field: "prompt", After: saved}, {Field: "args", Before: `["--careful"]`, After: `["--dangerously-skip-permissions"]`}}; !reflect.DeepEqual(r.Ask.Run.Plan.Changes, want) {
+		t.Errorf("the stored plan = %+v, want the yard's %+v", r.Ask.Run.Plan.Changes, want)
+	}
 	if want := []string{"crew", "set", "yardmaster", "prompt=" + given, "preset=bypass"}; !slices.Equal(r.Ask.Run.Argv, want) {
 		t.Errorf("stored command = %q, want %q", r.Ask.Run.Argv, want)
 	}
@@ -850,22 +857,112 @@ func TestRunAskCrewSetCardsTheYardmastersOwnEntry(t *testing.T) {
 	}
 }
 
-// A card of the strong few is stale when the member was defined since.
+// askedAgainSeq is the ask the yard asked again as, which the refusal err of
+// a stale plan names (askedAgain).
+func askedAgainSeq(t *testing.T, err error) uint64 {
+	t.Helper()
+	var seq uint64
+	text := ""
+	if err != nil {
+		text = err.Error()
+	}
+	i := strings.Index(text, "asked again as ask ")
+	if i < 0 {
+		t.Fatalf("the refusal names no ask asked again: %v", err)
+	}
+	if _, scanErr := fmt.Sscanf(text[i:], "asked again as ask %d", &seq); scanErr != nil {
+		t.Fatalf("the refusal %q: %v", text, scanErr)
+	}
+	return seq
+}
+
+// A crew set card is held to its plan: when the member was defined since and
+// the plan reads otherwise, the approval runs nothing, and the yard takes the
+// card back and asks again, once, with the plan as it reads now, which the
+// refusal names. The card asked again is the asker's, and approves.
 func TestRunAskCrewSetIsHeldToItsCard(t *testing.T) {
 	t.Parallel()
 	y := listYard(t)
 	seq := y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "yardmaster")
+	if plan := y.asked(t, seq).Ask.Run.Plan; plan == nil || plan.Of != "crew member yardmaster" ||
+		!reflect.DeepEqual(plan.Changes, []PlanChange{{Field: "args", Before: `["--careful"]`, After: `["--dangerously-skip-permissions"]`}}) {
+		t.Fatalf("the card's plan = %+v", plan)
+	}
 	y.crew(t, map[string]any{"kind": "claude", "args": []string{"--other"}})
-	y.refusedStale(t, seq, "was written when the crew member yardmaster was another: its definition was set since")
+	_, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil)
+	if err == nil || !strings.Contains(err.Error(), "was written when the crew member yardmaster was another: its definition was set since") ||
+		!strings.Contains(err.Error(), `it held args ["--careful"], and holds args ["--other"] now`) || !strings.Contains(err.Error(), "Nothing ran") {
+		t.Fatalf("approving a stale plan = %v", err)
+	}
 	if m, _ := y.GetCrew(y.ctx, "yardmaster"); fmt.Sprint(m.Config["args"]) != "[--other]" {
 		t.Errorf("a refused approval changed the member: %+v", m)
 	}
+	again := askedAgainSeq(t, err)
+	old := y.asked(t, seq)
+	if old.State != AskTakenBack || !strings.Contains(old.Current.Answer.Words, fmt.Sprintf("asked again as ask %d", again)) {
+		t.Fatalf("the stale ask is %s (%+v), want it taken back naming ask %d", old.State, old.Current, again)
+	}
+	r := y.asked(t, again)
+	if r.State != AskOpen || r.Note.Author != "yardmaster" || r.Ask.To != "mckean" || r.Ask.Question != "May I?" {
+		t.Fatalf("the ask asked again = %+v, want the yardmaster's, open, to mckean", r)
+	}
+	if c, _ := r.Ask.Run.Plan.change("args"); c.Before != `["--other"]` {
+		t.Errorf("the plan asked again = %+v, want it from the member as it stands", r.Ask.Run.Plan)
+	}
+	strongHas(t, r.Ask.Run.Does, `It starts claude (Claude Code) agents with "--other" now.`)
+	// One replacement for one refused approval: the old card is ended.
+	if _, err := y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil); err == nil || !strings.Contains(err.Error(), "is asked no more") {
+		t.Errorf("approving the replaced ask = %v, want it asked no more", err)
+	}
+	if _, err := y.ApproveAsk(y.ctx, y.bead, again, "mckean", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := y.GetCrew(y.ctx, "yardmaster"); fmt.Sprint(m.Config["args"]) != "[--dangerously-skip-permissions]" {
+		t.Errorf("the approved replacement left the member %+v", m)
+	}
+	// A card from a yard that kept no plan is asked again the same way.
+	seq = y.ask(t, listAsk("mckean", "crew", "set", "yardmaster", "preset=accept-edits"), "yardmaster")
+	y.dropPlan(t, seq)
+	_, err = y.ApproveAsk(y.ctx, y.bead, seq, "mckean", true, nil)
+	if err == nil || !strings.Contains(err.Error(), "the card is from a yard that kept no plan of it") {
+		t.Fatalf("approving a card with no plan = %v", err)
+	}
+	askedAgainSeq(t, err)
 	// A kind that has no preset of that name refuses where the card is
 	// drawn, whoever asks.
 	y.crew(t, map[string]any{"kind": "pi"})
-	_, err := y.AddAsk(y.ctx, y.bead, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "yardmaster")
+	_, err = y.AddAsk(y.ctx, y.bead, listAsk("mckean", "crew", "set", "yardmaster", "preset=bypass"), "yardmaster")
 	if err == nil || !strings.Contains(err.Error(), `pi has no permission preset "bypass" (it has: none)`) {
 		t.Errorf("a kind with no presets = %v", err)
+	}
+}
+
+// dropPlan rewrites the run ask seq as a build that kept no plan stored it.
+func (y *askYard) dropPlan(t *testing.T, seq uint64) {
+	t.Helper()
+	if err := y.write(func(w *wtx) error {
+		row, err := w.loadBead(y.bead)
+		if err != nil {
+			return err
+		}
+		key := join(row.UUID, seqKey(seq))
+		var n Note
+		if ok, err := get(w.Tx, bNotes, key, &n); err != nil || !ok {
+			return fmt.Errorf("no note %d (%v)", seq, err)
+		}
+		ask, err := ParseAsk(n)
+		if err != nil {
+			return err
+		}
+		ask.Run.Plan = nil
+		text, err := json.Marshal(ask)
+		if err != nil {
+			return err
+		}
+		n.Text = string(text)
+		return put(w.Tx, bNotes, key, n)
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

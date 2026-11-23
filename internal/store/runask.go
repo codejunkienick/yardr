@@ -135,6 +135,11 @@ type AskRun struct {
 	// these lines. No other row keeps it: askedRun throws a writer's
 	// HookTable away with its Does and Seen.
 	HookTable *AskHookTable `json:"hook_table,omitempty"`
+	// Plan is what the command changes, field by field, for a row of the
+	// set-a-field engine (runask_plan.go): written by the row from the
+	// yard's records, never taken from the writer. Nil on every other
+	// row; an old build ignores it.
+	Plan *RunPlan `json:"plan,omitempty"`
 }
 
 // What an ask proposes and what its approval did, as commands and
@@ -186,6 +191,9 @@ type runCommand struct {
 	checkRun func(ctx context.Context, w *wtx, run AskRun, actor string) error
 	cardRun  func(w *wtx, run AskRun, asking bool) (AskRun, error)
 	runRun   func(ctx context.Context, w *wtx, run AskRun, actor string, by *approvedOn) (string, error)
+	// plan is the card of a row of the set-a-field engine, drawn for a dry
+	// run (PlanRun) without the asker's check; nil on every other row.
+	plan func(w *wtx, run AskRun) (AskRun, error)
 	// whose is the user whose own the command is, where the store function
 	// takes it from that user as it does from the operator: the ask is then
 	// for one of the two, and the one asked approves. nil for a command
@@ -790,57 +798,9 @@ func (s *Store) ApproveAsk(ctx context.Context, id string, ask uint64, actor str
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.askedAgain(ctx, id, ask, actor, err)
 	}
 	return out, nil
-}
-
-// prewriteRun reads before the write what the row's card needs outside
-// one (runCommand.ready and runCommand.fetch): the flows and the call's
-// context carrying the fetched reading. A nil row reads none.
-func prewriteRun(ctx context.Context, s *Store, run AskRun, c *runCommand, argv []string) (map[string]*RepoFlows, context.Context, error) {
-	if c == nil {
-		return nil, ctx, nil
-	}
-	var repos map[string]*RepoFlows
-	if c.ready != nil {
-		var err error
-		if repos, err = c.ready(ctx, s, run, argv); err != nil {
-			return nil, ctx, err
-		}
-	}
-	if c.fetch != nil {
-		read, err := c.fetch(ctx, s, argv)
-		if err != nil {
-			return nil, ctx, err
-		}
-		ctx = context.WithValue(ctx, urlPackKey{}, read)
-	}
-	return repos, ctx, nil
-}
-
-// approvalRepos reads, before the write that approves the run ask seq on
-// the bead id, what its row's card needs of git or of the packs
-// repository (prewriteRun). An ask that cannot be read here (no bead, no
-// run) is left to the write, which refuses it in its own words.
-func (s *Store) approvalRepos(ctx context.Context, id string, seq uint64) (map[string]*RepoFlows, context.Context, error) {
-	notes, err := s.Notes(ctx, id)
-	if err != nil {
-		return nil, ctx, nil
-	}
-	for _, n := range notes {
-		if n.Seq != seq || n.Kind != NoteAsk {
-			continue
-		}
-		ask, err := ParseAsk(n)
-		if err != nil || ask.Run == nil {
-			return nil, ctx, nil
-		}
-		if c, argv, err := parseRow(ask.Run.Argv); err == nil {
-			return prewriteRun(ctx, s, *ask.Run, c, argv)
-		}
-	}
-	return nil, ctx, nil
 }
 
 // approveAsk is ApproveAsk inside the transaction. A batch may run it twice
@@ -944,7 +904,7 @@ func (w *wtx) approveAsk(ctx context.Context, id string, seq uint64, actor strin
 	if err != nil {
 		return nil, fmt.Errorf("ask %d: %w. %s", seq, err, nothingRan)
 	}
-	if was.General != nil || !sameMap(card.Seen, was.Seen) || !slices.Equal(card.Does, was.Does) || card.Back != was.Back || card.BackBy != was.BackBy {
+	if was.General != nil || !sameMap(card.Seen, was.Seen) || !slices.Equal(card.Does, was.Does) || card.Back != was.Back || card.BackBy != was.BackBy || !samePlan(card.Plan, was.Plan) {
 		if err := c.stale(w, seq, was, card); err != nil {
 			return nil, err
 		}

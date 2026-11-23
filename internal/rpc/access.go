@@ -198,6 +198,10 @@ var Access = map[string]Class{
 	"LoginWaitReady":       Read,
 	"ApproveAsk":           Admin,
 	"ApproveSetup":         Admin,
+	// A dry run of a crew set card shows what the card would: the prompt
+	// a member runs now, whole, which Line keeps to the operator. It is
+	// the command's own class, no reader's.
+	"PlanRun": Admin,
 
 	// Depots, groups, routes, flows: how the yard routes its work.
 	"PutDepot":       Admin,
