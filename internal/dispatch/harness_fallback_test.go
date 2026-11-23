@@ -2,6 +2,7 @@ package dispatch_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -321,4 +322,185 @@ func TestCrewMemberOnASharedLimitDoesNotFailOver(t *testing.T) {
 	if mails := mailsTo(t, s, "jo"); len(mails) != 0 {
 		t.Fatalf("mail = %v, want none for a shared window", mails)
 	}
+}
+
+// A crew member that starts while its own model's window is already
+// used up — a handoff restart's start among them, with no fallback
+// keys on the session it replaces and no pane error to prove the
+// model — starts on its fallback at once, with the return stamped
+// and the operator told once as a start. No other start does: an
+// open window, a shared window used up, a window of another model,
+// and limits that are cold or unknown all start it on its own model
+// with no failover and no tell, leaving a later stop to the stop
+// path. No test above drives a start with no fallback keys, so this
+// one is new beside them.
+func TestCrewMemberStartingWhileItsModelsWindowIsUsedUpStartsOnItsFallback(t *testing.T) {
+	t.Parallel()
+	const (
+		primary  = "kimi-fable-5"
+		fallback = "kimi-code/kimi-for-coding"
+	)
+	cfg := map[string]any{"kind": "kimi", "model": primary, "fallback_model": fallback}
+
+	// start is one fresh yard whose member's first start is judged
+	// against report: primed into the cache where prime holds, failed
+	// where fail holds, and left cold where neither holds.
+	start := func(t *testing.T, report func(now, fable time.Time) string, prime, fail bool) (store.API, *crewRunner, *dispatch.Dispatcher, time.Time) {
+		t.Helper()
+		s, f, d := crewSetup(t, store.CrewMember{Config: cfg})
+		ctx := context.Background()
+		p := newStandIn(t, s)
+		if _, err := s.AddUser(ctx, "jo", "me"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetSetting(ctx, store.OperatorSetting, "jo", "me"); err != nil {
+			t.Fatal(err)
+		}
+		now := noon()
+		dispatch.SetClock(d, func() time.Time { return now })
+		fable := now.Add(2 * time.Hour)
+		p.say(report(now, fable))
+		if fail {
+			p.fail()
+		}
+		if prime {
+			primeLimits(t, d, "kimi", "", nil)
+		}
+		must(t, d.Reconcile(ctx))
+		must(t, d.Reconcile(ctx))
+		return s, f, d, fable
+	}
+
+	assertOnPrimary := func(t *testing.T, s store.API, f *crewRunner) {
+		t.Helper()
+		m := crewMember(t, s)
+		if got := f.startModels(); len(got) != 1 || got[0] != primary || f.n != 1 {
+			t.Fatalf("start models = %v starts %d, want the one start on %s", got, f.n, primary)
+		}
+		if m.Config["model"] != primary || m.Handle["harness_fallback_model"] != nil || m.Handle["harness_fallback_return_at"] != nil {
+			t.Fatalf("member = %v handle %v, want the config's model and no fallback keys", m.Config, m.Handle)
+		}
+		if mails := mailsTo(t, s, "jo"); len(mails) != 0 {
+			t.Fatalf("mail = %v, want none", mails)
+		}
+		if tells := journalTells(t, s, m.Journal); len(tells) != 0 {
+			t.Fatalf("human_notified = %v, want none", tells)
+		}
+	}
+
+	t.Run("used up model window starts on fallback", func(t *testing.T) {
+		t.Parallel()
+		s, f, d, fable := start(t, func(now, fable time.Time) string {
+			return kimiFable(0, now.Add(5*time.Hour), fable)
+		}, true, false)
+		ctx := context.Background()
+		wantReturn := fable.Add(time.Minute).UTC().Format(time.RFC3339Nano)
+		m := crewMember(t, s)
+		if got := f.startModels(); len(got) != 1 || got[0] != fallback || f.n != 1 {
+			t.Fatalf("start models = %v starts %d, want the one start on the fallback %s", got, f.n, fallback)
+		}
+		if m.Config["model"] != primary || m.Handle["harness_fallback_model"] != fallback ||
+			m.Handle["harness_fallback_return_at"] != wantReturn {
+			t.Fatalf("member = %v handle %v, want the config's model kept, the fallback and its return %s", m.Config, m.Handle, wantReturn)
+		}
+		mails := mailsTo(t, s, "jo")
+		if len(mails) != 1 || !strings.Contains(mails[0].Data["text"].(string), "starting on its fallback model "+fallback) {
+			t.Fatalf("mail to the operator = %v, want one naming the start on the fallback", mails)
+		}
+		tells := journalTells(t, s, m.Journal)
+		if len(tells) != 1 || tells[0].Data["fallback"] != "start" || tells[0].Data["fallback_model"] != fallback ||
+			tells[0].Data["window"] != "Weekly Fable" {
+			t.Fatalf("human_notified = %v, want one start tell naming the fallback and its window", tells)
+		}
+		must(t, d.Reconcile(ctx))
+		if f.n != 1 || len(mailsTo(t, s, "jo")) != 1 {
+			t.Fatalf("a pass on: starts %d mail %d, want the start told once", f.n, len(mailsTo(t, s, "jo")))
+		}
+	})
+
+	t.Run("handoff restart starts on fallback", func(t *testing.T) {
+		t.Parallel()
+		// Started on its own model while its window was open, then
+		// restarted for a handoff once the provider says the window
+		// is used up: the replacing start carries no fallback keys
+		// and fails over all the same.
+		s, f, d := crewSetup(t, store.CrewMember{Config: cfg})
+		ctx := context.Background()
+		p := newStandIn(t, s)
+		if _, err := s.AddUser(ctx, "jo", "me"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetSetting(ctx, store.OperatorSetting, "jo", "me"); err != nil {
+			t.Fatal(err)
+		}
+		now := noon()
+		dispatch.SetClock(d, func() time.Time { return now })
+		p.say(kimiOpen)
+		primeLimits(t, d, "kimi", "", nil)
+		must(t, d.Reconcile(ctx))
+		must(t, d.Reconcile(ctx))
+		if got := f.startModels(); len(got) != 1 || got[0] != primary {
+			t.Fatalf("start models = %v, want the first start on %s", got, primary)
+		}
+		fable := now.Add(2 * time.Hour)
+		now = now.Add(2 * time.Minute) // expire the primed open answer
+		p.say(kimiFable(0, now.Add(5*time.Hour), fable))
+		primeLimits(t, d, "kimi", "", nil)
+		must(t, s.RequestRestart(ctx, "yardmaster", "handoff", "", "jo"))
+		f.show(kimiIdle)
+		must(t, d.Reconcile(ctx))
+		must(t, d.Reconcile(ctx))
+		m := crewMember(t, s)
+		wantReturn := fable.Add(time.Minute).UTC().Format(time.RFC3339Nano)
+		if got := f.startModels(); len(got) != 2 || got[1] != fallback {
+			t.Fatalf("start models = %v, want the restart on the fallback %s", got, fallback)
+		}
+		if m.Handle["harness_fallback_model"] != fallback || m.Handle["harness_fallback_return_at"] != wantReturn {
+			t.Fatalf("handle = %v, want the fallback and its return %s", m.Handle, wantReturn)
+		}
+		if mails := mailsTo(t, s, "jo"); len(mails) != 1 {
+			t.Fatalf("mail = %d, want the start's one", len(mails))
+		}
+	})
+
+	t.Run("open window starts on primary", func(t *testing.T) {
+		t.Parallel()
+		s, f, _, _ := start(t, func(_, _ time.Time) string { return kimiOpen }, true, false)
+		assertOnPrimary(t, s, f)
+	})
+
+	t.Run("shared window used up starts on primary", func(t *testing.T) {
+		t.Parallel()
+		s, f, _, _ := start(t, func(now, _ time.Time) string {
+			return kimiUsed(now.Add(42 * time.Minute))
+		}, true, false)
+		assertOnPrimary(t, s, f)
+	})
+
+	t.Run("another model's window starts on primary", func(t *testing.T) {
+		t.Parallel()
+		s, f, _, _ := start(t, func(now, fable time.Time) string {
+			return fmt.Sprintf(`{"provider":"Kimi","windows":[`+
+				`{"label":"5h","used_percent":0,"resets_at":%q},`+
+				`{"label":"Weekly Opus","model":"Opus","used_percent":100,"resets_at":%q}]}`,
+				now.Add(5*time.Hour).Format(time.RFC3339), fable.Format(time.RFC3339))
+		}, true, false)
+		assertOnPrimary(t, s, f)
+	})
+
+	t.Run("cold limits start on primary", func(t *testing.T) {
+		t.Parallel()
+		s, f, _, _ := start(t, func(now, fable time.Time) string {
+			return kimiFable(0, now.Add(5*time.Hour), fable)
+		}, false, false)
+		assertOnPrimary(t, s, f)
+	})
+
+	t.Run("unknown limits start on primary", func(t *testing.T) {
+		t.Parallel()
+		s, f, _, _ := start(t, func(now, fable time.Time) string {
+			return kimiFable(0, now.Add(5*time.Hour), fable)
+		}, true, true)
+		assertOnPrimary(t, s, f)
+	})
 }

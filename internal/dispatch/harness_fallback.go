@@ -6,6 +6,7 @@ import (
 	"maps"
 	"strings"
 	"time"
+	"unicode"
 
 	"yardr.dev/yardr/internal/limits"
 )
@@ -35,6 +36,15 @@ import (
 //     the harness shows the limit line instead of running the turn.
 //     The next session primes from the last journal handoff and the
 //     unread inbox, as a forced rotation's does.
+//   - A start with no fallback keys on the session it replaces — a
+//     handoff restart, say — has no pane error to prove its model is
+//     the used-up one, so crewFallbackJob reads the cached limits
+//     itself: a model window used up whose word matches the config's
+//     model id (windowModelMatches) starts it on its fallback at
+//     once, told once as a start. A shared window, a window of
+//     another model, an open window and an unknown one all start it
+//     on its own model as before, and a later stop is the stop
+//     path's business as ever.
 //   - The state is two handle keys (harnessFallbackModel,
 //     harnessFallbackReturnAt, harness.go): set on the stopped session
 //     with the error's mark, carried by the start that replaces it
@@ -210,6 +220,30 @@ func (d *Dispatcher) crewFallbackReturn(ctx context.Context, runner Runner, s *m
 	return true
 }
 
+// windowModelMatches reports whether the provider's word for a model
+// window (Window.Model, in its own words: "Fable") names the model id
+// a member is configured with ("claude-fable-5-2"): the word, lowercased,
+// stands among the id's words, the id split on runs of what is neither
+// a letter nor a digit and lowercased too. It is the one comparison a
+// start may make: no table of provider words to model ids, and no
+// looser match, since a failover onto another model's window returns
+// only at that window's reset. An empty word or an empty id (the
+// harness's own default) matches nothing.
+func windowModelMatches(word, id string) bool {
+	word = strings.ToLower(strings.TrimSpace(word))
+	if word == "" || id == "" {
+		return false
+	}
+	for _, w := range strings.FieldsFunc(strings.ToLower(id), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if w == word {
+			return true
+		}
+	}
+	return false
+}
+
 // crewFallbackJob is the start keepSession hands over for s: on a
 // member cloned with its fallback as its model, where the session it
 // replaces was on its fallback (or failing over to it) and its return
@@ -220,11 +254,17 @@ func (d *Dispatcher) crewFallbackReturn(ctx context.Context, runner Runner, s *m
 // failover restart itself, the member is as the store has it and no key
 // is carried: the new session runs on the config's model, the spell is
 // over, and the operator is told once.
+//
+// Where the session it replaces carries no fallback keys at all, the
+// start itself is judged (see the head of this file): the cached
+// limits of the member's kind, read as a stop reads them, and the
+// member starts on its fallback where that names its own model's used
+// up window.
 func (d *Dispatcher) crewFallbackJob(ctx context.Context, s *memberSession, runner Runner, starter CrewRunner) crewJob {
 	job := crewJob{session: *s, runner: runner, starter: starter}
 	fallback, _ := s.st.Handle[harnessFallbackModel].(string)
 	if fallback == "" {
-		return job
+		return d.crewFallbackStartJob(ctx, s, job)
 	}
 	due, hasDue := handleTime(s.st.Handle, harnessFallbackReturnAt)
 	if hasDue && !d.now().Before(due) {
@@ -251,6 +291,71 @@ func (d *Dispatcher) crewFallbackJob(ctx context.Context, s *memberSession, runn
 	job.session.member = member
 	job.fallbackModel = fallback
 	job.fallbackReturnAt, _ = s.st.Handle[harnessFallbackReturnAt].(string)
+	return job
+}
+
+// crewFallbackStartJob is crewFallbackJob for a start whose session
+// carries no fallback keys: it starts on its fallback where the cached
+// limits name its own model's window used up, and on its own model
+// otherwise. The read is harnessLimits as a stop makes it (the
+// machine's login, no group env), so a cold cache, a provider that
+// gave no answer and a limit no source knows of all answer no window
+// and the start is as it was: the stop path catches a later stop. A
+// shared window is UsedUpForStop's first word and names no model, so
+// it fails over nowhere, as at a stop; only a model window whose word
+// matches the config's model id (windowModelMatches) does, with
+// fallback_model named and not the model itself, as crewFallbackWake
+// holds a stop to. The job is the failover branch's own — the member
+// cloned on the fallback, the return stamped from the window's reset
+// plus the lag — and the operator is told once, as a start.
+func (d *Dispatcher) crewFallbackStartJob(ctx context.Context, s *memberSession, job crewJob) crewJob {
+	fallback, _ := s.member.Config["fallback_model"].(string)
+	if fallback == "" {
+		return job
+	}
+	primary, _ := s.member.Config["model"].(string)
+	if primary != "" && fallback == primary {
+		d.Log.Warn("crew session's fallback_model is the same as its model; skipping failover",
+			"crew", s.member.Name, "session", s.label(), "model", primary)
+		return job
+	}
+	kind := harnessKind(s.member.Config)
+	provider, _ := s.member.Config["provider"].(string)
+	data := map[string]any{}
+	_, w := d.harnessLimits(ctx, kind, provider, nil, data)
+	if w == nil || w.Model == "" || !windowModelMatches(w.Model, primary) {
+		return job
+	}
+	var returnAt string
+	var line string
+	if w.ResetsAt != nil {
+		now := d.now()
+		at := *w.ResetsAt
+		if at.Before(now) {
+			at = now
+		}
+		at = at.Add(harnessResetLag)
+		returnAt = at.UTC().Format(time.RFC3339Nano)
+		d.lookAt(at)
+		line = fmt.Sprintf("%s's %s is starting on its fallback model %s: its model's usage window (%s) is used up, and it returns to %s at %s",
+			s.member.Name, s.what(), fallback, w.Label, orModel(primary), limits.Clock(at, now))
+	} else {
+		line = fmt.Sprintf("%s's %s is starting on its fallback model %s: its model's usage window (%s) is used up; "+
+			"the provider does not say when that window resets, so run `%s` when ready to return to %s",
+			s.member.Name, s.what(), fallback, w.Label, s.restartCmd(), orModel(primary))
+	}
+	member := s.member
+	cfg := maps.Clone(member.Config)
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	cfg["model"] = fallback
+	member.Config = cfg
+	job.session.member = member
+	job.fallbackModel = fallback
+	job.fallbackReturnAt = returnAt
+	d.tellCrewFallback(ctx, s, line,
+		map[string]any{"fallback": "start", "window": w.Label, "fallback_model": fallback})
 	return job
 }
 
