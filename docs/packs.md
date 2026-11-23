@@ -11,9 +11,7 @@ person, secret or identity, which are the yard's and stay in it.
 `yardr pack apply` imports it; `yardr pack list` shows what the yard
 imported; `yardr pack export` writes a depot's way of working out as a pack
 ([below](#yardr-pack-export)). `yardr depot init` sets a new depot up from the yard's
-[default pack](#the-default-pack). `yardr flow draw <pack>` draws a pack's
-flow with the groups it puts at each stage, with no yard
-([flows.md](flows.md#drawing-a-flow)). A pack is a directory on this
+[default pack](#the-default-pack). A pack is a directory on this
 machine, one yardr carries in its binary, or the pack's directory on a web
 server, fetched when the command runs. What a pack built outside this
 repository may rely on, key by key and variable by variable, and what is

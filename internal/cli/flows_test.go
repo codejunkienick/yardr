@@ -633,16 +633,13 @@ func TestFlowShowNamedRepoFlow(t *testing.T) {
 			t.Errorf("section %d names no crew:\n%s", i, section)
 		}
 	}
-	if _, err := run(t, a.flowCmd(), "show", "posting.post", "--svg"); err == nil || !strings.Contains(err.Error(), "depots alpha, beta, gamma, git-source") {
-		t.Errorf("flow show posting.post --svg err = %v, want the sorted depot choices", err)
-	}
 	soloDir := t.TempDir()
 	write(soloDir, "solo.flow", text)
 	must(st.PutDepot(ctx, store.Depot{Name: "source", Path: soloDir, Kind: store.DepotDir}, "me"))
-	svg, err := run(t, a.flowCmd(), "show", "solo", "--svg")
+	solo, err := run(t, a.flowCmd(), "show", "solo")
 	must(err)
-	if !strings.HasPrefix(strings.TrimSpace(svg), "<svg") {
-		t.Errorf("flow show solo --svg = %q, want an SVG", svg)
+	if !strings.Contains(solo, "draft") {
+		t.Errorf("flow show solo = %q, want its stages", solo)
 	}
 
 	// --json serves each depot beside its view, sorted.

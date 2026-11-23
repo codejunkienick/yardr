@@ -755,7 +755,7 @@ origin; the test allows those and only those ([One bead](#one-bead)).
 | `/line` | what waits for a person, and the line in numbers ([The right column](#the-right-column)) | `Line` |
 | `/line?home=1` | the home mode: the line panel alone, what home's aside shows and re-reads ([The right column](#the-right-column)) | `Line` |
 | `/flows` | per depot, the flows that govern it: each stage a section with its group and the open beads in it as cards, which move as the beads do, and a stage with none folded to its head line ([Flows](#flows)) | `Flows` |
-| `/flows?panel=1` | the yard panel: every depot's flows drawn as track, with the open beads standing on them as blocks ([Flows](#flows)) | `Flows` |
+| `/flows?panel=1` | the yard panel: every depot's flows as a list, with the open beads in no stage off the line ([Flows](#flows)) | `Flows` |
 | `/beads` | the open beads, the newest change first ([Beads](#beads)) | `Beads` |
 | `/beads?depot=<depot>&stage=<stage>` | the same, of one depot, in one stage, or both | `Beads` |
 | `/beads?all=1` | the closed beads too, every one (`yardr bead list --all`) | `Beads` |
@@ -1483,56 +1483,18 @@ bead: reload the page to see it.
 
 ## The yard panel
 
-`/flows?panel=1` (the Yard row of the Lines column) draws every depot's flows as
-a signal panel: one line plan per flow — one thin track line, each stage a
-section of it with its name and count under it, a manual stage as a short
-siding above, the other edges as thin unlabelled lines — with the open
-beads standing on it as lights. A flow with no open bead still draws its
-bare track. The page has no right column, so its centre runs to the
-window's edge: each depot as wide as its widest flow plan needs, with
-depots side by side where there is room. On a phone they stack, and a
-diagram wider than its depot pans horizontally at full size.
-
-How to read it:
-
-- A light is its bead: tapping it opens the bead. What it is stands in its
-  title; a rust light's title names what holds it. Lights stand newest
-  first; past ten on one section the rest fold into `+N`, and the count
-  beside the stage name always says the true number. A stage with none
-  carries no count.
-- A section is lit green while a session runs in it. No bead writes
-  anything on the plan: no id, no group name, nothing beside its light.
-- Every blocked kind is told apart: solid red for held, hollow red for
-  gave up, a muted outline for stalled, rust with a red ring for blocked on
-  a prompt, rust for waiting on a dependency, a red diamond before a bead
-  back on `failed` or `changes`. A bead running past its usual time gets
-  an amber ring around its light besides, its title naming the stage age
-  against the p90; late stands beside the stalled lamp, never instead of
-  it ([Estimates](#estimates-the-eta-and-the-late-mark)).
-- A stage with a bead being worked and no fault of its own carries no
-  lamp: it is moving. A prompt-blocked session keeps its claim but still
-  makes a fault. When no bead is being worked without a fault, red marks a
-  session waiting on a prompt or a bead lacking what its route needs, and
-  rust marks a held bead or a person's turn (a manual stage, or an open
-  ask to the operator). A bead waiting only behind another bead lights no
-  lamp. A stage that can report `changes` carries a
-  signal instead: a lamp on a short post, an unlit outline unless the
-  stage waits, when it lights red or rust as a wait lamp does; a wait on
-  a stage with no signal is a bare lamp. A bead back on `failed` or
-  `changes` lights no lamp: its diamond is its only mark. A stage no
-  route serves is dotted with the faint words `no route`.
-- Tapping a section opens the stage on `/flows`, at its section.
-- Under a depot's diagrams, `off the line: N` holds the open beads in no
-  stage of its flows, each with its stage named: a bead stranded in a
-  stage its flow lacks stands there, since no section can hold it.
+`/flows?panel=1` (the Yard row of the Lines column) lists every depot's
+flows: each flow by name, type and source, with the open beads in no
+stage of its flows under `off the line: N`, each with its stage named —
+a bead stranded in a stage its flow lacks stands there, since no stage
+can hold it. The page has no right column, so its centre runs to the
+window's edge: depots side by side where there is room, stacked on a
+phone.
 
 The whole panel reads itself again on every event of the stream
-([Live pages](#live-pages)): a bead that moves is on its new section
+([Live pages](#live-pages)): a bead that moves is in its new flow's list
 without a reload. The parameter shapes the HTML alone: as JSON the page
-answers the same with it as without it. Every colour the panel uses is a
-named token of the stylesheet (`--panel-*` for the track, with `--running`,
-`--held` and `--accent` for running green, fault red and person's-turn rust,
-and `--late` for the late ring), so the palette changes in one edit.
+answers the same with it as without it.
 
 ## One depot
 
@@ -2160,8 +2122,7 @@ Every open bead with enough history behind it carries an estimate: its
 ETA as a usual range, and a late mark when its stage has run past its
 slow time. The bead's page shows the ETA sentence and the mark under
 the header; cards carry the mark (`⚠ late`, with the whole line as its
-title); the yard panel rings a late light amber; `/line` lists late
-beads under the waits. `yardr bead show` and `yardr prime --bead` print
+title); `/line` lists late beads under the waits. `yardr bead show` and `yardr prime --bead` print
 the same two lines, and `bead show --json` carries the same two
 objects. The socket's `Bead` call carries them too, so footplate reads
 what the view shows.
@@ -2189,10 +2150,9 @@ start.
 
 Late is past the stage's slow time: waiting past the whole-stay p90, or
 running past the claimed-run p90. Stalled means the agent stopped —
-its first prompt idle past the stall limit, a hollow muted lamp on the
-panel; late means it takes long. A bead can be either, both, or
-neither, and late tells no one: there is no event for it, only the
-mark.
+its first prompt idle past the stall limit; late means it takes long. A
+bead can be either, both, or neither, and late tells no one: there is no
+event for it, only the mark.
 
 The objects, as `eta` and `late` on the bead's page, on the cards of
 `/flows` and the rows of `/beads`, and on `/line`'s late rows (`late`
@@ -2601,11 +2561,6 @@ anywhere else.
 | `--held` | `#e5675a` | status: blocked or held, and errors |
 | `--late` | `#e8a33d` | status: running past its usual time; the design has no warning colour, so this keeps the nearest amber |
 | `--done` | faint | status: done |
-| `--panel-board` | `#202622` | the panel's track: its board |
-| `--panel-ink` | `#e6e1d3` | the panel's track: stage names |
-| `--panel-dim` | `#9aa39b` | the panel's track: faint names, unlit lamps |
-| `--panel-line` | `#d8d2c0` | the panel's track: the lines |
-| `--panel-platform` | `#3a423c` | the panel's track: quiet lights |
 | `--mono` | | | the main face: `"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace` |
 | `--sans` | | | human words — home's answer, reasons and titles — and longer prose: `"IBM Plex Sans", system-ui, sans-serif` |
 | `--text`, `--small`, `--large` | | | 14px, 11px (labels), 20px (names and figures; on home the answer line alone) |
@@ -2652,9 +2607,8 @@ of the talk page, with `.head`, `.day`, `.differs` and `.own` for how it reads, 
 `.filters` (a row of links, as a config page's way back), `.chips` (the Beads page's depot and stage rows, each a label over a wrapping run of pill links with their counts), `.facts` (name and value rows), `.routes` (one row per route, as `/routes` shows them on a wide window), `.text`
 (what someone wrote, lines kept), `.note`, `.outcomes`, `.bead` (a bead's
 id), `.state` (a status dot and its word),
-`.num`, `.faint`, `.held`, `.landed`, `.dot`, `.diagram` (one drawing of
-the yard panel, panning sideways) and `.off-line` (the beads in no stage of
-a depot's flows).
+`.num`, `.faint`, `.held`, `.landed`, `.dot` and `.off-line` (the beads in
+no stage of a depot's flows).
 
 ## Adding a page
 

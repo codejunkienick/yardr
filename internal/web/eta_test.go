@@ -214,36 +214,6 @@ func TestFlowsStreamCardLateMark(t *testing.T) {
 	s.quiet(t)
 }
 
-// The panel draws an amber ring around a late bead's light beside
-// whatever class it already has, with its title naming its stage age
-// against the p90.
-func TestPanelLateRing(t *testing.T) {
-	t.Parallel()
-	f := newFixture(t)
-	_, _, stall, _, _, _, _ := kindsYard(t, f)
-	g := serveEstimates(t, f, map[string]*eta.Result{stall.ID: etaRunning})
-	r := g.get("/flows?panel=1")
-	if r.status != 200 {
-		t.Fatalf("status %d: %s", r.status, r.body)
-	}
-	svg := diagram(t, r.body, "code")
-	// The stalled lamp keeps its class; the ring stands beside it.
-	if got := blockClass(t, svg, stall.ID); got != "block stalled" {
-		t.Errorf("late stalled light class = %q, want %q", got, "block stalled")
-	}
-	if want := "<title>" + stall.ID + "; " + etaRunning.Late.Line + "</title>"; !strings.Contains(svg, want) {
-		t.Errorf("the late light's title names no age against the p90:\n%s", svg)
-	}
-	at := strings.Index(svg, "<title>"+stall.ID+"; ")
-	linkEnd := strings.Index(svg[at:], "</a>")
-	if at < 0 || linkEnd < 0 || !strings.Contains(svg[at:at+linkEnd], `<circle class="late-ring"`) {
-		t.Errorf("no amber ring stands with the late light:\n%s", svg)
-	}
-	if n := strings.Count(svg, `class="late-ring"`); n != 1 {
-		t.Errorf("%d late rings, want the late light's alone", n)
-	}
-}
-
 // /line lists late beads under the waits, counted apart from what needs
 // the person: a late bead needs nothing yet.
 func TestLineLateRows(t *testing.T) {

@@ -4,7 +4,7 @@ package cli
 // file per depot, pointed at or not yet. flow show <name> falls back to
 // them on a store miss: every depot carrying the file is shown, each
 // under its own depot heading, in the view flow show <depot> prints for
-// that flow, and --svg draws the one depot's.
+// that flow.
 
 import (
 	"context"
@@ -13,7 +13,6 @@ import (
 	"slices"
 	"strings"
 
-	"yardr.dev/yardr/internal/flowdraw"
 	"yardr.dev/yardr/internal/store"
 )
 
@@ -188,33 +187,4 @@ func namedRepoFlowStrays(repo *store.RepoFlows, rf store.RepoFlow) []string {
 		}
 	}
 	return out
-}
-
-// repoDiagram is what flow show --svg draws of name when no depot or store
-// flow is called that: the repository flow one depot carries, with no
-// group at its stages, as for a named flow of the store. A name no
-// repository carries keeps the store miss's error; one several carry
-// names them, and the depot form draws one.
-func repoDiagram(warn io.Writer, ctx context.Context, st store.API, name, which string) (*flowdraw.Diagram, error) {
-	if which != "" && which != name {
-		return nil, fmt.Errorf("%s is a named flow, and --flow picks among a depot's flows", name)
-	}
-	hits, err := repoFlowHits(warn, ctx, st, name)
-	if err != nil {
-		return nil, err
-	}
-	if len(hits) == 0 {
-		return nil, fmt.Errorf("%s is neither a depot nor a named flow: %w", name, store.ErrNotFound)
-	}
-	if len(hits) > 1 {
-		var depots []string
-		for _, h := range hits {
-			depots = append(depots, h.depot)
-		}
-		return nil, fmt.Errorf("%s is a repository flow in depots %s: draw one depot's with flow show <depot> --svg --flow %s", name, strings.Join(depots, ", "), name)
-	}
-	if hits[0].file.Error != "" {
-		return nil, fmt.Errorf("%s: %s", hits[0].file.Path, hits[0].file.Error)
-	}
-	return &flowdraw.Diagram{Flow: *hits[0].file.Flow}, nil
 }

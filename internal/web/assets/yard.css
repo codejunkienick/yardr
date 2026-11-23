@@ -1,7 +1,7 @@
 /* yardr web: the one stylesheet. The tokens below are the whole palette and
    scale; a page uses them and adds none without need (docs/web.md). The
-   colours come from the yardr design system, except the late warning and
-   the panel's own track colours, which have no matching token. */
+   colours come from the yardr design system, except the late warning,
+   which has no matching token. */
 
 :root {
   color-scheme: dark light;
@@ -38,15 +38,6 @@
   --late: #e8a33d;
   --done: var(--faint); /* --text-disabled */
 
-  /* the yard panel: every colour the panel's track uses, so the palette
-     changes in one edit (flowdraw's own values, which its SVG carries for
-     the command line; the page carries no inline style) */
-  --panel-board: #202622;
-  --panel-ink: #e6e1d3;
-  --panel-dim: #9aa39b;
-  --panel-line: #d8d2c0;
-  --panel-platform: #3a423c;
-
   /* faces: the design system's Plex pair, with the system faces behind
      them; none is downloaded, and there is no @import */
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -75,8 +66,7 @@
 
 /* The light look: the same tokens with the design system's light values,
    for a visitor whose system asks for light. Dark stays the default. The
-   accent, the pill and the chips are the same in both, and the yard panel
-   keeps its dark board, as a dark object on either ground. */
+   accent, the pill and the chips are the same in both. */
 @media (prefers-color-scheme: light) {
   :root {
     color-scheme: light;
@@ -210,10 +200,8 @@ ul, ol { list-style: none; }
 @media (min-width: 700px) {
   .shell.wide { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
 }
-/* The yard panel: each depot as wide as its widest plan needs, depots
-   side by side where there is room and wrapping where not. A depot wider
-   than the window keeps to it, and its diagrams pan inside, as on a
-   phone. */
+/* The yard panel: each depot as wide as its widest list needs, depots
+   side by side where there is room and wrapping where not. */
 #panel { display: flex; flex-wrap: wrap; column-gap: var(--gap); }
 #panel > .item { flex: 1 1 max-content; max-width: 100%; min-width: 0; }
 
@@ -390,46 +378,7 @@ ul, ol { list-style: none; }
 .off:not(:has(.card)) { display: none; }
 .off .cards { margin-top: 8px; }
 
-/* The yard panel: a diagram wider than its depot pans horizontally at
-   full size, since the sections have a fixed pitch and shrinking them
-   would shrink the names past reading. The SVG's track classes are
-   flowdraw's own, styled here: a page carries no inline style. */
-.diagram { margin-top: 8px; overflow-x: auto; }
-.diagram .panel-svg { display: block; }
-.panel-svg .board { fill: var(--panel-board); }
-.panel-svg text { font: 11px var(--mono); fill: var(--panel-ink); }
-.panel-svg .small { font-size: 9px; fill: var(--panel-dim); }
-.panel-svg .mid { text-anchor: middle; }
-.panel-svg .ln { fill: none; stroke: var(--panel-line); }
-.panel-svg .idle { stroke-width: 1; stroke-dasharray: 1 4; }
-.panel-svg .branch { stroke-width: 1.5; }
-.panel-svg .hand { stroke-dasharray: 4 3; }
-.panel-svg .solid { fill: var(--panel-line); }
-/* What the yard adds to the track: a section lit while a session runs in
-   its stage, and the beads standing on it as lights. */
-.panel-svg .ln.lit { stroke: var(--running); }
-.panel-svg .block { fill: var(--panel-platform); stroke: var(--panel-line); }
-.panel-svg .block.running { fill: var(--running); }
-.panel-svg a:hover .block { stroke: var(--accent-hover); }
-/* Every blocked kind told apart: solid red for held, hollow red for gave
-   up, a muted outline for stalled, rust with a red ring for blocked on a
-   prompt, rust for waiting on a dependency, a red diamond for back on
-   failed or changes, an amber ring for running past its usual time, red
-   and rust wait lamps, dotted no-route sections. Green marks a running
-   session only; other state colours are fault red, person's-turn rust
-   and late amber. */
-.panel-svg .block.held { fill: var(--held); }
-.panel-svg .block.gaveup { fill: var(--panel-board); stroke: var(--held); stroke-width: 1.5; }
-.panel-svg .block.stalled { fill: var(--panel-board); stroke: var(--panel-dim); stroke-width: 1.5; }
-.panel-svg .block.blocked { fill: var(--accent); stroke: var(--held); stroke-width: 1.5; }
-.panel-svg .block.dep { fill: var(--accent); }
-.panel-svg .late-ring { fill: none; stroke: var(--late); stroke-width: 1.5; }
-.panel-svg .diamond { fill: var(--held); }
-.panel-svg .lamp.unlit { fill: none; stroke: var(--panel-dim); }
-.panel-svg .lamp.fault { fill: var(--held); }
-.panel-svg .lamp.turn { fill: var(--accent); }
-.panel-svg .noroute { fill: var(--panel-dim); }
-/* The beads in no stage of a depot's flows, under its diagrams. */
+/* The beads in no stage of a depot's flows, under its lists. */
 .off-line { margin-top: 8px; }
 
 .filters p + p { margin-top: 6px; }

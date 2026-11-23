@@ -125,40 +125,7 @@ type Flows struct {
 	// Head is the yard's newest seq when the page was read, before its
 	// beads: the stream after it (/events?after=) brings every later move.
 	Head uint64 `json:"head"`
-	// rfs and groups are what the panel draws from: the flows as the store
-	// reads them, beside Depots, and the yard's groups for the buildings.
-	// HTML-only: the JSON never carries them.
-	rfs    [][]store.DepotFlow
-	groups []store.Group
-	// marks and lamps are the panel's blocked vocabulary, read when the
-	// panel is asked for: per bead what colours its block, per stage
-	// whether a wait lamp burns. HTML-only like the panel itself.
-	marks map[string]panelMark
-	lamps map[string]flowLamp
 }
-
-// panelMark is what colours one bead's block on the yard panel: gave up,
-// stalled, blocked on a prompt, waiting on a dependency, back on failed or
-// changes, running past its usual time. Held and working are the card's
-// own.
-type panelMark struct {
-	gaveUp     bool
-	stalled    bool
-	blocked    bool
-	dep        string // the first open blocker's full id, "" when none waits
-	failedBack bool
-	// late is the bead's stage age against the p90, "" when it is not
-	// late: an amber ring around its light, named in its title.
-	late string
-}
-
-// flowLamp is a stage's wait lamp on the yard panel.
-type flowLamp string
-
-const (
-	lampFault flowLamp = "fault"
-	lampTurn  flowLamp = "turn"
-)
 
 type FlowsDepot struct {
 	Name  string       `json:"name"`
@@ -278,7 +245,7 @@ func (s *Server) flows(ctx context.Context) (*Flows, error) {
 		return nil, err
 	}
 	manual := manualClaims(sessions)
-	out := &Flows{Depots: []FlowsDepot{}, Head: head, rfs: [][]store.DepotFlow{}, groups: groups}
+	out := &Flows{Depots: []FlowsDepot{}, Head: head}
 	for _, depot := range depots {
 		beads, err := s.st.ListBeads(ctx, store.BeadFilter{Depot: depot.Name, Viewer: s.acting(ctx)})
 		if err != nil {
@@ -291,7 +258,6 @@ func (s *Server) flows(ctx context.Context) (*Flows, error) {
 		if err != nil {
 			fr.Error = err.Error()
 		}
-		out.rfs = append(out.rfs, rfs)
 		for _, rf := range rfs {
 			col := FlowColumn{Name: rf.Flow.Name, Type: rf.Type, Source: rf.Source.String(), Stages: []FlowStage{}}
 			files := rf.StageFiles
@@ -391,15 +357,9 @@ func (s *Server) handleFlows(w http.ResponseWriter, r *http.Request) {
 	}
 	p := Page{Template: "flows", Title: "Flows", Menu: "flows", Data: d, head: d.Head, stream: "card"}
 	if panel(r) {
-		// The yard panel: the same flows drawn as track, which reads
-		// itself again on every event of the stream. The JSON is the
-		// page's either way: the parameter shapes the HTML alone.
-		if !wantsJSON(r.Header.Values("Accept")) {
-			if err := s.panelMarks(r.Context(), d); err != nil {
-				s.fail(w, r, err)
-				return
-			}
-		}
+		// The yard panel: the same flows as a list, which reads itself
+		// again on every event of the stream. The JSON is the page's
+		// either way: the parameter shapes the HTML alone.
 		p.Template, p.Title, p.Menu, p.stream, p.Wide = "panel", "Yard", "yard", "seq", true
 	}
 	s.respond(w, r, p)

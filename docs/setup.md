@@ -477,9 +477,8 @@ BEAD
 ```
 
 From there the bead travels its depot's flow: the starter pack's, the one
-`yardr depot init` sets a depot up with, is drawn and read in
-[flows.md](flows.md#drawing-a-flow) (`yardr flow draw starter`), and
-[line.md](line.md) follows a bead through it.
+`yardr depot init` sets a depot up with, is read in [flows.md](flows.md),
+and [line.md](line.md) follows a bead through it.
 
 ## Letting the yard cut releases
 

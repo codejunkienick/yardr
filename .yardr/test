@@ -2077,7 +2077,7 @@ filesizes='
 internal/cli/beads.go 1098 the bead show, list and history commands and their printing
 internal/cli/crew.go 1950 the crew, inbox, mail and memory commands
 internal/cli/doctor.go 1243 the doctor examinations and its report
-internal/cli/init.go 1598 yard init, onboarding and settings
+internal/cli/init.go 1597 yard init, onboarding and settings
 internal/cli/ops.go 1699 the server, daemon, depot, group, route and session commands
 internal/cli/pack.go 1866 pack loading, import planning and its question rounds
 internal/cli/peers.go 1564 the peer identity, intake and ping commands
@@ -2994,7 +2994,7 @@ since="since $base ($said), from $(git rev-parse --short "$from")"
 # docs/architecture.md (arch_test.go): a package the binary imports runs it as
 # an importer does, and contrib's programs are imported by nothing. The test
 # helpers and generators under internal/ (previewtest, scripttest, standin,
-# storetest, rpc/gen, rpc/clientgen, flowdraw/gen) are no dependency of the
+# storetest, rpc/gen, rpc/clientgen) are no dependency of the
 # root package or its tests either, so each has its row too, and a new one
 # needs its row when it is added.
 # It also follows every link of the README to its page and heading, so the
@@ -3021,7 +3021,7 @@ packs/webhook/                 internal/hooks
 packs/template/                internal/pack packs .
 packs/website/                 internal/pack
 packs/testdata/                packs
-.yardr/flows/                 internal/cli internal/dispatch internal/store internal/flowdraw contrib/assembly packs
+.yardr/flows/                 internal/cli internal/dispatch internal/store contrib/assembly packs
 .yardr/security_paths          internal/store
 .yardr/test                    .
 internal/                       internal/rpc
@@ -3031,7 +3031,6 @@ internal/standin/              .
 internal/storetest/            .
 internal/rpc/gen/              .
 internal/rpc/clientgen/        .
-internal/flowdraw/gen/         .
 internal/hooks/testdata/       internal/hooks internal/dispatch
 internal/cli/testdata/         internal/cli
 internal/pack/testdata/        internal/pack
@@ -3073,7 +3072,7 @@ docs/api.md                    internal/rpc
 docs/pack-api.md               internal/cli
 docs/packs.md                  packs
 docs/install.md                contrib/release
-docs/flows/                    internal/flowdraw internal/cli
+docs/flows/                    internal/cli
 docs/                          .
 .yardr/depot.md                -
 .yardr/roles/                  packs

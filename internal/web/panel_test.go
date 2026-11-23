@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -77,30 +76,13 @@ func stocked(t *testing.T, f *fixture) (run, w1, w2, train, six *store.Bead) {
 	return run, w1, w2, train, six
 }
 
-// diagram is the panel's drawing of the flow named name on the page.
-func diagram(t *testing.T, page, name string) string {
-	t.Helper()
-	start := strings.Index(page, `aria-label="Panel diagram of flow `+name+`"`)
-	if start < 0 {
-		t.Fatalf("the panel draws no diagram of flow %s", name)
-	}
-	svg := page[strings.LastIndex(page[:start], "<svg"):]
-	svg, _, _ = strings.Cut(svg, "</svg>")
-	return svg
-}
-
-var blockTitle = regexp.MustCompile(`<title>([^<]+)</title>`)
-
-// The yard panel: every depot's flows drawn as track with the beads on them.
-// The track is the flow as it really is, sidings and back edges; a section
-// is lit while a session runs in it, with the group's short name on the
-// running block; platforms link to their stage on /flows and blocks to their
-// beads; a train's children stand together; beads in no stage stand off the
-// line; and an empty flow draws its bare track.
+// The yard panel: every depot's flows as a list, with the beads in no
+// stage off the line. No diagram is drawn: the flows page's cards carry
+// the beads.
 func TestPanelHTML(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	run, _, _, _, six := stocked(t, f)
+	_, _, _, _, six := stocked(t, f)
 	ctx := context.Background()
 	head, err := f.st.Head(ctx)
 	must(t, err)
@@ -115,26 +97,7 @@ func TestPanelHTML(t *testing.T) {
 		fmt.Sprintf(`<div class="shell wide" hx-ext="sse" sse-connect="/events?after=%d&amp;format=seq">`, head),
 		`<div id="panel" hx-get="/flows?panel=1" hx-trigger="sse:message" hx-select="#panel > *" hx-swap="innerHTML ignoreTitle:true">`,
 		`<h2>shop</h2>`,
-		// The edges review and approved send back are thin unlabelled
-		// lines below the track.
-		`<g class="loops" data-to="new">`,
-		// Decide is a siding above the line, with its two beads counted.
-		`<g class="siding" data-stage="decide">`,
-		`>decide · 2<`,
-		// New runs: its section is lit, its running bead a green light,
-		// and the section links to the stage on /flows.
-		`<a href="/flows#at/shop//new">`,
-		`<g class="section" data-stage="new">`,
-		`class="ln branch lit"`,
-		`<circle class="block running"`,
-		`<title>` + run.ID + `</title>`,
-		`>new · 2<`,
-		// Twelve stand on backlog: ten lights and the rest folded, the
-		// count beside the name the true number.
-		`>backlog · 12<`,
-		`>+2<`,
-		// The light links to its bead.
-		`<a href="/beads/` + run.ID + `">`,
+		`flow code`,
 		// The bead of the depot with no flow stands off the line, with
 		// its stage named.
 		`<span class="label">off the line: 1</span>`,
@@ -144,21 +107,12 @@ func TestPanelHTML(t *testing.T) {
 			t.Errorf("the panel lacks %s", want)
 		}
 	}
-	code := diagram(t, r.body, "code")
-	for _, not := range []string{
-		// No outcome, group or id is written on the plan.
-		`>changes<`, `>failed<`, `>question<`, `>done<`,
-		`>muse<`, `>muse-builders<`, `>decisions<`,
-		`class="who"`, `class="small train"`, `class="small dep"`,
-		`class="platform"`, `class="group`,
-	} {
-		if strings.Contains(code, not) {
-			t.Errorf("the line plan has %s", not)
+	for _, not := range []string{"panel-svg", "Panel diagram", `class="diagram"`} {
+		if strings.Contains(r.body, not) {
+			t.Errorf("the panel has %s, the diagram's", not)
 		}
 	}
-	// The lights stand newest first: each row is the stage's cards, in the
-	// JSON's order. Backlog's row is the first on the track: its ten
-	// lights, then new's, then decide's two on the siding.
+	// The flows page still stages every bead: backlog holds twelve.
 	var flows web.Flows
 	f.getJSON("/flows", &flows)
 	var codeFlow web.FlowColumn
@@ -170,35 +124,10 @@ func TestPanelHTML(t *testing.T) {
 	if codeFlow.Name != "code" {
 		t.Fatalf("shop's flow is %+v, want code", codeFlow)
 	}
-	staged := map[string][]string{}
 	for _, st := range codeFlow.Stages {
-		for _, c := range st.Beads {
-			staged[st.Stage] = append(staged[st.Stage], c.ID)
+		if st.Stage == "backlog" && len(st.Beads) != 12 {
+			t.Fatalf("backlog holds %d beads, want 12", len(st.Beads))
 		}
-	}
-	if len(staged["backlog"]) != 12 {
-		t.Fatalf("backlog holds %d beads, want 12", len(staged["backlog"]))
-	}
-	var titles []string
-	for _, m := range blockTitle.FindAllStringSubmatch(code, -1) {
-		if m[1] != "Flow code" {
-			// A light's title names what holds it after its id.
-			id, _, _ := strings.Cut(m[1], " waits on ")
-			titles = append(titles, id)
-		}
-	}
-	want := append(append(append([]string{}, staged["backlog"][:10]...), staged["new"]...), staged["decide"]...)
-	if !reflect.DeepEqual(titles, want) {
-		t.Errorf("lights stand %v, want %v", titles, want)
-	}
-	// A flow with no bead draws its bare track: sections and no lights,
-	// stages with no counts.
-	bare := diagram(t, r.body, "bugs")
-	if strings.Contains(bare, `class="block`) || strings.Contains(bare, "·") {
-		t.Error("the empty flow's track carries lights or counts")
-	}
-	if !strings.Contains(bare, `data-stage="triage"`) {
-		t.Error("the empty flow's track lacks its triage section")
 	}
 }
 
@@ -229,7 +158,7 @@ func TestPanelJSONUnchanged(t *testing.T) {
 	}
 }
 
-// A depot whose flows cannot be read draws no diagram and still names its
+// A depot whose flows cannot be read lists no flow and still names its
 // beads off the line; a depot with no flow at all says so.
 func TestPanelReadError(t *testing.T) {
 	t.Parallel()
@@ -252,7 +181,7 @@ func TestPanelReadError(t *testing.T) {
 		}
 	}
 	if n := strings.Count(r.body, "panel-svg"); n != 0 {
-		t.Errorf("the panel draws %d diagrams, want none: line's flows fail and loose has none", n)
+		t.Errorf("the panel lists %d diagrams, want none: line's flows fail and loose has none", n)
 	}
 }
 
@@ -281,8 +210,7 @@ func TestFlowsWithoutPanel(t *testing.T) {
 
 // kindsYard holds one of every blocked kind section 3.1 names: held,
 // gave up, stalled, blocked on a prompt, waiting on a dependency, back on
-// failed or changes, red and rust wait lamps, hollow no-route platforms,
-// and a stranded bead off the line.
+// failed or changes, and a stranded bead off the line.
 func kindsYard(t *testing.T, f *fixture) (held, gave, stall, block, dep, back, holder *store.Bead) {
 	t.Helper()
 	ctx := context.Background()
@@ -322,8 +250,8 @@ func kindsYard(t *testing.T, f *fixture) (held, gave, stall, block, dep, back, h
 		must(t, f.st.MarkRunning(ctx, sess.ID, map[string]any{"agent": b.ID + "-new"}))
 		return sess
 	}
-	// New holds a dependency-blocked bead, which lights no lamp: the
-	// running and stalled beads there keep the stage moving.
+	// New holds a dependency-blocked bead beside the running and
+	// stalled beads there.
 	back = bead("back on changes", "review")
 	_, err = f.st.Done(ctx, back.ID, "changes", "", store.Expect{}, "me")
 	must(t, err)
@@ -352,169 +280,17 @@ func kindsYard(t *testing.T, f *fixture) (held, gave, stall, block, dep, back, h
 	blocked := claim(block, "review")
 	must(t, f.st.LogDispatch(ctx, block.ID, "session_blocked", "yard", map[string]any{"session": blocked.ID}))
 	// Decide holds a parked bead; approved is unrouted and holds a bead
-	// that only waits behind another, which lights no lamp.
+	// that only waits behind another.
 	bead("parked", "decide")
 	_, err = f.st.CreateBead(ctx, store.NewBead{Title: "waits alone", Type: "task", Stage: "approved", Depot: "shop", BlockedBy: []string{holder.ID}}, "me")
 	must(t, err)
 	return held, gave, stall, block, dep, back, holder
 }
 
-// blockClass is the circle class of the light standing for id.
-func blockClass(t *testing.T, svg, id string) string {
-	t.Helper()
-	at := strings.Index(svg, "<title>"+id+"</title>")
-	if at < 0 {
-		// The title names what holds the bead, or its lateness, after
-		// its id.
-		at = strings.Index(svg, "<title>"+id+" waits on ")
-	}
-	if at < 0 {
-		at = strings.Index(svg, "<title>"+id+"; ")
-	}
-	if at < 0 {
-		t.Fatalf("no light stands for %s", id)
-	}
-	rest := svg[at:]
-	end := strings.Index(rest, "</a>")
-	if end < 0 {
-		t.Fatalf("the light for %s has no link", id)
-	}
-	rest = rest[:end]
-	i := strings.Index(rest, `<circle class="block`)
-	if i < 0 {
-		t.Fatalf("the light for %s has no circle", id)
-	}
-	rest = rest[i+len(`<circle class="`):]
-	class, _, _ := strings.Cut(rest, `"`)
-	return class
-}
-
-// stagePart is the drawing of the stage's section or siding: from its
-// group to the next stage's, or to the lines below.
-func stagePart(t *testing.T, svg, stage string) string {
-	t.Helper()
-	start := strings.Index(svg, `data-stage="`+stage+`"`)
-	if start < 0 {
-		t.Fatalf("the drawing has no stage %s", stage)
-	}
-	start = strings.LastIndex(svg[:start], "<g")
-	rest := svg[start:]
-	next := len(rest)
-	for _, g := range []string{`<g class="section`, `<g class="siding`, `<g class="loops`} {
-		if i := strings.Index(rest[len(`<g`):], g); i >= 0 {
-			next = min(next, len(`<g`)+i)
-		}
-	}
-	return rest[:next]
-}
-
-// Every blocked kind renders as section 3.1 says, lamps light exactly where
-// a wait sits, and a waiting light's title names what holds it.
-func TestPanelBlockedKinds(t *testing.T) {
-	t.Parallel()
-	f := newFixture(t)
-	held, gave, stall, block, dep, back, holder := kindsYard(t, f)
-	r := f.get("/flows?panel=1")
-	if r.status != 200 {
-		t.Fatalf("status %d: %s", r.status, r.body)
-	}
-	svg := diagram(t, r.body, "code")
-	if got, want := blockClass(t, svg, held.ID), "block held"; got != want {
-		t.Errorf("held light class = %q, want %q", got, want)
-	}
-	if got, want := blockClass(t, svg, gave.ID), "block gaveup"; got != want {
-		t.Errorf("gave-up light class = %q, want %q", got, want)
-	}
-	if got, want := blockClass(t, svg, stall.ID), "block stalled"; got != want {
-		t.Errorf("stalled light class = %q, want %q", got, want)
-	}
-	if got, want := blockClass(t, svg, block.ID), "block blocked"; got != want {
-		t.Errorf("blocked light class = %q, want %q", got, want)
-	}
-	if got, want := blockClass(t, svg, dep.ID), "block dep"; got != want {
-		t.Errorf("dep light class = %q, want %q", got, want)
-	}
-	if got, want := blockClass(t, svg, back.ID), "block"; got != want {
-		t.Errorf("failed-back light class = %q, want %q (quiet, with a diamond)", got, want)
-	}
-	// The diamond stands with its light in its link.
-	backAt := strings.Index(svg, "<title>"+back.ID+"</title>")
-	linkEnd := strings.Index(svg[backAt:], "</a>")
-	if backAt < 0 || linkEnd < 0 || !strings.Contains(svg[backAt:backAt+linkEnd], `<path class="diamond"`) {
-		t.Error("no red diamond stands with the failed-back light")
-	}
-	// The waiting light's title names what holds it; no id is written on
-	// the plan.
-	if want := "<title>" + dep.ID + " waits on " + holder.ID + "</title>"; !strings.Contains(svg, want) {
-		t.Errorf("the waiting light's title is not %s", want)
-	}
-	holderShort := holder.ID[strings.LastIndex(holder.ID, "-")+1:]
-	if strings.Contains(svg, `>`+holderShort+`<`) {
-		t.Errorf("the holding bead's id %s is written on the plan", holderShort)
-	}
-	// Red where a fault waits and nothing is worked, rust where a
-	// person's turn waits, and none where a stage is worked. The blocked
-	// session in review lights its signal (its held and gave-up beads are
-	// turns); new's held and dependency-blocked beads light none while
-	// new is worked, and approved's lone bead waiting behind another
-	// lights none; backlog and decide light bare lamps.
-	if strings.Count(svg, `class="lamp fault"`) != 1 {
-		t.Errorf("fault lamps = %d, want 1 (review holds a blocked session; a bead waiting behind another lights none)", strings.Count(svg, `class="lamp fault"`))
-	}
-	if strings.Count(svg, `class="lamp turn"`) != 2 {
-		t.Errorf("turn lamps = %d, want 2 (backlog and decide hold parked beads; new's held bead is hidden by its work)", strings.Count(svg, `class="lamp turn"`))
-	}
-	for _, stage := range []string{"review", "backlog", "decide"} {
-		part := stagePart(t, svg, stage)
-		if !strings.Contains(part, `class="lamp`) {
-			t.Errorf("stage %s waits and lights no lamp", stage)
-		}
-	}
-	if part := stagePart(t, svg, "review"); !strings.Contains(part, `<line class="ln"`) {
-		t.Error("review's fault lights no signal post")
-	}
-	if part := stagePart(t, svg, "new"); strings.Contains(part, `class="lamp fault"`) || strings.Contains(part, `class="lamp turn"`) {
-		t.Error("new is worked and lights a lamp")
-	}
-	for _, stage := range []string{"backlog", "decide"} {
-		if part := stagePart(t, svg, stage); strings.Contains(part, `<line class="ln"`) {
-			t.Errorf("the bare lamp on %s stands on a post", stage)
-		}
-	}
-	for _, stage := range []string{"approved", "merged"} {
-		part := stagePart(t, svg, stage)
-		if strings.Contains(part, `class="lamp fault"`) || strings.Contains(part, `class="lamp turn"`) {
-			t.Errorf("stage %s waits on no one and lights a lamp", stage)
-		}
-	}
-	// Dotted with the faint words where no route serves, empty or not; the
-	// terminal never is.
-	for _, stage := range []string{"review", "approved"} {
-		part := stagePart(t, svg, stage)
-		if !strings.Contains(part, `idle`) || !strings.Contains(part, ">no route<") {
-			t.Errorf("stage %s has no route and is not dotted with no route", stage)
-		}
-	}
-	if part := stagePart(t, svg, "merged"); strings.Contains(part, ">no route<") || strings.Contains(part, `idle`) {
-		t.Error("the terminal carries no route's mark")
-	}
-	// New runs but waits on no one: lit, with no lamp.
-	if part := stagePart(t, svg, "new"); !strings.Contains(part, `class="ln branch lit"`) {
-		t.Error("new runs and its section is not lit")
-	}
-	// Stranded stands off the line, with its stage named.
-	if !strings.Contains(r.body, "off the line: 1") {
-		t.Errorf("off the line holds 1, want the limbo bead")
-	}
-	if !strings.Contains(r.body, "(limbo)") {
-		t.Error("off the line does not name the limbo stage")
-	}
-}
-
-// The served flows view is /flows and the panel as served: the same depots
-// each with its flows, each flow its stages in travel order with the same
-// group, beads and lamp, the same Elsewhere rows, and the travelling totals
-// over the same beads.
+// The served flows view is /flows as served: the same depots each with
+// its flows, each flow its stages in travel order with the same group and
+// beads, the same Elsewhere rows, and the travelling totals over the same
+// beads.
 func TestFlowsCallMatchesFlowsPage(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -548,23 +324,6 @@ func TestFlowsCallMatchesFlowsPage(t *testing.T) {
 	}
 	if len(board.Unassigned) != len(unassigned) {
 		t.Errorf("%d unassigned rows, want %d beads with no depot", len(board.Unassigned), len(unassigned))
-	}
-	r := f.get("/flows?panel=1")
-	if r.status != 200 {
-		t.Fatalf("status %d: %s", r.status, r.body)
-	}
-	svg := diagram(t, r.body, "code")
-	lamp := func(stage string) string {
-		t.Helper()
-		part := stagePart(t, svg, stage)
-		switch {
-		case strings.Contains(part, `class="lamp fault"`):
-			return "fault"
-		case strings.Contains(part, `class="lamp turn"`):
-			return "turn"
-		default:
-			return "none"
-		}
 	}
 	ids := func(cards []web.Card) []string {
 		var out []string
@@ -622,12 +381,6 @@ func TestFlowsCallMatchesFlowsPage(t *testing.T) {
 						t.Errorf("%s served as %+v, page card %+v", b.Bead, b, st.Beads[l])
 					}
 				}
-				// The panel draws the depot's flows; loose has none.
-				if depot.Name == "shop" {
-					if stage.Lamp != lamp(st.Stage) {
-						t.Errorf("%s %s lamp = %q, panel lights %q", depot.Name, st.Stage, stage.Lamp, lamp(st.Stage))
-					}
-				}
 			}
 		}
 		if !reflect.DeepEqual(rows(served.Elsewhere), ids(depot.Elsewhere)) {
@@ -636,75 +389,8 @@ func TestFlowsCallMatchesFlowsPage(t *testing.T) {
 	}
 }
 
-// quietYard holds no fault, no hold and no failed return: a running
-// session, a quiet bead, and parked beads in manual stages (a person's
-// turn, rust).
-func quietYard(t *testing.T, f *fixture) {
-	t.Helper()
-	ctx := context.Background()
-	must(t, f.st.PutDepot(ctx, store.Depot{Name: "shop", Base: "origin/main"}, "me"))
-	fl, err := store.ParseFlow("backlog -> new | decide\n" +
-		"new -> review on done | decide on question | backlog\n" +
-		"review -> approved on done | new on changes | decide on question\n" +
-		"approved -> merged on done | new on failed | decide on question\n" +
-		"decide -> backlog | new\n" +
-		"merged terminal\n")
-	must(t, err)
-	fl.Name = "code"
-	_, err = f.st.PutFlow(ctx, *fl, "me")
-	must(t, err)
-	must(t, f.st.SetFlowPointer(ctx, "shop", "", "code", "me"))
-	must(t, f.st.PutGroup(ctx, store.Group{Name: "muse-builders", Runner: "herdr", Limit: 5}, "me"))
-	must(t, f.st.PutGroup(ctx, store.Group{Name: "decisions", Runner: "manual", Limit: 5}, "me"))
-	for _, rt := range []store.Route{{Stage: "new", Group: "muse-builders"}, {Stage: "backlog", Group: "decisions"}, {Stage: "decide", Group: "decisions"}} {
-		_, err := f.st.AddRoute(ctx, rt, "me")
-		must(t, err)
-	}
-	run, err := f.st.CreateBead(ctx, store.NewBead{Title: "running", Type: "task", Stage: "new", Depot: "shop"}, "me")
-	must(t, err)
-	sess, err := f.st.Claim(ctx, run.ID, "muse-builders", "new", "dispatcher")
-	must(t, err)
-	must(t, f.st.MarkRunning(ctx, sess.ID, map[string]any{"agent": "run-new"}))
-	for _, b := range []store.NewBead{
-		{Title: "quiet", Type: "task", Stage: "new", Depot: "shop"},
-		{Title: "parked", Type: "task", Stage: "backlog", Depot: "shop"},
-		{Title: "picked", Type: "task", Stage: "decide", Depot: "shop"},
-	} {
-		_, err := f.st.CreateBead(ctx, b, "me")
-		must(t, err)
-	}
-}
-
-// A yard with no fault, no hold and no failed return shows no red at all
-// on the panel: no held, gave-up or blocked light, no diamond, no fault
-// lamp, and no bare signal lamp burning red.
-func TestPanelQuietHasNoRed(t *testing.T) {
-	t.Parallel()
-	f := newFixture(t)
-	quietYard(t, f)
-	r := f.get("/flows?panel=1")
-	if r.status != 200 {
-		t.Fatalf("status %d: %s", r.status, r.body)
-	}
-	for _, not := range []string{
-		`block held`, `block gaveup`, `block blocked`, `block stalled`,
-		`diamond`, `lamp fault`, `class="lamp"`,
-	} {
-		if strings.Contains(r.body, not) {
-			t.Errorf("a quiet yard shows %s", not)
-		}
-	}
-	for _, want := range []string{
-		`block running`, `lamp turn`, `lamp unlit`, `>no route<`,
-	} {
-		if !strings.Contains(r.body, want) {
-			t.Errorf("a quiet yard lacks %s", want)
-		}
-	}
-}
-
 // The Yard page takes the whole window: a wide shell, no right column,
-// each depot as wide as its widest plan needs, side by side where there
+// each depot as wide as its widest list needs, side by side where there
 // is room.
 func TestYardPageIsWide(t *testing.T) {
 	t.Parallel()

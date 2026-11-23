@@ -96,15 +96,15 @@ Each cross-concept verb is owned by exactly one interface:
 
 ## Layers
 
-39 packages under `internal/` at 4bee454, each in one layer (38 at
+37 packages under `internal/` at 4bee454, each in one layer (38 at
 f75abf88; `shared` and `udiff` folded into `store` since, `pprof` moved
-out of `server`, `mcp` and `previewtest` added):
+out of `server`, `mcp` and `previewtest` added, `flowdraw` removed):
 
 - leaves, importing no internal package (7): `pairing`, `peer`, `pprof`, `previewtest`, `rpc/clientgen`, `scripttest`, `version`.
 - store (1): `store`. Measured: 220 non-test Go files, a 310-method `store.API`, 2 internal imports — the peer and source exceptions under the rules. Shared types the leaf splits move stay in store itself: there is no separate types package.
-- services (27): `agents`, `bdp`, `chat`, `config`, `depotfile`, `diskkeep`, `edgelink`, `eta`, `flowdraw`, `flowdraw/gen`, `hooks`, `limits`, `mcp`, `notify`, `otel`, `pack`, `preview`, `rpc`, `rpc/gen`, `source`, `standin`, `storetest`, `telemetry`, `testload`, `web`, `yardkey`, `yards`. (`storetest` and `testload` are test-only helpers; `rpc/gen` and `flowdraw/gen` are generators.)
+- services (25): `agents`, `bdp`, `chat`, `config`, `depotfile`, `diskkeep`, `edgelink`, `eta`, `hooks`, `limits`, `mcp`, `notify`, `otel`, `pack`, `preview`, `rpc`, `rpc/gen`, `source`, `standin`, `storetest`, `telemetry`, `testload`, `web`, `yardkey`, `yards`. (`storetest` and `testload` are test-only helpers; `rpc/gen` is a generator.)
 - `dispatch`, `runner`, `server` (3): the control loop and the process owners.
-- cli (1): `cli`. Measured: imports 29 of the 39 internal packages.
+- cli (1): `cli`. Measured: imports 28 of the 37 internal packages.
 - main: the root package, the binary; the only importer of `cli`.
 
 ## Import rules

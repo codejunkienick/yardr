@@ -624,56 +624,6 @@ func TestHomeNeedsAskTwice(t *testing.T) {
 	}
 }
 
-// An asked stage carries the rust lamp on the panel, as a manual wait
-// does; a hold keeps it rust, and a fault on the same stage burns red
-// instead.
-func TestPanelAskLamp(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	f := askFixture(t)
-	fl, err := store.ParseFlow("backlog -> new\nnew -> review\nreview -> merged\nmerged terminal\n")
-	must(t, err)
-	fl.Name = "code"
-	_, err = f.st.PutFlow(ctx, *fl, "me")
-	must(t, err)
-	must(t, f.st.SetFlowPointer(ctx, "home", "", "code", "me"))
-	asked := askBead(t, f, "asked", "new")
-	askOn(t, f, asked.ID, pickAsk())
-	r := f.get("/flows?panel=1")
-	if r.status != 200 {
-		t.Fatalf("status %d: %s", r.status, r.body)
-	}
-	svg := r.body
-	if part := stagePart(t, svg, "new"); !strings.Contains(part, `class="lamp turn"`) {
-		t.Error("the asked stage lights no rust lamp")
-	}
-	if strings.Contains(svg, `class="lamp fault"`) {
-		t.Error("no fault waits, and a red lamp burns")
-	}
-	// A hold on the asked stage keeps the rust lamp: a hold is the
-	// person's turn, not a fault.
-	_, err = f.st.SetHold(ctx, asked.ID, true, store.Expect{}, "me")
-	must(t, err)
-	svg = f.get("/flows?panel=1").body
-	if part := stagePart(t, svg, "new"); !strings.Contains(part, `class="lamp turn"`) {
-		t.Error("the held asked stage lights no rust lamp")
-	}
-	if strings.Contains(svg, `class="lamp fault"`) {
-		t.Error("a hold burns a red lamp")
-	}
-	// A fault on the asked stage burns red, as a fault does.
-	stuck := askBead(t, f, "stuck", "new")
-	must(t, f.st.PutGroup(ctx, store.Group{Name: "builders", Runner: "herdr", Limit: 5}, "me"))
-	sess, err := f.st.Claim(ctx, stuck.ID, "builders", "new", "yard")
-	must(t, err)
-	must(t, f.st.MarkRunning(ctx, sess.ID, map[string]any{"agent": "stuck-new"}))
-	must(t, f.st.LogDispatch(ctx, stuck.ID, "session_blocked", "yard", map[string]any{"session": sess.ID}))
-	svg = f.get("/flows?panel=1").body
-	if part := stagePart(t, svg, "new"); !strings.Contains(part, `class="lamp fault"`) {
-		t.Error("the fault on the asked stage lights no red lamp")
-	}
-}
-
 // The ask helpers: whether the bead carries one, its oldest question and
 // recommendation, and a lead that names a fault or the stage, never the
 // ask itself.

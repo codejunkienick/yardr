@@ -1412,14 +1412,6 @@ func TestTokens(t *testing.T) {
 			t.Errorf("font token --%s is not %s", name, stack)
 		}
 	}
-	for _, selector := range []string{".panel-svg .block.stalled", ".panel-svg .block.blocked"} {
-		if strings.Contains(cssRule(t, selector), "var(--running)") {
-			t.Errorf("%s uses the running green", selector)
-		}
-	}
-	if !strings.Contains(cssRule(t, ".panel-svg .block.running"), "var(--running)") {
-		t.Error("a running bead does not use the running green")
-	}
 	// Square corners everywhere; circles only for status dots, the bar's
 	// tiles and pills, which keep footplate's rounded corners, and the
 	// sidebar's chip, rows, dots and pills and the depot page's cards,
