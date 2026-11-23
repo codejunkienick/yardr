@@ -654,6 +654,18 @@ alone, and two that shrink the same file, or neighbouring files, never
 conflict on a row: the ceiling only falls, the landing lowers rows to
 actual, and nothing else edits a row.
 
+A generated file has no ceiling and no row, at any size. A non-test `.go`
+file whose first line is the marker `go help generate` gives,
+`// Code generated ... DO NOT EDIT.`, is skipped by the budget, draws no
+warning, and `sh .yardr/test sizes` names it exempt. Its size follows what its
+generator reads (the socket client's follows `store.API`), so a ceiling that
+only falls would fail it at the next method, and a person reads it at its
+source, the generator and the API, not at the artifact. Only the first line
+counts: a file that carries the marker lower down, or without its closing
+period, is judged like any other, which fails safe and gets noticed. The root
+package's test holds the table to no row for a generated file, as it holds it
+to none for a test file.
+
 The assembly lowers them. Where the depot's test command is a file of the
 branch that carries the table, as `.yardr/test` is,
 `contrib/assembly/merge-local` and, for a train, `integrate-train` run
@@ -694,10 +706,12 @@ take: none of a run's steps, no git and no go, and no test line (which would
 pass for the record of a run). It prints a line for each listed file, as
 `test: sizes: <file> <lines>/<ceiling> (<room>)` with the room signed (negative
 for a file over its ceiling); for each row whose file is gone, as
-`test: sizes: <file> gone, its row says <n>: the landing deletes the row`; and
-for each file with no row once fewer than 50 lines are left before the 1000 it
-fails at, marked `no row, fails over 1000`. With a path it prints that file's
-line alone, whatever its size. The report judges nothing and always exits 0.
+`test: sizes: <file> gone, its row says <n>: the landing deletes the row`; for
+each file with no row once fewer than 50 lines are left before the 1000 it
+fails at, marked `no row, fails over 1000`; and for each generated file,
+whatever its size, as `test: sizes: <file> <lines> lines, generated, exempt`.
+With a path it prints that file's line alone, whatever its size. The report
+judges nothing and always exits 0.
 Run it before planning a change to a file over 1000 lines: a listed file has no
 room, since the landing keeps its row at its size, so a change that grows one
 splits it first. `sh .yardr/test sizes --rewrite` is a second mode of the same
@@ -711,7 +725,8 @@ has <lines> lines, <n> under its <ceiling>-line ceiling ...`. A listed file's
 ceiling is its filesizes row; a file with no row has a ceiling of 1000. The
 warning appears even when formatting, vet or build fails first, so a builder
 sees the file before planning a change. Listed files at their rows are warned
-of too, since they have no room under their ceiling.
+of too, since they have no room under their ceiling. A generated file has no
+ceiling, so no warning names it at any size.
 
 ## Pruning tests
 

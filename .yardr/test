@@ -111,8 +111,9 @@
 # each Go file has under its ceiling (the filesizes table below), in the seconds
 # a find and a wc take, and exits 0 whatever it finds. A listed file has none, a
 # file with no row fails at 1000 lines, so run it before planning a change to a
-# file near or over 1000 lines, not after the gate has failed it. With a path it
-# reports that file alone.
+# file near or over 1000 lines, not after the gate has failed it. A generated
+# file (generatedfiles) has no ceiling at any size, and the report names it
+# exempt. With a path it reports that file alone.
 #
 # `sh .yardr/test sizes --rewrite` is what the landing runs on what it lands: it
 # lowers the table in this file to the tree it is run in (filesizerewrite), so
@@ -2070,7 +2071,8 @@ sleepbudget() {
 # changes that shrink the same file, or two neighbouring files, never
 # conflict on a row. The ceiling only falls: the landing lowers rows to
 # actual, and nothing else edits a row. The root package's test holds the
-# rows to non-test Go files.
+# rows to non-test Go files, and to none that is generated (generatedfiles):
+# a ceiling that only falls cannot follow what a generator reads.
 filesizes='
 internal/cli/beads.go 1098 the bead show, list and history commands and their printing
 internal/cli/crew.go 2205 the crew, inbox, mail and memory commands
@@ -2110,7 +2112,8 @@ internal/store/users.go 1226 user records and operator words
 '
 # filesizebudget fails the run when a non-test Go file stands over its
 # ceiling in the table above, or when one with no row stands over 1000
-# lines. A ceiling standing above its file, or a row naming a file that is
+# lines. A generated file (generatedfiles) is judged by neither, whatever
+# its size. A ceiling standing above its file, or a row naming a file that is
 # gone, only warns, whatever the run: the change leaves the row, and the
 # landing lowers or deletes it (filesizerewrite). At landing
 # (YARDR_LANDING set) it is a plain note instead, since the landing
@@ -2119,14 +2122,17 @@ internal/store/users.go 1226 user records and operator words
 # The measure is wc -l, the count the table was seeded
 # with. The allow-list goes by file, as the reads table does: awk takes no
 # newline in -v. It says how many listed files the tree holds, so the
-# re-measure can count the oversize debt. Before formatting, vet, build and
+# re-measure can count the oversize debt. The generated files go to awk the same
+# way, in a file after it. Before formatting, vet, build and
 # test, the run warns of each file with fewer than 50 lines of room under its
 # ceiling (filesizeview), so the file is known before a change takes it over.
 filesizebudget() {
   t0=$(date +%s)
   st=0
   allow=$(mktemp)
+  exempt=$(mktemp)
   printf '%s\n' "$filesizes" >"$allow"
+  generatedfiles >"$exempt"
   out=$(sizelines | awk -v landing="$YARDR_LANDING" '
     FILENAME == ARGV[1] {
       if ($0 ~ /^[^ ]+ [0-9]+ /) {
@@ -2136,10 +2142,14 @@ filesizebudget() {
       }
       next
     }
+    FILENAME == ARGV[2] { gen[$0] = 1; next }
     $2 == "total" || NF < 2 { next }
     {
       n = $1 + 0
       f = $0; sub(/^ *[0-9]+ +/, "", f); sub(/^\.\//, "", f)
+      # A generated file has no ceiling to stand over, whatever the table
+      # says of it. It is seen, so a row naming it is no row of a gone file.
+      if (f in gen) { seen[f]++; next }
       if (f in ceil) {
         seen[f]++
         if (n > ceil[f]) {
@@ -2172,8 +2182,8 @@ filesizebudget() {
       }
       if (bad > 0) exit 1
       if (nseen > 0) printf "test: %d files over 1000 lines allow-listed\n", nseen
-    }' "$allow" -) || st=$?
-  rm -f "$allow"
+    }' "$allow" "$exempt" -) || st=$?
+  rm -f "$allow" "$exempt"
   took "$t0" "file size budgets"
   # A direct budget check still warns, while a gate run's earlier call makes
   # this a no-op there. A warning fails nothing, not even by failing itself.
@@ -2368,20 +2378,49 @@ tellsitebudget() {
 sizelines() {
   find . -name '*.go' -not -name '*_test.go' -not -path './.git/*' -exec wc -l {} + 2>/dev/null | LC_ALL=C sort -k 2
 }
+# generatedfiles prints the path of each file in sizelines's list that a
+# generator wrote, one to a line and in its order, without the leading ./ that
+# the budget and the view cut from the paths they read. A file is generated
+# where its first line is the marker `go help generate` gives,
+# `// Code generated ... DO NOT EDIT.`, which Go's own tools take for generated
+# code too. It stands at the size its generator gives it, which follows what the
+# generator reads (internal/rpc/client_gen.go follows store.API), so it has no
+# row and no ceiling: a ceiling only falls, and this one would have to rise with
+# each method. People read small files, and a generated one is read at its
+# source. The class is left out of the rule as *_test.go is left out of
+# sizelines, and no file of it is listed in the table. Only the first line
+# counts: a file that carries the marker lower down is judged as any other,
+# which fails safe and is noticed. One awk reads each first line and closes the
+# file, so that no more than one is open at a time and no process starts for a
+# file.
+generatedfiles() {
+  sizelines | awk '
+    $2 == "total" || NF < 2 { next }
+    {
+      path = $0; sub(/^ *[0-9]+ +/, "", path)
+      ok = ((getline first < path) > 0 && first ~ /^\/\/ Code generated .* DO NOT EDIT\.$/)
+      close(path)
+      if (ok) { f = path; sub(/^\.\//, "", f); print f }
+    }'
+}
 # filesizeview prints what the file size table says of the tree that the
 # budget's verdict does not: how much room each file has under its ceiling,
 # the ceiling being 1000 for a file with no row. Its mode ($1) is report, the
 # lines of `sh .yardr/test sizes [path]`, or warn, which the gate prints
 # before its verdict. A report has a line for each listed file (its lines, its
 # ceiling and the room between them, negative for a file over its ceiling), for
-# each row whose file is gone, and for each file with no row once fewer than 50
-# lines of room are left; with a path ($2), the line for that file alone, small
-# or not. Warnings include listed files and files with no row, using the row's
-# ceiling or 1000 respectively. A file over its ceiling is already named by
+# each row whose file is gone, for each file with no row once fewer than 50
+# lines of room are left, and for each generated file, whatever its size, as
+# exempt (it has no ceiling to have room under); with a path ($2), the line for
+# that file alone, small or not. Warnings include listed files and files with
+# no row, using the row's ceiling or 1000 respectively, and no generated file.
+# A file over its ceiling is already named by
 # the budget's verdict. The view judges nothing and passes whatever it finds.
 filesizeview() {
   table=$(mktemp)
+  exempt=$(mktemp)
   printf '%s\n' "$filesizes" >"$table"
+  generatedfiles >"$exempt"
   sizelines | awk -v mode="$1" -v want="$2" '
     BEGIN { limit = 1000; near = 50 }
     FILENAME == ARGV[1] {
@@ -2393,11 +2432,21 @@ filesizeview() {
       }
       next
     }
+    FILENAME == ARGV[2] { gen[$0] = 1; next }
     $2 == "total" || NF < 2 { next }
     {
       n = $1 + 0
       f = $0; sub(/^ *[0-9]+ +/, "", f); sub(/^\.\//, "", f)
       seen[f] = 1
+      # A generated file has no ceiling, so it has no room to warn of and no
+      # line of the table: a report names it exempt, whatever a row says.
+      if (f in gen) {
+        if (mode != "warn" && (want == "" || f == want)) {
+          printf "test: sizes: %s %d lines, generated, exempt\n", f, n
+          shown++
+        }
+        next
+      }
       listed = (f in ceil)
       c = listed ? ceil[f] : limit
       if (mode == "warn") {
@@ -2421,8 +2470,8 @@ filesizeview() {
         shown++
       }
       if (want != "" && !shown) printf "test: sizes: %s is no non-test Go file here\n", want
-    }' "$table" - || true
-  rm -f "$table"
+    }' "$table" "$exempt" - || true
+  rm -f "$table" "$exempt"
 }
 # filesizerewrite lowers the table above to the tree it is run in, in the file
 # of this script itself: `sh .yardr/test sizes --rewrite`, which the landing
