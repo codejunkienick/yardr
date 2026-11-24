@@ -250,6 +250,7 @@ var Access = map[string]Class{
 	"FailureCount":        Read,
 	"SessionScreen":       Operator, // a screen can show what an agent printed, a secret among it
 	"Line":                Operator, // a cmd and a prompt are the operator's to read
+	"Prime":               Operator, // a role and a depot's rules are the operator's to read, and on the socket alone
 
 	// The log and the store.
 	"Events":        Read,

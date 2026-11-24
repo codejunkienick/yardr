@@ -680,6 +680,10 @@ func (c *Client) CrewPrime(ctx context.Context, name string) (*store.Prime, erro
 func (c *Client) CrewPrimeFor(ctx context.Context, name, user string) (*store.Prime, error) {
 	return callV[*store.Prime](c, ctx, "CrewPrimeFor", name, user)
 }
+
+func (c *Client) Prime(ctx context.Context, crew string) (*store.PrimeInputs, error) {
+	return callV[*store.PrimeInputs](c, ctx, "Prime", crew)
+}
 func (c *Client) Remember(ctx context.Context, m store.NewMemory, actor string) (*store.Bead, error) {
 	return callV[*store.Bead](c, ctx, "Remember", m, actor)
 }

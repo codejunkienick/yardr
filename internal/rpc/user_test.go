@@ -158,7 +158,7 @@ func refusedCounts(t *testing.T, st *store.Store, u *UserServer) map[string]int 
 // The calls of OperatorCalls are served under a condition, to a device of
 // the yard's operator: to sam's device each is one of the methods that are
 // not there, SourceGrants among them, and to jo's they are there, but for
-// the socket's own three, which are not there to any device, an
+// the socket's own four, which are not there to any device, an
 // operator's included.
 func TestUserServesTheCallsAndNoOther(t *testing.T) {
 	st, u, token := userYard(t)
@@ -266,7 +266,7 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 		t.Errorf("SourceGrants from the yard's machine is answered %s, want an empty list", w.Body)
 	}
 	// Made an operator too, sam's device is served every call of
-	// OperatorCalls but the socket's own three, and reads the list as
+	// OperatorCalls but the socket's own four, and reads the list as
 	// jo's does: the role, not the operator setting, is what the calls
 	// are served on.
 	if _, err := st.SetUser(context.Background(), "sam", map[string]string{store.UserRole: store.RoleOperator}, "jo"); err != nil {
@@ -558,10 +558,11 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "the telemetry switch is taken over https only") {
 		t.Errorf("TelemetrySet through the TLS router is answered %s, want it refused", w.Body)
 	}
-	// The socket's own three are answered as a method the yard does not
+	// The socket's own four are answered as a method the yard does not
 	// have to every device, the operator's included: a device token never
-	// opens a pairing. So with a pairing open, from another machine, from
-	// the yard's own machine, and down the link from the edge.
+	// opens a pairing, and a role's text stays off the listener. So with a
+	// pairing open, from another machine, from the yard's own machine, and
+	// down the link from the edge.
 	if _, err := st.DevicePairOpen(context.Background(), "sam", "laptop", "jo"); err != nil {
 		t.Fatal(err)
 	}
@@ -572,6 +573,7 @@ func TestUserServesTheCallsAndNoOther(t *testing.T) {
 		{"DevicePairOpen", []string{`{}`, `{"user":"sam","name":"phone","actor":"jo"}`}},
 		{"DevicePairState", []string{`{}`}},
 		{"DevicePairClose", []string{`{}`, `{"actor":"jo"}`}},
+		{"Prime", []string{`{}`, `{"crew":"yardmaster"}`}},
 	} {
 		none, _ := json.Marshal(noSuchMethod(c.name))
 		for _, body := range c.bodies {
@@ -609,7 +611,7 @@ func TestUserCallsNameTheirParty(t *testing.T) {
 	notAParty := map[string]string{"GetCrew": "name"} // a crew member that is read, not the reader
 	api := reflect.TypeOf((*store.API)(nil)).Elem()
 	// Of both lists: what a device of the operator is served besides Calls
-	// is made as its user too. The socket's own three are served to no
+	// is made as its user too. The socket's own four are served to no
 	// device, so no party of theirs is held to anyone.
 	calls := maps.Clone(Calls)
 	maps.Copy(calls, OperatorCalls)

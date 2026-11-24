@@ -511,6 +511,20 @@ func TestPrimeMemoriesAreCapped(t *testing.T) {
 			t.Fatalf("memory %02d kept = %v, want %v", i, !want, want)
 		}
 	}
+	// The Prime read repeats the prime's choice of titles (store.Prime), so
+	// it lists the same ones in the same order, and leaves out as many.
+	read, err := s.Prime(ctx, "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.MemoriesOmitted != p.MemoriesOmitted || len(read.Memories) != len(p.Memories) {
+		t.Fatalf("the Prime read lists %d memories and omits %d, the prime %d and %d", len(read.Memories), read.MemoriesOmitted, len(p.Memories), p.MemoriesOmitted)
+	}
+	for i := range p.Memories {
+		if read.Memories[i].ID != p.Memories[i].ID {
+			t.Errorf("memory %d of the Prime read is %s, the prime's is %s", i, read.Memories[i].ID, p.Memories[i].ID)
+		}
+	}
 }
 
 // yardr recall <words> finds journal entries too: the journal read back,

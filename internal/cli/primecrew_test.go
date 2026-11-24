@@ -12,6 +12,32 @@ import (
 	"yardr.dev/yardr/internal/store"
 )
 
+// sameRole holds the role the Prime read answers to the one `prime --crew`
+// carries, byte for byte, and says whether it is the folded one (setupDoneLine
+// where the First run section was) or the whole. The read repeats the prime's
+// reading of the role file and its fold (store.Prime), and the store cannot
+// call the cli's own steps, so each state of the setup that a test walks is
+// asked of both here: a copy that drifts fails in the state it drifts in.
+func sameRole(t *testing.T, st store.API, folded bool) {
+	t.Helper()
+	var v struct {
+		Role string `json:"role"`
+	}
+	if err := json.Unmarshal([]byte(mustAs(t, st, "yardmaster", "prime", "--crew", "yardmaster", "--json")), &v); err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.Prime(context.Background(), "yardmaster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Role == nil || p.Role.Path == "" || p.Role.Text != v.Role {
+		t.Errorf("the Prime read's role is %+v, want the prime's, from a file:\n%s", p.Role, v.Role)
+	}
+	if got := strings.Contains(v.Role, setupDoneLine); got != folded || strings.Contains(v.Role, "## First run") == folded {
+		t.Errorf("the prime's role has its First run section folded = %v, want %v:\n%s", got, folded, v.Role)
+	}
+}
+
 // A fresh yard reads done, so its yardmaster primes with the done line and
 // no First run section; once work needs a depot the setup is todo again,
 // and the section is back: the setup's steps are its job until every step
@@ -22,7 +48,9 @@ func TestPrimeCrewKeepsFirstRunWhileSetupTodo(t *testing.T) {
 	if out := mustAs(t, st, "yardmaster", "prime", "--crew", "yardmaster"); !strings.Contains(out, setupDoneLine) || strings.Contains(out, "## First run") {
 		t.Errorf("a fresh yard's prime is not the done line:\n%s", out)
 	}
+	sameRole(t, st, true)
 	depotlessWork(t, st)
+	sameRole(t, st, false)
 	out := mustAs(t, st, "yardmaster", "prime", "--crew", "yardmaster")
 	for _, want := range []string{"## First run", "Go on from the first step not done", "`yardr docs setup as a conversation`"} {
 		if !strings.Contains(out, want) {
@@ -43,8 +71,10 @@ func TestPrimeCrewReplacesFirstRunWhenSetupComplete(t *testing.T) {
 	ctx := context.Background()
 	depotlessWork(t, st) // the fresh prime carries the section to measure
 	fresh := mustAs(t, st, "yardmaster", "prime", "--crew", "yardmaster")
+	sameRole(t, st, false)
 
 	depot := committedDepot(t, st)
+	sameRole(t, st, false) // a depot with its files, and nothing routed yet
 	for _, g := range []store.Group{
 		{Name: "web/builders", Runner: "herdr", Config: map[string]any{"kind": "claude"}},
 		{Name: "web/reviewers", Runner: "herdr", Config: map[string]any{"kind": "claude"}},
@@ -59,18 +89,24 @@ func TestPrimeCrewReplacesFirstRunWhenSetupComplete(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	sameRole(t, st, false) // routed, and no bead has been through
 	b, err := st.CreateBead(ctx, store.NewBead{Title: "first", Depot: depot.Name}, "me")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, stage := range []string{"new", "review", "approved", "merged"} {
+	for _, stage := range []string{"new", "review", "approved"} {
 		if _, err := st.Advance(ctx, b.ID, stage, store.Expect{}, "me"); err != nil {
 			t.Fatalf("to %s: %v", stage, err)
 		}
 	}
+	sameRole(t, st, false) // a first bead, not yet merged
+	if _, err := st.Advance(ctx, b.ID, "merged", store.Expect{}, "me"); err != nil {
+		t.Fatalf("to merged: %v", err)
+	}
 	if steps, err := setupSteps(ctx, st); err != nil || nextStep(steps) != nil {
 		t.Fatalf("the yard is not set up: %+v, %v", steps, err)
 	}
+	sameRole(t, st, true)
 
 	out := mustAs(t, st, "yardmaster", "prime", "--crew", "yardmaster")
 	if !strings.Contains(out, setupDoneLine) {
@@ -105,6 +141,48 @@ func TestPrimeCrewReplacesFirstRunWhenSetupComplete(t *testing.T) {
 	if !strings.Contains(js, setupDoneLine) || strings.Contains(js, "## First run") {
 		t.Errorf("prime --json keeps the section:\n%s", js)
 	}
+}
+
+// A yard of dir depots lands nothing, so its setup is done at a bead's end
+// with routes for new and review alone: the Prime read folds the role at that
+// point and not before, as the prime does, with no route for approved.
+func TestPrimeReadFoldsTheRoleForADirDepotYard(t *testing.T) {
+	t.Parallel()
+	st := userYard(t)
+	ctx := context.Background()
+	depot := dirDepot(t, st)
+	sameRole(t, st, false)
+	for _, g := range []store.Group{
+		{Name: "web/builders", Runner: "herdr", Config: map[string]any{"kind": "claude"}},
+		{Name: "web/reviewers", Runner: "herdr", Config: map[string]any{"kind": "claude"}},
+	} {
+		if err := st.PutGroup(ctx, g, "jo"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for stage, group := range map[string]string{"new": "web/builders", "review": "web/reviewers"} {
+		if _, err := st.AddRoute(ctx, store.Route{Stage: stage, Depot: &depot.Name, Group: group}, "me"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sameRole(t, st, false)
+	b, err := st.CreateBead(ctx, store.NewBead{Title: "first", Depot: depot.Name}, "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stage := range []string{"new", "review"} {
+		if _, err := st.Advance(ctx, b.ID, stage, store.Expect{}, "me"); err != nil {
+			t.Fatalf("to %s: %v", stage, err)
+		}
+	}
+	sameRole(t, st, false)
+	if _, err := st.Advance(ctx, b.ID, "done", store.Expect{}, "me"); err != nil {
+		t.Fatalf("to done: %v", err)
+	}
+	if steps, err := setupSteps(ctx, st); err != nil || nextStep(steps) != nil {
+		t.Fatalf("the yard is not set up: %+v, %v", steps, err)
+	}
+	sameRole(t, st, true)
 }
 
 // prime --crew lists the crew member's open asks after the timers: the two

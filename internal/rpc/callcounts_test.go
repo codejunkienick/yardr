@@ -8,6 +8,6 @@ package rpc
 // the pin.
 const (
 	wantCalls         = 41
-	wantOperatorCalls = 13
+	wantOperatorCalls = 14
 	wantListenerOnly  = 1
 )

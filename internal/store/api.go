@@ -280,6 +280,10 @@ type API interface {
 	FireTimers(ctx context.Context, at time.Time) (*TimerPass, error)
 	CrewPrime(ctx context.Context, name string) (*Prime, error)
 	CrewPrimeFor(ctx context.Context, name, user string) (*Prime, error)
+	// Prime is what crew's session reads at prime from files and settings:
+	// its role, the operator, the memory titles and each depot's rules
+	// (prime.go). The operator's, on the socket alone.
+	Prime(ctx context.Context, crew string) (*PrimeInputs, error)
 	Remember(ctx context.Context, m NewMemory, actor string) (*Bead, error)
 	Recall(ctx context.Context, scope, query string) ([]MemoryInfo, error)
 	RecallJournal(ctx context.Context, scope, query string) (*JournalRecall, error)

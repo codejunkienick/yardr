@@ -164,6 +164,19 @@ var listenerOnly = map[string]bool{
 // a device of the operator alone, as a screen is, so it stands here
 // beside SessionScreen under the same transport rule.
 //
+// Prime reads what a crew member's session is given at prime from files and
+// settings: its role file as the session reads it (the First run section
+// folded once the setup is done, as `yardr prime --crew` folds it), what
+// the prime says of the operator, the titles of the memories it lists, and
+// the rules files each depot's checkout carries. It changes nothing, and
+// it answers no part of the session's own state (handoff, inbox, timers,
+// asks), nor a memory's body, nor a depot's `.yardr/depot.md`. A role and a
+// rules file are the operator's to read, as a cmd and a prompt are for
+// Line, and unlike Line it is no device's at all: it is the socket's
+// alone, as the device pairing's calls are (socketOnly), so the listener
+// answers it as a method the yard does not have, to a device of the
+// operator too, and down the link from the edge alike.
+//
 // Teammates reads the yard's teammates: one row per address of the
 // standing web_jwt_users mapping, each with its yard user name, role,
 // email, who invited them and when, and their devices with last use. A
@@ -222,6 +235,7 @@ var OperatorCalls = map[string][]string{
 	"SourceGrants":     {"source"},
 	"SessionScreen":    {"session"},
 	"Line":             {"depot"},
+	"Prime":            {"crew"},
 	"Teammates":        {},
 	"UninviteTeammate": {"user", "actor"},
 	"TelemetryShow":    {},
@@ -234,12 +248,14 @@ var OperatorCalls = map[string][]string{
 // socketOnly are the calls of OperatorCalls the listener serves to no
 // device, not even the operator's: opening, reading and ending a device
 // pairing are the socket's alone, since a device token never opens a
-// pairing. The link from the edge is served with the listener's mux, so
+// pairing, and so is Prime, whose role and rules text stays off the
+// listener. The link from the edge is served with the listener's mux, so
 // down it they are answered as not there too.
 var socketOnly = map[string]bool{
 	"DevicePairOpen":  true,
 	"DevicePairState": true,
 	"DevicePairClose": true,
+	"Prime":           true,
 }
 
 func isOperatorCall(method string) bool {

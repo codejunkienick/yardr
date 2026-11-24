@@ -56,9 +56,9 @@ import (
 //     else: GiveSecret, ApproveAsk, ApproveSetup, SourceGrants, SessionScreen,
 //     Line, Teammates, UninviteTeammate, TelemetryShow and TelemetrySet
 //     (operatorCall), and GiveSecret for a device of a user whose own address
-//     or credential is asked for (ownSecret). The other three, DevicePairOpen,
-//     DevicePairState and DevicePairClose, are the socket's alone, not there
-//     for any device: a device token never opens a pairing (socketOnly);
+//     or credential is asked for (ownSecret). The other four, DevicePairOpen,
+//     DevicePairState, DevicePairClose and Prime, are the socket's alone, not
+//     there for any device (socketOnly): none opens a pairing or reads a role;
 //   - every call is made as the user the credential resolves to (asUser);
 //   - Settings answers the keys of the store's device settings and no
 //     other, and the stream carries the value of a setting_changed for
@@ -834,7 +834,7 @@ func (u *UserServer) Run(ctx context.Context) {
 // may make it here: c is a device of an operator of the yard, whose user's
 // role is store.RoleOperator (isOperator). Anyone else is
 // answered as for a method the yard does not have, so the listener is for
-// them what it was before it served the call. The socket's own three
+// them what it was before it served the call. The socket's own four
 // (socketOnly) are answered so to every device, an operator's included.
 //
 // On the socket the store holds such a call to two things (maySource): the

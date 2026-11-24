@@ -123,6 +123,10 @@ func TestSocketRefusesABeadsPaneWhatIsNotAnAgents(t *testing.T) {
 			_, err := c.Line(ctx, "yard")
 			return err
 		}},
+		{"Prime", func() error {
+			_, err := c.Prime(ctx, "yardmaster")
+			return err
+		}},
 	}
 	for _, r := range refused {
 		if err := r.call(); err == nil || !strings.HasPrefix(err.Error(), r.method+" is ") {

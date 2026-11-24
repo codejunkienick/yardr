@@ -71,8 +71,9 @@ which only a person or a crew member does. An advance along the edge
 `done-safe` takes is held to the depot's security paths as the outcome is. Every call this page names is read or agent but those of
 [`OperatorCalls`](#over-the-network), which are admin, all but
 `SourceGrants`, which is read on the socket and the operator's on the
-listener, `SessionScreen`, `Teammates`, `TelemetryShow`, `TelemetrySet`,
-`DevicePairState` and `DevicePairClose`, whose socket class is operator,
+listener, `SessionScreen`, `Line`, `Prime`, `Teammates`, `TelemetryShow`,
+`TelemetrySet`, `DevicePairState` and `DevicePairClose`, whose socket class
+is operator,
 and `UninviteTeammate`, whose socket class
 is agent.
 
@@ -787,10 +788,10 @@ nothing else. What is not the same:
   with `TelemetryShow` and `TelemetrySet`.
   `/ping`, `/wake` and every other path are not there. The [calls for the
   operator alone](#for-the-operator-alone) are there besides, for a device
-  of an operator of the yard and for nobody else — but for the three that
-  open, read and end a pairing (`DevicePairOpen`, `DevicePairState` and
-  `DevicePairClose`), which are the socket's alone and are answered as no
-  method at all; `GiveSecret` is there too for
+  of an operator of the yard and for nobody else — but for the four that
+  are the socket's alone and are answered as no method at all: the three
+  that open, read and end a pairing (`DevicePairOpen`, `DevicePairState`
+  and `DevicePairClose`) and `Prime`; `GiveSecret` is there too for
   a device of a user, for an ask with `secret.user` or `secret.as` that
   names them: their own address or credential in a source, with
   `secret.login` the code their own login's sign-in page shows, or with
@@ -1344,7 +1345,8 @@ control uses the separate `web` link and the JWT-authenticated view, acting
 as the mapped yard user. Every
 other call is served wherever it comes from, as before. The three that
 open, read and end a pairing, `DevicePairOpen`, `DevicePairState` and
-`DevicePairClose`, are the socket's alone: the listener answers each as a
+`DevicePairClose`, and `Prime`, which reads a crew member's role and a
+depot's rules, are the socket's alone: the listener answers each as a
 method the yard does not have, to a device of the operator too, so the
 rule above has no request of theirs to hold.
 
@@ -7678,7 +7680,7 @@ operator's alone to make. An operator is a user whose role is `operator`
 there may be several, and each of them makes these calls. The `operator`
 setting names one of them, the one an ask with no `--to` goes to; any
 operator approves or answers it. In yardr's code the list is `OperatorCalls`, and
-it has twelve calls: `GiveSecret`, which gives the credential a secret ask
+it has fourteen calls: `GiveSecret`, which gives the credential a secret ask
 asks for, `ApproveAsk`, which approves a run ask so that the yard runs
 the command it holds, carrying the approval's values to a hook's register
 call where the card asks for any, `ApproveSetup`, which approves a setup ask with
@@ -7686,7 +7688,9 @@ the preset pick and the account together: typed, taken from a candidate, or
 kept as it stands, `SourceGrants`, which reads every grant of the
 yard's sources, the whole of who may call what, `SessionScreen`,
 which reads what a running session's pane shows, its visible screen with
-the ANSI styling, `Teammates`, which reads the yard's teammates, one row
+the ANSI styling, `Line`, which reads one depot's line, `Prime`, which
+reads what a crew member's session is given at prime from files and
+settings, `Teammates`, which reads the yard's teammates, one row
 per mapped address with its user and devices, and `UninviteTeammate`,
 which files a teammate's removal as a run ask on a new bead; `TelemetryShow`,
 which previews the switch and next request; `TelemetrySet`, which turns
@@ -7708,11 +7712,13 @@ cards](#weighty-cards)). Where they are served, and to whom:
   calls by the token and not by a word of the caller's; it cannot know
   whether an agent on some machine sent the request, so whoever holds
   that token gives and approves as the operator.
-- **Three are the socket's alone.** `DevicePairOpen`, `DevicePairState`
+- **Four are the socket's alone.** `DevicePairOpen`, `DevicePairState`
   and `DevicePairClose` open, read and end a device pairing for a window
   on the yard's own machine. A device token never opens a pairing, so on
   the listener each is answered as a method the yard does not have, to a
   device of the operator too, and down the yard link from the edge alike.
+  So is `Prime`: a role and a depot's rules are text the listener does not
+  carry to any device.
 - **A giving can be a user's own too.** A secret ask with `secret.user`
   asks for that user's own address in a source that tells people (for
   Pushover the user key), and one with `secret.as` for their own
@@ -8876,6 +8882,102 @@ POST /call/Line
 | `crew[].prompt.why` | string, may be absent | why a card cannot carry it, by the card's own rules; absent where it can |
 | `crew[].prompt.tried` | array of string, may be absent | the prompt path the crew read; present where that file could not be read |
 | `crew[].prompt.error` | string, may be absent | why the lookup could not read the prompt; absent where it could |
+
+### `Prime`
+
+Reads what a crew member's session is given at prime from files and settings, as `yardr prime --crew` prints it: the member's role file, whole, with the path it was read from (a relative `prompt` is read under the member's `dir`); what the prime says of the operator; the titles of the memories it lists; and, for each depot, the rules files its checkout carries. It changes nothing. The role is the file as the session reads it, trimmed, with a `## First run` section replaced by one line once the yard's setup is done, exactly as the prime has it; a member whose config names no `prompt` has no role, and a `prompt` that cannot be read fails the call as it fails the prime. The operator part is the prime's: the style the operator chose with what it asks of an agent, and their note, absent on a yard with neither. The memories are the member's own and the yard's, the 20 most recently written, newest first, with how many that leaves out: a title is shown and a memory's body never is, so what a memory keeps stays in the yard. A depot's rules are its `AGENTS.md` and then its `CLAUDE.md` where they stand at the root of its checkout as regular files, a link followed only while it stays inside the checkout, each at most 1 MiB; a depot with none, or whose checkout is gone, lists `rules` empty and is no error. `.yardr/depot.md` is not a rules file here: it describes how the yard works the depot, and a brief carries it. The session's own state (its handoff, inbox, timers and asks) is not here. A role and a rules file are the operator's to read, so on the socket it is the operator's alone, and no device is served it: the listener answers it as a method the yard does not have, to a device of the operator too, and down the yard link from the edge alike. A crew member the yard has not is `not-found`.
+
+| argument | type | |
+|---|---|---|
+| `crew` | string | the crew member whose prime is read: the name `yardr prime --crew` takes |
+
+```
+POST /call/Prime
+{"crew":"dispatcher"}
+
+{
+  "result": {
+    "role": {
+      "path": "/home/jo/.yardr/crew/dispatcher/roles/dispatcher.md",
+      "text": "# Dispatcher\n\nKeep the signals clear."
+    },
+    "operator": {
+      "name": "jo",
+      "style": "show",
+      "label": "Show me",
+      "tells": "Explain briefly what you do. Show the command you run. Ask when there is a decision to make.",
+      "note": "I read diffs, not prose"
+    },
+    "memories": [
+      {
+        "id": "mem-freeze",
+        "title": "The signal box is closed for the freeze",
+        "scope": "crew:dispatcher",
+        "expires": "2026-10-08T09:30:00Z",
+        "updated_at": "2026-10-08T09:30:00Z"
+      },
+      {
+        "id": "mem-lamps",
+        "title": "Lamps are lit at dusk",
+        "scope": "all",
+        "updated_at": "2026-10-08T09:30:00Z"
+      }
+    ],
+    "memories_omitted": 0,
+    "depots": [
+      {
+        "name": "drafts",
+        "rules": []
+      },
+      {
+        "name": "linegit",
+        "rules": []
+      },
+      {
+        "name": "notes",
+        "rules": [
+          {
+            "path": "/home/jo/notes/AGENTS.md",
+            "text": "# Notes\n\nKeep the inbox empty.\n"
+          },
+          {
+            "path": "/home/jo/notes/CLAUDE.md",
+            "text": "@AGENTS.md\n"
+          }
+        ]
+      },
+      {
+        "name": "yard",
+        "rules": []
+      }
+    ]
+  }
+}
+```
+
+| field of the result | type | |
+|---|---|---|
+| `role` | object, may be absent | the member's role file as its session reads it; absent where its config names no `prompt` |
+| `role.path` | string | the file the role was read from: the `prompt` as the config names it, under the member's `dir` where it is relative |
+| `role.text` | string | the role, trimmed, with its `## First run` section replaced by one line where the yard's setup is done |
+| `operator` | object, may be absent | what a prime says about the operator; absent on a yard with neither `operator_style` nor `operator_note` set |
+| `operator.name` | string | the operator, as the `operator` setting names them; where it is unset, the server's login name, else `operator` |
+| `operator.style` | string, may be absent | the `operator_style` setting: `guide`, `show`, `work` or `report`; absent when only the note is set |
+| `operator.label` | string, may be absent | the answer the style stands for, as the onboarding words it; absent with the style |
+| `operator.tells` | string, may be absent | what the style asks of an agent, as the prime tells it; absent with the style |
+| `operator.note` | string, may be absent | the `operator_note` setting, trimmed; absent where none is set |
+| `memories` | array | the titles of the memories the prime lists for the member, newest first |
+| `memories[].id` | string | the memory's id, which `Bead` reads whole |
+| `memories[].title` | string | the memory's title |
+| `memories[].scope` | string | `all`, or `crew:<name>` for the member's own |
+| `memories[].expires` | time, may be absent | when the memory retires itself; absent for one that never does |
+| `memories[].updated_at` | time | when the memory was last written: the order the list is in |
+| `memories_omitted` | number | how many more memories the member has than the 20 listed |
+| `depots` | array | every depot of the yard, by name |
+| `depots[].name` | string | the depot |
+| `depots[].rules` | array | the depot's rules files, `AGENTS.md` first; empty where its checkout has none |
+| `depots[].rules[].path` | string | the file: the depot's `path` and the file's name |
+| `depots[].rules[].text` | string | the file whole |
 
 ### `Teammates`
 
