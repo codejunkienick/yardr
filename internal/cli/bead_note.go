@@ -40,7 +40,8 @@ or without: a shell may have emptied it.
 home, in blobs/ under the SHA-256 of its bytes, once however often it is
 attached, and where the note is read (yardr prime, yardr review, yardr bead
 show) it stands under the note's words, on a line of its own starting with
-"◆", as "1 image: <path>", "1 page: <path>" or "1 file: <path> (name)".
+"◆", as "1 image: <path>", "1 page: <path>" or "1 file: <path> (name)";
+yardr bead files <id> lists every file a bead's notes carry.
 The note still needs its words: say what they show. What kind it is is read
 from its bytes: an image is a PNG or a JPEG, a page is HTML, anything else
 a file, which carries the path's base name; one over the yard's limit

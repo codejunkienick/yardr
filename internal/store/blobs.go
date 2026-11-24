@@ -190,19 +190,32 @@ func FilesLine(home string, files []BlobRef) string {
 	}
 	paths, between := make([]string, len(files)), " "
 	for i, f := range files {
-		paths[i] = BlobPath(home, f.Hash)
+		paths[i] = FileWords(home, f)
 		if f.NotTaken != "" {
 			// A reason has spaces of its own.
-			paths[i], between = "not taken: "+f.NotTaken, "; "
-		}
-		if name := Letters(f.Name); name != "" {
-			if strings.ContainsAny(name, `()"`) {
-				name = strconv.Quote(name)
-			}
-			paths[i] += " (" + name + ")"
+			between = "; "
 		}
 	}
 	return fmt.Sprintf("%s: %s", filesNoun(files), strings.Join(paths, between))
+}
+
+// FileWords is one file as FilesLine says it after the count: the path of
+// its blob in the yard at home, or the reason the yard did not take it where
+// the path would be, and the name its sender gave it in parentheses after
+// either, quoted where it holds a parenthesis or a quote. A listing of files
+// one by one (yardr bead files) says each so, as the marked line does.
+func FileWords(home string, f BlobRef) string {
+	words := BlobPath(home, f.Hash)
+	if f.NotTaken != "" {
+		words = "not taken: " + f.NotTaken
+	}
+	if name := Letters(f.Name); name != "" {
+		if strings.ContainsAny(name, `()"`) {
+			name = strconv.Quote(name)
+		}
+		words += " (" + name + ")"
+	}
+	return words
 }
 
 // filesNoun counts the files by kind, images first, then pages, then

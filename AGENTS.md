@@ -31,7 +31,7 @@ worked); user docs live in `docs/` and are not repeated here.
   by `internal/agents`.
 - `contrib/`: operator and developer tools, each with its own README
   (assembly, bench, burn, deploy, github-mint, isolated-yard,
-  peer, release, server-yard, shot). google-mint is no longer here: each
+  peer, release, server-yard, shot, testprune). google-mint is no longer here: each
   google pack under `packs/` carries it as its declarations' mint command.
   `contrib/server-yard/managers` installs the stand-in service managers
   that the server-yard suite and the yard-shape matrix
@@ -122,7 +122,9 @@ it lists every exported name with its comment, faster than grepping.
   written from the services' docs and the design, not recorded.
 - `store`: the bbolt store and `API`, the interface everything uses
   (`*Store` in the owning process, `rpc.Client` elsewhere); migrations are
-  `migrate_NNN_*.go`.
+  `migrate_NNN_*.go`;
+  imports no internal package except internal/peer and internal/source
+  (arch_test rule (a)).
 - `storetest`: throwaway stores for tests; with `YARDR_TEST_RPC=1` they
   talk over a real unix socket.
 - `testload`: the factor of a test run, the larger of the one the gate gives

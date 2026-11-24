@@ -990,7 +990,12 @@ declared source pushover, from sources/pushover.yaml
   address a host the operator types would fill), a `path_template` that is
   new, gone or different (the address a site the operator types would fill
   as one path segment), the credential's name (and the one of its updates,
-  `update_env`) or header, the `idempotency` header, a `hear`, `thread`,
+  `update_env`) or header, each key of the credential that alters a call on
+  a line of its own (`mint_scopes: (none) ->
+  https://www.googleapis.com/auth/drive.file`: the `mint_scopes` the hosted
+  mint must see granted, joined with `, `; the `mint_command` a mint runs,
+  joined with spaces; the `bound` mint inputs, joined with `, `; `in_path`,
+  `true` or `(none)`), the `idempotency` header, a `hear`, `thread`,
   `link` or `hook` key (which a pack of kind `source` may bring) that is new,
   gone or different, whole, as compact JSON before and after (`hear:
   {"field":"team","address":{"env":"CRM_TEAM"}} ->

@@ -499,6 +499,57 @@ func TestApplyReplacesADeclaredSourceAndThePlanShowsWhatChanges(t *testing.T) {
 		}
 		apply(t, st, plan, nil)
 	}
+
+	// Every key of the credential that alters a call is a change of its own,
+	// beside the credential's line, and never the line that says the pack
+	// declares the same calls: the scopes the hosted mint must see granted,
+	// whether a path may carry the credential, which of a mint's inputs one
+	// holder keeps and the command a mint runs. Each side is the key as the
+	// line shows it, "" for none. A mint's inputs and its command stand
+	// under a mint, so those rows follow the one that adds it, which says
+	// only that the credential's own line changed. A command is a file
+	// beside the declaration, so its rows carry it, and its first and last
+	// rows say the file's hash with it.
+	scopes, scopes2 := "https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive.readonly"
+	const account, key = "PUSHOVER_ACCOUNT", "PUSHOVER_KEY"
+	mint := "  mint: [" + account + ", " + key + "]\n"
+	script := "#!/bin/sh\necho token\n"
+	sum := sha256.Sum256([]byte(script))
+	sha := "sha256 " + hex.EncodeToString(sum[:])[:12]
+	withKeys := func(keys string) string {
+		return strings.Replace(changed, "credential:\n  env: PUSHOVER_TOKEN\n", "credential:\n  env: PUSHOVER_TOKEN\n"+keys, 1)
+	}
+	for _, step := range []struct {
+		name, text, script string
+		want               []pack.Diff
+	}{
+		{"mint_scopes added", withKeys("  mint_scopes: [" + scopes + "]\n"), "", []pack.Diff{{Field: "mint_scopes", Old: "", New: scopes}}},
+		{"mint_scopes moved", withKeys("  mint_scopes: [" + scopes2 + ", " + scopes + "]\n"), "", []pack.Diff{{Field: "mint_scopes", Old: scopes, New: scopes2 + ", " + scopes}}},
+		{"mint_scopes dropped", changed, "", []pack.Diff{{Field: "mint_scopes", Old: scopes2 + ", " + scopes, New: ""}}},
+		{"in_path added", withKeys("  in_path: true\n"), "", []pack.Diff{{Field: "in_path", Old: "", New: "true"}}},
+		{"in_path dropped", changed, "", []pack.Diff{{Field: "in_path", Old: "true", New: ""}}},
+		{"mint inputs added", withKeys(mint), "", []pack.Diff{{Field: "credential", Old: "PUSHOVER_TOKEN", New: "minted from " + account + " and " + key + "; PUSHOVER_TOKEN"}}},
+		{"bound added", withKeys("  mint: [{ name: " + account + ", bound: true }, " + key + "]\n"), "", []pack.Diff{{Field: "bound", Old: "", New: account}}},
+		{"bound moved", withKeys("  mint: [{ name: " + account + ", bound: true }, { name: " + key + ", bound: true }]\n"), "", []pack.Diff{{Field: "bound", Old: account, New: account + ", " + key}}},
+		{"bound dropped", withKeys(mint), "", []pack.Diff{{Field: "bound", Old: account + ", " + key, New: ""}}},
+		{"mint_command added", withKeys(mint + "  mint_command: [pushover/mint]\n"), script, []pack.Diff{
+			{Field: "mint_command", Old: "", New: "pushover/mint"}, {Field: "file pushover/mint", Old: "", New: sha}}},
+		{"mint_command moved", withKeys(mint + "  mint_command: [pushover/mint, --refresh]\n"), script, []pack.Diff{
+			{Field: "mint_command", Old: "pushover/mint", New: "pushover/mint --refresh"}}},
+		{"mint_command dropped", withKeys(mint), "", []pack.Diff{
+			{Field: "mint_command", Old: "pushover/mint --refresh", New: ""}, {Field: "file pushover/mint", Old: sha, New: ""}}},
+	} {
+		files := declaredFiles(smallDeclared, step.text)
+		if step.script != "" {
+			files["sources/pushover/mint"] = step.script
+		}
+		plan = build(t, st, load(t, writePack(t, files)), o)
+		got = find(t, plan, "source", "pushover")
+		if got.Action != pack.Change || !slices.Equal(got.Changes, step.want) {
+			t.Fatalf("%s: source = %s %+v, want a change of %+v", step.name, got.Action, got.Changes, step.want)
+		}
+		apply(t, st, plan, nil)
+	}
 }
 
 // A declared source may build a call's body with a pack script, or have a

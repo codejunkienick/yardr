@@ -598,6 +598,29 @@ nothing stored, a fragment that is itself a document, an empty one, a title
 that is not one line, and a frame that no longer meets what a frame is held
 to (an installed copy edited by hand since its pack was checked).
 
+### The files of a bead's notes
+
+`yardr bead files <id>` lists every file attached to a bead's notes, so
+none is hunted for under the words of a long bead: one row for each file,
+the oldest note first, as `<seq> <n> <kind> <hash> <path>`. `<seq>` is the
+note's number as `yardr bead show` gives it, `<n>` the file's number in
+that note, counted from 1, `<kind>` is `image`, `page` or `file`, `<hash>`
+names the file in `blobs/`, and `<path>` is its path with the name it was
+attached under in parentheses, as the note's `◆` line says it.
+
+```
+$ yardr bead files yd-greet
+14 1 page 9f31…c0a2 ~/.yardr/blobs/9f31…c0a2
+17 1 image 4977…1581 ~/.yardr/blobs/4977…1581 (yard.png)
+17 2 file 8f3a…c41d ~/.yardr/blobs/8f3a…c41d (report.pdf)
+```
+
+The first row is a page made with `--page`, which keeps no name. A bead whose
+notes carry no file prints nothing. With `--json` it prints an array of
+`{seq, n, hash, type, bytes, name}`, `type` being the file's media type, and
+`[]` for none. It prints no file's bytes: the path holds them, and the web
+serves them at `/blobs/<hash>`.
+
 ### A file in mail
 
 `--file <path>` sends a file with the mail, and is given once for each
