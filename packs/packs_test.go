@@ -2052,8 +2052,15 @@ func TestLinearPack(t *testing.T) {
 	for _, c := range p.Declared[0].Declaration.Commands() {
 		keys = append(keys, c.Key)
 	}
-	if want := []string{"credential.mint_command", "thread.reply", "thread.posted", "thread.read", "thread.open", "thread.opened", "thread.state", "hook.normalize"}; !slices.Equal(keys, want) {
+	if want := []string{"credential.mint_command", "thread.reply", "thread.posted", "thread.read", "thread.open", "thread.opened", "thread.state", "hook.normalize", "call.comment.build"}; !slices.Equal(keys, want) {
 		t.Fatalf("commands = %v, want %v", keys, want)
+	}
+	// The comment call's picture is built by the file beside the
+	// declaration, as the webhook call's body is (call.send.build below).
+	for _, c := range p.Declared[0].Declaration.Commands() {
+		if c.Key == "call.comment.build" && !slices.Equal(c.Argv, []string{"linear/build-comment"}) {
+			t.Errorf("call.comment.build = %v, want [linear/build-comment]", c.Argv)
+		}
 	}
 	// Its credential mints an app-actor token from the OAuth
 	// application's id and secret, and still takes a static token: the

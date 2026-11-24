@@ -11,10 +11,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"yardr.dev/yardr/internal/scripttest"
 	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/standin"
 	"yardr.dev/yardr/internal/store"
@@ -69,10 +71,22 @@ func TestLinearPackDeclaredCallSendsTheCredential(t *testing.T) {
 // calls them under its grants: comment posts one top-level comment with
 // the key as its own id, the same key twice posting once, and refuses a
 // key that is no UUID, an issue that is no identifier and an over-long
-// body before anything is sent; read-comments carries the newest page's
-// query, pages past it with an after cursor, and takes a long answer
-// whole, top-level errors beside data included.
+// body before anything is sent; with a picture the call's build uploads
+// it first and the comment carries its image line under the words, and
+// a refused upload or a file that is no PNG or JPEG posts nothing;
+// read-comments carries the newest page's query, pages past it with an
+// after cursor, and takes a long answer whole, top-level errors beside
+// data included.
 func TestLinearPackDeclaredCalls(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq is not installed, and the comment call's build command is written in it")
+	}
+	if _, err := exec.LookPath("curl"); err != nil {
+		t.Skip("curl is not installed, and the comment call's build command calls Linear with it")
+	}
+	if _, err := exec.LookPath("file"); err != nil {
+		t.Skip("file is not installed, and the comment call's build command reads a picture's type with it")
+	}
 	dir := filepath.Join("..", "..", "packs", "linear")
 	text, err := os.ReadFile(filepath.Join(dir, "linear.yaml"))
 	if err != nil {
@@ -84,6 +98,21 @@ func TestLinearPackDeclaredCalls(t *testing.T) {
 	}
 	if c, ok := d.Call("comment"); !ok || c.Kind != source.Update {
 		t.Fatalf("comment = %+v, %v, want an update call", c, ok)
+	}
+	// The comment call is built, not templated: its build script uploads
+	// the picture and prints the commentCreate body.
+	cc, _ := d.Call("comment")
+	if strings.Join(cc.Build, " ") != "linear/build-comment" || cc.Request.Body != nil {
+		t.Fatalf("comment build = %v with body %v, want [linear/build-comment] and no request body", cc.Build, cc.Request.Body)
+	}
+	var pic *source.Param
+	for i := range cc.Params {
+		if cc.Params[i].Name == "pictures" {
+			pic = &cc.Params[i]
+		}
+	}
+	if pic == nil || pic.Type != "file" || pic.Max != 8388608 || !pic.Optional {
+		t.Fatalf("pictures = %+v, want an optional file of at most 8388608 bytes", pic)
 	}
 	if c, ok := d.Call("read-comments"); !ok || c.Kind != source.Read {
 		t.Fatalf("read-comments = %+v, %v, want a read call", c, ok)
@@ -116,10 +145,24 @@ func TestLinearPackDeclaredCalls(t *testing.T) {
 	}))
 	defer srv.Close()
 	d.Base = srv.URL
+	home := t.TempDir()
+	if err := d.CopyCommandFiles(dir, home); err != nil {
+		t.Fatal(err)
+	}
+	scripttest.Relink(t, filepath.Join(home, "sources", d.Name))
 	ctx := context.Background()
 	const cred = "lin_api_test"
 	call := func(name string, params map[string]string) (*source.Result, error) {
 		return source.Do(ctx, d, name, params, cred, store.ReadSecretFile)
+	}
+	// comment goes as the store sends a built call: the build prints the
+	// body, which is then sent as it stands.
+	comment := func(params map[string]string) (*source.Result, error) {
+		body, err := source.BuildBody(ctx, d, "comment", params, cred, home, store.ReadSecretFile)
+		if err != nil {
+			return nil, err
+		}
+		return source.DoKeyedBody(ctx, d, "comment", params, cred, "", body, store.ReadSecretFile)
 	}
 
 	// v4key renders name as the design's key: the sha256 of a stable name
@@ -130,7 +173,7 @@ func TestLinearPackDeclaredCalls(t *testing.T) {
 		return h[0:8] + "-" + h[8:12] + "-4" + h[13:16] + "-8" + h[17:20] + "-" + h[20:32]
 	}
 	key := v4key("report-YRD-1-claim")
-	res, err := call("comment", map[string]string{"issue": "YRD-1", "body": "I have this. The post will follow here as a comment.", "key": key})
+	res, err := comment(map[string]string{"issue": "YRD-1", "body": "I have this. The post will follow here as a comment.", "key": key})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +191,7 @@ func TestLinearPackDeclaredCalls(t *testing.T) {
 	}
 	// The same key twice posts once, and the second call is answered
 	// with what the first left.
-	again, err := call("comment", map[string]string{"issue": "YRD-1", "body": "I have this. The post will follow here as a comment.", "key": key})
+	again, err := comment(map[string]string{"issue": "YRD-1", "body": "I have this. The post will follow here as a comment.", "key": key})
 	if err != nil || string(again.Answer) != string(res.Answer) {
 		t.Fatalf("the same key twice = %+v, %v, want the first call's answer", again, err)
 	}
@@ -171,7 +214,7 @@ func TestLinearPackDeclaredCalls(t *testing.T) {
 		{"a UUID issue", map[string]string{"issue": "9d4c3b2a-1f0e-4d5c-8b7a-6f5e4d3c2b1a", "body": "words", "key": key}, "parameter issue does not match its pattern", "9d4c3b2a"},
 		{"an over-long body", map[string]string{"issue": "YRD-1", "body": strings.Repeat("w", 65537), "key": key}, "parameter body is 65537 characters, and at most 65536", strings.Repeat("w", 100)},
 	} {
-		_, err := call("comment", c.params)
+		_, err := comment(c.params)
 		var ce *source.CallError
 		switch {
 		case !errors.As(err, &ce) || ce.Reason != source.BadParam:
@@ -186,8 +229,70 @@ func TestLinearPackDeclaredCalls(t *testing.T) {
 		t.Fatalf("a refused call sent %d requests", len(bodies)-n)
 	}
 	// At the bound the body posts: refused is over, never at.
-	if _, err := call("comment", map[string]string{"issue": "YRD-1", "body": strings.Repeat("w", 65536), "key": v4key("report-YRD-1-bound")}); err != nil {
+	if _, err := comment(map[string]string{"issue": "YRD-1", "body": strings.Repeat("w", 65536), "key": v4key("report-YRD-1-bound")}); err != nil {
 		t.Fatalf("a body of 65536 characters = %v", err)
+	}
+
+	// A picture rides the build: uploaded first, then one image line
+	// under the words in the one comment the call posts. The stand-in's
+	// uploads are this test's first, so the picture is u-1.
+	png := linearPNG(t)
+	res, err = comment(map[string]string{"issue": "YRD-1", "body": "the result", "key": v4key("report-YRD-1-picture"), "pictures": linearFile(t, "shot.png", png)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK() {
+		t.Fatalf("comment with a picture = %+v", res)
+	}
+	posted := s.LinearComments("YRD-1")
+	wantBody := "the result\n\n![shot.png](https://uploads.linear.app/standin/u-1/shot.png)"
+	if len(posted) != 3 || posted[2].Body != wantBody {
+		t.Fatalf("comments = %+v, want the picture comment %q last", posted, wantBody)
+	}
+	if ups := s.LinearUploads(); len(ups) != 1 || !ups[0].Sent || ups[0].Bearer ||
+		ups[0].Filename != "shot.png" || ups[0].ContentType != "image/png" || ups[0].Size != len(png) {
+		t.Fatalf("uploads = %+v, want the one picture, sent with no token", ups)
+	}
+	noSecrets(t, "the picture call's answer", string(res.Answer), linearSecrets(&linearGolden{s: s}, cred))
+
+	// An upload the host refuses fails the build and posts nothing, and
+	// its words hold the status alone: no signed address, no header, no
+	// token.
+	s.RefuseLinearUpload("refused.png", 403)
+	before := len(s.LinearComments("YRD-1"))
+	_, err = comment(map[string]string{"issue": "YRD-1", "body": "the result", "key": v4key("report-YRD-1-refused"), "pictures": linearFile(t, "refused.png", png)})
+	if err == nil {
+		t.Fatal("a refused upload was posted")
+	}
+	var ce *source.CallError
+	if !errors.As(err, &ce) || ce.Reason != source.BuildRefused || !strings.Contains(err.Error(), "HTTP 403") {
+		t.Fatalf("a refused upload = %v, want a build_refused refusal naming HTTP 403", err)
+	}
+	noSecrets(t, "the refused upload's error", err.Error(), linearSecrets(&linearGolden{s: s}, cred))
+	if n := len(s.LinearComments("YRD-1")); n != before {
+		t.Fatalf("a refused upload left %d comments, want %d", n, before)
+	}
+	s.RefuseLinearUpload("refused.png", 0)
+
+	// A file that is no picture is refused before anything is uploaded,
+	// and a picture over the bound is refused by the yard before the
+	// build runs: neither posts.
+	uploadsBefore := len(s.LinearUploads())
+	_, err = comment(map[string]string{"issue": "YRD-1", "body": "the result", "key": v4key("report-YRD-1-nonimage"), "pictures": linearFile(t, "notes.pdf", linearPDF)})
+	if err == nil || !strings.Contains(err.Error(), "not a PNG or JPEG picture") {
+		t.Fatalf("a non-picture = %v, want its refusal", err)
+	}
+	noSecrets(t, "the non-picture's error", err.Error(), linearSecrets(&linearGolden{s: s}, cred))
+	_, err = comment(map[string]string{"issue": "YRD-1", "body": "the result", "key": v4key("report-YRD-1-big"), "pictures": linearFile(t, "big.png", make([]byte, 8388608+1))})
+	if !errors.As(err, &ce) || ce.Reason != source.BadParam ||
+		!strings.Contains(err.Error(), "parameter pictures is 8388609 bytes, and at most 8388608") {
+		t.Fatalf("an over-limit picture = %v, want a bad_param refusal naming the bound", err)
+	}
+	if n := len(s.LinearComments("YRD-1")); n != before {
+		t.Fatalf("the refused pictures left %d comments, want %d", n, before)
+	}
+	if n := len(s.LinearUploads()); n != uploadsBefore {
+		t.Fatalf("the refused pictures uploaded %d files, want none", n-uploadsBefore)
 	}
 
 	// read-comments carries the newest page's query: first:50 with the
@@ -305,7 +410,7 @@ func TestLinearPackDeclaredCalls(t *testing.T) {
 	}))
 	defer failing.Close()
 	d.Base = failing.URL
-	res, err = call("comment", map[string]string{"issue": "YRD-9", "body": "words", "key": key})
+	res, err = comment(map[string]string{"issue": "YRD-9", "body": "words", "key": key})
 	if err != nil || !res.OK() {
 		t.Fatalf("errors beside data = %+v, %v", res, err)
 	}

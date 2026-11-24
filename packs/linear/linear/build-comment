@@ -1,0 +1,127 @@
+#!/bin/bash
+# build-comment: the body of the linear comment call, built per call. One
+# JSON object on stdin ({"params": {"issue", "body", "key", "pictures"}}),
+# the commentCreate body on stdout. LINEAR_API_KEY (a personal key, sent
+# bare, or anything else, sent as a Bearer token) and YARDR_SOURCE_BASE,
+# the declaration's base, are in the environment. Needs curl and jq, and
+# file (and wc and tr) for a call that carries a picture.
+#
+# Without a picture this prints the body the call's request template
+# printed: the words alone, with the key as the comment's own id. With
+# one (pictures, a file the yard read and held to its bound before this
+# runs) the picture goes to Linear's storage first, by fileUpload (the
+# file's type, its own name and its size; Linear answers a signed
+# address and the headers its PUT must carry) and then that PUT, and
+# the words gain one image line under them: ![name](assetUrl). A
+# picture is what the bytes say it is (file(1) reads the type, never
+# the name's ending), and pictures only: a PNG or a JPEG goes, anything
+# else is refused before any upload. That file, or an upload Linear
+# refuses, fails the whole call before any comment is sent, and the
+# error says the HTTP status and nothing more: Linear's answer holds
+# the signed address, a secret as the token is, and neither goes in an
+# argument, an output or a log. The PUT carries the file's type, the
+# Cache-Control that Linear's upload guide sets and the headers Linear
+# names, never the token, and follows no redirect. The slot, PUT and
+# markdown code below is linear/thread's, copied for one file.
+set -euo pipefail
+in=$(cat)
+param() { jq -r --arg k "$1" '.params[$k] // ""' <<<"$in"; }
+
+case "$LINEAR_API_KEY" in
+  lin_api_*|"Bearer "*) auth="$LINEAR_API_KEY" ;;
+  *) auth="Bearer $LINEAR_API_KEY" ;;
+esac
+
+# ---- the picture --------------------------------------------------------------
+# The most bytes the picture may have. The yard's own bound for the
+# parameter has held the file before this command runs; this is
+# thread.reply's per-file cap, the same bytes, held here too so the
+# refusal says the limit either way.
+max_file_bytes=8388608
+
+upload_query='mutation($contentType: String!, $filename: String!, $size: Int!) { fileUpload(contentType: $contentType, filename: $filename, size: $size) { success uploadFile { uploadUrl assetUrl headers { key value } } } }'
+
+# slot_ok: whether the answer to fileUpload, on stdin, names a place to put
+# the file that the PUT can use as it stands: no errors, an address of the
+# scheme the API was reached by ($scheme), headers made of characters a
+# config line carries. What it refuses never reaches a config.
+slot_ok='
+  def printable: type == "string" and all(explode[]; . >= 32 and . <= 126);
+  .data.fileUpload as $u
+  | ((.errors // []) | length == 0) and ($u.success == true)
+  and ($u.uploadFile.uploadUrl | printable and startswith($scheme + "://") and (contains(" ") | not))
+  and ($u.uploadFile.assetUrl | type == "string" and length > 0 and all(explode[]; . > 31 and . != 127))
+  and (($u.uploadFile.headers // []) | type == "array" and all(.[]; (.key | type == "string" and test("^[A-Za-z0-9._-]+$")) and (.value | printable)))'
+
+# put_config: the PUT as a curl config, from the same answer on stdin: its
+# address and the headers its guide sets, the type of the file ($ct) and
+# Cache-Control, then the ones the answer names, which replace a header of
+# the same name. No Authorization: the address carries its own signature, on
+# a host that is not the API, and the token is for the API alone. A quote or
+# backslash in a value is escaped, so no value can end its line.
+put_config='
+  def q: "\"" + (explode | map(if . == 92 or . == 34 then [92, .] else [.] end) | add // [] | implode) + "\"";
+  .data.fileUpload.uploadFile as $f
+  | "url = \($f.uploadUrl | q)",
+    ([{key: "Content-Type", value: $ct}, {key: "Cache-Control", value: "public, max-age=31536000"}] + ($f.headers // [])
+     | reduce .[] as $h ([]; map(select((.key | ascii_downcase) != ($h.key | ascii_downcase))) + [$h])
+     | .[] | "header = \("\(.key): \(.value)" | q)"),
+    "header = \"Expect:\""'
+
+# md_lib: what the picture's markdown is made with. A name is the text of a
+# link: control characters become spaces, and what could end the text or
+# make markup of it (\ [ ] ` * _ < >) gets a backslash, as markdown says.
+# An address is its destination: what could end it or is no part of an
+# address (controls, space, " ( ) < > [ \ ] `) is written as % and two
+# digits.
+md_lib='
+  def esc($set): explode | map(. as $c | if ($set | index($c)) != null then [92, $c] else [$c] end) | add // [] | implode;
+  def mdtext: explode | map(if . < 32 or . == 127 then 32 else . end) | implode | esc([92, 91, 93, 96, 42, 95, 60, 62]);
+  def pct: "0123456789ABCDEF" as $d | "%" + $d[(. / 16 | floor):(. / 16 | floor) + 1] + $d[(. % 16):(. % 16) + 1];
+  def mdurl: explode | map(. as $c | if $c < 33 or $c == 127 or ([34, 40, 41, 60, 62, 91, 92, 93, 96] | index($c)) != null then ($c | pct) else ([$c] | implode) end) | join("");
+'
+
+md=""
+pic=$(param pictures)
+if [ -n "$pic" ]; then
+  case "$pic" in /*) ;; *) pic=./$pic ;; esac
+  { [ -f "$pic" ] && [ -r "$pic" ]; } || { echo "comment found no picture" >&2; exit 1; }
+  # The type is what the bytes say, never what the name's ending claims.
+  mime=$(file -L -b --mime-type "$pic" 2>/dev/null) || { echo "comment cannot read the type of the picture (it needs file(1))" >&2; exit 1; }
+  [[ $mime =~ ^[a-z0-9.+_-]+/[a-z0-9.+_-]+$ ]] || mime=application/octet-stream
+  case "$mime" in
+    image/png | image/jpeg) ;;
+    *) echo "the picture is $mime, not a PNG or JPEG picture" >&2; exit 1 ;;
+  esac
+  size=$(wc -c <"$pic" | tr -d ' ')
+  [ "$size" -le "$max_file_bytes" ] || { echo "the picture is $size bytes, over the limit of $max_file_bytes" >&2; exit 1; }
+  # The name is the file's own, as the yard called it for the comment,
+  # never the path it is read from.
+  name=${pic##*/}
+  scheme=${YARDR_SOURCE_BASE%%://*}
+  vars=$(jq -nc --arg c "$mime" --arg f "$name" --argjson s "$size" '{contentType: $c, filename: $f, size: $s}')
+  # Ignore curl's user config so it cannot change the authenticated API call.
+  out=$(printf 'header = "Authorization: %s"\n' "$auth" \
+    | curl -q -sS -K - "$YARDR_SOURCE_BASE/graphql" -H 'Content-Type: application/json' -w '\n%{http_code}' \
+      -d "$(jq -nc --arg q "$upload_query" --argjson v "$vars" '{query: $q, variables: $v}')" 2>/dev/null) \
+    || { echo "fileUpload for the picture failed (curl exit $?)" >&2; exit 1; }
+  status=${out##*$'\n'}
+  out=${out%$'\n'*}
+  [ "$status" = 200 ] || { echo "fileUpload for the picture was refused (HTTP $status)" >&2; exit 1; }
+  printf '%s' "$out" | jq -e --arg scheme "$scheme" "$slot_ok" >/dev/null 2>&1 \
+    || { echo "fileUpload for the picture gave no place to send the file (HTTP $status)" >&2; exit 1; }
+  # -g: curl reads [ ] and { } in a file's name, and in an address, as a
+  # pattern to expand, so a file called "report [final].png" would fail to
+  # open. Both are what they are written as.
+  code=0
+  # -q is first so a user's .curlrc cannot enable redirects for a signed address.
+  status=$(printf '%s' "$out" | jq -r --arg ct "$mime" "$put_config" 2>/dev/null \
+    | curl -q -sS -g -o /dev/null -w '%{http_code}' --proto "=$scheme" -K - -T "$pic" 2>/dev/null) || code=$?
+  [ "$code" -eq 0 ] || { echo "the upload of the picture failed (curl exit $code)" >&2; exit 1; }
+  case "$status" in 2??) ;; *) echo "the upload of the picture was refused (HTTP $status)" >&2; exit 1 ;; esac
+  md=$(printf '%s' "$out" | jq -r --arg name "$name" "$md_lib"'
+    "\n\n![" + ($name | mdtext) + "](" + (.data.fileUpload.uploadFile.assetUrl | mdurl) + ")"' 2>/dev/null)
+fi
+jq -c --arg md "$md" '{
+  query: "mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id url } } }",
+  variables: {input: {id: .params.key, issueId: .params.issue, body: ((.params.body // "") + $md)}}}' <<<"$in"
