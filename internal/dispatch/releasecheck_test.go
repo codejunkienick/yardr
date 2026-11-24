@@ -23,6 +23,7 @@ import (
 type releaseSite struct {
 	mu   sync.Mutex
 	body []byte
+	wire []byte
 	asks int
 	hook func()
 	srv  *httptest.Server
@@ -35,10 +36,22 @@ func newReleaseSite(t *testing.T, version string) *releaseSite {
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		s.asks++
-		body, hook := s.body, s.hook
+		body, wire, hook := s.body, s.wire, s.hook
 		s.mu.Unlock()
 		if hook != nil {
 			hook()
+		}
+		if wire != nil {
+			// A host that does not speak HTTP: the bytes are the
+			// connection's own, with no status line before them.
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Errorf("hijacking the ask: %v", err)
+				return
+			}
+			_, _ = conn.Write(wire)
+			_ = conn.Close()
+			return
 		}
 		if r.URL.Path != "/releases/latest.json" {
 			http.NotFound(w, r)
@@ -64,6 +77,15 @@ func (s *releaseSite) serve(version string) {
 func (s *releaseSite) serveRaw(body string) {
 	s.mu.Lock()
 	s.body = []byte(body)
+	s.mu.Unlock()
+}
+
+// serveWire makes the site answer each ask with raw as the bytes of the
+// connection itself, then hang up: no HTTP in them, as from a host that
+// does not speak it.
+func (s *releaseSite) serveWire(raw string) {
+	s.mu.Lock()
+	s.wire = []byte(raw)
 	s.mu.Unlock()
 }
 
@@ -241,8 +263,8 @@ func TestReleaseCheckSilentCases(t *testing.T) {
 // telemetry pass twins. A row's check reads what the first pass held as
 // its fault, which the second pass the same day may have cleared.
 func TestReleaseCheckFaultsOnce(t *testing.T) {
-	// host is what a host that means harm sends as a version: a marker,
-	// as many times as the row says.
+	// host is what a host that means harm sends, as a version or as the
+	// first line of its answer: a marker, as many times as the row says.
 	const host = "HOSTTEXT"
 	// quiet says none of the host's text reached the log or the held
 	// fault, and that what did is short: told in the host's words, a
@@ -255,9 +277,14 @@ func TestReleaseCheckFaultsOnce(t *testing.T) {
 		if len(told) >= 256 {
 			t.Errorf("held fault is %d bytes, want under 256: %q", len(told), told)
 		}
+		// A fault's own line runs to about 250 bytes: the handler's time and
+		// level, the check's words, the stand-in's address and the fetch's
+		// sentence, a few bytes more or less with the port and the zone. The
+		// ceiling leaves it room to say a little more, and stands more than
+		// 150 times under the 64 KiB a host can send.
 		for _, line := range strings.Split(y.log.String(), "\n") {
-			if len(line) >= 256 {
-				t.Errorf("a log line is %d bytes, want under 256: %.300s", len(line), line)
+			if len(line) >= 384 {
+				t.Errorf("a log line is %d bytes, want under 384: %.300s", len(line), line)
 			}
 		}
 	}
@@ -342,6 +369,24 @@ func TestReleaseCheckFaultsOnce(t *testing.T) {
 			fault: "checking the latest release",
 			asks:  1,
 			check: quiet,
+		},
+		{
+			// net/http quotes a first line that is no status line into its own
+			// error whole, however long, so the fetch says why it failed in a
+			// word of its own, and the host's line reaches neither the log nor
+			// the held fault.
+			name: "an answer of 64 KiB that is no status line",
+			setup: func(t *testing.T, y *releaseYard) {
+				y.site.serveWire(strings.Repeat(host, 64*1024/len(host)) + "\r\n")
+			},
+			fault: "checking the latest release",
+			asks:  1,
+			check: func(t *testing.T, y *releaseYard, told string) {
+				quiet(t, y, told)
+				if !strings.Contains(told, "network error") {
+					t.Errorf("held fault = %q, want the cause said as a network error", told)
+				}
+			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

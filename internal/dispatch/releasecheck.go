@@ -2,11 +2,13 @@ package dispatch
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -143,7 +145,9 @@ func (e ReleaseAnswered) Error() string {
 // the most, from base with client. path is the site's word, vetted
 // by ReleaseFileUnder where it came from latest.json, and the
 // constant /releases/latest.json where it did not: both stay under
-// /releases/ on the one named host.
+// /releases/ on the one named host. A request or a read that fails
+// is told by releaseFetchCause and not in the transport's words,
+// which quote what the host sent.
 func ReleaseGet(ctx context.Context, base string, client *http.Client, path string, most int64) ([]byte, error) {
 	if ReleaseFileUnder(path) == "" {
 		return nil, fmt.Errorf("%q is no file under /releases/ on %s; yardr was not fetched", path, base)
@@ -157,7 +161,7 @@ func ReleaseGet(ctx context.Context, base string, client *http.Client, path stri
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s does not answer, so yardr was not fetched (%v); this needs the network once, and the old binary is left as it is", base, err)
+		return nil, fmt.Errorf("%s does not answer, so yardr was not fetched (%s); this needs the network once, and the old binary is left as it is", base, releaseFetchCause(err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -167,12 +171,38 @@ func ReleaseGet(ctx context.Context, base string, client *http.Client, path stri
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, most+1))
 	if err != nil {
-		return nil, fmt.Errorf("%s's answer for %s could not be read, so yardr was not fetched: %w", base, path, err)
+		return nil, fmt.Errorf("%s's answer for %s could not be read, so yardr was not fetched (%s)", base, path, releaseFetchCause(err))
 	}
 	if int64(len(b)) > most {
 		return nil, fmt.Errorf("%s's %s is larger than %d bytes, so yardr was not fetched", base, path, most)
 	}
 	return b, nil
+}
+
+// releaseFetchCause says in a word why a request to the site, or the
+// read of its answer, failed, never in the error's own text: net/http
+// quotes what the host sent into its errors (a first line that is no
+// status line, a header line that is none) at any length, and a
+// fault is logged, held by the daemon and printed by yardr upgrade.
+// The words are the ones an operator acts on differently: a host that
+// is slow, a name that is not found, a certificate or a handshake the
+// client refuses, and the rest, which is the network. A TLS alert the
+// host sends back is not told apart: crypto/tls gives it a type of its
+// own that is not exported, and AlertError is QUIC's alone.
+func releaseFetchCause(err error) string {
+	var netErr net.Error
+	var dnsErr *net.DNSError
+	var certErr *tls.CertificateVerificationError
+	var headerErr tls.RecordHeaderError
+	switch {
+	case errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()):
+		return "timed out"
+	case errors.As(err, &dnsErr) && dnsErr.IsNotFound:
+		return "no such host"
+	case errors.As(err, &certErr) || errors.As(err, &headerErr):
+		return "TLS error"
+	}
+	return "network error"
 }
 
 // ReleaseFileUnder is the file's name, when path is a file under
