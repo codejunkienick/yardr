@@ -101,13 +101,15 @@ func stageOf(t *testing.T, s store.API, ctx context.Context, id string) string {
 // goes straight to approved.
 func TestDoneSafeRefusedOnASecurityPath(t *testing.T) {
 	t.Parallel()
-	s, ctx, dir := securityRepo(t, "# what the second review may not be skipped for\n\ninternal/store/**\npacks/*/*.yaml\ngo.mod\nharnesses/**\ninstall.sh\n")
+	s, ctx, dir := securityRepo(t, "# what the second review may not be skipped for\n\ninternal/store/**\npacks/**\ngo.mod\nharnesses/**\ninstall.sh\n")
 	reviewed(t, s, ctx, dir, "web-a", "main", touching(t, "internal/store/new.go", "docs/b.md"))
 	reviewed(t, s, ctx, dir, "web-m", "main", touching(t, "go.mod"))
 	reviewed(t, s, ctx, dir, "web-p", "main", touching(t, "packs/github/github.yaml"))
+	reviewed(t, s, ctx, dir, "web-x", "main", touching(t, "packs/google-docs/google-mint"))
+	reviewed(t, s, ctx, dir, "web-r", "main", touching(t, "packs/starter/roles/reviewer.md"))
 	reviewed(t, s, ctx, dir, "web-h", "main", touching(t, "harnesses/claude.yaml"))
 	reviewed(t, s, ctx, dir, "web-i", "main", touching(t, "install.sh"))
-	reviewed(t, s, ctx, dir, "web-d", "main", touching(t, "docs/b.md", "internal/other.go", "packs/starter/SETUP.md"))
+	reviewed(t, s, ctx, dir, "web-d", "main", touching(t, "docs/b.md", "internal/other.go"))
 
 	_, err := s.Done(ctx, "web-a", store.DoneSafe, "", store.Expect{}, "me")
 	if err == nil {
@@ -134,6 +136,14 @@ func TestDoneSafeRefusedOnASecurityPath(t *testing.T) {
 	}
 	if _, err := s.Done(ctx, "web-p", store.DoneSafe, "", store.Expect{}, "me"); err == nil || !strings.Contains(err.Error(), "packs/github/github.yaml") {
 		t.Fatalf("done-safe on a pack declaration: %v", err)
+	}
+	// A pack's helper executable and its role file sit deeper than its
+	// declarations, and the list holds them as it holds those.
+	if _, err := s.Done(ctx, "web-x", store.DoneSafe, "", store.Expect{}, "me"); err == nil || !strings.Contains(err.Error(), "packs/google-docs/google-mint") {
+		t.Fatalf("done-safe on a pack's helper executable: %v", err)
+	}
+	if _, err := s.Done(ctx, "web-r", store.DoneSafe, "", store.Expect{}, "me"); err == nil || !strings.Contains(err.Error(), "packs/starter/roles/reviewer.md") {
+		t.Fatalf("done-safe on a pack's role file: %v", err)
 	}
 	if _, err := s.Done(ctx, "web-h", store.DoneSafe, "", store.Expect{}, "me"); err == nil || !strings.Contains(err.Error(), "harnesses/claude.yaml") {
 		t.Fatalf("done-safe on a harness fetch spec: %v", err)
@@ -397,7 +407,7 @@ func TestYardrsOwnSecurityPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"internal/store/**", "internal/rpc/**", "internal/web/**", "internal/hooks/**", "internal/peer/**",
-		"internal/pairing/**", "internal/source*/**", "internal/yards/**", "packs/*/*.yaml", "harnesses/**", "go.mod", "go.sum", "install.sh", ".yardr/**", "contrib/assembly/**"} {
+		"internal/pairing/**", "internal/source*/**", "internal/yards/**", "packs/**", "harnesses/**", "go.mod", "go.sum", "install.sh", ".yardr/**", "contrib/assembly/**"} {
 		if !slices.Contains(got, ":(glob)"+want) {
 			t.Errorf("%s lacks %s", store.SecurityPathsFile, want)
 		}

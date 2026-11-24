@@ -21,9 +21,14 @@ internal/pairing/**
 internal/yards/**
 # Declared sources: where a credential is sent, and what a call may do.
 internal/source*/**
-# Declared sources' calls live in the packs, beside their manifests: what a
-# call may do, where a credential is sent, and what a pack brings.
-packs/*/*.yaml
+# Everything under packs/ goes through the second review, whatever its kind:
+# declarations (what a call may do, where a credential is sent, what a pack
+# brings), roles, flow stage files and crew sections (what the agents a pack
+# starts are told), landing scripts and source helper executables (what runs
+# at a landing, with a credential or with a mint), and packs/packs.go, which
+# embeds them all. Kinds are not listed one by one: such a list goes stale as
+# the packs grow, and a directory does not.
+packs/**
 # What a harness install fetches and what checks it: the fetch specs and
 # their loader.
 harnesses/**
