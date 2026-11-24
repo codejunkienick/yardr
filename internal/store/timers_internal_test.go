@@ -568,9 +568,14 @@ func TestTimerListAndRemove(t *testing.T) {
 		t.Fatalf("all = %s, want %s", got, want)
 	}
 
-	if _, err := y.RemoveTimer(ctx, clerks.ID, "yardmaster"); err == nil ||
+	_, err := y.RemoveTimer(ctx, clerks.ID, "yardmaster")
+	if err == nil ||
 		!strings.Contains(err.Error(), "only the operator (jo) may remove the timer "+clerks.ID+", which clerk set for clerk; this is yardmaster") {
 		t.Fatalf("yardmaster removing clerk's = %v", err)
+	}
+	// No run ask proposes removing another's timer.
+	if class, ok := IsOperatorOnly(err); !ok || class != Alone {
+		t.Fatalf("yardmaster removing clerk's = %v (mark %v, %v), want an operator-only refusal marked alone", err, class, ok)
 	}
 	if _, err := y.RemoveTimer(ctx, "t99", "yardmaster"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("removing none = %v", err)

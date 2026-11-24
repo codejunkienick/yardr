@@ -938,8 +938,8 @@ func declareSlackSource(ctx context.Context, api store.API) error {
 	return err
 }
 
-// Changing an existing depot's path is the operator's alone; its test
-// command or base is the operator's, and a run ask may propose it.
+// Changing an existing depot's path or base is the operator's alone; its
+// test command is the operator's, and a run ask may propose it.
 // Adding a depot is the operator's and a run ask may propose it, with or
 // without a test command; re-adding one with its values unchanged is
 // anyone's, recorded as the pane's actor from a pane.
@@ -959,12 +959,12 @@ func TestPutDepotPathTestBaseChangesAreTheOperators(t *testing.T) {
 		"change a depot's test command": {Name: "yard", Path: "/srv/yard", Base: "origin/main", Test: "make test"},
 		"change a depot's base":         {Name: "yard", Path: "/srv/yard", Base: "origin/other"},
 	}
-	// The test command and the base may be proposed on a run ask; the
-	// path stays the operator's alone.
+	// Only the test command may be proposed on a run ask; the path and the
+	// base stay the operator's alone.
 	marks := map[string]store.AskClass{
 		"change a depot's path":         store.Alone,
 		"change a depot's test command": store.Askable,
-		"change a depot's base":         store.Askable,
+		"change a depot's base":         store.Alone,
 	}
 	markWord := map[store.AskClass]string{store.Alone: "alone", store.Askable: "askable"}
 	api, own, ctx := depotYard(t)

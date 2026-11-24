@@ -512,7 +512,7 @@ func (s *Store) GetUser(ctx context.Context, name string) (*User, error) {
 // operator's to do (operatorOnly).
 func (s *Store) DeleteUser(ctx context.Context, name, actor string) error {
 	return s.write(func(w *wtx) error {
-		return w.deleteUser(ctx, name, actor, nil)
+		return w.deleteUser(ctx, name, actor)
 	})
 }
 
@@ -630,10 +630,9 @@ func (w *wtx) clearUserCredential(name string, u *User) error {
 	return nil
 }
 
-// deleteUser is DeleteUser inside the transaction: by is the ask the removal
-// was approved on, which the event carries, and nil for a removal no ask
-// approved.
-func (w *wtx) deleteUser(ctx context.Context, name, actor string, by *approvedOn) error {
+// deleteUser is DeleteUser inside the transaction, which removeTeammate
+// shares to remove the user an approved removal names.
+func (w *wtx) deleteUser(ctx context.Context, name, actor string) error {
 	if err := w.may(ctx, actor, ActRemoveUser, Object{Kind: KindUser, Name: name, Ask: Askable}); err != nil {
 		return err
 	}
@@ -733,9 +732,6 @@ func (w *wtx) deleteUser(ctx context.Context, name, actor string, by *approvedOn
 	}
 	if err := unexposeAndUntrust(w, name, actor, data); err != nil {
 		return err
-	}
-	if by != nil {
-		data["approved"] = by
 	}
 	return w.event("", "user_removed", actor, data)
 }

@@ -198,8 +198,14 @@ func TestRenameGroupRefusals(t *testing.T) {
 		{"builders", "makers", "yardmaster", "only the operator (mckean) may rename a group; this is yardmaster"},
 		{"builders", "makers", "ada", "only the operator (mckean) may rename a group; this is ada"},
 	} {
-		if _, err := y.RenameGroup(y.ctx, c.name, c.to, c.actor); err == nil || !strings.Contains(err.Error(), c.want) {
+		_, err := y.RenameGroup(y.ctx, c.name, c.to, c.actor)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("rename %s to %s as %s = %v, want %q", c.name, c.to, c.actor, err, c.want)
+		} else if strings.HasPrefix(c.want, "only the operator") {
+			// No run ask proposes a rename.
+			if class, ok := IsOperatorOnly(err); !ok || class != Alone {
+				t.Errorf("rename %s to %s as %s = %v (mark %v, %v), want an operator-only refusal marked alone", c.name, c.to, c.actor, err, class, ok)
+			}
 		}
 	}
 	if evs, err := y.EventsOfKind(y.ctx, "group_renamed", 10); err != nil || len(evs) != 0 {

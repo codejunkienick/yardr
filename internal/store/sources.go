@@ -622,43 +622,31 @@ func (w *wtx) ignoreSender(ctx context.Context, name, sender, actor string) erro
 	return w.retireMappingCards(name, func(card string) bool { return card == sender }, "ignored", actor)
 }
 
-// unignoreSender removes the sender id from the source's ignore list,
-// so its next delivery follows the hook's word again. It is the
-// operator's alone to say (maySource), refused from an agent pane, as
-// ignoring is; an id the list does not name is refused. by is the ask
-// the change was approved on, nil for one typed at a terminal.
-func (w *wtx) unignoreSender(ctx context.Context, name, sender, actor string, by *approvedOn) error {
-	if err := w.may(ctx, actor, ActUnignoreSender, Object{Kind: KindSource, Name: name, Ask: Askable}); err != nil {
-		return err
-	}
-	src := new(Source)
-	if ok, err := get(w.Tx, bSources, name, src); err != nil {
-		return err
-	} else if !ok {
-		return fmt.Errorf("source %s: %w", name, ErrNotFound)
-	}
-	if !slices.Contains(src.Ignored, sender) {
-		return fmt.Errorf("source %s: %s is not ignored: %w", name, sender, ErrNotFound)
-	}
-	src.Ignored = slices.DeleteFunc(src.Ignored, func(id string) bool { return id == sender })
-	if err := put(w.Tx, bSources, name, src); err != nil {
-		return err
-	}
-	data := map[string]any{"source": name, "sender": sender}
-	if by != nil {
-		data["approved"] = by
-	}
-	return w.event("", "sender_unignored", actor, data)
-}
-
 // UnignoreSource removes the sender id from the source's ignore list
 // (yardr source ignore <source> --rm <id>), so its next delivery is
 // heard again: under unknown a fresh mapping card is offered, under
-// allow it is heard as an outsider. It is the operator's alone, refused
-// from an agent pane.
+// allow it is heard as an outsider. It is the operator's alone to say
+// (maySource), refused from an agent pane, as ignoring is; an id the
+// list does not name is refused.
 func (s *Store) UnignoreSource(ctx context.Context, name, sender, actor string) error {
 	return s.write(func(w *wtx) error {
-		return w.unignoreSender(ctx, name, sender, actor, nil)
+		if err := w.may(ctx, actor, ActUnignoreSender, Object{Kind: KindSource, Name: name}); err != nil {
+			return err
+		}
+		src := new(Source)
+		if ok, err := get(w.Tx, bSources, name, src); err != nil {
+			return err
+		} else if !ok {
+			return fmt.Errorf("source %s: %w", name, ErrNotFound)
+		}
+		if !slices.Contains(src.Ignored, sender) {
+			return fmt.Errorf("source %s: %s is not ignored: %w", name, sender, ErrNotFound)
+		}
+		src.Ignored = slices.DeleteFunc(src.Ignored, func(id string) bool { return id == sender })
+		if err := put(w.Tx, bSources, name, src); err != nil {
+			return err
+		}
+		return w.event("", "sender_unignored", actor, map[string]any{"source": name, "sender": sender})
 	})
 }
 
@@ -856,14 +844,12 @@ func (w *wtx) keySource(ctx context.Context, home, name string, values map[strin
 // is the operator's and stays.
 func (s *Store) DeleteSource(ctx context.Context, name, actor string) error {
 	return s.write(func(w *wtx) error {
-		return w.deleteSource(ctx, name, actor, nil)
+		return w.deleteSource(ctx, name, actor)
 	})
 }
 
-// deleteSource is DeleteSource inside the transaction: by is the ask the
-// removal was approved on, which the event carries, as hook_removed does,
-// and nil for a removal typed at a terminal.
-func (w *wtx) deleteSource(ctx context.Context, name, actor string, by *approvedOn) error {
+// deleteSource is DeleteSource inside the transaction.
+func (w *wtx) deleteSource(ctx context.Context, name, actor string) error {
 	// Alone: removing a source also removes the files of its commands
 	// from disk, which no write of the store takes back.
 	if err := w.may(ctx, actor, ActRemoveSource, Object{Kind: KindSource, Name: name}); err != nil {
@@ -881,11 +867,7 @@ func (w *wtx) deleteSource(ctx context.Context, name, actor string, by *approved
 	if err := dropSourceRecords(w.Tx, name); err != nil {
 		return err
 	}
-	data := map[string]any{"source": name}
-	if by != nil {
-		data["approved"] = by
-	}
-	if err := w.event("", "source_removed", actor, data); err != nil {
+	if err := w.event("", "source_removed", actor, map[string]any{"source": name}); err != nil {
 		return err
 	}
 	return w.tellSourceStale(name, &before, nil, actor)

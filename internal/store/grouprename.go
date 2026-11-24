@@ -720,47 +720,33 @@ func (s *Store) RenameGroup(ctx context.Context, name, to, actor string) (*Group
 		if err != nil {
 			return err
 		}
-		out, err = w.renameGroup(ctx, name, to, resolved, nil)
-		return err
+		if err := w.may(ctx, resolved, ActRenameGroup, Object{Kind: KindGroup, Name: name}); err != nil {
+			return err
+		}
+		p, err := w.planGroupRename(name, to)
+		if err != nil {
+			return err
+		}
+		if err := p.apply(w, resolved); err != nil {
+			return err
+		}
+		out = p.report()
+		data := map[string]any{"from": name, "to": to, "beads": out.Beads, "sessions": out.Sessions, "grants": out.Grants}
+		if len(out.Routes) > 0 {
+			data["routes"] = out.Routes
+		}
+		if len(out.Subscriptions) > 0 {
+			data["subscriptions"] = out.Subscriptions
+		}
+		if len(out.Members) > 0 {
+			data["members"] = out.Members
+		}
+		if len(out.Packs) > 0 {
+			data["packs"] = out.Packs
+		}
+		return w.event("", "group_renamed", resolved, data)
 	})
 	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// renameGroup is RenameGroup inside the transaction: by is the ask the
-// rename was approved on, which the event carries, and nil for a rename typed
-// at a terminal.
-func (w *wtx) renameGroup(ctx context.Context, name, to, actor string, by *approvedOn) (*GroupRenamed, error) {
-	if err := w.may(ctx, actor, ActRenameGroup, Object{Kind: KindGroup, Name: name, Ask: Askable}); err != nil {
-		return nil, err
-	}
-	p, err := w.planGroupRename(name, to)
-	if err != nil {
-		return nil, err
-	}
-	if err := p.apply(w, actor); err != nil {
-		return nil, err
-	}
-	out := p.report()
-	data := map[string]any{"from": name, "to": to, "beads": out.Beads, "sessions": out.Sessions, "grants": out.Grants}
-	if len(out.Routes) > 0 {
-		data["routes"] = out.Routes
-	}
-	if len(out.Subscriptions) > 0 {
-		data["subscriptions"] = out.Subscriptions
-	}
-	if len(out.Members) > 0 {
-		data["members"] = out.Members
-	}
-	if len(out.Packs) > 0 {
-		data["packs"] = out.Packs
-	}
-	if by != nil {
-		data["approved"] = by
-	}
-	if err := w.event("", "group_renamed", actor, data); err != nil {
 		return nil, err
 	}
 	return out, nil

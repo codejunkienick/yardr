@@ -481,7 +481,7 @@ func (s *Store) InviteTeammate(ctx context.Context, name, email, role string, cr
 // writes nothing.
 func (w *wtx) removeTeammate(ctx context.Context, name string, actor string) error {
 	if w.Bucket(bUsers).Get([]byte(name)) != nil {
-		if err := w.deleteUser(ctx, name, actor, nil); err != nil {
+		if err := w.deleteUser(ctx, name, actor); err != nil {
 			return err
 		}
 	}

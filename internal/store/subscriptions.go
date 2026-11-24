@@ -224,8 +224,8 @@ func (s Subscription) same(o Subscription) bool {
 // SetIdentity records who the crew member, or else the user, called name
 // is in source; a zero identity removes it. The two share one space of
 // names, so a name is one of them. A crew member's is the operator's to
-// say, and a run ask may propose it (setCrewIdentity); a user's is theirs
-// and the operator's to say (mayIdentify).
+// say alone (setCrewIdentity); a user's is theirs and the operator's to say
+// (mayIdentify).
 func (s *Store) SetIdentity(ctx context.Context, name, source string, id Identity, actor string) error {
 	if source == "" {
 		return fmt.Errorf("identity: source is required")
@@ -244,7 +244,7 @@ func (s *Store) SetIdentity(ctx context.Context, name, source string, id Identit
 		})
 	}
 	return s.write(func(w *wtx) error {
-		return w.setCrewIdentity(ctx, name, source, id, actor, nil)
+		return w.setCrewIdentity(ctx, name, source, id, actor)
 	})
 }
 
@@ -446,10 +446,9 @@ func setIdentityIn(ids *map[string]Identity, name, source string, id Identity, k
 // setCrewIdentity records who the crew member name is in source, as the
 // operator: a mention or an assignment of the id or key there is then
 // addressed to it, so whoever sets it sends what is meant for another to
-// it, or blinds it to what is meant for it. by is the ask the change was
-// approved on, nil for a change typed in a terminal.
-func (w *wtx) setCrewIdentity(ctx context.Context, name, source string, id Identity, actor string, by *approvedOn) error {
-	if err := w.may(ctx, actor, ActMapIdentity, Object{Kind: KindCrew, Name: name, Ask: Askable}); err != nil {
+// it, or blinds it to what is meant for it.
+func (w *wtx) setCrewIdentity(ctx context.Context, name, source string, id Identity, actor string) error {
+	if err := w.may(ctx, actor, ActMapIdentity, Object{Kind: KindCrew, Name: name}); err != nil {
 		return err
 	}
 	var r CrewMember
@@ -466,9 +465,6 @@ func (w *wtx) setCrewIdentity(ctx context.Context, name, source string, id Ident
 	kind, data, err := setIdentityIn(&r.Identities, name, source, id, "crew member", "crew")
 	if err != nil {
 		return err
-	}
-	if by != nil {
-		data["approved"] = by
 	}
 	r.Revision = newRevision()
 	if err := put(w.Tx, bCrew, name, r); err != nil {

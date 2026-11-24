@@ -557,6 +557,9 @@ func TestClaimIdentityNobodyIgnores(t *testing.T) {
 	}
 	if err := y.UnignoreSource(y.ctx, "talk", "U888", "ada"); err == nil {
 		t.Fatal("ada un-ignored a sender")
+	} else if class, ok := IsOperatorOnly(err); !ok || class != Alone {
+		// No run ask proposes un-ignoring a sender.
+		t.Fatalf("ada un-ignoring a sender = %v (mark %v, %v), want an operator-only refusal marked alone", err, class, ok)
 	}
 	if err := y.UnignoreSource(y.ctx, "talk", "U888", "mckean"); err != nil {
 		t.Fatal(err)

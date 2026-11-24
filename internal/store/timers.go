@@ -326,8 +326,13 @@ func (s *Store) RemoveTimer(ctx context.Context, id, actor string) (*Timer, erro
 	t := new(Timer)
 	err := s.write(func(w *wtx) error {
 		var err error
-		t, err = w.removeTimer(ctx, id, actor, nil)
-		return err
+		if t, err = w.timerForRemoval(ctx, id, actor); err != nil {
+			return err
+		}
+		if err := w.Bucket(bTimers).Delete([]byte(id)); err != nil {
+			return err
+		}
+		return w.event("", "timer_removed", actor, map[string]any{"timer": id, "by": t.By, "to": t.To, "reason": t.Reason})
 	})
 	if err != nil {
 		return nil, err
@@ -357,30 +362,9 @@ func (w *wtx) timerForRemoval(ctx context.Context, id, actor string) (*Timer, er
 		return nil, fmt.Errorf("timer %s: %w", id, ErrNotFound)
 	}
 	if t.By != actor && t.To != actor {
-		if err := w.may(ctx, actor, ActRemoveTimer, Object{Kind: KindTimer, Name: id, Does: timerRemoveDoes(id, t), Ask: Askable}); err != nil {
+		if err := w.may(ctx, actor, ActRemoveTimer, Object{Kind: KindTimer, Name: id, Does: timerRemoveDoes(id, t)}); err != nil {
 			return nil, err
 		}
-	}
-	return t, nil
-}
-
-// removeTimer is RemoveTimer inside the transaction: by is the ask the
-// removal was approved on, which the event carries, and nil for a removal
-// no ask approved.
-func (w *wtx) removeTimer(ctx context.Context, id, actor string, by *approvedOn) (*Timer, error) {
-	t, err := w.timerForRemoval(ctx, id, actor)
-	if err != nil {
-		return nil, err
-	}
-	if err := w.Bucket(bTimers).Delete([]byte(id)); err != nil {
-		return nil, err
-	}
-	data := map[string]any{"timer": id, "by": t.By, "to": t.To, "reason": t.Reason}
-	if by != nil {
-		data["approved"] = by
-	}
-	if err := w.event("", "timer_removed", actor, data); err != nil {
-		return nil, err
 	}
 	return t, nil
 }

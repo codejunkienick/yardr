@@ -1300,15 +1300,13 @@ type BeadPatch struct {
 }
 
 // setOriginator is the originator part of UpdateBead inside the
-// transaction: the bead id becomes for the user to. by is the ask the change
-// was approved on, which the event carries, and nil for a change typed at a
-// terminal.
-func (w *wtx) setOriginator(ctx context.Context, id, to string, exp Expect, actor string, by *approvedOn) error {
+// transaction: the bead id becomes for the user to.
+func (w *wtx) setOriginator(ctx context.Context, id, to string, exp Expect, actor string) error {
 	_, err := w.changeBead(id, actor, func(w *wtx, b *beadRow) (string, map[string]any, error) {
 		if err := w.check(ctx, exp, b); err != nil {
 			return "", nil, err
 		}
-		if err := w.may(ctx, actor, ActChangeOriginator, Object{Kind: KindBead, Name: b.ID, Ask: Askable}); err != nil {
+		if err := w.may(ctx, actor, ActChangeOriginator, Object{Kind: KindBead, Name: b.ID}); err != nil {
 			return "", nil, err
 		}
 		if to == OriginatorAny {
@@ -1319,11 +1317,7 @@ func (w *wtx) setOriginator(ctx context.Context, id, to string, exp Expect, acto
 		}
 		from := b.Originator
 		b.Originator = to
-		data := map[string]any{"from": from, "to": to}
-		if by != nil {
-			data["approved"] = by
-		}
-		return "originator_changed", data, nil
+		return "originator_changed", map[string]any{"from": from, "to": to}, nil
 	})
 	return err
 }
@@ -1409,7 +1403,7 @@ func (s *Store) UpdateBead(ctx context.Context, id string, p BeadPatch, exp Expe
 			}
 		}
 		if p.Originator != nil {
-			if err := w.setOriginator(ctx, id, *p.Originator, exp, actor, nil); err != nil {
+			if err := w.setOriginator(ctx, id, *p.Originator, exp, actor); err != nil {
 				return err
 			}
 			// The write transaction serializes bead changes, and the caller's

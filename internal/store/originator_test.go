@@ -16,7 +16,15 @@ import (
 // manual group humans.
 func originatorYard(t *testing.T) (store.API, context.Context) {
 	t.Helper()
-	s := storetest.New(t)
+	s, _, ctx := originatorYardOwned(t)
+	return s, ctx
+}
+
+// originatorYardOwned is originatorYard that also returns the store behind
+// the API, for what the socket does not carry: the mark of a refusal.
+func originatorYardOwned(t *testing.T) (store.API, *store.Store, context.Context) {
+	t.Helper()
+	s, own := storetest.NewOwned(t)
 	ctx := context.Background()
 	if _, err := s.AddUser(ctx, "jo", "jo"); err != nil {
 		t.Fatal(err)
@@ -40,7 +48,7 @@ func originatorYard(t *testing.T) (store.API, context.Context) {
 	if err := s.PutGroup(ctx, store.Group{Name: "humans", Runner: "manual"}, "jo"); err != nil {
 		t.Fatal(err)
 	}
-	return s, ctx
+	return s, own, ctx
 }
 
 // createdOriginator is the originator the bead's created event carries.
@@ -284,7 +292,7 @@ func TestQuestionBeadOriginator(t *testing.T) {
 // it already is logs nothing; anyone else is refused, for that too.
 func TestBeadUpdateOriginator(t *testing.T) {
 	t.Parallel()
-	s, ctx := originatorYard(t)
+	s, own, ctx := originatorYardOwned(t)
 	b, err := s.CreateBead(ctx, store.NewBead{Title: "x", Depot: "yard"}, "jo")
 	if err != nil {
 		t.Fatal(err)
@@ -293,6 +301,14 @@ func TestBeadUpdateOriginator(t *testing.T) {
 	if _, err := s.UpdateBead(ctx, b.ID, store.BeadPatch{Originator: &hal}, store.Expect{}, "hal"); err == nil ||
 		!strings.Contains(err.Error(), "only the operator (jo) may change a bead's originator; this is hal") {
 		t.Fatalf("hal's change: %v", err)
+	}
+	// The mark is the store's own: the socket carries a refusal's words but
+	// not its mark, so it is asked of the store behind the API. No run ask
+	// proposes an originator change.
+	if _, err := own.UpdateBead(ctx, b.ID, store.BeadPatch{Originator: &hal}, store.Expect{}, "hal"); err == nil {
+		t.Fatal("hal's change through own = nil")
+	} else if class, ok := store.IsOperatorOnly(err); !ok || class != store.Alone {
+		t.Fatalf("hal's change through own = %v (mark %v, %v), want an operator-only refusal marked alone", err, class, ok)
 	}
 	if _, err := s.UpdateBead(ctx, b.ID, store.BeadPatch{Originator: &mallory}, store.Expect{}, "jo"); err == nil ||
 		!strings.Contains(err.Error(), "--originator: user mallory: not found") {

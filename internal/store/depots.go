@@ -51,9 +51,9 @@ func (r *Depot) IsDir() bool { return r.Kind == DepotDir }
 // holds: what tests a depot must not change unseen. A depot given no kind is
 // a git depot. Adding a depot the yard has not is the operator's, and a run
 // ask may propose it; it is never delegated, since a depot names code the
-// yard fetches and runs. Changing an existing depot's path or kind is the
-// operator's alone; its test command or base is the operator's, and a run
-// ask may propose it. Re-adding one with all four unchanged is anyone's.
+// yard fetches and runs. Changing an existing depot's path, kind or base is
+// the operator's alone; its test command is the operator's, and a run ask may
+// propose it. Re-adding one with all four unchanged is anyone's.
 // From a session's or a crew member's pane the write is recorded as that
 // session's actor or that crew member, whatever actor says; from anywhere
 // else, as given (paneAuthor).
@@ -127,7 +127,7 @@ func (w *wtx) putDepot(ctx context.Context, r Depot, actor string, by *approvedO
 			}
 		}
 		if r.Base != was.Base {
-			if err := w.may(ctx, actor, ActChangeDepotBase, Object{Kind: KindDepot, Name: r.Name, Ask: Askable, Delegate: true}); err != nil {
+			if err := w.may(ctx, actor, ActChangeDepotBase, Object{Kind: KindDepot, Name: r.Name, Delegate: true}); err != nil {
 				return err
 			}
 		}

@@ -393,7 +393,7 @@ func TestIdentitiesAndSubscriptions(t *testing.T) {
 // removed by the same call: the name says which of the two it is.
 func TestUserIdentity(t *testing.T) {
 	t.Parallel()
-	s := storetest.New(t)
+	s, own := storetest.NewOwned(t)
 	ctx := context.Background()
 	if _, err := s.AddUser(ctx, "jo", "me"); err != nil {
 		t.Fatal(err)
@@ -438,6 +438,14 @@ func TestUserIdentity(t *testing.T) {
 	if err := s.SetIdentity(ctx, "nobody", "linear", store.Identity{ID: "x"}, "me"); err == nil ||
 		!strings.Contains(err.Error(), "only the operator (ada) may say who a crew member is in a source") {
 		t.Fatalf("a name that is no party as a user: %v", err)
+	}
+	// The mark is the store's own: the socket carries a refusal's words but
+	// not its mark, so it is asked of the store behind the API. No run ask
+	// proposes who a crew member is.
+	if err := own.SetIdentity(ctx, "nobody", "linear", store.Identity{ID: "x"}, "me"); err == nil {
+		t.Fatal("a name that is no party as a user through own = nil")
+	} else if class, ok := store.IsOperatorOnly(err); !ok || class != store.Alone {
+		t.Fatalf("a name that is no party as a user through own = %v (mark %v, %v), want an operator-only refusal marked alone", err, class, ok)
 	}
 	if err := s.SetIdentity(ctx, "nobody", "linear", store.Identity{ID: "x"}, "ada"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("a name that is no party: %v", err)
