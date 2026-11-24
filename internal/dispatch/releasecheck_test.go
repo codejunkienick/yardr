@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,7 @@ type releaseSite struct {
 	mu   sync.Mutex
 	body []byte
 	asks int
+	hook func()
 	srv  *httptest.Server
 }
 
@@ -33,8 +35,11 @@ func newReleaseSite(t *testing.T, version string) *releaseSite {
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		s.asks++
-		body := s.body
+		body, hook := s.body, s.hook
 		s.mu.Unlock()
+		if hook != nil {
+			hook()
+		}
 		if r.URL.Path != "/releases/latest.json" {
 			http.NotFound(w, r)
 			return
@@ -59,6 +64,14 @@ func (s *releaseSite) serve(version string) {
 func (s *releaseSite) serveRaw(body string) {
 	s.mu.Lock()
 	s.body = []byte(body)
+	s.mu.Unlock()
+}
+
+// onAsk runs f as each ask arrives, before the site answers it: a test
+// changes the yard in the middle of the check's ask with it.
+func (s *releaseSite) onAsk(f func()) {
+	s.mu.Lock()
+	s.hook = f
 	s.mu.Unlock()
 }
 
@@ -222,23 +235,135 @@ func TestReleaseCheckSilentCases(t *testing.T) {
 	}
 }
 
-// A latest.json that cannot be read faults once: two passes the
-// same day ask once and say it once, by the fault-once telling the
-// telemetry pass twins.
+// A fault the check meets is said once, and the day is spent before the
+// ask is made: two passes the same day make the asks and send the mails
+// the row names and say the fault once, by the fault-once telling the
+// telemetry pass twins. A row's check reads what the first pass held as
+// its fault, which the second pass the same day may have cleared.
 func TestReleaseCheckFaultsOnce(t *testing.T) {
-	y := newReleaseYard(t, "v1.3.0", "v1.2.3")
-	y.site.serveRaw(`{"version":`)
-	y.notify()
-	y.pass(y.now)
-	y.pass(y.now.Add(time.Hour))
-	if y.site.asked() != 1 {
-		t.Fatalf("asked %d, want the day's one ask", y.site.asked())
+	// host is what a host that means harm sends as a version: a marker,
+	// as many times as the row says.
+	const host = "HOSTTEXT"
+	// quiet says none of the host's text reached the log or the held
+	// fault, and that what did is short: told in the host's words, a
+	// fault would fill the log and the yard's memory of it with as many
+	// bytes as the host likes.
+	quiet := func(t *testing.T, y *releaseYard, told string) {
+		if strings.Contains(told, host) || strings.Contains(y.log.String(), host) {
+			t.Errorf("the host's text reached the log or the held fault %.300q", told)
+		}
+		if len(told) >= 256 {
+			t.Errorf("held fault is %d bytes, want under 256: %q", len(told), told)
+		}
+		for _, line := range strings.Split(y.log.String(), "\n") {
+			if len(line) >= 256 {
+				t.Errorf("a log line is %d bytes, want under 256: %.300s", len(line), line)
+			}
+		}
 	}
-	if n := strings.Count(y.log.String(), "release check: checking the latest release"); n != 1 {
-		t.Fatalf("fault said %d times, want 1:\n%s", n, y.log.String())
-	}
-	if len(y.mails()) != 0 {
-		t.Fatalf("mails = %v, want none", y.mails())
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, y *releaseYard)
+		fault string // the log line said once
+		asks  int
+		mails int
+		check func(t *testing.T, y *releaseYard, told string)
+	}{
+		{
+			name:  "a latest.json that cannot be read",
+			setup: func(t *testing.T, y *releaseYard) { y.site.serveRaw(`{"version":`) },
+			fault: "checking the latest release",
+			asks:  1,
+		},
+		{
+			// No home takes no file, as root or not, so the day cannot be
+			// spent: nothing is asked and nothing mailed, and the fault is
+			// the same words on the second pass.
+			name: "a state file that cannot be written before the ask",
+			setup: func(t *testing.T, y *releaseYard) {
+				y.d.Home = filepath.Join(t.TempDir(), "missing")
+			},
+			fault: "recording the check",
+			check: func(t *testing.T, y *releaseYard, told string) {
+				// The state file and the cause, never the temp file, whose
+				// name is random and would make every pass's words its own.
+				want := "writing " + filepath.Join(y.d.Home, "releasecheck.json") + ": "
+				if !strings.Contains(told, want) || strings.Contains(told, ".releasecheck-") {
+					t.Errorf("held fault = %q, want it to name %q and no temp file", told, want)
+				}
+			},
+		},
+		{
+			// The day is spent when the ask arrives, and the directory is
+			// read-only from then: the write of what was told finds no room
+			// for its temp file, and the file the day was spent in stands.
+			name: "a state file that cannot be written after the mail",
+			setup: func(t *testing.T, y *releaseYard) {
+				if os.Geteuid() == 0 {
+					t.Skip("root writes into a directory made read-only")
+				}
+				// The check's own directory: the store's file is not in it.
+				dir := t.TempDir()
+				y.home, y.d.Home = dir, dir
+				t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+				y.site.onAsk(func() {
+					if err := os.Chmod(dir, 0o500); err != nil {
+						t.Error(err)
+					}
+				})
+			},
+			fault: "recording the check",
+			asks:  1,
+			mails: 2,
+			check: func(t *testing.T, y *releaseYard, told string) {
+				if st := y.state(); !strings.Contains(st, `"last_check":"2026-11-24"`) || strings.Contains(st, "told") {
+					t.Errorf("state = %q, want the day spent and no release told", st)
+				}
+			},
+		},
+		{
+			// The most a latest.json is read to is 64 KiB: a version that
+			// fills it is one the check reads, and refuses.
+			name: "a version of 60 KiB",
+			setup: func(t *testing.T, y *releaseYard) {
+				y.site.serveRaw(`{"version":"` + strings.Repeat(host, 60*1024/len(host)) + `"}`)
+			},
+			fault: "checking the latest release",
+			asks:  1,
+			check: quiet,
+		},
+		{
+			// A release that is newer, as a latest.json over the most it is
+			// read to: refused, and so not mailed of.
+			name: "a latest.json over 64 KiB",
+			setup: func(t *testing.T, y *releaseYard) {
+				y.site.serveRaw(`{"version":"v1.3.0","more":"` + strings.Repeat(host, 64*1024/len(host)+1) + `"}`)
+			},
+			fault: "checking the latest release",
+			asks:  1,
+			check: quiet,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			y := newReleaseYard(t, "v1.3.0", "v1.2.3")
+			tc.setup(t, y)
+			y.notify()
+			y.pass(y.now)
+			told := dispatch.ReleaseCheckTold(y.d)
+			y.pass(y.now.Add(time.Hour))
+			if got := y.site.asked(); got != tc.asks {
+				t.Errorf("asked %d, want %d", got, tc.asks)
+			}
+			if got := len(y.mails()); got != tc.mails {
+				t.Errorf("mails = %v, want %d", y.mails(), tc.mails)
+			}
+			if n := strings.Count(y.log.String(), "release check: "+tc.fault); n != 1 {
+				t.Errorf("fault said %d times, want 1:\n%s", n, y.log.String())
+			}
+			if tc.check != nil {
+				tc.check(t, y, told)
+			}
+		})
 	}
 }
 

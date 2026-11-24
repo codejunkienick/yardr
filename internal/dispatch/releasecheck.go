@@ -200,7 +200,10 @@ func ReleaseFileUnder(path string) string {
 
 // FetchLatest reads the latest release from base: latest.json only,
 // proved no further than that it names a version. Callers that
-// install verify the signed checksums before they trust it.
+// install verify the signed checksums before they trust it. A version
+// that is none is refused in words of this file's own, never with the
+// host's in them: the host may send as many bytes there as the body
+// allows, and the error is told in the daemon's log and on a terminal.
 func FetchLatest(ctx context.Context, base string, client *http.Client) (*ReleaseLatest, error) {
 	b, err := ReleaseGet(ctx, base, client, "/releases/latest.json", ReleaseLatestMost)
 	if err != nil {
@@ -211,7 +214,7 @@ func FetchLatest(ctx context.Context, base string, client *http.Client) (*Releas
 		return nil, fmt.Errorf("yardr.dev's /releases/latest.json cannot be read: %v; yardr was not fetched", err)
 	}
 	if _, ok := ParseReleaseVersion(latest.Version); !ok {
-		return nil, fmt.Errorf("yardr.dev's /releases/latest.json names %q, which is no version of a release; yardr was not fetched", latest.Version)
+		return nil, fmt.Errorf("yardr.dev's /releases/latest.json does not name a release version; yardr was not fetched")
 	}
 	return &latest, nil
 }
@@ -239,6 +242,9 @@ func loadReleaseCheckState(path string) (*releaseCheckState, error) {
 	return st, nil
 }
 
+// saveReleaseCheckState writes st by a temp file renamed over path, so a
+// write that fails leaves the file as it was: the check leans on that
+// when the write of what it told comes after the mail.
 func saveReleaseCheckState(path string, st *releaseCheckState) error {
 	data, err := json.Marshal(st)
 	if err != nil {
@@ -246,22 +252,42 @@ func saveReleaseCheckState(path string, st *releaseCheckState) error {
 	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".releasecheck-*.tmp")
 	if err != nil {
-		return err
+		return releaseCheckWriteError(path, err)
 	}
 	tmp := f.Name()
 	defer os.Remove(tmp)
 	if err := f.Chmod(0o600); err != nil {
 		f.Close()
-		return err
+		return releaseCheckWriteError(path, err)
 	}
 	if _, err := f.Write(append(data, '\n')); err != nil {
 		f.Close()
-		return err
+		return releaseCheckWriteError(path, err)
 	}
 	if err := f.Close(); err != nil {
-		return err
+		return releaseCheckWriteError(path, err)
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return releaseCheckWriteError(path, err)
+	}
+	return nil
+}
+
+// releaseCheckWriteError says that path could not be written, and why.
+// The path error of a step names the temp file, whose name is random,
+// and the rename's link error names both files: a message with either in
+// it differs on every pass, and releaseCheckFault, which says a fault
+// once by comparing messages, would say it on every pass.
+func releaseCheckWriteError(path string, err error) error {
+	var pathErr *fs.PathError
+	var linkErr *os.LinkError
+	switch {
+	case errors.As(err, &pathErr):
+		err = pathErr.Err
+	case errors.As(err, &linkErr):
+		err = linkErr.Err
+	}
+	return fmt.Errorf("writing %s: %w", path, err)
 }
 
 // releaseCheckAsk bounds the daily ask for latest.json.
@@ -323,18 +349,20 @@ func (d *Dispatcher) releaseCheck(ctx context.Context) {
 	if state != nil && state.LastCheck == today {
 		return // asked today already
 	}
-	// The day's ask counts even where it faults, so a bad answer is
-	// not retried on every pass: the fault below is told once, and
-	// the next ask is tomorrow's.
-	markChecked := func(told string) {
-		next := &releaseCheckState{Told: told, LastCheck: today}
-		if err := saveReleaseCheckState(path, next); err != nil {
-			fault("recording the check", err)
-		}
-	}
 	told := ""
 	if state != nil {
 		told = state.Told
+	}
+	// Spend the day before the ask is made, as telemetry marks its
+	// attempt before its request, whatever the ask will find: a bad
+	// answer is not retried on every pass (its fault is told once, and
+	// the next ask is tomorrow's), and a restarted daemon makes no
+	// second ask today. A home that cannot be written makes no ask at
+	// all: an ask whose day was never recorded would be made, and its
+	// release mailed of, on every pass.
+	if err := saveReleaseCheckState(path, &releaseCheckState{Told: told, LastCheck: today}); err != nil {
+		fault("recording the check", err)
+		return
 	}
 	// The round waits on this ask, and the client's own bound is sized
 	// for an archive: latest.json is a few bytes, so a host that hangs
@@ -344,12 +372,8 @@ func (d *Dispatcher) releaseCheck(ctx context.Context) {
 	cancel()
 	if err != nil {
 		if ctx.Err() != nil {
-			return // the daemon was told to stop; the day is not spent
+			return // the daemon was told to stop; the day's ask is spent
 		}
-		// Spend the day before telling, as telemetry marks its
-		// attempt before its request: a restarted daemon makes no
-		// second ask today.
-		markChecked(told)
 		fault("checking the latest release", err)
 		return
 	}
@@ -357,17 +381,14 @@ func (d *Dispatcher) releaseCheck(ctx context.Context) {
 	cur, ok := ParseReleaseVersion(curTag)
 	if !ok {
 		// A build with no release tag cannot be ordered against a
-		// release: it says nothing and spends the day.
-		markChecked(told)
+		// release: it says nothing, and the day stays spent.
 		return
 	}
 	ver, _ := ParseReleaseVersion(latest.Version)
 	if CompareReleaseVersion(ver, cur) <= 0 {
-		markChecked(told)
 		return // the same release, or an older one
 	}
 	if told == latest.Version {
-		markChecked(told)
 		return // already mailed of this one
 	}
 	ym := settings[store.YardmasterSetting]
@@ -389,10 +410,14 @@ func (d *Dispatcher) releaseCheck(ctx context.Context) {
 	if !mailed {
 		// A release nobody was told of is not recorded as told: the
 		// day is spent, and tomorrow's ask tries the mail again.
-		markChecked(told)
 		return
 	}
-	markChecked(latest.Version)
+	// A write that fails here leaves the file the day was spent in, whole,
+	// so no later pass today asks again or mails again; the release goes
+	// unrecorded as told, and tomorrow's ask mails of it once more.
+	if err := saveReleaseCheckState(path, &releaseCheckState{Told: latest.Version, LastCheck: today}); err != nil {
+		fault("recording the check", err)
+	}
 }
 
 // releaseCheckFault says a fault of the check's own, once until it

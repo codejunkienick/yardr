@@ -308,3 +308,8 @@ var QuietNotJudged = quietNotJudged
 // QuietOverBudget names the packages a whole-suite output failed on the R1
 // budget, each with the times its line named and no load.
 var QuietOverBudget = quietOverBudget
+
+// ReleaseCheckTold is the last fault the release check said, in the words it
+// compares the next one with: "" once a pass met none. A test reads it right
+// after a pass that faulted, as the next pass the same day clears it.
+func ReleaseCheckTold(d *Dispatcher) string { return d.releaseCheckTold }
