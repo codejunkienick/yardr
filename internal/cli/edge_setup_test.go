@@ -24,9 +24,20 @@ func (p edgeSetupPolicy) May(ctx context.Context, tx *bbolt.Tx, actor string, ac
 }
 
 // googleSourceText is one google source's declaration as its pack brings
-// it, against no real Google address: the hosted setup reads its name
-// and credential alone.
+// it, against no real Google address: the hosted setup reads its name,
+// its account input and its declared scopes alone. The mail-shaped one
+// declares no mint_scopes and so is never a hosted source.
 func googleSourceText(name string) string {
+	scopes := map[string]string{
+		"google-drive":    "https://www.googleapis.com/auth/drive.file",
+		"google-docs":     "https://www.googleapis.com/auth/documents",
+		"google-slides":   "https://www.googleapis.com/auth/presentations",
+		"google-calendar": "https://www.googleapis.com/auth/calendar.events, https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+	}[name]
+	line := ""
+	if scopes != "" {
+		line = "  mint_scopes: [" + scopes + "]\n"
+	}
 	return `name: ` + name + `
 base: https://google.example.com
 credential:
@@ -36,7 +47,7 @@ credential:
     - name: GOOGLE_ACCOUNT
       secret: false
   mint_command: [google-mint]
-calls:
+` + line + `calls:
   ping: { kind: read, request: { method: GET, path: /ping } }
 `
 }
@@ -73,9 +84,10 @@ func googleYard(t *testing.T, st store.API) {
 }
 
 // The hosted setup on a hosted yard: against a stand-in edge whose
-// connection granted only some of the fixed set, the granted sources
-// take the hosted mint as their effective mint, the ungranted keep the
-// pack's google-mint, and google-mail is untouched. Clearing a set
+// connection granted only some of the declared scopes, the granted
+// sources take the hosted mint as their effective mint, the ungranted
+// keep the pack's google-mint, and the source that declares no scope
+// (the mail-shaped one) is never probed, set or mentioned. Clearing a set
 // source's mint_command shows the pack's mint again. With no reading of
 // the provider's terms no record stands; with --terms-read one does,
 // naming the yard kind's provider.
@@ -109,12 +121,14 @@ func TestEdgeSetupGoogleHosted(t *testing.T) {
 		"source google-slides: kept the pack's mint",
 		"needs https://www.googleapis.com/auth/drive.file, missing from the Google connection's grant",
 		"needs https://www.googleapis.com/auth/presentations, missing from the Google connection's grant",
-		"source google-mail: skipped",
 		"no provider-terms record is made until you do",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("setup-google says no %q in:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out+errs, "google-mail") {
+		t.Errorf("setup-google mentions the source that declares no scope:\n%s%s", out, errs)
 	}
 	if strings.Contains(out+errs, "ya29.probe") {
 		t.Errorf("a probe's token was printed:\n%s%s", out, errs)

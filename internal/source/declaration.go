@@ -183,6 +183,11 @@ type Credential struct {
 	// and its arguments. Used where the source's mint_command setting is
 	// unset (the operator's wins); empty where the declaration brings none.
 	MintCommand []string `json:"mint_command,omitempty"`
+	// MintScopes are the scopes the hosted edge mint must see granted
+	// before the token is held: what the source needs from the hosted
+	// connection's grant, in declaration order, matched exactly. Empty
+	// where the hosted mint does not serve the source.
+	MintScopes []string `json:"mint_scopes,omitempty"`
 	// InPath says the service takes the credential in the request path,
 	// so a call's path may name {credential}. It is said out loud because
 	// a credential there is in the logs of every server on the way;
@@ -212,6 +217,25 @@ type CredentialLogin struct {
 
 // Minted reports whether the credential may be minted (nil-safe): the file names the variables a mint takes.
 func (c *Credential) Minted() bool { return c != nil && len(c.Mint) > 0 }
+
+// HostedAccountInput is the name of the mint input the hosted mint takes
+// its account from: the declaration's one mint input marked no secret.
+// ok is false where there is not exactly one, so a caller refuses naming
+// the source rather than guessing which input names the account.
+func (c *Credential) HostedAccountInput() (name string, ok bool) {
+	if c == nil {
+		return "", false
+	}
+	for _, n := range c.NotSecret {
+		if slices.Contains(c.Mint, n) {
+			if ok {
+				return "", false
+			}
+			name, ok = n, true
+		}
+	}
+	return name, ok
+}
 
 // EnvOf is the name of the variable a call of kind is sent with.
 func (c *Credential) EnvOf(kind string) string {

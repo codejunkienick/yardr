@@ -156,6 +156,18 @@ func TestGoogleDeclarations(t *testing.T) {
 			!reflect.DeepEqual(d.Credential.Mint, []string{"GOOGLE_ACCOUNT"}) {
 			t.Errorf("%s: credential = %+v", file, d.Credential)
 		}
+		// The hosted mint's scopes are declared, not named in core: the
+		// four hosted sources carry theirs, and mail, which mints
+		// locally, carries none.
+		mintScopes := map[string][]string{
+			"google-drive.yaml":    {"https://www.googleapis.com/auth/drive.file"},
+			"google-docs.yaml":     {"https://www.googleapis.com/auth/documents"},
+			"google-slides.yaml":   {"https://www.googleapis.com/auth/presentations"},
+			"google-calendar.yaml": {"https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly"},
+		}
+		if want := mintScopes[file]; !reflect.DeepEqual(d.Credential.MintScopes, want) {
+			t.Errorf("%s: mint_scopes = %q, want %q", file, d.Credential.MintScopes, want)
+		}
 		loginRun := map[string][]string{
 			"google-mail.yaml":     {"gws auth login -s gmail", "gws auth export --unmasked"},
 			"google-drive.yaml":    {"gws auth login -s drive", "gws auth export --unmasked"},

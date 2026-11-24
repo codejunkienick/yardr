@@ -390,6 +390,16 @@ call made as a user reads it. Both are read for every pack, as every key of a de
 ([A declaration added by hand](#a-declaration-added-by-hand)): a
 declaration carries no API number of its own.
 
+A credential may name `mint_scopes` beside `mint` and `mint_command`:
+the scopes the hosted edge mint must see granted before the token is
+held, each spelled whole as the service names it and matched exactly
+against the connection's grant, in declaration order. A source that
+names none is not served by the hosted mint. The hosted mint takes its
+account from the declaration's one mint input marked `secret: false`;
+a declaration with no such input, or with more than one, names no
+account to mint for. It is read for every pack the same way, as every
+key of a declaration is.
+
 A credential may name its pack's sign-in under `login`: `run`, the
 shell lines a person runs on their own machine to make the login, in
 order, and `paste`, the one line that says what to paste into which

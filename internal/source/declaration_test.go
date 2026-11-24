@@ -1392,6 +1392,80 @@ func TestParseCredentialMintSecretFalse(t *testing.T) {
 	}
 }
 
+// A credential names the scopes the hosted mint must see granted under
+// mint_scopes, beside mint and mint_command: whole scope strings, in
+// file order, matched exactly. What is refused is no list, no scope, a
+// blank or spaced scope and one twice; a file without the key declares
+// none, and the hosted account is its one no-secret mint input alone.
+func TestParseCredentialMintScopes(t *testing.T) {
+	scoped := strings.Replace(minted, "mint: [CRM_APP_ID, CRM_APP_KEY]",
+		"mint: [CRM_APP_ID, CRM_APP_KEY]\n  mint_scopes: [https://crm.example.com/read, https://crm.example.com/write]", 1)
+	d, err := Parse("crm.yaml", []byte(scoped))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"https://crm.example.com/read", "https://crm.example.com/write"}
+	if !slices.Equal(d.Credential.MintScopes, want) {
+		t.Fatalf("mint_scopes = %q, want %q", d.Credential.MintScopes, want)
+	}
+	blocked := strings.Replace(minted, "mint: [CRM_APP_ID, CRM_APP_KEY]",
+		"mint: [CRM_APP_ID, CRM_APP_KEY]\n  mint_scopes:\n    - https://crm.example.com/read\n    - https://crm.example.com/write", 1)
+	bd, err := Parse("crm.yaml", []byte(blocked))
+	if err != nil || !slices.Equal(bd.Credential.MintScopes, want) {
+		t.Fatalf("the block form reads as %q, %v", bd.Credential.MintScopes, err)
+	}
+	raw, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var again Declaration
+	if err := json.Unmarshal(raw, &again); err != nil || !slices.Equal(again.Credential.MintScopes, want) {
+		t.Fatalf("round trip = %+v, %v", again.Credential, err)
+	}
+	plain, err := Parse("crm.yaml", []byte(minted))
+	if err != nil || len(plain.Credential.MintScopes) != 0 {
+		t.Fatalf("a file without mint_scopes = %+v, %v", plain.Credential, err)
+	}
+	for name, tc := range map[string]struct{ text, want string }{
+		"no list":   {strings.Replace(scoped, "mint_scopes: [https://crm.example.com/read, https://crm.example.com/write]", "mint_scopes: https://crm.example.com/read", 1), "credential.mint_scopes: want a list of scope strings"},
+		"no scope":  {strings.Replace(scoped, "mint_scopes: [https://crm.example.com/read, https://crm.example.com/write]", "mint_scopes: []", 1), "credential.mint_scopes: no scope"},
+		"blank":     {strings.Replace(scoped, "https://crm.example.com/write", `" "`, 1), "credential.mint_scopes: scope \" \" holds a space"},
+		"spaced":    {strings.Replace(scoped, "https://crm.example.com/write", `"two words"`, 1), "credential.mint_scopes: scope \"two words\" holds a space"},
+		"twice":     {strings.Replace(scoped, "https://crm.example.com/write", "https://crm.example.com/read", 1), "credential.mint_scopes: scope https://crm.example.com/read is listed twice"},
+		"no string": {strings.Replace(scoped, "https://crm.example.com/write", "7", 1), "credential.mint_scopes: want a string"},
+	} {
+		_, err := Parse("f", []byte(tc.text))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
+		}
+	}
+	// The hosted account input is the one mint input marked no secret.
+	account := strings.Replace(minted, "mint: [CRM_APP_ID, CRM_APP_KEY]",
+		"mint:\n    - CRM_APP_ID\n    - { name: CRM_APP_KEY, secret: false }", 1)
+	ad, err := Parse("crm.yaml", []byte(account))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name, ok := ad.Credential.HostedAccountInput(); !ok || name != "CRM_APP_KEY" {
+		t.Fatalf("the hosted account input = %q, %v", name, ok)
+	}
+	if _, ok := plain.Credential.HostedAccountInput(); ok {
+		t.Error("a file with no no-secret input names a hosted account")
+	}
+	two := strings.Replace(minted, "mint: [CRM_APP_ID, CRM_APP_KEY]",
+		"mint:\n    - { name: CRM_APP_ID, secret: false }\n    - { name: CRM_APP_KEY, secret: false }", 1)
+	td, err := Parse("crm.yaml", []byte(two))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := td.Credential.HostedAccountInput(); ok {
+		t.Error("a file with two no-secret inputs names a hosted account")
+	}
+	if _, ok := (*Credential)(nil).HostedAccountInput(); ok {
+		t.Error("a file with no credential names a hosted account")
+	}
+}
+
 // A credential may word its own sign-in: the shell lines that make the
 // login, in order, and what to paste where. What is refused is a key
 // the map does not know, either half missing, no line at all, a line

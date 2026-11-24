@@ -177,8 +177,9 @@ type HostedFetch func(ctx context.Context, addr, source, account string) (token 
 
 // MintHosted is the token inputs mints with scope through the hosted
 // mint, asked of fetch in-process instead of by running argv as a
-// command: argv names the hosted mint (HostedGoogleMint), inputs names
-// GOOGLE_ACCOUNT, and fetch makes the one signed call. The token is kept
+// command: argv names the hosted mint (HostedGoogleMint), the
+// declaration's one non-secret mint input names the account in inputs,
+// and fetch makes the one signed call. The token is kept
 // in the same memory Mint keeps its tokens in, under the same key, so a
 // hosted token and a minted one age alike and neither is ever printed,
 // logged or stored. A token fetch refuses (an ungranted source, a refused
@@ -191,9 +192,13 @@ func MintHosted(ctx context.Context, d *Declaration, argv []string, inputs map[s
 	if src != d.Name {
 		return "", time.Time{}, fmt.Errorf("source %s: the hosted mint names source %s, not this source", d.Name, src)
 	}
-	account := inputs["GOOGLE_ACCOUNT"]
+	input, ok := d.Credential.HostedAccountInput()
+	if !ok {
+		return "", time.Time{}, fmt.Errorf("source %s: its declaration does not name exactly one non-secret mint input for the hosted mint's account", d.Name)
+	}
+	account := strings.TrimSpace(inputs[input])
 	if account == "" {
-		return "", time.Time{}, fmt.Errorf("source %s: its inputs name no GOOGLE_ACCOUNT", d.Name)
+		return "", time.Time{}, fmt.Errorf("source %s: its inputs name no %s", d.Name, input)
 	}
 	if fetch == nil {
 		return "", time.Time{}, fmt.Errorf("source %s: the yard mints hosted Google in-process in its server, and no server has registered its mint on this process: make the call as a source call (yardr call %s <call>), which the server mints for", d.Name, d.Name)

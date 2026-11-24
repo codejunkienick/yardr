@@ -630,7 +630,7 @@ func hasDots(path string) bool {
 func (r *reader) credential(e entry) *Credential {
 	c, has := &Credential{}, false
 	var update, mint, mintCommand, header, inPath, login *entry
-	for _, f := range r.entries(e.v, e.path, "env", "update_env", "header", "mint", "mint_command", "in_path", "url", "login") {
+	for _, f := range r.entries(e.v, e.path, "env", "update_env", "header", "mint", "mint_command", "mint_scopes", "in_path", "url", "login") {
 		switch f.key {
 		case "env":
 			has = true
@@ -661,6 +661,8 @@ func (r *reader) credential(e entry) *Credential {
 				r.errf(f.v, f.path, "the program %q is absolute: a mint_command a declaration brings is a file beside the declaration's file that the yard copies and hashes; the operator's own is set on the source (yardr source set <name> mint_command=<program>)", c.MintCommand[0])
 				c.MintCommand = nil
 			}
+		case "mint_scopes":
+			c.MintScopes = r.mintScopes(f)
 		case "in_path":
 			inPath = &f
 			if v, ok := r.boolean(f.v, f.path); ok {
@@ -857,6 +859,37 @@ func (r *reader) needs(e entry) []Need {
 		}
 		seenProg[program] = true
 		out = append(out, Need{Program: program, Env: env, Install: install})
+	}
+	return out
+}
+
+// mintScopes reads the scopes the hosted edge mint must see granted: a
+// list of one or more scope strings, each non-empty and without a space
+// in it, none twice. They are matched exactly against the grant, so the
+// file spells each whole, as the service names it.
+func (r *reader) mintScopes(e entry) []string {
+	if e.v.Kind != yaml.SequenceNode {
+		r.errf(e.v, e.path, "want a list of scope strings ([scope, ...]), got %s", describe(e.v))
+		return nil
+	}
+	if len(e.v.Content) == 0 {
+		r.errf(e.v, e.path, "no scope: mint_scopes names the scopes the hosted mint must see granted, or is left out")
+		return nil
+	}
+	var out []string
+	for _, c := range e.v.Content {
+		s, ok := r.str(c, e.path)
+		if !ok {
+			continue
+		}
+		switch {
+		case strings.TrimSpace(s) == "" || strings.ContainsFunc(s, unicode.IsSpace):
+			r.errf(c, e.path, "scope %q holds a space: a scope is one string, spelled whole as the service names it", s)
+		case slices.Contains(out, s):
+			r.errf(c, e.path, "scope %s is listed twice", s)
+		default:
+			out = append(out, s)
+		}
 	}
 	return out
 }

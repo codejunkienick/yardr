@@ -53,8 +53,8 @@ connected yard dials out, so it needs no open port and no tunnel of its own.
                               mints hosted Google in-process for a source
                               call, and this command mints nothing
   yardr edge setup-google <url>
-                              set the hosted mint on the google sources the
-                              edge's connection granted, and record the
+                              set the hosted mint on the sources that
+                              declare their hosted scopes, and record the
                               provider's terms on your reading of them
 
 Connecting sets the edge setting and hook_public_url (yardr settings).`}
@@ -521,10 +521,10 @@ whoever runs it.
 
 The way to the token is a source call, which the server mints for:
 yardr call <source> <call>. Set the hosted mint with yardr edge
-setup-google, which probes each granted source in-process and writes
-the mint_command line the server reads.`,
+setup-google, which probes each source that declares its hosted scopes
+in-process and writes the mint_command line the server reads.`,
 		Args: cobra.ExactArgs(2),
-		Example: `  yardr edge setup-google https://my.yardr.dev   # set the hosted mint on the granted google sources
+		Example: `  yardr edge setup-google https://my.yardr.dev   # set the hosted mint on the sources that declare their hosted scopes
   yardr call google-drive files   # the server mints in-process for the call`,
 		RunE: func(c *cobra.Command, args []string) error {
 			return a.edgeMintGoogle(c, args[0], args[1])
@@ -570,20 +570,19 @@ func (a *app) edgeSetupGoogleCmd() *cobra.Command {
 	var termsRead, bars bool
 	var termsURL, readOn string
 	cmd := &cobra.Command{
-		Use: "setup-google <edge-url>", Short: "Set the hosted mint on the granted google sources, and record the provider's terms",
-		Long: `Sets the hosted mint on this yard's google sources, for a yard whose
-Google is connected at the edge: each of google-drive, google-docs,
-google-slides and google-calendar is probed once through the edge, and
-only a source whose scopes the connection was granted gets
-mint_command="yardr edge mint-google <edge-url> <source>". That line is
-read by the yard's server as the hosted mint, which it mints in-process
-for a source call; running the command itself mints nothing, for any
-caller. A source the
-probe refuses keeps the pack's google-mint, and its token is discarded.
-google-mail is untouched: it mints locally in this slice. Clearing a
-source's mint_command (yardr source set <source> mint_command=) is the
-way back to the pack's mint. Only the operator sets a mint, as only the
-operator sets any source's.
+		Use: "setup-google <edge-url>", Short: "Set the hosted mint on the sources that declare their hosted scopes, and record the provider's terms",
+		Long: `Sets the hosted mint on this yard's sources that declare their hosted
+scopes (credential.mint_scopes in the source's declaration), for a yard
+whose Google is connected at the edge: each is probed once through the
+edge, and only a source whose declared scopes the connection was granted
+gets mint_command="yardr edge mint-google <edge-url> <source>". That
+line is read by the yard's server as the hosted mint, which it mints
+in-process for a source call; running the command itself mints nothing,
+for any caller. A source the probe refuses keeps the pack's mint, and
+its token is discarded. A source that declares no scope is not probed
+and is left as it is. Clearing a source's mint_command (yardr source
+set <source> mint_command=) is the way back to the pack's mint. Only
+the operator sets a mint, as only the operator sets any source's.
 
 The same setup records what you read of your model provider's terms.
 It names the provider of the yard's harness kind (default_kind) and
@@ -656,17 +655,32 @@ func (a *app) edgeSetupGoogle(c *cobra.Command, address string, termsRead bool, 
 		}
 		terms = &rec
 	}
+	// The sources this setup may set are the yard's whose declaration
+	// carries mint_scopes: what a source declares decides, and core
+	// names no source of its own. A declaration this build cannot read
+	// declares nothing it can act on and is left out.
+	sources, err := st.Sources(ctx)
+	if err != nil {
+		return err
+	}
+	type declaringSource struct {
+		src  store.Source
+		decl *source.Declaration
+	}
+	var hosted []declaringSource
+	for _, src := range sources {
+		d, derr := src.Declaration()
+		if derr != nil || d.Credential == nil || len(d.Credential.MintScopes) == 0 {
+			continue
+		}
+		hosted = append(hosted, declaringSource{src: src, decl: d})
+	}
 	// Check every source and setting this command may write before a
 	// probe signs a call with the yard's key. A policy may decide by
 	// source name, so permission to change one is not permission to probe
 	// the rest.
-	for _, name := range edgelink.GoogleMintSources {
-		if _, err := st.GetSource(ctx, name); errors.Is(err, store.ErrNotFound) {
-			continue
-		} else if err != nil {
-			return fmt.Errorf("source %s: %w", name, err)
-		}
-		if err := st.May(ctx, a.who(), store.ActSetSourceKey, store.Object{Kind: store.KindSource, Name: name, Ask: store.Alone}); err != nil {
+	for _, h := range hosted {
+		if err := st.May(ctx, a.who(), store.ActSetSourceKey, store.Object{Kind: store.KindSource, Name: h.src.Name, Ask: store.Alone}); err != nil {
 			return err
 		}
 	}
@@ -676,17 +690,12 @@ func (a *app) edgeSetupGoogle(c *cobra.Command, address string, termsRead bool, 
 		}
 	}
 	out := googleSetup{Edge: addr, Sources: []googleSetupSource{}}
-	for _, name := range edgelink.GoogleMintSources {
-		source, err := a.setupGoogleSource(ctx, st, cfg, addr, name)
+	for _, h := range hosted {
+		source, err := a.setupGoogleSource(ctx, st, cfg, addr, h.src, h.decl)
 		if err != nil {
 			return err
 		}
 		out.Sources = append(out.Sources, source)
-	}
-	if _, err := st.GetSource(ctx, "google-mail"); err == nil {
-		out.Sources = append(out.Sources, googleSetupSource{Source: "google-mail", Action: "skipped", Reason: "mints locally in this slice, and is left as it is"})
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return fmt.Errorf("source google-mail: %w", err)
 	}
 	// The provider of the yard's harness kind, and the record of its
 	// terms: shown and asked here, recorded only on the operator's
@@ -726,18 +735,18 @@ func (a *app) edgeSetupGoogle(c *cobra.Command, address string, termsRead bool, 
 	})
 }
 
-// setupGoogleSource probes one google source through the edge and sets
-// its hosted mint only where the probe answers with its scopes granted:
-// any refusal keeps the pack's mint, and the probe's token is discarded
-// with the probe. The setting is verified back as the source's
-// effective mint before it is said to stand.
-func (a *app) setupGoogleSource(ctx context.Context, st store.API, cfg *config.Config, addr, name string) (googleSetupSource, error) {
-	src, err := st.GetSource(ctx, name)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return googleSetupSource{Source: name, Action: "skipped", Reason: "not in this yard"}, nil
-		}
-		return googleSetupSource{}, fmt.Errorf("source %s: %w", name, err)
+// setupGoogleSource probes one source that declares its hosted scopes
+// through the edge and sets its hosted mint only where the probe answers
+// with its declared scopes granted: any refusal keeps the pack's mint,
+// and the probe's token is discarded with the probe. The account it
+// probes with is the value of the declaration's one non-secret mint
+// input in the source's env file. The setting is verified back as the
+// source's effective mint before it is said to stand.
+func (a *app) setupGoogleSource(ctx context.Context, st store.API, cfg *config.Config, addr string, src store.Source, d *source.Declaration) (googleSetupSource, error) {
+	name := src.Name
+	input, ok := d.Credential.HostedAccountInput()
+	if !ok {
+		return googleSetupSource{Source: name, Action: "kept", Reason: "its declaration does not name exactly one non-secret mint input for the hosted mint's account, so there is nothing to probe with"}, nil
 	}
 	file := src.EnvFile
 	if file == "" {
@@ -746,16 +755,16 @@ func (a *app) setupGoogleSource(ctx context.Context, st store.API, cfg *config.C
 	f, err := store.ReadEnvFile(file)
 	account := ""
 	if err == nil {
-		account = source.Lookup(f.Env, "GOOGLE_ACCOUNT")
+		account = source.Lookup(f.Env, input)
 	}
 	if account == "" {
-		return googleSetupSource{Source: name, Action: "kept", Reason: "its account GOOGLE_ACCOUNT is not set, so there is nothing to probe with"}, nil
+		return googleSetupSource{Source: name, Action: "kept", Reason: fmt.Sprintf("its account %s is not set, so there is nothing to probe with", input)}, nil
 	}
 	mint, err := a.mintGoogleThrough(ctx, addr, account, st, cfg)
 	if err != nil {
 		return googleSetupSource{Source: name, Action: "kept", Reason: err.Error()}, nil
 	}
-	if err := edgelink.CheckGoogleScopes(name, addr, mint.GrantedScopes); err != nil {
+	if err := edgelink.CheckGoogleScopes(name, addr, d.Credential.MintScopes, mint.GrantedScopes); err != nil {
 		return googleSetupSource{Source: name, Action: "kept", Reason: err.Error()}, nil
 	}
 	command := "yardr edge mint-google " + addr + " " + name

@@ -50,6 +50,7 @@ credential:
       secret: false               # an address, asked in the clear
       bound: true                 # one holder: the yard or one user, never both
   mint_command: [google-mint]       # the file beside this one; the source's own mint_command wins
+  mint_scopes: [https://www.googleapis.com/auth/drive.file]  # the scopes the hosted mint must see granted before it holds a token
   login:
     run: [gws auth login -s drive, gws auth export --unmasked]
     paste: paste the whole output of gws auth export --unmasked into the Google sign-in card for this account, and give no other card the export

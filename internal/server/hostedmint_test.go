@@ -42,6 +42,11 @@ func TestHostedMintFor(t *testing.T) {
 	if err := st.SetSetting(ctx, store.EdgeSetting, store.Edge{URL: srv.URL, Key: edge.PublicKey(), Handle: "mckean", Name: "mckean"}.String(), "jo"); err != nil {
 		t.Fatal(err)
 	}
+	// The source declares the scopes its hosted mint must see granted.
+	drive := "name: google-drive\nbase: https://google.example.com\ncredential:\n  env: GOOGLE_TOKEN\n  mint:\n    - name: GOOGLE_ACCOUNT\n      secret: false\n  mint_scopes: [https://www.googleapis.com/auth/drive.file]\ncalls:\n  files: { kind: read, request: { method: GET, path: /files } }\n"
+	if _, err := st.PutSource(ctx, "google-drive.yaml", drive, "jo"); err != nil {
+		t.Fatal(err)
+	}
 	mint := hostedMintFor(st, config.At(home))
 	token, expires, err := mint(ctx, srv.URL, "google-drive", "ada@example.com")
 	if err != nil || token != "ya29.hosted" || time.Until(expires) < 59*time.Minute {
@@ -51,7 +56,7 @@ func TestHostedMintFor(t *testing.T) {
 		t.Errorf("the edge took %+v, want the one mint by the pinned key", s)
 	}
 	if _, _, err := mint(ctx, srv.URL, "unlisted-source", "ada@example.com"); err == nil ||
-		!strings.Contains(err.Error(), "not served by the hosted Google mint") {
+		!strings.Contains(err.Error(), "declares no mint_scopes") {
 		t.Fatalf("an unknown hosted source = %v", err)
 	}
 	if s := edge.State(); len(s.Mints) != 1 {

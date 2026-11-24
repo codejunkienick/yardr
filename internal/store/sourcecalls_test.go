@@ -490,6 +490,7 @@ credential:
     - name: GOOGLE_ACCOUNT
       secret: false
   mint_command: [google-mint]
+  mint_scopes: [https://www.googleapis.com/auth/drive.file]
 calls:
   files: { kind: read, request: { method: GET, path: /drive/v3/files } }
 `
@@ -509,14 +510,21 @@ calls:
 }
 
 // hostedFetch is the minter a test registers for the server's: the edge
-// one, through the stand-in edge a call names, with its scope check.
+// one, through the stand-in edge a call names, with its scope check
+// against the scopes the source's declaration names.
 func hostedFetch(s store.API, home string) store.HostedMint {
 	return func(ctx context.Context, addr, source, account string) (string, time.Time, error) {
 		mint, err := edgelink.MintGoogleThrough(ctx, s, config.At(home).PeerKey(), nil, addr, account)
 		if err != nil {
 			return "", time.Time{}, err
 		}
-		if err := edgelink.CheckGoogleScopes(source, addr, mint.GrantedScopes); err != nil {
+		var needed []string
+		if src, err := s.GetSource(ctx, source); err == nil {
+			if d, derr := src.Declaration(); derr == nil && d.Credential != nil {
+				needed = d.Credential.MintScopes
+			}
+		}
+		if err := edgelink.CheckGoogleScopes(source, addr, needed, mint.GrantedScopes); err != nil {
 			return "", time.Time{}, err
 		}
 		expires, err := time.Parse(time.RFC3339, mint.ExpiresAt)

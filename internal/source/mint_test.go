@@ -455,6 +455,10 @@ func TestMintHosted(t *testing.T) {
 	t.Cleanup(SetMintClock(func() time.Time { return now }))
 	d := mintDecl(t)
 	d.Name = "google-drive"
+	// The account is the declaration's one non-secret mint input, as the
+	// google declarations name theirs.
+	d.Credential.Mint = []string{"GOOGLE_ACCOUNT"}
+	d.Credential.NotSecret = []string{"GOOGLE_ACCOUNT"}
 	ctx := context.Background()
 	dir := t.TempDir()
 	ran := filepath.Join(dir, "ran")
@@ -507,5 +511,18 @@ func TestMintHosted(t *testing.T) {
 	// No account is refused before any fetch.
 	if _, _, err := MintHosted(ctx, d, argv, map[string]string{}, "", fetch); err == nil || !strings.Contains(err.Error(), "name no GOOGLE_ACCOUNT") || fetches != 1 {
 		t.Fatalf("MintHosted with no account = %v (%d fetches)", err, fetches)
+	}
+	// A declaration with no non-secret input, or with two, names no
+	// account to mint for: refused before any fetch, naming the source.
+	for name, cred := range map[string]*Credential{
+		"none": {Env: "GOOGLE_TOKEN", Mint: []string{"GOOGLE_ACCOUNT"}},
+		"two":  {Env: "GOOGLE_TOKEN", Mint: []string{"GOOGLE_ACCOUNT", "GOOGLE_TEAM"}, NotSecret: []string{"GOOGLE_ACCOUNT", "GOOGLE_TEAM"}},
+	} {
+		dd := *d
+		dd.Credential = cred
+		if _, _, err := MintHosted(ctx, &dd, argv, inputs, "", fetch); err == nil ||
+			!strings.Contains(err.Error(), "google-drive") || !strings.Contains(err.Error(), "exactly one non-secret mint input") || fetches != 1 {
+			t.Errorf("%s: MintHosted = %v (%d fetches)", name, err, fetches)
+		}
 	}
 }
