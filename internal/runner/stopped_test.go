@@ -173,4 +173,23 @@ esac`)}
 	status("working", "opencode network error has just been printed")
 	later("w1:p4")
 	status("idle", "opencode network error has stood for stopStill")
+
+	// An unknown status preserves what is remembered: the same still pane
+	// is idle again once herdr says working.
+	show("Error: read ECONNRESET\n", `{"result":{"agent":{"agent":"opencode","agent_status":"unknown"}}}`)
+	status("unknown", "herdr says unknown")
+	show("Error: read ECONNRESET\n", `{"result":{"agent":{"agent":"opencode","agent_status":"working"}}}`)
+	status("idle", "the same still pane is idle again after unknown")
+
+	// A pane that cannot be captured is unknown, and what is remembered
+	// stands for the next readable pass.
+	if err := os.WriteFile(filepath.Join(dir, "agent"), []byte(`{"result":{"agent":{"agent":"opencode","agent_status":"working"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "screen")); err != nil {
+		t.Fatal(err)
+	}
+	status("unknown", "the pane cannot be captured")
+	show("Error: read ECONNRESET\n", `{"result":{"agent":{"agent":"opencode","agent_status":"working"}}}`)
+	status("idle", "the same still pane is idle again after the capture failure")
 }

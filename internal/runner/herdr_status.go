@@ -22,7 +22,8 @@ func (h *Herdr) Alive(ctx context.Context, handle map[string]any) (bool, error) 
 // Status returns herdr's view of the agent (idle, working, blocked, done,
 // unknown), or "" when the agent is gone. An error means herdr is unreachable.
 // An agent herdr calls working whose harness stopped on an error is idle
-// (see stopped).
+// (see stopped). One herdr calls unknown, or whose pane cannot be read to
+// judge, is unknown: what is remembered of a stop stands for the next read.
 func (h *Herdr) Status(ctx context.Context, handle map[string]any) (string, error) {
 	name, _ := handle["agent"].(string)
 	if name == "" {
@@ -39,10 +40,12 @@ func (h *Herdr) Status(ctx context.Context, handle map[string]any) (string, erro
 			} `json:"agent"`
 		}
 		_ = json.Unmarshal(raw, &info)
-		if info.Agent.Status == "" {
+		if info.Agent.Status == "" || info.Agent.Status == "unknown" {
 			return "unknown", nil
 		}
-		if h.stopped(ctx, handle, info.Agent.Kind, info.Agent.Status == "working") {
+		if idle, unknown := h.stopped(ctx, handle, info.Agent.Kind, info.Agent.Status == "working"); unknown {
+			return "unknown", nil
+		} else if idle {
 			return "idle", nil
 		}
 		return info.Agent.Status, nil
@@ -76,7 +79,9 @@ const (
 
 // stopped reports whether the agent of handle, which herdr calls working,
 // stopped on an error of its harness and waits for input. looks is whether
-// that can be at all: herdr says working.
+// that can be at all: herdr says working. unknown reports an inconclusive
+// read: the pane could not be captured, so nothing is said either way and
+// what is remembered of it stands.
 //
 // A harness that ends a turn on an error may tell herdr nothing: herdr's
 // hooks for Kimi (integration v7) hear Stop and Interrupt, and Kimi ends a
@@ -92,16 +97,16 @@ const (
 // test's source, a log), so the pane's end has to stand as it is for
 // stopStill; what is remembered of it is this process's, and a daemon that
 // replaced itself counts again.
-func (h *Herdr) stopped(ctx context.Context, handle map[string]any, kind string, looks bool) bool {
+func (h *Herdr) stopped(ctx context.Context, handle map[string]any, kind string, looks bool) (idle, unknown bool) {
 	pane, _ := handle["pane"].(string)
 	if pane == "" {
-		return false
+		return false, false
 	}
 	h.stopMu.Lock()
 	defer h.stopMu.Unlock()
 	if !looks {
 		delete(h.stops, pane)
-		return false
+		return false, false
 	}
 	// The kind the session was started as names its harness file; herdr's
 	// word for the agent is the same for the kinds it knows.
@@ -112,25 +117,25 @@ func (h *Herdr) stopped(ctx context.Context, handle map[string]any, kind string,
 	// poll; known kinds share at least the provider-agnostic network patterns.
 	if _, ok := agents.Lookup(kind); !ok {
 		delete(h.stops, pane)
-		return false
+		return false, false
 	}
 	tail, err := h.Tail(ctx, handle, stopLines)
 	if err != nil {
-		return false // a pane that cannot be read says nothing either way
+		return false, true
 	}
 	if _, _, found := dispatch.HarnessError(kind, tail); !found {
 		delete(h.stops, pane)
-		return false
+		return false, false
 	}
 	now := time.Now()
 	if was, ok := h.stops[pane]; ok && was.tail == tail {
-		return now.Sub(was.since) >= stopStill
+		return now.Sub(was.since) >= stopStill, false
 	}
 	if h.stops == nil {
 		h.stops = map[string]paneStop{}
 	}
 	h.stops[pane] = paneStop{tail: tail, since: now}
-	return false
+	return false, false
 }
 
 func (h *Herdr) Stop(ctx context.Context, handle map[string]any) error {
