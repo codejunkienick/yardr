@@ -52,9 +52,12 @@ var inputMarks = []string{"❯", "›"}
 // box, is the side of the box: it comes before the input mark, and before
 // and after each line of the input's text, of which it is no part.
 // placeholder is the input's hint when it holds nothing, for a harness
-// that draws one in no faint style; placeholderSGR is the colour such a
+// that draws one in no faint style; placeholderSGR is the colours such a
 // hint is drawn in, for a harness whose hint's words are not fixed.
-type paneMarks struct{ input, message, edge, placeholder, placeholderSGR string }
+type paneMarks struct {
+	input, message, edge, placeholder string
+	placeholderSGR                    []string
+}
 
 // marksOf is the marks of a harness kind, and whether yardr knows them:
 // its file (harnesses/<kind>.yaml, `marks`) names the mark of its input.
@@ -315,11 +318,11 @@ func (h *Herdr) InputText(ctx context.Context, handle map[string]any) (text stri
 // 2.1.1 does. The attribute is asked, not the wording: Claude Code's
 // placeholder is a different suggestion each time, and a person may type a
 // placeholder's very words. A kind whose hint is drawn in no faint style
-// and whose words are not fixed names its hint's colour instead
-// (harnesses/<kind>.yaml, `marks.placeholder_sgr`): text drawn in it is
-// left out the same way, for that kind only. Muse Code 1.4.11 draws its
-// hint in 38;2;103;108;116 and what a person typed in 38;2;204;211;219
-// (read live, 21 Oct 2026).
+// and whose words are not fixed names its hint's colours instead
+// (harnesses/<kind>.yaml, `marks.placeholder_sgr`): text drawn in any of
+// them is left out the same way, for that kind only. Muse Code 1.4.25
+// draws its hints in 38;2;103;108;116 and 38;2;114;116;131 and what a
+// person typed in 38;2;204;211;219 (read live, 24 Nov 2026).
 func inputText(styled, kind string) (text string, ok bool) {
 	kindMarks, _ := marksOf(kind)
 	plain, typed := unstyled(styled, kindMarks.placeholderSGR)
@@ -500,7 +503,7 @@ func (h *Herdr) InputLogin(ctx context.Context, handle map[string]any) (line str
 // the edge of a box is between its input and its transcript.
 func inputDialog(styled, kind string) (dialog, line string) {
 	hn, _ := agents.Lookup(kind)
-	plain, _ := unstyled(styled, "")
+	plain, _ := unstyled(styled, nil)
 	plain, _ = rowsOf(kind, plain, nil)
 	input, m := inputLine(plain, kind)
 	if input < 0 || len(hn.Dialogs) == 0 {
@@ -575,14 +578,14 @@ func isRule(line string) bool {
 
 // unstyled splits a pane read with its styling into lines, twice: plain is
 // each line's text, and typed the same with a space for each character that
-// is drawn faint or, for a kind that names its hint's colour, in that
-// colour (hint, "" for none), so that what is cut out of one is cut out of
+// is drawn faint or, for a kind that names its hint's colours, in one of
+// them (hints, nil for none), so that what is cut out of one is cut out of
 // the other at the same place (see rowsOf). Every
 // escape sequence is dropped; of SGR only faint (2) and what ends it (22,
 // 0) are followed, and the foreground colour (38), which 0 and 39 end. The
 // numbers after 38, 48 and 58 are a colour's, so a 2 among them
 // (`38;2;r;g;b`, `38;5;2`) is not the attribute.
-func unstyled(styled, hint string) (plain, typed []string) {
+func unstyled(styled string, hints []string) (plain, typed []string) {
 	var p, t strings.Builder
 	faint := false
 	fg := ""
@@ -622,7 +625,7 @@ func unstyled(styled, hint string) (plain, typed []string) {
 			i++ // a two-character escape
 		default:
 			p.WriteRune(r)
-			if faint || (hint != "" && fg == hint) {
+			if faint || slices.Contains(hints, fg) {
 				r = ' '
 			}
 			t.WriteRune(r)

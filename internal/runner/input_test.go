@@ -35,7 +35,12 @@ import (
 // 2026, narrowed: the input line carries the amber mark and, after it,
 // the hint in a truecolor grey (38;2;103;108;116), not faint, which comes
 // and goes. A word typed in a scratch pane the same day is drawn in
-// 38;2;204;211;219, not the hint's grey.
+// 38;2;204;211;219, not the hint's grey. Muse Code 1.4.25's hints of
+// 24 Nov 2026 are narrowed the same way: the shell hint in that grey from
+// a scratch pane's capture, the queue hint in a second grey
+// (38;2;114;116;131) from a herdr pane read, and the loop hint's words
+// from the report that held a nudge on them (event 245770); a word typed
+// in a scratch pane that day is still drawn in 38;2;204;211;219.
 //
 // Grok 1.0.77's idle pane was read with `herdr pane read --format ansi`.
 //
@@ -95,6 +100,25 @@ const (
 		museRule + museFooter
 	museDraftHintAfter = museHead11 + museVoice +
 		"❯ half a thought \x1b[0m\x1b[38;2;103;108;116msuggested rest\x1b[0m\r\n" +
+		museRule + museFooter
+	// The 1.4.25 hints of the read above, each in its grey; the loop
+	// hint is taken in each grey in turn, since its words alone never
+	// tell it from typed text.
+	museHead25    = "  Muse Code 1.4.25\r\n\r\n"
+	museHintShell = museHead25 + museVoice +
+		"\x1b[0m\x1b[38;2;251;191;36m❯ \x1b[0m\x1b[38;2;103;108;116mStart a message with ! to run a shell command yourself\x1b[0m\r\n" +
+		museRule + museFooter
+	museHintQueue = museHead25 + museVoice +
+		"\x1b[0m\x1b[38;2;236;177;0m❯ \x1b[0m\x1b[38;2;114;116;131mTab queues or steers while a run is active\x1b[0m\r\n" +
+		museRule + museFooter
+	museHintLoopGrey = museHead25 + museVoice +
+		"\x1b[0m\x1b[38;2;251;191;36m❯ \x1b[0m\x1b[38;2;103;108;116m/loop 10m <prompt> schedules a recurring prompt\x1b[0m\r\n" +
+		museRule + museFooter
+	museHintLoop = museHead25 + museVoice +
+		"\x1b[0m\x1b[38;2;236;177;0m❯ \x1b[0m\x1b[38;2;114;116;131m/loop 10m <prompt> schedules a recurring prompt\x1b[0m\r\n" +
+		museRule + museFooter
+	museDraftHintAfter2 = museHead25 + museVoice +
+		"❯ half a thought \x1b[0m\x1b[38;2;114;116;131msuggested rest\x1b[0m\r\n" +
 		museRule + museFooter
 	museTaken   = "❯ hi\r\n\r\n◆ echo: hi\r\n\r\n"
 	museWorking = museHead + "❯ hi\r\n\r\n◆ Thinking (3s · esc to interrupt)\r\n\r\n" +
@@ -216,9 +240,18 @@ func TestInputText(t *testing.T) {
 		// the kind names the colour: the hint reads empty, a styled draft
 		// reads its text, and hint-coloured words after a draft take none
 		// of it. Another kind keeps the colour's words as text.
-		"muse, 1.4.11 hint reads empty":           {"muse", museHint, "", true},
-		"muse, 1.4.11 styled draft":               {"muse", museDraftStyled, "helloverify", true},
-		"muse, draft with hint-coloured words":    {"muse", museDraftHintAfter, "half a thought", true},
+		"muse, 1.4.11 hint reads empty":        {"muse", museHint, "", true},
+		"muse, 1.4.11 styled draft":            {"muse", museDraftStyled, "helloverify", true},
+		"muse, draft with hint-coloured words": {"muse", museDraftHintAfter, "half a thought", true},
+		// Muse 1.4.25 draws its hints in either of two greys, so the kind
+		// names both: each hint reads empty, and a person who types a
+		// hint's very words, with no hint colour on them, has typed text.
+		"muse, 1.4.25 shell hint reads empty":     {"muse", museHintShell, "", true},
+		"muse, 1.4.25 queue hint reads empty":     {"muse", museHintQueue, "", true},
+		"muse, 1.4.25 loop hint reads empty":      {"muse", museHintLoop, "", true},
+		"muse, loop hint in the other grey":       {"muse", museHintLoopGrey, "", true},
+		"muse, draft with second-grey words":      {"muse", museDraftHintAfter2, "half a thought", true},
+		"muse, a hint's words typed":              {"muse", museHead25 + museVoice + "❯ /loop 10m check the build\r\n" + museRule + museFooter, "/loop 10m check the build", true},
 		"codex, another kind's hint colour":       {"codex", "› \x1b[0m\x1b[38;2;103;108;116mgrey words\x1b[0m\r\n" + codexFooter, "grey words", true},
 		"muse, sent message above an empty input": {"muse", museTaken + museEmpty, "", true},
 		"muse, sent message above a draft":        {"muse", museTaken + museDraft, "half a thought", true},
@@ -497,12 +530,18 @@ func TestNudgeIsNotTypedIntoAnInputThatHoldsText(t *testing.T) {
 		"claude placeholder":            {"claude", "❯", claudeEmpty, claudePlaceholder, false},
 		"codex placeholder":             {"codex", "›", codexEmpty, codexPlaceholder, false},
 		"codex empty":                   {"codex", "›", codexEmpty, codexEmpty, false},
-		"kimi draft":                    {"kimi", "✨", kimiEmpty, kimiDraft, true},
-		"kimi empty":                    {"kimi", "✨", kimiEmpty, kimiEmpty, false},
-		"grok draft":                    {"grok", "❯", grokEmpty, grokDraft, true},
-		"grok empty":                    {"grok", "❯", grokEmpty, grokEmpty, false},
-		"grok echo, no box":             {"grok", "❯", grokEmpty, grokTaken, false},
-		"no mark":                       {"acme", ">", noMark, noMark, false},
+		// Muse's hint is no text in either grey, so the nudge is typed;
+		// a styled draft there holds it back.
+		"muse hint, shell grey": {"muse", "❯", museEmpty, museHintShell, false},
+		"muse hint, queue grey": {"muse", "❯", museEmpty, museHintQueue, false},
+		"muse hint, loop":       {"muse", "❯", museEmpty, museHintLoop, false},
+		"muse draft":            {"muse", "❯", museEmpty, museDraftStyled, true},
+		"kimi draft":            {"kimi", "✨", kimiEmpty, kimiDraft, true},
+		"kimi empty":            {"kimi", "✨", kimiEmpty, kimiEmpty, false},
+		"grok draft":            {"grok", "❯", grokEmpty, grokDraft, true},
+		"grok empty":            {"grok", "❯", grokEmpty, grokEmpty, false},
+		"grok echo, no box":     {"grok", "❯", grokEmpty, grokTaken, false},
+		"no mark":               {"acme", ">", noMark, noMark, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
