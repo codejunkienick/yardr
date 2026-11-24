@@ -184,8 +184,10 @@ func (d *Dispatcher) recordContextOnRestart(ctx context.Context, runner Runner, 
 // crewWorkingOver drops what a working session no longer sits at: a draft or
 // dialog remembered from an idle spell, the login mark when the runtime says
 // working (a blocked status can still be a login screen, so that mark stays),
-// and the harness marks of the idle spell. It runs whether or not this pass
-// read context, so a read that keeps failing cannot leave those marks in place.
+// and the harness marks of the idle spell, the try's wait only on observed
+// work (an unknown status says nothing of it, so it stands). It runs whether
+// or not this pass read context, so a read that keeps failing cannot leave
+// those marks in place.
 func (d *Dispatcher) crewWorkingOver(ctx context.Context, s *memberSession, status string) {
 	key := s.key()
 	delete(d.drafts, key) // what was in its input was sent
@@ -194,5 +196,5 @@ func (d *Dispatcher) crewWorkingOver(ctx context.Context, s *memberSession, stat
 		d.markCrewLogin(ctx, s, "")
 	}
 	d.crewHarnessDialogOver(ctx, s)
-	d.crewHarnessOver(ctx, s, false)
+	d.crewHarnessOver(ctx, s, status, false)
 }

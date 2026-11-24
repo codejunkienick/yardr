@@ -799,7 +799,7 @@ func (d *Dispatcher) crewRunning(ctx context.Context, runner Runner, s *memberSe
 		}
 		d.crewHarnessError(ctx, runner, s)
 	} else if err == nil {
-		d.crewHarnessOver(ctx, s, true)
+		d.crewHarnessOver(ctx, s, status, true)
 	}
 	if err != nil || page.Total == 0 || !d.crewNudgeDue(s, page) || d.crewNudgeHeld(s) {
 		// Nothing to type yet, or held for an error of its harness: text in
