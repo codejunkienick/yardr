@@ -454,6 +454,90 @@ func TestCrewInboxReceipts(t *testing.T) {
 	}
 }
 
+// Another member's inbox read and shown receipts never reach a crew inbox
+// through --on, on the line or in a session slice: each stays with its
+// reader. mail_read still matches through --on, as the released pack API
+// promises. The reader's own inbox holds none either, as its own action.
+func TestCrewInboxReceiptsStayWithReader(t *testing.T) {
+	t.Parallel()
+	s, raw := storetest.NewRPCOwned(t)
+	ctx := seedSessionYard(t, s)
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	serveYardmaster(t, s, ctx, "", map[string]string{"hal": "/tmp/hal.env"})
+	must(s.CrewStartedFor(ctx, "yardmaster", "hal", map[string]any{"agent": "ym-hal"}))
+	r, err := s.GetCrew(ctx, "yardmaster")
+	must(err)
+	def := *r
+	def.On = []string{"mail_read", "inbox_read", "inbox_shown"}
+	if _, err := s.PutCrew(ctx, def, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PutCrew(ctx, store.CrewMember{Name: "watcher", Runner: "herdr", On: []string{store.KindAttention}}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	must(s.AddSubscription(ctx, "watcher", store.Subscription{Source: "telegram", Scope: store.ScopeAll}, "jo"))
+
+	before := head(t, s)
+	must(s.Mail(ctx, "watcher", "hi", "jo"))
+	mail := head(t, s)
+	hook := func(text string) uint64 {
+		t.Helper()
+		seq, _, err := raw.RecordHook(ctx, "telegram", map[string]any{"source": "telegram", "type": "message", "text": text}, []byte(`{}`), nil)
+		must(err)
+		return seq
+	}
+	first := hook("first")
+	must(s.AckInbox(ctx, "watcher", mail))
+	must(s.AckInbox(ctx, "watcher", first))
+	shown := hook("shown")
+	must(s.MarkNotifiedFor(ctx, "watcher", "", shown))
+	must(s.AckInbox(ctx, "watcher", shown))
+
+	var receipts []store.Event
+	for _, e := range kindsAfter(t, s, before) {
+		switch e.Kind {
+		case "mail_read", "inbox_read", "inbox_shown":
+			receipts = append(receipts, e)
+		}
+	}
+	if len(receipts) != 4 {
+		t.Fatalf("receipts after watcher's acks = %v, want mail_read, two inbox_read and inbox_shown", kindsAfter(t, s, before))
+	}
+	for _, e := range receipts {
+		if e.Actor != "watcher" || e.Data["reader"] != "watcher" {
+			t.Fatalf("receipt = %+v, want actor and reader watcher", e)
+		}
+	}
+	line, err := s.Inbox(ctx, "yardmaster", 10)
+	must(err)
+	var got []string
+	for _, e := range line.Events {
+		if reader, _ := e.Data["reader"].(string); reader == "watcher" {
+			got = append(got, e.Kind)
+		}
+	}
+	if !slices.Equal(got, []string{"mail_read"}) {
+		t.Fatalf("watcher's receipts in yardmaster line inbox = %v, want [mail_read]", got)
+	}
+	hal, err := s.InboxFor(ctx, "yardmaster", "hal", 10)
+	must(err)
+	for _, e := range hal.Events {
+		if reader, _ := e.Data["reader"].(string); reader == "watcher" {
+			t.Fatalf("yardmaster hal slice holds watcher's %s: %+v", e.Kind, hal.Events)
+		}
+	}
+	own, err := s.Inbox(ctx, "watcher", 10)
+	must(err)
+	if own.Total != 0 {
+		t.Fatalf("watcher inbox after its acks = %+v, want empty", own.Events)
+	}
+}
+
 // An upgrade with unread items replays none and hides none: a per-user
 // slice starts at the crew cursor's position when the slice is made, and
 // what the line already read stays read.

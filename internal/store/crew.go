@@ -1011,11 +1011,11 @@ func reactionPreview(text string) string {
 
 // forCrew reports whether e belongs in r's inbox: mail to it, a reaction to
 // its own mail, a hook or bead event its subscriptions delivered to it when
-// logged, or a kind it hears of through --on, never its own actions nor
-// yardr telling of itself (aboutItself). --on works as implicit
-// "yardr all kind=<k>" subscriptions, checked when the inbox is read, and
-// also covers events not about a bead. A word of --on may be a class
-// (KindAttention): what it holds is looked up here, each time.
+// logged, or a kind it hears of through --on except an inbox read or shown
+// receipt, never its own actions nor yardr telling of itself (aboutItself).
+// --on works as implicit "yardr all kind=<k>" subscriptions, checked when
+// the inbox is read, and also covers events not about a bead. A word of --on
+// may be a class (KindAttention): what it holds is looked up here, each time.
 func forCrew(r *CrewMember, e Event) bool {
 	if e.Actor == r.Name || (e.Bead != nil && aboutItself(r, *e.Bead, e.Kind)) {
 		return false
@@ -1033,7 +1033,7 @@ func forCrew(r *CrewMember, e Event) bool {
 	case "hook":
 		return Reason(e, r.Name) != ""
 	}
-	return Reason(e, r.Name) != "" || slices.ContainsFunc(kindWords(EventKind(e.Kind)), func(word string) bool {
+	return Reason(e, r.Name) != "" || !ReceiptStaysWithReader(e.Kind) && slices.ContainsFunc(kindWords(EventKind(e.Kind)), func(word string) bool {
 		return slices.Contains(r.On, word)
 	})
 }

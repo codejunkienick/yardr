@@ -151,6 +151,107 @@ func TestSubscribeBareTakesNoFlags(t *testing.T) {
 	}
 }
 
+// A filtered receipt kind in --on keeps its mark but reaches no inbox: the
+// matrix reports what forCrew matches. mail_read still reaches, as the
+// released pack API promises.
+func TestSubscribeMatrixFilteredReceipt(t *testing.T) {
+	t.Parallel()
+	crew := []store.CrewMember{{Name: "yardmaster", On: []string{"mail_read", "inbox_read", "inbox_shown"}}}
+	m := subscriptionMatrix(crew, nil, nil)
+	row := func(kind string) subRow {
+		t.Helper()
+		for _, r := range m.Rows {
+			if r.Kind == kind {
+				return r
+			}
+		}
+		t.Fatalf("no row for kind %q", kind)
+		return subRow{}
+	}
+	for _, kind := range []string{"mail_read", "inbox_read", "inbox_shown"} {
+		if got := strings.Join(row(kind).Marks["yardmaster"], "+"); got != "on" {
+			t.Errorf("%s: mark = %q, want on", kind, got)
+		}
+	}
+	if r := row("mail_read"); !slices.Equal(r.Reaches, []string{"yardmaster"}) {
+		t.Errorf("mail_read reaches %v, want [yardmaster]", r.Reaches)
+	}
+	for _, kind := range []string{"inbox_read", "inbox_shown"} {
+		if r := row(kind); len(r.Reaches) != 0 {
+			t.Errorf("%s reaches %v, want none", kind, r.Reaches)
+		}
+	}
+}
+
+// An explicit yardr subscription naming only a filtered receipt kind reaches
+// no inbox either: those receipts are beadless and never match an explicit
+// yardr subscription. The marks stay (on+sub, on+via); mail_read, the
+// attention class and a filter naming another kind beside a receipt still
+// reach, as before.
+func TestSubscribeMatrixFilteredReceiptExplicit(t *testing.T) {
+	t.Parallel()
+	yardr := func(where map[string]string) store.Subscription {
+		return store.Subscription{Source: store.SourceYardr, Scope: store.ScopeAll, Where: where}
+	}
+	kind := func(k string) map[string]string { return map[string]string{"kind": k} }
+	crew := []store.CrewMember{{
+		Name: "yardmaster", On: []string{"mail_read", "inbox_read", "inbox_shown"},
+		Subscriptions: []store.Subscription{
+			yardr(kind("mail_read")),
+			yardr(kind("inbox_read")),
+			yardr(kind(store.KindAttention)),
+			yardr(kind(store.JoinWhere([]string{"inbox_read", "held"}))),
+		},
+	}}
+	groups := []store.Group{{
+		Name: "approvers", Runner: "manual", Members: []string{"yardmaster"},
+		Subscriptions: []store.Subscription{yardr(kind("inbox_shown"))},
+	}}
+	m := subscriptionMatrix(crew, nil, groups)
+	row := func(sub store.Subscription) subRow {
+		t.Helper()
+		for _, r := range m.Rows {
+			if r.Subscription.String() == sub.String() {
+				return r
+			}
+		}
+		t.Fatalf("no row for %q", sub.String())
+		return subRow{}
+	}
+	r := row(yardr(kind("inbox_read")))
+	if got := strings.Join(r.Marks["yardmaster"], "+"); got != "on+sub" {
+		t.Errorf("inbox_read marks = %q, want on+sub", got)
+	}
+	if len(r.Reaches) != 0 {
+		t.Errorf("inbox_read on+sub reaches %v, want none", r.Reaches)
+	}
+	r = row(yardr(kind("inbox_shown")))
+	if got := strings.Join(r.Marks["yardmaster"], "+"); got != "on+via approvers" {
+		t.Errorf("inbox_shown marks = %q, want on+via approvers", got)
+	}
+	if got := strings.Join(r.Marks["approvers (group)"], "+"); got != "sub" {
+		t.Errorf("inbox_shown group mark = %q, want sub", got)
+	}
+	if len(r.Reaches) != 0 {
+		t.Errorf("inbox_shown on+via reaches %v, want none", r.Reaches)
+	}
+	r = row(yardr(kind("mail_read")))
+	if got := strings.Join(r.Marks["yardmaster"], "+"); got != "on+sub" {
+		t.Errorf("mail_read marks = %q, want on+sub", got)
+	}
+	if !slices.Equal(r.Reaches, []string{"yardmaster"}) {
+		t.Errorf("mail_read reaches %v, want [yardmaster]", r.Reaches)
+	}
+	for _, sub := range []store.Subscription{
+		yardr(kind(store.KindAttention)),
+		yardr(kind(store.JoinWhere([]string{"inbox_read", "held"}))),
+	} {
+		if r := row(sub); !slices.Equal(r.Reaches, []string{"yardmaster"}) {
+			t.Errorf("%s reaches %v, want [yardmaster]", sub.String(), r.Reaches)
+		}
+	}
+}
+
 // A group and crew member may share a name. Their marks must stay in their
 // own columns even though the group also delivers to that crew member.
 func TestSubscribeMatrixSameNameGroupAndCrew(t *testing.T) {

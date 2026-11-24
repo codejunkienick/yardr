@@ -509,3 +509,44 @@ func (w *wtx) crewInboxRead(r *CrewMember, session string, was, through uint64) 
 func crewInboxReceipt(reader, session string, through uint64) map[string]any {
 	return map[string]any{"reader": reader, "through": through, "session": session}
 }
+
+// ReceiptStaysWithReader reports whether kind is a crew inbox read or shown
+// receipt (inbox_read, inbox_shown): it reaches no crew inbox through --on,
+// only its reader sees it on the stream. mail_read is not one: it is a
+// released crew listener (docs/pack-api.md) and still matches through --on.
+func ReceiptStaysWithReader(kind string) bool {
+	return kind == "inbox_read" || kind == "inbox_shown"
+}
+
+// OnInbox is the inbox a crew member's --on word reaches: the member's own,
+// or none for a receipt that stays with its reader. The subscription matrix
+// reports it, as forCrew matches it.
+func OnInbox(member, word string) string {
+	if ReceiptStaysWithReader(word) {
+		return ""
+	}
+	return member
+}
+
+// SubInbox is the inbox an explicit subscription reaches: the holder's own,
+// or none for a yardr subscription naming only receipts that stay with
+// their reader. Those receipts are beadless and never match an explicit
+// yardr subscription (only the upgrade's failure kinds and a quiet hook
+// are matched without a bead), so such a filter reaches no inbox; one
+// naming another kind beside them still reaches. The subscription matrix
+// reports it, as deliverBeadless matches them.
+func SubInbox(holder string, sub Subscription) string {
+	if sub.Source == SourceYardr {
+		if kinds, ok := sub.Where["kind"]; ok {
+			for _, word := range WhereValues(kinds) {
+				for _, k := range KindsOf(word) {
+					if !ReceiptStaysWithReader(k) {
+						return holder
+					}
+				}
+			}
+			return ""
+		}
+	}
+	return holder
+}
