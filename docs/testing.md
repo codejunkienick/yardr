@@ -31,6 +31,17 @@ suites side by side make a load and times of their own, and a time over
 60 s must be the package's own to judge it by (yardr-t4c0).
 Over 60 s alone fails the run and names both times; 60 s or less passes
 with a `test: R1:` line naming both times and marking the first run as loaded.
+One exception, on that quiet fail path alone: the gate runs the same
+package alone at the base, in a temporary worktree it removes after, and
+a package over 60 s alone there too passes the landing with a
+`test: R1:` line naming the run's, the alone and the base's times and
+the fix bead a person now owes for the base's time, as a flake's line
+names the bead a hand files for it: the time is the base's, not the
+change's. Under budget at the base fails as before,
+and a base run that cannot start, fails or prints no seconds falls back
+to that failure. No fix bead is filed and no allow-list row is added by
+the gate: a person files the bead, and its fix deletes the row it adds
+to the list in `.yardr/test`.
 Load multiplies package times up to ~2.5x, so the first run's time by
 itself does not fail the gate.
 The re-measurement can be loaded too: the race lock holds off the other

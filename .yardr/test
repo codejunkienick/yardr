@@ -53,7 +53,11 @@
 # allow-list below, naming why each entry is over and which bead brings it
 # under; the fix beads delete the rows. A race leg runs a package it ran
 # over budget and not allow-listed again by itself: over budget alone on a
-# quiet machine fails the run; on a loaded machine (loaded as the re-runs
+# quiet machine fails the run, unless it is over budget alone at the base
+# too, which the same package alone in a worktree at the base then proves:
+# the landing passes with an R1 line naming both alone times and the fix
+# bead a person owes for the base's time, and a base run that cannot start
+# fails as before; on a loaded machine (loaded as the re-runs
 # started or as the last ended) it passes with an R1 line naming both times and
 # the load, unless YARDR_R1_STRICT is set by the quiet run. Then over budget
 # alone on a loaded machine is refused the verdict (exit 3), in an R1 line
@@ -1638,7 +1642,9 @@ summary() {
 # YARDR_QUIET_RUN is set.
 # A race leg that runs one of these over 60 s still passes;
 # any other package over 60 s is run again alone, and fails the run when
-# over 60 s again on a quiet machine; over again on a loaded one passes
+# over 60 s again on a quiet machine, unless it is over alone at the base
+# too (packagebudget runs it there): then the landing passes and a person
+# files the fix bead this list waits for; over again on a loaded one passes
 # with the load named (loaded as the re-run started or as it ended), unless
 # YARDR_R1_STRICT is set by the quiet run.
 # Then the loaded pass is off: over 60 s alone on a loaded machine is not
@@ -1789,13 +1795,20 @@ legflag() {
 # reads table does: awk takes no newline in -v.
 # A package over budget that the allow-list does not name is run again by
 # itself, and judged by the re-run: over 60 s alone fails on a quiet
-# machine, naming both times, and passes with both times and the load on a
-# loaded one (loadedmachine), unless YARDR_R1_STRICT is set by the quiet
+# machine, naming both times, unless the package is over alone at the base
+# too, which one more run of it alone in a worktree at the base (the ref
+# YARDR_BASE names, else origin/main) proves on that fail path alone: then
+# the run passes with an R1 line naming the run's, the alone and the
+# base's times and the fix bead owed, and a base run that cannot start,
+# fails or prints no seconds falls back to the failure; the worktree is
+# removed after, and the tree under test is untouched. Over alone on a
+# loaded machine passes with both times and the load (loadedmachine),
+# unless YARDR_R1_STRICT is set by the quiet
 # run. Then the loaded pass is off: over 60 s alone on a loaded machine is
 # refused the verdict, in a `test: R1:` line naming both times and the load,
 # and the run ends neither passed nor failed (exit 3, which only a strict
 # run returns, so only the quiet run ever sees it); over 60 s alone on a
-# quiet machine fails as before, and a quiet-sample failure or a failed
+# quiet machine is judged as above, base compare included, and a quiet-sample failure or a failed
 # re-run beside a refusal still fails the run (exit 1). The machine is
 # sampled twice, as the re-runs start and
 # when the last ends, and is loaded when either sample is (loadedeither);
@@ -1965,18 +1978,72 @@ packagebudget() {
       if awk -v s="$alone" 'BEGIN { exit !(s + 0 > 60) }'; then
         if load=$(loadedeither "$load_start" "$load_end"); then
           if [ -n "$YARDR_R1_STRICT" ]; then
-            echo "test: R1: $pkg took $secs s in the run, $alone s alone: over budget, loaded machine ($load), not judged"
+            echo "test: R1: not judged: $pkg took $secs s in the run, $alone s alone: over budget, loaded machine ($load)"
             # A refusal, not a failure: exit 3, unless a package already
             # failed the run, which still fails it.
             if [ "$st" != 1 ]; then
               st=3
             fi
           else
-            echo "test: R1: $pkg took $secs s in the run, $alone s alone: over budget, loaded machine ($load), not failed"
+            echo "test: R1: not failed: $pkg took $secs s in the run, $alone s alone: over budget, loaded machine ($load)"
           fi
         else
-          echo "test: $pkg took $secs s with -race, $alone s alone, over the 60 s budget (docs/testing.md R1)"
-          st=1
+          # Over alone on a quiet machine fails, unless the package is over
+          # alone at the base too: then the time is the base's, not the
+          # change's, and the landing passes with a line naming both alone
+          # times and the fix bead a person now owes, as a flake's line
+          # names the bead a hand files for it. The base run is the same
+          # package alone, with the leg's flags, in a worktree the run
+          # makes at the base and removes after: the tree under test is
+          # untouched, and nothing is written but the worktree. A base
+          # that cannot be read, a worktree that cannot be made or a base
+          # run that cannot start or fails falls back to the failure
+          # below, as an unknown load does; under budget at the base fails
+          # as before. The loaded verdicts above never reach this: a load
+          # is the machine's, not the base's, to excuse.
+          balone=
+          baseref=${YARDR_BASE:-origin/main}
+          bcommit=$(git rev-parse --verify --quiet "$baseref^{commit}" 2>/dev/null) || bcommit=
+          if [ -n "$bcommit" ]; then
+            bwt=$(mktemp -d "${TMPDIR:-/tmp}/yardr-r1-base.XXXXXX")
+            if git worktree add --detach "$bwt/wt" "$bcommit" >/dev/null 2>&1; then
+              bout=$bwt/out
+              # shellcheck disable=SC2086
+              ( cd "$bwt/wt" && $prefix $flags -count=1 "$pkg" </dev/null >"$bout" 2>&1; echo "$?" >"$bout.rc" )
+              brc=$(cat "$bout.rc" 2>/dev/null) || brc=1
+              [ -n "$brc" ] || brc=1
+              if [ "$brc" = 0 ]; then
+                balone=$(awk '
+                  function seconds(s, total, n) {
+                    if (s == "") return -1
+                    total = 0
+                    while (match(s, /^[0-9]+([.][0-9]+)?/)) {
+                      n = substr(s, 1, RLENGTH) + 0
+                      s = substr(s, RLENGTH + 1)
+                      if (s ~ /^h/) { total += n * 3600; sub(/^h/, "", s) }
+                      else if (s ~ /^ms/) { total += n / 1000; sub(/^ms/, "", s) }
+                      else if (s ~ /^m/) { total += n * 60; sub(/^m/, "", s) }
+                      else if (s ~ /^µs/) { total += n / 1000000; sub(/^µs/, "", s) }
+                      else if (s ~ /^us/) { total += n / 1000000; sub(/^us/, "", s) }
+                      else if (s ~ /^ns/) { total += n / 1000000000; sub(/^ns/, "", s) }
+                      else if (s ~ /^s/) { total += n; sub(/^s/, "", s) }
+                      else return -1
+                    }
+                    return s == "" ? total : -1
+                  }
+                  /^ok[ \t]/ { s = seconds($3); if (s >= 0) { printf "%.9g\n", s; exit } }
+                ' "$bout")
+              fi
+              git worktree remove --force "$bwt/wt" >/dev/null 2>&1 || true
+            fi
+            rm -rf "$bwt"
+          fi
+          if [ -n "$balone" ] && awk -v s="$balone" 'BEGIN { exit !(s + 0 > 60) }'; then
+            echo "test: R1: passed: $pkg took $secs s in the run, $alone s alone, $balone s alone at the base: over the 60 s budget on the base too (docs/testing.md R1), fix bead owed"
+          else
+            echo "test: $pkg took $secs s with -race, $alone s alone, over the 60 s budget (docs/testing.md R1)"
+            st=1
+          fi
         fi
       else
         echo "test: R1: $pkg took $secs s in the run, $alone s alone: under budget, loaded run"

@@ -4987,7 +4987,7 @@ func TestYardTestBudgetRerunSharesTheRaceHold(t *testing.T) {
 			want: []string{underAlone}, res: "pass",
 			given: "7", factor: "1.0", says: quietSays},
 		{name: "strict, over alone on a loaded machine is not judged", alone: "1m6.6s", code: 3, strict: true,
-			want: []string{"test: R1: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (load 25.3 on 10 cores), not judged"},
+			want: []string{"test: R1: not judged: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (load 25.3 on 10 cores)"},
 			res:  "not judged", avg: "25.3", factor: "2.5", says: "load 25.3 on 10 cores", par: "-p=3"},
 		{name: "strict, over alone on a quiet machine still fails", alone: "1m6.6s", code: 1, strict: true,
 			want: []string{"test: yardr.dev/yardr/internal/dispatch took 61.2 s with -race, 66.6 s alone, over the 60 s budget (docs/testing.md R1)"},
@@ -4995,7 +4995,7 @@ func TestYardTestBudgetRerunSharesTheRaceHold(t *testing.T) {
 		{name: "strict, a failed re-run beside a refusal still fails", alone: "1m6.6s", code: 1, strict: true,
 			want: []string{
 				"test: yardr.dev/yardr/internal/dispatch took 61.2 s with -race, over the 60 s budget (docs/testing.md R1), and its re-run alone failed",
-				"test: R1: yardr.dev/yardr/internal/pack took 61.3 s in the run, 66.6 s alone: over budget, loaded machine (load 72.4 on 10 cores), not judged",
+				"test: R1: not judged: yardr.dev/yardr/internal/pack took 61.3 s in the run, 66.6 s alone: over budget, loaded machine (load 72.4 on 10 cores)",
 			},
 			res: "fail", avg: "72.4", factor: "4.0", says: "load 72.4 on 10 cores", par: "-p=2",
 			second: "yardr.dev/yardr/internal/pack", fail: "yardr.dev/yardr/internal/dispatch"},
@@ -6373,7 +6373,10 @@ func runProbe(t *testing.T, probePath, dir string, inheritedEnv, env []string, a
 // apart still gets them running together. A scheduler that allows fewer
 // than the width never reaches it and the wait ends at its fuse, of about
 // ten seconds, with the lower overlap; one that allows more shows a higher
-// one. FAKE_CACHED prints no seconds, as a cached re-run would. It writes
+// one. FAKE_CACHED prints no seconds, as a cached re-run would. A call
+// from the base worktree packagebudget makes for its base compare (its
+// directory names yardr-r1-base) reports FAKE_BASE_ALONE instead, or
+// fails when FAKE_BASE_FAIL is set. It writes
 // down every call with YARDR_RACE_HELD.
 func r1go(t *testing.T) (fake string, env []string) {
 	t.Helper()
@@ -6405,6 +6408,20 @@ fi
 [ -n "$FAKE_SLEEP" ] && sleep "$FAKE_SLEEP"
 [ -z "$FAKE_TRACK" ] || echo "end $$" >>"$FAKE/journal"
 for last in "$@"; do pkg=$last; done
+# A run at the base (packagebudget's yardr-r1-base worktree) reports
+# FAKE_BASE_ALONE, or fails when FAKE_BASE_FAIL is set, so a case can
+# judge the branch against a base of its own choosing.
+case "$(pwd)" in
+*yardr-r1-base*)
+  if [ -n "$FAKE_BASE_FAIL" ]; then
+    echo "FAIL"
+    exit 1
+  fi
+  if [ -n "$FAKE_BASE_ALONE" ]; then
+    printf 'ok  \t%s\t%s\n' "$pkg" "$FAKE_BASE_ALONE"
+    exit 0
+  fi ;;
+esac
 if [ -n "$FAKE_FAIL" ]; then
   echo "--- FAIL: TestX (0.00s)"
   echo "FAIL"
@@ -7163,8 +7180,8 @@ func TestYardTestBudgets(t *testing.T) {
 		dispatchSlow = "ok  \tyardr.dev/yardr/internal/dispatch\t61.2s\n"
 		dispatchCall = "test -race -count=1 yardr.dev/yardr/internal/dispatch held=1"
 		underAlone   = "test: R1: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 12.3 s alone: under budget, loaded run"
-		loaded72     = "test: R1: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (load 72.4 on 10 cores), not failed"
-		refused72    = "test: R1: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (load 72.4 on 10 cores), not judged"
+		loaded72     = "test: R1: not failed: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (load 72.4 on 10 cores)"
+		refused72    = "test: R1: not judged: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (load 72.4 on 10 cores)"
 		overAlone    = "test: yardr.dev/yardr/internal/dispatch took 61.2 s with -race, 66.6 s alone, over the 60 s budget (docs/testing.md R1)"
 		reRunFailed  = "test: yardr.dev/yardr/internal/dispatch took 61.2 s with -race, over the 60 s budget (docs/testing.md R1), and its re-run alone failed"
 		over         = "FAKE_OVER=yardr.dev/yardr/internal/dispatch"
@@ -7221,6 +7238,67 @@ func TestYardTestBudgets(t *testing.T) {
 			}
 		})
 	}
+
+	// The base compare, on the quiet fail path alone: over alone at the
+	// base too passes with the base's time named and a fix bead owed,
+	// under at the base fails as before, and a base that cannot be read
+	// or a base run that cannot start falls back to that failure. The
+	// directory is a repository the case commits, so the base the gate
+	// runs is the commit it made; the tree must stand untouched after,
+	// with no worktree left.
+	t.Run("a package over alone is compared against the base before it fails", func(t *testing.T) {
+		t.Parallel()
+		const baseOver = "test: R1: passed: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone, 66.6 s alone at the base: over the 60 s budget on the base too (docs/testing.md R1), fix bead owed"
+		for _, c := range []struct {
+			name      string
+			baseref   string // the ref YARDR_BASE names for the run
+			basealone string // FAKE_BASE_ALONE, the base run's duration
+			basefail  bool   // the base run itself fails
+			code      int
+			has       string
+			hasNot    string
+			calls     string // the fake go's calls, in order
+		}{
+			{"over on the base too passes naming both alone times", "main", "1m6.6s", false, 0,
+				baseOver, overAlone, dispatchCall + "\n" + dispatchCall},
+			{"under on the base still fails as before", "main", "12.3s", false, 1,
+				overAlone, "alone at the base", dispatchCall + "\n" + dispatchCall},
+			{"a base that is not there falls back to the failure", "nowhere", "", false, 1,
+				overAlone, "alone at the base", dispatchCall},
+			{"a base run that fails falls back to the failure", "main", "", true, 1,
+				overAlone, "alone at the base", dispatchCall + "\n" + dispatchCall},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				writeFile(t, dir, "leg.txt", dispatchLeg)
+				commitBase(t, dir)
+				fake, env := r1go(t)
+				env = append(env, over, "YARDR_TEST_LOADAVG=1.5", "YARDR_TEST_CORES=10",
+					"YARDR_BASE="+c.baseref)
+				if c.basealone != "" {
+					env = append(env, "FAKE_BASE_ALONE="+c.basealone)
+				}
+				if c.basefail {
+					env = append(env, "FAKE_BASE_FAIL=1")
+				}
+				out, code := runEnv(t, dir, env, "packagebudget", "leg.txt", "go", "test", "-race", "./...")
+				wantRun(t, out, code, c.code, c.has+"\n")
+				wantNot(t, out, c.hasNot)
+				if got := fakeLog(fake, "calls"); got != c.calls {
+					t.Errorf("go was run as:\n%s\nwant:\n%s", got, c.calls)
+				}
+				// The run leaves the tree as it found it: nothing
+				// uncommitted, and the one worktree it started with.
+				if got := gitT(t, dir, "status", "--porcelain"); got != "" {
+					t.Errorf("the tree stands changed after the base compare:\n%s", got)
+				}
+				if got := gitT(t, dir, "worktree", "list", "--porcelain"); strings.Count(got, "worktree ") != 1 {
+					t.Errorf("worktrees after the base compare:\n%s\nwant the one the case made", got)
+				}
+			})
+		}
+	})
 
 	t.Run("quiet run marks, the conformance mark and the race leg's wait factor do not reach the budget probe", func(t *testing.T) {
 		t.Parallel()
@@ -7328,10 +7406,10 @@ loadedmachine() {
 		)
 		const overQuiet = "test: yardr.dev/yardr/internal/dispatch took 61.2 s with -race, 66.6 s alone, over the 60 s budget (docs/testing.md R1)"
 		loadedPass := func(load string) string {
-			return "test: R1: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (" + load + "), not failed"
+			return "test: R1: not failed: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (" + load + ")"
 		}
 		notJudged := func(load string) string {
-			return "test: R1: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (" + load + "), not judged"
+			return "test: R1: not judged: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (" + load + ")"
 		}
 		for _, c := range []struct {
 			name       string
@@ -7417,15 +7495,15 @@ loadedmachine() {
 				// so both are refused the verdict; dispatch sat in quiet
 				// and is convicted. A refusal beside a failure still fails
 				// the run.
-				"test: R1: yardr.dev/yardr/internal/bdp took 61.1 s in the run, 66.6 s alone: over budget, loaded machine (" + early + "), not judged",
+				"test: R1: not judged: yardr.dev/yardr/internal/bdp took 61.1 s in the run, 66.6 s alone: over budget, loaded machine (" + early + ")",
 				"test: yardr.dev/yardr/internal/dispatch took 61.2 s with -race, 66.6 s alone, over the 60 s budget (docs/testing.md R1)",
-				"test: R1: yardr.dev/yardr/internal/pack took 61.3 s in the run, 66.6 s alone: over budget, loaded machine (" + late + "), not judged",
+				"test: R1: not judged: yardr.dev/yardr/internal/pack took 61.3 s in the run, 66.6 s alone: over budget, loaded machine (" + late + ")",
 			}},
 			{"a landing, all by the batch's", false, 0, []string{
 				// The batch started in early and ended in late: all three name the start's.
-				"test: R1: yardr.dev/yardr/internal/bdp took 61.1 s in the run, 66.6 s alone: over budget, loaded machine (" + early + "), not failed",
-				"test: R1: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (" + early + "), not failed",
-				"test: R1: yardr.dev/yardr/internal/pack took 61.3 s in the run, 66.6 s alone: over budget, loaded machine (" + early + "), not failed",
+				"test: R1: not failed: yardr.dev/yardr/internal/bdp took 61.1 s in the run, 66.6 s alone: over budget, loaded machine (" + early + ")",
+				"test: R1: not failed: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (" + early + ")",
+				"test: R1: not failed: yardr.dev/yardr/internal/pack took 61.3 s in the run, 66.6 s alone: over budget, loaded machine (" + early + ")",
 			}},
 		} {
 			t.Run(c.name, func(t *testing.T) {
@@ -7616,10 +7694,10 @@ loadedmachine() {
 				"test: yardr.dev/yardr/internal/dispatch took 61.2 s with -race, 66.6 s alone, over the 60 s budget (docs/testing.md R1)",
 				"0.5", 3},
 			{"loaded passes", []string{"YARDR_TEST_LOADAVG=72.4", "YARDR_TEST_CORES=10"}, 0,
-				"test: R1: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (load 72.4 on 10 cores), not failed",
+				"test: R1: not failed: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (load 72.4 on 10 cores)",
 				"", 0},
 			{"strict refuses the verdict naming times and load, one re-run at a time", []string{"YARDR_TEST_LOADAVG=72.4", "YARDR_TEST_CORES=10", "YARDR_R1_STRICT=1"}, 3,
-				"test: R1: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (load 72.4 on 10 cores), not judged",
+				"test: R1: not judged: yardr.dev/yardr/internal/dispatch took 61.2 s in the run, 66.6 s alone: over budget, loaded machine (load 72.4 on 10 cores)",
 				"0.2", 1},
 		} {
 			t.Run(c.name, func(t *testing.T) {
