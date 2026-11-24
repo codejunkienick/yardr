@@ -455,10 +455,29 @@ func TestPeersDaemonGetsWhatQueuedWhileAway(t *testing.T) {
 		}
 		a.down.Store(true)
 		b.run(t)
-		until(t, "b tries the pong while a is down", func() bool {
-			w := b.waiting(t, "a")
-			return len(w) == 1 && w[0].Attempts == 1
-		})
+		// The pong has been tried at least once, not exactly once: the clock ticks
+		// and the daemon polls every 50ms, so under load it can be on its second
+		// try or later before this first reads, and a count that was stepped over
+		// never comes back. The retries after the first log nothing until the
+		// last (PeerTries), so a wait that runs out its fuse says what it last
+		// read; the literal keeps that to this wait.
+		var w []store.PeerOut
+		func() {
+			defer func() {
+				if !t.Failed() {
+					return
+				}
+				if len(w) == 0 {
+					t.Log("at the last read nothing waited at b for a")
+					return
+				}
+				t.Logf("at the last read %d waited at b for a, the first with Attempts %d", len(w), w[0].Attempts)
+			}()
+			until(t, "b tries the pong while a is down", func() bool {
+				w = b.waiting(t, "a")
+				return len(w) == 1 && w[0].Attempts >= 1
+			})
+		}()
 		a.down.Store(false)
 		until(t, "the pong tried while a was down", func() bool { return a.pong(t, id) != nil })
 		until(t, "nothing waits at b for a", func() bool { return len(b.waiting(t, "a")) == 0 })
