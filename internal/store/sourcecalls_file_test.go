@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"unicode/utf8"
 
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/storetest"
@@ -114,7 +115,7 @@ func TestSourceFileCallGrantedByName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.File == nil || len(res.File.Hash) != 64 || res.File.Name != "Plan.docx" || res.File.Bytes != int64(len(planBytes)) ||
+	if res.File == nil || len(res.File.Hash) != 64 || res.File.Name != "docs-content-Plan.docx" || res.File.Bytes != int64(len(planBytes)) ||
 		len(res.Answer) != 0 || res.Status != 200 {
 		t.Fatalf("answer = %+v", res)
 	}
@@ -172,7 +173,7 @@ func TestSourceFileCallGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := s.CallSource(ctx, call)
-	if err != nil || res.File == nil || res.File.Name != "Plan.docx" {
+	if err != nil || res.File == nil || res.File.Name != "docs-content-Plan.docx" {
 		t.Fatalf("a file call granted by name = %+v, %v", res, err)
 	}
 	may, err = s.SessionCalls(ctx, reviewer.ID)
@@ -262,6 +263,96 @@ func TestSourceFileCallFromPeerRefused(t *testing.T) {
 	}
 	if _, data := lastCall(t, y.api); !strings.Contains(data, `"status":"from_peer"`) {
 		t.Fatalf("event = %s", data)
+	}
+}
+
+// A file call's answer never suggests a bare name from outside: every
+// usable suggestion is written <source>-<call>-<suggested>, so a name a
+// harness started in the directory reads as its instructions (CLAUDE.md
+// and the rest, in any case) lands as a file of no harness's, and one that
+// cannot be used is the yard's own <source>-<call> with the bytes'
+// extension.
+func TestSuggestedFileName(t *testing.T) {
+	t.Parallel()
+	const prefix = "docs-content-"
+	const fallback = "docs-content.pdf"
+	pdf := []byte("%PDF-1.4 the converted bytes")
+	room := store.MaxBlobName - len(prefix)
+	type row struct{ suggested, want string }
+	rows := []row{
+		// An ordinary name is prefixed as well: no name goes through bare.
+		{"Plan.docx", prefix + "Plan.docx"},
+		{"Q3 plan (final).docx", prefix + "Q3 plan (final).docx"},
+		{"LICENSE", prefix + "LICENSE"},
+		{"a. b.docx", prefix + "a. b.docx"},
+		// What a service's name may carry before its last segment is dropped.
+		{"../../CLAUDE.md", prefix + "CLAUDE.md"},
+		{"/etc/AGENTS.md", prefix + "AGENTS.md"},
+		{`sub\dir\GEMINI.md`, prefix + "GEMINI.md"},
+		// The dots and spaces that trail a name are dropped before the
+		// prefix, and only those: a Windows path drops them as well.
+		{"CLAUDE.md.", prefix + "CLAUDE.md"},
+		{"CLAUDE.md ", prefix + "CLAUDE.md"},
+		{"CLAUDE.md. . ", prefix + "CLAUDE.md"},
+		{"Plan.docx...", prefix + "Plan.docx"},
+		// Nothing left of the last segment once its trailing dots and
+		// spaces are gone is no name.
+		{"", fallback},
+		{" ", fallback},
+		{"dir/", fallback},
+		{"dir/ . ", fallback},
+		// A hidden name falls back, as it did before the prefix.
+		{".envrc", fallback},
+		{".mcp.json", fallback},
+		{".git", fallback},
+		{"..", fallback},
+		{"../.envrc", fallback},
+		{".envrc.", fallback},
+		// So does one a file may not be named: a control character, a
+		// direction override, or bytes that are no UTF-8.
+		{"a\x00b.txt", fallback},
+		{"a\nb.txt", fallback},
+		{"a\u202eb.txt", fallback},
+		{"a\u2028b.txt", fallback},
+		{"a\xffb.txt", fallback},
+		// A name over the limit is cut, not replaced: the whole name is at
+		// most 255 bytes, and these reach it.
+		{strings.Repeat("a", 300), prefix + strings.Repeat("a", room)},
+		{strings.Repeat("a", room), prefix + strings.Repeat("a", room)},
+		{strings.Repeat("a", room+1), prefix + strings.Repeat("a", room)},
+		{strings.Repeat("a", room-1), prefix + strings.Repeat("a", room-1)},
+		// The cut falls between characters: the 242 bytes the prefix
+		// leaves hold 121 runes of 2 bytes, or 80 of 3 and 60 of 4 with 2
+		// bytes over, so the rune the cut would split is dropped whole.
+		{strings.Repeat("é", 150), prefix + strings.Repeat("é", 121)},
+		{strings.Repeat("€", 100), prefix + strings.Repeat("€", 80)},
+		{strings.Repeat("😀", 75), prefix + strings.Repeat("😀", 60)},
+		// A cut that finds no rune to keep leaves no name.
+		{strings.Repeat("\x80", 300), fallback},
+	}
+	// The names an agent's harness reads at its start, and the same in other
+	// case: none is compared with, all are prefixed like the rest.
+	for _, n := range []string{"CLAUDE.md", "AGENTS.md", "GEMINI.md", "AGENT.md", "CLAUDE.local.md", "QWEN.md", "WARP.md",
+		"AGENTS.override.md", "claude.md", "Claude.MD", "agents.Md", "gemini.MD"} {
+		rows = append(rows, row{n, prefix + n})
+	}
+	for _, r := range rows {
+		got := store.SuggestedFileName("docs", "content", r.suggested, pdf)
+		if got != r.want {
+			t.Errorf("suggestedFileName(%q) = %q, want %q", r.suggested, got, r.want)
+		}
+		// Whatever came in, the name is one the command may write.
+		if err := store.CheckBlobName(got); err != nil || got == "" || !utf8.ValidString(got) {
+			t.Errorf("suggestedFileName(%q) = %q, which a file may not be named: %v", r.suggested, got, err)
+		}
+	}
+
+	// The longest source and call names a declaration allows leave the
+	// suggestion 125 bytes of the 255.
+	src, call := strings.Repeat("s", 64), strings.Repeat("c", 64)
+	want := src + "-" + call + "-" + strings.Repeat("a", 125)
+	if got := store.SuggestedFileName(src, call, strings.Repeat("a", 300), pdf); got != want || len(got) != store.MaxBlobName {
+		t.Errorf("suggestedFileName with the longest names = %q (%d bytes), want %q", got, len(got), want)
 	}
 }
 

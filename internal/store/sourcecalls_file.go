@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	bolt "go.etcd.io/bbolt"
 
@@ -141,23 +142,49 @@ func (s *Store) keepFileAnswer(ctx context.Context, src, call string, res *sourc
 
 // suggestedFileName is the name a file call's answer suggests for the
 // caller's working directory: the final download's name, cut to its last
-// segment and held to CheckBlobName, and where that fails, names
-// nothing or names a hidden file, the yard's own <source>-<call> with the
-// extension the bytes' type suggests. No outside name picks a directory:
-// the command writes in its own, under this name alone. A hidden name is
-// refused because the names tools read as their own settings in a
-// working directory (.envrc, .mcp.json, .npmrc, .git) are hidden ones, and
-// a service's bytes must never land there as one.
+// segment, with <source>-<call>- in front of it, never the service's word
+// alone. A harness started in a directory reads some names there as its
+// instructions (CLAUDE.md, AGENTS.md, GEMINI.md, and whatever an operator
+// sets), and a file a service sent is data from outside, not that. No list
+// of such names is complete, so none is kept: every name is prefixed, and
+// a name that begins with the call's own words is none of them. The
+// segment loses the dots and spaces that trail it (a Windows path drops
+// them, so the file would not be the one printed), and is cut at a rune
+// boundary so that the whole name is at most MaxBlobName bytes; a source's
+// and a call's name are at most 64 bytes each, so the prefix leaves it
+// 125 at the least. Where the segment then names nothing, names a hidden
+// file, or fails CheckBlobName, the yard's own <source>-<call> with the
+// extension the bytes' type suggests stands instead. No outside name picks
+// a directory: the command writes in its own, under this name alone. A
+// hidden name still falls back, though the prefix would bury it: the names
+// tools read as their own settings in a working directory (.envrc,
+// .mcp.json, .npmrc, .git) are hidden ones, and a service that asks for
+// one gets the yard's name for the bytes, not a copy of its own.
 func suggestedFileName(src, call, suggested string, data []byte) string {
-	name := suggested
-	name = strings.ReplaceAll(name, "\\", "/")
+	name := strings.ReplaceAll(suggested, "\\", "/")
 	if i := strings.LastIndex(name, "/"); i >= 0 {
 		name = name[i+1:]
 	}
+	prefix := src + "-" + call + "-"
+	name = cutName(strings.TrimRight(name, ". "), MaxBlobName-len(prefix))
 	if name != "" && !strings.HasPrefix(name, ".") && CheckBlobName(name) == nil {
-		return name
+		return prefix + name
 	}
 	return src + "-" + call + fileExt(data)
+}
+
+// cutName is name cut to at most n bytes at a rune boundary: a character
+// the cut would split goes whole, so what is left is as valid as the name
+// it was cut from. An n below zero leaves nothing, as a prefix that took
+// the whole room would.
+func cutName(name string, n int) string {
+	if len(name) <= n {
+		return name
+	}
+	for n > 0 && !utf8.RuneStart(name[n]) {
+		n--
+	}
+	return name[:max(n, 0)]
 }
 
 // fileExt is the extension the bytes' own type suggests, for the yard's

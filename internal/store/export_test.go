@@ -519,6 +519,10 @@ func (s *Store) SetNoteFiles(id string, seq uint64, files []BlobRef) error {
 // FinishLine is finishLine: the first line of the finish note among notes.
 var FinishLine = finishLine
 
+// SuggestedFileName is suggestedFileName: the name a file call's answer
+// suggests for the caller's working directory.
+var SuggestedFileName = suggestedFileName
+
 // SetClockForTest replaces the clock now reads, for tests that move time.
 func SetClockForTest(f func() time.Time) { clock = f }
 
