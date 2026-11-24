@@ -409,7 +409,7 @@ func TestStoreChecksSettings(t *testing.T) {
 	// Sequential: process environment.
 	s, ctx := storetest.New(t), context.Background()
 	for want, kv := range map[string][2]string{
-		`no setting "hook_adr"; there is: backup_dir, backup_every, backup_keep, bdp_addr, blob_max_bytes, codesign_identity, default_kind, default_pack, disk_keep_gb, edge, files_max, general_cards, hearer, herdr_session, hook_addr, hook_public_url, hosted, max_sessions, name, operator, operator_note, operator_style, peer_file_max_bytes, permissions_preset, preview_idle, provider_terms, quiet_landings, router_addr, telemetry, timer_limit, timer_min_every, upgrade_from, upgrade_restore, web_addr, web_as, web_jwt_audience, web_jwt_header, web_jwt_issuer, web_jwt_jwks, web_jwt_privileged_session_max_age, web_jwt_users, web_pages_addr, web_pages_host, yard_description, yardmaster`: {"hook_adr", "4"},
+		`no setting "hook_adr"; there is: auto_upgrade, backup_dir, backup_every, backup_keep, bdp_addr, blob_max_bytes, codesign_identity, default_kind, default_pack, disk_keep_gb, edge, files_max, general_cards, hearer, herdr_session, hook_addr, hook_public_url, hosted, max_sessions, name, operator, operator_note, operator_style, peer_file_max_bytes, permissions_preset, preview_idle, provider_terms, quiet_landings, router_addr, telemetry, timer_limit, timer_min_every, upgrade_from, upgrade_restore, web_addr, web_as, web_jwt_audience, web_jwt_header, web_jwt_issuer, web_jwt_jwks, web_jwt_privileged_session_max_age, web_jwt_users, web_pages_addr, web_pages_host, yard_description, yardmaster`: {"hook_adr", "4"},
 		`default_kind "nope": herdr starts`:                                                                                 {"default_kind", "nope"},
 		`operator_style "loud": there is guide, show, work, report`:                                                         {"operator_style", "loud"},
 		`hook address "8790": want host:port`:                                                                               {"hook_addr", "8790"},
@@ -441,6 +441,8 @@ func TestStoreChecksSettings(t *testing.T) {
 		`web_jwt_privileged_session_max_age: bad duration "soon"`:                                                           {"web_jwt_privileged_session_max_age", "soon"},
 		`web_jwt_privileged_session_max_age: bad duration "0"`:                                                              {"web_jwt_privileged_session_max_age", "0"},
 		`web_jwt_privileged_session_max_age: bad duration "-5m"`:                                                            {"web_jwt_privileged_session_max_age", "-5m"},
+		`auto_upgrade "release": off or notify`:                                                                             {store.AutoUpgradeSetting, "release"},
+		`auto_upgrade "on": off or notify`:                                                                                  {store.AutoUpgradeSetting, "on"},
 		`codesign_identity "ada\n-x": no newline or control character`:                                                      {store.CodesignIdentitySetting, "ada\n-x"},
 		`codesign_identity "ada\tx": no newline or control character`:                                                       {store.CodesignIdentitySetting, "ada\tx"},
 		`codesign_identity "ada\x7fx": no newline or control character`:                                                     {store.CodesignIdentitySetting, "ada\x7fx"},

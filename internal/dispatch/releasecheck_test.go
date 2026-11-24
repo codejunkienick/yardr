@@ -1,0 +1,272 @@
+package dispatch_test
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"yardr.dev/yardr/internal/dispatch"
+	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/storetest"
+)
+
+// releaseSite stands in for yardr.dev's releases: it serves one
+// latest.json the test writes, and counts what was asked for.
+type releaseSite struct {
+	mu   sync.Mutex
+	body []byte
+	asks int
+	srv  *httptest.Server
+}
+
+func newReleaseSite(t *testing.T, version string) *releaseSite {
+	t.Helper()
+	s := &releaseSite{}
+	s.serve(version)
+	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		s.asks++
+		body := s.body
+		s.mu.Unlock()
+		if r.URL.Path != "/releases/latest.json" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(s.srv.Close)
+	return s
+}
+
+func (s *releaseSite) serve(version string) {
+	b, _ := json.Marshal(map[string]any{
+		"version":   version,
+		"checksums": "/releases/" + version + "/checksums.txt",
+		"targets":   map[string]any{},
+	})
+	s.mu.Lock()
+	s.body = b
+	s.mu.Unlock()
+}
+
+func (s *releaseSite) serveRaw(body string) {
+	s.mu.Lock()
+	s.body = []byte(body)
+	s.mu.Unlock()
+}
+
+func (s *releaseSite) asked() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.asks
+}
+
+// releaseYard is a dispatcher on a throwaway store whose release
+// check asks a stand-in site for a build the test names, by a clock
+// the test moves. The operator jo and a yardmaster user stand to
+// receive its mail.
+type releaseYard struct {
+	t    *testing.T
+	s    store.API
+	d    *dispatch.Dispatcher
+	site *releaseSite
+	home string
+	log  *lockedWriter
+	now  time.Time
+}
+
+func newReleaseYard(t *testing.T, version, current string) *releaseYard {
+	t.Helper()
+	home := t.TempDir()
+	y := &releaseYard{t: t, s: storetest.NewIn(t, home), home: home, log: &lockedWriter{}, now: time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC)}
+	y.site = newReleaseSite(t, version)
+	ctx := context.Background()
+	must(t, y.s.SetSetting(ctx, store.OperatorSetting, "jo", "jo"))
+	if _, err := y.s.AddUser(ctx, "yardmaster", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	// The hooks the check asks with, replaced for this test alone:
+	// the stand-in's address and client, and the build's tag. They
+	// are package hooks, so these tests run in sequence.
+	oldBase, oldHTTP, oldTag := dispatch.ReleaseBase, dispatch.ReleaseHTTP, dispatch.ReleaseCurrentTag
+	dispatch.ReleaseBase, dispatch.ReleaseHTTP = y.site.srv.URL, y.site.srv.Client()
+	dispatch.ReleaseCurrentTag = func() string { return current }
+	t.Cleanup(func() {
+		dispatch.ReleaseBase, dispatch.ReleaseHTTP, dispatch.ReleaseCurrentTag = oldBase, oldHTTP, oldTag
+	})
+	y.d = &dispatch.Dispatcher{Store: y.s, Runners: map[string]dispatch.Runner{}, Home: home, Log: slog.New(slog.NewTextHandler(y.log, nil))}
+	dispatch.SetClock(y.d, func() time.Time { return y.now })
+	return y
+}
+
+func (y *releaseYard) notify() {
+	y.t.Helper()
+	must(y.t, y.s.SetSetting(context.Background(), store.AutoUpgradeSetting, "notify", "jo"))
+}
+
+func (y *releaseYard) pass(at time.Time) {
+	y.t.Helper()
+	y.now = at
+	must(y.t, y.d.Reconcile(context.Background()))
+}
+
+// mails are the mail events the daemon sent, oldest first.
+func (y *releaseYard) mails() []store.Event {
+	y.t.Helper()
+	evs, err := y.s.Events(context.Background(), "", 0)
+	must(y.t, err)
+	var out []store.Event
+	for _, e := range evs {
+		if e.Kind == "mail" && e.Actor == "daemon" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func (y *releaseYard) state() string {
+	y.t.Helper()
+	b, err := os.ReadFile(store.ReleaseCheckState(y.home))
+	if os.IsNotExist(err) {
+		return ""
+	}
+	must(y.t, err)
+	return string(b)
+}
+
+// Setting off asks nothing and mails nothing; notify with a newer
+// release mails the operator and the yardmaster once, naming the
+// version and the command; the same day and the next ask again but
+// mail nothing more, since the release stands told of.
+func TestReleaseCheckMailsOncePerRelease(t *testing.T) {
+	y := newReleaseYard(t, "v1.3.0", "v1.2.3")
+	day := y.now
+
+	// Off (unset reads as off): no fetch, no mail, no state file.
+	y.pass(day)
+	if y.site.asked() != 0 || len(y.mails()) != 0 || y.state() != "" {
+		t.Fatalf("off: asked %d, mails %v, state %q", y.site.asked(), y.mails(), y.state())
+	}
+
+	y.notify()
+	y.pass(day.Add(time.Hour))
+	mails := y.mails()
+	if len(mails) != 2 {
+		t.Fatalf("mails = %v, want operator and yardmaster", mails)
+	}
+	tos := map[string]bool{}
+	for _, m := range mails {
+		tos[m.Data["to"].(string)] = true
+		if got := m.Data["text"].(string); got != "yardr v1.3.0 is out (you run v1.2.3): yardr upgrade" {
+			t.Errorf("mail text = %q", got)
+		}
+	}
+	if !tos["jo"] || !tos["yardmaster"] {
+		t.Errorf("mailed to %v, want jo and yardmaster", tos)
+	}
+	if !strings.Contains(y.state(), `"told":"v1.3.0"`) {
+		t.Errorf("state = %q, want v1.3.0 told", y.state())
+	}
+
+	// Same day: throttled, no second ask. Next day: asked again,
+	// already told, no second mail.
+	asks := y.site.asked()
+	y.pass(day.Add(2 * time.Hour))
+	if y.site.asked() != asks {
+		t.Errorf("same-day pass asked again: %d, want %d", y.site.asked(), asks)
+	}
+	y.pass(day.AddDate(0, 0, 1))
+	if y.site.asked() != asks+1 || len(y.mails()) != 2 {
+		t.Errorf("next day: asked %d, mails %d, want one more ask and no more mail", y.site.asked(), len(y.mails()))
+	}
+
+	// A still newer release the next day mails again, once.
+	y.site.serve("v1.4.0")
+	y.pass(day.AddDate(0, 0, 2))
+	if len(y.mails()) != 4 {
+		t.Fatalf("mails after v1.4.0 = %d, want 4", len(y.mails()))
+	}
+}
+
+// The same release and an older one are silent, as is a newer one
+// the state file already tells of.
+func TestReleaseCheckSilentCases(t *testing.T) {
+	for _, tc := range []struct{ name, latest, current, told string }{
+		{"same", "v1.2.3", "v1.2.3", ""},
+		{"older", "v1.2.2", "v1.2.3", ""},
+		{"told", "v1.3.0", "v1.2.3", "v1.3.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			y := newReleaseYard(t, tc.latest, tc.current)
+			if tc.told != "" {
+				// Yesterday it was told of: today's ask finds it so.
+				prev := `{"told":"` + tc.told + `","last_check":"2026-11-23"}` + "\n"
+				must(t, os.WriteFile(store.ReleaseCheckState(y.home), []byte(prev), 0o600))
+			}
+			y.notify()
+			y.pass(y.now)
+			if len(y.mails()) != 0 {
+				t.Fatalf("mails = %v, want none", y.mails())
+			}
+			if y.site.asked() != 1 {
+				t.Fatalf("asked %d, want the day's one ask", y.site.asked())
+			}
+		})
+	}
+}
+
+// A latest.json that cannot be read faults once: two passes the
+// same day ask once and say it once, by the fault-once telling the
+// telemetry pass twins.
+func TestReleaseCheckFaultsOnce(t *testing.T) {
+	y := newReleaseYard(t, "v1.3.0", "v1.2.3")
+	y.site.serveRaw(`{"version":`)
+	y.notify()
+	y.pass(y.now)
+	y.pass(y.now.Add(time.Hour))
+	if y.site.asked() != 1 {
+		t.Fatalf("asked %d, want the day's one ask", y.site.asked())
+	}
+	if n := strings.Count(y.log.String(), "release check: checking the latest release"); n != 1 {
+		t.Fatalf("fault said %d times, want 1:\n%s", n, y.log.String())
+	}
+	if len(y.mails()) != 0 {
+		t.Fatalf("mails = %v, want none", y.mails())
+	}
+}
+
+// Parse and compare of a release's version, the moved check's own
+// arithmetic.
+func TestParseCompareReleaseVersion(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want int
+	}{
+		{"v1.2.3", "v1.2.3", 0},
+		{"v1.2.4", "v1.2.3", 1},
+		{"v1.3.0", "v1.2.9", 1},
+		{"v2.0.0", "v1.9.9", 1},
+		{"v1.2.3", "v1.2.4", -1},
+	} {
+		av, ok := dispatch.ParseReleaseVersion(tc.a)
+		if !ok {
+			t.Fatalf("ParseReleaseVersion(%q) refused", tc.a)
+		}
+		bv, _ := dispatch.ParseReleaseVersion(tc.b)
+		if got := dispatch.CompareReleaseVersion(av, bv); got != tc.want {
+			t.Errorf("Compare(%s, %s) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+	for _, bad := range []string{"", "1.2.3", "v1.2", "v1.2.3.4", "v1.2.x", "v1..3"} {
+		if _, ok := dispatch.ParseReleaseVersion(bad); ok {
+			t.Errorf("ParseReleaseVersion(%q) taken", bad)
+		}
+	}
+}

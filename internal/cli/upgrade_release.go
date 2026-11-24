@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,13 +16,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
-	"time"
 
 	"golang.org/x/crypto/blake2b"
 
-	"yardr.dev/yardr/internal/version"
+	"yardr.dev/yardr/internal/dispatch"
 )
 
 // The release road of yardr upgrade: for a yardr with no checkout and no
@@ -34,12 +31,6 @@ import (
 // the archive is downloaded, latest.json is discovery only, and nothing
 // is trusted because it says so.
 
-// upgradeReleaseSite is the one host a release is fetched from. Every
-// address the fetch asks for is this host plus a path under /releases/
-// that the checks below have vetted, so a latest.json that names
-// another host, or a path outside /releases/, fetches nothing.
-const upgradeReleaseSite = "https://yardr.dev"
-
 // upgradeReleaseKey is the public half of the minisign key yardr's
 // releases are signed with (id 0ECCFE6E81F150B3), as the second line
 // of its .pub file has it and docs/install.md prints it. It is in the
@@ -47,35 +38,29 @@ const upgradeReleaseSite = "https://yardr.dev"
 // a new key is a new yardr, as it is a new footplate.
 const upgradeReleaseKey = "RWSzUPGBbv7MDqH+nnbNmYdOm20UTkuk7eC5e6XuVtYRwZtaEZRlV/WB"
 
-// upgradeReleaseBase is upgradeReleaseSite as a test reaches it: a
-// fixture release stands at another address, with a key of its own.
-// Production runs never change it, so the one-host rule holds there.
-var upgradeReleaseBase = upgradeReleaseSite
-
 // upgradeReleasePubkey is the key the fetch verifies with: the
 // embedded one, or a fixture's in a test.
 var upgradeReleasePubkey = upgradeReleaseKey
 
-// upgradeReleaseHTTP fetches a release. A redirect is a refusal, as in
-// footplate: the site serves each file directly, and following a
-// redirect would leave the one named host. The bound is for a host
-// that hangs, sized for the archive on a slow link.
-var upgradeReleaseHTTP = &http.Client{
-	Timeout: 5 * time.Minute,
-	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-		return http.ErrUseLastResponse
-	},
-}
+// The hand fetch's hooks into the moved check, standing in for
+// dispatch's own (ReleaseBase, ReleaseHTTP, ReleaseCurrentTag),
+// which the daemon's pass asks with: a fixture release stands at
+// another address, with a client and a tag of the test's naming.
+// Production runs never change them, so the one-host rule holds
+// there as it does for the daemon's.
+const upgradeReleaseSite = dispatch.ReleaseSite
 
-// upgradeCurrentTag is the release this build was made for, "" for a
-// build from a checkout; tests name one.
-var upgradeCurrentTag = version.Tag
+var (
+	upgradeReleaseBase = upgradeReleaseSite
+	upgradeReleaseHTTP = dispatch.ReleaseHTTP
+	upgradeCurrentTag  = dispatch.ReleaseCurrentTag
+)
 
-// What is read of latest.json, of the checksums and of the signature,
-// of an archive, and of what an archive unpacks to. An archive of
-// yardr 0.10 is 9 MB and unpacks to 21, as footplate's fetch says.
+// What is read of the checksums and of the signature, of an archive,
+// and of what an archive unpacks to. An archive of yardr 0.10 is
+// 9 MB and unpacks to 21, as footplate's fetch says. What is read of
+// latest.json is dispatch.ReleaseLatestMost, beside the fetch there.
 const (
-	releaseLatestMost    = 64 * 1024
 	releaseChecksumsMost = 64 * 1024
 	releaseSignatureMost = 4 * 1024
 	releaseArchiveMost   = 64 * 1024 * 1024
@@ -104,19 +89,12 @@ type fetchedRelease struct {
 	binary  []byte
 }
 
-// releaseLatest is latest.json as sync-release writes it, of which
-// only what leads to the files is read. Its per-target size and sha256
-// are for a person: never this fetch's trust, which is the signed
-// checksums alone.
-type releaseLatest struct {
-	Version   string                   `json:"version"`
-	Checksums string                   `json:"checksums"`
-	Targets   map[string]releaseTarget `json:"targets"`
-}
-
-type releaseTarget struct {
-	Path string `json:"path"`
-}
+// The latest.json this fetch reads, its version parsed and compared,
+// lives in internal/dispatch (ReleaseLatest, ParseReleaseVersion,
+// CompareReleaseVersion, FetchLatest and ReleaseGet), beside the
+// daemon pass that mails of a newer release: the two read the same
+// latest.json the same way, and this fetch goes on from it to prove
+// the release before it installs anything.
 
 // upgradeFetchRelease reads the latest release from yardr.dev and
 // proves it, in footplate's order. It writes nothing: a caller that
@@ -134,20 +112,13 @@ func upgradeFetchRelease(ctx context.Context) (*fetchedRelease, error) {
 	if err != nil {
 		return nil, err
 	}
-	latestBytes, err := releaseGet(ctx, "/releases/latest.json", releaseLatestMost)
+	latest, err := dispatch.FetchLatest(ctx, upgradeReleaseBase, upgradeReleaseHTTP)
 	if err != nil {
 		return nil, err
 	}
-	var latest releaseLatest
-	if err := json.Unmarshal(latestBytes, &latest); err != nil {
-		return nil, fmt.Errorf("yardr.dev's /releases/latest.json cannot be read: %v; yardr was not fetched", err)
-	}
-	ver, ok := parseReleaseVersion(latest.Version)
-	if !ok {
-		return nil, fmt.Errorf("yardr.dev's /releases/latest.json names %q, which is no version of a release; yardr was not fetched", latest.Version)
-	}
-	if cur, ok := parseReleaseVersion(upgradeCurrentTag()); ok {
-		switch cmp := compareReleaseVersion(ver, cur); {
+	ver, _ := dispatch.ParseReleaseVersion(latest.Version)
+	if cur, ok := dispatch.ParseReleaseVersion(upgradeCurrentTag()); ok {
+		switch cmp := dispatch.CompareReleaseVersion(ver, cur); {
 		case cmp == 0:
 			return nil, fmt.Errorf("%w (%s)", errReleaseCurrent, latest.Version)
 		case cmp < 0:
@@ -162,24 +133,24 @@ func upgradeFetchRelease(ctx context.Context) (*fetchedRelease, error) {
 	// path: it is what the signed checksums are asked for, so that the
 	// version latest.json claims is the version that was signed.
 	archive := "yardr_" + strings.TrimPrefix(latest.Version, "v") + "_" + target + ".tar.gz"
-	if name := releaseFileUnder(info.Path); name != archive {
+	if name := dispatch.ReleaseFileUnder(info.Path); name != archive {
 		return nil, fmt.Errorf("yardr.dev's /releases/latest.json names %q for %s, and the archive of %s is %s under /releases/; yardr was not fetched", info.Path, target, latest.Version, archive)
 	}
-	if releaseFileUnder(latest.Checksums) == "" {
+	if dispatch.ReleaseFileUnder(latest.Checksums) == "" {
 		return nil, fmt.Errorf("yardr.dev's /releases/latest.json names %q for the checksums, which is no file under /releases/; yardr was not fetched", latest.Checksums)
 	}
 
 	// The signature before the archive: a release that is not signed
 	// costs no download.
-	checksums, err := releaseGet(ctx, latest.Checksums, releaseChecksumsMost)
+	checksums, err := dispatch.ReleaseGet(ctx, upgradeReleaseBase, upgradeReleaseHTTP, latest.Checksums, releaseChecksumsMost)
 	if err != nil {
 		return nil, err
 	}
 	sigPath := latest.Checksums + ".minisig"
-	sig, err := releaseGet(ctx, sigPath, releaseSignatureMost)
+	sig, err := dispatch.ReleaseGet(ctx, upgradeReleaseBase, upgradeReleaseHTTP, sigPath, releaseSignatureMost)
 	if err != nil {
-		var answered releaseAnswered
-		if errors.As(err, &answered) && answered.status == http.StatusNotFound {
+		var answered dispatch.ReleaseAnswered
+		if errors.As(err, &answered) && answered.Status == http.StatusNotFound {
 			return nil, fmt.Errorf("the release of yardr at %s is not signed, so nothing shows who made it; yardr was not fetched", upgradeReleaseBase)
 		}
 		return nil, err
@@ -192,7 +163,7 @@ func upgradeFetchRelease(ctx context.Context) (*fetchedRelease, error) {
 		return nil, err
 	}
 
-	archiveBytes, err := releaseGet(ctx, info.Path, releaseArchiveMost)
+	archiveBytes, err := dispatch.ReleaseGet(ctx, upgradeReleaseBase, upgradeReleaseHTTP, info.Path, releaseArchiveMost)
 	if err != nil {
 		return nil, err
 	}
@@ -223,117 +194,11 @@ func releaseTargetName() (string, error) {
 	return goos + "_" + goarch, nil
 }
 
-// releaseVersion is a release's tag as three numbers.
-type releaseVersion struct{ major, minor, patch int }
-
-// parseReleaseVersion reads a tag v1.2.3 and nothing more: where a
-// pre-release would stand against this build is not guessed at.
-func parseReleaseVersion(s string) (releaseVersion, bool) {
-	var v releaseVersion
-	rest, ok := strings.CutPrefix(s, "v")
-	if !ok {
-		return v, false
-	}
-	parts := strings.Split(rest, ".")
-	if len(parts) != 3 {
-		return v, false
-	}
-	nums := []*int{&v.major, &v.minor, &v.patch}
-	for i, p := range parts {
-		if p == "" || len(p) > 9 {
-			return v, false
-		}
-		for _, c := range p {
-			if c < '0' || c > '9' {
-				return v, false
-			}
-		}
-		n, err := strconv.Atoi(p)
-		if err != nil {
-			return v, false
-		}
-		*nums[i] = n
-	}
-	return v, true
-}
-
-func compareReleaseVersion(a, b releaseVersion) int {
-	for _, pair := range [][2]int{{a.major, b.major}, {a.minor, b.minor}, {a.patch, b.patch}} {
-		if pair[0] != pair[1] {
-			if pair[0] < pair[1] {
-				return -1
-			}
-			return 1
-		}
-	}
-	return 0
-}
-
-// releaseAnswered is the site answering with any status but 200: the
-// file is not served, directly or at all.
-type releaseAnswered struct {
-	path   string
-	status int
-}
-
-func (e releaseAnswered) Error() string {
-	return fmt.Sprintf("%s did not serve %s directly (status %d), so yardr was not fetched", upgradeReleaseBase, e.path, e.status)
-}
-
-// releaseGet reads the file the site has at path, of most bytes at the
-// most. path is the site's word, vetted by releaseFileUnder where it
-// came from latest.json, and the constant /releases/latest.json where
-// it did not: both stay under /releases/ on the one named host.
-func releaseGet(ctx context.Context, path string, most int64) ([]byte, error) {
-	if releaseFileUnder(path) == "" {
-		return nil, fmt.Errorf("%q is no file under /releases/ on %s; yardr was not fetched", path, upgradeReleaseBase)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(upgradeReleaseBase, "/")+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := upgradeReleaseHTTP.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("%s does not answer, so yardr was not fetched (%v); this needs the network once, and the old binary is left as it is", upgradeReleaseBase, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		// The body of a refusal is not read as the file it is not.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return nil, releaseAnswered{path: path, status: resp.StatusCode}
-	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, most+1))
-	if err != nil {
-		return nil, fmt.Errorf("%s's answer for %s could not be read, so yardr was not fetched: %w", upgradeReleaseBase, path, err)
-	}
-	if int64(len(b)) > most {
-		return nil, fmt.Errorf("%s's %s is larger than %d bytes, so yardr was not fetched", upgradeReleaseBase, path, most)
-	}
-	return b, nil
-}
-
-// releaseFileUnder is the file's name, when path is a file under
-// /releases/ written in letters, digits, ., _, - and / alone, with no
-// empty or dotted part. The path goes into the first line of a
-// request as it is, so nothing else is let through.
-func releaseFileUnder(path string) string {
-	rest, ok := strings.CutPrefix(path, "/releases/")
-	if !ok {
-		return ""
-	}
-	for _, b := range []byte(rest) {
-		if !(b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '.' || b == '_' || b == '-' || b == '/') {
-			return ""
-		}
-	}
-	parts := strings.Split(rest, "/")
-	for _, p := range parts {
-		if p == "" || strings.HasPrefix(p, ".") {
-			return ""
-		}
-	}
-	return parts[len(parts)-1]
-}
+// Parse and compare of a release's version, the fetch of a file
+// under /releases/ and the answered refusal live in internal/dispatch
+// beside FetchLatest (ParseReleaseVersion, CompareReleaseVersion,
+// ReleaseGet, ReleaseFileUnder, ReleaseAnswered), which this fetch
+// and the daemon's release check share.
 
 // parseMinisignKey reads a minisign public key's base64: "Ed", the
 // key's id (8 bytes) and the key (32).

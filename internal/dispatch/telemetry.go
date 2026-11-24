@@ -30,6 +30,12 @@ func (d *Dispatcher) telemetry(ctx context.Context) {
 	if d.Home == "" {
 		return // no home, no state file: nothing is sent
 	}
+	// The release check rides this pass's tail: same cadence (every
+	// pass), same setting-read and state-file shape, and it earns its
+	// own step with a future registry of daily passes. Deferred here
+	// rather than called at the end, which the off return below would
+	// skip: the check runs whatever telemetry does.
+	defer d.releaseCheck(ctx)
 	// A pass that met no fault of its own ends the one said before, so a
 	// fault that goes and comes back is said again, and one that stays is
 	// said once.

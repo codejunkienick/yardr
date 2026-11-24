@@ -36,6 +36,22 @@ func TestSettings(t *testing.T) {
 	if err := st.SetSetting(ctx, "Bad Key", "x", "me"); err == nil {
 		t.Fatal("bad key accepted")
 	}
+	// auto_upgrade takes off and notify alone: release, the coming
+	// auto-run value, is refused until the follow-up lands.
+	if err := st.SetSetting(ctx, store.AutoUpgradeSetting, "notify", "me"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Settings(ctx); got[store.AutoUpgradeSetting] != "notify" {
+		t.Fatalf("auto_upgrade = %v", got)
+	}
+	for _, v := range []string{"release", "on", "true"} {
+		if err := st.SetSetting(ctx, store.AutoUpgradeSetting, v, "me"); err == nil {
+			t.Fatalf("auto_upgrade %q accepted", v)
+		}
+	}
+	if err := st.SetSetting(ctx, store.AutoUpgradeSetting, "off", "me"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // A yard from before the onboarding (depots, groups or crew members, no

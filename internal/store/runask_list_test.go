@@ -1741,6 +1741,7 @@ func TestSettingRunAskClassesAreExplicit(t *testing.T) {
 		UpgradeFromSetting:       Alone,
 		UpgradeRestoreSetting:    Alone,
 		CodesignIdentitySetting:  Alone,
+		AutoUpgradeSetting:       Alone,
 		QuietLandingsSetting:     Alone,
 		DiskKeepGBSetting:        Alone,
 		PreviewIdleSetting:       Alone,

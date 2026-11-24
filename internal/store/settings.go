@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	bolt "go.etcd.io/bbolt"
@@ -120,6 +119,10 @@ const (
 	// identifier dev.yardr.yardr, so a Developer Tools entry holds across
 	// reinstalls; unset, nothing is signed.
 	CodesignIdentitySetting = "codesign_identity"
+	// AutoUpgradeSetting says whether the daemon mails the operator
+	// and the yardmaster when a newer signed release is out (notify),
+	// or does nothing (off).
+	AutoUpgradeSetting = "auto_upgrade"
 )
 
 // DefaultWebAddr and DefaultBDPAddr are where the web view and the BDP
@@ -444,26 +447,6 @@ var KnownSettings = append([]Setting{
 			}
 			return nil
 		}},
-	{Key: UpgradeFromSetting, Help: "the depot whose landed build the yard installs itself after the assembly lands on it (yardr upgrade); unset, the assembly installs nothing and a hand run with no depot named takes the latest signed release. " +
-		"It names a depot of the yard: a depot the yard has not got is refused, and the named depot is not removed until the setting is cleared",
-		Check: func(v string) error { return checkName("depot name", v) }},
-	{Key: UpgradeRestoreSetting, Help: "whether a failed yardr upgrade restores the pre-install store copies (true) or leaves refused stores down for a person to restore (false); default: true",
-		Default: "true", Env: "UPGRADE_RESTORE", Check: func(v string) error {
-			if v != "true" && v != "false" {
-				return fmt.Errorf("%s %q: true or false", UpgradeRestoreSetting, v)
-			}
-			return nil
-		}},
-	{Key: CodesignIdentitySetting, Help: "the code-signing identity yardr upgrade signs the installed binary with on darwin, under the identifier dev.yardr.yardr, so a Developer Tools entry holds across reinstalls; unset, nothing is signed",
-		Check: func(v string) error {
-			// The value reaches a command line as one argument, never a
-			// shell, so only what would not survive the argument is
-			// refused.
-			if strings.IndexFunc(v, unicode.IsControl) >= 0 {
-				return fmt.Errorf("%s %q: no newline or control character", CodesignIdentitySetting, v)
-			}
-			return nil
-		}},
 	{Key: QuietLandingsSetting, Help: "how many code landings on a depot's base pass before the daemon owes the whole suite a run on a quiet machine (docs/testing.md R6): ten, about two hours of landings at the 60-140 a day of 14-16 Oct 2026, so a quiet spell is used within hours; 0 turns the quiet run off; the daemon reads it on every event it judges",
 		Default: strconv.Itoa(DefaultQuietLandings), Check: func(v string) error {
 			if n, err := strconv.Atoi(v); err != nil || n < 0 {
@@ -491,7 +474,7 @@ var KnownSettings = append([]Setting{
 			}
 			return nil
 		}},
-}, webJWTPrivilegedSessionMaxAge, yardmasterDelegation)
+}, append(upgradeSettings, webJWTPrivilegedSessionMaxAge, yardmasterDelegation)...)
 
 // SettingOf is the setting key names.
 func SettingOf(key string) (Setting, bool) {
@@ -518,7 +501,7 @@ func SettingOf(key string) (Setting, bool) {
 func settingAsk(key string) AskClass {
 	switch key {
 	case OperatorSetting, DefaultPackSetting, PermissionsPresetSetting,
-		UpgradeFromSetting, UpgradeRestoreSetting,
+		UpgradeFromSetting, UpgradeRestoreSetting, CodesignIdentitySetting, AutoUpgradeSetting,
 		WebAsSetting, WebJWTIssuerSetting, WebJWTAudienceSetting,
 		WebJWTJWKSSetting, WebJWTHeaderSetting, WebJWTUsersSetting,
 		BackupDirSetting, HookAddrSetting, EdgeSetting, RouterAddrSetting, HostedSetting, ProviderTermsSetting, WebAddrSetting,

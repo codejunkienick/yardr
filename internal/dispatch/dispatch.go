@@ -284,9 +284,9 @@ type Dispatcher struct {
 	// A changed backup_dir is a new target and must be tried at once.
 	backupDownDir string
 
-	// telemetryTold is the last local fault of the telemetry pass that was
-	// said, so each is said once until it is gone. See telemetry.
-	telemetryTold string
+	// telemetryTold and releaseCheckTold are the last local faults of
+	// their passes that were said, so each is said once until it is gone.
+	telemetryTold, releaseCheckTold string
 
 	// timerDue is when the earliest timer left is due, as of the last pass
 	// (see timers); nil with none.

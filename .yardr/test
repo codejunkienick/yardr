@@ -2190,7 +2190,6 @@ internal/store/policy.go 1164 the permission gates and their rules
 internal/store/routing.go 2858 groups, routes and their config merges
 internal/store/runask_list.go 1221 ask cards, labels and preset reading
 internal/store/runask_setup.go 1503 the setup ask, its card, and the carrying record
-internal/store/settings.go 1014 yard settings and their checks
 internal/store/sourcecalls.go 1236 source grants and callables
 internal/store/subscriptions.go 1149 identities, subscriptions and where-clauses
 internal/store/users.go 1226 user records and operator words
