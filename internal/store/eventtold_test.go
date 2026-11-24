@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"yardr.dev/yardr/internal/store"
@@ -266,6 +267,44 @@ func TestEventFor(t *testing.T) {
 			}
 			if got.Kind != c.e.Kind || got.Seq != c.e.Seq || got.Actor != c.e.Actor || got.Bead != c.e.Bead {
 				t.Errorf("the event told is %+v, want all but the data kept", got)
+			}
+		})
+	}
+	// These seven kinds were once written with the bead and ask of the run card
+	// that approved the change. The cards are gone and no write of theirs sends
+	// approved, so their rows list none: a row that did would promise a key the
+	// stream never carries, and let the approval paragraph of docs/api.md go on
+	// naming the kind (TestApprovalParagraphKindsTellApproved holds the paragraph
+	// to the rows, not to the writers). A write that sent it again would be held
+	// from a member, as any key a row leaves out is, until its author listed it.
+	// key is one the row does tell, so that the event is told at all.
+	approval := map[string]any{"bead": "yd-4x1k", "ask": uint64(3)}
+	for _, c := range []struct{ kind, key string }{
+		{"originator_changed", "to"},
+		{"crew_restart_requested", "crew"},
+		{"user_removed", "user"},
+		{"device_removed", "device"},
+		{"source_removed", "source"},
+		{"group_renamed", "to"},
+		{"timer_removed", "timer"},
+	} {
+		t.Run(c.kind+" tells no approved", func(t *testing.T) {
+			keys, ok := store.EventDataTold(c.kind)
+			if !ok {
+				t.Fatalf("%s has no row", c.kind)
+			}
+			if !slices.Contains(keys, c.key) {
+				t.Fatalf("the row of %s is %v, want one that lists %s", c.kind, keys, c.key)
+			}
+			if slices.Contains(keys, "approved") {
+				t.Errorf("the row of %s lists approved: %v", c.kind, keys)
+			}
+			got, ok := store.EventFor("sam", false, store.Event{Kind: c.kind, Actor: "ada", Data: map[string]any{c.key: "x", "approved": approval}})
+			if !ok {
+				t.Fatal("the event is dropped, want it told")
+			}
+			if want := map[string]any{c.key: "x"}; !reflect.DeepEqual(got.Data, want) {
+				t.Errorf("the data told is %v, want %v", got.Data, want)
 			}
 		})
 	}

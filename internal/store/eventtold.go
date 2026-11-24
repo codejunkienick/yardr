@@ -46,7 +46,7 @@ var eventDataTold = map[string][]string{
 	"closed":             {"reason", "group", "originator"},
 	"reopened":           {},
 	"updated":            {"title", "body", "depot", "type", "priority", "labels_added", "labels_removed"},
-	"originator_changed": {"from", "to", "approved"},
+	"originator_changed": {"from", "to"},
 	"held":               {"session", "peer", "outcome"},
 	"unheld":             {},
 	"released":           {"reason"},
@@ -146,7 +146,7 @@ var eventDataTold = map[string][]string{
 	"crew_gave_up":           {"crew", "failures", "user"},
 	"crew_start_tail":        {"crew", "user"},
 	"crew_blocked":           {"agent", "crew", "user"},
-	"crew_restart_requested": {"approved", "crew", "user"},
+	"crew_restart_requested": {"crew", "user"},
 	"crew_rotation_asked":    {"crew", "user"},
 	"crew_context_asked":     {"crew", "pct", "window", "user"},
 	"open_threads_granted":   {"crew", "pack", "sources"},
@@ -161,10 +161,10 @@ var eventDataTold = map[string][]string{
 	// so are the files the login of a removed user named, which stay on disk
 	// when the user goes: the names of what went with them are the yard's news.
 	"user_added":            {"user", "approved"},
-	"user_removed":          {"user", "approved", "as_grants", "devices", "unexposed", "unreached", "untrusted", "login.groups", "login.routes", "login.crew"},
+	"user_removed":          {"user", "as_grants", "devices", "unexposed", "unreached", "untrusted", "login.groups", "login.routes", "login.crew"},
 	"user_set":              {"user", "approved", "notify", "tell"},
 	"device_added":          {"device", "user", "pairing"},
-	"device_removed":        {"device", "user", "approved"},
+	"device_removed":        {"device", "user"},
 	"device_channel_pinned": {"device", "user", "pinned"},
 	"device_pair_opened":    {"device", "user", "pairing", "expires", "wrong_codes"},
 	"device_pair_refused":   {"device", "user", "pairing", "reason", "wrong_codes"},
@@ -187,7 +187,7 @@ var eventDataTold = map[string][]string{
 	// calls, the file a hook's secret is read from and the values a call was
 	// made with are an operator's.
 	"source_added":         {"source", "calls", "limits", "replaced", "approved"},
-	"source_removed":       {"source", "approved"},
+	"source_removed":       {"source"},
 	"source_set":           {"source", "approved", "calls_per_hour", "updates_per_hour"},
 	"source_granted":       {"approved", "source", "what", "as", "crew", "group"},
 	"source_call":          {"as", "attempt", "by", "bytes", "call", "crew", "group", "kind", "ms", "params", "session", "source", "status"},
@@ -213,7 +213,7 @@ var eventDataTold = map[string][]string{
 	"flow_pointer_cleared": {"depot", "type"},
 	"group_set":            {"limit", "members", "name", "runner"},
 	"group_removed":        {"name", "released", "routes"},
-	"group_renamed":        {"approved", "beads", "from", "grants", "members", "packs", "routes", "sessions", "subscriptions", "to"},
+	"group_renamed":        {"beads", "from", "grants", "members", "packs", "routes", "sessions", "subscriptions", "to"},
 	"route_added":          {"id", "stage", "group", "priority", "label", "labels", "bead_priority", "type", "depot", "originator"},
 	"route_removed":        {"id", "stage", "group", "priority", "label", "labels", "bead_priority", "type", "depot", "originator"},
 	"route_set":            {},
@@ -272,7 +272,7 @@ var eventDataTold = map[string][]string{
 	"timer_set":     {"timer", "to", "due", "ends", "every"},
 	"timer":         {"by", "last", "late", "set_at", "timer", "to", "to_user"},
 	"timer_dropped": {"by", "timer", "to"},
-	"timer_removed": {"approved", "by", "timer", "to"},
+	"timer_removed": {"by", "timer", "to"},
 
 	// The yard: its daemon, its server, its disk and its upgrades. The
 	// directories of a backup, of the build cache and of a yard's home, and
