@@ -1103,7 +1103,9 @@ again() {
 # compiler say (file.go:line:col: message), then each failed test's own lines
 # under its report, so the summary says why and not only which, and the tests
 # a timeout caught running, which its panic line does not name. At most 60
-# lines over both, the first ones.
+# lines over both, the first ones: sed prints them and reads on, where a head
+# would exit at the 60th and leave the writers a pipe nobody reads, which they
+# say on stderr where SIGPIPE is ignored (a CI runner's children have it so).
 failed() {
   f=$1
   shift
@@ -1111,7 +1113,7 @@ failed() {
   {
     grep -a -E -e '--- FAIL' -e '^FAIL' -e 'panic:' -e 'DATA RACE' -e '^[^[:space:]]+\.go:[0-9]+:[0-9]+:' "$f" || true
     flakyfails --human "$f"
-  } | head -n 60 || true
+  } | sed -n 1,60p || true
 }
 # waitcount prints the race-lock seconds one step's log ($1) holds: the
 # `test: waited N s` lines its race legs printed, 0 when there are none.
@@ -1407,15 +1409,19 @@ diskfailed() {
         if (index($0, text)) hit = 1
       }
     ' "$1" | sort -u
-  elif [ -z "$(sed -n 's/.*--- FAIL: \([^ ][^ ]*\).*/\1/p' "$1" | head -n 1)" ]; then
+  elif [ -z "$(sed -n 's/.*--- FAIL: \([^ ][^ ]*\).*/\1/p' "$1")" ]; then
     case $(flakyfails "$1" || true) in *"$flaky_disk"*) echo - ;; esac
   else
     flakyfails --disk "$1" | sort -u
   fi
 }
 # inlist says whether the word $1 is a line of the text $2. It is a literal
-# match: test names and package paths hold characters a pattern would read.
-inlist() { printf '%s\n' "$2" | grep -qxF -- "$1"; }
+# match: test names and package paths hold characters a pattern would read. It
+# counts the matching lines, to read the whole text: a grep -q that stops at the
+# first match leaves printf, if it has more to write, a pipe nobody reads, and
+# where SIGPIPE is ignored (a CI runner's children have it so) printf says
+# "write error: Broken pipe" on stderr (yardr-8x49).
+inlist() { [ "$(printf '%s\n' "$2" | grep -cxF -- "$1")" != 0 ]; }
 # briefly prints the lines it is given on one line, five of them at most and
 # then how many more: a full disk fails every package and tens of tests, and the
 # line it is named in is read by a person.
@@ -2900,9 +2906,13 @@ diskfloor() {
     return 0
   fi
   # What diskvolumes could not read it leaves out, and the floor goes on
-  # without it. The first volume under the floor, in its order, is named.
+  # without it. The first volume under the floor, in its order, is named. The
+  # awk takes it with a flag and reads the whole list: one that exits at the
+  # first volume leaves printf, if it has more to write, a pipe nobody reads,
+  # and where SIGPIPE is ignored (a CI runner's children have it so) printf
+  # says "write error: Broken pipe" on stderr, ahead of the refusal (yardr-8x49).
   vols=$(diskvolumes) || true
-  short=$(printf '%s\n' "$vols" | awk -v floor=$((gib * 1048576)) '$2 ~ /^[0-9]+$/ && $2 < floor { print $1, $2; exit }')
+  short=$(printf '%s\n' "$vols" | awk -v floor=$((gib * 1048576)) '!found && $2 ~ /^[0-9]+$/ && $2 < floor { print $1, $2; found = 1 }')
   if [ -z "$short" ]; then
     return 0
   fi
@@ -3110,8 +3120,9 @@ changed=$(git diff --no-renames --name-only "$from")
 # A change under conformance/ has its test run whatever else the run tests. A
 # whole suite that go.mod or a stray file chose holds the package too, and
 # without the mark it would skip the package and pass the change unjudged. A
-# deleted path counts, as it does in the table's rows.
-if printf '%s\n' "$changed" | grep -q '^conformance/'; then
+# deleted path counts, as it does in the table's rows. The lines are counted
+# and not stopped at the first, as inlist says.
+if [ "$(printf '%s\n' "$changed" | grep -c '^conformance/')" != 0 ]; then
   YARDR_CONFORMANCE=1
 fi
 # What is tested: the packages that changed, and
@@ -3334,11 +3345,13 @@ if [ -n "$YARDR_LANDING" ]; then
   if [ -z "$changed" ]; then
     whole "nothing changed $since"
   fi
-  file=$(printf '%s\n' "$changed" | grep -x -e go.mod -e go.sum | head -n 1)
+  # The first file of each list is taken with sed -n 1p, which reads the list
+  # to its end, as failed says of its sed.
+  file=$(printf '%s\n' "$changed" | grep -x -e go.mod -e go.sum | sed -n 1p)
   if [ -n "$file" ]; then
     whole "$file changed $since"
   fi
-  file=$(git diff --no-renames --name-only --diff-filter=D "$from" | head -n 1)
+  file=$(git diff --no-renames --name-only --diff-filter=D "$from" | sed -n 1p)
   if [ -n "$file" ]; then
     whole "$file was deleted $since"
   fi
@@ -3347,7 +3360,7 @@ if [ -n "$YARDR_LANDING" ]; then
     read -r file <"$tmp/stray"
     whole "$file, which is read by no known package, changed $since"
   fi
-  file=$(printf '%s\n' "$changed" | grep -x -e '.*\.go' | head -n 1)
+  file=$(printf '%s\n' "$changed" | grep -x -e '.*\.go' | sed -n 1p)
   if [ -n "$file" ]; then
     whole "$file changed $since" selection
   fi
@@ -3370,7 +3383,7 @@ else
   # something is: a run with nothing to test makes no claim about it, as a
   # landing of nothing compiled does not. Every go test below is plain.
   modchanged=
-  if printf '%s\n' "$changed" | grep -qx -e go.mod -e go.sum; then
+  if inlist go.mod "$changed" || inlist go.sum "$changed"; then
     modchanged=1
   else
     pick

@@ -607,7 +607,14 @@ func (m modGate) box(t *testing.T, bins map[string]string) gateBox {
 // commit.
 func (b gateBox) run(t *testing.T, env ...string) (string, int) {
 	t.Helper()
-	cmd := gateCmd(t, string(b.script))
+	return b.runAfter(t, "", env...)
+}
+
+// runAfter is run with shell text ahead of the script (gateCmd): a trap, say,
+// that changes how the run's own children meet a signal.
+func (b gateBox) runAfter(t *testing.T, ahead string, env ...string) (string, int) {
+	t.Helper()
+	cmd := gateCmd(t, ahead+string(b.script))
 	cmd.Dir = b.dir
 	cmd.Env = boxEnv(b.fake, b.tmp, append([]string{"YARDR_BASE=" + b.base, "YARDR_RACE_HELD=1"}, env...)...)
 	return runCmd(t, cmd)
@@ -2848,11 +2855,11 @@ func TestYardTestKeepsTheFailingLinesOfAFlake(t *testing.T) {
 	if ok {
 		fns, _, ok = strings.Cut("flaky_sep="+fns, "\n# summary prints the run's test line")
 	}
-	for _, fn := range []string{"flakyfails", "flakystuck", "diskfailed", "briefly", "diskvolumes", "diskstate", "flakylines", "flakybeads", "flakyopen", "flakyfile"} {
+	for _, fn := range []string{"flakyfails", "flakystuck", "diskfailed", "inlist", "briefly", "diskvolumes", "diskstate", "flakylines", "flakybeads", "flakyopen", "flakyfile"} {
 		ok = ok && strings.Contains(fns, "\n"+fn+"() {")
 	}
 	if !ok {
-		t.Fatalf("cannot cut flakyfails, flakystuck, diskfailed, briefly, diskvolumes, diskstate, flakylines, flakybeads, flakyopen and flakyfile out of %s: move the probe with the script", yardTest)
+		t.Fatalf("cannot cut flakyfails, flakystuck, diskfailed, inlist, briefly, diskvolumes, diskstate, flakylines, flakybeads, flakyopen and flakyfile out of %s: move the probe with the script", yardTest)
 	}
 	dir := t.TempDir()
 	writeFile(t, dir, "probe.sh", fns+"\n\"$@\"\n")
@@ -3239,6 +3246,46 @@ func TestYardTestKeepsTheFailingLinesOfAFlake(t *testing.T) {
 		if out, err := cmd.Output(); err != nil || strings.TrimSuffix(string(out), "\n") != c.want {
 			t.Errorf("briefly of %q printed %q, %v, want %q", c.in, out, err, c.want)
 		}
+	}
+	// inlist says whether a word is a line of a text, the whole line and as it is
+	// written: test names and package paths hold characters a pattern would read.
+	// It reads the whole text. A grep that stops at its first match leaves the
+	// printf that feeds it, where it has more to write, a pipe nobody reads, and
+	// with SIGPIPE ignored, as it is for a CI runner's children, the printf says
+	// so on stderr (yardr-8x49). The probe ignores SIGPIPE, and the last case's
+	// text runs a MiB past its first line, more than a pipe and a grep's read
+	// ahead take, so that a grep that stops there fails the case on every
+	// machine, and not on a slow one now and then. The text is read from a file,
+	// as a MiB overruns an argument on Linux.
+	writeFile(t, dir, "inlist.sh", "trap '' PIPE\n"+fns+"\ninlist \"$1\" \"$(cat \"$2\")\"\n")
+	for _, c := range []struct {
+		name, word, text string
+		want             bool
+	}{
+		{"a word that is a line", "b", "a\nb\nc\n", true},
+		{"a word that is part of a line", "a", "ab\nba\n", false},
+		{"a word with a space, as a test and its package are listed", "TestA m.test/a", "TestB m.test/a\nTestA m.test/a\n", true},
+		{"a dot is no pattern", "a.c", "abc\n", false},
+		{"a star is no pattern", "a*", "aaa\n", false},
+		{"a dot as written", "a.c", "abc\na.c\n", true},
+		{"a word that reads as an option", "-v", "-v\n", true},
+		{"no text", "a", "", false},
+		{"a word at the head of a text no pipe holds", "a", "a\n" + strings.Repeat("x", 1<<20) + "\n", true},
+	} {
+		t.Run("inlist: "+c.name, func(t *testing.T) {
+			t.Parallel()
+			text := filepath.Join(t.TempDir(), "text")
+			if err := os.WriteFile(text, []byte(c.text), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var stderr strings.Builder
+			cmd := exec.Command("sh", filepath.Join(dir, "inlist.sh"), c.word, text)
+			cmd.Stderr = &stderr
+			err := cmd.Run()
+			if found := err == nil; found != c.want || stderr.Len() > 0 {
+				t.Errorf("inlist %q: found %v (%v), stderr %q, want found %v and nothing on stderr", c.word, found, err, stderr.String(), c.want)
+			}
+		})
 	}
 	// diskstate says how full the fullest volume a run writes to is: of the
 	// directories diskvolumes reads (GOCACHE's and GOTMPDIR's from go env, and
@@ -3743,17 +3790,23 @@ echo "$*" >>"$FAKE/calls"
 	// A df that writes down the directory it was asked about, fails when
 	// FAKE_DF_FAIL says so, and prints the table POSIX df does, with the space
 	// a case gives that directory's volume: FAKE_KIB_CACHE under $FAKE/cache,
-	// FAKE_KIB_GOTMP under $FAKE/gotmp, FAKE_KIB_TMP anywhere else.
+	// FAKE_KIB_GOTMP under $FAKE/gotmp, FAKE_KIB_TMP anywhere else. TMPDIR's
+	// volume has FAKE_DF_TMP_PAD more bytes in its mount point where a case
+	// gives them. They are made here, since one environment variable of a MiB
+	// overruns what Linux allows (128 KiB).
 	const stubDf = `#!/bin/sh
 echo "$2" >>"$FAKE/df-calls"
 [ -z "$FAKE_DF_FAIL" ] || exit 1
+pad=
 case "$2" in
 "$FAKE"/cache*) avail=$FAKE_KIB_CACHE ;;
 "$FAKE"/gotmp*) avail=$FAKE_KIB_GOTMP ;;
-*) avail=$FAKE_KIB_TMP ;;
+*) avail=$FAKE_KIB_TMP pad=$FAKE_DF_TMP_PAD ;;
 esac
+mount=${FAKE_DF_MOUNT:-/System/Volumes/Data}
+[ -z "$pad" ] || mount=$mount$(awk -v n="$pad" 'BEGIN { s = "x"; while (length(s) < n) s = s s; printf "%s", substr(s, 1, n) }')
 echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
-echo "${FAKE_DF_FS:-/dev/fake} 482797652 400000000 $avail 96% ${FAKE_DF_MOUNT:-/System/Volumes/Data}"
+echo "${FAKE_DF_FS:-/dev/fake} 482797652 400000000 $avail 96% $mount"
 `
 	// The directories a row names, under the fake directory: GOCACHE's, the
 	// one it is read at when nothing built in it yet, GOTMPDIR's and TMPDIR's.
@@ -3773,6 +3826,7 @@ echo "${FAKE_DF_FS:-/dev/fake} 482797652 400000000 $avail 96% ${FAKE_DF_MOUNT:-/
 		env     []string // the case's variables beyond the volumes
 		unbuilt bool     // GOCACHE is a rotation nothing built in yet
 		noGotmp bool     // go env says GOTMPDIR is unset
+		noPipe  bool     // the run starts with SIGPIPE ignored, as a CI runner's children have it
 		stops   string   // the volume the line names, "" for a run that goes on
 		shown   string   // the GiB the line shows
 		asked   []string // the directories df was asked about, in order
@@ -3789,6 +3843,16 @@ echo "${FAKE_DF_FS:-/dev/fake} 482797652 400000000 $avail 96% ${FAKE_DF_MOUNT:-/
 			stops: "GOCACHE", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cacheUp, gotmp, tmp}},
 		{name: "a filesystem and a mount point with a space in their names", cache: kib(floor / 2),
 			env:   []string{"FAKE_DF_FS=map auto_home", "FAKE_DF_MOUNT=/Volumes/My Disk"},
+			stops: "GOCACHE", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cache, gotmp, tmp}},
+		// The volumes go to an awk through a printf. An awk that stops at the
+		// first volume under the floor leaves the printf, where it has more to
+		// write, a pipe nobody reads, and with SIGPIPE ignored, as it is for a CI
+		// runner's children, the printf says so ahead of the refusal. Three short
+		// lines make that a race, which a runner lost once (yardr-8x49). A mount
+		// point of a MiB, on the volume read last, leaves the printf more to write
+		// than a pipe and an awk's read ahead can take, whatever the machine.
+		{name: "SIGPIPE ignored, and TMPDIR's volume a MiB behind the first under the floor", cache: kib(floor / 2),
+			env: []string{"FAKE_DF_TMP_PAD=1048576"}, noPipe: true,
 			stops: "GOCACHE", shown: strconv.Itoa(floor/2) + ".0", asked: []string{cache, gotmp, tmp}},
 		{name: "a floor given for the gate's own tests", cache: kib(floor), floor: floor + 10,
 			stops: "GOCACHE", shown: strconv.Itoa(floor) + ".0", asked: []string{cache, gotmp, tmp}},
@@ -3835,7 +3899,14 @@ echo "${FAKE_DF_FS:-/dev/fake} 482797652 400000000 $avail 96% ${FAKE_DF_MOUNT:-/
 				"FAKE_GOCACHE=" + gocache, "FAKE_GOTMPDIR=" + gotmpdir,
 				"FAKE_KIB_CACHE=" + free(c.cache), "FAKE_KIB_GOTMP=" + free(c.gotmp), "FAKE_KIB_TMP=" + free(c.tmp),
 			}, c.env...)
-			out, code := b.run(t, env...)
+			// A shell that ignores a signal hands that on to what it starts, as
+			// a runner's process does: the trap is the test's way to a run that
+			// has it, since no Go call sets a child's signals to ignored.
+			ahead := ""
+			if c.noPipe {
+				ahead = "trap '' PIPE\n"
+			}
+			out, code := b.runAfter(t, ahead, env...)
 			if c.stops != "" {
 				want := fmt.Sprintf("test: cannot run: %s GiB free on the volume of %s, under the floor of %d GiB: the disk is too full to start, which says nothing of the change\n",
 					c.shown, c.stops, named)
