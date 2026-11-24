@@ -538,6 +538,97 @@ func TestCrewInboxReceiptsStayWithReader(t *testing.T) {
 	}
 }
 
+// A replacement session's recovery summary shows the member's own inbox read
+// and shown receipts but never another member's; mail_read is shown as
+// before, whatever its reader.
+func TestCrewPrimeHidesOtherMembersReceipts(t *testing.T) {
+	// Sequential: the package's fake clock.
+	at := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	store.SetClockForTest(func() time.Time { return at })
+	t.Cleanup(func() { store.SetClockForTest(time.Now) })
+	s, raw := storetest.NewRPCOwned(t)
+	ctx := seedSessionYard(t, s)
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.PutCrew(ctx, store.CrewMember{Name: "watcher", Runner: "herdr", On: []string{store.KindAttention}}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	must(s.AddSubscription(ctx, "watcher", store.Subscription{Source: "telegram", Scope: store.ScopeAll}, "jo"))
+	must(s.AddSubscription(ctx, "yardmaster", store.Subscription{Source: "telegram", Scope: store.ScopeAll}, "jo"))
+	must(s.CrewStarted(ctx, "yardmaster", nil))
+	at = at.Add(time.Second)
+	before := head(t, s)
+	hook := func(text string) uint64 {
+		t.Helper()
+		seq, _, err := raw.RecordHook(ctx, "telegram", map[string]any{"source": "telegram", "type": "message", "text": text}, []byte(`{}`), nil)
+		must(err)
+		return seq
+	}
+	must(s.Mail(ctx, "watcher", "hi", "jo"))
+	mail := head(t, s)
+	first := hook("first")
+	must(s.AckInbox(ctx, "watcher", mail))
+	must(s.AckInbox(ctx, "watcher", first))
+	shown := hook("shown")
+	must(s.MarkNotifiedFor(ctx, "watcher", "", shown))
+	must(s.AckInbox(ctx, "watcher", shown))
+	must(s.Mail(ctx, "yardmaster", "hey", "jo"))
+	ownMail := head(t, s)
+	ownHook := hook("own")
+	must(s.AckInbox(ctx, "yardmaster", ownMail))
+	must(s.MarkNotifiedFor(ctx, "yardmaster", "", ownHook))
+	must(s.AckInbox(ctx, "yardmaster", ownHook))
+
+	var receipts []store.Event
+	for _, e := range kindsAfter(t, s, before) {
+		switch e.Kind {
+		case "mail_read", "inbox_read", "inbox_shown":
+			receipts = append(receipts, e)
+		}
+	}
+	if len(receipts) != 8 {
+		t.Fatalf("receipts after both members' acks = %v, want 4 from each", kindsAfter(t, s, before))
+	}
+
+	// The session ends without a handoff: the next prime falls back to
+	// what happened since the first start.
+	must(s.CrewStarted(ctx, "yardmaster", nil))
+	p, err := s.CrewPrime(ctx, "yardmaster")
+	must(err)
+	if !p.NoHandoff {
+		t.Fatal("prime after a start with no handoff has no recovery summary")
+	}
+	for _, e := range p.Recent {
+		if reader, _ := e.Data["reader"].(string); (e.Kind == "inbox_read" || e.Kind == "inbox_shown") && reader == "watcher" {
+			t.Fatalf("recovery summary holds watcher's %s: %+v", e.Kind, p.Recent)
+		}
+	}
+	var ownRead, ownShown, otherMail bool
+	for _, e := range p.Recent {
+		reader, _ := e.Data["reader"].(string)
+		switch {
+		case (e.Kind == "inbox_read" || e.Kind == "inbox_shown") && reader == "yardmaster":
+			ownRead = ownRead || e.Kind == "inbox_read"
+			ownShown = ownShown || e.Kind == "inbox_shown"
+		case e.Kind == "mail_read" && reader == "watcher":
+			otherMail = true
+		}
+	}
+	if !ownRead || !ownShown {
+		t.Fatalf("recovery summary lost yardmaster's own receipts: %+v", p.Recent)
+	}
+	if !otherMail {
+		t.Fatalf("recovery summary lost watcher's mail_read: %+v", p.Recent)
+	}
+	if p.EventCounts["inbox_read"] != 2 || p.EventCounts["inbox_shown"] != 1 || p.EventCounts["mail_read"] != 2 {
+		t.Fatalf("recovery counts = %v, want inbox_read 2, inbox_shown 1, mail_read 2", p.EventCounts)
+	}
+}
+
 // An upgrade with unread items replays none and hides none: a per-user
 // slice starts at the crew cursor's position when the slice is made, and
 // what the line already read stays read.

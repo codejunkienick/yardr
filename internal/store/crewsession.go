@@ -518,6 +518,33 @@ func ReceiptStaysWithReader(kind string) bool {
 	return kind == "inbox_read" || kind == "inbox_shown"
 }
 
+// PrimeShows reports whether member's recovery summary shows e: a receipt
+// that stays with its reader only when member is its reader, anything else
+// always. The prime renders full payloads, so another member's read or shown
+// receipt would leak its session and cursor; mail_read is shown as before.
+func PrimeShows(member string, e Event) bool {
+	if !ReceiptStaysWithReader(e.Kind) {
+		return true
+	}
+	reader, _ := e.Data["reader"].(string)
+	if reader == "" {
+		reader = e.Actor
+	}
+	return reader == member
+}
+
+// addRecent counts e and keeps it for the recovery summary, unless it is
+// another member's read or shown receipt.
+func (p *Prime) addRecent(member string, e Event) {
+	if !PrimeShows(member, e) {
+		return
+	}
+	p.EventCounts[e.Kind]++
+	if len(p.Recent) < PrimeFallback {
+		p.Recent = append(p.Recent, e)
+	}
+}
+
 // OnInbox is the inbox a crew member's --on word reaches: the member's own,
 // or none for a receipt that stays with its reader. The subscription matrix
 // reports it, as forCrew matches it.

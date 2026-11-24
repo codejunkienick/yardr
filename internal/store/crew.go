@@ -1367,10 +1367,7 @@ func (s *Store) CrewPrimeFor(ctx context.Context, name, user string) (*Prime, er
 				if !e.At.After(from) {
 					break
 				}
-				p.EventCounts[e.Kind]++
-				if len(p.Recent) < PrimeFallback {
-					p.Recent = append(p.Recent, e)
-				}
+				p.addRecent(name, e)
 			}
 			slices.Reverse(p.Recent)
 			named(tx, p.Recent)
