@@ -1660,6 +1660,21 @@ var apiEvents = []apiEvent{
 			{"data.then", "string", "the stage the bead went to instead"},
 		},
 	},
+	{
+		title: "A thread's flap guard held an event: `flap_held`",
+		says:  "A hook's thread made its bounded few beads in a day, so the event that would have made another was held and no bead was made. It is of the class `attention`, so a crew member that hears the class, and a subscription to it, has it. At most one is logged in a day for a thread.",
+		is:    kindOf("flap_held"),
+		fields: []field{
+			{"seq", "number", "the event's seq"},
+			{"kind", "string", "`flap_held`"},
+			{"actor", "string", "`yard`"},
+			{"at", "time", "when"},
+			{"data.hook", "string", "the hook whose table the held event matched"},
+			{"data.event", "string", "the held event's type at its source"},
+			{"data.seq", "number", "the seq of the event that was held"},
+			{"data.made", "number", "the beads the thread made in the day the guard counts"},
+		},
+	},
 }
 
 // apiErrors are the requests the doc shows refused, each with why.
@@ -2438,6 +2453,9 @@ calls:
 	// The yard's description, so that Settings shows the key to a
 	// device. Last, for the seqs above.
 	must(st.SetSetting(ctx, store.YardDescriptionSetting, "The yard where the south team keeps its work.", "jo"))
+	// A thread held by its flap guard, for the stream's flap_held. Last
+	// again, for the seqs above.
+	must(st.LogDispatch(ctx, "", "flap_held", "yard", map[string]any{"hook": "gh", "event": "issues", "seq": 41, "made": 3}))
 	return st, d.Token
 }
 

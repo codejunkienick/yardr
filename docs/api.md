@@ -337,7 +337,7 @@ Mail was queued for one of a linked yard: the conversation with `<data.to>@<data
 
 ```json
 {
-  "seq": 199,
+  "seq": 200,
   "kind": "mail",
   "actor": "jo",
   "data": {
@@ -365,7 +365,7 @@ A user or a crew member acknowledged its mail: either everything through `data.t
 
 ```json
 {
-  "seq": 201,
+  "seq": 202,
   "kind": "mail_read",
   "data": {
     "reader": "jo",
@@ -510,7 +510,7 @@ A user acknowledged their notifications, in this client or another.
 
 ```json
 {
-  "seq": 203,
+  "seq": 204,
   "kind": "notifications_read",
   "data": {
     "reader": "jo",
@@ -653,6 +653,36 @@ The limit of an outcome reported on the bead was used, and the bead went to the 
 | `data.rounds` | number | the rounds counted for `data.to`: the outcome's limit or more |
 | `data.to` | string | the stage the outcome leads to, which the bead did not go back to |
 | `data.then` | string | the stage the bead went to instead |
+
+### A thread's flap guard held an event: `flap_held`
+
+A hook's thread made its bounded few beads in a day, so the event that would have made another was held and no bead was made. It is of the class `attention`, so a crew member that hears the class, and a subscription to it, has it. At most one is logged in a day for a thread.
+
+```json
+{
+  "seq": 197,
+  "kind": "flap_held",
+  "actor": "yard",
+  "data": {
+    "event": "issues",
+    "hook": "gh",
+    "made": 3,
+    "seq": 41
+  },
+  "at": "2026-10-08T09:30:00Z"
+}
+```
+
+| field | type | |
+|---|---|---|
+| `seq` | number | the event's seq |
+| `kind` | string | `flap_held` |
+| `actor` | string | `yard` |
+| `at` | time | when |
+| `data.hook` | string | the hook whose table the held event matched |
+| `data.event` | string | the held event's type at its source |
+| `data.seq` | number | the seq of the event that was held |
+| `data.made` | number | the beads the thread made in the day the guard counts |
 
 <!-- /events -->
 
@@ -1471,7 +1501,7 @@ POST /call/Head
 {}
 
 {
-  "result": 196
+  "result": 197
 }
 ```
 
@@ -1986,7 +2016,7 @@ POST /call/Conversation
       "as": "jo"
     },
     {
-      "seq": 197,
+      "seq": 198,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -1994,7 +2024,7 @@ POST /call/Conversation
       "read": false
     },
     {
-      "seq": 198,
+      "seq": 199,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -2020,7 +2050,7 @@ POST /call/Conversation
 {
   "result": [
     {
-      "seq": 197,
+      "seq": 198,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -2028,7 +2058,7 @@ POST /call/Conversation
       "read": false
     },
     {
-      "seq": 198,
+      "seq": 199,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "yardmaster",
@@ -2055,7 +2085,7 @@ POST /call/Conversation
 {
   "result": [
     {
-      "seq": 199,
+      "seq": 200,
       "at": "2026-10-08T09:30:00Z",
       "from": "jo",
       "to": "clerk@north",
@@ -7635,7 +7665,7 @@ POST /call/MailExchange
         ]
       },
       {
-        "seq": 233,
+        "seq": 234,
         "at": "2026-10-08T09:30:00Z",
         "from": "jo",
         "to": "yardmaster",

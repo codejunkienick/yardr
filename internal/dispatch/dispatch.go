@@ -383,10 +383,10 @@ type Dispatcher struct {
 	// clock is the time a test has set (SetClock), nil for the wall clock.
 	// A test sets it while Run's goroutines read it, so it is read and
 	// written atomically; see now.
-	clock      atomic.Pointer[func() time.Time]
-	retryAfter map[string]time.Time
-	reported   map[string]map[string]string // bead -> kind -> last unroutable reason, to log once per kind
-	stays      map[string]stay              // bead -> its stay in a manual group's stage (waits.go)
+	clock                atomic.Pointer[func() time.Time]
+	retryAfter, mailedAt map[string]time.Time
+	reported             map[string]map[string]string // bead -> kind -> last unroutable reason, to log once per kind
+	stays                map[string]stay              // bead -> its stay in a manual group's stage (waits.go)
 	// quietChecked is when the hooks were last judged quiet (hookquiet.go).
 	quietChecked    time.Time
 	status          map[string]string  // session -> last runner status

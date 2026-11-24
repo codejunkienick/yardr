@@ -316,22 +316,56 @@ func testManualRecloseAfterEventCloseUsesCloseTime(t *testing.T) {
 // a bounded few beads, never one a cycle: past the flap guard's most, a
 // matching event makes nothing and is logged on no bead as held, a
 // restarted daemon holds it too, and once the beads have aged out of the
-// window the next event makes again, the genuine remake.
+// window the next event makes again, the genuine remake. The first hold
+// of a day is told of as flap_held, of the class attention, in the
+// yardmaster's inbox; a second hold in the day tells nothing, a hold a
+// day later tells again, and a restarted daemon tells once more. The
+// holds below are judged a day behind the wall clock, so the day of the
+// telling can pass while the beads, made on the wall clock, are still in
+// the flap window.
 func testFlapIsHeldThenAGenuineRemakeMakesAgain(t *testing.T) {
 	t.Helper()
 	r := newMakingDepot(t, contributorMakes...)
 	ctx := context.Background()
+	if _, err := r.api.PutCrew(ctx, store.CrewMember{Name: "yardmaster", Runner: "fake", On: []string{store.KindAttention}}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	held := func() []store.Event {
+		t.Helper()
+		evs, err := r.api.EventsOfKind(ctx, "flap_held", 10)
+		must(t, err)
+		return evs
+	}
+	told := func() int {
+		t.Helper()
+		page, err := r.api.Inbox(ctx, "yardmaster", 0)
+		must(t, err)
+		n := 0
+		for _, e := range page.Events {
+			if e.Kind == "flap_held" {
+				n++
+			}
+		}
+		return n
+	}
 	reopen := func() {
 		r.deliverAs(t, "gh", "issues", "issues_opened", func(s string) string {
 			return strings.Replace(s, `"action": "opened"`, `"action": "reopened"`, 1)
 		})
 		r.pass(t)
 	}
+	deliver := func() {
+		r.deliverAs(t, "gh", "issues", "issues_opened", func(s string) string {
+			return strings.Replace(s, `"action": "opened"`, `"action": "reopened"`, 1)
+		})
+	}
 	closeTracking := func() {
 		b := r.made(t, issue23)
 		_, err := r.api.CloseBead(ctx, b.ID, "not ours", store.Expect{}, "me")
 		must(t, err)
 	}
+	const ignored = "ignored: the thread flapped, 3 beads in 24h0m0s"
+	dispatch.SetClock(r.d, func() time.Time { return time.Now().Add(-25 * time.Hour) })
 
 	r.deliverAs(t, "gh", "issues", "issues_opened", nil)
 	r.pass(t)
@@ -357,16 +391,62 @@ func testFlapIsHeldThenAGenuineRemakeMakesAgain(t *testing.T) {
 	if all, err := r.api.ListBeads(ctx, store.BeadFilter{All: true}); err != nil || len(all) != 3 {
 		t.Fatalf("beads after the flap was held: %d (%v), want the three", len(all), err)
 	}
-	wantRules(t, r.beadless(t), "ignored: the thread flapped, 3 beads in 24h0m0s")
+	wantRules(t, r.beadless(t), ignored)
+
+	// The first hold is told of, with the held event and the count, and
+	// the yardmaster, who hears the class, has it in its inbox.
+	evs := held()
+	if len(evs) != 1 {
+		t.Fatalf("flap_held events after the first hold: %d, want one", len(evs))
+	}
+	if e := evs[0]; e.Bead != nil || e.Actor != "yard" || e.Data["hook"] != "gh" || e.Data["event"] != "issues" || e.Data["made"] != float64(3) {
+		t.Fatalf("flap_held = %+v, want hook gh, event issues, made 3, by the yard, about no bead", e)
+	}
+	all, err := r.api.Events(ctx, "", 500)
+	must(t, err)
+	for _, e := range all {
+		if e.Kind == "hook_rule" && e.Bead == nil && e.Data["ignored"] != nil {
+			if evs[0].Data["seq"] != e.Data["seq"] {
+				t.Fatalf("flap_held seq %v, want the held event's %v", evs[0].Data["seq"], e.Data["seq"])
+			}
+			break
+		}
+	}
+	if n := told(); n != 1 {
+		t.Fatalf("flap_held in the yardmaster's inbox: %d, want one", n)
+	}
+
+	// A second hold in the same span tells nothing more.
+	reopen()
+	wantRules(t, r.beadless(t), ignored, ignored)
+	if len(held()) != 1 || told() != 1 {
+		t.Fatalf("after a second hold in the day: %d told, %d in the inbox, want one and one", len(held()), told())
+	}
+
+	// A day later the thread is still held, and is told of again.
+	dispatch.SetClock(r.d, func() time.Time { return time.Now() })
+	reopen()
+	wantRules(t, r.beadless(t), ignored, ignored, ignored)
+	if len(held()) != 2 || told() != 2 {
+		t.Fatalf("after a hold a day later: %d told, %d in the inbox, want two and two", len(held()), told())
+	}
 
 	// A daemon that starts again holds it too: the count is in the store,
-	// and the skip it reads in the log is judged no again either.
-	reopen()
+	// and the skip it reads in the log is judged no again either. It tells
+	// once more, and no more than once.
+	deliver()
 	fresh := &dispatch.Dispatcher{Store: r.api, Runners: r.d.Runners, PRHead: r.d.PRHead, CI: r.d.CI, DepotRepo: r.d.DepotRepo}
 	must(t, fresh.Reconcile(ctx))
-	wantRules(t, r.beadless(t),
-		"ignored: the thread flapped, 3 beads in 24h0m0s",
-		"ignored: the thread flapped, 3 beads in 24h0m0s")
+	wantRules(t, r.beadless(t), ignored, ignored, ignored, ignored)
+	if len(held()) != 3 || told() != 3 {
+		t.Fatalf("after a restart held the flap: %d told, %d in the inbox, want three and three", len(held()), told())
+	}
+	deliver()
+	must(t, fresh.Reconcile(ctx))
+	wantRules(t, r.beadless(t), ignored, ignored, ignored, ignored, ignored)
+	if len(held()) != 3 {
+		t.Fatalf("flap_held after a second hold by the restarted daemon: %d, want the three", len(held()))
+	}
 	if all, err := r.api.ListBeads(ctx, store.BeadFilter{All: true}); err != nil || len(all) != 3 {
 		t.Fatalf("beads after a restart held the flap: %d (%v), want the three", len(all), err)
 	}
@@ -381,6 +461,9 @@ func testFlapIsHeldThenAGenuineRemakeMakesAgain(t *testing.T) {
 	}
 	if _, relates := r.tracking(t, issue23); len(relates) != 3 {
 		t.Fatalf("beads relating to %s: %v, want the three closed ones", issue23, relates)
+	}
+	if len(held()) != 3 {
+		t.Fatalf("flap_held after the genuine remake: %d, want the three", len(held()))
 	}
 }
 

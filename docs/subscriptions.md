@@ -495,7 +495,10 @@ are `gave_up`, `session_blocked`, `unrouted`, `stranded`, `no_runner`,
 `session_harness_dialog`,
 `session_model_mismatch`, `session_prompt_gave_up`, `move_refused`,
 `make_refused` (a hook's `makes` line matched an event but the store
-refused the bead: [integrations.md](integrations.md#github-where-it-differs)), `held`,
+refused the bead: [integrations.md](integrations.md#github-where-it-differs)),
+`flap_held` (a hook's thread made its bounded few beads in a day, so an
+event that would have made another was held:
+[integrations.md](integrations.md#github-where-it-differs)), `held`,
 `waited`, `nudge_held` (an agent's input holds text, a dialog of its
 harness, or its login screen, so nothing is typed there: see "Text in the
 input" in [crew.md](crew.md)), `backup_failed` (a dated copy of the

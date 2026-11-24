@@ -130,6 +130,7 @@ var eventDataTold = map[string][]string{
 	"waited":              {"group", "since", "stage", "waited"},
 	"hook_rule":           {"action", "bead", "depot", "event", "hook", "linked_author", "originator_rule", "outcome", "route", "seq", "stage", "train", "worker"},
 	"make_refused":        {"action", "bead", "depot", "event", "hook", "seq", "stage"},
+	"flap_held":           {"event", "hook", "made", "seq"},
 
 	// Crew: who runs, and in what state. The handle of a session is the
 	// directory it started in and the yardr it was told to run.

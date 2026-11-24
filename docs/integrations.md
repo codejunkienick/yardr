@@ -2685,7 +2685,10 @@ The same steps as Linear, with these differences:
   closed one keeps a `relates` link. A thread that flaps (assigned,
   closed, assigned again) makes at most three beads in a day: past that, an
   event it matches makes nothing and a `hook_rule` event on no bead says so
-  under `ignored`, until the thread's beads are a day old. A line is refused when the type's
+  under `ignored`, until the thread's beads are a day old. The first hold
+  of a thread in a day is told of as `flap_held`, of the class `attention`,
+  beside the `hook_rule` event; later holds in the same day tell nothing
+  more. A line is refused when the type's
   flow in the depot has no such stage a bead can be made in: the refusal is
   logged as `make_refused`, of the class `attention`, beside the
   `hook_rule` event. What the yard

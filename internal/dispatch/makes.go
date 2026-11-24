@@ -48,6 +48,10 @@ import (
 // out of the window. The count is read from the store (the beads the
 // thread's links name), so a restarted daemon holds the same flap, and the
 // first remake after a close, the genuine reopen, is never the one held.
+// The first hold of a thread in a day is told of beside the skip's
+// hook_rule event as flap_held, of the class attention, so a person hears
+// that reopens are being held; later holds in the same span stay quiet
+// (tellFlapHeld).
 //
 // An event is put to the table once. The bead it made carries its seq
 // (metaHookSeq), and every event a line matched is logged as a hook_rule
@@ -214,15 +218,16 @@ func (d *Dispatcher) closedSince(ctx context.Context, ev ruleEvent, decl *source
 
 // flapHeld reports whether ev's thread has already made makesFlapMaxMakes
 // beads in makesFlapWindow, and why it is held, in the words a hook_rule
-// event on no bead records. Every bead the thread's links name counts,
+// event on no bead records, with how many beads the window holds (made),
+// which a hold's flap_held event carries. Every bead the thread's links name counts,
 // tracking or only relating: a closed generation keeps a relates link, and
 // it was a mint with its comments all the same. A thread whose beads cannot
 // be read is held: nothing is made on what is not known, as closedSince
 // holds it. decl is the yard's declared source of the event's source, nil
 // for a builtin one.
-func (d *Dispatcher) flapHeld(ctx context.Context, ev ruleEvent, decl *source.Declaration) (string, bool) {
+func (d *Dispatcher) flapHeld(ctx context.Context, ev ruleEvent, decl *source.Declaration) (string, int, bool) {
 	if ev.threadURL == "" {
-		return "", false
+		return "", 0, false
 	}
 	since := d.now().Add(-makesFlapWindow)
 	seen := map[string]bool{}
@@ -231,7 +236,7 @@ func (d *Dispatcher) flapHeld(ctx context.Context, ev ruleEvent, decl *source.De
 		links, err := d.Store.IssueLinks(ctx, url)
 		if err != nil {
 			d.Log.Warn("hook event: reading the thread's links for the flap guard", "thread", url, "err", err)
-			return "the thread's links could not be read", true
+			return "the thread's links could not be read", made, true
 		}
 		for _, l := range links {
 			if l.Source != ev.source || seen[l.Bead] {
@@ -241,7 +246,7 @@ func (d *Dispatcher) flapHeld(ctx context.Context, ev ruleEvent, decl *source.De
 			b, err := d.Store.GetBead(ctx, l.Bead)
 			if err != nil {
 				d.Log.Warn("hook event: reading a bead of the thread for the flap guard", "bead", l.Bead, "err", err)
-				return "a bead of the thread could not be read", true
+				return "a bead of the thread could not be read", made, true
 			}
 			if b.CreatedAt.After(since) {
 				made++
@@ -249,9 +254,42 @@ func (d *Dispatcher) flapHeld(ctx context.Context, ev ruleEvent, decl *source.De
 		}
 	}
 	if made < makesFlapMaxMakes {
-		return "", false
+		return "", made, false
 	}
-	return fmt.Sprintf("the thread flapped, %d beads in %s: held until they age out of the flap window", made, makesFlapWindow), true
+	return fmt.Sprintf("the thread flapped, %d beads in %s: held until they age out of the flap window", made, makesFlapWindow), made, true
+}
+
+// tellFlapHeld logs flap_held for a thread the flap guard has just held,
+// beside the skip's hook_rule event: of the class attention, so a crew
+// member that hears the class hears that a thread's events are held, and
+// its genuine reopens with them. A thread is told of once in
+// makesFlapWindow: mailedAt, this dispatcher's alone, is thread -> when
+// the last flap_held was logged for it, judged against now, so the span
+// slides with each tell and a restarted daemon tells once again, as
+// reportOnce does (dispatch.go). Entries past the window are swept as
+// each tell is judged, so the map holds only threads told of within it.
+// The thread is named by its fixed form, which a link stores, so a
+// delivery that names it by another slug is the same thread. decl is the
+// yard's declared source of the event's source, nil for a builtin one.
+func (d *Dispatcher) tellFlapHeld(ctx context.Context, hook string, ev ruleEvent, made int, decl *source.Declaration) {
+	now := d.now()
+	thread := fixedThread(ev, decl)
+	if d.mailedAt == nil {
+		d.mailedAt = map[string]time.Time{}
+	}
+	for t, at := range d.mailedAt {
+		if now.Sub(at) >= makesFlapWindow {
+			delete(d.mailedAt, t)
+		}
+	}
+	if at, ok := d.mailedAt[thread]; ok && now.Sub(at) < makesFlapWindow {
+		return
+	}
+	if err := d.Store.LogDispatch(ctx, "", "flap_held", actor, map[string]any{"hook": hook, "event": ev.typ, "seq": ev.seq, "made": made}); err != nil {
+		d.Log.Warn("flap_held event", "err", err)
+		return
+	}
+	d.mailedAt[thread] = now
 }
 
 // make puts ev, about a thread no open bead tracks, to its hook's table of
@@ -284,7 +322,7 @@ func (d *Dispatcher) make(ctx context.Context, ev ruleEvent, pass *hookPass, dec
 	}
 	d.madeTo[h.Name] = ev.seq
 	data := map[string]any{"hook": h.Name, "event": ev.typ, "seq": ev.seq, "makes": line.String(), "thread": ev.threadURL}
-	if flap, held := d.flapHeld(ctx, ev, decl); held {
+	if flap, made, held := d.flapHeld(ctx, ev, decl); held {
 		// The skip is logged as any make that made nothing is, with why,
 		// and madeTo above has already taken the event: a restarted daemon
 		// reads this hook_rule event in makesFrom and judges it no again.
@@ -293,6 +331,7 @@ func (d *Dispatcher) make(ctx context.Context, ev ruleEvent, pass *hookPass, dec
 		if err := d.Store.LogDispatch(ctx, "", "hook_rule", actor, data); err != nil {
 			d.Log.Warn("hook_rule event", "err", err)
 		}
+		d.tellFlapHeld(ctx, h.Name, ev, made, decl)
 		return false
 	}
 	depot, why := d.depotFor(ctx, ev, line, decl)

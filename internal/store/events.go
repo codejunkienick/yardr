@@ -195,7 +195,7 @@ var DispatchKinds = []string{
 	"workspace_kept", "workspace_removed", DiskKept,
 	"gave_up", "backoff", "capped", "quota_wait", "group_wait", "limits_wait", "unrouted", "no_runner", "bad_depot", "bad_flow", "stranded",
 	"crew_blocked", "crew_start_tail", "nudge_held", "login_led", "human_notified", "waited",
-	"train_branched", "bad_train", "wagon_without_train", "hook_rule", "make_refused",
+	"train_branched", "bad_train", "wagon_without_train", "hook_rule", "make_refused", "flap_held",
 	HookQuiet, QuietStarted, QuietPassed, QuietFailed, QuietUnjudged,
 }
 
