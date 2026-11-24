@@ -18,6 +18,15 @@
 #                      checking
 #   DOKKU_KEY_FILE     the private key to push with, by its absolute path;
 #                      ssh's own default keys when unset
+#   DOKKU_CONNECT_TIMEOUT
+#                      seconds ssh waits to connect to the host and finish its
+#                      handshake before it gives up (default 30)
+#   DOKKU_SERVER_ALIVE_INTERVAL
+#                      seconds of silence from the host, once connected, after
+#                      which ssh asks it whether it is there (default 60)
+#   DOKKU_SERVER_ALIVE_COUNT_MAX
+#                      how many of those asks may go unanswered in a row
+#                      before ssh ends the call (default 3)
 #   DOKKU_URL          where the app is opened, for the note, with {app} for
 #                      the app's name; the note names the host and the app
 #                      when unset
@@ -66,6 +75,17 @@
 # The host's key is pinned: an unknown or a changed one fails the push, and
 # nothing is ever asked on a terminal. A missing option or file is refused
 # before anything is pushed.
+#
+# A host that does not answer fails the run in minutes, not never: every ssh
+# it starts, a command on the host or the push, gives up on a connection or
+# handshake that does not complete (DOKKU_CONNECT_TIMEOUT) and on a host that
+# goes silent once connected (the two DOKKU_SERVER_ALIVE_ options: after about
+# 4 minutes by default). The call then fails as any failed call does, below: a
+# deploy that cannot list the host's apps goes on to push, and a push that
+# fails fails the deploy. Each of the three is a whole number of 1 or more, and
+# one that is not is refused before anything is pushed: it becomes part of a
+# command line the shell runs, and ssh reads a 0 connect timeout or interval
+# as no limit.
 #
 # A deploy that failed reports failed (to decide, in the design's flow), with
 # the end of the push's output in the note and mail to the yardmaster: the
@@ -116,6 +136,9 @@ HOST=${DOKKU_HOST:-}
 APP=${DOKKU_APP:-}
 KNOWN=${DOKKU_KNOWN_HOSTS:-}
 KEY=${DOKKU_KEY_FILE:-}
+CONNECT=${DOKKU_CONNECT_TIMEOUT:-30}
+ALIVE_EVERY=${DOKKU_SERVER_ALIVE_INTERVAL:-60}
+ALIVE_MISSES=${DOKKU_SERVER_ALIVE_COUNT_MAX:-3}
 URL=${DOKKU_URL:-}
 AFTER=${DOKKU_AFTER:-}
 NOTIFY=${YARDR_NOTIFY:-}
@@ -273,13 +296,34 @@ if [ -n "$KEY" ]; then
   { [ -f "$KEY" ] && [ -r "$KEY" ]; } ||
     fail "DOKKU_KEY_FILE ($KEY) is missing or cannot be read; nothing was pushed"
 fi
+# positive <option> <value>: the three timeouts are whole numbers to ssh, and a
+# value is part of the command line dokku() evals and git hands to sh, so only
+# digits pass ("3 -o ProxyCommand=x" is not a count). Not a 0 either, for one
+# rule of 1 or more: ssh reads a 0 connect timeout or interval as no limit, the
+# wait these options are here to end.
+positive() {
+  case $2 in
+  '' | *[!0-9]*) ;;
+  *[1-9]*) return 0 ;;
+  esac
+  fail "$1 is no whole number of 1 or more ($2); nothing was pushed"
+}
+positive DOKKU_CONNECT_TIMEOUT "$CONNECT"
+positive DOKKU_SERVER_ALIVE_INTERVAL "$ALIVE_EVERY"
+positive DOKKU_SERVER_ALIVE_COUNT_MAX "$ALIVE_MISSES"
 
 # The ssh git runs. Only the pinned file says which host key is right: not
 # the user's or the machine's known hosts, not DNS, not a command of the
 # user's ssh configuration. Host-key updates are disabled too. BatchMode
 # asks nothing: no passphrase, no password, no "are you sure". With a key
-# file, that key alone is offered.
-SSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='$KNOWN' -o GlobalKnownHostsFile=/dev/null -o VerifyHostKeyDNS=no -o KnownHostsCommand=none -o UpdateHostKeys=no"
+# file, that key alone is offered. Nothing waits on the host for ever (a first
+# call once sat two hours, yardr-fhvm): ssh given no limit waits as long as a
+# host that took the connection and says nothing stays quiet. So the
+# connection and its handshake have a timeout, and a host that goes silent
+# after them is asked every ALIVE_EVERY seconds and dropped when ALIVE_MISSES
+# asks in a row go unanswered. These are command-line options, which win over
+# the user's ssh configuration.
+SSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='$KNOWN' -o GlobalKnownHostsFile=/dev/null -o VerifyHostKeyDNS=no -o KnownHostsCommand=none -o UpdateHostKeys=no -o ConnectTimeout=$CONNECT -o ServerAliveInterval=$ALIVE_EVERY -o ServerAliveCountMax=$ALIVE_MISSES"
 [ -z "$KEY" ] || SSH="$SSH -i '$KEY' -o IdentitiesOnly=yes"
 
 log=$(mktemp "${TMPDIR:-/tmp}/deploy-dokku.XXXXXX") || hold "cannot make a file for the push's output; nothing was pushed"

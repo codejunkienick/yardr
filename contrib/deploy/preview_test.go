@@ -107,12 +107,13 @@ func TestPreviewPushesTheBranch(t *testing.T) {
 		if strings.Contains(c, "git ") && strings.HasSuffix(c, "-G dokku@dokku.test") {
 			continue // git's probe of the ssh it has
 		}
-		// Every command on the host goes over the ssh the push uses.
-		for _, want := range []string{
+		// Every command on the host goes over the ssh the push uses, with its
+		// timeouts: the listing, the making of the app and the push.
+		for _, want := range append([]string{
 			"-o BatchMode=yes", "-o StrictHostKeyChecking=yes",
 			"-o UserKnownHostsFile=" + y.opts["DOKKU_KNOWN_HOSTS"] + " ", "-o GlobalKnownHostsFile=/dev/null",
 			"-o VerifyHostKeyDNS=no", "-o KnownHostsCommand=none", "-o UpdateHostKeys=no", " dokku@dokku.test ",
-		} {
+		}, timeouts("30", "60", "3")...) {
 			if !strings.Contains(c, want) && !strings.Contains(c, " -G ") {
 				t.Errorf("ssh was run without %q:\n%s", want, c)
 			}

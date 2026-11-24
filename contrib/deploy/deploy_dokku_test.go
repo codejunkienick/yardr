@@ -230,19 +230,36 @@ live terminal
 // removes one. With $FAKE_SSH/nodokku the host refuses every dokku command
 // and takes pushes only, with $FAKE_SSH/nocreate it makes no app, and with
 // $FAKE_SSH/nodestroy it refuses to remove one. With $FAKE_SSH/signal it ends
-// git with SIGTERM before it serves the push.
+// git with SIGTERM before it serves the push. With $FAKE_SSH/hang the host
+// takes the connection and says nothing: ssh given a ConnectTimeout gives up
+// when it ends, and given none waits for ever.
 const fakeSSH = `#!/bin/sh
 printf '%s\n' "$*" >>"$FAKE_SSH/calls"
 for a; do [ "$a" != -G ] || exit 0; done
+connect=
 while [ $# -gt 0 ]; do
   case $1 in
-  -i | -o | -p | -F) shift 2 ;;
+  -o)
+    case $2 in ConnectTimeout=*) connect=${2#*=} ;; esac
+    shift 2
+    ;;
+  -i | -p | -F) shift 2 ;;
   -*) shift ;;
   *) break ;;
   esac
 done
 shift
 [ "${1:-}" != -- ] || shift
+if [ -e "$FAKE_SSH/hang" ]; then
+  # What the real ssh does against a listener that accepts and never answers:
+  # with no limit it is still waiting when its caller gives up (600 s is past
+  # deploy()'s fuse at any load), and with one it ends at that many seconds,
+  # exit 255, with these two lines.
+  sleep "${connect:-600}"
+  echo "Connection timed out during banner exchange" >&2
+  echo "Connection to dokku.test port 22 timed out" >&2
+  exit 255
+fi
 if [ -e "$FAKE_SSH/hostkey" ]; then
   echo "No ED25519 host key is known for dokku.test and you have requested strict checking." >&2
   echo "Host key verification failed." >&2
@@ -523,7 +540,13 @@ func (y *yard) deploy(id string) {
 		}
 		if time.Now().After(deadline) {
 			_ = e.Stop(ctx, h)
-			y.t.Fatalf("%s did not finish", y.script)
+			// What ssh was run with says where it stood: a call with no
+			// timeouts, to a host that says nothing, never ends.
+			ran := ""
+			if calls := y.hostCalls(); len(calls) > 0 {
+				ran = "; ssh was run with:\n" + strings.Join(calls, "\n")
+			}
+			y.t.Fatalf("%s did not finish%s", y.script, ran)
 		}
 	}
 	out, _ := os.ReadFile(logPath)
@@ -575,6 +598,47 @@ func (y *yard) pushes() []string { return y.callsWith("git-receive-pack") }
 
 // calls is what the fake ssh was run with, each time.
 func (y *yard) calls() []string { return y.callsWith("") }
+
+// hostCalls is what the fake ssh was run with for each command on the host
+// and each push: the calls, less git's probe of the ssh it has (-G), which is
+// neither.
+func (y *yard) hostCalls() []string {
+	var out []string
+	for _, c := range y.calls() {
+		if !strings.Contains(c, " -G ") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// timeouts are the options every call to the host carries: the connect timeout
+// and the two keepalive limits, each with the space after it that ends its
+// value, so that 30 is not found in 300.
+func timeouts(connect, interval, misses string) []string {
+	return []string{
+		"-o ConnectTimeout=" + connect + " ",
+		"-o ServerAliveInterval=" + interval + " ",
+		"-o ServerAliveCountMax=" + misses + " ",
+	}
+}
+
+// everyCallHas fails the test unless the fake ssh was run n times for a command
+// on the host or a push, and each of those calls holds all of want.
+func (y *yard) everyCallHas(n int, want []string) {
+	y.t.Helper()
+	calls := y.hostCalls()
+	if len(calls) != n {
+		y.t.Fatalf("ssh was run %d times for the host, want %d: %q", len(calls), n, calls)
+	}
+	for _, c := range calls {
+		for _, w := range want {
+			if !strings.Contains(c, w) {
+				y.t.Errorf("ssh was run without %q:\n%s", w, c)
+			}
+		}
+	}
+}
 
 func (y *yard) callsWith(part string) []string {
 	y.t.Helper()
@@ -686,6 +750,9 @@ func TestDeployPushesTheBase(t *testing.T) {
 	if strings.Contains(pushes[0], " -i ") || strings.Contains(pushes[0], "IdentitiesOnly") {
 		t.Errorf("ssh was given a key with DOKKU_KEY_FILE unset:\n%s", pushes[0])
 	}
+	// With none of the timeouts set, every call the run makes, the listing of
+	// the host's apps and the push, carries the defaults.
+	y.everyCallHas(2, timeouts("30", "60", "3"))
 }
 
 // An app with a dot in it is a name Dokku takes, so the base is pushed to
@@ -960,8 +1027,59 @@ func TestDeployChangedHostKeyFailsThePush(t *testing.T) {
 	}
 }
 
+// ssh given no limit waits on a host that takes the connection and says
+// nothing for as long as the host keeps quiet, and a deploy once sat two
+// hours in its first call (yardr-fhvm). The group's cmd gives the three
+// options short values, so this is also the case that they are read from the
+// environment: every call the run makes carries them, and the stand-in, which
+// waits out the ConnectTimeout it is given as ssh does, ends each at it. The
+// listing of the host's apps fails and the deploy goes on, the push fails, and
+// the bead reports failed with the usual note and mail, in seconds and not
+// never.
+func TestDeployFailsInSecondsWhenTheHostSaysNothing(t *testing.T) {
+	y := newYard(t)
+	y.lead()
+	y.write("hang", "", 0o644)
+	y.opts["DOKKU_CONNECT_TIMEOUT"] = "1"
+	y.opts["DOKKU_SERVER_ALIVE_INTERVAL"] = "2"
+	y.opts["DOKKU_SERVER_ALIVE_COUNT_MAX"] = "1"
+
+	start := time.Now()
+	y.deploy("r-1")
+	took := time.Since(start)
+
+	// The run ends at its timeouts, two calls of a second each, and not at the
+	// fuse deploy() has for a script that never finishes. The bound is half of
+	// that fuse, scaled by the same load: far above what the run's own
+	// processes take, and far below a wait with no end.
+	if bound := testload.Scale(30 * time.Second); took > bound {
+		t.Errorf("the deploy took %s against a host that says nothing, want under %s", took, bound)
+	}
+	y.everyCallHas(2, timeouts("1", "2", "1"))
+	if b := y.bead("r-1"); b.Stage != "decide" || b.Hold || b.Status == "closed" {
+		t.Fatalf("bead %s/%s hold=%v, want open in decide", b.Stage, b.Status, b.Hold)
+	}
+	notes := y.notes("r-1")
+	for _, want := range []string{"deploy: pushing main at ", "to dokku@dokku.test:app failed",
+		"Connection timed out during banner exchange"} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("the note lacks %q:\n%s", want, notes)
+		}
+	}
+	if want := "could not list the apps of dokku.test (exit 255), no preview was removed"; !strings.Contains(y.log, want) {
+		t.Errorf("the log lacks %q:\n%s", want, y.log)
+	}
+	if !y.mailed() {
+		t.Error("the yardmaster was not mailed")
+	}
+	if got := y.deployed(); got != "" {
+		t.Errorf("the host has %s, want nothing pushed", got)
+	}
+}
+
 // What must be there is asked for before anything is pushed: the host, the
-// app, the pinned known-hosts file, and the key file where one is named.
+// app, the pinned known-hosts file, and the key file where one is named, and
+// the timeouts, which are whole numbers that go into the ssh command line.
 func TestDeployRefusesBeforeThePush(t *testing.T) {
 	gone := "/nonexistent/deploy-dokku-test"
 	for name, c := range map[string]struct {
@@ -990,6 +1108,12 @@ func TestDeployRefusesBeforeThePush(t *testing.T) {
 		"a key file of the tree":         {map[string]string{"DOKKU_KEY_FILE": "a.txt"}, "DOKKU_KEY_FILE is not an absolute path (a.txt)"},
 		"no key file":                    {map[string]string{"DOKKU_KEY_FILE": gone}, "DOKKU_KEY_FILE (" + gone + ") is missing"},
 		"a key path with a token":        {map[string]string{"DOKKU_KEY_FILE": "/tmp/%h"}, "DOKKU_KEY_FILE names a path ssh would read as another"},
+		// ssh reads a 0 connect timeout as no limit, and a value with a space
+		// in it would put another option on the command line.
+		"a connect timeout that is no number":    {map[string]string{"DOKKU_CONNECT_TIMEOUT": "soon"}, "DOKKU_CONNECT_TIMEOUT is no whole number of 1 or more (soon)"},
+		"a connect timeout of zero":              {map[string]string{"DOKKU_CONNECT_TIMEOUT": "0"}, "DOKKU_CONNECT_TIMEOUT is no whole number of 1 or more (0)"},
+		"a keepalive interval with a unit":       {map[string]string{"DOKKU_SERVER_ALIVE_INTERVAL": "60s"}, "DOKKU_SERVER_ALIVE_INTERVAL is no whole number of 1 or more (60s)"},
+		"a keepalive count with an option in it": {map[string]string{"DOKKU_SERVER_ALIVE_COUNT_MAX": "3 -o ProxyCommand=x"}, "DOKKU_SERVER_ALIVE_COUNT_MAX is no whole number of 1 or more (3 -o ProxyCommand=x)"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			y := newYard(t)

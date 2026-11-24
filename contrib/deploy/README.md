@@ -47,6 +47,9 @@ trusting the file: the scan believes whoever answers.
 | `DOKKU_APP` | the app on it (a deploy's; a preview names its own) |
 | `DOKKU_KNOWN_HOSTS` | a known-hosts file with the host's ssh key, by its absolute path |
 | `DOKKU_KEY_FILE` | the private key to push with, by its absolute path; ssh's own default keys when unset |
+| `DOKKU_CONNECT_TIMEOUT` | seconds ssh waits to connect to the host and finish its handshake before it gives up; default 30 |
+| `DOKKU_SERVER_ALIVE_INTERVAL` | seconds of silence from the host, once connected, after which ssh asks it whether it is there; default 60 |
+| `DOKKU_SERVER_ALIVE_COUNT_MAX` | how many of those asks may go unanswered in a row before ssh ends the call; default 3 |
 | `DOKKU_URL` | where the app is opened, for the note, with `{app}` for the app's name; the note names the host and the app when unset |
 | `DOKKU_AFTER` | a command run in the depot, with the deploy's environment, after a deploy's push; the bead goes live only when it exits 0; unset runs nothing |
 | `YARDR_NOTIFY` | crew member mailed when a deploy fails (default: the yard's `yardmaster` setting, else `yardmaster`) |
@@ -81,13 +84,28 @@ ssh configuration of the user the daemon runs as still applies (a port, a
 jump host). With `DOKKU_KEY_FILE` that key alone is offered; the yard holds
 its path, never its material.
 
+A host that does not answer fails the deploy in minutes, not never. Every
+ssh the script runs, the commands on the host and the push alike, gives up
+on a connection or a handshake that is not done in `DOKKU_CONNECT_TIMEOUT`
+seconds, and on a host that goes silent once connected: after
+`DOKKU_SERVER_ALIVE_INTERVAL` seconds without a word ssh asks it whether it
+is there, and when `DOKKU_SERVER_ALIVE_COUNT_MAX` asks in a row go
+unanswered it ends the call, about 4 minutes with the defaults. A host that
+is slow but answering is not ended, whatever its push takes. These are
+command-line options of ssh, so they win over the same names in the ssh
+configuration of the user the daemon runs as. The call that was given up on
+fails as any failed call does: a deploy that cannot list the host's apps
+goes on to push, and a push that fails reports `failed`, below.
+
 Before anything is pushed it refuses: no `DOKKU_HOST` or `DOKKU_APP`, or
 one that is no host or app name; no `DOKKU_KNOWN_HOSTS`, or a file that is
 missing or cannot be read; a `DOKKU_KEY_FILE` that is missing or cannot be
-read; and a path of either that is not absolute, or has a space, `%`, `$`,
-a quote or a backslash in it, which ssh would read as another file. ssh
-runs in the depot, so a relative path would name a file of the tree being
-pushed: the pin and the key are kept outside it.
+read; a path of either that is not absolute, or has a space, `%`, `$`, a
+quote or a backslash in it, which ssh would read as another file; and a
+timeout or count that is not a whole number of 1 or more (ssh reads a 0
+connect timeout or interval as no limit, and the value becomes part of ssh's
+command line). ssh runs in the depot, so a relative path would name a file
+of the tree being pushed: the pin and the key are kept outside it.
 
 A refusal and a failed push both report `failed` (to `decide`): the code
 has landed, so only the host or this setup can be fixed, and a person sends
@@ -296,10 +314,10 @@ reverses database migrations; a migration is undone by a new migration.
 
 `go test ./contrib/deploy/` runs it through the exec runner against a local
 repository behind a stand-in for ssh: the push, each outcome, the train
-gate, the pinned key and every refusal; and for a preview the push, the
-second, forced one, the app's name, the removal by each kind of run, and
-its refusals. The void run drives deploy-void through the same runner
-against a stand-in for npx: the checkout, the install without the
-credential, the connect and the deploy with the depot's HOME, the URL from
-the run's own log, each outcome, the train gate, coalescing, and every
-refusal.
+gate, the pinned key, a host that says nothing, and every refusal; and for
+a preview the push, the second, forced one, the app's name, the removal by
+each kind of run, and its refusals. The void run drives deploy-void through
+the same runner against a stand-in for npx: the checkout, the install
+without the credential, the connect and the deploy with the depot's HOME,
+the URL from the run's own log, each outcome, the train gate, coalescing,
+and every refusal.
