@@ -411,7 +411,8 @@ depot's flow does not have is refused.
 with the reason on stdin, for a question that is asked no more (it was settled another
 way, or asked again in other words). It is the asker's to do, and the
 operator's; anyone else is refused, since nobody ends a question in the
-person's place. The ask leaves the person's open decisions wherever it
+person's place. A crew member a stage ask addresses takes that ask back
+to pass it up to the stage's people, with its words in the reason's place. The ask leaves the person's open decisions wherever it
 stands and shows among the decided ones as "taken back by <who>: <reason>",
 never as an answer of theirs; the bead's notes say the same. It takes no
 answer afterwards: a pick that arrives late is refused with who took it
@@ -927,7 +928,7 @@ what the person asked does, and this is the asker's own.`,
 	ask.Flags().StringArrayVar(&askGroup, "group", nil, "with --setup: the grants are for this group's sessions (repeatable; at least one of --crew and --group)")
 	ask.Flags().StringVar(&askSourceBase, "source-base", "", "with --setup: the setup's calls go to the pack's region base <name>, for a pack whose source declares bases")
 	ask.Flags().StringSliceVar(&askEnv, "env", nil, "with --secret: only these variables of the source's credential (default the mint's inputs where the declaration names a mint, else every one it names)")
-	ask.Flags().BoolVar(&askTakeBack, "take-back", false, "take an open ask back instead of asking: <id> <ask> <reason|-> (the asker's, or the operator's)")
+	ask.Flags().BoolVar(&askTakeBack, "take-back", false, "take an open ask back instead of asking: <id> <ask> <reason|-> (the asker's, the operator's, or a crew member passing a stage ask up)")
 	ask.Flags().BoolVar(&askNew, "new", false, "the question is about no bead: make one titled with it, and the ask on it, in one write")
 	// The bead of --new, by bead create's flags and defaults.
 	ask.Flags().StringVarP(&askBead.Body, "body", "b", "", "with --new: the bead's description (- reads stdin)")

@@ -13,9 +13,10 @@ import (
 
 // takeBackAsk is bead ask --take-back <id> <ask> <reason>, with the three
 // args the command has counted: the asker's open ask, or the operator's,
-// taken back with the reason the person reads in its place. A reason of - is
-// read from stdin, so that one quoting code or file names is written as a
-// heredoc and no shell expands it.
+// taken back with the reason the person reads in its place; a crew
+// member's stage ask is its to take back, passing it up to the stage's
+// people. A reason of - is read from stdin, so that one quoting code or
+// file names is written as a heredoc and no shell expands it.
 func (a *app) takeBackAsk(c *cobra.Command, st store.API, args []string) error {
 	// A bead@peer ref is the store's to refuse, with whose the question is to
 	// take back.

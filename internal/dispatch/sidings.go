@@ -45,17 +45,17 @@ func (d *Dispatcher) sidings(ctx context.Context, groups map[string]store.Group,
 
 // passLists lists the open beads and the yard's routes once for the pass,
 // for waits and sidings to share, with the operator their routes match
-// against. With neither a wait nor a siding configured it lists nothing.
-// ok is false when a listing failed: the pass skips both steps, and the
-// next pass tries again, so a bead is told of and a siding folds late
-// rather than not.
+// against. With neither a wait, a crew-first group nor a siding configured
+// it lists nothing. ok is false when a listing failed: the pass skips both
+// steps, and the next pass tries again, so a bead is told of and a siding
+// folds late rather than not.
 func (d *Dispatcher) passLists(ctx context.Context, groups map[string]store.Group) (beads []store.Bead, routes []store.Route, operator string, ok bool) {
 	waits, sidings := false, false
 	for _, g := range groups {
 		if g.Runner != "manual" {
 			continue
 		}
-		if s, _ := g.Config["wait"].(string); s != "" {
+		if s, _ := g.Config["wait"].(string); s != "" || g.AskCrewFirst() {
 			waits = true
 		}
 		if _, ok := store.SidingOf(g); ok {

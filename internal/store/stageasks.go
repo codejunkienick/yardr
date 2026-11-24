@@ -370,7 +370,10 @@ func (t *AskTemplate) framed(row *beadRow, notes []Note, questionBy string, dir 
 // carry ask out gets no ask, and the put logs one attention event naming
 // the bead, the stage and the member. Crew members and names that are no
 // user have no decisions queue and are skipped. When no member got an ask,
-// the ask goes to the operator. Entering a stage that already has an open
+// the ask goes to the operator. Where the group sets ask_crew_first and
+// its members name a crew member, the ask goes to the first crew member
+// alone instead, and the people are asked only when that member passes
+// it up or stays silent (stageaskscrew.go). Entering a stage that already has an open
 // or put-aside ask of that stage puts none, so the put is idempotent. A
 // broken template puts no ask and logs one event naming the stage and the
 // error; a stage without a template, or one no manual group works, puts
@@ -453,38 +456,27 @@ func (w *wtx) putStageAsks(row *beadRow, stage string, entry uint64, f *Flow, tm
 		}
 	}
 	card := tmpl.framed(row, notes, questionBy, depot.IsDir())
-	got := 0
-	for _, member := range g.Members {
-		if strings.Contains(member, "@") {
-			ok, err := w.putRemoteAsk(row, card, stage, entry, member)
-			if err != nil {
+	if crew, ok := w.firstCrewMember(g); ok && g.AskCrewFirst() {
+		if err := w.putLocalStageAsk(row, card.stageAsk(crew, stage, entry)); err != nil {
+			return err
+		}
+	} else {
+		got, err := w.putPersonStageAsks(row, g, stage, func(to string) Ask {
+			return card.stageAsk(to, stage, entry)
+		})
+		if err != nil {
+			return err
+		}
+		if got == 0 {
+			operator, err := operatorIn(w.Tx)
+			if err != nil || operator == "" {
 				return err
 			}
-			if ok {
-				got++
+			ask := card.stageAsk(operator, stage, entry)
+			ask.Fallback = true
+			if err := w.putLocalStageAsk(row, ask); err != nil {
+				return err
 			}
-			continue
-		}
-		if w.Bucket(bCrew).Get([]byte(member)) != nil {
-			continue
-		}
-		if w.Bucket(bUsers).Get([]byte(member)) == nil {
-			continue
-		}
-		if err := w.putLocalStageAsk(row, card.stageAsk(member, stage, entry)); err != nil {
-			return err
-		}
-		got++
-	}
-	if got == 0 {
-		operator, err := operatorIn(w.Tx)
-		if err != nil || operator == "" {
-			return err
-		}
-		ask := card.stageAsk(operator, stage, entry)
-		ask.Fallback = true
-		if err := w.putLocalStageAsk(row, ask); err != nil {
-			return err
 		}
 	}
 	// The question the cards took over is theirs now, and answerable once,
@@ -537,14 +529,14 @@ func (w *wtx) putLocalStageAsk(row *beadRow, ask Ask) error {
 	return put(w.Tx, bAskCopies, join(row.UUID, seqKey(n.Seq)), copies)
 }
 
-// putRemoteAsk puts tmpl's ask for the remote member, addressed across to
+// putRemoteAsk puts ask for the remote member, addressed across to
 // name@peer: stored on the bead here and queued to that yard, where it
 // stands among the named person's decisions. The yard asking for its own
 // stage is none of the CLI's askers, so none of their gates is asked: the
 // link must only be one and carry ask out. A member whose link is missing
 // or carries none gets no ask, and the put logs one event naming the bead,
 // the stage and the member. It reports whether the member got an ask.
-func (w *wtx) putRemoteAsk(row *beadRow, tmpl *AskTemplate, stage string, entry uint64, member string) (bool, error) {
+func (w *wtx) putRemoteAsk(row *beadRow, ask Ask, stage string, member string) (bool, error) {
 	to, peer, _ := strings.Cut(member, "@")
 	unreachable := func(reason string) error {
 		return w.event(row.UUID, askUnreachableEvent, stageAskAuthor, map[string]any{
@@ -560,7 +552,6 @@ func (w *wtx) putRemoteAsk(row *beadRow, tmpl *AskTemplate, stage string, entry 
 	if !p.carries(PeerAsk, false) {
 		return false, unreachable(fmt.Sprintf("peer %s: the link does not carry ask out: the operator allows it with yardr peer allow %s --send ask", peer, peer))
 	}
-	ask := tmpl.stageAsk(member, stage, entry)
 	n, err := w.storeStageAsk(row, ask)
 	if err != nil {
 		return false, err
@@ -615,73 +606,6 @@ func (w *wtx) storeStageAsk(row *beadRow, ask Ask) (*Note, error) {
 		return nil, err
 	}
 	return w.addNoted(row, NoteAsk, string(text), stageAskAuthor)
-}
-
-// takeBackStageAsks takes back the open and put-aside asks put for stage on
-// the bead row, in the same write, authored yard with reason: the bead left
-// the stage. Answered and declined asks stay as history. Where an ask also
-// stands in another yard, addressed across, that yard is told in the same
-// write.
-func (w *wtx) takeBackStageAsks(row *beadRow, stage, reason string) error {
-	return w.takeBackStage(row, reason, func(ask Ask) bool { return ask.Stage == stage })
-}
-
-// handAskStands reports whether an ask someone put by hand is open or put
-// aside on the bead whose notes are given: no stage ask, which the yard
-// puts and takes back with the stage.
-func handAskStands(notes []Note) bool {
-	for _, r := range ResolveAsks(notes, now()) {
-		if r.AskErr == nil && r.Ask.Stage == "" && (r.State == AskOpen || r.State == AskAside) {
-			return true
-		}
-	}
-	return false
-}
-
-// withdrawMoves takes back the card of moves standing on the bead row, in
-// the write that puts a hand ask on it, authored yard with reason. The card
-// was put for a bead nobody had asked about (putStageAsks); this keeps the
-// person's phone from holding two cards for one decision. It takes back no
-// other stage ask, whose question the hand ask does not answer.
-func (w *wtx) withdrawMoves(row *beadRow, reason string) error {
-	return w.takeBackStage(row, reason, func(ask Ask) bool { return ask.Moves })
-}
-
-// takeBackAllStageAsks takes back every open and put-aside stage ask on the
-// bead row, whatever stage it was put for: the bead closed.
-func (w *wtx) takeBackAllStageAsks(row *beadRow, reason string) error {
-	return w.takeBackStage(row, reason, func(ask Ask) bool { return ask.Stage != "" })
-}
-
-func (w *wtx) takeBackStage(row *beadRow, reason string, match func(Ask) bool) error {
-	notes, err := beadNotes(w.Tx, row.UUID)
-	if err != nil {
-		return err
-	}
-	for _, r := range ResolveAsks(notes, now()) {
-		if r.AskErr != nil || !match(r.Ask) || (r.State != AskOpen && r.State != AskAside) {
-			continue
-		}
-		if err := w.yardTakesBack(row, r.Note.Seq, reason); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// yardTakesBack ends the ask seq on the bead row as asked no more, in the
-// same write, authored yard with reason, and tells the other yards the ask
-// also stands in.
-func (w *wtx) yardTakesBack(row *beadRow, seq uint64, reason string) error {
-	ans := Answer{Ask: seq, Words: reason, TakeBack: true}
-	text, err := json.Marshal(ans)
-	if err != nil {
-		return err
-	}
-	if _, err = w.addNoted(row, NoteAnswer, string(text), stageAskAuthor); err != nil {
-		return err
-	}
-	return w.settleCopies(row, ans, nil, "")
 }
 
 // latestStayEntry is the seq of the event that entered the bead into its

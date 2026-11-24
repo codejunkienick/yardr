@@ -776,6 +776,23 @@ to linked yards, and a later take-back settles those copies. The ask carries
 the stage, the move per option and the entry event's seq, frozen at ask
 time. Entering a stage that already has an open ask of that stage puts none.
 
+Where the group sets `ask_crew_first` ([groups.md](groups.md#a-crew-member-asked-first))
+and its members name a crew member, the entry puts the ask to the first
+crew member in members order alone, and no person is asked. The crew
+member answers as a member, as any member does. It passes the ask up by
+taking it back with its words, which stand as its authored answer note
+where the person reads them; on the daemon's next pass the stage's people
+are asked the same card. If it does neither within the group's `wait` —
+an hour where the group sets none — the yard takes its ask back on that
+pass, with the silence named in the reason, and asks the people in the
+same write. Before the wait, silence asks nobody new. A person who was
+asked for the stay, and answered or declined, is never asked again for
+it: the placed asks are what remember the fall-through happened, and a
+person's decline stands. Leaving the stage and coming back is a new
+stay: the crew member is asked first again, and its silence falls
+through anew. A group whose members name no crew member, and one that
+does not set the key, asks its people on entry as above.
+
 Any move out takes the stage's open and put-aside asks back in the same
 write, authored `yard` with the reason `moved to <to> by <actor>`;
 answered and declined asks stay as history. A same-stage transition is a

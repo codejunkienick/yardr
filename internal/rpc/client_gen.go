@@ -255,6 +255,10 @@ func (c *Client) DeclineAskExpected(ctx context.Context, id string, ask uint64, 
 func (c *Client) TakeBackAsk(ctx context.Context, id string, ask uint64, reason, actor string) error {
 	return c.call(ctx, "TakeBackAsk", nil, id, ask, reason, actor)
 }
+
+func (c *Client) FallThroughStageAsk(ctx context.Context, id string, at time.Time) (bool, error) {
+	return callV[bool](c, ctx, "FallThroughStageAsk", id, at)
+}
 func (c *Client) GiveSecret(ctx context.Context, id string, ask uint64, values map[string]string, actor string, weighed bool) (*store.SourceKeyed, error) {
 	return callV[*store.SourceKeyed](c, ctx, "GiveSecret", id, ask, values, actor, weighed)
 }

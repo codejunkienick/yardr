@@ -2,6 +2,8 @@ package dispatch_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -109,5 +111,100 @@ func TestBeadThatWaitsLongInAManualGroupRaisesWaitedOnce(t *testing.T) {
 	}
 	if n := len(waited(quiet)); n != 0 {
 		t.Fatalf("waited raised %d times in a manual group with no wait", n)
+	}
+}
+
+// In a manual group that asks its crew member first, the waits scan asks
+// the group's people when the crew member passes the stage's ask up, and
+// when it stays silent past the group's wait; before the wait, silence
+// asks nobody new (yardr-115z).
+func TestCrewFirstAskFallsThroughInTheWaitsScan(t *testing.T) {
+	t.Parallel()
+	s, _, d := crewSetup(t, store.CrewMember{On: []string{store.KindAttention}})
+	d.Runners["manual"] = &fakeRunner{dead: map[string]bool{}}
+	ctx := context.Background()
+	repo := t.TempDir()
+	gitIn(t, repo, "init", "-q", "-b", "main")
+	must(t, os.MkdirAll(filepath.Join(repo, ".yardr/flows/default"), 0o755))
+	must(t, os.WriteFile(filepath.Join(repo, ".yardr/flows/default.flow"),
+		[]byte("new -> review\nreview -> review | approved on done | new on changes\napproved -> merged\nmerged terminal\n"), 0o644))
+	must(t, os.WriteFile(filepath.Join(repo, ".yardr/flows/default/review.md"),
+		[]byte("Review the diff.\n\n## Ask\nkind: choice\nquestion: Where should this bead go next?\ncontext:\n- The branch is ready either way.\ndone: The bead moves to approved.\nchanges: The bead goes back for changes.\n"), 0o644))
+	gitIn(t, repo, "add", "-A")
+	gitIn(t, repo, "commit", "-q", "-m", "flow")
+	must(t, s.PutDepot(ctx, store.Depot{Name: "web", Path: repo, Base: "main"}, "me"))
+	must(t, s.SetSetting(ctx, store.OperatorSetting, "jo", "jo"))
+	if _, err := s.AddUser(ctx, "ada", "jo"); err != nil {
+		t.Fatal(err)
+	}
+	must(t, s.PutGroup(ctx, store.Group{Name: "deciders", Runner: "manual", Limit: 50,
+		Members: []string{"yardmaster", "ada"},
+		Config:  map[string]any{"ask_crew_first": true, "wait": "1h"}}, "me"))
+	_, err := s.AddRoute(ctx, store.Route{Stage: "review", Group: "deciders"}, "me")
+	must(t, err)
+	enter := func() *store.Bead {
+		t.Helper()
+		b, err := s.CreateBead(ctx, store.NewBead{Title: "x", Depot: "web", Stage: "new"}, "me")
+		must(t, err)
+		b, err = s.Advance(ctx, b.ID, "review", store.Expect{}, "me")
+		must(t, err)
+		return b
+	}
+	openTo := func(id, name string) int {
+		t.Helper()
+		notes, err := s.Notes(ctx, id)
+		must(t, err)
+		n := 0
+		for _, r := range store.ResolveAsks(notes, time.Now()) {
+			if r.AskErr == nil && r.Ask.To == name && r.State == store.AskOpen {
+				n++
+			}
+		}
+		return n
+	}
+	start := time.Now()
+	now := start
+	dispatch.SetClock(d, func() time.Time { return now })
+
+	// Silence before the wait asks nobody new.
+	silent := enter()
+	must(t, d.Reconcile(ctx))
+	now = start.Add(30 * time.Minute)
+	must(t, d.Reconcile(ctx))
+	if n := openTo(silent.ID, "ada"); n != 0 {
+		t.Fatalf("ada has %d open asks before the wait, want 0", n)
+	}
+	if n := openTo(silent.ID, "yardmaster"); n != 1 {
+		t.Fatalf("the crew member has %d open asks, want 1", n)
+	}
+	// Silence past the wait falls through to the people, once.
+	now = start.Add(61 * time.Minute)
+	must(t, d.Reconcile(ctx))
+	must(t, d.Reconcile(ctx))
+	if n := openTo(silent.ID, "ada"); n != 1 {
+		t.Fatalf("ada has %d open asks after the wait, want 1", n)
+	}
+	if n := openTo(silent.ID, "yardmaster"); n != 0 {
+		t.Fatalf("the crew member has %d open asks after the fall-through, want 0", n)
+	}
+
+	// A pass-up asks the people on the next pass, before any wait.
+	passed := enter()
+	notes, err := s.Notes(ctx, passed.ID)
+	must(t, err)
+	var crewAsk uint64
+	for _, r := range store.ResolveAsks(notes, time.Now()) {
+		if r.AskErr == nil && r.Ask.To == "yardmaster" && r.State == store.AskOpen {
+			crewAsk = r.Note.Seq
+		}
+	}
+	if crewAsk == 0 {
+		t.Fatalf("no open crew ask on the passed-up bead: %+v", notes)
+	}
+	must(t, s.TakeBackAsk(ctx, passed.ID, crewAsk, "a person should decide this", "yardmaster"))
+	now = start.Add(5 * time.Minute)
+	must(t, d.Reconcile(ctx))
+	if n := openTo(passed.ID, "ada"); n != 1 {
+		t.Fatalf("ada has %d open asks after the pass-up, want 1", n)
 	}
 }

@@ -117,6 +117,12 @@ type API interface {
 	DeferAskExpected(ctx context.Context, id string, ask uint64, turn int, actor string) error
 	DeclineAskExpected(ctx context.Context, id string, ask uint64, turn int, words, actor string, held int) error
 	TakeBackAsk(ctx context.Context, id string, ask uint64, reason, actor string) error
+	// FallThroughStageAsk asks a crew-first stage's people where its
+	// crew member passed the ask up or stayed silent past the group's
+	// wait (stageaskscrew.go), at the caller's clock. The daemon calls
+	// it on its own store; it is not in rpc's Calls, as no program
+	// outside yardr relies on it.
+	FallThroughStageAsk(ctx context.Context, id string, at time.Time) (bool, error)
 	GiveSecret(ctx context.Context, id string, ask uint64, values map[string]string, actor string, weighed bool) (*SourceKeyed, error)
 	LoginWait(ctx context.Context, id, group string) (string, error)
 	LoginWaitReady(ctx context.Context, id string) error

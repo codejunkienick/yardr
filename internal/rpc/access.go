@@ -193,6 +193,7 @@ var Access = map[string]Class{
 	"DeferAskExpected":     Admin,
 	"DeclineAskExpected":   Admin,
 	"TakeBackAsk":          Agent,
+	"FallThroughStageAsk":  Admin, // the daemon's waits scan alone, as LogDispatch
 	"GiveSecret":           Admin,
 	"LoginWait":            Admin,
 	"LoginWaitReady":       Read,

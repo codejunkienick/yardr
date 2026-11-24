@@ -95,6 +95,7 @@ var ConfigKeys = []ConfigKey{
 	{"label", ConfigString, []string{"herdr"}, GroupConfig, "the label of the herdr workspace the group's sessions open in"},
 	{"greet", ConfigString, []string{"herdr"}, CrewConfig, "the user the crew member's first session greets"},
 	{"notify", ConfigSwitch, []string{"manual"}, GroupConfig, "true: a herdr notification says a bead is waiting"},
+	{"ask_crew_first", ConfigSwitch, []string{"manual"}, GroupConfig, "true: a stage's ask goes to the group's first crew member first, and to its people only when that member passes it up or stays silent past the group's wait"},
 	{"wait", ConfigSpan, []string{"manual"}, GroupConfig, "how long a bead may be in a stage of the group before a waited event, once per stay; unset: never"},
 	{"fold", ConfigCount, []string{"manual"}, GroupConfig, fmt.Sprintf("makes the group a siding: the beads waiting in a stage of the group are folded into one bead when this many wait; default %d", SidingFold)},
 	{"fold_after", ConfigSpan, []string{"manual"}, GroupConfig, fmt.Sprintf("makes the group a siding: the beads waiting are folded when the latest has waited this long; default %s", Span(SidingAfter))},

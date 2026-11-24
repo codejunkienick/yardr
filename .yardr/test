@@ -2101,7 +2101,7 @@ internal/store/peerasks.go 1073 peer asks, their answers and ask copies
 internal/store/peerbeads.go 1727 peer bead intake and fetching
 internal/store/peers.go 1517 peer records and their allowances
 internal/store/peersend.go 1261 sending beads to peers and settling them
-internal/store/policy.go 1178 the permission gates and their rules
+internal/store/policy.go 1164 the permission gates and their rules
 internal/store/routing.go 2858 groups, routes and their config merges
 internal/store/runask_list.go 1221 ask cards, labels and preset reading
 internal/store/runask_setup.go 1503 the setup ask, its card, and the carrying record

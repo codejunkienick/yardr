@@ -6855,14 +6855,14 @@ POST /call/DeclineAskExpected
 
 ### `TakeBackAsk`
 
-Takes an open ask back: its asker asks it no more, and says why. It is what `yardr bead ask --take-back` does. The ask leaves the person's open decisions and stands among the decided as `taken back`, with `by` and the reason as `words`: "taken back by `<by>`: `<words>`", never an answer of the person. It is the asker's to do and the operator's, and is refused for anyone else; refused too on an ask that is answered, declined or taken back already, and on a `bead@peer`, which is taken back in the yard that asked. An ask put aside is taken back as an open one is. `AnswerAsk`, `DeferAsk`, `DeclineAsk` and `GiveSecret` refuse it afterwards, naming who took it back and why. Where the ask also stands in a linked yard it leaves the decisions there as well, with `it was taken back in <peer>'s yard`. It answers nothing; taking it back is then a `noted` event in the stream.
+Takes an open ask back: its asker asks it no more, and says why. It is what `yardr bead ask --take-back` does. The ask leaves the person's open decisions and stands among the decided as `taken back`, with `by` and the reason as `words`: "taken back by `<by>`: `<words>`", never an answer of the person. It is the asker's to do and the operator's, and a crew member addressed by a stage ask takes that ask back to pass it up to the stage's people ([flows.md](flows.md#the-ask-template--ask)); it is refused for anyone else; refused too on an ask that is answered, declined or taken back already, and on a `bead@peer`, which is taken back in the yard that asked. An ask put aside is taken back as an open one is. `AnswerAsk`, `DeferAsk`, `DeclineAsk` and `GiveSecret` refuse it afterwards, naming who took it back and why. Where the ask also stands in a linked yard it leaves the decisions there as well, with `it was taken back in <peer>'s yard`. It answers nothing; taking it back is then a `noted` event in the stream.
 
 | argument | type | |
 |---|---|---|
 | `bead` | string | the bead |
 | `ask` | number | the ask note's seq |
 | `reason` | string | why it is asked no more, in a line: the person reads it where the question stood |
-| `actor` | string | who takes it back: the asker's name, or the operator's |
+| `actor` | string | who takes it back: the asker's name, the operator's, or the crew member a stage ask addresses passing it up |
 
 ```
 POST /call/TakeBackAsk

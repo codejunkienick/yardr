@@ -606,6 +606,70 @@ func TestStageAskOperatorFallback(t *testing.T) {
 	})
 }
 
+// Where the group sets ask_crew_first and its members name a crew member,
+// the ask goes to the first crew member alone; the people wait. Without
+// the setting, or with no crew member named, the people are asked as
+// before. The crew member answers as a member, as any member does.
+func TestStageAskCrewFirst(t *testing.T) {
+	t.Parallel()
+	enter := func(t *testing.T, members []string, cfg map[string]any, crew ...string) (store.API, context.Context, *store.Bead) {
+		t.Helper()
+		s, ctx := stageAskYard(t, stageAskChoice)
+		for _, name := range crew {
+			if _, err := s.PutCrew(ctx, store.CrewMember{Name: name, Runner: "herdr"}, "jo"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := s.PutGroup(ctx, store.Group{Name: "reviewers", Runner: "manual", Members: members, Config: cfg}, "jo"); err != nil {
+			t.Fatal(err)
+		}
+		b, err := s.CreateBead(ctx, store.NewBead{Title: "x", Depot: "web", Stage: "new"}, "me")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if b, err = s.Advance(ctx, b.ID, "review", store.Expect{}, "me"); err != nil {
+			t.Fatal(err)
+		}
+		return s, ctx, b
+	}
+	on := map[string]any{"ask_crew_first": true}
+
+	s, ctx, b := enter(t, []string{"clerk", "ada", "mckean"}, on, "clerk")
+	got := stageAsks(t, s, b.ID)
+	if len(got) != 1 || got[0].Ask.To != "clerk" || got[0].Ask.Stage != "review" ||
+		got[0].State != store.AskOpen || got[0].Note.Author != "yard" {
+		t.Fatalf("crew-first asks = %+v, want clerk's alone", got)
+	}
+	// The crew member's pick moves the bead, as a member's does.
+	if err := s.AddAnswer(ctx, b.ID, store.Answer{Ask: got[0].Note.Seq, Option: 1}, "clerk"); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := s.GetBead(ctx, b.ID); err != nil || b.Stage != "approved" {
+		t.Fatalf("after the crew member's pick: %+v, %v", b, err)
+	}
+
+	// The first crew member in members order, of two.
+	s, _, b = enter(t, []string{"ada", "boss", "clerk", "mckean"}, on, "clerk", "boss")
+	if got = stageAsks(t, s, b.ID); len(got) != 1 || got[0].Ask.To != "boss" {
+		t.Fatalf("two crew members: asks = %+v, want boss's alone", got)
+	}
+
+	// Unset, and set false: the people are asked, the crew member not.
+	for name, cfg := range map[string]map[string]any{"unset": nil, "false": {"ask_crew_first": false}} {
+		s, _, b = enter(t, []string{"clerk", "ada", "mckean"}, cfg, "clerk")
+		got = stageAsks(t, s, b.ID)
+		if len(got) != 2 || got[0].Ask.To != "ada" || got[1].Ask.To != "mckean" {
+			t.Fatalf("%s: asks = %+v, want ada's and mckean's", name, got)
+		}
+	}
+
+	// Set, with no crew member named: the people are asked as before.
+	s, _, b = enter(t, []string{"ada", "mckean"}, on, "clerk")
+	if got = stageAsks(t, s, b.ID); len(got) != 2 || got[0].Ask.To != "ada" || got[1].Ask.To != "mckean" {
+		t.Fatalf("no crew member named: asks = %+v, want ada's and mckean's", got)
+	}
+}
+
 // A member naming another yard gets one ask addressed across, queued as the
 // yard's own traffic; an unreachable link logs one event and falls back to
 // the operator.

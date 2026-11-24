@@ -1414,7 +1414,7 @@ key sets them.
 
 | runner | starts | config |
 |---|---|---|
-| `manual` | nothing; the bead waits on the group | `notify`, `wait` ([below](#a-bead-that-waits-long)), `fold`, `fold_after`, `fold_max` ([below](#a-siding)) |
+| `manual` | nothing; the bead waits on the group | `notify`, `wait` ([below](#a-bead-that-waits-long)), `ask_crew_first` ([below](#a-crew-member-asked-first)), `fold`, `fold_after`, `fold_max` ([below](#a-siding)) |
 | `exec` | `sh -c cmd` in the depot, with `YARDR_BEAD`, `YARDR_SESSION`, `YARDR_STAGE`, `YARDR_GROUP`, `YARDR_ACTOR` (the group), `YARDR_KIND` (`exec`), `YARDR_MODEL` and `YARDR_GIT_SYSTEM_CLEAN`; for a bead with a depot also `YARDR_DEPOT`, `YARDR_DEPOT_PATH`, `YARDR_BASE` (what the bead lands on: the depot's base, or its train's branch, see [line.md](line.md#trains); for a bead from a linked yard that named where its work starts, that commit, see [peers.md](peers.md#code-that-comes-back)), `YARDR_BRANCH` (`yard/<bead>`), `YARDR_WORKTREE` (where herdr groups check that branch out); `YARDR_TEST` (the depot's test command, unset when it has none, see [configuration.md](configuration.md#registering-a-depot)); `YARDR_TYPE` (the bead's type) and `YARDR_TRAIN` (the train it is a child of, empty for none), by which merge-local knows a wagon of a train ([line.md](line.md#wagons)); and `YARDR_BIN`, `YARDR_HOME` for the script's own `yardr` commands; `YARDR_DEPOT_KIND` is `git`, or `dir` for a dir depot, whose beads get no base, branch or worktree. An assembly is one ([line.md](line.md#4-approved-the-assembly-lands-it-on-main)), and so is an integrator such as `yardr-integrators`, which integrates a train's branch once its children have landed ([line.md](line.md#the-trains-own-flow)) | `cmd`, `dir`, `log`, `worktrees`, `env_file`, `timeout`, `nice` ([below](#sessions-that-give-way)) |
 | `herdr` | a herdr worktree workspace on branch `yard/<bead>` (from the bead's base) at `~/.yardr/worktrees/<depot>/<bead>` (reopened for later stages, one tab per stage), an agent in it, in a tab of its own with `YARDR_ACTOR` (the agent), `YARDR_BEAD`, `YARDR_SESSION`, `YARDR_STAGE`, `YARDR_GROUP`, `YARDR_KIND` (its harness kind), `YARDR_MODEL`, `YARDR_GIT_SYSTEM_CLEAN`, `YARDR_BASE` (what it branches from: the depot's base, or its train's branch), `YARDR_HOME` and `YARDR_BIN` in its environment, prompted with a brief in the worktree's git dir (`git rev-parse --git-path yardr`); a dir depot's bead works in the directory itself (see [Dir depots](#dir-depots)) | `kind`, `prompt`, `args`, `model`, `keep`, `worktrees`, `idle`, `max_age`, `grace`, `stall`, `still`, `label`, `env_file`, `trust`, `nice` ([below](#sessions-that-give-way)) |
 | `peer` | nothing here: the bead is sent to a linked yard, which works it in a flow of its own and returns how it ended ([Peer groups](#peer-groups)) | `peer`, `tries`, `remote`, `max_age` |
@@ -1660,6 +1660,33 @@ The stay is read from the bead's events, where the `waited` raised for it is
 also what says it was told. A bead that has waited longer than the yard
 keeps events ([configuration.md](configuration.md#retention-keeping-yarddb-bounded), 90 days) is
 counted from when it was made and may be told of once more.
+
+### A crew member asked first
+
+A stage's ask normally goes to every person of its manual group at once.
+A group that would rather have its crew member try first sets
+`ask_crew_first`:
+
+```sh
+yardr group set deciders ask_crew_first=true
+```
+
+Where the group's members name a crew member, the stage's ask then goes
+to the first crew member in members order alone, and the people are not
+asked. The crew member answers as a member, as any member does. If it
+would rather a person decided, it passes the ask up by taking it back
+with its words (`yardr bead ask --take-back <bead> <ask> -`), which stand
+in its answer's place; the people are asked on the daemon's next pass. If
+it does neither within the group's `wait` — an hour where the group sets
+none — the yard takes its ask back, naming the silence, and asks the
+people the same card. A person who was asked and declined is never asked
+again for that stay; leaving the stage and coming back asks the crew
+member first again. A group with no crew member among its members, and a
+group that does not set the key, asks its people as it always did.
+
+Set it only where a crew member's answer is worth as much as a person's
+try: never on a group that serves a merge, release or commit stage, where
+the pick is a person's to give.
 
 ### A siding
 

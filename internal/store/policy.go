@@ -80,7 +80,7 @@ const (
 	ActAllowThreads       Action = "let a crew member open threads" // Object.Does names whom and where
 	ActRemoveTimer        Action = "remove a timer"                 // Object.Does names the timer
 	ActRemoveDevice       Action = "remove a device"                // the user's own, or the operator's
-	ActTakeBackAsk        Action = "take an ask back"               // its asker's, or the operator's
+	ActTakeBackAsk        Action = "take an ask back"               // its asker's, the operator's, or a stage ask's addressee passing it up
 	ActReadInbox          Action = "read an inbox"                  // its user's, or the operator's; Object.Does says read or acknowledge
 	ActSpeakAs            Action = "speak as a crew member"         // its own session's, or the operator's
 	ActAnswerAsk          Action = "answer an ask"                  // its addressee's, or an operator's
@@ -906,20 +906,6 @@ func ruleRemoveDevice(ctx context.Context, tx *bolt.Tx, actor string, _ Action, 
 		return err
 	}
 	return fmt.Errorf("only %s or %s may remove a device of %s; this is %s", user, operator, user, this)
-}
-
-// ruleTakeBackAsk refuses taking ask Object.Seq back to anyone but who
-// asked it (Object.Whose) and the operator.
-func ruleTakeBackAsk(ctx context.Context, tx *bolt.Tx, actor string, _ Action, obj Object) error {
-	asker := obj.Whose
-	if actor == asker {
-		return nil
-	}
-	operator, this, err := notOperator(ctx, tx, actor)
-	if err != nil || this == "" {
-		return err
-	}
-	return fmt.Errorf("only %s, who asked it, or %s may take ask %d back; this is %s", asker, operator, obj.Seq, this)
 }
 
 // ruleAnswerAsk refuses an answer to a plain ask (Object.Seq) by anyone
