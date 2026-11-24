@@ -56,7 +56,8 @@ func TestHostedMintFor(t *testing.T) {
 		t.Errorf("the edge took %+v, want the one mint by the pinned key", s)
 	}
 	if _, _, err := mint(ctx, srv.URL, "unlisted-source", "ada@example.com"); err == nil ||
-		!strings.Contains(err.Error(), "declares no mint_scopes") {
+		!strings.Contains(err.Error(), "declares no mint_scopes") ||
+		strings.Contains(err.Error(), "yardr pack apply") {
 		t.Fatalf("an unknown hosted source = %v", err)
 	}
 	if s := edge.State(); len(s.Mints) != 1 {
@@ -70,5 +71,28 @@ func TestHostedMintFor(t *testing.T) {
 		!strings.Contains(err.Error(), "missing from the Google connection's grant") ||
 		strings.Contains(err.Error(), "ya29.hosted") {
 		t.Fatalf("an ungranted mint = %v", err)
+	}
+	// A copy stored before its pack declared the scopes holds none, whatever
+	// the edge would grant: it is refused without a call to the edge, with
+	// the pack to apply again (the docs pack for slides), and with no pack
+	// for the source whose pack declares no scope (mail, which mints
+	// locally), since applying that one cures nothing.
+	mints := len(edge.State().Mints)
+	for _, c := range []struct{ source, cure string }{
+		{"google-drive", "; re-apply its pack (`yardr pack apply google-drive`)"},
+		{"google-slides", "; re-apply its pack (`yardr pack apply google-docs`)"},
+		{"google-mail", ""},
+	} {
+		stored := "name: " + c.source + "\nbase: https://google.example.com\ncredential:\n  env: GOOGLE_TOKEN\n  mint:\n    - name: GOOGLE_ACCOUNT\n      secret: false\ncalls:\n  files: { kind: read, request: { method: GET, path: /files } }\n"
+		if _, err := st.PutSource(ctx, c.source+".yaml", stored, "jo"); err != nil {
+			t.Fatal(err)
+		}
+		want := "source " + c.source + " declares no mint_scopes, so the hosted mint does not serve it" + c.cure
+		if _, _, err := mint(ctx, srv.URL, c.source, "ada@example.com"); err == nil || err.Error() != want {
+			t.Errorf("%s stored without scopes = %v, want %q", c.source, err, want)
+		}
+	}
+	if got := len(edge.State().Mints); got != mints {
+		t.Errorf("a source with no scopes reached the edge: %d mints, want %d", got, mints)
 	}
 }

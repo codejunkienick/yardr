@@ -192,6 +192,28 @@ func TestEdgeSetupGoogleHosted(t *testing.T) {
 	if got := effective("google-docs"); !strings.HasSuffix(got, packMint("google-docs")) {
 		t.Errorf("cleared, google-docs mints by %q, want the pack's google-mint", got)
 	}
+	// A copy stored before its pack declared the scopes holds none: the
+	// setup passes it over, never probed, and names it with the pack to apply
+	// again, in the words the hosted mint refuses its calls with. Mail, whose
+	// pack declares none, is still not mentioned.
+	stale := strings.Replace(googleSourceText("google-drive"), "  mint_scopes: [https://www.googleapis.com/auth/drive.file]\n", "", 1)
+	if _, err := st.PutSource(ctx, "google-drive.yaml", stale, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	before := len(edge.State().Mints)
+	out, errs, err = edgeAs(t, st, srv.Client(), "jo", "edge", "setup-google", srv.URL)
+	if err != nil {
+		t.Fatalf("setup-google with a copy stored without scopes: %v\n%s%s", err, out, errs)
+	}
+	if want := "source google-drive: skipped (source google-drive declares no mint_scopes, so the hosted mint does not serve it; re-apply its pack (`yardr pack apply google-drive`))"; !strings.Contains(out, want) {
+		t.Errorf("setup-google says no %q in:\n%s", want, out)
+	}
+	if strings.Contains(out+errs, "google-mail") {
+		t.Errorf("setup-google mentions the source whose pack declares no scope:\n%s%s", out, errs)
+	}
+	if got := len(edge.State().Mints) - before; got != 3 {
+		t.Errorf("the edge took %d mints, want the three probes of the sources that declare scopes and none for the one that declares none", got)
+	}
 	// A reading must include an explicit answer to the training question,
 	// and invalid dates fail before the setup probes or sets any source.
 	probes := len(edge.State().Mints)

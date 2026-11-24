@@ -168,6 +168,16 @@ func TestGoogleDeclarations(t *testing.T) {
 		if want := mintScopes[file]; !reflect.DeepEqual(d.Credential.MintScopes, want) {
 			t.Errorf("%s: mint_scopes = %q, want %q", file, d.Credential.MintScopes, want)
 		}
+		// A yard that applied a pack before it declared its scopes is told
+		// to apply the pack again, and only a pack that declares them can
+		// cure that: docs' is the pack of slides too, and mail's is none.
+		wantPack := googlePackOf(file)
+		if len(mintScopes[file]) == 0 {
+			wantPack = ""
+		}
+		if got := pack.HostedMintPack(packs.FS, d.Name); got != wantPack {
+			t.Errorf("%s: the pack to apply again for %s = %q, want %q", file, d.Name, got, wantPack)
+		}
 		loginRun := map[string][]string{
 			"google-mail.yaml":     {"gws auth login -s gmail", "gws auth export --unmasked"},
 			"google-drive.yaml":    {"gws auth login -s drive", "gws auth export --unmasked"},

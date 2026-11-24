@@ -8,7 +8,9 @@ import (
 
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/edgelink"
+	"yardr.dev/yardr/internal/pack"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/packs"
 )
 
 // hostedMintFor is the hosted-Google minter the server registers on its
@@ -18,21 +20,22 @@ import (
 // (credential.mint_scopes) before the token is held — an ungranted
 // source's token is discarded with the answer, as the setup's probe
 // discards its. A source that declares no scope is not served and
-// reaches no edge. The token goes back to the mint cache alone: it is
-// printed nowhere, logged nowhere and kept in no event. The edge is
-// called as the CLI's probe calls it (edgelink.MintGoogleThrough), with
-// the system's roots.
+// reaches no edge; its refusal names the pack to apply again where an
+// embedded pack declares the scopes the stored copy was applied without.
+// The token goes back to the mint cache alone: it is printed nowhere,
+// logged nowhere and kept in no event. The edge is called as the CLI's
+// probe calls it (edgelink.MintGoogleThrough), with the system's roots.
 func hostedMintFor(st store.API, c *config.Config) store.HostedMint {
 	return func(ctx context.Context, addr, source, account string) (string, time.Time, error) {
 		needed := declaredMintScopes(ctx, st, source)
 		if len(needed) == 0 {
-			return "", time.Time{}, edgelink.CheckGoogleScopes(source, addr, needed, nil)
+			return "", time.Time{}, edgelink.CheckGoogleScopes(source, addr, needed, nil, pack.HostedMintPack(packs.FS, source))
 		}
 		mint, err := edgelink.MintGoogleThrough(ctx, st, c.PeerKey(), nil, addr, account)
 		if err != nil {
 			return "", time.Time{}, err
 		}
-		if err := edgelink.CheckGoogleScopes(source, addr, needed, mint.GrantedScopes); err != nil {
+		if err := edgelink.CheckGoogleScopes(source, addr, needed, mint.GrantedScopes, ""); err != nil {
 			return "", time.Time{}, err
 		}
 		expires, err := time.Parse(time.RFC3339, strings.TrimSpace(mint.ExpiresAt))

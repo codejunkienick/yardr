@@ -53,10 +53,18 @@ func MintGoogleThrough(ctx context.Context, st store.API, peerKey string, hc *ht
 // the setup's probe and the in-process mint share. Needed is matched
 // exactly, in declaration order; a source that declares no scope is not
 // served, since treating that as no missing scopes would hand it a
-// token unchecked.
-func CheckGoogleScopes(source, addr string, needed, granted []string) error {
+// token unchecked. A stored declaration is the copy its apply made, so a
+// yard that applied a pack before the pack declared its scopes holds one
+// without them: where the caller knows the pack that declares them
+// (pack.HostedMintPack), that refusal names it as the cure, and says
+// nothing of one where pack is "". Pack is read for that refusal alone.
+func CheckGoogleScopes(source, addr string, needed, granted []string, pack string) error {
 	if len(needed) == 0 {
-		return fmt.Errorf("source %s declares no mint_scopes, so the hosted mint does not serve it", source)
+		cure := ""
+		if pack != "" {
+			cure = fmt.Sprintf("; re-apply its pack (`yardr pack apply %s`)", pack)
+		}
+		return fmt.Errorf("source %s declares no mint_scopes, so the hosted mint does not serve it%s", source, cure)
 	}
 	var missing []string
 	for _, need := range needed {

@@ -524,7 +524,7 @@ func hostedFetch(s store.API, home string) store.HostedMint {
 				needed = d.Credential.MintScopes
 			}
 		}
-		if err := edgelink.CheckGoogleScopes(source, addr, needed, mint.GrantedScopes); err != nil {
+		if err := edgelink.CheckGoogleScopes(source, addr, needed, mint.GrantedScopes, ""); err != nil {
 			return "", time.Time{}, err
 		}
 		expires, err := time.Parse(time.RFC3339, mint.ExpiresAt)

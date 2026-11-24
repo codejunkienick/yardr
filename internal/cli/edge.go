@@ -17,10 +17,12 @@ import (
 	"yardr.dev/yardr/internal/agents"
 	"yardr.dev/yardr/internal/config"
 	"yardr.dev/yardr/internal/edgelink"
+	"yardr.dev/yardr/internal/pack"
 	"yardr.dev/yardr/internal/runner"
 	"yardr.dev/yardr/internal/source"
 	"yardr.dev/yardr/internal/store"
 	"yardr.dev/yardr/internal/yardkey"
+	"yardr.dev/yardr/packs"
 )
 
 // productionEdge is the edge yardr runs, and publishedKeyAt the page outside
@@ -580,9 +582,11 @@ line is read by the yard's server as the hosted mint, which it mints
 in-process for a source call; running the command itself mints nothing,
 for any caller. A source the probe refuses keeps the pack's mint, and
 its token is discarded. A source that declares no scope is not probed
-and is left as it is. Clearing a source's mint_command (yardr source
-set <source> mint_command=) is the way back to the pack's mint. Only
-the operator sets a mint, as only the operator sets any source's.
+and is left as it is; where its pack declares scopes the copy this yard
+holds was applied without, the source is named with the pack to apply
+again. Clearing a source's mint_command (yardr source set <source>
+mint_command=) is the way back to the pack's mint. Only the operator
+sets a mint, as only the operator sets any source's.
 
 The same setup records what you read of your model provider's terms.
 It names the provider of the yard's harness kind (default_kind) and
@@ -668,9 +672,22 @@ func (a *app) edgeSetupGoogle(c *cobra.Command, address string, termsRead bool, 
 		decl *source.Declaration
 	}
 	var hosted []declaringSource
+	// stale are the sources whose stored declaration names no scope where
+	// the pack that declares them now does: a copy applied before the pack
+	// declared its scopes, which the hosted mint refuses at every call. The
+	// setup names each with the pack to apply again, in the words the mint's
+	// refusal has, rather than leave it out as it does a source no pack
+	// gives scopes (mail, which mints locally). None is probed or set.
+	var stale []googleSetupSource
 	for _, src := range sources {
 		d, derr := src.Declaration()
-		if derr != nil || d.Credential == nil || len(d.Credential.MintScopes) == 0 {
+		if derr != nil || d.Credential == nil {
+			continue
+		}
+		if len(d.Credential.MintScopes) == 0 {
+			if p := pack.HostedMintPack(packs.FS, src.Name); p != "" {
+				stale = append(stale, googleSetupSource{Source: src.Name, Action: "skipped", Reason: edgelink.CheckGoogleScopes(src.Name, addr, nil, nil, p).Error()})
+			}
 			continue
 		}
 		hosted = append(hosted, declaringSource{src: src, decl: d})
@@ -697,6 +714,7 @@ func (a *app) edgeSetupGoogle(c *cobra.Command, address string, termsRead bool, 
 		}
 		out.Sources = append(out.Sources, source)
 	}
+	out.Sources = append(out.Sources, stale...)
 	// The provider of the yard's harness kind, and the record of its
 	// terms: shown and asked here, recorded only on the operator's
 	// reading, since no code in the yard can read terms and judge them.
@@ -764,7 +782,9 @@ func (a *app) setupGoogleSource(ctx context.Context, st store.API, cfg *config.C
 	if err != nil {
 		return googleSetupSource{Source: name, Action: "kept", Reason: err.Error()}, nil
 	}
-	if err := edgelink.CheckGoogleScopes(name, addr, d.Credential.MintScopes, mint.GrantedScopes); err != nil {
+	// The setup probes only a declaration that names scopes, so no cure is
+	// asked of the refusal here: a copy that names none is stale, above.
+	if err := edgelink.CheckGoogleScopes(name, addr, d.Credential.MintScopes, mint.GrantedScopes, ""); err != nil {
 		return googleSetupSource{Source: name, Action: "kept", Reason: err.Error()}, nil
 	}
 	command := "yardr edge mint-google " + addr + " " + name
