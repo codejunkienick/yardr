@@ -504,10 +504,13 @@ func TestApplyReplacesADeclaredSourceAndThePlanShowsWhatChanges(t *testing.T) {
 	// beside the credential's line, and never the line that says the pack
 	// declares the same calls: the scopes the hosted mint must see granted,
 	// whether a path may carry the credential, which of a mint's inputs one
-	// holder keeps and the command a mint runs. Each side is the key as the
-	// line shows it, "" for none. A mint's inputs and its command stand
-	// under a mint, so those rows follow the one that adds it, which says
-	// only that the credential's own line changed. A command is a file
+	// holder keeps, which of them is no secret and the command a mint runs.
+	// The input marked no secret is the account the hosted mint mints for, so
+	// one of its rows moves the mark to the other input, a pack that differs
+	// in nothing else. Each side is the key as the line shows it, "" for none,
+	// the names of several joined with ", ". A mint's inputs and its command
+	// stand under a mint, so those rows follow the one that adds it, which
+	// says only that the credential's own line changed. A command is a file
 	// beside the declaration, so its rows carry it, and its first and last
 	// rows say the file's hash with it.
 	scopes, scopes2 := "https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive.readonly"
@@ -532,6 +535,10 @@ func TestApplyReplacesADeclaredSourceAndThePlanShowsWhatChanges(t *testing.T) {
 		{"bound added", withKeys("  mint: [{ name: " + account + ", bound: true }, " + key + "]\n"), "", []pack.Diff{{Field: "bound", Old: "", New: account}}},
 		{"bound moved", withKeys("  mint: [{ name: " + account + ", bound: true }, { name: " + key + ", bound: true }]\n"), "", []pack.Diff{{Field: "bound", Old: account, New: account + ", " + key}}},
 		{"bound dropped", withKeys(mint), "", []pack.Diff{{Field: "bound", Old: account + ", " + key, New: ""}}},
+		{"not_secret added", withKeys("  mint: [{ name: " + account + ", secret: false }, " + key + "]\n"), "", []pack.Diff{{Field: "not_secret", Old: "", New: account}}},
+		{"not_secret moved", withKeys("  mint: [" + account + ", { name: " + key + ", secret: false }]\n"), "", []pack.Diff{{Field: "not_secret", Old: account, New: key}}},
+		{"not_secret second input added", withKeys("  mint: [{ name: " + account + ", secret: false }, { name: " + key + ", secret: false }]\n"), "", []pack.Diff{{Field: "not_secret", Old: key, New: account + ", " + key}}},
+		{"not_secret dropped", withKeys(mint), "", []pack.Diff{{Field: "not_secret", Old: account + ", " + key, New: ""}}},
 		{"mint_command added", withKeys(mint + "  mint_command: [pushover/mint]\n"), script, []pack.Diff{
 			{Field: "mint_command", Old: "", New: "pushover/mint"}, {Field: "file pushover/mint", Old: "", New: sha}}},
 		{"mint_command moved", withKeys(mint + "  mint_command: [pushover/mint, --refresh]\n"), script, []pack.Diff{

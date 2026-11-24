@@ -994,7 +994,9 @@ declared source pushover, from sources/pushover.yaml
   a line of its own (`mint_scopes: (none) ->
   https://www.googleapis.com/auth/drive.file`: the `mint_scopes` the hosted
   mint must see granted, joined with `, `; the `mint_command` a mint runs,
-  joined with spaces; the `bound` mint inputs, joined with `, `; `in_path`,
+  joined with spaces; the `bound` mint inputs, joined with `, `; the
+  `not_secret` mint inputs (marked `secret: false`), where the hosted mint
+  finds the account it mints for, joined with `, `; `in_path`,
   `true` or `(none)`), the `idempotency` header, a `hear`, `thread`,
   `link` or `hook` key (which a pack of kind `source` may bring) that is new,
   gone or different, whole, as compact JSON before and after (`hear:
