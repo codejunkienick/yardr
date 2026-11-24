@@ -179,9 +179,10 @@ func answerFromRow(w http.ResponseWriter, r *http.Request, p *store.Preview) boo
 // port is bound and answers on the host returned with portBound, it is free
 // where every dial proves nothing listens, and it is unknown where a dial
 // proves neither (a timeout above all). Unknown is not bound: a waiter
-// keeps waiting on it, where loopbackHost reads the same dial as answered
-// for the spawn gate and watchBind, which must not start onto, or fail, a
-// port whose listener only stalled.
+// keeps waiting on it, and watchBind does not latch bound on it, so a
+// start that never listens is failed at its bind wait all the same. Where
+// loopbackHost reads the same dial as answered is the spawn gate alone,
+// which must not start onto a port whose listener only stalled.
 type portState int
 
 const (

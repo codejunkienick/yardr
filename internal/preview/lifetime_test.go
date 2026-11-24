@@ -3,12 +3,14 @@ package preview
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -471,6 +473,47 @@ func TestOnDemandStartIsWatchedAsRunStartsIt(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A start that never binds is failed at the bind wait even when every look
+// at its port times out. The dial is forced to a timeout only once the row
+// says running, so the start's own guard keeps its real dials; from then on
+// watchBind and the waiter see nothing but timeouts. A timeout proves
+// neither bound nor free, so it must not latch watchBind's bound: the
+// no-listen verdict is due at the bind wait all the same, and the waiting
+// request is answered from the row. Not parallel: forcing the package's
+// dial must not reach another test's looks.
+func TestNeverBindsPreviewIsFailedThroughDialTimeouts(t *testing.T) {
+	old := dialLoopback
+	// Restored last, after the supervisor has stopped: no look reads the
+	// dial then.
+	t.Cleanup(func() { dialLoopback = old })
+	var forced atomic.Bool
+	dialLoopback = func(addr string) (net.Conn, error) {
+		if forced.Load() {
+			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: os.ErrDeadlineExceeded}
+		}
+		return old(addr)
+	}
+	w := newWatched(t, false, gatedApp, 0, 5*time.Second, false, true, false)
+	w.up(t, false)
+	forced.Store(true)
+	answer := w.getAsync()
+	waitUntil(t, "the no-listen verdict under forced dial timeouts", w.sup.bindWait()+5*time.Second, func() bool {
+		return w.state(w.app).State == store.PreviewFailed
+	})
+	got := takePreviewAnswer(t, answer)
+	if got.code != http.StatusServiceUnavailable || !strings.Contains(got.body, "preview demo is failed") {
+		t.Fatalf("the answer = %d %q, want the row's: 503 preview demo is failed", got.code, got.body)
+	}
+	if row := w.state(w.app); row.State != store.PreviewFailed || row.StateDetail != "no listen" || w.sup.Running(w.app) {
+		t.Fatalf("after the answer = %+v running %v, want failed with no listen and the app stopped", row, w.sup.Running(w.app))
+	}
+	waitFor(t, "the request to end", func() bool {
+		w.sup.mu.Lock()
+		defer w.sup.mu.Unlock()
+		return w.sup.inflight[w.app] == 0
+	})
 }
 
 // A release of a bind gate waits for no app and is kept for the one that comes
