@@ -814,14 +814,19 @@ func (d *Dispatcher) crewNudgeHeld(s *memberSession) bool {
 // works, or is idle with nothing unread. A try that waited is over when
 // work was seen or the inbox is empty, so its deadline goes then; what was
 // told and the session's tries stand. An unknown status says nothing of
-// the try, so its wait stands for the next idle pass. With its inbox empty
-// the error told of is over as well, since an agent that handled its inbox
-// is not stopped: so is what yardr still watched of a prompt it gave at a
-// reset.
+// the try, so its wait stands for the next idle pass. What yardr still
+// watches of a prompt it gave at a reset keeps its deadline through a
+// working pass: the deadline is the reset check's, and crewPromptTaken ends
+// that watch. With its inbox empty the error told of is over as well, since
+// an agent that handled its inbox is not stopped: so is what yardr still
+// watched of a prompt it gave at a reset.
 func (d *Dispatcher) crewHarnessOver(ctx context.Context, s *memberSession, status string, handled bool) {
 	delete(d.idleSince, s.key())
 	if !handled {
 		if status != "working" {
+			return
+		}
+		if s.st.Handle[harnessPrompted] != nil {
 			return
 		}
 		if s.st.Handle[harnessRetryAt] != nil {
@@ -864,13 +869,16 @@ func (d *Dispatcher) markCrewLogin(ctx context.Context, s *memberSession, line s
 // markCrewHarnessError keeps reason on the session's handle, or takes the
 // mark off for "". Either ends a wait for a reset or a try; wake is the
 // one that begins with the mark (see resetWake), nil for none. What is kept
-// of a prompt given at a reset stays: crewPromptTaken ends that.
+// of a prompt given at a reset stays, its deadline with it: crewPromptTaken
+// ends that watch, not an idle pass inside it.
 func (d *Dispatcher) markCrewHarnessError(ctx context.Context, s *memberSession, reason string, wake map[string]any) {
 	h := maps.Clone(s.st.Handle)
 	if h == nil {
 		h = map[string]any{}
 	}
-	delete(h, harnessRetryAt)
+	if h[harnessPrompted] == nil {
+		delete(h, harnessRetryAt)
+	}
 	delete(h, harnessResetAt)
 	delete(h, harnessResetWindow)
 	maps.Copy(h, wake)

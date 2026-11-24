@@ -1116,6 +1116,100 @@ func TestCrewUsageLimitStandingAgainAfterThePromptIsRaised(t *testing.T) {
 	}
 }
 
+// A working pass inside the two minutes after a crew reset prompt does not
+// end the watch on what the prompt did: the deadline it shares with a
+// network try is the reset check's while the prompt is watched. A limit
+// standing again below the prompt is raised with a new wake, and a prompt
+// still behind Kimi's menu is told once, with the old error on the screen
+// or scrolled off.
+func TestCrewResetPromptSurvivesAWorkingPass(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		pane func(prompt string) string
+		menu bool
+	}{
+		"the error again below the prompt": {func(p string) string { return kimiLimit + "\n > " + p + "\n" + kimiLimit }, false},
+		"the prompt behind the menu":       {func(string) string { return kimiMenu }, true},
+		"the prompt behind the menu alone": {func(string) string { return kimiMenu[strings.Index(kimiMenu, " ───"):] }, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, f, d, p, now, told := crewAtItsLimit(t, 42*time.Minute)
+			ctx := context.Background()
+			agent := agentOf(t, s)
+			p.say(kimiOpen)
+			promptAt := noon().Add(43*time.Minute + time.Second)
+			*now = promptAt
+			primeLimits(t, d, "kimi", "", nil)
+			must(t, d.Reconcile(ctx))
+			if len(f.nudges) != 2 {
+				t.Fatalf("nudges = %q, want the prompt at the reset", f.nudges)
+			}
+			prompt := strings.SplitN(f.nudges[1], ": ", 2)[1]
+
+			// The agent works for a moment inside the two-minute look, then
+			// is idle again before it is over: the watch stands.
+			f.set(agent, "working")
+			*now = promptAt.Add(30 * time.Second)
+			must(t, d.Reconcile(ctx))
+			f.set(agent, "idle")
+			if !tc.menu {
+				f.mu.Lock()
+				f.shown = true
+				f.mu.Unlock()
+			} else {
+				must(t, s.Mail(ctx, "yardmaster", "are you there?", "chris"))
+			}
+			f.show(tc.pane(prompt))
+			*now = promptAt.Add(time.Minute)
+			must(t, d.Reconcile(ctx))
+			if n := len(told()); n != 1 || len(f.nudges) != 2 {
+				t.Fatalf("before the look is over: events = %d, nudges = %q; want nothing told or typed yet", n, f.nudges)
+			}
+
+			// Past the look, what the prompt did is judged as without the
+			// working pass. The renewed window is primed at the observation
+			// pass, so the second error's read finds it fresh.
+			*now = promptAt.Add(2*time.Minute + time.Second)
+			var resets time.Time
+			if !tc.menu {
+				resets = promptAt.Add(4 * time.Hour)
+				p.say(kimiUsed(resets))
+				primeLimits(t, d, "kimi", "", nil)
+			}
+			must(t, d.Reconcile(ctx))
+			must(t, d.Reconcile(ctx))
+			if !tc.menu {
+				evs := told()
+				if len(evs) != 2 {
+					t.Fatalf("session_harness_error events = %d, want 2 for the limit standing again", len(evs))
+				}
+				if evs[1].Data["tries"] != float64(1) || evs[1].Data["reason"] != dispatch.ReasonRateLimited {
+					t.Fatalf("data = %v, want the limit again with tries 1", evs[1].Data)
+				}
+				if want := resets.Add(time.Minute).UTC().Format(time.RFC3339); evs[1].Data["wakes_at"] != want {
+					t.Fatalf("wakes_at = %v, want %v for the renewed window", evs[1].Data["wakes_at"], want)
+				}
+				m, err := s.GetCrew(ctx, "yardmaster")
+				must(t, err)
+				if m.Handle["harness_reset_at"] == nil {
+					t.Fatalf("handle = %v, want the wake for the renewed window kept", m.Handle)
+				}
+				if m.Handle["harness_prompted"] != nil {
+					t.Fatalf("handle = %v, want the watch over", m.Handle)
+				}
+				return
+			}
+			evs := told()
+			if len(evs) != 2 || evs[1].Data["prompt_shown"] != false {
+				t.Fatalf("session_harness_error = %v, want a second, for the prompt that was not taken", evs)
+			}
+			if len(f.nudges) != 2 {
+				t.Fatalf("nudges = %q, want nothing typed behind the menu", f.nudges)
+			}
+		})
+	}
+}
+
 // A crew member whose window is still used up at the wake is not prompted;
 // the event is raised again with the later time.
 func TestCrewWindowStillUsedUpAtTheWake(t *testing.T) {
