@@ -357,8 +357,15 @@ func TestBriefPullRequestChecksTimeOut(t *testing.T) {
 	// having run (yardr-kvd2).
 	bin := t.TempDir()
 	pr, ci := filepath.Join(bin, "pr"), filepath.Join(bin, "ci")
+	ciCalls := ci + ".calls"
+	size := func(path string) int64 {
+		if info, err := os.Stat(path); err == nil {
+			return info.Size()
+		}
+		return 0
+	}
 	scripttest.Write(t, pr, "#!/bin/sh\nprintf '%s' \"$YARDR_SOURCE_BASE\" > selected-base\nprintf '{\"head\":\"abc1234\",\"base\":\"main\",\"state\":\"open\"}'\n")
-	scripttest.Write(t, ci, "#!/bin/sh\nprintf '{\"head\":\"abc1234\",\"base\":\"main\",\"state\":\"open\",\"required\":[\"build\"],\"checks\":[{\"name\":\"build\",\"status\":\"completed\",\"conclusion\":\"success\"}]}'\n")
+	scripttest.Write(t, ci, "#!/bin/sh\necho ran >>\""+ciCalls+"\"\nprintf '{\"head\":\"abc1234\",\"base\":\"main\",\"state\":\"open\",\"required\":[\"build\"],\"checks\":[{\"name\":\"build\",\"status\":\"completed\",\"conclusion\":\"success\"}]}'\n")
 	st := storetest.New(t)
 	decl := `name: forge
 base: https://forge.test
@@ -403,8 +410,10 @@ calls:
 			t.Errorf("prChecks snapshot missing %q:\n%s", want, got)
 		}
 	}
+	ciRan := size(ciCalls)
 	// The hanging command runs short, and is asserted on the timeout
-	// alone: under load the kill lands before the script has run.
+	// alone: under load the kill lands before the script has run. The
+	// ci command is skipped while its head is unknown.
 	scripttest.Write(t, pr, "#!/bin/sh\nexec sleep 30\n")
 	checksTimeout = 100 * time.Millisecond
 	start := time.Now()
@@ -418,6 +427,112 @@ calls:
 	}
 	if d := time.Since(start); d > 10*time.Second {
 		t.Errorf("prChecks took %s", d)
+	}
+	if size(ciCalls) != ciRan {
+		t.Errorf("the ci command ran although the pr command timed out: %s grew past %d", ciCalls, ciRan)
+	}
+	// A command stopped after its first line — CI's shape for this
+	// failure, a line written and no stdin read — is killed at the
+	// same bound rather than left hanging past it, and ci is skipped
+	// again (yardr-770a).
+	started := filepath.Join(bin, "pr-started")
+	scripttest.Write(t, pr, "#!/bin/sh\necho started >\""+started+"\"\nkill -STOP $$\nprintf '{\"head\":\"abc1234\",\"base\":\"main\",\"state\":\"open\"}'\n")
+	start = time.Now()
+	home = t.TempDir()
+	read, got = prChecks(st, home, "https://forge.test/o/r/pull/7")
+	if read != "source forge's ci command" {
+		t.Errorf("prChecks read %q", read)
+	}
+	if !strings.HasPrefix(got, "checks: unavailable (events.pr of source forge: no answer within") {
+		t.Errorf("prChecks = %q", got)
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Errorf("prChecks with a stopped command took %s", d)
+	}
+	// Asserted on the timeout alone, never on that first line having
+	// been written: under load the kill can land before the script
+	// has run (yardr-kvd2). That the line can precede the stall is
+	// what CI's log already showed.
+	if size(ciCalls) != ciRan {
+		t.Errorf("the ci command ran although the pr command was stopped: %s grew past %d", ciCalls, ciRan)
+	}
+	// A mint that stalls is bounded by its own MintTimeout, not by
+	// checksTimeout, and neither command runs while it is awaited; a
+	// mint that is merely slow, past checksTimeout, does not eat the
+	// pr command's bound either. The two bounds are separate, so on
+	// CI the 20 s was the stalled pr command's own bound: the mint
+	// had finished (its token was in pr.calls) and ci never ran
+	// (yardr-770a).
+	defer func(d time.Duration) { source.MintTimeout = d }(source.MintTimeout)
+	bin2 := t.TempDir()
+	pr2, ci2 := filepath.Join(bin2, "pr"), filepath.Join(bin2, "ci")
+	mint2 := filepath.Join(bin2, "mint")
+	prRan := filepath.Join(bin2, "pr-ran")
+	scripttest.Write(t, pr2, "#!/bin/sh\necho ran >\""+prRan+"\"\nprintf '{\"head\":\"abc1234\",\"base\":\"main\",\"state\":\"open\"}'\n")
+	scripttest.Write(t, ci2, "#!/bin/sh\nprintf '{\"head\":\"abc1234\",\"base\":\"main\",\"state\":\"open\",\"required\":[\"build\"],\"checks\":[{\"name\":\"build\",\"status\":\"completed\",\"conclusion\":\"success\"}]}'\n")
+	scripttest.Write(t, mint2, "#!/bin/sh\nexec sleep 30\n")
+	st2 := storetest.New(t)
+	decl2 := `name: forge
+base: https://forge.test
+credential: { env: FORGE_TOKEN, mint: [FORGE_APP_ID, FORGE_APP_KEY] }
+link:
+  host: forge.test
+  issue: '^/([^/]+)/([^/]+)/issues/([0-9]+)'
+  fixed: "https://forge.test/{1}/{2}/issues/{3}"
+  thread: "{1}/{2}#{3}"
+  pull:
+    issue: '^/([^/]+)/([^/]+)/pull/([0-9]+)'
+    fixed: "https://forge.test/{1}/{2}/pull/{3}"
+    thread: "{1}/{2}#{3}"
+events:
+  runs: [build_finished]
+  head_from: [merge_request]
+  pr: ["` + pr2 + `"]
+  ci: ["` + ci2 + `"]
+calls:
+  ping: { kind: read, request: { method: GET, path: /me } }
+`
+	if _, err := st2.PutSource(context.Background(), "forge.yaml", decl2, "me"); err != nil {
+		t.Fatal(err)
+	}
+	env2 := filepath.Join(bin2, "forge.env")
+	if err := os.WriteFile(env2, []byte("FORGE_TOKEN=forge-source\nFORGE_APP_ID=app-id\nFORGE_APP_KEY=app-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st2.SetSource(context.Background(), "forge", store.SourceEnvFile, env2, "me"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st2.SetSource(context.Background(), "forge", store.SourceMintCommand, mint2, "me"); err != nil {
+		t.Fatal(err)
+	}
+	source.MintTimeout = 500 * time.Millisecond
+	checksTimeout = 30 * time.Second
+	start = time.Now()
+	read, got = prChecks(st2, t.TempDir(), "https://forge.test/o/r/pull/7")
+	if read != "source forge's ci command" {
+		t.Errorf("prChecks read %q", read)
+	}
+	if !strings.Contains(got, "mint_command") || !strings.Contains(got, "no answer within") {
+		t.Errorf("prChecks with a stalled mint = %q, want its timeout named", got)
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Errorf("prChecks with a stalled mint took %s", d)
+	}
+	if _, err := os.Stat(prRan); !os.IsNotExist(err) {
+		t.Errorf("the pr command ran although the mint stalled: %v", err)
+	}
+	// The slow mint takes three seconds with a checksTimeout of two:
+	// the snapshot still reads, so none of the mint's time came out
+	// of the pr command's bound.
+	scripttest.Write(t, mint2, "#!/bin/sh\nsleep 3\ncat >/dev/null\nprintf '%s\\n' '{\"token\":\"forge-minted\",\"expires_at\":\"2099-01-01T00:00:00Z\"}'\n")
+	source.MintTimeout = 30 * time.Second
+	checksTimeout = 2 * time.Second
+	read, got = prChecks(st2, t.TempDir(), "https://forge.test/o/r/pull/7")
+	if read != "source forge's ci command" {
+		t.Errorf("prChecks read %q", read)
+	}
+	if !strings.Contains(got, "build: success") {
+		t.Errorf("prChecks with a slow mint = %q, want the snapshot read", got)
 	}
 }
 
@@ -451,11 +566,35 @@ func TestBriefForATrainWithoutAPullRequest(t *testing.T) {
 	}
 }
 
+// briefDeclaredPR is Brief for a train landing through a declared pull
+// request, tried once more where the first brief's CI snapshot is
+// unavailable because a declared command gave no answer within its
+// bound. On a loaded runner a command can start — its first line
+// written — and then make no progress until its bound kills it; the
+// product's answer is that unavailable snapshot, with the ci command
+// skipped (TestBriefPullRequestChecksTimeOut proves it for a sleeping
+// and a stopped command alike), so one fresh brief reads the snapshot
+// the caller asserts on, as the cli serve tests try a refused listen
+// again on fresh addresses (yardr-eenj). Only that timeout is retried,
+// never another refusal; a snapshot still unavailable after the retry
+// is returned as it is, and the caller's assertions fail as they did.
+func briefDeclaredPR(t *testing.T, job dispatch.Job, st store.API) (string, error) {
+	t.Helper()
+	b, err := Brief(job, "a", "/wt/web-e", "", st)
+	if err != nil || !strings.Contains(b, "checks: unavailable") || !strings.Contains(b, "no answer within") {
+		return b, err
+	}
+	return Brief(job, "a", "/wt/web-e", "", st)
+}
+
 // A train landing through a declared source's pull request has the ci
 // command's snapshot in its brief, read with the source's own env file,
 // and no gh: gh is not on PATH.
 func TestBriefForATrainWithADeclaredPullRequest(t *testing.T) {
-	// Serial: sets PATH for the mint command.
+	// Serial: sets PATH for the mint command. It also stubs
+	// checksTimeout, short while the stalled first brief is cut by it
+	// and long for the answering commands after, as
+	// TestBriefPullRequestChecksTimeOut stubs it.
 	const url = "https://forge.test/acme/webapp/pull/7"
 	const sha = "9f2c9e1a7b3d5e6f8091a2b3c4d5e6f708192a3b"
 	bin := t.TempDir()
@@ -470,7 +609,14 @@ func TestBriefForATrainWithADeclaredPullRequest(t *testing.T) {
 		body := "#!/bin/sh\n{\necho \"token=$FORGE_TOKEN\"\nwhile IFS= read -r line || [ -n \"$line\" ]; do echo \"$line\"; done\n} >>\"" + calls + "\"\nprintf '%s\\n' '" + answer + "'\n"
 		scripttest.Write(t, path, body)
 	}
-	script(pr, prCalls, `{"head": "`+sha+`", "base": "main", "state": "open"}`)
+	// The pr command stalls on its first run — its token line written,
+	// then no reading of its stdin — as it did on CI's loaded runner
+	// (yardr-770a): that brief is cut at the checksTimeout below and
+	// briefDeclaredPR reads it again, so the retry is exercised on
+	// every run, not only on an unlucky one. Later runs answer. The
+	// sleep is /bin/sleep as PATH here holds only this directory.
+	stalledOnce := filepath.Join(bin, "pr-stalled-once")
+	scripttest.Write(t, pr, "#!/bin/sh\nif [ ! -f \""+stalledOnce+"\" ]; then\n: >\""+stalledOnce+"\"\necho \"token=$FORGE_TOKEN\" >>\""+prCalls+"\"\nexec /bin/sleep 30\nfi\n{\necho \"token=$FORGE_TOKEN\"\nwhile IFS= read -r line || [ -n \"$line\" ]; do echo \"$line\"; done\n} >>\""+prCalls+"\"\nprintf '%s\\n' '{\"head\": \""+sha+"\", \"base\": \"main\", \"state\": \"open\"}'\n")
 	script(ci, ciCalls, `{"head": "`+sha+`", "base": "main", "state": "open", "required": ["build", "lint"], "checks": [`+
 		`{"name": "build", "status": "completed", "conclusion": "success", "url": "https://forge.test/runs/5"},`+
 		`{"name": "lint", "status": "in_progress", "conclusion": "", "url": "https://forge.test/runs/6"}]}`)
@@ -510,6 +656,12 @@ calls:
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin)
+	// Short while the stalled first brief is cut by it: the retry that
+	// answers runs under the same bound, so it is seconds, not the
+	// 100 ms the timeout test cuts a hanging command at. The answering
+	// briefs after the first run under the sibling test's long bound.
+	defer func(d time.Duration) { checksTimeout = d }(checksTimeout)
+	checksTimeout = 2 * time.Second
 	job := dispatch.Job{
 		Bead: store.Bead{ID: "web-e", Title: "Login", Type: store.TypeTrain, Stage: "review",
 			Metadata: map[string]any{"pr_url": url}},
@@ -518,10 +670,11 @@ calls:
 		Session: store.Session{ID: "s1"},
 		Base:    "main",
 	}
-	b, err := Brief(job, "a", "/wt/web-e", "", st)
+	b, err := briefDeclaredPR(t, job, st)
 	if err != nil {
 		t.Fatal(err)
 	}
+	checksTimeout = 30 * time.Second
 	for _, want := range []string{"## Pull request", "lands through the pull request " + url,
 		"git push --force-with-lease origin yard/web-e", "Never merge",
 		"(source forge's ci command)",
@@ -587,7 +740,7 @@ calls:
 		t.Errorf("a command ran with the credential held: pr, ci and mint grew from %v to %v", before, ran())
 	}
 	declareAt("https://forge.test")
-	if b, err = Brief(job, "a", "/wt/web-e", "", st); err != nil {
+	if b, err = briefDeclaredPR(t, job, st); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(b, "build: success") || strings.Contains(b, "unavailable") || ran() == before {
