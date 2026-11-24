@@ -17,7 +17,22 @@ kind: git
 # its own work (the starter's, say): this pack has none without a type.
 flows:
   # An issue from outside: a maintainer looks first. Accepted, it is a bead
-  # like any other, on the starter flow's stages from backlog on.
+  # like any other, on the starter flow's stages from backlog on, less its
+  # clear, a person's yes before landing: the maintainer gave theirs in
+  # triage.
+  #
+  # The second review, for security alone, is the starter's: review sends a
+  # bead on to review-security with done, and straight to approved with
+  # done-safe, which the store holds to the depot's .yardr/security_paths as
+  # it does on the starter's flow. A stranger wrote the issue and an agent
+  # built from it, so a diff that opens something is read twice, and both
+  # stage files have the reviewer read the issue's text as information.
+  #
+  # The ways back to new (review's changes, review-security's changes, the
+  # assembly's failed) have no limit on rounds. A limit counts the stage's
+  # rounds, whichever edge sent the bead back, so it would be set on the
+  # three together; the stage files say so where a reviewer must keep the
+  # count itself.
   #
   # A close on GitHub is the decision, made by someone who may close that
   # repository's issues, and ends the bead wherever it waits: every open
@@ -29,7 +44,8 @@ flows:
       triage:   { group: maintainers, file: flows/issue/triage.md, outcomes: { accepted: backlog, dropped: closed }, manual: [backlog, closed] }
       backlog:  { group: backlog,     outcomes: { dropped: closed }, manual: [new, decide] }
       new:      { group: builders,    outcomes: { done: review, question: decide, dropped: closed }, manual: [backlog] }
-      review:   { group: reviewers,   outcomes: { done: approved, changes: new, question: decide, dropped: closed } }
+      review:   { group: reviewers,   file: flows/issue/review.md, outcomes: { done: review-security, done-safe: approved, changes: new, question: decide, dropped: closed } }
+      review-security: { group: security-reviewers, file: flows/issue/review-security.md, outcomes: { done: approved, changes: new, question: decide, dropped: closed } }
       approved: { group: assembly,    outcomes: { done: merged, failed: new, question: decide, dropped: closed } }
       decide:   { group: decisions,   file: flows/issue/decide.md, outcomes: { dropped: closed }, manual: [backlog, new] }
       merged:   { end: true }
@@ -134,12 +150,17 @@ flows:
       merged:      { end: true }
       closed:      { end: true }
 
-# builders, reviewers, assembly, backlog and decisions are the starter's,
-# with its roles and its script, so an accepted issue is worked as the
-# depot's own beads are.
+# builders, reviewers, security-reviewers, assembly, backlog and decisions
+# are the starter's, with its roles and its script, so an accepted issue is
+# worked as the depot's own beads are. security-reviewers binds as reviewers,
+# as the starter's does, so the import asks nothing for it: the second review
+# is run by the agent the first is, unless the import is given --bind
+# security-reviewers=<kind>[:<model>]. Its limit is the starter's, since a
+# yard that has both packs has one group by that name.
 groups:
   builders:     { agent: roles/builder.md,     limit: 3 }
   reviewers:    { agent: roles/reviewer.md,    limit: 2 }
+  security-reviewers: { agent: roles/review-security.md, limit: 2, binds_as: reviewers }
   # The role says read, never run. What keeps it to that is the sandbox of
   # its agent, which the import asks for with the agent (README.md). Its
   # calls are the github source's three pull request reads, which the
@@ -237,7 +258,7 @@ sources:
       # never cut an assembly between its push and its advance to
       # merged, where the assembly closes the bead itself. A manual
       # drop from approved stays possible through the flow's own edge.
-      - { where: "event=issues action=closed stage=triage stage=backlog stage=new stage=review stage=decide type=issue", outcome: dropped }
+      - { where: "event=issues action=closed stage=triage stage=backlog stage=new stage=review stage=review-security stage=decide type=issue", outcome: dropped }
       # The yes is a person's: sender is a kind, as in makes, so the label put
       # by a bot (a workflow that sorts or sizes pull requests) is no
       # maintainer's. The yard records the head the event named as the bead's

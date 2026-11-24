@@ -211,6 +211,28 @@ func TestPackApplyTheContributorsPack(t *testing.T) {
 		if g, err := a.st.GetGroup(ctx, "maintainers"); err != nil || g.Runner != "manual" || !slices.Equal(g.Members, []string{"jo"}) {
 			t.Fatalf("maintainers = %+v, %v", g, err)
 		}
+		// The second review of an issue is asked nothing: no flag above names
+		// its agent, and its group runs the agent of the first review, with
+		// the pack's copy of the security reviewer's role, and the issues'
+		// stage for it is routed there.
+		reviewers, err := a.st.GetGroup(ctx, "web-reviewers")
+		if err != nil {
+			t.Fatal(err)
+		}
+		security, err := a.st.GetGroup(ctx, "web-security-reviewers")
+		if err != nil || security.Config["kind"] != reviewers.Config["kind"] || fmt.Sprint(security.Config["args"]) != fmt.Sprint(reviewers.Config["args"]) ||
+			security.Config["prompt"] != filepath.Join(config.At(a.cfg.Home).PackRoles("contributors"), "review-security.md") {
+			t.Fatalf("%s: web-security-reviewers = %+v, %v; want the agent of web-reviewers %+v and the pack's role", kind, security, err, reviewers)
+		}
+		routes, err := a.st.Routes(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.ContainsFunc(routes, func(r store.Route) bool {
+			return r.Stage == "review-security" && r.Type != nil && *r.Type == "issue" && r.Group == "web-security-reviewers"
+		}) {
+			t.Fatalf("%s: no route sends an issue's review-security to web-security-reviewers: %+v", kind, routes)
+		}
 		out, err := run(t, a.packCmd(), "check", "contributors", "--depot", "web")
 		if err != nil || !strings.Contains(out, "0 to create, 0 to change, ") ||
 			!strings.Contains(out, "type issue: contributors.issue (store)") || !strings.Contains(out, "type pr: contributors.pr (store)") ||

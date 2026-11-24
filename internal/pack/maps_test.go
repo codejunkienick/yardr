@@ -1200,9 +1200,9 @@ func TestTwoPacksShareOneHooksTables(t *testing.T) {
 
 			// Each pack lets go of a line: that one goes, the rest stays.
 			cdir, sdir := dirs[contributors], dirs[starter]
-			edit(t, cdir, `      - { where: "event=issues action=closed stage=triage stage=backlog stage=new stage=review stage=decide type=issue", outcome: dropped }
+			edit(t, cdir, `      - { where: "event=issues action=closed stage=triage stage=backlog stage=new stage=review stage=review-security stage=decide type=issue", outcome: dropped }
 `, "")
-			gone := say(t, "event=issues action=closed stage=triage stage=backlog stage=new stage=review stage=decide type=issue -> dropped")
+			gone := say(t, "event=issues action=closed stage=triage stage=backlog stage=new stage=review stage=review-security stage=decide type=issue -> dropped")
 			plan = build(t, st, load(t, cdir), o)
 			if mp := mapPlan(t, plan, "github"); !slices.Equal(mp.Drops, []pack.HookDrop{{Table: "says", Line: gone.String()}}) {
 				t.Fatalf("contributors' drops = %+v, want %s alone", mp.Drops, gone)

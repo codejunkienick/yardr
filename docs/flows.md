@@ -417,8 +417,9 @@ for security alone, and `done-safe` sends it straight to `approved`
 ([line.md](line.md#then-once-more-for-security-alone)); the starter pack's
 default flow has the same two, except both end in `clear`: `done` goes
 through `review-security` and `done-safe` past it, and the bead waits there
-for the person's yes before it is landed from `approved`. Which one a
-reviewer reports is its judgment,
+for the person's yes before it is landed from `approved`; and the contributors
+pack's `issue` flow has them as depot yardr's does, both ending in
+`approved`. Which one a reviewer reports is its judgment,
 by the list its stage file has. A depot can hold that judgment to its code
 with a file in its repository, `.yardr/security_paths`:
 

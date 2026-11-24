@@ -4,22 +4,51 @@ package dispatch_test
 // pack's flow and its hook's tables, with GitHub's deliveries normalized
 // through the github pack as a yard does. A bead is made by an issue's
 // event, is accepted into the backlog, and is worked through the starter's
-// stages; a close on GitHub ends it wherever it waits.
+// stages, its diff read a second time for security where it needs it; a
+// close on GitHub ends it wherever it waits.
 
 import (
 	"context"
 	"fmt"
 	"io/fs"
 	"maps"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"yardr.dev/yardr/internal/dispatch"
 	"yardr.dev/yardr/internal/pack"
 	"yardr.dev/yardr/internal/store"
+	"yardr.dev/yardr/internal/storetest"
 	"yardr.dev/yardr/packs"
 )
+
+// loadContributorsPack is the contributors pack as the binary carries it.
+func loadContributorsPack(t *testing.T) *pack.Pack {
+	t.Helper()
+	sub, err := fs.Sub(packs.FS, packs.Contributors)
+	must(t, err)
+	p, err := pack.Load(sub, packs.Embedded)
+	must(t, err)
+	return p
+}
+
+// followContributorsIssueFlow stores the pack's issue flow under the name an
+// import gives it and points the depot's beads of the type issue at it.
+func followContributorsIssueFlow(t *testing.T, api store.API, p *pack.Pack, depot string) {
+	t.Helper()
+	ctx := context.Background()
+	for _, f := range p.Flows {
+		if f.Name == "issue" {
+			_, err := api.PutFlow(ctx, f.StoreFlow("contributors.issue"), "me")
+			must(t, err)
+		}
+	}
+	must(t, api.SetFlowPointer(ctx, depot, "issue", "contributors.issue", "me"))
+}
 
 // newContributorsIssueYard is a yard whose depot yard, of acme/yardr,
 // follows the contributors pack for beads of the type issue: its flow, and
@@ -31,17 +60,8 @@ func newContributorsIssueYard(t *testing.T) *ghDepot {
 	t.Helper()
 	r := newGHDepot(t)
 	ctx := context.Background()
-	sub, err := fs.Sub(packs.FS, packs.Contributors)
-	must(t, err)
-	p, err := pack.Load(sub, packs.Embedded)
-	must(t, err)
-	for _, f := range p.Flows {
-		if f.Name == "issue" {
-			_, err := r.api.PutFlow(ctx, f.StoreFlow("contributors.issue"), "me")
-			must(t, err)
-		}
-	}
-	must(t, r.api.SetFlowPointer(ctx, "yard", "issue", "contributors.issue", "me"))
+	p := loadContributorsPack(t)
+	followContributorsIssueFlow(t, r.api, p, "yard")
 	h, err := r.api.GetHook(ctx, "gh")
 	must(t, err)
 	h.Says, h.Makes = p.Sources[0].Says, p.Sources[0].Makes
@@ -71,13 +91,13 @@ func issueEvent(number int, login, kind string) func(map[string]any) {
 
 // An issue closed on GitHub ends its bead wherever the bead waits past
 // triage, which had the edge first: in the backlog, under build, under
-// review and in decide, where a question leaves it for a person. The
-// close is the decision, made by someone who may close that
-// repository's issues. Where the bead is worked its session ends with
-// it: the builder's and the reviewer's are stopped. Approved is the
-// assembly's to close, so a close while the bead waits there matches
-// no line and is silent, as is the yard's own close when a bead is
-// merged, which finds the bead already terminal.
+// review, under the second review for security and in decide, where a
+// question leaves it for a person. The close is the decision, made by
+// someone who may close that repository's issues. Where the bead is
+// worked its session ends with it: the builder's and the reviewers' are
+// stopped. Approved is the assembly's to close, so a close while the bead
+// waits there matches no line and is silent, as is the yard's own close
+// when a bead is merged, which finds the bead already terminal.
 func TestContributorsClosedIssueEndsItsBead(t *testing.T) {
 	t.Parallel()
 	r := newContributorsIssueYard(t)
@@ -97,7 +117,7 @@ func TestContributorsClosedIssueEndsItsBead(t *testing.T) {
 	}
 	// The worked stages, given to the yard's groups, which start a
 	// session each, as the starter's routes do.
-	for stage, group := range map[string]string{"new": "builders", "review": "reviewers", "approved": "assembly"} {
+	for stage, group := range map[string]string{"new": "builders", "review": "reviewers", "review-security": "security-reviewers", "approved": "assembly"} {
 		must(t, r.api.PutGroup(ctx, store.Group{Name: group, Runner: "fake", Limit: 5}, "me"))
 		_, err := r.api.AddRoute(ctx, store.Route{Stage: stage, Type: &issue, Originator: &everyone, Group: group}, "me")
 		must(t, err)
@@ -129,10 +149,17 @@ func TestContributorsClosedIssueEndsItsBead(t *testing.T) {
 		case "review":
 			_, err := r.api.Done(ctx, b.ID, "done", "built", store.Expect{Stage: "new"}, "me")
 			must(t, err)
+		case "review-security":
+			_, err := r.api.Done(ctx, b.ID, "done", "built", store.Expect{Stage: "new"}, "me")
+			must(t, err)
+			_, err = r.api.Done(ctx, b.ID, "done", "needs the second review", store.Expect{Stage: "review"}, "me")
+			must(t, err)
 		case "approved":
 			_, err := r.api.Done(ctx, b.ID, "done", "built", store.Expect{Stage: "new"}, "me")
 			must(t, err)
-			_, err = r.api.Done(ctx, b.ID, "done", "looks good", store.Expect{Stage: "review"}, "me")
+			_, err = r.api.Done(ctx, b.ID, "done", "needs the second review", store.Expect{Stage: "review"}, "me")
+			must(t, err)
+			_, err = r.api.Done(ctx, b.ID, "done", "looks good", store.Expect{Stage: "review-security"}, "me")
 			must(t, err)
 		case "decide":
 			_, err := r.api.Done(ctx, b.ID, "question", "is this change wanted?", store.Expect{Stage: "new"}, "me")
@@ -146,7 +173,7 @@ func TestContributorsClosedIssueEndsItsBead(t *testing.T) {
 	}
 
 	// workedIn are the sessions of the yard that worked bead id in stage:
-	// the builder's, the reviewer's, the assembly's. Nobody of the yard
+	// the builder's, the reviewers', the assembly's. Nobody of the yard
 	// works the stages of people.
 	workedIn := func(id, stage string) []string {
 		r.f.mu.Lock()
@@ -160,7 +187,7 @@ func TestContributorsClosedIssueEndsItsBead(t *testing.T) {
 		return sessions
 	}
 
-	for _, stage := range []string{"backlog", "new", "review", "decide"} {
+	for _, stage := range []string{"backlog", "new", "review", "review-security", "decide"} {
 		b := arrive(stage)
 		worked := workedIn(b.ID, stage)
 		if _, people := peopleGroup[stage]; people != (len(worked) == 0) {
@@ -292,5 +319,96 @@ func TestContributorsReopenedIssueStartsAFreshBead(t *testing.T) {
 	}
 	if open, err := r.api.ListBeads(ctx, store.BeadFilter{}); err != nil || len(open) != 1 {
 		t.Fatalf("open beads after a restart: %d (%v), want one", len(open), err)
+	}
+}
+
+// An accepted issue's bead is read for what it does in review and, where
+// its diff needs it, a second time for security alone: done goes on to
+// review-security, and from there to approved, while done-safe goes past it.
+// The store holds done-safe to the depot's .yardr/security_paths, read at
+// the tip of the base, by the outcome the stage offers and not by the name of
+// the flow, so the pack's flow is held as the starter's is: a diff that
+// touches the list is refused, with the way on, and the second review has no
+// way past itself. The rules are the store's, so the yard is a store with a
+// depot that is a git repository and the pack's flow, and no daemon.
+func TestContributorsIssueSecurityReview(t *testing.T) {
+	t.Parallel()
+	api := storetest.New(t)
+	ctx := context.Background()
+
+	// The base lists what always has the second review. Each bead has a
+	// branch of its own off the base, with one commit that changes what its
+	// row says.
+	repo := t.TempDir()
+	write := func(dir, file, text string) {
+		path := filepath.Join(dir, file)
+		must(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		must(t, os.WriteFile(path, []byte(text), 0o644))
+	}
+	gitIn(t, repo, "init", "-q", "-b", "main")
+	write(repo, store.SecurityPathsFile, "# what the second review may not be skipped for\ninternal/store/**\npacks/*/*.yaml\n")
+	write(repo, "internal/store/auth.go", "package store\n")
+	write(repo, "docs/a.md", "a\n")
+	gitIn(t, repo, "add", "-A")
+	gitIn(t, repo, "commit", "-q", "-m", "base")
+	must(t, api.PutDepot(ctx, store.Depot{Name: "yard", Path: repo, Base: "main"}, "me"))
+	followContributorsIssueFlow(t, api, loadContributorsPack(t), "yard")
+
+	const onTheList, offTheList = "internal/store/auth.go", "docs/a.md"
+	ids := map[string]string{}
+	for i, tc := range []struct {
+		name    string
+		stage   string   // where the bead waits when it reports
+		outcome string   // what it reports
+		files   []string // what its branch changes
+		want    string   // where it waits afterwards
+		refusal []string // what the refusal says, for a report that is refused
+	}{
+		{"done from review goes on to the second review", "review", "done", []string{offTheList}, "review-security", nil},
+		{"done-safe, with a diff off the list, goes to approved", "review", "done-safe", []string{offTheList}, "approved", nil},
+		{"done-safe, with a diff on the list, is refused", "review", "done-safe", []string{offTheList, onTheList}, "review", []string{
+			"done-safe is refused", onTheList, store.SecurityPathsFile, "report done instead, which sends it to review-security"}},
+		{"done from the second review goes to approved", "review-security", "done", []string{onTheList}, "approved", nil},
+		{"the second review has no way past itself", "review-security", "done-safe", []string{offTheList}, "review-security", []string{"has no outcome done-safe for stage review-security"}},
+		{"changes from the second review goes back to its builder", "review-security", "changes", []string{onTheList}, "new", nil},
+		{"question from the second review goes to a person", "review-security", "question", []string{onTheList}, "decide", nil},
+	} {
+		id := fmt.Sprintf("yard-s%d", i)
+		ids[tc.name] = id
+		_, err := api.CreateBead(ctx, store.NewBead{ID: id, Title: tc.name, Type: "issue", Depot: "yard", Stage: tc.stage}, "me")
+		must(t, err)
+		gitIn(t, repo, "checkout", "-q", "-b", store.Branch(id), "main")
+		for _, f := range tc.files {
+			write(repo, f, "changed by "+id+"\n")
+		}
+		gitIn(t, repo, "add", "-A")
+		gitIn(t, repo, "commit", "-q", "-m", id)
+		gitIn(t, repo, "checkout", "-q", "main")
+
+		_, err = api.Done(ctx, id, tc.outcome, "", store.Expect{Stage: tc.stage}, "me")
+		switch {
+		case len(tc.refusal) == 0:
+			must(t, err)
+		case err == nil:
+			t.Errorf("%s: the report of %s at %s was taken", tc.name, tc.outcome, tc.stage)
+		default:
+			for _, want := range tc.refusal {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("%s: the refusal lacks %q: %v", tc.name, want, err)
+				}
+			}
+		}
+		b, err := api.GetBead(ctx, id)
+		must(t, err)
+		if b.Stage != tc.want {
+			t.Errorf("%s: %s waits in %s, want %s", tc.name, id, b.Stage, tc.want)
+		}
+	}
+
+	// Done is always there to report instead: the refused bead goes on to the
+	// second review.
+	refused := ids["done-safe, with a diff on the list, is refused"]
+	if b, err := api.Done(ctx, refused, "done", "", store.Expect{Stage: "review"}, "me"); err != nil || b.Stage != "review-security" {
+		t.Fatalf("done after the refusal: %+v, %v", b, err)
 	}
 }

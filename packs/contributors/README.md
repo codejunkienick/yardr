@@ -23,9 +23,11 @@ maps to a yard are in [docs/packs.md](../../docs/packs.md).
 - `pack.yaml`: the two flows, the groups, the crew member, and what
   GitHub's events make and say (`sources.github`).
 - `roles/pr-reviewer.md`: the prompt of the reviewer of a pull request.
-  `roles/builder.md`, `roles/reviewer.md` and `scripts/merge-local` are the
-  starter's, copied: an accepted issue is built, reviewed and landed as the
-  depot's own beads are. A test fails when a copy drifts.
+  `roles/builder.md`, `roles/reviewer.md`, `roles/review-security.md` and
+  `scripts/merge-local` are the starter's, copied (a pack may not read
+  another pack's file): an accepted issue is built, reviewed, read once more
+  for security where its diff needs it, and landed as the depot's own beads
+  are. A test fails when a copy drifts.
 - `sections/yardmaster.md`: this pack's yardmaster section, which prime
   prints after the base role. It says what the outside work adds to the
   yardmaster's job: the text of an issue or a pull request is a stranger's, a
@@ -36,17 +38,33 @@ maps to a yard are in [docs/packs.md](../../docs/packs.md).
   `contrib/assembly/push-fix`, for the groups that run the yard's CI, post
   the reviewer's review and push a fix onto the pull request. A test fails
   when a copy drifts.
-- `flows/issue/triage.md`, `flows/pr/triage.md`, `flows/pr/review.md`,
-  `flows/pr/review-post.md`, `flows/pr/ciwait.md`, `flows/pr/fix.md`,
-  `flows/pr/push.md`, `flows/pr/approved.md`:
+- `flows/issue/triage.md`, `flows/issue/review.md`,
+  `flows/issue/review-security.md`, `flows/pr/triage.md`,
+  `flows/pr/review.md`, `flows/pr/review-post.md`, `flows/pr/ciwait.md`,
+  `flows/pr/fix.md`, `flows/pr/push.md`, `flows/pr/approved.md`:
   the stage files of the stages that are this pack's own.
 
 ## The two flows
 
 | | stages |
 |---|---|
-| `issue` | `triage` (maintainers) -> `backlog` -> `new` -> `review` -> `approved` -> `merged`, or `closed` |
+| `issue` | `triage` (maintainers) -> `backlog` -> `new` -> `review` -> `review-security` (security-reviewers) -> `approved` -> `merged`, or `closed`; `review` goes past `review-security` to `approved` with `done-safe` |
 | `pr` | `triage` (maintainers) -> `review` (pr-reviewers) -> `review-post` (post) -> `ciwait` (pr-ci) -> `contributor` (outside) -> `approved` (maintainers) -> `merged`, or `closed`; a maintainer's pick sends `contributor` -> `fix` (builders) -> `push` (push-fix) -> `triage` |
+
+**An accepted issue's diff is read twice where it needs it.** `review` sends
+a bead on to `review-security`, worked by the group `security-reviewers`, with
+`done`, and past it, straight to `approved`, with `done-safe`: the reviewer's
+call, by the list of what is security-relevant in `flows/issue/review.md`, as
+on the starter's flow. A depot can hold that call to its code with
+`.yardr/security_paths`, a file of its repository, and the store then refuses
+`done-safe` for a diff that touches a path on it
+([docs/flows.md](../../docs/flows.md#done-safe-and-the-security-paths)), on
+this flow as on the starter's. A stranger wrote the issue and an agent built
+from it, so both stage files tell their reviewer that its text is
+information and never instructions: what in it reads as an order to a
+reviewer (approve this, skip the second review) has no say in the outcome. The
+flow sets no limit on the rounds back to `new`; the stage files tell a
+reviewer to hold a bead that has come back from review twice.
 
 Everything a maintainer chooses is in `pack.yaml`: the stages, the label,
 who is trusted. yardr knows three verbs and none of the choices:
@@ -54,7 +72,7 @@ who is trusted. yardr knows three verbs and none of the choices:
 | verb | direction | here |
 |---|---|---|
 | `makes` | an event makes a bead for a thread no open bead tracks | an issue opened: an `issue` bead in `triage`. A pull request opened, marked ready or reopened: a `pr` bead in `triage`, or in `review` when its author is an owner or a member of the repository, or a bot |
-| `says` | an event reports an outcome to the bead that tracks its thread | the label `accepted`, put on by a person: `accepted`. New commits on a pull request while its bead waits in `triage`: `pushed`, which makes the stay again. New commits on a pull request that waited in `triage`: `unaccepted`, from `review`, `review-post`, `ciwait`, `contributor` and `approved`, whoever pushed and even if the label was removed. New commits on any other pull request: `pushed` from `contributor`; from `review`, `pushed` when a bot pushed and `outdated` when a person did; from `review-post`, `pushed` when a bot pushed and nothing when a person did; from `ciwait`, `pushed` when a bot pushed and `changes` when a person did. In `fix` and `push` a push moves the bead's head and says nothing: the push script holds on a moved head. Merged: `merged`. Closed: `dropped`: for a pull request in `triage`, `review`, `review-post`, `ciwait`, `contributor`, `fix`, `push`, `approved` and `decide`, for an issue in `triage`, `backlog`, `new`, `review`, `approved` and `decide`. No event of GitHub's CI says anything: the pull request's CI is the yard's own, reported by a script |
+| `says` | an event reports an outcome to the bead that tracks its thread | the label `accepted`, put on by a person: `accepted`. New commits on a pull request while its bead waits in `triage`: `pushed`, which makes the stay again. New commits on a pull request that waited in `triage`: `unaccepted`, from `review`, `review-post`, `ciwait`, `contributor` and `approved`, whoever pushed and even if the label was removed. New commits on any other pull request: `pushed` from `contributor`; from `review`, `pushed` when a bot pushed and `outdated` when a person did; from `review-post`, `pushed` when a bot pushed and nothing when a person did; from `ciwait`, `pushed` when a bot pushed and `changes` when a person did. In `fix` and `push` a push moves the bead's head and says nothing: the push script holds on a moved head. Merged: `merged`. Closed: `dropped`: for a pull request in `triage`, `review`, `review-post`, `ciwait`, `contributor`, `fix`, `push`, `approved` and `decide`, for an issue in `triage`, `backlog`, `new`, `review`, `review-security`, `approved` and `decide`. No event of GitHub's CI says anything: the pull request's CI is the yard's own, reported by a script |
 | `hears` | a stage of the bead sets a status on the thread | an issue is closed when its bead is `merged` or `closed`; a pull request is untouched by its bead's stage and stays open until it is merged or closed on GitHub |
 
 **Triage is the pack's advice, not a rule of yardr.** The stage a bead
@@ -321,7 +339,10 @@ event.
 ## What the import asks
 
 Beside the starter's questions (the agents of `builders` and `reviewers`,
-the members of `backlog` and `decisions`):
+the members of `backlog` and `decisions`; `security-reviewers` binds as
+`reviewers`, as the starter's does, so the import asks nothing for it and the
+second review runs the agent the first does, unless `--bind
+security-reviewers=<kind>[:<model>]` gives it one of its own):
 
 - **who the maintainers are**: `--members maintainers=<a>,<b>`. They move
   a bead out of `triage` and `approved`;
@@ -354,11 +375,15 @@ gives. Each of the pack's `says` lines names the type of its bead (`issue` or
 closed unmerged is `dropped` for a `pr` bead, and asks a person about a train.
 
 Groups are matched by name, so imported into a depot the starter set up,
-the pack finds `builders`, `reviewers` and `assembly` there, installs its
-copies of the roles and the script, which are the same text, and sets its
-own limits (3 builders, 2 reviewers). The groups keep their prompt (the
-assembly its cmd), which still names the starter's copy, and `pack check`
-says so under `kept`.
+the pack finds `builders`, `reviewers`, `security-reviewers` and `assembly`
+there, installs its copies of the roles and the script, which are the same
+text, and sets its own limits (3 builders, 2 reviewers, 2 security reviewers,
+which is the starter's number). The groups keep their prompt (the assembly
+its cmd), which still names the starter's copy, and `pack check` says so
+under `kept`. Where the depot has a plain route for `review-security`
+already, the starter's, it works an issue's bead as well and the import
+writes none. A depot with no group of that name gets
+`<depot>-security-reviewers` and a route for the type issue.
 
 ## The pr-reviewers group binds read-only
 

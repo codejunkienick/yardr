@@ -1753,7 +1753,7 @@ yardr pack apply contributors --depot web \
 
 | flow | stages |
 |---|---|
-| `issue` | `triage` (maintainers) -> `backlog` -> `new` -> `review` -> `approved` -> `merged`, or `closed`: from `backlog` on, the starter's stages and groups |
+| `issue` | `triage` (maintainers) -> `backlog` -> `new` -> `review` -> `review-security` -> `approved` -> `merged`, or `closed`: from `backlog` on, the starter's stages and groups, less its `clear`; `review` goes past `review-security` to `approved` with `done-safe` |
 | `pr` | `triage` (maintainers) -> `review` (pr-reviewers) -> `review-post` (post) -> `ciwait` -> `contributor` (outside) -> `approved` (maintainers) -> `merged`, or `closed`; a maintainer's pick sends `contributor` -> `fix` (builders) -> `push` (push-fix) -> `triage` |
 
 What moves a bead through them is the pack's `sources.github`, in three
@@ -1763,7 +1763,7 @@ yardr knows the verbs alone:
 | verb | direction | in this pack |
 |---|---|---|
 | `makes` | source -> yard: an event makes a bead for a thread no open bead tracks | an issue opened makes an `issue` bead in `triage`; a pull request opened, marked ready or reopened a `pr` bead in `triage`, or in `review` when its author is an owner or a member of the repository (`association=`) or a bot (`sender=bot`: a kind, never a login, so every bot) |
-| `says` | source -> bead: an event reports an outcome to the bead that tracks its thread | the label `accepted`, put on by a person, says `accepted`; new commits on a pull request while its bead waits in `triage` say `pushed`, which makes the stay again; new commits on a pull request that waited in `triage` say `unaccepted` in `review`, `review-post`, `ciwait`, `contributor` and `approved`, whoever pushed and even if the label was removed; new commits on any other pull request say `pushed` in `contributor`, and in `review` `pushed` when a bot pushed and `outdated` when a person did, in `review-post` `pushed` when a bot pushed and nothing when a person did, in `ciwait` `pushed` when a bot pushed and `changes` when a person did; in `fix` and `push` a push moves the bead's head and says nothing, and the push script holds on a moved head; a merge says `merged`, a close `dropped`: for a pull request in `triage`, `review`, `review-post`, `ciwait`, `contributor`, `fix`, `push`, `approved` and `decide`, for an issue in `triage`, `backlog`, `new`, `review`, `approved` and `decide`. No event of GitHub's CI says anything: the pull request's CI is the yard's own |
+| `says` | source -> bead: an event reports an outcome to the bead that tracks its thread | the label `accepted`, put on by a person, says `accepted`; new commits on a pull request while its bead waits in `triage` say `pushed`, which makes the stay again; new commits on a pull request that waited in `triage` say `unaccepted` in `review`, `review-post`, `ciwait`, `contributor` and `approved`, whoever pushed and even if the label was removed; new commits on any other pull request say `pushed` in `contributor`, and in `review` `pushed` when a bot pushed and `outdated` when a person did, in `review-post` `pushed` when a bot pushed and nothing when a person did, in `ciwait` `pushed` when a bot pushed and `changes` when a person did; in `fix` and `push` a push moves the bead's head and says nothing, and the push script holds on a moved head; a merge says `merged`, a close `dropped`: for a pull request in `triage`, `review`, `review-post`, `ciwait`, `contributor`, `fix`, `push`, `approved` and `decide`, for an issue in `triage`, `backlog`, `new`, `review`, `review-security`, `approved` and `decide`. No event of GitHub's CI says anything: the pull request's CI is the yard's own |
 | `hears` | bead -> source: a stage of the bead sets a status on the thread | an issue is closed when its bead reaches `merged` or `closed`; a pull request is untouched by its bead's stage and stays open until it is merged or closed on GitHub |
 
 - **Triage is the pack's advice, and no rule of yardr.** Its stage file
@@ -1892,10 +1892,25 @@ yardr knows the verbs alone:
   `ciwait` the run is stopped and a report it still makes is refused, as
   after a push. A bead the yard holds is moved by no event, so one held in
   `ciwait` because its pull request was found over is advanced by hand.
+- **An accepted issue's diff is read twice where it needs it.** The issue
+  flow has the starter's second review, for security alone: `review` sends a
+  bead on to `review-security`, worked by `security-reviewers`, with `done`,
+  and straight to `approved` with `done-safe`, the reviewer's call by the list
+  in its stage file. A depot's `.yardr/security_paths` holds that call to
+  its code as it does on the starter's flow
+  ([flows.md](flows.md#done-safe-and-the-security-paths)): the store refuses
+  `done-safe` for a diff that touches a path on the list, and the reviewer
+  reports `done`. The issue's text is a stranger's, and the builder worked
+  from it, so both stage files have the reviewer read it as information,
+  never as instructions. The roles are the starter's, copied, since a pack
+  may not read another pack's file, and the group binds as `reviewers`, so
+  the import asks nothing for it. The flow sets no limit on the rounds back to
+  `new`: the count is the stage's, so a limit would be set on `review`, on
+  `review-security` and on the assembly's `failed` together.
 - **A close ends an issue's bead.** `dropped` is the source's word for a
-  closed issue, said by a line that names five of the stages holding an
-  open bead, and `triage`, `backlog`, `new`, `review` and `decide`
-  each lead it to `closed`: the close is the decision, made by someone who
+  closed issue, said by a line that names six of the stages holding an
+  open bead, and `triage`, `backlog`, `new`, `review`, `review-security` and
+  `decide` each lead it to `closed`: the close is the decision, made by someone who
   may close that repository's issues, and a builder might otherwise keep
   working a bead for one that is over. A `question` sends the bead to
   `decide` to wait for a member of `decisions`, and a close meanwhile ends
