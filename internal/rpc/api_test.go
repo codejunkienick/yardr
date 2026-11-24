@@ -1448,10 +1448,11 @@ var apiOperatorCalls = []apiCall{
 
 // apiEvent is one kind of event of the doc: is picks it from the stream.
 type apiEvent struct {
-	title  string
-	says   string
-	is     func(e store.Event) bool
-	fields []field
+	title      string
+	says       string
+	is         func(e store.Event) bool
+	fields     []field
+	socketOnly bool
 }
 
 func kindOf(kind string) func(store.Event) bool {
@@ -1511,6 +1512,21 @@ var apiEvents = []apiEvent{
 			{"data.through", "number?", "through which seq; absent on an acknowledgement of one letter"},
 			{"data.seq", "number?", "the one letter read; absent on an acknowledgement through"},
 		},
+	},
+	{
+		title: "Crew inbox was read: `inbox_read`",
+		says:  "A crew member acknowledged its inbox through at least one non-mail delivery, such as a hook, reaction, subscribed event or `--on` kind. Mail in the acknowledged slice still produces its own `mail_read` receipt.",
+		is:    kindOf("inbox_read"),
+		fields: []field{
+			{"seq", "number", "the event's seq"},
+			{"kind", "string", "`inbox_read`"},
+			{"actor", "string", "the crew member"},
+			{"at", "time", "when"},
+			{"data.reader", "string", "the crew member"},
+			{"data.through", "number", "the seq acknowledged through"},
+			{"data.session", "string", "`\"\"` for the line session, or the user of the conversation session"},
+		},
+		socketOnly: true,
 	},
 	{
 		title: "A reaction on mail: `reaction`",
@@ -2923,6 +2939,18 @@ func runAPI(t *testing.T, network bool) *apiRun {
 		run.refused = append(run.refused, strings.TrimSpace(string(post(t, hc, e.method, e.request))))
 	}
 
+	// Add crew receipts after the calls, so their examples keep their seqs.
+	fixtureCtx := context.Background()
+	if err := st.AddSubscription(fixtureCtx, "signalman", store.Subscription{Source: "telegram", Scope: store.ScopeAll}, "jo"); err != nil {
+		t.Fatal(err)
+	}
+	seq, _, err := st.RecordHook(fixtureCtx, "telegram", map[string]any{"source": "telegram", "type": "message", "text": "status?"}, []byte(`{}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AckInbox(fixtureCtx, "signalman", seq); err != nil {
+		t.Fatal(err)
+	}
 	// The stream, from the beginning: everything above is in it, and it
 	// stays open, so it is read up to the newest event and no further.
 	head := mustInt(t, parse(t, post(t, hc, "Head", `{}`)).(object)[0].val)
@@ -3171,6 +3199,12 @@ func checkContract(t *testing.T, run *apiRun, network bool) {
 	}
 	for _, ev := range apiEvents {
 		got := eventsOf(run, ev)
+		if network && ev.socketOnly {
+			if len(got) != 0 {
+				t.Errorf("%s: a device was sent a crew receipt", ev.title)
+			}
+			continue
+		}
 		if len(got) == 0 {
 			t.Errorf("%s: no such event in the stream", ev.title)
 			continue

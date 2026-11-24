@@ -454,6 +454,55 @@ func (s *Store) AckInboxFor(ctx context.Context, name, user string, through uint
 		was := st.Cursor
 		st.Cursor = max(st.Cursor, through)
 		st.Notified = max(st.Notified, st.Cursor)
-		return w.crewMailRead(r, user, was, st.Cursor)
+		return w.crewInboxRead(r, user, was, st.Cursor)
 	})
+}
+
+// inboxEventsBetween resolves inbox candidates as the session will see them.
+func inboxEventsBetween(tx *bolt.Tx, r *CrewMember, cursor, through uint64) ([]Event, error) {
+	var evs []Event
+	for _, k := range inboxKeysBetween(tx, r, cursor, through) {
+		var e Event
+		if ok, err := get(tx, bEvents, k, &e); err != nil {
+			return nil, err
+		} else if ok {
+			evs = append(evs, e)
+		}
+	}
+	named(tx, evs) // forCrew compares handles
+	return evs, peersToday(tx, evs)
+}
+
+// crewInboxRead logs one receipt of each kind in the newly acknowledged slice.
+func (w *wtx) crewInboxRead(r *CrewMember, session string, was, through uint64) error {
+	if through <= was {
+		return nil
+	}
+	evs, err := inboxEventsBetween(w.Tx, r, was, through)
+	if err != nil {
+		return err
+	}
+	var mail, other bool
+	for _, e := range evs {
+		if forSlice(r, session, e) {
+			mail = mail || e.Kind == "mail"
+			other = other || e.Kind != "mail"
+			if mail && other {
+				break
+			}
+		}
+	}
+	if mail {
+		if err := w.event("", "mail_read", r.Name, crewInboxReceipt(r.Name, session, through)); err != nil {
+			return err
+		}
+	}
+	if other {
+		return w.event("", "inbox_read", r.Name, crewInboxReceipt(r.Name, session, through))
+	}
+	return nil
+}
+
+func crewInboxReceipt(reader, session string, through uint64) map[string]any {
+	return map[string]any{"reader": reader, "through": through, "session": session}
 }
