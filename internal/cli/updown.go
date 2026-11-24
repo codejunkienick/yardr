@@ -1119,7 +1119,7 @@ func (a *app) handoffs(warn io.Writer, ctx context.Context, st store.API, runner
 	asked := map[string]time.Time{}
 	for _, g := range agents {
 		n, ok := runners[g.runner].(dispatch.Nudger)
-		if g.Kind != "crew" || !ok || g.State == agentGone || g.State == agentUnknown {
+		if g.Kind != "crew" || !ok || g.State == agentGone {
 			continue
 		}
 		at := time.Now()

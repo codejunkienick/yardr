@@ -103,6 +103,7 @@ var allowSerial = map[string]string{
 	"TestDoctorVersionCheck":                                "fakeTools,stub:goos,stub:versionTimeout",
 	"TestDoctorWebView":                                     "holdDaemon,statusYard,stubServices",
 	"TestDoctorYardmasterGivenUpAfterSessionsGoneAtOnce":    "answeredTools",
+	"TestDownAsksAnUnreadableWorkingPaneForItsHandoff":      "downYard,stub:yardRunners",
 	"TestDownAsksInATerminal":                               "downYard,stub:ask,stub:interactive",
 	"TestDownDeclineStopsInspectionServer":                  "downYard,stub:ask,stub:interactive,stub:serverRunning",
 	"TestDownDoesNotAskAboutIdleAgents":                     "downYard",
