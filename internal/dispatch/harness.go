@@ -811,12 +811,19 @@ func (d *Dispatcher) crewNudgeHeld(s *memberSession) bool {
 }
 
 // crewHarnessOver ends the spell the session's pane was read in: its agent
-// works, or is idle with nothing unread. With its inbox empty the error
-// told of is over as well, since an agent that handled its inbox is not
-// stopped: so is what yardr still watched of a prompt it gave at a reset.
+// works, or is idle with nothing unread. A try that waited is over either
+// way, so its deadline goes; what was told and the session's tries stand.
+// With its inbox empty the error told of is over as well, since an agent
+// that handled its inbox is not stopped: so is what yardr still watched of
+// a prompt it gave at a reset.
 func (d *Dispatcher) crewHarnessOver(ctx context.Context, s *memberSession, handled bool) {
 	delete(d.idleSince, s.key())
 	if !handled {
+		if s.st.Handle[harnessRetryAt] != nil {
+			h := maps.Clone(s.st.Handle)
+			delete(h, harnessRetryAt)
+			d.setCrewHandle(ctx, s, h)
+		}
 		return
 	}
 	for _, key := range []string{HarnessErrorKey, harnessRetryAt, harnessResetAt, harnessPrompted} {

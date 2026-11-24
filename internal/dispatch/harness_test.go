@@ -1114,6 +1114,75 @@ func TestCrewMemberAtNetworkErrorIsRetriedThenRaised(t *testing.T) {
 	}
 }
 
+// A crew member that resumes on a network retry, works past the wait, then
+// stops on a new network error waits a full wait again: the old deadline
+// must not prompt at once. The session's tries stand across the resume.
+func TestCrewMemberNetworkRetryWaitsAgainAfterWork(t *testing.T) {
+	t.Parallel()
+	const dropped = "● API Error: Connection dropped (ECONNRESET). A VPN, firewall, or security software can cause this. Check those\n" +
+		"────────────────────────────────────────\n❯ Resend your message to try again\n────────────────────────────────────────\n" +
+		"  ⏵⏵ auto mode on · ← 1 agent · ↓ to manage"
+	const resume = "yardr: your harness stopped on a dropped network connection. Go on where you stopped."
+	s, f, d := crewSetup(t, store.CrewMember{Config: map[string]any{"kind": "claude"}})
+	ctx := context.Background()
+	start := time.Now()
+	now := start
+	dispatch.SetClock(d, func() time.Time { return now })
+	must(t, d.Reconcile(ctx))
+	must(t, d.Reconcile(ctx))
+	agent := agentOf(t, s)
+	member := func() *store.CrewMember {
+		t.Helper()
+		r, err := s.GetCrew(ctx, "yardmaster")
+		must(t, err)
+		return r
+	}
+	told := func(kind string) []store.Event { t.Helper(); return eventKinds(t, s, member().Journal, kind) }
+
+	// The first error schedules its wait, and the first try is typed.
+	f.show(dropped)
+	must(t, s.Mail(ctx, "yardmaster", "review yardr-1my8", "chris"))
+	must(t, d.Reconcile(ctx))
+	now = start.Add(5*time.Minute + time.Second)
+	must(t, d.Reconcile(ctx))
+	must(t, d.Reconcile(ctx))
+	if len(told("session_harness_retry")) != 1 {
+		t.Fatalf("tries = %d, want the first try typed", len(told("session_harness_retry")))
+	}
+	if want := agent + ": " + resume; len(f.nudges) != 1 || f.nudges[0] != want {
+		t.Fatalf("nudges = %q, want the resume prompt alone", f.nudges)
+	}
+
+	// The agent resumes on it and works past the wait, then stops on a new
+	// network error before any idle pass sees a clear pane: a fresh wait is
+	// scheduled, and nothing is typed at once.
+	f.set(agent, "working")
+	now = start.Add(11*time.Minute + time.Second)
+	must(t, d.Reconcile(ctx))
+	f.set(agent, "idle")
+	must(t, d.Reconcile(ctx))
+	must(t, d.Reconcile(ctx))
+	if len(f.nudges) != 1 || len(told("session_harness_retry")) != 1 {
+		t.Fatalf("after the second error: nudges = %q, tries = %d; want the wait anew, nothing typed",
+			f.nudges, len(told("session_harness_retry")))
+	}
+
+	// The wait over, the second try is typed, counted with the first.
+	now = start.Add(16*time.Minute + 2*time.Second)
+	must(t, d.Reconcile(ctx))
+	must(t, d.Reconcile(ctx))
+	retries := told("session_harness_retry")
+	if len(retries) != 2 || len(f.nudges) != 2 {
+		t.Fatalf("tries = %d, nudges = %q; want the second try typed after its wait", len(retries), f.nudges)
+	}
+	if retries[1].Data["try"] != float64(2) {
+		t.Fatalf("second try data = %v, want the session's tries kept across the resume", retries[1].Data)
+	}
+	if len(told("session_harness_error")) != 0 {
+		t.Fatalf("session_harness_error raised with a try still to wait for")
+	}
+}
+
 // The pane is read at the start of a spell and after a nudge, not for as
 // long as a crew member leaves its inbox unread: an error drawn into it
 // under a nudge long after is still seen.
